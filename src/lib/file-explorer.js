@@ -66,6 +66,7 @@ class FileExplorer {
       const res = await fetch(`/api/files?path=${encodeURIComponent(dirPath)}`);
       const data = await res.json(); if (data.error) throw new Error(data.error);
       this.currentPath = data.path; this.pathInput.value = data.path; this.items = data.items;
+      this.winInfo._explorerPath = data.path; // for layout persistence
       const maxLen = 40;
       const display = data.path.length > maxLen ? '…' + data.path.slice(-maxLen + 1) : data.path;
       this.app.wm.setTitle(this.winInfo.id, `📁 ${display}`);

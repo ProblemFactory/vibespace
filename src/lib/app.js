@@ -573,9 +573,6 @@ class App {
     const winInfo = this.wm.createWindow({ title: 'File Explorer', type: 'files' });
     const explorer = new FileExplorer(winInfo, this);
     if (startPath) explorer.navigate(startPath);
-    // Track current path for layout persistence
-    const origNav = explorer.navigate.bind(explorer);
-    explorer.navigate = async function(p) { await origNav(p); winInfo._explorerPath = explorer.currentPath; };
     winInfo.onClose = () => this._checkWelcome();
     return winInfo;
   }
