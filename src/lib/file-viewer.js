@@ -1,7 +1,12 @@
 import { marked } from 'marked';
 import { MarkdownViewer } from './markdown.js';
 import { HexViewer } from './hex-viewer.js';
+import { CodeEditor } from './code-editor.js';
 import { formatSize } from './utils.js';
+
+const IMAGE_EXTS = ['png','jpg','jpeg','gif','webp','svg','bmp','ico'];
+const VIDEO_EXTS = ['mp4','webm','mov','avi'];
+const AUDIO_EXTS = ['mp3','wav','ogg','flac','aac','m4a'];
 
 class FileViewer {
   static async open(app, filePath, fileName, opts = {}) {
@@ -21,15 +26,18 @@ class FileViewer {
       return;
     }
 
-    // Binary file → hex viewer
-    if (fileInfo.isBinary) {
+    // Media types bypass binary detection — they ARE binary but have dedicated viewers
+    const isMedia = IMAGE_EXTS.includes(ext) || VIDEO_EXTS.includes(ext) || AUDIO_EXTS.includes(ext) || ext === 'pdf';
+
+    // Binary file (non-media) → hex viewer
+    if (fileInfo.isBinary && !isMedia) {
       const winInfo = app.wm.createWindow({ title: `Hex: ${fileName}`, type: 'hex-viewer' });
       new HexViewer(winInfo, filePath, fileInfo);
       return;
     }
 
-    // Large file warning
-    if (fileInfo.size > 1024 * 1024) {
+    // Large file warning (only for text files opened in editor)
+    if (!isMedia && fileInfo.size > 1024 * 1024) {
       if (!confirm(`This file is ${formatSize(fileInfo.size)}. Opening may slow down the UI. Continue?`)) return;
     }
 
@@ -46,12 +54,16 @@ class FileViewer {
     winInfo.onClose = () => {};
 
     try {
-      if (['png','jpg','jpeg','gif','webp','svg','bmp','ico'].includes(ext)) {
-        const img = document.createElement('img'); img.src = `/api/file/raw?path=${encodeURIComponent(filePath)}`;
-        img.style.padding = '8px'; container.appendChild(img);
+      if (IMAGE_EXTS.includes(ext)) {
+        FileViewer._renderImage(container, filePath);
+      } else if (VIDEO_EXTS.includes(ext)) {
+        FileViewer._renderVideo(container, filePath);
+      } else if (AUDIO_EXTS.includes(ext)) {
+        FileViewer._renderAudio(container, filePath, fileName);
       } else if (ext === 'pdf') {
-        const iframe = document.createElement('iframe'); iframe.src = `/api/file/raw?path=${encodeURIComponent(filePath)}`;
-        container.appendChild(iframe);
+        FileViewer._renderPdf(container, filePath);
+      } else if (ext === 'html' || ext === 'htm') {
+        FileViewer._renderHtml(container, filePath, app, fileName, winInfo);
       } else if (['csv','tsv'].includes(ext)) {
         const res = await fetch(`/api/file/content?path=${encodeURIComponent(filePath)}`);
         const data = await res.json();
@@ -97,6 +109,175 @@ class FileViewer {
     } catch (err) {
       container.innerHTML = `<div class="empty-hint" style="color:var(--red);padding:20px">Error: ${err.message}</div>`;
     }
+  }
+
+  // ── Image viewer with zoom controls ──
+  static _renderImage(container, filePath) {
+    const mediaViewer = document.createElement('div');
+    mediaViewer.className = 'media-viewer';
+
+    // Toolbar with zoom controls
+    const toolbar = document.createElement('div');
+    toolbar.className = 'media-toolbar';
+
+    let zoom = 100;
+    const zoomLabel = document.createElement('span');
+    zoomLabel.className = 'media-zoom-label';
+    zoomLabel.textContent = '100%';
+
+    const btnFit = FileViewer._mediaBtn('Fit');
+    const btnZoomOut = FileViewer._mediaBtn('-');
+    const btnZoomIn = FileViewer._mediaBtn('+');
+    const btnActual = FileViewer._mediaBtn('1:1');
+
+    const imgWrap = document.createElement('div');
+    imgWrap.className = 'media-content';
+
+    const img = document.createElement('img');
+    img.src = `/api/file/raw?path=${encodeURIComponent(filePath)}`;
+    img.className = 'media-image';
+    img.draggable = false;
+
+    const applyZoom = () => {
+      zoomLabel.textContent = zoom + '%';
+      img.style.transform = `scale(${zoom / 100})`;
+      img.style.transformOrigin = 'center center';
+    };
+
+    btnZoomIn.onclick = () => { zoom = Math.min(500, zoom + 25); applyZoom(); };
+    btnZoomOut.onclick = () => { zoom = Math.max(10, zoom - 25); applyZoom(); };
+    btnActual.onclick = () => { zoom = 100; img.style.maxWidth = 'none'; img.style.maxHeight = 'none'; applyZoom(); };
+    btnFit.onclick = () => { zoom = 100; img.style.maxWidth = '100%'; img.style.maxHeight = '100%'; applyZoom(); };
+
+    // Mouse wheel zoom
+    imgWrap.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const delta = e.deltaY < 0 ? 25 : -25;
+      zoom = Math.max(10, Math.min(500, zoom + delta));
+      applyZoom();
+    }, { passive: false });
+
+    toolbar.append(btnFit, btnZoomOut, zoomLabel, btnZoomIn, btnActual);
+    imgWrap.appendChild(img);
+    mediaViewer.append(toolbar, imgWrap);
+    container.appendChild(mediaViewer);
+  }
+
+  // ── Video viewer with native controls ──
+  static _renderVideo(container, filePath) {
+    const mediaViewer = document.createElement('div');
+    mediaViewer.className = 'media-viewer';
+
+    const videoWrap = document.createElement('div');
+    videoWrap.className = 'media-content';
+
+    const video = document.createElement('video');
+    video.src = `/api/file/raw?path=${encodeURIComponent(filePath)}`;
+    video.controls = true;
+    video.className = 'media-video';
+    video.preload = 'metadata';
+
+    videoWrap.appendChild(video);
+    mediaViewer.appendChild(videoWrap);
+    container.appendChild(mediaViewer);
+  }
+
+  // ── Audio viewer with native controls ──
+  static _renderAudio(container, filePath, fileName) {
+    const mediaViewer = document.createElement('div');
+    mediaViewer.className = 'media-viewer media-viewer-audio';
+
+    const label = document.createElement('div');
+    label.className = 'media-audio-label';
+    label.textContent = fileName;
+
+    const audio = document.createElement('audio');
+    audio.src = `/api/file/raw?path=${encodeURIComponent(filePath)}`;
+    audio.controls = true;
+    audio.className = 'media-audio';
+    audio.preload = 'metadata';
+
+    mediaViewer.append(label, audio);
+    container.appendChild(mediaViewer);
+  }
+
+  // ── PDF viewer via iframe/embed ──
+  static _renderPdf(container, filePath) {
+    const mediaViewer = document.createElement('div');
+    mediaViewer.className = 'media-viewer';
+
+    const embed = document.createElement('iframe');
+    embed.src = `/api/file/raw?path=${encodeURIComponent(filePath)}`;
+    embed.className = 'media-pdf';
+
+    mediaViewer.appendChild(embed);
+    container.appendChild(mediaViewer);
+  }
+
+  // ── HTML viewer with Preview / Code toggle ──
+  static _renderHtml(container, filePath, app, fileName, winInfo) {
+    const htmlViewer = document.createElement('div');
+    htmlViewer.className = 'html-viewer';
+
+    // Toolbar with mode toggle
+    const toolbar = document.createElement('div');
+    toolbar.className = 'media-toolbar';
+
+    const btnPreview = FileViewer._mediaBtn('Preview');
+    const btnCode = FileViewer._mediaBtn('Code');
+    btnPreview.classList.add('active');
+
+    const contentArea = document.createElement('div');
+    contentArea.className = 'html-viewer-content';
+
+    // Preview mode: iframe
+    const iframe = document.createElement('iframe');
+    iframe.className = 'html-preview';
+    iframe.sandbox = 'allow-scripts allow-same-origin';
+    iframe.src = `/api/file/raw?path=${encodeURIComponent(filePath)}`;
+    contentArea.appendChild(iframe);
+
+    let codeEditorContainer = null;
+    let codeEditorInstance = null;
+
+    const showPreview = () => {
+      btnPreview.classList.add('active');
+      btnCode.classList.remove('active');
+      iframe.style.display = '';
+      if (codeEditorContainer) codeEditorContainer.style.display = 'none';
+    };
+
+    const showCode = () => {
+      btnCode.classList.add('active');
+      btnPreview.classList.remove('active');
+      iframe.style.display = 'none';
+      if (!codeEditorContainer) {
+        // Create code editor on first switch
+        codeEditorContainer = document.createElement('div');
+        codeEditorContainer.className = 'html-code-container';
+        contentArea.appendChild(codeEditorContainer);
+
+        // Create a mini winInfo-like object for CodeEditor
+        const fakeWinInfo = { content: codeEditorContainer, onClose: null };
+        codeEditorInstance = new CodeEditor(fakeWinInfo, filePath, fileName, app);
+      }
+      codeEditorContainer.style.display = '';
+    };
+
+    btnPreview.onclick = showPreview;
+    btnCode.onclick = showCode;
+
+    toolbar.append(btnPreview, btnCode);
+    htmlViewer.append(toolbar, contentArea);
+    container.appendChild(htmlViewer);
+  }
+
+  // ── Helper: create a styled button for media toolbars ──
+  static _mediaBtn(text) {
+    const b = document.createElement('button');
+    b.className = 'file-tool-btn media-btn';
+    b.textContent = text;
+    return b;
   }
 }
 

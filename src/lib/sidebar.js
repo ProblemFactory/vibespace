@@ -19,6 +19,7 @@ class Sidebar {
     this._allSessions = [];
     this._webuiSessions = [];
     this._starredIds = new Set(JSON.parse(localStorage.getItem('starredSessions') || '[]'));
+    this._archivedIds = new Set(JSON.parse(localStorage.getItem('archivedSessions') || '[]'));
     this._customNames = JSON.parse(localStorage.getItem('sessionCustomNames') || '{}');
     this._sortMode = localStorage.getItem('sessionSort') || 'recent';
     this._filterLive = false;
@@ -38,8 +39,8 @@ class Sidebar {
       this._render();
     };
 
-    // Status filter dropdown (multi-select: live, running, stopped)
-    this._statusFilter = new Set(['live', 'tmux', 'external', 'stopped']); // all enabled by default
+    // Status filter dropdown (multi-select: live, running, stopped, archived)
+    this._statusFilter = new Set(['live', 'tmux', 'external', 'stopped']); // all except archived by default
     const filterBtn = document.getElementById('live-filter');
     filterBtn.onclick = (e) => { e.stopPropagation(); this._showStatusFilterMenu(filterBtn); };
 
@@ -60,6 +61,16 @@ class Sidebar {
 
   isStarred(sessionId) { return this._starredIds.has(sessionId); }
 
+  toggleArchive(sessionId) {
+    if (this._archivedIds.has(sessionId)) this._archivedIds.delete(sessionId);
+    else this._archivedIds.add(sessionId);
+    localStorage.setItem('archivedSessions', JSON.stringify([...this._archivedIds]));
+    this._render();
+    this.app.updateTaskbar();
+  }
+
+  isArchived(sessionId) { return this._archivedIds.has(sessionId); }
+
   getCustomName(sessionId) { return this._customNames[sessionId] || null; }
 
   renameSession(sessionId, currentName) {
@@ -72,6 +83,24 @@ class Sidebar {
     }
     localStorage.setItem('sessionCustomNames', JSON.stringify(this._customNames));
     this._render();
+    // Sync renamed session to any open window
+    const newName = name.trim() || currentName || sessionId.substring(0, 12) + '...';
+    this.app.syncSessionName(sessionId, newName);
+  }
+
+  highlightSession(sessionId) {
+    this.listEl.querySelectorAll('.session-item-card').forEach(c => c.classList.remove('highlighted'));
+    if (!sessionId) return;
+    const cards = this.listEl.querySelectorAll('.session-item-card');
+    for (const card of cards) {
+      if (card._sessionId === sessionId) {
+        card.classList.add('highlighted');
+        // Scroll into view if needed
+        if (card.scrollIntoViewIfNeeded) card.scrollIntoViewIfNeeded(false);
+        else card.scrollIntoView({ block: 'nearest' });
+        break;
+      }
+    }
   }
 
   _updateSortBtn(btn) {
@@ -90,6 +119,7 @@ class Sidebar {
       { id: 'tmux', label: 'Tmux', color: 'var(--blue)' },
       { id: 'external', label: 'External', color: 'var(--yellow)' },
       { id: 'stopped', label: 'Stopped', color: 'var(--text-dim)' },
+      { id: 'archived', label: 'Archived', color: 'var(--text-dim)' },
     ];
     for (const item of items) {
       const row = document.createElement('label'); row.className = 'status-filter-item';
@@ -109,9 +139,10 @@ class Sidebar {
   }
 
   _updateFilterBtn(btn) {
-    const allOn = this._statusFilter.size === 4;
-    btn.style.color = allOn ? '' : 'var(--accent-hover)';
-    btn.title = allOn ? 'Filter by status' : `Showing: ${[...this._statusFilter].join(', ')}`;
+    // Default state: 4 non-archived filters on, archived off
+    const isDefault = this._statusFilter.size === 4 && !this._statusFilter.has('archived');
+    btn.style.color = isDefault ? '' : 'var(--accent-hover)';
+    btn.title = isDefault ? 'Filter by status' : `Showing: ${[...this._statusFilter].join(', ')}`;
   }
 
   toggle(force) {
@@ -169,9 +200,23 @@ class Sidebar {
     // Text filter
     if (f) sessions = sessions.filter(s => (s.cwd||'').toLowerCase().includes(f) || (s.sessionId||'').toLowerCase().includes(f) || (s.name||'').toLowerCase().includes(f) || (s.webuiName||'').toLowerCase().includes(f));
 
-    // Status filter
-    if (this._statusFilter.size < 4) {
-      sessions = sessions.filter(s => this._statusFilter.has(s.status));
+    // Archive filter: hide archived sessions unless 'archived' filter is on
+    const showArchived = this._statusFilter.has('archived');
+    if (showArchived) {
+      // When archived filter is on, show only archived (plus any other enabled statuses for non-archived)
+      sessions = sessions.filter(s => {
+        if (this._archivedIds.has(s.sessionId)) return true;
+        return this._statusFilter.has(s.status);
+      });
+    } else {
+      // Hide archived sessions, then apply status filter
+      sessions = sessions.filter(s => !this._archivedIds.has(s.sessionId));
+      // Status filter (apply only when not all 4 non-archived statuses are selected)
+      const nonArchivedFilters = new Set([...this._statusFilter]);
+      nonArchivedFilters.delete('archived');
+      if (nonArchivedFilters.size < 4) {
+        sessions = sessions.filter(s => nonArchivedFilters.has(s.status));
+      }
     }
 
     this.listEl.innerHTML = '';
@@ -256,6 +301,9 @@ class Sidebar {
 
   _renderSessionCard(s) {
     const card = document.createElement('div'); card.className = 'session-item-card';
+    card._sessionId = s.sessionId; // Store for highlight lookup
+    const isArchived = this._archivedIds.has(s.sessionId);
+    if (isArchived) card.classList.add('archived');
     const date = new Date(s.startedAt);
     const customName = this._customNames[s.sessionId];
     const originalName = s.name || s.webuiName || s.sessionId.substring(0, 12) + '...';
@@ -284,6 +332,14 @@ class Sidebar {
     starBtn.title = starred ? 'Unstar' : 'Star';
     starBtn.onclick = (e) => { e.stopPropagation(); this.toggleStar(s.sessionId); };
     card.prepend(starBtn);
+
+    // Archive button
+    const archiveBtn = document.createElement('button');
+    archiveBtn.className = 'session-archive-btn' + (isArchived ? ' archived' : '');
+    archiveBtn.textContent = isArchived ? '\u{1F4E4}' : '\u{1F4E6}';
+    archiveBtn.title = isArchived ? 'Unarchive' : 'Archive';
+    archiveBtn.onclick = (e) => { e.stopPropagation(); this.toggleArchive(s.sessionId); };
+    card.prepend(archiveBtn);
 
     // Double-click name to rename (sets --name for next resume)
     const nameEl = card.querySelector('.session-card-name');

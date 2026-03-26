@@ -118,7 +118,19 @@ html, body {
 }
 .session-star-btn:hover { color: var(--yellow); }
 .session-star-btn.starred { color: var(--yellow); }
+.session-archive-btn {
+  background: none; border: none; cursor: pointer; font-size: 11px; color: var(--text-dim);
+  padding: 0; line-height: 1; position: absolute; right: 24px; top: 6px; z-index: 1;
+}
+.session-archive-btn:hover { color: var(--accent-hover); }
+.session-archive-btn.archived { color: var(--accent); }
 .session-item-card { position: relative; }
+.session-item-card.archived { opacity: 0.5; }
+.session-item-card.archived .session-card-name { text-decoration: line-through; }
+.session-item-card.highlighted {
+  border-left: 3px solid var(--accent);
+  background: var(--bg-hover);
+}
 
 /* Path autocomplete in file explorer */
 .path-autocomplete {
@@ -288,6 +300,9 @@ html, body {
 }
 .win-btn:hover { background: rgba(255,255,255,0.1); color: var(--text); }
 .win-close:hover { background: var(--red); color: #fff; }
+.win-overlap-btn { font-size: 11px; }
+.win-overlap-btn.no-overlap { opacity: 0.3; cursor: default; }
+.win-overlap-btn.no-overlap:hover { background: transparent; color: var(--text-dim); }
 .window-content { flex: 1; overflow: hidden; position: relative; }
 
 /* Resize Handles */
@@ -382,6 +397,68 @@ html, body {
 }
 .file-viewer-table th { background: var(--bg-titlebar); font-weight: 600; position: sticky; top: 0; }
 .file-viewer-table tr:hover { background: var(--bg-hover); }
+
+/* ── Media Viewer (images, video, audio, PDF) ── */
+.media-viewer {
+  display: flex; flex-direction: column; width: 100%; height: 100%; overflow: hidden;
+}
+.media-toolbar {
+  display: flex; align-items: center; gap: 4px; padding: 4px 8px;
+  background: var(--bg-titlebar); border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.media-btn { width: auto; padding: 2px 10px; font-size: 11px; }
+.media-btn.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+.media-zoom-label {
+  font-size: 11px; color: var(--text-secondary); min-width: 40px; text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.media-content {
+  flex: 1; overflow: auto; display: flex; align-items: center; justify-content: center;
+  background: var(--bg-workspace); padding: 8px;
+}
+.media-image {
+  max-width: 100%; max-height: 100%; object-fit: contain; display: block;
+  transition: transform 0.15s ease; user-select: none;
+}
+.media-video {
+  width: 100%; max-height: 100%; outline: none; background: #000;
+}
+.media-viewer-audio {
+  align-items: center; justify-content: center; padding: 40px 20px;
+}
+.media-audio-label {
+  font-size: 14px; color: var(--text); margin-bottom: 20px; text-align: center;
+  word-break: break-all;
+}
+.media-audio {
+  width: 100%; max-width: 500px;
+}
+.media-pdf {
+  width: 100%; height: 100%; border: none; flex: 1;
+}
+
+/* ── HTML Viewer (Preview + Code toggle) ── */
+.html-viewer {
+  display: flex; flex-direction: column; width: 100%; height: 100%; overflow: hidden;
+}
+.html-viewer-content { flex: 1; overflow: hidden; position: relative; }
+.html-preview {
+  width: 100%; height: 100%; border: none; background: #fff;
+}
+.html-code-container {
+  width: 100%; height: 100%; overflow: hidden; position: absolute; top: 0; left: 0;
+}
+
+/* ── Editor Settings Toolbar ── */
+.editor-toolbar-sep {
+  width: 1px; height: 16px; background: var(--border); margin: 0 2px; flex-shrink: 0;
+}
+.editor-setting-btn { width: auto; padding: 2px 8px; font-size: 11px; }
+.editor-font-size-display {
+  font-size: 10px; color: var(--text-secondary); min-width: 30px; text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
 .markdown-preview {
   padding: 16px 24px; font-size: 14px; line-height: 1.6; color: var(--text);
   overflow-y: auto; height: 100%;

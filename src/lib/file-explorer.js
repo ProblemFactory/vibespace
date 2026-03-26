@@ -15,7 +15,7 @@ class FileExplorer {
     const toolbar = document.createElement('div'); toolbar.className = 'file-toolbar';
     const btnUp = this._btn('↑','Go up'); btnUp.onclick = () => this.navigateUp();
     this.pathInput = document.createElement('input'); this.pathInput.className = 'file-path-input';
-    this.pathInput.addEventListener('keydown', e => { if (e.key==='Enter') { this._hideAC(); this.navigate(this.pathInput.value); } });
+    this.pathInput.addEventListener('keydown', e => { if (e.key==='Enter') { if (this._hideAC) this._hideAC(); this.navigate(this.pathInput.value); } });
     this._setupPathAutocomplete();
     const btnRefresh = this._btn('↻','Refresh'); btnRefresh.onclick = () => this.refresh();
     const btnHidden = this._btn('⚬','Toggle hidden files'); btnHidden.onclick = () => { this._showHidden = !this._showHidden; btnHidden.classList.toggle('active', this._showHidden); this._renderItems(); };
@@ -176,14 +176,30 @@ class FileExplorer {
     document.querySelectorAll('.context-menu').forEach(m => m.remove());
     const menu = document.createElement('div'); menu.className = 'context-menu';
     menu.style.left = x+'px'; menu.style.top = y+'px';
+    const fullPath = this.currentPath + '/' + dataset.name;
     const items = [];
     if (dataset.isDir === 'true') {
-      items.push({ label:'Open in Terminal', action:() => this.app.createSession({cwd:this.currentPath+'/'+dataset.name}) });
+      items.push({ label:'New session here', action:() => this.app.createSession({cwd:fullPath}) });
+      // Resume session here: find stopped sessions matching this cwd
+      const stoppedHere = (this.app.sidebar?._allSessions || []).filter(
+        s => s.status === 'stopped' && s.cwd === fullPath
+      );
+      if (stoppedHere.length === 1) {
+        const s = stoppedHere[0];
+        const customName = this.app.sidebar?.getCustomName(s.sessionId);
+        items.push({ label: 'Resume session here', action: () => this.app.resumeSession(s.sessionId, s.cwd, customName || s.name) });
+      } else if (stoppedHere.length > 1) {
+        for (const s of stoppedHere) {
+          const customName = this.app.sidebar?.getCustomName(s.sessionId);
+          const dispName = customName || s.name || s.sessionId.substring(0, 12) + '...';
+          items.push({ label: `Resume: ${dispName}`, action: () => this.app.resumeSession(s.sessionId, s.cwd, customName || s.name) });
+        }
+      }
     } else {
-      items.push({ label:'Open', action:() => this.app.openFile(this.currentPath+'/'+dataset.name, dataset.name) });
-      items.push({ label:'Edit', action:() => this.app.openEditor(this.currentPath+'/'+dataset.name, dataset.name) });
-      items.push({ label:'Open as Hex', action:() => this.app.openFile(this.currentPath+'/'+dataset.name, dataset.name, { hex: true }) });
-      items.push({ label:'Download', action:() => { window.open(`/api/download?path=${encodeURIComponent(this.currentPath+'/'+dataset.name)}`); } });
+      items.push({ label:'Open', action:() => this.app.openFile(fullPath, dataset.name) });
+      items.push({ label:'Edit', action:() => this.app.openEditor(fullPath, dataset.name) });
+      items.push({ label:'Open as Hex', action:() => this.app.openFile(fullPath, dataset.name, { hex: true }) });
+      items.push({ label:'Download', action:() => { window.open(`/api/download?path=${encodeURIComponent(fullPath)}`); } });
     }
     items.push({ label:'Rename', action:() => this._rename(dataset.name) });
     items.push({ label:'Delete', action:() => this._delete(dataset.name, dataset.isDir==='true') });
@@ -200,7 +216,9 @@ class FileExplorer {
   async _delete(name, isDir) { if (!confirm(`Delete "${name}"?`)) return; await fetch(`/api/file?path=${encodeURIComponent(this.currentPath+'/'+name)}`,{method:'DELETE'}); this.refresh(); }
 
   _setupPathAutocomplete() {
-    const ac = setupDirAutocomplete(this.pathInput, this._acDropdown);
+    const ac = setupDirAutocomplete(this.pathInput, this._acDropdown, {
+      onNavigate: (path) => this.navigate(path),
+    });
     this._hideAC = ac.hide;
   }
 

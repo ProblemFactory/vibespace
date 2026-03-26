@@ -5,7 +5,7 @@ import { TerminalSession } from './terminal.js';
 import { Sidebar } from './sidebar.js';
 import { FileExplorer } from './file-explorer.js';
 import { FileViewer } from './file-viewer.js';
-import { CodeEditor, detectLang, getLangExtension } from './code-editor.js';
+import { CodeEditor, detectLang, getLangExtension, loadEditorSettings, editorLightTheme } from './code-editor.js';
 import { LayoutManager } from './layout.js';
 import { Resizer } from './resizer.js';
 import { attachPopoverClose } from './utils.js';
@@ -13,7 +13,7 @@ import { setupDirAutocomplete } from './autocomplete.js';
 import { getAvailableFonts } from './terminal.js';
 import { EditorView, basicSetup } from 'codemirror';
 import { oneDark } from '@codemirror/theme-one-dark';
-import { EditorState } from '@codemirror/state';
+import { EditorState, Compartment } from '@codemirror/state';
 import { keymap } from '@codemirror/view';
 
 class App {
@@ -28,6 +28,7 @@ class App {
     this.wm.onWindowsChanged = () => {
       this.updateTaskbar();
       this.layoutManager.scheduleAutoSave();
+      this._notifySidebarFocus();
     };
     this.sidebar = new Sidebar(this);
 
@@ -675,12 +676,21 @@ class App {
       .then(data => {
         const content = data.content || '';
         const langExtensions = getLangExtension(detectLang(filePath));
+        const edSettings = loadEditorSettings();
+
+        const themeComp = new Compartment();
+        const wrapComp = new Compartment();
+        const fontSizeComp = new Compartment();
 
         const editorView = new EditorView({
           state: EditorState.create({
             doc: content,
             extensions: [
-              basicSetup, oneDark, ...langExtensions,
+              basicSetup,
+              themeComp.of(edSettings.theme === 'dark' ? oneDark : editorLightTheme),
+              wrapComp.of(edSettings.wordWrap ? EditorView.lineWrapping : []),
+              fontSizeComp.of(EditorView.theme({ '.cm-content, .cm-gutters': { fontSize: edSettings.fontSize + 'px' } })),
+              ...langExtensions,
               keymap.of([{ key: 'Mod-s', run: () => { doSave(); return true; } }]),
             ],
           }),
@@ -747,6 +757,36 @@ class App {
 
   _hideWelcome() { document.getElementById('welcome').classList.add('hidden'); }
   _checkWelcome() { if (this.wm.windows.size === 0) document.getElementById('welcome').classList.remove('hidden'); }
+
+  syncSessionName(claudeSessionId, newName) {
+    // Find the open window whose server session corresponds to this claude session ID
+    for (const [winId, term] of this.sessions) {
+      if (!term.sessionId) continue;
+      const allSess = this.sidebar?._allSessions || [];
+      const match = allSess.find(s => s.sessionId === claudeSessionId && s.webuiId === term.sessionId);
+      if (match) {
+        const cwd = match.cwd || '';
+        this.wm.setTitle(winId, `${newName} — ${cwd}`);
+        break;
+      }
+    }
+  }
+
+  _notifySidebarFocus() {
+    // Find the claude session ID for the currently focused terminal window
+    const activeWinId = this.wm.activeWindowId;
+    const term = this.sessions.get(activeWinId);
+    if (term && term.sessionId) {
+      const allSess = this.sidebar?._allSessions || [];
+      const match = allSess.find(s => s.webuiId === term.sessionId);
+      if (match) {
+        this.sidebar.highlightSession(match.sessionId);
+        return;
+      }
+    }
+    // No terminal focused — clear highlight
+    this.sidebar.highlightSession(null);
+  }
 
   updateTaskbar() {
     const container = document.getElementById('taskbar-items'); container.innerHTML = '';

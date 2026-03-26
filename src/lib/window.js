@@ -8,6 +8,7 @@ class WindowManager {
     this.gridOverlay = document.getElementById('grid-overlay');
     this.onWindowsChanged = null; this.windowCounter = 0;
     this.grid = null; // { rows, cols }
+    this._overlapDebounceTimer = null;
 
     // Reflow grid-tracked windows when workspace resizes (sidebar toggle, browser resize)
     this._resizeObserver = new ResizeObserver(() => this._reflowWindows());
@@ -26,7 +27,7 @@ class WindowManager {
     const titleBar = document.createElement('div'); titleBar.className = 'window-titlebar';
     const titleSpan = document.createElement('span'); titleSpan.className = 'window-title'; titleSpan.textContent = title;
     const controls = document.createElement('div'); controls.className = 'window-controls';
-    controls.innerHTML = '<button class="win-btn win-minimize" title="Minimize">─</button><button class="win-btn win-maximize" title="Maximize">□</button><button class="win-btn win-close" title="Close">✕</button>';
+    controls.innerHTML = '<button class="win-btn win-overlap-btn no-overlap" title="Overlapping windows">□</button><button class="win-btn win-minimize" title="Minimize">─</button><button class="win-btn win-maximize" title="Maximize">□</button><button class="win-btn win-close" title="Close">✕</button>';
     titleBar.append(titleSpan, controls);
 
     const content = document.createElement('div'); content.className = 'window-content';
@@ -39,6 +40,12 @@ class WindowManager {
       isMaximized: false, isMinimized: false, prevBounds: null, onResize: null, onClose: null, exited: false };
     this.windows.set(id, winInfo);
     this._setupDrag(winInfo); this._setupResize(winInfo);
+    controls.querySelector('.win-overlap-btn').onclick = (e) => {
+      e.stopPropagation();
+      const btn = e.currentTarget;
+      if (btn.classList.contains('no-overlap')) return;
+      this._showOverlapSwitcher(winInfo, e.clientX, e.clientY);
+    };
     controls.querySelector('.win-minimize').onclick = (e) => { e.stopPropagation(); this.minimize(id); };
     controls.querySelector('.win-maximize').onclick = (e) => { e.stopPropagation(); this.toggleMaximize(id); };
     controls.querySelector('.win-close').onclick = (e) => { e.stopPropagation(); this.closeWindow(id); };
@@ -50,7 +57,7 @@ class WindowManager {
       e.preventDefault();
       this._showOverlapSwitcher(winInfo, e.clientX, e.clientY);
     });
-    this.focusWindow(id); this._notify(); return winInfo;
+    this.focusWindow(id); this._notify(); this._scheduleOverlapUpdate(); return winInfo;
   }
 
   // ── Grid Bounds Tracking ──
@@ -122,7 +129,7 @@ class WindowManager {
       }
       this._clearGridHighlight(); this.gridOverlay.classList.remove('dragging');
       // Re-capture proportional bounds after final position (snap or free drop)
-      setTimeout(() => this._captureGridBounds(win), 250);
+      setTimeout(() => { this._captureGridBounds(win); this._scheduleOverlapUpdate(); }, 250);
     };
     document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
   }
@@ -182,6 +189,7 @@ class WindowManager {
           // Update gridBounds after resize (if window was grid-tracked, keep tracking with new proportions)
           if (win.gridBounds) this._captureGridBounds(win);
           if (win.onResize) win.onResize();
+          this._scheduleOverlapUpdate();
         };
         document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
       });
@@ -284,11 +292,11 @@ class WindowManager {
     const win = this.windows.get(id); if (!win) return; const el = win.element;
     if (win.isMaximized) { const p = win.prevBounds; el.style.left=p.left; el.style.top=p.top; el.style.width=p.width; el.style.height=p.height; win.isMaximized = false; }
     else { win.prevBounds={left:el.style.left,top:el.style.top,width:el.style.width,height:el.style.height}; el.style.left='0';el.style.top='0';el.style.width='100%';el.style.height='100%'; win.isMaximized = true; }
-    setTimeout(() => { if (win.onResize) win.onResize(); }, 50); this._notify();
+    setTimeout(() => { if (win.onResize) win.onResize(); }, 50); this._notify(); this._scheduleOverlapUpdate();
   }
-  minimize(id) { const win = this.windows.get(id); if (!win) return; win.element.style.display='none'; win.isMinimized=true; this._notify(); }
-  restore(id) { const win = this.windows.get(id); if (!win) return; win.element.style.display=''; win.isMinimized=false; this.focusWindow(id); setTimeout(() => { if (win.onResize) win.onResize(); }, 50); }
-  closeWindow(id) { const win = this.windows.get(id); if (!win) return; if (win.onClose) win.onClose(); win.element.remove(); this.windows.delete(id); this._notify(); }
+  minimize(id) { const win = this.windows.get(id); if (!win) return; win.element.style.display='none'; win.isMinimized=true; this._notify(); this._scheduleOverlapUpdate(); }
+  restore(id) { const win = this.windows.get(id); if (!win) return; win.element.style.display=''; win.isMinimized=false; this.focusWindow(id); setTimeout(() => { if (win.onResize) win.onResize(); }, 50); this._scheduleOverlapUpdate(); }
+  closeWindow(id) { const win = this.windows.get(id); if (!win) return; if (win.onClose) win.onClose(); win.element.remove(); this.windows.delete(id); this._notify(); this._scheduleOverlapUpdate(); }
   setTitle(id, t) { const win = this.windows.get(id); if (win) { win.title=t; win.titleSpan.textContent=t; this._notify(); } }
 
   applyLayout(layout) {
@@ -320,6 +328,7 @@ class WindowManager {
       this._positionToCell(w, cellIdx, true);
       setTimeout(() => this._captureGridBounds(w), 250);
     });
+    setTimeout(() => this._scheduleOverlapUpdate(), 300);
   }
   // ── Overlap Switcher (middle-click on title bar) ──
   _rectsOverlap(a, b) {
@@ -365,6 +374,41 @@ class WindowManager {
     });
 
     attachPopoverClose(pop);
+  }
+
+  // ── Overlap Indicators ──
+  _scheduleOverlapUpdate() {
+    clearTimeout(this._overlapDebounceTimer);
+    this._overlapDebounceTimer = setTimeout(() => this._updateOverlapIndicators(), 200);
+  }
+
+  _updateOverlapIndicators() {
+    const allWins = [...this.windows.values()].filter(w => !w.isMinimized);
+    // Build rects for all visible windows
+    const rects = new Map();
+    for (const w of allWins) {
+      const el = w.element;
+      rects.set(w.id, { left: el.offsetLeft, top: el.offsetTop, right: el.offsetLeft + el.offsetWidth, bottom: el.offsetTop + el.offsetHeight });
+    }
+    for (const w of allWins) {
+      const btn = w.element.querySelector('.win-overlap-btn');
+      if (!btn) continue;
+      const myRect = rects.get(w.id);
+      let hasOverlap = false;
+      for (const other of allWins) {
+        if (other.id === w.id) continue;
+        if (this._rectsOverlap(myRect, rects.get(other.id))) { hasOverlap = true; break; }
+      }
+      if (hasOverlap) {
+        btn.classList.remove('no-overlap');
+        btn.textContent = '\u29C9'; // ⧉ stacked windows
+        btn.title = 'Show overlapping windows';
+      } else {
+        btn.classList.add('no-overlap');
+        btn.textContent = '\u25A1'; // □ single window
+        btn.title = 'No overlapping windows';
+      }
+    }
   }
 
   _notify() { if (this.onWindowsChanged) this.onWindowsChanged(); }
