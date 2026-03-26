@@ -500,6 +500,26 @@ app.post('/api/paste-image', (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Browser proxy — fetches external URLs server-side to bypass X-Frame-Options
+const http_ = require('http');
+const https_ = require('https');
+app.get('/api/proxy', (req, res) => {
+  const url = req.query.url;
+  if (!url) return res.status(400).send('Missing url parameter');
+  try {
+    const mod = url.startsWith('https') ? https_ : http_;
+    mod.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (upstream) => {
+      // Strip X-Frame-Options and CSP frame-ancestors so iframe can render
+      const headers = { ...upstream.headers };
+      delete headers['x-frame-options'];
+      delete headers['content-security-policy'];
+      delete headers['content-security-policy-report-only'];
+      res.writeHead(upstream.statusCode, headers);
+      upstream.pipe(res);
+    }).on('error', (err) => res.status(502).send(err.message));
+  } catch (err) { res.status(500).send(err.message); }
+});
+
 // Editor: open request from editor-helper.sh (via HTTP, not terminal output)
 app.post('/api/editor/open', (req, res) => {
   const { file, signal, sessionId } = req.body;
