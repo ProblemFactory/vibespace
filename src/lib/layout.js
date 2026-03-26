@@ -38,6 +38,10 @@ class LayoutManager {
         winState.filePath = win._filePath;
         winState.fileName = win._fileName;
       }
+      // For browser windows, save URL
+      if (win.type === 'browser' && win._browserUrl) {
+        winState.browserUrl = win._browserUrl;
+      }
       windows.push(winState);
     }
     const grid = this.app.wm.grid;
@@ -133,6 +137,9 @@ class LayoutManager {
           setTimeout(checkWin, 100);
         };
         setTimeout(checkWin, 100);
+      } else if (ws.type === 'browser' && ws.browserUrl) {
+        const winInfo = this.app.openBrowser(ws.browserUrl);
+        applyPosition(winInfo, ws);
       }
     }
   }

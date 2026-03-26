@@ -59,6 +59,7 @@ class App {
     document.querySelectorAll('.layout-btn[data-layout]').forEach(btn => btn.addEventListener('click', () => this.wm.applyLayout(btn.dataset.layout)));
     document.getElementById('btn-new-session').addEventListener('click', () => this.showNewSessionDialog());
     document.getElementById('btn-file-explorer').addEventListener('click', () => this.openFileExplorer());
+    document.getElementById('btn-browser').addEventListener('click', () => this.openBrowser());
   }
 
   _setupWelcome() {
@@ -573,6 +574,49 @@ class App {
     const winInfo = this.wm.createWindow({ title: 'File Explorer', type: 'files' });
     const explorer = new FileExplorer(winInfo, this, startPath);
     winInfo.onClose = () => this._checkWelcome();
+    return winInfo;
+  }
+
+  openBrowser(url) {
+    this._hideWelcome();
+    const startUrl = url || '';
+    const winInfo = this.wm.createWindow({ title: startUrl ? new URL(startUrl).hostname : 'Browser', type: 'browser' });
+    const container = document.createElement('div');
+    container.style.cssText = 'display:flex;flex-direction:column;height:100%';
+
+    // URL bar
+    const urlBar = document.createElement('div');
+    urlBar.style.cssText = 'display:flex;gap:4px;padding:4px 6px;border-bottom:1px solid var(--border);background:var(--bg-titlebar);flex-shrink:0';
+    const urlInput = document.createElement('input');
+    urlInput.className = 'file-path-input';
+    urlInput.value = startUrl;
+    urlInput.placeholder = 'Enter URL...';
+    const goBtn = document.createElement('button');
+    goBtn.className = 'file-tool-btn'; goBtn.textContent = '→'; goBtn.title = 'Go';
+    goBtn.style.width = '28px';
+    urlBar.append(urlInput, goBtn);
+
+    const iframe = document.createElement('iframe');
+    iframe.style.cssText = 'flex:1;border:none;width:100%;background:#fff';
+    iframe.sandbox = 'allow-same-origin allow-scripts allow-popups allow-forms';
+
+    const navigate = (u) => {
+      if (!u) return;
+      if (!u.match(/^https?:\/\//)) u = 'http://' + u;
+      urlInput.value = u;
+      iframe.src = u;
+      try { this.wm.setTitle(winInfo.id, new URL(u).hostname); } catch {}
+      winInfo._browserUrl = u;
+    };
+
+    urlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') navigate(urlInput.value); });
+    goBtn.onclick = () => navigate(urlInput.value);
+
+    container.append(urlBar, iframe);
+    winInfo.content.appendChild(container);
+    winInfo.onClose = () => this._checkWelcome();
+
+    if (startUrl) navigate(startUrl);
     return winInfo;
   }
 
