@@ -108,11 +108,27 @@ class TerminalSession {
 
     // xterm custom key handler — fires before xterm processes the key
     this.terminal.attachCustomKeyEventHandler((e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'v' && e.type === 'keydown') {
-        // Focus hidden div so browser delivers paste event there
+      if (e.type !== 'keydown') return true;
+      // Ctrl+V / Cmd+V: redirect to hidden div for image paste support
+      if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
         pasteTarget.textContent = '';
         pasteTarget.focus();
-        return false; // prevent xterm from handling Ctrl+V
+        return false;
+      }
+      // Ctrl+C / Cmd+C with selection: copy to clipboard (fallback for HTTP)
+      if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+        const sel = this.terminal.getSelection();
+        if (sel) {
+          try { navigator.clipboard.writeText(sel); } catch {
+            // Fallback: use textarea + execCommand for HTTP
+            const ta = document.createElement('textarea');
+            ta.value = sel; ta.style.cssText = 'position:fixed;left:-9999px';
+            document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+          }
+          this.terminal.clearSelection();
+          return false; // don't send SIGINT
+        }
+        // No selection — let it through as SIGINT
       }
       return true;
     });
