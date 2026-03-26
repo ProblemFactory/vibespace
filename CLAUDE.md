@@ -55,6 +55,8 @@ src/
     resizer.js         — Resizer (reusable drag-to-resize handle)
     layout.js          — LayoutManager (auto-save/restore)
     app.js             — App controller (wires everything)
+    utils.js           — Shared utilities (formatSize, escHtml, attachPopoverClose)
+    autocomplete.js    — Shared directory autocomplete (setupDirAutocomplete)
 public/
   index.html           — HTML structure
   style.css            — CSS with 6 theme variants
@@ -74,6 +76,7 @@ CLAUDE.md              — This file
 | **Window tiling / grid / snap** | `src/lib/window.js` | Drag, resize, grid cells, layout presets, freeform, Alt bypass, overlap switcher |
 | **Custom grid presets** | `src/lib/app.js` → `_addCustomGrid()` + `server.js` → `POST/DELETE /api/custom-grids` | + button adds, right-click removes, persisted in layouts.json |
 | **Session starring** | `src/lib/sidebar.js` → `toggleStar()`, `isStarred()` | ★/☆ per session, starred first in sidebar + taskbar, localStorage |
+| **Session rename** | `src/lib/sidebar.js` → `renameSession()` | Double-click name in sidebar, syncs to open windows via `app.syncSessionName()` |
 | **Ctrl+G external editor** | `server.js` → `createEditorHelper()` + `src/lib/app.js` → `_openExternalEditor()` | Fake "code" script + split-pane CodeMirror |
 | **File viewer (open file)** | `src/lib/file-viewer.js` | Dispatch by type, size check, binary detection |
 | **Code editor** | `src/lib/code-editor.js` | CodeMirror 6, language switching via Compartment |
@@ -207,6 +210,7 @@ Recovery uses greedy filesystem checking as fallback, but the forward encoding i
 - Grid state (`{rows, cols}`) persisted and restored — `setGrid()` triggers `_notify()` to save
 - Custom grid presets stored in `layouts.json` → `customGrids` array, loaded on startup
 - Window restore uses `winInfo` returned by `attachSession()` — NOT `windows.values().pop()` (see bug below)
+- **All window types restored**: terminals (by claudeSessionId match), file explorers (by explorerPath), file viewers/editors (by filePath), browser windows (by URL)
 
 ### 6a. Grid Presets
 - **Freeform button**: Clears grid, restores free-floating mode (`setGrid(null)`)
@@ -318,16 +322,19 @@ Server → Client: `created`, `output`, `exited`, `attached`, `active-sessions`,
 - Custom grid presets: + button to add, right-click to remove, auto SVG icons, persisted
 - Grid overflow: round-robin distribution when windows > cells (`i % totalCells`)
 - Overlap switcher: right-click title bar → popup list of overlapping windows → click to focus
+- Overlap indicator: ⧉/□ icon on title bar shows whether other windows overlap, click opens switcher
 - Layout persistence: auto-save + named layouts + grid state
 
 ### Session Management
 - Unified session list grouped by working directory
-- Status filter dropdown (Live / Tmux / External / Stopped — multi-select)
+- Status filter dropdown (Live / Tmux / External / Stopped / Archived — multi-select)
 - Quick new session from folder header (+)
 - Resume stopped sessions via `claude --resume`
 - Session names from first user message in JSONL
 - Star sessions (★/☆): starred sessions sort first in sidebar groups and taskbar, stored in localStorage
 - Session rename: double-click name in sidebar → set custom name → used as `--name` on next resume
+- Archive/unarchive sessions: 📦 button, hidden by default, toggle via status filter
+- Focus window highlights corresponding session in sidebar
 
 ### File Management
 - File explorer with upload/download/drag-drop, title shows current path (front-truncated)
@@ -335,17 +342,23 @@ Server → Client: `created`, `output`, `exited`, `attached`, `active-sessions`,
 - Drag file from explorer to terminal → auto-types shell-escaped absolute path
 - View modes: list (with size/modified columns, sortable) and icon grid
 - Toggle hidden files (dotfiles)
-- File viewers: PDF, images, CSV, Excel, Word, Markdown (3 modes), hex
-- Code editor with syntax highlighting + language override
+- Large folder pagination: first 100 items + "Load more" button
+- File viewers: PDF, images (zoom + drag-to-pan), video, audio, CSV, Excel, Word, Markdown (3 modes), hex
+- HTML viewer: dual mode — Preview (iframe) and Code (CodeEditor) toggle
+- Code editor with syntax highlighting, word wrap toggle, font size, theme (dark/light)
 - Large file warnings (>1MB), binary auto-detection
 - CWD autocomplete with `~` support
-- Clipboard image paste (Ctrl+V → upload to server → xclip sets X clipboard → Ctrl+V to PTY)
+- Clipboard image paste (Ctrl+V → upload to server → xclip/osascript sets clipboard → Ctrl+V to PTY)
+- Folder right-click: "Sessions ▸" submenu with "+ New session" and all sessions at that path
+- All windows (file explorer, viewers, editors, browser) persist and restore on page refresh
 
 ### UI
 - 6 color themes: Dark, Light, Dracula, Nord, Solarized, Monokai
 - Global settings popover (⚙ in toolbar): theme, font size, font family
 - Resizable sidebar (drag right edge)
 - Usage bar in taskbar (5h + 7d rate limits from Anthropic API)
+- Embedded browser window (🌐 in toolbar): iframe with URL bar, layout persistence
+- "x active" click in taskbar → window list popup
 
 ### Bug Fixes Applied
 - Focus event spam (`^[[I^[[O`): stripped from terminal input
@@ -377,3 +390,4 @@ Server → Client: `created`, `output`, `exited`, `attached`, `active-sessions`,
 - Clipboard image paste failures: (1) `paste` event never fires — xterm.js v5 uses Clipboard API directly, bypassing paste event. Fix: `attachCustomKeyEventHandler` intercepts Ctrl+V, redirects focus to hidden contenteditable div. (2) `navigator.clipboard.read()` unavailable over HTTP. Fix: contenteditable div receives real paste event with clipboardData.items. (3) `xclip -i file` unreliable. Fix: `cat file | xclip` pipe. (4) Bracketed paste `\e[200~...\e[201~` inserts text, doesn't trigger image check. Fix: send raw Ctrl+V (`\x16`) which triggers Claude Code's Ink framework clipboard check. (5) Server polls `xclip -t TARGETS -o` to confirm clipboard ready before responding.
 - Dead dtach sockets cause "connection refused": `restoreSessions()` tried to attach to dead sockets. Fix: verify via `fuser`/`pgrep` before attach, auto-clean dead sockets.
 - node-pty `posix_spawnp failed` on macOS: prebuilt binary incompatible, `build/Release/spawn-helper` missing. Fix: `npm rebuild node-pty --build-from-source`. Also: commands (dtach, node, env, claude) resolved to full paths at startup via `resolveCmd()` since node-pty's `posix_spawnp` may not find Homebrew paths.
+- File explorer path not restored: `_explorerPath` was set via monkey-patch of `navigate()` AFTER constructor, so `_loadHome()`'s navigate used the original unpatched version. Fix: set `winInfo._explorerPath` directly inside `FileExplorer.navigate()`. Also pass `startPath` to constructor to skip `_loadHome()` when restoring.
