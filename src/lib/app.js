@@ -571,8 +571,7 @@ class App {
   openFileExplorer(startPath) {
     this._hideWelcome();
     const winInfo = this.wm.createWindow({ title: 'File Explorer', type: 'files' });
-    const explorer = new FileExplorer(winInfo, this);
-    if (startPath) explorer.navigate(startPath);
+    const explorer = new FileExplorer(winInfo, this, startPath);
     winInfo.onClose = () => this._checkWelcome();
     return winInfo;
   }

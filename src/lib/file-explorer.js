@@ -2,8 +2,9 @@ import { formatSize, attachPopoverClose } from './utils.js';
 import { setupDirAutocomplete } from './autocomplete.js';
 
 class FileExplorer {
-  constructor(winInfo, app) {
+  constructor(winInfo, app, startPath) {
     this.winInfo = winInfo; this.app = app; this.currentPath = ''; this.items = [];
+    this._startPath = startPath || null;
     this._showHidden = false;
     this._viewMode = 'list'; // 'list' or 'icon'
     this._sortBy = 'name';   // 'name', 'size', 'modified'
@@ -53,7 +54,8 @@ class FileExplorer {
       if (item) this._showContextMenu(e.clientX, e.clientY, item.dataset);
     });
 
-    this._loadHome();
+    if (this._startPath) this.navigate(this._startPath);
+    else this._loadHome();
   }
 
   _btn(text, title) { const b = document.createElement('button'); b.className='file-tool-btn'; b.textContent=text; b.title=title; return b; }
