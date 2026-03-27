@@ -8,6 +8,7 @@ import { css as cssLang } from '@codemirror/lang-css';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { EditorState, Compartment } from '@codemirror/state';
 import { keymap } from '@codemirror/view';
+import { indentWithTab } from '@codemirror/commands';
 
 const LANGUAGES = [
   { id: 'auto', label: 'Auto' },
@@ -210,7 +211,7 @@ class CodeEditor {
           this._wrapCompartment.of(this._getWrapExtension()),
           this._fontSizeCompartment.of(this._getFontSizeExtension()),
           this._langCompartment.of(getLangExtension(detectedLang)),
-          keymap.of([{ key: 'Mod-s', run: () => { self.save(); return true; } }]),
+          keymap.of([indentWithTab, { key: 'Mod-s', run: () => { self.save(); return true; } }]),
           EditorView.updateListener.of((update) => {
             if (update.docChanged) { self.modified = true; self.saveIndicator.textContent = '● Modified'; self.saveIndicator.style.color = 'var(--yellow)'; }
           }),

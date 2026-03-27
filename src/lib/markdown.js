@@ -3,6 +3,7 @@ import { markdown } from '@codemirror/lang-markdown';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { EditorState, Compartment } from '@codemirror/state';
 import { keymap } from '@codemirror/view';
+import { indentWithTab } from '@codemirror/commands';
 import { marked } from 'marked';
 import { Resizer } from './resizer.js';
 
@@ -141,7 +142,7 @@ class MarkdownViewer {
         extensions: [
           basicSetup, oneDark, markdown(),
           self._wrapCompartment.of(self._wordWrap ? EditorView.lineWrapping : []),
-          keymap.of([{ key: 'Mod-s', run: () => { self.save(); return true; } }]),
+          keymap.of([indentWithTab, { key: 'Mod-s', run: () => { self.save(); return true; } }]),
           EditorView.updateListener.of((update) => {
             if (update.docChanged) {
               self.saveIndicator.textContent = '● Modified'; self.saveIndicator.style.color = 'var(--yellow)';

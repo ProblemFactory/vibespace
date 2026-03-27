@@ -15,6 +15,7 @@ import { EditorView, basicSetup } from 'codemirror';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { EditorState, Compartment } from '@codemirror/state';
 import { keymap } from '@codemirror/view';
+import { indentWithTab } from '@codemirror/commands';
 
 class App {
   constructor() {
@@ -764,7 +765,7 @@ class App {
               wrapComp.of(edSettings.wordWrap ? EditorView.lineWrapping : []),
               fontSizeComp.of(EditorView.theme({ '.cm-content, .cm-gutters': { fontSize: edSettings.fontSize + 'px' } })),
               ...langExtensions,
-              keymap.of([{ key: 'Mod-s', run: () => { doSave(); return true; } }]),
+              keymap.of([indentWithTab, { key: 'Mod-s', run: () => { doSave(); return true; } }]),
             ],
           }),
           parent: editorBody,
