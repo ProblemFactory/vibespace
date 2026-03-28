@@ -178,6 +178,7 @@ class TerminalSession {
 
     // Pin-to-bottom: auto-scroll on new output unless user scrolled up
     this._pinned = true;
+    this._claudeIdle = true; // assume idle initially — prevents false "waiting" blink on buffer replay
     const scrollBtn = document.createElement('button');
     scrollBtn.className = 'term-scroll-btn hidden';
     scrollBtn.textContent = '↓';
