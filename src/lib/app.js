@@ -12,6 +12,7 @@ import { attachPopoverClose } from './utils.js';
 import { setupDirAutocomplete } from './autocomplete.js';
 import { getAvailableFonts } from './terminal.js';
 import { SettingsManager } from './settings.js';
+import { SettingsUI } from './settings-ui.js';
 import { EditorView, basicSetup } from 'codemirror';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { EditorState, Compartment } from '@codemirror/state';
@@ -84,6 +85,7 @@ class App {
   _setupGlobalSettings() {
     this._fontSize = parseInt(localStorage.getItem('termFontSize')) || 14;
     this._fontFamily = localStorage.getItem('termFontFamily') || getAvailableFonts()[0]?.value || 'monospace';
+    this._settingsUI = new SettingsUI(this);
 
     const btn = document.getElementById('btn-global-settings');
     btn.onclick = (e) => { e.stopPropagation(); this._showGlobalSettings(btn); };
@@ -153,7 +155,13 @@ class App {
       }
     };
 
-    pop.append(themeLabel, themeSel, sizeLabel, sizeRow, fontLabel, fontSel);
+    // "All Settings" link
+    const allSettingsLink = document.createElement('div');
+    allSettingsLink.className = 'settings-all-link';
+    allSettingsLink.textContent = 'All Settings...';
+    allSettingsLink.onclick = () => { pop.remove(); this._settingsUI.open(); };
+
+    pop.append(themeLabel, themeSel, sizeLabel, sizeRow, fontLabel, fontSel, allSettingsLink);
     document.body.appendChild(pop);
 
     attachPopoverClose(pop, anchor);
