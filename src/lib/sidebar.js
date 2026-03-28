@@ -290,6 +290,19 @@ class Sidebar {
 
   _deleteGroup(name) {
     delete this._sessionGroups[name];
+    delete this._groupFolders[name];
+    this._pushUserState();
+    this._render();
+  }
+
+  _renameGroup(oldName, newName) {
+    if (this._sessionGroups[newName]) return; // name taken
+    this._sessionGroups[newName] = this._sessionGroups[oldName] || [];
+    delete this._sessionGroups[oldName];
+    if (this._groupFolders[oldName]) {
+      this._groupFolders[newName] = this._groupFolders[oldName];
+      delete this._groupFolders[oldName];
+    }
     this._pushUserState();
     this._render();
   }
@@ -556,6 +569,19 @@ class Sidebar {
         const dot = document.createElement('span');
         dot.style.cssText = 'width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0';
         header.insertBefore(dot, header.children[2]);
+      }
+
+      // Double-click group name to rename
+      const nameSpan = header.querySelector('.folder-path');
+      if (nameSpan) {
+        nameSpan.addEventListener('dblclick', (e) => {
+          e.stopPropagation();
+          const newName = prompt('Rename group:', groupName);
+          if (newName && newName.trim() && newName.trim() !== groupName) {
+            this._renameGroup(groupName, newName.trim());
+          }
+        });
+        nameSpan.title = 'Double-click to rename';
       }
 
       // Resume all stopped sessions in group
