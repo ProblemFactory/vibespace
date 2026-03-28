@@ -324,6 +324,8 @@ Server → Client: `created`, `output`, `exited`, `attached`, `active-sessions`,
 - Grid overflow: round-robin distribution when windows > cells (`i % totalCells`)
 - Overlap switcher: right-click title bar → popup list of overlapping windows → click to focus
 - Overlap indicator: ⧉/□ icon on title bar shows whether other windows overlap, click opens switcher
+- Command mode: `Ctrl+\` prefix key (tmux-style), [CMD] indicator in taskbar, 2s auto-exit
+- Shift+drag: select rectangular cell range in grid mode, window spans entire range
 - Layout persistence: auto-save + named layouts + grid state
 
 ### Session Management
