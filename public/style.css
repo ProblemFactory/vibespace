@@ -222,6 +222,17 @@ html, body {
 .folder-add-btn:hover { color: var(--accent-hover); background: var(--bg-hover); }
 .new-session-card { border-style: dashed !important; text-align: center; cursor: pointer; }
 .new-session-card:hover { border-color: var(--accent) !important; }
+/* ── Status Quick Tabs ── */
+.status-quick-tabs { display: flex; gap: 2px; padding: 0 6px 4px; }
+.status-quick-tabs:empty { display: none; }
+.status-quick-tab {
+  flex: 1; padding: 2px 0; border: none; border-radius: var(--radius-sm);
+  background: transparent; color: var(--text-dim); font-size: 9px; font-weight: 600;
+  cursor: pointer; transition: all var(--transition); text-align: center; letter-spacing: 0.3px;
+}
+.status-quick-tab:hover { background: var(--bg-hover); color: var(--text); }
+.status-quick-tab.active { background: var(--bg-hover); color: var(--tab-color, var(--text)); }
+
 .status-filter-menu {
   position: fixed; z-index: 99999; background: var(--bg-dialog); border: 1px solid var(--border-active);
   border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,0.4); padding: 6px 0; min-width: 130px;

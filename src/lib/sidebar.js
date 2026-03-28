@@ -64,9 +64,12 @@ class Sidebar {
     };
 
     // Status filter dropdown (multi-select: live, running, stopped, archived)
-    this._statusFilter = new Set(['live', 'tmux', 'external', 'stopped']); // all except archived by default
+    const defaultFilter = this.app.settings?.get('sidebar.defaultStatusFilter') ?? ['live', 'tmux', 'external', 'stopped'];
+    this._statusFilter = new Set(defaultFilter);
+    this._activeView = null; // null = ALL (show all selected filters), or a specific status string
     const filterBtn = document.getElementById('live-filter');
     filterBtn.onclick = (e) => { e.stopPropagation(); this._showStatusFilterMenu(filterBtn); };
+    this._renderQuickTabs();
 
     this._sessionDigest = '';
     app.ws.onGlobal((msg) => {
@@ -349,7 +352,9 @@ class Sidebar {
       const lbl = document.createElement('span'); lbl.textContent = item.label;
       cb.onchange = () => {
         if (cb.checked) this._statusFilter.add(item.id); else this._statusFilter.delete(item.id);
+        this._activeView = null; // reset to ALL when filter changes
         this._updateFilterBtn(anchor);
+        this._renderQuickTabs();
         this._render();
       };
       row.append(cb, dot, lbl);
@@ -364,6 +369,35 @@ class Sidebar {
     const isDefault = this._statusFilter.size === 4 && !this._statusFilter.has('archived');
     btn.style.color = isDefault ? '' : 'var(--accent-hover)';
     btn.title = isDefault ? 'Filter by status' : `Showing: ${[...this._statusFilter].join(', ')}`;
+  }
+
+  _renderQuickTabs() {
+    const enabled = this.app.settings?.get('sidebar.enableStatusQuickTabs') ?? false;
+    const container = document.getElementById('status-quick-tabs');
+    if (!container) return;
+    container.innerHTML = '';
+    const filters = [...this._statusFilter];
+    // Only show tabs if enabled and more than 1 filter is selected
+    if (!enabled || filters.length <= 1) return;
+
+    const labelMap = { live: 'LIVE', tmux: 'TMUX', external: 'EXT', stopped: 'STOP', archived: 'ARCH' };
+    const colorMap = { live: 'var(--green)', tmux: 'var(--blue)', external: 'var(--yellow)', stopped: 'var(--text-dim)', archived: 'var(--text-dim)' };
+
+    // ALL button
+    const allBtn = document.createElement('button'); allBtn.className = 'status-quick-tab';
+    if (this._activeView === null) allBtn.classList.add('active');
+    allBtn.textContent = 'ALL';
+    allBtn.onclick = () => { this._activeView = null; this._renderQuickTabs(); this._render(); };
+    container.appendChild(allBtn);
+
+    for (const f of filters) {
+      const btn = document.createElement('button'); btn.className = 'status-quick-tab';
+      if (this._activeView === f) btn.classList.add('active');
+      btn.textContent = labelMap[f] || f.toUpperCase();
+      btn.style.setProperty('--tab-color', colorMap[f] || 'var(--text-dim)');
+      btn.onclick = () => { this._activeView = f; this._renderQuickTabs(); this._render(); };
+      container.appendChild(btn);
+    }
   }
 
   toggle(force) {
@@ -438,6 +472,11 @@ class Sidebar {
       if (nonArchivedFilters.size < 4) {
         sessions = sessions.filter(s => nonArchivedFilters.has(s.status));
       }
+    }
+
+    // Quick tab view: narrow down to a single status
+    if (this._activeView) {
+      sessions = sessions.filter(s => s.status === this._activeView);
     }
 
     this.listEl.innerHTML = '';
