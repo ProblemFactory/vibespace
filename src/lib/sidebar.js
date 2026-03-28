@@ -70,6 +70,8 @@ class Sidebar {
     const filterBtn = document.getElementById('live-filter');
     filterBtn.onclick = (e) => { e.stopPropagation(); this._showStatusFilterMenu(filterBtn); };
     this._renderQuickTabs();
+    // Re-render quick tabs after settings finish loading (async)
+    this.app.settings?.on('sidebar.enableStatusQuickTabs', () => this._renderQuickTabs());
 
     this._sessionDigest = '';
     app.ws.onGlobal((msg) => {
