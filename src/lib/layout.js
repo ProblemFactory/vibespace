@@ -111,7 +111,8 @@ class LayoutManager {
           alive = activeSessions.find(s => s.id === ws.serverSessionId);
         }
         if (alive) {
-          const winInfo = this.app.attachSession(alive.id, alive.name, alive.cwd);
+          const customName = this.app.sidebar?.getCustomName(ws.claudeSessionId || alive.claudeSessionId);
+          const winInfo = this.app.attachSession(alive.id, customName || alive.name, alive.cwd);
           applyPosition(winInfo, ws);
           // Restore split-pane editor if it was active (Ctrl+G)
           if (ws.editorState && winInfo) {
@@ -362,8 +363,9 @@ class LayoutManager {
           }
 
           if (activeMatch) {
-            // Active but no window — attach
-            const winInfo = this.app.attachSession(activeMatch.id, activeMatch.name, activeMatch.cwd);
+            // Active but no window — attach (use custom name if available)
+            const customName = this.app.sidebar?.getCustomName(ws.claudeSessionId);
+            const winInfo = this.app.attachSession(activeMatch.id, customName || activeMatch.name, activeMatch.cwd);
             if (winInfo) {
               matchedWinIds.add(winInfo.id);
               applyPosition(winInfo, ws);
@@ -379,7 +381,8 @@ class LayoutManager {
             // Check stopped sessions for resume
             const stoppedMatch = allSessions.find(s => s.sessionId === ws.claudeSessionId && s.status === 'stopped');
             if (stoppedMatch) {
-              this.app.resumeSession(stoppedMatch.sessionId, stoppedMatch.cwd, stoppedMatch.name);
+              const customName = this.app.sidebar?.getCustomName(ws.claudeSessionId);
+              this.app.resumeSession(stoppedMatch.sessionId, stoppedMatch.cwd, customName || stoppedMatch.name);
               // resumeSession creates window asynchronously; find it after a delay
               const capturedWs = ws;
               setTimeout(() => {
