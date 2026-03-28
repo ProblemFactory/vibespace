@@ -261,10 +261,12 @@ class TerminalSession {
     this._pinned = true;
     this.winInfo.content.querySelector('.term-scroll-btn')?.classList.add('hidden');
     if (this._pendingOutput) {
-      this.terminal.write(this._pendingOutput);
+      const pending = this._pendingOutput;
       this._pendingOutput = '';
+      this.terminal.write(pending, () => this.terminal.scrollToBottom());
+    } else {
+      this.terminal.scrollToBottom();
     }
-    this.terminal.scrollToBottom();
   }
 
   _getGlobalFontSize() { return parseInt(localStorage.getItem('termFontSize')) || 14; }
@@ -366,6 +368,7 @@ class TerminalSession {
         this.ws.send({ type: 'resize', sessionId: this.sessionId, cols: d.cols - 1, rows: d.rows });
         setTimeout(() => {
           this.ws.send({ type: 'resize', sessionId: this.sessionId, cols: d.cols, rows: d.rows });
+          setTimeout(() => { if (this._pinned) this.terminal.scrollToBottom(); }, 300);
         }, 100);
       }
     } catch {}

@@ -657,7 +657,7 @@ class App {
         // Write saved buffer after terminal is fully initialized
         if (msg.buffer) {
           const buf = msg.buffer;
-          setTimeout(() => { term.terminal.write(buf); term.fit(); }, 300);
+          setTimeout(() => { term.terminal.write(buf, () => { term.terminal.scrollToBottom(); term.fit(); }); }, 300);
         }
         this._wireTerminalWindow(winInfo, term, serverId);
         term.focus();
