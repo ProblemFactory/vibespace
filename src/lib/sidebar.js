@@ -508,6 +508,26 @@ class Sidebar {
         header.insertBefore(dot, header.children[2]);
       }
 
+      // Resume all stopped sessions in group
+      const resumeAllBtn = document.createElement('button');
+      resumeAllBtn.className = 'folder-add-btn';
+      resumeAllBtn.textContent = '\u25B6';
+      resumeAllBtn.title = 'Resume all sessions in "' + groupName + '"';
+      resumeAllBtn.onclick = (e) => {
+        e.stopPropagation();
+        for (const s of groupSessions) {
+          if (s.status === 'stopped') {
+            const customName = this.getCustomName(s.sessionId);
+            this.app.resumeSession(s.sessionId, s.cwd, customName || s.name);
+          } else if (s.status === 'live' && s.webuiId) {
+            this.app.attachSession(s.webuiId, s.webuiName || s.name, s.cwd);
+          } else if (s.status === 'tmux') {
+            this.app.attachTmuxSession(s.tmuxTarget, s.name, s.cwd);
+          }
+        }
+      };
+      header.appendChild(resumeAllBtn);
+
       // Delete group button
       const delBtn = document.createElement('button');
       delBtn.className = 'folder-add-btn';
