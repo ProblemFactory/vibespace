@@ -327,9 +327,16 @@ class LayoutManager {
       }
     }
 
+    // Track which claudeSessionIds have already been processed (prevent duplicates)
+    const processedClaudeIds = new Set();
+
     // Process each preset window
     for (const ws of preset.windows) {
       if (ws.type === 'terminal') {
+        // Skip if we already processed this session (prevents duplicate resume)
+        if (ws.claudeSessionId && processedClaudeIds.has(ws.claudeSessionId)) continue;
+        if (ws.claudeSessionId) processedClaudeIds.add(ws.claudeSessionId);
+
         // Try to find an already-open window matching this terminal
         let existing = null;
         if (ws.claudeSessionId) {
