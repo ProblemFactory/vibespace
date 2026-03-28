@@ -292,11 +292,14 @@ Split from monolithic 1647-line `src/client.js` into 13 ES modules under `src/li
 - `POST /api/layouts-autosave` — save workspace state
 - `POST /api/editor/open` — editor helper HTTP→WebSocket bridge
 - `POST /api/editor/signal` — signal editor completion
+- `GET /api/user-state` / `POST /api/user-state` — unified star/archive/rename/groups state (broadcasts to all WS clients)
+- `POST /api/session-groups/create|delete|rename|assign|unassign` — session group CRUD
+- `GET /api/bookmarks` / `POST /api/bookmarks` — file explorer bookmarks (broadcasts to all WS clients)
 - `GET /proxy/<url>` — full-rewriting web proxy via node-unblocker (HTML/CSS URL rewrite, JS XHR/WS rewrite, header stripping)
 
 ### WebSocket Protocol (`/ws`)
 Client → Server: `create`, `input`, `resize`, `attach`, `kill`, `tmux-attach`
-Server → Client: `created`, `output`, `exited`, `attached`, `active-sessions`, `editor-open`, `error`
+Server → Client: `created`, `output`, `exited`, `attached`, `active-sessions`, `editor-open`, `editor-close`, `effective-size`, `user-state-updated`, `bookmarks-updated`, `error`
 
 ## Features Summary
 
@@ -338,6 +341,8 @@ Server → Client: `created`, `output`, `exited`, `attached`, `active-sessions`,
 - Session rename: double-click name in sidebar → set custom name → used as `--name` on next resume
 - Archive/unarchive sessions: 📦 button, hidden by default, toggle via status filter
 - Focus window highlights corresponding session in sidebar
+- Session groups: Folders | Groups dual tab, user-defined groups with assign/unassign
+- Multi-client sync: star/archive/rename/groups broadcast via WebSocket to all clients
 
 ### File Management
 - File explorer with upload/download/drag-drop, title shows current path (front-truncated)
