@@ -321,13 +321,27 @@ class Sidebar {
     const badge = badgeMap[s.status] || badgeMap.stopped;
 
     const starred = this._starredIds.has(s.sessionId);
-    // Compact layout: [★] name + badge + ▸ on one row. Details only when expanded.
-    const starIcon = starred ? '<span class="session-star-inline" title="Starred">★</span>' : '';
-    card.innerHTML = `
-      <div class="session-card-row">
-        ${starIcon}<span class="session-card-name">${escHtml(displayName)}</span>
-        <span class="session-card-badge ${badge.cls}">${badge.text}</span>
-      </div>`;
+    const isExpanded = this._expandedCardId === s.sessionId;
+    // Compact row: ★ ☆ 📦 name badge ▸
+    card.innerHTML = `<div class="session-card-row">
+      <span class="session-card-name">${escHtml(displayName)}</span>
+      <span class="session-card-badge ${badge.cls}">${badge.text}</span>
+    </div>`;
+    const row = card.querySelector('.session-card-row');
+    // Star button (inline, always visible)
+    const starBtn = document.createElement('button');
+    starBtn.className = 'session-inline-btn' + (starred ? ' starred' : '');
+    starBtn.textContent = starred ? '\u2605' : '\u2606';
+    starBtn.title = starred ? 'Unstar' : 'Star';
+    starBtn.onclick = (e) => { e.stopPropagation(); this.toggleStar(s.sessionId); };
+    row.insertBefore(starBtn, row.firstChild);
+    // Archive button (inline, always visible)
+    const archBtn = document.createElement('button');
+    archBtn.className = 'session-inline-btn' + (isArchived ? ' archived' : '');
+    archBtn.textContent = isArchived ? '\u{1F4E4}' : '\u{1F4E6}';
+    archBtn.title = isArchived ? 'Unarchive' : 'Archive';
+    archBtn.onclick = (e) => { e.stopPropagation(); this.toggleArchive(s.sessionId); };
+    row.insertBefore(archBtn, row.children[1]);
 
     // Expand/collapse button on the right side, after badge
     const expandBtn = document.createElement('button');
@@ -380,21 +394,8 @@ class Sidebar {
       };
     }
 
-    // Action buttons in detail panel
+    // Action buttons in detail panel (star/archive already in compact row)
     const actionsDiv = detailPanel.querySelector('.session-detail-actions');
-    // Star button
-    const detailStarBtn = document.createElement('button');
-    detailStarBtn.className = 'session-detail-btn';
-    detailStarBtn.textContent = starred ? '\u2605 Unstar' : '\u2606 Star';
-    detailStarBtn.onclick = (e) => { e.stopPropagation(); this.toggleStar(s.sessionId); };
-    actionsDiv.appendChild(detailStarBtn);
-
-    // Archive button
-    const detailArchiveBtn = document.createElement('button');
-    detailArchiveBtn.className = 'session-detail-btn';
-    detailArchiveBtn.textContent = isArchived ? '\u{1F4E4} Unarchive' : '\u{1F4E6} Archive';
-    detailArchiveBtn.onclick = (e) => { e.stopPropagation(); this.toggleArchive(s.sessionId); };
-    actionsDiv.appendChild(detailArchiveBtn);
 
     // Rename button
     const detailRenameBtn = document.createElement('button');

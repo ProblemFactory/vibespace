@@ -144,17 +144,63 @@ class FileExplorer {
 
   _renderBookmarks() {
     this._bookmarkList.innerHTML = '';
-    for (const bk of this._bookmarks) {
+    this._bookmarks.forEach((bk, i) => {
       const item = document.createElement('div'); item.className = 'file-bookmark-item';
       item.title = bk.path;
       item.textContent = bk.label;
       item.onclick = () => this.navigate(bk.path);
+      // Drag to reorder
+      item.draggable = true;
+      item.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/x-bookmark-idx', String(i)); e.dataTransfer.effectAllowed = 'move'; });
+      item.addEventListener('dragover', (e) => { e.preventDefault(); item.classList.add('drag-over'); });
+      item.addEventListener('dragleave', () => item.classList.remove('drag-over'));
+      item.addEventListener('drop', (e) => {
+        e.preventDefault(); item.classList.remove('drag-over');
+        const fromIdx = e.dataTransfer.getData('text/x-bookmark-idx');
+        const filePath = e.dataTransfer.getData('application/x-file-path');
+        if (fromIdx !== '') {
+          // Reorder
+          const fi = parseInt(fromIdx);
+          if (fi !== i) {
+            const [moved] = this._bookmarks.splice(fi, 1);
+            this._bookmarks.splice(fi < i ? i : i, 0, moved);
+            this._saveBookmarks(); this._renderBookmarks();
+          }
+        } else if (filePath) {
+          // Drop file/folder from file list to add as bookmark
+          const label = filePath.split('/').pop() || filePath;
+          if (!this._bookmarks.some(b => b.path === filePath)) {
+            this._bookmarks.splice(i, 0, { label, path: filePath });
+            this._saveBookmarks(); this._renderBookmarks();
+          }
+        }
+      });
+      // Right-click to remove
+      item.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        this._bookmarks.splice(i, 1);
+        this._saveBookmarks(); this._renderBookmarks();
+      });
       this._bookmarkList.appendChild(item);
-    }
-    if (this._bookmarks.length === 0) {
-      const hint = document.createElement('div'); hint.className = 'empty-hint'; hint.textContent = 'No bookmarks';
-      this._bookmarkList.appendChild(hint);
-    }
+    });
+    // Drop zone at bottom for adding new bookmarks
+    const dropZone = document.createElement('div');
+    dropZone.className = 'file-bookmark-dropzone';
+    dropZone.textContent = this._bookmarks.length === 0 ? 'Drop folders here' : '';
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault(); dropZone.classList.remove('drag-over');
+      const filePath = e.dataTransfer.getData('application/x-file-path') || e.dataTransfer.getData('text/plain');
+      if (filePath && filePath.startsWith('/')) {
+        const label = filePath.split('/').pop() || filePath;
+        if (!this._bookmarks.some(b => b.path === filePath)) {
+          this._bookmarks.push({ label, path: filePath });
+          this._saveBookmarks(); this._renderBookmarks();
+        }
+      }
+    });
+    this._bookmarkList.appendChild(dropZone);
   }
 
   _bookmarkCurrent() {
@@ -540,6 +586,14 @@ class FileExplorer {
     const fullPath = this.currentPath + '/' + dataset.name;
     const items = [];
     if (dataset.isDir === 'true') {
+      const isBookmarked = this._bookmarks.some(b => b.path === fullPath);
+      items.push({ label: isBookmarked ? '★ Bookmarked' : '☆ Add to bookmarks', action: () => {
+        if (!isBookmarked) {
+          const label = dataset.name || fullPath.split('/').pop();
+          this._bookmarks.push({ label, path: fullPath });
+          this._saveBookmarks(); this._renderBookmarks();
+        }
+      }});
       items.push({ label: 'Sessions', submenu: () => {
         const sub = [];
         sub.push({ label: '+ New session', action: () => this.app.createSession({ cwd: fullPath }) });

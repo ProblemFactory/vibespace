@@ -103,7 +103,14 @@ html, body {
 .session-item-card:hover { background: var(--bg-hover); border-color: var(--border-active); }
 .session-card-row { display: flex; align-items: center; gap: 6px; }
 .session-card-name { font-size: 11px; font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
-.session-star-inline { color: var(--yellow); font-size: 10px; flex-shrink: 0; }
+.session-inline-btn {
+  background: none; border: none; cursor: pointer; font-size: 11px; color: var(--text-dim);
+  padding: 0 2px; line-height: 1; flex-shrink: 0; opacity: 0.4; transition: opacity 0.15s;
+}
+.session-item-card:hover .session-inline-btn { opacity: 0.8; }
+.session-inline-btn:hover { opacity: 1 !important; }
+.session-inline-btn.starred { color: var(--yellow); opacity: 1; }
+.session-inline-btn.archived { color: var(--accent); opacity: 0.8; }
 .session-card-badge {
   font-size: 9px; padding: 1px 6px; border-radius: 8px; font-weight: 600;
 }
@@ -483,6 +490,10 @@ html, body {
   transition: background var(--transition); border-left: 2px solid transparent;
 }
 .file-bookmark-item:hover { background: var(--bg-hover); border-left-color: var(--accent); }
+.file-bookmark-item.drag-over { background: var(--accent-dim); border-left-color: var(--accent); }
+.file-bookmark-item[draggable] { cursor: grab; }
+.file-bookmark-dropzone { min-height: 20px; padding: 4px 8px; font-size: 10px; color: var(--text-dim); text-align: center; }
+.file-bookmark-dropzone.drag-over { background: var(--accent-dim); }
 
 /* Bookmark editor overlay */
 .file-bookmark-overlay {
