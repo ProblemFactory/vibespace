@@ -398,19 +398,19 @@ class App {
 
       switch (key) {
         case 'ArrowLeft':
-          if (activeWin) { this.wm.setGrid(1, 2); this.wm.snapActiveToCell(0); }
+          if (activeWin) this.wm.snapToHalf(this.wm.activeWindowId, 'left');
           this._exitCommandMode();
           break;
         case 'ArrowRight':
-          if (activeWin) { this.wm.setGrid(1, 2); this.wm.snapActiveToCell(1); }
+          if (activeWin) this.wm.snapToHalf(this.wm.activeWindowId, 'right');
           this._exitCommandMode();
           break;
         case 'ArrowUp':
-          if (activeWin) { this.wm.setGrid(2, 1); this.wm.snapActiveToCell(0); }
+          if (activeWin) this.wm.snapToHalf(this.wm.activeWindowId, 'top');
           this._exitCommandMode();
           break;
         case 'ArrowDown':
-          if (activeWin) { this.wm.setGrid(2, 1); this.wm.snapActiveToCell(1); }
+          if (activeWin) this.wm.snapToHalf(this.wm.activeWindowId, 'bottom');
           this._exitCommandMode();
           break;
         case 'm':

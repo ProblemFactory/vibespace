@@ -288,8 +288,29 @@ class WindowManager {
   snapActiveToCell(cellIdx) {
     const win = this.windows.get(this.activeWindowId);
     if (!win || !this.grid) return;
+    const totalCells = this.grid.rows * this.grid.cols;
+    if (cellIdx < 0 || cellIdx >= totalCells) return; // bounds check
     this._positionToCell(win, cellIdx, true);
     setTimeout(() => this._captureGridBounds(win), 250);
+  }
+
+  // Snap a window to half the workspace without changing the grid
+  snapToHalf(winId, side) {
+    const win = this.windows.get(winId); if (!win) return;
+    const r = this.workspace.getBoundingClientRect(), g = 4;
+    const el = win.element;
+    const zones = {
+      left:   { left: g, top: g, width: r.width / 2 - g * 1.5, height: r.height - g * 2 },
+      right:  { left: r.width / 2 + g / 2, top: g, width: r.width / 2 - g * 1.5, height: r.height - g * 2 },
+      top:    { left: g, top: g, width: r.width - g * 2, height: r.height / 2 - g * 1.5 },
+      bottom: { left: g, top: r.height / 2 + g / 2, width: r.width - g * 2, height: r.height / 2 - g * 1.5 },
+    };
+    const z = zones[side]; if (!z) return;
+    el.classList.add('snap-animating');
+    el.style.left = z.left + 'px'; el.style.top = z.top + 'px';
+    el.style.width = z.width + 'px'; el.style.height = z.height + 'px';
+    win.isMaximized = false;
+    setTimeout(() => { el.classList.remove('snap-animating'); if (win.onResize) win.onResize(); this._captureGridBounds(win); }, 220);
   }
 
   _showGridRangeHighlight(startIdx, endIdx) {
