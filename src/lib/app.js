@@ -22,9 +22,11 @@ import { indentWithTab } from '@codemirror/commands';
 class App {
   constructor() {
     this.settings = new SettingsManager();
+    window._appSettings = this.settings; // expose for TerminalSession constructor
     this.themeManager = new ThemeManager();
     this.ws = new WsManager();
     this.wm = new WindowManager(document.getElementById('workspace'));
+    this.wm._settings = this.settings;
     this.sessions = new Map();
     this.attachedServerSessions = new Set();
     this.layoutManager = new LayoutManager(this);
@@ -75,6 +77,21 @@ class App {
     document.getElementById('btn-new-session').addEventListener('click', () => this.showNewSessionDialog());
     document.getElementById('btn-file-explorer').addEventListener('click', () => this.openFileExplorer());
     document.getElementById('btn-browser').addEventListener('click', () => this.openBrowser());
+
+    // Apply toolbar visibility settings
+    const applyToolbarSettings = () => {
+      const presets = document.getElementById('layout-presets');
+      const addGrid = document.getElementById('btn-add-grid');
+      if (presets) {
+        presets.querySelectorAll('.layout-btn[data-layout]').forEach(b => {
+          b.style.display = this.settings.get('toolbar.showLayoutPresets') ? '' : 'none';
+        });
+      }
+      if (addGrid) addGrid.style.display = this.settings.get('toolbar.showCustomGridButton') ? '' : 'none';
+    };
+    applyToolbarSettings();
+    this.settings.on('toolbar.showLayoutPresets', applyToolbarSettings);
+    this.settings.on('toolbar.showCustomGridButton', applyToolbarSettings);
   }
 
   _setupWelcome() {
@@ -367,8 +384,8 @@ class App {
     this._cmdIndicator = document.getElementById('cmd-indicator');
 
     document.addEventListener('keydown', (e) => {
-      // Ctrl+\ toggles command mode
-      if (e.key === '\\' && e.ctrlKey && !e.altKey && !e.metaKey) {
+      // Ctrl+\ toggles command mode (if enabled in settings)
+      if (e.key === '\\' && e.ctrlKey && !e.altKey && !e.metaKey && (this.settings.get('toolbar.showCommandMode') ?? true)) {
         e.preventDefault();
         e.stopPropagation();
         if (this._cmdMode) {
@@ -646,6 +663,8 @@ class App {
       term.dispose(); this.sessions.delete(winInfo.id); this._checkWelcome();
     };
     winInfo._notifyChanged = () => this.updateTaskbar();
+    // Give terminal access to settings
+    term._settings = this.settings;
   }
 
   // Find existing window for a server session ID and focus it

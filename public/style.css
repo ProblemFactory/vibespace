@@ -330,6 +330,8 @@ html, body {
   display: flex; flex-direction: column; overflow: hidden; min-width: 320px; min-height: 180px;
 }
 .window.window-active { border-color: var(--border-active); box-shadow: var(--shadow-active); }
+.window.window-bounce { animation: win-bounce 0.3s ease-out; }
+@keyframes win-bounce { 0% { transform: scale(1); } 40% { transform: scale(1.015); } 100% { transform: scale(1); } }
 .window.dragging { opacity: 0.85; cursor: grabbing; }
 .window.snap-animating { transition: left 0.2s ease, top 0.2s ease, width 0.2s ease, height 0.2s ease; }
 .window-titlebar {
