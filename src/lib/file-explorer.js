@@ -89,9 +89,7 @@ class FileExplorer {
     this._bookmarkList = document.createElement('div'); this._bookmarkList.className = 'file-bookmark-list';
     const bkHeader = document.createElement('div'); bkHeader.className = 'file-bookmark-header';
     const bkTitle = document.createElement('span'); bkTitle.textContent = 'Bookmarks'; bkTitle.className = 'file-bookmark-title';
-    const bkEdit = document.createElement('button'); bkEdit.className = 'file-tool-btn'; bkEdit.textContent = '\u270E'; bkEdit.title = 'Edit bookmarks';
-    bkEdit.onclick = () => this._showBookmarkEditor();
-    bkHeader.append(bkTitle, bkEdit);
+    bkHeader.append(bkTitle);
     this._bookmarkPanel.append(bkHeader, this._bookmarkList);
 
     // Sort header (for list view)
@@ -144,6 +142,22 @@ class FileExplorer {
 
   _renderBookmarks() {
     this._bookmarkList.innerHTML = '';
+    // Shared drop handler: determines insert position from mouse Y
+    const getInsertIdx = (e) => {
+      const items = this._bookmarkList.querySelectorAll('.file-bookmark-item');
+      for (let j = 0; j < items.length; j++) {
+        const r = items[j].getBoundingClientRect();
+        if (e.clientY < r.top + r.height / 2) return j;
+      }
+      return this._bookmarks.length;
+    };
+    // Clear all insertion indicators
+    const clearIndicators = () => {
+      this._bookmarkList.querySelectorAll('.file-bookmark-item').forEach(el => {
+        el.classList.remove('insert-above', 'insert-below');
+      });
+    };
+
     this._bookmarks.forEach((bk, i) => {
       const item = document.createElement('div'); item.className = 'file-bookmark-item';
       item.title = bk.path;
@@ -151,39 +165,64 @@ class FileExplorer {
       item.onclick = () => this.navigate(bk.path);
       // Drag to reorder
       item.draggable = true;
-      item.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/x-bookmark-idx', String(i)); e.dataTransfer.effectAllowed = 'move'; });
-      item.addEventListener('dragover', (e) => { e.preventDefault(); item.classList.add('drag-over'); });
-      item.addEventListener('dragleave', () => item.classList.remove('drag-over'));
+      item.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('text/x-bookmark-idx', String(i));
+        e.dataTransfer.effectAllowed = 'move';
+      });
+      item.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        clearIndicators();
+        const r = item.getBoundingClientRect();
+        if (e.clientY < r.top + r.height / 2) item.classList.add('insert-above');
+        else item.classList.add('insert-below');
+      });
+      item.addEventListener('dragleave', () => { item.classList.remove('insert-above', 'insert-below'); });
       item.addEventListener('drop', (e) => {
-        e.preventDefault(); item.classList.remove('drag-over');
+        e.preventDefault(); clearIndicators();
+        const insertAt = getInsertIdx(e);
         const fromIdx = e.dataTransfer.getData('text/x-bookmark-idx');
         const filePath = e.dataTransfer.getData('application/x-file-path');
         if (fromIdx !== '') {
-          // Reorder
           const fi = parseInt(fromIdx);
-          if (fi !== i) {
-            const [moved] = this._bookmarks.splice(fi, 1);
-            this._bookmarks.splice(fi < i ? i : i, 0, moved);
-            this._saveBookmarks(); this._renderBookmarks();
-          }
+          const [moved] = this._bookmarks.splice(fi, 1);
+          this._bookmarks.splice(fi < insertAt ? insertAt - 1 : insertAt, 0, moved);
+          this._saveBookmarks(); this._renderBookmarks();
         } else if (filePath) {
-          // Drop file/folder from file list to add as bookmark
           const label = filePath.split('/').pop() || filePath;
           if (!this._bookmarks.some(b => b.path === filePath)) {
-            this._bookmarks.splice(i, 0, { label, path: filePath });
+            this._bookmarks.splice(insertAt, 0, { label, path: filePath });
             this._saveBookmarks(); this._renderBookmarks();
           }
         }
       });
-      // Right-click to remove
+      // Right-click: show context menu (same as right-clicking the folder in file list)
       item.addEventListener('contextmenu', (e) => {
         e.preventDefault();
-        this._bookmarks.splice(i, 1);
-        this._saveBookmarks(); this._renderBookmarks();
+        const bmItems = [];
+        bmItems.push({ label: 'Open', action: () => this.navigate(bk.path) });
+        bmItems.push({ label: 'Open in new window', action: () => this.app.openFileExplorer(bk.path) });
+        bmItems.push({ label: 'Remove from bookmarks', action: () => {
+          this._bookmarks.splice(i, 1);
+          this._saveBookmarks(); this._renderBookmarks();
+        }});
+        bmItems.push({ label: 'Rename bookmark', action: () => {
+          const n = prompt('Bookmark name:', bk.label);
+          if (n && n.trim()) { bk.label = n.trim(); this._saveBookmarks(); this._renderBookmarks(); }
+        }});
+        // Show context menu
+        document.querySelectorAll('.context-menu').forEach(m => m.remove());
+        const menu = document.createElement('div'); menu.className = 'context-menu';
+        menu.style.left = e.clientX + 'px'; menu.style.top = e.clientY + 'px';
+        for (const mi of bmItems) {
+          const el = document.createElement('div'); el.className = 'context-menu-item'; el.textContent = mi.label;
+          el.onclick = () => { menu.remove(); mi.action(); }; menu.appendChild(el);
+        }
+        document.body.appendChild(menu);
+        attachPopoverClose(menu);
       });
       this._bookmarkList.appendChild(item);
     });
-    // Drop zone at bottom for adding new bookmarks
+    // Drop zone at bottom
     const dropZone = document.createElement('div');
     dropZone.className = 'file-bookmark-dropzone';
     dropZone.textContent = this._bookmarks.length === 0 ? 'Drop folders here' : '';

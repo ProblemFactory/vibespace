@@ -490,9 +490,10 @@ html, body {
   transition: background var(--transition); border-left: 2px solid transparent;
 }
 .file-bookmark-item:hover { background: var(--bg-hover); border-left-color: var(--accent); }
-.file-bookmark-item.drag-over { background: var(--accent-dim); border-left-color: var(--accent); }
 .file-bookmark-item[draggable] { cursor: grab; }
-.file-bookmark-dropzone { min-height: 20px; padding: 4px 8px; font-size: 10px; color: var(--text-dim); text-align: center; }
+.file-bookmark-item.insert-above { border-top: 2px solid var(--accent); padding-top: 2px; }
+.file-bookmark-item.insert-below { border-bottom: 2px solid var(--accent); padding-bottom: 2px; }
+.file-bookmark-dropzone { min-height: 24px; padding: 4px 8px; font-size: 10px; color: var(--text-dim); text-align: center; flex: 1; }
 .file-bookmark-dropzone.drag-over { background: var(--accent-dim); }
 
 /* Bookmark editor overlay */
