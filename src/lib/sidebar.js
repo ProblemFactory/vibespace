@@ -893,7 +893,7 @@ class Sidebar {
         row.className = 'session-detail-group-item';
         row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:6px;padding:4px 8px;cursor:default';
         const pathSpan = document.createElement('span');
-        pathSpan.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left;font-size:11px';
+        pathSpan.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px';
         pathSpan.textContent = fp.replace(/^\/home\/[^/]+/, '~');
         pathSpan.title = fp;
         const removeBtn = document.createElement('button');
