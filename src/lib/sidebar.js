@@ -789,43 +789,55 @@ class Sidebar {
     const detailPanel = document.createElement('div');
     detailPanel.className = 'session-card-detail';
 
-    const cwdShort = (s.cwd || '').replace(/^\/home\/[^/]+/, '~');
+    const settings = this.app.settings;
+    const visibleFields = settings?.get('sessionCard.visibleFields') ?? ['id', 'cwd', 'started', 'status', 'groups'];
+    const clickToCopy = settings?.get('sessionCard.clickToCopy') ?? false;
+    const alignment = settings?.get('sessionCard.detailAlignment') ?? 'right';
+    const cwdShort = (s.cwd || '').replace(/^\/home\/[^/]+/, '~').replace(/^\/Users\/[^/]+/, '~');
 
-    detailPanel.innerHTML = `
-      <div class="session-detail-row">
-        <span class="session-detail-label">ID</span>
-        <span class="session-detail-value session-detail-id">${escHtml(idShort)}...<button class="session-detail-copy" title="Copy full ID">&#x1F4CB;</button></span>
-      </div>
-      <div class="session-detail-row">
-        <span class="session-detail-label">CWD</span>
-        <span class="session-detail-value" title="${escHtml(s.cwd || '')}">${escHtml(cwdShort)}</span>
-      </div>
-      <div class="session-detail-row">
-        <span class="session-detail-label">Started</span>
-        <span class="session-detail-value">${date.toLocaleString()}</span>
-      </div>
-      <div class="session-detail-row">
-        <span class="session-detail-label">Status</span>
-        <span class="session-detail-value"><span class="session-card-badge ${badge.cls}">${badge.text}</span></span>
-      </div>
-      <div class="session-detail-groups"></div>
-      <div class="session-detail-actions"></div>
-    `;
+    const fields = [
+      { key: 'id', label: 'ID', display: `${idShort}...`, copy: s.sessionId },
+      { key: 'cwd', label: 'CWD', display: cwdShort, copy: s.cwd || '' },
+      { key: 'started', label: 'Started', display: date.toLocaleString(), copy: date.toISOString() },
+      { key: 'status', label: 'Status', display: null, badge: true, copy: `${s.status}${s.pid ? ' PID ' + s.pid : ''}` },
+    ];
 
-    // Copy ID button
-    const copyBtn = detailPanel.querySelector('.session-detail-copy');
-    if (copyBtn) {
-      copyBtn.onclick = (e) => {
-        e.stopPropagation();
-        navigator.clipboard.writeText(s.sessionId).then(() => { copyBtn.textContent = '\u2713'; setTimeout(() => { copyBtn.textContent = '\u{1F4CB}'; }, 1500); });
-      };
+    for (const f of fields) {
+      if (!visibleFields.includes(f.key)) continue;
+      const row = document.createElement('div'); row.className = 'session-detail-row';
+      if (alignment === 'left') row.style.flexDirection = 'row-reverse';
+      const lbl = document.createElement('span'); lbl.className = 'session-detail-label'; lbl.textContent = f.label;
+      const val = document.createElement('span'); val.className = 'session-detail-value';
+      if (alignment === 'left') { val.style.textAlign = 'left'; val.style.direction = 'ltr'; }
+      if (f.badge) {
+        val.innerHTML = `<span class="session-card-badge ${badge.cls}">${badge.text}</span>`;
+      } else {
+        val.textContent = f.display;
+      }
+      if (clickToCopy) {
+        val.classList.add('session-detail-copyable');
+        val.title = 'Click to copy';
+        val.onclick = (e) => {
+          e.stopPropagation();
+          navigator.clipboard.writeText(f.copy).then(() => {
+            const orig = val.textContent; val.textContent = 'Copied!';
+            setTimeout(() => { val.textContent = orig; }, 800);
+          }).catch(() => {});
+        };
+      }
+      row.append(lbl, val);
+      detailPanel.appendChild(row);
     }
 
-    // Groups section in detail panel
-    this._renderDetailGroups(detailPanel.querySelector('.session-detail-groups'), s.sessionId);
+    // Groups section
+    if (visibleFields.includes('groups')) {
+      const groupsContainer = document.createElement('div'); groupsContainer.className = 'session-detail-groups';
+      detailPanel.appendChild(groupsContainer);
+      this._renderDetailGroups(groupsContainer, s.sessionId, clickToCopy);
+    }
 
-    // Action buttons in detail panel (star/archive already in compact row)
-    const actionsDiv = detailPanel.querySelector('.session-detail-actions');
+    const actionsDiv = document.createElement('div'); actionsDiv.className = 'session-detail-actions';
+    detailPanel.appendChild(actionsDiv);
 
     // Rename button
     const detailRenameBtn = document.createElement('button');
@@ -876,29 +888,62 @@ class Sidebar {
       nameEl.addEventListener('dblclick', (e) => { e.stopPropagation(); this.renameSession(s.sessionId, originalName); });
     }
 
-    if (s.status === 'live' && s.webuiId) {
-      card.onclick = () => this.app.attachSession(s.webuiId, s.webuiName || displayName, s.cwd);
-    } else if (s.status === 'tmux') {
-      card.onclick = () => this.app.attachTmuxSession(s.tmuxTarget, displayName, s.cwd);
-      card.title = 'Running in tmux \u2014 click to view (closing won\'t kill it)';
-    } else if (s.status === 'external') {
-      card.style.opacity = '0.7'; card.style.cursor = 'default';
-      card.title = 'Running in unsupported terminal (PID ' + (s.pid || '?') + ')';
-    } else if (s.status === 'stopped') {
-      card.onclick = () => this.app.resumeSession(s.sessionId, s.cwd, customName || s.name);
+    const clickToExpand = settings?.get('sessionCard.clickToExpand') ?? false;
+    if (clickToExpand) {
+      // Click expands/collapses; use buttons inside detail to open/resume
+      if (s.status === 'external') {
+        card.style.opacity = '0.7';
+        card.title = 'Running in unsupported terminal (PID ' + (s.pid || '?') + ')';
+      }
+      card.onclick = (e) => {
+        if (e.target.closest('.session-detail-btn') || e.target.closest('.session-inline-btn') || e.target.closest('.session-expand-btn') || e.target.closest('.session-detail-copyable')) return;
+        if (this._expandedCardId === s.sessionId) {
+          this._expandedCardId = null;
+        } else {
+          this._expandedCardId = s.sessionId;
+        }
+        this._render();
+      };
+    } else {
+      // Default: click opens/resumes directly
+      if (s.status === 'live' && s.webuiId) {
+        card.onclick = () => this.app.attachSession(s.webuiId, s.webuiName || displayName, s.cwd);
+      } else if (s.status === 'tmux') {
+        card.onclick = () => this.app.attachTmuxSession(s.tmuxTarget, displayName, s.cwd);
+        card.title = 'Running in tmux \u2014 click to view (closing won\'t kill it)';
+      } else if (s.status === 'external') {
+        card.style.opacity = '0.7'; card.style.cursor = 'default';
+        card.title = 'Running in unsupported terminal (PID ' + (s.pid || '?') + ')';
+      } else if (s.status === 'stopped') {
+        card.onclick = () => this.app.resumeSession(s.sessionId, s.cwd, customName || s.name);
+      }
     }
     return card;
   }
 
-  _renderDetailGroups(container, sessionId) {
+  _renderDetailGroups(container, sessionId, clickToCopy) {
     container.innerHTML = '';
     const sessionGroups = this._getSessionGroups(sessionId);
     const summary = sessionGroups.length ? sessionGroups.join(', ') : 'None';
 
-    // Single row: "Groups: X, Y" + dropdown button
     const row = document.createElement('div');
     row.className = 'session-detail-row';
-    row.innerHTML = `<span class="session-detail-label">Groups</span><span class="session-detail-value" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(summary)}</span>`;
+    const lbl = document.createElement('span'); lbl.className = 'session-detail-label'; lbl.textContent = 'Groups';
+    const val = document.createElement('span'); val.className = 'session-detail-value';
+    val.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+    val.textContent = summary;
+    if (clickToCopy) {
+      val.classList.add('session-detail-copyable');
+      val.title = 'Click to copy';
+      val.onclick = (e) => {
+        e.stopPropagation();
+        navigator.clipboard.writeText(summary).then(() => {
+          const orig = val.textContent; val.textContent = 'Copied!';
+          setTimeout(() => { val.textContent = orig; }, 800);
+        }).catch(() => {});
+      };
+    }
+    row.append(lbl, val);
     const btn = document.createElement('button');
     btn.className = 'session-detail-btn';
     btn.textContent = '▾';

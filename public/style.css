@@ -164,6 +164,8 @@ html, body {
   color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   display: flex; align-items: center; gap: 4px;
 }
+.session-detail-copyable { cursor: pointer; border-radius: 2px; padding: 0 2px; transition: all 0.15s; }
+.session-detail-copyable:hover { background: var(--bg-hover); color: var(--text); }
 .session-detail-copy {
   background: none; border: none; cursor: pointer; font-size: 10px; color: var(--text-dim);
   padding: 0; line-height: 1;
