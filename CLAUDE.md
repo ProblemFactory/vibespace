@@ -57,6 +57,9 @@ src/
     app.js             — App controller (wires everything)
     utils.js           — Shared utilities (formatSize, escHtml, attachPopoverClose)
     autocomplete.js    — Shared directory autocomplete (setupDirAutocomplete)
+    settings.js        — SettingsManager (sparse storage, server persist, WS sync, event listeners)
+    settings-schema.js — Settings schema (all options with types, defaults, categories)
+    settings-ui.js     — SettingsUI (VS Code-style full settings dialog with search)
 public/
   index.html           — HTML structure
   style.css            — CSS with 6 theme variants
@@ -91,7 +94,8 @@ CLAUDE.md              — This file
 | **File upload/download** | `server.js` → `POST /api/upload`, `GET /api/download` | multer for upload |
 | **CWD autocomplete** | `server.js` → `GET /api/dir-complete` + `src/lib/app.js` → `_setupCwdAutocomplete()` | 500ms timeout, `~` expansion, debounce |
 | **Resizable panels** | `src/lib/resizer.js` | Used by sidebar (`inside: true`) and split-pane editor |
-| **Global settings** | `src/lib/app.js` → `_showGlobalSettings()` | ⚙ popover in toolbar: theme, font size, font family |
+| **Global settings** | `src/lib/app.js` → `_showGlobalSettings()` | ⚙ popover in toolbar: theme, font size, font family + "All Settings" link |
+| **Settings system** | `src/lib/settings.js` + `src/lib/settings-schema.js` + `src/lib/settings-ui.js` | Schema-driven, sparse storage, server-persisted, WS broadcast, VS Code-style UI |
 | **Per-terminal settings** | `src/lib/terminal.js` → `_showSettings()`, `applyOverride()` | ⚙ popover per window: theme/font size/font with Default option |
 | **Font discovery** | `src/lib/terminal.js` → `_buildFontList()` + `server.js` → `GET /api/fonts` | Client `queryLocalFonts()` → server `fc-list` fallback + Google Web Fonts |
 | **WebSocket protocol** | `server.js` → `wss.on('connection')` + `src/lib/ws.js` | All message types defined in server switch/case |
@@ -292,6 +296,7 @@ Split from monolithic 1647-line `src/client.js` into 13 ES modules under `src/li
 - `POST /api/layouts-autosave` — save workspace state
 - `POST /api/editor/open` — editor helper HTTP→WebSocket bridge
 - `POST /api/editor/signal` — signal editor completion
+- `GET /api/settings` / `POST /api/settings` / `PATCH /api/settings` — schema-driven settings (sparse storage, broadcasts `settings-updated`)
 - `GET /api/user-state` / `POST /api/user-state` — unified star/archive/rename/groups state (broadcasts to all WS clients)
 - `POST /api/session-groups/create|delete|rename|assign|unassign` — session group CRUD
 - `GET /api/bookmarks` / `POST /api/bookmarks` — file explorer bookmarks (broadcasts to all WS clients)
@@ -299,7 +304,7 @@ Split from monolithic 1647-line `src/client.js` into 13 ES modules under `src/li
 
 ### WebSocket Protocol (`/ws`)
 Client → Server: `create`, `input`, `resize`, `attach`, `kill`, `tmux-attach`
-Server → Client: `created`, `output`, `exited`, `attached`, `active-sessions`, `editor-open`, `editor-close`, `effective-size`, `user-state-updated`, `bookmarks-updated`, `error`
+Server → Client: `created`, `output`, `exited`, `attached`, `active-sessions`, `editor-open`, `editor-close`, `effective-size`, `user-state-updated`, `bookmarks-updated`, `settings-updated`, `error`
 
 ## Features Summary
 
