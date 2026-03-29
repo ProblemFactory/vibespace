@@ -7,14 +7,19 @@ A web-based UI for managing multiple [Claude Code](https://docs.anthropic.com/en
 ## Features
 
 - **Multi-session terminals** with dtach persistence (survive server restarts)
-- **Tiling window manager** with drag/resize, grid snap, edge snap, custom grid presets
-- **File explorer** with list/icon views, drag-to-terminal, upload/download
+- **Tiling window manager** with drag/resize, grid snap, edge snap, custom grid presets, command mode (Ctrl+\\)
+- **Session groups**: Folders | Groups dual tab, folder linking, drag sessions/folders to groups, right-click context menu
+- **Session management**: star/archive, rename, status filters, quick tabs, clickBehavior (focus/expand/flash)
+- **File explorer** with list/icon views, drag-to-terminal, upload/download, bookmarks (drag-reorder, right-click), "Add to group" on folders
+- **File viewers**: PDF, images (zoom + pan), video, audio, CSV, Excel, Word, Markdown (preview/edit/split), hex
 - **Code editor** (CodeMirror 6) with syntax highlighting, Ctrl+G split-pane integration
+- **Embedded browser** with URL bar and node-unblocker proxy mode for iframe-restricted sites
 - **6 color themes**: Dark, Light, Dracula, Nord, Solarized, Monokai
+- **Settings system**: VS Code-style UI, per-terminal overrides (theme/font/size), active window highlight intensity
 - **Session discovery**: auto-detects running Claude Code sessions (tmux, dtach, external)
 - **Multi-device sync**: share terminal sessions across browsers, auto-resize to smallest client
 - **Clipboard image paste**: Ctrl+V images from your local clipboard into Claude Code
-- **Layout persistence**: auto-save/restore window positions, named layouts
+- **Presets**: save/restore full workspace state (windows, positions, grid, theme, fonts)
 - **Rate limit monitoring**: 5-hour and 7-day usage display from Anthropic API
 
 ## Quick Install
