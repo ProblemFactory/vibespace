@@ -655,8 +655,6 @@ class App {
       term.dispose(); this.sessions.delete(winInfo.id); this._checkWelcome();
     };
     winInfo._notifyChanged = () => this.updateTaskbar();
-    // Give terminal access to settings
-    term._settings = this.settings;
   }
 
   // Find existing window for a server session ID and focus it

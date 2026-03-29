@@ -4,5 +4,7 @@ data/sockets/
 data/session-meta/
 data/session-buffers/
 data/layouts.json
+data/settings.json
+data/user-state.json
 data/bin/code
 *.nfs*
