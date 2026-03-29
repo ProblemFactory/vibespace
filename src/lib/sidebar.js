@@ -807,11 +807,12 @@ class Sidebar {
       const row = document.createElement('div'); row.className = 'session-detail-row';
       const lbl = document.createElement('span'); lbl.className = 'session-detail-label'; lbl.textContent = f.label;
       const val = document.createElement('span'); val.className = 'session-detail-value';
-      if (truncation === 'left') val.style.direction = 'rtl'; // rtl truncates from left, showing the end
       if (f.badge) {
         val.innerHTML = `<span class="session-card-badge ${badge.cls}">${badge.text}</span>`;
       } else {
         val.textContent = f.display;
+        val.style.display = 'block'; // block needed for text-overflow + direction to work
+        if (truncation === 'left') val.style.direction = 'rtl';
       }
       if (clickToCopy) {
         val.classList.add('session-detail-copyable');
