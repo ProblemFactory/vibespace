@@ -119,6 +119,41 @@ const SETTINGS_SCHEMA = {
     category: 'Sidebar', liveApply: false,
   },
 
+  // ── Session Card ──
+  'sessionCard.clickToExpand': {
+    type: 'boolean', default: false, label: 'Click to expand (not open)',
+    description: 'Single-click expands session card details instead of opening/resuming the session',
+    category: 'Session Card', liveApply: false,
+  },
+  'sessionCard.clickToCopy': {
+    type: 'boolean', default: false, label: 'Click detail values to copy',
+    description: 'Click on ID, Path, Time, or Groups values to copy them to clipboard',
+    category: 'Session Card', liveApply: false,
+  },
+  'sessionCard.visibleFields': {
+    type: 'multiSelect', default: ['id', 'cwd', 'started', 'status', 'groups'],
+    options: [
+      { value: 'id', label: 'Session ID' },
+      { value: 'cwd', label: 'Working Directory' },
+      { value: 'started', label: 'Started Time' },
+      { value: 'status', label: 'Status' },
+      { value: 'groups', label: 'Groups' },
+    ],
+    label: 'Visible detail fields',
+    description: 'Choose which fields to show in the expanded session card',
+    category: 'Session Card', liveApply: false,
+  },
+  'sessionCard.detailTruncation': {
+    type: 'enum', default: 'left',
+    options: [
+      { value: 'left', label: 'Truncate left (show end)' },
+      { value: 'right', label: 'Truncate right (show start)' },
+    ],
+    label: 'Detail value truncation',
+    description: 'When text overflows, truncate from the left (shows filename) or right (shows path start)',
+    category: 'Session Card', liveApply: false,
+  },
+
   // ── File Explorer ──
   'fileExplorer.defaultSort': {
     type: 'enum', default: 'name',
@@ -165,6 +200,7 @@ const SETTINGS_CATEGORIES = [
   'Window',
   'Terminal',
   'Sidebar',
+  'Session Card',
   'File Explorer',
   'Hotkeys',
   'Themes',

@@ -27,6 +27,11 @@ class SettingsManager {
       this._loadFromLocalStorage();
     }
     this._loaded = true;
+    // Notify all listeners for loaded values (they may differ from defaults)
+    for (const path of Object.keys(this._values)) {
+      const schema = SETTINGS_SCHEMA[path];
+      if (schema) this._notify(path, this._values[path], schema.default);
+    }
   }
 
   _loadFromLocalStorage() {
