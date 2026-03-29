@@ -792,7 +792,7 @@ class Sidebar {
     const settings = this.app.settings;
     const visibleFields = settings?.get('sessionCard.visibleFields') ?? ['id', 'cwd', 'started', 'status', 'groups'];
     const clickToCopy = settings?.get('sessionCard.clickToCopy') ?? false;
-    const alignment = settings?.get('sessionCard.detailAlignment') ?? 'right';
+    const truncation = settings?.get('sessionCard.detailTruncation') ?? 'left';
     const cwdShort = (s.cwd || '').replace(/^\/home\/[^/]+/, '~').replace(/^\/Users\/[^/]+/, '~');
 
     const fields = [
@@ -805,10 +805,9 @@ class Sidebar {
     for (const f of fields) {
       if (!visibleFields.includes(f.key)) continue;
       const row = document.createElement('div'); row.className = 'session-detail-row';
-      if (alignment === 'left') row.style.flexDirection = 'row-reverse';
       const lbl = document.createElement('span'); lbl.className = 'session-detail-label'; lbl.textContent = f.label;
       const val = document.createElement('span'); val.className = 'session-detail-value';
-      if (alignment === 'left') { val.style.textAlign = 'left'; val.style.direction = 'ltr'; }
+      if (truncation === 'left') val.style.direction = 'rtl'; // rtl truncates from left, showing the end
       if (f.badge) {
         val.innerHTML = `<span class="session-card-badge ${badge.cls}">${badge.text}</span>`;
       } else {

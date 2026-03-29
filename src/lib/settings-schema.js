@@ -143,14 +143,14 @@ const SETTINGS_SCHEMA = {
     description: 'Choose which fields to show in the expanded session card',
     category: 'Session Card', liveApply: false,
   },
-  'sessionCard.detailAlignment': {
-    type: 'enum', default: 'right',
+  'sessionCard.detailTruncation': {
+    type: 'enum', default: 'left',
     options: [
-      { value: 'left', label: 'Values on left' },
-      { value: 'right', label: 'Values on right' },
+      { value: 'left', label: 'Truncate left (show end)' },
+      { value: 'right', label: 'Truncate right (show start)' },
     ],
-    label: 'Detail value alignment',
-    description: 'Align detail values to the left or right side of the card',
+    label: 'Detail value truncation',
+    description: 'When text overflows, truncate from the left (shows filename) or right (shows path start)',
     category: 'Session Card', liveApply: false,
   },
 
