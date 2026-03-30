@@ -987,6 +987,7 @@ class App {
           }),
           parent: editorBody,
         });
+        setTimeout(() => editorView.focus(), 50);
 
         // Wire up editor settings buttons
         btnWrap.onclick = () => {
