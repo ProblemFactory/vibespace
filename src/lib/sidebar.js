@@ -660,20 +660,25 @@ class Sidebar {
         this._showGroupContextMenu(e.clientX, e.clientY, groupName);
       });
 
-      // Drop target: accept folders from file explorer and sessions from sidebar
-      header.addEventListener('dragover', (e) => {
-        if (e.dataTransfer.types.includes('application/x-folder-path') || e.dataTransfer.types.includes('application/x-session-id')) {
-          e.preventDefault(); header.classList.add('drop-target');
-        }
-      });
-      header.addEventListener('dragleave', () => header.classList.remove('drop-target'));
-      header.addEventListener('drop', (e) => {
-        e.preventDefault(); header.classList.remove('drop-target');
-        const folderPath = e.dataTransfer.getData('application/x-folder-path');
-        const sessionId = e.dataTransfer.getData('application/x-session-id');
-        if (folderPath) this._addFolderToGroup(folderPath, groupName);
-        else if (sessionId) this._assignSessionToGroup(sessionId, groupName);
-      });
+      // Drop target on entire group (header + expanded session area)
+      const _setupGroupDrop = (el) => {
+        el.addEventListener('dragover', (e) => {
+          if (e.dataTransfer.types.includes('application/x-folder-path') || e.dataTransfer.types.includes('application/x-session-id')) {
+            e.preventDefault(); e.stopPropagation(); header.classList.add('drop-target');
+          }
+        });
+        el.addEventListener('dragleave', (e) => {
+          if (!groupEl.contains(e.relatedTarget)) header.classList.remove('drop-target');
+        });
+        el.addEventListener('drop', (e) => {
+          e.preventDefault(); e.stopPropagation(); header.classList.remove('drop-target');
+          const folderPath = e.dataTransfer.getData('application/x-folder-path');
+          const sessionId = e.dataTransfer.getData('application/x-session-id');
+          if (folderPath) this._addFolderToGroup(folderPath, groupName);
+          else if (sessionId) this._assignSessionToGroup(sessionId, groupName);
+        });
+      };
+      _setupGroupDrop(groupEl);
 
       header.onclick = (e) => {
         if (e.target.closest('.folder-add-btn')) return;
