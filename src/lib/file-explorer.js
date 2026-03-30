@@ -422,7 +422,16 @@ class FileExplorer {
     try {
       this._renderLimit = 100; // reset batch on navigation
       const res = await fetch(`/api/files?path=${encodeURIComponent(dirPath)}`);
-      const data = await res.json(); if (data.error) throw new Error(data.error);
+      const data = await res.json();
+      if (data.error) {
+        // If path is a file (not a directory), open it in a viewer
+        const infoRes = await fetch(`/api/file/info?path=${encodeURIComponent(dirPath)}`);
+        if (infoRes.ok) {
+          const info = await infoRes.json();
+          if (!info.isDirectory) { this.app.openFile(dirPath, dirPath.split('/').pop()); return; }
+        }
+        throw new Error(data.error);
+      }
       this.currentPath = data.path; this.pathInput.value = data.path; this.items = data.items;
       this.winInfo._explorerPath = data.path; // for layout persistence
       const maxLen = 40;

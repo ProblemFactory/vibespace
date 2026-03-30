@@ -119,6 +119,10 @@ class TerminalSession {
         pasteTarget.focus();
         return false;
       }
+      // Ctrl+G: if split-pane editor is open, trigger Save & Close
+      if ((e.ctrlKey || e.metaKey) && e.key === 'g') {
+        if (this.winInfo?._editorDoSave) { this.winInfo._editorDoSave(); return false; }
+      }
       // Ctrl+C / Cmd+C with selection: copy to clipboard (fallback for HTTP)
       if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
         const sel = this.terminal.getSelection();

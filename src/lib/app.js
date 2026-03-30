@@ -1018,6 +1018,7 @@ class App {
           } catch {}
           // Remove editor pane + resizer, restore terminal to full height
           targetWinInfo._editorState = null;
+          targetWinInfo._editorDoSave = null;
           editorView.destroy();
           splitResizer.destroy();
           editorPane.remove();
@@ -1038,6 +1039,7 @@ class App {
         };
 
         saveBtn.onclick = doSave;
+        targetWinInfo._editorDoSave = doSave;
       });
   }
 
