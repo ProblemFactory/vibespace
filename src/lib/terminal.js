@@ -72,7 +72,18 @@ class TerminalSession {
     const effectiveFontSize = this.overrides.fontSize || parseInt(localStorage.getItem('termFontSize')) || 14;
     const effectiveFont = this.overrides.fontFamily || localStorage.getItem('termFontFamily') || getAvailableFonts()[0]?.value || 'monospace';
 
-    const mcr = this._settings?.get('terminal.minimumContrastRatio') ?? 1;
+    // Auto-detect light backgrounds and enforce minimum contrast if user hasn't set it
+    let mcr = this._settings?.get('terminal.minimumContrastRatio') ?? 1;
+    if (mcr <= 1) {
+      // Check if terminal background is "light" (luminance > 0.5)
+      const bg = effectiveTheme.background || '#000000';
+      const hex = bg.replace('#', '');
+      const r = parseInt(hex.substring(0, 2), 16) / 255;
+      const g = parseInt(hex.substring(2, 4), 16) / 255;
+      const b = parseInt(hex.substring(4, 6), 16) / 255;
+      const L = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      if (L > 0.4) mcr = 4.5; // WCAG AA for light backgrounds
+    }
 
     this.terminal = new Terminal({
       cursorBlink: false, cursorStyle: 'bar', cursorInactiveStyle: 'none',
@@ -437,7 +448,20 @@ class TerminalSession {
   }
 
   updateTheme(theme) {
-    if (!this.overrides.theme) this.terminal.options.theme = theme;
+    if (!this.overrides.theme) {
+      this.terminal.options.theme = theme;
+      // Re-check minimum contrast for new theme background
+      const mcr = this._settings?.get('terminal.minimumContrastRatio') ?? 1;
+      if (mcr <= 1) {
+        const bg = theme.background || '#000000';
+        const hex = bg.replace('#', '');
+        const r = parseInt(hex.substring(0, 2), 16) / 255;
+        const g = parseInt(hex.substring(2, 4), 16) / 255;
+        const b = parseInt(hex.substring(4, 6), 16) / 255;
+        const L = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        this.terminal.options.minimumContrastRatio = L > 0.4 ? 4.5 : 1;
+      }
+    }
   }
 
   _setBell(on) {
