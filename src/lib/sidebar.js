@@ -923,6 +923,7 @@ class Sidebar {
       card.onclick = (e) => {
         if (e.target.closest('.session-detail-btn') || e.target.closest('.session-inline-btn') || e.target.closest('.session-expand-btn') || e.target.closest('.session-detail-copyable')) return;
         if (s.webuiId) this.app.flashWindow(s.webuiId);
+        else if (s.status === 'live' && s.webuiId) this.app.attachSession(s.webuiId, s.webuiName || displayName, s.cwd);
         else if (s.status === 'tmux') this.app.attachTmuxSession(s.tmuxTarget, displayName, s.cwd);
         else if (s.status === 'stopped') this.app.resumeSession(s.sessionId, s.cwd, customName || s.name);
       };
@@ -933,6 +934,9 @@ class Sidebar {
       } else if (s.status === 'tmux') {
         card.onclick = () => this.app.attachTmuxSession(s.tmuxTarget, displayName, s.cwd);
         card.title = 'Running in tmux \u2014 click to view (closing won\'t kill it)';
+      } else if (s.status === 'live') {
+        // LIVE but no window open (e.g. layout didn't restore it) — click to attach
+        card.onclick = () => this.app.attachSession(s.webuiId, s.webuiName || displayName, s.cwd);
       } else if (s.status === 'stopped') {
         card.onclick = () => this.app.resumeSession(s.sessionId, s.cwd, customName || s.name);
       }

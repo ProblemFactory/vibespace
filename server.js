@@ -67,6 +67,7 @@ function collectDescendantPids(socketPath) {
   try {
     const out = execFileSync('pgrep', ['-f', socketPath], { encoding: 'utf-8', timeout: 2000 }).trim();
     const rootPids = out.split('\n').map(l => parseInt(l.trim())).filter(Boolean);
+    for (const rp of rootPids) pids.add(rp); // include root PIDs themselves
     const queue = [...rootPids];
     while (queue.length) {
       const pid = queue.pop();
