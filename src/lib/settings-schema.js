@@ -39,6 +39,16 @@ const SETTINGS_SCHEMA = {
     description: 'Briefly scale-bounce windows when focused from sidebar or taskbar',
     category: 'Window', liveApply: true,
   },
+  'window.closeBehavior': {
+    type: 'enum', default: 'terminate',
+    options: [
+      { value: 'terminate', label: 'Terminate session' },
+      { value: 'detach', label: 'Detach (keep alive)' },
+    ],
+    label: 'Window close behavior',
+    description: 'What happens when closing a terminal window: terminate the session, or detach and keep it running',
+    category: 'Window', liveApply: true,
+  },
   'window.activeHighlightIntensity': {
     type: 'enum', default: 'normal',
     options: [

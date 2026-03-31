@@ -651,10 +651,15 @@ class App {
 
   _wireTerminalWindow(winInfo, term, sessionId, { killOnClose = true } = {}) {
     winInfo.onClose = () => {
-      if (killOnClose) this.ws.send({ type: 'kill', sessionId });
+      const shouldKill = killOnClose && (this.settings.get('window.closeBehavior') ?? 'terminate') === 'terminate';
+      if (shouldKill) this.ws.send({ type: 'kill', sessionId });
       term.dispose(); this.sessions.delete(winInfo.id); this._checkWelcome();
     };
     winInfo._notifyChanged = () => this.updateTaskbar();
+  }
+
+  killSession(webuiId) {
+    this.ws.send({ type: 'kill', sessionId: webuiId });
   }
 
   // Find existing window for a server session ID and focus it

@@ -892,6 +892,21 @@ class Sidebar {
       actionsDiv.appendChild(detailResumeBtn);
     }
 
+    // Terminate button (for live WebUI sessions)
+    if (s.status === 'live' && s.webuiId) {
+      const terminateBtn = document.createElement('button');
+      terminateBtn.className = 'session-detail-btn';
+      terminateBtn.style.color = 'var(--red, #e55)';
+      terminateBtn.textContent = '\u2715 Terminate';
+      terminateBtn.onclick = (e) => {
+        e.stopPropagation();
+        if (confirm('Terminate session "' + displayName + '"?')) {
+          this.app.killSession(s.webuiId);
+        }
+      };
+      actionsDiv.appendChild(terminateBtn);
+    }
+
     card.appendChild(detailPanel);
 
     // Double-click name to rename (sets --name for next resume)
