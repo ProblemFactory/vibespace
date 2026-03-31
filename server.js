@@ -200,42 +200,6 @@ function restoreSessions() {
 
   // Populate webuiPids cache after all sessions are restored
   refreshWebuiPids();
-
-  // Backfill childPid for sessions whose pty-wrapper metadata is missing it
-  // (legacy sessions started before pty-wrapper wrote childPid)
-  for (const [id, s] of activeSessions) {
-    if (s._childPid) continue; // already have it
-    const metaPath = path.join(BUFFERS_DIR, id + '.json');
-    try {
-      const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
-      if (meta.childPid) continue; // already in file
-      // Fallback: use pgrep to find child PID and write it to metadata
-      if (s.socketPath) {
-        try {
-          const out = execFileSync('pgrep', ['-f', s.socketPath], { encoding: 'utf-8', timeout: 2000 }).trim();
-          const rootPids = out.split('\n').map(l => parseInt(l.trim())).filter(Boolean);
-          // Find the deepest child (claude process) via pgrep -P chain
-          let candidates = [...rootPids];
-          for (const rp of rootPids) {
-            try {
-              const children = execFileSync('pgrep', ['-P', String(rp)], { encoding: 'utf-8', timeout: 2000 }).trim();
-              for (const c of children.split('\n')) { const p = parseInt(c.trim()); if (p) candidates.push(p); }
-            } catch {}
-          }
-          // Add all found PIDs to webuiPids and write childPid to metadata
-          for (const p of candidates) webuiPids.add(p);
-          // The last candidate is typically the claude process
-          const claudePid = candidates.find(p => isProcessClaude(p)) || candidates[candidates.length - 1];
-          if (claudePid) {
-            meta.childPid = claudePid;
-            fs.writeFileSync(metaPath, JSON.stringify(meta));
-            s._childPid = claudePid;
-            console.log(`  ↳ Backfilled childPid=${claudePid} for ${id}`);
-          }
-        } catch {}
-      }
-    } catch {}
-  }
 }
 
 // ── Create editor helper script ──
