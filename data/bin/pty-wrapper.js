@@ -30,9 +30,9 @@ if (!bufferFile || !cmd) {
   process.exit(1);
 }
 
-// Write metadata for server recovery
-const meta = { pid: process.pid, startedAt: Date.now() };
+// Write initial metadata
 try { fs.mkdirSync(path.dirname(metaFile), { recursive: true }); } catch {}
+const meta = { pid: process.pid, startedAt: Date.now() };
 try { fs.writeFileSync(metaFile, JSON.stringify(meta)); } catch (e) { log(`meta write failed: ${e.message}`); }
 
 // Spawn child with PTY
@@ -46,6 +46,9 @@ try {
     env: process.env,
   });
   log(`Spawned child PID=${child.pid}`);
+  // Update metadata with child PID — server reads this for direct PID matching
+  meta.childPid = child.pid;
+  try { fs.writeFileSync(metaFile, JSON.stringify(meta)); } catch {}
 } catch (err) {
   log(`Failed to spawn: ${err.message}\ncmd=${cmd}\nargs=${JSON.stringify(args)}`);
   process.exit(1);

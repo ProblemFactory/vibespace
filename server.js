@@ -60,38 +60,19 @@ const { execFileSync, spawn } = require('child_process');
 function ensureDir(dir) { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); }
 
 // ── Cached webuiPids (PIDs managed by webui dtach sessions) ──
+// Built from pty-wrapper metadata files (childPid), no pgrep/process-tree traversal needed.
 const webuiPids = new Set();
-
-function collectDescendantPids(socketPath) {
-  const pids = new Set();
-  try {
-    const out = execFileSync('pgrep', ['-f', socketPath], { encoding: 'utf-8', timeout: 2000 }).trim();
-    const rootPids = out.split('\n').map(l => parseInt(l.trim())).filter(Boolean);
-    for (const rp of rootPids) pids.add(rp); // include root PIDs themselves
-    const queue = [...rootPids];
-    while (queue.length) {
-      const pid = queue.pop();
-      try {
-        // macOS ps uses -o ppid= not --ppid; use pgrep -P instead (cross-platform)
-        const children = execFileSync('pgrep', ['-P', String(pid)], { encoding: 'utf-8', timeout: 2000 });
-        for (const cl of children.trim().split('\n')) {
-          const cpid = parseInt(cl.trim());
-          if (cpid && !pids.has(cpid)) { pids.add(cpid); queue.push(cpid); }
-        }
-      } catch {}
-    }
-  } catch {}
-  return pids;
-}
 
 function refreshWebuiPids() {
   webuiPids.clear();
-  for (const [, s] of activeSessions) {
-    if (s.socketPath) {
-      for (const pid of collectDescendantPids(s.socketPath)) {
-        webuiPids.add(pid);
-      }
-    }
+  for (const [id, s] of activeSessions) {
+    // Read childPid from pty-wrapper's metadata file
+    try {
+      const metaPath = path.join(BUFFERS_DIR, id + '.json');
+      const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+      if (meta.childPid) { webuiPids.add(meta.childPid); s._childPid = meta.childPid; }
+      if (meta.pid) { webuiPids.add(meta.pid); } // wrapper PID too
+    } catch {}
   }
 }
 
@@ -219,6 +200,42 @@ function restoreSessions() {
 
   // Populate webuiPids cache after all sessions are restored
   refreshWebuiPids();
+
+  // Backfill childPid for sessions whose pty-wrapper metadata is missing it
+  // (legacy sessions started before pty-wrapper wrote childPid)
+  for (const [id, s] of activeSessions) {
+    if (s._childPid) continue; // already have it
+    const metaPath = path.join(BUFFERS_DIR, id + '.json');
+    try {
+      const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+      if (meta.childPid) continue; // already in file
+      // Fallback: use pgrep to find child PID and write it to metadata
+      if (s.socketPath) {
+        try {
+          const out = execFileSync('pgrep', ['-f', s.socketPath], { encoding: 'utf-8', timeout: 2000 }).trim();
+          const rootPids = out.split('\n').map(l => parseInt(l.trim())).filter(Boolean);
+          // Find the deepest child (claude process) via pgrep -P chain
+          let candidates = [...rootPids];
+          for (const rp of rootPids) {
+            try {
+              const children = execFileSync('pgrep', ['-P', String(rp)], { encoding: 'utf-8', timeout: 2000 }).trim();
+              for (const c of children.split('\n')) { const p = parseInt(c.trim()); if (p) candidates.push(p); }
+            } catch {}
+          }
+          // Add all found PIDs to webuiPids and write childPid to metadata
+          for (const p of candidates) webuiPids.add(p);
+          // The last candidate is typically the claude process
+          const claudePid = candidates.find(p => isProcessClaude(p)) || candidates[candidates.length - 1];
+          if (claudePid) {
+            meta.childPid = claudePid;
+            fs.writeFileSync(metaPath, JSON.stringify(meta));
+            s._childPid = claudePid;
+            console.log(`  ↳ Backfilled childPid=${claudePid} for ${id}`);
+          }
+        } catch {}
+      }
+    } catch {}
+  }
 }
 
 // ── Create editor helper script ──
@@ -991,14 +1008,16 @@ app.get('/api/sessions', (req, res) => {
     // Step 1: Scan lock files + tmux panes → build map of RUNNING sessions
     // Build webuiPid → claudeSessionId map for precise JSONL matching
     const webuiPidToSessionId = new Map();
-    for (const [, s] of activeSessions) {
+    for (const [id, s] of activeSessions) {
       if (s.claudeSessionId) {
-        // Find which PID in webuiPids belongs to this active session
-        if (s.socketPath) {
-          for (const pid of collectDescendantPids(s.socketPath)) {
-            webuiPidToSessionId.set(pid, s.claudeSessionId);
-          }
-        }
+        // Use stored childPid from pty-wrapper metadata (no process tree traversal)
+        if (s._childPid) webuiPidToSessionId.set(s._childPid, s.claudeSessionId);
+        // Also map wrapper PID for completeness
+        try {
+          const meta = JSON.parse(fs.readFileSync(path.join(BUFFERS_DIR, id + '.json'), 'utf-8'));
+          if (meta.childPid) webuiPidToSessionId.set(meta.childPid, s.claudeSessionId);
+          if (meta.pid) webuiPidToSessionId.set(meta.pid, s.claudeSessionId);
+        } catch {}
       }
     }
 
@@ -1235,8 +1254,8 @@ wss.on('connection', (ws) => {
           setTimeout(() => tryCapture(15), 2000);
         }
 
-        // Schedule delayed webuiPids refresh (child processes need time to start)
-        setTimeout(refreshWebuiPids, 3000);
+        // Read childPid from pty-wrapper metadata after it has time to spawn
+        setTimeout(() => refreshWebuiPids(), 3000);
 
         ws.send(JSON.stringify({ type: 'created', sessionId: id, name: session.name, cwd }));
         broadcastActiveSessions();
