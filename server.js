@@ -70,8 +70,16 @@ function refreshWebuiPids() {
     try {
       const metaPath = path.join(BUFFERS_DIR, id + '.json');
       const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
-      if (meta.childPid) { webuiPids.add(meta.childPid); s._childPid = meta.childPid; }
-      if (meta.pid) { webuiPids.add(meta.pid); } // wrapper PID too
+      if (meta.childPid) {
+        webuiPids.add(meta.childPid);
+        s._childPid = meta.childPid;
+        // Also add direct children of childPid (claude forks from node-pty spawn)
+        try {
+          const ch = execFileSync('pgrep', ['-P', String(meta.childPid)], { encoding: 'utf-8', timeout: 2000 }).trim();
+          for (const line of ch.split('\n')) { const p = parseInt(line.trim()); if (p) webuiPids.add(p); }
+        } catch {}
+      }
+      if (meta.pid) { webuiPids.add(meta.pid); }
     } catch {}
   }
 }
@@ -1004,14 +1012,14 @@ app.get('/api/sessions', (req, res) => {
     const webuiPidToSessionId = new Map();
     for (const [id, s] of activeSessions) {
       if (s.claudeSessionId) {
-        // Use stored childPid from pty-wrapper metadata (no process tree traversal)
-        if (s._childPid) webuiPidToSessionId.set(s._childPid, s.claudeSessionId);
-        // Also map wrapper PID for completeness
-        try {
-          const meta = JSON.parse(fs.readFileSync(path.join(BUFFERS_DIR, id + '.json'), 'utf-8'));
-          if (meta.childPid) webuiPidToSessionId.set(meta.childPid, s.claudeSessionId);
-          if (meta.pid) webuiPidToSessionId.set(meta.pid, s.claudeSessionId);
-        } catch {}
+        // Map childPid + its direct children (claude forks from node-pty spawn)
+        if (s._childPid) {
+          webuiPidToSessionId.set(s._childPid, s.claudeSessionId);
+          try {
+            const ch = execFileSync('pgrep', ['-P', String(s._childPid)], { encoding: 'utf-8', timeout: 2000 }).trim();
+            for (const line of ch.split('\n')) { const p = parseInt(line.trim()); if (p) webuiPidToSessionId.set(p, s.claudeSessionId); }
+          } catch {}
+        }
       }
     }
 
