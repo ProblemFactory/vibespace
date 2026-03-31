@@ -971,6 +971,17 @@ function extractSessionMeta(filePath) {
   return meta;
 }
 
+// Kill an external/tmux session by PID (not managed by WebUI WebSocket)
+app.post('/api/kill-pid', (req, res) => {
+  const { pid } = req.body;
+  if (!pid || typeof pid !== 'number') return res.status(400).json({ error: 'pid required' });
+  try {
+    if (!isProcessClaude(pid)) return res.status(400).json({ error: 'PID is not a claude process' });
+    process.kill(pid, 'SIGTERM');
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/api/sessions', (req, res) => {
   try {
     const projectsDir = path.join(os.homedir(), '.claude', 'projects');

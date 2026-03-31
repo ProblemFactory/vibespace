@@ -892,17 +892,17 @@ class Sidebar {
       actionsDiv.appendChild(detailResumeBtn);
     }
 
-    // Terminate button (for live WebUI sessions)
-    if (s.status === 'live' && s.webuiId) {
+    // Terminate button (for any running session)
+    if (s.status !== 'stopped') {
       const terminateBtn = document.createElement('button');
       terminateBtn.className = 'session-detail-btn';
       terminateBtn.style.color = 'var(--red, #e55)';
       terminateBtn.textContent = '\u2715 Terminate';
       terminateBtn.onclick = (e) => {
         e.stopPropagation();
-        if (confirm('Terminate session "' + displayName + '"?')) {
-          this.app.killSession(s.webuiId);
-        }
+        if (!confirm('Terminate session "' + displayName + '"?')) return;
+        if (s.webuiId) this.app.killSession(s.webuiId);
+        else if (s.pid) this.app.killPid(s.pid);
       };
       actionsDiv.appendChild(terminateBtn);
     }

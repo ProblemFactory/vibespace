@@ -662,6 +662,10 @@ class App {
     this.ws.send({ type: 'kill', sessionId: webuiId });
   }
 
+  async killPid(pid) {
+    await fetch('/api/kill-pid', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid }) });
+  }
+
   // Find existing window for a server session ID and focus it
   _focusExistingSession(serverId) {
     for (const [winId, term] of this.sessions) {
