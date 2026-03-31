@@ -52,7 +52,7 @@ Configurable via Settings > Session Card > **Card click behavior**:
 Click the ▸ arrow to expand any card. The detail panel shows:
 - Session ID, working directory, start time, status
 - Groups membership
-- Action buttons: Rename, Find, Attach/Resume
+- Action buttons: Rename, Find, Attach/Resume, Terminate (red, with confirmation)
 
 Configure visible fields via Settings > Session Card > **Visible detail fields**.
 

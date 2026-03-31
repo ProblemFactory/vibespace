@@ -8,8 +8,10 @@ When Claude Code prompts you to edit a file (via `Ctrl+G`), the WebUI opens a sp
 2. The WebUI intercepts this via a fake `code` script that mimics VS Code
 3. The terminal window splits: **terminal on top**, **CodeMirror editor on bottom**
 4. Claude Code shows "Save and close editor to continue..." in the terminal
-5. Edit the file, then click **"Save & Close"**
+5. Edit the file, then click **"Save & Close"** or press **Ctrl+G** again
 6. Claude reads the edited file and continues
+
+The editor auto-focuses on open, so you can start typing immediately. Ctrl+G toggles the editor: first press opens it, second press saves and closes.
 
 ### Why "code"?
 

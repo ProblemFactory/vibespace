@@ -95,6 +95,15 @@ Terminal fonts are discovered dynamically:
 
 Since the terminal renders in the browser, client-side fonts are what matter, not server fonts.
 
+## Minimum Contrast Ratio
+
+For light terminal backgrounds, xterm.js's `minimumContrastRatio` is automatically set to **4.5** (WCAG AA). This adjusts any foreground color (including RGB escape sequences from Claude Code's diff rendering) that doesn't meet the contrast threshold against the background.
+
+- **Light backgrounds** (luminance > 0.4): auto-enabled at 4.5
+- **Dark backgrounds**: disabled (ratio = 1) — dark themes have sufficient contrast by design
+- Applied on terminal creation and on theme switch
+- Override via Settings > Terminal > **Minimum contrast ratio**
+
 ## Drag-to-Terminal
 
 Drag a file from the file explorer and drop it on a terminal window. The shell-escaped absolute path is automatically typed into the terminal.

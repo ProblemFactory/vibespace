@@ -154,7 +154,7 @@ docs/
 - Metadata in `data/session-meta/<sockName>.json`
 - Output buffer in `data/session-buffers/<sessionId>.buf` (written by pty-wrapper, survives server restart)
 
-**PTY Wrapper** (`data/bin/pty-wrapper.js`): Runs inside dtach, uses node-pty to spawn claude. Tees all output to stdout (dtach PTY) + buffer file. Survives server restarts — dtach keeps the wrapper alive, wrapper keeps writing the buffer. On server restart, `restoreSessions()` reads the buffer file to recover terminal content.
+**PTY Wrapper** (`data/bin/pty-wrapper.js`): Runs inside dtach, uses node-pty to spawn claude. Tees all output to stdout (dtach PTY) + buffer file. Writes `childPid` to metadata file for server-side PID tracking (no pgrep needed). Survives server restarts — dtach keeps the wrapper alive, wrapper keeps writing the buffer. On server restart, `restoreSessions()` reads the buffer file to recover terminal content and the metadata file to recover PID mappings.
 
 **Why dtach -c not dtach -n**: `dtach -n` creates a detached session — initial output is LOST because dtach doesn't buffer when no one is attached. `dtach -c` creates AND immediately attaches, so output flows through from the start.
 
@@ -317,6 +317,7 @@ Split from monolithic 1647-line `src/client.js` into 13 ES modules under `src/li
 - `GET /api/user-state` / `POST /api/user-state` — unified star/archive/rename/groups state (broadcasts to all WS clients)
 - `POST /api/session-groups/create|delete|rename|assign|unassign` — session group CRUD
 - `GET /api/bookmarks` / `POST /api/bookmarks` — file explorer bookmarks (broadcasts to all WS clients)
+- `POST /api/kill-pid` — kill an external/tmux claude process by PID (validates `isProcessClaude` before SIGTERM)
 - `GET /proxy/<url>` — full-rewriting web proxy via node-unblocker (HTML/CSS URL rewrite, JS XHR/WS rewrite, header stripping)
 
 ### WebSocket Protocol (`/ws`)
@@ -338,7 +339,8 @@ Server → Client: `created`, `output`, `exited`, `attached`, `active-sessions`,
 - Clipboard image paste: Ctrl+V with image in clipboard → saves to temp file → sets server X clipboard via `cat | xclip` pipe → sends Ctrl+V (0x16) to PTY → Claude Code checks clipboard and reads image
 - CJK support: Unicode 11 addon for correct fullwidth character width calculation + CJK monospace font fallback chain
 - Multi-device sync: terminal size uses min(all clients), larger clients show padding. Editor open/close broadcasts to all clients with session targeting
-- Ctrl+G external editor with split-pane CodeMirror (screen not cleared)
+- Ctrl+G external editor with split-pane CodeMirror (screen not cleared). Press Ctrl+G again to Save & Close. Auto-focuses editor on open.
+- Minimum contrast ratio: auto-enabled at 4.5 (WCAG AA) for light terminal backgrounds, disabled for dark. Adjusts any RGB foreground color that doesn't meet threshold.
 
 ### Window Manager
 - Floating windows with drag/resize
@@ -353,6 +355,7 @@ Server → Client: `created`, `output`, `exited`, `attached`, `active-sessions`,
 - Shift+drag: select rectangular cell range in grid mode, window spans entire range
 - Presets (renamed from Layouts): save/restore full workspace state (windows, positions, z-order, grid, theme, fonts). Sessions matched by claudeSessionId. Non-preset windows minimized not killed.
 - Active window highlight intensity: `window.activeHighlightIntensity` setting (subtle = shadow only, normal = accent border, strong = border + glow)
+- Window close behavior: `window.closeBehavior` setting — terminate (default, kills session) or detach (keeps session alive for re-attach)
 
 ### Session Management
 - Unified session list grouped by working directory
@@ -371,9 +374,11 @@ Server → Client: `created`, `output`, `exited`, `attached`, `active-sessions`,
 - Group header: right-click context menu (Rename / Linked folders / Delete), drop target for folders and sessions
 - Multi-client sync: star/archive/rename/groups/bookmarks broadcast via WebSocket to all clients
 - Session rename: double-click name in sidebar → set custom name → used as `--name` on next resume, syncs to open windows
+- Terminate button: in session card expand panel for all running sessions (live/tmux/external). Live uses WebSocket kill, external/tmux uses `POST /api/kill-pid`
 
 ### File Management
 - File explorer with upload/download/drag-drop, title shows current path (front-truncated)
+- Path bar: autocomplete (Tab/Enter), submit file path to open it directly in viewer
 - Path autocomplete in address bar (Tab/Enter to select, reuses `/api/dir-complete`)
 - Drag file from explorer to terminal → auto-types shell-escaped absolute path
 - View modes: list (with size/modified columns, sortable) and icon grid
@@ -390,7 +395,7 @@ Server → Client: `created`, `output`, `exited`, `attached`, `active-sessions`,
 - All windows (file explorer, viewers, editors, browser) persist and restore on page refresh
 
 ### UI
-- 6 color themes: Dark, Light, Dracula, Nord, Solarized, Monokai
+- 6 color themes: Dark, Light, Dracula, Nord, Solarized, Monokai — all contrast-audited (terminal ANSI colors + UI chrome `--text-dim`/`--text-secondary`)
 - Global settings popover (⚙ in toolbar): theme, font size, font family
 - Resizable sidebar (drag right edge)
 - Usage bar in taskbar (5h + 7d rate limits from Anthropic API)
@@ -422,7 +427,7 @@ Server → Client: `created`, `output`, `exited`, `attached`, `active-sessions`,
 - White screen on resume: `dtach -n` loses initial output (no buffering when detached) → switched to `dtach -c` (create+attach). Also added `pty-wrapper.js` inside dtach for persistent buffering.
 - Output lost on server restart: server-side buffer only exists in memory → `pty-wrapper.js` runs inside dtach independently, writes buffer to file continuously, survives server restarts
 - Session kill leaves orphans: old kill only killed `dtach -a` (attach PTY), not `dtach -n` (session) → now uses `pgrep -f <socketPath>` to find and SIGTERM the dtach session process
-- WebUI dtach sessions show as EXTERNAL: `/api/sessions` didn't check if PID was a webui-managed dtach child → added `webuiPids` detection via `pgrep -f <socketPath>` + recursive `ps --ppid` to find all descendants (dtach → pty-wrapper → claude)
+- WebUI dtach sessions show as EXTERNAL: `/api/sessions` didn't check if PID was a webui-managed dtach child → pty-wrapper writes `childPid` to metadata file, server reads it directly + `pgrep -P childPid` for claude's forked child. No process tree traversal needed.
 - Named layout restore kills sessions: `loadNamed()` used `closeWindow()` which triggers `onClose` → kill. Fix: detach UI only (dispose terminal + remove DOM), don't send kill message. Sessions stay alive for re-attach.
 - Font switching no effect: original hardcoded fonts (Cascadia/SF Mono) not installed → Google Web Fonts + dynamic detection
 - Clipboard image paste failures: (1) `paste` event never fires — xterm.js v5 uses Clipboard API directly, bypassing paste event. Fix: `attachCustomKeyEventHandler` intercepts Ctrl+V, redirects focus to hidden contenteditable div. (2) `navigator.clipboard.read()` unavailable over HTTP. Fix: contenteditable div receives real paste event with clipboardData.items. (3) `xclip -i file` unreliable. Fix: `cat file | xclip` pipe. (4) Bracketed paste `\e[200~...\e[201~` inserts text, doesn't trigger image check. Fix: send raw Ctrl+V (`\x16`) which triggers Claude Code's Ink framework clipboard check. (5) Server polls `xclip -t TARGETS -o` to confirm clipboard ready before responding.
@@ -433,3 +438,7 @@ Server → Client: `created`, `output`, `exited`, `attached`, `active-sessions`,
 - Waiting blink on buffer restore: `_suppressWaiting` was checked but never assigned, so `suppressWaitingOnRestore` setting never worked. Fix: `app.js` sets `term._suppressWaiting = true` before buffer write, clears it in the write callback. Removed the dead setting.
 - defaultStatusFilter always uses schema default: sidebar constructor reads setting synchronously before async settings load completes. Fix: one-shot listener via `settings.on()` that applies the server value once then removes itself.
 - Dead settings in schema: removed 9 settings defined in `settings-schema.js` but never read by any code (enableAutoGrouping, enableStarredDrawer, showNewSessionCard, showRefitButton, showOverlapIndicator, flatTimeSort, suppressWaitingOnRestore, layoutBindings, colorOverrides). Removed empty Hotkeys, Themes, File Explorer categories.
+- Ctrl+G triggers browser "Find in page": `preventDefault()` on Ctrl+G in terminal. Split-pane editor uses `Prec.highest` keymap to override CodeMirror's gotoLine.
+- LIVE session not clickable / shows as EXTERNAL: `collectDescendantPids` didn't include root PIDs → replaced with PID-file approach (pty-wrapper writes childPid to metadata).
+- Theme contrast — terminal: light theme had 7 invisible ANSI colors (white, brightWhite, brightYellow etc. on #ffffff). All 6 themes' ANSI black was near-invisible on bg. Fixed all.
+- Theme contrast — UI chrome: `--text-dim` was 1.4:1 in Nord, 2.4:1 in Solarized, 2.6:1 in Light. Used for setting descriptions, path labels. Fixed all themes to ≥4.1:1.

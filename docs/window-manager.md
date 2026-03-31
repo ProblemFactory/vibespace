@@ -112,6 +112,17 @@ When loading a preset, windows not in the preset are minimized (not closed) — 
 
 Save presets via the toolbar menu. They persist across server restarts.
 
+## Close Behavior
+
+Configure via Settings > Window > **Window close behavior**:
+
+| Mode | Close window action |
+|------|-------------------|
+| **Terminate** (default) | Kills the session (process terminated) |
+| **Detach** | Removes the window but keeps the session alive. Re-attach from the sidebar. |
+
+Regardless of this setting, you can always explicitly terminate a session via the **Terminate** button in the session card's expand panel.
+
 ## Bounce on Focus
 
 Optional: when focusing a window from the sidebar or taskbar, a brief scale-bounce animation provides visual feedback. Enable via Settings > Window > **Bounce on remote focus**.
