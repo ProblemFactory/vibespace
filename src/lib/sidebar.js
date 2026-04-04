@@ -885,17 +885,33 @@ class Sidebar {
       detailTmuxBtn.onclick = (e) => { e.stopPropagation(); this.app.attachTmuxSession(s.tmuxTarget, displayName, s.cwd); };
       actionsDiv.appendChild(detailTmuxBtn);
     } else if (s.status === 'stopped') {
-      const resumeTermBtn = document.createElement('button');
-      resumeTermBtn.className = 'session-detail-btn session-detail-btn-primary';
-      resumeTermBtn.textContent = '\u25B6 Resume in Terminal';
-      resumeTermBtn.onclick = (e) => { e.stopPropagation(); this.app.resumeSession(s.sessionId, s.cwd, customName || s.name, { mode: 'terminal' }); };
-      actionsDiv.appendChild(resumeTermBtn);
+      const defaultMode = this.app.settings.get('session.defaultMode') ?? 'terminal';
+      let resumeMode = defaultMode;
 
-      const resumeChatBtn = document.createElement('button');
-      resumeChatBtn.className = 'session-detail-btn session-detail-btn-chat';
-      resumeChatBtn.textContent = '\uD83D\uDCAC Resume in Chat';
-      resumeChatBtn.onclick = (e) => { e.stopPropagation(); this.app.resumeSession(s.sessionId, s.cwd, customName || s.name, { mode: 'chat' }); };
-      actionsDiv.appendChild(resumeChatBtn);
+      const resumeWrap = document.createElement('div');
+      resumeWrap.className = 'session-resume-split';
+
+      const resumeBtn = document.createElement('button');
+      resumeBtn.className = 'session-detail-btn ' + (resumeMode === 'chat' ? 'session-detail-btn-chat' : 'session-detail-btn-primary');
+      const updateLabel = () => {
+        resumeBtn.textContent = resumeMode === 'chat' ? '\uD83D\uDCAC Resume in Chat' : '\u25B6 Resume in Terminal';
+        resumeBtn.className = 'session-detail-btn ' + (resumeMode === 'chat' ? 'session-detail-btn-chat' : 'session-detail-btn-primary');
+      };
+      updateLabel();
+      resumeBtn.onclick = (e) => { e.stopPropagation(); this.app.resumeSession(s.sessionId, s.cwd, customName || s.name, { mode: resumeMode }); };
+
+      const dropBtn = document.createElement('button');
+      dropBtn.className = 'session-resume-drop ' + (resumeMode === 'chat' ? 'session-detail-btn-chat' : 'session-detail-btn-primary');
+      dropBtn.textContent = '\u25BE';
+      dropBtn.onclick = (e) => {
+        e.stopPropagation();
+        resumeMode = resumeMode === 'chat' ? 'terminal' : 'chat';
+        updateLabel();
+        dropBtn.className = 'session-resume-drop ' + (resumeMode === 'chat' ? 'session-detail-btn-chat' : 'session-detail-btn-primary');
+      };
+
+      resumeWrap.append(resumeBtn, dropBtn);
+      actionsDiv.appendChild(resumeWrap);
     }
 
     // Terminate button (for any running session)
