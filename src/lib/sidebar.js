@@ -23,6 +23,7 @@ class Sidebar {
     this._starredIds = new Set(JSON.parse(localStorage.getItem('starredSessions') || '[]'));
     this._archivedIds = new Set(JSON.parse(localStorage.getItem('archivedSessions') || '[]'));
     this._customNames = JSON.parse(localStorage.getItem('sessionCustomNames') || '{}');
+    this._sessionModes = JSON.parse(localStorage.getItem('sessionModes') || '{}'); // { sessionId: 'terminal'|'chat' }
     this._sessionGroups = JSON.parse(localStorage.getItem('sessionGroups') || '{}'); // { groupName: [sessionId, ...] }
     this._groupFolders = JSON.parse(localStorage.getItem('groupFolders') || '{}'); // { groupName: [folderPath, ...] }
 
@@ -118,6 +119,10 @@ class Sidebar {
       this._customNames = { ...state.customNames };
       localStorage.setItem('sessionCustomNames', JSON.stringify(state.customNames));
     }
+    if (state.sessionModes) {
+      this._sessionModes = { ...state.sessionModes };
+      localStorage.setItem('sessionModes', JSON.stringify(state.sessionModes));
+    }
     if (state.sessionGroups) {
       this._sessionGroups = { ...state.sessionGroups };
       localStorage.setItem('sessionGroups', JSON.stringify(state.sessionGroups));
@@ -133,12 +138,14 @@ class Sidebar {
       starredSessions: [...this._starredIds],
       archivedSessions: [...this._archivedIds],
       customNames: this._customNames,
+      sessionModes: this._sessionModes,
       sessionGroups: this._sessionGroups,
       groupFolders: this._groupFolders,
     };
     localStorage.setItem('starredSessions', JSON.stringify(state.starredSessions));
     localStorage.setItem('archivedSessions', JSON.stringify(state.archivedSessions));
     localStorage.setItem('sessionCustomNames', JSON.stringify(state.customNames));
+    localStorage.setItem('sessionModes', JSON.stringify(state.sessionModes));
     localStorage.setItem('sessionGroups', JSON.stringify(state.sessionGroups));
     localStorage.setItem('groupFolders', JSON.stringify(state.groupFolders));
     // Push to server (broadcasts to other clients)
@@ -215,6 +222,8 @@ class Sidebar {
   isArchived(sessionId) { return this._archivedIds.has(sessionId); }
 
   getCustomName(sessionId) { return this._customNames[sessionId] || null; }
+  getSessionMode(sessionId) { return this._sessionModes[sessionId] || null; }
+  setSessionMode(sessionId, mode) { this._sessionModes[sessionId] = mode; this._pushUserState(); }
 
   renameSession(sessionId, currentName) {
     const name = prompt('Session name (used as --name on next resume):', this._customNames[sessionId] || currentName || '');
@@ -885,29 +894,30 @@ class Sidebar {
       detailTmuxBtn.onclick = (e) => { e.stopPropagation(); this.app.attachTmuxSession(s.tmuxTarget, displayName, s.cwd); };
       actionsDiv.appendChild(detailTmuxBtn);
     } else if (s.status === 'stopped') {
+      const savedMode = this.getSessionMode(s.sessionId);
       const defaultMode = this.app.settings.get('session.defaultMode') ?? 'terminal';
-      let resumeMode = defaultMode;
+      let resumeMode = savedMode || defaultMode;
 
       const resumeWrap = document.createElement('div');
       resumeWrap.className = 'session-resume-split';
 
       const resumeBtn = document.createElement('button');
-      resumeBtn.className = 'session-detail-btn ' + (resumeMode === 'chat' ? 'session-detail-btn-chat' : 'session-detail-btn-primary');
+      const dropBtn = document.createElement('button');
       const updateLabel = () => {
-        resumeBtn.textContent = resumeMode === 'chat' ? '\uD83D\uDCAC Resume in Chat' : '\u25B6 Resume in Terminal';
-        resumeBtn.className = 'session-detail-btn ' + (resumeMode === 'chat' ? 'session-detail-btn-chat' : 'session-detail-btn-primary');
+        const isChat = resumeMode === 'chat';
+        resumeBtn.textContent = isChat ? '\uD83D\uDCAC Resume in Chat' : '\u25B6 Resume in Terminal';
+        resumeBtn.className = 'session-detail-btn ' + (isChat ? 'session-detail-btn-chat' : 'session-detail-btn-primary');
+        dropBtn.className = 'session-resume-drop ' + (isChat ? 'session-detail-btn-chat' : 'session-detail-btn-primary');
       };
       updateLabel();
       resumeBtn.onclick = (e) => { e.stopPropagation(); this.app.resumeSession(s.sessionId, s.cwd, customName || s.name, { mode: resumeMode }); };
 
-      const dropBtn = document.createElement('button');
-      dropBtn.className = 'session-resume-drop ' + (resumeMode === 'chat' ? 'session-detail-btn-chat' : 'session-detail-btn-primary');
       dropBtn.textContent = '\u25BE';
       dropBtn.onclick = (e) => {
         e.stopPropagation();
         resumeMode = resumeMode === 'chat' ? 'terminal' : 'chat';
+        this.setSessionMode(s.sessionId, resumeMode);
         updateLabel();
-        dropBtn.className = 'session-resume-drop ' + (resumeMode === 'chat' ? 'session-detail-btn-chat' : 'session-detail-btn-primary');
       };
 
       resumeWrap.append(resumeBtn, dropBtn);
