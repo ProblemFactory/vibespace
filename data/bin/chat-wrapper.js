@@ -138,7 +138,11 @@ try {
         if (child.stdin.writable) child.stdin.write(line + '\n');
       } catch {
         // Plain text — wrap as stream-json user message
-        const msg = JSON.stringify({ type: 'user', content: line });
+        // Format must match JSONL schema: {type, message: {role, content: [{type, text}]}}
+        const msg = JSON.stringify({
+          type: 'user',
+          message: { role: 'user', content: [{ type: 'text', text: line }] }
+        });
         if (child.stdin.writable) child.stdin.write(msg + '\n');
       }
     }
