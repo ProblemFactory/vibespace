@@ -439,12 +439,12 @@ class Sidebar {
       if (wm) matchedWebuiIds.add(wm.id);
       // Only upgrade to 'live' for dtach-managed sessions (not tmux/external — those keep their status)
       const status = (wm && s.status === 'stopped') ? 'live' : (wm && s.status !== 'tmux' && s.status !== 'external') ? 'live' : s.status;
-      return { ...s, status, webuiId: wm?.id || null, webuiName: wm?.name || null };
+      return { ...s, status, webuiId: wm?.id || null, webuiName: wm?.name || null, webuiMode: wm?.mode || 'terminal' };
     });
 
     for (const ws of webui) {
       if (!matchedWebuiIds.has(ws.id)) {
-        unified.unshift({ sessionId: ws.claudeSessionId || ws.id, cwd: ws.cwd, startedAt: ws.createdAt, status: 'live', webuiId: ws.id, webuiName: ws.name, name: ws.name || '' });
+        unified.unshift({ sessionId: ws.claudeSessionId || ws.id, cwd: ws.cwd, startedAt: ws.createdAt, status: 'live', webuiId: ws.id, webuiName: ws.name, name: ws.name || '', webuiMode: ws.mode || 'terminal' });
       }
     }
 
@@ -646,7 +646,7 @@ class Sidebar {
             const customName = this.getCustomName(s.sessionId);
             this.app.resumeSession(s.sessionId, s.cwd, customName || s.name);
           } else if (s.status === 'live' && s.webuiId) {
-            this.app.attachSession(s.webuiId, s.webuiName || s.name, s.cwd);
+            this.app.attachSession(s.webuiId, s.webuiName || s.name, s.cwd, { mode: s.webuiMode });
           } else if (s.status === 'tmux') {
             this.app.attachTmuxSession(s.tmuxTarget, s.name, s.cwd);
           }
@@ -876,7 +876,7 @@ class Sidebar {
       const detailAttachBtn = document.createElement('button');
       detailAttachBtn.className = 'session-detail-btn session-detail-btn-primary';
       detailAttachBtn.textContent = '\u25B6 Attach';
-      detailAttachBtn.onclick = (e) => { e.stopPropagation(); this.app.attachSession(s.webuiId, s.webuiName || displayName, s.cwd); };
+      detailAttachBtn.onclick = (e) => { e.stopPropagation(); this.app.attachSession(s.webuiId, s.webuiName || displayName, s.cwd, { mode: s.webuiMode }); };
       actionsDiv.appendChild(detailAttachBtn);
     } else if (s.status === 'tmux') {
       const detailTmuxBtn = document.createElement('button');
@@ -938,20 +938,20 @@ class Sidebar {
       card.onclick = (e) => {
         if (e.target.closest('.session-detail-btn') || e.target.closest('.session-inline-btn') || e.target.closest('.session-expand-btn') || e.target.closest('.session-detail-copyable')) return;
         if (s.webuiId) this.app.flashWindow(s.webuiId);
-        else if (s.status === 'live' && s.webuiId) this.app.attachSession(s.webuiId, s.webuiName || displayName, s.cwd);
+        else if (s.status === 'live' && s.webuiId) this.app.attachSession(s.webuiId, s.webuiName || displayName, s.cwd, { mode: s.webuiMode });
         else if (s.status === 'tmux') this.app.attachTmuxSession(s.tmuxTarget, displayName, s.cwd);
         else if (s.status === 'stopped') this.app.resumeSession(s.sessionId, s.cwd, customName || s.name);
       };
     } else {
       // Default 'focus': click opens/resumes directly
       if (s.status === 'live' && s.webuiId) {
-        card.onclick = () => this.app.attachSession(s.webuiId, s.webuiName || displayName, s.cwd);
+        card.onclick = () => this.app.attachSession(s.webuiId, s.webuiName || displayName, s.cwd, { mode: s.webuiMode });
       } else if (s.status === 'tmux') {
         card.onclick = () => this.app.attachTmuxSession(s.tmuxTarget, displayName, s.cwd);
         card.title = 'Running in tmux \u2014 click to view (closing won\'t kill it)';
       } else if (s.status === 'live') {
         // LIVE but no window open (e.g. layout didn't restore it) — click to attach
-        card.onclick = () => this.app.attachSession(s.webuiId, s.webuiName || displayName, s.cwd);
+        card.onclick = () => this.app.attachSession(s.webuiId, s.webuiName || displayName, s.cwd, { mode: s.webuiMode });
       } else if (s.status === 'stopped') {
         card.onclick = () => this.app.resumeSession(s.sessionId, s.cwd, customName || s.name);
       }

@@ -7,6 +7,7 @@ import { FileExplorer } from './file-explorer.js';
 import { FileViewer } from './file-viewer.js';
 import { CodeEditor, detectLang, getLangExtension, loadEditorSettings, saveEditorSettings, editorLightTheme } from './code-editor.js';
 import { LayoutManager } from './layout.js';
+import { ChatView } from './chat-view.js';
 import { Resizer } from './resizer.js';
 import { attachPopoverClose } from './utils.js';
 import { setupDirAutocomplete } from './autocomplete.js';
@@ -595,6 +596,7 @@ class App {
 
     document.querySelector('#dialog-new-session .btn-create').addEventListener('click', () => {
       this.createSession({
+        mode: document.getElementById('input-mode').value,
         cwd: document.getElementById('input-cwd').value.trim(),
         name: document.getElementById('input-session-name').value.trim(),
         model: document.getElementById('input-model').value,
@@ -623,26 +625,41 @@ class App {
   showNewSessionDialog() { this._showDialog('dialog-new-session'); document.getElementById('input-cwd').focus(); }
   hideDialogs() { document.getElementById('dialog-overlay').classList.add('hidden'); document.getElementById('dialog-overlay').querySelectorAll('.dialog').forEach(d => d.classList.add('hidden')); }
 
-  createSession({ cwd, name, model, permission, extraArgs, resumeId }) {
+  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode }) {
     this._hideWelcome();
+    const sessionMode = mode || 'terminal';
     const sessionName = name || (resumeId ? `Resume ${resumeId.substring(0,8)}` : `Session ${this.wm.windowCounter+1}`);
-    const winInfo = this.wm.createWindow({ title: sessionName, type: 'terminal' });
+    const winType = sessionMode === 'chat' ? 'chat' : 'terminal';
+    const titlePrefix = sessionMode === 'chat' ? '\uD83D\uDCAC ' : '';
+    const winInfo = this.wm.createWindow({ title: `${titlePrefix}${sessionName}`, type: winType });
 
     this.ws.send({
-      type:'create', cwd: cwd||undefined, sessionName: name||undefined, model: model||undefined,
+      type:'create', mode: sessionMode, cwd: cwd||undefined, sessionName: name||undefined, model: model||undefined,
       permissionMode: permission||undefined, extraArgs: extraArgs||undefined,
       resume: !!resumeId, resumeId: resumeId||undefined, cols:120, rows:30,
     });
 
     const handler = (msg) => {
       if (msg.type === 'created') {
-        const term = new TerminalSession(winInfo, this.ws, msg.sessionId, this.themeManager, (filePath, signalPath) => {
-          this._openExternalEditor(filePath, signalPath);
-        }, {}, this.settings);
-        this.sessions.set(winInfo.id, term);
-        this._wireTerminalWindow(winInfo, term, msg.sessionId);
-        this.wm.setTitle(winInfo.id, `${sessionName} — ${msg.cwd||cwd||'~'}`);
-        term.focus();
+        if (msg.mode === 'chat' || sessionMode === 'chat') {
+          const chatView = new ChatView(winInfo, this.ws, msg.sessionId, this);
+          this.sessions.set(winInfo.id, chatView);
+          winInfo.onClose = () => {
+            const shouldKill = (this.settings.get('window.closeBehavior') ?? 'terminate') === 'terminate';
+            if (shouldKill) this.ws.send({ type: 'kill', sessionId: msg.sessionId });
+            chatView.dispose(); this.sessions.delete(winInfo.id); this._checkWelcome();
+          };
+          winInfo._notifyChanged = () => this.updateTaskbar();
+          chatView.focus();
+        } else {
+          const term = new TerminalSession(winInfo, this.ws, msg.sessionId, this.themeManager, (filePath, signalPath) => {
+            this._openExternalEditor(filePath, signalPath);
+          }, {}, this.settings);
+          this.sessions.set(winInfo.id, term);
+          this._wireTerminalWindow(winInfo, term, msg.sessionId);
+          term.focus();
+        }
+        this.wm.setTitle(winInfo.id, `${titlePrefix}${sessionName} — ${msg.cwd||cwd||'~'}`);
         this.ws.offGlobal(handler);
       }
     };
@@ -679,27 +696,45 @@ class App {
     return false;
   }
 
-  attachSession(serverId, name, cwd) {
+  attachSession(serverId, name, cwd, { mode } = {}) {
     // If we already have a window for this session, just focus it
     if (this._focusExistingSession(serverId)) return null;
 
     this._hideWelcome();
-    const winInfo = this.wm.createWindow({ title: `${name} — ${cwd}`, type: 'terminal' });
+    const isChat = mode === 'chat';
+    const titlePrefix = isChat ? '\uD83D\uDCAC ' : '';
+    const winInfo = this.wm.createWindow({ title: `${titlePrefix}${name} — ${cwd}`, type: isChat ? 'chat' : 'terminal' });
 
     this.ws.send({ type: 'attach', sessionId: serverId });
 
     const handler = (msg) => {
       if (msg.type === 'attached' && msg.sessionId === serverId) {
-        const term = new TerminalSession(winInfo, this.ws, serverId, this.themeManager, (fp, sp) => this._openExternalEditor(fp, sp), {}, this.settings);
-        this.sessions.set(winInfo.id, term);
-        // Write saved buffer after terminal is fully initialized
-        if (msg.buffer) {
-          const buf = msg.buffer;
-          term._suppressWaiting = true;
-          setTimeout(() => { term.terminal.write(buf, () => { term._suppressWaiting = false; term.terminal.scrollToBottom(); term.fit(); }); }, 300);
+        if (msg.mode === 'chat' || isChat) {
+          // Chat mode: create ChatView and load history
+          const chatView = new ChatView(winInfo, this.ws, serverId, this);
+          this.sessions.set(winInfo.id, chatView);
+          if (msg.chatHistory && msg.chatHistory.length) {
+            chatView.loadHistory(msg.chatHistory);
+          }
+          winInfo.onClose = () => {
+            const shouldKill = (this.settings.get('window.closeBehavior') ?? 'terminate') === 'terminate';
+            if (shouldKill) this.ws.send({ type: 'kill', sessionId: serverId });
+            chatView.dispose(); this.sessions.delete(winInfo.id); this._checkWelcome();
+          };
+          winInfo._notifyChanged = () => this.updateTaskbar();
+          chatView.focus();
+        } else {
+          // Terminal mode (existing)
+          const term = new TerminalSession(winInfo, this.ws, serverId, this.themeManager, (fp, sp) => this._openExternalEditor(fp, sp), {}, this.settings);
+          this.sessions.set(winInfo.id, term);
+          if (msg.buffer) {
+            const buf = msg.buffer;
+            term._suppressWaiting = true;
+            setTimeout(() => { term.terminal.write(buf, () => { term._suppressWaiting = false; term.terminal.scrollToBottom(); term.fit(); }); }, 300);
+          }
+          this._wireTerminalWindow(winInfo, term, serverId);
+          term.focus();
         }
-        this._wireTerminalWindow(winInfo, term, serverId);
-        term.focus();
         this.ws.offGlobal(handler);
       }
     };
