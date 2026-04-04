@@ -960,6 +960,43 @@ function cwdToProjectDir(cwd) {
   return cwd.replace(/[/._]/g, '-');
 }
 
+// Parse a Claude session JSONL file into chat messages
+function parseSessionJsonl(claudeSessionId, cwd) {
+  const projectsDir = path.join(os.homedir(), '.claude', 'projects');
+  // Try exact project dir from cwd
+  const projDir = cwdToProjectDir(cwd || '');
+  const candidates = [];
+  if (cwd) candidates.push(path.join(projectsDir, projDir, claudeSessionId + '.jsonl'));
+  // Also scan all project dirs as fallback
+  try {
+    for (const dir of fs.readdirSync(projectsDir)) {
+      const fp = path.join(projectsDir, dir, claudeSessionId + '.jsonl');
+      if (!candidates.includes(fp)) candidates.push(fp);
+    }
+  } catch {}
+
+  for (const filePath of candidates) {
+    try {
+      if (!fs.existsSync(filePath)) continue;
+      const content = fs.readFileSync(filePath, 'utf-8');
+      const messages = [];
+      for (const line of content.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const msg = JSON.parse(trimmed);
+          // Only include user/assistant/result messages (skip system/hooks/internal)
+          if (msg.type === 'user' || msg.type === 'assistant' || msg.type === 'result') {
+            messages.push(msg);
+          }
+        } catch {}
+      }
+      return messages;
+    } catch {}
+  }
+  return [];
+}
+
 function isProcessClaude(pid) {
   try {
     const cmd = execFileSync('ps', ['-p', String(pid), '-o', 'comm='], { encoding: 'utf-8', timeout: 2000 }).trim();
@@ -1009,6 +1046,14 @@ function extractSessionMeta(filePath) {
 }
 
 // Kill an external/tmux session by PID (not managed by WebUI WebSocket)
+// Get chat message history for a Claude session (from JSONL file)
+app.get('/api/session-messages', (req, res) => {
+  const { claudeSessionId, cwd } = req.query;
+  if (!claudeSessionId) return res.status(400).json({ error: 'claudeSessionId required' });
+  const messages = parseSessionJsonl(claudeSessionId, cwd || '');
+  res.json({ messages });
+});
+
 app.post('/api/kill-pid', (req, res) => {
   const { pid } = req.body;
   if (!pid || typeof pid !== 'number') return res.status(400).json({ error: 'pid required' });
@@ -1318,14 +1363,21 @@ wss.on('connection', (ws) => {
           session.clients.set(ws, { cols: 120, rows: 30 });
           attachedSessions.add(data.sessionId);
           if (session.mode === 'chat') {
-            // Chat mode: parse buffer as JSON lines and send as chat-history
-            const messages = [];
+            // Chat mode: parse buffer as JSON lines for current session output
+            const bufferMessages = [];
             for (const line of (session.buffer || '').split('\n')) {
               const trimmed = line.replace(/\r/g, '').trim();
               if (!trimmed) continue;
-              try { messages.push(JSON.parse(trimmed)); } catch {}
+              try { bufferMessages.push(JSON.parse(trimmed)); } catch {}
             }
-            ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, mode: 'chat', chatHistory: messages }));
+            // Also load JSONL history from Claude's session file (for resumed sessions)
+            let jsonlHistory = [];
+            if (session.claudeSessionId) {
+              jsonlHistory = parseSessionJsonl(session.claudeSessionId, session.cwd);
+            }
+            // Combine: JSONL history first (past conversation), then buffer (current session output)
+            const chatHistory = [...jsonlHistory, ...bufferMessages];
+            ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, mode: 'chat', chatHistory }));
           } else {
             ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, buffer: session.buffer || '' }));
           }
