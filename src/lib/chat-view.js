@@ -311,18 +311,59 @@ class ChatView {
       const fp = link.dataset.path;
       if (e.ctrlKey || e.metaKey) {
         // Ctrl+Click: open
-        if (url) window.open(url, '_blank');
-        else if (fp) this.app.openFile(fp, fp.split('/').pop());
+        if (url) {
+          window.open(url, '_blank');
+        } else if (fp) {
+          // Check if path is file, directory, or doesn't exist
+          fetch(`/api/file/info?path=${encodeURIComponent(fp)}`)
+            .then(r => r.json())
+            .then(info => {
+              if (info.error) {
+                this._flashLink(link, 'Not found');
+              } else if (info.isDirectory) {
+                this.app.openFileExplorer(fp);
+              } else {
+                this.app.openFile(fp, fp.split('/').pop());
+              }
+            })
+            .catch(() => this._flashLink(link, 'Error'));
+        }
       } else {
-        // Click: copy
+        // Click: copy to clipboard
         const text = url || fp;
-        navigator.clipboard.writeText(text).then(() => {
-          const orig = link.textContent;
-          link.textContent = 'Copied!';
-          setTimeout(() => { link.textContent = orig; }, 800);
-        }).catch(() => {});
+        this._copyText(text, link);
       }
     });
+  }
+
+  _copyText(text, link) {
+    // Try clipboard API, fall back to execCommand
+    const flash = () => this._flashLink(link, 'Copied!');
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(flash).catch(() => {
+        this._fallbackCopy(text);
+        flash();
+      });
+    } else {
+      this._fallbackCopy(text);
+      flash();
+    }
+  }
+
+  _fallbackCopy(text) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;left:-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+  }
+
+  _flashLink(link, msg) {
+    const orig = link.textContent;
+    link.textContent = msg;
+    setTimeout(() => { link.textContent = orig; }, 800);
   }
 
   _doSearch(query) {
