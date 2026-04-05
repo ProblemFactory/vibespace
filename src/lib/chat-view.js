@@ -389,27 +389,43 @@ class ChatView {
       return;
     }
 
-    // Actual user message
+    // Actual user message — render with markdown
     const el = document.createElement('div');
     el.className = 'chat-msg chat-msg-user';
+    let rawText = '';
     let textHtml = '';
     if (typeof content === 'string') {
-      textHtml = this._linkifyText(content);
+      rawText = content;
+      textHtml = `<div class="chat-text">${this._renderMarkdown(content)}</div>`;
     } else if (Array.isArray(content)) {
       const parts = [];
       for (const b of content) {
-        if (b.type === 'text') parts.push(this._linkifyText(b.text));
+        if (b.type === 'text') { rawText += b.text; parts.push(`<div class="chat-text">${this._renderMarkdown(b.text)}</div>`); }
         else if (b.type === 'image' && b.source?.data) parts.push(`<img class="chat-img" src="data:${b.source.media_type || 'image/png'};base64,${b.source.data}" alt="image">`);
         else if (b.type === 'image') parts.push('<span class="chat-img-placeholder">[Image]</span>');
       }
       textHtml = parts.join('');
     }
 
+    // Auto-collapse long messages (>500 chars)
+    const isLong = rawText.length > 500;
+    let innerHtml;
     if (this._compact) {
-      el.innerHTML = `<div class="chat-compact-msg"><span class="chat-role chat-role-user">You</span><div class="chat-compact-content">${textHtml}</div></div>`;
+      if (isLong) {
+        const preview = rawText.substring(0, 120).split('\n')[0];
+        innerHtml = `<div class="chat-compact-msg"><span class="chat-role chat-role-user">You</span><div class="chat-compact-content"><details class="chat-long-msg"><summary>${escHtml(preview)}...</summary>${textHtml}</details></div></div>`;
+      } else {
+        innerHtml = `<div class="chat-compact-msg"><span class="chat-role chat-role-user">You</span><div class="chat-compact-content">${textHtml}</div></div>`;
+      }
     } else {
-      el.innerHTML = `<div class="chat-bubble chat-bubble-user">${textHtml}</div>`;
+      if (isLong) {
+        const preview = rawText.substring(0, 120).split('\n')[0];
+        innerHtml = `<div class="chat-bubble chat-bubble-user"><details class="chat-long-msg"><summary>${escHtml(preview)}...</summary>${textHtml}</details></div>`;
+      } else {
+        innerHtml = `<div class="chat-bubble chat-bubble-user">${textHtml}</div>`;
+      }
     }
+    el.innerHTML = innerHtml;
     this._messageList.appendChild(el); this._addWrapToggles(el);
   }
 
