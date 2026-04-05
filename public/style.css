@@ -1439,37 +1439,22 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
   .sidebar { width: 100vw !important; max-width: 100vw; z-index: 1000; }
   #main-wrapper { margin-left: 0 !important; }
 
-  /* Prevent page-level scroll */
-  html, body { overflow: hidden !important; position: fixed !important; width: 100% !important; }
-
-  /* Toolbar: hide entirely, mobile has its own nav */
+  /* Replace toolbar with mobile nav */
   #toolbar { display: none; }
+  #taskbar { display: none; }
+  #snap-indicator, #grid-overlay { display: none !important; }
+  #mobile-nav { display: flex !important; }
 
-  /* Workspace: no special positioning needed, windows are fixed */
-
-  /* Windows: only active window visible, fills screen */
+  /* Windows: fill workspace, only active visible, no chrome */
   .window {
-    position: fixed !important;
-    left: 0 !important; right: 0 !important;
-    top: calc(44px + env(safe-area-inset-top, 0px)) !important; bottom: 0 !important;
-    width: auto !important; height: auto !important;
+    left: 0 !important; top: 0 !important;
+    width: 100% !important; height: 100% !important;
     border-radius: 0; min-width: 0; min-height: 0; border: none;
-    box-shadow: none; z-index: 1 !important;
-    display: none !important;
+    box-shadow: none; display: none !important;
   }
   .window.window-active { display: flex !important; }
   .window .resize-handle { display: none; }
   .window-titlebar { display: none; }
-
-  /* Taskbar: hide */
-  #taskbar { display: none; }
-
-  /* Snap/grid: disable */
-  #snap-indicator, #grid-overlay { display: none !important; }
-
-  /* Mobile nav bar: visible */
-  #mobile-nav { display: flex !important; }
-
 
   /* Terminal: mobile key toolbar */
   .mobile-term-keys {
@@ -1487,16 +1472,15 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
 
   /* Chat: optimize for touch */
   .chat-message-list { padding: 8px 10px; }
-  .chat-input-area { padding: 6px 8px; padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px)); }
+  .chat-input-area { padding: 6px 8px; }
   .chat-input { font-size: 16px; min-height: 44px; padding: 8px 32px 8px 10px; }
   .chat-send-btn { width: 36px; height: 36px; }
   .chat-compact-content { font-size: 14px; }
   .chat-role { font-size: 10px; min-width: 40px; }
 
-  /* Dialogs: full-width */
+  /* Dialogs */
   .dialog { width: 95vw !important; max-width: none; }
   .settings-dialog { width: 95vw !important; height: 90vh; }
-  .settings-nav { width: 100px; }
   .settings-body { flex-direction: column; }
   .settings-nav { width: 100%; border-right: none; border-bottom: 1px solid var(--border); display: flex; overflow-x: auto; padding: 4px; }
   .settings-nav-item { white-space: nowrap; }
@@ -1507,9 +1491,9 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
 
 /* Global mobile nav bar (hidden on desktop) */
 #mobile-nav {
-  display: none; position: fixed; top: 0; left: 0; right: 0; z-index: 500;
-  height: calc(44px + env(safe-area-inset-top, 0px)); align-items: flex-end; gap: 8px;
-  padding: 0 12px 6px; background: var(--bg-toolbar); border-bottom: 1px solid var(--border);
+  display: none; height: 44px; align-items: center; gap: 8px;
+  padding: 0 12px; background: var(--bg-toolbar); border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 #mobile-nav-menu, #mobile-nav-new {
   background: none; border: none; color: var(--text); font-size: 22px;
