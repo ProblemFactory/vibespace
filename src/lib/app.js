@@ -70,6 +70,25 @@ class App {
 
     // Restore layout after WebSocket is connected (needs active sessions)
     setTimeout(() => this.layoutManager.loadAutoSave(), 1500);
+
+    // Mobile: swipe from left edge to open sidebar
+    this._setupMobileGestures();
+  }
+
+  _setupMobileGestures() {
+    let startX = 0, startY = 0;
+    document.addEventListener('touchstart', (e) => {
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+    }, { passive: true });
+    document.addEventListener('touchend', (e) => {
+      const dx = e.changedTouches[0].clientX - startX;
+      const dy = e.changedTouches[0].clientY - startY;
+      if (Math.abs(dx) > 80 && Math.abs(dy) < 50) {
+        if (dx > 0 && startX < 30) this.sidebar.toggle(true); // swipe right from left edge
+        else if (dx < 0 && this.sidebar.isOpen) this.sidebar.toggle(false); // swipe left to close
+      }
+    }, { passive: true });
   }
 
   _setupToolbar() {

@@ -114,6 +114,7 @@ html, body {
 .session-card-badge {
   font-size: 9px; padding: 1px 6px; border-radius: 8px; font-weight: 600;
 }
+.session-mode-icon { font-size: 10px; flex-shrink: 0; }
 .badge-live { background: rgba(34,197,94,0.2); color: var(--green); }
 .badge-tmux { background: rgba(59,130,246,0.2); color: var(--blue); }
 .badge-external { background: rgba(245,158,11,0.15); color: var(--yellow); }
@@ -1342,6 +1343,11 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
 .chat-compact-content .chat-thinking { margin: 2px 0; padding: 4px 6px; }
 .chat-compact .chat-msg-system { padding: 1px 0; }
 .chat-compact .chat-system { font-size: 10px; padding: 2px 8px; }
+.chat-typing-dots { color: var(--text-dim); font-size: 18px; letter-spacing: 2px; }
+.chat-typing-dots span { animation: chat-dot-bounce 1.4s infinite; display: inline-block; }
+.chat-typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+.chat-typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes chat-dot-bounce { 0%,80%,100% { opacity: 0.3; } 40% { opacity: 1; } }
 .chat-expand-btn {
   position: absolute; right: 6px; bottom: 6px;
   width: 22px; height: 22px; border-radius: var(--radius-sm); border: none;
@@ -1357,18 +1363,44 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
 
 /* ── Mobile Responsive ── */
 @media (max-width: 768px) {
-  .sidebar { width: 100vw !important; max-width: 100vw; }
+  /* Sidebar: full-width overlay */
+  .sidebar { width: 100vw !important; max-width: 100vw; z-index: 1000; }
   #main-wrapper { margin-left: 0 !important; }
+
+  /* Toolbar: hide desktop-only elements, keep essentials */
   .toolbar-center { display: none; }
   #btn-presets, #btn-browser { display: none; }
+  #custom-grids-container { display: none; }
+  .toolbar-left { gap: 4px; }
+  .toolbar-right { gap: 4px; }
+  .toolbar-action { font-size: 11px; padding: 3px 6px; }
+
+  /* Windows: always maximized */
   .window {
     left: 0 !important; top: 0 !important;
     width: 100% !important; height: 100% !important;
     border-radius: 0; min-width: 0;
   }
   .window .resize-handle { display: none; }
-  #taskbar { display: none; }
+  .window-titlebar { padding: 0 6px; }
+  .win-btn { font-size: 11px; padding: 2px 6px; }
+
+  /* Taskbar: simplified */
+  #taskbar { height: 28px; font-size: 10px; }
+  .taskbar-item { font-size: 10px; padding: 2px 6px; }
+  .taskbar-usage { display: none; }
+
+  /* Chat: optimize for touch */
+  .chat-message-list { padding: 10px 12px; }
+  .chat-input-area { padding: 8px 10px; }
+  .chat-input { font-size: 16px; /* prevent iOS zoom */ padding: 8px 32px 8px 10px; }
+  .chat-send-btn { width: 36px; height: 36px; }
+  .chat-bubble { max-width: 92%; }
+  .chat-compact-content { font-size: 14px; }
+  .chat-role { font-size: 10px; min-width: 40px; }
+
+  /* Dialogs: full-width */
   .dialog { width: 95vw !important; max-width: none; }
   .settings-dialog { width: 95vw !important; height: 90vh; }
-  .chat-bubble { max-width: 92%; }
+  .settings-nav { width: 100px; }
 }

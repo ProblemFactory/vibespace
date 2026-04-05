@@ -195,6 +195,7 @@ class ChatView {
       this._shortcutHint.textContent = '\u23CE';
     }
     this.ws.send({ type: 'chat-input', sessionId: this.sessionId, text });
+    this._showTyping();
   }
 
   _onMessage(msg, isHistory = false) {
@@ -205,6 +206,7 @@ class ChatView {
         this._appendUser(msg);
         break;
       case 'assistant':
+        if (!isHistory) this._hideTyping();
         this._appendAssistant(msg);
         break;
       case 'system':
@@ -214,6 +216,7 @@ class ChatView {
         // Skip hook events and other system noise
         break;
       case 'result':
+        if (!isHistory) this._hideTyping();
         this._appendResult(msg);
         break;
       case 'rate_limit_event':
@@ -532,6 +535,24 @@ class ChatView {
     this._searchMatches = [];
     this._searchIdx = -1;
     if (this._searchStatus) this._searchStatus.textContent = '';
+  }
+
+  _showTyping() {
+    this._hideTyping();
+    const el = document.createElement('div');
+    el.className = 'chat-msg chat-msg-typing';
+    if (this._compact) {
+      el.innerHTML = '<div class="chat-compact-msg"><span class="chat-role chat-role-assistant">Claude</span><div class="chat-compact-content"><span class="chat-typing-dots"><span>.</span><span>.</span><span>.</span></span></div></div>';
+    } else {
+      el.innerHTML = '<div class="chat-bubble chat-bubble-assistant"><span class="chat-typing-dots"><span>.</span><span>.</span><span>.</span></span></div>';
+    }
+    this._typingEl = el;
+    this._messageList.appendChild(el);
+    this._scrollToBottom();
+  }
+
+  _hideTyping() {
+    if (this._typingEl) { this._typingEl.remove(); this._typingEl = null; }
   }
 
   _scrollToBottom() {

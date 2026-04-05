@@ -770,10 +770,11 @@ class Sidebar {
 
     const starred = this._starredIds.has(s.sessionId);
     const isExpanded = this._expandedCardId === s.sessionId;
-    // Compact row: star archive name badge expand
+    // Compact row: star archive name [mode] badge expand
+    const modeIcon = s.webuiMode === 'chat' ? '<span class="session-mode-icon" title="Chat mode">\uD83D\uDCAC</span>' : '';
     card.innerHTML = `<div class="session-card-row">
       <span class="session-card-name">${escHtml(displayName)}</span>
-      <span class="session-card-badge ${badge.cls}">${badge.text}</span>
+      ${modeIcon}<span class="session-card-badge ${badge.cls}">${badge.text}</span>
     </div>`;
     const row = card.querySelector('.session-card-row');
     // Star button (inline, always visible)
