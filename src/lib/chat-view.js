@@ -494,37 +494,25 @@ class ChatView {
 
     // Simple line-by-line diff
     const diffLines = [];
-    const maxLen = Math.max(oldLines.length, newLines.length);
     let oi = 0, ni = 0;
-
-    // Find common prefix lines
     while (oi < oldLines.length && ni < newLines.length && oldLines[oi] === newLines[ni]) {
-      diffLines.push({ type: 'ctx', text: oldLines[oi] });
-      oi++; ni++;
+      diffLines.push({ type: 'ctx', text: oldLines[oi] }); oi++; ni++;
     }
-    // Removed lines
-    while (oi < oldLines.length) {
-      diffLines.push({ type: 'del', text: oldLines[oi] });
-      oi++;
-    }
-    // Added lines
-    while (ni < newLines.length) {
-      diffLines.push({ type: 'add', text: newLines[ni] });
-      ni++;
-    }
+    while (oi < oldLines.length) { diffLines.push({ type: 'del', text: oldLines[oi] }); oi++; }
+    while (ni < newLines.length) { diffLines.push({ type: 'add', text: newLines[ni] }); ni++; }
 
     const addCount = diffLines.filter(l => l.type === 'add').length;
     const delCount = diffLines.filter(l => l.type === 'del').length;
-    const summary = `${escHtml(fileName)} (+${addCount} -${delCount})`;
+    const summary = `\u2713 \u270F ${escHtml(fileName)} (+${addCount} -${delCount})`;
 
-    let html = `<div class="chat-diff"><div class="chat-diff-header"><span class="chat-tool-label">\u270F ${summary}</span><span class="chat-diff-path" title="${escHtml(filePath)}">${escHtml(filePath)}</span></div><div class="chat-diff-body">`;
+    let body = '';
     for (const line of diffLines) {
       const cls = line.type === 'add' ? 'chat-diff-add' : line.type === 'del' ? 'chat-diff-del' : 'chat-diff-ctx';
       const prefix = line.type === 'add' ? '+' : line.type === 'del' ? '-' : ' ';
-      html += `<div class="${cls}"><span class="chat-diff-prefix">${prefix}</span>${escHtml(line.text)}</div>`;
+      body += `<div class="${cls}"><span class="chat-diff-prefix">${prefix}</span>${escHtml(line.text)}</div>`;
     }
-    html += '</div></div>';
-    return html;
+
+    return `<details class="chat-diff"><summary class="chat-diff-header"><span class="chat-tool-label">${summary}</span><span class="chat-diff-path" title="${escHtml(filePath)}">${escHtml(filePath)}</span></summary><div class="chat-diff-body">${body}</div></details>`;
   }
 
   // Strip trailing punctuation from matched paths/URLs

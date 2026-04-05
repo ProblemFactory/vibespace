@@ -1258,10 +1258,13 @@ html, body {
 .chat-tool-result-inline.chat-tool-error { background: rgba(239,68,68,0.08); color: var(--red); }
 
 .chat-diff { margin: 6px 0; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; font-size: 12px; }
+.chat-diff > summary { list-style: none; cursor: pointer; }
+.chat-diff > summary::-webkit-details-marker { display: none; }
 .chat-diff-header {
   display: flex; justify-content: space-between; align-items: center; gap: 8px;
-  padding: 4px 10px; background: rgba(128,128,128,0.1); border-bottom: 1px solid var(--border);
+  padding: 4px 10px; background: rgba(128,128,128,0.1);
 }
+.chat-diff[open] .chat-diff-header { border-bottom: 1px solid var(--border); }
 .chat-diff-path { font-size: 10px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: right; }
 .chat-diff-body { font-family: 'SF Mono','Fira Code','JetBrains Mono',monospace; font-size: 11px; line-height: 1.5; overflow-x: auto; }
 .chat-diff-body > div { padding: 0 10px; white-space: pre; min-height: 18px; }
