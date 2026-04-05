@@ -503,7 +503,7 @@ class ChatView {
 
     const addCount = diffLines.filter(l => l.type === 'add').length;
     const delCount = diffLines.filter(l => l.type === 'del').length;
-    const summary = `\u2713 \u270F ${escHtml(fileName)} (+${addCount} -${delCount})`;
+    const summary = `\u2713 Added ${addCount} lines, removed ${delCount} lines`;
 
     let body = '';
     for (const line of diffLines) {
