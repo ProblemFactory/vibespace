@@ -156,9 +156,9 @@ class ChatView {
         expandBtn.title = 'Collapse editor';
         this._shortcutHint.textContent = 'Ctrl+\u23CE';
       } else {
-        this._textarea.style.height = 'auto';
-        this._textarea.style.minHeight = '36px';
         this._textarea.classList.remove('chat-input-expanded');
+        this._textarea.style.minHeight = '';
+        this._textarea.style.height = '';
         expandBtn.textContent = '\u2922';
         expandBtn.title = 'Expand editor';
         this._shortcutHint.textContent = '\u23CE';
@@ -385,8 +385,8 @@ class ChatView {
     if (!text && !hasAttachments) return;
 
     this._textarea.value = '';
-    this._textarea.style.height = 'auto';
-    this._textarea.style.minHeight = '36px';
+    this._textarea.style.height = '';
+    this._textarea.style.minHeight = '';
     if (this._expanded) {
       this._expanded = false;
       this._textarea.classList.remove('chat-input-expanded');
@@ -1045,14 +1045,21 @@ class ChatView {
   _updateStatusBar() {
     const fmtK = (n) => n >= 1000000 ? (n / 1000000).toFixed(1) + 'M' : n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
     const parts = [];
-    if (this._statusModel) parts.push(this._statusModel);
-    if (this._statusContextWindow && this._statusLastInputTokens) {
-      const pct = Math.round((this._statusLastInputTokens / this._statusContextWindow) * 100);
-      parts.push(`${pct}% context (${fmtK(this._statusLastInputTokens)}/${fmtK(this._statusContextWindow)})`);
+    if (this._statusModel) {
+      parts.push(`<span class="chat-status-model">${escHtml(this._statusModel)}</span>`);
     }
-    if (this._statusTokensOut) parts.push(`${fmtK(this._statusTokensOut)} out`);
-    if (this._statusCost > 0) parts.push(`$${this._statusCost.toFixed(2)}`);
-    this._statusBar.textContent = parts.join('  \u00B7  ');
+    if (this._statusContextWindow && this._statusLastInputTokens) {
+      const pct = Math.min(100, Math.round((this._statusLastInputTokens / this._statusContextWindow) * 100));
+      const color = pct > 80 ? 'var(--red)' : pct > 50 ? 'var(--yellow)' : 'var(--green)';
+      parts.push(`<span class="chat-status-ctx"><span class="chat-status-ctx-bar"><span class="chat-status-ctx-fill" style="width:${pct}%;background:${color}"></span></span>${pct}%</span>`);
+    }
+    if (this._statusLastInputTokens) {
+      parts.push(`<span class="chat-status-tokens">${fmtK(this._statusLastInputTokens)} ctx</span>`);
+    }
+    if (this._statusCost > 0) {
+      parts.push(`<span class="chat-status-cost">$${this._statusCost.toFixed(2)}</span>`);
+    }
+    this._statusBar.innerHTML = parts.join('<span style="color:var(--border)"> | </span>');
   }
 
   _scrollToBottom() {
