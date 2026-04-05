@@ -1024,13 +1024,12 @@ class ChatView {
 
   _scrollToBottom() {
     this._programmaticScroll = true;
-    // Multiple attempts to handle content-visibility layout delay
-    const doScroll = () => { this._messageList.scrollTop = this._messageList.scrollHeight; };
-    doScroll();
-    requestAnimationFrame(doScroll);
-    setTimeout(doScroll, 50);
-    setTimeout(doScroll, 150);
-    setTimeout(() => { doScroll(); this._programmaticScroll = false; }, 300);
+    this._messageList.scrollTop = this._messageList.scrollHeight;
+    // Single rAF to let layout settle (contain-intrinsic-size keeps scrollHeight accurate)
+    requestAnimationFrame(() => {
+      this._messageList.scrollTop = this._messageList.scrollHeight;
+      this._programmaticScroll = false;
+    });
   }
 
   focus() {
