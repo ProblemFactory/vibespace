@@ -375,8 +375,15 @@ class ChatView {
         } else if (block.type === 'thinking') {
           parts.push(`<details class="chat-thinking"><summary>Thinking...</summary><pre>${escHtml(stripAnsi(block.text || ''))}</pre></details>`);
         } else if (block.type === 'tool_use') {
-          const inputStr = stripAnsi(typeof block.input === 'string' ? block.input : JSON.stringify(block.input, null, 2));
-          parts.push(`<div class="chat-tool-use"><span class="chat-tool-label">\uD83D\uDD27 ${escHtml(block.name || 'tool')}</span><details><summary>Input</summary><pre>${escHtml(inputStr).substring(0, 3000)}</pre></details></div>`);
+          if (block.name === 'Edit' && block.input?.old_string != null) {
+            parts.push(this._renderEditDiff(block));
+          } else if (block.name === 'Write' && block.input?.file_path) {
+            const preview = (block.input.content || '').substring(0, 500);
+            parts.push(`<div class="chat-tool-use"><span class="chat-tool-label">\u{1F4DD} Write ${escHtml(block.input.file_path.split('/').pop())}</span><details><summary>${escHtml(block.input.file_path)}</summary><pre>${escHtml(preview)}${block.input.content?.length > 500 ? '...' : ''}</pre></details></div>`);
+          } else {
+            const inputStr = stripAnsi(typeof block.input === 'string' ? block.input : JSON.stringify(block.input, null, 2));
+            parts.push(`<div class="chat-tool-use"><span class="chat-tool-label">\uD83D\uDD27 ${escHtml(block.name || 'tool')}</span><details><summary>Input</summary><pre>${escHtml(inputStr).substring(0, 3000)}</pre></details></div>`);
+          }
         } else if (block.type === 'image' && block.source?.data) {
           parts.push(`<img class="chat-img" src="data:${block.source.media_type || 'image/png'};base64,${block.source.data}" alt="image">`);
         }
@@ -440,6 +447,49 @@ class ChatView {
     } catch {
       return escHtml(text || '');
     }
+  }
+
+  _renderEditDiff(block) {
+    const filePath = block.input.file_path || '';
+    const fileName = filePath.split('/').pop();
+    const oldStr = block.input.old_string || '';
+    const newStr = block.input.new_string || '';
+    const oldLines = oldStr.split('\n');
+    const newLines = newStr.split('\n');
+
+    // Simple line-by-line diff
+    const diffLines = [];
+    const maxLen = Math.max(oldLines.length, newLines.length);
+    let oi = 0, ni = 0;
+
+    // Find common prefix lines
+    while (oi < oldLines.length && ni < newLines.length && oldLines[oi] === newLines[ni]) {
+      diffLines.push({ type: 'ctx', text: oldLines[oi] });
+      oi++; ni++;
+    }
+    // Removed lines
+    while (oi < oldLines.length) {
+      diffLines.push({ type: 'del', text: oldLines[oi] });
+      oi++;
+    }
+    // Added lines
+    while (ni < newLines.length) {
+      diffLines.push({ type: 'add', text: newLines[ni] });
+      ni++;
+    }
+
+    const addCount = diffLines.filter(l => l.type === 'add').length;
+    const delCount = diffLines.filter(l => l.type === 'del').length;
+    const summary = `${escHtml(fileName)} (+${addCount} -${delCount})`;
+
+    let html = `<div class="chat-diff"><div class="chat-diff-header"><span class="chat-tool-label">\u270F ${summary}</span><span class="chat-diff-path" title="${escHtml(filePath)}">${escHtml(filePath)}</span></div><div class="chat-diff-body">`;
+    for (const line of diffLines) {
+      const cls = line.type === 'add' ? 'chat-diff-add' : line.type === 'del' ? 'chat-diff-del' : 'chat-diff-ctx';
+      const prefix = line.type === 'add' ? '+' : line.type === 'del' ? '-' : ' ';
+      html += `<div class="${cls}"><span class="chat-diff-prefix">${prefix}</span>${escHtml(line.text)}</div>`;
+    }
+    html += '</div></div>';
+    return html;
   }
 
   // Strip trailing punctuation from matched paths/URLs
