@@ -374,6 +374,11 @@ class ChatView {
     } else {
       this.ws.send({ type: 'chat-input', sessionId: this.sessionId, text, msgId });
     }
+    // Re-pin and scroll to bottom on send — user expects to see the response
+    this._pinned = true;
+    this._newMsgCount = 0;
+    this._scrollBtn.classList.add('hidden');
+    this._scrollToBottom();
     this._pendingTyping = true;
   }
 
