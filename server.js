@@ -1431,18 +1431,25 @@ wss.on('connection', (ws) => {
             const chatHistory = allMessages.slice(-PAGE_SIZE);
             const totalCount = allMessages.length;
 
-            // Extract latest status info (model, tokens, cost) from all messages
+            // Extract latest status: last assistant's per-turn usage + cumulative cost
             let chatStatus = null;
+            let lastUsage = null, model = null, contextWindow = 0, totalCost = 0;
             for (let i = allMessages.length - 1; i >= 0; i--) {
               const m = allMessages[i];
-              if (m.type === 'result' && m.modelUsage) {
-                chatStatus = { model: Object.keys(m.modelUsage)[0], modelUsage: m.modelUsage, total_cost_usd: 0 };
-                // Sum all costs
-                for (const rm of allMessages) {
-                  if (rm.type === 'result' && rm.total_cost_usd) chatStatus.total_cost_usd += rm.total_cost_usd;
-                }
-                break;
+              if (!lastUsage && m.type === 'assistant' && m.message?.usage) {
+                lastUsage = m.message.usage;
               }
+              if (!model && m.type === 'result' && m.modelUsage) {
+                model = Object.keys(m.modelUsage)[0];
+                contextWindow = Object.values(m.modelUsage)[0]?.contextWindow || 0;
+              }
+              if (lastUsage && model) break;
+            }
+            for (const m of allMessages) {
+              if (m.type === 'result' && m.total_cost_usd) totalCost += m.total_cost_usd;
+            }
+            if (lastUsage || model) {
+              chatStatus = { model, lastUsage, contextWindow, total_cost_usd: totalCost };
             }
 
             ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, mode: 'chat', chatHistory, totalCount, chatStatus }));

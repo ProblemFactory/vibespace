@@ -447,10 +447,12 @@ class ChatView {
       case 'assistant':
         if (!isHistory) this._hideTyping();
         this._appendAssistant(msg);
-        // Track tokens from individual message usage
+        // Track per-turn usage from assistant message (NOT result.modelUsage which is cumulative)
         if (msg.message?.usage && !isHistory) {
           const u = msg.message.usage;
-          this._statusTokensOut += u.output_tokens || 0;
+          this._statusLastInputTokens = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+          this._statusTokensOut = u.output_tokens || 0;
+          this._updateStatusBar();
         }
         break;
       case 'system':
@@ -462,16 +464,15 @@ class ChatView {
       case 'result':
         if (!isHistory) this._hideTyping();
         this._appendResult(msg);
-        // Only update status from LIVE result messages (not history — applyStatus handles that)
-        if (!isHistory && msg.modelUsage) {
-          for (const [model, info] of Object.entries(msg.modelUsage)) {
-            this._statusModel = model.replace(/\[.*$/, '');
-            this._statusLastInputTokens = (info.inputTokens || 0) + (info.cacheReadInputTokens || 0) + (info.cacheCreationInputTokens || 0);
-            this._statusTokensOut = info.outputTokens || 0;
-            if (info.contextWindow) this._statusContextWindow = info.contextWindow;
+        if (!isHistory) {
+          if (msg.total_cost_usd) { this._statusCost += msg.total_cost_usd; this._updateStatusBar(); }
+          // Extract contextWindow from modelUsage if not set
+          if (msg.modelUsage && !this._statusContextWindow) {
+            const info = Object.values(msg.modelUsage)[0];
+            if (info?.contextWindow) this._statusContextWindow = info.contextWindow;
+            if (!this._statusModel) this._statusModel = Object.keys(msg.modelUsage)[0]?.replace(/\[.*$/, '');
+            this._updateStatusBar();
           }
-          if (msg.total_cost_usd) this._statusCost += msg.total_cost_usd;
-          this._updateStatusBar();
         }
         break;
       case 'rate_limit_event':
@@ -897,21 +898,20 @@ class ChatView {
 
     // Refresh highlight layer and scroll to first match in target
     this._applyHighlightLayer();
-    if (this._highlightRanges?.length > 0 && relIdx >= 0) {
-      // Find the first highlight range inside the target element
-      const targetEl = allMsgs[relIdx];
+    const targetEl = allMsgs[relIdx];
+    if (this._highlightRanges?.length > 0 && targetEl) {
       const matchIdx = this._highlightRanges.findIndex(r => targetEl.contains(r.startContainer));
       if (matchIdx >= 0) {
         this._setCurrentHighlight(matchIdx);
+        // Scroll the range into view
         const rect = this._highlightRanges[matchIdx].getBoundingClientRect();
         const listRect = this._messageList.getBoundingClientRect();
         this._messageList.scrollTop += rect.top - listRect.top - listRect.height / 2;
-      } else {
-        targetEl.scrollIntoView({ block: 'center' });
-        targetEl.classList.add('chat-msg-flash');
-        setTimeout(() => targetEl.classList.remove('chat-msg-flash'), 2000);
+        return;
       }
     }
+    // Fallback: just scroll to the message
+    if (targetEl) targetEl.scrollIntoView({ block: 'center' });
   }
 
   // ── Highlight Layer: non-destructive search highlighting ──
@@ -1032,12 +1032,11 @@ class ChatView {
   applyStatus(status) {
     if (!status) return;
     if (status.model) this._statusModel = status.model.replace(/\[.*$/, '');
-    if (status.modelUsage) {
-      for (const [, info] of Object.entries(status.modelUsage)) {
-        this._statusLastInputTokens = (info.inputTokens || 0) + (info.cacheReadInputTokens || 0) + (info.cacheCreationInputTokens || 0);
-        this._statusTokensOut = info.outputTokens || 0;
-        if (info.contextWindow) this._statusContextWindow = info.contextWindow;
-      }
+    if (status.contextWindow) this._statusContextWindow = status.contextWindow;
+    if (status.lastUsage) {
+      const u = status.lastUsage;
+      this._statusLastInputTokens = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+      this._statusTokensOut = u.output_tokens || 0;
     }
     if (status.total_cost_usd) this._statusCost = status.total_cost_usd;
     this._updateStatusBar();
@@ -1058,14 +1057,10 @@ class ChatView {
 
   _scrollToBottom() {
     this._programmaticScroll = true;
-    const last = this._messageList.lastElementChild;
-    if (last) {
-      last.scrollIntoView({ block: 'end' });
-    } else {
-      this._messageList.scrollTop = this._messageList.scrollHeight;
-    }
+    // Set scrollTop to max — browser clamps to actual scrollHeight
+    this._messageList.scrollTop = 999999999;
     requestAnimationFrame(() => {
-      if (last) last.scrollIntoView({ block: 'end' });
+      this._messageList.scrollTop = 999999999;
       this._programmaticScroll = false;
     });
   }
