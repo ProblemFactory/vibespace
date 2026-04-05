@@ -1136,6 +1136,7 @@ html, body {
 }
 .chat-message-list {
   flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 12px;
+  user-select: text; cursor: text;
 }
 
 /* Messages */
