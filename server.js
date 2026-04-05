@@ -1054,10 +1054,17 @@ function extractSessionMeta(filePath) {
 // Kill an external/tmux session by PID (not managed by WebUI WebSocket)
 // Get chat message history for a Claude session (from JSONL file)
 app.get('/api/session-messages', (req, res) => {
-  const { claudeSessionId, cwd } = req.query;
+  const { claudeSessionId, cwd, offset, limit } = req.query;
   if (!claudeSessionId) return res.status(400).json({ error: 'claudeSessionId required' });
-  const messages = parseSessionJsonl(claudeSessionId, cwd || '');
-  res.json({ messages });
+  const allMessages = parseSessionJsonl(claudeSessionId, cwd || '');
+  const total = allMessages.length;
+  if (offset !== undefined || limit !== undefined) {
+    const o = parseInt(offset) || 0;
+    const l = parseInt(limit) || 50;
+    res.json({ messages: allMessages.slice(o, o + l), total });
+  } else {
+    res.json({ messages: allMessages, total });
+  }
 });
 
 app.post('/api/kill-pid', (req, res) => {
@@ -1403,8 +1410,11 @@ wss.on('connection', (ws) => {
                 bufferMessages.push(msg);
               } catch {}
             }
-            const chatHistory = [...jsonlHistory, ...bufferMessages];
-            ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, mode: 'chat', chatHistory }));
+            const allMessages = [...jsonlHistory, ...bufferMessages];
+            const PAGE_SIZE = 50;
+            const chatHistory = allMessages.slice(-PAGE_SIZE);
+            const totalCount = allMessages.length;
+            ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, mode: 'chat', chatHistory, totalCount }));
           } else {
             ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, buffer: session.buffer || '' }));
           }

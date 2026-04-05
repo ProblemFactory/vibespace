@@ -691,7 +691,7 @@ class App {
           if (resumeId) {
             fetch(`/api/session-messages?claudeSessionId=${encodeURIComponent(resumeId)}&cwd=${encodeURIComponent(cwd||'')}`)
               .then(r => r.json())
-              .then(data => { if (data.messages?.length) chatView.loadHistory(data.messages); })
+              .then(data => { if (data.messages?.length) chatView.loadHistory(data.messages, data.total); })
               .catch(() => {});
           }
           chatView.focus();
@@ -763,7 +763,7 @@ class App {
           const chatView = new ChatView(winInfo, this.ws, serverId, this);
           this.sessions.set(winInfo.id, chatView);
           if (msg.chatHistory && msg.chatHistory.length) {
-            chatView.loadHistory(msg.chatHistory);
+            chatView.loadHistory(msg.chatHistory, msg.totalCount);
           }
           winInfo.onClose = () => {
             const shouldKill = (this.settings.get('window.closeBehavior') ?? 'terminate') === 'terminate';

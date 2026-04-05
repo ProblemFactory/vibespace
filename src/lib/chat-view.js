@@ -226,11 +226,94 @@ class ChatView {
   }
 
   // Load history from attach response
-  loadHistory(messages) {
-    for (const msg of messages) {
-      this._onMessage(msg, true);
+  loadHistory(messages, totalCount) {
+    this._totalServerMessages = totalCount || messages.length;
+    this._loadedOffset = this._totalServerMessages - messages.length;
+
+    // Show "load earlier" button if there are more messages
+    if (this._loadedOffset > 0) {
+      this._showLoadEarlierBtn();
     }
-    this._scrollToBottom();
+
+    // Render in batches to avoid blocking UI
+    this._renderBatch(messages, 0, true);
+  }
+
+  _renderBatch(messages, idx, isHistory) {
+    const BATCH = 20;
+    const end = Math.min(idx + BATCH, messages.length);
+    for (let i = idx; i < end; i++) {
+      this._onMessage(messages[i], isHistory);
+    }
+    if (end < messages.length) {
+      requestAnimationFrame(() => this._renderBatch(messages, end, isHistory));
+    } else if (isHistory) {
+      this._scrollToBottom();
+    }
+  }
+
+  _showLoadEarlierBtn() {
+    if (this._loadEarlierBtn) return;
+    const btn = document.createElement('button');
+    btn.className = 'chat-load-earlier';
+    btn.textContent = `Load earlier messages (${this._loadedOffset} more)`;
+    btn.onclick = () => this._loadEarlierMessages();
+    this._loadEarlierBtn = btn;
+    this._messageList.prepend(btn);
+  }
+
+  async _loadEarlierMessages() {
+    if (!this._loadEarlierBtn || this._loadedOffset <= 0) return;
+    this._loadEarlierBtn.textContent = 'Loading...';
+    this._loadEarlierBtn.disabled = true;
+
+    const pageSize = 50;
+    const newOffset = Math.max(0, this._loadedOffset - pageSize);
+    const count = this._loadedOffset - newOffset;
+
+    try {
+      // Use the session's claudeSessionId from sidebar data
+      const allSess = this.app.sidebar?._allSessions || [];
+      const match = allSess.find(s => s.webuiId === this.sessionId);
+      const claudeId = match?.sessionId;
+      const cwd = match?.cwd || '';
+      if (!claudeId) throw new Error('no claudeSessionId');
+
+      const res = await fetch(`/api/session-messages?claudeSessionId=${encodeURIComponent(claudeId)}&cwd=${encodeURIComponent(cwd)}&offset=${newOffset}&limit=${count}`);
+      const data = await res.json();
+
+      // Remove button, prepend messages, re-add button if more
+      this._loadEarlierBtn.remove();
+      this._loadEarlierBtn = null;
+
+      const scrollAnchor = this._messageList.firstElementChild;
+      const scrollTop = this._messageList.scrollTop;
+
+      // Render older messages at the top
+      const fragment = document.createDocumentFragment();
+      const tempContainer = document.createElement('div');
+      for (const msg of data.messages) {
+        this._onMessage(msg, true);
+      }
+
+      this._loadedOffset = newOffset;
+      if (this._loadedOffset > 0) {
+        this._showLoadEarlierBtn();
+      }
+
+      // Preserve scroll position (don't jump to top)
+      if (scrollAnchor) {
+        requestAnimationFrame(() => {
+          const newTop = scrollAnchor.offsetTop;
+          this._messageList.scrollTop = newTop;
+        });
+      }
+    } catch {
+      if (this._loadEarlierBtn) {
+        this._loadEarlierBtn.textContent = 'Failed to load. Retry?';
+        this._loadEarlierBtn.disabled = false;
+      }
+    }
   }
 
   _send() {
