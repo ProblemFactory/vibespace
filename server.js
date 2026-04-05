@@ -1430,7 +1430,22 @@ wss.on('connection', (ws) => {
             const PAGE_SIZE = 50;
             const chatHistory = allMessages.slice(-PAGE_SIZE);
             const totalCount = allMessages.length;
-            ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, mode: 'chat', chatHistory, totalCount }));
+
+            // Extract latest status info (model, tokens, cost) from all messages
+            let chatStatus = null;
+            for (let i = allMessages.length - 1; i >= 0; i--) {
+              const m = allMessages[i];
+              if (m.type === 'result' && m.modelUsage) {
+                chatStatus = { model: Object.keys(m.modelUsage)[0], modelUsage: m.modelUsage, total_cost_usd: 0 };
+                // Sum all costs
+                for (const rm of allMessages) {
+                  if (rm.type === 'result' && rm.total_cost_usd) chatStatus.total_cost_usd += rm.total_cost_usd;
+                }
+                break;
+              }
+            }
+
+            ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, mode: 'chat', chatHistory, totalCount, chatStatus }));
           } else {
             ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, buffer: session.buffer || '' }));
           }

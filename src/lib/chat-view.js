@@ -997,6 +997,21 @@ class ChatView {
     if (this._typingEl) { this._typingEl.remove(); this._typingEl = null; }
   }
 
+  applyStatus(status) {
+    if (!status) return;
+    if (status.model) this._statusModel = status.model.replace(/\[.*$/, '');
+    if (status.modelUsage) {
+      for (const [, info] of Object.entries(status.modelUsage)) {
+        this._statusTokensIn = (info.inputTokens || 0) + (info.cacheReadInputTokens || 0) + (info.cacheCreationInputTokens || 0);
+        this._statusTokensOut = info.outputTokens || 0;
+        this._statusCacheRead = info.cacheReadInputTokens || 0;
+        if (info.contextWindow) this._statusContextWindow = info.contextWindow;
+      }
+    }
+    if (status.total_cost_usd) this._statusCost = status.total_cost_usd;
+    this._updateStatusBar();
+  }
+
   _updateStatusBar() {
     const fmtK = (n) => n >= 1000000 ? (n / 1000000).toFixed(1) + 'M' : n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
     const parts = [];

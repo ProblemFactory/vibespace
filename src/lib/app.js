@@ -764,6 +764,7 @@ class App {
           this.sessions.set(winInfo.id, chatView);
           if (msg.chatHistory && msg.chatHistory.length) {
             chatView.loadHistory(msg.chatHistory, msg.totalCount);
+            if (msg.chatStatus) chatView.applyStatus(msg.chatStatus);
           }
           winInfo.onClose = () => {
             const shouldKill = (this.settings.get('window.closeBehavior') ?? 'terminate') === 'terminate';
