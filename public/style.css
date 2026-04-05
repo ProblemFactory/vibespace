@@ -391,7 +391,7 @@ html, body {
 .win-overlap-btn { font-size: 11px; }
 .win-overlap-btn.no-overlap { opacity: 0.3; cursor: default; }
 .win-overlap-btn.no-overlap:hover { background: transparent; color: var(--text-dim); }
-.window-content { flex: 1; overflow: hidden; position: relative; }
+.window-content { flex: 1; overflow: hidden; position: relative; display: flex; flex-direction: column; }
 
 /* Resize Handles */
 .resize-handle { position: absolute; z-index: 10; }
@@ -405,7 +405,7 @@ html, body {
 .resize-sw { bottom: -3px; left: -3px; width: 12px; height: 12px; cursor: sw-resize; }
 
 /* ── Terminal ── */
-.terminal-container { width: 100%; height: 100%; padding: 4px 10px 4px 4px; box-sizing: border-box; }
+.terminal-container { width: 100%; flex: 1; min-height: 0; padding: 4px 10px 4px 4px; box-sizing: border-box; }
 .terminal-container .xterm { height: 100%; }
 .terminal-container .xterm-viewport { overflow-y: auto !important; }
 

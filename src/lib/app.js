@@ -740,7 +740,12 @@ class App {
     return false;
   }
 
+  _closeSidebarOnMobile() {
+    if (window.innerWidth <= 768 && this.sidebar.isOpen) this.sidebar.toggle(false);
+  }
+
   attachSession(serverId, name, cwd, { mode } = {}) {
+    this._closeSidebarOnMobile();
     // If we already have a window for this session, just focus it
     if (this._focusExistingSession(serverId)) return null;
 
@@ -787,6 +792,7 @@ class App {
   }
 
   attachTmuxSession(tmuxTarget, name, cwd) {
+    this._closeSidebarOnMobile();
     // Check if already viewing this tmux target
     for (const [winId, term] of this.sessions) {
       if (term._tmuxTarget === tmuxTarget) {
@@ -816,6 +822,7 @@ class App {
   }
 
   resumeSession(sessionId, cwd, sessionName, { mode } = {}) {
+    this._closeSidebarOnMobile();
     // If this session is already open in a window (e.g. already resumed), just focus it
     for (const [winId, term] of this.sessions) {
       if (term.sessionId) {
