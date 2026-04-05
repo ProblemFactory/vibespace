@@ -1442,15 +1442,16 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
   /* Toolbar: hide entirely, mobile has its own nav */
   #toolbar { display: none; }
 
-  /* Workspace: fill screen */
-  #workspace { top: 0 !important; }
+  /* Workspace: no special positioning needed, windows are fixed */
 
-  /* Windows: no chrome, fill screen */
+  /* Windows: no chrome, fill workspace completely */
   .window {
-    left: 0 !important; top: 0 !important;
-    width: 100% !important; height: 100% !important;
-    border-radius: 0; min-width: 0; border: none;
-    box-shadow: none;
+    position: fixed !important;
+    left: 0 !important; right: 0 !important;
+    top: 44px !important; bottom: 0 !important;
+    width: auto !important; height: auto !important;
+    border-radius: 0; min-width: 0; min-height: 0; border: none;
+    box-shadow: none; z-index: 1 !important;
   }
   .window .resize-handle { display: none; }
   .window-titlebar { display: none; }
@@ -1464,8 +1465,20 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
   /* Mobile nav bar: visible */
   #mobile-nav { display: flex !important; }
 
-  /* Workspace: below mobile nav */
-  #workspace { top: 44px !important; }
+
+  /* Terminal: mobile key toolbar */
+  .mobile-term-keys {
+    display: flex !important; gap: 4px; padding: 4px 8px; overflow-x: auto;
+    background: var(--bg-taskbar); border-top: 1px solid var(--border);
+    flex-shrink: 0; -webkit-overflow-scrolling: touch;
+  }
+  .mobile-term-key {
+    flex-shrink: 0; padding: 4px 10px; font-size: 11px; font-weight: 600;
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    background: var(--bg-input); color: var(--text); cursor: pointer;
+    white-space: nowrap;
+  }
+  .mobile-term-key:active { background: var(--accent); color: #fff; }
 
   /* Chat: optimize for touch */
   .chat-message-list { padding: 8px 10px; }
@@ -1483,6 +1496,9 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
   .settings-nav { width: 100%; border-right: none; border-bottom: 1px solid var(--border); display: flex; overflow-x: auto; padding: 4px; }
   .settings-nav-item { white-space: nowrap; }
 }
+
+/* Mobile terminal key toolbar (hidden on desktop) */
+.mobile-term-keys { display: none; }
 
 /* Global mobile nav bar (hidden on desktop) */
 #mobile-nav {
