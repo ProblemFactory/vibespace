@@ -1444,7 +1444,7 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
 
   /* Workspace: no special positioning needed, windows are fixed */
 
-  /* Windows: no chrome, fill workspace completely */
+  /* Windows: only active window visible, fills screen */
   .window {
     position: fixed !important;
     left: 0 !important; right: 0 !important;
@@ -1452,7 +1452,9 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
     width: auto !important; height: auto !important;
     border-radius: 0; min-width: 0; min-height: 0; border: none;
     box-shadow: none; z-index: 1 !important;
+    display: none !important;
   }
+  .window.window-active { display: flex !important; }
   .window .resize-handle { display: none; }
   .window-titlebar { display: none; }
 
