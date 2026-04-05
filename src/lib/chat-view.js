@@ -346,9 +346,10 @@ class ChatView {
             const preview = resultText.substring(0, 500);
             html = `<div class="chat-tool-use"><span class="chat-tool-label">\u{1F4D6} Read ${escHtml(fp)}</span><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${lineCount} lines</summary><pre>${escHtml(preview)}${resultText.length > 500 ? '\n...' : ''}</pre></details></div>`;
           } else {
-            const icon = status === 'ok' ? '\u2713' : '\u2717';
-            const firstLine = resultText.split('\n')[0].substring(0, 120) || '(empty)';
-            html = `<div class="chat-tool-result-inline chat-tool-${status}"><span class="chat-tool-label">${icon} ${escHtml(pendingUse.name)} ${escHtml(fp)}</span> ${escHtml(firstLine)}</div>`;
+            // Failed or unhandled tool — show error with expandable original input
+            const firstLine = resultText.split('\n')[0].substring(0, 150) || '(empty)';
+            const inputStr = stripAnsi(typeof pendingUse.input === 'string' ? pendingUse.input : JSON.stringify(pendingUse.input, null, 2));
+            html = `<div class="chat-tool-use chat-tool-use-error"><span class="chat-tool-label">\u2717 ${escHtml(pendingUse.name)} ${escHtml(fp)}</span><div class="chat-tool-error-reason">${escHtml(firstLine)}</div><details class="chat-diff"><summary class="chat-diff-summary">Show input</summary><pre>${escHtml(inputStr).substring(0, 3000)}</pre></details></div>`;
           }
 
           if (placeholder) {
