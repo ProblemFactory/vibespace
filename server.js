@@ -1382,19 +1382,26 @@ wss.on('connection', (ws) => {
           session.clients.set(ws, { cols: 120, rows: 30 });
           attachedSessions.add(data.sessionId);
           if (session.mode === 'chat') {
-            // Chat mode: parse buffer as JSON lines for current session output
+            // Load JSONL history (past conversation from Claude's session file)
+            let jsonlHistory = [];
+            const jsonlUuids = new Set();
+            if (session.claudeSessionId) {
+              jsonlHistory = parseSessionJsonl(session.claudeSessionId, session.cwd);
+              for (const m of jsonlHistory) { if (m.uuid) jsonlUuids.add(m.uuid); }
+            }
+            // Parse buffer for current session output — only include messages
+            // not already in JSONL (dedup by uuid) and filter out noise
             const bufferMessages = [];
             for (const line of (session.buffer || '').split('\n')) {
               const trimmed = line.replace(/\r/g, '').trim();
               if (!trimmed) continue;
-              try { bufferMessages.push(JSON.parse(trimmed)); } catch {}
+              try {
+                const msg = JSON.parse(trimmed);
+                if (msg.type !== 'user' && msg.type !== 'assistant') continue; // skip system/result/rate_limit
+                if (msg.uuid && jsonlUuids.has(msg.uuid)) continue; // already in JSONL
+                bufferMessages.push(msg);
+              } catch {}
             }
-            // Also load JSONL history from Claude's session file (for resumed sessions)
-            let jsonlHistory = [];
-            if (session.claudeSessionId) {
-              jsonlHistory = parseSessionJsonl(session.claudeSessionId, session.cwd);
-            }
-            // Combine: JSONL history first (past conversation), then buffer (current session output)
             const chatHistory = [...jsonlHistory, ...bufferMessages];
             ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, mode: 'chat', chatHistory }));
           } else {
