@@ -1279,13 +1279,30 @@ html, body {
   background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 14px; padding: 2px 4px;
 }
 .chat-search-close:hover { color: var(--text); }
-.chat-search-hidden { display: none !important; }
+.chat-search-status { font-size: 11px; color: var(--text-dim); white-space: nowrap; min-width: 50px; text-align: center; }
+.chat-search-nav {
+  background: none; border: 1px solid var(--border); color: var(--text-dim); cursor: pointer;
+  font-size: 10px; padding: 2px 6px; border-radius: var(--radius-sm);
+}
+.chat-search-nav:hover { background: var(--bg-hover); color: var(--text); }
+mark.chat-search-highlight { background: rgba(255,193,7,0.3); color: inherit; border-radius: 2px; }
+mark.chat-search-current { background: rgba(255,193,7,0.7); outline: 1px solid var(--yellow); }
 .chat-link {
   color: var(--accent); cursor: pointer; text-decoration: underline;
   text-decoration-style: dotted; text-underline-offset: 2px;
 }
 .chat-link:hover { text-decoration-style: solid; opacity: 0.9; }
 .chat-link-path { color: var(--blue); }
+.chat-pre-wrap { position: relative; }
+.chat-wrap-toggle {
+  position: absolute; top: 4px; right: 4px;
+  font-size: 9px; padding: 1px 5px; border-radius: 3px; cursor: pointer;
+  background: var(--bg-hover); border: 1px solid var(--border); color: var(--text-dim);
+  opacity: 0; transition: opacity var(--transition);
+}
+.chat-pre-wrap:hover .chat-wrap-toggle { opacity: 1; }
+.chat-wrap-toggle:hover { color: var(--text); background: var(--bg-input); }
+pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
 
 /* ── Chat Compact Mode ── */
 .chat-compact .chat-message-list { padding: 8px 12px; gap: 2px; }

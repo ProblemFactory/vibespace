@@ -118,14 +118,33 @@ class ChatView {
     searchInput.className = 'chat-search-input';
     searchInput.placeholder = 'Search messages...';
     searchInput.type = 'text';
+    this._searchStatus = document.createElement('span');
+    this._searchStatus.className = 'chat-search-status';
+    const searchPrev = document.createElement('button');
+    searchPrev.className = 'chat-search-nav';
+    searchPrev.textContent = '\u25B2';
+    searchPrev.title = 'Previous';
+    searchPrev.onclick = () => this._searchNav(-1);
+    const searchNext = document.createElement('button');
+    searchNext.className = 'chat-search-nav';
+    searchNext.textContent = '\u25BC';
+    searchNext.title = 'Next';
+    searchNext.onclick = () => this._searchNav(1);
     const searchClose = document.createElement('button');
     searchClose.className = 'chat-search-close';
     searchClose.textContent = '\u2715';
     searchClose.onclick = () => { searchBar.classList.add('hidden'); searchInput.value = ''; this._clearSearch(); };
-    searchBar.append(searchInput, searchClose);
+    searchBar.append(searchInput, this._searchStatus, searchPrev, searchNext, searchClose);
+    this._searchInput = searchInput;
+    this._searchMatches = [];
+    this._searchIdx = -1;
     container.insertBefore(searchBar, this._messageList);
 
     searchInput.addEventListener('input', () => this._doSearch(searchInput.value));
+    searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); this._searchNav(e.shiftKey ? -1 : 1); }
+      if (e.key === 'Escape') { searchClose.click(); }
+    });
 
     // Ctrl+F to search
     container.addEventListener('keydown', (e) => {
@@ -133,9 +152,9 @@ class ChatView {
         e.preventDefault();
         searchBar.classList.remove('hidden');
         searchInput.focus();
+        searchInput.select();
       }
     });
-    // Make container focusable for Ctrl+F
     container.tabIndex = -1;
 
     container.appendChild(inputArea);
@@ -231,7 +250,7 @@ class ChatView {
         } else {
           el.innerHTML = `<details class="chat-tool-result-details chat-tool-${status}"><summary><span class="chat-tool-label">Tool Result (${status})</span> ${escHtml(firstLine)}</summary><pre>${escHtml(truncated)}</pre></details>`;
         }
-        this._messageList.appendChild(el);
+        this._messageList.appendChild(el); this._addWrapToggles(el);
       }
       return;
     }
@@ -251,7 +270,7 @@ class ChatView {
     } else {
       el.innerHTML = `<div class="chat-bubble chat-bubble-user">${textHtml}</div>`;
     }
-    this._messageList.appendChild(el);
+    this._messageList.appendChild(el); this._addWrapToggles(el);
   }
 
   _appendAssistant(msg) {
@@ -284,7 +303,7 @@ class ChatView {
     } else {
       el.innerHTML = `<div class="chat-bubble chat-bubble-assistant">${parts.join('')}</div>`;
     }
-    this._messageList.appendChild(el);
+    this._messageList.appendChild(el); this._addWrapToggles(el);
   }
 
   _appendResult(msg) {
@@ -301,7 +320,28 @@ class ChatView {
     const el = document.createElement('div');
     el.className = 'chat-msg chat-msg-system';
     el.innerHTML = `<div class="chat-system">${escHtml(text)}</div>`;
-    this._messageList.appendChild(el);
+    this._messageList.appendChild(el); this._addWrapToggles(el);
+  }
+
+  // Add wrap toggle button to all <pre> blocks inside an element
+  _addWrapToggles(el) {
+    for (const pre of el.querySelectorAll('pre')) {
+      if (pre.querySelector('.chat-wrap-toggle')) continue;
+      const wrapper = document.createElement('div');
+      wrapper.className = 'chat-pre-wrap';
+      pre.parentNode.insertBefore(wrapper, pre);
+      wrapper.appendChild(pre);
+      const btn = document.createElement('button');
+      btn.className = 'chat-wrap-toggle';
+      btn.textContent = 'Wrap';
+      btn.title = 'Toggle word wrap';
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const on = pre.classList.toggle('chat-pre-wrapped');
+        btn.textContent = on ? 'No Wrap' : 'Wrap';
+      };
+      wrapper.appendChild(btn);
+    }
   }
 
   _renderMarkdown(text) {
@@ -418,17 +458,65 @@ class ChatView {
   }
 
   _doSearch(query) {
+    this._clearSearch();
     const q = query.trim().toLowerCase();
-    const msgs = this._messageList.querySelectorAll('.chat-msg');
-    if (!q) { msgs.forEach(m => m.classList.remove('chat-search-hidden')); return; }
-    msgs.forEach(m => {
-      const text = m.textContent.toLowerCase();
-      m.classList.toggle('chat-search-hidden', !text.includes(q));
-    });
+    if (!q) { this._searchStatus.textContent = ''; return; }
+
+    // Walk text nodes and highlight matches
+    const matches = [];
+    const walker = document.createTreeWalker(this._messageList, NodeFilter.SHOW_TEXT);
+    const ranges = [];
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      const text = node.textContent.toLowerCase();
+      let idx = 0;
+      while ((idx = text.indexOf(q, idx)) !== -1) {
+        ranges.push({ node, start: idx, length: q.length });
+        idx += q.length;
+      }
+    }
+
+    // Apply highlights (reverse order to preserve offsets)
+    for (let i = ranges.length - 1; i >= 0; i--) {
+      const { node, start, length } = ranges[i];
+      const range = document.createRange();
+      range.setStart(node, start);
+      range.setEnd(node, start + length);
+      const mark = document.createElement('mark');
+      mark.className = 'chat-search-highlight';
+      range.surroundContents(mark);
+      matches.unshift(mark); // prepend since we go reverse
+    }
+
+    this._searchMatches = matches;
+    this._searchIdx = matches.length > 0 ? 0 : -1;
+    this._searchStatus.textContent = matches.length > 0 ? `1/${matches.length}` : 'No results';
+    if (matches.length > 0) {
+      matches[0].classList.add('chat-search-current');
+      matches[0].scrollIntoView({ block: 'center' });
+    }
+  }
+
+  _searchNav(dir) {
+    if (!this._searchMatches.length) return;
+    this._searchMatches[this._searchIdx]?.classList.remove('chat-search-current');
+    this._searchIdx = (this._searchIdx + dir + this._searchMatches.length) % this._searchMatches.length;
+    const current = this._searchMatches[this._searchIdx];
+    current.classList.add('chat-search-current');
+    current.scrollIntoView({ block: 'center' });
+    this._searchStatus.textContent = `${this._searchIdx + 1}/${this._searchMatches.length}`;
   }
 
   _clearSearch() {
-    this._messageList.querySelectorAll('.chat-msg').forEach(m => m.classList.remove('chat-search-hidden'));
+    // Remove all highlight marks
+    for (const mark of this._messageList.querySelectorAll('mark.chat-search-highlight')) {
+      const parent = mark.parentNode;
+      parent.replaceChild(document.createTextNode(mark.textContent), mark);
+      parent.normalize(); // merge adjacent text nodes
+    }
+    this._searchMatches = [];
+    this._searchIdx = -1;
+    if (this._searchStatus) this._searchStatus.textContent = '';
   }
 
   _scrollToBottom() {
