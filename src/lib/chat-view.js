@@ -57,10 +57,15 @@ class ChatView {
     this._scrollBtn.innerHTML = '\u2193';
     this._scrollBtn.title = 'Scroll to bottom';
     this._scrollBtn.onclick = () => {
-      this._pinned = true;
-      this._newMsgCount = 0;
-      this._scrollToBottom();
-      this._scrollBtn.classList.add('hidden');
+      if (this._windowEnd < this._total) {
+        // Window doesn't include latest messages — reload at bottom
+        this.jumpToBottom();
+      } else {
+        this._pinned = true;
+        this._newMsgCount = 0;
+        this._scrollToBottom();
+        this._scrollBtn.classList.add('hidden');
+      }
     };
     container.appendChild(this._scrollBtn);
 
@@ -82,8 +87,8 @@ class ChatView {
           this._pinned = false;
           this._scrollBtn.classList.remove('hidden');
         }
-        if (scrollTop < 100 && this._loadedOffset > 0 && !this._loadingEarlier) {
-          this._loadEarlierMessages();
+        if (scrollTop < 100 && this._windowStart > 0 && !this._loading) {
+          this._extendTop();
         }
       });
     }, { passive: true });
@@ -265,76 +270,107 @@ class ChatView {
     this.ws.onStateChange(this._stateHandler);
   }
 
-  // Load history from attach response
+  // ── View Manager: sliding window over server message list ──
+
+  // Load initial messages from attach response
   loadHistory(messages, totalCount) {
-    this._totalServerMessages = totalCount || messages.length;
-    this._loadedOffset = this._totalServerMessages - messages.length;
-    this._loadingEarlier = false;
+    this._total = totalCount || messages.length;
+    this._windowStart = this._total - messages.length; // index of first loaded msg
+    this._windowEnd = this._total; // index after last loaded msg
+    this._loading = false;
 
-    // Render in batches to avoid blocking UI
-    this._renderBatch(messages, 0, true);
+    for (const msg of messages) this._onMessage(msg, true);
+    this._scrollToBottom();
   }
 
-  _renderBatch(messages, idx, isHistory) {
-    const BATCH = 20;
-    const end = Math.min(idx + BATCH, messages.length);
-    for (let i = idx; i < end; i++) {
-      this._onMessage(messages[i], isHistory);
+  // Get session identifiers for API calls
+  _getSessionIds() {
+    const allSess = this.app.sidebar?._allSessions || [];
+    const match = allSess.find(s => s.webuiId === this.sessionId);
+    return { claudeId: match?.sessionId, cwd: match?.cwd || '' };
+  }
+
+  // Fetch a range of messages from server
+  async _fetchMessages(offset, limit) {
+    const { claudeId, cwd } = this._getSessionIds();
+    if (!claudeId) return [];
+    const res = await fetch(`/api/session-messages?claudeSessionId=${encodeURIComponent(claudeId)}&cwd=${encodeURIComponent(cwd)}&offset=${offset}&limit=${limit}`);
+    const data = await res.json();
+    if (data.total) this._total = data.total;
+    return data.messages || [];
+  }
+
+  // Extend the window upward (scroll up)
+  async _extendTop(count = 50) {
+    if (this._loading || this._windowStart <= 0) return;
+    this._loading = true;
+
+    const newStart = Math.max(0, this._windowStart - count);
+    const fetchCount = this._windowStart - newStart;
+    const msgs = await this._fetchMessages(newStart, fetchCount);
+
+    const scrollHeightBefore = this._messageList.scrollHeight;
+    const firstEl = this._messageList.querySelector('.chat-msg');
+    for (const msg of msgs) {
+      const el = this._renderElement(msg);
+      if (el && firstEl) this._messageList.insertBefore(el, firstEl);
     }
-    if (end < messages.length) {
-      requestAnimationFrame(() => this._renderBatch(messages, end, isHistory));
-    } else if (isHistory) {
-      this._scrollToBottom();
+    this._windowStart = newStart;
+
+    // Preserve scroll position
+    this._messageList.scrollTop += (this._messageList.scrollHeight - scrollHeightBefore);
+    setTimeout(() => { this._loading = false; }, 300);
+  }
+
+  // Jump to a specific message index: replace window entirely
+  async jumpToIndex(targetIdx) {
+    const windowSize = 50;
+    const start = Math.max(0, targetIdx - 20);
+    const end = Math.min(this._total, start + windowSize);
+    const msgs = await this._fetchMessages(start, end - start);
+
+    // Clear and rebuild DOM
+    this._messageList.querySelectorAll('.chat-msg, .chat-msg-system').forEach(el => el.remove());
+    this._windowStart = start;
+    this._windowEnd = end;
+    this._pinned = false;
+
+    for (const msg of msgs) this._onMessage(msg, true);
+
+    // Scroll to the target message
+    const relIdx = targetIdx - start;
+    const allMsgs = this._messageList.querySelectorAll('.chat-msg');
+    if (relIdx >= 0 && relIdx < allMsgs.length) {
+      const targetEl = allMsgs[relIdx];
+      for (const d of targetEl.querySelectorAll('details:not([open])')) d.open = true;
+      targetEl.style.contentVisibility = 'visible';
+      requestAnimationFrame(() => targetEl.scrollIntoView({ block: 'center' }));
     }
   }
 
-  async _loadEarlierMessages() {
-    if (this._loadingEarlier || this._loadedOffset <= 0) return;
-    this._loadingEarlier = true;
+  // Jump to the bottom of the conversation
+  async jumpToBottom() {
+    const windowSize = 50;
+    const start = Math.max(0, this._total - windowSize);
+    const msgs = await this._fetchMessages(start, this._total - start);
 
-    const pageSize = 50;
-    const newOffset = Math.max(0, this._loadedOffset - pageSize);
-    const count = this._loadedOffset - newOffset;
+    this._messageList.querySelectorAll('.chat-msg, .chat-msg-system').forEach(el => el.remove());
+    this._windowStart = start;
+    this._windowEnd = this._total;
 
-    try {
-      const allSess = this.app.sidebar?._allSessions || [];
-      const match = allSess.find(s => s.webuiId === this.sessionId);
-      const claudeId = match?.sessionId;
-      const cwd = match?.cwd || '';
-      if (!claudeId) throw new Error('no claudeSessionId');
-
-      const res = await fetch(`/api/session-messages?claudeSessionId=${encodeURIComponent(claudeId)}&cwd=${encodeURIComponent(cwd)}&offset=${newOffset}&limit=${count}`);
-      const data = await res.json();
-
-      // Measure scroll height before inserting
-      const scrollHeightBefore = this._messageList.scrollHeight;
-
-      // Render older messages at the top
-      const beforeEl = this._messageList.querySelector('.chat-msg');
-      for (const msg of data.messages) {
-        const el = this._renderMessageElement(msg);
-        if (el && beforeEl) this._messageList.insertBefore(el, beforeEl);
-      }
-
-      this._loadedOffset = newOffset;
-
-      // Restore scroll position: offset by the height of newly inserted content
-      const scrollHeightAfter = this._messageList.scrollHeight;
-      this._messageList.scrollTop += (scrollHeightAfter - scrollHeightBefore);
-    } catch {}
-
-    // Delay re-enabling to prevent scroll event from immediately retriggering
-    setTimeout(() => { this._loadingEarlier = false; }, 500);
+    for (const msg of msgs) this._onMessage(msg, true);
+    this._pinned = true;
+    this._newMsgCount = 0;
+    this._scrollBtn.classList.add('hidden');
+    this._scrollToBottom();
   }
 
-  // Render a single message and return the DOM element (without appending to messageList)
-  _renderMessageElement(msg) {
-    // Reuse _onMessage but capture the last appended element
+  // Render a single message element (append to list, then detach for insertion elsewhere)
+  _renderElement(msg) {
     const countBefore = this._messageList.children.length;
     this._onMessage(msg, true);
     const countAfter = this._messageList.children.length;
     if (countAfter > countBefore) {
-      // Detach the newly appended element (it was added at the end)
       return this._messageList.removeChild(this._messageList.lastElementChild);
     }
     return null;
@@ -374,11 +410,15 @@ class ChatView {
     } else {
       this.ws.send({ type: 'chat-input', sessionId: this.sessionId, text, msgId });
     }
-    // Re-pin and scroll to bottom on send — user expects to see the response
-    this._pinned = true;
-    this._newMsgCount = 0;
-    this._scrollBtn.classList.add('hidden');
-    this._scrollToBottom();
+    // Re-pin — if we're not at the end of conversation, jump there first
+    if (this._windowEnd < this._total) {
+      this.jumpToBottom();
+    } else {
+      this._pinned = true;
+      this._newMsgCount = 0;
+      this._scrollBtn.classList.add('hidden');
+      this._scrollToBottom();
+    }
     this._pendingTyping = true;
   }
 
@@ -443,10 +483,11 @@ class ChatView {
     }
 
     if (!isHistory) {
+      this._total = (this._total || 0) + 1;
+      this._windowEnd = this._total;
       if (this._pinned) {
         this._scrollToBottom();
       } else {
-        // Count new messages while unpinned
         this._newMsgCount++;
         this._scrollBtn.innerHTML = `\u2193 <span class="chat-scroll-badge">${this._newMsgCount}</span>`;
       }
@@ -836,50 +877,25 @@ class ChatView {
     const results = this._serverSearchResults;
     if (!results || idx < 0 || idx >= results.length) return;
 
-    const result = results[idx];
-    const msgIndex = result.index;
-
-    // Load messages if needed
-    if (msgIndex < this._loadedOffset) {
-      const allSess = this.app.sidebar?._allSessions || [];
-      const match = allSess.find(s => s.webuiId === this.sessionId);
-      const claudeId = match?.sessionId;
-      const cwd = match?.cwd || '';
-      if (!claudeId) return;
-
-      try {
-        const pageStart = Math.max(0, msgIndex - 10);
-        const res = await fetch(`/api/session-messages?claudeSessionId=${encodeURIComponent(claudeId)}&cwd=${encodeURIComponent(cwd)}&offset=${pageStart}&limit=${this._loadedOffset - pageStart}`);
-        const data = await res.json();
-        const firstMsg = this._messageList.querySelector('.chat-msg');
-        for (const msg of data.messages) {
-          const el = this._renderMessageElement(msg);
-          if (el && firstMsg) this._messageList.insertBefore(el, firstMsg);
-        }
-        this._loadedOffset = pageStart;
-      } catch { return; }
-    }
-
-    // Clear previous highlight
+    const msgIndex = results[idx].index;
     this._clearDomHighlights();
 
-    // Only highlight inside the target message element (not entire DOM)
-    const targetPos = msgIndex - this._loadedOffset;
+    // Jump window to the target if it's outside current range
+    if (msgIndex < this._windowStart || msgIndex >= this._windowEnd) {
+      await this.jumpToIndex(msgIndex);
+    }
+
+    // Highlight in the target element
+    const relIdx = msgIndex - this._windowStart;
     const allMsgs = this._messageList.querySelectorAll('.chat-msg');
-    if (targetPos >= 0 && targetPos < allMsgs.length) {
-      const targetEl = allMsgs[targetPos];
-      // Expand all collapsed <details> inside the target so text nodes are accessible
+    if (relIdx >= 0 && relIdx < allMsgs.length) {
+      const targetEl = allMsgs[relIdx];
       for (const d of targetEl.querySelectorAll('details:not([open])')) d.open = true;
-      // Force render (content-visibility: auto may skip off-screen elements)
       targetEl.style.contentVisibility = 'visible';
       this._highlightInElement(targetEl, this._searchQuery);
       const mark = targetEl.querySelector('mark.chat-search-highlight');
-      if (mark) {
-        this._scrollToMatch(mark);
-      } else {
-        // Fallback: scroll to element even if highlight failed
-        targetEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      }
+      if (mark) this._scrollToMatch(mark);
+      else targetEl.scrollIntoView({ block: 'center' });
     }
   }
 
