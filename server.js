@@ -1344,12 +1344,34 @@ wss.on('connection', (ws) => {
         // Chat mode: send user message to stdin + broadcast to all clients
         const session = activeSessions.get(data.sessionId);
         if (session?.pty && session.mode === 'chat') {
-          session.pty.write(data.text + '\n');
-          // Broadcast user message to all attached clients (stream-json doesn't echo it)
-          const userMsg = { type: 'user', message: { role: 'user', content: data.text }, timestamp: new Date().toISOString() };
-          const userLine = JSON.stringify(userMsg);
-          session.buffer = (session.buffer + userLine + '\n').slice(-500000);
-          broadcastToSession(session, data.sessionId, { type: 'chat-message', sessionId: data.sessionId, message: userMsg });
+          // Check if text is already a raw JSON message (e.g. image paste)
+          let isRawJson = false;
+          try {
+            const parsed = JSON.parse(data.text);
+            if (parsed.type === 'user' && parsed.message) isRawJson = true;
+          } catch {}
+
+          if (isRawJson) {
+            // Already formatted — pass through to stdin, broadcast a simplified version (no base64 blob)
+            session.pty.write(data.text + '\n');
+            const parsed = JSON.parse(data.text);
+            // Strip base64 data from broadcast to avoid huge WS messages
+            const broadcastContent = (parsed.message.content || []).map(b => {
+              if (b.type === 'image') return { type: 'text', text: '[Image]' };
+              return b;
+            });
+            const userMsg = { type: 'user', message: { role: 'user', content: broadcastContent }, timestamp: new Date().toISOString() };
+            const userLine = JSON.stringify(userMsg);
+            session.buffer = (session.buffer + userLine + '\n').slice(-500000);
+            broadcastToSession(session, data.sessionId, { type: 'chat-message', sessionId: data.sessionId, message: userMsg });
+          } else {
+            // Plain text — wrap and send
+            session.pty.write(data.text + '\n');
+            const userMsg = { type: 'user', message: { role: 'user', content: data.text }, timestamp: new Date().toISOString() };
+            const userLine = JSON.stringify(userMsg);
+            session.buffer = (session.buffer + userLine + '\n').slice(-500000);
+            broadcastToSession(session, data.sessionId, { type: 'chat-message', sessionId: data.sessionId, message: userMsg });
+          }
         }
         break;
       }

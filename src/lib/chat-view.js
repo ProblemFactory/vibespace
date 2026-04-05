@@ -1,6 +1,11 @@
 import { marked } from 'marked';
 import { escHtml } from './utils.js';
 
+// Strip ANSI escape sequences (colors, cursor, etc.)
+function stripAnsi(str) {
+  return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\x1b\][^\x07]*\x07/g, '');
+}
+
 /**
  * ChatView — renders a chat interface for stream-json mode sessions.
  * Displays structured messages from Claude Code's --output-format stream-json.
@@ -49,6 +54,20 @@ class ChatView {
     this._textarea.className = 'chat-input';
     this._textarea.placeholder = 'Type a message...';
     this._textarea.rows = 1;
+
+    // Image paste support — intercept paste with image data
+    this._textarea.addEventListener('paste', (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          e.preventDefault();
+          const file = item.getAsFile();
+          if (file) this._handleImagePaste(file);
+          return;
+        }
+      }
+    });
 
     // Auto-grow textarea (skip in expanded mode — user controls height)
     this._textarea.addEventListener('input', () => {
@@ -264,7 +283,8 @@ class ChatView {
         const el = document.createElement('div');
         el.className = 'chat-msg chat-msg-tool-result';
         const status = block.is_error ? 'error' : 'ok';
-        const resultText = typeof block.content === 'string' ? block.content : JSON.stringify(block.content, null, 2);
+        const rawText = typeof block.content === 'string' ? block.content : JSON.stringify(block.content, null, 2);
+        const resultText = stripAnsi(rawText);
         const truncated = resultText.length > 2000 ? resultText.substring(0, 2000) + '...' : resultText;
         const firstLine = resultText.split('\n')[0].substring(0, 120) || '(empty)';
         const icon = status === 'ok' ? '\u2713' : '\u2717';
@@ -307,11 +327,11 @@ class ChatView {
     if (Array.isArray(content)) {
       for (const block of content) {
         if (block.type === 'text') {
-          parts.push(`<div class="chat-text">${this._renderMarkdown(block.text)}</div>`);
+          parts.push(`<div class="chat-text">${this._renderMarkdown(stripAnsi(block.text || ''))}</div>`);
         } else if (block.type === 'thinking') {
-          parts.push(`<details class="chat-thinking"><summary>Thinking...</summary><pre>${escHtml(block.text || '')}</pre></details>`);
+          parts.push(`<details class="chat-thinking"><summary>Thinking...</summary><pre>${escHtml(stripAnsi(block.text || ''))}</pre></details>`);
         } else if (block.type === 'tool_use') {
-          const inputStr = typeof block.input === 'string' ? block.input : JSON.stringify(block.input, null, 2);
+          const inputStr = stripAnsi(typeof block.input === 'string' ? block.input : JSON.stringify(block.input, null, 2));
           parts.push(`<div class="chat-tool-use"><span class="chat-tool-label">\uD83D\uDD27 ${escHtml(block.name || 'tool')}</span><details><summary>Input</summary><pre>${escHtml(inputStr).substring(0, 3000)}</pre></details></div>`);
         }
       }
@@ -555,6 +575,34 @@ class ChatView {
     this._searchMatches = [];
     this._searchIdx = -1;
     if (this._searchStatus) this._searchStatus.textContent = '';
+  }
+
+  async _handleImagePaste(file) {
+    // Read image as base64 and send as stream-json image content block
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = reader.result.split(',')[1]; // strip data:image/...;base64, prefix
+      const mediaType = file.type || 'image/png';
+      // Build stream-json user message with image + optional text
+      const text = this._textarea.value.trim();
+      const content = [
+        { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+      ];
+      if (text) content.push({ type: 'text', text });
+      const msg = JSON.stringify({ type: 'user', message: { role: 'user', content } });
+      // Send the raw JSON through chat-input — chat-wrapper passes valid JSON through as-is
+      this.ws.send({ type: 'chat-input', sessionId: this.sessionId, text: msg });
+      this._textarea.value = '';
+      this._textarea.style.height = 'auto';
+      this._pendingTyping = true;
+
+      // Show image preview in user message
+      const userMsg = { type: 'user', message: { role: 'user', content: [
+        { type: 'text', text: `[Image: ${file.name || 'clipboard'}]${text ? '\n' + text : ''}` }
+      ]}};
+      this._onMessage(userMsg);
+    };
+    reader.readAsDataURL(file);
   }
 
   _showTyping() {
