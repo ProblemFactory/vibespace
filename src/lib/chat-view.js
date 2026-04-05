@@ -261,15 +261,6 @@ class ChatView {
     if (this._loadingEarlier || this._loadedOffset <= 0) return;
     this._loadingEarlier = true;
 
-    // Show spinner at top
-    let spinner = this._messageList.querySelector('.chat-load-spinner');
-    if (!spinner) {
-      spinner = document.createElement('div');
-      spinner.className = 'chat-load-spinner';
-      spinner.innerHTML = '<span class="chat-spinner"></span>';
-      this._messageList.prepend(spinner);
-    }
-
     const pageSize = 50;
     const newOffset = Math.max(0, this._loadedOffset - pageSize);
     const count = this._loadedOffset - newOffset;
@@ -284,13 +275,10 @@ class ChatView {
       const res = await fetch(`/api/session-messages?claudeSessionId=${encodeURIComponent(claudeId)}&cwd=${encodeURIComponent(cwd)}&offset=${newOffset}&limit=${count}`);
       const data = await res.json();
 
-      spinner.remove();
+      // Measure scroll height before inserting
+      const scrollHeightBefore = this._messageList.scrollHeight;
 
-      // Remember scroll anchor to preserve position
-      const firstMsg = this._messageList.querySelector('.chat-msg');
-      const anchorTop = firstMsg?.offsetTop || 0;
-
-      // Render older messages at the top (before existing messages)
+      // Render older messages at the top
       const beforeEl = this._messageList.querySelector('.chat-msg');
       for (const msg of data.messages) {
         const el = this._renderMessageElement(msg);
@@ -299,16 +287,13 @@ class ChatView {
 
       this._loadedOffset = newOffset;
 
-      // Preserve scroll position
-      if (firstMsg) {
-        requestAnimationFrame(() => {
-          this._messageList.scrollTop = firstMsg.offsetTop - anchorTop;
-        });
-      }
-    } catch {
-      if (spinner) spinner.remove();
-    }
-    this._loadingEarlier = false;
+      // Restore scroll position: offset by the height of newly inserted content
+      const scrollHeightAfter = this._messageList.scrollHeight;
+      this._messageList.scrollTop += (scrollHeightAfter - scrollHeightBefore);
+    } catch {}
+
+    // Delay re-enabling to prevent scroll event from immediately retriggering
+    setTimeout(() => { this._loadingEarlier = false; }, 500);
   }
 
   // Render a single message and return the DOM element (without appending to messageList)
