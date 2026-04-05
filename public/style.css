@@ -1454,7 +1454,7 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
     box-shadow: none; z-index: 1 !important;
     display: none !important;
   }
-  .window.window-active { display: flex !important; }
+  .window.window-active { display: flex !important; bottom: var(--kb-offset, 0px) !important; }
   .window .resize-handle { display: none; }
   .window-titlebar { display: none; }
 

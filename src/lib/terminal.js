@@ -314,6 +314,18 @@ class TerminalSession {
     }
     winInfo.content.appendChild(mobileKeys);
 
+    // Mobile: keep key toolbar visible when virtual keyboard opens
+    if ('visualViewport' in window) {
+      const adjustForKeyboard = () => {
+        if (window.innerWidth > 768) return;
+        const vv = window.visualViewport;
+        const offset = window.innerHeight - vv.height - vv.offsetTop;
+        winInfo.element.style.setProperty('--kb-offset', offset + 'px');
+      };
+      window.visualViewport.addEventListener('resize', adjustForKeyboard);
+      window.visualViewport.addEventListener('scroll', adjustForKeyboard);
+    }
+
     // Add settings gear icon to titlebar
     this._addSettingsButton(winInfo);
   }
