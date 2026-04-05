@@ -1446,18 +1446,15 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
 
   /* Windows: only active window visible, fills screen */
   .window {
-    position: absolute !important;
-    left: 0 !important; top: 0 !important;
-    width: 100% !important; height: 100% !important;
+    position: fixed !important;
+    left: 0 !important; right: 0 !important;
+    top: 44px !important; bottom: 0 !important;
+    width: auto !important; height: auto !important;
     border-radius: 0; min-width: 0; min-height: 0; border: none;
     box-shadow: none; z-index: 1 !important;
     display: none !important;
   }
   .window.window-active { display: flex !important; }
-
-  /* Main wrapper uses dvh to shrink with keyboard */
-  #main-wrapper { height: 100dvh; height: 100vh; /* fallback */ }
-  @supports (height: 100dvh) { #main-wrapper { height: 100dvh; } }
   .window .resize-handle { display: none; }
   .window-titlebar { display: none; }
 
