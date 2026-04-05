@@ -211,24 +211,34 @@ class ChatView {
     const content = msg.message?.content;
     if (!content) return;
 
+    // Distinguish actual user messages (string content) from tool results (array with tool_result blocks)
+    const isToolResult = Array.isArray(content) && content.every(b => b.type === 'tool_result');
+
+    if (isToolResult) {
+      for (const block of content) {
+        const el = document.createElement('div');
+        el.className = 'chat-msg chat-msg-tool-result';
+        const status = block.is_error ? 'error' : 'ok';
+        const resultText = typeof block.content === 'string' ? block.content : JSON.stringify(block.content, null, 2);
+        const truncated = resultText.length > 2000 ? resultText.substring(0, 2000) + '...' : resultText;
+        if (this._compact) {
+          el.innerHTML = `<div class="chat-compact-msg"><span class="chat-role chat-role-tool">${status === 'ok' ? '\u2713' : '\u2717'}</span><div class="chat-compact-content"><div class="chat-tool-result chat-tool-${status}"><pre>${escHtml(truncated)}</pre></div></div></div>`;
+        } else {
+          el.innerHTML = `<div class="chat-tool-result chat-tool-${status}"><span class="chat-tool-label">Tool Result (${status})</span><pre>${escHtml(truncated)}</pre></div>`;
+        }
+        this._messageList.appendChild(el);
+      }
+      return;
+    }
+
+    // Actual user message
     const el = document.createElement('div');
     el.className = 'chat-msg chat-msg-user';
-
     let textHtml = '';
     if (typeof content === 'string') {
       textHtml = this._linkifyText(content);
     } else if (Array.isArray(content)) {
-      const parts = [];
-      for (const block of content) {
-        if (block.type === 'text') {
-          parts.push(this._linkifyText(block.text));
-        } else if (block.type === 'tool_result') {
-          const status = block.is_error ? 'error' : 'ok';
-          const resultText = typeof block.content === 'string' ? block.content : JSON.stringify(block.content, null, 2);
-          parts.push(`<div class="chat-tool-result chat-tool-${status}"><span class="chat-tool-label">Tool Result (${status})</span><pre>${escHtml(resultText).substring(0, 2000)}</pre></div>`);
-        }
-      }
-      textHtml = parts.join('');
+      textHtml = content.filter(b => b.type === 'text').map(b => this._linkifyText(b.text)).join('');
     }
 
     if (this._compact) {
@@ -298,16 +308,24 @@ class ChatView {
     }
   }
 
+  // Strip trailing punctuation from matched paths/URLs
+  _cleanPath(p) { return p.replace(/[`'".,;:!?)}\]]+$/, ''); }
+
   // Auto-detect URLs and file paths in rendered HTML, make them interactive
   // Click = copy, Ctrl+Click = open
   _linkify(html) {
     // Match URLs not already inside <a> tags
-    html = html.replace(/(?<!href=["'])(https?:\/\/[^\s<>"')\]]+)/g, (url) => {
-      return `<span class="chat-link" data-href="${escHtml(url)}" title="Click to copy, Ctrl+Click to open">${escHtml(url)}</span>`;
+    html = html.replace(/(?<!href=["'])(https?:\/\/[^\s<>"')\]]+)/g, (raw) => {
+      const url = this._cleanPath(raw);
+      const after = raw.slice(url.length);
+      return `<span class="chat-link" data-href="${escHtml(url)}" title="Click to copy, Ctrl+Click to open">${escHtml(url)}</span>${escHtml(after)}`;
     });
     // Match absolute file paths (not already inside tags)
-    html = html.replace(/(?<![="'\w])(\/(?:home|tmp|usr|var|etc|opt|mnt|root|workspace)[^\s<>"')\]]*)/g, (fp) => {
-      return `<span class="chat-link chat-link-path" data-path="${escHtml(fp)}" title="Click to copy, Ctrl+Click to open">${escHtml(fp)}</span>`;
+    html = html.replace(/(?<![="'\w])(\/(?:home|tmp|usr|var|etc|opt|mnt|root|workspace)[^\s<>"')\]]*)/g, (raw) => {
+      const fp = this._cleanPath(raw);
+      const after = raw.slice(fp.length);
+      if (fp.length < 3) return raw; // too short
+      return `<span class="chat-link chat-link-path" data-path="${escHtml(fp)}" title="Click to copy, Ctrl+Click to open">${escHtml(fp)}</span>${escHtml(after)}`;
     });
     return html;
   }
@@ -315,11 +333,16 @@ class ChatView {
   // Linkify plain text (for user messages that don't go through markdown)
   _linkifyText(text) {
     let html = escHtml(text);
-    html = html.replace(/(https?:\/\/[^\s<>&]+)/g, (url) => {
-      return `<span class="chat-link" data-href="${url}" title="Click to copy, Ctrl+Click to open">${url}</span>`;
+    html = html.replace(/(https?:\/\/[^\s<>&]+)/g, (raw) => {
+      const url = this._cleanPath(raw);
+      const after = raw.slice(url.length);
+      return `<span class="chat-link" data-href="${url}" title="Click to copy, Ctrl+Click to open">${url}</span>${after}`;
     });
-    html = html.replace(/(?<![="'\w])(\/(?:home|tmp|usr|var|etc|opt|mnt|root|workspace)[^\s<>&]*)/g, (fp) => {
-      return `<span class="chat-link chat-link-path" data-path="${fp}" title="Click to copy, Ctrl+Click to open">${fp}</span>`;
+    html = html.replace(/(?<![="'\w])(\/(?:home|tmp|usr|var|etc|opt|mnt|root|workspace)[^\s<>&]*)/g, (raw) => {
+      const fp = this._cleanPath(raw);
+      const after = raw.slice(fp.length);
+      if (fp.length < 3) return raw;
+      return `<span class="chat-link chat-link-path" data-path="${fp}" title="Click to copy, Ctrl+Click to open">${fp}</span>${after}`;
     });
     return html;
   }

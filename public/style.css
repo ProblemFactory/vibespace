@@ -1156,7 +1156,7 @@ html, body {
   max-width: 100%; padding: 4px 0; font-size: 13px; line-height: 1.6;
   color: var(--text); word-wrap: break-word; overflow-wrap: break-word;
 }
-.chat-bubble-assistant .chat-text p { margin: 0 0 10px; }
+.chat-bubble-assistant .chat-text p { margin: 0 0 6px; }
 .chat-bubble-assistant .chat-text p:last-child { margin-bottom: 0; }
 .chat-bubble-assistant .chat-text pre {
   background: var(--bg-root); padding: 10px 12px; border-radius: var(--radius);
@@ -1281,13 +1281,19 @@ html, body {
 }
 .chat-role-user { color: var(--accent); }
 .chat-role-assistant { color: var(--green); }
+.chat-role-tool { color: var(--text-dim); font-family: monospace; }
 .chat-compact-content {
   flex: 1; min-width: 0; font-size: 13px; line-height: 1.5; overflow-wrap: break-word;
   padding: 2px 0; white-space: pre-wrap;
 }
 .chat-compact-content .chat-text { }
-.chat-compact-content .chat-text p { margin: 0 0 4px; }
+.chat-compact-content .chat-text { line-height: 1.35; }
+.chat-compact-content .chat-text p { margin: 0 0 2px; }
 .chat-compact-content .chat-text p:last-child { margin-bottom: 0; }
+.chat-compact-content .chat-text ul, .chat-compact-content .chat-text ol { margin: 2px 0; padding-left: 18px; }
+.chat-compact-content .chat-text li { margin: 1px 0; }
+.chat-compact-content .chat-text h1, .chat-compact-content .chat-text h2,
+.chat-compact-content .chat-text h3, .chat-compact-content .chat-text h4 { margin: 6px 0 2px; }
 .chat-compact-content .chat-text pre {
   background: var(--bg-root); padding: 6px 8px; border-radius: var(--radius-sm);
   overflow-x: auto; font-size: 12px; margin: 4px 0; border: 1px solid var(--border);
