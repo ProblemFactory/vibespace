@@ -458,12 +458,16 @@ class ChatView {
   }
 
   _doSearch(query) {
+    if (this._searchTimer) clearTimeout(this._searchTimer);
+    this._searchTimer = setTimeout(() => this._executeSearch(query), 150);
+  }
+
+  _executeSearch(query) {
     this._clearSearch();
     const q = query.trim().toLowerCase();
     if (!q) { this._searchStatus.textContent = ''; return; }
 
-    // Walk text nodes and highlight matches
-    const matches = [];
+    // Collect ranges in batches to avoid blocking
     const walker = document.createTreeWalker(this._messageList, NodeFilter.SHOW_TEXT);
     const ranges = [];
     while (walker.nextNode()) {
@@ -477,23 +481,25 @@ class ChatView {
     }
 
     // Apply highlights (reverse order to preserve offsets)
+    const matches = [];
     for (let i = ranges.length - 1; i >= 0; i--) {
       const { node, start, length } = ranges[i];
-      const range = document.createRange();
-      range.setStart(node, start);
-      range.setEnd(node, start + length);
-      const mark = document.createElement('mark');
-      mark.className = 'chat-search-highlight';
-      range.surroundContents(mark);
-      matches.unshift(mark); // prepend since we go reverse
+      try {
+        const range = document.createRange();
+        range.setStart(node, start);
+        range.setEnd(node, start + length);
+        const mark = document.createElement('mark');
+        mark.className = 'chat-search-highlight';
+        range.surroundContents(mark);
+        matches.unshift(mark);
+      } catch {}
     }
 
     this._searchMatches = matches;
     this._searchIdx = matches.length > 0 ? 0 : -1;
     this._searchStatus.textContent = matches.length > 0 ? `1/${matches.length}` : 'No results';
     if (matches.length > 0) {
-      matches[0].classList.add('chat-search-current');
-      matches[0].scrollIntoView({ block: 'center' });
+      this._scrollToMatch(matches[0]);
     }
   }
 
@@ -501,18 +507,27 @@ class ChatView {
     if (!this._searchMatches.length) return;
     this._searchMatches[this._searchIdx]?.classList.remove('chat-search-current');
     this._searchIdx = (this._searchIdx + dir + this._searchMatches.length) % this._searchMatches.length;
-    const current = this._searchMatches[this._searchIdx];
-    current.classList.add('chat-search-current');
-    current.scrollIntoView({ block: 'center' });
+    this._scrollToMatch(this._searchMatches[this._searchIdx]);
     this._searchStatus.textContent = `${this._searchIdx + 1}/${this._searchMatches.length}`;
   }
 
+  // Expand parent <details> if collapsed, then scroll to match
+  _scrollToMatch(mark) {
+    mark.classList.add('chat-search-current');
+    // Open any collapsed <details> ancestors
+    let el = mark.parentElement;
+    while (el && el !== this._messageList) {
+      if (el.tagName === 'DETAILS' && !el.open) el.open = true;
+      el = el.parentElement;
+    }
+    requestAnimationFrame(() => mark.scrollIntoView({ block: 'center', behavior: 'smooth' }));
+  }
+
   _clearSearch() {
-    // Remove all highlight marks
     for (const mark of this._messageList.querySelectorAll('mark.chat-search-highlight')) {
       const parent = mark.parentNode;
       parent.replaceChild(document.createTextNode(mark.textContent), mark);
-      parent.normalize(); // merge adjacent text nodes
+      parent.normalize();
     }
     this._searchMatches = [];
     this._searchIdx = -1;
