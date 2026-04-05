@@ -66,13 +66,13 @@ class ChatView {
       }
     });
 
-    // Button row: expand toggle + send
-    const btnRow = document.createElement('div');
-    btnRow.className = 'chat-btn-row';
+    // Input wrapper (for floating expand button inside textarea)
+    const inputWrap = document.createElement('div');
+    inputWrap.className = 'chat-input-wrap';
 
     const expandBtn = document.createElement('button');
     expandBtn.className = 'chat-expand-btn';
-    expandBtn.textContent = '\u2922'; // ⤢ expand icon
+    expandBtn.textContent = '\u2922';
     expandBtn.title = 'Expand editor';
     this._expanded = false;
     expandBtn.onclick = () => {
@@ -83,31 +83,33 @@ class ChatView {
         this._textarea.classList.add('chat-input-expanded');
         expandBtn.textContent = '\u2923';
         expandBtn.title = 'Collapse editor';
-        this._shortcutHint.textContent = 'Ctrl+Enter to send';
+        this._shortcutHint.textContent = 'Ctrl+\u23CE';
       } else {
         this._textarea.style.height = 'auto';
         this._textarea.style.minHeight = '36px';
         this._textarea.classList.remove('chat-input-expanded');
         expandBtn.textContent = '\u2922';
         expandBtn.title = 'Expand editor';
-        this._shortcutHint.textContent = 'Enter to send';
+        this._shortcutHint.textContent = '\u23CE';
       }
       this._textarea.focus();
     };
 
+    inputWrap.append(this._textarea, expandBtn);
+
+    const sendCol = document.createElement('div');
+    sendCol.className = 'chat-send-col';
     const sendBtn = document.createElement('button');
     sendBtn.className = 'chat-send-btn';
     sendBtn.textContent = '▶';
     sendBtn.title = 'Send';
     sendBtn.onclick = () => this._send();
-
-    // Shortcut hint
     this._shortcutHint = document.createElement('div');
     this._shortcutHint.className = 'chat-shortcut-hint';
-    this._shortcutHint.textContent = 'Enter to send';
+    this._shortcutHint.textContent = '\u23CE';
+    sendCol.append(sendBtn, this._shortcutHint);
 
-    btnRow.append(expandBtn, sendBtn, this._shortcutHint);
-    inputArea.append(this._textarea, btnRow);
+    inputArea.append(inputWrap, sendCol);
 
     // Search bar
     const searchBar = document.createElement('div');
@@ -169,8 +171,9 @@ class ChatView {
     if (this._expanded) {
       this._expanded = false;
       this._textarea.classList.remove('chat-input-expanded');
-      const eb = this._textarea.closest('.chat-input-area')?.querySelector('.chat-expand-btn');
+      const eb = this._textarea.parentElement?.querySelector('.chat-expand-btn');
       if (eb) { eb.textContent = '\u2922'; eb.title = 'Expand editor'; }
+      this._shortcutHint.textContent = '\u23CE';
     }
     this.ws.send({ type: 'chat-input', sessionId: this.sessionId, text });
   }
@@ -221,10 +224,12 @@ class ChatView {
         const status = block.is_error ? 'error' : 'ok';
         const resultText = typeof block.content === 'string' ? block.content : JSON.stringify(block.content, null, 2);
         const truncated = resultText.length > 2000 ? resultText.substring(0, 2000) + '...' : resultText;
+        const firstLine = resultText.split('\n')[0].substring(0, 120) || '(empty)';
+        const icon = status === 'ok' ? '\u2713' : '\u2717';
         if (this._compact) {
-          el.innerHTML = `<div class="chat-compact-msg"><span class="chat-role chat-role-tool">${status === 'ok' ? '\u2713' : '\u2717'}</span><div class="chat-compact-content"><div class="chat-tool-result chat-tool-${status}"><pre>${escHtml(truncated)}</pre></div></div></div>`;
+          el.innerHTML = `<div class="chat-compact-msg"><span class="chat-role chat-role-tool">${icon}</span><div class="chat-compact-content"><details class="chat-tool-result-details chat-tool-${status}"><summary>${escHtml(firstLine)}</summary><pre>${escHtml(truncated)}</pre></details></div></div>`;
         } else {
-          el.innerHTML = `<div class="chat-tool-result chat-tool-${status}"><span class="chat-tool-label">Tool Result (${status})</span><pre>${escHtml(truncated)}</pre></div>`;
+          el.innerHTML = `<details class="chat-tool-result-details chat-tool-${status}"><summary><span class="chat-tool-label">Tool Result (${status})</span> ${escHtml(firstLine)}</summary><pre>${escHtml(truncated)}</pre></details>`;
         }
         this._messageList.appendChild(el);
       }
