@@ -748,80 +748,127 @@ class ChatView {
     const q = query.trim().toLowerCase();
     if (!q) { this._searchStatus.textContent = ''; return; }
 
-    // Server-side search: fetch ALL messages matching the query
+    this._searchStatus.textContent = 'Searching...';
+    this._searchQuery = q;
+
+    // Server-side search
     const allSess = this.app.sidebar?._allSessions || [];
     const match = allSess.find(s => s.webuiId === this.sessionId);
     const claudeId = match?.sessionId;
     const cwd = match?.cwd || '';
 
-    this._searchStatus.textContent = 'Searching...';
-
-    // Search server messages + loaded DOM
-    let serverResults = [];
     if (claudeId) {
       try {
         const res = await fetch(`/api/session-messages?claudeSessionId=${encodeURIComponent(claudeId)}&cwd=${encodeURIComponent(cwd)}&search=${encodeURIComponent(q)}`);
         const data = await res.json();
-        serverResults = data.matches || [];
-      } catch {}
+        this._serverSearchResults = data.matches || [];
+      } catch {
+        this._serverSearchResults = [];
+      }
+    } else {
+      this._serverSearchResults = [];
     }
 
-    if (serverResults.length > 0) {
-      this._searchStatus.textContent = `${serverResults.length} results`;
-      // Show results as a summary list — click to jump
-      this._showSearchResults(serverResults, q);
-    } else {
-      // Fallback: search loaded DOM content
-      this._searchDom(q);
+    if (!this._serverSearchResults.length) {
+      this._searchStatus.textContent = 'No results';
+      return;
     }
+
+    this._searchResultIdx = 0;
+    this._searchStatus.textContent = `1/${this._serverSearchResults.length}`;
+    this._jumpToSearchResult(0);
   }
 
-  _searchDom(q) {
+  async _jumpToSearchResult(idx) {
+    const results = this._serverSearchResults;
+    if (!results || idx < 0 || idx >= results.length) return;
+
+    const result = results[idx];
+    const msgIndex = result.index; // index in the full message list
+
+    // Check if this message is already loaded
+    if (msgIndex < this._loadedOffset) {
+      // Need to load messages around this result
+      const pageStart = Math.max(0, msgIndex - 10);
+      const pageSize = Math.max(50, msgIndex - this._loadedOffset + 20);
+
+      const allSess = this.app.sidebar?._allSessions || [];
+      const match = allSess.find(s => s.webuiId === this.sessionId);
+      const claudeId = match?.sessionId;
+      const cwd = match?.cwd || '';
+      if (!claudeId) return;
+
+      try {
+        const res = await fetch(`/api/session-messages?claudeSessionId=${encodeURIComponent(claudeId)}&cwd=${encodeURIComponent(cwd)}&offset=${pageStart}&limit=${this._loadedOffset - pageStart}`);
+        const data = await res.json();
+
+        // Prepend messages
+        const firstMsg = this._messageList.querySelector('.chat-msg');
+        for (const msg of data.messages) {
+          const el = this._renderMessageElement(msg);
+          if (el && firstMsg) this._messageList.insertBefore(el, firstMsg);
+        }
+        this._loadedOffset = pageStart;
+      } catch { return; }
+    }
+
+    // Now highlight in DOM
+    this._clearDomHighlights();
+    const q = this._searchQuery;
     const walker = document.createTreeWalker(this._messageList, NodeFilter.SHOW_TEXT);
-    const ranges = [];
+    const marks = [];
     while (walker.nextNode()) {
       const node = walker.currentNode;
       const text = node.textContent.toLowerCase();
-      let idx = 0;
-      while ((idx = text.indexOf(q, idx)) !== -1) {
-        ranges.push({ node, start: idx, length: q.length });
-        idx += q.length;
+      let i = 0;
+      while ((i = text.indexOf(q, i)) !== -1) {
+        try {
+          const range = document.createRange();
+          range.setStart(node, i);
+          range.setEnd(node, i + q.length);
+          const mark = document.createElement('mark');
+          mark.className = 'chat-search-highlight';
+          range.surroundContents(mark);
+          marks.push(mark);
+        } catch {}
+        i += q.length;
       }
     }
-    const matches = [];
-    for (let i = ranges.length - 1; i >= 0; i--) {
-      const { node, start, length } = ranges[i];
-      try {
-        const range = document.createRange();
-        range.setStart(node, start);
-        range.setEnd(node, start + length);
-        const mark = document.createElement('mark');
-        mark.className = 'chat-search-highlight';
-        range.surroundContents(mark);
-        matches.unshift(mark);
-      } catch {}
+    this._searchDomMarks = marks;
+
+    // Find the mark closest to the target message and scroll to it
+    // Target message position: msgIndex - this._loadedOffset in rendered order
+    const targetPos = msgIndex - this._loadedOffset;
+    const allMsgs = this._messageList.querySelectorAll('.chat-msg');
+    if (targetPos >= 0 && targetPos < allMsgs.length) {
+      const targetEl = allMsgs[targetPos];
+      // Find first mark inside this element
+      const markInTarget = targetEl.querySelector('mark.chat-search-highlight');
+      if (markInTarget) {
+        this._scrollToMatch(markInTarget);
+      } else {
+        targetEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
+    } else if (marks.length > 0) {
+      this._scrollToMatch(marks[0]);
     }
-    this._searchMatches = matches;
-    this._searchIdx = matches.length > 0 ? 0 : -1;
-    this._searchStatus.textContent = matches.length > 0 ? `1/${matches.length}` : 'No results';
-    if (matches.length > 0) this._scrollToMatch(matches[0]);
   }
 
-  _showSearchResults(results, query) {
-    // For server results, highlight in loaded DOM and show count
-    this._searchDom(query);
-    // Update count with server total if DOM had fewer
-    if (results.length > this._searchMatches.length) {
-      this._searchStatus.textContent = `${this._searchMatches.length}/${results.length} (scroll up for more)`;
+  _clearDomHighlights() {
+    for (const mark of this._messageList.querySelectorAll('mark.chat-search-highlight')) {
+      const parent = mark.parentNode;
+      parent.replaceChild(document.createTextNode(mark.textContent), mark);
+      parent.normalize();
     }
+    this._searchDomMarks = [];
   }
 
   _searchNav(dir) {
-    if (!this._searchMatches.length) return;
-    this._searchMatches[this._searchIdx]?.classList.remove('chat-search-current');
-    this._searchIdx = (this._searchIdx + dir + this._searchMatches.length) % this._searchMatches.length;
-    this._scrollToMatch(this._searchMatches[this._searchIdx]);
-    this._searchStatus.textContent = `${this._searchIdx + 1}/${this._searchMatches.length}`;
+    const results = this._serverSearchResults;
+    if (!results || !results.length) return;
+    this._searchResultIdx = (this._searchResultIdx + dir + results.length) % results.length;
+    this._searchStatus.textContent = `${this._searchResultIdx + 1}/${results.length}`;
+    this._jumpToSearchResult(this._searchResultIdx);
   }
 
   // Expand parent <details> if collapsed, then scroll to match
@@ -837,13 +884,10 @@ class ChatView {
   }
 
   _clearSearch() {
-    for (const mark of this._messageList.querySelectorAll('mark.chat-search-highlight')) {
-      const parent = mark.parentNode;
-      parent.replaceChild(document.createTextNode(mark.textContent), mark);
-      parent.normalize();
-    }
-    this._searchMatches = [];
-    this._searchIdx = -1;
+    this._clearDomHighlights();
+    this._serverSearchResults = [];
+    this._searchResultIdx = -1;
+    this._searchQuery = '';
     if (this._searchStatus) this._searchStatus.textContent = '';
   }
 
