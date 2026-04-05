@@ -279,13 +279,17 @@ class ChatView {
     this._messages.push(msg);
 
     switch (msg.type) {
-      case 'user':
+      case 'user': {
+        const c = msg.message?.content;
+        const hasToolResult = Array.isArray(c) && c.some(b => b.type === 'tool_result');
         this._appendUser(msg);
+        this._lastUserWasToolResult = hasToolResult;
         if (!isHistory && this._pendingTyping) {
           this._pendingTyping = false;
           this._showTyping();
         }
         break;
+      }
       case 'assistant':
         if (!isHistory) this._hideTyping();
         this._appendAssistant(msg);
@@ -314,8 +318,12 @@ class ChatView {
     const content = msg.message?.content;
     if (!content) return;
 
-    // Distinguish actual user messages (string content) from tool results (array with tool_result blocks)
-    const isToolResult = Array.isArray(content) && content.every(b => b.type === 'tool_result');
+    // Distinguish actual user messages from tool results and system context
+    const isToolResult = Array.isArray(content) && content.some(b => b.type === 'tool_result');
+    // System-injected context: array with text that follows a tool_result (has parentUuid)
+    const isSystemContext = Array.isArray(content) && !isToolResult && msg.parentUuid && content.every(b => b.type === 'text') && this._lastUserWasToolResult;
+
+    if (isSystemContext) return; // Skip system-injected context (skill paths, interrupt markers)
 
     if (isToolResult) {
       for (const block of content) {
