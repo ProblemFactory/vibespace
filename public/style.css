@@ -1387,13 +1387,7 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
 }
 .chat-long-msg > summary::-webkit-details-marker { display: none; }
 .chat-long-msg > summary::after { content: ' \25B8'; color: var(--text-dim); font-size: 10px; }
-.chat-load-earlier {
-  display: block; width: 100%; padding: 8px; margin-bottom: 8px; border: none;
-  background: var(--bg-hover); color: var(--accent); font-size: 12px;
-  border-radius: var(--radius-sm); cursor: pointer; text-align: center;
-}
-.chat-load-earlier:hover { background: var(--accent-dim); }
-.chat-load-earlier:disabled { color: var(--text-dim); cursor: default; }
+.chat-load-spinner { display: flex; justify-content: center; padding: 8px; }
 .chat-long-msg[open] > summary { white-space: normal; display: none; }
 .chat-long-msg[open] > summary::after { content: ''; }
 .chat-compact-content {

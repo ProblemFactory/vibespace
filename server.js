@@ -1054,11 +1054,27 @@ function extractSessionMeta(filePath) {
 // Kill an external/tmux session by PID (not managed by WebUI WebSocket)
 // Get chat message history for a Claude session (from JSONL file)
 app.get('/api/session-messages', (req, res) => {
-  const { claudeSessionId, cwd, offset, limit } = req.query;
+  const { claudeSessionId, cwd, offset, limit, search } = req.query;
   if (!claudeSessionId) return res.status(400).json({ error: 'claudeSessionId required' });
   const allMessages = parseSessionJsonl(claudeSessionId, cwd || '');
   const total = allMessages.length;
-  if (offset !== undefined || limit !== undefined) {
+
+  if (search) {
+    // Server-side search: find messages containing the query
+    const q = search.toLowerCase();
+    const matches = [];
+    for (let i = 0; i < allMessages.length; i++) {
+      const m = allMessages[i];
+      const c = m.message?.content;
+      let text = '';
+      if (typeof c === 'string') text = c;
+      else if (Array.isArray(c)) text = c.map(b => b.text || '').join(' ');
+      if (text.toLowerCase().includes(q)) {
+        matches.push({ index: i, type: m.type, preview: text.substring(0, 120) });
+      }
+    }
+    res.json({ matches, total });
+  } else if (offset !== undefined || limit !== undefined) {
     const o = parseInt(offset) || 0;
     const l = parseInt(limit) || 50;
     res.json({ messages: allMessages.slice(o, o + l), total });

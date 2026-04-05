@@ -41,12 +41,16 @@ class ChatView {
     this._messageList.className = 'chat-message-list';
     container.appendChild(this._messageList);
 
-    // Scroll detection for pin-to-bottom
+    // Scroll detection: pin-to-bottom + auto-load earlier messages
     this._messageList.addEventListener('scroll', () => {
       const { scrollTop, scrollHeight, clientHeight } = this._messageList;
       const atBottom = scrollHeight - scrollTop - clientHeight < 30;
       if (atBottom && !this._pinned) this._pinned = true;
       else if (!atBottom) this._pinned = false;
+      // Auto-load earlier messages when scrolled near top
+      if (scrollTop < 100 && this._loadedOffset > 0 && !this._loadingEarlier) {
+        this._loadEarlierMessages();
+      }
     });
 
     // Input area
@@ -229,11 +233,7 @@ class ChatView {
   loadHistory(messages, totalCount) {
     this._totalServerMessages = totalCount || messages.length;
     this._loadedOffset = this._totalServerMessages - messages.length;
-
-    // Show "load earlier" button if there are more messages
-    if (this._loadedOffset > 0) {
-      this._showLoadEarlierBtn();
-    }
+    this._loadingEarlier = false;
 
     // Render in batches to avoid blocking UI
     this._renderBatch(messages, 0, true);
@@ -252,27 +252,24 @@ class ChatView {
     }
   }
 
-  _showLoadEarlierBtn() {
-    if (this._loadEarlierBtn) return;
-    const btn = document.createElement('button');
-    btn.className = 'chat-load-earlier';
-    btn.textContent = `Load earlier messages (${this._loadedOffset} more)`;
-    btn.onclick = () => this._loadEarlierMessages();
-    this._loadEarlierBtn = btn;
-    this._messageList.prepend(btn);
-  }
-
   async _loadEarlierMessages() {
-    if (!this._loadEarlierBtn || this._loadedOffset <= 0) return;
-    this._loadEarlierBtn.textContent = 'Loading...';
-    this._loadEarlierBtn.disabled = true;
+    if (this._loadingEarlier || this._loadedOffset <= 0) return;
+    this._loadingEarlier = true;
+
+    // Show spinner at top
+    let spinner = this._messageList.querySelector('.chat-load-spinner');
+    if (!spinner) {
+      spinner = document.createElement('div');
+      spinner.className = 'chat-load-spinner';
+      spinner.innerHTML = '<span class="chat-spinner"></span>';
+      this._messageList.prepend(spinner);
+    }
 
     const pageSize = 50;
     const newOffset = Math.max(0, this._loadedOffset - pageSize);
     const count = this._loadedOffset - newOffset;
 
     try {
-      // Use the session's claudeSessionId from sidebar data
       const allSess = this.app.sidebar?._allSessions || [];
       const match = allSess.find(s => s.webuiId === this.sessionId);
       const claudeId = match?.sessionId;
@@ -282,38 +279,44 @@ class ChatView {
       const res = await fetch(`/api/session-messages?claudeSessionId=${encodeURIComponent(claudeId)}&cwd=${encodeURIComponent(cwd)}&offset=${newOffset}&limit=${count}`);
       const data = await res.json();
 
-      // Remove button, prepend messages, re-add button if more
-      this._loadEarlierBtn.remove();
-      this._loadEarlierBtn = null;
+      spinner.remove();
 
-      const scrollAnchor = this._messageList.firstElementChild;
-      const scrollTop = this._messageList.scrollTop;
+      // Remember scroll anchor to preserve position
+      const firstMsg = this._messageList.querySelector('.chat-msg');
+      const anchorTop = firstMsg?.offsetTop || 0;
 
-      // Render older messages at the top
-      const fragment = document.createDocumentFragment();
-      const tempContainer = document.createElement('div');
+      // Render older messages at the top (before existing messages)
+      const beforeEl = this._messageList.querySelector('.chat-msg');
       for (const msg of data.messages) {
-        this._onMessage(msg, true);
+        const el = this._renderMessageElement(msg);
+        if (el && beforeEl) this._messageList.insertBefore(el, beforeEl);
       }
 
       this._loadedOffset = newOffset;
-      if (this._loadedOffset > 0) {
-        this._showLoadEarlierBtn();
-      }
 
-      // Preserve scroll position (don't jump to top)
-      if (scrollAnchor) {
+      // Preserve scroll position
+      if (firstMsg) {
         requestAnimationFrame(() => {
-          const newTop = scrollAnchor.offsetTop;
-          this._messageList.scrollTop = newTop;
+          this._messageList.scrollTop = firstMsg.offsetTop - anchorTop;
         });
       }
     } catch {
-      if (this._loadEarlierBtn) {
-        this._loadEarlierBtn.textContent = 'Failed to load. Retry?';
-        this._loadEarlierBtn.disabled = false;
-      }
+      if (spinner) spinner.remove();
     }
+    this._loadingEarlier = false;
+  }
+
+  // Render a single message and return the DOM element (without appending to messageList)
+  _renderMessageElement(msg) {
+    // Reuse _onMessage but capture the last appended element
+    const countBefore = this._messageList.children.length;
+    this._onMessage(msg, true);
+    const countAfter = this._messageList.children.length;
+    if (countAfter > countBefore) {
+      // Detach the newly appended element (it was added at the end)
+      return this._messageList.removeChild(this._messageList.lastElementChild);
+    }
+    return null;
   }
 
   _send() {
@@ -737,15 +740,43 @@ class ChatView {
 
   _doSearch(query) {
     if (this._searchTimer) clearTimeout(this._searchTimer);
-    this._searchTimer = setTimeout(() => this._executeSearch(query), 150);
+    this._searchTimer = setTimeout(() => this._executeSearch(query), 250);
   }
 
-  _executeSearch(query) {
+  async _executeSearch(query) {
     this._clearSearch();
     const q = query.trim().toLowerCase();
     if (!q) { this._searchStatus.textContent = ''; return; }
 
-    // Collect ranges in batches to avoid blocking
+    // Server-side search: fetch ALL messages matching the query
+    const allSess = this.app.sidebar?._allSessions || [];
+    const match = allSess.find(s => s.webuiId === this.sessionId);
+    const claudeId = match?.sessionId;
+    const cwd = match?.cwd || '';
+
+    this._searchStatus.textContent = 'Searching...';
+
+    // Search server messages + loaded DOM
+    let serverResults = [];
+    if (claudeId) {
+      try {
+        const res = await fetch(`/api/session-messages?claudeSessionId=${encodeURIComponent(claudeId)}&cwd=${encodeURIComponent(cwd)}&search=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        serverResults = data.matches || [];
+      } catch {}
+    }
+
+    if (serverResults.length > 0) {
+      this._searchStatus.textContent = `${serverResults.length} results`;
+      // Show results as a summary list — click to jump
+      this._showSearchResults(serverResults, q);
+    } else {
+      // Fallback: search loaded DOM content
+      this._searchDom(q);
+    }
+  }
+
+  _searchDom(q) {
     const walker = document.createTreeWalker(this._messageList, NodeFilter.SHOW_TEXT);
     const ranges = [];
     while (walker.nextNode()) {
@@ -757,8 +788,6 @@ class ChatView {
         idx += q.length;
       }
     }
-
-    // Apply highlights (reverse order to preserve offsets)
     const matches = [];
     for (let i = ranges.length - 1; i >= 0; i--) {
       const { node, start, length } = ranges[i];
@@ -772,12 +801,18 @@ class ChatView {
         matches.unshift(mark);
       } catch {}
     }
-
     this._searchMatches = matches;
     this._searchIdx = matches.length > 0 ? 0 : -1;
     this._searchStatus.textContent = matches.length > 0 ? `1/${matches.length}` : 'No results';
-    if (matches.length > 0) {
-      this._scrollToMatch(matches[0]);
+    if (matches.length > 0) this._scrollToMatch(matches[0]);
+  }
+
+  _showSearchResults(results, query) {
+    // For server results, highlight in loaded DOM and show count
+    this._searchDom(query);
+    // Update count with server total if DOM had fewer
+    if (results.length > this._searchMatches.length) {
+      this._searchStatus.textContent = `${this._searchMatches.length}/${results.length} (scroll up for more)`;
     }
   }
 
