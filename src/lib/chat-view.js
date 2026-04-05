@@ -36,7 +36,7 @@ class ChatView {
       container.classList.toggle('chat-compact', v);
     });
 
-    // Status bar
+    // Status bar (will be added after input area)
     this._statusBar = document.createElement('div');
     this._statusBar.className = 'chat-status-bar';
     this._statusModel = '';
@@ -45,7 +45,7 @@ class ChatView {
     this._statusCacheRead = 0;
     this._statusCost = 0;
     this._statusTurns = 0;
-    container.appendChild(this._statusBar);
+    this._statusContextWindow = 0;
 
     // Message list
     this._messageList = document.createElement('div');
@@ -225,6 +225,7 @@ class ChatView {
     container.tabIndex = -1;
 
     container.appendChild(inputArea);
+    container.appendChild(this._statusBar);
 
     // Set up click handler for links/paths + image zoom
     this._setupLinkHandler();
@@ -413,8 +414,8 @@ class ChatView {
         }
         break;
       case 'system':
-        if (msg.subtype === 'init' && msg.model) {
-          this._statusModel = msg.model.replace(/\[.*$/, ''); // strip [1m] etc
+        if (msg.subtype === 'init') {
+          if (msg.model) this._statusModel = msg.model.replace(/\[.*$/, '');
           this._updateStatusBar();
         }
         break;
@@ -425,9 +426,10 @@ class ChatView {
         if (msg.modelUsage) {
           for (const [model, info] of Object.entries(msg.modelUsage)) {
             this._statusModel = model.replace(/\[.*$/, '');
-            this._statusTokensIn += (info.inputTokens || 0) + (info.cacheReadInputTokens || 0) + (info.cacheCreationInputTokens || 0);
-            this._statusTokensOut += info.outputTokens || 0;
-            this._statusCacheRead += info.cacheReadInputTokens || 0;
+            this._statusTokensIn = (info.inputTokens || 0) + (info.cacheReadInputTokens || 0) + (info.cacheCreationInputTokens || 0);
+            this._statusTokensOut = info.outputTokens || 0;
+            this._statusCacheRead = info.cacheReadInputTokens || 0;
+            if (info.contextWindow) this._statusContextWindow = info.contextWindow;
           }
         }
         if (msg.total_cost_usd) this._statusCost += msg.total_cost_usd;
@@ -996,15 +998,17 @@ class ChatView {
   }
 
   _updateStatusBar() {
+    const fmtK = (n) => n >= 1000000 ? (n / 1000000).toFixed(1) + 'M' : n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
     const parts = [];
     if (this._statusModel) parts.push(this._statusModel);
     if (this._statusTokensIn || this._statusTokensOut) {
-      const fmtK = (n) => n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
-      parts.push(`\u25B8 ${fmtK(this._statusTokensIn)} in / ${fmtK(this._statusTokensOut)} out`);
-      if (this._statusCacheRead) parts.push(`(${fmtK(this._statusCacheRead)} cached)`);
+      parts.push(`${fmtK(this._statusTokensIn)} in \u00B7 ${fmtK(this._statusTokensOut)} out`);
     }
-    if (this._statusCost > 0) parts.push(`$${this._statusCost.toFixed(4)}`);
-    if (this._statusTurns > 0) parts.push(`${this._statusTurns} turns`);
+    if (this._statusContextWindow && this._statusTokensIn) {
+      const pct = Math.round((this._statusTokensIn / this._statusContextWindow) * 100);
+      parts.push(`${pct}% context`);
+    }
+    if (this._statusCost > 0) parts.push(`$${this._statusCost.toFixed(2)}`);
     this._statusBar.textContent = parts.join('  \u00B7  ');
   }
 
