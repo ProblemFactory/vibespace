@@ -19,6 +19,7 @@ class ChatView {
     this.app = app;
     this._messages = []; // parsed message objects
     this._pinned = true; // auto-scroll to bottom
+    this._renderedMsgIds = new Set(); // dedup by msgId
 
     // Build DOM
     const container = document.createElement('div');
@@ -248,39 +249,36 @@ class ChatView {
       this._shortcutHint.textContent = '\u23CE';
     }
 
+    const msgId = Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+
     if (hasAttachments) {
-      // Build stream-json message with image content blocks
       const content = [];
-      const localContent = [];
       for (const a of this._attachments) {
         content.push({ type: 'image', source: { type: 'base64', media_type: a.mediaType, data: a.base64 } });
-        localContent.push({ type: 'image', source: { type: 'base64', media_type: a.mediaType, data: a.base64 } });
       }
-      if (text) { content.push({ type: 'text', text }); localContent.push({ type: 'text', text }); }
+      if (text) content.push({ type: 'text', text });
       const msg = JSON.stringify({ type: 'user', message: { role: 'user', content } });
-      // Skip next server echo (we show local preview instead)
-      this._skipNextUserEcho = true;
-      this.ws.send({ type: 'chat-input', sessionId: this.sessionId, text: msg });
-      this._onMessage({ type: 'user', message: { role: 'user', content: localContent } });
+      this.ws.send({ type: 'chat-input', sessionId: this.sessionId, text: msg, msgId });
+      // Show local preview immediately (server echo deduped by msgId)
+      this._onMessage({ type: 'user', message: { role: 'user', content }, msgId });
       this._attachments = [];
       this._renderAttachments();
     } else {
-      this.ws.send({ type: 'chat-input', sessionId: this.sessionId, text });
+      this.ws.send({ type: 'chat-input', sessionId: this.sessionId, text, msgId });
     }
     this._pendingTyping = true;
   }
 
   _onMessage(msg, isHistory = false) {
+    // Dedup by msgId — skip if already rendered
+    if (msg.msgId) {
+      if (this._renderedMsgIds.has(msg.msgId)) return;
+      this._renderedMsgIds.add(msg.msgId);
+    }
     this._messages.push(msg);
 
     switch (msg.type) {
       case 'user':
-        // Skip server echo for image messages (local preview already shown)
-        if (!isHistory && this._skipNextUserEcho) {
-          this._skipNextUserEcho = false;
-          if (this._pendingTyping) { this._pendingTyping = false; this._showTyping(); }
-          break;
-        }
         this._appendUser(msg);
         if (!isHistory && this._pendingTyping) {
           this._pendingTyping = false;
