@@ -233,16 +233,22 @@
 .chat-permission-question { display: flex; flex-direction: column; gap: 6px; min-width: 180px; flex: 1 1 180px; }
 
 /* AskUserQuestion interactive UI */
-.chat-ask-question { display: flex; flex-direction: column; gap: 6px; }
-.chat-ask-header { font-size: 13px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 6px; }
-.chat-ask-chip { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: var(--accent); color: #fff; font-weight: 700; }
-.chat-ask-option { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-dialog); cursor: pointer; text-align: left; color: var(--text); font-size: 12px; }
+.chat-ask-form { gap: 10px; }
+.chat-ask-page { display: flex; flex-direction: column; gap: 8px; }
+.chat-ask-header { font-size: 13px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.chat-ask-chip { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: var(--accent); color: #fff; font-weight: 700; flex-shrink: 0; }
+.chat-ask-options { display: flex; flex-direction: column; gap: 4px; }
+.chat-ask-option { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-dialog); cursor: pointer; text-align: left; color: var(--text); font-size: 12px; transition: border-color 0.15s, background 0.15s; }
 .chat-ask-option:hover { border-color: var(--accent); background: rgba(99,102,241,0.06); }
-.chat-ask-option.selected { border-color: var(--accent); background: rgba(99,102,241,0.12); }
+.chat-ask-option.selected { border-color: var(--accent); background: rgba(99,102,241,0.12); box-shadow: inset 3px 0 0 var(--accent); }
 .chat-ask-option strong { font-weight: 600; }
 .chat-ask-desc { color: var(--text-dim); font-size: 11px; }
-.chat-ask-other { display: flex; gap: 6px; }
-.chat-ask-other input { font-size: 12px; padding: 4px 8px; }
+.chat-ask-custom { font-size: 12px; padding: 6px 8px; margin-top: 2px; }
+.chat-ask-nav { display: flex; align-items: center; gap: 6px; }
+.chat-ask-nav-btn { min-width: 28px; padding: 4px 0; font-size: 14px; }
+.chat-ask-page-indicator { font-size: 11px; color: var(--text-dim); min-width: 40px; text-align: center; }
+.chat-ask-submit { margin-left: auto; }
+.chat-ask-submit:disabled { opacity: 0.4; cursor: default; }
 .chat-permission-question .chat-status-dim { margin-left: 0; }
 .chat-perm-answer {
   padding: 6px 8px;

@@ -357,48 +357,25 @@ class ChatRenderers {
       const questions = msg.permission.questions || [];
       section.innerHTML = '';
       const prompt = document.createElement('div');
-      prompt.className = 'chat-permission-prompt';
+      prompt.className = 'chat-permission-prompt chat-ask-form';
 
-      // Track selections per question (for multi-question forms)
       const selections = new Map();
       const origInput = msg.permission.input || {};
+      let currentPage = 0;
 
-      const sendAnswer = () => {
-        const answers = {};
-        for (const [qText, val] of selections) answers[qText] = val;
-        this.ws.send({
-          type: 'permission-response',
-          sessionId: this.sessionId,
-          requestId: msg.permission.requestId,
-          approved: true,
-          toolInput: { ...origInput, answers },
-        });
-        msg.permission.resolved = 'allowed';
-        msg.permission.selectedAnswers = answers;
-        this.renderPermissionOverlay(el, msg);
-        this._onPermissionResolve('allowed');
-      };
-
-      const sendDeny = () => {
-        this.ws.send({
-          type: 'permission-response',
-          sessionId: this.sessionId,
-          requestId: msg.permission.requestId,
-          approved: false,
-        });
-        msg.permission.resolved = 'denied';
-        this.renderPermissionOverlay(el, msg);
-      };
-
+      // Build pages \u2014 one per question
+      const pages = [];
       for (const q of questions) {
-        const qBlock = document.createElement('div');
-        qBlock.className = 'chat-ask-question';
+        const page = document.createElement('div');
+        page.className = 'chat-ask-page';
         const qHeader = document.createElement('div');
         qHeader.className = 'chat-ask-header';
         if (q.header) { const chip = document.createElement('span'); chip.className = 'chat-ask-chip'; chip.textContent = q.header; qHeader.appendChild(chip); }
-        const qText = document.createElement('span'); qText.textContent = q.question; qHeader.appendChild(qText);
-        qBlock.appendChild(qHeader);
+        const qTextEl = document.createElement('span'); qTextEl.textContent = q.question; qHeader.appendChild(qTextEl);
+        page.appendChild(qHeader);
 
+        const optionsWrap = document.createElement('div');
+        optionsWrap.className = 'chat-ask-options';
         if (Array.isArray(q.options) && q.options.length) {
           for (const option of q.options) {
             const btn = document.createElement('button');
@@ -407,47 +384,107 @@ class ChatRenderers {
             btn.onclick = () => {
               if (q.multiSelect) {
                 btn.classList.toggle('selected');
-                const selected = [...qBlock.querySelectorAll('.chat-ask-option.selected')].map(b => b.querySelector('strong').textContent);
+                const selected = [...optionsWrap.querySelectorAll('.chat-ask-option.selected')].map(b => b.querySelector('strong').textContent);
                 selections.set(q.question, selected.join(', '));
+                page._customInput.value = '';
               } else {
-                selections.set(q.question, option.label);
-                // Single question with single select \u2192 send immediately
-                if (questions.length === 1) { sendAnswer(); return; }
-                qBlock.querySelectorAll('.chat-ask-option').forEach(b => b.classList.remove('selected'));
+                optionsWrap.querySelectorAll('.chat-ask-option').forEach(b => b.classList.remove('selected'));
                 btn.classList.add('selected');
+                selections.set(q.question, option.label);
+                page._customInput.value = '';
               }
+              updateSubmitState();
             };
-            qBlock.appendChild(btn);
+            optionsWrap.appendChild(btn);
           }
-          // "Other" free text option
-          const otherRow = document.createElement('div');
-          otherRow.className = 'chat-ask-other';
-          const otherInput = document.createElement('input');
-          otherInput.className = 'filter-input';
-          otherInput.placeholder = 'Other...';
-          otherInput.style.flex = '1';
-          otherInput.oninput = () => { if (otherInput.value.trim()) selections.set(q.question, otherInput.value.trim()); };
-          otherRow.appendChild(otherInput);
-          qBlock.appendChild(otherRow);
         }
-        prompt.appendChild(qBlock);
+        page.appendChild(optionsWrap);
+
+        const customInput = document.createElement('input');
+        customInput.className = 'filter-input chat-ask-custom';
+        customInput.placeholder = 'Or type a custom answer...';
+        customInput.oninput = () => {
+          const val = customInput.value.trim();
+          if (val) {
+            selections.set(q.question, val);
+            optionsWrap.querySelectorAll('.chat-ask-option').forEach(b => b.classList.remove('selected'));
+          } else {
+            selections.delete(q.question);
+          }
+          updateSubmitState();
+        };
+        page._customInput = customInput;
+        page.appendChild(customInput);
+        pages.push(page);
       }
 
-      // Submit + Cancel buttons (for multi-question or multiSelect)
-      if (questions.length > 1 || questions.some(q => q.multiSelect)) {
-        const actions = document.createElement('div');
-        actions.className = 'chat-permission-actions';
-        const submitBtn = document.createElement('button');
-        submitBtn.className = 'chat-perm-btn chat-perm-allow';
-        submitBtn.textContent = 'Submit';
-        submitBtn.onclick = sendAnswer;
-        const cancelBtn = document.createElement('button');
-        cancelBtn.className = 'chat-perm-btn chat-perm-deny';
-        cancelBtn.textContent = 'Cancel';
-        cancelBtn.onclick = sendDeny;
-        actions.append(submitBtn, cancelBtn);
-        prompt.appendChild(actions);
-      }
+      // Container for pages (only show one at a time)
+      const pageContainer = document.createElement('div');
+      pageContainer.className = 'chat-ask-page-container';
+      pages.forEach(p => pageContainer.appendChild(p));
+      prompt.appendChild(pageContainer);
+
+      // Navigation + progress
+      const nav = document.createElement('div');
+      nav.className = 'chat-ask-nav';
+      const prevBtn = document.createElement('button');
+      prevBtn.className = 'chat-perm-btn chat-ask-nav-btn';
+      prevBtn.textContent = '\u2190';
+      prevBtn.onclick = () => { if (currentPage > 0) { currentPage--; showPage(); } };
+      const nextBtn = document.createElement('button');
+      nextBtn.className = 'chat-perm-btn chat-ask-nav-btn';
+      nextBtn.textContent = '\u2192';
+      nextBtn.onclick = () => { if (currentPage < pages.length - 1) { currentPage++; showPage(); } };
+      const pageIndicator = document.createElement('span');
+      pageIndicator.className = 'chat-ask-page-indicator';
+
+      const submitBtn = document.createElement('button');
+      submitBtn.className = 'chat-perm-btn chat-perm-allow chat-ask-submit';
+      submitBtn.textContent = 'Submit';
+      submitBtn.disabled = true;
+      submitBtn.onclick = () => {
+        const answers = {};
+        for (const [qText, val] of selections) answers[qText] = val;
+        this.ws.send({
+          type: 'permission-response', sessionId: this.sessionId,
+          requestId: msg.permission.requestId, approved: true,
+          toolInput: { ...origInput, answers },
+        });
+        msg.permission.resolved = 'allowed';
+        msg.permission.selectedAnswers = answers;
+        this.renderPermissionOverlay(el, msg);
+        this._onPermissionResolve('allowed');
+      };
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'chat-perm-btn chat-perm-deny';
+      cancelBtn.textContent = 'Cancel';
+      cancelBtn.onclick = () => {
+        this.ws.send({
+          type: 'permission-response', sessionId: this.sessionId,
+          requestId: msg.permission.requestId, approved: false,
+        });
+        msg.permission.resolved = 'denied';
+        this.renderPermissionOverlay(el, msg);
+      };
+
+      if (questions.length > 1) nav.append(prevBtn, pageIndicator, nextBtn);
+      nav.append(submitBtn, cancelBtn);
+      prompt.appendChild(nav);
+
+      const showPage = () => {
+        pages.forEach((p, i) => p.style.display = i === currentPage ? '' : 'none');
+        pageIndicator.textContent = `${currentPage + 1} / ${pages.length}`;
+        prevBtn.disabled = currentPage === 0;
+        nextBtn.disabled = currentPage === pages.length - 1;
+        // Mark answered pages in indicator
+        const dots = questions.map((q, i) => selections.has(q.question) ? '\u25cf' : (i === currentPage ? '\u25cb' : '\u25cb'));
+        pageIndicator.title = dots.join(' ');
+      };
+      const updateSubmitState = () => {
+        submitBtn.disabled = selections.size < questions.length;
+        showPage();
+      };
+      showPage();
       section.appendChild(prompt);
     } else if (msg.permission.kind === 'user_input' && msg.permission.resolved) {
       section.innerHTML = '';
