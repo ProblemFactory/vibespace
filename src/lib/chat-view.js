@@ -826,22 +826,7 @@ class ChatView {
   }
 
   _onGoalUpdated(goal) {
-    if (!this._goalBanner) {
-      this._goalBanner = document.createElement('div');
-      this._goalBanner.className = 'chat-goal-banner hidden';
-      // Insert before message list
-      this._container.insertBefore(this._goalBanner, this._messageList);
-    }
-    if (goal) {
-      this._goalBanner.innerHTML = `<span class="chat-goal-icon">\u{1F3AF}</span><span class="chat-goal-text">${escHtml(goal)}</span><button class="chat-goal-clear" title="Clear goal">✕</button>`;
-      this._goalBanner.classList.remove('hidden');
-      this._goalBanner.querySelector('.chat-goal-clear').onclick = () => {
-        this.ws.send({ type: 'set-goal', sessionId: this.sessionId, goal: null });
-      };
-    } else {
-      this._goalBanner.classList.add('hidden');
-      this._goalBanner.innerHTML = '';
-    }
+    this._statusBar.setGoal(goal);
   }
 
   _onSubagentMessage(parentToolUseId, msg) {
