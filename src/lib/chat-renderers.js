@@ -358,98 +358,96 @@ class ChatRenderers {
       section.innerHTML = '';
       const prompt = document.createElement('div');
       prompt.className = 'chat-permission-prompt';
-      const label = document.createElement('span');
-      label.className = 'chat-permission-label';
-      label.textContent = `Input Requested: ${msg.permission.toolName}`;
-      prompt.appendChild(label);
 
-      const answersWrap = document.createElement('div');
-      answersWrap.className = 'chat-permission-actions';
-      const answerInputs = new Map();
+      // Track selections per question (for multi-question forms)
+      const selections = new Map();
+      const origInput = msg.permission.input || {};
 
-      for (const q of questions) {
-        const row = document.createElement('div');
-        row.className = 'chat-permission-question';
-        const qLabel = document.createElement('div');
-        qLabel.className = 'chat-status-dim';
-        qLabel.textContent = q.question || q.header || q.id;
-        row.appendChild(qLabel);
-
-        if (Array.isArray(q.options) && q.options.length) {
-          for (const option of q.options) {
-            const btn = document.createElement('button');
-            btn.className = 'chat-perm-btn';
-            btn.textContent = option.label;
-            btn.onclick = () => {
-              this.ws.send({
-                type: 'permission-response',
-                sessionId: this.sessionId,
-                requestId: msg.permission.requestId,
-                responseData: {
-                  decision: 'accept',
-                  answers: { [q.id]: { answers: [option.label] } },
-                },
-              });
-              msg.permission.resolved = 'allowed';
-              msg.permission.answers = { ...(msg.permission.answers || {}), [q.id]: { answers: [option.label] } };
-              this.renderPermissionOverlay(el, msg);
-              this._onPermissionResolve('allowed');
-            };
-            row.appendChild(btn);
-          }
-        } else {
-          const input = document.createElement('input');
-          input.className = 'filter-input';
-          input.placeholder = q.header || q.id || 'Answer';
-          input.style.minWidth = '180px';
-          answerInputs.set(q.id, input);
-          row.appendChild(input);
-        }
-        answersWrap.appendChild(row);
-      }
-
-      if (answerInputs.size) {
-        const submitBtn = document.createElement('button');
-        submitBtn.className = 'chat-perm-btn chat-perm-allow';
-        submitBtn.textContent = 'Submit';
-        submitBtn.onclick = () => {
-          const answers = {};
-          for (const [id, input] of answerInputs) {
-            const value = input.value.trim();
-            if (value) answers[id] = [value];
-          }
-          this.ws.send({
-            type: 'permission-response',
-            sessionId: this.sessionId,
-            requestId: msg.permission.requestId,
-            responseData: {
-              decision: 'accept',
-              answers: Object.fromEntries(Object.entries(answers).map(([key, value]) => [key, { answers: value }])),
-            },
-          });
-          msg.permission.resolved = 'allowed';
-          msg.permission.answers = Object.fromEntries(Object.entries(answers).map(([key, value]) => [key, { answers: value }]));
-          this.renderPermissionOverlay(el, msg);
-          this._onPermissionResolve('allowed');
-        };
-        answersWrap.appendChild(submitBtn);
-      }
-
-      const cancelBtn = document.createElement('button');
-      cancelBtn.className = 'chat-perm-btn chat-perm-deny';
-      cancelBtn.textContent = 'Cancel';
-      cancelBtn.onclick = () => {
+      const sendAnswer = () => {
+        const answers = {};
+        for (const [qText, val] of selections) answers[qText] = val;
         this.ws.send({
           type: 'permission-response',
           sessionId: this.sessionId,
           requestId: msg.permission.requestId,
-          responseData: { decision: 'cancel' },
+          approved: true,
+          toolInput: { ...origInput, answers },
+        });
+        msg.permission.resolved = 'allowed';
+        msg.permission.selectedAnswers = answers;
+        this.renderPermissionOverlay(el, msg);
+        this._onPermissionResolve('allowed');
+      };
+
+      const sendDeny = () => {
+        this.ws.send({
+          type: 'permission-response',
+          sessionId: this.sessionId,
+          requestId: msg.permission.requestId,
+          approved: false,
         });
         msg.permission.resolved = 'denied';
         this.renderPermissionOverlay(el, msg);
       };
-      answersWrap.appendChild(cancelBtn);
-      prompt.appendChild(answersWrap);
+
+      for (const q of questions) {
+        const qBlock = document.createElement('div');
+        qBlock.className = 'chat-ask-question';
+        const qHeader = document.createElement('div');
+        qHeader.className = 'chat-ask-header';
+        if (q.header) { const chip = document.createElement('span'); chip.className = 'chat-ask-chip'; chip.textContent = q.header; qHeader.appendChild(chip); }
+        const qText = document.createElement('span'); qText.textContent = q.question; qHeader.appendChild(qText);
+        qBlock.appendChild(qHeader);
+
+        if (Array.isArray(q.options) && q.options.length) {
+          for (const option of q.options) {
+            const btn = document.createElement('button');
+            btn.className = 'chat-ask-option';
+            btn.innerHTML = `<strong>${escHtml(option.label)}</strong>${option.description ? `<span class="chat-ask-desc">${escHtml(option.description)}</span>` : ''}`;
+            btn.onclick = () => {
+              if (q.multiSelect) {
+                btn.classList.toggle('selected');
+                const selected = [...qBlock.querySelectorAll('.chat-ask-option.selected')].map(b => b.querySelector('strong').textContent);
+                selections.set(q.question, selected.join(', '));
+              } else {
+                selections.set(q.question, option.label);
+                // Single question with single select \u2192 send immediately
+                if (questions.length === 1) { sendAnswer(); return; }
+                qBlock.querySelectorAll('.chat-ask-option').forEach(b => b.classList.remove('selected'));
+                btn.classList.add('selected');
+              }
+            };
+            qBlock.appendChild(btn);
+          }
+          // "Other" free text option
+          const otherRow = document.createElement('div');
+          otherRow.className = 'chat-ask-other';
+          const otherInput = document.createElement('input');
+          otherInput.className = 'filter-input';
+          otherInput.placeholder = 'Other...';
+          otherInput.style.flex = '1';
+          otherInput.oninput = () => { if (otherInput.value.trim()) selections.set(q.question, otherInput.value.trim()); };
+          otherRow.appendChild(otherInput);
+          qBlock.appendChild(otherRow);
+        }
+        prompt.appendChild(qBlock);
+      }
+
+      // Submit + Cancel buttons (for multi-question or multiSelect)
+      if (questions.length > 1 || questions.some(q => q.multiSelect)) {
+        const actions = document.createElement('div');
+        actions.className = 'chat-permission-actions';
+        const submitBtn = document.createElement('button');
+        submitBtn.className = 'chat-perm-btn chat-perm-allow';
+        submitBtn.textContent = 'Submit';
+        submitBtn.onclick = sendAnswer;
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'chat-perm-btn chat-perm-deny';
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.onclick = sendDeny;
+        actions.append(submitBtn, cancelBtn);
+        prompt.appendChild(actions);
+      }
       section.appendChild(prompt);
     } else if (msg.permission.kind === 'user_input' && msg.permission.resolved) {
       section.innerHTML = '';
@@ -457,26 +455,14 @@ class ChatRenderers {
       prompt.className = 'chat-permission-prompt';
       const resolved = document.createElement('div');
       resolved.className = `chat-permission-resolved ${msg.permission.resolved === 'denied' ? 'chat-permission-denied' : 'chat-permission-allowed'}`;
-      resolved.textContent = msg.permission.resolved === 'denied' ? '\u2717 Input Cancelled' : '\u2713 Input Submitted';
+      resolved.textContent = msg.permission.resolved === 'denied' ? '\u2717 Cancelled' : '\u2713 Answered';
       prompt.appendChild(resolved);
 
-      if (msg.permission.resolved !== 'denied') {
-        const normalizedAnswers = normalizeUserInputAnswers(msg.permission.answers);
-        const questions = msg.permission.questions || [];
-        for (const q of questions) {
+      if (msg.permission.resolved !== 'denied' && msg.permission.selectedAnswers) {
+        for (const [qText, answer] of Object.entries(msg.permission.selectedAnswers)) {
           const row = document.createElement('div');
           row.className = 'chat-permission-question';
-          const qLabel = document.createElement('div');
-          qLabel.className = 'chat-status-dim';
-          qLabel.textContent = q.question || q.header || q.id;
-          row.appendChild(qLabel);
-          const values = normalizedAnswers[q.id] || [];
-          for (const answer of values) {
-            const answerEl = document.createElement('div');
-            answerEl.className = 'chat-perm-answer';
-            answerEl.textContent = answer;
-            row.appendChild(answerEl);
-          }
+          row.innerHTML = `<span class="chat-status-dim">${escHtml(qText)}</span> → <strong>${escHtml(answer)}</strong>`;
           prompt.appendChild(row);
         }
       }

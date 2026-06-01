@@ -392,12 +392,14 @@ class MessageManager {
     // If the tool already completed, the permission was implicitly approved
     const autoResolved = existing.status === 'complete' ? 'allowed' : null;
 
+    const isAskUser = raw.request.tool_name === 'AskUserQuestion';
     existing.permission = {
       requestId: raw.request_id,
       toolName: raw.request.tool_name,
       input: raw.request.input || {},
       suggestions: raw.request.permission_suggestions || [],
       resolved: autoResolved,
+      ...(isAskUser && { kind: 'user_input', questions: raw.request.input?.questions || [] }),
     };
     if (emit) this._emit({ op: 'edit', id: existing.id, fields: { permission: existing.permission } });
   }
