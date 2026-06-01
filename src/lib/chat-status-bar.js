@@ -36,6 +36,9 @@ export class ChatStatusBar {
     this._statusPermMode = '';
     this._permissionModes = null;
     this._activeTasks = null;
+    this._goal = null;
+    this._goalStartedAt = 0;
+    this._goalTimerInterval = null;
 
     // Container reference (set via popupContainer setter for dropdown positioning)
     this._popupContainer = null;
@@ -137,6 +140,21 @@ export class ChatStatusBar {
     this.render();
   }
 
+  setGoal(goal) {
+    if (goal) {
+      this._goal = goal;
+      if (!this._goalStartedAt) this._goalStartedAt = Date.now();
+      if (!this._goalTimerInterval) {
+        this._goalTimerInterval = setInterval(() => this._updateGoalTimer(), 1000);
+      }
+    } else {
+      this._goal = null;
+      this._goalStartedAt = 0;
+      if (this._goalTimerInterval) { clearInterval(this._goalTimerInterval); this._goalTimerInterval = null; }
+    }
+    this.render();
+  }
+
   setReviewEnabled(enabled) {
     this._reviewEnabled = !!enabled;
     this.render();
@@ -149,6 +167,13 @@ export class ChatStatusBar {
     // Model badge
     if (this._statusModel) {
       parts.push(`<span class="chat-status-model" title="Model (set at session creation)">${escHtml(this._statusModel)}</span>`);
+    }
+
+    // Goal indicator
+    if (this._goal) {
+      const elapsed = this._goalStartedAt ? this._fmtElapsed(Date.now() - this._goalStartedAt) : '';
+      const shortGoal = this._goal.length > 30 ? this._goal.substring(0, 30) + '…' : this._goal;
+      parts.push(`<span class="chat-status-goal chat-status-clickable" title="${escHtml(this._goal)}">\u{1F3AF} <span class="chat-goal-timer">${elapsed}</span> ${escHtml(shortGoal)}</span>`);
     }
 
     // Permission mode (always show, click to change)
@@ -199,6 +224,20 @@ export class ChatStatusBar {
   }
 
   // ── Private ──
+
+  _fmtElapsed(ms) {
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m${String(s % 60).padStart(2, '0')}s`;
+    const h = Math.floor(m / 60);
+    return `${h}h${String(m % 60).padStart(2, '0')}m`;
+  }
+
+  _updateGoalTimer() {
+    const el = this._element.querySelector('.chat-goal-timer');
+    if (el && this._goalStartedAt) el.textContent = this._fmtElapsed(Date.now() - this._goalStartedAt);
+  }
 
   _onClick(e) {
     const container = this._popupContainer || this._element.parentElement;
@@ -261,6 +300,34 @@ export class ChatStatusBar {
         };
         dropdown.appendChild(item);
       }
+      return;
+    }
+
+    // Goal click -> popup with full text + controls
+    const goalEl = e.target.closest('.chat-status-goal');
+    if (goalEl && this._goal) {
+      e.stopPropagation();
+      const dropdown = showDropdown(goalEl);
+      if (!dropdown) return;
+      dropdown.style.minWidth = '240px';
+      dropdown.style.maxWidth = '400px';
+      const content = document.createElement('div');
+      content.style.cssText = 'display:flex;flex-direction:column;gap:8px;padding:4px';
+      const text = document.createElement('div');
+      text.style.cssText = 'font-size:12px;white-space:pre-wrap;word-break:break-word;color:var(--text)';
+      text.textContent = this._goal;
+      const elapsed = document.createElement('div');
+      elapsed.style.cssText = 'font-size:11px;color:var(--text-dim)';
+      elapsed.textContent = `Running for ${this._fmtElapsed(Date.now() - this._goalStartedAt)}`;
+      const actions = document.createElement('div');
+      actions.style.cssText = 'display:flex;gap:6px';
+      const clearBtn = document.createElement('button');
+      clearBtn.className = 'chat-perm-btn chat-perm-deny';
+      clearBtn.textContent = 'Clear Goal';
+      clearBtn.onclick = () => { dropdown.remove(); this._ws.send({ type: 'set-goal', sessionId: this._sessionId, goal: null }); };
+      actions.append(clearBtn);
+      content.append(text, elapsed, actions);
+      dropdown.appendChild(content);
       return;
     }
 
