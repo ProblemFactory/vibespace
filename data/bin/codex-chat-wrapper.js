@@ -529,16 +529,6 @@ function handleNotification(method, params) {
     currentTurnId = null;
     scheduleMeta();
 
-    // Goal auto-continue: if goal is active and turn completed normally, start a new turn
-    if (normalEnd && meta.goal && meta.threadId) {
-      setTimeout(async () => {
-        try {
-          const goalPrompt = `[Goal still active: "${meta.goal}"]\nYou stopped but your goal is not yet complete. Continue working toward it. Do not ask for confirmation — just proceed.`;
-          await startTurn(goalPrompt, []);
-          log('Goal auto-continue sent');
-        } catch (e) { log(`Goal auto-continue failed: ${e.message}`); }
-      }, 1000);
-    }
     return;
   }
   if (method === 'item/agentMessage/delta') {
@@ -604,7 +594,7 @@ async function startTurn(text, attachments = []) {
   if (!meta.threadId) throw new Error('No threadId available for turn/start');
   const input = encodeUserInput(text, attachments);
   if (!input.length) return;
-  const resp = await request('turn/start', {
+  const turnParams = {
     threadId: meta.threadId,
     input,
     cwd: meta.cwd,
@@ -613,7 +603,9 @@ async function startTurn(text, attachments = []) {
     model: meta.model || undefined,
     effort: effort || undefined,
     personality: 'pragmatic',
-  }, 120000);
+  };
+  if (meta.goal) turnParams.goal = { condition: meta.goal };
+  const resp = await request('turn/start', turnParams, 120000);
   currentTurnId = resp?.turn?.id || currentTurnId;
   meta.activeTurnId = currentTurnId;
   meta.streaming = true;
