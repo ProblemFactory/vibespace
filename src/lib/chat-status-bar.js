@@ -140,16 +140,18 @@ export class ChatStatusBar {
     this.render();
   }
 
-  setGoal(goal) {
+  setGoal(goal, elapsedMs) {
     if (goal) {
       this._goal = goal;
-      if (!this._goalStartedAt) this._goalStartedAt = Date.now();
+      this._goalElapsed = elapsedMs || this._goalElapsed || 0;
+      this._goalPausedAt = Date.now();
       if (!this._goalTimerInterval) {
         this._goalTimerInterval = setInterval(() => this._updateGoalTimer(), 1000);
       }
     } else {
       this._goal = null;
-      this._goalStartedAt = 0;
+      this._goalElapsed = 0;
+      this._goalPausedAt = 0;
       if (this._goalTimerInterval) { clearInterval(this._goalTimerInterval); this._goalTimerInterval = null; }
     }
     this.render();
@@ -171,7 +173,7 @@ export class ChatStatusBar {
 
     // Goal indicator
     if (this._goal) {
-      const elapsed = this._goalStartedAt ? this._fmtElapsed(Date.now() - this._goalStartedAt) : '';
+      const elapsed = this._fmtElapsed(this._goalElapsed || 0);
       const shortGoal = this._goal.length > 30 ? this._goal.substring(0, 30) + '…' : this._goal;
       parts.push(`<span class="chat-status-goal chat-status-clickable" title="${escHtml(this._goal)}">\u{1F3AF} <span class="chat-goal-timer">${elapsed}</span> ${escHtml(shortGoal)}</span>`);
     }
@@ -236,7 +238,8 @@ export class ChatStatusBar {
 
   _updateGoalTimer() {
     const el = this._element.querySelector('.chat-goal-timer');
-    if (el && this._goalStartedAt) el.textContent = this._fmtElapsed(Date.now() - this._goalStartedAt);
+    if (!el) return;
+    el.textContent = this._fmtElapsed(this._goalElapsed || 0);
   }
 
   _onClick(e) {
@@ -318,14 +321,18 @@ export class ChatStatusBar {
       text.textContent = this._goal;
       const elapsed = document.createElement('div');
       elapsed.style.cssText = 'font-size:11px;color:var(--text-dim)';
-      elapsed.textContent = `Running for ${this._fmtElapsed(Date.now() - this._goalStartedAt)}`;
+      elapsed.textContent = `Pursued for ${this._fmtElapsed(this._goalElapsed || 0)}`;
       const actions = document.createElement('div');
       actions.style.cssText = 'display:flex;gap:6px';
+      const continueBtn = document.createElement('button');
+      continueBtn.className = 'chat-perm-btn chat-perm-allow';
+      continueBtn.textContent = 'Continue Goal';
+      continueBtn.onclick = () => { dropdown.remove(); this._ws.send({ type: 'set-goal', sessionId: this._sessionId, goal: this._goal }); };
       const clearBtn = document.createElement('button');
       clearBtn.className = 'chat-perm-btn chat-perm-deny';
-      clearBtn.textContent = 'Clear Goal';
+      clearBtn.textContent = 'Clear';
       clearBtn.onclick = () => { dropdown.remove(); this._ws.send({ type: 'set-goal', sessionId: this._sessionId, goal: null }); };
-      actions.append(clearBtn);
+      actions.append(continueBtn, clearBtn);
       content.append(text, elapsed, actions);
       dropdown.appendChild(content);
       return;
