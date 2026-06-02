@@ -321,22 +321,22 @@ export class ChatStatusBar {
       elapsed.textContent = `Pursued for ${this._fmtElapsed(this._goalElapsed || 0)}${statusLabel}`;
       const actions = document.createElement('div');
       actions.style.cssText = 'display:flex;gap:6px';
-      const continueBtn = document.createElement('button');
-      continueBtn.className = 'chat-perm-btn chat-perm-allow';
-      continueBtn.textContent = 'Continue Goal';
-      continueBtn.onclick = () => {
-        dropdown.remove();
-        const goal = this._goal;
-        this._ws.send({ type: 'set-goal', sessionId: this._sessionId, goal });
-        this._ws.send({ type: 'chat-input', sessionId: this._sessionId,
-          text: `[Goal: "${goal}"]\nContinue working toward this goal. Do not ask for confirmation — just proceed.`,
-          msgId: Date.now() + '-goal' });
-      };
+      const isActive = this._goalStatus === 'active' || this._goalStatus === 'Active';
+      if (!isActive) {
+        const continueBtn = document.createElement('button');
+        continueBtn.className = 'chat-perm-btn chat-perm-allow';
+        continueBtn.textContent = 'Continue Goal';
+        continueBtn.onclick = () => {
+          dropdown.remove();
+          this._ws.send({ type: 'set-goal', sessionId: this._sessionId, goal: this._goal });
+        };
+        actions.append(continueBtn);
+      }
       const clearBtn = document.createElement('button');
       clearBtn.className = 'chat-perm-btn chat-perm-deny';
       clearBtn.textContent = 'Clear';
       clearBtn.onclick = () => { dropdown.remove(); this._ws.send({ type: 'set-goal', sessionId: this._sessionId, goal: null }); };
-      actions.append(continueBtn, clearBtn);
+      actions.append(clearBtn);
       content.append(text, elapsed, actions);
       dropdown.appendChild(content);
       return;
