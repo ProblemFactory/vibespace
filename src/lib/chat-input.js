@@ -320,10 +320,11 @@ export class ChatInput {
     if (goalMatch) {
       const goalArg = (goalMatch[1] || '').trim();
       if (!goalArg) {
-        // /goal with no args → request status
         this._ws.send({ type: 'set-goal', sessionId: this._sessionId, action: 'status' });
       } else if (goalArg === 'clear') {
         this._ws.send({ type: 'set-goal', sessionId: this._sessionId, goal: null });
+      } else if (goalArg === 'resume') {
+        this._ws.send({ type: 'set-goal', sessionId: this._sessionId, action: 'resume' });
       } else {
         this._ws.send({ type: 'set-goal', sessionId: this._sessionId, goal: goalArg });
       }

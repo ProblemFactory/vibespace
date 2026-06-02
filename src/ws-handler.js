@@ -413,12 +413,24 @@ function registerWsHandler(wss, ctx) {
           const session = activeSessions.get(data.sessionId);
           if (session?.mode === 'chat') {
             if (data.action === 'status') {
-              // Show current goal status to the requesting client only
               const goal = session._goal;
-              const msg = goal ? `Goal active: ${goal}\n\`/goal clear\` to remove, \`/goal <new text>\` to replace.` : 'No goal set. Usage: `/goal <condition>`';
+              const prev = session._prevGoal;
+              let msg = goal ? `Goal active: ${goal}\n\`/goal clear\` to remove, \`/goal <new text>\` to replace.` : 'No goal set. Usage: `/goal <condition>`';
+              if (!goal && prev) msg += `\nPrevious goal available — \`/goal resume\` to re-activate.`;
               ws.send(JSON.stringify({ type: 'goal-updated', sessionId: data.sessionId, goal: session._goal || null, statusMsg: msg }));
+            } else if (data.action === 'resume') {
+              const prev = session._prevGoal;
+              if (!prev) {
+                ws.send(JSON.stringify({ type: 'goal-updated', sessionId: data.sessionId, goal: null, statusMsg: 'No previous goal to resume.' }));
+              } else {
+                session._goal = prev;
+                session._prevGoal = null;
+                if (session.pty) session.pty.write(JSON.stringify({ type: 'set-goal', goal: prev }) + '\n');
+                broadcastToSession(session, data.sessionId, { type: 'goal-updated', sessionId: data.sessionId, goal: prev, statusMsg: `Goal resumed: ${prev}` });
+              }
             } else {
               const goalText = data.goal || null;
+              if (!goalText && session._goal) session._prevGoal = session._goal;
               if (session.pty) session.pty.write(JSON.stringify({ type: 'set-goal', goal: goalText }) + '\n');
               session._goal = goalText;
               const msg = goalText ? `Goal set: ${goalText}` : `Goal cleared`;
