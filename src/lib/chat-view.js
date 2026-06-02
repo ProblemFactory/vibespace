@@ -331,7 +331,7 @@ class ChatView {
     if (meta) {
       if (meta.chatStatus) this.applyStatus(meta.chatStatus);
       if (meta.taskState) this._applyTaskState(meta.taskState);
-      if (meta.goal != null) this._onGoalUpdated(meta.goal, meta.goalElapsed);
+      if (meta.goal != null) { this._onGoalUpdated(meta.goal, meta.goalElapsed); if (meta.goalStatus) this._statusBar.setGoalStatus(meta.goalStatus); }
       // Restore pending permission overlays from server (survived in buffer)
       if (meta.pendingPermissions) {
         for (const [toolUseId, cr] of Object.entries(meta.pendingPermissions)) {

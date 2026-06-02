@@ -576,10 +576,12 @@ function registerWsHandler(wss, ctx) {
                   if (!gs.met) session._goal = gs.condition;
                   else session._prevGoal = gs.condition;
                 }
-                // 2. From wrapper meta file
-                if (!session._goal) {
+                // 2. From wrapper meta file (most up-to-date for active sessions)
+                {
                   const wMeta = sm.wrapperMeta?.() || {};
-                  if (wMeta.goal) session._goal = wMeta.goal;
+                  if (wMeta.goal && !session._goal) session._goal = wMeta.goal;
+                  if (wMeta.goalStatus) session._goalStatus = wMeta.goalStatus;
+                  if (wMeta.goalElapsed) session._goalElapsed = wMeta.goalElapsed;
                 }
                 // 3. Fast scan of raw records for goal (avoids waiting for full convertHistory)
                 if (session.backend === 'codex' && (!session._goal || !session._goalElapsed)) {
@@ -623,7 +625,7 @@ function registerWsHandler(wss, ctx) {
               const streamingLabel = isStreaming ? (session._streamingLabel || 'thinking...') : '';
               ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, mode: 'chat',
                 messages, totalCount, chatStatus: sm.chatStatus(), isStreaming, streamingLabel, taskState: sm.taskState(), turnMap, pendingPermissions: pendingPerms,
-                goal: session._goal || null, goalElapsed: session._goalElapsed || 0 }));
+                goal: session._goal || null, goalElapsed: session._goalElapsed || 0, goalStatus: session._goalStatus || null }));
             } else {
               ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, buffer: session.buffer || '' }));
             }
