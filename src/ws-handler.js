@@ -569,22 +569,25 @@ function registerWsHandler(wss, ctx) {
                 session._normalizer.convertHistory(sm.raw());
               }
               // Recover goal state + elapsed time
-              if (!session._goal || (session._goal && !session._goalElapsed)) {
-                // 1. From normalizer (if convertHistory already ran)
-                const gs = session._normalizer?.goalState?.();
-                if (gs?.condition) {
-                  if (!gs.met) session._goal = gs.condition;
-                  else session._prevGoal = gs.condition;
-                }
-                // 2. From wrapper meta file (most up-to-date for active sessions)
-                {
-                  const wMeta = sm.wrapperMeta?.() || {};
-                  if (wMeta.goal && !session._goal) session._goal = wMeta.goal;
+              // Priority: wrapper meta (live) > JSONL scan (historical) > normalizer
+              if (!session._goal || !session._goalStatus) {
+                // 1. Wrapper meta (authoritative for active sessions)
+                const wMeta = sm.wrapperMeta?.() || {};
+                if (wMeta.goal) {
+                  session._goal = wMeta.goal;
                   if (wMeta.goalStatus) session._goalStatus = wMeta.goalStatus;
                   if (wMeta.goalElapsed) session._goalElapsed = wMeta.goalElapsed;
                 }
-                // 3. Fast scan of raw records for goal (avoids waiting for full convertHistory)
-                if (session.backend === 'codex' && (!session._goal || !session._goalElapsed)) {
+                // 2. Normalizer goalState (from convertHistory)
+                if (!session._goal) {
+                  const gs = session._normalizer?.goalState?.();
+                  if (gs?.condition) {
+                    if (!gs.met) session._goal = gs.condition;
+                    else session._prevGoal = gs.condition;
+                  }
+                }
+                // 3. Fast scan of raw records for elapsed time (JSONL has cumulative time)
+                if (session.backend === 'codex' && session._goal && !session._goalElapsed) {
                   const raw = sm.raw();
                   for (let i = raw.length - 1; i >= 0 && i >= raw.length - 2000; i--) {
                     const r = raw[i];
