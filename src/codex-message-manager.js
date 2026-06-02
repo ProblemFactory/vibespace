@@ -340,16 +340,16 @@ class CodexMessageManager {
 
   _processResponseMessage(item, emit) {
     const role = item.role;
-    // Detect Codex thread goal auto-continue messages (role=developer)
-    if (role === 'developer') {
+    // Detect Codex thread goal auto-continue messages (role=developer or user with goal context)
+    if (role === 'developer' || role === 'user') {
       const text = asArray(item.content).map(b => b.text || '').join('');
       if (text.includes('Continue working toward the active thread goal')) {
         this._goalActive = true;
-        // Extract goal text from <untrusted_objective> tag
-        const match = text.match(/<untrusted_objective>\s*([\s\S]*?)\s*<\/untrusted_objective>/);
+        const match = text.match(/<(?:untrusted_)?objective>\s*([\s\S]*?)\s*<\/(?:untrusted_)?objective>/);
         if (match) this._goalCondition = match[1].trim();
+        if (role === 'user') return; // Don't render as user message
       }
-      return;
+      if (role === 'developer') return;
     }
     if (role === 'user') {
       const content = [];
