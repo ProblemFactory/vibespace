@@ -330,7 +330,7 @@ class ChatView {
     if (meta) {
       if (meta.chatStatus) this.applyStatus(meta.chatStatus);
       if (meta.taskState) this._applyTaskState(meta.taskState);
-      if (meta.goal != null) this._onGoalUpdated(meta.goal);
+      if (meta.goal != null) this._onGoalUpdated(meta.goal, meta.goalElapsed);
       // Restore pending permission overlays from server (survived in buffer)
       if (meta.pendingPermissions) {
         for (const [toolUseId, cr] of Object.entries(meta.pendingPermissions)) {
@@ -834,8 +834,8 @@ class ChatView {
     this._streamStatus.innerHTML = '';
   }
 
-  _onGoalUpdated(goal) {
-    this._statusBar.setGoal(goal);
+  _onGoalUpdated(goal, elapsed) {
+    this._statusBar.setGoal(goal, elapsed);
   }
 
   _onSubagentMessage(parentToolUseId, msg) {

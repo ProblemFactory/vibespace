@@ -568,8 +568,8 @@ function registerWsHandler(wss, ctx) {
                 if (opHandler) session._normalizer.onOp(opHandler);
                 session._normalizer.convertHistory(sm.raw());
               }
-              // Recover goal state
-              if (!session._goal) {
+              // Recover goal state + elapsed time
+              if (!session._goal || (session._goal && !session._goalElapsed)) {
                 // 1. From normalizer (if convertHistory already ran)
                 const gs = session._normalizer?.goalState?.();
                 if (gs?.condition) {
@@ -582,7 +582,7 @@ function registerWsHandler(wss, ctx) {
                   if (wMeta.goal) session._goal = wMeta.goal;
                 }
                 // 3. Fast scan of raw records for goal (avoids waiting for full convertHistory)
-                if (!session._goal && session.backend === 'codex') {
+                if (session.backend === 'codex' && (!session._goal || !session._goalElapsed)) {
                   const raw = sm.raw();
                   for (let i = raw.length - 1; i >= 0 && i >= raw.length - 2000; i--) {
                     const r = raw[i];
@@ -590,7 +590,10 @@ function registerWsHandler(wss, ctx) {
                       const text = (r.payload.content || []).map(b => b.text || '').join('');
                       if (text.includes('Continue working toward the active thread goal')) {
                         const match = text.match(/<untrusted_objective>\s*([\s\S]*?)\s*<\/untrusted_objective>/);
-                        if (match) { session._goal = match[1].trim(); break; }
+                        if (match) session._goal = match[1].trim();
+                        const timeMatch = text.match(/Time spent pursuing goal:\s*(\d+)\s*seconds/);
+                        if (timeMatch) session._goalElapsed = parseInt(timeMatch[1]) * 1000;
+                        break;
                       }
                     }
                   }
@@ -619,7 +622,8 @@ function registerWsHandler(wss, ctx) {
               const isStreaming = session._isStreaming ?? sm.isStreaming;
               const streamingLabel = isStreaming ? (session._streamingLabel || 'thinking...') : '';
               ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, mode: 'chat',
-                messages, totalCount, chatStatus: sm.chatStatus(), isStreaming, streamingLabel, taskState: sm.taskState(), turnMap, pendingPermissions: pendingPerms, goal: session._goal || null }));
+                messages, totalCount, chatStatus: sm.chatStatus(), isStreaming, streamingLabel, taskState: sm.taskState(), turnMap, pendingPermissions: pendingPerms,
+                goal: session._goal || null, goalElapsed: session._goalElapsed || 0 }));
             } else {
               ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, buffer: session.buffer || '' }));
             }
