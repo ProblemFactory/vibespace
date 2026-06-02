@@ -568,56 +568,21 @@ function registerWsHandler(wss, ctx) {
                 if (opHandler) session._normalizer.onOp(opHandler);
                 session._normalizer.convertHistory(sm.raw());
               }
-              // Recover goal state + elapsed time
-              // Priority: wrapper meta (live) > JSONL scan (historical) > normalizer
-              if (!session._goal || !session._goalStatus) {
-                // 1. Wrapper meta (authoritative for active sessions)
+              // Recover goal state from wrapper meta (populated by thread/goal/get on startup)
+              if (!session._goal) {
                 const wMeta = sm.wrapperMeta?.() || {};
                 if (wMeta.goal) {
                   session._goal = wMeta.goal;
-                  if (wMeta.goalStatus) session._goalStatus = wMeta.goalStatus;
-                  if (wMeta.goalElapsed > 0) session._goalElapsed = wMeta.goalElapsed;
+                  session._goalStatus = wMeta.goalStatus || null;
+                  session._goalElapsed = wMeta.goalElapsed || 0;
+                  session._goalTokensUsed = wMeta.goalTokensUsed || 0;
                 }
-                // 2. Normalizer goalState (from convertHistory)
-                if (!session._goal) {
+                // Claude fallback: goal_status attachments in JSONL
+                if (!session._goal && session.backend === 'claude') {
                   const gs = session._normalizer?.goalState?.();
                   if (gs?.condition) {
                     if (!gs.met) session._goal = gs.condition;
                     else session._prevGoal = gs.condition;
-                  }
-                }
-                // 3. Fast scan of JSONL for goal elapsed time + fallback goal text
-                if (session.backend === 'codex' && (!session._goal || !session._goalElapsed)) {
-                  const raw = sm.raw();
-                  for (let i = raw.length - 1; i >= 0 && i >= raw.length - 2000; i--) {
-                    const r = raw[i];
-                    if (r.type !== 'response_item') continue;
-                    const text = (r.payload?.content || []).map(b => b.text || '').join('');
-                    if (!text.includes('Continue working toward the active thread goal')) continue;
-                    if (!session._goal) {
-                      const match = text.match(/<(?:untrusted_)?objective>\s*([\s\S]*?)\s*<\/(?:untrusted_)?objective>/);
-                      if (match) session._goal = match[1].trim();
-                    }
-                    if (!session._goalElapsed) {
-                      const timeMatch = text.match(/Time spent pursuing goal:\s*(\d+)\s*seconds/);
-                      if (timeMatch) session._goalElapsed = parseInt(timeMatch[1]) * 1000;
-                      // Newer format uses token count instead of time
-                      const tokenMatch = text.match(/Tokens used:\s*(\d+)/);
-                      if (tokenMatch && !session._goalTokensUsed) session._goalTokensUsed = parseInt(tokenMatch[1]);
-                    }
-                    break;
-                  }
-                }
-                // 4. Fast scan for Claude goal_status attachment
-                if (!session._goal && session.backend === 'claude') {
-                  const raw = sm.raw();
-                  for (let i = raw.length - 1; i >= 0 && i >= raw.length - 500; i--) {
-                    const r = raw[i];
-                    if (r.type === 'attachment' && r.attachment?.type === 'goal_status') {
-                      if (!r.attachment.met && r.attachment.condition) session._goal = r.attachment.condition;
-                      else if (r.attachment.met) session._prevGoal = r.attachment.condition;
-                      break;
-                    }
                   }
                 }
               }
