@@ -626,7 +626,7 @@ class ChatRenderers {
         const cls = line.type === 'add' ? 'chat-diff-add' : line.type === 'del' ? 'chat-diff-del' : 'chat-diff-ctx';
         return `<div class="${cls}"><span class="chat-diff-prefix">${escHtml(line.prefix)}</span><span class="chat-diff-text">${escHtml(line.text)}</span></div>`;
       }).join('');
-      return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.memo} ${action} ${pathLabel}</span><details class="chat-diff" open><summary class="chat-diff-summary">${summary}</summary><div class="chat-diff-body">${body}</div></details></div>`;
+      return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.memo} ${action} ${pathLabel}</span><details class="chat-diff"><summary class="chat-diff-summary">${summary}</summary><div class="chat-diff-body">${body}</div></details></div>`;
     }).join('');
   }
 
