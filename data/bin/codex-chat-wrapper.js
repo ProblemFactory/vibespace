@@ -547,6 +547,20 @@ function handleNotification(method, params) {
     currentTurnId = null;
     scheduleMeta();
 
+    // Refresh goal state after each turn (time_used_seconds updated in DB)
+    if (meta.goal && meta.threadId) {
+      request('thread/goal/get', { threadId: meta.threadId }, 5000).then(resp => {
+        const g = resp?.goal;
+        if (g) {
+          meta.goalStatus = g.status || meta.goalStatus;
+          meta.goalElapsed = (g.timeUsedSeconds || g.time_used_seconds || 0) * 1000;
+          meta.goalTokensUsed = g.tokensUsed || g.tokens_used || 0;
+          if (g.status === 'complete' || g.status === 'blocked') meta.goal = null;
+          scheduleMeta();
+          record('event_msg', { type: 'goal_updated', goal: g });
+        }
+      }).catch(() => {});
+    }
     return;
   }
   if (method === 'item/agentMessage/delta') {
