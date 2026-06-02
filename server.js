@@ -344,7 +344,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
                 else if (evType === 'task_complete' || evType === 'turn_aborted' || evType === 'task_failed') { session._isStreaming = false; newLabel = ''; }
                 else if (evType === 'goal_updated' && payload.goal) {
                   session._goal = payload.goal.objective || null;
-                  session._goalElapsed = (payload.goal.time_used_seconds || 0) * 1000;
+                  session._goalElapsed = (payload.goal.timeUsedSeconds || payload.goal.time_used_seconds || 0) * 1000;
                   session._goalStatus = payload.goal.status || null;
                   broadcastToSession(session, id, { type: 'goal-updated', sessionId: id, goal: session._goal, goalElapsed: session._goalElapsed, goalStatus: session._goalStatus });
                 } else if (evType === 'goal_cleared') {

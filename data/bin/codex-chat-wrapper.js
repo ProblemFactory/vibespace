@@ -497,8 +497,8 @@ function handleNotification(method, params) {
     const goal = params?.goal;
     meta.goal = goal?.objective || null;
     meta.goalStatus = goal?.status || null;
-    meta.goalElapsed = (goal?.time_used_seconds || 0) * 1000;
-    meta.goalTokensUsed = goal?.tokens_used || 0;
+    meta.goalElapsed = (goal?.timeUsedSeconds || goal?.time_used_seconds || 0) * 1000;
+    meta.goalTokensUsed = goal?.tokensUsed || goal?.tokens_used || 0;
     scheduleMeta();
     record('event_msg', { type: 'goal_updated', goal });
     return;
@@ -606,6 +606,26 @@ async function startThread() {
   if (resumeId) params.threadId = resumeId;
   const resp = await request(method, params, 120000);
   updateMetaFromThread(resp || {});
+
+  // Query goal state from app-server (authoritative source)
+  if (meta.threadId) {
+    try {
+      const goalResp = await request('thread/goal/get', { threadId: meta.threadId }, 10000);
+      const goal = goalResp?.goal;
+      if (goal) {
+        meta.goal = goal.objective || null;
+        meta.goalStatus = goal.status || null;
+        meta.goalElapsed = (goal.timeUsedSeconds || goal.time_used_seconds || 0) * 1000;
+        meta.goalTokensUsed = goal.tokensUsed || goal.tokens_used || 0;
+        log(`Goal from thread/goal/get: status=${meta.goalStatus} elapsed=${meta.goalElapsed}ms tokens=${meta.goalTokensUsed} objective=${(meta.goal || '').substring(0, 60)}`);
+      } else {
+        meta.goal = null;
+        meta.goalStatus = null;
+        meta.goalElapsed = 0;
+      }
+      scheduleMeta();
+    } catch (e) { log(`thread/goal/get failed: ${e.message}`); }
+  }
 }
 
 async function startTurn(text, attachments = []) {
