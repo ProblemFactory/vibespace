@@ -164,6 +164,14 @@ child.stdout.on('data', (chunk) => {
       }
     }
 
+    // Track goal state from CLI /goal (goal_status attachment in stream-json)
+    if (msg.type === 'attachment' && msg.attachment?.type === 'goal_status') {
+      const a = msg.attachment;
+      if (a.met) { meta.goal = null; }
+      else if (a.condition) { meta.goal = a.condition; }
+      scheduleMeta();
+    }
+
     // Track todos: TodoWrite tool_use in assistant messages
     if (msg.type === 'assistant' && msg.message?.content) {
       const blocks = Array.isArray(msg.message.content) ? msg.message.content : [];

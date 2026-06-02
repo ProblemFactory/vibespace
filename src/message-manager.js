@@ -165,6 +165,7 @@ class MessageManager {
       case 'user': return this._processUser(raw, emit);
       case 'assistant': return this._processAssistant(raw, emit);
       case 'result': return this._processResult(raw, emit);
+      case 'attachment': return this._processAttachment(raw, emit);
       case 'control_request': return this._processControlRequest(raw, emit);
       case 'control_response': return this._processControlResponse(raw, emit);
       case 'control_cancel_request': return this._processControlCancel(raw, emit);
@@ -227,6 +228,15 @@ class MessageManager {
       }
     }
   }
+
+  _processAttachment(raw, emit) {
+    const a = raw.attachment;
+    if (!a || a.type !== 'goal_status') return;
+    this._goalState = { condition: a.condition || '', met: !!a.met, sentinel: !!a.sentinel };
+    if (emit) this._emit({ op: 'meta', subtype: 'goal_status', data: this._goalState });
+  }
+
+  goalState() { return this._goalState || null; }
 
   _processUser(raw, emit) {
     this._finalizeStreaming(emit);

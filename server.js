@@ -469,6 +469,22 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
               }
             }
 
+            // Track goal state from CLI /goal command (goal_status attachment)
+            if (msg.type === 'attachment' && msg.attachment?.type === 'goal_status') {
+              const a = msg.attachment;
+              const prevGoal = session._goal;
+              if (a.met) {
+                if (prevGoal) session._prevGoal = prevGoal;
+                session._goal = null;
+              } else if (a.condition) {
+                session._goal = a.condition;
+              }
+              if (session._goal !== prevGoal) {
+                broadcastToSession(session, id, { type: 'goal-updated', sessionId: id, goal: session._goal || null,
+                  statusMsg: a.met ? `Goal met: ${a.condition}` : (a.sentinel ? `Goal set: ${a.condition}` : null) });
+              }
+            }
+
             // Track subagent lifecycle: start/stop JSONL watchers
             if (msg.type === 'system' && msg.subtype === 'task_started' && msg.task_type === 'local_agent' && msg.task_id && msg.tool_use_id) {
               startSubagentWatcher(msg.tool_use_id, msg.task_id);
@@ -606,10 +622,12 @@ function restoreSessions() {
     // Detect mode and streaming state from wrapper metadata
     let sessionMode = meta.mode || 'terminal';
     let wrapperStreaming = false;
+    let wrapperGoal = null;
     try {
       const wrapperMeta = JSON.parse(fs.readFileSync(path.join(BUFFERS_DIR, id + '.json'), 'utf-8'));
       if (wrapperMeta.mode === 'chat') sessionMode = 'chat';
       if (wrapperMeta.streaming != null) wrapperStreaming = !!wrapperMeta.streaming;
+      if (wrapperMeta.goal) wrapperGoal = wrapperMeta.goal;
     } catch {}
 
     let savedBuffer = '';
@@ -636,6 +654,7 @@ function restoreSessions() {
       socketPath,
       buffer: savedBuffer,
       _isStreaming: wrapperStreaming,
+      _goal: wrapperGoal,
     };
     // Create normalizer for chat sessions (populated on first attach from JSONL + buffer)
     if (sessionMode === 'chat') {

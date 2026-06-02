@@ -124,7 +124,8 @@ class ChatRenderers {
     // Detect system notifications: command tags, meta directives, reminders
     const rawText = content.map(b => b.text || '').join('');
     const isNotification = /^<(command-name|local-command|task-notification|system-reminder)/.test(rawText.trim())
-      || /^A session-scoped Stop hook is now active/.test(rawText.trim());
+      || /^A session-scoped Stop hook is now active/.test(rawText.trim())
+      || /^Stop hook feedback:/.test(rawText.trim());
     if (isNotification) {
       return this._renderNotificationMsg(rawText);
     }
@@ -157,6 +158,7 @@ class ChatRenderers {
     const argsMatch = rawText.match(/<command-args>([\s\S]*?)<\/command-args>/);
     const stdoutMatch = rawText.match(/<local-command-stdout>([\s\S]*?)<\/local-command-stdout>/);
     const hookMatch = rawText.match(/^A session-scoped Stop hook is now active with condition: "([\s\S]*?)"/);
+    const hookFeedback = rawText.match(/^Stop hook feedback:\s*\[[\s\S]*?\]:\s*([\s\S]*)/);
 
     if (cmdMatch) {
       label = `/${cmdMatch[1]}`;
@@ -165,7 +167,10 @@ class ChatRenderers {
       label = stdoutMatch[1].trim().substring(0, 80);
       if (stdoutMatch[1].length > 80) label += '...';
     } else if (hookMatch) {
-      label = `Goal: ${hookMatch[1].substring(0, 60)}${hookMatch[1].length > 60 ? '...' : ''}`;
+      label = `\u{1F3AF} Goal: ${hookMatch[1].substring(0, 60)}${hookMatch[1].length > 60 ? '...' : ''}`;
+    } else if (hookFeedback) {
+      label = '\u{1F3AF} Goal check: not met';
+      detail = hookFeedback[1].trim();
     } else {
       label = rawText.replace(/<[^>]+>/g, '').trim().substring(0, 80) || 'notification';
     }

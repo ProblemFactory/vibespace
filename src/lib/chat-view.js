@@ -797,6 +797,15 @@ class ChatView {
         this._todos = op.data;
         this._updateTodoDisplay();
       }
+    } else if (op.subtype === 'goal_status') {
+      const gs = op.data;
+      if (gs?.met) {
+        this._statusBar.setGoal(null);
+        this._renderers.appendSystem(`Goal met: ${gs.condition}`);
+      } else if (gs?.condition) {
+        this._statusBar.setGoal(gs.condition);
+        if (gs.sentinel) this._renderers.appendSystem(`Goal set: ${gs.condition}`);
+      }
     } else if (op.subtype === 'turn_complete') {
       this._hideTyping();
       this._statusBar.addCost(op.data?.cost, op.data?.modelUsage);
