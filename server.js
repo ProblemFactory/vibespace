@@ -632,12 +632,12 @@ function restoreSessions() {
     // Detect mode and streaming state from wrapper metadata
     let sessionMode = meta.mode || 'terminal';
     let wrapperStreaming = false;
-    let wrapperGoal = null;
+    let wrapperGoal = null, wrapperGoalStatus = null, wrapperGoalElapsed = 0, wrapperGoalTokens = 0;
     try {
       const wrapperMeta = JSON.parse(fs.readFileSync(path.join(BUFFERS_DIR, id + '.json'), 'utf-8'));
       if (wrapperMeta.mode === 'chat') sessionMode = 'chat';
       if (wrapperMeta.streaming != null) wrapperStreaming = !!wrapperMeta.streaming;
-      if (wrapperMeta.goal) wrapperGoal = wrapperMeta.goal;
+      if (wrapperMeta.goal) { wrapperGoal = wrapperMeta.goal; wrapperGoalStatus = wrapperMeta.goalStatus || null; wrapperGoalElapsed = wrapperMeta.goalElapsed || 0; wrapperGoalTokens = wrapperMeta.goalTokensUsed || 0; }
     } catch {}
 
     let savedBuffer = '';
@@ -665,6 +665,9 @@ function restoreSessions() {
       buffer: savedBuffer,
       _isStreaming: wrapperStreaming,
       _goal: wrapperGoal,
+      _goalStatus: wrapperGoalStatus,
+      _goalElapsed: wrapperGoalElapsed,
+      _goalTokensUsed: wrapperGoalTokens,
     };
     // Create normalizer for chat sessions (populated on first attach from JSONL + buffer)
     if (sessionMode === 'chat') {
