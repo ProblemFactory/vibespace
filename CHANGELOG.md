@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.7.0] — 2026-06-02
+
+### Added
+
+- **`/goal` command in chat mode (Claude + Codex)**: set a session-scoped objective the agent auto-continues toward until met.
+  - **Claude**: `/goal <text>` sets the goal; wrapper auto-sends a continuation message after each `result` (turn end) so the model keeps working. CLI's own `/goal` (Stop hook) is also detected — `goal_status` attachments in stream-json sync `session._goal`. `/goal`, `/goal clear`, `/goal resume` semantics match the CLI.
+  - **Codex**: uses the app-server's **native** goal loop via `thread/goal/set` RPC (objective stored in Codex's SQLite, auto-continues with developer messages). Wrapper queries `thread/goal/get` on startup and after each `turn/completed` to sync authoritative state (`objective`, `status`, `timeUsedSeconds`, `tokensUsed` — note camelCase). Resuming a thread with an active goal auto-continues by Codex design.
+  - **Status bar goal indicator**: 🎯 + status icon (▶ active / ⏸ paused / ✓ complete) + elapsed time + truncated objective. Click for popup with full text, elapsed/status, Continue (when not active) and Clear buttons. Elapsed comes from protocol (`timeUsedSeconds`), not a wall clock — updates per turn.
+  - Goal state persisted in wrapper meta + session, survives server restart (read in `restoreSessions`), broadcast to all clients via `goal-updated`.
+- **Interactive AskUserQuestion UI**: `AskUserQuestion` tool calls (via `control_request` `tool_name === 'AskUserQuestion'`) render as a paginated questionnaire — one question per page with ← → navigation, selectable option cards, a custom-answer input per question, and a Submit enabled only when all are answered. Response uses `approved: true` + `toolInput.answers` keyed by question text.
+- **Fork button on session cards**: branches a session from its history. Claude uses `--fork-session`; Codex uses the app-server's `thread/fork` RPC (confirmed to return a new thread with `forkedFromId`). Fork name auto-generated: "Name (forked)", "(forked 2)", etc.
+- **Hook event rendering**: `hook_response` → collapsed "✓ Hook: name" card (expand for output); `stop_hook_summary` → "N hooks ran". `hook_started` ignored.
+- **CLI command notification cards**: `<command-name>`, `<local-command-stdout>`, `<system-reminder>`, `<task-notification>`, and goal Stop-hook directives render as compact dim notification cards instead of raw XML user messages.
+
+### Fixed
+
+- **Session history lost after server restart**: attach only loaded JSONL when `normalizer.total === 0`, but PTY `processLive` could populate partial buffer data first, skipping the full history (e.g. 4367 messages → 63). Now uses a `_historyLoaded` flag and re-creates the normalizer from full JSONL + buffer on first attach.
+- **Duplicate Codex messages from JSONL/buffer overlap**: JSONL records carry an `item_id` that buffer records lack, so `JSON.stringify(payload)` fingerprints differed and dedup failed. Now strips `item_id`/`itemId` before fingerprinting.
+- **Resume opening a second window for a terminated conversation**: clicking Resume in the sidebar while a terminated (read-only) window for the same session was still open created a duplicate stuck window. `resumeSession` now closes any window whose `_openSpec.backendSessionId` matches the target before creating the resumed window.
+- **File explorer Copy Path over HTTP**: `navigator.clipboard` is undefined in non-HTTPS contexts, so the optional chain silently skipped the fallback. Replaced inline code with the shared `copyText` utility.
+- **Codex `apply_patch` Update cards expanded by default**: `renderPatchDiff` had `open` on the diff `<details>`. Now collapsed like other tool cards.
+
 ## [2.6.1] — 2026-05-09
 
 ### Fixed
