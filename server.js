@@ -922,11 +922,21 @@ function refreshRateLimit() {
 }
 function _refreshRateLimitWithToken(token) {
   const body = JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1, messages: [{ role: 'user', content: '.' }] });
+  // OAuth tokens (sk-ant-oat…) must use Authorization: Bearer + the oauth beta
+  // header — Anthropic returns 401 "invalid x-api-key" for OAuth tokens sent via
+  // x-api-key. Real API keys (sk-ant-api…) still use x-api-key.
+  const isApiKey = typeof token === 'string' && token.startsWith('sk-ant-api');
+  const authHeaders = isApiKey
+    ? { 'x-api-key': token }
+    : { 'authorization': `Bearer ${token}`, 'anthropic-beta': 'oauth-2025-04-20' };
   const req = https.request('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: { 'x-api-key': token, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) },
+    headers: { ...authHeaders, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) },
   }, (res) => {
     const h = res.headers;
+    if (res.statusCode !== 200) {
+      console.warn(`[rate-limit] poll failed: HTTP ${res.statusCode}`);
+    }
     if (res.statusCode === 200) {
       _rateLimitCache = {
         fiveHour: { utilization: parseFloat(h['anthropic-ratelimit-unified-5h-utilization'] || '0'), status: h['anthropic-ratelimit-unified-5h-status'] || 'unknown', resetsAt: parseInt(h['anthropic-ratelimit-unified-5h-reset'] || '0') },
