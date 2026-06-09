@@ -653,6 +653,12 @@ async function startThread() {
         meta.goalElapsed = (goal.timeUsedSeconds || goal.time_used_seconds || 0) * 1000;
         meta.goalTokensUsed = goal.tokensUsed || goal.tokens_used || 0;
         log(`Goal from thread/goal/get: status=${meta.goalStatus} elapsed=${meta.goalElapsed}ms tokens=${meta.goalTokensUsed} objective=${(meta.goal || '').substring(0, 60)}`);
+        // Emit immediately so the server learns the restored goal NOW.
+        // Resuming a thread with an active goal auto-continues (Codex design)
+        // — without this event the status bar stayed empty for the entire
+        // first turn (the only other emit happens at turn/completed), leaving
+        // the user looking at a silently-running goal.
+        record('event_msg', { type: 'goal_updated', goal });
       } else {
         meta.goal = null;
         meta.goalStatus = null;

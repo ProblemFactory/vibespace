@@ -444,7 +444,11 @@ function registerWsHandler(wss, ctx) {
               }
             } else {
               const goalText = data.goal || null;
-              if (!goalText && session._goal) session._prevGoal = session._goal;
+              // Save the previous goal for /goal resume on BOTH clear and
+              // replace (both backends natively replace an active goal:
+              // Claude /goal swaps the Stop-hook condition; Codex
+              // thread/goal/set updates/replaces, steering a running turn)
+              if (session._goal && session._goal !== goalText) session._prevGoal = session._goal;
               if (session.pty) session.pty.write(JSON.stringify({ type: 'set-goal', goal: goalText }) + '\n');
               session._goal = goalText;
               session._goalStatus = goalText ? 'active' : null;
