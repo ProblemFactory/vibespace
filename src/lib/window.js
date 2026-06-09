@@ -6,6 +6,15 @@ class WindowManager {
   constructor(workspace) {
     this.workspace = workspace;
     this.windows = new Map(); this.zIndex = 100; this.activeWindowId = null;
+    // Window z-indexes grow on every focus AND persist across reloads — left
+    // unchecked they eventually pass the fixed chrome layers (snap indicator
+    // 9990, theme editor 9999). Renumber preserving stacking order.
+    this._normalizeZIndices = () => {
+      const ordered = [...this.windows.values()].sort((a, b) => (parseInt(a.element.style.zIndex) || 0) - (parseInt(b.element.style.zIndex) || 0));
+      let z = 100;
+      for (const w of ordered) w.element.style.zIndex = z++;
+      this.zIndex = z;
+    };
     this.snapIndicator = document.getElementById('snap-indicator');
     this.gridOverlay = document.getElementById('grid-overlay');
     this.onWindowsChanged = null; this.windowCounter = 0;
@@ -665,6 +674,7 @@ class WindowManager {
       return;
     }
     this.windows.forEach(w => w.element.classList.remove('window-active', 'highlight-subtle', 'highlight-strong'));
+    if (this.zIndex > 9000) this._normalizeZIndices();
     win.element.style.zIndex = this.zIndex++; win.element.classList.add('window-active');
     const intensity = this._settings?.get('window.activeHighlightIntensity') ?? 'normal';
     if (intensity === 'subtle') win.element.classList.add('highlight-subtle');

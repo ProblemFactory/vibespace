@@ -7,7 +7,7 @@ class HexViewer {
   constructor(winInfo, filePath, fileInfo) {
     this.filePath = filePath;
     this.fileSize = fileInfo.size;
-    this.loadedBytes = 0;
+    this.baseOffset = 0; // file offset where this.data starts (non-zero after a jump)
     this.data = new Uint8Array(0);
     this._renderedBytes = 0;
 
@@ -35,12 +35,25 @@ class HexViewer {
     container.append(toolbar, this.contentEl, this.statusEl);
     winInfo.content.appendChild(container);
 
+    // Auto-load on scroll: a 10MB file needed ~160 manual "Load more" clicks
+    this._sentinel = document.createElement('div');
+    this._sentinel.style.height = '1px';
+    this.contentEl.after(this._sentinel);
+    this._io = new IntersectionObserver((entries) => {
+      if (entries.some(e => e.isIntersecting) && !this._loading) this._loadChunk();
+    }, { root: winInfo.content.querySelector('.hex-viewer'), rootMargin: '200px' });
+    this._io.observe(this._sentinel);
+
     this._loadChunk();
   }
 
   async _loadChunk() {
+    if (this._loading) return;
+    this._loading = true;
     try {
-      const res = await fetch(`/api/file/binary?path=${encodeURIComponent(this.filePath)}&offset=${this.loadedBytes}&length=${CHUNK_SIZE}`);
+      const fileOffset = this.baseOffset + this.data.length;
+      if (fileOffset >= this.fileSize) { this.statusEl.textContent = 'End of file'; return; }
+      const res = await fetch(`/api/file/binary?path=${encodeURIComponent(this.filePath)}&offset=${fileOffset}&length=${CHUNK_SIZE}`);
       if (!res.ok) throw new Error('Failed to load');
       const buf = await res.arrayBuffer();
       const newData = new Uint8Array(buf);
@@ -51,12 +64,16 @@ class HexViewer {
       combined.set(this.data);
       combined.set(newData, this.data.length);
       this.data = combined;
-      this.loadedBytes += newData.length;
 
       this._render();
-      this.statusEl.textContent = `Loaded ${formatSize(this.loadedBytes)} / ${formatSize(this.fileSize)}`;
+      const upTo = this.baseOffset + this.data.length;
+      this.statusEl.textContent = this.baseOffset > 0
+        ? `Showing 0x${this.baseOffset.toString(16)}–0x${upTo.toString(16)} / ${formatSize(this.fileSize)}`
+        : `Loaded ${formatSize(upTo)} / ${formatSize(this.fileSize)}`;
     } catch (err) {
       this.statusEl.textContent = 'Error: ' + err.message;
+    } finally {
+      this._loading = false;
     }
   }
 
@@ -71,7 +88,7 @@ class HexViewer {
 
       // Offset column
       const offsetEl = document.createElement('span'); offsetEl.className = 'hex-offset';
-      offsetEl.textContent = offset.toString(16).padStart(8, '0');
+      offsetEl.textContent = (this.baseOffset + offset).toString(16).padStart(8, '0'); // real file offset, not buffer offset
 
       // Hex bytes column
       const bytesEl = document.createElement('span'); bytesEl.className = 'hex-bytes';
@@ -107,20 +124,25 @@ class HexViewer {
     this._renderedBytes = this.data.length;
   }
 
-  _jumpTo(hexOffset) {
+  async _jumpTo(hexOffset) {
     const offset = parseInt(hexOffset, 16);
     if (isNaN(offset)) return;
-    const row = Math.floor(offset / BYTES_PER_ROW);
-    const rowEl = this.contentEl.children[row];
-    if (rowEl) rowEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    else if (offset > this.loadedBytes) {
-      // Need to load more data first
-      this.loadedBytes = Math.max(0, offset - CHUNK_SIZE);
-      this.data = new Uint8Array(0);
-      this._renderedBytes = 0;
-      this.contentEl.innerHTML = '';
-      this._loadChunk();
-    }
+    const relRow = Math.floor((offset - this.baseOffset) / BYTES_PER_ROW);
+    const rowEl = relRow >= 0 ? this.contentEl.children[relRow] : null;
+    if (rowEl) { rowEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+    // Outside the loaded view — reset the buffer to a row-aligned base at the
+    // target, then scroll once it renders (offsets now show real file
+    // positions; previously the gutter restarted at 00000000 after a jump and
+    // never scrolled to the target)
+    this.baseOffset = Math.max(0, Math.floor(offset / BYTES_PER_ROW) * BYTES_PER_ROW - CHUNK_SIZE / 2);
+    this.baseOffset = Math.floor(this.baseOffset / BYTES_PER_ROW) * BYTES_PER_ROW;
+    this.data = new Uint8Array(0);
+    this._renderedBytes = 0;
+    this.contentEl.innerHTML = '';
+    await this._loadChunk();
+    const newRow = Math.floor((offset - this.baseOffset) / BYTES_PER_ROW);
+    const target = this.contentEl.children[newRow];
+    if (target) target.scrollIntoView({ block: 'center' });
   }
 
 }

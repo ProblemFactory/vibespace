@@ -202,9 +202,9 @@
   flex-shrink: 0;
 }
 .file-upload-cancel:hover { color: var(--text); }
-.file-upload-done .file-upload-fill { background: #16a34a; }
+.file-upload-done .file-upload-fill { background: var(--green, #16a34a); }
 .file-upload-done { opacity: 0.5; }
-.file-upload-error .file-upload-fill { background: #ef4444; width: 100% !important; }
+.file-upload-error .file-upload-fill { background: var(--red, #ef4444); width: 100% !important; }
 
 /* Active upload item in popover (multi-line) */
 .upload-active-item { padding: 6px 12px; }
@@ -430,8 +430,8 @@
 
 /* ── Context Menu ── */
 .context-menu {
-  position: fixed; background: var(--bg-dialog); border: 1px solid var(--border);
-  border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  position: fixed; background: var(--bg-dialog); border: 1px solid var(--border-active);
+  border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,0.4);
   padding: 4px 0; z-index: 99999; min-width: 160px;
 }
 .context-menu-item {
