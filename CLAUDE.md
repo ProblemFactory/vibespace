@@ -364,16 +364,17 @@ Mobile-specific UI code extracted into dedicated modules to keep desktop and mob
 
 **OAuth token management**: `getOAuthToken(callback)` — dual API: async callback mode (auto-refreshes expired tokens via `platform.claude.com/v1/oauth/token` using Claude Code's client_id `9d1c250a-...`) and sync mode (returns cached, may be expired). Full creds stored in `_oauthCreds` (accessToken + refreshToken + expiresAt). On Linux, refreshed tokens written back to `~/.claude/.credentials.json`. On macOS, in-memory only (Claude Code handles Keychain persistence). Both model discovery and rate limit polling use the async path.
 
-**Model discovery**: `refreshAvailableModels()` — OAuth users: `GET /api/claude_cli/bootstrap` (Bearer + `anthropic-beta: oauth-2025-04-20`), returns `additional_model_options: [{model, name, description}]`. API key users: `GET /v1/models`. Runs 3s after startup then hourly. `/v1/models` does NOT support OAuth tokens (returns 401 "OAuth authentication not supported").
+**Model discovery**: `refreshAvailableModels()` — `GET /v1/models` for BOTH auth types (OAuth: Bearer + `anthropic-beta: oauth-2025-04-20`; API key: `x-api-key`). Runs 3s after startup then hourly. Full model IDs come from the API; CLI aliases (`fable`/`opus`/`sonnet`/`haiku` + `[1m]` variants) are hardcoded in `CLAUDE_MODEL_ALIASES` since they're CLI-side names — when a new tier ships, add its alias there (+ fallbacks in `app.js` BACKEND_SESSION_OPTIONS and `settings-schema.js` claude.defaultModel). History: `/api/claude_cli/bootstrap`'s `additional_model_options` was the OAuth source until ~2026-06 when it started returning null; `/v1/models` used to 401 for OAuth tokens but now accepts Bearer.
+
+**OAuth auth headers (2026-06)**: OAuth tokens must use `Authorization: Bearer` + `anthropic-beta: oauth-2025-04-20` on api.anthropic.com — sending an OAuth token via `x-api-key` returns 401 "invalid x-api-key" (this silently froze the usage poll until fixed). Real API keys (`sk-ant-api…`) still use `x-api-key`.
 
 **Failed approaches:**
 - ❌ Parse statusline output: user-customizable, can't guarantee format
 - ❌ Statusline hook wrapper (`--settings`): intrusive, doesn't work for non-WebUI sessions
 - ❌ `/api/oauth/usage` endpoint: correct data but extremely aggressive rate limiting
-- ❌ `/v1/models` with OAuth token: returns 401, only supports API keys
 - ❌ macOS `security unlock-keychain`: works but requires empty keychain password, invasive
 - ✅ Haiku API call + response headers: reliable, cheap, gets 5h + 7d unified limits
-- ✅ `/api/claude_cli/bootstrap` with OAuth: correct endpoint for model discovery
+- ✅ `/v1/models` with OAuth Bearer: current model discovery source (both auth types)
 
 ### 10. Settings System (Global + Per-Terminal)
 **Global settings** (toolbar ⚙): Theme, font size (A-/A+), font family. Stored in `localStorage` (`termFontSize`, `termFontFamily`). Changes propagate to all terminals without per-terminal overrides.
@@ -824,7 +825,7 @@ Server → Client: `created`, `output`, `msg` (normalized: op=create/edit/meta),
 - Upload progress bar fill invisible: `<span>` fill element was `display:inline`, CSS width/height had no effect. Fix: `display:block`.
 - Upload popover had no background: missing `background/border/box-shadow` CSS on `.upload-popover`.
 - Popovers/context menus clipped by viewport edge: no bounds checking after render. Fix: `createPopover` uses rAF + `getBoundingClientRect` to clamp all four edges; `showContextMenu` clamps synchronously after items appended. Both render with `visibility:hidden` first then reveal.
-- Model discovery failed for OAuth users: `/v1/models` returns 401 for OAuth tokens. Fix: use `/api/claude_cli/bootstrap` endpoint (supports OAuth, same as Claude Code) with `anthropic-beta: oauth-2025-04-20`. Falls back to `ANTHROPIC_API_KEY` + `/v1/models`.
+- Model discovery failed for OAuth users: `/v1/models` returned 401 for OAuth tokens → switched to `/api/claude_cli/bootstrap`. Later (~2026-06) bootstrap's `additional_model_options` went null AND `/v1/models` started accepting OAuth Bearer → switched back to `/v1/models` for both auth types (new fable tier was missing until then).
 - OAuth token expired silently: server cached only the accessToken with no refresh. Fix: store full creds (accessToken + refreshToken + expiresAt), auto-refresh via `platform.claude.com/v1/oauth/token` when expired. `getOAuthToken(callback)` async API with refresh, sync fallback for non-critical paths.
 - Resume/new session fails on older Claude CLI (`--name` unsupported): Claude Code <2.1.98 doesn't have `--name`, causing `error: unknown option` → exit code 1 → immediate read-only. Fix: parse `claude --help` at startup for `--name` support (`CLAUDE_SUPPORTS_NAME`), propagate to adapter config. `buildSessionArgs` only includes `--name` when supported.
 - Dead sessions lost on server restart: layout restore silently dropped windows when dtach processes died. Fix: fallback to `viewSession()` (read-only JSONL history + Resume button). `captureState` now saves `cwd`, `restoreState` fetches `/api/sessions` for stopped session lookup.
