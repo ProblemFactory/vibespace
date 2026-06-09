@@ -185,6 +185,12 @@ html, body {
   background: var(--bg-sidebar, var(--bg-root)); border-radius: 2px; padding: 1px;
 }
 .mode-badge svg { width: 100%; height: 100%; display: block; }
+.badge-config {
+  background: rgba(168,85,247,0.16); color: var(--accent-hover);
+  display: inline-flex; align-items: center; gap: 3px; min-width: 0;
+}
+.badge-config svg { width: 9px; height: 9px; flex-shrink: 0; }
+.badge-config span { max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .badge-live { background: rgba(34,197,94,0.2); color: var(--green); }
 .badge-tmux { background: rgba(59,130,246,0.2); color: var(--blue); }
 .badge-external { background: rgba(245,158,11,0.15); color: var(--yellow); }
