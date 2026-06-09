@@ -122,9 +122,21 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
   card.innerHTML = `<div class="session-card-row">
     <span class="session-card-name">${escHtml(displayName)}</span>
     ${agentRoleShort ? `<span class="session-card-badge badge-agent-role" title="${escHtml(agentRoleLabel)}">${escHtml(agentRoleShort)}</span>` : ''}
+    <span class="session-card-badge badge-config" style="display:none"></span>
     <span class="session-card-badge ${badge.cls}">${badge.text}</span>
   </div>`;
   const row = card.querySelector('.session-card-row');
+  // Custom config marker: shown when this session has persisted model/effort/permission overrides
+  const cfgBadge = row.querySelector('.badge-config');
+  const updateCfgBadge = () => {
+    const cfg = state.getSessionConfig?.(s) || {};
+    const parts = ['model', 'effort', 'permission'].filter(k => cfg[k]).map(k => `${k}: ${cfg[k]}`);
+    if (!parts.length) { cfgBadge.style.display = 'none'; cfgBadge.textContent = ''; return; }
+    cfgBadge.style.display = '';
+    cfgBadge.title = 'Custom session config — ' + parts.join(' · ');
+    cfgBadge.innerHTML = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.6 3.6l1.4 1.4M11 11l1.4 1.4M3.6 12.4l1.4-1.4M11 5l1.4-1.4"/></svg><span>${escHtml(cfg.model || cfg.effort || cfg.permission)}</span>`;
+  };
+  updateCfgBadge();
   // Star button (inline, always visible)
   const starBtn = document.createElement('button');
   starBtn.className = 'session-inline-btn' + (starred ? ' starred' : '');
@@ -306,12 +318,14 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       effort: settings?.get(`${prefix}.defaultEffort`) ?? '',
       permission: settings?.get(`${prefix}.defaultPermissionMode`) ?? '',
     };
-    const overrides = { model: defaults.model, effort: defaults.effort, permission: defaults.permission };
-    // Track current labels for the config button badge
-    const getModelLabel = () => {
-      if (!overrides.model) return '';
-      const m = opts.models.find(o => (o.value || o.id || '') === overrides.model);
-      return m ? (m.label || m.value || '') : overrides.model;
+    // Overrides are persisted per-session in user state (survives sidebar re-renders
+    // and applies to ALL resume paths via app.resumeSession's savedCfg lookup).
+    // Empty string = no override (use global default).
+    const savedCfg = state.getSessionConfig?.(s) || {};
+    const overrides = { model: savedCfg.model || '', effort: savedCfg.effort || '', permission: savedCfg.permission || '' };
+    const persistOverrides = () => {
+      state.setSessionConfig?.(s, overrides);
+      updateCfgBadge();
     };
 
     const resumeWrap = document.createElement('div');
@@ -390,8 +404,9 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
           if (sel.value === '__custom__') { input.style.display = ''; input.focus(); overrides[key] = input.value; }
           else { input.style.display = 'none'; overrides[key] = sel.value; }
           if (!cb.checked) { cb.checked = true; applyDisabled(); }
+          persistOverrides();
         };
-        input.onchange = () => { overrides[key] = input.value; if (!cb.checked) { cb.checked = true; applyDisabled(); } };
+        input.onchange = () => { overrides[key] = input.value; if (!cb.checked) { cb.checked = true; applyDisabled(); } persistOverrides(); };
         const applyDisabled = () => {
           const disabled = !cb.checked;
           sel.disabled = disabled;
@@ -402,6 +417,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
         cb.onchange = () => {
           applyDisabled();
           if (cb.checked) { overrides[key] = sel.value === '__custom__' ? (input?.value || '') : sel.value; }
+          persistOverrides();
         };
         row.append(cb, lbl, sel);
         if (input) row.appendChild(input);

@@ -988,14 +988,17 @@ class App {
     }
 
     const sessionMode = mode || (this.settings.get('session.defaultMode') ?? 'chat');
+    // Apply persisted per-session config (gear popover) for any param the caller
+    // didn't specify — covers card click, resume-all, chat resume bar, etc.
+    const savedCfg = this.sidebar?.getSessionConfig?.({ backend, sessionId, backendSessionId: targetBackendId }) || {};
     this.createSession({
       cwd,
       name: sessionName,
       resumeId: sessionId,
       mode: sessionMode,
-      model,
-      permission,
-      effort,
+      model: model !== undefined ? model : savedCfg.model,
+      permission: permission !== undefined ? permission : savedCfg.permission,
+      effort: effort !== undefined ? effort : savedCfg.effort,
       syncId,
       backend,
       backendSessionId: backendSessionId || sessionId,

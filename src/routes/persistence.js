@@ -190,6 +190,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions }) {
     archivedSessions: [],
     customNames: {},
     sessionModes: {},
+    sessionConfigs: {},
     sessionGroups: {},
     groupFolders: {},
   };
@@ -266,6 +267,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions }) {
       archivedSessions: migrateStateArray(source.archivedSessions, knownSessionKeys),
       customNames: migrateStateMap(source.customNames && typeof source.customNames === 'object' ? source.customNames : {}, knownSessionKeys),
       sessionModes: migrateStateMap(source.sessionModes && typeof source.sessionModes === 'object' ? source.sessionModes : {}, knownSessionKeys),
+      sessionConfigs: migrateStateMap(source.sessionConfigs && typeof source.sessionConfigs === 'object' ? source.sessionConfigs : {}, knownSessionKeys),
       sessionGroups,
       groupFolders: source.groupFolders && typeof source.groupFolders === 'object' ? source.groupFolders : {},
     };

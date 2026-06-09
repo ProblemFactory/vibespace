@@ -29,6 +29,7 @@ export function installSidebarState(SidebarClass) {
     localStorage.setItem('archivedSessions', JSON.stringify(state.archivedSessions || []));
     localStorage.setItem('sessionCustomNames', JSON.stringify(state.customNames || {}));
     localStorage.setItem('sessionModes', JSON.stringify(state.sessionModes || {}));
+    localStorage.setItem('sessionConfigs', JSON.stringify(state.sessionConfigs || {}));
     localStorage.setItem('sessionGroups', JSON.stringify(state.sessionGroups || {}));
     localStorage.setItem('groupFolders', JSON.stringify(state.groupFolders || {}));
   };
@@ -141,22 +142,24 @@ export function installSidebarState(SidebarClass) {
     const archived = this._migrateStateArray([...this._archivedIds], sessions);
     const customNames = this._migrateStateMap(this._customNames, sessions);
     const sessionModes = this._migrateStateMap(this._sessionModes, sessions);
+    const sessionConfigs = this._migrateStateMap(this._sessionConfigs, sessions);
     const nextGroups = {};
     for (const [groupName, sessionKeys] of Object.entries(this._sessionGroups || {})) {
       const migrated = this._migrateStateArray(sessionKeys, sessions);
       nextGroups[groupName] = migrated.next;
       if (migrated.changed) changed = true;
     }
-    if (starred.changed || archived.changed || customNames.changed || sessionModes.changed) changed = true;
+    if (starred.changed || archived.changed || customNames.changed || sessionModes.changed || sessionConfigs.changed) changed = true;
     if (!changed) return false;
     this._starredIds = new Set(starred.next);
     this._archivedIds = new Set(archived.next);
     this._customNames = customNames.next;
     this._sessionModes = sessionModes.next;
+    this._sessionConfigs = sessionConfigs.next;
     this._sessionGroups = nextGroups;
     this._writeUserStateToLocalStorage({
       starredSessions: [...this._starredIds], archivedSessions: [...this._archivedIds],
-      customNames: this._customNames, sessionModes: this._sessionModes,
+      customNames: this._customNames, sessionModes: this._sessionModes, sessionConfigs: this._sessionConfigs,
       sessionGroups: this._sessionGroups, groupFolders: this._groupFolders,
     });
     return true;
@@ -168,11 +171,12 @@ export function installSidebarState(SidebarClass) {
     if (state.archivedSessions) this._archivedIds = new Set(state.archivedSessions);
     if (state.customNames) this._customNames = { ...state.customNames };
     if (state.sessionModes) this._sessionModes = { ...state.sessionModes };
+    if (state.sessionConfigs) this._sessionConfigs = { ...state.sessionConfigs };
     if (state.sessionGroups) this._sessionGroups = { ...state.sessionGroups };
     if (state.groupFolders) this._groupFolders = { ...state.groupFolders };
     this._writeUserStateToLocalStorage({
       starredSessions: [...this._starredIds], archivedSessions: [...this._archivedIds],
-      customNames: this._customNames, sessionModes: this._sessionModes,
+      customNames: this._customNames, sessionModes: this._sessionModes, sessionConfigs: this._sessionConfigs,
       sessionGroups: this._sessionGroups, groupFolders: this._groupFolders,
     });
   };
@@ -180,7 +184,7 @@ export function installSidebarState(SidebarClass) {
   proto._pushUserState = async function() {
     const state = {
       starredSessions: [...this._starredIds], archivedSessions: [...this._archivedIds],
-      customNames: this._customNames, sessionModes: this._sessionModes,
+      customNames: this._customNames, sessionModes: this._sessionModes, sessionConfigs: this._sessionConfigs,
       sessionGroups: this._sessionGroups, groupFolders: this._groupFolders,
     };
     this._writeUserStateToLocalStorage(state);
@@ -236,6 +240,23 @@ export function installSidebarState(SidebarClass) {
     this._sessionModes[stateKey] = mode;
     const legacyId = this._getLegacySessionId(sessionOrKey);
     if (legacyId && legacyId !== stateKey) delete this._sessionModes[legacyId];
+    this._pushUserState();
+  };
+
+  // Per-session parameter overrides: { model, effort, permission } (only non-empty keys stored)
+  proto.getSessionConfig = function(sessionOrKey) { return this._stateMapGet(this._sessionConfigs, sessionOrKey); };
+
+  proto.setSessionConfig = function(sessionOrKey, config) {
+    const stateKey = this._getSessionStateKey(sessionOrKey);
+    if (!stateKey) return;
+    const clean = {};
+    for (const k of ['model', 'effort', 'permission']) {
+      if (config?.[k]) clean[k] = config[k];
+    }
+    if (Object.keys(clean).length) this._sessionConfigs[stateKey] = clean;
+    else delete this._sessionConfigs[stateKey];
+    const legacyId = this._getLegacySessionId(sessionOrKey);
+    if (legacyId && legacyId !== stateKey) delete this._sessionConfigs[legacyId];
     this._pushUserState();
   };
 

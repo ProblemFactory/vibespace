@@ -36,6 +36,7 @@ class Sidebar {
     this._archivedIds = new Set(JSON.parse(localStorage.getItem('archivedSessions') || '[]'));
     this._customNames = JSON.parse(localStorage.getItem('sessionCustomNames') || '{}');
     this._sessionModes = JSON.parse(localStorage.getItem('sessionModes') || '{}'); // { sessionId: 'terminal'|'chat' }
+    this._sessionConfigs = JSON.parse(localStorage.getItem('sessionConfigs') || '{}'); // { sessionKey: {model, effort, permission} }
     this._sessionGroups = JSON.parse(localStorage.getItem('sessionGroups') || '{}'); // { groupName: [sessionId, ...] }
     this._groupFolders = JSON.parse(localStorage.getItem('groupFolders') || '{}'); // { groupName: [folderPath, ...] }
 
