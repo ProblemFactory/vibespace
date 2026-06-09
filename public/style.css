@@ -104,10 +104,6 @@ html, body {
 .sidebar-title { font-weight: 600; font-size: 14px; color: var(--text); }
 .sidebar-section { padding: 8px 0; border-bottom: 1px solid var(--border); }
 .sidebar-section:last-child { border-bottom: none; flex: 1; overflow-y: auto; }
-.sidebar-section-title {
-  font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-dim);
-  padding: 4px 12px 6px; letter-spacing: 0.5px;
-}
 .session-items { padding: 0 6px; }
 .session-item-card {
   padding: 5px 8px; margin: 2px 0; border-radius: var(--radius-sm);
@@ -181,7 +177,6 @@ html, body {
 .session-card-badge {
   font-size: 9px; padding: 1px 6px; border-radius: 8px; font-weight: 600;
 }
-.session-mode-icon { font-size: 10px; flex-shrink: 0; }
 .session-backend-icon, .session-composite-icon { width: 14px; height: 14px; }
 .mode-backend-icon { position: relative; overflow: visible; }
 .mode-badge {
@@ -206,15 +201,6 @@ html, body {
 .badge-agent-kind { background: rgba(245,158,11,0.14); color: var(--yellow); letter-spacing: 0.35px; padding: 1px 4px; }
 .badge-agent-role { background: rgba(34,197,94,0.14); color: var(--green); letter-spacing: 0.35px; padding: 1px 4px; }
 .empty-hint { padding: 12px; text-align: center; color: var(--text-dim); font-size: 11px; }
-.session-star-btn, .session-archive-btn {
-  background: none; border: none; cursor: pointer; font-size: 11px; color: var(--text-dim);
-  padding: 0; line-height: 1; position: absolute; right: 6px; z-index: 1;
-}
-.session-star-btn { top: 6px; }
-.session-star-btn:hover, .session-star-btn.starred { color: var(--yellow); }
-.session-archive-btn { top: 22px; }
-.session-archive-btn:hover { color: var(--accent-hover); }
-.session-archive-btn.archived { color: var(--accent); }
 .session-item-card.archived { opacity: 0.5; }
 .session-item-card.archived .session-card-name { text-decoration: line-through; }
 .session-item-card.highlighted {
@@ -356,12 +342,6 @@ html, body {
 .folder-path::before { content: '\200e'; }
 .folder-count { font-size: 10px; color: var(--text-dim); font-weight: 400; }
 .folder-sessions { padding-left: 6px; }
-.folder-load-more {
-  padding: 8px 12px; font-size: 11px; color: var(--accent);
-  cursor: pointer; text-align: center;
-}
-.folder-load-more:hover { text-decoration: underline; }
-
 /* Mobile two-level folder/group navigation */
 .mobile-folder-card {
   display: flex; align-items: center; gap: 8px;
@@ -783,8 +763,6 @@ html, body {
 .taskbar-subtitle {
   font-size: var(--taskbar-sub-size, 9px); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.taskbar-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
-.taskbar-dot.exited { background: var(--text-dim); }
 #taskbar-status { font-size: 9px; color: var(--text-dim); padding: 0; flex-shrink: 0; line-height: 1.2; }
 .taskbar-context-menu { min-width: 100px; }
 /* item base lives in viewers.css (.context-menu-item); keep taskbar items identical */
@@ -1023,32 +1001,6 @@ html, body {
 }
 .resizer-h:hover, .resizer-h.active { background: var(--accent); }
 .resizer-v:hover, .resizer-v.active { background: var(--accent); }
-
-/* ── Markdown Editor ── */
-.md-container { display: flex; flex-direction: column; height: 100%; }
-.md-toolbar {
-  display: flex; align-items: center; padding: 3px 8px; gap: 4px;
-  border-bottom: 1px solid var(--border); background: var(--bg-titlebar); flex-shrink: 0;
-}
-.md-toolbar .file-path { flex: 1; font-size: 11px; color: var(--text-secondary); font-family: monospace; overflow: hidden; text-overflow: ellipsis; }
-.md-mode-group { display: flex; gap: 1px; background: var(--border); border-radius: var(--radius-sm); overflow: hidden; }
-.md-mode-btn {
-  background: var(--bg-input); border: none; color: var(--text-secondary); padding: 3px 10px;
-  font-size: 10px; cursor: pointer; transition: all var(--transition);
-}
-.md-mode-btn:hover { color: var(--text); }
-.md-mode-btn.active { background: var(--accent-dim); color: var(--accent-hover); font-weight: 600; }
-.md-content { flex: 1; overflow: hidden; }
-.md-mode-preview .markdown-preview { height: 100%; overflow-y: auto; }
-.md-mode-edit { display: flex; flex-direction: column; }
-.md-mode-edit .cm-editor { height: 100%; }
-.md-mode-edit .cm-scroller { overflow: auto; }
-.md-mode-split { display: flex; flex-direction: row; }
-.md-split-editor { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
-.md-split-editor .cm-editor { height: 100%; }
-.md-split-editor .cm-scroller { overflow: auto; }
-.md-split-preview { flex: 1; overflow-y: auto; }
-.md-split-preview .markdown-preview { height: 100%; overflow-y: auto; }
 
 /* ── Hex Viewer ── */
 .hex-viewer { display: flex; flex-direction: column; height: 100%; }

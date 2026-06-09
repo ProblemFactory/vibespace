@@ -170,7 +170,6 @@ setTimeout(refreshAvailableModels, 3000);
 setInterval(refreshAvailableModels, 3600000); // refresh hourly
 
 const HOST = process.env.HOST || '0.0.0.0';
-const EDITOR_SCRIPT = path.join(__dirname, 'editor-helper.sh');
 
 const app = express();
 const server = http.createServer(app);
@@ -675,9 +674,7 @@ function restoreSessions() {
     } catch {}
 
     let savedBuffer = '';
-    if (id) {
-      try { savedBuffer = fs.readFileSync(path.join(BUFFERS_DIR, id + '.buf'), 'utf-8'); } catch {}
-    }
+    try { savedBuffer = fs.readFileSync(path.join(BUFFERS_DIR, id + '.buf'), 'utf-8'); } catch {}
 
     const session = {
       mode: sessionMode,

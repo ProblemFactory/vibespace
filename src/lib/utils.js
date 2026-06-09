@@ -220,7 +220,6 @@ class StateSync {
     s.version = version || 0;
     // Notify for all changed keys
     for (const key of new Set([...oldKeys, ...Object.keys(s.data)])) {
-      const oldVal = oldKeys.has(key) ? undefined : '';
       const newVal = s.data[key] || '';
       this._notify(s, key, newVal);
     }

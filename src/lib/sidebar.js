@@ -41,7 +41,6 @@ class Sidebar {
     this._groupFolders = JSON.parse(localStorage.getItem('groupFolders') || '{}'); // { groupName: [folderPath, ...] }
 
     this._sortMode = localStorage.getItem('sessionSort') || 'recent';
-    this._filterLive = false;
     this._backendFilter = new Set(JSON.parse(localStorage.getItem('backendFilter') || '[]'));
     this._agentKindFilter = localStorage.getItem('agentKindFilter') || '';
     this._collapsedFolders = new Set(JSON.parse(localStorage.getItem('collapsedFolders') || '[]'));
@@ -403,7 +402,7 @@ class Sidebar {
       );
       if (wm) matchedWebuiIds.add(wm.id);
       // Only upgrade to 'live' for dtach-managed sessions (not tmux/external — those keep their status)
-      const status = (wm && s.status === 'stopped') ? 'live' : (wm && s.status !== 'tmux' && s.status !== 'external') ? 'live' : s.status;
+      const status = (wm && s.status !== 'tmux' && s.status !== 'external') ? 'live' : s.status;
       return {
         ...s,
         sessionKey: s.sessionKey || wm?.sessionKey || getSessionKey(s),

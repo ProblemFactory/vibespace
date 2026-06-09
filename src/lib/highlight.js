@@ -35,6 +35,12 @@ import hljsScss from 'highlight.js/lib/languages/scss';
 import hljsGraphql from 'highlight.js/lib/languages/graphql';
 import hljsNginx from 'highlight.js/lib/languages/nginx';
 import hljsProtobuf from 'highlight.js/lib/languages/protobuf';
+import hljsObjectivec from 'highlight.js/lib/languages/objectivec';
+import hljsLess from 'highlight.js/lib/languages/less';
+import hljsLatex from 'highlight.js/lib/languages/latex';
+import hljsMakefile from 'highlight.js/lib/languages/makefile';
+import hljsGroovy from 'highlight.js/lib/languages/groovy';
+import hljsThrift from 'highlight.js/lib/languages/thrift';
 import { escHtml } from './utils.js';
 
 hljs.registerLanguage('javascript', hljsJavascript);
@@ -68,6 +74,12 @@ hljs.registerLanguage('scss', hljsScss);
 hljs.registerLanguage('graphql', hljsGraphql);
 hljs.registerLanguage('nginx', hljsNginx);
 hljs.registerLanguage('protobuf', hljsProtobuf);
+hljs.registerLanguage('objectivec', hljsObjectivec);
+hljs.registerLanguage('less', hljsLess);
+hljs.registerLanguage('latex', hljsLatex);
+hljs.registerLanguage('makefile', hljsMakefile);
+hljs.registerLanguage('groovy', hljsGroovy);
+hljs.registerLanguage('thrift', hljsThrift);
 
 // Map file extensions to highlight.js language identifiers
 const EXT_TO_LANG = {

@@ -479,11 +479,6 @@ class CodexAdapter extends BackendAdapter {
     };
   }
 
-  parseHistory(threadId) {
-    if (!threadId) return [];
-    return parseCodexSessionJsonl(threadId);
-  }
-
   // ── Protocol formatting (called by ws-handler) ──
 
   formatChatInput(text, msgId) {

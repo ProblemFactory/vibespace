@@ -7,7 +7,7 @@
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { escHtml, copyText } from './utils.js';
-import { renderCodeBlock, rehighlightCodeBlock, stripAnsi } from './highlight.js';
+import { renderCodeBlock, rehighlightCodeBlock, stripAnsi, getHljsLanguages } from './highlight.js';
 import { UI_ICONS } from './icons.js';
 import { createBackendIconHtml, getBackendMeta } from './agent-meta.js';
 
@@ -834,10 +834,7 @@ class ChatRenderers {
 
   /** Add wrap toggle button to all <pre> blocks inside an element */
   addWrapToggles(el) {
-    const LANGS = ['plain', 'bash', 'c', 'cpp', 'csharp', 'css', 'diff', 'dockerfile',
-      'go', 'graphql', 'ini', 'java', 'javascript', 'json', 'kotlin', 'lua', 'markdown',
-      'nginx', 'perl', 'php', 'protobuf', 'python', 'r', 'ruby', 'rust', 'scala', 'scss',
-      'sql', 'swift', 'typescript', 'xml', 'yaml'];
+    const LANGS = ['plain', ...getHljsLanguages().sort()];
 
     for (const block of el.querySelectorAll('pre, .chat-diff-body, .chat-code-block')) {
       if (block.parentNode?.classList?.contains('chat-pre-wrap')) continue;

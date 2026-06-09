@@ -174,7 +174,7 @@ let refreshTimer = null;
 
 export function refreshBackendIcons(root = document) {
   const scope = root?.querySelectorAll ? root : document;
-  scope.querySelectorAll('.backend-icon[data-backend], .mode-backend-logo[data-backend]').forEach((el) => applyBackendIconContrast(el));
+  scope.querySelectorAll('.backend-icon[data-backend]').forEach((el) => applyBackendIconContrast(el));
 }
 
 function scheduleBackendIconRefresh(target) {

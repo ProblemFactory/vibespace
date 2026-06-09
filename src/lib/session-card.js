@@ -118,7 +118,6 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
   const badge = badgeMap[s.status] || badgeMap.stopped;
 
   const starred = state.isStarred(s);
-  const isExpanded = expandedCardId === s.sessionId;
   // Compact row: star archive mode/backend icon name status expand
   card.innerHTML = `<div class="session-card-row">
     <span class="session-card-name">${escHtml(displayName)}</span>

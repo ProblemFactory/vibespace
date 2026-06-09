@@ -36,11 +36,6 @@ const SETTINGS_SCHEMA = {
   },
 
   // ── Window ──
-  'window.enableSnapAnimation': {
-    type: 'boolean', default: true, label: 'Snap animation',
-    description: 'Animate window snap transitions (disable for instant positioning)',
-    category: 'Window', liveApply: true,
-  },
   'window.enableBounceOnFocus': {
     type: 'boolean', default: false, label: 'Bounce on remote focus',
     description: 'Briefly scale-bounce windows when focused from sidebar or taskbar',

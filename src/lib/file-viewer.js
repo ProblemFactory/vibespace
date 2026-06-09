@@ -266,64 +266,6 @@ class FileViewer {
     container.appendChild(mediaViewer);
   }
 
-  // ── HTML viewer with Preview / Code toggle ──
-  static _renderHtml(container, filePath, app, fileName, winInfo) {
-    const htmlViewer = document.createElement('div');
-    htmlViewer.className = 'html-viewer';
-
-    // Toolbar with mode toggle
-    const toolbar = document.createElement('div');
-    toolbar.className = 'media-toolbar';
-
-    const btnPreview = FileViewer._mediaBtn('Preview');
-    const btnCode = FileViewer._mediaBtn('Code');
-    btnPreview.classList.add('active');
-
-    const contentArea = document.createElement('div');
-    contentArea.className = 'html-viewer-content';
-
-    // Preview mode: iframe
-    const iframe = document.createElement('iframe');
-    iframe.className = 'html-preview';
-    iframe.sandbox = 'allow-scripts allow-same-origin';
-    iframe.src = `/api/file/raw?path=${encodeURIComponent(filePath)}`;
-    contentArea.appendChild(iframe);
-
-    let codeEditorContainer = null;
-    let codeEditorInstance = null;
-
-    const showPreview = () => {
-      btnPreview.classList.add('active');
-      btnCode.classList.remove('active');
-      iframe.style.display = '';
-      if (codeEditorContainer) codeEditorContainer.style.display = 'none';
-    };
-
-    const showCode = () => {
-      btnCode.classList.add('active');
-      btnPreview.classList.remove('active');
-      iframe.style.display = 'none';
-      if (!codeEditorContainer) {
-        // Create code editor on first switch
-        codeEditorContainer = document.createElement('div');
-        codeEditorContainer.className = 'html-code-container';
-        contentArea.appendChild(codeEditorContainer);
-
-        // Create a mini winInfo-like object for CodeEditor
-        const fakeWinInfo = { content: codeEditorContainer, onClose: null };
-        codeEditorInstance = new CodeEditor(fakeWinInfo, filePath, fileName, app);
-      }
-      codeEditorContainer.style.display = '';
-    };
-
-    btnPreview.onclick = showPreview;
-    btnCode.onclick = showCode;
-
-    toolbar.append(btnPreview, btnCode);
-    htmlViewer.append(toolbar, contentArea);
-    container.appendChild(htmlViewer);
-  }
-
   // ── Helper: create a styled button for media toolbars ──
   // ── PPTX viewer: thumbnail sidebar + main slide + responsive ──
   static async _renderPptx(container, filePath, rawUrl) {

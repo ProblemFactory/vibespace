@@ -99,7 +99,7 @@ export class ChatStatusBar {
     if (!this._activeTasks) this._activeTasks = new Map();
     if (taskInfo.status !== 'running') {
       this._activeTasks.delete(toolCallId);
-    } else if (taskInfo.status === 'running') {
+    } else {
       const block = content?.[0];
       const task = { ...taskInfo };
       if (block?.type === 'tool_call') {
