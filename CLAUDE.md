@@ -544,7 +544,7 @@ Read/Write tool output uses highlight.js for syntax highlighting with line numbe
 - `POST /api/editor/signal` — signal editor completion
 - `GET /api/settings` / `POST /api/settings` / `PATCH /api/settings` — schema-driven settings (sparse storage, broadcasts `settings-updated`)
 - `GET /api/user-state` / `POST /api/user-state` — unified star/archive/rename/groups state (broadcasts to all WS clients)
-- `POST /api/session-groups/create|delete|rename|assign|unassign` — session group CRUD
+<!-- session-groups CRUD routes removed 2026-06-09: were unreachable dead code with a conflicting data shape; groups are managed via full-state POST /api/user-state -->
 - `GET /api/bookmarks` / `POST /api/bookmarks` — file explorer bookmarks (broadcasts to all WS clients)
 - `POST /api/kill-pid` — kill an external/tmux claude process by PID (validates `isProcessClaude` before SIGTERM)
 - `GET /api/session-messages?claudeSessionId=&cwd=` — parse JSONL file into chat message history
@@ -694,6 +694,21 @@ Server → Client: `created`, `output`, `msg` (normalized: op=create/edit/meta),
 - Frontend optimization: esbuild minification (2.5MB → 1.4MB) + gzip compression middleware (~420KB over wire, 83% reduction)
 - Static file caching: `maxAge=0` with etag validation for cache revalidation
 - "N windows" click in taskbar → window list popup (scoped to active desktop)
+
+### 2026-06-09 Full-Project Code Review (v2.8.0)
+Eight parallel review agents audited every subsystem; ~120 findings fixed in five batches (commits 46de4ec…50f53df). Key invariants established — do NOT regress these:
+- **escHtml escapes quotes** (utils.js) — safe in attribute contexts. All markdown rendering goes through `DOMPurify.sanitize(marked.parse(...))`. Never inject model/tool/filename content into innerHTML unescaped.
+- **Claude thinking blocks**: the text lives in `block.thinking`, NOT `block.text`.
+- **Sidebar lazy folders**: `_setupLazyFolders()` MUST run before `_observeFolder()` calls (observer is disconnected+replaced).
+- **server onExit**: identity-guard (`session.pty === ptyProcess`) before any teardown; detach path (socket alive) keeps watchers/listeners and auto-re-attaches with bounded retries.
+- **All persistence JSON writes are atomic** (`writeJsonAtomic` tmp+rename); SyncStores + layouts flush on SIGINT/SIGTERM; layouts disk writes are debounced behind the memory cache.
+- **Window listeners**: every window registers document-level listeners with `winInfo._listenerCtl.signal` (AbortController, aborted in closeWindow/removeFromTabChain); tab-bar drag listeners use `chain._tabCtl` (per-render).
+- **create/created correlate via reqId**; windows without `_openSpec` are never closed by remote layout-sync.
+- **Codex requestUserInput**: adapter translates `toolInput.answers` → `responseData.{decision,answers}` (wrapper protocol).
+- **Codex thread meta is cached by mtime** (`_threadMetaCache`, 256KB head reads); `normalizeUserState` only scans for legacy keys when un-prefixed refs exist.
+- **user-state**: client never pushes migration results before the initial server fetch applied (`_userStateFetched`).
+- **Theme vars**: use `--accent-fg` for text on accent/green backgrounds, `--hover-overlay` for hover fills, `--magenta`/`--cyan` for code colors, `color-mix(in srgb, var(--accent) N%, transparent)` instead of hardcoded indigo rgba.
+- **z-index**: window manager renumbers via `_normalizeZIndices()` past 9000 — fixed chrome layers (snap 9990, theme editor 9999) stay on top.
 
 ### Bug Fixes Applied
 - Focus event spam (`^[[I^[[O`): stripped from terminal input
