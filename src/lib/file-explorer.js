@@ -1,4 +1,4 @@
-import { formatSize, attachPopoverClose, createPopover, showContextMenu, getStateSync, copyText } from './utils.js';
+import { formatSize, attachPopoverClose, createPopover, showContextMenu, getStateSync, copyText, escHtml } from './utils.js';
 import { setupDirAutocomplete } from './autocomplete.js';
 import { getFileIcon, hasDedicatedViewer } from './file-types.js';
 import { FILE_ICONS, UI_ICONS } from './icons.js';
@@ -503,7 +503,7 @@ class FileExplorer {
       const display = data.path.length > maxLen ? '\u2026' + data.path.slice(-maxLen + 1) : data.path;
       this.app.wm.setTitle(this.winInfo.id, display);
       this._renderItems();
-    } catch (err) { this.listEl.innerHTML = `<div class="empty-hint" style="color:var(--red)">${err.message}</div>`; }
+    } catch (err) { this.listEl.innerHTML = `<div class="empty-hint" style="color:var(--red)">${escHtml(err.message)}</div>`; }
   }
 
   _renderSortHeader() {
@@ -1216,7 +1216,7 @@ class FileExplorer {
       // Fallback: text preview for non-binary files
       const infoRes = await fetch(`/api/file/info?path=${encodeURIComponent(fp)}`);
       const info = await infoRes.json();
-      if (info.error) { this._previewContent.innerHTML = `<div class="empty-hint">${info.error}</div>`; return; }
+      if (info.error) { this._previewContent.innerHTML = `<div class="empty-hint">${escHtml(info.error)}</div>`; return; }
       if (info.isBinary) {
         this._previewContent.innerHTML = `<div class="empty-hint">${formatSize(info.size)} binary file</div>`;
         return;
@@ -1227,13 +1227,13 @@ class FileExplorer {
       }
       const res = await fetch(`/api/file/content?path=${encodeURIComponent(fp)}`);
       const data = await res.json();
-      if (data.error) { this._previewContent.innerHTML = `<div class="empty-hint">${data.error}</div>`; return; }
+      if (data.error) { this._previewContent.innerHTML = `<div class="empty-hint">${escHtml(data.error)}</div>`; return; }
       const pre = document.createElement('pre');
       pre.className = 'file-preview-code';
       pre.textContent = data.content;
       this._previewContent.appendChild(pre);
     } catch (err) {
-      this._previewContent.innerHTML = `<div class="empty-hint">Error: ${err.message}</div>`;
+      this._previewContent.innerHTML = `<div class="empty-hint">Error: ${escHtml(err.message)}</div>`;
     }
   }
 

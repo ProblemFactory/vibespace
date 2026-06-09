@@ -1,7 +1,7 @@
 import { marked } from 'marked';
 import { HexViewer } from './hex-viewer.js';
 import { CodeEditor } from './code-editor.js';
-import { formatSize } from './utils.js';
+import { formatSize, escHtml } from './utils.js';
 import { hasDedicatedViewer, getViewerType } from './file-types.js';
 import { renderAsync as renderDocx } from 'docx-preview';
 import { init as initPptx } from 'pptx-preview';
@@ -136,7 +136,7 @@ class FileViewer {
       }
       return true;
     } catch (err) {
-      container.innerHTML = `<div class="empty-hint" style="color:var(--red);padding:20px">Error: ${err.message}</div>`;
+      container.innerHTML = `<div class="empty-hint" style="color:var(--red);padding:20px">Error: ${escHtml(err.message)}</div>`;
       return true; // error shown, don't fall through to editor
     }
   }

@@ -791,6 +791,7 @@ html, body {
   z-index: 99998; display: flex; align-items: center; justify-content: center;
 }
 .dialog-overlay.hidden { display: none; }
+.dialog label.hidden { display: none; } /* e.g. #custom-model-row toggle */
 .dialog {
   background: var(--bg-dialog); border: 1px solid var(--border);
   border-radius: calc(var(--radius) * 1.5); box-shadow: 0 16px 48px rgba(0,0,0,0.5);

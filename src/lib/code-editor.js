@@ -11,6 +11,8 @@ import { keymap } from '@codemirror/view';
 let _mermaid = null; // lazy-loaded from CDN
 import { indentWithTab } from '@codemirror/commands';
 import { marked } from 'marked';
+import { escHtml } from './utils.js';
+import DOMPurify from 'dompurify';
 import * as prettier from 'prettier/standalone';
 import prettierBabel from 'prettier/plugins/babel';
 import prettierEstree from 'prettier/plugins/estree';
@@ -157,7 +159,7 @@ class CodeEditor {
             this._previewRO.observe(this._previewBody);
           }
         } else {
-          this._previewBody.innerHTML = marked.parse(src);
+          this._previewBody.innerHTML = DOMPurify.sanitize(marked.parse(src)); // previewed files may be untrusted (cloned repos)
           // Render mermaid diagrams: convert <code class="language-mermaid"> to mermaid divs
           this._previewBody.querySelectorAll('code.language-mermaid').forEach(code => {
             const pre = code.parentElement;
@@ -292,12 +294,12 @@ class CodeEditor {
         const res = await fetch(`/api/file/content?path=${encodeURIComponent(this.filePath)}`);
         const data = await res.json();
         if (data.error) {
-          this.editorBody.innerHTML = `<div class="empty-hint" style="color:var(--red);padding:20px">${data.error}</div>`;
+          this.editorBody.innerHTML = `<div class="empty-hint" style="color:var(--red);padding:20px">${escHtml(data.error)}</div>`;
           return;
         }
         content = data.content || '';
       } catch (err) {
-        this.editorBody.innerHTML = `<div class="empty-hint" style="color:var(--red);padding:20px">Failed to load file: ${err.message}</div>`;
+        this.editorBody.innerHTML = `<div class="empty-hint" style="color:var(--red);padding:20px">Failed to load file: ${escHtml(err.message)}</div>`;
         return;
       }
     }
