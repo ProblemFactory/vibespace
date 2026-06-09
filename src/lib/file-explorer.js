@@ -680,6 +680,10 @@ class FileExplorer {
         this.listEl.appendChild(loadMoreBtn);
       }
     }
+    // Inline progress rows for uploads targeting the current directory.
+    // (This call was lost in a refactor — domRefs stayed empty, so progress
+    // updates were no-ops and the documented inline bars never rendered.)
+    this._renderUploadRows();
   }
 
   _renderFileItem(item) {
@@ -780,7 +784,7 @@ class FileExplorer {
         // Row 1: spinner + name + cancel
         const row1 = document.createElement('div'); row1.className = 'upload-active-row1';
         const spinner = document.createElement('span'); spinner.className = 'upload-active-spinner';
-        const nameList = upload.rows.map(r => r.el.querySelector('.file-name')?.textContent).filter(Boolean);
+        const nameList = upload.displayNames || [];
         const label = nameList.length > 1 ? `${nameList.length} files` : (nameList[0] || 'uploading...');
         const name = document.createElement('span'); name.className = 'upload-active-name'; name.textContent = label;
         const cancelBtn = document.createElement('span'); cancelBtn.className = 'upload-active-cancel'; cancelBtn.textContent = '\u2715';
@@ -790,9 +794,7 @@ class FileExplorer {
         const row2 = document.createElement('div'); row2.className = 'upload-active-row2';
         const track = document.createElement('span'); track.className = 'upload-active-track';
         const fill = document.createElement('span'); fill.className = 'upload-active-fill';
-        // Read current progress from inline row
-        const curFill = upload.rows[0]?.fill;
-        if (curFill) fill.style.width = curFill.style.width;
+        fill.style.width = (upload.pct || 0) + '%';
         track.appendChild(fill);
         const totalSize = upload.files.reduce((s, f) => s + f.size, 0);
         const sizeLabel = document.createElement('span'); sizeLabel.className = 'upload-active-size';
@@ -925,6 +927,9 @@ class FileExplorer {
     };
 
     xhr.onload = () => {
+      // onload fires for ANY completed response — a 4xx/5xx (disk full,
+      // permission denied) used to record 'ok' and play the done animation
+      if (xhr.status < 200 || xhr.status >= 300) { xhr.onerror(); return; }
       let resultFiles = files.map((f, i) => ({ name: names[i], size: f.size, destPath: destDir + '/' + names[i] }));
       try {
         const resp = JSON.parse(xhr.responseText);

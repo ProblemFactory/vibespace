@@ -195,7 +195,14 @@ class SettingsUI {
       if (schema.min !== undefined) input.min = schema.min;
       if (schema.max !== undefined) input.max = schema.max;
       if (schema.step !== undefined) input.step = schema.step;
-      input.onchange = () => { this.settings.set(path, parseFloat(input.value)); row.classList.toggle('modified', this.settings.isModified(path)); };
+      input.onchange = () => {
+        // Empty/invalid input must not store NaN (it persisted as null and
+        // broke numeric consumers like taskbar sizing) — revert to default
+        const num = parseFloat(input.value);
+        if (Number.isFinite(num)) this.settings.set(path, num);
+        else { this.settings.set(path, schema.default); input.value = schema.default; }
+        row.classList.toggle('modified', this.settings.isModified(path));
+      };
       return input;
     }
 

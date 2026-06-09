@@ -117,7 +117,11 @@ function registerWsHandler(wss, ctx) {
           const sockName = 'cw-' + sessionCounterRef.value + '-' + Date.now();
           const socketPath = path.join(SOCKETS_DIR, sockName);
           const sessionMode = data.mode === 'chat' ? 'chat' : 'terminal';
-          const extraArgs = data.extraArgs ? data.extraArgs.trim().split(/\s+/).filter(Boolean) : [];
+          // Shell-style tokenization: quoted segments stay one argument
+          // (plain split broke e.g. --append-system-prompt "two words")
+          const extraArgs = data.extraArgs
+            ? (data.extraArgs.trim().match(/"[^"]*"|'[^']*'|\S+/g) || []).map(t => t.replace(/^(["'])(.*)\1$/, '$2'))
+            : [];
           const sessionSpec = adapter.buildSessionArgs({
             cwd,
             model: data.model,

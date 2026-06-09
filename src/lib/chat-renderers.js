@@ -391,7 +391,10 @@ class ChatRenderers {
               if (q.multiSelect) {
                 btn.classList.toggle('selected');
                 const selected = [...optionsWrap.querySelectorAll('.chat-ask-option.selected')].map(b => b.querySelector('strong').textContent);
-                selections.set(q.question, selected.join(', '));
+                // Deselecting everything = unanswered — an empty-string entry
+                // kept Submit enabled and sent "" as the answer
+                if (selected.length) selections.set(q.question, selected.join(', '));
+                else selections.delete(q.question);
                 page._customInput.value = '';
               } else {
                 optionsWrap.querySelectorAll('.chat-ask-option').forEach(b => b.classList.remove('selected'));

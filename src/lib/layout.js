@@ -144,7 +144,11 @@ class LayoutManager {
           }
         }
       }
-    } catch {}
+    } catch (err) {
+      // An exception mid-diff aborts the rest of the state application and
+      // leaves clients silently diverged — surface it for debugging
+      console.error('[layout-sync] _applyRemoteState failed:', err);
+    }
     setTimeout(() => { this._restoring = false; }, 1000);
   }
 
@@ -347,11 +351,10 @@ class LayoutManager {
             (s.backendSessionId || s.sessionId) === backendSessionId && (s.backend || 'claude') === backend
           );
           if (stoppedMatch) {
-            this.app.viewSession(stoppedMatch.sessionId, stoppedMatch.cwd, customName || stoppedMatch.name || ws.title || 'Session', {
+            const viewWin = this.app.viewSession(stoppedMatch.sessionId, stoppedMatch.cwd, customName || stoppedMatch.name || ws.title || 'Session', {
               backend, backendSessionId,
             });
-            const lastWin = [...this.app.wm.windows.values()].pop();
-            if (lastWin) applyPosition(lastWin, ws);
+            if (viewWin) applyPosition(viewWin, ws);
           }
         }
       } else if (ws.type === 'chat') {
@@ -377,21 +380,18 @@ class LayoutManager {
             (s.backendSessionId || s.sessionId) === backendSessionId && (s.backend || 'claude') === backend
           );
           if (stoppedMatch) {
-            this.app.viewSession(stoppedMatch.sessionId, stoppedMatch.cwd, customName || stoppedMatch.name || ws.title || 'Session', {
+            const viewWin = this.app.viewSession(stoppedMatch.sessionId, stoppedMatch.cwd, customName || stoppedMatch.name || ws.title || 'Session', {
               backend, backendSessionId,
             });
-            const lastWin = [...this.app.wm.windows.values()].pop();
-            if (lastWin) applyPosition(lastWin, ws);
+            if (viewWin) applyPosition(viewWin, ws);
           }
         }
       } else if (ws.type === 'files') {
         const winInfo = this.app.openFileExplorer(ws.explorerPath);
         applyPosition(winInfo, ws);
       } else if (ws.type === 'editor' && ws.filePath) {
-        this.app.openEditor(ws.filePath, ws.fileName || ws.filePath.split('/').pop());
-        // openEditor creates the window synchronously; find it by checking the last created window
-        const lastWin = [...this.app.wm.windows.values()].pop();
-        if (lastWin && lastWin.type === 'editor') applyPosition(lastWin, ws);
+        const edWin = this.app.openEditor(ws.filePath, ws.fileName || ws.filePath.split('/').pop());
+        if (edWin) applyPosition(edWin, ws);
       } else if ((ws.type === 'viewer' || ws.type === 'hex-viewer') && ws.filePath) {
         // openFile is async (FileViewer.open), so we need to wait for the window to appear
         const beforeIds = new Set(this.app.wm.windows.keys());
@@ -399,6 +399,7 @@ class LayoutManager {
         this.app.openFile(ws.filePath, ws.fileName || ws.filePath.split('/').pop(), opts);
         // Poll briefly for the new window to appear (FileViewer.open is async)
         const applyPos = ws;
+        let checkAttempts = 0;
         const checkWin = () => {
           for (const [id, win] of this.app.wm.windows) {
             if (!beforeIds.has(id) && (win.type === 'viewer' || win.type === 'hex-viewer')) {
@@ -406,7 +407,9 @@ class LayoutManager {
               return;
             }
           }
-          setTimeout(checkWin, 100);
+          // Cap: if FileViewer.open failed (file deleted since save), the
+          // timer chain would otherwise poll forever
+          if (++checkAttempts < 50) setTimeout(checkWin, 100);
         };
         setTimeout(checkWin, 100);
       } else if (ws.type === 'browser' && ws.browserUrl) {
@@ -743,11 +746,10 @@ class LayoutManager {
           matchedWinIds.add(existing.winId);
           applyPosition(existing.win, ws);
         } else {
-          this.app.openEditor(ws.filePath, ws.fileName || ws.filePath.split('/').pop());
-          const lastWin = [...this.app.wm.windows.values()].pop();
-          if (lastWin && lastWin.type === 'editor') {
-            matchedWinIds.add(lastWin.id);
-            applyPosition(lastWin, ws);
+          const edWin = this.app.openEditor(ws.filePath, ws.fileName || ws.filePath.split('/').pop());
+          if (edWin) {
+            matchedWinIds.add(edWin.id);
+            applyPosition(edWin, ws);
           }
         }
       } else if ((ws.type === 'viewer' || ws.type === 'hex-viewer') && ws.filePath) {
@@ -761,6 +763,7 @@ class LayoutManager {
           const opts = ws.type === 'hex-viewer' ? { hex: true } : {};
           this.app.openFile(ws.filePath, ws.fileName || ws.filePath.split('/').pop(), opts);
           const applyPos = ws;
+          let checkAttempts = 0;
           const checkWin = () => {
             for (const [id, win] of this.app.wm.windows) {
               if (!beforeIds.has(id) && (win.type === 'viewer' || win.type === 'hex-viewer')) {
@@ -769,7 +772,7 @@ class LayoutManager {
                 return;
               }
             }
-            setTimeout(checkWin, 100);
+            if (++checkAttempts < 50) setTimeout(checkWin, 100); // cap: file may no longer open
           };
           setTimeout(checkWin, 100);
         }

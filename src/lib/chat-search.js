@@ -89,6 +89,11 @@ class ChatSearch {
     const q = query.trim().toLowerCase();
     if (!q) { this._searchStatus.textContent = ''; return; }
 
+    // Request token: a slow earlier search resolving after a newer one must
+    // not overwrite the newer results / jump the view to stale matches
+    const token = (this._searchToken = (this._searchToken || 0) + 1);
+    const stale = () => this._searchToken !== token;
+
     this._searchStatus.textContent = 'Searching...';
     this._searchQuery = q;
     this._highlightQuery = q;
@@ -113,17 +118,16 @@ class ChatSearch {
       } catch {}
     }
 
+    let matches = [];
     if (backendSessionId) {
       try {
         const res = await fetch(`/api/session-messages?backend=${encodeURIComponent(backend || 'claude')}&backendSessionId=${encodeURIComponent(backendSessionId)}&cwd=${encodeURIComponent(cwd)}&search=${encodeURIComponent(q)}`);
         const data = await res.json();
-        this._serverSearchResults = data.matches || [];
-      } catch {
-        this._serverSearchResults = [];
-      }
-    } else {
-      this._serverSearchResults = [];
+        matches = data.matches || [];
+      } catch {}
     }
+    if (stale()) return; // a newer search superseded this one
+    this._serverSearchResults = matches;
 
     if (!this._serverSearchResults.length) {
       this._searchStatus.textContent = 'No results';

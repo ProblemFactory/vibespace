@@ -76,12 +76,16 @@ export class CommandMode {
         case 'ArrowDown': if (activeWin) wm.snapToHalf(wm.activeWindowId, 'bottom'); this.exit(); break;
         case 'm': if (activeWin) wm.toggleMaximize(wm.activeWindowId); this.exit(); break;
         case 'w': if (activeWin) wm.closeWindow(wm.activeWindowId); this.exit(); break;
-        case 'Tab':
-          if (wm.windows.size > 0) {
-            const ids = [...wm.windows.keys()];
-            const curIdx = ids.indexOf(wm.activeWindowId);
-            const nextIdx = (curIdx + 1) % ids.length;
-            const nextId = ids[nextIdx];
+        case 'Tab': {
+          // Cycle only windows on the active desktop (and skip tab guests) —
+          // focusing a _hiddenByDesktop window sent keyboard focus into an
+          // invisible window with no desktop switch
+          const cycleIds = [...wm.windows.entries()]
+            .filter(([, w]) => !w._hiddenByDesktop && !(w._tabChain && w._tabChain.tabs[0] !== w.id))
+            .map(([id]) => id);
+          if (cycleIds.length > 0) {
+            const curIdx = cycleIds.indexOf(wm.activeWindowId);
+            const nextId = cycleIds[(curIdx + 1) % cycleIds.length];
             const nextWin = wm.windows.get(nextId);
             if (nextWin && nextWin.isMinimized) wm.restore(nextId);
             else wm.focusWindow(nextId);
@@ -89,6 +93,7 @@ export class CommandMode {
             if (session) session.focus();
           }
           break; // Stay in command mode for Tab
+        }
         case 'f': wm.applyLayout('freeform'); this.exit(); break;
         case 'g': {
           this.exit();

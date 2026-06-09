@@ -79,11 +79,15 @@ const editorLightTheme = EditorView.theme({
 
 // Editor settings persistence
 function loadEditorSettings() {
+  // theme defaults to 'dark' (matches the app default) — when it was absent,
+  // external-editor's `theme === 'dark'` check fell to the light theme on
+  // first use, blinding dark-theme users
+  const defaults = { wordWrap: false, fontSize: 14, theme: 'dark' };
   try {
     const raw = localStorage.getItem('editorSettings');
-    if (raw) return JSON.parse(raw);
+    if (raw) return { ...defaults, ...JSON.parse(raw) };
   } catch {}
-  return { wordWrap: false, fontSize: 14 };
+  return defaults;
 }
 
 function saveEditorSettings(settings) {
