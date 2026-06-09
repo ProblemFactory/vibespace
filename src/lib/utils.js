@@ -1,5 +1,9 @@
 export function formatSize(b) { if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
-export function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+// Escapes quotes too — safe in BOTH text and attribute contexts (the old
+// textContent/innerHTML round-trip left " and ' unescaped, allowing attribute
+// breakout in `attr="${escHtml(x)}"` template patterns).
+const ESC_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+export function escHtml(s) { return String(s ?? '').replace(/[&<>"']/g, (c) => ESC_MAP[c]); }
 
 export function attachPopoverClose(popover, ...excludeEls) {
   setTimeout(() => {

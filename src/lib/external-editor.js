@@ -74,7 +74,10 @@ export function openExternalEditor(app, filePath, signalPath, sessionId) {
   // Editor toolbar with settings
   const toolbar = document.createElement('div');
   toolbar.className = 'editor-toolbar';
-  toolbar.innerHTML = `<span class="file-path">${filePath}</span>`;
+  const pathSpan = document.createElement('span');
+  pathSpan.className = 'file-path';
+  pathSpan.textContent = filePath;
+  toolbar.appendChild(pathSpan);
 
   const edSettings = loadEditorSettings();
   const mkBtn = (text) => { const b = document.createElement('button'); b.className = 'editor-setting-btn'; b.textContent = text; return b; };

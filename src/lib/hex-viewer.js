@@ -1,4 +1,4 @@
-import { formatSize } from './utils.js';
+import { formatSize, escHtml } from './utils.js';
 
 const BYTES_PER_ROW = 16;
 const CHUNK_SIZE = 65536; // 64KB chunks
@@ -16,7 +16,7 @@ class HexViewer {
     // Toolbar
     const toolbar = document.createElement('div'); toolbar.className = 'hex-toolbar';
     toolbar.innerHTML = `
-      <span class="file-path">${filePath}</span>
+      <span class="file-path">${escHtml(filePath)}</span>
       <span class="hex-info">${formatSize(fileInfo.size)}</span>
     `;
     const jumpInput = document.createElement('input');

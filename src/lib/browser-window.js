@@ -1,3 +1,5 @@
+import { escHtml } from './utils.js';
+
 /**
  * Open an embedded browser window with URL bar, proxy toggle, and error overlay.
  * Returns the winInfo object.
@@ -6,7 +8,9 @@ export function openBrowser(app, url, { syncId } = {}) {
   app._hideWelcome();
   const startUrl = url || '';
   const openSpec = { action: 'openBrowser', url: startUrl };
-  const winInfo = app.wm.createWindow({ title: startUrl ? new URL(startUrl).hostname : 'Browser', type: 'browser', syncId, openSpec });
+  let startTitle = 'Browser';
+  try { if (startUrl) startTitle = new URL(startUrl).hostname; } catch {} // scheme-less replayed URLs must not abort window creation
+  const winInfo = app.wm.createWindow({ title: startTitle, type: 'browser', syncId, openSpec });
   const container = document.createElement('div');
   container.style.cssText = 'display:flex;flex-direction:column;height:100%';
 
@@ -55,13 +59,14 @@ export function openBrowser(app, url, { syncId } = {}) {
     iframe.src = proxyMode ? `/proxy/${u}` : u;
     try { app.wm.setTitle(winInfo.id, new URL(u).hostname); } catch {}
     winInfo._browserUrl = u;
+    if (winInfo._openSpec) winInfo._openSpec.url = u; // keep multi-client replay in sync with navigation
   };
 
   // Detect load failures (X-Frame-Options, CSP, etc.)
   iframe.addEventListener('load', () => {
     try { iframe.contentWindow.document; } catch {
       // Cross-origin blocked — show error
-      errorMsg.innerHTML = `<p>This site blocked iframe embedding (X-Frame-Options).</p><p style="margin-top:8px"><a href="${urlInput.value}" target="_blank" style="color:var(--accent)">Open in new tab \u2197</a></p><p style="margin-top:12px;font-size:11px;opacity:0.6">Tip: Same-origin pages (noVNC, local services) work fine in this browser.</p>`;
+      errorMsg.innerHTML = `<p>This site blocked iframe embedding (X-Frame-Options).</p><p style="margin-top:8px"><a href="${escHtml(urlInput.value)}" target="_blank" style="color:var(--accent)">Open in new tab \u2197</a></p><p style="margin-top:12px;font-size:11px;opacity:0.6">Tip: Same-origin pages (noVNC, local services) work fine in this browser.</p>`;
       errorMsg.style.display = '';
       iframe.style.display = 'none';
     }

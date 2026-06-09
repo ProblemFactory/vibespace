@@ -5,6 +5,7 @@
  */
 
 import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 import { escHtml, copyText } from './utils.js';
 import { renderCodeBlock, rehighlightCodeBlock, stripAnsi } from './highlight.js';
 import { UI_ICONS } from './icons.js';
@@ -135,7 +136,7 @@ class ChatRenderers {
     el._rawMsg = msg;
     const parts = content.map(b => {
       if (b.type === 'text') return `<div class="chat-text">${this.renderMarkdown(b.text)}</div>`;
-      if (b.type === 'image') return `<img class="chat-img" src="data:${b.mediaType || 'image/png'};base64,${b.data}" alt="image">`;
+      if (b.type === 'image') return `<img class="chat-img" src="data:${escHtml(b.mediaType || 'image/png')};base64,${escHtml(b.data)}" alt="image">`;
       return '';
     }).join('');
 
@@ -632,7 +633,11 @@ class ChatRenderers {
 
   renderMarkdown(text) {
     try {
-      let html = marked.parse(text || '');
+      // marked passes raw HTML through — sanitize before injecting into the
+      // DOM (message content is model/tool-controlled and may echo hostile
+      // markup from files or web pages). Sanitize BEFORE linkify so our own
+      // chat-link spans aren't subject to filtering.
+      let html = DOMPurify.sanitize(marked.parse(text || ''));
       return this.linkify(html);
     } catch {
       return escHtml(text || '');

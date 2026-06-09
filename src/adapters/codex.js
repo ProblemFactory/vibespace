@@ -463,13 +463,24 @@ class CodexAdapter extends BackendAdapter {
   postInterrupt() {} // no SIGINT fallback needed
 
   formatPermissionResponse(data) {
+    // requestUserInput answers arrive from the unified AskUserQuestion UI as
+    // toolInput.answers (same shape as Claude); the wrapper expects them in
+    // responseData.{decision,answers} — translate here so running wrappers
+    // (which persist inside dtach across server restarts) need no change.
+    let responseData = data.responseData || null;
+    if (!responseData && data.toolInput?.answers) {
+      responseData = {
+        decision: data.approved ? 'accept' : (data.abort ? 'cancel' : 'decline'),
+        answers: data.toolInput.answers,
+      };
+    }
     return JSON.stringify({
       type: 'permission-response',
       requestId: data.requestId,
       approved: !!data.approved,
       alwaysAllow: Array.isArray(data.permissionUpdates) && data.permissionUpdates.length > 0,
       abort: !!data.abort,
-      responseData: data.responseData || null,
+      responseData,
     });
   }
 

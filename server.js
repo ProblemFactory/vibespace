@@ -258,6 +258,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
     if (session.backend === 'codex') {
       const stripAnsi = (value) => String(value || '').replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, '');
       ptyProcess.onData((output) => {
+        if (session._reattachAttempts) session._reattachAttempts = 0;
         session.buffer = (session.buffer + output).slice(-800000);
         lineBuf += output;
         let nlIdx;
@@ -443,6 +444,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
       };
 
       ptyProcess.onData((output) => {
+        if (session._reattachAttempts) session._reattachAttempts = 0;
         session.buffer = (session.buffer + output).slice(-500000);
         lineBuf += output;
         let nlIdx;
@@ -539,13 +541,42 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
   } else {
     // Terminal mode: raw PTY output
     ptyProcess.onData((output) => {
+      if (session._reattachAttempts) session._reattachAttempts = 0;
       session.buffer = (session.buffer + output).slice(-50000);
       broadcastToSession(session, id, { type: 'output', sessionId: id, data: output });
     });
   }
 
   ptyProcess.onExit(() => {
-    // Clean up subagent file watchers and normalizers
+    // Session already torn down (e.g. this is a stale PTY exiting after kill) — nothing to do
+    if (!activeSessions.has(id)) return;
+    const isCurrent = session.pty === ptyProcess;
+
+    // Detach path: dtach socket still alive → the session survives, only this
+    // attach PTY died. Do NOT tear down watchers/normalizer listeners here —
+    // the session keeps running and clients stay attached.
+    if (cleanupOnExit && session.socketPath && fs.existsSync(session.socketPath)) {
+      // Stale PTY (a replacement was already attached, e.g. broken-stdin
+      // recovery): must not null the fresh pty or schedule re-attach.
+      if (!isCurrent) return;
+      session.pty = null;
+      // Auto re-attach so the session doesn't become a zombie (LIVE in the
+      // sidebar but input-dead). Bounded retries; counter resets on data.
+      session._reattachAttempts = (session._reattachAttempts || 0) + 1;
+      if (session._reattachAttempts <= 5) {
+        setTimeout(() => {
+          if (session.pty || !activeSessions.has(id)) return;
+          if (!session.socketPath || !fs.existsSync(session.socketPath)) return;
+          try { attachToDtach(id, session.socketPath, session); } catch {}
+        }, 1000 * session._reattachAttempts);
+      }
+      return;
+    }
+
+    // A stale PTY must never tear down a session that has a live replacement
+    if (!isCurrent && session.pty) return;
+
+    // Real teardown: clean up subagent file watchers and normalizers
     if (session.subagentWatchers) {
       for (const [, entry] of session.subagentWatchers) {
         if (entry.watcher) entry.watcher.close();
@@ -558,17 +589,10 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
     session._isStreaming = false;
     // Detect auth failure from buffer content (claude exits immediately with "Not logged in")
     const exitReason = /Not logged in|Please run \/login|OAuth token revoked/.test(session.buffer || '') ? 'not_logged_in' : undefined;
-    if (cleanupOnExit) {
-      if (session.socketPath && fs.existsSync(session.socketPath)) { session.pty = null; return; }
-      broadcastToSession(session, id, { type: 'exited', sessionId: id, reason: exitReason });
-      activeSessions.delete(id);
-      if (session.sockName) deleteSessionMeta(session.sockName);
-      broadcastActiveSessions();
-    } else {
-      broadcastToSession(session, id, { type: 'exited', sessionId: id, reason: exitReason });
-      activeSessions.delete(id);
-      broadcastActiveSessions();
-    }
+    broadcastToSession(session, id, { type: 'exited', sessionId: id, reason: exitReason });
+    activeSessions.delete(id);
+    if (cleanupOnExit && session.sockName) deleteSessionMeta(session.sockName);
+    broadcastActiveSessions();
   });
 }
 

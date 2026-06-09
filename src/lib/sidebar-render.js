@@ -55,6 +55,11 @@ export function installSidebarRender(SidebarClass) {
   };
 
   proto._renderGrouped = function(sessions) {
+    // Must create the observer BEFORE the loop: _observeFolder registers on
+    // this._folderObserver, and _setupLazyFolders() disconnects + replaces it.
+    // (Calling it after the loop made every observe() land on the observer
+    // that was about to be disconnected — lazy rendering never fired.)
+    this._setupLazyFolders();
     const groups = new Map();
     for (const s of sessions) {
       const key = s.cwd || '/unknown';
@@ -120,7 +125,6 @@ export function installSidebarRender(SidebarClass) {
       // Defer card rendering to IntersectionObserver
       this._observeFolder(group, sessionsDiv, items);
     }
-    this._setupLazyFolders();
     // Trigger initial check for folders already in viewport
     requestAnimationFrame(() => {
       if (!this._folderObserver) return;
@@ -143,6 +147,8 @@ export function installSidebarRender(SidebarClass) {
   };
 
   proto._renderByGroups = function(sessions) {
+    // Observer must exist before _observeFolder calls (see _renderGrouped)
+    this._setupLazyFolders();
     const sessionById = new Map();
     for (const s of sessions) {
       sessionById.set(this._getSessionStateKey(s), s);
@@ -279,7 +285,6 @@ export function installSidebarRender(SidebarClass) {
       groupEl.append(header, sessionsDiv);
       this.listEl.appendChild(groupEl);
     }
-    this._setupLazyFolders();
   };
 
   proto._buildSessionCard = function(s) {

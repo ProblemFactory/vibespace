@@ -116,7 +116,7 @@ class MessageManager {
 
   _extractText(msg) {
     return msg.content.map(b => {
-      if (b.type === 'text' || b.type === 'thinking' || b.type === 'system_info') return b.text || '';
+      if (b.type === 'text' || b.type === 'thinking' || b.type === 'system_info') return b.text || b.thinking || '';
       if (b.type === 'tool_result') return `${b.toolName}: ${b.output || ''}`;
       if (b.type === 'tool_call') return `${b.toolName}: ${JSON.stringify(b.input).substring(0, 200)}`;
       return '';
@@ -294,7 +294,8 @@ class MessageManager {
 
     for (const block of content) {
       if (block.type === 'thinking') {
-        const msg = this._create({ role: 'assistant', content: [{ type: 'thinking', text: block.text || '' }] });
+        // Claude's thinking blocks carry the text in `thinking`, not `text`
+        const msg = this._create({ role: 'assistant', content: [{ type: 'thinking', text: block.thinking || block.text || '' }] });
         if (emit) this._emit({ op: 'create', message: msg });
 
       } else if (block.type === 'text') {

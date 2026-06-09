@@ -1,5 +1,5 @@
 {
-  "version": 17,
+  "version": 27,
   "data": {
     "upload:1776387414050-0": {
       "name": "test-5mb.bin",
@@ -90,6 +90,76 @@
       "path": "/tmp/audio (2).wav",
       "size": 682710,
       "date": 1777634278007,
+      "status": "ok"
+    },
+    "upload:1778325079887-0": {
+      "name": "Fish_Audio_Enterprise_Billing_SOP_260509.md",
+      "path": "/home/xingweil/workspace/39AI/platform-dev/enterprise_references/Fish_Audio_Enterprise_Billing_SOP_260509.md",
+      "size": 35219,
+      "date": 1778325079887,
+      "status": "ok"
+    },
+    "upload:1778325315150-0": {
+      "name": "FA_MSA_representative_samples.zip",
+      "path": "/home/xingweil/workspace/39AI/platform-dev/enterprise_references/FA_MSA_representative_samples.zip",
+      "size": 2148494,
+      "date": 1778325315150,
+      "status": "ok"
+    },
+    "upload:1778395325762-0": {
+      "name": "Fish Audio - Customer Agreement (MSA) - Standard Template.docx",
+      "path": "/tmp/Fish Audio - Customer Agreement (MSA) - Standard Template.docx",
+      "size": 220538,
+      "date": 1778395325762,
+      "status": "ok"
+    },
+    "upload:1778671875234-0": {
+      "name": "Fish Audio - Customer Agreement (MSA) - Standard Template.docx",
+      "path": "/home/xingweil/workspace/39AI/platform-dev/enterprise_references/Fish Audio - Customer Agreement (MSA) - Standard Template.docx",
+      "size": 220538,
+      "date": 1778671875234,
+      "status": "ok"
+    },
+    "upload:1780106163823-0": {
+      "name": "Hanabi Report.pdf",
+      "path": "/tmp/Hanabi Report.pdf",
+      "size": 1583086,
+      "date": 1780106163823,
+      "status": "ok"
+    },
+    "upload:1780455978074-0": {
+      "name": "VSA Questionnaire FULL Final - BLANK (Hanabi).xlsx",
+      "path": "/home/xingweil/workspace/39AI/AIWorkspace/B2BTasks/VSA Questionnaire FULL Final - BLANK (Hanabi).xlsx",
+      "size": 483442,
+      "date": 1780455978074,
+      "status": "ok"
+    },
+    "upload:1780540558501-0": {
+      "name": "holy_crab_preferences_06_03_2026.csv",
+      "path": "/home/xingweil/workspace/39AI/AIWorkspace/B2BTasks/holy_crab_preferences_06_03_2026.csv",
+      "size": 938505,
+      "date": 1780540558501,
+      "status": "ok"
+    },
+    "upload:1780542155519-0": {
+      "name": "arena_results.json",
+      "path": "/home/xingweil/workspace/39AI/AIWorkspace/260519_BannerVoices/arena_results.json",
+      "size": 9055,
+      "date": 1780542155519,
+      "status": "ok"
+    },
+    "upload:1780981173631-0": {
+      "name": "2026-06-08_speech_arena_preferences_big_oyster.csv",
+      "path": "/home/xingweil/workspace/39AI/AIWorkspace/B2BTasks/2026-06-08_speech_arena_preferences_big_oyster.csv",
+      "size": 819727,
+      "date": 1780981173631,
+      "status": "ok"
+    },
+    "upload:1781031155709-0": {
+      "name": "James Fowler_Narrative Reel.mp3",
+      "path": "/home/xingweil/Downloads/James Fowler_Narrative Reel.mp3",
+      "size": 2850624,
+      "date": 1781031155709,
       "status": "ok"
     }
   }
