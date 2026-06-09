@@ -171,7 +171,8 @@ export class ChatStatusBar {
       parts.push(`<span class="chat-status-model" title="Model (set at session creation)">${escHtml(this._statusModel)}</span>`);
     }
 
-    // Goal indicator
+    // Goal indicator — always rendered so there's a discoverable entry point
+    // for SETTING a goal, not just viewing one (dim \u{1F3AF} when no goal active)
     if (this._goal) {
       const elapsed = this._fmtElapsed(this._goalElapsed || 0);
       // Codex sends lowercase active/paused/blocked/complete — normalize case
@@ -179,6 +180,8 @@ export class ChatStatusBar {
       const statusIcon = status === 'active' ? '\u{25B6}' : status === 'paused' ? '⏸' : status === 'blocked' ? '⛔' : status === 'complete' ? '✓' : '';
       const shortGoal = this._goal.length > 30 ? this._goal.substring(0, 30) + '…' : this._goal;
       parts.push(`<span class="chat-status-goal chat-status-clickable" title="${escHtml(this._goal)}">\u{1F3AF}${statusIcon ? ' ' + statusIcon : ''} <span class="chat-goal-timer">${elapsed}</span> ${escHtml(shortGoal)}</span>`);
+    } else {
+      parts.push(`<span class="chat-status-goal chat-status-goal-empty chat-status-clickable" title="Set a goal \u2014 the agent keeps working until the condition is met">\u{1F3AF}</span>`);
     }
 
     // Permission mode (always show, click to change)
@@ -340,6 +343,49 @@ export class ChatStatusBar {
       actions.append(clearBtn);
       content.append(text, elapsed, actions);
       dropdown.appendChild(content);
+      return;
+    }
+
+    // No active goal → set-a-goal popup (the only entry point besides typing /goal)
+    if (goalEl && !this._goal) {
+      e.stopPropagation();
+      const dropdown = showDropdown(goalEl);
+      if (!dropdown) return;
+      dropdown.style.minWidth = '280px';
+      dropdown.style.maxWidth = '420px';
+      const content = document.createElement('div');
+      content.style.cssText = 'display:flex;flex-direction:column;gap:8px;padding:4px';
+      const hint = document.createElement('div');
+      hint.style.cssText = 'font-size:11px;color:var(--text-dim)';
+      hint.textContent = 'The agent keeps working until this condition is met:';
+      const input = document.createElement('textarea');
+      input.className = 'chat-ask-custom';
+      input.rows = 2;
+      input.placeholder = 'e.g. all tests in tests/ pass';
+      input.style.cssText = 'resize:vertical;font-size:12px;width:100%';
+      const submit = () => {
+        const goal = input.value.trim();
+        if (!goal) return;
+        dropdown.remove();
+        this._ws.send({ type: 'set-goal', sessionId: this._sessionId, goal });
+      };
+      input.onkeydown = (ev) => { if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); submit(); } ev.stopPropagation(); };
+      const actions = document.createElement('div');
+      actions.style.cssText = 'display:flex;gap:6px;align-items:center';
+      const setBtn = document.createElement('button');
+      setBtn.className = 'chat-perm-btn chat-perm-allow';
+      setBtn.textContent = 'Set Goal';
+      setBtn.onclick = submit;
+      actions.append(setBtn);
+      const resumeLink = document.createElement('button');
+      resumeLink.className = 'chat-perm-btn';
+      resumeLink.textContent = 'Resume previous';
+      resumeLink.title = 'Re-activate the last cleared/completed goal';
+      resumeLink.onclick = () => { dropdown.remove(); this._ws.send({ type: 'set-goal', sessionId: this._sessionId, action: 'resume' }); };
+      actions.append(resumeLink);
+      content.append(hint, input, actions);
+      dropdown.appendChild(content);
+      setTimeout(() => input.focus(), 0);
       return;
     }
 
