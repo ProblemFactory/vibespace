@@ -85,6 +85,9 @@ export class ChatStatusBar {
     if (status.total_cost_usd) this._statusCost = status.total_cost_usd;
     if (status.permissionMode) this._statusPermMode = status.permissionMode;
     if (status.permissionModes) this._permissionModes = status.permissionModes;
+    if (status.effort) this._statusEffort = status.effort;
+    if (status.sandbox) this._statusSandbox = status.sandbox;
+    if (status.totalUsage) this._statusTotalUsage = status.totalUsage;
     this.render();
   }
 
@@ -92,6 +95,7 @@ export class ChatStatusBar {
     const u = usageData;
     this._statusLastInputTokens = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
     this._statusLastCacheRead = u.cache_read_input_tokens || 0;
+    if (u.totals) this._statusTotalUsage = u.totals; // Codex: cumulative session usage
     this.render();
   }
 
@@ -166,9 +170,10 @@ export class ChatStatusBar {
     const fmtK = (n) => n >= 1000000 ? (n / 1000000).toFixed(1) + 'm' : n >= 1000 ? Math.round(n / 1000) + 'k' : String(n);
     const parts = [];
 
-    // Model badge
+    // Model badge (+ reasoning effort when known — Codex turn_context carries it)
     if (this._statusModel) {
-      parts.push(`<span class="chat-status-model" title="Model (set at session creation)">${escHtml(this._statusModel)}</span>`);
+      const effortSuffix = this._statusEffort ? ` \u00B7 ${escHtml(this._statusEffort)}` : '';
+      parts.push(`<span class="chat-status-model" title="Model${this._statusEffort ? ' \u00B7 reasoning effort' : ''} (set at session creation)">${escHtml(this._statusModel)}${effortSuffix}</span>`);
     }
 
     // Goal indicator — always rendered so there's a discoverable entry point
@@ -184,9 +189,10 @@ export class ChatStatusBar {
       parts.push(`<span class="chat-status-goal chat-status-goal-empty chat-status-clickable" title="Set a goal \u2014 the agent keeps working until the condition is met">\u{1F3AF}</span>`);
     }
 
-    // Permission mode (always show, click to change)
+    // Permission mode (always show, click to change; Codex sandbox policy in tooltip)
     const permLabel = this._statusPermMode || 'default';
-    parts.push(`<span class="chat-status-perm chat-status-clickable" title="Click to change permission mode">${UI_ICONS.lock} ${escHtml(permLabel)}</span>`);
+    const permTitle = this._statusSandbox ? `Click to change permission mode \u00B7 sandbox: ${this._statusSandbox}` : 'Click to change permission mode';
+    parts.push(`<span class="chat-status-perm chat-status-clickable" title="${escHtml(permTitle)}">${UI_ICONS.lock} ${escHtml(permLabel)}</span>`);
 
     // Background tasks
     if (this._activeTasks?.size > 0) {
@@ -211,7 +217,12 @@ export class ChatStatusBar {
       const deg = Math.round(pct * 3.6);
       const usedK = fmtK(this._statusLastInputTokens);
       const totalK = fmtK(this._statusContextWindow);
-      parts.push(`<span class="chat-status-ctx"><span class="chat-status-ctx-pie" style="background:conic-gradient(${color} ${deg}deg, var(--bg-input) ${deg}deg)"></span> <span style="color:${color}">${pct}%</span><span class="chat-status-dim">[${usedK}/${totalK}]</span></span>`);
+      let ctxTitle = `Context: ${usedK} of ${totalK} tokens`;
+      if (this._statusTotalUsage) {
+        const t = this._statusTotalUsage;
+        ctxTitle += ` \u00B7 session total: ${fmtK(t.total_tokens || 0)} (in ${fmtK(t.input_tokens || 0)}, cached ${fmtK(t.cached_input_tokens || 0)}, out ${fmtK(t.output_tokens || 0)}${t.reasoning_output_tokens ? `, reasoning ${fmtK(t.reasoning_output_tokens)}` : ''})`;
+      }
+      parts.push(`<span class="chat-status-ctx" title="${escHtml(ctxTitle)}"><span class="chat-status-ctx-pie" style="background:conic-gradient(${color} ${deg}deg, var(--bg-input) ${deg}deg)"></span> <span style="color:${color}">${pct}%</span><span class="chat-status-dim">[${usedK}/${totalK}]</span></span>`);
     }
 
     // Cache ratio

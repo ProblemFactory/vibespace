@@ -579,15 +579,36 @@ class CodexMessageManager {
 
     if (type === 'token_count') {
       const info = event.info || {};
-      const last = info.last_token_usage || info.lastTokenUsage || info.total_token_usage || null;
+      // Shapes seen in the wild: rollout-native snake_case (last_token_usage),
+      // and the v2 notification's nested camelCase ({ last, total })
+      const last = info.last_token_usage || info.lastTokenUsage || info.last || info.total_token_usage || null;
+      const total = info.total_token_usage || info.totalTokenUsage || info.total || null;
       const contextWindow = info.model_context_window || info.modelContextWindow || 0;
       if (last) this._status.lastUsage = {
         input_tokens: last.input_tokens || last.inputTokens || 0,
         cache_read_input_tokens: last.cached_input_tokens || last.cache_read_input_tokens || last.cachedInputTokens || 0,
         cache_creation_input_tokens: last.cache_creation_input_tokens || last.cacheCreationInputTokens || 0,
       };
+      if (total) this._status.totalUsage = {
+        total_tokens: total.total_tokens ?? total.totalTokens ?? 0,
+        input_tokens: total.input_tokens ?? total.inputTokens ?? 0,
+        cached_input_tokens: total.cached_input_tokens ?? total.cachedInputTokens ?? 0,
+        output_tokens: total.output_tokens ?? total.outputTokens ?? 0,
+        reasoning_output_tokens: total.reasoning_output_tokens ?? total.reasoningOutputTokens ?? 0,
+      };
       if (contextWindow) this._status.contextWindow = contextWindow;
-      if (emit && this._status.lastUsage) this._emit({ op: 'meta', subtype: 'usage', data: this._status.lastUsage });
+      if (emit && this._status.lastUsage) this._emit({ op: 'meta', subtype: 'usage', data: { ...this._status.lastUsage, totals: this._status.totalUsage || null } });
+      return;
+    }
+
+    if (type === 'plan_updated') {
+      // Codex update_plan → same pipeline as Claude's TodoWrite
+      const todos = (Array.isArray(event.plan) ? event.plan : []).map((p) => ({
+        content: p.step || '',
+        status: p.status === 'inProgress' || p.status === 'in_progress' ? 'in_progress'
+          : p.status === 'completed' ? 'completed' : 'pending',
+      })).filter((t) => t.content);
+      if (emit) this._emit({ op: 'meta', subtype: 'todos', data: todos });
       return;
     }
 

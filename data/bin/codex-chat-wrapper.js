@@ -530,15 +530,44 @@ function handleNotification(method, params) {
     updateMetaFromThread({ thread: { id: params?.threadId || meta.threadId, name: resolveThreadName(params) } });
     return;
   }
-  if (method === 'turn/plan/updated') return;
-  if (method === 'account/rateLimits/updated') return;
+  if (method === 'turn/plan/updated') {
+    // Codex's plan tool (update_plan) — the analog of Claude's TodoWrite.
+    // Forward as plan_updated so the TODO display above the input works for
+    // Codex too; persist in meta for attach-time restore.
+    const plan = Array.isArray(params?.plan) ? params.plan : [];
+    meta.plan = plan;
+    scheduleMeta();
+    emitTaskEvent('plan_updated', { explanation: params?.explanation || null, plan });
+    return;
+  }
+  if (method === 'account/rateLimits/updated') {
+    // This is the ONLY notification that carries rate limits (the old code
+    // looked for them on thread/tokenUsage/updated, which has no such field —
+    // meta.rateLimits never populated and the taskbar's live path was dead)
+    if (params?.rateLimits) {
+      meta.rateLimits = params.rateLimits;
+      meta.rateLimitsFetchedAt = Date.now();
+      scheduleMeta();
+    }
+    return;
+  }
   if (method === 'thread/tokenUsage/updated') {
+    // v2 protocol shape: { threadId, turnId, tokenUsage: { total, last, modelContextWindow } }
+    // (the old code read tokenUsage.last_token_usage — a field that doesn't
+    // exist — so lastTokenUsage was always null and live context% never updated)
     const tokenUsage = params?.tokenUsage || params?.token_usage || params || {};
-    meta.lastTokenUsage = tokenUsage.last_token_usage || tokenUsage.lastTokenUsage || meta.lastTokenUsage || null;
-    meta.contextWindow = tokenUsage.model_context_window || tokenUsage.modelContextWindow || meta.contextWindow || 0;
-    meta.rateLimits = params?.rateLimits || meta.rateLimits || null;
-    meta.rateLimitsFetchedAt = Date.now();
-    emitTaskEvent('token_count', { info: tokenUsage, rate_limits: params?.rateLimits || null });
+    const last = tokenUsage.last || tokenUsage.last_token_usage || tokenUsage.lastTokenUsage || null;
+    const total = tokenUsage.total || tokenUsage.total_token_usage || tokenUsage.totalTokenUsage || null;
+    meta.lastTokenUsage = last || meta.lastTokenUsage || null;
+    meta.totalTokenUsage = total || meta.totalTokenUsage || null;
+    meta.contextWindow = tokenUsage.modelContextWindow || tokenUsage.model_context_window || meta.contextWindow || 0;
+    // Emit in the rollout-native snake_case shape that all consumers
+    // (codex-message-manager, CodexSessionMessages.chatStatus) already parse
+    emitTaskEvent('token_count', { info: {
+      last_token_usage: last,
+      total_token_usage: total,
+      model_context_window: meta.contextWindow || null,
+    } });
     scheduleMeta();
     return;
   }
