@@ -51,18 +51,15 @@ if (!args.includes('--permission-prompt-tool')) {
 // Write initial metadata
 try { fs.mkdirSync(path.dirname(metaFile), { recursive: true }); } catch {}
 const meta = { pid: process.pid, startedAt: Date.now(), mode: 'chat', tasks: {}, todos: [] };
-let metaDirty = false;
 let metaTimer = null;
 
 function persistMeta() {
   metaTimer = null;
-  metaDirty = false;
   try { fs.writeFileSync(metaFile, JSON.stringify(meta)); } catch {}
 }
 
 function scheduleMeta() {
   if (!metaTimer) metaTimer = setTimeout(persistMeta, 500);
-  metaDirty = true;
 }
 
 try { fs.writeFileSync(metaFile, JSON.stringify(meta)); } catch (e) { log(`meta write failed: ${e.message}`); }

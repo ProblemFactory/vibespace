@@ -19,7 +19,7 @@ import { SETTINGS_SCHEMA } from './settings-schema.js';
 import { SettingsUI } from './settings-ui.js';
 import { openExternalEditor, closeExternalEditor } from './external-editor.js';
 import { CommandMode } from './command-mode.js';
-import { updateTaskbar as updateTaskbarFn, showWindowList } from './taskbar.js';
+import { updateTaskbar as updateTaskbarFn } from './taskbar.js';
 import { openBrowser as openBrowserFn } from './browser-window.js';
 import { DesktopManager } from './desktop-manager.js';
 import { createBackendIconHtml, getSessionKey, pickAgentIdentity } from './agent-meta.js';
@@ -1408,8 +1408,6 @@ class App {
   }
 
   updateTaskbar() { updateTaskbarFn(this); if (this.desktopManager) this.desktopManager._renderSwitcher(); }
-
-  _showWindowList(anchor) { showWindowList(this, anchor); }
 
   _populateThemeSelect(sel) {
     sel.innerHTML = '';

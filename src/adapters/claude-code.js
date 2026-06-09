@@ -12,8 +12,7 @@
  * - stream-json message format
  */
 
-const { BackendAdapter, SessionHandle } = require('./base');
-const EventEmitter = require('events');
+const { BackendAdapter } = require('./base');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -57,56 +56,6 @@ class ClaudeCodeAdapter extends BackendAdapter {
       cwd: cwd || os.homedir(),
       mode,
     };
-  }
-
-  /**
-   * Parse JSONL history for a Claude session.
-   * Returns raw Claude messages (not normalized).
-   */
-  parseHistory(claudeSessionId, cwd) {
-    if (!claudeSessionId) return [];
-    const fp = this._findJsonlPath(claudeSessionId, cwd);
-    if (!fp) return [];
-    try {
-      const content = fs.readFileSync(fp, 'utf-8');
-      const messages = [];
-      for (const line of content.split('\n')) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        try {
-          const msg = JSON.parse(trimmed);
-          // Skip subagent messages (handled separately)
-          if (msg.parent_tool_use_id || msg.isSidechain) continue;
-          messages.push(msg);
-        } catch {}
-      }
-      return messages;
-    } catch { return []; }
-  }
-
-  /**
-   * Find JSONL file path for a session.
-   */
-  _findJsonlPath(claudeSessionId, cwd) {
-    const projectsDir = path.join(os.homedir(), '.claude', 'projects');
-    const projDir = this._cwdToProjectDir(cwd || '');
-    const candidates = [];
-    if (cwd) candidates.push(path.join(projectsDir, projDir, claudeSessionId + '.jsonl'));
-    try {
-      for (const dir of fs.readdirSync(projectsDir)) {
-        const fp = path.join(projectsDir, dir, claudeSessionId + '.jsonl');
-        if (!candidates.includes(fp)) candidates.push(fp);
-      }
-    } catch {}
-    for (const fp of candidates) {
-      try { if (fs.existsSync(fp)) return fp; } catch {}
-    }
-    return null;
-  }
-
-  /** Encode CWD to Claude's project directory name */
-  _cwdToProjectDir(cwd) {
-    return cwd.replace(/[/._]/g, '-');
   }
 
   // ── Protocol formatting (called by ws-handler) ──
@@ -158,8 +107,6 @@ class ClaudeCodeAdapter extends BackendAdapter {
   formatSetPermissionMode(mode) {
     return JSON.stringify(ClaudeCodeAdapter.buildSetPermissionMode(mode));
   }
-
-  buildUserPreview(text, msgId) { return null; } // handled inline by formatChatInput
 
   // ── Static helpers (kept for backward compat) ──
 

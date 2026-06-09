@@ -305,10 +305,6 @@ class LayoutManager {
       if (winState.gridBounds) {
         winInfo.gridBounds = winState.gridBounds;
         this.app.wm._applyGridBounds(winInfo);
-      } else {
-        const el = winInfo.element;
-        el.style.left = winState.left; el.style.top = winState.top;
-        el.style.width = winState.width; el.style.height = winState.height;
       }
       if (winState.zIndex) { winInfo.element.style.zIndex = winState.zIndex; if (winState.zIndex >= this.app.wm.zIndex) this.app.wm.zIndex = winState.zIndex + 1; }
       if (winState.isSnapped) { winInfo._isSnapped = true; winInfo._preSnapBounds = winState.preSnapBounds; }
@@ -529,10 +525,6 @@ class LayoutManager {
       if (winState.gridBounds) {
         winInfo.gridBounds = winState.gridBounds;
         this.app.wm._applyGridBounds(winInfo);
-      } else {
-        const el = winInfo.element;
-        el.style.left = winState.left; el.style.top = winState.top;
-        el.style.width = winState.width; el.style.height = winState.height;
       }
       if (winState.zIndex) {
         winInfo.element.style.zIndex = winState.zIndex;
@@ -833,13 +825,6 @@ class LayoutManager {
     localStorage.setItem('taskbarHeight', h);
     this.app.desktopManager?._adaptTaskbarSize(h);
   }
-
-  // Legacy aliases for backwards compatibility
-  get _savedLayouts() { return this._savedPresets; }
-  set _savedLayouts(v) { this._savedPresets = v; }
-  async saveNamed(name) { return this.savePreset(name); }
-  async loadNamed(name) { return this.loadPreset(name); }
-  async deleteNamed(name) { return this.deletePreset(name); }
 }
 
 export { LayoutManager };
