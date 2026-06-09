@@ -41,10 +41,11 @@ function renderDetailGroups(container, sessionRef, clickToCopy, state) {
     val.title = 'Click to copy';
     val.onclick = (e) => {
       e.stopPropagation();
-      navigator.clipboard.writeText(summary).then(() => {
-        const orig = val.textContent; val.textContent = 'Copied!';
-        setTimeout(() => { val.textContent = orig; }, 800);
-      }).catch(() => {});
+      // copyText handles non-HTTPS contexts (navigator.clipboard is undefined
+      // over HTTP — the bare property access threw synchronously here)
+      copyText(summary);
+      const orig = val.textContent; val.textContent = 'Copied!';
+      setTimeout(() => { val.textContent = orig; }, 800);
     };
   }
   row.append(lbl, val);

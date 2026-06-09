@@ -903,7 +903,7 @@ class WindowManager {
 
     const overlapping = [];
     for (const [id, w] of this.windows) {
-      if (id === win.id || w.isMinimized) continue;
+      if (id === win.id || w.isMinimized || w._hiddenByDesktop) continue;
       if (w._tabChain && w._tabChain.tabs[0] !== w.id) continue; // skip grouped guests
       const wEl = w.element;
       const wr = { left: wEl.offsetLeft, top: wEl.offsetTop, right: wEl.offsetLeft + wEl.offsetWidth, bottom: wEl.offsetTop + wEl.offsetHeight };
@@ -945,7 +945,9 @@ class WindowManager {
   }
 
   _updateOverlapIndicators() {
-    const allWins = [...this.windows.values()].filter(w => !w.isMinimized && !(w._tabChain && w._tabChain.tabs[0] !== w.id));
+    // _hiddenByDesktop windows are geometrically present (visibility:hidden) —
+    // counting them lit the ⧉ indicator for windows the user can't see
+    const allWins = [...this.windows.values()].filter(w => !w.isMinimized && !w._hiddenByDesktop && !(w._tabChain && w._tabChain.tabs[0] !== w.id));
     // Build rects for all visible windows
     const rects = new Map();
     for (const w of allWins) {

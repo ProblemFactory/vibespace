@@ -148,6 +148,7 @@ export function openExternalEditor(app, filePath, signalPath, sessionId) {
         }),
         parent: editorBody,
       });
+      if (targetWinInfo._editorState) targetWinInfo._editorState.editorView = editorView; // for closeExternalEditor teardown
       setTimeout(() => editorView.focus(), 50);
 
       // Wire up editor settings buttons
@@ -179,9 +180,18 @@ export function openExternalEditor(app, filePath, signalPath, sessionId) {
       const doSave = async () => {
         const newContent = editorView.state.doc.toString();
         try {
-          await fetch('/api/file/write', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ path: filePath, content: newContent }) });
+          const res = await fetch('/api/file/write', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ path: filePath, content: newContent }) });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
           await fetch('/api/editor/signal', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ signalPath, filePath }) });
-        } catch {}
+        } catch (err) {
+          // Write failed — keep the editor open with the user's edits instead
+          // of tearing down and unblocking Claude with a stale file
+          saveBtn.textContent = `✕ ${err.message || 'Save failed'} — retry`;
+          saveBtn.style.background = 'var(--red)';
+          setTimeout(() => { saveBtn.textContent = 'Save & Close'; saveBtn.style.background = ''; }, 4000);
+          return;
+        }
         // Remove editor pane + resizer, restore terminal to full height
         targetWinInfo._editorState = null;
         targetWinInfo._editorDoSave = null;
@@ -205,6 +215,27 @@ export function openExternalEditor(app, filePath, signalPath, sessionId) {
 
       saveBtn.onclick = doSave;
       targetWinInfo._editorDoSave = doSave;
+    })
+    .catch((err) => {
+      // Load failed (server briefly down, file unreadable) — without this the
+      // split pane appeared with a dead Save button and the terminal was stuck
+      pathSpan.textContent = `Failed to load ${filePath}: ${err.message}`;
+      pathSpan.style.color = 'var(--red)';
+      saveBtn.textContent = 'Close editor';
+      saveBtn.onclick = async () => {
+        try { await fetch('/api/editor/signal', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ signalPath, filePath }) }); } catch {}
+        targetWinInfo._editorState = null;
+        targetWinInfo._editorDoSave = null;
+        splitResizer.destroy();
+        editorPane.remove();
+        contentEl.style.display = '';
+        contentEl.style.flexDirection = '';
+        termContainer.style.flex = '';
+        termContainer.style.minHeight = '';
+        termContainer.style.height = '';
+        termContainer.style.flexBasis = '';
+        if (termSession) setTimeout(() => { termSession.fit(); termSession.terminal.focus(); }, 150);
+      };
     });
 }
 
@@ -219,8 +250,10 @@ export function closeExternalEditor(app, signalPath) {
       const editorPane = win.content.querySelector('.editor-container');
       const termContainer = win.content.querySelector('.terminal-container');
       if (editorPane) {
+        win._editorState?.editorView?.destroy?.(); // release the CodeMirror instance (leaked per remote close)
         editorPane.remove();
         win._editorState = null;
+        win._editorDoSave = null;
         if (win._splitResizer) { win._splitResizer.destroy(); win._splitResizer = null; }
         if (termContainer) {
           win.content.style.display = '';

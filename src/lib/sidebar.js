@@ -88,7 +88,8 @@ class Sidebar {
     const filterBtn = document.getElementById('live-filter');
     filterBtn.onclick = (e) => {
       e.stopPropagation();
-      if (document.querySelector('.status-filter-menu')) { document.querySelector('.status-filter-menu').remove(); return; }
+      const own = document.querySelector('.status-filter-menu:not(.backend-filter-menu)');
+      if (own) { own.remove(); return; }
       this._showStatusFilterMenu(filterBtn);
     };
     const backendFilterBtn = document.getElementById('backend-filter');
@@ -104,6 +105,7 @@ class Sidebar {
       this._activeView = null;
       this._updateFilterBtn(filterBtn);
       this._updateBackendFilterBtn(backendFilterBtn);
+      this._renderQuickTabs(); // quick-tab row must reflect the async-loaded filter too
       this._render();
       this.app.settings?.off('sidebar.defaultStatusFilter', _applyDefaultFilter);
     };
@@ -205,7 +207,10 @@ class Sidebar {
   }
 
   _showBackendFilterMenu(anchor) {
-    const menu = createPopover(anchor, 'status-filter-menu');
+    // Own class — sharing .status-filter-menu made the two filter buttons'
+    // open/close toggles fight each other (status click closed the backend
+    // menu; backend's own toggle check never matched)
+    const menu = createPopover(anchor, 'backend-filter-menu status-filter-menu');
     const backends = this._getAvailableBackends();
     for (const id of backends) {
       const meta = getBackendMeta(id);

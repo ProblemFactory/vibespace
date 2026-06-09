@@ -174,8 +174,9 @@ export class ChatStatusBar {
     // Goal indicator
     if (this._goal) {
       const elapsed = this._fmtElapsed(this._goalElapsed || 0);
-      const status = this._goalStatus || '';
-      const statusIcon = status === 'Active' ? '\u{25B6}' : status === 'Paused' ? '⏸' : status === 'Complete' ? '✓' : '';
+      // Codex sends lowercase active/paused/blocked/complete — normalize case
+      const status = (this._goalStatus || '').toLowerCase();
+      const statusIcon = status === 'active' ? '\u{25B6}' : status === 'paused' ? '⏸' : status === 'blocked' ? '⛔' : status === 'complete' ? '✓' : '';
       const shortGoal = this._goal.length > 30 ? this._goal.substring(0, 30) + '…' : this._goal;
       parts.push(`<span class="chat-status-goal chat-status-clickable" title="${escHtml(this._goal)}">\u{1F3AF}${statusIcon ? ' ' + statusIcon : ''} <span class="chat-goal-timer">${elapsed}</span> ${escHtml(shortGoal)}</span>`);
     }
@@ -321,7 +322,7 @@ export class ChatStatusBar {
       elapsed.textContent = `Pursued for ${this._fmtElapsed(this._goalElapsed || 0)}${statusLabel}`;
       const actions = document.createElement('div');
       actions.style.cssText = 'display:flex;gap:6px';
-      const isActive = this._goalStatus === 'active' || this._goalStatus === 'Active';
+      const isActive = (this._goalStatus || '').toLowerCase() === 'active';
       if (!isActive) {
         const continueBtn = document.createElement('button');
         continueBtn.className = 'chat-perm-btn chat-perm-allow';

@@ -230,12 +230,19 @@ export class DesktopManager {
 
   /** Move a window to another desktop */
   moveWindowToDesktop(winId, desktopId) {
-    const win = this.app.wm.windows.get(winId);
+    let win = this.app.wm.windows.get(winId);
+    if (!win) return;
+    // Tab chains live on ONE desktop (invariant enforced at creation):
+    // move the whole group together, anchored at the host. Moving a single
+    // guest used to split the chain across desktops, which captureState /
+    // restoreTabChain can't represent.
+    const members = win._tabChain ? win._tabChain.tabs.map(id => this.app.wm.windows.get(id)).filter(Boolean) : [win];
+    if (win._tabChain) win = members[0]; // host owns the visible element
     if (!win || win._desktopId === desktopId) return;
 
-    win._desktopId = desktopId;
+    for (const m of members) m._desktopId = desktopId;
 
-    // If moving to a non-active desktop, hide
+    // If moving to a non-active desktop, hide (host element carries the group)
     if (desktopId !== this._activeId) {
       this._hideWin(win);
     }

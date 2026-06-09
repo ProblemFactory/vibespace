@@ -228,10 +228,16 @@ router.post('/api/upload', upload.array('files'), (req, res) => {
   try { clientNames = JSON.parse(req.body.fileNames || '[]'); } catch {}
   try {
     const results = [];
+    const destRoot = path.resolve(destDir);
     for (let i = 0; i < req.files.length; i++) {
       const file = req.files[i];
       const name = clientNames[i] || file.originalname;
-      const dest = path.join(destDir, name);
+      const dest = path.resolve(destRoot, name);
+      // Confine to the chosen folder: a name containing ../ would otherwise
+      // silently write outside the upload destination
+      if (dest !== destRoot && !dest.startsWith(destRoot + path.sep)) {
+        throw new Error(`Invalid file name: ${name}`);
+      }
       // For folder uploads, create intermediate directories
       if (preservePaths && name.includes('/')) {
         fs.mkdirSync(path.dirname(dest), { recursive: true });
@@ -241,7 +247,11 @@ router.post('/api/upload', upload.array('files'), (req, res) => {
       results.push({ name, path: dest, size: file.size });
     }
     res.json({ success: true, files: results });
-  } catch (err) { res.status(400).json({ error: err.message }); }
+  } catch (err) {
+    // Clean up remaining multer temp files on failure (they leaked in /tmp)
+    for (const f of req.files || []) { try { fs.unlinkSync(f.path); } catch {} }
+    res.status(400).json({ error: err.message });
+  }
 });
 
 // Paste image from clipboard → save to temp file + set X clipboard via xclip
@@ -287,6 +297,29 @@ router.post('/api/paste-image', (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Quote-aware CSV field split (commas inside "..." stay in one field,
+// "" unescapes to "). Embedded newlines inside quotes are not supported —
+// the endpoint streams line-by-line by design.
+function splitCsvLine(line, sep) {
+  const out = [];
+  let cur = '', inQ = false, wasQuoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQ) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i++; }
+        else inQ = false;
+      } else cur += ch;
+    } else if (ch === '"' && cur === '') {
+      inQ = true; wasQuoted = true;
+    } else if (ch === sep) {
+      out.push(wasQuoted ? cur : cur.trim()); cur = ''; wasQuoted = false;
+    } else cur += ch;
+  }
+  out.push(wasQuoted ? cur : cur.trim());
+  return out;
+}
+
 // CSV/TSV streaming: read only requested row range from a file
 // Supports large files by reading line-by-line without loading entire file
 router.get('/api/file/csv', (req, res) => {
@@ -303,18 +336,20 @@ router.get('/api/file/csv', (req, res) => {
     let partial = '';
     let totalLines = 0;
     let done = false;
+    let bytesConsumed = 0; // bytes covered by fully-processed lines (for the size-based estimate)
 
     stream.on('data', (chunk) => {
       if (done) return;
       const lines = (partial + chunk).split('\n');
       partial = lines.pop(); // last partial line
       for (const line of lines) {
+        bytesConsumed += Buffer.byteLength(line) + 1;
         const trimmed = line.replace(/\r$/, '');
         if (!trimmed) continue;
         if (lineNum === 0) {
-          headerRow = trimmed.split(sep).map(c => c.trim());
+          headerRow = splitCsvLine(trimmed, sep);
         } else if (lineNum > offset && rows.length < limit) {
-          rows.push(trimmed.split(sep).map(c => c.trim()));
+          rows.push(splitCsvLine(trimmed, sep));
         }
         lineNum++;
         totalLines = lineNum;
@@ -328,13 +363,16 @@ router.get('/api/file/csv', (req, res) => {
     });
 
     stream.on('end', () => {
-      if (partial.trim()) { totalLines++; if (lineNum > offset && rows.length < limit) rows.push(partial.split(sep).map(c => c.trim())); }
+      if (partial.trim()) { totalLines++; if (lineNum > offset && rows.length < limit) rows.push(splitCsvLine(partial, sep)); }
       res.json({ header: headerRow, rows, offset: offset, total: totalLines, fileSize: stat.size });
     });
     stream.on('close', () => {
       if (!res.headersSent) {
-        // Estimate total from file size if we stopped early
-        const bytesPerLine = stat.size / Math.max(1, totalLines);
+        // Estimate total rows from average bytes/line over what we actually
+        // read. (The old formula divided stat.size by stat.size/totalLines,
+        // which algebraically just returned totalLines — large CSVs reported
+        // ~10k rows no matter their real size.)
+        const bytesPerLine = Math.max(1, bytesConsumed) / Math.max(1, totalLines);
         const estimatedTotal = Math.round(stat.size / bytesPerLine);
         res.json({ header: headerRow, rows, offset, total: done ? estimatedTotal : totalLines, fileSize: stat.size, estimated: done });
       }

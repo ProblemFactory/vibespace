@@ -1211,6 +1211,7 @@ class App {
       if (opts._onCloseDelete) opts._onCloseDelete();
       this._checkWelcome();
     };
+    return winInfo;
   }
 
   // Delegate to extracted external-editor.js module
@@ -1303,9 +1304,9 @@ class App {
         }
 
         flashWin.element.classList.add('window-find-flash');
-        const taskbarItems = document.querySelectorAll('.taskbar-item');
-        const idx = [...this.wm.windows.keys()].indexOf(flashWinId);
-        const taskbarItem = taskbarItems[idx];
+        // Match by winId — index-based mapping diverged from taskbar order as
+        // soon as tab groups or a second desktop existed (taskbar skips those)
+        const taskbarItem = document.querySelector(`.taskbar-item[data-win-id="${CSS.escape(flashWinId)}"]`);
         if (taskbarItem) taskbarItem.classList.add('find-flash');
         // Also flash in desktop preview
         if (dm) {

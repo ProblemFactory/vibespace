@@ -495,17 +495,30 @@ class FileViewer {
     const ROW_HEIGHT = 24;
     const PAGE_SIZE = 200;
     const cache = new Map(); // offset → rows array
+    const inflight = new Map(); // offset → Promise (dedupe concurrent fetches during fast scroll)
     let header = null, total = 0;
+    let onTotalChanged = null; // set after the spacer/status exist
 
     // Fetch a page of rows
-    const fetchPage = async (offset) => {
-      if (cache.has(offset)) return;
-      const res = await fetch(`/api/file/csv?path=${encodeURIComponent(filePath)}&offset=${offset}&limit=${PAGE_SIZE}&sep=${encodeURIComponent(sep)}`);
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      if (!header && data.header) header = data.header;
-      if (data.total) total = Math.max(total, data.total);
-      cache.set(offset, data.rows);
+    const fetchPage = (offset) => {
+      if (cache.has(offset)) return Promise.resolve();
+      if (inflight.has(offset)) return inflight.get(offset);
+      const p = (async () => {
+        const res = await fetch(`/api/file/csv?path=${encodeURIComponent(filePath)}&offset=${offset}&limit=${PAGE_SIZE}&sep=${encodeURIComponent(sep)}`);
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        if (!header && data.header) header = data.header;
+        if (data.total && data.total > total) {
+          total = data.total;
+          // Later pages refine the row estimate — without this the spacer and
+          // status stayed at the first page's value, so big files could only
+          // be scrolled to ~10k rows
+          onTotalChanged?.();
+        }
+        cache.set(offset, data.rows);
+      })().finally(() => inflight.delete(offset));
+      inflight.set(offset, p);
+      return p;
     };
 
     // Initial fetch
@@ -544,6 +557,11 @@ class FileViewer {
     spacer.style.height = ((total - 1) * ROW_HEIGHT) + 'px';
     spacer.style.position = 'relative';
     scrollArea.appendChild(spacer);
+
+    onTotalChanged = () => {
+      spacer.style.height = ((total - 1) * ROW_HEIGHT) + 'px';
+      status.textContent = `${total.toLocaleString()} rows × ${header.length} columns`;
+    };
 
     const renderRows = () => {
       const scrollTop = scrollArea.scrollTop;

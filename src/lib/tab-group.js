@@ -148,10 +148,13 @@ const tabGroupMethods = {
   },
 
   addToTabChain(chain, guestWin, insertIndex) {
+    let insertedAt;
     if (insertIndex != null && insertIndex >= 0 && insertIndex < chain.tabs.length) {
-      chain.tabs.splice(insertIndex + 1, 0, guestWin.id); // insert after the tab at insertIndex
+      insertedAt = insertIndex + 1;
+      chain.tabs.splice(insertedAt, 0, guestWin.id); // insert after the tab at insertIndex
     } else {
       chain.tabs.push(guestWin.id);
+      insertedAt = chain.tabs.length - 1;
     }
     guestWin._tabChain = chain;
     const hostWin = this.windows.get(chain.tabs[0]);
@@ -163,7 +166,9 @@ const tabGroupMethods = {
     guestWin.element.style.display = 'none';
     guestWin.gridBounds = hostWin.gridBounds ? { ...hostWin.gridBounds } : null;
     this._renderTabBar(chain);
-    this.switchTab(chain, chain.tabs.length - 1);
+    // Activate the tab that was just dropped — not the last one (dropping
+    // between tabs used to light up an unrelated trailing tab)
+    this.switchTab(chain, insertedAt);
     this._notify();
   },
 

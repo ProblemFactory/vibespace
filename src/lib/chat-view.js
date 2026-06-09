@@ -359,6 +359,10 @@ class ChatView {
       }
     }
     this._syncReviewAvailability();
+    // Set viewport BEFORE rendering markers — render() positions markers
+    // against _total, which is stale (0) until setViewport runs, stretching
+    // first-render markers toward 100%
+    this._chatMinimap.setViewport(this._windowStart, this._windowEnd, this._total);
     // Render minimap from turn data (attach payload or async fetch fallback)
     if (meta?.turnMap?.length) {
       this._chatMinimap.render(meta.turnMap);
@@ -370,7 +374,6 @@ class ChatView {
           .then(r => r.json()).then(d => { if (d.turns?.length) this._chatMinimap.render(d.turns); }).catch(() => {});
       }
     }
-    this._chatMinimap.setViewport(this._windowStart, this._windowEnd, this._total);
 
     if (isStreaming) this._showTyping(meta?.streamingLabel || 'thinking...');
     this._scrollToBottom();

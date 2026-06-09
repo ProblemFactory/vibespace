@@ -155,18 +155,29 @@ child.stdout.on('data', (chunk) => {
       // Goal auto-continue: if a goal is active and the turn completed normally,
       // send a follow-up message to keep the model working toward the goal.
       if (msg.type === 'result' && meta.goal && !msg.is_error && child.stdin.writable) {
-        const continueMsg = JSON.stringify({
-          type: 'user',
-          message: { role: 'user', content: [{ type: 'text',
-            text: `[Goal still active: "${meta.goal}"]\nYou stopped but your goal is not yet complete. Continue working toward it. Do not ask for confirmation — just proceed.`
-          }] }
-        });
-        setTimeout(() => {
-          if (child.stdin.writable) {
+        meta.goalIterations = (meta.goalIterations || 0) + 1;
+        // Safety cap: WebUI-set goals have no CLI-side "met" detection, so an
+        // unattended goal would otherwise continue forever. Pausing (not
+        // clearing) lets the user resume via the status bar Continue button.
+        if (meta.goalIterations > 200) {
+          log(`Goal auto-continue cap reached (${meta.goalIterations - 1} turns) — pausing goal`);
+          meta.goalStatus = 'paused';
+          scheduleMeta();
+        } else {
+          setTimeout(() => {
+            // Re-check at fire time: clearing the goal during this window must
+            // not trigger one more forced continuation
+            if (!meta.goal || !child.stdin.writable) return;
+            const continueMsg = JSON.stringify({
+              type: 'user',
+              message: { role: 'user', content: [{ type: 'text',
+                text: `[Goal still active: "${meta.goal}"]\nYou stopped but your goal is not yet complete. Continue working toward it. Do not ask for confirmation — just proceed.`
+              }] }
+            });
             child.stdin.write(continueMsg + '\n');
             log('Goal auto-continue sent');
-          }
-        }, 1000);
+          }, 1000);
+        }
       }
     }
 
@@ -233,6 +244,8 @@ try {
         // Handle goal commands from WebUI
         if (parsed.type === 'set-goal') {
           meta.goal = parsed.goal || null;
+          meta.goalIterations = 0; // fresh goal → fresh auto-continue budget
+          if (meta.goal) meta.goalStatus = 'active';
           scheduleMeta();
           log(`Goal ${meta.goal ? 'set: ' + meta.goal.substring(0, 80) : 'cleared'}`);
           continue;
