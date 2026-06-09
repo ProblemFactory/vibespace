@@ -221,12 +221,26 @@ class CodexSessionMessages {
       permissionMode: '',
       permissionModes: ['default', 'read-only', 'safe-yolo', 'yolo'],
       subagentMetas: [],
+      effort: null,
+      sandbox: null,
+      totalUsage: null,
     };
     const meta = this.wrapperMeta();
     if (meta?.model) status.model = meta.model;
     if (meta?.permissionMode) status.permissionMode = meta.permissionMode;
     if (meta?.contextWindow) status.contextWindow = meta.contextWindow;
     if (meta?.subagentMetas) status.subagentMetas = meta.subagentMetas;
+    if (meta?.sandbox) status.sandbox = meta.sandbox;
+    if (meta?.totalTokenUsage) {
+      const t = meta.totalTokenUsage;
+      status.totalUsage = {
+        total_tokens: t.total_tokens ?? t.totalTokens ?? 0,
+        input_tokens: t.input_tokens ?? t.inputTokens ?? 0,
+        cached_input_tokens: t.cached_input_tokens ?? t.cachedInputTokens ?? 0,
+        output_tokens: t.output_tokens ?? t.outputTokens ?? 0,
+        reasoning_output_tokens: t.reasoning_output_tokens ?? t.reasoningOutputTokens ?? 0,
+      };
+    }
 
     for (const record of this._all) {
       if (record.type === 'session_meta' && !status.model) {
@@ -236,6 +250,8 @@ class CodexSessionMessages {
         if (record.payload?.permissionMode) status.permissionMode = record.payload.permissionMode;
         if (record.payload?.approval_policy && !status.permissionMode) status.permissionMode = record.payload.approval_policy;
         if (record.payload?.model_context_window) status.contextWindow = record.payload.model_context_window;
+        if (record.payload?.effort) status.effort = record.payload.effort;
+        if (record.payload?.sandbox_policy && !status.sandbox) status.sandbox = record.payload.sandbox_policy;
       } else if (record.type === 'event_msg' && record.payload?.type === 'token_count') {
         const info = record.payload.info || {};
         const last = info.last_token_usage || info.lastTokenUsage || info.total_token_usage || null;
@@ -263,9 +279,17 @@ class CodexSessionMessages {
       if ((taskInfo?.status || '') !== 'running') continue;
       tasks[taskId] = taskInfo;
     }
+    // Codex's plan tool (update_plan) — persisted by the wrapper, mapped to
+    // the same TODO shape Claude's TodoWrite uses so attach restores the
+    // TODO display
+    const todos = (Array.isArray(meta?.plan) ? meta.plan : []).map((p) => ({
+      content: p.step || '',
+      status: p.status === 'inProgress' || p.status === 'in_progress' ? 'in_progress'
+        : p.status === 'completed' ? 'completed' : 'pending',
+    })).filter((t) => t.content);
     return {
       tasks,
-      todos: [],
+      todos,
     };
   }
 }
