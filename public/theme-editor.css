@@ -28,7 +28,7 @@
 .theme-editor-select:focus, .theme-editor-name:focus { outline: none; border-color: var(--accent); }
 .theme-editor-name { width: 140px; }
 .theme-editor-save {
-  background: var(--accent); color: #fff; border: none; padding: 5px 14px;
+  background: var(--accent); color: var(--accent-fg, #fff); border: none; padding: 5px 14px;
   border-radius: var(--radius-sm); font-size: 12px; font-weight: 600; cursor: pointer;
   transition: background var(--transition);
 }

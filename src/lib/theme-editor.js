@@ -555,11 +555,14 @@ class ThemeEditor {
       if (!res.ok) { const e = await res.json(); alert(e.error); return; }
     } catch (e) { alert('Delete failed: ' + e.message); return; }
 
+    const wasActive = this.app.themeManager.current === name;
     this.app.themeManager.unregisterCustomTheme(name);
     delete this._customThemes[name];
     if (this.app._refreshThemeDropdown) this.app._refreshThemeDropdown();
     this._previewActive = false;
-    this.app.themeManager.apply('dark');
+    // Only switch themes if the DELETED theme was the active one — deleting an
+    // unused custom theme used to reset the user's current theme to dark
+    if (wasActive) this.app.themeManager.apply('dark');
     const termTheme = this.app.themeManager.getTerminalTheme();
     for (const [, session] of this.app.sessions) {
       if (session.updateTheme) session.updateTheme(termTheme);

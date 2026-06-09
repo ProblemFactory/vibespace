@@ -1,6 +1,7 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root, [data-theme="dark"] {
+  --accent-fg: #ffffff; --magenta: #c678dd; --cyan: #56b6c2; --hover-overlay: rgba(255,255,255,0.1);
   --bg-root: #0c0c18; --bg-workspace: #111122; --bg-window: #1a1a30;
   --bg-titlebar: #14142a; --bg-titlebar-active: #1a1a38; --bg-toolbar: #0e0e1e;
   --bg-taskbar: #0e0e1e; --bg-input: #12122a; --bg-hover: rgba(99,102,241,0.12);
@@ -16,6 +17,7 @@
   --terminal-bg: #12122a; --terminal-fg: #e4e4e8; --terminal-cursor: #6366f1;
 }
 [data-theme="light"] {
+  --accent-fg: #ffffff; --magenta: #9333ea; --cyan: #0e7490; --hover-overlay: rgba(0,0,0,0.08);
   --bg-root: #f0f0f5; --bg-workspace: #e8e8f0; --bg-window: #ffffff;
   --bg-titlebar: #f0f0f5; --bg-titlebar-active: #e8e8f0; --bg-toolbar: #ffffff;
   --bg-taskbar: #ffffff; --bg-input: #f5f5fa; --bg-hover: rgba(99,102,241,0.08);
@@ -27,6 +29,7 @@
   --chat-green: #15803d;
 }
 [data-theme="dracula"] {
+  --accent-fg: #1e1f29; --magenta: #ff79c6; --cyan: #8be9fd; --hover-overlay: rgba(255,255,255,0.1);
   --bg-root: #1e1f29; --bg-workspace: #21222c; --bg-window: #282a36;
   --bg-titlebar: #21222c; --bg-titlebar-active: #2c2d3a; --bg-toolbar: #1e1f29;
   --bg-taskbar: #1e1f29; --bg-input: #282a36; --bg-hover: rgba(189,147,249,0.12);
@@ -38,6 +41,7 @@
   --terminal-bg: #282a36; --terminal-fg: #f8f8f2; --terminal-cursor: #bd93f9;
 }
 [data-theme="nord"] {
+  --accent-fg: #2e3440; --magenta: #b48ead; --cyan: #88c0d0; --hover-overlay: rgba(255,255,255,0.1);
   --bg-root: #242933; --bg-workspace: #2e3440; --bg-window: #3b4252;
   --bg-titlebar: #2e3440; --bg-titlebar-active: #3b4252; --bg-toolbar: #242933;
   --bg-taskbar: #242933; --bg-input: #3b4252; --bg-hover: rgba(136,192,208,0.12);
@@ -49,6 +53,7 @@
   --terminal-bg: #2e3440; --terminal-fg: #eceff4; --terminal-cursor: #88c0d0;
 }
 [data-theme="solarized"] {
+  --accent-fg: #fdf6e3; --magenta: #d33682; --cyan: #2aa198; --hover-overlay: rgba(255,255,255,0.1);
   --bg-root: #00212b; --bg-workspace: #002b36; --bg-window: #073642;
   --bg-titlebar: #002b36; --bg-titlebar-active: #073642; --bg-toolbar: #00212b;
   --bg-taskbar: #00212b; --bg-input: #073642; --bg-hover: rgba(38,139,210,0.12);
@@ -60,6 +65,7 @@
   --terminal-bg: #002b36; --terminal-fg: #fdf6e3; --terminal-cursor: #268bd2;
 }
 [data-theme="monokai"] {
+  --accent-fg: #1a1a1a; --magenta: #f92672; --cyan: #66d9ef; --hover-overlay: rgba(255,255,255,0.1);
   --bg-root: #1a1a1a; --bg-workspace: #1e1e1e; --bg-window: #272822;
   --bg-titlebar: #1e1e1e; --bg-titlebar-active: #2d2e27; --bg-toolbar: #1a1a1a;
   --bg-taskbar: #1a1a1a; --bg-input: #272822; --bg-hover: rgba(166,226,46,0.1);
@@ -78,7 +84,7 @@ html, body {
 
 /* ── Shared popover base (position set by JS createPopover) ── */
 .status-filter-menu, .overlap-switcher, .groups-popover,
-.term-settings-popover, .global-settings-popover, .context-menu, .taskbar-context-menu {
+.term-settings-popover, .global-settings-popover, .taskbar-context-menu {
   background: var(--bg-dialog); border: 1px solid var(--border-active); border-radius: var(--radius);
   box-shadow: 0 8px 24px rgba(0,0,0,0.4); padding: 6px 0;
 }
@@ -162,8 +168,7 @@ html, body {
   border-color: rgba(148,163,184,0.25);
   color: var(--text-dim);
 }
-.session-backend-icon { width: 14px; height: 14px; font-size: 8px; }
-.session-backend-icon { width: 12px; height: 12px; font-size: 8px; flex-shrink: 0; }
+.session-backend-icon { flex-shrink: 0; font-size: 8px; } /* size set with .session-composite-icon below */
 .session-agent-kind-icon { width: 12px; height: 12px; font-size: 8px; }
 .session-inline-btn {
   background: none; border: none; cursor: pointer; font-size: 11px; color: var(--text-dim);
@@ -186,7 +191,7 @@ html, body {
 }
 .mode-badge svg { width: 100%; height: 100%; display: block; }
 .badge-config {
-  background: rgba(168,85,247,0.16); color: var(--accent-hover);
+  background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent-hover);
   display: inline-flex; align-items: center; gap: 3px; min-width: 0;
 }
 .badge-config svg { width: 9px; height: 9px; flex-shrink: 0; }
@@ -273,11 +278,11 @@ html, body {
 .session-detail-btn-primary {
   background: var(--accent-dim); color: var(--accent-hover); border-color: var(--accent);
 }
-.session-detail-btn-primary:hover { background: var(--accent); color: #fff; }
+.session-detail-btn-primary:hover { background: var(--accent); color: var(--accent-fg); }
 .session-detail-btn-chat {
   background: rgba(34,197,94,0.15); color: var(--green); border-color: var(--green);
 }
-.session-detail-btn-chat:hover { background: var(--green); color: #fff; }
+.session-detail-btn-chat:hover { background: var(--green); color: var(--accent-fg); }
 .session-resume-split { display: inline-flex; gap: 0; }
 .session-resume-split .session-detail-btn { border-top-right-radius: 0; border-bottom-right-radius: 0; border-right: none; }
 .session-resume-drop {
@@ -286,11 +291,11 @@ html, body {
   border-top-left-radius: 0; border-bottom-left-radius: 0;
   background: var(--accent-dim); color: var(--accent-hover); transition: all var(--transition);
 }
-.session-resume-drop:hover { background: var(--accent); color: #fff; }
+.session-resume-drop:hover { background: var(--accent); color: var(--accent-fg); }
 .session-resume-drop.session-find-drop { background: transparent; color: var(--text-dim); border-color: var(--border); }
 .session-resume-drop.session-find-drop:hover { background: var(--bg-hover); color: var(--text); }
 .session-resume-drop.session-detail-btn-chat { background: rgba(34,197,94,0.15); color: var(--green); border-color: var(--green); }
-.session-resume-drop.session-detail-btn-chat:hover { background: var(--green); color: #fff; }
+.session-resume-drop.session-detail-btn-chat:hover { background: var(--green); color: var(--accent-fg); }
 
 /* Per-session config popover */
 .session-config-popover {
@@ -491,11 +496,11 @@ html, body {
 }
 .layout-btn:hover { background: var(--bg-hover); color: var(--text); border-color: var(--border); }
 .toolbar-action {
-  background: rgba(99,102,241,0.1); border: 1px solid rgba(99,102,241,0.2);
+  background: color-mix(in srgb, var(--accent) 10%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
   color: var(--accent-hover); padding: 4px 10px; border-radius: var(--radius-sm);
   cursor: pointer; font-size: 11px; font-weight: 500; white-space: nowrap; transition: all var(--transition);
 }
-.toolbar-action:hover { background: rgba(99,102,241,0.2); border-color: rgba(99,102,241,0.4); color: #fff; }
+.toolbar-action:hover { background: color-mix(in srgb, var(--accent) 20%, transparent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); color: var(--text); }
 .font-size-ctrl { display: flex; align-items: center; gap: 1px; margin-right: 4px; }
 .toolbar-select {
   background: var(--bg-input); border: 1px solid var(--border); color: var(--text);
@@ -519,7 +524,7 @@ html, body {
 #grid-overlay.active { display: grid; }
 #grid-overlay.dragging { z-index: 9989; } /* raise above windows only during drag */
 .grid-cell {
-  border: 1px dashed rgba(99,102,241,0.12); transition: background 0.15s;
+  border: 1px dashed color-mix(in srgb, var(--accent) 12%, transparent); transition: background 0.15s;
 }
 .grid-cell.highlight {
   background: var(--accent-dim); border-color: var(--accent);
@@ -538,7 +543,7 @@ html, body {
 .welcome-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-bottom: 20px; }
 .welcome-btn {
   padding: 8px 20px; border-radius: var(--radius); border: 1px solid var(--accent);
-  background: var(--accent); color: #fff; font-size: 13px; font-weight: 500; cursor: pointer;
+  background: var(--accent); color: var(--accent-fg); font-size: 13px; font-weight: 500; cursor: pointer;
 }
 .welcome-btn:hover { background: var(--accent-hover); }
 .welcome-btn-secondary { background: transparent; color: var(--accent-hover); }
@@ -583,7 +588,7 @@ html, body {
   border-radius: 3px; cursor: pointer; display: flex; align-items: center;
   justify-content: center; font-size: 10px; transition: all var(--transition); line-height: 1;
 }
-.win-btn:hover { background: rgba(255,255,255,0.1); color: var(--text); }
+.win-btn:hover { background: var(--hover-overlay); color: var(--text); }
 .win-close:hover { background: var(--red); color: #fff; }
 .win-overlap-btn { font-size: 11px; }
 .win-overlap-btn.no-overlap { opacity: 0.3; cursor: default; }
@@ -635,7 +640,7 @@ html, body {
   flex-shrink: 0; opacity: 0; transition: all 0.1s;
 }
 .tab-item:hover .tab-close { opacity: 0.5; }
-.tab-close:hover { opacity: 1 !important; background: rgba(255,255,255,0.1); color: var(--red); }
+.tab-close:hover { opacity: 1 !important; background: var(--hover-overlay); color: var(--red); }
 .tab-hidden { display: none !important; }
 .tab-drop-target .window-icon-stack { color: var(--accent); transform: scale(1.05); }
 .tab-ghost {
@@ -782,8 +787,9 @@ html, body {
 .taskbar-dot.exited { background: var(--text-dim); }
 #taskbar-status { font-size: 9px; color: var(--text-dim); padding: 0; flex-shrink: 0; line-height: 1.2; }
 .taskbar-context-menu { min-width: 100px; }
-.context-menu-item, .taskbar-context-menu-item { padding: 4px 12px; font-size: 11px; cursor: pointer; color: var(--text-secondary); }
-.context-menu-item:hover, .taskbar-context-menu-item:hover { background: var(--bg-hover); color: var(--text); }
+/* item base lives in viewers.css (.context-menu-item); keep taskbar items identical */
+.taskbar-context-menu-item { padding: 5px 12px; font-size: 11px; cursor: pointer; color: var(--text-secondary); display: flex; align-items: center; gap: 8px; }
+.taskbar-context-menu-item:hover { background: var(--bg-hover); color: var(--text); }
 
 /* ── Dialogs ── */
 .dialog-overlay {
@@ -807,7 +813,7 @@ html, body {
   background: transparent; border: none; color: var(--text-dim); cursor: pointer;
   font-size: 13px; padding: 2px 5px; border-radius: var(--radius-sm); transition: all var(--transition);
 }
-.dialog-close:hover { background: rgba(255,255,255,0.1); color: var(--text); }
+.dialog-close:hover { background: var(--hover-overlay); color: var(--text); }
 .dialog-body { padding: 14px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
 .dialog-body label {
   display: flex; flex-direction: column; gap: 3px; font-size: 11px;
@@ -877,7 +883,7 @@ html, body {
   display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;
   padding: 8px 0; border-bottom: 1px solid rgba(128,128,128,0.1);
 }
-.settings-row.modified { background: rgba(99,102,241,0.04); margin: 0 -8px; padding: 8px; border-radius: var(--radius-sm); }
+.settings-row.modified { background: color-mix(in srgb, var(--accent) 5%, transparent); margin: 0 -8px; padding: 8px; border-radius: var(--radius-sm); }
 .settings-row-info { flex: 1; min-width: 0; }
 .settings-row-label { font-size: 12px; font-weight: 500; color: var(--text); display: flex; align-items: center; gap: 6px; }
 .settings-row-desc { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
@@ -1003,7 +1009,7 @@ html, body {
 /* ── Scrollbar ── */
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+::-webkit-scrollbar-thumb { background: var(--hover-overlay); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
 
 /* ── Resizer handles ── */
@@ -1234,7 +1240,7 @@ html, body {
     background: var(--bg-input); color: var(--text); cursor: pointer;
     white-space: nowrap; min-height: 32px;
   }
-  .mobile-term-key:active { background: var(--accent); color: #fff; }
+  .mobile-term-key:active { background: var(--accent); color: var(--accent-fg); }
 
   /* Chat: optimize for touch */
   .chat-view { height: 100%; }
@@ -1286,3 +1292,12 @@ html, body {
 
 /* Mobile terminal key toolbar (hidden on desktop) */
 .mobile-term-keys { display: none; }
+
+/* ── Touch & motion accessibility ── */
+@media (hover: none) {
+  .folder-add-btn { opacity: 0.6; }
+  .tab-item .tab-close { opacity: 0.5; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}
