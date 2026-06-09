@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.8.0] — 2026-06-09
+
+Full-project code review release: 8 parallel review agents audited every subsystem (server, wrappers, WS/stores, routes, window manager, sidebar, chat UI, viewers, CSS), followed by five fix batches covering ~120 findings.
+
+### Added
+
+- **Fable 5 model tier**: `fable` / `fable[1m]` aliases in all model lists; model discovery switched to `/v1/models` with OAuth Bearer (the bootstrap endpoint's `additional_model_options` now returns null), so new full model IDs appear automatically.
+- **Per-session config persistence**: model/effort/permission overrides from the gear popover are now stored in user state (`sessionConfigs`, key `backend:backendSessionId`), synced multi-client, applied by ALL resume paths (card click, resume-all, chat resume bar, layout restore), and surfaced as a purple gear badge on session cards (tooltip shows the full config).
+- **Hex viewer**: auto-loads chunks on scroll; offset gutter shows real file offsets after a jump; jump scrolls to its target.
+- **Accessibility**: pinch-zoom re-enabled (was `user-scalable=no`), hover-revealed controls visible on touch devices, chat minimap non-interactive on touch, `prefers-reduced-motion` support.
+- **Theme system**: per-theme `--accent-fg`/`--magenta`/`--cyan`/`--hover-overlay` variables; hardcoded indigo/green/red follow the theme accent via `color-mix`; Nord/Monokai accent-background buttons now readable; Light-theme scrollbars/hovers visible.
+
+### Fixed (highlights)
+
+- **Claude thinking content rendered empty** — the normalizer read `block.text` but Claude sends `block.thinking`. All thinking blocks now display.
+- **Sidebar lazy rendering never fired** — the IntersectionObserver was created *after* `observe()` calls registered on its disconnected predecessor; the Groups tab rendered permanently empty and off-screen folders stayed blank.
+- **Codex AskUserQuestion always declined** — questionnaire answers (`toolInput.answers`) never reached the wrapper; the adapter now translates them to `responseData.{decision,answers}`.
+- **XSS hardening** — `escHtml` escapes quotes (attribute-context injection); DOMPurify sanitizes all markdown rendering; file paths/error messages escaped in hex viewer, external editor, browser overlay, explorer/editor error cards.
+- **Zombie sessions after attach-PTY death** — stale PTY exits no longer null a freshly re-attached PTY or tear down live subagent watchers/normalizer listeners; dead attach PTYs auto-re-attach with bounded retries.
+- **Data-loss windows closed** — all persistence JSON writes are atomic (tmp+rename); SyncStores and layouts flush on shutdown; user-state migration no longer POSTs a stale localStorage cache over other devices' changes; CodeEditor/external editor surface write failures instead of reporting "Saved".
+- **Window manager leaks** — per-window/per-tab document listeners released on close (previously leaked the full window DOM per close); ChatView removes its settings listeners; `_messages` no longer grows unboundedly with duplicates.
+- **Concurrent create cross-wiring** — `create`/`created` correlate via reqId (group resume-all could bind a ChatView to the wrong session); tmux view windows get an openSpec so remote layout-sync stops closing them.
+- **Performance** — Codex thread metadata cached by mtime with head-only reads (sidebar polls re-parsed every session file); user-state writes skip the Codex tree scan when no legacy keys exist; Codex history conversion no longer O(n²); taskbar updates in place on focus changes; streaming markdown re-renders coalesce per frame; waiting/find blink animates composited opacity instead of repainting box-shadow; `/api/sessions` gets a 2s response cache.
+- **Logic** — WebUI goals re-check state before auto-continuing and cap at 200 turns (paused, resumable); CSV viewer parses quoted fields and estimates totals correctly (large files were capped at ~10k rows); upload names are confined to the destination directory; upload failures no longer record success; goal status icons show for Codex (case mismatch); AskUserQuestion multi-select can't submit empty; ~340 lines of verified dead code/CSS removed (the typo'd notification-card selector now styles correctly).
+
+### Removed
+
+- Dead `/api/session-groups` CRUD routes (7 endpoints, unreachable, conflicting data shape that corrupted state if invoked). Groups remain managed through `/api/user-state`.
+
 ## [2.7.0] — 2026-06-02
 
 ### Added
