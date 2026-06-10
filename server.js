@@ -420,6 +420,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
                 agentNickname: session.agentNickname || '',
                 parentThreadId: session.parentThreadId || null,
                 forkedFrom: session.forkedFrom || null,
+                permissionMode: session._permissionMode || null,
                 createdAt: session.createdAt,
                 webuiSessionId: id,
                 mode: session.mode,
@@ -795,6 +796,9 @@ function restoreSessions() {
       agentNickname: meta.agentNickname || '',
       parentThreadId: meta.parentThreadId || null,
       forkedFrom: meta.forkedFrom || null,
+      // Permission mode isn't recoverable from the JSONL (init records are
+      // stdout-only) — restore what the session was launched with
+      _permissionMode: meta.permissionMode || null,
       sockName: sockFile,
       socketPath,
       buffer: savedBuffer,
