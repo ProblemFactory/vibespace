@@ -97,7 +97,7 @@ class ChatView {
     container.appendChild(this._posIndicator);
 
     // Scroll minimap — semantic scrollbar showing turns
-    this._chatMinimap = new ChatMinimap(container, this._messageList, (idx) => this.jumpToIndex(idx));
+    this._chatMinimap = new ChatMinimap(container, this._messageList, (idx) => this.jumpToIndex(idx), (ts, line) => this._jumpToFileTime(ts, line));
     // Sync minimap bounds on resize
     // Minimap ResizeObserver is handled by ChatMinimap internally
 
@@ -159,6 +159,7 @@ class ChatView {
         }
         this._updatePosIndicator();
         this._chatMinimap.setViewport(this._windowStart, this._windowEnd, this._total);
+        if (this._gapMinimapActive) this._reportVisibleTsRange();
       });
     }, { passive: true });
 
@@ -385,6 +386,11 @@ class ChatView {
           .then(r => r.json()).then(d => { if (d.turns?.length) this._chatMinimap.render(d.turns); }).catch(() => {});
       }
     }
+    // Huge (elided) session? Switch the minimap to whole-conversation view up
+    // front, so the scrollbar reflects the full timeline without waiting for
+    // the user to scroll up to the seam marker. (info probe is free for normal
+    // sessions — jsonlGapInfo returns null without building an index.)
+    if (this._total > 50) this._initGapMinimap();
 
     if (isStreaming) this._showTyping(meta?.streamingLabel || 'thinking...');
     this._scrollToBottom();
@@ -577,9 +583,137 @@ class ChatView {
     }
     if (!el) return null;
     el.classList.add('chat-gap-msg');
+    if (Number.isFinite(msg.srcLine)) el.dataset.line = msg.srcLine;
+    if (msg.ts) el.dataset.ts = msg.ts;
     this._renderers.addWrapToggles(el);
     this._renderers.addOpenInEditorBtn(el);
     return el;
+  }
+
+  // ── Whole-conversation minimap for gapped (huge) sessions ──
+  // Fetch the full-file user-turn map (TIME coordinates) and switch the
+  // minimap to full-extent mode so the scrollbar reflects the entire session,
+  // not just the loaded head+tail window.
+  async _initGapMinimap() {
+    if (this._gapMinimapActive || this._gapMinimapLoading) return;
+    this._gapMinimapLoading = true;
+    try {
+      const { backend, backendSessionId, cwd } = this._getSessionIds();
+      if (!backendSessionId) return;
+      const base = `backend=${encodeURIComponent(backend || 'claude')}&backendSessionId=${encodeURIComponent(backendSessionId)}&cwd=${encodeURIComponent(cwd || '')}`;
+      const data = await fetch(`/api/session-history-gap?${base}&fullturnmap=1`).then(r => r.json()).catch(() => null);
+      if (this._disposed || !data?.fullTurns?.length) return;
+      this._gapMinimapActive = true;
+      this._gapBounds = { headEndLine: data.headEndLine, tailStartLine: data.tailStartLine };
+      this._chatMinimap.renderFullExtent({ fullTurns: data.fullTurns, firstTs: data.firstTs, lastTs: data.lastTs });
+      this._reportVisibleTsRange();
+    } finally {
+      this._gapMinimapLoading = false;
+    }
+  }
+
+  // Report the visible viewport's time span to the minimap thumb. Reads the ts
+  // of the topmost and bottommost visible message elements (loaded or gap).
+  _reportVisibleTsRange() {
+    if (!this._gapMinimapActive) return;
+    const list = this._messageList;
+    const top = list.scrollTop, bot = top + list.clientHeight;
+    let topTs = null, botTs = null;
+    for (const el of list.querySelectorAll('.chat-msg')) {
+      const ot = el.offsetTop, ob = ot + el.offsetHeight;
+      if (ob < top || ot > bot) continue;
+      const ts = Number(el.dataset.ts) || this._tsOfRenderedEl(el);
+      if (!ts) continue;
+      if (topTs == null) topTs = ts;
+      botTs = ts;
+    }
+    this._chatMinimap.setVisibleTsRange(topTs, botTs);
+  }
+
+  _tsOfRenderedEl(el) {
+    const id = el.dataset.msgId;
+    if (!id) return 0;
+    const m = this._messages.find(mm => mm.id === id);
+    return m?.ts || 0;
+  }
+
+  // Minimap click/drag in time mode: jump to a turn at file line `line`. If the
+  // target is in the unloaded middle, seek-load a forward slab there and scroll
+  // to it; otherwise it's already loaded — scroll to the nearest message by ts.
+  async _jumpToFileTime(ts, line) {
+    const b = this._gapBounds;
+    if (b && line >= b.headEndLine && line < b.tailStartLine) {
+      await this._seekToGapLine(line);     // unloaded middle: precise seek-load
+      return;
+    }
+    // Head/tail are in the server's normalized window. If the target region
+    // isn't currently rendered, load it first, then scroll to the nearest ts.
+    const rendered = this._scrollToNearestTs(ts, /*tolMs*/ 6 * 3600 * 1000);
+    if (rendered) return;
+    if (b && line < b.headEndLine) {
+      await this.jumpToIndex(0);            // conversation start
+    } else {
+      await this.jumpToBottom();           // recent tail
+    }
+    requestAnimationFrame(() => this._scrollToNearestTs(ts));
+  }
+
+  async _seekToGapLine(line) {
+    let marker = this._messageList.querySelector('.chat-history-gap');
+    if (!marker) {
+      // Seam not currently rendered (user is down in the tail). Jump to the
+      // conversation start so the head+seam region loads, then retry.
+      await this.jumpToIndex(0);
+      marker = this._messageList.querySelector('.chat-history-gap');
+    }
+    if (!marker || marker._gapLoading) return;
+    marker._gapLoading = true;
+    try {
+      const { backend, backendSessionId, cwd } = this._getSessionIds();
+      const base = `backend=${encodeURIComponent(backend || 'claude')}&backendSessionId=${encodeURIComponent(backendSessionId)}&cwd=${encodeURIComponent(cwd || '')}`;
+      const data = await fetch(`/api/session-history-gap?${base}&startLine=${line}&count=2000`).then(r => r.json()).catch(() => null);
+      if (this._disposed) return;
+      const msgs = data?.messages || [];
+      if (!msgs.length) return;
+      // Replace existing gap content with this jumped slab (avoids interleaving
+      // arbitrary jumps with the bottom-up auto-load chain)
+      this._messageList.querySelectorAll('.chat-gap-msg').forEach(el => el.remove());
+      const anchor = marker.nextElementSibling;
+      let firstInserted = null;
+      for (const msg of msgs) {
+        const el = this._renderGapMsg(msg);
+        if (!el) continue;
+        this._messageList.insertBefore(el, anchor);
+        if (!firstInserted) firstInserted = el;
+      }
+      // Reset the auto-load chain so scrolling up continues from this point
+      marker._gapAnchor = firstInserted || anchor;
+      marker._gapCursor = (data && Number.isFinite(data.fromLine)) ? data.fromLine : line;
+      if (firstInserted) { this._programmaticScroll = true; firstInserted.scrollIntoView({ block: 'center' }); setTimeout(() => { this._programmaticScroll = false; }, 60); }
+      this._reportVisibleTsRange();
+    } finally {
+      marker._gapLoading = false;
+    }
+  }
+
+  // Scroll to the rendered message nearest `ts`. Returns true if a match within
+  // `tolMs` was found (Infinity = always scroll to the closest rendered).
+  _scrollToNearestTs(ts, tolMs = Infinity) {
+    let best = null, bestDiff = Infinity;
+    for (const el of this._messageList.querySelectorAll('.chat-msg')) {
+      const ets = Number(el.dataset.ts) || this._tsOfRenderedEl(el);
+      if (!ets) continue;
+      const d = Math.abs(ets - ts);
+      if (d < bestDiff) { bestDiff = d; best = el; }
+    }
+    if (best && bestDiff <= tolMs) {
+      this._programmaticScroll = true;
+      best.scrollIntoView({ block: 'center' });
+      setTimeout(() => { this._programmaticScroll = false; }, 60);
+      this._reportVisibleTsRange();
+      return true;
+    }
+    return false;
   }
 
   // Load messages at the bottom (when scrolling back down after trimming)
@@ -816,12 +950,14 @@ class ChatView {
 
     if (!el) return;
     el.dataset.msgId = msg.id;
+    if (msg.ts) el.dataset.ts = msg.ts; // for time-coordinate minimap positioning
     this._elements.set(msg.id, el);
     this._messageList.appendChild(el);
     this._renderers.addWrapToggles(el);
     this._renderers.addOpenInEditorBtn(el);
-    // Truncated-history seam: auto-load the elided middle as it scrolls near
-    if (el._isHistoryGap) this._observeHistoryGap(el);
+    // Truncated-history seam: auto-load the elided middle as it scrolls near,
+    // and switch the minimap to whole-conversation (time-coordinate) view
+    if (el._isHistoryGap) { this._observeHistoryGap(el); this._initGapMinimap(); }
     // Update window bounds for live messages (not history batch)
     if (!this._loadingHistory) {
       this._total++;

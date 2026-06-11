@@ -184,6 +184,77 @@ function jsonlGapInfo(fp) {
   return { headEndLine, tailStartLine, totalLines, gapRecords: Math.max(0, tailStartLine - headEndLine) };
 }
 
+// Full-file user-turn scan for a whole-conversation minimap. Streams the file
+// in chunks (no big string), pre-filters to lines containing a user-role marker
+// (~2k of 300k lines), JSON-parses only those. Returns turns in TIME coordinates
+// (the universal minimap axis) plus each turn's file line (for seek-jumping).
+const _turnScanCache = new Map(); // fp -> { mtimeMs, size, turns }
+function scanJsonlUserTurns(fp, backend) {
+  const stat = fs.statSync(fp);
+  const hit = _turnScanCache.get(fp);
+  if (hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) return hit.turns;
+  const fd = fs.openSync(fp, 'r');
+  const turns = [];
+  const needle = '"role":"user"';
+  const handleLine = (raw, line) => {
+    if (!raw || raw.indexOf(needle) === -1) return;
+    let rec; try { rec = JSON.parse(raw); } catch { return; }
+    const turn = backend === 'codex' ? _codexUserTurn(rec, line) : _claudeUserTurn(rec, line);
+    if (turn) turns.push(turn);
+  };
+  try {
+    const buf = Buffer.alloc(LINE_INDEX_CHUNK);
+    let pos = 0, line = 0, carry = '';
+    while (pos < stat.size) {
+      const n = fs.readSync(fd, buf, 0, LINE_INDEX_CHUNK, pos);
+      if (n <= 0) break;
+      const text = carry + buf.toString('utf-8', 0, n);
+      const parts = text.split('\n');
+      carry = parts.pop();
+      for (const raw of parts) handleLine(raw.trim(), line++);
+      pos += n;
+    }
+    handleLine(carry.trim(), line);
+  } finally { fs.closeSync(fd); }
+  _turnScanCache.set(fp, { mtimeMs: stat.mtimeMs, size: stat.size, turns });
+  if (_turnScanCache.size > 32) _turnScanCache.delete(_turnScanCache.keys().next().value);
+  return turns;
+}
+
+function _previewOf(text) {
+  const t = String(text || '').trim();
+  if (!t) return '';
+  if (t.startsWith('This session is being continued from a previous conversation')) return null; // compact
+  return t.length > 10 ? t.slice(0, 10) + '…' : t;
+}
+
+function _claudeUserTurn(rec, line) {
+  if (rec.type !== 'user' || rec.message?.role !== 'user') return null;
+  const content = rec.message.content;
+  let text = '';
+  if (typeof content === 'string') text = content;
+  else if (Array.isArray(content)) {
+    if (content.some((b) => b.type === 'tool_result')) return null; // tool result, not a real user turn
+    text = content.filter((b) => b.type === 'text').map((b) => b.text || '').join('');
+  }
+  if (!text.trim()) return null;
+  const ts = rec.timestamp ? Date.parse(rec.timestamp) || 0 : 0;
+  const preview = _previewOf(text);
+  return { line, ts, preview: preview ?? 'Context compacted', isCompact: preview === null };
+}
+
+function _codexUserTurn(rec, line) {
+  if (rec.type !== 'response_item' || rec.payload?.type !== 'message' || rec.payload?.role !== 'user') return null;
+  const content = rec.payload.content;
+  const text = Array.isArray(content)
+    ? content.filter((b) => b.type === 'input_text' || b.type === 'text').map((b) => b.text || '').join('')
+    : String(content || '');
+  if (!text.trim()) return null;
+  const ts = rec.timestamp ? Date.parse(rec.timestamp) || 0 : 0;
+  const preview = _previewOf(text);
+  return { line, ts, preview: preview ?? 'Context compacted', isCompact: preview === null };
+}
+
 // Read raw records for line range [startLine, endLine) by seeking to the
 // indexed byte offsets — no full-file read, no string-limit risk.
 function readJsonlLineRange(fp, startLine, endLine) {
@@ -201,10 +272,12 @@ function readJsonlLineRange(fp, startLine, endLine) {
     const n = fs.readSync(fd, buf, 0, len, startByte);
     const text = buf.toString('utf-8', 0, n);
     const records = [];
+    let li = s;
     for (const line of text.split('\n')) {
       const trimmed = line.trim();
+      const curLine = li++;
       if (!trimmed) continue;
-      try { records.push(JSON.parse(trimmed)); } catch {}
+      try { const rec = JSON.parse(trimmed); rec.__line = curLine; records.push(rec); } catch {}
     }
     return records;
   } finally { fs.closeSync(fd); }
@@ -703,5 +776,6 @@ module.exports = {
   getJsonlLineIndex,
   jsonlGapInfo,
   readJsonlLineRange,
+  scanJsonlUserTurns,
   resolveCodexPermissionMode,
 };

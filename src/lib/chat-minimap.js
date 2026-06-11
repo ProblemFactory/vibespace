@@ -9,14 +9,19 @@ export class ChatMinimap {
    * @param {HTMLElement} messageList - the message list element to sync with
    * @param {function(number):void} jumpToIndex - callback to jump to a message index
    */
-  constructor(container, messageList, jumpToIndex) {
+  constructor(container, messageList, jumpToIndex, jumpToTime) {
     this._container = container;
     this._messageList = messageList;
     this._jumpToIndex = jumpToIndex;
+    this._jumpToTime = jumpToTime; // (ts, line) => void — used in full-extent (time-coordinate) mode
     this._total = 0;
     this._windowStart = 0;
     this._windowEnd = 0;
     this._turnMap = [];
+    // Full-extent mode: whole-conversation markers in TIME coordinates, for
+    // huge sessions whose middle isn't loaded. Set via renderFullExtent().
+    this._fullExtent = null; // { fullTurns, firstTs, lastTs }
+    this._thumbTsRange = null; // { topTs, botTs } — visible region in time
 
     // Create DOM elements
     this._minimap = document.createElement('div');
@@ -46,8 +51,39 @@ export class ChatMinimap {
     this.updateThumb();
   }
 
+  /**
+   * Switch to whole-conversation view: markers span the entire file in TIME
+   * coordinates (the only axis shared by loaded messages and the elided
+   * middle). Called once when a history gap is detected.
+   * @param {{fullTurns: Array, firstTs: number, lastTs: number}} ext
+   */
+  renderFullExtent(ext) {
+    if (!ext?.fullTurns?.length) return;
+    this._fullExtent = ext;
+    this._minimap.classList.remove('hidden');
+    this._messageList.classList.add('chat-minimap-active');
+    this.syncBounds();
+    for (const el of [...this._minimap.children]) { if (el !== this._thumb) el.remove(); }
+    const span = Math.max(1, ext.lastTs - ext.firstTs);
+    for (const turn of ext.fullTurns) {
+      const top = Math.max(0, Math.min(100, ((turn.ts - ext.firstTs) / span) * 100));
+      const marker = document.createElement('div');
+      marker.className = 'chat-minimap-marker ' + (turn.isCompact ? 'chat-minimap-compact' : 'chat-minimap-user-mark');
+      marker.style.top = top + '%';
+      this._minimap.appendChild(marker);
+    }
+    this.updateThumb();
+  }
+
+  /** Report the visible viewport's time span (full-extent thumb positioning) */
+  setVisibleTsRange(topTs, botTs) {
+    this._thumbTsRange = (topTs && botTs) ? { topTs, botTs } : null;
+    this.updateThumb();
+  }
+
   /** Render turn map markers */
   render(turnMap) {
+    if (this._fullExtent) return; // full-extent markers take over once a gap exists
     if (!turnMap?.length || turnMap.length < 3) {
       this._minimap.classList.add('hidden');
       return;
@@ -80,6 +116,7 @@ export class ChatMinimap {
 
   /** Add a single turn incrementally (for live messages) */
   addTurn(turn, total) {
+    if (this._fullExtent) return; // full-extent markers own the minimap once a gap exists
     if (!turn || turn.role !== 'user') return;
     this._turnMap.push(turn);
     this._total = total || this._total;
@@ -129,7 +166,20 @@ export class ChatMinimap {
   }
 
   updateThumb() {
-    if (!this._thumb || !this._total || this._minimap.classList.contains('hidden')) return;
+    if (!this._thumb || this._minimap.classList.contains('hidden')) return;
+    if (this._fullExtent) {
+      // Time-coordinate thumb: where the visible messages sit on the timeline
+      const { firstTs, lastTs } = this._fullExtent;
+      const span = Math.max(1, lastTs - firstTs);
+      const r = this._thumbTsRange;
+      if (!r) { this._thumb.style.height = '0'; return; }
+      const top = Math.max(0, Math.min(100, ((r.topTs - firstTs) / span) * 100));
+      const bot = Math.max(0, Math.min(100, ((r.botTs - firstTs) / span) * 100));
+      this._thumb.style.top = top + '%';
+      this._thumb.style.height = Math.max(2, bot - top) + '%';
+      return;
+    }
+    if (!this._total) return;
     const top = (this._windowStart / this._total) * 100;
     const height = Math.max(5, ((this._windowEnd - this._windowStart) / this._total) * 100);
     this._thumb.style.top = top + '%';
@@ -141,11 +191,11 @@ export class ChatMinimap {
     let jumpTimer = null;
     let pendingJumpIdx = null;
 
-    const getIdxAtY = (e) => {
+    const getFracAtY = (e) => {
       const rect = this._minimap.getBoundingClientRect();
-      const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
-      return Math.floor(y * (this._total || 1));
+      return Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
     };
+    const getIdxAtY = (e) => Math.floor(getFracAtY(e) * (this._total || 1));
 
     const getTurnAtIdx = (idx) => {
       if (!this._turnMap.length) return null;
@@ -154,6 +204,16 @@ export class ChatMinimap {
         if (t.startIdx <= idx) best = t;
         else break;
       }
+      return best;
+    };
+
+    // Full-extent (time) mode: map a Y fraction to the nearest full-file turn
+    const tsAtFrac = (f) => this._fullExtent ? this._fullExtent.firstTs + f * Math.max(1, this._fullExtent.lastTs - this._fullExtent.firstTs) : 0;
+    const getFullTurnAtY = (e) => {
+      const ext = this._fullExtent; if (!ext?.fullTurns.length) return null;
+      const targetTs = tsAtFrac(getFracAtY(e));
+      let best = ext.fullTurns[0];
+      for (const t of ext.fullTurns) { if (t.ts <= targetTs) best = t; else break; }
       return best;
     };
 
@@ -183,33 +243,55 @@ export class ChatMinimap {
     };
 
     const onMove = (e) => {
+      if (this._fullExtent) {
+        const turn = getFullTurnAtY(e);
+        updateLabel(e, turn);
+        if (dragging && turn) scheduleFullJump(turn);
+        return;
+      }
       const idx = getIdxAtY(e);
-      const turn = getTurnAtIdx(idx);
-      updateLabel(e, turn);
+      updateLabel(e, getTurnAtIdx(idx));
       if (dragging) scheduleJump(idx);
+    };
+
+    // Debounced jump in time mode (drag): seek to the turn's file line
+    let fullJumpTimer = null, pendingTurn = null;
+    const scheduleFullJump = (turn) => {
+      pendingTurn = turn;
+      if (!fullJumpTimer) {
+        fullJumpTimer = setTimeout(() => {
+          fullJumpTimer = null;
+          if (pendingTurn && this._jumpToTime) this._jumpToTime(pendingTurn.ts, pendingTurn.line);
+          pendingTurn = null;
+        }, 150);
+      }
     };
 
     this._minimap.addEventListener('mousedown', (e) => {
       e.preventDefault();
       dragging = true;
-      const idx = getIdxAtY(e);
-      this._jumpToIndex(idx);
-      const turn = getTurnAtIdx(idx);
-      updateLabel(e, turn);
+      if (this._fullExtent) {
+        const turn = getFullTurnAtY(e);
+        if (turn && this._jumpToTime) this._jumpToTime(turn.ts, turn.line);
+        updateLabel(e, turn);
+      } else {
+        const idx = getIdxAtY(e);
+        this._jumpToIndex(idx);
+        updateLabel(e, getTurnAtIdx(idx));
+      }
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', () => {
         dragging = false;
         document.removeEventListener('mousemove', onMove);
         this._label.classList.add('hidden');
         if (jumpTimer) { clearTimeout(jumpTimer); jumpTimer = null; }
+        if (fullJumpTimer) { clearTimeout(fullJumpTimer); fullJumpTimer = null; }
       }, { once: true });
     });
 
     this._minimap.addEventListener('mousemove', (e) => {
       if (dragging) return;
-      const idx = getIdxAtY(e);
-      const turn = getTurnAtIdx(idx);
-      updateLabel(e, turn);
+      updateLabel(e, this._fullExtent ? getFullTurnAtY(e) : getTurnAtIdx(getIdxAtY(e)));
     });
 
     this._minimap.addEventListener('mouseleave', () => {

@@ -18,7 +18,7 @@ const {
 const { createMessageManager } = require('../normalizers');
 const { listCodexThreads } = require('../codex-session-store');
 const { findSessionJsonlPath } = require('../session-store');
-const { findCodexSessionJsonlPath, jsonlGapInfo, readJsonlLineRange } = require('../adapters/codex');
+const { findCodexSessionJsonlPath, jsonlGapInfo, readJsonlLineRange, scanJsonlUserTurns } = require('../adapters/codex');
 
 function getSessionKey(session = {}) {
   const backend = session.backend || 'claude';
@@ -130,11 +130,31 @@ function setup(ctx) {
 
     if (req.query.info) return res.json({ gap });
 
-    const endLine = parseInt(req.query.endLine);
+    // Whole-conversation minimap: full-file user-turn scan in TIME coordinates
+    // (markers) + each turn's file line (for seek-jumping into the gap).
+    if (req.query.fullturnmap) {
+      let turns = [];
+      try { turns = scanJsonlUserTurns(fp, resolvedBackend); } catch { turns = []; }
+      const firstTs = turns.length ? turns[0].ts : 0;
+      const lastTs = turns.length ? turns[turns.length - 1].ts : 0;
+      return res.json({ fullTurns: turns, firstTs, lastTs, ...gap });
+    }
+
     const count = Math.min(parseInt(req.query.count) || 2000, 8000);
-    if (!Number.isFinite(endLine)) return res.status(400).json({ error: 'endLine required' });
-    const toLine = Math.min(endLine, gap.tailStartLine);
-    const fromLine = Math.max(gap.headEndLine, toLine - count);
+    const endLine = parseInt(req.query.endLine);
+    const startLine = parseInt(req.query.startLine);
+    let fromLine, toLine;
+    if (Number.isFinite(startLine)) {
+      // Forward read (minimap jump): records [startLine, startLine+count)
+      fromLine = Math.max(gap.headEndLine, Math.min(startLine, gap.tailStartLine));
+      toLine = Math.min(gap.tailStartLine, fromLine + count);
+    } else if (Number.isFinite(endLine)) {
+      // Backward read (scroll-up auto-load): records [endLine-count, endLine)
+      toLine = Math.min(endLine, gap.tailStartLine);
+      fromLine = Math.max(gap.headEndLine, toLine - count);
+    } else {
+      return res.status(400).json({ error: 'endLine or startLine required' });
+    }
     if (fromLine >= toLine) return res.json({ messages: [], fromLine: gap.headEndLine, toLine: gap.headEndLine, headEndLine: gap.headEndLine });
 
     let records = [];

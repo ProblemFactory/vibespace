@@ -130,6 +130,7 @@ class MessageManager {
       status: fields.status || 'complete',
       content: fields.content || [],
       ts: fields.ts || this._currentTs || Date.now(),
+      srcLine: this._currentLine,
       turnIndex: fields.turnIndex ?? this.turnIndex,
       toolCallId: fields.toolCallId || null,
       toolName: fields.toolName || null,
@@ -160,6 +161,7 @@ class MessageManager {
   _processMessage(raw, emit) {
     // Extract timestamp from raw message for _create
     this._currentTs = raw.timestamp ? new Date(raw.timestamp).getTime() : Date.now();
+    this._currentLine = Number.isFinite(raw.__line) ? raw.__line : null; // source file line (gap loads only)
     switch (raw.type) {
       case 'system': return this._processSystem(raw, emit);
       case 'user': return this._processUser(raw, emit);

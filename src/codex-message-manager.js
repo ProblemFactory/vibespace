@@ -190,6 +190,7 @@ class CodexMessageManager {
       status: fields.status || 'complete',
       content: fields.content || [],
       ts: fields.ts || this._currentTs || Date.now(),
+      srcLine: this._currentLine,
       turnIndex: fields.turnIndex ?? this.turnIndex,
       toolCallId: fields.toolCallId || null,
       toolName: fields.toolName || null,
@@ -227,6 +228,7 @@ class CodexMessageManager {
   _processRecord(record, emit) {
     if (!record || typeof record !== 'object') return;
     this._currentTs = toTs(record.timestamp);
+    this._currentLine = Number.isFinite(record.__line) ? record.__line : null; // source file line (gap loads only)
     if (record.type === 'turn_context') {
       this._processTurnContext(record, emit);
       return;
