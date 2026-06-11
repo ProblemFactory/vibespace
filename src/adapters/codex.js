@@ -291,6 +291,7 @@ function extractCodexThreadMeta(filePath) {
   let reviewHint = '';
   let firstUserName = '';
   let scannedRecords = 0;
+  let extractFailed = false;
   try {
     const stat = cachedStat || fs.statSync(filePath);
     updatedAt = stat.mtimeMs || 0;
@@ -369,7 +370,7 @@ function extractCodexThreadMeta(filePath) {
         break;
       }
     }
-  } catch {}
+  } catch { extractFailed = true; }
 
   if (!sourceMeta.agentRole && sessionAgentRole) sourceMeta.agentRole = sessionAgentRole;
   if (!sourceMeta.agentNickname && sessionAgentNickname) sourceMeta.agentNickname = sessionAgentNickname;
@@ -404,7 +405,12 @@ function extractCodexThreadMeta(filePath) {
     parentThreadId: sourceMeta.parentThreadId,
     forkedFrom: forkedFromChain || [],
   };
-  if (cachedStat) {
+  // NEVER cache a failed extraction: a transient IO error (EMFILE under fd
+  // pressure, mid-write race) would otherwise be cached keyed by the file's
+  // current mtime — and if the session never writes again (terminated), the
+  // empty threadId is cached FOREVER and the thread silently vanishes from
+  // discovery until a server restart.
+  if (cachedStat && !extractFailed) {
     _threadMetaCache.set(filePath, { mtimeMs: cachedStat.mtimeMs, meta });
     // Bounded: evict oldest entries past 2000 files
     if (_threadMetaCache.size > 2000) {
