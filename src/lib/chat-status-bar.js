@@ -182,9 +182,14 @@ export class ChatStatusBar {
       const elapsed = this._fmtElapsed(this._goalElapsed || 0);
       // Codex sends lowercase active/paused/blocked/complete — normalize case
       const status = (this._goalStatus || '').toLowerCase();
-      const statusIcon = status === 'active' ? '\u{25B6}' : status === 'paused' ? '⏸' : status === 'blocked' ? '⛔' : status === 'complete' ? '✓' : '';
+      // Codex statuses beyond the basic four: usageLimited (rate limit hit —
+      // resumes only via explicit reactivation), budgetLimited (token budget)
+      const statusIcon = status === 'active' ? '\u{25B6}' : status === 'paused' ? '⏸' : status === 'blocked' ? '⛔' : status === 'complete' ? '✓'
+        : status === 'usagelimited' ? '⏳' : status === 'budgetlimited' ? '🪙' : '';
+      const statusHint = status === 'usagelimited' ? ' — paused by usage limit, click → Continue Goal to resume'
+        : status === 'budgetlimited' ? ' — token budget exhausted, click → Continue Goal to resume' : '';
       const shortGoal = this._goal.length > 30 ? this._goal.substring(0, 30) + '…' : this._goal;
-      parts.push(`<span class="chat-status-goal chat-status-clickable" title="${escHtml(this._goal)}">\u{1F3AF}${statusIcon ? ' ' + statusIcon : ''} <span class="chat-goal-timer">${elapsed}</span> ${escHtml(shortGoal)}</span>`);
+      parts.push(`<span class="chat-status-goal chat-status-clickable" title="${escHtml(this._goal + statusHint)}">\u{1F3AF}${statusIcon ? ' ' + statusIcon : ''} <span class="chat-goal-timer">${elapsed}</span> ${escHtml(shortGoal)}</span>`);
     } else {
       parts.push(`<span class="chat-status-goal chat-status-goal-empty chat-status-clickable" title="Set a goal \u2014 the agent keeps working until the condition is met">\u{1F3AF}</span>`);
     }

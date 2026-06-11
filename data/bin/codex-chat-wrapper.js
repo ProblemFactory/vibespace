@@ -831,8 +831,14 @@ async function handleInput(msg) {
   if (msg.type === 'set-goal') {
     if (msg.goal && meta.threadId) {
       try {
-        await request('thread/goal/set', { threadId: meta.threadId, objective: msg.goal }, 30000);
+        // status:'active' is REQUIRED to (re)start the goal loop. thread/goal/set
+        // without status is a partial update that KEEPS the current status — a
+        // goal parked in usageLimited/paused/blocked stays parked, and the
+        // app-server's continue_if_idle only fires for Active goals (so the
+        // "Continue Goal" button silently did nothing on a usageLimited goal).
+        await request('thread/goal/set', { threadId: meta.threadId, objective: msg.goal, status: 'active' }, 30000);
         meta.goal = msg.goal;
+        meta.goalStatus = 'active';
         log('Goal set via thread/goal/set: ' + msg.goal.substring(0, 80));
       } catch (e) { log('thread/goal/set failed: ' + e.message); meta.goal = msg.goal; }
     } else if (!msg.goal && meta.threadId) {
