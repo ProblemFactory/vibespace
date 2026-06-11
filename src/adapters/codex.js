@@ -98,7 +98,7 @@ function findCodexSessionJsonlPath(threadId) {
 // MB of JSON synchronously blocks the event loop for the whole server.
 const JSONL_HEAD_BYTES = 2 * 1024 * 1024;
 const JSONL_TAIL_BYTES = 32 * 1024 * 1024;
-function readJsonlBounded(fp) {
+function readJsonlBounded(fp, opts = {}) {
   const stat = fs.statSync(fp);
   if (stat.size <= JSONL_HEAD_BYTES + JSONL_TAIL_BYTES) return fs.readFileSync(fp, 'utf-8');
   console.warn(`[jsonl] large session file ${path.basename(fp)} (${Math.round(stat.size / 1048576)}MB): loading first ${JSONL_HEAD_BYTES / 1048576}MB + last ${JSONL_TAIL_BYTES / 1048576}MB, middle elided`);
@@ -112,8 +112,35 @@ function readJsonlBounded(fp) {
     const tn = fs.readSync(fd, tailBuf, 0, JSONL_TAIL_BYTES, stat.size - JSONL_TAIL_BYTES);
     let tail = tailBuf.toString('utf-8', 0, tn);
     tail = tail.slice(tail.indexOf('\n') + 1); // drop the cut-off first line
+    // Make the elision VISIBLE: insert a marker line at the seam so the chat
+    // shows where (and roughly how much) history was skipped, instead of the
+    // head silently jumping into the tail mid-conversation
+    if (typeof opts.makeMarker === 'function') {
+      const elidedBytes = stat.size - hn - tn;
+      const loadedLines = ((head.match(/\n/g) || []).length) + ((tail.match(/\n/g) || []).length);
+      const approxOmitted = loadedLines ? Math.round(elidedBytes / ((hn + tn) / loadedLines)) : 0;
+      const marker = opts.makeMarker(elidedBytes, approxOmitted);
+      if (marker) return head + marker + '\n' + tail;
+    }
     return head + tail;
   } finally { fs.closeSync(fd); }
+}
+
+function elisionNoticeText(elidedBytes, approxOmitted) {
+  const mb = Math.round(elidedBytes / 1048576);
+  return `<system-reminder>Session history truncated for display: ~${approxOmitted} records (${mb}MB) in the middle of this conversation were not loaded — the file is too large. Showing the earliest ${JSONL_HEAD_BYTES / 1048576}MB and the most recent ${JSONL_TAIL_BYTES / 1048576}MB.</system-reminder>`;
+}
+
+// Tag the seam marker, then give it the timestamp of its preceding record so
+// timestamp-based sorting (mergeCodexRecords) keeps it at the seam
+function applyElisionTimestamp(messages) {
+  for (let i = 0; i < messages.length; i++) {
+    if (!messages[i].__webui_elision) continue;
+    const neighbor = messages[i - 1] || messages[i + 1];
+    if (neighbor?.timestamp) messages[i].timestamp = neighbor.timestamp;
+    break;
+  }
+  return messages;
 }
 
 function parseCodexSessionJsonl(threadId) {
@@ -121,13 +148,20 @@ function parseCodexSessionJsonl(threadId) {
   if (!fp) return [];
   const messages = [];
   try {
-    for (const line of readJsonlBounded(fp).split('\n')) {
+    const content = readJsonlBounded(fp, {
+      makeMarker: (bytes, approx) => JSON.stringify({
+        __webui_elision: true,
+        type: 'response_item',
+        payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: elisionNoticeText(bytes, approx) }] },
+      }),
+    });
+    for (const line of content.split('\n')) {
       const trimmed = line.trim();
       if (!trimmed) continue;
       try { messages.push(JSON.parse(trimmed)); } catch {}
     }
   } catch {}
-  return messages;
+  return applyElisionTimestamp(messages);
 }
 
 function formatCodexRoleLabel(role) {
@@ -585,5 +619,7 @@ module.exports = {
   parseCodexSessionJsonl,
   extractCodexThreadMeta,
   readJsonlBounded,
+  elisionNoticeText,
+  applyElisionTimestamp,
   resolveCodexPermissionMode,
 };
