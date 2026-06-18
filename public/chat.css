@@ -121,9 +121,13 @@
   border-left: 3px solid var(--accent); padding-left: 12px; margin: 8px 0;
   color: var(--text-secondary);
 }
-.chat-text table { border-collapse: collapse; margin: 8px 0; font-size: 12px; width: auto; border: 1px solid var(--text-dim); }
+/* Tables scroll horizontally inside this wrapper instead of overflowing the
+   message (mobile has no other way to reach off-screen columns) */
+.chat-table-wrap { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 8px 0; }
+.chat-text table { border-collapse: collapse; margin: 0; font-size: 12px; width: auto; border: 1px solid var(--text-dim); }
 .chat-text th, .chat-text td {
   border: 1px solid rgba(128,128,128,0.5); padding: 4px 8px;
+  white-space: nowrap; /* keep cells on one line so the table can exceed the viewport and scroll */
 }
 .chat-text th { background: rgba(128,128,128,0.1); font-weight: 600; }
 

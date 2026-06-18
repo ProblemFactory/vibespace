@@ -661,10 +661,27 @@ class ChatRenderers {
       // markup from files or web pages). Sanitize BEFORE linkify so our own
       // chat-link spans aren't subject to filtering.
       let html = DOMPurify.sanitize(marked.parse(text || ''));
+      html = this._wrapTables(html);
       return this.linkify(html);
     } catch {
       return escHtml(text || '');
     }
+  }
+
+  /** Wrap each <table> in a horizontally-scrollable container so wide tables
+   *  scroll instead of overflowing (critical on mobile — no scroll otherwise). */
+  _wrapTables(html) {
+    if (html.indexOf('<table') === -1) return html;
+    const tpl = document.createElement('template');
+    tpl.innerHTML = html;
+    for (const table of tpl.content.querySelectorAll('table')) {
+      if (table.parentElement?.classList.contains('chat-table-wrap')) continue;
+      const wrap = document.createElement('div');
+      wrap.className = 'chat-table-wrap';
+      table.parentNode.insertBefore(wrap, table);
+      wrap.appendChild(table);
+    }
+    return tpl.innerHTML;
   }
 
   appendSystem(text) {

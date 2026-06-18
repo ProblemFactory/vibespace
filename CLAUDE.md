@@ -598,6 +598,7 @@ Server → Client: `created`, `output`, `msg` (normalized: op=create/edit/meta),
 - Auto-detect URLs and file paths with VS Code-style character exclusion regex, `:line`, `:line:col`, `:line-line` suffixes (click=copy with tooltip, Ctrl+click=open; touch devices: tap=Open/Copy menu; right-click/long-press=same menu everywhere). `_linkify` is HTML-aware (splits tags/text, skips `<a>` tags, linkifies inside `<code>` blocks). Markdown `<a href>` tags also intercepted (same behavior).
 - Code block toolbar: Copy button (strips line-number gutters, keeps diff +/- prefixes), Wrap toggle, language picker — always visible on touch devices (hover-gated on desktop)
 - Pre block wrap toggle (hover to show)
+- Markdown tables wrapped in `.chat-table-wrap` (overflow-x:auto) at render time (`ChatRenderers._wrapTables`) — wide tables scroll horizontally instead of overflowing; cells are `white-space:nowrap` so the table keeps natural width and the wrapper scrolls (essential on mobile, which otherwise can't reach off-screen columns)
 - Streaming/activity indicator above input bar (always visible): thinking/running ToolName/responding. Mid-stream detection on attach via `isStreaming`.
 - Interrupt result labels: maps `subtype` to human-readable label (error_during_execution -> "Interrupted", error_max_turns -> "Max turns reached", etc.)
 - Delayed-fallback interrupt: control_request protocol first, SIGINT scheduled 2s later and skipped if protocol worked — avoids killing the whole session on newer Claude Code versions where SIGINT exits the process (bugs #17466, #3455)
