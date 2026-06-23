@@ -18,16 +18,16 @@ After installing a backend CLI for the first time, run it once in your terminal 
 ### One-line install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ProblemFactory/claude-code-webui/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ProblemFactory/vibespace/master/install.sh | bash
 ```
 
-The installer checks dependencies, prompts for install location (default `~/claude-code-webui`), clones the repo, and builds.
+The installer checks dependencies, prompts for install location (default `~/vibespace`), clones the repo, and builds.
 
 ### Manual install
 
 ```bash
-git clone https://github.com/ProblemFactory/claude-code-webui.git
-cd claude-code-webui
+git clone https://github.com/ProblemFactory/vibespace.git
+cd vibespace
 npm install
 npm run build
 ```
@@ -37,7 +37,7 @@ npm run build
 ## Running
 
 ```bash
-cd ~/claude-code-webui
+cd ~/vibespace
 npm start
 ```
 
@@ -95,7 +95,7 @@ When resuming a stopped session, a split button lets you choose Terminal or Chat
 ## Updating
 
 ```bash
-cd ~/claude-code-webui
+cd ~/vibespace
 git pull
 npm install
 npm run build
