@@ -1,7 +1,7 @@
 # VibeSpace
 
 ## Project Overview
-A web-based UI for managing multiple Claude Code sessions with a tiling window manager, file explorer, and code editor. Uses native `claude` CLI via **dtach** for session persistence across server restarts.
+A backend-agnostic web workspace for **coding agents** — manage many concurrent agent CLI sessions with a tiling window manager, file explorer, and code editor. Each backend (Claude Code, Codex, …) is driven through a `BackendAdapter` (`src/adapters/`); the UI, window manager, chat view, and session layer stay backend-neutral. Sessions run via native agent CLIs inside **dtach** for persistence across server restarts. (Project was "Claude Code WebUI" before the 2026-06-22 rename to VibeSpace — references to the `claude`/Claude Code CLI tool itself are unchanged.)
 
 ## How to Build and Run
 ```bash

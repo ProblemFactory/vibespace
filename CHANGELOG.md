@@ -10,6 +10,7 @@ and this project uses [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - **Renamed the project to VibeSpace** (was "Claude Code WebUI"). This is a branding change only — the underlying Claude Code / Codex CLIs it manages are unchanged. Display name, page title, console banner, `package.json` name (`vibespace`), default install directory (`~/vibespace`) and the GitHub repo (`github.com/ProblemFactory/vibespace`) all updated.
+- **Repositioned as backend-agnostic.** Docs (README, getting-started, docs index, CLAUDE.md overview) no longer center on Claude Code — VibeSpace is a workspace for *any* coding agent / agent-harness CLI, driven through a `BackendAdapter`. Claude Code and Codex are the supported backends out of the box; adding another is a single adapter. The installer now requires **at least one** backend (`claude` and/or `codex`) instead of hard-requiring Claude.
 
 ### Migration (seamless for existing installs)
 

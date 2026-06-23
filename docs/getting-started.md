@@ -1,16 +1,21 @@
 # Getting Started
 
+VibeSpace is a backend-agnostic workspace for coding agents. You bring the agent CLI(s) — Claude Code, Codex, or another harness wired up via an adapter — and VibeSpace adds persistent multi-session management, a tiling window manager, and a structured chat view on top.
+
 ## Prerequisites
+
+You need Node.js, dtach, and **at least one** agent backend CLI.
 
 | Dependency | macOS | Ubuntu/Debian |
 |-----------|-------|---------------|
 | **Node.js 18+** | `brew install node` | See [NodeSource](https://github.com/nodesource/distributions) |
 | **dtach** | `brew install dtach` | `sudo apt install dtach` |
-| **Claude CLI** | `npm install -g @anthropic-ai/claude-code` | same |
-| **Codex CLI** | Install `codex` and make sure it is on `PATH` | same |
+| **An agent CLI** (≥1) | | |
+| &nbsp;&nbsp;• Claude Code | `npm install -g @anthropic-ai/claude-code` | same |
+| &nbsp;&nbsp;• Codex | install `codex`, ensure it's on `PATH` | same |
 
 After installing a backend CLI for the first time, run it once in your terminal to complete login/setup:
-- `claude` for Claude sessions
+- `claude` for Claude Code sessions
 - `codex` for Codex sessions
 
 ## Installation
