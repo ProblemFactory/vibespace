@@ -927,8 +927,8 @@ setupSessions({ activeSessions, webuiPids, refreshWebuiPids, createSessionMessag
 app.use(sessionsRouter);
 
 // ── Usage / Rate Limit ──
-// Minimal haiku API call to read rate limit headers. Cached, refreshed every 5 min.
-// Uses OAuth token from ~/.claude/.credentials.json (x-api-key header).
+// Usage / rate limits read NON-INVASIVELY from the OAuth token store. Cached,
+// refreshed every ~5 min. See _fetchOAuthUsage below for the why.
 const https = require('https');
 function readUsageCache() {
   try {
@@ -955,8 +955,6 @@ let _codexRateLimitCacheAt = 0;
 
 let _oauthCreds = null; // { accessToken, refreshToken, expiresAt }
 let _oauthMtime = 0;
-const OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
-const OAUTH_TOKEN_URL = 'https://platform.claude.com/v1/oauth/token';
 
 function _readOAuthCreds() {
   try {
@@ -985,113 +983,83 @@ function _readOAuthCreds() {
   return _oauthCreds;
 }
 
-function _saveRefreshedToken(creds) {
-  try {
-    // Linux: write back to .credentials.json
-    const credsPath = path.join(os.homedir(), '.claude', '.credentials.json');
-    if (fs.existsSync(credsPath)) {
-      const raw = JSON.parse(fs.readFileSync(credsPath, 'utf-8'));
-      raw.claudeAiOauth = { ...raw.claudeAiOauth, ...creds };
-      fs.writeFileSync(credsPath, JSON.stringify(raw, null, 2));
-      _oauthMtime = fs.statSync(credsPath).mtimeMs;
-    }
-    // macOS: Keychain — let Claude Code handle persisting on next run.
-    // We update in-memory only; Claude Code will re-read Keychain and
-    // see the token isn't expired, skipping its own refresh.
-  } catch {}
-  _oauthCreds = { ..._oauthCreds, ...creds };
-}
-
-function _refreshOAuthToken(callback) {
-  const creds = _readOAuthCreds();
-  if (!creds?.refreshToken) return callback(null);
-  const body = JSON.stringify({
-    grant_type: 'refresh_token',
-    refresh_token: creds.refreshToken,
-    client_id: OAUTH_CLIENT_ID,
-  });
-  const req = https.request(OAUTH_TOKEN_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
-  }, (res) => {
-    let data = '';
-    res.on('data', d => { data += d; });
-    res.on('end', () => {
-      try {
-        const resp = JSON.parse(data);
-        if (resp.access_token) {
-          const refreshed = {
-            accessToken: resp.access_token,
-            refreshToken: resp.refresh_token || creds.refreshToken,
-            expiresAt: Date.now() + (resp.expires_in || 3600) * 1000,
-          };
-          _saveRefreshedToken(refreshed);
-          callback(refreshed.accessToken);
-        } else { callback(null); }
-      } catch { callback(null); }
-    });
-  });
-  req.on('error', () => callback(null));
-  req.end(body);
-}
-
 function getOAuthToken(callback) {
-  // Async version: callback(token) — handles refresh if expired
-  if (callback) {
-    const creds = _readOAuthCreds();
-    if (!creds?.accessToken) return callback(null);
-    if (creds.expiresAt && Date.now() > creds.expiresAt) {
-      _refreshOAuthToken(callback);
-    } else {
-      callback(creds.accessToken);
-    }
-    return;
-  }
-  // Sync version (for rate limit polling where we don't want to block) —
-  // returns cached token, may be expired (caller should handle 401).
+  // READ-ONLY: we NEVER refresh the OAuth token ourselves. Anthropic's refresh
+  // tokens rotate (each refresh invalidates the previous one), so calling the
+  // refresh endpoint would burn the token Claude Code still has stored — on
+  // macOS that lives in the Keychain, which we can't safely rewrite, forcing a
+  // daily re-login (issue #20). We only USE a currently-valid access token; if
+  // it's expired we return null and skip, letting Claude Code refresh it through
+  // its own session activity — the next poll picks up the fresh token. (60s
+  // skew so we don't use a token about to expire mid-request.)
   const creds = _readOAuthCreds();
-  return creds?.accessToken || null;
+  const token = (creds?.accessToken && (!creds.expiresAt || Date.now() < creds.expiresAt - 60000))
+    ? creds.accessToken
+    : null;
+  if (callback) { callback(token); return; }
+  return token;
 }
+
+// Non-invasive usage/rate-limit polling via GET /api/oauth/usage.
+//
+// The old approach made a BILLABLE haiku `POST /v1/messages` every 5 min purely
+// to read the unified rate-limit RESPONSE HEADERS — consuming quota to measure
+// quota, and (because that call needs a fresh token) driving the token refresh
+// that rotates and breaks the macOS Keychain (#20). /api/oauth/usage returns
+// the same 5h/7d utilization directly in the body for FREE, with a read-only
+// token. It rate-limits HARD on bursts (~5 rapid requests → 429 for 5 min;
+// verified), so we poll once per ~5 min and on 429 back off for the advised
+// window, keeping the last-known value rather than retry-storming.
+let _rateLimitBackoffUntil = 0;
 
 function refreshRateLimit() {
-  getOAuthToken((token) => {
-    if (!token) return;
-    _refreshRateLimitWithToken(token);
-  });
+  if (Date.now() < _rateLimitBackoffUntil) return; // honoring a prior 429
+  const token = getOAuthToken();                   // read-only; null if expired
+  if (!token) return;                              // keep last-known; Claude refreshes the token
+  _fetchOAuthUsage(token);
 }
-function _refreshRateLimitWithToken(token) {
-  const body = JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1, messages: [{ role: 'user', content: '.' }] });
-  // OAuth tokens (sk-ant-oat…) must use Authorization: Bearer + the oauth beta
-  // header — Anthropic returns 401 "invalid x-api-key" for OAuth tokens sent via
-  // x-api-key. Real API keys (sk-ant-api…) still use x-api-key.
-  const isApiKey = typeof token === 'string' && token.startsWith('sk-ant-api');
-  const authHeaders = isApiKey
-    ? { 'x-api-key': token }
-    : { 'authorization': `Bearer ${token}`, 'anthropic-beta': 'oauth-2025-04-20' };
-  const req = https.request('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { ...authHeaders, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) },
+
+function _fetchOAuthUsage(token) {
+  // OAuth-only endpoint; a real API key can't read subscription usage.
+  if (typeof token === 'string' && token.startsWith('sk-ant-api')) return;
+  const req = https.request('https://api.anthropic.com/api/oauth/usage', {
+    method: 'GET',
+    headers: { 'authorization': `Bearer ${token}`, 'anthropic-beta': 'oauth-2025-04-20', 'anthropic-version': '2023-06-01' },
   }, (res) => {
-    const h = res.headers;
-    if (res.statusCode !== 200) {
-      console.warn(`[rate-limit] poll failed: HTTP ${res.statusCode}`);
-    }
-    if (res.statusCode === 200) {
-      _rateLimitCache = {
-        fiveHour: { utilization: parseFloat(h['anthropic-ratelimit-unified-5h-utilization'] || '0'), status: h['anthropic-ratelimit-unified-5h-status'] || 'unknown', resetsAt: parseInt(h['anthropic-ratelimit-unified-5h-reset'] || '0') },
-        sevenDay: { utilization: parseFloat(h['anthropic-ratelimit-unified-7d-utilization'] || '0'), status: h['anthropic-ratelimit-unified-7d-status'] || 'unknown', resetsAt: parseInt(h['anthropic-ratelimit-unified-7d-reset'] || '0') },
-        overallStatus: h['anthropic-ratelimit-unified-status'] || 'unknown',
-        fetchedAt: Date.now(),
-      };
-      writeUsageCache();
-    }
-    res.resume();
+    let body = '';
+    res.on('data', (d) => { body += d; });
+    res.on('end', () => {
+      if (res.statusCode === 429) {
+        const ra = parseInt(res.headers['retry-after'] || '300', 10);
+        _rateLimitBackoffUntil = Date.now() + (Number.isFinite(ra) ? ra : 300) * 1000;
+        console.warn(`[rate-limit] /api/oauth/usage 429 — backing off ${ra}s (keeping last-known)`);
+        return;
+      }
+      if (res.statusCode !== 200) { console.warn(`[rate-limit] /api/oauth/usage HTTP ${res.statusCode}`); return; }
+      try {
+        const u = JSON.parse(body);
+        // Frontend expects utilization as a 0–1 fraction and resetsAt as unix
+        // seconds; the endpoint gives a 0–100 percent and an ISO timestamp.
+        const toWin = (w) => (w && typeof w === 'object') ? {
+          utilization: (typeof w.utilization === 'number' ? w.utilization : 0) / 100,
+          status: (typeof w.utilization === 'number' && w.utilization >= 100) ? 'limited' : 'allowed',
+          resetsAt: w.resets_at ? Math.floor(Date.parse(w.resets_at) / 1000) || 0 : 0,
+        } : { utilization: 0, status: 'unknown', resetsAt: 0 };
+        const fiveHour = toWin(u.five_hour);
+        const sevenDay = toWin(u.seven_day);
+        _rateLimitCache = {
+          fiveHour, sevenDay,
+          overallStatus: (fiveHour.status === 'limited' || sevenDay.status === 'limited') ? 'limited' : 'allowed',
+          fetchedAt: Date.now(),
+        };
+        writeUsageCache();
+      } catch {}
+    });
   });
   req.on('error', () => {});
-  req.write(body);
   req.end();
 }
-setTimeout(refreshRateLimit, 5000); // delay startup to avoid hitting rate limits
+setTimeout(refreshRateLimit, 5000 + Math.floor(Math.random() * 20000)); // jittered first poll (de-sync from other pollers)
 setInterval(refreshRateLimit, 300000); // every 5 min
 
 function normalizeCodexRateLimit(raw, fetchedAt = Date.now()) {

@@ -199,7 +199,7 @@ docs/
 | `attachToDtach()` | server.js | Creates PTY bridge to dtach socket |
 | `restoreSessions()` | server.js | Reconnects to surviving dtach sessions on startup |
 | `setupSessionPty()` | server.js | Wires PTY onData (chat JSON parser or terminal raw) + onExit |
-| `refreshRateLimit()` | server.js | Minimal haiku API call, reads rate limit response headers |
+| `refreshRateLimit()` | server.js | Non-billable `GET /api/oauth/usage` poll (read-only token, 429 backoff) |
 | `registerWsHandler()` | src/ws-handler.js | All WebSocket message type handling (create/attach/kill/etc.) |
 | `cwdToProjectDir()` | src/session-store.js | `cwd.replace(/[/._]/g, '-')` — deterministic encoding |
 | `recoverCwdFromProjDir()` | src/session-store.js | Greedy reverse: try segments as-is, `.` prefix, `_` |
@@ -363,12 +363,12 @@ Mobile-specific UI code extracted into dedicated modules to keep desktop and mob
 - **Pin-to-bottom / scroll freeze**: When user scrolls up (detected via `wheel` event, not xterm `onScroll` which fires on programmatic scrolls too), output is queued in `_pendingOutput` instead of written to terminal. Terminal freezes in place. When user scrolls back to bottom or clicks the ↓ button, `_repin()` writes all queued output and scrolls to bottom. This prevents Claude Code's TUI redraw (`\e[H` cursor home) from yanking the viewport.
 - **Idle detection via OSC 0**: Claude Code updates terminal title via `\e]0;...\a`. First character indicates state: `✳` (U+2733) = idle/waiting for input, braille chars (U+2800-28FF) = working. Detected via `terminal.parser.registerOscHandler(0, ...)`. When transitioning to idle while window not focused, `window-waiting` class triggers orange blink animation on title bar + taskbar item. Cleared on focus.
 
-### 9. Usage / Rate Limit Monitoring
-**Approach**: Minimal haiku API call every 5 minutes. Reads rate limit utilization from response headers (`anthropic-ratelimit-unified-*`). Uses OAuth token with auto-refresh.
+### 9. Usage / Rate Limit Monitoring (non-invasive, since 2026-06-22)
+**Approach**: `GET /api/oauth/usage` every ~5 min (`_fetchOAuthUsage`). Non-billable — returns 5h/7d utilization + resets directly in the body (`five_hour`/`seven_day`: `{utilization (0–100 %), resets_at (ISO)}` → mapped to our `{utilization (0–1), resetsAt (unix s)}`). Endpoint rate-limits HARD on bursts (~5 rapid reqs → 429, retry-after 300s; verified), so: one request per interval, `_rateLimitBackoffUntil` honors the 429 retry-after, keep last-known on any failure, jittered first poll. Frontend already shows "Updated Xmin ago" from `fetchedAt` (only bumped on a 200) → staleness is visible.
 
-**Available data**: 5-hour utilization (%), 7-day utilization (%), reset timestamps, status (allowed/limited).
+**READ-ONLY OAuth token (issue #20)**: `getOAuthToken()` NEVER refreshes the token — it returns the stored access token only if currently valid (60s skew), else null (caller skips, keeps last-known; Claude Code refreshes it via its own session activity and the next poll picks it up). The old auto-refresh was invasive: Anthropic's refresh tokens **rotate**, so our 5-min poll burned the refresh token Claude Code still had stored — on macOS (Keychain, which we can't safely rewrite) this forced a daily re-login. There is no `_refreshOAuthToken`/`_saveRefreshedToken` anymore; we never write tokens anywhere. `_readOAuthCreds` reads `.credentials.json` (Linux) / Keychain (macOS) read-only, mtime-cached.
 
-**OAuth token management**: `getOAuthToken(callback)` — dual API: async callback mode (auto-refreshes expired tokens via `platform.claude.com/v1/oauth/token` using Claude Code's client_id `9d1c250a-...`) and sync mode (returns cached, may be expired). Full creds stored in `_oauthCreds` (accessToken + refreshToken + expiresAt). On Linux, refreshed tokens written back to `~/.claude/.credentials.json`. On macOS, in-memory only (Claude Code handles Keychain persistence). Both model discovery and rate limit polling use the async path.
+**Available data**: 5-hour utilization, 7-day utilization, reset timestamps, status (allowed/limited). The endpoint also carries per-model 7d, spend, and limits (not yet surfaced).
 
 **Model discovery**: `refreshAvailableModels()` — `GET /v1/models` for BOTH auth types (OAuth: Bearer + `anthropic-beta: oauth-2025-04-20`; API key: `x-api-key`). Runs 3s after startup then hourly. Full model IDs come from the API; CLI aliases (`fable`/`opus`/`sonnet`/`haiku` + `[1m]` variants) are hardcoded in `CLAUDE_MODEL_ALIASES` since they're CLI-side names — when a new tier ships, add its alias there (+ fallbacks in `app.js` BACKEND_SESSION_OPTIONS and `settings-schema.js` claude.defaultModel). History: `/api/claude_cli/bootstrap`'s `additional_model_options` was the OAuth source until ~2026-06 when it started returning null; `/v1/models` used to 401 for OAuth tokens but now accepts Bearer.
 
@@ -377,10 +377,11 @@ Mobile-specific UI code extracted into dedicated modules to keep desktop and mob
 **Failed approaches:**
 - ❌ Parse statusline output: user-customizable, can't guarantee format
 - ❌ Statusline hook wrapper (`--settings`): intrusive, doesn't work for non-WebUI sessions
-- ❌ `/api/oauth/usage` endpoint: correct data but extremely aggressive rate limiting
 - ❌ macOS `security unlock-keychain`: works but requires empty keychain password, invasive
-- ✅ Haiku API call + response headers: reliable, cheap, gets 5h + 7d unified limits
-- ✅ `/v1/models` with OAuth Bearer: current model discovery source (both auth types)
+- ❌ Billable haiku `/v1/messages` + response headers: worked, but consumed quota to measure quota AND needed a fresh token → drove the token refresh that rotates + breaks the macOS Keychain (#20). Superseded 2026-06-22.
+- ❌ Self-refreshing the OAuth token (`platform.claude.com/v1/oauth/token`): rotates Anthropic's refresh token out from under Claude Code → forced re-login on macOS. Removed.
+- ✅ `GET /api/oauth/usage` (non-billable) + read-only token + 429 backoff: current approach. Earlier rejected for "aggressive rate limiting" — but that was *burst* polling; one request per ~5 min sustains fine (verified: 14/14 over 30 min at 2-min cadence, zero token rotation).
+- ✅ `/v1/models` with OAuth Bearer: model discovery source (both auth types), now also read-only token.
 
 ### 10. Settings System (Global + Per-Terminal)
 **Global settings** (toolbar ⚙): Theme, font size (A-/A+), font family. Stored in `localStorage` (`termFontSize`, `termFontFamily`). Changes propagate to all terminals without per-terminal overrides.
