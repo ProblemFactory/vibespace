@@ -160,27 +160,42 @@ function extractSessionMeta(filePath) {
 
   let cwd = '', name = '';
   try {
+    // Stream in 64KB chunks with a leftover-line buffer until both cwd + name
+    // are found (cap at 2MB). A fixed 32KB read truncated the meta whenever an
+    // early line carried a large attachment (>32KB) — the line JSON.parse threw
+    // and `cwd` stayed empty, so the session became silently un-resumable
+    // (wrong/empty cwd → resume no-ops). (issue #18)
     const fd = fs.openSync(filePath, 'r');
-    const buf = Buffer.alloc(32768);
-    const bytesRead = fs.readSync(fd, buf, 0, 32768, 0);
-    fs.closeSync(fd);
-    for (const line of buf.toString('utf-8', 0, bytesRead).split('\n')) {
-      if (!line.trim()) continue;
-      try {
-        const d = JSON.parse(line);
-        if (!cwd && d.cwd) cwd = d.cwd;
-        if (d.type === 'user' && !name) {
-          const msg = d.message;
-          if (msg?.content) {
-            const content = Array.isArray(msg.content)
-              ? (msg.content.find(c => c.type === 'text')?.text || '')
-              : String(msg.content);
-            name = content.split('\n')[0].substring(0, 80);
-          }
+    try {
+      const CHUNK = 65536;
+      const MAX_BYTES = 2 * 1024 * 1024;
+      const chunk = Buffer.alloc(CHUNK);
+      let leftover = '', pos = 0;
+      while (pos < MAX_BYTES) {
+        const bytesRead = fs.readSync(fd, chunk, 0, CHUNK, pos);
+        if (bytesRead <= 0) break;
+        pos += bytesRead;
+        const lines = (leftover + chunk.toString('utf-8', 0, bytesRead)).split('\n');
+        leftover = lines.pop() || ''; // last (possibly partial) line carries over
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const d = JSON.parse(line);
+            if (!cwd && d.cwd) cwd = d.cwd;
+            if (d.type === 'user' && !name) {
+              const msg = d.message;
+              if (msg?.content) {
+                const content = Array.isArray(msg.content)
+                  ? (msg.content.find(c => c.type === 'text')?.text || '')
+                  : String(msg.content);
+                name = content.split('\n')[0].substring(0, 80);
+              }
+            }
+          } catch {}
         }
         if (cwd && name) break;
-      } catch {}
-    }
+      }
+    } finally { fs.closeSync(fd); }
   } catch {}
 
   const meta = { cwd, name };

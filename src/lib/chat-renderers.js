@@ -708,16 +708,19 @@ class ChatRenderers {
   cleanPath(p) { return p.replace(/[`'".,;:!?)}\]]+$/, ''); }
 
   /**
-   * Linkify URLs in a text segment. esc=true wraps output in escHtml (for markdown HTML text nodes).
-   * esc=false assumes input is already HTML-escaped (from escHtml on plain text).
+   * Linkify URLs in a text segment. Input is ALWAYS already HTML-escaped in both
+   * call paths (marked output for markdown; escHtml'd plain text for linkifyText),
+   * so `&` appears as `&amp;`. We match `&amp;` as part of the URL and never
+   * re-escape: the old esc=true branch re-ran escHtml on the matched URL and
+   * produced `&amp;amp;`, corrupting copied multi-param URLs (e.g. OAuth links —
+   * every `&` came back as `&amp;`). (issue #16)
    */
-  linkifyUrls(text, esc) {
-    const re = esc ? /(https?:\/\/[^\s<>"')\]]+)/g : /(https?:\/\/[^\s<>&]+)/g;
-    const e = esc ? escHtml : s => s;
+  linkifyUrls(text) {
+    const re = /(https?:\/\/(?:[^\s<>"')\]&]|&amp;)+)/g;
     return text.replace(re, (raw) => {
       const url = this.cleanPath(raw);
       const after = raw.slice(url.length);
-      return `<span class="chat-link" data-href="${e(url)}" title="Click to copy, Ctrl+Click to open">${e(url)}</span>${e(after)}`;
+      return `<span class="chat-link" data-href="${url}" title="Click to copy, Ctrl+Click to open">${url}</span>${after}`;
     });
   }
 
@@ -741,7 +744,7 @@ class ChatRenderers {
 
   /** Combined URL + path linkification on a text segment. */
   linkifySegment(text, esc) {
-    return this.linkifyPathsTagSafe(this.linkifyUrls(text, esc), esc);
+    return this.linkifyPathsTagSafe(this.linkifyUrls(text), esc);
   }
 
   /**
