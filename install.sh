@@ -102,14 +102,18 @@ if ! command -v dtach &>/dev/null; then
 fi
 echo "  [OK] dtach"
 
-# Claude CLI
-if ! command -v claude &>/dev/null; then
-  echo "  [!] Claude CLI not found."
-  echo "      Install via: npm install -g @anthropic-ai/claude-code"
-  echo "      Then run: claude (to complete setup/login)"
+# Agent CLI — at least one backend (Claude Code and/or Codex)
+HAVE_CLAUDE=0; HAVE_CODEX=0
+command -v claude &>/dev/null && HAVE_CLAUDE=1
+command -v codex  &>/dev/null && HAVE_CODEX=1
+if [ "$HAVE_CLAUDE" = 0 ] && [ "$HAVE_CODEX" = 0 ]; then
+  echo "  [!] No agent CLI found. Install at least one backend:"
+  echo "      Claude Code: npm install -g @anthropic-ai/claude-code   (then run: claude)"
+  echo "      Codex:       install 'codex' and ensure it's on PATH     (then run: codex)"
   exit 1
 fi
-echo "  [OK] Claude CLI found"
+[ "$HAVE_CLAUDE" = 1 ] && echo "  [OK] Claude Code CLI found"
+[ "$HAVE_CODEX"  = 1 ] && echo "  [OK] Codex CLI found"
 
 # ── Install ──
 

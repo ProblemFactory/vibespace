@@ -1,5 +1,7 @@
 # Documentation
 
+VibeSpace is a backend-agnostic web workspace for **coding agents** — it drives any agent CLI through a `BackendAdapter`, with Claude Code and Codex supported out of the box. These guides are written backend-neutral; where a detail is specific to a backend it's called out inline.
+
 ## Guides
 
 - **[Getting Started](getting-started.md)** — Installation, first run, quick tour
