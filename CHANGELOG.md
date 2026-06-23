@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.9.0] — 2026-06-22
+
+### Changed
+
+- **Renamed the project to VibeSpace** (was "Claude Code WebUI"). This is a branding change only — the underlying Claude Code / Codex CLIs it manages are unchanged. Display name, page title, console banner, `package.json` name (`vibespace`), default install directory (`~/vibespace`) and the GitHub repo (`github.com/ProblemFactory/vibespace`) all updated.
+
+### Migration (seamless for existing installs)
+
+- **No data migration needed.** All persisted state — `data/` (layouts, session metadata, dtach sockets, buffers, drafts, settings), browser `localStorage`, and dtach session sockets (`cw-` prefix unchanged) — is independent of the project name. An in-place `git pull` keeps every session, layout and setting intact.
+- **`install.sh` adopts a pre-rename install automatically**: if `~/claude-code-webui` exists and `~/vibespace` doesn't, the installer updates it in place (keeping the folder name and all data) instead of cloning a fresh copy, and points the git remote at the renamed repo. The folder is deliberately **not** renamed — dtach session sockets are bound to absolute paths, so moving the folder would orphan running sessions. Rename the folder yourself later (after stopping the server) if you want it to match.
+- GitHub redirects the old repo URL, so a manual `git pull` from an existing clone also keeps working unchanged.
+
+### Added
+
+- **Markdown tables scroll horizontally** (`.chat-table-wrap`): wide tables in chat now scroll instead of overflowing — essential on mobile, where off-screen columns were previously unreachable.
+
 ## [2.8.2] — 2026-06-09
 
 ### Added

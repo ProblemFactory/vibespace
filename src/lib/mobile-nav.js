@@ -29,7 +29,7 @@ export class MobileNav {
     if (!this._titleEl) return;
     const win = this.app.wm.windows.get(this.app.wm.activeWindowId);
     const count = [...this.app.wm.windows.values()].filter(w => !w._hiddenByDesktop && !w.isMinimized).length;
-    this._titleEl.textContent = (win?.title || 'Claude Code') + (count > 1 ? ` (${count})` : '');
+    this._titleEl.textContent = (win?.title || 'VibeSpace') + (count > 1 ? ` (${count})` : '');
   }
 
   _showWindowSwitcher() {

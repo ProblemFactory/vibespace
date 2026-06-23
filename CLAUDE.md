@@ -1,4 +1,4 @@
-# Claude Code WebUI
+# VibeSpace
 
 ## Project Overview
 A web-based UI for managing multiple Claude Code sessions with a tiling window manager, file explorer, and code editor. Uses native `claude` CLI via **dtach** for session persistence across server restarts.
@@ -6,7 +6,7 @@ A web-based UI for managing multiple Claude Code sessions with a tiling window m
 ## How to Build and Run
 ```bash
 # One-line install (checks deps, clones, builds):
-curl -fsSL https://raw.githubusercontent.com/ProblemFactory/claude-code-webui/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ProblemFactory/vibespace/master/install.sh | bash
 
 # Or manually:
 npm install

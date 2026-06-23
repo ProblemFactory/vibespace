@@ -1287,7 +1287,7 @@ server.on('upgrade', (req, socket, head) => {
 
 server.listen(PORT, HOST, () => {
   const ver = require('./package.json').version;
-  console.log(`\n  Claude Code WebUI v${ver} running at http://localhost:${PORT}`);
+  console.log(`\n  VibeSpace v${ver} running at http://localhost:${PORT}`);
   console.log(`  dtach: ${DTACH_CMD}, node: ${NODE_CMD}, env: ${ENV_CMD}, claude: ${CLAUDE_CMD}, codex: ${CODEX_CMD}`);
 
   // Restore existing dtach sessions from before restart

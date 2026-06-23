@@ -1,17 +1,47 @@
 #!/bin/bash
 set -e
 
-# Claude Code WebUI — One-line installer
+# VibeSpace — One-line installer
 # Usage: curl -fsSL <url>/install.sh | bash
 #   or:  bash install.sh
 
 PORT="${PORT:-3456}"
-DEFAULT_DIR="$HOME/claude-code-webui"
+DEFAULT_DIR="$HOME/vibespace"
+LEGACY_DIR="$HOME/claude-code-webui"   # pre-rename install location
+OLD_REMOTE_SLUG="ProblemFactory/claude-code-webui"
+NEW_REMOTE_SLUG="ProblemFactory/vibespace"
 
 echo ""
-echo "  Claude Code WebUI Installer"
-echo "  ============================"
+echo "  VibeSpace Installer"
+echo "  ==================="
 echo ""
+
+# Point an existing checkout's git remote at the renamed repo. GitHub redirects
+# the old URL, but updating it makes future pulls explicit and future-proof.
+normalize_remote() {
+  [ -d ".git" ] || return 0
+  local url
+  url=$(git remote get-url origin 2>/dev/null) || return 0
+  case "$url" in
+    *"$OLD_REMOTE_SLUG"*)
+      git remote set-url origin "${url/$OLD_REMOTE_SLUG/$NEW_REMOTE_SLUG}"
+      echo "  → Updated git remote to the renamed repo (vibespace)"
+      ;;
+  esac
+}
+
+# Seamless migration: project was renamed Claude Code WebUI → VibeSpace. If a
+# legacy install exists at ~/claude-code-webui and there's no ~/vibespace yet,
+# update that install IN PLACE (keep its folder name + all data) instead of
+# cloning a fresh copy. The folder is deliberately NOT renamed — dtach session
+# sockets are bound to absolute paths, so moving the folder would orphan any
+# running sessions. Everything else (data/, localStorage) is name-independent.
+if [ ! -d "$DEFAULT_DIR" ] && [ -f "$LEGACY_DIR/server.js" ]; then
+  echo "  ℹ  Found a pre-rename install at $LEGACY_DIR — it will be updated in place."
+  echo "     Sessions, layouts, drafts and settings are preserved (folder name unchanged)."
+  echo ""
+  DEFAULT_DIR="$LEGACY_DIR"
+fi
 
 # Ask user to confirm install location (read from /dev/tty for curl|bash compat)
 printf "  Install location [%s]: " "$DEFAULT_DIR"
@@ -88,6 +118,7 @@ if [ -d "$INSTALL_DIR" ] && [ -f "$INSTALL_DIR/server.js" ]; then
   echo "  Existing installation found at $INSTALL_DIR"
   echo "  Updating..."
   cd "$INSTALL_DIR"
+  normalize_remote
   if [ -d ".git" ]; then git pull --ff-only 2>/dev/null || true; fi
 else
   echo ""
@@ -102,11 +133,11 @@ else
     cd "$INSTALL_DIR"
   elif command -v git &>/dev/null; then
     echo "  Cloning from GitHub..."
-    git clone https://github.com/ProblemFactory/claude-code-webui.git "$INSTALL_DIR" </dev/null
+    git clone https://github.com/ProblemFactory/vibespace.git "$INSTALL_DIR" </dev/null
     cd "$INSTALL_DIR"
   else
     echo "  [!] git not found. Install git or download manually:"
-    echo "      https://github.com/ProblemFactory/claude-code-webui"
+    echo "      https://github.com/ProblemFactory/vibespace"
     exit 1
   fi
 fi

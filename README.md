@@ -1,4 +1,4 @@
-# Claude Code WebUI
+# VibeSpace
 
 A web-based UI for managing multiple [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI sessions with a tiling window manager, file explorer, and code editor.
 
@@ -71,13 +71,15 @@ A web-based UI for managing multiple [Claude Code](https://docs.anthropic.com/en
 ## Quick Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ProblemFactory/claude-code-webui/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ProblemFactory/vibespace/master/install.sh | bash
 ```
 
 The installer will:
 1. Check for Node.js 18+, dtach, and Claude CLI (auto-installs dtach if needed)
-2. Prompt for install location (default: `~/claude-code-webui`)
+2. Prompt for install location (default: `~/vibespace`)
 3. Clone the repo, install dependencies, and build
+
+> **Updating from "Claude Code WebUI"?** The project was renamed to VibeSpace — migration is seamless. Re-running the installer detects a pre-rename install at `~/claude-code-webui` and updates it in place, preserving all sessions, layouts and settings (the folder keeps its name so running sessions aren't disturbed). A manual `git pull` in your existing clone also keeps working — nothing is keyed to the old name. See [CHANGELOG](CHANGELOG.md) for details.
 
 ### Prerequisites
 
@@ -92,7 +94,7 @@ After installing Claude CLI for the first time, run `claude` once to complete lo
 ## Usage
 
 ```bash
-cd ~/claude-code-webui
+cd ~/vibespace
 npm start
 ```
 
@@ -112,7 +114,7 @@ Example: `PORT=8080 HOST=127.0.0.1 npm start`
 
 Re-run the install command or:
 ```bash
-cd ~/claude-code-webui
+cd ~/vibespace
 git pull
 npm install
 npm run build
