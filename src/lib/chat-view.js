@@ -1344,19 +1344,22 @@ class ChatView {
     container.appendChild(overlay);
     this._dropOverlay = overlay;
     const isFileDrag = (e) => Array.from(e.dataTransfer?.types || []).includes('Files');
-    const hide = () => overlay.classList.add('hidden');
-    // dragover fires continuously while hovering, so showing here (rather than
-    // a fragile dragenter/dragleave depth counter, which browsers fire
-    // unbalanced and leaves the overlay stuck) keeps it visible reliably.
+    // Robust across browsers (incl. Safari, and OS/Finder file drags that never
+    // fire dragend): `dragover` fires continuously while the cursor hovers, so
+    // each one shows the overlay and pushes back a short hide timer. When
+    // dragover STOPS firing — cursor left, drag cancelled, or it ended — the
+    // timer hides it. This avoids `dragleave`/`relatedTarget` (unreliable in
+    // Safari) and the dragenter/leave depth counter (unbalanced in Chrome,
+    // which left the overlay stuck).
+    this._dropHideTimer = null;
+    const hide = () => { if (this._dropHideTimer) { clearTimeout(this._dropHideTimer); this._dropHideTimer = null; } overlay.classList.add('hidden'); };
+    container.addEventListener('dragenter', (e) => { if (isFileDrag(e)) e.preventDefault(); });
     container.addEventListener('dragover', (e) => {
       if (!isFileDrag(e)) return;
       e.preventDefault();
       overlay.classList.remove('hidden');
-    });
-    // Hide only when the cursor truly leaves the chat view — relatedTarget is
-    // null (left the window) or outside the container (not a child).
-    container.addEventListener('dragleave', (e) => {
-      if (!e.relatedTarget || !container.contains(e.relatedTarget)) hide();
+      if (this._dropHideTimer) clearTimeout(this._dropHideTimer);
+      this._dropHideTimer = setTimeout(hide, 150);
     });
     container.addEventListener('drop', async (e) => {
       hide();
@@ -1365,11 +1368,6 @@ class ChatView {
       const files = await this._collectDroppedFiles(e.dataTransfer);
       if (files.length && this._chatInput) this._chatInput.uploadFiles(files);
     });
-    // Safety net: any drop/dragend anywhere (released outside the view, dropped
-    // on another element) ends the drag and clears the overlay.
-    this._dropEndHandler = hide;
-    document.addEventListener('drop', this._dropEndHandler);
-    document.addEventListener('dragend', this._dropEndHandler);
   }
 
   // Collect dropped files, recursing into directories (DataTransferItem entries
@@ -1566,11 +1564,7 @@ class ChatView {
     if (this._chatMinimap) this._chatMinimap.dispose();
     if (this._search) this._search.dispose();
     if (this._gapObserver) { this._gapObserver.disconnect(); this._gapObserver = null; }
-    if (this._dropEndHandler) {
-      document.removeEventListener('drop', this._dropEndHandler);
-      document.removeEventListener('dragend', this._dropEndHandler);
-      this._dropEndHandler = null;
-    }
+    if (this._dropHideTimer) { clearTimeout(this._dropHideTimer); this._dropHideTimer = null; }
   }
 }
 
