@@ -153,8 +153,34 @@ class Sidebar {
   highlightSession(sessionId) {
     this.listEl.querySelectorAll('.session-item-card').forEach(c => c.classList.remove('highlighted', 'highlight-flash'));
     if (!sessionId) return;
-    const cards = this.listEl.querySelectorAll('.session-item-card');
-    for (const card of cards) {
+
+    // The target card may be inside a COLLAPSED folder/group (CSS-hidden) or a
+    // LAZY folder whose cards haven't rendered yet — in both cases a plain
+    // scroll finds nothing or a hidden node. First locate the containing
+    // folder-group via its stored lazy item list (present even before render),
+    // expand it (persisting so it stays open), and force-render its cards.
+    for (const group of this.listEl.querySelectorAll('.folder-group')) {
+      const sessionsDiv = group.querySelector('.folder-sessions');
+      const items = sessionsDiv?._lazyItems;
+      if (!items || !items.some(s => s.sessionId === sessionId)) continue;
+      if (group.classList.contains('collapsed')) {
+        group.classList.remove('collapsed');
+        const key = group._collapseKey;
+        if (key && this._collapsedFolders.has(key)) {
+          this._collapsedFolders.delete(key);
+          localStorage.setItem('collapsedFolders', JSON.stringify([...this._collapsedFolders]));
+        }
+      }
+      if (sessionsDiv.dataset.lazy && sessionsDiv.dataset.lazy !== 'rendered') {
+        sessionsDiv.innerHTML = '';
+        sessionsDiv.style.minHeight = '';
+        for (const s of items) sessionsDiv.appendChild(this._buildSessionCard(s));
+        sessionsDiv.dataset.lazy = 'rendered';
+      }
+      break;
+    }
+
+    for (const card of this.listEl.querySelectorAll('.session-item-card')) {
       if (card._sessionId === sessionId) {
         card.classList.add('highlighted');
         requestAnimationFrame(() => card.classList.add('highlight-flash'));
@@ -456,13 +482,25 @@ class Sidebar {
       // Migration re-runs after the fetch, so deferring loses nothing.
       if (this._userStateFetched) this._pushUserState();
     }
-    const digest = JSON.stringify(this._allSessions.map(s => `${this._getSessionStateKey(s)}:${s.status}:${s.name || ''}:${s.webuiName || ''}:${s.startedAt || 0}:${s.webuiId || ''}:${s.agentKind || 'primary'}:${s.agentRole || ''}:${s.agentNickname || ''}`));
+    // NOTE: startedAt is deliberately NOT in the digest. For active sessions it
+    // is the JSONL/rollout mtime, which bumps on every write — including it made
+    // the list fully re-render on every 5s poll while a session was producing
+    // output, yanking scroll/expanded-card state out from under the user. The
+    // digest now only changes when the visible content does (which sessions,
+    // their status/name/identity). Recency re-sorting is picked up on the next
+    // real change instead of churning continuously.
+    const digest = JSON.stringify(this._allSessions.map(s => `${this._getSessionStateKey(s)}:${s.status}:${s.name || ''}:${s.webuiName || ''}:${s.webuiId || ''}:${s.agentKind || 'primary'}:${s.agentRole || ''}:${s.agentNickname || ''}`));
     if (digest === this._sessionDigest) return;
     this._sessionDigest = digest;
     this.app.syncSessionIdentity?.(this._allSessions);
     this._updateBackendFilterBtn(document.getElementById('backend-filter'));
     this._renderAgentKindQuickTabs();
+    // Preserve scroll position across the auto-refresh re-render so browsing a
+    // session lower in the list isn't interrupted by a jump to the top.
+    const sc = this.listEl.closest('.sidebar-section');
+    const savedScroll = sc ? sc.scrollTop : 0;
     this._render();
+    if (sc && savedScroll) { sc.scrollTop = savedScroll; requestAnimationFrame(() => { sc.scrollTop = savedScroll; }); }
   }
 
   _render() {
