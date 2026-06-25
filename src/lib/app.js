@@ -634,6 +634,26 @@ class App {
       this.hideDialogs();
     });
 
+    // Fork dialog: textarea + "Fork & Send". Sending a first message is what
+    // makes the fork actually diverge (claude only mints the fork's new id once
+    // it receives input), so the primary action requires non-empty text.
+    const forkTa = document.getElementById('fork-first-message');
+    const forkBtn = document.getElementById('btn-fork-send');
+    if (forkTa && forkBtn) {
+      const sync = () => { forkBtn.disabled = !forkTa.value.trim(); };
+      forkTa.addEventListener('input', sync);
+      forkBtn.addEventListener('click', () => {
+        const text = forkTa.value.trim();
+        if (!text || !this._pendingFork) return;
+        const info = this._pendingFork; this._pendingFork = null;
+        this.hideDialogs();
+        this._doForkSession(info, text);
+      });
+      forkTa.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); forkBtn.click(); }
+      });
+    }
+
     // CWD autocomplete
     this._setupCwdAutocomplete();
   }
@@ -765,7 +785,7 @@ class App {
     };
   }
 
-  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, fork, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId }) {
+  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, fork, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage }) {
     this._hideWelcome();
     const defaults = this._getBackendSessionDefaults(backend);
     const sessionMode = mode || this.settings.get('session.defaultMode') || 'chat';
@@ -830,7 +850,14 @@ class App {
                 if (data.messages?.length) chatView.loadHistory(data.messages, data.total);
                 if (data.chatStatus) chatView.applyStatus(data.chatStatus);
               })
-              .catch(() => {});
+              .catch(() => {})
+              // Send the fork's first message AFTER history renders, so the
+              // echoed user message appends instead of being wiped by loadHistory.
+              // This first turn is also what makes the fork diverge (claude mints
+              // the fork's new id on first input).
+              .finally(() => { if (initialMessage) this._sendChatMessage(msg.sessionId, initialMessage); });
+          } else if (initialMessage) {
+            this._sendChatMessage(msg.sessionId, initialMessage);
           }
           chatView.focus();
         } else {
@@ -1031,7 +1058,34 @@ class App {
     });
   }
 
+  // Clicking Fork opens a popup for the first message. The fork only diverges
+  // into its own session once that message is sent (the backend mints the
+  // fork's new id on first input), so prompting up front gives the user an
+  // immediately-distinct session instead of a window indistinguishable from a
+  // resume. Terminal-mode forks have no chat input, so they fork directly.
   forkSession(sessionInfo) {
+    const mode = sessionInfo.webuiMode || this.settings.get('session.defaultMode') || 'chat';
+    if (mode !== 'chat') { this._doForkSession(sessionInfo, ''); return; }
+    this._pendingFork = sessionInfo;
+    if (this.isMobile) this.sidebar.toggle(false);
+    this._showDialog('dialog-fork');
+    const ta = document.getElementById('fork-first-message');
+    const btn = document.getElementById('btn-fork-send');
+    if (ta) { ta.value = ''; }
+    if (btn) { btn.disabled = true; }
+    if (ta) setTimeout(() => ta.focus(), 0);
+  }
+
+  // Programmatically send a chat message to a live chat session (used for the
+  // fork first-message popup). The server echoes it back via the normalizer, so
+  // the ChatView renders it without any local preview.
+  _sendChatMessage(sessionId, text) {
+    const t = (text || '').trim();
+    if (!t) return;
+    this.ws.send({ type: 'chat-input', sessionId, text: t, msgId: Date.now() + '-' + Math.random().toString(36).slice(2, 8) });
+  }
+
+  _doForkSession(sessionInfo, initialMessage = '') {
     const backend = sessionInfo.backend || 'claude';
     const resumeId = sessionInfo.backendSessionId || sessionInfo.sessionId;
     const baseName = sessionInfo.webuiName || sessionInfo.name || 'Session';
@@ -1051,6 +1105,7 @@ class App {
       backendSessionId: resumeId,
       fork: true,
       extraArgs: backend === 'claude' ? '--fork-session' : '',
+      initialMessage,
     });
   }
 

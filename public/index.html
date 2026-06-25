@@ -172,6 +172,18 @@
       <div class="dialog-footer"><button class="btn-cancel">Cancel</button><button class="btn-create">Create Session</button></div>
     </div>
 
+    <!-- Fork Session Dialog -->
+    <div id="dialog-fork" class="dialog hidden">
+      <div class="dialog-header"><h3>Fork Session</h3><button class="dialog-close">✕</button></div>
+      <div class="dialog-body">
+        <p class="dialog-hint">A fork branches from the shared history into its own independent session — the original is left untouched. Send a first message to make the branch diverge now (otherwise it looks identical to a plain resume until you continue it).</p>
+        <label>First message
+          <textarea id="fork-first-message" rows="4" placeholder="Continue the forked conversation…"></textarea>
+        </label>
+      </div>
+      <div class="dialog-footer"><button class="btn-cancel">Cancel</button><button class="btn-create" id="btn-fork-send" disabled>Fork &amp; Send</button></div>
+    </div>
+
     <!-- Grid Config Dialog -->
     <div id="dialog-grid" class="dialog hidden">
       <div class="dialog-header"><h3>Add Grid Layout</h3><button class="dialog-close">✕</button></div>
