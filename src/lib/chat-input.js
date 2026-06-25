@@ -1,4 +1,4 @@
-import { escHtml, saveDraft, loadDraft, clearDraft, getStateSync } from './utils.js';
+import { escHtml, saveDraft, loadDraft, clearDraft, getStateSync, showContextMenu } from './utils.js';
 import { UI_ICONS } from './icons.js';
 
 /**
@@ -15,11 +15,12 @@ export class ChatInput {
    * @param {function} opts.getStateSync - returns StateSync instance
    * @param {function} opts.onInterrupt - called when user clicks Stop
    */
-  constructor(ws, sessionId, { onSend, onInterrupt }) {
+  constructor(ws, sessionId, { onSend, onInterrupt, getCwd }) {
     this._ws = ws;
     this._sessionId = sessionId;
     this._onSend = onSend;
     this._onInterrupt = onInterrupt;
+    this._getCwd = getCwd || (() => null);
 
     // Attachment state
     this._attachments = [];
@@ -218,7 +219,29 @@ export class ChatInput {
       attachInput.value = '';
     };
 
-    inputWrap.append(attachBtn, attachInput, this._textarea, expandBtn, this._slashDropdown);
+    // Upload file/folder to the session's working directory, then insert its
+    // path into the input. Click → menu (also the mobile entry point); desktop
+    // also supports drag-and-drop (wired by ChatView onto the whole chat view).
+    const uploadBtn = document.createElement('button');
+    uploadBtn.className = 'chat-attach-btn';
+    uploadBtn.title = 'Upload file/folder to working directory';
+    uploadBtn.innerHTML = '<svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 4L5 8.5a2.5 2.5 0 003.5 3.5L13 7.5a4 4 0 00-5.7-5.7L3 6.2"/></svg>';
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file'; fileInput.multiple = true; fileInput.style.display = 'none';
+    const dirInput = document.createElement('input');
+    dirInput.type = 'file'; dirInput.setAttribute('webkitdirectory', ''); dirInput.style.display = 'none';
+    fileInput.onchange = () => { if (fileInput.files.length) this.uploadFiles([...fileInput.files]); fileInput.value = ''; };
+    dirInput.onchange = () => { if (dirInput.files.length) this.uploadFiles([...dirInput.files]); dirInput.value = ''; };
+    uploadBtn.onclick = (e) => {
+      e.preventDefault();
+      const r = uploadBtn.getBoundingClientRect();
+      showContextMenu(r.left, r.bottom + 4, [
+        { label: 'Upload file(s)', action: () => fileInput.click() },
+        { label: 'Upload folder', action: () => dirInput.click() },
+      ]);
+    };
+
+    inputWrap.append(attachBtn, attachInput, uploadBtn, fileInput, dirInput, this._textarea, expandBtn, this._slashDropdown);
 
     const sendCol = document.createElement('div');
     sendCol.className = 'chat-send-col';
@@ -250,6 +273,75 @@ export class ChatInput {
 
   /** The streaming status element (for readOnly mode, shared reference) */
   get statusElement() { return this._streamStatus; }
+
+  // ── Upload files/folders to the session cwd, then insert their path(s) ──
+  // Called by the upload button, the folder picker, and ChatView's drag-drop.
+  // Each File may carry `_relPath` (drag-dropped folder) or `webkitRelativePath`
+  // (folder picker); preservePaths is inferred so the folder tree is recreated
+  // under cwd. After upload, the top-level path(s) are inserted at the cursor.
+  async uploadFiles(files) {
+    files = (files || []).filter(Boolean);
+    if (!files.length) return;
+    const cwd = this._getCwd();
+    if (!cwd) { this._uploadToast('No working directory for this session', true); return; }
+    this._uploadToast(`Uploading ${files.length} item${files.length > 1 ? 's' : ''}…`);
+    try {
+      const fd = new FormData();
+      const names = [];
+      for (const f of files) {
+        fd.append('files', f);
+        names.push(f._relPath || f.webkitRelativePath || f.name);
+      }
+      fd.append('destDir', cwd);
+      fd.append('fileNames', JSON.stringify(names));
+      if (names.some((n) => n.includes('/'))) fd.append('preservePaths', '1');
+      const res = await fetch('/api/upload', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`);
+      this._insertUploadedPaths(cwd, data.files || []);
+      this._uploadToast(null);
+    } catch (e) {
+      this._uploadToast('Upload failed: ' + e.message, true);
+    }
+  }
+
+  _insertUploadedPaths(cwd, uploaded) {
+    const base = cwd.replace(/\/+$/, '');
+    // One entry per top-level item: a file → its own path; a folder → the folder
+    // root (deduped across all its uploaded files).
+    const tops = new Set();
+    for (const f of uploaded) { const first = (f.name || '').split('/')[0]; if (first) tops.add(first); }
+    if (!tops.size) return;
+    const quote = (p) => /[\s'"$`\\()]/.test(p) ? `'${p.replace(/'/g, "'\\''")}'` : p;
+    const text = [...tops].map((t) => quote(base + '/' + t)).join(' ');
+    const ta = this._textarea;
+    const start = ta.selectionStart ?? ta.value.length;
+    const end = ta.selectionEnd ?? ta.value.length;
+    const before = ta.value.slice(0, start);
+    const after = ta.value.slice(end);
+    const sep = (before && !/\s$/.test(before)) ? ' ' : '';
+    const inserted = sep + text + ' ';
+    ta.value = before + inserted + after;
+    const pos = (before + inserted).length;
+    ta.focus();
+    try { ta.setSelectionRange(pos, pos); } catch {}
+    ta.dispatchEvent(new Event('input', { bubbles: true })); // resize + draft save
+  }
+
+  _uploadToast(msg, isError) {
+    if (!this._uploadToastEl) {
+      this._uploadToastEl = document.createElement('div');
+      this._uploadToastEl.className = 'chat-upload-toast hidden';
+      this._element.appendChild(this._uploadToastEl);
+    }
+    const el = this._uploadToastEl;
+    if (this._uploadToastTimer) { clearTimeout(this._uploadToastTimer); this._uploadToastTimer = null; }
+    if (!msg) { el.classList.add('hidden'); return; }
+    el.textContent = msg;
+    el.classList.toggle('chat-upload-toast-error', !!isError);
+    el.classList.remove('hidden');
+    if (isError || !/…$/.test(msg)) this._uploadToastTimer = setTimeout(() => el.classList.add('hidden'), 3000);
+  }
 
   /** The todo display element */
   get todoElement() { return this._todoDisplay; }
