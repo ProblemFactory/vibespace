@@ -515,7 +515,7 @@ Read/Write tool output uses highlight.js for syntax highlighting with line numbe
 ### 15. Frontend Optimization
 - **Minification**: esbuild `--minify` flag (2.5MB → 1.4MB)
 - **Gzip compression**: `compression` middleware on all Express responses (1.4MB → ~420KB over the wire, 83% total reduction)
-- **Static file caching**: `maxAge=0` with etag for cache revalidation on every request
+- **Cache-busting**: `index.html` is served by a route (not static) that injects `?v=<mtime>` onto every local `js`/`css` asset URL and sets `Cache-Control: no-cache`, so a changed bundle/CSS always gets a fresh fetch. Browsers serve unversioned `<script>`/`<link>` from memory cache on a soft reload without revalidating — users were stuck on a stale bundle after an update until a hard refresh; versioning the URL fixes that permanently. Other static files keep `maxAge=0` + etag.
 
 ## API Reference
 
