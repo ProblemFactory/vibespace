@@ -1,4 +1,5 @@
 import { escHtml, saveDraft, loadDraft, clearDraft, getStateSync } from './utils.js';
+import { UI_ICONS } from './icons.js';
 
 /**
  * ChatInput — input area for chat mode sessions.
@@ -416,7 +417,7 @@ export class ChatInput {
     const total = this._todos.length;
     if (!inProgress && completed === total) { this._todoDisplay.classList.add('hidden'); return; }
     const label = inProgress ? inProgress.activeForm || inProgress.content : `${completed}/${total} done`;
-    const icon = inProgress ? '\u23F3' : '\u2705';
+    const icon = inProgress ? UI_ICONS.hourglass : UI_ICONS.check;
     this._todoDisplay.innerHTML = `<span class="chat-todo-current">${icon} ${escHtml(label)} <span class="chat-status-dim">(${completed}/${total})</span></span>`;
     this._todoDisplay.classList.remove('hidden');
     this._todoDisplay.onclick = (e) => {
@@ -427,10 +428,10 @@ export class ChatInput {
       const popup = document.createElement('div');
       popup.className = 'chat-todo-popup';
       for (const t of this._todos) {
-        const icon = t.status === 'completed' ? '\u2705' : t.status === 'in_progress' ? '\u23F3' : '\u2B55';
+        const icon = t.status === 'completed' ? UI_ICONS.check : t.status === 'in_progress' ? UI_ICONS.hourglass : UI_ICONS.circle;
         const item = document.createElement('div');
         item.className = `chat-todo-item chat-todo-${t.status}`;
-        item.textContent = `${icon} ${t.content}`;
+        item.innerHTML = `${icon} <span>${escHtml(t.content)}</span>`;
         popup.appendChild(item);
       }
       const rect = this._todoDisplay.getBoundingClientRect();
