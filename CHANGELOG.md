@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.10.0] — 2026-06-24
+
+### Added
+
+- **Chat file/folder upload** — drag-drop onto a chat (desktop) or a paperclip button → Files/Folder menu (mobile): files/folders are saved into the session's working directory and the path(s) inserted into the input box. Backend-agnostic; reuses `/api/upload`.
+- **Colored file-explorer icons** — each file/folder icon is tinted by category (`fic-<category>`: folders amber, images purple, video red, audio cyan, code green, …) so types are distinguishable at a glance.
+- **Non-invasive usage monitoring** — usage now comes from the non-billable `GET /api/oauth/usage` with a **read-only** OAuth token (never refreshed). Stops consuming quota to measure quota and stops rotating Claude Code's refresh token, fixing the macOS daily-re-login (#20). Polls ~5 min with 429 backoff + keep-last-known.
+- **Cache-busting** — `index.html` is served with `?v=<mtime>` on every local js/css asset + `Cache-Control: no-cache`, so updates land on a normal refresh (no hard-refresh needed).
+
+### Fixed
+
+- **Sidebar jump-to-session** now auto-expands a collapsed/lazy folder before scrolling (previously did nothing when the target was hidden).
+- **Sidebar no longer re-renders on every poll** — `startedAt` (an active session's file mtime) was in the change-digest, so the list churned + lost scroll while browsing. Dropped it; scroll position preserved across re-renders.
+- **Remaining colorful emoji → SVG** (🎯 goal, ⏳ hourglass, 🪙 budget, ⏸/⛔ goal status, ⚡ cache ratio).
+- **Chat drag-upload overlay was permanently visible** — the new overlay toggled a `.hidden` class but this project has no global `.hidden` rule, so it was never hidden. Added the scoped rule; overlay shows on drag, hides on a dragover-idle timer.
+- **walter's reports**: URL double-escape of `&` in chat links (#16), and silent resume failure from a 32KB session-meta read truncating past an early large attachment (#18).
+
 ## [2.9.0] — 2026-06-22
 
 ### Changed
