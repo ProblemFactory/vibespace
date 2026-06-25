@@ -176,6 +176,23 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
 
 app.use(compression());
+// Serve index.html with cache-busting query params on every local js/css asset
+// (?v=<mtime>). Browsers serve unversioned <script>/<link> from memory cache on
+// a soft reload without revalidating, so users were stuck on a stale bundle
+// after an update until a hard refresh. Versioning the URL forces a fresh fetch
+// whenever the file changes — no hard refresh ever needed.
+app.get(['/', '/index.html'], (req, res, next) => {
+  try {
+    const pub = path.join(__dirname, 'public');
+    let html = fs.readFileSync(path.join(pub, 'index.html'), 'utf-8');
+    html = html.replace(/(href|src)="\/([^"?]+\.(?:js|css))"/g, (m, attr, file) => {
+      try { return `${attr}="/${file}?v=${Math.floor(fs.statSync(path.join(pub, file)).mtimeMs)}"`; }
+      catch { return m; }
+    });
+    res.set('Cache-Control', 'no-cache');
+    res.type('html').send(html);
+  } catch { next(); }
+});
 app.use(express.static(path.join(__dirname, 'public'), { etag: true, lastModified: true, maxAge: 0 }));
 app.use(express.json({ limit: '50mb' }));
 
