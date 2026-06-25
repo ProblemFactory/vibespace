@@ -9,6 +9,8 @@
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   border: 2.5px dashed var(--accent); border-radius: 8px; pointer-events: none;
 }
+/* No global .hidden in this project — each component hides its own */
+.chat-drop-overlay.hidden { display: none; }
 .chat-drop-hint {
   padding: 12px 20px; border-radius: 8px; font-size: 14px; font-weight: 600;
   background: var(--bg-dialog); color: var(--text); box-shadow: 0 4px 16px rgba(0,0,0,0.3);
@@ -20,6 +22,7 @@
   background: var(--bg-dialog); color: var(--text); border: 1px solid var(--border); box-shadow: 0 2px 10px rgba(0,0,0,0.25);
 }
 .chat-upload-toast-error { border-color: var(--red); color: var(--red); }
+.chat-upload-toast.hidden { display: none; }
 /* Goal indicator in status bar */
 .chat-status-goal { color: var(--accent); font-weight: 600; }
 .chat-status-goal-empty { opacity: 0.45; filter: grayscale(0.6); }
