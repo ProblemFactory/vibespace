@@ -181,6 +181,7 @@ class ChatRenderers {
     const hookMatch = rawText.match(/^A session-scoped Stop hook is now active with condition: "([\s\S]*?)"/);
     const hookFeedback = rawText.match(/^Stop hook feedback:\s*\[[\s\S]*?\]:\s*([\s\S]*)/);
 
+    let labelIcon = ''; // SVG prefix rendered outside escHtml (label text is escaped)
     if (cmdMatch) {
       label = `/${cmdMatch[1]}`;
       if (argsMatch) detail = argsMatch[1].trim();
@@ -188,18 +189,21 @@ class ChatRenderers {
       label = stdoutMatch[1].trim().substring(0, 80);
       if (stdoutMatch[1].length > 80) label += '...';
     } else if (hookMatch) {
-      label = `\u{1F3AF} Goal: ${hookMatch[1].substring(0, 60)}${hookMatch[1].length > 60 ? '...' : ''}`;
+      labelIcon = UI_ICONS.goal;
+      label = `Goal: ${hookMatch[1].substring(0, 60)}${hookMatch[1].length > 60 ? '...' : ''}`;
     } else if (hookFeedback) {
-      label = '\u{1F3AF} Goal check: not met';
+      labelIcon = UI_ICONS.goal;
+      label = 'Goal check: not met';
       detail = hookFeedback[1].trim();
     } else {
       label = rawText.replace(/<[^>]+>/g, '').trim().substring(0, 80) || 'notification';
     }
 
+    const labelHtml = (labelIcon ? labelIcon + ' ' : '') + escHtml(label);
     if (detail) {
-      el.innerHTML = `<details class="chat-hook-details"><summary class="chat-hook-summary">${escHtml(label)}</summary><pre class="chat-hook-output">${escHtml(detail)}</pre></details>`;
+      el.innerHTML = `<details class="chat-hook-details"><summary class="chat-hook-summary">${labelHtml}</summary><pre class="chat-hook-output">${escHtml(detail)}</pre></details>`;
     } else {
-      el.innerHTML = `<span class="chat-system-text">${escHtml(label)}</span>`;
+      el.innerHTML = `<span class="chat-system-text">${labelHtml}</span>`;
     }
     return el;
   }
@@ -242,7 +246,7 @@ class ChatRenderers {
       const isFileOp = ['Edit', 'Write', 'Read'].includes(block.toolName);
       const isPending = msg.status === 'pending';
       if (isPending && isFileOp) {
-        const label = `\u23F3 ${escHtml(block.toolName)} ${this.clickablePath(fp)}`;
+        const label = `${UI_ICONS.hourglass} ${escHtml(block.toolName)} ${this.clickablePath(fp)}`;
         html = `<div class="chat-tool-pending"><span class="chat-tool-label">${label}</span><span class="chat-spinner"></span></div>`;
       } else {
         const desc = isAgent && block.input?.description ? `${icon} Agent: ${escHtml(block.input.description)}` : `${icon} ${escHtml(block.toolName)}`;
@@ -259,7 +263,7 @@ class ChatRenderers {
       html = `<pre>${escHtml(JSON.stringify(block, null, 2))}</pre>`;
     }
 
-    const toolLabel = msg.toolStatus === 'error' ? '\u2717' : msg.status === 'pending' ? '\u23F3' : '\u2713';
+    const toolLabel = msg.toolStatus === 'error' ? '\u2717' : msg.status === 'pending' ? UI_ICONS.hourglass : '\u2713';
     this.wrapMsg(el, 'tool', toolLabel, html);
 
     // Permission overlay — only for pending or denied (resolved+complete = no overlay needed)

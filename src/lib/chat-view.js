@@ -1315,7 +1315,7 @@ class ChatView {
     const total = this._todos.length;
     if (!inProgress && completed === total) { this._todoDisplay.classList.add('hidden'); return; }
     const label = inProgress ? inProgress.activeForm || inProgress.content : `${completed}/${total} done`;
-    const icon = inProgress ? '\u23F3' : '\u2705';
+    const icon = inProgress ? UI_ICONS.hourglass : UI_ICONS.check;
     this._todoDisplay.innerHTML = `<span class="chat-todo-current">${icon} ${escHtml(label)} <span class="chat-status-dim">(${completed}/${total})</span></span>`;
     this._todoDisplay.classList.remove('hidden');
   }

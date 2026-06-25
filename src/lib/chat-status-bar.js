@@ -184,14 +184,14 @@ export class ChatStatusBar {
       const status = (this._goalStatus || '').toLowerCase();
       // Codex statuses beyond the basic four: usageLimited (rate limit hit —
       // resumes only via explicit reactivation), budgetLimited (token budget)
-      const statusIcon = status === 'active' ? '\u{25B6}' : status === 'paused' ? '⏸' : status === 'blocked' ? '⛔' : status === 'complete' ? '✓'
-        : status === 'usagelimited' ? '⏳' : status === 'budgetlimited' ? '🪙' : '';
+      const statusIcon = status === 'active' ? UI_ICONS.play : status === 'paused' ? UI_ICONS.pause : status === 'blocked' ? UI_ICONS.block : status === 'complete' ? UI_ICONS.check
+        : status === 'usagelimited' ? UI_ICONS.hourglass : status === 'budgetlimited' ? UI_ICONS.coin : '';
       const statusHint = status === 'usagelimited' ? ' — paused by usage limit, click → Continue Goal to resume'
         : status === 'budgetlimited' ? ' — token budget exhausted, click → Continue Goal to resume' : '';
       const shortGoal = this._goal.length > 30 ? this._goal.substring(0, 30) + '…' : this._goal;
-      parts.push(`<span class="chat-status-goal chat-status-clickable" title="${escHtml(this._goal + statusHint)}">\u{1F3AF}${statusIcon ? ' ' + statusIcon : ''} <span class="chat-goal-timer">${elapsed}</span> ${escHtml(shortGoal)}</span>`);
+      parts.push(`<span class="chat-status-goal chat-status-clickable" title="${escHtml(this._goal + statusHint)}">${UI_ICONS.goal}${statusIcon ? ' ' + statusIcon : ''} <span class="chat-goal-timer">${elapsed}</span> ${escHtml(shortGoal)}</span>`);
     } else {
-      parts.push(`<span class="chat-status-goal chat-status-goal-empty chat-status-clickable" title="Set a goal \u2014 the agent keeps working until the condition is met">\u{1F3AF}</span>`);
+      parts.push(`<span class="chat-status-goal chat-status-goal-empty chat-status-clickable" title="Set a goal \u2014 the agent keeps working until the condition is met">${UI_ICONS.goal}</span>`);
     }
 
     // Permission mode (always show, click to change; Codex sandbox policy in tooltip)

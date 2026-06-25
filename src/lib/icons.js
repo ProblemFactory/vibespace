@@ -49,4 +49,13 @@ export const UI_ICONS = {
   memo:      _s('<path d="M4 1h8a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1z"/><path d="M6 5h4M6 8h4M6 11h2"/>'),
   link:      _s('<path d="M7 9l2-2M6 12l-1.5 1.5a2 2 0 01-3-3L4 8M10 4l1.5-1.5a2 2 0 013 3L12 8"/>'),
   tasks:     _s('<path d="M4 4l8 0M4 8l8 0M4 12l8 0"/><circle cx="2" cy="4" r="0.8" fill="currentColor" stroke="none"/><circle cx="2" cy="8" r="0.8" fill="currentColor" stroke="none"/><circle cx="2" cy="12" r="0.8" fill="currentColor" stroke="none"/>'),
+  // Goal indicator + status icons (replace 🎯 ▶ ⏸ ⛔ ✓ ⏳ 🪙 emoji)
+  goal:      _s('<circle cx="8" cy="8" r="6.5"/><circle cx="8" cy="8" r="3.5"/><circle cx="8" cy="8" r="1" fill="currentColor" stroke="none"/>'),
+  hourglass: _s('<path d="M4 2h8M4 14h8M5.5 2v2.2c0 1.3 2.5 2.5 2.5 3.8s-2.5 2.5-2.5 3.8V14M10.5 2v2.2c0 1.3-2.5 2.5-2.5 3.8s2.5 2.5 2.5 3.8V14"/>'),
+  play:      _s('<path d="M5 3.5l7 4.5-7 4.5z"/>', { fill: true }),
+  pause:     _s('<rect x="4.5" y="3" width="2.4" height="10" rx="0.6"/><rect x="9.1" y="3" width="2.4" height="10" rx="0.6"/>', { fill: true }),
+  block:     _s('<circle cx="8" cy="8" r="6"/><path d="M3.8 3.8l8.4 8.4"/>'),
+  check:     _s('<path d="M3 8.5l3.5 3.5L13 4.5"/>'),
+  coin:      _s('<circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="2.5"/>'),
+  circle:    _s('<circle cx="8" cy="8" r="6"/>'),
 };
