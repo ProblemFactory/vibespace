@@ -424,13 +424,34 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
                 }
               }
             }
+            // Claude fork: adopt the session id from the stream-json header.
+            // --fork-session makes claude mint a NEW id at startup and write a
+            // separate JSONL (verified: plain resume reuses the id, fork returns
+            // a fresh one). Without adopting it the WebUI keeps tracking the
+            // PARENT id, so the forked window is indistinguishable from a plain
+            // resume — it shadows the original and the fork's transcript is
+            // orphaned. Guarded by _forkRequested (one-shot) so a normal resume,
+            // which the parser sees on every line, can never be hijacked.
+            if (session._forkRequested && session.backend === 'claude'
+                && typeof msg.session_id === 'string' && msg.session_id
+                && session.backendSessionId !== msg.session_id) {
+              if (session.backendSessionId) {
+                const prev = session.forkedFrom || [];
+                if (!prev.includes(session.backendSessionId)) prev.push(session.backendSessionId);
+                session.forkedFrom = prev;
+              }
+              session.backendSessionId = msg.session_id;
+              session.claudeSessionId = msg.session_id;
+              session._forkRequested = false; // adopt once, then stop watching
+              changed = true;
+            }
             if (changed && session.sockName) {
               writeSessionMeta(session.sockName, {
                 name: session.name,
                 cwd: session.cwd,
                 backend: session.backend,
                 backendSessionId: session.backendSessionId,
-                claudeSessionId: null,
+                claudeSessionId: session.claudeSessionId || null,
                 sourceKind: session.sourceKind || null,
                 agentKind: session.agentKind || 'primary',
                 agentRole: session.agentRole || '',

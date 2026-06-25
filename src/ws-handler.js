@@ -184,6 +184,10 @@ function registerWsHandler(wss, ctx) {
             // are stdout-only) — remember what this session was started with
             // so attach can restore the status bar immediately
             _permissionMode: data.permissionMode || null,
+            // Claude --fork-session mints a NEW session id at startup; this arms
+            // the stdout parser to adopt it (so the fork becomes its own session
+            // instead of shadowing the parent). One-shot, cleared on adoption.
+            _forkRequested: backend === 'claude' && !!data.fork,
             sockName, socketPath, buffer: '',
           };
           if (codexThreadBaseline) session._codexThreadBaseline = codexThreadBaseline;
