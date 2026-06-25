@@ -91,7 +91,7 @@ class ChatRenderers {
    * @param {HTMLElement} opts.messageList - Message list DOM element
    * @param {Function} [opts.onPermissionResolve] - Called when a permission is resolved (allow/deny)
    */
-  constructor({ ws, sessionId, app, backend = 'claude', compact, messageList, onPermissionResolve }) {
+  constructor({ ws, sessionId, app, backend = 'claude', compact, messageList, onPermissionResolve, onFork }) {
     this.ws = ws;
     this.sessionId = sessionId;
     this.app = app;
@@ -99,6 +99,7 @@ class ChatRenderers {
     this._compact = compact;
     this._messageList = messageList;
     this._onPermissionResolve = onPermissionResolve || (() => {});
+    this._onFork = onFork || null;
     this.setupLinkHandler();
   }
 
@@ -885,6 +886,25 @@ class ChatRenderers {
       this.openInTempEditor(text);
     };
     el.style.position = 'relative';
+    el.appendChild(btn);
+    this.addForkBtn(el, msg);
+  }
+
+  // "Fork from here" — branches a NEW session containing the conversation up to
+  // and including this assistant message (claude --resume-session-at <uuid>
+  // --fork-session). Claude-only (the flag is claude-specific), assistant
+  // messages only (that's the truncation boundary the CLI accepts), and never
+  // in subagent viewers. Sits next to the open-in-editor button.
+  addForkBtn(el, msg) {
+    if (!this._onFork) return;
+    if (this.backend !== 'claude') return;
+    if (msg.role !== 'assistant' || !msg.uuid) return;
+    if (typeof this.sessionId === 'string' && this.sessionId.startsWith('sub-')) return;
+    const btn = document.createElement('button');
+    btn.className = 'chat-open-editor-btn chat-fork-btn';
+    btn.innerHTML = UI_ICONS.forkBranch;
+    btn.title = 'Fork from here — branch a new session up to this message';
+    btn.onclick = (e) => { e.stopPropagation(); this._onFork(msg.uuid, msg); };
     el.appendChild(btn);
   }
 

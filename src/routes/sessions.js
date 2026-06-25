@@ -79,7 +79,15 @@ function setup(ctx) {
     }
 
     let payload;
-    if (offset !== undefined || limit !== undefined) {
+    if (req.query.untilUuid) {
+      // Fork-from-here: return the conversation truncated at the given message
+      // (matches claude --resume-session-at), last 50 of that range for the
+      // initial view; total=upto so scroll-up pagination still loads older.
+      const idx = mm.messages.findIndex(m => m.uuid === req.query.untilUuid);
+      const upto = idx >= 0 ? idx + 1 : mm.total;
+      const start = Math.max(0, upto - 50);
+      payload = { messages: mm.messages.slice(start, upto), total: upto };
+    } else if (offset !== undefined || limit !== undefined) {
       const o = parseInt(offset) || 0;
       const l = parseInt(limit) || 50;
       payload = { messages: mm.slice(o, l), total: mm.total };

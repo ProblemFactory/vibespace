@@ -645,9 +645,10 @@ class App {
       forkBtn.addEventListener('click', () => {
         const text = forkTa.value.trim();
         if (!text || !this._pendingFork) return;
-        const info = this._pendingFork; this._pendingFork = null;
+        const info = this._pendingFork; const at = this._pendingForkAt;
+        this._pendingFork = null; this._pendingForkAt = null;
         this.hideDialogs();
-        this._doForkSession(info, text);
+        this._doForkSession(info, text, at);
       });
       forkTa.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); forkBtn.click(); }
@@ -785,7 +786,7 @@ class App {
     };
   }
 
-  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, fork, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage }) {
+  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, fork, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, forkAtUuid }) {
     this._hideWelcome();
     const defaults = this._getBackendSessionDefaults(backend);
     const sessionMode = mode || this.settings.get('session.defaultMode') || 'chat';
@@ -842,9 +843,11 @@ class App {
             chatView.dispose(); this.sessions.delete(winInfo.id); this._checkWelcome();
           };
           winInfo._notifyChanged = () => this.updateTaskbar();
-          // Load JSONL history for resumed sessions
+          // Load JSONL history for resumed sessions (truncated at the fork
+          // point when forking from a specific message, so the displayed history
+          // matches the fork's actual --resume-session-at boundary).
           if (resumeId) {
-            fetch(`/api/session-messages?backend=${encodeURIComponent(backend)}&backendSessionId=${encodeURIComponent(backendSessionId || resumeId)}&cwd=${encodeURIComponent(cwd||'')}&withStatus=1`)
+            fetch(`/api/session-messages?backend=${encodeURIComponent(backend)}&backendSessionId=${encodeURIComponent(backendSessionId || resumeId)}&cwd=${encodeURIComponent(cwd||'')}&withStatus=1${forkAtUuid ? `&untilUuid=${encodeURIComponent(forkAtUuid)}` : ''}`)
               .then(r => r.json())
               .then(data => {
                 if (data.messages?.length) chatView.loadHistory(data.messages, data.total);
@@ -1066,9 +1069,26 @@ class App {
   forkSession(sessionInfo) {
     const mode = sessionInfo.webuiMode || this.settings.get('session.defaultMode') || 'chat';
     if (mode !== 'chat') { this._doForkSession(sessionInfo, ''); return; }
+    this._openForkDialog(sessionInfo, null);
+  }
+
+  // Fork from a specific assistant message (chat fork button). Passes the
+  // message uuid as the truncation point (--resume-session-at) so the branch
+  // contains the conversation only up to that message.
+  forkFromMessage(sessionInfo, messageUuid) {
+    this._openForkDialog(sessionInfo, messageUuid || null);
+  }
+
+  _openForkDialog(sessionInfo, forkAtUuid) {
     this._pendingFork = sessionInfo;
+    this._pendingForkAt = forkAtUuid;
     if (this.isMobile) this.sidebar.toggle(false);
     this._showDialog('dialog-fork');
+    // Swap the hint depending on whole-session vs from-a-point fork
+    const genHint = document.getElementById('fork-hint-general');
+    const atHint = document.getElementById('fork-hint-at');
+    if (genHint) genHint.classList.toggle('hidden', !!forkAtUuid);
+    if (atHint) atHint.classList.toggle('hidden', !forkAtUuid);
     const ta = document.getElementById('fork-first-message');
     const btn = document.getElementById('btn-fork-send');
     if (ta) { ta.value = ''; }
@@ -1085,7 +1105,7 @@ class App {
     this.ws.send({ type: 'chat-input', sessionId, text: t, msgId: Date.now() + '-' + Math.random().toString(36).slice(2, 8) });
   }
 
-  _doForkSession(sessionInfo, initialMessage = '') {
+  _doForkSession(sessionInfo, initialMessage = '', resumeAt = null) {
     const backend = sessionInfo.backend || 'claude';
     const resumeId = sessionInfo.backendSessionId || sessionInfo.sessionId;
     const baseName = sessionInfo.webuiName || sessionInfo.name || 'Session';
@@ -1096,6 +1116,12 @@ class App {
     while (allNames.includes(forkName)) { forkName = `${baseName} (forked ${n++})`; }
 
     const mode = sessionInfo.webuiMode || this.settings.get('session.defaultMode') || 'chat';
+    // --resume-session-at <uuid> truncates the fork to up-to-and-including that
+    // assistant message (claude-only). uuid has no spaces, so it tokenizes
+    // cleanly inside the extraArgs string.
+    const forkArgs = backend === 'claude'
+      ? ('--fork-session' + (resumeAt ? ` --resume-session-at ${resumeAt}` : ''))
+      : '';
     this.createSession({
       cwd: sessionInfo.cwd,
       name: forkName,
@@ -1104,8 +1130,9 @@ class App {
       backend,
       backendSessionId: resumeId,
       fork: true,
-      extraArgs: backend === 'claude' ? '--fork-session' : '',
+      extraArgs: forkArgs,
       initialMessage,
+      forkAtUuid: resumeAt || undefined,
     });
   }
 

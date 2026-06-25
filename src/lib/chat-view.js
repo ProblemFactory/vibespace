@@ -87,6 +87,7 @@ class ChatView {
       compact: this._compact,
       messageList: this._messageList,
       onPermissionResolve: () => this._hideTyping(),
+      onFork: (uuid, msg) => this._forkFromMessage(uuid, msg),
     });
 
     // Position indicator (shows when not at bottom, e.g. "120-170 / 3000")
@@ -402,6 +403,19 @@ class ChatView {
         this._extendTop();
       }
     }, 100);
+  }
+
+  // Fork a new session from a specific assistant message (the chat fork button).
+  // Resolves this view's session, then hands off to app.forkFromMessage which
+  // adds --resume-session-at <uuid> so the branch is truncated at this point.
+  _forkFromMessage(uuid, msg) {
+    const { backend, backendSessionId, cwd } = this._getSessionIds();
+    if (backend !== 'claude' || !backendSessionId || !uuid) return;
+    const allSess = this.app.sidebar?._allSessions || [];
+    const match = allSess.find(s => s.webuiId === this.sessionId)
+      || allSess.find(s => (s.backendSessionId || s.sessionId) === backendSessionId);
+    const webuiName = match?.webuiName || match?.name || this.winInfo?._openSpec?.name || 'Session';
+    this.app.forkFromMessage({ backend, backendSessionId, cwd, webuiName, webuiMode: 'chat' }, uuid);
   }
 
   // Get session identifiers for API calls

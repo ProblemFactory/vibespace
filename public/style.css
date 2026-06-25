@@ -804,6 +804,7 @@ html, body {
 .dialog-body textarea { resize: vertical; min-height: 56px; line-height: 1.4; }
 .dialog-body input:focus, .dialog-body select:focus, .dialog-body textarea:focus { outline: none; border-color: var(--accent); }
 .dialog-hint { font-size: 11px; color: var(--text-dim); line-height: 1.45; margin: 0; }
+.dialog-hint.hidden { display: none; } /* no global .hidden in this project */
 .dialog-footer {
   padding: 10px 14px; border-top: 1px solid var(--border);
   display: flex; justify-content: flex-end; gap: 6px;
