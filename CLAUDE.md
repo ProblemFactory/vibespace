@@ -407,7 +407,7 @@ Mobile-specific UI code extracted into dedicated modules to keep desktop and mob
 
 **ChatRenderers** (`src/lib/chat-renderers.js`): All message rendering — `renderUserMsg`, `renderAssistantMsg`, `renderToolMsg`, `renderToolResult`, `renderSystemMsg`, `renderPermissionOverlay`, `renderEditDiff`, `renderMarkdown`. Linkification via unified `linkifySegment` (URL + path regex). Wrap toggles + searchable language picker. `renderSystemMsg` returns `{el, sideEffect}` so ChatView applies model/permMode/slashCommands without circular deps.
 
-**ChatInput** (`src/lib/chat-input.js`): Textarea, send, attachments, slash command dropdown, draft persistence, streaming status indicator, TODO display, interrupt button.
+**ChatInput** (`src/lib/chat-input.js`): Textarea, send, attachments, slash command dropdown, draft persistence, streaming status indicator, TODO display, interrupt button. **File/folder upload**: a paperclip button (mobile/click entry point) → Files/Folder menu; `uploadFiles()` POSTs to `/api/upload` with `destDir` = the session cwd (`getCwd` callback) + `fileNames` + `preservePaths` (inferred from relative paths). `_insertUploadedPaths` inserts one shell-quoted path per top-level item at the cursor. Desktop also drag-drops onto the whole chat view: `ChatView._setupChatDrop` (editable views only) shows a dashed overlay and `_collectDroppedFiles` recurses dropped directories via the DataTransfer entries API. Backend-agnostic.
 
 **ChatStatusBar** (`src/lib/chat-status-bar.js`): Model badge, context %, cache ratio, cost, permission mode dropdown, background task popup.
 
@@ -610,6 +610,9 @@ Server → Client: `created`, `output`, `msg` (normalized: op=create/edit/meta),
 - Send: Enter (normal), Ctrl+Enter (expanded mode)
 - Chat font size follows global A-/A+ via CSS zoom
 - Draft persistence: chat input auto-saved every 300ms to server, synced across clients (Telegram-style), restored on refresh/resume
+- Upload to chat: drag-drop files/folders onto the chat (desktop) or the paperclip button → Files/Folder menu (mobile) → saved into the session's working directory and the path(s) inserted into the input box
+- File-explorer icons colored by category (`fic-<category>` class → CSS tint; folders amber, images purple, video red, audio cyan, code green, …) so types are distinguishable
+- Sidebar jump-to-focused-session auto-expands a collapsed/lazy folder before scrolling; the session list no longer re-renders on every poll (startedAt dropped from the change-digest) and preserves scroll position across re-renders
 - Syntax highlighting in Read/Write output: 30 languages via highlight.js, auto-detected from file extension, line numbers, searchable language picker dropdown, wrap toggle
 - Edit diff view: flex layout with fixed +/- prefix column, suffix context matching, wrap toggle
 - JSONL history loaded on resume (full past conversation)
