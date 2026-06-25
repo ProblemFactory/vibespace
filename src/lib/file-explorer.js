@@ -1,6 +1,6 @@
 import { formatSize, attachPopoverClose, createPopover, showContextMenu, getStateSync, copyText, escHtml } from './utils.js';
 import { setupDirAutocomplete } from './autocomplete.js';
-import { getFileIcon, hasDedicatedViewer } from './file-types.js';
+import { getFileIcon, hasDedicatedViewer, getCategory } from './file-types.js';
 import { FILE_ICONS, UI_ICONS } from './icons.js';
 import { FileViewer } from './file-viewer.js';
 
@@ -692,7 +692,8 @@ class FileExplorer {
     if (this._viewMode === 'icon') {
       const cell = document.createElement('div'); cell.className = 'file-icon-cell';
       cell.dataset.name = item.name; cell.dataset.isDir = item.isDirectory;
-      const icon = document.createElement('div'); icon.className = 'file-icon-large';
+      const icon = document.createElement('div');
+      icon.className = 'file-icon-large fic-' + (item.isDirectory ? 'folder' : getCategory(this._getExtension(item.name)));
       icon.innerHTML = item.isDirectory ? FILE_ICONS.folder : getFileIcon(item.name);
       const label = document.createElement('div'); label.className = 'file-icon-label'; label.textContent = item.name;
       cell.append(icon, label);
@@ -712,7 +713,9 @@ class FileExplorer {
     } else {
       const row = document.createElement('div'); row.className = 'file-item';
       row.dataset.name = item.name; row.dataset.isDir = item.isDirectory;
-      const iconEl = document.createElement('span'); iconEl.className = 'file-icon'; iconEl.innerHTML = item.isDirectory ? FILE_ICONS.folder : getFileIcon(item.name);
+      const iconEl = document.createElement('span');
+      iconEl.className = 'file-icon fic-' + (item.isDirectory ? 'folder' : getCategory(this._getExtension(item.name)));
+      iconEl.innerHTML = item.isDirectory ? FILE_ICONS.folder : getFileIcon(item.name);
       row.appendChild(iconEl);
 
       const visCols = this._getVisibleColumns();

@@ -41,6 +41,20 @@
 .file-item.selected { background: var(--accent-dim); border-left-color: var(--accent); }
 .file-item[draggable] { cursor: grab; }
 .file-icon { font-size: 13px; width: 16px; text-align: center; flex-shrink: 0; padding: 0 2px; }
+/* Color file/folder icons by category so types are distinguishable at a glance.
+   The SVGs use currentColor, so setting `color` tints them. Mid-tone hues that
+   read on both light and dark themes. */
+.fic-folder   { color: #e0b341; }  /* amber — folders */
+.fic-image    { color: #c678dd; }  /* purple */
+.fic-video    { color: #e06c75; }  /* red */
+.fic-audio    { color: #56b6c2; }  /* cyan */
+.fic-document { color: #e0564e; }  /* pdf red */
+.fic-office   { color: #4a90d9; }  /* blue */
+.fic-code     { color: #98c379; }  /* green */
+.fic-web      { color: #e6914a; }  /* orange */
+.fic-data     { color: #d19a66; }  /* tan */
+.fic-text     { color: #8a94a6; }  /* muted gray-blue */
+.fic-unknown  { color: var(--text-dim); }
 .file-name { width: var(--col-name-w, 250px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; padding: 0 6px; box-sizing: border-box; }
 .file-meta { color: var(--text-dim); font-size: 10px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 6px; box-sizing: border-box; }
 .file-size { width: var(--col-size-w, 80px); }
