@@ -1343,20 +1343,33 @@ class ChatView {
     overlay.innerHTML = '<div class="chat-drop-hint">Drop to upload to the working directory</div>';
     container.appendChild(overlay);
     this._dropOverlay = overlay;
-    let depth = 0;
     const isFileDrag = (e) => Array.from(e.dataTransfer?.types || []).includes('Files');
-    container.addEventListener('dragenter', (e) => {
+    const hide = () => overlay.classList.add('hidden');
+    // dragover fires continuously while hovering, so showing here (rather than
+    // a fragile dragenter/dragleave depth counter, which browsers fire
+    // unbalanced and leaves the overlay stuck) keeps it visible reliably.
+    container.addEventListener('dragover', (e) => {
       if (!isFileDrag(e)) return;
-      e.preventDefault(); depth++; overlay.classList.remove('hidden');
+      e.preventDefault();
+      overlay.classList.remove('hidden');
     });
-    container.addEventListener('dragover', (e) => { if (isFileDrag(e)) e.preventDefault(); });
-    container.addEventListener('dragleave', () => { if (--depth <= 0) { depth = 0; overlay.classList.add('hidden'); } });
+    // Hide only when the cursor truly leaves the chat view — relatedTarget is
+    // null (left the window) or outside the container (not a child).
+    container.addEventListener('dragleave', (e) => {
+      if (!e.relatedTarget || !container.contains(e.relatedTarget)) hide();
+    });
     container.addEventListener('drop', async (e) => {
+      hide();
       if (!isFileDrag(e)) return;
-      e.preventDefault(); depth = 0; overlay.classList.add('hidden');
+      e.preventDefault();
       const files = await this._collectDroppedFiles(e.dataTransfer);
       if (files.length && this._chatInput) this._chatInput.uploadFiles(files);
     });
+    // Safety net: any drop/dragend anywhere (released outside the view, dropped
+    // on another element) ends the drag and clears the overlay.
+    this._dropEndHandler = hide;
+    document.addEventListener('drop', this._dropEndHandler);
+    document.addEventListener('dragend', this._dropEndHandler);
   }
 
   // Collect dropped files, recursing into directories (DataTransferItem entries
@@ -1553,6 +1566,11 @@ class ChatView {
     if (this._chatMinimap) this._chatMinimap.dispose();
     if (this._search) this._search.dispose();
     if (this._gapObserver) { this._gapObserver.disconnect(); this._gapObserver = null; }
+    if (this._dropEndHandler) {
+      document.removeEventListener('drop', this._dropEndHandler);
+      document.removeEventListener('dragend', this._dropEndHandler);
+      this._dropEndHandler = null;
+    }
   }
 }
 
