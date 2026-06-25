@@ -225,8 +225,10 @@ class ChatView {
         }
       },
       onInterrupt: () => this.ws.send({ type: 'interrupt', sessionId: this.sessionId }),
+      getCwd: () => this._getSessionIds().cwd,
     });
     this._chatInput.popupContainer = container;
+    this._setupChatDrop(container);
 
     // Search (extracted to ChatSearch)
     this._search = new ChatSearch(this._messageList, {
@@ -1330,6 +1332,54 @@ class ChatView {
 
   _scrollToBottom() {
     this._forceScrollToBottom();
+  }
+
+  // Drag-and-drop file/folder upload onto the chat → saved into the session's
+  // working directory, with the path inserted into the input. (Editable views
+  // only; the input button handles the mobile/click path.)
+  _setupChatDrop(container) {
+    const overlay = document.createElement('div');
+    overlay.className = 'chat-drop-overlay hidden';
+    overlay.innerHTML = '<div class="chat-drop-hint">Drop to upload to the working directory</div>';
+    container.appendChild(overlay);
+    this._dropOverlay = overlay;
+    let depth = 0;
+    const isFileDrag = (e) => Array.from(e.dataTransfer?.types || []).includes('Files');
+    container.addEventListener('dragenter', (e) => {
+      if (!isFileDrag(e)) return;
+      e.preventDefault(); depth++; overlay.classList.remove('hidden');
+    });
+    container.addEventListener('dragover', (e) => { if (isFileDrag(e)) e.preventDefault(); });
+    container.addEventListener('dragleave', () => { if (--depth <= 0) { depth = 0; overlay.classList.add('hidden'); } });
+    container.addEventListener('drop', async (e) => {
+      if (!isFileDrag(e)) return;
+      e.preventDefault(); depth = 0; overlay.classList.add('hidden');
+      const files = await this._collectDroppedFiles(e.dataTransfer);
+      if (files.length && this._chatInput) this._chatInput.uploadFiles(files);
+    });
+  }
+
+  // Collect dropped files, recursing into directories (DataTransferItem entries
+  // must be read synchronously before the first await), tagging each File with
+  // its relative path so folder trees are recreated under the cwd.
+  async _collectDroppedFiles(dt) {
+    const entries = Array.from(dt.items || []).map((i) => i.webkitGetAsEntry?.()).filter(Boolean);
+    if (!entries.length) return Array.from(dt.files || []);
+    const out = [];
+    const walk = async (entry, prefix) => {
+      if (entry.isFile) {
+        const file = await new Promise((res, rej) => entry.file(res, rej));
+        try { file._relPath = prefix + entry.name; } catch {}
+        out.push(file);
+      } else if (entry.isDirectory) {
+        const reader = entry.createReader();
+        const readBatch = () => new Promise((res, rej) => reader.readEntries(res, rej));
+        let batch;
+        do { batch = await readBatch(); for (const e of batch) await walk(e, prefix + entry.name + '/'); } while (batch.length);
+      }
+    };
+    for (const entry of entries) await walk(entry, '');
+    return out;
   }
 
   // Re-attach to session after reconnect: re-register with server + sync missed messages

@@ -229,6 +229,7 @@ router.post('/api/upload', upload.array('files'), (req, res) => {
   try {
     const results = [];
     const destRoot = path.resolve(destDir);
+    fs.mkdirSync(destRoot, { recursive: true }); // ensure target exists (plain-file uploads to a fresh dir)
     for (let i = 0; i < req.files.length; i++) {
       const file = req.files[i];
       const name = clientNames[i] || file.originalname;
