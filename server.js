@@ -424,34 +424,13 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
                 }
               }
             }
-            // Claude fork: adopt the session id from the stream-json header.
-            // --fork-session makes claude mint a NEW id at startup and write a
-            // separate JSONL (verified: plain resume reuses the id, fork returns
-            // a fresh one). Without adopting it the WebUI keeps tracking the
-            // PARENT id, so the forked window is indistinguishable from a plain
-            // resume — it shadows the original and the fork's transcript is
-            // orphaned. Guarded by _forkRequested (one-shot) so a normal resume,
-            // which the parser sees on every line, can never be hijacked.
-            if (session._forkRequested && session.backend === 'claude'
-                && typeof msg.session_id === 'string' && msg.session_id
-                && session.backendSessionId !== msg.session_id) {
-              if (session.backendSessionId) {
-                const prev = session.forkedFrom || [];
-                if (!prev.includes(session.backendSessionId)) prev.push(session.backendSessionId);
-                session.forkedFrom = prev;
-              }
-              session.backendSessionId = msg.session_id;
-              session.claudeSessionId = msg.session_id;
-              session._forkRequested = false; // adopt once, then stop watching
-              changed = true;
-            }
             if (changed && session.sockName) {
               writeSessionMeta(session.sockName, {
                 name: session.name,
                 cwd: session.cwd,
                 backend: session.backend,
                 backendSessionId: session.backendSessionId,
-                claudeSessionId: session.claudeSessionId || null,
+                claudeSessionId: null,
                 sourceKind: session.sourceKind || null,
                 agentKind: session.agentKind || 'primary',
                 agentRole: session.agentRole || '',
@@ -591,6 +570,47 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
           try {
             const msg = JSON.parse(line);
             if (msg.type === '_stdin_ack') { session._stdinAckReceived = true; continue; }
+
+            // Claude fork: adopt the new session id. --fork-session makes claude
+            // mint a fresh id at startup — the very first system/hook_started
+            // line already carries it (verified) — and write a separate JSONL.
+            // Without adopting it the WebUI keeps tracking the PARENT id, so the
+            // forked window shadows the original (same name/history/resume
+            // target) and the fork's transcript is orphaned — indistinguishable
+            // from a plain resume. One-shot _forkRequested guard (set only when
+            // data.fork) so a normal resume, whose id the parser also sees on
+            // every line, can never be hijacked.
+            if (session._forkRequested && typeof msg.session_id === 'string' && msg.session_id
+                && session.backendSessionId !== msg.session_id) {
+              if (session.backendSessionId) {
+                const prev = session.forkedFrom || [];
+                if (!prev.includes(session.backendSessionId)) prev.push(session.backendSessionId);
+                session.forkedFrom = prev;
+              }
+              session.backendSessionId = msg.session_id;
+              session.claudeSessionId = msg.session_id;
+              session._forkRequested = false; // adopt once, then stop watching
+              if (session.sockName) {
+                writeSessionMeta(session.sockName, {
+                  name: session.name,
+                  cwd: session.cwd,
+                  backend: session.backend,
+                  backendSessionId: session.backendSessionId,
+                  claudeSessionId: session.claudeSessionId,
+                  sourceKind: session.sourceKind || null,
+                  agentKind: session.agentKind || 'primary',
+                  agentRole: session.agentRole || '',
+                  agentNickname: session.agentNickname || '',
+                  parentThreadId: session.parentThreadId || null,
+                  forkedFrom: session.forkedFrom || null,
+                  permissionMode: session._permissionMode || null,
+                  createdAt: session.createdAt,
+                  webuiSessionId: id,
+                  mode: session.mode,
+                });
+              }
+              broadcastActiveSessions();
+            }
 
             // Track turn lifecycle: streaming state + activity label (broadcast to clients)
             {
