@@ -58,4 +58,5 @@ export const UI_ICONS = {
   check:     _s('<path d="M3 8.5l3.5 3.5L13 4.5"/>'),
   coin:      _s('<circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="2.5"/>'),
   circle:    _s('<circle cx="8" cy="8" r="6"/>'),
+  bolt:      _s('<path d="M9 1.2L3.8 9.2H7l-0.9 5.6L12.4 6.6H8.6z"/>', { fill: true }),
 };

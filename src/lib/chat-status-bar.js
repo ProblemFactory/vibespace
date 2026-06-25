@@ -235,7 +235,7 @@ export class ChatStatusBar {
       const cacheTotal = this._statusLastInputTokens;
       const cachePct = cacheTotal > 0 ? Math.round((this._statusLastCacheRead / cacheTotal) * 100) : 0;
       const cacheColor = cachePct >= 80 ? '#22c55e' : cachePct >= 50 ? '#eab308' : '#f97316';
-      parts.push(`<span style="color:${cacheColor}">\u26A1${cachePct}%</span><span class="chat-status-dim">[${fmtK(this._statusLastCacheRead)}]</span>`);
+      parts.push(`<span style="color:${cacheColor}">${UI_ICONS.bolt}${cachePct}%</span><span class="chat-status-dim">[${fmtK(this._statusLastCacheRead)}]</span>`);
     }
 
     // Cost with color tiers
