@@ -7,7 +7,7 @@ import { html as htmlLang } from '@codemirror/lang-html';
 import { css as cssLang } from '@codemirror/lang-css';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { EditorState, Compartment, EditorSelection } from '@codemirror/state';
-import { keymap } from '@codemirror/view';
+import { keymap, ViewPlugin } from '@codemirror/view';
 let _mermaid = null; // lazy-loaded from CDN
 import { indentWithTab } from '@codemirror/commands';
 import { marked } from 'marked';
@@ -76,6 +76,27 @@ const editorLightTheme = EditorView.theme({
   '.cm-tooltip .cm-tooltip-arrow:after': { borderTopColor: '#f5f5fa', borderBottomColor: '#f5f5fa' },
   '.cm-tooltip-autocomplete': { '& > ul > li[aria-selected]': { backgroundColor: '#d7d4f0', color: '#1e293b' } },
 }, { dark: false });
+
+// Active-line highlight competes with multi-line selection: `highlightActiveLine`
+// (from basicSetup) decorates the line under the selection HEAD — i.e. the first
+// or last selected line, depending on drag direction — and the active-line
+// background paints on `.cm-line`, ABOVE the selection layer (z-index:-1), hiding
+// the selection rect on that one line. VS Code-style fix: suppress the active-line
+// highlight whenever there's a non-empty selection. The ViewPlugin toggles a class
+// on the editor wrapper; the theme zeroes the background for both light + oneDark
+// (the `.cm-has-selection` selector outranks each theme's plain `.cm-activeLine`).
+const suppressActiveLineOnSelection = ViewPlugin.fromClass(class {
+  constructor(view) { this._apply(view); }
+  update(u) { if (u.selectionSet || u.focusChanged) this._apply(u.view); }
+  _apply(view) {
+    const sel = view.state.selection.ranges.some(r => !r.empty);
+    view.dom.classList.toggle('cm-has-selection', sel);
+  }
+});
+const activeLineSelectionFix = EditorView.theme({
+  '&.cm-has-selection .cm-activeLine': { backgroundColor: 'transparent' },
+  '&.cm-has-selection .cm-activeLineGutter': { backgroundColor: 'transparent' },
+});
 
 // Editor settings persistence
 function loadEditorSettings() {
@@ -319,6 +340,8 @@ class CodeEditor {
         doc: content,
         extensions: [
           basicSetup,
+          suppressActiveLineOnSelection,
+          activeLineSelectionFix,
           this._themeCompartment.of(this._getThemeExtension()),
           this._wrapCompartment.of(this._getWrapExtension()),
           this._fontSizeCompartment.of(this._getFontSizeExtension()),
@@ -473,4 +496,8 @@ class CodeEditor {
   }
 }
 
-export { CodeEditor, detectLang, getLangExtension, loadEditorSettings, saveEditorSettings, editorLightTheme };
+// Bundle both halves of the active-line/selection fix so external-editor (its own
+// EditorView) gets identical behavior.
+const activeLineSelectionPatch = [suppressActiveLineOnSelection, activeLineSelectionFix];
+
+export { CodeEditor, detectLang, getLangExtension, loadEditorSettings, saveEditorSettings, editorLightTheme, activeLineSelectionPatch };

@@ -4,7 +4,7 @@
  * invoked by Claude Code's EDITOR mechanism.
  */
 
-import { CodeEditor, detectLang, getLangExtension, loadEditorSettings, saveEditorSettings, editorLightTheme } from './code-editor.js';
+import { CodeEditor, detectLang, getLangExtension, loadEditorSettings, saveEditorSettings, editorLightTheme, activeLineSelectionPatch } from './code-editor.js';
 import { Resizer } from './resizer.js';
 import { EditorView, basicSetup } from 'codemirror';
 import { oneDark } from '@codemirror/theme-one-dark';
@@ -135,6 +135,7 @@ export function openExternalEditor(app, filePath, signalPath, sessionId) {
           doc: content,
           extensions: [
             basicSetup,
+            activeLineSelectionPatch,
             themeComp.of(edSettings.theme === 'dark' ? oneDark : editorLightTheme),
             wrapComp.of(edSettings.wordWrap ? EditorView.lineWrapping : []),
             fontSizeComp.of(EditorView.theme({ '.cm-content, .cm-gutters': { fontSize: edSettings.fontSize + 'px' } })),
