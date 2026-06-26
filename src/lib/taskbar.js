@@ -24,21 +24,27 @@ export function updateTaskbar(app) {
       const match = webuiIdToSession.get(term.sessionId);
       if (match && app.sidebar.isStarred(match)) starPrefix = '\u2605 ';
     }
-    entries.push({ id, win, starPrefix });
+    // Tab group host → collect its tabs so the taskbar shows a stacked entry
+    let group = null;
+    if (win._tabChain && win._tabChain.tabs[0] === id) {
+      const chain = win._tabChain;
+      const tabWins = chain.tabs.map(tid => ({ id: tid, win: app.wm.windows.get(tid) })).filter(t => t.win);
+      if (tabWins.length > 1) group = { chain, tabWins, active: Math.min(chain.active, tabWins.length - 1) };
+    }
+    entries.push({ id, win, starPrefix, group });
   }
 
   // Structure unchanged → update state classes in place. onWindowsChanged
   // fires on EVERY focus (each mousedown); a full innerHTML rebuild + listener
   // re-wiring per click was constant churn.
-  const structKey = entries.map(e => `${e.id}\u0000${e.win.title}\u0000${e.starPrefix}`).join('\u0001');
+  const structKey = entries.map(e => {
+    const g = e.group
+      ? `\tG:${e.group.tabWins.map(t => t.id).join(',')}:${e.group.active}:${e.group.tabWins.map(t => t.win.title).join('\t')}`
+      : '';
+    return `${e.id}\t${e.win.title}\t${e.starPrefix}${g}`;
+  }).join('\n');
   if (container._structKey === structKey) {
-    for (const el of container.children) {
-      const win = app.wm.windows.get(el.dataset.winId);
-      if (!win) continue;
-      el.classList.toggle('active', el.dataset.winId === app.wm.activeWindowId && !win.isMinimized);
-      el.classList.toggle('minimized', win.isMinimized);
-      el.classList.toggle('waiting', win.element.classList.contains('window-waiting'));
-    }
+    for (const el of container.children) _applyTaskbarItemState(app, el);
   } else {
     container._structKey = structKey;
     container.innerHTML = '';
@@ -52,9 +58,11 @@ export function updateTaskbar(app) {
 }
 
 function _rebuildTaskbarItems(app, container, entries) {
-  for (const { id, win, starPrefix } of entries) {
+  for (const { id, win, starPrefix, group } of entries) {
     const item = document.createElement('div'); item.className = 'taskbar-item';
     item.dataset.winId = id;
+    // Tab group → render a stacked entry (Windows-style) instead of a single icon
+    if (group) { _buildGroupItem(app, container, item, win, starPrefix, group); continue; }
     if (id === app.wm.activeWindowId && !win.isMinimized) item.classList.add('active');
     if (win.isMinimized) item.classList.add('minimized');
     if (win.element.classList.contains('window-waiting')) item.classList.add('waiting');
@@ -112,6 +120,141 @@ function _rebuildTaskbarItems(app, container, entries) {
     });
     container.appendChild(item);
   }
+}
+
+// Group-aware item state: a tab-group item is active/waiting if ANY of its tabs
+// is, minimized if the host (which all tabs share) is. Stored tab ids let the
+// in-place update path (no rebuild) stay correct without re-reading the chain.
+function _applyTaskbarItemState(app, el) {
+  const hostId = el.dataset.winId;
+  const win = app.wm.windows.get(hostId);
+  if (!win) return;
+  const ids = el.dataset.groupTabs ? el.dataset.groupTabs.split(',') : [hostId];
+  el.classList.toggle('active', ids.includes(app.wm.activeWindowId) && !win.isMinimized);
+  el.classList.toggle('minimized', win.isMinimized);
+  el.classList.toggle('waiting', ids.some(tid => app.wm.windows.get(tid)?.element.classList.contains('window-waiting')));
+}
+
+function _cloneTabIcon(win) {
+  if (win.backendIconSlot?.children.length) {
+    const clone = win.backendIconSlot.children[0].cloneNode(true);
+    clone.style.width = ''; clone.style.height = '';
+    return clone;
+  }
+  const span = document.createElement('span');
+  span.innerHTML = win._typeIcon || '';
+  return span;
+}
+
+// Stacked icon: the unique tab icons (active tab frontmost) offset like a card
+// stack, plus a count badge. A single unique icon gets a faded ghost behind so
+// it still reads as a stack.
+function _buildStackIcon(app, group) {
+  const stack = document.createElement('span');
+  stack.className = 'taskbar-icon taskbar-icon-stack';
+  const activeIdx = group.active;
+  const order = [activeIdx, ...group.tabWins.map((_, i) => i).filter(i => i !== activeIdx)];
+  const seen = new Set();
+  const layers = [];
+  for (const i of order) {
+    const w = group.tabWins[i].win;
+    const key = w.backendIconSlot?.children.length
+      ? 'b:' + w.backendIconSlot.children[0].outerHTML
+      : 't:' + (w._typeIcon || w.type || '');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    layers.push(w);
+    if (layers.length >= 3) break;
+  }
+  if (layers.length === 1) layers.push(layers[0]); // ghost duplicate behind
+  for (let j = layers.length - 1; j >= 0; j--) {
+    const layer = document.createElement('span');
+    layer.className = 'stack-layer' + (j > 0 ? ' stack-ghost' : '');
+    layer.style.transform = `translate(${j * 3}px, ${j * 3}px)`;
+    layer.style.zIndex = String(10 - j);
+    layer.appendChild(_cloneTabIcon(layers[j]));
+    stack.appendChild(layer);
+  }
+  const badge = document.createElement('span');
+  badge.className = 'taskbar-stack-count';
+  badge.textContent = String(group.tabWins.length);
+  stack.appendChild(badge);
+  return stack;
+}
+
+// Render a stacked tab-group taskbar item. Click expands the tab list; right
+// click acts on the whole group (host).
+function _buildGroupItem(app, container, item, hostWin, starPrefix, group) {
+  item.classList.add('taskbar-group');
+  item.dataset.groupTabs = group.tabWins.map(t => t.id).join(',');
+  _applyTaskbarItemState(app, item);
+  item.appendChild(_buildStackIcon(app, group));
+
+  const activeTab = group.tabWins[group.active] || group.tabWins[0];
+  const textCol = document.createElement('div'); textCol.className = 'taskbar-text';
+  const title = document.createElement('div'); title.className = 'taskbar-title';
+  const parts = activeTab.win.title.split(' \u2014 ');
+  title.textContent = starPrefix + (parts[0] || activeTab.win.title);
+  const subtitle = document.createElement('div'); subtitle.className = 'taskbar-subtitle';
+  subtitle.textContent = `${group.tabWins.length} windows grouped`;
+  textCol.append(title, subtitle);
+  item.appendChild(textCol);
+
+  const hostId = group.chain.tabs[0];
+  item.draggable = true;
+  item.addEventListener('dragstart', (e) => {
+    e.dataTransfer.setData('text/window-id', hostId);
+    e.dataTransfer.effectAllowed = 'move';
+  });
+  item.addEventListener('click', () => showTabGroupList(app, item, group.chain));
+  item.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    const menuItems = [
+      { label: '\u2725 Move', action: () => app.wm.startMoveMode(hostId) },
+      { label: hostWin.isMinimized ? '\u25A1 Restore' : '\u2013 Minimize', action: () => hostWin.isMinimized ? app.wm.restore(hostId) : app.wm.minimize(hostId) },
+    ];
+    const deskItems = app.desktopManager?.getDesktopMenuItems(hostId);
+    if (deskItems?.length) menuItems.push({ label: '\u27A4 Move to Desktop', children: deskItems });
+    menuItems.push({ label: '\u2715 Close group', action: () => app.wm.closeWindow(hostId), style: 'color:var(--red, #e55)' });
+    const menu = showContextMenu(e.clientX, e.clientY, menuItems, 'taskbar-context-menu');
+    menu.style.top = '';
+    menu.style.bottom = (window.innerHeight - e.clientY + 4) + 'px';
+  });
+  container.appendChild(item);
+}
+
+// Popover listing the tabs in a group; click one to focus the group + switch to it.
+export function showTabGroupList(app, anchor, chain) {
+  const pop = createPopover(anchor, 'overlap-switcher');
+  for (let i = 0; i < chain.tabs.length; i++) {
+    const tid = chain.tabs[i];
+    const win = app.wm.windows.get(tid);
+    if (!win) continue;
+    const item = document.createElement('div');
+    item.className = 'overlap-switcher-item';
+    if (i === chain.active) item.classList.add('active');
+    const icon = document.createElement('span');
+    icon.style.cssText = 'flex-shrink:0;display:inline-flex;align-items:center';
+    icon.appendChild(_cloneTabIcon(win));
+    const label = document.createElement('span');
+    label.textContent = win.title;
+    item.append(icon, label);
+    item.onclick = () => {
+      if (app.wm.windows.get(chain.tabs[0])?.isMinimized) app.wm.restore(chain.tabs[0]);
+      app.wm.focusWindow(chain.tabs[0]);
+      const idx = chain.tabs.indexOf(tid);
+      if (idx >= 0) app.wm.switchTab(chain, idx);
+      const session = app.sessions.get(tid);
+      if (session) session.focus();
+      pop.remove();
+    };
+    pop.appendChild(item);
+  }
+  requestAnimationFrame(() => {
+    const rect = anchor.getBoundingClientRect();
+    pop.style.left = Math.max(0, rect.left) + 'px';
+    pop.style.top = (rect.top - pop.offsetHeight - 4) + 'px';
+  });
 }
 
 /**

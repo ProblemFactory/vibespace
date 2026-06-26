@@ -763,6 +763,32 @@ html, body {
 .taskbar-subtitle {
   font-size: var(--taskbar-sub-size, 9px); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* Tab-group stacked taskbar item (Windows-style) */
+.taskbar-group { overflow: visible; } /* let the count badge poke out */
+.taskbar-icon-stack {
+  position: relative; flex-shrink: 0;
+  width: calc(var(--taskbar-icon-size, 18px) + 6px);
+  height: calc(var(--taskbar-icon-size, 18px) + 6px);
+}
+.taskbar-icon-stack .stack-layer {
+  position: absolute; top: 0; left: 0;
+  width: var(--taskbar-icon-size, 18px); height: var(--taskbar-icon-size, 18px);
+  display: flex; align-items: center; justify-content: center; line-height: 1;
+}
+.taskbar-icon-stack .stack-layer > * { font-size: var(--taskbar-icon-size, 18px); }
+.taskbar-icon-stack .stack-layer .backend-icon,
+.taskbar-icon-stack .stack-layer .mode-backend-icon {
+  width: var(--taskbar-icon-size, 18px); height: var(--taskbar-icon-size, 18px);
+}
+.taskbar-icon-stack .stack-layer svg { width: 1em; height: 1em; }
+.taskbar-icon-stack .stack-ghost { opacity: 0.4; }
+.taskbar-stack-count {
+  position: absolute; top: -5px; right: -6px; z-index: 20;
+  min-width: 13px; height: 13px; padding: 0 3px; box-sizing: border-box;
+  background: var(--accent); color: var(--accent-fg);
+  font-size: 8px; font-weight: 700; line-height: 13px; text-align: center;
+  border-radius: 7px; box-shadow: 0 0 0 1.5px var(--bg-taskbar);
+}
 #taskbar-status { font-size: 9px; color: var(--text-dim); padding: 0; flex-shrink: 0; line-height: 1.2; }
 .taskbar-context-menu { min-width: 100px; }
 /* item base lives in viewers.css (.context-menu-item); keep taskbar items identical */
