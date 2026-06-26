@@ -7,7 +7,7 @@ import { html as htmlLang } from '@codemirror/lang-html';
 import { css as cssLang } from '@codemirror/lang-css';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { EditorState, Compartment, EditorSelection } from '@codemirror/state';
-import { keymap, ViewPlugin } from '@codemirror/view';
+import { keymap } from '@codemirror/view';
 let _mermaid = null; // lazy-loaded from CDN
 import { indentWithTab } from '@codemirror/commands';
 import { marked } from 'marked';
@@ -82,17 +82,21 @@ const editorLightTheme = EditorView.theme({
 // or last selected line, depending on drag direction — and the active-line
 // background paints on `.cm-line`, ABOVE the selection layer (z-index:-1), hiding
 // the selection rect on that one line. VS Code-style fix: suppress the active-line
-// highlight whenever there's a non-empty selection. The ViewPlugin toggles a class
-// on the editor wrapper; the theme zeroes the background for both light + oneDark
-// (the `.cm-has-selection` selector outranks each theme's plain `.cm-activeLine`).
-const suppressActiveLineOnSelection = ViewPlugin.fromClass(class {
-  constructor(view) { this._apply(view); }
-  update(u) { if (u.selectionSet || u.focusChanged) this._apply(u.view); }
-  _apply(view) {
-    const sel = view.state.selection.ranges.some(r => !r.empty);
-    view.dom.classList.toggle('cm-has-selection', sel);
-  }
-});
+// highlight whenever there's a non-empty selection. We tag the editor with a
+// `cm-has-selection` class and the theme zeroes the background for both light +
+// oneDark (the `.cm-has-selection` selector outranks each theme's plain
+// `.cm-activeLine`).
+//
+// The class is contributed via the `editorAttributes` FACET, NOT by mutating
+// `view.dom.classList`: CodeMirror rebuilds `view.dom.className` from scratch on
+// every focus change (`updateAttrs` → `"cm-editor" + (cm-focused) + themeClasses`),
+// which wiped a directly-added class and made the bug reappear once the editor
+// lost focus. `attrsFromFacet` re-evaluates this function on every update (incl.
+// selection + focus changes) and merges the class into the className CM builds,
+// so it survives blur.
+const suppressActiveLineOnSelection = EditorView.editorAttributes.of((view) =>
+  view.state.selection.ranges.some(r => !r.empty) ? { class: 'cm-has-selection' } : null
+);
 const activeLineSelectionFix = EditorView.theme({
   '&.cm-has-selection .cm-activeLine': { backgroundColor: 'transparent' },
   '&.cm-has-selection .cm-activeLineGutter': { backgroundColor: 'transparent' },
