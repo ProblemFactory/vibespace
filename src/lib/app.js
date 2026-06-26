@@ -10,7 +10,7 @@ import { CodeEditor } from './code-editor.js';
 import { LayoutManager } from './layout.js';
 import { ChatView } from './chat-view.js';
 import { Resizer } from './resizer.js';
-import { createPopover, fetchJson, initStateSync, installLongPressContextMenu } from './utils.js';
+import { createPopover, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate } from './utils.js';
 import { MobileNav } from './mobile-nav.js';
 import { setupDirAutocomplete } from './autocomplete.js';
 import { getAvailableFonts } from './terminal.js';
@@ -1326,7 +1326,9 @@ class App {
 
   openEditor(filePath, fileName, opts = {}) {
     this._hideWelcome();
-    const title = opts._tempFile ? `View: ${fileName}` : filePath;
+    // Front-truncate the path (like the file explorer) so the taskbar/title-bar
+    // CSS end-ellipsis keeps the filename visible instead of cutting it off.
+    const title = opts._tempFile ? `View: ${fileName}` : frontTruncate(filePath);
     const openSpec = opts._tempFile ? undefined : { action: 'openEditor', path: filePath, name: fileName };
     const winInfo = this.wm.createWindow({ title, type: 'editor', syncId: opts.syncId, openSpec });
     winInfo._filePath = filePath; winInfo._fileName = fileName;

@@ -1,4 +1,11 @@
 export function formatSize(b) { if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
+// Front-truncate a path-like string: keep the END (the meaningful filename),
+// drop the front with a leading ellipsis. Used for window/taskbar titles so a
+// CSS end-ellipsis doesn't hide the filename. e.g. "…/deep/dir/file.js".
+export function frontTruncate(str, maxLen = 40) {
+  const s = String(str ?? '');
+  return s.length > maxLen ? '…' + s.slice(-(maxLen - 1)) : s;
+}
 // Escapes quotes too — safe in BOTH text and attribute contexts (the old
 // textContent/innerHTML round-trip left " and ' unescaped, allowing attribute
 // breakout in `attr="${escHtml(x)}"` template patterns).

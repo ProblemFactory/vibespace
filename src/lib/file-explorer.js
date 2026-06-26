@@ -1,4 +1,4 @@
-import { formatSize, attachPopoverClose, createPopover, showContextMenu, getStateSync, copyText, escHtml } from './utils.js';
+import { formatSize, attachPopoverClose, createPopover, showContextMenu, getStateSync, copyText, escHtml, frontTruncate } from './utils.js';
 import { setupDirAutocomplete } from './autocomplete.js';
 import { getFileIcon, hasDedicatedViewer, getCategory } from './file-types.js';
 import { FILE_ICONS, UI_ICONS } from './icons.js';
@@ -499,9 +499,7 @@ class FileExplorer {
       this.currentPath = data.path; this.pathInput.value = data.path; this.items = data.items;
       this.winInfo._explorerPath = data.path; // for layout persistence
       if (this.winInfo._openSpec) this.winInfo._openSpec.path = data.path; // update for sync
-      const maxLen = 40;
-      const display = data.path.length > maxLen ? '\u2026' + data.path.slice(-maxLen + 1) : data.path;
-      this.app.wm.setTitle(this.winInfo.id, display);
+      this.app.wm.setTitle(this.winInfo.id, frontTruncate(data.path));
       this._renderItems();
     } catch (err) { this.listEl.innerHTML = `<div class="empty-hint" style="color:var(--red)">${escHtml(err.message)}</div>`; }
   }
