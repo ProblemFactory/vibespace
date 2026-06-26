@@ -175,10 +175,9 @@ const tabGroupMethods = {
   _renderTabBar(chain) {
     const hostWin = this.windows.get(chain.tabs[0]);
     if (!hostWin) return;
-    // Per-render controller: tab-drag document listeners from the previous
-    // render are released here (they used to accumulate on every re-render)
-    chain._tabCtl?.abort();
-    chain._tabCtl = new AbortController();
+    // Tab-drag listeners are now scoped per-drag (created on mousedown, aborted
+    // on mouseup in _setupTabDrag) instead of per-render, so re-rendering the
+    // tab bar mid-drag no longer kills an in-flight drag.
     const titleBar = hostWin.titleBar;
     const existing = titleBar.querySelector('.tab-bar-tabs');
     if (existing) existing.remove();
@@ -261,12 +260,22 @@ const tabGroupMethods = {
     let mergeTarget = null;
     let mergeGhost = null;
     let savedBounds = null;
+    let dragCtl = null;
+    const endDrag = () => { if (dragCtl) { dragCtl.abort(); dragCtl = null; } };
 
     tabEl.addEventListener('mousedown', (e) => {
       if (e.target.closest('.tab-close') || e.button !== 0) return;
       if (chain.tabs.length <= 1) return;
       mouseDown = true; detached = false; mergeTarget = null;
       startX = e.clientX; startY = e.clientY;
+      // Drag listeners live on a per-drag controller, NOT chain._tabCtl:
+      // detaching re-renders the tab bar (which aborts _tabCtl) MID-DRAG, which
+      // used to kill onMove/onUp — freezing the drag and leaving the grid
+      // highlight stuck until something else repainted it.
+      endDrag();
+      dragCtl = new AbortController();
+      document.addEventListener('mousemove', onMove, { signal: dragCtl.signal });
+      document.addEventListener('mouseup', onUp, { signal: dragCtl.signal });
       e.preventDefault();
     });
 
@@ -338,6 +347,9 @@ const tabGroupMethods = {
     };
 
     const onUp = (e) => {
+      // Release the per-drag listeners first — the drag is over regardless of
+      // which branch we take below (safe to abort the signal mid-handler).
+      endDrag();
       if (!mouseDown) return;
       mouseDown = false;
       if (!detached) return;
@@ -388,9 +400,6 @@ const tabGroupMethods = {
       setTimeout(() => { this._captureGridBounds(win); this._scheduleOverlapUpdate(); this._notify(); }, 250);
     };
 
-    const signal = chain._tabCtl?.signal;
-    document.addEventListener('mousemove', onMove, { signal });
-    document.addEventListener('mouseup', onUp, { signal });
   },
 
   _detachFromChain(chain, winId) {
@@ -498,7 +507,6 @@ const tabGroupMethods = {
 
   _ungroupLast(chain) {
     if (chain.tabs.length !== 1) return;
-    chain._tabCtl?.abort(); // chain dissolves — release its tab-drag listeners
     const lastWin = this.windows.get(chain.tabs[0]);
     if (!lastWin) return;
     lastWin._tabChain = null;
