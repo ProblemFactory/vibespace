@@ -252,7 +252,7 @@ export function showTabGroupList(app, anchor, chain) {
   }
   requestAnimationFrame(() => {
     const rect = anchor.getBoundingClientRect();
-    pop.style.left = Math.max(0, rect.left) + 'px';
+    pop.style.left = Math.max(0, Math.min(rect.left, window.innerWidth - pop.offsetWidth - 4)) + 'px';
     pop.style.top = (rect.top - pop.offsetHeight - 4) + 'px';
   });
 }
