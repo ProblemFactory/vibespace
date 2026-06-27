@@ -78,6 +78,10 @@ While a tool is running, a spinner indicates progress. For file operations (Edit
 
 Each tool card has a clipboard button that opens the tool's input and output in a temporary CodeEditor window. This is useful for examining large outputs without scrolling through the chat. Messages also have a clipboard button that opens the message content in a temporary editor.
 
+### Fork from a message
+
+Every assistant message has a small **fork** (GitHub repo-forked) icon next to the open-in-editor button on hover. Clicking it branches a **new session** that contains the conversation **up to and including that message**, then a popup asks for the first message of the branch. The original session is untouched. See [Sessions → Forking](sessions.md#forking). (Claude only.)
+
 ## Interactive Permissions
 
 When Claude requests permission to use a tool (via `--permission-prompt-tool`), the permission prompt appears inline on the tool card:

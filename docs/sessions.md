@@ -63,6 +63,21 @@ On mobile (≤768px), the sidebar uses a **two-level navigation** instead of the
 
 The mobile nav bar provides: ☰ sidebar toggle, session title (tap for window switcher with desktop tabs), ✕ close window, + new session. Image upload button appears next to the chat input on mobile.
 
+## Forking
+
+Forking branches a chat session into a **new, independent session** that shares the conversation history up to the fork point. The original is left untouched, so you can explore an alternative direction without losing your place.
+
+### Fork a whole session
+
+The **Fork** button in a session card's expanded panel opens a popup with:
+
+- **Title** — pre-filled with `<name> (forked)`, editable, so you can fork straight into the title you want. The title sticks to the forked window and its sidebar card (it won't fall back to a first-message-derived name after the fork stops or you reload).
+- **First message** — sending it is what makes the branch actually **diverge**. The agent only mints the fork's new session id on its first turn, so until you send something a freshly-forked window is indistinguishable from a plain resume.
+
+### Fork from a specific message
+
+Inside a chat, every assistant message has a small **fork** icon (next to "open in editor") on hover. It branches a new session containing the conversation **up to and including that message**, then continues from your first message — handy for "go back to that decision point and try something else." (Claude only; the forked window's history is truncated to match.)
+
 ## Session Cards
 
 Each session appears as a compact card showing: name, status badge, mode icon (for chat), and expand arrow.

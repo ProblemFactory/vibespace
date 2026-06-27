@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.11.0] — 2026-06-26
+
+### Added
+
+- **Fork sessions** — fork a chat session into an independent branch that shares the history so far; the original is left untouched. Clicking Fork opens a popup with an editable **Title** and a **first message** (sending that message is what makes the branch actually diverge — the agent mints the fork's new id on its first turn). The chosen title sticks on the window and in the sidebar, even after the fork stops or the page reloads.
+- **Fork from any message** — each assistant message in chat shows a fork (GitHub repo-forked) icon next to "open in editor"; it branches a new session truncated to the conversation up to and including that message, then continues from your first message (`claude --resume … --resume-session-at <uuid> --fork-session`).
+- **Stacked tab-group taskbar items** — grouping windows into tabs now shows ONE stacked taskbar entry (the unique tab icons offset like a card stack + a count badge) instead of hiding the grouped windows. Click it to expand a list of the tabs and jump to any of them; the active tab's title is shown; right-click acts on the whole group.
+
+### Fixed
+
+- **A Claude fork behaved exactly like a resume** — the WebUI never adopted Claude's stream-json session id, so a forked window shadowed the original and the fork's transcript was orphaned. The chat parser now adopts the fork's new id on its first turn (guarded so a normal resume can't be hijacked).
+- **Editor highlight covered the selection** — the current-line highlight hid the selection on the first/last selected line. Suppressed while a selection exists; the fix now also survives the editor losing focus (uses the CodeMirror `editorAttributes` facet instead of a DOM class, which CodeMirror rebuilds on focus change).
+- **Splitting a tab out of a group froze the drag** and left the grid snap-preview dashed area stuck — the drag listeners were torn down mid-drag by the tab-bar re-render. They're now scoped per-drag.
+- **Editor window/taskbar title now front-truncates** the file path (`…/dir/file.js`) like the file explorer, so the filename stays visible.
+- **Office file icons unified** — Excel and PowerPoint now match Word's folded-document look; the Python file icon is the clean official logo.
+- **Chat loading spinner no longer freezes under OS "Reduce Motion"** — it pulses instead of stopping, so it still signals activity without the rotation reduced-motion suppresses.
+
 ## [2.10.0] — 2026-06-24
 
 ### Added

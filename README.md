@@ -40,6 +40,7 @@ You only need to install the CLI(s) for the backend(s) you actually use — at l
 - **Interactive permissions** — Allow / Always Allow / Deny inline on tool cards (maps to each backend's native permission/approval protocol)
 - **Subagent support** — Agent tool cards show live status; View Log opens a read-only ChatView via per-subagent normalizers
 - **Goals** — set a session objective the agent auto-continues toward (native goal loop on backends that support it)
+- **Fork** — branch a chat into an independent session (with an editable title); fork the whole session or from any past assistant message (truncated to that point), then continue from a first message
 - **Search** — Ctrl+F with the CSS Custom Highlight API, match counter, prev/next across full history; seek-loads the middle of huge sessions on demand
 - **Whole-conversation minimap** — semantic, time-coordinate scrollbar covering the entire session (not just the loaded window); drag/click to jump anywhere, lazily seeking into multi-hundred-MB histories
 - **Status bar** — model, context %, cache ratio, cost, permission mode (clickable), background tasks (clickable popup)

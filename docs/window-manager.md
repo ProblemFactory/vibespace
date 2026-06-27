@@ -201,6 +201,15 @@ When windows merge, the title bar is replaced by a tab bar with rounded-top tabs
 - **Close button** on each tab to remove it from the group (window closes or becomes standalone)
 - **Drag a tab downward** (>30px) to pull it out of the group. The detached window is raised above all others and follows the cursor. You can then drop it in empty space (becomes standalone), onto another window's icon/tab bar (merges into that group — including the original group), or on a snap zone.
 
+### In the taskbar
+
+A tab group shows as a **single stacked taskbar item** (Windows-style) — the unique tab icons offset like a stack of cards, with a count badge — instead of hiding the grouped windows behind the host. The item is titled by the currently active tab.
+
+- **Click** the stacked item to open a popover listing every tab in the group; click one to restore + focus the group and switch to that tab.
+- **Right-click** acts on the whole group (move, minimize/restore, close).
+
+The item blinks if **any** tab is waiting for input.
+
 ### Data model
 
 Tab groups share a `{tabs, active}` object among all grouped windows. The `tabs` array holds references to each window in the group, and `active` tracks the currently displayed tab.
