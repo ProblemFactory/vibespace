@@ -724,5 +724,10 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
   .chat-minimap { pointer-events: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .chat-spinner, .chat-msg, .chat-view * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  .chat-msg, .chat-view *:not(.chat-spinner) { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  /* The spinner is an essential "still working" indicator — don't freeze it.
+     Swap the rotation (a vestibular trigger) for a gentle opacity pulse so it
+     keeps signalling activity without spinning. */
+  .chat-spinner { animation: chat-spinner-pulse 1.2s ease-in-out infinite !important; }
 }
+@keyframes chat-spinner-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
