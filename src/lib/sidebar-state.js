@@ -235,6 +235,21 @@ export function installSidebarState(SidebarClass) {
 
   proto.isArchived = function(sessionOrKey) { return this._stateSetHas(this._archivedIds, sessionOrKey); };
   proto.getCustomName = function(sessionOrKey) { return this._stateMapGet(this._customNames, sessionOrKey); };
+
+  // Programmatic custom-name setter (no prompt) — used e.g. to persist a fork's
+  // chosen title once its session id is known. Mirrors renameSession's persist
+  // + broadcast + open-window title sync.
+  proto.setCustomName = function(sessionOrKey, name) {
+    const stateKey = this._getSessionStateKey(sessionOrKey);
+    if (!stateKey) return;
+    const trimmed = (name || '').trim();
+    if (trimmed) this._customNames[stateKey] = trimmed;
+    else delete this._customNames[stateKey];
+    const legacyId = this._getLegacySessionId(sessionOrKey);
+    if (legacyId && legacyId !== stateKey) delete this._customNames[legacyId];
+    this._pushUserState(); this._render();
+    if (trimmed) this.app.syncSessionName?.(sessionOrKey, trimmed);
+  };
   proto.getSessionMode = function(sessionOrKey) { return this._stateMapGet(this._sessionModes, sessionOrKey); };
 
   proto.setSessionMode = function(sessionOrKey, mode) {

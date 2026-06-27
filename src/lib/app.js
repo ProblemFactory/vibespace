@@ -645,10 +645,12 @@ class App {
       forkBtn.addEventListener('click', () => {
         const text = forkTa.value.trim();
         if (!text || !this._pendingFork) return;
+        const titleInput = document.getElementById('fork-title');
+        const customName = titleInput ? titleInput.value.trim() : '';
         const info = this._pendingFork; const at = this._pendingForkAt;
         this._pendingFork = null; this._pendingForkAt = null;
         this.hideDialogs();
-        this._doForkSession(info, text, at);
+        this._doForkSession(info, text, at, customName);
       });
       forkTa.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); forkBtn.click(); }
@@ -786,7 +788,7 @@ class App {
     };
   }
 
-  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, fork, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, forkAtUuid }) {
+  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, fork, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, forkAtUuid, forkTitle }) {
     this._hideWelcome();
     const defaults = this._getBackendSessionDefaults(backend);
     const sessionMode = mode || this.settings.get('session.defaultMode') || 'chat';
@@ -834,6 +836,12 @@ class App {
           mode: sessionMode,
         };
         this.layoutManager.scheduleAutoSave(); // re-broadcast with openSpec
+        // Persist a fork's chosen title as a custom name once the fork's NEW
+        // backend id is adopted (after its first turn). Keyed by webui id; the
+        // parent id is remembered so we don't rename the parent before divergence.
+        if (forkTitle && resumeId) {
+          (this._pendingForkTitles ??= new Map()).set(msg.sessionId, { name: forkTitle, parentId: backendSessionId || resumeId });
+        }
         if (msg.mode === 'chat' || sessionMode === 'chat') {
           const chatView = new ChatView(winInfo, this.ws, msg.sessionId, this);
           this.sessions.set(winInfo.id, chatView);
@@ -1089,6 +1097,8 @@ class App {
     const atHint = document.getElementById('fork-hint-at');
     if (genHint) genHint.classList.toggle('hidden', !!forkAtUuid);
     if (atHint) atHint.classList.toggle('hidden', !forkAtUuid);
+    const titleInput = document.getElementById('fork-title');
+    if (titleInput) titleInput.value = this._defaultForkName(sessionInfo); // editable default
     const ta = document.getElementById('fork-first-message');
     const btn = document.getElementById('btn-fork-send');
     if (ta) { ta.value = ''; }
@@ -1105,15 +1115,20 @@ class App {
     this.ws.send({ type: 'chat-input', sessionId, text: t, msgId: Date.now() + '-' + Math.random().toString(36).slice(2, 8) });
   }
 
-  _doForkSession(sessionInfo, initialMessage = '', resumeAt = null) {
-    const backend = sessionInfo.backend || 'claude';
-    const resumeId = sessionInfo.backendSessionId || sessionInfo.sessionId;
+  // Default fork title: "<base> (forked)" with a numeric suffix to stay unique.
+  _defaultForkName(sessionInfo) {
     const baseName = sessionInfo.webuiName || sessionInfo.name || 'Session';
-    // Generate fork name: "Name (forked)", "Name (forked 2)", etc.
     const allNames = (this.sidebar._allSessions || []).map(s => s.webuiName || s.name || '');
     let forkName = `${baseName} (forked)`;
     let n = 2;
     while (allNames.includes(forkName)) { forkName = `${baseName} (forked ${n++})`; }
+    return forkName;
+  }
+
+  _doForkSession(sessionInfo, initialMessage = '', resumeAt = null, customName = '') {
+    const backend = sessionInfo.backend || 'claude';
+    const resumeId = sessionInfo.backendSessionId || sessionInfo.sessionId;
+    const forkName = (customName && customName.trim()) || this._defaultForkName(sessionInfo);
 
     const mode = sessionInfo.webuiMode || this.settings.get('session.defaultMode') || 'chat';
     // --resume-session-at <uuid> truncates the fork to up-to-and-including that
@@ -1133,6 +1148,7 @@ class App {
       extraArgs: forkArgs,
       initialMessage,
       forkAtUuid: resumeAt || undefined,
+      forkTitle: forkName,
     });
   }
 
@@ -1495,6 +1511,14 @@ class App {
         return !!(spec.sessionKey || spec.backendSessionId || spec.sessionId) && entryKey === specKey;
       });
       if (!match) continue;
+      // Persist a fork's chosen title as a custom name once its NEW backend id
+      // is adopted (after the first turn) — before that, match.backendSessionId
+      // is still the parent's, and renaming then would clobber the parent.
+      const pendingFork = this._pendingForkTitles?.get(session.sessionId);
+      if (pendingFork && match.backendSessionId && match.backendSessionId !== pendingFork.parentId) {
+        this.sidebar.setCustomName?.(match.sessionKey || getSessionKey(match), pendingFork.name);
+        this._pendingForkTitles.delete(session.sessionId);
+      }
       this.wm.setTitleMeta(winId, this._buildTitleMeta(match));
       if (win._openSpec) {
         Object.assign(win._openSpec, {
@@ -1510,7 +1534,7 @@ class App {
         });
       }
       if (win._openSpec?.action === 'viewSession' || win._openSpec?.action === 'attachSession') {
-        const displayName = match.webuiName || match.name || win._openSpec?.name || win.title || 'Session';
+        const displayName = this.sidebar.getCustomName?.(match) || match.webuiName || match.name || win._openSpec?.name || win.title || 'Session';
         const cwd = match.cwd || win._openSpec?.cwd || '';
         this.wm.setTitle(winId, cwd ? `${displayName} — ${cwd}` : displayName);
       }
