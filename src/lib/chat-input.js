@@ -1,4 +1,4 @@
-import { escHtml, saveDraft, loadDraft, clearDraft, getStateSync, showContextMenu } from './utils.js';
+import { escHtml, saveDraft, loadDraft, clearDraft, getStateSync, showContextMenu, uploadFilesBatched } from './utils.js';
 import { UI_ICONS } from './icons.js';
 
 /**
@@ -286,20 +286,20 @@ export class ChatInput {
     if (!cwd) { this._uploadToast('No working directory for this session', true); return; }
     this._uploadToast(`Uploading ${files.length} item${files.length > 1 ? 's' : ''}…`);
     try {
-      const fd = new FormData();
-      const names = [];
-      for (const f of files) {
-        fd.append('files', f);
-        names.push(f._relPath || f.webkitRelativePath || f.name);
+      // Chunked + per-file fallback: a folder with one unreadable file (the
+      // usual net::ERR_ACCESS_DENIED cause) no longer fails the whole upload.
+      const { uploaded, failed } = await uploadFilesBatched(files, {
+        destDir: cwd,
+        onProgress: (d, total) => this._uploadToast(`Uploading ${d}/${total}…`),
+      });
+      if (uploaded.length) this._insertUploadedPaths(cwd, uploaded);
+      if (failed.length) {
+        this._uploadToast(`Uploaded ${uploaded.length}, ${failed.length} couldn't be read (e.g. ${failed[0].name})`, true);
+      } else if (!uploaded.length) {
+        this._uploadToast('Upload failed — no files could be read', true);
+      } else {
+        this._uploadToast(null);
       }
-      fd.append('destDir', cwd);
-      fd.append('fileNames', JSON.stringify(names));
-      if (names.some((n) => n.includes('/'))) fd.append('preservePaths', '1');
-      const res = await fetch('/api/upload', { method: 'POST', body: fd });
-      const data = await res.json();
-      if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`);
-      this._insertUploadedPaths(cwd, data.files || []);
-      this._uploadToast(null);
     } catch (e) {
       this._uploadToast('Upload failed: ' + e.message, true);
     }

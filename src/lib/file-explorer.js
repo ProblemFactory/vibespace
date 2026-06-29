@@ -1,4 +1,4 @@
-import { formatSize, attachPopoverClose, createPopover, showContextMenu, getStateSync, copyText, escHtml, frontTruncate } from './utils.js';
+import { formatSize, attachPopoverClose, createPopover, showContextMenu, getStateSync, copyText, escHtml, frontTruncate, uploadFilesBatched } from './utils.js';
 import { setupDirAutocomplete } from './autocomplete.js';
 import { getFileIcon, hasDedicatedViewer, getCategory } from './file-types.js';
 import { FILE_ICONS, UI_ICONS } from './icons.js';
@@ -949,17 +949,34 @@ class FileExplorer {
       }, 800);
     };
 
-    xhr.onerror = () => {
-      this._saveUploadHistory(files.map((f, i) => ({ name: names[i], size: f.size })), 'fail');
-      upload.status = 'error';
-      for (const ref of upload.domRefs.values()) {
-        ref.row.classList.add('file-upload-error'); ref.pctLabel.textContent = 'Failed';
+    xhr.onerror = async () => {
+      // The single multipart request failed (e.g. net::ERR_ACCESS_DENIED when a
+      // file in the folder is unreadable). Salvage by retrying resiliently
+      // (chunked + per-file) so the readable files still land; only the
+      // unreadable ones are reported as failed.
+      for (const ref of upload.domRefs.values()) ref.pctLabel.textContent = 'Retrying…';
+      const { uploaded, failed } = await uploadFilesBatched(files, {
+        destDir, preservePaths: isFolder,
+        onProgress: (d, total) => {
+          const p = Math.round(d / total * 100);
+          for (const ref of upload.domRefs.values()) { ref.fill.style.width = p + '%'; ref.pctLabel.textContent = p + '%'; }
+        },
+      });
+      if (uploaded.length) {
+        this._saveUploadHistory(uploaded.map(f => ({ name: f.name, size: f.size })), failed.length ? 'fail' : 'ok');
+        upload.status = failed.length ? 'error' : 'done'; upload.pct = 100;
+        for (const ref of upload.domRefs.values()) {
+          ref.fill.style.width = '100%';
+          ref.pctLabel.textContent = failed.length ? `${failed.length} failed` : '100%';
+          ref.row.classList.add(failed.length ? 'file-upload-error' : 'file-upload-done');
+        }
+        setTimeout(() => { this._activeUploads.delete(uploadId); this._updateUploadRing(); this.refresh(); }, failed.length ? 3000 : 800);
+      } else {
+        this._saveUploadHistory(files.map((f, i) => ({ name: names[i], size: f.size })), 'fail');
+        upload.status = 'error';
+        for (const ref of upload.domRefs.values()) { ref.row.classList.add('file-upload-error'); ref.pctLabel.textContent = 'Failed'; }
+        setTimeout(() => { this._activeUploads.delete(uploadId); this._updateUploadRing(); if (this.currentPath === destDir) this._renderItems(); }, 3000);
       }
-      setTimeout(() => {
-        this._activeUploads.delete(uploadId);
-        this._updateUploadRing();
-        if (this.currentPath === destDir) this._renderItems();
-      }, 3000);
     };
 
     xhr.onabort = () => {

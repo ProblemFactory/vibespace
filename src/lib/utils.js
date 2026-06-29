@@ -1,4 +1,58 @@
 export function formatSize(b) { if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
+
+const _uploadName = (f) => f._relPath || f.webkitRelativePath || f.name;
+
+// Resilient multipart upload to /api/upload. A folder upload used to go up as
+// ONE giant request, so a single file the browser can't read (permission /
+// special file / dead symlink — common in macOS project dirs) failed the WHOLE
+// thing with net::ERR_ACCESS_DENIED. This chunks the files and, when a chunk
+// fails, retries it FILE-BY-FILE so the readable files still land and only the
+// bad ones are reported. Returns { uploaded:[{name,path,size}], failed:[{name,error}] }.
+export async function uploadFilesBatched(files, { destDir, preservePaths, onProgress } = {}) {
+  const list = (files || []).filter(Boolean);
+  const CHUNK_FILES = 40, CHUNK_BYTES = 64 * 1024 * 1024;
+  const chunks = [];
+  let cur = [], curBytes = 0;
+  for (const f of list) {
+    if (cur.length && (cur.length >= CHUNK_FILES || curBytes + (f.size || 0) > CHUNK_BYTES)) { chunks.push(cur); cur = []; curBytes = 0; }
+    cur.push(f); curBytes += f.size || 0;
+  }
+  if (cur.length) chunks.push(cur);
+
+  const postChunk = async (chunkFiles) => {
+    const fd = new FormData();
+    const names = [];
+    for (const f of chunkFiles) { fd.append('files', f); names.push(_uploadName(f)); }
+    fd.append('destDir', destDir);
+    fd.append('fileNames', JSON.stringify(names));
+    if (preservePaths || names.some((n) => n.includes('/'))) fd.append('preservePaths', '1');
+    const res = await fetch('/api/upload', { method: 'POST', body: fd });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.success === false) throw new Error(data.error || `HTTP ${res.status}`);
+    return data.files || [];
+  };
+
+  const uploaded = [], failed = [];
+  let done = 0;
+  for (const chunk of chunks) {
+    try {
+      uploaded.push(...await postChunk(chunk));
+    } catch (e) {
+      if (chunk.length === 1) {
+        failed.push({ name: _uploadName(chunk[0]), error: e.message });
+      } else {
+        // Isolate the unreadable file(s): retry each on its own.
+        for (const f of chunk) {
+          try { uploaded.push(...await postChunk([f])); }
+          catch (e2) { failed.push({ name: _uploadName(f), error: e2.message }); }
+        }
+      }
+    }
+    done += chunk.length;
+    onProgress?.(done, list.length);
+  }
+  return { uploaded, failed };
+}
 // Front-truncate a path-like string: keep the END (the meaningful filename),
 // drop the front with a leading ellipsis. Used for window/taskbar titles so a
 // CSS end-ellipsis doesn't hide the filename. e.g. "…/deep/dir/file.js".
