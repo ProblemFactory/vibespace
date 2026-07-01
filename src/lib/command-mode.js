@@ -140,6 +140,8 @@ export class CommandMode {
     this._cmdDigits = '';
     clearTimeout(this._cmdDigitTimer);
     this._cmdIndicator.classList.add('active');
+    // Show the available keys while armed — command mode was undiscoverable
+    this._cmdIndicator.textContent = '[CMD] \u2190\u2191\u2193\u2192 snap \u00B7 m max \u00B7 w close \u00B7 Tab cycle \u00B7 f free \u00B7 g grid \u00B7 n new \u00B7 s sidebar';
     this._resetTimer();
   }
 
@@ -149,6 +151,7 @@ export class CommandMode {
     clearTimeout(this._cmdTimer);
     clearTimeout(this._cmdDigitTimer);
     this._cmdIndicator.classList.remove('active');
+    this._cmdIndicator.textContent = '[CMD]';
   }
 
   _resetTimer() {

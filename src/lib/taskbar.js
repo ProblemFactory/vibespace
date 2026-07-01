@@ -76,6 +76,7 @@ function _rebuildTaskbarItems(app, container, entries) {
     } else {
       icon.innerHTML = win._typeIcon || '';
     }
+    item.title = win.title; // full title — taskbar items truncate hard
     // Text column (title + subtitle)
     const textCol = document.createElement('div');
     textCol.className = 'taskbar-text';
@@ -186,6 +187,7 @@ function _buildStackIcon(app, group) {
 // click acts on the whole group (host).
 function _buildGroupItem(app, container, item, hostWin, starPrefix, group) {
   item.classList.add('taskbar-group');
+  item.title = group.tabWins.map(t => t.win.title).join('\n');
   item.dataset.groupTabs = group.tabWins.map(t => t.id).join(',');
   _applyTaskbarItemState(app, item);
   item.appendChild(_buildStackIcon(app, group));

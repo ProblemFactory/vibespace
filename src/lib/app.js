@@ -296,6 +296,14 @@ class App {
       fontSel.appendChild(o);
     }
     fontSel.value = this._fontFamily;
+    // A stored font that matches no option (stale localStorage, font list not
+    // yet loaded, uninstalled font) left the select BLANK — surface it instead
+    if (fontSel.selectedIndex === -1) {
+      const curLabel = (this._fontFamily.split(',')[0] || 'Current').replace(/"/g, '').trim() || 'Current';
+      const cur = opt(this._fontFamily, `${curLabel} (current)`);
+      fontSel.insertBefore(cur, fontSel.firstChild);
+      fontSel.value = this._fontFamily;
+    }
     fontSel.onchange = () => {
       this._fontFamily = fontSel.value;
       localStorage.setItem('termFontFamily', this._fontFamily);
@@ -629,6 +637,16 @@ class App {
     backendInput.addEventListener('change', () => this._applySessionBackendOptions(backendInput.value, { applyDefaults: true }));
     this._applySessionBackendOptions(backendInput.value || 'claude', { applyDefaults: true });
 
+    // Enter in any text input of the New Session dialog submits it
+    document.getElementById('dialog-new-session').addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229) return;
+      if (e.target.tagName !== 'INPUT') return;
+      // Let the cwd autocomplete accept its highlighted suggestion first
+      if (e.target.id === 'input-cwd' && !document.getElementById('cwd-suggestions')?.classList.contains('hidden')) return;
+      e.preventDefault();
+      document.querySelector('#dialog-new-session .btn-create').click();
+    });
+
     document.querySelector('#dialog-new-session .btn-create').addEventListener('click', () => {
       this.createSession({
         backend: document.getElementById('input-backend').value || 'claude',
@@ -783,6 +801,26 @@ class App {
     this._applySessionBackendOptions(b, { applyDefaults: true });
     document.getElementById('input-mode').value = this.settings.get('session.defaultMode') ?? 'chat';
     if (cwd) document.getElementById('input-cwd').value = cwd;
+    // Recent directories as one-click chips — the working directory is the one
+    // field you always have to fill, and the recent list is already known
+    const recentEl = document.getElementById('cwd-recent');
+    if (recentEl) {
+      recentEl.innerHTML = '';
+      const seen = new Set();
+      const sessions = [...(this.sidebar?._allSessions || [])].sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
+      for (const s of sessions) {
+        if (!s.cwd || seen.has(s.cwd)) continue;
+        seen.add(s.cwd);
+        if (seen.size > 6) break;
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'cwd-recent-chip';
+        chip.textContent = s.cwd.replace(/^\/home\/[^/]+/, '~');
+        chip.title = s.cwd;
+        chip.onclick = () => { document.getElementById('input-cwd').value = s.cwd; };
+        recentEl.appendChild(chip);
+      }
+    }
     document.getElementById('input-cwd').focus();
   }
   hideDialogs() { document.getElementById('dialog-overlay').classList.add('hidden'); document.getElementById('dialog-overlay').querySelectorAll('.dialog').forEach(d => d.classList.add('hidden')); }
