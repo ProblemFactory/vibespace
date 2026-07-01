@@ -1,4 +1,4 @@
-import { showContextMenu } from './utils.js';
+import { showContextMenu, showInputDialog } from './utils.js';
 
 /**
  * DesktopManager — virtual desktop system.
@@ -423,8 +423,8 @@ export class DesktopManager {
     container.appendChild(addBtn);
   }
 
-  _startRename(desk) {
-    const name = prompt('Desktop name:', desk.name);
+  async _startRename(desk) {
+    const name = await showInputDialog({ title: 'Rename Desktop', label: 'Desktop name', value: desk.name, confirmText: 'Rename' });
     if (name && name.trim()) this.renameDesktop(desk.id, name.trim());
   }
 

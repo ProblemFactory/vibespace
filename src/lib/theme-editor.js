@@ -1,4 +1,5 @@
 import { THEMES, BUILTIN_THEMES } from './themes.js';
+import { showToast, showConfirmDialog } from './utils.js';
 
 // All CSS custom properties that themes define
 const CSS_VAR_DEFS = [
@@ -517,11 +518,11 @@ class ThemeEditor {
   }
 
   async _save(name) {
-    if (!name) { alert('Please enter a theme name.'); return; }
-    if (!/^[a-zA-Z0-9 _-]+$/.test(name)) { alert('Name must be alphanumeric (spaces, hyphens, underscores allowed).'); return; }
-    if (name.length > 50) { alert('Name too long (max 50 characters).'); return; }
+    if (!name) { showToast('Please enter a theme name.', { type: 'error' }); return; }
+    if (!/^[a-zA-Z0-9 _-]+$/.test(name)) { showToast('Name must be alphanumeric (spaces, hyphens, underscores allowed).', { type: 'error' }); return; }
+    if (name.length > 50) { showToast('Name too long (max 50 characters).', { type: 'error' }); return; }
     const builtIn = ['dark', 'light', 'dracula', 'nord', 'solarized', 'monokai'];
-    if (builtIn.includes(name.toLowerCase())) { alert('Cannot use a built-in theme name.'); return; }
+    if (builtIn.includes(name.toLowerCase())) { showToast('Cannot use a built-in theme name.', { type: 'error' }); return; }
 
     try {
       const res = await fetch('/api/custom-themes', {
@@ -529,8 +530,8 @@ class ThemeEditor {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, css: this._cssValues, terminal: this._termValues }),
       });
-      if (!res.ok) { const e = await res.json(); alert(e.error); return; }
-    } catch (e) { alert('Save failed: ' + e.message); return; }
+      if (!res.ok) { const e = await res.json(); showToast(e.error || 'Save failed', { type: 'error' }); return; }
+    } catch (e) { showToast('Save failed: ' + e.message, { type: 'error' }); return; }
 
     // Register locally
     this.app.themeManager.registerCustomTheme(name, this._cssValues, this._termValues);
@@ -546,14 +547,14 @@ class ThemeEditor {
 
   async _delete(fromSel, nameInput) {
     const current = fromSel.value;
-    if (!current.startsWith('custom-')) { alert('Can only delete custom themes.'); return; }
+    if (!current.startsWith('custom-')) { showToast('Can only delete custom themes.', { type: 'error' }); return; }
     const name = current.slice(7);
-    if (!confirm(`Delete custom theme "${name}"?`)) return;
+    if (!(await showConfirmDialog({ title: 'Delete Theme', message: `Delete custom theme "${name}"?`, confirmText: 'Delete', danger: true }))) return;
 
     try {
       const res = await fetch('/api/custom-themes/' + encodeURIComponent(name), { method: 'DELETE' });
-      if (!res.ok) { const e = await res.json(); alert(e.error); return; }
-    } catch (e) { alert('Delete failed: ' + e.message); return; }
+      if (!res.ok) { const e = await res.json(); showToast(e.error || 'Delete failed', { type: 'error' }); return; }
+    } catch (e) { showToast('Delete failed: ' + e.message, { type: 'error' }); return; }
 
     const wasActive = this.app.themeManager.current === name;
     this.app.themeManager.unregisterCustomTheme(name);

@@ -1,4 +1,4 @@
-import { formatSize, attachPopoverClose, createPopover, showContextMenu, getStateSync, copyText, escHtml, frontTruncate, uploadFilesBatched } from './utils.js';
+import { formatSize, attachPopoverClose, createPopover, showContextMenu, getStateSync, copyText, escHtml, frontTruncate, uploadFilesBatched, showInputDialog, showConfirmDialog, showToast } from './utils.js';
 import { setupDirAutocomplete } from './autocomplete.js';
 import { getFileIcon, hasDedicatedViewer, getCategory } from './file-types.js';
 import { FILE_ICONS, UI_ICONS } from './icons.js';
@@ -278,8 +278,8 @@ class FileExplorer {
             this._bookmarks.splice(i, 1);
             this._saveBookmarks(); this._renderBookmarks();
           }},
-          { label: 'Rename bookmark', action: () => {
-            const n = prompt('Bookmark name:', bk.label);
+          { label: 'Rename bookmark', action: async () => {
+            const n = await showInputDialog({ title: 'Rename Bookmark', label: 'Bookmark name', value: bk.label, confirmText: 'Rename' });
             if (n && n.trim()) { bk.label = n.trim(); this._saveBookmarks(); this._renderBookmarks(); }
           }},
         ]);
@@ -758,8 +758,20 @@ class FileExplorer {
   navigateUp() { this.navigate(this.currentPath.replace(/\/[^/]+\/?$/, '') || '/'); }
   refresh() { this.navigate(this.currentPath); }
 
-  async createFile() { const n = prompt('File name:'); if (n) { await fetch('/api/file/write', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: this.currentPath + '/' + n, content: '' }) }); this.refresh(); } }
-  async createDir() { const n = prompt('Folder name:'); if (n) { await fetch('/api/mkdir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: this.currentPath + '/' + n }) }); this.refresh(); } }
+  async createFile() {
+    const n = await showInputDialog({ title: 'New File', label: 'File name', confirmText: 'Create' });
+    if (!n || !n.trim()) return;
+    const r = await fetch('/api/file/write', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: this.currentPath + '/' + n.trim(), content: '' }) }).catch(() => null);
+    if (!r?.ok) showToast('Create file failed', { type: 'error' });
+    this.refresh();
+  }
+  async createDir() {
+    const n = await showInputDialog({ title: 'New Folder', label: 'Folder name', confirmText: 'Create' });
+    if (!n || !n.trim()) return;
+    const r = await fetch('/api/mkdir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: this.currentPath + '/' + n.trim() }) }).catch(() => null);
+    if (!r?.ok) showToast('Create folder failed', { type: 'error' });
+    this.refresh();
+  }
 
   // ── Upload popover menu (Chrome download-button style) ──
   _triggerUpload(anchor) {
@@ -1113,8 +1125,20 @@ class FileExplorer {
     attachPopoverClose(menu);
   }
 
-  async _rename(oldName) { const n = prompt('New name:', oldName); if (n && n !== oldName) { await fetch('/api/rename', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oldPath: this.currentPath + '/' + oldName, newPath: this.currentPath + '/' + n }) }); this.refresh(); } }
-  async _delete(name, isDir) { if (!confirm(`Delete "${name}"?`)) return; await fetch(`/api/file?path=${encodeURIComponent(this.currentPath + '/' + name)}`, { method: 'DELETE' }); this.refresh(); }
+  async _rename(oldName) {
+    const n = await showInputDialog({ title: 'Rename', label: 'New name', value: oldName, confirmText: 'Rename' });
+    if (!n || n === oldName) return;
+    const r = await fetch('/api/rename', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oldPath: this.currentPath + '/' + oldName, newPath: this.currentPath + '/' + n }) }).catch(() => null);
+    if (!r?.ok) showToast('Rename failed', { type: 'error' });
+    this.refresh();
+  }
+  async _delete(name, isDir) {
+    const ok = await showConfirmDialog({ title: isDir ? 'Delete Folder' : 'Delete File', message: `Delete "${name}"?${isDir ? ' All contents will be removed.' : ''}`, confirmText: 'Delete', danger: true });
+    if (!ok) return;
+    const r = await fetch(`/api/file?path=${encodeURIComponent(this.currentPath + '/' + name)}`, { method: 'DELETE' }).catch(() => null);
+    if (!r?.ok) showToast('Delete failed', { type: 'error' });
+    this.refresh();
+  }
 
   _getFileExtension(name) {
     const dot = name.lastIndexOf('.');

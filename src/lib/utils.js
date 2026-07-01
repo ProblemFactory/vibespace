@@ -1,5 +1,82 @@
 export function formatSize(b) { if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
 
+// ── In-app modal dialogs (replace native prompt/confirm/alert) ──
+// Native dialogs block the event loop, ignore the theme, and are awkward on
+// mobile. These reuse the existing .dialog CSS. Promise-based:
+//   const name = await showInputDialog({ title: 'Rename', value: old });  // null on cancel
+//   if (await showConfirmDialog({ title: 'Delete?', message: '...', danger: true })) …
+function _modalShell(title) {
+  const overlay = document.createElement('div');
+  overlay.className = 'dialog-overlay';
+  overlay.style.zIndex = '99998';
+  const dialog = document.createElement('div');
+  dialog.className = 'dialog';
+  const header = document.createElement('div');
+  header.className = 'dialog-header';
+  const h3 = document.createElement('h3'); h3.textContent = title || '';
+  const closeBtn = document.createElement('button'); closeBtn.className = 'dialog-close'; closeBtn.textContent = '✕';
+  header.append(h3, closeBtn);
+  const body = document.createElement('div'); body.className = 'dialog-body';
+  const footer = document.createElement('div'); footer.className = 'dialog-footer';
+  const cancelBtn = document.createElement('button'); cancelBtn.className = 'btn-cancel'; cancelBtn.textContent = 'Cancel';
+  const okBtn = document.createElement('button'); okBtn.className = 'btn-create';
+  footer.append(cancelBtn, okBtn);
+  dialog.append(header, body, footer);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+  return { overlay, body, okBtn, cancelBtn, closeBtn };
+}
+
+export function showInputDialog({ title = 'Input', label = '', value = '', placeholder = '', confirmText = 'OK', multiline = false } = {}) {
+  return new Promise((resolve) => {
+    const { overlay, body, okBtn, cancelBtn, closeBtn } = _modalShell(title);
+    okBtn.textContent = confirmText;
+    const wrap = document.createElement('label');
+    if (label) wrap.appendChild(document.createTextNode(label));
+    const input = document.createElement(multiline ? 'textarea' : 'input');
+    if (!multiline) input.type = 'text';
+    else input.rows = 4;
+    input.value = value;
+    input.placeholder = placeholder;
+    wrap.appendChild(input);
+    body.appendChild(wrap);
+    const done = (result) => { overlay.remove(); resolve(result); };
+    okBtn.onclick = () => done(input.value);
+    cancelBtn.onclick = closeBtn.onclick = () => done(null);
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) done(null); });
+    input.addEventListener('keydown', (e) => {
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.key === 'Enter' && !multiline) { e.preventDefault(); done(input.value); }
+      if (e.key === 'Enter' && multiline && (e.ctrlKey || e.metaKey)) { e.preventDefault(); done(input.value); }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(null); }
+    });
+    setTimeout(() => { input.focus(); input.select(); }, 0);
+  });
+}
+
+export function showConfirmDialog({ title = 'Confirm', message = '', confirmText = 'OK', danger = false } = {}) {
+  return new Promise((resolve) => {
+    const { overlay, body, okBtn, cancelBtn, closeBtn } = _modalShell(title);
+    okBtn.textContent = confirmText;
+    if (danger) okBtn.style.background = 'var(--red)';
+    const p = document.createElement('p');
+    p.className = 'dialog-hint';
+    p.style.fontSize = '12px';
+    p.textContent = message;
+    body.appendChild(p);
+    const done = (result) => { overlay.remove(); resolve(result); };
+    okBtn.onclick = () => done(true);
+    cancelBtn.onclick = closeBtn.onclick = () => done(false);
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) done(false); });
+    overlay.tabIndex = -1;
+    overlay.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); done(true); }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(false); }
+    });
+    setTimeout(() => okBtn.focus(), 0);
+  });
+}
+
 // ── Global toast notifications ──
 // One shared bottom-center stack for transient feedback. Replaces the ad-hoc
 // mix of alert()s, per-component toasts, and silent .catch(() => {}) failures.

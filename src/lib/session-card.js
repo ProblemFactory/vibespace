@@ -1,4 +1,4 @@
-import { escHtml, copyText, createPopover } from './utils.js';
+import { escHtml, copyText, createPopover, showConfirmDialog } from './utils.js';
 import { createBackendIcon, createAgentKindIcon, createModeBackendIcon, getBackendMeta, getAgentKindMeta, getAgentRoleLabel, getAgentRoleShortLabel, getSessionKey } from './agent-meta.js';
 
 /** Inline SVG icon helper — returns an HTML string for a 12x12 stroked icon */
@@ -459,9 +459,10 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     terminateBtn.className = 'session-detail-btn';
     terminateBtn.style.color = 'var(--red, #e55)';
     terminateBtn.innerHTML = ICON.terminate + ' Terminate';
-    terminateBtn.onclick = (e) => {
+    terminateBtn.onclick = async (e) => {
       e.stopPropagation();
-      if (!confirm('Terminate session "' + displayName + '"?')) return;
+      const ok = await showConfirmDialog({ title: 'Terminate Session', message: `Terminate session "${displayName}"? The running agent process will be killed.`, confirmText: 'Terminate', danger: true });
+      if (!ok) return;
       if (s.webuiId) app.killSession(s.webuiId);
       else if (s.pid) app.killPid(s.pid);
     };

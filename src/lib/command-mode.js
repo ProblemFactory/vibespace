@@ -4,6 +4,8 @@
  * Single keystrokes: arrows=snap, m=maximize, w=close, Tab=cycle, f/g/n/s/b/e=global.
  */
 
+import { showInputDialog } from './utils.js';
+
 export class CommandMode {
   /**
    * @param {object} app - App instance for dispatching commands
@@ -97,11 +99,11 @@ export class CommandMode {
         case 'f': wm.applyLayout('freeform'); this.exit(); break;
         case 'g': {
           this.exit();
-          const input = prompt('Grid (e.g. 3x3):');
-          if (input) {
+          showInputDialog({ title: 'Custom Grid', label: 'Grid (e.g. 3x3)', placeholder: '3x3', confirmText: 'Apply' }).then((input) => {
+            if (!input) return;
             const match = input.match(/(\d+)\s*[x×X]\s*(\d+)/);
             if (match) wm.setGrid(parseInt(match[1]), parseInt(match[2]));
-          }
+          });
           break;
         }
         case 'n': this.exit(); app.showNewSessionDialog(); break;

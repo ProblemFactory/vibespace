@@ -1,4 +1,4 @@
-import { escHtml } from './utils.js';
+import { escHtml, showInputDialog } from './utils.js';
 import { UI_ICONS } from './icons.js';
 
 /**
@@ -424,20 +424,20 @@ export class ChatStatusBar {
         const item = document.createElement('div');
         item.className = 'chat-status-dropdown-item';
         item.textContent = option.label;
-        item.onclick = (ev) => {
+        item.onclick = async (ev) => {
           ev.stopPropagation();
           dropdown.remove();
           let target = option.target || null;
           if (option.kind === 'baseBranch') {
-            const branch = prompt('Base branch to review against:', 'main');
+            const branch = await showInputDialog({ title: 'Review vs Branch', label: 'Base branch to review against', value: 'main', confirmText: 'Review' });
             if (!branch) return;
             target = { type: 'baseBranch', branch: branch.trim() };
           } else if (option.kind === 'commit') {
-            const sha = prompt('Commit SHA to review:', '');
+            const sha = await showInputDialog({ title: 'Review Commit', label: 'Commit SHA to review', confirmText: 'Review' });
             if (!sha) return;
             target = { type: 'commit', sha: sha.trim() };
           } else if (option.kind === 'custom') {
-            const instructions = prompt('Review instructions:', '');
+            const instructions = await showInputDialog({ title: 'Custom Review', label: 'Review instructions', confirmText: 'Review', multiline: true });
             if (!instructions) return;
             target = { type: 'custom', instructions: instructions.trim() };
           }

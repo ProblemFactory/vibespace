@@ -1,7 +1,7 @@
 import { marked } from 'marked';
 import { HexViewer } from './hex-viewer.js';
 import { CodeEditor } from './code-editor.js';
-import { formatSize, escHtml } from './utils.js';
+import { formatSize, escHtml, showConfirmDialog } from './utils.js';
 import { hasDedicatedViewer, getViewerType } from './file-types.js';
 import { renderAsync as renderDocx } from 'docx-preview';
 import { init as initPptx } from 'pptx-preview';
@@ -39,7 +39,8 @@ class FileViewer {
 
     // Large file warning (only for text files opened in editor)
     if (!hasDedicatedViewer(ext) && fileInfo.size > 1024 * 1024) {
-      if (!confirm(`This file is ${formatSize(fileInfo.size)}. Opening may slow down the UI. Continue?`)) return;
+      const ok = await showConfirmDialog({ title: 'Large File', message: `This file is ${formatSize(fileInfo.size)}. Opening may slow down the UI. Continue?`, confirmText: 'Open' });
+      if (!ok) return;
     }
 
     // HTML: open in CodeEditor with preview toggle (same as markdown)

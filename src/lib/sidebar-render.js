@@ -4,7 +4,7 @@
  *
  * Installed on Sidebar.prototype via installSidebarRender(Sidebar).
  */
-import { escHtml, createPopover, showContextMenu, copyText, showToast } from './utils.js';
+import { escHtml, createPopover, showContextMenu, copyText, showToast, showInputDialog, showConfirmDialog } from './utils.js';
 import { createBackendIcon, getBackendMeta, getSessionKey } from './agent-meta.js';
 import { renderSessionCard } from './session-card.js';
 
@@ -181,8 +181,8 @@ export function installSidebarRender(SidebarClass) {
     const addGroupCard = document.createElement('div');
     addGroupCard.className = 'session-item-card new-session-card';
     addGroupCard.innerHTML = '<div class="session-card-name" style="color:var(--accent-hover)">+ New Group</div>';
-    addGroupCard.onclick = () => {
-      const name = prompt('Group name:');
+    addGroupCard.onclick = async () => {
+      const name = await showInputDialog({ title: 'New Group', label: 'Group name', confirmText: 'Create' });
       if (name && name.trim()) this._createGroup(name.trim());
     };
     this.listEl.appendChild(addGroupCard);
@@ -213,9 +213,9 @@ export function installSidebarRender(SidebarClass) {
 
       const nameSpan = header.querySelector('.folder-path');
       if (nameSpan) {
-        nameSpan.addEventListener('dblclick', (e) => {
+        nameSpan.addEventListener('dblclick', async (e) => {
           e.stopPropagation();
-          const newName = prompt('Rename group:', groupName);
+          const newName = await showInputDialog({ title: 'Rename Group', label: 'Group name', value: groupName, confirmText: 'Rename' });
           if (newName && newName.trim() && newName.trim() !== groupName) this._renameGroup(groupName, newName.trim());
         });
         nameSpan.title = 'Double-click to rename';
@@ -342,8 +342,8 @@ export function installSidebarRender(SidebarClass) {
 
   proto._showGroupContextMenu = function(x, y, groupName) {
     showContextMenu(x, y, [
-      { label: 'Rename', action: () => {
-        const n = prompt('Rename group:', groupName);
+      { label: 'Rename', action: async () => {
+        const n = await showInputDialog({ title: 'Rename Group', label: 'Group name', value: groupName, confirmText: 'Rename' });
         if (n && n.trim() && n.trim() !== groupName) this._renameGroup(groupName, n.trim());
       }},
       { label: 'Linked folders', action: () => {
@@ -354,8 +354,8 @@ export function installSidebarRender(SidebarClass) {
         anchor.remove();
       }},
       { separator: true },
-      { label: 'Delete group', style: 'color:var(--red,#e55)', action: () => {
-        if (confirm('Delete group "' + groupName + '"?\nSessions will not be deleted.')) this._deleteGroup(groupName);
+      { label: 'Delete group', style: 'color:var(--red,#e55)', action: async () => {
+        if (await showConfirmDialog({ title: 'Delete Group', message: `Delete group "${groupName}"? Sessions will not be deleted.`, confirmText: 'Delete', danger: true })) this._deleteGroup(groupName);
       }},
     ]);
   };
@@ -388,9 +388,9 @@ export function installSidebarRender(SidebarClass) {
     }
     const createRow = document.createElement('div'); createRow.className = 'session-detail-group-create';
     createRow.textContent = '+ New group';
-    createRow.onclick = (e) => {
+    createRow.onclick = async (e) => {
       e.stopPropagation();
-      const name = prompt('New group name:');
+      const name = await showInputDialog({ title: 'New Group', label: 'Group name', confirmText: 'Create' });
       if (name && name.trim()) { this._createGroup(name.trim()); onToggleFn(name.trim(), true, pop); pop.remove(); }
     };
     pop.appendChild(createRow);

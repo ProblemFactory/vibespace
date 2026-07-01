@@ -1,4 +1,5 @@
 import { SETTINGS_SCHEMA, SETTINGS_CATEGORIES } from './settings-schema.js';
+import { showConfirmDialog } from './utils.js';
 
 /**
  * SettingsUI — VS Code-style settings page.
@@ -37,7 +38,7 @@ class SettingsUI {
     resetAllBtn.className = 'settings-header-btn';
     resetAllBtn.textContent = 'Reset All';
     resetAllBtn.title = 'Reset all settings to defaults';
-    resetAllBtn.onclick = () => { if (confirm('Reset all settings to defaults?')) { this.settings.resetAll(); this._renderContent(content, nav); } };
+    resetAllBtn.onclick = async () => { if (await showConfirmDialog({ title: 'Reset Settings', message: 'Reset all settings to defaults?', confirmText: 'Reset', danger: true })) { this.settings.resetAll(); this._renderContent(content, nav); } };
     const closeBtn = document.createElement('button');
     closeBtn.className = 'dialog-close';
     closeBtn.textContent = '✕';

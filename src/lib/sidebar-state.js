@@ -6,7 +6,7 @@
  * All methods use `this` (Sidebar instance context).
  */
 import { getSessionKey } from './agent-meta.js';
-import { showToast } from './utils.js';
+import { showToast, showInputDialog } from './utils.js';
 
 export function installSidebarState(SidebarClass) {
   const proto = SidebarClass.prototype;
@@ -293,9 +293,13 @@ export function installSidebarState(SidebarClass) {
     this._pushUserState();
   };
 
-  proto.renameSession = function(sessionOrKey, currentName) {
+  proto.renameSession = async function(sessionOrKey, currentName) {
     const stateKey = this._getSessionStateKey(sessionOrKey);
-    const name = prompt('Session name:', this.getCustomName(sessionOrKey) || currentName || '');
+    const name = await showInputDialog({
+      title: 'Rename Session', label: 'Session name',
+      value: this.getCustomName(sessionOrKey) || currentName || '',
+      confirmText: 'Rename',
+    });
     if (name === null) return;
     if (!stateKey) return;
     if (name.trim()) this._customNames[stateKey] = name.trim();
