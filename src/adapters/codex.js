@@ -101,20 +101,25 @@ const JSONL_TAIL_BYTES = 32 * 1024 * 1024;
 function readJsonlBounded(fp, opts = {}) {
   const stat = fs.statSync(fp);
   if (stat.size <= JSONL_HEAD_BYTES + JSONL_TAIL_BYTES) return fs.readFileSync(fp, 'utf-8');
-  console.warn(`[jsonl] large session file ${path.basename(fp)} (${Math.round(stat.size / 1048576)}MB): loading first ${JSONL_HEAD_BYTES / 1048576}MB + last ${JSONL_TAIL_BYTES / 1048576}MB, middle elided`);
   const fd = fs.openSync(fp, 'r');
   try {
-    const headBuf = Buffer.alloc(JSONL_HEAD_BYTES);
-    const hn = fs.readSync(fd, headBuf, 0, JSONL_HEAD_BYTES, 0);
-    let head = headBuf.toString('utf-8', 0, hn);
-    head = head.slice(0, head.lastIndexOf('\n') + 1);
     const tailBuf = Buffer.alloc(JSONL_TAIL_BYTES);
     const tn = fs.readSync(fd, tailBuf, 0, JSONL_TAIL_BYTES, stat.size - JSONL_TAIL_BYTES);
     let tail = tailBuf.toString('utf-8', 0, tn);
     tail = tail.slice(tail.indexOf('\n') + 1); // drop the cut-off first line
-    // Make the elision VISIBLE: insert a marker line at the seam so the chat
-    // shows where (and roughly how much) history was skipped, instead of the
-    // head silently jumping into the tail mid-conversation
+    // Tail-only display window. The elided head+middle is NOT stitched in with a
+    // seam marker anymore — the client seek-loads the whole file backward from
+    // this tail as a continuous virtual scroll (no visible truncation notice).
+    if (opts.tailOnly) {
+      console.warn(`[jsonl] large session file ${path.basename(fp)} (${Math.round(stat.size / 1048576)}MB): tail-only display (last ${JSONL_TAIL_BYTES / 1048576}MB), earlier history seek-loaded on scroll`);
+      return tail;
+    }
+    // Legacy head+seam+tail path (kept for any non-display caller that still
+    // wants the elision marker stitched in).
+    const headBuf = Buffer.alloc(JSONL_HEAD_BYTES);
+    const hn = fs.readSync(fd, headBuf, 0, JSONL_HEAD_BYTES, 0);
+    let head = headBuf.toString('utf-8', 0, hn);
+    head = head.slice(0, head.lastIndexOf('\n') + 1);
     if (typeof opts.makeMarker === 'function') {
       const elidedBytes = stat.size - hn - tn;
       const loadedLines = ((head.match(/\n/g) || []).length) + ((tail.match(/\n/g) || []).length);
@@ -377,13 +382,8 @@ function parseCodexSessionJsonl(threadId) {
   if (!fp) return [];
   const messages = [];
   try {
-    const content = readJsonlBounded(fp, {
-      makeMarker: (bytes, approx) => JSON.stringify({
-        __webui_elision: true,
-        type: 'response_item',
-        payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: elisionNoticeText(bytes, approx) }] },
-      }),
-    });
+    // Tail-only: earlier history is seek-loaded on scroll (no seam marker).
+    const content = readJsonlBounded(fp, { tailOnly: true });
     for (const line of content.split('\n')) {
       const trimmed = line.trim();
       if (!trimmed) continue;

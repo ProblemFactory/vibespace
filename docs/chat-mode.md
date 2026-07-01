@@ -132,7 +132,7 @@ Subagent messages are filtered from the main chat -- they only appear in the ded
 Press **Ctrl+F** to open the search bar. Features:
 
 - Full-text search across the entire conversation history (not just the current view). Falls back to `/api/active` when JSONL path is unavailable.
-- **Huge sessions too**: when a session is so large its middle isn't loaded (multi-hundred-MB histories), search automatically switches to a server-side streaming scan of the **whole file** — head, unloaded middle, and tail are all covered, and jumping to a match seek-loads that part of the history on demand. The counter shows `N/500+` if there are more than 500 matches.
+- **Huge sessions too**: when a session is so large it can't be held in memory (multi-hundred-MB histories), search automatically switches to a server-side streaming scan of the **whole file**. Jumping to a match **teleports** to that part of the history (seek-loaded around the match's exact file position) and locks onto the highlighted result — reliable regardless of how far back the match is or whether the session is still growing. The scroll-to-bottom button returns you to the live conversation. The counter shows `N/500+` if there are more than 500 matches.
 - **CSS Custom Highlight API** for non-destructive highlighting (does not modify DOM)
 - Match counter showing current position and total matches
 - **Previous/Next** navigation (arrow buttons or Enter/Shift+Enter)
@@ -244,6 +244,7 @@ The chat view uses a virtual scroll system with a sliding DOM window for efficie
 
 - On attach, the server normalizes all messages via `MessageManager` and sends the last 50 as normalized messages (with stable IDs, merged tool calls). All messages go through the same `MessageManager` — no separate "buffer" vs "JSONL" concept exposed to the client.
 - **Scroll up** near the top to load earlier messages (50 at a time via `_extendTop`). When DOM exceeds ~150 elements, older messages at the bottom are trimmed (`_trimBottom`).
+- **Huge sessions** (transcripts too large to hold in memory) load only the recent tail, then treat the entire earlier history as one continuous scroll: scrolling up seek-loads older messages by byte offset all the way back to the first message, with no "history truncated" notice and nothing to click. Search/minimap jumps teleport to the target and the scroll-to-bottom button returns you to the live tail.
 - **Scroll down** past the rendered window loads newer messages (`_extendBottom`) and trims the top (`_trimTop`) with scroll position preservation.
 - **Wheel at top edge**: When `scrollTop=0`, scroll events stop firing. A wheel listener detects upward scroll intent and triggers pagination.
 - **Auto-fill**: If initial content is shorter than viewport (no scrollbar), more messages are loaded automatically.
@@ -260,7 +261,7 @@ A semantic scrollbar on the right side of the message list provides an overview 
 - **Outline (☰) button** at the top of the track: opens a filterable list of **all your messages** (time + two-line preview), scrolled to the most recent. Type to filter, click to jump. This is the fastest way to find a spot you remember sending something at. Works for huge (partially loaded) sessions too.
 - **Viewport thumb**: Semi-transparent bar showing current rendered window position
 - Hidden for short conversations (<3 turns). Native scrollbar hidden when minimap is active.
-- **Huge sessions**: when the middle of a very large history isn't loaded, the minimap switches to whole-conversation **time coordinates** — markers span the entire file, and clicking/dragging seek-loads the target region on demand.
+- **Huge sessions**: when a very large history is loaded tail-only, the minimap switches to whole-conversation **time coordinates** — markers span the entire file, and clicking/dragging teleports to the target region (seek-loaded on demand by file position).
 
 Turn data comes from `MessageManager.turnMap()`, included in the attach response or fetched via `?turnmap=1` API.
 

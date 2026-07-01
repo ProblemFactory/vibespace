@@ -222,6 +222,9 @@
 .chat-diff-summary.chat-tool-error-label { color: var(--red); }
 
 /* System/background notifications */
+/* Invisible top sentinel: drives continuous seek-load of earlier history in
+   huge sessions (no visible "truncated" notice — one continuous virtual scroll) */
+.chat-gap-sentinel { height: 1px; margin: 0; padding: 0; pointer-events: none; }
 /* Truncated-history seam: interactive "load earlier" card for huge sessions */
 .chat-history-gap { padding: 6px 0; }
 .chat-history-gap-inner {

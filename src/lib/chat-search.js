@@ -187,16 +187,64 @@ class ChatSearch {
     if (el) el.scrollIntoView({ block: 'center' });
   }
 
+  /**
+   * Full-file jumps land in the right WINDOW but the anchor element may be a
+   * message or two off the actual match (server's bounded-index normalization
+   * drifts a few positions from the paginated one). So instead of searching
+   * only inside the anchor, pick the highlight range physically NEAREST the
+   * anchor and scroll to it — the real match is loaded and highlighted, just
+   * not necessarily in `el`.
+   */
+  _revealNearest(el) {
+    this.applyHighlightLayer();
+    const ranges = this._highlightRanges;
+    if (!ranges || !ranges.length) { if (el) el.scrollIntoView({ block: 'center' }); return; }
+    const listRect = this._messageList.getBoundingClientRect();
+    let anchorY = listRect.top + listRect.height / 2;
+    if (el) { const r = el.getBoundingClientRect(); anchorY = r.top + r.height / 2; }
+    let best = 0, bestD = Infinity;
+    for (let i = 0; i < ranges.length; i++) {
+      const rr = ranges[i].getBoundingClientRect();
+      const d = Math.abs((rr.top + rr.height / 2) - anchorY);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    this._setCurrentHighlight(best);
+    const range = ranges[best];
+    // Iterative scroll convergence: after seek-loading a big slab, content-
+    // visibility computes real element heights over several frames (and keeps
+    // going for ~1s), shifting the target after a single scrollTop set. Re-center
+    // over ~12 frames, then a few more times on a timer, to stay locked on.
+    const list = this._messageList;
+    const center = () => {
+      const lr = list.getBoundingClientRect();
+      const rc = range.getBoundingClientRect();
+      list.scrollTop += rc.top - lr.top - lr.height / 2;
+    };
+    let n = 0;
+    const step = () => { center(); if (++n < 12) requestAnimationFrame(step); };
+    step();
+    for (const d of [180, 400, 750]) setTimeout(center, d);
+  }
+
   async _jumpToSearchResult(idx) {
     const results = this._serverSearchResults;
     if (!results || idx < 0 || idx >= results.length) return;
 
     // Full-file mode (huge sessions): matches carry {line, ts} instead of a
-    // window index — delegate the seek/scroll to ChatView, then reveal.
+    // window index — delegate the seek/scroll to ChatView, then reveal the
+    // nearest highlight (the anchor may be a couple messages off the match).
     if (this._fullFileMode) {
       const el = await this._jumpToFileMatch(results[idx]);
+      // Expand the anchor and its neighbours so a match in an adjacent
+      // (collapsed) tool card can still be highlighted + scrolled to.
       this._expandEl(el);
-      this._revealInEl(el);
+      if (el) {
+        let sib = el.previousElementSibling, n = 0;
+        while (sib && n < 3) { this._expandEl(sib); sib = sib.previousElementSibling; n++; }
+        sib = el.nextElementSibling; n = 0;
+        while (sib && n < 3) { this._expandEl(sib); sib = sib.nextElementSibling; n++; }
+      }
+      this._revealNearest(el);
       return;
     }
 
@@ -248,6 +296,15 @@ class ChatSearch {
       CSS.highlights.set('chat-search', new Highlight(...ranges));
     }
     this._highlightRanges = ranges;
+    // Re-assert the "current" highlight. applyHighlightLayer is re-run by
+    // scroll-driven paths (_extendBottom, _reportVisibleTsRange, jumpToIndex)
+    // AFTER a jump set the current match — without this the current highlight
+    // silently vanishes whenever a jump happens to land near a load boundary.
+    if (this._currentAnchor) {
+      const { node, offset } = this._currentAnchor;
+      const match = ranges.find(r => r.startContainer === node && r.startOffset === offset);
+      if (match) CSS.highlights.set('chat-search-current', new Highlight(match));
+    }
   }
 
   /** Highlight a specific range as "current" (for search navigation) */
@@ -255,13 +312,18 @@ class ChatSearch {
     if (!CSS.highlights || !this._highlightRanges) return;
     CSS.highlights.delete('chat-search-current');
     if (rangeIdx >= 0 && rangeIdx < this._highlightRanges.length) {
-      CSS.highlights.set('chat-search-current', new Highlight(this._highlightRanges[rangeIdx]));
+      const range = this._highlightRanges[rangeIdx];
+      CSS.highlights.set('chat-search-current', new Highlight(range));
+      // Anchor to the underlying DOM node+offset so applyHighlightLayer can
+      // recover the current highlight after it rebuilds the range list.
+      this._currentAnchor = { node: range.startContainer, offset: range.startOffset };
     }
   }
 
   _clearHighlightLayer() {
     this._highlightQuery = '';
     this._highlightRanges = [];
+    this._currentAnchor = null;
     if (CSS.highlights) {
       CSS.highlights.delete('chat-search');
       CSS.highlights.delete('chat-search-current');

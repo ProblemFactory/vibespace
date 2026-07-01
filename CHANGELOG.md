@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.13.0] — 2026-07-01
+
+### Changed
+
+- **Huge sessions now scroll like small ones — pure streaming seek, no truncation notice.** Sessions whose transcript is too large to hold in memory (hundreds of MB) previously loaded as a head + tail with a visible "Session history truncated" seam card in the middle, and jumping into the elided middle was unreliable. Now the chat loads the recent tail only and treats the entire earlier history as one continuous virtual scroll: scrolling up transparently seek-loads older messages (by byte offset) all the way back to the first message, with no seam marker and nothing to click.
+- **Search and minimap jumps are now precise on any session size.** Every jump (search result, minimap marker) teleports to a slab seek-loaded around the target's absolute file position, then locks onto the exact match with iterative, content-shift-proof centering. This is immune to the index drift that made jumps miss on very large and actively-growing sessions. A "return to latest" affordance (the scroll-to-bottom button) brings you back to the live conversation.
+- Full-file search already covered the whole transcript; it now lands correctly on the match instead of near it, and the highlighted result stays highlighted as the view settles.
+
 ## [2.12.0] — 2026-06-28
 
 ### Fixed

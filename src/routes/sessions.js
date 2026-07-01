@@ -13,7 +13,7 @@ const router = express.Router();
 const {
   SESSIONS_DIR, isPidAlive, cwdToProjectDir, recoverCwdFromProjDir,
   getTmuxPaneMap, findTmuxTarget, isProcessClaude,
-  extractSessionMeta,
+  extractSessionMeta, isSubagentMessage,
 } = require('../session-store');
 const { createMessageManager } = require('../normalizers');
 const { listCodexThreads } = require('../codex-session-store');
@@ -114,13 +114,55 @@ function setup(ctx) {
     res.json(payload);
   });
 
-  // ── Lazy middle-of-history loading for huge JSONL files ──
-  // Initial attach loads head+tail with an elided middle (see readJsonlBounded).
-  // This endpoint seeks into that middle by byte offset (via a cached line
-  // index) and normalizes just the requested raw-record slab — so the user can
-  // scroll into history that's too large to ever hold fully in memory.
-  //   ?…&info=1                  → { headEndLine, tailStartLine, totalLines, gapRecords } or { gap:null }
-  //   ?…&endLine=N&count=C       → { messages, fromLine, toLine, headEndLine } (records [max(headEnd,N-C), N))
+  // ── Whole-file seek loading for huge JSONL files ──
+  // Initial attach loads TAIL-only (see readJsonlBounded tailOnly). This endpoint
+  // seek-reads any earlier line range by byte offset (via a cached line index)
+  // and normalizes just that raw-record slab, so the client scrolls backward
+  // through history too large to hold fully in memory, as one continuous virtual
+  // list (no seam marker).
+  //   ?...&info=1               -> { gap:{ tailStartLine, totalLines } } or { gap:null }
+  //   ?...&endLine=N&count=C    -> { messages, fromLine, toLine } (records [max(0,N-C), N))
+  //   ?...&startLine=N&count=C  -> { messages, fromLine, toLine } (records [N, N+C))
+  // _tailIndexFor maps the loaded tail to normalized indices so a full-file
+  // search hit in the tail jumps precisely via jumpToIndex; earlier-history hits
+  // seek-load by file line. Cached by mtime+size (a 32MB normalize is expensive).
+  const _boundedIdxCache = new Map();
+  const _tailIndexFor = (fp, backend, gap) => {
+    const stat = fs.statSync(fp);
+    const hit = _boundedIdxCache.get(fp);
+    if (hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) return hit;
+    // The client's registered window is now tail-ONLY (readJsonlBounded tailOnly),
+    // so normalizing readJsonlLineRange(tailStartLine, totalLines) here reproduces
+    // the client's index space EXACTLY - no head/seam, no drift. Records carry
+    // __line so each message gets srcLine for line->index.
+    let tailRecs = readJsonlLineRange(fp, gap.tailStartLine, gap.totalLines);
+    // Match parseSessionJsonl: subagent records are filtered before normalizing.
+    tailRecs = tailRecs.filter((r) => !isSubagentMessage(r));
+    const mm = createMessageManager(backend, 'tidx');
+    mm.convertHistory(tailRecs);
+    const lineIdx = [];
+    for (let i = 0; i < mm.messages.length; i++) {
+      const m = mm.messages[i];
+      if (Number.isFinite(m.srcLine)) lineIdx.push({ line: m.srcLine, index: i });
+    }
+    const result = { mtimeMs: stat.mtimeMs, size: stat.size, lineIdx };
+    _boundedIdxCache.set(fp, result);
+    if (_boundedIdxCache.size > 8) _boundedIdxCache.delete(_boundedIdxCache.keys().next().value);
+    return result;
+  };
+  // Nearest tail message index at or before `line` (or null when the line is
+  // below the tail - i.e. seek-loadable earlier history).
+  const _indexForLine = (bidx, line, gap) => {
+    if (line < gap.tailStartLine) return null; // earlier history -> seek by line
+    let lo = 0, hi = bidx.lineIdx.length - 1, best = null;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (bidx.lineIdx[mid].line <= line) { best = bidx.lineIdx[mid].index; lo = mid + 1; }
+      else hi = mid - 1;
+    }
+    return best;
+  };
+
   router.get('/api/session-history-gap', (req, res) => {
     const { backend, backendSessionId, claudeSessionId, cwd } = req.query;
     const resolvedBackend = backend || 'claude';
@@ -136,13 +178,24 @@ function setup(ctx) {
     try { gap = jsonlGapInfo(fp); } catch { gap = null; }
     if (!gap) return res.json({ gap: null });
 
-    if (req.query.info) return res.json({ gap });
+    if (req.query.info) {
+      return res.json({ gap });
+    }
 
-    // Full-file streaming search: covers head + elided middle + tail uniformly
-    // in {line, ts} coordinates, so huge sessions search like small ones.
+    // Full-file streaming search: covers the whole file uniformly in {line, ts}
+    // coordinates, so huge sessions search like small ones. Matches in the loaded
+    // tail also get an exact normalized index (jumpToIndex, no drift); matches in
+    // earlier history carry only {line} and are seek-loaded by file line.
     if (req.query.search) {
       let result = { matches: [], truncated: false };
       try { result = searchJsonlFull(fp, resolvedBackend, req.query.search); } catch {}
+      try {
+        const bidx = _tailIndexFor(fp, resolvedBackend, gap);
+        for (const m of result.matches) {
+          const i = _indexForLine(bidx, m.line, gap);
+          if (i != null) m.index = i;
+        }
+      } catch {}
       return res.json({ ...result, ...gap });
     }
 
@@ -160,26 +213,33 @@ function setup(ctx) {
     const endLine = parseInt(req.query.endLine);
     const startLine = parseInt(req.query.startLine);
     let fromLine, toLine;
+    // whole=1: seek anywhere in [0, totalLines) — used for jump/teleport, which
+    // reads by ABSOLUTE file line (immune to the tail sliding on a live session).
+    // Default clamps to [0, tailStartLine): the tail is the registered window, so
+    // continuous scroll-up only loads earlier history and never re-reads the tail.
+    const ceil = req.query.whole ? gap.totalLines : gap.tailStartLine;
     if (Number.isFinite(startLine)) {
-      // Forward read (minimap jump): records [startLine, startLine+count)
-      fromLine = Math.max(gap.headEndLine, Math.min(startLine, gap.tailStartLine));
-      toLine = Math.min(gap.tailStartLine, fromLine + count);
+      // Forward read (jump): records [startLine, startLine+count).
+      fromLine = Math.max(0, Math.min(startLine, ceil));
+      toLine = Math.min(ceil, fromLine + count);
     } else if (Number.isFinite(endLine)) {
-      // Backward read (scroll-up auto-load): records [endLine-count, endLine)
-      toLine = Math.min(endLine, gap.tailStartLine);
-      fromLine = Math.max(gap.headEndLine, toLine - count);
+      // Backward read (scroll-up auto-load): records [endLine-count, endLine).
+      toLine = Math.min(endLine, ceil);
+      fromLine = Math.max(0, toLine - count);
     } else {
       return res.status(400).json({ error: 'endLine or startLine required' });
     }
-    if (fromLine >= toLine) return res.json({ messages: [], fromLine: gap.headEndLine, toLine: gap.headEndLine, headEndLine: gap.headEndLine });
+    if (fromLine >= toLine) return res.json({ messages: [], fromLine: 0, toLine: 0, tailStartLine: gap.tailStartLine });
 
     let records = [];
     try { records = readJsonlLineRange(fp, fromLine, toLine); } catch { records = []; }
+    // Match the display path: drop subagent records before normalizing.
+    records = records.filter((r) => !isSubagentMessage(r));
     // Normalize the slab in isolation. Tool calls whose result is outside this
     // window render as orphans (acceptable for read-only history browsing).
     const mm = createMessageManager(resolvedBackend, 'gap');
     mm.convertHistory(records);
-    res.json({ messages: mm.tail(mm.total), fromLine, toLine, headEndLine: gap.headEndLine });
+    res.json({ messages: mm.tail(mm.total), fromLine, toLine, tailStartLine: gap.tailStartLine, totalLines: gap.totalLines });
   });
 
   // Subagent messages for a given session + agentId

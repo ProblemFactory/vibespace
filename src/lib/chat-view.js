@@ -109,6 +109,7 @@ class ChatView {
     this._scrollBtn.innerHTML = '\u2193';
     this._scrollBtn.title = 'Scroll to bottom';
     this._scrollBtn.onclick = () => {
+      if (this._teleported) { this.jumpToBottom(); return; }   // return to latest
       if (this._readOnly || !this.sessionId) {
         // Read-only or no session: just scroll, don't fetch
         this._pinned = true;
@@ -128,9 +129,10 @@ class ChatView {
     // Wheel at top edge: scroll event won't fire when already at scrollTop=0,
     // so use wheel to detect upward scroll intent and trigger pagination
     this._messageList.addEventListener('wheel', (e) => {
-      if (e.deltaY < 0 && this._messageList.scrollTop < 10 && this._windowStart > 0 && !this._loading && this._canPaginate) {
-        this._extendTop();
-      }
+      if (e.deltaY >= 0 || this._messageList.scrollTop >= 10 || this._loading || !this._canPaginate) return;
+      if (this._teleported) this._maybeSeekEarlier();          // teleported: seek older by line
+      else if (this._windowStart > 0) this._extendTop();
+      else this._maybeSeekEarlier();                           // registered tail exhausted → seek gap
     }, { passive: true });
 
     // Scroll detection: pin-to-bottom + auto-load earlier messages (throttled)
@@ -151,11 +153,14 @@ class ChatView {
           this._pinned = false;
           this._scrollBtn.classList.remove('hidden');
         }
-        if (scrollTop < 100 && this._windowStart > 0 && !this._loading && this._canPaginate) {
-          this._extendTop();
+        if (scrollTop < 100 && !this._loading && this._canPaginate) {
+          if (this._teleported) this._maybeSeekEarlier();       // teleported: seek older by line
+          else if (this._windowStart > 0) this._extendTop();
+          else this._maybeSeekEarlier();                        // registered tail exhausted → seek gap
         }
-        // Extend bottom when scrolling near end of rendered window (but more messages exist)
-        if (scrollHeight - scrollTop - clientHeight < 200 && this._windowEnd < this._total && !this._loading && this._canPaginate) {
+        // Extend bottom when scrolling near end of rendered window (registered
+        // mode only — teleport slabs don't extend down; use "return to latest")
+        if (!this._teleported && scrollHeight - scrollTop - clientHeight < 200 && this._windowEnd < this._total && !this._loading && this._canPaginate) {
           this._extendBottom();
         }
         this._updatePosIndicator();
@@ -277,11 +282,6 @@ class ChatView {
           parentToolUseId: e.target.dataset.parentToolId,
           description: e.target.dataset.desc,
         });
-      }
-      // "Load earlier messages" on a truncated-history seam marker
-      if (e.target.classList.contains('chat-load-earlier-btn')) {
-        e.stopPropagation();
-        this._loadEarlierGap(e.target.closest('.chat-history-gap'), e.target);
       }
     });
 
@@ -516,31 +516,71 @@ class ChatView {
     setTimeout(() => { this._loading = false; }, 300);
   }
 
-  // Auto-load the elided middle as the seam marker scrolls into view — like a
-  // virtual list's infinite scroll. The marker sits at the top of the gap
-  // region; each loaded slab inserts just below it (with scroll compensation),
-  // pushing the marker out of the trigger zone until the user scrolls up again.
+  // Install an invisible sentinel at the very top of the message list. It plays
+  // the role the old seam marker did (holds the gap-load cursor + anchor) but is
+  // 0-height and unstyled, so scrolling up seek-loads earlier history with no
+  // visible "truncated" notice — a continuous virtual scroll to line 0.
+  _installSeekSentinel() {
+    if (this._seekSentinel && this._seekSentinel.isConnected) return this._seekSentinel;
+    const el = document.createElement('div');
+    el.className = 'chat-gap-sentinel';
+    el._isSeekSentinel = true;
+    this._messageList.insertBefore(el, this._messageList.firstChild);
+    this._seekSentinel = el;
+    this._observeHistoryGap(el);
+    return el;
+  }
+
+  // Scroll-driven trigger for continuous gap loading once the registered tail is
+  // fully rendered — complements the IntersectionObserver (which only fires on
+  // intersection CHANGES, and scroll compensation can pin the sentinel in place).
+  _maybeSeekEarlier() {
+    if (!this._gapMinimapActive) return;
+    const s = this._seekSentinel;
+    if (s && s.isConnected && !s._gapLoading && (s._gapCursor == null || s._gapCursor > 0)) {
+      this._loadEarlierGap(s, null);
+    }
+  }
+
+  // A full-window jump (jumpToIndex/jumpToBottom) cleared the gap content; the
+  // sentinel survives (it's not a .chat-msg) but its cursor now points at a stale
+  // line. Reset it so the next scroll-up re-seeks from the tail edge (line
+  // tailStartLine) instead of skipping the [cursor, tailStartLine) span.
+  _resetGapAfterJump() {
+    this._teleported = false;   // a full-window jump exits teleport mode
+    if (!this._gapMinimapActive) return;
+    const s = this._installSeekSentinel();   // re-create if a prior seek removed it
+    if (s) { s._gapCursor = null; s._gapAnchor = null; s._gapLoading = false; }
+  }
+
+  // Auto-load earlier history as the top sentinel scrolls into view — like a
+  // virtual list's infinite scroll. The sentinel sits at the top; each loaded
+  // slab inserts just below it (with scroll compensation), pushing the sentinel
+  // out of the trigger zone until the user scrolls up again.
   _observeHistoryGap(markerEl) {
     if (markerEl._gapObserved) return;
     markerEl._gapObserved = true;
     if (!this._gapObserver) {
       this._gapObserver = new IntersectionObserver((entries) => {
         for (const entry of entries) {
-          if (entry.isIntersecting) this._loadEarlierGap(entry.target, entry.target.querySelector('.chat-load-earlier-btn'));
+          if (entry.isIntersecting) this._loadEarlierGap(entry.target, null);
         }
       }, { root: this._messageList, rootMargin: '300px 0px 0px 0px' });
     }
     this._gapObserver.observe(markerEl);
   }
 
-  // Lazily load a slab of the elided MIDDLE of a huge session (seek-read on the
-  // server by byte offset). Fired automatically by the IntersectionObserver as
-  // the marker nears the viewport, or manually via the fallback button. Each
-  // call walks one slab older, filling the gap between head and tail bottom-up.
-  // Gap messages render read-only and are excluded from virtual-scroll trimming
-  // + window accounting.
+  // Lazily seek-load a slab of earlier history (server reads by byte offset).
+  // Fired automatically by the IntersectionObserver as the sentinel nears the
+  // viewport. Each call walks one slab older, filling from the tail edge down to
+  // line 0 — the whole file as one continuous scroll. Gap messages render
+  // read-only and are excluded from virtual-scroll trimming + window accounting.
   async _loadEarlierGap(markerEl, btn) {
     if (!markerEl || markerEl._gapLoading) return;
+    // Tail mode: load the registered tail to completion first — the sentinel
+    // loads history BELOW line tailStartLine, which must sit above a fully
+    // rendered tail. Teleport mode has no registered tail, so skip this.
+    if (!this._teleported && this._windowStart > 0) { await this._extendTop(); return; }
     markerEl._gapLoading = true;
     const origLabel = btn ? btn.textContent : '';
     if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
@@ -548,16 +588,20 @@ class ChatView {
       const { backend, backendSessionId, cwd } = this._getSessionIds();
       if (!backendSessionId) return;
       const base = `backend=${encodeURIComponent(backend || 'claude')}&backendSessionId=${encodeURIComponent(backendSessionId)}&cwd=${encodeURIComponent(cwd || '')}`;
-      // First click: discover the gap boundaries; cursor starts at the tail edge
+      // First fire: discover the boundary; cursor starts at the tail edge.
       if (markerEl._gapCursor == null) {
-        const info = await fetch(`/api/session-history-gap?${base}&info=1`).then(r => r.json()).catch(() => null);
-        if (!info?.gap) { if (btn) btn.remove(); return; }
-        markerEl._gapHeadEnd = info.gap.headEndLine;
-        markerEl._gapCursor = info.gap.tailStartLine;
+        const b = this._gapBounds;
+        const tailStartLine = b?.tailStartLine
+          ?? (await fetch(`/api/session-history-gap?${base}&info=1`).then(r => r.json()).catch(() => null))?.gap?.tailStartLine;
+        if (!Number.isFinite(tailStartLine)) { if (btn) btn.remove(); return; }
+        markerEl._gapCursor = tailStartLine;
         markerEl._gapAnchor = markerEl.nextElementSibling; // insert new (older) slabs before this
       }
-      if (markerEl._gapCursor <= markerEl._gapHeadEnd) { if (btn) btn.remove(); this._gapObserver?.unobserve(markerEl); return; }
-      const data = await fetch(`/api/session-history-gap?${base}&endLine=${markerEl._gapCursor}&count=2000`).then(r => r.json()).catch(() => null);
+      if (markerEl._gapCursor <= 0) { this._finishSeek(markerEl, btn); return; }
+      // Teleport mode reads across the whole file (whole=1); tail mode stops at
+      // tailStartLine (the registered tail lives below).
+      const whole = this._teleported ? '&whole=1' : '';
+      const data = await fetch(`/api/session-history-gap?${base}&endLine=${markerEl._gapCursor}&count=2000${whole}`).then(r => r.json()).catch(() => null);
       const msgs = data?.messages || [];
       const scrollHeightBefore = this._messageList.scrollHeight;
       const scrollTopBefore = this._messageList.scrollTop;
@@ -572,21 +616,23 @@ class ChatView {
       }
       // Next (older) slab inserts above the one we just added
       if (firstInserted) markerEl._gapAnchor = firstInserted;
-      markerEl._gapCursor = (data && Number.isFinite(data.fromLine)) ? data.fromLine : markerEl._gapHeadEnd;
-      // Keep the viewport stable: we inserted content below the marker
+      markerEl._gapCursor = (data && Number.isFinite(data.fromLine)) ? data.fromLine : 0;
+      // Keep the viewport stable: we inserted content below the sentinel
       this._messageList.scrollTop = scrollTopBefore + (this._messageList.scrollHeight - scrollHeightBefore);
-      if (markerEl._gapCursor <= markerEl._gapHeadEnd) {
-        if (btn) btn.remove();
-        this._gapObserver?.unobserve(markerEl);
-        const done = document.createElement('div');
-        done.className = 'chat-history-gap-done';
-        done.textContent = '— reached the start of the loadable middle —';
-        markerEl.querySelector('.chat-history-gap-inner')?.appendChild(done);
-      }
+      if (markerEl._gapCursor <= 0) this._finishSeek(markerEl, btn);
     } finally {
       markerEl._gapLoading = false;
       if (btn && btn.isConnected) { btn.disabled = false; btn.textContent = origLabel; }
     }
+  }
+
+  // Reached line 0 — the whole conversation is now loaded. Stop observing; the
+  // invisible sentinel can just go away (a visible "Load earlier" button, if any
+  // legacy marker is in use, is removed too).
+  _finishSeek(markerEl, btn) {
+    if (btn) btn.remove();
+    this._gapObserver?.unobserve(markerEl);
+    if (markerEl._isSeekSentinel) markerEl.remove();
   }
 
   // Render a gap message to a standalone element WITHOUT registering it in the
@@ -623,8 +669,12 @@ class ChatView {
       const data = await fetch(`/api/session-history-gap?${base}&fullturnmap=1`).then(r => r.json()).catch(() => null);
       if (this._disposed || !data?.fullTurns?.length) return;
       this._gapMinimapActive = true;
-      this._gapBounds = { headEndLine: data.headEndLine, tailStartLine: data.tailStartLine };
+      this._gapBounds = { tailStartLine: data.tailStartLine, totalLines: data.totalLines };
       this._chatMinimap.renderFullExtent({ fullTurns: data.fullTurns, firstTs: data.firstTs, lastTs: data.lastTs });
+      // Huge session: the server sent tail-ONLY (no head, no seam marker). Install
+      // an invisible sentinel above the tail so scrolling up seek-loads the whole
+      // earlier history as one continuous virtual list (down to line 0).
+      this._installSeekSentinel();
       this._reportVisibleTsRange();
     } finally {
       this._gapMinimapLoading = false;
@@ -656,93 +706,98 @@ class ChatView {
     return m?.ts || 0;
   }
 
-  // Minimap click/drag in time mode: jump to a turn at file line `line`. If the
-  // target is in the unloaded middle, seek-load a forward slab there and scroll
-  // to it; otherwise it's already loaded — scroll to the nearest message by ts.
+  // Minimap click/drag in time mode: jump to a turn at file `line`. Teleports
+  // to a seek-loaded slab around that absolute line, then scrolls to nearest ts.
   async _jumpToFileTime(ts, line) {
-    const b = this._gapBounds;
-    if (b && line >= b.headEndLine && line < b.tailStartLine) {
-      await this._seekToGapLine(line);     // unloaded middle: precise seek-load
-      return;
+    let el = this._gapElForLine(line);
+    if (!el) el = await this._seekTeleport(line);
+    const target = this._nearestElByTs(ts) || el;
+    if (target) {
+      this._scrollElStable(target);
+      this._reportVisibleTsRange();
     }
-    // Head/tail are in the server's normalized window. If the target region
-    // isn't currently rendered, load it first, then scroll to the nearest ts.
-    const rendered = this._scrollToNearestTs(ts, /*tolMs*/ 6 * 3600 * 1000);
-    if (rendered) return;
-    if (b && line < b.headEndLine) {
-      await this.jumpToIndex(0);            // conversation start
-    } else {
-      await this.jumpToBottom();           // recent tail
-    }
-    requestAnimationFrame(() => this._scrollToNearestTs(ts));
+    return target;
   }
 
-  async _seekToGapLine(line) {
-    let marker = this._messageList.querySelector('.chat-history-gap');
-    if (!marker) {
-      // Seam not currently rendered (user is down in the tail). Jump to the
-      // conversation start so the head+seam region loads, then retry.
-      await this.jumpToIndex(0);
-      marker = this._messageList.querySelector('.chat-history-gap');
+  // Center an element with iterative convergence: after a teleport loads a big
+  // slab, content-visibility computes real heights over several frames and a
+  // single scrollTop set drifts. Re-center over ~12 frames until stable. Holds
+  // the programmatic-scroll guard so auto-load doesn't fire mid-scroll.
+  _scrollElStable(el) {
+    if (!el || !el.isConnected) return;
+    this._programmaticScroll = true;
+    clearTimeout(this._jumpGuardTimer);
+    this._jumpGuardTimer = setTimeout(() => { this._programmaticScroll = false; }, 1100);
+    const list = this._messageList;
+    const center = () => {
+      if (!el.isConnected) return;
+      const lr = list.getBoundingClientRect();
+      const rc = el.getBoundingClientRect();
+      list.scrollTop += rc.top - lr.top - lr.height / 2;
+    };
+    let n = 0;
+    const step = () => { center(); if (++n < 12) requestAnimationFrame(step); };
+    step();
+    // content-visibility keeps computing off-screen heights for ~1s after the
+    // jump, shifting the target after rAF convergence ends — re-center a few
+    // more times on a timer to stay locked on.
+    for (const d of [180, 400, 750]) setTimeout(center, d);
+  }
+
+  // Teleport: replace the whole view with a read-only slab seek-loaded around an
+  // ABSOLUTE file line (whole=1, so it works in the tail region too and is immune
+  // to the live tail sliding). Scrolling up continues seeking older by line; the
+  // scroll-to-bottom button returns to the live/registered tail. This is the one
+  // jump primitive — search + minimap both go through it, so there is no
+  // normalized-index drift regardless of session size or live growth.
+  async _seekTeleport(line) {
+    const { backend, backendSessionId, cwd } = this._getSessionIds();
+    if (!backendSessionId) return null;
+    const base = `backend=${encodeURIComponent(backend || 'claude')}&backendSessionId=${encodeURIComponent(backendSessionId)}&cwd=${encodeURIComponent(cwd || '')}`;
+    const start = Math.max(0, line - 1000);   // center the target in the 2000-line slab
+    const data = await fetch(`/api/session-history-gap?${base}&startLine=${start}&count=2000&whole=1`).then(r => r.json()).catch(() => null);
+    if (this._disposed) return null;
+    const msgs = data?.messages || [];
+    if (!msgs.length) return null;
+    // Replace the entire rendered view with this slab; keep + reset the sentinel.
+    this._teleported = true;
+    this._messageList.querySelectorAll('.chat-msg, .chat-msg-system').forEach(el => el.remove());
+    this._elements.clear();
+    this._renderedMsgIds.clear();
+    this._messages = [];
+    const marker = this._installSeekSentinel();
+    marker._gapCursor = Number.isFinite(data.fromLine) ? data.fromLine : start;
+    marker._gapLoading = false;
+    let firstInserted = null;
+    for (const msg of msgs) {
+      const el = this._renderGapMsg(msg);
+      if (!el) continue;
+      this._messageList.appendChild(el);      // sentinel stays first, slab follows
+      if (!firstInserted) firstInserted = el;
     }
-    if (!marker || marker._gapLoading) return;
-    marker._gapLoading = true;
-    try {
-      const { backend, backendSessionId, cwd } = this._getSessionIds();
-      const base = `backend=${encodeURIComponent(backend || 'claude')}&backendSessionId=${encodeURIComponent(backendSessionId)}&cwd=${encodeURIComponent(cwd || '')}`;
-      const data = await fetch(`/api/session-history-gap?${base}&startLine=${line}&count=2000`).then(r => r.json()).catch(() => null);
-      if (this._disposed) return;
-      const msgs = data?.messages || [];
-      if (!msgs.length) return;
-      // Replace existing gap content with this jumped slab (avoids interleaving
-      // arbitrary jumps with the bottom-up auto-load chain)
-      this._messageList.querySelectorAll('.chat-gap-msg').forEach(el => el.remove());
-      const anchor = marker.nextElementSibling;
-      let firstInserted = null;
-      for (const msg of msgs) {
-        const el = this._renderGapMsg(msg);
-        if (!el) continue;
-        this._messageList.insertBefore(el, anchor);
-        if (!firstInserted) firstInserted = el;
-      }
-      // Reset the auto-load chain so scrolling up continues from this point
-      marker._gapAnchor = firstInserted || anchor;
-      marker._gapCursor = (data && Number.isFinite(data.fromLine)) ? data.fromLine : line;
-      if (firstInserted) { this._programmaticScroll = true; firstInserted.scrollIntoView({ block: 'center' }); setTimeout(() => { this._programmaticScroll = false; }, 60); }
-      this._reportVisibleTsRange();
-      return firstInserted;
-    } finally {
-      marker._gapLoading = false;
-    }
+    marker._gapAnchor = firstInserted;         // older slabs insert above this
+    this._pinned = false;
+    this._scrollBtn.classList.remove('hidden'); // "return to latest" affordance
+    return this._gapElForLine(line) || firstInserted;
   }
 
   // ── Full-file search support (huge sessions) ──
-  // Jump to a search match given file-line + ts coordinates. Returns the DOM
-  // element containing (or nearest to) the match so the caller can expand and
-  // highlight it. Handles all three regions: elided middle (seek-load a slab,
-  // with a fast path when the line is already loaded), head, and tail.
+  // Jump to a search match given file-line + ts. Teleports to a slab around the
+  // absolute line, then returns the DOM element nearest the match (by ts) so the
+  // caller can expand + highlight it.
   async jumpToFileMatch(match) {
-    const b = this._gapBounds;
     const line = match.line;
-    if (b && line >= b.headEndLine && line < b.tailStartLine) {
-      let el = this._gapElForLine(line);
-      if (!el) {
-        await this._seekToGapLine(line);
-        el = this._gapElForLine(line);
-      }
-      if (el) {
-        this._programmaticScroll = true;
-        el.scrollIntoView({ block: 'center' });
-        setTimeout(() => { this._programmaticScroll = false; }, 60);
-        this._reportVisibleTsRange();
-      }
-      return el;
-    }
-    // Head/tail: make sure the right region is rendered, then nearest by ts
-    await this._jumpToFileTime(match.ts, line);
-    // _jumpToFileTime scrolls via rAF fallbacks — wait a frame before resolving
-    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-    return this._nearestElByTs(match.ts);
+    const settle = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    // Hold the programmatic-scroll guard across the jump + the caller's reveal so
+    // scroll-driven auto-load can't yank a slab in under the target mid-reveal.
+    this._programmaticScroll = true;
+    clearTimeout(this._jumpGuardTimer);
+    this._jumpGuardTimer = setTimeout(() => { this._programmaticScroll = false; }, 700);
+    let el = this._gapElForLine(line);          // fast path: already in the loaded slab
+    if (!el) { await this._seekTeleport(line); await settle(); }
+    const target = this._nearestElByTs(match.ts) || this._gapElForLine(line);
+    if (target) { this._scrollElStable(target); this._reportVisibleTsRange(); }
+    return target;
   }
 
   // Find the loaded gap-slab element at (or nearest before) a file line.
@@ -862,6 +917,7 @@ class ChatView {
 
     // Clear and rebuild DOM
     this._messageList.querySelectorAll('.chat-msg, .chat-msg-system').forEach(el => el.remove());
+    this._resetGapAfterJump();
     this._elements.clear();
     this._renderedMsgIds.clear();
     this._messages = [];
@@ -893,6 +949,7 @@ class ChatView {
     const msgs = await this._fetchMessages(start, this._total - start);
 
     this._messageList.querySelectorAll('.chat-msg, .chat-msg-system').forEach(el => el.remove());
+    this._resetGapAfterJump();
     this._elements.clear();
     this._renderedMsgIds.clear();
     this._messages = [];
@@ -1039,9 +1096,6 @@ class ChatView {
     this._messageList.appendChild(el);
     this._renderers.addWrapToggles(el);
     this._renderers.addOpenInEditorBtn(el);
-    // Truncated-history seam: auto-load the elided middle as it scrolls near,
-    // and switch the minimap to whole-conversation (time-coordinate) view
-    if (el._isHistoryGap) { this._observeHistoryGap(el); this._initGapMinimap(); }
     // Update window bounds for live messages (not history batch)
     if (!this._loadingHistory) {
       this._total++;

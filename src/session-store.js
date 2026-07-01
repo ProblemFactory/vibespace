@@ -121,14 +121,10 @@ function parseSessionJsonl(claudeSessionId, cwd) {
     }
 
     // Bounded read: a full readFileSync('utf-8') THROWS past Node's ~512MB
-    // string limit (and blocks the event loop for hundreds of MB below it)
-    const content = readJsonlBounded(fp, {
-      makeMarker: (bytes, approx) => JSON.stringify({
-        __webui_elision: true,
-        type: 'user',
-        message: { role: 'user', content: [{ type: 'text', text: elisionNoticeText(bytes, approx) }] },
-      }),
-    });
+    // string limit (and blocks the event loop for hundreds of MB below it).
+    // Tail-only: the client seek-loads the earlier history as a continuous
+    // virtual scroll, so no seam marker is stitched in.
+    const content = readJsonlBounded(fp, { tailOnly: true });
     const messages = [];
     for (const line of content.split('\n')) {
       const trimmed = line.trim();
