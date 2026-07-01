@@ -150,11 +150,31 @@ function getJsonlLineIndex(fp) {
   const stat = fs.statSync(fp);
   const hit = _lineIndexCache.get(fp);
   if (hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) return hit;
-  const offsets = [0]; // byte offset where each line STARTS; offsets[i] = start of line i
   const fd = fs.openSync(fp, 'r');
   try {
+    let offsets;      // byte offset where each line STARTS; offsets[i] = start of line i
+    let scanFrom;
+    // Incremental fast path: JSONL is append-only, so when the file has only
+    // GROWN and its previous end was a clean line boundary, reuse the cached
+    // offset table and scan JUST the appended tail — instead of re-streaming the
+    // whole (100s-of-MB, actively-growing) file on every seek. This is what makes
+    // jumps stay instant while a live session keeps writing.
+    let canExtend = false;
+    if (hit && stat.size > hit.size && stat.mtimeMs >= hit.mtimeMs && hit.size > 0) {
+      const b = Buffer.alloc(1);
+      fs.readSync(fd, b, 0, 1, hit.size - 1);
+      canExtend = b[0] === 0x0a;   // old size ended exactly after a newline
+    }
+    if (canExtend) {
+      offsets = hit.offsets.slice(); // copy so a held-elsewhere old entry isn't mutated
+      offsets.push(hit.size);        // start of the first appended line (was popped before)
+      scanFrom = hit.size;
+    } else {
+      offsets = [0];
+      scanFrom = 0;
+    }
     const buf = Buffer.alloc(LINE_INDEX_CHUNK);
-    let pos = 0;
+    let pos = scanFrom;
     while (pos < stat.size) {
       const n = fs.readSync(fd, buf, 0, LINE_INDEX_CHUNK, pos);
       if (n <= 0) break;
@@ -163,14 +183,14 @@ function getJsonlLineIndex(fp) {
       }
       pos += n;
     }
+    // offsets now has one trailing entry == file end if the file ends with \n;
+    // totalLines = number of line starts that actually begin a line (< size)
+    while (offsets.length > 1 && offsets[offsets.length - 1] >= stat.size) offsets.pop();
+    const entry = { mtimeMs: stat.mtimeMs, size: stat.size, offsets, totalLines: offsets.length };
+    _lineIndexCache.set(fp, entry);
+    if (_lineIndexCache.size > 32) _lineIndexCache.delete(_lineIndexCache.keys().next().value);
+    return entry;
   } finally { fs.closeSync(fd); }
-  // offsets now has one trailing entry == file end if the file ends with \n;
-  // totalLines = number of line starts that actually begin a line (< size)
-  while (offsets.length > 1 && offsets[offsets.length - 1] >= stat.size) offsets.pop();
-  const entry = { mtimeMs: stat.mtimeMs, size: stat.size, offsets, totalLines: offsets.length };
-  _lineIndexCache.set(fp, entry);
-  if (_lineIndexCache.size > 32) _lineIndexCache.delete(_lineIndexCache.keys().next().value);
-  return entry;
 }
 
 // Which line indices does the head+tail window cover? Lines [0, headEndLine)

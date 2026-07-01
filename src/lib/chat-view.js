@@ -548,6 +548,9 @@ class ChatView {
   // tailStartLine) instead of skipping the [cursor, tailStartLine) span.
   _resetGapAfterJump() {
     this._teleported = false;   // a full-window jump exits teleport mode
+    // Restore content-visibility for the live tail (we forced it off to stabilize
+    // a jumped-to slab's scroll — the tail can be long, so it wants the culling).
+    if (this._forcedStableHeights) { this._container.classList.remove('chat-no-content-visibility'); this._forcedStableHeights = false; }
     if (!this._gapMinimapActive) return;
     const s = this._installSeekSentinel();   // re-create if a prior seek removed it
     if (s) { s._gapCursor = null; s._gapAnchor = null; s._gapLoading = false; }
@@ -765,13 +768,21 @@ class ChatView {
     const { backend, backendSessionId, cwd } = this._getSessionIds();
     if (!backendSessionId) return null;
     const base = `backend=${encodeURIComponent(backend || 'claude')}&backendSessionId=${encodeURIComponent(backendSessionId)}&cwd=${encodeURIComponent(cwd || '')}`;
-    const start = Math.max(0, line - 1000);   // center the target in the 2000-line slab
-    const data = await fetch(`/api/session-history-gap?${base}&startLine=${start}&count=2000&whole=1`).then(r => r.json()).catch(() => null);
+    // Small slab (~600 lines) centered on the target: fewer messages render far
+    // faster and — critically — settle their real heights almost instantly, so
+    // the scroll lands in one shot. Scrolling up seek-loads more on demand.
+    const start = Math.max(0, line - 300);
+    const data = await fetch(`/api/session-history-gap?${base}&startLine=${start}&count=600&whole=1`).then(r => r.json()).catch(() => null);
     if (this._disposed) return null;
     const msgs = data?.messages || [];
     if (!msgs.length) return null;
     // Replace the entire rendered view with this slab; keep + reset the sentinel.
     this._teleported = true;
+    // Force stable heights while browsing a jumped-to slab: content-visibility's
+    // 80px estimate is wildly off for code/tool cards, so with it ON the scroll
+    // chases a target that keeps moving as real heights compute. Disabling it for
+    // the bounded slab makes the jump land immediately. Restored on return-to-latest.
+    if (!this._readOnly) { this._container.classList.add('chat-no-content-visibility'); this._forcedStableHeights = true; }
     this._messageList.querySelectorAll('.chat-msg, .chat-msg-system').forEach(el => el.remove());
     this._elements.clear();
     this._renderedMsgIds.clear();
@@ -789,7 +800,16 @@ class ChatView {
     marker._gapAnchor = firstInserted;         // older slabs insert above this
     this._pinned = false;
     this._scrollBtn.classList.remove('hidden'); // "return to latest" affordance
-    return this._gapElForLine(line) || firstInserted;
+    const target = this._gapElForLine(line) || firstInserted;
+    // Scroll to the target SYNCHRONOUSLY (before the browser paints) so the jump
+    // doesn't flash the top of the slab then visibly scroll down. Heights are
+    // stable (content-visibility forced off above), so this lands correctly.
+    if (target) {
+      const lr = this._messageList.getBoundingClientRect();
+      const rc = target.getBoundingClientRect();
+      this._messageList.scrollTop += rc.top - lr.top - lr.height / 2;
+    }
+    return target;
   }
 
   // ── Full-file search support (huge sessions) ──
