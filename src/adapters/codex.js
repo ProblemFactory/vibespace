@@ -222,10 +222,10 @@ function scanJsonlUserTurns(fp, backend) {
 }
 
 function _previewOf(text) {
-  const t = String(text || '').trim();
+  const t = String(text || '').trim().replace(/\s+/g, ' ');
   if (!t) return '';
   if (t.startsWith('This session is being continued from a previous conversation')) return null; // compact
-  return t.length > 10 ? t.slice(0, 10) + '…' : t;
+  return t.length > 60 ? t.slice(0, 60) + '…' : t;
 }
 
 function _claudeUserTurn(rec, line) {
@@ -253,6 +253,83 @@ function _codexUserTurn(rec, line) {
   const ts = rec.timestamp ? Date.parse(rec.timestamp) || 0 : 0;
   const preview = _previewOf(text);
   return { line, ts, preview: preview ?? 'Context compacted', isCompact: preview === null };
+}
+
+// ── Full-file streaming search ──
+// Search the ENTIRE JSONL (including the elided middle of huge files) without
+// ever holding it in memory. Chunked Buffer scan with a cheap raw-substring
+// pre-filter, then JSON.parse only the candidate lines and match against the
+// record's extracted text. Coordinates are {line, ts} — the same axes the
+// full-extent minimap uses — so the client can seek-jump to any match.
+// Caveat: the raw pre-filter can miss text whose JSON encoding differs from
+// the query (embedded quotes/newlines); plain words and CJK are stored
+// literally in these files, so real-world queries are unaffected.
+function _searchableTextOf(rec, backend) {
+  const parts = [];
+  const push = (v) => { if (typeof v === 'string' && v) parts.push(v); };
+  if (backend === 'codex') {
+    const p = rec.payload || {};
+    if (Array.isArray(p.content)) for (const b of p.content) push(b?.text);
+    push(typeof p.content === 'string' ? p.content : '');
+    push(p.arguments); push(p.output); push(p.text);
+    if (Array.isArray(p.summary)) for (const b of p.summary) push(b?.text);
+  } else {
+    const m = rec.message || {};
+    if (typeof m.content === 'string') push(m.content);
+    else if (Array.isArray(m.content)) {
+      for (const b of m.content) {
+        if (!b) continue;
+        push(b.text); push(b.thinking);
+        if (b.type === 'tool_use' && b.input !== undefined) { try { push(JSON.stringify(b.input)); } catch {} }
+        if (b.type === 'tool_result') {
+          if (typeof b.content === 'string') push(b.content);
+          else if (Array.isArray(b.content)) for (const c of b.content) push(c?.text);
+        }
+      }
+    }
+  }
+  return parts.join(' ');
+}
+
+function searchJsonlFull(fp, backend, query, maxResults = 500) {
+  const q = String(query || '').toLowerCase();
+  if (!q) return { matches: [], truncated: false };
+  const stat = fs.statSync(fp);
+  const fd = fs.openSync(fp, 'r');
+  const matches = [];
+  let truncated = false;
+  const handleLine = (raw, line) => {
+    if (!raw || matches.length >= maxResults) { if (raw && matches.length >= maxResults) truncated = true; return; }
+    if (raw.toLowerCase().indexOf(q) === -1) return; // cheap pre-filter
+    let rec; try { rec = JSON.parse(raw); } catch { return; }
+    const text = _searchableTextOf(rec, backend);
+    const idx = text.toLowerCase().indexOf(q);
+    if (idx === -1) return;
+    const ts = rec.timestamp ? Date.parse(rec.timestamp) || 0 : 0;
+    const role = backend === 'codex'
+      ? (rec.payload?.role || rec.payload?.type || rec.type || '')
+      : (rec.message?.role || rec.type || '');
+    // Preview centered on the match
+    const from = Math.max(0, idx - 30);
+    const preview = (from > 0 ? '…' : '') + text.slice(from, idx + q.length + 50).replace(/\s+/g, ' ') + (idx + q.length + 50 < text.length ? '…' : '');
+    matches.push({ line, ts, role, preview });
+  };
+  try {
+    const buf = Buffer.alloc(LINE_INDEX_CHUNK);
+    let pos = 0, line = 0, carry = '';
+    while (pos < stat.size && matches.length < maxResults) {
+      const n = fs.readSync(fd, buf, 0, LINE_INDEX_CHUNK, pos);
+      if (n <= 0) break;
+      const text = carry + buf.toString('utf-8', 0, n);
+      const parts = text.split('\n');
+      carry = parts.pop();
+      for (const raw of parts) handleLine(raw.trim(), line++);
+      pos += n;
+    }
+    if (matches.length >= maxResults && pos < stat.size) truncated = true;
+    handleLine(carry.trim(), line);
+  } finally { fs.closeSync(fd); }
+  return { matches, truncated };
 }
 
 // Read raw records for line range [startLine, endLine) by seeking to the
@@ -777,5 +854,6 @@ module.exports = {
   jsonlGapInfo,
   readJsonlLineRange,
   scanJsonlUserTurns,
+  searchJsonlFull,
   resolveCodexPermissionMode,
 };

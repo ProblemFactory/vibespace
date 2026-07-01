@@ -80,7 +80,7 @@ class MessageManager {
               entry.isCompact = true;
               entry.preview = 'Context compacted';
             } else {
-              entry.preview = this._truncateWord(raw, 10);
+              entry.preview = this._truncateWord(raw, 60);
             }
           }
         }

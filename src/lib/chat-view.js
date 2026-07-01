@@ -237,6 +237,9 @@ class ChatView {
       getSessionId: () => this.sessionId,
       jumpToIndex: (idx) => this.jumpToIndex(idx),
       getWindowBounds: () => ({ windowStart: this._windowStart, windowEnd: this._windowEnd }),
+      // Huge (elided) sessions: search the WHOLE file in {line, ts} coordinates
+      getGapActive: () => !!this._gapMinimapActive,
+      jumpToFileMatch: (m) => this.jumpToFileMatch(m),
     });
     container.insertBefore(this._search.element, this._messageList);
 
@@ -707,9 +710,68 @@ class ChatView {
       marker._gapCursor = (data && Number.isFinite(data.fromLine)) ? data.fromLine : line;
       if (firstInserted) { this._programmaticScroll = true; firstInserted.scrollIntoView({ block: 'center' }); setTimeout(() => { this._programmaticScroll = false; }, 60); }
       this._reportVisibleTsRange();
+      return firstInserted;
     } finally {
       marker._gapLoading = false;
     }
+  }
+
+  // ── Full-file search support (huge sessions) ──
+  // Jump to a search match given file-line + ts coordinates. Returns the DOM
+  // element containing (or nearest to) the match so the caller can expand and
+  // highlight it. Handles all three regions: elided middle (seek-load a slab,
+  // with a fast path when the line is already loaded), head, and tail.
+  async jumpToFileMatch(match) {
+    const b = this._gapBounds;
+    const line = match.line;
+    if (b && line >= b.headEndLine && line < b.tailStartLine) {
+      let el = this._gapElForLine(line);
+      if (!el) {
+        await this._seekToGapLine(line);
+        el = this._gapElForLine(line);
+      }
+      if (el) {
+        this._programmaticScroll = true;
+        el.scrollIntoView({ block: 'center' });
+        setTimeout(() => { this._programmaticScroll = false; }, 60);
+        this._reportVisibleTsRange();
+      }
+      return el;
+    }
+    // Head/tail: make sure the right region is rendered, then nearest by ts
+    await this._jumpToFileTime(match.ts, line);
+    // _jumpToFileTime scrolls via rAF fallbacks — wait a frame before resolving
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    return this._nearestElByTs(match.ts);
+  }
+
+  // Find the loaded gap-slab element at (or nearest before) a file line.
+  // Only accepts a hit when the line actually falls inside the loaded span —
+  // otherwise the nearest-below element could be a whole slab away.
+  _gapElForLine(line) {
+    let best = null, bestLine = -1, maxLine = -1;
+    for (const el of this._messageList.querySelectorAll('.chat-gap-msg[data-line]')) {
+      const l = Number(el.dataset.line);
+      if (!Number.isFinite(l)) continue;
+      if (l > maxLine) maxLine = l;
+      if (l <= line && l > bestLine) { best = el; bestLine = l; }
+    }
+    if (!best) return null;
+    // In-span: either something at/after the target exists, or the gap between
+    // the best match and the target is small (non-rendering records only)
+    if (maxLine >= line || line - bestLine <= 50) return best;
+    return null;
+  }
+
+  _nearestElByTs(ts) {
+    let best = null, bestDiff = Infinity;
+    for (const el of this._messageList.querySelectorAll('.chat-msg')) {
+      const ets = Number(el.dataset.ts) || this._tsOfRenderedEl(el);
+      if (!ets) continue;
+      const d = Math.abs(ets - ts);
+      if (d < bestDiff) { bestDiff = d; best = el; }
+    }
+    return best;
   }
 
   // Scroll to the rendered message nearest `ts`. Returns true if a match within
@@ -992,7 +1054,7 @@ class ChatView {
           if (preview.startsWith('This session is being continued from a previous conversation')) {
             turn.isCompact = true; turn.preview = 'Context compacted';
           } else {
-            turn.preview = preview.length > 10 ? preview.substring(0, preview.lastIndexOf(' ', 10) > 5 ? preview.lastIndexOf(' ', 10) : 10) + '…' : preview;
+            turn.preview = preview.length > 60 ? preview.substring(0, preview.lastIndexOf(' ', 60) > 30 ? preview.lastIndexOf(' ', 60) : 60) + '…' : preview;
           }
         }
         this._chatMinimap.addTurn(turn, this._total);

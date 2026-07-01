@@ -18,7 +18,7 @@ const {
 const { createMessageManager } = require('../normalizers');
 const { listCodexThreads } = require('../codex-session-store');
 const { findSessionJsonlPath } = require('../session-store');
-const { findCodexSessionJsonlPath, jsonlGapInfo, readJsonlLineRange, scanJsonlUserTurns } = require('../adapters/codex');
+const { findCodexSessionJsonlPath, jsonlGapInfo, readJsonlLineRange, scanJsonlUserTurns, searchJsonlFull } = require('../adapters/codex');
 
 function getSessionKey(session = {}) {
   const backend = session.backend || 'claude';
@@ -137,6 +137,14 @@ function setup(ctx) {
     if (!gap) return res.json({ gap: null });
 
     if (req.query.info) return res.json({ gap });
+
+    // Full-file streaming search: covers head + elided middle + tail uniformly
+    // in {line, ts} coordinates, so huge sessions search like small ones.
+    if (req.query.search) {
+      let result = { matches: [], truncated: false };
+      try { result = searchJsonlFull(fp, resolvedBackend, req.query.search); } catch {}
+      return res.json({ ...result, ...gap });
+    }
 
     // Whole-conversation minimap: full-file user-turn scan in TIME coordinates
     // (markers) + each turn's file line (for seek-jumping into the gap).

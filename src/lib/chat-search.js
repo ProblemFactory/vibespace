@@ -11,12 +11,16 @@ class ChatSearch {
    * @param {(idx: number) => Promise<void>} callbacks.jumpToIndex
    * @param {() => {windowStart: number, windowEnd: number}} callbacks.getWindowBounds
    */
-  constructor(messageList, { getSessionIds, getSessionId, jumpToIndex, getWindowBounds }) {
+  constructor(messageList, { getSessionIds, getSessionId, jumpToIndex, getWindowBounds, getGapActive, jumpToFileMatch }) {
     this._messageList = messageList;
     this._getSessionIds = getSessionIds;
     this._getSessionId = getSessionId;
     this._jumpToIndex = jumpToIndex;
     this._getWindowBounds = getWindowBounds;
+    this._getGapActive = getGapActive || (() => false);
+    this._jumpToFileMatch = jumpToFileMatch || null;
+    this._fullFileMode = false;
+    this._truncated = false;
 
     // Search state
     this._searchQuery = '';
@@ -119,11 +123,27 @@ class ChatSearch {
     }
 
     let matches = [];
+    this._fullFileMode = false;
+    this._truncated = false;
     if (backendSessionId) {
       try {
-        const res = await fetch(`/api/session-messages?backend=${encodeURIComponent(backend || 'claude')}&backendSessionId=${encodeURIComponent(backendSessionId)}&cwd=${encodeURIComponent(cwd)}&search=${encodeURIComponent(q)}`);
-        const data = await res.json();
-        matches = data.matches || [];
+        // Huge (elided) session: stream-search the ENTIRE file server-side —
+        // covers head + unloaded middle + tail uniformly in {line, ts}
+        // coordinates, so search behaves the same regardless of session size.
+        if (this._getGapActive() && this._jumpToFileMatch) {
+          const res = await fetch(`/api/session-history-gap?backend=${encodeURIComponent(backend || 'claude')}&backendSessionId=${encodeURIComponent(backendSessionId)}&cwd=${encodeURIComponent(cwd)}&search=${encodeURIComponent(q)}`);
+          const data = await res.json();
+          if (data.matches) {
+            matches = data.matches;
+            this._fullFileMode = true;
+            this._truncated = !!data.truncated;
+          }
+        }
+        if (!this._fullFileMode) {
+          const res = await fetch(`/api/session-messages?backend=${encodeURIComponent(backend || 'claude')}&backendSessionId=${encodeURIComponent(backendSessionId)}&cwd=${encodeURIComponent(cwd)}&search=${encodeURIComponent(q)}`);
+          const data = await res.json();
+          matches = data.matches || [];
+        }
       } catch {}
     }
     if (stale()) return; // a newer search superseded this one
@@ -135,13 +155,50 @@ class ChatSearch {
     }
 
     this._searchResultIdx = 0;
-    this._searchStatus.textContent = `1/${this._serverSearchResults.length}`;
+    this._updateSearchStatus();
     this._jumpToSearchResult(0);
+  }
+
+  _updateSearchStatus() {
+    const n = this._serverSearchResults.length;
+    this._searchStatus.textContent = `${this._searchResultIdx + 1}/${n}${this._truncated ? '+' : ''}`;
+  }
+
+  /** Expand collapsed content inside an element so highlights can paint */
+  _expandEl(el) {
+    if (!el) return;
+    el.style.contentVisibility = 'visible';
+    for (const d of el.querySelectorAll('details:not([open])')) d.open = true;
+  }
+
+  /** Highlight + scroll to the first match inside `el` (fallback: center el) */
+  _revealInEl(el) {
+    this.applyHighlightLayer();
+    if (el && this._highlightRanges?.length > 0) {
+      const matchIdx = this._highlightRanges.findIndex(r => el.contains(r.startContainer));
+      if (matchIdx >= 0) {
+        this._setCurrentHighlight(matchIdx);
+        const rect = this._highlightRanges[matchIdx].getBoundingClientRect();
+        const listRect = this._messageList.getBoundingClientRect();
+        this._messageList.scrollTop += rect.top - listRect.top - listRect.height / 2;
+        return;
+      }
+    }
+    if (el) el.scrollIntoView({ block: 'center' });
   }
 
   async _jumpToSearchResult(idx) {
     const results = this._serverSearchResults;
     if (!results || idx < 0 || idx >= results.length) return;
+
+    // Full-file mode (huge sessions): matches carry {line, ts} instead of a
+    // window index — delegate the seek/scroll to ChatView, then reveal.
+    if (this._fullFileMode) {
+      const el = await this._jumpToFileMatch(results[idx]);
+      this._expandEl(el);
+      this._revealInEl(el);
+      return;
+    }
 
     const msgIndex = results[idx].index;
     const { windowStart, windowEnd } = this._getWindowBounds();
@@ -158,28 +215,9 @@ class ChatSearch {
     const { windowStart: newStart } = this._getWindowBounds();
     const relIdx = msgIndex - newStart;
     const allMsgs = this._messageList.querySelectorAll('.chat-msg:not(.chat-gap-msg)');
-    if (relIdx >= 0 && relIdx < allMsgs.length) {
-      const targetEl = allMsgs[relIdx];
-      targetEl.style.contentVisibility = 'visible';
-      for (const d of targetEl.querySelectorAll('details:not([open])')) d.open = true;
-    }
-
-    // Refresh highlight layer and scroll to first match in target
-    this.applyHighlightLayer();
-    const targetEl = allMsgs[relIdx];
-    if (this._highlightRanges?.length > 0 && targetEl) {
-      const matchIdx = this._highlightRanges.findIndex(r => targetEl.contains(r.startContainer));
-      if (matchIdx >= 0) {
-        this._setCurrentHighlight(matchIdx);
-        // Scroll the range into view
-        const rect = this._highlightRanges[matchIdx].getBoundingClientRect();
-        const listRect = this._messageList.getBoundingClientRect();
-        this._messageList.scrollTop += rect.top - listRect.top - listRect.height / 2;
-        return;
-      }
-    }
-    // Fallback: just scroll to the message
-    if (targetEl) targetEl.scrollIntoView({ block: 'center' });
+    const targetEl = (relIdx >= 0 && relIdx < allMsgs.length) ? allMsgs[relIdx] : null;
+    this._expandEl(targetEl);
+    this._revealInEl(targetEl);
   }
 
   // ── Highlight Layer: non-destructive search highlighting ──
@@ -234,7 +272,7 @@ class ChatSearch {
     const results = this._serverSearchResults;
     if (!results || !results.length) return;
     this._searchResultIdx = (this._searchResultIdx + dir + results.length) % results.length;
-    this._searchStatus.textContent = `${this._searchResultIdx + 1}/${results.length}`;
+    this._updateSearchStatus();
     this._jumpToSearchResult(this._searchResultIdx);
   }
 

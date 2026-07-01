@@ -1,7 +1,9 @@
 /**
  * ChatMinimap — semantic scrollbar showing conversation structure.
  * User message markers (blue), compact markers (red), drag-to-jump with floating label.
+ * TOC button (top of the track) opens a filterable outline of all user messages.
  */
+import { createPopover } from './utils.js';
 
 export class ChatMinimap {
   /**
@@ -35,6 +37,18 @@ export class ChatMinimap {
     this._label = document.createElement('div');
     this._label.className = 'chat-minimap-label hidden';
     container.appendChild(this._label);
+
+    this._markerByTurn = new Map(); // turn object → marker el (hover highlight)
+    this._hoverMarker = null;
+
+    // TOC button: opens a filterable outline of the user's own messages —
+    // the fastest way to find a spot you remember sending something at.
+    this._tocBtn = document.createElement('button');
+    this._tocBtn.className = 'chat-minimap-toc-btn hidden';
+    this._tocBtn.innerHTML = '&#9776;';
+    this._tocBtn.title = 'Your messages (outline)';
+    this._tocBtn.addEventListener('click', (e) => { e.stopPropagation(); this._showToc(); });
+    container.appendChild(this._tocBtn);
 
     // Sync bounds on message list resize
     this._ro = new ResizeObserver(() => this.syncBounds());
@@ -71,6 +85,7 @@ export class ChatMinimap {
     this._messageList.classList.add('chat-minimap-active');
     this.syncBounds();
     for (const el of [...this._minimap.children]) { if (el !== this._thumb) el.remove(); }
+    this._markerByTurn.clear();
     const span = Math.max(1, ext.lastTs - ext.firstTs);
     for (const turn of ext.fullTurns) {
       const top = Math.max(0, Math.min(100, ((turn.ts - ext.firstTs) / span) * 100));
@@ -78,7 +93,9 @@ export class ChatMinimap {
       marker.className = 'chat-minimap-marker ' + (turn.isCompact ? 'chat-minimap-compact' : 'chat-minimap-user-mark');
       marker.style.top = top + '%';
       this._minimap.appendChild(marker);
+      this._markerByTurn.set(turn, marker);
     }
+    this._tocBtn.classList.remove('hidden');
     this.updateThumb();
   }
 
@@ -105,6 +122,7 @@ export class ChatMinimap {
       if (el !== this._thumb) el.remove();
     }
 
+    this._markerByTurn.clear();
     const total = this._total || turnMap[turnMap.length - 1].startIdx + 1;
     for (const turn of turnMap) {
       if (turn.role !== 'user') continue;
@@ -118,7 +136,9 @@ export class ChatMinimap {
         marker.classList.add('chat-minimap-user-mark');
       }
       this._minimap.appendChild(marker);
+      this._markerByTurn.set(turn, marker);
     }
+    this._tocBtn.classList.remove('hidden');
   }
 
   /** Add a single turn incrementally (for live messages) */
@@ -145,6 +165,7 @@ export class ChatMinimap {
     if (turn.isCompact) marker.classList.add('chat-minimap-compact');
     else marker.classList.add('chat-minimap-user-mark');
     this._minimap.appendChild(marker);
+    this._markerByTurn.set(turn, marker);
     // Reposition existing markers since total changed
     this._repositionMarkers();
   }
@@ -183,6 +204,7 @@ export class ChatMinimap {
     const containerRect = this._container.getBoundingClientRect();
     this._minimap.style.top = (listRect.top - containerRect.top) + 'px';
     this._minimap.style.height = listRect.height + 'px';
+    if (this._tocBtn) this._tocBtn.style.top = (listRect.top - containerRect.top + 4) + 'px';
   }
 
   updateThumb() {
@@ -252,9 +274,19 @@ export class ChatMinimap {
       const date = isToday ? '' : d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ';
       const time = date + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const preview = turn.preview || '';
-      this._label.textContent = preview ? `${time} · ${preview}` : time;
+      // Two-line card: dim time on top, message preview below (textContent —
+      // previews are raw user text)
+      this._label.innerHTML = '';
+      const tEl = document.createElement('div'); tEl.className = 'chat-minimap-label-time'; tEl.textContent = time;
+      this._label.appendChild(tEl);
+      if (preview) { const pEl = document.createElement('div'); pEl.className = 'chat-minimap-label-preview'; pEl.textContent = preview; this._label.appendChild(pEl); }
       this._label.classList.remove('hidden');
       this._label.style.top = (e.clientY - containerRect.top) + 'px';
+      // Emphasize the hovered turn's marker so the eye can track it
+      const marker = this._markerByTurn.get(turn) || null;
+      if (this._hoverMarker && this._hoverMarker !== marker) this._hoverMarker.classList.remove('chat-minimap-marker-hover');
+      if (marker) marker.classList.add('chat-minimap-marker-hover');
+      this._hoverMarker = marker;
     };
 
     const scheduleJump = (idx) => {
@@ -322,12 +354,67 @@ export class ChatMinimap {
 
     this._minimap.addEventListener('mouseleave', () => {
       if (!dragging) this._label.classList.add('hidden');
+      if (this._hoverMarker) { this._hoverMarker.classList.remove('chat-minimap-marker-hover'); this._hoverMarker = null; }
     });
+  }
+
+  // Outline popover: every user message (time + preview), filterable, click to
+  // jump. Works in both coordinate modes.
+  _showToc() {
+    const turns = this._fullExtent
+      ? this._fullExtent.fullTurns
+      : this._turnMap.filter(t => t.role === 'user');
+    if (!turns.length) return;
+    const pop = createPopover(this._tocBtn, 'chat-minimap-toc');
+    const filter = document.createElement('input');
+    filter.className = 'chat-minimap-toc-filter';
+    filter.placeholder = `Filter ${turns.length} messages…`;
+    pop.appendChild(filter);
+    const list = document.createElement('div');
+    list.className = 'chat-minimap-toc-list';
+    pop.appendChild(list);
+    const renderRows = (f) => {
+      list.innerHTML = '';
+      const q = (f || '').toLowerCase();
+      for (const turn of turns) {
+        const preview = turn.preview || '';
+        if (q && !preview.toLowerCase().includes(q)) continue;
+        const row = document.createElement('div');
+        row.className = 'chat-minimap-toc-row' + (turn.isCompact ? ' compact' : '');
+        const d = new Date(turn.ts);
+        const time = document.createElement('span');
+        time.className = 'chat-minimap-toc-time';
+        time.textContent = turn.ts ? d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+        const text = document.createElement('span');
+        text.className = 'chat-minimap-toc-text';
+        text.textContent = preview || '(empty)';
+        row.append(time, text);
+        row.onclick = () => {
+          pop.remove();
+          if (this._fullExtent) { if (this._jumpToTime) this._jumpToTime(turn.ts, turn.line); }
+          else this._jumpToIndex(turn.startIdx);
+        };
+        list.appendChild(row);
+      }
+      if (!list.children.length) {
+        const empty = document.createElement('div');
+        empty.className = 'chat-minimap-toc-row';
+        empty.style.opacity = '0.5';
+        empty.textContent = 'No matches';
+        list.appendChild(empty);
+      }
+    };
+    renderRows('');
+    filter.addEventListener('input', () => renderRows(filter.value));
+    filter.addEventListener('keydown', (e) => { if (e.key === 'Escape') { pop.remove(); } e.stopPropagation(); });
+    // Start at the bottom — recent messages are what users usually remember
+    requestAnimationFrame(() => { list.scrollTop = list.scrollHeight; filter.focus(); });
   }
 
   dispose() {
     if (this._ro) this._ro.disconnect();
     if (this._minimap) this._minimap.remove();
     if (this._label) this._label.remove();
+    if (this._tocBtn) this._tocBtn.remove();
   }
 }
