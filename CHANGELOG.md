@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.12.0] — 2026-06-28
+
+### Fixed
+
+- **Multi-client sync stability** — operations on one client no longer get undone and replayed by stale echoes from other clients. Layout broadcasts are sequence-stamped (stale ones dropped), clients only re-broadcast state the user actually caused, inbound state is deferred while you're mid-drag, and proportional bounds are quantized so clients with different window sizes converge instead of ping-ponging forever.
+- **Window drag performance** — all drag/resize mousemove work (snap highlight, merge hit-tests, preview updates) is now coalesced to once per frame instead of running at raw pointer rate (up to 1000Hz); resizing a terminal no longer re-fits xterm per event. Sidebar session polling pauses in hidden tabs.
+- **Font dropdown showed blank** when the stored font matched no option — now shown as "(current)".
+
+### Added / Improved (UX review follow-ups)
+
+- **Folder bulk operations** — right-click a sidebar folder header: archive all stopped sessions at once, new session here, copy path. Folders with >100 sessions and nothing live start collapsed.
+- **In-app dialogs everywhere** — every native `prompt/alert/confirm` (rename, group ops, file create/rename/delete, terminate, review targets, theme editor, settings reset, command-mode grid) replaced with themed dialogs (Enter confirms, Esc cancels, destructive actions get a red confirm).
+- **Escape closes overlays** — context menus and popovers first, then the open dialog (except while typing in a terminal).
+- **Global toasts** — one consistent notification stack; file operation failures now surface instead of failing silently.
+- **New Session dialog** — recent working directories as one-click chips; Enter submits.
+- **Density & mobile** — thinking blocks are slimmer (runs of consecutive blocks no longer drown content); the mobile chat status bar is one swipeable line instead of wrapping into 2-3 rows.
+- **Discoverability** — taskbar items get full-title tooltips (groups list every tab), the cache-ratio badge explains itself, and command mode (`Ctrl+\`) shows its key map while armed.
+
 ## [2.11.0] — 2026-06-26
 
 ### Added

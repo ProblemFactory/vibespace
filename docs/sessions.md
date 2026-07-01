@@ -23,6 +23,15 @@ The sidebar automatically discovers all Claude Code sessions on your machine usi
 
 The sidebar has two tabs:
 
+### Folder bulk operations
+
+Right-click (or long-press) a folder header for folder-level actions:
+
+- **Archive N stopped sessions** — archive every stopped, non-archived session in the folder at once (one toast confirms the count). The go-to move for folders full of auto-generated sessions.
+- **New session here** / **Copy path**
+
+Folders with more than 100 sessions and nothing live start **collapsed** so they don't dominate the sidebar; expanding one (or jumping to a session inside it) is remembered.
+
 ### Folders tab
 Sessions grouped by working directory. Each folder header shows:
 - Session count
