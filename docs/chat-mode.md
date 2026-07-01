@@ -132,12 +132,13 @@ Subagent messages are filtered from the main chat -- they only appear in the ded
 Press **Ctrl+F** to open the search bar. Features:
 
 - Full-text search across the entire conversation history (not just the current view). Falls back to `/api/active` when JSONL path is unavailable.
+- **Huge sessions too**: when a session is so large its middle isn't loaded (multi-hundred-MB histories), search automatically switches to a server-side streaming scan of the **whole file** — head, unloaded middle, and tail are all covered, and jumping to a match seek-loads that part of the history on demand. The counter shows `N/500+` if there are more than 500 matches.
 - **CSS Custom Highlight API** for non-destructive highlighting (does not modify DOM)
 - Match counter showing current position and total matches
 - **Previous/Next** navigation (arrow buttons or Enter/Shift+Enter)
-- Search results from outside the current view window automatically load the target messages
+- Search results from outside the current view window automatically load the target messages; the target message's collapsed cards (tool output, thinking) are expanded so the highlight is visible
 
-The highlight layer is re-applied when the view changes (scroll, pagination, expand/collapse).
+The highlight layer is re-applied when the view changes (scroll, pagination, jumps, reconnect catch-up).
 
 ## Input
 
@@ -252,12 +253,14 @@ The chat view uses a virtual scroll system with a sliding DOM window for efficie
 
 A semantic scrollbar on the right side of the message list provides an overview of the entire conversation:
 
-- **User message markers**: Thin blue lines at each user input position
+- **User message markers**: Thin blue lines at each user input position; the hovered turn's marker lights up
 - **Compact markers**: Wider red lines at context compaction boundaries
 - **Drag to navigate**: Click or drag the minimap to jump to any point in the conversation via `jumpToIndex`
-- **Floating label**: Follows cursor vertically, showing time and a preview of the nearest user message (first ~10 chars, word-boundary truncated). Non-today messages include the date (e.g., "Apr 5 14:32 · Fix the...").
+- **Floating label**: Follows cursor vertically as a two-line card — time on top, a ~60-char preview of the nearest user message below. Non-today messages include the date.
+- **Outline (☰) button** at the top of the track: opens a filterable list of **all your messages** (time + two-line preview), scrolled to the most recent. Type to filter, click to jump. This is the fastest way to find a spot you remember sending something at. Works for huge (partially loaded) sessions too.
 - **Viewport thumb**: Semi-transparent bar showing current rendered window position
 - Hidden for short conversations (<3 turns). Native scrollbar hidden when minimap is active.
+- **Huge sessions**: when the middle of a very large history isn't loaded, the minimap switches to whole-conversation **time coordinates** — markers span the entire file, and clicking/dragging seek-loads the target region on demand.
 
 Turn data comes from `MessageManager.turnMap()`, included in the attach response or fetched via `?turnmap=1` API.
 
