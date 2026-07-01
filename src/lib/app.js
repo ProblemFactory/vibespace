@@ -614,6 +614,17 @@ class App {
     overlay.querySelectorAll('.dialog-close, .btn-cancel').forEach(btn => btn.addEventListener('click', () => this.hideDialogs()));
     overlay.addEventListener('click', (e) => { if (e.target === overlay) this.hideDialogs(); });
 
+    // Global Escape: close the transient chrome layer-by-layer — context menus
+    // and popovers first, then the modal dialog. Skipped while focus is inside
+    // a terminal (Esc is meaningful to TUI apps there).
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || e.isComposing) return;
+      if (e.target.closest?.('.xterm')) return;
+      const floats = document.querySelectorAll('[data-popover]');
+      if (floats.length) { floats.forEach(el => el.remove()); e.preventDefault(); return; }
+      if (!overlay.classList.contains('hidden')) { this.hideDialogs(); e.preventDefault(); }
+    });
+
     const backendInput = document.getElementById('input-backend');
     backendInput.addEventListener('change', () => this._applySessionBackendOptions(backendInput.value, { applyDefaults: true }));
     this._applySessionBackendOptions(backendInput.value || 'claude', { applyDefaults: true });

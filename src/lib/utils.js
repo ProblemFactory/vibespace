@@ -1,5 +1,30 @@
 export function formatSize(b) { if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
 
+// ── Global toast notifications ──
+// One shared bottom-center stack for transient feedback. Replaces the ad-hoc
+// mix of alert()s, per-component toasts, and silent .catch(() => {}) failures.
+// showToast('Saved');  showToast('Rename failed: ' + e.message, { type: 'error' })
+export function showToast(message, { type = 'info', duration } = {}) {
+  let stack = document.getElementById('global-toasts');
+  if (!stack) {
+    stack = document.createElement('div');
+    stack.id = 'global-toasts';
+    document.body.appendChild(stack);
+  }
+  const el = document.createElement('div');
+  el.className = `global-toast global-toast-${type}`;
+  el.textContent = message;
+  stack.appendChild(el);
+  // Cap the stack so a burst of errors doesn't fill the screen
+  while (stack.children.length > 4) stack.firstChild.remove();
+  const ttl = duration ?? (type === 'error' ? 6000 : 3000);
+  setTimeout(() => {
+    el.classList.add('global-toast-out');
+    setTimeout(() => { el.remove(); if (!stack.children.length) stack.remove(); }, 250);
+  }, ttl);
+  return el;
+}
+
 const _uploadName = (f) => f._relPath || f.webkitRelativePath || f.name;
 
 // Resilient multipart upload to /api/upload. A folder upload used to go up as
@@ -89,6 +114,7 @@ export function createPopover(anchor, className, opts = {}) {
   document.querySelectorAll('.' + className.split(' ')[0]).forEach(p => p.remove());
   const pop = document.createElement('div');
   pop.className = className;
+  pop.dataset.popover = '1'; // global Escape handler closes anything tagged
   pop.style.position = 'fixed';
   pop.style.zIndex = '99999';
   // Initial placement (off-screen to measure)
@@ -128,6 +154,7 @@ export function showContextMenu(x, y, items, className = 'context-menu') {
   document.querySelectorAll('.' + className.split(' ')[0]).forEach(p => p.remove());
   const pop = document.createElement('div');
   pop.className = className;
+  pop.dataset.popover = '1'; // global Escape handler closes anything tagged
   pop.style.position = 'fixed';
   pop.style.zIndex = '99999';
   pop.style.visibility = 'hidden';

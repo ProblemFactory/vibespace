@@ -6,6 +6,7 @@
  * All methods use `this` (Sidebar instance context).
  */
 import { getSessionKey } from './agent-meta.js';
+import { showToast } from './utils.js';
 
 export function installSidebarState(SidebarClass) {
   const proto = SidebarClass.prototype;
@@ -234,6 +235,20 @@ export function installSidebarState(SidebarClass) {
   };
 
   proto.isArchived = function(sessionOrKey) { return this._stateSetHas(this._archivedIds, sessionOrKey); };
+
+  // Bulk archive (folder header context menu) — one state push + render for
+  // the whole batch instead of per-session toggles.
+  proto.archiveSessions = function(sessions) {
+    let n = 0;
+    for (const s of sessions || []) {
+      const stateKey = this._getSessionStateKey(s);
+      if (stateKey && !this._archivedIds.has(stateKey)) { this._archivedIds.add(stateKey); n++; }
+    }
+    if (!n) return;
+    this._pushUserState(); this._render(); this.app.updateTaskbar();
+    showToast(`Archived ${n} session${n === 1 ? '' : 's'}`);
+  };
+
   proto.getCustomName = function(sessionOrKey) { return this._stateMapGet(this._customNames, sessionOrKey); };
 
   // Programmatic custom-name setter (no prompt) — used e.g. to persist a fork's

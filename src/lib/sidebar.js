@@ -44,6 +44,7 @@ class Sidebar {
     this._backendFilter = new Set(JSON.parse(localStorage.getItem('backendFilter') || '[]'));
     this._agentKindFilter = localStorage.getItem('agentKindFilter') || '';
     this._collapsedFolders = new Set(JSON.parse(localStorage.getItem('collapsedFolders') || '[]'));
+    this._expandedFolders = new Set(JSON.parse(localStorage.getItem('expandedFolders') || '[]'));
     this._expandedCardId = null; // only one card expanded at a time
 
     // Tab state: 'folders' or 'groups'
@@ -166,9 +167,13 @@ class Sidebar {
       if (group.classList.contains('collapsed')) {
         group.classList.remove('collapsed');
         const key = group._collapseKey;
-        if (key && this._collapsedFolders.has(key)) {
+        if (key) {
           this._collapsedFolders.delete(key);
+          // Counts as explicit expansion — a huge auto-collapsed folder must
+          // not re-collapse on the next render right after we jumped into it
+          this._expandedFolders.add(key);
           localStorage.setItem('collapsedFolders', JSON.stringify([...this._collapsedFolders]));
+          localStorage.setItem('expandedFolders', JSON.stringify([...this._expandedFolders]));
         }
       }
       if (sessionsDiv.dataset.lazy && sessionsDiv.dataset.lazy !== 'rendered') {
@@ -357,9 +362,16 @@ class Sidebar {
 
   _toggleCollapse(el, key) {
     el.classList.toggle('collapsed');
-    if (el.classList.contains('collapsed')) this._collapsedFolders.add(key);
-    else this._collapsedFolders.delete(key);
+    if (el.classList.contains('collapsed')) {
+      this._collapsedFolders.add(key);
+      this._expandedFolders.delete(key);
+    } else {
+      this._collapsedFolders.delete(key);
+      // Remember explicit expansion so huge folders don't re-auto-collapse
+      this._expandedFolders.add(key);
+    }
     localStorage.setItem('collapsedFolders', JSON.stringify([...this._collapsedFolders]));
+    localStorage.setItem('expandedFolders', JSON.stringify([...this._expandedFolders]));
   }
 
   _applySidebarLayoutWidth(width = this.el.offsetWidth) {

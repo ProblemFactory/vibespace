@@ -4,7 +4,7 @@
  *
  * Installed on Sidebar.prototype via installSidebarRender(Sidebar).
  */
-import { escHtml, createPopover, showContextMenu } from './utils.js';
+import { escHtml, createPopover, showContextMenu, copyText, showToast } from './utils.js';
 import { createBackendIcon, getBackendMeta, getSessionKey } from './agent-meta.js';
 import { renderSessionCard } from './session-card.js';
 
@@ -84,10 +84,14 @@ export function installSidebarRender(SidebarClass) {
     for (const [cwd, items] of groupEntries) {
       const group = document.createElement('div'); group.className = 'folder-group';
       group._collapseKey = cwd; // for highlightSession to expand on jump
-      if (this._collapsedFolders.has(cwd)) group.classList.add('collapsed');
 
       const cwdShort = cwd.replace(/^\/home\/[^/]+/, '~');
       const hasLive = items.some(s => s.status === 'live' || s.status === 'tmux');
+
+      // Huge all-stopped folders (auto-generated session dumps) start collapsed
+      // so they don't dominate the sidebar; explicit expansion is remembered.
+      const autoCollapse = items.length > 100 && !hasLive && !this._expandedFolders.has(cwd);
+      if (this._collapsedFolders.has(cwd) || autoCollapse) group.classList.add('collapsed');
 
       const header = document.createElement('div'); header.className = 'folder-header';
       header.innerHTML = `<span class="folder-chevron">\u25BC</span><span class="folder-path">${cwdShort}</span><span class="folder-count">${items.length}</span>`;
@@ -117,6 +121,19 @@ export function installSidebarRender(SidebarClass) {
         if (e.target.closest('.folder-add-btn')) return;
         this._toggleCollapse(group, cwd);
       };
+
+      // Folder-level bulk operations (right-click / long-press). Without this,
+      // taming a noisy folder (e.g. thousands of auto-generated observer
+      // sessions) meant archiving cards one at a time.
+      header.addEventListener('contextmenu', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        const stopped = items.filter(s => s.status === 'stopped' && !this.isArchived(s));
+        showContextMenu(e.clientX, e.clientY, [
+          { label: `Archive ${stopped.length} stopped session${stopped.length === 1 ? '' : 's'}`, disabled: !stopped.length, action: () => this.archiveSessions(stopped) },
+          { label: 'New session here', action: () => this.app.showNewSessionDialog({ cwd }) },
+          { label: 'Copy path', action: () => copyText(cwd) },
+        ]);
+      });
 
       const sessionsDiv = document.createElement('div'); sessionsDiv.className = 'folder-sessions';
       this._sortSessions(items);
