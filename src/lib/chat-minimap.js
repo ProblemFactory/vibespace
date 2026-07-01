@@ -45,9 +45,16 @@ export class ChatMinimap {
 
   /** Update total message count and window position */
   setViewport(windowStart, windowEnd, total) {
+    const totalChanged = total !== this._total;
     this._windowStart = windowStart;
     this._windowEnd = windowEnd;
     this._total = total;
+    // Markers are positioned as startIdx/total — when total grows (live
+    // messages), their true positions shift up; without this they stayed at
+    // their first-render percentages and drifted ever further off
+    if (totalChanged && !this._fullExtent && !this._minimap.classList.contains('hidden')) {
+      this._repositionMarkers();
+    }
     this.updateThumb();
   }
 
@@ -145,15 +152,28 @@ export class ChatMinimap {
   /** Reposition all markers after total count changes */
   _repositionMarkers() {
     const t = this._total || 1;
+    const userTurns = this._turnMap.filter(tt => tt.role === 'user');
+    let i = 0;
+    // Markers are appended in turn order — walk both lists once (the old
+    // indexOf-inside-loop version was O(n²) and ran per new user turn)
     for (const el of this._minimap.children) {
       if (el === this._thumb) continue;
-      // Find the turn for this marker
-      const idx = [...this._minimap.children].filter(c => c !== this._thumb).indexOf(el);
-      const userTurns = this._turnMap.filter(tt => tt.role === 'user');
-      if (idx >= 0 && idx < userTurns.length) {
-        el.style.top = (userTurns[idx].startIdx / t) * 100 + '%';
-      }
+      if (i < userTurns.length) el.style.top = (userTurns[i].startIdx / t) * 100 + '%';
+      i++;
     }
+  }
+
+  /**
+   * Full-extent mode: register a NEW live turn and re-render. Without this the
+   * timeline froze at init time — new messages have ts beyond lastTs, so the
+   * thumb pinned to 100% and marker positions compressed ever more wrongly as
+   * the live session grew.
+   */
+  appendFullTurn(turn) {
+    if (!this._fullExtent || !turn?.ts) return;
+    this._fullExtent.fullTurns.push({ ts: turn.ts, preview: turn.preview, isCompact: turn.isCompact, line: turn.line });
+    if (turn.ts > this._fullExtent.lastTs) this._fullExtent.lastTs = turn.ts;
+    this.renderFullExtent(this._fullExtent);
   }
 
   /** Sync minimap position/height to match message list within the container */
@@ -168,15 +188,21 @@ export class ChatMinimap {
   updateThumb() {
     if (!this._thumb || this._minimap.classList.contains('hidden')) return;
     if (this._fullExtent) {
-      // Time-coordinate thumb: where the visible messages sit on the timeline
+      // Time-coordinate thumb: where the visible messages sit on the timeline.
+      // Live messages can be NEWER than the lastTs captured at init (assistant/
+      // tool growth doesn't add user turns) — clamping against the stale span
+      // pushed the thumb to top:100% (overflowing below the track). Use the
+      // visible bottom as the effective end of the timeline instead.
       const { firstTs, lastTs } = this._fullExtent;
-      const span = Math.max(1, lastTs - firstTs);
       const r = this._thumbTsRange;
       if (!r) { this._thumb.style.height = '0'; return; }
+      const effLast = Math.max(lastTs, r.botTs);
+      const span = Math.max(1, effLast - firstTs);
       const top = Math.max(0, Math.min(100, ((r.topTs - firstTs) / span) * 100));
       const bot = Math.max(0, Math.min(100, ((r.botTs - firstTs) / span) * 100));
-      this._thumb.style.top = top + '%';
-      this._thumb.style.height = Math.max(2, bot - top) + '%';
+      const h = Math.max(2, bot - top);
+      this._thumb.style.top = Math.min(top, 100 - h) + '%';
+      this._thumb.style.height = h + '%';
       return;
     }
     if (!this._total) return;

@@ -748,6 +748,9 @@ class ChatView {
     // Trim top if DOM window too large
     this._trimTop();
 
+    // Newly rendered messages need the search highlight re-applied
+    if (this._search?.hasHighlight) this._search.applyHighlightLayer();
+
     setTimeout(() => { this._loading = false; }, 300);
   }
 
@@ -808,15 +811,17 @@ class ChatView {
     for (const msg of msgs) this._onCreateMessage(msg);
     this._loadingHistory = false;
 
-    // Scroll to the target message
+    // Scroll to the target message (gap-loaded elements are outside the
+    // window index space — exclude them so relIdx maps to the right element)
     const relIdx = targetIdx - start;
-    const allMsgs = this._messageList.querySelectorAll('.chat-msg');
+    const allMsgs = this._messageList.querySelectorAll('.chat-msg:not(.chat-gap-msg)');
     if (relIdx >= 0 && relIdx < allMsgs.length) {
       const targetEl = allMsgs[relIdx];
       for (const d of targetEl.querySelectorAll('details:not([open])')) d.open = true;
       targetEl.style.contentVisibility = 'visible';
       requestAnimationFrame(() => targetEl.scrollIntoView({ block: 'center' }));
     }
+    if (this._search?.hasHighlight) this._search.applyHighlightLayer();
   }
 
   // Jump to the bottom of the conversation
@@ -838,6 +843,7 @@ class ChatView {
     this._pinned = true;
     this._newMsgCount = 0;
     this._scrollBtn.classList.add('hidden');
+    if (this._search?.hasHighlight) this._search.applyHighlightLayer();
 
     // Temporarily disable content-visibility so the browser computes real heights
     // for all elements, then scroll to bottom, then re-enable
@@ -990,6 +996,10 @@ class ChatView {
           }
         }
         this._chatMinimap.addTurn(turn, this._total);
+        // Huge-session (time-coordinate) minimap: extend the timeline too —
+        // addTurn is a no-op in full-extent mode, and without this the map
+        // froze at init time while the live session kept growing
+        if (this._gapMinimapActive) this._chatMinimap.appendFullTurn(turn);
       }
       this._chatMinimap.setViewport(this._windowStart, this._windowEnd, this._total);
     }
@@ -1023,6 +1033,7 @@ class ChatView {
         }
         if (newEl) {
           newEl.dataset.msgId = id;
+          if (msg.ts) newEl.dataset.ts = msg.ts; // keep time-coordinate minimap data on re-render
           oldEl.replaceWith(newEl);
           this._elements.set(id, newEl);
           this._renderers.addWrapToggles(newEl);
@@ -1439,6 +1450,21 @@ class ChatView {
       this._loadingHistory = true;
       for (const msg of msgs) this._onCreateMessage(msg);
       this._loadingHistory = false;
+      // Keep the window accounting in sync: _fetchMessages silently updated
+      // _total from the server, but _windowEnd previously stayed stale — the
+      // rendered window then held more messages than [start,end) claimed, so
+      // the minimap thumb, position indicator, and every index-based jump
+      // (search + minimap) were off by the missed count after a reconnect.
+      this._windowEnd = missedStart + msgs.length;
+      this._total = Math.max(this._total, this._windowEnd);
+      this._chatMinimap.setViewport(this._windowStart, this._windowEnd, this._total);
+      this._updatePosIndicator();
+      // Missed user turns also belong on the minimap
+      for (let i = 0; i < msgs.length; i++) {
+        const m = msgs[i];
+        if (m.role === 'user') this._chatMinimap.addTurn({ turnIndex: m.turnIndex, startIdx: missedStart + i, ts: m.ts, role: 'user' }, this._total);
+      }
+      if (this._search?.hasHighlight) this._search.applyHighlightLayer();
       if (this._pinned) this._scrollToBottom();
     }).catch(() => {});
   }

@@ -151,10 +151,13 @@ class ChatSearch {
       await this._jumpToIndex(msgIndex);
     }
 
-    // Expand collapsed content in target, then refresh highlight layer
+    // Expand collapsed content in target, then refresh highlight layer.
+    // Gap-loaded messages (.chat-gap-msg) are IN the DOM but NOT in the
+    // window index space — including them here shifted relIdx onto the wrong
+    // element whenever the user had loaded part of the elided middle.
     const { windowStart: newStart } = this._getWindowBounds();
     const relIdx = msgIndex - newStart;
-    const allMsgs = this._messageList.querySelectorAll('.chat-msg');
+    const allMsgs = this._messageList.querySelectorAll('.chat-msg:not(.chat-gap-msg)');
     if (relIdx >= 0 && relIdx < allMsgs.length) {
       const targetEl = allMsgs[relIdx];
       targetEl.style.contentVisibility = 'visible';
