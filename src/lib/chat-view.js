@@ -670,6 +670,8 @@ class ChatView {
       if (this._disposed || !data?.fullTurns?.length) return;
       this._gapMinimapActive = true;
       this._gapBounds = { tailStartLine: data.tailStartLine, totalLines: data.totalLines };
+      this._convoLastTs = data.lastTs; // newest real turn ts — anything past it in a
+                                       // seek-loaded slab is a Date.now() fallback
       this._chatMinimap.renderFullExtent({ fullTurns: data.fullTurns, firstTs: data.firstTs, lastTs: data.lastTs });
       // Huge session: the server sent tail-ONLY (no head, no seam marker). Install
       // an invisible sentinel above the tail so scrolling up seek-loads the whole
@@ -681,22 +683,31 @@ class ChatView {
     }
   }
 
-  // Report the visible viewport's time span to the minimap thumb. Reads the ts
-  // of the topmost and bottommost visible message elements (loaded or gap).
+  // Report the visible viewport's time span to the minimap thumb. Uses
+  // getBoundingClientRect for ACCURATE on-screen detection — offsetTop is
+  // content-visibility-estimated for off-screen elements, so a far-below live
+  // message could read as "visible" and yank the thumb to the recent end. Takes
+  // min/max ts (not DOM-first/last) so a stray element can't invert the range.
+  // The whole loop forces just ONE reflow (first rect read), then cheap reads.
   _reportVisibleTsRange() {
     if (!this._gapMinimapActive) return;
     const list = this._messageList;
-    const top = list.scrollTop, bot = top + list.clientHeight;
-    let topTs = null, botTs = null;
+    const lr = list.getBoundingClientRect();
+    // Teleport = browsing history, so every visible message is historical: any ts
+    // past the conversation's last real turn is a Date.now() fallback the
+    // normalizer stamped on slab records that lacked a timestamp (orphan tool
+    // results). Ignore those or they'd stretch the thumb to the recent end.
+    const ceil = this._teleported && this._convoLastTs ? this._convoLastTs + 1000 : Infinity;
+    let minTs = null, maxTs = null;
     for (const el of list.querySelectorAll('.chat-msg')) {
-      const ot = el.offsetTop, ob = ot + el.offsetHeight;
-      if (ob < top || ot > bot) continue;
+      const rc = el.getBoundingClientRect();
+      if (rc.bottom < lr.top || rc.top > lr.bottom) continue; // not actually visible
       const ts = Number(el.dataset.ts) || this._tsOfRenderedEl(el);
-      if (!ts) continue;
-      if (topTs == null) topTs = ts;
-      botTs = ts;
+      if (!ts || ts > ceil) continue;
+      if (minTs == null || ts < minTs) minTs = ts;
+      if (maxTs == null || ts > maxTs) maxTs = ts;
     }
-    this._chatMinimap.setVisibleTsRange(topTs, botTs);
+    if (minTs != null) this._chatMinimap.setVisibleTsRange(minTs, maxTs);
   }
 
   _tsOfRenderedEl(el) {
@@ -1050,8 +1061,11 @@ class ChatView {
       }
     }
 
-    // Live message while viewing history: don't render, just track count
-    if (!this._loadingHistory && !this._pinned && this._windowEnd < this._total) {
+    // Live message while viewing history: don't render, just track count.
+    // Teleport mode is always "viewing history" \u2014 its window accounting is
+    // stale, so gate on the flag directly (else live messages leak into the
+    // teleported slab and corrupt the minimap's visible-ts thumb).
+    if (!this._loadingHistory && (this._teleported || (!this._pinned && this._windowEnd < this._total))) {
       this._total++;
       this._newMsgCount++;
       this._scrollBtn.innerHTML = `\u2193 <span class="chat-scroll-badge">${this._newMsgCount}</span>`;
