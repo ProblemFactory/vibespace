@@ -81,7 +81,7 @@ const tabGroupMethods = {
     });
 
     let prevVisibility = '';
-    const onMove = (e) => {
+    const processMove = (e) => {
       if (!mouseDown) return;
       const dx = e.clientX - startX, dy = e.clientY - startY;
       if (!dragging) {
@@ -104,8 +104,18 @@ const tabGroupMethods = {
         w.element.classList.toggle('tab-drop-target', w === targetWin);
       }
     };
+    // rAF-coalesce (same as window.js drags): _detectTabMergeTarget forces a
+    // style recalc + hit-test per event — once per frame is enough.
+    let pendingEv = null, raf = 0;
+    const onMove = (e) => {
+      if (!mouseDown) return;
+      pendingEv = e;
+      if (raf) return;
+      raf = requestAnimationFrame(() => { raf = 0; const ev = pendingEv; pendingEv = null; if (ev && mouseDown) processMove(ev); });
+    };
 
     const onUp = () => {
+      if (raf) { cancelAnimationFrame(raf); raf = 0; pendingEv = null; }
       if (!mouseDown) return;
       mouseDown = false;
       if (ghost) { ghost.remove(); ghost = null; }
@@ -279,7 +289,7 @@ const tabGroupMethods = {
       e.preventDefault();
     });
 
-    const onMove = (e) => {
+    const processMove = (e) => {
       if (!mouseDown) return;
       if (!detached && Math.abs(e.clientY - startY) > 30) {
         detached = true;
@@ -345,8 +355,17 @@ const tabGroupMethods = {
         }
       }
     };
+    // rAF-coalesce the merge hit-test + highlight work (see window.js drag)
+    let pendingEv = null, moveRaf = 0;
+    const onMove = (e) => {
+      if (!mouseDown) return;
+      pendingEv = e;
+      if (moveRaf) return;
+      moveRaf = requestAnimationFrame(() => { moveRaf = 0; const ev = pendingEv; pendingEv = null; if (ev && mouseDown) processMove(ev); });
+    };
 
     const onUp = (e) => {
+      if (moveRaf) { cancelAnimationFrame(moveRaf); moveRaf = 0; pendingEv = null; }
       // Release the per-drag listeners first — the drag is over regardless of
       // which branch we take below (safe to abort the signal mid-handler).
       endDrag();

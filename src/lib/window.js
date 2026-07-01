@@ -96,11 +96,15 @@ class WindowManager {
     if (win._tabChain && win._tabChain.tabs[0] !== win.id) return;
     const r = this.workspace.getBoundingClientRect();
     const el = win.element;
+    // Quantize to 4 decimals: offsetLeft/Width are integer px, so raw
+    // fractions carry viewport-dependent rounding noise — two clients would
+    // never agree on the "same" bounds and layout-sync bounced forever.
+    const q = (v) => Math.round(v * 10000) / 10000;
     win.gridBounds = {
-      left: el.offsetLeft / r.width,
-      top: el.offsetTop / r.height,
-      width: el.offsetWidth / r.width,
-      height: el.offsetHeight / r.height,
+      left: q(el.offsetLeft / r.width),
+      top: q(el.offsetTop / r.height),
+      width: q(el.offsetWidth / r.width),
+      height: q(el.offsetHeight / r.height),
     };
   }
 
@@ -160,7 +164,7 @@ class WindowManager {
       e.preventDefault();
     });
 
-    const onMove = (e) => {
+    const processMove = (e) => {
       if (!mouseDown) return;
       const dx = e.clientX - startX, dy = e.clientY - startY;
 
@@ -321,7 +325,27 @@ class WindowManager {
       }
     };
 
+    // rAF-coalesce mousemove: processMove does 2 elementFromPoint hit-tests
+    // (each preceded by a style flip = forced synchronous recalc), a per-window
+    // class toggle loop, and several getBoundingClientRect reads. Uncoalesced
+    // mousemove fires at pointer rate (125-1000Hz) — with several live chat
+    // windows that alone made dragging stutter. One processMove per frame is
+    // visually identical (the compositor only paints per frame anyway).
+    let pendingMoveEv = null, moveRaf = 0;
+    const onMove = (e) => {
+      if (!mouseDown) return;
+      pendingMoveEv = e;
+      if (moveRaf) return;
+      moveRaf = requestAnimationFrame(() => {
+        moveRaf = 0;
+        const ev = pendingMoveEv; pendingMoveEv = null;
+        if (ev && mouseDown) processMove(ev);
+      });
+    };
+
     const onUp = (e) => {
+      // Cancel any queued frame so processMove can't run after the drop
+      if (moveRaf) { cancelAnimationFrame(moveRaf); moveRaf = 0; pendingMoveEv = null; }
       if (!mouseDown) return;
       mouseDown = false;
       if (!dragging) return;
@@ -467,7 +491,7 @@ class WindowManager {
         const sW = win.element.offsetWidth, sH = win.element.offsetHeight, sL = win.element.offsetLeft, sT = win.element.offsetTop;
         const SNAP_T = 15;
 
-        const onMove = (e) => {
+        const processMove = (e) => {
           const dx = e.clientX - sX, dy = e.clientY - sY;
           let newL = sL, newT = sT, newW = sW, newH = sH;
 
@@ -488,7 +512,16 @@ class WindowManager {
           win.element.style.width = Math.max(320, newW) + 'px'; win.element.style.height = Math.max(180, newH) + 'px';
           if (win.onResize) win.onResize();
         };
+        // rAF-coalesce: win.onResize() per raw mousemove means an xterm fit()
+        // reflow at pointer rate while resizing a terminal — cap it per frame.
+        let pendingEv = null, raf = 0;
+        const onMove = (e) => {
+          pendingEv = e;
+          if (raf) return;
+          raf = requestAnimationFrame(() => { raf = 0; const ev = pendingEv; pendingEv = null; if (ev) processMove(ev); });
+        };
         const onUp = () => {
+          if (raf) { cancelAnimationFrame(raf); raf = 0; pendingEv = null; }
           document.removeEventListener('mousemove', onMove);
           document.removeEventListener('mouseup', onUp);
           // Update gridBounds after resize (if window was grid-tracked, keep tracking with new proportions)

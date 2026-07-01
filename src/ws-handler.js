@@ -75,6 +75,11 @@ function registerWsHandler(wss, ctx) {
     adapterRegistry, pty, path, fs, os, execFileSync, ensureDir,
   } = ctx;
 
+  // Monotonic sequence for layout-sync rebroadcasts (shared across all
+  // connections; resets on server restart — clients reset their counter on WS
+  // reconnect, which a server restart always forces).
+  const layoutSyncSeqRef = { value: 0 };
+
   // Heartbeat: without ping/pong a half-open WS (network blip, sleep/wake,
   // the OOM-induced unresponsiveness from heavy local jobs) is NOT detected
   // by the server — the dead ws lingers in every session.clients map for the
@@ -753,7 +758,11 @@ function registerWsHandler(wss, ctx) {
         }
 
         case 'layout-sync': {
-          // Layout state sync: save to disk + broadcast to other clients
+          // Layout state sync: save to disk + broadcast to other clients.
+          // Each rebroadcast carries a monotonically increasing seq — receivers
+          // drop anything <= the last seq they applied, so a delayed/stale
+          // broadcast can never "undo" a newer one (the ping-pong bug where an
+          // operation on one client got reverted and replayed several times).
           const layoutData = readLayouts();
           const desktopId = data.desktopId;
           if (desktopId) {
@@ -767,7 +776,7 @@ function registerWsHandler(wss, ctx) {
           }
           writeLayouts(layoutData);
           // Broadcast to other clients (sender excluded) — include desktopMeta
-          const syncMsg = JSON.stringify({ type: 'layout-sync', desktopId, state: data.state, desktopMeta: layoutData.desktopMeta || [] });
+          const syncMsg = JSON.stringify({ type: 'layout-sync', seq: ++layoutSyncSeqRef.value, desktopId, state: data.state, desktopMeta: layoutData.desktopMeta || [] });
           wss.clients.forEach(client => {
             if (client !== ws && client.readyState === WS_OPEN) { try { client.send(syncMsg); } catch {} }
           });

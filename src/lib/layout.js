@@ -5,23 +5,61 @@ class LayoutManager {
     this._savedPresets = {};
     this._currentName = null;
 
+    // ── Multi-client sync stability ──
+    // _lastRemoteSeq: drop stale/out-of-order broadcasts (server stamps seq).
+    // _userDirty: true only after a REAL local input since the last remote
+    //   apply — broadcasts are gated on it, so the local timers that fire
+    //   while/after applying remote state (captureGridBounds chains, onResize)
+    //   can never echo a slightly-different state back (the ping-pong where an
+    //   op on one client got undone and replayed).
+    // _pointerDown: while the user is mid-drag/resize, inbound remote state is
+    //   deferred (latest wins) and applied on pointerup — remote state can no
+    //   longer yank a window out from under an in-progress drag.
+    this._lastRemoteSeq = 0;
+    this._userDirty = false;
+    this._pendingRemote = null;
+    this._pointerDown = false;
+    this._lastSentJson = null;
+    document.addEventListener('pointerdown', () => { this._userDirty = true; this._pointerDown = true; }, { capture: true, passive: true });
+    document.addEventListener('keydown', () => { this._userDirty = true; }, { capture: true, passive: true });
+    const flushPending = () => {
+      this._pointerDown = false;
+      if (this._pendingRemote) {
+        const pending = this._pendingRemote; this._pendingRemote = null;
+        // Wait for the drop's own snap/capture timers (250ms) to settle first
+        setTimeout(() => this._handleRemoteSync(pending), 300);
+      }
+    };
+    document.addEventListener('pointerup', flushPending, { capture: true, passive: true });
+    document.addEventListener('pointercancel', flushPending, { capture: true, passive: true });
+    // Server restart resets its seq counter — reset ours on every reconnect
+    app.ws.onStateChange((connected) => { if (connected) this._lastRemoteSeq = 0; });
+
     // Listen for state sync from other clients
     app.ws.onGlobal((msg) => {
-      if (msg.type === 'layout-sync' && !this._restoring) {
-        const dm = this.app.desktopManager;
-        if (dm && msg.desktopId) {
-          // Desktop-aware: only apply if it's for our active desktop
-          if (msg.desktopId !== dm.activeDesktopId) {
-            // Cache state for non-active desktop
-            dm._savedStates.set(msg.desktopId, msg.state);
-            dm._renderSwitcher(); // update window counts
-            return;
-          }
-        }
-        this._applyRemoteState(msg.state);
-        if (msg.desktopMeta && dm) dm.updateFromMeta(msg.desktopMeta);
+      if (msg.type !== 'layout-sync' || this._restoring) return;
+      if (msg.seq) {
+        if (msg.seq <= this._lastRemoteSeq) return; // stale echo — never re-apply older state
+        this._lastRemoteSeq = msg.seq;
       }
+      if (this._pointerDown) { this._pendingRemote = msg; return; } // defer while interacting
+      this._handleRemoteSync(msg);
     });
+  }
+
+  _handleRemoteSync(msg) {
+    const dm = this.app.desktopManager;
+    if (dm && msg.desktopId) {
+      // Desktop-aware: only apply if it's for our active desktop
+      if (msg.desktopId !== dm.activeDesktopId) {
+        // Cache state for non-active desktop
+        dm._savedStates.set(msg.desktopId, msg.state);
+        dm._renderSwitcher(); // update window counts
+        return;
+      }
+    }
+    this._applyRemoteState(msg.state);
+    if (msg.desktopMeta && dm) dm.updateFromMeta(msg.desktopMeta);
   }
 
   // Apply remote state: diff against local windows, update only what changed
@@ -58,13 +96,19 @@ class LayoutManager {
             continue;
           }
 
-          // Update gridBounds
+          // Update gridBounds. Epsilon must exceed the px-rounding drift:
+          // _captureGridBounds derives fractions from INTEGER offsetLeft/Width,
+          // so apply→recapture can differ by up to ~0.5px/viewport (0.0004 at
+          // 1280w) — the old 0.0001 epsilon saw that as a "change" and clients
+          // with different viewport sizes re-broadcast forever (ping-pong).
+          // 0.002 ≈ 2-4px: below any real move, above all rounding noise.
           if (rw.gridBounds) {
+            const EPS = 0.002;
             const changed = !win.gridBounds
-              || Math.abs(win.gridBounds.left - rw.gridBounds.left) > 0.0001
-              || Math.abs(win.gridBounds.top - rw.gridBounds.top) > 0.0001
-              || Math.abs(win.gridBounds.width - rw.gridBounds.width) > 0.0001
-              || Math.abs(win.gridBounds.height - rw.gridBounds.height) > 0.0001;
+              || Math.abs(win.gridBounds.left - rw.gridBounds.left) > EPS
+              || Math.abs(win.gridBounds.top - rw.gridBounds.top) > EPS
+              || Math.abs(win.gridBounds.width - rw.gridBounds.width) > EPS
+              || Math.abs(win.gridBounds.height - rw.gridBounds.height) > EPS;
             if (changed) {
               win.gridBounds = rw.gridBounds;
               this.app.wm._applyGridBounds(win);
@@ -149,6 +193,11 @@ class LayoutManager {
       // leaves clients silently diverged — surface it for debugging
       console.error('[layout-sync] _applyRemoteState failed:', err);
     }
+    // Everything we just changed came from the remote — nothing local is worth
+    // re-broadcasting until the user actually touches something. This is the
+    // anti-echo gate: delayed capture/notify timers spawned by the apply fire
+    // after the 1s cooldown, but _doAutoSave drops them while !_userDirty.
+    this._userDirty = false;
     setTimeout(() => { this._restoring = false; }, 1000);
   }
 
@@ -457,8 +506,19 @@ class LayoutManager {
   async _doAutoSave() {
     if (this._restoring) return;
     if (this.app.desktopManager?._restoring) return;
+    // Anti-echo: only broadcast state the USER caused. After applying a remote
+    // state, our own follow-up timers (captureGridBounds, onResize chains)
+    // schedule autosaves with a state that differs only by rounding — sending
+    // those bounced every operation between clients several times.
+    if (!this._userDirty) return;
     const state = this.captureState();
     const desktopId = this.app.desktopManager?.activeDesktopId;
+    // No-op guard: focus clicks and timers frequently schedule saves with an
+    // unchanged state — skip the send (and the server disk write + rebroadcast
+    // + every other client's full diff pass) when nothing actually changed.
+    const json = JSON.stringify({ state, desktopId });
+    if (json === this._lastSentJson) return;
+    this._lastSentJson = json;
     // Full state to server for disk persistence
     this.app.ws.send({ type: 'layout-sync', state, desktopId });
   }

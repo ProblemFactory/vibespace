@@ -408,12 +408,25 @@ class Sidebar {
   }
 
   async _poll() {
-    try {
-      const res = await fetch('/api/sessions'); const data = await res.json();
-      this._systemSessions = data.sessions || [];
-      this._mergeAndRender();
-    } catch {}
-    setTimeout(() => this._poll(), 5000);
+    // Hidden tab: skip the fetch + merge entirely (each poll costs a server
+    // discovery scan and, with thousands of sessions, a client-side merge +
+    // digest). A visibilitychange listener reschedules an immediate catch-up
+    // poll — single timer chain, so the two paths can never double-poll.
+    if (!this._visListener) {
+      this._visListener = () => {
+        if (!document.hidden) { clearTimeout(this._pollTimer); this._pollTimer = setTimeout(() => this._poll(), 100); }
+      };
+      document.addEventListener('visibilitychange', this._visListener);
+    }
+    if (!document.hidden) {
+      try {
+        const res = await fetch('/api/sessions'); const data = await res.json();
+        this._systemSessions = data.sessions || [];
+        this._mergeAndRender();
+      } catch {}
+    }
+    clearTimeout(this._pollTimer);
+    this._pollTimer = setTimeout(() => this._poll(), document.hidden ? 30000 : 5000);
   }
 
   _merge() {
