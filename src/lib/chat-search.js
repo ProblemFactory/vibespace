@@ -122,46 +122,87 @@ class ChatSearch {
       } catch {}
     }
 
-    let matches = [];
     this._fullFileMode = false;
     this._truncated = false;
-    if (backendSessionId) {
-      try {
-        // Huge (elided) session: stream-search the ENTIRE file server-side —
-        // covers head + unloaded middle + tail uniformly in {line, ts}
-        // coordinates, so search behaves the same regardless of session size.
-        if (this._getGapActive() && this._jumpToFileMatch) {
-          const res = await fetch(`/api/session-history-gap?backend=${encodeURIComponent(backend || 'claude')}&backendSessionId=${encodeURIComponent(backendSessionId)}&cwd=${encodeURIComponent(cwd)}&search=${encodeURIComponent(q)}`);
-          const data = await res.json();
-          if (data.matches) {
-            matches = data.matches;
-            this._fullFileMode = true;
-            this._truncated = !!data.truncated;
-          }
-        }
-        if (!this._fullFileMode) {
-          const res = await fetch(`/api/session-messages?backend=${encodeURIComponent(backend || 'claude')}&backendSessionId=${encodeURIComponent(backendSessionId)}&cwd=${encodeURIComponent(cwd)}&search=${encodeURIComponent(q)}`);
-          const data = await res.json();
-          matches = data.matches || [];
-        }
-      } catch {}
-    }
-    if (stale()) return; // a newer search superseded this one
-    this._serverSearchResults = matches;
+    this._searching = false;
+    if (!backendSessionId) { if (!stale()) this._searchStatus.textContent = 'No results'; return; }
 
-    if (!this._serverSearchResults.length) {
-      this._searchStatus.textContent = 'No results';
+    // Huge session: stream-search the ENTIRE file server-side. Results arrive
+    // progressively (less-style) so the count updates live ("N… searching") and
+    // the first match is jumped to as soon as it's found. Otherwise a single
+    // request against the loaded window.
+    if (this._getGapActive() && this._jumpToFileMatch) {
+      this._fullFileMode = true;
+      await this._streamFullFileSearch(backend, backendSessionId, cwd, q, token, stale);
       return;
     }
 
+    let matches = [];
+    try {
+      const res = await fetch(`/api/session-messages?backend=${encodeURIComponent(backend || 'claude')}&backendSessionId=${encodeURIComponent(backendSessionId)}&cwd=${encodeURIComponent(cwd)}&search=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      matches = data.matches || [];
+    } catch {}
+    if (stale()) return; // a newer search superseded this one
+    this._serverSearchResults = matches;
+    if (!this._serverSearchResults.length) { this._searchStatus.textContent = 'No results'; return; }
     this._searchResultIdx = 0;
     this._updateSearchStatus();
     this._jumpToSearchResult(0);
   }
 
+  // Read the NDJSON match stream: jump to the first hit immediately, then keep
+  // updating the live count until the server signals `done`.
+  async _streamFullFileSearch(backend, backendSessionId, cwd, q, token, stale) {
+    this._searchAbort?.abort();
+    const ac = (this._searchAbort = new AbortController());
+    this._searching = true;
+    this._serverSearchResults = [];
+    this._searchResultIdx = -1;
+    this._updateSearchStatus();
+    let jumped = false;
+    try {
+      const url = `/api/session-history-gap?backend=${encodeURIComponent(backend || 'claude')}&backendSessionId=${encodeURIComponent(backendSessionId)}&cwd=${encodeURIComponent(cwd)}&search=${encodeURIComponent(q)}&stream=1`;
+      const res = await fetch(url, { signal: ac.signal });
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (stale()) { ac.abort(); return; }
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const ln of lines) {
+          if (!ln) continue;
+          let obj; try { obj = JSON.parse(ln); } catch { continue; }
+          if (obj.done) { this._searching = false; this._truncated = !!obj.truncated; continue; }
+          if (typeof obj.line !== 'number') continue; // gap-info preamble line
+          this._serverSearchResults.push(obj);
+          if (!jumped) { jumped = true; this._searchResultIdx = 0; this._jumpToSearchResult(0); }
+          this._updateSearchStatus();
+        }
+      }
+    } catch (e) {
+      if (e?.name === 'AbortError') return;
+    } finally {
+      this._searching = false;
+    }
+    if (stale()) return;
+    if (!this._serverSearchResults.length) this._searchStatus.textContent = 'No results';
+    else this._updateSearchStatus();
+  }
+
   _updateSearchStatus() {
     const n = this._serverSearchResults.length;
-    this._searchStatus.textContent = `${this._searchResultIdx + 1}/${n}${this._truncated ? '+' : ''}`;
+    const idx = this._searchResultIdx >= 0 ? this._searchResultIdx + 1 : 0;
+    if (this._searching) {
+      // less-style: keep counting while the scan is still running
+      this._searchStatus.textContent = n ? `${idx}/${n}… searching` : 'Searching…';
+    } else {
+      this._searchStatus.textContent = `${idx}/${n}${this._truncated ? '+' : ''}`;
+    }
   }
 
   /** Expand collapsed content inside an element so highlights can paint */
@@ -339,6 +380,8 @@ class ChatSearch {
   }
 
   _clearSearch() {
+    this._searchAbort?.abort();          // stop any in-flight streaming search
+    this._searching = false;
     this._clearHighlightLayer();
     this._serverSearchResults = [];
     this._searchResultIdx = -1;
@@ -349,6 +392,7 @@ class ChatSearch {
   /** Clean up timers */
   dispose() {
     if (this._searchTimer) clearTimeout(this._searchTimer);
+    this._searchAbort?.abort();
     this._clearHighlightLayer();
   }
 }

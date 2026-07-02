@@ -18,7 +18,7 @@ const {
 const { createMessageManager } = require('../normalizers');
 const { listCodexThreads } = require('../codex-session-store');
 const { findSessionJsonlPath } = require('../session-store');
-const { findCodexSessionJsonlPath, jsonlGapInfo, readJsonlLineRange, scanJsonlUserTurns, searchJsonlFull } = require('../adapters/codex');
+const { findCodexSessionJsonlPath, jsonlGapInfo, readJsonlLineRange, scanJsonlUserTurns, searchJsonlFull, searchJsonlFullStream } = require('../adapters/codex');
 
 function getSessionKey(session = {}) {
   const backend = session.backend || 'claude';
@@ -123,47 +123,10 @@ function setup(ctx) {
   //   ?...&info=1               -> { gap:{ tailStartLine, totalLines } } or { gap:null }
   //   ?...&endLine=N&count=C    -> { messages, fromLine, toLine } (records [max(0,N-C), N))
   //   ?...&startLine=N&count=C  -> { messages, fromLine, toLine } (records [N, N+C))
-  // _tailIndexFor maps the loaded tail to normalized indices so a full-file
-  // search hit in the tail jumps precisely via jumpToIndex; earlier-history hits
-  // seek-load by file line. Cached by mtime+size (a 32MB normalize is expensive).
-  const _boundedIdxCache = new Map();
-  const _tailIndexFor = (fp, backend, gap) => {
-    const stat = fs.statSync(fp);
-    const hit = _boundedIdxCache.get(fp);
-    if (hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) return hit;
-    // The client's registered window is now tail-ONLY (readJsonlBounded tailOnly),
-    // so normalizing readJsonlLineRange(tailStartLine, totalLines) here reproduces
-    // the client's index space EXACTLY - no head/seam, no drift. Records carry
-    // __line so each message gets srcLine for line->index.
-    let tailRecs = readJsonlLineRange(fp, gap.tailStartLine, gap.totalLines);
-    // Match parseSessionJsonl: subagent records are filtered before normalizing.
-    tailRecs = tailRecs.filter((r) => !isSubagentMessage(r));
-    const mm = createMessageManager(backend, 'tidx');
-    mm.convertHistory(tailRecs);
-    const lineIdx = [];
-    for (let i = 0; i < mm.messages.length; i++) {
-      const m = mm.messages[i];
-      if (Number.isFinite(m.srcLine)) lineIdx.push({ line: m.srcLine, index: i });
-    }
-    const result = { mtimeMs: stat.mtimeMs, size: stat.size, lineIdx };
-    _boundedIdxCache.set(fp, result);
-    if (_boundedIdxCache.size > 8) _boundedIdxCache.delete(_boundedIdxCache.keys().next().value);
-    return result;
-  };
-  // Nearest tail message index at or before `line` (or null when the line is
-  // below the tail - i.e. seek-loadable earlier history).
-  const _indexForLine = (bidx, line, gap) => {
-    if (line < gap.tailStartLine) return null; // earlier history -> seek by line
-    let lo = 0, hi = bidx.lineIdx.length - 1, best = null;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      if (bidx.lineIdx[mid].line <= line) { best = bidx.lineIdx[mid].index; lo = mid + 1; }
-      else hi = mid - 1;
-    }
-    return best;
-  };
+  //   ?...&search=q[&stream=1]  -> full-file matches (streamed NDJSON if stream=1)
+  //   ?...&fullturnmap=1        -> every user turn in TIME coordinates for the minimap
 
-  router.get('/api/session-history-gap', (req, res) => {
+  router.get('/api/session-history-gap', async (req, res) => {
     const { backend, backendSessionId, claudeSessionId, cwd } = req.query;
     const resolvedBackend = backend || 'claude';
     const resolvedSessionId = backendSessionId || claudeSessionId;
@@ -182,20 +145,34 @@ function setup(ctx) {
       return res.json({ gap });
     }
 
-    // Full-file streaming search: covers the whole file uniformly in {line, ts}
-    // coordinates, so huge sessions search like small ones. Matches in the loaded
-    // tail also get an exact normalized index (jumpToIndex, no drift); matches in
-    // earlier history carry only {line} and are seek-loaded by file line.
+    // Full-file search: covers the whole file uniformly in {line, ts} coordinates,
+    // so huge sessions search like small ones. Jumps teleport by absolute line, so
+    // no normalized index is needed. `stream=1` progressively streams matches as
+    // NDJSON (less-style live count); otherwise all matches come back at once.
     if (req.query.search) {
+      if (req.query.stream) {
+        res.writeHead(200, {
+          'Content-Type': 'application/x-ndjson; charset=utf-8',
+          'Cache-Control': 'no-cache, no-transform',
+          'X-Accel-Buffering': 'no',
+        });
+        res.write(JSON.stringify({ ...gap }) + '\n'); // first line: tailStartLine/totalLines
+        const ac = new AbortController();
+        req.on('close', () => ac.abort());
+        try {
+          const { total, truncated } = await searchJsonlFullStream(
+            fp, resolvedBackend, req.query.search,
+            (m) => { res.write(JSON.stringify(m) + '\n'); },
+            { signal: ac.signal },
+          );
+          if (!ac.signal.aborted) res.write(JSON.stringify({ done: true, total, truncated }) + '\n');
+        } catch {
+          if (!ac.signal.aborted) res.write(JSON.stringify({ done: true, total: 0, truncated: false, error: true }) + '\n');
+        }
+        return res.end();
+      }
       let result = { matches: [], truncated: false };
       try { result = searchJsonlFull(fp, resolvedBackend, req.query.search); } catch {}
-      try {
-        const bidx = _tailIndexFor(fp, resolvedBackend, gap);
-        for (const m of result.matches) {
-          const i = _indexForLine(bidx, m.line, gap);
-          if (i != null) m.index = i;
-        }
-      } catch {}
       return res.json({ ...result, ...gap });
     }
 

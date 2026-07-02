@@ -316,6 +316,22 @@ function _searchableTextOf(rec, backend) {
   return parts.join(' ');
 }
 
+// Build a match object for one raw JSONL line, or null if it doesn't match.
+function _matchJsonlLine(raw, line, backend, q) {
+  if (!raw || raw.toLowerCase().indexOf(q) === -1) return null; // cheap pre-filter
+  let rec; try { rec = JSON.parse(raw); } catch { return null; }
+  const text = _searchableTextOf(rec, backend);
+  const idx = text.toLowerCase().indexOf(q);
+  if (idx === -1) return null;
+  const ts = rec.timestamp ? Date.parse(rec.timestamp) || 0 : 0;
+  const role = backend === 'codex'
+    ? (rec.payload?.role || rec.payload?.type || rec.type || '')
+    : (rec.message?.role || rec.type || '');
+  const from = Math.max(0, idx - 30);
+  const preview = (from > 0 ? '…' : '') + text.slice(from, idx + q.length + 50).replace(/\s+/g, ' ') + (idx + q.length + 50 < text.length ? '…' : '');
+  return { line, ts, role, preview };
+}
+
 function searchJsonlFull(fp, backend, query, maxResults = 500) {
   const q = String(query || '').toLowerCase();
   if (!q) return { matches: [], truncated: false };
@@ -323,22 +339,6 @@ function searchJsonlFull(fp, backend, query, maxResults = 500) {
   const fd = fs.openSync(fp, 'r');
   const matches = [];
   let truncated = false;
-  const handleLine = (raw, line) => {
-    if (!raw || matches.length >= maxResults) { if (raw && matches.length >= maxResults) truncated = true; return; }
-    if (raw.toLowerCase().indexOf(q) === -1) return; // cheap pre-filter
-    let rec; try { rec = JSON.parse(raw); } catch { return; }
-    const text = _searchableTextOf(rec, backend);
-    const idx = text.toLowerCase().indexOf(q);
-    if (idx === -1) return;
-    const ts = rec.timestamp ? Date.parse(rec.timestamp) || 0 : 0;
-    const role = backend === 'codex'
-      ? (rec.payload?.role || rec.payload?.type || rec.type || '')
-      : (rec.message?.role || rec.type || '');
-    // Preview centered on the match
-    const from = Math.max(0, idx - 30);
-    const preview = (from > 0 ? '…' : '') + text.slice(from, idx + q.length + 50).replace(/\s+/g, ' ') + (idx + q.length + 50 < text.length ? '…' : '');
-    matches.push({ line, ts, role, preview });
-  };
   try {
     const buf = Buffer.alloc(LINE_INDEX_CHUNK);
     let pos = 0, line = 0, carry = '';
@@ -348,13 +348,53 @@ function searchJsonlFull(fp, backend, query, maxResults = 500) {
       const text = carry + buf.toString('utf-8', 0, n);
       const parts = text.split('\n');
       carry = parts.pop();
-      for (const raw of parts) handleLine(raw.trim(), line++);
+      for (const raw of parts) {
+        if (matches.length >= maxResults) { truncated = true; break; }
+        const m = _matchJsonlLine(raw.trim(), line++, backend, q);
+        if (m) matches.push(m);
+      }
       pos += n;
     }
     if (matches.length >= maxResults && pos < stat.size) truncated = true;
-    handleLine(carry.trim(), line);
+    else if (matches.length < maxResults) { const m = _matchJsonlLine(carry.trim(), line, backend, q); if (m) matches.push(m); }
   } finally { fs.closeSync(fd); }
   return { matches, truncated };
+}
+
+// Streaming full-file search: reads the file ASYNChronously (yields to the event
+// loop between chunks, so the response flushes progressively and other requests
+// aren't blocked) and calls onMatch(match) as each hit is found — so the client
+// can show a live "found N, still searching…" count (less-style). Returns the
+// final { total, truncated } once the whole file has been scanned (or aborted).
+async function searchJsonlFullStream(fp, backend, query, onMatch, opts = {}) {
+  const maxResults = opts.maxResults || 500;
+  const signal = opts.signal;
+  const q = String(query || '').toLowerCase();
+  if (!q) return { total: 0, truncated: false };
+  const stat = fs.statSync(fp);
+  const fh = await fs.promises.open(fp, 'r');
+  let total = 0, truncated = false;
+  try {
+    const buf = Buffer.alloc(LINE_INDEX_CHUNK);
+    let pos = 0, line = 0, carry = '';
+    while (pos < stat.size && total < maxResults) {
+      if (signal?.aborted) break;
+      const { bytesRead } = await fh.read(buf, 0, LINE_INDEX_CHUNK, pos);
+      if (bytesRead <= 0) break;
+      const chunk = carry + buf.toString('utf-8', 0, bytesRead);
+      const parts = chunk.split('\n');
+      carry = parts.pop();
+      for (const raw of parts) {
+        if (total >= maxResults) { truncated = true; break; }
+        const m = _matchJsonlLine(raw.trim(), line++, backend, q);
+        if (m) { total++; onMatch(m); }
+      }
+      pos += bytesRead;
+    }
+    if (total >= maxResults && pos < stat.size) truncated = true;
+    else if (total < maxResults && !signal?.aborted) { const m = _matchJsonlLine(carry.trim(), line, backend, q); if (m) { total++; onMatch(m); } }
+  } finally { await fh.close(); }
+  return { total, truncated };
 }
 
 // Read raw records for line range [startLine, endLine) by seeking to the
@@ -875,5 +915,6 @@ module.exports = {
   readJsonlLineRange,
   scanJsonlUserTurns,
   searchJsonlFull,
+  searchJsonlFullStream,
   resolveCodexPermissionMode,
 };
