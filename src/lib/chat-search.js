@@ -219,9 +219,7 @@ class ChatSearch {
       const matchIdx = this._highlightRanges.findIndex(r => el.contains(r.startContainer));
       if (matchIdx >= 0) {
         this._setCurrentHighlight(matchIdx);
-        const rect = this._highlightRanges[matchIdx].getBoundingClientRect();
-        const listRect = this._messageList.getBoundingClientRect();
-        this._messageList.scrollTop += rect.top - listRect.top - listRect.height / 2;
+        this._scrollToRange(this._highlightRanges[matchIdx]);
         return;
       }
     }
@@ -250,21 +248,78 @@ class ChatSearch {
       if (d < bestD) { bestD = d; best = i; }
     }
     this._setCurrentHighlight(best);
-    const range = ranges[best];
-    // Iterative scroll convergence: after seek-loading a big slab, content-
-    // visibility computes real element heights over several frames (and keeps
-    // going for ~1s), shifting the target after a single scrollTop set. Re-center
-    // over ~12 frames, then a few more times on a timer, to stay locked on.
+    this._scrollToRange(this._highlightRanges[best]);
+  }
+
+  /**
+   * Bring a highlight range fully into view and flash it. Two things the plain
+   * outer-list scroll couldn't do: (1) a match can be scrolled off INSIDE a card
+   * that has its own max-height + overflow (code blocks, tool output) — so we
+   * scroll every nested scroll container too; (2) a subtle CSS highlight in a
+   * long card gives no sense of WHERE the match is — so we pulse an overlay right
+   * on it. Both the inner-scroll and the outer-list centering re-run for ~1s
+   * because content-visibility keeps recomputing heights after a big slab loads.
+   */
+  _scrollToRange(range) {
+    if (!range) return;
     const list = this._messageList;
-    const center = () => {
+    const settle = () => {
+      this._scrollNestedIntoView(range); // reveal within inner scroll containers
       const lr = list.getBoundingClientRect();
       const rc = range.getBoundingClientRect();
-      list.scrollTop += rc.top - lr.top - lr.height / 2;
+      if (rc.width || rc.height) list.scrollTop += rc.top - lr.top - lr.height / 2;
     };
     let n = 0;
-    const step = () => { center(); if (++n < 12) requestAnimationFrame(step); };
+    const step = () => { settle(); if (++n < 12) requestAnimationFrame(step); };
     step();
-    for (const d of [180, 400, 750]) setTimeout(center, d);
+    for (const d of [180, 400, 750]) setTimeout(settle, d);
+    this._flashRange(range);
+  }
+
+  /** Scroll every nested overflow:auto/scroll ancestor so `range` is visible
+   *  within it (the outer message list is handled separately). */
+  _scrollNestedIntoView(range) {
+    let el = range.startContainer;
+    el = el.nodeType === 1 ? el : el.parentElement;
+    for (; el && el !== this._messageList && el !== document.body; el = el.parentElement) {
+      if (el.scrollHeight <= el.clientHeight + 4) continue;
+      const oy = getComputedStyle(el).overflowY;
+      if (oy !== 'auto' && oy !== 'scroll') continue;
+      const rc = range.getBoundingClientRect();
+      const er = el.getBoundingClientRect();
+      el.scrollTop += (rc.top - er.top) - (el.clientHeight - rc.height) / 2;
+    }
+  }
+
+  /** Pulse an overlay on the current match so the eye lands on it immediately,
+   *  even when it's buried in a long card. Tracks the range for ~1.2s so it
+   *  stays glued while the view is still settling. */
+  _flashRange(range) {
+    if (this._flashEl) { this._flashEl.remove(); this._flashEl = null; }
+    const flash = document.createElement('div');
+    flash.className = 'chat-search-flash';
+    document.body.appendChild(flash);
+    this._flashEl = flash;
+    const list = this._messageList;
+    const t0 = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    const tick = () => {
+      if (flash !== this._flashEl) return;               // superseded by a newer flash
+      const rc = range.getBoundingClientRect();
+      const lr = list.getBoundingClientRect();
+      // clip visibility check: hide the flash if the match scrolled out of the list
+      const visible = (rc.width || rc.height) && rc.bottom > lr.top && rc.top < lr.bottom;
+      flash.style.display = visible ? 'block' : 'none';
+      if (visible) {
+        flash.style.left = (rc.left - 5) + 'px';
+        flash.style.top = (rc.top - 3) + 'px';
+        flash.style.width = (rc.width + 10) + 'px';
+        flash.style.height = (rc.height + 6) + 'px';
+      }
+      const elapsed = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0;
+      if (elapsed < 1200) requestAnimationFrame(tick);
+      else { flash.remove(); if (this._flashEl === flash) this._flashEl = null; }
+    };
+    tick();
   }
 
   async _jumpToSearchResult(idx) {
@@ -382,6 +437,7 @@ class ChatSearch {
   _clearSearch() {
     this._searchAbort?.abort();          // stop any in-flight streaming search
     this._searching = false;
+    if (this._flashEl) { this._flashEl.remove(); this._flashEl = null; }
     this._clearHighlightLayer();
     this._serverSearchResults = [];
     this._searchResultIdx = -1;
@@ -393,6 +449,7 @@ class ChatSearch {
   dispose() {
     if (this._searchTimer) clearTimeout(this._searchTimer);
     this._searchAbort?.abort();
+    if (this._flashEl) { this._flashEl.remove(); this._flashEl = null; }
     this._clearHighlightLayer();
   }
 }

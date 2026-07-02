@@ -138,7 +138,7 @@ Press **Ctrl+F** to open the search bar. Features:
 - **Previous/Next** navigation (arrow buttons or Enter/Shift+Enter)
 - Search results from outside the current view window automatically load the target messages; the target message's collapsed cards (tool output, thinking) are expanded so the highlight is visible
 
-The highlight layer is re-applied when the view changes (scroll, pagination, jumps, reconnect catch-up).
+Jumping to a match scrolls it fully into view — including scrolling *inside* a card that has its own scrollbar (long code blocks, tool output), which a plain list-scroll can't reach. The active match is a solid high-contrast highlight (the other hits are dimmer) and a pulse briefly flashes on it, so it's obvious where the match is even in a long card. The highlight layer is re-applied when the view changes (scroll, pagination, jumps, reconnect catch-up).
 
 ## Input
 
