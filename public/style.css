@@ -642,7 +642,18 @@ html, body {
 .resize-sw { bottom: -3px; left: -3px; width: 12px; height: 12px; cursor: sw-resize; }
 
 /* ── Terminal ── */
-.terminal-container { width: 100%; flex: 1; min-height: 0; padding: 4px 10px 4px 4px; box-sizing: border-box; }
+.terminal-container { width: 100%; flex: 1; min-height: 0; padding: 4px 10px 4px 4px; box-sizing: border-box; position: relative; }
+/* tmux-style boundary: hatched unused region when a smaller client caps the PTY */
+.term-cap-strip {
+  position: absolute; pointer-events: none; z-index: 5; display: none;
+  background: repeating-linear-gradient(45deg, transparent 0 6px, color-mix(in srgb, var(--text) 10%, transparent) 6px 7px);
+}
+.term-cap-badge {
+  position: absolute; top: 6px; right: 12px; z-index: 6; display: none;
+  padding: 2px 8px; font-size: 10px; border-radius: 8px; pointer-events: auto; cursor: help;
+  background: color-mix(in srgb, var(--bg-window) 85%, transparent); color: var(--text-dim);
+  border: 1px dashed var(--border);
+}
 .terminal-container .xterm { height: 100%; }
 .terminal-container .xterm-viewport { overflow-y: auto !important; }
 

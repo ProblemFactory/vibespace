@@ -261,17 +261,17 @@ function broadcastToSession(session, id, msg) {
 //    this placeholder used to win the min and shrink everyone's terminal.
 function resizeSessionToMin(session, sessionId) {
   if (!session.clients.size || !session.pty) return;
-  let minCols = Infinity, minRows = Infinity, sawReal = false;
+  let minCols = Infinity, minRows = Infinity, realCount = 0;
   for (const sz of session.clients.values()) {
     if (sz.viewer || !sz.real) continue;
-    sawReal = true;
+    realCount++;
     if (sz.cols < minCols) minCols = sz.cols;
     if (sz.rows < minRows) minRows = sz.rows;
   }
   // No real terminal client yet (e.g. chat sessions never fit) — fall back to
   // non-viewer placeholders so chat PTYs still get a sane width, but never let
   // a viewer entry participate.
-  if (!sawReal) {
+  if (!realCount) {
     for (const sz of session.clients.values()) {
       if (sz.viewer) continue;
       if (sz.cols < minCols) minCols = sz.cols;
@@ -280,7 +280,9 @@ function resizeSessionToMin(session, sessionId) {
   }
   if (minCols < Infinity && minRows < Infinity) {
     try { session.pty.resize(minCols, minRows); } catch {}
-    broadcastToSession(session, sessionId, { type: 'effective-size', sessionId, cols: minCols, rows: minRows });
+    // clients: real terminal count — lets the UI say "limited by a smaller
+    // client" (tmux-style boundary) only when someone else is actually attached
+    broadcastToSession(session, sessionId, { type: 'effective-size', sessionId, cols: minCols, rows: minRows, clients: realCount });
   }
 }
 

@@ -277,7 +277,9 @@ class TerminalSession {
       } else if (msg.type === 'effective-size') {
         // Multi-device: PTY is sized to min of all clients. Cap local terminal to match.
         this._effectiveSize = { cols: msg.cols, rows: msg.rows };
+        this._effectiveClients = msg.clients || 0;
         this.terminal.resize(msg.cols, msg.rows);
+        requestAnimationFrame(() => this._updateCapIndicator());
       }
     });
 
@@ -514,8 +516,48 @@ class TerminalSession {
           if (wasAtBottom) this.terminal.scrollToBottom();
           else this.terminal.scrollToLine(Math.max(0, bottomLine - this.terminal.rows));
         }
+        requestAnimationFrame(() => this._updateCapIndicator());
       } catch {}
     }, 100);
+  }
+
+  // tmux-style boundary when another (smaller) client caps the PTY below what
+  // this window could fit: hatch the unused region and show a badge explaining
+  // why — otherwise the terminal just looks mysteriously small.
+  _updateCapIndicator() {
+    const container = this.terminal.element?.parentElement;
+    if (!container) return;
+    const remove = () => {
+      if (this._capEls) { for (const el of this._capEls) el.remove(); this._capEls = null; }
+    };
+    let d = null;
+    try { d = this.fitAddon.proposeDimensions(); } catch {}
+    const eff = this._effectiveSize;
+    // Capped = another client's size is the binding constraint. clients<=1 means
+    // any mismatch is our own resize still in flight — not a real cap.
+    const capped = eff && d && (this._effectiveClients || 0) > 1
+      && (eff.cols < d.cols || eff.rows < d.rows)
+      && this.terminal.cols <= eff.cols && this.terminal.rows <= eff.rows;
+    if (!capped) { remove(); return; }
+    const screen = this.terminal.element?.querySelector('.xterm-screen');
+    if (!screen) { remove(); return; }
+    const cRect = container.getBoundingClientRect();
+    const sRect = screen.getBoundingClientRect();
+    if (!this._capEls) {
+      const mk = (cls) => { const el = document.createElement('div'); el.className = cls; container.appendChild(el); return el; };
+      this._capEls = [mk('term-cap-strip'), mk('term-cap-strip'), mk('term-cap-badge')];
+    }
+    const [right, bottom, badge] = this._capEls;
+    const set = (el, l, t, w, h) => {
+      const show = w > 5 && h > 5;
+      el.style.display = show ? 'block' : 'none';
+      if (show) { el.style.left = l + 'px'; el.style.top = t + 'px'; el.style.width = w + 'px'; el.style.height = h + 'px'; }
+    };
+    set(right, sRect.right - cRect.left, sRect.top - cRect.top, cRect.right - sRect.right, sRect.height);
+    set(bottom, sRect.left - cRect.left, sRect.bottom - cRect.top, cRect.width - (sRect.left - cRect.left), cRect.bottom - sRect.bottom);
+    badge.style.display = 'block';
+    badge.textContent = `${eff.cols}×${eff.rows} — limited by a smaller client`;
+    badge.title = `Another attached client's window fits only ${eff.cols}×${eff.rows}; the PTY is sized to the smallest client (this window fits ${d.cols}×${d.rows}). Close or enlarge the other client to use the full window.`;
   }
 
   updateTheme(theme) {
@@ -567,6 +609,7 @@ class TerminalSession {
   dispose() {
     if (this._dprCleanup) this._dprCleanup();
     if (this._webgl) { try { this._webgl.dispose(); } catch {} this._webgl = null; }
+    if (this._capEls) { for (const el of this._capEls) el.remove(); this._capEls = null; }
     this._ro.disconnect(); this.terminal.dispose(); this.ws.off(this.sessionId);
     if (this._pasteTarget) this._pasteTarget.remove();
   }

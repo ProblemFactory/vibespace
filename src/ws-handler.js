@@ -548,8 +548,23 @@ function registerWsHandler(wss, ctx) {
           if (session && data.cols > 0 && data.rows > 0) {
             // real:true marks this as a genuine terminal fit (vs the 120×30
             // placeholder set at attach) — only these drive resizeSessionToMin
+            const prev = session.clients.get(ws);
+            const firstRealFit = !prev?.real;
             session.clients.set(ws, { cols: data.cols, rows: data.rows, real: true });
+            const before = session.pty ? { cols: session.pty.cols, rows: session.pty.rows } : null;
             resizeSessionToMin(session, data.sessionId);
+            // Fresh attach (first real fit from this client): if the min-size
+            // came out unchanged, the PTY got no SIGWINCH — the TUI never
+            // repaints and this client is stuck with whatever partial frame the
+            // buffer replay contained. Nudge one column down and back to force
+            // a clean repaint (same trick as dtach's `-r winch` refresh mode).
+            if (firstRealFit && session.mode !== 'chat' && session.pty && before
+                && session.pty.cols === before.cols && session.pty.rows === before.rows) {
+              try {
+                session.pty.resize(Math.max(1, before.cols - 1), before.rows);
+                setTimeout(() => { try { session.pty.resize(before.cols, before.rows); } catch {} }, 60);
+              } catch {}
+            }
           }
           break;
         }

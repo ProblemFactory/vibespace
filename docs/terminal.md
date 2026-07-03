@@ -22,6 +22,8 @@ Open the same WebUI from multiple browsers or devices:
 - When a client disconnects, the size may increase for remaining clients
 - Editor open/close events broadcast to all clients for correct window targeting
 
+When clients have different window sizes, the PTY is sized to the **smallest** client (so every client sees a complete frame). The larger clients hatch the unused region tmux-style and show a badge — "80×20 — limited by a smaller client" — so the size cap is visible instead of the terminal just looking small. Closing or enlarging the smaller client restores the full size automatically. A freshly attached client always gets a forced TUI repaint, so a page refresh lands on a clean frame.
+
 ## WebSocket Auto-Reconnect
 
 If the connection to the server is lost (network interruption, server restart):
