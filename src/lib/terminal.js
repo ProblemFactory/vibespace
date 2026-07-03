@@ -275,10 +275,17 @@ class TerminalSession {
         this.terminal.write('\r\n\x1b[90m[Process exited]\x1b[0m\r\n');
         winInfo.exited = true; if (winInfo._notifyChanged) winInfo._notifyChanged();
       } else if (msg.type === 'effective-size') {
-        // Multi-device: PTY is sized to min of all clients. Cap local terminal to match.
+        // Multi-device: PTY is sized to min of all clients — unless one client
+        // took over via size-override, in which case the PTY is ITS size.
         this._effectiveSize = { cols: msg.cols, rows: msg.rows };
         this._effectiveClients = msg.clients || 0;
-        this.terminal.resize(msg.cols, msg.rows);
+        this._effOverride = !!msg.override;
+        // Blocked (a larger client took over): keep the local grid at its own
+        // size — resizing xterm beyond the container would overflow; the content
+        // is hidden behind the takeover overlay anyway.
+        let d = null; try { d = this.fitAddon.proposeDimensions(); } catch {}
+        const blocked = this._effOverride && d && (msg.cols > d.cols || msg.rows > d.rows);
+        if (!blocked) this.terminal.resize(msg.cols, msg.rows);
         requestAnimationFrame(() => this._updateCapIndicator());
       }
     });
@@ -521,31 +528,63 @@ class TerminalSession {
     }, 100);
   }
 
-  // tmux-style boundary when another (smaller) client caps the PTY below what
-  // this window could fit: hatch the unused region and show a badge explaining
-  // why — otherwise the terminal just looks mysteriously small.
+  // Multi-client size UI. Three states:
+  // - CAPPED: a smaller client bounds the PTY below what this window fits →
+  //   tmux-style hatched boundary + badge + "Use my size" takeover button.
+  // - BLOCKED: a larger client took over (size-override) and the PTY exceeds
+  //   this window → content hidden behind an overlay with "Resume here".
+  // - OWNER: this client's override is active and fits exactly → subtle badge
+  //   with a "Release" button back to the min-of-all-clients policy.
   _updateCapIndicator() {
     const container = this.terminal.element?.parentElement;
     if (!container) return;
-    const remove = () => {
-      if (this._capEls) { for (const el of this._capEls) el.remove(); this._capEls = null; }
-    };
+    const removeCap = () => { if (this._capEls) { for (const el of this._capEls) el.remove(); this._capEls = null; } };
+    const removeBlock = () => { if (this._blockEl) { this._blockEl.remove(); this._blockEl = null; } };
     let d = null;
     try { d = this.fitAddon.proposeDimensions(); } catch {}
     const eff = this._effectiveSize;
-    // Capped = another client's size is the binding constraint. clients<=1 means
-    // any mismatch is our own resize still in flight — not a real cap.
-    const capped = eff && d && (this._effectiveClients || 0) > 1
+    if (!eff || !d) { removeCap(); removeBlock(); return; }
+    const override = !!this._effOverride;
+
+    // ── BLOCKED: PTY larger than this window (only possible under override) ──
+    if (override && (eff.cols > d.cols || eff.rows > d.rows)) {
+      removeCap();
+      if (!this._blockEl) {
+        const ov = document.createElement('div');
+        ov.className = 'term-blocked-overlay';
+        const msg = document.createElement('div');
+        msg.className = 'term-blocked-msg';
+        const btn = document.createElement('button');
+        btn.className = 'term-blocked-btn';
+        btn.textContent = 'Resume here';
+        btn.onclick = () => this.ws.send({ type: 'size-override', sessionId: this.sessionId });
+        ov.append(msg, btn);
+        container.appendChild(ov);
+        this._blockEl = ov;
+      }
+      this._blockEl.querySelector('.term-blocked-msg').textContent =
+        `Taken over by a larger client (${eff.cols}×${eff.rows} — this window fits ${d.cols}×${d.rows})`;
+      return;
+    }
+    removeBlock();
+
+    // ── CAPPED: PTY smaller than this window ──
+    const capped = ((this._effectiveClients || 0) > 1 || override)
       && (eff.cols < d.cols || eff.rows < d.rows)
       && this.terminal.cols <= eff.cols && this.terminal.rows <= eff.rows;
-    if (!capped) { remove(); return; }
+    // ── OWNER: override active at exactly this window's size ──
+    const owner = override && !capped;
+    if (!capped && !owner) { removeCap(); return; }
     const screen = this.terminal.element?.querySelector('.xterm-screen');
-    if (!screen) { remove(); return; }
-    const cRect = container.getBoundingClientRect();
-    const sRect = screen.getBoundingClientRect();
+    if (!screen) { removeCap(); return; }
     if (!this._capEls) {
       const mk = (cls) => { const el = document.createElement('div'); el.className = cls; container.appendChild(el); return el; };
-      this._capEls = [mk('term-cap-strip'), mk('term-cap-strip'), mk('term-cap-badge')];
+      const badge = mk('term-cap-badge');
+      badge.appendChild(document.createElement('span'));
+      const btn = document.createElement('button');
+      btn.className = 'term-cap-btn';
+      badge.appendChild(btn);
+      this._capEls = [mk('term-cap-strip'), mk('term-cap-strip'), badge];
     }
     const [right, bottom, badge] = this._capEls;
     const set = (el, l, t, w, h) => {
@@ -553,11 +592,27 @@ class TerminalSession {
       el.style.display = show ? 'block' : 'none';
       if (show) { el.style.left = l + 'px'; el.style.top = t + 'px'; el.style.width = w + 'px'; el.style.height = h + 'px'; }
     };
-    set(right, sRect.right - cRect.left, sRect.top - cRect.top, cRect.right - sRect.right, sRect.height);
-    set(bottom, sRect.left - cRect.left, sRect.bottom - cRect.top, cRect.width - (sRect.left - cRect.left), cRect.bottom - sRect.bottom);
-    badge.style.display = 'block';
-    badge.textContent = `${eff.cols}×${eff.rows} — limited by a smaller client`;
-    badge.title = `Another attached client's window fits only ${eff.cols}×${eff.rows}; the PTY is sized to the smallest client (this window fits ${d.cols}×${d.rows}). Close or enlarge the other client to use the full window.`;
+    const label = badge.querySelector('span');
+    const btn = badge.querySelector('.term-cap-btn');
+    badge.style.display = 'flex';
+    if (capped) {
+      const cRect = container.getBoundingClientRect();
+      const sRect = screen.getBoundingClientRect();
+      set(right, sRect.right - cRect.left, sRect.top - cRect.top, cRect.right - sRect.right, sRect.height);
+      set(bottom, sRect.left - cRect.left, sRect.bottom - cRect.top, cRect.width - (sRect.left - cRect.left), cRect.bottom - sRect.bottom);
+      label.textContent = `${eff.cols}×${eff.rows} — limited by a smaller client`;
+      badge.title = `Another attached client's window fits only ${eff.cols}×${eff.rows}; this window fits ${d.cols}×${d.rows}. "Use my size" resizes the terminal to this window (the smaller client's view gets blocked with a Resume button).`;
+      btn.textContent = 'Use my size';
+      btn.onclick = () => this.ws.send({ type: 'size-override', sessionId: this.sessionId });
+    } else {
+      // owner: no strips (nothing is cut off here), just the release affordance
+      right.style.display = 'none';
+      bottom.style.display = 'none';
+      label.textContent = `Size override active (${eff.cols}×${eff.rows})`;
+      badge.title = 'This window\'s size overrides the min-of-all-clients policy; smaller clients are blocked. Release to return to automatic sizing.';
+      btn.textContent = 'Release';
+      btn.onclick = () => this.ws.send({ type: 'size-override', sessionId: this.sessionId, release: true });
+    }
   }
 
   updateTheme(theme) {
@@ -610,6 +665,7 @@ class TerminalSession {
     if (this._dprCleanup) this._dprCleanup();
     if (this._webgl) { try { this._webgl.dispose(); } catch {} this._webgl = null; }
     if (this._capEls) { for (const el of this._capEls) el.remove(); this._capEls = null; }
+    if (this._blockEl) { this._blockEl.remove(); this._blockEl = null; }
     this._ro.disconnect(); this.terminal.dispose(); this.ws.off(this.sessionId);
     if (this._pasteTarget) this._pasteTarget.remove();
   }

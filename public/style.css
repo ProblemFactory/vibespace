@@ -650,10 +650,31 @@ html, body {
 }
 .term-cap-badge {
   position: absolute; top: 6px; right: 12px; z-index: 6; display: none;
-  padding: 2px 8px; font-size: 10px; border-radius: 8px; pointer-events: auto; cursor: help;
+  align-items: center; gap: 6px;
+  padding: 2px 4px 2px 8px; font-size: 10px; border-radius: 8px; pointer-events: auto; cursor: help;
   background: color-mix(in srgb, var(--bg-window) 85%, transparent); color: var(--text-dim);
   border: 1px dashed var(--border);
 }
+.term-cap-btn {
+  padding: 1px 8px; font-size: 10px; font-weight: 600; cursor: pointer;
+  border: 1px solid var(--accent); border-radius: 8px;
+  background: var(--accent); color: var(--accent-fg);
+}
+.term-cap-btn:hover { opacity: 0.85; }
+/* Full takeover overlay on the smaller client while a larger one owns the size */
+.term-blocked-overlay {
+  position: absolute; inset: 0; z-index: 7;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+  background: color-mix(in srgb, var(--bg-window) 94%, transparent);
+  text-align: center; padding: 16px;
+}
+.term-blocked-msg { font-size: 12px; color: var(--text-dim); max-width: 360px; line-height: 1.5; }
+.term-blocked-btn {
+  padding: 7px 18px; font-size: 12px; font-weight: 600; cursor: pointer;
+  border: 1px solid var(--accent); border-radius: 16px;
+  background: var(--accent); color: var(--accent-fg);
+}
+.term-blocked-btn:hover { opacity: 0.85; }
 .terminal-container .xterm { height: 100%; }
 .terminal-container .xterm-viewport { overflow-y: auto !important; }
 

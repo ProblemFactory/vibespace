@@ -569,6 +569,18 @@ function registerWsHandler(wss, ctx) {
           break;
         }
 
+        case 'size-override': {
+          // Take over the PTY size: this client's window size wins over the
+          // min-of-all-clients policy (smaller clients show a blocked overlay
+          // with a "Resume here" takeover button). release:true → min policy.
+          const session = activeSessions.get(data.sessionId);
+          if (session) {
+            session._sizeOwnerWs = data.release ? null : ws;
+            resizeSessionToMin(session, data.sessionId);
+          }
+          break;
+        }
+
         case 'attach': {
           // Virtual subagent session: sub-{parentToolUseId} or sub-agent-{agentId}
           if (data.sessionId?.startsWith('sub-')) {

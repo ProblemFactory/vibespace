@@ -278,11 +278,23 @@ function resizeSessionToMin(session, sessionId) {
       if (sz.rows < minRows) minRows = sz.rows;
     }
   }
-  if (minCols < Infinity && minRows < Infinity) {
-    try { session.pty.resize(minCols, minRows); } catch {}
+  // Size override ("take over"): one client forces the PTY to ITS size instead
+  // of the min — e.g. working from a big screen while a small window at home
+  // stays attached. Smaller clients block their view behind a "Resume here"
+  // overlay. Ownership follows the owner's live resizes and evaporates when the
+  // owner disconnects (its clients-map entry disappears → back to min policy).
+  let cols = minCols, rows = minRows, override = false;
+  const ownerSz = session._sizeOwnerWs ? session.clients.get(session._sizeOwnerWs) : null;
+  if (ownerSz && ownerSz.real && !ownerSz.viewer) {
+    cols = ownerSz.cols; rows = ownerSz.rows; override = true;
+  } else if (session._sizeOwnerWs) {
+    session._sizeOwnerWs = null; // owner gone — min policy again
+  }
+  if (cols < Infinity && rows < Infinity) {
+    try { session.pty.resize(cols, rows); } catch {}
     // clients: real terminal count — lets the UI say "limited by a smaller
     // client" (tmux-style boundary) only when someone else is actually attached
-    broadcastToSession(session, sessionId, { type: 'effective-size', sessionId, cols: minCols, rows: minRows, clients: realCount });
+    broadcastToSession(session, sessionId, { type: 'effective-size', sessionId, cols, rows, clients: realCount, override });
   }
 }
 
