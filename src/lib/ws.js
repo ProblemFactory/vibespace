@@ -25,8 +25,12 @@ class WsManager {
       [...this.globalHandlers].forEach(call);
     };
     this.ws.onclose = () => {
+      // Only notify on a real transition: while the server is down, each failed
+      // 2s retry fires onclose again — without this guard every retry appended
+      // another "Disconnected from server" marker to every chat window.
+      const wasConnected = this._connected;
       this._connected = false;
-      this._notifyState(false);
+      if (wasConnected) this._notifyState(false);
       setTimeout(() => this.connect(), 2000);
     };
     this.ws.onerror = () => {};

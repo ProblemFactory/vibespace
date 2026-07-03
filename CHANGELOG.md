@@ -7,6 +7,10 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ## [2.16.0] — 2026-07-03
 
+### Fixed
+
+- **Reconnect polish**: while the server is down, each failed 2s retry appended another "Disconnected from server" marker to every chat window — now exactly one Disconnected/Reconnected pair per outage. Reconnect catch-up also clamps its window accounting (server totals can shift across restarts), fixing a drifted position indicator.
+
 ### Added (File Explorer overhaul)
 
 - **Archives**: right-click files/folders → **Compress to Archive** (.zip / .tar.gz / .tar / .tar.xz, multi-select supported); double-click a .zip/.tar.* → **contents preview** (entry tree with sizes, filter box, "N files · X MB uncompressed" summary); click an entry inside the archive to open it with the normal viewer (code, images, PDF — extracted on demand, nothing else touched); **Extract Here / Extract to Folder…** on archive files and **Extract All** in the preview (existing files are never overwritten). Folders get **Download as Zip** (streamed, no temp file).

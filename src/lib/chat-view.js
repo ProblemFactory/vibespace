@@ -1758,6 +1758,10 @@ class ChatView {
       // the minimap thumb, position indicator, and every index-based jump
       // (search + minimap) were off by the missed count after a reconnect.
       this._windowEnd = missedStart + msgs.length;
+      // Server totals can move across a restart (e.g. dedup changes) — clamp so
+      // the window accounting never overshoots (_windowEnd > _total broke the
+      // at-bottom checks and the pos indicator).
+      if (this._total && this._windowEnd > this._total) this._windowEnd = this._total;
       this._total = Math.max(this._total, this._windowEnd);
       this._chatMinimap.setViewport(this._windowStart, this._windowEnd, this._total);
       this._updatePosIndicator();
