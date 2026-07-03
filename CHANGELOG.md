@@ -9,6 +9,7 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Minimap/search jumps no longer drift away ~1.5s after landing.** Re-enabling content-visibility after a jump collapses off-screen elements *asynchronously*; the old one-shot scroll compensation measured before the collapse (and delta-tracking fought the browser's own scroll anchoring — observed scrollTop yanked to 0). The restore now simply replays the landing: re-centers the jump target (or the exact search match range) with the proven multi-frame convergence, skipped if you already scrolled away.
 - **Reconnect polish**: while the server is down, each failed 2s retry appended another "Disconnected from server" marker to every chat window — now exactly one Disconnected/Reconnected pair per outage. Reconnect catch-up also clamps its window accounting (server totals can shift across restarts), fixing a drifted position indicator.
 
 ### Added (File Explorer overhaul)

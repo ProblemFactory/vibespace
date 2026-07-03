@@ -131,6 +131,8 @@ class ChatView {
 
     // Wheel at top edge: scroll event won't fire when already at scrollTop=0,
     // so use wheel to detect upward scroll intent and trigger pagination
+    this._messageList.addEventListener('wheel', () => { this._lastUserScrollAt = Date.now(); }, { passive: true });
+    this._messageList.addEventListener('touchmove', () => { this._lastUserScrollAt = Date.now(); }, { passive: true });
     this._messageList.addEventListener('wheel', (e) => {
       if (this._loading || !this._canPaginate) return;
       const list = this._messageList;
@@ -562,18 +564,25 @@ class ChatView {
     const has = this._container.classList.contains('chat-no-content-visibility');
     if (stable === has) return;
     if (stable) { this._container.classList.add('chat-no-content-visibility'); return; }
-    const list = this._messageList;
-    let anchorEl = null;
-    const top = list.scrollTop;
-    for (const el of list.querySelectorAll('.chat-msg')) {
-      if (el.offsetTop + el.offsetHeight > top) { anchorEl = el; break; }
-    }
-    const before = anchorEl ? anchorEl.getBoundingClientRect().top : 0;
     this._container.classList.remove('chat-no-content-visibility');
-    if (anchorEl) {
-      const after = anchorEl.getBoundingClientRect().top; // forces layout
-      list.scrollTop += after - before;
-    }
+    // Re-enabling content-visibility collapses never-c-v-rendered elements to
+    // their 80px estimate ASYNCHRONOUSLY over the next frames — scrollHeight
+    // shrinks massively and scrollTop clamps, so any delta-arithmetic
+    // compensation fights the browser's own scroll anchoring and loses
+    // (observed: viewport yanked ~1.5s after a minimap landing). Instead:
+    // re-run the proven multi-frame centering on the JUMP TARGET itself —
+    // idempotent per frame, converges after the collapse settles. Skipped if
+    // the user already scrolled away from the landing (don't yank them back).
+    const target = this._lastJumpTargetEl;
+    const jumpAt = this._lastJumpAt || 0;
+    const revealAt = this._search?._lastRevealAt || 0;
+    const userScrolled = (this._lastUserScrollAt || 0) > Math.max(jumpAt, revealAt);
+    if (userScrolled) return;
+    // Search reveals target a RANGE inside a (possibly very tall) message —
+    // replay that if it's the most recent positioning; else re-center the
+    // jump target element.
+    if (revealAt > jumpAt && this._search?._lastRevealRun) this._search._lastRevealRun();
+    else if (target && target.isConnected) this._scrollElStable(target);
   }
 
   // Downward counterpart of _maybeSeekEarlier: while teleported, scrolling near
@@ -861,6 +870,8 @@ class ChatView {
   // the programmatic-scroll guard so auto-load doesn't fire mid-scroll.
   _scrollElStable(el) {
     if (!el || !el.isConnected) return;
+    this._lastJumpTargetEl = el;
+    this._lastJumpAt = Date.now();
     this._programmaticScroll = true;
     clearTimeout(this._jumpGuardTimer);
     this._jumpGuardTimer = setTimeout(() => { this._programmaticScroll = false; }, 1100);

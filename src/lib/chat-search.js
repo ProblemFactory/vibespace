@@ -275,6 +275,8 @@ class ChatSearch {
    */
   _scrollToRange(range) {
     if (!range) return;
+    this._lastRevealAt = Date.now();
+    this._lastRevealRun = () => this._scrollToRange(range); // replayed after c-v restore
     const list = this._messageList;
     let node = range.startContainer;
     node = node.nodeType === 1 ? node : node.parentElement;
