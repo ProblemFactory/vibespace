@@ -25,6 +25,7 @@ BackendAdapter.prototype.formatChatInput = function(text, msgId) { throw new Err
 BackendAdapter.prototype.formatInterrupt = function(session) { throw new Error('not implemented'); };
 BackendAdapter.prototype.formatPermissionResponse = function(data) { throw new Error('not implemented'); };
 BackendAdapter.prototype.formatSetPermissionMode = function(mode) { throw new Error('not implemented'); };
+BackendAdapter.prototype.formatSetModel = function(model) { throw new Error('not implemented'); };
 /** Extra actions after sending interrupt (e.g. delayed SIGINT fallback) */
 BackendAdapter.prototype.postInterrupt = function(session, sessionId) {};
 

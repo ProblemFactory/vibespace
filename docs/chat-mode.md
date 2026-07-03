@@ -206,14 +206,14 @@ The status bar at the bottom of the chat view shows session metrics:
 
 | Metric | Display | Description |
 |--------|---------|-------------|
-| **Model** | Badge | Active model name (e.g., claude-sonnet-4-20250514), read-only |
+| **Model** | Dropdown | Model as last reported by the CLI (full resolved ID; `model: ?` when not yet reported). Click to switch model mid-session — Claude applies instantly (`set_model`), Codex from the next turn. |
 | **Permission mode** | Lock icon + mode | Current permission mode. **Click to open dropdown** and change mode mid-session (see below) |
 | **Background tasks** | Spinner + count | Active background tasks (agents + commands). **Click for detail popup** (see below) |
 | **Context usage** | Colored progress bar + percentage | How much of the context window is used. Colors: green (<70%), yellow (70-85%), orange (85-95%), red (>95%) |
 | **Cache ratio** | Lightning bolt + percentage | Ratio of cache-read tokens to total input tokens |
 | **Cost** | Dollar amount | Cumulative session cost. Colors: green (<$1), orange ($1-5), red (>$5) |
 
-Status data comes from per-turn `usage` in assistant messages and `modelUsage` in result messages. It is persisted in the session's `chatStatus` and restored when re-attaching to an existing session.
+Status data comes from per-turn `usage` in assistant messages and `modelUsage` in result messages. The display never guesses: when the context-window size is unknown the bar shows `<used>/?` instead of a percentage against an assumed window. It is persisted in the session's `chatStatus` and restored when re-attaching to an existing session.
 
 ### Permission Mode Dropdown
 

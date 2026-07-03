@@ -874,6 +874,12 @@ class CodexAdapter extends BackendAdapter {
     return JSON.stringify({ type: 'set-permission-mode', mode });
   }
 
+  // Mid-session model switch: the wrapper stores it in meta.model, which is
+  // passed on every turn/start — takes effect from the next turn.
+  formatSetModel(model) {
+    return JSON.stringify({ type: 'set-model', model });
+  }
+
   /** Build a preview user message for buffer before JSONL arrives */
   static _buildUserPreview(rawText, msgId) {
     let text = typeof rawText === 'string' ? rawText : '';

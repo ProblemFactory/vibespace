@@ -75,7 +75,7 @@ export class ChatStatusBar {
 
   applyStatus(status) {
     if (!status) return;
-    if (status.model) this._statusModel = status.model.replace(/\[.*$/, '');
+    if (status.model) this._statusModel = status.model; // as reported — no stripping, no guessing
     if (status.contextWindow) this._statusContextWindow = status.contextWindow;
     if (status.lastUsage) {
       const u = status.lastUsage;
@@ -129,7 +129,7 @@ export class ChatStatusBar {
     if (modelUsage) {
       const info = Object.values(modelUsage)[0];
       if (info?.contextWindow) this._statusContextWindow = info.contextWindow;
-      if (!this._statusModel) this._statusModel = Object.keys(modelUsage)[0]?.replace(/\[.*$/, '');
+      if (!this._statusModel) this._statusModel = Object.keys(modelUsage)[0] || '';
     }
     this.render();
   }
@@ -170,10 +170,17 @@ export class ChatStatusBar {
     const fmtK = (n) => n >= 1000000 ? (n / 1000000).toFixed(1) + 'm' : n >= 1000 ? Math.round(n / 1000) + 'k' : String(n);
     const parts = [];
 
-    // Model badge (+ reasoning effort when known — Codex turn_context carries it)
-    if (this._statusModel) {
+    // Model badge (+ reasoning effort when known — Codex turn_context carries it).
+    // ALWAYS rendered: when the model hasn't been reported by the CLI yet we say
+    // so explicitly ("model: ?") instead of hiding or guessing. Click to change
+    // the model mid-session (set_model control request / codex per-turn model).
+    {
       const effortSuffix = this._statusEffort ? ` \u00B7 ${escHtml(this._statusEffort)}` : '';
-      parts.push(`<span class="chat-status-model" title="Model${this._statusEffort ? ' \u00B7 reasoning effort' : ''} (set at session creation)">${escHtml(this._statusModel)}${effortSuffix}</span>`);
+      const known = !!this._statusModel;
+      const title = known
+        ? `Model (as last reported by the CLI)${this._statusEffort ? ' \u00B7 reasoning effort' : ''} — click to change`
+        : 'Model not reported by the CLI yet — click to set';
+      parts.push(`<span class="chat-status-model chat-status-clickable${known ? '' : ' chat-status-dim'}" title="${escHtml(title)}">${known ? escHtml(this._statusModel) : 'model: ?'}${effortSuffix}</span>`);
     }
 
     // Goal indicator — always rendered so there's a discoverable entry point
@@ -215,6 +222,11 @@ export class ChatStatusBar {
       parts.push(`<span class="chat-status-review ${reviewClass}" title="${escHtml(reviewTitle)}">\u2713 Review</span>`);
     }
 
+    // Context: used tokens without a fake percentage when the window is unknown
+    if (!this._statusContextWindow && this._statusLastInputTokens) {
+      const usedK = fmtK(this._statusLastInputTokens);
+      parts.push(`<span class="chat-status-ctx chat-status-dim" title="Context used last turn: ${escHtml(usedK)} tokens. The context window size was not reported by the CLI, so no percentage is shown.">${escHtml(usedK)}/?</span>`);
+    }
     // Context % with pie chart
     if (this._statusContextWindow && this._statusLastInputTokens) {
       const pct = Math.min(100, Math.round((this._statusLastInputTokens / this._statusContextWindow) * 100));
@@ -447,6 +459,42 @@ export class ChatStatusBar {
         };
         dropdown.appendChild(item);
       }
+      return;
+    }
+
+    // Model click -> dropdown (mid-session model switch)
+    const modelEl = e.target.closest('.chat-status-model');
+    if (modelEl) {
+      e.stopPropagation();
+      const dropdown = showDropdown(modelEl);
+      if (!dropdown) return;
+      const backend = this._backend === 'codex' ? 'codex' : 'claude';
+      fetch('/api/available-models').then(r => r.json()).then(data => {
+        const models = (data?.[backend] || []).filter(m => m.id);
+        const pick = (model) => {
+          this._ws.send({ type: 'set-model', sessionId: this._sessionId, model });
+          // optimistic; the CLI's own confirmation (set_model echo / codex
+          // turn_context) overwrites this with the RESOLVED id
+          this._statusModel = model;
+          this.render();
+        };
+        for (const m of models) {
+          const item = document.createElement('div');
+          item.className = 'chat-status-dropdown-item' + (m.id === this._statusModel ? ' active' : '');
+          item.textContent = m.label || m.id;
+          item.onclick = (ev) => { ev.stopPropagation(); dropdown.remove(); pick(m.id); };
+          dropdown.appendChild(item);
+        }
+        const custom = document.createElement('div');
+        custom.className = 'chat-status-dropdown-item';
+        custom.textContent = 'Custom\u2026';
+        custom.onclick = async (ev) => {
+          ev.stopPropagation(); dropdown.remove();
+          const v = await showInputDialog({ title: 'Set model', label: 'Model ID or alias', confirmText: 'Set' });
+          if (v && v.trim()) pick(v.trim());
+        };
+        dropdown.appendChild(custom);
+      }).catch(() => { dropdown.remove(); });
       return;
     }
 

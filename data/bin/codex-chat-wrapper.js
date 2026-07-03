@@ -857,6 +857,14 @@ async function handleInput(msg) {
     scheduleMeta();
     return;
   }
+  if (msg.type === 'set-model') {
+    // Applied on the NEXT turn/start (model is a per-turn param). turn_context
+    // in the rollout JSONL confirms the switch authoritatively.
+    meta.model = msg.model || '';
+    scheduleMeta();
+    log('Model set for next turn: ' + (msg.model || '(default)'));
+    return;
+  }
   if (msg.type === 'set-thread-name') {
     if (!meta.threadId) throw new Error('No threadId available for thread/name/set');
     const name = typeof msg.name === 'string' ? msg.name.trim() : '';

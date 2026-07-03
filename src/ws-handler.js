@@ -369,6 +369,17 @@ function registerWsHandler(wss, ctx) {
           break;
         }
 
+        case 'set-model': {
+          const session = activeSessions.get(data.sessionId);
+          if (session?.pty && session.mode === 'chat' && data.model) {
+            const adapter = adapterRegistry.get(session.backend);
+            if (adapter?.formatSetModel) {
+              try { session.pty.write(adapter.formatSetModel(data.model) + '\n'); } catch {}
+            }
+          }
+          break;
+        }
+
         case 'input': {
           const session = activeSessions.get(data.sessionId);
           if (session?.pty) session.pty.write(data.data);

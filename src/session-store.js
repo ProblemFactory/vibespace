@@ -331,11 +331,13 @@ class SessionMessages {
       }
     }
     // contextWindow comes from result.modelUsage (stdout-only). When restoring
-    // from JSONL, infer it from observed usage: a context larger than the
-    // standard 200k window implies the 1M beta.
+    // from JSONL the only sound DEDUCTION is: observed usage beyond the 200k
+    // window proves the 1M beta. Anything else stays 0 = unknown — the UI shows
+    // "?" rather than a guessed default (a wrong 200k on a 1M session made the
+    // context % lie by 5x).
     if (!contextWindow && lastUsage) {
       const used = (lastUsage.input_tokens || 0) + (lastUsage.cache_read_input_tokens || 0) + (lastUsage.cache_creation_input_tokens || 0);
-      contextWindow = used > 190000 ? 1000000 : 200000;
+      if (used > 190000) contextWindow = 1000000;
     }
     for (const m of msgs) { if (m.type === 'result' && m.total_cost_usd) totalCost += m.total_cost_usd; }
     if (!lastUsage && !model) return null;

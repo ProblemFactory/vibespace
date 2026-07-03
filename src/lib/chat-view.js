@@ -1065,6 +1065,15 @@ class ChatView {
   // Create a new normalized message → render and append to DOM
   _onCreateMessage(msg) {
     if (this._renderedMsgIds.has(msg.id)) return;
+    // set_model confirmation: the CLI echoes "Set model to X (resolved-id)" as a
+    // user record — the RESOLVED id is the authoritative model for the status
+    // bar (the control_response reports success even for bogus names). Parsed
+    // before the defer check so it applies even while viewing history.
+    if (msg.role === 'user' && this._statusBar) {
+      const txt = (msg.content || []).map(b => b.text || '').join('');
+      const m = txt.match(/^<local-command-stdout>Set model to (\S+?)(?: \(([^)]+)\))?<\/local-command-stdout>/);
+      if (m) this._statusBar.setModel(m[2] || m[1]);
+    }
     if (!this._loadingHistory && msg.backendMeta?.reviewThreadId && msg.backendMeta?.delivery === 'detached') {
       if (!this._openedDetachedReviews) this._openedDetachedReviews = new Set();
       const reviewThreadId = msg.backendMeta.reviewThreadId;

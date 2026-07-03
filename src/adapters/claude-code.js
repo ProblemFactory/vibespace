@@ -147,6 +147,22 @@ class ClaudeCodeAdapter extends BackendAdapter {
       request: { subtype: 'set_permission_mode', mode },
     };
   }
+
+  // Mid-session model switch (stream-json control protocol, CLI >=2.1.x).
+  // The CLI echoes "<local-command-stdout>Set model to X (resolved-full-id)"
+  // as a user record — that echo is the authoritative confirmation (the
+  // control_response says success even for bogus model names).
+  formatSetModel(model) {
+    return JSON.stringify(ClaudeCodeAdapter.buildSetModel(model));
+  }
+
+  static buildSetModel(model) {
+    return {
+      type: 'control_request',
+      request_id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      request: { subtype: 'set_model', model },
+    };
+  }
 }
 
 module.exports = { ClaudeCodeAdapter };
