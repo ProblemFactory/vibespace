@@ -436,7 +436,7 @@
 /* Pulsing overlay drawn right on the current match when a jump lands — gives an
    unmistakable "here it is", even when the match is buried deep in a long card. */
 .chat-search-flash {
-  position: fixed; z-index: 9998; pointer-events: none; box-sizing: border-box;
+  position: absolute; z-index: 60; pointer-events: none; box-sizing: border-box;
   border-radius: 4px; outline: 2px solid #ff9800;
   box-shadow: 0 0 0 3px rgba(255,152,0,0.45), 0 0 16px 5px rgba(255,152,0,0.6);
   animation: chat-search-flash-anim 1.2s ease-out forwards;

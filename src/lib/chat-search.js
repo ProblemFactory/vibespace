@@ -358,7 +358,11 @@ class ChatSearch {
     if (this._flashEl) { this._flashEl.remove(); this._flashEl = null; }
     const flash = document.createElement('div');
     flash.className = 'chat-search-flash';
-    document.body.appendChild(flash);
+    // Parent inside the chat window (absolute coords relative to the positioned
+    // ancestor) — a body-level fixed overlay would draw OVER other windows
+    // stacked on top of this one.
+    const host = this._messageList.offsetParent || document.body;
+    host.appendChild(flash);
     this._flashEl = flash;
     const list = this._messageList;
     const t0 = (typeof performance !== 'undefined' ? performance.now() : Date.now());
@@ -385,8 +389,9 @@ class ChatSearch {
       }
       flash.style.display = visible ? 'block' : 'none';
       if (visible) {
-        flash.style.left = (rc.left - 5) + 'px';
-        flash.style.top = (rc.top - 3) + 'px';
+        const hr = host.getBoundingClientRect();
+        flash.style.left = (rc.left - hr.left + host.scrollLeft - 5) + 'px';
+        flash.style.top = (rc.top - hr.top + host.scrollTop - 3) + 'px';
         flash.style.width = (rc.width + 10) + 'px';
         flash.style.height = (rc.height + 6) + 'px';
       }

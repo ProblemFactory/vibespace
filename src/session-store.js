@@ -7,7 +7,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { execFileSync } = require('child_process');
-const { readJsonlBounded, elisionNoticeText, applyElisionTimestamp } = require('./adapters/codex');
+const { readJsonlBounded } = require('./adapters/codex');
 
 const SESSIONS_DIR = path.join(os.homedir(), '.claude', 'sessions');
 
@@ -134,7 +134,6 @@ function parseSessionJsonl(claudeSessionId, cwd) {
         if (!isSubagentMessage(msg)) messages.push(msg);
       } catch {}
     }
-    applyElisionTimestamp(messages);
     _jsonlCache.delete(claudeSessionId);
     _jsonlCache.set(claudeSessionId, { mtimeMs: stat.mtimeMs, size: stat.size, messages });
     while (_jsonlCache.size > JSONL_CACHE_MAX) {

@@ -18,6 +18,7 @@ and this project uses [Semantic Versioning](https://semver.org/).
 - **Scroll-up pagination could lock permanently.** A failed history fetch (e.g. server restart mid-scroll) left the `_loading` flag stuck `true`, blocking all further pagination. Wrapped in try/finally.
 - **One buggy handler no longer drops WebSocket messages app-wide.** The client WS dispatch now isolates each handler in try/catch, so a throwing (e.g. disposed) handler can't abort delivery of `layout-sync`/`settings-updated`/`editor-open` to everything after it.
 - **Search: pressing Escape right after typing no longer leaves stuck highlights.** The debounced search timer is now cancelled on clear.
+- **Jumped-to history browses in both directions.** After jumping into old history, scrolling *down* now seek-loads newer messages continuously (previously only scrolling up worked — downward was a dead end until you clicked "return to latest"). The browse DOM is capped (far-away slabs are dropped and transparently re-loaded when you scroll back), so long browsing stays smooth. A search hit that's already on screen just scrolls to it instead of replacing the view, and the stale position indicator is hidden while browsing history.
 
 ## [2.14.0] — 2026-07-02
 

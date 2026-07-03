@@ -132,10 +132,16 @@ class ChatView {
     // Wheel at top edge: scroll event won't fire when already at scrollTop=0,
     // so use wheel to detect upward scroll intent and trigger pagination
     this._messageList.addEventListener('wheel', (e) => {
-      if (e.deltaY >= 0 || this._messageList.scrollTop >= 10 || this._loading || !this._canPaginate) return;
-      if (this._teleported) this._maybeSeekEarlier();          // teleported: seek older by line
-      else if (this._windowStart > 0) this._extendTop();
-      else this._maybeSeekEarlier();                           // registered tail exhausted → seek gap
+      if (this._loading || !this._canPaginate) return;
+      const list = this._messageList;
+      if (e.deltaY < 0 && list.scrollTop < 10) {
+        if (this._teleported) this._maybeSeekEarlier();        // teleported: seek older by line
+        else if (this._windowStart > 0) this._extendTop();
+        else this._maybeSeekEarlier();                         // registered tail exhausted → seek gap
+      } else if (e.deltaY > 0 && this._teleported
+          && list.scrollHeight - list.scrollTop - list.clientHeight < 10) {
+        this._maybeSeekLater();                                // teleported: seek newer by line
+      }
     }, { passive: true });
 
     // Scroll detection: pin-to-bottom + auto-load earlier messages (throttled)
@@ -161,10 +167,12 @@ class ChatView {
           else if (this._windowStart > 0) this._extendTop();
           else this._maybeSeekEarlier();                        // registered tail exhausted → seek gap
         }
-        // Extend bottom when scrolling near end of rendered window (registered
-        // mode only — teleport slabs don't extend down; use "return to latest")
-        if (!this._teleported && scrollHeight - scrollTop - clientHeight < 200 && this._windowEnd < this._total && !this._loading && this._canPaginate) {
-          this._extendBottom();
+        // Extend bottom when scrolling near end of rendered window. Teleport
+        // mode seeks NEWER slabs by file line instead, so browsing continues
+        // downward from a jump just like it does upward.
+        if (scrollHeight - scrollTop - clientHeight < 300 && !this._loading && this._canPaginate) {
+          if (this._teleported) this._maybeSeekLater();
+          else if (this._windowEnd < this._total) this._extendBottom();
         }
         this._updatePosIndicator();
         this._chatMinimap.setViewport(this._windowStart, this._windowEnd, this._total);
@@ -545,6 +553,100 @@ class ChatView {
     return el;
   }
 
+  // Toggle the content-visibility escape hatch. Turning it back ON (off=stable)
+  // makes never-c-v-rendered elements collapse to the 80px estimate, which would
+  // visibly shift the viewport — so re-enabling anchors on the topmost visible
+  // message and compensates scrollTop to keep the view still.
+  _setStableHeights(stable) {
+    if (this._readOnly) return; // read-only views run without c-v permanently
+    const has = this._container.classList.contains('chat-no-content-visibility');
+    if (stable === has) return;
+    if (stable) { this._container.classList.add('chat-no-content-visibility'); return; }
+    const list = this._messageList;
+    let anchorEl = null;
+    const top = list.scrollTop;
+    for (const el of list.querySelectorAll('.chat-msg')) {
+      if (el.offsetTop + el.offsetHeight > top) { anchorEl = el; break; }
+    }
+    const before = anchorEl ? anchorEl.getBoundingClientRect().top : 0;
+    this._container.classList.remove('chat-no-content-visibility');
+    if (anchorEl) {
+      const after = anchorEl.getBoundingClientRect().top; // forces layout
+      list.scrollTop += after - before;
+    }
+  }
+
+  // Downward counterpart of _maybeSeekEarlier: while teleported, scrolling near
+  // the bottom seek-loads the next NEWER slab so browsing continues past the
+  // jumped-to point (until the end of the file / "return to latest").
+  _maybeSeekLater() {
+    if (!this._teleported || this._gapDownLoading) return;
+    if (!Number.isFinite(this._gapCursorDown)) return;
+    if (Date.now() < (this._gapDownIdleUntil || 0)) return; // at file end; back off
+    this._loadLaterGap();
+  }
+
+  async _loadLaterGap() {
+    this._gapDownLoading = true;
+    try {
+      const { backend, backendSessionId, cwd } = this._getSessionIds();
+      if (!backendSessionId) return;
+      const base = `backend=${encodeURIComponent(backend || 'claude')}&backendSessionId=${encodeURIComponent(backendSessionId)}&cwd=${encodeURIComponent(cwd || '')}`;
+      const data = await fetch(`/api/session-history-gap?${base}&startLine=${this._gapCursorDown}&count=2000&whole=1`).then(r => r.json()).catch(() => null);
+      if (this._disposed || !this._teleported) return;
+      const msgs = data?.messages || [];
+      if (Number.isFinite(data?.totalLines) && this._gapBounds) this._gapBounds.totalLines = data.totalLines;
+      if (!msgs.length) { this._gapDownIdleUntil = Date.now() + 3000; return; } // reached file end (for now)
+      for (const msg of msgs) {
+        const el = this._renderGapMsg(msg);
+        if (el) this._messageList.appendChild(el); // below viewport — no compensation
+      }
+      this._gapCursorDown = Number.isFinite(data.toLine) ? data.toLine : this._gapCursorDown;
+      if (this._gapBounds && this._gapCursorDown >= this._gapBounds.totalLines) this._gapDownIdleUntil = Date.now() + 3000;
+      this._trimGapDom('top');
+      this._reportVisibleTsRange();
+    } finally {
+      this._gapDownLoading = false;
+    }
+  }
+
+  // Cap the teleport-browse DOM: each slab adds hundreds of elements and gap
+  // messages are exempt from the virtual-scroll trim, so a long browse would
+  // otherwise grow without bound. Drop from the far side, keeping the seek
+  // cursors consistent so scrolling back re-loads what was dropped. The cap must
+  // comfortably hold the teleport slab + a full 2000-line slab (~1200 msgs) in
+  // EACH direction — a tighter cap thrashes: an up-load trims away what a
+  // down-load just added (and vice versa).
+  _trimGapDom(side, cap = 3400, keep = 2400) {
+    const els = this._messageList.querySelectorAll('.chat-gap-msg');
+    if (els.length <= cap) return;
+    const n = els.length - keep;
+    const list = this._messageList;
+    if (side === 'bottom') {
+      // dropping BELOW the viewport — no scroll shift; rewind the down-cursor
+      let firstDroppedLine = null;
+      for (let i = els.length - n; i < els.length; i++) {
+        const l = Number(els[i].dataset.line);
+        if (firstDroppedLine == null && Number.isFinite(l)) firstDroppedLine = l;
+        els[i].remove();
+      }
+      if (Number.isFinite(firstDroppedLine)) { this._gapCursorDown = firstDroppedLine; this._gapDownIdleUntil = 0; }
+    } else {
+      // dropping ABOVE the viewport — compensate scrollTop; advance the up-cursor
+      const before = list.scrollHeight;
+      let lastKeptFirstLine = null;
+      for (let i = 0; i < n; i++) els[i].remove();
+      const first = list.querySelector('.chat-gap-msg[data-line]');
+      if (first) lastKeptFirstLine = Number(first.dataset.line);
+      list.scrollTop -= (before - list.scrollHeight);
+      const marker = this._seekSentinel;
+      if (marker && Number.isFinite(lastKeptFirstLine)) {
+        marker._gapCursor = lastKeptFirstLine;
+        marker._gapAnchor = first;
+      }
+    }
+  }
+
   // Scroll-driven trigger for continuous gap loading once the registered tail is
   // fully rendered — complements the IntersectionObserver (which only fires on
   // intersection CHANGES, and scroll compensation can pin the sentinel in place).
@@ -562,9 +664,11 @@ class ChatView {
   // tailStartLine) instead of skipping the [cursor, tailStartLine) span.
   _resetGapAfterJump() {
     this._teleported = false;   // a full-window jump exits teleport mode
+    this._gapCursorDown = null;
+    clearTimeout(this._cvRestoreTimer);
     // Restore content-visibility for the live tail (we forced it off to stabilize
     // a jumped-to slab's scroll — the tail can be long, so it wants the culling).
-    if (this._forcedStableHeights) { this._container.classList.remove('chat-no-content-visibility'); this._forcedStableHeights = false; }
+    this._setStableHeights(false);
     if (!this._gapMinimapActive) return;
     const s = this._installSeekSentinel();   // re-create if a prior seek removed it
     if (s) { s._gapCursor = null; s._gapAnchor = null; s._gapLoading = false; }
@@ -636,6 +740,7 @@ class ChatView {
       markerEl._gapCursor = (data && Number.isFinite(data.fromLine)) ? data.fromLine : 0;
       // Keep the viewport stable: we inserted content below the sentinel
       this._messageList.scrollTop = scrollTopBefore + (this._messageList.scrollHeight - scrollHeightBefore);
+      if (this._teleported) this._trimGapDom('bottom');
       if (markerEl._gapCursor <= 0) this._finishSeek(markerEl, btn);
     } finally {
       markerEl._gapLoading = false;
@@ -737,6 +842,9 @@ class ChatView {
   // Minimap click/drag in time mode: jump to a turn at file `line`. Teleports
   // to a seek-loaded slab around that absolute line, then scrolls to nearest ts.
   async _jumpToFileTime(ts, line) {
+    // Already rendered in the live view? Just scroll (tight tolerance — beyond
+    // ±2s the actual turn isn't rendered and we teleport instead).
+    if (!this._teleported && this._scrollToNearestTs(ts, 2000)) return null;
     let el = this._gapElForLine(line);
     if (!el) el = await this._seekTeleport(line);
     const target = this._nearestElByTs(ts) || el;
@@ -792,11 +900,17 @@ class ChatView {
     if (!msgs.length) return null;
     // Replace the entire rendered view with this slab; keep + reset the sentinel.
     this._teleported = true;
-    // Force stable heights while browsing a jumped-to slab: content-visibility's
-    // 80px estimate is wildly off for code/tool cards, so with it ON the scroll
-    // chases a target that keeps moving as real heights compute. Disabling it for
-    // the bounded slab makes the jump land immediately. Restored on return-to-latest.
-    if (!this._readOnly) { this._container.classList.add('chat-no-content-visibility'); this._forcedStableHeights = true; }
+    this._gapCursorDown = Number.isFinite(data.toLine) ? data.toLine : null; // next NEWER slab starts here
+    this._gapDownIdleUntil = 0;
+    if (Number.isFinite(data.totalLines) && this._gapBounds) this._gapBounds.totalLines = data.totalLines;
+    // Force stable heights while the jump lands: content-visibility's 80px
+    // estimate is wildly off for code/tool cards, so with it ON the scroll chases
+    // a target that keeps moving as real heights compute. Re-enabled (with scroll
+    // compensation) once landed, so long browsing doesn't pile up thousands of
+    // fully-laid-out elements.
+    this._setStableHeights(true);
+    clearTimeout(this._cvRestoreTimer);
+    this._cvRestoreTimer = setTimeout(() => this._setStableHeights(false), 1600);
     this._messageList.querySelectorAll('.chat-msg, .chat-msg-system').forEach(el => el.remove());
     this._elements.clear();
     this._renderedMsgIds.clear();
@@ -838,6 +952,19 @@ class ChatView {
     this._programmaticScroll = true;
     clearTimeout(this._jumpGuardTimer);
     this._jumpGuardTimer = setTimeout(() => { this._programmaticScroll = false; }, 700);
+    // Fast path: the match is already RENDERED in the live view (recent tail) —
+    // just scroll to it. Replacing the live view with a read-only teleport slab
+    // for something on screen was jarring. Tight ts tolerance: a rendered
+    // element further off than ±2s means the actual record isn't rendered.
+    if (!this._teleported) {
+      const near = this._nearestElByTs(match.ts);
+      const nts = near ? (Number(near.dataset.ts) || this._tsOfRenderedEl(near)) : 0;
+      if (near && Math.abs(nts - match.ts) < 2000) {
+        this._scrollElStable(near);
+        this._reportVisibleTsRange();
+        return near;
+      }
+    }
     let el = this._gapElForLine(line);          // fast path: already in the loaded slab
     if (!el) { await this._seekTeleport(line); await settle(); }
     const target = this._nearestElByTs(match.ts) || this._gapElForLine(line);
@@ -1660,7 +1787,9 @@ class ChatView {
 
   _updatePosIndicator() {
     if (!this._posIndicator || !this._total) return;
-    if (this._pinned && this._windowEnd >= this._total) {
+    // Teleport mode browses by file position; the window-index numbers are stale
+    // and misleading — the minimap thumb communicates position instead.
+    if (this._teleported || (this._pinned && this._windowEnd >= this._total)) {
       this._posIndicator.classList.add('hidden');
       return;
     }

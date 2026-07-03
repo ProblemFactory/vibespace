@@ -114,27 +114,16 @@ function readJsonlBounded(fp, opts = {}) {
       console.warn(`[jsonl] large session file ${path.basename(fp)} (${Math.round(stat.size / 1048576)}MB): tail-only display (last ${JSONL_TAIL_BYTES / 1048576}MB), earlier history seek-loaded on scroll`);
       return tail;
     }
-    // Legacy head+seam+tail path (kept for any non-display caller that still
-    // wants the elision marker stitched in).
+    // Legacy head+tail path (no callers pass tailOnly=false today, but keep the
+    // head stitch for safety — WITHOUT the old seam-marker injection).
     const headBuf = Buffer.alloc(JSONL_HEAD_BYTES);
     const hn = fs.readSync(fd, headBuf, 0, JSONL_HEAD_BYTES, 0);
     let head = headBuf.toString('utf-8', 0, hn);
     head = head.slice(0, head.lastIndexOf('\n') + 1);
-    if (typeof opts.makeMarker === 'function') {
-      const elidedBytes = stat.size - hn - tn;
-      const loadedLines = ((head.match(/\n/g) || []).length) + ((tail.match(/\n/g) || []).length);
-      const approxOmitted = loadedLines ? Math.round(elidedBytes / ((hn + tn) / loadedLines)) : 0;
-      const marker = opts.makeMarker(elidedBytes, approxOmitted);
-      if (marker) return head + marker + '\n' + tail;
-    }
     return head + tail;
   } finally { fs.closeSync(fd); }
 }
 
-function elisionNoticeText(elidedBytes, approxOmitted) {
-  const mb = Math.round(elidedBytes / 1048576);
-  return `<system-reminder>Session history truncated for display: ~${approxOmitted} records (${mb}MB) in the middle of this conversation were not loaded — the file is too large. Showing the earliest ${JSONL_HEAD_BYTES / 1048576}MB and the most recent ${JSONL_TAIL_BYTES / 1048576}MB.</system-reminder>`;
-}
 
 // ── Byte-offset line index for seek-based lazy loading of huge JSONL files ──
 // A full readFileSync is impossible (>512MB string) and a full normalize is
@@ -425,17 +414,6 @@ function readJsonlLineRange(fp, startLine, endLine) {
   } finally { fs.closeSync(fd); }
 }
 
-// Tag the seam marker, then give it the timestamp of its preceding record so
-// timestamp-based sorting (mergeCodexRecords) keeps it at the seam
-function applyElisionTimestamp(messages) {
-  for (let i = 0; i < messages.length; i++) {
-    if (!messages[i].__webui_elision) continue;
-    const neighbor = messages[i - 1] || messages[i + 1];
-    if (neighbor?.timestamp) messages[i].timestamp = neighbor.timestamp;
-    break;
-  }
-  return messages;
-}
 
 function parseCodexSessionJsonl(threadId) {
   const fp = findCodexSessionJsonlPath(threadId);
@@ -450,7 +428,7 @@ function parseCodexSessionJsonl(threadId) {
       try { messages.push(JSON.parse(trimmed)); } catch {}
     }
   } catch {}
-  return applyElisionTimestamp(messages);
+  return messages;
 }
 
 function formatCodexRoleLabel(role) {
@@ -920,8 +898,6 @@ module.exports = {
   parseCodexSessionJsonl,
   extractCodexThreadMeta,
   readJsonlBounded,
-  elisionNoticeText,
-  applyElisionTimestamp,
   getJsonlLineIndex,
   jsonlGapInfo,
   readJsonlLineRange,
