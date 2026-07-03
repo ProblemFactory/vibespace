@@ -16,6 +16,7 @@ class Sidebar {
     this._resizer = new Resizer(this.el, 'horizontal', {
       min: 200, max: 500, initial: parseInt(localStorage.getItem('sidebarWidth')) || 260,
       storageKey: 'sidebarWidth', inside: true, liveResize: false,
+      invert: () => this.app.settings?.get('sidebar.position') === 'right',
       onResizeStart: (w) => {
         this._setSidebarResizing(true);
         this._showSidebarResizePreview(w);
@@ -375,7 +376,11 @@ class Sidebar {
   }
 
   _applySidebarLayoutWidth(width = this.el.offsetWidth) {
-    document.getElementById('main-wrapper').style.marginLeft = this.isOpen ? `${width}px` : '0';
+    const right = this.app.settings?.get('sidebar.position') === 'right';
+    const w = this.isOpen ? `${width}px` : '0';
+    const mw = document.getElementById('main-wrapper');
+    mw.style.marginLeft = right ? '0' : w;
+    mw.style.marginRight = right ? w : '0';
   }
 
   _setSidebarResizing(active) {
@@ -393,7 +398,9 @@ class Sidebar {
 
   _showSidebarResizePreview(width) {
     const el = this._ensureSidebarResizePreview();
-    el.style.transform = `translate3d(${Math.max(0, width) - 1}px, 0, 0)`;
+    const right = this.app.settings?.get('sidebar.position') === 'right';
+    const x = right ? window.innerWidth - Math.max(0, width) : Math.max(0, width) - 1;
+    el.style.transform = `translate3d(${x}px, 0, 0)`;
     el.classList.add('visible');
   }
 

@@ -1371,3 +1371,17 @@ html, body {
   direction: rtl; text-align: left; /* front-truncate: keep the path's tail visible */
 }
 .cwd-recent-chip:hover { border-color: var(--accent); color: var(--text); }
+
+/* ── Chrome position customization (taskbar.position / sidebar.position) ── */
+/* Taskbar docked to the top: reorder the main-wrapper flex column (taskbar,
+   then its resize handle, then toolbar+workspace) and flip its border */
+body.taskbar-top #taskbar { order: -3; border-top: none; border-bottom: 1px solid var(--border); }
+body.taskbar-top #taskbar-resize-handle { order: -2; }
+/* Sidebar docked to the right edge */
+body.sidebar-right .sidebar {
+  left: auto; right: 0;
+  transform: translateX(100%);
+  border-right: none; border-left: 1px solid var(--border);
+}
+body.sidebar-right .sidebar.open { transform: translateX(0); }
+body.sidebar-right .sidebar .resizer-h { right: auto; left: 0; }

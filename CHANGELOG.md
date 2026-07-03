@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.17.0] — 2026-07-03
+
+### Added (team deployment)
+
+- **Password authentication** (optional — off unless configured). Set `VIBESPACE_PASSWORD` or let the container generate one. Guards all pages, APIs, WebSockets, and the browser proxy; login sessions are HttpOnly-cookie tokens persisted server-side (survive restarts, 180d), per-IP rate limiting on the login form, Sign out in the ⚙ menu, automatic bounce to `/login` when a token expires mid-session.
+- **Docker deployment**: `Dockerfile` + `docker-compose.yml` — dtach/zip/git/Claude CLI included, runs as non-root (required for bypassPermissions), volumes for data / Claude credentials / workspace, and a **random workspace password generated + printed on first boot**. See [docs/deployment.md](docs/deployment.md).
+- **UI chrome customization** (Settings → Toolbar & Layout): taskbar docked top or bottom, sidebar docked left or right, and show/hide toggles for the taskbar itself, desktop previews, usage donuts, the window counter, layout presets, and the Browser/Files toolbar buttons — all live-apply, all synced across clients.
+- **Collaboration & remote-session design** ([docs/design-collaboration.md](docs/design-collaboration.md)): multi-host gateway architecture, shared-storage recipes (NFS / JuiceFS-on-S3 / rclone), team memory conventions, cross-host session migration ("a session is one JSONL file"), identity/presence roadmap.
+
 ## [2.16.0] — 2026-07-03
 
 ### Fixed

@@ -237,9 +237,32 @@ const HOST = process.env.HOST || '0.0.0.0';
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server, path: '/ws' });
+
+// ── Optional password auth (VIBESPACE_PASSWORD env / data/auth.json) ──
+const { Auth } = require('./src/auth');
+const auth = new Auth(path.join(__dirname, 'data'));
+{
+  const { generated } = auth.ensurePassword({ generateIfMissing: process.env.VIBESPACE_GENERATE_PASSWORD === '1' });
+  if (generated) {
+    console.log('\n  ╔════════════════════════════════════════════════╗');
+    console.log(`  ║  Generated workspace password: ${generated.padEnd(15)} ║`);
+    console.log('  ║  (persisted in data/auth.json — set             ║');
+    console.log('  ║   VIBESPACE_PASSWORD to choose your own)        ║');
+    console.log('  ╚════════════════════════════════════════════════╝\n');
+  }
+  if (auth.enabled) console.log('  Password auth: ENABLED');
+  app.locals.authEnabled = auth.enabled;
+}
+
+const wss = new WebSocketServer({
+  server, path: '/ws',
+  // Reject unauthenticated WebSocket upgrades (cookie carries the login token)
+  verifyClient: (info) => auth.requestAuthed(info.req),
+});
 
 app.use(compression());
+auth.registerRoutes(app);
+app.use(auth.middleware());
 // Serve index.html with cache-busting query params on every local js/css asset
 // (?v=<mtime>). Browsers serve unversioned <script>/<link> from memory cache on
 // a soft reload without revalidating, so users were stuck on a stale bundle
@@ -1437,7 +1460,10 @@ function broadcastActiveSessions() {
 // ── Start Server ──
 // Unblocker WebSocket proxy (for proxied sites' WebSockets, not our /ws)
 server.on('upgrade', (req, socket, head) => {
-  if (req.url.startsWith('/proxy/')) unblocker.onUpgrade(req, socket, head);
+  if (req.url.startsWith('/proxy/')) {
+    if (!auth.requestAuthed(req)) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); return; }
+    unblocker.onUpgrade(req, socket, head);
+  }
 });
 
 server.listen(PORT, HOST, () => {

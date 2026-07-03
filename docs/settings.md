@@ -60,6 +60,14 @@ Overrides persist in the layout auto-save.
 |---------|------|---------|-------------|
 | `toolbar.showLayoutPresets` | boolean | `true` | Show the layout presets bar (built-in + custom grids + add button) |
 | `toolbar.showCommandMode` | boolean | `true` | Enable Ctrl+\\ command mode |
+| `toolbar.showBrowserButton` | boolean | `true` | Show the Browser button in the toolbar |
+| `toolbar.showFileExplorerButton` | boolean | `true` | Show the Files button in the toolbar |
+| `sidebar.position` | enum | `left` | Dock the session sidebar to the `left` or `right` edge |
+| `taskbar.position` | enum | `bottom` | Dock the taskbar (windows, desktops, usage) to the `bottom` or `top` |
+| `taskbar.show` | boolean | `true` | Show the taskbar at all (desktops still switch via Ctrl+Alt+arrows) |
+| `taskbar.showDesktopPreviews` | boolean | `true` | Show virtual-desktop previews in the taskbar |
+| `taskbar.showUsage` | boolean | `true` | Show the 5h/7d usage donuts |
+| `taskbar.showWindowCount` | boolean | `true` | Show the "N windows" counter/list |
 | `layout.enableDragSnap` | boolean | `true` | Snap windows to grid cells or screen edges when dragging |
 | `layout.enableShiftDragSelection` | boolean | `true` | Hold Shift while dragging to select a range of grid cells |
 | `taskbar.desktopPreviewRatio` | number | `70` | Desktop preview size as % of taskbar height (30-100) |

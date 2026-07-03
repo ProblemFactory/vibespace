@@ -1,0 +1,30 @@
+# VibeSpace — team deployment
+#
+#   docker compose up -d
+#   docker compose logs | grep password     # first-boot generated password
+#
+# To pick your own password, uncomment VIBESPACE_PASSWORD below.
+
+services:
+  vibespace:
+    build: .
+    container_name: vibespace
+    restart: unless-stopped
+    ports:
+      - "3456:3456"
+    environment:
+      # - VIBESPACE_PASSWORD=change-me        # omit → random password on first boot (see logs)
+      - NO_AUTO_UPDATE=1
+      # - CLAUDE_CMD=claude                   # override CLI paths if needed
+    volumes:
+      - vibespace-data:/app/data              # sessions, layouts, settings, auth
+      - vibespace-claude:/home/vibe/.claude   # claude credentials + transcripts
+      - ./workspace:/workspace                # your projects (bind-mount anything)
+    # Shared team storage examples (see docs/design-collaboration.md):
+    #   - /mnt/nfs/team-projects:/workspace
+    #   - type: volume
+    #     source: s3-projects           # rclone/JuiceFS-backed volume driver
+
+volumes:
+  vibespace-data:
+  vibespace-claude:

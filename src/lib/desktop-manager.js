@@ -465,8 +465,11 @@ export class DesktopManager {
       // Suppress ResizeObserver-triggered reflow during drag
       this.app.wm._suppressReflow = true;
 
+      const top = document.body.classList.contains('taskbar-top');
       const onMove = (e) => {
-        const h = Math.max(MIN_H, Math.min(MAX_H, startH + (startY - e.clientY)));
+        // bottom taskbar: drag UP grows; top taskbar: drag DOWN grows
+        const delta = top ? (e.clientY - startY) : (startY - e.clientY);
+        const h = Math.max(MIN_H, Math.min(MAX_H, startH + delta));
         taskbar.style.height = h + 'px';
         this._adaptTaskbarSize(h);
       };

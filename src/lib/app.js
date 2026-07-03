@@ -167,7 +167,13 @@ class App {
       }
     });
 
-    fetch('/api/home').then(r=>r.json()).then(d=> { document.getElementById('input-cwd').placeholder = d.home; }).catch(()=>{});
+    fetch('/api/home').then(r => {
+      if (r.status === 401) { location.href = '/login'; throw new Error('unauthorized'); }
+      return r.json();
+    }).then(d => {
+      document.getElementById('input-cwd').placeholder = d.home;
+      this._authEnabled = !!d.authEnabled;
+    }).catch(()=>{});
 
     // Initialize unified state sync (server-persisted, versioned diff broadcast, reconnect recovery)
     initStateSync(this.ws);
@@ -209,13 +215,31 @@ class App {
     document.getElementById('btn-file-explorer').addEventListener('click', () => this.openFileExplorer());
     document.getElementById('btn-browser').addEventListener('click', () => this.openBrowser());
 
-    // Apply toolbar visibility settings
-    const applyToolbarSettings = () => {
-      const presets = document.getElementById('layout-presets');
-      if (presets) presets.style.display = this.settings.get('toolbar.showLayoutPresets') ? '' : 'none';
+    // Apply toolbar/taskbar/sidebar chrome customization settings
+    const applyChromeSettings = () => {
+      const s = this.settings;
+      const show = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
+      show('layout-presets', s.get('toolbar.showLayoutPresets'));
+      show('btn-browser', s.get('toolbar.showBrowserButton'));
+      show('btn-file-explorer', s.get('toolbar.showFileExplorerButton'));
+      const tb = s.get('taskbar.show');
+      show('taskbar', tb);
+      show('taskbar-resize-handle', tb);
+      show('desktop-previews', tb && s.get('taskbar.showDesktopPreviews'));
+      show('taskbar-usage', s.get('taskbar.showUsage'));
+      show('taskbar-status', s.get('taskbar.showWindowCount'));
+      document.body.classList.toggle('taskbar-top', s.get('taskbar.position') === 'top');
+      document.body.classList.toggle('sidebar-right', s.get('sidebar.position') === 'right');
+      // re-apply main-wrapper margin on the correct side
+      this.sidebar?._applySidebarLayoutWidth?.();
     };
-    applyToolbarSettings();
-    this.settings.on('toolbar.showLayoutPresets', applyToolbarSettings);
+    this._applyChromeSettings = applyChromeSettings;
+    applyChromeSettings();
+    for (const k of ['toolbar.showLayoutPresets', 'toolbar.showBrowserButton', 'toolbar.showFileExplorerButton',
+                     'taskbar.show', 'taskbar.showDesktopPreviews', 'taskbar.showUsage', 'taskbar.showWindowCount',
+                     'taskbar.position', 'sidebar.position']) {
+      this.settings.on(k, applyChromeSettings);
+    }
   }
 
   _setupWelcome() {
@@ -327,6 +351,19 @@ class App {
     themeRow.style.cssText = 'display:flex;align-items:center;gap:4px';
     themeRow.append(themeSel, editBtn);
     pop.append(themeLabel, themeRow, sizeLabel, sizeRow, fontLabel, fontSel, allSettingsLink);
+
+    // Sign out (only relevant when password auth is enabled server-side)
+    if (this._authEnabled) {
+      const signOut = document.createElement('button');
+      signOut.className = 'file-tool-btn';
+      signOut.style.cssText = 'width:100%;margin-top:8px;color:var(--red);';
+      signOut.textContent = 'Sign out';
+      signOut.onclick = async () => {
+        try { await fetch('/api/logout', { method: 'POST' }); } catch {}
+        location.href = '/login';
+      };
+      pop.append(signOut);
+    }
   }
 
   _setupGridConfig() {

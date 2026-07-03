@@ -19,6 +19,10 @@ class Resizer {
     this.onResizeEnd = opts.onResizeEnd || null;
     this.storageKey = opts.storageKey || null;
     this._inside = !!opts.inside;
+    // invert: reverse drag direction (e.g. sidebar docked to the RIGHT edge —
+    // dragging left should grow it). Function form is evaluated per-drag so a
+    // live settings change takes effect without recreating the Resizer.
+    this._invert = opts.invert || false;
 
     this.handle = document.createElement('div');
     this.handle.className = dir === 'horizontal' ? 'resizer-h' : 'resizer-v';
@@ -62,8 +66,10 @@ class Resizer {
       document.body.style.userSelect = 'none';
       if (this.onResizeStart) this.onResizeStart(startSize);
 
+      const inv = typeof this._invert === 'function' ? this._invert() : !!this._invert;
       const onMove = (e) => {
-        const delta = (dir === 'horizontal' ? e.clientX : e.clientY) - startPos;
+        let delta = (dir === 'horizontal' ? e.clientX : e.clientY) - startPos;
+        if (inv) delta = -delta;
         const newSize = Math.max(this.min, Math.min(this.max, startSize + delta));
         currentSize = newSize;
         if (this.liveResize) this._setSize(newSize);

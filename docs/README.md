@@ -13,6 +13,7 @@ VibeSpace is a backend-agnostic web workspace for **coding agents** — it drive
 - **[External Editor](editor.md)** — Ctrl+G split-pane CodeMirror integration
 - **[Embedded Browser](browser.md)** — Iframe browser with proxy mode
 - **[Settings](settings.md)** — Global/per-terminal/chat settings plus Claude and Codex launch defaults
+- **[Deployment](deployment.md)** — Password authentication, Docker/compose, team server setup
 
 ## Reference
 
@@ -27,4 +28,5 @@ See [CLAUDE.md](../CLAUDE.md) in the project root for:
 - API reference (REST + WebSocket)
 - Bug fix history
 
+- **[Collaboration Design](design-collaboration.md)** — Remote sessions, multi-host gateway, shared storage, session migration (roadmap)
 - **[Codex Support Plan](codex-support-plan.md)** — Research notes, parity gaps, and phased integration plan for first-class Codex support

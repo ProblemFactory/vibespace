@@ -18,7 +18,7 @@ function expandTilde(p) {
 }
 function safePath(p) { return path.resolve(expandTilde(p)); }
 
-router.get('/api/home', (req, res) => res.json({ home: os.homedir() }));
+router.get('/api/home', (req, res) => res.json({ home: os.homedir(), authEnabled: !!req.app.locals.authEnabled }));
 
 // System monospace fonts via fc-list (cached)
 let _cachedMonoFonts = null;

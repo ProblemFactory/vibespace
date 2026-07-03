@@ -12,6 +12,46 @@ const SETTINGS_SCHEMA = {
     description: 'Show the entire layout presets bar (built-in presets, custom grids, and + add button)',
     category: 'Toolbar & Layout', liveApply: true,
   },
+  'toolbar.showBrowserButton': {
+    type: 'boolean', default: true, label: 'Show Browser button',
+    description: 'Show the embedded-browser button in the toolbar',
+    category: 'Toolbar & Layout', liveApply: true,
+  },
+  'toolbar.showFileExplorerButton': {
+    type: 'boolean', default: true, label: 'Show Files button',
+    description: 'Show the file explorer button in the toolbar',
+    category: 'Toolbar & Layout', liveApply: true,
+  },
+  'sidebar.position': {
+    type: 'enum', default: 'left', options: ['left', 'right'], label: 'Sidebar position',
+    description: 'Which screen edge the session sidebar docks to',
+    category: 'Toolbar & Layout', liveApply: true,
+  },
+  'taskbar.position': {
+    type: 'enum', default: 'bottom', options: ['bottom', 'top'], label: 'Taskbar position',
+    description: 'Dock the taskbar (window list, desktop previews, usage) to the top or bottom of the screen',
+    category: 'Toolbar & Layout', liveApply: true,
+  },
+  'taskbar.show': {
+    type: 'boolean', default: true, label: 'Show taskbar',
+    description: 'Show the taskbar entirely. When hidden, switch desktops with Ctrl+Alt+Left/Right and windows via the sidebar',
+    category: 'Toolbar & Layout', liveApply: true,
+  },
+  'taskbar.showDesktopPreviews': {
+    type: 'boolean', default: true, label: 'Show desktop previews',
+    description: 'Show the virtual-desktop miniature previews in the taskbar',
+    category: 'Toolbar & Layout', liveApply: true,
+  },
+  'taskbar.showUsage': {
+    type: 'boolean', default: true, label: 'Show usage meters',
+    description: 'Show the 5h/7d rate-limit donuts in the taskbar',
+    category: 'Toolbar & Layout', liveApply: true,
+  },
+  'taskbar.showWindowCount': {
+    type: 'boolean', default: true, label: 'Show window count',
+    description: 'Show the "N windows" counter/list button in the taskbar',
+    category: 'Toolbar & Layout', liveApply: true,
+  },
   'toolbar.showCommandMode': {
     type: 'boolean', default: true, label: 'Enable command mode',
     description: 'Enable Ctrl+\\ command mode for keyboard-driven window management',

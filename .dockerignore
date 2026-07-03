@@ -1,0 +1,6 @@
+node_modules
+data
+docs/screenshots
+.git
+*.log
+public/bundle.js

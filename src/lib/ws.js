@@ -31,6 +31,10 @@ class WsManager {
       const wasConnected = this._connected;
       this._connected = false;
       if (wasConnected) this._notifyState(false);
+      // Auth token revoked/expired? The WS upgrade gets rejected before open —
+      // probe once per close and bounce to the login page instead of retrying
+      // forever against a 401.
+      fetch('/api/home').then(r => { if (r.status === 401) location.href = '/login'; }).catch(() => {});
       setTimeout(() => this.connect(), 2000);
     };
     this.ws.onerror = () => {};
