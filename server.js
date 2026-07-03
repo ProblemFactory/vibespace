@@ -17,6 +17,25 @@ const { createAdapterRegistry } = require('./src/adapters');
 const fileRoutes = require('./src/routes/files');
 const { router: persistenceRouter, setup: setupPersistence } = require('./src/routes/persistence');
 
+// ── Env sanitation: the server may have been (re)started from INSIDE a Claude
+// Code session (e.g. an agent running in a WebUI terminal restarts it). The
+// inherited session env then leaks into every CLI this server spawns —
+// CLAUDE_CODE_CHILD_SESSION=1 alone puts a spawned claude into child-session
+// mode: NO lock file, NO project transcript. Conversations look fine live but
+// are silently unpersisted — terminate + resume loses everything (verified on
+// CLI 2.1.199 by A/B env test). Strip the whole inherited set at startup so all
+// spawn paths (dtach spawn line, wrappers, probes) run top-level.
+if (process.env.CLAUDECODE || process.env.CLAUDE_CODE_CHILD_SESSION) {
+  const stripped = [];
+  for (const k of Object.keys(process.env)) {
+    if (k === 'CLAUDECODE' || k === 'CLAUDE_EFFORT' || k.startsWith('CLAUDE_CODE_') || k.startsWith('CLAUDE_WEBUI_')) {
+      stripped.push(k);
+      delete process.env[k];
+    }
+  }
+  console.warn(`[env] Server was started from inside a Claude Code session — stripped inherited session env (${stripped.join(', ')}) so spawned CLIs run top-level. Without this, spawned sessions never write transcripts and their conversations are LOST on resume.`);
+}
+
 // Auto-update: pull latest + rebuild on startup (skip with NO_AUTO_UPDATE=1)
 if (!process.env.NO_AUTO_UPDATE) {
   try {
@@ -949,6 +968,28 @@ function restoreSessions() {
 
   // Populate webuiPids cache after all sessions are restored
   refreshWebuiPids();
+
+  // Warn about surviving sessions whose CLI is still running in child-session
+  // mode (spawned while the server env carried CLAUDE_CODE_CHILD_SESSION —
+  // e.g. a pre-fix server restarted from inside a Claude session). Those CLIs
+  // keep their poisoned env until recreated: their conversations are NOT being
+  // written to any transcript and will be lost on terminate+resume.
+  if (process.platform === 'linux') {
+    setTimeout(() => {
+      const affected = [];
+      for (const [id, s] of activeSessions) {
+        const pid = s._childPid;
+        if (!pid) continue;
+        try {
+          const env = fs.readFileSync(`/proc/${pid}/environ`, 'utf-8');
+          if (env.includes('CLAUDE_CODE_CHILD_SESSION=1')) affected.push(`${s.name} (${s.cwd})`);
+        } catch {}
+      }
+      if (affected.length) {
+        console.warn(`[env] ${affected.length} running session(s) were spawned with CLAUDE_CODE_CHILD_SESSION=1 and are NOT persisting transcripts — finish + recreate them to restore persistence:\n  - ${affected.join('\n  - ')}`);
+      }
+    }, 3000); // after refreshWebuiPids has populated _childPid
+  }
 }
 
 // ── Create editor helper script ──
