@@ -26,6 +26,7 @@ export const FILE_ICONS = {
   text:     _s('<path d="M4 1h8a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1z"/><path d="M5 5h6M5 8h6M5 11h3"/>'),
   markdown: _s('<rect x="1" y="3" width="14" height="10" rx="1.5"/><path d="M4 10V6l2 2.5L8 6v4M11 6v4M13 8l-2 2-2-2"/>'),
   shell:    _s('<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M4.5 7l2 2-2 2M8.5 11h3"/>'),
+  archive:  _s('<path d="M3 5h10v8.5a1 1 0 01-1 1H4a1 1 0 01-1-1V5z"/><path d="M2 2h12v3H2z"/><path d="M8 7v1M8 9.5v1M8 12v1"/>'),
   folder:   _s('<path d="M2 4h4l2 2h6v7a1 1 0 01-1 1H3a1 1 0 01-1-1V4z"/>'),
   folderOpen: _s('<path d="M2 4h4l2 2h6v1H6L3.5 14H2V4z"/><path d="M6 7h9l-2.5 7H3.5z"/>'),
   unknown:  _s('<path d="M4 1h6l4 4v9a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1z"/><path d="M10 1v4h4"/>'),

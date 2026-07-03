@@ -1,8 +1,9 @@
 import { marked } from 'marked';
 import { HexViewer } from './hex-viewer.js';
 import { CodeEditor } from './code-editor.js';
-import { formatSize, escHtml, showConfirmDialog } from './utils.js';
-import { hasDedicatedViewer, getViewerType } from './file-types.js';
+import { formatSize, escHtml, showConfirmDialog, showInputDialog, showToast } from './utils.js';
+import { hasDedicatedViewer, getViewerType, getFileIcon } from './file-types.js';
+import { FILE_ICONS } from './icons.js';
 import { renderAsync as renderDocx } from 'docx-preview';
 import { init as initPptx } from 'pptx-preview';
 
@@ -56,7 +57,7 @@ class FileViewer {
     const container = document.createElement('div'); container.className = 'file-viewer';
     winInfo.content.appendChild(container);
     winInfo.onClose = () => {};
-    const rendered = await FileViewer.renderInto(container, filePath, fileName);
+    const rendered = await FileViewer.renderInto(container, filePath, fileName, app);
     if (!rendered) {
       // No dedicated viewer — open in code editor
       app.openEditor(filePath, fileName, opts);
@@ -69,13 +70,15 @@ class FileViewer {
    * and the file explorer preview panel. Returns true if rendered, false if
    * no dedicated viewer exists for this file type.
    */
-  static async renderInto(container, filePath, fileName) {
+  static async renderInto(container, filePath, fileName, app = null) {
     const ext = (fileName || filePath.split('/').pop()).split('.').pop().toLowerCase();
     const viewerType = getViewerType(ext);
     const rawUrl = `/api/file/raw?path=${encodeURIComponent(filePath)}`;
 
     try {
-      if (viewerType === 'image') {
+      if (viewerType === 'archive') {
+        await FileViewer._renderArchive(container, filePath, app);
+      } else if (viewerType === 'image') {
         FileViewer._renderImage(container, filePath);
       } else if (viewerType === 'video') {
         FileViewer._renderVideo(container, filePath);
@@ -143,6 +146,91 @@ class FileViewer {
   }
 
   // ── Image viewer with zoom controls ──
+  // Archive contents viewer: entry list + filter + Extract All. Clicking a file
+  // entry extracts just that entry to a temp file and opens it through the
+  // normal viewer pipeline (editor / image / pdf / ...).
+  static async _renderArchive(container, filePath, app) {
+    const res = await fetch(`/api/archive/list?path=${encodeURIComponent(filePath)}`);
+    const data = await res.json().catch(() => ({}));
+    container.innerHTML = '';
+    const root = document.createElement('div'); root.className = 'archive-viewer';
+    if (!res.ok || data.error) {
+      const err = document.createElement('div'); err.className = 'archive-empty';
+      err.textContent = `Cannot read archive: ${data.error || 'unknown error'}`;
+      root.appendChild(err);
+      container.appendChild(root);
+      return;
+    }
+    const entries = data.entries || [];
+    const files = entries.filter(e => !e.isDirectory);
+    const totalSize = files.reduce((a, e) => a + (e.size || 0), 0);
+
+    const toolbar = document.createElement('div'); toolbar.className = 'archive-toolbar';
+    const summary = document.createElement('span');
+    summary.textContent = `${files.length} file${files.length === 1 ? '' : 's'}${entries.length > files.length ? `, ${entries.length - files.length} folders` : ''} \u00b7 ${formatSize(totalSize)} uncompressed${data.truncated ? ' \u00b7 list truncated' : ''}`;
+    const filter = document.createElement('input');
+    filter.placeholder = 'Filter\u2026'; filter.type = 'text';
+    const extractBtn = document.createElement('button'); extractBtn.className = 'archive-extract-btn'; extractBtn.textContent = 'Extract All\u2026';
+    toolbar.append(summary, filter, extractBtn);
+
+    const list = document.createElement('div'); list.className = 'archive-list';
+    const renderList = (q) => {
+      list.innerHTML = '';
+      const needle = (q || '').toLowerCase();
+      let shown = 0;
+      for (const e of entries) {
+        if (needle && !e.name.toLowerCase().includes(needle)) continue;
+        if (++shown > 3000) break;
+        const row = document.createElement('div');
+        row.className = 'archive-entry' + (e.isDirectory ? '' : ' is-file');
+        const depth = (e.name.replace(/\/$/, '').match(/\//g) || []).length;
+        row.style.paddingLeft = (12 + depth * 16) + 'px';
+        const icon = document.createElement('span'); icon.className = 'ae-icon';
+        icon.innerHTML = e.isDirectory ? FILE_ICONS.folder : getFileIcon(e.name);
+        const name = document.createElement('span'); name.className = 'ae-name';
+        name.textContent = e.name.replace(/\/$/, '').split('/').pop();
+        name.title = e.name;
+        const size = document.createElement('span'); size.className = 'ae-size';
+        size.textContent = e.isDirectory ? '' : formatSize(e.size);
+        row.append(icon, name, size);
+        if (!e.isDirectory && app) {
+          row.onclick = async () => {
+            row.style.opacity = '0.5';
+            try {
+              const r = await fetch('/api/archive/extract-entry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: filePath, entry: e.name }) });
+              const d = await r.json().catch(() => ({}));
+              if (!r.ok) { showToast('Open failed: ' + (d.error || ''), { type: 'error' }); return; }
+              app.openFile(d.path, e.name.split('/').pop());
+            } finally { row.style.opacity = ''; }
+          };
+        }
+        list.appendChild(row);
+      }
+      if (!shown) {
+        const empty = document.createElement('div'); empty.className = 'archive-empty';
+        empty.textContent = needle ? 'No matching entries' : 'Empty archive';
+        list.appendChild(empty);
+      }
+    };
+    renderList('');
+    filter.addEventListener('input', () => renderList(filter.value));
+
+    extractBtn.onclick = async () => {
+      const base = filePath.split('/').pop().replace(/\.(zip|tar\.gz|tar\.bz2|tar\.xz|tar|tgz|tbz2|txz|gz|bz2|xz)$/i, '');
+      const parent = filePath.substring(0, filePath.lastIndexOf('/'));
+      const d = await showInputDialog({ title: 'Extract All', label: 'Destination folder', value: parent + '/' + base, confirmText: 'Extract' });
+      if (!d || !d.trim()) return;
+      showToast('Extracting\u2026');
+      const r = await fetch('/api/archive/extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: filePath, dest: d.trim(), overwrite: false }) }).catch(() => null);
+      const dd = await r?.json().catch(() => ({}));
+      if (!r?.ok) showToast('Extract failed: ' + (dd?.error || ''), { type: 'error' });
+      else showToast('Extracted to ' + d.trim());
+    };
+
+    root.append(toolbar, list);
+    container.appendChild(root);
+  }
+
   static _renderImage(container, filePath) {
     const mediaViewer = document.createElement('div');
     mediaViewer.className = 'media-viewer';

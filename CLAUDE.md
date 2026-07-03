@@ -554,6 +554,13 @@ Read/Write tool output uses highlight.js for syntax highlighting with line numbe
 - `POST /api/mkdir` — create directory
 - `POST /api/rename` — rename
 - `DELETE /api/file?path=` — delete
+- `POST /api/archive` — create archive from same-parent paths[] (`.zip`/`.tar[.gz|.bz2|.xz]`, execFile zip/tar, 409 on existing dest unless overwrite)
+- `GET /api/archive/list?path=` — archive contents (unzip -l / tar -tvf parse; 20k entry cap)
+- `POST /api/archive/extract` — extract archive to dest (never overwrites unless overwrite:true — unzip -n / tar -k)
+- `POST /api/archive/extract-entry` — extract ONE entry to a temp file (spawn streaming, 200MB cap) → client opens via normal viewer pipeline
+- `POST /api/file/copy` / `POST /api/file/move` — recursive copy/move to FULL dest path (fs.cpSync; move falls back to copy+rm across devices; 409 on conflict unless overwrite)
+- `GET /api/download-zip?path=` — stream folder as zip download (spawn `zip -r - `, no temp file)
+- `GET /api/file/stat?path=&du=1` — extended properties (mode/uid/entryCount; optional bounded du -sb)
 - `GET /api/dir-complete?path=` — directory autocomplete (500ms timeout, supports `~`)
 - `GET /api/fonts` — system monospace fonts via `fc-list` (cached, fallback for client-side detection)
 - `POST /api/custom-grids` — add custom grid preset `{rows, cols}`
@@ -689,6 +696,10 @@ Server → Client: `created`, `output`, `msg` (normalized: op=create/edit/meta),
 
 ### File Management
 - File explorer with upload/download/drag-drop, title shows current path
+- Multi-select (Ctrl/Cmd+click toggle, Shift+click range, Ctrl+A) with bulk Compress/Copy/Cut/Delete; Delete key works on selection
+- Copy/Cut/Paste file clipboard (`app._fileClipboard`, works across explorer windows; cut items dimmed via `.cut-pending`; same-dir paste auto-renames "(copy)"; conflicts confirm-once overwrite); Duplicate
+- Archives: Compress to Archive (zip/tar.gz/tar/tar.xz, multi-select), archive viewer (double-click .zip/.tar.* → entry list + filter + Extract All; entry click extracts to temp + opens via normal pipeline), Extract Here / Extract to Folder (skip-existing semantics), folder Download as Zip (streamed)
+- Background right-click menu (Paste/New File/New Folder/Select All/Refresh/Copy Path/Properties); Properties dialog (du recursive size, permissions); icon view has the same context menu as list view
 - View menu (single dropdown): view mode (list/icon), options (hidden files, mixed sort, bookmarks panel, preview panel), group by (none/type/modified/size), column visibility
 - Resizable columns: drag column header borders, absolute widths (Windows Explorer behavior), persist in localStorage. Right-click header for column visibility + auto-fit.
 - Preview panel: toggle via View menu, auto-detects layout (horizontal when wide, vertical when tall), supports all file types (text, images, PDF, video, audio, HTML as iframe)

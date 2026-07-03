@@ -69,24 +69,47 @@ Bookmarks sync across all connected clients via WebSocket.
 
 ## File Operations
 
+### Selection
+
+- **Click** selects one item; **Ctrl/Cmd+click** toggles items; **Shift+click** selects a range; **Ctrl+A** selects everything.
+- **Delete** key deletes the selection (with confirmation).
+- Right-clicking a multi-selection shows bulk actions: Compress N items, Copy (N), Cut (N), Delete N items.
+
+### Copy / Cut / Paste
+
+Files and folders have a real clipboard: **Copy** / **Cut** from the context menu (or Ctrl+C / Ctrl+X), then **Paste** (background right-click or Ctrl+V) — including into a *different* explorer window. Cut items render dimmed until pasted. Pasting into the same folder auto-renames (`name (copy)`, `name (copy 2)`, …). If a name already exists at the destination you're asked once whether to overwrite. **Duplicate** makes a copy next to the original in one click.
+
+### Archives
+
+- **Compress to Archive…** on any file, folder, or multi-selection. The archive name's extension picks the format: `.zip`, `.tar.gz`, `.tar`, `.tar.bz2`, `.tar.xz`.
+- **Double-click a `.zip` / `.tar.*`** to preview its contents — entry tree with per-file sizes, a filter box, and a summary line ("12 files · 4.2 MB uncompressed"). **Click any file entry** to open it with the normal viewer (code, image, PDF, …) — only that entry is extracted, to a temp file.
+- **Extract Here** / **Extract to Folder…** on archive files, and **Extract All…** inside the preview. Extraction never overwrites existing files.
+- **Download as Zip** on folders streams the folder as a zip straight to your browser (no temp archive written on the server).
+
+### Properties
+
+**Properties** on any file/folder (or the current directory via background right-click) shows type, size (recursive for folders), item count, modified/created times, and permissions.
+
 ### Right-click context menu
 
 **On folders:**
-- Copy Path — copy absolute path to clipboard
+- Open / Open in new window
+- Copy, Cut, Duplicate, Compress to Archive…, Download as Zip, Copy Path
 - Add to bookmarks
 - Sessions ▸ — submenu with "+ New session" and all sessions at this path
 - Add to group ▸ — link folder to a session group
-- Rename
-- Delete
+- Rename, Properties, Delete
 
 **On files:**
-- Copy Path — copy absolute path to clipboard
-- Open (in appropriate viewer)
-- Edit (CodeMirror editor)
-- Open as Hex
-- Download
-- Rename
-- Delete
+- Open (in appropriate viewer), Edit (CodeMirror editor), Open as Hex
+- Extract Here / Extract to Folder… (archives)
+- Copy, Cut, Duplicate, Compress to Archive…, Download, Copy Path
+- Rename, Properties, Delete
+
+**On empty space (background):**
+- Paste, New File, New Folder, Select All, Refresh, Copy Path, Properties
+
+Both list view and icon view have the same menus.
 
 ### Upload
 

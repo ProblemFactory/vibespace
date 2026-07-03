@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.16.0] — 2026-07-03
+
+### Added (File Explorer overhaul)
+
+- **Archives**: right-click files/folders → **Compress to Archive** (.zip / .tar.gz / .tar / .tar.xz, multi-select supported); double-click a .zip/.tar.* → **contents preview** (entry tree with sizes, filter box, "N files · X MB uncompressed" summary); click an entry inside the archive to open it with the normal viewer (code, images, PDF — extracted on demand, nothing else touched); **Extract Here / Extract to Folder…** on archive files and **Extract All** in the preview (existing files are never overwritten). Folders get **Download as Zip** (streamed, no temp file).
+- **Multi-select**: Ctrl/Cmd+click toggles, Shift+click selects a range, Ctrl+A selects all; right-click a selection for bulk Compress / Copy / Cut / Delete.
+- **Copy / Cut / Paste**: full clipboard for files and folders (context menu or Ctrl+C/X/V), works **across explorer windows** — cut items show dimmed until pasted; pasting into the same folder auto-renames ("name (copy)"); name conflicts ask once whether to overwrite. Plus one-click **Duplicate**.
+- **Background right-click menu**: Paste, New File, New Folder, Select All, Refresh, Copy Path, Properties (previously right-clicking empty space did nothing).
+- **Properties dialog**: type, size (recursive for folders via du), item count, modified/created times, permissions — for any file, folder, or the current directory.
+- **Keyboard**: Delete key deletes the selection (with confirm); icon view now supports the same right-click menu as list view.
+
 ## [2.15.0] — 2026-07-03
 
 ### Security

@@ -432,4 +432,218 @@ router.post('/api/format', (req, res) => {
   }
 });
 
+
+// ── Archive operations (zip / tar family via system tools) ──
+// All subprocess calls use execFile with arg arrays — no shell interpolation.
+const { execFile } = require('child_process');
+
+function archiveType(p) {
+  const n = p.toLowerCase();
+  if (n.endsWith('.zip')) return 'zip';
+  if (n.endsWith('.tar') || n.endsWith('.tar.gz') || n.endsWith('.tgz')
+    || n.endsWith('.tar.bz2') || n.endsWith('.tbz2') || n.endsWith('.tar.xz') || n.endsWith('.txz')) return 'tar';
+  return null;
+}
+
+// Create an archive from files/folders that share one parent directory.
+// Runs with cwd = parent so the archive holds clean relative paths.
+router.post('/api/archive', (req, res) => {
+  const { paths, dest, overwrite } = req.body || {};
+  if (!Array.isArray(paths) || !paths.length || !dest) return res.status(400).json({ error: 'paths[] and dest required' });
+  const absPaths = paths.map(safePath);
+  const destPath = safePath(dest);
+  const parent = path.dirname(absPaths[0]);
+  if (!absPaths.every(p => path.dirname(p) === parent)) return res.status(400).json({ error: 'all paths must share one parent directory' });
+  const names = absPaths.map(p => path.basename(p));
+  if (fs.existsSync(destPath)) {
+    if (!overwrite) return res.status(409).json({ error: 'exists', dest: destPath });
+    try { fs.unlinkSync(destPath); } catch (e) { return res.status(400).json({ error: e.message }); }
+  }
+  const type = archiveType(destPath);
+  let cmd, args;
+  if (type === 'zip') { cmd = 'zip'; args = ['-r', '-q', '-y', destPath, ...names]; }
+  else if (type === 'tar') {
+    const n = destPath.toLowerCase();
+    const flag = n.endsWith('.tar') ? '-cf' : (n.endsWith('.bz2') || n.endsWith('.tbz2')) ? '-cjf' : (n.endsWith('.xz') || n.endsWith('.txz')) ? '-cJf' : '-czf';
+    cmd = 'tar'; args = [flag, destPath, ...names];
+  } else return res.status(400).json({ error: 'dest must end in .zip, .tar, .tar.gz/.tgz, .tar.bz2 or .tar.xz' });
+  execFile(cmd, args, { cwd: parent, timeout: 10 * 60 * 1000, maxBuffer: 8 * 1024 * 1024 }, (err, _o, stderr) => {
+    if (err) { try { fs.unlinkSync(destPath); } catch {} return res.status(400).json({ error: (stderr || err.message).split('\n')[0] }); }
+    let size = 0; try { size = fs.statSync(destPath).size; } catch {}
+    res.json({ success: true, dest: destPath, size });
+  });
+});
+
+// List archive contents (preview without extracting)
+router.get('/api/archive/list', (req, res) => {
+  const fp = safePath(req.query.path || '');
+  const type = archiveType(fp);
+  if (!type) return res.status(400).json({ error: 'unsupported archive type' });
+  if (!fs.existsSync(fp)) return res.status(404).json({ error: 'not found' });
+  const MAX = 20000;
+  const opts = { timeout: 60000, maxBuffer: 64 * 1024 * 1024 };
+  if (type === 'zip') {
+    execFile('unzip', ['-l', '-qq', fp], opts, (err, out) => {
+      if (err) return res.status(400).json({ error: 'failed to read zip: ' + (err.message || '').split('\n')[0] });
+      const entries = [];
+      for (const line of out.split('\n')) {
+        // "     1234  2026-07-03 12:00   dir/file.txt" (skip the trailing totals row)
+        const m = line.match(/^\s*(\d+)\s+[\d-]+\s+[\d:]+\s+(.+)$/);
+        if (!m) continue;
+        const name = m[2];
+        entries.push({ name, size: parseInt(m[1]), isDirectory: name.endsWith('/') });
+        if (entries.length > MAX) break;
+      }
+      res.json({ type, entries: entries.slice(0, MAX), total: entries.length, truncated: entries.length > MAX });
+    });
+  } else {
+    execFile('tar', ['-tvf', fp], opts, (err, out) => {
+      if (err) return res.status(400).json({ error: 'failed to read tar: ' + (err.message || '').split('\n')[0] });
+      const entries = [];
+      for (const line of out.split('\n')) {
+        // "drwxr-xr-x user/grp 0 2026-07-03 12:00 dir/"
+        const m = line.match(/^([\-dlrwxsStT]{10})\s+\S+\s+(\d+)\s+\S+\s+\S+\s+(.+)$/);
+        if (!m) continue;
+        let name = m[3];
+        const arrow = name.indexOf(' -> '); // symlink target
+        if (arrow > 0) name = name.substring(0, arrow);
+        entries.push({ name, size: parseInt(m[2]), isDirectory: m[1][0] === 'd' });
+        if (entries.length > MAX) break;
+      }
+      res.json({ type, entries: entries.slice(0, MAX), total: entries.length, truncated: entries.length > MAX });
+    });
+  }
+});
+
+// Extract ONE entry to a temp file and return its path — the client then opens
+// it through the normal viewer pipeline (editor / image / pdf / …).
+router.post('/api/archive/extract-entry', (req, res) => {
+  const { path: ap, entry } = req.body || {};
+  if (!ap || !entry) return res.status(400).json({ error: 'path and entry required' });
+  const fp = safePath(ap);
+  const type = archiveType(fp);
+  if (!type) return res.status(400).json({ error: 'unsupported archive type' });
+  if (entry.endsWith('/')) return res.status(400).json({ error: 'cannot open a directory entry' });
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'webui-archive-'));
+  const outPath = path.join(tmpDir, path.basename(entry) || 'entry');
+  const outStream = fs.createWriteStream(outPath);
+  let cmd, args;
+  if (type === 'zip') {
+    // unzip treats [ ] * ? as globs — escape for a literal member name
+    const literal = entry.replace(/([\[\]*?])/g, '\\$1');
+    cmd = 'unzip'; args = ['-p', fp, literal];
+  } else { cmd = 'tar'; args = ['-xOf', fp, entry]; }
+  // spawn (not execFile): execFile buffers stdout internally and maxBuffer
+  // kills the child — for streaming, pipe from a spawned process instead
+  const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'ignore'] });
+  child.stdout.pipe(outStream);
+  let written = 0, killed = false;
+  const CAP = 200 * 1024 * 1024;
+  const timer = setTimeout(() => { killed = true; child.kill(); }, 120000);
+  child.stdout.on('data', (c) => { written += c.length; if (written > CAP && !killed) { killed = true; child.kill(); } });
+  child.on('close', (code) => {
+    clearTimeout(timer);
+    if (killed) { try { fs.rmSync(tmpDir, { recursive: true }); } catch {} return res.status(413).json({ error: 'entry too large (>200MB)' }); }
+    if (code !== 0) { try { fs.rmSync(tmpDir, { recursive: true }); } catch {} return res.status(400).json({ error: `extract failed (exit ${code})` }); }
+    outStream.end(() => res.json({ path: outPath, size: written }));
+  });
+});
+
+// Extract a whole archive into dest
+router.post('/api/archive/extract', (req, res) => {
+  const { path: ap, dest, overwrite } = req.body || {};
+  if (!ap || !dest) return res.status(400).json({ error: 'path and dest required' });
+  const fp = safePath(ap);
+  const destDir = safePath(dest);
+  const type = archiveType(fp);
+  if (!type) return res.status(400).json({ error: 'unsupported archive type' });
+  try { fs.mkdirSync(destDir, { recursive: true }); } catch (e) { return res.status(400).json({ error: e.message }); }
+  let cmd, args;
+  if (type === 'zip') { cmd = 'unzip'; args = [overwrite ? '-o' : '-n', '-q', fp, '-d', destDir]; }
+  else { cmd = 'tar'; args = [overwrite ? '-xf' : '-xkf', fp, '-C', destDir]; }
+  execFile(cmd, args, { timeout: 10 * 60 * 1000, maxBuffer: 8 * 1024 * 1024 }, (err, _o, stderr) => {
+    // tar -k exits non-zero when files already existed — treat as success (skip-existing semantics)
+    if (err && !(cmd === 'tar' && !overwrite && /already exists/i.test(stderr || ''))) {
+      return res.status(400).json({ error: (stderr || err.message).split('\n')[0] });
+    }
+    res.json({ success: true, dest: destDir });
+  });
+});
+
+// Copy file/dir (recursive). dest is the FULL target path.
+router.post('/api/file/copy', (req, res) => {
+  const { src, dest, overwrite } = req.body || {};
+  if (!src || !dest) return res.status(400).json({ error: 'src and dest required' });
+  const s = safePath(src), d = safePath(dest);
+  if (s === d) return res.status(400).json({ error: 'source and destination are the same' });
+  if (d.startsWith(s + '/')) return res.status(400).json({ error: 'cannot copy a folder into itself' });
+  if (fs.existsSync(d) && !overwrite) return res.status(409).json({ error: 'exists', dest: d });
+  try {
+    fs.cpSync(s, d, { recursive: true, force: !!overwrite, errorOnExist: !overwrite });
+    res.json({ success: true, dest: d });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Move file/dir. dest is the FULL target path. Falls back to copy+rm across devices.
+router.post('/api/file/move', (req, res) => {
+  const { src, dest, overwrite } = req.body || {};
+  if (!src || !dest) return res.status(400).json({ error: 'src and dest required' });
+  const s = safePath(src), d = safePath(dest);
+  if (s === d) return res.json({ success: true, dest: d }); // no-op
+  if (d.startsWith(s + '/')) return res.status(400).json({ error: 'cannot move a folder into itself' });
+  if (fs.existsSync(d) && !overwrite) return res.status(409).json({ error: 'exists', dest: d });
+  try {
+    if (fs.existsSync(d) && overwrite) fs.rmSync(d, { recursive: true, force: true });
+    try { fs.renameSync(s, d); }
+    catch (e) {
+      if (e.code !== 'EXDEV') throw e;
+      fs.cpSync(s, d, { recursive: true });
+      fs.rmSync(s, { recursive: true, force: true });
+    }
+    res.json({ success: true, dest: d });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Stream a folder (or file) as a zip download — no temp archive on disk
+router.get('/api/download-zip', (req, res) => {
+  const fp = safePath(req.query.path || '');
+  if (!fs.existsSync(fp)) return res.status(404).json({ error: 'not found' });
+  const base = path.basename(fp) || 'archive';
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(base)}.zip`);
+  const child = spawn('zip', ['-r', '-q', '-y', '-', base], { cwd: path.dirname(fp), stdio: ['ignore', 'pipe', 'ignore'] });
+  child.stdout.pipe(res);
+  child.on('error', () => { if (!res.headersSent) res.status(500).end(); else res.end(); });
+  child.on('close', (code) => { if (code !== 0 && !res.writableEnded) res.end(); });
+  res.on('close', () => { try { child.kill(); } catch {} });
+});
+
+// Extended properties: stat + optional recursive size/count for directories
+router.get('/api/file/stat', (req, res) => {
+  const fp = safePath(req.query.path || '');
+  try {
+    const st = fs.statSync(fp);
+    const out = {
+      path: fp,
+      isDirectory: st.isDirectory(),
+      size: st.size,
+      modified: st.mtimeMs,
+      created: st.birthtimeMs,
+      mode: '0' + (st.mode & 0o777).toString(8),
+      uid: st.uid, gid: st.gid,
+    };
+    if (st.isDirectory()) {
+      try { out.entryCount = fs.readdirSync(fp).length; } catch {}
+      if (req.query.du) {
+        // du can crawl for a while on huge trees — bounded, best-effort
+        return execFile('du', ['-sb', fp], { timeout: 15000, maxBuffer: 1024 * 1024 }, (err, o) => {
+          if (!err) { const n = parseInt(o.split('\t')[0]); if (Number.isFinite(n)) out.duSize = n; }
+          res.json(out);
+        });
+      }
+    }
+    res.json(out);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 module.exports = router;

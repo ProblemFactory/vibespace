@@ -37,6 +37,19 @@ const REGISTRY = {
   xls:  { category: 'office', icon: I.sheet, viewer: 'xlsx', bypassBinary: true },
   pptx: { category: 'office', icon: I.slides, viewer: 'pptx', bypassBinary: true },
   ppt:  { category: 'office', icon: I.slides, viewer: 'pptx', bypassBinary: true },
+  // Archives — viewer lists contents; entries open through the normal pipeline.
+  // (.gz/.bz2/.xz get the viewer too: usually .tar.gz collapsed to its last
+  // extension segment; plain compressed single files show a clear error.)
+  zip:  { category: 'archive', icon: I.archive, viewer: 'archive', bypassBinary: true },
+  tar:  { category: 'archive', icon: I.archive, viewer: 'archive', bypassBinary: true },
+  tgz:  { category: 'archive', icon: I.archive, viewer: 'archive', bypassBinary: true },
+  gz:   { category: 'archive', icon: I.archive, viewer: 'archive', bypassBinary: true },
+  tbz2: { category: 'archive', icon: I.archive, viewer: 'archive', bypassBinary: true },
+  bz2:  { category: 'archive', icon: I.archive, viewer: 'archive', bypassBinary: true },
+  txz:  { category: 'archive', icon: I.archive, viewer: 'archive', bypassBinary: true },
+  xz:   { category: 'archive', icon: I.archive, viewer: 'archive', bypassBinary: true },
+  '7z': { category: 'archive', icon: I.archive },
+  rar:  { category: 'archive', icon: I.archive },
   // Data
   csv:  { category: 'data', icon: I.data, viewer: 'csv' },
   tsv:  { category: 'data', icon: I.data, viewer: 'csv' },

@@ -159,6 +159,11 @@ class FileExplorer {
     this._folderInput.onchange = (e) => { this._uploadFiles(e.target.files, true); e.target.value = ''; };
     this._activeUploads = new Map(); // uploadId → {xhr, files, rows[]}
 
+    // Multi-select state: names within the current directory
+    this._selection = new Set();
+    this._selAnchor = null;      // shift-range anchor
+    this._renderOrder = [];      // current sorted order (for shift ranges / select-all)
+
     el.append(toolbar, contentArea, this.uploadInput, this._folderInput);
     winInfo.content.appendChild(el);
 
@@ -167,8 +172,23 @@ class FileExplorer {
     el.addEventListener('drop', (e) => { e.preventDefault(); e.stopPropagation(); if (e.dataTransfer.files.length) this._uploadFiles(e.dataTransfer.files); });
 
     this.listEl.addEventListener('contextmenu', (e) => {
-      e.preventDefault(); const item = e.target.closest('.file-item');
+      e.preventDefault();
+      const item = e.target.closest('.file-item, .file-icon-cell');
       if (item) this._showContextMenu(e.clientX, e.clientY, item.dataset);
+      else this._showBackgroundMenu(e.clientX, e.clientY);
+    });
+
+    // Keyboard: select-all / copy / cut / paste / delete on the file list
+    this.listEl.tabIndex = -1;
+    this.listEl.style.outline = 'none';
+    this.listEl.addEventListener('mousedown', () => this.listEl.focus());
+    this.listEl.addEventListener('keydown', (e) => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.key === 'a') { e.preventDefault(); this._selection = new Set(this._renderOrder); this._applySelectionClasses(); }
+      else if (mod && e.key === 'c' && this._selection.size) { e.preventDefault(); this._clipboardSet('copy'); }
+      else if (mod && e.key === 'x' && this._selection.size) { e.preventDefault(); this._clipboardSet('cut'); }
+      else if (mod && e.key === 'v') { e.preventDefault(); this._paste(); }
+      else if (e.key === 'Delete' && this._selection.size) { e.preventDefault(); this._deleteSelection(); }
     });
 
     // Load bookmarks from server
@@ -496,6 +516,7 @@ class FileExplorer {
         }
         throw new Error(data.error);
       }
+      if (this.currentPath !== data.path) { this._selection.clear(); this._selAnchor = null; }
       this.currentPath = data.path; this.pathInput.value = data.path; this.items = data.items;
       this.winInfo._explorerPath = data.path; // for layout persistence
       if (this.winInfo._openSpec) this.winInfo._openSpec.path = data.path; // update for sync
@@ -618,6 +639,7 @@ class FileExplorer {
 
   _renderItems() {
     const sorted = this._getSortedItems();
+    this._renderOrder = sorted.map(i => i.name);
     this.listEl.innerHTML = '';
     this.listEl.className = 'file-list' + (this._viewMode === 'icon' ? ' icon-view' : '');
 
@@ -682,6 +704,44 @@ class FileExplorer {
     // (This call was lost in a refactor — domRefs stayed empty, so progress
     // updates were no-ops and the documented inline bars never rendered.)
     this._renderUploadRows();
+    this._applySelectionClasses();
+  }
+
+  // Apply .selected (multi-select) and .cut-pending (clipboard cut) classes
+  _applySelectionClasses() {
+    const clip = this.app._fileClipboard;
+    const cutNames = new Set(
+      clip && clip.op === 'cut'
+        ? clip.paths.filter(p => p.substring(0, p.lastIndexOf('/')) === this.currentPath).map(p => p.split('/').pop())
+        : []
+    );
+    this.listEl.querySelectorAll('.file-item, .file-icon-cell').forEach(el => {
+      el.classList.toggle('selected', this._selection.has(el.dataset.name));
+      el.classList.toggle('cut-pending', cutNames.has(el.dataset.name));
+    });
+  }
+
+  // Click with ctrl/shift multi-select semantics (shared by list + icon views)
+  _onItemClick(e, item) {
+    const name = item.name;
+    if (e.shiftKey && this._selAnchor) {
+      const a = this._renderOrder.indexOf(this._selAnchor), b = this._renderOrder.indexOf(name);
+      if (a >= 0 && b >= 0) this._selection = new Set(this._renderOrder.slice(Math.min(a, b), Math.max(a, b) + 1));
+    } else if (e.ctrlKey || e.metaKey) {
+      if (this._selection.has(name)) this._selection.delete(name);
+      else this._selection.add(name);
+      this._selAnchor = name;
+    } else {
+      this._selection = new Set([name]);
+      this._selAnchor = name;
+    }
+    this._applySelectionClasses();
+    if (this._selection.size === 1) {
+      const only = [...this._selection][0];
+      const it = this.items.find(i => i.name === only);
+      this._selectedPath = it && !it.isDirectory ? this.currentPath + '/' + only : null;
+    } else this._selectedPath = null;
+    this._updatePreview();
   }
 
   _renderFileItem(item) {
@@ -697,12 +757,7 @@ class FileExplorer {
       cell.append(icon, label);
       cell.draggable = true;
       cell.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', fullPath); e.dataTransfer.setData('application/x-file-path', fullPath); if (item.isDirectory) e.dataTransfer.setData('application/x-folder-path', fullPath); });
-      cell.addEventListener('click', () => {
-        this.listEl.querySelectorAll('.file-icon-cell').forEach(c => c.classList.remove('selected'));
-        cell.classList.add('selected');
-        this._selectedPath = item.isDirectory ? null : fullPath;
-        this._updatePreview();
-      });
+      cell.addEventListener('click', (e) => this._onItemClick(e, item));
       cell.addEventListener('dblclick', () => {
         if (item.isDirectory) this.navigate(fullPath);
         else this.app.openFile(fullPath, item.name);
@@ -741,12 +796,7 @@ class FileExplorer {
 
       row.draggable = true;
       row.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', fullPath); e.dataTransfer.setData('application/x-file-path', fullPath); if (item.isDirectory) e.dataTransfer.setData('application/x-folder-path', fullPath); });
-      row.addEventListener('click', () => {
-        this.listEl.querySelectorAll('.file-item').forEach(r => r.classList.remove('selected'));
-        row.classList.add('selected');
-        this._selectedPath = item.isDirectory ? null : fullPath;
-        this._updatePreview();
-      });
+      row.addEventListener('click', (e) => this._onItemClick(e, item));
       row.addEventListener('dblclick', () => {
         if (item.isDirectory) this.navigate(fullPath);
         else this.app.openFile(fullPath, item.name);
@@ -1044,13 +1094,52 @@ class FileExplorer {
   }
 
   _showContextMenu(x, y, dataset) {
-    document.querySelectorAll('.context-menu').forEach(m => m.remove());
-    const menu = document.createElement('div'); menu.className = 'context-menu';
-    menu.style.left = x + 'px'; menu.style.top = y + 'px';
+    // Right-clicking an item outside the selection selects just it
+    if (!this._selection.has(dataset.name)) {
+      this._selection = new Set([dataset.name]);
+      this._selAnchor = dataset.name;
+      this._applySelectionClasses();
+    }
+    const sel = [...this._selection];
+    const multi = sel.length > 1;
     const fullPath = this.currentPath + '/' + dataset.name;
+    const isDir = dataset.isDir === 'true';
+    const isArchive = /\.(zip|tar|tgz|tbz2|txz|gz|bz2|xz)$/i.test(dataset.name);
     const items = [];
+
+    if (multi) {
+      items.push({ label: `Compress ${sel.length} items\u2026`, action: () => this._compressSelection(sel) });
+      items.push({ label: `Copy (${sel.length})`, action: () => this._clipboardSet('copy') });
+      items.push({ label: `Cut (${sel.length})`, action: () => this._clipboardSet('cut') });
+      items.push({ sep: true });
+      items.push({ label: `Delete ${sel.length} items`, action: () => this._deleteSelection() });
+      return this._buildMenu(x, y, items);
+    }
+
+    if (isDir) {
+      items.push({ label: 'Open', action: () => this.navigate(fullPath) });
+      items.push({ label: 'Open in new window', action: () => this.app.openFileExplorer(fullPath) });
+    } else {
+      items.push({ label: 'Open', action: () => this.app.openFile(fullPath, dataset.name) });
+      items.push({ label: 'Edit', action: () => this.app.openEditor(fullPath, dataset.name) });
+      items.push({ label: 'Open as Hex', action: () => this.app.openFile(fullPath, dataset.name, { hex: true }) });
+    }
+    if (isArchive && !isDir) {
+      items.push({ sep: true });
+      items.push({ label: 'Extract Here', action: () => this._extractArchive(dataset.name, true) });
+      items.push({ label: 'Extract to Folder\u2026', action: () => this._extractArchive(dataset.name, false) });
+    }
+    items.push({ sep: true });
+    items.push({ label: 'Copy', action: () => this._clipboardSet('copy') });
+    items.push({ label: 'Cut', action: () => this._clipboardSet('cut') });
+    items.push({ label: 'Duplicate', action: () => this._duplicate(dataset.name) });
+    items.push({ label: 'Compress to Archive\u2026', action: () => this._compressSelection([dataset.name]) });
+    if (isDir) items.push({ label: 'Download as Zip', action: () => { window.open(`/api/download-zip?path=${encodeURIComponent(fullPath)}`); } });
+    else items.push({ label: 'Download', action: () => { window.open(`/api/download?path=${encodeURIComponent(fullPath)}`); } });
     items.push({ label: 'Copy Path', action: () => copyText(fullPath) });
-    if (dataset.isDir === 'true') {
+
+    if (isDir) {
+      items.push({ sep: true });
       const isBookmarked = this._bookmarks.some(b => b.path === fullPath);
       items.push({ label: isBookmarked ? '\u2605 Bookmarked' : '\u2606 Add to bookmarks', action: () => {
         if (!isBookmarked) {
@@ -1084,28 +1173,47 @@ class FileExplorer {
         }
         return sub;
       }});
-      // Link folder to a session group
       const groupNames = this.app.sidebar?._getGroupNames() || [];
       if (groupNames.length > 0) {
         items.push({ label: 'Add to group', submenu: () => {
           return groupNames.map(g => ({ label: g, action: () => this.app.sidebar?._addFolderToGroup(fullPath, g) }));
         }});
       }
-    } else {
-      items.push({ label: 'Open', action: () => this.app.openFile(fullPath, dataset.name) });
-      items.push({ label: 'Edit', action: () => this.app.openEditor(fullPath, dataset.name) });
-      items.push({ label: 'Open as Hex', action: () => this.app.openFile(fullPath, dataset.name, { hex: true }) });
-      items.push({ label: 'Download', action: () => { window.open(`/api/download?path=${encodeURIComponent(fullPath)}`); } });
     }
+    items.push({ sep: true });
     items.push({ label: 'Rename', action: () => this._rename(dataset.name) });
-    items.push({ label: 'Delete', action: () => this._delete(dataset.name, dataset.isDir === 'true') });
+    items.push({ label: 'Properties', action: () => this._showProperties(dataset.name) });
+    items.push({ label: 'Delete', action: () => this._delete(dataset.name, isDir) });
+    this._buildMenu(x, y, items);
+  }
 
+  // Background (empty area) right-click
+  _showBackgroundMenu(x, y) {
+    const clip = this.app._fileClipboard;
+    const items = [];
+    if (clip?.paths?.length) items.push({ label: `Paste ${clip.paths.length} item${clip.paths.length > 1 ? 's' : ''}`, action: () => this._paste() });
+    items.push({ label: 'New File', action: () => this.createFile() });
+    items.push({ label: 'New Folder', action: () => this.createDir() });
+    items.push({ sep: true });
+    items.push({ label: 'Select All', action: () => { this._selection = new Set(this._renderOrder); this._applySelectionClasses(); } });
+    items.push({ label: 'Refresh', action: () => this.refresh() });
+    items.push({ label: 'Copy Path', action: () => copyText(this.currentPath) });
+    items.push({ label: 'Properties', action: () => this._showProperties(null) });
+    this._buildMenu(x, y, items);
+  }
+
+  // Shared manual menu builder (supports {sep:true} dividers + lazy submenus)
+  _buildMenu(x, y, items) {
+    document.querySelectorAll('.context-menu').forEach(m => m.remove());
+    const menu = document.createElement('div'); menu.className = 'context-menu';
+    menu.style.left = x + 'px'; menu.style.top = y + 'px';
     for (const item of items) {
+      if (item.sep) { const d = document.createElement('div'); d.className = 'context-menu-sep'; menu.appendChild(d); continue; }
       const el = document.createElement('div'); el.className = 'context-menu-item'; el.textContent = item.label;
       if (item.submenu) {
         el.classList.add('has-submenu');
         el.onmouseenter = () => {
-          menu.querySelectorAll('.context-submenu').forEach(s => s.remove());
+          menu.querySelectorAll('.context-submenu').forEach(sx => sx.remove());
           const subItems = item.submenu();
           const sub = document.createElement('div'); sub.className = 'context-menu context-submenu';
           sub.style.left = menu.offsetWidth + 'px'; sub.style.top = (el.offsetTop - menu.scrollTop) + 'px';
@@ -1123,6 +1231,154 @@ class FileExplorer {
     }
     document.body.appendChild(menu);
     attachPopoverClose(menu);
+  }
+
+  // ── Clipboard (copy/cut/paste), duplicate, compress, extract, properties ──
+
+  _clipboardSet(op) {
+    const paths = [...this._selection].map(n => this.currentPath + '/' + n);
+    if (!paths.length) return;
+    this.app._fileClipboard = { op, paths };
+    showToast(`${op === 'cut' ? 'Cut' : 'Copied'} ${paths.length} item${paths.length > 1 ? 's' : ''}`);
+    this._applySelectionClasses();
+  }
+
+  _uniqueName(base) {
+    const dot = base.startsWith('.') ? -1 : base.lastIndexOf('.');
+    const stem = dot > 0 ? base.slice(0, dot) : base;
+    const ext = dot > 0 ? base.slice(dot) : '';
+    let cand = `${stem} (copy)${ext}`, n = 2;
+    const names = new Set(this.items.map(i => i.name));
+    while (names.has(cand)) cand = `${stem} (copy ${n++})${ext}`;
+    return this.currentPath + '/' + cand;
+  }
+
+  async _paste() {
+    const clip = this.app._fileClipboard;
+    if (!clip || !clip.paths.length) return;
+    const api = clip.op === 'cut' ? '/api/file/move' : '/api/file/copy';
+    let overwriteAll = null, done = 0, failed = 0;
+    const post = (src, dest, overwrite) => fetch(api, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ src, dest, overwrite }) }).catch(() => null);
+    for (const src of clip.paths) {
+      const base = src.split('/').pop();
+      let dest = this.currentPath + '/' + base;
+      if (dest === src) {
+        if (clip.op === 'cut') continue;          // move onto itself: no-op
+        dest = this._uniqueName(base);            // copy into same dir: duplicate
+      }
+      let r = await post(src, dest, false);
+      if (r && r.status === 409) {
+        if (overwriteAll === null) {
+          overwriteAll = await showConfirmDialog({ title: 'Overwrite?', message: `"${base}" already exists here. Overwrite existing item(s)?`, confirmText: 'Overwrite', danger: true });
+        }
+        if (!overwriteAll) { failed++; continue; }
+        r = await post(src, dest, true);
+      }
+      if (r?.ok) done++; else failed++;
+    }
+    if (clip.op === 'cut' && done) this.app._fileClipboard = null;
+    showToast(failed ? `Pasted ${done}, failed ${failed}` : `Pasted ${done} item${done > 1 ? 's' : ''}`, failed ? { type: 'error' } : {});
+    this.refresh();
+  }
+
+  async _duplicate(name) {
+    const r = await fetch('/api/file/copy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ src: this.currentPath + '/' + name, dest: this._uniqueName(name) }) }).catch(() => null);
+    if (!r?.ok) showToast('Duplicate failed', { type: 'error' });
+    this.refresh();
+  }
+
+  async _compressSelection(names) {
+    if (!names.length) return;
+    const def = (names.length === 1 ? names[0] : (this.currentPath.split('/').pop() || 'archive')) + '.zip';
+    const out = await showInputDialog({ title: `Compress ${names.length} item${names.length > 1 ? 's' : ''}`, label: 'Archive name (.zip / .tar.gz / .tar / .tar.xz)', value: def, confirmText: 'Compress' });
+    if (!out || !out.trim()) return;
+    const dest = this.currentPath + '/' + out.trim();
+    const paths = names.map(n => this.currentPath + '/' + n);
+    const post = (overwrite) => fetch('/api/archive', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paths, dest, overwrite }) }).catch(() => null);
+    showToast('Compressing\u2026');
+    let r = await post(false);
+    if (r && r.status === 409) {
+      const ok = await showConfirmDialog({ title: 'Overwrite', message: `"${out.trim()}" already exists. Overwrite?`, confirmText: 'Overwrite', danger: true });
+      if (!ok) return;
+      r = await post(true);
+    }
+    const d = await r?.json().catch(() => ({}));
+    if (!r?.ok) showToast('Compress failed: ' + (d?.error || 'unknown error'), { type: 'error' });
+    else showToast(`Created ${out.trim()} (${formatSize(d.size || 0)})`);
+    this.refresh();
+  }
+
+  async _extractArchive(name, here) {
+    const src = this.currentPath + '/' + name;
+    let dest = this.currentPath;
+    if (!here) {
+      const defFolder = name.replace(/\.(zip|tar\.gz|tar\.bz2|tar\.xz|tar|tgz|tbz2|txz|gz|bz2|xz)$/i, '');
+      const d = await showInputDialog({ title: 'Extract to Folder', label: 'Destination folder (under current directory)', value: defFolder, confirmText: 'Extract' });
+      if (!d || !d.trim()) return;
+      dest = this.currentPath + '/' + d.trim();
+    }
+    showToast('Extracting\u2026');
+    // overwrite:false = skip files that already exist (never destructive)
+    const r = await fetch('/api/archive/extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: src, dest, overwrite: false }) }).catch(() => null);
+    const dd = await r?.json().catch(() => ({}));
+    if (!r?.ok) showToast('Extract failed: ' + (dd?.error || 'unknown error'), { type: 'error' });
+    else showToast(here ? 'Extracted here' : `Extracted to ${dest.split('/').pop()}`);
+    this.refresh();
+  }
+
+  async _deleteSelection() {
+    const names = [...this._selection];
+    if (!names.length) return;
+    const ok = await showConfirmDialog({ title: 'Delete', message: names.length === 1 ? `Delete "${names[0]}"?` : `Delete ${names.length} items? Folders are removed with all contents.`, confirmText: 'Delete', danger: true });
+    if (!ok) return;
+    let failed = 0;
+    for (const n of names) {
+      const r = await fetch(`/api/file?path=${encodeURIComponent(this.currentPath + '/' + n)}`, { method: 'DELETE' }).catch(() => null);
+      if (!r?.ok) failed++;
+    }
+    if (failed) showToast(`Delete failed for ${failed} item(s)`, { type: 'error' });
+    this._selection.clear();
+    this.refresh();
+  }
+
+  async _showProperties(name) {
+    const fp = name ? this.currentPath + '/' + name : this.currentPath;
+    const r = await fetch(`/api/file/stat?path=${encodeURIComponent(fp)}&du=1`).catch(() => null);
+    const d = await r?.json().catch(() => null);
+    if (!d || d.error) { showToast('Could not read properties', { type: 'error' }); return; }
+    const overlay = document.createElement('div'); overlay.className = 'dialog-overlay'; overlay.style.zIndex = '99998';
+    const dialog = document.createElement('div'); dialog.className = 'dialog';
+    const header = document.createElement('div'); header.className = 'dialog-header';
+    const h3 = document.createElement('h3'); h3.textContent = 'Properties';
+    const closeBtn = document.createElement('button'); closeBtn.className = 'dialog-close'; closeBtn.textContent = '\u2715';
+    header.append(h3, closeBtn);
+    const body = document.createElement('div'); body.className = 'dialog-body';
+    const rows = [
+      ['Name', fp.split('/').pop() || '/'],
+      ['Path', fp],
+      ['Type', d.isDirectory ? `Folder (${d.entryCount ?? '?'} items)` : 'File'],
+      ['Size', d.isDirectory ? (d.duSize != null ? `${formatSize(d.duSize)} (recursive)` : 'unknown') : formatSize(d.size)],
+      ['Modified', d.modified ? new Date(d.modified).toLocaleString() : '-'],
+      ['Created', d.created ? new Date(d.created).toLocaleString() : '-'],
+      ['Permissions', d.mode || '-'],
+    ];
+    const table = document.createElement('div');
+    table.style.cssText = 'display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:12px;';
+    for (const [k, v] of rows) {
+      const kEl = document.createElement('div'); kEl.textContent = k; kEl.style.color = 'var(--text-dim)';
+      const vEl = document.createElement('div'); vEl.textContent = v; vEl.style.cssText = 'word-break:break-all;user-select:text;';
+      table.append(kEl, vEl);
+    }
+    body.appendChild(table);
+    dialog.append(header, body);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    const done = () => overlay.remove();
+    closeBtn.onclick = done;
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) done(); });
+    overlay.tabIndex = -1;
+    overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape' || e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); done(); } });
+    setTimeout(() => overlay.focus(), 0);
   }
 
   async _rename(oldName) {
@@ -1257,7 +1513,7 @@ class FileExplorer {
     try {
       // Try dedicated viewer first (reuses FileViewer.renderInto for all formats)
       this._previewContent.innerHTML = '';
-      const rendered = await FileViewer.renderInto(this._previewContent, fp, name);
+      const rendered = await FileViewer.renderInto(this._previewContent, fp, name, this.app);
       if (rendered) return;
 
       // Fallback: text preview for non-binary files
