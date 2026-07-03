@@ -238,63 +238,123 @@ class ChatSearch {
     this.applyHighlightLayer();
     const ranges = this._highlightRanges;
     if (!ranges || !ranges.length) { if (el) el.scrollIntoView({ block: 'center' }); return; }
-    const listRect = this._messageList.getBoundingClientRect();
-    let anchorY = listRect.top + listRect.height / 2;
-    if (el) { const r = el.getBoundingClientRect(); anchorY = r.top + r.height / 2; }
-    let best = 0, bestD = Infinity;
-    for (let i = 0; i < ranges.length; i++) {
-      const rr = ranges[i].getBoundingClientRect();
-      const d = Math.abs((rr.top + rr.height / 2) - anchorY);
-      if (d < bestD) { bestD = d; best = i; }
+    // Prefer a match INSIDE the anchor message — that's where the server located
+    // the hit (a visible copy of the query in a neighbouring message must not
+    // win). Fall back to the physically nearest MEASURABLE one (ranges inside
+    // collapsed cards report useless rects).
+    let best = el ? ranges.findIndex(r => el.contains(r.startContainer)) : -1;
+    if (best < 0) {
+      const listRect = this._messageList.getBoundingClientRect();
+      let anchorY = listRect.top + listRect.height / 2;
+      if (el) { const r = el.getBoundingClientRect(); anchorY = r.top + r.height / 2; }
+      let bestD = Infinity;
+      for (let i = 0; i < ranges.length; i++) {
+        const rr = ranges[i].getBoundingClientRect();
+        if (!rr.width && !rr.height) continue; // hidden (collapsed card) — unmeasurable
+        const d = Math.abs((rr.top + rr.height / 2) - anchorY);
+        if (d < bestD) { bestD = d; best = i; }
+      }
+      if (best < 0) best = 0;
     }
     this._setCurrentHighlight(best);
     this._scrollToRange(this._highlightRanges[best]);
   }
 
   /**
-   * Bring a highlight range fully into view and flash it. Two things the plain
-   * outer-list scroll couldn't do: (1) a match can be scrolled off INSIDE a card
-   * that has its own max-height + overflow (code blocks, tool output) — so we
-   * scroll every nested scroll container too; (2) a subtle CSS highlight in a
-   * long card gives no sense of WHERE the match is — so we pulse an overlay right
-   * on it. Both the inner-scroll and the outer-list centering re-run for ~1s
-   * because content-visibility keeps recomputing heights after a big slab loads.
+   * Bring a highlight range fully into view and flash it. Hard-won details:
+   * (1) most tool cards are COLLAPSED <details> — the match's ancestor chain
+   *     must be expanded first or nothing is visible;
+   * (2) expanding a card fires its deferred re-highlight, which REPLACES the
+   *     card's DOM and detaches our Range — every settle step re-acquires a
+   *     live range (same message element) when that happens;
+   * (3) a match can be scrolled off INSIDE a card both vertically (max-height)
+   *     and horizontally (nowrap long lines) — nested containers scroll on
+   *     both axes;
+   * (4) content-visibility keeps recomputing heights ~1s after a slab loads —
+   *     centering re-runs on rAF + timers.
    */
   _scrollToRange(range) {
     if (!range) return;
     const list = this._messageList;
+    let node = range.startContainer;
+    node = node.nodeType === 1 ? node : node.parentElement;
+    const msgEl = node?.closest?.('.chat-msg') || null;
+    let cur = range;
+    this._expandRangeAncestors(cur);
+    // Re-acquire a live range after the card interior was re-rendered (deferred
+    // rehighlight on expand). The message element itself is stable.
+    const reacquire = () => {
+      if (cur.startContainer.isConnected) return true;
+      this.applyHighlightLayer();
+      const ranges = this._highlightRanges || [];
+      const idx = msgEl ? ranges.findIndex(r => msgEl.contains(r.startContainer)) : -1;
+      if (idx < 0) return false;
+      cur = ranges[idx];
+      this._setCurrentHighlight(idx);
+      this._expandRangeAncestors(cur);
+      return true;
+    };
     const settle = () => {
-      this._scrollNestedIntoView(range); // reveal within inner scroll containers
+      if (!reacquire()) return;
+      this._scrollNestedIntoView(cur);
       const lr = list.getBoundingClientRect();
-      const rc = range.getBoundingClientRect();
+      const rc = cur.getBoundingClientRect();
       if (rc.width || rc.height) list.scrollTop += rc.top - lr.top - lr.height / 2;
     };
     let n = 0;
     const step = () => { settle(); if (++n < 12) requestAnimationFrame(step); };
     step();
     for (const d of [180, 400, 750]) setTimeout(settle, d);
-    this._flashRange(range);
+    this._flashRange(() => cur);
+  }
+
+  /** Open every collapsed <details> above the range and force the message
+   *  renderable — without this a match inside a collapsed tool card stays
+   *  invisible no matter how much we scroll. */
+  _expandRangeAncestors(range) {
+    let el = range.startContainer;
+    el = el.nodeType === 1 ? el : el.parentElement;
+    for (let n = el; n && n !== document.body; n = n.parentElement) {
+      if (n.tagName === 'DETAILS' && !n.open) n.open = true;
+      if (n.classList?.contains('chat-msg')) n.style.contentVisibility = 'visible';
+    }
   }
 
   /** Scroll every nested overflow:auto/scroll ancestor so `range` is visible
-   *  within it (the outer message list is handled separately). */
+   *  within it — BOTH axes: vertically (max-height cards) and horizontally
+   *  (nowrap code lines extend far past the card's right edge). The outer
+   *  message list is handled separately. */
   _scrollNestedIntoView(range) {
+    const probe = range.getBoundingClientRect();
+    if (!probe.width && !probe.height) return; // still hidden — nothing to measure
     let el = range.startContainer;
     el = el.nodeType === 1 ? el : el.parentElement;
     for (; el && el !== this._messageList && el !== document.body; el = el.parentElement) {
-      if (el.scrollHeight <= el.clientHeight + 4) continue;
-      const oy = getComputedStyle(el).overflowY;
-      if (oy !== 'auto' && oy !== 'scroll') continue;
-      const rc = range.getBoundingClientRect();
+      const cs = getComputedStyle(el);
+      const canV = el.scrollHeight > el.clientHeight + 4 && (cs.overflowY === 'auto' || cs.overflowY === 'scroll');
+      const canH = el.scrollWidth > el.clientWidth + 4 && (cs.overflowX === 'auto' || cs.overflowX === 'scroll');
+      if (!canV && !canH) continue;
       const er = el.getBoundingClientRect();
-      el.scrollTop += (rc.top - er.top) - (el.clientHeight - rc.height) / 2;
+      if (canV) {
+        const rc = range.getBoundingClientRect();
+        el.scrollTop += (rc.top - er.top) - (el.clientHeight - rc.height) / 2;
+      }
+      if (canH) {
+        const rc = range.getBoundingClientRect();
+        // only when actually outside the horizontal viewport (don't jiggle wrapped text)
+        if (rc.left < er.left + 4 || rc.right > er.left + el.clientWidth - 4) {
+          el.scrollLeft += (rc.left - er.left) - (el.clientWidth - rc.width) / 2;
+        }
+      }
     }
   }
 
   /** Pulse an overlay on the current match so the eye lands on it immediately,
-   *  even when it's buried in a long card. Tracks the range for ~1.2s so it
-   *  stays glued while the view is still settling. */
-  _flashRange(range) {
+   *  even when it's buried in a long card. Takes a GETTER because the range can
+   *  be re-acquired mid-flight (card re-render); tracks it for ~1.2s so it
+   *  stays glued while the view settles. Hidden while the match is clipped by
+   *  the list OR by any inner scroll container. */
+  _flashRange(getRange) {
     if (this._flashEl) { this._flashEl.remove(); this._flashEl = null; }
     const flash = document.createElement('div');
     flash.className = 'chat-search-flash';
@@ -304,10 +364,25 @@ class ChatSearch {
     const t0 = (typeof performance !== 'undefined' ? performance.now() : Date.now());
     const tick = () => {
       if (flash !== this._flashEl) return;               // superseded by a newer flash
-      const rc = range.getBoundingClientRect();
-      const lr = list.getBoundingClientRect();
-      // clip visibility check: hide the flash if the match scrolled out of the list
-      const visible = (rc.width || rc.height) && rc.bottom > lr.top && rc.top < lr.bottom;
+      const range = typeof getRange === 'function' ? getRange() : getRange;
+      let visible = false, rc = null;
+      if (range && range.startContainer.isConnected) {
+        rc = range.getBoundingClientRect();
+        const lr = list.getBoundingClientRect();
+        visible = (rc.width || rc.height) && rc.bottom > lr.top && rc.top < lr.bottom;
+        if (visible) {
+          // also hidden if clipped inside a nested scroll container
+          let el = range.startContainer;
+          el = el.nodeType === 1 ? el : el.parentElement;
+          for (; el && el !== list && el !== document.body; el = el.parentElement) {
+            const cs = getComputedStyle(el);
+            if (cs.overflowY === 'auto' || cs.overflowY === 'scroll' || cs.overflowX === 'auto' || cs.overflowX === 'scroll') {
+              const er = el.getBoundingClientRect();
+              if (rc.bottom < er.top || rc.top > er.bottom || rc.right < er.left || rc.left > er.right) { visible = false; break; }
+            }
+          }
+        }
+      }
       flash.style.display = visible ? 'block' : 'none';
       if (visible) {
         flash.style.left = (rc.left - 5) + 'px';
