@@ -58,6 +58,51 @@ function resolveCmd(name) {
 const DTACH_CMD = resolveCmd('dtach');
 const NODE_CMD = process.execPath;
 const ENV_CMD = resolveCmd('env');
+
+// ── X display detection (Linux clipboard / xclip) ──
+// The inherited DISPLAY is unreliable: the server is often (re)started from
+// shells with a stale value (e.g. :99 with no X server behind it), and under
+// XWayland the display also needs the compositor's XAUTHORITY cookie — without
+// it even the right display number fails. Probe candidates at startup and use
+// the first {DISPLAY, XAUTHORITY} pair that actually answers; this env is used
+// for the server's own xclip calls AND injected into spawned sessions (the CLI
+// reads the clipboard itself on Ctrl+V).
+function detectXDisplay() {
+  if (process.platform !== 'linux') return { DISPLAY: process.env.DISPLAY || '', XAUTHORITY: process.env.XAUTHORITY || '' };
+  const displays = [];
+  if (process.env.DISPLAY) displays.push(process.env.DISPLAY);
+  try {
+    for (const f of fs.readdirSync('/tmp/.X11-unix')) {
+      if (/^X\d+$/.test(f)) { const d = ':' + f.slice(1); if (!displays.includes(d)) displays.push(d); }
+    }
+  } catch {}
+  const xauths = [];
+  if (process.env.XAUTHORITY) xauths.push(process.env.XAUTHORITY);
+  try {
+    const rd = `/run/user/${process.getuid()}`;
+    for (const f of fs.readdirSync(rd)) {
+      // .mutter-Xwaylandauth.XXXXXX, Xauthority, xauth_XXXXXX (sddm), …
+      // NOTE: "Xwaylandauth" does NOT contain the substring "xauth" — match "auth"
+      if (/auth/i.test(f)) xauths.push(path.join(rd, f));
+    }
+  } catch {}
+  xauths.push(path.join(os.homedir(), '.Xauthority'));
+  const xauthCandidates = ['', ...xauths.filter((p, i, a) => p && a.indexOf(p) === i && fs.existsSync(p))];
+  const xsetCmd = resolveCmd('xset');
+  for (const d of displays) {
+    for (const xa of xauthCandidates) {
+      try {
+        execFileSync(xsetCmd, ['q'], {
+          env: { ...process.env, DISPLAY: d, ...(xa ? { XAUTHORITY: xa } : {}) },
+          timeout: 1500, stdio: 'ignore',
+        });
+        return { DISPLAY: d, XAUTHORITY: xa, probed: true };
+      } catch {}
+    }
+  }
+  return { DISPLAY: process.env.DISPLAY || '', XAUTHORITY: process.env.XAUTHORITY || '', probed: false }; // best effort
+}
+const X_ENV = detectXDisplay();
 const CLAUDE_CMD = CLAUDE_CMD_RAW.startsWith('/') ? CLAUDE_CMD_RAW : resolveCmd(CLAUDE_CMD_RAW);
 const CODEX_CMD = CODEX_CMD_RAW.startsWith('/') ? CODEX_CMD_RAW : resolveCmd(CODEX_CMD_RAW);
 const CODEX_LINUX_SANDBOX_CMD = resolveCmd('codex-linux-sandbox');
@@ -930,6 +975,7 @@ rm -f "\$SIGNAL"
 createEditorHelper();
 
 // ── File System API (extracted to src/routes/files.js) ──
+app.locals.xEnv = X_ENV;
 app.use(fileRoutes);
 
 // Browser proxy — full-rewriting web proxy via node-unblocker
@@ -1280,7 +1326,7 @@ registerWsHandler(wss, {
   readLayouts, writeLayouts, getSyncStore,
   sessionCounterRef, createSessionMessages, PERMISSION_MODES,
   SOCKETS_DIR, BUFFERS_DIR, META_DIR, PTY_WRAPPER, CHAT_WRAPPER,
-  NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, CODEX_CMD, EDITOR_CMD, PORT,
+  NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, CODEX_CMD, EDITOR_CMD, PORT, X_ENV,
   adapterRegistry, pty, path, fs, os, execFileSync, ensureDir,
 });
 
@@ -1329,6 +1375,7 @@ server.listen(PORT, HOST, () => {
   const ver = require('./package.json').version;
   console.log(`\n  VibeSpace v${ver} running at http://localhost:${PORT}`);
   console.log(`  dtach: ${DTACH_CMD}, node: ${NODE_CMD}, env: ${ENV_CMD}, claude: ${CLAUDE_CMD}, codex: ${CODEX_CMD}`);
+  if (process.platform === 'linux') console.log(`  X display: ${X_ENV.DISPLAY || '(none)'}${X_ENV.XAUTHORITY ? ' (xauth: ' + X_ENV.XAUTHORITY + ')' : ''} — clipboard image paste ${X_ENV.probed ? 'ready' : 'UNAVAILABLE (no working X display found)'}`);
 
   // Restore existing dtach sessions from before restart
   restoreSessions();

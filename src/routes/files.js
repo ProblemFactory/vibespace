@@ -274,7 +274,12 @@ router.post('/api/paste-image', (req, res) => {
         execFileSync('osascript', ['-e', `set the clipboard to (read POSIX file "${tmpPath}" as «class PNGf»)`], { timeout: 5000 });
         res.json({ path: tmpPath, ready: true });
       } else {
-        const clipEnv = { ...process.env, DISPLAY: process.env.DISPLAY || ':99' };
+        // Use the display the server PROBED at startup (app.locals.xEnv) — the
+        // inherited DISPLAY is often stale, and XWayland needs the compositor's
+        // XAUTHORITY cookie or xclip fails with "Can't open display".
+        const xEnv = req.app.locals.xEnv || {};
+        const clipEnv = { ...process.env, DISPLAY: xEnv.DISPLAY || process.env.DISPLAY || ':0' };
+        if (xEnv.XAUTHORITY) clipEnv.XAUTHORITY = xEnv.XAUTHORITY;
         const cp = spawn('bash', ['-c', `cat "${tmpPath}" | xclip -selection clipboard -t ${mimeType}`], {
           env: clipEnv, detached: true, stdio: 'ignore',
         });

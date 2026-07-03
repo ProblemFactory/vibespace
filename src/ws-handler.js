@@ -71,7 +71,7 @@ function registerWsHandler(wss, ctx) {
     readLayouts, writeLayouts, getSyncStore,
     sessionCounterRef, createSessionMessages, PERMISSION_MODES,
     SOCKETS_DIR, BUFFERS_DIR, META_DIR, PTY_WRAPPER, CHAT_WRAPPER,
-    NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, PORT,
+    NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, PORT, X_ENV,
     adapterRegistry, pty, path, fs, os, execFileSync, ensureDir,
   } = ctx;
 
@@ -215,7 +215,11 @@ function registerWsHandler(wss, ctx) {
             createPty = pty.spawn(DTACH_CMD, ['-c', socketPath, '-E', '-r', 'none',
               NODE_CMD, wrapper,
               bufFile, metaFileW,
-              ENV_CMD, `EDITOR=${EDITOR_CMD}`, `CLAUDE_WEBUI_PORT=${PORT}`, `CLAUDE_WEBUI_SESSION_ID=${id}`, `DISPLAY=${process.env.DISPLAY || (process.platform === 'darwin' ? '' : ':99')}`,
+              ENV_CMD, `EDITOR=${EDITOR_CMD}`, `CLAUDE_WEBUI_PORT=${PORT}`, `CLAUDE_WEBUI_SESSION_ID=${id}`,
+              // Probed working X display (see server.js detectXDisplay) — the CLI
+              // reads the clipboard itself on Ctrl+V, so it needs BOTH vars
+              `DISPLAY=${X_ENV?.DISPLAY || process.env.DISPLAY || ''}`,
+              ...(X_ENV?.XAUTHORITY ? [`XAUTHORITY=${X_ENV.XAUTHORITY}`] : []),
               `TERM=xterm-256color`, `COLORTERM=truecolor`,
               ...Object.entries(sessionSpec.env || {}).map(([k, v]) => `${k}=${v == null ? '' : String(v)}`),
               sessionSpec.cmd || CLAUDE_CMD, ...(sessionSpec.args || []),
