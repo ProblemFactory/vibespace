@@ -10,7 +10,7 @@ import { CodeEditor } from './code-editor.js';
 import { LayoutManager } from './layout.js';
 import { ChatView } from './chat-view.js';
 import { Resizer } from './resizer.js';
-import { createPopover, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate } from './utils.js';
+import { createPopover, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml } from './utils.js';
 import { MobileNav } from './mobile-nav.js';
 import { setupDirAutocomplete } from './autocomplete.js';
 import { getAvailableFonts } from './terminal.js';
@@ -471,11 +471,13 @@ class App {
     }
 
     const usageColor = (pct) => (pct > 80 ? 'var(--red)' : pct > 50 ? 'var(--yellow)' : 'var(--green)');
+    // Donut with the window label in the hole — 5h vs 7d distinguishable at a
+    // glance instead of two identical pies
     const renderPie = (label, pct) => {
       const clamped = Math.max(0, Math.min(100, Math.round(pct || 0)));
       const color = usageColor(clamped);
       const deg = Math.round(clamped * 3.6);
-      return `<div class="usage-pie" title="${label}: ${clamped}%" style="background:conic-gradient(${color} ${deg}deg, var(--bg-input) ${deg}deg)"></div>`;
+      return `<div class="usage-pie usage-donut" title="${label}: ${clamped}%" style="background:conic-gradient(${color} ${deg}deg, var(--bg-input) ${deg}deg)"><span class="usage-donut-label">${label}</span></div>`;
     };
     const renderRow = (backend, primaryLabel, primaryPct, secondaryLabel, secondaryPct) => (
       `<div class="taskbar-usage-row">
@@ -510,6 +512,20 @@ class App {
       const color7d = usageColor(pct7d);
       rows.push(renderRow('claude', '5h', pct5h, '7d', pct7d));
       updatedAt = Math.max(updatedAt, rl.fetchedAt || 0);
+      const scopedSections = [];
+      for (const sc of rl.scopedWeekly || []) {
+        const pctSc = Math.round((sc.utilization || 0) * 100);
+        const colorSc = usageColor(pctSc);
+        scopedSections.push(`
+      <div class="usage-session">
+        <div class="usage-session-name">${escHtml(sc.name)} weekly limit</div>
+        <div class="usage-bar" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pctSc}%;background:${colorSc}"></div></div>
+        <div class="usage-session-stats">
+          <span class="usage-stat">${pctSc}% used</span>
+          <span class="usage-stat"><span class="usage-stat-label">Resets</span> ${fmtReset(sc.resetsAt)}</span>
+        </div>
+      </div>`);
+      }
       sections.push(`${renderSectionTitle('claude', 'Claude')}
       <div class="usage-session">
         <div class="usage-session-name">5-hour limit</div>
@@ -526,7 +542,7 @@ class App {
           <span class="usage-stat">${pct7d}% used</span>
           <span class="usage-stat"><span class="usage-stat-label">Resets</span> ${fmtReset(rl.sevenDay?.resetsAt)}</span>
         </div>
-      </div>`);
+      </div>${scopedSections.join('')}`);
     }
 
     if (codex?.fiveHour || codex?.sevenDay) {

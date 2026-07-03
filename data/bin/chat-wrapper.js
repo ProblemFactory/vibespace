@@ -140,8 +140,14 @@ child.stdout.on('data', (chunk) => {
       }
     }
 
-    // Track streaming state
-    if (msg.type === 'user') { meta.streaming = true; scheduleMeta(); }
+    // Track streaming state. Local-command echoes ("<local-command-stdout>...")
+    // are user records with no turn behind them — not a streaming start.
+    if (msg.type === 'user') {
+      const uText = typeof msg.message?.content === 'string'
+        ? msg.message.content
+        : (Array.isArray(msg.message?.content) ? msg.message.content.map(b => b.text || '').join('') : '');
+      if (!/^<local-command-/.test(uText.trim())) { meta.streaming = true; scheduleMeta(); }
+    }
     if (msg.type === 'result' || (msg.type === 'system' && msg.subtype === 'compact_boundary')) {
       meta.streaming = false;
       for (const [id, t] of Object.entries(meta.tasks)) {

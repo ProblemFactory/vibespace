@@ -748,6 +748,17 @@ html, body {
 .taskbar-usage-row { display: flex; align-items: center; gap: 4px; }
 .taskbar-usage-pair { display: flex; align-items: center; gap: 3px; }
 .taskbar-usage-backend { width: 11px; height: 11px; font-size: 7px; }
+/* Donut variant: window label (5h/7d) in the hole for at-a-glance distinction */
+.usage-donut { position: relative; display: flex; align-items: center; justify-content: center; }
+.usage-donut::before {
+  content: ''; position: absolute; inset: 22%; border-radius: 50%;
+  background: var(--bg-taskbar, var(--bg-window));
+}
+.usage-donut-label {
+  position: relative; z-index: 1;
+  font-size: calc(var(--usage-pie-size, 14px) * 0.42); line-height: 1;
+  font-weight: 700; color: var(--text-dim); letter-spacing: -0.3px;
+}
 .usage-pie {
   width: var(--usage-pie-size, 14px); height: var(--usage-pie-size, 14px);
   border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 1px var(--border);
@@ -1254,6 +1265,7 @@ html, body {
     white-space: nowrap; min-height: 32px;
   }
   .mobile-term-key:active { background: var(--accent); color: var(--accent-fg); }
+  .mobile-term-key.active { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
 
   /* Chat: optimize for touch */
   .chat-view { height: 100%; }
@@ -1304,6 +1316,17 @@ html, body {
 }
 
 /* Mobile terminal key toolbar (hidden on desktop) */
+/* Mobile paste pad: visible long-press → Paste target (HTTP fallback where the
+   async Clipboard API is unavailable). Routes into the same paste pipeline. */
+.term-paste-pad {
+  position: absolute; left: 50%; bottom: 64px; transform: translateX(-50%);
+  min-width: 240px; min-height: 56px; z-index: 30;
+  border: 2px dashed var(--accent); border-radius: var(--radius);
+  background: var(--bg-window); color: var(--text);
+  padding: 16px; font-size: 14px; text-align: center;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+}
+.term-paste-pad:empty::before { content: attr(data-hint); color: var(--text-dim); pointer-events: none; }
 .mobile-term-keys { display: none; }
 
 /* ── Touch & motion accessibility ── */

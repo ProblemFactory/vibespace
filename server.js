@@ -678,8 +678,17 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
                 session._isStreaming = false;
                 newLabel = '';
               } else if (msg.type === 'user' && !msg.parent_tool_use_id && !msg.isSidechain) {
-                session._isStreaming = true;
-                newLabel = 'thinking...';
+                // Local-command echoes (e.g. "<local-command-stdout>Set model
+                // to ...") are user records with NO turn behind them — treating
+                // them as a turn start left the chat stuck on "thinking..."
+                // forever after a model switch.
+                const uText = typeof msg.message?.content === 'string'
+                  ? msg.message.content
+                  : (Array.isArray(msg.message?.content) ? msg.message.content.map(b => b.text || '').join('') : '');
+                if (!/^<local-command-/.test(uText.trim())) {
+                  session._isStreaming = true;
+                  newLabel = 'thinking...';
+                }
               } else if (msg.type === 'assistant' && !msg.parent_tool_use_id && !msg.isSidechain) {
                 const blocks = msg.message?.content;
                 if (Array.isArray(blocks)) {
@@ -1165,8 +1174,23 @@ function _fetchOAuthUsage(token) {
         } : { utilization: 0, status: 'unknown', resetsAt: 0 };
         const fiveHour = toWin(u.five_hour);
         const sevenDay = toWin(u.seven_day);
+        // Model-scoped weekly limits (e.g. Anthropic's separate Fable cap) ride
+        // in the limits[] array as kind:"weekly_scoped" with scope.model.
+        const scopedWeekly = [];
+        if (Array.isArray(u.limits)) {
+          for (const lim of u.limits) {
+            if (lim?.kind === 'weekly_scoped' && lim.scope?.model?.display_name) {
+              scopedWeekly.push({
+                name: lim.scope.model.display_name,
+                utilization: (typeof lim.percent === 'number' ? lim.percent : 0) / 100,
+                resetsAt: lim.resets_at ? Math.floor(Date.parse(lim.resets_at) / 1000) || 0 : 0,
+                severity: lim.severity || 'normal',
+              });
+            }
+          }
+        }
         _rateLimitCache = {
-          fiveHour, sevenDay,
+          fiveHour, sevenDay, scopedWeekly,
           overallStatus: (fiveHour.status === 'limited' || sevenDay.status === 'limited') ? 'limited' : 'allowed',
           fetchedAt: Date.now(),
         };

@@ -138,8 +138,15 @@ class TerminalSession {
     // when the terminal element gains/loses browser focus. These cause ^[[I^[[O
     // spam when clicking between terminal and other UI elements (e.g. split-pane editor).
     this.terminal.onData((data) => {
-      const filtered = data.replace(/\x1b\[I|\x1b\[O/g, '');
+      let filtered = data.replace(/\x1b\[I|\x1b\[O/g, '');
       if (!filtered) return;
+      // Sticky Ctrl (mobile key row): the next typed letter becomes a control
+      // byte — soft keyboards have no Ctrl, this is the standard workaround.
+      if (this._ctrlSticky && filtered.length === 1) {
+        const c = filtered.toLowerCase().charCodeAt(0);
+        if (c >= 97 && c <= 122) filtered = String.fromCharCode(c - 96);
+        this._setCtrlSticky(false);
+      }
       // Auto-repin when user types while scrolled up (skip if split-pane editor is active)
       if (!this._pinned && !this.winInfo?._editorDoSave) this._repin();
       this.ws.send({ type: 'input', sessionId, data: filtered });
@@ -200,25 +207,10 @@ class TerminalSession {
           if (_pasteInFlight) return; // dedupe rapid re-triggers
           _pasteInFlight = true;
           const blob = item.getAsFile();
-          const reader = new FileReader();
-          reader.onload = async () => {
-            try {
-              // Upload image and wait for server to set clipboard
-              const res = await fetch('/api/paste-image', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ dataUrl: reader.result }),
-              });
-              const data = await res.json();
-              if (data.ready) {
-                // Trigger paste — clipboard is ready
-                // Send Ctrl+V (0x16) — Claude Code's Ink input handler checks clipboard on this
-                this.ws.send({ type: 'input', sessionId, data: '\x16' });
-              }
-            } catch {}
+          this._uploadImageBlob(blob).finally(() => {
             this.terminal.focus();
             setTimeout(() => { _pasteInFlight = false; }, 1000);
-          };
-          reader.readAsDataURL(blob);
+          });
           return;
         }
       }
@@ -343,25 +335,53 @@ class TerminalSession {
     winInfo.onResize = () => this.fit();
     this._ro = new ResizeObserver(() => this.fit()); this._ro.observe(container);
 
-    // Mobile: special key toolbar (hidden on desktop via CSS)
+    // Mobile: special key toolbar (hidden on desktop via CSS). Horizontally
+    // scrollable; sticky Ctrl turns the next typed letter into a control byte;
+    // arrows repeat on hold; 📋 pastes (incl. images) via _mobilePaste.
     const mobileKeys = document.createElement('div');
     mobileKeys.className = 'mobile-term-keys';
+    const sendKey = (data) => { this.ws.send({ type: 'input', sessionId, data }); };
     const keys = [
-      { label: 'Ctrl+C', data: '\x03' },
-      { label: 'Ctrl+G', data: '\x07' },
-      { label: 'Ctrl+Z', data: '\x1a' },
-      { label: 'Ctrl+D', data: '\x04' },
-      { label: 'Ctrl+\\', data: '\x1c' },
-      { label: 'Tab', data: '\t' },
       { label: 'Esc', data: '\x1b' },
-      { label: '↑', data: '\x1b[A' },
-      { label: '↓', data: '\x1b[B' },
+      { label: 'Tab', data: '\t' },
+      { label: '⇧Tab', data: '\x1b[Z', title: 'Shift+Tab — cycle permission modes' },
+      { label: 'Ctrl', sticky: true, title: 'Sticky Ctrl: next letter becomes Ctrl+letter' },
+      { label: '←', data: '\x1b[D', repeat: true },
+      { label: '↓', data: '\x1b[B', repeat: true },
+      { label: '↑', data: '\x1b[A', repeat: true },
+      { label: '→', data: '\x1b[C', repeat: true },
+      { label: '📋', paste: true, title: 'Paste (text or image)' },
+      { label: '^C', data: '\x03', title: 'Ctrl+C — interrupt' },
+      { label: '^G', data: '\x07', title: 'Ctrl+G — open editor' },
+      { label: '^R', data: '\x12', title: 'Ctrl+R — history search' },
+      { label: '^Z', data: '\x1a' },
+      { label: '^D', data: '\x04' },
+      { label: '^\\', data: '\x1c', title: 'Ctrl+\\ — command mode' },
     ];
     for (const k of keys) {
       const btn = document.createElement('button');
       btn.className = 'mobile-term-key';
       btn.textContent = k.label;
-      btn.onclick = (e) => { e.preventDefault(); this.ws.send({ type: 'input', sessionId, data: k.data }); this.terminal.focus(); };
+      if (k.title) btn.title = k.title;
+      if (k.sticky) {
+        this._ctrlKeyBtn = btn;
+        btn.onclick = (e) => { e.preventDefault(); this._setCtrlSticky(!this._ctrlSticky); this.terminal.focus(); };
+      } else if (k.paste) {
+        btn.onclick = (e) => { e.preventDefault(); this._mobilePaste(); };
+      } else if (k.repeat) {
+        // Hold-to-repeat: 350ms delay then every 140ms
+        let holdT = null, repT = null;
+        const stop = () => { clearTimeout(holdT); clearInterval(repT); holdT = repT = null; };
+        btn.addEventListener('pointerdown', (e) => {
+          e.preventDefault();
+          sendKey(k.data);
+          holdT = setTimeout(() => { repT = setInterval(() => sendKey(k.data), 140); }, 350);
+        });
+        for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) btn.addEventListener(ev, stop);
+        btn.onclick = (e) => e.preventDefault();
+      } else {
+        btn.onclick = (e) => { e.preventDefault(); sendKey(k.data); this.terminal.focus(); };
+      }
       mobileKeys.appendChild(btn);
     }
     winInfo.content.appendChild(mobileKeys);
@@ -381,6 +401,81 @@ class TerminalSession {
     } else {
       this.terminal.scrollToBottom();
     }
+  }
+
+  // Upload an image blob to the server (sets the X clipboard) then send Ctrl+V
+  // so the CLI reads it — shared by desktop Ctrl+V paste and the mobile 📋 flow.
+  _uploadImageBlob(blob) {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const res = await fetch('/api/paste-image', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dataUrl: reader.result }),
+          });
+          const data = await res.json();
+          if (data.ready) this.ws.send({ type: 'input', sessionId: this.sessionId, data: '\x16' });
+        } catch {}
+        resolve();
+      };
+      reader.onerror = () => resolve();
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  _setCtrlSticky(on) {
+    this._ctrlSticky = on;
+    if (this._ctrlKeyBtn) this._ctrlKeyBtn.classList.toggle('active', on);
+  }
+
+  // Mobile paste: prefer the async Clipboard API (HTTPS — reads images
+  // directly); over HTTP fall back to a visible paste pad the user long-presses
+  // → Paste into, which feeds the SAME paste-event pipeline as desktop Ctrl+V.
+  async _mobilePaste() {
+    try {
+      if (navigator.clipboard?.read) {
+        const items = await navigator.clipboard.read();
+        for (const it of items) {
+          const imgType = it.types.find(t => t.startsWith('image/'));
+          if (imgType) { const blob = await it.getType(imgType); await this._uploadImageBlob(blob); this.terminal.focus(); return; }
+        }
+        const text = await navigator.clipboard.readText();
+        if (text) { this.ws.send({ type: 'input', sessionId: this.sessionId, data: '\x1b[200~' + text + '\x1b[201~' }); this.terminal.focus(); return; }
+      }
+    } catch {} // permission denied / HTTP — fall through to the paste pad
+    this._showPastePad();
+  }
+
+  _showPastePad() {
+    if (this._pastePad?.isConnected) { this._pastePad.focus(); return; }
+    const pad = document.createElement('div');
+    pad.className = 'term-paste-pad';
+    pad.contentEditable = 'true';
+    pad.dataset.hint = 'Long-press here and tap Paste';
+    const hide = () => { pad.remove(); this._pastePad = null; };
+    pad.addEventListener('paste', (e) => {
+      // Route through the SAME pipeline as desktop: image → upload+Ctrl+V,
+      // text → bracketed paste
+      const items = e.clipboardData?.items || [];
+      e.preventDefault();
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          const blob = item.getAsFile();
+          this._uploadImageBlob(blob).finally(() => this.terminal.focus());
+          hide();
+          return;
+        }
+      }
+      const text = e.clipboardData?.getData('text/plain');
+      if (text) this.ws.send({ type: 'input', sessionId: this.sessionId, data: '\x1b[200~' + text + '\x1b[201~' });
+      hide();
+      this.terminal.focus();
+    });
+    pad.addEventListener('blur', () => setTimeout(() => { if (this._pastePad === pad) hide(); }, 8000));
+    this.winInfo.content.appendChild(pad);
+    this._pastePad = pad;
+    pad.focus();
   }
 
   _getGlobalFontSize() { return parseInt(localStorage.getItem('termFontSize')) || 14; }

@@ -88,6 +88,14 @@ Configure via Settings > Terminal > **Waiting blink behavior**:
 - **Only when unfocused** — default
 - **Never** — disable blinking entirely
 
+## Mobile Key Row
+
+On phones (≤768px) a horizontally scrollable key row sits under the terminal: **Esc, Tab, ⇧Tab** (cycles Claude's permission modes), **Ctrl** (sticky: tap it, then type a letter to send Ctrl+letter), arrow keys (hold to repeat), **📋 Paste**, and common control combos (^C interrupt, ^G editor, ^R history search, ^Z, ^D, ^\ command mode).
+
+**Paste on mobile**: tap 📋 — text and images both work. On HTTPS the clipboard is read directly; over HTTP a dashed "long-press here and tap Paste" pad appears, and pasting into it routes through the same pipeline as desktop Ctrl+V (images upload to the server clipboard and are handed to the CLI).
+
+**Ctrl+G on mobile**: the ^G key opens the same split-pane editor as desktop.
+
 ## Clipboard Image Paste
 
 Paste images from your system clipboard directly into Claude Code:
