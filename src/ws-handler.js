@@ -67,7 +67,7 @@ function pickCodexThreadCandidate({ activeSessions, webuiSessionId, cwd, created
 function registerWsHandler(wss, ctx) {
   const {
     activeSessions, WS_OPEN, broadcastActiveSessions, broadcastToSession, resizeSessionToMin,
-    setupSessionPty, refreshWebuiPids, deleteSessionMeta, writeSessionMeta,
+    setupSessionPty, refreshWebuiPids, deleteSessionMeta, writeSessionMeta, readSessionMeta,
     readLayouts, writeLayouts, getSyncStore,
     sessionCounterRef, createSessionMessages, PERMISSION_MODES,
     SOCKETS_DIR, BUFFERS_DIR, META_DIR, PTY_WRAPPER, CHAT_WRAPPER,
@@ -251,6 +251,7 @@ function registerWsHandler(wss, ctx) {
             agentNickname: session.agentNickname,
             parentThreadId: session.parentThreadId,
             permissionMode: session._permissionMode || null,
+            effort: session._effort || null,
             createdAt: session.createdAt,
             webuiSessionId: id,
             mode: sessionMode,
@@ -288,6 +289,10 @@ function registerWsHandler(wss, ctx) {
                       agentNickname: session.agentNickname,
                       parentThreadId: session.parentThreadId,
                       permissionMode: session._permissionMode || null,
+              effort: session._effort || null,
+                  effort: session._effort || null,
+                      effort: session._effort || null,
+            effort: session._effort || null,
                       createdAt: session.createdAt,
                       webuiSessionId: id,
                       mode: sessionMode,
@@ -340,6 +345,9 @@ function registerWsHandler(wss, ctx) {
                   parentThreadId: session.parentThreadId,
                   forkedFrom: session.forkedFrom || null,
                   permissionMode: session._permissionMode || null,
+              effort: session._effort || null,
+                  effort: session._effort || null,
+            effort: session._effort || null,
                   createdAt: session.createdAt,
                   webuiSessionId: id,
                   mode: sessionMode,
@@ -391,8 +399,13 @@ function registerWsHandler(wss, ctx) {
               try {
                 session.pty.write(adapter.formatSetEffort(data.effort) + '\n');
                 // remembered for attach restore — the CLI never reports effort
-                // back (claude), so the last COMMANDED value is what we show
+                // back (claude), so the last COMMANDED value is what we show.
+                // Persisted in session meta so it survives server restarts.
                 session._effort = data.effort || null;
+                if (session.sockName) {
+                  const m = readSessionMeta(session.sockName);
+                  writeSessionMeta(session.sockName, { ...m, effort: session._effort });
+                }
               } catch {}
             }
           }
@@ -568,6 +581,8 @@ function registerWsHandler(wss, ctx) {
               agentNickname: session.agentNickname || '',
               parentThreadId: session.parentThreadId || null,
               permissionMode: session._permissionMode || null,
+              effort: session._effort || null,
+            effort: session._effort || null,
               createdAt: session.createdAt,
               webuiSessionId: targetId,
               mode: session.mode || 'terminal',

@@ -516,6 +516,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
                 parentThreadId: session.parentThreadId || null,
                 forkedFrom: session.forkedFrom || null,
                 permissionMode: session._permissionMode || null,
+                effort: session._effort || null,
                 createdAt: session.createdAt,
                 webuiSessionId: id,
                 mode: session.mode,
@@ -682,6 +683,8 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
                   parentThreadId: session.parentThreadId || null,
                   forkedFrom: session.forkedFrom || null,
                   permissionMode: session._permissionMode || null,
+                  effort: session._effort || null,
+                effort: session._effort || null,
                   createdAt: session.createdAt,
                   webuiSessionId: id,
                   mode: session.mode,
@@ -944,6 +947,7 @@ function restoreSessions() {
       // Permission mode isn't recoverable from the JSONL (init records are
       // stdout-only) — restore what the session was launched with
       _permissionMode: meta.permissionMode || null,
+      _effort: meta.effort || null,
       sockName: sockFile,
       socketPath,
       buffer: savedBuffer,
@@ -1387,7 +1391,7 @@ app.get('/api/session-options', (req, res) => {
 const { registerWsHandler } = require('./src/ws-handler');
 registerWsHandler(wss, {
   activeSessions, WS_OPEN, broadcastActiveSessions, broadcastToSession, resizeSessionToMin,
-  setupSessionPty, refreshWebuiPids, deleteSessionMeta, writeSessionMeta,
+  setupSessionPty, refreshWebuiPids, deleteSessionMeta, writeSessionMeta, readSessionMeta,
   readLayouts, writeLayouts, getSyncStore,
   sessionCounterRef, createSessionMessages, PERMISSION_MODES,
   SOCKETS_DIR, BUFFERS_DIR, META_DIR, PTY_WRAPPER, CHAT_WRAPPER,

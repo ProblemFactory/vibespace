@@ -319,7 +319,11 @@ class SessionMessages {
     const msgs = this._all;
     let lastUsage = null, model = null, contextWindow = 0, totalCost = 0, slashCommands = null, permissionMode = null;
     let assistantModel = null;
-    for (let i = msgs.length - 1; i >= Math.max(0, msgs.length - 200); i--) {
+    // Scan depth: the tail of _all can be dominated by hundreds of surviving
+    // buffer records (stdout-only system/hook events that never dedup against
+    // the JSONL) — a 200-record window missed every assistant usage record and
+    // the status bar lost its context% on refresh. 2000 covers the spam.
+    for (let i = msgs.length - 1; i >= Math.max(0, msgs.length - 2000); i--) {
       const m = msgs[i];
       if (!lastUsage && m.type === 'assistant' && m.message?.usage) lastUsage = m.message.usage;
       // result/init records are stream-json stdout-only — they NEVER appear in
