@@ -37,7 +37,7 @@ class ClaudeCodeAdapter extends BackendAdapter {
    * This adapter provides the command line arguments and session config.
    */
   buildSessionArgs(options) {
-    const { cwd, model, permissionMode, resumeId, sessionName, effort, extraArgs = [], mode = 'chat' } = options;
+    const { cwd, model, permissionMode, resumeId, sessionName, effort, extraArgs = [], mode = 'chat', tuiRenderer } = options;
     const args = [];
 
     if (resumeId) {
@@ -49,9 +49,20 @@ class ClaudeCodeAdapter extends BackendAdapter {
     if (effort) args.push('--effort', effort);
     if (extraArgs.length) args.push(...extraArgs);
 
+    // TUI renderer for terminal-mode sessions (CLI ≥2.1.x): "fullscreen" is the
+    // flicker-free alternate-screen renderer with virtualized scrollback (same
+    // as /tui fullscreen), "classic" forces the main-screen renderer. Unset =
+    // whatever preference the CLI has saved. Chat mode has no TUI — skip.
+    const env = {};
+    if (mode !== 'chat') {
+      if (tuiRenderer === 'fullscreen') env.CLAUDE_CODE_NO_FLICKER = '1';
+      else if (tuiRenderer === 'classic') env.CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN = '1';
+    }
+
     return {
       cmd: this.config.claudeCmd,
       args,
+      env,
       wrapper: mode === 'chat' ? this.config.chatWrapper : this.config.ptyWrapper,
       cwd: cwd || os.homedir(),
       mode,

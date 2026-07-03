@@ -157,6 +157,7 @@ function registerWsHandler(wss, ctx) {
             extraArgs,
             initialPrompt: data.initialPrompt || '',
             mode: sessionMode,
+            tuiRenderer: data.tuiRenderer || '',
           });
           // For codex resume: inherit forkedFrom chain from old session's JSONL
           if (backend === 'codex' && data.resumeId && sessionSpec.env) {

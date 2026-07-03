@@ -2,6 +2,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
+import { WebglAddon } from '@xterm/addon-webgl';
 import { THEMES } from './themes.js';
 import { attachPopoverClose } from './utils.js';
 
@@ -99,8 +100,39 @@ class TerminalSession {
     this.terminal.loadAddon(unicode11);
     this.terminal.unicode.activeVersion = '11';
     this.terminal.open(container);
+    // WebGL renderer: device-pixel-aligned cells. The default DOM renderer lays
+    // rows out with browser-rounded letter spacing while fit() computes cols from
+    // the UNROUNDED cell width — the accumulated fraction clipped the rightmost
+    // column. WebGL removes that whole class of bugs (and repaints far faster =
+    // less TUI flicker). Falls back to the DOM renderer when WebGL is unavailable.
+    try {
+      const webgl = new WebglAddon();
+      webgl.onContextLoss(() => { try { webgl.dispose(); } catch {} this._webgl = null; });
+      this.terminal.loadAddon(webgl);
+      this._webgl = webgl;
+    } catch { this._webgl = null; }
+    // Paint the container in the terminal theme background: cols/rows are whole
+    // cells, so up to one cell of remainder is unavoidable — in window-chrome
+    // color it read as "the TUI is smaller than the window"; in the terminal's
+    // own background it's invisible.
+    container.style.background = effectiveTheme.background || '#000';
     requestAnimationFrame(() => this.fit());
     setTimeout(() => this.fit(), 500);
+    // Device-pixel-ratio change (browser zoom, moving between monitors): glyph
+    // atlas + measured cell size are stale — rebuild and refit.
+    this._dprCleanup = null;
+    const watchDpr = () => {
+      const mq = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+      const onChange = () => {
+        try { this.terminal.clearTextureAtlas(); } catch {}
+        this.fit();
+        mq.removeEventListener('change', onChange);
+        watchDpr(); // re-arm for the new ratio
+      };
+      mq.addEventListener('change', onChange);
+      this._dprCleanup = () => mq.removeEventListener('change', onChange);
+    };
+    watchDpr();
 
     // Filter out focus in/out sequences (\e[I and \e[O) that xterm.js sends
     // when the terminal element gains/loses browser focus. These cause ^[[I^[[O
@@ -210,9 +242,13 @@ class TerminalSession {
     scrollBtn.onclick = () => { this._repin(); };
     winInfo.content.appendChild(scrollBtn);
 
-    // Detect user scroll via wheel — unpin on scroll up, re-pin on scroll to bottom
+    // Detect user scroll via wheel — unpin on scroll up, re-pin on scroll to bottom.
+    // Only meaningful on the NORMAL buffer: a fullscreen TUI on the alternate
+    // screen (claude's flicker-free renderer, vim, htop) has no xterm scrollback —
+    // the wheel is mouse-reported to the app, which scrolls its own content.
     container.addEventListener('wheel', () => {
       requestAnimationFrame(() => {
+        if (this.terminal.buffer.active.type === 'alternate') return;
         const buf = this.terminal.buffer.active;
         const atBottom = buf.viewportY >= buf.baseY;
         if (atBottom && !this._pinned) this._repin();
@@ -222,7 +258,14 @@ class TerminalSession {
 
     this.ws.on(sessionId, (msg) => {
       if (msg.type === 'output') {
-        if (!this._pinned) {
+        // Alternate screen: the freeze/queue machinery exists to stop main-screen
+        // TUI redraws yanking the scrolled-up viewport — an alt-screen TUI owns
+        // the whole viewport, so freezing its frames would just show a stale
+        // screen. Always write through (and flush anything queued on the way in).
+        if (this.terminal.buffer.active.type === 'alternate') {
+          if (!this._pinned) { this._pendingOutput = (this._pendingOutput || '') + msg.data; this._repin(); }
+          else this.terminal.write(msg.data);
+        } else if (!this._pinned) {
           // Queue output while user is scrolled up — write all at once when re-pinned
           this._pendingOutput = (this._pendingOutput || '') + msg.data;
         } else {
@@ -410,6 +453,7 @@ class TerminalSession {
     if (key === 'theme') {
       const t = value ? (THEMES[value]?.terminal || this.themeManager.getTerminalTheme()) : this.themeManager.getTerminalTheme();
       this.terminal.options.theme = t;
+      this._syncContainerBg();
     } else if (key === 'fontSize') {
       this.terminal.options.fontSize = value || this._getGlobalFontSize();
       try { this.terminal.clearTextureAtlas(); } catch {}
@@ -477,6 +521,7 @@ class TerminalSession {
   updateTheme(theme) {
     if (!this.overrides.theme) {
       this.terminal.options.theme = theme;
+      this._syncContainerBg();
       // Re-check minimum contrast for new theme background
       const mcr = this._settings?.get('terminal.minimumContrastRatio') ?? 1;
       if (mcr <= 1) {
@@ -489,6 +534,14 @@ class TerminalSession {
         this.terminal.options.minimumContrastRatio = L > 0.4 ? 4.5 : 1;
       }
     }
+  }
+
+  // Keep the container painted in the active terminal background so the
+  // whole-cell remainder around the grid is invisible (not window-chrome color)
+  _syncContainerBg() {
+    const bg = this.terminal.options.theme?.background;
+    const container = this.terminal.element?.parentElement;
+    if (bg && container) container.style.background = bg;
   }
 
   _setBell(on) {
@@ -512,6 +565,8 @@ class TerminalSession {
 
   focus() { this.terminal.focus(); this._setBell(false); this._setWaiting(false); }
   dispose() {
+    if (this._dprCleanup) this._dprCleanup();
+    if (this._webgl) { try { this._webgl.dispose(); } catch {} this._webgl = null; }
     this._ro.disconnect(); this.terminal.dispose(); this.ws.off(this.sessionId);
     if (this._pasteTarget) this._pasteTarget.remove();
   }

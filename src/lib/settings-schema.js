@@ -178,6 +178,17 @@ const SETTINGS_SCHEMA = {
     description: 'Extra Claude CLI args appended when starting a Claude session.',
     category: 'Claude', liveApply: true,
   },
+  'claude.tuiRenderer': {
+    type: 'enum', default: '',
+    options: [
+      { value: '', label: 'Auto (CLI preference)' },
+      { value: 'fullscreen', label: 'Fullscreen (flicker-free)' },
+      { value: 'classic', label: 'Classic (main screen)' },
+    ],
+    label: 'Terminal TUI renderer',
+    description: 'Renderer for terminal-mode Claude sessions. "Fullscreen" forces the flicker-free alternate-screen renderer with virtualized scrollback (CLAUDE_CODE_NO_FLICKER=1, same as /tui fullscreen); "Classic" forces the main-screen renderer; "Auto" follows the preference saved by the CLI (/tui). Applies to newly started sessions.',
+    category: 'Claude', liveApply: true,
+  },
 
   // ── Codex ──
   'codex.defaultModel': {

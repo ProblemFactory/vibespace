@@ -858,6 +858,7 @@ class App {
     this.ws.send({
       type:'create', backend, mode: sessionMode, cwd: cwd||undefined, sessionName: name||undefined, model: sessionModel||undefined,
       permissionMode: sessionPermission||undefined, effort: sessionEffort||undefined, extraArgs: sessionExtraArgs||undefined,
+      tuiRenderer: (backend === 'claude' && sessionMode === 'terminal' ? this.settings.get('claude.tuiRenderer') : '') || undefined,
       agentKind: agentKind || undefined, agentRole: agentRole || undefined, agentNickname: agentNickname || undefined,
       sourceKind: sourceKind || undefined, parentThreadId: parentThreadId || undefined,
       resume: !!resumeId, resumeId: resumeId||undefined, fork: fork||undefined, cols:120, rows:30, reqId,

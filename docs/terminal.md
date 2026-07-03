@@ -54,6 +54,22 @@ By default, the terminal auto-scrolls to show new output. When you scroll up to 
 
 This prevents Claude Code's TUI redraws from yanking the viewport while you're reading.
 
+Fullscreen (alternate-screen) TUIs — Claude's flicker-free renderer, vim, htop — own the whole viewport and handle their own scrolling, so the freeze machinery steps aside: frames always write through, and the mouse wheel is passed to the app.
+
+## Rendering
+
+Terminals render with xterm.js's **WebGL renderer** (device-pixel-aligned cells — no clipped rightmost column, fast flicker-free repaints), falling back to the DOM renderer where WebGL is unavailable. The area around the character grid is painted in the terminal theme's background, and cell metrics refresh automatically when the browser zoom or monitor changes.
+
+### Claude fullscreen TUI
+
+Claude Code ≥2.1 ships a flicker-free **fullscreen renderer** (alternate screen + virtualized scrollback; `/tui fullscreen` in any session). Settings → Claude → **Terminal TUI renderer** controls it for terminal-mode sessions started from the WebUI:
+
+| Value | Behavior |
+|-------|----------|
+| Auto (default) | Follow the preference saved by the CLI (`/tui`) |
+| Fullscreen (flicker-free) | Force the alt-screen renderer (`CLAUDE_CODE_NO_FLICKER=1`) |
+| Classic (main screen) | Force the classic renderer (`CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1`) |
+
 ## Idle Detection
 
 Claude Code updates the terminal title via OSC 0 escape sequences:

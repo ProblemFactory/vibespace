@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.14.0] — 2026-07-02
+
+### Changed
+
+- **Terminal rendering rebuilt on the WebGL renderer.** The old DOM renderer laid rows out with browser-rounded letter spacing while the size calculation used the unrounded cell width — the accumulated fraction is what clipped the rightmost column. WebGL renders device-pixel-aligned cells (integer cell metrics), eliminating that entire class of bugs, and repaints far faster (less TUI flicker). Falls back to the DOM renderer where WebGL is unavailable.
+- **No more "terminal smaller than the window" look.** The sub-cell remainder around the character grid is now painted in the terminal theme's own background instead of window-chrome color, so it blends in. Cell metrics also refresh automatically on browser zoom / monitor changes (device-pixel-ratio watcher).
+- **Claude Code's flicker-free fullscreen TUI integrated.** New setting Claude → **Terminal TUI renderer**: "Fullscreen (flicker-free)" starts terminal-mode Claude sessions with the alternate-screen renderer + virtualized scrollback (`CLAUDE_CODE_NO_FLICKER=1`, same as `/tui fullscreen`); "Classic" forces the main-screen renderer; "Auto" follows the CLI's own saved preference. The WebUI's scroll-freeze machinery now detects alternate-screen TUIs and writes through instead of queueing frames (correct behavior for the fullscreen renderer, vim, htop, …).
+
 ## [2.13.0] — 2026-07-01
 
 ### Changed

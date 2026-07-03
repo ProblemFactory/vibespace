@@ -104,6 +104,7 @@ Overrides persist in the layout auto-save.
 | `claude.defaultPermissionMode` | enum | `''` | Default Claude permission mode for new or resumed Claude sessions |
 | `claude.defaultEffort` | enum | `''` | Default Claude effort for new or resumed Claude sessions |
 | `claude.defaultExtraArgs` | text | `''` | Extra Claude CLI args appended when starting a Claude session |
+| `claude.tuiRenderer` | enum | `''` (Auto) | TUI renderer for terminal-mode Claude sessions: Auto (CLI `/tui` preference), Fullscreen (flicker-free alt-screen, `CLAUDE_CODE_NO_FLICKER=1`), Classic (main screen) |
 
 ### Codex
 
