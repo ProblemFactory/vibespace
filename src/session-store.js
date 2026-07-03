@@ -252,7 +252,16 @@ class SessionMessages {
     const historySessionId = getHistorySessionId(session);
     const jsonl = historySessionId ? parseSessionJsonl(historySessionId, session.cwd) : [];
     const uuids = new Set();
-    for (const m of jsonl) { if (m.uuid) uuids.add(m.uuid); }
+    const msgIds = new Set();
+    for (const m of jsonl) {
+      if (m.uuid) uuids.add(m.uuid);
+      // Streaming stdout events can carry a PLACEHOLDER uuid (…-000000000001)
+      // while the JSONL record for the SAME message has the real one — uuid
+      // dedup misses those and the stale buffer copy would render pinned after
+      // the entire history. message.id (msg_…) is stable across both copies.
+      const mid = m.message?.id;
+      if (mid) msgIds.add(mid);
+    }
 
     this._pendingPerms = {};
     const live = [];
@@ -265,6 +274,7 @@ class SessionMessages {
         if (msg.type === 'control_request' || msg.type === 'control_response' || msg.type === 'control_cancel_request') { live.push(msg); continue; }
         if (isSubagentMessage(msg)) continue;
         if (msg.uuid && uuids.has(msg.uuid)) continue;
+        if (msg.message?.id && msgIds.has(msg.message.id)) continue;
         if (msg._fromWebui && msg.timestamp) {
           if (jsonl.some(m => m.type === 'user' && m.timestamp >= msg.timestamp)) continue;
         }
