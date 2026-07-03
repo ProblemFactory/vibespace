@@ -207,6 +207,7 @@ The status bar at the bottom of the chat view shows session metrics:
 | Metric | Display | Description |
 |--------|---------|-------------|
 | **Model** | Dropdown | Model as last reported by the CLI (full resolved ID; `model: ?` when not yet reported). Click to switch model mid-session — Claude applies instantly (`set_model`), Codex from the next turn. |
+| **Effort** | Dropdown | Reasoning effort. Claude: shows the last *commanded* value (the CLI doesn't report it back); switching applies via the CLI's runtime settings channel and takes effect immediately. Codex: reported per turn; switching applies from the next turn. `effort: ?` when nothing is known. |
 | **Permission mode** | Lock icon + mode | Current permission mode. **Click to open dropdown** and change mode mid-session (see below) |
 | **Background tasks** | Spinner + count | Active background tasks (agents + commands). **Click for detail popup** (see below) |
 | **Context usage** | Colored progress bar + percentage | How much of the context window is used. Colors: green (<70%), yellow (70-85%), orange (85-95%), red (>95%) |

@@ -71,6 +71,9 @@ class ChatView {
       openInTempEditor: (text) => this._renderers.openInTempEditor(text),
       startReview: (opts) => this._startReview(opts),
     });
+    // Initial render: a brand-new session has no chatStatus yet — show the
+    // honest unknown badges (model: ? / effort: ?) instead of an empty bar.
+    this._statusBar.render();
     this._statusBar.popupContainer = container;
     this._syncReviewAvailability();
 

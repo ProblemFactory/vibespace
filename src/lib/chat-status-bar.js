@@ -170,17 +170,22 @@ export class ChatStatusBar {
     const fmtK = (n) => n >= 1000000 ? (n / 1000000).toFixed(1) + 'm' : n >= 1000 ? Math.round(n / 1000) + 'k' : String(n);
     const parts = [];
 
-    // Model badge (+ reasoning effort when known — Codex turn_context carries it).
-    // ALWAYS rendered: when the model hasn't been reported by the CLI yet we say
-    // so explicitly ("model: ?") instead of hiding or guessing. Click to change
-    // the model mid-session (set_model control request / codex per-turn model).
+    // Model + effort badges — separate clickable segments, both ALWAYS
+    // rendered: when a value hasn't been reported/commanded we say so
+    // explicitly ("?") instead of hiding or guessing.
     {
-      const effortSuffix = this._statusEffort ? ` \u00B7 ${escHtml(this._statusEffort)}` : '';
       const known = !!this._statusModel;
       const title = known
-        ? `Model (as last reported by the CLI)${this._statusEffort ? ' \u00B7 reasoning effort' : ''} — click to change`
+        ? 'Model (as last reported by the CLI) — click to change'
         : 'Model not reported by the CLI yet — click to set';
-      parts.push(`<span class="chat-status-model chat-status-clickable${known ? '' : ' chat-status-dim'}" title="${escHtml(title)}">${known ? escHtml(this._statusModel) : 'model: ?'}${effortSuffix}</span>`);
+      parts.push(`<span class="chat-status-model chat-status-clickable${known ? '' : ' chat-status-dim'}" title="${escHtml(title)}">${known ? escHtml(this._statusModel) : 'model: ?'}</span>`);
+      const eKnown = !!this._statusEffort;
+      const eTitle = eKnown
+        ? (this._backend === 'codex'
+          ? 'Reasoning effort (as reported per turn) — click to change (applies from the next turn)'
+          : 'Reasoning effort (as last commanded — the CLI does not report it back) — click to change')
+        : 'Reasoning effort not set/reported — click to change';
+      parts.push(`<span class="chat-status-effort chat-status-clickable${eKnown ? '' : ' chat-status-dim'}" title="${escHtml(eTitle)}">${eKnown ? escHtml(this._statusEffort) : 'effort: ?'}</span>`);
     }
 
     // Goal indicator — always rendered so there's a discoverable entry point
@@ -458,6 +463,43 @@ export class ChatStatusBar {
           this._startReview({ target, delivery: option.delivery || 'inline' });
         };
         dropdown.appendChild(item);
+      }
+      return;
+    }
+
+    // Effort click -> dropdown (mid-session reasoning-effort switch)
+    const effortEl = e.target.closest('.chat-status-effort');
+    if (effortEl) {
+      e.stopPropagation();
+      const dropdown = showDropdown(effortEl);
+      if (!dropdown) return;
+      const pickE = (effort, label) => {
+        this._ws.send({ type: 'set-effort', sessionId: this._sessionId, effort });
+        // Optimistic — claude never reports effort back (apply_flag_settings is
+        // success-blind); codex confirms via turn_context on the next turn.
+        this._statusEffort = effort || '';
+        this.render();
+      };
+      const addItems = (levels) => {
+        for (const lv of levels) {
+          const item = document.createElement('div');
+          item.className = 'chat-status-dropdown-item' + ((lv.value || '') === (this._statusEffort || '') ? ' active' : '');
+          item.textContent = lv.label;
+          item.onclick = (ev) => { ev.stopPropagation(); dropdown.remove(); pickE(lv.value); };
+          dropdown.appendChild(item);
+        }
+      };
+      if (this._backend === 'codex') {
+        addItems([
+          { value: '', label: 'Auto (model default)' },
+          { value: 'minimal', label: 'minimal' }, { value: 'low', label: 'low' },
+          { value: 'medium', label: 'medium' }, { value: 'high', label: 'high' }, { value: 'xhigh', label: 'xhigh' },
+        ]);
+      } else {
+        fetch('/api/session-options').then(r => r.json()).then(data => {
+          const levels = (data?.effortLevels || ['low', 'medium', 'high', 'max']).map(v => ({ value: v, label: v }));
+          addItems([{ value: '', label: 'Default (reset)' }, ...levels]);
+        }).catch(() => { dropdown.remove(); });
       }
       return;
     }

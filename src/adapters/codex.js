@@ -880,6 +880,12 @@ class CodexAdapter extends BackendAdapter {
     return JSON.stringify({ type: 'set-model', model });
   }
 
+  // Mid-session effort switch: wrapper stores it and passes it on the next
+  // turn/start (effort is a per-turn param, like model).
+  formatSetEffort(effort) {
+    return JSON.stringify({ type: 'set-effort', effort });
+  }
+
   /** Build a preview user message for buffer before JSONL arrives */
   static _buildUserPreview(rawText, msgId) {
     let text = typeof rawText === 'string' ? rawText : '';

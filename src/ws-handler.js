@@ -190,6 +190,9 @@ function registerWsHandler(wss, ctx) {
             // are stdout-only) — remember what this session was started with
             // so attach can restore the status bar immediately
             _permissionMode: data.permissionMode || null,
+            // Effort is never reported back by claude — remember the commanded
+            // value (spawn flag now, set-effort later) for the status bar
+            _effort: data.effort || null,
             // Claude --fork-session mints a NEW session id at startup; this arms
             // the stdout parser to adopt it (so the fork becomes its own session
             // instead of shadowing the parent). One-shot, cleared on adoption.
@@ -375,6 +378,22 @@ function registerWsHandler(wss, ctx) {
             const adapter = adapterRegistry.get(session.backend);
             if (adapter?.formatSetModel) {
               try { session.pty.write(adapter.formatSetModel(data.model) + '\n'); } catch {}
+            }
+          }
+          break;
+        }
+
+        case 'set-effort': {
+          const session = activeSessions.get(data.sessionId);
+          if (session?.pty && session.mode === 'chat' && data.effort != null) {
+            const adapter = adapterRegistry.get(session.backend);
+            if (adapter?.formatSetEffort) {
+              try {
+                session.pty.write(adapter.formatSetEffort(data.effort) + '\n');
+                // remembered for attach restore — the CLI never reports effort
+                // back (claude), so the last COMMANDED value is what we show
+                session._effort = data.effort || null;
+              } catch {}
             }
           }
           break;
@@ -706,6 +725,7 @@ function registerWsHandler(wss, ctx) {
               // resumed sessions had an empty mode until the first reply
               const chatStatus = sm.chatStatus() || {};
               if (!chatStatus.permissionMode && session._permissionMode) chatStatus.permissionMode = session._permissionMode;
+              if (!chatStatus.effort && session._effort) chatStatus.effort = session._effort;
               ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, mode: 'chat',
                 messages, totalCount, chatStatus, isStreaming, streamingLabel, taskState: sm.taskState(), turnMap, pendingPermissions: pendingPerms,
                 goal: session._goal || null, goalElapsed: session._goalElapsed || 0, goalStatus: session._goalStatus || null }));

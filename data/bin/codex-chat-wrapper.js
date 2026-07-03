@@ -148,7 +148,7 @@ const clientInfo = {
 const sessionName = process.env.CODEX_WEBUI_SESSION_NAME || '';
 const resumeId = process.env.CODEX_WEBUI_RESUME_ID || '';
 const model = process.env.CODEX_WEBUI_MODEL || '';
-const effort = process.env.CODEX_WEBUI_EFFORT || '';
+let effort = process.env.CODEX_WEBUI_EFFORT || ''; // mutable: set-effort updates it mid-session
 const backendPermissionMode = process.env.CODEX_WEBUI_PERMISSION_MODE || 'default';
 const isFork = process.env.CODEX_WEBUI_FORK === '1';
 const forkedFromEnv = process.env.CODEX_WEBUI_FORKED_FROM || '';
@@ -855,6 +855,14 @@ async function handleInput(msg) {
       meta.goal = msg.goal || null;
     }
     scheduleMeta();
+    return;
+  }
+  if (msg.type === 'set-effort') {
+    // Applied on the NEXT turn/start (effort is a per-turn param).
+    effort = msg.effort || '';
+    meta.effortOverride = effort;
+    scheduleMeta();
+    log('Effort set for next turn: ' + (effort || '(default)'));
     return;
   }
   if (msg.type === 'set-model') {

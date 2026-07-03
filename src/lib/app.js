@@ -895,6 +895,10 @@ class App {
         if (msg.mode === 'chat' || sessionMode === 'chat') {
           const chatView = new ChatView(winInfo, this.ws, msg.sessionId, this);
           this.sessions.set(winInfo.id, chatView);
+          // Commanded-at-spawn effort (the CLI never reports effort back, so
+          // the commanded value is the display source — same as the server's
+          // attach-time merge)
+          if (sessionEffort) chatView.applyStatus({ effort: sessionEffort });
           winInfo.onClose = () => {
             const shouldKill = (this.settings.get('window.closeBehavior') ?? 'terminate') === 'terminate';
             if (shouldKill) this.ws.send({ type: 'kill', sessionId: msg.sessionId });

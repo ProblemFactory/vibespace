@@ -163,6 +163,21 @@ class ClaudeCodeAdapter extends BackendAdapter {
       request: { subtype: 'set_model', model },
     };
   }
+
+  // Mid-session effort switch. There is NO set_effort subtype and /effort is
+  // blocked in stream-json — but apply_flag_settings with the `effortLevel` key
+  // is the CLI's OWN mechanism (its /effort command sends exactly this on
+  // remote transports). Verified live: overrides even a spawn-time --effort
+  // flag; effortLevel:null resets to default. NOTE: the response is
+  // success-blind (bogus values also "succeed") and nothing echoes back — the
+  // commanded value is all we have to display.
+  formatSetEffort(effort) {
+    return JSON.stringify({
+      type: 'control_request',
+      request_id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      request: { subtype: 'apply_flag_settings', settings: { effortLevel: effort || null } },
+    });
+  }
 }
 
 module.exports = { ClaudeCodeAdapter };
