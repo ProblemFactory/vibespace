@@ -567,7 +567,7 @@ class App {
         <div class="usage-session-stats">
           <span class="usage-stat">${pct7d}% used</span>
           <span class="usage-stat"><span class="usage-stat-label">Resets</span> ${fmtReset(codex.sevenDay?.resetsAt)}</span>
-          ${codex.planType ? `<span class="usage-stat"><span class="usage-stat-label">Plan</span> ${codex.planType}</span>` : ''}
+          ${codex.planType ? `<span class="usage-stat"><span class="usage-stat-label">Plan</span> ${escHtml(codex.planType)}</span>` : ''}
         </div>
       </div>`);
     }
@@ -613,8 +613,8 @@ class App {
       const isCurrent = name === this.layoutManager._currentName;
 
       const info = document.createElement('div'); info.className = 'layout-card-info';
-      info.innerHTML = `<div class="layout-card-name">${isCurrent ? '● ' : ''}${name}</div>
-        <div class="layout-card-meta">${preset.windows?.length || 0} windows · ${preset.theme || 'dark'} · ${preset.updatedAt ? new Date(preset.updatedAt).toLocaleString() : ''}</div>`;
+      info.innerHTML = `<div class="layout-card-name">${isCurrent ? '● ' : ''}${escHtml(name)}</div>
+        <div class="layout-card-meta">${preset.windows?.length || 0} windows · ${escHtml(preset.theme || 'dark')} · ${preset.updatedAt ? new Date(preset.updatedAt).toLocaleString() : ''}</div>`;
       info.onclick = () => {
         this.layoutManager.loadPreset(name).then(() => this.hideDialogs());
       };
@@ -1023,6 +1023,11 @@ class App {
     this.ws.send({ type: 'attach', sessionId: serverId });
 
     const handler = (msg) => {
+      // Window closed before the server answered (esp. slow huge-JSONL attaches):
+      // drop the handler so it can't build a ChatView into a dead winInfo and
+      // leave a phantom sessions entry that makes the session un-reopenable.
+      if (!this.wm.windows.has(winInfo.id)) { this.ws.offGlobal(handler); return; }
+      if ((msg.type === 'error') && msg.sessionId === serverId) { this.ws.offGlobal(handler); return; }
       if (msg.type === 'attached' && msg.sessionId === serverId) {
         if (msg.mode === 'chat' || isChat) {
           const chatView = new ChatView(winInfo, this.ws, serverId, this);
@@ -1265,6 +1270,11 @@ class App {
     });
 
     const handler = (msg) => {
+      // Window closed (or the server replied error) before 'attached' — drop the
+      // handler so a stale fire can't call loadHistory on a disposed ChatView
+      // (which throws mid-dispatch and swallows every later handler's message).
+      if (!this.wm.windows.has(winInfo.id)) { this.ws.offGlobal(handler); return; }
+      if (msg.type === 'error' && msg.sessionId === viewId) { this.ws.offGlobal(handler); return; }
       if (msg.type === 'attached' && msg.sessionId === viewId) {
         this.ws.offGlobal(handler);
         if (msg.messages?.length) {
@@ -1273,7 +1283,7 @@ class App {
       }
     };
     this.ws.onGlobal(handler);
-    winInfo.onClose = () => { chatView.dispose(); this.sessions.delete(winInfo.id); this._checkWelcome(); };
+    winInfo.onClose = () => { this.ws.offGlobal(handler); chatView.dispose(); this.sessions.delete(winInfo.id); this._checkWelcome(); };
     winInfo._notifyChanged = () => this.updateTaskbar();
     return winInfo;
   }
@@ -1382,13 +1392,15 @@ class App {
           cwd: spec.cwd,
         });
         const handler = (msg) => {
+          if (!this.wm.windows.has(winInfo.id)) { this.ws.offGlobal(handler); return; }
+          if (msg.type === 'error' && msg.sessionId === spec.virtualId) { this.ws.offGlobal(handler); return; }
           if (msg.type === 'attached' && msg.sessionId === spec.virtualId) {
             this.ws.offGlobal(handler);
             if (msg.messages?.length) view.loadHistory(msg.messages, msg.totalCount, msg.isStreaming);
           }
         };
         this.ws.onGlobal(handler);
-        winInfo.onClose = () => { view.dispose(); this.sessions.delete(winInfo.id); this._checkWelcome(); };
+        winInfo.onClose = () => { this.ws.offGlobal(handler); view.dispose(); this.sessions.delete(winInfo.id); this._checkWelcome(); };
         break;
       }
     }

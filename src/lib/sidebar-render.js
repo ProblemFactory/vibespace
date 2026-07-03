@@ -94,7 +94,7 @@ export function installSidebarRender(SidebarClass) {
       if (this._collapsedFolders.has(cwd) || autoCollapse) group.classList.add('collapsed');
 
       const header = document.createElement('div'); header.className = 'folder-header';
-      header.innerHTML = `<span class="folder-chevron">\u25BC</span><span class="folder-path">${cwdShort}</span><span class="folder-count">${items.length}</span>`;
+      header.innerHTML = `<span class="folder-chevron">\u25BC</span><span class="folder-path">${escHtml(cwdShort)}</span><span class="folder-count">${items.length}</span>`;
       if (hasLive) {
         const dot = document.createElement('span');
         dot.style.cssText = 'width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0';

@@ -1,4 +1,4 @@
-import { attachPopoverClose } from './utils.js';
+import { attachPopoverClose, escHtml } from './utils.js';
 import { TYPE_ICONS, installTabGroupMixin } from './tab-group.js';
 import { createAgentKindIcon, createBackendIcon, createModeBackendIcon, getAgentKindMeta } from './agent-meta.js';
 
@@ -242,7 +242,7 @@ class WindowManager {
         mergeGhost = document.createElement('div');
         mergeGhost.className = 'tab-ghost';
         const ghostIcon = win.backendIconSlot?.children.length ? win.backendIconSlot.children[0].cloneNode(true).outerHTML : (win._typeIcon || '');
-        mergeGhost.innerHTML = `<span>${ghostIcon}</span><span>${win.title}</span>`;
+        mergeGhost.innerHTML = `<span>${ghostIcon}</span><span>${escHtml(win.title)}</span>`;
         document.body.appendChild(mergeGhost);
       } else if (!tabMergeTarget && prevTarget && mergeGhost) {
         // Leaving merge zone — remove ghost, restore window

@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.15.0] — 2026-07-03
+
+### Security
+
+- **Fixed stored XSS in six UI surfaces.** Session working-directory paths (sidebar folder headers), layout-preset names/themes, drag-ghost window titles, the Codex plan badge, and the image-zoom overlay all interpolated user- or peer-controlled strings into `innerHTML` without escaping. Because these values sync across all connected clients, a session in a directory named `<img onerror=…>` (or a maliciously-named preset) could run script in every browser that rendered it. All are now escaped; the image overlay is built by DOM property assignment (defeating the decoded-`data:`-URL escape).
+- **Fixed CSS injection via custom-theme keys.** The theme sanitizer only stripped `{}` from values, not keys — a variable named `--x:red} *{…` broke out of the rule to inject arbitrary CSS on every client. Keys are now validated as `--custom-property` names and values reject CSS-breaking chars, on both the client and the server.
+
+### Fixed
+
+- **A session could become permanently un-openable.** Closing a chat/view window while its attach was still in flight (common on huge sessions) leaked the one-time handler and left a phantom session entry, so the window's "focus existing" path returned true forever and the session couldn't be reopened until reload. The attach handlers now drop themselves when the window is gone or the server replies with an error (matching the create path).
+- **Scroll-up pagination could lock permanently.** A failed history fetch (e.g. server restart mid-scroll) left the `_loading` flag stuck `true`, blocking all further pagination. Wrapped in try/finally.
+- **One buggy handler no longer drops WebSocket messages app-wide.** The client WS dispatch now isolates each handler in try/catch, so a throwing (e.g. disposed) handler can't abort delivery of `layout-sync`/`settings-updated`/`editor-open` to everything after it.
+- **Search: pressing Escape right after typing no longer leaves stuck highlights.** The debounced search timer is now cancelled on clear.
+
 ## [2.14.0] — 2026-07-02
 
 ### Changed

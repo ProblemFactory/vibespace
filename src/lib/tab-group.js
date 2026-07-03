@@ -1,4 +1,5 @@
 import { createAgentKindIcon } from './agent-meta.js';
+import { escHtml } from './utils.js';
 
 /**
  * Tab grouping — mixin methods for WindowManager.
@@ -93,7 +94,7 @@ const tabGroupMethods = {
         ghost = document.createElement('div');
         ghost.className = 'tab-ghost';
         const ghostIcon = winInfo.backendIconSlot?.children.length ? winInfo.backendIconSlot.children[0].cloneNode(true).outerHTML : (winInfo._typeIcon || '');
-        ghost.innerHTML = `<span>${ghostIcon}</span><span>${winInfo.title}</span>`;
+        ghost.innerHTML = `<span>${ghostIcon}</span><span>${escHtml(winInfo.title)}</span>`;
         document.body.appendChild(ghost);
       }
       ghost.style.left = (e.clientX + 12) + 'px';
@@ -326,7 +327,7 @@ const tabGroupMethods = {
         mergeGhost = document.createElement('div');
         mergeGhost.className = 'tab-ghost';
         const ghostIcon = win.backendIconSlot?.children.length ? win.backendIconSlot.children[0].cloneNode(true).outerHTML : (win._typeIcon || '');
-        mergeGhost.innerHTML = `<span>${ghostIcon}</span><span>${win.title}</span>`;
+        mergeGhost.innerHTML = `<span>${ghostIcon}</span><span>${escHtml(win.title)}</span>`;
         document.body.appendChild(mergeGhost);
         this.snapIndicator.style.display = 'none';
         this._clearGridHighlight();

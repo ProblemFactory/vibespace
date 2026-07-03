@@ -194,7 +194,11 @@ class ChatView {
         if (e.target.tagName === 'IMG' && e.target.classList.contains('chat-img')) {
           const overlay = document.createElement('div');
           overlay.className = 'chat-img-overlay';
-          overlay.innerHTML = `<img src="${e.target.src}" alt="image">`;
+          // Build the <img> via property assignment (NOT innerHTML): e.target.src
+          // is the browser-DECODED url, and a hostile data: mediaType can smuggle
+          // a literal `" onerror=` through it — property assignment is unescapable.
+          const zoomImg = document.createElement('img'); zoomImg.src = e.target.src; zoomImg.alt = 'image';
+          overlay.appendChild(zoomImg);
           overlay.onclick = () => overlay.remove();
           document.body.appendChild(overlay);
         }
@@ -272,7 +276,10 @@ class ChatView {
       if (e.target.tagName === 'IMG' && e.target.classList.contains('chat-img')) {
         const overlay = document.createElement('div');
         overlay.className = 'chat-img-overlay';
-        overlay.innerHTML = `<img src="${e.target.src}" alt="image">`;
+        // Property assignment, not innerHTML — a hostile data: mediaType can
+        // smuggle a literal `" onerror=` through the decoded e.target.src.
+        const zoomImg = document.createElement('img'); zoomImg.src = e.target.src; zoomImg.alt = 'image';
+        overlay.appendChild(zoomImg);
         overlay.onclick = () => overlay.remove();
         document.body.appendChild(overlay);
       }
@@ -495,28 +502,32 @@ class ChatView {
   async _extendTop(count = 50) {
     if (this._loading || this._windowStart <= 0) return;
     this._loading = true;
+    try {
+      const newStart = Math.max(0, this._windowStart - count);
+      const fetchCount = this._windowStart - newStart;
+      // A failed fetch (server restart mid-scroll) must NOT leave _loading stuck
+      // true forever — that permanently blocks all pagination. The finally resets it.
+      const msgs = await this._fetchMessages(newStart, fetchCount);
 
-    const newStart = Math.max(0, this._windowStart - count);
-    const fetchCount = this._windowStart - newStart;
-    const msgs = await this._fetchMessages(newStart, fetchCount);
+      const scrollHeightBefore = this._messageList.scrollHeight;
+      const firstEl = this._messageList.querySelector('.chat-msg');
+      this._loadingHistory = true;
+      for (const msg of msgs) {
+        const el = this._renderDetached(msg);
+        if (el && firstEl) this._messageList.insertBefore(el, firstEl);
+      }
+      this._loadingHistory = false;
+      this._windowStart = newStart;
 
-    const scrollHeightBefore = this._messageList.scrollHeight;
-    const firstEl = this._messageList.querySelector('.chat-msg');
-    this._loadingHistory = true;
-    for (const msg of msgs) {
-      const el = this._renderDetached(msg);
-      if (el && firstEl) this._messageList.insertBefore(el, firstEl);
+      // Trim bottom if DOM window too large (keep max ~150 rendered messages)
+      this._trimBottom();
+
+      // Preserve scroll position
+      this._messageList.scrollTop += (this._messageList.scrollHeight - scrollHeightBefore);
+      if (this._search?.hasHighlight) this._search.applyHighlightLayer();
+    } finally {
+      setTimeout(() => { this._loading = false; }, 300);
     }
-    this._loadingHistory = false;
-    this._windowStart = newStart;
-
-    // Trim bottom if DOM window too large (keep max ~150 rendered messages)
-    this._trimBottom();
-
-    // Preserve scroll position
-    this._messageList.scrollTop += (this._messageList.scrollHeight - scrollHeightBefore);
-    if (this._search?.hasHighlight) this._search.applyHighlightLayer();
-    setTimeout(() => { this._loading = false; }, 300);
   }
 
   // Install an invisible sentinel at the very top of the message list. It plays
@@ -887,22 +898,24 @@ class ChatView {
   async _extendBottom(count = 50) {
     if (this._loading || this._windowEnd >= this._total) return;
     this._loading = true;
+    try {
+      const end = Math.min(this._total, this._windowEnd + count);
+      // finally resets _loading even if the fetch rejects — else pagination locks.
+      const msgs = await this._fetchMessages(this._windowEnd, end - this._windowEnd);
 
-    const end = Math.min(this._total, this._windowEnd + count);
-    const msgs = await this._fetchMessages(this._windowEnd, end - this._windowEnd);
+      this._loadingHistory = true;
+      for (const msg of msgs) this._onCreateMessage(msg);
+      this._loadingHistory = false;
+      this._windowEnd = end;
 
-    this._loadingHistory = true;
-    for (const msg of msgs) this._onCreateMessage(msg);
-    this._loadingHistory = false;
-    this._windowEnd = end;
+      // Trim top if DOM window too large
+      this._trimTop();
 
-    // Trim top if DOM window too large
-    this._trimTop();
-
-    // Newly rendered messages need the search highlight re-applied
-    if (this._search?.hasHighlight) this._search.applyHighlightLayer();
-
-    setTimeout(() => { this._loading = false; }, 300);
+      // Newly rendered messages need the search highlight re-applied
+      if (this._search?.hasHighlight) this._search.applyHighlightLayer();
+    } finally {
+      setTimeout(() => { this._loading = false; }, 300);
+    }
   }
 
   // Keep DOM under ~150 messages by removing from bottom

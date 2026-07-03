@@ -182,6 +182,13 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions }) {
     const builtIn = ['dark', 'light', 'dracula', 'nord', 'solarized', 'monokai'];
     if (builtIn.includes(name.toLowerCase())) return res.status(400).json({ error: 'Cannot overwrite built-in theme' });
     if (JSON.stringify(req.body).length > 100000) return res.status(413).json({ error: 'Theme data too large' });
+    // Reject non-custom-property keys and values with CSS-breaking chars — a
+    // malicious key/value would inject CSS onto every client at load (themes are
+    // broadcast). Defense in depth with the client-side sanitizer in themes.js.
+    for (const [k, v] of Object.entries(css)) {
+      if (!/^--[\w-]+$/.test(k)) return res.status(400).json({ error: `Invalid CSS variable name: ${k}` });
+      if (/[{}<;]/.test(String(v))) return res.status(400).json({ error: `Invalid value for ${k}` });
+    }
     const data = readCustomThemes();
     data[name] = { css, terminal: terminal || {} };
     writeCustomThemes(data);

@@ -113,11 +113,15 @@ class ThemeManager {
       document.head.appendChild(el);
       this._customStyleEls[key] = el;
     }
-    // Sanitize: strip } and { from values to prevent CSS injection
+    // Sanitize BOTH sides: a key like `--x:red} *{display:none` breaks out of
+    // the rule and injects attacker CSS on every client (themes are synced) —
+    // the value-only {} strip missed it. Keys must be `--foo` custom props;
+    // values drop `;{}` (a `;` would start a second declaration).
     const rules = Object.entries(cssVars).map(([k, v]) => {
-      const safeVal = String(v).replace(/[{}]/g, '');
+      if (!/^--[\w-]+$/.test(k)) return '';
+      const safeVal = String(v).replace(/[{};]/g, '');
       return `  ${k}: ${safeVal};`;
-    }).join('\n');
+    }).filter(Boolean).join('\n');
     el.textContent = `[data-theme="${key}"] {\n${rules}\n}`;
   }
 

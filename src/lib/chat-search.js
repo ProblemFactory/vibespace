@@ -510,6 +510,10 @@ class ChatSearch {
   }
 
   _clearSearch() {
+    // Cancel a pending debounced search too — else pressing Escape within 250ms
+    // of typing runs the search with the bar hidden, jumping the view and leaving
+    // highlights that re-paint on every scroll with no UI to clear them.
+    if (this._searchTimer) { clearTimeout(this._searchTimer); this._searchTimer = null; }
     this._searchAbort?.abort();          // stop any in-flight streaming search
     this._searching = false;
     if (this._flashEl) { this._flashEl.remove(); this._flashEl = null; }
