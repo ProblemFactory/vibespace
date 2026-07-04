@@ -46,15 +46,23 @@ export function installSidebarWorkbench(Sidebar) {
       bar.className = 'wb-manage-bar';
       const label = document.createElement('div');
       label.className = 'wb-manage-label';
-      label.innerHTML = marks.size
-        ? `<b>${marks.size}</b> marked${nTerm ? ` · ${nTerm} terminate` : ''}${nArch ? ` · ${nArch} archive` : ''}`
-        : 'Manage mode — mark cards to batch-act';
+      if (!marks.size) {
+        label.innerHTML = '<span class="wb-manage-hint">Tap cards to mark</span>';
+      } else {
+        // icon + number chips — compact, fixed footprint (no text wrap)
+        const TERM = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>';
+        const ARCH = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h12M3 4v8a1 1 0 001 1h8a1 1 0 001-1V4"/><path d="M6.5 8h3"/></svg>';
+        label.innerHTML = `<span class="wb-mark-chip wb-mark-term" title="${nTerm} to terminate"${nTerm ? '' : ' style="display:none"'}>${TERM}<b>${nTerm}</b></span>`
+          + `<span class="wb-mark-chip wb-mark-arch" title="${nArch} to archive"${nArch ? '' : ' style="display:none"'}>${ARCH}<b>${nArch}</b></span>`;
+      }
       const actions = document.createElement('div');
       actions.className = 'wb-manage-actions';
       const applyBtn = document.createElement('button');
       applyBtn.className = 'wb-manage-apply';
       applyBtn.textContent = 'Apply';
-      applyBtn.disabled = !marks.size;
+      // hidden (not just disabled) when nothing's marked — frees the row so
+      // the empty-state hint shows in full
+      applyBtn.style.display = marks.size ? '' : 'none';
       applyBtn.onclick = () => this._applyManageMarks();
       const clearBtn = document.createElement('button');
       clearBtn.className = 'wb-manage-clear';

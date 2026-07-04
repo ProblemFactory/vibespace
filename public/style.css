@@ -1892,10 +1892,18 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
   background: color-mix(in srgb, var(--accent) 12%, var(--bg-sidebar));
   border-bottom: 1px solid var(--accent);
 }
-/* single line, ellipsis — a changing count never wraps to a 2nd row */
+/* icon+count chips — compact, fixed footprint, never wraps */
 .wb-manage-label { font-size: 11px; color: var(--text); min-width: 0; flex: 1;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.wb-manage-label b { color: var(--accent); }
+  display: flex; align-items: center; gap: 6px; overflow: hidden; }
+.wb-manage-hint { color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wb-mark-chip {
+  display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0;
+  padding: 2px 7px; border-radius: 999px; font-size: 11px;
+  border: 1px solid var(--border); background: var(--bg-input);
+}
+.wb-mark-chip b { font-weight: 700; }
+.wb-mark-term { color: var(--red, #e55); border-color: color-mix(in srgb, var(--red, #e55) 40%, transparent); }
+.wb-mark-arch { color: var(--yellow, #e2b340); border-color: color-mix(in srgb, var(--yellow, #e2b340) 40%, transparent); }
 .wb-manage-actions { display: flex; gap: 6px; flex-shrink: 0; }
 .wb-manage-apply, .wb-manage-clear {
   border: 1px solid var(--border); background: var(--bg-input); color: var(--text-secondary);
