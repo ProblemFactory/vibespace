@@ -106,6 +106,12 @@ const SETTINGS_SCHEMA = {
     description: 'Alignment per area: taskbar-items left/center (Windows-11-style centered icons), toolbar-center left/center/right, taskbar-tray left/right end. Managed by Customize mode.',
     category: 'Toolbar & Layout', liveApply: true,
   },
+  'chrome.springs': {
+    type: 'json', default: null,
+    label: 'Spring configs',
+    description: 'Per-spring config: {mode:"flex", weight:1-9} (strength = flex-grow share) or {mode:"fixed", px:N} (rigid spacer). Managed by Customize mode (click a spring).',
+    category: 'Toolbar & Layout', liveApply: true,
+  },
 
   // ── Window ──
   'window.enableBounceOnFocus': {

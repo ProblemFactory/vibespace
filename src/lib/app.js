@@ -270,10 +270,12 @@ class App {
                      'taskbar.position', 'sidebar.position', 'chrome.zoneAlign']) {
       this.settings.on(k, applyChromeSettings);
     }
-    // Element arrangement (which zone hosts which movable, in what order) —
-    // written by CustomizeMode drag, synced multi-client like any setting
-    applyArrangement(this.settings.get('chrome.arrangement'));
-    this.settings.on('chrome.arrangement', () => applyArrangement(this.settings.get('chrome.arrangement')));
+    // Element arrangement (which zone hosts which movable, in what order) +
+    // per-spring configs — written by CustomizeMode, synced multi-client
+    const applyArr = () => applyArrangement(this.settings.get('chrome.arrangement'), this.settings.get('chrome.springs'));
+    applyArr();
+    this.settings.on('chrome.arrangement', applyArr);
+    this.settings.on('chrome.springs', applyArr);
   }
 
   // Auto-hide taskbar: a thin fixed hotzone on the taskbar's screen edge — the

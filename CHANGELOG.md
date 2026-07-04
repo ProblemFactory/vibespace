@@ -19,6 +19,9 @@ and this project uses [Semantic Versioning](https://semver.org/).
 - **Springs (flexible space)** — the "+ Spring" button in Customize mode inserts an invisible flexible spacer (macOS-toolbar style) that pushes its neighbors apart; drag it between elements for justify-between layouts (previews centered, usage pushed right, etc.). Springs show as hatched ↔ bars while editing; click one to remove it.
 - **Extra bar rows** — two optional full-width rows (below the toolbar, next to the taskbar) that appear when you drag elements into them and vanish when emptied. E.g. give the layout presets their own row under the toolbar.
 - Fixed: desktop preview labels disappeared when previews were moved into the toolbar — they now shrink to fit instead of being hidden.
+- **Configurable springs** — click a spring to open its config popover: **Flexible** with a strength weight (1–9; two springs at 1× and 3× split the leftover space 1:3) or **Fixed** width in px (a rigid spacer — e.g. mirror the "☰ VibeSpace" section's width at the start of an extra row so both rows' centered content lines up on the same axis), plus Remove. Live-applied, persisted (`chrome.springs`), synced.
+- Fixed: the window-list popup always opened upward — off-screen when the window-count chip is hosted in the top toolbar. It (and the tab-group list) now flips below the anchor when there's no room above; the per-window right-click menu likewise opens downward when invoked in the top half of the screen instead of being bottom-anchored.
+- Window-list rows are now **right-clickable** with the same per-window menu as taskbar items (Move / Minimize / Move to Desktop / Close).
 
 ### Fixed
 

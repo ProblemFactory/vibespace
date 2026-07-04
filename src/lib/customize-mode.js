@@ -64,7 +64,21 @@ function ensureSpringEl(id) {
   }
   return el;
 }
-const STRUCT_KEYS = ['taskbar.position', 'taskbar.visibility', 'sidebar.position', 'chrome.zoneAlign'];
+
+// Per-spring config (`chrome.springs` setting): flexible with a strength
+// weight (flex-grow — two springs at 1× and 2× split leftover space 1:2), or
+// FIXED width in px (a rigid spacer — e.g. mirror the "☰ VibeSpace" section's
+// width at the start of an extra row so both rows' centers coincide).
+// Default (flex, 1×) needs no entry (sparse).
+function applySpringStyle(el, cfg) {
+  const fixed = cfg?.mode === 'fixed';
+  el.classList.toggle('spring-fixed', fixed);
+  el.style.flex = fixed ? '0 0 auto' : `${cfg?.weight || 1} 1 24px`;
+  el.style.width = fixed ? `${cfg?.px || 120}px` : '';
+  // label shown inside the hatched bar while editing
+  el.dataset.w = fixed ? `${cfg?.px || 120}px` : ((cfg?.weight || 1) > 1 ? `${cfg.weight}×` : '↔');
+}
+const STRUCT_KEYS = ['taskbar.position', 'taskbar.visibility', 'sidebar.position', 'chrome.zoneAlign', 'chrome.springs'];
 
 // Alignment targets (chrome.zoneAlign) — each gets a mini icon chip anchored
 // to the element it aligns while editing.
@@ -110,7 +124,7 @@ function normalizeArrangement(raw) {
 }
 
 /** Re-parent movable elements into their zones. Idempotent; listeners survive. */
-export function applyArrangement(raw) {
+export function applyArrangement(raw, springCfgs) {
   const norm = normalizeArrangement(raw);
   // Spring lifecycle: create the ones the model mentions, drop the rest
   const wantedSprings = new Set(Object.values(norm).flat().filter(isSpringId));
@@ -123,6 +137,7 @@ export function applyArrangement(raw) {
     for (const id of ids) {
       const el = isSpringId(id) ? ensureSpringEl(id) : document.getElementById(id);
       if (el) zone.appendChild(el);
+      if (el && isSpringId(id)) applySpringStyle(el, springCfgs?.[id]);
     }
   }
 }
@@ -211,19 +226,18 @@ export class CustomizeMode {
     this.app._applyChromeSettings?.();
   }
 
-  // Wire a spring for editing: outlined, click = REMOVE (springs aren't
-  // hidden, they're deleted), drag = move like any element. Safe to call
-  // twice (remote applyArrangement can re-create springs mid-session).
+  // Wire a spring for editing: outlined, click = open the config popover
+  // (mode / strength / width / remove), drag = move like any element. Safe to
+  // call twice (remote applyArrangement can re-create springs mid-session).
   _wireSpring(el) {
     if (el._czWired) return;
     el._czWired = true;
     el.classList.add('cz-item', 'cz-spring-edit');
-    el.dataset.czTip = 'Spring — pushes neighbors apart; click to remove, drag to move';
+    el.dataset.czTip = 'Spring — click to configure (strength / fixed width), drag to move';
     const onClick = (e) => {
       e.preventDefault(); e.stopPropagation();
       if (this._justDragged) return;
-      el.remove();
-      this._saveArrangement();
+      this._showSpringPopover(el);
     };
     el.addEventListener('click', onClick, true);
     const offDrag = this._setupDrag(el, { spring: true });
@@ -234,6 +248,77 @@ export class CustomizeMode {
       el.removeEventListener('click', onClick, true);
       offDrag();
     });
+  }
+
+  // Spring config popover: Flexible (strength 1–9, the flex-grow weight) or
+  // Fixed (width in px — a rigid spacer, e.g. to mirror the "☰ VibeSpace"
+  // section so two rows' centers line up). Live-applies on every change.
+  _showSpringPopover(el) {
+    document.querySelector('.cz-spring-pop')?.remove();
+    const pop = document.createElement('div');
+    pop.className = 'cz-spring-pop';
+    const getCfg = () => ({ mode: 'flex', weight: 1, px: 120, ...(this.app.settings.get('chrome.springs')?.[el.id] || {}) });
+    const save = (patch) => {
+      const cfg = { ...getCfg(), ...patch };
+      const all = { ...(this.app.settings.get('chrome.springs') || {}) };
+      if (cfg.mode === 'flex' && (cfg.weight || 1) === 1) delete all[el.id];
+      else all[el.id] = cfg.mode === 'fixed' ? { mode: 'fixed', px: cfg.px } : { mode: 'flex', weight: cfg.weight };
+      this.app.settings.set('chrome.springs', Object.keys(all).length ? all : null);
+    };
+
+    const seg = document.createElement('span');
+    seg.className = 'cz-seg';
+    const valWrap = document.createElement('label');
+    valWrap.className = 'cz-spring-val';
+    const valLabel = document.createElement('span');
+    const valInput = document.createElement('input');
+    valInput.type = 'number';
+    const syncUi = () => {
+      const cfg = getCfg();
+      for (const b of seg.querySelectorAll('button')) b.classList.toggle('active', b.dataset.value === cfg.mode);
+      if (cfg.mode === 'fixed') {
+        valLabel.textContent = 'Width';
+        valInput.min = 4; valInput.max = 2000; valInput.step = 4; valInput.value = cfg.px;
+      } else {
+        valLabel.textContent = 'Strength';
+        valInput.min = 1; valInput.max = 9; valInput.step = 1; valInput.value = cfg.weight;
+      }
+    };
+    for (const [value, label] of [['flex', 'Flexible'], ['fixed', 'Fixed']]) {
+      const b = document.createElement('button');
+      b.textContent = label; b.dataset.value = value;
+      b.onclick = (e) => { e.stopPropagation(); save({ mode: value }); syncUi(); };
+      seg.appendChild(b);
+    }
+    valInput.oninput = () => {
+      const n = parseInt(valInput.value);
+      if (!Number.isFinite(n)) return;
+      const cfg = getCfg();
+      if (cfg.mode === 'fixed') save({ px: Math.max(4, Math.min(2000, n)) });
+      else save({ weight: Math.max(1, Math.min(9, n)) });
+    };
+    valWrap.append(valLabel, valInput);
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'cz-btn';
+    removeBtn.textContent = 'Remove';
+    removeBtn.onclick = (e) => { e.stopPropagation(); pop.remove(); el.remove(); this._saveArrangement(); };
+    pop.append(seg, valWrap, removeBtn);
+    document.body.appendChild(pop);
+    syncUi();
+
+    // position near the spring (above by default, below if clipped)
+    const r = el.getBoundingClientRect();
+    const ph = pop.offsetHeight || 34;
+    pop.style.top = (r.top - ph - 8 > 0 ? r.top - ph - 8 : r.bottom + 8) + 'px';
+    pop.style.left = Math.max(8, Math.min(r.left + r.width / 2 - pop.offsetWidth / 2, innerWidth - pop.offsetWidth - 8)) + 'px';
+
+    const close = (e) => {
+      if (pop.contains(e.target) || el.contains(e.target)) return;
+      pop.remove();
+      document.removeEventListener('mousedown', close, true);
+    };
+    document.addEventListener('mousedown', close, true);
+    this._cleanup.push(() => { pop.remove(); document.removeEventListener('mousedown', close, true); });
   }
 
   _addSpring() {
@@ -322,6 +407,15 @@ export class CustomizeMode {
       arr[z] = zone ? [...zone.children].map(c => c.id).filter(isMovableId) : [];
     }
     this.app.settings.set('chrome.arrangement', arr);
+    // prune configs of springs that no longer exist
+    const cfgs = this.app.settings.get('chrome.springs');
+    if (cfgs) {
+      const live = new Set(Object.values(arr).flat().filter(isSpringId));
+      const pruned = Object.fromEntries(Object.entries(cfgs).filter(([id]) => live.has(id)));
+      if (Object.keys(pruned).length !== Object.keys(cfgs).length) {
+        this.app.settings.set('chrome.springs', Object.keys(pruned).length ? pruned : null);
+      }
+    }
   }
 
   // ── UI pieces ──

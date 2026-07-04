@@ -1632,4 +1632,24 @@ body.customize-mode .chrome-spring {
     color-mix(in srgb, var(--accent) 16%, transparent) 4px,
     color-mix(in srgb, var(--accent) 16%, transparent) 8px);
 }
-body.customize-mode .chrome-spring::after { content: '\2194'; font-size: 11px; }
+body.customize-mode .chrome-spring::after { content: attr(data-w); font-size: 10px; font-weight: 600; }
+body.customize-mode .chrome-spring.spring-fixed {
+  background: repeating-linear-gradient(0deg,
+    transparent, transparent 3px,
+    color-mix(in srgb, var(--accent) 16%, transparent) 3px,
+    color-mix(in srgb, var(--accent) 16%, transparent) 6px);
+}
+/* spring config popover */
+.cz-spring-pop {
+  position: fixed; z-index: 9700; display: flex; align-items: center; gap: 8px;
+  background: var(--bg-dialog); border: 1px solid var(--border-active);
+  border-radius: 999px; padding: 5px 10px; box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+  white-space: nowrap;
+}
+.cz-spring-pop .cz-btn { padding: 3px 10px; font-size: 11px; }
+.cz-spring-val { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-secondary); }
+.cz-spring-val input {
+  width: 58px; padding: 2px 5px; font-size: 11px;
+  background: var(--bg-input); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+}

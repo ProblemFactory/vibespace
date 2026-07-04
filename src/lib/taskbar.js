@@ -107,22 +107,32 @@ function _rebuildTaskbarItems(app, container, entries) {
     // Right-click context menu for window recovery
     item.addEventListener('contextmenu', (e) => {
       e.preventDefault();
-      const menuItems = [
-        { label: '\u2725 Move', action: () => app.wm.startMoveMode(id) },
-        { label: win.isMinimized ? '\u25A1 Restore' : '\u2013 Minimize', action: () => win.isMinimized ? app.wm.restore(id) : app.wm.minimize(id) },
-      ];
-      // "Move to Desktop" submenu
-      const deskItems = app.desktopManager?.getDesktopMenuItems(id);
-      if (deskItems?.length) {
-        menuItems.push({ label: '\u27A4 Move to Desktop', children: deskItems });
-      }
-      menuItems.push({ label: '\u2715 Close', action: () => app.wm.closeWindow(id), style: 'color:var(--red, #e55)' });
-      const menu = showContextMenu(e.clientX, e.clientY, menuItems, 'taskbar-context-menu');
-      menu.style.top = '';
-      menu.style.bottom = (window.innerHeight - e.clientY + 4) + 'px';
+      showWindowContextMenu(app, id, e.clientX, e.clientY);
     });
     container.appendChild(item);
   }
+}
+
+// Shared per-window context menu (taskbar items, group items, window-list
+// rows). Opens upward only when invoked in the lower half of the screen
+// (bottom taskbar); downward otherwise \u2014 a top-docked taskbar or a
+// window-count chip moved into the toolbar must not push the menu off-screen.
+export function showWindowContextMenu(app, id, x, y, { closeLabel = '\u2715 Close' } = {}) {
+  const win = app.wm.windows.get(id);
+  if (!win) return;
+  const menuItems = [
+    { label: '\u2725 Move', action: () => app.wm.startMoveMode(id) },
+    { label: win.isMinimized ? '\u25A1 Restore' : '\u2013 Minimize', action: () => win.isMinimized ? app.wm.restore(id) : app.wm.minimize(id) },
+  ];
+  const deskItems = app.desktopManager?.getDesktopMenuItems(id);
+  if (deskItems?.length) menuItems.push({ label: '\u27A4 Move to Desktop', children: deskItems });
+  menuItems.push({ label: closeLabel, action: () => app.wm.closeWindow(id), style: 'color:var(--red, #e55)' });
+  const menu = showContextMenu(x, y, menuItems, 'taskbar-context-menu');
+  if (y > window.innerHeight / 2) {
+    menu.style.top = '';
+    menu.style.bottom = (window.innerHeight - y + 4) + 'px';
+  }
+  return menu;
 }
 
 // Group-aware item state: a tab-group item is active/waiting if ANY of its tabs
@@ -213,16 +223,7 @@ function _buildGroupItem(app, container, item, hostWin, starPrefix, group) {
   item.addEventListener('click', () => showTabGroupList(app, item, group.chain));
   item.addEventListener('contextmenu', (e) => {
     e.preventDefault();
-    const menuItems = [
-      { label: '\u2725 Move', action: () => app.wm.startMoveMode(hostId) },
-      { label: hostWin.isMinimized ? '\u25A1 Restore' : '\u2013 Minimize', action: () => hostWin.isMinimized ? app.wm.restore(hostId) : app.wm.minimize(hostId) },
-    ];
-    const deskItems = app.desktopManager?.getDesktopMenuItems(hostId);
-    if (deskItems?.length) menuItems.push({ label: '\u27A4 Move to Desktop', children: deskItems });
-    menuItems.push({ label: '\u2715 Close group', action: () => app.wm.closeWindow(hostId), style: 'color:var(--red, #e55)' });
-    const menu = showContextMenu(e.clientX, e.clientY, menuItems, 'taskbar-context-menu');
-    menu.style.top = '';
-    menu.style.bottom = (window.innerHeight - e.clientY + 4) + 'px';
+    showWindowContextMenu(app, hostId, e.clientX, e.clientY, { closeLabel: '\u2715 Close group' });
   });
   container.appendChild(item);
 }
@@ -257,7 +258,10 @@ export function showTabGroupList(app, anchor, chain) {
   requestAnimationFrame(() => {
     const rect = anchor.getBoundingClientRect();
     pop.style.left = Math.max(0, Math.min(rect.left, window.innerWidth - pop.offsetWidth - 4)) + 'px';
-    pop.style.top = (rect.top - pop.offsetHeight - 4) + 'px';
+    // Prefer above (bottom taskbar); flip below when the anchor is near the
+    // top edge (top-docked taskbar)
+    const above = rect.top - pop.offsetHeight - 4;
+    pop.style.top = (above >= 4 ? above : rect.bottom + 4) + 'px';
   });
 }
 
@@ -291,12 +295,23 @@ export function showWindowList(app, anchor) {
       if (session) session.focus();
       pop.remove();
     };
+    // Right-click: same per-window menu as the taskbar item (Move / Minimize /
+    // Move to Desktop / Close). Close the list first — actions like Close
+    // would leave it stale.
+    item.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      pop.remove();
+      showWindowContextMenu(app, id, e.clientX, e.clientY);
+    });
     pop.appendChild(item);
   }
 
   requestAnimationFrame(() => {
     const rect = anchor.getBoundingClientRect();
-    pop.style.left = Math.max(0, rect.right - pop.offsetWidth) + 'px';
-    pop.style.top = (rect.top - pop.offsetHeight - 4) + 'px';
+    pop.style.left = Math.max(4, Math.min(rect.right - pop.offsetWidth, innerWidth - pop.offsetWidth - 4)) + 'px';
+    // Prefer opening above the anchor (bottom taskbar); flip below when
+    // there's no room — e.g. the chip was moved into the top toolbar
+    const above = rect.top - pop.offsetHeight - 4;
+    pop.style.top = (above >= 4 ? above : rect.bottom + 4) + 'px';
   });
 }
