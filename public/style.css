@@ -1836,6 +1836,11 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
   font-size: 10px; color: var(--text-dim); padding: 1px 2px 0 2px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.wb-proj-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  background: var(--wb-proj-color, var(--text-dim));
+}
+.wb-proj-card { border-left: 3px solid var(--wb-strip, var(--border)) !important; }
 .wb-proj-head {
   display: flex; align-items: center; gap: 6px; padding: 5px 10px 2px;
   font-size: 10px; color: var(--text-secondary);
@@ -1930,4 +1935,9 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
   display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
 }
 .wb-proj-archive:hover { background: var(--hover-overlay); color: var(--accent); }
+.wb-proj-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  background: var(--wb-proj-color, var(--text-dim));
+}
+.wb-proj-card { border-left: 3px solid var(--wb-strip, var(--border)) !important; }
 .wb-proj-head { gap: 4px; }

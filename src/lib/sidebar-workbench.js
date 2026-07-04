@@ -162,6 +162,9 @@ export function installSidebarWorkbench(Sidebar) {
       for (const s of live) {
         const card = this._buildSessionCard(s);
         card.classList.add('wb-active-card');
+        // Same per-project color strip as the Recent zone — a running session
+        // and its Recent siblings share a color so you can tie them to one
+        // project at a glance (the Recent header's colored dot names it).
         card.style.setProperty('--wb-strip', `hsl(${projectHue(s.cwd)} 55% 52%)`);
         // second line: dim abbreviated path — the context that keeps
         // similarly-named sessions distinguishable (user-raised concern)
@@ -183,10 +186,16 @@ export function installSidebarWorkbench(Sidebar) {
         byProj.get(k).push(s);
       }
       for (const [cwd, list] of byProj) {
+        // Per-project color, applied at PROJECT level (header + its cards) so
+        // the color↔project mapping is unambiguous — a colored dot on the
+        // header names the color, the cards share the left strip.
+        const hue = projectHue(cwd);
+        const color = `hsl(${hue} 55% 52%)`;
         const head = document.createElement('div');
         head.className = 'wb-proj-head';
         head.title = cwd;
-        head.innerHTML = `<span class="wb-proj-name">${escHtml(abbrevPath(cwd))}</span><span class="wb-zone-count">${list.length}</span>`;
+        head.style.setProperty('--wb-proj-color', color);
+        head.innerHTML = `<span class="wb-proj-dot"></span><span class="wb-proj-name">${escHtml(abbrevPath(cwd))}</span><span class="wb-zone-count">${list.length}</span>`;
         // Archive the WHOLE project in one click — the fast path for folders
         // full of throwaway sessions (observer swarms etc.).
         const archAll = document.createElement('button');
@@ -211,7 +220,12 @@ export function installSidebarWorkbench(Sidebar) {
         // otherwise render thousands of "recent" cards
         const expanded = this._wbProjExpanded?.has(cwd);
         const shown = expanded ? list : list.slice(0, 5);
-        for (const s of shown) this.listEl.appendChild(this._buildSessionCard(s));
+        for (const s of shown) {
+          const card = this._buildSessionCard(s);
+          card.classList.add('wb-proj-card');
+          card.style.setProperty('--wb-strip', color);
+          this.listEl.appendChild(card);
+        }
         if (list.length > shown.length) {
           const more = document.createElement('button');
           more.className = 'wb-more';
