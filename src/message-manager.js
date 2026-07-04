@@ -145,6 +145,15 @@ class MessageManager {
     return msg;
   }
 
+  /** Harness tasks (TaskCreate/TaskUpdate) → TodoWrite-shaped todos meta */
+  _emitHarnessTodos(emit) {
+    if (!emit || !this._harnessTasks?.size) return;
+    const todos = [...this._harnessTasks.values()]
+      .filter(t => t.status !== 'deleted')
+      .map(t => ({ content: t.content, status: t.status, activeForm: t.activeForm }));
+    this._emit({ op: 'meta', subtype: 'todos', data: todos });
+  }
+
   _finalizeStreaming(emit) {
     for (let i = this.messages.length - 1; i >= 0; i--) {
       const m = this.messages[i];
@@ -269,6 +278,17 @@ class MessageManager {
         input: pending.block.input, output: resultText, status: tr.is_error ? 'error' : 'ok',
       }];
       if (emit) this._emit({ op: 'edit', id: existing.id, fields: { status: existing.status, toolStatus: existing.toolStatus, content: existing.content } });
+      // harness TaskCreate: "Task #N created successfully" carries the id
+      const subj = this._pendingTaskCreates?.get(toolUseId);
+      if (subj && !tr.is_error) {
+        const m = resultText.match(/#(\d+)/);
+        if (m) {
+          (this._harnessTasks = this._harnessTasks || new Map())
+            .set(m[1], { id: m[1], content: `#${m[1]} ${subj}`, status: 'pending', activeForm: subj });
+          this._emitHarnessTodos(emit);
+        }
+        this._pendingTaskCreates.delete(toolUseId);
+      }
       this.pendingToolCalls.delete(toolUseId);
     }
 
@@ -319,6 +339,19 @@ class MessageManager {
         // TodoWrite → emit meta op so frontend can update display
         if (block.name === 'TodoWrite' && block.input?.todos && emit) {
           this._emit({ op: 'meta', subtype: 'todos', data: block.input.todos });
+        }
+        // Harness Task tools (TaskCreate/TaskUpdate) → same TODO display.
+        // TaskCreate's id only appears in the RESULT text, so creation is
+        // finalized in the tool_result merge below.
+        if (block.name === 'TaskCreate' && block.input?.subject) {
+          (this._pendingTaskCreates = this._pendingTaskCreates || new Map())
+            .set(block.id, String(block.input.subject));
+        } else if (block.name === 'TaskUpdate' && block.input?.taskId != null) {
+          const t = this._harnessTasks?.get(String(block.input.taskId));
+          if (t && block.input.status) {
+            t.status = block.input.status;
+            this._emitHarnessTodos(emit);
+          }
         }
         const msgId = this._nextId();
         const msg = {
