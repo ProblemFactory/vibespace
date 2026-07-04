@@ -495,6 +495,11 @@ class TerminalSession {
     document.querySelectorAll('.term-settings-popover').forEach(p => p.remove());
 
     const pop = document.createElement('div'); pop.className = 'term-settings-popover';
+    // MUST be positioned — without position:fixed the top/right below are inert
+    // (static flow dumps the popover at the bottom of <body>, off-screen).
+    pop.style.position = 'fixed';
+    pop.style.zIndex = '99999';
+    pop.dataset.popover = '1';
     const rect = anchor.getBoundingClientRect();
     pop.style.top = (rect.bottom + 4) + 'px'; pop.style.right = (window.innerWidth - rect.right) + 'px';
 
