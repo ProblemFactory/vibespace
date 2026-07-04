@@ -1961,3 +1961,12 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
 }
 .wb-remote-card:hover { background: var(--hover-overlay); }
+
+/* Host strip (multi-host): inner 3px band in the HOST's stable color, next to
+   the outer project strip. No inner band = session runs on this machine. */
+.wb-host-strip { position: relative; }
+.wb-host-strip::after {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--wb-host-color, transparent);
+  pointer-events: none;
+}

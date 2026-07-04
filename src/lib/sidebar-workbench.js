@@ -27,46 +27,45 @@ function abbrevPath(cwd) {
   return parts.length > 3 ? '…/' + parts.slice(-2).join('/') : p;
 }
 
+// Stable per-host color (inner strip on cards/heads — the outer strip stays
+// the project color; absence of an inner strip = this machine).
+function hostColor(hostId) {
+  return `hsl(${projectHue('host:' + hostId)} 70% 45%)`;
+}
+function applyHostStrip(el, hostId) {
+  if (!hostId) return;
+  el.classList.add('wb-host-strip');
+  el.style.setProperty('--wb-host-color', hostColor(hostId));
+}
+
 export function installSidebarWorkbench(Sidebar) {
   Object.assign(Sidebar.prototype, {
 
     // ── RECENT host switcher (remote session discovery over ssh) ──
 
     _buildRecentHead(recentHost, localCount, zoneHead) {
-      const st = this._wbRemote;
+      const st = recentHost ? this._remoteHostState(recentHost) : null;
       // remote count = only the RECENT-window slice (older ones count under History)
       const cutoff = Date.now() - RECENT_MS;
       const count = recentHost
-        ? (st && st.hostId === recentHost && st.sessions
+        ? (st?.sessions
           ? st.sessions.filter(s => (s.mtime || 0) >= cutoff || s.status === 'remote-running').length : '…')
         : localCount;
       const h = zoneHead('Recent', count);
       this._ensureHostsData();
       const hostsList = this._hostsData?.hosts || [];
       if (hostsList.length || recentHost) {
-        const sel = document.createElement('select');
-        sel.className = 'wb-recent-host';
-        sel.title = 'Show recent sessions from this machine or a remote host';
-        sel.innerHTML = '<option value="">Local</option>';
-        for (const hh of hostsList) {
-          const o = document.createElement('option');
-          o.value = hh.id; o.textContent = hh.name;
-          sel.appendChild(o);
-        }
-        sel.value = recentHost;
-        sel.onclick = (e) => e.stopPropagation();
-        sel.onchange = () => {
-          this._wbRecentHost = sel.value;
-          localStorage.setItem('wbRecentHost', sel.value);
+        h.appendChild(this._buildHostSelect(recentHost, (v) => {
+          this._wbRecentHost = v;
+          localStorage.setItem('wbRecentHost', v);
           this._render();
-        };
-        h.appendChild(sel);
+        }));
         if (recentHost) {
           const rf = document.createElement('button');
           rf.className = 'wb-recent-refresh';
           rf.title = 'Re-scan sessions on this host';
           rf.innerHTML = '<svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M13 2v3h-3"/></svg>';
-          rf.onclick = (e) => { e.stopPropagation(); this._loadRemoteRecent(recentHost, { fresh: true }); };
+          rf.onclick = (e) => { e.stopPropagation(); this._loadRemoteHost(recentHost, { fresh: true }); };
           h.appendChild(rf);
         }
       }
@@ -82,47 +81,74 @@ export function installSidebarWorkbench(Sidebar) {
       }).catch(() => {});
     },
 
-    _loadRemoteRecent(hostId, { fresh = false } = {}) {
-      const cur = this._wbRemote;
-      if (!fresh && cur && cur.hostId === hostId && (cur.loading || cur.sessions)) return;
-      this._wbRemote = { hostId, loading: true, sessions: cur?.hostId === hostId ? cur.sessions : null, error: null };
+    // Per-host discovery cache — Recent and History can point at DIFFERENT
+    // hosts simultaneously; a shared host costs one fetch.
+    _loadRemoteHost(hostId, { fresh = false } = {}) {
+      const map = this._wbRemoteHosts = this._wbRemoteHosts || new Map();
+      const cur = map.get(hostId);
+      if (!fresh && cur && (cur.loading || cur.sessions)) return;
+      map.set(hostId, { loading: true, sessions: cur?.sessions || null, error: null });
       if (fresh) this._render(); // show the scanning row immediately
+      const relevant = () => this._wbRecentHost === hostId || this._wbHistoryHost === hostId;
       fetch(`/api/hosts/${hostId}/sessions${fresh ? '?fresh=1' : ''}`)
         .then(r => r.json())
         .then(d => {
-          if (this._wbRecentHost !== hostId) return; // switched away meanwhile
-          this._wbRemote = { hostId, loading: false, sessions: d.sessions || [], error: d.error || null };
-          this._render();
+          map.set(hostId, { loading: false, sessions: d.sessions || [], error: d.error || null });
+          if (relevant()) this._render();
         })
         .catch(e => {
-          if (this._wbRecentHost !== hostId) return;
-          this._wbRemote = { hostId, loading: false, sessions: null, error: e.message };
-          this._render();
+          map.set(hostId, { loading: false, sessions: null, error: e.message });
+          if (relevant()) this._render();
         });
     },
 
-    // Renders the RECENT slice (last 7 days) of the remote host's sessions and
-    // returns the OLDER ones — the HISTORY zone (same switcher scopes both,
-    // mirroring the local recent/history time split).
-    _renderRemoteRecent(hostId) {
-      this._loadRemoteRecent(hostId);
-      const st = this._wbRemote;
-      const empty = (text) => {
-        const e = document.createElement('div');
-        e.className = 'wb-empty';
-        e.textContent = text;
-        this.listEl.appendChild(e);
-      };
-      if (!st || st.hostId !== hostId || (st.loading && !st.sessions)) { empty('Scanning sessions over ssh…'); return []; }
-      if (st.error) { empty('Discovery failed: ' + st.error); return []; }
+    _remoteHostState(hostId) { return this._wbRemoteHosts?.get(hostId) || null; },
+
+    // Compact host <select> shared by the Recent and History zone heads
+    _buildHostSelect(value, onchange) {
+      const sel = document.createElement('select');
+      sel.className = 'wb-recent-host';
+      sel.title = 'Show sessions from this machine or a remote host';
+      sel.innerHTML = '<option value="">Local</option>';
+      for (const hh of this._hostsData?.hosts || []) {
+        const o = document.createElement('option');
+        o.value = hh.id; o.textContent = hh.name;
+        sel.appendChild(o);
+      }
+      sel.value = value;
+      sel.onclick = (e) => e.stopPropagation();
+      sel.onchange = () => onchange(sel.value);
+      return sel;
+    },
+
+    _wbEmptyRow(text) {
+      const e = document.createElement('div');
+      e.className = 'wb-empty';
+      e.textContent = text;
+      this.listEl.appendChild(e);
+    },
+
+    _wbFilterRemote(sessions) {
       const f = (document.getElementById('session-filter')?.value || '').toLowerCase().trim();
-      let all = st.sessions || [];
-      if (f) all = all.filter(s => (s.cwd || s.projDir || '').toLowerCase().includes(f) || (s.sessionId || '').toLowerCase().includes(f));
+      if (!f) return sessions;
+      return sessions.filter(s => (s.cwd || s.projDir || '').toLowerCase().includes(f)
+        || (s.name || '').toLowerCase().includes(f) || (s.sessionId || '').toLowerCase().includes(f));
+    },
+
+    // Renders the RECENT slice (last 7 days) of a remote host's sessions.
+    // (History has its own independent host switcher — see the History zone.)
+    _renderRemoteRecent(hostId) {
+      this._loadRemoteHost(hostId);
+      const st = this._remoteHostState(hostId);
+      const empty = (t) => this._wbEmptyRow(t);
+      const hostLabelFallback = this._hostsData?.hosts?.find(x => x.id === hostId)?.name || hostId;
+      if (!st || (st.loading && !st.sessions)) { empty('Scanning sessions over ssh…'); return; }
+      if (st.error) { empty('Discovery failed: ' + st.error); return; }
+      const all = this._wbFilterRemote(st.sessions || []);
       const cutoff = Date.now() - RECENT_MS;
       const sessions = all.filter(s => (s.mtime || 0) >= cutoff || s.status === 'remote-running');
-      const older = all.filter(s => (s.mtime || 0) < cutoff && s.status !== 'remote-running');
-      if (!all.length) { empty(f ? 'No matches on this host' : 'No sessions found on this host'); return []; }
-      if (!sessions.length) { empty('Nothing in the last 7 days on this host'); return older; }
+      if (!all.length) { empty('No sessions found on ' + hostLabelFallback); return; }
+      if (!sessions.length) { empty(`Nothing in the last 7 days on ${hostLabelFallback} — check History below`); return; }
       const byProj = new Map();
       for (const s of sessions) {
         const k = s.cwd || `(${s.projDir || 'unknown'})`;
@@ -137,6 +163,7 @@ export function installSidebarWorkbench(Sidebar) {
         head.className = 'wb-proj-head';
         head.title = hostLabel + ': ' + cwd;
         head.style.setProperty('--wb-proj-color', color);
+        applyHostStrip(head, hostId);
         head.innerHTML = `<span class="wb-proj-dot"></span><span class="wb-proj-name">${escHtml(abbrevPath(cwd))}</span><span class="wb-zone-count">${list.length}</span>`;
         if (!cwd.startsWith('(')) {
           const plus = document.createElement('button');
@@ -154,6 +181,7 @@ export function installSidebarWorkbench(Sidebar) {
           const card = this._buildRemoteCard(s);
           card.classList.add('wb-proj-card');
           card.style.setProperty('--wb-strip', color);
+          applyHostStrip(card, hostId);
           this.listEl.appendChild(card);
         }
         if (list.length > shown.length) {
@@ -167,7 +195,6 @@ export function installSidebarWorkbench(Sidebar) {
           this.listEl.appendChild(more);
         }
       }
-      return older;
     },
 
     // Map a discovered remote session to the FULL session-card shape — remote
@@ -329,6 +356,7 @@ export function installSidebarWorkbench(Sidebar) {
         // and its Recent siblings share a color so you can tie them to one
         // project at a glance (the Recent header's colored dot names it).
         card.style.setProperty('--wb-strip', `hsl(${projectHue(s.cwd)} 55% 52%)`);
+        applyHostStrip(card, s.host); // inner strip: which MACHINE (mixed zone)
         // second line: dim abbreviated path — the context that keeps
         // similarly-named sessions distinguishable (user-raised concern)
         const pathEl = document.createElement('div');
@@ -347,9 +375,8 @@ export function installSidebarWorkbench(Sidebar) {
       // while the zone shows Local.
       const recentHost = this._wbRecentHost ?? (this._wbRecentHost = localStorage.getItem('wbRecentHost') || '');
       this.listEl.appendChild(this._buildRecentHead(recentHost, recent.length, zoneHead));
-      let remoteOlder = [];
       if (recentHost) {
-        remoteOlder = this._renderRemoteRecent(recentHost);
+        this._renderRemoteRecent(recentHost);
       } else {
       const byProj = new Map();
       for (const s of recent) {
@@ -417,21 +444,59 @@ export function installSidebarWorkbench(Sidebar) {
       }
       } // end local RECENT branch
 
-      // ── HISTORY (collapsed, search-first, paged) ──
-      // The Recent host switcher scopes this zone too: with a remote host
-      // selected, HISTORY = that host's sessions older than 7 days.
-      const histList = recentHost ? remoteOlder : history;
+      // ── HISTORY (collapsed, search-first, paged; own host switcher) ──
+      const histHost = this._wbHistoryHost ?? (this._wbHistoryHost = localStorage.getItem('wbHistoryHost') || '');
+      const histState = histHost ? this._remoteHostState(histHost) : null;
+      const histLabel = histHost ? (this._hostsData?.hosts?.find(x => x.id === histHost)?.name || histHost) : '';
+      if (histHost) this._loadRemoteHost(histHost);
+      const cutoffH = Date.now() - RECENT_MS;
+      const histList = histHost
+        ? this._wbFilterRemote(histState?.sessions || []).filter(s => (s.mtime || 0) < cutoffH && s.status !== 'remote-running')
+        : history;
+      const histLoading = histHost && (!histState || (histState.loading && !histState.sessions));
       const hHead = document.createElement('div');
       hHead.className = 'wb-zone-head wb-history-head';
       const filterActive = !!(document.getElementById('session-filter')?.value || '').trim();
       const open = this._wbHistoryOpen || filterActive; // searching implies looking at history
-      hHead.innerHTML = `<span class="wb-hist-arrow">${open ? '▾' : '▸'}</span><span>History</span><span class="wb-zone-count">${histList.length}</span>`;
+      hHead.innerHTML = `<span class="wb-hist-arrow">${open ? '▾' : '▸'}</span><span>History</span><span class="wb-zone-count">${histLoading ? '…' : histList.length}</span>`;
       hHead.onclick = () => { this._wbHistoryOpen = !this._wbHistoryOpen; this._render(); };
+      if ((this._hostsData?.hosts || []).length || histHost) {
+        hHead.appendChild(this._buildHostSelect(histHost, (v) => {
+          this._wbHistoryHost = v;
+          localStorage.setItem('wbHistoryHost', v);
+          if (v) this._wbHistoryOpen = true; // picking a host means you want to SEE it
+          this._render();
+        }));
+        if (histHost) {
+          const rf = document.createElement('button');
+          rf.className = 'wb-recent-refresh';
+          rf.title = 'Re-scan sessions on this host';
+          rf.innerHTML = '<svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M13 2v3h-3"/></svg>';
+          rf.onclick = (e) => { e.stopPropagation(); this._loadRemoteHost(histHost, { fresh: true }); };
+          hHead.appendChild(rf);
+        }
+      }
       this.listEl.appendChild(hHead);
       if (open) {
+        if (histLoading) {
+          this._wbEmptyRow('Scanning sessions over ssh…');
+        } else if (histHost && histState?.error) {
+          this._wbEmptyRow('Discovery failed: ' + histState.error);
+        } else if (!histList.length) {
+          this._wbEmptyRow(histHost ? `No sessions older than 7 days on ${histLabel}` : 'No older sessions');
+        }
         const cap = this._wbHistoryCap || HISTORY_PAGE;
         for (const s of histList.slice(0, cap)) {
-          this.listEl.appendChild(recentHost ? this._buildRemoteCard(s) : this._buildSessionCard(s));
+          let card;
+          if (histHost) {
+            card = this._buildRemoteCard(s);
+            card.classList.add('wb-proj-card');
+            card.style.setProperty('--wb-strip', `hsl(${projectHue(histLabel + ': ' + (s.cwd || s.projDir || ''))} 55% 52%)`);
+            applyHostStrip(card, histHost);
+          } else {
+            card = this._buildSessionCard(s);
+          }
+          this.listEl.appendChild(card);
         }
         if (histList.length > cap) {
           const more = document.createElement('button');

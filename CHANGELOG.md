@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.27.0] — 2026-07-04
+
+### Added
+
+- **Host color strips** — session cards and project headers carry a second, inner 3px strip in a stable per-host color next to the outer project strip (no inner strip = this machine), so mixed local/remote sessions in the Active zone separate at a glance.
+- **History has its own host switcher** — independent of Recent's: browse one host's recent work while digging through another's (or Local's) history. Explicit host-scoped empty states ("No sessions older than 7 days on AIDev") so an empty zone reads as data, not breakage; picking a host auto-expands the zone.
+
 ## [2.26.0] — 2026-07-04
 
 ### Added
