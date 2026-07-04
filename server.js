@@ -1057,6 +1057,8 @@ createEditorHelper();
 
 // ── File System API (extracted to src/routes/files.js) ──
 app.locals.xEnv = X_ENV;
+// Remote fs (Files cross-host) — resolved lazily; `hosts` is created below.
+app.locals.getRemoteFs = () => remoteFs;
 app.use(fileRoutes);
 
 // Browser proxy — full-rewriting web proxy via node-unblocker
@@ -1115,6 +1117,8 @@ app.use(persistenceRouter);
 // ── Hosts (ssh host registry for remote sessions — collaboration P2) ──
 const { HostManager } = require('./src/hosts');
 const hosts = new HostManager({ dataDir: path.join(__dirname, 'data') });
+const { RemoteFs } = require('./src/remote-fs');
+const remoteFs = new RemoteFs(hosts);
 app.get('/api/hosts', (req, res) => {
   const k = hosts.keyInfo();
   res.json({ hosts: hosts.list(), key: { exists: k.exists, path: k.path, publicKey: k.publicKey } });

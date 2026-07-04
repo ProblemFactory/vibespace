@@ -26,6 +26,7 @@ class FileExplorer {
   constructor(winInfo, app, startPath) {
     this.winInfo = winInfo; this.app = app; this.currentPath = ''; this.items = [];
     this._startPath = startPath || null;
+    this._host = winInfo._explorerHost || ''; // '' = local; else host id (Files cross-host)
     this._viewMode = 'list'; // 'list' or 'icon'
     this._renderLimit = 100; // initial batch size for large folders
     this._bookmarks = [];
@@ -57,6 +58,18 @@ class FileExplorer {
     // Toolbar
     const toolbar = document.createElement('div'); toolbar.className = 'file-toolbar';
     const btnUp = this._btn('\u2191', 'Go up'); btnUp.onclick = () => this.navigateUp();
+    // Host selector (Files cross-host): Local + each registered ssh host.
+    // Switching re-browses that host's filesystem from its home dir.
+    this._hostSelect = document.createElement('select');
+    this._hostSelect.className = 'file-host-select';
+    this._hostSelect.title = 'Browse files on this machine or a remote host';
+    this._hostSelect.innerHTML = '<option value="">Local</option>';
+    this._hostSelect.onchange = () => {
+      this._host = this._hostSelect.value;
+      this.winInfo._explorerHost = this._host;
+      this._loadHome();
+    };
+    this._refreshHostOptions();
     this.pathInput = document.createElement('input'); this.pathInput.className = 'file-path-input';
     this.pathInput.addEventListener('keydown', e => { if (e.key === 'Enter') { if (this._hideAC) this._hideAC(); this.navigate(this.pathInput.value); } });
     this._acDropdown = document.createElement('div'); this._acDropdown.className = 'path-autocomplete hidden';
@@ -97,7 +110,7 @@ class FileExplorer {
     this._ringCircumference = 2 * Math.PI * 8;
 
     toolbar.style.position = 'relative';
-    toolbar.append(btnUp, this.pathInput, btnRefresh, btnView, btnNewFile, btnNewDir, btnUpload, this._acDropdown);
+    toolbar.append(btnUp, this._hostSelect, this.pathInput, btnRefresh, btnView, btnNewFile, btnNewDir, btnUpload, this._acDropdown);
 
     // Bookmark panel
     this._bookmarkPanel = document.createElement('div'); this._bookmarkPanel.className = 'file-bookmark-panel';
@@ -500,16 +513,35 @@ class FileExplorer {
     showContextMenu(x, y, menuItems);
   }
 
-  async _loadHome() { try { const r = await fetch('/api/home'); const d = await r.json(); this.navigate(d.home); } catch { this.navigate('/'); } }
+  // Host query-param suffix for GET URLs / body field for POSTs (Files
+  // cross-host). Empty string / no field when browsing the local machine.
+  _hp() { return this._host ? `&host=${encodeURIComponent(this._host)}` : ''; }
+  _hb(obj = {}) { return this._host ? { ...obj, host: this._host } : obj; }
+
+  async _refreshHostOptions() {
+    try {
+      const r = await fetch('/api/hosts'); const d = await r.json();
+      const cur = this._host;
+      this._hostSelect.innerHTML = '<option value="">Local</option>';
+      for (const h of d?.hosts || []) {
+        const o = document.createElement('option');
+        o.value = h.id; o.textContent = h.name;
+        this._hostSelect.appendChild(o);
+      }
+      this._hostSelect.value = cur;
+    } catch {}
+  }
+
+  async _loadHome() { try { const r = await fetch('/api/home?_=1' + this._hp()); const d = await r.json(); this.navigate(d.home || '/'); } catch { this.navigate('/'); } }
 
   async navigate(dirPath) {
     try {
       this._renderLimit = 100; // reset batch on navigation
-      const res = await fetch(`/api/files?path=${encodeURIComponent(dirPath)}`);
+      const res = await fetch(`/api/files?path=${encodeURIComponent(dirPath)}${this._hp()}`);
       const data = await res.json();
       if (data.error) {
         // If path is a file (not a directory), open it in a viewer
-        const infoRes = await fetch(`/api/file/info?path=${encodeURIComponent(dirPath)}`);
+        const infoRes = await fetch(`/api/file/info?path=${encodeURIComponent(dirPath)}${this._hp()}`);
         if (infoRes.ok) {
           const info = await infoRes.json();
           if (!info.isDirectory) { this.app.openFile(dirPath, dirPath.split('/').pop()); return; }
@@ -519,8 +551,9 @@ class FileExplorer {
       if (this.currentPath !== data.path) { this._selection.clear(); this._selAnchor = null; }
       this.currentPath = data.path; this.pathInput.value = data.path; this.items = data.items;
       this.winInfo._explorerPath = data.path; // for layout persistence
-      if (this.winInfo._openSpec) this.winInfo._openSpec.path = data.path; // update for sync
-      this.app.wm.setTitle(this.winInfo.id, frontTruncate(data.path));
+      if (this.winInfo._openSpec) { this.winInfo._openSpec.path = data.path; this.winInfo._openSpec.host = this._host || undefined; }
+      const hostName = this._host ? (this._hostSelect.selectedOptions[0]?.textContent || this._host) : '';
+      this.app.wm.setTitle(this.winInfo.id, (hostName ? hostName + ': ' : '') + frontTruncate(data.path));
       this._renderItems();
     } catch (err) { this.listEl.innerHTML = `<div class="empty-hint" style="color:var(--red)">${escHtml(err.message)}</div>`; }
   }
@@ -811,14 +844,14 @@ class FileExplorer {
   async createFile() {
     const n = await showInputDialog({ title: 'New File', label: 'File name', confirmText: 'Create' });
     if (!n || !n.trim()) return;
-    const r = await fetch('/api/file/write', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: this.currentPath + '/' + n.trim(), content: '' }) }).catch(() => null);
+    const r = await fetch('/api/file/write', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this._hb({ path: this.currentPath + '/' + n.trim(), content: '' })) }).catch(() => null);
     if (!r?.ok) showToast('Create file failed', { type: 'error' });
     this.refresh();
   }
   async createDir() {
     const n = await showInputDialog({ title: 'New Folder', label: 'Folder name', confirmText: 'Create' });
     if (!n || !n.trim()) return;
-    const r = await fetch('/api/mkdir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: this.currentPath + '/' + n.trim() }) }).catch(() => null);
+    const r = await fetch('/api/mkdir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this._hb({ path: this.currentPath + '/' + n.trim() })) }).catch(() => null);
     if (!r?.ok) showToast('Create folder failed', { type: 'error' });
     this.refresh();
   }
@@ -944,7 +977,7 @@ class FileExplorer {
     const destDir = this.currentPath;
 
     // Build FormData
-    const fd = new FormData(); fd.append('destDir', destDir);
+    const fd = new FormData(); fd.append('destDir', destDir); if (this._host) fd.append('host', this._host);
     const names = [];
     for (const f of files) {
       fd.append('files', f);
@@ -1134,8 +1167,8 @@ class FileExplorer {
     items.push({ label: 'Cut', action: () => this._clipboardSet('cut') });
     items.push({ label: 'Duplicate', action: () => this._duplicate(dataset.name) });
     items.push({ label: 'Compress to Archive\u2026', action: () => this._compressSelection([dataset.name]) });
-    if (isDir) items.push({ label: 'Download as Zip', action: () => { window.open(`/api/download-zip?path=${encodeURIComponent(fullPath)}`); } });
-    else items.push({ label: 'Download', action: () => { window.open(`/api/download?path=${encodeURIComponent(fullPath)}`); } });
+    if (isDir) items.push({ label: 'Download as Zip', action: () => { window.open(`/api/download-zip?path=${encodeURIComponent(fullPath)}${this._hp()}`); } });
+    else items.push({ label: 'Download', action: () => { window.open(`/api/download?path=${encodeURIComponent(fullPath)}${this._hp()}`); } });
     items.push({ label: 'Copy Path', action: () => copyText(fullPath) });
 
     if (isDir) {
@@ -1260,7 +1293,7 @@ class FileExplorer {
     if (!clip || !clip.paths.length) return;
     const api = clip.op === 'cut' ? '/api/file/move' : '/api/file/copy';
     let overwriteAll = null, done = 0, failed = 0;
-    const post = (src, dest, overwrite) => fetch(api, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ src, dest, overwrite }) }).catch(() => null);
+    const post = (src, dest, overwrite) => fetch(api, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this._hb({ src, dest, overwrite })) }).catch(() => null);
     for (const src of clip.paths) {
       const base = src.split('/').pop();
       let dest = this.currentPath + '/' + base;
@@ -1284,7 +1317,7 @@ class FileExplorer {
   }
 
   async _duplicate(name) {
-    const r = await fetch('/api/file/copy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ src: this.currentPath + '/' + name, dest: this._uniqueName(name) }) }).catch(() => null);
+    const r = await fetch('/api/file/copy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this._hb({ src: this.currentPath + '/' + name, dest: this._uniqueName(name) })) }).catch(() => null);
     if (!r?.ok) showToast('Duplicate failed', { type: 'error' });
     this.refresh();
   }
@@ -1296,7 +1329,7 @@ class FileExplorer {
     if (!out || !out.trim()) return;
     const dest = this.currentPath + '/' + out.trim();
     const paths = names.map(n => this.currentPath + '/' + n);
-    const post = (overwrite) => fetch('/api/archive', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paths, dest, overwrite }) }).catch(() => null);
+    const post = (overwrite) => fetch('/api/archive', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this._hb({ paths, dest, overwrite })) }).catch(() => null);
     showToast('Compressing\u2026');
     let r = await post(false);
     if (r && r.status === 409) {
@@ -1321,7 +1354,7 @@ class FileExplorer {
     }
     showToast('Extracting\u2026');
     // overwrite:false = skip files that already exist (never destructive)
-    const r = await fetch('/api/archive/extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: src, dest, overwrite: false }) }).catch(() => null);
+    const r = await fetch('/api/archive/extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this._hb({ path: src, dest, overwrite: false })) }).catch(() => null);
     const dd = await r?.json().catch(() => ({}));
     if (!r?.ok) showToast('Extract failed: ' + (dd?.error || 'unknown error'), { type: 'error' });
     else showToast(here ? 'Extracted here' : `Extracted to ${dest.split('/').pop()}`);
@@ -1335,7 +1368,7 @@ class FileExplorer {
     if (!ok) return;
     let failed = 0;
     for (const n of names) {
-      const r = await fetch(`/api/file?path=${encodeURIComponent(this.currentPath + '/' + n)}`, { method: 'DELETE' }).catch(() => null);
+      const r = await fetch(`/api/file?path=${encodeURIComponent(this.currentPath + '/' + n)}${this._hp()}`, { method: 'DELETE' }).catch(() => null);
       if (!r?.ok) failed++;
     }
     if (failed) showToast(`Delete failed for ${failed} item(s)`, { type: 'error' });
@@ -1345,7 +1378,7 @@ class FileExplorer {
 
   async _showProperties(name) {
     const fp = name ? this.currentPath + '/' + name : this.currentPath;
-    const r = await fetch(`/api/file/stat?path=${encodeURIComponent(fp)}&du=1`).catch(() => null);
+    const r = await fetch(`/api/file/stat?path=${encodeURIComponent(fp)}&du=1${this._hp()}`).catch(() => null);
     const d = await r?.json().catch(() => null);
     if (!d || d.error) { showToast('Could not read properties', { type: 'error' }); return; }
     const overlay = document.createElement('div'); overlay.className = 'dialog-overlay'; overlay.style.zIndex = '99998';
@@ -1386,14 +1419,14 @@ class FileExplorer {
   async _rename(oldName) {
     const n = await showInputDialog({ title: 'Rename', label: 'New name', value: oldName, confirmText: 'Rename' });
     if (!n || n === oldName) return;
-    const r = await fetch('/api/rename', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oldPath: this.currentPath + '/' + oldName, newPath: this.currentPath + '/' + n }) }).catch(() => null);
+    const r = await fetch('/api/rename', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this._hb({ oldPath: this.currentPath + '/' + oldName, newPath: this.currentPath + '/' + n })) }).catch(() => null);
     if (!r?.ok) showToast('Rename failed', { type: 'error' });
     this.refresh();
   }
   async _delete(name, isDir) {
     const ok = await showConfirmDialog({ title: isDir ? 'Delete Folder' : 'Delete File', message: `Delete "${name}"?${isDir ? ' All contents will be removed.' : ''}`, confirmText: 'Delete', danger: true });
     if (!ok) return;
-    const r = await fetch(`/api/file?path=${encodeURIComponent(this.currentPath + '/' + name)}`, { method: 'DELETE' }).catch(() => null);
+    const r = await fetch(`/api/file?path=${encodeURIComponent(this.currentPath + '/' + name)}${this._hp()}`, { method: 'DELETE' }).catch(() => null);
     if (!r?.ok) showToast('Delete failed', { type: 'error' });
     this.refresh();
   }
@@ -1466,6 +1499,7 @@ class FileExplorer {
   _setupPathAutocomplete() {
     const ac = setupDirAutocomplete(this.pathInput, this._acDropdown, {
       onNavigate: (path) => this.navigate(path),
+      endpoint: () => this._host ? `/api/hosts/${this._host}/dir-complete` : null,
     });
     this._hideAC = ac.hide;
   }
@@ -1508,7 +1542,7 @@ class FileExplorer {
     const fp = this._selectedPath;
     const name = fp.split('/').pop();
     const ext = name.split('.').pop().toLowerCase();
-    const rawUrl = `/api/file/raw?path=${encodeURIComponent(fp)}`;
+    const rawUrl = `/api/file/raw?path=${encodeURIComponent(fp)}${this._hp()}`;
     this._previewTitle.textContent = name;
     this._previewContent.innerHTML = '<div class="empty-hint">Loading...</div>';
 
@@ -1519,7 +1553,7 @@ class FileExplorer {
       if (rendered) return;
 
       // Fallback: text preview for non-binary files
-      const infoRes = await fetch(`/api/file/info?path=${encodeURIComponent(fp)}`);
+      const infoRes = await fetch(`/api/file/info?path=${encodeURIComponent(fp)}${this._hp()}`);
       const info = await infoRes.json();
       if (info.error) { this._previewContent.innerHTML = `<div class="empty-hint">${escHtml(info.error)}</div>`; return; }
       if (info.isBinary) {
@@ -1530,7 +1564,7 @@ class FileExplorer {
         this._previewContent.innerHTML = `<div class="empty-hint">${formatSize(info.size)} — too large to preview</div>`;
         return;
       }
-      const res = await fetch(`/api/file/content?path=${encodeURIComponent(fp)}`);
+      const res = await fetch(`/api/file/content?path=${encodeURIComponent(fp)}${this._hp()}`);
       const data = await res.json();
       if (data.error) { this._previewContent.innerHTML = `<div class="empty-hint">${escHtml(data.error)}</div>`; return; }
       const pre = document.createElement('pre');

@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.23.0] — 2026-07-04
+
+### Added (collaboration)
+
+- **Files across hosts** — the file explorer gains a host dropdown next to the path bar: browse and *edit* files on any registered ssh host with full parity (list / open / create / rename / delete / upload / download / compress / extract / properties), each op one ssh command reusing the host's key. Drag or copy a file between two explorer windows on different hosts and it transfers automatically (same host = remote cp; cross-host or host↔local = streamed through the server). See [docs/files-cross-host.md](docs/files-cross-host.md).
+
 ## [2.22.0] — 2026-07-04
 
 ### Added / Changed (remote + session management)

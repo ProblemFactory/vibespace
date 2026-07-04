@@ -477,3 +477,11 @@
 .archive-entry .ae-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .archive-entry .ae-size { flex-shrink: 0; color: var(--text-dim); font-size: 11px; }
 .archive-empty { padding: 24px; text-align: center; color: var(--text-dim); font-size: 12px; }
+
+/* File explorer host selector (Files cross-host) */
+.file-host-select {
+  height: 24px; max-width: 90px; padding: 0 4px; font-size: 11px;
+  background: var(--bg-input); color: var(--text); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); cursor: pointer; flex-shrink: 0;
+}
+.file-host-select:hover { border-color: var(--accent); }

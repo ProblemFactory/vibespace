@@ -16,6 +16,7 @@ VibeSpace is a backend-agnostic web workspace for **coding agents** — it drive
 - **[Settings](settings.md)** — Global/per-terminal/chat settings plus Claude and Codex launch defaults
 - **[Deployment](deployment.md)** — Password authentication, Docker/compose, team server setup
 - **[Mounts](mounts.md)** — Shared S3 storage: my-storage mount, share minting, import links
+- **[Files across hosts](files-cross-host.md)** — Browse/edit remote files over ssh, cross-host copy
 
 ## Reference
 

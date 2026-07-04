@@ -18,7 +18,24 @@ function expandTilde(p) {
 }
 function safePath(p) { return path.resolve(expandTilde(p)); }
 
-router.get('/api/home', (req, res) => res.json({ home: os.homedir(), authEnabled: !!req.app.locals.authEnabled }));
+// Files cross-host: when ?host=<id> is present, dispatch to the RemoteFs
+// (ssh-backed) instead of the local filesystem. rfs(req) returns the
+// RemoteFs instance + host id, or null for local.
+function rfs(req) {
+  const host = req.query.host || req.body?.host;
+  if (!host) return null;
+  const inst = req.app.locals.getRemoteFs?.();
+  return inst ? { fs: inst, host } : null;
+}
+// remote paths are used verbatim (no local path.resolve — they live on the
+// remote); '~' expands remotely inside RemoteFs
+const remotePath = (p) => String(p || '~');
+
+router.get('/api/home', async (req, res) => {
+  const R = rfs(req);
+  if (R) { try { return res.json({ home: await R.fs.home(R.host) }); } catch (e) { return res.status(400).json({ error: e.message }); } }
+  res.json({ home: os.homedir(), authEnabled: !!req.app.locals.authEnabled });
+});
 
 // System monospace fonts via fc-list (cached)
 let _cachedMonoFonts = null;
@@ -39,7 +56,9 @@ router.get('/api/fonts', (req, res) => {
 });
 
 // Directory autocomplete — returns dirs matching partial path, with 500ms timeout
-router.get('/api/dir-complete', (req, res) => {
+router.get('/api/dir-complete', async (req, res) => {
+  const R = rfs(req);
+  if (R) { try { return res.json({ suggestions: await R.fs.dirComplete(R.host, req.query.path || '') }); } catch { return res.json({ suggestions: [] }); } }
   const input = req.query.path || '';
   const timeout = setTimeout(() => { if (!res.headersSent) res.json({ suggestions: [] }); }, 500);
 
@@ -67,7 +86,9 @@ router.get('/api/dir-complete', (req, res) => {
   }
 });
 
-router.get('/api/files', (req, res) => {
+router.get('/api/files', async (req, res) => {
+  const R = rfs(req);
+  if (R) { try { return res.json(await R.fs.list(R.host, remotePath(req.query.path))); } catch (e) { return res.status(400).json({ error: e.message }); } }
   const dirPath = safePath(req.query.path || os.homedir());
   try {
     const entries = fs.readdirSync(dirPath, { withFileTypes: true });
@@ -91,7 +112,9 @@ router.get('/api/files', (req, res) => {
 });
 
 // File info (size + binary detection) without reading full content
-router.get('/api/file/info', (req, res) => {
+router.get('/api/file/info', async (req, res) => {
+  const R = rfs(req);
+  if (R) { try { return res.json(await R.fs.info(R.host, remotePath(req.query.path))); } catch (e) { return res.status(400).json({ error: e.message }); } }
   const filePath = safePath(req.query.path);
   try {
     const stat = fs.statSync(filePath);
@@ -108,7 +131,9 @@ router.get('/api/file/info', (req, res) => {
 });
 
 // Read text file content (limit raised to 10MB)
-router.get('/api/file/content', (req, res) => {
+router.get('/api/file/content', async (req, res) => {
+  const R = rfs(req);
+  if (R) { try { return res.json(await R.fs.readText(R.host, remotePath(req.query.path))); } catch (e) { return res.status(400).json({ error: e.message, size: e.size }); } }
   const filePath = safePath(req.query.path);
   try {
     const stat = fs.statSync(filePath);
@@ -119,10 +144,19 @@ router.get('/api/file/content', (req, res) => {
 });
 
 // Read binary file chunk as raw bytes
-router.get('/api/file/binary', (req, res) => {
-  const filePath = safePath(req.query.path);
+router.get('/api/file/binary', async (req, res) => {
   const offset = parseInt(req.query.offset) || 0;
   const length = Math.min(parseInt(req.query.length) || 65536, 1048576); // max 1MB per chunk
+  const R = rfs(req);
+  if (R) {
+    try {
+      const info = await R.fs.info(R.host, remotePath(req.query.path));
+      const buf = await R.fs.readBinary(R.host, remotePath(req.query.path), offset, length);
+      res.set({ 'Content-Type': 'application/octet-stream', 'X-File-Size': info.size, 'X-Offset': offset, 'X-Bytes-Read': buf.length });
+      return res.send(buf);
+    } catch (e) { return res.status(400).json({ error: e.message }); }
+  }
+  const filePath = safePath(req.query.path);
   try {
     const fd = fs.openSync(filePath, 'r');
     const buf = Buffer.alloc(length);
@@ -136,6 +170,8 @@ router.get('/api/file/binary', (req, res) => {
 
 // Serve raw files (PDF, images, etc.)
 router.get('/api/file/raw', (req, res) => {
+  const R = rfs(req);
+  if (R) return R.fs.downloadTo(R.host, remotePath(req.query.path), res);
   const filePath = safePath(req.query.path);
   try {
     res.sendFile(filePath);
@@ -155,6 +191,8 @@ router.get('/api/file/serve/*', (req, res) => {
 
 // Download file
 router.get('/api/download', (req, res) => {
+  const R = rfs(req);
+  if (R) return R.fs.downloadTo(R.host, remotePath(req.query.path), res, { attachment: true });
   const filePath = safePath(req.query.path);
   try {
     res.download(filePath);
@@ -193,22 +231,30 @@ router.get('/api/file/docx', (req, res) => {
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
-router.post('/api/mkdir', (req, res) => {
+router.post('/api/mkdir', async (req, res) => {
+  const R = rfs(req);
+  if (R) { try { return res.json(await R.fs.mkdir(R.host, remotePath(req.body.path))); } catch (e) { return res.status(400).json({ error: e.message }); } }
   try { fs.mkdirSync(safePath(req.body.path), { recursive: true }); res.json({ success: true }); }
   catch (err) { res.status(400).json({ error: err.message }); }
 });
 
-router.post('/api/file/write', (req, res) => {
+router.post('/api/file/write', async (req, res) => {
+  const R = rfs(req);
+  if (R) { try { return res.json(await R.fs.write(R.host, remotePath(req.body.path), Buffer.from(req.body.content || ''))); } catch (e) { return res.status(400).json({ error: e.message }); } }
   try { fs.writeFileSync(safePath(req.body.path), req.body.content || ''); res.json({ success: true }); }
   catch (err) { res.status(400).json({ error: err.message }); }
 });
 
-router.post('/api/rename', (req, res) => {
+router.post('/api/rename', async (req, res) => {
+  const R = rfs(req);
+  if (R) { try { return res.json(await R.fs.rename(R.host, remotePath(req.body.oldPath), remotePath(req.body.newPath))); } catch (e) { return res.status(400).json({ error: e.message }); } }
   try { fs.renameSync(safePath(req.body.oldPath), safePath(req.body.newPath)); res.json({ success: true }); }
   catch (err) { res.status(400).json({ error: err.message }); }
 });
 
-router.delete('/api/file', (req, res) => {
+router.delete('/api/file', async (req, res) => {
+  const R = rfs(req);
+  if (R) { try { return res.json(await R.fs.remove(R.host, remotePath(req.query.path))); } catch (e) { return res.status(400).json({ error: e.message }); } }
   const filePath = safePath(req.query.path);
   try {
     const stat = fs.statSync(filePath);
@@ -220,12 +266,32 @@ router.delete('/api/file', (req, res) => {
 
 // File upload
 const upload = multer({ dest: '/tmp/claude-webui-uploads/' });
-router.post('/api/upload', upload.array('files'), (req, res) => {
+router.post('/api/upload', upload.array('files'), async (req, res) => {
   const destDir = req.body.destDir || os.homedir();
   const preservePaths = req.body.preservePaths === '1'; // folder upload: keep relative paths
   // Client sends correct UTF-8 filenames as JSON to avoid multer encoding issues
   let clientNames = [];
   try { clientNames = JSON.parse(req.body.fileNames || '[]'); } catch {}
+  // Remote upload: stream each temp file to the host over ssh
+  const R = rfs(req);
+  if (R) {
+    try {
+      const results = [];
+      for (let i = 0; i < req.files.length; i++) {
+        const file = req.files[i];
+        const name = clientNames[i] || file.originalname;
+        if (name.includes('..')) throw new Error('Invalid file name: ' + name);
+        const dest = (destDir.endsWith('/') ? destDir : destDir + '/') + name;
+        await R.fs.write(R.host, dest, fs.readFileSync(file.path));
+        fs.unlinkSync(file.path);
+        results.push({ name, path: dest, size: file.size });
+      }
+      return res.json({ success: true, files: results });
+    } catch (e) {
+      for (const f of req.files || []) { try { fs.unlinkSync(f.path); } catch {} }
+      return res.status(400).json({ error: e.message });
+    }
+  }
   try {
     const results = [];
     const destRoot = path.resolve(destDir);
@@ -447,9 +513,18 @@ function archiveType(p) {
 
 // Create an archive from files/folders that share one parent directory.
 // Runs with cwd = parent so the archive holds clean relative paths.
-router.post('/api/archive', (req, res) => {
+router.post('/api/archive', async (req, res) => {
   const { paths, dest, overwrite } = req.body || {};
   if (!Array.isArray(paths) || !paths.length || !dest) return res.status(400).json({ error: 'paths[] and dest required' });
+  const R = rfs(req);
+  if (R) {
+    try {
+      const parent = path.posix.dirname(remotePath(paths[0]));
+      const names = paths.map(p => path.posix.basename(p));
+      await R.fs.makeArchive(R.host, remotePath(dest), parent, names);
+      return res.json({ success: true, dest });
+    } catch (e) { return res.status(400).json({ error: e.message }); }
+  }
   const absPaths = paths.map(safePath);
   const destPath = safePath(dest);
   const parent = path.dirname(absPaths[0]);
@@ -475,7 +550,9 @@ router.post('/api/archive', (req, res) => {
 });
 
 // List archive contents (preview without extracting)
-router.get('/api/archive/list', (req, res) => {
+router.get('/api/archive/list', async (req, res) => {
+  const R = rfs(req);
+  if (R) { try { return res.json(await R.fs.archiveList(R.host, remotePath(req.query.path))); } catch (e) { return res.status(400).json({ error: e.message }); } }
   const fp = safePath(req.query.path || '');
   const type = archiveType(fp);
   if (!type) return res.status(400).json({ error: 'unsupported archive type' });
@@ -550,9 +627,11 @@ router.post('/api/archive/extract-entry', (req, res) => {
 });
 
 // Extract a whole archive into dest
-router.post('/api/archive/extract', (req, res) => {
+router.post('/api/archive/extract', async (req, res) => {
   const { path: ap, dest, overwrite } = req.body || {};
   if (!ap || !dest) return res.status(400).json({ error: 'path and dest required' });
+  const R = rfs(req);
+  if (R) { try { return res.json(await R.fs.archiveExtract(R.host, remotePath(ap), remotePath(dest))); } catch (e) { return res.status(400).json({ error: e.message }); } }
   const fp = safePath(ap);
   const destDir = safePath(dest);
   const type = archiveType(fp);
@@ -570,8 +649,51 @@ router.post('/api/archive/extract', (req, res) => {
   });
 });
 
+// Cross-host transfer relay: stream src (local or remote) → dest (local or
+// remote) through the server. Smart selection: same host uses remote cp/mv
+// (handled below); different hosts (or host↔local) stream here.
+async function crossHostTransfer(req, res, { move }) {
+  const { src, dest, srcHost, destHost, overwrite } = req.body || {};
+  if (!src || !dest) return res.status(400).json({ error: 'src and dest required' });
+  const inst = req.app.locals.getRemoteFs?.();
+  const isDir = async (host, p) => host ? (await inst.info(host, p)).isDirectory : fs.statSync(safePath(p)).isDirectory();
+  let dir;
+  try { dir = await isDir(srcHost, src); } catch (e) { return res.status(400).json({ error: 'source not found: ' + e.message }); }
+  if (dir) {
+    // stream directories as a zip through the server, unzip on the far side
+    // (simplest correct path for arbitrary trees over ssh)
+    return res.status(400).json({ error: 'cross-host folder transfer not supported yet — copy files, or zip the folder first' });
+  }
+  const base = path.posix.basename(src);
+  const destPath = dest.endsWith('/') ? dest + base : dest;
+  // reader stream
+  let reader;
+  if (srcHost) reader = inst._spawn(srcHost, `cat '${String(src).replace(/'/g, `'\\''`)}'`).stdout;
+  else reader = fs.createReadStream(safePath(src));
+  try {
+    if (destHost) {
+      const h = inst._host(destHost);
+      const { spawn } = require('child_process');
+      const w = spawn('ssh', [...inst.hosts.sshArgs(h), '--', `mkdir -p "$(dirname '${String(destPath).replace(/'/g, `'\\''`)}')" && cat > '${String(destPath).replace(/'/g, `'\\''`)}'`]);
+      reader.pipe(w.stdin);
+      await new Promise((resolve, reject) => { w.on('close', c => c === 0 ? resolve() : reject(new Error('remote write failed'))); reader.on('error', reject); });
+    } else {
+      const dPath = safePath(destPath);
+      fs.mkdirSync(path.dirname(dPath), { recursive: true });
+      await new Promise((resolve, reject) => { const w = fs.createWriteStream(dPath); reader.pipe(w); w.on('finish', resolve); w.on('error', reject); reader.on('error', reject); });
+    }
+    if (move) { if (srcHost) await inst.remove(srcHost, src); else fs.rmSync(safePath(src), { force: true }); }
+    res.json({ success: true, dest: destPath });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+}
+
 // Copy file/dir (recursive). dest is the FULL target path.
-router.post('/api/file/copy', (req, res) => {
+router.post('/api/file/copy', async (req, res) => {
+  const { srcHost, destHost } = req.body || {};
+  // cross-host (or host↔local) → relay stream through the server
+  if ((srcHost || destHost) && srcHost !== destHost) return crossHostTransfer(req, res, { move: false });
+  const R = rfs(req) || (srcHost ? { fs: req.app.locals.getRemoteFs(), host: srcHost } : null);
+  if (R) { try { return res.json(await R.fs.copy(R.host, remotePath(req.body.src), remotePath(req.body.dest))); } catch (e) { return res.status(400).json({ error: e.message }); } }
   const { src, dest, overwrite } = req.body || {};
   if (!src || !dest) return res.status(400).json({ error: 'src and dest required' });
   const s = safePath(src), d = safePath(dest);
@@ -585,7 +707,11 @@ router.post('/api/file/copy', (req, res) => {
 });
 
 // Move file/dir. dest is the FULL target path. Falls back to copy+rm across devices.
-router.post('/api/file/move', (req, res) => {
+router.post('/api/file/move', async (req, res) => {
+  const { srcHost, destHost } = req.body || {};
+  if ((srcHost || destHost) && srcHost !== destHost) return crossHostTransfer(req, res, { move: true });
+  const R = srcHost ? { fs: req.app.locals.getRemoteFs(), host: srcHost } : null;
+  if (R) { try { return res.json(await R.fs.move(R.host, remotePath(req.body.src), remotePath(req.body.dest))); } catch (e) { return res.status(400).json({ error: e.message }); } }
   const { src, dest, overwrite } = req.body || {};
   if (!src || !dest) return res.status(400).json({ error: 'src and dest required' });
   const s = safePath(src), d = safePath(dest);
@@ -606,6 +732,8 @@ router.post('/api/file/move', (req, res) => {
 
 // Stream a folder (or file) as a zip download — no temp archive on disk
 router.get('/api/download-zip', (req, res) => {
+  const R = rfs(req);
+  if (R) return R.fs.downloadZipTo(R.host, remotePath(req.query.path), res);
   const fp = safePath(req.query.path || '');
   if (!fs.existsSync(fp)) return res.status(404).json({ error: 'not found' });
   const base = path.basename(fp) || 'archive';
@@ -619,7 +747,14 @@ router.get('/api/download-zip', (req, res) => {
 });
 
 // Extended properties: stat + optional recursive size/count for directories
-router.get('/api/file/stat', (req, res) => {
+router.get('/api/file/stat', async (req, res) => {
+  const R = rfs(req);
+  if (R) {
+    try {
+      const s = await R.fs.stat(R.host, remotePath(req.query.path), !!req.query.du);
+      return res.json({ path: s.path, isDirectory: s.kind === 'directory', size: s.size, modified: s.modified, created: 0, mode: s.mode, uid: s.uid, gid: s.gid, du: s.du });
+    } catch (e) { return res.status(400).json({ error: e.message }); }
+  }
   const fp = safePath(req.query.path || '');
   try {
     const st = fs.statSync(fp);

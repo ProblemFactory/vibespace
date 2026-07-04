@@ -59,6 +59,8 @@ src/
   codex-session-store.js — Codex session discovery (thread listing, JSONL parsing, forkedFrom chain merge)
   normalizers.js       — createMessageManager(backend, id) factory for backend-agnostic normalization
   mounts.js            — MountManager (rclone S3 mounts, detached + boot adoption, share minting: mc service accounts → STS AssumeRole fallback, vibespace-share:v1 links)
+  hosts.js             — HostManager (ssh host registry, connectivity test, keygen, remote discovery, bootstrap, backend-status, dir-complete)
+  remote-fs.js         — RemoteFs (ssh-per-op remote filesystem: list/read/write/mkdir/rename/rm/stat/copy/move/download/archive — mirrors /api/file* shapes; files.js dispatches on ?host=)
   auth.js              — Optional password auth (scrypt, server-side cookie tokens in data/auth.json, per-IP rate limit; VIBESPACE_PASSWORD / VIBESPACE_GENERATE_PASSWORD=1)
   adapters/
     base.js            — BackendAdapter + SessionHandle (abstract interface for AI backends)
