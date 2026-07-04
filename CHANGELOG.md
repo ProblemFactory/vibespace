@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.23.1] — 2026-07-04
+
+### Added / Fixed
+
+- **Cross-host drag between file explorers** — drag a file from one explorer window to another on a different host and it transfers automatically (same host = remote cp; cross-host or host↔local = streamed through the server). Verified both directions against a real remote.
+- **Project colors clarified** — the per-project color now appears at project level: Recent headers carry a colored dot naming each project's color, and both Active and Recent cards of the same project share that color's left strip, so a running session ties to its Recent siblings at a glance.
+- **Fixed:** the per-terminal ⚙ settings popover was invisible (missing `position:fixed` laid it out off-screen) — clicking it now shows the theme/font controls under the gear.
+
 ## [2.23.0] — 2026-07-04
 
 ### Added (collaboration)

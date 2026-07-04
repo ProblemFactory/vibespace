@@ -182,7 +182,13 @@ class FileExplorer {
 
     // Drag and drop (upload)
     el.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); });
-    el.addEventListener('drop', (e) => { e.preventDefault(); e.stopPropagation(); if (e.dataTransfer.files.length) this._uploadFiles(e.dataTransfer.files); });
+    el.addEventListener('drop', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      // OS file drop → upload; internal explorer→explorer drag → transfer
+      if (e.dataTransfer.files.length) { this._uploadFiles(e.dataTransfer.files); return; }
+      const srcPath = e.dataTransfer.getData('application/x-file-path');
+      if (srcPath) this._receiveDraggedFile(srcPath, e.dataTransfer.getData('application/x-file-host') || '');
+    });
 
     this.listEl.addEventListener('contextmenu', (e) => {
       e.preventDefault();
@@ -534,6 +540,32 @@ class FileExplorer {
 
   async _loadHome() { try { const r = await fetch('/api/home?_=1' + this._hp()); const d = await r.json(); this.navigate(d.home || '/'); } catch { this.navigate('/'); } }
 
+  // Receive a file dragged from ANOTHER explorer window into this one. Uses
+  // the copy endpoint's smart routing: same host -> remote cp; different host
+  // (or host<->local) -> server relay. Dropping into the SAME dir on the SAME
+  // host is a no-op (avoids a pointless self-copy).
+  async _receiveDraggedFile(srcPath, srcHost) {
+    const destHost = this._host || '';
+    const base = srcPath.replace(/\/+$/, '').split('/').pop();
+    const destPath = (this.currentPath.endsWith('/') ? this.currentPath : this.currentPath + '/') + base;
+    if (srcHost === destHost && srcPath === destPath) return; // same place
+    const sameHost = srcHost === destHost;
+    const label = sameHost ? '' : ` (${srcHost || 'local'} -> ${destHost || 'local'})`;
+    try {
+      const body = { src: srcPath, dest: destPath };
+      if (srcHost) body.srcHost = srcHost;
+      if (destHost) body.destHost = destHost;
+      if (sameHost && destHost) body.host = destHost; // same remote host -> remote cp
+      const r = await fetch('/api/file/copy', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.error) { showToast('Copy failed: ' + (d.error || r.status), { type: 'error' }); return; }
+      showToast('Copied ' + base + label);
+      this.refresh();
+    } catch (e) { showToast('Copy failed: ' + e.message, { type: 'error' }); }
+  }
+
   async navigate(dirPath) {
     try {
       this._renderLimit = 100; // reset batch on navigation
@@ -789,7 +821,7 @@ class FileExplorer {
       const label = document.createElement('div'); label.className = 'file-icon-label'; label.textContent = item.name;
       cell.append(icon, label);
       cell.draggable = true;
-      cell.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', fullPath); e.dataTransfer.setData('application/x-file-path', fullPath); if (item.isDirectory) e.dataTransfer.setData('application/x-folder-path', fullPath); });
+      cell.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', fullPath); e.dataTransfer.setData('application/x-file-path', fullPath); e.dataTransfer.setData('application/x-file-host', this._host || ''); if (item.isDirectory) e.dataTransfer.setData('application/x-folder-path', fullPath); });
       cell.addEventListener('click', (e) => this._onItemClick(e, item));
       cell.addEventListener('dblclick', () => {
         if (item.isDirectory) this.navigate(fullPath);
@@ -828,7 +860,7 @@ class FileExplorer {
       }
 
       row.draggable = true;
-      row.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', fullPath); e.dataTransfer.setData('application/x-file-path', fullPath); if (item.isDirectory) e.dataTransfer.setData('application/x-folder-path', fullPath); });
+      row.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', fullPath); e.dataTransfer.setData('application/x-file-path', fullPath); e.dataTransfer.setData('application/x-file-host', this._host || ''); if (item.isDirectory) e.dataTransfer.setData('application/x-folder-path', fullPath); });
       row.addEventListener('click', (e) => this._onItemClick(e, item));
       row.addEventListener('dblclick', () => {
         if (item.isDirectory) this.navigate(fullPath);
