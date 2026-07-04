@@ -29,6 +29,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Claude Code CLI (root install so it lands in the global PATH).
 # NOTE: bypassPermissions is blocked for root — run the app as a normal user.
+# mc (MinIO client): lets users mint PERMANENT revocable share credentials
+# (service accounts); without it shares fall back to 7-day STS credentials
+RUN curl -fsSL https://dl.min.io/client/mc/release/linux-$(dpkg --print-architecture | sed 's/armhf/arm/')/mc -o /usr/local/bin/mc && chmod +x /usr/local/bin/mc
+
 RUN npm install -g @anthropic-ai/claude-code
 
 # Non-root user (uid 1000 matches the default first user on most hosts, so

@@ -110,7 +110,7 @@ Fresh container → onboarding wizard: what VibeSpace is → live Claude/Codex i
 | Phase | Scope | Size |
 |-------|-------|------|
 | **P0 — done** | Auth, Docker (verified E2E), onboarding wizard, shell terminals, in-product CLI login, chrome customization | shipped |
-| **P1** | Mounts manager MVP: env-driven "my storage" mount, share links, RO import; rclone + FUSE in the image/compose | M |
+| **P1 — done (2.20.0)** | Mounts manager: sidebar tab, env-driven "my storage" mount, share minting (mc service accounts → STS fallback), link import, restart adoption — see [mounts.md](mounts.md) | shipped |
 | **P2** | Host manager: add/test hosts, key handling, one-click bootstrap (dtach/node/claude), remote **terminal** sessions via ssh+remote-dtach | M |
 | **P3** | Remote **chat** sessions (stream-json over ssh through the existing wrapper), host-tagged session records, remote discovery over ssh | M |
 | **P4** | Wizard S3 step, share management polish (list my shares, revoke = move), JuiceFS backend option | S–M |

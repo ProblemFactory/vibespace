@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.20.0] — 2026-07-04
+
+### Added (collaboration P1)
+
+- **Mounts tab** (sidebar, next to Folders | Groups) — rclone-backed shared S3 storage:
+  - **My storage**: instances provisioned with `VIBESPACE_S3_*` env get a one-click mount of their bucket prefix.
+  - **Share a folder**: mint a *down-scoped* credential for any folder under your prefix with your own key — permanent revocable MinIO service accounts when `mc` is available (bundled in the Docker image), STS AssumeRole temporary credentials (≤7 days) otherwise. Revoke from the "Shares I created" list.
+  - **Import share link**: paste a `vibespace-share:v1:…` link → the folder mounts read-only/read-write as granted. Links embed the credential — treat them as secrets.
+  - Mounts survive server restarts (detached rclone, adopted on boot + auto-remount), credentials are encrypted at rest and never appear in argv, mount base configurable (`VIBESPACE_MOUNT_BASE`, default `~/vibespace-mounts`) with per-mount custom paths. See [docs/mounts.md](docs/mounts.md).
+
 ## [2.19.0] — 2026-07-04
 
 ### Added

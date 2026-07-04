@@ -1108,6 +1108,80 @@ syncStores.uploads = new SyncStore('uploads', path.join(__dirname, 'data', 'uplo
 
 setupPersistence({ dataDir: path.join(__dirname, 'data'), wss, WS_OPEN, getSyncStore, activeSessions, auth });
 app.use(persistenceRouter);
+
+// ── Mounts (rclone S3 mounts + share minting — collaboration P1) ──
+const { MountManager } = require('./src/mounts');
+const mounts = new MountManager({
+  dataDir: path.join(__dirname, 'data'),
+  broadcast: (msg) => {
+    const json = JSON.stringify(msg);
+    wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
+  },
+});
+setTimeout(() => mounts.restore().catch(e => console.error('[mounts] restore:', e.message)), 2000);
+
+app.get('/api/mounts', async (req, res) => {
+  const env = mounts.envStorage();
+  res.json({
+    mounts: mounts.list(),
+    shares: mounts.listShares(),
+    env: env ? { endpoint: env.endpoint, bucket: env.bucket, prefix: env.prefix, configured: env.configured } : null,
+    mountBase: mounts.mountBase,
+    mcAvailable: await mounts.mcAvailable(),
+  });
+});
+app.post('/api/mounts', (req, res) => {
+  try { res.json({ success: true, id: mounts.add(req.body || {}) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/mounts/import', (req, res) => {
+  try {
+    const p = MountManager.parseShareLink(req.body?.link);
+    const id = mounts.add({
+      ...p, origin: 'imported',
+      name: req.body?.name || p.name || 'imported-share',
+      mode: p.mode === 'rw' ? 'rw' : 'ro',
+      customPath: req.body?.customPath || null,
+    });
+    res.json({ success: true, id });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/mounts/my-storage', (req, res) => {
+  try { res.json({ success: true, id: mounts.addMyStorage() }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/mounts/share', async (req, res) => {
+  try {
+    const env = mounts.envStorage();
+    if (!env) return res.status(400).json({ error: 'My storage (VIBESPACE_S3_*) is not configured — shares are minted with your own key' });
+    const { folder, mode, name, expiryDays } = req.body || {};
+    const prefix = [env.prefix, folder].filter(Boolean).join('/').replace(/\/+/g, '/');
+    const out = await mounts.mintShare({
+      name, endpoint: env.endpoint, bucket: env.bucket, prefix,
+      mode: mode === 'rw' ? 'rw' : 'ro',
+      ownerAccessKey: env.accessKey, ownerSecretKey: env.secretKey, expiryDays,
+    });
+    res.json({ success: true, ...out });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.delete('/api/mounts/shares/:id', async (req, res) => {
+  try { await mounts.revokeShare(req.params.id); res.json({ success: true }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/mounts/:id/mount', async (req, res) => {
+  try {
+    const ok = await mounts.mount(req.params.id);
+    res.json({ success: ok, mounts: mounts.list() });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/mounts/:id/unmount', async (req, res) => {
+  try { res.json({ success: await mounts.unmount(req.params.id) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.delete('/api/mounts/:id', async (req, res) => {
+  try { await mounts.remove(req.params.id); res.json({ success: true }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
 const { readLayouts, writeLayouts, flushLayouts } = persistenceRouter;
 
 // Session discovery functions imported from ./src/session-store.js

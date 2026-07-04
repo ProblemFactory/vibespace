@@ -15,6 +15,7 @@ VibeSpace is a backend-agnostic web workspace for **coding agents** — it drive
 - **[Customize UI](customize-ui.md)** — Edit mode for the chrome: show/hide, drag between bars, springs, alignment, extra rows
 - **[Settings](settings.md)** — Global/per-terminal/chat settings plus Claude and Codex launch defaults
 - **[Deployment](deployment.md)** — Password authentication, Docker/compose, team server setup
+- **[Mounts](mounts.md)** — Shared S3 storage: my-storage mount, share minting, import links
 
 ## Reference
 

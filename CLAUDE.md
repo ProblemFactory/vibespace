@@ -58,6 +58,7 @@ src/
   codex-message-manager.js — CodexMessageManager (Codex JSON-RPC → normalized messages)
   codex-session-store.js — Codex session discovery (thread listing, JSONL parsing, forkedFrom chain merge)
   normalizers.js       — createMessageManager(backend, id) factory for backend-agnostic normalization
+  mounts.js            — MountManager (rclone S3 mounts, detached + boot adoption, share minting: mc service accounts → STS AssumeRole fallback, vibespace-share:v1 links)
   auth.js              — Optional password auth (scrypt, server-side cookie tokens in data/auth.json, per-IP rate limit; VIBESPACE_PASSWORD / VIBESPACE_GENERATE_PASSWORD=1)
   adapters/
     base.js            — BackendAdapter + SessionHandle (abstract interface for AI backends)
@@ -126,6 +127,7 @@ docs/
   sessions.md          — Sessions: discovery, groups, star/archive, drag-drop, filters
   file-explorer.md     — Files: browsing, bookmarks, viewers, right-click, drag-drop
   settings.md          — Settings: global/per-terminal, complete reference table
+  mounts.md            — Shared S3 storage: my-storage, share minting, import links
   customize-ui.md      — Customize mode guide: show/hide, drag between bars, springs, alignment, extra rows
   editor.md            — Ctrl+G split-pane CodeMirror editor
   browser.md           — Embedded browser with proxy mode
@@ -616,6 +618,7 @@ Server → Client: `created`, `output`, `msg` (normalized: op=create/edit/meta),
 - **Extra bar rows**: `#toolbar-row2` (below toolbar) + `#taskbar-row2` (adjacent to taskbar; `order:-1` under body.taskbar-top so it follows the bar) are zones that auto-hide via `:empty` CSS and force-show in customize mode (equal specificity — the customize rule must come AFTER the :empty rule) with a "drag elements here" ::after hint. Lets e.g. layout presets live on their own full-width row.
 - **Toolbar-hosted preview labels**: `#toolbar .desktop-preview-label` is size-reduced (8px) NOT display:none — hiding it was reported as a bug ("挪到顶部之后下面的字不见了"). Previews clamp to 20px so preview+label fit the 40px toolbar.
 - **Window-count chip**: `#taskbar-status` is a compact chip — window-stack SVG + bare count number, full label in the tooltip (`taskbar.js` writes count + title, click on the chip opens the window list). Don't regress to text "N windows": as a standalone tray element it wasted horizontal space.
+- **Mounts (collaboration P1, 2.20.0)**: sidebar third tab (sidebar-mounts.js mixin, `_activeTab === 'mounts'`); server `src/mounts.js` MountManager + routes in server.js (`/api/mounts*`). rclone mount runs DETACHED (survives restarts; boot `restore()` adopts live fuse.rclone entries from /proc/mounts, remounts desired-but-dead); creds AES-GCM at rest (data/.mounts-key) + passed via child ENV not argv; VIBESPACE_MOUNT_BASE (default ~/vibespace-mounts) or per-mount customPath. My-storage from VIBESPACE_S3_* env. Share minting with the OWNER key: mc `admin accesskey create` (modern) → `admin user svcacct add` (legacy) → STS AssumeRole fallback (built-in SigV4 signer, ≤7d, sessionToken carried in link + RCLONE_CONFIG_VS_SESSION_TOKEN). GOTCHA: MinIO rejects the s3:prefix condition on GetBucketLocation — keep it in a separate ListBucket-only statement. MinIO ROOT credentials cannot AssumeRole — always test with a regular user. Share links `vibespace-share:v1:<base64url json>` EMBED the credential (secret). Verified e2e vs local MinIO: my-storage RW write→object visible, STS mint→import→RO read ok/write blocked, restart adoption, revoke.
 - WS message dispatch is wrapped in try/catch (ws-handler handleMessage) — a malformed client message once crashed the whole server (array extraArgs hit .trim()); handler errors now log + reply an error instead of killing the process. extraArgs accepts string|array.
 
 ### Terminal Management

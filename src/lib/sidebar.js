@@ -4,6 +4,7 @@ import { createAgentKindIcon, createBackendIcon, getAgentKindMeta, getBackendMet
 import { installSidebarState } from './sidebar-state.js';
 import { installSidebarRender } from './sidebar-render.js';
 import { installSidebarRenderMobile } from './sidebar-render-mobile.js';
+import { installSidebarMounts } from './sidebar-mounts.js';
 
 class Sidebar {
   constructor(app) {
@@ -141,7 +142,12 @@ class Sidebar {
     groupsTab.textContent = 'Groups';
     groupsTab.dataset.tab = 'groups';
     groupsTab.onclick = () => { this._activeTab = 'groups'; this._updateTabs(); this._render(); };
-    tabBar.append(foldersTab, groupsTab);
+    const mountsTab = document.createElement('button');
+    mountsTab.className = 'sidebar-tab';
+    mountsTab.textContent = 'Mounts';
+    mountsTab.dataset.tab = 'mounts';
+    mountsTab.onclick = () => { this._activeTab = 'mounts'; this._updateTabs(); this._render(); };
+    tabBar.append(foldersTab, groupsTab, mountsTab);
     section.insertBefore(tabBar, section.firstChild);
   }
 
@@ -624,10 +630,12 @@ class Sidebar {
         }
         this._mobileDrilldown = null; // fallback to list if drill-down target gone
       }
-      if (this._activeTab === 'groups') this._renderMobileGroupList(sessions);
+      if (this._activeTab === 'mounts') this._renderMounts();
+      else if (this._activeTab === 'groups') this._renderMobileGroupList(sessions);
       else this._renderMobileFolderList(sessions);
     } else {
-      if (this._activeTab === 'groups') this._renderByGroups(sessions);
+      if (this._activeTab === 'mounts') this._renderMounts();
+      else if (this._activeTab === 'groups') this._renderByGroups(sessions);
       else this._renderGrouped(sessions);
     }
   }
@@ -640,4 +648,5 @@ class Sidebar {
 installSidebarState(Sidebar);
 installSidebarRender(Sidebar);
 installSidebarRenderMobile(Sidebar);
+installSidebarMounts(Sidebar);
 export { Sidebar };
