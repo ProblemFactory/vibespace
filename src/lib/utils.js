@@ -173,6 +173,11 @@ export function attachPopoverClose(popover, ...excludeEls) {
     const close = (e) => {
       if (popover.contains(e.target)) return;
       for (const el of excludeEls) { if (el?.contains(e.target)) return; }
+      // A popover spawned FROM this one (context menu on a list row, submenu)
+      // is a child interaction — clicking it must not dismiss this popover.
+      // Opening a popover from regular UI still closes this one (that
+      // mousedown lands outside any [data-popover]).
+      if (e.target.closest?.('[data-popover]')) return;
       popover.remove();
       document.removeEventListener('mousedown', close);
     };

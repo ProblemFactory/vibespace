@@ -74,9 +74,12 @@ function applySpringStyle(el, cfg) {
   const fixed = cfg?.mode === 'fixed';
   el.classList.toggle('spring-fixed', fixed);
   el.style.flex = fixed ? '0 0 auto' : `${cfg?.weight || 1} 1 24px`;
-  el.style.width = fixed ? `${cfg?.px || 120}px` : '';
+  // fixed width: px, or pct = % of the viewport width (vw — "12% of screen")
+  el.style.width = fixed ? (cfg?.pct != null ? `${cfg.pct}vw` : `${cfg?.px || 120}px`) : '';
   // label shown inside the hatched bar while editing
-  el.dataset.w = fixed ? `${cfg?.px || 120}px` : ((cfg?.weight || 1) > 1 ? `${cfg.weight}×` : '↔');
+  el.dataset.w = fixed
+    ? (cfg?.pct != null ? `${cfg.pct}%` : `${cfg?.px || 120}px`)
+    : ((cfg?.weight || 1) > 1 ? `${cfg.weight}×` : '↔');
 }
 const STRUCT_KEYS = ['taskbar.position', 'taskbar.visibility', 'sidebar.position', 'chrome.zoneAlign', 'chrome.springs'];
 
@@ -251,18 +254,21 @@ export class CustomizeMode {
   }
 
   // Spring config popover: Flexible (strength 1–9, the flex-grow weight) or
-  // Fixed (width in px — a rigid spacer, e.g. to mirror the "☰ VibeSpace"
-  // section so two rows' centers line up). Live-applies on every change.
+  // Fixed (width in px or % of screen width — a rigid spacer, e.g. to mirror
+  // the "☰ VibeSpace" section so two rows' centers line up). "Match" enters a
+  // pick mode: click any chrome element(s) to sum their widths into the
+  // spring. Live-applies on every change.
   _showSpringPopover(el) {
     document.querySelector('.cz-spring-pop')?.remove();
     const pop = document.createElement('div');
     pop.className = 'cz-spring-pop';
-    const getCfg = () => ({ mode: 'flex', weight: 1, px: 120, ...(this.app.settings.get('chrome.springs')?.[el.id] || {}) });
+    const getCfg = () => ({ mode: 'flex', weight: 1, px: 120, pct: null, ...(this.app.settings.get('chrome.springs')?.[el.id] || {}) });
     const save = (patch) => {
       const cfg = { ...getCfg(), ...patch };
       const all = { ...(this.app.settings.get('chrome.springs') || {}) };
       if (cfg.mode === 'flex' && (cfg.weight || 1) === 1) delete all[el.id];
-      else all[el.id] = cfg.mode === 'fixed' ? { mode: 'fixed', px: cfg.px } : { mode: 'flex', weight: cfg.weight };
+      else if (cfg.mode === 'fixed') all[el.id] = cfg.pct != null ? { mode: 'fixed', pct: cfg.pct } : { mode: 'fixed', px: cfg.px };
+      else all[el.id] = { mode: 'flex', weight: cfg.weight };
       this.app.settings.set('chrome.springs', Object.keys(all).length ? all : null);
     };
 
@@ -273,12 +279,54 @@ export class CustomizeMode {
     const valLabel = document.createElement('span');
     const valInput = document.createElement('input');
     valInput.type = 'number';
+    // px ⇄ % of screen unit toggle (fixed mode only); switching converts the
+    // value so the visual width stays put
+    const unitSeg = document.createElement('span');
+    unitSeg.className = 'cz-seg';
+    for (const [value, label] of [['px', 'px'], ['pct', '%']]) {
+      const b = document.createElement('button');
+      b.textContent = label; b.dataset.value = value;
+      b.onclick = (e) => {
+        e.stopPropagation();
+        const cfg = getCfg();
+        if (cfg.mode !== 'fixed') return;
+        if (value === 'pct' && cfg.pct == null) save({ pct: +((cfg.px / innerWidth) * 100).toFixed(1) });
+        else if (value === 'px' && cfg.pct != null) save({ px: Math.round((cfg.pct / 100) * innerWidth), pct: null });
+        syncUi();
+      };
+      unitSeg.appendChild(b);
+    }
+    // Match: pick mode — click chrome elements to copy/sum their widths
+    const matchBtn = document.createElement('button');
+    matchBtn.className = 'cz-btn';
+    matchBtn.textContent = 'Match…';
+    matchBtn.title = 'Click any element (e.g. the ☰ VibeSpace section) to copy its width; keep clicking to add more widths up; click Done to finish';
+    matchBtn.onclick = (e) => {
+      e.stopPropagation();
+      if (this._picking) { this._stopWidthPick?.(); return; }
+      save({ mode: 'fixed' });
+      syncUi();
+      matchBtn.textContent = 'Done (0)';
+      this._startWidthPick(el, (totalPx, count) => {
+        save({ px: totalPx, pct: null });
+        syncUi();
+        matchBtn.textContent = `Done (${count} · ${totalPx}px)`;
+      }, () => { matchBtn.textContent = 'Match…'; });
+    };
+
     const syncUi = () => {
       const cfg = getCfg();
       for (const b of seg.querySelectorAll('button')) b.classList.toggle('active', b.dataset.value === cfg.mode);
-      if (cfg.mode === 'fixed') {
+      const fixed = cfg.mode === 'fixed';
+      unitSeg.style.display = fixed ? '' : 'none';
+      matchBtn.style.display = fixed ? '' : 'none';
+      for (const b of unitSeg.querySelectorAll('button')) {
+        b.classList.toggle('active', b.dataset.value === (cfg.pct != null ? 'pct' : 'px'));
+      }
+      if (fixed) {
         valLabel.textContent = 'Width';
-        valInput.min = 4; valInput.max = 2000; valInput.step = 4; valInput.value = cfg.px;
+        if (cfg.pct != null) { valInput.min = 1; valInput.max = 100; valInput.step = 0.5; valInput.value = cfg.pct; }
+        else { valInput.min = 4; valInput.max = 2000; valInput.step = 4; valInput.value = cfg.px; }
       } else {
         valLabel.textContent = 'Strength';
         valInput.min = 1; valInput.max = 9; valInput.step = 1; valInput.value = cfg.weight;
@@ -291,18 +339,19 @@ export class CustomizeMode {
       seg.appendChild(b);
     }
     valInput.oninput = () => {
-      const n = parseInt(valInput.value);
+      const n = parseFloat(valInput.value);
       if (!Number.isFinite(n)) return;
       const cfg = getCfg();
-      if (cfg.mode === 'fixed') save({ px: Math.max(4, Math.min(2000, n)) });
-      else save({ weight: Math.max(1, Math.min(9, n)) });
+      if (cfg.mode !== 'fixed') save({ weight: Math.max(1, Math.min(9, Math.round(n))) });
+      else if (cfg.pct != null) save({ pct: Math.max(1, Math.min(100, n)) });
+      else save({ px: Math.max(4, Math.min(2000, Math.round(n))) });
     };
     valWrap.append(valLabel, valInput);
     const removeBtn = document.createElement('button');
     removeBtn.className = 'cz-btn';
     removeBtn.textContent = 'Remove';
-    removeBtn.onclick = (e) => { e.stopPropagation(); pop.remove(); el.remove(); this._saveArrangement(); };
-    pop.append(seg, valWrap, removeBtn);
+    removeBtn.onclick = (e) => { e.stopPropagation(); this._stopWidthPick?.(); pop.remove(); el.remove(); this._saveArrangement(); };
+    pop.append(seg, valWrap, unitSeg, matchBtn, removeBtn);
     document.body.appendChild(pop);
     syncUi();
 
@@ -314,11 +363,88 @@ export class CustomizeMode {
 
     const close = (e) => {
       if (pop.contains(e.target) || el.contains(e.target)) return;
+      if (this._picking) return; // width-pick clicks must not dismiss the popover
       pop.remove();
       document.removeEventListener('mousedown', close, true);
     };
     document.addEventListener('mousedown', close, true);
-    this._cleanup.push(() => { pop.remove(); document.removeEventListener('mousedown', close, true); });
+    this._cleanup.push(() => { this._stopWidthPick?.(); pop.remove(); document.removeEventListener('mousedown', close, true); });
+  }
+
+  // Width-pick mode: hover highlights any bar element (sections like
+  // "☰ VibeSpace", buttons, previews…), each click ADDS its width to the
+  // running total (multi-select sum), Done / Escape finishes. Handlers ride
+  // the WINDOW capture phase so they preempt drag/toggle handlers and the
+  // customize-mode Escape (document capture fires after window capture).
+  _startWidthPick(springEl, onPicked, onStop) {
+    if (this._picking) return;
+    this._picking = true;
+    document.body.classList.add('cz-picking');
+    const PICK_SEL = '#toolbar > *, #toolbar-row2 > *, #taskbar > *, #taskbar-row2 > *, [data-zone] > *';
+    let total = 0, count = 0, hover = null, raf = 0, lastMove = null;
+    const tip = document.createElement('div');
+    tip.className = 'cz-pick-tip';
+    document.body.appendChild(tip);
+    const resolve = (t) => {
+      const cand = t?.closest?.(PICK_SEL);
+      if (!cand || cand === springEl) return null;
+      if (cand.classList.contains('cz-pill') || cand.classList.contains('cz-align') || cand.closest('.cz-spring-pop, .cz-panel')) return null;
+      return cand;
+    };
+    const setHover = (el2) => {
+      if (hover === el2) return;
+      hover?.classList.remove('cz-pick-hover');
+      hover = el2;
+      hover?.classList.add('cz-pick-hover');
+    };
+    const onMove = (e) => {
+      lastMove = e;
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        const el2 = resolve(lastMove.target);
+        setHover(el2);
+        tip.style.display = el2 ? '' : 'none';
+        if (el2) {
+          tip.textContent = `+${Math.round(el2.getBoundingClientRect().width)}px — click to add`;
+          tip.style.left = (lastMove.clientX + 14) + 'px';
+          tip.style.top = (lastMove.clientY + 16) + 'px';
+        }
+      });
+    };
+    const inPopover = (e) => !!e.target.closest?.('.cz-spring-pop');
+    const onDown = (e) => { if (!inPopover(e)) { e.preventDefault(); e.stopPropagation(); } };
+    const onClick = (e) => {
+      if (inPopover(e)) return; // Done / inputs keep working
+      e.preventDefault(); e.stopPropagation();
+      const el2 = resolve(e.target);
+      if (!el2) return;
+      total += el2.getBoundingClientRect().width;
+      count++;
+      onPicked(Math.round(total), count);
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); stop(); }
+    };
+    window.addEventListener('mousedown', onDown, true);
+    window.addEventListener('click', onClick, true);
+    window.addEventListener('mousemove', onMove, true);
+    window.addEventListener('keydown', onKey, true);
+    const stop = () => {
+      if (!this._picking) return;
+      this._picking = false;
+      if (raf) cancelAnimationFrame(raf);
+      setHover(null);
+      tip.remove();
+      document.body.classList.remove('cz-picking');
+      window.removeEventListener('mousedown', onDown, true);
+      window.removeEventListener('click', onClick, true);
+      window.removeEventListener('mousemove', onMove, true);
+      window.removeEventListener('keydown', onKey, true);
+      this._stopWidthPick = null;
+      onStop?.();
+    };
+    this._stopWidthPick = stop;
   }
 
   _addSpring() {

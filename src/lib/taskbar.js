@@ -117,16 +117,20 @@ function _rebuildTaskbarItems(app, container, entries) {
 // rows). Opens upward only when invoked in the lower half of the screen
 // (bottom taskbar); downward otherwise \u2014 a top-docked taskbar or a
 // window-count chip moved into the toolbar must not push the menu off-screen.
-export function showWindowContextMenu(app, id, x, y, { closeLabel = '\u2715 Close' } = {}) {
+// opts.onAction(kind) fires after any action ('move'|'minimize'|'desktop'|
+// 'close') so a hosting popover can refresh itself instead of going stale.
+export function showWindowContextMenu(app, id, x, y, { closeLabel = '\u2715 Close', onAction } = {}) {
   const win = app.wm.windows.get(id);
   if (!win) return;
+  const act = (kind, fn) => () => { fn(); onAction?.(kind); };
   const menuItems = [
-    { label: '\u2725 Move', action: () => app.wm.startMoveMode(id) },
-    { label: win.isMinimized ? '\u25A1 Restore' : '\u2013 Minimize', action: () => win.isMinimized ? app.wm.restore(id) : app.wm.minimize(id) },
+    { label: '\u2725 Move', action: act('move', () => app.wm.startMoveMode(id)) },
+    { label: win.isMinimized ? '\u25A1 Restore' : '\u2013 Minimize', action: act('minimize', () => win.isMinimized ? app.wm.restore(id) : app.wm.minimize(id)) },
   ];
-  const deskItems = app.desktopManager?.getDesktopMenuItems(id);
-  if (deskItems?.length) menuItems.push({ label: '\u27A4 Move to Desktop', children: deskItems });
-  menuItems.push({ label: closeLabel, action: () => app.wm.closeWindow(id), style: 'color:var(--red, #e55)' });
+  const deskItems = (app.desktopManager?.getDesktopMenuItems(id) || [])
+    .map(d => ({ ...d, action: act('desktop', d.action) }));
+  if (deskItems.length) menuItems.push({ label: '\u27A4 Move to Desktop', children: deskItems });
+  menuItems.push({ label: closeLabel, action: act('close', () => app.wm.closeWindow(id)), style: 'color:var(--red, #e55)' });
   const menu = showContextMenu(x, y, menuItems, 'taskbar-context-menu');
   if (y > window.innerHeight / 2) {
     menu.style.top = '';
@@ -271,47 +275,62 @@ export function showTabGroupList(app, anchor, chain) {
 export function showWindowList(app, anchor) {
   if (!app.wm.windows.size) return;
   const pop = createPopover(anchor, 'overlap-switcher');
-  const activeDesk = app.desktopManager?.activeDesktopId;
 
-  for (const [id, win] of app.wm.windows) {
-    // Skip grouped guests — only the host appears in the list
-    if (win._tabChain && win._tabChain.tabs[0] !== id) continue;
-    if (activeDesk && win._desktopId && win._desktopId !== activeDesk) continue;
-    const item = document.createElement('div');
-    item.className = 'overlap-switcher-item';
-    if (id === app.wm.activeWindowId && !win.isMinimized) item.classList.add('active');
-
-    const icon = document.createElement('span');
-    icon.innerHTML = win._typeIcon || '';
-    icon.style.cssText = 'font-size:11px;flex-shrink:0;display:inline-flex;align-items:center';
-    if (win.isMinimized) icon.style.opacity = '0.4';
-    const label = document.createElement('span');
-    label.textContent = (win.isMinimized ? '\u229E ' : '') + win.title;
-    item.append(icon, label);
-    item.onclick = () => {
-      if (win.isMinimized) app.wm.restore(id);
-      else app.wm.focusWindow(id);
-      const session = app.sessions.get(id);
-      if (session) session.focus();
-      pop.remove();
-    };
-    // Right-click: same per-window menu as the taskbar item (Move / Minimize /
-    // Move to Desktop / Close). Close the list first — actions like Close
-    // would leave it stale.
-    item.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      pop.remove();
-      showWindowContextMenu(app, id, e.clientX, e.clientY);
-    });
-    pop.appendChild(item);
-  }
-
-  requestAnimationFrame(() => {
+  const place = () => requestAnimationFrame(() => {
+    if (!pop.isConnected) return;
     const rect = anchor.getBoundingClientRect();
     pop.style.left = Math.max(4, Math.min(rect.right - pop.offsetWidth, innerWidth - pop.offsetWidth - 4)) + 'px';
     // Prefer opening above the anchor (bottom taskbar); flip below when
-    // there's no room — e.g. the chip was moved into the top toolbar
+    // there's no room -- e.g. the chip was moved into the top toolbar
     const above = rect.top - pop.offsetHeight - 4;
     pop.style.top = (above >= 4 ? above : rect.bottom + 4) + 'px';
   });
+
+  const render = () => {
+    pop.innerHTML = '';
+    const activeDesk = app.desktopManager?.activeDesktopId;
+    let count = 0;
+    for (const [id, win] of app.wm.windows) {
+      // Skip grouped guests -- only the host appears in the list
+      if (win._tabChain && win._tabChain.tabs[0] !== id) continue;
+      if (activeDesk && win._desktopId && win._desktopId !== activeDesk) continue;
+      count++;
+      const item = document.createElement('div');
+      item.className = 'overlap-switcher-item';
+      if (id === app.wm.activeWindowId && !win.isMinimized) item.classList.add('active');
+
+      const icon = document.createElement('span');
+      icon.innerHTML = win._typeIcon || '';
+      icon.style.cssText = 'font-size:11px;flex-shrink:0;display:inline-flex;align-items:center';
+      if (win.isMinimized) icon.style.opacity = '0.4';
+      const label = document.createElement('span');
+      label.textContent = (win.isMinimized ? '\u229E ' : '') + win.title;
+      item.append(icon, label);
+      item.onclick = () => {
+        if (win.isMinimized) app.wm.restore(id);
+        else app.wm.focusWindow(id);
+        const session = app.sessions.get(id);
+        if (session) session.focus();
+        pop.remove();
+      };
+      // Right-click: same per-window menu as the taskbar item. The list stays
+      // open under the menu (attachPopoverClose ignores clicks inside other
+      // popovers) and refreshes in place after the action -- except Move,
+      // which takes over the whole screen, so the list gets out of the way.
+      item.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        showWindowContextMenu(app, id, e.clientX, e.clientY, {
+          onAction: (kind) => {
+            if (!pop.isConnected) return;
+            if (kind === 'move') pop.remove();
+            else render();
+          },
+        });
+      });
+      pop.appendChild(item);
+    }
+    if (!count) { pop.remove(); return; }
+    place();
+  };
+  render();
 }

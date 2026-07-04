@@ -1653,3 +1653,13 @@ body.customize-mode .chrome-spring.spring-fixed {
   background: var(--bg-input); color: var(--text);
   border: 1px solid var(--border); border-radius: var(--radius-sm);
 }
+
+/* ── Customize mode: width-pick (Match…) ── */
+body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
+.cz-pick-hover { outline: 2px solid var(--cyan, #37c4cf) !important; outline-offset: 2px; }
+.cz-pick-tip {
+  position: fixed; z-index: 99999; pointer-events: none;
+  background: var(--bg-dialog); color: var(--text); border: 1px solid var(--border-active);
+  border-radius: var(--radius-sm); padding: 3px 8px; font-size: 11px; white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+}
