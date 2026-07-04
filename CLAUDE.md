@@ -58,10 +58,12 @@ src/
   codex-message-manager.js — CodexMessageManager (Codex JSON-RPC → normalized messages)
   codex-session-store.js — Codex session discovery (thread listing, JSONL parsing, forkedFrom chain merge)
   normalizers.js       — createMessageManager(backend, id) factory for backend-agnostic normalization
+  auth.js              — Optional password auth (scrypt, server-side cookie tokens in data/auth.json, per-IP rate limit; VIBESPACE_PASSWORD / VIBESPACE_GENERATE_PASSWORD=1)
   adapters/
     base.js            — BackendAdapter + SessionHandle (abstract interface for AI backends)
     claude-code.js     — ClaudeCodeAdapter (Claude Code CLI: flags, JSONL, control protocol, format methods)
     codex.js           — CodexAdapter (Codex CLI: app-server mode, JSON-RPC, permission mapping)
+    shell.js           — ShellAdapter (plain login-shell terminals — no AI; toolbar Terminal button, "Open Terminal Here")
     index.js           — createAdapterRegistry() factory
   routes/
     files.js           — File system API routes (browse, read, write, upload, download, clipboard paste, CSV streaming, format)
@@ -537,7 +539,9 @@ Read/Write tool output uses highlight.js for syntax highlighting with line numbe
 ## API Reference
 
 ### REST Endpoints
-- `GET /api/home` — home directory
+- `GET /api/home` — home directory (+ authEnabled flag)
+- `POST /api/login` / `POST /api/logout` — password auth (rate-limited; sets/revokes HttpOnly cookie token); `GET /login` login page
+- `GET /api/backend-status` — CLI readiness for onboarding: {claude,codex} × {installed, version, loggedIn} (file-existence detection, never spawns CLIs)
 - `GET /api/files?path=` — list directory
 - `GET /api/file/info?path=` — file metadata (size, isBinary) without reading content
 - `GET /api/file/content?path=` — read text file (max 10MB)
@@ -591,6 +595,13 @@ Server → Client: `created`, `output`, `msg` (normalized: op=create/edit/meta),
 **Virtual session attach**: `attach` with `sessionId` starting with `sub-` routes to subagent handler. `sub-{parentToolUseId}` returns live-buffered messages from parent session's `subagentBuffers`. `sub-agent-{agentId}` loads completed agent's JSONL from disk. Both respond with standard `attached` payload with normalized messages. Live virtual sessions receive normalized `msg` ops via per-subagent normalizers. `attach` with `viewOnly:true` loads JSONL history without an active session (for stopped session history viewing).
 
 ## Features Summary
+
+### Deployment & Onboarding
+- Optional password auth: VIBESPACE_PASSWORD env or data/auth.json; guards pages/APIs/WS/proxy; login tokens survive restarts; Sign out in ⚙ menu; 401 → auto-bounce to /login. Docker: Dockerfile+compose, non-root `vibe` (Claude blocks bypassPermissions as root), random first-boot password printed to logs, rclone+fuse3 preinstalled. docs/deployment.md.
+- First-run onboarding wizard: 3 steps (intro → backend status via /api/backend-status + one-click in-product login → first session). Re-run via ⚙ → Welcome tour. CRITICAL: #welcome sits at z-index 1 — the `.onboarding` class elevates it to a fixed z-9600 overlay, otherwise windows cover it (looked like a no-op).
+- Plain shell terminals (backend 'shell'): toolbar Terminal button, file-explorer "Open Terminal Here"; in-product CLI login = shell terminal with the command auto-typed (createSession({initialCommand})).
+- Chrome customization: taskbar.position top/bottom (flex order + inverted drag), sidebar.position left/right (mirrored CSS + Resizer invert option + side-aware margin), taskbar.visibility show/autohide/hidden (autohide = position:fixed overlay + 6px hotzone — keeps workspace full-height, no reflow churn), show/hide toggles for desktops/usage/window-count/presets/toolbar buttons. Right-click empty taskbar/toolbar space = in-place customize menu writing the same settings. Settings enum options MUST be {value,label} objects — plain strings render blank dropdowns.
+- WS message dispatch is wrapped in try/catch (ws-handler handleMessage) — a malformed client message once crashed the whole server (array extraArgs hit .trim()); handler errors now log + reply an error instead of killing the process. extraArgs accepts string|array.
 
 ### Terminal Management
 - Multiple simultaneous sessions via dtach (survive server restarts)
