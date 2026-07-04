@@ -326,6 +326,77 @@ class App {
     this._showOnboarding();
   }
 
+  // ── Manage Agents dialog: install/login status + login/update actions ──
+  // One place for CLI lifecycle instead of scattered menu entries. Login and
+  // update both run visibly in a shell terminal window (nothing hidden).
+  _showAgentsDialog() {
+    document.getElementById('agents-dialog-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'agents-dialog-overlay';
+    overlay.className = 'dialog-overlay';
+    overlay.style.zIndex = '99998';
+    const dialog = document.createElement('div'); dialog.className = 'dialog';
+    const header = document.createElement('div'); header.className = 'dialog-header';
+    const h3 = document.createElement('h3'); h3.textContent = 'Agents';
+    const closeBtn = document.createElement('button'); closeBtn.className = 'dialog-close'; closeBtn.textContent = '\u2715';
+    header.append(h3, closeBtn);
+    const body = document.createElement('div'); body.className = 'dialog-body agents-dialog-body';
+    body.innerHTML = '<div class="ob-loading">Checking\u2026</div>';
+    dialog.append(header, body);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    const done = () => overlay.remove();
+    closeBtn.onclick = done;
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) done(); });
+    overlay.tabIndex = -1;
+    overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); done(); } });
+    setTimeout(() => overlay.focus(), 0);
+
+    const BACKENDS = [
+      { key: 'claude', label: 'Claude Code', loginCmd: 'claude', updateCmd: 'claude update' },
+      { key: 'codex', label: 'Codex', loginCmd: 'codex login', updateCmd: 'npm install -g @openai/codex@latest' },
+    ];
+    const run = (cmd) => { done(); this.openShellTerminal(undefined, { initialCommand: cmd }); };
+    const refresh = async () => {
+      let st = {};
+      try { st = await fetchJson('/api/backend-status'); } catch {}
+      body.innerHTML = '';
+      for (const b of BACKENDS) {
+        const info = st[b.key] || {};
+        const row = document.createElement('div'); row.className = 'ob-backend';
+        const left = document.createElement('div');
+        left.innerHTML = `<b>${b.label}</b> ${info.version ? `<span class="ob-ver">${escHtml(info.version)}</span>` : ''}<div>${
+          !info.installed ? '<span class="ob-bad">not installed</span>'
+          : info.loggedIn ? '<span class="ob-ok">\u2713 logged in</span>'
+          : '<span class="ob-warn">not logged in</span>'
+        }</div>`;
+        const actions = document.createElement('div'); actions.className = 'agent-actions';
+        if (info.installed && !info.loggedIn) {
+          const loginBtn = document.createElement('button'); loginBtn.className = 'agent-btn primary'; loginBtn.textContent = 'Log in';
+          loginBtn.onclick = () => run(b.loginCmd);
+          actions.appendChild(loginBtn);
+        }
+        if (info.installed) {
+          const updBtn = document.createElement('button'); updBtn.className = 'agent-btn'; updBtn.textContent = 'Update';
+          updBtn.title = b.updateCmd;
+          updBtn.onclick = () => run(b.updateCmd);
+          actions.appendChild(updBtn);
+        }
+        row.append(left, actions);
+        body.appendChild(row);
+      }
+      const foot = document.createElement('div');
+      foot.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:10px;';
+      const note = document.createElement('p'); note.className = 'agents-note';
+      note.textContent = 'Actions open in a terminal window so you can see exactly what runs.';
+      const recheck = document.createElement('button'); recheck.className = 'agent-btn'; recheck.textContent = 'Re-check';
+      recheck.onclick = refresh;
+      foot.append(note, recheck);
+      body.appendChild(foot);
+    };
+    refresh();
+  }
+
   _showOnboarding(force = false) {
     const welcome = document.getElementById('welcome');
     if (!welcome) return;
@@ -556,8 +627,7 @@ class App {
       out: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2H3v12h3M10 11l3-3-3-3M13 8H6"/></svg>',
     };
     menu.append(
-      item(I.key, 'Log in to Claude\u2026', () => this.openShellTerminal(undefined, { initialCommand: 'claude' })),
-      item(I.key, 'Log in to Codex\u2026', () => this.openShellTerminal(undefined, { initialCommand: 'codex login' })),
+      item(I.key, 'Manage agents\u2026', () => this._showAgentsDialog()),
       item(I.tour, 'Welcome tour', () => this._showOnboarding(true)),
     );
     if (this._authEnabled) {

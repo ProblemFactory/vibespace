@@ -1014,7 +1014,8 @@ html, body {
 }
 
 /* ── Autocomplete ── */
-.autocomplete-wrapper { position: relative; }
+.autocomplete-wrapper { position: relative; width: 100%; }
+.autocomplete-wrapper > input { width: 100%; box-sizing: border-box; }
 .autocomplete-dropdown {
   position: absolute; left: 0; right: 0; top: 100%; margin-top: 2px;
   background: var(--bg-dialog); border: 1px solid var(--border-active); border-radius: var(--radius-sm);
@@ -1466,3 +1467,16 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .gs-menu-item.danger { color: var(--red); }
 .gs-menu-icon { display: inline-flex; width: 15px; justify-content: center; color: var(--text-secondary); }
 .gs-menu-item.danger .gs-menu-icon { color: var(--red); }
+
+/* ── Manage Agents dialog ── */
+.agents-dialog-body { display: flex; flex-direction: column; gap: 10px; min-width: 380px; }
+.agents-dialog-body .ob-backend { margin: 0; }
+.agent-actions { display: flex; gap: 6px; align-items: center; }
+.agent-btn {
+  padding: 4px 12px; font-size: 12px; cursor: pointer; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--bg-input); color: var(--text);
+}
+.agent-btn:hover { border-color: var(--accent); color: var(--accent); }
+.agent-btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.agent-btn.primary:hover { opacity: 0.85; color: var(--accent-fg); }
+.agents-note { font-size: 11px; color: var(--text-dim); line-height: 1.5; margin: 2px 0 0; }
