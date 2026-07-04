@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.24.0] — 2026-07-04
+
+### Added
+
+- **Terminal host picker** — the toolbar Terminal button lists Local + registered remote hosts when any are configured (direct local shell otherwise); "Open Terminal Here" in a remote explorer opens the shell on that host in that directory.
+- **Host-aware bookmarks** — bookmarks record the host they were created on: remote bookmarks show a host badge, and clicking one switches the explorer to that host and navigates. Dedup, drag-to-bookmark, and "Open in new window" are all host-aware.
+- **Explorer host persistence** — file explorer windows restore their host across page refreshes, layout sync, and presets (an `AIDev: /tmp` window no longer comes back as a local `/tmp` window).
+
 ## [2.23.2] — 2026-07-04
 
 ### Added

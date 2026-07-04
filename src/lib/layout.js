@@ -134,7 +134,11 @@ class LayoutManager {
           win._isSnapped = rw.snap ?? rw.isSnapped ?? false;
           const snapB = rw.snapBounds || rw.preSnapBounds;
           if (snapB) win._preSnapBounds = snapB;
-          // file explorer navigation sync
+          // file explorer navigation sync (host first — path is host-relative)
+          const rwHost = rw.explorerHost || '';
+          if (win._explorer && (win._explorerHost || '') !== rwHost) {
+            win._explorer.setHost(rwHost, { navigate: false });
+          }
           if (rw.explorerPath && win._explorerPath !== rw.explorerPath) {
             // Find the FileExplorer instance and navigate
             const explorer = win._explorer;
@@ -280,9 +284,10 @@ class LayoutManager {
         winState.claudeSessionId = winState.backend === 'claude' ? winState.backendSessionId : null;
         if (!winState.cwd) winState.cwd = win._openSpec.cwd || '';
       }
-      // For file explorers, save current path
+      // For file explorers, save current path (+ which host it browses)
       if (win.type === 'files' && win._explorerPath) {
         winState.explorerPath = win._explorerPath;
+        if (win._explorerHost) winState.explorerHost = win._explorerHost;
       }
       // For file viewers and editors, save file path and name
       if ((win.type === 'viewer' || win.type === 'hex-viewer' || win.type === 'editor') && win._filePath) {
@@ -441,7 +446,7 @@ class LayoutManager {
           }
         }
       } else if (ws.type === 'files') {
-        const winInfo = this.app.openFileExplorer(ws.explorerPath);
+        const winInfo = this.app.openFileExplorer(ws.explorerPath, { host: ws.explorerHost });
         applyPosition(winInfo, ws);
       } else if (ws.type === 'editor' && ws.filePath) {
         const edWin = this.app.openEditor(ws.filePath, ws.fileName || ws.filePath.split('/').pop());
@@ -676,7 +681,7 @@ class LayoutManager {
     const openNonTermWindows = new Map(); // type:key -> { winId, win }
     for (const [winId, win] of this.app.wm.windows) {
       if (win.type === 'files' && win._explorerPath) {
-        openNonTermWindows.set(`files:${win._explorerPath}`, { winId, win });
+        openNonTermWindows.set(`files:${win._explorerHost || ''}:${win._explorerPath}`, { winId, win });
       } else if (win.type === 'browser' && win._browserUrl) {
         openNonTermWindows.set(`browser:${win._browserUrl}`, { winId, win });
       } else if ((win.type === 'editor' || win.type === 'viewer' || win.type === 'hex-viewer') && win._filePath) {
@@ -788,13 +793,13 @@ class LayoutManager {
           }
         }
       } else if (ws.type === 'files') {
-        const key = `files:${ws.explorerPath || ''}`;
+        const key = `files:${ws.explorerHost || ''}:${ws.explorerPath || ''}`;
         const existing = ws.explorerPath ? openNonTermWindows.get(key) : null;
         if (existing) {
           matchedWinIds.add(existing.winId);
           applyPosition(existing.win, ws);
         } else {
-          const winInfo = this.app.openFileExplorer(ws.explorerPath);
+          const winInfo = this.app.openFileExplorer(ws.explorerPath, { host: ws.explorerHost });
           if (winInfo) {
             matchedWinIds.add(winInfo.id);
             applyPosition(winInfo, ws);

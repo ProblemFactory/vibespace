@@ -217,7 +217,19 @@ class App {
     document.querySelectorAll('.layout-btn[data-layout]').forEach(btn => btn.addEventListener('click', () => this.wm.applyLayout(btn.dataset.layout)));
     document.getElementById('btn-new-session').addEventListener('click', () => this.showNewSessionDialog());
     document.getElementById('btn-file-explorer').addEventListener('click', () => this.openFileExplorer());
-    document.getElementById('btn-terminal').addEventListener('click', () => this.openShellTerminal());
+    document.getElementById('btn-terminal').addEventListener('click', async (e) => {
+      // Host-aware (like Files): with remote hosts registered, pick where the
+      // shell runs; with none, open a local shell directly (zero friction).
+      const btn = e.currentTarget;
+      let hostsList = [];
+      try { const d = await fetchJson('/api/hosts'); hostsList = d?.hosts || []; } catch {}
+      if (!hostsList.length) return this.openShellTerminal();
+      const r = btn.getBoundingClientRect();
+      showContextMenu(r.left, r.bottom + 4, [
+        { label: 'Local', action: () => this.openShellTerminal() },
+        ...hostsList.map(h => ({ label: h.name, action: () => this.openShellTerminal(undefined, { hostId: h.id }) })),
+      ]);
+    });
     document.getElementById('btn-browser').addEventListener('click', () => this.openBrowser());
 
     // Apply toolbar/taskbar/sidebar chrome customization settings.
@@ -2156,7 +2168,7 @@ class App {
         break;
       }
       case 'openFileExplorer':
-        this.openFileExplorer(spec.path, { syncId });
+        this.openFileExplorer(spec.path, { syncId, host: spec.host });
         break;
       case 'openFile':
         this.openFile(spec.path, spec.name, { syncId });
@@ -2224,10 +2236,11 @@ class App {
     }
   }
 
-  openFileExplorer(startPath, { syncId } = {}) {
+  openFileExplorer(startPath, { syncId, host } = {}) {
     this._hideWelcome();
-    const openSpec = { action: 'openFileExplorer', path: startPath };
+    const openSpec = { action: 'openFileExplorer', path: startPath, host: host || undefined };
     const winInfo = this.wm.createWindow({ title: 'File Explorer', type: 'files', syncId, openSpec });
+    if (host) winInfo._explorerHost = host; // read by FileExplorer constructor
     const explorer = new FileExplorer(winInfo, this, startPath);
     winInfo._explorer = explorer;
     winInfo.onClose = () => this._checkWelcome();

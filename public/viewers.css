@@ -485,3 +485,12 @@
   border-radius: var(--radius-sm); cursor: pointer; flex-shrink: 0;
 }
 .file-host-select:hover { border-color: var(--accent); }
+
+/* Bookmark host badge (Files cross-host): remote bookmarks show which host they live on */
+.file-bookmark-host {
+  margin-left: 6px; padding: 0 4px; border-radius: 3px;
+  font-size: 9px; line-height: 14px; vertical-align: 1px;
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+  white-space: nowrap;
+}

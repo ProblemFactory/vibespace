@@ -64,11 +64,7 @@ class FileExplorer {
     this._hostSelect.className = 'file-host-select';
     this._hostSelect.title = 'Browse files on this machine or a remote host';
     this._hostSelect.innerHTML = '<option value="">Local</option>';
-    this._hostSelect.onchange = () => {
-      this._host = this._hostSelect.value;
-      this.winInfo._explorerHost = this._host;
-      this._loadHome();
-    };
+    this._hostSelect.onchange = () => this.setHost(this._hostSelect.value);
     this._refreshHostOptions();
     this.pathInput = document.createElement('input'); this.pathInput.className = 'file-path-input';
     this.pathInput.addEventListener('keydown', e => { if (e.key === 'Enter') { if (this._hideAC) this._hideAC(); this.navigate(this.pathInput.value); } });
@@ -272,9 +268,16 @@ class FileExplorer {
 
     this._bookmarks.forEach((bk, i) => {
       const item = document.createElement('div'); item.className = 'file-bookmark-item';
-      item.title = bk.path;
+      const bkHost = bk.host || '';
+      item.title = (bkHost ? this._hostName(bkHost) + ': ' : '') + bk.path;
       item.textContent = bk.label;
-      item.onclick = () => this.navigate(bk.path);
+      if (bkHost) {
+        const badge = document.createElement('span');
+        badge.className = 'file-bookmark-host';
+        badge.textContent = this._hostName(bkHost);
+        item.appendChild(badge);
+      }
+      item.onclick = () => { this.setHost(bkHost, { navigate: false }); this.navigate(bk.path); };
       // Drag to reorder
       item.draggable = true;
       item.addEventListener('dragstart', (e) => {
@@ -301,8 +304,9 @@ class FileExplorer {
           this._saveBookmarks(); this._renderBookmarks();
         } else if (filePath) {
           const label = filePath.split('/').pop() || filePath;
-          if (!this._bookmarks.some(b => b.path === filePath)) {
-            this._bookmarks.splice(insertAt, 0, { label, path: filePath });
+          const srcHost = e.dataTransfer.getData('application/x-file-host') || '';
+          if (!this._bookmarks.some(b => b.path === filePath && (b.host || '') === srcHost)) {
+            this._bookmarks.splice(insertAt, 0, { label, path: filePath, ...(srcHost ? { host: srcHost } : {}) });
             this._saveBookmarks(); this._renderBookmarks();
           }
         }
@@ -311,8 +315,8 @@ class FileExplorer {
       item.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         showContextMenu(e.clientX, e.clientY, [
-          { label: 'Open', action: () => this.navigate(bk.path) },
-          { label: 'Open in new window', action: () => this.app.openFileExplorer(bk.path) },
+          { label: 'Open', action: () => { this.setHost(bkHost, { navigate: false }); this.navigate(bk.path); } },
+          { label: 'Open in new window', action: () => this.app.openFileExplorer(bk.path, { host: bkHost || undefined }) },
           { label: 'Remove from bookmarks', action: () => {
             this._bookmarks.splice(i, 1);
             this._saveBookmarks(); this._renderBookmarks();
@@ -336,8 +340,9 @@ class FileExplorer {
       const filePath = e.dataTransfer.getData('application/x-file-path') || e.dataTransfer.getData('text/plain');
       if (filePath && filePath.startsWith('/')) {
         const label = filePath.split('/').pop() || filePath;
-        if (!this._bookmarks.some(b => b.path === filePath)) {
-          this._bookmarks.push({ label, path: filePath });
+        const srcHost = e.dataTransfer.getData('application/x-file-host') || '';
+        if (!this._bookmarks.some(b => b.path === filePath && (b.host || '') === srcHost)) {
+          this._bookmarks.push({ label, path: filePath, ...(srcHost ? { host: srcHost } : {}) });
           this._saveBookmarks(); this._renderBookmarks();
         }
       }
@@ -347,9 +352,10 @@ class FileExplorer {
 
   _bookmarkCurrent() {
     if (!this.currentPath) return;
-    if (this._bookmarks.some(b => b.path === this.currentPath)) return;
+    const h = this._host || '';
+    if (this._bookmarks.some(b => b.path === this.currentPath && (b.host || '') === h)) return;
     const label = this.currentPath.split('/').pop() || this.currentPath;
-    this._bookmarks.push({ label, path: this.currentPath });
+    this._bookmarks.push({ label, path: this.currentPath, ...(h ? { host: h } : {}) });
     this._saveBookmarks();
     this._renderBookmarks();
   }
@@ -529,13 +535,30 @@ class FileExplorer {
       const r = await fetch('/api/hosts'); const d = await r.json();
       const cur = this._host;
       this._hostSelect.innerHTML = '<option value="">Local</option>';
+      this._hostNames = {};
       for (const h of d?.hosts || []) {
         const o = document.createElement('option');
         o.value = h.id; o.textContent = h.name;
         this._hostSelect.appendChild(o);
+        this._hostNames[h.id] = h.name;
       }
       this._hostSelect.value = cur;
+      this._renderBookmarks(); // host names may resolve after first render
     } catch {}
+  }
+
+  _hostName(id) { return (this._hostNames || {})[id] || id; }
+
+  // Switch which host this explorer browses (programmatic — bookmark click,
+  // remote layout sync). navigate:false skips the home load (caller navigates).
+  setHost(hostId, { navigate = true } = {}) {
+    const h = hostId || '';
+    if (h === (this._host || '')) return;
+    this._host = h;
+    this._hostSelect.value = h;
+    this.winInfo._explorerHost = h;
+    if (this.winInfo._openSpec) this.winInfo._openSpec.host = h || undefined;
+    if (navigate) this._loadHome();
   }
 
   async _loadHome() { try { const r = await fetch('/api/home?_=1' + this._hp()); const d = await r.json(); this.navigate(d.home || '/'); } catch { this.navigate('/'); } }
@@ -1213,7 +1236,7 @@ class FileExplorer {
           this._saveBookmarks(); this._renderBookmarks();
         }
       }});
-      items.push({ label: 'Open Terminal Here', action: () => this.app.openShellTerminal(fullPath) });
+      items.push({ label: 'Open Terminal Here', action: () => this.app.openShellTerminal(fullPath, { hostId: this._host || undefined }) });
       items.push({ label: 'Sessions', submenu: () => {
         const sub = [];
         sub.push({ label: '+ New session', action: () => this.app.showNewSessionDialog({ cwd: fullPath }) });
@@ -1259,7 +1282,7 @@ class FileExplorer {
     const items = [];
     if (clip?.paths?.length) items.push({ label: `Paste ${clip.paths.length} item${clip.paths.length > 1 ? 's' : ''}`, action: () => this._paste() });
     items.push({ label: 'New File', action: () => this.createFile() });
-    items.push({ label: 'Open Terminal Here', action: () => this.app.openShellTerminal(this.currentPath) });
+    items.push({ label: 'Open Terminal Here', action: () => this.app.openShellTerminal(this.currentPath, { hostId: this._host || undefined }) });
     items.push({ label: 'New Folder', action: () => this.createDir() });
     items.push({ sep: true });
     items.push({ label: 'Select All', action: () => { this._selection = new Set(this._renderOrder); this._applySelectionClasses(); } });
