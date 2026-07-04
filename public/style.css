@@ -1395,9 +1395,10 @@ body.sidebar-right .sidebar .resizer-h { right: auto; left: 0; }
 /* Auto-hide taskbar: fixed overlay that slides off its edge; a 6px hotzone
    reveals it. Workspace keeps full height (taskbar is out of flow). */
 body.taskbar-autohide #taskbar {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 9500;
+  position: fixed; bottom: 0; z-index: 9500;
+  left: var(--sidebar-inset-left, 0px); right: var(--sidebar-inset-right, 0px);
   transform: translateY(calc(100% - 2px));
-  transition: transform 0.18s ease;
+  transition: transform 0.18s ease, left 0.2s ease, right 0.2s ease;
   box-shadow: 0 -4px 16px rgba(0,0,0,0.35);
 }
 body.taskbar-autohide.taskbar-top #taskbar {
@@ -1407,7 +1408,8 @@ body.taskbar-autohide.taskbar-top #taskbar {
 }
 body.taskbar-autohide.taskbar-revealed #taskbar { transform: translateY(0); }
 #taskbar-hotzone {
-  position: fixed; left: 0; right: 0; bottom: 0; height: 6px; z-index: 9499;
+  position: fixed; bottom: 0; height: 6px; z-index: 9499;
+  left: var(--sidebar-inset-left, 0px); right: var(--sidebar-inset-right, 0px);
 }
 body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 

@@ -381,6 +381,12 @@ class Sidebar {
     const mw = document.getElementById('main-wrapper');
     mw.style.marginLeft = right ? '0' : w;
     mw.style.marginRight = right ? w : '0';
+    // Published for fixed-position chrome that must respect the sidebar too —
+    // the auto-hide taskbar + its hotzone are out of the flex flow and would
+    // otherwise span the full viewport underneath the sidebar.
+    const root = document.documentElement.style;
+    root.setProperty('--sidebar-inset-left', right ? '0px' : w);
+    root.setProperty('--sidebar-inset-right', right ? w : '0px');
   }
 
   _setSidebarResizing(active) {
