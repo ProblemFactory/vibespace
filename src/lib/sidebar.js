@@ -512,6 +512,8 @@ class Sidebar {
         agentRole: s.agentRole || wm?.agentRole || '',
         agentNickname: s.agentNickname || wm?.agentNickname || '',
         parentThreadId: s.parentThreadId || wm?.parentThreadId || null,
+        host: wm?.host || null,
+        hostName: wm?.hostName || null,
         webuiId: wm?.id || null,
         webuiName: wm?.name || null,
         webuiMode: wm ? (wm.mode || 'terminal') : null,
