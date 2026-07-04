@@ -1305,7 +1305,7 @@ class FileExplorer {
   _clipboardSet(op) {
     const paths = [...this._selection].map(n => this.currentPath + '/' + n);
     if (!paths.length) return;
-    this.app._fileClipboard = { op, paths };
+    this.app._fileClipboard = { op, paths, host: this._host || '' };
     showToast(`${op === 'cut' ? 'Cut' : 'Copied'} ${paths.length} item${paths.length > 1 ? 's' : ''}`);
     this._applySelectionClasses();
   }
@@ -1324,12 +1324,20 @@ class FileExplorer {
     const clip = this.app._fileClipboard;
     if (!clip || !clip.paths.length) return;
     const api = clip.op === 'cut' ? '/api/file/move' : '/api/file/copy';
+    // Cross-host aware: clipboard remembers its SOURCE host; posting with
+    // srcHost/destHost routes same-host ops to cp/mv and cross-host (or
+    // host↔local) ops through the server relay.
+    const srcHost = clip.host || '', destHost = this._host || '';
+    const sameHost = srcHost === destHost;
     let overwriteAll = null, done = 0, failed = 0;
-    const post = (src, dest, overwrite) => fetch(api, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this._hb({ src, dest, overwrite })) }).catch(() => null);
+    const post = (src, dest, overwrite) => {
+      const body = sameHost ? this._hb({ src, dest, overwrite }) : { src, dest, overwrite, srcHost, destHost };
+      return fetch(api, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).catch(() => null);
+    };
     for (const src of clip.paths) {
       const base = src.split('/').pop();
       let dest = this.currentPath + '/' + base;
-      if (dest === src) {
+      if (dest === src && sameHost) {             // same path only counts on the same host
         if (clip.op === 'cut') continue;          // move onto itself: no-op
         dest = this._uniqueName(base);            // copy into same dir: duplicate
       }

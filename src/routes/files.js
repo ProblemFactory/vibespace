@@ -659,13 +659,50 @@ async function crossHostTransfer(req, res, { move }) {
   const isDir = async (host, p) => host ? (await inst.info(host, p)).isDirectory : fs.statSync(safePath(p)).isDirectory();
   let dir;
   try { dir = await isDir(srcHost, src); } catch (e) { return res.status(400).json({ error: 'source not found: ' + e.message }); }
-  if (dir) {
-    // stream directories as a zip through the server, unzip on the far side
-    // (simplest correct path for arbitrary trees over ssh)
-    return res.status(400).json({ error: 'cross-host folder transfer not supported yet — copy files, or zip the folder first' });
-  }
-  const base = path.posix.basename(src);
+  const base = path.posix.basename(src.replace(/\/+$/, ''));
   const destPath = dest.endsWith('/') ? dest + base : dest;
+  const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+  // NOTE: inst.info() exits 0 even for missing paths (its trailing echo wins),
+  // so existence needs a real `[ -e ]` probe.
+  const exists = async (host, p) => host ? await inst._run(host, `[ -e ${shq(p)} ]`).then(() => true, () => false) : fs.existsSync(safePath(p));
+  if (!overwrite && await exists(destHost, destPath)) return res.status(409).json({ error: 'exists', dest: destPath });
+  if (dir) {
+    // Folder transfer: tar stream from the source side piped straight into a
+    // tar extract on the destination side (through the server) — no temp
+    // archive, arbitrary trees, preserves permissions/symlinks.
+    const { spawn } = require('child_process');
+    const srcParent = path.posix.dirname(src.replace(/\/+$/, ''));
+    const destParent = path.posix.dirname(destPath);
+    const destBase = path.posix.basename(destPath);
+    let srcChild;
+    if (srcHost) srcChild = inst._spawn(srcHost, `cd ${shq(srcParent)} && tar -cf - ${shq(base)}`);
+    else { const sp = safePath(src); srcChild = spawn('tar', ['-cf', '-', path.basename(sp)], { cwd: path.dirname(sp) }); }
+    try {
+      let destChild, localRename = null;
+      if (destHost) {
+        const h = inst._host(destHost);
+        // extract lands as <base>; rename remotely if the target name differs
+        const post = destBase === base ? '' : ` && mv ${shq(destParent + '/' + base)} ${shq(destPath)}`;
+        destChild = spawn('ssh', [...inst.hosts.sshArgs(h), '--', `mkdir -p ${shq(destParent)} && tar -xf - -C ${shq(destParent)}${post}`]);
+      } else {
+        const dp = safePath(destPath), dParent = path.dirname(dp);
+        fs.mkdirSync(dParent, { recursive: true });
+        destChild = spawn('tar', ['-xf', '-', '-C', dParent]);
+        if (path.basename(dp) !== base) localRename = { from: path.join(dParent, base), to: dp };
+      }
+      srcChild.stdout.pipe(destChild.stdin);
+      let srcErr = '', dstErr = '';
+      srcChild.stderr?.on('data', d => { srcErr += d; });
+      destChild.stderr?.on('data', d => { dstErr += d; });
+      await Promise.all([
+        new Promise((resolve, reject) => srcChild.on('close', c => c === 0 ? resolve() : reject(new Error('source read failed: ' + (srcErr.trim().slice(0, 200) || c))))),
+        new Promise((resolve, reject) => destChild.on('close', c => c === 0 ? resolve() : reject(new Error('extract failed: ' + (dstErr.trim().slice(0, 200) || c))))),
+      ]);
+      if (localRename) fs.renameSync(localRename.from, localRename.to);
+      if (move) { if (srcHost) await inst.remove(srcHost, src); else fs.rmSync(safePath(src), { recursive: true, force: true }); }
+      return res.json({ success: true, dest: destPath });
+    } catch (e) { return res.status(400).json({ error: e.message }); }
+  }
   // reader stream
   let reader;
   if (srcHost) reader = inst._spawn(srcHost, `cat '${String(src).replace(/'/g, `'\\''`)}'`).stdout;

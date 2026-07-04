@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.23.2] — 2026-07-04
+
+### Added
+
+- **Cross-host folder transfer** — folders now copy/move between hosts directly (drag between explorer windows, or copy/paste): the source streams a `tar` of the tree through the server into a `tar` extract on the destination. No temp archive; permissions, executable bits, and symlinks preserved. Renaming during transfer works, existing destinations return a conflict prompt, and cross-host *move* removes the source after a successful transfer.
+- **Cross-host copy/paste** — the file clipboard now remembers which host it was copied from, so Copy on one host + Paste on another transfers the items (previously the paths were misread as belonging to the destination host).
+
 ## [2.23.1] — 2026-07-04
 
 ### Added / Fixed

@@ -15,7 +15,7 @@ Drag-and-drop or copy/paste a file from one explorer window to another on a **di
 - **Same host** → a remote `cp`/`mv` on that machine.
 - **Different hosts (or host ↔ local)** → the file streams through the VibeSpace server (A → server → B). Works local→remote, remote→local, and remote→remote.
 
-Folders: compress to an archive first, transfer, then extract (direct cross-host folder trees are on the roadmap).
+Folders transfer directly too: the source side streams a `tar` of the tree through the server into a `tar` extract on the destination — no temp archive, and permissions, executable bits, and symlinks are preserved. Drag a folder between explorer windows on different hosts, or copy/cut in one window and paste in another (the clipboard remembers its source host).
 
 ## Limits
 
