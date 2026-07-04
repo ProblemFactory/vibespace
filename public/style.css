@@ -1970,3 +1970,10 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
   background: var(--wb-host-color, transparent);
   pointer-events: none;
 }
+
+/* Mobile: desktop chrome customization does not apply (arrangement is skipped
+   in app.js) — hide the extra bar rows outright as a belt-and-braces so a
+   populated row can never render on phones. */
+@media (max-width: 768px) {
+  #toolbar-row2, #taskbar-row2 { display: none !important; }
+}

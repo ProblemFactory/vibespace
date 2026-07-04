@@ -285,8 +285,15 @@ class App {
       this.settings.on(k, applyChromeSettings);
     }
     // Element arrangement (which zone hosts which movable, in what order) +
-    // per-spring configs — written by CustomizeMode, synced multi-client
-    const applyArr = () => applyArrangement(this.settings.get('chrome.arrangement'), this.settings.get('chrome.springs'));
+    // per-spring configs — written by CustomizeMode, synced multi-client.
+    // Desktop-only: mobile has its own chrome (MobileNav, two-level sidebar),
+    // so a desktop arrangement must not re-parent elements there — moving
+    // e.g. desktop-previews into an extra toolbar row made that row render
+    // on phones (the :empty auto-hide no longer applied).
+    const applyArr = () => {
+      if (this.isMobile) return;
+      applyArrangement(this.settings.get('chrome.arrangement'), this.settings.get('chrome.springs'));
+    };
     applyArr();
     this.settings.on('chrome.arrangement', applyArr);
     this.settings.on('chrome.springs', applyArr);

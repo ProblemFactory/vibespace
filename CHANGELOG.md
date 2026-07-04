@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.27.2] — 2026-07-04
+
+### Fixed
+
+- **Mobile rendered desktop chrome customization** — a custom arrangement (e.g. desktop previews moved into an extra toolbar row) was applied on phones too, drawing the extra row on top of the mobile UI. Arrangement/springs are now desktop-only (mobile keeps its own chrome), plus a media-query guard hides the extra bar rows on small screens outright.
+
 ## [2.27.1] — 2026-07-04
 
 ### Fixed
