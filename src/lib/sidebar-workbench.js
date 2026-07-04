@@ -48,7 +48,7 @@ export function installSidebarWorkbench(Sidebar) {
       label.className = 'wb-manage-label';
       label.innerHTML = marks.size
         ? `<b>${marks.size}</b> marked${nTerm ? ` · ${nTerm} terminate` : ''}${nArch ? ` · ${nArch} archive` : ''}`
-        : 'Manage mode — tap the ✕ / archive icon on cards to mark them';
+        : 'Manage mode — mark cards to batch-act';
       const actions = document.createElement('div');
       actions.className = 'wb-manage-actions';
       const applyBtn = document.createElement('button');

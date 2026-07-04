@@ -1887,11 +1887,14 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 .session-item-card.manage-marked { outline: 1px solid color-mix(in srgb, var(--red, #e55) 45%, transparent); outline-offset: -1px; opacity: 0.85; }
 .wb-manage-bar {
   position: sticky; top: 0; z-index: 3; display: flex; align-items: center; justify-content: space-between;
-  gap: 8px; padding: 8px 10px; margin-bottom: 2px;
+  gap: 8px; padding: 0 10px; margin-bottom: 2px;
+  height: 40px; box-sizing: border-box; /* fixed — label length must not resize the bar */
   background: color-mix(in srgb, var(--accent) 12%, var(--bg-sidebar));
   border-bottom: 1px solid var(--accent);
 }
-.wb-manage-label { font-size: 11px; color: var(--text); min-width: 0; }
+/* single line, ellipsis — a changing count never wraps to a 2nd row */
+.wb-manage-label { font-size: 11px; color: var(--text); min-width: 0; flex: 1;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wb-manage-label b { color: var(--accent); }
 .wb-manage-actions { display: flex; gap: 6px; flex-shrink: 0; }
 .wb-manage-apply, .wb-manage-clear {
