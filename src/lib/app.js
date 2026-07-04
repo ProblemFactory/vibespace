@@ -1371,6 +1371,7 @@ class App {
     document.querySelector('#dialog-new-session .btn-create').addEventListener('click', () => {
       this.createSession({
         backend: document.getElementById('input-backend').value || 'claude',
+        hostId: document.getElementById('input-host')?.value || undefined,
         mode: document.getElementById('input-mode').value,
         cwd: document.getElementById('input-cwd').value.trim(),
         name: document.getElementById('input-session-name').value.trim(),
@@ -1514,9 +1515,28 @@ class App {
     document.getElementById(id).classList.remove('hidden');
   }
 
-  showNewSessionDialog({ cwd, backend } = {}) {
+  showNewSessionDialog({ cwd, backend, hostId } = {}) {
     if (this.isMobile) this.sidebar.toggle(false); // close sidebar so dialog is visible
     this._showDialog('dialog-new-session');
+    // Host dropdown (remote sessions run over ssh + remote dtach; terminal only until P3)
+    const hostSel = document.getElementById('input-host');
+    if (hostSel) {
+      fetchJson('/api/hosts').then(d => {
+        hostSel.innerHTML = '<option value="">Local</option>';
+        for (const h of d?.hosts || []) {
+          const o = document.createElement('option');
+          o.value = h.id; o.textContent = `${h.name} (${h.user}@${h.host})`;
+          hostSel.appendChild(o);
+        }
+        hostSel.value = hostId || '';
+        hostSel.onchange = () => {
+          const modeSel = document.getElementById('input-mode');
+          if (hostSel.value) { modeSel.value = 'terminal'; modeSel.disabled = true; modeSel.title = 'Remote sessions are terminal-mode only for now'; }
+          else { modeSel.disabled = false; modeSel.title = ''; }
+        };
+        hostSel.onchange();
+      });
+    }
     const b = backend || 'claude';
     document.getElementById('input-backend').value = b;
     this._applySessionBackendOptions(b, { applyDefaults: true });
@@ -1570,7 +1590,7 @@ class App {
     });
   }
 
-  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, fork, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle }) {
+  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, fork, hostId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle }) {
     this._hideWelcome();
     const defaults = this._getBackendSessionDefaults(backend);
     const sessionMode = mode || this.settings.get('session.defaultMode') || 'chat';
@@ -1589,7 +1609,7 @@ class App {
     const reqId = `req-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
     this.ws.send({
-      type:'create', backend, mode: sessionMode, cwd: cwd||undefined, sessionName: name||undefined, model: sessionModel||undefined,
+      type:'create', backend, hostId: hostId||undefined, mode: sessionMode, cwd: cwd||undefined, sessionName: name||undefined, model: sessionModel||undefined,
       permissionMode: sessionPermission||undefined, effort: sessionEffort||undefined, extraArgs: sessionExtraArgs||undefined,
       tuiRenderer: (backend === 'claude' && sessionMode === 'terminal' ? this.settings.get('claude.tuiRenderer') : '') || undefined,
       agentKind: agentKind || undefined, agentRole: agentRole || undefined, agentNickname: agentNickname || undefined,

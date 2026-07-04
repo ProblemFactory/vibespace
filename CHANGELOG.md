@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.21.0] — 2026-07-04
+
+### Added (collaboration P2)
+
+- **Remote hosts** — the sidebar tab (renamed **Remote**) gains a Hosts section: register ssh machines (your `~/.ssh` keys, or an app-generated ed25519 key with the public key surfaced for `authorized_keys`), one-click **connectivity test** (latency + which of dtach/node/claude/codex are installed → READY / NEEDS SETUP badge), and **Bootstrap** — a step-progress dialog with an expandable live log that idempotently installs dtach, Node.js (nvm) and the Claude CLI on the target.
+- **Remote terminal sessions** — the New Session dialog has a Host dropdown; the session runs as `local dtach → ssh -t → remote dtach → claude`, so network drops and local server restarts never kill the remote agent. Remote sessions mix into the main session list grouped under a `host:` prefix with a host badge.
+- **Location filter** — the backend-filter popover gains a Location section: show only Local sessions or only those on chosen hosts.
+- Remote chat mode, remote resume of discovered sessions, and richer discovery land in P3.
+
 ## [2.20.0] — 2026-07-04
 
 ### Added (collaboration P1)

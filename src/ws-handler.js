@@ -72,7 +72,7 @@ function registerWsHandler(wss, ctx) {
     sessionCounterRef, createSessionMessages, PERMISSION_MODES,
     SOCKETS_DIR, BUFFERS_DIR, META_DIR, PTY_WRAPPER, CHAT_WRAPPER,
     NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, PORT, X_ENV,
-    adapterRegistry, pty, path, fs, os, execFileSync, ensureDir,
+    adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
   } = ctx;
 
   // Monotonic sequence for layout-sync rebroadcasts (shared across all
@@ -225,6 +225,33 @@ function registerWsHandler(wss, ctx) {
           const bufFile = path.join(BUFFERS_DIR, id + '.buf');
           const metaFileW = path.join(BUFFERS_DIR, id + '.json');
           const wrapper = sessionSpec.wrapper || (sessionMode === 'chat' ? CHAT_WRAPPER : PTY_WRAPPER);
+          // Remote session (collaboration P2, terminal mode): the LOCAL dtach+
+          // pty-wrapper machinery stays (buffer/restore all work unchanged) but
+          // the wrapped command becomes ssh -t … dtach -A on the REMOTE — a
+          // network drop doesn't kill the agent; reattach = re-ssh.
+          let spawnCmd = sessionSpec.cmd || CLAUDE_CMD;
+          let spawnArgs = sessionSpec.args || [];
+          let spawnEnvPairs = Object.entries(sessionSpec.env || {}).map(([k, v]) => `${k}=${v == null ? '' : String(v)}`);
+          let spawnCwd = cwd;
+          if (data.hostId && hosts && sessionMode === 'terminal') {
+            let h;
+            try { h = hosts.get(data.hostId); }
+            catch { ws.send(JSON.stringify({ type: 'error', message: 'Unknown host: ' + data.hostId })); return; }
+            const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+            // locally-resolved binary paths mean nothing on the remote
+            const rcmd = spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd;
+            const inner = `cd ${shq(cwd)} 2>/dev/null; exec env TERM=xterm-256color COLORTERM=truecolor `
+              + [...spawnEnvPairs.map(shq), rcmd, ...spawnArgs.map(shq)].join(' ');
+            spawnCmd = 'ssh';
+            spawnArgs = [...hosts.sshArgs(h, { tty: true }), '--', `dtach -A /tmp/vs-${id} -r winch sh -lc ${shq(inner)}`];
+            spawnEnvPairs = [];
+            spawnCwd = os.homedir(); // remote cwd rides inside the ssh command
+            session.host = h.id;
+            session.hostName = h.name;
+          } else if (data.hostId && sessionMode !== 'terminal') {
+            ws.send(JSON.stringify({ type: 'error', message: 'Remote sessions are terminal-mode only for now (chat lands in P3)' }));
+            return;
+          }
           let createPty;
           try {
             createPty = pty.spawn(DTACH_CMD, ['-c', socketPath, '-E', '-r', 'none',
@@ -236,11 +263,11 @@ function registerWsHandler(wss, ctx) {
               `DISPLAY=${X_ENV?.DISPLAY || process.env.DISPLAY || ''}`,
               ...(X_ENV?.XAUTHORITY ? [`XAUTHORITY=${X_ENV.XAUTHORITY}`] : []),
               `TERM=xterm-256color`, `COLORTERM=truecolor`,
-              ...Object.entries(sessionSpec.env || {}).map(([k, v]) => `${k}=${v == null ? '' : String(v)}`),
-              sessionSpec.cmd || CLAUDE_CMD, ...(sessionSpec.args || []),
+              ...spawnEnvPairs,
+              spawnCmd, ...spawnArgs,
             ], {
               name: 'xterm-256color', cols: data.cols || 120, rows: data.rows || 30,
-              cwd, env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor', ...Object.fromEntries(Object.entries(sessionSpec.env || {}).map(([k, v]) => [k, v == null ? '' : String(v)])) },
+              cwd: spawnCwd, env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor', ...Object.fromEntries(Object.entries(sessionSpec.env || {}).map(([k, v]) => [k, v == null ? '' : String(v)])) },
             });
           } catch (err) {
             ws.send(JSON.stringify({ type: 'error', message: `Failed to spawn session: ${err.message}\ndtach=${DTACH_CMD} node=${NODE_CMD} env=${ENV_CMD} cwd=${cwd}` }));
@@ -254,6 +281,8 @@ function registerWsHandler(wss, ctx) {
           writeSessionMeta(sockName, {
             name: session.name,
             cwd,
+            host: session.host || null,
+            hostName: session.hostName || null,
             backend: session.backend,
             backendSessionId: session.backendSessionId,
             claudeSessionId: session.claudeSessionId,

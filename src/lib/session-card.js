@@ -124,6 +124,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     <span class="session-card-name">${escHtml(displayName)}</span>
     ${agentRoleShort ? `<span class="session-card-badge badge-agent-role" title="${escHtml(agentRoleLabel)}">${escHtml(agentRoleShort)}</span>` : ''}
     <span class="session-card-badge badge-config" style="display:none"></span>
+    ${s.hostName ? `<span class="session-host-badge" title="Remote session on ${escHtml(s.hostName)}">${escHtml(s.hostName)}</span>` : ''}
     <span class="session-card-badge ${badge.cls}">${badge.text}</span>
   </div>`;
   const row = card.querySelector('.session-card-row');

@@ -12,6 +12,10 @@ const MI = {
   importL: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8M5 7l3 3 3-3M3 10v3h10v-3"/></svg>',
   link: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 9.5l3-3M5 8L3.5 9.5a2.5 2.5 0 003.5 3.5L8.5 11.5M8 5l1.5-1.5a2.5 2.5 0 013.5 3.5L11.5 8.5"/></svg>',
   plus: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>',
+  server: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2.5" width="12" height="4.5" rx="1"/><rect x="2" y="9" width="12" height="4.5" rx="1"/><path d="M4.5 4.75h.01M4.5 11.25h.01"/></svg>',
+  bolt: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 1.5L3.5 9h3l-1 5.5L10.5 7h-3l1-5.5z"/></svg>',
+  wrench: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2.5a3.5 3.5 0 00-3.3 4.6L2.5 10.8a1.4 1.4 0 002 2l3.7-3.7a3.5 3.5 0 004.5-4.4L10.5 7 9 5.5l2.3-2.2a3.5 3.5 0 00-1.8-.8z"/></svg>',
+  termNew: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M4 6l2.5 2L4 10M8.5 10.5h3.5"/></svg>',
 };
 
 // fetch wrapper that THROWS on HTTP/{error} responses (utils fetchJson swallows)
@@ -36,14 +40,42 @@ export function installSidebarMounts(Sidebar) {
     async _renderMounts() {
       this._initMountsSync();
       this.listEl.innerHTML = '<div class="mounts-loading">Loading…</div>';
-      let d;
-      try { d = await api('/api/mounts'); }
-      catch { this.listEl.innerHTML = '<div class="mounts-loading">Failed to load mounts</div>'; return; }
+      let d, hd;
+      try { [d, hd] = await Promise.all([api('/api/mounts'), api('/api/hosts')]); }
+      catch { this.listEl.innerHTML = '<div class="mounts-loading">Failed to load</div>'; return; }
       if (this._activeTab !== 'mounts') return; // user switched away mid-fetch
       this._mountsData = d;
+      this._hostsData = hd;
       this.listEl.innerHTML = '';
       const root = document.createElement('div');
       root.className = 'mounts-panel';
+
+      // ── Hosts section (remote machines over ssh) ──
+      const hHead = document.createElement('div');
+      hHead.className = 'mounts-sec-head';
+      hHead.textContent = 'Hosts';
+      root.appendChild(hHead);
+      if (!hd.hosts.length) {
+        const empty = document.createElement('div');
+        empty.className = 'mounts-empty';
+        empty.textContent = 'No remote hosts yet. Add one to run agent sessions on other machines over ssh.';
+        root.appendChild(empty);
+      } else {
+        const hlist = document.createElement('div');
+        hlist.className = 'mounts-list';
+        for (const h of hd.hosts) hlist.appendChild(this._buildHostRow(h));
+        root.appendChild(hlist);
+      }
+      const addHost = document.createElement('button');
+      addHost.className = 'mounts-action';
+      addHost.innerHTML = `<span class="mounts-action-icon">${MI.server}</span><span>Add host</span>`;
+      addHost.onclick = () => this._showAddHostDialog(hd);
+      root.appendChild(addHost);
+
+      const sHead = document.createElement('div');
+      sHead.className = 'mounts-sec-head';
+      sHead.textContent = 'Storage';
+      root.appendChild(sHead);
 
       // My storage (env-provisioned company bucket)
       if (d.env) {
@@ -68,12 +100,6 @@ export function installSidebarMounts(Sidebar) {
       }
 
       // Mounts list
-      if (d.mounts.length) {
-        const head = document.createElement('div');
-        head.className = 'mounts-sec-head';
-        head.textContent = 'Mounts';
-        root.appendChild(head);
-      }
       const list = document.createElement('div');
       list.className = 'mounts-list';
       if (!d.mounts.length) {
@@ -192,6 +218,154 @@ export function installSidebarMounts(Sidebar) {
         row.appendChild(err);
       }
       return row;
+    },
+
+    _buildHostRow(h) {
+      const row = document.createElement('div');
+      row.className = 'mounts-row';
+      const st = this._hostStatus?.[h.id]; // {ok, latencyMs, tools} | {error} | undefined
+      const dot = st ? (st.ok ? 'ok' : 'err') : 'off';
+      const top = document.createElement('div');
+      top.className = 'mounts-row-top';
+      top.innerHTML = `
+        <span class="mounts-dot mounts-dot-${dot}" title="${st ? (st.ok ? `${st.latencyMs}ms` : escHtml(st.error || 'unreachable')) : 'Not tested yet'}"></span>
+        <b class="mounts-name" title="${escHtml(h.user)}@${escHtml(h.host)}:${h.port}">${escHtml(h.name)}</b>
+        ${st?.ok && st.tools ? `<span class="mounts-badge${st.tools.claude && st.tools.dtach ? '' : ' mounts-badge-red'}" title="dtach:${st.tools.dtach ? '✓' : '✗'} node:${st.tools.node ? '✓' : '✗'} claude:${st.tools.claude ? '✓' : '✗'}">${st.tools.claude && st.tools.dtach ? 'READY' : 'NEEDS SETUP'}</span>` : ''}`;
+      const actions = document.createElement('span');
+      actions.className = 'mounts-row-actions';
+      const ibtn = (svg, title, fn, cls = '') => {
+        const b = document.createElement('button');
+        b.className = 'mounts-icon-btn ' + cls;
+        b.innerHTML = svg; b.title = title;
+        b.onclick = async (e) => {
+          e.stopPropagation(); b.disabled = true;
+          try { await fn(); } catch (err) { showToast(err.message || 'Failed', { type: 'error' }); }
+          this._renderMounts();
+        };
+        return b;
+      };
+      actions.append(
+        ibtn(MI.bolt, 'Test connection', async () => {
+          this._hostStatus = this._hostStatus || {};
+          try { this._hostStatus[h.id] = await api(`/api/hosts/${h.id}/test`, { method: 'POST' }); }
+          catch (e) { this._hostStatus[h.id] = { ok: false, error: e.message }; throw e; }
+        }),
+        ibtn(MI.wrench, 'Bootstrap (install dtach / node / claude)', () => { this._showBootstrapDialog(h); }),
+        ibtn(MI.termNew, 'New session on this host', () => { this.app.showNewSessionDialog?.({ hostId: h.id, hostName: h.name }); }),
+        ibtn(MI.cross, 'Remove host', async () => {
+          const ok = await showConfirmDialog({ title: `Remove "${h.name}"?`, message: 'Only the registry entry goes away — nothing on the remote machine is touched.', confirmText: 'Remove', danger: true });
+          if (ok) await api(`/api/hosts/${h.id}`, { method: 'DELETE' });
+        }, 'mounts-icon-danger'),
+      );
+      top.appendChild(actions);
+      const sub = document.createElement('div');
+      sub.className = 'mounts-path';
+      sub.style.direction = 'ltr';
+      sub.textContent = `${h.user}@${h.host}${h.port !== 22 ? ':' + h.port : ''}${h.keyPath ? ' · app key' : ''}`;
+      row.append(top, sub);
+      return row;
+    },
+
+    _showAddHostDialog(hd) {
+      this._mountsDialog('Add remote host', [
+        { key: 'name', label: 'Name', placeholder: 'gpu-01' },
+        { key: 'user', label: 'SSH user', placeholder: 'ubuntu' },
+        { key: 'host', label: 'Host', placeholder: '10.0.0.5 or gpu01.internal' },
+        { key: 'port', label: 'Port', value: '22' },
+        { key: 'keyChoice', label: 'SSH key', type: 'select', options: [
+          ['default', 'My ~/.ssh keys (default)'],
+          ['app', hd.key.exists ? 'VibeSpace key (data/ssh)' : 'VibeSpace key — generate now'],
+        ] },
+      ], 'Add host', async (v, { close }) => {
+        let keyPath = null;
+        if (v.keyChoice === 'app') {
+          let k = hd.key;
+          if (!k.exists) {
+            const r = await api('/api/hosts/key', { method: 'POST' });
+            k = r.key;
+            // surface the public key so the user can install it on the target
+            await new Promise((done) => {
+              this._mountsDialog('Public key generated', [], 'Done', async (_, ctx) => { ctx.close(); done(); });
+              const ov = document.getElementById('mounts-dialog-overlay');
+              const body = ov.querySelector('.dialog-body');
+              const ta = document.createElement('textarea');
+              ta.readOnly = true; ta.value = k.publicKey; ta.style.minHeight = '64px'; ta.style.fontSize = '11px';
+              const note = document.createElement('p');
+              note.className = 'agents-note';
+              note.textContent = 'Append this line to ~/.ssh/authorized_keys on the target machine, then press Done.';
+              const copy = document.createElement('button');
+              copy.className = 'btn-cancel';
+              copy.textContent = 'Copy';
+              copy.onclick = () => { copyText(k.publicKey); showToast('Public key copied'); };
+              body.prepend(note, ta, copy);
+            });
+          }
+          keyPath = k.path;
+        }
+        const r = await api('/api/hosts', { method: 'POST', body: JSON.stringify({ name: v.name, user: v.user, host: v.host, port: v.port, keyPath }) });
+        close();
+        // immediate connectivity test so the row shows a real status
+        this._hostStatus = this._hostStatus || {};
+        try { this._hostStatus[r.id] = await api(`/api/hosts/${r.id}/test`, { method: 'POST' }); showToast('Host reachable'); }
+        catch (e) { this._hostStatus[r.id] = { ok: false, error: e.message }; showToast('Added, but unreachable: ' + e.message, { type: 'error' }); }
+        this._renderMounts();
+      });
+    },
+
+    // Bootstrap: dedicated step-progress UI with an expandable live log
+    // (user-specified design — not a bare terminal window).
+    async _showBootstrapDialog(h) {
+      document.getElementById('mounts-dialog-overlay')?.remove();
+      const overlay = document.createElement('div');
+      overlay.id = 'mounts-dialog-overlay';
+      overlay.className = 'dialog-overlay';
+      overlay.style.zIndex = '99998';
+      overlay.innerHTML = `<div class="dialog" style="min-width:400px">
+        <div class="dialog-header"><h3>Bootstrap ${escHtml(h.name)}</h3><button class="dialog-close">✕</button></div>
+        <div class="dialog-body">
+          <div class="bs-steps"></div>
+          <details class="bs-log-wrap"><summary>Log</summary><pre class="bs-log"></pre></details>
+          <div class="dialog-actions"><button class="btn-create bs-start">Start</button></div>
+        </div></div>`;
+      document.body.appendChild(overlay);
+      const close = () => { overlay.remove(); off?.(); };
+      overlay.querySelector('.dialog-close').onclick = close;
+      const stepsEl = overlay.querySelector('.bs-steps');
+      const logEl = overlay.querySelector('.bs-log');
+      const { steps } = await api('/api/hosts/bootstrap-steps');
+      const state = {};
+      const paint = () => {
+        stepsEl.innerHTML = steps.map(s => {
+          const st = state[s.key] || 'pending';
+          const icon = st === 'ok' ? '<span class="bs-ic bs-ok">✓</span>'
+            : st === 'fail' ? '<span class="bs-ic bs-fail">✗</span>'
+            : st === 'running' ? '<span class="bs-ic bs-spin"></span>'
+            : '<span class="bs-ic bs-pend"></span>';
+          return `<div class="bs-step">${icon}<span>${escHtml(s.label)}</span></div>`;
+        }).join('');
+      };
+      paint();
+      const handler = (msg) => {
+        if (msg.type !== 'host-bootstrap' || msg.hostId !== h.id) return;
+        if (msg.type === 'host-bootstrap' && msg.key) { state[msg.key] = msg.status; paint(); }
+        if (msg.line) { logEl.textContent += msg.line + '\n'; logEl.scrollTop = logEl.scrollHeight; }
+        if (msg.steps) { Object.assign(state, msg.steps); paint(); }
+      };
+      this.app.ws.onGlobal(handler);
+      const off = () => { const i = this.app.ws.globalHandlers.indexOf(handler); if (i >= 0) this.app.ws.globalHandlers.splice(i, 1); };
+      const startBtn = overlay.querySelector('.bs-start');
+      startBtn.onclick = async () => {
+        startBtn.disabled = true; startBtn.textContent = 'Running…';
+        try {
+          const r = await api(`/api/hosts/${h.id}/bootstrap`, { method: 'POST' });
+          Object.assign(state, r.steps); paint();
+          startBtn.textContent = r.success ? 'All done' : 'Finished with failures';
+          if (!r.success) overlay.querySelector('.bs-log-wrap').open = true;
+          this._hostStatus = this._hostStatus || {};
+          try { this._hostStatus[h.id] = await api(`/api/hosts/${h.id}/test`, { method: 'POST' }); } catch {}
+          this._renderMounts();
+        } catch (e) { startBtn.textContent = 'Failed'; showToast(e.message, { type: 'error' }); }
+      };
     },
 
     _mountsDialog(title, fields, submitLabel, onSubmit) {

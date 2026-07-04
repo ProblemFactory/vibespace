@@ -957,6 +957,8 @@ function restoreSessions() {
       mode: sessionMode,
       pty: null, clients: new Map(),
       cwd: meta.cwd || os.homedir(),
+      host: meta.host || null,
+      hostName: meta.hostName || null,
       name: meta.name || sockFile,
       createdAt: meta.createdAt || Date.now(),
       backend: meta.backend || 'claude',
@@ -1136,6 +1138,19 @@ app.delete('/api/hosts/:id', (req, res) => {
   try { hosts.remove(req.params.id); res.json({ success: true }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
+// Bootstrap: progress streams to ALL clients over WS (host-bootstrap events);
+// the HTTP response returns when the run completes.
+app.post('/api/hosts/:id/bootstrap', async (req, res) => {
+  const bcast = (msg) => {
+    const json = JSON.stringify(msg);
+    wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
+  };
+  try {
+    const steps = await hosts.bootstrap(req.params.id, (ev) => bcast({ type: 'host-bootstrap', hostId: req.params.id, ...ev }));
+    res.json({ success: Object.values(steps).every(s => s === 'ok'), steps });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.get('/api/hosts/bootstrap-steps', (req, res) => res.json({ steps: hosts.bootstrapSteps() }));
 
 // ── Mounts (rclone S3 mounts + share minting — collaboration P1) ──
 const { MountManager } = require('./src/mounts');
@@ -1551,7 +1566,7 @@ registerWsHandler(wss, {
   sessionCounterRef, createSessionMessages, PERMISSION_MODES,
   SOCKETS_DIR, BUFFERS_DIR, META_DIR, PTY_WRAPPER, CHAT_WRAPPER,
   NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, CODEX_CMD, EDITOR_CMD, PORT, X_ENV,
-  adapterRegistry, pty, path, fs, os, execFileSync, ensureDir,
+  adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
 });
 
 function broadcastActiveSessions() {
@@ -1568,6 +1583,8 @@ function broadcastActiveSessions() {
       id,
       name: s.name,
       cwd: s.cwd,
+      host: s.host || null,
+      hostName: s.hostName || null,
       createdAt: s.createdAt,
       backend: s.backend || 'claude',
       backendSessionId: s.backendSessionId || s.claudeSessionId || null,

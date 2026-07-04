@@ -44,6 +44,7 @@ class Sidebar {
 
     this._sortMode = localStorage.getItem('sessionSort') || 'recent';
     this._backendFilter = new Set(JSON.parse(localStorage.getItem('backendFilter') || '[]'));
+    this._hostFilter = new Set(JSON.parse(localStorage.getItem('hostFilter') || '[]')); // empty = all; 'local' or host ids
     this._agentKindFilter = localStorage.getItem('agentKindFilter') || '';
     this._collapsedFolders = new Set(JSON.parse(localStorage.getItem('collapsedFolders') || '[]'));
     this._expandedFolders = new Set(JSON.parse(localStorage.getItem('expandedFolders') || '[]'));
@@ -144,7 +145,7 @@ class Sidebar {
     groupsTab.onclick = () => { this._activeTab = 'groups'; this._updateTabs(); this._render(); };
     const mountsTab = document.createElement('button');
     mountsTab.className = 'sidebar-tab';
-    mountsTab.textContent = 'Mounts';
+    mountsTab.textContent = 'Remote';
     mountsTab.dataset.tab = 'mounts';
     mountsTab.onclick = () => { this._activeTab = 'mounts'; this._updateTabs(); this._render(); };
     tabBar.append(foldersTab, groupsTab, mountsTab);
@@ -268,6 +269,35 @@ class Sidebar {
       };
       row.append(cb, dot, lbl);
       menu.appendChild(row);
+    }
+
+    // ── Location section (local / each remote host) ──
+    const hosts = new Map([['local', 'Local']]);
+    for (const s of this._allSessions || []) if (s.host) hosts.set(s.host, s.hostName || s.host);
+    for (const h of this._hostsData?.hosts || []) hosts.set(h.id, h.name);
+    if (hosts.size > 1) {
+      const head = document.createElement('div');
+      head.className = 'status-filter-sec';
+      head.textContent = 'Location';
+      menu.appendChild(head);
+      const all = [...hosts.keys()];
+      for (const [hid, label] of hosts) {
+        const row = document.createElement('label'); row.className = 'status-filter-item';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = this._hostFilter.size === 0 || this._hostFilter.has(hid);
+        const lbl = document.createElement('span'); lbl.textContent = label;
+        cb.onchange = () => {
+          const next = this._hostFilter.size === 0 ? new Set(all) : new Set(this._hostFilter);
+          if (cb.checked) next.add(hid); else next.delete(hid);
+          this._hostFilter = next.size === all.length ? new Set() : next;
+          localStorage.setItem('hostFilter', JSON.stringify([...this._hostFilter]));
+          this._activeView = null;
+          this._render();
+        };
+        row.append(cb, lbl);
+        menu.appendChild(row);
+      }
     }
   }
 
@@ -498,7 +528,10 @@ class Sidebar {
           sessionKey: ws.sessionKey || `${backend}:${backendSessionId}`,
           claudeSessionId: ws.claudeSessionId || null,
           sessionId: backendSessionId,
-          cwd: ws.cwd,
+          // remote sessions group under a host-prefixed folder in the list
+          cwd: ws.hostName ? `${ws.hostName}: ${ws.cwd}` : ws.cwd,
+          host: ws.host || null,
+          hostName: ws.hostName || null,
           startedAt: ws.createdAt,
           status: 'live',
           sourceKind: ws.sourceKind || null,
@@ -568,6 +601,9 @@ class Sidebar {
     // Backend / agent filter
     if (this._backendFilter.size > 0) {
       sessions = sessions.filter(s => this._backendFilter.has(s.backend || 'claude'));
+    }
+    if (this._hostFilter.size > 0) {
+      sessions = sessions.filter(s => this._hostFilter.has(s.host || 'local'));
     }
     if (this._agentKindFilter) {
       sessions = sessions.filter(s => (s.agentKind || 'primary') === this._agentKindFilter);

@@ -33,3 +33,13 @@ The share link (`vibespace-share:v1:…`) **embeds the credential** — treat it
 ## Importing a share
 
 **Import share link** → paste → the folder mounts under the granted mode. Revoked service-account shares stop working immediately; expired STS shares show EXPIRED.
+
+# Remote hosts (same sidebar tab)
+
+The Remote tab's **Hosts** section manages ssh machines that run agent sessions (see [design-collaboration.md](design-collaboration.md)).
+
+- **Add host** — name, user, host, port; auth via your `~/.ssh` keys (default) or a VibeSpace-generated ed25519 key (the public key is shown for `authorized_keys`). The row shows live status after a connectivity test: latency + which tools are already installed (READY / NEEDS SETUP badge).
+- **Bootstrap** — a step-progress dialog (Connect → dtach → Node.js → Claude CLI) with an expandable live log; idempotent, installs only what's missing (package manager with passwordless sudo, dtach source build, nvm, Claude native installer).
+- **New session on a host** — the New Session dialog has a Host dropdown (terminal mode only until P3). The spawn chain is `local dtach → pty-wrapper → ssh -t → remote dtach → login shell → claude`: a network drop or local server restart doesn't kill the remote agent; the local side re-attaches through both dtach layers.
+- Remote sessions appear in the main session list **grouped under a `host:` prefix** with a host badge, and the backend-filter popover gains a **Location** section (Local / each host, multi-select).
+- Limitations (P3 scope): remote chat mode, resuming remotely-discovered stopped sessions, remote transcript search. Closing a remote session window locally detaches it — the agent keeps running under the remote dtach.
