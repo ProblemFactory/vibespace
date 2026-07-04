@@ -1882,7 +1882,17 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 
 /* Sidebar manage mode: mark-then-apply batch management */
 #manage-toggle.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
-.session-inline-btn.mark-on { color: var(--red, #e55) !important; background: color-mix(in srgb, var(--red, #e55) 16%, transparent); border-radius: var(--radius-sm); }
+/* Manage-mode MARK toggles: a bordered box reads as "checkable state" (not a
+   one-shot action), gives a bigger hit target, and a clearer boundary. */
+.session-mark-toggle {
+  border: 1px solid var(--border) !important; border-radius: var(--radius-sm);
+  width: 22px; height: 22px; padding: 0 !important; opacity: 1 !important;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--text-dim); margin: 0 1px;
+}
+.session-mark-toggle:hover { border-color: var(--accent) !important; color: var(--text); }
+.session-mark-toggle svg { width: 13px; height: 13px; }
+.session-mark-toggle.mark-on { color: var(--red, #e55) !important; border-color: var(--red, #e55) !important; background: color-mix(in srgb, var(--red, #e55) 16%, transparent); }
 .session-term-mark { color: var(--text-dim); }
 .session-item-card.manage-marked { outline: 1px solid color-mix(in srgb, var(--red, #e55) 45%, transparent); outline-offset: -1px; opacity: 0.85; }
 .wb-manage-bar {

@@ -153,7 +153,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
   const mark = state._manageMode ? (state._manageMarks?.get(manageKey) || {}) : null;
   const archBtn = document.createElement('button');
   if (mark) {
-    archBtn.className = 'session-inline-btn' + (mark.archive ? ' mark-on' : '');
+    archBtn.className = 'session-inline-btn session-mark-toggle' + (mark.archive ? ' mark-on' : '');
     archBtn.innerHTML = isArchived ? ICON.unarchive : ICON.archive;
     archBtn.title = isArchived ? 'Mark to unarchive' : 'Mark to archive';
     archBtn.onclick = (e) => { e.stopPropagation(); state._toggleManageMark(manageKey, 'archive'); };
@@ -167,7 +167,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
   // Manage mode: a terminate-mark button right next to archive (running only)
   if (mark && s.status !== 'stopped') {
     const termMark = document.createElement('button');
-    termMark.className = 'session-inline-btn session-term-mark' + (mark.terminate ? ' mark-on' : '');
+    termMark.className = 'session-inline-btn session-mark-toggle session-term-mark' + (mark.terminate ? ' mark-on' : '');
     termMark.innerHTML = ICON.terminate;
     termMark.title = 'Mark to terminate';
     termMark.onclick = (e) => { e.stopPropagation(); state._toggleManageMark(manageKey, 'terminate'); };
