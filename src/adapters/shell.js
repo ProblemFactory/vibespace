@@ -24,7 +24,16 @@ class ShellAdapter extends BackendAdapter {
   buildSessionArgs(options = {}) {
     const { cwd, extraArgs = [], initialCommand } = options;
     const shell = process.env.SHELL || '/bin/bash';
-    const env = {};
+    const env = {
+      // zsh prints an inverse-video "%" (PROMPT_EOL_MARK) before the first
+      // prompt because the cursor position is unknown at startup. The mark
+      // self-erases only when the emitted width matches the display width —
+      // but our PTY starts at a placeholder size and the buffer replays into
+      // whatever size the client fits later, so the mark strands as a black
+      // "%" box at the top-left of every new shell. Suppress the mark (the
+      // partial-line PRESERVATION behavior itself stays intact).
+      PROMPT_EOL_MARK: '',
+    };
     // Optional command typed for the user after the shell starts (e.g. the
     // "Log in to Claude" helper) — consumed by the client, carried in spec.
     return {
