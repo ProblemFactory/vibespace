@@ -71,7 +71,7 @@
         <button id="sidebar-toggle" class="icon-btn" title="Toggle sidebar">☰</button>
         <span class="toolbar-title">VibeSpace</span>
       </div>
-      <div class="toolbar-center">
+      <div class="toolbar-center" data-zone="toolbar-center">
         <div class="layout-presets" id="layout-presets">
           <button class="layout-btn" data-layout="freeform" title="Freeform (no grid)">
             <svg viewBox="0 0 16 16" width="14" height="14"><rect x="1" y="1" width="5" height="4" rx="0.5" fill="none" stroke="currentColor" stroke-width="1" transform="rotate(-5 3.5 3)"/><rect x="7" y="3" width="7" height="5" rx="0.5" fill="none" stroke="currentColor" stroke-width="1" transform="rotate(3 10.5 5.5)"/><rect x="2" y="8" width="6" height="6" rx="0.5" fill="none" stroke="currentColor" stroke-width="1" transform="rotate(2 5 11)"/></svg>
@@ -97,7 +97,7 @@
           </button>
         </div>
       </div>
-      <div class="toolbar-right">
+      <div class="toolbar-right" data-zone="toolbar-right">
         <button id="btn-global-settings" class="icon-btn" title="Global settings" style="font-size:14px;width:28px;height:28px"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></button>
         <button id="btn-presets" class="toolbar-action" title="Saved presets"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 2h12v12H2z"/><path d="M4 2v5l2-1.5L8 7V2"/></svg> Presets</button>
         <button id="btn-new-session" class="toolbar-action"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v10M3 8h10"/></svg> New Session</button>
@@ -139,8 +139,8 @@
     <footer id="taskbar">
       <span id="cmd-indicator">[CMD]</span>
       <div id="taskbar-items"></div>
-      <div id="desktop-previews"></div>
-      <div class="taskbar-right-section">
+      <div id="taskbar-tray" data-zone="taskbar-tray">
+        <div id="desktop-previews"></div>
         <div id="taskbar-usage" class="taskbar-usage" title="Click for usage details"></div>
         <div id="taskbar-status"><span id="active-count">0 windows</span></div>
       </div>

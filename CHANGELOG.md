@@ -10,7 +10,10 @@ and this project uses [Semantic Versioning](https://semver.org/).
 ### Added
 
 - **Customize mode** — a Firefox-style edit mode replacing settings-list hunting for chrome customization (⚙ menu → **Customize UI…**, or right-click empty toolbar/taskbar space). The workspace dims and every customizable element is outlined *on the real UI*: click an element to hide/show it (hidden elements stay dimmed on the canvas while editing, so nothing ever disappears), hover for a what-is-this tooltip, and segmented pills float next to the bars they control — taskbar position (Bottom/Top) + visibility (Show/Auto-hide/Hidden), sidebar position (Left/Right). Bottom panel: Reset / All settings… / Done; Escape exits. Everything writes the existing settings keys, so persistence and multi-client sync are unchanged.
+- **Drag elements between bars** (in Customize mode) — every customizable element can now be *dragged* to reorder it within its bar or move it to a different bar entirely: toolbar center, toolbar right, or the taskbar tray. A ghost follows the cursor, target zones light up, and an insertion marker shows exactly where it will land. The flagship workflow: drag the desktop previews and usage donuts into the toolbar, then hide the whole taskbar — nothing is lost. Arrangement persists (`chrome.arrangement`) and syncs across clients; Reset restores the stock layout. Core anchors (☰, ⚙, the window-item strip) stay put by design; New Session is movable but never hideable.
+- **Move from the sidebar** — session cards' expand panel gains a **Move** button that starts window Move mode (window follows the cursor, click to place), switching to the window's desktop first. This is the recovery path for a window accidentally dragged off-screen with no grabbable title bar.
 - Toolbar **Terminal** and **Presets** buttons are now hideable too (`toolbar.showTerminalButton`, `toolbar.showPresetsButton`).
+- The taskbar right side is now a **tray** (`#taskbar-tray`): desktop previews, usage meters, and the window counter sit in one horizontal row (previously usage/count were stacked in a fixed column) — each independently hideable, orderable, and movable.
 
 ### Fixed
 

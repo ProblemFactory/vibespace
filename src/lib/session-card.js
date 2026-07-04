@@ -15,6 +15,7 @@ const ICON = {
   terminal:  _s('<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M4.5 7l2 2-2 2M8.5 11h3"/>'),
   terminate: _s('<path d="M4 4l8 8M12 4l-8 8"/>'),
   goto:      _s('<path d="M5 1l7 7-7 7"/>'),
+  move:      _s('<path d="M8 1v14M1 8h14M8 1L6 3M8 1l2 2M8 15l-2-2M8 15l2-2M1 8l2-2M1 8l2 2M15 8l-2-2M15 8l-2 2"/>'),
   fork:      _s('<path d="M8 2v6M8 8c-3 0-4 2-4 4M8 8c3 0 4 2 4 4"/><circle cx="4" cy="13" r="1.5"/><circle cx="12" cy="13" r="1.5"/><circle cx="8" cy="2" r="1.5"/>'),
 };
 
@@ -289,6 +290,18 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     };
     findWrap.append(findBtn, findDrop);
     actionsDiv.appendChild(findWrap);
+
+    // Move: attach the window to the cursor, click to place — the recovery
+    // path for a window accidentally dragged off-screen (pointer-only, so
+    // desktop only)
+    if (!app.isMobile) {
+      const moveBtn = document.createElement('button');
+      moveBtn.className = 'session-detail-btn';
+      moveBtn.innerHTML = ICON.move + ' Move';
+      moveBtn.title = 'Move the window with the cursor (recovers off-screen windows)';
+      moveBtn.onclick = (e) => { e.stopPropagation(); app.moveSessionWindow(s.webuiId); };
+      actionsDiv.appendChild(moveBtn);
+    }
   }
 
   // Resume/Attach action button

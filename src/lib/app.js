@@ -22,7 +22,7 @@ import { CommandMode } from './command-mode.js';
 import { updateTaskbar as updateTaskbarFn } from './taskbar.js';
 import { openBrowser as openBrowserFn } from './browser-window.js';
 import { DesktopManager } from './desktop-manager.js';
-import { CustomizeMode } from './customize-mode.js';
+import { CustomizeMode, applyArrangement } from './customize-mode.js';
 import { createBackendIconHtml, getSessionKey, pickAgentIdentity } from './agent-meta.js';
 
 const BACKEND_SESSION_OPTIONS = {
@@ -236,7 +236,9 @@ class App {
       show('taskbar-resize-handle', vis === 'show' && !cz); // no drag-resize while auto-hidden/editing
       document.body.classList.toggle('taskbar-autohide', vis === 'autohide');
       this._ensureTaskbarHotzone(vis === 'autohide');
-      show('desktop-previews', (vis !== 'hidden' || cz) && s.get('taskbar.showDesktopPreviews'));
+      // NOTE: no `vis` coupling — previews may be hosted in the toolbar now
+      // (chrome.arrangement); a hidden taskbar hides only its own children
+      show('desktop-previews', s.get('taskbar.showDesktopPreviews'));
       show('taskbar-usage', s.get('taskbar.showUsage'));
       show('taskbar-status', s.get('taskbar.showWindowCount'));
       document.body.classList.toggle('taskbar-top', s.get('taskbar.position') === 'top');
@@ -252,6 +254,10 @@ class App {
                      'taskbar.position', 'sidebar.position']) {
       this.settings.on(k, applyChromeSettings);
     }
+    // Element arrangement (which zone hosts which movable, in what order) —
+    // written by CustomizeMode drag, synced multi-client like any setting
+    applyArrangement(this.settings.get('chrome.arrangement'));
+    this.settings.on('chrome.arrangement', () => applyArrangement(this.settings.get('chrome.arrangement')));
   }
 
   // Auto-hide taskbar: a thin fixed hotzone on the taskbar's screen edge — the
@@ -1800,6 +1806,35 @@ class App {
   }
 
   // Switch to the window's desktop and flash it
+  // Start Move mode on a session's window from the sidebar — the recovery
+  // path when a window was dragged off-screen and can't be grabbed anymore.
+  // Resolves tab groups to the host and switches to the window's desktop first.
+  moveSessionWindow(serverSessionId) {
+    for (const [winId, term] of this.sessions) {
+      if (term.sessionId !== serverSessionId) continue;
+      const win = this.wm.windows.get(winId);
+      if (!win) break;
+      let targetId = winId, targetWin = win;
+      if (win._tabChain && win._tabChain.tabs[0] !== winId) {
+        const hostId = win._tabChain.tabs[0];
+        const host = this.wm.windows.get(hostId);
+        if (host) {
+          targetId = hostId; targetWin = host;
+          const tabIdx = win._tabChain.tabs.indexOf(winId);
+          if (tabIdx >= 0) this.wm.switchTab(win._tabChain, tabIdx);
+        }
+      }
+      const dm = this.desktopManager;
+      const start = () => this.wm.startMoveMode(targetId);
+      if (dm && targetWin._desktopId && targetWin._desktopId !== dm.activeDesktopId) {
+        dm.switchTo(targetWin._desktopId).then(start);
+      } else {
+        start();
+      }
+      break;
+    }
+  }
+
   goToWindow(serverSessionId) {
     for (const [winId, term] of this.sessions) {
       if (term.sessionId === serverSessionId) {

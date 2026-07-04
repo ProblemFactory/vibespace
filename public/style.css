@@ -683,10 +683,10 @@ html, body {
 .terminal-container .xterm { height: 100%; }
 .terminal-container .xterm-viewport { overflow-y: auto !important; }
 
-/* ── Desktop Previews (taskbar right) ── */
-.taskbar-right-section {
-  display: flex; flex-direction: column; align-items: flex-end; justify-content: center;
-  gap: 1px; flex-shrink: 0; padding: 0 4px;
+/* ── Taskbar tray (movable elements: previews, usage, window count) ── */
+#taskbar-tray {
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0; padding: 0 4px;
+  height: 100%;
 }
 #desktop-previews {
   display: flex; align-items: flex-end; gap: 3px; flex-shrink: 0; padding: 0 2px;
@@ -1512,7 +1512,7 @@ body.customize-mode.taskbar-autohide #taskbar { transform: translateY(0) !import
 #toolbar .cz-item:hover::after { top: calc(100% + 8px); }
 #taskbar .cz-item:hover::after { bottom: calc(100% + 8px); top: auto; }
 body.taskbar-top #taskbar .cz-item:hover::after { top: calc(100% + 8px); bottom: auto; }
-#taskbar .taskbar-right-section .cz-item:hover::after { left: auto; right: 0; transform: none; }
+#taskbar #taskbar-tray .cz-item:hover::after { left: auto; right: 0; transform: none; }
 /* structural pills (position / visibility) floating next to their bar */
 .cz-pill {
   position: absolute; display: flex; align-items: center; gap: 10px;
@@ -1550,3 +1550,33 @@ body.taskbar-top .cz-panel { bottom: 32px; }
 .cz-btn:hover { border-color: var(--accent); color: var(--accent); }
 .cz-btn.cz-done { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); font-weight: 600; }
 .cz-btn.cz-done:hover { opacity: 0.85; color: var(--accent-fg); }
+
+/* ── Customize mode: drag to move / reorder ── */
+.cz-ghost-drag {
+  position: fixed; z-index: 99999; pointer-events: none; opacity: 0.85;
+  transform: translate(-50%, -50%); margin: 0;
+  filter: drop-shadow(0 4px 12px rgba(0,0,0,0.45));
+}
+.cz-drag-src { opacity: 0.25; }
+.cz-zone-allowed {
+  outline: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: -2px;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  border-radius: var(--radius-sm); min-width: 56px; min-height: 24px;
+}
+.cz-zone-hover { background: color-mix(in srgb, var(--accent) 16%, transparent); outline-style: solid; }
+.cz-drop-marker {
+  width: 3px; align-self: stretch; min-height: 18px; margin: 2px 0;
+  background: var(--accent); border-radius: 2px; flex-shrink: 0;
+}
+
+/* Taskbar natives hosted in the 40px toolbar: clamp taskbar-derived sizes */
+#toolbar #desktop-previews { align-items: center; height: 100%; }
+#toolbar .desktop-preview { width: 39px; height: 26px; }
+#toolbar .desktop-preview-add { width: 16px; height: 26px; font-size: 11px; }
+#toolbar .desktop-preview-label { display: none; }
+#toolbar .taskbar-usage { --usage-pie-size: 15px; }
+#toolbar #taskbar-status { font-size: 10px; }
+/* Toolbar-hosted layout presets / buttons dropped into the taskbar just work
+   (26px buttons in a 44px+ bar); give the center zone breathing room */
+.toolbar-center { gap: 6px; }
+#taskbar [data-zone] > .toolbar-action { flex-shrink: 0; }

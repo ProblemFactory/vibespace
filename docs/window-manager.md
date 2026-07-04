@@ -129,7 +129,7 @@ Right-click any taskbar item to open a context menu:
 
 Move mode detaches a window from its current position and attaches it to your cursor. A full-screen overlay blocks all other UI interaction during move, ensuring no accidental clicks reach elements underneath. If the window is maximized or snapped, it restores to its original (pre-snap) size before following the cursor. Click to place it at the new location.
 
-Move mode can also be triggered via command mode (Ctrl+\\ then a move command).
+Move mode can also be triggered via command mode (Ctrl+\\ then a move command), or from the sidebar: expand a session card → **Move**. The sidebar path is the recovery route for a window accidentally dragged off-screen (no grabbable title bar) — it switches to the window's desktop first and resolves tab groups to the host.
 
 ## Virtual Desktops
 

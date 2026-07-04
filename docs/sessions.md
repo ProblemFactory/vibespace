@@ -141,6 +141,10 @@ The expanded detail panel has a split button that toggles between **Find** and *
 
 The mode is persisted via settings (`sessionCard.findMode`) and synced across clients.
 
+### Move (recover off-screen windows)
+
+Next to Find/GoTo, the **Move** button starts window Move mode from the sidebar: the window detaches and follows your cursor — click to place it. This is the recovery path when a window was accidentally dragged off-screen and its title bar can't be grabbed anymore. It switches to the window's desktop first and resolves tab groups to the host window. (Desktop only — Move mode needs a pointer.)
+
 ## Status Filters
 
 The filter button (top of sidebar) opens a multi-select dropdown:

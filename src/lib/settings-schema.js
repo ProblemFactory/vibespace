@@ -94,6 +94,12 @@ const SETTINGS_SCHEMA = {
     description: 'How much of the taskbar height the desktop preview occupies (rest goes to label text)',
     category: 'Toolbar & Layout', liveApply: true,
   },
+  'chrome.arrangement': {
+    type: 'json', default: null,
+    label: 'Chrome element arrangement',
+    description: 'Which bar hosts each movable element, in what order ({zone: [elementId, …]}). Managed by Customize mode (⚙ → Customize UI… → drag elements); edit by hand only if you know what you are doing.',
+    category: 'Toolbar & Layout', liveApply: true,
+  },
 
   // ── Window ──
   'window.enableBounceOnFocus': {
