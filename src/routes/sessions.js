@@ -443,6 +443,8 @@ function setup(ctx) {
         agentNickname: s.agentNickname || '',
         parentThreadId: s.parentThreadId || null,
         mode: s.mode || 'terminal',
+        host: s.host || null,
+        hostName: s.hostName || null,
       });
     }
     res.json({ sessions });

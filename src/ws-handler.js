@@ -102,13 +102,19 @@ function registerWsHandler(wss, ctx) {
     ws.on('pong', () => { ws._isAlive = true; });
     const attachedSessions = new Set();
 
-    // Send current active sessions on connect
+    // Send current active sessions on connect.
+    // Keep this field list in sync with broadcastActiveSessions (server.js) —
+    // a field missing HERE is invisible to every client until the next
+    // broadcast (host badges were absent after reconnect for exactly this).
     const activeList = [];
     for (const [id, s] of activeSessions) {
+      if (s.isTmuxView) continue; // match broadcastActiveSessions
       activeList.push({
         id,
         name: s.name,
         cwd: s.cwd,
+        host: s.host || null,
+        hostName: s.hostName || null,
         createdAt: s.createdAt,
         backend: s.backend || 'claude',
         backendSessionId: s.backendSessionId || s.claudeSessionId || null,
