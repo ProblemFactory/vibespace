@@ -1151,6 +1151,27 @@ app.post('/api/hosts/:id/bootstrap', async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.get('/api/hosts/bootstrap-steps', (req, res) => res.json({ steps: hosts.bootstrapSteps() }));
+// Remote directory autocomplete (New Session dialog when a host is chosen) —
+// mirrors /api/dir-complete but runs ls over ssh on the target.
+app.get('/api/hosts/:id/dir-complete', async (req, res) => {
+  try { res.json({ suggestions: await hosts.dirComplete(req.params.id, req.query.path || '') }); }
+  catch { res.json({ suggestions: [] }); }
+});
+// Recent working dirs seen on the host (from its Claude project dirs) — the
+// "path list" the New Session dialog offers as chips for a remote host.
+// Backend (CLI) status on a host — Manage Agents dialog when a host is chosen.
+app.get('/api/hosts/:id/backend-status', async (req, res) => {
+  try { res.json(await hosts.backendStatus(req.params.id)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.get('/api/hosts/:id/recent-cwds', async (req, res) => {
+  try {
+    const sessions = await hosts.discoverSessions(req.params.id);
+    const seen = [];
+    for (const s of sessions) { if (s.cwd && !seen.includes(s.cwd)) seen.push(s.cwd); if (seen.length >= 8) break; }
+    res.json({ cwds: seen });
+  } catch { res.json({ cwds: [] }); }
+});
 
 // ── Mounts (rclone S3 mounts + share minting — collaboration P1) ──
 const { MountManager } = require('./src/mounts');

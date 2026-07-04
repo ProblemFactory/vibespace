@@ -1874,3 +1874,8 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 .palette-dot.on { background: var(--green, #3fb950); opacity: 1; box-shadow: 0 0 4px var(--green, #3fb950); }
 .palette-name { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .palette-path { color: var(--text-dim); font-size: 10px; margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; direction: rtl; }
+
+/* Manage Agents: host selector row */
+.agents-host-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+.agents-host-select { flex: 1; padding: 5px 8px; font-size: 12px; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.cwd-recent-loading { font-size: 10px; color: var(--text-dim); }

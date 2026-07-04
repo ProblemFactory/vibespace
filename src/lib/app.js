@@ -394,11 +394,35 @@ class App {
       { key: 'claude', label: 'Claude Code', loginCmd: 'claude', updateCmd: 'claude update' },
       { key: 'codex', label: 'Codex', loginCmd: 'codex login', updateCmd: 'npm install -g @openai/codex@latest' },
     ];
-    const run = (cmd) => { done(); this.openShellTerminal(undefined, { initialCommand: cmd }); };
+    // Host selector: agent lifecycle can target a remote machine too. Login/
+    // update then run in a shell ON that host (ssh -t).
+    let selectedHost = ''; // '' = local
+    const run = (cmd) => {
+      done();
+      if (selectedHost) this.openShellTerminal(undefined, { hostId: selectedHost, initialCommand: cmd });
+      else this.openShellTerminal(undefined, { initialCommand: cmd });
+    };
     const refresh = async () => {
       let st = {};
-      try { st = await fetchJson('/api/backend-status'); } catch {}
+      try { st = await fetchJson(selectedHost ? `/api/hosts/${selectedHost}/backend-status` : '/api/backend-status'); } catch {}
       body.innerHTML = '';
+      // Host dropdown row
+      const hostRow = document.createElement('div');
+      hostRow.className = 'agents-host-row';
+      const hostLabel = document.createElement('span'); hostLabel.textContent = 'Machine:';
+      const hostSel = document.createElement('select'); hostSel.className = 'agents-host-select';
+      hostSel.innerHTML = '<option value="">This machine (local)</option>';
+      try {
+        const hd = await fetchJson('/api/hosts');
+        for (const h of hd?.hosts || []) {
+          const o = document.createElement('option'); o.value = h.id; o.textContent = `${h.name} (${h.user}@${h.host})`;
+          hostSel.appendChild(o);
+        }
+      } catch {}
+      hostSel.value = selectedHost;
+      hostSel.onchange = () => { selectedHost = hostSel.value; refresh(); };
+      hostRow.append(hostLabel, hostSel);
+      body.appendChild(hostRow);
       for (const b of BACKENDS) {
         const info = st[b.key] || {};
         const row = document.createElement('div'); row.className = 'ob-backend';
@@ -1508,7 +1532,48 @@ class App {
   _setupCwdAutocomplete() {
     const input = document.getElementById('input-cwd');
     const dropdown = document.getElementById('cwd-suggestions');
-    setupDirAutocomplete(input, dropdown);
+    // When a host is chosen, completion + recent chips come from that host
+    // over ssh instead of the local filesystem.
+    setupDirAutocomplete(input, dropdown, {
+      endpoint: () => {
+        const h = document.getElementById('input-host')?.value;
+        return h ? `/api/hosts/${h}/dir-complete` : null;
+      },
+    });
+  }
+
+  // Fill the recent-cwd chip row for the selected host (or local).
+  _fillCwdRecent(hostId) {
+    const recentEl = document.getElementById('cwd-recent');
+    if (!recentEl) return;
+    const paint = (cwds) => {
+      recentEl.innerHTML = '';
+      for (const cwd of cwds.slice(0, 8)) {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'cwd-recent-chip';
+        chip.textContent = cwd.replace(/^\/home\/[^/]+/, '~');
+        chip.title = cwd;
+        chip.onclick = () => { document.getElementById('input-cwd').value = cwd; };
+        recentEl.appendChild(chip);
+      }
+    };
+    if (hostId) {
+      recentEl.innerHTML = '<span class="cwd-recent-loading">loading host paths…</span>';
+      fetchJson(`/api/hosts/${hostId}/recent-cwds`).then(d => {
+        // strip the "host: " display prefix discovery may add
+        paint((d?.cwds || []).map(c => c.includes(': ') ? c.split(': ').pop() : c));
+      }).catch(() => { recentEl.innerHTML = ''; });
+    } else {
+      const seen = new Set();
+      const local = [];
+      for (const s of [...(this.sidebar?._allSessions || [])].sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))) {
+        if (!s.cwd || s.host || seen.has(s.cwd)) continue; // skip remote sessions' host-prefixed cwds
+        seen.add(s.cwd); local.push(s.cwd);
+        if (local.length >= 8) break;
+      }
+      paint(local);
+    }
   }
 
   _showDialog(id) {
@@ -1532,6 +1597,9 @@ class App {
         }
         hostSel.value = hostId || '';
         // both terminal and chat supported on remote hosts (chat = ssh -T pipe)
+        // switching host re-sources the path list + autocomplete target
+        hostSel.onchange = () => this._fillCwdRecent(hostSel.value);
+        this._fillCwdRecent(hostSel.value);
       });
     }
     const b = backend || 'claude';
@@ -1539,26 +1607,7 @@ class App {
     this._applySessionBackendOptions(b, { applyDefaults: true });
     document.getElementById('input-mode').value = this.settings.get('session.defaultMode') ?? 'chat';
     if (cwd) document.getElementById('input-cwd').value = cwd;
-    // Recent directories as one-click chips — the working directory is the one
-    // field you always have to fill, and the recent list is already known
-    const recentEl = document.getElementById('cwd-recent');
-    if (recentEl) {
-      recentEl.innerHTML = '';
-      const seen = new Set();
-      const sessions = [...(this.sidebar?._allSessions || [])].sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
-      for (const s of sessions) {
-        if (!s.cwd || seen.has(s.cwd)) continue;
-        seen.add(s.cwd);
-        if (seen.size > 6) break;
-        const chip = document.createElement('button');
-        chip.type = 'button';
-        chip.className = 'cwd-recent-chip';
-        chip.textContent = s.cwd.replace(/^\/home\/[^/]+/, '~');
-        chip.title = s.cwd;
-        chip.onclick = () => { document.getElementById('input-cwd').value = s.cwd; };
-        recentEl.appendChild(chip);
-      }
-    }
+    this._fillCwdRecent(hostId || '');
     document.getElementById('input-cwd').focus();
   }
   hideDialogs() { document.getElementById('dialog-overlay').classList.add('hidden'); document.getElementById('dialog-overlay').querySelectorAll('.dialog').forEach(d => d.classList.add('hidden')); }
@@ -1578,9 +1627,9 @@ class App {
   // Plain shell terminal — no AI backend, same dtach persistence + window
   // management. Optional initialCommand is typed for the user once the shell
   // is up (e.g. the in-product "Log in to Claude" helper).
-  openShellTerminal(cwd, { initialCommand } = {}) {
+  openShellTerminal(cwd, { initialCommand, hostId } = {}) {
     this.createSession({
-      backend: 'shell', mode: 'terminal', cwd: cwd || undefined,
+      backend: 'shell', mode: 'terminal', cwd: cwd || undefined, hostId,
       name: initialCommand ? initialCommand.split(' ')[0] : 'Terminal',
       model: null, permission: null, effort: null, extraArgs: '',
       initialCommand,

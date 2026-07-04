@@ -1,4 +1,6 @@
-export function setupDirAutocomplete(input, dropdown, { onNavigate } = {}) {
+// opts.endpoint: () => url — swap the completion source at query time (used
+// to point at a remote host's ssh-backed completion when one is chosen).
+export function setupDirAutocomplete(input, dropdown, { onNavigate, endpoint } = {}) {
   let timer = null, abortCtrl = null, activeIdx = -1, items = [];
 
   const hide = () => { dropdown.classList.add('hidden'); dropdown.innerHTML = ''; items = []; activeIdx = -1; };
@@ -23,7 +25,9 @@ export function setupDirAutocomplete(input, dropdown, { onNavigate } = {}) {
   const fetchAC = (val) => {
     if (abortCtrl) abortCtrl.abort();
     abortCtrl = new AbortController();
-    fetch(`/api/dir-complete?path=${encodeURIComponent(val)}`, { signal: abortCtrl.signal })
+    const url = (endpoint && endpoint()) || `/api/dir-complete?path=${encodeURIComponent(val)}`;
+    const withPath = url.includes('path=') ? url : `${url}${url.includes('?') ? '&' : '?'}path=${encodeURIComponent(val)}`;
+    fetch(withPath, { signal: abortCtrl.signal })
       .then(r => r.json()).then(d => show(d.suggestions || [])).catch(() => {});
   };
 

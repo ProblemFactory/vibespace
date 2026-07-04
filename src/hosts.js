@@ -123,6 +123,43 @@ class HostManager {
     return { ok: true, latencyMs: Date.now() - t0, tools, uname: (out.trim().split('\n').pop() || '').trim() };
   }
 
+  /** Remote directory autocomplete — ls the parent dir over ssh, prefix-filter. */
+  async dirComplete(id, input) {
+    const h = this.get(id);
+    const raw = String(input || '');
+    const slash = raw.lastIndexOf('/');
+    const parent = slash >= 0 ? raw.slice(0, slash) || '/' : '';
+    const prefix = slash >= 0 ? raw.slice(slash + 1) : raw;
+    const base = (parent === '' || parent === '~') ? '"$HOME"' : `'${parent.replace(/'/g, `'\\''`)}'`;
+    const out = await this._ssh(h, `cd ${base} 2>/dev/null && ls -1ap 2>/dev/null | grep '/$' | head -60`, { timeoutMs: 6000 }).catch(() => '');
+    const shownParent = (parent === '' || parent === '~') ? '~' : parent;
+    return out.split('\n')
+      .map(s => s.replace(/\/$/, ''))
+      .filter(s => s && s !== '.' && s !== '..' && s.toLowerCase().startsWith(prefix.toLowerCase()))
+      .slice(0, 20)
+      .map(s => (shownParent === '/' ? '/' : shownParent + '/') + s);
+  }
+
+  /** Backend status on a host (mirrors local /api/backend-status shape). */
+  async backendStatus(id) {
+    const h = this.get(id);
+    const probe = 'export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; '
+      + 'for c in claude codex; do '
+      + 'if command -v $c >/dev/null 2>&1; then v=$($c --version 2>/dev/null | head -1); echo "$c|yes|$v"; else echo "$c|no|"; fi; done; '
+      // login state: creds file existence, same heuristic as local
+      + '[ -f "$HOME/.claude/.credentials.json" ] && echo "claude-login|yes" || echo "claude-login|no"; '
+      + '[ -f "$HOME/.codex/auth.json" ] && echo "codex-login|yes" || echo "codex-login|no"';
+    const out = await this._ssh(h, probe, { timeoutMs: 10000 });
+    const st = { claude: {}, codex: {} };
+    for (const line of out.split('\n')) {
+      const [k, v, ver] = line.split('|');
+      if (k === 'claude' || k === 'codex') { st[k].installed = v === 'yes'; if (ver) st[k].version = ver.trim(); }
+      else if (k === 'claude-login') st.claude.loggedIn = v === 'yes';
+      else if (k === 'codex-login') st.codex.loggedIn = v === 'yes';
+    }
+    return st;
+  }
+
   // ── In-app key generation (optional; default is the user's own ~/.ssh) ──
 
   keyInfo() {
