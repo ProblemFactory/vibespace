@@ -62,9 +62,9 @@ Overrides persist in the layout auto-save.
 | `toolbar.showCommandMode` | boolean | `true` | Enable Ctrl+\\ command mode |
 | `toolbar.showBrowserButton` | boolean | `true` | Show the Browser button in the toolbar |
 | `toolbar.showFileExplorerButton` | boolean | `true` | Show the Files button in the toolbar |
+| `toolbar.showTerminalButton` | boolean | `true` | Show the Terminal button in the toolbar |
+| `toolbar.showPresetsButton` | boolean | `true` | Show the saved-presets button in the toolbar |
 | `sidebar.position` | enum | `left` | Dock the session sidebar to the `left` or `right` edge |
-
-> Tip: most of these are also one right-click away — right-click empty taskbar or toolbar space for an in-place customize menu.
 | `taskbar.position` | enum | `bottom` | Dock the taskbar (windows, desktops, usage) to the `bottom` or `top` |
 | `taskbar.visibility` | enum | `show` | `show` / `autohide` (slides away, reveals on edge hover) / `hidden` |
 | `taskbar.showDesktopPreviews` | boolean | `true` | Show virtual-desktop previews in the taskbar |
@@ -73,6 +73,8 @@ Overrides persist in the layout auto-save.
 | `layout.enableDragSnap` | boolean | `true` | Snap windows to grid cells or screen edges when dragging |
 | `layout.enableShiftDragSelection` | boolean | `true` | Hold Shift while dragging to select a range of grid cells |
 | `taskbar.desktopPreviewRatio` | number | `70` | Desktop preview size as % of taskbar height (30-100) |
+
+> Tip: the easiest way to change all of the above is **Customize mode** (⚙ menu → Customize UI…, or right-click empty toolbar/taskbar space → Customize UI…). It's a Firefox-style edit mode: every customizable element gets outlined on the real UI — click an element to hide/show it (hidden elements stay dimmed on screen while editing, so nothing disappears), and segmented pills next to the taskbar/sidebar switch position (Top/Bottom, Left/Right) and taskbar visibility (Show/Auto-hide/Hidden). Escape or Done exits; Reset restores chrome defaults. The right-click menus also keep direct toggles for quick single changes.
 
 ### Window
 

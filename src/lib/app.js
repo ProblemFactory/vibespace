@@ -22,6 +22,7 @@ import { CommandMode } from './command-mode.js';
 import { updateTaskbar as updateTaskbarFn } from './taskbar.js';
 import { openBrowser as openBrowserFn } from './browser-window.js';
 import { DesktopManager } from './desktop-manager.js';
+import { CustomizeMode } from './customize-mode.js';
 import { createBackendIconHtml, getSessionKey, pickAgentIdentity } from './agent-meta.js';
 
 const BACKEND_SESSION_OPTIONS = {
@@ -217,19 +218,25 @@ class App {
     document.getElementById('btn-terminal').addEventListener('click', () => this.openShellTerminal());
     document.getElementById('btn-browser').addEventListener('click', () => this.openBrowser());
 
-    // Apply toolbar/taskbar/sidebar chrome customization settings
+    // Apply toolbar/taskbar/sidebar chrome customization settings.
+    // While CustomizeMode is active, hidden elements stay ON the canvas
+    // (dimmed via .cz-off from _refresh) instead of display:none, so the
+    // user can click them back on.
     const applyChromeSettings = () => {
       const s = this.settings;
-      const show = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
+      const cz = this._customize?.active;
+      const show = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = (on || cz) ? '' : 'none'; };
       show('layout-presets', s.get('toolbar.showLayoutPresets'));
+      show('btn-presets', s.get('toolbar.showPresetsButton'));
+      show('btn-terminal', s.get('toolbar.showTerminalButton'));
       show('btn-browser', s.get('toolbar.showBrowserButton'));
       show('btn-file-explorer', s.get('toolbar.showFileExplorerButton'));
       const vis = s.get('taskbar.visibility') || 'show';
       show('taskbar', vis !== 'hidden');
-      show('taskbar-resize-handle', vis === 'show'); // no drag-resize while auto-hidden
+      show('taskbar-resize-handle', vis === 'show' && !cz); // no drag-resize while auto-hidden/editing
       document.body.classList.toggle('taskbar-autohide', vis === 'autohide');
       this._ensureTaskbarHotzone(vis === 'autohide');
-      show('desktop-previews', vis !== 'hidden' && s.get('taskbar.showDesktopPreviews'));
+      show('desktop-previews', (vis !== 'hidden' || cz) && s.get('taskbar.showDesktopPreviews'));
       show('taskbar-usage', s.get('taskbar.showUsage'));
       show('taskbar-status', s.get('taskbar.showWindowCount'));
       document.body.classList.toggle('taskbar-top', s.get('taskbar.position') === 'top');
@@ -239,7 +246,8 @@ class App {
     };
     this._applyChromeSettings = applyChromeSettings;
     applyChromeSettings();
-    for (const k of ['toolbar.showLayoutPresets', 'toolbar.showBrowserButton', 'toolbar.showFileExplorerButton',
+    for (const k of ['toolbar.showLayoutPresets', 'toolbar.showPresetsButton', 'toolbar.showTerminalButton',
+                     'toolbar.showBrowserButton', 'toolbar.showFileExplorerButton',
                      'taskbar.visibility', 'taskbar.showDesktopPreviews', 'taskbar.showUsage', 'taskbar.showWindowCount',
                      'taskbar.position', 'sidebar.position']) {
       this.settings.on(k, applyChromeSettings);
@@ -283,6 +291,8 @@ class App {
       e.preventDefault();
       const vis = s.get('taskbar.visibility') || 'show';
       showContextMenu(e.clientX, e.clientY, [
+        { label: 'Customize UI…', action: () => this._customize.enter() },
+        { separator: true },
         { label: check('Dock to top', s.get('taskbar.position') === 'top'), action: () => s.set('taskbar.position', s.get('taskbar.position') === 'top' ? 'bottom' : 'top') },
         { label: check('Auto-hide', vis === 'autohide'), action: () => s.set('taskbar.visibility', vis === 'autohide' ? 'show' : 'autohide') },
         { label: check('Desktop previews', s.get('taskbar.showDesktopPreviews')), action: () => s.set('taskbar.showDesktopPreviews', !s.get('taskbar.showDesktopPreviews')) },
@@ -296,6 +306,8 @@ class App {
       if (e.target.closest('button, select, input')) return;
       e.preventDefault();
       showContextMenu(e.clientX, e.clientY, [
+        { label: 'Customize UI…', action: () => this._customize.enter() },
+        { separator: true },
         { label: check('Layout presets', s.get('toolbar.showLayoutPresets')), action: () => s.set('toolbar.showLayoutPresets', !s.get('toolbar.showLayoutPresets')) },
         { label: check('Browser button', s.get('toolbar.showBrowserButton')), action: () => s.set('toolbar.showBrowserButton', !s.get('toolbar.showBrowserButton')) },
         { label: check('Files button', s.get('toolbar.showFileExplorerButton')), action: () => s.set('toolbar.showFileExplorerButton', !s.get('toolbar.showFileExplorerButton')) },
@@ -510,6 +522,7 @@ class App {
     this._fontSize = parseInt(localStorage.getItem('termFontSize')) || 14;
     this._fontFamily = localStorage.getItem('termFontFamily') || getAvailableFonts()[0]?.value || 'monospace';
     this._settingsUI = new SettingsUI(this);
+    this._customize = new CustomizeMode(this);
 
     const btn = document.getElementById('btn-global-settings');
     btn.onclick = (e) => { e.stopPropagation(); this._showGlobalSettings(btn); };
@@ -623,9 +636,11 @@ class App {
     };
     const I = {
       key: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="11" r="3"/><path d="M7.5 8.5L13 3M11 5l2 2M9 7l1.5 1.5"/></svg>',
+      brush: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 2.5c-2.5.5-5.5 3-7 5l2 2c2-1.5 4.5-4.5 5-7z"/><path d="M6.5 7.5c-1.5.3-2.5 1.5-2.5 3.5-1 .5-1.5.5-2.5.5 1 1.5 2.5 2 4 2s2.8-1.3 3-3"/></svg>',
       tour: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.5"/><path d="M8 7.5v3.5M8 5v.5"/></svg>',
       out: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2H3v12h3M10 11l3-3-3-3M13 8H6"/></svg>',
     };
+    if (!this.isMobile) menu.append(item(I.brush, 'Customize UI\u2026', () => this._customize.enter()));
     menu.append(
       item(I.key, 'Manage agents\u2026', () => this._showAgentsDialog()),
       item(I.tour, 'Welcome tour', () => this._showOnboarding(true)),

@@ -317,10 +317,11 @@ File paths with line number suffixes are supported:
 ## WebSocket Reconnect
 
 If the WebSocket connection drops (server restart, network interruption):
-1. A "Disconnected from server" message appears and the input is disabled
-2. On reconnect, a "Reconnected" message appears
-3. The chat view automatically re-attaches to the session
-4. Any messages missed during the disconnection are fetched and rendered
-5. The input is re-enabled
+1. A "Disconnected from server" message appears and a red bar shows at the bottom of the message list
+2. The input stays fully interactive — you can select/copy what you've typed and keep drafting; only *sending* is blocked (a toast explains, your draft is kept)
+3. On reconnect, a "Reconnected" message appears
+4. The chat view automatically re-attaches to the session
+5. Any messages missed during the disconnection are fetched and rendered
+6. Sending is re-enabled
 
-This ensures no messages are lost during brief network interruptions.
+This ensures no messages (or drafts) are lost during brief network interruptions.

@@ -17,6 +17,16 @@ const SETTINGS_SCHEMA = {
     description: 'Show the embedded-browser button in the toolbar',
     category: 'Toolbar & Layout', liveApply: true,
   },
+  'toolbar.showTerminalButton': {
+    type: 'boolean', default: true, label: 'Show Terminal button',
+    description: 'Show the plain-shell terminal button in the toolbar',
+    category: 'Toolbar & Layout', liveApply: true,
+  },
+  'toolbar.showPresetsButton': {
+    type: 'boolean', default: true, label: 'Show Presets button',
+    description: 'Show the saved workspace presets button in the toolbar',
+    category: 'Toolbar & Layout', liveApply: true,
+  },
   'toolbar.showFileExplorerButton': {
     type: 'boolean', default: true, label: 'Show Files button',
     description: 'Show the file explorer button in the toolbar',

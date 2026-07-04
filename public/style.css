@@ -1487,3 +1487,66 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .agent-btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
 .agent-btn.primary:hover { opacity: 0.85; color: var(--accent-fg); }
 .agents-note { font-size: 11px; color: var(--text-dim); line-height: 1.5; margin: 2px 0 0; }
+
+/* ── Customize mode (Firefox-style chrome edit mode) ── */
+.cz-overlay {
+  position: fixed; inset: 0; z-index: 9400;
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+}
+/* chrome bars rise above the overlay while editing */
+body.customize-mode #toolbar, body.customize-mode #taskbar { position: relative; z-index: 9500; }
+body.customize-mode.taskbar-autohide #taskbar { transform: translateY(0) !important; }
+/* editable elements: dashed outline, click to toggle */
+.cz-item { outline: 2px dashed var(--accent); outline-offset: 2px; cursor: pointer !important; position: relative; border-radius: var(--radius-sm); }
+.cz-item:hover { outline-style: solid; background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.cz-item.cz-off { opacity: 0.35; outline-color: var(--text-dim); }
+.cz-item.cz-off:hover { opacity: 0.6; outline-color: var(--accent); }
+#taskbar.cz-ghost > *:not(.cz-pill) { opacity: 0.4; }
+/* what-am-I tooltip on hover */
+.cz-item:hover::after {
+  content: attr(data-cz-tip); position: absolute; left: 50%; transform: translateX(-50%);
+  background: var(--bg-dialog); color: var(--text); border: 1px solid var(--border-active);
+  border-radius: var(--radius-sm); padding: 3px 8px; font-size: 11px; white-space: nowrap;
+  z-index: 9700; pointer-events: none; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+#toolbar .cz-item:hover::after { top: calc(100% + 8px); }
+#taskbar .cz-item:hover::after { bottom: calc(100% + 8px); top: auto; }
+body.taskbar-top #taskbar .cz-item:hover::after { top: calc(100% + 8px); bottom: auto; }
+#taskbar .taskbar-right-section .cz-item:hover::after { left: auto; right: 0; transform: none; }
+/* structural pills (position / visibility) floating next to their bar */
+.cz-pill {
+  position: absolute; display: flex; align-items: center; gap: 10px;
+  background: var(--bg-dialog); border: 1px solid var(--border-active); border-radius: 999px;
+  padding: 5px 12px; box-shadow: 0 6px 20px rgba(0,0,0,0.35); z-index: 9600; white-space: nowrap;
+}
+.cz-pill-taskbar { top: -48px; left: 50%; transform: translateX(-50%); }
+/* top-docked: the toolbar sits right below the taskbar — drop the pill past it */
+body.taskbar-top .cz-pill-taskbar { top: auto; bottom: calc(-48px - var(--toolbar-height, 40px)); }
+.cz-pill-sidebar { bottom: 14px; left: 50%; transform: translateX(-50%); }
+.cz-seg-wrap { display: inline-flex; align-items: center; gap: 6px; }
+.cz-seg-label { font-size: 11px; color: var(--text-secondary); font-weight: 600; }
+.cz-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
+.cz-seg button {
+  border: none; background: transparent; color: var(--text-dim); font-size: 11px;
+  padding: 3px 10px; cursor: pointer; line-height: 1.4;
+}
+.cz-seg button:hover { color: var(--text); background: var(--hover-overlay); }
+.cz-seg button.active { background: var(--accent); color: var(--accent-fg); }
+/* bottom control bar */
+.cz-panel {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(var(--taskbar-height, 44px) + 104px);
+  display: flex; align-items: center; gap: 10px; z-index: 9600;
+  background: var(--bg-dialog); border: 1px solid var(--border-active);
+  border-radius: var(--radius); padding: 10px 14px; box-shadow: 0 10px 32px rgba(0,0,0,0.45);
+}
+body.taskbar-top .cz-panel { bottom: 32px; }
+.cz-hint { font-size: 12px; color: var(--text-secondary); margin-right: 6px; }
+.cz-hint b { color: var(--text); }
+.cz-btn {
+  border: 1px solid var(--border); background: var(--bg-input); color: var(--text);
+  border-radius: var(--radius-sm); padding: 5px 14px; font-size: 12px; cursor: pointer;
+}
+.cz-btn:hover { border-color: var(--accent); color: var(--accent); }
+.cz-btn.cz-done { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); font-weight: 600; }
+.cz-btn.cz-done:hover { opacity: 0.85; color: var(--accent-fg); }

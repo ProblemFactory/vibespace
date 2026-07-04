@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.18.0] — 2026-07-04
+
+### Added
+
+- **Customize mode** — a Firefox-style edit mode replacing settings-list hunting for chrome customization (⚙ menu → **Customize UI…**, or right-click empty toolbar/taskbar space). The workspace dims and every customizable element is outlined *on the real UI*: click an element to hide/show it (hidden elements stay dimmed on the canvas while editing, so nothing ever disappears), hover for a what-is-this tooltip, and segmented pills float next to the bars they control — taskbar position (Bottom/Top) + visibility (Show/Auto-hide/Hidden), sidebar position (Left/Right). Bottom panel: Reset / All settings… / Done; Escape exits. Everything writes the existing settings keys, so persistence and multi-client sync are unchanged.
+- Toolbar **Terminal** and **Presets** buttons are now hideable too (`toolbar.showTerminalButton`, `toolbar.showPresetsButton`).
+
+### Fixed
+
+- **Disconnected chat input is no longer frozen.** While the server connection is down, the input box used to be disabled with pointer-events off — you couldn't even select the text you'd already typed to copy it. Now the input stays fully interactive offline: select, copy, keep drafting (drafts sync after reconnect); only *sending* is blocked, with a toast and your draft kept intact. The send button dims to show the state.
+
 ## [2.17.0] — 2026-07-03
 
 ### Added (team deployment)

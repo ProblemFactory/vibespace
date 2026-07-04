@@ -760,8 +760,11 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
 }
 @keyframes chat-spin { to { transform: rotate(360deg); } }
 
-/* Disconnected state */
-.chat-disconnected .chat-input-area { opacity: 0.5; pointer-events: none; }
+/* Disconnected state — keep the input INTERACTIVE (select/copy/keep typing a
+   draft); only sending is blocked (guarded in ChatInput._send). No
+   pointer-events:none here: it made typed text unselectable while offline. */
+.chat-disconnected .chat-input-area { opacity: 0.7; }
+.chat-input-disconnected .chat-send-btn { opacity: 0.35; cursor: not-allowed; }
 .chat-disconnected .chat-message-list::after {
   content: ''; position: sticky; bottom: 0; left: 0; right: 0; height: 3px;
   background: var(--red); display: block;

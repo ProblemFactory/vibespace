@@ -1,4 +1,4 @@
-import { escHtml, saveDraft, loadDraft, clearDraft, getStateSync, showContextMenu, uploadFilesBatched } from './utils.js';
+import { escHtml, saveDraft, loadDraft, clearDraft, getStateSync, showContextMenu, showToast, uploadFilesBatched } from './utils.js';
 import { UI_ICONS } from './icons.js';
 
 /**
@@ -387,7 +387,12 @@ export class ChatInput {
   }
 
   setDisconnected(disconnected) {
-    if (this._textarea) this._textarea.disabled = disconnected;
+    // Keep the textarea fully editable — the user must be able to select/copy
+    // (a disabled textarea blocks selection) and keep drafting; only SENDING
+    // is blocked (guarded in _send). Drafts queue via ws.pending and sync on
+    // reconnect.
+    this._disconnected = disconnected;
+    this._element.classList.toggle('chat-input-disconnected', disconnected);
   }
 
   focus() {
@@ -407,6 +412,10 @@ export class ChatInput {
     const text = this._textarea.value.trim();
     const hasAttachments = this._attachments.length > 0;
     if (!text && !hasAttachments) return;
+    if (this._disconnected) {
+      showToast('Disconnected — reconnecting… your draft is kept', { type: 'error' });
+      return;
+    }
 
     // Intercept /goal command — handled by wrapper, not sent as chat message
     const goalMatch = text.match(/^\/goal(?:\s+(.*))?$/s);
