@@ -126,6 +126,7 @@ docs/
   sessions.md          — Sessions: discovery, groups, star/archive, drag-drop, filters
   file-explorer.md     — Files: browsing, bookmarks, viewers, right-click, drag-drop
   settings.md          — Settings: global/per-terminal, complete reference table
+  customize-ui.md      — Customize mode guide: show/hide, drag between bars, springs, alignment, extra rows
   editor.md            — Ctrl+G split-pane CodeMirror editor
   browser.md           — Embedded browser with proxy mode
   keyboard-shortcuts.md — Complete shortcut reference

@@ -40,7 +40,7 @@ You only need to install the CLI(s) for the backend(s) you actually use — at l
 - **Interactive permissions** — Allow / Always Allow / Deny inline on tool cards (maps to each backend's native permission/approval protocol)
 - **Subagent support** — Agent tool cards show live status; View Log opens a read-only ChatView via per-subagent normalizers
 - **Goals** — set a session objective the agent auto-continues toward (native goal loop on backends that support it)
-- **Team deployment** — optional password auth, Docker/compose with random first-boot password, UI chrome customization via a Firefox-style **Customize mode** (click elements on the real UI to show/hide them, pills for bar positions); collaboration & remote-session roadmap in [docs/design-collaboration.md](docs/design-collaboration.md)
+- **Team deployment** — optional password auth, Docker/compose with random first-boot password; fully rearrangeable chrome via a Firefox-style **Customize mode** (show/hide + drag elements between bars, springs, alignment, extra rows — see [docs/customize-ui.md](docs/customize-ui.md)); collaboration & remote-session roadmap in [docs/design-collaboration.md](docs/design-collaboration.md)
 - **Fork** — branch a chat into an independent session (with an editable title); fork the whole session or from any past assistant message (truncated to that point), then continue from a first message
 - **Search** — Ctrl+F with the CSS Custom Highlight API, match counter, prev/next across full history; seek-loads the middle of huge sessions on demand
 - **Whole-conversation minimap** — semantic, time-coordinate scrollbar covering the entire session (not just the loaded window); drag/click to jump anywhere, lazily seeking into multi-hundred-MB histories
@@ -220,6 +220,7 @@ See the **[docs/](docs/)** directory for detailed guides:
 - [Session Management](docs/sessions.md) — Discovery, groups, star/archive, drag-drop, filters
 - [File Explorer](docs/file-explorer.md) — Browsing, bookmarks, viewers, code editor
 - [External Editor](docs/editor.md) — Ctrl+G split-pane CodeMirror integration
+- [Customize UI](docs/customize-ui.md) — Edit mode for the chrome: show/hide, drag, springs, alignment, extra rows
 - [Embedded Browser](docs/browser.md) — Iframe browser with proxy mode
 - [Settings](docs/settings.md) — All configuration options
 - [Keyboard Shortcuts](docs/keyboard-shortcuts.md) — Complete reference
