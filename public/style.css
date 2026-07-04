@@ -1719,8 +1719,8 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 .gs-menu-sep { height: 1px; background: var(--border); margin: 5px -4px; }
 
 /* ── Sidebar Mounts tab ── */
-.mounts-panel { display: flex; flex-direction: column; gap: 10px; padding: 8px; font-size: 12px; }
-.mounts-loading, .mounts-empty { color: var(--text-dim); font-size: 12px; padding: 12px 10px; }
+.mounts-panel { display: flex; flex-direction: column; gap: 8px; padding: 10px 8px; font-size: 12px; }
+.mounts-loading, .mounts-empty { color: var(--text-dim); font-size: 12px; padding: 12px 10px; line-height: 1.5; }
 .mounts-env-card {
   border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); border-radius: var(--radius-sm);
   padding: 8px 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px;
@@ -1728,22 +1728,46 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 }
 .mounts-env-head { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .mounts-env-head b { font-size: 12px; color: var(--text); }
-.mounts-env-head span { font-size: 10px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; }
+.mounts-env-head span { font-size: 10px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mounts-sec-head {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--text-dim); margin: 2px 2px 0;
+}
 .mounts-list { display: flex; flex-direction: column; gap: 4px; }
 .mounts-row {
-  display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+  display: flex; flex-direction: column; gap: 2px; padding: 6px 8px;
   border: 1px solid var(--border); border-radius: var(--radius-sm);
 }
+.mounts-row-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .mounts-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .mounts-dot-ok { background: var(--green, #3fb950); box-shadow: 0 0 4px var(--green, #3fb950); }
 .mounts-dot-err { background: var(--red, #e55); }
 .mounts-dot-off { background: var(--text-dim); opacity: 0.5; }
-.mounts-row-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
-.mounts-row-text b { font-size: 12px; color: var(--text); }
-.mounts-row-text span { font-size: 10px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
-.mounts-err { color: var(--red, #e55) !important; direction: ltr !important; }
-.mounts-ro { font-size: 9px; color: var(--yellow, #e2b340); font-weight: 700; }
-.mounts-row-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.mounts-name {
+  flex: 1; min-width: 0; font-size: 12px; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mounts-badge {
+  font-size: 9px; font-weight: 700; color: var(--yellow, #e2b340);
+  border: 1px solid color-mix(in srgb, var(--yellow, #e2b340) 50%, transparent);
+  border-radius: 3px; padding: 0 4px; flex-shrink: 0;
+}
+.mounts-badge-red { color: var(--red, #e55); border-color: color-mix(in srgb, var(--red, #e55) 50%, transparent); }
+.mounts-row-actions { display: flex; gap: 2px; flex-shrink: 0; }
+.mounts-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border: none; border-radius: var(--radius-sm);
+  background: transparent; color: var(--text-dim); cursor: pointer;
+}
+.mounts-icon-btn:hover:not(:disabled) { background: var(--hover-overlay); color: var(--text); }
+.mounts-icon-btn:disabled { opacity: 0.4; cursor: default; }
+.mounts-icon-accent { color: var(--accent); }
+.mounts-icon-danger:hover:not(:disabled) { color: var(--red, #e55); }
+.mounts-path {
+  padding-left: 14px; font-size: 10px; color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left;
+}
+.mounts-errline { padding-left: 14px; font-size: 10px; color: var(--red, #e55); line-height: 1.4; }
 .mounts-btn {
   border: 1px solid var(--border); background: var(--bg-input); color: var(--text-secondary);
   border-radius: var(--radius-sm); padding: 3px 9px; font-size: 11px; cursor: pointer;
@@ -1753,10 +1777,18 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 .mounts-btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
 .mounts-btn-primary:hover:not(:disabled) { opacity: 0.85; color: var(--accent-fg); }
 .mounts-btn-danger:hover:not(:disabled) { border-color: var(--red, #e55); color: var(--red, #e55); }
-.mounts-sec-head { font-size: 11px; font-weight: 600; color: var(--text-secondary); margin: 4px 0 2px; }
 .mounts-share-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border: 1px dashed var(--border); border-radius: var(--radius-sm); }
 .mounts-share-text { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
-.mounts-share-text b { font-size: 11px; }
-.mounts-share-text span { font-size: 10px; color: var(--text-dim); }
-.mounts-foot { display: flex; flex-wrap: wrap; gap: 6px; }
-.mounts-note { font-size: 10px; color: var(--text-dim); line-height: 1.5; }
+.mounts-share-text b { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mounts-share-text span { font-size: 10px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mounts-foot { display: flex; flex-direction: column; gap: 4px; margin-top: 2px; }
+.mounts-action {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  border: 1px solid var(--border); background: var(--bg-input); color: var(--text-secondary);
+  border-radius: var(--radius-sm); padding: 6px 10px; font-size: 12px; cursor: pointer; text-align: left;
+}
+.mounts-action:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
+.mounts-action:disabled { opacity: 0.45; cursor: default; }
+.mounts-action-icon { display: inline-flex; width: 15px; justify-content: center; color: var(--text-dim); }
+.mounts-action:hover:not(:disabled) .mounts-action-icon { color: var(--accent); }
+.mounts-note { font-size: 10px; color: var(--text-dim); line-height: 1.5; padding: 0 2px; }

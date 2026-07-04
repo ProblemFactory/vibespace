@@ -3,6 +3,17 @@
 // mount list with live status, share-a-folder minting, import-a-link.
 import { showToast, showConfirmDialog, copyText, escHtml } from './utils.js';
 
+// 16x16 stroke icons (project convention — no emoji in chrome)
+const MI = {
+  folder: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h4l2 2h6v8H2V3z"/></svg>',
+  eject: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l5-5 5 5H3z"/><path d="M3 12h10"/></svg>',
+  plug: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v7M4.5 6l3.5 3.5L11.5 6"/><path d="M3 13h10"/></svg>',
+  cross: '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>',
+  importL: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8M5 7l3 3 3-3M3 10v3h10v-3"/></svg>',
+  link: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 9.5l3-3M5 8L3.5 9.5a2.5 2.5 0 003.5 3.5L8.5 11.5M8 5l1.5-1.5a2.5 2.5 0 013.5 3.5L11.5 8.5"/></svg>',
+  plus: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>',
+};
+
 // fetch wrapper that THROWS on HTTP/{error} responses (utils fetchJson swallows)
 async function api(url, opts = {}) {
   const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...opts });
@@ -57,6 +68,12 @@ export function installSidebarMounts(Sidebar) {
       }
 
       // Mounts list
+      if (d.mounts.length) {
+        const head = document.createElement('div');
+        head.className = 'mounts-sec-head';
+        head.textContent = 'Mounts';
+        root.appendChild(head);
+      }
       const list = document.createElement('div');
       list.className = 'mounts-list';
       if (!d.mounts.length) {
@@ -91,28 +108,32 @@ export function installSidebarMounts(Sidebar) {
         root.appendChild(sh);
       }
 
-      // Footer actions
+      // Footer actions — stacked, icon + label, equal width
       const foot = document.createElement('div');
       foot.className = 'mounts-foot';
-      const importBtn = document.createElement('button');
-      importBtn.className = 'mounts-btn';
-      importBtn.textContent = '📥 Import share link';
-      importBtn.onclick = () => this._showImportShareDialog();
-      const addBtn = document.createElement('button');
-      addBtn.className = 'mounts-btn';
-      addBtn.textContent = '+ Add S3 mount';
-      addBtn.onclick = () => this._showAddMountDialog();
-      const shareBtn = document.createElement('button');
-      shareBtn.className = 'mounts-btn';
-      shareBtn.textContent = '🔗 Share a folder';
-      shareBtn.title = d.env ? 'Mint a down-scoped credential for a folder under your prefix' : 'Requires VIBESPACE_S3_* (my storage)';
-      shareBtn.disabled = !d.env;
-      shareBtn.onclick = () => this._showMintShareDialog(d);
-      foot.append(importBtn, shareBtn, addBtn);
+      const action = (svg, label, fn, opts = {}) => {
+        const b = document.createElement('button');
+        b.className = 'mounts-action';
+        b.innerHTML = `<span class="mounts-action-icon">${svg}</span><span>${escHtml(label)}</span>`;
+        b.disabled = !!opts.disabled;
+        if (opts.title) b.title = opts.title;
+        b.onclick = fn;
+        return b;
+      };
+      foot.append(
+        action(MI.importL, 'Import share link', () => this._showImportShareDialog()),
+        action(MI.link, 'Share a folder', () => this._showMintShareDialog(d), {
+          disabled: !d.env,
+          title: d.env ? 'Mint a down-scoped credential for a folder under your prefix' : 'Requires company storage (VIBESPACE_S3_*)',
+        }),
+        action(MI.plus, 'Add S3 mount', () => this._showAddMountDialog()),
+      );
       root.appendChild(foot);
       const note = document.createElement('div');
       note.className = 'mounts-note';
-      note.textContent = `Mounts live under ${d.mountBase} (rclone: good for datasets/artifacts, not live git trees). Minting: ${d.mcAvailable ? 'permanent service accounts (mc)' : 'temporary STS credentials ≤7 days (install mc for permanent shares)'}`;
+      note.textContent = d.mcAvailable
+        ? `Mounts live under ${d.mountBase}. Shares are permanent service accounts (revocable).`
+        : `Mounts live under ${d.mountBase}. Shares are temporary STS credentials (max 7 days) — install mc for permanent ones.`;
       root.appendChild(note);
       this.listEl.appendChild(root);
     },
@@ -122,19 +143,20 @@ export function installSidebarMounts(Sidebar) {
       row.className = 'mounts-row';
       const dot = m.mounted ? 'ok' : (m.error ? 'err' : 'off');
       const expired = m.expiresAt && Date.now() > m.expiresAt;
-      row.innerHTML = `
-        <span class="mounts-dot mounts-dot-${dot}" title="${m.mounted ? 'mounted' : escHtml(m.error || 'not mounted')}"></span>
-        <span class="mounts-row-text">
-          <b>${escHtml(m.name)}</b>${m.mode === 'ro' ? ' <span class="mounts-ro">RO</span>' : ''}${expired ? ' <span class="mounts-ro" style="color:var(--red)">EXPIRED</span>' : ''}
-          <span title="${escHtml(m.endpoint)}/${escHtml(m.bucket)}/${escHtml(m.prefix || '')}">${escHtml(m.path)}</span>
-          ${m.error ? `<span class="mounts-err">${escHtml(m.error.slice(0, 90))}</span>` : ''}
-        </span>`;
+      const top = document.createElement('div');
+      top.className = 'mounts-row-top';
+      top.innerHTML = `
+        <span class="mounts-dot mounts-dot-${dot}" title="${m.mounted ? 'Mounted' : escHtml(m.error || 'Not mounted')}"></span>
+        <b class="mounts-name" title="${escHtml(m.name)}">${escHtml(m.name)}</b>
+        ${m.mode === 'ro' ? '<span class="mounts-badge">RO</span>' : ''}
+        ${expired ? '<span class="mounts-badge mounts-badge-red">EXPIRED</span>' : ''}`;
       const actions = document.createElement('span');
       actions.className = 'mounts-row-actions';
-      const btn = (label, title, fn, cls = '') => {
+      const ibtn = (svg, title, fn, cls = '') => {
         const b = document.createElement('button');
-        b.className = 'mounts-btn ' + cls;
-        b.textContent = label; b.title = title;
+        b.className = 'mounts-icon-btn ' + cls;
+        b.innerHTML = svg;
+        b.title = title;
         b.onclick = async (e) => {
           e.stopPropagation(); b.disabled = true;
           try { await fn(); } catch (err) { showToast(err.message || 'Failed', { type: 'error' }); }
@@ -144,20 +166,31 @@ export function installSidebarMounts(Sidebar) {
       };
       if (m.mounted) {
         actions.append(
-          btn('Open', 'Browse in file explorer', () => { this.app.openFileExplorer(m.path); }),
-          btn('Unmount', 'fusermount -u', () => api(`/api/mounts/${m.id}/unmount`, { method: 'POST' })),
+          ibtn(MI.folder, 'Browse in file explorer', () => { this.app.openFileExplorer(m.path); }),
+          ibtn(MI.eject, 'Unmount', () => api(`/api/mounts/${m.id}/unmount`, { method: 'POST' })),
         );
       } else {
-        actions.append(btn('Mount', 'rclone mount', async () => {
+        actions.append(ibtn(MI.plug, 'Mount', async () => {
           const r = await api(`/api/mounts/${m.id}/mount`, { method: 'POST' });
-          if (!r.success) throw new Error('Mount failed — see status');
-        }, 'mounts-btn-primary'));
+          if (!r.success) throw new Error('Mount failed — hover the status dot for details');
+        }, 'mounts-icon-accent'));
       }
-      actions.append(btn('✕', 'Remove mount (unmounts first; remote data is untouched)', async () => {
+      actions.append(ibtn(MI.cross, 'Remove mount (nothing is deleted remotely)', async () => {
         const ok = await showConfirmDialog({ title: `Remove "${m.name}"?`, message: 'The mount record and local mountpoint go away. Nothing is deleted remotely.', confirmText: 'Remove', danger: true });
         if (ok) await api(`/api/mounts/${m.id}`, { method: 'DELETE' });
-      }, 'mounts-btn-danger'));
-      row.appendChild(actions);
+      }, 'mounts-icon-danger'));
+      top.appendChild(actions);
+      const pathEl = document.createElement('div');
+      pathEl.className = 'mounts-path';
+      pathEl.title = `${m.endpoint}/${m.bucket}${m.prefix ? '/' + m.prefix : ''} → ${m.path}`;
+      pathEl.textContent = m.path;
+      row.append(top, pathEl);
+      if (m.error) {
+        const err = document.createElement('div');
+        err.className = 'mounts-errline';
+        err.textContent = m.error.slice(0, 110);
+        row.appendChild(err);
+      }
       return row;
     },
 
