@@ -213,6 +213,7 @@ function registerWsHandler(wss, ctx) {
           if (codexThreadBaseline) session._codexThreadBaseline = codexThreadBaseline;
           if (sessionMode === 'chat') {
             session._normalizer = createMessageManager(backend, id);
+            session._normEpoch = Date.now();
             session._normalizer.onOp((op) => {
               broadcastToSession(session, id, { type: 'msg', sessionId: id, ...op });
             });
@@ -715,6 +716,7 @@ function registerWsHandler(wss, ctx) {
                 session._historyLoaded = true;
                 const opHandlers = [...session._normalizer.listeners]; // carry over ALL subscribers, not just the first
                 session._normalizer = createMessageManager(session.backend || 'claude', data.sessionId);
+                session._normEpoch = Date.now();
                 for (const h of opHandlers) session._normalizer.onOp(h);
                 session._normalizer.convertHistory(sm.raw());
               }
@@ -754,6 +756,7 @@ function registerWsHandler(wss, ctx) {
               if (!chatStatus.effort && session._effort) chatStatus.effort = session._effort;
               ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, mode: 'chat',
                 messages, totalCount, chatStatus, isStreaming, streamingLabel, taskState: sm.taskState(), turnMap, pendingPermissions: pendingPerms,
+                normEpoch: session._normEpoch || 0,
                 goal: session._goal || null, goalElapsed: session._goalElapsed || 0, goalStatus: session._goalStatus || null }));
             } else {
               ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, buffer: session.buffer || '' }));

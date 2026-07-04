@@ -983,6 +983,7 @@ function restoreSessions() {
     // Create normalizer for chat sessions (populated on first attach from JSONL + buffer)
     if (sessionMode === 'chat') {
       session._normalizer = createMessageManager(session.backend || 'claude', id);
+      session._normEpoch = Date.now();
       session._normalizer.onOp((op) => {
         broadcastToSession(session, id, { type: 'msg', sessionId: id, ...op });
       });

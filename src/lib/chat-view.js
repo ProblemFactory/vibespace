@@ -328,6 +328,11 @@ class ChatView {
           this._renderers.appendSystem('Session ended.');
           this._setReadOnly();
         }
+      } else if (msg.type === 'attached' && msg.sessionId === sessionId) {
+        // Track the server normalizer epoch from EVERY attach path (create,
+        // attach, reattach) — _reattach compares against it to detect a
+        // server restart (ID-space reset).
+        if (msg.normEpoch) this._normEpoch = msg.normEpoch;
       } else if (msg.type === 'error' && msg.sessionId === sessionId) {
         // Attach failed (e.g. stale serverId replayed from a saved layout) —
         // surface it instead of waiting forever on a blank window
@@ -362,6 +367,7 @@ class ChatView {
   // Load initial messages from attach response
   // Load normalized messages from attach response
   loadHistory(messages, totalCount, isStreaming, meta) {
+    if (meta?.normEpoch) this._normEpoch = meta.normEpoch;
     this._total = totalCount || messages.length;
     this._windowStart = this._total - messages.length;
     this._windowEnd = this._total;
@@ -1737,6 +1743,11 @@ class ChatView {
     // sending messages before the WS is registered in session.clients
     if (keepDisabled && this._chatInput) this._chatInput.setDisconnected(true);
 
+    // Snapshot the epoch BEFORE re-attaching: the permanent handler stores the
+    // fresh epoch as soon as 'attached' arrives, so comparing against
+    // this._normEpoch inside the temp handler would always match.
+    const epochBefore = this._normEpoch;
+
     // Re-attach so server adds this WS to session.clients again
     this.ws.send({ type: 'attach', sessionId: this.sessionId });
 
@@ -1745,9 +1756,18 @@ class ChatView {
       if (msg.type !== 'attached' || msg.sessionId !== this.sessionId) return;
       this.ws.offGlobal(handler);
       if (this._chatInput) this._chatInput.setDisconnected(false);
+      // Server normalizer was REBUILT (server restart): message IDs are a
+      // plain per-normalizer counter, so the new numbering collides with what
+      // we've already rendered — incremental catch-up would silently DROP new
+      // messages (false dedup in _renderedMsgIds) and corrupt indices. The
+      // only safe move is a full view reload from the attach payload.
+      const epochChanged = msg.normEpoch && epochBefore && msg.normEpoch !== epochBefore;
+      if (msg.normEpoch) this._normEpoch = msg.normEpoch;
+      if (epochChanged) { this._fullViewReset(msg); return; }
       // Sync streaming label from server
       if (msg.isStreaming) this._showTyping(msg.streamingLabel || 'thinking...');
       else this._hideTyping();
+      this._reattachCatchUp();
     };
     this.ws.onGlobal(handler);
     // Safety: re-enable after 5s even if attached never arrives
@@ -1755,8 +1775,10 @@ class ChatView {
       this.ws.offGlobal(handler);
       if (this._chatInput) this._chatInput.setDisconnected(false);
     }, 5000);
+  }
 
-    // Fetch messages from where we left off to catch up
+  // Same-epoch reconnect: fetch just the messages we missed while offline
+  _reattachCatchUp() {
     const missedStart = this._windowEnd;
     this._fetchMessages(missedStart, 200).then(msgs => {
       if (!msgs.length) return;
@@ -1784,6 +1806,24 @@ class ChatView {
       if (this._search?.hasHighlight) this._search.applyHighlightLayer();
       if (this._pinned) this._scrollToBottom();
     }).catch(() => {});
+  }
+
+  // Server-restart reload: rebuild the whole view from the fresh attach
+  // payload (new ID space, new totals). Position resets to the live tail —
+  // predictable, and beats silently frozen messages.
+  _fullViewReset(msg) {
+    this._messageList.querySelectorAll('.chat-msg, .chat-msg-system').forEach(el => el.remove());
+    this._resetGapAfterJump();
+    this._elements.clear();
+    this._renderedMsgIds.clear();
+    this._messages = [];
+    this._newMsgCount = 0;
+    this.loadHistory(msg.messages || [], msg.totalCount || 0, msg.isStreaming, {
+      chatStatus: msg.chatStatus, taskState: msg.taskState, turnMap: msg.turnMap,
+      pendingPermissions: msg.pendingPermissions, streamingLabel: msg.streamingLabel,
+      goal: msg.goal, goalElapsed: msg.goalElapsed, goalStatus: msg.goalStatus,
+      normEpoch: msg.normEpoch,
+    });
   }
 
   _clearWaiting() {
