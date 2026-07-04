@@ -23,6 +23,7 @@ import { updateTaskbar as updateTaskbarFn } from './taskbar.js';
 import { openBrowser as openBrowserFn } from './browser-window.js';
 import { DesktopManager } from './desktop-manager.js';
 import { CustomizeMode, applyArrangement } from './customize-mode.js';
+import { installSessionPalette } from './session-palette.js';
 import { createBackendIconHtml, getSessionKey, pickAgentIdentity } from './agent-meta.js';
 
 const BACKEND_SESSION_OPTIONS = {
@@ -155,6 +156,7 @@ class App {
     this._setupWelcome();
     this._setupGlobalSettings();
     this._setupChromeContextMenus();
+    if (!this.isMobile) installSessionPalette(this);
     this._setupGridConfig();
     this._setupLayoutManager();
     this._setupUsage();

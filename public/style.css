@@ -1816,3 +1816,61 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
   border: 1px solid color-mix(in srgb, var(--cyan, #37c4cf) 50%, transparent);
   border-radius: 3px; padding: 0 4px; margin-left: 4px; flex-shrink: 0;
 }
+
+/* ── Workbench sidebar (three-zone session list) ── */
+.wb-zone-head {
+  display: flex; align-items: center; gap: 6px; padding: 8px 10px 3px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--text-dim); position: sticky; top: 0; background: var(--bg-sidebar); z-index: 2;
+}
+.wb-zone-count {
+  font-size: 9px; font-weight: 600; color: var(--text-dim);
+  border: 1px solid var(--border); border-radius: 8px; padding: 0 6px;
+}
+.wb-history-head { cursor: pointer; }
+.wb-history-head:hover { color: var(--text); }
+.wb-hist-arrow { width: 10px; }
+.wb-empty { font-size: 11px; color: var(--text-dim); padding: 4px 12px 6px; }
+.wb-active-card { border-left: 3px solid var(--wb-strip, var(--border)) !important; }
+.wb-card-path {
+  font-size: 10px; color: var(--text-dim); padding: 1px 2px 0 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.wb-proj-head {
+  display: flex; align-items: center; gap: 6px; padding: 5px 10px 2px;
+  font-size: 10px; color: var(--text-secondary);
+}
+.wb-proj-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+.wb-proj-plus {
+  border: none; background: transparent; color: var(--text-dim); cursor: pointer;
+  font-size: 12px; width: 18px; height: 18px; border-radius: var(--radius-sm); line-height: 1;
+}
+.wb-proj-plus:hover { background: var(--hover-overlay); color: var(--accent); }
+.wb-more {
+  margin: 4px 10px 8px; padding: 4px 10px; font-size: 11px; cursor: pointer;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg-input); color: var(--text-secondary); width: calc(100% - 20px);
+}
+.wb-more:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ── Ctrl+K session palette ── */
+.palette-overlay { position: fixed; inset: 0; z-index: 99997; background: rgba(0,0,0,0.35); display: flex; justify-content: center; }
+.palette {
+  margin-top: 12vh; width: min(560px, 90vw); height: fit-content;
+  background: var(--bg-dialog); border: 1px solid var(--border-active); border-radius: var(--radius);
+  box-shadow: 0 16px 48px rgba(0,0,0,0.5); overflow: hidden;
+}
+.palette-input {
+  width: 100%; box-sizing: border-box; padding: 12px 14px; font-size: 14px;
+  border: none; border-bottom: 1px solid var(--border); background: var(--bg-input); color: var(--text); outline: none;
+}
+.palette-list { max-height: 46vh; overflow-y: auto; padding: 4px; }
+.palette-item {
+  display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+  border-radius: var(--radius-sm); cursor: pointer; font-size: 12px;
+}
+.palette-item.active { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.palette-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-dim); opacity: 0.4; flex-shrink: 0; }
+.palette-dot.on { background: var(--green, #3fb950); opacity: 1; box-shadow: 0 0 4px var(--green, #3fb950); }
+.palette-name { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.palette-path { color: var(--text-dim); font-size: 10px; margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; direction: rtl; }

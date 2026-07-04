@@ -5,6 +5,7 @@ import { installSidebarState } from './sidebar-state.js';
 import { installSidebarRender } from './sidebar-render.js';
 import { installSidebarRenderMobile } from './sidebar-render-mobile.js';
 import { installSidebarMounts } from './sidebar-mounts.js';
+import { installSidebarWorkbench } from './sidebar-workbench.js';
 
 class Sidebar {
   constructor(app) {
@@ -245,10 +246,38 @@ class Sidebar {
   }
 
   _showBackendFilterMenu(anchor) {
+    // Unified filter (2026-07 redesign): one popover with Status / Backend /
+    // Location / Agent-kind sections replaces three rows of controls.
     // Own class — sharing .status-filter-menu made the two filter buttons'
     // open/close toggles fight each other (status click closed the backend
     // menu; backend's own toggle check never matched)
     const menu = createPopover(anchor, 'backend-filter-menu status-filter-menu');
+    {
+      const head = document.createElement('div');
+      head.className = 'status-filter-sec';
+      head.style.borderTop = 'none';
+      head.textContent = 'Status';
+      menu.appendChild(head);
+      for (const [id, label] of [['live', 'Live'], ['tmux', 'Tmux'], ['external', 'External'], ['stopped', 'Stopped'], ['archived', 'Archived']]) {
+        const row = document.createElement('label'); row.className = 'status-filter-item';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = this._statusFilter.has(id);
+        cb.onchange = () => {
+          if (cb.checked) this._statusFilter.add(id); else this._statusFilter.delete(id);
+          localStorage.setItem('statusFilter', JSON.stringify([...this._statusFilter]));
+          this._activeView = null;
+          this._render();
+        };
+        const lbl = document.createElement('span'); lbl.textContent = label;
+        row.append(cb, lbl);
+        menu.appendChild(row);
+      }
+      const bhead = document.createElement('div');
+      bhead.className = 'status-filter-sec';
+      bhead.textContent = 'Backend';
+      menu.appendChild(bhead);
+    }
     const backends = this._getAvailableBackends();
     for (const id of backends) {
       const meta = getBackendMeta(id);
@@ -674,7 +703,7 @@ class Sidebar {
     } else {
       if (this._activeTab === 'mounts') this._renderMounts();
       else if (this._activeTab === 'groups') this._renderByGroups(sessions);
-      else this._renderGrouped(sessions);
+      else this._renderWorkbench(sessions);
     }
   }
 
@@ -687,4 +716,5 @@ installSidebarState(Sidebar);
 installSidebarRender(Sidebar);
 installSidebarRenderMobile(Sidebar);
 installSidebarMounts(Sidebar);
+installSidebarWorkbench(Sidebar);
 export { Sidebar };

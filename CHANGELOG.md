@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.22.0] — 2026-07-04
+
+### Changed (session list redesign)
+
+- **Three-zone workbench** — the Folders tab now renders ACTIVE (every running session as a two-line card: name + badges, dim abbreviated path below, per-project colored strip, starred first, same-project adjacent) / RECENT (stopped in the last 7 days, grouped by project, capped at 5 per project with expanders — session floods can't bury the list) / HISTORY (collapsed + search-first; typing in the filter searches it, expansion pages 60 at a time). A dozen live agents are now one glance instead of a scroll through thousands of stopped cards.
+- **Ctrl+K session palette** — fuzzy switcher over every session (name/path/host; live first). Enter focuses a live session or resumes a stopped one; typing a `/path` or `~path` offers "new session here". Works everywhere except inside terminals.
+- **Unified filter** — Status / Backend / Location / Agent sections in ONE popover behind the funnel button; the separate live-filter button and its row are gone.
+
 ## [2.21.0] — 2026-07-04
 
 ### Added (collaboration P2)
