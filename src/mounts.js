@@ -21,7 +21,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
-const { spawn, execFile } = require('child_process');
+const { spawn, execFile, execFileSync } = require('child_process');
 
 const SHARE_PREFIX = 'vibespace-share:v1:';
 
@@ -205,7 +205,40 @@ class MountManager {
       '--vfs-cache-mode', 'writes',
       '--dir-cache-time', '30s',
       '--log-level', 'INFO'];
+    // Proxy-safe signing: old aws-sdk-go signs Accept-Encoding into the V4
+    // signature and CDN proxies (Cloudflare) rewrite that header on plain
+    // object GETs → SignatureDoesNotMatch on every read (silent retry loop
+    // that looks like a hang; list/put unaffected because query-string
+    // requests pass untouched). rclone ≥1.63 has a flag that stops sending/
+    // signing it — add it whenever the installed rclone supports it.
+    if (this._rcloneSupportsAcceptEncodingFlag()) args.push('--s3-use-accept-encoding-gzip=false');
     if (m.mode === 'ro') args.push('--read-only');
+    // One-time signing probe: some proxies (Cloudflare) rewrite the signed
+    // Accept-Encoding header → SignatureDoesNotMatch on everything. V2 auth
+    // avoids signing it and rescues PERMANENT-credential mounts; STS session
+    // tokens require V4, so those need rclone 1.63–1.69 (v1 SDK + the flag)
+    // or an un-proxied endpoint — fail with a message that says so.
+    if (m.v2Auth === undefined) {
+      const probe = (extraEnv) => new Promise((resolve) => {
+        execFile('rclone', ['lsf', remote, '--max-depth', '1', '--retries', '1', '--low-level-retries', '1',
+          ...(this._rcloneSupportsAcceptEncodingFlag() ? ['--s3-use-accept-encoding-gzip=false'] : [])],
+          { env: { ...env, ...extraEnv }, timeout: 20000 },
+          (err, _o, stderr) => resolve(err ? String(stderr || err.message) : null));
+      });
+      const v4err = await probe({});
+      if (!v4err) { m.v2Auth = false; }
+      else if (/SignatureDoesNotMatch/i.test(v4err)) {
+        if (m.sessionTokenEnc) {
+          this._errors.set(id, 'endpoint proxy rewrites signed headers (Cloudflare?) — temporary-credential (STS) shares need rclone 1.63–1.69, a service-account share, or an un-proxied endpoint');
+          this._notify();
+          return false;
+        }
+        const v2err = await probe({ RCLONE_CONFIG_VS_V2_AUTH: 'true' });
+        if (!v2err) { m.v2Auth = true; }
+      }
+      this._save();
+    }
+    if (m.v2Auth) env.RCLONE_CONFIG_VS_V2_AUTH = 'true';
     // detached: mounts survive server restarts (adopted on boot)
     const child = spawn('rclone', args, { env, detached: true, stdio: ['ignore', log, log] });
     child.unref();
@@ -303,6 +336,15 @@ class MountManager {
       if (!payload[k]) throw new Error('Share link is missing ' + k);
     }
     return payload;
+  }
+
+  _rcloneSupportsAcceptEncodingFlag() {
+    if (this._rcloneAEFlag !== undefined) return this._rcloneAEFlag;
+    try {
+      const out = execFileSync('rclone', ['help', 'flags'], { encoding: 'utf-8', timeout: 5000, maxBuffer: 4 * 1024 * 1024 });
+      this._rcloneAEFlag = out.includes('use-accept-encoding-gzip');
+    } catch { this._rcloneAEFlag = false; }
+    return this._rcloneAEFlag;
   }
 
   // ── Minting (mc service account → STS AssumeRole fallback) ──

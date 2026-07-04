@@ -44,3 +44,12 @@ The Remote tab's **Hosts** section manages ssh machines that run agent sessions 
 - Remote sessions appear in the main session list **grouped under a `host:` prefix** with a host badge, and the backend-filter popover gains a **Location** section (Local / each host, multi-select).
 - **Remote chat sessions**: pick a host + Chat mode — stream-json flows over a clean `ssh -T` pipe (no remote dtach: a pty layer would corrupt the JSON). Trade-off: an ssh drop ends the remote process (transcript survives remotely, resume-able); terminal mode survives drops via remote dtach.
 - Limitations (later): resuming remotely-discovered stopped sessions, merging remote discovery into the main session list, remote transcript search. Closing a remote *terminal* window locally detaches it — the agent keeps running under the remote dtach.
+
+## Proxied endpoints (Cloudflare) — signing gotcha
+
+If the S3 endpoint sits behind a CDN/proxy that rewrites the `Accept-Encoding` header (Cloudflare does), rclone's SigV4 signature breaks with `SignatureDoesNotMatch` — rclone signs that header, most other clients don't. Symptoms: listing works but reads fail (old rclone), or everything fails (rclone ≥1.70). VibeSpace handles this automatically:
+
+- rclone **1.63–1.69**: the mount adds `--s3-use-accept-encoding-gzip=false` — everything works, including temporary-credential (STS) shares. This is the recommended rclone range for proxied endpoints.
+- rclone ≥1.70 (aws-sdk-go-v2 always signs the header): a one-time probe detects the mismatch and falls back to **V2 signatures** for permanent-credential mounts. STS shares can't use V2 (session tokens require V4) — the mount fails with an explanatory error; use rclone 1.63–1.69, a service-account share (`mc` installed on the owner side), or un-proxy the endpoint (grey-cloud the DNS record).
+
+The probe result is persisted per mount (`v2Auth`), so it runs once.

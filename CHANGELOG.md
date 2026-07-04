@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.27.1] — 2026-07-04
+
+### Fixed
+
+- **Mounts through Cloudflare-fronted MinIO** — proxies that rewrite the `Accept-Encoding` header broke rclone's SigV4 signature (`SignatureDoesNotMatch`; reads silently retry-looped, looking like a hang). Mounts now add `--s3-use-accept-encoding-gzip=false` when the installed rclone supports it (1.63+), and a one-time signing probe falls back to V2 signatures for permanent-credential mounts on rclone builds where the flag doesn't help (≥1.70, aws-sdk-go-v2). STS shares on such builds fail with an explanatory error instead of hanging. Verified end-to-end against a real Cloudflare-fronted MinIO: RW mount, STS share mint → import → RO read/write-block, server-restart adoption, revoke.
+
 ## [2.27.0] — 2026-07-04
 
 ### Added
