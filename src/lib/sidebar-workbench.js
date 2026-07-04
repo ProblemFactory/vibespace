@@ -30,6 +30,181 @@ function abbrevPath(cwd) {
 export function installSidebarWorkbench(Sidebar) {
   Object.assign(Sidebar.prototype, {
 
+    // ── RECENT host switcher (remote session discovery over ssh) ──
+
+    _buildRecentHead(recentHost, localCount, zoneHead) {
+      const st = this._wbRemote;
+      // remote count = only the RECENT-window slice (older ones count under History)
+      const cutoff = Date.now() - RECENT_MS;
+      const count = recentHost
+        ? (st && st.hostId === recentHost && st.sessions
+          ? st.sessions.filter(s => (s.mtime || 0) >= cutoff || s.status === 'remote-running').length : '…')
+        : localCount;
+      const h = zoneHead('Recent', count);
+      this._ensureHostsData();
+      const hostsList = this._hostsData?.hosts || [];
+      if (hostsList.length || recentHost) {
+        const sel = document.createElement('select');
+        sel.className = 'wb-recent-host';
+        sel.title = 'Show recent sessions from this machine or a remote host';
+        sel.innerHTML = '<option value="">Local</option>';
+        for (const hh of hostsList) {
+          const o = document.createElement('option');
+          o.value = hh.id; o.textContent = hh.name;
+          sel.appendChild(o);
+        }
+        sel.value = recentHost;
+        sel.onclick = (e) => e.stopPropagation();
+        sel.onchange = () => {
+          this._wbRecentHost = sel.value;
+          localStorage.setItem('wbRecentHost', sel.value);
+          this._render();
+        };
+        h.appendChild(sel);
+        if (recentHost) {
+          const rf = document.createElement('button');
+          rf.className = 'wb-recent-refresh';
+          rf.title = 'Re-scan sessions on this host';
+          rf.innerHTML = '<svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M13 2v3h-3"/></svg>';
+          rf.onclick = (e) => { e.stopPropagation(); this._loadRemoteRecent(recentHost, { fresh: true }); };
+          h.appendChild(rf);
+        }
+      }
+      return h;
+    },
+
+    _ensureHostsData() {
+      if (this._hostsData || this._hostsDataLoading) return;
+      this._hostsDataLoading = true;
+      fetch('/api/hosts').then(r => r.json()).then(d => {
+        this._hostsData = d;
+        if (d?.hosts?.length) this._render(); // switcher appears once hosts are known
+      }).catch(() => {});
+    },
+
+    _loadRemoteRecent(hostId, { fresh = false } = {}) {
+      const cur = this._wbRemote;
+      if (!fresh && cur && cur.hostId === hostId && (cur.loading || cur.sessions)) return;
+      this._wbRemote = { hostId, loading: true, sessions: cur?.hostId === hostId ? cur.sessions : null, error: null };
+      if (fresh) this._render(); // show the scanning row immediately
+      fetch(`/api/hosts/${hostId}/sessions${fresh ? '?fresh=1' : ''}`)
+        .then(r => r.json())
+        .then(d => {
+          if (this._wbRecentHost !== hostId) return; // switched away meanwhile
+          this._wbRemote = { hostId, loading: false, sessions: d.sessions || [], error: d.error || null };
+          this._render();
+        })
+        .catch(e => {
+          if (this._wbRecentHost !== hostId) return;
+          this._wbRemote = { hostId, loading: false, sessions: null, error: e.message };
+          this._render();
+        });
+    },
+
+    // Renders the RECENT slice (last 7 days) of the remote host's sessions and
+    // returns the OLDER ones — the HISTORY zone (same switcher scopes both,
+    // mirroring the local recent/history time split).
+    _renderRemoteRecent(hostId) {
+      this._loadRemoteRecent(hostId);
+      const st = this._wbRemote;
+      const empty = (text) => {
+        const e = document.createElement('div');
+        e.className = 'wb-empty';
+        e.textContent = text;
+        this.listEl.appendChild(e);
+      };
+      if (!st || st.hostId !== hostId || (st.loading && !st.sessions)) { empty('Scanning sessions over ssh…'); return []; }
+      if (st.error) { empty('Discovery failed: ' + st.error); return []; }
+      const f = (document.getElementById('session-filter')?.value || '').toLowerCase().trim();
+      let all = st.sessions || [];
+      if (f) all = all.filter(s => (s.cwd || s.projDir || '').toLowerCase().includes(f) || (s.sessionId || '').toLowerCase().includes(f));
+      const cutoff = Date.now() - RECENT_MS;
+      const sessions = all.filter(s => (s.mtime || 0) >= cutoff || s.status === 'remote-running');
+      const older = all.filter(s => (s.mtime || 0) < cutoff && s.status !== 'remote-running');
+      if (!all.length) { empty(f ? 'No matches on this host' : 'No sessions found on this host'); return []; }
+      if (!sessions.length) { empty('Nothing in the last 7 days on this host'); return older; }
+      const byProj = new Map();
+      for (const s of sessions) {
+        const k = s.cwd || `(${s.projDir || 'unknown'})`;
+        if (!byProj.has(k)) byProj.set(k, []);
+        byProj.get(k).push(s);
+      }
+      const hostLabel = st.sessions[0]?.hostName || hostId;
+      for (const [cwd, list] of byProj) {
+        // color key includes the host so AIDev:/tmp never shares a color with local /tmp
+        const color = `hsl(${projectHue(hostLabel + ': ' + cwd)} 55% 52%)`;
+        const head = document.createElement('div');
+        head.className = 'wb-proj-head';
+        head.title = hostLabel + ': ' + cwd;
+        head.style.setProperty('--wb-proj-color', color);
+        head.innerHTML = `<span class="wb-proj-dot"></span><span class="wb-proj-name">${escHtml(abbrevPath(cwd))}</span><span class="wb-zone-count">${list.length}</span>`;
+        if (!cwd.startsWith('(')) {
+          const plus = document.createElement('button');
+          plus.className = 'wb-proj-plus';
+          plus.textContent = '+';
+          plus.title = `New session here on ${hostLabel}`;
+          plus.onclick = (e) => { e.stopPropagation(); this.app.showNewSessionDialog({ cwd, hostId }); };
+          head.appendChild(plus);
+        }
+        this.listEl.appendChild(head);
+        const key = `remote:${hostId}:${cwd}`;
+        const expanded = this._wbProjExpanded?.has(key);
+        const shown = expanded ? list : list.slice(0, 5);
+        for (const s of shown) {
+          const card = this._buildRemoteCard(s);
+          card.style.setProperty('--wb-strip', color);
+          this.listEl.appendChild(card);
+        }
+        if (list.length > shown.length) {
+          const more = document.createElement('button');
+          more.className = 'wb-more';
+          more.textContent = `${list.length - shown.length} more…`;
+          more.onclick = () => {
+            (this._wbProjExpanded = this._wbProjExpanded || new Set()).add(key);
+            this._render();
+          };
+          this.listEl.appendChild(more);
+        }
+      }
+      return older;
+    },
+
+    _buildRemoteCard(s) {
+      const card = document.createElement('div');
+      card.className = 'session-card wb-remote-card wb-proj-card';
+      const name = (s.cwd || s.projDir || '').split('/').pop() || 'session';
+      const running = s.status === 'remote-running';
+      const badge = running
+        ? '<span class="session-badge badge-external" title="Running on the remote host in an external terminal">REMOTE</span>'
+        : '<span class="session-badge badge-stopped">STOPPED</span>';
+      const time = s.mtime ? new Date(s.mtime).toLocaleString([], { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+      card.innerHTML = `
+        <div class="session-card-row">
+          <span class="wb-remote-name">${escHtml(name)}</span>
+          ${badge}
+        </div>
+        <div class="wb-card-path" title="${escHtml(s.cwd || s.projDir || '')}">${escHtml(abbrevPath(s.cwd) || s.projDir || '')}${time ? ' · ' + escHtml(time) : ''}</div>`;
+      if (!running) {
+        card.title = 'Resume this session on ' + (s.hostName || s.host);
+        card.style.cursor = 'pointer';
+        card.onclick = () => this._resumeRemote(s);
+      } else {
+        card.title = 'Running on ' + (s.hostName || s.host) + ' in an external terminal — not attachable';
+      }
+      return card;
+    },
+
+    _resumeRemote(s) {
+      if (!s.cwd) return showToast('Cannot resume: working directory unknown for this session', { type: 'error' });
+      this.app.createSession({
+        backend: 'claude',
+        resumeId: s.sessionId,
+        cwd: s.cwd,
+        hostId: s.host,
+        name: (s.cwd.split('/').pop() || 'Session'),
+      });
+    },
+
     _toggleManageMark(key, kind) {
       const marks = this._manageMarks = this._manageMarks || new Map();
       const cur = marks.get(key) || {};
@@ -177,8 +352,17 @@ export function installSidebarWorkbench(Sidebar) {
         this.listEl.appendChild(card);
       }
 
-      // ── RECENT (last 7 days, grouped by project) ──
-      this.listEl.appendChild(zoneHead('Recent', recent.length));
+      // ── RECENT (last 7 days, grouped by project; host-switchable) ──
+      // Selecting a remote host swaps this zone to live ssh discovery of that
+      // machine's ~/.claude sessions (lock-first, 15s server cache) — stopped
+      // remote sessions become visible and resumable, with zero polling cost
+      // while the zone shows Local.
+      const recentHost = this._wbRecentHost ?? (this._wbRecentHost = localStorage.getItem('wbRecentHost') || '');
+      this.listEl.appendChild(this._buildRecentHead(recentHost, recent.length, zoneHead));
+      let remoteOlder = [];
+      if (recentHost) {
+        remoteOlder = this._renderRemoteRecent(recentHost);
+      } else {
       const byProj = new Map();
       for (const s of recent) {
         const k = s.cwd || '(unknown)';
@@ -243,26 +427,32 @@ export function installSidebarWorkbench(Sidebar) {
         e.textContent = 'Nothing stopped in the last 7 days';
         this.listEl.appendChild(e);
       }
+      } // end local RECENT branch
 
       // ── HISTORY (collapsed, search-first, paged) ──
+      // The Recent host switcher scopes this zone too: with a remote host
+      // selected, HISTORY = that host's sessions older than 7 days.
+      const histList = recentHost ? remoteOlder : history;
       const hHead = document.createElement('div');
       hHead.className = 'wb-zone-head wb-history-head';
       const filterActive = !!(document.getElementById('session-filter')?.value || '').trim();
       const open = this._wbHistoryOpen || filterActive; // searching implies looking at history
-      hHead.innerHTML = `<span class="wb-hist-arrow">${open ? '▾' : '▸'}</span><span>History</span><span class="wb-zone-count">${history.length}</span>`;
+      hHead.innerHTML = `<span class="wb-hist-arrow">${open ? '▾' : '▸'}</span><span>History</span><span class="wb-zone-count">${histList.length}</span>`;
       hHead.onclick = () => { this._wbHistoryOpen = !this._wbHistoryOpen; this._render(); };
       this.listEl.appendChild(hHead);
       if (open) {
         const cap = this._wbHistoryCap || HISTORY_PAGE;
-        for (const s of history.slice(0, cap)) this.listEl.appendChild(this._buildSessionCard(s));
-        if (history.length > cap) {
+        for (const s of histList.slice(0, cap)) {
+          this.listEl.appendChild(recentHost ? this._buildRemoteCard(s) : this._buildSessionCard(s));
+        }
+        if (histList.length > cap) {
           const more = document.createElement('button');
           more.className = 'wb-more';
-          more.textContent = `Show more (${history.length - cap} left)`;
+          more.textContent = `Show more (${histList.length - cap} left)`;
           more.onclick = () => { this._wbHistoryCap = cap + HISTORY_PAGE * 4; this._render(); };
           this.listEl.appendChild(more);
         }
-      } else if (history.length) {
+      } else if (histList.length) {
         const hint = document.createElement('div');
         hint.className = 'wb-empty';
         hint.textContent = 'Type in the filter box to search, or click to expand';

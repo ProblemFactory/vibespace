@@ -1941,3 +1941,23 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 }
 .wb-proj-card { border-left: 3px solid var(--wb-strip, var(--border)) !important; }
 .wb-proj-head { gap: 4px; }
+
+/* RECENT zone host switcher (remote session discovery) */
+.wb-recent-host {
+  margin-left: auto; max-width: 90px;
+  font-size: 10px; padding: 1px 2px; border-radius: 4px;
+  background: var(--bg-secondary); color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+.wb-zone-head .wb-recent-host + .wb-recent-refresh { margin-left: 4px; }
+.wb-recent-refresh {
+  background: none; border: none; cursor: pointer; padding: 2px;
+  color: var(--text-dim); border-radius: 4px; line-height: 0;
+}
+.wb-recent-refresh:hover { color: var(--text); background: var(--hover-overlay); }
+.wb-remote-card { padding: 5px 8px 5px 10px; }
+.wb-remote-card .wb-remote-name {
+  font-size: 12px; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
+}
+.wb-remote-card:hover { background: var(--hover-overlay); }

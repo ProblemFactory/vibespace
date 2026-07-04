@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.25.0] — 2026-07-04
+
+### Added
+
+- **Recent + History host switcher** — the sidebar's Recent section can switch from Local to any registered remote host (one switcher scopes both zones: Recent = that host's last 7 days, History = its older sessions, same time split as local): sessions on that machine are discovered live over ssh (lock-first, cached 15s, no background polling), grouped by project with per-host colors, and stopped ones resume **on that host** with one click (verified end-to-end: same session id, full model context restored, live replies). Running remote sessions show a REMOTE badge. Includes a re-scan button; the selection persists per browser.
+- Remote discovery hardening: works when the remote login shell is zsh (an unmatched glob previously aborted the whole scan → "0 sessions"), skips subagent transcripts, and extracts each session's real cwd from the JSONL head (the encoded project dir name is ambiguous).
+
+### Fixed
+
+- `/api/active` and the on-connect WebSocket session list both dropped `host`/`hostName` — remote sessions lost their host badge and host-prefixed grouping after every refresh/reconnect until the next broadcast.
+
 ## [2.24.0] — 2026-07-04
 
 ### Added

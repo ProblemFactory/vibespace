@@ -189,3 +189,9 @@ View and manage linked folders: right-click a group header → **Linked folders*
 ### Multi-client sync
 
 All session state (stars, archives, names, groups, folder links) is stored server-side in `data/user-state.json` and broadcast to all connected clients via WebSocket. Changes made on one device appear instantly on all others.
+
+## Recent & History on a remote host
+
+When remote hosts are registered (Remote tab), the **Recent** zone header gains a host selector. Switching it from Local to a host runs live session discovery on that machine over ssh (`~/.claude` lock files + project JSONLs, same lock-first algorithm as local, 15-second cache) and lists that host's sessions grouped by project — the switcher scopes BOTH zones: Recent shows the host's last 7 days, History its older sessions — stopped ones are click-to-resume **on that host**, running ones show a REMOTE badge (external terminal, not attachable). The refresh button re-scans; the choice persists per browser. Local recent listing is untouched while a host is selected, and there is no background ssh polling — discovery only runs while you're looking at it.
+
+Note: a resumed remote session streams live with full model context (the CLI reads its own transcript on the remote machine), but the WebUI can't yet display the *pre-resume* history in the chat window — the JSONL lives on the remote host. History-over-ssh is on the roadmap.

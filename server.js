@@ -1136,7 +1136,7 @@ app.post('/api/hosts/:id/test', async (req, res) => {
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.get('/api/hosts/:id/sessions', async (req, res) => {
-  try { res.json({ sessions: await hosts.discoverSessions(req.params.id) }); }
+  try { res.json({ sessions: await hosts.discoverSessions(req.params.id, req.query.fresh ? { ttlMs: 0 } : {}) }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.delete('/api/hosts/:id', (req, res) => {

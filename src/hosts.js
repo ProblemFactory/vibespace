@@ -222,21 +222,30 @@ class HostManager {
     if (hit && Date.now() - hit.at < ttlMs) return hit.sessions;
     // One round trip: alive lock files + all project JSONLs (path, mtime, size)
     const script = `
-      for f in "$HOME"/.claude/sessions/*.json; do
-        [ -f "$f" ] || continue
+      find "$HOME"/.claude/sessions -maxdepth 1 -name '*.json' 2>/dev/null | while read -r f; do
         pid=$(basename "$f" .json)
         kill -0 "$pid" 2>/dev/null && { echo "LOCK $(cat "$f")"; }
       done
-      find "$HOME"/.claude/projects -maxdepth 2 -name '*.jsonl' -printf 'J %T@ %s %p\\n' 2>/dev/null | sort -rn -k2 | head -200
+      find "$HOME"/.claude/projects -maxdepth 2 -name '*.jsonl' ! -name 'agent-*' -printf 'J %T@ %s %p\\n' 2>/dev/null | sort -rn -k2 | head -200
+      # cwd from the head of each JSONL (projDir decode is ambiguous; the first
+      # record may be a summary without cwd, so grep the first cwd field instead)
+      find "$HOME"/.claude/projects -maxdepth 2 -name '*.jsonl' ! -name 'agent-*' -printf '%T@ %p\\n' 2>/dev/null | sort -rn | head -60 | while read -r _ f; do
+        printf 'H %s\\t' "$f"; head -c 16000 "$f" | grep -o '"cwd":"[^"]*"' | head -n 1; echo
+      done
     `.trim();
     const out = await this._ssh(h, script, { timeoutMs: 20000 });
     const locks = [];
     const jsonls = [];
+    const heads = new Map(); // jsonl path -> first record (cwd source)
     for (const line of out.split('\n')) {
       if (line.startsWith('LOCK ')) { try { locks.push(JSON.parse(line.slice(5))); } catch {} }
       else if (line.startsWith('J ')) {
         const m = line.match(/^J ([\d.]+) (\d+) (.+)$/);
         if (m) jsonls.push({ mtime: parseFloat(m[1]) * 1000, size: +m[2], path: m[3] });
+      } else if (line.startsWith('H ')) {
+        const t = line.indexOf('\t');
+        const m = t > 2 && line.slice(t + 1).match(/^"cwd":"([^"]*)"/);
+        if (m) heads.set(line.slice(2, t), { cwd: m[1] });
       }
     }
     // lock-first claim: newest JSONL in the lock's project dir = RUNNING
@@ -254,7 +263,8 @@ class HostManager {
     }
     for (const j of jsonls) {
       if (claimed.has(j.path)) continue;
-      sessions.push({ sessionId: path.basename(j.path, '.jsonl'), cwd: null, projDir: path.basename(path.dirname(j.path)), status: 'remote-stopped', host: h.id, hostName: h.name, mtime: j.mtime });
+      const head = heads.get(j.path);
+      sessions.push({ sessionId: path.basename(j.path, '.jsonl'), cwd: head?.cwd || null, projDir: path.basename(path.dirname(j.path)), status: 'remote-stopped', host: h.id, hostName: h.name, mtime: j.mtime });
     }
     this._discoveryCache.set(id, { at: Date.now(), sessions });
     return sessions;
