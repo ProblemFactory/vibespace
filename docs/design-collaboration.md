@@ -37,6 +37,20 @@ Key property: the **remote transcript lives on the remote host** (`~/.claude` th
 
 Session discovery on remotes (which sessions exist there) runs over ssh on demand (`ls ~/.claude/projects` + lock files) — no daemon needed; cached with a short TTL.
 
+### Getting your files to the remote
+
+Three tiers, offered in the "New session on host" flow based on what the project is:
+
+| Tier | When | Mechanics |
+|------|------|-----------|
+| **Shared mount (zero-copy)** | project lives under the S3 mount | bootstrap pushes the user's rclone config over ssh and mounts the SAME prefix at the SAME path on the remote — the session `cwd` is valid on both sides, nothing to copy. Datasets/artifacts tier. |
+| **Git (recommended for code)** | project is a repo | VibeSpace clones/pulls on the remote and checks out the same branch; local uncommitted changes prompt "commit/stash or rsync them?". Deterministic, merge-safe, POSIX-native on the remote disk. |
+| **rsync push/pull (ad-hoc)** | anything else | one-click `rsync -az` of the folder over the existing ssh connection before the session starts; a "Pull results back" action does the reverse (with `--delete` off by default). Progress streams into a terminal window. |
+
+Advanced option (off by default): **reverse SSHFS** — the container tunnels its sshd back over the session's ssh link (`-R`) and the remote live-mounts the container's workspace. True live sharing, but latency-bound and needs sshd in the image; documented, not the default path.
+
+Claude's own memory/config for remote sessions: `CLAUDE.md` and `.claude/` travel WITH the project (git/rsync/mount — free). Host-level `~/.claude` (credentials, transcripts) stays per-host by design.
+
 ## Unified mounts: one company bucket, per-user prefixes
 
 ### Provisioning convention (admin side)
@@ -53,8 +67,23 @@ VIBESPACE_S3_SECRET_KEY=…
 
 Recommended IAM scoping per user key:
 - **RW** on `users/<me>/**`
-- **RO** on `users/*/shared/**` — only content each user places under their own `shared/` sub-prefix is visible to others (share-by-location, no ACL churn)
+- permission to create **scoped service accounts / STS session credentials** derived from the user's own identity (see sharing below)
 - optional **RW** on `team/**` for a common area
+
+### Sharing: user-autonomous, driven by the user's own key
+
+Shares are **not** a fixed location convention — the user decides per share what to expose and how:
+
+1. User picks any folder under their prefix, chooses **read-only or read-write**, optional expiry.
+2. VibeSpace uses the user's own key to mint a **derived, down-scoped credential** for exactly that prefix:
+   - **MinIO** (recommended backend): users create *service accounts* under their own identity with an inline restricting policy — non-expiring until deleted, can never exceed the parent's rights. Perfect fit.
+   - **AWS S3**: `sts:GetFederationToken` with a session policy (up to 36h) — works but expires; long-lived autonomous shares on AWS need the admin-convention fallback or a small credential-vending lambda.
+3. The **share link embeds the derived credential** (endpoint, bucket, prefix, key, secret, mode), encoded and marked sensitive. Importing = VibeSpace writes an rclone remote from the link and mounts at `/workspace/shares/<name>` (RO or RW as granted).
+4. **Revoke = delete the service account** in the Shares panel — every importer's mount dies immediately. The panel lists active shares (name, path, mode, created, who it was sent to as a free-text note).
+
+Because the link carries credentials: links are secrets (send over company chat, not public channels); VibeSpace stores them encrypted at rest in `data/mounts.json` and never logs them. The blast radius of a leaked link is exactly one folder in the chosen mode — and one click kills it.
+
+Trade-off vs the old "shared/ prefix is org-readable" convention: full user autonomy (any path, RO **or RW**, revocable) and zero standing org-wide read surface, at the cost of requiring a backend with user-mintable scoped credentials (MinIO/Ceph RGW: yes; raw AWS: degraded).
 
 The container needs FUSE for mounting: `devices: [/dev/fuse]` + `cap_add: [SYS_ADMIN]` in compose (template provided). rclone ships in the image.
 
@@ -63,10 +92,8 @@ The container needs FUSE for mounting: `devices: [/dev/fuse]` + `cap_add: [SYS_A
 A "Mounts" panel managing `data/mounts.json`; each entry spawns a supervised `rclone mount` and shows health:
 
 1. **My storage** — one click mounts `s3:$BUCKET/$PREFIX` at `/workspace/s3` (auto-offered on first run when the env vars are present).
-2. **Share a folder** — pick any folder under your prefix that lives in `shared/` (or the UI moves/copies it there), then copy the **share link**:
-   `vibes://s3/company-workspace/users/alice/shared/whisper-finetune`
-   A share is just a *location* — revoke by moving the folder out of `shared/`.
-3. **Import a share** — paste a link → mounted read-only at `/workspace/shares/<name>`. The link carries no secrets; access comes from the importer's own key (RO on `users/*/shared/**`).
+2. **Share a folder** — pick any folder under your prefix, choose RO/RW (+ optional expiry) → VibeSpace mints a down-scoped credential from your own key and hands you the share link (see "Sharing" above). A Shares panel lists + revokes them.
+3. **Import a share** — paste a link → rclone remote created from the embedded credential, mounted at `/workspace/shares/<name>` in the granted mode.
 
 ### Honest limits (documented in the UI, not buried)
 
