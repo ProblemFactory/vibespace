@@ -248,9 +248,30 @@ function registerWsHandler(wss, ctx) {
             spawnCwd = os.homedir(); // remote cwd rides inside the ssh command
             session.host = h.id;
             session.hostName = h.name;
-          } else if (data.hostId && sessionMode !== 'terminal') {
-            ws.send(JSON.stringify({ type: 'error', message: 'Remote sessions are terminal-mode only for now (chat lands in P3)' }));
-            return;
+          } else if (data.hostId && hosts && sessionMode === 'chat') {
+            // Remote CHAT (P3): ssh -T gives a CLEAN pipe — stream-json must
+            // NOT cross a remote dtach/pty layer (echo + CRLF corrupt JSON).
+            // Local dtach still keeps the pipeline across server restarts; an
+            // ssh drop ends the remote process (transcript survives remotely,
+            // resume-able). Stream flags ride INSIDE the remote string; the
+            // wrapper's appended flags land as harmless sh -lc positionals.
+            let h;
+            try { h = hosts.get(data.hostId); }
+            catch { ws.send(JSON.stringify({ type: 'error', message: 'Unknown host: ' + data.hostId })); return; }
+            const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+            const rcmd = spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd;
+            const rargs = [...spawnArgs];
+            for (const fl of [['--output-format', 'stream-json'], ['--input-format', 'stream-json'], ['--verbose'], ['--permission-prompt-tool', 'stdio']]) {
+              if (!rargs.includes(fl[0])) rargs.push(...fl);
+            }
+            const inner = `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; exec env `
+              + [...spawnEnvPairs.map(shq), rcmd, ...rargs.map(shq)].join(' ');
+            spawnCmd = 'ssh';
+            spawnArgs = [...hosts.sshArgs(h), '-T', '--', inner];
+            spawnEnvPairs = [];
+            spawnCwd = os.homedir();
+            session.host = h.id;
+            session.hostName = h.name;
           }
           let createPty;
           try {

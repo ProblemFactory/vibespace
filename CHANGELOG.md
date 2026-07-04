@@ -12,7 +12,8 @@ and this project uses [Semantic Versioning](https://semver.org/).
 - **Remote hosts** — the sidebar tab (renamed **Remote**) gains a Hosts section: register ssh machines (your `~/.ssh` keys, or an app-generated ed25519 key with the public key surfaced for `authorized_keys`), one-click **connectivity test** (latency + which of dtach/node/claude/codex are installed → READY / NEEDS SETUP badge), and **Bootstrap** — a step-progress dialog with an expandable live log that idempotently installs dtach, Node.js (nvm) and the Claude CLI on the target.
 - **Remote terminal sessions** — the New Session dialog has a Host dropdown; the session runs as `local dtach → ssh -t → remote dtach → claude`, so network drops and local server restarts never kill the remote agent. Remote sessions mix into the main session list grouped under a `host:` prefix with a host badge.
 - **Location filter** — the backend-filter popover gains a Location section: show only Local sessions or only those on chosen hosts.
-- Remote chat mode, remote resume of discovered sessions, and richer discovery land in P3.
+- **Remote chat sessions** (P3 core) — the Host dropdown works for chat mode too: stream-json flows over a clean `ssh -T` pipe through the existing chat-wrapper/normalizer stack (the full chat UI — permissions, tools, status bar — against a remote agent). Trade-off vs terminal mode: an ssh drop ends the remote process (the transcript survives on the remote and is resume-able); terminal mode keeps the remote agent alive through drops via remote dtach.
+- Remaining for later: resuming remotely-discovered stopped sessions, merging remote discovery into the main list, remote transcript search.
 
 ## [2.20.0] — 2026-07-04
 

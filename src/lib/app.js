@@ -1529,12 +1529,7 @@ class App {
           hostSel.appendChild(o);
         }
         hostSel.value = hostId || '';
-        hostSel.onchange = () => {
-          const modeSel = document.getElementById('input-mode');
-          if (hostSel.value) { modeSel.value = 'terminal'; modeSel.disabled = true; modeSel.title = 'Remote sessions are terminal-mode only for now'; }
-          else { modeSel.disabled = false; modeSel.title = ''; }
-        };
-        hostSel.onchange();
+        // both terminal and chat supported on remote hosts (chat = ssh -T pipe)
       });
     }
     const b = backend || 'claude';
