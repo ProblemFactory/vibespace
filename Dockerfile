@@ -41,7 +41,9 @@ COPY package.json package-lock.json* ./
 RUN npm ci
 
 COPY . .
-RUN npm run build && chown -R vibe:vibe /app
+# data/ is dockerignored — create it IN the image owned by vibe, or the VOLUME
+# would materialize at runtime owned by root and auth.json writes fail (EACCES)
+RUN npm run build && mkdir -p /app/data && chown -R vibe:vibe /app
 
 USER vibe
 ENV HOME=/home/vibe \

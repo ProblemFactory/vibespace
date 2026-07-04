@@ -10,6 +10,17 @@ export const BACKEND_META = {
     iconClass: 'backend-icon-claude',
     brandColor: '#D97757',
   },
+  shell: {
+    id: 'shell',
+    label: 'Terminal',
+    shortLabel: 'SHELL',
+    badgeClass: 'badge-backend-shell',
+    color: 'var(--green)',
+    icon: '>_',
+    iconSrc: null,
+    iconClass: 'backend-icon-shell',
+    brandColor: '#3fb950',
+  },
   codex: {
     id: 'codex',
     label: 'Codex',

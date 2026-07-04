@@ -1148,6 +1148,7 @@ class FileExplorer {
           this._saveBookmarks(); this._renderBookmarks();
         }
       }});
+      items.push({ label: 'Open Terminal Here', action: () => this.app.openShellTerminal(fullPath) });
       items.push({ label: 'Sessions', submenu: () => {
         const sub = [];
         sub.push({ label: '+ New session', action: () => this.app.showNewSessionDialog({ cwd: fullPath }) });
@@ -1193,6 +1194,7 @@ class FileExplorer {
     const items = [];
     if (clip?.paths?.length) items.push({ label: `Paste ${clip.paths.length} item${clip.paths.length > 1 ? 's' : ''}`, action: () => this._paste() });
     items.push({ label: 'New File', action: () => this.createFile() });
+    items.push({ label: 'Open Terminal Here', action: () => this.app.openShellTerminal(this.currentPath) });
     items.push({ label: 'New Folder', action: () => this.createDir() });
     items.push({ sep: true });
     items.push({ label: 'Select All', action: () => { this._selection = new Set(this._renderOrder); this._applySelectionClasses(); } });

@@ -127,7 +127,17 @@ function registerWsHandler(wss, ctx) {
     ws.on('message', (raw) => {
       let data;
       try { data = JSON.parse(raw); } catch { return; }
+      try {
+        handleMessage(data);
+      } catch (err) {
+        // A malformed/unexpected client message must never crash the server
+        // (observed: array extraArgs → .trim() TypeError killed the process).
+        console.error('[ws] message handler error:', err.message, '| type:', data?.type);
+        try { ws.send(JSON.stringify({ type: 'error', message: 'Internal error handling ' + (data?.type || 'message'), sessionId: data?.sessionId })); } catch {}
+      }
+    });
 
+    function handleMessage(data) {
       switch (data.type) {
         case 'create': {
           const backend = data.backend || 'claude';
@@ -143,9 +153,10 @@ function registerWsHandler(wss, ctx) {
           const sessionMode = data.mode === 'chat' ? 'chat' : 'terminal';
           // Shell-style tokenization: quoted segments stay one argument
           // (plain split broke e.g. --append-system-prompt "two words")
-          const extraArgs = data.extraArgs
-            ? (data.extraArgs.trim().match(/"[^"]*"|'[^']*'|\S+/g) || []).map(t => t.replace(/^(["'])(.*)\1$/, '$2'))
-            : [];
+          const extraArgs = Array.isArray(data.extraArgs) ? data.extraArgs.map(String)
+            : data.extraArgs
+              ? (String(data.extraArgs).trim().match(/"[^"]*"|'[^']*'|\S+/g) || []).map(t => t.replace(/^(["'])(.*)\1$/, '$2'))
+              : [];
           const sessionSpec = adapter.buildSessionArgs({
             cwd,
             model: data.model,
@@ -927,7 +938,7 @@ function registerWsHandler(wss, ctx) {
           break;
         }
       }
-    });
+    }
 
     ws.on('close', () => {
       for (const sid of attachedSessions) {

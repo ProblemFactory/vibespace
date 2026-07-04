@@ -63,8 +63,10 @@ Overrides persist in the layout auto-save.
 | `toolbar.showBrowserButton` | boolean | `true` | Show the Browser button in the toolbar |
 | `toolbar.showFileExplorerButton` | boolean | `true` | Show the Files button in the toolbar |
 | `sidebar.position` | enum | `left` | Dock the session sidebar to the `left` or `right` edge |
+
+> Tip: most of these are also one right-click away — right-click empty taskbar or toolbar space for an in-place customize menu.
 | `taskbar.position` | enum | `bottom` | Dock the taskbar (windows, desktops, usage) to the `bottom` or `top` |
-| `taskbar.show` | boolean | `true` | Show the taskbar at all (desktops still switch via Ctrl+Alt+arrows) |
+| `taskbar.visibility` | enum | `show` | `show` / `autohide` (slides away, reveals on edge hover) / `hidden` |
 | `taskbar.showDesktopPreviews` | boolean | `true` | Show virtual-desktop previews in the taskbar |
 | `taskbar.showUsage` | boolean | `true` | Show the 5h/7d usage donuts |
 | `taskbar.showWindowCount` | boolean | `true` | Show the "N windows" counter/list |

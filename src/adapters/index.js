@@ -1,5 +1,6 @@
 const { ClaudeCodeAdapter } = require('./claude-code');
 const { CodexAdapter } = require('./codex');
+const { ShellAdapter } = require('./shell');
 
 function createAdapterRegistry(config = {}) {
   const adapters = new Map();
@@ -9,6 +10,10 @@ function createAdapterRegistry(config = {}) {
     chatWrapper: config.chatWrapper,
     ptyWrapper: config.ptyWrapper,
     buffersDir: config.buffersDir,
+  }));
+
+  adapters.set('shell', new ShellAdapter({
+    ptyWrapper: config.ptyWrapper,
   }));
 
   adapters.set('codex', new CodexAdapter({

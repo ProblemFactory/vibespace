@@ -43,7 +43,7 @@ docker run -d -p 3456:3456 \
   --name vibespace vibespace
 ```
 
-**One-time Claude login inside the container** (credentials persist in the `vibespace-claude` volume):
+**One-time Claude login** (credentials persist in the `vibespace-claude` volume) — either in-product: ⚙ menu → **Log in to Claude** (opens a terminal window with the CLI started; follow its login flow), or from the host:
 
 ```bash
 docker exec -it vibespace claude    # then /login in the TUI, exit after

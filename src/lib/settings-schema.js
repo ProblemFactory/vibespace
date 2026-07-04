@@ -23,18 +23,28 @@ const SETTINGS_SCHEMA = {
     category: 'Toolbar & Layout', liveApply: true,
   },
   'sidebar.position': {
-    type: 'enum', default: 'left', options: ['left', 'right'], label: 'Sidebar position',
+    type: 'enum', default: 'left', options: [
+      { value: 'left', label: 'Left' },
+      { value: 'right', label: 'Right' },
+    ], label: 'Sidebar position',
     description: 'Which screen edge the session sidebar docks to',
     category: 'Toolbar & Layout', liveApply: true,
   },
   'taskbar.position': {
-    type: 'enum', default: 'bottom', options: ['bottom', 'top'], label: 'Taskbar position',
+    type: 'enum', default: 'bottom', options: [
+      { value: 'bottom', label: 'Bottom' },
+      { value: 'top', label: 'Top' },
+    ], label: 'Taskbar position',
     description: 'Dock the taskbar (window list, desktop previews, usage) to the top or bottom of the screen',
     category: 'Toolbar & Layout', liveApply: true,
   },
-  'taskbar.show': {
-    type: 'boolean', default: true, label: 'Show taskbar',
-    description: 'Show the taskbar entirely. When hidden, switch desktops with Ctrl+Alt+Left/Right and windows via the sidebar',
+  'taskbar.visibility': {
+    type: 'enum', default: 'show', options: [
+      { value: 'show', label: 'Always visible' },
+      { value: 'autohide', label: 'Auto-hide (reveal on edge hover)' },
+      { value: 'hidden', label: 'Hidden' },
+    ], label: 'Taskbar visibility',
+    description: 'Auto-hide slides the taskbar away and reveals it when the pointer touches the screen edge. Hidden removes it entirely (desktops still switch with Ctrl+Alt+Left/Right)',
     category: 'Toolbar & Layout', liveApply: true,
   },
   'taskbar.showDesktopPreviews': {

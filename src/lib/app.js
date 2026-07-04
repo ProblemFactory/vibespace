@@ -10,7 +10,7 @@ import { CodeEditor } from './code-editor.js';
 import { LayoutManager } from './layout.js';
 import { ChatView } from './chat-view.js';
 import { Resizer } from './resizer.js';
-import { createPopover, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml } from './utils.js';
+import { createPopover, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu } from './utils.js';
 import { MobileNav } from './mobile-nav.js';
 import { setupDirAutocomplete } from './autocomplete.js';
 import { getAvailableFonts } from './terminal.js';
@@ -153,6 +153,7 @@ class App {
     this._setupDialogs();
     this._setupWelcome();
     this._setupGlobalSettings();
+    this._setupChromeContextMenus();
     this._setupGridConfig();
     this._setupLayoutManager();
     this._setupUsage();
@@ -213,6 +214,7 @@ class App {
     document.querySelectorAll('.layout-btn[data-layout]').forEach(btn => btn.addEventListener('click', () => this.wm.applyLayout(btn.dataset.layout)));
     document.getElementById('btn-new-session').addEventListener('click', () => this.showNewSessionDialog());
     document.getElementById('btn-file-explorer').addEventListener('click', () => this.openFileExplorer());
+    document.getElementById('btn-terminal').addEventListener('click', () => this.openShellTerminal());
     document.getElementById('btn-browser').addEventListener('click', () => this.openBrowser());
 
     // Apply toolbar/taskbar/sidebar chrome customization settings
@@ -222,10 +224,12 @@ class App {
       show('layout-presets', s.get('toolbar.showLayoutPresets'));
       show('btn-browser', s.get('toolbar.showBrowserButton'));
       show('btn-file-explorer', s.get('toolbar.showFileExplorerButton'));
-      const tb = s.get('taskbar.show');
-      show('taskbar', tb);
-      show('taskbar-resize-handle', tb);
-      show('desktop-previews', tb && s.get('taskbar.showDesktopPreviews'));
+      const vis = s.get('taskbar.visibility') || 'show';
+      show('taskbar', vis !== 'hidden');
+      show('taskbar-resize-handle', vis === 'show'); // no drag-resize while auto-hidden
+      document.body.classList.toggle('taskbar-autohide', vis === 'autohide');
+      this._ensureTaskbarHotzone(vis === 'autohide');
+      show('desktop-previews', vis !== 'hidden' && s.get('taskbar.showDesktopPreviews'));
       show('taskbar-usage', s.get('taskbar.showUsage'));
       show('taskbar-status', s.get('taskbar.showWindowCount'));
       document.body.classList.toggle('taskbar-top', s.get('taskbar.position') === 'top');
@@ -236,10 +240,69 @@ class App {
     this._applyChromeSettings = applyChromeSettings;
     applyChromeSettings();
     for (const k of ['toolbar.showLayoutPresets', 'toolbar.showBrowserButton', 'toolbar.showFileExplorerButton',
-                     'taskbar.show', 'taskbar.showDesktopPreviews', 'taskbar.showUsage', 'taskbar.showWindowCount',
+                     'taskbar.visibility', 'taskbar.showDesktopPreviews', 'taskbar.showUsage', 'taskbar.showWindowCount',
                      'taskbar.position', 'sidebar.position']) {
       this.settings.on(k, applyChromeSettings);
     }
+  }
+
+  // Auto-hide taskbar: a thin fixed hotzone on the taskbar's screen edge — the
+  // taskbar (position:fixed in this mode, so the workspace keeps full height)
+  // slides in while the pointer is over the hotzone or the taskbar itself, and
+  // slides away when it leaves. Pure CSS transform; no reflow churn.
+  _ensureTaskbarHotzone(on) {
+    let hz = document.getElementById('taskbar-hotzone');
+    if (!on) { hz?.remove(); return; }
+    if (hz) return;
+    hz = document.createElement('div');
+    hz.id = 'taskbar-hotzone';
+    document.body.appendChild(hz);
+    const taskbar = document.getElementById('taskbar');
+    const reveal = () => document.body.classList.add('taskbar-revealed');
+    const conceal = (e) => {
+      // stay revealed while a popover spawned from the taskbar is open
+      if (document.querySelector('.taskbar-window-list, .usage-popup:not(.hidden), [data-popover]')) return;
+      document.body.classList.remove('taskbar-revealed');
+    };
+    hz.addEventListener('mouseenter', reveal);
+    taskbar.addEventListener('mouseenter', reveal);
+    taskbar.addEventListener('mouseleave', conceal);
+    hz.addEventListener('mouseleave', (e) => { if (e.relatedTarget !== taskbar && !taskbar.contains(e.relatedTarget)) conceal(e); });
+  }
+
+  // In-place chrome customization (the pattern desktops/browsers use: right-
+  // click the bar itself). These write the SAME settings as the Settings
+  // dialog — the menu is just a discoverable shortcut.
+  _setupChromeContextMenus() {
+    const s = this.settings;
+    const check = (label, on) => (on ? '\u2713 ' : '\u2003 ') + label;
+    const taskbar = document.getElementById('taskbar');
+    taskbar?.addEventListener('contextmenu', (e) => {
+      // let taskbar ITEMS keep their own menus; empty areas customize
+      if (e.target.closest('.taskbar-item, .desktop-preview, .taskbar-usage')) return;
+      e.preventDefault();
+      const vis = s.get('taskbar.visibility') || 'show';
+      showContextMenu(e.clientX, e.clientY, [
+        { label: check('Dock to top', s.get('taskbar.position') === 'top'), action: () => s.set('taskbar.position', s.get('taskbar.position') === 'top' ? 'bottom' : 'top') },
+        { label: check('Auto-hide', vis === 'autohide'), action: () => s.set('taskbar.visibility', vis === 'autohide' ? 'show' : 'autohide') },
+        { label: check('Desktop previews', s.get('taskbar.showDesktopPreviews')), action: () => s.set('taskbar.showDesktopPreviews', !s.get('taskbar.showDesktopPreviews')) },
+        { label: check('Usage meters', s.get('taskbar.showUsage')), action: () => s.set('taskbar.showUsage', !s.get('taskbar.showUsage')) },
+        { label: check('Window count', s.get('taskbar.showWindowCount')), action: () => s.set('taskbar.showWindowCount', !s.get('taskbar.showWindowCount')) },
+        { label: 'All settings\u2026', action: () => this._settingsUI?.open() },
+      ]);
+    });
+    const toolbar = document.getElementById('toolbar');
+    toolbar?.addEventListener('contextmenu', (e) => {
+      if (e.target.closest('button, select, input')) return;
+      e.preventDefault();
+      showContextMenu(e.clientX, e.clientY, [
+        { label: check('Layout presets', s.get('toolbar.showLayoutPresets')), action: () => s.set('toolbar.showLayoutPresets', !s.get('toolbar.showLayoutPresets')) },
+        { label: check('Browser button', s.get('toolbar.showBrowserButton')), action: () => s.set('toolbar.showBrowserButton', !s.get('toolbar.showBrowserButton')) },
+        { label: check('Files button', s.get('toolbar.showFileExplorerButton')), action: () => s.set('toolbar.showFileExplorerButton', !s.get('toolbar.showFileExplorerButton')) },
+        { label: check('Sidebar on right', s.get('sidebar.position') === 'right'), action: () => s.set('sidebar.position', s.get('sidebar.position') === 'right' ? 'left' : 'right') },
+        { label: 'All settings\u2026', action: () => this._settingsUI?.open() },
+      ]);
+    });
   }
 
   _setupWelcome() {
@@ -351,6 +414,20 @@ class App {
     themeRow.style.cssText = 'display:flex;align-items:center;gap:4px';
     themeRow.append(themeSel, editBtn);
     pop.append(themeLabel, themeRow, sizeLabel, sizeRow, fontLabel, fontSel, allSettingsLink);
+
+    // Backend login helpers — for teammates who don't live in a terminal:
+    // one click opens a shell terminal with the CLI already started; they
+    // follow the CLI's own /login flow from there.
+    const loginRow = document.createElement('div');
+    loginRow.style.cssText = 'display:flex;gap:6px;margin-top:8px;';
+    const mkLogin = (label, cmd) => {
+      const b = document.createElement('button');
+      b.className = 'file-tool-btn'; b.style.flex = '1'; b.textContent = label;
+      b.onclick = () => { pop.remove(); this.openShellTerminal(undefined, { initialCommand: cmd }); };
+      return b;
+    };
+    loginRow.append(mkLogin('Log in to Claude', 'claude'), mkLogin('Log in to Codex', 'codex login'));
+    pop.append(loginRow);
 
     // Sign out (only relevant when password auth is enabled server-side)
     if (this._authEnabled) {
@@ -890,7 +967,19 @@ class App {
     };
   }
 
-  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, fork, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, forkAtUuid, forkTitle }) {
+  // Plain shell terminal — no AI backend, same dtach persistence + window
+  // management. Optional initialCommand is typed for the user once the shell
+  // is up (e.g. the in-product "Log in to Claude" helper).
+  openShellTerminal(cwd, { initialCommand } = {}) {
+    this.createSession({
+      backend: 'shell', mode: 'terminal', cwd: cwd || undefined,
+      name: initialCommand ? initialCommand.split(' ')[0] : 'Terminal',
+      model: null, permission: null, effort: null, extraArgs: '',
+      initialCommand,
+    });
+  }
+
+  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, fork, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle }) {
     this._hideWelcome();
     const defaults = this._getBackendSessionDefaults(backend);
     const sessionMode = mode || this.settings.get('session.defaultMode') || 'chat';
@@ -984,6 +1073,11 @@ class App {
           }, {}, this.settings);
           this.sessions.set(winInfo.id, term);
           this._wireTerminalWindow(winInfo, term, msg.sessionId);
+          // Type a starter command for the user (shell terminals: login helpers
+          // etc.) once the shell has had a beat to print its prompt
+          if (initialCommand) {
+            setTimeout(() => this.ws.send({ type: 'input', sessionId: msg.sessionId, data: initialCommand + '\r' }), 1200);
+          }
           term.focus();
         }
         this.wm.setTitle(winInfo.id, `${sessionName} — ${msg.cwd||cwd||'~'}`);
