@@ -100,6 +100,12 @@ const SETTINGS_SCHEMA = {
     description: 'Which bar hosts each movable element, in what order ({zone: [elementId, …]}). Managed by Customize mode (⚙ → Customize UI… → drag elements); edit by hand only if you know what you are doing.',
     category: 'Toolbar & Layout', liveApply: true,
   },
+  'chrome.zoneAlign': {
+    type: 'json', default: null,
+    label: 'Chrome alignment',
+    description: 'Alignment per area: taskbar-items left/center (Windows-11-style centered icons), toolbar-center left/center/right, taskbar-tray left/right end. Managed by Customize mode.',
+    category: 'Toolbar & Layout', liveApply: true,
+  },
 
   // ── Window ──
   'window.enableBounceOnFocus': {

@@ -243,6 +243,22 @@ class App {
       show('taskbar-status', s.get('taskbar.showWindowCount'));
       document.body.classList.toggle('taskbar-top', s.get('taskbar.position') === 'top');
       document.body.classList.toggle('sidebar-right', s.get('sidebar.position') === 'right');
+      // Per-area alignment (chrome.zoneAlign): window items left/center
+      // (Win11-style), toolbar-center content left/center/right, tray at the
+      // taskbar's left or right end (order swap; [CMD] stays leftmost)
+      const za = s.get('chrome.zoneAlign') || {};
+      const items = document.getElementById('taskbar-items');
+      // `safe center` falls back to start when items overflow (plain center
+      // makes the left overflow unreachable in a scroll container)
+      if (items) items.style.justifyContent = za['taskbar-items'] === 'center' ? 'safe center' : '';
+      const centerZone = document.querySelector('[data-zone="toolbar-center"]');
+      if (centerZone) centerZone.style.justifyContent =
+        za['toolbar-center'] === 'left' ? 'flex-start' : za['toolbar-center'] === 'right' ? 'flex-end' : '';
+      const tray = document.getElementById('taskbar-tray');
+      const trayLeft = za['taskbar-tray'] === 'left';
+      if (tray) tray.style.order = trayLeft ? '-1' : '';
+      const cmd = document.getElementById('cmd-indicator');
+      if (cmd) cmd.style.order = trayLeft ? '-2' : '';
       // re-apply main-wrapper margin on the correct side
       this.sidebar?._applySidebarLayoutWidth?.();
     };
@@ -251,7 +267,7 @@ class App {
     for (const k of ['toolbar.showLayoutPresets', 'toolbar.showPresetsButton', 'toolbar.showTerminalButton',
                      'toolbar.showBrowserButton', 'toolbar.showFileExplorerButton',
                      'taskbar.visibility', 'taskbar.showDesktopPreviews', 'taskbar.showUsage', 'taskbar.showWindowCount',
-                     'taskbar.position', 'sidebar.position']) {
+                     'taskbar.position', 'sidebar.position', 'chrome.zoneAlign']) {
       this.settings.on(k, applyChromeSettings);
     }
     // Element arrangement (which zone hosts which movable, in what order) —

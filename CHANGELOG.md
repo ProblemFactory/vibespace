@@ -14,6 +14,8 @@ and this project uses [Semantic Versioning](https://semver.org/).
 - **Move from the sidebar** — session cards' expand panel gains a **Move** button that starts window Move mode (window follows the cursor, click to place), switching to the window's desktop first. This is the recovery path for a window accidentally dragged off-screen with no grabbable title bar.
 - Toolbar **Terminal** and **Presets** buttons are now hideable too (`toolbar.showTerminalButton`, `toolbar.showPresetsButton`).
 - The taskbar right side is now a **tray** (`#taskbar-tray`): desktop previews, usage meters, and the window counter sit in one horizontal row (previously usage/count were stacked in a fixed column) — each independently hideable, orderable, and movable.
+- **Alignment controls** (in Customize mode) — mini alignment chips appear next to each alignable area: window items left-aligned or centered (Windows-11 style), toolbar-center content left/center/right, and the tray at the taskbar's left or right end. Persisted as `chrome.zoneAlign`, synced, covered by Reset.
+- The window counter is now a **compact chip** — a window-stack icon + bare count (tooltip carries the full "N windows — click for window list" label) instead of a wide text label that wasted tray space.
 
 ### Fixed
 

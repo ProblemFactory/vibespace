@@ -46,7 +46,26 @@ export const CHROME_ELEMENTS = [
 export const ZONE_IDS = ['toolbar-center', 'toolbar-right', 'taskbar-tray'];
 
 const ELEMENT_BY_ID = new Map(CHROME_ELEMENTS.map(e => [e.id, e]));
-const STRUCT_KEYS = ['taskbar.position', 'taskbar.visibility', 'sidebar.position'];
+const STRUCT_KEYS = ['taskbar.position', 'taskbar.visibility', 'sidebar.position', 'chrome.zoneAlign'];
+
+// Alignment targets (chrome.zoneAlign) — each gets a mini icon chip anchored
+// to the element it aligns while editing.
+const ALIGN_ICON = {
+  left:   '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 3v10M5 6h8M5 10h5"/></svg>',
+  center: '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 3v10M3 6h10M5 10h6"/></svg>',
+  right:  '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M14 3v10M3 6h8M6 10h5"/></svg>',
+};
+const ALIGN_TARGETS = [
+  { key: 'taskbar-items',  el: () => document.getElementById('taskbar-items'),
+    label: 'Window items', options: ['left', 'center'], default: 'left',
+    tips: { left: 'Window items left-aligned', center: 'Window items centered (Windows-11 style)' } },
+  { key: 'toolbar-center', el: () => document.querySelector('[data-zone="toolbar-center"]'),
+    label: 'Center area',  options: ['left', 'center', 'right'], default: 'center',
+    tips: { left: 'Align left', center: 'Align center', right: 'Align right' } },
+  { key: 'taskbar-tray',   el: () => document.getElementById('taskbar-tray'),
+    label: 'Tray',         options: ['left', 'right'], default: 'right',
+    tips: { left: 'Tray at the left end', right: 'Tray at the right end' } },
+];
 
 function zoneEl(zoneId) {
   return document.querySelector(`[data-zone="${zoneId}"]`);
@@ -138,6 +157,7 @@ export class CustomizeMode {
     this._buildTaskbarPill();
     this._buildSidebarPill();
     this._buildPanel();
+    this._buildAlignChips();
 
     // Live refresh on any relevant change (incl. remote clients while editing)
     const refresh = () => this._refresh();
@@ -296,6 +316,63 @@ export class CustomizeMode {
     this._cleanup.push(() => pill.remove());
   }
 
+  // Mini alignment chips — body-fixed (a chip inside #taskbar-items would be
+  // clipped by its overflow-x scroll context), repositioned by _refresh on
+  // every relevant change + window resize.
+  _buildAlignChips() {
+    this._alignChips = [];
+    for (const t of ALIGN_TARGETS) {
+      if (!t.el()) continue;
+      const chip = document.createElement('div');
+      chip.className = 'cz-align';
+      chip.dataset.czAlignKey = t.key;
+      const lab = document.createElement('span');
+      lab.className = 'cz-align-label';
+      lab.textContent = t.label;
+      chip.appendChild(lab);
+      for (const opt of t.options) {
+        const b = document.createElement('button');
+        b.innerHTML = ALIGN_ICON[opt];
+        b.title = t.tips[opt];
+        b.dataset.value = opt;
+        b.onclick = (e) => {
+          e.stopPropagation();
+          const za = { ...(this.app.settings.get('chrome.zoneAlign') || {}) };
+          if (opt === t.default) delete za[t.key]; else za[t.key] = opt;
+          this.app.settings.set('chrome.zoneAlign', Object.keys(za).length ? za : null);
+        };
+        chip.appendChild(b);
+      }
+      document.body.appendChild(chip);
+      this._alignChips.push({ target: t, chip });
+      this._cleanup.push(() => chip.remove());
+    }
+    const onResize = () => this._positionAlignChips();
+    window.addEventListener('resize', onResize);
+    this._cleanup.push(() => { window.removeEventListener('resize', onResize); this._alignChips = []; });
+  }
+
+  _positionAlignChips() {
+    if (!this._alignChips) return;
+    const taskbarTop = document.body.classList.contains('taskbar-top');
+    for (const { target, chip } of this._alignChips) {
+      const el = target.el();
+      if (!el) { chip.style.display = 'none'; continue; }
+      const r = el.getBoundingClientRect();
+      chip.style.display = '';
+      const ch = chip.offsetHeight || 26;
+      const inTaskbar = !!el.closest('#taskbar');
+      // toolbar targets: chip below the bar; taskbar targets: above (flipped
+      // when the taskbar is docked top)
+      const below = inTaskbar ? taskbarTop : true;
+      chip.style.top = (below ? r.bottom + 6 : r.top - ch - 6) + 'px';
+      // taskbar-items spans most of the bar — centering its chip would collide
+      // with the (centered) taskbar pill, so anchor it at the strip's left end
+      const anchorX = target.key === 'taskbar-items' ? r.left + 8 : r.left + r.width / 2 - chip.offsetWidth / 2;
+      chip.style.left = Math.max(8, Math.min(anchorX, innerWidth - chip.offsetWidth - 8)) + 'px';
+    }
+  }
+
   _buildPanel() {
     const panel = document.createElement('div');
     panel.className = 'cz-panel';
@@ -339,6 +416,14 @@ export class CustomizeMode {
       const val = s.get(seg.dataset.czKey);
       for (const b of seg.querySelectorAll('button')) b.classList.toggle('active', b.dataset.value === val);
     }
+    // Alignment chips: active states + reposition (bars may have moved)
+    const za = s.get('chrome.zoneAlign') || {};
+    for (const chip of document.querySelectorAll('.cz-align')) {
+      const t = ALIGN_TARGETS.find(t => t.key === chip.dataset.czAlignKey);
+      const val = za[t.key] || t.default;
+      for (const b of chip.querySelectorAll('button')) b.classList.toggle('active', b.dataset.value === val);
+    }
+    this._positionAlignChips();
     // Whole-taskbar ghost when set to Hidden (kept on canvas while editing)
     document.getElementById('taskbar')?.classList.toggle('cz-ghost', s.get('taskbar.visibility') === 'hidden');
   }

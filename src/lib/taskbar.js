@@ -51,10 +51,12 @@ export function updateTaskbar(app) {
     _rebuildTaskbarItems(app, container, entries);
   }
   const winCount = [...app.wm.windows.values()].filter(w => !activeDesk || w._desktopId === activeDesk).length;
+  // Compact chip: window-stack icon + bare count; the wordy label lives in the tooltip
   const countEl = document.getElementById('active-count');
-  countEl.textContent = `${winCount} windows`;
-  countEl.style.cursor = 'pointer';
-  countEl.onclick = (e) => { e.stopPropagation(); showWindowList(app, countEl); };
+  countEl.textContent = winCount;
+  const chip = document.getElementById('taskbar-status');
+  chip.title = `${winCount} window${winCount === 1 ? '' : 's'} — click for window list`;
+  chip.onclick = (e) => { e.stopPropagation(); showWindowList(app, chip); };
 }
 
 function _rebuildTaskbarItems(app, container, entries) {

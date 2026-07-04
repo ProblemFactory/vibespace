@@ -837,7 +837,15 @@ html, body {
   font-size: 8px; font-weight: 700; line-height: 13px; text-align: center;
   border-radius: 7px; box-shadow: 0 0 0 1.5px var(--bg-taskbar);
 }
-#taskbar-status { font-size: 9px; color: var(--text-dim); padding: 0; flex-shrink: 0; line-height: 1.2; }
+/* Window-count chip: stack icon + bare number (label lives in the tooltip) */
+#taskbar-status {
+  display: flex; align-items: center; gap: 4px; flex-shrink: 0;
+  padding: 3px 7px; border: 1px solid var(--border); border-radius: 999px;
+  font-size: 11px; line-height: 1; color: var(--text-secondary); cursor: pointer;
+  transition: all var(--transition);
+}
+#taskbar-status:hover { border-color: var(--accent); color: var(--text); background: var(--hover-overlay); }
+#taskbar-status svg { display: block; opacity: 0.75; }
 .taskbar-context-menu { min-width: 100px; }
 /* item base lives in viewers.css (.context-menu-item); keep taskbar items identical */
 .taskbar-context-menu-item { padding: 5px 12px; font-size: 11px; cursor: pointer; color: var(--text-secondary); display: flex; align-items: center; gap: 8px; }
@@ -1580,3 +1588,19 @@ body.taskbar-top .cz-panel { bottom: 32px; }
    (26px buttons in a 44px+ bar); give the center zone breathing room */
 .toolbar-center { gap: 6px; }
 #taskbar [data-zone] > .toolbar-action { flex-shrink: 0; }
+
+/* ── Customize mode: per-area alignment chips ── */
+.cz-align {
+  position: fixed; z-index: 9600; display: flex; align-items: center; gap: 2px;
+  background: var(--bg-dialog); border: 1px solid var(--border-active);
+  border-radius: 999px; padding: 3px 6px; box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+  white-space: nowrap;
+}
+.cz-align-label { font-size: 10px; color: var(--text-secondary); font-weight: 600; margin-right: 3px; }
+.cz-align button {
+  display: flex; align-items: center; justify-content: center;
+  width: 22px; height: 20px; border: none; border-radius: 999px;
+  background: transparent; color: var(--text-dim); cursor: pointer;
+}
+.cz-align button:hover { color: var(--text); background: var(--hover-overlay); }
+.cz-align button.active { background: var(--accent); color: var(--accent-fg); }
