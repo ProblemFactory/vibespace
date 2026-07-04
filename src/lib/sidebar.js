@@ -103,6 +103,17 @@ class Sidebar {
       this._showBackendFilterMenu(backendFilterBtn);
     };
     this._updateBackendFilterBtn(backendFilterBtn);
+    // Manage mode: batch-terminate via a ✕ on every running card's collapsed row
+    const manageBtn = document.getElementById('manage-toggle');
+    if (manageBtn) {
+      manageBtn.onclick = (e) => {
+        e.stopPropagation();
+        this._manageMode = !this._manageMode;
+        manageBtn.classList.toggle('active', this._manageMode);
+        this.el.classList.toggle('manage-mode', this._manageMode);
+        this._render();
+      };
+    }
     // Apply defaultStatusFilter once after async settings load (setting may differ from schema default)
     const _applyDefaultFilter = (val) => {
       this._statusFilter = new Set(val);
@@ -699,7 +710,10 @@ class Sidebar {
       }
       if (this._activeTab === 'mounts') this._renderMounts();
       else if (this._activeTab === 'groups') this._renderMobileGroupList(sessions);
-      else this._renderMobileFolderList(sessions);
+      // Sessions tab uses the same three-zone workbench as desktop — it's a
+      // plain vertical card list (no hover-only affordances), so it's more
+      // touch-friendly than the old two-level folder drill-down.
+      else this._renderWorkbench(sessions);
     } else {
       if (this._activeTab === 'mounts') this._renderMounts();
       else if (this._activeTab === 'groups') this._renderByGroups(sessions);

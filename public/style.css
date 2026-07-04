@@ -1879,3 +1879,13 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 .agents-host-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); padding-bottom: 6px; border-bottom: 1px solid var(--border); }
 .agents-host-select { flex: 1; padding: 5px 8px; font-size: 12px; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .cwd-recent-loading { font-size: 10px; color: var(--text-dim); }
+
+/* Sidebar manage mode: quick terminate on collapsed cards */
+.session-manage-kill {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border: none; border-radius: var(--radius-sm);
+  background: transparent; color: var(--red, #e55); cursor: pointer; flex-shrink: 0;
+}
+.session-manage-kill:hover { background: color-mix(in srgb, var(--red, #e55) 15%, transparent); }
+.session-manage-kill svg { width: 12px; height: 12px; }
+#manage-toggle.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }

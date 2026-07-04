@@ -34,6 +34,15 @@ class ShellAdapter extends BackendAdapter {
       // partial-line PRESERVATION behavior itself stays intact).
       PROMPT_EOL_MARK: '',
     };
+    // ONLY for automated shells (we auto-type a command): oh-my-zsh's "would
+    // you like to update? [Y/n]" prompt at .zshrc load eats the FIRST char of
+    // the typed command ("claude update" → "laude update", invalid). Disable
+    // it here — but NOT for a plain interactive Terminal the user opens by
+    // hand, where that prompt is a legitimate thing they may want to answer.
+    if (initialCommand) {
+      env.DISABLE_AUTO_UPDATE = 'true';
+      env.DISABLE_UPDATE_PROMPT = 'true';
+    }
     // Optional command typed for the user after the shell starts (e.g. the
     // "Log in to Claude" helper) — consumed by the client, carried in spec.
     return {

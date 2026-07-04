@@ -1395,11 +1395,20 @@ class App {
     });
 
     document.querySelector('#dialog-new-session .btn-create').addEventListener('click', () => {
+      const backend = document.getElementById('input-backend').value || 'claude';
+      const hostId = document.getElementById('input-host')?.value || undefined;
+      const cwd = document.getElementById('input-cwd').value.trim();
+      if (backend === 'shell') {
+        // Plain terminal — reuse openShellTerminal (handles host + defaults)
+        this.openShellTerminal(cwd || undefined, { hostId });
+        this.hideDialogs();
+        return;
+      }
       this.createSession({
-        backend: document.getElementById('input-backend').value || 'claude',
-        hostId: document.getElementById('input-host')?.value || undefined,
+        backend,
+        hostId,
         mode: document.getElementById('input-mode').value,
-        cwd: document.getElementById('input-cwd').value.trim(),
+        cwd,
         name: document.getElementById('input-session-name').value.trim(),
         model: document.getElementById('input-model').value === '__custom__'
           ? (document.getElementById('input-model-custom').value.trim() || '')
@@ -1459,6 +1468,18 @@ class App {
   }
 
   _applySessionBackendOptions(backend, { applyDefaults = false } = {}) {
+    // Plain shell terminal has no model/permission/effort/mode — hide those
+    // rows so the dialog is just Backend / Host / Working Directory / Name.
+    const isShell = backend === 'shell';
+    for (const [id, hide] of [
+      ['row-mode', isShell], ['row-model', isShell], ['custom-model-row', isShell],
+      ['row-permission', isShell], ['row-effort', isShell], ['row-extra-args', isShell],
+    ]) {
+      const el = document.getElementById(id);
+      if (el) el.classList.toggle('hidden', hide);
+    }
+    if (isShell) return; // nothing else to populate
+
     const cfg = BACKEND_SESSION_OPTIONS[backend] || BACKEND_SESSION_OPTIONS.claude;
     const modelSel = document.getElementById('input-model');
     const customModelRow = document.getElementById('custom-model-row');

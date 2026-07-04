@@ -1146,7 +1146,10 @@ app.post('/api/hosts/:id/bootstrap', async (req, res) => {
     wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
   };
   try {
-    const steps = await hosts.bootstrap(req.params.id, (ev) => bcast({ type: 'host-bootstrap', hostId: req.params.id, ...ev }));
+    // NOTE: spread ev FIRST — its own `type` ('step'/'log'/'done') must not
+    // clobber the outer message type the client filters on. `kind` carries
+    // the event type instead.
+    const steps = await hosts.bootstrap(req.params.id, (ev) => bcast({ ...ev, kind: ev.type, type: 'host-bootstrap', hostId: req.params.id }));
     res.json({ success: Object.values(steps).every(s => s === 'ok'), steps });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });

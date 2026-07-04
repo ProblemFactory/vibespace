@@ -247,8 +247,13 @@ export function installSidebarMounts(Sidebar) {
       actions.append(
         ibtn(MI.bolt, 'Test connection', async () => {
           this._hostStatus = this._hostStatus || {};
-          try { this._hostStatus[h.id] = await api(`/api/hosts/${h.id}/test`, { method: 'POST' }); }
-          catch (e) { this._hostStatus[h.id] = { ok: false, error: e.message }; throw e; }
+          try {
+            const r = await api(`/api/hosts/${h.id}/test`, { method: 'POST' });
+            this._hostStatus[h.id] = r;
+            const t = r.tools || {};
+            const tools = ['dtach', 'node', 'claude', 'codex'].filter(k => t[k]);
+            showToast(`${h.name} reachable · ${r.latencyMs}ms · ${tools.length ? tools.join(', ') : 'no agent tools — run Bootstrap'}`);
+          } catch (e) { this._hostStatus[h.id] = { ok: false, error: e.message }; throw e; }
         }),
         ibtn(MI.wrench, 'Bootstrap (install dtach / node / claude)', () => { this._showBootstrapDialog(h); }),
         ibtn(MI.termNew, 'New session on this host', () => { this.app.showNewSessionDialog?.({ hostId: h.id, hostName: h.name }); }),
@@ -372,22 +377,24 @@ export function installSidebarMounts(Sidebar) {
         }).join('');
       };
       paint();
+      const appendLog = (line) => { logEl.textContent += line + '\n'; logEl.scrollTop = logEl.scrollHeight; };
       const handler = (msg) => {
         if (msg.type !== 'host-bootstrap' || msg.hostId !== h.id) return;
-        if (msg.type === 'host-bootstrap' && msg.key) { state[msg.key] = msg.status; paint(); }
-        if (msg.line) { logEl.textContent += msg.line + '\n'; logEl.scrollTop = logEl.scrollHeight; }
-        if (msg.steps) { Object.assign(state, msg.steps); paint(); }
+        if (msg.kind === 'step' && msg.key) { state[msg.key] = msg.status; paint(); }
+        else if (msg.kind === 'log' && msg.line) appendLog(msg.line);
+        else if (msg.kind === 'done' && msg.steps) { Object.assign(state, msg.steps); paint(); }
       };
       this.app.ws.onGlobal(handler);
       const off = () => { const i = this.app.ws.globalHandlers.indexOf(handler); if (i >= 0) this.app.ws.globalHandlers.splice(i, 1); };
       const startBtn = overlay.querySelector('.bs-start');
       startBtn.onclick = async () => {
         startBtn.disabled = true; startBtn.textContent = 'Running…';
+        overlay.querySelector('.bs-log-wrap').open = true; // show the log live
+        appendLog(`$ connecting to ${h.user}@${h.host}…`);
         try {
           const r = await api(`/api/hosts/${h.id}/bootstrap`, { method: 'POST' });
           Object.assign(state, r.steps); paint();
           startBtn.textContent = r.success ? 'All done' : 'Finished with failures';
-          if (!r.success) overlay.querySelector('.bs-log-wrap').open = true;
           this._hostStatus = this._hostStatus || {};
           try { this._hostStatus[h.id] = await api(`/api/hosts/${h.id}/test`, { method: 'POST' }); } catch {}
           this._renderMounts();

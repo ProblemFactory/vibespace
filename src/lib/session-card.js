@@ -193,6 +193,24 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
   };
   card.querySelector('.session-card-row').appendChild(expandBtn);
 
+  // Manage mode: a compact terminate ✕ on the collapsed row for quick batch
+  // cleanup, so the user doesn't have to expand every card. Only for running
+  // sessions; shown when the sidebar is in manage mode.
+  if (state._manageMode && s.status !== 'stopped') {
+    const killBtn = document.createElement('button');
+    killBtn.className = 'session-manage-kill';
+    killBtn.innerHTML = ICON.terminate;
+    killBtn.title = 'Terminate this session';
+    killBtn.onclick = async (e) => {
+      e.stopPropagation();
+      const ok = await showConfirmDialog({ title: 'Terminate session', message: `Terminate "${displayName}"? The running agent process will be killed.`, confirmText: 'Terminate', danger: true });
+      if (!ok) return;
+      if (s.webuiId) app.killSession(s.webuiId);
+      else if (s.pid) app.killPid(s.pid);
+    };
+    row.insertBefore(killBtn, expandBtn);
+  }
+
   // Detail panel (shown when expanded)
   const detailPanel = document.createElement('div');
   detailPanel.className = 'session-card-detail';
