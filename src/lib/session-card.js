@@ -193,22 +193,33 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
   };
   card.querySelector('.session-card-row').appendChild(expandBtn);
 
-  // Manage mode: a compact terminate ✕ on the collapsed row for quick batch
-  // cleanup, so the user doesn't have to expand every card. Only for running
-  // sessions; shown when the sidebar is in manage mode.
-  if (state._manageMode && s.status !== 'stopped') {
-    const killBtn = document.createElement('button');
-    killBtn.className = 'session-manage-kill';
-    killBtn.innerHTML = ICON.terminate;
-    killBtn.title = 'Terminate this session';
-    killBtn.onclick = async (e) => {
-      e.stopPropagation();
-      const ok = await showConfirmDialog({ title: 'Terminate session', message: `Terminate "${displayName}"? The running agent process will be killed.`, confirmText: 'Terminate', danger: true });
-      if (!ok) return;
-      if (s.webuiId) app.killSession(s.webuiId);
-      else if (s.pid) app.killPid(s.pid);
+  // Manage mode: MARK-then-apply. Clicking these buttons only TAGS the card
+  // (terminate / archive / both) — it does NOT act immediately, so the list
+  // never reshuffles mid-selection. A batch bar at the top applies all marks
+  // at once. Marks live in state._manageMarks (Map key → {terminate,archive}).
+  if (state._manageMode) {
+    const key = state._getSessionStateKey(s) || s.sessionId;
+    const mark = state._manageMarks?.get(key) || {};
+    if (mark.terminate || mark.archive) card.classList.add('manage-marked');
+    const mkMark = (kind, icon, title, allowed) => {
+      if (!allowed) return;
+      const b = document.createElement('button');
+      b.className = 'session-manage-mark' + (mark[kind] ? ' on' : '');
+      b.innerHTML = icon;
+      b.title = title;
+      b.onclick = (e) => {
+        e.stopPropagation();
+        const marks = state._manageMarks = state._manageMarks || new Map();
+        const cur = marks.get(key) || {};
+        cur[kind] = !cur[kind];
+        if (!cur.terminate && !cur.archive) marks.delete(key); else marks.set(key, cur);
+        state._render();
+      };
+      row.insertBefore(b, expandBtn);
     };
-    row.insertBefore(killBtn, expandBtn);
+    // archive available to all; terminate only to running sessions
+    mkMark('archive', ICON.archive, isArchived ? 'Mark to unarchive' : 'Mark to archive', true);
+    mkMark('terminate', ICON.terminate, 'Mark to terminate', s.status !== 'stopped');
   }
 
   // Detail panel (shown when expanded)

@@ -7,6 +7,14 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ## [2.22.0] — 2026-07-04
 
+### Added / Changed (remote + session management)
+
+- **Remote hosts, verified against a real box.** Register an ssh host (paste/upload a private key or reuse `~/.ssh`), one-click connectivity test (latency + which of dtach/node/claude/codex are installed → toast + READY badge), and a **Bootstrap** dialog with a live streaming log that idempotently installs the missing tools.
+- **Remote sessions everywhere they make sense.** New Session gets a Host dropdown and a **Terminal (plain shell)** backend (the form adapts — no model/permission rows for a shell); choosing a host re-sources the working-directory autocomplete and recent-path chips over ssh. Manage Agents gets a Machine dropdown so you can check/log-in/update a CLI on a remote host.
+- **Batch session management.** A manage-mode toggle in the sidebar lets you *mark* running sessions to terminate and/or archive without the list reshuffling; a top bar shows the count and applies everything at once.
+- **Automation terminals are throwaway.** Login/update helper terminals now always terminate when you close them, instead of lingering as detached shells.
+- Mobile uses the same three-zone workbench; the oh-my-zsh update prompt no longer eats the first character of auto-typed commands.
+
 ### Changed (session list redesign)
 
 - **Three-zone workbench** — the Folders tab now renders ACTIVE (every running session as a two-line card: name + badges, dim abbreviated path below, per-project colored strip, starred first, same-project adjacent) / RECENT (stopped in the last 7 days, grouped by project, capped at 5 per project with expanders — session floods can't bury the list) / HISTORY (collapsed + search-first; typing in the filter searches it, expansion pages 60 at a time). A dozen live agents are now one glance instead of a scroll through thousands of stopped cards.

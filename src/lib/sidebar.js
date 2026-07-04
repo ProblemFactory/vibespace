@@ -109,6 +109,7 @@ class Sidebar {
       manageBtn.onclick = (e) => {
         e.stopPropagation();
         this._manageMode = !this._manageMode;
+        this._manageMarks = new Map(); // fresh selection each time
         manageBtn.classList.toggle('active', this._manageMode);
         this.el.classList.toggle('manage-mode', this._manageMode);
         this._render();

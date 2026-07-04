@@ -30,8 +30,89 @@ function abbrevPath(cwd) {
 export function installSidebarWorkbench(Sidebar) {
   Object.assign(Sidebar.prototype, {
 
+    _buildManageBar() {
+      const marks = this._manageMarks || new Map();
+      let nTerm = 0, nArch = 0;
+      for (const m of marks.values()) { if (m.terminate) nTerm++; if (m.archive) nArch++; }
+      const bar = document.createElement('div');
+      bar.className = 'wb-manage-bar';
+      const label = document.createElement('div');
+      label.className = 'wb-manage-label';
+      label.innerHTML = marks.size
+        ? `<b>${marks.size}</b> marked${nTerm ? ` · ${nTerm} terminate` : ''}${nArch ? ` · ${nArch} archive` : ''}`
+        : 'Manage mode — tap the ✕ / archive icon on cards to mark them';
+      const actions = document.createElement('div');
+      actions.className = 'wb-manage-actions';
+      const applyBtn = document.createElement('button');
+      applyBtn.className = 'wb-manage-apply';
+      applyBtn.textContent = 'Apply';
+      applyBtn.disabled = !marks.size;
+      applyBtn.onclick = () => this._applyManageMarks();
+      const clearBtn = document.createElement('button');
+      clearBtn.className = 'wb-manage-clear';
+      clearBtn.textContent = marks.size ? 'Clear' : 'Done';
+      clearBtn.onclick = () => {
+        if (marks.size) { this._manageMarks = new Map(); this._render(); }
+        else { this._manageMode = false; this.el.classList.remove('manage-mode'); document.getElementById('manage-toggle')?.classList.remove('active'); this._render(); }
+      };
+      actions.append(applyBtn, clearBtn);
+      bar.append(label, actions);
+      return bar;
+    },
+
+    async _applyManageMarks() {
+      const marks = this._manageMarks || new Map();
+      if (!marks.size) return;
+      const byKey = new Map();
+      for (const s of this._allSessions || []) {
+        const k = this._getSessionStateKey(s) || s.sessionId;
+        if (marks.has(k) && !byKey.has(k)) byKey.set(k, s);
+      }
+      const termList = [], archList = [];
+      for (const [k, m] of marks) {
+        const s = byKey.get(k);
+        if (!s) continue;
+        if (m.terminate) termList.push(s);
+        if (m.archive) archList.push(s);
+      }
+      const parts = [];
+      if (termList.length) parts.push(`terminate ${termList.length}`);
+      if (archList.length) parts.push(`archive ${archList.length}`);
+      const ok = await showConfirmDialog({
+        title: 'Apply batch actions',
+        message: `About to ${parts.join(' and ')} session${marks.size === 1 ? '' : 's'}. Terminating kills the running agent process.`,
+        confirmText: 'Apply', danger: true,
+      });
+      if (!ok) return;
+      // terminate first (kills), then archive the rest
+      for (const s of termList) {
+        if (s.webuiId) this.app.killSession(s.webuiId);
+        else if (s.pid) this.app.killPid(s.pid);
+      }
+      // archive as a batch — toggle the set directly, single state push + render
+      for (const s of archList) {
+        const sk = this._getSessionStateKey(s);
+        if (!sk) continue;
+        if (this._stateSetHas(this._archivedIds, s)) {
+          this._archivedIds.delete(sk);
+          const legacy = this._getLegacySessionId(s);
+          if (legacy) this._archivedIds.delete(legacy);
+        } else {
+          this._archivedIds.add(sk);
+        }
+      }
+      if (archList.length) { this._pushUserState(); this.app.updateTaskbar(); }
+      this._manageMarks = new Map();
+      showToast(parts.join(', ') + ' applied');
+      this._render();
+    },
+
     _renderWorkbench(sessions) {
       this.listEl.innerHTML = '';
+      // Manage mode batch bar — both the "you're in batch management" marker
+      // and the apply/clear controls. Marks are collected on the cards; this
+      // bar commits them all at once so the list never reshuffles mid-select.
+      if (this._manageMode) this.listEl.appendChild(this._buildManageBar());
       const now = Date.now();
       const isLive = (s) => s.status === 'live' || s.status === 'tmux' || s.status === 'external' || s.status === 'remote-running';
       const live = sessions.filter(isLive);

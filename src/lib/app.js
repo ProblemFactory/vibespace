@@ -1750,7 +1750,11 @@ class App {
             this._openExternalEditor(filePath, signalPath);
           }, {}, this.settings);
           this.sessions.set(winInfo.id, term);
-          this._wireTerminalWindow(winInfo, term, msg.sessionId);
+          // Automation-command terminals (Log in / Update helpers) are
+          // throwaway — closing the window should terminate them directly,
+          // never leave a detached login shell lingering, regardless of the
+          // global close-behavior setting.
+          this._wireTerminalWindow(winInfo, term, msg.sessionId, { ephemeral: !!initialCommand });
           // Type a starter command for the user (shell terminals: login helpers
           // etc.) once the shell has had a beat to print its prompt
           if (initialCommand) {
@@ -1765,9 +1769,12 @@ class App {
     this.ws.onGlobal(handler);
   }
 
-  _wireTerminalWindow(winInfo, term, sessionId, { killOnClose = true } = {}) {
+  _wireTerminalWindow(winInfo, term, sessionId, { killOnClose = true, ephemeral = false } = {}) {
+    winInfo._ephemeral = ephemeral;
     winInfo.onClose = () => {
-      const shouldKill = killOnClose && (this.settings.get('window.closeBehavior') ?? 'terminate') === 'terminate';
+      // ephemeral (automation helper) terminals always terminate on close;
+      // otherwise honor the global close-behavior (terminate vs detach)
+      const shouldKill = ephemeral || (killOnClose && (this.settings.get('window.closeBehavior') ?? 'terminate') === 'terminate');
       if (shouldKill) this.ws.send({ type: 'kill', sessionId });
       term.dispose(); this.sessions.delete(winInfo.id); this._checkWelcome();
     };
