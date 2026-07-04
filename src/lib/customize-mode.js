@@ -43,9 +43,27 @@ export const CHROME_ELEMENTS = [
   { id: 'taskbar-status',    label: 'Window count',       hideKey: 'taskbar.showWindowCount',        defaultZone: 'taskbar-tray' },
 ];
 
-export const ZONE_IDS = ['toolbar-center', 'toolbar-right', 'taskbar-tray'];
+// toolbar-row2 / taskbar-row2 are optional extra bar rows (below the toolbar /
+// next to the taskbar) — auto-hidden via CSS :empty, populated by drag.
+export const ZONE_IDS = ['toolbar-center', 'toolbar-right', 'toolbar-row2', 'taskbar-tray', 'taskbar-row2'];
 
 const ELEMENT_BY_ID = new Map(CHROME_ELEMENTS.map(e => [e.id, e]));
+
+// Springs (macOS-toolbar "flexible space"): invisible flex:1 divs that push
+// neighbors apart — the general answer to "usage on the right, previews in
+// the middle" style requests. Created on demand (+ Spring button), persisted
+// in chrome.arrangement by id, deleted by clicking them in customize mode.
+const isSpringId = (id) => /^spring-\d+$/.test(id || '');
+const isMovableId = (id) => ELEMENT_BY_ID.has(id) || isSpringId(id);
+function ensureSpringEl(id) {
+  let el = document.getElementById(id);
+  if (!el) {
+    el = document.createElement('div');
+    el.id = id;
+    el.className = 'chrome-spring';
+  }
+  return el;
+}
 const STRUCT_KEYS = ['taskbar.position', 'taskbar.visibility', 'sidebar.position', 'chrome.zoneAlign'];
 
 // Alignment targets (chrome.zoneAlign) — each gets a mini icon chip anchored
@@ -79,7 +97,7 @@ function normalizeArrangement(raw) {
   if (raw && typeof raw === 'object') {
     for (const z of ZONE_IDS) {
       for (const id of (Array.isArray(raw[z]) ? raw[z] : [])) {
-        if (ELEMENT_BY_ID.has(id) && !seen.has(id)) { out[z].push(id); seen.add(id); }
+        if (isMovableId(id) && !seen.has(id)) { out[z].push(id); seen.add(id); }
       }
     }
   }
@@ -94,11 +112,16 @@ function normalizeArrangement(raw) {
 /** Re-parent movable elements into their zones. Idempotent; listeners survive. */
 export function applyArrangement(raw) {
   const norm = normalizeArrangement(raw);
+  // Spring lifecycle: create the ones the model mentions, drop the rest
+  const wantedSprings = new Set(Object.values(norm).flat().filter(isSpringId));
+  for (const el of document.querySelectorAll('.chrome-spring')) {
+    if (!wantedSprings.has(el.id)) el.remove();
+  }
   for (const [zoneId, ids] of Object.entries(norm)) {
     const zone = zoneEl(zoneId);
     if (!zone) continue;
     for (const id of ids) {
-      const el = document.getElementById(id);
+      const el = isSpringId(id) ? ensureSpringEl(id) : document.getElementById(id);
       if (el) zone.appendChild(el);
     }
   }
@@ -154,6 +177,9 @@ export class CustomizeMode {
       });
     }
 
+    // Springs already in the arrangement get the same outline/drag treatment
+    for (const el of document.querySelectorAll('.chrome-spring')) this._wireSpring(el);
+
     this._buildTaskbarPill();
     this._buildSidebarPill();
     this._buildPanel();
@@ -161,7 +187,7 @@ export class CustomizeMode {
 
     // Live refresh on any relevant change (incl. remote clients while editing)
     const refresh = () => this._refresh();
-    for (const k of [...CHROME_ELEMENTS.filter(e => e.hideKey).map(e => e.hideKey), ...STRUCT_KEYS]) {
+    for (const k of [...CHROME_ELEMENTS.filter(e => e.hideKey).map(e => e.hideKey), ...STRUCT_KEYS, 'chrome.arrangement']) {
       this.app.settings.on(k, refresh);
       this._cleanup.push(() => this.app.settings.off(k, refresh));
     }
@@ -183,6 +209,40 @@ export class CustomizeMode {
     if (this._sidebarWasOpen === false && this.app.sidebar?.isOpen) this.app.sidebar.toggle();
     // Re-render chrome normally (hidden items go back to display:none)
     this.app._applyChromeSettings?.();
+  }
+
+  // Wire a spring for editing: outlined, click = REMOVE (springs aren't
+  // hidden, they're deleted), drag = move like any element. Safe to call
+  // twice (remote applyArrangement can re-create springs mid-session).
+  _wireSpring(el) {
+    if (el._czWired) return;
+    el._czWired = true;
+    el.classList.add('cz-item', 'cz-spring-edit');
+    el.dataset.czTip = 'Spring — pushes neighbors apart; click to remove, drag to move';
+    const onClick = (e) => {
+      e.preventDefault(); e.stopPropagation();
+      if (this._justDragged) return;
+      el.remove();
+      this._saveArrangement();
+    };
+    el.addEventListener('click', onClick, true);
+    const offDrag = this._setupDrag(el, { spring: true });
+    this._cleanup.push(() => {
+      el._czWired = false;
+      el.classList.remove('cz-item', 'cz-spring-edit', 'cz-drag-src');
+      el.removeAttribute('data-cz-tip');
+      el.removeEventListener('click', onClick, true);
+      offDrag();
+    });
+  }
+
+  _addSpring() {
+    let n = 1;
+    while (document.getElementById(`spring-${n}`)) n++;
+    const el = ensureSpringEl(`spring-${n}`);
+    zoneEl('toolbar-center')?.appendChild(el);
+    this._wireSpring(el);
+    this._saveArrangement();
   }
 
   // ── Drag to move / reorder ──
@@ -225,7 +285,7 @@ export class CustomizeMode {
         // fixed anchor like the ⚙ gear — those aren't part of the model)
         marker = document.createElement('div');
         marker.className = 'cz-drop-marker';
-        const siblings = [...zone.children].filter(c => c !== el && ELEMENT_BY_ID.has(c.id));
+        const siblings = [...zone.children].filter(c => c !== el && isMovableId(c.id));
         let ref = null;
         for (const sib of siblings) {
           const r = sib.getBoundingClientRect();
@@ -259,7 +319,7 @@ export class CustomizeMode {
     const arr = {};
     for (const z of ZONE_IDS) {
       const zone = zoneEl(z);
-      arr[z] = zone ? [...zone.children].map(c => c.id).filter(id => ELEMENT_BY_ID.has(id)) : [];
+      arr[z] = zone ? [...zone.children].map(c => c.id).filter(isMovableId) : [];
     }
     this.app.settings.set('chrome.arrangement', arr);
   }
@@ -386,8 +446,11 @@ export class CustomizeMode {
       b.onclick = onClick;
       return b;
     };
+    const springBtn = btn('+ Spring', '', () => this._addSpring());
+    springBtn.title = 'Insert a flexible space that pushes neighboring elements apart (drag it between two elements; e.g. center previews with usage pushed right)';
     panel.append(
       hint,
+      springBtn,
       btn('Reset', '', () => {
         const s = this.app.settings;
         for (const k of [...CHROME_ELEMENTS.filter(e => e.hideKey).map(e => e.hideKey), ...STRUCT_KEYS]) s.reset(k);
@@ -416,6 +479,8 @@ export class CustomizeMode {
       const val = s.get(seg.dataset.czKey);
       for (const b of seg.querySelectorAll('button')) b.classList.toggle('active', b.dataset.value === val);
     }
+    // Springs re-created by a remote arrangement change need wiring
+    for (const el of document.querySelectorAll('.chrome-spring')) this._wireSpring(el);
     // Alignment chips: active states + reposition (bars may have moved)
     const za = s.get('chrome.zoneAlign') || {};
     for (const chip of document.querySelectorAll('.cz-align')) {

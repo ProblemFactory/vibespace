@@ -16,6 +16,9 @@ and this project uses [Semantic Versioning](https://semver.org/).
 - The taskbar right side is now a **tray** (`#taskbar-tray`): desktop previews, usage meters, and the window counter sit in one horizontal row (previously usage/count were stacked in a fixed column) — each independently hideable, orderable, and movable.
 - **Alignment controls** (in Customize mode) — mini alignment chips appear next to each alignable area: window items left-aligned or centered (Windows-11 style), toolbar-center content left/center/right, and the tray at the taskbar's left or right end. Persisted as `chrome.zoneAlign`, synced, covered by Reset.
 - The window counter is now a **compact chip** — a window-stack icon + bare count (tooltip carries the full "N windows — click for window list" label) instead of a wide text label that wasted tray space.
+- **Springs (flexible space)** — the "+ Spring" button in Customize mode inserts an invisible flexible spacer (macOS-toolbar style) that pushes its neighbors apart; drag it between elements for justify-between layouts (previews centered, usage pushed right, etc.). Springs show as hatched ↔ bars while editing; click one to remove it.
+- **Extra bar rows** — two optional full-width rows (below the toolbar, next to the taskbar) that appear when you drag elements into them and vanish when emptied. E.g. give the layout presets their own row under the toolbar.
+- Fixed: desktop preview labels disappeared when previews were moved into the toolbar — they now shrink to fit instead of being hidden.
 
 ### Fixed
 

@@ -1579,9 +1579,9 @@ body.taskbar-top .cz-panel { bottom: 32px; }
 
 /* Taskbar natives hosted in the 40px toolbar: clamp taskbar-derived sizes */
 #toolbar #desktop-previews { align-items: center; height: 100%; }
-#toolbar .desktop-preview { width: 39px; height: 26px; }
-#toolbar .desktop-preview-add { width: 16px; height: 26px; font-size: 11px; }
-#toolbar .desktop-preview-label { display: none; }
+#toolbar .desktop-preview { width: 34px; height: 20px; }
+#toolbar .desktop-preview-add { width: 14px; height: 20px; font-size: 10px; }
+#toolbar .desktop-preview-label { font-size: 8px; line-height: 1; }
 #toolbar .taskbar-usage { --usage-pie-size: 15px; }
 #toolbar #taskbar-status { font-size: 10px; }
 /* Toolbar-hosted layout presets / buttons dropped into the taskbar just work
@@ -1604,3 +1604,32 @@ body.taskbar-top .cz-panel { bottom: 32px; }
 }
 .cz-align button:hover { color: var(--text); background: var(--hover-overlay); }
 .cz-align button.active { background: var(--accent); color: var(--accent-fg); }
+
+/* ── Extra bar rows (populate via Customize-mode drag; hidden when empty) ── */
+#toolbar-row2, #taskbar-row2 {
+  display: flex; align-items: center; gap: 4px; padding: 3px 10px;
+  flex-shrink: 0; min-height: 34px;
+}
+#toolbar-row2 { background: var(--bg-toolbar); border-bottom: 1px solid var(--border); }
+#taskbar-row2 { background: var(--bg-taskbar); border-top: 1px solid var(--border); }
+body.taskbar-top #taskbar-row2 { order: -1; border-top: none; border-bottom: 1px solid var(--border); }
+#toolbar-row2:empty, #taskbar-row2:empty { display: none; }
+body.customize-mode #toolbar-row2, body.customize-mode #taskbar-row2 {
+  display: flex; position: relative; z-index: 9500;
+}
+/* empty-row hint while editing */
+body.customize-mode #toolbar-row2:empty::after, body.customize-mode #taskbar-row2:empty::after {
+  content: 'Extra row — drag elements here'; font-size: 10px; color: var(--text-dim);
+}
+
+/* ── Springs (flexible space) ── */
+.chrome-spring { flex: 1 1 24px; min-width: 0; align-self: stretch; }
+body.customize-mode .chrome-spring {
+  min-width: 30px; display: flex; align-items: center; justify-content: center;
+  color: var(--text-secondary); border-radius: var(--radius-sm);
+  background: repeating-linear-gradient(135deg,
+    transparent, transparent 4px,
+    color-mix(in srgb, var(--accent) 16%, transparent) 4px,
+    color-mix(in srgb, var(--accent) 16%, transparent) 8px);
+}
+body.customize-mode .chrome-spring::after { content: '\2194'; font-size: 11px; }
