@@ -1108,7 +1108,8 @@ syncStores.drafts = new SyncStore('drafts', path.join(__dirname, 'data', 'drafts
 syncStores.settings = new SyncStore('settings', path.join(__dirname, 'data', 'settings-sync.json'), wss);
 syncStores.uploads = new SyncStore('uploads', path.join(__dirname, 'data', 'uploads-sync.json'), wss);
 
-setupPersistence({ dataDir: path.join(__dirname, 'data'), wss, WS_OPEN, getSyncStore, activeSessions, auth });
+setupPersistence({ dataDir: path.join(__dirname, 'data'), wss, WS_OPEN, getSyncStore, activeSessions, auth,
+  getHosts: () => hosts, getMounts: () => mounts });
 app.use(persistenceRouter);
 
 // ── Hosts (ssh host registry for remote sessions — collaboration P2) ──

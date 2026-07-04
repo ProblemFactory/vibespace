@@ -1922,3 +1922,12 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 .wb-manage-apply { background: var(--red, #e55); border-color: var(--red, #e55); color: #fff; font-weight: 600; }
 .wb-manage-apply:disabled { opacity: 0.4; cursor: default; }
 .wb-manage-clear:hover { border-color: var(--accent); color: var(--accent); }
+
+/* RECENT project header: archive-all button */
+.wb-proj-archive {
+  border: none; background: transparent; color: var(--text-dim); cursor: pointer;
+  width: 18px; height: 18px; border-radius: var(--radius-sm); line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.wb-proj-archive:hover { background: var(--hover-overlay); color: var(--accent); }
+.wb-proj-head { gap: 4px; }

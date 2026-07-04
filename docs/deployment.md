@@ -39,6 +39,8 @@ Auth is **off by default** (local single-user use). Enable it by giving the serv
 **Sensitive items are opt-in and always encrypted** (AES-256-GCM under a passphrase you type at export; the file only reveals *which* sensitive items it contains, not their contents):
 - *VibeSpace password* — the scrypt hash; after import the same password logs in (and all other devices are logged out).
 - *Claude / Codex CLI credentials* — `~/.claude/.credentials.json` / `~/.codex/auth.json`; the imported instance needs no re-login. Treat a file containing these like an SSH key.
+- *Remote hosts* — ssh host records plus any private keys you uploaded in-app (re-keyed under the new instance).
+- *S3 mounts & shares* — mount definitions with their S3 credentials (decrypted from the instance-local key and re-encrypted under your passphrase).
 
 **Import** (⚙ → Backup & migrate… → Import tab, or the wizard) shows what the file contains with per-section checkboxes — each selected section *replaces* the corresponding data; sensitive items ask for the passphrase. The page reloads after import. Login tokens are never exported.
 

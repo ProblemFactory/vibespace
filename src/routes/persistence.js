@@ -27,7 +27,7 @@ function writeJsonAtomic(file, data) {
 }
 
 /** Setup persistence routes. Requires { dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth } context. */
-function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth }) {
+function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getHosts, getMounts }) {
   const broadcast = (msg) => {
     const json = JSON.stringify(msg);
     wss.clients.forEach(client => {
@@ -446,6 +446,8 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth }) {
         vsPassword: !!auth?.enabled,
         claudeCreds: fs.existsSync(CLAUDE_CREDS),
         codexCreds: fs.existsSync(CODEX_CREDS),
+        hosts: (getHosts?.()?.list?.() || []).length,
+        mounts: (getMounts?.()?.list?.() || []).length,
       },
     });
   });
@@ -482,6 +484,14 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth }) {
       if (includeSensitive.includes('codexCreds')) {
         const c = readFileJson(CODEX_CREDS);
         if (c) sens.codexCreds = c;
+      }
+      if (includeSensitive.includes('hosts')) {
+        const b = getHosts?.()?.exportBundle?.();
+        if (b?.hosts?.length) sens.hosts = b;
+      }
+      if (includeSensitive.includes('mounts')) {
+        const b = getMounts?.()?.exportBundle?.();
+        if (b?.mounts?.length || b?.shares?.length) sens.mounts = b;
       }
       if (Object.keys(sens).length) {
         file.sensitive = { manifest: Object.keys(sens), ...encryptSensitive(sens, passphrase) };
@@ -525,6 +535,14 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth }) {
         ensureDir(path.dirname(CODEX_CREDS));
         fs.writeFileSync(CODEX_CREDS, JSON.stringify(sens.codexCreds), { mode: 0o600 });
         applied.push('codexCreds');
+      }
+      if (includeSensitive.includes('hosts') && sens.hosts) {
+        getHosts?.()?.importBundle?.(sens.hosts);
+        applied.push('hosts');
+      }
+      if (includeSensitive.includes('mounts') && sens.mounts) {
+        getMounts?.()?.importBundle?.(sens.mounts);
+        applied.push('mounts');
       }
       if (includeSensitive.includes('vsPassword') && sens.vsPassword && auth) {
         // enables auth + revokes all tokens; keep THIS caller logged in

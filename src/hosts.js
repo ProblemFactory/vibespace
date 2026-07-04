@@ -93,6 +93,39 @@ class HostManager {
     this._save();
   }
 
+  /** Config transfer: host records + the private-key TEXT of any uploaded keys. */
+  exportBundle() {
+    const keys = {};
+    for (const h of this._state.hosts) {
+      if (h.keyPath && h.keyPath.startsWith(this._sshDir)) {
+        try { keys[h.id] = fs.readFileSync(h.keyPath, 'utf-8'); } catch {}
+      }
+    }
+    return { hosts: this._state.hosts, keys };
+  }
+
+  /** Import a host bundle — records REPLACE, uploaded keys rewritten (0600). */
+  importBundle(bundle) {
+    if (!bundle || !Array.isArray(bundle.hosts)) return;
+    fs.mkdirSync(this._sshDir, { recursive: true, mode: 0o700 });
+    const hosts = [];
+    for (const h of bundle.hosts) {
+      const rec = { ...h };
+      const keyText = bundle.keys?.[h.id];
+      if (keyText && h.keyPath && h.keyPath.startsWith(this._sshDir)) {
+        // rebase the key under THIS instance's ssh dir
+        const kp = path.join(this._sshDir, `${h.id}.key`);
+        fs.writeFileSync(kp, keyText, { mode: 0o600 });
+        rec.keyPath = kp;
+      } else if (h.keyPath && h.keyPath.startsWith(this._sshDir)) {
+        rec.keyPath = null; // key text missing — fall back to ~/.ssh
+      }
+      hosts.push(rec);
+    }
+    this._state.hosts = hosts;
+    this._save();
+  }
+
   /** ssh argv for a host (shared by test/discovery/bootstrap/session spawn). */
   sshArgs(h, { tty = false } = {}) {
     const args = [...SSH_BASE_OPTS, '-p', String(h.port || 22)];

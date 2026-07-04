@@ -8,7 +8,7 @@
 //   HISTORY — everything older; collapsed and SEARCH-FIRST (typing in the
 //             main filter searches it; expanding renders capped pages).
 // Starred sessions float to the top of their zone.
-import { escHtml } from './utils.js';
+import { escHtml, showConfirmDialog, showToast } from './utils.js';
 
 const RECENT_MS = 7 * 86400e3;
 const HISTORY_PAGE = 60;
@@ -187,6 +187,18 @@ export function installSidebarWorkbench(Sidebar) {
         head.className = 'wb-proj-head';
         head.title = cwd;
         head.innerHTML = `<span class="wb-proj-name">${escHtml(abbrevPath(cwd))}</span><span class="wb-zone-count">${list.length}</span>`;
+        // Archive the WHOLE project in one click — the fast path for folders
+        // full of throwaway sessions (observer swarms etc.).
+        const archAll = document.createElement('button');
+        archAll.className = 'wb-proj-archive';
+        archAll.innerHTML = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h12M3 4v8a1 1 0 001 1h8a1 1 0 001-1V4"/><path d="M6.5 8h3"/></svg>';
+        archAll.title = `Archive all ${list.length} session${list.length === 1 ? '' : 's'} in this project`;
+        archAll.onclick = async (e) => {
+          e.stopPropagation();
+          const ok = await showConfirmDialog({ title: 'Archive project', message: `Archive all ${list.length} session${list.length === 1 ? '' : 's'} under ${abbrevPath(cwd)}? They move to the Archived filter (nothing is deleted).`, confirmText: 'Archive all', danger: false });
+          if (ok) this.archiveSessions(list);
+        };
+        head.appendChild(archAll);
         // one-click new session in this project (kept from the old folder header)
         const plus = document.createElement('button');
         plus.className = 'wb-proj-plus';

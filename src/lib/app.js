@@ -550,6 +550,8 @@ class App {
       mkRow('vsPassword', 'VibeSpace password', info.sensitive.vsPassword ? 'password hash — same password works after import' : 'no password configured', { checked: false, disabled: !info.sensitive.vsPassword }),
       mkRow('claudeCreds', 'Claude CLI credentials', info.sensitive.claudeCreds ? '~/.claude/.credentials.json — no re-login on the new instance' : 'not found on this machine', { checked: false, disabled: !info.sensitive.claudeCreds }),
       mkRow('codexCreds', 'Codex CLI credentials', info.sensitive.codexCreds ? '~/.codex/auth.json' : 'not found on this machine', { checked: false, disabled: !info.sensitive.codexCreds }),
+      mkRow('hosts', 'Remote hosts', info.sensitive.hosts ? `${info.sensitive.hosts} ssh host(s) + uploaded keys` : 'no hosts configured', { checked: false, disabled: !info.sensitive.hosts }),
+      mkRow('mounts', 'S3 mounts & shares', info.sensitive.mounts ? `${info.sensitive.mounts} mount(s) incl. credentials` : 'no mounts configured', { checked: false, disabled: !info.sensitive.mounts }),
     );
     const passRow = document.createElement('div');
     passRow.className = 'cfg-pass-row hidden';
@@ -618,7 +620,7 @@ class App {
       bookmarks: ['File bookmarks', (d) => `${(d || []).length} bookmark(s)`],
       clientPrefs: ['Browser preferences', (d) => Object.keys(d || {}).join(', ') || 'empty'],
     };
-    const SENS_LABELS = { vsPassword: 'VibeSpace password', claudeCreds: 'Claude CLI credentials', codexCreds: 'Codex CLI credentials' };
+    const SENS_LABELS = { vsPassword: 'VibeSpace password', claudeCreds: 'Claude CLI credentials', codexCreds: 'Codex CLI credentials', hosts: 'Remote hosts', mounts: 'S3 mounts & shares' };
 
     const renderFile = (file) => {
       body.innerHTML = '';

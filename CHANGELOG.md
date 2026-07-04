@@ -14,6 +14,8 @@ and this project uses [Semantic Versioning](https://semver.org/).
 - **Batch session management.** A manage-mode toggle in the sidebar lets you *mark* running sessions to terminate and/or archive without the list reshuffling; a top bar shows the count and applies everything at once.
 - **Automation terminals are throwaway.** Login/update helper terminals now always terminate when you close them, instead of lingering as detached shells.
 - Mobile uses the same three-zone workbench; the oh-my-zsh update prompt no longer eats the first character of auto-typed commands.
+- **Archive a whole project in one click** — each Recent-zone project header has an archive-all button, for folders full of throwaway sessions.
+- **Config export/import now covers remote hosts and S3 mounts** (opt-in, encrypted): migrating to a fresh instance carries your ssh hosts + uploaded keys and your mount definitions + credentials, not just settings.
 
 ### Changed (session list redesign)
 

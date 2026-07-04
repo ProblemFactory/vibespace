@@ -75,6 +75,35 @@ class MountManager {
 
   _notify() { this.broadcast({ type: 'mounts-updated', mounts: this.list() }); }
 
+  // ── Config transfer ──
+  // Secrets are stored encrypted under an INSTANCE-local key (data/.mounts-key),
+  // so a raw mounts.json is useless elsewhere. Export decrypts to plaintext
+  // (the caller re-encrypts under the user's export passphrase); import re-adds
+  // each mount so it's re-encrypted under the new instance's key.
+  exportBundle() {
+    const mounts = this._state.mounts.map(m => ({
+      name: m.name, origin: m.origin, mode: m.mode,
+      endpoint: m.endpoint, bucket: m.bucket, prefix: m.prefix,
+      accessKey: m.accessKey, secretKey: this._dec(m.secretKeyEnc),
+      sessionToken: m.sessionTokenEnc ? this._dec(m.sessionTokenEnc) : null,
+      customPath: m.customPath, expiresAt: m.expiresAt,
+    }));
+    return { mounts, shares: this._state.shares };
+  }
+
+  importBundle(bundle) {
+    if (!bundle || !Array.isArray(bundle.mounts)) return;
+    for (const m of bundle.mounts) {
+      if (this._state.mounts.some(x => x.name === m.name)) continue; // skip dupes
+      try { this.add(m); } catch {}
+    }
+    if (Array.isArray(bundle.shares)) {
+      for (const s of bundle.shares) if (!this._state.shares.some(x => x.id === s.id)) this._state.shares.push(s);
+      this._save();
+    }
+    this._notify();
+  }
+
   // ── Introspection ──
 
   _liveMounts() {
