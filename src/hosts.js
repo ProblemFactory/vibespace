@@ -53,11 +53,23 @@ class HostManager {
     return h;
   }
 
-  add({ name, user, host, port, keyPath }) {
+  add({ name, user, host, port, keyPath, privateKey }) {
     if (!host) throw new Error('host required');
     if (!user) throw new Error('user required');
+    const id = 'host-' + crypto.randomBytes(4).toString('hex');
+    // Pasted/uploaded private key → stored per-host under data/ssh, 0600.
+    // BatchMode ssh can't prompt, so passphrase-protected keys won't work.
+    if (privateKey && String(privateKey).trim()) {
+      const body = String(privateKey).replace(/\r\n/g, '\n').trim() + '\n';
+      if (!/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(body)) throw new Error('Not a valid private key (missing BEGIN PRIVATE KEY header)');
+      if (/ENCRYPTED/.test(body.split('\n').slice(0, 3).join('\n'))) throw new Error('Key is passphrase-protected — ssh runs non-interactively; provide an unencrypted key');
+      fs.mkdirSync(this._sshDir, { recursive: true, mode: 0o700 });
+      const kp = path.join(this._sshDir, `${id}.key`);
+      fs.writeFileSync(kp, body, { mode: 0o600 });
+      keyPath = kp;
+    }
     const rec = {
-      id: 'host-' + crypto.randomBytes(4).toString('hex'),
+      id,
       name: String(name || host).slice(0, 60),
       user: String(user), host: String(host),
       port: Number(port) || 22,
@@ -71,8 +83,12 @@ class HostManager {
   }
 
   remove(id) {
-    this.get(id);
-    this._state.hosts = this._state.hosts.filter(h => h.id !== id);
+    const h = this.get(id);
+    // uploaded per-host key files are ours to clean up
+    if (h.keyPath && h.keyPath.startsWith(this._sshDir) && h.keyPath.endsWith(`${id}.key`)) {
+      try { fs.unlinkSync(h.keyPath); } catch {}
+    }
+    this._state.hosts = this._state.hosts.filter(x => x.id !== id);
     this._discoveryCache.delete(id);
     this._save();
   }

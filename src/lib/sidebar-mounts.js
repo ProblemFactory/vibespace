@@ -275,9 +275,36 @@ export function installSidebarMounts(Sidebar) {
         { key: 'keyChoice', label: 'SSH key', type: 'select', options: [
           ['default', 'My ~/.ssh keys (default)'],
           ['app', hd.key.exists ? 'VibeSpace key (data/ssh)' : 'VibeSpace key — generate now'],
+          ['paste', 'Paste / upload a private key…'],
         ] },
       ], 'Add host', async (v, { close }) => {
         let keyPath = null;
+        let privateKey = null;
+        if (v.keyChoice === 'paste') {
+          privateKey = await new Promise((resolve) => {
+            this._mountsDialog('Private key', [], 'Use this key', async (_, ctx) => {
+              const val = document.getElementById('mounts-key-paste')?.value || '';
+              if (!val.trim()) throw new Error('Paste or upload the key first');
+              ctx.close(); resolve(val);
+            });
+            const ov = document.getElementById('mounts-dialog-overlay');
+            const body = ov.querySelector('.dialog-body');
+            const note = document.createElement('p');
+            note.className = 'agents-note';
+            note.textContent = 'Stored server-side with 0600 permissions (data/ssh/). Must be passphrase-free — ssh runs non-interactively.';
+            const ta = document.createElement('textarea');
+            ta.id = 'mounts-key-paste';
+            ta.placeholder = '-----BEGIN OPENSSH PRIVATE KEY-----';
+            ta.style.cssText = 'min-height:130px;font-size:10px;font-family:monospace';
+            const up = document.createElement('input');
+            up.type = 'file';
+            up.onchange = () => {
+              const f = up.files[0];
+              if (f) { const r = new FileReader(); r.onload = () => { ta.value = r.result; }; r.readAsText(f); }
+            };
+            body.prepend(note, ta, up);
+          });
+        }
         if (v.keyChoice === 'app') {
           let k = hd.key;
           if (!k.exists) {
@@ -302,7 +329,7 @@ export function installSidebarMounts(Sidebar) {
           }
           keyPath = k.path;
         }
-        const r = await api('/api/hosts', { method: 'POST', body: JSON.stringify({ name: v.name, user: v.user, host: v.host, port: v.port, keyPath }) });
+        const r = await api('/api/hosts', { method: 'POST', body: JSON.stringify({ name: v.name, user: v.user, host: v.host, port: v.port, keyPath, privateKey }) });
         close();
         // immediate connectivity test so the row shows a real status
         this._hostStatus = this._hostStatus || {};
