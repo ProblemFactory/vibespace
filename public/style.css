@@ -1663,3 +1663,11 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
   border-radius: var(--radius-sm); padding: 3px 8px; font-size: 11px; white-space: nowrap;
   box-shadow: 0 4px 12px rgba(0,0,0,0.35);
 }
+
+/* While width-picking, the spring popover parks mid-screen so it can never
+   cover a pickable bar element (inline top/left overridden; removing the
+   class restores the anchored position) */
+.cz-spring-pop.cz-parked {
+  top: 50% !important; left: 50% !important; transform: translate(-50%, -50%);
+  box-shadow: 0 10px 36px rgba(0,0,0,0.5);
+}

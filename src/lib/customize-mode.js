@@ -307,11 +307,19 @@ export class CustomizeMode {
       save({ mode: 'fixed' });
       syncUi();
       matchBtn.textContent = 'Done (0)';
+      // Park the popover mid-screen while picking — anchored next to the
+      // spring it can cover exactly the bar elements the user wants to click
+      // (e.g. spring in the extra row → popover sits over "☰ VibeSpace").
+      // All pickable elements live in the top/bottom bars, so center is safe.
+      pop.classList.add('cz-parked');
       this._startWidthPick(el, (totalPx, count) => {
         save({ px: totalPx, pct: null });
         syncUi();
         matchBtn.textContent = `Done (${count} · ${totalPx}px)`;
-      }, () => { matchBtn.textContent = 'Match…'; });
+      }, () => {
+        pop.classList.remove('cz-parked');
+        matchBtn.textContent = 'Match…';
+      });
     };
 
     const syncUi = () => {
