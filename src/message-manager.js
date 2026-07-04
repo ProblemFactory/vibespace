@@ -148,8 +148,15 @@ class MessageManager {
   /** Harness tasks (TaskCreate/TaskUpdate) → TodoWrite-shaped todos meta */
   _emitHarnessTodos(emit) {
     if (!emit || !this._harnessTasks?.size) return;
-    const todos = [...this._harnessTasks.values()]
-      .filter(t => t.status !== 'deleted')
+    // Harness tasks accumulate over the whole session (unlike TodoWrite,
+    // which replaces its working set) — show the current working set only:
+    // everything unfinished + the 5 most recent completions.
+    const all = [...this._harnessTasks.values()].filter(t => t.status !== 'deleted');
+    const openTasks = all.filter(t => t.status !== 'completed');
+    const doneTail = all.filter(t => t.status === 'completed')
+      .sort((a, b) => Number(a.id) - Number(b.id)).slice(-5);
+    const todos = [...doneTail, ...openTasks]
+      .sort((a, b) => Number(a.id) - Number(b.id))
       .map(t => ({ content: t.content, status: t.status, activeForm: t.activeForm }));
     this._emit({ op: 'meta', subtype: 'todos', data: todos });
   }
