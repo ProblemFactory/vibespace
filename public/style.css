@@ -1404,3 +1404,31 @@ body.taskbar-autohide.taskbar-revealed #taskbar { transform: translateY(0); }
   position: fixed; left: 0; right: 0; bottom: 0; height: 6px; z-index: 9499;
 }
 body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
+
+/* ── First-run onboarding wizard (upgrades #welcome) ── */
+#welcome.onboarding .welcome-content { max-width: 520px; }
+.ob-sub { color: var(--text-secondary); margin: -6px 0 18px; font-size: 13px; }
+.ob-points { display: flex; flex-direction: column; gap: 12px; text-align: left; margin-bottom: 22px; }
+.ob-point { display: flex; flex-direction: column; gap: 2px; padding: 10px 14px;
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; }
+.ob-point b { font-size: 13px; color: var(--text); }
+.ob-point span { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+.ob-backends { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
+.ob-backend { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 14px; background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: 8px; font-size: 13px; }
+.ob-backend .ob-ver { font-size: 11px; color: var(--text-dim); margin-left: 6px; }
+.ob-ok { color: var(--green); font-weight: 600; font-size: 12px; }
+.ob-warn { color: var(--yellow); font-size: 12px; }
+.ob-bad { color: var(--red); font-size: 12px; }
+.ob-backend .welcome-btn { padding: 4px 12px; font-size: 12px; margin-left: 8px; }
+.ob-recheck { align-self: center; padding: 4px 14px !important; font-size: 12px !important; }
+.ob-loading { color: var(--text-dim); font-size: 12px; padding: 12px; }
+.ob-cwd { width: 100%; box-sizing: border-box; padding: 10px 12px; font-size: 13px; margin-bottom: 16px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--bg-input); color: var(--text); }
+.ob-cwd:focus { outline: none; border-color: var(--accent); }
+.ob-alt { margin-top: 12px; font-size: 12px; color: var(--text-dim); }
+.ob-alt a { color: var(--text-secondary); }
+.ob-dots { display: flex; gap: 6px; justify-content: center; margin-top: 20px; }
+.ob-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border); }
+.ob-dot.active { background: var(--accent); }

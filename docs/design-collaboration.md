@@ -1,106 +1,96 @@
 # Design: Team Collaboration & Remote Sessions
 
-Status: **design** (phase 0 shipped: password auth + Docker). This document is the concrete plan for turning VibeSpace from a personal workspace into a company-internal collaboration tool.
+Status: **v2 design** (supersedes the gateway/agent model). Shipped so far: password auth, Docker, first-run onboarding, shell terminals, in-product CLI login.
 
-## Scenarios to serve
+## The deployment model (decided)
 
-1. **Shared workspace** — a team deploys one VibeSpace on a beefy shared box; members log in, see each other's sessions, and can watch/continue them.
-2. **Shared storage** — project folders (and agent memory) live on a common bucket/NFS so anyone can open, share, and continue work on the same code.
-3. **Multi-device / multi-host** — one person has Claude running on their workstation *and* wants sessions on a GPU cluster node, managed from a single UI. Start a session at the office, continue it from home on a different host.
+**One cloud container per user.** VibeSpace stays strictly single-user — no in-app accounts, no multi-tenancy. The company provisions a container per person (compose/k8s), injects that person's credentials as env vars, and hands them a URL + password. Everything below builds on this.
 
-## Core insight
+Consequences:
+- Auth stays the simple per-instance password (already shipped).
+- "Presence / shared sessions inside one instance" is out of scope — collaboration happens through **shared storage** and **shared remote hosts**, not shared UIs.
+- Admin provisioning is the natural place for org-wide config (S3 keys, default hosts, SSH keys).
 
-A VibeSpace server already *is* a "session host agent": dtach-backed session persistence, lock-first discovery, a WS protocol for attach/input/output, and multi-client sync. Collaboration is therefore not a rewrite — it's:
+## Remote sessions: SSH out, not agents in
 
-- **auth + identity** in front of one host (done / next),
-- **an aggregation layer** across many hosts,
-- **storage conventions** underneath,
-- **session portability** (a Claude session is a single JSONL file — this makes "move my session to the cluster" genuinely easy).
+VibeSpace never gets installed on target machines. Your VibeSpace container is the **SSH client**; remote machines (GPU cluster, build boxes) just need sshd.
 
-## Architecture
+### How sessions run remotely
+
+The local dtach + wrapper architecture doesn't care what the child process is:
+
+| Mode | Local child process | Notes |
+|------|--------------------|-------|
+| Remote terminal | `ssh -t user@host -- dtach -A /tmp/vs-<id> claude …` | dtach **on the remote** too — a network drop doesn't kill the agent; reattach = re-ssh + dtach attach |
+| Remote chat | `ssh user@host -- dtach … claude --output-format stream-json …` piped through the local chat-wrapper | stream-json flows over ssh stdio; the existing wrapper/normalizer stack works unmodified |
+| Remote shell | `ssh -t user@host` under the shell adapter | works today by typing ssh in a Terminal window; the host manager makes it one click |
+
+Key property: the **remote transcript lives on the remote host** (`~/.claude` there), so resume/fork must target the same host — the session record carries `host`, and the sidebar groups by host. This is consistent by construction (no cross-host file sharing of transcripts, which we already ruled out — corruption + PID-lock false positives).
+
+### Host manager + bootstrap (new UI)
+
+"Hosts" panel (sidebar section or settings page):
+1. **Add host** — `user@hostname`, key selection (container's `~/.ssh`, admin-provisioned or generated in-app + "copy public key" for authorized_keys), connectivity test.
+2. **Bootstrap** — one click runs a versioned script over ssh: checks/installs `dtach`, `node` (if absent, via nvm), `claude` (native installer), `codex` (optional). Idempotent; streams output into a terminal window so nothing is hidden.
+3. **Log in remotely** — opens a terminal running `ssh -t host claude` for the CLI's own login flow (same UX as local in-product login).
+4. **New session on host** — the New Session dialog gains a Host dropdown (local + configured hosts).
+
+Session discovery on remotes (which sessions exist there) runs over ssh on demand (`ls ~/.claude/projects` + lock files) — no daemon needed; cached with a short TTL.
+
+## Unified mounts: one company bucket, per-user prefixes
+
+### Provisioning convention (admin side)
+
+Each user's container is started with:
 
 ```
-                 ┌──────────────────────────── Gateway (VibeSpace) ───────────────┐
- Browser ──auth──►  UI + own sessions          host registry: data/hosts.json     │
-                 │  /remote/<host>/api/…  ────────────────┐                       │
-                 │  /remote/<host>/ws     ──────────────┐ │ (service token)       │
-                 └───────────────────────────────────────┼─┼───────────────────────┘
-                                                         ▼ ▼
-                                   ┌──────────────┐   ┌──────────────┐
-                                   │ Agent: ws-01 │   │ Agent: gpu-07 │   … each is a plain
-                                   │ (VibeSpace)  │   │ (VibeSpace)   │     VibeSpace server
-                                   └──────────────┘   └──────────────┘
-                                          │                  │
-                                   local FS + shared mounts (NFS / JuiceFS-on-S3 / rclone)
+VIBESPACE_S3_ENDPOINT=https://s3.company.internal
+VIBESPACE_S3_BUCKET=company-workspace
+VIBESPACE_S3_PREFIX=users/alice
+VIBESPACE_S3_ACCESS_KEY=…
+VIBESPACE_S3_SECRET_KEY=…
 ```
 
-### Why a gateway (reverse-proxy aggregation), not N direct connections
+Recommended IAM scoping per user key:
+- **RW** on `users/<me>/**`
+- **RO** on `users/*/shared/**` — only content each user places under their own `shared/` sub-prefix is visible to others (share-by-location, no ACL churn)
+- optional **RW** on `team/**` for a common area
 
-The browser could open WebSockets to every host directly, but that means per-host cookies/CORS/TLS and N login flows. Instead the **gateway proxies** `/remote/<host>/...` to each agent using a per-host service token (stored server-side in `data/hosts.json`). Users authenticate **once** at the gateway; the client code keeps talking to a single origin. Any VibeSpace install can act as gateway, agent, or both — no new binary.
+The container needs FUSE for mounting: `devices: [/dev/fuse]` + `cap_add: [SYS_ADMIN]` in compose (template provided). rclone ships in the image.
 
-### Client changes (moderate, well-localized)
+### Mounts manager (new UI)
 
-- `WsManager` → one instance per host (`hosts.js` registry; default host = ''). All REST helpers take an optional host prefix.
-- Every `openSpec` gains a `host` field (default local). `replayOpenSpec` routes create/attach/resume through the right host's WS + REST prefix. Windows show a small host badge; the sidebar groups sessions **Host ▸ Folder ▸ Session** (reuses the existing folder-group machinery).
-- Layout sync stays per-gateway (layouts live where you log in), so your workspace arrangement follows *you*, while sessions live on their hosts.
+A "Mounts" panel managing `data/mounts.json`; each entry spawns a supervised `rclone mount` and shows health:
 
-### Server changes (small)
+1. **My storage** — one click mounts `s3:$BUCKET/$PREFIX` at `/workspace/s3` (auto-offered on first run when the env vars are present).
+2. **Share a folder** — pick any folder under your prefix that lives in `shared/` (or the UI moves/copies it there), then copy the **share link**:
+   `vibes://s3/company-workspace/users/alice/shared/whisper-finetune`
+   A share is just a *location* — revoke by moving the folder out of `shared/`.
+3. **Import a share** — paste a link → mounted read-only at `/workspace/shares/<name>`. The link carries no secrets; access comes from the importer's own key (RO on `users/*/shared/**`).
 
-- `GET/POST /api/hosts` — registry CRUD (name, base URL, service token); connectivity probe.
-- `/remote/<host>/*` — HTTP + WS proxy with the service token injected; gateway-side auth already guards it.
-- Agent side needs nothing new: service token = a long-lived login token (already implemented).
+### Honest limits (documented in the UI, not buried)
 
-## Shared storage
+- **rclone mount is not POSIX**: no locking, weak rename semantics, eventual visibility. Perfect for datasets, artifacts, docs, checkpoints. **Wrong for live git working trees and for `~/.claude` transcript dirs** — code collaboration stays on git; agent transcripts stay on local/host volumes.
+- Two writers on the same prefix = last-writer-wins at file granularity. The `shared/` convention is RO for importers precisely to keep this safe; use `team/` knowingly.
+- If the org later wants real POSIX shared volumes, JuiceFS (metadata DB + same S3) slots into the same Mounts manager as a second backend type.
 
-### Project folders
+## First-run experience (shipped)
 
-| Backend | How | Notes |
-|---------|-----|-------|
-| **NFS** (recommended for LAN) | mount to the same path on every host, e.g. `/workspace/shared` | Real POSIX; Claude/git/watchers all just work |
-| **S3-compatible** | **JuiceFS** (metadata on Redis/SQLite, data on S3) mounted at `/workspace/shared` | POSIX on top of a bucket; good for cross-site |
-| | rclone mount as fallback | Weaker consistency; fine for read-mostly sharing, avoid for active git repos |
-| **Google Drive** | rclone mount | Personal/small-team convenience only — latency + no real locking |
-
-Convention: same mount path on every host (`/workspace/shared/<project>`), so a session's `cwd` is valid anywhere and **cross-host resume needs no path translation**. Personal areas at `/workspace/<user>`.
-
-### Agent memory & transcripts — what to share and what not to
-
-- **Share via the repo/mount (already works today):** `CLAUDE.md`, `.claude/` project settings, and any in-repo memory directories. Whatever lives in the project folder is shared by the storage layer for free.
-- **Auto-memory** (`~/.claude/projects/<enc>/memory/`): shareable and valuable (team-wide "lessons learned"), but writes must not race. Plan: per-project symlink of that directory into the shared project folder (`<project>/.claude/team-memory`), advisory "last writer wins" (memory files are append-mostly Markdown; conflicts are rare and human-mergeable).
-- **Transcripts (`~/.claude/projects/**/*.jsonl`): do NOT naively share the directory across hosts.** Two hosts appending the same JSONL corrupts it, and lock files contain host-local PIDs (a foreign lock whose PID happens to exist locally would read as "running"). Sharing conversations happens at the **VibeSpace layer** instead — view/attach through the gateway — plus explicit migration (below).
-
-### Session migration = the multi-device answer
-
-A Claude session is **one JSONL file**. "Continue on another machine" becomes a first-class VibeSpace feature instead of a storage hack:
-
-> **Move to host…** (sidebar action): gateway streams the transcript file from host A → host B's project dir (same `cwd` by the mount convention), then issues `claude --resume <id>` on B and marks A's copy archived (`.moved-to-<host>`). Live sessions are terminated first (with confirmation).
-
-This dodges every locking/corruption problem: exactly one host owns a session's file at a time, and the move is a copy + resume that reuses existing endpoints (`/api/download` + upload + resume) plus one new orchestration route.
-
-## Identity & sharing model
-
-Phased, staying compatible with the current single-password mode:
-
-1. **Named users** — `data/auth.json` grows `users: { alice: {hash,salt}, … }`; login form gains a name field; tokens carry the username. Single-password mode keeps working (user = "team").
-2. **Presence** — the server already tracks per-session clients; broadcast `{sessionId: [users]}` and show avatars on session cards/window title bars ("alice is watching"). Cheap and high-value for collaboration.
-3. **Session visibility** — default all-visible (trusted team). Later: `owner` on sessions, "private" flag hiding them from others' sidebars; shared-folder sessions always visible.
-4. **Share links** — `#session=<backend>:<id>@<host>` URL fragment that opens/attaches that session on load (openSpec replay already knows how to build such windows).
-5. **Guest/read-only attach** — attach with `readOnly:true` (ChatView already supports read-only; terminal gets input suppressed server-side).
+Fresh container → onboarding wizard: what VibeSpace is → live Claude/Codex install+login status with one-click in-product login → pick a folder, first session. Re-runnable from ⚙ → "Show welcome tour". Next iteration: when `VIBESPACE_S3_*` is present, the wizard offers "Mount my company storage" as a step.
 
 ## Roadmap
 
 | Phase | Scope | Size |
 |-------|-------|------|
-| **P0 — done** | Password auth (scrypt + tokens + rate limit + WS guard), Docker + compose, random first-boot password, UI chrome customization | shipped |
-| **P1** | Named users, presence indicators, share-session URLs, read-only attach | S |
-| **P2** | Host registry + gateway proxy (`/remote/<host>` HTTP+WS), sidebar host grouping, host badge on windows, openSpec `host` field | M |
-| **P3** | Session migration between hosts (transcript copy + cross-host resume + archive marker) | M |
-| **P4** | Storage recipes as compose profiles + docs (NFS / JuiceFS / rclone), team-memory symlink convention | S (mostly docs) |
-| **P5** | Org-wide transcript archive → bucket + search UI (builds on the existing full-file streaming search) | L, later |
+| **P0 — done** | Auth, Docker (verified E2E), onboarding wizard, shell terminals, in-product CLI login, chrome customization | shipped |
+| **P1** | Mounts manager MVP: env-driven "my storage" mount, share links, RO import; rclone + FUSE in the image/compose | M |
+| **P2** | Host manager: add/test hosts, key handling, one-click bootstrap (dtach/node/claude), remote **terminal** sessions via ssh+remote-dtach | M |
+| **P3** | Remote **chat** sessions (stream-json over ssh through the existing wrapper), host-tagged session records, remote discovery over ssh | M |
+| **P4** | Wizard S3 step, share management polish (list my shares, revoke = move), JuiceFS backend option | S–M |
 
-## Risks / open questions
+## Open questions for the admin side
 
-- **Claude credentials are per-host** (each agent logs in once via `docker exec`). Org-managed API keys would centralize this; OAuth tokens must NOT be shared across hosts (refresh-token rotation — see the usage-monitoring lessons in CLAUDE.md).
-- **Gateway WS fan-in**: N hosts × M clients through one proxy — fine at company scale (tens), revisit for hundreds.
-- **Clock skew** between hosts affects timestamp-ordered merges (minimap time coordinates) — require NTP on agents.
-- **Same-session concurrent resume on two hosts** is prevented socially (migration flow) not mechanically in P3; a gateway-held session→host ownership map can harden this later.
+1. IAM per-user keys with the `shared/` RO pattern — confirm the object store supports prefix-scoped policies (MinIO/AWS both do).
+2. Container FUSE privileges — acceptable in the target runtime? (k8s needs a device plugin or privileged; plain docker compose is trivial.)
+3. SSH key distribution: admin-injected (`~/.ssh` volume) vs in-app generated + user self-serves `authorized_keys`. Both supported; pick the default.
+4. Claude/Codex seats: remote hosts each need their own CLI login (transcripts + creds live per host). Fine for personal workstations; for shared cluster nodes decide between per-user unix accounts (clean) or a service account (shared history — probably not wanted).

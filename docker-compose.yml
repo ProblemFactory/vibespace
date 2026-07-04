@@ -16,14 +16,24 @@ services:
       # - VIBESPACE_PASSWORD=change-me        # omit → random password on first boot (see logs)
       - NO_AUTO_UPDATE=1
       # - CLAUDE_CMD=claude                   # override CLI paths if needed
+      # Company object storage (per-user prefix) — enables the Mounts manager.
+      # See docs/design-collaboration.md for the IAM scoping convention.
+      # - VIBESPACE_S3_ENDPOINT=https://s3.company.internal
+      # - VIBESPACE_S3_BUCKET=company-workspace
+      # - VIBESPACE_S3_PREFIX=users/alice
+      # - VIBESPACE_S3_ACCESS_KEY=…
+      # - VIBESPACE_S3_SECRET_KEY=…
     volumes:
       - vibespace-data:/app/data              # sessions, layouts, settings, auth
       - vibespace-claude:/home/vibe/.claude   # claude credentials + transcripts
       - ./workspace:/workspace                # your projects (bind-mount anything)
     # Shared team storage examples (see docs/design-collaboration.md):
     #   - /mnt/nfs/team-projects:/workspace
-    #   - type: volume
-    #     source: s3-projects           # rclone/JuiceFS-backed volume driver
+    # S3 mounts (rclone/FUSE) additionally require:
+    # devices:
+    #   - /dev/fuse
+    # cap_add:
+    #   - SYS_ADMIN
 
 volumes:
   vibespace-data:

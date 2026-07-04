@@ -24,7 +24,7 @@ FROM node:22-bookworm-slim
 # fontconfig: /api/fonts (fc-list) — optional but small
 RUN apt-get update && apt-get install -y --no-install-recommends \
       dtach procps psmisc zip unzip tar git curl ca-certificates \
-      python3 make g++ fontconfig openssh-client \
+      python3 make g++ fontconfig openssh-client rclone fuse3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Claude Code CLI (root install so it lands in the global PATH).

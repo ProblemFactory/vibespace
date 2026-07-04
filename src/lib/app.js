@@ -308,6 +308,118 @@ class App {
   _setupWelcome() {
     document.getElementById('welcome-new').addEventListener('click', () => this.showNewSessionDialog());
     document.getElementById('welcome-files').addEventListener('click', () => this.openFileExplorer());
+    this._maybeShowOnboarding();
+  }
+
+  // ── First-run onboarding wizard ──
+  // Shown once per browser when this instance has no sessions yet (fresh
+  // container / new user). Guides: what VibeSpace is → connect Claude/Codex
+  // (live install/login status + one-click login) → first session.
+  async _maybeShowOnboarding() {
+    if (localStorage.getItem('vs-onboarded')) return;
+    let hasSessions = false;
+    try {
+      const d = await fetchJson('/api/sessions');
+      hasSessions = (d.sessions || []).length > 0;
+    } catch {}
+    if (hasSessions) { localStorage.setItem('vs-onboarded', '1'); return; }
+    this._showOnboarding();
+  }
+
+  _showOnboarding(force = false) {
+    const welcome = document.getElementById('welcome');
+    if (!welcome) return;
+    welcome.classList.remove('hidden');
+    welcome.classList.add('onboarding');
+    const content = welcome.querySelector('.welcome-content');
+    content.dataset.saved = content.dataset.saved || content.innerHTML; // restore target on finish
+    let step = 0;
+    const done = () => {
+      localStorage.setItem('vs-onboarded', '1');
+      welcome.classList.remove('onboarding');
+      content.innerHTML = content.dataset.saved;
+      // re-wire the plain welcome buttons (innerHTML replace dropped listeners)
+      content.querySelector('#welcome-new')?.addEventListener('click', () => this.showNewSessionDialog());
+      content.querySelector('#welcome-files')?.addEventListener('click', () => this.openFileExplorer());
+      this._checkWelcome();
+    };
+
+    const render = () => {
+      const dots = [0, 1, 2].map(i => `<span class="ob-dot${i === step ? ' active' : ''}"></span>`).join('');
+      if (step === 0) {
+        content.innerHTML = `
+          <h1>Welcome to VibeSpace</h1>
+          <p class="ob-sub">Your workspace for coding agents</p>
+          <div class="ob-points">
+            <div class="ob-point"><b>Sessions that never die</b><span>Agents keep running through restarts, refreshes, and network drops — reattach from any device.</span></div>
+            <div class="ob-point"><b>A real window manager</b><span>Tile agent chats, terminals, files and editors across virtual desktops.</span></div>
+            <div class="ob-point"><b>Chat or terminal, your choice</b><span>Every session can run as a structured chat or a raw terminal TUI.</span></div>
+          </div>
+          <div class="welcome-actions">
+            <button class="welcome-btn" id="ob-next">Get started</button>
+            <button class="welcome-btn welcome-btn-secondary" id="ob-skip">Skip tour</button>
+          </div>
+          <div class="ob-dots">${dots}</div>`;
+        content.querySelector('#ob-next').onclick = () => { step = 1; render(); };
+        content.querySelector('#ob-skip').onclick = done;
+      } else if (step === 1) {
+        content.innerHTML = `
+          <h1>Connect your agents</h1>
+          <p class="ob-sub">VibeSpace drives the official CLIs — log in once, credentials persist</p>
+          <div class="ob-backends" id="ob-backends"><div class="ob-loading">Checking…</div></div>
+          <div class="welcome-actions">
+            <button class="welcome-btn" id="ob-next">Continue</button>
+            <button class="welcome-btn welcome-btn-secondary" id="ob-back">Back</button>
+          </div>
+          <div class="ob-dots">${dots}</div>`;
+        content.querySelector('#ob-next').onclick = () => { step = 2; render(); };
+        content.querySelector('#ob-back').onclick = () => { step = 0; render(); };
+        const refresh = async () => {
+          let st = {};
+          try { st = await fetchJson('/api/backend-status'); } catch {}
+          const card = (key, label, loginCmd) => {
+            const b = st[key] || {};
+            const state = !b.installed ? '<span class="ob-bad">not installed</span>'
+              : b.loggedIn ? '<span class="ob-ok">✓ ready</span>'
+              : '<span class="ob-warn">installed, not logged in</span>';
+            const btn = !b.installed ? '' : b.loggedIn ? '' : `<button class="welcome-btn ob-login" data-cmd="${loginCmd}">Log in</button>`;
+            return `<div class="ob-backend"><div><b>${label}</b> ${b.version ? `<span class="ob-ver">${escHtml(b.version)}</span>` : ''}</div><div>${state} ${btn}</div></div>`;
+          };
+          const el = content.querySelector('#ob-backends');
+          if (!el) return;
+          el.innerHTML = card('claude', 'Claude Code', 'claude') + card('codex', 'Codex', 'codex login')
+            + '<button class="welcome-btn welcome-btn-secondary ob-recheck">Re-check</button>';
+          el.querySelectorAll('.ob-login').forEach(btn => {
+            btn.onclick = () => this.openShellTerminal(undefined, { initialCommand: btn.dataset.cmd });
+          });
+          el.querySelector('.ob-recheck').onclick = refresh;
+        };
+        refresh();
+      } else {
+        content.innerHTML = `
+          <h1>Start your first session</h1>
+          <p class="ob-sub">Pick a project folder — the agent works inside it</p>
+          <input type="text" id="ob-cwd" class="ob-cwd" placeholder="~/projects/my-app" autocomplete="off">
+          <div class="welcome-actions">
+            <button class="welcome-btn" id="ob-chat">Start Chat Session</button>
+            <button class="welcome-btn welcome-btn-secondary" id="ob-term">Start Terminal Session</button>
+          </div>
+          <div class="ob-alt"><a href="#" id="ob-files">or browse files first</a> · <a href="#" id="ob-finish">finish tour</a></div>
+          <div class="ob-dots">${dots}</div>`;
+        const cwdInput = content.querySelector('#ob-cwd');
+        fetchJson('/api/home').then(d => { cwdInput.placeholder = d.home; }).catch(() => {});
+        const go = (mode) => {
+          const cwd = cwdInput.value.trim() || undefined;
+          done();
+          this.createSession({ cwd, mode, backend: 'claude' });
+        };
+        content.querySelector('#ob-chat').onclick = () => go('chat');
+        content.querySelector('#ob-term').onclick = () => go('terminal');
+        content.querySelector('#ob-files').onclick = (e) => { e.preventDefault(); done(); this.openFileExplorer(); };
+        content.querySelector('#ob-finish').onclick = (e) => { e.preventDefault(); done(); };
+      }
+    };
+    render();
   }
 
   _setupGlobalSettings() {
@@ -428,6 +540,13 @@ class App {
     };
     loginRow.append(mkLogin('Log in to Claude', 'claude'), mkLogin('Log in to Codex', 'codex login'));
     pop.append(loginRow);
+
+    const tourBtn = document.createElement('button');
+    tourBtn.className = 'file-tool-btn';
+    tourBtn.style.cssText = 'width:100%;margin-top:6px;';
+    tourBtn.textContent = 'Show welcome tour';
+    tourBtn.onclick = () => { pop.remove(); this._showOnboarding(true); };
+    pop.append(tourBtn);
 
     // Sign out (only relevant when password auth is enabled server-side)
     if (this._authEnabled) {

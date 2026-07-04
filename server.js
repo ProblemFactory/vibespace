@@ -1119,6 +1119,34 @@ function createSessionMessages(session, sessionId) {
 // ── Session API (extracted to src/routes/sessions.js) ──
 const { router: sessionsRouter, setup: setupSessions } = require('./src/routes/sessions');
 setupSessions({ activeSessions, webuiPids, refreshWebuiPids, createSessionMessages, BUFFERS_DIR, PERMISSION_MODES, execFileSync });
+// Backend readiness for onboarding: is each CLI installed + logged in?
+// Login detection is best-effort file existence — never spawns the CLIs.
+app.get('/api/backend-status', (req, res) => {
+  const out = {};
+  const probe = (cmd) => {
+    try {
+      const v = execFileSync(cmd, ['--version'], { encoding: 'utf-8', timeout: 5000 }).trim();
+      return { installed: true, version: v.split('\n')[0] };
+    } catch { return { installed: false, version: null }; }
+  };
+  out.claude = probe(CLAUDE_CMD);
+  out.claude.loggedIn = false;
+  try {
+    if (process.platform === 'darwin') {
+      execFileSync('security', ['find-generic-password', '-s', 'Claude Code-credentials'], { timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'] });
+      out.claude.loggedIn = true;
+    } else {
+      const creds = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', '.credentials.json'), 'utf-8'));
+      out.claude.loggedIn = !!(creds?.claudeAiOauth?.accessToken || creds?.accessToken);
+    }
+  } catch {}
+  if (!out.claude.loggedIn && process.env.ANTHROPIC_API_KEY) out.claude.loggedIn = true;
+  out.codex = probe(CODEX_CMD);
+  out.codex.loggedIn = false;
+  try { out.codex.loggedIn = fs.existsSync(path.join(os.homedir(), '.codex', 'auth.json')); } catch {}
+  res.json(out);
+});
+
 app.use(sessionsRouter);
 
 // ── Usage / Rate Limit ──
