@@ -337,6 +337,7 @@ class App {
     const done = () => {
       localStorage.setItem('vs-onboarded', '1');
       welcome.classList.remove('onboarding');
+      welcome.classList.add('hidden'); // _checkWelcome re-shows it only on an empty desktop
       content.innerHTML = content.dataset.saved;
       // re-wire the plain welcome buttons (innerHTML replace dropped listeners)
       content.querySelector('#welcome-new')?.addEventListener('click', () => this.showNewSessionDialog());
@@ -418,7 +419,19 @@ class App {
         content.querySelector('#ob-files').onclick = (e) => { e.preventDefault(); done(); this.openFileExplorer(); };
         content.querySelector('#ob-finish').onclick = (e) => { e.preventDefault(); done(); };
       }
+      // ✕ close on every step (Escape works too)
+      const close = document.createElement('button');
+      close.className = 'ob-close';
+      close.innerHTML = '\u2715';
+      close.title = 'Close tour';
+      close.onclick = done;
+      content.appendChild(close);
     };
+    this._obKeyHandler?.abort?.();
+    this._obKeyHandler = new AbortController();
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && welcome.classList.contains('onboarding')) { e.stopPropagation(); done(); this._obKeyHandler.abort(); }
+    }, { capture: true, signal: this._obKeyHandler.signal });
     render();
   }
 
@@ -527,39 +540,33 @@ class App {
     themeRow.append(themeSel, editBtn);
     pop.append(themeLabel, themeRow, sizeLabel, sizeRow, fontLabel, fontSel, allSettingsLink);
 
-    // Backend login helpers — for teammates who don't live in a terminal:
-    // one click opens a shell terminal with the CLI already started; they
-    // follow the CLI's own /login flow from there.
-    const loginRow = document.createElement('div');
-    loginRow.style.cssText = 'display:flex;gap:6px;margin-top:8px;';
-    const mkLogin = (label, cmd) => {
-      const b = document.createElement('button');
-      b.className = 'file-tool-btn'; b.style.flex = '1'; b.textContent = label;
-      b.onclick = () => { pop.remove(); this.openShellTerminal(undefined, { initialCommand: cmd }); };
-      return b;
+    // Account / help section — compact menu rows (matches context-menu look)
+    const menu = document.createElement('div');
+    menu.className = 'gs-menu';
+    const item = (svg, label, onClick, danger = false) => {
+      const el = document.createElement('div');
+      el.className = 'gs-menu-item' + (danger ? ' danger' : '');
+      el.innerHTML = `<span class="gs-menu-icon">${svg}</span><span>${label}</span>`;
+      el.onclick = () => { pop.remove(); onClick(); };
+      return el;
     };
-    loginRow.append(mkLogin('Log in to Claude', 'claude'), mkLogin('Log in to Codex', 'codex login'));
-    pop.append(loginRow);
-
-    const tourBtn = document.createElement('button');
-    tourBtn.className = 'file-tool-btn';
-    tourBtn.style.cssText = 'width:100%;margin-top:6px;';
-    tourBtn.textContent = 'Show welcome tour';
-    tourBtn.onclick = () => { pop.remove(); this._showOnboarding(true); };
-    pop.append(tourBtn);
-
-    // Sign out (only relevant when password auth is enabled server-side)
+    const I = {
+      key: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="11" r="3"/><path d="M7.5 8.5L13 3M11 5l2 2M9 7l1.5 1.5"/></svg>',
+      tour: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.5"/><path d="M8 7.5v3.5M8 5v.5"/></svg>',
+      out: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2H3v12h3M10 11l3-3-3-3M13 8H6"/></svg>',
+    };
+    menu.append(
+      item(I.key, 'Log in to Claude\u2026', () => this.openShellTerminal(undefined, { initialCommand: 'claude' })),
+      item(I.key, 'Log in to Codex\u2026', () => this.openShellTerminal(undefined, { initialCommand: 'codex login' })),
+      item(I.tour, 'Welcome tour', () => this._showOnboarding(true)),
+    );
     if (this._authEnabled) {
-      const signOut = document.createElement('button');
-      signOut.className = 'file-tool-btn';
-      signOut.style.cssText = 'width:100%;margin-top:8px;color:var(--red);';
-      signOut.textContent = 'Sign out';
-      signOut.onclick = async () => {
+      menu.append(item(I.out, 'Sign out', async () => {
         try { await fetch('/api/logout', { method: 'POST' }); } catch {}
         location.href = '/login';
-      };
-      pop.append(signOut);
+      }, true));
     }
+    pop.append(menu);
   }
 
   _setupGridConfig() {

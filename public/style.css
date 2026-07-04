@@ -1432,3 +1432,37 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .ob-dots { display: flex; gap: 6px; justify-content: center; margin-top: 20px; }
 .ob-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border); }
 .ob-dot.active { background: var(--accent); }
+
+/* Onboarding as a proper overlay ABOVE windows (welcome sits at z-index 1 and
+   windows cover it — "Show welcome tour" looked like a no-op with windows open) */
+#welcome.onboarding {
+  position: fixed; inset: 0; z-index: 9600;
+  background: color-mix(in srgb, var(--bg-root) 72%, transparent);
+  backdrop-filter: blur(5px);
+}
+#welcome.onboarding .welcome-content {
+  position: relative;
+  background: var(--bg-dialog); border: 1px solid var(--border); border-radius: 14px;
+  padding: 34px 40px 26px; box-shadow: 0 18px 60px rgba(0,0,0,0.45);
+}
+.ob-close {
+  position: absolute; top: 10px; right: 12px;
+  background: none; border: none; color: var(--text-dim); font-size: 14px;
+  cursor: pointer; padding: 4px 6px; border-radius: 6px;
+}
+.ob-close:hover { color: var(--text); background: var(--hover-overlay); }
+
+/* ⚙ popover: account/help menu section */
+.gs-menu {
+  margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--border);
+  display: flex; flex-direction: column;
+}
+.gs-menu-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; margin: 0 -4px; border-radius: var(--radius-sm);
+  font-size: 12px; color: var(--text); cursor: pointer;
+}
+.gs-menu-item:hover { background: var(--bg-hover); }
+.gs-menu-item.danger { color: var(--red); }
+.gs-menu-icon { display: inline-flex; width: 15px; justify-content: center; color: var(--text-secondary); }
+.gs-menu-item.danger .gs-menu-icon { color: var(--red); }
