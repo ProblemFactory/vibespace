@@ -1109,6 +1109,34 @@ syncStores.uploads = new SyncStore('uploads', path.join(__dirname, 'data', 'uplo
 setupPersistence({ dataDir: path.join(__dirname, 'data'), wss, WS_OPEN, getSyncStore, activeSessions, auth });
 app.use(persistenceRouter);
 
+// ── Hosts (ssh host registry for remote sessions — collaboration P2) ──
+const { HostManager } = require('./src/hosts');
+const hosts = new HostManager({ dataDir: path.join(__dirname, 'data') });
+app.get('/api/hosts', (req, res) => {
+  const k = hosts.keyInfo();
+  res.json({ hosts: hosts.list(), key: { exists: k.exists, path: k.path, publicKey: k.publicKey } });
+});
+app.post('/api/hosts', (req, res) => {
+  try { res.json({ success: true, id: hosts.add(req.body || {}) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/hosts/key', async (req, res) => {
+  try { res.json({ success: true, key: await hosts.generateKey() }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/hosts/:id/test', async (req, res) => {
+  try { res.json({ success: true, ...(await hosts.test(req.params.id)) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.get('/api/hosts/:id/sessions', async (req, res) => {
+  try { res.json({ sessions: await hosts.discoverSessions(req.params.id) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.delete('/api/hosts/:id', (req, res) => {
+  try { hosts.remove(req.params.id); res.json({ success: true }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 // ── Mounts (rclone S3 mounts + share minting — collaboration P1) ──
 const { MountManager } = require('./src/mounts');
 const mounts = new MountManager({
