@@ -10,7 +10,7 @@ import { CodeEditor } from './code-editor.js';
 import { LayoutManager } from './layout.js';
 import { ChatView } from './chat-view.js';
 import { Resizer } from './resizer.js';
-import { createPopover, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu } from './utils.js';
+import { createPopover, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog } from './utils.js';
 import { MobileNav } from './mobile-nav.js';
 import { setupDirAutocomplete } from './autocomplete.js';
 import { getAvailableFonts } from './terminal.js';
@@ -433,6 +433,312 @@ class App {
     refresh();
   }
 
+  // ── Shared modal shell for the config/password dialogs ──
+  _modal(title, { wide = false } = {}) {
+    document.getElementById('cfg-dialog-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'cfg-dialog-overlay';
+    overlay.className = 'dialog-overlay';
+    overlay.style.zIndex = '99998';
+    const dialog = document.createElement('div'); dialog.className = 'dialog';
+    if (wide) dialog.style.minWidth = '440px';
+    const header = document.createElement('div'); header.className = 'dialog-header';
+    const h3 = document.createElement('h3'); h3.textContent = title;
+    const closeBtn = document.createElement('button'); closeBtn.className = 'dialog-close'; closeBtn.textContent = '✕';
+    header.append(h3, closeBtn);
+    const body = document.createElement('div'); body.className = 'dialog-body cfg-dialog-body';
+    dialog.append(header, body);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+    closeBtn.onclick = close;
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) close(); });
+    overlay.tabIndex = -1;
+    overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
+    setTimeout(() => overlay.focus(), 0);
+    return { overlay, body, close };
+  }
+
+  // ── Backup & migrate (one dialog, Export | Import tabs) ──
+  // Merged into a single gs-menu entry after the menu grew too long.
+  _showTransferDialog(initialTab = 'export', presetFile = null) {
+    const { body: shell, close } = this._modal('Backup & migrate', { wide: true });
+    const tabs = document.createElement('div');
+    tabs.className = 'cfg-tabs';
+    const body = document.createElement('div');
+    body.className = 'cfg-tab-body';
+    shell.append(tabs, body);
+    const mk = (id, label) => {
+      const b = document.createElement('button');
+      b.className = 'cfg-tab';
+      b.dataset.tab = id;
+      b.textContent = label;
+      b.onclick = () => show(id);
+      tabs.appendChild(b);
+      return b;
+    };
+    mk('export', 'Export to file');
+    mk('import', 'Import from file');
+    const show = (id) => {
+      for (const t of tabs.children) t.classList.toggle('active', t.dataset.tab === id);
+      body.innerHTML = '';
+      if (id === 'export') this._buildExportBody(body, close);
+      else this._buildImportBody(body, close, presetFile);
+    };
+    show(initialTab);
+  }
+
+  // Non-sensitive sections default-checked; sensitive items (password record,
+  // agent CLI credentials) are opt-in and AES-encrypted under a passphrase.
+  async _buildExportBody(body, close) {
+    body.innerHTML = '<div class="ob-loading">Checking…</div>';
+    let info;
+    try { info = await fetchJson('/api/config/export-info'); }
+    catch { body.innerHTML = '<p class="agents-note">Failed to load export info.</p>'; return; }
+
+    body.innerHTML = '';
+    const mkRow = (id, label, desc, { checked = true, disabled = false } = {}) => {
+      const row = document.createElement('label');
+      row.className = 'cfg-row' + (disabled ? ' disabled' : '');
+      row.innerHTML = `<input type="checkbox" data-sec="${id}" ${checked && !disabled ? 'checked' : ''} ${disabled ? 'disabled' : ''}>
+        <span class="cfg-row-text"><b>${escHtml(label)}</b><span>${escHtml(desc)}</span></span>`;
+      return row;
+    };
+    const s = info.sections;
+    const secWrap = document.createElement('div');
+    secWrap.className = 'cfg-rows';
+    secWrap.append(
+      mkRow('settings', 'Settings', `${s.settings.count} customized option(s), incl. Customize-UI arrangement`),
+      mkRow('customThemes', 'Custom themes', `${s.customThemes.count} theme(s)`),
+      mkRow('layouts', 'Layouts & desktops', `${s.layouts.count} layout(s), ${s.layouts.desktops} desktop(s), custom grids`),
+      mkRow('userState', 'Session metadata', `stars, renames, ${s.userState.groups} group(s), per-session configs`),
+      mkRow('bookmarks', 'File bookmarks', `${s.bookmarks.count} bookmark(s)`),
+      mkRow('clientPrefs', 'This browser’s preferences', 'theme, font, taskbar height'),
+    );
+    const sensHead = document.createElement('div');
+    sensHead.className = 'cfg-sens-head';
+    sensHead.innerHTML = '<b>Sensitive</b><span> — off by default; encrypted with a passphrase. The file lets anyone who has it (and the passphrase) log in / use your agent accounts. Treat it like a key.</span>';
+    const sensWrap = document.createElement('div');
+    sensWrap.className = 'cfg-rows cfg-rows-sens';
+    sensWrap.append(
+      mkRow('vsPassword', 'VibeSpace password', info.sensitive.vsPassword ? 'password hash — same password works after import' : 'no password configured', { checked: false, disabled: !info.sensitive.vsPassword }),
+      mkRow('claudeCreds', 'Claude CLI credentials', info.sensitive.claudeCreds ? '~/.claude/.credentials.json — no re-login on the new instance' : 'not found on this machine', { checked: false, disabled: !info.sensitive.claudeCreds }),
+      mkRow('codexCreds', 'Codex CLI credentials', info.sensitive.codexCreds ? '~/.codex/auth.json' : 'not found on this machine', { checked: false, disabled: !info.sensitive.codexCreds }),
+    );
+    const passRow = document.createElement('div');
+    passRow.className = 'cfg-pass-row hidden';
+    passRow.innerHTML = '<label>Encryption passphrase <input type="password" id="cfg-exp-pass" placeholder="min 4 chars" autocomplete="new-password"></label>';
+    const syncPass = () => {
+      const anySens = [...sensWrap.querySelectorAll('input:checked')].length > 0;
+      passRow.classList.toggle('hidden', !anySens);
+    };
+    sensWrap.addEventListener('change', syncPass);
+
+    const err = document.createElement('div'); err.className = 'cfg-err';
+    const actions = document.createElement('div');
+    actions.className = 'dialog-actions';
+    const exportBtn = document.createElement('button');
+    exportBtn.className = 'btn-create';
+    exportBtn.textContent = 'Export';
+    exportBtn.onclick = async () => {
+      err.textContent = '';
+      const sections = [...secWrap.querySelectorAll('input:checked')].map(i => i.dataset.sec);
+      const includeSensitive = [...sensWrap.querySelectorAll('input:checked')].map(i => i.dataset.sec);
+      const passphrase = passRow.querySelector('input')?.value || '';
+      if (!sections.length && !includeSensitive.length) { err.textContent = 'Nothing selected'; return; }
+      if (includeSensitive.length && passphrase.length < 4) { err.textContent = 'Passphrase must be at least 4 characters'; return; }
+      const clientPrefs = {};
+      for (const k of ['theme', 'termFontSize', 'termFontFamily', 'taskbarHeight']) {
+        const v = localStorage.getItem(k);
+        if (v != null) clientPrefs[k] = v;
+      }
+      try {
+        const res = await fetch('/api/config/export', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sections, includeSensitive, passphrase, clientPrefs }),
+        });
+        if (!res.ok) { err.textContent = (await res.json().catch(() => ({}))).error || 'Export failed'; return; }
+        const blob = await res.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `vibespace-config-${new Date().toISOString().slice(0, 10)}.json`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+        close();
+        showToast('Configuration exported');
+      } catch { err.textContent = 'Export failed'; }
+    };
+    actions.appendChild(exportBtn);
+    body.append(secWrap, sensHead, sensWrap, passRow, err, actions);
+  }
+
+  // File is inspected CLIENT-side (plain JSON; the sensitive manifest sits
+  // outside the ciphertext) → user picks sections → server applies. Each
+  // section REPLACES its store. Page reloads afterwards.
+  _buildImportBody(body, close, presetFile = null) {
+    const pick = document.createElement('div');
+    pick.className = 'cfg-import-pick';
+    pick.innerHTML = '<button class="btn-create" id="cfg-imp-pick">Choose config file…</button><span class="agents-note">a vibespace-config-*.json export</span>';
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file'; fileInput.accept = 'application/json,.json'; fileInput.style.display = 'none';
+    body.append(pick, fileInput);
+    pick.querySelector('#cfg-imp-pick').onclick = () => fileInput.click();
+
+    const SEC_LABELS = {
+      settings: ['Settings', (d) => `${Object.keys(d).length} option(s)`],
+      customThemes: ['Custom themes', (d) => `${Object.keys(d || {}).length} theme(s)`],
+      layouts: ['Layouts & desktops', (d) => `${Object.keys(d?.layouts || {}).length} layout(s), ${(d?.desktopMeta || []).length} desktop(s)`],
+      userState: ['Session metadata', (d) => `${Object.keys(d?.sessionGroups || {}).length} group(s), ${Object.keys(d?.customNames || {}).length} rename(s), ${Object.keys(d?.starredSessions || {}).length} star(s)`],
+      bookmarks: ['File bookmarks', (d) => `${(d || []).length} bookmark(s)`],
+      clientPrefs: ['Browser preferences', (d) => Object.keys(d || {}).join(', ') || 'empty'],
+    };
+    const SENS_LABELS = { vsPassword: 'VibeSpace password', claudeCreds: 'Claude CLI credentials', codexCreds: 'Codex CLI credentials' };
+
+    const renderFile = (file) => {
+      body.innerHTML = '';
+      const head = document.createElement('p');
+      head.className = 'agents-note';
+      head.textContent = `Exported ${file.exportedAt ? new Date(file.exportedAt).toLocaleString() : '(unknown date)'} — each selected section REPLACES the current data.`;
+      const secWrap = document.createElement('div');
+      secWrap.className = 'cfg-rows';
+      for (const [id, data] of Object.entries(file.sections || {})) {
+        const meta = SEC_LABELS[id];
+        if (!meta) continue;
+        const row = document.createElement('label');
+        row.className = 'cfg-row';
+        row.innerHTML = `<input type="checkbox" data-sec="${id}" checked>
+          <span class="cfg-row-text"><b>${escHtml(meta[0])}</b><span>${escHtml(meta[1](data))}</span></span>`;
+        secWrap.appendChild(row);
+      }
+      const sensWrap = document.createElement('div');
+      sensWrap.className = 'cfg-rows cfg-rows-sens';
+      const passRow = document.createElement('div');
+      passRow.className = 'cfg-pass-row hidden';
+      passRow.innerHTML = '<label>Decryption passphrase <input type="password" autocomplete="off"></label>';
+      if (file.sensitive?.manifest?.length) {
+        const sensHead = document.createElement('div');
+        sensHead.className = 'cfg-sens-head';
+        sensHead.innerHTML = '<b>Sensitive (encrypted)</b><span> — requires the export passphrase</span>';
+        body.appendChild(sensHead);
+        for (const id of file.sensitive.manifest) {
+          const row = document.createElement('label');
+          row.className = 'cfg-row';
+          row.innerHTML = `<input type="checkbox" data-sec="${id}">
+            <span class="cfg-row-text"><b>${escHtml(SENS_LABELS[id] || id)}</b><span>${id === 'vsPassword' ? 'enables password auth; all other devices are logged out' : 'written to this machine'}</span></span>`;
+          sensWrap.appendChild(row);
+        }
+        sensWrap.addEventListener('change', () => {
+          passRow.classList.toggle('hidden', !sensWrap.querySelector('input:checked'));
+        });
+      }
+      const err = document.createElement('div'); err.className = 'cfg-err';
+      const actions = document.createElement('div');
+      actions.className = 'dialog-actions';
+      const importBtn = document.createElement('button');
+      importBtn.className = 'btn-create';
+      importBtn.textContent = 'Import';
+      importBtn.onclick = async () => {
+        err.textContent = '';
+        const sections = [...secWrap.querySelectorAll('input:checked')].map(i => i.dataset.sec);
+        const includeSensitive = [...sensWrap.querySelectorAll('input:checked')].map(i => i.dataset.sec);
+        const passphrase = passRow.querySelector('input')?.value || '';
+        if (!sections.length && !includeSensitive.length) { err.textContent = 'Nothing selected'; return; }
+        if (includeSensitive.length && !passphrase) { err.textContent = 'Enter the passphrase'; return; }
+        try {
+          const res = await fetch('/api/config/import', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file, sections, includeSensitive, passphrase }),
+          });
+          const d = await res.json().catch(() => ({}));
+          if (!res.ok) { err.textContent = d.error || 'Import failed'; return; }
+          if (d.clientPrefs) {
+            for (const [k, v] of Object.entries(d.clientPrefs)) {
+              if (['theme', 'termFontSize', 'termFontFamily', 'taskbarHeight'].includes(k)) localStorage.setItem(k, v);
+            }
+          }
+          close();
+          showToast(`Imported: ${d.applied.join(', ')} — reloading…`);
+          setTimeout(() => location.reload(), 900);
+        } catch { err.textContent = 'Import failed'; }
+      };
+      actions.appendChild(importBtn);
+      body.append(head, secWrap, sensWrap, passRow, err, actions);
+    };
+
+    const readFile = (f) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const file = JSON.parse(reader.result);
+          if (file.app !== 'vibespace-config') throw new Error('not a config');
+          renderFile(file);
+        } catch { body.querySelector('.agents-note').textContent = 'Not a valid VibeSpace config file.'; }
+      };
+      reader.readAsText(f);
+    };
+    fileInput.onchange = () => { if (fileInput.files[0]) readFile(fileInput.files[0]); };
+    if (presetFile) readFile(presetFile);
+  }
+
+  // ── In-app password management ──
+  // Setting/changing revokes every other device's token (this browser gets a
+  // fresh one). Removing disables auth; env vars won't re-enable a user-set
+  // state on the next boot.
+  _showPasswordDialog() {
+    const enabled = !!this._authEnabled;
+    const { body, close } = this._modal(enabled ? 'Change password' : 'Set a password');
+    const form = document.createElement('form');
+    form.className = 'cfg-pass-form';
+    form.innerHTML = `
+      ${enabled ? '<label>Current password<input type="password" id="pw-cur" autocomplete="current-password"></label>' : ''}
+      <label>New password<input type="password" id="pw-new" autocomplete="new-password" placeholder="min 4 chars"></label>
+      <label>Confirm<input type="password" id="pw-conf" autocomplete="new-password"></label>
+      <p class="agents-note">${enabled ? 'Changing the password logs out every other device.' : 'Everything (pages, APIs, terminals) will require login afterwards. Other open devices are logged out.'}</p>
+      <div class="cfg-err"></div>
+      <div class="dialog-actions">
+        ${enabled ? '<button type="button" class="btn-cancel cfg-danger" id="pw-remove">Remove password…</button>' : ''}
+        <button type="submit" class="btn-create">${enabled ? 'Change' : 'Set password'}</button>
+      </div>`;
+    body.appendChild(form);
+    const err = form.querySelector('.cfg-err');
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      err.textContent = '';
+      const nw = form.querySelector('#pw-new').value;
+      if (nw.length < 4) { err.textContent = 'At least 4 characters'; return; }
+      if (nw !== form.querySelector('#pw-conf').value) { err.textContent = 'Passwords don’t match'; return; }
+      try {
+        const res = await fetch('/api/auth/set-password', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ current: form.querySelector('#pw-cur')?.value, newPassword: nw }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) { err.textContent = d.error || 'Failed'; return; }
+        this._authEnabled = true;
+        close();
+        showToast('Password ' + (enabled ? 'changed' : 'set') + ' — other devices were logged out');
+      } catch { err.textContent = 'Failed'; }
+    };
+    form.querySelector('#pw-remove')?.addEventListener('click', async () => {
+      err.textContent = '';
+      const cur = form.querySelector('#pw-cur')?.value || '';
+      if (!cur) { err.textContent = 'Enter the current password first'; return; }
+      const ok = await showConfirmDialog({ title: 'Remove password?', message: 'Auth will be disabled — anyone who can reach this server gets full access.', confirmText: 'Remove', danger: true });
+      if (!ok) return;
+      try {
+        const res = await fetch('/api/auth/set-password', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ current: cur, remove: true }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) { err.textContent = d.error || 'Failed'; return; }
+        this._authEnabled = false;
+        close();
+        showToast('Password removed — auth disabled');
+      } catch { err.textContent = 'Failed'; }
+    });
+  }
+
   _showOnboarding(force = false) {
     const welcome = document.getElementById('welcome');
     if (!welcome) return;
@@ -453,7 +759,7 @@ class App {
     };
 
     const render = () => {
-      const dots = [0, 1, 2].map(i => `<span class="ob-dot${i === step ? ' active' : ''}"></span>`).join('');
+      const dots = [0, 1, 2, 3].map(i => `<span class="ob-dot${i === step ? ' active' : ''}"></span>`).join('');
       if (step === 0) {
         content.innerHTML = `
           <h1>Welcome to VibeSpace</h1>
@@ -503,6 +809,50 @@ class App {
           el.querySelector('.ob-recheck').onclick = refresh;
         };
         refresh();
+      } else if (step === 2) {
+        const protectedAlready = !!this._authEnabled;
+        content.innerHTML = `
+          <h1>Protect this workspace</h1>
+          <p class="ob-sub">${protectedAlready ? 'Password auth is already enabled ✓' : 'Optional — anyone who can reach this server gets full shell access. A password gates pages, APIs, and terminals.'}</p>
+          ${protectedAlready ? '' : `
+          <div class="ob-pass">
+            <input type="password" id="ob-pw" placeholder="Password (min 4 chars)" autocomplete="new-password">
+            <button class="welcome-btn welcome-btn-secondary" id="ob-gen" title="Generate a random password">Generate</button>
+          </div>
+          <div class="cfg-err" id="ob-pw-err"></div>`}
+          <div class="welcome-actions">
+            ${protectedAlready ? '' : '<button class="welcome-btn" id="ob-setpw">Set password</button>'}
+            <button class="welcome-btn ${protectedAlready ? '' : 'welcome-btn-secondary'}" id="ob-next">${protectedAlready ? 'Continue' : 'Skip'}</button>
+            <button class="welcome-btn welcome-btn-secondary" id="ob-back">Back</button>
+          </div>
+          <div class="ob-alt"><a href="#" id="ob-import">Import a config file from another VibeSpace…</a></div>
+          <div class="ob-dots">${dots}</div>`;
+        content.querySelector('#ob-next').onclick = () => { step = 3; render(); };
+        content.querySelector('#ob-back').onclick = () => { step = 1; render(); };
+        content.querySelector('#ob-import').onclick = (e) => { e.preventDefault(); this._showTransferDialog('import'); };
+        const pwInput = content.querySelector('#ob-pw');
+        content.querySelector('#ob-gen')?.addEventListener('click', () => {
+          const bytes = new Uint8Array(9);
+          crypto.getRandomValues(bytes);
+          pwInput.value = btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+          pwInput.type = 'text'; // show the generated one so the user can save it
+        });
+        content.querySelector('#ob-setpw')?.addEventListener('click', async () => {
+          const errEl = content.querySelector('#ob-pw-err');
+          errEl.textContent = '';
+          const pw = pwInput.value;
+          if (pw.length < 4) { errEl.textContent = 'At least 4 characters'; return; }
+          try {
+            const res = await fetch('/api/auth/set-password', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ newPassword: pw }),
+            });
+            const d = await res.json().catch(() => ({}));
+            if (!res.ok) { errEl.textContent = d.error || 'Failed'; return; }
+            this._authEnabled = true;
+            step = 3; render();
+          } catch { errEl.textContent = 'Failed'; }
+        });
       } else {
         content.innerHTML = `
           <h1>Start your first session</h1>
@@ -663,12 +1013,18 @@ class App {
       brush: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 2.5c-2.5.5-5.5 3-7 5l2 2c2-1.5 4.5-4.5 5-7z"/><path d="M6.5 7.5c-1.5.3-2.5 1.5-2.5 3.5-1 .5-1.5.5-2.5.5 1 1.5 2.5 2 4 2s2.8-1.3 3-3"/></svg>',
       tour: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.5"/><path d="M8 7.5v3.5M8 5v.5"/></svg>',
       out: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2H3v12h3M10 11l3-3-3-3M13 8H6"/></svg>',
+      exp: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 10V2M5 5l3-3 3 3M3 10v3h10v-3"/></svg>',
+      imp: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8M5 7l3 3 3-3M3 10v3h10v-3"/></svg>',
+      lock: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="7" width="9" height="6.5" rx="1"/><path d="M5.5 7V5a2.5 2.5 0 015 0v2"/></svg>',
     };
+    const sep = () => { const s = document.createElement('div'); s.className = 'gs-menu-sep'; return s; };
+    // workspace tools / data & security / help — grouped, the flat list grew too long
     if (!this.isMobile) menu.append(item(I.brush, 'Customize UI\u2026', () => this._customize.enter()));
-    menu.append(
-      item(I.key, 'Manage agents\u2026', () => this._showAgentsDialog()),
-      item(I.tour, 'Welcome tour', () => this._showOnboarding(true)),
-    );
+    menu.append(item(I.key, 'Manage agents\u2026', () => this._showAgentsDialog()));
+    menu.append(sep(),
+      item(I.exp, 'Backup & migrate\u2026', () => this._showTransferDialog()),
+      item(I.lock, this._authEnabled ? 'Change password\u2026' : 'Set password\u2026', () => this._showPasswordDialog()));
+    menu.append(sep(), item(I.tour, 'Welcome tour', () => this._showOnboarding(true)));
     if (this._authEnabled) {
       menu.append(item(I.out, 'Sign out', async () => {
         try { await fetch('/api/logout', { method: 'POST' }); } catch {}

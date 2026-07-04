@@ -251,7 +251,8 @@ const auth = new Auth(path.join(__dirname, 'data'));
     console.log('  ╚════════════════════════════════════════════════╝\n');
   }
   if (auth.enabled) console.log('  Password auth: ENABLED');
-  app.locals.authEnabled = auth.enabled;
+  // getter — auth can be enabled/disabled at runtime via /api/auth/set-password
+  Object.defineProperty(app.locals, 'authEnabled', { get: () => auth.enabled });
 }
 
 const wss = new WebSocketServer({
@@ -1105,7 +1106,7 @@ syncStores.drafts = new SyncStore('drafts', path.join(__dirname, 'data', 'drafts
 syncStores.settings = new SyncStore('settings', path.join(__dirname, 'data', 'settings-sync.json'), wss);
 syncStores.uploads = new SyncStore('uploads', path.join(__dirname, 'data', 'uploads-sync.json'), wss);
 
-setupPersistence({ dataDir: path.join(__dirname, 'data'), wss, WS_OPEN, getSyncStore, activeSessions });
+setupPersistence({ dataDir: path.join(__dirname, 'data'), wss, WS_OPEN, getSyncStore, activeSessions, auth });
 app.use(persistenceRouter);
 const { readLayouts, writeLayouts, flushLayouts } = persistenceRouter;
 

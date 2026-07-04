@@ -26,8 +26,8 @@ function writeJsonAtomic(file, data) {
   fs.renameSync(tmp, file);
 }
 
-/** Setup persistence routes. Requires { dataDir, wss, WS_OPEN, getSyncStore, activeSessions } context. */
-function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions }) {
+/** Setup persistence routes. Requires { dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth } context. */
+function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth }) {
   const broadcast = (msg) => {
     const json = JSON.stringify(msg);
     wss.clients.forEach(client => {
@@ -387,6 +387,155 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions }) {
     for (const [k, v] of Object.entries(merged)) { if (v === null) delete merged[k]; }
     writeSettings(merged);
     res.json({ success: true });
+  });
+
+  // ── Config export / import (whole-instance transfer) ──
+  // Non-sensitive sections travel as plaintext JSON; sensitive items
+  // (VibeSpace password record, agent CLI credentials) are OPT-IN and always
+  // AES-256-GCM-encrypted under a user passphrase (scrypt KDF). The sensitive
+  // manifest lives OUTSIDE the ciphertext so the import dialog can list what's
+  // inside without the passphrase. Login tokens are never exported.
+  const crypto = require('crypto');
+  const CLAUDE_CREDS = path.join(os.homedir(), '.claude', '.credentials.json');
+  const CODEX_CREDS = path.join(os.homedir(), '.codex', 'auth.json');
+
+  function encryptSensitive(obj, passphrase) {
+    const salt = crypto.randomBytes(16);
+    const key = crypto.scryptSync(String(passphrase), salt, 32);
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+    const data = Buffer.concat([cipher.update(JSON.stringify(obj), 'utf8'), cipher.final()]);
+    return {
+      cipher: 'aes-256-gcm', kdf: 'scrypt',
+      salt: salt.toString('base64'), iv: iv.toString('base64'),
+      tag: cipher.getAuthTag().toString('base64'), data: data.toString('base64'),
+    };
+  }
+
+  function decryptSensitive(enc, passphrase) {
+    const key = crypto.scryptSync(String(passphrase), Buffer.from(enc.salt, 'base64'), 32);
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(enc.iv, 'base64'));
+    decipher.setAuthTag(Buffer.from(enc.tag, 'base64'));
+    const out = Buffer.concat([decipher.update(Buffer.from(enc.data, 'base64')), decipher.final()]);
+    return JSON.parse(out.toString('utf8'));
+  }
+
+  const readFileJson = (fp) => { try { return JSON.parse(fs.readFileSync(fp, 'utf-8')); } catch { return null; } };
+
+  // What's available to export + entry counts for the dialog
+  router.get('/api/config/export-info', (req, res) => {
+    const settings = readSettings();
+    const themes = readCustomThemes();
+    const layouts = readLayouts();
+    const state = readUserState();
+    const bookmarks = readBookmarks();
+    res.json({
+      sections: {
+        settings: { count: Object.keys(settings).length },
+        customThemes: { count: Object.keys(themes || {}).length },
+        layouts: { count: Object.keys(layouts?.layouts || {}).length + (layouts?.autoSave ? 1 : 0), desktops: (layouts?.desktopMeta || []).length },
+        userState: {
+          count: Object.keys(state?.customNames || {}).length + Object.keys(state?.starredSessions || {}).length
+            + Object.keys(state?.archivedSessions || {}).length + Object.keys(state?.sessionGroups || {}).length
+            + Object.keys(state?.sessionConfigs || {}).length,
+          groups: Object.keys(state?.sessionGroups || {}).length,
+        },
+        bookmarks: { count: (bookmarks || []).length },
+      },
+      sensitive: {
+        vsPassword: !!auth?.enabled,
+        claudeCreds: fs.existsSync(CLAUDE_CREDS),
+        codexCreds: fs.existsSync(CODEX_CREDS),
+      },
+    });
+  });
+
+  router.post('/api/config/export', (req, res) => {
+    const { sections = [], includeSensitive = [], passphrase, clientPrefs } = req.body || {};
+    const file = {
+      app: 'vibespace-config', version: 1,
+      exportedAt: new Date().toISOString(),
+      sections: {},
+    };
+    const take = (name, fn) => { if (sections.includes(name)) file.sections[name] = fn(); };
+    take('settings', readSettings);
+    take('customThemes', readCustomThemes);
+    take('layouts', readLayouts);
+    take('userState', readUserState);
+    take('bookmarks', readBookmarks);
+    if (sections.includes('clientPrefs') && clientPrefs && typeof clientPrefs === 'object') {
+      file.sections.clientPrefs = clientPrefs;
+    }
+    if (includeSensitive.length) {
+      if (!passphrase || String(passphrase).length < 4) {
+        return res.status(400).json({ error: 'A passphrase (≥4 chars) is required to export sensitive items' });
+      }
+      const sens = {};
+      if (includeSensitive.includes('vsPassword')) {
+        const rec = auth?.exportPasswordRecord?.();
+        if (rec) sens.vsPassword = rec;
+      }
+      if (includeSensitive.includes('claudeCreds')) {
+        const c = readFileJson(CLAUDE_CREDS);
+        if (c) sens.claudeCreds = c;
+      }
+      if (includeSensitive.includes('codexCreds')) {
+        const c = readFileJson(CODEX_CREDS);
+        if (c) sens.codexCreds = c;
+      }
+      if (Object.keys(sens).length) {
+        file.sensitive = { manifest: Object.keys(sens), ...encryptSensitive(sens, passphrase) };
+      }
+    }
+    const name = `vibespace-config-${new Date().toISOString().slice(0, 10)}.json`;
+    res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
+    res.json(file);
+  });
+
+  router.post('/api/config/import', (req, res) => {
+    const { file, sections = [], includeSensitive = [], passphrase } = req.body || {};
+    if (!file || file.app !== 'vibespace-config' || typeof file.sections !== 'object') {
+      return res.status(400).json({ error: 'Not a VibeSpace config file' });
+    }
+    const applied = [];
+    const apply = (name, fn) => {
+      if (!sections.includes(name) || file.sections[name] === undefined) return;
+      fn(file.sections[name]);
+      applied.push(name);
+    };
+    apply('settings', (d) => { if (d && typeof d === 'object') writeSettings(d); });
+    apply('customThemes', (d) => { if (d && typeof d === 'object') { writeCustomThemes(d); } });
+    apply('layouts', (d) => { if (d && typeof d === 'object') writeLayouts(d); });
+    apply('userState', (d) => { if (d && typeof d === 'object') writeUserState(d); });
+    apply('bookmarks', (d) => { if (Array.isArray(d)) { writeBookmarks(d); broadcast({ type: 'bookmarks-updated', bookmarks: d }); } });
+    // clientPrefs are applied by the CLIENT (localStorage) — echo them back
+    const clientPrefs = sections.includes('clientPrefs') ? file.sections.clientPrefs : undefined;
+    if (clientPrefs) applied.push('clientPrefs');
+
+    if (includeSensitive.length && file.sensitive) {
+      let sens;
+      try { sens = decryptSensitive(file.sensitive, passphrase); }
+      catch { return res.status(400).json({ error: 'Wrong passphrase (or corrupted file)' }); }
+      if (includeSensitive.includes('claudeCreds') && sens.claudeCreds) {
+        ensureDir(path.dirname(CLAUDE_CREDS));
+        fs.writeFileSync(CLAUDE_CREDS, JSON.stringify(sens.claudeCreds), { mode: 0o600 });
+        applied.push('claudeCreds');
+      }
+      if (includeSensitive.includes('codexCreds') && sens.codexCreds) {
+        ensureDir(path.dirname(CODEX_CREDS));
+        fs.writeFileSync(CODEX_CREDS, JSON.stringify(sens.codexCreds), { mode: 0o600 });
+        applied.push('codexCreds');
+      }
+      if (includeSensitive.includes('vsPassword') && sens.vsPassword && auth) {
+        // enables auth + revokes all tokens; keep THIS caller logged in
+        auth.importPasswordRecord(sens.vsPassword);
+        const token = auth.issueToken(req.headers['user-agent']);
+        const secure = req.secure || req.headers['x-forwarded-proto'] === 'https' ? ' Secure;' : '';
+        res.setHeader('Set-Cookie', `vs_token=${token}; HttpOnly; Path=/; Max-Age=${180 * 24 * 3600}; SameSite=Lax;${secure}`);
+        applied.push('vsPassword');
+      }
+    }
+    res.json({ success: true, applied, clientPrefs });
   });
 
   return router;

@@ -1671,3 +1671,49 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
   top: 50% !important; left: 50% !important; transform: translate(-50%, -50%);
   box-shadow: 0 10px 36px rgba(0,0,0,0.5);
 }
+
+/* ── Config export/import + password dialogs ── */
+.cfg-dialog-body { max-width: 520px; }
+.cfg-rows { display: flex; flex-direction: column; gap: 2px; }
+.cfg-row {
+  display: flex; align-items: flex-start; gap: 9px; padding: 6px 8px;
+  border-radius: var(--radius-sm); cursor: pointer;
+}
+.cfg-row:hover { background: var(--hover-overlay); }
+.cfg-row.disabled { opacity: 0.45; cursor: default; }
+.cfg-row input[type="checkbox"] { margin-top: 2px; flex-shrink: 0; accent-color: var(--accent); }
+.cfg-row-text { display: flex; flex-direction: column; gap: 1px; font-size: 12px; }
+.cfg-row-text b { color: var(--text); font-weight: 600; }
+.cfg-row-text span { color: var(--text-dim); font-size: 11px; }
+.cfg-sens-head { font-size: 11px; margin-top: 6px; padding: 0 8px; }
+.cfg-sens-head b { color: var(--yellow, #e2b340); }
+.cfg-sens-head span { color: var(--text-dim); }
+.cfg-rows-sens { border: 1px dashed color-mix(in srgb, var(--yellow, #e2b340) 45%, transparent); border-radius: var(--radius-sm); padding: 2px; }
+.cfg-pass-row label { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); }
+.cfg-pass-row input { flex: 1; }
+.cfg-pass-row.hidden { display: none; }
+.cfg-err { color: var(--red, #e55); font-size: 12px; min-height: 15px; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.cfg-pass-form { display: flex; flex-direction: column; gap: 10px; min-width: 300px; }
+.cfg-danger { color: var(--red, #e55); border-color: color-mix(in srgb, var(--red, #e55) 45%, transparent); }
+.cfg-danger:hover { background: color-mix(in srgb, var(--red, #e55) 12%, transparent); color: var(--red, #e55); }
+.cfg-import-pick { display: flex; align-items: center; gap: 10px; }
+/* onboarding password step */
+.ob-pass { display: flex; gap: 8px; max-width: 360px; margin: 0 auto 6px; }
+.ob-pass input {
+  flex: 1; padding: 9px 12px; font-size: 13px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--bg-input); color: var(--text); outline: none;
+}
+.ob-pass input:focus { border-color: var(--accent); }
+#welcome .cfg-err { text-align: center; }
+
+/* backup & migrate tabs + menu separators */
+.cfg-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.cfg-tab {
+  border: none; background: transparent; color: var(--text-dim); font-size: 12px;
+  padding: 6px 14px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.cfg-tab:hover { color: var(--text); }
+.cfg-tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.cfg-tab-body { display: flex; flex-direction: column; gap: 10px; }
+.gs-menu-sep { height: 1px; background: var(--border); margin: 5px -4px; }

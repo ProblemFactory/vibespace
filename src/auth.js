@@ -42,16 +42,49 @@ class Auth {
     return crypto.scryptSync(String(password), Buffer.from(salt, 'hex'), 32).toString('hex');
   }
 
-  /** Set (or replace) the password. Existing login tokens stay valid. */
-  setPassword(password) {
+  /**
+   * Set (or replace) the password. Existing login tokens stay valid (in-app
+   * changes go through the /api/auth/set-password route, which revokes them).
+   * userSet marks a password configured from INSIDE the app — boot-time env
+   * resolution never overrides a user-set state (incl. user-removed).
+   */
+  setPassword(password, { userSet = false } = {}) {
     const salt = crypto.randomBytes(16).toString('hex');
     const passwordHash = this._hash(password, salt);
-    this._state = { passwordHash, salt, tokens: this._state?.tokens || {} };
+    this._state = { passwordHash, salt, userSet: userSet || this._state?.userSet || false, tokens: this._state?.tokens || {} };
+    this._save();
+  }
+
+  /** Disable auth entirely (user choice — env won't re-enable on next boot). */
+  removePassword() {
+    this._state = { userSet: true, tokens: {} };
+    this._save();
+  }
+
+  /** Revoke every login token except (optionally) one — in-app password change kicks all other devices. */
+  revokeAllTokens(exceptToken = null) {
+    const keep = exceptToken && this._state?.tokens?.[exceptToken];
+    this._state.tokens = keep ? { [exceptToken]: keep } : {};
+    this._save();
+  }
+
+  /** Export the password record for config transfer (hash + salt, never tokens). */
+  exportPasswordRecord() {
+    if (!this.enabled) return null;
+    return { passwordHash: this._state.passwordHash, salt: this._state.salt };
+  }
+
+  /** Import a password record (config transfer). Revokes all tokens — caller should issue a fresh one. */
+  importPasswordRecord(rec) {
+    if (!rec?.passwordHash || !rec?.salt) throw new Error('invalid password record');
+    this._state = { passwordHash: String(rec.passwordHash), salt: String(rec.salt), userSet: true, tokens: {} };
     this._save();
   }
 
   /**
    * Boot-time resolution:
+   * - user-set state (configured in-app, incl. explicit removal) → ALWAYS kept;
+   *   env vars never override it.
    * - VIBESPACE_PASSWORD env → (re)set if it doesn't match the stored hash.
    * - else stored auth.json → keep.
    * - else if generateIfMissing (container first boot) → random password,
@@ -59,6 +92,7 @@ class Auth {
    * Returns { generated?: string } — the plaintext ONLY when freshly generated.
    */
   ensurePassword({ generateIfMissing = false } = {}) {
+    if (this._state?.userSet) return {};
     const envPw = process.env.VIBESPACE_PASSWORD;
     if (envPw) {
       if (!this.enabled || this._hash(envPw, this._state.salt) !== this._state.passwordHash) {
@@ -176,6 +210,39 @@ class Auth {
       if (token) this.revokeToken(token);
       res.setHeader('Set-Cookie', `${TOKEN_COOKIE}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax`);
       res.json({ success: true });
+    });
+
+    // In-app password management. When auth is enabled the request already
+    // passed the auth middleware AND must still present the current password
+    // (defense against an unlocked screen). When disabled, setting a password
+    // is open — that's how a local instance opts INTO auth.
+    // Changing/setting revokes every other device's token (that's usually the
+    // point); the caller gets a fresh token so they stay logged in.
+    app.post('/api/auth/set-password', express_json_lite, (req, res) => {
+      const ip = req.socket.remoteAddress || '?';
+      if (!this._rateCheck(ip)) return res.status(429).json({ error: 'Too many attempts — wait a minute' });
+      const { current, newPassword, remove } = req.body || {};
+      if (this.enabled) {
+        if (!this.verifyPassword(String(current ?? ''))) {
+          this._rateFail(ip);
+          return res.status(401).json({ error: 'Current password is wrong' });
+        }
+        this._rateOk(ip);
+      }
+      if (remove) {
+        if (!this.enabled) return res.json({ success: true, enabled: false });
+        this.removePassword();
+        res.setHeader('Set-Cookie', `${TOKEN_COOKIE}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax`);
+        return res.json({ success: true, enabled: false });
+      }
+      const pw = String(newPassword ?? '');
+      if (pw.length < 4) return res.status(400).json({ error: 'Password must be at least 4 characters' });
+      this.setPassword(pw, { userSet: true });
+      this.revokeAllTokens();
+      const token = this.issueToken(req.headers['user-agent']);
+      const secure = req.secure || req.headers['x-forwarded-proto'] === 'https' ? ' Secure;' : '';
+      res.setHeader('Set-Cookie', `${TOKEN_COOKIE}=${token}; HttpOnly; Path=/; Max-Age=${Math.floor(TOKEN_TTL_MS / 1000)}; SameSite=Lax;${secure}`);
+      res.json({ success: true, enabled: true });
     });
   }
 }

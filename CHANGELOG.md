@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.19.0] — 2026-07-04
+
+### Added
+
+- **Config export / import (Backup & migrate)** — ⚙ menu → Backup & migrate… exports the whole instance configuration to a single JSON file: settings (incl. Customize-UI arrangement), custom themes, layouts & virtual desktops, session metadata (stars/renames/groups/per-session configs), file bookmarks, and this browser's preferences. **Sensitive items are opt-in and always encrypted** (AES-256-GCM under an export passphrase): the VibeSpace password record and Claude/Codex CLI credentials — so migrating to a fresh container can carry your logins without ever writing them in plaintext. Import (same dialog / the onboarding wizard) shows the file's contents with per-section checkboxes; each selected section replaces the current data. Login tokens are never exported.
+- **In-app password management** — ⚙ menu → Set/Change password…: set a password (enables auth), change it (requires the current one), or remove it (disables auth). Setting or changing **logs out every other device**; the acting browser keeps a fresh session. A password set (or removed) in-app always wins over `VIBESPACE_PASSWORD` at the next boot.
+- **Onboarding wizard: "Protect this workspace" step** — set a password, generate a random one, or skip; plus an "Import a config file" entry so a new container is password-protected and fully configured in one step.
+- **⚙ menu reorganized** — grouped with separators (workspace tools / data & security / help) after the flat list grew too long; export+import merged into one tabbed "Backup & migrate" dialog.
+
 ## [2.18.0] — 2026-07-04
 
 ### Added
