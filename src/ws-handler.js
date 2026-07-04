@@ -130,11 +130,11 @@ function registerWsHandler(wss, ctx) {
     }
     ws.send(JSON.stringify({ type: 'active-sessions', sessions: activeList }));
 
-    ws.on('message', (raw) => {
+    ws.on('message', async (raw) => {
       let data;
       try { data = JSON.parse(raw); } catch { return; }
       try {
-        handleMessage(data);
+        await handleMessage(data);
       } catch (err) {
         // A malformed/unexpected client message must never crash the server
         // (observed: array extraArgs → .trim() TypeError killed the process).
@@ -143,7 +143,7 @@ function registerWsHandler(wss, ctx) {
       }
     });
 
-    function handleMessage(data) {
+    async function handleMessage(data) {
       switch (data.type) {
         case 'create': {
           const backend = data.backend || 'claude';
@@ -764,6 +764,13 @@ function registerWsHandler(wss, ctx) {
             session.clients.set(ws, { cols: 120, rows: 30 });
             attachedSessions.add(data.sessionId);
             if (session.mode === 'chat') {
+              // Remote session: pull its transcript into the local cache BEFORE
+              // the first history load, so pre-resume history renders and the
+              // pagination/search machinery has a real file to work on.
+              if (session.host && hosts && !session._historyLoaded && (session.claudeSessionId || session.backendSessionId)) {
+                try { await hosts.fetchSessionJsonl(session.host, session.claudeSessionId || session.backendSessionId); }
+                catch (e) { console.error('remote jsonl fetch failed:', e.message); }
+              }
               const sm = createSessionMessages(session, data.sessionId);
               // Initialize normalizer from full JSONL + buffer history on first attach.
               // Can't use total===0: PTY output via processLive may have populated the
@@ -820,6 +827,13 @@ function registerWsHandler(wss, ctx) {
           } else if (data.viewOnly && (data.backendSessionId || data.claudeSessionId)) {
             // View-only: load JSONL history without an active session
             const backendSessionId = data.backendSessionId || data.claudeSessionId;
+            // Remote session: pull the transcript over ssh into the local
+            // cache first (findSessionJsonlPath scans it) — history then
+            // loads through the normal path. Stale cache beats no history.
+            if (data.host && hosts) {
+              try { await hosts.fetchSessionJsonl(data.host, backendSessionId); }
+              catch (e) { console.error('remote jsonl fetch failed:', e.message); }
+            }
             const sm = createSessionMessages({
               backend: data.backend || 'claude',
               backendSessionId,

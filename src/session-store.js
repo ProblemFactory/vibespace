@@ -95,6 +95,15 @@ function findSessionJsonlPath(claudeSessionId, cwd) {
       if (!candidates.includes(fp)) candidates.push(fp);
     }
   } catch {}
+  // Remote-host transcripts fetched over ssh (hosts.fetchSessionJsonl) land in
+  // data/remote-jsonl/<hostId>/<id>.jsonl — session ids are UUIDs, so scanning
+  // the cache here makes every history consumer remote-capable for free.
+  try {
+    const cacheRoot = path.join(__dirname, '..', 'data', 'remote-jsonl');
+    for (const hostDir of fs.readdirSync(cacheRoot)) {
+      candidates.push(path.join(cacheRoot, hostDir, claudeSessionId + '.jsonl'));
+    }
+  } catch {}
   for (const fp of candidates) {
     try { if (fs.existsSync(fp)) return fp; } catch {}
   }

@@ -152,6 +152,7 @@ export function installSidebarWorkbench(Sidebar) {
         const shown = expanded ? list : list.slice(0, 5);
         for (const s of shown) {
           const card = this._buildRemoteCard(s);
+          card.classList.add('wb-proj-card');
           card.style.setProperty('--wb-strip', color);
           this.listEl.appendChild(card);
         }
@@ -169,40 +170,27 @@ export function installSidebarWorkbench(Sidebar) {
       return older;
     },
 
-    _buildRemoteCard(s) {
-      const card = document.createElement('div');
-      card.className = 'session-card wb-remote-card wb-proj-card';
-      const name = (s.cwd || s.projDir || '').split('/').pop() || 'session';
-      const running = s.status === 'remote-running';
-      const badge = running
-        ? '<span class="session-badge badge-external" title="Running on the remote host in an external terminal">REMOTE</span>'
-        : '<span class="session-badge badge-stopped">STOPPED</span>';
-      const time = s.mtime ? new Date(s.mtime).toLocaleString([], { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
-      card.innerHTML = `
-        <div class="session-card-row">
-          <span class="wb-remote-name">${escHtml(name)}</span>
-          ${badge}
-        </div>
-        <div class="wb-card-path" title="${escHtml(s.cwd || s.projDir || '')}">${escHtml(abbrevPath(s.cwd) || s.projDir || '')}${time ? ' · ' + escHtml(time) : ''}</div>`;
-      if (!running) {
-        card.title = 'Resume this session on ' + (s.hostName || s.host);
-        card.style.cursor = 'pointer';
-        card.onclick = () => this._resumeRemote(s);
-      } else {
-        card.title = 'Running on ' + (s.hostName || s.host) + ' in an external terminal — not attachable';
-      }
-      return card;
+    // Map a discovered remote session to the FULL session-card shape — remote
+    // sessions get the same first-class cards as local ones (name from the
+    // first user message, star/archive, expand panel, View History, Resume);
+    // hostId rides in via the card's agentOpts so resume/view run on the host.
+    _remoteToCardSession(s) {
+      const folder = (s.cwd || '').split('/').pop();
+      return {
+        sessionId: s.sessionId,
+        backendSessionId: s.sessionId,
+        backend: 'claude',
+        name: s.name || folder || s.projDir || s.sessionId.slice(0, 8),
+        cwd: s.cwd || '',
+        host: s.host,
+        hostName: s.hostName,
+        status: s.status === 'remote-running' ? 'external' : 'stopped',
+        startedAt: s.mtime,
+      };
     },
 
-    _resumeRemote(s) {
-      if (!s.cwd) return showToast('Cannot resume: working directory unknown for this session', { type: 'error' });
-      this.app.createSession({
-        backend: 'claude',
-        resumeId: s.sessionId,
-        cwd: s.cwd,
-        hostId: s.host,
-        name: (s.cwd.split('/').pop() || 'Session'),
-      });
+    _buildRemoteCard(s) {
+      return this._buildSessionCard(this._remoteToCardSession(s));
     },
 
     _toggleManageMark(key, kind) {

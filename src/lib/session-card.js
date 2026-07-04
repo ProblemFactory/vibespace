@@ -103,6 +103,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
   const agentOpts = {
     backend: s.backend || 'claude',
     backendSessionId: s.backendSessionId || s.sessionId,
+    hostId: s.host || undefined, // remote sessions resume/view ON their host
     agentKind: s.agentKind || 'primary',
     agentRole: s.agentRole || '',
     agentNickname: s.agentNickname || '',

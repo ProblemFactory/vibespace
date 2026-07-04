@@ -135,10 +135,10 @@ class HostManager {
     return args;
   }
 
-  _ssh(h, remoteCmd, { timeoutMs = 15000 } = {}) {
+  _ssh(h, remoteCmd, { timeoutMs = 15000, maxBuffer = 4 * 1024 * 1024, encoding } = {}) {
     return new Promise((resolve, reject) => {
-      execFile('ssh', [...this.sshArgs(h), '--', remoteCmd], { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
-        if (err) return reject(new Error((stderr || err.message || '').trim().slice(0, 300)));
+      execFile('ssh', [...this.sshArgs(h), '--', remoteCmd], { timeout: timeoutMs, maxBuffer, ...(encoding !== undefined ? { encoding } : {}) }, (err, stdout, stderr) => {
+        if (err) return reject(new Error((stderr?.toString() || err.message || '').trim().slice(0, 300)));
         resolve(stdout);
       });
     });
@@ -214,6 +214,35 @@ class HostManager {
     });
   }
 
+  // ── Remote session transcripts (JSONL over ssh → local cache) ──
+  // The cache makes remote sessions first-class: findSessionJsonlPath scans
+  // data/remote-jsonl/<hostId>/, so history load / View History / pagination /
+  // search all work unchanged. Invalidation by remote size+mtime (one ssh stat
+  // when fresh; stat+cat when stale). Session ids are UUIDs — no collisions.
+  async fetchSessionJsonl(id, sessionId, { maxBytes = 64 * 1024 * 1024 } = {}) {
+    if (!/^[\w-]+$/.test(sessionId)) throw new Error('bad session id');
+    const h = this.get(id);
+    const dir = path.join(this.dataDir, 'remote-jsonl', id);
+    const cachePath = path.join(dir, sessionId + '.jsonl');
+    const metaPath = cachePath + '.meta';
+    let meta = null;
+    try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8')); } catch {}
+    const probe = `f=$(find "$HOME"/.claude/projects -maxdepth 2 -name ${JSON.stringify(sessionId + '.jsonl')} 2>/dev/null | head -1); [ -n "$f" ] && stat -c '%s %Y' "$f" && echo "$f"`;
+    const out = (await this._ssh(h, probe, { timeoutMs: 15000 })).toString().trim();
+    if (!out) return fs.existsSync(cachePath) ? cachePath : null; // gone remotely — keep stale cache if any
+    const [sizeMtime, remotePath] = [out.split('\n')[0], out.split('\n')[1]];
+    const [size, mtime] = sizeMtime.split(' ').map(Number);
+    if (meta && meta.size === size && meta.mtime === mtime && fs.existsSync(cachePath)) return cachePath;
+    if (size > maxBytes) throw new Error(`remote transcript too large (${(size / 1048576) | 0}MB)`);
+    const buf = await this._ssh(h, `cat ${JSON.stringify(remotePath)}`, { timeoutMs: 120000, maxBuffer: maxBytes + 1024, encoding: 'buffer' });
+    fs.mkdirSync(dir, { recursive: true });
+    const tmp = cachePath + '.tmp';
+    fs.writeFileSync(tmp, buf);
+    fs.renameSync(tmp, cachePath);
+    fs.writeFileSync(metaPath, JSON.stringify({ size, mtime, fetchedAt: Date.now() }));
+    return cachePath;
+  }
+
   // ── Remote session discovery (lock-first, same algorithm as local) ──
 
   async discoverSessions(id, { ttlMs = 15000 } = {}) {
@@ -231,6 +260,7 @@ class HostManager {
       # record may be a summary without cwd, so grep the first cwd field instead)
       find "$HOME"/.claude/projects -maxdepth 2 -name '*.jsonl' ! -name 'agent-*' -printf '%T@ %p\\n' 2>/dev/null | sort -rn | head -60 | while read -r _ f; do
         printf 'H %s\\t' "$f"; head -c 16000 "$f" | grep -o '"cwd":"[^"]*"' | head -n 1; echo
+        printf 'N %s\\t' "$f"; grep -m1 '"type":"user"' "$f" 2>/dev/null | head -c 1500; echo
       done
     `.trim();
     const out = await this._ssh(h, script, { timeoutMs: 20000 });
@@ -245,7 +275,24 @@ class HostManager {
       } else if (line.startsWith('H ')) {
         const t = line.indexOf('\t');
         const m = t > 2 && line.slice(t + 1).match(/^"cwd":"([^"]*)"/);
-        if (m) heads.set(line.slice(2, t), { cwd: m[1] });
+        if (m) heads.set(line.slice(2, t), { ...(heads.get(line.slice(2, t)) || {}), cwd: m[1] });
+      } else if (line.startsWith('N ')) {
+        const t = line.indexOf('\t');
+        if (t > 2) {
+          const fp = line.slice(2, t);
+          // first user record → session name (same rule as local naming);
+          // content is either a plain string ("content":"...") or an array of
+          // blocks ("content":[{"type":"text","text":"..."}]) — support both.
+          // The line may be truncated at 1500 bytes.
+          const seg = line.slice(t + 1);
+          const m = seg.match(/"content":"((?:[^"\\]|\\.)*)"/) || seg.match(/"text":"((?:[^"\\]|\\.)*)"/);
+          if (m) {
+            let name = null;
+            try { name = JSON.parse('"' + m[1] + '"'); } catch { name = m[1]; }
+            name = (name || '').replace(/\s+/g, ' ').trim();
+            if (name && !name.startsWith('<')) heads.set(fp, { ...(heads.get(fp) || {}), name: name.slice(0, 80) });
+          }
+        }
       }
     }
     // lock-first claim: newest JSONL in the lock's project dir = RUNNING
@@ -264,7 +311,7 @@ class HostManager {
     for (const j of jsonls) {
       if (claimed.has(j.path)) continue;
       const head = heads.get(j.path);
-      sessions.push({ sessionId: path.basename(j.path, '.jsonl'), cwd: head?.cwd || null, projDir: path.basename(path.dirname(j.path)), status: 'remote-stopped', host: h.id, hostName: h.name, mtime: j.mtime });
+      sessions.push({ sessionId: path.basename(j.path, '.jsonl'), cwd: head?.cwd || null, name: head?.name || null, projDir: path.basename(path.dirname(j.path)), status: 'remote-stopped', host: h.id, hostName: h.name, mtime: j.mtime });
     }
     this._discoveryCache.set(id, { at: Date.now(), sessions });
     return sessions;

@@ -35,12 +35,18 @@ function withSessionKey(session = {}) {
 
 /** Setup session routes. Requires ctx object with dependencies. */
 function setup(ctx) {
-  const { activeSessions, webuiPids, refreshWebuiPids, createSessionMessages, BUFFERS_DIR, PERMISSION_MODES, execFileSync } = ctx;
+  const { activeSessions, webuiPids, refreshWebuiPids, createSessionMessages, BUFFERS_DIR, PERMISSION_MODES, execFileSync, hosts } = ctx;
 
   // Get chat message history for a Claude session (JSONL + optional buffer)
-  router.get('/api/session-messages', (req, res) => {
+  router.get('/api/session-messages', async (req, res) => {
     const { backend, backendSessionId, claudeSessionId, cwd, offset, limit, search } = req.query;
     const resolvedBackend = backend || 'claude';
+    // Remote session (?host=): refresh the local transcript cache first —
+    // findSessionJsonlPath scans it, so everything below works unchanged.
+    if (req.query.host && hosts) {
+      try { await hosts.fetchSessionJsonl(req.query.host, backendSessionId || claudeSessionId); }
+      catch (e) { console.error('remote jsonl fetch failed:', e.message); }
+    }
     const resolvedSessionId = backendSessionId || claudeSessionId;
     if (!resolvedSessionId) return res.status(400).json({ error: 'backendSessionId or claudeSessionId required' });
 

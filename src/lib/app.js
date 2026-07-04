@@ -1927,7 +1927,7 @@ class App {
     this.ws.onGlobal(handler);
   }
 
-  resumeSession(sessionId, cwd, sessionName, { mode, model, effort, permission, syncId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId } = {}) {
+  resumeSession(sessionId, cwd, sessionName, { mode, model, effort, permission, syncId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, hostId } = {}) {
     this._closeSidebarOnMobile();
     const targetBackendId = backendSessionId || sessionId;
     // If this session is already open in a LIVE window, focus it
@@ -1966,6 +1966,7 @@ class App {
       syncId,
       backend,
       backendSessionId: backendSessionId || sessionId,
+      hostId, // remote session resumes ON its host
       agentKind,
       agentRole,
       agentNickname,
@@ -2058,7 +2059,7 @@ class App {
   }
 
   // Open a stopped session as view-only (load JSONL, no claude --resume)
-  viewSession(sessionId, cwd, sessionName, { syncId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId } = {}) {
+  viewSession(sessionId, cwd, sessionName, { syncId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, hostId } = {}) {
     this._closeSidebarOnMobile();
     this._hideWelcome();
     const resolvedSessionId = backendSessionId || sessionId;
@@ -2074,6 +2075,7 @@ class App {
       agentNickname: agentNickname || '',
       sourceKind: sourceKind || '',
       parentThreadId: parentThreadId || null,
+      hostId: hostId || undefined,
       cwd,
       name: sessionName,
     };
@@ -2095,6 +2097,7 @@ class App {
       backend,
       backendSessionId: resolvedSessionId,
       claudeSessionId: backend === 'claude' ? resolvedSessionId : undefined,
+      host: hostId || undefined, // remote session: server pulls the transcript over ssh first
       cwd,
       name: sessionName,
     });
@@ -2184,6 +2187,7 @@ class App {
         break;
       case 'viewSession':
         this.viewSession(spec.sessionId, spec.cwd, spec.name, {
+          hostId: spec.hostId,
           syncId,
           backend: spec.backend || 'claude',
           backendSessionId: spec.backendSessionId || spec.sessionId,

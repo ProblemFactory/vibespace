@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.26.0] — 2026-07-04
+
+### Added
+
+- **Remote session history over ssh** — the server fetches a remote session's JSONL into a local cache (invalidated by remote size+mtime; one ssh stat when fresh) whenever you view or resume it. Pre-resume history now renders in the chat window (verified: 342-message remote transcript), View History works for remote sessions, and pagination/search/minimap all operate on the cache like a local transcript. This also removes the failure mode where a live reply could be lost on a history-less remote attach.
+- **Remote cards are now full session cards** — same card as local sessions: real name extracted from the first user message during discovery (string- and block-form content), host badge, star/archive, expand panel with details, View History and Resume buttons. The stripped-down two-line remote card is gone.
+
 ## [2.25.0] — 2026-07-04
 
 ### Added
