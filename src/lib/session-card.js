@@ -146,13 +146,34 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
   starBtn.title = starred ? 'Unstar' : 'Star';
   starBtn.onclick = (e) => { e.stopPropagation(); state.toggleStar(s); };
   row.insertBefore(starBtn, row.firstChild);
-  // Archive button (inline, always visible)
+  // Archive button (inline, always visible). In manage mode it becomes a
+  // MARK toggle — same position, so entering manage mode doesn't reshuffle
+  // the controls the user already knows.
+  const manageKey = state._getSessionStateKey(s) || s.sessionId;
+  const mark = state._manageMode ? (state._manageMarks?.get(manageKey) || {}) : null;
   const archBtn = document.createElement('button');
-  archBtn.className = 'session-inline-btn' + (isArchived ? ' archived' : '');
-  archBtn.innerHTML = isArchived ? ICON.unarchive : ICON.archive;
-  archBtn.title = isArchived ? 'Unarchive' : 'Archive';
-  archBtn.onclick = (e) => { e.stopPropagation(); state.toggleArchive(s); };
+  if (mark) {
+    archBtn.className = 'session-inline-btn' + (mark.archive ? ' mark-on' : '');
+    archBtn.innerHTML = isArchived ? ICON.unarchive : ICON.archive;
+    archBtn.title = isArchived ? 'Mark to unarchive' : 'Mark to archive';
+    archBtn.onclick = (e) => { e.stopPropagation(); state._toggleManageMark(manageKey, 'archive'); };
+  } else {
+    archBtn.className = 'session-inline-btn' + (isArchived ? ' archived' : '');
+    archBtn.innerHTML = isArchived ? ICON.unarchive : ICON.archive;
+    archBtn.title = isArchived ? 'Unarchive' : 'Archive';
+    archBtn.onclick = (e) => { e.stopPropagation(); state.toggleArchive(s); };
+  }
   row.insertBefore(archBtn, row.children[1]);
+  // Manage mode: a terminate-mark button right next to archive (running only)
+  if (mark && s.status !== 'stopped') {
+    const termMark = document.createElement('button');
+    termMark.className = 'session-inline-btn session-term-mark' + (mark.terminate ? ' mark-on' : '');
+    termMark.innerHTML = ICON.terminate;
+    termMark.title = 'Mark to terminate';
+    termMark.onclick = (e) => { e.stopPropagation(); state._toggleManageMark(manageKey, 'terminate'); };
+    row.insertBefore(termMark, row.children[2]);
+  }
+  if (mark && (mark.terminate || mark.archive)) card.classList.add('manage-marked');
   // Composite icon: mode shape (chat/terminal) + backend logo inside
   // For live sessions with known mode: composite icon before name
   // For stopped/external: plain backend icon before name
@@ -192,35 +213,6 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     }
   };
   card.querySelector('.session-card-row').appendChild(expandBtn);
-
-  // Manage mode: MARK-then-apply. Clicking these buttons only TAGS the card
-  // (terminate / archive / both) — it does NOT act immediately, so the list
-  // never reshuffles mid-selection. A batch bar at the top applies all marks
-  // at once. Marks live in state._manageMarks (Map key → {terminate,archive}).
-  if (state._manageMode) {
-    const key = state._getSessionStateKey(s) || s.sessionId;
-    const mark = state._manageMarks?.get(key) || {};
-    if (mark.terminate || mark.archive) card.classList.add('manage-marked');
-    const mkMark = (kind, icon, title, allowed) => {
-      if (!allowed) return;
-      const b = document.createElement('button');
-      b.className = 'session-manage-mark' + (mark[kind] ? ' on' : '');
-      b.innerHTML = icon;
-      b.title = title;
-      b.onclick = (e) => {
-        e.stopPropagation();
-        const marks = state._manageMarks = state._manageMarks || new Map();
-        const cur = marks.get(key) || {};
-        cur[kind] = !cur[kind];
-        if (!cur.terminate && !cur.archive) marks.delete(key); else marks.set(key, cur);
-        state._render();
-      };
-      row.insertBefore(b, expandBtn);
-    };
-    // archive available to all; terminate only to running sessions
-    mkMark('archive', ICON.archive, isArchived ? 'Mark to unarchive' : 'Mark to archive', true);
-    mkMark('terminate', ICON.terminate, 'Mark to terminate', s.status !== 'stopped');
-  }
 
   // Detail panel (shown when expanded)
   const detailPanel = document.createElement('div');

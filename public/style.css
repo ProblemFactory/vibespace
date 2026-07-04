@@ -1882,14 +1882,8 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 
 /* Sidebar manage mode: mark-then-apply batch management */
 #manage-toggle.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
-.session-manage-mark {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 20px; height: 20px; border: 1px solid var(--border); border-radius: var(--radius-sm);
-  background: transparent; color: var(--text-dim); cursor: pointer; flex-shrink: 0;
-}
-.session-manage-mark svg { width: 12px; height: 12px; }
-.session-manage-mark:hover { color: var(--text); border-color: var(--accent); }
-.session-manage-mark.on { color: var(--red, #e55); border-color: var(--red, #e55); background: color-mix(in srgb, var(--red, #e55) 15%, transparent); }
+.session-inline-btn.mark-on { color: var(--red, #e55) !important; background: color-mix(in srgb, var(--red, #e55) 16%, transparent); border-radius: var(--radius-sm); }
+.session-term-mark { color: var(--text-dim); }
 .session-item-card.manage-marked { outline: 1px solid color-mix(in srgb, var(--red, #e55) 45%, transparent); outline-offset: -1px; opacity: 0.85; }
 .wb-manage-bar {
   position: sticky; top: 0; z-index: 3; display: flex; align-items: center; justify-content: space-between;

@@ -30,6 +30,14 @@ function abbrevPath(cwd) {
 export function installSidebarWorkbench(Sidebar) {
   Object.assign(Sidebar.prototype, {
 
+    _toggleManageMark(key, kind) {
+      const marks = this._manageMarks = this._manageMarks || new Map();
+      const cur = marks.get(key) || {};
+      cur[kind] = !cur[kind];
+      if (!cur.terminate && !cur.archive) marks.delete(key); else marks.set(key, cur);
+      this._render();
+    },
+
     _buildManageBar() {
       const marks = this._manageMarks || new Map();
       let nTerm = 0, nArch = 0;
