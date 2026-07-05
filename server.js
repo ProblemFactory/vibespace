@@ -1205,6 +1205,7 @@ app.get('/api/mounts', async (req, res) => {
     env: cfg ? { endpoint: cfg.endpoint, bucket: cfg.bucket, prefix: cfg.prefix, accessKey: cfg.accessKey, configured: cfg.configured, importedFromEnv: cfg.importedFromEnv } : null,
     mountBase: mounts.mountBase,
     mcAvailable: await mounts.mcAvailable(),
+    rcloneAvailable: mounts.rcloneAvailable(),
   });
 });
 app.post('/api/mounts', (req, res) => {
@@ -1263,6 +1264,25 @@ app.delete('/api/mount-tokens/:id', (req, res) => {
   try { mountTokens.revoke(req.params.id); res.json({ success: true }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
+
+// rclone availability + one-click install (data/bin, pinned verified version)
+app.get('/api/mounts/rclone', (req, res) => res.json({ available: mounts.rcloneAvailable(), bin: mounts.rcloneBin() }));
+app.post('/api/mounts/rclone/install', async (req, res) => {
+  try { res.json({ success: true, ...(await mounts.installRclone()) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Guided Google Drive OAuth (see mounts.js startDriveAuth for the model)
+app.post('/api/mounts/gdrive-auth/start', async (req, res) => {
+  try { res.json(await mounts.startDriveAuth()); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.get('/api/mounts/gdrive-auth/status', (req, res) => res.json(mounts.driveAuthStatus()));
+app.post('/api/mounts/gdrive-auth/callback', async (req, res) => {
+  try { res.json(await mounts.forwardDriveCallback(req.body?.url)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/mounts/gdrive-auth/cancel', (req, res) => { mounts.cancelDriveAuth(); res.json({ success: true }); });
 
 app.post('/api/mounts/my-storage', (req, res) => {
   try { res.json({ success: true, id: mounts.addMyStorage() }); }
