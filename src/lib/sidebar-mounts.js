@@ -116,7 +116,7 @@ export function installSidebarMounts(Sidebar) {
         if (!d.env.configured) {
           const add = document.createElement('button');
           add.className = 'mounts-btn mounts-btn-primary';
-          add.textContent = 'Add & mount';
+          add.textContent = 'Connect';
           add.onclick = async () => {
             add.disabled = true;
             try {
@@ -199,14 +199,14 @@ export function installSidebarMounts(Sidebar) {
       foot.append(
         action(MI.importL, 'Import share link', () => this._showImportShareDialog()),
         action(MI.importL, 'Import rclone config', () => this._showRcloneConfDialog()),
-        action(MI.link, 'Share a folder', () => this._showMintShareDialog(d), {
+        action(MI.link, 'Share a cloud folder', () => this._showMintShareDialog(d), {
           disabled: !d.env,
           title: d.env ? 'Create a link that lets someone else open one folder from your storage.' : 'Set up “My storage” first (Configure S3… above).',
         }),
         action(MI.server, 'Share a local folder', () => this._showBridgeShareDialog(), {
           title: 'Create a link that lets another VibeSpace open a folder from this computer.',
         }),
-        action(MI.plus, 'Add mount', () => this._showAddMountDialog()),
+        action(MI.plus, 'Connect storage', () => this._showAddMountDialog()),
       );
       root.appendChild(foot);
       // Bridge tokens I minted (revocable)
@@ -271,12 +271,12 @@ export function installSidebarMounts(Sidebar) {
       if (m.mounted) {
         actions.append(
           ibtn(MI.folder, 'Browse in file explorer', () => { this.app.openFileExplorer(m.path); }),
-          ibtn(MI.eject, 'Unmount', () => api(`/api/mounts/${m.id}/unmount`, { method: 'POST' })),
+          ibtn(MI.eject, 'Disconnect', () => api(`/api/mounts/${m.id}/unmount`, { method: 'POST' })),
         );
       } else {
-        actions.append(ibtn(MI.plug, 'Mount', async () => {
+        actions.append(ibtn(MI.plug, 'Connect', async () => {
           const r = await api(`/api/mounts/${m.id}/mount`, { method: 'POST' });
-          if (!r.success) throw new Error('Mount failed — hover the status dot for details');
+          if (!r.success) throw new Error('Couldn’t connect — hover the status dot for details');
         }, 'mounts-icon-accent'));
       }
       actions.append(ibtn(MI.cross, 'Remove mount (nothing is deleted remotely)', async () => {
@@ -692,7 +692,7 @@ export function installSidebarMounts(Sidebar) {
         modeWrap.appendChild(modeSel);
         const importBtn = document.createElement('button');
         importBtn.className = 'btn-create';
-        importBtn.textContent = 'Import & mount selected';
+        importBtn.textContent = 'Import & connect selected';
         importBtn.onclick = async () => {
           const names = checks.filter(c => c.checked).map(c => c.dataset.name);
           if (!names.length) { err.textContent = 'Pick at least one remote.'; return; }
@@ -700,7 +700,7 @@ export function installSidebarMounts(Sidebar) {
           try {
             const r = await api('/api/mounts/rclone-conf/import', { method: 'POST', body: JSON.stringify({ text: confText, names, mode: modeSel.value }), headers: { 'Content-Type': 'application/json' } });
             close(); showToast(`Imported ${r.added.length} remote${r.added.length === 1 ? '' : 's'}`); this._renderMounts();
-          } catch (e) { err.textContent = e.message || 'Import failed'; importBtn.disabled = false; importBtn.textContent = 'Import & mount selected'; }
+          } catch (e) { err.textContent = e.message || 'Import failed'; importBtn.disabled = false; importBtn.textContent = 'Import & connect selected'; }
         };
         list.append(modeWrap, importBtn);
       };
@@ -710,7 +710,7 @@ export function installSidebarMounts(Sidebar) {
       this._mountsDialog('Import share link', [
         { key: 'link', label: 'Share link', placeholder: 'vibespace-share:v1:…' },
         { key: 'name', label: 'Display name (optional)', placeholder: 'team-dataset', hint: 'What to call this folder in your file list.' },
-      ], 'Import & mount', async (v, { close }) => {
+      ], 'Import & connect', async (v, { close }) => {
         if (!v.link) throw new Error('Paste the share link');
         const r = await api('/api/mounts/import', { method: 'POST', body: JSON.stringify({ link: v.link, name: v.name || undefined }), headers: { 'Content-Type': 'application/json' } });
         await fetch(`/api/mounts/${r.id}/mount`, { method: 'POST' });
@@ -720,7 +720,7 @@ export function installSidebarMounts(Sidebar) {
 
     _showAddMountDialog() {
       const is = (t) => (v) => v.type === t;
-      this._mountsDialog('Add mount', [
+      this._mountsDialog('Connect storage', [
         { key: 'type', label: 'Source type', type: 'select', options: [
           ['s3', 'Cloud storage (S3 / MinIO)'], ['drive', 'Google Drive'], ['webdav', 'Nextcloud / WebDAV'],
           ['sftp', 'A server over SSH (SFTP)'], ['vibespace', 'Another VibeSpace'], ['rclone', 'Custom / advanced (rclone)'],
@@ -762,7 +762,7 @@ export function installSidebarMounts(Sidebar) {
         { key: 'extraParams', label: 'Extra options (key = value per line)', type: 'textarea', placeholder: 'e.g.  chunk_size = 64M', hint: 'Passed to the underlying transfer engine (rclone) — custom API keys, tuning, provider quirks. See rclone.org/docs.', advanced: true },
         { key: 'mode', label: 'Mode', type: 'select', options: [['rw', 'Read-write'], ['ro', 'Read-only']] },
         { key: 'customPath', label: 'Where to put it on this computer (optional)', placeholder: 'leave blank — we choose automatically', hint: 'Advanced: an absolute path if you need it in a specific place.', advanced: true, autocomplete: 'local' },
-      ], 'Add & mount', async (v, { close }) => {
+      ], 'Connect', async (v, { close }) => {
         delete v.fromHost; // UI-only prefill helper
         const parseKV = (text) => {
           const o = {};
@@ -778,7 +778,7 @@ export function installSidebarMounts(Sidebar) {
         if (v.extraParams) v.extraParams = parseKV(v.extraParams);
         const r = await api('/api/mounts', { method: 'POST', body: JSON.stringify(v), headers: { 'Content-Type': 'application/json' } });
         await fetch(`/api/mounts/${r.id}/mount`, { method: 'POST' });
-        close(); showToast('Mount added'); this._renderMounts();
+        close(); showToast('Storage connected'); this._renderMounts();
       });
       const ctx = this._lastMountsDialog;
       if (!ctx) return;
@@ -820,7 +820,7 @@ export function installSidebarMounts(Sidebar) {
       const finish = (token) => {
         stopPoll();
         tokenInput.value = token;
-        status.textContent = '✓ Connected — finish with “Add & mount”.';
+        status.textContent = '✓ Connected — finish with the “Connect” button below.';
         btn.textContent = 'Reconnect';
         btn.disabled = false;
         pasteBox?.remove(); pasteBox = null;
@@ -893,7 +893,7 @@ export function installSidebarMounts(Sidebar) {
         const r = await api('/api/mount-tokens', { method: 'POST', body: JSON.stringify(v), headers: { 'Content-Type': 'application/json' } });
         body.innerHTML = `<label>Bridge link — embeds a scoped token; treat it like a key</label>
           <textarea readonly style="min-height:84px;font-size:11px">${escHtml(r.link)}</textarea>
-          <div class="mounts-note">The other side pastes this into Import share link (or Add mount → Another VibeSpace). Revoke any time under Bridge tokens.</div>`;
+          <div class="mounts-note">The other side pastes this into “Import share link” (or Connect storage → Another VibeSpace). Revoke any time under Bridge tokens.</div>`;
         const copyBtn = document.createElement('button');
         copyBtn.className = 'btn-create';
         copyBtn.textContent = 'Copy link';
