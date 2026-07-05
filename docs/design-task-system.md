@@ -22,22 +22,30 @@ Explicitly **out of scope** (user did not choose it): auto-scheduling / fleet au
 
 ## 3. Core model
 
-**Task = a tag, and tasks are a SUPERSET of Groups** (user-confirmed). A task is a group with a goal + lifecycle + attention. Existing user groups stay as-is (a task with no objective/status behaves exactly like today's group); the Groups tab grows into the task board. One grouping system, not two.
+**Task = a tag, and tasks are a SUPERSET of Groups** (user-confirmed). A task is a group with a goal + lifecycle + attention. Existing user groups stay as-is (a task with no goal behaves exactly like today's group); the Groups tab grows into the task board. One grouping system, not two.
+
+**Tagging is many-to-many** (a session can carry several task tags — that's what "tag" means). But **context injection uses ONE task per session** (the task the session was created under, carried in `VIBESPACE_TASK_ID`) — you can't inject two conflicting objectives. So: multi-tag for organization, single "context task" for injection.
+
+**Two INDEPENDENT, both-optional folder bindings** (user clarification — don't conflate them):
+- `folders[]` — **auto-include folders**: sessions whose cwd is under these are auto-added to the task (= today's `groupFolders`). Absent → sessions are added manually.
+- `contextDir` — the **context folder**: the task's shared brain, injected into its context sessions (§4a). Absent → no injection / no agent file-participation; the task is still a fully usable board item.
+
+A task can have neither, either, or both.
 
 ```
 Task {
-  id            "T-<yymmdd>-<slug>"        // stable, human-readable
+  id            "T-<yymmdd>-<slug>"        // stable
   title
-  status        active | paused | done | blocked
-  attention     null | { reason, since }    // surfaced, set by signals (see §7) or manually
-  sessions      [sessionKey, ...]           // bound sessions (backend:backendSessionId)
-  contextDir    null | "<abs path>"         // the task's shared context FOLDER (§4a)
-  pinnedFile    "TASK.md"                   // file inside contextDir injected VERBATIM (default TASK.md)
-  createdAt, updatedAt
+  kind          "task" | "group"           // migrated groups = "group" (no goal/lifecycle)
+  status        active | paused | blocked | done   // AUTHORITATIVE in tasks.json (see §3.2)
+  attention     null | { reason, since }           // backbone = VibeSpace idle detection (§7)
+  sessions      [sessionKey, ...]           // tagged sessions (many-to-many)
+  folders       [absPath, ...]              // auto-include folders (optional)
+  contextDir    null | absPath              // context folder (optional, §4a)
+  pinnedFile    "TASK.md"
+  color, createdAt, updatedAt
 }
 ```
-
-The `objective` lives in the pinned file inside `contextDir` (not a DB field) — human-editable, agent-readable/writable, one source of truth.
 
 **State source (user-confirmed): split by nature** — task METADATA (id/title/status/sessions/attention/contextDir) lives in `data/tasks.json` (atomic write + `tasks-updated` WS broadcast, same pattern as hosts/mounts/user-state); task CONTENT (objective, progress, shared artifacts) lives in the context folder as plain files (§4a/§5), where both the user (via VibeSpace UI) and agents (via their file tools) read/write it. Self-contained with zero external setup; repo participation is just pointing contextDir into a repo (§6).
 
@@ -73,16 +81,20 @@ data/tasks.json
 
 **ID:** `T-<yymmdd>-<slug>` where slug = kebab of the title, or a 6-char random suffix when the title doesn't slug cleanly (CJK/spaces). Stable forever (used in `VIBESPACE_TASK_ID` + the contextDir folder name). Migrated groups get an id too; their CJK names stay in `title`.
 
-**Truth-source split (the rule that keeps sync sane):**
+### 3.2 Truth model — structured store is authoritative; files are a RAW-displayed workspace
 
-| field | source of truth | who writes |
+**`data/tasks.json` is the single source of truth for everything the UI renders** — title, kind, status, attention, tags, folders, contextDir. The UI reads and writes it directly (structured, reliable, no markdown parsing anywhere in the render path). This is the correction to an earlier draft that put status in `TASK.md` frontmatter: **an agent is non-deterministic and may ignore any file convention, so the board must never depend on parsing agent-authored markdown.**
+
+The context folder's files (`TASK.md`, `progress.md`, artifacts) are the **shared human+agent workspace**, and VibeSpace shows them **raw** (existing CodeMirror / file explorer — zero parsing to display). Their relationship to the structured store:
+
+| field | authoritative | how it's set |
 |---|---|---|
-| id, title, kind, sessions, folders, contextDir, pinnedFile, color | `data/tasks.json` | VibeSpace UI only (agents never touch structure/binding) |
-| status, attention(blocked) | `TASK.md` frontmatter *(if contextDir set)*, else tasks.json | agent (frontmatter) **or** user (UI → writes frontmatter); VibeSpace caches to tasks.json for the board |
-| objective / plan | `TASK.md` body | agent or user (CodeMirror on the file) |
-| progress | `progress.md` (append-only) | agent appends; user views (or appends via UI) |
+| title, kind, tags(sessions), folders, contextDir, color | `tasks.json` | user in UI (and VibeSpace auto-tag by `folders`) |
+| **status** | `tasks.json` | user in UI (always), OR VibeSpace idle detection (active↔waiting), OR a best-effort agent signal (below) |
+| **attention** (needs-you) | `tasks.json` | **backbone = VibeSpace idle/no-progress detection** (§7, zero agent cooperation) + optional agent-declared blocked |
+| objective, progress, artifacts | the files in `contextDir` | agent (its file tools) + user (CodeMirror), shown RAW in the detail view |
 
-So `data/tasks.json` owns *structure*; the *content* an agent and a human both touch lives in files, where each field has exactly ONE writable home — no bidirectional loops.
+**Agent signals are best-effort enrichment with a reliable native fallback.** The board is fully populated from user input + VibeSpace's own observation *even if no agent ever touches a file*. If an agent DOES follow the skill's convention, VibeSpace best-effort enriches (a "blocked: <reason>" chip, a "latest progress" line) — but a malformed or missing file just means no enrichment, never a broken or blank board (last-good wins; the raw file is still there for humans). See §5 for exactly how the agent reports and how VibeSpace consumes it safely.
 
 ## 4. Binding → context injection (the key mechanism)
 
@@ -137,13 +149,25 @@ Blocked: need the staging API key to verify the refresh path.
 
 Short, declarative, no tool calls — the agent uses ordinary Read/Write.
 
-### 5.3 How VibeSpace consumes it
+### 5.3 How VibeSpace consumes it — safely, never as a dependency
 
-`TaskManager` runs one `fs.watch` per task with a `contextDir` (debounced): on change it re-parses `TASK.md` frontmatter (`status`, `blocked`) and `progress.md`'s tail, writes the cached `status`/`attention`/`lastProgress` into `data/tasks.json`, and broadcasts `tasks-updated`. Detection stays with the agent (it declares blocked); VibeSpace only observes + surfaces (§7). Remote contextDirs: watched via the local mount view, or polled over ssh on the discovery cadence when not mounted.
+`TaskManager` runs one debounced `fs.watch` per task that has a `contextDir`. On change it BEST-EFFORT enriches the board:
+- `progress.md` tail → a "latest progress" chip (parse the last `## …` heading; if the agent didn't use that shape, fall back to the last non-empty line; if empty, show nothing).
+- an optional structured marker (§5.4) → the `blocked: <reason>` chip.
 
-### 5.4 The user edits the same medium
+Every parse is defensive: malformed/missing → keep the last-good cached value, never clear the board. The **authoritative** `status`/`attention` in `tasks.json` come from the user + VibeSpace's own idle detection (§7); the file parse only *adds* a reason string / progress line. So the board is correct and full with zero agent cooperation, and richer when the agent plays along. Remote contextDirs: watched via the local mount view, or polled over ssh on the discovery cadence when not mounted.
 
-The task detail view gives the USER the same two levers without leaving VibeSpace: **open `TASK.md` in the existing CodeMirror editor** (edit objective + flip status), **browse `contextDir` in the file explorer**, **view `progress.md`**. A "Set up context folder" button scaffolds `contextDir` (creates the dir + a `TASK.md` stub) when a task first wants agent participation. User and agents share one folder; there is exactly one place each fact lives.
+### 5.4 The reliable agent status signal (structured, not free markdown)
+
+For the one thing worth capturing structurally — *the agent declaring it's blocked and why* (VibeSpace can see "idle" but not the reason) — the skill has the agent write a tiny **structured** file, `.vibespace-signal.json`, in `contextDir`:
+```json
+{ "status": "blocked", "reason": "need the staging API key", "at": "2026-07-05T15:10:00Z" }
+```
+JSON, not YAML-in-a-doc — deterministic to parse, and a malformed write is simply ignored (last-good wins). This is the ONLY structured convention; everything else the agent writes (`progress.md`, `TASK.md` objective, artifacts) is free prose shown raw. Even this signal is optional — without it the board still shows idle/active from §7. (Local agents may instead run a shipped `vibespace-task blocked "reason"` helper that writes the same file; remote agents just write the file, which is why the file — not an HTTP/CLI call — is the canonical channel.)
+
+### 5.5 The user edits the same medium
+
+The task detail view: **structured fields at the top** (title, status dropdown, tags, folders, contextDir — all editing `tasks.json`, reliable), then the **raw folder workspace below** — `TASK.md` in the existing CodeMirror editor, `progress.md` rendered, the rest of `contextDir` in the file explorer. A "Set up context folder" button scaffolds `contextDir` (dir + `TASK.md` stub + the skill's conventions) when a task first wants agent participation. The user never parses markdown either — they read/write the structured fields for state and the files for content.
 
 ## 6. Repo task files (optional, bidirectional, agent-driven)
 
