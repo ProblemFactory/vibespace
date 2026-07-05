@@ -103,6 +103,47 @@ class MountManager {
     this._notify();
   }
 
+  // ── rclone binary resolution + one-click install ──
+  // Non-engineers shouldn't need a terminal: if rclone isn't on PATH we can
+  // download the official static binary into data/bin (pinned to a version
+  // we've verified end-to-end — also predates the aws-sdk-go-v2 signing
+  // behavior that breaks V4 auth through Cloudflare-fronted MinIO).
+  static RCLONE_PIN = 'v1.65.2';
+
+  rcloneBin() {
+    const local = path.join(this.dataDir, 'bin', 'rclone');
+    if (fs.existsSync(local)) return local;
+    return 'rclone'; // PATH
+  }
+
+  rcloneAvailable() {
+    try { execFileSync(this.rcloneBin(), ['version'], { timeout: 5000, stdio: 'pipe' }); return true; }
+    catch { return false; }
+  }
+
+  async installRclone() {
+    const arch = { x64: 'amd64', arm64: 'arm64', arm: 'arm-v7' }[process.arch] || 'amd64';
+    const osName = process.platform === 'darwin' ? 'osx' : 'linux';
+    const ver = MountManager.RCLONE_PIN;
+    const url = `https://downloads.rclone.org/${ver}/rclone-${ver}-${osName}-${arch}.zip`;
+    const binDir = path.join(this.dataDir, 'bin');
+    fs.mkdirSync(binDir, { recursive: true });
+    const zipPath = path.join(binDir, 'rclone-dl.zip');
+    await new Promise((resolve, reject) => {
+      execFile('curl', ['-fsSL', '-o', zipPath, url], { timeout: 120000 }, (err, _o, stderr) =>
+        err ? reject(new Error('download failed: ' + (stderr || err.message).slice(0, 200))) : resolve());
+    });
+    await new Promise((resolve, reject) => {
+      execFile('unzip', ['-oj', zipPath, `rclone-${ver}-${osName}-${arch}/rclone`, '-d', binDir], { timeout: 30000 }, (err, _o, stderr) =>
+        err ? reject(new Error('unzip failed: ' + (stderr || err.message).slice(0, 200))) : resolve());
+    });
+    fs.chmodSync(path.join(binDir, 'rclone'), 0o755);
+    try { fs.unlinkSync(zipPath); } catch {}
+    this._rcloneAEFlag = undefined; // re-probe flags with the new binary
+    if (!this.rcloneAvailable()) throw new Error('installed binary failed to run');
+    return { version: ver, path: path.join(binDir, 'rclone') };
+  }
+
   _key() {
     try { return Buffer.from(fs.readFileSync(this._keyFile, 'utf-8').trim(), 'hex'); }
     catch {
@@ -331,7 +372,7 @@ class MountManager {
   // rclone obscure: rclone requires PASS-type params in its reversible
   // obscured form. We store the REAL secret AES-GCM'd and obscure at use time.
   _obscure(plain) {
-    return execFileSync('rclone', ['obscure', String(plain)], { encoding: 'utf-8', timeout: 5000 }).trim();
+    return execFileSync(this.rcloneBin(), ['obscure', String(plain)], { encoding: 'utf-8', timeout: 5000 }).trim();
   }
 
   /** Per-type rclone env + remote string for a mount record. */
@@ -414,7 +455,7 @@ class MountManager {
     // or an un-proxied endpoint — fail with a message that says so.
     if (isS3 && m.v2Auth === undefined) {
       const probe = (extraEnv) => new Promise((resolve) => {
-        execFile('rclone', ['lsf', remote, '--max-depth', '1', '--retries', '1', '--low-level-retries', '1',
+        execFile(this.rcloneBin(), ['lsf', remote, '--max-depth', '1', '--retries', '1', '--low-level-retries', '1',
           ...(this._rcloneSupportsAcceptEncodingFlag() ? ['--s3-use-accept-encoding-gzip=false'] : [])],
           { env: { ...env, ...extraEnv }, timeout: 20000 },
           (err, _o, stderr) => resolve(err ? String(stderr || err.message) : null));
@@ -434,7 +475,7 @@ class MountManager {
     }
     if (m.v2Auth) env.RCLONE_CONFIG_VS_V2_AUTH = 'true';
     // detached: mounts survive server restarts (adopted on boot)
-    const child = spawn('rclone', args, { env, detached: true, stdio: ['ignore', log, log] });
+    const child = spawn(this.rcloneBin(), args, { env, detached: true, stdio: ['ignore', log, log] });
     child.unref();
     fs.closeSync(log);
     m.desired = 'mounted';
@@ -532,10 +573,95 @@ class MountManager {
   _rcloneSupportsAcceptEncodingFlag() {
     if (this._rcloneAEFlag !== undefined) return this._rcloneAEFlag;
     try {
-      const out = execFileSync('rclone', ['help', 'flags'], { encoding: 'utf-8', timeout: 5000, maxBuffer: 4 * 1024 * 1024 });
+      const out = execFileSync(this.rcloneBin(), ['help', 'flags'], { encoding: 'utf-8', timeout: 5000, maxBuffer: 4 * 1024 * 1024 });
       this._rcloneAEFlag = out.includes('use-accept-encoding-gzip');
     } catch { this._rcloneAEFlag = false; }
     return this._rcloneAEFlag;
+  }
+
+  // ── Guided Google Drive OAuth (no terminal needed) ──
+  // We spawn `rclone authorize "drive"` ON THE SERVER: rclone prints the
+  // Google consent URL and listens on 127.0.0.1:53682 for the redirect.
+  //  - Browser on the same machine as the server: the redirect lands directly
+  //    and the flow completes hands-free.
+  //  - Remote deployment: the redirect to 127.0.0.1 fails in the USER'S
+  //    browser, but the code is in the address bar — the UI asks them to
+  //    paste that URL back and we FORWARD it to rclone's local listener.
+  // Either way rclone performs the token exchange itself (its own OAuth
+  // client credentials) and prints the token JSON, which we capture. No
+  // Google secrets to configure, no terminal.
+
+  startDriveAuth() {
+    this.cancelDriveAuth();
+    const child = spawn(this.rcloneBin(), ['authorize', 'drive', '--auth-no-open-browser'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const st = { child, url: null, token: null, error: null, buf: '', startedAt: Date.now() };
+    this._driveAuth = st;
+    const onData = (d) => {
+      st.buf += d.toString();
+      // rclone prints a LOCAL redirector URL (http://127.0.0.1:53682/auth?state=…)
+      // that 302s to the real Google consent URL — resolve it server-side so a
+      // user on ANOTHER machine gets a link that actually works.
+      const m = st.buf.match(/http:\/\/127\.0\.0\.1:53682\/auth\?state=[\w-]+/);
+      if (m && !st.localUrl) {
+        st.localUrl = m[0];
+        execFile('curl', ['-s', '-o', '/dev/null', '-w', '%{redirect_url}', st.localUrl], { timeout: 10000 },
+          (err, stdout) => { if (!err && String(stdout).startsWith('http')) st.url = String(stdout).trim(); else st.url = st.localUrl; });
+      }
+      // token JSON is printed between marker lines on stdout
+      const tok = st.buf.match(/--->\s*(\{[\s\S]*?\})\s*<---/);
+      if (tok) { st.token = tok[1]; try { child.kill(); } catch {} }
+    };
+    child.stdout.on('data', onData);
+    child.stderr.on('data', onData);
+    child.on('close', () => { if (!st.token && !st.error) st.error = st.error || null; });
+    // safety: kill after 10 minutes
+    st.timer = setTimeout(() => this.cancelDriveAuth(), 10 * 60 * 1000);
+    st.timer.unref?.();
+    return new Promise((resolve) => {
+      const t0 = Date.now();
+      const tick = () => {
+        if (st.url) return resolve({ url: st.url });
+        if (Date.now() - t0 > 15000) return resolve({ error: 'rclone did not produce an auth URL: ' + st.buf.slice(-200) });
+        setTimeout(tick, 200);
+      };
+      tick();
+    });
+  }
+
+  driveAuthStatus() {
+    const st = this._driveAuth;
+    if (!st) return { active: false };
+    return { active: !st.token, url: st.url, token: st.token, error: st.error };
+  }
+
+  /** Remote-deployment fallback: forward the pasted redirect URL to rclone's listener. */
+  async forwardDriveCallback(pastedUrl) {
+    const st = this._driveAuth;
+    if (!st) throw new Error('no authorization in progress');
+    let u;
+    try { u = new URL(String(pastedUrl).trim()); } catch { throw new Error('paste the full URL from the browser address bar'); }
+    if (!u.searchParams.get('code')) throw new Error('that URL has no ?code= — paste the address the browser showed AFTER approving');
+    await new Promise((resolve, reject) => {
+      execFile('curl', ['-fsS', '-o', '/dev/null', `http://127.0.0.1:53682${u.pathname}${u.search}`], { timeout: 20000 },
+        (err, _o, stderr) => err ? reject(new Error('forward failed: ' + (stderr || err.message).slice(0, 150))) : resolve());
+    });
+    // token appears on rclone stdout momentarily
+    const t0 = Date.now();
+    return new Promise((resolve, reject) => {
+      const tick = () => {
+        if (st.token) return resolve({ token: st.token });
+        if (st.error) return reject(new Error(st.error));
+        if (Date.now() - t0 > 20000) return reject(new Error('rclone did not return a token: ' + st.buf.slice(-200)));
+        setTimeout(tick, 250);
+      };
+      tick();
+    });
+  }
+
+  cancelDriveAuth() {
+    const st = this._driveAuth;
+    if (st) { clearTimeout(st.timer); try { st.child.kill(); } catch {} }
+    this._driveAuth = null;
   }
 
   // ── Minting (mc service account → STS AssumeRole fallback) ──

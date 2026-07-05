@@ -1985,3 +1985,7 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
   background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent);
   vertical-align: 1px; white-space: nowrap;
 }
+
+.mounts-field-hint { font-size: 10px; color: var(--text-dim); margin: -2px 0 6px; line-height: 1.4; }
+.mounts-drive-connect { margin-bottom: 6px; display: flex; flex-direction: column; gap: 4px; }
+.mounts-rclone-warn { border-color: var(--yellow, #b58900); }

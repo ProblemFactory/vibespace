@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.28.1] — 2026-07-05
+
+### Added / Changed
+
+- **No terminal needed for mounts.** Google Drive now connects with a guided **Connect Google Drive** button — VibeSpace runs the OAuth handshake (server resolves the real Google consent URL; same-machine browsers complete hands-free, remote deployments paste the redirect address back) and fills the token automatically. No more `rclone authorize` on the command line.
+- **One-click rclone install** — if rclone isn't present, the Storage section offers an **Install rclone** button that downloads the official pinned binary into `data/bin` (no package manager). All mounts use it automatically.
+- **SFTP prefill from registered hosts** — pick a host in the SFTP add-mount form and its address/user/port/key are filled in.
+- Per-field help text in the add-mount dialog (e.g. where to find a Nextcloud WebDAV URL).
+
 ## [2.28.0] — 2026-07-05
 
 ### Added

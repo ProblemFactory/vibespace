@@ -5,12 +5,20 @@ The sidebar's **Remote** tab (Storage section) manages rclone-backed mounts of s
 | Type | What you provide |
 |------|------------------|
 | **S3 / MinIO** | endpoint, bucket, prefix, access + secret key |
-| **Google Drive** | the OAuth token JSON from `rclone authorize "drive"` (run it on any machine with a browser, paste the result), optional folder |
+| **Google Drive** | click **Connect Google Drive** — a guided sign-in, no terminal or token wrangling (advanced users can still paste an `rclone authorize` token) |
 | **WebDAV / Nextcloud** | URL, username, password/app-token |
 | **SFTP** | ssh host/user/port, remote path, private-key path *or* password |
 | **Another VibeSpace** | the other instance's URL + a bridge token (`vsmt_…`) it minted for you |
 
 All secrets are AES-256-GCM encrypted at rest in `data/mounts.json`; passwords rclone needs obscured are obscured only at mount time (argv is never used).
+
+> **rclone not installed?** Mounts are powered by [rclone](https://rclone.org). If it isn't on the machine, the Storage section shows a one-click **Install rclone** button that downloads the official static binary into `data/bin` (a version we've verified end-to-end) — no terminal, no package manager.
+
+### Connecting Google Drive (no terminal)
+
+Click **Connect Google Drive** in the Add-mount dialog. VibeSpace runs the OAuth handshake for you:
+- **Same machine** (VibeSpace and your browser on one computer): a Google sign-in page opens, you approve, and the connection completes on its own.
+- **Remote deployment** (VibeSpace on a server): after you approve, the browser tries to reach `127.0.0.1` and shows a "can't connect" page — that's expected. Copy that page's address from the address bar and paste it into the box that appears; VibeSpace finishes the exchange. The Drive token is filled in automatically either way.
 
 ## My storage
 

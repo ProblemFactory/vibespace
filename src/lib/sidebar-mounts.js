@@ -79,6 +79,26 @@ export function installSidebarMounts(Sidebar) {
       sHead.textContent = 'Storage';
       root.appendChild(sHead);
 
+      // rclone powers every mount type — offer a one-click install when absent
+      if (d.rcloneAvailable === false) {
+        const warn = document.createElement('div');
+        warn.className = 'mounts-env-card mounts-rclone-warn';
+        warn.innerHTML = '<div class="mounts-env-head"><b>rclone not installed</b><span>mounts need it — install it here, no terminal required</span></div>';
+        const ib = document.createElement('button');
+        ib.className = 'mounts-btn mounts-btn-primary';
+        ib.textContent = 'Install rclone';
+        ib.onclick = async () => {
+          ib.disabled = true; ib.textContent = 'Downloading…';
+          try {
+            const r = await api('/api/mounts/rclone/install', { method: 'POST' });
+            showToast(`rclone ${r.version} installed`);
+          } catch (e) { showToast(e.message || 'Install failed', { type: 'error' }); }
+          this._renderMounts();
+        };
+        warn.appendChild(ib);
+        root.appendChild(warn);
+      }
+
       // My storage (S3 bucket used as personal store + owner key for minting
       // shares). Configured IN-APP now (env imported once, see mounts.js).
       const card = document.createElement('div');
@@ -495,14 +515,22 @@ export function installSidebarMounts(Sidebar) {
         inputs[f.key] = el;
         rows.push({ field: f, label, el });
         body.append(label, el);
+        if (f.hint) {
+          const h = document.createElement('div');
+          h.className = 'mounts-field-hint';
+          h.textContent = f.hint;
+          rows[rows.length - 1].hintEl = h;
+          body.appendChild(h);
+        }
       }
       // conditional fields: re-evaluate `when(values)` whenever any input changes
       const applyConds = () => {
         const vals = readValues();
-        for (const { field, label, el } of rows) {
+        for (const { field, label, el, hintEl } of rows) {
           const show = !field.when || field.when(vals);
           label.style.display = show ? '' : 'none';
           el.style.display = show ? '' : 'none';
+          if (hintEl) hintEl.style.display = show ? '' : 'none';
         }
       };
       if (fields.some(f => f.when)) {
@@ -532,7 +560,9 @@ export function installSidebarMounts(Sidebar) {
           await onSubmit(vals, { close, body, err });
         } catch (e) { err.textContent = e.message || 'Failed'; submit.disabled = false; }
       };
-      return { close };
+      const ctx = { close, inputs, body, applyConds: fields.some(f => f.when) ? applyConds : () => {} };
+      this._lastMountsDialog = ctx;
+      return ctx;
     },
 
     _showImportShareDialog() {
@@ -562,14 +592,16 @@ export function installSidebarMounts(Sidebar) {
         { key: 'accessKey', label: 'Access key', when: is('s3') },
         { key: 'secretKey', label: 'Secret key', type: 'password', when: is('s3') },
         // Google Drive
-        { key: 'token', label: 'OAuth token JSON', type: 'textarea', placeholder: 'run: rclone authorize "drive"  →  paste the JSON here', when: is('drive') },
+        { key: 'token', label: 'Google Drive access', type: 'textarea', placeholder: 'click "Connect Google Drive" below — no terminal needed', when: is('drive'), hint: 'Advanced: you can also paste the JSON from `rclone authorize "drive"` run elsewhere.' },
         { key: 'driveFolder', label: 'Folder (optional, blank = whole Drive)', placeholder: 'Projects/Data', when: is('drive') },
         // WebDAV / Nextcloud
-        { key: 'url', label: 'WebDAV URL', placeholder: 'https://cloud.example.com/remote.php/dav/files/me', when: is('webdav') },
+        { key: 'url', label: 'WebDAV URL', placeholder: 'https://cloud.example.com/remote.php/dav/files/me', when: is('webdav'), hint: 'Nextcloud: Settings → Files shows this address. Use an app password if you have 2FA.' },
         { key: 'vendor', label: 'Vendor', type: 'select', options: [['other', 'Generic WebDAV'], ['nextcloud', 'Nextcloud']], when: is('webdav') },
         { key: 'user', label: 'Username', when: is('webdav') },
         { key: 'pass', label: 'Password / app token', type: 'password', when: is('webdav') },
         // SFTP
+        { key: 'fromHost', label: 'From registered host (optional)', type: 'select', when: is('sftp'),
+          options: [['', '— pick to prefill —'], ...((this._hostsData?.hosts || []).map(h => [h.id, h.name]))] },
         { key: 'sshHost', label: 'SSH host', placeholder: 'box.example.com', when: is('sftp') },
         { key: 'sshUser', label: 'SSH user', placeholder: 'ubuntu', when: is('sftp') },
         { key: 'sshPort', label: 'Port', placeholder: '22', when: is('sftp') },
@@ -583,11 +615,92 @@ export function installSidebarMounts(Sidebar) {
         { key: 'mode', label: 'Mode', type: 'select', options: [['rw', 'Read-write'], ['ro', 'Read-only']] },
         { key: 'customPath', label: 'Custom mount path (optional, absolute)', placeholder: '' },
       ], 'Add & mount', async (v, { close }) => {
-        // sftp keyPath ~ expansion is server-side absolute-only; leave as typed
+        delete v.fromHost; // UI-only prefill helper
         const r = await api('/api/mounts', { method: 'POST', body: JSON.stringify(v), headers: { 'Content-Type': 'application/json' } });
         await fetch(`/api/mounts/${r.id}/mount`, { method: 'POST' });
         close(); showToast('Mount added'); this._renderMounts();
       });
+      const ctx = this._lastMountsDialog;
+      if (!ctx) return;
+      // SFTP: picking a registered host prefills connection fields (key incl.)
+      ctx.inputs.fromHost?.addEventListener('change', () => {
+        const h = (this._hostsData?.hosts || []).find(x => x.id === ctx.inputs.fromHost.value);
+        if (!h) return;
+        ctx.inputs.sshHost.value = h.host;
+        ctx.inputs.sshUser.value = h.user;
+        ctx.inputs.sshPort.value = String(h.port || 22);
+        if (h.keyPath) ctx.inputs.keyPath.value = h.keyPath;
+        if (!ctx.inputs.name.value) ctx.inputs.name.value = h.name.toLowerCase().replace(/[^\w-]+/g, '-') + '-files';
+      });
+      // Google Drive: guided OAuth — no terminal needed
+      this._wireDriveConnect(ctx);
+    },
+
+    // Inject a "Connect Google Drive" button + guided flow into the add-mount
+    // dialog. Server runs rclone authorize; same-machine browsers complete
+    // hands-free, remote ones paste the redirect URL back (we forward it).
+    _wireDriveConnect(ctx) {
+      const tokenInput = ctx.inputs.token;
+      if (!tokenInput) return;
+      const wrap = document.createElement('div');
+      wrap.className = 'mounts-drive-connect';
+      const btn = document.createElement('button');
+      btn.className = 'mounts-btn mounts-btn-primary';
+      btn.textContent = 'Connect Google Drive';
+      const status = document.createElement('div');
+      status.className = 'mounts-field-hint';
+      wrap.append(btn, status);
+      tokenInput.before(wrap);
+      // show/hide with the drive fields
+      const sync = () => { wrap.style.display = tokenInput.style.display; };
+      new MutationObserver(sync).observe(tokenInput, { attributes: true, attributeFilter: ['style'] });
+      sync();
+      let pasteBox = null, poll = null;
+      const stopPoll = () => { clearInterval(poll); poll = null; };
+      const finish = (token) => {
+        stopPoll();
+        tokenInput.value = token;
+        status.textContent = '✓ Connected — finish with “Add & mount”.';
+        btn.textContent = 'Reconnect';
+        btn.disabled = false;
+        pasteBox?.remove(); pasteBox = null;
+      };
+      btn.onclick = async () => {
+        btn.disabled = true;
+        status.textContent = 'Preparing authorization…';
+        try {
+          const r = await api('/api/mounts/gdrive-auth/start', { method: 'POST' });
+          if (r.error) throw new Error(r.error);
+          window.open(r.url, '_blank');
+          status.textContent = 'A Google sign-in page opened. Approve access, then come back here.';
+          if (!pasteBox) {
+            pasteBox = document.createElement('div');
+            pasteBox.innerHTML = `<div class="mounts-field-hint">If this VibeSpace runs on ANOTHER machine, the final page won't load (address starts with 127.0.0.1) — copy that address and paste it here:</div>`;
+            const inp = document.createElement('input');
+            inp.placeholder = 'http://127.0.0.1:53682/?state=…&code=…';
+            inp.onchange = async () => {
+              try {
+                status.textContent = 'Completing…';
+                const fr = await api('/api/mounts/gdrive-auth/callback', { method: 'POST', body: JSON.stringify({ url: inp.value }), headers: { 'Content-Type': 'application/json' } });
+                finish(fr.token);
+              } catch (e) { status.textContent = e.message || 'Failed'; }
+            };
+            pasteBox.appendChild(inp);
+            wrap.appendChild(pasteBox);
+          }
+          // same-machine flow completes on its own — poll for the token
+          poll = setInterval(async () => {
+            try {
+              const st = await api('/api/mounts/gdrive-auth/status');
+              if (st.token) finish(st.token);
+            } catch {}
+          }, 1500);
+          setTimeout(stopPoll, 10 * 60 * 1000);
+        } catch (e) {
+          status.textContent = e.message || 'Failed to start authorization';
+          btn.disabled = false;
+        }
+      };
     },
 
     // Configure "My storage" (the S3 bucket used as your personal store + the
