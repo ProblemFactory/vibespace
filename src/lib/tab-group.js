@@ -19,6 +19,7 @@ export const TYPE_ICONS = {
   editor:   _i('<path d="M11.5 1.5l3 3L5 14H2v-3z"/>'),
   'hex-viewer': _i('<path d="M2 2h12v12H2z"/><path d="M2 6h12M6 2v12"/>'),
   browser:  _i('<circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c-2 2-2 10 0 12M8 2c2 2 2 10 0 12"/>'),
+  task:     _i('<rect x="2" y="2" width="12" height="12" rx="1.5"/><path d="M5 6h6M5 9h6M5 12h3"/>'),
 };
 
 /**

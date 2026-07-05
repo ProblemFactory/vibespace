@@ -21,6 +21,7 @@ import { openExternalEditor, closeExternalEditor } from './external-editor.js';
 import { CommandMode } from './command-mode.js';
 import { updateTaskbar as updateTaskbarFn } from './taskbar.js';
 import { openBrowser as openBrowserFn } from './browser-window.js';
+import { openTaskDetail as openTaskDetailFn } from './task-detail.js';
 import { DesktopManager } from './desktop-manager.js';
 import { CustomizeMode, applyArrangement } from './customize-mode.js';
 import { installSessionPalette } from './session-palette.js';
@@ -2189,6 +2190,9 @@ class App {
       case 'openBrowser':
         this.openBrowser(spec.url, { syncId });
         break;
+      case 'openTaskDetail':
+        this.openTaskDetail(spec.taskId, { syncId });
+        break;
       case 'attachTmuxSession':
         this.attachTmuxSession(spec.tmuxTarget, spec.name, spec.cwd);
         break;
@@ -2259,6 +2263,27 @@ class App {
   }
 
   openBrowser(url, opts) { return openBrowserFn(this, url, opts); }
+
+  openTaskDetail(taskId, opts) { return openTaskDetailFn(this, taskId, opts); }
+
+  // Session state keys (backend:backendSessionId) of every window currently
+  // blinking "waiting for input" — the idle-detection signal the task board
+  // aggregates into per-task attention (design §7: observe, never act).
+  getWaitingSessionKeys() {
+    const keys = new Set();
+    for (const winInfo of this.wm.windows.values()) {
+      if (!winInfo.element?.classList?.contains('window-waiting')) continue;
+      const spec = winInfo._openSpec;
+      let backend = spec?.backend || 'claude';
+      let bsid = spec?.backendSessionId || null;
+      if (!bsid && spec?.serverId) {
+        const live = (this.sidebar?._webuiSessions || []).find(s => s.id === spec.serverId);
+        if (live) { backend = live.backend || backend; bsid = live.backendSessionId || live.claudeSessionId || null; }
+      }
+      if (bsid) keys.add(`${backend}:${bsid}`);
+    }
+    return keys;
+  }
 
   openFile(filePath, fileName, opts) {
     FileViewer.open(this, filePath, fileName, opts);
@@ -2510,7 +2535,16 @@ class App {
     this.sidebar.highlightSession(null);
   }
 
-  updateTaskbar() { updateTaskbarFn(this); if (this.desktopManager) this.desktopManager._renderSwitcher(); }
+  updateTaskbar() {
+    updateTaskbarFn(this);
+    if (this.desktopManager) this.desktopManager._renderSwitcher();
+    // Task attention rides the same signal: every waiting-blink toggle and
+    // window open/close funnels through here (winInfo._notifyChanged), so the
+    // board's ⚠ badges stay live without their own event plumbing. Debounced —
+    // updateTaskbar fires in bursts during layout changes.
+    clearTimeout(this._taskAttnTimer);
+    this._taskAttnTimer = setTimeout(() => this.sidebar?.refreshTaskAttention?.(), 250);
+  }
 
   _populateThemeSelect(sel) {
     sel.innerHTML = '';

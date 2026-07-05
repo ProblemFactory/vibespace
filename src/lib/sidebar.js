@@ -6,6 +6,7 @@ import { installSidebarRender } from './sidebar-render.js';
 import { installSidebarRenderMobile } from './sidebar-render-mobile.js';
 import { installSidebarMounts } from './sidebar-mounts.js';
 import { installSidebarWorkbench } from './sidebar-workbench.js';
+import { installSidebarTasks } from './sidebar-tasks.js';
 
 class Sidebar {
   constructor(app) {
@@ -52,13 +53,15 @@ class Sidebar {
     this._expandedFolders = new Set(JSON.parse(localStorage.getItem('expandedFolders') || '[]'));
     this._expandedCardId = null; // only one card expanded at a time
 
-    // Tab state: 'folders' or 'groups'
+    // Tab state: 'folders' | 'tasks' | 'mounts'
     this._activeTab = 'folders';
     // Mobile mode from centralized app.isMobile
     this._mobileMode = app.isMobile;
 
     // Fetch server state (source of truth)
     this._fetchUserState();
+    // Task store (tasks ⊃ groups — the board data, from /api/tasks)
+    this._initTasks();
 
     // Listen for user-state-updated WebSocket messages from other clients
     app.ws.onGlobal((msg) => {
@@ -152,17 +155,17 @@ class Sidebar {
     foldersTab.textContent = 'Folders';
     foldersTab.dataset.tab = 'folders';
     foldersTab.onclick = () => { this._activeTab = 'folders'; this._updateTabs(); this._render(); };
-    const groupsTab = document.createElement('button');
-    groupsTab.className = 'sidebar-tab';
-    groupsTab.textContent = 'Groups';
-    groupsTab.dataset.tab = 'groups';
-    groupsTab.onclick = () => { this._activeTab = 'groups'; this._updateTabs(); this._render(); };
+    const tasksTab = document.createElement('button');
+    tasksTab.className = 'sidebar-tab';
+    tasksTab.textContent = 'Tasks';
+    tasksTab.dataset.tab = 'tasks';
+    tasksTab.onclick = () => { this._activeTab = 'tasks'; this._updateTabs(); this._render(); };
     const mountsTab = document.createElement('button');
     mountsTab.className = 'sidebar-tab';
     mountsTab.textContent = 'Remote';
     mountsTab.dataset.tab = 'mounts';
     mountsTab.onclick = () => { this._activeTab = 'mounts'; this._updateTabs(); this._render(); };
-    tabBar.append(foldersTab, groupsTab, mountsTab);
+    tabBar.append(foldersTab, tasksTab, mountsTab);
     section.insertBefore(tabBar, section.firstChild);
   }
 
@@ -695,35 +698,39 @@ class Sidebar {
           const items = sessions.filter(s => (s.cwd || '/unknown') === dd.key);
           if (items.length) { this._renderMobileFolderDetail(dd.key, dd.label, items, sessions); return; }
         } else if (dd.type === 'group') {
+          // dd.key is a task id (or '__ungrouped__' for untagged)
           const sessionById = new Map();
           for (const s of sessions) { sessionById.set(this._getSessionStateKey(s), s); sessionById.set(s.sessionId, s); }
           if (dd.key === '__ungrouped__') {
             const assignedIds = new Set();
-            for (const gn of this._getGroupNames()) this._getGroupSessions(gn, sessions).forEach(id => assignedIds.add(id));
-            const ungrouped = sessions.filter(s => !assignedIds.has(this._getSessionStateKey(s)) && !assignedIds.has(s.sessionId));
-            if (ungrouped.length) { this._renderMobileGroupDetail('Ungrouped', ungrouped, sessions); return; }
+            for (const t of this._tasks || []) this._getTaskSessionKeys(t, sessions).forEach(id => assignedIds.add(id));
+            const untagged = sessions.filter(s => !assignedIds.has(this._getSessionStateKey(s)) && !assignedIds.has(s.sessionId));
+            if (untagged.length) { this._renderMobileTaskDetail('Untagged', untagged, sessions); return; }
           } else {
-            const ids = this._getGroupSessions(dd.key, sessions);
-            const groupSessions = [...ids].map(id => sessionById.get(id)).filter(Boolean);
-            if (groupSessions.length) { this._renderMobileGroupDetail(dd.key, groupSessions, sessions); return; }
+            const task = this._taskById(dd.key);
+            if (task) {
+              const ids = this._getTaskSessionKeys(task, sessions);
+              const taskSessions = [...ids].map(id => sessionById.get(id)).filter(Boolean);
+              if (taskSessions.length) { this._renderMobileTaskDetail(task.title, taskSessions, sessions); return; }
+            }
           }
         }
         this._mobileDrilldown = null; // fallback to list if drill-down target gone
       }
       if (this._activeTab === 'mounts') { if (!this.listEl.querySelector('.mounts-panel')) this._renderMounts(); }
-      else if (this._activeTab === 'groups') this._renderMobileGroupList(sessions);
+      else if (this._activeTab === 'tasks') this._renderMobileTaskList(sessions);
       // Sessions tab uses the same three-zone workbench as desktop — it's a
       // plain vertical card list (no hover-only affordances), so it's more
       // touch-friendly than the old two-level folder drill-down.
       else this._renderWorkbench(sessions);
     } else {
       if (this._activeTab === 'mounts') { if (!this.listEl.querySelector('.mounts-panel')) this._renderMounts(); }
-      else if (this._activeTab === 'groups') this._renderByGroups(sessions);
+      else if (this._activeTab === 'tasks') this._renderTaskBoard(sessions);
       else this._renderWorkbench(sessions);
     }
   }
 
-  // Rendering methods (_renderGrouped, _renderByGroups, _buildSessionCard, group popovers)
+  // Rendering methods (_renderGrouped, _buildSessionCard) installed by sidebar-render.js; task board by sidebar-tasks.js
   // installed by sidebar-render.js mixin
 
 }
@@ -733,4 +740,5 @@ installSidebarRender(Sidebar);
 installSidebarRenderMobile(Sidebar);
 installSidebarMounts(Sidebar);
 installSidebarWorkbench(Sidebar);
+installSidebarTasks(Sidebar);
 export { Sidebar };
