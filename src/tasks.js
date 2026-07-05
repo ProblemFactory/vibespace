@@ -172,7 +172,8 @@ class TaskManager {
       parts.push('', '### Rules');
     }
     parts.push(
-      `- Report THIS session's state with the \`vibespace-status\` command (already on your PATH): \`vibespace-status <working|needs-input|blocked|review> [--urgency low|normal|high|urgent] [--reason "why"]\`. The user sees it on the task board — keep it honest and current, especially when you are blocked or need input.`,
+      `- Report TASK-level updates with the \`vibespace-task\` command (already on your PATH) instead of editing TASK.md: \`vibespace-task progress "what you did"\` when you complete meaningful work, \`vibespace-task plan-check <step number>\` when a plan step is done, \`vibespace-task plan-add "new step"\` to extend the plan, \`vibespace-task status <active|paused|blocked|done>\` when the whole task's state changes, \`vibespace-task show\` to re-read the current state.`,
+      `- Report THIS session's state with the \`vibespace-status\` command: \`vibespace-status <working|needs-input|blocked|review> [--urgency low|normal|high|urgent] [--reason "why"]\`. The user sees it on the task board — keep it honest and current, especially when you are blocked or need input.`,
       `</vibespace-task-context>`);
     return parts.join('\n');
   }
