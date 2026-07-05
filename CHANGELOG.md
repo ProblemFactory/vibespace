@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.28.7] — 2026-07-05
+
+### Fixed
+
+- **“Archive project” now archives the WHOLE folder** — the Recent-zone project archive button only archived the sessions it showed (the last 7 days, capped), leaving the folder’s older sessions un-archived. Those reappeared later (surfaced by History or a fresh discovery after a server restart), which looked like the archive hadn’t stuck. It now archives every session under that working directory. (Session archive state itself was always persisted correctly — server-side in `data/user-state.json` and client-side in localStorage — verified surviving a restart + refresh.)
+
 ## [2.28.6] — 2026-07-05
 
 ### Changed
