@@ -1991,6 +1991,10 @@ class App {
     // Apply persisted per-session config (gear popover) for any param the caller
     // didn't specify — covers card click, resume-all, chat resume bar, etc.
     const savedCfg = this.sidebar?.getSessionConfig?.({ backend, sessionId, backendSessionId: targetBackendId }) || {};
+    // Context task rides across resumes: the first task this session is
+    // explicitly tagged with becomes VIBESPACE_TASK_ID again, so the
+    // SessionStart hook re-injects task context on every resume.
+    const contextTask = this.sidebar?._getSessionTasks?.({ backend, backendSessionId: targetBackendId })?.[0];
     this.createSession({
       cwd,
       name: sessionName,
@@ -2008,6 +2012,7 @@ class App {
       agentNickname,
       sourceKind,
       parentThreadId,
+      taskId: contextTask?.id,
     });
   }
 
