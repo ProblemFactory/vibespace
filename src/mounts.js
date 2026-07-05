@@ -1,5 +1,14 @@
 /**
- * MountManager — rclone-backed S3 mounts + share minting (collaboration P1).
+ * MountManager — rclone-backed mounts (S3 / Google Drive / WebDAV / SFTP /
+ * VibeSpace bridge) + S3 share minting (collaboration P1).
+ *
+ * - Mount records are TYPED (m.type, default 's3' for legacy records); each
+ *   type has its own rclone backend config built in _rcloneFor(). Passwords
+ *   that rclone expects obscured are obscured at mount time (never stored
+ *   obscured — obscure() is reversible, our AES-GCM is the real protection).
+ * - "My storage" lives in VibeSpace config (state.myStorage, secrets
+ *   encrypted) — VIBESPACE_S3_* env is imported ONCE when no config exists
+ *   (Docker/legacy deployments keep working), after that the config wins.
  *
  * - Mount records live in data/mounts.json; S3 secrets are encrypted at rest
  *   (AES-256-GCM under a server-local key in data/.mounts-key — protects
@@ -36,6 +45,62 @@ class MountManager {
     this._state = { mounts: [], shares: [] };
     this._errors = new Map(); // id -> last mount error line
     this._load();
+    this._maybeImportEnvStorage();
+  }
+
+  // One-time migration: VIBESPACE_S3_* env → persisted config. Runs only when
+  // no myStorage config exists yet; afterwards the in-app config is canonical
+  // (edit/remove in the UI, included in export/import).
+  _maybeImportEnvStorage() {
+    if (this._state.myStorage) return;
+    const e = process.env;
+    if (!e.VIBESPACE_S3_ENDPOINT || !e.VIBESPACE_S3_BUCKET || !e.VIBESPACE_S3_ACCESS_KEY) return;
+    this._state.myStorage = {
+      endpoint: e.VIBESPACE_S3_ENDPOINT,
+      bucket: e.VIBESPACE_S3_BUCKET,
+      prefix: e.VIBESPACE_S3_PREFIX || '',
+      accessKey: e.VIBESPACE_S3_ACCESS_KEY,
+      secretKeyEnc: this._enc(e.VIBESPACE_S3_SECRET_KEY || ''),
+      importedFromEnv: true,
+      updatedAt: Date.now(),
+    };
+    this._save();
+  }
+
+  // ── My storage config (in-app, canonical) ──
+
+  getMyStorageConfig({ redact = true } = {}) {
+    const c = this._state.myStorage;
+    if (!c) return null;
+    return {
+      endpoint: c.endpoint, bucket: c.bucket, prefix: c.prefix || '',
+      accessKey: c.accessKey,
+      secretKey: redact ? undefined : this._dec(c.secretKeyEnc),
+      importedFromEnv: !!c.importedFromEnv,
+      configured: this._state.mounts.some(m => m.origin === 'my-storage'),
+    };
+  }
+
+  setMyStorageConfig({ endpoint, bucket, prefix, accessKey, secretKey }) {
+    if (!endpoint || !bucket || !accessKey) throw new Error('endpoint, bucket and accessKey required');
+    const prev = this._state.myStorage;
+    // secretKey omitted on edit = keep the existing one
+    const enc = secretKey ? this._enc(secretKey) : prev?.secretKeyEnc;
+    if (!enc) throw new Error('secretKey required');
+    this._state.myStorage = {
+      endpoint: String(endpoint), bucket: String(bucket),
+      prefix: String(prefix || '').replace(/^\/+|\/+$/g, ''),
+      accessKey: String(accessKey), secretKeyEnc: enc,
+      importedFromEnv: false, updatedAt: Date.now(),
+    };
+    this._save();
+    this._notify();
+  }
+
+  clearMyStorageConfig() {
+    delete this._state.myStorage;
+    this._save();
+    this._notify();
   }
 
   _key() {
@@ -82,17 +147,34 @@ class MountManager {
   // each mount so it's re-encrypted under the new instance's key.
   exportBundle() {
     const mounts = this._state.mounts.map(m => ({
-      name: m.name, origin: m.origin, mode: m.mode,
-      endpoint: m.endpoint, bucket: m.bucket, prefix: m.prefix,
-      accessKey: m.accessKey, secretKey: this._dec(m.secretKeyEnc),
-      sessionToken: m.sessionTokenEnc ? this._dec(m.sessionTokenEnc) : null,
+      name: m.name, type: m.type || 's3', origin: m.origin, mode: m.mode,
       customPath: m.customPath, expiresAt: m.expiresAt,
+      // s3
+      endpoint: m.endpoint, bucket: m.bucket, prefix: m.prefix,
+      accessKey: m.accessKey,
+      secretKey: m.secretKeyEnc ? this._dec(m.secretKeyEnc) : undefined,
+      sessionToken: m.sessionTokenEnc ? this._dec(m.sessionTokenEnc) : undefined,
+      // drive
+      token: m.tokenEnc ? this._dec(m.tokenEnc) : undefined,
+      driveFolder: m.driveFolder, clientId: m.clientId,
+      clientSecret: m.clientSecretEnc ? this._dec(m.clientSecretEnc) : undefined,
+      // webdav / vibespace
+      url: m.url, vendor: m.vendor, user: m.user,
+      pass: m.passEnc ? this._dec(m.passEnc) : undefined,
+      bearerToken: m.bearerTokenEnc ? this._dec(m.bearerTokenEnc) : undefined,
+      // sftp
+      sshHost: m.sshHost, sshUser: m.sshUser, sshPort: m.sshPort, sshPath: m.sshPath, keyPath: m.keyPath,
     }));
-    return { mounts, shares: this._state.shares };
+    const myStorage = this.getMyStorageConfig({ redact: false }) || undefined;
+    return { mounts, shares: this._state.shares, myStorage };
   }
 
   importBundle(bundle) {
-    if (!bundle || !Array.isArray(bundle.mounts)) return;
+    if (!bundle) return;
+    if (bundle.myStorage && !this._state.myStorage) {
+      try { this.setMyStorageConfig(bundle.myStorage); } catch {}
+    }
+    if (!Array.isArray(bundle.mounts)) return;
     for (const m of bundle.mounts) {
       if (this._state.mounts.some(x => x.name === m.name)) continue; // skip dupes
       try { this.add(m); } catch {}
@@ -123,10 +205,21 @@ class MountManager {
     return m.customPath || path.join(this.mountBase, m.name.replace(/[^\w.-]+/g, '_'));
   }
 
+  _sourceLabel(m) {
+    switch (m.type || 's3') {
+      case 'drive': return 'Google Drive' + (m.driveFolder ? `: ${m.driveFolder}` : '');
+      case 'webdav': return m.url;
+      case 'vibespace': return m.url;
+      case 'sftp': return `${m.sshUser}@${m.sshHost}:${m.sshPath || '~'}`;
+      default: return `${m.bucket}${m.prefix ? '/' + m.prefix : ''} @ ${m.endpoint}`;
+    }
+  }
+
   list() {
     return this._state.mounts.map(m => ({
-      id: m.id, name: m.name, origin: m.origin, mode: m.mode,
+      id: m.id, name: m.name, type: m.type || 's3', origin: m.origin, mode: m.mode,
       endpoint: m.endpoint, bucket: m.bucket, prefix: m.prefix,
+      source: this._sourceLabel(m),
       path: this.pathOf(m), desired: m.desired, expiresAt: m.expiresAt || null,
       mounted: this.isMounted(m), error: this._errors.get(m.id) || null,
       createdAt: m.createdAt,
@@ -138,26 +231,80 @@ class MountManager {
   // ── CRUD ──
 
   add(cfg) {
-    const required = ['name', 'endpoint', 'bucket', 'accessKey', 'secretKey'];
-    for (const k of required) if (!cfg[k]) throw new Error(`${k} required`);
+    const type = cfg.type || 's3';
+    if (!cfg.name) throw new Error('name required');
     if (this._state.mounts.some(m => m.name === cfg.name)) throw new Error('A mount with that name exists');
     if (cfg.customPath && !path.isAbsolute(cfg.customPath)) throw new Error('Custom path must be absolute');
     const m = {
       id: 'mnt-' + crypto.randomBytes(5).toString('hex'),
       name: String(cfg.name).slice(0, 60),
+      type,
       origin: cfg.origin || 'manual',
       mode: cfg.mode === 'ro' ? 'ro' : 'rw',
-      endpoint: String(cfg.endpoint),
-      bucket: String(cfg.bucket),
-      prefix: String(cfg.prefix || '').replace(/^\/+|\/+$/g, ''),
-      accessKey: String(cfg.accessKey),
-      secretKeyEnc: this._enc(cfg.secretKey),
-      sessionTokenEnc: cfg.sessionToken ? this._enc(cfg.sessionToken) : null,
       customPath: cfg.customPath || null,
       expiresAt: cfg.expiresAt || null,
       desired: 'unmounted',
       createdAt: Date.now(),
     };
+    switch (type) {
+      case 's3': {
+        for (const k of ['endpoint', 'bucket', 'accessKey', 'secretKey']) if (!cfg[k]) throw new Error(`${k} required`);
+        Object.assign(m, {
+          endpoint: String(cfg.endpoint), bucket: String(cfg.bucket),
+          prefix: String(cfg.prefix || '').replace(/^\/+|\/+$/g, ''),
+          accessKey: String(cfg.accessKey), secretKeyEnc: this._enc(cfg.secretKey),
+          sessionTokenEnc: cfg.sessionToken ? this._enc(cfg.sessionToken) : null,
+        });
+        break;
+      }
+      case 'drive': {
+        // token = the JSON blob printed by `rclone authorize "drive"` (run it
+        // on any machine with a browser and paste the result here)
+        if (!cfg.token) throw new Error('token required (run: rclone authorize "drive")');
+        let tok = String(cfg.token).trim();
+        const jsonMatch = tok.match(/\{[\s\S]*\}/); // tolerate the surrounding "Paste the following…" noise
+        if (jsonMatch) tok = jsonMatch[0];
+        try { JSON.parse(tok); } catch { throw new Error('token must be the JSON printed by rclone authorize'); }
+        Object.assign(m, {
+          tokenEnc: this._enc(tok),
+          driveFolder: String(cfg.driveFolder || '').replace(/^\/+|\/+$/g, ''),
+          clientId: cfg.clientId || null,
+          clientSecretEnc: cfg.clientSecret ? this._enc(cfg.clientSecret) : null,
+        });
+        break;
+      }
+      case 'webdav': {
+        for (const k of ['url']) if (!cfg[k]) throw new Error(`${k} required`);
+        if (!cfg.bearerToken && !cfg.user) throw new Error('user/pass or bearerToken required');
+        Object.assign(m, {
+          url: String(cfg.url), vendor: cfg.vendor === 'nextcloud' ? 'nextcloud' : 'other',
+          user: cfg.user ? String(cfg.user) : null,
+          passEnc: cfg.pass ? this._enc(cfg.pass) : null,
+          bearerTokenEnc: cfg.bearerToken ? this._enc(cfg.bearerToken) : null,
+        });
+        break;
+      }
+      case 'vibespace': {
+        // another VibeSpace instance's /dav bridge — webdav + scoped bearer token
+        for (const k of ['url', 'bearerToken']) if (!cfg[k]) throw new Error(`${k} required`);
+        Object.assign(m, { url: String(cfg.url).replace(/\/+$/, ''), bearerTokenEnc: this._enc(cfg.bearerToken) });
+        break;
+      }
+      case 'sftp': {
+        for (const k of ['sshHost', 'sshUser']) if (!cfg[k]) throw new Error(`${k} required`);
+        if (!cfg.keyPath && !cfg.pass) throw new Error('keyPath or pass required');
+        if (cfg.keyPath && !path.isAbsolute(cfg.keyPath)) throw new Error('keyPath must be absolute');
+        Object.assign(m, {
+          sshHost: String(cfg.sshHost), sshUser: String(cfg.sshUser),
+          sshPort: parseInt(cfg.sshPort) || 22,
+          sshPath: String(cfg.sshPath || ''),
+          keyPath: cfg.keyPath || null,
+          passEnc: cfg.pass ? this._enc(cfg.pass) : null,
+        });
+        break;
+      }
+      default: throw new Error('unknown mount type: ' + type);
+    }
     this._state.mounts.push(m);
     this._save();
     this._notify();
@@ -181,25 +328,71 @@ class MountManager {
 
   // ── Mount / unmount ──
 
+  // rclone obscure: rclone requires PASS-type params in its reversible
+  // obscured form. We store the REAL secret AES-GCM'd and obscure at use time.
+  _obscure(plain) {
+    return execFileSync('rclone', ['obscure', String(plain)], { encoding: 'utf-8', timeout: 5000 }).trim();
+  }
+
+  /** Per-type rclone env + remote string for a mount record. */
+  _rcloneFor(m) {
+    const R = 'VS';
+    const P = (k) => `RCLONE_CONFIG_${R}_${k}`;
+    const env = { ...process.env };
+    let remote;
+    switch (m.type || 's3') {
+      case 'drive': {
+        env[P('TYPE')] = 'drive';
+        env[P('TOKEN')] = this._dec(m.tokenEnc);
+        env[P('SCOPE')] = 'drive';
+        if (m.clientId) env[P('CLIENT_ID')] = m.clientId;
+        if (m.clientSecretEnc) env[P('CLIENT_SECRET')] = this._dec(m.clientSecretEnc);
+        remote = `${R}:${m.driveFolder || ''}`;
+        break;
+      }
+      case 'webdav':
+      case 'vibespace': {
+        env[P('TYPE')] = 'webdav';
+        env[P('URL')] = m.type === 'vibespace' ? m.url + '/dav' : m.url;
+        env[P('VENDOR')] = m.vendor === 'nextcloud' ? 'nextcloud' : 'other';
+        if (m.user) env[P('USER')] = m.user;
+        if (m.passEnc) env[P('PASS')] = this._obscure(this._dec(m.passEnc));
+        if (m.bearerTokenEnc) env[P('BEARER_TOKEN')] = this._dec(m.bearerTokenEnc);
+        remote = `${R}:`;
+        break;
+      }
+      case 'sftp': {
+        env[P('TYPE')] = 'sftp';
+        env[P('HOST')] = m.sshHost;
+        env[P('USER')] = m.sshUser;
+        env[P('PORT')] = String(m.sshPort || 22);
+        if (m.keyPath) env[P('KEY_FILE')] = m.keyPath;
+        if (m.passEnc) env[P('PASS')] = this._obscure(this._dec(m.passEnc));
+        remote = `${R}:${m.sshPath || ''}`;
+        break;
+      }
+      default: { // s3
+        env[P('TYPE')] = 's3';
+        env[P('PROVIDER')] = 'Other';
+        env[P('ENDPOINT')] = m.endpoint;
+        env[P('ACCESS_KEY_ID')] = m.accessKey;
+        env[P('SECRET_ACCESS_KEY')] = this._dec(m.secretKeyEnc);
+        env[P('FORCE_PATH_STYLE')] = 'true';
+        env[P('NO_CHECK_BUCKET')] = 'true';
+        if (m.sessionTokenEnc) env[P('SESSION_TOKEN')] = this._dec(m.sessionTokenEnc);
+        remote = `${R}:${m.bucket}${m.prefix ? '/' + m.prefix : ''}`;
+      }
+    }
+    return { env, remote };
+  }
+
   async mount(id) {
     const m = this._get(id);
     if (this.isMounted(m)) { m.desired = 'mounted'; this._save(); this._notify(); return; }
     const mp = this.pathOf(m);
     fs.mkdirSync(mp, { recursive: true });
     fs.mkdirSync(this._logDir, { recursive: true });
-    const R = 'VS'; // rclone remote name (env-config)
-    const env = {
-      ...process.env,
-      [`RCLONE_CONFIG_${R}_TYPE`]: 's3',
-      [`RCLONE_CONFIG_${R}_PROVIDER`]: 'Other',
-      [`RCLONE_CONFIG_${R}_ENDPOINT`]: m.endpoint,
-      [`RCLONE_CONFIG_${R}_ACCESS_KEY_ID`]: m.accessKey,
-      [`RCLONE_CONFIG_${R}_SECRET_ACCESS_KEY`]: this._dec(m.secretKeyEnc),
-      [`RCLONE_CONFIG_${R}_FORCE_PATH_STYLE`]: 'true',
-      [`RCLONE_CONFIG_${R}_NO_CHECK_BUCKET`]: 'true',
-    };
-    if (m.sessionTokenEnc) env[`RCLONE_CONFIG_${R}_SESSION_TOKEN`] = this._dec(m.sessionTokenEnc);
-    const remote = `${R}:${m.bucket}${m.prefix ? '/' + m.prefix : ''}`;
+    const { env, remote } = this._rcloneFor(m);
     const log = fs.openSync(path.join(this._logDir, `${m.id}.log`), 'w');
     const args = ['mount', remote, mp,
       '--vfs-cache-mode', 'writes',
@@ -211,14 +404,15 @@ class MountManager {
     // that looks like a hang; list/put unaffected because query-string
     // requests pass untouched). rclone ≥1.63 has a flag that stops sending/
     // signing it — add it whenever the installed rclone supports it.
-    if (this._rcloneSupportsAcceptEncodingFlag()) args.push('--s3-use-accept-encoding-gzip=false');
+    const isS3 = (m.type || 's3') === 's3';
+    if (isS3 && this._rcloneSupportsAcceptEncodingFlag()) args.push('--s3-use-accept-encoding-gzip=false');
     if (m.mode === 'ro') args.push('--read-only');
     // One-time signing probe: some proxies (Cloudflare) rewrite the signed
     // Accept-Encoding header → SignatureDoesNotMatch on everything. V2 auth
     // avoids signing it and rescues PERMANENT-credential mounts; STS session
     // tokens require V4, so those need rclone 1.63–1.69 (v1 SDK + the flag)
     // or an un-proxied endpoint — fail with a message that says so.
-    if (m.v2Auth === undefined) {
+    if (isS3 && m.v2Auth === undefined) {
       const probe = (extraEnv) => new Promise((resolve) => {
         execFile('rclone', ['lsf', remote, '--max-depth', '1', '--retries', '1', '--low-level-retries', '1',
           ...(this._rcloneSupportsAcceptEncodingFlag() ? ['--s3-use-accept-encoding-gzip=false'] : [])],
@@ -299,14 +493,11 @@ class MountManager {
   // ── My storage (env-provisioned) ──
 
   envStorage() {
-    const e = process.env;
-    if (!e.VIBESPACE_S3_ENDPOINT || !e.VIBESPACE_S3_BUCKET || !e.VIBESPACE_S3_ACCESS_KEY) return null;
-    return {
-      endpoint: e.VIBESPACE_S3_ENDPOINT, bucket: e.VIBESPACE_S3_BUCKET,
-      prefix: e.VIBESPACE_S3_PREFIX || '', accessKey: e.VIBESPACE_S3_ACCESS_KEY,
-      secretKey: e.VIBESPACE_S3_SECRET_KEY || '',
-      configured: this._state.mounts.some(m => m.origin === 'my-storage'),
-    };
+    // Historical name — the source of truth is now the in-app config
+    // (state.myStorage; env imported once at first boot, see constructor).
+    const c = this.getMyStorageConfig({ redact: false });
+    if (!c) return null;
+    return { endpoint: c.endpoint, bucket: c.bucket, prefix: c.prefix, accessKey: c.accessKey, secretKey: c.secretKey, configured: c.configured };
   }
 
   addMyStorage() {

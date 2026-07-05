@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.28.0] — 2026-07-05
+
+### Added
+
+- **Multiple mount source types** — the Storage section's **Add mount** now supports S3/MinIO, **Google Drive** (paste the `rclone authorize "drive"` token), **WebDAV / Nextcloud**, **SFTP** (ssh host + key/password), and **another VibeSpace** — one dialog, per-type fields. All secrets AES-256-GCM encrypted at rest; rclone-obscured passwords are obscured only at mount time. Verified SFTP end-to-end against a real host (read + write).
+- **VibeSpace-to-VibeSpace mounting (WebDAV bridge)** — **Share via bridge** mints a scoped mount token (`vsmt_…`) + `vibespace-mount:v1:…` link for a folder of this machine; another instance imports it to mount that folder RO/RW. Tokens are stored hashed, carry a chroot root + ro/rw enforced on every request (traversal and symlink escapes rejected), and are revocable. The bridge is standard WebDAV (`/dav`, Bearer auth), so rclone/Finder/phone file managers can mount it too. Verified loopback: RO write-block, scope enforcement, RW round-trip.
+- **My storage configured in-app** — the personal S3 store (and share-minting owner key) is now set in the UI (Storage → Configure S3… / Edit), encrypted in config. `VIBESPACE_S3_*` env vars are imported once on first boot for backward compatibility, then the in-app config is canonical and rides in config export/import. Env vars are no longer required.
+
 ## [2.27.2] — 2026-07-04
 
 ### Fixed

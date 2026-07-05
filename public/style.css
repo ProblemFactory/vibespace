@@ -1977,3 +1977,11 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 @media (max-width: 768px) {
   #toolbar-row2, #taskbar-row2 { display: none !important; }
 }
+
+/* Multi-source mounts UI */
+.mounts-env-btns { display: flex; gap: 6px; margin-top: 6px; }
+.mounts-typetag {
+  margin-left: 6px; padding: 0 5px; border-radius: 3px; font-size: 9px; line-height: 15px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent);
+  vertical-align: 1px; white-space: nowrap;
+}

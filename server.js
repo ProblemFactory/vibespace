@@ -282,6 +282,11 @@ app.get(['/', '/index.html'], (req, res, next) => {
   } catch { next(); }
 });
 app.use(express.static(path.join(__dirname, 'public'), { etag: true, lastModified: true, maxAge: 0 }));
+// WebDAV bridge — BEFORE the json body parser (PUT bodies stream to disk).
+// Auth = scoped Bearer mount tokens; see src/webdav.js for the security model.
+const { MountTokens, registerWebdav } = require('./src/webdav');
+const mountTokens = new MountTokens({ dataDir: path.join(__dirname, 'data') });
+registerWebdav(app, { tokens: mountTokens });
 app.use(express.json({ limit: '50mb' }));
 
 app.get('/xterm.css', (req, res) => {
@@ -1193,11 +1198,11 @@ const mounts = new MountManager({
 setTimeout(() => mounts.restore().catch(e => console.error('[mounts] restore:', e.message)), 2000);
 
 app.get('/api/mounts', async (req, res) => {
-  const env = mounts.envStorage();
+  const cfg = mounts.getMyStorageConfig(); // redacted (no secret)
   res.json({
     mounts: mounts.list(),
     shares: mounts.listShares(),
-    env: env ? { endpoint: env.endpoint, bucket: env.bucket, prefix: env.prefix, configured: env.configured } : null,
+    env: cfg ? { endpoint: cfg.endpoint, bucket: cfg.bucket, prefix: cfg.prefix, accessKey: cfg.accessKey, configured: cfg.configured, importedFromEnv: cfg.importedFromEnv } : null,
     mountBase: mounts.mountBase,
     mcAvailable: await mounts.mcAvailable(),
   });
@@ -1208,7 +1213,20 @@ app.post('/api/mounts', (req, res) => {
 });
 app.post('/api/mounts/import', (req, res) => {
   try {
-    const p = MountManager.parseShareLink(req.body?.link);
+    const link = req.body?.link;
+    // vibespace-mount:v1 = another instance's WebDAV bridge (scoped bearer token)
+    const dav = MountTokens.parseLink ? MountTokens.parseLink(link) : null;
+    if (dav) {
+      const id = mounts.add({
+        type: 'vibespace', origin: 'imported',
+        name: req.body?.name || dav.name || 'vibespace-mount',
+        mode: dav.mode === 'rw' ? 'rw' : 'ro',
+        url: dav.url, bearerToken: dav.token,
+        customPath: req.body?.customPath || null,
+      });
+      return res.json({ success: true, id });
+    }
+    const p = MountManager.parseShareLink(link);
     const id = mounts.add({
       ...p, origin: 'imported',
       name: req.body?.name || p.name || 'imported-share',
@@ -1218,6 +1236,34 @@ app.post('/api/mounts/import', (req, res) => {
     res.json({ success: true, id });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
+// My storage config — in-app, canonical (env imported once at first boot)
+app.get('/api/mounts/my-storage-config', (req, res) => {
+  res.json({ config: mounts.getMyStorageConfig() });
+});
+app.put('/api/mounts/my-storage-config', (req, res) => {
+  try { mounts.setMyStorageConfig(req.body || {}); res.json({ success: true, config: mounts.getMyStorageConfig() }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.delete('/api/mounts/my-storage-config', (req, res) => {
+  try { mounts.clearMyStorageConfig(); res.json({ success: true }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Mount tokens (WebDAV bridge): mint returns the link ONCE; stored hashed
+app.get('/api/mount-tokens', (req, res) => res.json({ tokens: mountTokens.list() }));
+app.post('/api/mount-tokens', (req, res) => {
+  try {
+    const { name, root, mode } = req.body || {};
+    const { raw, rec } = mountTokens.mint({ name, root, mode });
+    const url = `${req.protocol}://${req.get('host')}`;
+    res.json({ success: true, token: rec.id ? undefined : undefined, link: mountTokens.buildLink({ url, raw, rec }), id: rec.id, rec: { id: rec.id, name: rec.name, root: rec.root, mode: rec.mode } });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.delete('/api/mount-tokens/:id', (req, res) => {
+  try { mountTokens.revoke(req.params.id); res.json({ success: true }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 app.post('/api/mounts/my-storage', (req, res) => {
   try { res.json({ success: true, id: mounts.addMyStorage() }); }
   catch (e) { res.status(400).json({ error: e.message }); }

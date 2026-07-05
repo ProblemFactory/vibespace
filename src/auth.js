@@ -174,6 +174,8 @@ class Auth {
       if (!this.enabled) return next();
       const p = req.path;
       if (p === '/login' || p === '/api/login' || p === '/favicon.ico') return next();
+      // WebDAV bridge authenticates with scoped Bearer mount tokens (webdav.js)
+      if (p === '/dav' || p.startsWith('/dav/')) return next();
       if (this.requestAuthed(req)) return next();
       // Browsers navigating to pages get the login form; API calls get 401
       const wantsHtml = req.method === 'GET' && (req.headers.accept || '').includes('text/html');

@@ -41,9 +41,11 @@ export function installSidebarMounts(Sidebar) {
       this._initMountsSync();
       this.listEl.innerHTML = '<div class="mounts-loading">Loading…</div>';
       let d, hd;
-      try { [d, hd] = await Promise.all([api('/api/mounts'), api('/api/hosts')]); }
+      let mt;
+      try { [d, hd, mt] = await Promise.all([api('/api/mounts'), api('/api/hosts'), api('/api/mount-tokens').catch(() => ({ tokens: [] }))]); }
       catch { this.listEl.innerHTML = '<div class="mounts-loading">Failed to load</div>'; return; }
       if (this._activeTab !== 'mounts') return; // user switched away mid-fetch
+      d.mountTokens = mt?.tokens || [];
       this._mountsData = d;
       this._hostsData = hd;
       this.listEl.innerHTML = '';
@@ -77,27 +79,49 @@ export function installSidebarMounts(Sidebar) {
       sHead.textContent = 'Storage';
       root.appendChild(sHead);
 
-      // My storage (env-provisioned company bucket)
+      // My storage (S3 bucket used as personal store + owner key for minting
+      // shares). Configured IN-APP now (env imported once, see mounts.js).
+      const card = document.createElement('div');
+      card.className = 'mounts-env-card';
       if (d.env) {
-        const card = document.createElement('div');
-        card.className = 'mounts-env-card';
-        card.innerHTML = `<div class="mounts-env-head"><b>My storage</b><span>${escHtml(d.env.bucket)}${d.env.prefix ? '/' + escHtml(d.env.prefix) : ''}</span></div>`;
+        card.innerHTML = `<div class="mounts-env-head"><b>My storage</b><span>${escHtml(d.env.bucket)}${d.env.prefix ? '/' + escHtml(d.env.prefix) : ''} · S3</span></div>`;
+        const btns = document.createElement('div');
+        btns.className = 'mounts-env-btns';
         if (!d.env.configured) {
-          const btn = document.createElement('button');
-          btn.className = 'mounts-btn mounts-btn-primary';
-          btn.textContent = 'Add & mount';
-          btn.onclick = async () => {
-            btn.disabled = true;
+          const add = document.createElement('button');
+          add.className = 'mounts-btn mounts-btn-primary';
+          add.textContent = 'Add & mount';
+          add.onclick = async () => {
+            add.disabled = true;
             try {
               const r = await api('/api/mounts/my-storage', { method: 'POST' });
               await fetch(`/api/mounts/${r.id}/mount`, { method: 'POST' });
             } catch (e) { showToast(e.message || 'Failed', { type: 'error' }); }
             this._renderMounts();
           };
-          card.appendChild(btn);
+          btns.appendChild(add);
         }
-        root.appendChild(card);
+        const edit = document.createElement('button');
+        edit.className = 'mounts-btn';
+        edit.textContent = 'Edit';
+        edit.onclick = () => this._showMyStorageDialog(d.env);
+        btns.appendChild(edit);
+        card.appendChild(btns);
+        if (d.env.importedFromEnv) {
+          const n = document.createElement('div');
+          n.className = 'mounts-note';
+          n.textContent = 'Imported from VIBESPACE_S3_* — now editable here; the env var is no longer needed.';
+          card.appendChild(n);
+        }
+      } else {
+        card.innerHTML = `<div class="mounts-env-head"><b>My storage</b><span>Not configured</span></div>`;
+        const cfg = document.createElement('button');
+        cfg.className = 'mounts-btn mounts-btn-primary';
+        cfg.textContent = 'Configure S3…';
+        cfg.onclick = () => this._showMyStorageDialog(null);
+        card.appendChild(cfg);
       }
+      root.appendChild(card);
 
       // Mounts list
       const list = document.createElement('div');
@@ -148,13 +172,40 @@ export function installSidebarMounts(Sidebar) {
       };
       foot.append(
         action(MI.importL, 'Import share link', () => this._showImportShareDialog()),
-        action(MI.link, 'Share a folder', () => this._showMintShareDialog(d), {
+        action(MI.link, 'Share S3 folder', () => this._showMintShareDialog(d), {
           disabled: !d.env,
-          title: d.env ? 'Mint a down-scoped credential for a folder under your prefix' : 'Requires company storage (VIBESPACE_S3_*)',
+          title: d.env ? 'Mint a down-scoped S3 credential for a folder under your prefix' : 'Requires My storage (S3) configured',
         }),
-        action(MI.plus, 'Add S3 mount', () => this._showAddMountDialog()),
+        action(MI.server, 'Share via bridge', () => this._showBridgeShareDialog(), {
+          title: 'Mint a scoped WebDAV token so another VibeSpace can mount a folder of THIS machine',
+        }),
+        action(MI.plus, 'Add mount', () => this._showAddMountDialog()),
       );
       root.appendChild(foot);
+      // Bridge tokens I minted (revocable)
+      if ((d.mountTokens || []).length) {
+        const bt = document.createElement('div');
+        bt.className = 'mounts-shares';
+        bt.innerHTML = '<div class="mounts-sec-head">Bridge tokens</div>';
+        for (const t of d.mountTokens) {
+          const row = document.createElement('div');
+          row.className = 'mounts-share-row';
+          row.innerHTML = `<span class="mounts-share-text"><b>${escHtml(t.name)}</b><span>${escHtml(t.root)} · ${t.mode.toUpperCase()}</span></span>`;
+          const rm = document.createElement('button');
+          rm.className = 'mounts-btn mounts-btn-danger';
+          rm.textContent = 'Revoke';
+          rm.onclick = async () => {
+            const ok = await showConfirmDialog({ title: 'Revoke bridge token?', message: `Anyone mounting "${t.name}" loses access immediately.`, confirmText: 'Revoke', danger: true });
+            if (!ok) return;
+            try { await api(`/api/mount-tokens/${t.id}`, { method: 'DELETE' }); showToast('Token revoked'); }
+            catch (e) { showToast(e.message || 'Failed', { type: 'error' }); }
+            this._renderMounts();
+          };
+          row.appendChild(rm);
+          bt.appendChild(row);
+        }
+        root.appendChild(bt);
+      }
       const note = document.createElement('div');
       note.className = 'mounts-note';
       note.textContent = d.mcAvailable
@@ -208,8 +259,14 @@ export function installSidebarMounts(Sidebar) {
       top.appendChild(actions);
       const pathEl = document.createElement('div');
       pathEl.className = 'mounts-path';
-      pathEl.title = `${m.endpoint}/${m.bucket}${m.prefix ? '/' + m.prefix : ''} → ${m.path}`;
+      pathEl.title = `${m.source || ''} → ${m.path}`;
       pathEl.textContent = m.path;
+      if (m.type && m.type !== 's3') {
+        const tag = document.createElement('span');
+        tag.className = 'mounts-typetag';
+        tag.textContent = { drive: 'Drive', webdav: 'WebDAV', sftp: 'SFTP', vibespace: 'VibeSpace' }[m.type] || m.type;
+        top.querySelector('.mounts-name')?.after(tag);
+      }
       row.append(top, pathEl);
       if (m.error) {
         const err = document.createElement('div');
@@ -414,6 +471,8 @@ export function installSidebarMounts(Sidebar) {
       const body = document.createElement('div');
       body.className = 'dialog-body';
       const inputs = {};
+      const rows = []; // {field, label, el} for conditional visibility
+      const readValues = () => Object.fromEntries(Object.entries(inputs).map(([k, el]) => [k, el.value]));
       for (const f of fields) {
         const label = document.createElement('label');
         label.textContent = f.label;
@@ -422,6 +481,11 @@ export function installSidebarMounts(Sidebar) {
           el = document.createElement('select');
           for (const [v, l] of f.options) { const o = document.createElement('option'); o.value = v; o.textContent = l; el.appendChild(o); }
           if (f.value) el.value = f.value;
+        } else if (f.type === 'textarea') {
+          el = document.createElement('textarea');
+          el.placeholder = f.placeholder || '';
+          el.style.minHeight = '72px'; el.style.fontSize = '12px';
+          if (f.value) el.value = f.value;
         } else {
           el = document.createElement('input');
           el.type = f.type || 'text';
@@ -429,7 +493,21 @@ export function installSidebarMounts(Sidebar) {
           if (f.value) el.value = f.value;
         }
         inputs[f.key] = el;
+        rows.push({ field: f, label, el });
         body.append(label, el);
+      }
+      // conditional fields: re-evaluate `when(values)` whenever any input changes
+      const applyConds = () => {
+        const vals = readValues();
+        for (const { field, label, el } of rows) {
+          const show = !field.when || field.when(vals);
+          label.style.display = show ? '' : 'none';
+          el.style.display = show ? '' : 'none';
+        }
+      };
+      if (fields.some(f => f.when)) {
+        for (const { el } of rows) { el.addEventListener('change', applyConds); el.addEventListener('input', applyConds); }
+        applyConds();
       }
       const err = document.createElement('div');
       err.className = 'cfg-err';
@@ -470,19 +548,83 @@ export function installSidebarMounts(Sidebar) {
     },
 
     _showAddMountDialog() {
-      this._mountsDialog('Add S3 mount', [
-        { key: 'name', label: 'Name', placeholder: 'my-bucket' },
-        { key: 'endpoint', label: 'Endpoint', placeholder: 'https://s3.company.internal' },
-        { key: 'bucket', label: 'Bucket', placeholder: 'company-workspace' },
-        { key: 'prefix', label: 'Prefix (optional)', placeholder: 'users/alice' },
-        { key: 'accessKey', label: 'Access key' },
-        { key: 'secretKey', label: 'Secret key', type: 'password' },
+      const is = (t) => (v) => v.type === t;
+      this._mountsDialog('Add mount', [
+        { key: 'type', label: 'Source type', type: 'select', options: [
+          ['s3', 'S3 / MinIO'], ['drive', 'Google Drive'], ['webdav', 'WebDAV / Nextcloud'],
+          ['sftp', 'SFTP (ssh)'], ['vibespace', 'Another VibeSpace'],
+        ] },
+        { key: 'name', label: 'Name', placeholder: 'my-mount' },
+        // S3
+        { key: 'endpoint', label: 'Endpoint', placeholder: 'https://s3.company.internal', when: is('s3') },
+        { key: 'bucket', label: 'Bucket', placeholder: 'company-workspace', when: is('s3') },
+        { key: 'prefix', label: 'Prefix (optional)', placeholder: 'users/alice', when: is('s3') },
+        { key: 'accessKey', label: 'Access key', when: is('s3') },
+        { key: 'secretKey', label: 'Secret key', type: 'password', when: is('s3') },
+        // Google Drive
+        { key: 'token', label: 'OAuth token JSON', type: 'textarea', placeholder: 'run: rclone authorize "drive"  →  paste the JSON here', when: is('drive') },
+        { key: 'driveFolder', label: 'Folder (optional, blank = whole Drive)', placeholder: 'Projects/Data', when: is('drive') },
+        // WebDAV / Nextcloud
+        { key: 'url', label: 'WebDAV URL', placeholder: 'https://cloud.example.com/remote.php/dav/files/me', when: is('webdav') },
+        { key: 'vendor', label: 'Vendor', type: 'select', options: [['other', 'Generic WebDAV'], ['nextcloud', 'Nextcloud']], when: is('webdav') },
+        { key: 'user', label: 'Username', when: is('webdav') },
+        { key: 'pass', label: 'Password / app token', type: 'password', when: is('webdav') },
+        // SFTP
+        { key: 'sshHost', label: 'SSH host', placeholder: 'box.example.com', when: is('sftp') },
+        { key: 'sshUser', label: 'SSH user', placeholder: 'ubuntu', when: is('sftp') },
+        { key: 'sshPort', label: 'Port', placeholder: '22', when: is('sftp') },
+        { key: 'sshPath', label: 'Remote path (optional)', placeholder: '/home/ubuntu/data', when: is('sftp') },
+        { key: 'keyPath', label: 'Private key path (absolute) — or use password', placeholder: '~/.ssh/id_ed25519', when: is('sftp') },
+        { key: 'pass', label: 'Password (if no key)', type: 'password', when: is('sftp') },
+        // Another VibeSpace
+        { key: 'url', label: 'VibeSpace URL', placeholder: 'https://vibespace.example.com', when: is('vibespace') },
+        { key: 'bearerToken', label: 'Mount token (vsmt_…)', type: 'password', when: is('vibespace'), hint: 'Ask the other instance to mint one under Storage → Share via bridge' },
+        // common
         { key: 'mode', label: 'Mode', type: 'select', options: [['rw', 'Read-write'], ['ro', 'Read-only']] },
         { key: 'customPath', label: 'Custom mount path (optional, absolute)', placeholder: '' },
       ], 'Add & mount', async (v, { close }) => {
+        // sftp keyPath ~ expansion is server-side absolute-only; leave as typed
         const r = await api('/api/mounts', { method: 'POST', body: JSON.stringify(v), headers: { 'Content-Type': 'application/json' } });
         await fetch(`/api/mounts/${r.id}/mount`, { method: 'POST' });
         close(); showToast('Mount added'); this._renderMounts();
+      });
+    },
+
+    // Configure "My storage" (the S3 bucket used as your personal store + the
+    // owner key for minting shares). Replaces VIBESPACE_S3_* env config.
+    _showMyStorageDialog(cfg) {
+      this._mountsDialog('My storage (S3)', [
+        { key: 'endpoint', label: 'Endpoint', placeholder: 'https://s3.company.internal', value: cfg?.endpoint || '' },
+        { key: 'bucket', label: 'Bucket', placeholder: 'my-workspace', value: cfg?.bucket || '' },
+        { key: 'prefix', label: 'Prefix (optional)', placeholder: 'me', value: cfg?.prefix || '' },
+        { key: 'accessKey', label: 'Access key', value: cfg?.accessKey || '' },
+        { key: 'secretKey', label: cfg ? 'Secret key (blank = keep current)' : 'Secret key', type: 'password' },
+      ], cfg ? 'Save' : 'Configure', async (v, { close }) => {
+        await api('/api/mounts/my-storage-config', { method: 'PUT', body: JSON.stringify(v), headers: { 'Content-Type': 'application/json' } });
+        close(); showToast('My storage saved'); this._renderMounts();
+      });
+    },
+
+    // Mint a scoped WebDAV mount token so another VibeSpace can mount a folder
+    // of THIS instance (the "VibeSpace互挂" bridge).
+    _showBridgeShareDialog() {
+      this._mountsDialog('Share via bridge', [
+        { key: 'name', label: 'Label', placeholder: 'shared-with-bob' },
+        { key: 'root', label: 'Folder to share (absolute path on this machine)', placeholder: '/home/me/project' },
+        { key: 'mode', label: 'Access', type: 'select', options: [['ro', 'Read-only'], ['rw', 'Read-write']] },
+      ], 'Mint bridge link', async (v, { close, body }) => {
+        const r = await api('/api/mount-tokens', { method: 'POST', body: JSON.stringify(v), headers: { 'Content-Type': 'application/json' } });
+        body.innerHTML = `<label>Bridge link — embeds a scoped token; treat it like a key</label>
+          <textarea readonly style="min-height:84px;font-size:11px">${escHtml(r.link)}</textarea>
+          <div class="mounts-note">The other side pastes this into Import share link (or Add mount → Another VibeSpace). Revoke any time under Bridge tokens.</div>`;
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'btn-create';
+        copyBtn.textContent = 'Copy link';
+        copyBtn.onclick = () => { copyText(r.link); showToast('Link copied'); close(); this._renderMounts(); };
+        const actions = document.createElement('div');
+        actions.className = 'dialog-actions';
+        actions.appendChild(copyBtn);
+        body.appendChild(actions);
       });
     },
 

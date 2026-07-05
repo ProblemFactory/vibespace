@@ -491,7 +491,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
       }
       if (includeSensitive.includes('mounts')) {
         const b = getMounts?.()?.exportBundle?.();
-        if (b?.mounts?.length || b?.shares?.length) sens.mounts = b;
+        if (b?.mounts?.length || b?.shares?.length || b?.myStorage) sens.mounts = b;
       }
       if (Object.keys(sens).length) {
         file.sensitive = { manifest: Object.keys(sens), ...encryptSensitive(sens, passphrase) };

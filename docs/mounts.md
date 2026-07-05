@@ -1,17 +1,22 @@
-# Mounts (shared S3 storage)
+# Mounts (shared storage — S3, Drive, WebDAV, SFTP, VibeSpace)
 
-The sidebar's **Mounts** tab manages rclone-backed S3 mounts — the shared-storage half of the [collaboration design](design-collaboration.md).
+The sidebar's **Remote** tab (Storage section) manages rclone-backed mounts of several source types — the shared-storage half of the [collaboration design](design-collaboration.md). **Add mount** picks a type and shows only that type's fields:
+
+| Type | What you provide |
+|------|------------------|
+| **S3 / MinIO** | endpoint, bucket, prefix, access + secret key |
+| **Google Drive** | the OAuth token JSON from `rclone authorize "drive"` (run it on any machine with a browser, paste the result), optional folder |
+| **WebDAV / Nextcloud** | URL, username, password/app-token |
+| **SFTP** | ssh host/user/port, remote path, private-key path *or* password |
+| **Another VibeSpace** | the other instance's URL + a bridge token (`vsmt_…`) it minted for you |
+
+All secrets are AES-256-GCM encrypted at rest in `data/mounts.json`; passwords rclone needs obscured are obscured only at mount time (argv is never used).
 
 ## My storage
 
-When the instance is provisioned with company storage env vars (see [deployment.md](deployment.md)):
+**My storage** is an S3 bucket you designate as your personal store — it's also the owner key used to mint S3 shares. Configure it **in-app**: Storage → *Configure S3…* (or **Edit** on the card). No environment variables required.
 
-```
-VIBESPACE_S3_ENDPOINT / VIBESPACE_S3_BUCKET / VIBESPACE_S3_PREFIX
-VIBESPACE_S3_ACCESS_KEY / VIBESPACE_S3_SECRET_KEY
-```
-
-the Mounts tab shows a **My storage** card — one click adds and mounts your bucket prefix.
+> Legacy `VIBESPACE_S3_*` env vars are still honored: on first boot with no in-app config, they're imported once into the encrypted config and the card is marked "imported from env". After that the in-app config is canonical (edit/remove it in the UI; it rides in config export/import). You can drop the env vars once imported.
 
 ## Mount mechanics
 
@@ -53,3 +58,18 @@ If the S3 endpoint sits behind a CDN/proxy that rewrites the `Accept-Encoding` h
 - rclone ≥1.70 (aws-sdk-go-v2 always signs the header): a one-time probe detects the mismatch and falls back to **V2 signatures** for permanent-credential mounts. STS shares can't use V2 (session tokens require V4) — the mount fails with an explanatory error; use rclone 1.63–1.69, a service-account share (`mc` installed on the owner side), or un-proxy the endpoint (grey-cloud the DNS record).
 
 The probe result is persisted per mount (`v2Auth`), so it runs once.
+
+
+## Mounting another VibeSpace (the bridge)
+
+Two VibeSpace instances can mount each other's folders over a built-in **WebDAV bridge**, without exposing an S3 bucket or ssh account.
+
+**On the sharing side** — Storage → **Share via bridge**: pick a folder (absolute path on that machine) and RO/RW, and it mints a **scoped mount token** and a `vibespace-mount:v1:…` link. The token:
+
+- is a random 256-bit value, stored **hashed** (a leaked `data/mount-tokens.json` can't be replayed);
+- carries its own **root directory** (chroot — path traversal and symlink escapes are rejected server-side) and **ro/rw** flag (ro tokens 403 on every write);
+- is listed under **Bridge tokens** and revocable any time (revoke = the mounter loses access immediately).
+
+**On the mounting side** — paste the link into **Import share link** (or **Add mount → Another VibeSpace**). It mounts the shared folder read/write per the token. Under the hood this is a WebDAV mount against the sharing instance's `/dav` endpoint with the token as a Bearer credential, so **any** WebDAV client (rclone, macOS Finder, Windows Explorer, phone file managers) can mount it too — the token is the only credential; `/dav` bypasses the normal cookie login.
+
+The bridge implements the WebDAV subset clients need (OPTIONS, PROPFIND, HEAD, GET with Range, PUT, MKCOL, DELETE, MOVE, COPY); locks aren't implemented (rclone doesn't use them).
