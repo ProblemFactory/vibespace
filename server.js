@@ -1169,40 +1169,96 @@ createHookHelper();
 // Idempotent, NON-DESTRUCTIVE hook registration for both harnesses: only our
 // own entry (matched by 'vibespace-hook.mjs') is ever added or updated; every
 // other key/entry (e.g. the task-tracker plugin's hooks) is left untouched.
+// Runs at every startup AND on demand from the Manage Agents dialog, which
+// shows per-harness status so non-engineers can see + repair the integration.
+const HOOK_FILES = {
+  claude: { file: () => path.join(os.homedir(), '.claude', 'settings.json'), createIfMissing: false },
+  codex: { file: () => path.join(os.homedir(), '.codex', 'hooks.json'), createIfMissing: true },
+};
+function _findOurHook(root) {
+  for (const group of root?.hooks?.SessionStart || []) {
+    const h = (group.hooks || []).find(h => typeof h.command === 'string' && h.command.includes('vibespace-hook.mjs'));
+    if (h) return h;
+  }
+  return null;
+}
+function agentHooksStatus() {
+  const hookCmd = `node ${HOOK_CMD}`;
+  const out = { hookPath: HOOK_CMD };
+  for (const [key, def] of Object.entries(HOOK_FILES)) {
+    const file = def.file();
+    let root = null, parseError = false;
+    try { root = JSON.parse(fs.readFileSync(file, 'utf-8')); }
+    catch { parseError = fs.existsSync(file); }
+    const ours = root ? _findOurHook(root) : null;
+    out[key] = {
+      file,
+      fileExists: fs.existsSync(file),
+      parseError,
+      installed: !!ours && ours.command === hookCmd,
+      stale: !!ours && ours.command !== hookCmd, // registered but points at an old path
+    };
+  }
+  return out;
+}
 function ensureAgentHooks() {
   const hookCmd = `node ${HOOK_CMD}`;
-  const patchFile = (file, wrap) => {
-    let root = null;
-    try { root = JSON.parse(fs.readFileSync(file, 'utf-8')); } catch { root = null; }
-    if (!root) {
-      if (!wrap) return; // ~/.claude/settings.json missing/unparseable — don't invent it
-      root = {};
+  const results = {};
+  for (const [key, def] of Object.entries(HOOK_FILES)) {
+    const file = def.file();
+    try {
+      let root = null;
+      try { root = JSON.parse(fs.readFileSync(file, 'utf-8')); } catch { root = null; }
+      if (!root) {
+        if (fs.existsSync(file)) throw new Error(`${file} exists but is not valid JSON — not touching it`);
+        if (!def.createIfMissing) throw new Error(`${file} not found (start the CLI once to create it)`);
+        root = {};
+      }
+      if (!root.hooks || typeof root.hooks !== 'object') root.hooks = {};
+      if (!Array.isArray(root.hooks.SessionStart)) root.hooks.SessionStart = [];
+      let changed = false;
+      const ours = _findOurHook(root);
+      if (ours) {
+        if (ours.command !== hookCmd) { ours.command = hookCmd; changed = true; } // path moved
+      } else {
+        root.hooks.SessionStart.push({ hooks: [{ type: 'command', command: hookCmd, timeout: 10 }] });
+        changed = true;
+      }
+      if (changed) {
+        const tmp = file + '.tmp';
+        fs.writeFileSync(tmp, JSON.stringify(root, null, 2) + '\n');
+        fs.renameSync(tmp, file);
+        console.log(`Registered VibeSpace SessionStart hook in ${file}`);
+      }
+      results[key] = { ok: true };
+    } catch (e) {
+      console.log(`Hook registration (${key}) skipped:`, e.message);
+      results[key] = { ok: false, error: e.message };
     }
-    if (!root.hooks || typeof root.hooks !== 'object') root.hooks = {};
-    if (!Array.isArray(root.hooks.SessionStart)) root.hooks.SessionStart = [];
-    let changed = false;
-    let ours = null;
-    for (const group of root.hooks.SessionStart) {
-      ours = (group.hooks || []).find(h => typeof h.command === 'string' && h.command.includes('vibespace-hook.mjs'));
-      if (ours) break;
-    }
-    if (ours) {
-      if (ours.command !== hookCmd) { ours.command = hookCmd; changed = true; } // path moved
-    } else {
-      root.hooks.SessionStart.push({ hooks: [{ type: 'command', command: hookCmd, timeout: 10 }] });
-      changed = true;
-    }
-    if (changed) {
-      const tmp = file + '.tmp';
-      fs.writeFileSync(tmp, JSON.stringify(root, null, 2) + '\n');
-      fs.renameSync(tmp, file);
-      console.log(`Registered VibeSpace SessionStart hook in ${file}`);
-    }
-  };
-  try { patchFile(path.join(os.homedir(), '.claude', 'settings.json'), false); }
-  catch (e) { console.log('Hook registration (claude) skipped:', e.message); }
-  try { patchFile(path.join(os.homedir(), '.codex', 'hooks.json'), true); }
-  catch (e) { console.log('Hook registration (codex) skipped:', e.message); }
+  }
+  return results;
+}
+function removeAgentHooks() {
+  for (const def of Object.values(HOOK_FILES)) {
+    const file = def.file();
+    try {
+      const root = JSON.parse(fs.readFileSync(file, 'utf-8'));
+      if (!Array.isArray(root?.hooks?.SessionStart)) continue;
+      let changed = false;
+      for (const group of root.hooks.SessionStart) {
+        const before = (group.hooks || []).length;
+        group.hooks = (group.hooks || []).filter(h => !(typeof h.command === 'string' && h.command.includes('vibespace-hook.mjs')));
+        if (group.hooks.length !== before) changed = true;
+      }
+      root.hooks.SessionStart = root.hooks.SessionStart.filter(g => (g.hooks || []).length);
+      if (changed) {
+        const tmp = file + '.tmp';
+        fs.writeFileSync(tmp, JSON.stringify(root, null, 2) + '\n');
+        fs.renameSync(tmp, file);
+        console.log(`Removed VibeSpace SessionStart hook from ${file}`);
+      }
+    } catch { }
+  }
 }
 ensureAgentHooks();
 
@@ -1352,17 +1408,95 @@ app.post('/api/agent/session-status', (req, res) => {
     res.json({ success: true, sessionKey: key, status: rec });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
+// Resolve the calling agent's session from its per-session bearer token.
+// Returns [session, id] or replies 401/403 and returns null.
+function agentSession(req, res, { needTask = false } = {}) {
+  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || req.body?.token;
+  if (!token || !token.startsWith('vsst_')) { res.status(401).json({ error: 'missing session token' }); return null; }
+  for (const [id, s] of activeSessions) {
+    if (s.agentToken === token) {
+      if (needTask && !s._taskId) { res.status(403).json({ error: 'this session has no context task' }); return null; }
+      return [s, id];
+    }
+  }
+  res.status(401).json({ error: 'unknown session token' });
+  return null;
+}
 // SessionStart hook payload (P2 context injection): rendered task state +
-// context folder file index + the rules. Bearer = per-session token, same
-// auth story as /api/agent/session-status.
+// context folder file index + the rules.
 app.get('/api/agent/task-context', (req, res) => {
-  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-  if (!token || !token.startsWith('vsst_')) return res.status(401).json({ error: 'missing session token' });
-  let found = false;
-  for (const [, s] of activeSessions) { if (s.agentToken === token) { found = true; break; } }
-  if (!found) return res.status(401).json({ error: 'unknown session token' });
+  if (!agentSession(req, res)) return;
   try { res.json({ success: true, context: tasks.renderContext(String(req.query.taskId || '')) }); }
   catch (e) { res.status(404).json({ error: e.message }); }
+});
+// ── vibespace-task agent endpoints (P3): validated task-level writes,
+// SCOPED to the session's own context task (VIBESPACE_TASK_ID at spawn) —
+// an agent cannot touch arbitrary tasks. All writes flow through TaskManager,
+// so TASK.md regenerates and tasks-updated broadcasts automatically. ──
+app.get('/api/agent/task', (req, res) => {
+  const hit = agentSession(req, res, { needTask: true });
+  if (!hit) return;
+  try {
+    const t = tasks.get(hit[0]._taskId);
+    res.json({ success: true, task: { id: t.id, title: t.title, status: t.status, objective: t.objective, plan: t.plan, progress: (t.progress || []).slice(-10), contextDir: t.contextDir } });
+  } catch (e) { res.status(404).json({ error: e.message }); }
+});
+app.post('/api/agent/task-progress', (req, res) => {
+  const hit = agentSession(req, res, { needTask: true });
+  if (!hit) return;
+  try {
+    const t = tasks.addProgress(hit[0]._taskId, { note: req.body?.note, session: sessionStatusKey(hit[0], hit[1]) });
+    res.json({ success: true, progress: t.progress.slice(-3) });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/agent/task-status', (req, res) => {
+  const hit = agentSession(req, res, { needTask: true });
+  if (!hit) return;
+  try {
+    const t = tasks.update(hit[0]._taskId, { status: req.body?.status });
+    res.json({ success: true, status: t.status });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/agent/task-plan', (req, res) => {
+  const hit = agentSession(req, res, { needTask: true });
+  if (!hit) return;
+  try {
+    const t = tasks.get(hit[0]._taskId);
+    const plan = (t.plan || []).map(p => ({ ...p }));
+    const { check, uncheck, add } = req.body || {};
+    if (typeof add === 'string' && add.trim()) {
+      plan.push({ text: add.trim(), done: false });
+    } else if (check !== undefined || uncheck !== undefined) {
+      const ref = check !== undefined ? check : uncheck;
+      const done = check !== undefined;
+      // by 1-based index or unique substring
+      let idx = -1;
+      const n = Number(ref);
+      if (Number.isInteger(n) && n >= 1 && n <= plan.length) idx = n - 1;
+      else {
+        const matches = plan.map((p, i) => [p, i]).filter(([p]) => p.text.includes(String(ref)));
+        if (matches.length === 1) idx = matches[0][1];
+        else return res.status(400).json({ error: matches.length ? 'ambiguous step — use its number' : 'no matching plan step' });
+      }
+      plan[idx].done = done;
+    } else {
+      return res.status(400).json({ error: 'need add, check, or uncheck' });
+    }
+    const updated = tasks.update(hit[0]._taskId, { plan });
+    res.json({ success: true, plan: updated.plan });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+// ── Hook install management (Manage Agents dialog — auto-registers at boot,
+// this surfaces status + one-click repair/remove for non-engineers) ──
+app.get('/api/agent-hooks', (req, res) => res.json(agentHooksStatus()));
+app.post('/api/agent-hooks/install', (req, res) => {
+  createHookHelper(); // regenerate the script too (repair path)
+  const results = ensureAgentHooks();
+  res.json({ success: true, results, status: agentHooksStatus() });
+});
+app.post('/api/agent-hooks/uninstall', (req, res) => {
+  removeAgentHooks();
+  res.json({ success: true, status: agentHooksStatus() });
 });
 
 // ── Hosts (ssh host registry for remote sessions — collaboration P2) ──
