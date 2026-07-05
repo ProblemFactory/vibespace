@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.30.0] — 2026-07-05
+
+### Added
+
+- **Task system (P1)** — the Groups tab grew into a **task board** (design: `docs/design-task-system.md`; tasks ⊃ groups, existing groups migrated automatically and behave exactly as before):
+  - A task tags sessions across directories (many-to-many) and can carry a **status** (active/paused/blocked/done), **objective**, **plan checklist**, and **progress log** — all stored server-side in `data/tasks.json` (authoritative for everything the board shows, synced to every client live).
+  - **Task detail window**: structured editor for all of the above, plus bound sessions (with unbind and dim "via folder" rows), auto-include folders with path autocomplete, a **context folder** designation (its content will be injected into bound sessions in an upcoming release), and a board color.
+  - **Attention**: when a bound agent finishes and waits for input (the same idle detection that blinks window titles), the task header shows a blinking **⚠ N** and the Tasks tab itself lights up — a board-level "which agents need me" view. Observation only; VibeSpace never drives the agent.
+  - Bind from the session card (Tasks ▾ checklist), by dragging a card/folder onto a task header, from the file explorer ("Add to task"), or via folder auto-include. Right-click a task for Details / Rename / Status / Convert to task / Linked folders / Delete.
+  - Legacy `sessionGroups`/`groupFolders` in user-state migrate once into `kind:'group'` tasks and stay dormant; tasks are included in config export/import.
+
+### Fixed
+
+- **Archived folders now cover future sessions** — "Archive project" records the folder itself (`archivedFolders` in user-state), so a session created in that folder later starts archived instead of popping the project back into Recent (the final piece of the "archive didn't stick" saga). The same button unarchives the whole project; unarchiving a single session dissolves the folder rule into per-session archives so it sticks.
+
 ## [2.29.1] — 2026-07-05
 
 ### Added
