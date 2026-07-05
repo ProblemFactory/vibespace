@@ -1,0 +1,37 @@
+#!/usr/bin/env node
+// vibespace-status — report this session's status to the VibeSpace board.
+// Usage:
+//   vibespace-status <working|needs-input|blocked|review> [--urgency low|normal|high|urgent] [--reason "why"]
+//   vibespace-status clear      # remove the indicator
+//   vibespace-status show       # print the current indicator
+// The user sees this on your session card and may adjust it; if they do,
+// you'll be told on their next message.
+const api = process.env.VIBESPACE_API;
+const token = process.env.VIBESPACE_SESSION_TOKEN;
+if (!api || !token) { console.error('vibespace-status: not running inside a VibeSpace session (missing env)'); process.exit(2); }
+const args = process.argv.slice(2);
+const cmd = args[0];
+const opt = (name) => { const i = args.indexOf('--' + name); return i >= 0 ? args[i + 1] : undefined; };
+async function main() {
+  if (!cmd || cmd === '--help' || cmd === '-h') {
+    console.log('usage: vibespace-status <working|needs-input|blocked|review> [--urgency low|normal|high|urgent] [--reason "why"] | clear | show');
+    return;
+  }
+  const body = cmd === 'show' ? { show: true }
+    : cmd === 'clear' ? { clear: true }
+    : { state: cmd, urgency: opt('urgency'), reason: opt('reason') };
+  const res = await fetch(api + '/api/agent/session-status', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { console.error('vibespace-status:', data.error || res.status); process.exit(1); }
+  if (cmd === 'show') {
+    const s = data.status;
+    console.log(s ? `state=${s.state || 'unset'} urgency=${s.urgency || 'unset'}${s.reason ? ' reason=' + JSON.stringify(s.reason) : ''} (set by ${s.setBy})` : 'no status set');
+  } else {
+    console.log(cmd === 'clear' ? 'status cleared' : 'status set: ' + cmd + (opt('urgency') ? ' / ' + opt('urgency') : ''));
+  }
+}
+main().catch((e) => { console.error('vibespace-status:', e.message); process.exit(1); });

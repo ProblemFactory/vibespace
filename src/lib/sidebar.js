@@ -599,6 +599,11 @@ class Sidebar {
 
   _mergeAndRender() {
     this._merge();
+    // Sessions created "in" a task get bound once their backend id appears
+    this._processPendingTaskBinds?.();
+    // Task ⚠ badges depend on the session list (folder auto-include + blocked
+    // key resolution) — re-evaluate; signature-guarded, so usually a no-op
+    this.refreshTaskAttention?.();
     if (this._migrateUserStateKeys(this._allSessions)) {
       // Never push migration results before the initial server fetch has been
       // applied — doing so POSTs the stale localStorage cache as full state,

@@ -86,7 +86,9 @@ class TaskManager {
       this._state.tasks[id] = {
         id,
         title: String(name).slice(0, CAPS.title),
-        kind: 'group',
+        // Migrated groups become full tasks (user decision 2026-07-05: 把现有的
+        // group folders都升级成tasks) — a title-only task behaves like a group
+        kind: 'task',
         status: 'active',
         attention: null,
         objective: '',

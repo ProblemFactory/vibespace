@@ -1,4 +1,5 @@
 import { escHtml, copyText, createPopover, showConfirmDialog } from './utils.js';
+import { SESSION_STATE_META, SESSION_URGENCY_META } from './sidebar-tasks.js';
 import { createBackendIcon, createAgentKindIcon, createModeBackendIcon, getBackendMeta, getAgentKindMeta, getAgentRoleLabel, getAgentRoleShortLabel, getSessionKey } from './agent-meta.js';
 
 /** Inline SVG icon helper — returns an HTML string for a 12x12 stroked icon */
@@ -126,9 +127,26 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     ${agentRoleShort ? `<span class="session-card-badge badge-agent-role" title="${escHtml(agentRoleLabel)}">${escHtml(agentRoleShort)}</span>` : ''}
     <span class="session-card-badge badge-config" style="display:none"></span>
     ${s.hostName ? `<span class="session-host-badge" title="Remote session on ${escHtml(s.hostName)}">${escHtml(s.hostName)}</span>` : ''}
+    <span class="sess-state-chip" style="display:none"></span>
     <span class="session-card-badge ${badge.cls}">${badge.text}</span>
   </div>`;
   const row = card.querySelector('.session-card-row');
+  // Session status chip (agent-set via vibespace-status / user-set) — state
+  // color + urgency marks; click to adjust (overrides are relayed to the agent)
+  const stateChip = row.querySelector('.sess-state-chip');
+  {
+    const st = state.getSessionStatus?.(s);
+    if (st && (st.state || st.urgency)) {
+      const meta = SESSION_STATE_META[st.state] || { label: st.state || 'status', color: 'var(--text-dim)' };
+      const mark = SESSION_URGENCY_META[st.urgency]?.mark || '';
+      stateChip.style.display = '';
+      stateChip.style.setProperty('--chip-color', meta.color);
+      stateChip.textContent = (st.state ? meta.label : '') + (mark ? ' ' + mark : (!st.state && st.urgency ? st.urgency : ''));
+      stateChip.title = `${st.state ? 'state: ' + meta.label : ''}${st.urgency ? (st.state ? ' · ' : '') + 'urgency: ' + st.urgency : ''}${st.reason ? ' — ' + st.reason : ''} (set by ${st.setBy === 'agent' ? 'the agent' : 'you'}; click to change)`;
+      if (st.urgency === 'urgent') stateChip.classList.add('sess-state-urgent');
+      stateChip.onclick = (e) => { e.stopPropagation(); state._showSessionStatusPopover?.(stateChip, s); };
+    }
+  }
   // Custom config marker: shown when this session has persisted model/effort/permission overrides
   const cfgBadge = row.querySelector('.badge-config');
   const updateCfgBadge = () => {
@@ -266,6 +284,27 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       };
     }
     row.append(lbl, val);
+    detailPanel.appendChild(row);
+  }
+
+  // Session status row — view/adjust the agent-set (or your) status indicator
+  {
+    const row = document.createElement('div');
+    row.className = 'session-detail-row';
+    const lbl = document.createElement('span'); lbl.className = 'session-detail-label'; lbl.textContent = 'Status';
+    const val = document.createElement('span'); val.className = 'session-detail-value';
+    val.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+    const st = state.getSessionStatus?.(s);
+    val.textContent = st && (st.state || st.urgency)
+      ? `${st.state || ''}${st.urgency ? (st.state ? ' / ' : '') + st.urgency : ''}${st.reason ? ' — ' + st.reason : ''} (${st.setBy === 'agent' ? 'agent' : 'you'})`
+      : 'None';
+    if (st?.reason) val.title = st.reason;
+    const btn = document.createElement('button');
+    btn.className = 'session-detail-btn';
+    btn.textContent = '\u25be';
+    btn.style.cssText = 'padding:1px 6px;font-size:10px;min-width:0';
+    btn.onclick = (e) => { e.stopPropagation(); state._showSessionStatusPopover?.(btn, s); };
+    row.append(lbl, val, btn);
     detailPanel.appendChild(row);
   }
 
