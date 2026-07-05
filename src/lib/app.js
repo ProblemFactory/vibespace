@@ -42,7 +42,9 @@ const BACKEND_SESSION_OPTIONS = {
       { value: 'low', label: 'Low' },
       { value: 'medium', label: 'Medium' },
       { value: 'high', label: 'High' },
-      { value: 'max', label: 'Max (Opus 4.6 only)' },
+      { value: 'xhigh', label: 'XHigh' },
+      { value: 'max', label: 'Max (Opus only)' },
+      { value: 'ultracode', label: 'Ultracode (xhigh + workflows)' },
     ],
   },
   codex: {
