@@ -190,7 +190,7 @@ Manage: right-click a task header → **Linked folders**, or the detail window (
 
 ### Task detail window
 
-The details button (or context menu → Details…) opens a per-task window: title, status dropdown, **objective** (shared definition of the goal), **plan** checklist, **progress** log (timestamped notes), bound sessions (with unbind), auto-include folders, **context folder** (the task's shared context directory — will be injected into bound sessions' context in an upcoming release), and a board color. Everything saves immediately and syncs to all clients.
+The details button (or context menu → Details…) opens a per-task window: title, status dropdown, **objective** (shared definition of the goal), **plan** checklist, **progress** log (timestamped notes), bound sessions (with unbind), auto-include folders, **context folder** (the task's shared context directory — see below), and a board color. Everything saves immediately and syncs to all clients.
 
 ### Task header actions
 
@@ -202,6 +202,15 @@ The details button (or context menu → Details…) opens a per-task window: tit
 ### Attention
 
 When a bound session's agent finishes and waits for input (the window-title blink), or declares itself **blocked** via session status (below), the task's header shows a blinking **⚠ N** and the Tasks tab itself gets a ⚠ — a board-level "which of my agents need me" view. VibeSpace only observes and surfaces; it never acts on the agent.
+
+## Task context injection
+
+A session started (or resumed) **in a task** begins with the task's context already in the agent's head: the task state (objective, plan, recent progress), an index of the files in the context folder (the agent reads what it needs with its own tools), and the working rules — never modify `<contextDir>/.vibespace/` (it's generated; `TASK.md` there always mirrors the task state), put shared artifacts in the context folder, and report session state with `vibespace-status`.
+
+- **Claude** sessions get this through Claude Code's own SessionStart hook (registered automatically; it is a no-op for sessions not started from a VibeSpace task) — on both terminal and chat sessions, and again on every resume.
+- **Codex** has no session-start hook yet, so the context is attached to the session's first message instead (visible as a collapsible dim block in the chat).
+
+VibeSpace also maintains `<contextDir>/.vibespace/TASK.md` — a generated, always-current markdown mirror of the task state that agents and humans can read from disk.
 
 ## Session status (agent-set, user-overridable)
 
