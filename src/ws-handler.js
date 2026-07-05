@@ -75,7 +75,7 @@ function registerWsHandler(wss, ctx) {
     SOCKETS_DIR, BUFFERS_DIR, META_DIR, PTY_WRAPPER, CHAT_WRAPPER,
     NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, PORT, X_ENV,
     adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
-    sessionStatus, sessionStatusKey,
+    sessionStatus, sessionStatusKey, getTasks,
   } = ctx;
 
   // Monotonic sequence for layout-sync rebroadcasts (shared across all
@@ -201,6 +201,10 @@ function registerWsHandler(wss, ctx) {
             // Per-session bearer for the agent-facing API (vibespace-status):
             // spawned into the CLI's env, scopes writes to this session only
             agentToken: 'vsst_' + crypto.randomBytes(12).toString('hex'),
+            // Context task (VIBESPACE_TASK_ID). Claude injects via its native
+            // SessionStart hook; codex (no session-start hook as of 0.142.x)
+            // gets the context attached to its FIRST chat message instead.
+            _taskId: data.taskId || null,
             backend,
             backendSessionId: data.resumeId || null,
             claudeSessionId: backend === 'claude' ? (data.resumeId || null) : null,
@@ -334,6 +338,7 @@ function registerWsHandler(wss, ctx) {
             permissionMode: session._permissionMode || null,
             effort: session._effort || null,
             agentToken: session.agentToken || null,
+            taskId: session._taskId || null,
             createdAt: session.createdAt,
             webuiSessionId: id,
             mode: sessionMode,
@@ -517,6 +522,19 @@ function registerWsHandler(wss, ctx) {
             // disliked its self-assessment). Rendered as a <system-reminder>
             // block, which the chat UI shows as a collapsible dim card.
             let inputText = data.text;
+            // Codex has no session-start hook (0.142.x: hook events are only
+            // user_prompt_submit/permission_request) — attach the task context
+            // to the FIRST message of the session instead. Same transparent
+            // channel as the status-override notice below; renders as a dim
+            // collapsible block in the chat. Claude is NOT double-injected —
+            // its native SessionStart hook already delivered the context.
+            if (session.backend === 'codex' && session._taskId && !session._taskCtxInjected && getTasks) {
+              try {
+                const ctxText = getTasks().renderContext(session._taskId);
+                if (ctxText) inputText = ctxText + '\n\n' + inputText;
+                session._taskCtxInjected = true;
+              } catch { /* task deleted — never block the message */ }
+            }
             if (sessionStatus && sessionStatusKey) {
               try {
                 const notice = sessionStatus.consumeNotice(sessionStatusKey(session, data.sessionId));
