@@ -59,6 +59,7 @@ src/
   codex-session-store.js — Codex session discovery (thread listing, JSONL parsing, forkedFrom chain merge)
   normalizers.js       — createMessageManager(backend, id) factory for backend-agnostic normalization
   mounts.js            — MountManager (rclone mounts, MULTI-SOURCE: typed records s3/drive/webdav/sftp/vibespace/rclone via _rcloneFor; detached + boot adoption; one-click rclone install (data/bin, pinned 1.65.2); guided Google Drive OAuth; rclone.conf import; per-mount S3 share minting mc→STS; flat-connections model — no special my-storage slot, env auto-migrates to a normal mount)
+  tasks.js             — TaskManager (task system P1 — data/tasks.json authoritative store, tasks ⊃ groups, one-time sessionGroups/groupFolders migration guarded by file existence, CRUD + bind/unbind + progress, tasks-updated broadcast, export/import; design: docs/design-task-system.md)
   webdav.js            — MountTokens (scoped bearer mount tokens, sha256-hashed, per-token chroot root + ro/rw) + registerWebdav (/dav WebDAV subset for VibeSpace↔VibeSpace mounting; auth = Bearer vsmt_ token, bypasses cookie auth, registered before json body parser)
   hosts.js             — HostManager (ssh host registry, connectivity test, keygen, remote discovery + first-user-message names, bootstrap, backend-status, dir-complete, fetchSessionJsonl = remote transcript → data/remote-jsonl cache)
   remote-fs.js         — RemoteFs (ssh-per-op remote filesystem: list/read/write/mkdir/rename/rm/stat/copy/move/download/archive/tar-stream folder transfer — mirrors /api/file* shapes; files.js dispatches on ?host=, cross-host copy = server relay)
@@ -81,8 +82,10 @@ src/
     tab-group.js       — Tab grouping mixin (chain model, icon drag, tab bar, drag-out)
     terminal.js        — TerminalSession (xterm.js wrapper, per-terminal settings)
     sidebar.js         — Sidebar shell (filter/sort/merge pipeline, ~560 lines)
-    sidebar-state.js   — Sidebar state mixin (star/archive/rename/groups/migration)
-    sidebar-render.js  — Sidebar rendering mixin (folder groups, user groups, drag-drop)
+    sidebar-state.js   — Sidebar state mixin (star/archive/archivedFolders/rename/migration)
+    sidebar-render.js  — Sidebar rendering mixin (folder groups, drag-drop)
+    sidebar-tasks.js   — Sidebar tasks mixin (client task store + tasks-updated sync, task board render desktop+mobile, bind/unbind write-through, checklist popover, attention aggregation)
+    task-detail.js     — Task detail window (structured editor: objective/plan/progress/sessions/folders/contextDir/color)
     sidebar-render-mobile.js — Mobile sidebar mixin (two-level folder/group navigation)
     mobile-nav.js      — MobileNav class (window switcher, close, desktop tabs, gestures)
     session-card.js    — Session card renderer (SVG icons, composite backend+mode icons)
@@ -153,6 +156,7 @@ docs/
 | **Tab groups** | `src/lib/tab-group.js` | Drag icon-to-icon to merge windows into tabs, Chrome-style tab bar, drag-out to split |
 | **Custom grid presets** | `src/lib/app.js` → `_addCustomGrid()` + `src/routes/persistence.js` | + button adds, right-click removes, persisted in layouts.json |
 | **Session starring** | `src/lib/sidebar.js` → `toggleStar()`, `isStarred()` | ★/☆ per session, starred first in sidebar + taskbar |
+| **Task system / board** | `src/tasks.js` + `src/lib/sidebar-tasks.js` + `src/lib/task-detail.js` | tasks.json store, board (Tasks tab), bind-as-tag, detail window, attention — design in docs/design-task-system.md |
 | **Session rename** | `src/lib/sidebar.js` → `renameSession()` | Double-click name in sidebar, syncs to open windows via `app.syncSessionName()` |
 | **Ctrl+G external editor** | `server.js` → `createEditorHelper()` + `src/lib/external-editor.js` | Fake "code" script + split-pane CodeMirror |
 | **File viewer (open file)** | `src/lib/file-viewer.js` | Dispatch by type, size check, binary detection |
@@ -587,7 +591,10 @@ Read/Write tool output uses highlight.js for syntax highlighting with line numbe
 - `POST /api/editor/open` — editor helper HTTP→WebSocket bridge
 - `POST /api/editor/signal` — signal editor completion
 - `GET /api/settings` / `POST /api/settings` / `PATCH /api/settings` — schema-driven settings (sparse storage, broadcasts `settings-updated`)
-- `GET /api/user-state` / `POST /api/user-state` — unified star/archive/rename/groups state (broadcasts to all WS clients)
+- `GET /api/user-state` / `POST /api/user-state` — unified star/archive/archivedFolders/rename state (broadcasts to all WS clients; sessionGroups/groupFolders keys are DORMANT since 2.30.0 — migrated once into data/tasks.json)
+- `GET /api/tasks` / `POST /api/tasks` / `PATCH /api/tasks/:id` / `DELETE /api/tasks/:id` — task CRUD (data/tasks.json authoritative, broadcasts `tasks-updated`)
+- `POST /api/tasks/:id/bind` / `:id/unbind` — granular session tag add/remove (`{sessionKey}`, atomic server-side)
+- `POST /api/tasks/:id/progress` — append progress note `{note, session?}` (capped 500)
 <!-- session-groups CRUD routes removed 2026-06-09: were unreachable dead code with a conflicting data shape; groups are managed via full-state POST /api/user-state -->
 - `GET /api/bookmarks` / `POST /api/bookmarks` — file explorer bookmarks (broadcasts to all WS clients)
 - `POST /api/kill-pid` — kill an external/tmux claude process by PID (validates `isProcessClaude` before SIGTERM)
@@ -599,7 +606,7 @@ Read/Write tool output uses highlight.js for syntax highlighting with line numbe
 
 ### WebSocket Protocol (`/ws`)
 Client → Server: `create` (incl. `fork` flag), `input`, `chat-input`, `permission-response`, `set-permission-mode`, `set-goal`, `interrupt`, `resize`, `attach`, `kill`, `tmux-attach`, `state-set`, `state-resync`, `layout-sync`, `desktop-create`, `desktop-delete`, `desktop-rename`
-Server → Client: `created`, `output`, `msg` (normalized: op=create/edit/meta), `subagent-message` (parentToolUseId for tool card status), `streaming-label`, `goal-updated` (goal/goalStatus/goalElapsed/statusMsg), `exited`, `attached` (includes `messages`, `totalCount`, `isStreaming`, `streamingLabel`, `chatStatus`, `taskState`, `goal`, `goalStatus`, `goalElapsed`), `active-sessions`, `editor-open`, `editor-close`, `effective-size`, `user-state-updated`, `bookmarks-updated`, `settings-updated`, `custom-themes-updated`, `state-sync`, `state-snapshot`, `layout-sync`, `desktop-updated`, `error`
+Server → Client: `created`, `output`, `msg` (normalized: op=create/edit/meta), `subagent-message` (parentToolUseId for tool card status), `streaming-label`, `goal-updated` (goal/goalStatus/goalElapsed/statusMsg), `exited`, `attached` (includes `messages`, `totalCount`, `isStreaming`, `streamingLabel`, `chatStatus`, `taskState`, `goal`, `goalStatus`, `goalElapsed`), `active-sessions`, `editor-open`, `editor-close`, `effective-size`, `user-state-updated`, `bookmarks-updated`, `settings-updated`, `custom-themes-updated`, `state-sync`, `state-snapshot`, `layout-sync`, `desktop-updated`, `tasks-updated`, `error`
 
 **Virtual session attach**: `attach` with `sessionId` starting with `sub-` routes to subagent handler. `sub-{parentToolUseId}` returns live-buffered messages from parent session's `subagentBuffers`. `sub-agent-{agentId}` loads completed agent's JSONL from disk. Both respond with standard `attached` payload with normalized messages. Live virtual sessions receive normalized `msg` ops via per-subagent normalizers. `attach` with `viewOnly:true` loads JSONL history without an active session (for stopped session history viewing).
 
@@ -731,9 +738,12 @@ Server → Client: `created`, `output`, `msg` (normalized: op=create/edit/meta),
 - Session card display: full ID with CSS mid-truncation (text-overflow ellipsis in center), CWD left-truncated via unicode-bidi
 - Session cards draggable: drag to group header to assign session to group
 - Status quick tabs: ALL/LIVE/TMUX/EXT/STOP/ARCH filter tabs (enabled via settings)
-- Session groups: Folders | Groups dual tab, user-defined groups with assign/unassign, folder linking (recursive auto-include by cwd), ▶ resume-all button
-- Group header: right-click context menu (Rename / Linked folders / Delete), drop target for folders and sessions
-- Multi-client sync: star/archive/rename/groups/bookmarks broadcast via WebSocket to all clients
+- Task board (Tasks tab, 2.30.0 — tasks ⊃ groups, design docs/design-task-system.md): tasks tag sessions across directories; kind:'task' adds a status chip (active/paused/blocked/done) + ⚠ attention badge; kind:'group' = migrated legacy groups (Convert to task via context menu). Board order: attention → tasks → groups → done. Bind via card Tasks-row checklist / drag card onto header / folder auto-include; ▶ resume-all; detail button opens the task detail window
+- Task detail window (task-detail.js, window type 'task'): structured editor over tasks.json — title, status, objective, plan checklist, progress log, bound sessions (explicit + dim "via folder" rows, × unbind), auto-include folders (dir autocomplete), context folder designation (P2 injects it), color swatches, delete. Live-syncs via tasks-updated (skips re-render while an input inside is focused); closes itself if the task is deleted elsewhere; openSpec `openTaskDetail` replays across clients/restores
+- Task header: right-click context menu (Details… / Rename / Status ▸ / Convert to task / Linked folders / Delete), drop target for folders and sessions
+- Per-task attention: the existing OSC-idle/window-waiting signal aggregated per task (`app.getWaitingSessionKeys()` → `sidebar.refreshTaskAttention()` through the updateTaskbar funnel, signature-guarded) — board headers show ⚠ N and the Tasks tab blinks ⚠; observation only, never auto-acts
+- Archive folders (2.30.0): "Archive project" records the FOLDER (`archivedFolders` in user-state, host-scoped exact-cwd keys) so sessions created there LATER start archived too; unarchiving one session dissolves the folder rule into individual archives; the project button toggles archive/unarchive
+- Multi-client sync: star/archive/archivedFolders/rename/bookmarks broadcast via `user-state-updated`; tasks broadcast via `tasks-updated` — all clients update live
 - Session rename: double-click name in sidebar → set custom name → used as `--name` on next resume (if CLI supports it — detected via `--help` at startup), syncs to open windows
 - Terminate button: in session card expand panel for all running sessions (live/tmux/external). Live uses WebSocket kill, external/tmux uses `POST /api/kill-pid`
 - Per-session config: gear button (⚙) in Resume split button group opens a popover with Model/Effort/Permission overrides. Each row has a checkbox — unchecked = greyed out, uses global default; checked = per-session override. Changing a select while unchecked auto-checks. Model supports combobox (Custom... for specific model IDs). Overrides are PERSISTED per session in user state (`sessionConfigs` map, key `backend:backendSessionId`, synced multi-client like star/archive) — saved on every popover change, NOT just passed at resume time (closure-only overrides were lost on sidebar re-render, which is why config "didn't take effect"). `app.resumeSession()` reads saved config via `sidebar.getSessionConfig()` for any param the caller didn't specify, so ALL resume paths apply it (card click, Resume button, resume-all, chat resume bar, layout restore). Cards with overrides show a purple gear badge (model/effort/permission summary in tooltip, `.badge-config`).

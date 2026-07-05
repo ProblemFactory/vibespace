@@ -37,10 +37,10 @@ Sessions grouped by working directory. Each folder header shows:
 - Session count
 - Green dot if any session is live
 - **+** button to create a new session in that directory
-- **🔗** button to link the folder to a session group
+- **🔗** button to link the folder to a task (auto-include)
 
-### Groups tab
-User-created groups for organizing sessions across directories. See [Session Groups](#session-groups) below.
+### Tasks tab
+The task board — tasks tag sessions across directories and carry an optional goal, status, and attention. See [Tasks](#tasks) below.
 
 ## Session Modes
 
@@ -112,7 +112,7 @@ Session card details use smart truncation for readability:
 
 Click the ▸ arrow to expand any card. The detail panel shows:
 - Session ID, working directory, start time, status
-- Groups membership
+- Tasks membership
 - Action buttons: Rename, Find, Attach/Resume, Terminate (red, with confirmation)
 
 Configure visible fields via Settings > Session Card > **Visible detail fields**.
@@ -155,40 +155,57 @@ The filter button (top of sidebar) opens a multi-select dropdown:
 
 Enable via Settings > Sidebar > **Status quick tabs** to show one-click filter tabs below the search bar: ALL / LIVE / TMUX / EXT / STOP / ARCH.
 
-## Session Groups
+## Tasks
 
-Groups let you organize sessions independently of their working directory.
+A **task** is a durable unit of work above individual sessions: it tags sessions across directories and can carry a goal, status, plan, and progress. Tasks are a superset of the old Groups — your existing groups were migrated automatically (they behave exactly as before; use **Convert to task** to give one a goal and lifecycle).
 
-### Creating a group
+### The board (Tasks tab)
 
-In the Groups tab, click **"+ New Group"** and enter a name.
+Each task renders as a collapsible section: status chip (`active` / `paused` / `blocked` / `done`, colored), title, linked-folder count, live dot, a **⚠ attention badge** when a bound agent is waiting for your input (from the same idle detection that blinks window titles), session count, a details button, and ▶ resume-all. Order: tasks needing attention first, then working tasks, then plain groups, done last. Sessions not in any task appear under **Untagged**.
 
-### Adding sessions to a group
+### Creating a task
 
-Multiple ways:
-- **Session card dropdown**: Expand a card → click the Groups ▾ button → check/uncheck groups
-- **Drag session**: Drag a session card and drop it on a group header
-- **Folder linking**: Link a folder so all sessions with matching `cwd` auto-include (see below)
+Click **"+ New Task"** on the board (opens the detail window), or "+ New task" at the bottom of any task checklist popover.
 
-### Folder linking
+### Tagging sessions (many-to-many)
 
-Link a folder path to a group to automatically include all sessions whose working directory matches (or is a subdirectory):
+- **Session card**: expand a card → **Tasks ▾** → check/uncheck tasks
+- **Drag session**: drop a session card on a task header
+- **Folder auto-include**: sessions whose working directory is under a linked folder join automatically (see below)
 
-- From the **Folders tab**: Click the 🔗 button on a folder header → select a group
-- From the **File explorer**: Right-click a folder → "Add to group" → select a group
-- **Drag a folder** from the file explorer onto a group header in the sidebar
+### Auto-include folders
 
-View and manage linked folders: right-click a group header → **Linked folders**.
+Link folders to a task so every session under them (including subdirectories) joins automatically:
 
-### Group header actions
+- **Folders tab**: 🔗 button on a folder header → check tasks
+- **File explorer**: right-click a folder → "Add to task"
+- **Drag a folder** from the file explorer onto a task header
+- **Detail window**: "+ Link folder path" with autocomplete
 
-- **▶ button** — Resume/attach all sessions in the group
-- **Right-click** — Context menu with: Rename, Linked folders, Delete
-- **Drop target** — Drag sessions or folders onto the header
+Manage: right-click a task header → **Linked folders**, or the detail window (auto-included sessions show a dim "via folder" tag).
+
+### Task detail window
+
+The details button (or context menu → Details…) opens a per-task window: title, status dropdown, **objective** (shared definition of the goal), **plan** checklist, **progress** log (timestamped notes), bound sessions (with unbind), auto-include folders, **context folder** (the task's shared context directory — will be injected into bound sessions' context in an upcoming release), and a board color. Everything saves immediately and syncs to all clients.
+
+### Task header actions
+
+- **▶** — Resume/attach all sessions in the task
+- **Details button** — open the detail window
+- **Right-click** — Details… / Rename / Status ▸ / Convert to task / Linked folders / Delete
+- **Drop target** — drag sessions or folders onto the header
+
+### Attention
+
+When a bound session's agent finishes and waits for input (the window-title blink), the task's header shows a blinking **⚠ N** and the Tasks tab itself gets a ⚠ — a board-level "which of my agents need me" view. VibeSpace only observes and surfaces; it never acts on the agent.
 
 ### Multi-client sync
 
-All session state (stars, archives, names, groups, folder links) is stored server-side in `data/user-state.json` and broadcast to all connected clients via WebSocket. Changes made on one device appear instantly on all others.
+Tasks live server-side in `data/tasks.json` and broadcast to all connected clients (`tasks-updated`); star/archive/name state stays in `data/user-state.json`. Changes made on one device appear instantly on all others.
+
+### Archiving whole projects
+
+"Archive project" in the Recent zone archives every session under that folder **and remembers the folder** — sessions created there later start archived too (previously new sessions popped back unarchived). The same button unarchives the whole project when viewing archived sessions; unarchiving a single session dissolves the folder rule (that session stays visible, the rest remain archived).
 
 ## Recent & History on a remote host
 

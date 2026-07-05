@@ -8,7 +8,7 @@ VibeSpace is a backend-agnostic web workspace for **coding agents** — it drive
 - **[Chat Mode](chat-mode.md)** — Structured Claude/Codex messages, tool visualization, permissions, search, subagents
 - **[Terminal Management](terminal.md)** — Claude/Codex terminal sessions, persistence, multi-device sync, clipboard paste, idle detection, fonts
 - **[Window Manager](window-manager.md)** — Grid layouts, snap, command mode, presets, virtual desktops, tab groups
-- **[Session Management](sessions.md)** — Claude/Codex discovery, groups, star/archive, drag-drop, filters, dual-mode resume
+- **[Session Management](sessions.md)** — Claude/Codex discovery, tasks, star/archive, drag-drop, filters, dual-mode resume
 - **[File Explorer](file-explorer.md)** — Browsing, bookmarks, viewers, code editor, clickable paths
 - **[External Editor](editor.md)** — Ctrl+G split-pane CodeMirror integration
 - **[Embedded Browser](browser.md)** — Iframe browser with proxy mode
