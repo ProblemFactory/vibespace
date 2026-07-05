@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.28.6] — 2026-07-05
+
+### Changed
+
+- **Plain-language storage actions** — the primary buttons now say **Connect** / **Disconnect** instead of “mount”/“unmount” (footer “Connect storage”, per-row Connect/Disconnect, “Import & connect”); “mount” remains only in tooltips and advanced contexts. The two share buttons are now symmetric — **Share a cloud folder** (from your S3 storage) vs **Share a local folder** (a folder on this machine, over the bridge) — so the difference is obvious.
+
 ## [2.28.5] — 2026-07-05
 
 ### Fixed / Added
