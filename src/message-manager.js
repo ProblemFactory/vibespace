@@ -323,7 +323,23 @@ class MessageManager {
     const content = raw.message?.content;
     if (!Array.isArray(content) || !content.length) return;
 
+    // Per-turn serving model — lets the UI detect silent auto-fallback
+    // (harness swapped models mid-session; e.g. fable-5 → opus under load).
+    const servedModel = raw.message?.model;
+    if (servedModel && servedModel !== '<synthetic>' && emit && servedModel !== this._lastServedModel) {
+      this._lastServedModel = servedModel;
+      this._emit({ op: 'meta', subtype: 'served-model', data: { model: servedModel } });
+    }
+
     for (const block of content) {
+      // Explicit fallback marker the CLI writes when it auto-switches models:
+      // { type:'fallback', from:{model}, to:{model} } — surface it as a notice.
+      if (block.type === 'fallback' && (block.from?.model || block.to?.model)) {
+        const from = block.from?.model || '?', to = block.to?.model || '?';
+        const msg = this._create({ role: 'system', content: [{ type: 'text', text: `⚠ Model auto-fallback: ${from} → ${to} (the harness switched models, e.g. capacity/overload; /model or the badge menu sets it back)` }], noticeKind: 'model-fallback' });
+        if (emit) this._emit({ op: 'create', message: msg });
+        continue;
+      }
       if (block.type === 'thinking') {
         // Claude's thinking blocks carry the text in `thinking`, not `text`
         const msg = this._create({ role: 'assistant', content: [{ type: 'thinking', text: block.thinking || block.text || '' }] });

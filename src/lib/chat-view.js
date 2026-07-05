@@ -70,6 +70,10 @@ class ChatView {
       openSubagentViewer: (opts) => this._openSubagentViewer(opts),
       openInTempEditor: (text) => this._renderers.openInTempEditor(text),
       startReview: (opts) => this._startReview(opts),
+      // Mid-session model/effort picks persist as this session's per-session
+      // config (same store as the Resume gear popover) so the next resume
+      // starts with the same choice.
+      onConfigChange: (patch) => this._persistSessionConfig(patch),
     });
     // Initial render: a brand-new session has no chatStatus yet — show the
     // honest unknown badges (model: ? / effort: ?) instead of an empty bar.
@@ -1413,7 +1417,24 @@ class ChatView {
   }
 
   // Handle meta ops (usage, cost, turn_complete)
+  _persistSessionConfig(patch) {
+    try {
+      const sb = this.app?.sidebar;
+      if (!sb?.setSessionConfig) return;
+      const match = (sb._allSessions || []).find(x => x.webuiId === this.sessionId);
+      const spec = this.winInfo?._openSpec;
+      const target = match || (spec?.backendSessionId ? { backend: spec.backend || 'claude', backendSessionId: spec.backendSessionId } : null);
+      if (!target) return; // brand-new session with no backend id yet — nothing durable to key on
+      const cur = sb.getSessionConfig?.(target) || {};
+      sb.setSessionConfig(target, { ...cur, ...patch });
+    } catch { /* config persistence is best-effort */ }
+  }
+
   _onMeta(op) {
+    if (op.subtype === 'served-model') {
+      this._statusBar.setServedModel(op.data?.model || null);
+      return;
+    }
     if (op.subtype === 'usage') {
       this._statusBar.updateUsage(op.data);
     } else if (op.subtype === 'todos') {
