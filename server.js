@@ -979,6 +979,7 @@ function restoreSessions() {
       // stdout-only) — restore what the session was launched with
       _permissionMode: meta.permissionMode || null,
       _effort: meta.effort || null,
+      agentToken: meta.agentToken || null, // vibespace-status auth survives restarts
       sockName: sockFile,
       socketPath,
       buffer: savedBuffer,
@@ -1059,6 +1060,55 @@ rm -f "\$SIGNAL"
   fs.writeFileSync(EDITOR_CMD, script, { mode: 0o755 });
 }
 createEditorHelper();
+
+// vibespace-status — the agent-facing status tool (session-status feature).
+// Spawned sessions get data/bin on PATH + VIBESPACE_API/VIBESPACE_SESSION_TOKEN
+// in env, so an agent can run e.g. `vibespace-status blocked --urgency high
+// --reason "waiting for DB credentials"` from its ordinary shell tool.
+const STATUS_CMD = path.join(EDITOR_DIR, 'vibespace-status');
+function createStatusHelper() {
+  ensureDir(EDITOR_DIR);
+  const script = `#!/usr/bin/env node
+// vibespace-status — report this session's status to the VibeSpace board.
+// Usage:
+//   vibespace-status <working|needs-input|blocked|review> [--urgency low|normal|high|urgent] [--reason "why"]
+//   vibespace-status clear      # remove the indicator
+//   vibespace-status show       # print the current indicator
+// The user sees this on your session card and may adjust it; if they do,
+// you'll be told on their next message.
+const api = process.env.VIBESPACE_API;
+const token = process.env.VIBESPACE_SESSION_TOKEN;
+if (!api || !token) { console.error('vibespace-status: not running inside a VibeSpace session (missing env)'); process.exit(2); }
+const args = process.argv.slice(2);
+const cmd = args[0];
+const opt = (name) => { const i = args.indexOf('--' + name); return i >= 0 ? args[i + 1] : undefined; };
+async function main() {
+  if (!cmd || cmd === '--help' || cmd === '-h') {
+    console.log('usage: vibespace-status <working|needs-input|blocked|review> [--urgency low|normal|high|urgent] [--reason "why"] | clear | show');
+    return;
+  }
+  const body = cmd === 'show' ? { show: true }
+    : cmd === 'clear' ? { clear: true }
+    : { state: cmd, urgency: opt('urgency'), reason: opt('reason') };
+  const res = await fetch(api + '/api/agent/session-status', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { console.error('vibespace-status:', data.error || res.status); process.exit(1); }
+  if (cmd === 'show') {
+    const s = data.status;
+    console.log(s ? \`state=\${s.state || 'unset'} urgency=\${s.urgency || 'unset'}\${s.reason ? ' reason=' + JSON.stringify(s.reason) : ''} (set by \${s.setBy})\` : 'no status set');
+  } else {
+    console.log(cmd === 'clear' ? 'status cleared' : 'status set: ' + cmd + (opt('urgency') ? ' / ' + opt('urgency') : ''));
+  }
+}
+main().catch((e) => { console.error('vibespace-status:', e.message); process.exit(1); });
+`;
+  fs.writeFileSync(STATUS_CMD, script, { mode: 0o755 });
+}
+createStatusHelper();
 
 // ── File System API (extracted to src/routes/files.js) ──
 app.locals.xEnv = X_ENV;
@@ -1158,6 +1208,53 @@ app.post('/api/tasks/:id/unbind', (req, res) => {
 app.post('/api/tasks/:id/progress', (req, res) => {
   try { res.json({ success: true, task: tasks.addProgress(req.params.id, req.body || {}) }); }
   catch (e) { res.status(e.message === 'task not found' ? 404 : 400).json({ error: e.message }); }
+});
+
+// ── Session status (agent-set via vibespace-status CLI, user-overridable) ──
+// The user's override of an agent-set status is injected as a system-reminder
+// into the NEXT chat message (see ws-handler chat-input) so the agent learns
+// the user disagreed with its self-assessment.
+const { SessionStatusManager } = require('./src/session-status');
+const sessionStatus = new SessionStatusManager({
+  dataDir: path.join(__dirname, 'data'),
+  onChange: (statuses) => {
+    const json = JSON.stringify({ type: 'session-status-updated', statuses });
+    wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
+  },
+});
+function sessionStatusKey(session, id) {
+  const bsid = session?.backendSessionId || session?.claudeSessionId;
+  return bsid ? `${session.backend || 'claude'}:${bsid}` : `webui:${id}`;
+}
+app.get('/api/session-status', (req, res) => res.json({ statuses: sessionStatus.snapshot() }));
+// User set/override/clear from the UI (cookie-authed like every route)
+app.post('/api/session-status', (req, res) => {
+  const { sessionKey, state, urgency, reason, clear } = req.body || {};
+  if (!sessionKey || typeof sessionKey !== 'string') return res.status(400).json({ error: 'sessionKey required' });
+  try {
+    const rec = clear ? sessionStatus.clear(sessionKey, 'user') : sessionStatus.setByUser(sessionKey, { state, urgency, reason });
+    res.json({ success: true, status: rec });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+// Agent endpoint — authenticated ONLY by the per-session token spawned into
+// the agent's env (VIBESPACE_SESSION_TOKEN); exempt from cookie auth in
+// auth.middleware. The token scopes writes to the agent's own session.
+app.post('/api/agent/session-status', (req, res) => {
+  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || req.body?.token;
+  if (!token || !token.startsWith('vsst_')) return res.status(401).json({ error: 'missing session token' });
+  let found = null, foundId = null;
+  for (const [id, s] of activeSessions) { if (s.agentToken === token) { found = s; foundId = id; break; } }
+  if (!found) return res.status(401).json({ error: 'unknown session token' });
+  const key = sessionStatusKey(found, foundId);
+  // migrate an early webui:<id> record once the real backend id exists
+  if (!key.startsWith('webui:')) sessionStatus.rekey(`webui:${foundId}`, key);
+  const { state, urgency, reason, clear, show } = req.body || {};
+  try {
+    const rec = show ? sessionStatus.get(key)
+      : clear ? sessionStatus.clear(key, 'agent')
+      : sessionStatus.setByAgent(key, { state, urgency, reason });
+    res.json({ success: true, sessionKey: key, status: rec });
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 // ── Hosts (ssh host registry for remote sessions — collaboration P2) ──
@@ -1738,6 +1835,7 @@ registerWsHandler(wss, {
   SOCKETS_DIR, BUFFERS_DIR, META_DIR, PTY_WRAPPER, CHAT_WRAPPER,
   NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, CODEX_CMD, EDITOR_CMD, PORT, X_ENV,
   adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
+  sessionStatus, sessionStatusKey,
 });
 
 function broadcastActiveSessions() {

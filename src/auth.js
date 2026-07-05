@@ -176,6 +176,10 @@ class Auth {
       if (p === '/login' || p === '/api/login' || p === '/favicon.ico') return next();
       // WebDAV bridge authenticates with scoped Bearer mount tokens (webdav.js)
       if (p === '/dav' || p.startsWith('/dav/')) return next();
+      // Agent endpoints authenticate with per-session tokens spawned into the
+      // agent's env (vsst_ — see /api/agent/session-status); no cookie exists
+      // inside an agent's shell, so these must bypass cookie auth.
+      if (p.startsWith('/api/agent/')) return next();
       if (this.requestAuthed(req)) return next();
       // Browsers navigating to pages get the login form; API calls get 401
       const wantsHtml = req.method === 'GET' && (req.headers.accept || '').includes('text/html');

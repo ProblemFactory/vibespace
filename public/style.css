@@ -2076,3 +2076,20 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 .task-detail-swatch.none { background: transparent; border: 1px dashed var(--border-active); position: relative; }
 .task-detail-swatch.none::after { content: ''; position: absolute; left: 2px; right: 2px; top: 50%; height: 1px; background: var(--text-dim); transform: rotate(-45deg); }
 .task-detail-delete { align-self: flex-start; color: var(--red, #e55); margin-top: 4px; }
+
+/* ── Session status chip (agent-set / user-set state + urgency) ── */
+.sess-state-chip {
+  font-size: 9px; padding: 0 5px; border-radius: 7px; flex-shrink: 0; line-height: 14px; cursor: pointer;
+  color: var(--chip-color, var(--text-dim)); border: 1px solid color-mix(in srgb, var(--chip-color, var(--text-dim)) 55%, transparent);
+  background: color-mix(in srgb, var(--chip-color, var(--text-dim)) 10%, transparent);
+  white-space: nowrap;
+}
+.sess-state-chip.sess-state-urgent { animation: task-attn-pulse 1.2s ease-in-out infinite; font-weight: 700; }
+.session-status-pop { padding: 8px; display: flex; flex-direction: column; gap: 6px; min-width: 200px; }
+.session-status-pop-row { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-secondary); justify-content: space-between; }
+.session-status-pop-row select, .session-status-pop-row input {
+  background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font-size: 11px; padding: 3px 6px; width: 130px; box-sizing: border-box;
+}
+.session-status-pop-hint { font-size: 10px; color: var(--text-dim); max-width: 220px; line-height: 1.4; }
+.session-status-pop-btns { display: flex; gap: 6px; justify-content: flex-end; }

@@ -8,6 +8,8 @@ const { createMessageManager } = require('./normalizers');
 const { listCodexThreads } = require('./codex-session-store');
 const { findCodexSessionJsonlPath, extractCodexThreadMeta } = require('./adapters/codex');
 const { cwdToProjectDir } = require('./session-store');
+const crypto = require('crypto');
+const { SessionStatusManager } = require('./session-status');
 
 function getSessionKey(session = {}) {
   const backend = session.backend || 'claude'; // fallback needed: called with API data too
@@ -73,6 +75,7 @@ function registerWsHandler(wss, ctx) {
     SOCKETS_DIR, BUFFERS_DIR, META_DIR, PTY_WRAPPER, CHAT_WRAPPER,
     NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, PORT, X_ENV,
     adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
+    sessionStatus, sessionStatusKey,
   } = ctx;
 
   // Monotonic sequence for layout-sync rebroadcasts (shared across all
@@ -195,6 +198,9 @@ function registerWsHandler(wss, ctx) {
             pty: null, clients: new Map([[ws, { cols: data.cols || 120, rows: data.rows || 30 }]]),
             cwd, name: data.sessionName || `Session ${sessionCounterRef.value}`,
             createdAt: Date.now(),
+            // Per-session bearer for the agent-facing API (vibespace-status):
+            // spawned into the CLI's env, scopes writes to this session only
+            agentToken: 'vsst_' + crypto.randomBytes(12).toString('hex'),
             backend,
             backendSessionId: data.resumeId || null,
             claudeSessionId: backend === 'claude' ? (data.resumeId || null) : null,
@@ -285,6 +291,13 @@ function registerWsHandler(wss, ctx) {
               NODE_CMD, wrapper,
               bufFile, metaFileW,
               ENV_CMD, `EDITOR=${EDITOR_CMD}`, `CLAUDE_WEBUI_PORT=${PORT}`, `CLAUDE_WEBUI_SESSION_ID=${id}`,
+              // Agent-facing env: the vibespace-status tool (data/bin on PATH)
+              // authenticates with the per-session token; VIBESPACE_TASK_ID
+              // marks the context task when created from the task board.
+              `VIBESPACE_API=http://127.0.0.1:${PORT}`,
+              `VIBESPACE_SESSION_TOKEN=${session.agentToken}`,
+              ...(data.taskId ? [`VIBESPACE_TASK_ID=${data.taskId}`] : []),
+              `PATH=${path.dirname(EDITOR_CMD)}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
               // Probed working X display (see server.js detectXDisplay) — the CLI
               // reads the clipboard itself on Ctrl+V, so it needs BOTH vars
               `DISPLAY=${X_ENV?.DISPLAY || process.env.DISPLAY || ''}`,
@@ -320,6 +333,7 @@ function registerWsHandler(wss, ctx) {
             parentThreadId: session.parentThreadId,
             permissionMode: session._permissionMode || null,
             effort: session._effort || null,
+            agentToken: session.agentToken || null,
             createdAt: session.createdAt,
             webuiSessionId: id,
             mode: sessionMode,
@@ -498,7 +512,18 @@ function registerWsHandler(wss, ctx) {
               session._interruptTimer = null;
             }
             const msgId = data.msgId || (Date.now() + '-' + Math.random().toString(36).slice(2, 8));
-            const { stdinPayload, userMsg } = adapter.formatChatInput(data.text, msgId);
+            // User overrode an agent-set status since the last message → tell
+            // the agent (user-requested: the agent should learn the user
+            // disliked its self-assessment). Rendered as a <system-reminder>
+            // block, which the chat UI shows as a collapsible dim card.
+            let inputText = data.text;
+            if (sessionStatus && sessionStatusKey) {
+              try {
+                const notice = sessionStatus.consumeNotice(sessionStatusKey(session, data.sessionId));
+                if (notice) inputText += '\n\n' + SessionStatusManager.renderNotice(notice);
+              } catch { }
+            }
+            const { stdinPayload, userMsg } = adapter.formatChatInput(inputText, msgId);
             session._isStreaming = true;
             session.pty.write(stdinPayload + '\n');
             if (userMsg) {
