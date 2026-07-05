@@ -1,34 +1,44 @@
 #!/usr/bin/env node
-// vibespace-hook — injects VibeSpace task context at SessionStart.
-// No-op unless the session was spawned by VibeSpace with a bound task.
+// vibespace-hook — delivers VibeSpace task context through the harness's OWN
+// native hooks (never by rewriting the user's message):
+//   SessionStart     → the task's context (goal, plan, files, rules)
+//   UserPromptSubmit → any pending status-override notice for this session
+// No-op unless the session was spawned by VibeSpace (VIBESPACE_* env present).
 let buf = '';
 let ran = false;
 async function run(input) {
   if (ran) return;
   ran = true;
   try {
-    if (input.hook_event_name !== 'SessionStart') return process.exit(0);
+    const event = input.hook_event_name;
     const api = process.env.VIBESPACE_API;
     const token = process.env.VIBESPACE_SESSION_TOKEN;
-    const taskId = process.env.VIBESPACE_TASK_ID;
-    if (!api || !token || !taskId) return process.exit(0);
+    if (!api || !token) return process.exit(0);
+    let path;
+    if (event === 'SessionStart') {
+      const taskId = process.env.VIBESPACE_TASK_ID;
+      if (!taskId) return process.exit(0);
+      path = '/api/agent/task-context?taskId=' + encodeURIComponent(taskId);
+    } else if (event === 'UserPromptSubmit') {
+      path = '/api/agent/prompt-context';
+    } else {
+      return process.exit(0);
+    }
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), 3000);
-    const res = await fetch(api + '/api/agent/task-context?taskId=' + encodeURIComponent(taskId), {
-      headers: { Authorization: 'Bearer ' + token }, signal: ctl.signal,
-    });
+    const res = await fetch(api + path, { headers: { Authorization: 'Bearer ' + token }, signal: ctl.signal });
     clearTimeout(timer);
     if (res.ok) {
       const data = await res.json();
-      if (data?.context) {
-        // Claude Code (verified against 2.1.201 binary: it even suggests "Did
-        // you mean hookSpecificOutput") requires the nested shape; Codex's
-        // hook schema descends from the same contract but the org's plugin
-        // uses top-level additionalContext — emit BOTH keys, each harness
-        // reads the one it knows.
+      if (data && data.context) {
+        // BOTH harnesses read the NESTED hookSpecificOutput.additionalContext
+        // (verified against the Claude 2.1.201 binary — it suggests "Did you
+        // mean hookSpecificOutput" — and the Codex *HookSpecificOutputWire
+        // JSON schema). Emit ONLY that: Codex's output schema is strict
+        // (additionalProperties:false), so an extra top-level additionalContext
+        // key makes Codex reject the whole object and inject nothing.
         process.stdout.write(JSON.stringify({
-          hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: data.context },
-          additionalContext: data.context,
+          hookSpecificOutput: { hookEventName: event, additionalContext: data.context },
         }));
       }
     }

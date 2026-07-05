@@ -466,6 +466,8 @@ export function installSidebarTasks(SidebarClass) {
 
     const assignedIds = new Set();
 
+    const addRow = document.createElement('div');
+    addRow.className = 'task-board-addrow';
     const addCard = document.createElement('div');
     addCard.className = 'session-item-card new-session-card';
     addCard.innerHTML = '<div class="session-card-name" style="color:var(--accent-hover)">+ New Task</div>';
@@ -476,7 +478,19 @@ export function installSidebarTasks(SidebarClass) {
         if (t) this.app.openTaskDetail(t.id);
       }
     };
-    this.listEl.appendChild(addCard);
+    // Import a task from a committable repo file (P4)
+    const importCard = document.createElement('div');
+    importCard.className = 'session-item-card new-session-card task-board-import';
+    importCard.innerHTML = '<div class="session-card-name" style="color:var(--text-secondary)">Import…</div>';
+    importCard.title = 'Import a task from a VibeSpace task markdown file';
+    importCard.onclick = async () => {
+      const p = await showInputDialog({ title: 'Import Task', label: 'Absolute path to a VibeSpace task .md file', placeholder: '/path/to/repo/T-xxxxxx.md', confirmText: 'Import' });
+      if (!p || !p.trim()) return;
+      const data = await this._taskApi('POST', '/api/tasks/import', { path: p.trim() });
+      if (data?.task) { showToast('Imported: ' + data.task.title); this.app.openTaskDetail(data.task.id); }
+    };
+    addRow.append(addCard, importCard);
+    this.listEl.appendChild(addRow);
 
     for (const task of this._taskBoardOrder()) {
       const keys = this._getTaskSessionKeys(task, sessions);

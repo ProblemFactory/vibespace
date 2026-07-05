@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.34.0] — 2026-07-05
+
+### Changed
+
+- **Task context is now delivered ONLY through the harness's native hooks — never by rewriting your message.** The earlier approach of prepending context to the user's first message (for Codex and remote sessions) was removed: modifying the input stream bypasses the CLI's own mechanisms and is unstable. `vibespace-hook.mjs` now registers for **both** `SessionStart` (task context) and `UserPromptSubmit` (status-override notices, and first-prompt context where SessionStart doesn't fire), for both Claude Code and Codex.
+
+### Added
+
+- **Remote sessions get the full task integration (P3 remote).** Spawning a session on a remote host now opens an ssh reverse tunnel so the remote agent's tools and hook reach VibeSpace, distributes the `vibespace-status` / `vibespace-task` tools + the hook to `~/.vibespace/bin` on the remote, and registers the hook in the remote's own Claude/Codex config. Verified end-to-end on a real remote box: the agent received the task's context and reported progress back through the tunnel.
+- **Repo task files (P4).** A task can be exported to a committable markdown file (YAML frontmatter + objective + plan + progress) from the task detail window, and imported back from such a file via the board's "Import…" card. The structured store stays authoritative — the file is a shareable projection, not a live-parsed source.
+
+### Hardened (adversarial review before release)
+
+- Remote spawn: the task id is now validated to the `T-…` shape and env values are shell-quoted before interpolation into the ssh command (closes a command-injection vector on the taskId).
+- Task-context is strictly scoped to the session's own task (a per-session token can't read another task's context).
+- Hook management: the "Remove" button is now durable (a persisted opt-out stops startup from re-registering); the status endpoint no longer errors on a hand-edited/malformed hooks file; config writes use a compare-and-swap to avoid clobbering a concurrent CLI write.
+- Repo import tolerates CRLF files and preserves the progress log and objectives that contain markdown headings.
+
+### Known limitation
+
+- **Codex chat sessions do not yet receive auto-injected task context.** Codex's app-server (JSON-RPC) mode runs hook *commands* but does not inject their returned context into the model (verified empirically against codex-cli 0.142.5); the hook is registered and will work if/when Codex adds app-server hook-injection. Claude sessions (terminal + chat, local + remote) are fully covered.
+
 ## [2.33.0] — 2026-07-05
 
 ### Added
