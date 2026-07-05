@@ -702,10 +702,38 @@ async function startThread() {
   }
 }
 
+// VibeSpace task context for Codex — Codex's app-server does NOT inject hook
+// additionalContext (empirically confirmed), so we deliver it natively via
+// `thread/inject_items` (a first-class app-server method that appends a
+// developer-role message to the thread's model-visible history WITHOUT starting
+// a user turn — verified). Called before each turn: the server's
+// /api/agent/prompt-context returns the full task context on the first turn and
+// a refresh whenever the task changed since the session last saw it, plus any
+// status-override notice. Best-effort — never blocks or breaks a turn.
+async function injectTaskContextForTurn() {
+  const api = process.env.VIBESPACE_API, token = process.env.VIBESPACE_SESSION_TOKEN;
+  if (!api || !token || !process.env.VIBESPACE_TASK_ID || !meta.threadId) return;
+  try {
+    const res = await fetch(api + '/api/agent/prompt-context', {
+      headers: { Authorization: 'Bearer ' + token }, signal: AbortSignal.timeout(3000),
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data && data.context) {
+      await request('thread/inject_items', {
+        threadId: meta.threadId,
+        items: [{ type: 'message', role: 'developer', content: [{ type: 'input_text', text: data.context }] }],
+      }, 10000);
+      log(`injected task context (${data.context.length} chars) via thread/inject_items`);
+    }
+  } catch (e) { log(`task context inject skipped: ${e.message}`); }
+}
+
 async function startTurn(text, attachments = []) {
   if (!meta.threadId) throw new Error('No threadId available for turn/start');
   const input = encodeUserInput(text, attachments);
   if (!input.length) return;
+  await injectTaskContextForTurn(); // deliver task context/updates before the turn
   const resp = await request('turn/start', {
     threadId: meta.threadId,
     input,
