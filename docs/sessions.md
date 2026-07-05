@@ -210,6 +210,10 @@ A session started (or resumed) **in a task** begins with the task's context alre
 - **Claude** sessions get this through Claude Code's own SessionStart hook (registered automatically; it is a no-op for sessions not started from a VibeSpace task) — on both terminal and chat sessions, and again on every resume.
 - **Codex** has no session-start hook yet, so the context is attached to the session's first message instead (visible as a collapsible dim block in the chat).
 
+The hook is installed automatically when the server starts. To check or repair it, open **⚙ → Manage agents…** — the "VibeSpace integration" row shows the status for both CLIs with one-click Install / Remove.
+
+Agents in a task session can also **report back** with the `vibespace-task` command (the injected context teaches them): `vibespace-task progress "what I did"` adds a timestamped entry to the task's progress log, `plan-check 2` ticks a plan step, `plan-add "new step"` extends the plan, and `vibespace-task status blocked` flips the task's board status. Everything appears live in the task detail window and `TASK.md`; writes are scoped to the session's own task.
+
 VibeSpace also maintains `<contextDir>/.vibespace/TASK.md` — a generated, always-current markdown mirror of the task state that agents and humans can read from disk.
 
 ## Session status (agent-set, user-overridable)
