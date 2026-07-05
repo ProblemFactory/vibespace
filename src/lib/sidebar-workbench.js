@@ -303,6 +303,9 @@ export function installSidebarWorkbench(Sidebar) {
           this._archivedIds.delete(sk);
           const legacy = this._getLegacySessionId(s);
           if (legacy) this._archivedIds.delete(legacy);
+          this._dissolveFolderArchive(s, sk); // folder rule would re-archive it otherwise
+        } else if (this._isFolderArchived(s)) {
+          this._dissolveFolderArchive(s, sk); // archived only via folder rule → unarchive
         } else {
           this._archivedIds.add(sk);
         }
@@ -396,23 +399,33 @@ export function installSidebarWorkbench(Sidebar) {
         head.style.setProperty('--wb-proj-color', color);
         head.innerHTML = `<span class="wb-proj-dot"></span><span class="wb-proj-name">${escHtml(abbrevPath(cwd))}</span><span class="wb-zone-count">${list.length}</span>`;
         // Archive the WHOLE project in one click — the fast path for folders
-        // full of throwaway sessions (observer swarms etc.). IMPORTANT: archive
-        // EVERY session under this cwd (recent + older/history), not just the
-        // recent-zone rows shown here — otherwise the folder's older sessions
-        // stay un-archived and reappear (looked like the archive "didn't stick"
-        // after a restart re-surfaced them).
+        // full of throwaway sessions (observer swarms etc.). Archives the
+        // FOLDER itself (archivedFolders), so sessions created here LATER
+        // start archived too — per-session-only archiving let new sessions
+        // pop back unarchived (the "archive didn't stick" complaint), plus
+        // every current session under this cwd (recent + older/history).
+        // When the folder is already archived (visible via the Archived
+        // filter), the same button unarchives the whole project.
         const archAll = document.createElement('button');
         archAll.className = 'wb-proj-archive';
-        archAll.innerHTML = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h12M3 4v8a1 1 0 001 1h8a1 1 0 001-1V4"/><path d="M6.5 8h3"/></svg>';
-        const projAll = (this._allSessions || []).filter(s => (s.cwd || '(unknown)') === cwd && !this.isArchived(s));
-        const nAll = projAll.length || list.length;
-        archAll.title = `Archive all ${nAll} session${nAll === 1 ? '' : 's'} in this project`;
-        archAll.onclick = async (e) => {
-          e.stopPropagation();
-          const targets = (this._allSessions || []).filter(s => (s.cwd || '(unknown)') === cwd && !this.isArchived(s));
-          const ok = await showConfirmDialog({ title: 'Archive project', message: `Archive all ${targets.length} session${targets.length === 1 ? '' : 's'} under ${abbrevPath(cwd)}? They move to the Archived filter (nothing is deleted).`, confirmText: 'Archive all', danger: false });
-          if (ok) this.archiveSessions(targets);
-        };
+        const folderArchived = this.isFolderArchived(cwd);
+        archAll.innerHTML = folderArchived
+          ? '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h12M3 4v8a1 1 0 001 1h8a1 1 0 001-1V4"/><path d="M8 11V7M6 9l2-2 2 2"/></svg>'
+          : '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h12M3 4v8a1 1 0 001 1h8a1 1 0 001-1V4"/><path d="M6.5 8h3"/></svg>';
+        if (folderArchived) {
+          archAll.title = 'Unarchive this project (folder + all its sessions)';
+          archAll.onclick = (e) => { e.stopPropagation(); this.unarchiveProject(cwd); };
+        } else {
+          const projAll = (this._allSessions || []).filter(s => (s.cwd || '(unknown)') === cwd && !this.isArchived(s));
+          const nAll = projAll.length || list.length;
+          archAll.title = `Archive this project (${nAll} session${nAll === 1 ? '' : 's'} + future sessions here)`;
+          archAll.onclick = async (e) => {
+            e.stopPropagation();
+            const targets = (this._allSessions || []).filter(s => (s.cwd || '(unknown)') === cwd && !this.isArchived(s));
+            const ok = await showConfirmDialog({ title: 'Archive project', message: `Archive all ${targets.length} session${targets.length === 1 ? '' : 's'} under ${abbrevPath(cwd)}? New sessions in this folder will start archived too (nothing is deleted; find them under the Archived filter).`, confirmText: 'Archive all', danger: false });
+            if (ok) this.archiveProject(cwd, targets);
+          };
+        }
         head.appendChild(archAll);
         // one-click new session in this project (kept from the old folder header)
         const plus = document.createElement('button');
