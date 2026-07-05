@@ -105,55 +105,12 @@ export function installSidebarMounts(Sidebar) {
         root.appendChild(warn);
       }
 
-      // My storage (S3 bucket used as personal store + owner key for minting
-      // shares). Configured IN-APP now (env imported once, see mounts.js).
-      const card = document.createElement('div');
-      card.className = 'mounts-env-card';
-      if (d.env) {
-        card.innerHTML = `<div class="mounts-env-head"><b>My storage</b><span>${escHtml(d.env.bucket)}${d.env.prefix ? '/' + escHtml(d.env.prefix) : ''} · S3</span></div>`;
-        const btns = document.createElement('div');
-        btns.className = 'mounts-env-btns';
-        if (!d.env.configured) {
-          const add = document.createElement('button');
-          add.className = 'mounts-btn mounts-btn-primary';
-          add.textContent = 'Connect';
-          add.onclick = async () => {
-            add.disabled = true;
-            try {
-              const r = await api('/api/mounts/my-storage', { method: 'POST' });
-              await fetch(`/api/mounts/${r.id}/mount`, { method: 'POST' });
-            } catch (e) { showToast(e.message || 'Failed', { type: 'error' }); }
-            this._renderMounts();
-          };
-          btns.appendChild(add);
-        }
-        const edit = document.createElement('button');
-        edit.className = 'mounts-btn';
-        edit.textContent = 'Edit';
-        edit.onclick = () => this._showMyStorageDialog(d.env);
-        btns.appendChild(edit);
-        card.appendChild(btns);
-        if (d.env.importedFromEnv) {
-          const n = document.createElement('div');
-          n.className = 'mounts-note';
-          n.textContent = 'These settings were imported from your server configuration and can be edited here now.';
-          card.appendChild(n);
-        }
-      } else {
-        card.innerHTML = `<div class="mounts-env-head"><b>My storage</b><span>Not configured</span></div>`;
-        const cfg = document.createElement('button');
-        cfg.className = 'mounts-btn mounts-btn-primary';
-        cfg.textContent = 'Configure S3…';
-        cfg.onclick = () => this._showMyStorageDialog(null);
-        card.appendChild(cfg);
-      }
-      root.appendChild(card);
-
-      // Mounts list
+      // ONE flat list of connections (no special "My storage" slot). Each row
+      // is a connected place — S3, Drive, WebDAV, SFTP, a shared folder, etc.
       const list = document.createElement('div');
       list.className = 'mounts-list';
       if (!d.mounts.length) {
-        list.innerHTML = `<div class="mounts-empty">No storage connected yet.${d.env ? '' : ' Use “Configure S3…” above to connect your own storage, or “Import share link” to open a folder someone shared with you.'}</div>`;
+        list.innerHTML = `<div class="mounts-empty">Nothing connected yet. Click “Connect storage” below to add a cloud folder (S3, Google Drive, Nextcloud, SFTP…), or “Import share link” to open a folder someone shared with you.</div>`;
       }
       for (const m of d.mounts) list.appendChild(this._buildMountRow(m));
       root.appendChild(list);
@@ -197,16 +154,12 @@ export function installSidebarMounts(Sidebar) {
         return b;
       };
       foot.append(
+        action(MI.plus, 'Connect storage', () => this._showAddMountDialog()),
         action(MI.importL, 'Import share link', () => this._showImportShareDialog()),
         action(MI.importL, 'Import rclone config', () => this._showRcloneConfDialog()),
-        action(MI.link, 'Share a cloud folder', () => this._showMintShareDialog(d), {
-          disabled: !d.env,
-          title: d.env ? 'Create a link that lets someone else open one folder from your storage.' : 'Set up “My storage” first (Configure S3… above).',
-        }),
         action(MI.server, 'Share a local folder', () => this._showBridgeShareDialog(), {
           title: 'Create a link that lets another VibeSpace open a folder from this computer.',
         }),
-        action(MI.plus, 'Connect storage', () => this._showAddMountDialog()),
       );
       root.appendChild(foot);
       // Bridge tokens I minted (revocable)
@@ -278,6 +231,16 @@ export function installSidebarMounts(Sidebar) {
           const r = await api(`/api/mounts/${m.id}/mount`, { method: 'POST' });
           if (!r.success) throw new Error('Couldn’t connect — hover the status dot for details');
         }, 'mounts-icon-accent'));
+      }
+      // Share a folder FROM this connection — only S3 with full owner creds.
+      // Doesn't hit the network here, so it's fine to offer while unmounted.
+      if (m.canShare) {
+        const shareBtn = document.createElement('button');
+        shareBtn.className = 'mounts-icon-btn';
+        shareBtn.innerHTML = MI.link;
+        shareBtn.title = 'Share a folder from this storage (creates a link)';
+        shareBtn.onclick = (e) => { e.stopPropagation(); this._showMintShareDialog(m); };
+        actions.append(shareBtn);
       }
       actions.append(ibtn(MI.cross, 'Remove mount (nothing is deleted remotely)', async () => {
         const ok = await showConfirmDialog({ title: `Remove "${m.name}"?`, message: 'The mount record and local mountpoint go away. Nothing is deleted remotely.', confirmText: 'Remove', danger: true });
@@ -867,21 +830,6 @@ export function installSidebarMounts(Sidebar) {
       };
     },
 
-    // Configure "My storage" (the S3 bucket used as your personal store + the
-    // owner key for minting shares). Replaces VIBESPACE_S3_* env config.
-    _showMyStorageDialog(cfg) {
-      this._mountsDialog('My storage (S3)', [
-        { key: 'endpoint', label: 'Server address (endpoint)', placeholder: 'https://s3.amazonaws.com  or  https://s3.mycompany.com', value: cfg?.endpoint || '', hint: 'For Amazon S3 use https://s3.amazonaws.com; for MinIO/other providers use the link from their console.' },
-        { key: 'bucket', label: 'Bucket (storage container)', placeholder: 'my-workspace', value: cfg?.bucket || '', hint: 'The container name from your provider’s console.' },
-        { key: 'prefix', label: 'Subfolder (optional)', placeholder: 'me', value: cfg?.prefix || '', hint: 'Limit to one folder inside the bucket. Blank = whole bucket.' },
-        { key: 'accessKey', label: 'Access key', value: cfg?.accessKey || '', hint: 'From your provider’s “Access Keys” / API credentials page.' },
-        { key: 'secretKey', label: cfg ? 'Secret key (blank = keep current)' : 'Secret key', type: 'password' },
-      ], cfg ? 'Save' : 'Configure', async (v, { close }) => {
-        await api('/api/mounts/my-storage-config', { method: 'PUT', body: JSON.stringify(v), headers: { 'Content-Type': 'application/json' } });
-        close(); showToast('My storage saved'); this._renderMounts();
-      });
-    },
-
     // Mint a scoped WebDAV mount token so another VibeSpace can mount a folder
     // of THIS instance (the "VibeSpace互挂" bridge).
     _showBridgeShareDialog(prefillRoot) {
@@ -905,14 +853,17 @@ export function installSidebarMounts(Sidebar) {
       });
     },
 
-    _showMintShareDialog(d) {
-      this._mountsDialog('Share a folder', [
-        { key: 'name', label: 'Share name', placeholder: 'dataset-v2' },
-        { key: 'folder', label: `Folder under ${d.env.bucket}/${d.env.prefix || ''} (empty = share everything)`, placeholder: 'datasets/v2' },
+    // Mint an S3 share link FROM a specific mount (uses that mount's own creds).
+    _showMintShareDialog(m) {
+      const under = `${m.bucket}${m.prefix ? '/' + m.prefix : ''}`;
+      const mc = this._mountsData?.mcAvailable;
+      this._mountsDialog(`Share a folder from “${m.name}”`, [
+        { key: 'name', label: 'Share name', placeholder: 'dataset-v2', value: m.name + '-share' },
+        { key: 'folder', label: `Folder under ${under} (empty = share everything)`, placeholder: 'datasets/v2' },
         { key: 'mode', label: 'Access', type: 'select', options: [['ro', 'Read-only'], ['rw', 'Read-write']] },
-        ...(d.mcAvailable ? [] : [{ key: 'expiryDays', label: 'Link expires after (days, max 7)', value: '7' }]),
+        ...(mc ? [] : [{ key: 'expiryDays', label: 'Link expires after (days, max 7)', value: '7' }]),
       ], 'Create link', async (v, { close, body, err }) => {
-        const r = await api('/api/mounts/share', { method: 'POST', body: JSON.stringify(v), headers: { 'Content-Type': 'application/json' } });
+        const r = await api(`/api/mounts/${m.id}/share`, { method: 'POST', body: JSON.stringify(v), headers: { 'Content-Type': 'application/json' } });
         // show the link with a copy button (it embeds the credential — a secret)
         body.innerHTML = `<label>Share link — treat it like a key; send over company chat only</label>
           <textarea readonly style="min-height:84px;font-size:11px">${escHtml(r.link)}</textarea>`;

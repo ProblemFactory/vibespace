@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.29.0] — 2026-07-05
+
+### Changed
+
+- **Storage is now one flat list of connections** — the special "My storage" card is gone. Every place your files live (S3, Google Drive, Nextcloud/WebDAV, SFTP, an imported share, another VibeSpace) is an equal row in one list; **Connect storage** adds any type and connects it in one step. This removes the confusing split where S3 had a privileged card while everything else lived in a separate list (and the "is my Google Drive "My storage"? how do I mount it?" confusion).
+- **Sharing moved onto the connection** — instead of a global "share" button tied to the special slot, each S3 connection that holds your own full credentials shows a **share** button on its row that mints a down-scoped link for a subfolder. It reads the credentials straight from that connection, so no separate owner-key config exists. Imported shares and non-S3 types don't show it (they can't mint).
+- Legacy `VIBESPACE_S3_*` / earlier `myStorage` config auto-migrates to a normal S3 connection named "My storage" on first boot. Verified end-to-end (mint from a row → import → read a real MinIO object).
+
 ## [2.28.7] — 2026-07-05
 
 ### Fixed

@@ -21,11 +21,15 @@ Click **Connect Google Drive** in the Add-mount dialog. VibeSpace runs the OAuth
 - **Same machine** (VibeSpace and your browser on one computer): a Google sign-in page opens, you approve, and the connection completes on its own.
 - **Remote deployment** (VibeSpace on a server): after you approve, the browser tries to reach `127.0.0.1` and shows a "can't connect" page — that's expected. Copy that page's address from the address bar and paste it into the box that appears; VibeSpace finishes the exchange. The Drive token is filled in automatically either way.
 
-## My storage
+## One flat list of connections
 
-**My storage** is an S3 bucket you designate as your personal store — it's also the owner key used to mint S3 shares. Configure it **in-app**: Storage → *Configure S3…* (or **Edit** on the card). No environment variables required.
+Storage is a single list of connected places — S3, Google Drive, Nextcloud/WebDAV, SFTP, a folder someone shared, or another VibeSpace. They're all equal; there is no special "my storage" slot. **Connect storage** adds any type (add = connect, one step). Each row is one connection: a green dot when connected, a folder button to browse it in the file explorer, and a disconnect/remove button.
 
-> Legacy `VIBESPACE_S3_*` env vars are still honored: on first boot with no in-app config, they're imported once into the encrypted config and the card is marked "imported from env". After that the in-app config is canonical (edit/remove it in the UI; it rides in config export/import). You can drop the env vars once imported.
+> Team deployments can still set `VIBESPACE_S3_*` — on first boot it's imported once as a normal S3 connection named "My storage" (auto-connected). After that it's just another row you can edit or remove; the env var isn't needed again.
+
+## Sharing a folder from your S3 storage
+
+Any S3 connection that holds your own full credentials shows a **share** button on its row: it mints a down-scoped link for a subfolder (see below). Imported shares and non-S3 connections can't mint (only full-credential S3 can), so they don't show it.
 
 ## Mount mechanics
 
@@ -37,7 +41,7 @@ Click **Connect Google Drive** in the Add-mount dialog. VibeSpace runs the OAuth
 
 ## Sharing a folder
 
-**Share a folder** mints a **down-scoped credential** for any folder under your prefix using your own key:
+The **share** button on an S3 connection row mints a **down-scoped credential** for a subfolder, using that connection's own key:
 
 - With `mc` installed (bundled in the Docker image): a permanent MinIO **service account** restricted to that folder — revoke = delete, from the "Shares I created" list.
 - Without `mc`: **STS AssumeRole** temporary credentials (≤7 days; the link records the expiry).

@@ -52,18 +52,27 @@ class MountManager {
   // no myStorage config exists yet; afterwards the in-app config is canonical
   // (edit/remove in the UI, included in export/import).
   _maybeImportEnvStorage() {
-    if (this._state.myStorage) return;
+    // One-time migration of VIBESPACE_S3_* → a normal S3 mount (auto-mounted).
+    // Storage is now ONE flat list of connections — no special "My storage"
+    // slot. Legacy state.myStorage (from earlier builds) also migrates here.
+    if (this._state._envImported) return;
     const e = process.env;
-    if (!e.VIBESPACE_S3_ENDPOINT || !e.VIBESPACE_S3_BUCKET || !e.VIBESPACE_S3_ACCESS_KEY) return;
-    this._state.myStorage = {
-      endpoint: e.VIBESPACE_S3_ENDPOINT,
-      bucket: e.VIBESPACE_S3_BUCKET,
-      prefix: e.VIBESPACE_S3_PREFIX || '',
-      accessKey: e.VIBESPACE_S3_ACCESS_KEY,
-      secretKeyEnc: this._enc(e.VIBESPACE_S3_SECRET_KEY || ''),
-      importedFromEnv: true,
-      updatedAt: Date.now(),
-    };
+    const legacy = this._state.myStorage; // earlier-build config
+    const src = legacy
+      ? { endpoint: legacy.endpoint, bucket: legacy.bucket, prefix: legacy.prefix || '', accessKey: legacy.accessKey, secretKey: this._dec(legacy.secretKeyEnc) }
+      : (e.VIBESPACE_S3_ENDPOINT && e.VIBESPACE_S3_BUCKET && e.VIBESPACE_S3_ACCESS_KEY)
+        ? { endpoint: e.VIBESPACE_S3_ENDPOINT, bucket: e.VIBESPACE_S3_BUCKET, prefix: e.VIBESPACE_S3_PREFIX || '', accessKey: e.VIBESPACE_S3_ACCESS_KEY, secretKey: e.VIBESPACE_S3_SECRET_KEY || '' }
+        : null;
+    this._state._envImported = true;
+    if (!src) { this._save(); return; }
+    if (!this._state.mounts.some(m => m.origin === 'my-storage')) {
+      try {
+        const id = this.add({ type: 's3', origin: 'my-storage', name: 'My storage', mode: 'rw', ...src });
+        const m = this._state.mounts.find(x => x.id === id);
+        if (m) m.desired = 'mounted'; // restore() connects it on boot
+      } catch {}
+    }
+    delete this._state.myStorage;
     this._save();
   }
 
@@ -308,6 +317,7 @@ class MountManager {
       id: m.id, name: m.name, type: m.type || 's3', origin: m.origin, mode: m.mode,
       endpoint: m.endpoint, bucket: m.bucket, prefix: m.prefix,
       source: this._sourceLabel(m),
+      canShare: this.canShareFromMount(m),
       path: this.pathOf(m), desired: m.desired, expiresAt: m.expiresAt || null,
       mounted: this.isMounted(m), error: this._errors.get(m.id) || null,
       createdAt: m.createdAt,
@@ -799,6 +809,23 @@ class MountManager {
     this._save();
     const link = this.buildShareLink({ ...share, secretKey: cred.secretKey, sessionToken: cred.sessionToken });
     return { share, link };
+  }
+
+  // Which mounts can mint an S3 share: full-credential S3 mounts (not an
+  // imported down-scoped share, not a session-token STS credential).
+  canShareFromMount(m) {
+    return (m.type || 's3') === 's3' && !!m.secretKeyEnc && !m.sessionTokenEnc && m.origin !== 'imported';
+  }
+
+  async mintShareFromMount(mountId, { folder, mode, name, expiryDays }) {
+    const m = this._get(mountId);
+    if (!this.canShareFromMount(m)) throw new Error('This connection can’t create share links (only your own S3 storage can).');
+    const prefix = [m.prefix, folder].filter(Boolean).join('/').replace(/\/+/g, '/').replace(/^\/+|\/+$/g, '');
+    return this.mintShare({
+      name: name || m.name, endpoint: m.endpoint, bucket: m.bucket, prefix,
+      mode: mode === 'rw' ? 'rw' : 'ro',
+      ownerAccessKey: m.accessKey, ownerSecretKey: this._dec(m.secretKeyEnc), expiryDays,
+    });
   }
 
   _mcEnv(endpoint, ak, sk) {
