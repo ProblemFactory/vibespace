@@ -192,6 +192,8 @@ Manage: right-click a task header → **Linked folders**, or the detail window (
 
 The details button (or context menu → Details…) opens a per-task window: title, status dropdown, **objective** (shared definition of the goal), **plan** checklist, **progress** log (timestamped notes), bound sessions (with unbind), auto-include folders, **context folder** (the task's shared context directory — see below), and a board color. Everything saves immediately and syncs to all clients.
 
+The detail window can also **export** the task to a committable markdown file ("Repo file" → Export), and the board's **Import…** card reads such a file back in — so tasks can live in a repo and travel between VibeSpace instances.
+
 ### Task header actions
 
 - **▶** — Resume/attach all sessions in the task
@@ -207,8 +209,12 @@ When a bound session's agent finishes and waits for input (the window-title blin
 
 A session started (or resumed) **in a task** begins with the task's context already in the agent's head: the task state (objective, plan, recent progress), an index of the files in the context folder (the agent reads what it needs with its own tools), and the working rules — never modify `<contextDir>/.vibespace/` (it's generated; `TASK.md` there always mirrors the task state), put shared artifacts in the context folder, and report session state with `vibespace-status`.
 
-- **Claude** sessions get this through Claude Code's own SessionStart hook (registered automatically; it is a no-op for sessions not started from a VibeSpace task) — on both terminal and chat sessions, and again on every resume.
-- **Codex** has no session-start hook yet, so the context is attached to the session's first message instead (visible as a collapsible dim block in the chat).
+It is delivered **only through the harness's own hooks** — VibeSpace never rewrites your message to smuggle it in. `vibespace-hook.mjs` is registered automatically for the `SessionStart` and `UserPromptSubmit` events (a no-op for any session not started from a task).
+
+- **Claude** sessions (terminal and chat, local and on remote hosts, and again on every resume) receive the context fully.
+- **Codex** chat sessions do not yet receive auto-injected context: Codex's app-server mode runs the hook but does not inject its output. The hook is registered and ready for when Codex supports it; meanwhile a Codex agent can still read its task with `vibespace-task show`.
+
+For **remote** sessions, VibeSpace distributes the hook and the task tools to `~/.vibespace/bin` on the remote host and opens an ssh reverse tunnel so they reach back to VibeSpace — so a remote Claude session gets the same task context as a local one.
 
 The hook is installed automatically when the server starts. To check or repair it, open **⚙ → Manage agents…** — the "VibeSpace integration" row shows the status for both CLIs with one-click Install / Remove.
 

@@ -255,6 +255,35 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
     swatchRow.appendChild(noColor);
     colorSec.appendChild(swatchRow);
 
+    // ── Repo file (P4): export this task to a committable markdown file ──
+    const repoSec = section('Repo file', 'export the task as a committable markdown file (frontmatter + objective + plan)');
+    const repoWrap = document.createElement('div');
+    repoWrap.className = 'task-detail-acwrap task-detail-ctxrow';
+    const repoInput = document.createElement('input');
+    repoInput.className = 'task-detail-input';
+    repoInput.placeholder = 'Absolute path for the .md file';
+    repoInput.value = task.contextDir ? `${task.contextDir}/${task.id}.md` : '';
+    const repoDrop = document.createElement('div');
+    repoDrop.className = 'autocomplete-dropdown hidden';
+    setupDirAutocomplete(repoInput, repoDrop);
+    const exportBtn = document.createElement('button');
+    exportBtn.className = 'task-detail-btn';
+    exportBtn.textContent = 'Export';
+    exportBtn.onclick = async () => {
+      const p = repoInput.value.trim();
+      if (!p) { showToast('Enter a file path first', { type: 'error' }); return; }
+      try {
+        const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/export`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: p }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (res.ok) showToast('Exported to ' + d.path);
+        else showToast(d.error || 'Export failed', { type: 'error' });
+      } catch { showToast('Export failed — server unreachable', { type: 'error' }); }
+    };
+    repoWrap.append(repoInput, repoDrop, exportBtn);
+    repoSec.appendChild(repoWrap);
+
     // ── Danger ──
     const del = document.createElement('button');
     del.className = 'task-detail-btn task-detail-delete';

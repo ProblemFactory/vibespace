@@ -364,6 +364,135 @@ class TaskManager {
     return { ...t };
   }
 
+  // ── Repo task files (P4): a task ⇄ a self-contained committable markdown
+  // file with YAML frontmatter for the structured fields + human body. The
+  // structured store stays authoritative; the file is a projection (export)
+  // or a seed (import), never a live-parsed source of truth. ──
+
+  renderRepoFile(t) {
+    const esc = (v) => (v == null ? '' : String(v));
+    const fm = [
+      '---',
+      'vibespace_task: ' + t.id,
+      'title: ' + JSON.stringify(t.title),
+      'kind: ' + t.kind,
+      'status: ' + t.status,
+      'color: ' + (t.color ? JSON.stringify(t.color) : 'null'),
+      '---',
+      '',
+    ];
+    const body = [
+      '# ' + esc(t.title),
+      '',
+      '## Objective',
+      '',
+      (t.objective && t.objective.trim()) || '_(none)_',
+    ];
+    if (t.plan?.length) {
+      body.push('', '## Plan', '');
+      for (const p of t.plan) body.push(`- [${p.done ? 'x' : ' '}] ${p.text}`);
+    }
+    const prog = (t.progress || []).slice(-30);
+    if (prog.length) {
+      body.push('', '## Progress', '');
+      for (const p of prog) body.push(`- ${new Date(p.at).toISOString().slice(0, 16).replace('T', ' ')} ${p.note}${p.session ? ` _(${p.session})_` : ''}`);
+    }
+    body.push('');
+    return fm.join('\n') + body.join('\n');
+  }
+
+  // Write a task to an absolute file path (creating parent dirs). Returns path.
+  exportToFile(id, absPath) {
+    const t = this.get(id);
+    if (typeof absPath !== 'string' || !path.isAbsolute(absPath)) throw new Error('an absolute file path is required');
+    const dir = path.dirname(absPath);
+    fs.mkdirSync(dir, { recursive: true });
+    const tmp = absPath + '.tmp';
+    fs.writeFileSync(tmp, this.renderRepoFile(t));
+    fs.renameSync(tmp, absPath);
+    return absPath;
+  }
+
+  // Parse a repo task file (frontmatter is authoritative for id/title/kind/
+  // status/color; body parsed leniently for objective + plan). Creates a new
+  // task or updates the existing one with the same id. One-shot at import —
+  // after this the structured store is the truth (never re-parsed live).
+  importFromFile(absPath) {
+    if (typeof absPath !== 'string' || !path.isAbsolute(absPath)) throw new Error('an absolute file path is required');
+    let text;
+    try { text = fs.readFileSync(absPath, 'utf-8'); } catch { throw new Error('cannot read ' + absPath); }
+    text = text.replace(/\r\n/g, '\n'); // tolerate CRLF (Windows / git autocrlf checkouts)
+    const m = text.match(/^---\n([\s\S]*?)\n---\n?/);
+    if (!m) throw new Error('not a VibeSpace task file (missing frontmatter)');
+    const fm = {};
+    for (const line of m[1].split('\n')) {
+      const i = line.indexOf(':');
+      if (i < 0) continue;
+      const key = line.slice(0, i).trim();
+      let val = line.slice(i + 1).trim();
+      if (val.startsWith('"')) { try { val = JSON.parse(val); } catch { } }
+      fm[key] = val;
+    }
+    const id = fm.vibespace_task;
+    if (typeof id !== 'string' || !/^T-[\w-]{1,60}$/.test(id)) throw new Error('missing/invalid vibespace_task id in frontmatter');
+    const body = text.slice(m[0].length);
+    // Objective = text under "## Objective". Stop only at a KNOWN next section
+    // (Plan/Progress) or EOF, so an objective that itself contains a markdown
+    // heading (e.g. "## Constraints") is preserved, not truncated.
+    let objective = '';
+    const objM = body.match(/##\s+Objective\s*\n([\s\S]*?)(?=\n##\s+(?:Plan|Progress)\b|$)/i);
+    if (objM) { objective = objM[1].trim(); if (objective === '_(none)_') objective = ''; }
+    // Plan = checklist lines under "## Plan"
+    const plan = [];
+    const planM = body.match(/##\s+Plan\s*\n([\s\S]*?)(?=\n##\s+Progress\b|$)/i);
+    if (planM) {
+      for (const line of planM[1].split('\n')) {
+        const pm = line.match(/^\s*-\s*\[([ xX])\]\s+(.+)$/);
+        if (pm) plan.push({ text: pm[2].trim().slice(0, CAPS.planItem), done: pm[1].toLowerCase() === 'x' });
+      }
+    }
+    // Progress = "- <ISO date> <note> _(session)_" lines under "## Progress".
+    // Round-trip fidelity: on a machine without the task yet, the FILE is the
+    // only source of the progress log, so parse it rather than dropping it.
+    const parsedProgress = [];
+    const progM = body.match(/##\s+Progress\s*\n([\s\S]*?)(?=\n##\s|\n#\s|$)/i);
+    if (progM) {
+      for (const line of progM[1].split('\n')) {
+        const gm = line.match(/^\s*-\s+(\d{4}-\d\d-\d\d[ T]\d\d:\d\d)\s+(.+)$/);
+        if (!gm) continue;
+        let note = gm[2].trim();
+        let session = null;
+        const sm = note.match(/\s*_\(([^)]+)\)_\s*$/);
+        if (sm) { session = sm[1]; note = note.slice(0, sm.index).trim(); }
+        const at = Date.parse(gm[1].replace(' ', 'T') + 'Z');
+        parsedProgress.push({ at: Number.isNaN(at) ? Date.now() : at, note: note.slice(0, CAPS.note), session });
+      }
+    }
+    const now = Date.now();
+    const existing = this._state.tasks[id];
+    this._state.tasks[id] = {
+      id,
+      title: String(fm.title || existing?.title || id).slice(0, CAPS.title),
+      kind: KINDS.includes(fm.kind) ? fm.kind : (existing?.kind || 'task'),
+      status: STATUSES.includes(fm.status) ? fm.status : (existing?.status || 'active'),
+      attention: existing?.attention || null,
+      objective: objective.slice(0, CAPS.objective),
+      plan: plan.slice(0, CAPS.planItems),
+      // prefer the store's live log if the task already exists (it's fuller —
+      // the file caps at the last 30); otherwise seed from the file.
+      progress: (existing?.progress?.length ? existing.progress : parsedProgress).slice(-500),
+      sessions: existing?.sessions || [],
+      folders: existing?.folders || [],
+      contextDir: existing?.contextDir || null,
+      color: (typeof fm.color === 'string' && fm.color !== 'null' && !/[{};]/.test(fm.color)) ? fm.color.slice(0, 40) : (existing?.color || null),
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+    };
+    this._save();
+    this._notify();
+    return { ...this._state.tasks[id] };
+  }
+
   // ── Config transfer (same contract as hosts/mounts) ──
   exportBundle() { return { version: 1, tasks: Object.values(this._state.tasks) }; }
 
