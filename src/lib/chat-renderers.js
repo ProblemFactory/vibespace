@@ -125,7 +125,7 @@ class ChatRenderers {
 
     // Detect system notifications: command tags, meta directives, reminders
     const rawText = content.map(b => b.text || '').join('');
-    const isNotification = /^<(command-name|local-command|task-notification|system-reminder)/.test(rawText.trim())
+    const isNotification = /^<(command-name|local-command|task-notification|system-reminder|vibespace-task-context)/.test(rawText.trim())
       || /^A session-scoped Stop hook is now active/.test(rawText.trim())
       || /^Stop hook feedback:/.test(rawText.trim());
     if (isNotification) {

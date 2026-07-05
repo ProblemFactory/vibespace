@@ -980,6 +980,7 @@ function restoreSessions() {
       _permissionMode: meta.permissionMode || null,
       _effort: meta.effort || null,
       agentToken: meta.agentToken || null, // vibespace-status auth survives restarts
+      _taskId: meta.taskId || null, // context task (codex re-injects on next message after restart — idempotent)
       sockName: sockFile,
       socketPath,
       buffer: savedBuffer,
@@ -1109,6 +1110,101 @@ main().catch((e) => { console.error('vibespace-status:', e.message); process.exi
   fs.writeFileSync(STATUS_CMD, script, { mode: 0o755 });
 }
 createStatusHelper();
+
+// vibespace-hook — dual-harness SessionStart hook (task context injection, P2).
+// Registered in ~/.claude/settings.json AND ~/.codex/hooks.json (same schema,
+// proven by the org's claude-task-tracker plugin). GATED on env: sessions not
+// spawned by VibeSpace with a task have no VIBESPACE_TASK_ID → instant no-op,
+// so global registration never affects other sessions. Output contract copied
+// from the live-verified plugin: top-level {additionalContext} JSON on stdout.
+const HOOK_CMD = path.join(EDITOR_DIR, 'vibespace-hook.mjs');
+function createHookHelper() {
+  ensureDir(EDITOR_DIR);
+  const script = `#!/usr/bin/env node
+// vibespace-hook — injects VibeSpace task context at SessionStart.
+// No-op unless the session was spawned by VibeSpace with a bound task.
+let buf = '';
+let ran = false;
+async function run(input) {
+  if (ran) return;
+  ran = true;
+  try {
+    if (input.hook_event_name !== 'SessionStart') return process.exit(0);
+    const api = process.env.VIBESPACE_API;
+    const token = process.env.VIBESPACE_SESSION_TOKEN;
+    const taskId = process.env.VIBESPACE_TASK_ID;
+    if (!api || !token || !taskId) return process.exit(0);
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 3000);
+    const res = await fetch(api + '/api/agent/task-context?taskId=' + encodeURIComponent(taskId), {
+      headers: { Authorization: 'Bearer ' + token }, signal: ctl.signal,
+    });
+    clearTimeout(timer);
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.context) {
+        // Claude Code (verified against 2.1.201 binary: it even suggests "Did
+        // you mean hookSpecificOutput") requires the nested shape; Codex's
+        // hook schema descends from the same contract but the org's plugin
+        // uses top-level additionalContext — emit BOTH keys, each harness
+        // reads the one it knows.
+        process.stdout.write(JSON.stringify({
+          hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: data.context },
+          additionalContext: data.context,
+        }));
+      }
+    }
+  } catch { }
+  process.exit(0);
+}
+process.stdin.setEncoding('utf-8');
+process.stdin.on('data', (c) => { buf += c; try { run(JSON.parse(buf)); } catch { } });
+process.stdin.on('end', () => { try { run(JSON.parse(buf)); } catch { } if (!ran) process.exit(0); });
+setTimeout(() => process.exit(0), 8000); // never hang a session start
+`;
+  fs.writeFileSync(HOOK_CMD, script, { mode: 0o755 });
+}
+createHookHelper();
+
+// Idempotent, NON-DESTRUCTIVE hook registration for both harnesses: only our
+// own entry (matched by 'vibespace-hook.mjs') is ever added or updated; every
+// other key/entry (e.g. the task-tracker plugin's hooks) is left untouched.
+function ensureAgentHooks() {
+  const hookCmd = `node ${HOOK_CMD}`;
+  const patchFile = (file, wrap) => {
+    let root = null;
+    try { root = JSON.parse(fs.readFileSync(file, 'utf-8')); } catch { root = null; }
+    if (!root) {
+      if (!wrap) return; // ~/.claude/settings.json missing/unparseable — don't invent it
+      root = {};
+    }
+    if (!root.hooks || typeof root.hooks !== 'object') root.hooks = {};
+    if (!Array.isArray(root.hooks.SessionStart)) root.hooks.SessionStart = [];
+    let changed = false;
+    let ours = null;
+    for (const group of root.hooks.SessionStart) {
+      ours = (group.hooks || []).find(h => typeof h.command === 'string' && h.command.includes('vibespace-hook.mjs'));
+      if (ours) break;
+    }
+    if (ours) {
+      if (ours.command !== hookCmd) { ours.command = hookCmd; changed = true; } // path moved
+    } else {
+      root.hooks.SessionStart.push({ hooks: [{ type: 'command', command: hookCmd, timeout: 10 }] });
+      changed = true;
+    }
+    if (changed) {
+      const tmp = file + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(root, null, 2) + '\n');
+      fs.renameSync(tmp, file);
+      console.log(`Registered VibeSpace SessionStart hook in ${file}`);
+    }
+  };
+  try { patchFile(path.join(os.homedir(), '.claude', 'settings.json'), false); }
+  catch (e) { console.log('Hook registration (claude) skipped:', e.message); }
+  try { patchFile(path.join(os.homedir(), '.codex', 'hooks.json'), true); }
+  catch (e) { console.log('Hook registration (codex) skipped:', e.message); }
+}
+ensureAgentHooks();
 
 // ── File System API (extracted to src/routes/files.js) ──
 app.locals.xEnv = X_ENV;
@@ -1255,6 +1351,18 @@ app.post('/api/agent/session-status', (req, res) => {
       : sessionStatus.setByAgent(key, { state, urgency, reason });
     res.json({ success: true, sessionKey: key, status: rec });
   } catch (e) { res.status(400).json({ error: e.message }); }
+});
+// SessionStart hook payload (P2 context injection): rendered task state +
+// context folder file index + the rules. Bearer = per-session token, same
+// auth story as /api/agent/session-status.
+app.get('/api/agent/task-context', (req, res) => {
+  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (!token || !token.startsWith('vsst_')) return res.status(401).json({ error: 'missing session token' });
+  let found = false;
+  for (const [, s] of activeSessions) { if (s.agentToken === token) { found = true; break; } }
+  if (!found) return res.status(401).json({ error: 'unknown session token' });
+  try { res.json({ success: true, context: tasks.renderContext(String(req.query.taskId || '')) }); }
+  catch (e) { res.status(404).json({ error: e.message }); }
 });
 
 // ── Hosts (ssh host registry for remote sessions — collaboration P2) ──
@@ -1835,7 +1943,7 @@ registerWsHandler(wss, {
   SOCKETS_DIR, BUFFERS_DIR, META_DIR, PTY_WRAPPER, CHAT_WRAPPER,
   NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, CODEX_CMD, EDITOR_CMD, PORT, X_ENV,
   adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
-  sessionStatus, sessionStatusKey,
+  sessionStatus, sessionStatusKey, getTasks: () => tasks,
 });
 
 function broadcastActiveSessions() {
