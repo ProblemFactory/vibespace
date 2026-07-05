@@ -1,6 +1,6 @@
 # Task System — Design
 
-Status: **DESIGN** (2026-07-05). Supersedes the shelved walter `feat/task-centric` approach (see below). This document is the agreed design before implementation.
+Status: **P1 SHIPPED** (2.30.0, 2026-07-05) — TaskManager + tasks.json + Groups migration + board + bind-as-tag + detail window + idle attention + contextDir designation. P2 (hook injection) / P3 (vibespace-task CLI) / P4 (repo sync) not started. Design agreed 2026-07-05; supersedes the shelved walter `feat/task-centric` approach (see below).
 
 ## 1. Vision & the hard boundary
 

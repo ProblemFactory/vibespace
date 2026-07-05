@@ -65,7 +65,7 @@ Example: `PORT=8080 HOST=127.0.0.1 CODEX_CMD=/usr/local/bin/codex npm start`
 
 The UI has four main areas:
 
-1. **Sidebar** (left) — Session list grouped by working directory. Star, archive, rename, and organize sessions into groups.
+1. **Sidebar** (left) — Session list grouped by working directory. Star, archive, rename, and organize sessions into tasks.
 2. **Workspace** (center) — Tiling window manager with draggable, resizable windows for terminals, chat views, file explorers, editors, and browsers.
 3. **Toolbar** (top of workspace) — Theme selector, layout presets, grid controls, new session, settings.
 4. **Taskbar** (bottom) — Window tabs, virtual desktop previews, backend usage pies, window count. Drag the top edge to resize.
@@ -113,5 +113,5 @@ Or re-run the one-line install command.
 - [Chat Mode](chat-mode.md) — Structured messages, tool visualization, permissions, subagents
 - [Terminal Management](terminal.md) — Session persistence, multi-device sync, clipboard paste
 - [Window Manager](window-manager.md) — Grid layouts, command mode, presets
-- [Session Management](sessions.md) — Groups, star/archive, filters
+- [Session Management](sessions.md) — Tasks, star/archive, filters
 - [Keyboard Shortcuts](keyboard-shortcuts.md) — Complete reference
