@@ -192,6 +192,7 @@ export function installSidebarMounts(Sidebar) {
       };
       foot.append(
         action(MI.importL, 'Import share link', () => this._showImportShareDialog()),
+        action(MI.importL, 'Import rclone config', () => this._showRcloneConfDialog()),
         action(MI.link, 'Share S3 folder', () => this._showMintShareDialog(d), {
           disabled: !d.env,
           title: d.env ? 'Mint a down-scoped S3 credential for a folder under your prefix' : 'Requires My storage (S3) configured',
@@ -563,6 +564,85 @@ export function installSidebarMounts(Sidebar) {
       const ctx = { close, inputs, body, applyConds: fields.some(f => f.when) ? applyConds : () => {} };
       this._lastMountsDialog = ctx;
       return ctx;
+    },
+
+    _showRcloneConfDialog() {
+      document.getElementById('mounts-dialog-overlay')?.remove();
+      const overlay = document.createElement('div');
+      overlay.id = 'mounts-dialog-overlay';
+      overlay.className = 'dialog-overlay';
+      overlay.style.zIndex = '99998';
+      const dialog = document.createElement('div');
+      dialog.className = 'dialog';
+      dialog.innerHTML = `<div class="dialog-header"><h3>Import rclone config</h3><button class="dialog-close">✕</button></div>`;
+      const body = document.createElement('div');
+      body.className = 'dialog-body';
+      const hint = document.createElement('div');
+      hint.className = 'mounts-field-hint';
+      hint.textContent = 'Paste the contents of your rclone.conf (from `rclone config file` — usually ~/.config/rclone/rclone.conf). Every remote inside it becomes a mount you can pick.';
+      const ta = document.createElement('textarea');
+      ta.placeholder = '[gdrive]\ntype = drive\ntoken = {…}\n\n[b2]\ntype = b2\naccount = …\nkey = …';
+      ta.style.minHeight = '120px'; ta.style.fontSize = '11px'; ta.style.fontFamily = 'monospace';
+      const parseBtn = document.createElement('button');
+      parseBtn.className = 'btn-create';
+      parseBtn.textContent = 'Read remotes';
+      const list = document.createElement('div');
+      list.className = 'mounts-conf-list';
+      const err = document.createElement('div');
+      err.className = 'cfg-err';
+      body.append(hint, ta, parseBtn, list, err);
+      dialog.appendChild(body);
+      overlay.appendChild(dialog);
+      document.body.appendChild(overlay);
+      const close = () => overlay.remove();
+      dialog.querySelector('.dialog-close').onclick = close;
+      overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) close(); });
+
+      let confText = '';
+      parseBtn.onclick = async () => {
+        err.textContent = ''; list.innerHTML = '';
+        confText = ta.value;
+        let d;
+        try { d = await api('/api/mounts/rclone-conf/parse', { method: 'POST', body: JSON.stringify({ text: confText }), headers: { 'Content-Type': 'application/json' } }); }
+        catch (e) { err.textContent = e.message || 'Parse failed'; return; }
+        if (!d.remotes?.length) { err.textContent = 'No remotes found in that config.'; return; }
+        const checks = [];
+        for (const r of d.remotes) {
+          const row = document.createElement('label');
+          row.className = 'mounts-conf-row';
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.checked = !r.wraps;
+          cb.disabled = r.wraps;
+          cb.dataset.name = r.name;
+          checks.push(cb);
+          const txt = document.createElement('span');
+          txt.innerHTML = `<b>${escHtml(r.name)}</b> <span class="mounts-typetag">${escHtml(r.type)}</span>` +
+            (r.wraps ? ' <span class="mounts-field-hint" style="display:inline">references another remote — not supported</span>' : '');
+          row.append(cb, txt);
+          list.appendChild(row);
+        }
+        // mode + import button
+        const modeWrap = document.createElement('div');
+        modeWrap.className = 'mounts-conf-mode';
+        modeWrap.innerHTML = '<label>Mount as</label>';
+        const modeSel = document.createElement('select');
+        for (const [v, l] of [['rw', 'Read-write'], ['ro', 'Read-only']]) { const o = document.createElement('option'); o.value = v; o.textContent = l; modeSel.appendChild(o); }
+        modeWrap.appendChild(modeSel);
+        const importBtn = document.createElement('button');
+        importBtn.className = 'btn-create';
+        importBtn.textContent = 'Import & mount selected';
+        importBtn.onclick = async () => {
+          const names = checks.filter(c => c.checked).map(c => c.dataset.name);
+          if (!names.length) { err.textContent = 'Pick at least one remote.'; return; }
+          importBtn.disabled = true; importBtn.textContent = 'Importing…';
+          try {
+            const r = await api('/api/mounts/rclone-conf/import', { method: 'POST', body: JSON.stringify({ text: confText, names, mode: modeSel.value }), headers: { 'Content-Type': 'application/json' } });
+            close(); showToast(`Imported ${r.added.length} remote${r.added.length === 1 ? '' : 's'}`); this._renderMounts();
+          } catch (e) { err.textContent = e.message || 'Import failed'; importBtn.disabled = false; importBtn.textContent = 'Import & mount selected'; }
+        };
+        list.append(modeWrap, importBtn);
+      };
     },
 
     _showImportShareDialog() {

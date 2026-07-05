@@ -1989,3 +1989,8 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 .mounts-field-hint { font-size: 10px; color: var(--text-dim); margin: -2px 0 6px; line-height: 1.4; }
 .mounts-drive-connect { margin-bottom: 6px; display: flex; flex-direction: column; gap: 4px; }
 .mounts-rclone-warn { border-color: var(--yellow, #b58900); }
+
+.mounts-conf-list { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.mounts-conf-row { display: flex; align-items: center; gap: 8px; font-size: 12px; cursor: pointer; }
+.mounts-conf-row input[disabled] + span { opacity: 0.5; }
+.mounts-conf-mode { display: flex; align-items: center; gap: 8px; margin: 10px 0 6px; }
