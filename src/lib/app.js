@@ -467,6 +467,56 @@ class App {
         row.append(left, actions);
         body.appendChild(row);
       }
+      // ── VibeSpace integration (task context hook) — local machine only.
+      // Auto-installed at server start; this row makes the state VISIBLE and
+      // repairable for non-engineers (auto-install can fail silently if e.g.
+      // the CLI's settings file doesn't exist yet).
+      if (!selectedHost) {
+        let hs = null;
+        try { hs = await fetchJson('/api/agent-hooks'); } catch {}
+        if (hs) {
+          const row = document.createElement('div'); row.className = 'ob-backend';
+          const left = document.createElement('div');
+          const stateOf = (k, label) => {
+            const st = hs[k] || {};
+            if (st.installed) return `<span class="ob-ok">✓ ${label}</span>`;
+            if (st.stale) return `<span class="ob-warn">${label}: needs update</span>`;
+            if (st.parseError) return `<span class="ob-bad">${label}: config unreadable</span>`;
+            if (!st.fileExists) return `<span class="ob-warn">${label}: run the CLI once first</span>`;
+            return `<span class="ob-warn">${label}: not installed</span>`;
+          };
+          const allGood = hs.claude?.installed && hs.codex?.installed;
+          left.innerHTML = `<b>VibeSpace integration</b><div>${stateOf('claude', 'Claude')} &nbsp; ${stateOf('codex', 'Codex')}</div>`
+            + `<div class="agents-note" style="margin:4px 0 0">Lets sessions started from a task automatically receive the task's context (goal, plan, shared files).</div>`;
+          const actions = document.createElement('div'); actions.className = 'agent-actions';
+          const installBtn = document.createElement('button');
+          installBtn.className = 'agent-btn' + (allGood ? '' : ' primary');
+          installBtn.textContent = allGood ? 'Reinstall' : 'Install';
+          installBtn.onclick = async () => {
+            installBtn.disabled = true;
+            try {
+              const r = await fetchJson('/api/agent-hooks/install', { method: 'POST' });
+              const errs = Object.entries(r?.results || {}).filter(([, v]) => !v.ok);
+              if (errs.length) showToast(errs.map(([k, v]) => `${k}: ${v.error}`).join('; '), { type: 'error' });
+              else showToast('Task context hook installed');
+            } catch { showToast('Install failed', { type: 'error' }); }
+            refresh();
+          };
+          actions.appendChild(installBtn);
+          if (hs.claude?.installed || hs.codex?.installed || hs.claude?.stale || hs.codex?.stale) {
+            const rmBtn = document.createElement('button'); rmBtn.className = 'agent-btn'; rmBtn.textContent = 'Remove';
+            rmBtn.title = 'Unregister the hook from both CLIs (sessions stop receiving task context)';
+            rmBtn.onclick = async () => {
+              rmBtn.disabled = true;
+              try { await fetchJson('/api/agent-hooks/uninstall', { method: 'POST' }); showToast('Hook removed'); } catch {}
+              refresh();
+            };
+            actions.appendChild(rmBtn);
+          }
+          row.append(left, actions);
+          body.appendChild(row);
+        }
+      }
       const foot = document.createElement('div');
       foot.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:10px;';
       const note = document.createElement('p'); note.className = 'agents-note';
