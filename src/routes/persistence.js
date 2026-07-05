@@ -27,7 +27,7 @@ function writeJsonAtomic(file, data) {
 }
 
 /** Setup persistence routes. Requires { dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth } context. */
-function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getHosts, getMounts }) {
+function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getHosts, getMounts, getTasks }) {
   const broadcast = (msg) => {
     const json = JSON.stringify(msg);
     wss.clients.forEach(client => {
@@ -122,6 +122,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   router.readLayouts = readLayouts;
   router.writeLayouts = writeLayouts;
   router.flushLayouts = flushLayouts;
+  router.readUserState = () => readUserState(); // TaskManager one-time Groups migration
 
   // ── Bookmarks ──
   const BOOKMARKS_FILE = path.join(dataDir, 'bookmarks.json');
@@ -444,6 +445,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
           groups: Object.keys(state?.sessionGroups || {}).length,
         },
         bookmarks: { count: (bookmarks || []).length },
+        tasks: { count: (getTasks?.()?.list?.() || []).length },
       },
       sensitive: {
         vsPassword: !!auth?.enabled,
@@ -468,6 +470,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     take('layouts', readLayouts);
     take('userState', readUserState);
     take('bookmarks', readBookmarks);
+    take('tasks', () => getTasks?.()?.exportBundle?.() || null);
     if (sections.includes('clientPrefs') && clientPrefs && typeof clientPrefs === 'object') {
       file.sections.clientPrefs = clientPrefs;
     }
@@ -521,6 +524,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     apply('layouts', (d) => { if (d && typeof d === 'object') writeLayouts(d); });
     apply('userState', (d) => { if (d && typeof d === 'object') writeUserState(d); });
     apply('bookmarks', (d) => { if (Array.isArray(d)) { writeBookmarks(d); broadcast({ type: 'bookmarks-updated', bookmarks: d }); } });
+    apply('tasks', (d) => { if (d && typeof d === 'object') getTasks?.()?.importBundle?.(d); });
     // clientPrefs are applied by the CLIENT (localStorage) — echo them back
     const clientPrefs = sections.includes('clientPrefs') ? file.sections.clientPrefs : undefined;
     if (clientPrefs) applied.push('clientPrefs');
