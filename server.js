@@ -1316,6 +1316,13 @@ app.post('/api/mounts/my-storage', (req, res) => {
   try { res.json({ success: true, id: mounts.addMyStorage() }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
+app.post('/api/mounts/:id/share', async (req, res) => {
+  try {
+    const { folder, mode, name, expiryDays } = req.body || {};
+    const out = await mounts.mintShareFromMount(req.params.id, { folder, mode, name, expiryDays });
+    res.json({ success: true, ...out });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
 app.post('/api/mounts/share', async (req, res) => {
   try {
     const env = mounts.envStorage();
