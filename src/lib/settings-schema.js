@@ -356,7 +356,7 @@ const SETTINGS_SCHEMA = {
   },
   'sessionCard.clickToCopy': {
     type: 'boolean', default: false, label: 'Click detail values to copy',
-    description: 'Click on ID, Path, Time, or Groups values to copy them to clipboard',
+    description: 'Click on ID, Path, Time, or Tasks values to copy them to clipboard',
     category: 'Session Card', liveApply: false,
   },
   'sessionCard.visibleFields': {
@@ -367,7 +367,7 @@ const SETTINGS_SCHEMA = {
       { value: 'cwd', label: 'Working Directory' },
       { value: 'started', label: 'Started Time' },
       { value: 'status', label: 'Status' },
-      { value: 'groups', label: 'Groups' },
+      { value: 'groups', label: 'Tasks' },
     ],
     label: 'Visible detail fields',
     description: 'Choose which fields to show in the expanded session card',
