@@ -284,7 +284,7 @@ export function installSidebarMounts(Sidebar) {
       if (m.type && m.type !== 's3') {
         const tag = document.createElement('span');
         tag.className = 'mounts-typetag';
-        tag.textContent = { drive: 'Drive', webdav: 'WebDAV', sftp: 'SFTP', vibespace: 'VibeSpace' }[m.type] || m.type;
+        tag.textContent = { drive: 'Drive', webdav: 'WebDAV', sftp: 'SFTP', vibespace: 'VibeSpace', rclone: (m.source || 'rclone').split(':')[0] }[m.type] || m.type;
         top.querySelector('.mounts-name')?.after(tag);
       }
       row.append(top, pathEl);
@@ -582,7 +582,7 @@ export function installSidebarMounts(Sidebar) {
       this._mountsDialog('Add mount', [
         { key: 'type', label: 'Source type', type: 'select', options: [
           ['s3', 'S3 / MinIO'], ['drive', 'Google Drive'], ['webdav', 'WebDAV / Nextcloud'],
-          ['sftp', 'SFTP (ssh)'], ['vibespace', 'Another VibeSpace'],
+          ['sftp', 'SFTP (ssh)'], ['vibespace', 'Another VibeSpace'], ['rclone', 'Custom (any rclone backend)'],
         ] },
         { key: 'name', label: 'Name', placeholder: 'my-mount' },
         // S3
@@ -594,6 +594,8 @@ export function installSidebarMounts(Sidebar) {
         // Google Drive
         { key: 'token', label: 'Google Drive access', type: 'textarea', placeholder: 'click "Connect Google Drive" below — no terminal needed', when: is('drive'), hint: 'Advanced: you can also paste the JSON from `rclone authorize "drive"` run elsewhere.' },
         { key: 'driveFolder', label: 'Folder (optional, blank = whole Drive)', placeholder: 'Projects/Data', when: is('drive') },
+        { key: 'clientId', label: 'Custom OAuth client ID (optional)', placeholder: 'leave blank to use the built-in client', when: is('drive'), hint: 'Advanced: your own Google Cloud OAuth client — avoids rclone\'s shared quota. Used by Connect too.' },
+        { key: 'clientSecret', label: 'Custom OAuth client secret (optional)', type: 'password', when: is('drive') },
         // WebDAV / Nextcloud
         { key: 'url', label: 'WebDAV URL', placeholder: 'https://cloud.example.com/remote.php/dav/files/me', when: is('webdav'), hint: 'Nextcloud: Settings → Files shows this address. Use an app password if you have 2FA.' },
         { key: 'vendor', label: 'Vendor', type: 'select', options: [['other', 'Generic WebDAV'], ['nextcloud', 'Nextcloud']], when: is('webdav') },
@@ -611,11 +613,28 @@ export function installSidebarMounts(Sidebar) {
         // Another VibeSpace
         { key: 'url', label: 'VibeSpace URL', placeholder: 'https://vibespace.example.com', when: is('vibespace') },
         { key: 'bearerToken', label: 'Mount token (vsmt_…)', type: 'password', when: is('vibespace'), hint: 'Ask the other instance to mint one under Storage → Share via bridge' },
+        // Custom rclone backend
+        { key: 'rcloneType', label: 'rclone backend', placeholder: 'dropbox / b2 / azureblob / mega / …', when: is('rclone'), hint: 'Any backend rclone supports — see rclone.org/docs. Params below map to that backend\'s config keys.' },
+        { key: 'params', label: 'Parameters (one key = value per line)', type: 'textarea', placeholder: 'token = {"access_token":…}\naccount = my-account\nkey = …', when: is('rclone'), hint: 'e.g. b2 wants account + key; dropbox wants token. All values encrypted at rest.' },
+        { key: 'remotePath', label: 'Path within the remote (optional)', placeholder: 'folder/subfolder', when: is('rclone') },
         // common
+        { key: 'extraParams', label: 'Extra rclone options (advanced, key = value per line)', type: 'textarea', placeholder: 'e.g.  chunk_size = 64M\n     upload_concurrency = 4', hint: 'Merged into rclone config for ANY type — custom API keys, tuning flags, provider quirks.' },
         { key: 'mode', label: 'Mode', type: 'select', options: [['rw', 'Read-write'], ['ro', 'Read-only']] },
         { key: 'customPath', label: 'Custom mount path (optional, absolute)', placeholder: '' },
       ], 'Add & mount', async (v, { close }) => {
         delete v.fromHost; // UI-only prefill helper
+        const parseKV = (text) => {
+          const o = {};
+          for (const line of String(text || '').split('\n')) {
+            const i = line.indexOf('=');
+            if (i < 0) continue;
+            const k = line.slice(0, i).trim(); if (!k) continue;
+            o[k] = line.slice(i + 1).trim();
+          }
+          return o;
+        };
+        if (v.type === 'rclone') v.params = parseKV(v.params);
+        if (v.extraParams) v.extraParams = parseKV(v.extraParams);
         const r = await api('/api/mounts', { method: 'POST', body: JSON.stringify(v), headers: { 'Content-Type': 'application/json' } });
         await fetch(`/api/mounts/${r.id}/mount`, { method: 'POST' });
         close(); showToast('Mount added'); this._renderMounts();
@@ -669,7 +688,11 @@ export function installSidebarMounts(Sidebar) {
         btn.disabled = true;
         status.textContent = 'Preparing authorization…';
         try {
-          const r = await api('/api/mounts/gdrive-auth/start', { method: 'POST' });
+          const r = await api('/api/mounts/gdrive-auth/start', {
+            method: 'POST',
+            body: JSON.stringify({ clientId: ctx.inputs.clientId?.value || undefined, clientSecret: ctx.inputs.clientSecret?.value || undefined }),
+            headers: { 'Content-Type': 'application/json' },
+          });
           if (r.error) throw new Error(r.error);
           window.open(r.url, '_blank');
           status.textContent = 'A Google sign-in page opened. Approve access, then come back here.';

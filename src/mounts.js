@@ -205,6 +205,10 @@ class MountManager {
       bearerToken: m.bearerTokenEnc ? this._dec(m.bearerTokenEnc) : undefined,
       // sftp
       sshHost: m.sshHost, sshUser: m.sshUser, sshPort: m.sshPort, sshPath: m.sshPath, keyPath: m.keyPath,
+      // custom rclone
+      rcloneType: m.rcloneType, remotePath: m.remotePath,
+      params: m.paramsEnc ? Object.fromEntries(Object.entries(m.paramsEnc).map(([k, v]) => [k, this._dec(v)])) : undefined,
+      extraParams: m.extraParamsEnc ? Object.fromEntries(Object.entries(m.extraParamsEnc).map(([k, v]) => [k, this._dec(v)])) : undefined,
     }));
     const myStorage = this.getMyStorageConfig({ redact: false }) || undefined;
     return { mounts, shares: this._state.shares, myStorage };
@@ -252,6 +256,7 @@ class MountManager {
       case 'webdav': return m.url;
       case 'vibespace': return m.url;
       case 'sftp': return `${m.sshUser}@${m.sshHost}:${m.sshPath || '~'}`;
+      case 'rclone': return `${m.rcloneType}:${m.remotePath || ''}`;
       default: return `${m.bucket}${m.prefix ? '/' + m.prefix : ''} @ ${m.endpoint}`;
     }
   }
@@ -344,7 +349,26 @@ class MountManager {
         });
         break;
       }
+      case 'rclone': {
+        // Any rclone backend the user knows how to configure: backend name +
+        // freeform params → RCLONE_CONFIG_VS_<KEY>. All param values encrypted
+        // (safe default — many are secrets); non-secret ones cost nothing.
+        if (!cfg.rcloneType) throw new Error('rclone backend type required (e.g. dropbox, b2, azureblob)');
+        const params = cfg.params && typeof cfg.params === 'object' ? cfg.params : {};
+        if (!Object.keys(params).length && !cfg.remotePath) throw new Error('at least one parameter required');
+        m.rcloneType = String(cfg.rcloneType).trim();
+        m.paramsEnc = {};
+        for (const [k, v] of Object.entries(params)) m.paramsEnc[k] = this._enc(String(v));
+        m.remotePath = String(cfg.remotePath || '').replace(/^\/+/, '');
+        break;
+      }
       default: throw new Error('unknown mount type: ' + type);
+    }
+    // Advanced: extra rclone params merged into ANY type's config (custom API
+    // keys, tuning flags, etc.) — encrypted like everything else.
+    if (cfg.extraParams && typeof cfg.extraParams === 'object' && Object.keys(cfg.extraParams).length) {
+      m.extraParamsEnc = {};
+      for (const [k, v] of Object.entries(cfg.extraParams)) m.extraParamsEnc[k] = this._enc(String(v));
     }
     this._state.mounts.push(m);
     this._save();
@@ -412,6 +436,12 @@ class MountManager {
         remote = `${R}:${m.sshPath || ''}`;
         break;
       }
+      case 'rclone': {
+        env[P('TYPE')] = m.rcloneType;
+        for (const [k, blob] of Object.entries(m.paramsEnc || {})) env[P(k.toUpperCase())] = this._dec(blob);
+        remote = `${R}:${m.remotePath || ''}`;
+        break;
+      }
       default: { // s3
         env[P('TYPE')] = 's3';
         env[P('PROVIDER')] = 'Other';
@@ -424,6 +454,8 @@ class MountManager {
         remote = `${R}:${m.bucket}${m.prefix ? '/' + m.prefix : ''}`;
       }
     }
+    // Advanced extra params (custom API keys, tuning) override/extend any type
+    for (const [k, blob] of Object.entries(m.extraParamsEnc || {})) env[P(k.toUpperCase())] = this._dec(blob);
     return { env, remote };
   }
 
@@ -591,9 +623,14 @@ class MountManager {
   // client credentials) and prints the token JSON, which we capture. No
   // Google secrets to configure, no terminal.
 
-  startDriveAuth() {
+  startDriveAuth({ clientId, clientSecret } = {}) {
     this.cancelDriveAuth();
-    const child = spawn(this.rcloneBin(), ['authorize', 'drive', '--auth-no-open-browser'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    // Custom OAuth client (own Google Cloud project) = positional args to
+    // `rclone authorize "drive" <id> <secret>`; blank = rclone's built-in client.
+    const authArgs = ['authorize', 'drive'];
+    if (clientId && clientSecret) authArgs.push(String(clientId), String(clientSecret));
+    authArgs.push('--auth-no-open-browser');
+    const child = spawn(this.rcloneBin(), authArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
     const st = { child, url: null, token: null, error: null, buf: '', startedAt: Date.now() };
     this._driveAuth = st;
     const onData = (d) => {
