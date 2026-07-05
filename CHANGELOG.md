@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.28.4] — 2026-07-05
+
+### Changed
+
+- **Storage/Mounts UI made non-engineer friendly** (from a full UX audit). S3 fields now explain themselves ("Server address (endpoint)", "Bucket (storage container)", "Access key — from your provider's Access Keys page", etc.) with a where-do-I-get-this hint on each; source types read in plain language ("Cloud storage (S3 / MinIO)", "A server over SSH (SFTP)"); RO/RW render as "Read-only"/"Read-write"; share descriptors say "expires in 7 days" / "no expiry" instead of "STS"/"revocable". Advanced knobs (extra rclone options, custom mount path) collapse under an "Advanced options" disclosure. "Mint"→"Create", "Bootstrap"→"Set up", "Host"→"Machine"; the empty state and notes no longer mention `VIBESPACE_S3_*`, `mc`, or `STS`. Section headers gained one-line descriptions, and the SSH-key picker and public-key instructions now explain what a key is and what to do with it. Mount errors are prefixed "Couldn't connect:".
+
 ## [2.28.3] — 2026-07-05
 
 ### Added

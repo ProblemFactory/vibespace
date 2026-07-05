@@ -1994,3 +1994,9 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 .mounts-conf-row { display: flex; align-items: center; gap: 8px; font-size: 12px; cursor: pointer; }
 .mounts-conf-row input[disabled] + span { opacity: 0.5; }
 .mounts-conf-mode { display: flex; align-items: center; gap: 8px; margin: 10px 0 6px; }
+
+.mounts-sec-head { display: flex; flex-direction: column; }
+.mounts-sec-sub { font-size: 10px; font-weight: 400; color: var(--text-dim); margin-top: 1px; }
+.mounts-advanced { margin: 6px 0; }
+.mounts-advanced > summary { cursor: pointer; font-size: 12px; color: var(--text-secondary); padding: 4px 0; user-select: none; }
+.mounts-advanced[open] > summary { margin-bottom: 4px; }
