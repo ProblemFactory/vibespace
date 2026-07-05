@@ -522,8 +522,13 @@ export class ChatStatusBar {
         ]);
       } else {
         fetch('/api/session-options').then(r => r.json()).then(data => {
-          const levels = (data?.effortLevels || ['low', 'medium', 'high', 'max']).map(v => ({ value: v, label: v }));
-          addItems([{ value: '', label: 'Default (reset)' }, ...levels]);
+          const levels = (data?.effortLevels || ['low', 'medium', 'high', 'xhigh', 'max']).map(v => ({ value: v, label: v }));
+          // "ultracode" isn't an effortLevel — it's a separate mode (xhigh +
+          // dynamic-workflow orchestration). The CLI's own /effort UI appends it
+          // to the ladder; mirror that. The adapter wires it via the ultracode
+          // settings key, not effortLevel. (Gated CLI-side on an xhigh-capable
+          // model + dynamic workflows — a no-op if unsupported.)
+          addItems([{ value: '', label: 'Default (reset)' }, ...levels, { value: 'ultracode', label: 'ultracode (xhigh + workflows)' }]);
         }).catch(() => { dropdown.remove(); });
       }
       return;

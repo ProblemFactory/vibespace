@@ -144,7 +144,12 @@ if (!CODEX_SANDBOX_SUPPORTED) {
 
 // Parse available permission modes, effort levels, and supported flags from claude --help
 let PERMISSION_MODES = ['default', 'acceptEdits', 'auto', 'bypassPermissions', 'dontAsk', 'plan'];
-let EFFORT_LEVELS = ['low', 'medium', 'high', 'max'];
+// The effortLevel enum (parsed from `claude --help` below, which lists it on a
+// wrapped line: "(low, medium, high, xhigh, max)"). This is the fallback if the
+// parse ever fails — keep it matching. NOTE: "ultracode" is deliberately NOT
+// here — it's not an effortLevel value but a separate session mode (xhigh +
+// dynamic-workflow orchestration), appended as a pseudo-level client-side.
+let EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
 let CLAUDE_SUPPORTS_NAME = false;
 try {
   const help = execFileSync(CLAUDE_CMD, ['--help'], { encoding: 'utf-8', timeout: 5000 });
