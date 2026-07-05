@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.28.5] — 2026-07-05
+
+### Fixed / Added
+
+- **Share a folder from the file explorer** — folder right-click and the background menu gain “Share this folder…”, which opens the bridge-share dialog with the path prefilled (local explorers only). Previously sharing was reachable only from the Storage tab.
+- **File-explorer submenu no longer sticks** — hovering a plain menu item now dismisses an open sibling submenu (e.g. the “Sessions ▸” flyout) instead of leaving it floating.
+- **Properties opens instantly** — the dialog appears immediately with the fast info filled in and the recursive folder size streams in afterward (“calculating…”), instead of the click hanging for seconds on a big folder’s `du` and popping up later.
+- **Machines connectivity auto-checks** — hosts are probed automatically on the Remote tab (and re-probed when older than 2 minutes), updating each dot in place, so status is meaningful without clicking the link button.
+- **Remote tab no longer flickers** — the session poll no longer rebuilds the whole Storage/Machines panel every few seconds; it repaints only on real changes (and even then keeps the old panel up until the new one is ready).
+- **Advanced options fields fixed** — the collapsed “Advanced options” inputs were rendering at ~half width because they’d dropped out of the dialog’s flex layout; they’re full-width again. The label no longer says “rclone”.
+- **Path fields get autocomplete** — the bridge-share folder, SFTP key/remote paths, and custom mount path now have the same Tab/type-ahead directory completion as the file explorer’s path bar (SFTP remote path completes over the chosen host).
+
 ## [2.28.4] — 2026-07-05
 
 ### Changed

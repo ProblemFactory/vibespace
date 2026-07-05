@@ -709,14 +709,14 @@ class Sidebar {
         }
         this._mobileDrilldown = null; // fallback to list if drill-down target gone
       }
-      if (this._activeTab === 'mounts') this._renderMounts();
+      if (this._activeTab === 'mounts') { if (!this.listEl.querySelector('.mounts-panel')) this._renderMounts(); }
       else if (this._activeTab === 'groups') this._renderMobileGroupList(sessions);
       // Sessions tab uses the same three-zone workbench as desktop — it's a
       // plain vertical card list (no hover-only affordances), so it's more
       // touch-friendly than the old two-level folder drill-down.
       else this._renderWorkbench(sessions);
     } else {
-      if (this._activeTab === 'mounts') this._renderMounts();
+      if (this._activeTab === 'mounts') { if (!this.listEl.querySelector('.mounts-panel')) this._renderMounts(); }
       else if (this._activeTab === 'groups') this._renderByGroups(sessions);
       else this._renderWorkbench(sessions);
     }

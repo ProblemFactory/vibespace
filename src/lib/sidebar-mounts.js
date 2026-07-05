@@ -2,6 +2,7 @@
 // Third tab next to Folders | Groups: my-storage card (env-provisioned),
 // mount list with live status, share-a-folder minting, import-a-link.
 import { showToast, showConfirmDialog, copyText, escHtml } from './utils.js';
+import { setupDirAutocomplete } from './autocomplete.js';
 
 // 16x16 stroke icons (project convention — no emoji in chrome)
 const MI = {
@@ -39,7 +40,11 @@ export function installSidebarMounts(Sidebar) {
 
     async _renderMounts() {
       this._initMountsSync();
-      this.listEl.innerHTML = '<div class="mounts-loading">Loading…</div>';
+      // Only blank to "Loading…" on the FIRST paint — on refreshes we keep the
+      // existing panel up and swap in the new one when ready (no flicker).
+      if (!this.listEl.querySelector('.mounts-panel')) {
+        this.listEl.innerHTML = '<div class="mounts-loading">Loading…</div>';
+      }
       let d, hd;
       let mt;
       try { [d, hd, mt] = await Promise.all([api('/api/mounts'), api('/api/hosts'), api('/api/mount-tokens').catch(() => ({ tokens: [] }))]); }
@@ -67,6 +72,7 @@ export function installSidebarMounts(Sidebar) {
         hlist.className = 'mounts-list';
         for (const h of hd.hosts) hlist.appendChild(this._buildHostRow(h));
         root.appendChild(hlist);
+        this._autoTestHosts(hd.hosts, hlist);
       }
       const addHost = document.createElement('button');
       addHost.className = 'mounts-action';
@@ -298,9 +304,33 @@ export function installSidebarMounts(Sidebar) {
       return row;
     },
 
+    // Auto-probe connectivity so the dots are meaningful without clicking:
+    // test any host with no status or one older than 2 minutes, in parallel,
+    // and swap JUST that row in place (no full re-render → no flicker).
+    _autoTestHosts(hosts, hlist) {
+      const now = Date.now();
+      this._hostStatus = this._hostStatus || {};
+      for (const h of hosts) {
+        const st = this._hostStatus[h.id];
+        if (st && now - (st.at || 0) < 120000) continue;
+        if (this._hostTesting?.has(h.id)) continue;
+        (this._hostTesting = this._hostTesting || new Set()).add(h.id);
+        api(`/api/hosts/${h.id}/test`, { method: 'POST' })
+          .then((r) => { this._hostStatus[h.id] = { ...r, at: Date.now() }; })
+          .catch((e) => { this._hostStatus[h.id] = { error: e.message, at: Date.now() }; })
+          .finally(() => {
+            this._hostTesting.delete(h.id);
+            if (!hlist.isConnected) return; // panel re-rendered meanwhile
+            const old = [...hlist.children].find(el => el._hostId === h.id);
+            if (old) hlist.replaceChild(this._buildHostRow(h), old);
+          });
+      }
+    },
+
     _buildHostRow(h) {
       const row = document.createElement('div');
       row.className = 'mounts-row';
+      row._hostId = h.id; // in-place replacement key (_autoTestHosts)
       const st = this._hostStatus?.[h.id]; // {ok, latencyMs, tools} | {error} | undefined
       const dot = st ? (st.ok ? 'ok' : 'err') : 'off';
       const top = document.createElement('div');
@@ -517,10 +547,28 @@ export function installSidebarMounts(Sidebar) {
         inputs[f.key] = el;
         const rowRec = { field: f, label, el };
         rows.push(rowRec);
+        // Path autocomplete (Tab / type-ahead) — 'local' completes against this
+        // server's filesystem; a function returns a per-keystroke endpoint URL.
+        if (f.autocomplete && el.tagName === 'INPUT') {
+          const wrap = document.createElement('div');
+          wrap.style.position = 'relative';
+          wrap.style.display = 'flex';
+          wrap.style.flexDirection = 'column';
+          const dd = document.createElement('div');
+          dd.className = 'path-autocomplete hidden';
+          wrap.append(el, dd);
+          rowRec.el = wrap; // visibility toggling targets the wrapper
+          inputs[f.key] = el;
+          setupDirAutocomplete(el, dd, {
+            endpoint: typeof f.autocomplete === 'function' ? () => f.autocomplete(inputs) : undefined,
+          });
+          el._acWrap = wrap;
+        }
         // Advanced fields collect into a collapsed <details> at the end so the
         // common case isn't cluttered with tuning knobs most users never touch.
-        const dest = f.advanced ? (advBody || (advBody = document.createElement('div'))) : body;
-        dest.append(label, el);
+        if (f.advanced && !advBody) { advBody = document.createElement('div'); advBody.className = 'mounts-adv-body'; }
+        const dest = f.advanced ? advBody : body;
+        dest.append(label, rowRec.el);
         if (f.hint) {
           const h = document.createElement('div');
           h.className = 'mounts-field-hint';
@@ -700,8 +748,8 @@ export function installSidebarMounts(Sidebar) {
         { key: 'sshHost', label: 'SSH host', placeholder: 'box.example.com', when: is('sftp') },
         { key: 'sshUser', label: 'SSH user', placeholder: 'ubuntu', when: is('sftp') },
         { key: 'sshPort', label: 'Port', placeholder: '22', when: is('sftp') },
-        { key: 'sshPath', label: 'Remote path (optional)', placeholder: '/home/ubuntu/data', when: is('sftp') },
-        { key: 'keyPath', label: 'Private key path (absolute) — or use password', placeholder: '~/.ssh/id_ed25519', when: is('sftp') },
+        { key: 'sshPath', label: 'Remote path (optional)', placeholder: '/home/ubuntu/data', when: is('sftp'), autocomplete: (inputs) => inputs.fromHost?.value ? `/api/hosts/${inputs.fromHost.value}/dir-complete` : '/api/hosts/none/dir-complete' },
+        { key: 'keyPath', label: 'Private key path (absolute) — or use password', placeholder: '~/.ssh/id_ed25519', when: is('sftp'), autocomplete: 'local' },
         { key: 'pass', label: 'Password (if no key)', type: 'password', when: is('sftp') },
         // Another VibeSpace
         { key: 'url', label: 'VibeSpace URL', placeholder: 'https://vibespace.example.com', when: is('vibespace') },
@@ -711,9 +759,9 @@ export function installSidebarMounts(Sidebar) {
         { key: 'params', label: 'Parameters (one key = value per line)', type: 'textarea', placeholder: 'token = {"access_token":…}\naccount = my-account\nkey = …', when: is('rclone'), hint: 'e.g. b2 wants account + key; dropbox wants token. All values encrypted at rest.' },
         { key: 'remotePath', label: 'Path within the remote (optional)', placeholder: 'folder/subfolder', when: is('rclone') },
         // common
-        { key: 'extraParams', label: 'Extra rclone options (key = value per line)', type: 'textarea', placeholder: 'e.g.  chunk_size = 64M\n     upload_concurrency = 4', hint: 'Advanced: custom API keys, tuning flags, provider quirks.', advanced: true },
+        { key: 'extraParams', label: 'Extra options (key = value per line)', type: 'textarea', placeholder: 'e.g.  chunk_size = 64M', hint: 'Passed to the underlying transfer engine (rclone) — custom API keys, tuning, provider quirks. See rclone.org/docs.', advanced: true },
         { key: 'mode', label: 'Mode', type: 'select', options: [['rw', 'Read-write'], ['ro', 'Read-only']] },
-        { key: 'customPath', label: 'Where to put it on this computer (optional)', placeholder: 'leave blank — we choose automatically', hint: 'Advanced: an absolute path if you need it in a specific place.', advanced: true },
+        { key: 'customPath', label: 'Where to put it on this computer (optional)', placeholder: 'leave blank — we choose automatically', hint: 'Advanced: an absolute path if you need it in a specific place.', advanced: true, autocomplete: 'local' },
       ], 'Add & mount', async (v, { close }) => {
         delete v.fromHost; // UI-only prefill helper
         const parseKV = (text) => {
@@ -836,10 +884,10 @@ export function installSidebarMounts(Sidebar) {
 
     // Mint a scoped WebDAV mount token so another VibeSpace can mount a folder
     // of THIS instance (the "VibeSpace互挂" bridge).
-    _showBridgeShareDialog() {
+    _showBridgeShareDialog(prefillRoot) {
       this._mountsDialog('Share a local folder', [
         { key: 'name', label: 'Label', placeholder: 'shared-with-bob' },
-        { key: 'root', label: 'Folder to share (absolute path on this machine)', placeholder: '/home/me/project' },
+        { key: 'root', label: 'Folder to share (absolute path on this machine)', placeholder: '/home/me/project', autocomplete: 'local', value: prefillRoot || '' },
         { key: 'mode', label: 'Access', type: 'select', options: [['ro', 'Read-only'], ['rw', 'Read-write']] },
       ], 'Create link', async (v, { close, body }) => {
         const r = await api('/api/mount-tokens', { method: 'POST', body: JSON.stringify(v), headers: { 'Content-Type': 'application/json' } });
