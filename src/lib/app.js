@@ -1438,6 +1438,7 @@ class App {
         permission: document.getElementById('input-permission').value,
         effort: document.getElementById('input-effort').value,
         extraArgs: document.getElementById('input-extra-args').value.trim(),
+        taskId: document.getElementById('input-task')?.value || undefined,
       });
       this.hideDialogs();
     });
@@ -1625,9 +1626,30 @@ class App {
     document.getElementById(id).classList.remove('hidden');
   }
 
-  showNewSessionDialog({ cwd, backend, hostId } = {}) {
+  showNewSessionDialog({ cwd, backend, hostId, taskId } = {}) {
     if (this.isMobile) this.sidebar.toggle(false); // close sidebar so dialog is visible
     this._showDialog('dialog-new-session');
+    // Task dropdown — new sessions can start "in" a task: pre-selected when
+    // opened from the task board, freely pickable otherwise. Picking a task
+    // prefills the cwd from its first auto-include folder (never clobbers a
+    // path the user already typed); the created session is bound to the task
+    // and spawned with VIBESPACE_TASK_ID.
+    const taskSel = document.getElementById('input-task');
+    if (taskSel) {
+      taskSel.innerHTML = '<option value="">None</option>';
+      for (const t of this.sidebar?._taskBoardOrder?.() || []) {
+        const o = document.createElement('option');
+        o.value = t.id;
+        o.textContent = t.title + (t.kind === 'task' ? ` (${t.status})` : '');
+        taskSel.appendChild(o);
+      }
+      taskSel.value = taskId || '';
+      taskSel.onchange = () => {
+        const t = this.sidebar?._taskById?.(taskSel.value);
+        const cwdInput = document.getElementById('input-cwd');
+        if (t?.folders?.[0] && !cwdInput.value.trim()) cwdInput.value = t.folders[0];
+      };
+    }
     // Host dropdown (remote sessions run over ssh + remote dtach; terminal only until P3)
     const hostSel = document.getElementById('input-host');
     if (hostSel) {
@@ -1679,7 +1701,7 @@ class App {
     });
   }
 
-  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, fork, hostId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle }) {
+  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, fork, hostId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId }) {
     this._hideWelcome();
     const defaults = this._getBackendSessionDefaults(backend);
     const sessionMode = mode || this.settings.get('session.defaultMode') || 'chat';
@@ -1704,6 +1726,7 @@ class App {
       agentKind: agentKind || undefined, agentRole: agentRole || undefined, agentNickname: agentNickname || undefined,
       sourceKind: sourceKind || undefined, parentThreadId: parentThreadId || undefined,
       resume: !!resumeId, resumeId: resumeId||undefined, fork: fork||undefined, cols:120, rows:30, reqId,
+      taskId: taskId || undefined, // spawns VIBESPACE_TASK_ID into the agent env
     });
 
     const handler = (msg) => {
@@ -1734,6 +1757,11 @@ class App {
         if (forkTitle && resumeId) {
           (this._pendingForkTitles ??= new Map()).set(msg.sessionId, { name: forkTitle, parentId: backendSessionId || resumeId });
         }
+        // Session created "in" a task — bind once the backend session id shows
+        // up in active-sessions (unknown at creation for claude; folder
+        // auto-include already covers tasks with linked folders, this makes
+        // the explicit tag stick for folder-less tasks too).
+        if (taskId) this.sidebar?._registerPendingTaskBind?.(msg.sessionId, taskId);
         if (msg.mode === 'chat' || sessionMode === 'chat') {
           const chatView = new ChatView(winInfo, this.ws, msg.sessionId, this);
           this.sessions.set(winInfo.id, chatView);

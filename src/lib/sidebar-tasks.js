@@ -21,6 +21,22 @@ export const TASK_STATUS_META = {
 
 const ICON_DETAIL = '<svg style="width:10px;height:10px" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="12" height="12" rx="1.5"/><path d="M5 6h6M5 9h6M5 12h3"/></svg>';
 
+// Session-level status indicators — set by the AGENT itself (vibespace-status
+// CLI in its env) or by the user (card popover). User overrides of agent-set
+// values are relayed to the agent on the next message (server-side).
+export const SESSION_STATE_META = {
+  working: { label: 'working', color: 'var(--green)' },
+  'needs-input': { label: 'needs input', color: 'var(--yellow, #e5c07b)' },
+  blocked: { label: 'blocked', color: 'var(--red, #e55)' },
+  review: { label: 'review', color: 'var(--blue, #6af)' },
+};
+export const SESSION_URGENCY_META = {
+  low: { label: 'low', mark: '' },
+  normal: { label: 'normal', mark: '' },
+  high: { label: 'high', mark: '!' },
+  urgent: { label: 'urgent', mark: '!!' },
+};
+
 export function installSidebarTasks(SidebarClass) {
   const proto = SidebarClass.prototype;
 
@@ -29,7 +45,17 @@ export function installSidebarTasks(SidebarClass) {
   proto._initTasks = function() {
     this._tasks = [];
     this._tasksLoaded = false; // gates "task not found" decisions during startup
+    this._sessionStatuses = {}; // sessionKey → {state, urgency, reason, setBy, at}
+    this._pendingTaskBinds = new Map(); // webuiId → taskId (new-session-in-task, bound once the backend id appears)
     this._fetchTasks();
+    fetch('/api/session-status').then(r => r.ok ? r.json() : null).then(d => {
+      if (d?.statuses) {
+        this._sessionStatuses = d.statuses;
+        this._render();
+        this._lastAttnSig = null;
+        this.refreshTaskAttention();
+      }
+    }).catch(() => { });
     this.app.ws.onGlobal((msg) => {
       if (msg.type === 'tasks-updated' && Array.isArray(msg.tasks)) {
         this._tasks = msg.tasks;
@@ -38,8 +64,127 @@ export function installSidebarTasks(SidebarClass) {
         this._lastAttnSig = null; // declared attention may have changed
         this.refreshTaskAttention();
         this.app.onTasksUpdated?.(msg.tasks);
+      } else if (msg.type === 'session-status-updated' && msg.statuses) {
+        this._sessionStatuses = msg.statuses;
+        this._render();
+        this._lastAttnSig = null; // blocked counts feed task attention
+        this.refreshTaskAttention();
       }
     });
+  };
+
+  // ── Session status (state/urgency chips on cards) ──
+
+  proto._sessionStatusKeyFor = function(sessionOrKey) {
+    // Write to the key an EXISTING record lives under — the agent keys its
+    // record webui:<serverId> until the backend id exists, and a user
+    // override must land on THAT record (a second record under the state key
+    // would silently skip override detection).
+    const sts = this._sessionStatuses || {};
+    const key = this._getSessionStateKey(sessionOrKey);
+    if (key && sts[key]) return key;
+    const webuiId = sessionOrKey && typeof sessionOrKey === 'object' ? (sessionOrKey.webuiId || sessionOrKey.id) : null;
+    if (webuiId && sts['webui:' + webuiId]) return 'webui:' + webuiId;
+    return key || (webuiId ? 'webui:' + webuiId : null);
+  };
+
+  proto.getSessionStatus = function(sessionOrKey) {
+    const sts = this._sessionStatuses || {};
+    const key = this._getSessionStateKey(sessionOrKey);
+    if (key && sts[key]) return sts[key];
+    const webuiId = sessionOrKey && typeof sessionOrKey === 'object' ? (sessionOrKey.webuiId || sessionOrKey.id) : null;
+    return (webuiId && sts['webui:' + webuiId]) || null;
+  };
+
+  proto.setSessionStatusUser = async function(sessionOrKey, fields) {
+    const sessionKey = this._sessionStatusKeyFor(sessionOrKey);
+    if (!sessionKey) return;
+    try {
+      const res = await fetch('/api/session-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionKey, ...fields }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        showToast(d.error || 'Failed to set status', { type: 'error' });
+      }
+    } catch { showToast('Failed to set status — server unreachable', { type: 'error' }); }
+  };
+
+  proto._showSessionStatusPopover = function(anchor, sessionRef) {
+    const pop = createPopover(anchor, 'groups-popover session-status-pop');
+    const cur = this.getSessionStatus(sessionRef) || {};
+    const mkSel = (label, options, value) => {
+      const row = document.createElement('label');
+      row.className = 'session-status-pop-row';
+      row.appendChild(document.createTextNode(label));
+      const sel = document.createElement('select');
+      const none = document.createElement('option');
+      none.value = ''; none.textContent = '—';
+      sel.appendChild(none);
+      for (const [v, meta] of Object.entries(options)) {
+        const o = document.createElement('option');
+        o.value = v; o.textContent = meta.label; o.selected = value === v;
+        sel.appendChild(o);
+      }
+      row.appendChild(sel);
+      pop.appendChild(row);
+      return sel;
+    };
+    const stateSel = mkSel('State', SESSION_STATE_META, cur.state);
+    const urgSel = mkSel('Urgency', SESSION_URGENCY_META, cur.urgency);
+    const reasonRow = document.createElement('label');
+    reasonRow.className = 'session-status-pop-row';
+    reasonRow.appendChild(document.createTextNode('Reason'));
+    const reasonInp = document.createElement('input');
+    reasonInp.type = 'text'; reasonInp.value = cur.reason || ''; reasonInp.placeholder = 'optional';
+    reasonRow.appendChild(reasonInp);
+    pop.appendChild(reasonRow);
+    if (cur.setBy === 'agent') {
+      const hint = document.createElement('div');
+      hint.className = 'session-status-pop-hint';
+      hint.textContent = 'Set by the agent — if you change it, the agent is told on your next message.';
+      pop.appendChild(hint);
+    }
+    const btnRow = document.createElement('div');
+    btnRow.className = 'session-status-pop-btns';
+    const apply = document.createElement('button');
+    apply.className = 'task-detail-btn'; apply.textContent = 'Apply';
+    apply.onclick = (e) => {
+      e.stopPropagation();
+      this.setSessionStatusUser(sessionRef, { state: stateSel.value || null, urgency: urgSel.value || null, reason: reasonInp.value });
+      pop.remove();
+    };
+    const clearB = document.createElement('button');
+    clearB.className = 'task-detail-btn'; clearB.textContent = 'Clear';
+    clearB.onclick = (e) => { e.stopPropagation(); this.setSessionStatusUser(sessionRef, { clear: true }); pop.remove(); };
+    btnRow.append(apply, clearB);
+    pop.appendChild(btnRow);
+  };
+
+  // ── New-session-in-task binding (backend id unknown at creation) ──
+
+  proto._registerPendingTaskBind = function(webuiId, taskId) {
+    this._pendingTaskBinds.set(webuiId, taskId);
+  };
+
+  proto._processPendingTaskBinds = function() {
+    if (!this._pendingTaskBinds?.size) return;
+    for (const [webuiId, taskId] of [...this._pendingTaskBinds]) {
+      const live = (this._webuiSessions || []).find(s => s.id === webuiId);
+      if (!live) continue; // not in the list yet (or died — retried until sweep below)
+      const bsid = live.backendSessionId || live.claudeSessionId;
+      if (!bsid) continue; // id not adopted yet
+      this._pendingTaskBinds.delete(webuiId);
+      this._taskBind(taskId, `${live.backend || 'claude'}:${bsid}`);
+    }
+    // sweep entries whose session vanished without ever getting an id
+    if (this._pendingTaskBinds.size > 20) {
+      for (const [webuiId] of [...this._pendingTaskBinds]) {
+        if (!(this._webuiSessions || []).some(s => s.id === webuiId)) this._pendingTaskBinds.delete(webuiId);
+      }
+    }
   };
 
   proto._fetchTasks = async function() {
@@ -145,17 +290,37 @@ export function installSidebarTasks(SidebarClass) {
 
   proto._taskAttention = function(task, allSessions) {
     const waitingKeys = this.app.getWaitingSessionKeys?.() || new Set();
-    if (!waitingKeys.size && !task.attention) return { waiting: 0, declared: task.attention || null };
+    const statuses = this._sessionStatuses || {};
+    const anyStatus = Object.keys(statuses).length > 0;
+    if (!waitingKeys.size && !task.attention && !anyStatus) return { waiting: 0, blocked: 0, declared: null };
     const keys = this._getTaskSessionKeys(task, allSessions || this._allSessions || []);
-    let waiting = 0;
-    for (const k of keys) if (waitingKeys.has(k)) waiting++;
-    return { waiting, declared: task.attention || null };
+    // Declared-blocked keys: a brand-new session's status is keyed webui:<id>
+    // until its backend id exists — resolve those onto state keys so the task
+    // badge counts them too.
+    const blockedKeys = new Set();
+    for (const [k, r] of Object.entries(statuses)) {
+      if (r?.state !== 'blocked') continue;
+      if (k.startsWith('webui:')) {
+        // resolve against the MERGED list — _getTaskSessionKeys derives its
+        // keys from the same objects, so this is the matching key space
+        const id = k.slice(6);
+        const merged = (allSessions || this._allSessions || []).find(s => s.webuiId === id || s.id === id);
+        const sk = merged && this._getSessionStateKey(merged);
+        blockedKeys.add(sk || k);
+      } else blockedKeys.add(k);
+    }
+    let waiting = 0, blocked = 0;
+    for (const k of keys) {
+      if (waitingKeys.has(k)) waiting++;
+      if (blockedKeys.has(k)) blocked++; // agent/user-declared blocked feeds the task badge
+    }
+    return { waiting, blocked, declared: task.attention || null };
   };
 
   proto.anyTaskAttention = function() {
     return (this._tasks || []).some(t => {
       const a = this._taskAttention(t);
-      return a.waiting > 0 || !!a.declared;
+      return a.waiting > 0 || (a.blocked || 0) > 0 || !!a.declared;
     });
   };
 
@@ -165,7 +330,13 @@ export function installSidebarTasks(SidebarClass) {
   // focus/layout churn.
   proto.refreshTaskAttention = function() {
     const waiting = this.app.getWaitingSessionKeys?.() || new Set();
-    const sig = [...waiting].sort().join(',');
+    // Signature covers everything the badges derive from: waiting windows,
+    // declared statuses, AND the session list (blocked-key resolution + folder
+    // auto-include both depend on it — the initial status fetch races the
+    // first session poll, so a session-list change must re-evaluate).
+    const sig = [...waiting].sort().join(',')
+      + '|' + Object.entries(this._sessionStatuses || {}).map(([k, v]) => k + ':' + v.state).sort().join(',')
+      + '|' + (this._sessionDigest || '');
     if (sig === this._lastAttnSig) return;
     this._lastAttnSig = sig;
     const tab = this.el?.querySelector('.sidebar-tab[data-tab="tasks"]');
@@ -250,6 +421,7 @@ export function installSidebarTasks(SidebarClass) {
     if (!t) return;
     const items = [
       { label: 'Details…', action: () => this.app.openTaskDetail(taskId) },
+      { label: 'New session in this task…', action: () => this.app.showNewSessionDialog({ cwd: t.folders?.[0], taskId }) },
       { label: 'Rename', action: async () => {
         const n = await showInputDialog({ title: 'Rename Task', label: 'Title', value: t.title, confirmText: 'Rename' });
         if (n && n.trim() && n.trim() !== t.title) this._taskUpdate(taskId, { title: n.trim() });
@@ -325,8 +497,11 @@ export function installSidebarTasks(SidebarClass) {
       const statusChip = task.kind === 'task'
         ? `<span class="task-status-chip" style="--chip-color:${TASK_STATUS_META[task.status]?.color || 'var(--text-dim)'}">${escHtml(TASK_STATUS_META[task.status]?.label || task.status)}</span>`
         : '';
-      const attnBadge = (attn.waiting || attn.declared)
-        ? `<span class="task-attn-badge" title="${attn.declared ? escHtml(attn.declared.reason || 'needs attention') : attn.waiting + ' session' + (attn.waiting === 1 ? '' : 's') + ' waiting for input'}">⚠${attn.waiting ? ' ' + attn.waiting : ''}</span>`
+      const attnCount = (attn.waiting || 0) + (attn.blocked || 0);
+      const attnTip = attn.declared ? (attn.declared.reason || 'needs attention')
+        : [attn.waiting ? `${attn.waiting} waiting for input` : '', attn.blocked ? `${attn.blocked} blocked` : ''].filter(Boolean).join(' · ');
+      const attnBadge = (attnCount || attn.declared)
+        ? `<span class="task-attn-badge" title="${escHtml(attnTip)}">⚠${attnCount ? ' ' + attnCount : ''}</span>`
         : '';
 
       const header = document.createElement('div');
@@ -351,6 +526,18 @@ export function installSidebarTasks(SidebarClass) {
         });
         nameSpan.title = 'Double-click to rename';
       }
+
+      const plusBtn = document.createElement('button');
+      plusBtn.className = 'folder-add-btn';
+      plusBtn.textContent = '+';
+      plusBtn.title = 'New session in this task' + (task.folders?.[0] ? ` (${task.folders[0]})` : '');
+      plusBtn.onclick = (e) => {
+        e.stopPropagation();
+        // Reuse the normal dialog PRE-FILLED (user confirms all params):
+        // cwd defaults to the first auto-include folder, task pre-selected.
+        this.app.showNewSessionDialog({ cwd: task.folders?.[0], taskId: task.id });
+      };
+      header.appendChild(plusBtn);
 
       const detailBtn = document.createElement('button');
       detailBtn.className = 'folder-add-btn';
