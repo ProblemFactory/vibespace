@@ -37,6 +37,7 @@ class Sidebar {
     // Load from localStorage as initial cache/fallback
     this._starredIds = new Set(JSON.parse(localStorage.getItem('starredSessions') || '[]'));
     this._archivedIds = new Set(JSON.parse(localStorage.getItem('archivedSessions') || '[]'));
+    this._archivedFolders = new Set(JSON.parse(localStorage.getItem('archivedFolders') || '[]')); // folder keys — sessions under these default to archived (incl. future ones)
     this._customNames = JSON.parse(localStorage.getItem('sessionCustomNames') || '{}');
     this._sessionModes = JSON.parse(localStorage.getItem('sessionModes') || '{}'); // { sessionId: 'terminal'|'chat' }
     this._sessionConfigs = JSON.parse(localStorage.getItem('sessionConfigs') || '{}'); // { sessionKey: {model, effort, permission} }
@@ -657,12 +658,12 @@ class Sidebar {
     if (showArchived) {
       // When archived filter is on, show only archived (plus any other enabled statuses for non-archived)
       sessions = sessions.filter(s => {
-        if (this._stateSetHas(this._archivedIds, s)) return true;
+        if (this.isArchived(s)) return true;
         return this._statusFilter.has(s.status);
       });
     } else {
       // Hide archived sessions, then apply status filter
-      sessions = sessions.filter(s => !this._stateSetHas(this._archivedIds, s));
+      sessions = sessions.filter(s => !this.isArchived(s));
       // Status filter (apply only when not all 4 non-archived statuses are selected)
       const nonArchivedFilters = new Set([...this._statusFilter]);
       nonArchivedFilters.delete('archived');
