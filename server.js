@@ -1514,35 +1514,56 @@ function agentSession(req, res, { needTask = false } = {}) {
 // SessionStart hook payload (context injection): rendered task state + context
 // folder file index + the rules. Fires + injects for Claude (terminal + chat).
 // SCOPED to the session's OWN context task — the ?taskId= query is ignored so a
-// token can never read another task's context.
+// token can never read another task's context. Records the task version the
+// session has now "seen" so UserPromptSubmit only RE-injects on later changes.
 app.get('/api/agent/task-context', (req, res) => {
   const hit = agentSession(req, res);
   if (!hit) return;
   try {
-    res.json({ success: true, context: hit[0]._taskId ? tasks.renderContext(hit[0]._taskId) : '' });
+    let context = '';
+    if (hit[0]._taskId) {
+      context = tasks.renderContext(hit[0]._taskId);
+      // Only Claude injects the SessionStart output; codex runs the command but
+      // ignores it, so don't mark it "seen" for codex (that would starve its
+      // UserPromptSubmit delivery).
+      if (context && hit[0].backend !== 'codex') {
+        try { hit[0]._taskSeenAt = tasks.get(hit[0]._taskId).updatedAt; } catch {}
+      }
+    }
+    res.json({ success: true, context });
   } catch (e) { res.status(404).json({ error: e.message }); }
 });
 // UserPromptSubmit hook payload — delivered through the harness's own prompt
-// hook, NEVER by rewriting the user's message. Two things ride here:
-//  1. Task context on the FIRST prompt, but ONLY for codex — codex fires
-//     UserPromptSubmit (not SessionStart) in app-server mode. Claude gets its
-//     context from SessionStart, so it must NOT also get it here (no double
-//     injection, and no dependence on a cross-endpoint "delivered" flag that a
-//     timed-out SessionStart fetch could set falsely).
-//  2. Any pending status-override notice (the user changed a status the agent
-//     set). Consumed on read → injected exactly once, on the next user turn.
+// hook, NEVER by rewriting the user's message. Three things ride here:
+//  1. Task context on the FIRST prompt when SessionStart didn't deliver it
+//     (codex — it fires UserPromptSubmit but not SessionStart in app-server).
+//  2. A REFRESH of the task context whenever the task changed since the session
+//     last saw it — so any task update (objective/plan/progress/status, from
+//     the UI or another session's vibespace-task) reaches the agent on its next
+//     turn (user request). Gated on updatedAt > _taskSeenAt → no per-turn noise
+//     when nothing changed.
+//  3. Any pending status-override notice (consumed once).
 app.get('/api/agent/prompt-context', (req, res) => {
   const hit = agentSession(req, res);
   if (!hit) return;
   try {
     const parts = [];
-    if (hit[0].backend === 'codex' && hit[0]._taskId && !hit[0]._promptCtxDone) {
-      try {
-        const ctx = tasks.renderContext(hit[0]._taskId);
-        if (ctx) { parts.push(ctx); hit[0]._promptCtxDone = true; }
-      } catch { /* task deleted */ }
+    const s = hit[0];
+    if (s._taskId) {
+      let t = null;
+      try { t = tasks.get(s._taskId); } catch { /* deleted */ }
+      if (t && t.updatedAt > (s._taskSeenAt || 0)) {
+        const fresh = s._taskSeenAt !== undefined; // seen before → this is an UPDATE, not first delivery
+        const ctx = tasks.renderContext(s._taskId);
+        if (ctx) {
+          parts.push(fresh
+            ? `The task below was UPDATED since you last saw it — this is the current state (supersedes any earlier copy).\n\n${ctx}`
+            : ctx);
+          s._taskSeenAt = t.updatedAt;
+        }
+      }
     }
-    const key = sessionStatusKey(hit[0], hit[1]);
+    const key = sessionStatusKey(s, hit[1]);
     for (const k of [key, `webui:${hit[1]}`]) { // record may still be under webui:<id>
       const notice = sessionStatus.consumeNotice(k);
       if (notice) { parts.push(SessionStatusManager.renderNotice(notice)); break; }

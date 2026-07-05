@@ -349,7 +349,18 @@ function registerWsHandler(wss, ctx) {
               spawnCmd, ...spawnArgs,
             ], {
               name: 'xterm-256color', cols: data.cols || 120, rows: data.rows || 30,
-              cwd: spawnCwd, env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor', ...Object.fromEntries(Object.entries(sessionSpec.env || {}).map(([k, v]) => [k, v == null ? '' : String(v)])) },
+              cwd: spawnCwd, env: {
+                ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor',
+                // The WRAPPER (always local, even for remote sessions) needs the
+                // agent API in its OWN env: the codex-chat-wrapper injects task
+                // context via thread/inject_items by calling /api/agent/*. The
+                // spawned CLI gets these separately via the `env VAR=val` argv
+                // prefix; the wrapper doesn't, hence this. Always the LOCAL port.
+                VIBESPACE_API: `http://127.0.0.1:${PORT}`,
+                VIBESPACE_SESSION_TOKEN: session.agentToken,
+                ...(session._taskId ? { VIBESPACE_TASK_ID: session._taskId } : {}),
+                ...Object.fromEntries(Object.entries(sessionSpec.env || {}).map(([k, v]) => [k, v == null ? '' : String(v)])),
+              },
             });
           } catch (err) {
             ws.send(JSON.stringify({ type: 'error', message: `Failed to spawn session: ${err.message}\ndtach=${DTACH_CMD} node=${NODE_CMD} env=${ENV_CMD} cwd=${cwd}` }));
