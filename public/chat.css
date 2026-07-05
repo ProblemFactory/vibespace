@@ -810,3 +810,12 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
   .chat-status-bar::-webkit-scrollbar { display: none; }
   .chat-status-bar > * { flex-shrink: 0; }
 }
+
+/* Model auto-fallback warning: the harness is serving a different model than
+   the one the user set (e.g. fable overloaded -> opus). */
+.chat-status-model-fallback {
+  color: var(--yellow, #b58900) !important;
+  font-weight: 600;
+  animation: chat-fallback-pulse 2s ease-in-out 3;
+}
+@keyframes chat-fallback-pulse { 50% { opacity: 0.45; } }

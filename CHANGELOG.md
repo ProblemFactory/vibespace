@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.29.1] — 2026-07-05
+
+### Added
+
+- **Model auto-fallback warning** — when the harness silently swaps models mid-session (e.g. Fable overloaded → served by Opus; the CLI writes a `fallback` marker), the chat now surfaces it: the status-bar model badge turns amber with ⚠ and the actual serving model (tooltip explains; click to re-pick), and a dim system notice appears in the stream. Clears automatically when the requested model is served again. Alias-tolerant ("fable" vs "claude-fable-5" is not a false positive).
+- **Mid-session model/effort picks persist** — choosing a model or effort from the chat status bar now saves it as that session's per-session config (the same store as the Resume gear popover), so the next resume starts with the same choice.
+
 ## [2.29.0] — 2026-07-05
 
 ### Changed

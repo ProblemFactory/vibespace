@@ -16,10 +16,12 @@ export class ChatStatusBar {
    * @param {function} opts.openInTempEditor - (text) => void
    * @param {function} [opts.startReview] - ({ target, delivery }) => void
    */
-  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview }) {
+  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange }) {
     this._ws = ws;
     this._sessionId = sessionId;
     this._backend = backend;
+    this._onConfigChange = onConfigChange || null;
+    this._servedModel = null; // actual serving model (per-turn) — fallback detection
     this._allowReview = allowReview;
     this._reviewEnabled = !allowReview;
     this._getToolMsg = getToolMsg;
@@ -139,6 +141,22 @@ export class ChatStatusBar {
     this.render();
   }
 
+  // Actual serving model from the latest assistant turn — when it diverges
+  // from the commanded/reported one, the harness auto-fell-back (e.g. fable
+  // overloaded → opus). Alias-tolerant compare ('fable' vs 'claude-fable-5').
+  setServedModel(model) {
+    if (this._servedModel === model) return;
+    this._servedModel = model;
+    this.render();
+  }
+
+  _modelMismatch() {
+    if (!this._servedModel || !this._statusModel) return false;
+    const core = (v) => String(v || '').replace(/\[1m\]$/, '').trim().replace(/^claude-/, '');
+    const a = core(this._servedModel), b = core(this._statusModel);
+    return !(a === b || a.startsWith(b) || b.startsWith(a));
+  }
+
   setPermMode(mode) {
     this._statusPermMode = mode;
     this.render();
@@ -175,10 +193,14 @@ export class ChatStatusBar {
     // explicitly ("?") instead of hiding or guessing.
     {
       const known = !!this._statusModel;
-      const title = known
-        ? 'Model (as last reported by the CLI) — click to change'
-        : 'Model not reported by the CLI yet — click to set';
-      parts.push(`<span class="chat-status-model chat-status-clickable${known ? '' : ' chat-status-dim'}" title="${escHtml(title)}">${known ? escHtml(this._statusModel) : 'model: ?'}</span>`);
+      const mismatch = this._modelMismatch();
+      const title = mismatch
+        ? `Auto-fallback: the harness is serving ${this._servedModel} instead of ${this._statusModel} (capacity/overload). Click to re-pick.`
+        : known
+          ? 'Model (as last reported by the CLI) — click to change'
+          : 'Model not reported by the CLI yet — click to set';
+      const label = mismatch ? `\u26a0 ${escHtml(this._servedModel)}` : (known ? escHtml(this._statusModel) : 'model: ?');
+      parts.push(`<span class="chat-status-model chat-status-clickable${known ? '' : ' chat-status-dim'}${mismatch ? ' chat-status-model-fallback' : ''}" title="${escHtml(title)}">${label}</span>`);
       const eKnown = !!this._statusEffort;
       const eTitle = eKnown
         ? (this._backend === 'codex'
@@ -475,6 +497,9 @@ export class ChatStatusBar {
       if (!dropdown) return;
       const pickE = (effort, label) => {
         this._ws.send({ type: 'set-effort', sessionId: this._sessionId, effort });
+        // Mid-session picks persist as this session's per-session config, so
+        // the NEXT resume starts with the same effort (user-requested).
+        this._onConfigChange?.({ effort: effort || null });
         // Optimistic — claude never reports effort back (apply_flag_settings is
         // success-blind); codex confirms via turn_context on the next turn.
         this._statusEffort = effort || '';
@@ -515,6 +540,7 @@ export class ChatStatusBar {
         const models = (data?.[backend] || []).filter(m => m.id);
         const pick = (model) => {
           this._ws.send({ type: 'set-model', sessionId: this._sessionId, model });
+          this._onConfigChange?.({ model });
           // optimistic; the CLI's own confirmation (set_model echo / codex
           // turn_context) overwrites this with the RESOLVED id
           this._statusModel = model;
