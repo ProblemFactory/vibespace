@@ -1265,6 +1265,34 @@ app.delete('/api/mount-tokens/:id', (req, res) => {
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// Import an rclone.conf: parse to a preview list, then import selected remotes
+app.post('/api/mounts/rclone-conf/parse', (req, res) => {
+  try {
+    const remotes = MountManager.parseRcloneConf(req.body?.text || '');
+    // never echo secret values back — just names/types/param-keys + wraps flag
+    res.json({ remotes: remotes.map(r => ({ name: r.name, type: r.type, paramKeys: Object.keys(r.params), wraps: r.wraps })) });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/mounts/rclone-conf/import', async (req, res) => {
+  try {
+    const all = MountManager.parseRcloneConf(req.body?.text || '');
+    const want = new Set(req.body?.names || []);
+    const mode = req.body?.mode === 'ro' ? 'ro' : 'rw';
+    const doMount = req.body?.mount !== false;
+    const added = [];
+    for (const r of all) {
+      if (want.size && !want.has(r.name)) continue;
+      if (r.wraps) continue; // can't resolve nested remotes
+      try {
+        const id = mounts.addFromRcloneRemote(r, { mode });
+        added.push({ name: r.name, id });
+        if (doMount) { try { await mounts.mount(id); } catch {} }
+      } catch (e) { /* skip dupes/invalid, continue */ }
+    }
+    res.json({ success: true, added });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 // rclone availability + one-click install (data/bin, pinned verified version)
 app.get('/api/mounts/rclone', (req, res) => res.json({ available: mounts.rcloneAvailable(), bin: mounts.rcloneBin() }));
 app.post('/api/mounts/rclone/install', async (req, res) => {

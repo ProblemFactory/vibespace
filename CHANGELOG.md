@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.28.3] — 2026-07-05
+
+### Added
+
+- **Import an rclone config file** — Storage → *Import rclone config* takes a pasted `rclone.conf`, previews every remote in it (name + backend type; wrapper remotes like `crypt`/`alias` shown greyed as unsupported), and imports the ones you tick as mounts. Verified end-to-end against real MinIO.
+
+### Fixed
+
+- The Cloudflare Accept-Encoding signing fix (and V2-auth probe) now applies to **any** s3-backed mount — custom-rclone and rclone.conf-imported s3 remotes, not just the native S3 type — so object reads through a proxied endpoint no longer hang.
+
 ## [2.28.2] — 2026-07-05
 
 ### Added

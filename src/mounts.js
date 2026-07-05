@@ -103,6 +103,48 @@ class MountManager {
     this._notify();
   }
 
+  // ── Import an rclone config file (rclone.conf) ──
+  // Users who already configured remotes elsewhere (`rclone config`) can paste
+  // the whole file. It's INI: [remote-name] then key = value lines. We turn
+  // each [section] into a preview the UI lists; the user picks which to import
+  // and each becomes a custom 'rclone' mount (all values encrypted at rest).
+  static parseRcloneConf(text) {
+    const remotes = [];
+    let cur = null;
+    for (const raw of String(text || '').split(/\r?\n/)) {
+      const line = raw.trim();
+      if (!line || line.startsWith('#') || line.startsWith(';')) continue;
+      const sec = line.match(/^\[([^\]]+)\]$/);
+      if (sec) { cur = { name: sec[1].trim(), type: '', params: {} }; remotes.push(cur); continue; }
+      if (!cur) continue;
+      const eq = line.indexOf('=');
+      if (eq < 0) continue;
+      const k = line.slice(0, eq).trim();
+      const v = line.slice(eq + 1).trim();
+      if (k === 'type') cur.type = v;
+      else if (k) cur.params[k] = v;
+    }
+    // Flag wrapping backends (crypt/alias/combine/union/chunker) — they
+    // reference ANOTHER remote (a `remote =`/`upstreams =` value), which our
+    // single-remote env model can't resolve. The UI greys these out.
+    const WRAPPERS = new Set(['crypt', 'alias', 'combine', 'union', 'chunker']);
+    return remotes.filter(r => r.type).map(r => ({
+      ...r,
+      wraps: WRAPPERS.has(r.type) || !!r.params.remote || !!r.params.upstreams,
+    }));
+  }
+
+  /** Add a mount from one parsed rclone.conf remote (custom 'rclone' type). */
+  addFromRcloneRemote(remote, { mode = 'rw', name } = {}) {
+    return this.add({
+      type: 'rclone', origin: 'rclone-conf',
+      name: name || remote.name,
+      rcloneType: remote.type,
+      params: remote.params || {},
+      mode,
+    });
+  }
+
   // ── rclone binary resolution + one-click install ──
   // Non-engineers shouldn't need a terminal: if rclone isn't on PATH we can
   // download the official static binary into data/bin (pinned to a version
@@ -477,7 +519,10 @@ class MountManager {
     // that looks like a hang; list/put unaffected because query-string
     // requests pass untouched). rclone ≥1.63 has a flag that stops sending/
     // signing it — add it whenever the installed rclone supports it.
-    const isS3 = (m.type || 's3') === 's3';
+    // s3-backed whether it's the native type OR a custom rclone mount using
+    // the s3 backend (rclone.conf import, Custom type) — both hit the proxy
+    // signing issue, so the fix must key off the BACKEND, not our type name.
+    const isS3 = (m.type || 's3') === 's3' || m.rcloneType === 's3';
     if (isS3 && this._rcloneSupportsAcceptEncodingFlag()) args.push('--s3-use-accept-encoding-gzip=false');
     if (m.mode === 'ro') args.push('--read-only');
     // One-time signing probe: some proxies (Cloudflare) rewrite the signed

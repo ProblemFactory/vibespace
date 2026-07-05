@@ -84,6 +84,10 @@ Two VibeSpace instances can mount each other's folders over a built-in **WebDAV 
 The bridge implements the WebDAV subset clients need (OPTIONS, PROPFIND, HEAD, GET with Range, PUT, MKCOL, DELETE, MOVE, COPY); locks aren't implemented (rclone doesn't use them).
 
 
+## Importing an existing rclone config
+
+If you already have remotes configured with `rclone config` on another machine, **Import rclone config** (Storage footer) takes the whole `rclone.conf` (find it with `rclone config file`): paste it, tick which remotes to bring in, and each becomes a mount. Remotes that wrap another remote (`crypt`, `alias`, `combine`, `union`, `chunker`) are shown greyed — they reference a second remote the simple importer can't resolve; recreate those with the Custom type if needed. All values are encrypted at rest.
+
 ## Advanced: custom backends and options
 
 Every mount type accepts an **Extra rclone options** field (`key = value` per line) that's merged into the rclone config — for custom API keys, tuning flags (`chunk_size`, `upload_concurrency`), or provider quirks.
