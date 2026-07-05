@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.35.0] — 2026-07-05
+
+### Added
+
+- **Task updates reach the agent on its next message.** When a task changes (its objective, plan, progress, or status — edited in the UI or reported by another session), the agent gets the refreshed task context injected on its very next turn, marked as an update. It stays quiet when nothing changed. Works on both Claude (via its UserPromptSubmit hook) and Codex.
+- **Codex chat now receives task context natively.** Previously Codex's app-server ignored the hook output, so Codex sessions didn't get auto-injected task context. VibeSpace now delivers it through Codex's own `thread/inject_items` (a developer-role message appended to the thread), verified end-to-end. Codex sessions started in a task now know the task — and get the same on-next-turn updates as Claude.
+- **`run.sh` supervised launcher.** Starts the server and automatically restarts it if it exits (e.g. an out-of-memory kill under system memory pressure) — dtach sessions survive, so agents aren't lost. Bare `node server.js` stays down after a kill; `./run.sh` brings it back.
+
+### Fixed
+
+- **Ultracode effort in the chat effort menu.** The effort dropdown (and the per-session config) now offer **ultracode** (and the previously-missing xhigh). Researched the real mechanism from the CLI: ultracode isn't an effort *level* but a separate mode (xhigh + dynamic-workflow orchestration), so it's wired via the CLI's own `ultracode` settings key rather than as a bogus effort value.
+
 ## [2.34.0] — 2026-07-05
 
 ### Changed
