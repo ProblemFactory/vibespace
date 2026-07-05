@@ -107,13 +107,13 @@ export function installSidebarRender(SidebarClass) {
       header.appendChild(addBtn);
 
       const linkBtn = document.createElement('button'); linkBtn.className = 'folder-add-btn';
-      linkBtn.innerHTML = '<svg style="width:10px;height:10px" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M7 9l2-2M6 12l-1.5 1.5a2 2 0 01-3-3L4 8M10 4l1.5-1.5a2 2 0 013 3L12 8"/></svg>'; linkBtn.title = 'Add folder to group';
+      linkBtn.innerHTML = '<svg style="width:10px;height:10px" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M7 9l2-2M6 12l-1.5 1.5a2 2 0 01-3-3L4 8M10 4l1.5-1.5a2 2 0 013 3L12 8"/></svg>'; linkBtn.title = 'Link folder to a task';
       linkBtn.style.fontSize = '10px';
       linkBtn.onclick = (e) => {
         e.stopPropagation();
-        this._showGroupChecklistPopover(linkBtn,
-          (name) => (this._groupFolders[name] || []).includes(cwd),
-          (name, checked, pop) => { if (checked) this._addFolderToGroup(cwd, name); else this._removeFolderFromGroup(cwd, name); pop.remove(); });
+        this._showTaskChecklistPopover(linkBtn,
+          (task) => (task.folders || []).includes(cwd),
+          (task, checked, pop) => { if (checked) this._taskAddFolder(task.id, cwd); else this._taskRemoveFolder(task.id, cwd); pop.remove(); });
       };
       header.appendChild(linkBtn);
 
@@ -164,148 +164,6 @@ export function installSidebarRender(SidebarClass) {
     });
   };
 
-  proto._renderByGroups = function(sessions) {
-    // Observer must exist before _observeFolder calls (see _renderGrouped)
-    this._setupLazyFolders();
-    const sessionById = new Map();
-    for (const s of sessions) {
-      sessionById.set(this._getSessionStateKey(s), s);
-      if (s.sessionId) sessionById.set(s.sessionId, s);
-      const legacyId = this._getLegacySessionId(s);
-      if (legacyId) sessionById.set(legacyId, s);
-    }
-
-    const groupNames = this._getGroupNames();
-    const assignedIds = new Set();
-
-    const addGroupCard = document.createElement('div');
-    addGroupCard.className = 'session-item-card new-session-card';
-    addGroupCard.innerHTML = '<div class="session-card-name" style="color:var(--accent-hover)">+ New Group</div>';
-    addGroupCard.onclick = async () => {
-      const name = await showInputDialog({ title: 'New Group', label: 'Group name', confirmText: 'Create' });
-      if (name && name.trim()) this._createGroup(name.trim());
-    };
-    this.listEl.appendChild(addGroupCard);
-
-    for (const groupName of groupNames) {
-      const groupSessionIds = this._getGroupSessions(groupName, sessions);
-      const groupSessions = [...groupSessionIds].map(id => sessionById.get(id)).filter(Boolean);
-      groupSessionIds.forEach(id => assignedIds.add(id));
-
-      const groupEl = document.createElement('div');
-      groupEl.className = 'folder-group';
-      const collapseKey = 'group:' + groupName;
-      groupEl._collapseKey = collapseKey; // for highlightSession to expand on jump
-      if (this._collapsedFolders.has(collapseKey)) groupEl.classList.add('collapsed');
-
-      const hasLive = groupSessions.some(s => s.status === 'live' || s.status === 'tmux');
-      const linkedFolders = this._groupFolders[groupName] || [];
-      const folderHint = linkedFolders.length ? ` (${linkedFolders.length} folder${linkedFolders.length > 1 ? 's' : ''})` : '';
-
-      const header = document.createElement('div');
-      header.className = 'folder-header';
-      header.innerHTML = `<span class="folder-chevron">\u25BC</span><span class="folder-path" style="direction:ltr">${escHtml(groupName)}<span style="color:var(--text-dim);font-weight:400;font-size:10px">${folderHint}</span></span><span class="folder-count">${groupSessions.length}</span>`;
-      if (hasLive) {
-        const dot = document.createElement('span');
-        dot.style.cssText = 'width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0';
-        header.insertBefore(dot, header.children[2]);
-      }
-
-      const nameSpan = header.querySelector('.folder-path');
-      if (nameSpan) {
-        nameSpan.addEventListener('dblclick', async (e) => {
-          e.stopPropagation();
-          const newName = await showInputDialog({ title: 'Rename Group', label: 'Group name', value: groupName, confirmText: 'Rename' });
-          if (newName && newName.trim() && newName.trim() !== groupName) this._renameGroup(groupName, newName.trim());
-        });
-        nameSpan.title = 'Double-click to rename';
-      }
-
-      const resumeAllBtn = document.createElement('button');
-      resumeAllBtn.className = 'folder-add-btn';
-      resumeAllBtn.textContent = '\u25B6';
-      resumeAllBtn.title = 'Resume all sessions in "' + groupName + '"';
-      resumeAllBtn.onclick = (e) => {
-        e.stopPropagation();
-        for (const s of groupSessions) {
-          const agentOpts = {
-            backend: s.backend || 'claude', backendSessionId: s.backendSessionId || s.sessionId,
-            agentKind: s.agentKind || 'primary', agentRole: s.agentRole || '',
-            agentNickname: s.agentNickname || '', sourceKind: s.sourceKind || '',
-            parentThreadId: s.parentThreadId || null,
-          };
-          if (s.status === 'stopped') {
-            this.app.resumeSession(s.sessionId, s.cwd, this.getCustomName(s) || s.name, agentOpts);
-          } else if (s.status === 'live' && s.webuiId) {
-            this.app.attachSession(s.webuiId, s.webuiName || s.name, s.cwd, { mode: s.webuiMode, ...agentOpts });
-          } else if (s.status === 'tmux') {
-            this.app.attachTmuxSession(s.tmuxTarget, s.name, s.cwd);
-          }
-        }
-      };
-      header.appendChild(resumeAllBtn);
-
-      header.addEventListener('contextmenu', (e) => {
-        e.preventDefault(); e.stopPropagation();
-        this._showGroupContextMenu(e.clientX, e.clientY, groupName);
-      });
-
-      const _setupGroupDrop = (el) => {
-        el.addEventListener('dragover', (e) => {
-          if (e.dataTransfer.types.includes('application/x-folder-path') || e.dataTransfer.types.includes('application/x-session-id') || e.dataTransfer.types.includes('application/x-session-key')) {
-            e.preventDefault(); e.stopPropagation(); header.classList.add('drop-target');
-          }
-        });
-        el.addEventListener('dragleave', (e) => { if (!groupEl.contains(e.relatedTarget)) header.classList.remove('drop-target'); });
-        el.addEventListener('drop', (e) => {
-          e.preventDefault(); e.stopPropagation(); header.classList.remove('drop-target');
-          const folderPath = e.dataTransfer.getData('application/x-folder-path');
-          const sessionKey = e.dataTransfer.getData('application/x-session-key');
-          const sessionId = e.dataTransfer.getData('application/x-session-id');
-          if (folderPath) this._addFolderToGroup(folderPath, groupName);
-          else if (sessionKey || sessionId) this._assignSessionToGroup(sessionKey || sessionId, groupName);
-        });
-      };
-      _setupGroupDrop(groupEl);
-
-      header.onclick = (e) => {
-        if (e.target.closest('.folder-add-btn')) return;
-        this._toggleCollapse(groupEl, collapseKey);
-      };
-
-      const sessionsDiv = document.createElement('div');
-      sessionsDiv.className = 'folder-sessions';
-      this._sortSessions(groupSessions);
-
-      if (groupSessions.length === 0) {
-        const empty = document.createElement('div'); empty.className = 'empty-hint';
-        empty.textContent = 'No sessions in this group';
-        sessionsDiv.appendChild(empty);
-      } else {
-        this._observeFolder(groupEl, sessionsDiv, groupSessions);
-      }
-
-      groupEl.append(header, sessionsDiv);
-      this.listEl.appendChild(groupEl);
-    }
-
-    // Ungrouped
-    const ungrouped = sessions.filter(s => !assignedIds.has(this._getSessionStateKey(s)) && !assignedIds.has(s.sessionId));
-    if (ungrouped.length > 0) {
-      const groupEl = document.createElement('div'); groupEl.className = 'folder-group';
-      const collapseKey = 'group:__ungrouped__';
-      groupEl._collapseKey = collapseKey; // for highlightSession to expand on jump
-      if (this._collapsedFolders.has(collapseKey)) groupEl.classList.add('collapsed');
-      const header = document.createElement('div'); header.className = 'folder-header';
-      header.innerHTML = `<span class="folder-chevron">\u25BC</span><span class="folder-path" style="direction:ltr;font-style:italic">Ungrouped</span><span class="folder-count">${ungrouped.length}</span>`;
-      header.onclick = () => this._toggleCollapse(groupEl, collapseKey);
-      const sessionsDiv = document.createElement('div'); sessionsDiv.className = 'folder-sessions';
-      this._sortSessions(ungrouped);
-      this._observeFolder(groupEl, sessionsDiv, ungrouped);
-      groupEl.append(header, sessionsDiv);
-      this.listEl.appendChild(groupEl);
-    }
-  };
 
   proto._buildSessionCard = function(s) {
     return renderSessionCard(s, {
@@ -316,83 +174,4 @@ export function installSidebarRender(SidebarClass) {
     });
   };
 
-  proto._showGroupFoldersPopover = function(anchor, groupName) {
-    const pop = createPopover(anchor, 'groups-popover');
-    const folders = this._groupFolders[groupName] || [];
-    if (folders.length === 0) {
-      const hint = document.createElement('div'); hint.className = 'empty-hint';
-      hint.textContent = 'No linked folders. Use \uD83D\uDD17 on folder headers in Folders tab, or drag folders here.';
-      pop.appendChild(hint);
-    } else {
-      for (const fp of folders) {
-        const row = document.createElement('div'); row.className = 'session-detail-group-item';
-        row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:6px;padding:4px 8px;cursor:default';
-        const pathSpan = document.createElement('span');
-        pathSpan.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px';
-        pathSpan.textContent = fp.replace(/^\/home\/[^/]+/, '~'); pathSpan.title = fp;
-        const removeBtn = document.createElement('button');
-        removeBtn.style.cssText = 'background:none;border:none;color:var(--red,#e55);cursor:pointer;font-size:12px;padding:0 4px;flex-shrink:0';
-        removeBtn.textContent = '\u00D7'; removeBtn.title = 'Unlink folder';
-        removeBtn.onclick = (e) => { e.stopPropagation(); this._removeFolderFromGroup(fp, groupName); pop.remove(); };
-        row.append(pathSpan, removeBtn);
-        pop.appendChild(row);
-      }
-    }
-  };
-
-  proto._showGroupContextMenu = function(x, y, groupName) {
-    showContextMenu(x, y, [
-      { label: 'Rename', action: async () => {
-        const n = await showInputDialog({ title: 'Rename Group', label: 'Group name', value: groupName, confirmText: 'Rename' });
-        if (n && n.trim() && n.trim() !== groupName) this._renameGroup(groupName, n.trim());
-      }},
-      { label: 'Linked folders', action: () => {
-        const anchor = document.createElement('span');
-        anchor.style.cssText = 'position:fixed;left:' + x + 'px;top:' + y + 'px;width:0;height:0';
-        document.body.appendChild(anchor);
-        this._showGroupFoldersPopover(anchor, groupName);
-        anchor.remove();
-      }},
-      { separator: true },
-      { label: 'Delete group', style: 'color:var(--red,#e55)', action: async () => {
-        if (await showConfirmDialog({ title: 'Delete Group', message: `Delete group "${groupName}"? Sessions will not be deleted.`, confirmText: 'Delete', danger: true })) this._deleteGroup(groupName);
-      }},
-    ]);
-  };
-
-  proto._assignSessionToGroup = function(sessionOrKey, groupName) {
-    const stateKey = this._getSessionStateKey(sessionOrKey);
-    if (!stateKey) return;
-    if (!this._sessionGroups[groupName]) this._sessionGroups[groupName] = [];
-    if (!this._sessionGroups[groupName].includes(stateKey)) this._sessionGroups[groupName].push(stateKey);
-    const legacyId = this._getLegacySessionId(sessionOrKey);
-    if (legacyId && legacyId !== stateKey) this._sessionGroups[groupName] = this._sessionGroups[groupName].filter(id => id !== legacyId);
-    this._pushUserState(); this._render();
-  };
-
-  proto._showGroupChecklistPopover = function(anchor, isCheckedFn, onToggleFn) {
-    const pop = createPopover(anchor, 'groups-popover');
-    const groupNames = this._getGroupNames();
-    for (const name of groupNames) {
-      const row = document.createElement('label'); row.className = 'session-detail-group-item';
-      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = isCheckedFn(name);
-      cb.onchange = (e) => { e.stopPropagation(); onToggleFn(name, cb.checked, pop); };
-      const lbl = document.createElement('span'); lbl.textContent = name;
-      row.append(cb, lbl);
-      row.onclick = (e) => e.stopPropagation();
-      pop.appendChild(row);
-    }
-    if (groupNames.length === 0) {
-      const hint = document.createElement('div'); hint.className = 'empty-hint'; hint.textContent = 'No groups yet';
-      pop.appendChild(hint);
-    }
-    const createRow = document.createElement('div'); createRow.className = 'session-detail-group-create';
-    createRow.textContent = '+ New group';
-    createRow.onclick = async (e) => {
-      e.stopPropagation();
-      const name = await showInputDialog({ title: 'New Group', label: 'Group name', confirmText: 'Create' });
-      if (name && name.trim()) { this._createGroup(name.trim()); onToggleFn(name.trim(), true, pop); pop.remove(); }
-    };
-    pop.appendChild(createRow);
-  };
 }

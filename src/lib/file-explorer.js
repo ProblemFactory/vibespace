@@ -1263,10 +1263,10 @@ class FileExplorer {
         }
         return sub;
       }});
-      const groupNames = this.app.sidebar?._getGroupNames() || [];
-      if (groupNames.length > 0) {
-        items.push({ label: 'Add to group', submenu: () => {
-          return groupNames.map(g => ({ label: g, action: () => this.app.sidebar?._addFolderToGroup(fullPath, g) }));
+      const tasks = this.app.sidebar?._tasks || [];
+      if (tasks.length > 0) {
+        items.push({ label: 'Add to task', submenu: () => {
+          return tasks.map(t => ({ label: t.title, action: () => this.app.sidebar?._taskAddFolder(t.id, fullPath) }));
         }});
       }
     }

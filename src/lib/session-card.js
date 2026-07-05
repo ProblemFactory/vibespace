@@ -24,16 +24,16 @@ const ICON = {
  * @param {HTMLElement} container - DOM container for groups
  * @param {object|string} sessionRef
  * @param {boolean} clickToCopy
- * @param {object} state - sidebar instance (for _getSessionGroups, _showGroupChecklistPopover, _addSessionToGroup, _removeSessionFromGroup)
+ * @param {object} state - sidebar instance (for _getSessionTasks, _showTaskChecklistPopover, _taskBind, _taskUnbind)
  */
 function renderDetailGroups(container, sessionRef, clickToCopy, state) {
   container.innerHTML = '';
-  const sessionGroups = state._getSessionGroups(sessionRef);
-  const summary = sessionGroups.length ? sessionGroups.join(', ') : 'None';
+  const sessionTasks = state._getSessionTasks(sessionRef);
+  const summary = sessionTasks.length ? sessionTasks.map(t => t.title).join(', ') : 'None';
 
   const row = document.createElement('div');
   row.className = 'session-detail-row';
-  const lbl = document.createElement('span'); lbl.className = 'session-detail-label'; lbl.textContent = 'Groups';
+  const lbl = document.createElement('span'); lbl.className = 'session-detail-label'; lbl.textContent = 'Tasks';
   const val = document.createElement('span'); val.className = 'session-detail-value';
   val.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
   val.textContent = summary;
@@ -56,10 +56,10 @@ function renderDetailGroups(container, sessionRef, clickToCopy, state) {
   btn.style.cssText = 'padding:1px 6px;font-size:10px;min-width:0';
   btn.onclick = (e) => {
     e.stopPropagation();
-    const groups = state._getSessionGroups(sessionRef);
-    state._showGroupChecklistPopover(btn,
-      (name) => groups.includes(name),
-      (name, checked) => { if (checked) state._addSessionToGroup(sessionRef, name); else state._removeSessionFromGroup(sessionRef, name); });
+    const taskIds = new Set(state._getSessionTasks(sessionRef).map(t => t.id));
+    state._showTaskChecklistPopover(btn,
+      (task) => taskIds.has(task.id),
+      (task, checked) => { if (checked) state._taskBind(task.id, sessionRef); else state._taskUnbind(task.id, sessionRef); });
   };
   row.appendChild(btn);
   container.appendChild(row);
