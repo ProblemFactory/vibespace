@@ -9,6 +9,7 @@ The sidebar's **Remote** tab (Storage section) manages rclone-backed mounts of s
 | **WebDAV / Nextcloud** | URL, username, password/app-token |
 | **SFTP** | ssh host/user/port, remote path, private-key path *or* password |
 | **Another VibeSpace** | the other instance's URL + a bridge token (`vsmt_…`) it minted for you |
+| **Custom (any rclone backend)** | an rclone backend name (dropbox, b2, azureblob, mega, …) + its config params as `key = value` lines |
 
 All secrets are AES-256-GCM encrypted at rest in `data/mounts.json`; passwords rclone needs obscured are obscured only at mount time (argv is never used).
 
@@ -81,3 +82,12 @@ Two VibeSpace instances can mount each other's folders over a built-in **WebDAV 
 **On the mounting side** — paste the link into **Import share link** (or **Add mount → Another VibeSpace**). It mounts the shared folder read/write per the token. Under the hood this is a WebDAV mount against the sharing instance's `/dav` endpoint with the token as a Bearer credential, so **any** WebDAV client (rclone, macOS Finder, Windows Explorer, phone file managers) can mount it too — the token is the only credential; `/dav` bypasses the normal cookie login.
 
 The bridge implements the WebDAV subset clients need (OPTIONS, PROPFIND, HEAD, GET with Range, PUT, MKCOL, DELETE, MOVE, COPY); locks aren't implemented (rclone doesn't use them).
+
+
+## Advanced: custom backends and options
+
+Every mount type accepts an **Extra rclone options** field (`key = value` per line) that's merged into the rclone config — for custom API keys, tuning flags (`chunk_size`, `upload_concurrency`), or provider quirks.
+
+For a backend not in the type list, pick **Custom (any rclone backend)**: give the rclone backend name and its params as `key = value` lines (see [rclone.org/docs](https://rclone.org/docs/) for each backend's keys — e.g. Backblaze `b2` wants `account` + `key`, Dropbox wants `token`). All values are encrypted at rest.
+
+Google Drive can use **your own OAuth client** (Google Cloud project) instead of rclone's shared one — fill the optional client ID/secret fields; the guided Connect flow uses them too.

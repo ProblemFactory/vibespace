@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.28.2] — 2026-07-05
+
+### Added
+
+- **Custom rclone backends** — a new *Custom (any rclone backend)* mount type takes any rclone backend name (dropbox, b2, azureblob, mega, …) plus its config as `key = value` lines, so anything rclone supports can be mounted without waiting for a dedicated type. Verified end-to-end (S3 backend via the generic path).
+- **Extra rclone options on every type** — an advanced `key = value` field merged into the rclone config of any mount (custom API keys, tuning flags like `chunk_size`, provider quirks).
+- **Custom Google Drive OAuth client** — optional client ID/secret fields (your own Google Cloud project, avoids rclone's shared quota); the guided Connect flow uses them too.
+
+All custom param values are AES-256-GCM encrypted at rest like every other secret.
+
 ## [2.28.1] — 2026-07-05
 
 ### Added / Changed

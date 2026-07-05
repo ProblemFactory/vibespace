@@ -1274,7 +1274,7 @@ app.post('/api/mounts/rclone/install', async (req, res) => {
 
 // Guided Google Drive OAuth (see mounts.js startDriveAuth for the model)
 app.post('/api/mounts/gdrive-auth/start', async (req, res) => {
-  try { res.json(await mounts.startDriveAuth()); }
+  try { res.json(await mounts.startDriveAuth(req.body || {})); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.get('/api/mounts/gdrive-auth/status', (req, res) => res.json(mounts.driveAuthStatus()));
