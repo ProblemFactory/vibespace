@@ -9,7 +9,6 @@ const { listCodexThreads } = require('./codex-session-store');
 const { findCodexSessionJsonlPath, extractCodexThreadMeta } = require('./adapters/codex');
 const { cwdToProjectDir } = require('./session-store');
 const crypto = require('crypto');
-const { SessionStatusManager } = require('./session-status');
 
 function getSessionKey(session = {}) {
   const backend = session.backend || 'claude'; // fallback needed: called with API data too
@@ -75,7 +74,7 @@ function registerWsHandler(wss, ctx) {
     SOCKETS_DIR, BUFFERS_DIR, META_DIR, PTY_WRAPPER, CHAT_WRAPPER,
     NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, PORT, X_ENV,
     adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
-    sessionStatus, sessionStatusKey, getTasks,
+    sessionStatus, sessionStatusKey,
   } = ctx;
 
   // Monotonic sequence for layout-sync rebroadcasts (shared across all
@@ -201,10 +200,11 @@ function registerWsHandler(wss, ctx) {
             // Per-session bearer for the agent-facing API (vibespace-status):
             // spawned into the CLI's env, scopes writes to this session only
             agentToken: 'vsst_' + crypto.randomBytes(12).toString('hex'),
-            // Context task (VIBESPACE_TASK_ID). Claude injects via its native
-            // SessionStart hook; codex (no session-start hook as of 0.142.x)
-            // gets the context attached to its FIRST chat message instead.
-            _taskId: data.taskId || null,
+            // Context task (VIBESPACE_TASK_ID). Delivered natively via the
+            // SessionStart/UserPromptSubmit hooks. VALIDATED to the task-id
+            // shape: it is interpolated into the remote ssh shell command, so a
+            // metachar-bearing value would be a shell-injection vector.
+            _taskId: (typeof data.taskId === 'string' && /^T-[\w-]{1,60}$/.test(data.taskId)) ? data.taskId : null,
             backend,
             backendSessionId: data.resumeId || null,
             claudeSessionId: backend === 'claude' ? (data.resumeId || null) : null,
@@ -249,6 +249,42 @@ function registerWsHandler(wss, ctx) {
           let spawnArgs = sessionSpec.args || [];
           let spawnEnvPairs = Object.entries(sessionSpec.env || {}).map(([k, v]) => `${k}=${v == null ? '' : String(v)}`);
           let spawnCwd = cwd;
+          // Remote agent enablement (P3): a remote session can't reach the local
+          // API at 127.0.0.1:<PORT>, and the vibespace-status/-task tools don't
+          // exist on the remote box. So for any remote session we (1) open an
+          // ssh REVERSE tunnel (remote 127.0.0.1:<rport> → this server) and (2)
+          // write the two tools into ~/.vibespace/bin on the remote + prepend
+          // PATH. Returns pieces spliced into the ssh inner command. Node's
+          // base64 is unwrapped (no newlines) so the blob is a single safe word.
+          const remoteAgentSetup = () => {
+            // Wide range → per-host collision (two sessions picking the same
+            // port) is negligible; a collision only degrades the loser's tools
+            // (ssh -R bind warns, session still runs), never breaks the session.
+            const rport = session._remotePort = 20000 + Math.floor(Math.random() * 40000);
+            const toolDir = path.dirname(EDITOR_CMD);
+            const b64 = (name) => { try { return fs.readFileSync(path.join(toolDir, name)).toString('base64'); } catch { return ''; } };
+            // Distribute the agent tools AND the hook + its self-registering
+            // installer to the remote box, then register the hook in the
+            // remote's own Claude/Codex config so its native SessionStart /
+            // UserPromptSubmit hooks deliver task context + status notices
+            // (our LOCAL hook never fires on the remote). node available: the
+            // remote agent CLIs are node apps, and we source nvm first.
+            const files = { 'vibespace-status': b64('vibespace-status'), 'vibespace-task': b64('vibespace-task'), 'vibespace-hook.mjs': b64('vibespace-hook.mjs'), 'vibespace-hook-register.mjs': b64('vibespace-hook-register.mjs') };
+            const haveAll = Object.values(files).every(Boolean);
+            const writes = Object.entries(files).map(([n, b]) => `printf %s ${b} | base64 -d > "$HOME/.vibespace/bin/${n}";`).join(' ');
+            const prelude = haveAll
+              ? `export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; mkdir -p "$HOME/.vibespace/bin"; ${writes} chmod +x "$HOME/.vibespace/bin"/vibespace-*; export PATH="$HOME/.vibespace/bin:$PATH"; node "$HOME/.vibespace/bin/vibespace-hook-register.mjs" 2>/dev/null || true; `
+              : '';
+            // session._taskId is already validated to the task-id shape; url +
+            // vsst_ token are metachar-free. The values are shq'd at the use
+            // sites (like spawnEnvPairs) as defense-in-depth regardless.
+            const envPairs = [
+              `VIBESPACE_API=http://127.0.0.1:${rport}`,
+              `VIBESPACE_SESSION_TOKEN=${session.agentToken}`,
+              ...(session._taskId ? [`VIBESPACE_TASK_ID=${session._taskId}`] : []),
+            ];
+            return { prelude, envPairs, reverse: `${rport}:127.0.0.1:${PORT}` };
+          };
           if (data.hostId && hosts && sessionMode === 'terminal') {
             let h;
             try { h = hosts.get(data.hostId); }
@@ -256,10 +292,11 @@ function registerWsHandler(wss, ctx) {
             const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
             // locally-resolved binary paths mean nothing on the remote
             const rcmd = spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd;
-            const inner = `cd ${shq(cwd)} 2>/dev/null; exec env TERM=xterm-256color COLORTERM=truecolor `
-              + [...spawnEnvPairs.map(shq), rcmd, ...spawnArgs.map(shq)].join(' ');
+            const ra = remoteAgentSetup();
+            const inner = ra.prelude + `cd ${shq(cwd)} 2>/dev/null; exec env TERM=xterm-256color COLORTERM=truecolor `
+              + [...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq), rcmd, ...spawnArgs.map(shq)].join(' ');
             spawnCmd = 'ssh';
-            spawnArgs = [...hosts.sshArgs(h, { tty: true }), '--', `dtach -A /tmp/vs-${id} -r winch sh -lc ${shq(inner)}`];
+            spawnArgs = [...hosts.sshArgs(h, { tty: true, reverse: ra.reverse }), '--', `dtach -A /tmp/vs-${id} -r winch sh -lc ${shq(inner)}`];
             spawnEnvPairs = [];
             spawnCwd = os.homedir(); // remote cwd rides inside the ssh command
             session.host = h.id;
@@ -280,10 +317,11 @@ function registerWsHandler(wss, ctx) {
             for (const fl of [['--output-format', 'stream-json'], ['--input-format', 'stream-json'], ['--verbose'], ['--permission-prompt-tool', 'stdio']]) {
               if (!rargs.includes(fl[0])) rargs.push(...fl);
             }
-            const inner = `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; exec env `
-              + [...spawnEnvPairs.map(shq), rcmd, ...rargs.map(shq)].join(' ');
+            const ra = remoteAgentSetup();
+            const inner = ra.prelude + `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; exec env `
+              + [...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq), rcmd, ...rargs.map(shq)].join(' ');
             spawnCmd = 'ssh';
-            spawnArgs = [...hosts.sshArgs(h), '-T', '--', inner];
+            spawnArgs = [...hosts.sshArgs(h, { reverse: ra.reverse }), '-T', '--', inner];
             spawnEnvPairs = [];
             spawnCwd = os.homedir();
             session.host = h.id;
@@ -300,7 +338,7 @@ function registerWsHandler(wss, ctx) {
               // marks the context task when created from the task board.
               `VIBESPACE_API=http://127.0.0.1:${PORT}`,
               `VIBESPACE_SESSION_TOKEN=${session.agentToken}`,
-              ...(data.taskId ? [`VIBESPACE_TASK_ID=${data.taskId}`] : []),
+              ...(session._taskId ? [`VIBESPACE_TASK_ID=${session._taskId}`] : []), // validated shape
               `PATH=${path.dirname(EDITOR_CMD)}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
               // Probed working X display (see server.js detectXDisplay) — the CLI
               // reads the clipboard itself on Ctrl+V, so it needs BOTH vars
@@ -517,31 +555,12 @@ function registerWsHandler(wss, ctx) {
               session._interruptTimer = null;
             }
             const msgId = data.msgId || (Date.now() + '-' + Math.random().toString(36).slice(2, 8));
-            // User overrode an agent-set status since the last message → tell
-            // the agent (user-requested: the agent should learn the user
-            // disliked its self-assessment). Rendered as a <system-reminder>
-            // block, which the chat UI shows as a collapsible dim card.
-            let inputText = data.text;
-            // Codex has no session-start hook (0.142.x: hook events are only
-            // user_prompt_submit/permission_request) — attach the task context
-            // to the FIRST message of the session instead. Same transparent
-            // channel as the status-override notice below; renders as a dim
-            // collapsible block in the chat. Claude is NOT double-injected —
-            // its native SessionStart hook already delivered the context.
-            if (session.backend === 'codex' && session._taskId && !session._taskCtxInjected && getTasks) {
-              try {
-                const ctxText = getTasks().renderContext(session._taskId);
-                if (ctxText) inputText = ctxText + '\n\n' + inputText;
-                session._taskCtxInjected = true;
-              } catch { /* task deleted — never block the message */ }
-            }
-            if (sessionStatus && sessionStatusKey) {
-              try {
-                const notice = sessionStatus.consumeNotice(sessionStatusKey(session, data.sessionId));
-                if (notice) inputText += '\n\n' + SessionStatusManager.renderNotice(notice);
-              } catch { }
-            }
-            const { stdinPayload, userMsg } = adapter.formatChatInput(inputText, msgId);
+            // NOTE: the user's message text is sent VERBATIM. Task context and
+            // status-override notices are delivered through the harness's OWN
+            // native hooks (SessionStart / UserPromptSubmit → vibespace-hook.mjs),
+            // never by rewriting the user's input — modifying the message stream
+            // is unstable and bypasses the CLI's mechanisms (user directive).
+            const { stdinPayload, userMsg } = adapter.formatChatInput(data.text, msgId);
             session._isStreaming = true;
             session.pty.write(stdinPayload + '\n');
             if (userMsg) {

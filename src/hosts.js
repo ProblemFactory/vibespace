@@ -127,10 +127,15 @@ class HostManager {
   }
 
   /** ssh argv for a host (shared by test/discovery/bootstrap/session spawn). */
-  sshArgs(h, { tty = false } = {}) {
+  sshArgs(h, { tty = false, reverse = null } = {}) {
     const args = [...SSH_BASE_OPTS, '-p', String(h.port || 22)];
     if (h.keyPath) args.push('-i', h.keyPath, '-o', 'IdentitiesOnly=yes');
     if (tty) args.push('-t');
+    // Reverse tunnel (remote 127.0.0.1:<rport> → this server): remote agent
+    // tools (vibespace-status/-task) call VIBESPACE_API through it. Placed
+    // BEFORE the destination so option parsing is unambiguous. Bind failures
+    // (port in use) only warn — the session still runs, tools just degrade.
+    if (reverse) args.push('-R', reverse);
     args.push(`${h.user}@${h.host}`);
     return args;
   }

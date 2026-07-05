@@ -1121,36 +1121,46 @@ const HOOK_CMD = path.join(EDITOR_DIR, 'vibespace-hook.mjs');
 function createHookHelper() {
   ensureDir(EDITOR_DIR);
   const script = `#!/usr/bin/env node
-// vibespace-hook — injects VibeSpace task context at SessionStart.
-// No-op unless the session was spawned by VibeSpace with a bound task.
+// vibespace-hook — delivers VibeSpace task context through the harness's OWN
+// native hooks (never by rewriting the user's message):
+//   SessionStart     → the task's context (goal, plan, files, rules)
+//   UserPromptSubmit → any pending status-override notice for this session
+// No-op unless the session was spawned by VibeSpace (VIBESPACE_* env present).
 let buf = '';
 let ran = false;
 async function run(input) {
   if (ran) return;
   ran = true;
   try {
-    if (input.hook_event_name !== 'SessionStart') return process.exit(0);
+    const event = input.hook_event_name;
     const api = process.env.VIBESPACE_API;
     const token = process.env.VIBESPACE_SESSION_TOKEN;
-    const taskId = process.env.VIBESPACE_TASK_ID;
-    if (!api || !token || !taskId) return process.exit(0);
+    if (!api || !token) return process.exit(0);
+    let path;
+    if (event === 'SessionStart') {
+      const taskId = process.env.VIBESPACE_TASK_ID;
+      if (!taskId) return process.exit(0);
+      path = '/api/agent/task-context?taskId=' + encodeURIComponent(taskId);
+    } else if (event === 'UserPromptSubmit') {
+      path = '/api/agent/prompt-context';
+    } else {
+      return process.exit(0);
+    }
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), 3000);
-    const res = await fetch(api + '/api/agent/task-context?taskId=' + encodeURIComponent(taskId), {
-      headers: { Authorization: 'Bearer ' + token }, signal: ctl.signal,
-    });
+    const res = await fetch(api + path, { headers: { Authorization: 'Bearer ' + token }, signal: ctl.signal });
     clearTimeout(timer);
     if (res.ok) {
       const data = await res.json();
-      if (data?.context) {
-        // Claude Code (verified against 2.1.201 binary: it even suggests "Did
-        // you mean hookSpecificOutput") requires the nested shape; Codex's
-        // hook schema descends from the same contract but the org's plugin
-        // uses top-level additionalContext — emit BOTH keys, each harness
-        // reads the one it knows.
+      if (data && data.context) {
+        // BOTH harnesses read the NESTED hookSpecificOutput.additionalContext
+        // (verified against the Claude 2.1.201 binary — it suggests "Did you
+        // mean hookSpecificOutput" — and the Codex *HookSpecificOutputWire
+        // JSON schema). Emit ONLY that: Codex's output schema is strict
+        // (additionalProperties:false), so an extra top-level additionalContext
+        // key makes Codex reject the whole object and inject nothing.
         process.stdout.write(JSON.stringify({
-          hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: data.context },
-          additionalContext: data.context,
+          hookSpecificOutput: { hookEventName: event, additionalContext: data.context },
         }));
       }
     }
@@ -1163,6 +1173,41 @@ process.stdin.on('end', () => { try { run(JSON.parse(buf)); } catch { } if (!ran
 setTimeout(() => process.exit(0), 8000); // never hang a session start
 `;
   fs.writeFileSync(HOOK_CMD, script, { mode: 0o755 });
+
+  // Remote-side registration script (P3): distributed to remote hosts alongside
+  // the hook so a REMOTE session's own Claude/Codex fires the hook natively
+  // (our LOCAL registration can't reach the remote box). Self-locating: it
+  // registers `node <its own dir>/vibespace-hook.mjs`. Same non-destructive
+  // logic as ensureAgentHooks; best-effort (a failure just means no injection).
+  const reg = `#!/usr/bin/env node
+import { readFileSync, writeFileSync, renameSync, existsSync } from 'fs';
+import { join, dirname } from 'path';
+import { homedir } from 'os';
+import { fileURLToPath } from 'url';
+const hookCmd = 'node ' + join(dirname(fileURLToPath(import.meta.url)), 'vibespace-hook.mjs');
+const EVENTS = ['SessionStart', 'UserPromptSubmit'];
+const files = [
+  { f: join(homedir(), '.claude', 'settings.json'), create: false },
+  { f: join(homedir(), '.codex', 'hooks.json'), create: true },
+];
+const findOur = (list) => { for (const g of (Array.isArray(list) ? list : [])) { const h = (g.hooks || []).find(h => typeof h.command === 'string' && h.command.includes('vibespace-hook.mjs')); if (h) return h; } return null; };
+for (const { f, create } of files) {
+  try {
+    let root = null; try { root = JSON.parse(readFileSync(f, 'utf-8')); } catch { root = null; }
+    if (!root) { if (existsSync(f)) continue; if (!create) continue; root = {}; }
+    if (!root.hooks || typeof root.hooks !== 'object') root.hooks = {};
+    let changed = false;
+    for (const ev of EVENTS) {
+      if (!Array.isArray(root.hooks[ev])) root.hooks[ev] = [];
+      const ours = findOur(root.hooks[ev]);
+      if (ours) { if (ours.command !== hookCmd) { ours.command = hookCmd; changed = true; } }
+      else { root.hooks[ev].push({ hooks: [{ type: 'command', command: hookCmd, timeout: 10 }] }); changed = true; }
+    }
+    if (changed) { const tmp = f + '.tmp'; writeFileSync(tmp, JSON.stringify(root, null, 2) + '\\n'); renameSync(tmp, f); }
+  } catch { }
+}
+`;
+  fs.writeFileSync(path.join(EDITOR_DIR, 'vibespace-hook-register.mjs'), reg, { mode: 0o755 });
 }
 createHookHelper();
 
@@ -1175,61 +1220,91 @@ const HOOK_FILES = {
   claude: { file: () => path.join(os.homedir(), '.claude', 'settings.json'), createIfMissing: false },
   codex: { file: () => path.join(os.homedir(), '.codex', 'hooks.json'), createIfMissing: true },
 };
-function _findOurHook(root) {
-  for (const group of root?.hooks?.SessionStart || []) {
-    const h = (group.hooks || []).find(h => typeof h.command === 'string' && h.command.includes('vibespace-hook.mjs'));
+// Both events are natively supported by Claude Code and Codex; SessionStart
+// delivers task context, UserPromptSubmit delivers pending status notices.
+const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit'];
+// Persisted opt-out: when the user clicks Remove in Manage Agents, we drop this
+// marker so startup does NOT silently re-register the hooks they removed.
+const HOOK_OPTOUT_FILE = path.join(__dirname, 'data', '.agent-hooks-optout');
+// DEFENSIVE: a user can hand-edit settings.json into any shape (a null group, a
+// string `hooks`, …). Never throw walking it — skip non-conforming entries so
+// agentHooksStatus/ensure/remove degrade gracefully instead of 500ing the UI.
+function _findOurHookIn(list) {
+  for (const group of Array.isArray(list) ? list : []) {
+    if (!group || !Array.isArray(group.hooks)) continue;
+    const h = group.hooks.find(h => h && typeof h.command === 'string' && h.command.includes('vibespace-hook.mjs'));
     if (h) return h;
   }
   return null;
 }
+// Read → mutate → write with a compare-and-swap re-read right before the atomic
+// rename: shrinks the lost-update window (a concurrent CLI write to the same
+// settings file between our read and write) to the two-syscall rename gap. The
+// mutate is idempotent, so re-applying it to fresher on-disk content is safe.
+function _patchHookFile(file, createIfMissing, mutate) {
+  const parse = () => { try { return { text: fs.readFileSync(file, 'utf-8') }; } catch { return { text: null }; } };
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const { text } = parse();
+    let root = null;
+    if (text != null) { try { root = JSON.parse(text); } catch { throw new Error(`${file} exists but is not valid JSON — not touching it`); } }
+    if (!root) {
+      if (text != null) throw new Error(`${file} exists but is not valid JSON — not touching it`);
+      if (!createIfMissing) throw new Error(`${file} not found (start the CLI once to create it)`);
+      root = {};
+    }
+    if (!root.hooks || typeof root.hooks !== 'object') root.hooks = {};
+    const changed = mutate(root);
+    if (!changed) return false;
+    const out = JSON.stringify(root, null, 2) + '\n';
+    // CAS: only commit if the file hasn't changed under us since we read it.
+    const cur = parse();
+    if (cur.text !== text) continue; // someone wrote it — re-read + re-apply
+    const tmp = file + '.tmp';
+    fs.writeFileSync(tmp, out);
+    fs.renameSync(tmp, file);
+    return true;
+  }
+  throw new Error(`${file} kept changing under concurrent writes — gave up`);
+}
 function agentHooksStatus() {
   const hookCmd = `node ${HOOK_CMD}`;
-  const out = { hookPath: HOOK_CMD };
+  const out = { hookPath: HOOK_CMD, optedOut: fs.existsSync(HOOK_OPTOUT_FILE) };
   for (const [key, def] of Object.entries(HOOK_FILES)) {
     const file = def.file();
     let root = null, parseError = false;
     try { root = JSON.parse(fs.readFileSync(file, 'utf-8')); }
     catch { parseError = fs.existsSync(file); }
-    const ours = root ? _findOurHook(root) : null;
+    let found = [];
+    try { found = HOOK_EVENTS.map(ev => root ? _findOurHookIn(root.hooks?.[ev]) : null); } catch { found = HOOK_EVENTS.map(() => null); }
     out[key] = {
       file,
       fileExists: fs.existsSync(file),
       parseError,
-      installed: !!ours && ours.command === hookCmd,
-      stale: !!ours && ours.command !== hookCmd, // registered but points at an old path
+      installed: found.every(h => h && h.command === hookCmd),
+      stale: found.some(h => h && h.command !== hookCmd) || (found.some(Boolean) && !found.every(Boolean)),
     };
   }
   return out;
 }
-function ensureAgentHooks() {
+// auto=true (startup): respect the opt-out marker. auto=false (explicit Install
+// from the UI): always register + clear the marker.
+function ensureAgentHooks({ auto = false } = {}) {
   const hookCmd = `node ${HOOK_CMD}`;
+  if (auto && fs.existsSync(HOOK_OPTOUT_FILE)) return { optedOut: true };
+  if (!auto) { try { fs.rmSync(HOOK_OPTOUT_FILE, { force: true }); } catch {} }
   const results = {};
   for (const [key, def] of Object.entries(HOOK_FILES)) {
-    const file = def.file();
     try {
-      let root = null;
-      try { root = JSON.parse(fs.readFileSync(file, 'utf-8')); } catch { root = null; }
-      if (!root) {
-        if (fs.existsSync(file)) throw new Error(`${file} exists but is not valid JSON — not touching it`);
-        if (!def.createIfMissing) throw new Error(`${file} not found (start the CLI once to create it)`);
-        root = {};
-      }
-      if (!root.hooks || typeof root.hooks !== 'object') root.hooks = {};
-      if (!Array.isArray(root.hooks.SessionStart)) root.hooks.SessionStart = [];
-      let changed = false;
-      const ours = _findOurHook(root);
-      if (ours) {
-        if (ours.command !== hookCmd) { ours.command = hookCmd; changed = true; } // path moved
-      } else {
-        root.hooks.SessionStart.push({ hooks: [{ type: 'command', command: hookCmd, timeout: 10 }] });
-        changed = true;
-      }
-      if (changed) {
-        const tmp = file + '.tmp';
-        fs.writeFileSync(tmp, JSON.stringify(root, null, 2) + '\n');
-        fs.renameSync(tmp, file);
-        console.log(`Registered VibeSpace SessionStart hook in ${file}`);
-      }
+      _patchHookFile(def.file(), def.createIfMissing, (root) => {
+        let changed = false;
+        for (const ev of HOOK_EVENTS) {
+          if (!Array.isArray(root.hooks[ev])) root.hooks[ev] = [];
+          const ours = _findOurHookIn(root.hooks[ev]);
+          if (ours) { if (ours.command !== hookCmd) { ours.command = hookCmd; changed = true; } }
+          else { root.hooks[ev].push({ hooks: [{ type: 'command', command: hookCmd, timeout: 10 }] }); changed = true; }
+        }
+        return changed;
+      }) && console.log(`Registered VibeSpace hooks in ${def.file()}`);
       results[key] = { ok: true };
     } catch (e) {
       console.log(`Hook registration (${key}) skipped:`, e.message);
@@ -1239,28 +1314,28 @@ function ensureAgentHooks() {
   return results;
 }
 function removeAgentHooks() {
+  // Durable: record the opt-out so startup won't re-register (finding #3).
+  try { fs.writeFileSync(HOOK_OPTOUT_FILE, new Date().toISOString() + '\n'); } catch {}
   for (const def of Object.values(HOOK_FILES)) {
-    const file = def.file();
     try {
-      const root = JSON.parse(fs.readFileSync(file, 'utf-8'));
-      if (!Array.isArray(root?.hooks?.SessionStart)) continue;
-      let changed = false;
-      for (const group of root.hooks.SessionStart) {
-        const before = (group.hooks || []).length;
-        group.hooks = (group.hooks || []).filter(h => !(typeof h.command === 'string' && h.command.includes('vibespace-hook.mjs')));
-        if (group.hooks.length !== before) changed = true;
-      }
-      root.hooks.SessionStart = root.hooks.SessionStart.filter(g => (g.hooks || []).length);
-      if (changed) {
-        const tmp = file + '.tmp';
-        fs.writeFileSync(tmp, JSON.stringify(root, null, 2) + '\n');
-        fs.renameSync(tmp, file);
-        console.log(`Removed VibeSpace SessionStart hook from ${file}`);
-      }
+      _patchHookFile(def.file(), false, (root) => {
+        let changed = false;
+        for (const ev of HOOK_EVENTS) {
+          if (!Array.isArray(root.hooks[ev])) continue;
+          for (const group of root.hooks[ev]) {
+            if (!group || !Array.isArray(group.hooks)) continue;
+            const before = group.hooks.length;
+            group.hooks = group.hooks.filter(h => !(h && typeof h.command === 'string' && h.command.includes('vibespace-hook.mjs')));
+            if (group.hooks.length !== before) changed = true;
+          }
+          root.hooks[ev] = root.hooks[ev].filter(g => g && Array.isArray(g.hooks) && g.hooks.length);
+        }
+        return changed;
+      }) && console.log(`Removed VibeSpace hooks from ${def.file()}`);
     } catch { }
   }
 }
-ensureAgentHooks();
+ensureAgentHooks({ auto: true });
 
 // ── File System API (extracted to src/routes/files.js) ──
 app.locals.xEnv = X_ENV;
@@ -1361,6 +1436,15 @@ app.post('/api/tasks/:id/progress', (req, res) => {
   try { res.json({ success: true, task: tasks.addProgress(req.params.id, req.body || {}) }); }
   catch (e) { res.status(e.message === 'task not found' ? 404 : 400).json({ error: e.message }); }
 });
+// P4 repo task files: export a task to a committable markdown file / import one.
+app.post('/api/tasks/:id/export', (req, res) => {
+  try { res.json({ success: true, path: tasks.exportToFile(req.params.id, req.body?.path) }); }
+  catch (e) { res.status(e.message === 'task not found' ? 404 : 400).json({ error: e.message }); }
+});
+app.post('/api/tasks/import', (req, res) => {
+  try { res.json({ success: true, task: tasks.importFromFile(req.body?.path) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
 
 // ── Session status (agent-set via vibespace-status CLI, user-overridable) ──
 // The user's override of an agent-set status is injected as a system-reminder
@@ -1422,12 +1506,44 @@ function agentSession(req, res, { needTask = false } = {}) {
   res.status(401).json({ error: 'unknown session token' });
   return null;
 }
-// SessionStart hook payload (P2 context injection): rendered task state +
-// context folder file index + the rules.
+// SessionStart hook payload (context injection): rendered task state + context
+// folder file index + the rules. Fires + injects for Claude (terminal + chat).
+// SCOPED to the session's OWN context task — the ?taskId= query is ignored so a
+// token can never read another task's context.
 app.get('/api/agent/task-context', (req, res) => {
-  if (!agentSession(req, res)) return;
-  try { res.json({ success: true, context: tasks.renderContext(String(req.query.taskId || '')) }); }
-  catch (e) { res.status(404).json({ error: e.message }); }
+  const hit = agentSession(req, res);
+  if (!hit) return;
+  try {
+    res.json({ success: true, context: hit[0]._taskId ? tasks.renderContext(hit[0]._taskId) : '' });
+  } catch (e) { res.status(404).json({ error: e.message }); }
+});
+// UserPromptSubmit hook payload — delivered through the harness's own prompt
+// hook, NEVER by rewriting the user's message. Two things ride here:
+//  1. Task context on the FIRST prompt, but ONLY for codex — codex fires
+//     UserPromptSubmit (not SessionStart) in app-server mode. Claude gets its
+//     context from SessionStart, so it must NOT also get it here (no double
+//     injection, and no dependence on a cross-endpoint "delivered" flag that a
+//     timed-out SessionStart fetch could set falsely).
+//  2. Any pending status-override notice (the user changed a status the agent
+//     set). Consumed on read → injected exactly once, on the next user turn.
+app.get('/api/agent/prompt-context', (req, res) => {
+  const hit = agentSession(req, res);
+  if (!hit) return;
+  try {
+    const parts = [];
+    if (hit[0].backend === 'codex' && hit[0]._taskId && !hit[0]._promptCtxDone) {
+      try {
+        const ctx = tasks.renderContext(hit[0]._taskId);
+        if (ctx) { parts.push(ctx); hit[0]._promptCtxDone = true; }
+      } catch { /* task deleted */ }
+    }
+    const key = sessionStatusKey(hit[0], hit[1]);
+    for (const k of [key, `webui:${hit[1]}`]) { // record may still be under webui:<id>
+      const notice = sessionStatus.consumeNotice(k);
+      if (notice) { parts.push(SessionStatusManager.renderNotice(notice)); break; }
+    }
+    res.json({ success: true, context: parts.join('\n\n') });
+  } catch (e) { res.json({ success: true, context: '' }); }
 });
 // ── vibespace-task agent endpoints (P3): validated task-level writes,
 // SCOPED to the session's own context task (VIBESPACE_TASK_ID at spawn) —
@@ -1491,7 +1607,7 @@ app.post('/api/agent/task-plan', (req, res) => {
 app.get('/api/agent-hooks', (req, res) => res.json(agentHooksStatus()));
 app.post('/api/agent-hooks/install', (req, res) => {
   createHookHelper(); // regenerate the script too (repair path)
-  const results = ensureAgentHooks();
+  const results = ensureAgentHooks({ auto: false }); // explicit → clears any opt-out
   res.json({ success: true, results, status: agentHooksStatus() });
 });
 app.post('/api/agent-hooks/uninstall', (req, res) => {

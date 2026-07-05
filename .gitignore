@@ -14,3 +14,4 @@ data/settings-sync.json
 data/bin/code
 *.nfs*
 .agent-context/
+data/.agent-hooks-optout

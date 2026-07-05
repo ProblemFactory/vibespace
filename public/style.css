@@ -2093,3 +2093,8 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 }
 .session-status-pop-hint { font-size: 10px; color: var(--text-dim); max-width: 220px; line-height: 1.4; }
 .session-status-pop-btns { display: flex; gap: 6px; justify-content: flex-end; }
+
+/* Task board add/import row (P4) */
+.task-board-addrow { display: flex; gap: 6px; }
+.task-board-addrow .new-session-card { flex: 1; }
+.task-board-import { flex: 0 0 auto !important; padding-left: 12px; padding-right: 12px; }
