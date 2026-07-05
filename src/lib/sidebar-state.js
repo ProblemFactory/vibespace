@@ -31,6 +31,7 @@ export function installSidebarState(SidebarClass) {
   proto._writeUserStateToLocalStorage = function(state) {
     localStorage.setItem('starredSessions', JSON.stringify(state.starredSessions || []));
     localStorage.setItem('archivedSessions', JSON.stringify(state.archivedSessions || []));
+    localStorage.setItem('archivedFolders', JSON.stringify(state.archivedFolders || []));
     localStorage.setItem('sessionCustomNames', JSON.stringify(state.customNames || {}));
     localStorage.setItem('sessionModes', JSON.stringify(state.sessionModes || {}));
     localStorage.setItem('sessionConfigs', JSON.stringify(state.sessionConfigs || {}));
@@ -163,6 +164,7 @@ export function installSidebarState(SidebarClass) {
     this._sessionGroups = nextGroups;
     this._writeUserStateToLocalStorage({
       starredSessions: [...this._starredIds], archivedSessions: [...this._archivedIds],
+      archivedFolders: [...(this._archivedFolders || [])],
       customNames: this._customNames, sessionModes: this._sessionModes, sessionConfigs: this._sessionConfigs,
       sessionGroups: this._sessionGroups, groupFolders: this._groupFolders,
     });
@@ -173,6 +175,7 @@ export function installSidebarState(SidebarClass) {
     if (state.stateVersion) this._userStateVersion = state.stateVersion;
     if (state.starredSessions) this._starredIds = new Set(state.starredSessions);
     if (state.archivedSessions) this._archivedIds = new Set(state.archivedSessions);
+    if (state.archivedFolders) this._archivedFolders = new Set(state.archivedFolders);
     if (state.customNames) this._customNames = { ...state.customNames };
     if (state.sessionModes) this._sessionModes = { ...state.sessionModes };
     if (state.sessionConfigs) this._sessionConfigs = { ...state.sessionConfigs };
@@ -180,6 +183,7 @@ export function installSidebarState(SidebarClass) {
     if (state.groupFolders) this._groupFolders = { ...state.groupFolders };
     this._writeUserStateToLocalStorage({
       starredSessions: [...this._starredIds], archivedSessions: [...this._archivedIds],
+      archivedFolders: [...(this._archivedFolders || [])],
       customNames: this._customNames, sessionModes: this._sessionModes, sessionConfigs: this._sessionConfigs,
       sessionGroups: this._sessionGroups, groupFolders: this._groupFolders,
     });
@@ -188,6 +192,7 @@ export function installSidebarState(SidebarClass) {
   proto._pushUserState = async function() {
     const state = {
       starredSessions: [...this._starredIds], archivedSessions: [...this._archivedIds],
+      archivedFolders: [...(this._archivedFolders || [])],
       customNames: this._customNames, sessionModes: this._sessionModes, sessionConfigs: this._sessionConfigs,
       sessionGroups: this._sessionGroups, groupFolders: this._groupFolders,
     };
@@ -228,13 +233,86 @@ export function installSidebarState(SidebarClass) {
       this._archivedIds.delete(stateKey);
       const legacyId = this._getLegacySessionId(sessionOrKey);
       if (legacyId) this._archivedIds.delete(legacyId);
+      // If its folder is still folder-archived the session would just re-archive
+      // on the next render — dissolve the folder rule into individual archives
+      // (minus this session) so unarchiving one card actually sticks.
+      this._dissolveFolderArchive(sessionOrKey, stateKey);
+    } else if (this._isFolderArchived(sessionOrKey)) {
+      // Archived only via the folder rule (e.g. created after Archive project):
+      // unarchive = dissolve the rule, keep the rest archived individually.
+      this._dissolveFolderArchive(sessionOrKey, stateKey);
     } else if (stateKey) {
       this._archivedIds.add(stateKey);
     }
     this._pushUserState(); this._render(); this.app.updateTaskbar();
   };
 
-  proto.isArchived = function(sessionOrKey) { return this._stateSetHas(this._archivedIds, sessionOrKey); };
+  // Folder-level archive key for a session — host-scoped so archiving a local
+  // folder never swallows a remote session that happens to share the path.
+  proto._archiveFolderKey = function(sessionOrKey, host) {
+    if (sessionOrKey && typeof sessionOrKey === 'object') {
+      const cwd = sessionOrKey.cwd || '(unknown)';
+      return (sessionOrKey.host ? sessionOrKey.host + '::' : '') + cwd;
+    }
+    if (typeof sessionOrKey === 'string' && sessionOrKey) return (host ? host + '::' : '') + sessionOrKey;
+    return null;
+  };
+
+  proto._isFolderArchived = function(sessionOrKey) {
+    const fkey = this._archiveFolderKey(sessionOrKey);
+    return !!(fkey && this._archivedFolders?.has(fkey));
+  };
+
+  proto._dissolveFolderArchive = function(sessionOrKey, exceptKey) {
+    const fkey = this._archiveFolderKey(sessionOrKey);
+    if (!fkey || !this._archivedFolders?.has(fkey)) return;
+    this._archivedFolders.delete(fkey);
+    for (const s of this._allSessions || []) {
+      if (this._archiveFolderKey(s) !== fkey) continue;
+      const k = this._getSessionStateKey(s);
+      if (k && k !== exceptKey) this._archivedIds.add(k);
+    }
+  };
+
+  // A session is archived when explicitly archived OR its folder is archived.
+  // The folder rule is what makes "Archive project" cover FUTURE sessions in
+  // that folder too (previously only then-existing sessions were archived, so
+  // new ones popped back and the archive looked like it didn't stick).
+  proto.isArchived = function(sessionOrKey) {
+    if (this._stateSetHas(this._archivedIds, sessionOrKey)) return true;
+    return this._isFolderArchived(sessionOrKey);
+  };
+
+  proto.isFolderArchived = function(cwd, host) { return !!this._archivedFolders?.has(this._archiveFolderKey(cwd, host)); };
+
+  // Archive a whole project: record the FOLDER (future sessions start archived)
+  // + archive every current session under it individually.
+  proto.archiveProject = function(cwd, sessions, host) {
+    const fkey = this._archiveFolderKey(cwd, host);
+    if (fkey) this._archivedFolders.add(fkey);
+    let n = 0;
+    for (const s of sessions || []) {
+      const stateKey = this._getSessionStateKey(s);
+      if (stateKey && !this._archivedIds.has(stateKey)) { this._archivedIds.add(stateKey); n++; }
+    }
+    this._pushUserState(); this._render(); this.app.updateTaskbar();
+    showToast(`Archived ${n} session${n === 1 ? '' : 's'} — new sessions here start archived`);
+  };
+
+  proto.unarchiveProject = function(cwd, host) {
+    const fkey = this._archiveFolderKey(cwd, host);
+    if (fkey) this._archivedFolders.delete(fkey);
+    let n = 0;
+    for (const s of this._allSessions || []) {
+      if (this._archiveFolderKey(s) !== fkey) continue;
+      const k = this._getSessionStateKey(s);
+      if (k && this._archivedIds.delete(k)) n++;
+      const legacy = this._getLegacySessionId(s);
+      if (legacy) this._archivedIds.delete(legacy);
+    }
+    this._pushUserState(); this._render(); this.app.updateTaskbar();
+    showToast(`Unarchived project (${n} session${n === 1 ? '' : 's'})`);
+  };
 
   // Bulk archive (folder header context menu) — one state push + render for
   // the whole batch instead of per-session toggles.

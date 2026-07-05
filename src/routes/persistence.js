@@ -217,6 +217,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     stateVersion: 2,
     starredSessions: [],
     archivedSessions: [],
+    archivedFolders: [],
     customNames: {},
     sessionModes: {},
     sessionConfigs: {},
@@ -311,6 +312,8 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
       stateVersion: 2,
       starredSessions: migrateStateArray(source.starredSessions, knownSessionKeys),
       archivedSessions: migrateStateArray(source.archivedSessions, knownSessionKeys),
+      // folder keys, not session refs — no legacy migration needed
+      archivedFolders: Array.isArray(source.archivedFolders) ? source.archivedFolders.filter((x) => typeof x === 'string' && x) : [],
       customNames: migrateStateMap(source.customNames && typeof source.customNames === 'object' ? source.customNames : {}, knownSessionKeys),
       sessionModes: migrateStateMap(source.sessionModes && typeof source.sessionModes === 'object' ? source.sessionModes : {}, knownSessionKeys),
       sessionConfigs: migrateStateMap(source.sessionConfigs && typeof source.sessionConfigs === 'object' ? source.sessionConfigs : {}, knownSessionKeys),
@@ -436,8 +439,8 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
         layouts: { count: Object.keys(layouts?.layouts || {}).length + (layouts?.autoSave ? 1 : 0), desktops: (layouts?.desktopMeta || []).length },
         userState: {
           count: Object.keys(state?.customNames || {}).length + Object.keys(state?.starredSessions || {}).length
-            + Object.keys(state?.archivedSessions || {}).length + Object.keys(state?.sessionGroups || {}).length
-            + Object.keys(state?.sessionConfigs || {}).length,
+            + Object.keys(state?.archivedSessions || {}).length + Object.keys(state?.archivedFolders || {}).length
+            + Object.keys(state?.sessionGroups || {}).length + Object.keys(state?.sessionConfigs || {}).length,
           groups: Object.keys(state?.sessionGroups || {}).length,
         },
         bookmarks: { count: (bookmarks || []).length },
