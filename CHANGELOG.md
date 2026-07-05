@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.31.0] — 2026-07-05
+
+### Added
+
+- **Session status indicators** — every session can carry a state (`working` / `needs-input` / `blocked` / `review`) + urgency (`low`→`urgent`) + reason, shown as a colored chip on the session card (urgent pulses). **Agents set their own status**: sessions now spawn with a `vibespace-status` CLI on PATH (per-session token auth) so an agent can report `vibespace-status blocked --urgency high --reason "…"` from its normal shell tool. **You can overwrite it** from the chip's popover — and if you change or clear an agent-set status, the agent is told in a note attached to your next message, so it learns your preference. Blocked sessions feed their tasks' ⚠ attention badges alongside idle-waiting.
+- **New session in a task** — the New Session dialog gained a **Task** dropdown; the task board's + button and context menu open the dialog pre-filled (task selected, working directory = the task's first auto-include folder) while you confirm all parameters. The session is tagged to the task automatically and spawned with `VIBESPACE_TASK_ID` in its environment (groundwork for context injection).
+
+### Changed
+
+- **Your existing groups are now full tasks** — the migrated groups (kind `group`) were upgraded to kind `task` (status/objective/plan/progress available); fresh migrations now produce tasks directly.
+
 ## [2.30.0] — 2026-07-05
 
 ### Added

@@ -167,6 +167,10 @@ Each task renders as a collapsible section: status chip (`active` / `paused` / `
 
 Click **"+ New Task"** on the board (opens the detail window), or "+ New task" at the bottom of any task checklist popover.
 
+### New session in a task
+
+The **+** button on a task header (or right-click → "New session in this task…") opens the normal New Session dialog **pre-filled**: the task pre-selected in the new **Task** dropdown and the working directory set to the task's first auto-include folder — you confirm every parameter as usual. The Task dropdown is also available when creating a session from anywhere else. The created session is tagged to the task automatically and spawned with `VIBESPACE_TASK_ID` in the agent's environment (used by the upcoming context injection).
+
 ### Tagging sessions (many-to-many)
 
 - **Session card**: expand a card → **Tasks ▾** → check/uncheck tasks
@@ -197,11 +201,28 @@ The details button (or context menu → Details…) opens a per-task window: tit
 
 ### Attention
 
-When a bound session's agent finishes and waits for input (the window-title blink), the task's header shows a blinking **⚠ N** and the Tasks tab itself gets a ⚠ — a board-level "which of my agents need me" view. VibeSpace only observes and surfaces; it never acts on the agent.
+When a bound session's agent finishes and waits for input (the window-title blink), or declares itself **blocked** via session status (below), the task's header shows a blinking **⚠ N** and the Tasks tab itself gets a ⚠ — a board-level "which of my agents need me" view. VibeSpace only observes and surfaces; it never acts on the agent.
+
+## Session status (agent-set, user-overridable)
+
+Every session can carry a **status indicator**: a state (`working` / `needs-input` / `blocked` / `review`), an urgency (`low` / `normal` / `high` / `urgent`), and an optional reason. It renders as a colored chip on the session card (urgency adds `!` / `!!`; urgent pulses), and blocked sessions feed their tasks' ⚠ badges.
+
+**Agents set their own status.** Sessions are spawned with a small CLI on PATH — the agent just runs it with its ordinary shell tool:
+
+```
+vibespace-status blocked --urgency high --reason "waiting for DB credentials"
+vibespace-status working
+vibespace-status clear
+vibespace-status show
+```
+
+It authenticates with a per-session token from the environment, so an agent can only set its own session's status.
+
+**You can overwrite it.** Click the chip (or the Status row in the expanded card) → pick state/urgency, or Clear. If you change or clear a status the **agent** had set, the agent is told about it in a note attached to your next message — so it learns your preference instead of silently fighting you over the indicator.
 
 ### Multi-client sync
 
-Tasks live server-side in `data/tasks.json` and broadcast to all connected clients (`tasks-updated`); star/archive/name state stays in `data/user-state.json`. Changes made on one device appear instantly on all others.
+Tasks live server-side in `data/tasks.json`, session statuses in `data/session-status.json`; both broadcast to all connected clients (`tasks-updated` / `session-status-updated`). Star/archive/name state stays in `data/user-state.json`. Changes made on one device appear instantly on all others.
 
 ### Archiving whole projects
 
