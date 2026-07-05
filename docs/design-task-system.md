@@ -39,11 +39,7 @@ Task {
 
 The `objective` lives in the pinned file inside `contextDir` (not a DB field) — human-editable, agent-readable/writable, one source of truth.
 
-**State source (user-confirmed): VibeSpace owns it** — `data/tasks.json` (atomic write + `tasks-updated` WS broadcast, same pattern as hosts/mounts/user-state). Two escape hatches, both agent-driven:
-- Agents can **read/update** task state via an MCP tool / skill (§5).
-- A task can **export to / sync with a repo task file** (§6), written by the agent with its normal file tools.
-
-This makes VibeSpace self-contained (works with zero external setup) while letting agents and repos participate when wanted.
+**State source (user-confirmed): split by nature** — task METADATA (id/title/status/sessions/attention/contextDir) lives in `data/tasks.json` (atomic write + `tasks-updated` WS broadcast, same pattern as hosts/mounts/user-state); task CONTENT (objective, progress, shared artifacts) lives in the context folder as plain files (§4a/§5), where both the user (via VibeSpace UI) and agents (via their file tools) read/write it. Self-contained with zero external setup; repo participation is just pointing contextDir into a repo (§6).
 
 ## 4. Binding → context injection (the key mechanism)
 
