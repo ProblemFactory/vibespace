@@ -1237,6 +1237,7 @@ class FileExplorer {
         }
       }});
       items.push({ label: 'Open Terminal Here', action: () => this.app.openShellTerminal(fullPath, { hostId: this._host || undefined }) });
+      if (!this._host) items.push({ label: 'Share this folder…', action: () => this.app.sidebar?._showBridgeShareDialog?.(fullPath) });
       items.push({ label: 'Sessions', submenu: () => {
         const sub = [];
         sub.push({ label: '+ New session', action: () => this.app.showNewSessionDialog({ cwd: fullPath }) });
@@ -1288,6 +1289,7 @@ class FileExplorer {
     items.push({ label: 'Select All', action: () => { this._selection = new Set(this._renderOrder); this._applySelectionClasses(); } });
     items.push({ label: 'Refresh', action: () => this.refresh() });
     items.push({ label: 'Copy Path', action: () => copyText(this.currentPath) });
+    if (!this._host) items.push({ label: 'Share this folder…', action: () => this.app.sidebar?._showBridgeShareDialog?.(this.currentPath) });
     items.push({ label: 'Properties', action: () => this._showProperties(null) });
     this._buildMenu(x, y, items);
   }
@@ -1315,6 +1317,9 @@ class FileExplorer {
           menu.appendChild(sub);
         };
       } else {
+        // hovering a plain item must dismiss a sibling's open submenu —
+        // without this the submenu stuck around until another submenu opened
+        el.onmouseenter = () => menu.querySelectorAll('.context-submenu').forEach(sx => sx.remove());
         el.onclick = () => { menu.remove(); item.action(); };
       }
       menu.appendChild(el);
@@ -1441,9 +1446,8 @@ class FileExplorer {
 
   async _showProperties(name) {
     const fp = name ? this.currentPath + '/' + name : this.currentPath;
-    const r = await fetch(`/api/file/stat?path=${encodeURIComponent(fp)}&du=1${this._hp()}`).catch(() => null);
-    const d = await r?.json().catch(() => null);
-    if (!d || d.error) { showToast('Could not read properties', { type: 'error' }); return; }
+    // Open INSTANTLY with placeholders; a recursive-size du on a big tree can
+    // take many seconds and a click with no response reads as broken.
     const overlay = document.createElement('div'); overlay.className = 'dialog-overlay'; overlay.style.zIndex = '99998';
     const dialog = document.createElement('div'); dialog.className = 'dialog';
     const header = document.createElement('div'); header.className = 'dialog-header';
@@ -1454,20 +1458,34 @@ class FileExplorer {
     const rows = [
       ['Name', fp.split('/').pop() || '/'],
       ['Path', fp],
-      ['Type', d.isDirectory ? `Folder (${d.entryCount ?? '?'} items)` : 'File'],
-      ['Size', d.isDirectory ? (d.duSize != null ? `${formatSize(d.duSize)} (recursive)` : 'unknown') : formatSize(d.size)],
-      ['Modified', d.modified ? new Date(d.modified).toLocaleString() : '-'],
-      ['Created', d.created ? new Date(d.created).toLocaleString() : '-'],
-      ['Permissions', d.mode || '-'],
+      ['Type', '…'], ['Size', '…'], ['Modified', '…'], ['Created', '…'], ['Permissions', '…'],
     ];
     const table = document.createElement('div');
     table.style.cssText = 'display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:12px;';
+    const cells = {};
     for (const [k, v] of rows) {
       const kEl = document.createElement('div'); kEl.textContent = k; kEl.style.color = 'var(--text-dim)';
       const vEl = document.createElement('div'); vEl.textContent = v; vEl.style.cssText = 'word-break:break-all;user-select:text;';
+      cells[k] = vEl;
       table.append(kEl, vEl);
     }
     body.appendChild(table);
+    // fast stat (no recursive size) fills everything visible immediately…
+    fetch(`/api/file/stat?path=${encodeURIComponent(fp)}${this._hp()}`).then(r => r.json()).then((d) => {
+      if (!d || d.error) { cells.Type.textContent = 'Could not read properties'; return; }
+      cells.Type.textContent = d.isDirectory ? `Folder (${d.entryCount ?? '?'} items)` : 'File';
+      cells.Size.textContent = d.isDirectory ? 'calculating…' : formatSize(d.size);
+      cells.Modified.textContent = d.modified ? new Date(d.modified).toLocaleString() : '-';
+      cells.Created.textContent = d.created ? new Date(d.created).toLocaleString() : '-';
+      cells.Permissions.textContent = d.mode || '-';
+      // …then the slow recursive size streams in for folders when it's done
+      if (d.isDirectory) {
+        fetch(`/api/file/stat?path=${encodeURIComponent(fp)}&du=1${this._hp()}`).then(r => r.json()).then((d2) => {
+          if (!overlay.isConnected) return; // dialog closed meanwhile
+          cells.Size.textContent = d2?.duSize != null ? `${formatSize(d2.duSize)} (recursive)` : 'unknown';
+        }).catch(() => { if (overlay.isConnected) cells.Size.textContent = 'unknown'; });
+      }
+    }).catch(() => { cells.Type.textContent = 'Could not read properties'; });
     dialog.append(header, body);
     overlay.appendChild(dialog);
     document.body.appendChild(overlay);
