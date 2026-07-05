@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.33.0] — 2026-07-05
+
+### Added
+
+- **Hook management in Manage Agents** — the task-context hook now has a visible home: **⚙ → Manage agents…** shows a "VibeSpace integration" row with plain-language per-CLI status (installed / not installed / needs update / config unreadable) and one-click **Install / Reinstall / Remove**. It still installs itself automatically at server start; the dialog exists so non-engineers can see that it's working and fix it if it isn't. Removal only ever touches VibeSpace's own entry — other hooks are never modified.
+- **`vibespace-task` — agents report task progress** — sessions started from a task can now write back to the board with their ordinary shell tool: `vibespace-task progress "what I did"` (timestamped, session-tagged), `plan-check <step>` / `plan-add "step"`, `status <active|paused|blocked|done>`, and `show`. Writes are validated and scoped server-side to the session's own task; the task detail window, board, and `TASK.md` update live. The injected task context teaches agents these commands automatically.
+
 ## [2.32.0] — 2026-07-05
 
 ### Added
