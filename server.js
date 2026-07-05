@@ -1116,8 +1116,49 @@ syncStores.settings = new SyncStore('settings', path.join(__dirname, 'data', 'se
 syncStores.uploads = new SyncStore('uploads', path.join(__dirname, 'data', 'uploads-sync.json'), wss);
 
 setupPersistence({ dataDir: path.join(__dirname, 'data'), wss, WS_OPEN, getSyncStore, activeSessions, auth,
-  getHosts: () => hosts, getMounts: () => mounts });
+  getHosts: () => hosts, getMounts: () => mounts, getTasks: () => tasks });
 app.use(persistenceRouter);
+
+// ── Tasks (task system P1 — docs/design-task-system.md) ──
+// data/tasks.json is AUTHORITATIVE for everything the board renders; the
+// one-time Groups migration (sessionGroups/groupFolders → kind:'group' tasks)
+// runs in the constructor, guarded by tasks.json existence.
+const { TaskManager } = require('./src/tasks');
+const tasks = new TaskManager({
+  dataDir: path.join(__dirname, 'data'),
+  readUserState: () => persistenceRouter.readUserState(),
+  onChange: (list) => {
+    const json = JSON.stringify({ type: 'tasks-updated', tasks: list });
+    wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
+  },
+});
+app.get('/api/tasks', (req, res) => res.json({ tasks: tasks.list() }));
+app.post('/api/tasks', (req, res) => {
+  try { res.json({ success: true, task: tasks.create(req.body || {}) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.patch('/api/tasks/:id', (req, res) => {
+  try { res.json({ success: true, task: tasks.update(req.params.id, req.body || {}) }); }
+  catch (e) { res.status(e.message === 'task not found' ? 404 : 400).json({ error: e.message }); }
+});
+app.delete('/api/tasks/:id', (req, res) => {
+  try { tasks.remove(req.params.id); res.json({ success: true }); }
+  catch (e) { res.status(404).json({ error: e.message }); }
+});
+// Granular tag ops (atomic server-side — concurrent clients can't clobber
+// each other's read-modify-write of the sessions array)
+app.post('/api/tasks/:id/bind', (req, res) => {
+  try { res.json({ success: true, task: tasks.bind(req.params.id, req.body?.sessionKey) }); }
+  catch (e) { res.status(e.message === 'task not found' ? 404 : 400).json({ error: e.message }); }
+});
+app.post('/api/tasks/:id/unbind', (req, res) => {
+  try { res.json({ success: true, task: tasks.unbind(req.params.id, req.body?.sessionKey) }); }
+  catch (e) { res.status(e.message === 'task not found' ? 404 : 400).json({ error: e.message }); }
+});
+app.post('/api/tasks/:id/progress', (req, res) => {
+  try { res.json({ success: true, task: tasks.addProgress(req.params.id, req.body || {}) }); }
+  catch (e) { res.status(e.message === 'task not found' ? 404 : 400).json({ error: e.message }); }
+});
 
 // ── Hosts (ssh host registry for remote sessions — collaboration P2) ──
 const { HostManager } = require('./src/hosts');
