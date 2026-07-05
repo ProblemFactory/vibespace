@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.32.0] — 2026-07-05
+
+### Added
+
+- **Task context injection (P2)** — a session started or resumed **in a task** now begins with the task's context already injected: objective, plan, recent progress, an index of the context folder's files (the agent reads what it needs), and the working rules (don't touch the generated `.vibespace/`, share artifacts in the folder, report with `vibespace-status`).
+  - **Claude**: via Claude Code's native SessionStart hook — registered automatically (idempotent, non-destructive to existing hooks), a no-op for any session not started from a VibeSpace task. Works for terminal and chat sessions, and re-fires on resume.
+  - **Codex**: no session-start hook exists in current Codex, so the context rides on the session's first message (shown as a collapsible dim block).
+  - VibeSpace now also generates `<contextDir>/.vibespace/TASK.md` — an always-current markdown mirror of the task state, kept in lockstep with every task change (the program is its only writer).
+  - Verified end-to-end on both backends with a codeword placed only in the task objective — both models answered it.
+
 ## [2.31.0] — 2026-07-05
 
 ### Added
