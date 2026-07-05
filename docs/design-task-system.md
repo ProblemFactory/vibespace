@@ -104,16 +104,46 @@ Each task can designate a **context folder** (`contextDir`) — the task's share
 
 Properties: opt-in (env var), sanctioned hook API, degrades gracefully (no hook → session starts normally; no contextDir → inject just title/status), user-authored content. The `/goal` lesson applied: delegate to the native mechanism.
 
-## 5. Agent participation = files, not MCP (user decision)
+## 5. The agent-modification interface = file conventions (no MCP, no protocol)
 
-No MCP server. The injected skill (§4a) defines simple file conventions inside `contextDir`:
-- `TASK.md` (pinned) — objective + a small frontmatter block (`status:`, `blocked:` reason) the agent may update.
-- `progress.md` — append-only progress notes (`## <date> <session>` sections).
-- anything else — shared artifacts/reference docs for sibling agents.
+The interface for an agent to modify a task IS a set of file conventions inside `contextDir`, taught by the injected skill (§4a). Chosen over MCP/HTTP/CLI because it is the **only** interface that works uniformly for **remote-host agents** too: if `contextDir` is a shared folder (mount / repo / synced path), a remote agent editing files just works, and VibeSpace — watching its own view of that folder — picks the change up. An HTTP endpoint or a CLI helper would break the moment the agent runs on another machine.
 
-VibeSpace **watches the folder** and parses just those two conventions to drive the board (status changes, blocked reasons, latest progress line). The agent uses its normal Read/Write tools; nothing to install beyond the hook. This is control-plane by construction: agents report by writing files; VibeSpace observes and presents.
+### 5.1 The two convention files
 
-**UI for the same state:** the task detail view lets the USER edit everything the agent can — open/edit the pinned file (CodeMirror editor already exists), browse the context folder (file explorer exists), change status/attention directly. User and agents share one medium: the folder.
+**`TASK.md`** — the pinned file (injected verbatim). YAML frontmatter carries the machine-readable state; the body is the objective/plan (free markdown, human + agent authored):
+```markdown
+---
+status: active          # active | paused | blocked | done
+blocked:                # optional one-line reason; presence (or status:blocked) raises attention
+---
+
+# Refactor the auth layer to scrypt
+
+Constraints: keep the cookie-token format. Plan: 1) … 2) …
+```
+
+**`progress.md`** — append-only log; each entry a `##` heading `date time · <who>` then free notes:
+```markdown
+## 2026-07-05 14:30 · claude
+Extracted the token store; tests green.
+
+## 2026-07-05 15:10 · codex
+Blocked: need the staging API key to verify the refresh path.
+```
+
+### 5.2 What the injected skill tells the agent
+
+> You are working on task **{title}** (folder: `{contextDir}`). To report up: append a `## <date> · <you>` entry to `progress.md` when you finish a step; if you get stuck, set `status: blocked` and a one-line `blocked:` reason in `TASK.md` frontmatter. Put anything sibling agents need (findings, artifacts, decisions) as files in this folder. Read the other files here for shared context. Keep `TASK.md`'s objective current.
+
+Short, declarative, no tool calls — the agent uses ordinary Read/Write.
+
+### 5.3 How VibeSpace consumes it
+
+`TaskManager` runs one `fs.watch` per task with a `contextDir` (debounced): on change it re-parses `TASK.md` frontmatter (`status`, `blocked`) and `progress.md`'s tail, writes the cached `status`/`attention`/`lastProgress` into `data/tasks.json`, and broadcasts `tasks-updated`. Detection stays with the agent (it declares blocked); VibeSpace only observes + surfaces (§7). Remote contextDirs: watched via the local mount view, or polled over ssh on the discovery cadence when not mounted.
+
+### 5.4 The user edits the same medium
+
+The task detail view gives the USER the same two levers without leaving VibeSpace: **open `TASK.md` in the existing CodeMirror editor** (edit objective + flip status), **browse `contextDir` in the file explorer**, **view `progress.md`**. A "Set up context folder" button scaffolds `contextDir` (creates the dir + a `TASK.md` stub) when a task first wants agent participation. User and agents share one folder; there is exactly one place each fact lives.
 
 ## 6. Repo task files (optional, bidirectional, agent-driven)
 
