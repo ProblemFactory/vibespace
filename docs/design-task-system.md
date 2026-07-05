@@ -22,20 +22,22 @@ Explicitly **out of scope** (user did not choose it): auto-scheduling / fleet au
 
 ## 3. Core model
 
-**Task = a tag** (user-confirmed). It's a first-class object that sessions are tagged with; a session belongs to zero or one task; a task has many sessions. It is NOT a container that owns/locks sessions (walter's claim/lock model is dropped — too heavy, too close to orchestration).
+**Task = a tag, and tasks are a SUPERSET of Groups** (user-confirmed). A task is a group with a goal + lifecycle + attention. Existing user groups stay as-is (a task with no objective/status behaves exactly like today's group); the Groups tab grows into the task board. One grouping system, not two.
 
 ```
 Task {
   id            "T-<yymmdd>-<slug>"        // stable, human-readable
   title
-  objective     markdown                    // the persistent goal + context injected into bound sessions
   status        active | paused | done | blocked
   attention     null | { reason, since }    // surfaced, set by signals (see §7) or manually
   sessions      [sessionKey, ...]           // bound sessions (backend:backendSessionId)
-  repoFile      null | "<abs path or repo-relative>"  // optional linked task file (§6)
+  contextDir    null | "<abs path>"         // the task's shared context FOLDER (§4a)
+  pinnedFile    "TASK.md"                   // file inside contextDir injected VERBATIM (default TASK.md)
   createdAt, updatedAt
 }
 ```
+
+The `objective` lives in the pinned file inside `contextDir` (not a DB field) — human-editable, agent-readable/writable, one source of truth.
 
 **State source (user-confirmed): VibeSpace owns it** — `data/tasks.json` (atomic write + `tasks-updated` WS broadcast, same pattern as hosts/mounts/user-state). Two escape hatches, both agent-driven:
 - Agents can **read/update** task state via an MCP tool / skill (§5).
@@ -45,26 +47,34 @@ This makes VibeSpace self-contained (works with zero external setup) while letti
 
 ## 4. Binding → context injection (the key mechanism)
 
-**Confirmed feasible** — this is exactly how existing SessionStart hook plugins (e.g. `claude-mem`) already inject context: a hook emits `hookSpecificOutput.additionalContext` at session start and the harness adds it to the session's context. We use the harness's own mechanism; VibeSpace never touches the stream.
+**Confirmed feasible on BOTH harnesses.** Claude Code and Codex (≥0.14x) use the SAME hooks.json schema (`SessionStart`/`UserPromptSubmit`/`Stop`, `{type:'command', command}`), and a SessionStart hook returning `{ additionalContext }` injects into the session's context. Live evidence on this machine: the org's own `claude-task-tracker` plugin (ProblemFactory) runs ONE hook.mjs from both `~/.claude` plugin hooks AND `~/.codex/hooks.json`, and its SessionStart handler already returns `additionalContext`. So one dual-harness hook script covers both backends.
 
 Flow:
-1. User bind a session to a task (or starts a new session "in" a task from the task board).
-2. VibeSpace spawns that session with an env var, e.g. `VIBESPACE_TASK_ID=T-...` (injected in the dtach/ssh spawn line, same place `CLAUDE_WEBUI_*` go).
-3. A **VibeSpace SessionStart hook plugin** (shipped by us, installed once into `~/.claude/settings` or as a plugin) runs at session start, reads `VIBESPACE_TASK_ID`, fetches that task's `objective` + live progress from VibeSpace's local API (`GET /api/tasks/:id/context`), and emits it as `additionalContext`.
-4. The agent starts already knowing the task's goal and state — natively, opt-in, no wrapper injection.
+1. User binds a session to a task (or starts a new session "in" a task from the board).
+2. VibeSpace spawns that session with `VIBESPACE_TASK_ID=T-...` in its env (dtach/ssh spawn line, same place `CLAUDE_WEBUI_*` go).
+3. A **VibeSpace hook script** (one .mjs, registered for both harnesses) runs at SessionStart, reads `VIBESPACE_TASK_ID`, fetches `GET /api/tasks/:id/context` from the local VibeSpace, and returns `additionalContext`.
+4. The agent starts knowing the task — natively, opt-in, no wrapper injection.
 
-Properties: opt-in (only fires when the env var is present), uses the sanctioned hook API, degrades gracefully (hook absent → session just starts normally), and the injected text is *user-authored task context*, not VibeSpace deciding agent behavior. This is the `/goal` lesson applied: delegate to the native mechanism.
+### 4a. What gets injected: the task context folder (user-designed)
 
-Open question for implementation: ship the hook as a **Claude Code plugin** (cleanest, versioned, `/plugin` install) vs. a settings-snippet the onboarding writes. Plugin preferred.
+Each task can designate a **context folder** (`contextDir`) — the task's shared brain, visible to every bound agent (it's just a directory; agents on remote hosts see it via a mount/shared path when applicable). The injected `additionalContext` is assembled from it:
 
-## 5. Agent-writable state (MCP / skill)
+1. **The pinned file** (default `TASK.md`, user-choosable) — injected **verbatim**: the objective, constraints, current plan.
+2. **A listing of the other files** in the folder (name/path + size/mtime) — injected as an index so the agent knows what reference material exists and can READ what it needs with its normal file tools (no context bloat from injecting everything).
+3. **The task skill** — short instructions telling the agent the conventions: "this is your task folder; append progress to progress.md; update status/blocked in TASK.md frontmatter; put artifacts other agents need here." This replaces MCP entirely (user decision): the agent participates through ordinary file reads/writes, and VibeSpace **watches the folder** (fs.watch) to reflect status/progress on the board. No protocol, no tools to install — any agent that can edit files can participate.
 
-VibeSpace exposes a small **MCP server** (local, stdio or the session's env-addressable HTTP) giving the bound agent tools to participate in its task:
-- `task_get` — read the current task (objective, status, progress, sibling sessions).
-- `task_update` — set status, append a progress note, set/clear `attention` with a reason ("blocked on X").
-- `task_note` — append to a running shared context/log the task carries.
+Properties: opt-in (env var), sanctioned hook API, degrades gracefully (no hook → session starts normally; no contextDir → inject just title/status), user-authored content. The `/goal` lesson applied: delegate to the native mechanism.
 
-The agent *chooses* to call these (a tool, not a compulsion) — squarely control-plane: the agent reports up, VibeSpace stores + presents. This is how an agent marks itself blocked, which the board then surfaces (§7) — detection stays with the agent/harness, VibeSpace only stores + shows.
+## 5. Agent participation = files, not MCP (user decision)
+
+No MCP server. The injected skill (§4a) defines simple file conventions inside `contextDir`:
+- `TASK.md` (pinned) — objective + a small frontmatter block (`status:`, `blocked:` reason) the agent may update.
+- `progress.md` — append-only progress notes (`## <date> <session>` sections).
+- anything else — shared artifacts/reference docs for sibling agents.
+
+VibeSpace **watches the folder** and parses just those two conventions to drive the board (status changes, blocked reasons, latest progress line). The agent uses its normal Read/Write tools; nothing to install beyond the hook. This is control-plane by construction: agents report by writing files; VibeSpace observes and presents.
+
+**UI for the same state:** the task detail view lets the USER edit everything the agent can — open/edit the pinned file (CodeMirror editor already exists), browse the context folder (file explorer exists), change status/attention directly. User and agents share one medium: the folder.
 
 ## 6. Repo task files (optional, bidirectional, agent-driven)
 
@@ -94,18 +104,21 @@ VibeSpace only *detects-by-observing* + *surfaces* + lets the user *acknowledge*
 server:  src/tasks.js  TaskManager (data/tasks.json, atomic + tasks-updated broadcast)
          routes: /api/tasks CRUD, /api/tasks/:id/context (hook reads this), bind/unbind
          spawn: inject VIBESPACE_TASK_ID into bound sessions (ws-handler spawn line)
-hook:    a Claude Code plugin — SessionStart → read VIBESPACE_TASK_ID → GET context → additionalContext
-mcp:     a small MCP server exposing task_get/task_update/task_note to bound agents
-client:  task board UI (sidebar), bind-to-task on session cards, attention surfacing
-         reuse: group-assignment interaction, OSC idle detection, workbench cards
+         watch: fs.watch on each task's contextDir → parse TASK.md frontmatter + progress.md → board
+hook:    ONE dual-harness hook script (same schema in ~/.claude plugin hooks and ~/.codex/hooks.json;
+         proven by the org's claude-task-tracker) — SessionStart → VIBESPACE_TASK_ID →
+         GET /api/tasks/:id/context → additionalContext (pinned file + folder index + task skill)
+client:  task board = Groups tab grown up (tasks ⊃ groups); task detail view (objective editor via
+         CodeMirror, folder browse, status/attention); bind via existing group-assignment interaction;
+         attention from OSC idle detection + folder-declared blocked
 ```
 
 ## 10. Phasing
 
-- **P1 (MVP, pure control-plane, zero agent-facing pieces):** TaskManager + `data/tasks.json` + task board UI + bind sessions to tasks (tag) + per-task attention from the EXISTING idle detection. No hook, no MCP yet. This alone delivers pains #1 and #2 and is unambiguously in-scope.
-- **P2 (context injection):** the SessionStart hook plugin + `VIBESPACE_TASK_ID` spawn + `/api/tasks/:id/context`. Delivers pain #3.
-- **P3 (agent participation):** the MCP server (task_get/update/note) → agent-declared progress + blocked.
-- **P4 (repo sync):** export/import/link task files.
+- **P1 (MVP, pure control-plane, zero agent-facing pieces):** TaskManager + `data/tasks.json` + task board (Groups-superset migration) + bind sessions (tag) + per-task attention from the EXISTING idle detection + context folder designation + task detail UI (edit pinned file / browse folder). No hook yet. Delivers pains #1 and #2.
+- **P2 (context injection):** the dual-harness SessionStart hook + `VIBESPACE_TASK_ID` spawn + `/api/tasks/:id/context` (pinned file verbatim + folder index + task skill). Delivers pain #3.
+- **P3 (agent participation):** contextDir watcher parsing TASK.md frontmatter + progress.md → agent-declared status/blocked/progress on the board. (Files, not MCP.)
+- **P4 (repo sync):** contextDir can BE a repo directory (tasks/T-*/ in a repo) — export/link conventions.
 
 Ship and validate each phase before the next. P1 is the safe, high-value core; P2–P4 add the agent-facing surface, each through a native harness extension point.
 
@@ -116,6 +129,6 @@ Ship and validate each phase before the next. P1 is the safe, high-value core; P
 | Task-as-tag + board | ✅ pure | organizes/presents; user drives |
 | Attention surfacing | ✅ | detect-by-observing existing signals + manual ack; never auto-acts |
 | Context injection via SessionStart hook | ✅ | harness's own mechanism, opt-in, user-authored context; VibeSpace doesn't touch the loop |
-| Agent MCP task tools | ✅ | tools the agent *chooses* to call; agent reports up, VibeSpace stores |
+| Agent participation via files in contextDir | ✅ | agent uses its ordinary file tools by choice; VibeSpace watches + presents |
 | Repo task-file sync | ✅ | a projection of state; agent writes files with its own tools |
 | ~~auto-spawn / auto-continue / auto-assign~~ | ❌ excluded | that's orchestration — the harness's `/goal` and the user own it |
