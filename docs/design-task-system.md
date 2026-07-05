@@ -1,6 +1,6 @@
 # Task System — Design
 
-Status: **P1+P2 SHIPPED** (P1 2.30.0, session-status/new-session-from-task 2.31.0, P2 injection 2.32.0 — all 2026-07-05). P2 note: codex 0.142.x has NO session-start hook (only user_prompt_submit/permission_request), so codex gets the context attached to its first chat message until a native hook exists; claude uses the real SessionStart hook (nested hookSpecificOutput shape REQUIRED). P3 (vibespace-task CLI; vibespace-status shipped early in 2.31.0) / P4 (repo sync) not started. Design agreed 2026-07-05; supersedes the shelved walter `feat/task-centric` approach (see below).
+Status: **P1+P2 SHIPPED** (P1 2.30.0, session-status/new-session-from-task 2.31.0, P2 injection 2.32.0 — all 2026-07-05). P2 note: codex 0.142.x has NO session-start hook (only user_prompt_submit/permission_request), so codex gets the context attached to its first chat message until a native hook exists; claude uses the real SessionStart hook (nested hookSpecificOutput shape REQUIRED). P3 vibespace-task CLI shipped 2.33.0 (local sessions; endpoints scoped to the session's context task; hook install surfaced in Manage Agents). Remaining: P3 remote half (ssh reverse tunnel + remote tool distribution) and P4 (repo sync). Design agreed 2026-07-05; supersedes the shelved walter `feat/task-centric` approach (see below).
 
 ## 1. Vision & the hard boundary
 
