@@ -396,15 +396,22 @@ export function installSidebarWorkbench(Sidebar) {
         head.style.setProperty('--wb-proj-color', color);
         head.innerHTML = `<span class="wb-proj-dot"></span><span class="wb-proj-name">${escHtml(abbrevPath(cwd))}</span><span class="wb-zone-count">${list.length}</span>`;
         // Archive the WHOLE project in one click — the fast path for folders
-        // full of throwaway sessions (observer swarms etc.).
+        // full of throwaway sessions (observer swarms etc.). IMPORTANT: archive
+        // EVERY session under this cwd (recent + older/history), not just the
+        // recent-zone rows shown here — otherwise the folder's older sessions
+        // stay un-archived and reappear (looked like the archive "didn't stick"
+        // after a restart re-surfaced them).
         const archAll = document.createElement('button');
         archAll.className = 'wb-proj-archive';
         archAll.innerHTML = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h12M3 4v8a1 1 0 001 1h8a1 1 0 001-1V4"/><path d="M6.5 8h3"/></svg>';
-        archAll.title = `Archive all ${list.length} session${list.length === 1 ? '' : 's'} in this project`;
+        const projAll = (this._allSessions || []).filter(s => (s.cwd || '(unknown)') === cwd && !this.isArchived(s));
+        const nAll = projAll.length || list.length;
+        archAll.title = `Archive all ${nAll} session${nAll === 1 ? '' : 's'} in this project`;
         archAll.onclick = async (e) => {
           e.stopPropagation();
-          const ok = await showConfirmDialog({ title: 'Archive project', message: `Archive all ${list.length} session${list.length === 1 ? '' : 's'} under ${abbrevPath(cwd)}? They move to the Archived filter (nothing is deleted).`, confirmText: 'Archive all', danger: false });
-          if (ok) this.archiveSessions(list);
+          const targets = (this._allSessions || []).filter(s => (s.cwd || '(unknown)') === cwd && !this.isArchived(s));
+          const ok = await showConfirmDialog({ title: 'Archive project', message: `Archive all ${targets.length} session${targets.length === 1 ? '' : 's'} under ${abbrevPath(cwd)}? They move to the Archived filter (nothing is deleted).`, confirmText: 'Archive all', danger: false });
+          if (ok) this.archiveSessions(targets);
         };
         head.appendChild(archAll);
         // one-click new session in this project (kept from the old folder header)
