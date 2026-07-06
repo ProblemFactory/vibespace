@@ -24,11 +24,12 @@ const ICON_DETAIL = '<svg style="width:10px;height:10px" viewBox="0 0 16 16" fil
 // Session-level status indicators — set by the AGENT itself (vibespace-status
 // CLI in its env) or by the user (card popover). User overrides of agent-set
 // values are relayed to the agent on the next message (server-side).
+const _si = (d) => `<svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 export const SESSION_STATE_META = {
-  working: { label: 'working', color: 'var(--green)' },
-  'needs-input': { label: 'needs input', color: 'var(--yellow, #e5c07b)' },
-  blocked: { label: 'blocked', color: 'var(--red, #e55)' },
-  review: { label: 'review', color: 'var(--blue, #6af)' },
+  working: { label: 'working', color: 'var(--green)', icon: _si('<path d="M1.5 8h3l1.5-4 2 8 1.5-4h3.5"/>') },
+  'needs-input': { label: 'needs input', color: 'var(--yellow, #e5c07b)', icon: _si('<path d="M6 6a2 2 0 113 1.7c-.6.5-1 .9-1 1.8"/><circle cx="8" cy="12" r=".7" fill="currentColor" stroke="none"/>') },
+  blocked: { label: 'blocked', color: 'var(--red, #e55)', icon: _si('<circle cx="8" cy="8" r="6"/><path d="M4 4l8 8"/>') },
+  review: { label: 'review', color: 'var(--blue, #6af)', icon: _si('<path d="M1.5 8s2.5-4 6.5-4 6.5 4 6.5 4-2.5 4-6.5 4-6.5-4-6.5-4z"/><circle cx="8" cy="8" r="1.7"/>') },
 };
 export const SESSION_URGENCY_META = {
   low: { label: 'low', mark: '' },

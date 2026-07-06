@@ -122,25 +122,24 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
 
   const starred = state.isStarred(s);
   // Compact row: star archive mode/backend icon name status expand
-  // Row 1: name alone (never crowded by tags). Row 2: all tag badges
-  // (role/config-icon/host/status chip/connection). Row 3 (only when showCwd —
-  // the task board, where a task's sessions span different directories): the
-  // session's own cwd, left-truncated so the meaningful tail shows. Left-side
-  // control icons sit centered across the rows.
+  // Two rows. Row 1: a connection-status DOT (LIVE/STOPPED/… as a colored dot
+  // left of the name) + name + tag badges (role, config gear, host, and the
+  // session-status chip — text on a wide sidebar, icon-only when narrow via a
+  // container query). Row 2 (task board only, via showCwd): the session's own
+  // cwd, left-truncated. Left control icons center across the rows.
   const cwdText = s.cwd ? escHtml(s.cwd.replace(/^\/home\/[^/]+/, '~')) : '';
+  const connLabel = { live: 'LIVE', tmux: 'TMUX', external: 'External', stopped: 'Stopped' }[s.status] || 'Stopped';
   card.innerHTML = `<div class="session-card-row">
     <div class="session-card-lines">
       <div class="session-card-main">
+        <span class="session-conn-dot" data-status="${escHtml(s.status || 'stopped')}" data-tip="${escHtml(connLabel)}"></span>
         <span class="session-card-name">${escHtml(displayName)}</span>
-      </div>
-      <div class="session-card-tags">
-        ${agentRoleShort ? `<span class="session-card-badge badge-agent-role" title="${escHtml(agentRoleLabel)}">${escHtml(agentRoleShort)}</span>` : ''}
+        ${agentRoleShort ? `<span class="session-card-badge badge-agent-role" data-tip="${escHtml(agentRoleLabel)}">${escHtml(agentRoleShort)}</span>` : ''}
         <span class="session-card-badge badge-config" style="display:none"></span>
-        ${s.hostName ? `<span class="session-host-badge" title="Remote session on ${escHtml(s.hostName)}">${escHtml(s.hostName)}</span>` : ''}
+        ${s.hostName ? `<span class="session-host-badge" data-tip="Remote session on ${escHtml(s.hostName)}">${escHtml(s.hostName)}</span>` : ''}
         <span class="sess-state-chip" style="display:none"></span>
-        <span class="session-card-badge ${badge.cls}">${badge.text}</span>
       </div>
-      ${showCwd && cwdText ? `<div class="session-card-sub"><span class="session-card-cwd" title="${escHtml(s.cwd)}">${cwdText}</span></div>` : ''}
+      ${showCwd && cwdText ? `<div class="session-card-sub"><span class="session-card-cwd" data-tip="${escHtml(s.cwd)}">${cwdText}</span></div>` : ''}
     </div>
   </div>`;
   const row = card.querySelector('.session-card-row');
@@ -161,11 +160,14 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       const meta = SESSION_STATE_META[dstate] || { label: dstate || 'status', color: 'var(--text-dim)' };
       const mark = SESSION_URGENCY_META[st?.urgency]?.mark || '';
       const derived = !st?.state; // synthesized by VibeSpace, not agent/user-declared
+      const label = (dstate ? meta.label : (st?.urgency || 'status')) + (mark ? ' ' + mark : '');
       stateChip.style.display = '';
       stateChip.style.setProperty('--chip-color', meta.color);
-      stateChip.textContent = (dstate ? meta.label : '') + (mark ? ' ' + mark : (!dstate && st?.urgency ? st.urgency : ''));
+      // Icon + text: the text shows on a wide sidebar, the icon-only when narrow
+      // (container query). data-tip gives the instant tooltip in icon mode.
+      stateChip.innerHTML = `<span class="chip-icon">${meta.icon || ''}</span><span class="chip-text">${escHtml(label)}</span>`;
       stateChip.classList.toggle('sess-state-derived', derived);
-      stateChip.title = derived
+      stateChip.dataset.tip = derived
         ? `${meta.label} — ${waiting ? 'finished, waiting for you' : 'active'} (observed by VibeSpace; the agent can set its own state with vibespace-status). Click to set manually.`
         : `${st.state ? 'state: ' + meta.label : ''}${st.urgency ? (st.state ? ' · ' : '') + 'urgency: ' + st.urgency : ''}${st.reason ? ' — ' + st.reason : ''} (set by ${st.setBy === 'agent' ? 'the agent' : 'you'}; click to change)`;
       stateChip.classList.toggle('sess-state-urgent', st?.urgency === 'urgent');
@@ -181,7 +183,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     cfgBadge.style.display = '';
     // Icon-only: the details live in the tooltip (was showing the full model id,
     // which crowded the row). Hover to see model/effort/permission.
-    cfgBadge.title = 'Custom session config — ' + parts.join(' · ') + ' (click to change)';
+    cfgBadge.dataset.tip = 'Custom session config — ' + parts.join(' · ') + ' (click to change)';
     cfgBadge.innerHTML = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.6 3.6l1.4 1.4M11 11l1.4 1.4M3.6 12.4l1.4-1.4M11 5l1.4-1.4"/></svg>`;
   };
   updateCfgBadge();
