@@ -122,13 +122,22 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
 
   const starred = state.isStarred(s);
   // Compact row: star archive mode/backend icon name status expand
+  // Two-row layout: name + connection status on the main row (name gets the
+  // width), secondary metadata (role/config/host/state chip) on a sub row that
+  // hides itself when empty. Left-side control icons sit centered across both.
   card.innerHTML = `<div class="session-card-row">
-    <span class="session-card-name">${escHtml(displayName)}</span>
-    ${agentRoleShort ? `<span class="session-card-badge badge-agent-role" title="${escHtml(agentRoleLabel)}">${escHtml(agentRoleShort)}</span>` : ''}
-    <span class="session-card-badge badge-config" style="display:none"></span>
-    ${s.hostName ? `<span class="session-host-badge" title="Remote session on ${escHtml(s.hostName)}">${escHtml(s.hostName)}</span>` : ''}
-    <span class="sess-state-chip" style="display:none"></span>
-    <span class="session-card-badge ${badge.cls}">${badge.text}</span>
+    <div class="session-card-lines">
+      <div class="session-card-main">
+        <span class="session-card-name">${escHtml(displayName)}</span>
+        <span class="session-card-badge ${badge.cls}">${badge.text}</span>
+      </div>
+      <div class="session-card-sub">
+        ${agentRoleShort ? `<span class="session-card-badge badge-agent-role" title="${escHtml(agentRoleLabel)}">${escHtml(agentRoleShort)}</span>` : ''}
+        <span class="session-card-badge badge-config" style="display:none"></span>
+        ${s.hostName ? `<span class="session-host-badge" title="Remote session on ${escHtml(s.hostName)}">${escHtml(s.hostName)}</span>` : ''}
+        <span class="sess-state-chip" style="display:none"></span>
+      </div>
+    </div>
   </div>`;
   const row = card.querySelector('.session-card-row');
   // Session status chip (agent-set via vibespace-status / user-set) — state
@@ -166,8 +175,10 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     const parts = ['model', 'effort', 'permission'].filter(k => cfg[k]).map(k => `${k}: ${cfg[k]}`);
     if (!parts.length) { cfgBadge.style.display = 'none'; cfgBadge.textContent = ''; return; }
     cfgBadge.style.display = '';
-    cfgBadge.title = 'Custom session config — ' + parts.join(' · ');
-    cfgBadge.innerHTML = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.6 3.6l1.4 1.4M11 11l1.4 1.4M3.6 12.4l1.4-1.4M11 5l1.4-1.4"/></svg><span>${escHtml(cfg.model || cfg.effort || cfg.permission)}</span>`;
+    // Icon-only: the details live in the tooltip (was showing the full model id,
+    // which crowded the row). Hover to see model/effort/permission.
+    cfgBadge.title = 'Custom session config — ' + parts.join(' · ') + ' (click to change)';
+    cfgBadge.innerHTML = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.6 3.6l1.4 1.4M11 11l1.4 1.4M3.6 12.4l1.4-1.4M11 5l1.4-1.4"/></svg>`;
   };
   updateCfgBadge();
   // Star button (inline, always visible)
@@ -213,13 +224,13 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       className: 'session-composite-icon',
       title: `${backendMeta.label} ${s.webuiMode === 'chat' ? 'Chat' : 'Terminal'}`,
     });
-    row.insertBefore(compositeIcon, row.querySelector('.session-card-name'));
+    row.insertBefore(compositeIcon, row.querySelector('.session-card-lines'));
   } else {
     const backendIcon = createBackendIcon(s.backend || 'claude', {
       className: 'session-backend-icon',
       title: backendMeta.label,
     });
-    row.insertBefore(backendIcon, row.querySelector('.session-card-name'));
+    row.insertBefore(backendIcon, row.querySelector('.session-card-lines'));
   }
 
   if (showAgentKind) {
@@ -227,7 +238,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       className: 'session-agent-kind-icon',
       title: agentKindMeta.label,
     });
-    row.insertBefore(agentKindIcon, row.querySelector('.session-card-name'));
+    row.insertBefore(agentKindIcon, row.querySelector('.session-card-lines'));
   }
 
   // Expand/collapse button on the right side, after badge
@@ -243,7 +254,14 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       onExpandToggle(s.sessionId);
     }
   };
-  card.querySelector('.session-card-row').appendChild(expandBtn);
+  card.querySelector('.session-card-main').appendChild(expandBtn);
+
+  // Hide the second row when it has nothing to show, so plain/stopped sessions
+  // stay on a single line.
+  {
+    const sub = card.querySelector('.session-card-sub');
+    if (sub && ![...sub.children].some((c) => c.style.display !== 'none')) sub.style.display = 'none';
+  }
 
   // Detail panel (shown when expanded)
   const detailPanel = document.createElement('div');

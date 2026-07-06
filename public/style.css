@@ -112,6 +112,12 @@ html, body {
 }
 .session-item-card:hover { background: var(--bg-hover); border-color: var(--border-active); }
 .session-card-row { display: flex; align-items: center; gap: 6px; }
+.session-card-lines { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.session-card-main { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.session-card-sub { display: flex; align-items: center; gap: 5px; min-width: 0; flex-wrap: wrap; }
+.session-card-sub .session-card-badge, .session-card-sub .session-host-badge { font-size: 9px; }
+.badge-config { padding: 1px 3px; display: inline-flex; align-items: center; }
+.badge-config svg { width: 11px; height: 11px; }
 .session-card-name { font-size: 11px; font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
 .backend-icon {
   --backend-icon-color: currentColor;
@@ -331,6 +337,10 @@ html, body {
   font-size: 11px; font-weight: 600; color: var(--text-secondary);
   border-radius: var(--radius-sm); transition: background var(--transition);
 }
+.folder-header.has-paths { flex-direction: column; align-items: stretch; gap: 2px; }
+.folder-header-main { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.task-folder-paths { display: flex; flex-wrap: wrap; gap: 2px 8px; padding-left: 18px; font-size: 9px; font-weight: 400; color: var(--text-dim); min-width: 0; }
+.task-folder-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; direction: ltr; }
 .folder-header:hover { background: var(--bg-hover); }
 .folder-header.drop-target { background: var(--accent-dim, rgba(99,102,241,0.15)); outline: 1px dashed var(--accent); outline-offset: -1px; }
 .folder-chevron {
@@ -2021,7 +2031,7 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 @keyframes task-attn-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 .task-board-item { border-left: 4px solid var(--task-color, transparent); }
 .task-board-item[data-colored="1"] { background: color-mix(in srgb, var(--task-color) 8%, transparent); }
-.task-board-item[data-colored="1"] > .folder-header > .folder-path { color: var(--task-color); }
+.task-board-item[data-colored="1"] .folder-path { color: var(--task-color); }
 .sidebar-tab .task-attn-badge { margin-left: 3px; }
 
 .task-detail { display: flex; flex-direction: column; gap: 10px; height: 100%; overflow-y: auto; padding: 10px 12px; font-size: 12px; }
