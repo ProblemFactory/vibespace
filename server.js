@@ -1147,9 +1147,12 @@ async function run(input) {
     if (!api || !token) return process.exit(0);
     let path;
     if (event === 'SessionStart') {
+      // Call task-context whether or not a task is bound: with a task it returns
+      // the task context; without one it returns the baseline VibeSpace tools
+      // intro (so no-task sessions still learn to report their status). The
+      // endpoint scopes to the session's OWN task via the token, ignoring this query.
       const taskId = process.env.VIBESPACE_TASK_ID;
-      if (!taskId) return process.exit(0);
-      path = '/api/agent/task-context?taskId=' + encodeURIComponent(taskId);
+      path = '/api/agent/task-context' + (taskId ? '?taskId=' + encodeURIComponent(taskId) : '');
     } else if (event === 'UserPromptSubmit') {
       path = '/api/agent/prompt-context';
     } else {
@@ -1515,6 +1518,20 @@ function agentSession(req, res, { needTask = false } = {}) {
   res.status(401).json({ error: 'unknown session token' });
   return null;
 }
+
+// Baseline tools intro for ANY VibeSpace-managed session (even without a task):
+// teaches the agent to report its own status. Task-bound sessions get the full
+// task context instead (which already includes both tools' usage).
+const SESSION_TOOLS_INTRO = [
+  '<vibespace-session-tools>',
+  'This session is running inside VibeSpace. Report your OWN status so the user can see it on their session board — use the `vibespace-status` command (already on your PATH):',
+  '  vibespace-status <working|needs-input|blocked|review> [--urgency low|normal|high|urgent] [--reason "why"]',
+  '  vibespace-status show   (or run it with no arguments) — prints usage + your current status',
+  'Keep it honest and current: `working` while making progress; `blocked` or `needs-input` (with a higher urgency) the moment you are stuck or waiting on the user; `review` when you have finished a chunk and want them to look.',
+  '(If this session is later linked to a VibeSpace task, you will also get `vibespace-task` for task-level progress/plan/status — you have no task right now, so it is not active yet.)',
+  '</vibespace-session-tools>',
+].join('\n');
+
 // SessionStart hook payload (context injection): rendered task state + context
 // folder file index + the rules. Fires + injects for Claude (terminal + chat).
 // SCOPED to the session's OWN context task — the ?taskId= query is ignored so a
@@ -1525,14 +1542,20 @@ app.get('/api/agent/task-context', (req, res) => {
   if (!hit) return;
   try {
     let context = '';
-    if (hit[0]._taskId) {
-      context = tasks.renderContext(hit[0]._taskId);
+    const s = hit[0];
+    if (s._taskId) {
+      context = tasks.renderContext(s._taskId);
       // Only Claude injects the SessionStart output; codex runs the command but
       // ignores it, so don't mark it "seen" for codex (that would starve its
       // UserPromptSubmit delivery).
-      if (context && hit[0].backend !== 'codex') {
-        try { hit[0]._taskSeenAt = tasks.get(hit[0]._taskId).updatedAt; } catch {}
+      if (context && s.backend !== 'codex') {
+        try { s._taskSeenAt = tasks.get(s._taskId).updatedAt; } catch {}
       }
+    } else if (s.backend !== 'codex' && !s._toolsIntroSeen) {
+      // No task: still teach the agent to report its status (baseline), once.
+      // codex ignores SessionStart output, so it gets this via prompt-context.
+      context = SESSION_TOOLS_INTRO;
+      s._toolsIntroSeen = true;
     }
     res.json({ success: true, context });
   } catch (e) { res.status(404).json({ error: e.message }); }
@@ -1566,6 +1589,11 @@ app.get('/api/agent/prompt-context', (req, res) => {
           s._taskSeenAt = t.updatedAt;
         }
       }
+    } else if (!s._toolsIntroSeen) {
+      // No task: deliver the baseline tools intro on the FIRST prompt (covers
+      // codex — its app-server runs the hook but ignores SessionStart output).
+      parts.push(SESSION_TOOLS_INTRO);
+      s._toolsIntroSeen = true;
     }
     const key = sessionStatusKey(s, hit[1]);
     for (const k of [key, `webui:${hit[1]}`]) { // record may still be under webui:<id>
@@ -2292,6 +2320,7 @@ function shutdown() {
   // the last couple seconds aren't lost across a restart
   for (const store of Object.values(syncStores)) { try { store.flush(); } catch {} }
   try { flushLayouts(); } catch {}
+  try { sessionStatus.flush(); } catch {} // debounced session-status writes
   process.exit(0);
 }
 process.on('SIGINT', () => {

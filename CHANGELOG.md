@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.38.0] — 2026-07-06
+
+### Added
+
+- **Every VibeSpace-managed session now learns to report its status — not just task-bound ones.** Previously a session only got injected context (and thus only learned about `vibespace-status` / `vibespace-task`) if it was linked to a task; a plain session's agent had no idea it could report its state, so the board couldn't reflect what it was doing unless you'd bound a task. Now every VibeSpace session gets a small baseline injection at start teaching it `vibespace-status` (working / needs-input / blocked / review + urgency). Task-bound sessions still get the full task context (which already covers both tools). Injected once per session. This is delivered through the harness's own SessionStart/UserPromptSubmit hook — no message rewriting — and works without a task because session status is stored globally (`data/session-status.json`), independent of any task or context folder.
+
+### Changed
+
+- **Session-status disk writes are debounced.** The in-memory state and the live UI broadcast update immediately (as before), but the write to `data/session-status.json` is now coalesced (500ms) and content-compared, so a burst of status reports from many sessions no longer does a synchronous full-file write per update; flushed on exit. (Correctness was never at risk — single process + synchronous writes have no read-modify-write race — this purely cuts redundant I/O now that more sessions report status.)
+
 ## [2.37.5] — 2026-07-06
 
 ### Changed
