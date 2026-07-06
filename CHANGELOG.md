@@ -5,13 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
-## [2.37.1] — 2026-07-06
+## [2.37.2] — 2026-07-06
 
 ### Changed — roomier card layouts
 
-- **Session cards are now two rows.** The name gets its own line with the connection badge (LIVE/STOPPED) — no longer crowded off the row by badges — and secondary metadata (role, config, host, and the status chip) sits on a second line that hides itself when empty. Fixes the squeeze introduced by the always-on status chip in 2.37.0.
-- **Per-session custom config is now a single gear icon**, with the model/effort/permission details in its tooltip (it used to print the full model id inline, e.g. "claude-opus-4-8", eating the row).
-- **Task headers on the Tasks board are two rows too**: title + status/attention tags on the first line, the task's linked folder paths on the second (a task can link several; recursive folders show `/**`).
+- **Session cards are now up to three rows** so the name is never crowded off: row 1 = the name alone; row 2 = its tags (role, a config gear, host, the status chip, and the connection badge); row 3 — in the **Tasks view** only, where a task's sessions can live in different directories — the session's own **working directory**, left-truncated so the meaningful tail is visible. Fixes the squeeze the always-on status chip introduced in 2.37.0 (names had collapsed to a single character).
+- **Per-session custom config is a single gear icon**, with the model/effort/permission details in its tooltip (it used to print the full model id inline, e.g. "claude-opus-4-8", eating the row).
 
 ## [2.37.0] — 2026-07-06
 
