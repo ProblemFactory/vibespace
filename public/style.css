@@ -123,15 +123,13 @@ html, body {
 .session-conn-dot[data-status="live"], .session-conn-dot[data-status="tmux"] { background: var(--green); }
 .session-conn-dot[data-status="external"] { background: var(--yellow, #e5c07b); }
 .session-conn-dot[data-status="stopped"] { background: var(--text-dim); opacity: 0.45; }
-/* Status chip: text on a wide sidebar, icon-only when narrow (container query) */
+/* Status chip: text by default; collapses to icon-only PER CARD when the tags
+   would crowd the name (JS-measured: name truncated → add .tags-icon). */
 .sess-state-chip .chip-icon { display: none; align-items: center; }
 .sess-state-chip .chip-text { display: inline; }
-#all-sessions-list { container-type: inline-size; }
-@container (max-width: 235px) {
-  .sess-state-chip .chip-text { display: none; }
-  .sess-state-chip .chip-icon { display: inline-flex; }
-  .sess-state-chip { padding: 1px 4px; }
-}
+.session-item-card.tags-icon .sess-state-chip .chip-text { display: none; }
+.session-item-card.tags-icon .sess-state-chip .chip-icon { display: inline-flex; }
+.session-item-card.tags-icon .sess-state-chip { padding: 1px 4px; }
 /* Instant hover tooltip (no ~1s native-title delay) — utils.js setupInstantTooltip */
 .instant-tooltip { position: fixed; z-index: 100000; pointer-events: none; background: var(--bg-elevated, var(--bg-input, #2a2a2a)); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font-size: 11px; line-height: 1.4; max-width: 300px; box-shadow: 0 2px 10px rgba(0,0,0,0.4); }
 .badge-config { padding: 1px 3px; display: inline-flex; align-items: center; }
