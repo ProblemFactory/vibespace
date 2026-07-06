@@ -78,7 +78,7 @@ function renderDetailGroups(container, sessionRef, clickToCopy, state) {
  * @param {function} opts.onRename - callback(session, originalName) for rename
  * @returns {HTMLElement}
  */
-export function renderSessionCard(s, { state, app, settings, expandedCardId, onExpandToggle, onRename }) {
+export function renderSessionCard(s, { state, app, settings, expandedCardId, onExpandToggle, onRename, showCwd }) {
   const card = document.createElement('div'); card.className = 'session-item-card';
   card._sessionId = s.sessionId; // Store for highlight lookup
   card.draggable = true;
@@ -122,21 +122,25 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
 
   const starred = state.isStarred(s);
   // Compact row: star archive mode/backend icon name status expand
-  // Two-row layout: name + connection status on the main row (name gets the
-  // width), secondary metadata (role/config/host/state chip) on a sub row that
-  // hides itself when empty. Left-side control icons sit centered across both.
+  // Row 1: name alone (never crowded by tags). Row 2: all tag badges
+  // (role/config-icon/host/status chip/connection). Row 3 (only when showCwd —
+  // the task board, where a task's sessions span different directories): the
+  // session's own cwd, left-truncated so the meaningful tail shows. Left-side
+  // control icons sit centered across the rows.
+  const cwdText = s.cwd ? escHtml(s.cwd.replace(/^\/home\/[^/]+/, '~')) : '';
   card.innerHTML = `<div class="session-card-row">
     <div class="session-card-lines">
       <div class="session-card-main">
         <span class="session-card-name">${escHtml(displayName)}</span>
-        <span class="session-card-badge ${badge.cls}">${badge.text}</span>
       </div>
-      <div class="session-card-sub">
+      <div class="session-card-tags">
         ${agentRoleShort ? `<span class="session-card-badge badge-agent-role" title="${escHtml(agentRoleLabel)}">${escHtml(agentRoleShort)}</span>` : ''}
         <span class="session-card-badge badge-config" style="display:none"></span>
         ${s.hostName ? `<span class="session-host-badge" title="Remote session on ${escHtml(s.hostName)}">${escHtml(s.hostName)}</span>` : ''}
         <span class="sess-state-chip" style="display:none"></span>
+        <span class="session-card-badge ${badge.cls}">${badge.text}</span>
       </div>
+      ${showCwd && cwdText ? `<div class="session-card-sub"><span class="session-card-cwd" title="${escHtml(s.cwd)}">${cwdText}</span></div>` : ''}
     </div>
   </div>`;
   const row = card.querySelector('.session-card-row');
@@ -255,13 +259,6 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     }
   };
   card.querySelector('.session-card-main').appendChild(expandBtn);
-
-  // Hide the second row when it has nothing to show, so plain/stopped sessions
-  // stay on a single line.
-  {
-    const sub = card.querySelector('.session-card-sub');
-    if (sub && ![...sub.children].some((c) => c.style.display !== 'none')) sub.style.display = 'none';
-  }
 
   // Detail panel (shown when expanded)
   const detailPanel = document.createElement('div');

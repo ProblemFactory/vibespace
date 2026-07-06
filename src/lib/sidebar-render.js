@@ -30,7 +30,7 @@ export function installSidebarRender(SidebarClass) {
             if (items) {
               sessionsDiv.innerHTML = '';
               sessionsDiv.style.minHeight = '';
-              for (const s of items) sessionsDiv.appendChild(this._buildSessionCard(s));
+              for (const s of items) sessionsDiv.appendChild(this._buildSessionCard(s, sessionsDiv._lazyOpts || {}));
               sessionsDiv.dataset.lazy = 'rendered';
             }
           }
@@ -47,9 +47,10 @@ export function installSidebarRender(SidebarClass) {
     }, { root: scrollRoot, rootMargin: '200px 0px' });
   };
 
-  proto._observeFolder = function(group, sessionsDiv, items) {
-    // Store items for lazy re-render
+  proto._observeFolder = function(group, sessionsDiv, items, opts = {}) {
+    // Store items + per-card options (e.g. showCwd for the task board) for lazy re-render
     sessionsDiv._lazyItems = items;
+    sessionsDiv._lazyOpts = opts;
     sessionsDiv.dataset.lazy = 'pending';
     if (this._folderObserver) this._folderObserver.observe(group);
   };
@@ -155,7 +156,7 @@ export function installSidebarRender(SidebarClass) {
           if (rect.top < rootRect.bottom + 200 && rect.bottom > rootRect.top - 200) {
             const items = sessionsDiv._lazyItems;
             if (items) {
-              for (const s of items) sessionsDiv.appendChild(this._buildSessionCard(s));
+              for (const s of items) sessionsDiv.appendChild(this._buildSessionCard(s, sessionsDiv._lazyOpts || {}));
               sessionsDiv.dataset.lazy = 'rendered';
             }
           }
@@ -165,12 +166,13 @@ export function installSidebarRender(SidebarClass) {
   };
 
 
-  proto._buildSessionCard = function(s) {
+  proto._buildSessionCard = function(s, opts = {}) {
     return renderSessionCard(s, {
       state: this, app: this.app, settings: this.app.settings,
       expandedCardId: this._expandedCardId,
       onExpandToggle: (id) => { this._expandedCardId = id; this._render(); },
       onRename: (session, originalName) => this.renameSession(session, originalName),
+      showCwd: !!opts.showCwd, // task board: show each session's cwd on row 2
     });
   };
 

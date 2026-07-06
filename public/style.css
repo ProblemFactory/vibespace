@@ -114,8 +114,11 @@ html, body {
 .session-card-row { display: flex; align-items: center; gap: 6px; }
 .session-card-lines { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .session-card-main { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.session-card-sub { display: flex; align-items: center; gap: 5px; min-width: 0; flex-wrap: wrap; }
-.session-card-sub .session-card-badge, .session-card-sub .session-host-badge { font-size: 9px; }
+.session-card-tags { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; min-width: 0; }
+.session-card-sub { display: flex; min-width: 0; }
+/* cwd: left-truncate (elide the front, keep the meaningful tail) like folder-path */
+.session-card-cwd { font-size: 9px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; min-width: 0; }
+.session-card-cwd::before { content: '\200e'; }
 .badge-config { padding: 1px 3px; display: inline-flex; align-items: center; }
 .badge-config svg { width: 11px; height: 11px; }
 .session-card-name { font-size: 11px; font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
@@ -337,10 +340,6 @@ html, body {
   font-size: 11px; font-weight: 600; color: var(--text-secondary);
   border-radius: var(--radius-sm); transition: background var(--transition);
 }
-.folder-header.has-paths { flex-direction: column; align-items: stretch; gap: 2px; }
-.folder-header-main { display: flex; align-items: center; gap: 4px; min-width: 0; }
-.task-folder-paths { display: flex; flex-wrap: wrap; gap: 2px 8px; padding-left: 18px; font-size: 9px; font-weight: 400; color: var(--text-dim); min-width: 0; }
-.task-folder-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; direction: ltr; }
 .folder-header:hover { background: var(--bg-hover); }
 .folder-header.drop-target { background: var(--accent-dim, rgba(99,102,241,0.15)); outline: 1px dashed var(--accent); outline-offset: -1px; }
 .folder-chevron {

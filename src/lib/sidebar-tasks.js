@@ -519,6 +519,7 @@ export function installSidebarTasks(SidebarClass) {
 
       const hasLive = taskSessions.some(s => s.status === 'live' || s.status === 'tmux');
       const linkedFolders = task.folders || [];
+      const folderHint = linkedFolders.length ? ` (${linkedFolders.length} folder${linkedFolders.length > 1 ? 's' : ''})` : '';
       const statusChip = task.kind === 'task'
         ? `<span class="task-status-chip" style="--chip-color:${TASK_STATUS_META[task.status]?.color || 'var(--text-dim)'}">${escHtml(TASK_STATUS_META[task.status]?.label || task.status)}</span>`
         : '';
@@ -529,29 +530,17 @@ export function installSidebarTasks(SidebarClass) {
         ? `<span class="task-attn-badge" title="${escHtml(attnTip)}">⚠${attnCount ? ' ' + attnCount : ''}</span>`
         : '';
 
-      // Two-row task header: row 1 = title + status/attention tags + count;
-      // row 2 = the task's linked folder paths (a task can have several).
-      const folderPathsHtml = linkedFolders.length
-        ? `<div class="task-folder-paths">${linkedFolders.map((f) => {
-            const r = this._folderRec(f);
-            return `<span class="task-folder-path" title="${escHtml(r.path)}${r.recursive ? ' (incl. subfolders)' : ' (this folder only)'}">${escHtml(r.path.replace(/^\/home\/[^/]+/, '~'))}${r.recursive ? '/**' : ''}</span>`;
-          }).join('')}</div>`
-        : '';
       const header = document.createElement('div');
-      header.className = 'folder-header' + (linkedFolders.length ? ' has-paths' : '');
-      header.innerHTML = `<div class="folder-header-main">`
-        + `<span class="folder-chevron">▼</span>`
+      header.className = 'folder-header';
+      header.innerHTML = `<span class="folder-chevron">▼</span>`
         + (task.kind === 'task' ? `<span class="task-status-dot" style="background:${TASK_STATUS_META[task.status]?.color || 'var(--text-dim)'}"></span>` : '')
-        + `<span class="folder-path" style="direction:ltr">${escHtml(task.title)}</span>`
+        + `<span class="folder-path" style="direction:ltr">${escHtml(task.title)}<span style="color:var(--text-dim);font-weight:400;font-size:10px">${folderHint}</span></span>`
         + statusChip + attnBadge
-        + `<span class="folder-count">${taskSessions.length}</span>`
-        + `</div>`
-        + folderPathsHtml;
+        + `<span class="folder-count">${taskSessions.length}</span>`;
       if (hasLive) {
         const dot = document.createElement('span');
         dot.style.cssText = 'width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0';
-        const main = header.querySelector('.folder-header-main');
-        main.insertBefore(dot, main.querySelector('.folder-count'));
+        header.insertBefore(dot, header.querySelector('.folder-count'));
       }
 
       const nameSpan = header.querySelector('.folder-path');
@@ -644,7 +633,7 @@ export function installSidebarTasks(SidebarClass) {
         empty.textContent = 'No sessions in this task';
         sessionsDiv.appendChild(empty);
       } else {
-        this._observeFolder(groupEl, sessionsDiv, taskSessions);
+        this._observeFolder(groupEl, sessionsDiv, taskSessions, { showCwd: true });
       }
 
       groupEl.append(header, sessionsDiv);
@@ -663,7 +652,7 @@ export function installSidebarTasks(SidebarClass) {
       header.onclick = () => this._toggleCollapse(groupEl, collapseKey);
       const sessionsDiv = document.createElement('div'); sessionsDiv.className = 'folder-sessions';
       this._sortSessions(untagged);
-      this._observeFolder(groupEl, sessionsDiv, untagged);
+      this._observeFolder(groupEl, sessionsDiv, untagged, { showCwd: true });
       groupEl.append(header, sessionsDiv);
       this.listEl.appendChild(groupEl);
     }
@@ -721,6 +710,6 @@ export function installSidebarTasks(SidebarClass) {
     titleRow.innerHTML = `<span>${escHtml(title)}</span>`;
     this.listEl.appendChild(titleRow);
     this._sortSessions(taskSessions);
-    for (const s of taskSessions) this.listEl.appendChild(this._buildSessionCard(s));
+    for (const s of taskSessions) this.listEl.appendChild(this._buildSessionCard(s, { showCwd: true }));
   };
 }
