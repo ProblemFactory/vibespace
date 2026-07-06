@@ -231,15 +231,23 @@ function setup(ctx) {
     if (!claudeSessionId || !agentId) return res.status(400).json({ error: 'claudeSessionId and agentId required' });
     const projectsDir = path.join(os.homedir(), '.claude', 'projects');
     const projDir = cwdToProjectDir(cwd || '');
-    // Try exact project dir, then scan all
-    const candidates = [];
-    if (cwd) candidates.push(path.join(projectsDir, projDir, claudeSessionId, 'subagents', `agent-${agentId}.jsonl`));
+    // Try exact project dir, then scan all. Workflow agents live one level
+    // deeper (subagents/workflows/wf_*/agent-<id>.jsonl) — include those too so
+    // a workflow phase's agent opens in the SAME viewer with zero client change.
+    const subDirs = [];
+    if (cwd) subDirs.push(path.join(projectsDir, projDir, claudeSessionId, 'subagents'));
     try {
       for (const dir of fs.readdirSync(projectsDir)) {
-        const fp = path.join(projectsDir, dir, claudeSessionId, 'subagents', `agent-${agentId}.jsonl`);
-        if (!candidates.includes(fp)) candidates.push(fp);
+        const sd = path.join(projectsDir, dir, claudeSessionId, 'subagents');
+        if (!subDirs.includes(sd)) subDirs.push(sd);
       }
     } catch {}
+    const candidates = [];
+    for (const sd of subDirs) {
+      candidates.push(path.join(sd, `agent-${agentId}.jsonl`));
+      let wfRuns = []; try { wfRuns = fs.readdirSync(path.join(sd, 'workflows')); } catch {}
+      for (const wf of wfRuns) candidates.push(path.join(sd, 'workflows', wf, `agent-${agentId}.jsonl`));
+    }
     for (const filePath of candidates) {
       try {
         if (!fs.existsSync(filePath)) continue;
@@ -258,6 +266,104 @@ function setup(ctx) {
       } catch {}
     }
     res.json({ messages: [], total: 0, meta: {} });
+  });
+
+  // ── Dynamic-workflow (ultracode) POST-HOC detail ────────────────────────
+  // A workflow run writes ONE terminal-state snapshot at
+  //   <projectDir>/<claudeSessionId>/workflows/wf_<runId>.json
+  // (NOT written live — verified empirically; live progress is TUI-only). It
+  // carries the phase/agent tree + per-agent state/model + token totals. Each
+  // agent's transcript is a normal subagent JSONL under
+  //   <claudeSessionId>/subagents/workflows/wf_<runId>/agent-<id>.jsonl
+  // reachable through the existing subagent viewer (candidate lists extended
+  // below + in ws-handler). runId is globally unique, so a cross-session scan
+  // is a safe last resort when cwd/claudeSessionId don't pin it down.
+  function findWorkflowSnapshot(runId, claudeSessionId, cwd) {
+    const projectsDir = path.join(os.homedir(), '.claude', 'projects');
+    const tryPath = (p) => { try { return fs.existsSync(p) ? p : null; } catch { return null; } };
+    // 1) targeted: exact project dir for the cwd
+    if (claudeSessionId && cwd) {
+      const hit = tryPath(path.join(projectsDir, cwdToProjectDir(cwd), claudeSessionId, 'workflows', `${runId}.json`));
+      if (hit) return hit;
+    }
+    // 2) session id known, unknown/mismatched cwd: scan project dirs
+    if (claudeSessionId) {
+      try {
+        for (const dir of fs.readdirSync(projectsDir)) {
+          const hit = tryPath(path.join(projectsDir, dir, claudeSessionId, 'workflows', `${runId}.json`));
+          if (hit) return hit;
+        }
+      } catch {}
+    }
+    // 3) last resort: runId is unique — walk every session dir
+    try {
+      for (const dir of fs.readdirSync(projectsDir)) {
+        const base = path.join(projectsDir, dir);
+        let sids = []; try { sids = fs.readdirSync(base); } catch {}
+        for (const sid of sids) {
+          const hit = tryPath(path.join(base, sid, 'workflows', `${runId}.json`));
+          if (hit) return hit;
+        }
+      }
+    } catch {}
+    return null;
+  }
+
+  function normalizeWorkflowSnapshot(o, runId) {
+    const wp = Array.isArray(o.workflowProgress) ? o.workflowProgress : [];
+    const phaseMap = new Map(); // phaseIndex -> phase
+    const ordered = [];
+    const ensurePhase = (idx, title) => {
+      let p = phaseMap.get(idx);
+      if (!p) { p = { index: idx, title: title || `Phase ${idx}`, agents: [] }; phaseMap.set(idx, p); ordered.push(p); }
+      else if (title && !p._titled) { p.title = title; p._titled = true; }
+      return p;
+    };
+    for (const e of wp) if (e && e.type === 'workflow_phase') ensurePhase(e.index, e.title)._titled = true;
+    const noPhase = { index: 0, title: 'Agents', agents: [] };
+    for (const e of wp) {
+      if (!e || e.type !== 'workflow_agent') continue;
+      const pi = e.phaseIndex != null ? e.phaseIndex : 0;
+      const p = pi === 0 && !phaseMap.has(0) ? noPhase : ensurePhase(pi, e.phaseTitle);
+      p.agents.push({
+        index: e.index || 0, label: e.label || '', model: e.model || '',
+        state: e.state || 'queued', agentId: e.agentId || '',
+        phaseTitle: e.phaseTitle || p.title,
+      });
+    }
+    const phases = ordered.filter(p => p.agents.length || true);
+    if (noPhase.agents.length) phases.push(noPhase);
+    phases.sort((a, b) => a.index - b.index);
+    for (const p of phases) { p.agents.sort((a, b) => (a.index || 0) - (b.index || 0)); delete p._titled; }
+    let result = o.result;
+    if (result != null && typeof result !== 'string') { try { result = JSON.stringify(result, null, 2); } catch { result = String(result); } }
+    return {
+      runId: o.runId || runId,
+      workflowName: o.workflowName || o.summary || 'Workflow',
+      summary: o.summary || '',
+      status: o.status || (o.error ? 'failed' : 'completed'),
+      durationMs: o.durationMs || 0,
+      totalTokens: o.totalTokens || 0,
+      totalToolCalls: o.totalToolCalls || 0,
+      agentCount: o.agentCount || 0,
+      error: o.error ? String(o.error).slice(0, 4000) : null,
+      result: typeof result === 'string' ? result.slice(0, 20000) : null,
+      timestamp: o.timestamp || null,
+      phases,
+    };
+  }
+
+  router.get('/api/workflow', (req, res) => {
+    const { claudeSessionId, cwd, runId } = req.query;
+    if (!runId || !/^wf_[\w-]{1,64}$/.test(runId)) return res.status(400).json({ error: 'valid runId required' });
+    const fp = findWorkflowSnapshot(runId, claudeSessionId || '', cwd || '');
+    if (!fp) return res.status(404).json({ error: 'workflow snapshot not found (only written after the run finishes)' });
+    try {
+      const o = JSON.parse(fs.readFileSync(fp, 'utf-8'));
+      return res.json(normalizeWorkflowSnapshot(o, runId));
+    } catch (err) {
+      return res.status(500).json({ error: 'failed to parse workflow snapshot: ' + err.message });
+    }
   });
 
   router.post('/api/kill-pid', (req, res) => {

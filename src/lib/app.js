@@ -22,6 +22,7 @@ import { CommandMode } from './command-mode.js';
 import { updateTaskbar as updateTaskbarFn } from './taskbar.js';
 import { openBrowser as openBrowserFn } from './browser-window.js';
 import { openTaskDetail as openTaskDetailFn } from './task-detail.js';
+import { openWorkflowDetail as openWorkflowDetailFn } from './workflow-detail.js';
 import { DesktopManager } from './desktop-manager.js';
 import { CustomizeMode, applyArrangement } from './customize-mode.js';
 import { installSessionPalette } from './session-palette.js';
@@ -2278,6 +2279,9 @@ class App {
       case 'openTaskDetail':
         this.openTaskDetail(spec.taskId, { syncId });
         break;
+      case 'openWorkflowDetail':
+        this.openWorkflowDetail(spec.runId, { syncId, claudeSessionId: spec.claudeSessionId, cwd: spec.cwd, name: spec.name });
+        break;
       case 'attachTmuxSession':
         this.attachTmuxSession(spec.tmuxTarget, spec.name, spec.cwd);
         break;
@@ -2350,6 +2354,8 @@ class App {
   openBrowser(url, opts) { return openBrowserFn(this, url, opts); }
 
   openTaskDetail(taskId, opts) { return openTaskDetailFn(this, taskId, opts); }
+
+  openWorkflowDetail(runId, opts) { return openWorkflowDetailFn(this, runId, opts); }
 
   // Session state keys (backend:backendSessionId) of every window currently
   // blinking "waiting for input" — the idle-detection signal the task board

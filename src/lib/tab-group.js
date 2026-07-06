@@ -20,6 +20,7 @@ export const TYPE_ICONS = {
   'hex-viewer': _i('<path d="M2 2h12v12H2z"/><path d="M2 6h12M6 2v12"/>'),
   browser:  _i('<circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c-2 2-2 10 0 12M8 2c2 2 2 10 0 12"/>'),
   task:     _i('<rect x="2" y="2" width="12" height="12" rx="1.5"/><path d="M5 6h6M5 9h6M5 12h3"/>'),
+  workflow: _i('<circle cx="3" cy="8" r="2"/><circle cx="13" cy="3.5" r="1.8"/><circle cx="13" cy="8" r="1.8"/><circle cx="13" cy="12.5" r="1.8"/><path d="M5 8h2M11.2 3.5H8a1 1 0 00-1 1v6a1 1 0 001 1h3.2M7 8h4"/>'),
 };
 
 /**

@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.36.0] — 2026-07-05
+
+### Added
+
+- **Workflow detail viewer (dynamic-workflow / ultracode observability).** When Claude runs a dynamic workflow in chat, its tool card now has a **View Workflow** button. It opens a panel showing the run's phases, every agent with its state (queued/running/done/error), model and the run's token/tool totals — and each agent has a **View Log** that opens its full transcript in the read-only viewer. This is a *post-hoc* view: Claude Code writes the rich phase/agent snapshot once, when the run finishes (live progress is a TUI-only render layer with no file or stream to read — verified empirically and against the third-party claude-view tool, which reaches the same conclusion). Killed/failed runs show their frozen mid-run state.
+
 ## [2.35.0] — 2026-07-05
 
 ### Added

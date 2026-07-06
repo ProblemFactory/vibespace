@@ -307,6 +307,16 @@ class ChatView {
           description: e.target.dataset.desc,
         });
       }
+      // View Workflow button (dynamic-workflow post-hoc detail)
+      if (e.target.classList.contains('chat-workflow-view-btn')) {
+        e.stopPropagation();
+        const { claudeId, cwd } = this._getSessionIds();
+        this.app.openWorkflowDetail(e.target.dataset.wfRun, {
+          name: e.target.dataset.wfName,
+          claudeSessionId: claudeId,
+          cwd,
+        });
+      }
     });
 
     // Listen for normalized message ops from server

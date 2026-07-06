@@ -2077,6 +2077,37 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 .task-detail-swatch.none::after { content: ''; position: absolute; left: 2px; right: 2px; top: 50%; height: 1px; background: var(--text-dim); transform: rotate(-45deg); }
 .task-detail-delete { align-self: flex-start; color: var(--red, #e55); margin-top: 4px; }
 
+/* ── Workflow detail window (post-hoc dynamic-workflow viewer) ── */
+.workflow-detail { display: flex; flex-direction: column; gap: 10px; height: 100%; overflow-y: auto; padding: 10px 12px; font-size: 12px; }
+.workflow-detail-head { display: flex; gap: 8px; align-items: center; }
+.workflow-detail-title { flex: 1; min-width: 0; color: var(--text); font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workflow-status-chip {
+  font-size: 9px; padding: 0 6px; border-radius: 7px; flex-shrink: 0; line-height: 15px; text-transform: uppercase; letter-spacing: 0.4px;
+  color: var(--chip-color, var(--text-dim)); border: 1px solid color-mix(in srgb, var(--chip-color, var(--text-dim)) 55%, transparent);
+  background: color-mix(in srgb, var(--chip-color, var(--text-dim)) 12%, transparent);
+}
+.workflow-detail-summary { font-size: 11px; color: var(--text-secondary); line-height: 1.4; }
+.workflow-detail-meta { font-size: 10px; color: var(--text-dim); }
+.workflow-phase { display: flex; flex-direction: column; gap: 2px; }
+.workflow-phase-head { display: flex; align-items: baseline; gap: 8px; border-bottom: 1px solid var(--border); padding-bottom: 2px; margin-bottom: 2px; }
+.workflow-phase-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); flex: 1; min-width: 0; }
+.workflow-phase-count { font-size: 10px; color: var(--text-dim); flex-shrink: 0; }
+.workflow-agent-row { display: flex; align-items: center; gap: 7px; padding: 2px 0; min-width: 0; }
+.workflow-agent-state { width: 8px; height: 8px; border-radius: 50%; background: var(--chip-color, var(--text-dim)); flex-shrink: 0; }
+.workflow-agent-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+.workflow-agent-model { font-size: 9px; color: var(--text-dim); flex-shrink: 0; }
+.workflow-agent-view-btn {
+  padding: 1px 8px; font-size: 10px; border-radius: 3px; cursor: pointer; flex-shrink: 0;
+  background: var(--bg-input); border: 1px solid var(--border); color: var(--text-dim); font-weight: 500;
+}
+.workflow-agent-view-btn:hover:not(:disabled) { color: var(--text); background: var(--bg-hover); }
+.workflow-agent-view-btn:disabled { opacity: 0.4; cursor: default; }
+.workflow-detail-box { font-size: 11px; }
+.workflow-detail-box summary { cursor: pointer; color: var(--text-dim); font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+.workflow-detail-box pre { margin: 4px 0 0; padding: 6px 8px; background: var(--bg-input); border-radius: var(--radius-sm); overflow-x: auto; white-space: pre-wrap; color: var(--text-secondary); }
+.workflow-detail-error pre { color: var(--red, #e06c75); }
+.workflow-hint-sub { font-size: 10px; color: var(--text-dim); }
+
 /* ── Session status chip (agent-set / user-set state + urgency) ── */
 .sess-state-chip {
   font-size: 9px; padding: 0 5px; border-radius: 7px; flex-shrink: 0; line-height: 14px; cursor: pointer;
