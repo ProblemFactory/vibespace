@@ -786,10 +786,18 @@ function registerWsHandler(wss, ctx) {
               const projectsDir = path.join(os.homedir(), '.claude', 'projects');
               const projDir = cwdToProjectDir(cwd);
               let rawMsgs = [], meta = {};
-              const candidates = [path.join(projectsDir, projDir, claudeId, 'subagents')];
-              try { for (const dir of fs.readdirSync(projectsDir)) { const fp = path.join(projectsDir, dir, claudeId, 'subagents'); if (!candidates.includes(fp)) candidates.push(fp); } } catch {}
-              for (const subDir of candidates) {
-                const fp = path.join(subDir, `agent-${agentId}.jsonl`);
+              const subDirs = [path.join(projectsDir, projDir, claudeId, 'subagents')];
+              try { for (const dir of fs.readdirSync(projectsDir)) { const fp = path.join(projectsDir, dir, claudeId, 'subagents'); if (!subDirs.includes(fp)) subDirs.push(fp); } } catch {}
+              // Direct subagent files first, then workflow-nested ones
+              // (subagents/workflows/wf_*/agent-<id>.jsonl) so a workflow phase's
+              // agent opens in this same viewer.
+              const fileCandidates = [];
+              for (const subDir of subDirs) {
+                fileCandidates.push(path.join(subDir, `agent-${agentId}.jsonl`));
+                let wfRuns = []; try { wfRuns = fs.readdirSync(path.join(subDir, 'workflows')); } catch {}
+                for (const wf of wfRuns) fileCandidates.push(path.join(subDir, 'workflows', wf, `agent-${agentId}.jsonl`));
+              }
+              for (const fp of fileCandidates) {
                 try {
                   if (!fs.existsSync(fp)) continue;
                   for (const line of fs.readFileSync(fp, 'utf-8').split('\n')) {

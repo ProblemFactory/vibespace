@@ -310,6 +310,19 @@ class ChatRenderers {
         : '';
       return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.robot} Agent: ${escHtml(desc)}${viewBtn}</span><details class="chat-diff"><summary class="chat-diff-summary">Input</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLine)}</summary><pre>${this.linkifyText(resultText)}</pre></details></div>`;
     }
+    if (block.toolName === 'Workflow') {
+      // Dynamic workflow (ultracode). The tool_result is the launch ack, which
+      // carries the run id ("Run ID: wf_..."); resume passes it as input.
+      const runId = (block.input && block.input.resumeFromRunId)
+        || (resultText.match(/Run ID:\s*(wf_[\w-]+)/)?.[1])
+        || (resultText.match(/"runId":\s*"(wf_[\w-]+)"/)?.[1]) || '';
+      const wfName = resultText.match(/Summary:\s*(.+)/)?.[1]?.trim().substring(0, 120) || '';
+      const viewBtn = runId
+        ? ` <button class="chat-workflow-view-btn" data-wf-run="${escHtml(runId)}" data-wf-name="${escHtml(wfName)}">View Workflow</button>`
+        : '';
+      const firstLineW = resultText.split('\n')[0].substring(0, 120) || '(empty)';
+      return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.workflow || UI_ICONS.robot} Workflow${wfName ? ': ' + escHtml(wfName) : ''}${viewBtn}</span><details class="chat-diff"><summary class="chat-diff-summary">Script</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLineW)}</summary><pre>${this.linkifyText(resultText)}</pre></details></div>`;
+    }
     // Generic tool
     const firstLine = resultText.split('\n')[0].substring(0, 120) || '(empty)';
     return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.wrench} ${escHtml(block.toolName)}</span><details class="chat-diff"><summary class="chat-diff-summary">Input</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLine)}</summary><pre>${this.linkifyText(resultText)}</pre></details></div>`;

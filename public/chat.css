@@ -396,6 +396,12 @@
   margin-left: 6px; font-weight: 500; vertical-align: middle;
 }
 .chat-agent-view-btn:hover { color: var(--text); background: var(--bg-hover); }
+.chat-workflow-view-btn {
+  padding: 1px 8px; font-size: 10px; border-radius: 3px; cursor: pointer;
+  background: var(--bg-input); border: 1px solid var(--border); color: var(--text-dim);
+  margin-left: 6px; font-weight: 500; vertical-align: middle;
+}
+.chat-workflow-view-btn:hover { color: var(--text); background: var(--bg-hover); }
 .chat-agent-live-status {
   display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); padding: 4px 0;
 }

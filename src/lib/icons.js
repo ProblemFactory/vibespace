@@ -39,6 +39,7 @@ export const UI_ICONS = {
   // Tool cards
   wrench:    _s('<path d="M10.5 1.5L14 5l-1.5 1.5L9 3M4 7l-2.5 2.5a1.4 1.4 0 002 2L6 9M7 4l5 5"/>'),
   robot:     _s('<rect x="3" y="4" width="10" height="9" rx="2"/><circle cx="6" cy="8" r="1" fill="currentColor" stroke="none"/><circle cx="10" cy="8" r="1" fill="currentColor" stroke="none"/><path d="M8 1v3M4 7h8"/><path d="M1 8v3M15 8v3"/>'),
+  workflow:  _s('<circle cx="3" cy="8" r="2"/><circle cx="13" cy="3.5" r="1.8"/><circle cx="13" cy="8" r="1.8"/><circle cx="13" cy="12.5" r="1.8"/><path d="M5 8h2M11.2 3.5H8a1 1 0 00-1 1v6a1 1 0 001 1h3.2M7 8h4"/>'),
   lock:      _s('<rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5 7V5a3 3 0 016 0v2"/>'),
   clipboard: _s('<path d="M5 2h6a1 1 0 011 1v11a1 1 0 01-1 1H4a1 1 0 01-1-1V5"/><path d="M6 1h4v2H6z"/>'),
   bell:      _s('<path d="M8 1.5a4.5 4.5 0 00-4.5 4.5c0 2.5-1.5 4-1.5 4h12s-1.5-1.5-1.5-4A4.5 4.5 0 008 1.5zM6.5 14a1.5 1.5 0 003 0"/>'),
