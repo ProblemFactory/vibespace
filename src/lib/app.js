@@ -1636,6 +1636,14 @@ class App {
         const h = document.getElementById('input-host')?.value;
         return h ? `/api/hosts/${h}/dir-complete` : null;
       },
+      // #2: float the selected task's linked folders to the top of the cwd
+      // suggestions (highlighted), so starting a session "in" a task recommends
+      // its own folders first.
+      priorityPaths: () => {
+        const tid = document.getElementById('input-task')?.value;
+        const t = tid && this.sidebar?._taskById?.(tid);
+        return t ? this.sidebar._folderPaths(t) : [];
+      },
     });
   }
 
