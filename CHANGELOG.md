@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.36.1] — 2026-07-06
+
+### Added
+
+- **Workflow viewer now works while a run is in progress.** Previously "View Workflow" only worked after a dynamic workflow finished (the rich snapshot is written once at the end) — opening it mid-run showed "snapshot not found". It now falls back to a **live view** built from the run's journal + agent transcripts: a pulsing "Running" chip, an "N agents · M done · running…" line, and one row per agent (running/done) with a live-updating transcript via View Log. The panel polls every ~2.5s and automatically switches to the full phase/label/token view the moment the run finishes. (Phase names, labels and token totals only exist in the end-of-run snapshot, so the running view shows agent count + per-agent state + transcripts.)
+
 ## [2.36.0] — 2026-07-05
 
 ### Added

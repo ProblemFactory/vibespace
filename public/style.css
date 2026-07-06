@@ -2107,6 +2107,8 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 .workflow-detail-box pre { margin: 4px 0 0; padding: 6px 8px; background: var(--bg-input); border-radius: var(--radius-sm); overflow-x: auto; white-space: pre-wrap; color: var(--text-secondary); }
 .workflow-detail-error pre { color: var(--red, #e06c75); }
 .workflow-hint-sub { font-size: 10px; color: var(--text-dim); }
+.workflow-status-live { animation: task-attn-pulse 1.4s ease-in-out infinite; }
+.workflow-live-note { font-size: 10px; color: var(--text-dim); line-height: 1.4; padding: 2px 0 2px; border-left: 2px solid color-mix(in srgb, var(--blue, #6af) 60%, transparent); padding-left: 8px; }
 
 /* ── Session status chip (agent-set / user-set state + urgency) ── */
 .sess-state-chip {

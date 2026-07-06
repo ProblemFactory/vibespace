@@ -353,17 +353,72 @@ function setup(ctx) {
     };
   }
 
+  // The rich snapshot is written only at the END. While a run is in progress
+  // the live signals are the per-run dir's journal.jsonl (one {started}/{result}
+  // per agent, appended live) + the agent-<id>.jsonl transcripts (streamed).
+  // We build a LIVE skeleton from those so the viewer works mid-run — with the
+  // caveat that phase names / labels / token totals only exist in the snapshot,
+  // so a running view shows agent count + per-agent state + live transcripts only.
+  function findWorkflowRunDir(runId, claudeSessionId, cwd) {
+    const projectsDir = path.join(os.homedir(), '.claude', 'projects');
+    const sub = (base) => path.join(base, 'subagents', 'workflows', runId);
+    const tryDir = (p) => { try { return fs.existsSync(p) && fs.statSync(p).isDirectory() ? p : null; } catch { return null; } };
+    if (claudeSessionId && cwd) { const h = tryDir(sub(path.join(projectsDir, cwdToProjectDir(cwd), claudeSessionId))); if (h) return h; }
+    if (claudeSessionId) { try { for (const dir of fs.readdirSync(projectsDir)) { const h = tryDir(sub(path.join(projectsDir, dir, claudeSessionId))); if (h) return h; } } catch {} }
+    try {
+      for (const dir of fs.readdirSync(projectsDir)) {
+        const base = path.join(projectsDir, dir);
+        let sids = []; try { sids = fs.readdirSync(base); } catch {}
+        for (const sid of sids) { const h = tryDir(sub(path.join(base, sid))); if (h) return h; }
+      }
+    } catch {}
+    return null;
+  }
+
+  function readLiveWorkflow(runDir, runId) {
+    const started = new Set(), done = new Set();
+    try {
+      for (const line of fs.readFileSync(path.join(runDir, 'journal.jsonl'), 'utf-8').split('\n')) {
+        const t = line.trim(); if (!t) continue;
+        let o; try { o = JSON.parse(t); } catch { continue; }
+        if (!o.agentId) continue;
+        if (o.type === 'started') started.add(o.agentId);
+        else if (o.type === 'result') done.add(o.agentId);
+      }
+    } catch {}
+    // A transcript file can exist before its journal 'started' line lands.
+    try { for (const f of fs.readdirSync(runDir)) { const m = f.match(/^agent-([0-9a-f]+)\.jsonl$/); if (m) started.add(m[1]); } } catch {}
+    // Best-effort workflow name from the persisted script filename (<name>-<runId>.js).
+    let name = 'Workflow';
+    try {
+      const scriptsDir = path.join(path.resolve(runDir, '..', '..', '..'), 'workflows', 'scripts');
+      for (const f of fs.readdirSync(scriptsDir)) { if (f.endsWith(`-${runId}.js`)) { name = f.slice(0, -(`-${runId}.js`.length)); break; } }
+    } catch {}
+    const agents = [...started].map((id) => ({ index: 0, label: '', model: '', state: done.has(id) ? 'done' : 'progress', agentId: id }));
+    agents.sort((a, b) => a.agentId.localeCompare(b.agentId));
+    return {
+      runId, workflowName: name, summary: '', status: 'running', live: true,
+      agentCount: started.size, doneCount: done.size,
+      durationMs: 0, totalTokens: 0, totalToolCalls: 0,
+      error: null, result: null, timestamp: null,
+      phases: [{ index: 0, title: 'Agents (live — phase names, labels & tokens appear when the run finishes)', agents }],
+    };
+  }
+
   router.get('/api/workflow', (req, res) => {
     const { claudeSessionId, cwd, runId } = req.query;
     if (!runId || !/^wf_[\w-]{1,64}$/.test(runId)) return res.status(400).json({ error: 'valid runId required' });
+    // Terminal snapshot wins (it's complete). Prefer it even if the run dir also
+    // still exists (snapshot is written at completion, dir lingers).
     const fp = findWorkflowSnapshot(runId, claudeSessionId || '', cwd || '');
-    if (!fp) return res.status(404).json({ error: 'workflow snapshot not found (only written after the run finishes)' });
-    try {
-      const o = JSON.parse(fs.readFileSync(fp, 'utf-8'));
-      return res.json(normalizeWorkflowSnapshot(o, runId));
-    } catch (err) {
-      return res.status(500).json({ error: 'failed to parse workflow snapshot: ' + err.message });
+    if (fp) {
+      try { return res.json(normalizeWorkflowSnapshot(JSON.parse(fs.readFileSync(fp, 'utf-8')), runId)); }
+      catch (err) { return res.status(500).json({ error: 'failed to parse workflow snapshot: ' + err.message }); }
     }
+    // No snapshot yet — surface a LIVE view if the run is still going.
+    const runDir = findWorkflowRunDir(runId, claudeSessionId || '', cwd || '');
+    if (runDir) return res.json(readLiveWorkflow(runDir, runId));
+    return res.status(404).json({ error: 'workflow not found (no run directory or snapshot for this id)' });
   });
 
   router.post('/api/kill-pid', (req, res) => {
