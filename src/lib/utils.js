@@ -483,3 +483,29 @@ export function loadDraft(type, id) {
 export function clearDraft(type, id) {
   saveDraft(type, id, '');
 }
+
+// Instant hover tooltip (no ~1s native-title delay) for any element carrying a
+// `data-tip` attribute. Self-installs on import. Used for icon-only badges
+// (config gear, icon-mode status tags) so hovering shows the label immediately.
+(function setupInstantTooltip() {
+  if (typeof document === 'undefined') return;
+  let tip = null;
+  const show = (el) => {
+    const text = el.getAttribute('data-tip');
+    if (!text) return;
+    if (!tip) { tip = document.createElement('div'); tip.className = 'instant-tooltip'; (document.body || document.documentElement).appendChild(tip); }
+    tip.textContent = text;
+    tip.style.display = 'block';
+    const r = el.getBoundingClientRect();
+    tip.style.left = r.left + 'px';
+    tip.style.top = (r.bottom + 5) + 'px';
+    const tr = tip.getBoundingClientRect();
+    if (tr.right > window.innerWidth - 6) tip.style.left = Math.max(6, window.innerWidth - 6 - tr.width) + 'px';
+    if (tr.bottom > window.innerHeight - 6) tip.style.top = (r.top - 5 - tr.height) + 'px';
+  };
+  const hide = () => { if (tip) tip.style.display = 'none'; };
+  document.addEventListener('mouseover', (e) => { const el = e.target.closest && e.target.closest('[data-tip]'); if (el) show(el); });
+  document.addEventListener('mouseout', (e) => { if (e.target.closest && e.target.closest('[data-tip]')) hide(); });
+  document.addEventListener('mousedown', hide, true);
+  window.addEventListener('scroll', hide, true);
+})();

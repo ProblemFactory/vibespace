@@ -114,11 +114,26 @@ html, body {
 .session-card-row { display: flex; align-items: center; gap: 6px; }
 .session-card-lines { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .session-card-main { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.session-card-tags { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; min-width: 0; }
 .session-card-sub { display: flex; min-width: 0; }
 /* cwd: left-truncate (elide the front, keep the meaningful tail) like folder-path */
 .session-card-cwd { font-size: 9px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; min-width: 0; }
 .session-card-cwd::before { content: '\200e'; }
+/* Connection-status dot (left of the name): LIVE/TMUX green, EXTERNAL amber, STOPPED dim */
+.session-conn-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--text-dim); }
+.session-conn-dot[data-status="live"], .session-conn-dot[data-status="tmux"] { background: var(--green); }
+.session-conn-dot[data-status="external"] { background: var(--yellow, #e5c07b); }
+.session-conn-dot[data-status="stopped"] { background: var(--text-dim); opacity: 0.45; }
+/* Status chip: text on a wide sidebar, icon-only when narrow (container query) */
+.sess-state-chip .chip-icon { display: none; align-items: center; }
+.sess-state-chip .chip-text { display: inline; }
+#all-sessions-list { container-type: inline-size; }
+@container (max-width: 235px) {
+  .sess-state-chip .chip-text { display: none; }
+  .sess-state-chip .chip-icon { display: inline-flex; }
+  .sess-state-chip { padding: 1px 4px; }
+}
+/* Instant hover tooltip (no ~1s native-title delay) — utils.js setupInstantTooltip */
+.instant-tooltip { position: fixed; z-index: 100000; pointer-events: none; background: var(--bg-elevated, var(--bg-input, #2a2a2a)); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font-size: 11px; line-height: 1.4; max-width: 300px; box-shadow: 0 2px 10px rgba(0,0,0,0.4); }
 .badge-config { padding: 1px 3px; display: inline-flex; align-items: center; }
 .badge-config svg { width: 11px; height: 11px; }
 .session-card-name { font-size: 11px; font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }

@@ -42,7 +42,13 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
       app.wm.closeWindow(winInfo.id); // deleted elsewhere
       return;
     }
-    if (root.contains(document.activeElement) && /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
+    // Skip re-render only while the user is ACTIVELY typing (a non-empty field).
+    // An emptied add-field (right after adding a folder/step) must re-render so
+    // the new item shows immediately; remember it to re-focus after the rebuild.
+    const _ae = document.activeElement;
+    const _typing = root.contains(_ae) && /^(INPUT|TEXTAREA)$/.test(_ae.tagName);
+    if (_typing && _ae.value) return;
+    const _refocusPlaceholder = _typing ? _ae.placeholder : null;
     app.wm.setTitle(winInfo.id, task.title);
     root.innerHTML = '';
 
@@ -323,6 +329,13 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
       }
     };
     root.appendChild(del);
+
+    // Re-focus the emptied add-field so adding folders/steps in a row keeps
+    // focus after the list re-renders.
+    if (_refocusPlaceholder) {
+      const inp = [...root.querySelectorAll('input, textarea')].find((i) => i.placeholder === _refocusPlaceholder);
+      if (inp) inp.focus();
+    }
   };
 
   render();

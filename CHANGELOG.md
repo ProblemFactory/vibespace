@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.37.3] — 2026-07-06
+
+### Changed
+
+- **Session cards back to two rows** (three wasted vertical space). Row 1 = a **connection-status dot** (LIVE/TMUX green, EXTERNAL amber, STOPPED dim, left of the name) + name + tags; row 2 (Tasks view) = the session's cwd. The intrinsic connection state is now that colored dot instead of a LIVE/STOPPED text badge — its label shows on hover and in the expanded card.
+- **Status tags adapt to the sidebar width**: the working / needs-input / blocked / review chip shows its text on a wide sidebar and collapses to just an icon when the sidebar is narrow (CSS container query). Config stays a gear icon.
+- **Instant hover tooltips**: icon-only badges (config gear, narrow status chips, the connection dot, host) show their label the moment you hover, via a custom tooltip — no more ~1s native-title delay.
+
+### Fixed
+
+- **Adding a folder to a task now refreshes the list immediately.** The task detail window used to skip re-rendering whenever any field was focused (to avoid clobbering what you were typing); it now skips only while a field actually has text, so an emptied add-field (right after you add a folder or step) refreshes and re-focuses for the next entry.
+
 ## [2.37.2] — 2026-07-06
 
 ### Changed — roomier card layouts
