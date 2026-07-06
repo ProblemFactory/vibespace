@@ -629,10 +629,13 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     }
   }
   // Adaptive tags (per-card, content-driven — not a fixed width threshold):
-  // collapse the status chip to ICON-only when the tags, at full text width,
-  // are as WIDE AS the title itself (tags shouldn't out-width the name). Short
-  // names with a wide "working" chip → icons; long names keep the text.
-  // Re-measured on any width change (sidebar resize, folder expand).
+  // collapse the status chip to ICON-only when the tags (at full text width)
+  // are as wide as the title's CURRENTLY DISPLAYED area — the name is flex and
+  // its area shrinks as the tags grow, so we compare against `clientWidth` (the
+  // shown title width), not `scrollWidth` (the full untruncated text). When the
+  // tags reach the title area, they'd be out-widthing what's actually shown, so
+  // switch them to icons to give the title back its room. Re-measured on any
+  // width change (sidebar resize, folder expand).
   const fitTags = () => {
     const name = card.querySelector('.session-card-name');
     const main = card.querySelector('.session-card-main');
@@ -644,7 +647,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       if (getComputedStyle(el).display === 'none') continue;
       tagsW += el.offsetWidth;
     }
-    if (tagsW >= name.scrollWidth) card.classList.add('tags-icon'); // tags reached the title's width
+    if (tagsW >= name.clientWidth) card.classList.add('tags-icon'); // tags reached the displayed title area
   };
   card._fitTags = fitTags;
   requestAnimationFrame(fitTags);

@@ -5,11 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.37.5] — 2026-07-06
+
+### Changed
+
+- **The status-tag text↔icon switch measures against the title's DISPLAYED area**, not its full text. The name is flexible and its shown width shrinks as the tags grow, so a card collapses its status chip to an icon when the tags reach the *currently displayed* title width (`clientWidth`) — the accurate "the tags are out-widthing the visible title" signal. (2.37.4 compared against the untruncated text width, which was off once the title itself got squeezed.)
+
 ## [2.37.4] — 2026-07-06
 
 ### Changed
 
-- **The status-tag text↔icon switch is now per-card and content-driven** (was a fixed sidebar-width threshold, which felt arbitrary). A card collapses its status chip to an icon only when its tags — measured at full text width — are as wide as the title itself, so tags never out-width the name: a short name with a wide "working" chip shows the icon, a long name keeps the text. Re-measured per card on any width change.
+- **The status-tag text↔icon switch is now per-card and content-driven** (was a fixed sidebar-width threshold, which felt arbitrary). A card collapses its status chip to an icon only when its tags are as wide as the title, so tags never out-width the name. Re-measured per card on any width change.
 
 ## [2.37.3] — 2026-07-06
 
