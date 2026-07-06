@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.37.0] — 2026-07-06
+
+### Task system review — status visibility, clarity, safer agent tools
+
+- **See each session's status at a glance.** Every live session card now shows a status chip — working / waiting for input / blocked / review — synthesized from what VibeSpace already observes (the agent's own report if it made one, otherwise the idle/active signal). Chips the agent or you set are solid; ones VibeSpace inferred are dashed. **Urgency drives the sidebar order**: sessions the agent flagged urgent/high (or that are blocked / waiting for you) float to the top.
+- **Recursive folders, now configurable.** A task's linked folders each have a "subfolders" toggle — on (default) auto-includes sessions anywhere under the folder; off restricts to sessions whose directory is exactly that folder.
+- **New sessions recommend the task's folders.** Starting a session in a task floats its linked folders to the top of the working-directory suggestions (highlighted).
+- **Clearer task detail.** "Plan" → "Checklist" and "Progress" → "Activity log" everywhere (the UI, the generated TASK.md, and the context injected into agents), each with a one-line explanation. "Repo file" is now "Export / Import" (with an Import button and a clearer description). The context-folder field no longer says "coming in P2" — it describes what it does. Task colors are now clearly visible on the board (a bold color bar + tinted title) instead of a 2px edge.
+- **Agents are less likely to misuse the reporting tools.** `vibespace-task` / `vibespace-status` now print usage AND the current state when run with no arguments, list the valid subcommands on a typo, and catch the common "task status vs this session's state" mix-up with a corrective hint. The injected context spells out that the commands are already scoped to the agent's own task (no task id to pass), disambiguates the two enums, and tells the agent to self-check by running a command bare. The injected activity log is capped at the last 30 entries with a pointer to the full log.
+
 ## [2.36.1] — 2026-07-06
 
 ### Added
