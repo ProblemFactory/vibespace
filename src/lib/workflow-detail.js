@@ -100,7 +100,7 @@ export function openWorkflowDetail(app, runId, opts = {}) {
     const st = RUN_STATUS_META[wf.status] || { label: wf.status || '?', color: 'var(--text-dim)' };
     head.innerHTML =
       `<div class="workflow-detail-title">${escHtml(wf.workflowName || 'Workflow')}</div>` +
-      `<span class="workflow-status-chip" style="--chip-color:${st.color}">${escHtml(st.label)}</span>`;
+      `<span class="workflow-status-chip${wf.live ? ' workflow-status-live' : ''}" style="--chip-color:${st.color}">${escHtml(st.label)}</span>`;
     root.appendChild(head);
 
     if (wf.summary) {
@@ -113,14 +113,22 @@ export function openWorkflowDetail(app, runId, opts = {}) {
     // ── Meta line ──
     const meta = document.createElement('div');
     meta.className = 'workflow-detail-meta';
-    const bits = [
-      `${wf.agentCount || 0} agents`,
-      `${fmtTokens(wf.totalTokens)} tokens`,
-      `${wf.totalToolCalls || 0} tool calls`,
-    ];
-    if (wf.durationMs) bits.push(fmtDuration(wf.durationMs));
+    let bits;
+    if (wf.live) {
+      bits = [`${wf.agentCount || 0} agents`, `${wf.doneCount || 0} done`, 'running…'];
+    } else {
+      bits = [`${wf.agentCount || 0} agents`, `${fmtTokens(wf.totalTokens)} tokens`, `${wf.totalToolCalls || 0} tool calls`];
+      if (wf.durationMs) bits.push(fmtDuration(wf.durationMs));
+    }
     meta.textContent = bits.join(' · ');
     root.appendChild(meta);
+
+    if (wf.live) {
+      const note = document.createElement('div');
+      note.className = 'workflow-live-note';
+      note.textContent = 'Live view — updates every few seconds. Phase names, labels and token totals appear when the run finishes. Open any agent to watch its transcript.';
+      root.appendChild(note);
+    }
 
     // ── Phases → agents ──
     for (const phase of wf.phases || []) {
@@ -169,6 +177,10 @@ export function openWorkflowDetail(app, runId, opts = {}) {
     }
   };
 
+  // While the run is in progress the endpoint returns a live skeleton (status
+  // 'running'); poll until a terminal snapshot replaces it, then stop.
+  let pollTimer = null;
+  const stopPoll = () => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } };
   const load = async () => {
     const q = new URLSearchParams({ runId });
     if (claudeSessionId) q.set('claudeSessionId', claudeSessionId);
@@ -176,17 +188,25 @@ export function openWorkflowDetail(app, runId, opts = {}) {
     try {
       const res = await fetch(`/api/workflow?${q}`);
       if (!res.ok) {
+        stopPoll();
         const body = await res.json().catch(() => ({}));
-        root.innerHTML = `<div class="empty-hint">${escHtml(body.error || 'Workflow snapshot not found.')}<br><span class="workflow-hint-sub">The snapshot is written when the run finishes.</span></div>`;
+        root.innerHTML = `<div class="empty-hint">${escHtml(body.error || 'Workflow not found.')}<br><span class="workflow-hint-sub">Live tracking needs the run's working directory — open this from the workflow's own chat session.</span></div>`;
         return;
       }
-      render(await res.json());
+      const wf = await res.json();
+      render(wf);
+      if (wf.live || wf.status === 'running') {
+        if (!pollTimer) pollTimer = setInterval(load, 2500);
+      } else {
+        stopPoll();
+      }
     } catch (e) {
-      root.innerHTML = `<div class="empty-hint">Failed to load workflow: ${escHtml(e.message)}</div>`;
+      // transient (server restart mid-run) — keep polling if we already are
+      if (!pollTimer) root.innerHTML = `<div class="empty-hint">Failed to load workflow: ${escHtml(e.message)}</div>`;
     }
   };
   load();
 
-  winInfo.onClose = () => app._checkWelcome();
+  winInfo.onClose = () => { stopPoll(); app._checkWelcome(); };
   return winInfo;
 }
