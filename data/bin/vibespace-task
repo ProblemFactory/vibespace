@@ -1,19 +1,24 @@
 #!/usr/bin/env node
 // vibespace-task — report progress on this session's VibeSpace task.
-// Usage:
-//   vibespace-task show                          # objective, plan, recent progress
-//   vibespace-task progress "what you did"       # append a progress note
-//   vibespace-task plan-check <step# | text>     # mark a plan step done
-//   vibespace-task plan-uncheck <step# | text>   # mark a plan step not done
-//   vibespace-task plan-add "new step"           # append a plan step
-//   vibespace-task status <active|paused|blocked|done>
-// The user sees all of this live on the VibeSpace task board. Writes are
-// scoped server-side to THIS session's context task.
+// Already scoped server-side to THIS session's context task (via the per-session
+// token in the env) — you NEVER pass a task id. Run with NO arguments to see the
+// usage AND the current state, so a wrong guess self-corrects in one call.
 const api = process.env.VIBESPACE_API;
 const token = process.env.VIBESPACE_SESSION_TOKEN;
 if (!api || !token) { console.error('vibespace-task: not running inside a VibeSpace session (missing env)'); process.exit(2); }
 const [cmd, ...rest] = process.argv.slice(2);
 const arg = rest.join(' ').trim();
+const USAGE = [
+  'usage (already bound to THIS session\'s task — no task id needed):',
+  '  vibespace-task show                          objective, checklist, recent activity',
+  '  vibespace-task progress "what you did"       append to the Activity log',
+  '  vibespace-task plan-check <step#|text>       tick a Checklist step',
+  '  vibespace-task plan-uncheck <step#|text>     untick a Checklist step',
+  '  vibespace-task plan-add "new step"           add a Checklist step',
+  '  vibespace-task status <active|paused|blocked|done>   set the WHOLE TASK\'s status',
+  '  (to report THIS session\'s own state instead, use: vibespace-status)',
+].join('\n');
+const TASK_STATUSES = ['active', 'paused', 'blocked', 'done'];
 async function call(method, url, body) {
   const res = await fetch(api + url, {
     method,
@@ -25,37 +30,46 @@ async function call(method, url, body) {
   return data;
 }
 const fmtPlan = (plan) => plan.forEach((p, i) => console.log('  ' + (i + 1) + '. [' + (p.done ? 'x' : ' ') + '] ' + p.text));
-async function main() {
-  if (!cmd || cmd === '--help' || cmd === '-h') {
-    console.log('usage: vibespace-task show | progress "note" | plan-check <step#|text> | plan-uncheck <step#|text> | plan-add "step" | status <active|paused|blocked|done>');
-    return;
+async function printShow() {
+  const { task } = await call('GET', '/api/agent/task');
+  console.log('# ' + task.title + ' (' + task.id + ') — ' + task.status);
+  if (task.objective) console.log('\nObjective: ' + task.objective);
+  if (task.plan && task.plan.length) { console.log('\nChecklist:'); fmtPlan(task.plan); }
+  if (task.progress && task.progress.length) {
+    console.log('\nActivity log (recent):');
+    for (const pr of task.progress) console.log('  - ' + new Date(pr.at).toISOString().slice(0, 16).replace('T', ' ') + ' ' + pr.note);
   }
+}
+async function main() {
+  if (cmd === '--help' || cmd === '-h') { console.log(USAGE); return; }
+  // No args → usage + current state (one call teaches syntax AND shows status).
+  if (!cmd) { console.log(USAGE); console.log(''); try { await printShow(); } catch {} return; }
   if (cmd === 'show') {
-    const { task } = await call('GET', '/api/agent/task');
-    console.log('# ' + task.title + ' (' + task.id + ') — ' + task.status);
-    if (task.objective) console.log('\nObjective: ' + task.objective);
-    if (task.plan && task.plan.length) { console.log('\nPlan:'); fmtPlan(task.plan); }
-    if (task.progress && task.progress.length) {
-      console.log('\nRecent progress:');
-      for (const pr of task.progress) console.log('  - ' + new Date(pr.at).toISOString().slice(0, 16).replace('T', ' ') + ' ' + pr.note);
-    }
+    await printShow();
   } else if (cmd === 'progress') {
-    if (!arg) { console.error('vibespace-task: progress needs a note'); process.exit(1); }
+    if (!arg) { console.error('vibespace-task: progress needs a note, e.g. vibespace-task progress "fixed the parser"'); process.exit(1); }
     await call('POST', '/api/agent/task-progress', { note: arg });
     console.log('progress recorded');
   } else if (cmd === 'plan-check' || cmd === 'plan-uncheck') {
-    if (!arg) { console.error('vibespace-task: need a step number or unique text'); process.exit(1); }
+    if (!arg) { console.error('vibespace-task: ' + cmd + ' needs a step number or unique text (run `vibespace-task show` to see the checklist)'); process.exit(1); }
     const { plan } = await call('POST', '/api/agent/task-plan', cmd === 'plan-check' ? { check: arg } : { uncheck: arg });
     fmtPlan(plan);
   } else if (cmd === 'plan-add') {
-    if (!arg) { console.error('vibespace-task: plan-add needs text'); process.exit(1); }
+    if (!arg) { console.error('vibespace-task: plan-add needs text, e.g. vibespace-task plan-add "write tests"'); process.exit(1); }
     const { plan } = await call('POST', '/api/agent/task-plan', { add: arg });
     console.log('added as step ' + plan.length);
   } else if (cmd === 'status') {
+    if (!TASK_STATUSES.includes(arg)) {
+      console.error('vibespace-task: status must be one of ' + TASK_STATUSES.join('/')
+        + '\n  (this sets the WHOLE TASK\'s status; to report THIS session\'s own state use:'
+        + '\n   vibespace-status <working|needs-input|blocked|review>)');
+      process.exit(1);
+    }
     await call('POST', '/api/agent/task-status', { status: arg });
     console.log('task status set: ' + arg);
   } else {
-    console.error('vibespace-task: unknown command ' + cmd);
+    console.error('vibespace-task: unknown command "' + cmd + '"'
+      + '\n  valid: show, progress, plan-check, plan-uncheck, plan-add, status\n' + USAGE);
     process.exit(1);
   }
 }

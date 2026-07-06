@@ -112,7 +112,7 @@ export function installSidebarRender(SidebarClass) {
       linkBtn.onclick = (e) => {
         e.stopPropagation();
         this._showTaskChecklistPopover(linkBtn,
-          (task) => (task.folders || []).includes(cwd),
+          (task) => this._folderPaths(task).includes(cwd),
           (task, checked, pop) => { if (checked) this._taskAddFolder(task.id, cwd); else this._taskRemoveFolder(task.id, cwd); pop.remove(); });
       };
       header.appendChild(linkBtn);

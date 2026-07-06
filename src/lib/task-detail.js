@@ -94,8 +94,8 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
       obj.onchange = () => patch({ objective: obj.value });
       objSec.appendChild(obj);
 
-      // ── Plan ──
-      const planSec = section('Plan');
+      // ── Checklist (was "Plan") ──
+      const planSec = section('Checklist', 'steps toward the objective — you and agents tick them off');
       const planList = document.createElement('div');
       planList.className = 'task-detail-plan';
       (task.plan || []).forEach((item, i) => {
@@ -115,7 +115,7 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
       planSec.appendChild(planList);
       const planAdd = document.createElement('input');
       planAdd.className = 'task-detail-input';
-      planAdd.placeholder = '+ Add step (Enter)';
+      planAdd.placeholder = '+ Add checklist step (Enter)';
       planAdd.onkeydown = (e) => {
         if (e.key === 'Enter' && planAdd.value.trim()) {
           patch({ plan: [...(task.plan || []), { text: planAdd.value.trim(), done: false }] });
@@ -124,8 +124,8 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
       };
       planSec.appendChild(planAdd);
 
-      // ── Progress log ──
-      const progSec = section('Progress');
+      // ── Activity log (was "Progress") ──
+      const progSec = section('Activity log', 'timestamped notes of what was done — agents append via vibespace-task, you can too');
       const progList = document.createElement('div');
       progList.className = 'task-detail-progress';
       const entries = (task.progress || []).slice(-30);
@@ -141,7 +141,7 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
       progList.scrollTop = progList.scrollHeight;
       const progAdd = document.createElement('input');
       progAdd.className = 'task-detail-input';
-      progAdd.placeholder = '+ Add progress note (Enter)';
+      progAdd.placeholder = '+ Add activity note (Enter)';
       progAdd.onkeydown = async (e) => {
         if (e.key === 'Enter' && progAdd.value.trim()) {
           await sidebar._taskApi('POST', `/api/tasks/${encodeURIComponent(taskId)}/progress`, { note: progAdd.value.trim() });
@@ -183,15 +183,28 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
     sessSec.appendChild(sessList);
 
     // ── Auto-include folders ──
-    const foldSec = section('Auto-include folders', 'sessions under these join automatically');
+    const foldSec = section('Auto-include folders', 'sessions in these folders join automatically');
     const foldList = document.createElement('div');
-    for (const fp of task.folders || []) {
+    for (const f of task.folders || []) {
+      const rec = sidebar._folderRec(f);
       const row = document.createElement('div');
       row.className = 'task-detail-session';
-      row.innerHTML = `<span class="task-detail-session-name" title="${escHtml(fp)}">${escHtml(fp.replace(/^\/home\/[^/]+/, '~'))}</span>`;
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'task-detail-session-name';
+      nameSpan.title = rec.path;
+      nameSpan.textContent = rec.path.replace(/^\/home\/[^/]+/, '~');
+      row.appendChild(nameSpan);
+      // Per-folder recursion toggle (#1): on = sessions in subfolders join too.
+      const recLabel = document.createElement('label');
+      recLabel.className = 'task-detail-folder-rec';
+      recLabel.title = 'Include sessions in subfolders too. Off = only sessions whose cwd is exactly this folder.';
+      const recCb = document.createElement('input'); recCb.type = 'checkbox'; recCb.checked = rec.recursive;
+      recCb.onchange = () => sidebar._taskSetFolderRecursive(taskId, rec.path, recCb.checked);
+      recLabel.append(recCb, document.createTextNode('subfolders'));
+      row.appendChild(recLabel);
       const un = document.createElement('button');
       un.className = 'task-detail-x'; un.textContent = '×'; un.title = 'Unlink folder';
-      un.onclick = () => sidebar._taskRemoveFolder(taskId, fp);
+      un.onclick = () => sidebar._taskRemoveFolder(taskId, rec.path);
       row.appendChild(un);
       foldList.appendChild(row);
     }
@@ -214,7 +227,7 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
     foldSec.appendChild(foldAddWrap);
 
     // ── Context folder ──
-    const ctxSec = section('Context folder', 'the task’s shared brain — injected into bound sessions (coming in P2)');
+    const ctxSec = section('Context folder', 'a shared folder for this task — its TASK.md and a file index are injected into every session bound to this task');
     const ctxWrap = document.createElement('div');
     ctxWrap.className = 'task-detail-acwrap task-detail-ctxrow';
     const ctxInput = document.createElement('input');
@@ -255,8 +268,8 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
     swatchRow.appendChild(noColor);
     colorSec.appendChild(swatchRow);
 
-    // ── Repo file (P4): export this task to a committable markdown file ──
-    const repoSec = section('Repo file', 'export the task as a committable markdown file (frontmatter + objective + plan)');
+    // ── Export / Import (P4): a task ⇄ a committable markdown file ──
+    const repoSec = section('Export / Import', 'a self-contained markdown file (frontmatter + objective + checklist) — commit it into a git repo so the task travels with the code, or move it between machines');
     const repoWrap = document.createElement('div');
     repoWrap.className = 'task-detail-acwrap task-detail-ctxrow';
     const repoInput = document.createElement('input');
@@ -281,7 +294,23 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
         else showToast(d.error || 'Export failed', { type: 'error' });
       } catch { showToast('Export failed — server unreachable', { type: 'error' }); }
     };
-    repoWrap.append(repoInput, repoDrop, exportBtn);
+    const importBtn = document.createElement('button');
+    importBtn.className = 'task-detail-btn';
+    importBtn.textContent = 'Import';
+    importBtn.title = 'Read a task markdown file back into the store (its frontmatter id/title/status are authoritative; existing sessions/folders/progress are preserved)';
+    importBtn.onclick = async () => {
+      const p = repoInput.value.trim();
+      if (!p) { showToast('Enter the .md file path first', { type: 'error' }); return; }
+      try {
+        const res = await fetch('/api/tasks/import', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: p }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (res.ok) showToast('Imported ' + (d.task?.id || ''));
+        else showToast(d.error || 'Import failed', { type: 'error' });
+      } catch { showToast('Import failed — server unreachable', { type: 'error' }); }
+    };
+    repoWrap.append(repoInput, repoDrop, exportBtn, importBtn);
     repoSec.appendChild(repoWrap);
 
     // ── Danger ──

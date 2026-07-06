@@ -2068,6 +2068,8 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 .task-detail-session-dot[data-status="live"], .task-detail-session-dot[data-status="tmux"] { background: var(--green); }
 .task-detail-session-dot[data-status="external"] { background: var(--yellow, #e5c07b); }
 .task-detail-acwrap { position: relative; }
+.task-detail-folder-rec { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; color: var(--text-dim); flex-shrink: 0; cursor: pointer; user-select: none; }
+.task-detail-folder-rec input { margin: 0; width: 12px; height: 12px; }
 .task-detail-ctxrow { display: flex; gap: 6px; }
 .task-detail-ctxrow .task-detail-input { flex: 1; }
 .task-detail-swatches { display: flex; gap: 6px; }

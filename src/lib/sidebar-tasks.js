@@ -245,31 +245,42 @@ export function installSidebarTasks(SidebarClass) {
     if (!sessionKey) return;
     return this._taskApi('POST', `/api/tasks/${encodeURIComponent(id)}/unbind`, { sessionKey });
   };
-  proto._taskAddFolder = function(id, folderPath) {
+  // Folders are {path, recursive} records; tolerate legacy bare strings.
+  proto._folderRec = (f) => (typeof f === 'string' ? { path: f, recursive: true } : { path: f.path, recursive: f.recursive !== false });
+  proto._folderPaths = function(task) { return (task?.folders || []).map((f) => this._folderRec(f).path); };
+  proto._taskAddFolder = function(id, folderPath, recursive = true) {
     const t = this._taskById(id);
-    if (!t || !folderPath || (t.folders || []).includes(folderPath)) return;
-    return this._taskUpdate(id, { folders: [...(t.folders || []), folderPath] });
+    if (!t || !folderPath) return;
+    const recs = (t.folders || []).map(this._folderRec);
+    if (recs.some((f) => f.path === folderPath)) return;
+    return this._taskUpdate(id, { folders: [...recs, { path: folderPath, recursive: !!recursive }] });
   };
   proto._taskRemoveFolder = function(id, folderPath) {
     const t = this._taskById(id);
     if (!t) return;
-    return this._taskUpdate(id, { folders: (t.folders || []).filter(p => p !== folderPath) });
+    return this._taskUpdate(id, { folders: (t.folders || []).map(this._folderRec).filter((f) => f.path !== folderPath) });
+  };
+  proto._taskSetFolderRecursive = function(id, folderPath, recursive) {
+    const t = this._taskById(id);
+    if (!t) return;
+    const folders = (t.folders || []).map(this._folderRec).map((f) => (f.path === folderPath ? { ...f, recursive: !!recursive } : f));
+    return this._taskUpdate(id, { folders });
   };
 
   // ── Resolvers ──
 
-  // All session state keys of a task: explicit tags + auto-include by folder
-  // (a session whose cwd is under any of task.folders counts, like the old
-  // groupFolders behavior).
+  // All session state keys of a task: explicit tags + auto-include by folder.
+  // recursive:true → a session whose cwd is UNDER the folder counts; false →
+  // only an exact cwd match (the old behavior was always recursive).
   proto._getTaskSessionKeys = function(task, allSessions) {
     const result = new Set(task.sessions || []);
-    const folders = task.folders || [];
+    const folders = (task.folders || []).map(this._folderRec);
     for (const s of allSessions || []) {
       const sessionKey = this._getSessionStateKey(s);
       if (result.has(sessionKey) || result.has(s.sessionId)) continue;
       const cwd = s.cwd || '';
-      for (const fp of folders) {
-        if (cwd === fp || cwd.startsWith(fp + '/')) { result.add(sessionKey); break; }
+      for (const f of folders) {
+        if (cwd === f.path || (f.recursive && cwd.startsWith(f.path + '/'))) { result.add(sessionKey); break; }
       }
     }
     return result;
@@ -400,16 +411,17 @@ export function installSidebarTasks(SidebarClass) {
       hint.textContent = 'No linked folders. Sessions under a linked folder join this task automatically. Link via the file explorer right-click menu or drag a folder onto the task.';
       pop.appendChild(hint);
     } else {
-      for (const fp of folders) {
+      for (const f of folders) {
+        const rec = this._folderRec(f);
         const row = document.createElement('div'); row.className = 'session-detail-group-item';
         row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:6px;padding:4px 8px;cursor:default';
         const pathSpan = document.createElement('span');
         pathSpan.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px';
-        pathSpan.textContent = fp.replace(/^\/home\/[^/]+/, '~'); pathSpan.title = fp;
+        pathSpan.textContent = rec.path.replace(/^\/home\/[^/]+/, '~') + (rec.recursive ? '' : ' (this folder only)'); pathSpan.title = rec.path;
         const removeBtn = document.createElement('button');
         removeBtn.style.cssText = 'background:none;border:none;color:var(--red,#e55);cursor:pointer;font-size:12px;padding:0 4px;flex-shrink:0';
         removeBtn.textContent = '×'; removeBtn.title = 'Unlink folder';
-        removeBtn.onclick = (e) => { e.stopPropagation(); this._taskRemoveFolder(taskId, fp); pop.remove(); };
+        removeBtn.onclick = (e) => { e.stopPropagation(); this._taskRemoveFolder(taskId, rec.path); pop.remove(); };
         row.append(pathSpan, removeBtn);
         pop.appendChild(row);
       }
@@ -421,7 +433,7 @@ export function installSidebarTasks(SidebarClass) {
     if (!t) return;
     const items = [
       { label: 'Details…', action: () => this.app.openTaskDetail(taskId) },
-      { label: 'New session in this task…', action: () => this.app.showNewSessionDialog({ cwd: t.folders?.[0], taskId }) },
+      { label: 'New session in this task…', action: () => this.app.showNewSessionDialog({ cwd: this._folderPaths(t)[0], taskId }) },
       { label: 'Rename', action: async () => {
         const n = await showInputDialog({ title: 'Rename Task', label: 'Title', value: t.title, confirmText: 'Rename' });
         if (n && n.trim() && n.trim() !== t.title) this._taskUpdate(taskId, { title: n.trim() });
@@ -544,12 +556,12 @@ export function installSidebarTasks(SidebarClass) {
       const plusBtn = document.createElement('button');
       plusBtn.className = 'folder-add-btn';
       plusBtn.textContent = '+';
-      plusBtn.title = 'New session in this task' + (task.folders?.[0] ? ` (${task.folders[0]})` : '');
+      plusBtn.title = 'New session in this task' + (this._folderPaths(task)[0] ? ` (${this._folderPaths(task)[0]})` : '');
       plusBtn.onclick = (e) => {
         e.stopPropagation();
         // Reuse the normal dialog PRE-FILLED (user confirms all params):
         // cwd defaults to the first auto-include folder, task pre-selected.
-        this.app.showNewSessionDialog({ cwd: task.folders?.[0], taskId: task.id });
+        this.app.showNewSessionDialog({ cwd: this._folderPaths(task)[0], taskId: task.id });
       };
       header.appendChild(plusBtn);
 
