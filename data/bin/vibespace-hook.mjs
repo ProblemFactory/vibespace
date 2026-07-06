@@ -16,9 +16,12 @@ async function run(input) {
     if (!api || !token) return process.exit(0);
     let path;
     if (event === 'SessionStart') {
+      // Call task-context whether or not a task is bound: with a task it returns
+      // the task context; without one it returns the baseline VibeSpace tools
+      // intro (so no-task sessions still learn to report their status). The
+      // endpoint scopes to the session's OWN task via the token, ignoring this query.
       const taskId = process.env.VIBESPACE_TASK_ID;
-      if (!taskId) return process.exit(0);
-      path = '/api/agent/task-context?taskId=' + encodeURIComponent(taskId);
+      path = '/api/agent/task-context' + (taskId ? '?taskId=' + encodeURIComponent(taskId) : '');
     } else if (event === 'UserPromptSubmit') {
       path = '/api/agent/prompt-context';
     } else {

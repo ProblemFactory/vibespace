@@ -29,22 +29,41 @@ class SessionStatusManager {
     this._file = path.join(dataDir, 'session-status.json');
     this._onChange = onChange || (() => {});
     this._state = { statuses: {} };
+    this._writeTimer = null; this._dirty = false; this._lastWritten = null;
     try {
       this._state = JSON.parse(fs.readFileSync(this._file, 'utf-8'));
       if (!this._state || typeof this._state.statuses !== 'object') this._state = { statuses: {} };
+      this._lastWritten = JSON.stringify(this._state, null, 2); // avoid a redundant first write
     } catch { /* fresh */ }
   }
 
+  // In-memory state + broadcast are updated synchronously by the callers; disk
+  // persistence is DEBOUNCED (single process → no cross-process race) and
+  // content-compared, so a burst of status updates coalesces into one write
+  // instead of a synchronous full-file writeFileSync per update. Flushed on exit.
   _save() {
     const keys = Object.keys(this._state.statuses);
     if (keys.length > MAX_ENTRIES) {
       keys.sort((a, b) => (this._state.statuses[a].at || 0) - (this._state.statuses[b].at || 0));
       for (const k of keys.slice(0, keys.length - MAX_ENTRIES)) delete this._state.statuses[k];
     }
-    const tmp = this._file + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(this._state, null, 2));
-    fs.renameSync(tmp, this._file);
+    this._dirty = true;
+    if (!this._writeTimer) this._writeTimer = setTimeout(() => { this._writeTimer = null; this._flush(); }, 500);
   }
+
+  _flush() {
+    if (!this._dirty) return;
+    const json = JSON.stringify(this._state, null, 2);
+    if (json === this._lastWritten) { this._dirty = false; return; } // no real change → skip write
+    const tmp = this._file + '.tmp';
+    fs.writeFileSync(tmp, json);
+    fs.renameSync(tmp, this._file);
+    this._lastWritten = json;
+    this._dirty = false;
+  }
+
+  // Synchronous flush for process exit (SIGINT/SIGTERM), like SyncStore/layouts.
+  flush() { if (this._writeTimer) { clearTimeout(this._writeTimer); this._writeTimer = null; } this._flush(); }
 
   _notify() { try { this._onChange(this.snapshot()); } catch { } }
 
