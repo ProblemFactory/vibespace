@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.37.4] — 2026-07-06
+
+### Changed
+
+- **The status-tag text↔icon switch is now per-card and content-driven** (was a fixed sidebar-width threshold, which felt arbitrary). A card collapses its status chip to an icon only when its tags — measured at full text width — are as wide as the title itself, so tags never out-width the name: a short name with a wide "working" chip shows the icon, a long name keeps the text. Re-measured per card on any width change.
+
 ## [2.37.3] — 2026-07-06
 
 ### Changed

@@ -628,5 +628,27 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       });
     }
   }
+  // Adaptive tags (per-card, content-driven — not a fixed width threshold):
+  // collapse the status chip to ICON-only when the tags, at full text width,
+  // are as WIDE AS the title itself (tags shouldn't out-width the name). Short
+  // names with a wide "working" chip → icons; long names keep the text.
+  // Re-measured on any width change (sidebar resize, folder expand).
+  const fitTags = () => {
+    const name = card.querySelector('.session-card-name');
+    const main = card.querySelector('.session-card-main');
+    if (!name || !main || !name.isConnected || name.offsetParent === null) return; // hidden/detached
+    card.classList.remove('tags-icon'); // measure tags at full (text) width — sync reflow, no paint
+    let tagsW = 0;
+    for (const el of main.children) {
+      if (el === name || el.classList.contains('session-conn-dot') || el.classList.contains('session-expand-btn')) continue;
+      if (getComputedStyle(el).display === 'none') continue;
+      tagsW += el.offsetWidth;
+    }
+    if (tagsW >= name.scrollWidth) card.classList.add('tags-icon'); // tags reached the title's width
+  };
+  card._fitTags = fitTags;
+  requestAnimationFrame(fitTags);
+  try { const ro = new ResizeObserver(fitTags); ro.observe(card); card._tagsRO = ro; } catch {}
+
   return card;
 }
