@@ -1700,7 +1700,8 @@ class App {
       taskSel.onchange = () => {
         const t = this.sidebar?._taskById?.(taskSel.value);
         const cwdInput = document.getElementById('input-cwd');
-        if (t?.folders?.[0] && !cwdInput.value.trim()) cwdInput.value = t.folders[0];
+        const firstFolder = t?.folders?.[0] && (typeof t.folders[0] === 'string' ? t.folders[0] : t.folders[0].path);
+        if (firstFolder && !cwdInput.value.trim()) cwdInput.value = firstFolder;
       };
     }
     // Host dropdown (remote sessions run over ssh + remote dtach; terminal only until P3)
