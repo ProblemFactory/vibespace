@@ -1042,6 +1042,8 @@ html, body {
 }
 .autocomplete-item::before { content: '\200e'; } /* LTR mark so text reads normally, but truncation happens on the left */
 .autocomplete-item:hover, .autocomplete-item.active { background: var(--bg-hover); color: var(--accent-hover); }
+.autocomplete-item-task { background: color-mix(in srgb, var(--accent) 12%, transparent); border-left: 3px solid var(--accent); color: var(--accent-hover); }
+.autocomplete-item-task:hover, .autocomplete-item-task.active { background: color-mix(in srgb, var(--accent) 22%, transparent); }
 .autocomplete-item .match { color: var(--accent-hover); font-weight: 600; }
 
 .layout-save-row { display: flex; gap: 6px; }
@@ -2017,7 +2019,9 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
   animation: task-attn-pulse 1.6s ease-in-out infinite;
 }
 @keyframes task-attn-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
-.task-board-item { border-left: 2px solid var(--task-color, transparent); }
+.task-board-item { border-left: 4px solid var(--task-color, transparent); }
+.task-board-item[data-colored="1"] { background: color-mix(in srgb, var(--task-color) 8%, transparent); }
+.task-board-item[data-colored="1"] > .folder-header > .folder-path { color: var(--task-color); }
 .sidebar-tab .task-attn-badge { margin-left: 3px; }
 
 .task-detail { display: flex; flex-direction: column; gap: 10px; height: 100%; overflow-y: auto; padding: 10px 12px; font-size: 12px; }
@@ -2120,6 +2124,8 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
   white-space: nowrap;
 }
 .sess-state-chip.sess-state-urgent { animation: task-attn-pulse 1.2s ease-in-out infinite; font-weight: 700; }
+/* Synthesized (observed by VibeSpace) vs declared (agent/user-set): dashed + dim */
+.sess-state-chip.sess-state-derived { border-style: dashed; opacity: 0.8; }
 .session-status-pop { padding: 8px; display: flex; flex-direction: column; gap: 6px; min-width: 200px; }
 .session-status-pop-row { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-secondary); justify-content: space-between; }
 .session-status-pop-row select, .session-status-pop-row input {

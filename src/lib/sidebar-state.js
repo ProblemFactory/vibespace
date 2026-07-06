@@ -204,8 +204,37 @@ export function installSidebarState(SidebarClass) {
 
   // ── Star / Archive / Rename ──
 
+  // Waiting-key set (OSC-idle sessions), cached for one synchronous render pass
+  // so a card grid + its sort don't each re-scan every window.
+  proto._waitingSet = function() {
+    if (this.__waitingCache) return this.__waitingCache;
+    const w = this.app?.getWaitingSessionKeys?.() || new Set();
+    this.__waitingCache = w;
+    try { queueMicrotask(() => { this.__waitingCache = null; }); } catch { this.__waitingCache = null; }
+    return w;
+  };
+
+  // Urgency + attention rank for a session (higher floats to the top). The
+  // agent sets urgency via vibespace-status; blocked/needs-input/OSC-waiting
+  // also bump it so sessions that need you surface without an explicit urgency.
+  proto._sessionSortRank = function(s, waiting) {
+    const URG = { urgent: 3, high: 2, normal: 1, low: 0 };
+    const st = this.getSessionStatus?.(s);
+    let r = st?.urgency ? (URG[st.urgency] ?? 0) : 0;
+    if (st?.state === 'blocked') r = Math.max(r, 2);
+    else if (st?.state === 'needs-input') r = Math.max(r, 1);
+    const key = `${s.backend || 'claude'}:${s.backendSessionId || s.claudeSessionId || ''}`;
+    if (waiting.has(key)) r = Math.max(r, 1);
+    return r;
+  };
+
   proto._sortSessions = function(arr) {
+    const waiting = this._waitingSet();
+    const rankOf = new Map();
+    for (const s of arr) rankOf.set(s, this._sessionSortRank(s, waiting));
     arr.sort((a, b) => {
+      const ar = rankOf.get(a), br = rankOf.get(b);
+      if (ar !== br) return br - ar; // urgency/attention first (user: 决定排列优先级)
       const as = this._stateSetHas(this._starredIds, a) ? 1 : 0;
       const bs = this._stateSetHas(this._starredIds, b) ? 1 : 0;
       if (as !== bs) return bs - as;

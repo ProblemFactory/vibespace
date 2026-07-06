@@ -136,14 +136,26 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
   const stateChip = row.querySelector('.sess-state-chip');
   {
     const st = state.getSessionStatus?.(s);
-    if (st && (st.state || st.urgency)) {
-      const meta = SESSION_STATE_META[st.state] || { label: st.state || 'status', color: 'var(--text-dim)' };
-      const mark = SESSION_URGENCY_META[st.urgency]?.mark || '';
+    const isLive = s.status === 'live' || s.status === 'tmux';
+    const sKey = `${s.backend || 'claude'}:${s.backendSessionId || s.claudeSessionId || ''}`;
+    const waiting = isLive && (state._waitingSet?.().has(sKey));
+    // Synthesize a display state so EVERY live session shows working/waiting/
+    // blocked at a glance: agent-declared wins; else OSC-idle ⇒ needs-input,
+    // otherwise a live session reads as "working". Non-live shows nothing here
+    // (the connection badge already says stopped/external).
+    const dstate = st?.state || (isLive ? (waiting ? 'needs-input' : 'working') : null);
+    if (dstate || st?.urgency) {
+      const meta = SESSION_STATE_META[dstate] || { label: dstate || 'status', color: 'var(--text-dim)' };
+      const mark = SESSION_URGENCY_META[st?.urgency]?.mark || '';
+      const derived = !st?.state; // synthesized by VibeSpace, not agent/user-declared
       stateChip.style.display = '';
       stateChip.style.setProperty('--chip-color', meta.color);
-      stateChip.textContent = (st.state ? meta.label : '') + (mark ? ' ' + mark : (!st.state && st.urgency ? st.urgency : ''));
-      stateChip.title = `${st.state ? 'state: ' + meta.label : ''}${st.urgency ? (st.state ? ' · ' : '') + 'urgency: ' + st.urgency : ''}${st.reason ? ' — ' + st.reason : ''} (set by ${st.setBy === 'agent' ? 'the agent' : 'you'}; click to change)`;
-      if (st.urgency === 'urgent') stateChip.classList.add('sess-state-urgent');
+      stateChip.textContent = (dstate ? meta.label : '') + (mark ? ' ' + mark : (!dstate && st?.urgency ? st.urgency : ''));
+      stateChip.classList.toggle('sess-state-derived', derived);
+      stateChip.title = derived
+        ? `${meta.label} — ${waiting ? 'finished, waiting for you' : 'active'} (observed by VibeSpace; the agent can set its own state with vibespace-status). Click to set manually.`
+        : `${st.state ? 'state: ' + meta.label : ''}${st.urgency ? (st.state ? ' · ' : '') + 'urgency: ' + st.urgency : ''}${st.reason ? ' — ' + st.reason : ''} (set by ${st.setBy === 'agent' ? 'the agent' : 'you'}; click to change)`;
+      stateChip.classList.toggle('sess-state-urgent', st?.urgency === 'urgent');
       stateChip.onclick = (e) => { e.stopPropagation(); state._showSessionStatusPopover?.(stateChip, s); };
     }
   }

@@ -515,7 +515,7 @@ export function installSidebarTasks(SidebarClass) {
       const collapseKey = 'group:' + task.id;
       groupEl._collapseKey = collapseKey; // for highlightSession to expand on jump
       if (this._collapsedFolders.has(collapseKey)) groupEl.classList.add('collapsed');
-      if (task.color) groupEl.style.setProperty('--task-color', task.color);
+      if (task.color) { groupEl.style.setProperty('--task-color', task.color); groupEl.dataset.colored = '1'; }
 
       const hasLive = taskSessions.some(s => s.status === 'live' || s.status === 'tmux');
       const linkedFolders = task.folders || [];
