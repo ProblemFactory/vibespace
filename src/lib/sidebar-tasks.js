@@ -519,7 +519,6 @@ export function installSidebarTasks(SidebarClass) {
 
       const hasLive = taskSessions.some(s => s.status === 'live' || s.status === 'tmux');
       const linkedFolders = task.folders || [];
-      const folderHint = linkedFolders.length ? ` (${linkedFolders.length} folder${linkedFolders.length > 1 ? 's' : ''})` : '';
       const statusChip = task.kind === 'task'
         ? `<span class="task-status-chip" style="--chip-color:${TASK_STATUS_META[task.status]?.color || 'var(--text-dim)'}">${escHtml(TASK_STATUS_META[task.status]?.label || task.status)}</span>`
         : '';
@@ -530,17 +529,29 @@ export function installSidebarTasks(SidebarClass) {
         ? `<span class="task-attn-badge" title="${escHtml(attnTip)}">⚠${attnCount ? ' ' + attnCount : ''}</span>`
         : '';
 
+      // Two-row task header: row 1 = title + status/attention tags + count;
+      // row 2 = the task's linked folder paths (a task can have several).
+      const folderPathsHtml = linkedFolders.length
+        ? `<div class="task-folder-paths">${linkedFolders.map((f) => {
+            const r = this._folderRec(f);
+            return `<span class="task-folder-path" title="${escHtml(r.path)}${r.recursive ? ' (incl. subfolders)' : ' (this folder only)'}">${escHtml(r.path.replace(/^\/home\/[^/]+/, '~'))}${r.recursive ? '/**' : ''}</span>`;
+          }).join('')}</div>`
+        : '';
       const header = document.createElement('div');
-      header.className = 'folder-header';
-      header.innerHTML = `<span class="folder-chevron">▼</span>`
+      header.className = 'folder-header' + (linkedFolders.length ? ' has-paths' : '');
+      header.innerHTML = `<div class="folder-header-main">`
+        + `<span class="folder-chevron">▼</span>`
         + (task.kind === 'task' ? `<span class="task-status-dot" style="background:${TASK_STATUS_META[task.status]?.color || 'var(--text-dim)'}"></span>` : '')
-        + `<span class="folder-path" style="direction:ltr">${escHtml(task.title)}<span style="color:var(--text-dim);font-weight:400;font-size:10px">${folderHint}</span></span>`
+        + `<span class="folder-path" style="direction:ltr">${escHtml(task.title)}</span>`
         + statusChip + attnBadge
-        + `<span class="folder-count">${taskSessions.length}</span>`;
+        + `<span class="folder-count">${taskSessions.length}</span>`
+        + `</div>`
+        + folderPathsHtml;
       if (hasLive) {
         const dot = document.createElement('span');
         dot.style.cssText = 'width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0';
-        header.insertBefore(dot, header.querySelector('.folder-count'));
+        const main = header.querySelector('.folder-header-main');
+        main.insertBefore(dot, main.querySelector('.folder-count'));
       }
 
       const nameSpan = header.querySelector('.folder-path');
