@@ -222,7 +222,7 @@ class Sidebar {
     // Sort: Folders = recent/folder cycle; Tasks tab shows it only in the flat
     // Tasks view (the Groups board has a fixed attention order). Same button,
     // per-context behavior — no separate toolbar row inside the view.
-    show('sort-toggle', t === 'folders' || (t === 'tasks' && !this._mobileMode && this._boardView === 'tasks')); // mobile tasks tab = drill-down, no Task View sort
+    show('sort-toggle', t === 'folders' || (t === 'tasks' && this._boardView === 'tasks')); // Tasks flat view has its sort on ALL form factors now
     this._updateSortBtn(document.getElementById('sort-toggle'));
     show('manage-toggle', t !== 'mounts');
     show('status-quick-tabs', t === 'folders');
@@ -845,7 +845,7 @@ class Sidebar {
         this._mobileDrilldown = null; // fallback to list if drill-down target gone
       }
       if (this._activeTab === 'mounts') { if (!this.listEl.querySelector('.mounts-panel')) this._renderMounts(); }
-      else if (this._activeTab === 'tasks') this._renderMobileTaskList(sessions);
+      else if (this._activeTab === 'tasks') this._renderMobileTaskBoard(sessions);
       // Sessions tab uses the same three-zone workbench as desktop — it's a
       // plain vertical card list (no hover-only affordances), so it's more
       // touch-friendly than the old two-level folder drill-down.

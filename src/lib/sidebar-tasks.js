@@ -821,6 +821,15 @@ export function installSidebarTasks(SidebarClass) {
 
   // ── Mobile (two-level drill, same as folders) ──
 
+  // Mobile Tasks tab: the same Groups | Tasks sub-views as desktop. Groups =
+  // the two-level drill-down; Tasks = the SAME flat urgency-sorted Task View
+  // renderer as desktop (cards are the shared renderer, already touch-ready).
+  proto._renderMobileTaskBoard = function(sessions) {
+    this.listEl.appendChild(this._buildBoardViewTabs());
+    if (this._boardView === 'tasks') { this._renderTaskViewFlat(sessions); return; }
+    this._renderMobileTaskList(sessions);
+  };
+
   proto._renderMobileTaskList = function(sessions) {
     const MOBILE_ICON_TASK = '<svg class="mobile-folder-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="12" height="12" rx="1.5"/><path d="M5 6h6M5 9h6M5 12h3"/></svg>';
     const sessionById = new Map();
@@ -870,7 +879,7 @@ export function installSidebarTasks(SidebarClass) {
     this.listEl.innerHTML = '';
     const back = document.createElement('div'); back.className = 'mobile-folder-back';
     back.innerHTML = `<span class="mobile-folder-back-arrow">‹</span> <span>All Task Groups</span>`;
-    back.onclick = () => { this._mobileDrilldown = null; this.listEl.innerHTML = ''; this._renderMobileTaskList(allSessions); };
+    back.onclick = () => { this._mobileDrilldown = null; this._render(); }; // full re-render restores the sub-tab bar
     this.listEl.appendChild(back);
     const titleRow = document.createElement('div'); titleRow.className = 'mobile-folder-title';
     titleRow.innerHTML = `<span>${escHtml(title)}</span>`;
