@@ -251,6 +251,16 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
     browse.onclick = () => { if (task.contextDir) app.openFileExplorer(task.contextDir); };
     ctxWrap.append(ctxInput, ctxDrop, browse);
     ctxSec.appendChild(ctxWrap);
+    // Context injection toggle (P6) — off = sessions still belong (board /
+    // vibespace-task / status keep working) but this group's context is NOT
+    // injected into them.
+    const injWrap = document.createElement('label');
+    injWrap.className = 'task-detail-folder-rec task-detail-inject';
+    injWrap.title = "When off, this group's objective / checklist / file index is NOT injected into its sessions. They still belong to it — the board, vibespace-task and status keep working.";
+    const injCb = document.createElement('input'); injCb.type = 'checkbox'; injCb.checked = task.injectContext !== false;
+    injCb.onchange = () => patch({ injectContext: injCb.checked });
+    injWrap.append(injCb, document.createTextNode("Inject this group's context into its sessions"));
+    ctxSec.appendChild(injWrap);
 
     // ── Color ──
     const colorSec = section('Color');

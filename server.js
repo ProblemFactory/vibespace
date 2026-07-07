@@ -1562,21 +1562,22 @@ app.get('/api/agent/task-context', (req, res) => {
     const [s, id] = hit;
     const key = sessionStatusKey(s, id);
     const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId });
+    const injectGroups = groups.filter((g) => g.injectContext !== false); // P6: per-group context toggle
     let context = '';
-    if (groups.length) {
-      context = tasks.renderMultiContext(groups.map((g) => g.id));
+    if (injectGroups.length) {
+      context = tasks.renderMultiContext(injectGroups.map((g) => g.id));
       // Only Claude injects the SessionStart output; codex runs the command but
       // ignores it, so don't mark groups "seen" for codex (that would starve its
       // UserPromptSubmit delivery).
       if (context && s.backend !== 'codex') {
         s._groupSeenAt = s._groupSeenAt || {};
         s._ctxSig = s._ctxSig || {};
-        for (const g of groups) {
+        for (const g of injectGroups) {
           s._groupSeenAt[g.id] = g.updatedAt;
           if (g.contextDir) s._ctxSig[g.id] = tasks.contextDirSignature(g.contextDir);
         }
       }
-    } else if (s.backend !== 'codex' && !s._toolsIntroSeen) {
+    } else if (!groups.length && s.backend !== 'codex' && !s._toolsIntroSeen) {
       // In no group: still teach the agent to report its status (baseline), once.
       // codex ignores SessionStart output, so it gets this via prompt-context.
       context = SESSION_TOOLS_INTRO;
@@ -1603,11 +1604,12 @@ app.get('/api/agent/prompt-context', (req, res) => {
     const key = sessionStatusKey(s, id);
     const parts = [];
     const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId });
-    if (groups.length) {
+    const injectGroups = groups.filter((g) => g.injectContext !== false); // P6: per-group context toggle
+    if (injectGroups.length) {
       s._groupSeenAt = s._groupSeenAt || {};
       s._ctxSig = s._ctxSig || {};
-      const multi = groups.length > 1;
-      for (const g of groups) {
+      const multi = injectGroups.length > 1;
+      for (const g of injectGroups) {
         const seenAt = s._groupSeenAt[g.id];
         const firstTime = seenAt === undefined;
         // User-written contextDir files don't bump updatedAt — a signature diff
@@ -1632,7 +1634,7 @@ app.get('/api/agent/prompt-context', (req, res) => {
           s._ctxSig[g.id] = sig;
         }
       }
-    } else if (!s._toolsIntroSeen) {
+    } else if (!groups.length && !s._toolsIntroSeen) {
       // In no group: deliver the baseline tools intro on the FIRST prompt (covers
       // codex — its app-server runs the hook but ignores SessionStart output).
       parts.push(SESSION_TOOLS_INTRO);
