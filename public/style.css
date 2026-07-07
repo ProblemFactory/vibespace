@@ -126,6 +126,7 @@ html, body {
 /* Status chip: text by default; collapses to icon-only PER CARD when the tags
    would crowd the name (JS-measured: name truncated → add .tags-icon). */
 .sess-state-chip .chip-icon { display: none; align-items: center; }
+.sess-state-chip .chip-icon svg { width: 10px; height: 10px; display: block; }
 .sess-state-chip .chip-text { display: inline; }
 .session-item-card.tags-icon .sess-state-chip .chip-text { display: none; }
 .session-item-card.tags-icon .sess-state-chip .chip-icon { display: inline-flex; }
@@ -133,7 +134,7 @@ html, body {
 /* Instant hover tooltip (no ~1s native-title delay) — utils.js setupInstantTooltip */
 .instant-tooltip { position: fixed; z-index: 100000; pointer-events: none; background: var(--bg-elevated, var(--bg-input, #2a2a2a)); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font-size: 11px; line-height: 1.4; max-width: 300px; box-shadow: 0 2px 10px rgba(0,0,0,0.4); }
 .badge-config { padding: 1px 3px; display: inline-flex; align-items: center; }
-.badge-config svg { width: 11px; height: 11px; }
+.badge-config svg { width: 10px; height: 10px; }
 .session-card-name { font-size: 11px; font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
 .backend-icon {
   --backend-icon-color: currentColor;
@@ -211,7 +212,7 @@ html, body {
   background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent-hover);
   display: inline-flex; align-items: center; gap: 3px; min-width: 0;
 }
-.badge-config svg { width: 9px; height: 9px; flex-shrink: 0; }
+.badge-config svg { width: 10px; height: 10px; flex-shrink: 0; }
 .badge-config span { max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .badge-live { background: rgba(34,197,94,0.2); color: var(--green); }
 .badge-tmux { background: rgba(59,130,246,0.2); color: var(--blue); }
@@ -2142,6 +2143,7 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 
 /* ── Session status chip (agent-set / user-set state + urgency) ── */
 .sess-state-chip {
+  display: inline-flex; align-items: center; gap: 3px;
   font-size: 9px; padding: 0 5px; border-radius: 7px; flex-shrink: 0; line-height: 14px; cursor: pointer;
   color: var(--chip-color, var(--text-dim)); border: 1px solid color-mix(in srgb, var(--chip-color, var(--text-dim)) 55%, transparent);
   background: color-mix(in srgb, var(--chip-color, var(--text-dim)) 10%, transparent);
@@ -2163,3 +2165,26 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 .task-board-addrow { display: flex; gap: 6px; }
 .task-board-addrow .new-session-card { flex: 1; }
 .task-board-import { flex: 0 0 auto !important; padding-left: 12px; padding-right: 12px; }
+/* Tasks-tab Groups|Tasks view toggle */
+.task-board-viewtabs { display: flex; gap: 4px; padding: 4px 6px 6px; }
+.task-board-viewtab {
+  flex: 1; padding: 4px 8px; font-size: 11px; font-weight: 500; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text-dim);
+}
+.task-board-viewtab:hover { background: var(--hover-overlay, rgba(127,127,127,.1)); color: var(--text); }
+.task-board-viewtab.active {
+  background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent-hover);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent); font-weight: 600;
+}
+/* Task View: flat status-sorted list of tagged sessions (活儿) */
+.task-view-list { display: flex; flex-direction: column; }
+.task-view-row { border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent); padding-bottom: 2px; }
+.task-view-groups { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 8px 5px 30px; }
+.task-view-group-badge {
+  display: inline-flex; align-items: center; gap: 4px; font-size: 9px; padding: 1px 6px;
+  border-radius: 8px; background: var(--hover-overlay, rgba(127,127,127,.12)); color: var(--text-secondary);
+  cursor: pointer; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.task-view-group-badge:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--text); }
+.tvg-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--g-color, var(--text-dim)); flex-shrink: 0; }
+.task-view-empty { padding: 16px 12px; line-height: 1.5; }
