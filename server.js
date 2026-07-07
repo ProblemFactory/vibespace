@@ -1570,7 +1570,11 @@ app.get('/api/agent/task-context', (req, res) => {
       // UserPromptSubmit delivery).
       if (context && s.backend !== 'codex') {
         s._groupSeenAt = s._groupSeenAt || {};
-        for (const g of groups) s._groupSeenAt[g.id] = g.updatedAt;
+        s._ctxSig = s._ctxSig || {};
+        for (const g of groups) {
+          s._groupSeenAt[g.id] = g.updatedAt;
+          if (g.contextDir) s._ctxSig[g.id] = tasks.contextDirSignature(g.contextDir);
+        }
       }
     } else if (s.backend !== 'codex' && !s._toolsIntroSeen) {
       // In no group: still teach the agent to report its status (baseline), once.
@@ -1601,18 +1605,31 @@ app.get('/api/agent/prompt-context', (req, res) => {
     const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId });
     if (groups.length) {
       s._groupSeenAt = s._groupSeenAt || {};
+      s._ctxSig = s._ctxSig || {};
       const multi = groups.length > 1;
       for (const g of groups) {
         const seenAt = s._groupSeenAt[g.id];
-        if (g.updatedAt > (seenAt || 0)) {
-          const wasSeen = seenAt !== undefined; // seen before → this is an UPDATE, not first delivery
+        const firstTime = seenAt === undefined;
+        // User-written contextDir files don't bump updatedAt — a signature diff
+        // (path/size/mtime of the indexed files) is how we notice them.
+        const sig = g.contextDir ? tasks.contextDirSignature(g.contextDir) : '';
+        const hadSig = s._ctxSig[g.id] !== undefined;
+        const ctxChanged = hadSig && s._ctxSig[g.id] !== sig;
+        const metaChanged = g.updatedAt > (seenAt || 0);
+        if (firstTime || metaChanged || ctxChanged) {
+          const wasSeen = !firstTime; // seen before → this is an UPDATE, not first delivery
           const ctx = tasks.renderContext(g.id, { multi });
           if (ctx) {
             parts.push(wasSeen
               ? `The Task Group below was UPDATED since you last saw it — this is the current state (supersedes any earlier copy).\n\n${ctx}`
               : ctx);
             s._groupSeenAt[g.id] = g.updatedAt;
+            s._ctxSig[g.id] = sig;
           }
+        } else if (!hadSig && g.contextDir) {
+          // Meta already seen (e.g. claude's SessionStart set _groupSeenAt) but
+          // no contextDir baseline recorded yet — set it now WITHOUT re-injecting.
+          s._ctxSig[g.id] = sig;
         }
       }
     } else if (!s._toolsIntroSeen) {
