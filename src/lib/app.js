@@ -1701,7 +1701,7 @@ class App {
       for (const t of this.sidebar?._taskBoardOrder?.() || []) {
         const o = document.createElement('option');
         o.value = t.id;
-        o.textContent = t.title + (t.kind === 'task' ? ` (${t.status})` : '');
+        o.textContent = t.title + (t.archived ? ' (archived)' : '');
         taskSel.appendChild(o);
       }
       taskSel.value = taskId || '';

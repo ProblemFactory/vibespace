@@ -1085,10 +1085,10 @@ if (!api || !token) { console.error('vibespace-status: not running inside a Vibe
 const args = process.argv.slice(2);
 const cmd = args[0];
 const opt = (name) => { const i = args.indexOf('--' + name); return i >= 0 ? args[i + 1] : undefined; };
-const STATES = ['working', 'needs-input', 'blocked', 'review'];
+const STATES = ['working', 'needs-input', 'blocked', 'review', 'done'];
 const USAGE = [
-  'usage (reports THIS session\\'s own state — for the whole task use: vibespace-task status):',
-  '  vibespace-status <working|needs-input|blocked|review> [--urgency low|normal|high|urgent] [--reason "why"]',
+  'usage — report THIS Task\\'s (this session\\'s) own state; done = this work is finished:',
+  '  vibespace-status <working|needs-input|blocked|review|done> [--urgency low|normal|high|urgent] [--reason "why"]',
   '  vibespace-status clear      remove the indicator',
   '  vibespace-status show       print the current indicator',
 ].join('\\n');
@@ -1525,9 +1525,9 @@ function agentSession(req, res, { needTask = false } = {}) {
 const SESSION_TOOLS_INTRO = [
   '<vibespace-session-tools>',
   'This session is running inside VibeSpace. Report your OWN status so the user can see it on their session board — use the `vibespace-status` command (already on your PATH):',
-  '  vibespace-status <working|needs-input|blocked|review> [--urgency low|normal|high|urgent] [--reason "why"]',
+  '  vibespace-status <working|needs-input|blocked|review|done> [--urgency low|normal|high|urgent] [--reason "why"]',
   '  vibespace-status show   (or run it with no arguments) — prints usage + your current status',
-  'Keep it honest and current: `working` while making progress; `blocked` or `needs-input` (with a higher urgency) the moment you are stuck or waiting on the user; `review` when you have finished a chunk and want them to look.',
+  'Keep it honest and current: `working` while making progress; `blocked` or `needs-input` (with a higher urgency) the moment you are stuck or waiting on the user; `review` when you want them to look; `done` when this piece of work is finished.',
   '(If this session is later linked to a VibeSpace task, you will also get `vibespace-task` for task-level progress/plan/status — you have no task right now, so it is not active yet.)',
   '</vibespace-session-tools>',
 ].join('\n');
@@ -1612,7 +1612,7 @@ app.get('/api/agent/task', (req, res) => {
   if (!hit) return;
   try {
     const t = tasks.get(hit[0]._taskId);
-    res.json({ success: true, task: { id: t.id, title: t.title, status: t.status, objective: t.objective, plan: t.plan, progress: (t.progress || []).slice(-10), contextDir: t.contextDir } });
+    res.json({ success: true, task: { id: t.id, title: t.title, archived: !!t.archived, objective: t.objective, plan: t.plan, progress: (t.progress || []).slice(-10), contextDir: t.contextDir } });
   } catch (e) { res.status(404).json({ error: e.message }); }
 });
 app.post('/api/agent/task-progress', (req, res) => {
@@ -1623,14 +1623,8 @@ app.post('/api/agent/task-progress', (req, res) => {
     res.json({ success: true, progress: t.progress.slice(-3) });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
-app.post('/api/agent/task-status', (req, res) => {
-  const hit = agentSession(req, res, { needTask: true });
-  if (!hit) return;
-  try {
-    const t = tasks.update(hit[0]._taskId, { status: req.body?.status });
-    res.json({ success: true, status: t.status });
-  } catch (e) { res.status(400).json({ error: e.message }); }
-});
+// (Removed /api/agent/task-status — a Task Group has no status. A session
+// reports its own state via /api/agent/session-status (vibespace-status).)
 app.post('/api/agent/task-plan', (req, res) => {
   const hit = agentSession(req, res, { needTask: true });
   if (!hit) return;

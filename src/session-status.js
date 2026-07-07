@@ -20,7 +20,9 @@
 const fs = require('fs');
 const path = require('path');
 
-const STATES = ['working', 'needs-input', 'blocked', 'review'];
+// A Task (= a session) has one of these states; `done` = this piece of work is
+// finished (the "岗位/Task Group" itself has no status — only archive).
+const STATES = ['working', 'needs-input', 'blocked', 'review', 'done'];
 const URGENCIES = ['low', 'normal', 'high', 'urgent'];
 const MAX_ENTRIES = 500;
 
