@@ -2185,14 +2185,17 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 .tv-tool-ico { font-size: 11px; opacity: 0.75; }
 /* Task View: flat status-sorted list (tagged on top, untagged sunk below) */
 .task-view-list { display: flex; flex-direction: column; }
-.task-view-row { border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent); padding-bottom: 2px; }
-.task-view-groups { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 8px 5px 30px; }
-.task-view-group-badge {
-  display: inline-flex; align-items: center; gap: 4px; font-size: 9px; padding: 1px 6px;
-  border-radius: 8px; background: var(--hover-overlay, rgba(127,127,127,.12)); color: var(--text-secondary);
-  cursor: pointer; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.task-view-group-badge:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--text); }
+.task-view-row { display: flex; align-items: stretch; border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent); }
+.task-view-row > .session-item-card { flex: 1; min-width: 0; }
+/* Group membership shown as LEFT color bars (one per group), not a badge row */
+.task-view-colorbars { display: flex; flex-shrink: 0; }
+.task-view-colorbar { width: 3px; background: var(--g-color, var(--text-dim)); cursor: pointer; transition: width .1s; }
+.task-view-colorbar:hover { width: 6px; }
+/* Card background tinted by urgency (Task View only, subtle) */
+.task-view-row .session-item-card[data-urgency="urgent"] { background: color-mix(in srgb, var(--red, #e06c75) 15%, transparent); }
+.task-view-row .session-item-card[data-urgency="high"] { background: color-mix(in srgb, var(--yellow, #e5c07b) 13%, transparent); }
+.task-view-row .session-item-card[data-urgency="normal"] { background: color-mix(in srgb, var(--blue, #61afef) 7%, transparent); }
+.task-view-row .session-item-card[data-urgency="low"] { background: color-mix(in srgb, var(--text-dim) 6%, transparent); }
 .tvg-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--g-color, var(--text-dim)); flex-shrink: 0; }
 .task-view-untagged-header {
   display: flex; align-items: center; gap: 6px; padding: 8px 8px 3px; margin-top: 4px;
