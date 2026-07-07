@@ -144,6 +144,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
         ${s.accountName ? `<span class="session-card-badge badge-account" data-tip="API account: ${escHtml(s.accountName)}${s.accountTail ? ' (…' + escHtml(s.accountTail) + ')' : ''} — pay per use"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="8" r="3"/><path d="M8 8h6.5M12 8v2.5M14.5 8v2"/></svg></span>` : ''}
         <span class="session-card-badge badge-config" style="display:none"></span>
         ${s.hostName ? `<span class="session-host-badge" data-tip="Remote session on ${escHtml(s.hostName)}">${escHtml(s.hostName)}</span>` : ''}
+        ${s.todo && s.todo.total > 0 && s.todo.done < s.todo.total ? `<span class="session-todo-pill" data-tip="${escHtml(s.todo.current ? 'Now: ' + s.todo.current : 'Agent steps')} (${s.todo.done}/${s.todo.total} done)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4.5l1.2 1.2L5.5 3.4M2 9.5l1.2 1.2 2.3-2.3M8 4.5h6M8 9.5h6M8 13h4"/></svg>${s.todo.done}/${s.todo.total}</span>` : ''}
         <span class="sess-state-chip" style="display:none"></span>
       </div>
       ${showCwd && cwdText ? `<div class="session-card-sub"><span class="session-card-cwd" data-tip="${escHtml(s.cwd)}">${cwdText}</span></div>` : ''}
@@ -363,6 +364,31 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     const groupsContainer = document.createElement('div'); groupsContainer.className = 'session-detail-groups';
     detailPanel.appendChild(groupsContainer);
     renderDetailGroups(groupsContainer, s, clickToCopy, state);
+  }
+
+  // Steps (the agent's own TodoWrite / codex plan) — lazily fetched from the
+  // transcript when the card expands, so stopped sessions show them too.
+  if (expandedCardId === s.sessionId && !s.host) {
+    const stepsWrap = document.createElement('div');
+    stepsWrap.className = 'session-detail-steps';
+    detailPanel.appendChild(stepsWrap);
+    const rid = s.backendSessionId || s.sessionId;
+    fetch(`/api/session-todos?backend=${encodeURIComponent(s.backend || 'claude')}&backendSessionId=${encodeURIComponent(rid)}&cwd=${encodeURIComponent(s.cwd || '')}`)
+      .then(r => r.json()).then(d => {
+        const todos = d?.todos || [];
+        if (!todos.length || !stepsWrap.isConnected) return;
+        const row = document.createElement('div'); row.className = 'session-detail-row';
+        row.innerHTML = `<span class="session-detail-label">Steps</span>`;
+        const list = document.createElement('div'); list.className = 'session-steps-list';
+        for (const t of todos) {
+          const li = document.createElement('div');
+          li.className = 'session-step ' + (t.status === 'completed' ? 'done' : t.status === 'in_progress' ? 'active' : '');
+          li.textContent = (t.status === 'completed' ? '✓ ' : t.status === 'in_progress' ? '▸ ' : '○ ') + (t.content || t.step || '');
+          list.appendChild(li);
+        }
+        row.appendChild(list);
+        stepsWrap.appendChild(row);
+      }).catch(() => {});
   }
 
   const actionsDiv = document.createElement('div'); actionsDiv.className = 'session-detail-actions';

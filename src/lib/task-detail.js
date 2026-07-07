@@ -97,7 +97,7 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
       objSec.appendChild(obj);
 
       // ── Checklist (was "Plan") ──
-      const planSec = section('Checklist', 'steps toward the objective — you and agents tick them off');
+      const planSec = section('Checklist', "the group's backlog of work items — you queue them, any session picks one up and ticks it off (agents keep their own working steps in their session TODO, shown on each card)");
       const planList = document.createElement('div');
       planList.className = 'task-detail-plan';
       (task.plan || []).forEach((item, i) => {

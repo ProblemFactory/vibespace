@@ -467,6 +467,48 @@ function checkClaudeGoalStatus(session, id) {
 }
 
 // ── PTY setup helper (onData + onExit wiring) ──
+// Live TODO capture — the agent's own TodoWrite (claude) / plan tool (codex)
+// IS the session's (活儿's) checklist; VibeSpace only OBSERVES it (never a
+// parallel store the agent must be taught). Summary rides active-sessions for
+// the board's progress pill; the full list is fetched on demand (expanded card
+// → /api/session-todos, which reads taskState() from the transcript).
+// New task-tool family (CLI ≥2.1.2xx: TaskCreate/TaskUpdate — CRUD by id, not
+// full-list snapshots like TodoWrite). The created task's id only arrives in
+// the paired TOOL RESULT text ("Task #N created…"), so creates are stashed by
+// tool_use_id until the result lands. Replayed into a list for the same pill.
+function applyTaskToolUpdate(session, input) {
+  const list = (session._taskList ||= new Map());
+  const key = String(input.taskId);
+  if (input.status === 'deleted') list.delete(key);
+  else {
+    const cur = list.get(key) || { content: '', status: 'pending' };
+    if (input.subject) cur.content = input.subject;
+    if (input.activeForm) cur.activeForm = input.activeForm;
+    if (input.status) cur.status = input.status;
+    list.set(key, cur);
+  }
+  emitTaskListTodos(session);
+}
+function emitTaskListTodos(session) {
+  if (!session._taskList?.size) return;
+  const todos = [...session._taskList.entries()]
+    .sort((a, b) => Number(a[0]) - Number(b[0]))
+    .map(([, v]) => v);
+  updateSessionTodos(session, todos);
+}
+let _todoBroadcastTimer = null;
+function updateSessionTodos(session, todos) {
+  try {
+    if (!Array.isArray(todos) || !todos.length) return;
+    const done = todos.filter((t) => t?.status === 'completed').length;
+    const cur = todos.find((t) => t?.status === 'in_progress');
+    session._todos = { done, total: todos.length, current: cur ? String(cur.content || cur.activeForm || cur.step || '').slice(0, 140) : null };
+    if (!_todoBroadcastTimer) { // coalesce: TodoWrite can fire several times per turn
+      _todoBroadcastTimer = setTimeout(() => { _todoBroadcastTimer = null; broadcastActiveSessions(); }, 500);
+    }
+  } catch { }
+}
+
 function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {}) {
   session.pty = ptyProcess;
 
@@ -585,6 +627,13 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
                 session._streamingLabel = newLabel;
                 broadcastToSession(session, id, { type: 'streaming-label', sessionId: id, label: newLabel });
               }
+            }
+            // Codex plan tool → the session's live TODO summary (board pill)
+            if (msg.type === 'event_msg' && msg.payload?.type === 'plan_updated' && Array.isArray(msg.payload.plan)) {
+              updateSessionTodos(session, msg.payload.plan.map((p) => ({
+                content: p.step || '',
+                status: (p.status === 'inProgress' || p.status === 'in_progress') ? 'in_progress' : (p.status === 'completed' ? 'completed' : 'pending'),
+              })));
             }
             if (session._normalizer) session._normalizer.processLive(msg);
           } catch {
@@ -727,6 +776,30 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
                 });
               }
               broadcastActiveSessions();
+            }
+
+            // TodoWrite / TaskCreate / TaskUpdate → the session's live TODO
+            // summary (board pill). TaskCreate's id arrives in the RESULT.
+            if (msg.type === 'assistant' && Array.isArray(msg.message?.content)) {
+              for (const b of msg.message.content) {
+                if (b?.type !== 'tool_use') continue;
+                if (b.name === 'TodoWrite' && Array.isArray(b.input?.todos)) updateSessionTodos(session, b.input.todos);
+                else if (b.name === 'TaskCreate') (session._pendingTaskCreates ||= new Map()).set(b.id, b.input || {});
+                else if (b.name === 'TaskUpdate' && b.input?.taskId) applyTaskToolUpdate(session, b.input);
+              }
+            }
+            if (msg.type === 'user' && Array.isArray(msg.message?.content) && session._pendingTaskCreates?.size) {
+              for (const b of msg.message.content) {
+                if (b?.type !== 'tool_result' || !session._pendingTaskCreates.has(b.tool_use_id)) continue;
+                const inp = session._pendingTaskCreates.get(b.tool_use_id);
+                session._pendingTaskCreates.delete(b.tool_use_id);
+                const txt = typeof b.content === 'string' ? b.content : (Array.isArray(b.content) ? b.content.map((c) => c?.text || '').join(' ') : '');
+                const m = /Task #(\d+) created/.exec(txt);
+                if (m) {
+                  (session._taskList ||= new Map()).set(m[1], { content: inp.subject || '', activeForm: inp.activeForm, status: 'pending' });
+                  emitTaskListTodos(session);
+                }
+              }
             }
 
             // Track turn lifecycle: streaming state + activity label (broadcast to clients)
@@ -2478,6 +2551,7 @@ function broadcastActiveSessions() {
       accountId: s._accountId || null,
       accountName: s._accountId ? (accounts.get(s._accountId)?.name || 'API key') : null,
       accountTail: s._accountId ? (accounts.get(s._accountId)?.tail || null) : null,
+      todo: s._todos || null, // {done, total, current} — the agent's own TodoWrite/plan
       mode: s.mode || 'terminal',
     });
   }

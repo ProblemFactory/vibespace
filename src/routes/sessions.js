@@ -606,6 +606,30 @@ function setup(ctx) {
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
+  // Full TODO list (the agent's own TodoWrite / codex plan) for the expanded
+  // card — reads taskState() from the transcript, so it works for stopped and
+  // restored sessions too (the live pill rides active-sessions instead).
+  router.get('/api/session-todos', (req, res) => {
+    try {
+      const { backend, backendSessionId, claudeSessionId, cwd } = req.query;
+      const b = backend || 'claude';
+      const rid = backendSessionId || claudeSessionId;
+      if (!rid) return res.json({ todos: [] });
+      let session = null;
+      for (const [, s] of activeSessions) {
+        if ((s.backend || 'claude') === b && (s.backendSessionId === rid || s.claudeSessionId === rid)) { session = s; break; }
+      }
+      const sm = createSessionMessages(session || {
+        backend: b,
+        backendSessionId: rid,
+        claudeSessionId: b === 'claude' ? rid : null,
+        cwd: cwd || '',
+      });
+      const st = sm.taskState() || {};
+      res.json({ todos: st.todos || [] });
+    } catch (e) { res.json({ todos: [] }); }
+  });
+
   router.get('/api/active', (req, res) => {
     const sessions = [];
     for (const [id, s] of activeSessions) {
@@ -626,6 +650,7 @@ function setup(ctx) {
         accountId: s._accountId || null,
         accountName: s._accountId ? (ctx.accounts?.get(s._accountId)?.name || 'API key') : null,
         accountTail: s._accountId ? (ctx.accounts?.get(s._accountId)?.tail || null) : null,
+        todo: s._todos || null,
         mode: s.mode || 'terminal',
         host: s.host || null,
         hostName: s.hostName || null,
