@@ -74,7 +74,7 @@ function registerWsHandler(wss, ctx) {
     SOCKETS_DIR, BUFFERS_DIR, META_DIR, PTY_WRAPPER, CHAT_WRAPPER,
     NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, PORT, X_ENV,
     adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
-    sessionStatus, sessionStatusKey, accounts,
+    sessionStatus, sessionStatusKey, accounts, scheduleCtxSync,
   } = ctx;
 
   // Monotonic sequence for layout-sync rebroadcasts (shared across all
@@ -420,6 +420,9 @@ function registerWsHandler(wss, ctx) {
 
           activeSessions.set(id, session);
           attachedSessions.add(id);
+          // Remote session: push its groups' context folders to the host now
+          // (the 60s timer + prompt-time trigger keep them fresh afterwards)
+          if (session.host) scheduleCtxSync?.(session, id);
 
           writeSessionMeta(sockName, {
             name: session.name,
