@@ -150,7 +150,14 @@ class App {
       if (msg.type === 'custom-themes-updated' && msg.themes) {
         this._applyCustomThemesFromServer(msg.themes);
       }
+      if (msg.type === 'accounts-updated' && Array.isArray(msg.accounts)) {
+        this._accounts = { ...(this._accounts || {}), accounts: msg.accounts, defaultAccountId: msg.defaultAccountId || null };
+      }
     });
+
+    // Anthropic accounts (subscription ↔ API key, per-session billing identity)
+    this._accounts = { accounts: [], defaultAccountId: null, subscription: {}, cliKey: {} };
+    this.refreshAccounts();
 
     // Load custom themes from server
     this._loadCustomThemes();
@@ -1492,6 +1499,7 @@ class App {
         effort: document.getElementById('input-effort').value,
         extraArgs: document.getElementById('input-extra-args').value.trim(),
         taskId: document.getElementById('input-task')?.value || undefined,
+        accountId: document.getElementById('input-account')?.value || undefined,
       });
       this.hideDialogs();
     });
@@ -1712,6 +1720,43 @@ class App {
         if (firstFolder && !cwdInput.value.trim()) cwdInput.value = firstFolder;
       };
     }
+    // Account dropdown (billing identity: subscription OAuth vs an API key).
+    // Local Claude sessions only — hidden for codex/shell and remote hosts
+    // (remote uses the remote machine's own login).
+    const acctRow = document.getElementById('row-account');
+    const acctSel = document.getElementById('input-account');
+    const updateAcctRow = () => {
+      if (!acctRow || !acctSel) return;
+      const be = document.getElementById('input-backend')?.value || 'claude';
+      const host = document.getElementById('input-host')?.value || '';
+      const list = this._accounts?.accounts || [];
+      const show = be === 'claude' && !host && list.length > 0;
+      acctRow.style.display = show ? '' : 'none';
+      if (!show) { acctSel.value = ''; return; }
+      const defId = this._accounts?.defaultAccountId;
+      const defName = defId ? (list.find(a => a.id === defId)?.name || 'API key') : 'Subscription';
+      const prev = acctSel.value;
+      acctSel.innerHTML = '';
+      for (const [v, label] of [
+        ['', `Default (${defName})`],
+        ['subscription', 'Subscription (Pro/Max login)'],
+        ...list.map(a => [a.id, `${a.name} — API key …${a.tail}`]),
+      ]) {
+        const o = document.createElement('option');
+        o.value = v; o.textContent = label;
+        acctSel.appendChild(o);
+      }
+      acctSel.value = [...acctSel.options].some(o => o.value === prev) ? prev : '';
+    };
+    this._updateAcctRow = updateAcctRow; // freshest closure wins
+    updateAcctRow();
+    if (!this._acctListenersWired) {
+      // Wire ONCE (this method runs on every dialog open) — call through the
+      // stored freshest updater.
+      this._acctListenersWired = true;
+      document.getElementById('input-backend')?.addEventListener('change', () => this._updateAcctRow?.());
+      document.getElementById('input-host')?.addEventListener('change', () => this._updateAcctRow?.());
+    }
     // Host dropdown (remote sessions run over ssh + remote dtach; terminal only until P3)
     const hostSel = document.getElementById('input-host');
     if (hostSel) {
@@ -1763,7 +1808,7 @@ class App {
     });
   }
 
-  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, fork, hostId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId }) {
+  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, fork, hostId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, accountId }) {
     this._hideWelcome();
     const defaults = this._getBackendSessionDefaults(backend);
     const sessionMode = mode || this.settings.get('session.defaultMode') || 'chat';
@@ -1789,6 +1834,7 @@ class App {
       sourceKind: sourceKind || undefined, parentThreadId: parentThreadId || undefined,
       resume: !!resumeId, resumeId: resumeId||undefined, fork: fork||undefined, cols:120, rows:30, reqId,
       taskId: taskId || undefined, // spawns VIBESPACE_TASK_ID into the agent env
+      accountId: accountId || undefined, // billing identity: undefined=server default, 'subscription', or acct-… key id
     });
 
     const handler = (msg) => {
@@ -2025,7 +2071,7 @@ class App {
     this.ws.onGlobal(handler);
   }
 
-  resumeSession(sessionId, cwd, sessionName, { mode, model, effort, permission, syncId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, hostId } = {}) {
+  resumeSession(sessionId, cwd, sessionName, { mode, model, effort, permission, accountId, syncId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, hostId } = {}) {
     this._closeSidebarOnMobile();
     const targetBackendId = backendSessionId || sessionId;
     // If this session is already open in a LIVE window, focus it
@@ -2065,6 +2111,7 @@ class App {
       model: model !== undefined ? model : savedCfg.model,
       permission: permission !== undefined ? permission : savedCfg.permission,
       effort: effort !== undefined ? effort : savedCfg.effort,
+      accountId: accountId !== undefined ? accountId : savedCfg.account,
       syncId,
       backend,
       backendSessionId: backendSessionId || sessionId,
@@ -2363,6 +2410,16 @@ class App {
   openBrowser(url, opts) { return openBrowserFn(this, url, opts); }
 
   openTaskDetail(taskId, opts) { return openTaskDetailFn(this, taskId, opts); }
+
+  // Anthropic accounts (billing identity). Full snapshot incl. subscription
+  // login state + importable CLI key; the accounts-updated broadcast keeps the
+  // list fresh between refreshes.
+  refreshAccounts() {
+    return fetchJson('/api/accounts').then(d => {
+      if (d) this._accounts = { accounts: d.accounts || [], defaultAccountId: d.defaultAccountId || null, subscription: d.subscription || {}, cliKey: d.cliKey || {} };
+      return this._accounts;
+    }).catch(() => this._accounts);
+  }
 
   openWorkflowDetail(runId, opts) { return openWorkflowDetailFn(this, runId, opts); }
 
