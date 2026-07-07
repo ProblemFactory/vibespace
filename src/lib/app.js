@@ -2897,6 +2897,7 @@ class App {
         this._pendingForkTitles.delete(session.sessionId);
       }
       this.wm.setTitleMeta(winId, this._buildTitleMeta(match));
+      this.wm.setAuthBadge?.(winId, match.auth || null); // billing key in the title bar
       if (win._openSpec) {
         Object.assign(win._openSpec, {
           backend: match.backend || win._openSpec.backend || 'claude',

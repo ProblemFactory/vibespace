@@ -845,6 +845,45 @@ class WindowManager {
     this._notify();
   }
 
+  // Billing identity indicator in the TITLE BAR (mirrors the session card's
+  // amber key badge): API-billed sessions show a key, unknown live ones a
+  // dashed '?', subscription stays quiet. Synced from active-sessions via
+  // app.syncSessionIdentity — auth can land seconds after window creation
+  // (the CLI's init record) or change across a resume.
+  setAuthBadge(id, auth) {
+    const win = this.windows.get(id); if (!win) return;
+    const key = auth ? `${auth.source}:${auth.name || ''}:${auth.guessed ? 1 : 0}` : '';
+    if (win._authBadgeKey === key) return; // unchanged — avoid churn per broadcast
+    win._authBadgeKey = key;
+    const KEY_SVG = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="8" r="3"/><path d="M8 8h6.5M12 8v2.5M14.5 8v2"/></svg>';
+    // Standalone: SIBLING right after the title span (setTitle wipes
+    // titleSpan's children via textContent — same reason the bell icon
+    // re-inserts). Tab group: sibling of the tab's label inside the tab item.
+    const applyAfter = (anchorEl) => {
+      if (!anchorEl || !anchorEl.parentElement) return;
+      let el = anchorEl.parentElement.querySelector(':scope > .win-auth-badge');
+      const isApi = auth && (auth.source === 'api-key' || auth.source === 'api-console' || auth.source === 'api-other');
+      const isUnknown = auth && auth.source === 'unknown';
+      if (!isApi && !isUnknown) { el?.remove(); return; }
+      if (!el) {
+        el = document.createElement('span');
+        el.className = 'win-auth-badge';
+        anchorEl.insertAdjacentElement('afterend', el);
+      }
+      el.classList.toggle('unknown', isUnknown);
+      el.innerHTML = KEY_SVG + (isUnknown ? '?' : '');
+      el.dataset.tip = isApi
+        ? `API billing (pay per use) — ${auth.source === 'api-console' ? 'Console login' : (auth.name ? auth.name + (auth.tail ? ' (…' + auth.tail + ')' : '') : (auth.detail || 'API key'))}${auth.guessed ? ' · estimated from the login state at spawn' : ''}`
+        : 'Billing identity unknown (started before tracking)';
+    };
+    if (win.titleSpan.parentElement === win.titleBar) applyAfter(win.titleSpan);
+    if (win._tabChain) {
+      const host = this.windows.get(win._tabChain.tabs[0]);
+      const tabEl = host?.titleBar.querySelector(`.tab-item[data-win-id="${id}"] .tab-label`);
+      applyAfter(tabEl);
+    }
+  }
+
   _applyTitleMeta(win) {
     if (!win?.backendIconSlot || !win?.agentKindSlot) return;
     const meta = win.titleMeta || {};
