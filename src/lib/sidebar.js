@@ -130,6 +130,26 @@ class Sidebar {
       this.app.settings?.off('sidebar.defaultStatusFilter', _applyDefaultFilter);
     };
     this.app.settings?.on('sidebar.defaultStatusFilter', _applyDefaultFilter);
+    // Default tab + Task-Groups default sub-view (one-shot after async settings
+    // load, same pattern as defaultStatusFilter; a manual click wins).
+    const _applyDefaultTab = (val) => {
+      this.app.settings?.off('sidebar.defaultTab', _applyDefaultTab);
+      if (!this._tabTouched && val && ['folders', 'tasks', 'mounts'].includes(val) && val !== this._activeTab) {
+        this._activeTab = val;
+        this._updateTabs();
+        this._render();
+      }
+    };
+    this.app.settings?.on('sidebar.defaultTab', _applyDefaultTab);
+    const _applyDefaultView = (val) => {
+      this.app.settings?.off('sidebar.defaultBoardView', _applyDefaultView);
+      if (!this._boardViewTouched && (val === 'groups' || val === 'tasks') && val !== this._boardView) {
+        this._boardView = val;
+        if (this._activeTab === 'tasks') this._render();
+      }
+    };
+    this.app.settings?.on('sidebar.defaultBoardView', _applyDefaultView);
+    this._updateTabs(); // apply per-tab chrome for the initial tab
     this._renderQuickTabs();
     this._renderAgentKindQuickTabs();
     // Re-render quick tabs after settings finish loading (async)
@@ -154,17 +174,17 @@ class Sidebar {
     foldersTab.className = 'sidebar-tab active';
     foldersTab.textContent = 'Folders';
     foldersTab.dataset.tab = 'folders';
-    foldersTab.onclick = () => { this._activeTab = 'folders'; this._updateTabs(); this._render(); };
+    foldersTab.onclick = () => { this._tabTouched = true; this._activeTab = 'folders'; this._updateTabs(); this._render(); };
     const tasksTab = document.createElement('button');
     tasksTab.className = 'sidebar-tab';
     tasksTab.textContent = 'Task Groups';
     tasksTab.dataset.tab = 'tasks';
-    tasksTab.onclick = () => { this._activeTab = 'tasks'; this._updateTabs(); this._render(); };
+    tasksTab.onclick = () => { this._tabTouched = true; this._activeTab = 'tasks'; this._updateTabs(); this._render(); };
     const mountsTab = document.createElement('button');
     mountsTab.className = 'sidebar-tab';
     mountsTab.textContent = 'Remote';
     mountsTab.dataset.tab = 'mounts';
-    mountsTab.onclick = () => { this._activeTab = 'mounts'; this._updateTabs(); this._render(); };
+    mountsTab.onclick = () => { this._tabTouched = true; this._activeTab = 'mounts'; this._updateTabs(); this._render(); };
     tabBar.append(foldersTab, tasksTab, mountsTab);
     section.insertBefore(tabBar, section.firstChild);
   }
@@ -172,6 +192,17 @@ class Sidebar {
   _updateTabs() {
     const tabs = this.el.querySelectorAll('.sidebar-tab');
     tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === this._activeTab));
+    // Per-tab chrome: ONE filter/sort story per tab. Folders keeps the full
+    // global set; Task Groups keeps just the text filter + manage mode (its
+    // views carry their own sort/filter toolbar); Remote needs none of it.
+    const t = this._activeTab;
+    const show = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
+    show('session-filter', t !== 'mounts');
+    show('backend-filter', t === 'folders');
+    show('sort-toggle', t === 'folders');
+    show('manage-toggle', t !== 'mounts');
+    show('status-quick-tabs', t === 'folders');
+    show('agent-kind-quick-tabs', t === 'folders');
   }
 
   // ── Highlight / Sort / Filter ──

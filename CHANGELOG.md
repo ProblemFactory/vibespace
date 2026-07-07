@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.47.0] — 2026-07-07
+
+### Changed — sidebar per-tab cleanup + defaults
+- **One filter/sort story per tab**: the Folders tab keeps the full global set
+  (text/backend filter, sort, quick tabs); the Task Groups tab now shows only
+  the text filter + manage mode (its views carry their own sort/status-filter
+  toolbar — the duplicated global controls are hidden there); the Remote tab
+  hides all of it.
+- **Default view settings**: `sidebar.defaultTab` (open the app on Folders /
+  Task Groups / Remote) and `sidebar.defaultBoardView` (Task Groups tab opens
+  in Groups or the flat Tasks view). In-session switching stays transient; the
+  setting is the persistence (synced across clients).
+- **Task View now respects stars**: ★ is the tiebreaker right after the
+  primary sort key (urgency/status/recent modes), matching the Folders sort
+  precedence (urgency first, then ★, then recency). Name sort stays purely
+  alphabetical. (The Groups view already respected stars via the shared
+  session sort.)
+
 ## [2.46.0] — 2026-07-07
 
 ### Added — the agent's own TODO list, surfaced on the board (活儿的步骤)
