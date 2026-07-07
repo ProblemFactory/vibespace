@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.48.4] — 2026-07-08
+
+### Fixed
+- **Terminate from the sidebar left the session's window looking alive** (no
+  read-only flip): the kill handler removes the session from activeSessions
+  before the PTY's async onExit runs, and onExit's stale-PTY guard (from the
+  2026-06 review batch) then returns without ever emitting 'exited'. The kill
+  handler now broadcasts 'exited' (reason: terminated) itself,
+  deterministically. Verified with a live create→kill reproduction.
+
 ## [2.48.2] — 2026-07-07
 
 ### Fixed

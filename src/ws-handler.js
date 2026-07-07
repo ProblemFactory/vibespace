@@ -998,6 +998,13 @@ function registerWsHandler(wss, ctx) {
             // Clean up wrapper buffer files
             try { fs.unlinkSync(path.join(BUFFERS_DIR, data.sessionId + '.json')); } catch {}
             try { fs.unlinkSync(path.join(BUFFERS_DIR, data.sessionId + '.buf')); } catch {}
+            // Tell every attached client the session ended (windows flip to the
+            // read-only view). This must happen HERE, deterministically: we
+            // delete the session from activeSessions right below, and the pty's
+            // async onExit starts with `if (!activeSessions.has(id)) return`
+            // (the 46de4ec stale-PTY guard) — so relying on onExit to emit
+            // 'exited' silently broke terminate-from-sidebar.
+            broadcastToSession(session, data.sessionId, { type: 'exited', sessionId: data.sessionId, reason: 'terminated' });
             activeSessions.delete(data.sessionId);
             refreshWebuiPids();
             broadcastActiveSessions();
