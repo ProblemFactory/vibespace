@@ -162,11 +162,11 @@ class TaskManager {
 
   // The SessionStart injection payload (design §4a): rendered task state +
   // Class-B file INDEX (names only, agents read what they need) + the rules.
-  renderContext(id) {
+  renderContext(id, { multi = false } = {}) {
     const t = this.get(id);
     const parts = [
       `<vibespace-task-context>`,
-      `This session belongs to VibeSpace task "${t.title}" (${t.id}). The task state below is shared across ALL sessions of this task.`,
+      `This session belongs to VibeSpace Task Group "${t.title}" (${t.id}). The state below is shared across ALL sessions of this group.`,
       '',
       // Injected copy shows the last 30 Activity-log entries (TASK.md keeps 50).
       this.renderTaskMd(t, 30).replace(/\n---\n[\s\S]*$/, '').trim(),
@@ -182,14 +182,17 @@ class TaskManager {
       }
     }
     // ── How to report back — self-documenting + scoped + enum-disambiguated ──
+    const gid = multi ? `--group ${t.id} ` : '';
     parts.push('', '### How to report back  (IMPORTANT — read this before using the tools)', '',
-      `Two commands are already on your PATH and are already bound to THIS session's task. You NEVER pass a task id or any other task's name — they only ever act on your own task. If you forget the exact syntax, just run the command with NO arguments: it prints its usage AND the current state.`,
+      multi
+        ? `You belong to more than one Task Group, so \`vibespace-task\` needs \`--group ${t.id}\` to target THIS group (each block above names its group). You can only ever act on groups THIS session belongs to. \`vibespace-status\` always reports THIS session and needs no group.`
+        : `Two commands are already on your PATH and are already bound to THIS session's Task Group. You NEVER pass a group id — they only ever act on your own group. If you forget the exact syntax, just run the command with NO arguments: it prints its usage AND the current state.`,
       '',
-      '`vibespace-task` — update the SHARED TASK (every session of this task, and the user on the board, see it):',
-      `- \`vibespace-task progress "what you did"\` — append to the Activity log after finishing a meaningful piece of work.`,
-      `- \`vibespace-task plan-check <step# or unique text>\` (and \`plan-uncheck\`) — tick a Checklist step. If the Checklist above is empty, add steps first with \`plan-add\`.`,
-      `- \`vibespace-task plan-add "new step"\` — add a Checklist step.`,
-      `- \`vibespace-task show\` — reprint the objective / checklist / activity log.`,
+      '`vibespace-task` — update the SHARED Task Group (every session of it, and the user on the board, see it):',
+      `- \`vibespace-task ${gid}progress "what you did"\` — append to the Activity log after finishing a meaningful piece of work.`,
+      `- \`vibespace-task ${gid}plan-check <step# or unique text>\` (and \`plan-uncheck\`) — tick a Checklist step. If the Checklist above is empty, add steps first with \`plan-add\`.`,
+      `- \`vibespace-task ${gid}plan-add "new step"\` — add a Checklist step.`,
+      `- \`vibespace-task ${gid}show\` — reprint the objective / checklist / activity log.`,
       '',
       '`vibespace-status` — report the state of THIS SESSION (your own work) right now. A Task Group has no status; the SESSION does:',
       `- \`vibespace-status <working|needs-input|blocked|review|done> [--urgency low|normal|high|urgent] [--reason "why"]\``,
@@ -201,6 +204,42 @@ class TaskManager {
     }
     parts.push(`</vibespace-task-context>`);
     return parts.join('\n');
+  }
+
+  // Reverse lookup: every NON-archived Task Group this session belongs to, by
+  // (a) explicit membership (sessions[] holds its key), (b) an auto-include
+  // folder matching its cwd, or (c) the group it was spawned into
+  // (initialGroupId — covers the window before the async UI bind lands).
+  // Belonging is LIVE: a UI bind/drag or a folder change takes effect on the
+  // agent's next turn with no respawn (fixes the old bind≠context gap). Returns
+  // full task objects, stable order.
+  groupsForSession({ sessionKey, cwd, initialGroupId } = {}) {
+    const out = [];
+    for (const t of Object.values(this._state.tasks)) {
+      if (t.archived) continue;
+      let member = false;
+      if (sessionKey && Array.isArray(t.sessions) && t.sessions.includes(sessionKey)) member = true;
+      if (!member && initialGroupId && t.id === initialGroupId) member = true;
+      if (!member && cwd) {
+        for (const f of this._sanitizeFolders(t.folders)) {
+          if (cwd === f.path || (f.recursive && cwd.startsWith(f.path + '/'))) { member = true; break; }
+        }
+      }
+      if (member) out.push(t);
+    }
+    return out.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  }
+
+  // Injection payload for a session across N groups. 0 → '' (caller falls back
+  // to the baseline tools intro). 1 → the normal single-group context. N → each
+  // group's context, prefaced so the agent knows it spans multiple 岗位 and must
+  // use `--group <id>` to act on a specific one.
+  renderMultiContext(groupIds) {
+    const ids = (groupIds || []).filter((id) => this._state.tasks[id] && !this._state.tasks[id].archived);
+    if (!ids.length) return '';
+    if (ids.length === 1) return this.renderContext(ids[0]);
+    const blocks = ids.map((id) => this.renderContext(id, { multi: true }));
+    return `This session belongs to ${ids.length} VibeSpace Task Groups (岗位). Each group's shared context follows; use \`vibespace-task --group <id> …\` to act on a specific one.\n\n` + blocks.join('\n\n');
   }
 
   _notify() { try { this._onChange(this.list()); } catch { } }
