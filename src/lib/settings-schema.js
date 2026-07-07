@@ -312,6 +312,27 @@ const SETTINGS_SCHEMA = {
   },
 
   // ── Sidebar ──
+  'sidebar.defaultTab': {
+    type: 'enum', default: 'folders',
+    options: [
+      { value: 'folders', label: 'Folders (sessions by directory)' },
+      { value: 'tasks', label: 'Task Groups' },
+      { value: 'mounts', label: 'Remote' },
+    ],
+    label: 'Default sidebar tab',
+    description: 'Which sidebar tab opens on page load',
+    category: 'Sidebar', liveApply: false,
+  },
+  'sidebar.defaultBoardView': {
+    type: 'enum', default: 'groups',
+    options: [
+      { value: 'groups', label: 'Groups (board with member sessions)' },
+      { value: 'tasks', label: 'Tasks (flat list, sorted by urgency)' },
+    ],
+    label: 'Task Groups tab: default view',
+    description: 'Which sub-view the Task Groups tab shows on page load',
+    category: 'Sidebar', liveApply: false,
+  },
   'sidebar.defaultStatusFilter': {
     type: 'multiSelect', default: ['live', 'tmux', 'external', 'stopped'],
     options: [

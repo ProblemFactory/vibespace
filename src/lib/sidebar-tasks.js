@@ -43,11 +43,14 @@ export function installSidebarTasks(SidebarClass) {
   proto._initTasks = function() {
     this._tasks = [];
     this._tasksLoaded = false; // gates "task not found" decisions during startup
-    // Tasks-tab view: 'groups' = Task Groups (岗位) with member sessions (default);
+    // Tasks-tab view: 'groups' = Task Groups (岗位) with member sessions;
     // 'tasks' = a FLAT list of every session (活儿) — tagged sorted on top by
-    // status+urgency, untagged sunk to the bottom.
+    // status+urgency, untagged sunk to the bottom. The default comes from the
+    // SETTING sidebar.defaultBoardView (applied one-shot after async load in
+    // sidebar.js); in-session toggling is transient (no localStorage — the
+    // setting IS the persistence, synced across clients).
     const ls = (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
-    this._boardView = ls('vibespace.boardView', 'groups');
+    this._boardView = this.app.settings?.get('sidebar.defaultBoardView') || 'groups';
     this._taskViewSortMode = ls('vibespace.taskViewSort', 'urgency'); // urgency|status|recent|name
     try { this._taskViewStatusFilter = JSON.parse(localStorage.getItem('vibespace.taskViewFilter') || 'null'); } catch { this._taskViewStatusFilter = null; }
     this._sessionStatuses = {}; // sessionKey → {state, urgency, reason, setBy, at}
@@ -500,8 +503,8 @@ export function installSidebarTasks(SidebarClass) {
       b.title = tip;
       b.onclick = () => {
         if (this._boardView === view) return;
+        this._boardViewTouched = true; // manual choice wins over the async default
         this._boardView = view;
-        try { localStorage.setItem('vibespace.boardView', view); } catch {}
         this._render();
       };
       wrap.appendChild(b);
@@ -539,10 +542,16 @@ export function installSidebarTasks(SidebarClass) {
 
   proto._taskViewSortFn = function(waiting) {
     const mode = this._taskViewSortMode;
-    if (mode === 'recent') return (a, b) => (b.lastActivity || b.startedAt || 0) - (a.lastActivity || a.startedAt || 0);
+    // Starred = tiebreaker right after the primary key (same precedence as the
+    // Folders sort: urgency/attention first, then ★, then recency). 'name'
+    // stays purely alphabetical — star-jumping would break scanning.
+    const star = (s) => (this._stateSetHas(this._starredIds, s) ? 1 : 0);
+    const recent = (a, b) => (b.lastActivity || b.startedAt || 0) - (a.lastActivity || a.startedAt || 0);
+    if (mode === 'recent') return (a, b) => star(b) - star(a) || recent(a, b);
     if (mode === 'name') return (a, b) => String(a.name || a.webuiName || a.sessionId || '').localeCompare(String(b.name || b.webuiName || b.sessionId || ''));
     return (a, b) => this._taskViewRank(b, waiting, mode) - this._taskViewRank(a, waiting, mode)
-      || (b.lastActivity || b.startedAt || 0) - (a.lastActivity || a.startedAt || 0);
+      || star(b) - star(a)
+      || recent(a, b);
   };
 
   proto._taskViewMatch = function(s, waiting) {
