@@ -74,7 +74,7 @@ function registerWsHandler(wss, ctx) {
     SOCKETS_DIR, BUFFERS_DIR, META_DIR, PTY_WRAPPER, CHAT_WRAPPER,
     NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, PORT, X_ENV,
     adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
-    sessionStatus, sessionStatusKey, accounts, scheduleCtxSync,
+    sessionStatus, sessionStatusKey, accounts, scheduleCtxSync, activeSessionsPayload,
   } = ctx;
 
   // Monotonic sequence for layout-sync rebroadcasts (shared across all
@@ -104,33 +104,11 @@ function registerWsHandler(wss, ctx) {
     ws.on('pong', () => { ws._isAlive = true; });
     const attachedSessions = new Set();
 
-    // Send current active sessions on connect.
-    // Keep this field list in sync with broadcastActiveSessions (server.js) —
-    // a field missing HERE is invisible to every client until the next
-    // broadcast (host badges were absent after reconnect for exactly this).
-    const activeList = [];
-    for (const [id, s] of activeSessions) {
-      if (s.isTmuxView) continue; // match broadcastActiveSessions
-      activeList.push({
-        id,
-        name: s.name,
-        cwd: s.cwd,
-        host: s.host || null,
-        hostName: s.hostName || null,
-        createdAt: s.createdAt,
-        backend: s.backend || 'claude',
-        backendSessionId: s.backendSessionId || s.claudeSessionId || null,
-        sessionKey: getSessionKey(s),
-        claudeSessionId: s.claudeSessionId || null,
-        sourceKind: s.sourceKind || null,
-        agentKind: s.agentKind || 'primary',
-        agentRole: s.agentRole || '',
-        agentNickname: s.agentNickname || '',
-        parentThreadId: s.parentThreadId || null,
-        mode: s.mode || 'terminal',
-      });
-    }
-    ws.send(JSON.stringify({ type: 'active-sessions', sessions: activeList }));
+    // Send current active sessions on connect — THE SAME payload builder as
+    // broadcastActiveSessions (a second hardcoded field list here silently
+    // dropped every later-added field — auth/account/todo badges were dead
+    // after a server-restart reconnect until the next organic broadcast).
+    ws.send(JSON.stringify({ type: 'active-sessions', sessions: activeSessionsPayload() }));
 
     ws.on('message', async (raw) => {
       let data;

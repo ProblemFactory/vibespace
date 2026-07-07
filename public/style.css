@@ -144,6 +144,15 @@ html, body {
 .session-step { font-size: 10px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .session-step.done { color: var(--text-dim); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--text-dim) 50%, transparent); }
 .session-step.active { color: var(--text); font-weight: 600; }
+/* Status history timeline (expanded card) */
+.session-history-list { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.session-history-item { display: flex; align-items: center; gap: 5px; font-size: 10px; color: var(--text-secondary); min-width: 0; }
+.session-history-time { color: var(--text-dim); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.session-history-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--h-color, var(--text-dim)); flex-shrink: 0; }
+.session-history-state { font-weight: 600; color: var(--h-color, var(--text)); flex-shrink: 0; }
+.session-history-item .session-history-state { color: var(--text); }
+.session-history-reason { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; color: var(--text-dim); }
+.session-history-by { flex-shrink: 0; font-size: 9px; color: var(--text-dim); opacity: 0.8; }
 /* Instant hover tooltip (no ~1s native-title delay) — utils.js setupInstantTooltip */
 .instant-tooltip { position: fixed; z-index: 100000; pointer-events: none; background: var(--bg-elevated, var(--bg-input, #2a2a2a)); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font-size: 11px; line-height: 1.4; max-width: 300px; box-shadow: 0 2px 10px rgba(0,0,0,0.4); }
 .badge-config { padding: 1px 3px; display: inline-flex; align-items: center; }

@@ -73,6 +73,20 @@ class SessionStatusManager {
 
   get(key) { return this._state.statuses[key] || null; }
 
+  // Status-change HISTORY per session (capped) — the expanded card shows this
+  // timeline. Appended on every set/clear; entries are immutable snapshots.
+  _logHistory(key, entry) {
+    if (!this._state.history || typeof this._state.history !== 'object') this._state.history = {};
+    const arr = this._state.history[key] || (this._state.history[key] = []);
+    const last = arr[arr.length - 1];
+    // Skip no-op repeats (agents re-assert the same state; a heartbeat isn't history)
+    if (last && last.state === entry.state && last.urgency === entry.urgency && last.reason === entry.reason && last.setBy === entry.setBy) return;
+    arr.push(entry);
+    if (arr.length > 50) arr.splice(0, arr.length - 50);
+  }
+
+  history(key) { return this._state.history?.[key] || []; }
+
   _validate({ state, urgency, reason }) {
     if (state != null && !STATES.includes(state)) throw new Error(`state must be one of ${STATES.join('/')}`);
     if (urgency != null && !URGENCIES.includes(urgency)) throw new Error(`urgency must be one of ${URGENCIES.join('/')}`);
@@ -92,6 +106,7 @@ class SessionStatusManager {
       // an undelivered override notice survives an agent re-set (still worth telling)
       pendingNotice: prev?.pendingNotice || null,
     };
+    this._logHistory(key, { ...v, setBy: 'agent', at: Date.now() });
     this._save(); this._notify();
     return this._state.statuses[key];
   }
@@ -108,6 +123,7 @@ class SessionStatusManager {
         ? { agent: { state: prev.state, urgency: prev.urgency, reason: prev.reason }, user: { state: v.state, urgency: v.urgency }, at: Date.now() }
         : (prev?.pendingNotice || null),
     };
+    this._logHistory(key, { ...v, setBy: 'user', at: Date.now() });
     this._save(); this._notify();
     return this._state.statuses[key];
   }
@@ -124,6 +140,7 @@ class SessionStatusManager {
     } else {
       delete this._state.statuses[key];
     }
+    this._logHistory(key, { state: null, urgency: null, reason: null, setBy: by || 'user', at: Date.now(), cleared: true });
     this._save(); this._notify();
     return null;
   }
@@ -133,6 +150,12 @@ class SessionStatusManager {
     if (fromKey === toKey || !this._state.statuses[fromKey]) return;
     if (!this._state.statuses[toKey]) this._state.statuses[toKey] = this._state.statuses[fromKey];
     delete this._state.statuses[fromKey];
+    const h = this._state.history?.[fromKey];
+    if (h) {
+      if (!this._state.history[toKey]) this._state.history[toKey] = h;
+      else this._state.history[toKey] = [...h, ...this._state.history[toKey]].slice(-50);
+      delete this._state.history[fromKey];
+    }
     this._save(); this._notify();
   }
 

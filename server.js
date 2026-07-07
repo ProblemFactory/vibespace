@@ -1764,6 +1764,16 @@ app.post('/api/agent/session-status', (req, res) => {
     res.json({ success: true, sessionKey: key, status: rec });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
+// Status-change history for the expanded card's timeline. Accepts a comma
+// list of keys (backend:id + webui:<serverId> placeholder) — first hit wins.
+app.get('/api/session-status/history', (req, res) => {
+  const keys = String(req.query.sessionKey || '').split(',').filter(Boolean);
+  for (const k of keys) {
+    const h = sessionStatus.history(k);
+    if (h.length) return res.json({ history: h });
+  }
+  res.json({ history: [] });
+});
 // Resolve the calling agent's session from its per-session bearer token.
 // Returns [session, id] or replies 401/403 and returns null.
 function agentSession(req, res) {
@@ -2579,7 +2589,7 @@ registerWsHandler(wss, {
   SOCKETS_DIR, BUFFERS_DIR, META_DIR, PTY_WRAPPER, CHAT_WRAPPER,
   NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, CODEX_CMD, EDITOR_CMD, PORT, X_ENV,
   adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
-  sessionStatus, sessionStatusKey, getTasks: () => tasks, accounts, scheduleCtxSync,
+  sessionStatus, sessionStatusKey, getTasks: () => tasks, accounts, scheduleCtxSync, activeSessionsPayload,
 });
 
 // Billing identity for the card badge. Precedence: env-key spawn (definite) →
@@ -2606,7 +2616,11 @@ function sessionAuth(s) {
   return { source: 'unknown' };
 }
 
-function broadcastActiveSessions() {
+// THE single active-sessions payload builder — used by every broadcast AND the
+// per-connection initial snapshot (ws-handler). A second hardcoded field list
+// anywhere means new fields silently vanish for freshly-(re)connected clients
+// until the next organic broadcast (bit us twice: host badges, then auth/todo).
+function activeSessionsPayload() {
   const getSessionKey = (session = {}) => {
     const backend = session.backend || 'claude';
     const backendSessionId = session.backendSessionId || session.sessionId || session.claudeSessionId || null;
@@ -2642,7 +2656,11 @@ function broadcastActiveSessions() {
       mode: s.mode || 'terminal',
     });
   }
-  const msg = JSON.stringify({ type: 'active-sessions', sessions: activeList });
+  return activeList;
+}
+
+function broadcastActiveSessions() {
+  const msg = JSON.stringify({ type: 'active-sessions', sessions: activeSessionsPayload() });
   wss.clients.forEach(client => {
     if (client.readyState === WS_OPEN) {
       try { client.send(msg); } catch {}
