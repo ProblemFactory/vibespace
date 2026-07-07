@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.39.0] — 2026-07-06
+
+### Changed — Task Groups (岗位/活儿 concept refactor)
+
+Aligned the task system to the intended model: a **Task Group** (岗位) is a
+persistent role; a **session** is the unit of work (活儿); **status lives on the
+session**, not the group.
+
+- **Session status** gained `done`. A Task Group has no status — only archived
+  (a role never "completes"). Removed the `vibespace-task status` subcommand and
+  the `/api/agent/task-status` endpoint; `done` is reported via `vibespace-status done`.
+- **Many-to-many, live belonging**: a session belongs to 0..N Task Groups,
+  derived live (explicit tag / auto-include folder / spawned-into group). A
+  UI bind/drag/folder change reaches the agent on its next turn with no respawn.
+  Removed the single `session._taskId` and the `VIBESPACE_TASK_ID` spawn env —
+  belonging is resolved server-side from the session token.
+- **Injection** now covers every belonged group and re-injects a group whenever
+  it changes — a UI edit, another session's `vibespace-task`, or files the user
+  hand-writes into the group's context folder.
+- **`vibespace-task --group <id>`** with enforced isolation — a session may only
+  read/write Task Groups it belongs to.
+- **Per-group injection toggle** (`injectContext`) — opt a group out of context
+  injection while keeping it on the board and reportable via vibespace-task.
+- **Checklist ↔ session** loose link: ticking a step records which session did it
+  (informational, shown in the detail window).
+- **Rename**: `TaskManager` → `TaskGroupManager`, `src/tasks.js` →
+  `src/task-groups.js`, `data/tasks.json` → `data/task-groups.json` (migrated
+  forward automatically on first boot; the legacy file is left in place).
+  User-visible UI now says "Task Group". Wire names (JSON fields, API paths, the
+  `tasks-updated` event, CLI command names) are kept for data/contract compatibility.
+
 ## [2.38.0] — 2026-07-06
 
 ### Added

@@ -1,7 +1,8 @@
 # Task System Refactor — align to the user's concept model (岗位 / 活儿)
 
-**Status: DESIGN APPROVED 2026-07-06, pending implementation (this doc is the blueprint — written pre-compaction).**
-Already shipped this session (keep): 2.38.0 baseline tool injection (no-task sessions get a `vibespace-status` intro) + session-status debounced disk write. The refactor below supersedes some of it.
+**Status: ✅ IMPLEMENTED — shipped as 2.39.0 (2026-07-06). P1→P2→P3→P4→P6→P5 + P0 (rename) all done + verified; commits `25b0a18`(P1) `62f0208`(P2) `c9231b5`(P3) `d0a2f89`(P4) `f58e0e1`(P6) `4fff818`(P5) + P0a/P0b + the 2.39.0 release.**
+Deviations from this blueprint, by design (recorded in the CLAUDE.md 2.39.0 refactor note): **wire/contract + internal-symbol names were KEPT** — JSON fields `plan`/`progress`, API paths `/api/tasks*` + `/api/agent/task*`, the `tasks-updated` WS event, CLI command names (`plan-check`/`plan-add`/`progress`), the internal `_state.tasks` map key, and the client-side symbol/file names (`sidebar-tasks.js`, `_taskUpdate`, …). Rationale: renaming them is pure cosmetic, invisible to users/agents, high-churn, and would break data + config-export round-trip compatibility. The RENAME that shipped is the concept-carrier layer only: `TaskManager`→`TaskGroupManager`, `src/tasks.js`→`src/task-groups.js`, `data/tasks.json`→`data/task-groups.json` (auto-migrated), and all user-visible UI strings → "Task Group".
+Already shipped earlier this session (kept): 2.38.0 baseline tool injection (no-group sessions get a `vibespace-status` intro) + session-status debounced disk write.
 
 ## 1. Why (the naming/concept mismatch)
 
