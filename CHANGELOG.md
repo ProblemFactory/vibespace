@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.43.0] — 2026-07-07
+
+### Added — Anthropic account switching (subscription ↔ API, per session)
+
+The CLI's `/login` is mutually exclusive — logging into a Console account wipes
+the subscription OAuth (and vice versa), switching everything globally.
+VibeSpace now keeps API keys in its own encrypted store and injects
+`ANTHROPIC_API_KEY` into a session's spawn environment, so both identities
+coexist and **every session picks its own billing account**:
+
+- **Manage Agents → Anthropic accounts**: subscription login status, saved API
+  keys (add / import the key a Console login minted / rename / delete / set
+  default / Test), and a **"Set up both…" wizard** that walks ordinary users
+  through the one-time choreography — Console login first (its key is captured
+  automatically), then log back into the subscription. Login steps open a
+  terminal; VibeSpace detects completion and continues by itself.
+- **Per-session choice**: Account row in the New Session dialog and in the
+  card's ⚙ config popover (persisted; applies to every resume path — resuming
+  with a different account is how you move a conversation's billing, e.g. when
+  the subscription weekly cap is hit).
+- **Visibility**: API-key sessions show an amber key badge (name + key tail in
+  the tooltip); the usage popup explains when the subscription is signed out
+  and that API sessions never appear in the quota pies.
+- Keys are AES-256-GCM encrypted at rest (mode-600 files) and travel only via
+  the process-env channel — never argv (verified: zero /proc/cmdline leaks).
+
+### Fixed
+- Five `writeSessionMeta` callers rebuilt session meta from hardcoded field
+  lists, silently dropping later-added keys (`agentToken`, `taskId`,
+  `accountId`) on id-capture / rename / fork-adoption. All now merge into the
+  existing meta.
+
 ## [2.42.0] — 2026-07-06
 
 ### Changed — session card / Task View
