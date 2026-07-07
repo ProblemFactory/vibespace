@@ -1461,6 +1461,74 @@ app.post('/api/tasks/import', (req, res) => {
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// ── Remote context-folder auto-sync ("mount"): a REMOTE session's belonged
+// groups with a contextDir get a live-synced copy at
+// <remoteHome>/.vibespace/ctx/<groupId> (bidirectional rsync, newer-wins, no
+// deletes, .vibespace excluded), and the injected file index is path-translated
+// to the remote copy (remoteCtxBase). Triggers: session spawn + a 60s timer
+// while any live remote session belongs to the group. Remote writes sync back
+// → the local signature changes → every member re-injects next turn. ──
+const _ctxSyncBusy = new Set(); // `${hostId}:${groupId}` in-flight guard
+async function syncRemoteGroupCtx(h, g) {
+  const key = `${h.id}:${g.id}`;
+  if (_ctxSyncBusy.has(key)) return;
+  _ctxSyncBusy.add(key);
+  try {
+    const home = await hosts.homeDir(h);
+    if (!home) return;
+    const rdir = `${home}/.vibespace/ctx/${g.id}`;
+    await hosts._ssh(h, `mkdir -p "${rdir}"`);
+    const e = hosts.sshCmd(h);
+    const local = g.contextDir.replace(/\/+$/, '') + '/';
+    const remote = `${hosts.dest(h)}:${rdir}/`;
+    const opts = ['-az', '--update', '--exclude', '.vibespace', '--timeout', '25', '-e', e];
+    const rsync = (args) => new Promise((resolve, reject) => {
+      const { execFile } = require('child_process');
+      execFile('rsync', args, { timeout: 60000 }, (err, so, se) => err ? reject(new Error(String(se || err.message).slice(0, 200))) : resolve());
+    });
+    await rsync([...opts, local, remote]); // push newer local files
+    await rsync([...opts, remote, local]); // pull newer remote artifacts back
+  } catch (e) { console.warn('[ctx-sync]', h.name, g.id, e.message); }
+  finally { _ctxSyncBusy.delete(key); }
+}
+// Groups a session belongs to that have a syncable context folder.
+function ctxGroupsOf(session, id) {
+  if (!session.host) return [];
+  return tasks.groupsForSession({ sessionKey: sessionStatusKey(session, id), cwd: session.cwd, initialGroupId: session._initialGroupId })
+    .filter((g) => g.contextDir && g.injectContext !== false);
+}
+function scheduleCtxSync(session, id) {
+  try {
+    if (!session.host || !hosts) return;
+    let h; try { h = hosts.get(session.host); } catch { return; }
+    for (const g of ctxGroupsOf(session, id)) syncRemoteGroupCtx(h, g);
+  } catch { }
+}
+setInterval(() => {
+  try {
+    const seen = new Set();
+    for (const [id, s] of activeSessions) {
+      if (!s.host) continue;
+      let h; try { h = hosts.get(s.host); } catch { continue; }
+      for (const g of ctxGroupsOf(s, id)) {
+        const k = s.host + ':' + g.id;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        syncRemoteGroupCtx(h, g);
+      }
+    }
+  } catch { }
+}, 60000);
+// Absolute remote path the injection should show for a group's context folder
+// (null → local session, keep local paths). Uses the cached remote home; if
+// the home isn't known yet (first contact) fall back to local paths this turn.
+function remoteCtxBaseFor(session) {
+  if (!session.host || !hosts) return null;
+  const home = hosts._homes?.get(session.host);
+  if (!home) { try { hosts.homeDir(hosts.get(session.host)); } catch { } return null; } // warm the cache async
+  return (gid) => `${home}/.vibespace/ctx/${gid}`;
+}
+
 // ── Anthropic accounts (subscription ↔ API/console per-session switching) ──
 // Keys AES-GCM encrypted in data/accounts.json; injected as ANTHROPIC_API_KEY
 // into the session's spawn env (process-env channel — never argv/proc-visible).
@@ -1622,7 +1690,8 @@ app.get('/api/agent/task-context', (req, res) => {
     const injectGroups = groups.filter((g) => g.injectContext !== false); // P6: per-group context toggle
     let context = '';
     if (injectGroups.length) {
-      context = tasks.renderMultiContext(injectGroups.map((g) => g.id));
+      // Remote sessions read the auto-synced copy — translate file paths
+      context = tasks.renderMultiContext(injectGroups.map((g) => g.id), { ctxBaseFor: remoteCtxBaseFor(s) });
       // Only Claude injects the SessionStart output; codex runs the command but
       // ignores it, so don't mark groups "seen" for codex (that would starve its
       // UserPromptSubmit delivery).
@@ -1670,6 +1739,7 @@ app.get('/api/agent/prompt-context', (req, res) => {
       s._groupSeenAt = s._groupSeenAt || {};
       s._ctxSig = s._ctxSig || {};
       const multi = injectGroups.length > 1;
+      const ctxBaseFor = remoteCtxBaseFor(s); // remote → translated file paths
       for (const g of injectGroups) {
         const seenAt = s._groupSeenAt[g.id];
         const firstTime = seenAt === undefined;
@@ -1685,7 +1755,7 @@ app.get('/api/agent/prompt-context', (req, res) => {
         const metaChanged = contentAt > (seenAt || 0);
         if (firstTime || metaChanged || ctxChanged) {
           const wasSeen = !firstTime; // seen before → this is an UPDATE, not first delivery
-          const ctx = tasks.renderContext(g.id, { multi });
+          const ctx = tasks.renderContext(g.id, { multi, ctxBase: ctxBaseFor ? ctxBaseFor(g.id) : null });
           if (ctx) {
             parts.push(wasSeen
               ? `The Task Group below was UPDATED since you last saw it — this is the current state (supersedes any earlier copy).\n\n${ctx}`
@@ -1710,6 +1780,9 @@ app.get('/api/agent/prompt-context', (req, res) => {
       const notice = sessionStatus.consumeNotice(k);
       if (notice) { parts.push(SessionStatusManager.renderNotice(notice)); break; }
     }
+    // Remote session about to receive a fresh/updated context → make sure the
+    // synced copy refreshes promptly too (busy-guard makes over-calling cheap).
+    if (s.host && parts.length) scheduleCtxSync(s, id);
     res.json({ success: true, context: parts.join('\n\n') });
   } catch (e) { res.json({ success: true, context: '' }); }
 });
@@ -2371,7 +2444,7 @@ registerWsHandler(wss, {
   SOCKETS_DIR, BUFFERS_DIR, META_DIR, PTY_WRAPPER, CHAT_WRAPPER,
   NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, CODEX_CMD, EDITOR_CMD, PORT, X_ENV,
   adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
-  sessionStatus, sessionStatusKey, getTasks: () => tasks, accounts,
+  sessionStatus, sessionStatusKey, getTasks: () => tasks, accounts, scheduleCtxSync,
 });
 
 function broadcastActiveSessions() {

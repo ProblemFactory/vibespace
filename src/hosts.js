@@ -140,6 +140,28 @@ class HostManager {
     return args;
   }
 
+  /** ssh option STRING for tools that take a transport command (rsync -e):
+   *  everything sshArgs adds except the destination. */
+  sshCmd(h) {
+    const args = [...SSH_BASE_OPTS, '-p', String(h.port || 22)];
+    if (h.keyPath) args.push('-i', h.keyPath, '-o', 'IdentitiesOnly=yes');
+    return 'ssh ' + args.map((a) => (/[\s"']/.test(a) ? JSON.stringify(a) : a)).join(' ');
+  }
+
+  dest(h) { return `${h.user}@${h.host}`; }
+
+  /** Remote $HOME, cached per host — injection needs ABSOLUTE remote paths
+   *  (agent file tools don't expand ~ or $HOME). */
+  async homeDir(h) {
+    if (!this._homes) this._homes = new Map();
+    if (this._homes.has(h.id)) return this._homes.get(h.id);
+    try {
+      const out = String(await this._ssh(h, 'echo "$HOME"')).trim().split('\n').pop().trim();
+      if (out && out.startsWith('/')) { this._homes.set(h.id, out); return out; }
+    } catch { }
+    return null;
+  }
+
   _ssh(h, remoteCmd, { timeoutMs = 15000, maxBuffer = 4 * 1024 * 1024, encoding } = {}) {
     return new Promise((resolve, reject) => {
       execFile('ssh', [...this.sshArgs(h), '--', remoteCmd], { timeout: timeoutMs, maxBuffer, ...(encoding !== undefined ? { encoding } : {}) }, (err, stdout, stderr) => {

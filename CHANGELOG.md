@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.45.0] — 2026-07-07
+
+### Added — remote context-folder auto-sync
+Remote sessions now get their Task Groups' **context folders auto-synced onto
+the host** (`~/.vibespace/ctx/<groupId>`, bidirectional rsync, newer file wins,
+no deletes, `.vibespace/` excluded), and the **injected file index is
+path-translated** to the remote copy — a remote agent can actually read (and
+write back) the group's shared files. Sync triggers: session spawn, every 60s
+while a live remote session belongs to the group, and whenever an injection
+delivers fresh context. Remote artifacts sync back → the local signature
+changes → every member session re-injects next turn.
+
 ## [2.44.0] — 2026-07-07
 
 ### Changed — task-system review fixes
