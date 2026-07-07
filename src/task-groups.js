@@ -71,6 +71,9 @@ class TaskGroupManager {
     let migrated = false;
     for (const t of Object.values(this._state.tasks)) {
       if ('status' in t) { if (t.archived === undefined) t.archived = (t.status === 'done'); delete t.status; migrated = true; }
+      // Backfill (in-memory is enough; persisted on the next change): content
+      // gate falls back to the coarse updatedAt until a content edit happens.
+      if (t.contentUpdatedAt === undefined) t.contentUpdatedAt = t.updatedAt;
     }
     if (!existed && typeof readUserState === 'function') {
       // One-time legacy Groups migration (file existence is the guard: once the
@@ -183,12 +186,19 @@ class TaskGroupManager {
   // indexed file. Detects USER-written changes (files added / edited / removed
   // in contextDir, OUTSIDE the task store, which therefore don't bump
   // updatedAt) so the next agent turn re-injects the group. Ignores .vibespace/
-  // (program-managed) since _listContextFiles skips it.
+  // (program-managed) since _listContextFiles skips it. TTL-cached: this runs
+  // on EVERY prompt for every belonged group — without the cache a big context
+  // dir would put a recursive dir walk on the hook's 3s-timeout path.
   contextDirSignature(dir) {
     if (!dir) return '';
-    return this._listContextFiles(dir, 200)
+    if (!this._sigCache) this._sigCache = new Map();
+    const hit = this._sigCache.get(dir);
+    if (hit && Date.now() - hit.at < 4000) return hit.sig;
+    const sig = this._listContextFiles(dir, 200)
       .map((f) => `${f.path}:${f.size}:${Math.round(f.mtime || 0)}`)
       .join('|');
+    this._sigCache.set(dir, { sig, at: Date.now() });
+    return sig;
   }
 
   // The SessionStart injection payload (design §4a): rendered task state +
@@ -247,8 +257,16 @@ class TaskGroupManager {
   groupsForSession({ sessionKey, cwd, realCwd, initialGroupId } = {}) {
     // Match a folder against the cwd AND its symlink-resolved realpath (a session
     // opened under claude-code-webui → vibespace must match a folder on either).
+    // realpath is cached (this runs per prompt; same scheme as routes/sessions.js).
     let real = realCwd;
-    if (!real && cwd) { try { real = fs.realpathSync(cwd); } catch { /* gone */ } }
+    if (!real && cwd) {
+      if (!this._realCache) this._realCache = new Map();
+      if (this._realCache.has(cwd)) real = this._realCache.get(cwd);
+      else {
+        try { real = fs.realpathSync(cwd); } catch { real = null; }
+        this._realCache.set(cwd, real);
+      }
+    }
     const cwds = [cwd, real && real !== cwd ? real : null].filter(Boolean);
     const out = [];
     for (const t of Object.values(this._state.tasks)) {
@@ -355,6 +373,7 @@ class TaskGroupManager {
       injectContext: injectContext !== false, // per-group context-injection toggle (default on)
       createdAt: now,
       updatedAt: now,
+      contentUpdatedAt: now,
     };
     this._state.tasks[id] = t;
     this._save();
@@ -433,6 +452,14 @@ class TaskGroupManager {
         : null;
     }
     t.updatedAt = Date.now();
+    // contentUpdatedAt gates AGENT re-injection: only what the injected context
+    // actually renders (title/objective/checklist/contextDir) counts. Cosmetic
+    // patches (color, injectContext, archived, kind, folders, binds) bump only
+    // updatedAt — they used to trigger a full "was UPDATED" re-injection to
+    // every member agent.
+    if (['title', 'objective', 'plan', 'contextDir'].some((k) => patch[k] !== undefined)) {
+      t.contentUpdatedAt = t.updatedAt;
+    }
     this._save();
     this._notify();
     return { ...t };
@@ -481,6 +508,7 @@ class TaskGroupManager {
     t.progress.push({ at: Date.now(), note: clean, session: typeof session === 'string' ? session.slice(0, 200) : null });
     if (t.progress.length > 500) t.progress = t.progress.slice(-500);
     t.updatedAt = Date.now();
+    t.contentUpdatedAt = t.updatedAt; // progress is injected content
     this._save();
     this._notify();
     return { ...t };

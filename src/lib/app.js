@@ -1920,16 +1920,16 @@ class App {
       };
     }
     // Account dropdown (billing identity: subscription OAuth vs an API key).
-    // Local Claude sessions only — hidden for codex/shell and remote hosts
-    // (remote uses the remote machine's own login).
+    // Claude sessions only — remote hosts supported too (the key ships to the
+    // remote over ssh stdin, never argv; 'Subscription' there means the
+    // REMOTE machine's own login).
     const acctRow = document.getElementById('row-account');
     const acctSel = document.getElementById('input-account');
     const updateAcctRow = () => {
       if (!acctRow || !acctSel) return;
       const be = document.getElementById('input-backend')?.value || 'claude';
-      const host = document.getElementById('input-host')?.value || '';
       const list = this._accounts?.accounts || [];
-      const show = be === 'claude' && !host && list.length > 0;
+      const show = be === 'claude' && list.length > 0;
       acctRow.style.display = show ? '' : 'none';
       if (!show) { acctSel.value = ''; return; }
       const defId = this._accounts?.defaultAccountId;

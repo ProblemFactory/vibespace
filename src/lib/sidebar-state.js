@@ -220,9 +220,14 @@ export function installSidebarState(SidebarClass) {
   proto._sessionSortRank = function(s, waiting) {
     const URG = { urgent: 3, high: 2, normal: 1, low: 0 };
     const st = this.getSessionStatus?.(s);
+    const isLive = s.status === 'live' || s.status === 'tmux';
+    // Finished work sinks below everything — done is a result, not a demand.
+    if (st?.state === 'done') return -1;
     let r = st?.urgency ? (URG[st.urgency] ?? 0) : 0;
-    if (st?.state === 'blocked') r = Math.max(r, 2);
-    else if (st?.state === 'needs-input') r = Math.max(r, 1);
+    // Attention bumps only for RUNNING sessions — a stopped session's stale
+    // blocked/needs-input declaration describes a process that no longer runs.
+    if (isLive && st?.state === 'blocked') r = Math.max(r, 2);
+    else if (isLive && st?.state === 'needs-input') r = Math.max(r, 1);
     const key = `${s.backend || 'claude'}:${s.backendSessionId || s.claudeSessionId || ''}`;
     if (waiting.has(key)) r = Math.max(r, 1);
     return r;

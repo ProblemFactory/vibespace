@@ -162,26 +162,32 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     // blocked at a glance: agent-declared wins; else OSC-idle ⇒ needs-input,
     // otherwise a live session reads as "working". Non-live shows nothing here
     // (the connection badge already says stopped/external).
-    const dstate = st?.state || (isLive ? (waiting ? 'needs-input' : 'working') : null);
+    // STALE DECAY: a stopped session's declared working/needs-input describes a
+    // process that no longer runs — drop it. Result-like states (done/review/
+    // blocked) persist on stopped cards but render dashed like derived ones.
+    const staleActive = !isLive && st?.state && (st.state === 'working' || st.state === 'needs-input');
+    const declared = staleActive ? null : (st?.state || null);
+    const dstate = declared || (isLive ? (waiting ? 'needs-input' : 'working') : null);
+    const staleResult = !isLive && !!declared;
     // Urgency defaults to 'normal' once a session has ANY state — so every such
     // card carries an urgency for its background tint (#4/#5); the agent/user can
     // still raise it. data-urgency drives the card background color.
     const urg = st?.urgency || (dstate ? 'normal' : null);
-    if (urg) card.dataset.urgency = urg;
-    if (dstate || st?.urgency) {
+    if (urg && dstate) card.dataset.urgency = urg;
+    if (dstate) {
       const meta = SESSION_STATE_META[dstate] || { label: dstate || 'status', color: 'var(--text-dim)' };
       const mark = SESSION_URGENCY_META[st?.urgency]?.mark || '';
-      const derived = !st?.state; // synthesized by VibeSpace, not agent/user-declared
-      const label = (dstate ? meta.label : (st?.urgency || 'status')) + (mark ? ' ' + mark : '');
+      const derived = !declared; // synthesized by VibeSpace, not agent/user-declared
+      const label = meta.label + (mark ? ' ' + mark : '');
       stateChip.style.display = '';
       stateChip.style.setProperty('--chip-color', meta.color);
       // Icon + text: the text shows on a wide sidebar, the icon-only when narrow
       // (container query). data-tip gives the instant tooltip in icon mode.
       stateChip.innerHTML = `<span class="chip-icon">${meta.icon || ''}</span><span class="chip-text">${escHtml(label)}</span>`;
-      stateChip.classList.toggle('sess-state-derived', derived);
+      stateChip.classList.toggle('sess-state-derived', derived || staleResult);
       stateChip.dataset.tip = derived
         ? `${meta.label} — ${waiting ? 'finished, waiting for you' : 'active'} (observed by VibeSpace; the agent can set its own state with vibespace-status). Click to set manually.`
-        : `${st.state ? 'state: ' + meta.label : ''}${st.urgency ? (st.state ? ' · ' : '') + 'urgency: ' + st.urgency : ''}${st.reason ? ' — ' + st.reason : ''} (set by ${st.setBy === 'agent' ? 'the agent' : 'you'}; click to change)`;
+        : `${'state: ' + meta.label}${st.urgency ? ' · urgency: ' + st.urgency : ''}${st.reason ? ' — ' + st.reason : ''}${staleResult ? ' (set before the session stopped)' : ''} (set by ${st.setBy === 'agent' ? 'the agent' : 'you'}; click to change)`;
       stateChip.classList.toggle('sess-state-urgent', st?.urgency === 'urgent');
       stateChip.onclick = (e) => { e.stopPropagation(); state._showSessionStatusPopover?.(stateChip, s); };
     }
@@ -553,7 +559,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       // switch to an API key here and Resume, the conversation continues on
       // API billing.
       const acctList = app._accounts?.accounts || [];
-      if (backend === 'claude' && !s.host && acctList.length) {
+      if (backend === 'claude' && acctList.length) {
         pop.appendChild(makeRow('Account', [
           { value: 'subscription', label: 'Subscription (Pro/Max)' },
           ...acctList.map(a => ({ value: a.id, label: `${a.name} — API …${a.tail}` })),
