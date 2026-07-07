@@ -222,7 +222,7 @@ class Sidebar {
     // Sort: Folders = recent/folder cycle; Tasks tab shows it only in the flat
     // Tasks view (the Groups board has a fixed attention order). Same button,
     // per-context behavior — no separate toolbar row inside the view.
-    show('sort-toggle', t === 'folders' || (t === 'tasks' && this._boardView === 'tasks'));
+    show('sort-toggle', t === 'folders' || (t === 'tasks' && !this._mobileMode && this._boardView === 'tasks')); // mobile tasks tab = drill-down, no Task View sort
     this._updateSortBtn(document.getElementById('sort-toggle'));
     show('manage-toggle', t !== 'mounts');
     show('status-quick-tabs', t === 'folders');
@@ -827,7 +827,11 @@ class Sidebar {
           if (dd.key === '__ungrouped__') {
             const assignedIds = new Set();
             for (const t of this._tasks || []) this._getTaskSessionKeys(t, sessions).forEach(id => assignedIds.add(id));
-            const untagged = sessions.filter(s => !assignedIds.has(this._getSessionStateKey(s)) && !assignedIds.has(s.sessionId));
+            // Live/tmux only — matches _renderMobileTaskList (the unfiltered
+            // tasks-tab list holds thousands of stopped sessions; rendering
+            // them all in the drill-down would freeze the phone).
+            const untagged = sessions.filter(s => (s.status === 'live' || s.status === 'tmux')
+              && !assignedIds.has(this._getSessionStateKey(s)) && !assignedIds.has(s.sessionId));
             if (untagged.length) { this._renderMobileTaskDetail('Untagged', untagged, sessions); return; }
           } else {
             const task = this._taskById(dd.key);
