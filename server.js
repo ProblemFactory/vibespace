@@ -538,6 +538,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
             }
             if (changed && session.sockName) {
               writeSessionMeta(session.sockName, {
+                ...(readSessionMeta(session.sockName) || {}), // preserve keys not re-listed (agentToken/taskId/accountId)
                 name: session.name,
                 cwd: session.cwd,
                 backend: session.backend,
@@ -705,6 +706,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
               session._forkRequested = false; // adopt once, then stop watching
               if (session.sockName) {
                 writeSessionMeta(session.sockName, {
+                  ...(readSessionMeta(session.sockName) || {}), // preserve keys not re-listed (agentToken/taskId/accountId)
                   name: session.name,
                   cwd: session.cwd,
                   backend: session.backend,
@@ -986,6 +988,7 @@ function restoreSessions() {
       _effort: meta.effort || null,
       agentToken: meta.agentToken || null, // vibespace-status auth survives restarts
       _initialGroupId: meta.taskId || null, // group spawned into; belonging is live-derived, this only covers the pre-bind window
+      _accountId: meta.accountId || null, // billing identity the session was spawned with (badge only — env lives in the surviving dtach process)
       sockName: sockFile,
       socketPath,
       buffer: savedBuffer,
@@ -1455,6 +1458,48 @@ app.post('/api/tasks/:id/export', (req, res) => {
 });
 app.post('/api/tasks/import', (req, res) => {
   try { res.json({ success: true, task: tasks.importFromFile(req.body?.path) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// ── Anthropic accounts (subscription ↔ API/console per-session switching) ──
+// Keys AES-GCM encrypted in data/accounts.json; injected as ANTHROPIC_API_KEY
+// into the session's spawn env (process-env channel — never argv/proc-visible).
+// The CLI's own /login is mutually exclusive; this store is what lets both
+// identities coexist. Design: docs/design in CLAUDE.md "Accounts".
+const { AccountManager } = require('./src/accounts');
+const accounts = new AccountManager({
+  dataDir: path.join(__dirname, 'data'),
+  onChange: (list) => {
+    const json = JSON.stringify({ type: 'accounts-updated', ...list });
+    for (const client of wss.clients) if (client.readyState === WS_OPEN) client.send(json);
+    broadcastActiveSessions(); // account names on live session cards may change
+  },
+});
+app.get('/api/accounts', (req, res) => {
+  res.json({
+    ...accounts.list(),
+    subscription: accounts.subscriptionStatus(),
+    cliKey: accounts.cliPrimaryKey(),
+  });
+});
+app.post('/api/accounts', (req, res) => {
+  try { res.json({ success: true, account: accounts.add(req.body || {}) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/accounts/import-cli', (req, res) => {
+  try { res.json({ success: true, account: accounts.importFromCli() }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/accounts/default', (req, res) => {
+  try { accounts.setDefault(req.body?.id || null); res.json({ success: true }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.patch('/api/accounts/:id', (req, res) => {
+  try { res.json({ success: true, account: accounts.rename(req.params.id, req.body?.name) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.delete('/api/accounts/:id', (req, res) => {
+  try { accounts.remove(req.params.id); res.json({ success: true }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
@@ -1968,7 +2013,7 @@ function createSessionMessages(session, sessionId) {
 
 // ── Session API (extracted to src/routes/sessions.js) ──
 const { router: sessionsRouter, setup: setupSessions } = require('./src/routes/sessions');
-setupSessions({ activeSessions, webuiPids, refreshWebuiPids, createSessionMessages, BUFFERS_DIR, PERMISSION_MODES, execFileSync, hosts });
+setupSessions({ activeSessions, webuiPids, refreshWebuiPids, createSessionMessages, BUFFERS_DIR, PERMISSION_MODES, execFileSync, hosts, accounts });
 // Backend readiness for onboarding: is each CLI installed + logged in?
 // Login detection is best-effort file existence — never spawns the CLIs.
 app.get('/api/backend-status', (req, res) => {
@@ -2028,6 +2073,7 @@ let _codexRateLimitCacheAt = 0;
 
 let _oauthCreds = null; // { accessToken, refreshToken, expiresAt }
 let _oauthMtime = 0;
+let _oauthSignedOut = false; // credentials file present but emptied (user /login'd to console) — last-known data is real but frozen
 
 function _readOAuthCreds() {
   try {
@@ -2038,7 +2084,13 @@ function _readOAuthCreds() {
       if (_oauthCreds && stat.mtimeMs === _oauthMtime) return _oauthCreds;
       const raw = JSON.parse(fs.readFileSync(credsPath, 'utf-8'));
       const o = raw?.claudeAiOauth;
-      if (o?.accessToken) { _oauthCreds = o; _oauthMtime = stat.mtimeMs; return _oauthCreds; }
+      if (o?.accessToken) { _oauthCreds = o; _oauthMtime = stat.mtimeMs; _oauthSignedOut = false; return _oauthCreds; }
+      // File parses but holds no token → the user logged OUT of the subscription
+      // (e.g. switched to a console login, which wipes it to {}). We keep serving
+      // the last-known in-memory creds while their access token stays valid, but
+      // flag it so the UI can say the pies are from a signed-out subscription.
+      _oauthMtime = stat.mtimeMs;
+      _oauthSignedOut = true;
     }
     // macOS: Keychain
     if (process.platform === 'darwin') {
@@ -2278,7 +2330,7 @@ function summarizeCodexRateLimit() {
 }
 
 app.get('/api/usage', (req, res) => {
-  res.json({ rateLimit: _rateLimitCache, codexRateLimit: summarizeCodexRateLimit() });
+  res.json({ rateLimit: _rateLimitCache, codexRateLimit: summarizeCodexRateLimit(), subscriptionSignedOut: _oauthSignedOut });
 });
 
 app.get('/api/available-models', (req, res) => {
@@ -2298,7 +2350,7 @@ registerWsHandler(wss, {
   SOCKETS_DIR, BUFFERS_DIR, META_DIR, PTY_WRAPPER, CHAT_WRAPPER,
   NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, CODEX_CMD, EDITOR_CMD, PORT, X_ENV,
   adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
-  sessionStatus, sessionStatusKey, getTasks: () => tasks,
+  sessionStatus, sessionStatusKey, getTasks: () => tasks, accounts,
 });
 
 function broadcastActiveSessions() {
@@ -2327,6 +2379,11 @@ function broadcastActiveSessions() {
       agentRole: s.agentRole || '',
       agentNickname: s.agentNickname || '',
       parentThreadId: s.parentThreadId || null,
+      // Billing identity badge: which account this session's env was spawned
+      // with (null = the CLI's global login / subscription).
+      accountId: s._accountId || null,
+      accountName: s._accountId ? (accounts.get(s._accountId)?.name || 'API key') : null,
+      accountTail: s._accountId ? (accounts.get(s._accountId)?.tail || null) : null,
       mode: s.mode || 'terminal',
     });
   }

@@ -562,6 +562,8 @@ class Sidebar {
         webuiId: wm?.id || null,
         webuiName: wm?.name || null,
         webuiMode: wm ? (wm.mode || 'terminal') : null,
+        accountName: wm?.accountName || null, // billing identity badge (API key sessions)
+        accountTail: wm?.accountTail || null,
       };
     });
 
@@ -590,6 +592,8 @@ class Sidebar {
           webuiName: ws.name,
           name: ws.name || '',
           webuiMode: ws.mode || 'terminal',
+          accountName: ws.accountName || null,
+          accountTail: ws.accountTail || null,
         });
       }
     }

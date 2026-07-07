@@ -74,7 +74,7 @@ function registerWsHandler(wss, ctx) {
     SOCKETS_DIR, BUFFERS_DIR, META_DIR, PTY_WRAPPER, CHAT_WRAPPER,
     NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, PORT, X_ENV,
     adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
-    sessionStatus, sessionStatusKey,
+    sessionStatus, sessionStatusKey, accounts,
   } = ctx;
 
   // Monotonic sequence for layout-sync rebroadcasts (shared across all
@@ -192,6 +192,19 @@ function registerWsHandler(wss, ctx) {
           ensureDir(SOCKETS_DIR);
           ensureDir(BUFFERS_DIR);
 
+          // Billing identity (subscription ↔ API/console account, P: accounts).
+          // Local Claude sessions only in v1 — remote hosts use the remote
+          // machine's own login; codex has its own auth. Resolved BEFORE the
+          // session object so a bad account aborts the create cleanly.
+          let spawnAccount = null;
+          if (backend === 'claude' && !data.hostId && accounts) {
+            try { spawnAccount = accounts.resolveForSpawn(data.accountId); }
+            catch (e) {
+              ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'Account error: ' + e.message }));
+              return;
+            }
+          }
+
           const session = {
             mode: sessionMode,
             pty: null, clients: new Map([[ws, { cols: data.cols || 120, rows: data.rows || 30 }]]),
@@ -206,6 +219,8 @@ function registerWsHandler(wss, ctx) {
             // bind lands. VALIDATED to the id shape (metachar-free — kept as
             // defense-in-depth even though it's no longer shell-interpolated).
             _initialGroupId: (typeof data.taskId === 'string' && /^T-[\w-]{1,60}$/.test(data.taskId)) ? data.taskId : null,
+            // Billing identity badge (the key itself only lives in the spawn env)
+            _accountId: spawnAccount?.id || null,
             backend,
             backendSessionId: data.resumeId || null,
             claudeSessionId: backend === 'claude' ? (data.resumeId || null) : null,
@@ -349,17 +364,26 @@ function registerWsHandler(wss, ctx) {
               spawnCmd, ...spawnArgs,
             ], {
               name: 'xterm-256color', cols: data.cols || 120, rows: data.rows || 30,
-              cwd: spawnCwd, env: {
-                ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor',
-                // The WRAPPER (always local, even for remote sessions) needs the
-                // agent API in its OWN env: the codex-chat-wrapper injects task
-                // context via thread/inject_items by calling /api/agent/*. The
-                // spawned CLI gets these separately via the `env VAR=val` argv
-                // prefix; the wrapper doesn't, hence this. Always the LOCAL port.
-                VIBESPACE_API: `http://127.0.0.1:${PORT}`,
-                VIBESPACE_SESSION_TOKEN: session.agentToken,
-                ...Object.fromEntries(Object.entries(sessionSpec.env || {}).map(([k, v]) => [k, v == null ? '' : String(v)])),
-              },
+              cwd: spawnCwd, env: (() => {
+                const env = {
+                  ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor',
+                  // The WRAPPER (always local, even for remote sessions) needs the
+                  // agent API in its OWN env: the codex-chat-wrapper injects task
+                  // context via thread/inject_items by calling /api/agent/*. The
+                  // spawned CLI gets these separately via the `env VAR=val` argv
+                  // prefix; the wrapper doesn't, hence this. Always the LOCAL port.
+                  VIBESPACE_API: `http://127.0.0.1:${PORT}`,
+                  VIBESPACE_SESSION_TOKEN: session.agentToken,
+                  ...Object.fromEntries(Object.entries(sessionSpec.env || {}).map(([k, v]) => [k, v == null ? '' : String(v)])),
+                };
+                // Billing identity: the key rides the PROCESS-ENV channel only
+                // (dtach → wrapper `env: process.env` → CLI), never argv — argv
+                // is world-readable in /proc/cmdline. No account → explicitly
+                // strip any ambient key so the CLI uses its global login.
+                delete env.ANTHROPIC_API_KEY;
+                if (spawnAccount) env.ANTHROPIC_API_KEY = spawnAccount.key;
+                return env;
+              })(),
             });
           } catch (err) {
             ws.send(JSON.stringify({ type: 'error', message: `Failed to spawn session: ${err.message}\ndtach=${DTACH_CMD} node=${NODE_CMD} env=${ENV_CMD} cwd=${cwd}` }));
@@ -387,6 +411,7 @@ function registerWsHandler(wss, ctx) {
             effort: session._effort || null,
             agentToken: session.agentToken || null,
             taskId: session._initialGroupId || null, // group spawned into (meta key kept for back-compat)
+            accountId: session._accountId || null, // billing identity (badge restore across server restarts)
             createdAt: session.createdAt,
             webuiSessionId: id,
             mode: sessionMode,
@@ -412,25 +437,13 @@ function registerWsHandler(wss, ctx) {
                   if (lockData.cwd === cwd && lockData.startedAt > session.createdAt - 5000) {
                     session.claudeSessionId = lockData.sessionId;
                     session.backendSessionId = lockData.sessionId;
+                    // MERGE into the existing meta (spread base) — a hardcoded
+                    // field list here silently dropped later-added keys
+                    // (agentToken, taskId, accountId) on id capture.
                     writeSessionMeta(sockName, {
-                      name: session.name,
-                      cwd,
-                      backend: session.backend,
+                      ...(readSessionMeta(sockName) || {}),
                       backendSessionId: session.backendSessionId,
                       claudeSessionId: session.claudeSessionId,
-                      sourceKind: session.sourceKind,
-                      agentKind: session.agentKind,
-                      agentRole: session.agentRole,
-                      agentNickname: session.agentNickname,
-                      parentThreadId: session.parentThreadId,
-                      permissionMode: session._permissionMode || null,
-              effort: session._effort || null,
-                  effort: session._effort || null,
-                      effort: session._effort || null,
-            effort: session._effort || null,
-                      createdAt: session.createdAt,
-                      webuiSessionId: id,
-                      mode: sessionMode,
                     });
                     broadcastActiveSessions();
                     return;
@@ -468,6 +481,7 @@ function registerWsHandler(wss, ctx) {
                 if (matched.parentThreadId !== undefined) session.parentThreadId = matched.parentThreadId || null;
 
                 writeSessionMeta(sockName, {
+                  ...(readSessionMeta(sockName) || {}), // preserve keys not re-listed (agentToken/taskId/accountId)
                   name: session.name,
                   cwd: session.cwd,
                   backend: session.backend,
@@ -710,6 +724,7 @@ function registerWsHandler(wss, ctx) {
           }
           if (session.sockName) {
             writeSessionMeta(session.sockName, {
+              ...(readSessionMeta(session.sockName) || {}), // preserve keys not re-listed (agentToken/taskId/accountId)
               name: session.name,
               cwd: session.cwd,
               backend: session.backend,

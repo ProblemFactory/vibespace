@@ -141,6 +141,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
         <span class="session-conn-dot" data-status="${escHtml(s.status || 'stopped')}" data-tip="${escHtml(connLabel)}"></span>
         <span class="session-card-name">${escHtml(displayName)}</span>
         ${agentRoleShort ? `<span class="session-card-badge badge-agent-role" data-tip="${escHtml(agentRoleLabel)}">${escHtml(agentRoleShort)}</span>` : ''}
+        ${s.accountName ? `<span class="session-card-badge badge-account" data-tip="API account: ${escHtml(s.accountName)}${s.accountTail ? ' (…' + escHtml(s.accountTail) + ')' : ''} — pay per use"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="8" r="3"/><path d="M8 8h6.5M12 8v2.5M14.5 8v2"/></svg></span>` : ''}
         <span class="session-card-badge badge-config" style="display:none"></span>
         ${s.hostName ? `<span class="session-host-badge" data-tip="Remote session on ${escHtml(s.hostName)}">${escHtml(s.hostName)}</span>` : ''}
         <span class="sess-state-chip" style="display:none"></span>
@@ -189,7 +190,10 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
   const cfgBadge = row.querySelector('.badge-config');
   const updateCfgBadge = () => {
     const cfg = state.getSessionConfig?.(s) || {};
+    const acctLabel = cfg.account === 'subscription' ? 'Subscription'
+      : cfg.account ? ((app._accounts?.accounts || []).find(a => a.id === cfg.account)?.name || cfg.account) : null;
     const parts = ['model', 'effort', 'permission'].filter(k => cfg[k]).map(k => `${k}: ${cfg[k]}`);
+    if (acctLabel) parts.push(`account: ${acctLabel}`);
     if (!parts.length) { cfgBadge.style.display = 'none'; cfgBadge.textContent = ''; return; }
     cfgBadge.style.display = '';
     // Icon-only: the details live in the tooltip (was showing the full model id,
@@ -437,7 +441,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     // and applies to ALL resume paths via app.resumeSession's savedCfg lookup).
     // Empty string = no override (use global default).
     const savedCfg = state.getSessionConfig?.(s) || {};
-    const overrides = { model: savedCfg.model || '', effort: savedCfg.effort || '', permission: savedCfg.permission || '' };
+    const overrides = { model: savedCfg.model || '', effort: savedCfg.effort || '', permission: savedCfg.permission || '', account: savedCfg.account || '' };
     const persistOverrides = () => {
       state.setSessionConfig?.(s, overrides);
       updateCfgBadge();
@@ -462,6 +466,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
         model: overrides.model || undefined,
         effort: overrides.effort || undefined,
         permission: overrides.permission || undefined,
+        accountId: overrides.account || undefined,
         ...agentOpts,
       });
     };
@@ -543,6 +548,17 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       pop.appendChild(makeRow('Model', opts.models, 'model', true));
       pop.appendChild(makeRow('Effort', opts.efforts, 'effort'));
       pop.appendChild(makeRow('Permission', opts.permissions, 'permission'));
+      // Account (billing identity) — local Claude sessions only. Resume with a
+      // different account = the quota-escape hatch: subscription limit hit →
+      // switch to an API key here and Resume, the conversation continues on
+      // API billing.
+      const acctList = app._accounts?.accounts || [];
+      if (backend === 'claude' && !s.host && acctList.length) {
+        pop.appendChild(makeRow('Account', [
+          { value: 'subscription', label: 'Subscription (Pro/Max)' },
+          ...acctList.map(a => ({ value: a.id, label: `${a.name} — API …${a.tail}` })),
+        ], 'account'));
+      }
     };
 
     resumeWrap.append(resumeBtn, dropBtn, configBtn);

@@ -213,6 +213,12 @@ html, body {
   display: inline-flex; align-items: center; gap: 3px; min-width: 0;
 }
 .badge-config svg { width: 10px; height: 10px; flex-shrink: 0; }
+/* Billing identity: key icon on sessions spawned with an API account */
+.badge-account {
+  background: color-mix(in srgb, var(--yellow, #e5c07b) 16%, transparent); color: var(--yellow, #e5c07b);
+  display: inline-flex; align-items: center; padding: 1px 3px;
+}
+.badge-account svg { width: 10px; height: 10px; flex-shrink: 0; }
 .badge-config span { max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .badge-live { background: rgba(34,197,94,0.2); color: var(--green); }
 .badge-tmux { background: rgba(59,130,246,0.2); color: var(--blue); }
