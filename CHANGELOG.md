@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.40.0] — 2026-07-06
+
+### Added
+- **Tasks tab — Groups | Tasks view toggle.** *Groups* is the existing board
+  (Task Groups/岗位 with their member sessions). *Tasks* is a new flat view of
+  every session tagged into a Task Group (活儿), sorted by urgency then status
+  (blocked/needs-input float up, done sinks), each card showing its cwd and the
+  group(s) it belongs to (click a group badge to open it). Choice persists.
+
+### Fixed
+- Session-state chip icon (working/done/…) was slightly low and a different size
+  from the config-gear badge. Both icons are now a uniform 10×10 and the chip
+  centers them (inline-flex); the state icon no longer hard-codes its own size.
+
 ## [2.39.0] — 2026-07-06
 
 ### Changed — Task Groups (岗位/活儿 concept refactor)

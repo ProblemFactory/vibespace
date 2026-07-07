@@ -20,7 +20,7 @@ const ICON_DETAIL = '<svg style="width:10px;height:10px" viewBox="0 0 16 16" fil
 // Session-level status indicators — set by the AGENT itself (vibespace-status
 // CLI in its env) or by the user (card popover). User overrides of agent-set
 // values are relayed to the agent on the next message (server-side).
-const _si = (d) => `<svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+const _si = (d) => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 export const SESSION_STATE_META = {
   working: { label: 'working', color: 'var(--green)', icon: _si('<path d="M1.5 8h3l1.5-4 2 8 1.5-4h3.5"/>') },
   'needs-input': { label: 'needs input', color: 'var(--yellow, #e5c07b)', icon: _si('<path d="M6 6a2 2 0 113 1.7c-.6.5-1 .9-1 1.8"/><circle cx="8" cy="12" r=".7" fill="currentColor" stroke="none"/>') },
@@ -43,6 +43,9 @@ export function installSidebarTasks(SidebarClass) {
   proto._initTasks = function() {
     this._tasks = [];
     this._tasksLoaded = false; // gates "task not found" decisions during startup
+    // Tasks-tab view: 'groups' = Task Groups (岗位) with member sessions (default);
+    // 'tasks' = a FLAT list of every tagged session (活儿), sorted by status+urgency.
+    this._boardView = (() => { try { return localStorage.getItem('vibespace.boardView') || 'groups'; } catch { return 'groups'; } })();
     this._sessionStatuses = {}; // sessionKey → {state, urgency, reason, setBy, at}
     this._pendingTaskBinds = new Map(); // webuiId → taskId (new-session-in-task, bound once the backend id appears)
     this._fetchTasks();
@@ -452,7 +455,87 @@ export function installSidebarTasks(SidebarClass) {
 
   // ── Desktop board (the old Groups tab, grown up) ──
 
+  // Segmented Groups | Tasks toggle at the top of the Tasks tab.
+  proto._buildBoardViewTabs = function() {
+    const wrap = document.createElement('div');
+    wrap.className = 'task-board-viewtabs';
+    for (const [view, label, tip] of [
+      ['groups', 'Groups', 'Task Groups (岗位) with their member sessions'],
+      ['tasks', 'Tasks', 'Every tagged session (活儿), flat, sorted by status + urgency'],
+    ]) {
+      const b = document.createElement('button');
+      b.className = 'task-board-viewtab' + (this._boardView === view ? ' active' : '');
+      b.textContent = label;
+      b.title = tip;
+      b.onclick = () => {
+        if (this._boardView === view) return;
+        this._boardView = view;
+        try { localStorage.setItem('vibespace.boardView', view); } catch {}
+        this._render();
+      };
+      wrap.appendChild(b);
+    }
+    return wrap;
+  };
+
+  // Task View sort rank: urgency dominates, then a status weight that floats the
+  // sessions needing attention (blocked / needs-input) up and sinks done. State
+  // is synthesized the same way the card chip does (declared > OSC-idle > live).
+  proto._taskViewRank = function(s, waiting) {
+    const st = this.getSessionStatus(s) || {};
+    const isLive = s.status === 'live' || s.status === 'tmux';
+    const sKey = `${s.backend || 'claude'}:${s.backendSessionId || s.claudeSessionId || ''}`;
+    const wait = isLive && waiting.has(sKey);
+    const dstate = st.state || (isLive ? (wait ? 'needs-input' : 'working') : null);
+    const urg = { urgent: 4, high: 3, normal: 2, low: 1 }[st.urgency] || 0;
+    const stateW = { blocked: 5, 'needs-input': 5, review: 3, working: 2, done: 1 }[dstate] || 0;
+    return urg * 10 + stateW;
+  };
+
+  // Task View: a flat, status+urgency-sorted list of every session tagged into
+  // at least one Task Group (a "活儿"). Each card shows its cwd (sessions span
+  // dirs here) + the group(s) it belongs to.
+  proto._renderTaskViewFlat = function(sessions) {
+    const tagged = sessions.filter(s => this._getSessionTasks(s).length > 0);
+    if (!tagged.length) {
+      const empty = document.createElement('div');
+      empty.className = 'empty-hint task-view-empty';
+      empty.textContent = 'No sessions are tagged into a Task Group yet. Tag one from its card’s Task Groups row, or drag a card onto a group in Groups view.';
+      this.listEl.appendChild(empty);
+      return;
+    }
+    const waiting = (this._waitingSet && this._waitingSet()) || new Set();
+    const sorted = [...tagged].sort((a, b) =>
+      this._taskViewRank(b, waiting) - this._taskViewRank(a, waiting)
+      || (b.lastActivity || b.startedAt || 0) - (a.lastActivity || a.startedAt || 0));
+    const list = document.createElement('div');
+    list.className = 'task-view-list';
+    for (const s of sorted) {
+      const row = document.createElement('div');
+      row.className = 'task-view-row';
+      row.appendChild(this._buildSessionCard(s, { showCwd: true }));
+      const groups = this._getSessionTasks(s);
+      const gr = document.createElement('div');
+      gr.className = 'task-view-groups';
+      for (const g of groups) {
+        const b = document.createElement('span');
+        b.className = 'task-view-group-badge';
+        if (g.color) b.style.setProperty('--g-color', g.color);
+        b.innerHTML = `<span class="tvg-dot"></span>${escHtml(g.title)}`;
+        b.title = 'Task Group: ' + g.title + ' — click to open';
+        b.onclick = (e) => { e.stopPropagation(); this.app.openTaskDetail(g.id); };
+        gr.appendChild(b);
+      }
+      row.appendChild(gr);
+      list.appendChild(row);
+    }
+    this.listEl.appendChild(list);
+  };
+
   proto._renderTaskBoard = function(sessions) {
+    // View toggle: Groups (岗位, member-session board) | Tasks (活儿, flat list).
+    this.listEl.appendChild(this._buildBoardViewTabs());
+    if (this._boardView === 'tasks') { this._renderTaskViewFlat(sessions); return; }
     // Observer must exist before _observeFolder calls (see _renderGrouped)
     this._setupLazyFolders();
     const sessionById = new Map();
