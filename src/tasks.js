@@ -278,6 +278,7 @@ class TaskManager {
         folders: sanitizeStrArray(folders[name], 100),
         contextDir: null,
         color: null,
+        injectContext: true,
         createdAt: at,
         updatedAt: at,
       };
@@ -309,7 +310,7 @@ class TaskManager {
     return t;
   }
 
-  create({ title, kind, archived, objective, sessions, folders, contextDir, color } = {}) {
+  create({ title, kind, archived, objective, sessions, folders, contextDir, color, injectContext } = {}) {
     const cleanTitle = String(title || '').trim().slice(0, CAPS.title);
     if (!cleanTitle) throw new Error('title required');
     const id = this._genId(cleanTitle);
@@ -327,6 +328,7 @@ class TaskManager {
       folders: this._sanitizeFolders(folders),
       contextDir: this._sanitizeContextDir(contextDir),
       color: this._sanitizeColor(color),
+      injectContext: injectContext !== false, // per-group context-injection toggle (default on)
       createdAt: now,
       updatedAt: now,
     };
@@ -390,6 +392,7 @@ class TaskManager {
     if (patch.folders !== undefined) t.folders = this._sanitizeFolders(patch.folders);
     if (patch.contextDir !== undefined) t.contextDir = this._sanitizeContextDir(patch.contextDir);
     if (patch.color !== undefined) t.color = this._sanitizeColor(patch.color);
+    if (patch.injectContext !== undefined) t.injectContext = !!patch.injectContext;
     if (patch.plan !== undefined) {
       if (!Array.isArray(patch.plan)) throw new Error('plan must be an array');
       t.plan = patch.plan.slice(0, CAPS.planItems).map((it) => ({
