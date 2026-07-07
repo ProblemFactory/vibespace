@@ -29,10 +29,10 @@ export const SESSION_STATE_META = {
   done: { label: 'done', color: 'var(--text-dim)', icon: _si('<path d="M2.5 8.5l3.5 3.5 7.5-9"/>') },
 };
 export const SESSION_URGENCY_META = {
-  low: { label: 'low', mark: '' },
-  normal: { label: 'normal', mark: '' },
-  high: { label: 'high', mark: '!' },
-  urgent: { label: 'urgent', mark: '!!' },
+  low: { label: 'low', mark: '', color: 'var(--text-dim)' },
+  normal: { label: 'normal', mark: '', color: 'var(--blue, #61afef)' },
+  high: { label: 'high', mark: '!', color: 'var(--yellow, #e5c07b)' },
+  urgent: { label: 'urgent', mark: '!!', color: 'var(--red, #e06c75)' },
 };
 
 export function installSidebarTasks(SidebarClass) {
@@ -520,7 +520,8 @@ export function installSidebarTasks(SidebarClass) {
   proto._taskViewRank = function(s, waiting, mode) {
     const st = this.getSessionStatus(s) || {};
     const dstate = this._synthSessionState(s, waiting);
-    const urg = { urgent: 4, high: 3, normal: 2, low: 1 }[st.urgency] || 0;
+    const urgency = st.urgency || (dstate ? 'normal' : null); // default normal (#4)
+    const urg = { urgent: 4, high: 3, normal: 2, low: 1 }[urgency] || 0;
     const stateW = { blocked: 5, 'needs-input': 5, review: 3, working: 2, done: 1 }[dstate] || 0;
     return mode === 'status' ? stateW * 10 + urg : urg * 10 + stateW;
   };
@@ -598,22 +599,24 @@ export function installSidebarTasks(SidebarClass) {
   proto._taskViewRow = function(s, withGroups) {
     const row = document.createElement('div');
     row.className = 'task-view-row';
-    row.appendChild(this._buildSessionCard(s, { showCwd: true }));
+    // Group membership as LEFT color bars (one per group) instead of a badge
+    // row below — saves vertical space. Hover a bar for the group name/objective,
+    // click to open it.
     const groups = withGroups ? this._getSessionTaskGroups(s) : [];
     if (groups.length) {
-      const gr = document.createElement('div');
-      gr.className = 'task-view-groups';
+      const bars = document.createElement('div');
+      bars.className = 'task-view-colorbars';
       for (const g of groups) {
-        const b = document.createElement('span');
-        b.className = 'task-view-group-badge';
-        if (g.color) b.style.setProperty('--g-color', g.color);
-        b.innerHTML = `<span class="tvg-dot"></span>${escHtml(g.title)}`;
-        b.title = 'Task Group: ' + g.title + ' — click to open';
-        b.onclick = (e) => { e.stopPropagation(); this.app.openTaskDetail(g.id); };
-        gr.appendChild(b);
+        const bar = document.createElement('span');
+        bar.className = 'task-view-colorbar';
+        bar.style.setProperty('--g-color', g.color || 'var(--text-dim)');
+        bar.dataset.tip = g.title + (g.objective ? ' — ' + g.objective.slice(0, 100) : '');
+        bar.onclick = (e) => { e.stopPropagation(); this.app.openTaskDetail(g.id); };
+        bars.appendChild(bar);
       }
-      row.appendChild(gr);
+      row.appendChild(bars);
     }
+    row.appendChild(this._buildSessionCard(s, { showCwd: true }));
     return row;
   };
 

@@ -29,8 +29,14 @@ const ICON = {
  */
 function renderDetailGroups(container, sessionRef, clickToCopy, state) {
   container.innerHTML = '';
-  const sessionTasks = state._getSessionTasks(sessionRef);
-  const summary = sessionTasks.length ? sessionTasks.map(t => t.title).join(', ') : 'None';
+  const explicit = state._getSessionTasks(sessionRef);
+  const explicitIds = new Set(explicit.map(t => t.id));
+  // Show ALL groups this session belongs to — explicit tag AND auto-include
+  // folder match (folder ones marked, since they're not toggleable here).
+  const allGroups = state._getSessionTaskGroups ? state._getSessionTaskGroups(sessionRef) : explicit;
+  const summary = allGroups.length
+    ? allGroups.map(t => explicitIds.has(t.id) ? t.title : t.title + ' (folder)').join(', ')
+    : 'None';
 
   const row = document.createElement('div');
   row.className = 'session-detail-row';
@@ -156,6 +162,11 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     // otherwise a live session reads as "working". Non-live shows nothing here
     // (the connection badge already says stopped/external).
     const dstate = st?.state || (isLive ? (waiting ? 'needs-input' : 'working') : null);
+    // Urgency defaults to 'normal' once a session has ANY state — so every such
+    // card carries an urgency for its background tint (#4/#5); the agent/user can
+    // still raise it. data-urgency drives the card background color.
+    const urg = st?.urgency || (dstate ? 'normal' : null);
+    if (urg) card.dataset.urgency = urg;
     if (dstate || st?.urgency) {
       const meta = SESSION_STATE_META[dstate] || { label: dstate || 'status', color: 'var(--text-dim)' };
       const mark = SESSION_URGENCY_META[st?.urgency]?.mark || '';

@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.42.0] — 2026-07-06
+
+### Changed — session card / Task View
+- The expanded card's **Task Groups** field now lists folder-auto-include
+  membership too (marked "(folder)"), not just explicit tags — it was showing
+  "None" for folder-derived members.
+- Task View shows a session's group membership as **left color bars** (one per
+  group, hover for the name/objective, click to open) instead of a badge row
+  below the card — saves vertical space; multiple groups stack multiple bars.
+- **Urgency defaults to `normal`** for any session that has a state (live or
+  agent-declared), so it's no longer blank; the agent/user can still raise it.
+  Sorting treats missing urgency as normal too.
+- **Card background is tinted by urgency** in Task View (urgent → red, high →
+  amber, normal → faint blue, low → faint grey; subtle).
+
 ## [2.41.1] — 2026-07-06
 
 ### Fixed
