@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.41.0] — 2026-07-06
+
+### Changed — Task View follow-ups
+- The **Groups | Tasks** switch is now a proper sub-tab bar under the
+  Folders/Task Groups/Remote tabs (same visual language), not a segmented pill.
+- Task View shows **all** sessions: tagged ones sorted on top, **untagged sunk
+  to a labeled section at the bottom** (live/active untagged listed; the count
+  of stopped untagged is surfaced with a pointer to Folders instead of piling
+  thousands of historical sessions here).
+- Added a **sort** control (Urgency+status / Status / Recent / Name) and a
+  **status filter** (show only chosen states) above the list; both persist.
+- The Tasks tab is no longer narrowed by the live/stopped status filter or the
+  quick-view tabs — a Task Group's members (often stopped) always show. The bare
+  **New Session** card is gone from the Tasks tab (it has New Task Group).
+
 ## [2.40.0] — 2026-07-06
 
 ### Added
