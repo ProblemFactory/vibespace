@@ -1,4 +1,4 @@
-import { escHtml, copyText, createPopover, showConfirmDialog } from './utils.js';
+import { escHtml, copyText, createPopover, showConfirmDialog, showContextMenu } from './utils.js';
 import { SESSION_STATE_META, SESSION_URGENCY_META } from './sidebar-tasks.js';
 import { createBackendIcon, createAgentKindIcon, createModeBackendIcon, getBackendMeta, getAgentKindMeta, getAgentRoleLabel, getAgentRoleShortLabel, getSessionKey } from './agent-meta.js';
 
@@ -644,6 +644,14 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     actionsDiv.appendChild(forkBtn);
   }
 
+  // Properties — the full reference sheet for this session (identity, billing,
+  // state history, groups, agent steps). Everything the card can't fit.
+  const propsBtn = document.createElement('button');
+  propsBtn.className = 'session-detail-btn';
+  propsBtn.innerHTML = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="6.2"/><path d="M8 7.2v4M8 4.8v.2"/></svg> Properties';
+  propsBtn.onclick = (e) => { e.stopPropagation(); app.openSessionProps(s); };
+  actionsDiv.appendChild(propsBtn);
+
   // Terminate button (for any running session)
   if (s.status !== 'stopped') {
     const terminateBtn = document.createElement('button');
@@ -661,6 +669,66 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
   }
 
   card.appendChild(detailPanel);
+
+  // Right-click (long-press on touch): quick actions without expanding the
+  // card. Everything here calls the SAME handlers as the expanded buttons.
+  card.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const items = [];
+    if (s.status === 'live' && s.webuiId) {
+      items.push({ label: 'Focus window', action: () => app.attachSession(s.webuiId, s.webuiName || displayName, s.cwd, { mode: s.webuiMode, ...agentOpts }) });
+    } else if (s.status === 'tmux') {
+      items.push({ label: 'View (tmux)', action: () => app.attachTmuxSession(s.tmuxTarget, displayName, s.cwd) });
+    } else if (s.status === 'stopped') {
+      const cfgA = state.getSessionConfig?.(s) || {};
+      const resumeWith = (mode) => app.resumeSession(s.sessionId, s.cwd, customName || s.name, { mode, accountId: cfgA.account || undefined, ...agentOpts });
+      items.push({ label: 'Resume in Chat', action: () => resumeWith('chat') });
+      items.push({ label: 'Resume in Terminal', action: () => resumeWith('terminal') });
+    }
+    items.push({ label: 'View History', action: () => app.viewSession(s.sessionId, s.cwd, customName || s.name, { ...agentOpts }) });
+    if ((s.backend || 'claude') === 'claude' && s.status !== 'external') items.push({ label: 'Fork…', action: () => app.forkSession(s) });
+    items.push({ separator: true });
+    items.push({ label: state.isStarred(s) ? 'Unstar' : 'Star', action: () => state.toggleStar(s) });
+    items.push({ label: state.isArchived(s) ? 'Unarchive' : 'Archive', action: () => state.toggleArchive(s) });
+    items.push({ label: 'Rename…', action: () => onRename(s, originalName) });
+    items.push({ label: 'Set status…', action: () => state._showSessionStatusPopover?.(card, s) });
+    const groups = (state._tasks || []).filter(t => !t.archived);
+    if (groups.length) {
+      const explicitIds = new Set((state._getSessionTasks?.(s) || []).map(t => t.id));
+      const folderIds = new Set((state._getSessionTaskGroups?.(s) || []).map(t => t.id));
+      items.push({
+        label: 'Task Groups',
+        children: groups.map(t => ({
+          label: (explicitIds.has(t.id) ? '✓ ' : folderIds.has(t.id) ? '◇ ' : ' ') + t.title + (!explicitIds.has(t.id) && folderIds.has(t.id) ? ' (folder)' : ''),
+          disabled: !explicitIds.has(t.id) && folderIds.has(t.id),
+          action: () => { explicitIds.has(t.id) ? state._taskUnbind(t.id, s) : state._taskBind(t.id, s); },
+        })),
+      });
+    }
+    items.push({ separator: true });
+    items.push({ label: 'Copy session ID', action: () => copyText(s.sessionId || '') });
+    items.push({ label: 'Copy path', action: () => copyText(s.cwd || '') });
+    if (s.webuiId) {
+      items.push({ label: 'Find window', action: () => app.flashWindow(s.webuiId) });
+      items.push({ label: 'Go to window', action: () => app.goToWindow(s.webuiId) });
+      if (!app.isMobile) items.push({ label: 'Move window…', action: () => app.moveSessionWindow(s.webuiId) });
+    }
+    items.push({ separator: true });
+    items.push({ label: 'Properties…', action: () => app.openSessionProps(s) });
+    if (s.status !== 'stopped') {
+      items.push({
+        label: 'Terminate', style: 'color: var(--red, #e55)',
+        action: async () => {
+          const ok = await showConfirmDialog({ title: 'Terminate Session', message: `Terminate session "${displayName}"? The running agent process will be killed.`, confirmText: 'Terminate', danger: true });
+          if (!ok) return;
+          if (s.webuiId) app.killSession(s.webuiId);
+          else if (s.pid) app.killPid(s.pid);
+        },
+      });
+    }
+    showContextMenu(e.clientX, e.clientY, items);
+  });
 
   // Double-click name to rename (sets --name for next resume)
   const nameEl = card.querySelector('.session-card-name');

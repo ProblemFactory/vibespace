@@ -2283,3 +2283,9 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 .win-auth-badge.unknown { color: var(--text-dim); opacity: 0.8; }
 .tab-item .win-auth-badge { margin-left: 3px; }
 .tab-item .win-auth-badge svg { width: 10px; height: 10px; }
+/* Session Properties window */
+.session-props .session-detail-row { padding: 2px 0; display: flex; align-items: center; gap: 8px; }
+.session-props .session-detail-label { flex-shrink: 0; width: 72px; color: var(--text-dim); font-size: 10px; }
+.session-props-group { display: flex; align-items: center; gap: 6px; font-size: 11px; padding: 2px 0; cursor: pointer; color: var(--text-secondary); }
+.session-props-group input { margin: 0; width: 12px; height: 12px; }
+.session-props .session-history-list, .session-props .session-steps-list { max-height: 180px; overflow-y: auto; }
