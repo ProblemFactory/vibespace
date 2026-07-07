@@ -6,7 +6,20 @@
 const api = process.env.VIBESPACE_API;
 const token = process.env.VIBESPACE_SESSION_TOKEN;
 if (!api || !token) { console.error('vibespace-task: not running inside a VibeSpace session (missing env)'); process.exit(2); }
-const [cmd, ...rest] = process.argv.slice(2);
+// --group <id> (also -g / --group=<id>) may appear anywhere; it targets a
+// specific Task Group when this session belongs to more than one. Optional —
+// with a single group the server infers it. Stripped before parsing the command.
+const rawArgs = process.argv.slice(2);
+let group = '';
+const argv = [];
+for (let i = 0; i < rawArgs.length; i++) {
+  const a = rawArgs[i];
+  if ((a === '--group' || a === '-g') && rawArgs[i + 1] !== undefined) { group = rawArgs[++i]; continue; }
+  const m = /^--group=(.*)$/.exec(a);
+  if (m) { group = m[1]; continue; }
+  argv.push(a);
+}
+const [cmd, ...rest] = argv;
 const arg = rest.join(' ').trim();
 const USAGE = [
   'usage (updates the Task Group / 岗位 this session belongs to):',
@@ -15,13 +28,17 @@ const USAGE = [
   '  vibespace-task plan-check <step#|text>       tick a Checklist step',
   '  vibespace-task plan-uncheck <step#|text>     untick a Checklist step',
   '  vibespace-task plan-add "new step"           add a Checklist step',
+  '  --group <id>   target a specific group if this session belongs to more than one',
   '  (a Task Group has NO status; to report THIS session\'s own state use: vibespace-status)',
 ].join('\n');
 async function call(method, url, body) {
-  const res = await fetch(api + url, {
+  let full = api + url;
+  if (method === 'GET' && group) full += (url.includes('?') ? '&' : '?') + 'group=' + encodeURIComponent(group);
+  const payload = method !== 'GET' ? { ...(body || {}), ...(group ? { group } : {}) } : undefined;
+  const res = await fetch(full, {
     method,
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-    body: body ? JSON.stringify(body) : undefined,
+    body: payload ? JSON.stringify(payload) : undefined,
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) { console.error('vibespace-task:', data.error || res.status); process.exit(1); }
