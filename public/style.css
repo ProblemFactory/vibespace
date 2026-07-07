@@ -2097,6 +2097,7 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 .task-detail-folder-rec { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; color: var(--text-dim); flex-shrink: 0; cursor: pointer; user-select: none; }
 .task-detail-folder-rec input { margin: 0; width: 12px; height: 12px; }
 .task-detail-inject { display: flex; margin-top: 10px; font-size: 11px; color: var(--text-secondary); }
+.task-detail-plan-by { margin-left: auto; font-size: 9px; color: var(--text-dim); white-space: nowrap; flex-shrink: 0; }
 .task-detail-ctxrow { display: flex; gap: 6px; }
 .task-detail-ctxrow .task-detail-input { flex: 1; }
 .task-detail-swatches { display: flex; gap: 6px; }
