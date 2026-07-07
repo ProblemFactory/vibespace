@@ -505,6 +505,7 @@ export function installSidebarTasks(SidebarClass) {
         if (this._boardView === view) return;
         this._boardViewTouched = true; // manual choice wins over the async default
         this._boardView = view;
+        this._updateTabs(); // sort button shows only in the flat Tasks view
         this._render();
       };
       wrap.appendChild(b);
@@ -560,62 +561,6 @@ export function installSidebarTasks(SidebarClass) {
     return f.includes(this._synthSessionState(s, waiting));
   };
 
-  // Sort + status-filter controls above the Task View list.
-  proto._buildTaskViewToolbar = function() {
-    const bar = document.createElement('div');
-    bar.className = 'task-view-toolbar';
-    const SORTS = { urgency: 'Urgency + status', status: 'Status', recent: 'Recent', name: 'Name' };
-    const sortBtn = document.createElement('button');
-    sortBtn.className = 'tv-tool-btn';
-    sortBtn.innerHTML = `<span class="tv-tool-ico">↕</span><span>${SORTS[this._taskViewSortMode] || 'Sort'}</span>`;
-    sortBtn.title = 'Sort order';
-    sortBtn.onclick = () => {
-      const r = sortBtn.getBoundingClientRect();
-      showContextMenu(r.left, r.bottom + 2, Object.entries(SORTS).map(([k, label]) => ({
-        label: (this._taskViewSortMode === k ? '✓ ' : ' ') + label,
-        action: () => { this._taskViewSortMode = k; try { localStorage.setItem('vibespace.taskViewSort', k); } catch {} this._render(); },
-      })));
-    };
-    const active = this._taskViewStatusFilter && this._taskViewStatusFilter.length;
-    const filterBtn = document.createElement('button');
-    filterBtn.className = 'tv-tool-btn' + (active ? ' active' : '');
-    filterBtn.innerHTML = `<span class="tv-tool-ico">☰</span><span>Filter${active ? ' · ' + active : ''}</span>`;
-    filterBtn.title = 'Show only certain states';
-    filterBtn.onclick = () => this._showTaskViewFilterPopover(filterBtn);
-    bar.append(sortBtn, filterBtn);
-    return bar;
-  };
-
-  proto._showTaskViewFilterPopover = function(anchor) {
-    const pop = createPopover(anchor, 'tv-filter-pop');
-    const cur = new Set(this._taskViewStatusFilter || []);
-    const apply = () => {
-      const arr = [...cur];
-      this._taskViewStatusFilter = arr.length ? arr : null;
-      try { localStorage.setItem('vibespace.taskViewFilter', JSON.stringify(this._taskViewStatusFilter)); } catch {}
-      this._render();
-    };
-    const hint = document.createElement('div');
-    hint.className = 'tv-filter-hint';
-    hint.textContent = 'Show only these states (none = all):';
-    pop.appendChild(hint);
-    for (const st of ['working', 'needs-input', 'blocked', 'review', 'done']) {
-      const meta = SESSION_STATE_META[st] || { label: st, color: 'var(--text-dim)' };
-      const label = document.createElement('label');
-      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = cur.has(st);
-      cb.onchange = () => { cb.checked ? cur.add(st) : cur.delete(st); apply(); };
-      const dot = document.createElement('span'); dot.className = 'tvg-dot'; dot.style.setProperty('--g-color', meta.color);
-      const txt = document.createElement('span'); txt.textContent = meta.label;
-      label.append(cb, dot, txt);
-      pop.appendChild(label);
-    }
-    const clr = document.createElement('button');
-    clr.className = 'tv-filter-clear'; clr.textContent = 'Clear filter';
-    clr.onclick = () => { cur.clear(); apply(); pop.remove(); };
-    pop.appendChild(clr);
-    return pop;
-  };
-
   proto._taskViewRow = function(s, withGroups) {
     const row = document.createElement('div');
     row.className = 'task-view-row';
@@ -644,7 +589,6 @@ export function installSidebarTasks(SidebarClass) {
   // sort to the top by status+urgency; untagged sink to a labeled section at the
   // bottom. Each card shows its cwd; tagged cards show their group badge(s).
   proto._renderTaskViewFlat = function(sessions) {
-    this.listEl.appendChild(this._buildTaskViewToolbar());
     const waiting = (this._waitingSet && this._waitingSet()) || new Set();
     const match = (s) => this._taskViewMatch(s, waiting);
     const sortFn = this._taskViewSortFn(waiting);

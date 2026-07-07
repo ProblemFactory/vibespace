@@ -141,7 +141,24 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
         <span class="session-conn-dot" data-status="${escHtml(s.status || 'stopped')}" data-tip="${escHtml(connLabel)}"></span>
         <span class="session-card-name">${escHtml(displayName)}</span>
         ${agentRoleShort ? `<span class="session-card-badge badge-agent-role" data-tip="${escHtml(agentRoleLabel)}">${escHtml(agentRoleShort)}</span>` : ''}
-        ${s.accountName ? `<span class="session-card-badge badge-account" data-tip="API account: ${escHtml(s.accountName)}${s.accountTail ? ' (…' + escHtml(s.accountTail) + ')' : ''} — pay per use"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="8" r="3"/><path d="M8 8h6.5M12 8v2.5M14.5 8v2"/></svg></span>` : ''}
+        ${(() => {
+          // Billing identity: EVERY API-billed session gets the amber key —
+          // whether via an env key OR a console global login at spawn — so
+          // sessions that keep burning API money after a subscription
+          // re-login stay visible. Subscription = quiet (no badge).
+          const a = s.auth;
+          if (!a || a.source === 'subscription') return '';
+          const KEY = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="8" r="3"/><path d="M8 8h6.5M12 8v2.5M14.5 8v2"/></svg>';
+          if (a.source === 'api-key' || a.source === 'api-console' || a.source === 'api-other') {
+            const who = a.source === 'api-console' ? 'Console login'
+              : a.name ? `${a.name}${a.tail ? ' (…' + a.tail + ')' : ''}` : (a.detail || 'API key');
+            return `<span class="session-card-badge badge-account" data-tip="API billing (pay per use) — ${escHtml(who)}${a.guessed ? ' · estimated from the login state at spawn' : ''}">${KEY}</span>`;
+          }
+          if (a.source === 'unknown' && (s.status === 'live' || s.status === 'tmux')) {
+            return `<span class="session-card-badge badge-account badge-account-unknown" data-tip="Billing identity unknown (started before tracking — could be subscription or API)">${KEY}?</span>`;
+          }
+          return '';
+        })()}
         <span class="session-card-badge badge-config" style="display:none"></span>
         ${s.hostName ? `<span class="session-host-badge" data-tip="Remote session on ${escHtml(s.hostName)}">${escHtml(s.hostName)}</span>` : ''}
         ${s.todo && s.todo.total > 0 && s.todo.done < s.todo.total ? `<span class="session-todo-pill" data-tip="${escHtml(s.todo.current ? 'Now: ' + s.todo.current : 'Agent steps')} (${s.todo.done}/${s.todo.total} done)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4.5l1.2 1.2L5.5 3.4M2 9.5l1.2 1.2 2.3-2.3M8 4.5h6M8 9.5h6M8 13h4"/></svg>${s.todo.done}/${s.todo.total}</span>` : ''}

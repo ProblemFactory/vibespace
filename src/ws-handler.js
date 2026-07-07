@@ -222,6 +222,16 @@ function registerWsHandler(wss, ctx) {
             _initialGroupId: (typeof data.taskId === 'string' && /^T-[\w-]{1,60}$/.test(data.taskId)) ? data.taskId : null,
             // Billing identity badge (the key itself only lives in the spawn env)
             _accountId: spawnAccount?.id || null,
+            // Billing intent at spawn: without an env key the CLI follows its
+            // GLOBAL login — record what that was RIGHT NOW so the badge can
+            // warn about API-billed sessions even after the user re-logins to
+            // the subscription. The stream's init record (apiKeySource) later
+            // CONFIRMS/overrides this guess (chat sessions).
+            _authAtSpawn: spawnAccount ? 'env-key'
+              : backend !== 'claude' ? null
+              : data.hostId ? 'remote-global'
+              : (accounts?.subscriptionStatus?.().loggedIn ? 'subscription'
+                : (accounts?.cliPrimaryKey?.().present ? 'console' : 'unknown')),
             backend,
             backendSessionId: data.resumeId || null,
             claudeSessionId: backend === 'claude' ? (data.resumeId || null) : null,
@@ -442,6 +452,7 @@ function registerWsHandler(wss, ctx) {
             agentToken: session.agentToken || null,
             taskId: session._initialGroupId || null, // group spawned into (meta key kept for back-compat)
             accountId: session._accountId || null, // billing identity (badge restore across server restarts)
+            authAtSpawn: session._authAtSpawn || null,
             createdAt: session.createdAt,
             webuiSessionId: id,
             mode: sessionMode,

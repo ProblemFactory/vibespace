@@ -150,6 +150,33 @@ class HostManager {
 
   dest(h) { return `${h.user}@${h.host}`; }
 
+  /** Anthropic login state ON THE HOST (read-only probe, one round trip):
+   *  subscription = remote credentials.json holds an OAuth token; cliKey = the
+   *  remote's console-login-minted primaryApiKey (importable into the central
+   *  store). Mirrors AccountManager's local probes. */
+  async accountsStatus(id) {
+    const h = this.get(id);
+    const out = String(await this._ssh(h,
+      `S=$(grep -c accessToken "$HOME/.claude/.credentials.json" 2>/dev/null); echo "SUB:$S"; K=$(grep -o "primaryApiKey\\":\\"sk-ant-[^\\"]*" "$HOME/.claude.json" 2>/dev/null | head -1); echo "KEY:$K"`));
+    const sub = /SUB:(\d+)/.exec(out);
+    const key = /KEY:primaryApiKey":"(sk-ant-[^\s"]+)/.exec(out);
+    return {
+      subscription: { loggedIn: !!(sub && parseInt(sub[1]) > 0) },
+      cliKey: key ? { present: true, tail: key[1].slice(-8) } : { present: false },
+    };
+  }
+
+  /** Full remote primaryApiKey + org name (for one-click import into the
+   *  central store — travels over the ssh channel, never argv). */
+  async cliPrimaryKey(id) {
+    const h = this.get(id);
+    const out = String(await this._ssh(h,
+      `grep -o "primaryApiKey\\":\\"sk-ant-[^\\"]*" "$HOME/.claude.json" 2>/dev/null | head -1; grep -o "organizationName\\":\\"[^\\"]*" "$HOME/.claude.json" 2>/dev/null | head -1`));
+    const key = /primaryApiKey":"(sk-ant-[^\s"]+)/.exec(out);
+    const org = /organizationName":"([^"]+)/.exec(out);
+    return { key: key ? key[1] : null, org: org ? org[1] : null };
+  }
+
   /** Remote $HOME, cached per host — injection needs ABSOLUTE remote paths
    *  (agent file tools don't expand ~ or $HOME). */
   async homeDir(h) {
