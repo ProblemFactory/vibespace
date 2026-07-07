@@ -985,7 +985,7 @@ function restoreSessions() {
       _permissionMode: meta.permissionMode || null,
       _effort: meta.effort || null,
       agentToken: meta.agentToken || null, // vibespace-status auth survives restarts
-      _taskId: meta.taskId || null, // context task (codex re-injects on next message after restart — idempotent)
+      _initialGroupId: meta.taskId || null, // group spawned into; belonging is live-derived, this only covers the pre-bind window
       sockName: sockFile,
       socketPath,
       buffer: savedBuffer,
@@ -1147,12 +1147,12 @@ async function run(input) {
     if (!api || !token) return process.exit(0);
     let path;
     if (event === 'SessionStart') {
-      // Call task-context whether or not a task is bound: with a task it returns
-      // the task context; without one it returns the baseline VibeSpace tools
-      // intro (so no-task sessions still learn to report their status). The
-      // endpoint scopes to the session's OWN task via the token, ignoring this query.
-      const taskId = process.env.VIBESPACE_TASK_ID;
-      path = '/api/agent/task-context' + (taskId ? '?taskId=' + encodeURIComponent(taskId) : '');
+      // Which Task Group(s) this session belongs to is resolved SERVER-SIDE from
+      // the token (live-derived — explicit tag / auto-include folder / spawned-
+      // into group), so the hook passes no id. With groups it returns their
+      // shared context; with none, the baseline VibeSpace tools intro (so every
+      // session still learns to report its status).
+      path = '/api/agent/task-context';
     } else if (event === 'UserPromptSubmit') {
       path = '/api/agent/prompt-context';
     } else {
@@ -1506,16 +1506,34 @@ app.post('/api/agent/session-status', (req, res) => {
 });
 // Resolve the calling agent's session from its per-session bearer token.
 // Returns [session, id] or replies 401/403 and returns null.
-function agentSession(req, res, { needTask = false } = {}) {
+function agentSession(req, res) {
   const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || req.body?.token;
   if (!token || !token.startsWith('vsst_')) { res.status(401).json({ error: 'missing session token' }); return null; }
   for (const [id, s] of activeSessions) {
-    if (s.agentToken === token) {
-      if (needTask && !s._taskId) { res.status(403).json({ error: 'this session has no context task' }); return null; }
-      return [s, id];
-    }
+    if (s.agentToken === token) return [s, id];
   }
   res.status(401).json({ error: 'unknown session token' });
+  return null;
+}
+// Resolve which Task Group a vibespace-task call targets. Belonging is LIVE-
+// derived (groupsForSession — explicit tag / auto-include folder / spawned-into
+// group), so a UI bind takes effect with no respawn. Isolation is ENFORCED: an
+// explicit --group must be one this session belongs to. 0 groups → 403; >1
+// without --group → 400 (agent must disambiguate). Returns a group id or null
+// (and has already replied).
+function resolveAgentGroup(hit, req, res) {
+  const [s, id] = hit;
+  const key = sessionStatusKey(s, id);
+  const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId });
+  if (!groups.length) { res.status(403).json({ error: 'this session is not in any Task Group' }); return null; }
+  const want = String(req.query?.group || req.body?.group || '').trim();
+  if (want) {
+    const g = groups.find((x) => x.id === want);
+    if (!g) { res.status(403).json({ error: `this session does not belong to Task Group ${want}` }); return null; }
+    return g.id;
+  }
+  if (groups.length === 1) return groups[0].id;
+  res.status(400).json({ error: `this session belongs to ${groups.length} Task Groups — pass --group <id> (one of: ${groups.map((g) => g.id).join(', ')})` });
   return null;
 }
 
@@ -1541,18 +1559,21 @@ app.get('/api/agent/task-context', (req, res) => {
   const hit = agentSession(req, res);
   if (!hit) return;
   try {
+    const [s, id] = hit;
+    const key = sessionStatusKey(s, id);
+    const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId });
     let context = '';
-    const s = hit[0];
-    if (s._taskId) {
-      context = tasks.renderContext(s._taskId);
+    if (groups.length) {
+      context = tasks.renderMultiContext(groups.map((g) => g.id));
       // Only Claude injects the SessionStart output; codex runs the command but
-      // ignores it, so don't mark it "seen" for codex (that would starve its
+      // ignores it, so don't mark groups "seen" for codex (that would starve its
       // UserPromptSubmit delivery).
       if (context && s.backend !== 'codex') {
-        try { s._taskSeenAt = tasks.get(s._taskId).updatedAt; } catch {}
+        s._groupSeenAt = s._groupSeenAt || {};
+        for (const g of groups) s._groupSeenAt[g.id] = g.updatedAt;
       }
     } else if (s.backend !== 'codex' && !s._toolsIntroSeen) {
-      // No task: still teach the agent to report its status (baseline), once.
+      // In no group: still teach the agent to report its status (baseline), once.
       // codex ignores SessionStart output, so it gets this via prompt-context.
       context = SESSION_TOOLS_INTRO;
       s._toolsIntroSeen = true;
@@ -1562,41 +1583,45 @@ app.get('/api/agent/task-context', (req, res) => {
 });
 // UserPromptSubmit hook payload — delivered through the harness's own prompt
 // hook, NEVER by rewriting the user's message. Three things ride here:
-//  1. Task context on the FIRST prompt when SessionStart didn't deliver it
+//  1. Group context on the FIRST prompt when SessionStart didn't deliver it
 //     (codex — it fires UserPromptSubmit but not SessionStart in app-server).
-//  2. A REFRESH of the task context whenever the task changed since the session
-//     last saw it — so any task update (objective/plan/progress/status, from
-//     the UI or another session's vibespace-task) reaches the agent on its next
-//     turn (user request). Gated on updatedAt > _taskSeenAt → no per-turn noise
-//     when nothing changed.
+//  2. A per-group REFRESH whenever a Task Group this session belongs to changed
+//     since the session last saw it — so any change (objective/plan/progress,
+//     from the UI or another session's vibespace-task, or a new bind adding a
+//     group) reaches the agent on its next turn. Gated per group on
+//     updatedAt > _groupSeenAt[id] → no per-turn noise when nothing changed.
 //  3. Any pending status-override notice (consumed once).
 app.get('/api/agent/prompt-context', (req, res) => {
   const hit = agentSession(req, res);
   if (!hit) return;
   try {
+    const [s, id] = hit;
+    const key = sessionStatusKey(s, id);
     const parts = [];
-    const s = hit[0];
-    if (s._taskId) {
-      let t = null;
-      try { t = tasks.get(s._taskId); } catch { /* deleted */ }
-      if (t && t.updatedAt > (s._taskSeenAt || 0)) {
-        const fresh = s._taskSeenAt !== undefined; // seen before → this is an UPDATE, not first delivery
-        const ctx = tasks.renderContext(s._taskId);
-        if (ctx) {
-          parts.push(fresh
-            ? `The task below was UPDATED since you last saw it — this is the current state (supersedes any earlier copy).\n\n${ctx}`
-            : ctx);
-          s._taskSeenAt = t.updatedAt;
+    const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId });
+    if (groups.length) {
+      s._groupSeenAt = s._groupSeenAt || {};
+      const multi = groups.length > 1;
+      for (const g of groups) {
+        const seenAt = s._groupSeenAt[g.id];
+        if (g.updatedAt > (seenAt || 0)) {
+          const wasSeen = seenAt !== undefined; // seen before → this is an UPDATE, not first delivery
+          const ctx = tasks.renderContext(g.id, { multi });
+          if (ctx) {
+            parts.push(wasSeen
+              ? `The Task Group below was UPDATED since you last saw it — this is the current state (supersedes any earlier copy).\n\n${ctx}`
+              : ctx);
+            s._groupSeenAt[g.id] = g.updatedAt;
+          }
         }
       }
     } else if (!s._toolsIntroSeen) {
-      // No task: deliver the baseline tools intro on the FIRST prompt (covers
+      // In no group: deliver the baseline tools intro on the FIRST prompt (covers
       // codex — its app-server runs the hook but ignores SessionStart output).
       parts.push(SESSION_TOOLS_INTRO);
       s._toolsIntroSeen = true;
     }
-    const key = sessionStatusKey(s, hit[1]);
-    for (const k of [key, `webui:${hit[1]}`]) { // record may still be under webui:<id>
+    for (const k of [key, `webui:${id}`]) { // record may still be under webui:<id>
       const notice = sessionStatus.consumeNotice(k);
       if (notice) { parts.push(SessionStatusManager.renderNotice(notice)); break; }
     }
@@ -1608,28 +1633,34 @@ app.get('/api/agent/prompt-context', (req, res) => {
 // an agent cannot touch arbitrary tasks. All writes flow through TaskManager,
 // so TASK.md regenerates and tasks-updated broadcasts automatically. ──
 app.get('/api/agent/task', (req, res) => {
-  const hit = agentSession(req, res, { needTask: true });
+  const hit = agentSession(req, res);
   if (!hit) return;
+  const gid = resolveAgentGroup(hit, req, res);
+  if (!gid) return;
   try {
-    const t = tasks.get(hit[0]._taskId);
+    const t = tasks.get(gid);
     res.json({ success: true, task: { id: t.id, title: t.title, archived: !!t.archived, objective: t.objective, plan: t.plan, progress: (t.progress || []).slice(-10), contextDir: t.contextDir } });
   } catch (e) { res.status(404).json({ error: e.message }); }
 });
 app.post('/api/agent/task-progress', (req, res) => {
-  const hit = agentSession(req, res, { needTask: true });
+  const hit = agentSession(req, res);
   if (!hit) return;
+  const gid = resolveAgentGroup(hit, req, res);
+  if (!gid) return;
   try {
-    const t = tasks.addProgress(hit[0]._taskId, { note: req.body?.note, session: sessionStatusKey(hit[0], hit[1]) });
+    const t = tasks.addProgress(gid, { note: req.body?.note, session: sessionStatusKey(hit[0], hit[1]) });
     res.json({ success: true, progress: t.progress.slice(-3) });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 // (Removed /api/agent/task-status — a Task Group has no status. A session
 // reports its own state via /api/agent/session-status (vibespace-status).)
 app.post('/api/agent/task-plan', (req, res) => {
-  const hit = agentSession(req, res, { needTask: true });
+  const hit = agentSession(req, res);
   if (!hit) return;
+  const gid = resolveAgentGroup(hit, req, res);
+  if (!gid) return;
   try {
-    const t = tasks.get(hit[0]._taskId);
+    const t = tasks.get(gid);
     const plan = (t.plan || []).map(p => ({ ...p }));
     const { check, uncheck, add } = req.body || {};
     if (typeof add === 'string' && add.trim()) {
@@ -1650,7 +1681,7 @@ app.post('/api/agent/task-plan', (req, res) => {
     } else {
       return res.status(400).json({ error: 'need add, check, or uncheck' });
     }
-    const updated = tasks.update(hit[0]._taskId, { plan });
+    const updated = tasks.update(gid, { plan });
     res.json({ success: true, plan: updated.plan });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });

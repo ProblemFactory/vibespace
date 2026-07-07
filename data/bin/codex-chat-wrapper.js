@@ -707,12 +707,16 @@ async function startThread() {
 // `thread/inject_items` (a first-class app-server method that appends a
 // developer-role message to the thread's model-visible history WITHOUT starting
 // a user turn — verified). Called before each turn: the server's
-// /api/agent/prompt-context returns the full task context on the first turn and
-// a refresh whenever the task changed since the session last saw it, plus any
-// status-override notice. Best-effort — never blocks or breaks a turn.
+// /api/agent/prompt-context returns the shared context of every Task Group this
+// session belongs to on the first turn and a refresh whenever any of them changed
+// since the session last saw it, plus any status-override notice. Group belonging
+// is resolved SERVER-SIDE from the token (live — a UI bind reaches the agent on
+// its next turn with no respawn), so we do NOT gate on a task-id env var; we call
+// every turn and let the server decide (it returns '' when there's nothing new).
+// Best-effort — never blocks or breaks a turn.
 async function injectTaskContextForTurn() {
   const api = process.env.VIBESPACE_API, token = process.env.VIBESPACE_SESSION_TOKEN;
-  if (!api || !token || !process.env.VIBESPACE_TASK_ID || !meta.threadId) return;
+  if (!api || !token || !meta.threadId) return;
   try {
     const res = await fetch(api + '/api/agent/prompt-context', {
       headers: { Authorization: 'Bearer ' + token }, signal: AbortSignal.timeout(3000),

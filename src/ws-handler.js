@@ -200,11 +200,12 @@ function registerWsHandler(wss, ctx) {
             // Per-session bearer for the agent-facing API (vibespace-status):
             // spawned into the CLI's env, scopes writes to this session only
             agentToken: 'vsst_' + crypto.randomBytes(12).toString('hex'),
-            // Context task (VIBESPACE_TASK_ID). Delivered natively via the
-            // SessionStart/UserPromptSubmit hooks. VALIDATED to the task-id
-            // shape: it is interpolated into the remote ssh shell command, so a
-            // metachar-bearing value would be a shell-injection vector.
-            _taskId: (typeof data.taskId === 'string' && /^T-[\w-]{1,60}$/.test(data.taskId)) ? data.taskId : null,
+            // Task Group this session was spawned INTO (from the New-session
+            // dialog). Belonging is otherwise LIVE-derived server-side from the
+            // session token; this only covers the window before the async UI
+            // bind lands. VALIDATED to the id shape (metachar-free — kept as
+            // defense-in-depth even though it's no longer shell-interpolated).
+            _initialGroupId: (typeof data.taskId === 'string' && /^T-[\w-]{1,60}$/.test(data.taskId)) ? data.taskId : null,
             backend,
             backendSessionId: data.resumeId || null,
             claudeSessionId: backend === 'claude' ? (data.resumeId || null) : null,
@@ -275,13 +276,13 @@ function registerWsHandler(wss, ctx) {
             const prelude = haveAll
               ? `export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; mkdir -p "$HOME/.vibespace/bin"; ${writes} chmod +x "$HOME/.vibespace/bin"/vibespace-*; export PATH="$HOME/.vibespace/bin:$PATH"; node "$HOME/.vibespace/bin/vibespace-hook-register.mjs" 2>/dev/null || true; `
               : '';
-            // session._taskId is already validated to the task-id shape; url +
-            // vsst_ token are metachar-free. The values are shq'd at the use
-            // sites (like spawnEnvPairs) as defense-in-depth regardless.
+            // url + vsst_ token are metachar-free; shq'd at the use sites as
+            // defense-in-depth regardless. No VIBESPACE_TASK_ID — Task Group
+            // belonging is resolved server-side from the token, so the remote
+            // agent's hook/tools need only API + token.
             const envPairs = [
               `VIBESPACE_API=http://127.0.0.1:${rport}`,
               `VIBESPACE_SESSION_TOKEN=${session.agentToken}`,
-              ...(session._taskId ? [`VIBESPACE_TASK_ID=${session._taskId}`] : []),
             ];
             return { prelude, envPairs, reverse: `${rport}:127.0.0.1:${PORT}` };
           };
@@ -333,12 +334,11 @@ function registerWsHandler(wss, ctx) {
               NODE_CMD, wrapper,
               bufFile, metaFileW,
               ENV_CMD, `EDITOR=${EDITOR_CMD}`, `CLAUDE_WEBUI_PORT=${PORT}`, `CLAUDE_WEBUI_SESSION_ID=${id}`,
-              // Agent-facing env: the vibespace-status tool (data/bin on PATH)
-              // authenticates with the per-session token; VIBESPACE_TASK_ID
-              // marks the context task when created from the task board.
+              // Agent-facing env: the vibespace tools (data/bin on PATH)
+              // authenticate with the per-session token; Task Group belonging is
+              // resolved server-side from that token (no task id in the env).
               `VIBESPACE_API=http://127.0.0.1:${PORT}`,
               `VIBESPACE_SESSION_TOKEN=${session.agentToken}`,
-              ...(session._taskId ? [`VIBESPACE_TASK_ID=${session._taskId}`] : []), // validated shape
               `PATH=${path.dirname(EDITOR_CMD)}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
               // Probed working X display (see server.js detectXDisplay) — the CLI
               // reads the clipboard itself on Ctrl+V, so it needs BOTH vars
@@ -358,7 +358,6 @@ function registerWsHandler(wss, ctx) {
                 // prefix; the wrapper doesn't, hence this. Always the LOCAL port.
                 VIBESPACE_API: `http://127.0.0.1:${PORT}`,
                 VIBESPACE_SESSION_TOKEN: session.agentToken,
-                ...(session._taskId ? { VIBESPACE_TASK_ID: session._taskId } : {}),
                 ...Object.fromEntries(Object.entries(sessionSpec.env || {}).map(([k, v]) => [k, v == null ? '' : String(v)])),
               },
             });
@@ -387,7 +386,7 @@ function registerWsHandler(wss, ctx) {
             permissionMode: session._permissionMode || null,
             effort: session._effort || null,
             agentToken: session.agentToken || null,
-            taskId: session._taskId || null,
+            taskId: session._initialGroupId || null, // group spawned into (meta key kept for back-compat)
             createdAt: session.createdAt,
             webuiSessionId: id,
             mode: sessionMode,
