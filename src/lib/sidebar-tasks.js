@@ -838,7 +838,7 @@ export function installSidebarTasks(SidebarClass) {
       const card = document.createElement('div'); card.className = 'mobile-folder-card';
       card.innerHTML = MOBILE_ICON_TASK
         + `<span class="mobile-folder-path">${escHtml(task.title)}${attn.waiting || attn.declared ? ' <span class="task-attn-badge">⚠</span>' : ''}</span>`
-        + `<span class="mobile-folder-meta">${task.kind === 'task' ? task.status + ' · ' : ''}${taskSessions.length} session${taskSessions.length === 1 ? '' : 's'}${liveCount ? ' · ' + liveCount + ' live' : ''}</span>`
+        + `<span class="mobile-folder-meta">${task.archived ? 'archived · ' : ''}${taskSessions.length} session${taskSessions.length === 1 ? '' : 's'}${liveCount ? ' · ' + liveCount + ' live' : ''}</span>`
         + `<span class="mobile-folder-arrow">›</span>`;
       if (liveCount) card.classList.add('has-live');
       card.onclick = () => { this._mobileDrilldown = { type: 'group', key: task.id, label: task.title }; this._renderMobileTaskDetail(task.title, taskSessions, sessions); };
@@ -849,12 +849,17 @@ export function installSidebarTasks(SidebarClass) {
       });
       this.listEl.appendChild(card);
     }
-    const untagged = sessions.filter(s => !assignedIds.has(this._getSessionStateKey(s)) && !assignedIds.has(s.sessionId));
-    if (untagged.length > 0) {
+    // Untagged: list ACTIVE ones only — since 2.47 the tasks tab gets the
+    // UNFILTERED session list (thousands of stopped) and the mobile drill-down
+    // has no pagination; rendering them all would freeze the phone.
+    const untaggedAll = sessions.filter(s => !assignedIds.has(this._getSessionStateKey(s)) && !assignedIds.has(s.sessionId));
+    const untagged = untaggedAll.filter(s => s.status === 'live' || s.status === 'tmux');
+    const untaggedStopped = untaggedAll.length - untagged.length;
+    if (untagged.length > 0 || untaggedStopped > 0) {
       const card = document.createElement('div'); card.className = 'mobile-folder-card';
       card.innerHTML = MOBILE_ICON_TASK
         + `<span class="mobile-folder-path" style="font-style:italic">Untagged</span>`
-        + `<span class="mobile-folder-meta">${untagged.length} sessions</span>`
+        + `<span class="mobile-folder-meta">${untagged.length} active${untaggedStopped ? ' · ' + untaggedStopped + ' stopped (see Folders)' : ''}</span>`
         + `<span class="mobile-folder-arrow">›</span>`;
       card.onclick = () => { this._mobileDrilldown = { type: 'group', key: '__ungrouped__' }; this._renderMobileTaskDetail('Untagged', untagged, sessions); };
       this.listEl.appendChild(card);

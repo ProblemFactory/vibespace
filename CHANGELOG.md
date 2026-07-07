@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.49.1] — 2026-07-08
+
+### Fixed (mobile)
+- Mobile Task Group cards showed "undefined ·" in the meta line — leftover
+  `task.status` read (removed in the 2.39.0 refactor); shows "archived" now.
+- Mobile "Untagged" drill-down would render EVERY stopped session (thousands,
+  since 2.47.0 stopped narrowing the tasks tab) — now lists active ones only
+  with a stopped-count pointer to Folders, matching the desktop Task View.
+- The sort button no longer shows on the mobile Task Groups tab (its Task View
+  sort menu has no effect there — mobile keeps the drill-down list).
+
 ## [2.49.0] — 2026-07-08
 
 ### Added — session right-click menu + Properties window
