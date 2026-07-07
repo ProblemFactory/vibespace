@@ -34,7 +34,7 @@ function renderDetailGroups(container, sessionRef, clickToCopy, state) {
 
   const row = document.createElement('div');
   row.className = 'session-detail-row';
-  const lbl = document.createElement('span'); lbl.className = 'session-detail-label'; lbl.textContent = 'Tasks';
+  const lbl = document.createElement('span'); lbl.className = 'session-detail-label'; lbl.textContent = 'Task Groups';
   const val = document.createElement('span'); val.className = 'session-detail-value';
   val.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
   val.textContent = summary;

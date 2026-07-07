@@ -490,7 +490,7 @@ class App {
           };
           const allGood = hs.claude?.installed && hs.codex?.installed;
           left.innerHTML = `<b>VibeSpace integration</b><div>${stateOf('claude', 'Claude')} &nbsp; ${stateOf('codex', 'Codex')}</div>`
-            + `<div class="agents-note" style="margin:4px 0 0">Lets sessions started from a task automatically receive the task's context (goal, plan, shared files).</div>`;
+            + `<div class="agents-note" style="margin:4px 0 0">Lets sessions in a Task Group automatically receive the group's context (objective, checklist, shared files).</div>`;
           const actions = document.createElement('div'); actions.className = 'agent-actions';
           const installBtn = document.createElement('button');
           installBtn.className = 'agent-btn' + (allGood ? '' : ' primary');
@@ -501,14 +501,14 @@ class App {
               const r = await fetchJson('/api/agent-hooks/install', { method: 'POST' });
               const errs = Object.entries(r?.results || {}).filter(([, v]) => !v.ok);
               if (errs.length) showToast(errs.map(([k, v]) => `${k}: ${v.error}`).join('; '), { type: 'error' });
-              else showToast('Task context hook installed');
+              else showToast('Task Group context hook installed');
             } catch { showToast('Install failed', { type: 'error' }); }
             refresh();
           };
           actions.appendChild(installBtn);
           if (hs.claude?.installed || hs.codex?.installed || hs.claude?.stale || hs.codex?.stale) {
             const rmBtn = document.createElement('button'); rmBtn.className = 'agent-btn'; rmBtn.textContent = 'Remove';
-            rmBtn.title = 'Unregister the hook from both CLIs (sessions stop receiving task context)';
+            rmBtn.title = 'Unregister the hook from both CLIs (sessions stop receiving Task Group context)';
             rmBtn.onclick = async () => {
               rmBtn.disabled = true;
               try { await fetchJson('/api/agent-hooks/uninstall', { method: 'POST' }); showToast('Hook removed'); } catch {}

@@ -219,10 +219,10 @@ export function installSidebarTasks(SidebarClass) {
         body: body !== undefined ? JSON.stringify(body) : undefined,
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) { showToast(data.error || 'Task operation failed', { type: 'error' }); return null; }
+      if (!res.ok) { showToast(data.error || 'Task Group operation failed', { type: 'error' }); return null; }
       return data;
     } catch {
-      showToast('Task operation failed — server unreachable', { type: 'error' });
+      showToast('Task Group operation failed — server unreachable', { type: 'error' });
       return null;
     }
   };
@@ -377,14 +377,14 @@ export function installSidebarTasks(SidebarClass) {
       pop.appendChild(row);
     }
     if (!tasks.length) {
-      const hint = document.createElement('div'); hint.className = 'empty-hint'; hint.textContent = 'No tasks yet';
+      const hint = document.createElement('div'); hint.className = 'empty-hint'; hint.textContent = 'No Task Groups yet';
       pop.appendChild(hint);
     }
     const createRow = document.createElement('div'); createRow.className = 'session-detail-group-create';
     createRow.textContent = '+ New task';
     createRow.onclick = async (e) => {
       e.stopPropagation();
-      const name = await showInputDialog({ title: 'New Task', label: 'Task title', confirmText: 'Create' });
+      const name = await showInputDialog({ title: 'New Task Group', label: 'Task Group title', confirmText: 'Create' });
       if (name && name.trim()) {
         const t = await this._taskCreate({ title: name.trim() });
         if (t) { onToggleFn(t, true, pop); pop.remove(); }
@@ -425,7 +425,7 @@ export function installSidebarTasks(SidebarClass) {
       { label: 'Details…', action: () => this.app.openTaskDetail(taskId) },
       { label: 'New session in this task…', action: () => this.app.showNewSessionDialog({ cwd: this._folderPaths(t)[0], taskId }) },
       { label: 'Rename', action: async () => {
-        const n = await showInputDialog({ title: 'Rename Task', label: 'Title', value: t.title, confirmText: 'Rename' });
+        const n = await showInputDialog({ title: 'Rename Task Group', label: 'Title', value: t.title, confirmText: 'Rename' });
         if (n && n.trim() && n.trim() !== t.title) this._taskUpdate(taskId, { title: n.trim() });
       } },
     ];
@@ -443,8 +443,8 @@ export function installSidebarTasks(SidebarClass) {
         anchor.remove();
       } },
       { separator: true },
-      { label: 'Delete task', style: 'color:var(--red,#e55)', action: async () => {
-        if (await showConfirmDialog({ title: 'Delete Task', message: `Delete "${t.title}"? Sessions will not be deleted.`, confirmText: 'Delete', danger: true })) this._taskDelete(taskId);
+      { label: 'Delete Task Group', style: 'color:var(--red,#e55)', action: async () => {
+        if (await showConfirmDialog({ title: 'Delete Task Group', message: `Delete "${t.title}"? Sessions will not be deleted.`, confirmText: 'Delete', danger: true })) this._taskDelete(taskId);
       } },
     );
     showContextMenu(x, y, items);
@@ -469,9 +469,9 @@ export function installSidebarTasks(SidebarClass) {
     addRow.className = 'task-board-addrow';
     const addCard = document.createElement('div');
     addCard.className = 'session-item-card new-session-card';
-    addCard.innerHTML = '<div class="session-card-name" style="color:var(--accent-hover)">+ New Task</div>';
+    addCard.innerHTML = '<div class="session-card-name" style="color:var(--accent-hover)">+ New Task Group</div>';
     addCard.onclick = async () => {
-      const name = await showInputDialog({ title: 'New Task', label: 'Task title', confirmText: 'Create' });
+      const name = await showInputDialog({ title: 'New Task Group', label: 'Task Group title', confirmText: 'Create' });
       if (name && name.trim()) {
         const t = await this._taskCreate({ title: name.trim() });
         if (t) this.app.openTaskDetail(t.id);
@@ -483,7 +483,7 @@ export function installSidebarTasks(SidebarClass) {
     importCard.innerHTML = '<div class="session-card-name" style="color:var(--text-secondary)">Import…</div>';
     importCard.title = 'Import a task from a VibeSpace task markdown file';
     importCard.onclick = async () => {
-      const p = await showInputDialog({ title: 'Import Task', label: 'Absolute path to a VibeSpace task .md file', placeholder: '/path/to/repo/T-xxxxxx.md', confirmText: 'Import' });
+      const p = await showInputDialog({ title: 'Import Task Group', label: 'Absolute path to a VibeSpace task .md file', placeholder: '/path/to/repo/T-xxxxxx.md', confirmText: 'Import' });
       if (!p || !p.trim()) return;
       const data = await this._taskApi('POST', '/api/tasks/import', { path: p.trim() });
       if (data?.task) { showToast('Imported: ' + data.task.title); this.app.openTaskDetail(data.task.id); }
@@ -533,7 +533,7 @@ export function installSidebarTasks(SidebarClass) {
       if (nameSpan) {
         nameSpan.addEventListener('dblclick', async (e) => {
           e.stopPropagation();
-          const newName = await showInputDialog({ title: 'Rename Task', label: 'Title', value: task.title, confirmText: 'Rename' });
+          const newName = await showInputDialog({ title: 'Rename Task Group', label: 'Title', value: task.title, confirmText: 'Rename' });
           if (newName && newName.trim() && newName.trim() !== task.title) this._taskUpdate(task.id, { title: newName.trim() });
         });
         nameSpan.title = 'Double-click to rename';
@@ -554,7 +554,7 @@ export function installSidebarTasks(SidebarClass) {
       const detailBtn = document.createElement('button');
       detailBtn.className = 'folder-add-btn';
       detailBtn.innerHTML = ICON_DETAIL;
-      detailBtn.title = 'Task details (objective, plan, progress)';
+      detailBtn.title = 'Task Group details (objective, checklist, activity log)';
       detailBtn.onclick = (e) => { e.stopPropagation(); this.app.openTaskDetail(task.id); };
       header.appendChild(detailBtn);
 
@@ -689,7 +689,7 @@ export function installSidebarTasks(SidebarClass) {
   proto._renderMobileTaskDetail = function(title, taskSessions, allSessions) {
     this.listEl.innerHTML = '';
     const back = document.createElement('div'); back.className = 'mobile-folder-back';
-    back.innerHTML = `<span class="mobile-folder-back-arrow">‹</span> <span>All Tasks</span>`;
+    back.innerHTML = `<span class="mobile-folder-back-arrow">‹</span> <span>All Task Groups</span>`;
     back.onclick = () => { this._mobileDrilldown = null; this.listEl.innerHTML = ''; this._renderMobileTaskList(allSessions); };
     this.listEl.appendChild(back);
     const titleRow = document.createElement('div'); titleRow.className = 'mobile-folder-title';
