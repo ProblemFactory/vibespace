@@ -2165,18 +2165,25 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 .task-board-addrow { display: flex; gap: 6px; }
 .task-board-addrow .new-session-card { flex: 1; }
 .task-board-import { flex: 0 0 auto !important; padding-left: 12px; padding-right: 12px; }
-/* Tasks-tab Groups|Tasks view toggle */
-.task-board-viewtabs { display: flex; gap: 4px; padding: 4px 6px 6px; }
-.task-board-viewtab {
-  flex: 1; padding: 4px 8px; font-size: 11px; font-weight: 500; cursor: pointer;
-  border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text-dim);
+/* Tasks-tab Groups|Tasks sub-tabs (same language as the main tabs, one level in) */
+.sidebar-subtabs { display: flex; border-bottom: 1px solid var(--border); }
+.sidebar-subtab {
+  flex: 1; padding: 5px 8px; background: none; border: none; border-bottom: 2px solid transparent;
+  color: var(--text-dim); font-size: 10px; font-weight: 600; cursor: pointer; text-align: center;
+  transition: all var(--transition);
 }
-.task-board-viewtab:hover { background: var(--hover-overlay, rgba(127,127,127,.1)); color: var(--text); }
-.task-board-viewtab.active {
-  background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent-hover);
-  border-color: color-mix(in srgb, var(--accent) 40%, transparent); font-weight: 600;
+.sidebar-subtab:hover { color: var(--text); background: var(--bg-hover); }
+.sidebar-subtab.active { color: var(--accent-hover); border-bottom-color: var(--accent-hover); }
+/* Task View: sort/filter toolbar */
+.task-view-toolbar { display: flex; gap: 6px; padding: 6px 8px 4px; }
+.tv-tool-btn {
+  display: inline-flex; align-items: center; gap: 4px; font-size: 10px; padding: 3px 8px; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text-secondary);
 }
-/* Task View: flat status-sorted list of tagged sessions (活儿) */
+.tv-tool-btn:hover { background: var(--hover-overlay, rgba(127,127,127,.1)); color: var(--text); }
+.tv-tool-btn.active { border-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--accent-hover); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.tv-tool-ico { font-size: 11px; opacity: 0.75; }
+/* Task View: flat status-sorted list (tagged on top, untagged sunk below) */
 .task-view-list { display: flex; flex-direction: column; }
 .task-view-row { border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent); padding-bottom: 2px; }
 .task-view-groups { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 8px 5px 30px; }
@@ -2187,4 +2194,18 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 }
 .task-view-group-badge:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--text); }
 .tvg-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--g-color, var(--text-dim)); flex-shrink: 0; }
+.task-view-untagged-header {
+  display: flex; align-items: center; gap: 6px; padding: 8px 8px 3px; margin-top: 4px;
+  font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-dim);
+  border-top: 1px solid var(--border);
+}
+.tv-untagged-note { font-size: 9px; color: var(--text-dim); font-weight: 400; text-transform: none; letter-spacing: 0; margin-left: 6px; }
+.task-view-untagged-header .folder-count { margin-left: auto; }
 .task-view-empty { padding: 16px 12px; line-height: 1.5; }
+/* Task View: status filter popover */
+.tv-filter-pop { padding: 6px; display: flex; flex-direction: column; gap: 1px; min-width: 160px; background: var(--bg-elevated, var(--bg-input)); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,.35); }
+.tv-filter-hint { font-size: 9px; color: var(--text-dim); padding: 2px 4px 4px; }
+.tv-filter-pop label { display: flex; align-items: center; gap: 6px; font-size: 11px; padding: 4px; cursor: pointer; border-radius: 4px; }
+.tv-filter-pop label:hover { background: var(--hover-overlay, rgba(127,127,127,.1)); }
+.tv-filter-clear { margin-top: 4px; padding: 4px; font-size: 10px; background: none; border: 1px solid var(--border); border-radius: 4px; color: var(--text-secondary); cursor: pointer; }
+.tv-filter-clear:hover { background: var(--hover-overlay, rgba(127,127,127,.1)); }

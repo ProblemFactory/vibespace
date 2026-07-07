@@ -44,8 +44,12 @@ export function installSidebarTasks(SidebarClass) {
     this._tasks = [];
     this._tasksLoaded = false; // gates "task not found" decisions during startup
     // Tasks-tab view: 'groups' = Task Groups (岗位) with member sessions (default);
-    // 'tasks' = a FLAT list of every tagged session (活儿), sorted by status+urgency.
-    this._boardView = (() => { try { return localStorage.getItem('vibespace.boardView') || 'groups'; } catch { return 'groups'; } })();
+    // 'tasks' = a FLAT list of every session (活儿) — tagged sorted on top by
+    // status+urgency, untagged sunk to the bottom.
+    const ls = (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
+    this._boardView = ls('vibespace.boardView', 'groups');
+    this._taskViewSortMode = ls('vibespace.taskViewSort', 'urgency'); // urgency|status|recent|name
+    try { this._taskViewStatusFilter = JSON.parse(localStorage.getItem('vibespace.taskViewFilter') || 'null'); } catch { this._taskViewStatusFilter = null; }
     this._sessionStatuses = {}; // sessionKey → {state, urgency, reason, setBy, at}
     this._pendingTaskBinds = new Map(); // webuiId → taskId (new-session-in-task, bound once the backend id appears)
     this._fetchTasks();
@@ -455,16 +459,17 @@ export function installSidebarTasks(SidebarClass) {
 
   // ── Desktop board (the old Groups tab, grown up) ──
 
-  // Segmented Groups | Tasks toggle at the top of the Tasks tab.
+  // Groups | Tasks sub-tabs at the top of the Task Groups tab (same visual
+  // language as the Folders/Task Groups/Remote tabs, one level down).
   proto._buildBoardViewTabs = function() {
     const wrap = document.createElement('div');
-    wrap.className = 'task-board-viewtabs';
+    wrap.className = 'sidebar-subtabs';
     for (const [view, label, tip] of [
       ['groups', 'Groups', 'Task Groups (岗位) with their member sessions'],
-      ['tasks', 'Tasks', 'Every tagged session (活儿), flat, sorted by status + urgency'],
+      ['tasks', 'Tasks', 'Every session (活儿) flat, sorted by status + urgency; untagged at the bottom'],
     ]) {
       const b = document.createElement('button');
-      b.className = 'task-board-viewtab' + (this._boardView === view ? ' active' : '');
+      b.className = 'sidebar-subtab' + (this._boardView === view ? ' active' : '');
       b.textContent = label;
       b.title = tip;
       b.onclick = () => {
@@ -478,43 +483,103 @@ export function installSidebarTasks(SidebarClass) {
     return wrap;
   };
 
-  // Task View sort rank: urgency dominates, then a status weight that floats the
-  // sessions needing attention (blocked / needs-input) up and sinks done. State
-  // is synthesized the same way the card chip does (declared > OSC-idle > live).
-  proto._taskViewRank = function(s, waiting) {
+  // Synthesized display state — declared (agent/user) > OSC-idle ⇒ needs-input
+  // > live ⇒ working; null for a non-live session with nothing declared.
+  proto._synthSessionState = function(s, waiting) {
     const st = this.getSessionStatus(s) || {};
+    if (st.state) return st.state;
     const isLive = s.status === 'live' || s.status === 'tmux';
+    if (!isLive) return null;
     const sKey = `${s.backend || 'claude'}:${s.backendSessionId || s.claudeSessionId || ''}`;
-    const wait = isLive && waiting.has(sKey);
-    const dstate = st.state || (isLive ? (wait ? 'needs-input' : 'working') : null);
-    const urg = { urgent: 4, high: 3, normal: 2, low: 1 }[st.urgency] || 0;
-    const stateW = { blocked: 5, 'needs-input': 5, review: 3, working: 2, done: 1 }[dstate] || 0;
-    return urg * 10 + stateW;
+    return waiting.has(sKey) ? 'needs-input' : 'working';
   };
 
-  // Task View: a flat, status+urgency-sorted list of every session tagged into
-  // at least one Task Group (a "活儿"). Each card shows its cwd (sessions span
-  // dirs here) + the group(s) it belongs to.
-  proto._renderTaskViewFlat = function(sessions) {
-    const tagged = sessions.filter(s => this._getSessionTasks(s).length > 0);
-    if (!tagged.length) {
-      const empty = document.createElement('div');
-      empty.className = 'empty-hint task-view-empty';
-      empty.textContent = 'No sessions are tagged into a Task Group yet. Tag one from its card’s Task Groups row, or drag a card onto a group in Groups view.';
-      this.listEl.appendChild(empty);
-      return;
+  // Task View sort rank: urgency dominates (mode 'urgency'), or status dominates
+  // (mode 'status'). The status weight floats blocked/needs-input up, sinks done.
+  proto._taskViewRank = function(s, waiting, mode) {
+    const st = this.getSessionStatus(s) || {};
+    const dstate = this._synthSessionState(s, waiting);
+    const urg = { urgent: 4, high: 3, normal: 2, low: 1 }[st.urgency] || 0;
+    const stateW = { blocked: 5, 'needs-input': 5, review: 3, working: 2, done: 1 }[dstate] || 0;
+    return mode === 'status' ? stateW * 10 + urg : urg * 10 + stateW;
+  };
+
+  proto._taskViewSortFn = function(waiting) {
+    const mode = this._taskViewSortMode;
+    if (mode === 'recent') return (a, b) => (b.lastActivity || b.startedAt || 0) - (a.lastActivity || a.startedAt || 0);
+    if (mode === 'name') return (a, b) => String(a.name || a.webuiName || a.sessionId || '').localeCompare(String(b.name || b.webuiName || b.sessionId || ''));
+    return (a, b) => this._taskViewRank(b, waiting, mode) - this._taskViewRank(a, waiting, mode)
+      || (b.lastActivity || b.startedAt || 0) - (a.lastActivity || a.startedAt || 0);
+  };
+
+  proto._taskViewMatch = function(s, waiting) {
+    const f = this._taskViewStatusFilter;
+    if (!f || !f.length) return true;
+    return f.includes(this._synthSessionState(s, waiting));
+  };
+
+  // Sort + status-filter controls above the Task View list.
+  proto._buildTaskViewToolbar = function() {
+    const bar = document.createElement('div');
+    bar.className = 'task-view-toolbar';
+    const SORTS = { urgency: 'Urgency + status', status: 'Status', recent: 'Recent', name: 'Name' };
+    const sortBtn = document.createElement('button');
+    sortBtn.className = 'tv-tool-btn';
+    sortBtn.innerHTML = `<span class="tv-tool-ico">↕</span><span>${SORTS[this._taskViewSortMode] || 'Sort'}</span>`;
+    sortBtn.title = 'Sort order';
+    sortBtn.onclick = () => {
+      const r = sortBtn.getBoundingClientRect();
+      showContextMenu(r.left, r.bottom + 2, Object.entries(SORTS).map(([k, label]) => ({
+        label: (this._taskViewSortMode === k ? '✓ ' : ' ') + label,
+        action: () => { this._taskViewSortMode = k; try { localStorage.setItem('vibespace.taskViewSort', k); } catch {} this._render(); },
+      })));
+    };
+    const active = this._taskViewStatusFilter && this._taskViewStatusFilter.length;
+    const filterBtn = document.createElement('button');
+    filterBtn.className = 'tv-tool-btn' + (active ? ' active' : '');
+    filterBtn.innerHTML = `<span class="tv-tool-ico">☰</span><span>Filter${active ? ' · ' + active : ''}</span>`;
+    filterBtn.title = 'Show only certain states';
+    filterBtn.onclick = () => this._showTaskViewFilterPopover(filterBtn);
+    bar.append(sortBtn, filterBtn);
+    return bar;
+  };
+
+  proto._showTaskViewFilterPopover = function(anchor) {
+    const pop = createPopover(anchor, 'tv-filter-pop');
+    const cur = new Set(this._taskViewStatusFilter || []);
+    const apply = () => {
+      const arr = [...cur];
+      this._taskViewStatusFilter = arr.length ? arr : null;
+      try { localStorage.setItem('vibespace.taskViewFilter', JSON.stringify(this._taskViewStatusFilter)); } catch {}
+      this._render();
+    };
+    const hint = document.createElement('div');
+    hint.className = 'tv-filter-hint';
+    hint.textContent = 'Show only these states (none = all):';
+    pop.appendChild(hint);
+    for (const st of ['working', 'needs-input', 'blocked', 'review', 'done']) {
+      const meta = SESSION_STATE_META[st] || { label: st, color: 'var(--text-dim)' };
+      const label = document.createElement('label');
+      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = cur.has(st);
+      cb.onchange = () => { cb.checked ? cur.add(st) : cur.delete(st); apply(); };
+      const dot = document.createElement('span'); dot.className = 'tvg-dot'; dot.style.setProperty('--g-color', meta.color);
+      const txt = document.createElement('span'); txt.textContent = meta.label;
+      label.append(cb, dot, txt);
+      pop.appendChild(label);
     }
-    const waiting = (this._waitingSet && this._waitingSet()) || new Set();
-    const sorted = [...tagged].sort((a, b) =>
-      this._taskViewRank(b, waiting) - this._taskViewRank(a, waiting)
-      || (b.lastActivity || b.startedAt || 0) - (a.lastActivity || a.startedAt || 0));
-    const list = document.createElement('div');
-    list.className = 'task-view-list';
-    for (const s of sorted) {
-      const row = document.createElement('div');
-      row.className = 'task-view-row';
-      row.appendChild(this._buildSessionCard(s, { showCwd: true }));
-      const groups = this._getSessionTasks(s);
+    const clr = document.createElement('button');
+    clr.className = 'tv-filter-clear'; clr.textContent = 'Clear filter';
+    clr.onclick = () => { cur.clear(); apply(); pop.remove(); };
+    pop.appendChild(clr);
+    return pop;
+  };
+
+  proto._taskViewRow = function(s, withGroups) {
+    const row = document.createElement('div');
+    row.className = 'task-view-row';
+    row.appendChild(this._buildSessionCard(s, { showCwd: true }));
+    const groups = withGroups ? this._getSessionTasks(s) : [];
+    if (groups.length) {
       const gr = document.createElement('div');
       gr.className = 'task-view-groups';
       for (const g of groups) {
@@ -527,7 +592,46 @@ export function installSidebarTasks(SidebarClass) {
         gr.appendChild(b);
       }
       row.appendChild(gr);
-      list.appendChild(row);
+    }
+    return row;
+  };
+
+  // Task View: every session (活儿) flat. Tagged sessions (in ≥1 Task Group)
+  // sort to the top by status+urgency; untagged sink to a labeled section at the
+  // bottom. Each card shows its cwd; tagged cards show their group badge(s).
+  proto._renderTaskViewFlat = function(sessions) {
+    this.listEl.appendChild(this._buildTaskViewToolbar());
+    const waiting = (this._waitingSet && this._waitingSet()) || new Set();
+    const match = (s) => this._taskViewMatch(s, waiting);
+    const sortFn = this._taskViewSortFn(waiting);
+    const tagged = sessions.filter(s => this._getSessionTasks(s).length > 0 && match(s)).sort(sortFn);
+    // Untagged sink to the bottom — but only LIVE/tmux (active, unorganized
+    // work). The (often thousands of) historical STOPPED untagged sessions live
+    // in Folders (paginated); piling them here would be useless + slow, so we
+    // surface just a count + pointer.
+    const untaggedAll = sessions.filter(s => this._getSessionTasks(s).length === 0 && match(s));
+    const untagged = untaggedAll.filter(s => s.status === 'live' || s.status === 'tmux').sort(sortFn);
+    const untaggedStopped = untaggedAll.length - untagged.length;
+    if (!tagged.length && !untagged.length && !untaggedStopped) {
+      const empty = document.createElement('div');
+      empty.className = 'empty-hint task-view-empty';
+      empty.textContent = (this._taskViewStatusFilter && this._taskViewStatusFilter.length)
+        ? 'No sessions match the current status filter.'
+        : 'No sessions yet. Sessions tagged into a Task Group sort to the top here.';
+      this.listEl.appendChild(empty);
+      return;
+    }
+    const list = document.createElement('div');
+    list.className = 'task-view-list';
+    for (const s of tagged) list.appendChild(this._taskViewRow(s, true));
+    if (untagged.length || untaggedStopped) {
+      const h = document.createElement('div');
+      h.className = 'task-view-untagged-header';
+      h.innerHTML = `<span>Untagged</span>`
+        + (untaggedStopped ? `<span class="tv-untagged-note">${untaggedStopped} stopped · see Folders</span>` : '')
+        + `<span class="folder-count">${untagged.length}</span>`;
+      list.appendChild(h);
+      for (const s of untagged) list.appendChild(this._taskViewRow(s, false));
     }
     this.listEl.appendChild(list);
   };

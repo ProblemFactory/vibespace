@@ -663,37 +663,48 @@ class Sidebar {
 
     // Archive filter: hide archived sessions unless 'archived' filter is on
     const showArchived = this._statusFilter.has('archived');
-    if (showArchived) {
-      // When archived filter is on, show only archived (plus any other enabled statuses for non-archived)
-      sessions = sessions.filter(s => {
-        if (this.isArchived(s)) return true;
-        return this._statusFilter.has(s.status);
-      });
+    if (this._activeTab === 'tasks') {
+      // Tasks tab organizes Task-Group membership — a group's sessions are often
+      // stopped, so it must NOT be narrowed by the live/stopped status filter or
+      // the quick-view tabs (that hid tagged sessions). Only hide archived unless
+      // the archived filter is on. Task View has its OWN status filter (per-view).
+      if (!showArchived) sessions = sessions.filter(s => !this.isArchived(s));
     } else {
-      // Hide archived sessions, then apply status filter
-      sessions = sessions.filter(s => !this.isArchived(s));
-      // Status filter (apply only when not all 4 non-archived statuses are selected)
-      const nonArchivedFilters = new Set([...this._statusFilter]);
-      nonArchivedFilters.delete('archived');
-      if (nonArchivedFilters.size < 4) {
-        sessions = sessions.filter(s => nonArchivedFilters.has(s.status));
+      if (showArchived) {
+        // When archived filter is on, show only archived (plus any other enabled statuses for non-archived)
+        sessions = sessions.filter(s => {
+          if (this.isArchived(s)) return true;
+          return this._statusFilter.has(s.status);
+        });
+      } else {
+        // Hide archived sessions, then apply status filter
+        sessions = sessions.filter(s => !this.isArchived(s));
+        // Status filter (apply only when not all 4 non-archived statuses are selected)
+        const nonArchivedFilters = new Set([...this._statusFilter]);
+        nonArchivedFilters.delete('archived');
+        if (nonArchivedFilters.size < 4) {
+          sessions = sessions.filter(s => nonArchivedFilters.has(s.status));
+        }
       }
-    }
-
-    // Quick tab view: narrow down to a single status
-    if (this._activeView) {
-      sessions = sessions.filter(s => s.status === this._activeView);
+      // Quick tab view: narrow down to a single status
+      if (this._activeView) {
+        sessions = sessions.filter(s => s.status === this._activeView);
+      }
     }
 
     this.listEl.innerHTML = '';
 
-    // "New Session" card at the top
-    const newCard = document.createElement('div'); newCard.className = 'session-item-card new-session-card';
-    newCard.innerHTML = '<div class="session-card-name" style="color:var(--accent-hover)">+ New Session</div>';
-    newCard.onclick = () => this.app.showNewSessionDialog();
-    this.listEl.appendChild(newCard);
+    // "New Session" card at the top — NOT on the Tasks tab (it has its own
+    // "+ New Task Group" card; a bare New Session there is meaningless).
+    if (this._activeTab !== 'tasks') {
+      const newCard = document.createElement('div'); newCard.className = 'session-item-card new-session-card';
+      newCard.innerHTML = '<div class="session-card-name" style="color:var(--accent-hover)">+ New Session</div>';
+      newCard.onclick = () => this.app.showNewSessionDialog();
+      this.listEl.appendChild(newCard);
+    }
 
-    if (!sessions.length) { this.listEl.insertAdjacentHTML('beforeend', '<div class="empty-hint">No sessions</div>'); return; }
+    // Tasks tab renders its board (groups + view toggle) even with zero sessions.
+    if (!sessions.length && this._activeTab !== 'tasks') { this.listEl.insertAdjacentHTML('beforeend', '<div class="empty-hint">No sessions</div>'); return; }
 
     if (this._mobileMode) {
       // Restore drill-down state if we were inside a folder/group
