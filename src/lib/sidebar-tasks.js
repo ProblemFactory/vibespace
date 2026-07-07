@@ -300,6 +300,27 @@ export function installSidebarTasks(SidebarClass) {
       (t.sessions || []).includes(stateKey) || (legacyId && (t.sessions || []).includes(legacyId)));
   };
 
+  // Task Groups this session BELONGS to — explicit tag OR auto-include folder
+  // match (cwd or its symlink-resolved realCwd). Mirrors the board's
+  // _getTaskSessionKeys and the server's groupsForSession, so Task View
+  // membership matches Group view. Excludes archived. (Distinct from
+  // _getSessionTasks, which is tag-only for the toggleable checklist popover.)
+  proto._getSessionTaskGroups = function(s) {
+    const stateKey = this._getSessionStateKey(s);
+    const legacyId = this._getLegacySessionId(s);
+    const cwds = [s.cwd, s.realCwd].filter(Boolean);
+    return (this._tasks || []).filter(t => {
+      if (t.archived) return false;
+      if ((t.sessions || []).includes(stateKey) || (legacyId && (t.sessions || []).includes(legacyId))) return true;
+      for (const f of (t.folders || []).map(this._folderRec)) {
+        for (const cwd of cwds) {
+          if (cwd === f.path || (f.recursive && cwd.startsWith(f.path + '/'))) return true;
+        }
+      }
+      return false;
+    });
+  };
+
   // ── Attention (P1 backbone: VibeSpace's OWN idle detection — a bound
   // session's window blinking "waiting" makes the task need you; zero agent
   // cooperation required. Agent-declared attention arrives in P3.) ──
@@ -578,7 +599,7 @@ export function installSidebarTasks(SidebarClass) {
     const row = document.createElement('div');
     row.className = 'task-view-row';
     row.appendChild(this._buildSessionCard(s, { showCwd: true }));
-    const groups = withGroups ? this._getSessionTasks(s) : [];
+    const groups = withGroups ? this._getSessionTaskGroups(s) : [];
     if (groups.length) {
       const gr = document.createElement('div');
       gr.className = 'task-view-groups';
@@ -604,12 +625,12 @@ export function installSidebarTasks(SidebarClass) {
     const waiting = (this._waitingSet && this._waitingSet()) || new Set();
     const match = (s) => this._taskViewMatch(s, waiting);
     const sortFn = this._taskViewSortFn(waiting);
-    const tagged = sessions.filter(s => this._getSessionTasks(s).length > 0 && match(s)).sort(sortFn);
+    const tagged = sessions.filter(s => this._getSessionTaskGroups(s).length > 0 && match(s)).sort(sortFn);
     // Untagged sink to the bottom — but only LIVE/tmux (active, unorganized
     // work). The (often thousands of) historical STOPPED untagged sessions live
     // in Folders (paginated); piling them here would be useless + slow, so we
     // surface just a count + pointer.
-    const untaggedAll = sessions.filter(s => this._getSessionTasks(s).length === 0 && match(s));
+    const untaggedAll = sessions.filter(s => this._getSessionTaskGroups(s).length === 0 && match(s));
     const untagged = untaggedAll.filter(s => s.status === 'live' || s.status === 'tmux').sort(sortFn);
     const untaggedStopped = untaggedAll.length - untagged.length;
     if (!tagged.length && !untagged.length && !untaggedStopped) {

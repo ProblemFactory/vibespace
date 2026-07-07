@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.41.1] — 2026-07-06
+
+### Fixed
+- Task View wrongly showed sessions as **untagged** when they belonged to a Task
+  Group via an **auto-include folder** (not an explicit tag). Task View now uses
+  the same membership rule as the Group board (`_getSessionTaskGroups` = explicit
+  tag ∪ folder match), so a group's folder members appear under it.
+- **Symlinked cwd**: a session opened under a symlinked path (e.g.
+  `claude-code-webui` → `vibespace`) now matches a folder set on the real path.
+  Discovery stamps a resolved `realCwd`; both the client membership check and the
+  server's context injection (`groupsForSession`) match cwd or realCwd.
+
 ## [2.41.0] — 2026-07-06
 
 ### Changed — Task View follow-ups

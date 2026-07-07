@@ -244,16 +244,21 @@ class TaskGroupManager {
   // Belonging is LIVE: a UI bind/drag or a folder change takes effect on the
   // agent's next turn with no respawn (fixes the old bind≠context gap). Returns
   // full task objects, stable order.
-  groupsForSession({ sessionKey, cwd, initialGroupId } = {}) {
+  groupsForSession({ sessionKey, cwd, realCwd, initialGroupId } = {}) {
+    // Match a folder against the cwd AND its symlink-resolved realpath (a session
+    // opened under claude-code-webui → vibespace must match a folder on either).
+    let real = realCwd;
+    if (!real && cwd) { try { real = fs.realpathSync(cwd); } catch { /* gone */ } }
+    const cwds = [cwd, real && real !== cwd ? real : null].filter(Boolean);
     const out = [];
     for (const t of Object.values(this._state.tasks)) {
       if (t.archived) continue;
       let member = false;
       if (sessionKey && Array.isArray(t.sessions) && t.sessions.includes(sessionKey)) member = true;
       if (!member && initialGroupId && t.id === initialGroupId) member = true;
-      if (!member && cwd) {
+      if (!member && cwds.length) {
         for (const f of this._sanitizeFolders(t.folders)) {
-          if (cwd === f.path || (f.recursive && cwd.startsWith(f.path + '/'))) { member = true; break; }
+          if (cwds.some(c => c === f.path || (f.recursive && c.startsWith(f.path + '/')))) { member = true; break; }
         }
       }
       if (member) out.push(t);
