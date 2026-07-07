@@ -402,12 +402,27 @@ class SessionMessages {
     if (this._taskState !== undefined) return this._taskState;
     const wMeta = this.wrapperMeta();
     if (wMeta?.tasks || wMeta?.todos) {
-      this._taskState = { tasks: wMeta.tasks || {}, todos: wMeta.todos || [] };
+      const base = { tasks: wMeta.tasks || {}, todos: wMeta.todos || [] };
+      // An EMPTY todos array in wrapper meta must not short-circuit the scan —
+      // the newer TaskCreate/TaskUpdate family only exists in the transcript.
+      if (base.todos.length) { this._taskState = base; return base; }
+      const scanned = this._scanTaskState();
+      this._taskState = { tasks: Object.keys(base.tasks).length ? base.tasks : scanned.tasks, todos: scanned.todos };
       return this._taskState;
     }
+    this._taskState = this._scanTaskState();
+    return this._taskState;
+  }
+
+  _scanTaskState() {
     this._ensureParsed();
     const tasks = {};
     const todos = [];
+    // Newer task-tool family (TaskCreate/TaskUpdate, CLI ≥2.1.2xx): CRUD by id
+    // — replay into a list. The created id only appears in the RESULT text
+    // ("Task #N created successfully: …").
+    const pendingCreates = new Map(); // tool_use_id → input
+    const taskList = new Map(); // taskId → {content, activeForm, status}
     for (const msg of this._all) {
       if (msg.type === 'system' && msg.tool_use_id) {
         if (msg.subtype === 'task_started') {
@@ -422,15 +437,41 @@ class SessionMessages {
       if (msg.type === 'assistant' && msg.message?.content) {
         const blocks = Array.isArray(msg.message.content) ? msg.message.content : [];
         for (const b of blocks) {
-          if (b.type === 'tool_use' && b.name === 'TodoWrite' && b.input?.todos) {
+          if (b.type !== 'tool_use') continue;
+          if (b.name === 'TodoWrite' && b.input?.todos) {
             todos.length = 0;
             todos.push(...b.input.todos);
+          } else if (b.name === 'TaskCreate') {
+            pendingCreates.set(b.id, b.input || {});
+          } else if (b.name === 'TaskUpdate' && b.input?.taskId) {
+            const key = String(b.input.taskId);
+            if (b.input.status === 'deleted') taskList.delete(key);
+            else {
+              const cur = taskList.get(key) || { content: '', status: 'pending' };
+              if (b.input.subject) cur.content = b.input.subject;
+              if (b.input.activeForm) cur.activeForm = b.input.activeForm;
+              if (b.input.status) cur.status = b.input.status;
+              taskList.set(key, cur);
+            }
           }
         }
       }
+      if (msg.type === 'user' && Array.isArray(msg.message?.content) && pendingCreates.size) {
+        for (const b of msg.message.content) {
+          if (b?.type !== 'tool_result' || !pendingCreates.has(b.tool_use_id)) continue;
+          const inp = pendingCreates.get(b.tool_use_id);
+          pendingCreates.delete(b.tool_use_id);
+          const txt = typeof b.content === 'string' ? b.content : (Array.isArray(b.content) ? b.content.map((c) => c?.text || '').join(' ') : '');
+          const m = /Task #(\d+) created/.exec(txt);
+          if (m) taskList.set(m[1], { content: inp.subject || '', activeForm: inp.activeForm, status: 'pending' });
+        }
+      }
     }
-    this._taskState = { tasks, todos };
-    return this._taskState;
+    // Prefer the newer task-tool list when TodoWrite wasn't used.
+    if (!todos.length && taskList.size) {
+      todos.push(...[...taskList.entries()].sort((a, b) => Number(a[0]) - Number(b[0])).map(([, v]) => v));
+    }
+    return { tasks, todos };
   }
 }
 

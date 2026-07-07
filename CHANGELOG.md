@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.46.0] — 2026-07-07
+
+### Added — the agent's own TODO list, surfaced on the board (活儿的步骤)
+The session-level checklist was already there all along — the agent's native
+TodoWrite (Claude) / plan tool (Codex) / the newer TaskCreate-TaskUpdate family
+(CLI ≥2.1.2xx). VibeSpace now OBSERVES it instead of inventing a parallel store:
+
+- Session cards show a **progress pill** (`3/7` + current step in the tooltip)
+  while steps are underway (hidden when all done); the expanded card shows the
+  full **Steps** list (works for stopped sessions too, read from the transcript
+  via a new `GET /api/session-todos`).
+- Live capture rides the existing stream parse for both backends; the
+  TaskCreate/TaskUpdate family is replayed CRUD-style (the created id only
+  appears in the tool RESULT text).
+- The Task Group **Checklist is repositioned as the group's BACKLOG** of work
+  items (UI hint + injected guidance): the user queues work items, any session
+  picks one up and ticks it off; agents keep their working steps in their own
+  session TODO — which the board now shows.
+
 ## [2.45.0] — 2026-07-07
 
 ### Added — remote context-folder auto-sync

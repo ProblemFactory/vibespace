@@ -564,6 +564,7 @@ class Sidebar {
         webuiMode: wm ? (wm.mode || 'terminal') : null,
         accountName: wm?.accountName || null, // billing identity badge (API key sessions)
         accountTail: wm?.accountTail || null,
+        todo: wm?.todo || null, // agent's own TodoWrite/plan summary (board pill)
       };
     });
 
@@ -594,6 +595,7 @@ class Sidebar {
           webuiMode: ws.mode || 'terminal',
           accountName: ws.accountName || null,
           accountTail: ws.accountTail || null,
+          todo: ws.todo || null,
         });
       }
     }
