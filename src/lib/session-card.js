@@ -383,28 +383,39 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     renderDetailGroups(groupsContainer, s, clickToCopy, state);
   }
 
-  // Steps (the agent's own TodoWrite / codex plan) — lazily fetched from the
-  // transcript when the card expands, so stopped sessions show them too.
-  if (expandedCardId === s.sessionId && !s.host) {
-    const stepsWrap = document.createElement('div');
-    stepsWrap.className = 'session-detail-steps';
-    detailPanel.appendChild(stepsWrap);
-    const rid = s.backendSessionId || s.sessionId;
-    fetch(`/api/session-todos?backend=${encodeURIComponent(s.backend || 'claude')}&backendSessionId=${encodeURIComponent(rid)}&cwd=${encodeURIComponent(s.cwd || '')}`)
+  // Status HISTORY timeline (replaced the agent-TODO Steps replay — the raw
+  // todo dump read as noise; the vibespace-status trail is the meaningful
+  // "what happened here" record). Newest first, lazily fetched on expand.
+  // The live todo summary stays available as the row pill.
+  if (expandedCardId === s.sessionId) {
+    const histWrap = document.createElement('div');
+    histWrap.className = 'session-detail-steps';
+    detailPanel.appendChild(histWrap);
+    const keys = [state._getSessionStateKey(s), s.webuiId ? 'webui:' + s.webuiId : null].filter(Boolean).join(',');
+    fetch(`/api/session-status/history?sessionKey=${encodeURIComponent(keys)}`)
       .then(r => r.json()).then(d => {
-        const todos = d?.todos || [];
-        if (!todos.length || !stepsWrap.isConnected) return;
+        const hist = (d?.history || []).slice(-15).reverse();
+        if (!hist.length || !histWrap.isConnected) return;
         const row = document.createElement('div'); row.className = 'session-detail-row';
-        row.innerHTML = `<span class="session-detail-label">Steps</span>`;
-        const list = document.createElement('div'); list.className = 'session-steps-list';
-        for (const t of todos) {
+        row.innerHTML = `<span class="session-detail-label">History</span>`;
+        const list = document.createElement('div'); list.className = 'session-history-list';
+        const today = new Date().toDateString();
+        for (const h of hist) {
           const li = document.createElement('div');
-          li.className = 'session-step ' + (t.status === 'completed' ? 'done' : t.status === 'in_progress' ? 'active' : '');
-          li.textContent = (t.status === 'completed' ? '✓ ' : t.status === 'in_progress' ? '▸ ' : '○ ') + (t.content || t.step || '');
+          li.className = 'session-history-item';
+          const when = new Date(h.at);
+          const t = (when.toDateString() === today ? '' : (when.getMonth() + 1) + '/' + when.getDate() + ' ')
+            + when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          const meta = h.state ? (SESSION_STATE_META[h.state] || { label: h.state, color: 'var(--text-dim)' }) : null;
+          li.innerHTML = `<span class="session-history-time">${escHtml(t)}</span>`
+            + `<span class="session-history-dot" style="--h-color:${meta ? meta.color : 'var(--text-dim)'}"></span>`
+            + `<span class="session-history-state">${escHtml(h.cleared ? 'cleared' : (meta?.label || ''))}${h.urgency && h.urgency !== 'normal' ? ' !' + (h.urgency === 'urgent' ? '!' : '') : ''}</span>`
+            + (h.reason ? `<span class="session-history-reason" title="${escHtml(h.reason)}">${escHtml(h.reason)}</span>` : '')
+            + `<span class="session-history-by">${h.setBy === 'user' ? 'you' : 'agent'}</span>`;
           list.appendChild(li);
         }
         row.appendChild(list);
-        stepsWrap.appendChild(row);
+        histWrap.appendChild(row);
       }).catch(() => {});
   }
 
