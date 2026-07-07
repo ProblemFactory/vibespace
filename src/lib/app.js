@@ -10,7 +10,7 @@ import { CodeEditor } from './code-editor.js';
 import { LayoutManager } from './layout.js';
 import { ChatView } from './chat-view.js';
 import { Resizer } from './resizer.js';
-import { createPopover, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog } from './utils.js';
+import { createPopover, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog } from './utils.js';
 import { MobileNav } from './mobile-nav.js';
 import { setupDirAutocomplete } from './autocomplete.js';
 import { getAvailableFonts } from './terminal.js';
@@ -397,6 +397,119 @@ class App {
   // ── Manage Agents dialog: install/login status + login/update actions ──
   // One place for CLI lifecycle instead of scattered menu entries. Login and
   // update both run visibly in a shell terminal window (nothing hidden).
+  // Guided "both accounts" setup (subscription OAuth + a saved API key). The
+  // CLI's /login is mutually exclusive, so the wizard choreographs the order:
+  // Console login FIRST (its minted key gets captured into VibeSpace), then log
+  // BACK into the subscription — final state: subscription owns the global
+  // login, the API key lives in our store, sessions pick per-spawn. Each login
+  // step opens a terminal; a background watcher detects completion and reopens
+  // the wizard at the next step.
+  _showAccountsWizard() {
+    document.getElementById('acct-wizard-overlay')?.remove();
+    if (this._acctWatch) { clearInterval(this._acctWatch); this._acctWatch = null; }
+    const overlay = document.createElement('div');
+    overlay.id = 'acct-wizard-overlay';
+    overlay.className = 'dialog-overlay';
+    overlay.style.zIndex = '99998';
+    const dialog = document.createElement('div'); dialog.className = 'dialog';
+    dialog.innerHTML = `<div class="dialog-header"><h3>Set up both Anthropic accounts</h3><button class="dialog-close">✕</button></div>
+      <div class="dialog-body acct-wizard-body"><div class="ob-loading">Checking…</div></div>`;
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    const done = () => { overlay.remove(); if (this._acctWatch) { clearInterval(this._acctWatch); this._acctWatch = null; } };
+    dialog.querySelector('.dialog-close').onclick = done;
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) done(); });
+    const body = dialog.querySelector('.acct-wizard-body');
+
+    // Background watcher: poll until cond(data) is true, then act. Used while a
+    // login terminal is open (the wizard closes so the terminal is usable) —
+    // completion reopens the wizard at the recomputed next step.
+    const watch = (cond, act) => {
+      let tries = 0;
+      this._acctWatch = setInterval(async () => {
+        if (++tries > 100) { clearInterval(this._acctWatch); this._acctWatch = null; return; }
+        let d = null;
+        try { d = await fetchJson('/api/accounts'); } catch { return; }
+        if (d && cond(d)) {
+          clearInterval(this._acctWatch); this._acctWatch = null;
+          await act(d);
+        }
+      }, 3000);
+    };
+
+    const render = async () => {
+      let d = null;
+      try { d = await fetchJson('/api/accounts'); } catch {}
+      if (!d) { body.innerHTML = '<div class="ob-loading">Server unreachable</div>'; return; }
+      const sub = !!d.subscription?.loggedIn;
+      const hasKey = (d.accounts || []).length > 0;
+      const importable = d.cliKey?.present && !d.cliKey.imported;
+      const step = (n, state, title, desc, btn) => `
+        <div class="acct-step ${state}">
+          <span class="acct-step-n">${state === 'done' ? '✓' : n}</span>
+          <div class="acct-step-body"><b>${title}</b><div class="agents-note">${desc}</div>${btn || ''}</div>
+        </div>`;
+      if (sub && hasKey) {
+        body.innerHTML = `<div class="acct-wizard-done"><span class="ob-ok" style="font-size:15px">✓ All set</span>
+          <p class="agents-note">Subscription is the global login and ${(d.accounts.length)} API key${d.accounts.length > 1 ? 's are' : ' is'} saved. Every session can pick its account in the New Session dialog or the card's ⚙ — you'll never need /login switching again.</p></div>`;
+        return;
+      }
+      let html = '';
+      // Step 1 — get an API key into VibeSpace
+      if (hasKey) {
+        html += step(1, 'done', 'API key saved', `${escHtml(d.accounts[0].name)} (…${escHtml(d.accounts[0].tail)})`);
+      } else if (importable) {
+        html += step(1, 'active', 'Save your Console key', 'Your current Console login already minted an API key — one click saves it into VibeSpace (encrypted).', '<button class="agent-btn primary" id="acct-w-import">Import it</button>');
+      } else {
+        html += step(1, 'active', 'Log in to your Console account once',
+          'A terminal will open — in the login menu pick <b>“Anthropic Console account”</b>. This temporarily replaces the subscription login; step 2 restores it right after. VibeSpace auto-captures the key the moment it appears.',
+          '<button class="agent-btn primary" id="acct-w-console">Open login terminal</button>'
+          + '<div class="agents-note" style="margin-top:4px">Or, if you already have a key: <a href="#" id="acct-w-paste">paste an API key</a></div>');
+      }
+      // Step 2 — subscription owns the global login
+      if (sub) {
+        html += step(2, 'done', 'Subscription logged in', escHtml(d.subscription.email || ''));
+      } else {
+        html += step(2, hasKey || importable ? 'active' : 'pending', 'Log back in to your subscription',
+          'A terminal will open — pick <b>“Claude account with subscription”</b> and finish in the browser. VibeSpace detects it automatically.',
+          (hasKey || importable) ? '<button class="agent-btn primary" id="acct-w-sub">Open login terminal</button>' : '');
+      }
+      body.innerHTML = html;
+      body.querySelector('#acct-w-import')?.addEventListener('click', async () => {
+        try { const r = await fetchJson('/api/accounts/import-cli', { method: 'POST' }); showToast('Imported: ' + r.account.name); } catch { showToast('Import failed', { type: 'error' }); }
+        render();
+      });
+      body.querySelector('#acct-w-console')?.addEventListener('click', () => {
+        done();
+        this.openShellTerminal(undefined, { initialCommand: 'claude /login' });
+        showToast('Complete the Console login — setup continues automatically');
+        watch((x) => x.cliKey?.present && !x.cliKey.imported, async () => {
+          try { await fetchJson('/api/accounts/import-cli', { method: 'POST' }); } catch {}
+          showToast('Console key captured ✓ — one step left');
+          this._showAccountsWizard();
+        });
+      });
+      body.querySelector('#acct-w-paste')?.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const key = await showInputDialog({ title: 'Add API key', label: 'Anthropic API key (from console.anthropic.com)', placeholder: 'sk-ant-…', confirmText: 'Save' });
+        if (key && key.trim()) {
+          try { await fetchJson('/api/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: key.trim() }) }); } catch {}
+        }
+        render();
+      });
+      body.querySelector('#acct-w-sub')?.addEventListener('click', () => {
+        done();
+        this.openShellTerminal(undefined, { initialCommand: 'claude /login' });
+        showToast('Complete the subscription login — setup continues automatically');
+        watch((x) => x.subscription?.loggedIn, async () => {
+          showToast('Subscription restored ✓ — accounts setup complete');
+          this._showAccountsWizard();
+        });
+      });
+    };
+    render();
+  }
+
   _showAgentsDialog() {
     document.getElementById('agents-dialog-overlay')?.remove();
     const overlay = document.createElement('div');
@@ -525,6 +638,88 @@ class App {
           }
           row.append(left, actions);
           body.appendChild(row);
+        }
+      }
+      // ── Anthropic accounts (billing identity: subscription ↔ API keys).
+      // Local machine only — remote sessions use the remote's own login. ──
+      if (!selectedHost) {
+        let acct = null;
+        try { acct = await fetchJson('/api/accounts'); } catch {}
+        if (acct) {
+          const accts = await this.refreshAccounts(); // keep app cache in sync
+          const row = document.createElement('div'); row.className = 'ob-backend acct-section';
+          const left = document.createElement('div');
+          left.style.flex = '1';
+          const sub = acct.subscription || {};
+          const subLine = sub.loggedIn
+            ? `<span class="ob-ok">✓ Subscription — ${escHtml(sub.email || 'logged in')}</span>`
+            : `<span class="ob-warn">Subscription: not logged in${acct.cliKey?.present ? ' (a Console login replaced it)' : ''}</span>`;
+          const keyLines = (accts.accounts || []).map(a => {
+            const isDef = accts.defaultAccountId === a.id;
+            return `<div class="acct-key-row" data-id="${escHtml(a.id)}">
+              <span class="ob-ok">✓</span> <span class="acct-key-name">${escHtml(a.name)}</span>
+              <span class="acct-key-tail">API …${escHtml(a.tail)}</span>${isDef ? '<span class="acct-def-badge">default</span>' : ''}
+              <span class="acct-key-actions">
+                <button class="agent-btn acct-test" title="Open a terminal session using this key (approve the CLI's one-time trust prompt here if it appears)">Test</button>
+                <button class="agent-btn acct-def" title="Use for new sessions unless a session picks otherwise">${isDef ? 'Unset default' : 'Set default'}</button>
+                <button class="agent-btn acct-del" title="Remove from VibeSpace (the key itself stays valid)">✕</button>
+              </span></div>`;
+          }).join('');
+          left.innerHTML = `<b>Anthropic accounts</b>
+            <div style="margin:3px 0">${subLine}</div>
+            ${keyLines || '<div class="agents-note">No API keys saved — sessions can only use the CLI’s global login.</div>'}
+            <div class="agents-note" style="margin:4px 0 0">Each session can pick its account (New Session dialog / card ⚙). Subscription = your Pro/Max plan; API keys bill pay-per-use.</div>`;
+          const actions = document.createElement('div'); actions.className = 'agent-actions';
+          const needsSetup = !sub.loggedIn || !(accts.accounts || []).length;
+          const wizardBtn = document.createElement('button');
+          wizardBtn.className = 'agent-btn' + (needsSetup ? ' primary' : '');
+          wizardBtn.textContent = 'Set up both…';
+          wizardBtn.onclick = () => { done(); this._showAccountsWizard(); };
+          actions.appendChild(wizardBtn);
+          if (acct.cliKey?.present && !acct.cliKey.imported) {
+            const impBtn = document.createElement('button'); impBtn.className = 'agent-btn primary';
+            impBtn.textContent = 'Import CLI key';
+            impBtn.title = `Save the key your Console login minted (${escHtml(acct.cliKey.org || '')} …${escHtml(acct.cliKey.tail || '')}) into VibeSpace`;
+            impBtn.onclick = async () => {
+              try { const r = await fetchJson('/api/accounts/import-cli', { method: 'POST' }); showToast('Imported: ' + r.account.name); } catch (e) { showToast('Import failed', { type: 'error' }); }
+              refresh();
+            };
+            actions.appendChild(impBtn);
+          }
+          const addBtn = document.createElement('button'); addBtn.className = 'agent-btn'; addBtn.textContent = 'Add key…';
+          addBtn.onclick = async () => {
+            const key = await showInputDialog({ title: 'Add API key', label: 'Anthropic API key (from console.anthropic.com)', placeholder: 'sk-ant-…', confirmText: 'Save' });
+            if (!key || !key.trim()) return;
+            const name = await showInputDialog({ title: 'Name this account', label: 'Shown in account pickers', placeholder: 'e.g. Company API', confirmText: 'Save' });
+            try {
+              const r = await fetchJson('/api/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: key.trim(), name: (name || '').trim() }) });
+              if (r?.account) showToast('Saved: ' + r.account.name + ' — use Test once to approve the CLI’s trust prompt');
+              else showToast(r?.error || 'Save failed', { type: 'error' });
+            } catch { showToast('Save failed', { type: 'error' }); }
+            refresh();
+          };
+          actions.appendChild(addBtn);
+          row.append(left, actions);
+          body.appendChild(row);
+          // Per-key row actions (event delegation on the section)
+          left.onclick = async (e) => {
+            const keyRow = e.target.closest?.('.acct-key-row');
+            if (!keyRow) return;
+            const id = keyRow.dataset.id;
+            if (e.target.classList.contains('acct-test')) {
+              done();
+              this.createSession({ backend: 'claude', mode: 'terminal', cwd: '', accountId: id });
+            } else if (e.target.classList.contains('acct-def')) {
+              const isDef = accts.defaultAccountId === id;
+              try { await fetchJson('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: isDef ? null : id }) }); } catch {}
+              refresh();
+            } else if (e.target.classList.contains('acct-del')) {
+              const a = (accts.accounts || []).find(x => x.id === id);
+              if (!(await showConfirmDialog({ title: 'Remove account', message: `Remove "${a?.name}" from VibeSpace? Sessions already running keep working; the key itself stays valid.` }))) return;
+              try { await fetchJson(`/api/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }); } catch {}
+              refresh();
+            }
+          };
         }
       }
       const foot = document.createElement('div');
@@ -1267,6 +1462,7 @@ class App {
     else if (this._rateLimit === undefined) this._rateLimit = null;
     if (data?.codexRateLimit) this._codexRateLimit = data.codexRateLimit;
     else if (this._codexRateLimit === undefined) this._codexRateLimit = null;
+    this._subSignedOut = !!data?.subscriptionSignedOut;
     this._renderUsage();
     setTimeout(() => this._pollUsage(), 30000);
   }
@@ -1387,7 +1583,10 @@ class App {
 
     const ago = updatedAt ? Math.round((Date.now() - updatedAt) / 60000) : 0;
     usageEl.innerHTML = rows.join('');
-    popup.innerHTML = `${sections.join('')}<div class="usage-total" style="font-weight:400;color:var(--text-dim)">Updated ${ago < 1 ? 'just now' : ago + 'min ago'}</div>`;
+    const signedOutNote = this._subSignedOut
+      ? `<div class="usage-total" style="font-weight:400;color:var(--yellow,#e5c07b)">⚠ Subscription signed out (a Console login replaced it) — these pies show its last-known quota and stop updating once the cached token expires. API-key sessions are billed pay-per-use and never appear here.</div>`
+      : '';
+    popup.innerHTML = `${sections.join('')}${signedOutNote}<div class="usage-total" style="font-weight:400;color:var(--text-dim)">Updated ${ago < 1 ? 'just now' : ago + 'min ago'}</div>`;
   }
 
   // Command mode extracted to CommandMode class (src/lib/command-mode.js)
