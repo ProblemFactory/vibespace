@@ -388,14 +388,18 @@ export function installSidebarState(SidebarClass) {
     this._pushUserState();
   };
 
-  // Per-session parameter overrides: { model, effort, permission } (only non-empty keys stored)
+  // Per-session parameter overrides: { model, effort, permission, account }
+  // (only non-empty keys stored)
   proto.getSessionConfig = function(sessionOrKey) { return this._stateMapGet(this._sessionConfigs, sessionOrKey); };
 
   proto.setSessionConfig = function(sessionOrKey, config) {
     const stateKey = this._getSessionStateKey(sessionOrKey);
     if (!stateKey) return;
     const clean = {};
-    for (const k of ['model', 'effort', 'permission']) {
+    // NOTE: this whitelist silently dropped 'account' when it was added in
+    // 2.43.0 (the gear's Account pick never saved) — keep it in sync with the
+    // gear popover's rows.
+    for (const k of ['model', 'effort', 'permission', 'account']) {
       if (config?.[k]) clean[k] = config[k];
     }
     if (Object.keys(clean).length) this._sessionConfigs[stateKey] = clean;

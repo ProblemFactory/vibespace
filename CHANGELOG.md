@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.48.2] — 2026-07-07
+
+### Fixed
+- The per-session **Account** override (card ⚙) never saved: `setSessionConfig`
+  whitelisted only model/effort/permission and silently dropped the `account`
+  key. Picking an API key in the gear now persists, shows in the config badge,
+  and applies on every resume path.
+
 ## [2.48.1] — 2026-07-07
 
 ### Added
