@@ -152,12 +152,24 @@ class TaskManager {
         if (e.isDirectory()) walk(p, r, depth + 1);
         else {
           let st; try { st = fs.statSync(p); } catch { continue; }
-          out.push({ path: r, size: st.size });
+          out.push({ path: r, size: st.size, mtime: st.mtimeMs });
         }
       }
     };
     walk(dir, '', 0);
     return out;
+  }
+
+  // Cheap content signature of a context folder — path:size:mtime of each
+  // indexed file. Detects USER-written changes (files added / edited / removed
+  // in contextDir, OUTSIDE the task store, which therefore don't bump
+  // updatedAt) so the next agent turn re-injects the group. Ignores .vibespace/
+  // (program-managed) since _listContextFiles skips it.
+  contextDirSignature(dir) {
+    if (!dir) return '';
+    return this._listContextFiles(dir, 200)
+      .map((f) => `${f.path}:${f.size}:${Math.round(f.mtime || 0)}`)
+      .join('|');
   }
 
   // The SessionStart injection payload (design §4a): rendered task state +
