@@ -198,11 +198,15 @@ class Sidebar {
     const t = this._activeTab;
     const show = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
     show('session-filter', t !== 'mounts');
-    show('backend-filter', t === 'folders');
+    // The unified filter menu (status/backend/machine/kind) applies on BOTH
+    // session tabs — its backend/host/kind dimensions filter the Tasks tab too
+    // (hiding it while they silently kept filtering was a 2.47.0 bug); its
+    // Status section self-hides on the tasks tab (see _showBackendFilterMenu).
+    show('backend-filter', t !== 'mounts');
     show('sort-toggle', t === 'folders');
     show('manage-toggle', t !== 'mounts');
     show('status-quick-tabs', t === 'folders');
-    show('agent-kind-quick-tabs', t === 'folders');
+    show('agent-kind-quick-tabs', t !== 'mounts'); // agentKind filter applies on tasks too
   }
 
   // ── Highlight / Sort / Filter ──
@@ -299,7 +303,11 @@ class Sidebar {
     // open/close toggles fight each other (status click closed the backend
     // menu; backend's own toggle check never matched)
     const menu = createPopover(anchor, 'backend-filter-menu status-filter-menu');
-    {
+    // The connection-Status section is FOLDERS-ONLY: the Task Groups tab
+    // deliberately bypasses the status filter (a group's members are often
+    // stopped — 2.41.0), and Task View has its own state filter. Showing dead
+    // checkboxes there would misrepresent what's being filtered.
+    if (this._activeTab !== 'tasks') {
       const head = document.createElement('div');
       head.className = 'status-filter-sec';
       head.style.borderTop = 'none';
@@ -320,8 +328,11 @@ class Sidebar {
         row.append(cb, lbl);
         menu.appendChild(row);
       }
+    }
+    {
       const bhead = document.createElement('div');
       bhead.className = 'status-filter-sec';
+      if (this._activeTab === 'tasks') bhead.style.borderTop = 'none';
       bhead.textContent = 'Backend';
       menu.appendChild(bhead);
     }

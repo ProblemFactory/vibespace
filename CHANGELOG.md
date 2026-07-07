@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.47.1] — 2026-07-07
+
+### Fixed
+- 2.47.0 wrongly hid the unified filter button on the Task Groups tab: despite
+  its "backend filter" name it holds FOUR dimensions (connection status /
+  backend / machine / agent kind), and three of them still apply there — they
+  kept filtering silently with no visible control. The button now shows on both
+  session tabs, and the menu hides its (genuinely inapplicable) Status section
+  on the Task Groups tab.
+- Naming: the sidebar text input now says "Search..." — it clashed with the
+  Task View "Filter" button (two things labeled filter).
+
 ## [2.47.0] — 2026-07-07
 
 ### Changed — sidebar per-tab cleanup + defaults
