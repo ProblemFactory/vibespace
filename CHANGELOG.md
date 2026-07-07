@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.50.0] — 2026-07-08
+
+### Added — mobile flat Task View
+The mobile Task Groups tab now has the same **Groups | Tasks** sub-views as
+desktop: Groups keeps the two-level drill-down; Tasks is the flat
+urgency-sorted 活儿 list (same renderer as desktop — group color bars, cwd on
+cards, untagged actives at the bottom with a stopped-count pointer). The sort
+menu button works on mobile there too; the header filter menu's State section
+applies as on desktop. Back from a group drill-down restores the sub-tab bar.
+
 ## [2.49.1] — 2026-07-08
 
 ### Fixed (mobile)
