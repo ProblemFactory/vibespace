@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.48.1] — 2026-07-07
+
+### Added
+- The billing key also shows in the **window title bar** (and on tabs in a tab
+  group): amber key on API-billed sessions, dashed "?" on unknown ones —
+  synced live from the same per-session auth source as the card badge.
+
 ## [2.48.0] — 2026-07-07
 
 ### Added — per-session billing identity (who's spending what)
