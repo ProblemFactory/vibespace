@@ -219,8 +219,13 @@ html, body {
   display: inline-flex; align-items: center; padding: 1px 3px;
 }
 .badge-account svg { width: 10px; height: 10px; flex-shrink: 0; }
+/* Manage Agents dialog: wider than the 440px default — its rows carry real
+   button groups (login/update, accounts) that truncate/wrap at 440px */
+.dialog.agents-dialog { width: 560px; max-width: 92vw; }
+.agents-dialog .agent-btn { white-space: nowrap; }
 /* Anthropic accounts section (Manage Agents) + setup wizard */
-.acct-section { align-items: flex-start; }
+.acct-section { flex-direction: column; align-items: stretch; }
+.acct-section > .agent-actions { flex-wrap: wrap; justify-content: flex-start; margin-top: 8px; padding-top: 8px; border-top: 1px solid color-mix(in srgb, var(--border) 50%, transparent); }
 .acct-key-row { display: flex; align-items: center; gap: 6px; margin: 3px 0; font-size: 11px; }
 .acct-key-name { font-weight: 600; }
 .acct-key-tail { color: var(--text-dim); font-size: 10px; }

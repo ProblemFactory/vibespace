@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.43.1] — 2026-07-07
+
+### Fixed
+- Manage Agents dialog: widened to 560px and the accounts section switched to a
+  column layout (buttons no longer truncate/wrap at the 440px default width).
+
 ## [2.43.0] — 2026-07-07
 
 ### Added — Anthropic account switching (subscription ↔ API, per session)

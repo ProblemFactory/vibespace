@@ -516,7 +516,7 @@ class App {
     overlay.id = 'agents-dialog-overlay';
     overlay.className = 'dialog-overlay';
     overlay.style.zIndex = '99998';
-    const dialog = document.createElement('div'); dialog.className = 'dialog';
+    const dialog = document.createElement('div'); dialog.className = 'dialog agents-dialog';
     const header = document.createElement('div'); header.className = 'dialog-header';
     const h3 = document.createElement('h3'); h3.textContent = 'Agents';
     const closeBtn = document.createElement('button'); closeBtn.className = 'dialog-close'; closeBtn.textContent = '\u2715';
