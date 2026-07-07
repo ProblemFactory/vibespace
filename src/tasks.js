@@ -398,6 +398,9 @@ class TaskManager {
       t.plan = patch.plan.slice(0, CAPS.planItems).map((it) => ({
         text: String(it?.text || '').slice(0, CAPS.planItem),
         done: !!it?.done,
+        // P5: loose, informational link — which session ticked this step
+        // (recorded by vibespace-task plan-check; never enforced).
+        ...(it?.by ? { by: String(it.by).slice(0, 120) } : {}),
       })).filter((it) => it.text);
     }
     if (patch.attention !== undefined) {

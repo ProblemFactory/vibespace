@@ -105,13 +105,27 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
         row.className = 'task-detail-plan-item' + (item.done ? ' done' : '');
         const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!item.done;
         cb.onchange = () => {
-          const plan = task.plan.map((p, j) => j === i ? { ...p, done: cb.checked } : p);
+          const plan = task.plan.map((p, j) => {
+            if (j !== i) return p;
+            const np = { ...p, done: cb.checked };
+            if (!cb.checked) delete np.by; // P5: unticking clears the "done by" link
+            return np;
+          });
           patch({ plan });
         };
         const txt = document.createElement('span'); txt.textContent = item.text;
         const del = document.createElement('button'); del.className = 'task-detail-x'; del.textContent = '×'; del.title = 'Remove step';
         del.onclick = () => patch({ plan: task.plan.filter((_, j) => j !== i) });
-        row.append(cb, txt, del);
+        row.append(cb, txt);
+        if (item.done && item.by) {
+          // P5: loose, informational link — which session ticked this step.
+          const by = document.createElement('span');
+          by.className = 'task-detail-plan-by';
+          by.textContent = item.by.replace(/^(\w+):(.{6}).*/, '$1:$2…');
+          by.title = 'Ticked by session ' + item.by;
+          row.append(by);
+        }
+        row.append(del);
         planList.appendChild(row);
       });
       planSec.appendChild(planList);

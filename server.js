@@ -1697,6 +1697,9 @@ app.post('/api/agent/task-plan', (req, res) => {
         else return res.status(400).json({ error: matches.length ? 'ambiguous step — use its number' : 'no matching plan step' });
       }
       plan[idx].done = done;
+      // P5: record who ticked it (loose, informational — never enforced).
+      if (done) plan[idx].by = sessionStatusKey(hit[0], hit[1]);
+      else delete plan[idx].by;
     } else {
       return res.status(400).json({ error: 'need add, check, or uncheck' });
     }
