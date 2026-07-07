@@ -83,6 +83,22 @@ class Sidebar {
     const sortBtn = document.getElementById('sort-toggle');
     this._updateSortBtn(sortBtn);
     sortBtn.onclick = () => {
+      if (this._activeTab === 'tasks') {
+        // Task View sort menu (urgency/status/recent/name) — same control
+        // position as the Folders sort, per-context contents.
+        const r = sortBtn.getBoundingClientRect();
+        const SORTS = { urgency: 'Urgency + status', status: 'Status', recent: 'Recent', name: 'Name' };
+        showContextMenu(r.left, r.bottom + 2, Object.entries(SORTS).map(([k, label]) => ({
+          label: (this._taskViewSortMode === k ? '✓ ' : '  ') + label,
+          action: () => {
+            this._taskViewSortMode = k;
+            try { localStorage.setItem('vibespace.taskViewSort', k); } catch {}
+            this._updateSortBtn(sortBtn);
+            this._render();
+          },
+        })));
+        return;
+      }
       this._sortMode = this._sortMode === 'recent' ? 'folder' : 'recent';
       localStorage.setItem('sessionSort', this._sortMode);
       this._updateSortBtn(sortBtn);
@@ -203,7 +219,11 @@ class Sidebar {
     // (hiding it while they silently kept filtering was a 2.47.0 bug); its
     // Status section self-hides on the tasks tab (see _showBackendFilterMenu).
     show('backend-filter', t !== 'mounts');
-    show('sort-toggle', t === 'folders');
+    // Sort: Folders = recent/folder cycle; Tasks tab shows it only in the flat
+    // Tasks view (the Groups board has a fixed attention order). Same button,
+    // per-context behavior — no separate toolbar row inside the view.
+    show('sort-toggle', t === 'folders' || (t === 'tasks' && this._boardView === 'tasks'));
+    this._updateSortBtn(document.getElementById('sort-toggle'));
     show('manage-toggle', t !== 'mounts');
     show('status-quick-tabs', t === 'folders');
     show('agent-kind-quick-tabs', t !== 'mounts'); // agentKind filter applies on tasks too
@@ -257,6 +277,14 @@ class Sidebar {
   }
 
   _updateSortBtn(btn) {
+    if (!btn) return;
+    // Context-aware: on the Task Groups tab (Tasks view) the button owns the
+    // Task View sort menu; on Folders it cycles recent/folder grouping.
+    if (this._activeTab === 'tasks') {
+      btn.innerHTML = '<svg style="width:11px;height:11px;vertical-align:-1px" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v10M5 13l-2.5-2.5M5 13l2.5-2.5M11 13V3M11 3L8.5 5.5M11 3l2.5 2.5"/></svg>';
+      btn.title = `Sort by: ${({ urgency: 'Urgency + status', status: 'Status', recent: 'Recent', name: 'Name' })[this._taskViewSortMode] || 'Urgency + status'}`;
+      return;
+    }
     btn.innerHTML = this._sortMode === 'recent' ? '<svg style="width:11px;height:11px;vertical-align:-1px" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="6"/><path d="M8 4v4l3 1.5"/></svg>' : '<svg style="width:11px;height:11px;vertical-align:-1px" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h4l2 2h6v7a1 1 0 01-1 1H3a1 1 0 01-1-1V4z"/></svg>';
     btn.title = `Sort by: ${this._sortMode === 'recent' ? 'Recent' : 'Folder'}`;
   }
@@ -303,10 +331,39 @@ class Sidebar {
     // open/close toggles fight each other (status click closed the backend
     // menu; backend's own toggle check never matched)
     const menu = createPopover(anchor, 'backend-filter-menu status-filter-menu');
+    // On the Task Groups tab (flat Tasks view) the first section is the session
+    // STATE filter (working/needs-input/…/done) — it lives HERE so all
+    // narrowing controls share one menu instead of a second toolbar row.
+    if (this._activeTab === 'tasks' && this._boardView === 'tasks') {
+      const head = document.createElement('div');
+      head.className = 'status-filter-sec';
+      head.style.borderTop = 'none';
+      head.textContent = 'State';
+      menu.appendChild(head);
+      const cur = new Set(this._taskViewStatusFilter || []);
+      const apply = () => {
+        const arr = [...cur];
+        this._taskViewStatusFilter = arr.length ? arr : null;
+        try { localStorage.setItem('vibespace.taskViewFilter', JSON.stringify(this._taskViewStatusFilter)); } catch {}
+        this._render();
+      };
+      for (const st of ['working', 'needs-input', 'blocked', 'review', 'done']) {
+        const row = document.createElement('label'); row.className = 'status-filter-item';
+        const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = cur.has(st);
+        cb.onchange = () => { cb.checked ? cur.add(st) : cur.delete(st); apply(); };
+        const lbl = document.createElement('span'); lbl.textContent = st;
+        row.append(cb, lbl);
+        menu.appendChild(row);
+      }
+      const hint = document.createElement('div');
+      hint.className = 'status-filter-hint';
+      hint.textContent = 'none checked = show all states';
+      menu.appendChild(hint);
+    }
     // The connection-Status section is FOLDERS-ONLY: the Task Groups tab
     // deliberately bypasses the status filter (a group's members are often
-    // stopped — 2.41.0), and Task View has its own state filter. Showing dead
-    // checkboxes there would misrepresent what's being filtered.
+    // stopped — 2.41.0), and Task View has its own state filter (above). Showing
+    // dead checkboxes there would misrepresent what's being filtered.
     if (this._activeTab !== 'tasks') {
       const head = document.createElement('div');
       head.className = 'status-filter-sec';
@@ -332,7 +389,7 @@ class Sidebar {
     {
       const bhead = document.createElement('div');
       bhead.className = 'status-filter-sec';
-      if (this._activeTab === 'tasks') bhead.style.borderTop = 'none';
+      if (this._activeTab === 'tasks' && this._boardView !== 'tasks') bhead.style.borderTop = 'none';
       bhead.textContent = 'Backend';
       menu.appendChild(bhead);
     }
@@ -606,6 +663,7 @@ class Sidebar {
         webuiMode: wm ? (wm.mode || 'terminal') : null,
         accountName: wm?.accountName || null, // billing identity badge (API key sessions)
         accountTail: wm?.accountTail || null,
+        auth: wm?.auth || null, // billing identity (subscription/api-console/api-key/unknown)
         todo: wm?.todo || null, // agent's own TodoWrite/plan summary (board pill)
       };
     });
@@ -637,6 +695,7 @@ class Sidebar {
           webuiMode: ws.mode || 'terminal',
           accountName: ws.accountName || null,
           accountTail: ws.accountTail || null,
+          auth: ws.auth || null,
           todo: ws.todo || null,
         });
       }

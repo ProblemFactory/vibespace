@@ -640,8 +640,48 @@ class App {
           body.appendChild(row);
         }
       }
-      // ── Anthropic accounts (billing identity: subscription ↔ API keys).
-      // Local machine only — remote sessions use the remote's own login. ──
+      // ── Anthropic accounts (billing identity: subscription ↔ API keys). ──
+      // Remote host selected: probe the HOST's login state + offer importing
+      // its console key into the central store (keys are host-agnostic — they
+      // ship to whichever host a session spawns on).
+      if (selectedHost) {
+        let racct = null;
+        try { racct = await fetchJson(`/api/hosts/${encodeURIComponent(selectedHost)}/accounts-status`); } catch {}
+        if (racct && !racct.error) {
+          const accts = this._accounts || { accounts: [] };
+          const hostLabel = hostSel.options[hostSel.selectedIndex]?.textContent?.split(' (')[0] || 'host';
+          const row = document.createElement('div'); row.className = 'ob-backend acct-section';
+          const left = document.createElement('div'); left.style.flex = '1';
+          const importedTails = new Set((accts.accounts || []).map(a => a.tail));
+          left.innerHTML = `<b>Anthropic accounts on ${escHtml(hostLabel)}</b>
+            <div style="margin:3px 0">${racct.subscription?.loggedIn
+              ? '<span class="ob-ok">✓ Subscription logged in (on the host)</span>'
+              : `<span class="ob-warn">Subscription: not logged in${racct.cliKey?.present ? ' (a Console login replaced it)' : ''}</span>`}</div>
+            ${racct.cliKey?.present ? `<div style="margin:3px 0">Console key on host: …${escHtml(racct.cliKey.tail)} ${importedTails.has(racct.cliKey.tail) ? '<span class="ob-ok">✓ imported</span>' : '<span class="ob-warn">not imported</span>'}</div>` : ''}
+            <div class="agents-note" style="margin:4px 0 0">API keys live in the central store (${(accts.accounts || []).length} saved) and are pushed to the host per session — pick the account in the New Session dialog / card ⚙. 'Subscription' there means THIS host's own login.</div>`;
+          const actions = document.createElement('div'); actions.className = 'agent-actions';
+          const loginBtn = document.createElement('button');
+          loginBtn.className = 'agent-btn' + (racct.subscription?.loggedIn ? '' : ' primary');
+          loginBtn.textContent = 'Log in on host…';
+          loginBtn.title = 'Opens a terminal ON the host running claude /login';
+          loginBtn.onclick = () => run('claude /login');
+          actions.appendChild(loginBtn);
+          if (racct.cliKey?.present && !importedTails.has(racct.cliKey.tail)) {
+            const impBtn = document.createElement('button'); impBtn.className = 'agent-btn primary';
+            impBtn.textContent = 'Import host key';
+            impBtn.onclick = async () => {
+              try {
+                const r = await fetchJson('/api/accounts/import-cli-host', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hostId: selectedHost }) });
+                if (r?.account) showToast('Imported: ' + r.account.name); else showToast(r?.error || 'Import failed', { type: 'error' });
+              } catch { showToast('Import failed', { type: 'error' }); }
+              refresh();
+            };
+            actions.appendChild(impBtn);
+          }
+          row.append(left, actions);
+          body.appendChild(row);
+        }
+      }
       if (!selectedHost) {
         let acct = null;
         try { acct = await fetchJson('/api/accounts'); } catch {}
@@ -1503,7 +1543,11 @@ class App {
 
     const rows = [];
     const sections = [];
-    let updatedAt = 0;
+    const agoText = (ts) => {
+      if (!ts) return '—';
+      const m = Math.round((Date.now() - ts) / 60000);
+      return m < 1 ? 'just now' : m + 'min ago';
+    };
     const fmtReset = (ts) => {
       if (!ts) return '?';
       const d = new Date(ts * 1000), now = new Date();
@@ -1520,7 +1564,6 @@ class App {
       const pct7d = Math.round((rl.sevenDay?.utilization || 0) * 100);
       const color7d = usageColor(pct7d);
       rows.push(renderRow('claude', '5h', pct5h, '7d', pct7d));
-      updatedAt = Math.max(updatedAt, rl.fetchedAt || 0);
       const scopedSections = [];
       for (const sc of rl.scopedWeekly || []) {
         const pctSc = Math.round((sc.utilization || 0) * 100);
@@ -1551,7 +1594,9 @@ class App {
           <span class="usage-stat">${pct7d}% used</span>
           <span class="usage-stat"><span class="usage-stat-label">Resets</span> ${fmtReset(rl.sevenDay?.resetsAt)}</span>
         </div>
-      </div>${scopedSections.join('')}`);
+      </div>${scopedSections.join('')}
+      ${this._subSignedOut ? `<div class="usage-note">⚠ Subscription signed out (a Console login replaced it) — pies show its last-known quota. API-billed sessions never appear here.</div>` : ''}
+      <div class="usage-updated">Updated ${agoText(rl.fetchedAt)}</div>`);
     }
 
     if (codex?.fiveHour || codex?.sevenDay) {
@@ -1560,7 +1605,6 @@ class App {
       const color5h = usageColor(pct5h);
       const color7d = usageColor(pct7d);
       rows.push(renderRow('codex', '5h', pct5h, '7d', pct7d));
-      updatedAt = Math.max(updatedAt, codex.fetchedAt || 0);
       sections.push(`${renderSectionTitle('codex', 'Codex')}
       <div class="usage-session">
         <div class="usage-session-name">5-hour limit</div>
@@ -1578,15 +1622,14 @@ class App {
           <span class="usage-stat"><span class="usage-stat-label">Resets</span> ${fmtReset(codex.sevenDay?.resetsAt)}</span>
           ${codex.planType ? `<span class="usage-stat"><span class="usage-stat-label">Plan</span> ${escHtml(codex.planType)}</span>` : ''}
         </div>
-      </div>`);
+      </div>
+      <div class="usage-updated">Updated ${agoText(codex.fetchedAt)}</div>`);
     }
 
-    const ago = updatedAt ? Math.round((Date.now() - updatedAt) / 60000) : 0;
     usageEl.innerHTML = rows.join('');
-    const signedOutNote = this._subSignedOut
-      ? `<div class="usage-total" style="font-weight:400;color:var(--yellow,#e5c07b)">⚠ Subscription signed out (a Console login replaced it) — these pies show its last-known quota and stop updating once the cached token expires. API-key sessions are billed pay-per-use and never appear here.</div>`
-      : '';
-    popup.innerHTML = `${sections.join('')}${signedOutNote}<div class="usage-total" style="font-weight:400;color:var(--text-dim)">Updated ${ago < 1 ? 'just now' : ago + 'min ago'}</div>`;
+    // Per-SECTION freshness: claude and codex poll independently — a stalled
+    // claude poll (e.g. signed out) must not make codex's data look stale too.
+    popup.innerHTML = sections.join('');
   }
 
   // Command mode extracted to CommandMode class (src/lib/command-mode.js)

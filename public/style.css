@@ -840,8 +840,10 @@ html, body {
 .usage-popup {
   position: fixed; bottom: 50px; right: 10px; z-index: 99999;
   background: var(--bg-dialog); border: 1px solid var(--border-active); border-radius: var(--radius);
-  box-shadow: 0 -8px 24px rgba(0,0,0,0.4); padding: 12px; min-width: 280px; max-height: 400px; overflow-y: auto;
+  box-shadow: 0 -8px 24px rgba(0,0,0,0.4); padding: 12px; min-width: 280px; max-width: 340px; max-height: 400px; overflow-y: auto;
 }
+.usage-note { font-size: 11px; color: var(--yellow, #e5c07b); white-space: normal; line-height: 1.45; margin-top: 6px; }
+.usage-updated { font-size: 10px; color: var(--text-dim); margin: 4px 0 10px; }
 .usage-popup.hidden { display: none; }
 .usage-popup h4 { font-size: 12px; color: var(--text); margin-bottom: 8px; }
 .usage-section-title {
@@ -2256,3 +2258,10 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 .tv-filter-pop label:hover { background: var(--hover-overlay, rgba(127,127,127,.1)); }
 .tv-filter-clear { margin-top: 4px; padding: 4px; font-size: 10px; background: none; border: 1px solid var(--border); border-radius: 4px; color: var(--text-secondary); cursor: pointer; }
 .tv-filter-clear:hover { background: var(--hover-overlay, rgba(127,127,127,.1)); }
+/* Billing identity unknown (pre-tracking live sessions): dashed grey key + ? */
+.badge-account-unknown {
+  background: color-mix(in srgb, var(--text-dim) 10%, transparent); color: var(--text-dim);
+  border: 1px dashed color-mix(in srgb, var(--text-dim) 50%, transparent); gap: 1px; font-size: 8px;
+}
+/* Unified filter menu: hint row under the State section */
+.status-filter-hint { font-size: 9px; color: var(--text-dim); padding: 2px 8px 4px; }

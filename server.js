@@ -778,6 +778,18 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
               broadcastActiveSessions();
             }
 
+            // Billing identity TRUTH: the init record's apiKeySource is the
+            // CLI's own statement of what auth it resolved — 'none'=subscription
+            // OAuth, '/login managed key'=console login (API billing),
+            // 'ANTHROPIC_API_KEY'=env key. Overrides the spawn-time guess.
+            if (msg.type === 'system' && msg.subtype === 'init' && typeof msg.apiKeySource === 'string') {
+              if (session._apiKeySource !== msg.apiKeySource) {
+                session._apiKeySource = msg.apiKeySource;
+                if (session.sockName) writeSessionMeta(session.sockName, { ...(readSessionMeta(session.sockName) || {}), apiKeySource: msg.apiKeySource });
+                broadcastActiveSessions();
+              }
+            }
+
             // TodoWrite / TaskCreate / TaskUpdate → the session's live TODO
             // summary (board pill). TaskCreate's id arrives in the RESULT.
             if (msg.type === 'assistant' && Array.isArray(msg.message?.content)) {
@@ -1062,6 +1074,8 @@ function restoreSessions() {
       agentToken: meta.agentToken || null, // vibespace-status auth survives restarts
       _initialGroupId: meta.taskId || null, // group spawned into; belonging is live-derived, this only covers the pre-bind window
       _accountId: meta.accountId || null, // billing identity the session was spawned with (badge only — env lives in the surviving dtach process)
+      _authAtSpawn: meta.authAtSpawn || null,
+      _apiKeySource: meta.apiKeySource || null, // CLI-confirmed auth (init record); backfilled from the buffer below when absent
       sockName: sockFile,
       socketPath,
       buffer: savedBuffer,
@@ -1087,6 +1101,38 @@ function restoreSessions() {
 
   // Populate webuiPids cache after all sessions are restored
   refreshWebuiPids();
+
+  // Backfill billing identity for sessions restored WITHOUT a recorded
+  // apiKeySource (spawned before tracking): chat sessions carry the init
+  // record in their buffer (grep the last occurrence — bounded child
+  // process, off the boot critical path); terminal sessions get a /proc env
+  // probe (env key = definite API). One broadcast when done.
+  setTimeout(() => {
+    const { execFile } = require('child_process');
+    let pending = 0, changed = false;
+    const finish = () => { if (--pending === 0 && changed) broadcastActiveSessions(); };
+    for (const [id, s] of activeSessions) {
+      if (s.backend !== 'claude' || s._apiKeySource) continue;
+      const buf = path.join(BUFFERS_DIR, `${id}.buf`);
+      pending++;
+      execFile('sh', ['-c', `grep -o 'apiKeySource":"[^"]*"' ${JSON.stringify(buf)} 2>/dev/null | tail -1`], { timeout: 20000 }, (err, out) => {
+        const m = /apiKeySource":"([^"]*)"/.exec(String(out || ''));
+        if (m) {
+          s._apiKeySource = m[1];
+          if (s.sockName) { try { writeSessionMeta(s.sockName, { ...(readSessionMeta(s.sockName) || {}), apiKeySource: m[1] }); } catch { } }
+          changed = true;
+        } else if (!s._authAtSpawn && s._childPid) {
+          // terminal session: env probe (only the env-key case is provable)
+          try {
+            const env = fs.readFileSync(`/proc/${s._childPid}/environ`, 'utf-8');
+            if (env.includes('ANTHROPIC_API_KEY=')) { s._apiKeySource = 'ANTHROPIC_API_KEY'; changed = true; }
+          } catch { }
+        }
+        finish();
+      });
+    }
+    if (!pending) { /* nothing to backfill */ }
+  }, 3000);
 
   // Warn about surviving sessions whose CLI is still running in child-session
   // mode (spawned while the server env carried CLAUDE_CODE_CHILD_SESSION —
@@ -1630,6 +1676,22 @@ app.post('/api/accounts', (req, res) => {
 app.post('/api/accounts/import-cli', (req, res) => {
   try { res.json({ success: true, account: accounts.importFromCli() }); }
   catch (e) { res.status(400).json({ error: e.message }); }
+});
+// Anthropic login state ON a remote host (subscription OAuth? console key?) —
+// powers the Manage Agents accounts section when a host is selected.
+app.get('/api/hosts/:id/accounts-status', async (req, res) => {
+  try { res.json(await hosts.accountsStatus(req.params.id)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+// Import the console-login key minted on a REMOTE host into the central store
+// (the store is host-agnostic — keys are pushed per-session wherever needed).
+app.post('/api/accounts/import-cli-host', async (req, res) => {
+  try {
+    const { key, org } = await hosts.cliPrimaryKey(req.body?.hostId);
+    if (!key) return res.status(400).json({ error: 'no primaryApiKey on that host — log in to a Console account there first' });
+    const hostName = (() => { try { return hosts.get(req.body?.hostId)?.name; } catch { return null; } })();
+    res.json({ success: true, account: accounts.add({ name: (org || 'Console') + ' (API' + (hostName ? ', ' + hostName : '') + ')', key, source: 'cli-import' }) });
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.post('/api/accounts/default', (req, res) => {
   try { accounts.setDefault(req.body?.id || null); res.json({ success: true }); }
@@ -2180,7 +2242,7 @@ function createSessionMessages(session, sessionId) {
 
 // ── Session API (extracted to src/routes/sessions.js) ──
 const { router: sessionsRouter, setup: setupSessions } = require('./src/routes/sessions');
-setupSessions({ activeSessions, webuiPids, refreshWebuiPids, createSessionMessages, BUFFERS_DIR, PERMISSION_MODES, execFileSync, hosts, accounts });
+setupSessions({ activeSessions, webuiPids, refreshWebuiPids, createSessionMessages, BUFFERS_DIR, PERMISSION_MODES, execFileSync, hosts, accounts, sessionAuth });
 // Backend readiness for onboarding: is each CLI installed + logged in?
 // Login detection is best-effort file existence — never spawns the CLIs.
 app.get('/api/backend-status', (req, res) => {
@@ -2520,6 +2582,30 @@ registerWsHandler(wss, {
   sessionStatus, sessionStatusKey, getTasks: () => tasks, accounts, scheduleCtxSync,
 });
 
+// Billing identity for the card badge. Precedence: env-key spawn (definite) →
+// the CLI's OWN init statement (apiKeySource: 'none'=subscription OAuth,
+// '/login managed key'=console login=API billing, 'ANTHROPIC_API_KEY'=env) →
+// spawn-time global-login guess (marked guessed) → unknown. This is what tells
+// the user WHICH sessions still burn API money after they re-login to the
+// subscription: env-key/console sessions keep their auth for their lifetime.
+function sessionAuth(s) {
+  if ((s.backend || 'claude') !== 'claude') return null;
+  if (s._accountId) {
+    const a = accounts.get(s._accountId);
+    return { source: 'api-key', name: a?.name || 'API key', tail: a?.tail || null };
+  }
+  const src = s._apiKeySource;
+  if (src === 'none') return { source: 'subscription' };
+  if (src === '/login managed key') return { source: 'api-console' };
+  if (src === 'ANTHROPIC_API_KEY') return { source: 'api-key', name: 'env key' };
+  if (typeof src === 'string' && src) return { source: 'api-other', detail: src };
+  const at = s._authAtSpawn;
+  if (at === 'subscription') return { source: 'subscription', guessed: true };
+  if (at === 'console') return { source: 'api-console', guessed: true };
+  if (at === 'env-key') return { source: 'api-key', guessed: true };
+  return { source: 'unknown' };
+}
+
 function broadcastActiveSessions() {
   const getSessionKey = (session = {}) => {
     const backend = session.backend || 'claude';
@@ -2552,6 +2638,7 @@ function broadcastActiveSessions() {
       accountName: s._accountId ? (accounts.get(s._accountId)?.name || 'API key') : null,
       accountTail: s._accountId ? (accounts.get(s._accountId)?.tail || null) : null,
       todo: s._todos || null, // {done, total, current} — the agent's own TodoWrite/plan
+      auth: sessionAuth(s), // billing identity (subscription / api-console / api-key / unknown)
       mode: s.mode || 'terminal',
     });
   }

@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.48.0] — 2026-07-07
+
+### Added — per-session billing identity (who's spending what)
+Every Claude session now carries its billing identity, so sessions that keep
+burning API money after you re-login to the subscription stay visible:
+- Amber key badge on **every API-billed session** — via a chosen API key OR a
+  Console global login at spawn (tooltip says which). Subscription sessions
+  stay quiet. Pre-tracking busy sessions show a dashed "?" badge (their init
+  record scrolled out of the buffer) and self-resolve on the next resume.
+- Truth source: the CLI's own init record (`apiKeySource`: none=subscription,
+  '/login managed key'=Console, ANTHROPIC_API_KEY=env key), captured live and
+  persisted; falls back to the spawn-time global-login state (marked
+  "estimated"). Backfill on restart from the session buffer + /proc env probe.
+
+### Added — remote host account status
+- Manage Agents with a host selected now shows the HOST's Anthropic login
+  state (subscription / console key), a "Log in on host…" terminal button, and
+  one-click **Import host key** into the central store.
+
+### Changed — one control row on the Task Groups tab
+- The flat Tasks view's embedded Sort/Filter toolbar is gone: the header's
+  sort button is context-aware (opens the urgency/status/recent/name menu
+  there), and the session-state filter became the first section of the unified
+  filter menu. Search + Filter + Sort now live side by side in one row, and
+  the search box narrows ALL sub-views of the tab.
+
+### Fixed
+- Usage popup: no longer stretched by the signed-out note (max-width + wrap),
+  and each backend section shows its OWN "Updated X ago" — a stalled Claude
+  poll no longer makes Codex's data look stale.
+
 ## [2.47.1] — 2026-07-07
 
 ### Fixed

@@ -651,6 +651,7 @@ function setup(ctx) {
         accountName: s._accountId ? (ctx.accounts?.get(s._accountId)?.name || 'API key') : null,
         accountTail: s._accountId ? (ctx.accounts?.get(s._accountId)?.tail || null) : null,
         todo: s._todos || null,
+        auth: ctx.sessionAuth ? ctx.sessionAuth(s) : null,
         mode: s.mode || 'terminal',
         host: s.host || null,
         hostName: s.hostName || null,
