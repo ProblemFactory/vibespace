@@ -1499,7 +1499,19 @@ app.patch('/api/accounts/:id', (req, res) => {
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.delete('/api/accounts/:id', (req, res) => {
-  try { accounts.remove(req.params.id); res.json({ success: true }); }
+  try {
+    accounts.remove(req.params.id); // throws for unknown ids → only real (shape-safe) ids continue
+    // Best-effort: clear the 0600 key file remote sessions may have left on
+    // each host (fire-and-forget; unreachable hosts are fine — the file is
+    // useless without the account anyway, but tidy up when we can).
+    if (/^acct-[a-f0-9]+$/.test(req.params.id) && hosts) {
+      const { execFile } = require('child_process');
+      for (const h of hosts.list() || []) {
+        try { execFile('ssh', [...hosts.sshArgs(h), '--', `rm -f "$HOME/.vibespace/${req.params.id}.key"`], { timeout: 15000 }, () => {}); } catch { }
+      }
+    }
+    res.json({ success: true });
+  }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
@@ -1618,11 +1630,15 @@ app.get('/api/agent/task-context', (req, res) => {
         s._groupSeenAt = s._groupSeenAt || {};
         s._ctxSig = s._ctxSig || {};
         for (const g of injectGroups) {
-          s._groupSeenAt[g.id] = g.updatedAt;
+          s._groupSeenAt[g.id] = g.contentUpdatedAt || g.updatedAt;
           if (g.contextDir) s._ctxSig[g.id] = tasks.contextDirSignature(g.contextDir);
         }
       }
-    } else if (!groups.length && s.backend !== 'codex' && !s._toolsIntroSeen) {
+    } else if (s.backend !== 'codex' && !s._toolsIntroSeen) {
+      // No INJECTABLE group (none at all, or every belonged group has
+      // injectContext off): still teach vibespace-status once — the baseline
+      // intro carries no group content, and an agent that never learns the
+      // tool can't self-report.
       // In no group: still teach the agent to report its status (baseline), once.
       // codex ignores SessionStart output, so it gets this via prompt-context.
       context = SESSION_TOOLS_INTRO;
@@ -1662,7 +1678,11 @@ app.get('/api/agent/prompt-context', (req, res) => {
         const sig = g.contextDir ? tasks.contextDirSignature(g.contextDir) : '';
         const hadSig = s._ctxSig[g.id] !== undefined;
         const ctxChanged = hadSig && s._ctxSig[g.id] !== sig;
-        const metaChanged = g.updatedAt > (seenAt || 0);
+        // Gate on CONTENT changes only (title/objective/checklist/activity/
+        // contextDir) — cosmetic edits (color, toggles, binds) bump updatedAt
+        // but must not re-inject the whole group to every member.
+        const contentAt = g.contentUpdatedAt || g.updatedAt;
+        const metaChanged = contentAt > (seenAt || 0);
         if (firstTime || metaChanged || ctxChanged) {
           const wasSeen = !firstTime; // seen before → this is an UPDATE, not first delivery
           const ctx = tasks.renderContext(g.id, { multi });
@@ -1670,7 +1690,7 @@ app.get('/api/agent/prompt-context', (req, res) => {
             parts.push(wasSeen
               ? `The Task Group below was UPDATED since you last saw it — this is the current state (supersedes any earlier copy).\n\n${ctx}`
               : ctx);
-            s._groupSeenAt[g.id] = g.updatedAt;
+            s._groupSeenAt[g.id] = contentAt;
             s._ctxSig[g.id] = sig;
           }
         } else if (!hadSig && g.contextDir) {
@@ -1679,7 +1699,8 @@ app.get('/api/agent/prompt-context', (req, res) => {
           s._ctxSig[g.id] = sig;
         }
       }
-    } else if (!groups.length && !s._toolsIntroSeen) {
+    } else if (!s._toolsIntroSeen) {
+      // No injectable group → baseline tools intro once (see task-context note).
       // In no group: deliver the baseline tools intro on the FIRST prompt (covers
       // codex — its app-server runs the hook but ignores SessionStart output).
       parts.push(SESSION_TOOLS_INTRO);

@@ -277,16 +277,27 @@ export function installSidebarTasks(SidebarClass) {
   // All session state keys of a task: explicit tags + auto-include by folder.
   // recursive:true → a session whose cwd is UNDER the folder counts; false →
   // only an exact cwd match (the old behavior was always recursive).
+  // THE folder-match rule — the single client-side implementation (mirrors the
+  // server's groupsForSession): a session matches a folder by cwd OR its
+  // symlink-resolved realCwd (stamped by discovery). Board, Task View and the
+  // expanded card must all agree, so they all call this.
+  proto._sessionFolderMatch = function(s, folderRecs) {
+    const cwds = [s.cwd, s.realCwd].filter(Boolean);
+    for (const f of folderRecs) {
+      for (const c of cwds) {
+        if (c === f.path || (f.recursive && c.startsWith(f.path + '/'))) return true;
+      }
+    }
+    return false;
+  };
+
   proto._getTaskSessionKeys = function(task, allSessions) {
     const result = new Set(task.sessions || []);
     const folders = (task.folders || []).map(this._folderRec);
     for (const s of allSessions || []) {
       const sessionKey = this._getSessionStateKey(s);
       if (result.has(sessionKey) || result.has(s.sessionId)) continue;
-      const cwd = s.cwd || '';
-      for (const f of folders) {
-        if (cwd === f.path || (f.recursive && cwd.startsWith(f.path + '/'))) { result.add(sessionKey); break; }
-      }
+      if (this._sessionFolderMatch(s, folders)) result.add(sessionKey);
     }
     return result;
   };
@@ -308,16 +319,10 @@ export function installSidebarTasks(SidebarClass) {
   proto._getSessionTaskGroups = function(s) {
     const stateKey = this._getSessionStateKey(s);
     const legacyId = this._getLegacySessionId(s);
-    const cwds = [s.cwd, s.realCwd].filter(Boolean);
     return (this._tasks || []).filter(t => {
       if (t.archived) return false;
       if ((t.sessions || []).includes(stateKey) || (legacyId && (t.sessions || []).includes(legacyId))) return true;
-      for (const f of (t.folders || []).map(this._folderRec)) {
-        for (const cwd of cwds) {
-          if (cwd === f.path || (f.recursive && cwd.startsWith(f.path + '/'))) return true;
-        }
-      }
-      return false;
+      return this._sessionFolderMatch(s, (t.folders || []).map(this._folderRec));
     });
   };
 
@@ -506,10 +511,16 @@ export function installSidebarTasks(SidebarClass) {
 
   // Synthesized display state — declared (agent/user) > OSC-idle ⇒ needs-input
   // > live ⇒ working; null for a non-live session with nothing declared.
+  // STALE DECAY: a stopped session's declared working/needs-input describes a
+  // process that no longer runs — drop it (a dead card advertising "working"
+  // is misinformation). Result-like states (done/review/blocked) persist.
   proto._synthSessionState = function(s, waiting) {
     const st = this.getSessionStatus(s) || {};
-    if (st.state) return st.state;
     const isLive = s.status === 'live' || s.status === 'tmux';
+    if (st.state) {
+      if (!isLive && (st.state === 'working' || st.state === 'needs-input')) return null;
+      return st.state;
+    }
     if (!isLive) return null;
     const sKey = `${s.backend || 'claude'}:${s.backendSessionId || s.claudeSessionId || ''}`;
     return waiting.has(sKey) ? 'needs-input' : 'working';

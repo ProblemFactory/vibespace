@@ -192,12 +192,13 @@ function registerWsHandler(wss, ctx) {
           ensureDir(SOCKETS_DIR);
           ensureDir(BUFFERS_DIR);
 
-          // Billing identity (subscription ↔ API/console account, P: accounts).
-          // Local Claude sessions only in v1 — remote hosts use the remote
-          // machine's own login; codex has its own auth. Resolved BEFORE the
-          // session object so a bad account aborts the create cleanly.
+          // Billing identity (subscription ↔ API/console account). Claude only
+          // (codex has its own auth). Local sessions get the key via the spawn
+          // process env; REMOTE sessions get it via an ssh-stdin-shipped 0600
+          // file + shell prefix assignment (see remoteAccountEnv). Resolved
+          // BEFORE the session object so a bad account aborts the create cleanly.
           let spawnAccount = null;
-          if (backend === 'claude' && !data.hostId && accounts) {
+          if (backend === 'claude' && accounts) {
             try { spawnAccount = accounts.resolveForSpawn(data.accountId); }
             catch (e) {
               ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'Account error: ' + e.message }));
@@ -301,6 +302,22 @@ function registerWsHandler(wss, ctx) {
             ];
             return { prelude, envPairs, reverse: `${rport}:127.0.0.1:${PORT}` };
           };
+          // Remote account key distribution: the env-pair channel is OUT for
+          // secrets (the inner command is argv on BOTH sides — local ssh proc +
+          // remote sh -lc — and /proc/cmdline is world-readable). Instead ship
+          // the key over ssh STDIN into a 0600 file on the remote, and have the
+          // inner command reference it via $(cat …) — the command text carries
+          // only the PATH, never the value. Returns the raw (pre-quoted) env
+          // assignment to splice into the inner command, or '' when no account.
+          // Throws on write failure — silently billing the wrong account is
+          // worse than failing the create.
+          const remoteAccountEnv = (h) => {
+            if (!spawnAccount) return '';
+            const kf = `$HOME/.vibespace/${spawnAccount.id}.key`; // id shape acct-<hex>, metachar-free
+            execFileSync('ssh', [...hosts.sshArgs(h), '--', `umask 077; mkdir -p "$HOME/.vibespace"; cat > "${kf}"`],
+              { input: spawnAccount.key, timeout: 15000 });
+            return `ANTHROPIC_API_KEY="$(cat "${kf}")" `;
+          };
           if (data.hostId && hosts && sessionMode === 'terminal') {
             let h;
             try { h = hosts.get(data.hostId); }
@@ -309,7 +326,13 @@ function registerWsHandler(wss, ctx) {
             // locally-resolved binary paths mean nothing on the remote
             const rcmd = spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd;
             const ra = remoteAgentSetup();
-            const inner = ra.prelude + `cd ${shq(cwd)} 2>/dev/null; exec env TERM=xterm-256color COLORTERM=truecolor `
+            let acctEnv = '';
+            try { acctEnv = remoteAccountEnv(h); }
+            catch (e) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'Failed to place the account key on ' + h.name + ': ' + e.message })); return; }
+            // acctEnv rides as a SHELL PREFIX ASSIGNMENT before exec — the shell
+            // setenvs it internally, so the VALUE never appears in any argv
+            // (an `env KEY=$(cat …)` argument would expand into env's argv).
+            const inner = ra.prelude + `cd ${shq(cwd)} 2>/dev/null; ` + acctEnv + `exec env TERM=xterm-256color COLORTERM=truecolor `
               + [...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq), rcmd, ...spawnArgs.map(shq)].join(' ');
             spawnCmd = 'ssh';
             spawnArgs = [...hosts.sshArgs(h, { tty: true, reverse: ra.reverse }), '--', `dtach -A /tmp/vs-${id} -r winch sh -lc ${shq(inner)}`];
@@ -334,7 +357,11 @@ function registerWsHandler(wss, ctx) {
               if (!rargs.includes(fl[0])) rargs.push(...fl);
             }
             const ra = remoteAgentSetup();
-            const inner = ra.prelude + `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; exec env `
+            let acctEnv = '';
+            try { acctEnv = remoteAccountEnv(h); }
+            catch (e) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'Failed to place the account key on ' + h.name + ': ' + e.message })); return; }
+            // acctEnv = shell prefix assignment (see the terminal branch note)
+            const inner = ra.prelude + `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ` + acctEnv + `exec env `
               + [...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq), rcmd, ...rargs.map(shq)].join(' ');
             spawnCmd = 'ssh';
             spawnArgs = [...hosts.sshArgs(h, { reverse: ra.reverse }), '-T', '--', inner];

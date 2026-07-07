@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.44.0] — 2026-07-07
+
+### Changed — task-system review fixes
+- **One membership rule everywhere**: the Groups board now matches folder
+  membership by cwd OR symlink-resolved realCwd, via the same helper Task View
+  and the expanded card use (`_sessionFolderMatch`) — mirroring the server.
+- **Content-gated re-injection**: only edits an agent actually sees (title /
+  objective / checklist / activity / context folder) re-inject a group's
+  context. Binding a session, changing color, toggles etc. no longer blast a
+  full "was UPDATED" context to every member agent (`contentUpdatedAt`).
+- Sessions whose Task Groups are ALL injection-off now still get the one-time
+  `vibespace-status` intro (they could never learn to self-report before).
+- **Stale state decay**: a stopped session's declared working/needs-input no
+  longer shows as a live chip or bumps sorting (a dead card advertising
+  "working" was misinformation); done/review/blocked persist but render dashed.
+  `done` sessions sink to the bottom of the Folders sort.
+- Injection hot path: realpath + context-folder-signature caches (the signature
+  walk ran per prompt per group on the hook's 3s-timeout path).
+
+### Added — API accounts on remote hosts
+- Per-session account switching now works for **remote sessions** too: the key
+  ships to the host over **ssh stdin** into a mode-600 file and the spawn
+  command references it via a shell prefix assignment — the key value never
+  appears in any argv on either machine (verified end-to-end on a real remote
+  host via /proc: remote CLI env has the key, zero cmdline leaks both sides).
+  The Account selector now shows for remote Claude sessions; deleting an
+  account best-effort removes its key file from all hosts.
+
 ## [2.43.1] — 2026-07-07
 
 ### Fixed
