@@ -22,6 +22,7 @@ import { CommandMode } from './command-mode.js';
 import { updateTaskbar as updateTaskbarFn } from './taskbar.js';
 import { openBrowser as openBrowserFn } from './browser-window.js';
 import { openTaskDetail as openTaskDetailFn } from './task-detail.js';
+import { openSessionProps as openSessionPropsFn } from './session-props.js';
 import { openWorkflowDetail as openWorkflowDetailFn } from './workflow-detail.js';
 import { DesktopManager } from './desktop-manager.js';
 import { CustomizeMode, applyArrangement } from './customize-mode.js';
@@ -2577,6 +2578,9 @@ class App {
       case 'openTaskDetail':
         this.openTaskDetail(spec.taskId, { syncId });
         break;
+      case 'openSessionProps':
+        this.openSessionProps(spec.sessionKey, { syncId });
+        break;
       case 'openWorkflowDetail':
         this.openWorkflowDetail(spec.runId, { syncId, claudeSessionId: spec.claudeSessionId, cwd: spec.cwd, name: spec.name });
         break;
@@ -2652,6 +2656,8 @@ class App {
   openBrowser(url, opts) { return openBrowserFn(this, url, opts); }
 
   openTaskDetail(taskId, opts) { return openTaskDetailFn(this, taskId, opts); }
+
+  openSessionProps(sessionRef, opts) { return openSessionPropsFn(this, sessionRef, opts); }
 
   // Anthropic accounts (billing identity). Full snapshot incl. subscription
   // login state + importable CLI key; the accounts-updated broadcast keeps the

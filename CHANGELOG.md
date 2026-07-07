@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.49.0] — 2026-07-08
+
+### Added — session right-click menu + Properties window
+- **Right-click a session card** (long-press on touch) for quick actions
+  without expanding: focus/resume (chat/terminal), view history, fork,
+  star/archive/rename, set status, Task Groups submenu (toggle membership;
+  folder-derived marked), copy ID/path, find/go-to/move window, Properties,
+  terminate.
+- **Properties window** (also a button in the expanded card): the full
+  reference sheet for one session — identity (ID/agent/mode/machine/cwd/
+  started/connection), current state with a Change button + the status history
+  timeline, billing (this run's identity + the on-resume account selector),
+  saved config overrides, Task Group membership toggles, and the agent's todo
+  steps. Live-synced; replays across clients and layout restores.
+
 ## [2.48.4] — 2026-07-08
 
 ### Fixed
