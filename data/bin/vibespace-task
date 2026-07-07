@@ -9,16 +9,14 @@ if (!api || !token) { console.error('vibespace-task: not running inside a VibeSp
 const [cmd, ...rest] = process.argv.slice(2);
 const arg = rest.join(' ').trim();
 const USAGE = [
-  'usage (already bound to THIS session\'s task — no task id needed):',
+  'usage (updates the Task Group / 岗位 this session belongs to):',
   '  vibespace-task show                          objective, checklist, recent activity',
   '  vibespace-task progress "what you did"       append to the Activity log',
   '  vibespace-task plan-check <step#|text>       tick a Checklist step',
   '  vibespace-task plan-uncheck <step#|text>     untick a Checklist step',
   '  vibespace-task plan-add "new step"           add a Checklist step',
-  '  vibespace-task status <active|paused|blocked|done>   set the WHOLE TASK\'s status',
-  '  (to report THIS session\'s own state instead, use: vibespace-status)',
+  '  (a Task Group has NO status; to report THIS session\'s own state use: vibespace-status)',
 ].join('\n');
-const TASK_STATUSES = ['active', 'paused', 'blocked', 'done'];
 async function call(method, url, body) {
   const res = await fetch(api + url, {
     method,
@@ -32,7 +30,7 @@ async function call(method, url, body) {
 const fmtPlan = (plan) => plan.forEach((p, i) => console.log('  ' + (i + 1) + '. [' + (p.done ? 'x' : ' ') + '] ' + p.text));
 async function printShow() {
   const { task } = await call('GET', '/api/agent/task');
-  console.log('# ' + task.title + ' (' + task.id + ') — ' + task.status);
+  console.log('# ' + task.title + ' (' + task.id + ')' + (task.archived ? ' [archived]' : ''));
   if (task.objective) console.log('\nObjective: ' + task.objective);
   if (task.plan && task.plan.length) { console.log('\nChecklist:'); fmtPlan(task.plan); }
   if (task.progress && task.progress.length) {
@@ -59,17 +57,11 @@ async function main() {
     const { plan } = await call('POST', '/api/agent/task-plan', { add: arg });
     console.log('added as step ' + plan.length);
   } else if (cmd === 'status') {
-    if (!TASK_STATUSES.includes(arg)) {
-      console.error('vibespace-task: status must be one of ' + TASK_STATUSES.join('/')
-        + '\n  (this sets the WHOLE TASK\'s status; to report THIS session\'s own state use:'
-        + '\n   vibespace-status <working|needs-input|blocked|review>)');
-      process.exit(1);
-    }
-    await call('POST', '/api/agent/task-status', { status: arg });
-    console.log('task status set: ' + arg);
+    console.error('vibespace-task: a Task Group (岗位) has NO status. To report THIS session\'s own state use:\n   vibespace-status <working|needs-input|blocked|review|done>');
+    process.exit(1);
   } else {
     console.error('vibespace-task: unknown command "' + cmd + '"'
-      + '\n  valid: show, progress, plan-check, plan-uncheck, plan-add, status\n' + USAGE);
+      + '\n  valid: show, progress, plan-check, plan-uncheck, plan-add\n' + USAGE);
     process.exit(1);
   }
 }

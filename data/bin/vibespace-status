@@ -9,10 +9,10 @@ if (!api || !token) { console.error('vibespace-status: not running inside a Vibe
 const args = process.argv.slice(2);
 const cmd = args[0];
 const opt = (name) => { const i = args.indexOf('--' + name); return i >= 0 ? args[i + 1] : undefined; };
-const STATES = ['working', 'needs-input', 'blocked', 'review'];
+const STATES = ['working', 'needs-input', 'blocked', 'review', 'done'];
 const USAGE = [
-  'usage (reports THIS session\'s own state — for the whole task use: vibespace-task status):',
-  '  vibespace-status <working|needs-input|blocked|review> [--urgency low|normal|high|urgent] [--reason "why"]',
+  'usage — report THIS Task\'s (this session\'s) own state; done = this work is finished:',
+  '  vibespace-status <working|needs-input|blocked|review|done> [--urgency low|normal|high|urgent] [--reason "why"]',
   '  vibespace-status clear      remove the indicator',
   '  vibespace-status show       print the current indicator',
 ].join('\n');

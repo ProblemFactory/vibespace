@@ -1,6 +1,5 @@
 import { escHtml, showConfirmDialog, showToast } from './utils.js';
 import { setupDirAutocomplete } from './autocomplete.js';
-import { TASK_STATUS_META } from './sidebar-tasks.js';
 
 /**
  * Task detail window — the structured editor over data/tasks.json
@@ -61,22 +60,19 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
     titleInput.title = 'Task title';
     titleInput.onchange = () => { if (titleInput.value.trim()) patch({ title: titleInput.value.trim() }); };
     head.appendChild(titleInput);
-    if (task.kind === 'task') {
-      const statusSel = document.createElement('select');
-      statusSel.className = 'task-detail-status';
-      for (const [status, meta] of Object.entries(TASK_STATUS_META)) {
-        const o = document.createElement('option');
-        o.value = status; o.textContent = meta.label; o.selected = task.status === status;
-        statusSel.appendChild(o);
-      }
-      statusSel.onchange = () => patch({ status: statusSel.value });
-      statusSel.style.setProperty('--chip-color', TASK_STATUS_META[task.status]?.color || 'var(--text-dim)');
-      head.appendChild(statusSel);
-    } else {
+    // A Task Group (岗位) has NO status — persistent role; only archive. Task
+    // status lives on the session (reported via vibespace-status).
+    const archBtn = document.createElement('button');
+    archBtn.className = 'task-detail-btn';
+    archBtn.textContent = task.archived ? 'Unarchive' : 'Archive';
+    archBtn.title = task.archived ? 'Restore this group' : 'Archive this group (hide it; it stops auto-including new sessions)';
+    archBtn.onclick = () => patch({ archived: !task.archived });
+    head.appendChild(archBtn);
+    if (task.kind !== 'task') {
       const convert = document.createElement('button');
       convert.className = 'task-detail-btn';
       convert.textContent = 'Convert to task';
-      convert.title = 'Groups are plain tags; a task adds status, objective, plan and progress';
+      convert.title = 'Groups are plain tags; a task adds an objective, checklist and activity log';
       convert.onclick = () => patch({ kind: 'task' });
       head.appendChild(convert);
     }

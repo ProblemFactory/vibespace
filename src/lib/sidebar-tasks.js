@@ -12,12 +12,8 @@ import { escHtml, createPopover, showContextMenu, showInputDialog, showConfirmDi
  * can't clobber each other).
  */
 
-export const TASK_STATUS_META = {
-  active: { label: 'active', color: 'var(--green)' },
-  paused: { label: 'paused', color: 'var(--text-dim)' },
-  blocked: { label: 'blocked', color: 'var(--red, #e55)' },
-  done: { label: 'done', color: 'var(--blue, #6af)' },
-};
+// Task Groups (岗位) have NO status — a persistent role, only `archived`.
+// (Removed TASK_STATUS_META; task STATUS lives on the session — SESSION_STATE_META.)
 
 const ICON_DETAIL = '<svg style="width:10px;height:10px" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="12" height="12" rx="1.5"/><path d="M5 6h6M5 9h6M5 12h3"/></svg>';
 
@@ -30,6 +26,7 @@ export const SESSION_STATE_META = {
   'needs-input': { label: 'needs input', color: 'var(--yellow, #e5c07b)', icon: _si('<path d="M6 6a2 2 0 113 1.7c-.6.5-1 .9-1 1.8"/><circle cx="8" cy="12" r=".7" fill="currentColor" stroke="none"/>') },
   blocked: { label: 'blocked', color: 'var(--red, #e55)', icon: _si('<circle cx="8" cy="8" r="6"/><path d="M4 4l8 8"/>') },
   review: { label: 'review', color: 'var(--blue, #6af)', icon: _si('<path d="M1.5 8s2.5-4 6.5-4 6.5 4 6.5 4-2.5 4-6.5 4-6.5-4-6.5-4z"/><circle cx="8" cy="8" r="1.7"/>') },
+  done: { label: 'done', color: 'var(--text-dim)', icon: _si('<path d="M2.5 8.5l3.5 3.5 7.5-9"/>') },
 };
 export const SESSION_URGENCY_META = {
   low: { label: 'low', mark: '' },
@@ -208,7 +205,7 @@ export function installSidebarTasks(SidebarClass) {
   // Board order: attention first, then working tasks, then plain groups,
   // done last; newest first within a bucket.
   proto._taskBoardOrder = function() {
-    const bucket = (t) => (this._taskAttention(t).waiting ? 0 : t.kind === 'task' ? (t.status === 'done' ? 3 : 1) : 2);
+    const bucket = (t) => (this._taskAttention(t).waiting ? 0 : t.archived ? 3 : 1);
     return [...(this._tasks || [])].sort((a, b) => bucket(a) - bucket(b) || (b.createdAt || 0) - (a.createdAt || 0));
   };
 
@@ -375,15 +372,7 @@ export function installSidebarTasks(SidebarClass) {
       const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = isCheckedFn(t);
       cb.onchange = (e) => { e.stopPropagation(); onToggleFn(t, cb.checked, pop); };
       const lbl = document.createElement('span'); lbl.textContent = t.title;
-      if (t.kind === 'task') {
-        const dot = document.createElement('span');
-        dot.className = 'task-status-dot';
-        dot.style.background = TASK_STATUS_META[t.status]?.color || 'var(--text-dim)';
-        dot.title = t.status;
-        row.append(cb, dot, lbl);
-      } else {
-        row.append(cb, lbl);
-      }
+      row.append(cb, lbl);
       row.onclick = (e) => e.stopPropagation();
       pop.appendChild(row);
     }
@@ -440,12 +429,9 @@ export function installSidebarTasks(SidebarClass) {
         if (n && n.trim() && n.trim() !== t.title) this._taskUpdate(taskId, { title: n.trim() });
       } },
     ];
-    if (t.kind === 'task') {
-      items.push({ label: 'Status', children: Object.entries(TASK_STATUS_META).map(([status, meta]) => ({
-        label: (t.status === status ? '✓ ' : '') + meta.label,
-        action: () => this._taskUpdate(taskId, { status }),
-      })) });
-    } else {
+    // A Task Group (岗位) has no status — only archive.
+    items.push({ label: t.archived ? 'Unarchive' : 'Archive', action: () => this._taskUpdate(taskId, { archived: !t.archived }) });
+    if (t.kind !== 'task') {
       items.push({ label: 'Convert to task', action: () => this._taskUpdate(taskId, { kind: 'task' }) });
     }
     items.push(
@@ -521,8 +507,8 @@ export function installSidebarTasks(SidebarClass) {
       const hasLive = taskSessions.some(s => s.status === 'live' || s.status === 'tmux');
       const linkedFolders = task.folders || [];
       const folderHint = linkedFolders.length ? ` (${linkedFolders.length} folder${linkedFolders.length > 1 ? 's' : ''})` : '';
-      const statusChip = task.kind === 'task'
-        ? `<span class="task-status-chip" style="--chip-color:${TASK_STATUS_META[task.status]?.color || 'var(--text-dim)'}">${escHtml(TASK_STATUS_META[task.status]?.label || task.status)}</span>`
+      const statusChip = task.archived
+        ? `<span class="task-status-chip" style="--chip-color:var(--text-dim)">archived</span>`
         : '';
       const attnCount = (attn.waiting || 0) + (attn.blocked || 0);
       const attnTip = attn.declared ? (attn.declared.reason || 'needs attention')
@@ -534,7 +520,6 @@ export function installSidebarTasks(SidebarClass) {
       const header = document.createElement('div');
       header.className = 'folder-header';
       header.innerHTML = `<span class="folder-chevron">▼</span>`
-        + (task.kind === 'task' ? `<span class="task-status-dot" style="background:${TASK_STATUS_META[task.status]?.color || 'var(--text-dim)'}"></span>` : '')
         + `<span class="folder-path" style="direction:ltr">${escHtml(task.title)}<span style="color:var(--text-dim);font-weight:400;font-size:10px">${folderHint}</span></span>`
         + statusChip + attnBadge
         + `<span class="folder-count">${taskSessions.length}</span>`;
