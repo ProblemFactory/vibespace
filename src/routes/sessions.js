@@ -26,10 +26,24 @@ function getSessionKey(session = {}) {
   return backendSessionId ? `${backend}:${backendSessionId}` : '';
 }
 
+// Symlink-resolved cwd (cached): a session opened under a symlinked path (e.g.
+// claude-code-webui → vibespace) must still match a Task-Group folder set on the
+// real path. Only stored when it actually differs from cwd.
+const _realCwdCache = new Map();
+function realCwdOf(cwd) {
+  if (!cwd) return null;
+  if (_realCwdCache.has(cwd)) return _realCwdCache.get(cwd);
+  let rp = null;
+  try { const r = fs.realpathSync(cwd); if (r && r !== cwd) rp = r; } catch { /* gone/unreadable */ }
+  _realCwdCache.set(cwd, rp);
+  return rp;
+}
 function withSessionKey(session = {}) {
+  const rc = realCwdOf(session.cwd);
   return {
     ...session,
     sessionKey: session.sessionKey || getSessionKey(session),
+    ...(rc ? { realCwd: rc } : {}),
   };
 }
 
