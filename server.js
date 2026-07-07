@@ -1408,12 +1408,12 @@ setupPersistence({ dataDir: path.join(__dirname, 'data'), wss, WS_OPEN, getSyncS
   getHosts: () => hosts, getMounts: () => mounts, getTasks: () => tasks });
 app.use(persistenceRouter);
 
-// ── Tasks (task system P1 — docs/design-task-system.md) ──
-// data/tasks.json is AUTHORITATIVE for everything the board renders; the
-// one-time Groups migration (sessionGroups/groupFolders → kind:'group' tasks)
-// runs in the constructor, guarded by tasks.json existence.
-const { TaskManager } = require('./src/tasks');
-const tasks = new TaskManager({
+// ── Task Groups (岗位; task system — docs/design-task-system.md + refactor) ──
+// data/task-groups.json is AUTHORITATIVE for everything the board renders (the
+// store migrates the legacy data/tasks.json forward once). The one-time legacy
+// Groups migration (sessionGroups/groupFolders) runs in the constructor.
+const { TaskGroupManager } = require('./src/task-groups');
+const tasks = new TaskGroupManager({
   dataDir: path.join(__dirname, 'data'),
   readUserState: () => persistenceRouter.readUserState(),
   onChange: (list) => {
