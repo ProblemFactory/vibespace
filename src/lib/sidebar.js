@@ -157,7 +157,7 @@ class Sidebar {
     foldersTab.onclick = () => { this._activeTab = 'folders'; this._updateTabs(); this._render(); };
     const tasksTab = document.createElement('button');
     tasksTab.className = 'sidebar-tab';
-    tasksTab.textContent = 'Tasks';
+    tasksTab.textContent = 'Task Groups';
     tasksTab.dataset.tab = 'tasks';
     tasksTab.onclick = () => { this._activeTab = 'tasks'; this._updateTabs(); this._render(); };
     const mountsTab = document.createElement('button');

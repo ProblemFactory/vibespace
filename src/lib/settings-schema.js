@@ -367,7 +367,7 @@ const SETTINGS_SCHEMA = {
       { value: 'cwd', label: 'Working Directory' },
       { value: 'started', label: 'Started Time' },
       { value: 'status', label: 'Status' },
-      { value: 'groups', label: 'Tasks' },
+      { value: 'groups', label: 'Task Groups' },
     ],
     label: 'Visible detail fields',
     description: 'Choose which fields to show in the expanded session card',

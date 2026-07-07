@@ -18,10 +18,10 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
   if (existing) { app.wm.focusWindow(existing.id); return existing; }
 
   let task = sidebar._taskById(taskId);
-  if (!task && sidebar._tasksLoaded) { showToast('Task not found', { type: 'error' }); return null; }
+  if (!task && sidebar._tasksLoaded) { showToast('Task Group not found', { type: 'error' }); return null; }
 
   const openSpec = { action: 'openTaskDetail', taskId };
-  const winInfo = app.wm.createWindow({ title: task?.title || 'Task', type: 'task', syncId, openSpec, width: 460, height: 560 });
+  const winInfo = app.wm.createWindow({ title: task?.title || 'Task Group', type: 'task', syncId, openSpec, width: 460, height: 560 });
   winInfo._taskDetailId = taskId;
 
   const root = document.createElement('div');
@@ -57,7 +57,7 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
     const titleInput = document.createElement('input');
     titleInput.className = 'task-detail-title';
     titleInput.value = task.title;
-    titleInput.title = 'Task title';
+    titleInput.title = 'Task Group title';
     titleInput.onchange = () => { if (titleInput.value.trim()) patch({ title: titleInput.value.trim() }); };
     head.appendChild(titleInput);
     // A Task Group (岗位) has NO status — persistent role; only archive. Task
@@ -342,9 +342,9 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
     // ── Danger ──
     const del = document.createElement('button');
     del.className = 'task-detail-btn task-detail-delete';
-    del.textContent = 'Delete task';
+    del.textContent = 'Delete Task Group';
     del.onclick = async () => {
-      if (await showConfirmDialog({ title: 'Delete Task', message: `Delete "${task.title}"? Sessions will not be deleted.`, confirmText: 'Delete', danger: true })) {
+      if (await showConfirmDialog({ title: 'Delete Task Group', message: `Delete "${task.title}"? Sessions will not be deleted.`, confirmText: 'Delete', danger: true })) {
         sidebar._taskDelete(taskId);
       }
     };
