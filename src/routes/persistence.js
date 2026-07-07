@@ -122,7 +122,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   router.readLayouts = readLayouts;
   router.writeLayouts = writeLayouts;
   router.flushLayouts = flushLayouts;
-  router.readUserState = () => readUserState(); // TaskManager one-time Groups migration
+  router.readUserState = () => readUserState(); // TaskGroupManager one-time Groups migration
 
   // ── Bookmarks ──
   const BOOKMARKS_FILE = path.join(dataDir, 'bookmarks.json');

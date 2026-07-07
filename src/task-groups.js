@@ -1,20 +1,26 @@
 /**
- * TaskManager — the task system's structured store (docs/design-task-system.md).
+ * TaskGroupManager — the structured store for Task Groups (岗位; the persistent
+ * role a session belongs to). docs/design-task-system.md + design-task-refactor.md.
  *
- * A task is a TAG above sessions and a SUPERSET of the old user groups:
- * kind:'group' tasks are exactly the old groups (no goal/lifecycle shown),
- * kind:'task' adds status/objective/plan/attention. `data/tasks.json` is
- * AUTHORITATIVE for everything the board renders — the UI never parses
- * agent-authored text (agents are non-deterministic; see §3.2 of the design).
+ * A Task Group is a TAG above sessions and a SUPERSET of the old user groups:
+ * kind:'group' entries are exactly the old groups, kind:'task' adds
+ * objective/checklist/activity/attention. `data/task-groups.json` (migrated
+ * once from the legacy data/tasks.json) is AUTHORITATIVE for everything the
+ * board renders — the UI never parses agent-authored text (agents are
+ * non-deterministic; see §3.2 of the design).
  *
- * - Groups migration: on first load with no tasks.json, sessionGroups +
- *   groupFolders from user-state.json become kind:'group' tasks (one-time,
+ * - Legacy Groups migration: on first load with no store, sessionGroups +
+ *   groupFolders from user-state.json become kind:'group' entries (one-time,
  *   guarded by file existence). user-state keeps the legacy keys dormant.
- * - Two INDEPENDENT optional folder bindings per task: folders[] auto-include
+ * - Two INDEPENDENT optional folder bindings per group: folders[] auto-include
  *   sessions by cwd (old groupFolders), contextDir = the shared context
- *   folder (P2 injection source; P1 just designates + browses it).
+ *   folder (injection source).
  * - Atomic writes + tasks-updated broadcast via onChange, same manager
  *   pattern as hosts.js/mounts.js. Export/import for config transfer.
+ * NOTE: internal identifiers still say `task`/`plan`/`progress` in places — the
+ * user-facing concept is Task Group / Checklist / Activity log; wire names
+ * (JSON fields, API paths, the `tasks-updated` event, CLI commands) are kept
+ * for data + contract compatibility.
  */
 
 const fs = require('fs');
@@ -48,12 +54,17 @@ function sanitizeStrArray(arr, cap = 200) {
   return out;
 }
 
-class TaskManager {
+class TaskGroupManager {
   constructor({ dataDir, onChange, readUserState }) {
-    this._file = path.join(dataDir, 'tasks.json');
+    // Authoritative store for Task Groups (岗位). Renamed from tasks.json in the
+    // 岗位/活儿 refactor; _load migrates the old file once. The internal
+    // `_state.tasks` map keeps its key (a wire/data structure — renaming it would
+    // break existing files for no user-visible gain).
+    this._file = path.join(dataDir, 'task-groups.json');
+    this._legacyFile = path.join(dataDir, 'tasks.json');
     this._onChange = onChange || (() => {});
     this._state = { version: 1, tasks: {} };
-    this._lastMd = new Map(); // taskId → last written TASK.md content (skip no-op writes)
+    this._lastMd = new Map(); // groupId → last written TASK.md content (skip no-op writes)
     const existed = this._load();
     // One-time migration: Task Groups lost their status (岗位 refactor) — a
     // `done` group becomes archived, others just drop the field.
@@ -62,8 +73,8 @@ class TaskManager {
       if ('status' in t) { if (t.archived === undefined) t.archived = (t.status === 'done'); delete t.status; migrated = true; }
     }
     if (!existed && typeof readUserState === 'function') {
-      // One-time Groups → tasks migration (file existence is the guard: once
-      // tasks.json exists, legacy sessionGroups in user-state stay dormant).
+      // One-time legacy Groups migration (file existence is the guard: once the
+      // store exists, legacy sessionGroups in user-state stay dormant).
       try { this._migrateGroups(readUserState()); } catch { /* fresh install */ }
       this._save();
     } else if (migrated) {
@@ -76,11 +87,19 @@ class TaskManager {
   }
 
   _load() {
-    try {
-      this._state = JSON.parse(fs.readFileSync(this._file, 'utf-8'));
-      if (!this._state || typeof this._state.tasks !== 'object') this._state = { version: 1, tasks: {} };
+    // Prefer the current file; fall back to the legacy tasks.json ONCE and
+    // migrate it forward (write the new file). The legacy file is left in place
+    // (harmless) so an older server build could still read it if rolled back.
+    for (const [f, legacy] of [[this._file, false], [this._legacyFile, true]]) {
+      let parsed;
+      try { parsed = JSON.parse(fs.readFileSync(f, 'utf-8')); } catch { continue; }
+      if (!parsed || typeof parsed.tasks !== 'object') continue;
+      this._state = parsed;
+      if (legacy) this._save(); // migrate tasks.json → task-groups.json
       return true;
-    } catch { return false; }
+    }
+    this._state = { version: 1, tasks: {} };
+    return false;
   }
 
   _save() {
@@ -624,4 +643,4 @@ class TaskManager {
   }
 }
 
-module.exports = { TaskManager };
+module.exports = { TaskGroupManager };
