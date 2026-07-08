@@ -1,6 +1,6 @@
 # Design: Team Collaboration & Remote Sessions
 
-Status: **v2 design** (supersedes the gateway/agent model). Shipped so far: password auth, Docker, first-run onboarding, shell terminals, in-product CLI login.
+Status: **v2 design** (supersedes the gateway/agent model). Shipped so far: password auth, Docker, first-run onboarding, shell terminals, in-product CLI login; **P1 shared mounts** (src/mounts.js — see [mounts.md](mounts.md)), **P2 remote hosts + remote terminal sessions** and **P3 remote chat sessions** (src/hosts.js, src/remote-fs.js — see [files-cross-host.md](files-cross-host.md)). What remains a design sketch below is the longer-term per-user-account / multi-tenant collaboration model — the single-user-per-container remote + storage pieces are done.
 
 ## The deployment model (decided)
 

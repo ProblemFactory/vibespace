@@ -21,7 +21,11 @@ The sidebar automatically discovers all Claude Code sessions on your machine usi
 
 ## Sidebar Views
 
-The sidebar has two tabs:
+The sidebar has three tabs:
+
+- **Folders** — sessions grouped by working directory (below).
+- **Task Groups** — the Task Group board (岗位; see [Task Groups](#task-groups)).
+- **Remote** — registered ssh hosts (machines) and storage mounts. See [Remote hosts / files](files-cross-host.md) and [Mounts](mounts.md).
 
 ### Folder bulk operations
 
@@ -37,10 +41,14 @@ Sessions grouped by working directory. Each folder header shows:
 - Session count
 - Green dot if any session is live
 - **+** button to create a new session in that directory
-- **🔗** button to link the folder to a task (auto-include)
+- **🔗** button to link the folder to a Task Group (auto-include)
 
-### Tasks tab
-The task board — tasks tag sessions across directories and carry an optional goal, status, and attention. See [Tasks](#tasks) below.
+### Task Groups tab
+The Task Group board. Two sub-views (**Groups | Tasks**):
+- **Groups** — each Task Group with its member sessions grouped under it.
+- **Tasks** — a flat list of every session (活儿), sorted by urgency/status; sessions tagged into ≥1 group sort to the top, untagged ones sink to the bottom.
+
+See [Task Groups](#task-groups) below.
 
 ## Session Modes
 
@@ -53,7 +61,7 @@ Chat sessions display a speech bubble icon next to their status badge in the sid
 
 ### Default mode
 
-Configure the default mode for new sessions and single-click resume via Settings > Session Card > **Default session mode**. The default is Chat.
+Configure the default mode for new sessions and single-click resume via Settings > Session > **Default session mode**. The default is Chat.
 
 ### Choosing mode on resume
 
@@ -112,8 +120,10 @@ Session card details use smart truncation for readability:
 
 Click the ▸ arrow to expand any card. The detail panel shows:
 - Session ID, working directory, start time, status
-- Tasks membership
+- Task Group membership
 - Action buttons: Rename, Find, Attach/Resume, Terminate (red, with confirmation)
+
+Right-clicking a card (or long-pressing on touch) opens a full quick-action context menu, and **Properties** (also on that menu) opens a dedicated window with the session's full identity, state history timeline, billing identity, config overrides, Task-Group toggles, and the agent's own step list — so you don't have to expand the card for everything.
 
 Configure visible fields via Settings > Session Card > **Visible detail fields**.
 Configure truncation direction via Settings > Session Card > **Detail truncation**.
@@ -155,76 +165,80 @@ The filter button (top of sidebar) opens a multi-select dropdown:
 
 Enable via Settings > Sidebar > **Status quick tabs** to show one-click filter tabs below the search bar: ALL / LIVE / TMUX / EXT / STOP / ARCH.
 
-## Tasks
+## Task Groups
 
-A **task** is a durable unit of work above individual sessions: it tags sessions across directories and can carry a goal, status, plan, and progress. Tasks are a superset of the old Groups — your existing groups were migrated automatically (they behave exactly as before; use **Convert to task** to give one a goal and lifecycle).
+A **Task Group** (岗位) is a durable *role* that tags sessions across directories — it groups the sessions (活儿) working toward it and carries a shared **objective**, a **Checklist** (backlog of work items), an **Activity log** (timestamped notes), auto-include folders, a shared **context folder**, and a board color. A Task Group has **no status of its own** — it's a persistent role, so the only lifecycle flag is **archived**. Work status lives on the *sessions* (see [Session status](#session-status-agent-set-user-overridable)). Task Groups are a superset of the old Groups — your existing groups were migrated automatically; use **Convert to task** to give one an objective, checklist and activity log.
 
-### The board (Tasks tab)
+> Naming note: the code and older internals still say "task" in wire names (`/api/tasks*`, the `tasks-updated` event, JSON fields `plan`/`progress`, CLI subcommands `plan-check`/`plan-add`/`progress`). The user-facing concept is **Task Group**.
 
-Each task renders as a collapsible section: status chip (`active` / `paused` / `blocked` / `done`, colored), title, linked-folder count, live dot, a **⚠ attention badge** when a bound agent is waiting for your input (from the same idle detection that blinks window titles), session count, a details button, and ▶ resume-all. Order: tasks needing attention first, then working tasks, then plain groups, done last. Sessions not in any task appear under **Untagged**.
+### The board (Task Groups tab)
 
-### Creating a task
+Each Task Group renders as a collapsible section: title, an **archived** chip if archived, linked-folder count, live dot, a **⚠ attention badge** when a member agent is waiting for your input (from the same idle detection that blinks window titles), session count, a details button, and ▶ resume-all. Order: groups needing attention first, then the rest, archived last. Sessions not in any group appear under **Untagged**. The tab also has a **Groups | Tasks** sub-view toggle (see [Task Groups tab](#task-groups-tab)).
 
-Click **"+ New Task"** on the board (opens the detail window), or "+ New task" at the bottom of any task checklist popover.
+### Creating a Task Group
 
-### New session in a task
+Click **"+ New Task Group"** on the board (opens the detail window), or "+ New task" at the bottom of any Task-Group checklist popover.
 
-The **+** button on a task header (or right-click → "New session in this task…") opens the normal New Session dialog **pre-filled**: the task pre-selected in the new **Task** dropdown and the working directory set to the task's first auto-include folder — you confirm every parameter as usual. The Task dropdown is also available when creating a session from anywhere else. The created session is tagged to the task automatically and spawned with `VIBESPACE_TASK_ID` in the agent's environment (used by the upcoming context injection).
+### New session in a Task Group
+
+The **+** button on a group header (or right-click → "New session in this task…") opens the normal New Session dialog **pre-filled**: the group pre-selected in the **Task** dropdown and the working directory set to the group's first auto-include folder — you confirm every parameter as usual. The Task dropdown is also available when creating a session from anywhere else. The created session is tagged to the group automatically; membership is otherwise **live-derived** server-side (there is no `VIBESPACE_TASK_ID` env — a fresh session records `_initialGroupId` only to cover the window before the tag lands).
 
 ### Tagging sessions (many-to-many)
 
-- **Session card**: expand a card → **Tasks ▾** → check/uncheck tasks
-- **Drag session**: drop a session card on a task header
+A session belongs to 0..N Task Groups, resolved live from: an explicit tag ∪ a linked-folder match ∪ the group it was spawned into. Change any of these and the agent picks it up on its next turn — no respawn.
+
+- **Session card**: expand a card → **Task Groups ▾** → check/uncheck groups (or the right-click menu → Task Groups submenu)
+- **Drag session**: drop a session card on a group header
 - **Folder auto-include**: sessions whose working directory is under a linked folder join automatically (see below)
 
 ### Auto-include folders
 
-Link folders to a task so every session under them (including subdirectories) joins automatically:
+Link folders to a Task Group so every session under them (including subdirectories, per a per-folder recursive toggle) joins automatically:
 
-- **Folders tab**: 🔗 button on a folder header → check tasks
+- **Folders tab**: 🔗 button on a folder header → check groups
 - **File explorer**: right-click a folder → "Add to task"
-- **Drag a folder** from the file explorer onto a task header
+- **Drag a folder** from the file explorer onto a group header
 - **Detail window**: "+ Link folder path" with autocomplete
 
-Manage: right-click a task header → **Linked folders**, or the detail window (auto-included sessions show a dim "via folder" tag).
+Manage: right-click a group header → **Linked folders**, or the detail window (auto-included sessions show a dim "via folder" tag).
 
-### Task detail window
+### Task Group detail window
 
-The details button (or context menu → Details…) opens a per-task window: title, status dropdown, **objective** (shared definition of the goal), **plan** checklist, **progress** log (timestamped notes), bound sessions (with unbind), auto-include folders, **context folder** (the task's shared context directory — see below), and a board color. Everything saves immediately and syncs to all clients.
+The details button (or context menu → Details…) opens a per-group window: title, **objective**, **Checklist** (the group's backlog — tick items as they're done), **Activity log** (timestamped notes), bound sessions (with unbind), auto-include folders (each with a recursive toggle), **context folder** + an **Inject this group's context into its sessions** toggle, and a board color. Everything saves immediately and syncs to all clients. Editing color/toggles no longer scrolls the window back to the top.
 
-The detail window can also **export** the task to a committable markdown file ("Repo file" → Export), and the board's **Import…** card reads such a file back in — so tasks can live in a repo and travel between VibeSpace instances.
+The detail window can also **export** the group to a committable markdown file (**Export**), and the board's **Import…** card reads such a file back in — so a Task Group can live in a repo and travel between VibeSpace instances.
 
-### Task header actions
+### Task Group header actions
 
-- **▶** — Resume/attach all sessions in the task
+- **▶** — Resume/attach all sessions in the group
 - **Details button** — open the detail window
-- **Right-click** — Details… / Rename / Status ▸ / Convert to task / Linked folders / Delete
+- **Right-click** — Details… / Rename / Convert to task / Linked folders / Delete
 - **Drop target** — drag sessions or folders onto the header
 
 ### Attention
 
-When a bound session's agent finishes and waits for input (the window-title blink), or declares itself **blocked** via session status (below), the task's header shows a blinking **⚠ N** and the Tasks tab itself gets a ⚠ — a board-level "which of my agents need me" view. VibeSpace only observes and surfaces; it never acts on the agent.
+When a member session's agent finishes and waits for input (the window-title blink), or declares itself **blocked** via session status (below), the group's header shows a blinking **⚠ N** and the Task Groups tab itself gets a ⚠ — a board-level "which of my agents need me" view. VibeSpace only observes and surfaces; it never acts on the agent.
 
 ## Task context injection
 
-A session started (or resumed) **in a task** begins with the task's context already in the agent's head: the task state (objective, plan, recent progress), an index of the files in the context folder (the agent reads what it needs with its own tools), and the working rules — never modify `<contextDir>/.vibespace/` (it's generated; `TASK.md` there always mirrors the task state), put shared artifacts in the context folder, and report session state with `vibespace-status`.
+A session that **belongs to a Task Group** begins each turn with the group's context in the agent's head: the group state (objective, checklist, recent activity), an index of the files in the context folder (the agent reads what it needs with its own tools), and the working rules — never modify `<contextDir>/.vibespace/` (it's generated; `TASK.md` there always mirrors the group state), put shared artifacts in the context folder, and report session state with `vibespace-status`. Injection covers **every** group a session belongs to and re-fires when the group's content changes; a per-group **Inject context** toggle can opt a group out while keeping membership/board/`vibespace-task` working. A session in **no** group still gets a one-time baseline intro teaching the `vibespace-status` tool.
 
-It is delivered **only through the harness's own hooks** — VibeSpace never rewrites your message to smuggle it in. `vibespace-hook.mjs` is registered automatically for the `SessionStart` and `UserPromptSubmit` events (a no-op for any session not started from a task).
+It is delivered **only through the harness's own hooks / native mechanisms** — VibeSpace never rewrites your message to smuggle it in. `vibespace-hook.mjs` is registered automatically for the `SessionStart` and `UserPromptSubmit` events (a true no-op only *outside* a VibeSpace session, i.e. when the `VIBESPACE_API`/token env is absent).
 
-- **Claude** sessions (terminal and chat, local and on remote hosts, and again on every resume) receive the context fully.
-- **Codex** chat sessions do not yet receive auto-injected context: Codex's app-server mode runs the hook but does not inject its output. The hook is registered and ready for when Codex supports it; meanwhile a Codex agent can still read its task with `vibespace-task show`.
+- **Claude** sessions (terminal and chat, local and on remote hosts, and again on every resume) receive the context via the hook.
+- **Codex** chat sessions also receive it: Codex's app-server runs the hook but ignores its output, so the Codex wrapper injects the same context natively via `thread/inject_items` (a `role:'developer'` message) before each turn.
 
-For **remote** sessions, VibeSpace distributes the hook and the task tools to `~/.vibespace/bin` on the remote host and opens an ssh reverse tunnel so they reach back to VibeSpace — so a remote Claude session gets the same task context as a local one.
+For **remote** sessions, VibeSpace distributes the hook and the task tools to `~/.vibespace/bin` on the remote host and opens an ssh reverse tunnel so they reach back to VibeSpace; a group's context folder is also live-synced to the remote and injected with path translation — so a remote Claude session gets the same task context as a local one.
 
 The hook is installed automatically when the server starts. To check or repair it, open **⚙ → Manage agents…** — the "VibeSpace integration" row shows the status for both CLIs with one-click Install / Remove.
 
-Agents in a task session can also **report back** with the `vibespace-task` command (the injected context teaches them): `vibespace-task progress "what I did"` adds a timestamped entry to the task's progress log, `plan-check 2` ticks a plan step, `plan-add "new step"` extends the plan, and `vibespace-task status blocked` flips the task's board status. Everything appears live in the task detail window and `TASK.md`; writes are scoped to the session's own task.
+Agents can also **report back** with the `vibespace-task` command (the injected context teaches them): `vibespace-task progress "what I did"` adds a timestamped entry to the Activity log, `plan-check 2` ticks a checklist item, `plan-add "new step"` extends the checklist. Commands are scoped server-side to the session's own group membership via its per-session token — if the session belongs to several groups it passes `--group <id>` (validated to be one it belongs to). There is **no** `vibespace-task status` subcommand: a Task Group has no status; a session reports its *own* state with `vibespace-status <working|needs-input|blocked|review|done>`.
 
-VibeSpace also maintains `<contextDir>/.vibespace/TASK.md` — a generated, always-current markdown mirror of the task state that agents and humans can read from disk.
+VibeSpace also maintains `<contextDir>/.vibespace/TASK.md` — a generated, always-current markdown mirror of the group state that agents and humans can read from disk.
 
 ## Session status (agent-set, user-overridable)
 
-Every session can carry a **status indicator**: a state (`working` / `needs-input` / `blocked` / `review`), an urgency (`low` / `normal` / `high` / `urgent`), and an optional reason. It renders as a colored chip on the session card (urgency adds `!` / `!!`; urgent pulses), and blocked sessions feed their tasks' ⚠ badges.
+Every session can carry a **status indicator**: a state (`working` / `needs-input` / `blocked` / `review` / `done`), an urgency (`low` / `normal` / `high` / `urgent`), and an optional reason. It renders as a colored chip on the session card (urgency adds `!` / `!!`; urgent pulses), and blocked sessions feed their Task Groups' ⚠ badges. Urgency also drives the sidebar sort order.
 
 **Agents set their own status.** Sessions are spawned with a small CLI on PATH — the agent just runs it with its ordinary shell tool:
 
@@ -241,7 +255,7 @@ It authenticates with a per-session token from the environment, so an agent can 
 
 ### Multi-client sync
 
-Tasks live server-side in `data/tasks.json`, session statuses in `data/session-status.json`; both broadcast to all connected clients (`tasks-updated` / `session-status-updated`). Star/archive/name state stays in `data/user-state.json`. Changes made on one device appear instantly on all others.
+Task Groups live server-side in `data/task-groups.json`, session statuses in `data/session-status.json`; both broadcast to all connected clients (`tasks-updated` / `session-status-updated`). Star/archive/name state stays in `data/user-state.json`. Changes made on one device appear instantly on all others. (These runtime files are gitignored — never committed.)
 
 ### Archiving whole projects
 

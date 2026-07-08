@@ -94,7 +94,6 @@ Overrides persist in the layout auto-save.
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `window.enableSnapAnimation` | boolean | `true` | Animate window snap transitions |
 | `window.enableBounceOnFocus` | boolean | `false` | Scale-bounce when focused from sidebar/taskbar |
 | `window.tabWrap` | boolean | `false` | Allow tab bar to wrap into multiple rows |
 | `window.closeBehavior` | enum | `terminate` | Close window: terminate session, or detach (keep alive for re-attach) |
@@ -126,7 +125,7 @@ Overrides persist in the layout auto-save.
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `claude.defaultModel` | combobox | `''` | Default Claude model — dropdown aliases + "Custom..." for specific model IDs (e.g. claude-opus-4-6-20250414). Populated from bootstrap API. |
+| `claude.defaultModel` | combobox | `''` | Default Claude model — dropdown aliases + "Custom..." for specific model IDs (e.g. claude-opus-4-6-20250414). Populated from `/api/available-models` (Claude `/v1/models`). |
 | `claude.defaultPermissionMode` | enum | `''` | Default Claude permission mode for new or resumed Claude sessions |
 | `claude.defaultEffort` | enum | `''` | Default Claude effort for new or resumed Claude sessions |
 | `claude.defaultExtraArgs` | text | `''` | Extra Claude CLI args appended when starting a Claude session |
@@ -147,6 +146,8 @@ Overrides persist in the layout auto-save.
 |---------|------|---------|-------------|
 | `sidebar.defaultStatusFilter` | multiSelect | live, tmux, external, stopped | Which statuses to show by default (excludes archived) |
 | `sidebar.enableStatusQuickTabs` | boolean | `false` | Show ALL/LIVE/TMUX/EXT/STOP/ARCH quick-filter tabs |
+| `sidebar.defaultTab` | enum | `folders` | Which sidebar tab opens on page load (folders / tasks / mounts) |
+| `sidebar.defaultBoardView` | enum | `groups` | Which Task Groups sub-view opens on load (groups / tasks) |
 
 ### Session Card
 

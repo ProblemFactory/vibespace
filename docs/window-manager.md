@@ -97,6 +97,7 @@ Command mode auto-exits after 2 seconds or on Escape.
 | m | Maximize / restore |
 | w | Close window |
 | Tab | Cycle to next window (stays in command mode) |
+| ] / [ | Move active window to the next / previous desktop |
 
 ### Global commands
 
@@ -108,6 +109,7 @@ Command mode auto-exits after 2 seconds or on Escape.
 | s | Toggle sidebar |
 | b | Open embedded browser |
 | e | Open file explorer |
+| d / D | Switch to the next / previous desktop |
 
 ## Taskbar
 

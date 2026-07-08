@@ -97,7 +97,7 @@ Files and folders have a real clipboard: **Copy** / **Cut** from the context men
 - Copy, Cut, Duplicate, Compress to Archive…, Download as Zip, Copy Path
 - Add to bookmarks
 - Sessions ▸ — submenu with "+ New session" and all sessions at this path
-- Add to group ▸ — link folder to a session group
+- Add to task ▸ — link this folder to a Task Group (its sessions auto-include into the chosen group)
 - Rename, Properties, Delete
 
 **On files:**
@@ -130,9 +130,9 @@ You can also **drag files from your OS file manager** onto the file explorer to 
 
 Drag any file or folder from the explorer and drop it on a terminal window. The shell-escaped absolute path is typed into the terminal.
 
-### Drag folder to group
+### Drag folder to a Task Group
 
-Drag a folder from the explorer and drop it on a session group header in the sidebar to link it.
+Drag a folder from the explorer and drop it on a Task Group header (sidebar → Task Groups tab) to link it — sessions under that folder then auto-include into the group.
 
 ## File Viewers
 
