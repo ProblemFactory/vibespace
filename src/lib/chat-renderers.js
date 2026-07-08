@@ -11,6 +11,12 @@ import { renderCodeBlock, rehighlightCodeBlock, stripAnsi, getHljsLanguages } fr
 import { UI_ICONS } from './icons.js';
 import { createBackendIconHtml, getBackendMeta } from './agent-meta.js';
 
+// Shell-command tools get a terminal icon instead of the generic wrench
+// (covers Claude Bash/BashOutput/KillShell and Codex exec_command/write_stdin
+// which normalize to Bash/Terminal).
+const SHELL_TOOL_NAMES = new Set(['Bash', 'BashOutput', 'KillShell', 'Terminal']);
+const toolCardIcon = (name) => (name === 'Agent' ? UI_ICONS.robot : SHELL_TOOL_NAMES.has(name) ? UI_ICONS.terminal : UI_ICONS.wrench);
+
 function normalizeUserInputAnswers(rawAnswers) {
   if (!rawAnswers || typeof rawAnswers !== 'object') return {};
   const result = {};
@@ -222,7 +228,7 @@ class ChatRenderers {
     if (block.type === 'tool_call') {
       // Tool call — pending (spinner) or interrupted (error, no result ever came)
       const isAgent = block.toolName === 'Agent';
-      const icon = isAgent ? UI_ICONS.robot : UI_ICONS.wrench;
+      const icon = toolCardIcon(block.toolName);
       const fp = block.input?.file_path || '';
       const isFileOp = ['Edit', 'Write', 'Read'].includes(block.toolName);
       const isPending = msg.status === 'pending';
@@ -271,7 +277,7 @@ class ChatRenderers {
     const inputStr = stripAnsi(typeof block.input === 'string' ? block.input : JSON.stringify(block.input, null, 2));
 
     if (block.status === 'error') {
-      return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.wrench} ${escHtml(block.toolName)} ${this.clickablePath(fp)}</span><details class="chat-diff"><summary class="chat-diff-summary">Input</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff" open><summary class="chat-diff-summary chat-tool-error-label">\u2717 Error</summary><pre class="chat-tool-error-text">${this.linkifyText(resultText)}</pre></details></div>`;
+      return `<div class="chat-tool-use"><span class="chat-tool-label">${toolCardIcon(block.toolName)} ${escHtml(block.toolName)} ${this.clickablePath(fp)}</span><details class="chat-diff"><summary class="chat-diff-summary">Input</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff" open><summary class="chat-diff-summary chat-tool-error-label">\u2717 Error</summary><pre class="chat-tool-error-text">${this.linkifyText(resultText)}</pre></details></div>`;
     }
     if (block.toolName === 'Patch') {
       const patchHtml = this.renderPatchDiff(block);
@@ -325,7 +331,7 @@ class ChatRenderers {
     }
     // Generic tool
     const firstLine = resultText.split('\n')[0].substring(0, 120) || '(empty)';
-    return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.wrench} ${escHtml(block.toolName)}</span><details class="chat-diff"><summary class="chat-diff-summary">Input</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLine)}</summary><pre>${this.linkifyText(resultText)}</pre></details></div>`;
+    return `<div class="chat-tool-use"><span class="chat-tool-label">${toolCardIcon(block.toolName)} ${escHtml(block.toolName)}</span><details class="chat-diff"><summary class="chat-diff-summary">Input</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLine)}</summary><pre>${this.linkifyText(resultText)}</pre></details></div>`;
   }
 
   /**
