@@ -68,7 +68,9 @@ Note the tension: UI already renamed plan→Checklist, progress→Activity log (
 
 ## 6. Current code anchors (for post-compaction navigation)
 
-- `src/tasks.js` — `TaskManager`: create/update/remove/bind/unbind/addProgress, `renderContext(id)` (the `<vibespace-task-context>` block), `renderTaskMd(t, cap)`, `_getTaskSessionKeys`, folders are `{path, recursive}`, `plan`=Checklist, `progress`=Activity log, `.status` in STATUSES=[active,paused,blocked,done].
+> **PRE-IMPLEMENTATION SNAPSHOT — superseded by what shipped (2.39.0).** The anchors below were written before the refactor landed; the ACTUAL current names differ: `src/tasks.js`→**`src/task-groups.js`**, `TaskManager`→**`TaskGroupManager`**, `data/tasks.json`→**`data/task-groups.json`**; a Task Group has **no `.status`** (the STATUSES field was dropped); session `STATES` now **include `done`**; `session._taskId`→**`session._initialGroupId`** with live belonging via `groupsForSession`/`resolveAgentGroup`; and there is **no `VIBESPACE_TASK_ID` env**. See the CLAUDE.md "2.39.0 refactor" note for the authoritative current map.
+
+- `src/task-groups.js` (was `src/tasks.js`) — `TaskGroupManager` (was `TaskManager`): create/update/remove/bind/unbind/addProgress, `renderContext(id)` / `renderMultiContext(ids)` (the `<vibespace-task-context>` block), `renderTaskMd(t, cap)`, `groupsForSession`/`_getTaskSessionKeys`, folders are `{path, recursive}`, `plan`=Checklist, `progress`=Activity log. NO `.status` field (Task Groups only have `archived`).
 - `src/session-status.js` — `SessionStatusManager`: `STATES=[working,needs-input,blocked,review]` (add `done`), debounced `_save`/`_flush`/`flush`, `data/session-status.json`.
 - `server.js` — `agentSession(req,res,{needTask})`, `/api/agent/task-context` (task ctx OR `SESSION_TOOLS_INTRO` baseline), `/api/agent/prompt-context` (task update on `updatedAt > _taskSeenAt` + baseline + status notice), `createHookHelper()` (generates `vibespace-hook.mjs` — no longer gates on taskId), `sessionStatus.flush()` in `shutdown()`.
 - `data/bin/vibespace-task` (static CLI, scoped server-side to session's `_taskId`), `vibespace-status` (generated in `createStatusHelper`).
