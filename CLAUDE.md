@@ -125,7 +125,7 @@ src/
     autocomplete.js    — Shared directory autocomplete (setupDirAutocomplete)
     settings.js        — SettingsManager (sparse storage, server persist, WS sync, event listeners)
     settings-schema.js — Settings schema (all options with types, defaults, categories)
-    settings-ui.js     — SettingsUI (VS Code-style full settings dialog with search)
+    settings-ui.js     — SettingsUI (VS Code-style full settings, search + category nav). Opens as a NON-BLOCKING same-level WINDOW (type 'settings', singleton-focus, no openSpec = transient/not persisted) so you can edit a setting and watch the effect live — NOT a modal overlay (2.53.0)
 public/
   brand/               — Backend brand SVGs (claude.svg, codex.svg)
   index.html           — HTML structure
@@ -426,7 +426,7 @@ Mobile-specific UI code extracted into dedicated modules to keep desktop and mob
 
 **Per-terminal settings** (window titlebar ⚙): Same three options, each with a "Default" that follows global. Theme and font have Default as a dropdown option. Font size has a Default checkbox that disables the number input. Overrides stored in `TerminalSession.overrides` and persisted in layout.
 
-**Schema-driven settings** (`settings-schema.js`): VS Code-style settings UI. Categories: Toolbar & Layout, Window, Terminal, Sidebar, Session Card, Chat, Session. **Rule: only add settings that have working code behind them** — no placeholder/aspirational entries. Settings with `liveApply: false` need explicit one-shot listeners if they must be applied after async load (see `defaultStatusFilter` pattern). File explorer sort/filter config uses its own localStorage persistence — these are operational state, not user settings. Notable settings: `chat.roleIndicator` (border/background/icon/label), `session.defaultMode` (terminal/chat, default: chat).
+**Schema-driven settings** (`settings-schema.js`): VS Code-style settings UI. Opens as a NON-BLOCKING same-level window (2.53.0 — `SettingsUI.open()` calls `wm.createWindow({type:'settings'})`, singleton-focus, no openSpec so it's transient; the old `.settings-overlay` modal is gone) so a setting can be tweaked while the workspace effect is visible. `.settings-dialog.settings-window` fills the window content. Categories: Toolbar & Layout, Window, Terminal, Sidebar, Session Card, Chat, Session. **Rule: only add settings that have working code behind them** — no placeholder/aspirational entries. Settings with `liveApply: false` need explicit one-shot listeners if they must be applied after async load (see `defaultStatusFilter` pattern). File explorer sort/filter config uses its own localStorage persistence — these are operational state, not user settings. Notable settings: `chat.roleIndicator` (border/background/icon/label), `session.defaultMode` (terminal/chat, default: chat).
 
 **Session card click behavior**: `sessionCard.clickBehavior` enum: `focus` (default — click opens/focuses window), `expand` (click toggles card details), `flash` (click flashes/bounces the window), `goto` (switch desktop + flash). Expand/collapse is always available via the ▸ arrow button regardless of this setting.
 
@@ -738,7 +738,7 @@ Server → Client: `created`, `output`, `msg` (normalized: op=create/edit/meta),
 - Drag threshold (5px): prevents accidental snap when clicking title bar to focus
 - Pre-snap size memory: snapping saves original window size, dragging out of snap restores it (persisted in layout)
 - Freeform mode (no grid) + custom MxN grid with snap-to-cell (drag + resize snap, Alt to bypass)
-- Shake-to-bypass-snap: shaking a window vigorously for ~1s mid-drag latches "grid/edge snap off" for the rest of that drag (mouse-only alternative to holding Alt; cursor-following "Grid snap off" badge + dashed window outline; per-drag, re-enables next drag; `window.js` titlebar-drag path only — reversal-count detector, `layout.shakeBypassSnap` setting, default on)
+- Shake-to-bypass-snap: shaking a window vigorously mid-drag latches "grid/edge snap off" for the rest of that drag (mouse-only alternative to holding Alt; cursor-following "Grid snap off" badge + dashed window outline; per-drag, re-enables next drag; `window.js` titlebar-drag path only — reversal-count detector, `layout.shakeBypassSnap` on/off default on + `layout.shakeBypassSeconds` sustained-shake duration default 1s, re-read per drag so it's live-adjustable)
 - Built-in presets: maximize, 2-col, 2-row, quad, 3-col (all via grid mechanism)
 - Custom grid presets: + button to add, right-click to remove, auto SVG icons, persisted
 - Grid overflow: round-robin distribution when windows > cells (`i % totalCells`)

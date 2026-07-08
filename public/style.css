@@ -1000,6 +1000,12 @@ html, body {
   width: 720px; max-width: 90vw; height: 75vh; max-height: 80vh;
   display: flex; flex-direction: column; overflow: hidden;
 }
+/* When hosted in a WindowManager window (non-blocking mode) the window chrome
+   supplies the frame/size — the dialog just fills the content area. */
+.settings-dialog.settings-window {
+  width: 100%; max-width: none; height: 100%; max-height: none;
+  border: none; border-radius: 0; box-shadow: none; background: transparent;
+}
 .settings-header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 12px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0;
@@ -1404,7 +1410,8 @@ html, body {
 
   /* Dialogs */
   .dialog { width: 95vw !important; max-width: none; max-height: 85vh; max-height: 85dvh; overflow-y: auto; }
-  .settings-dialog { width: 95vw !important; height: 90vh; height: 90dvh; }
+  /* Settings is a window now; the .settings-window rule fills its window. Keep
+     the stacked nav layout on narrow screens. */
   .settings-body { flex-direction: column; }
   .settings-nav { width: 100%; border-right: none; border-bottom: 1px solid var(--border); display: flex; overflow-x: auto; padding: 4px; }
   .settings-nav-item { white-space: nowrap; }

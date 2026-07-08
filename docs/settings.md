@@ -13,7 +13,7 @@ Settings are stored server-side (sparse storage — only non-default values pers
 ## Opening Settings
 
 - **Toolbar ⚙** → Quick popover with theme, font size (A-/A+), font family, and "All Settings" link
-- **"All Settings"** → Full settings dialog with category navigation and search
+- **"All Settings"** → Full settings, category navigation and search. It opens as a **normal window** (not a blocking overlay), so you can drag it aside, resize it, and tweak a setting while watching the effect on your workspace live. Opening it again focuses the existing window.
 - **Per-terminal ⚙** → Gear icon on each terminal window's title bar
 
 ## Global Settings (Quick Access)
@@ -82,6 +82,7 @@ Overrides persist in the layout auto-save.
 | `layout.enableDragSnap` | boolean | `true` | Snap windows to grid cells or screen edges when dragging |
 | `layout.enableShiftDragSelection` | boolean | `true` | Hold Shift while dragging to select a range of grid cells |
 | `layout.shakeBypassSnap` | boolean | `true` | Shake a window vigorously for ~1s while dragging to turn off grid/edge snap for the rest of that drag |
+| `layout.shakeBypassSeconds` | number | `1` | How long (0.3–3s) you must keep shaking before grid snap turns off |
 | `taskbar.desktopPreviewRatio` | number | `70` | Desktop preview size as % of taskbar height (30-100) |
 | `chrome.arrangement` | json | `null` | Which bar hosts each movable element, in what order — written by Customize-mode drag |
 | `chrome.zoneAlign` | json | `null` | Per-area alignment: window items left/center (Win11-style), toolbar center left/center/right, tray left/right end — written by Customize-mode chips |

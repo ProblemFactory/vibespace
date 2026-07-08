@@ -164,12 +164,14 @@ class WindowManager {
     const SHAKE_MIN_SPEED = 6;   // px/frame on an axis to count as intentional motion
     const SHAKE_WINDOW = 500;    // ms sliding window for the reversal count
     const SHAKE_REVERSALS = 3;   // reversals within the window ⇒ vigorous
-    const SHAKE_HOLD = 1000;     // ms of sustained vigor ⇒ latch (the ">1 second")
+    let shakeHoldMs = 1000;      // ms of sustained vigor ⇒ latch — from settings, read per drag
     let shakeBypass = false, shakeReversals = [], shakeActiveSince = 0;
     let shakeDirX = 0, shakeDirY = 0, shakeLastX = 0, shakeLastY = 0, shakeBadge = null;
     const resetShake = (e) => {
       shakeBypass = false; shakeReversals = []; shakeActiveSince = 0;
       shakeDirX = 0; shakeDirY = 0; shakeLastX = e.clientX; shakeLastY = e.clientY;
+      const secs = this._settings?.get('layout.shakeBypassSeconds');
+      shakeHoldMs = (typeof secs === 'number' && secs > 0 ? secs : 1) * 1000; // re-read each drag → live-adjustable
     };
     const clearShakeBadge = () => {
       if (shakeBadge) { shakeBadge.remove(); shakeBadge = null; }
@@ -189,7 +191,7 @@ class WindowManager {
       while (shakeReversals.length && shakeReversals[0] < cutoff) shakeReversals.shift();
       if (shakeReversals.length >= SHAKE_REVERSALS) {
         if (!shakeActiveSince) shakeActiveSince = now;
-        else if (now - shakeActiveSince >= SHAKE_HOLD) {
+        else if (now - shakeActiveSince >= shakeHoldMs) {
           shakeBypass = true; // latch — the drop handler now skips snap
           element.classList.add('snap-bypassed');
           this.snapIndicator.style.display = 'none';
