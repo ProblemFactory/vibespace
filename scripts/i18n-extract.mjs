@@ -9,8 +9,9 @@ import path from 'path';
 const ROOT = new URL('..', import.meta.url).pathname;
 const keys = new Set();
 
-// ── JS: t('...') / t("...") with escaped-quote support ──
-const tRe = /\bt\(\s*(?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)")/g;
+// ── JS: t('...') / tr('...') with escaped-quote support (tr = the alias used
+// where a local `t` variable would shadow the import, e.g. sidebar cluster) ──
+const tRe = /\bt(?:r)?\(\s*(?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)")/g;
 const walk = (dir) => {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name);

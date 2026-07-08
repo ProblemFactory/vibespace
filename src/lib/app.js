@@ -32,39 +32,39 @@ import { createBackendIconHtml, getSessionKey, pickAgentIdentity } from './agent
 
 const BACKEND_SESSION_OPTIONS = {
   claude: {
-    models: [{ id: '', label: 'Default' }, { id: 'fable', label: 'fable (latest, 200k)' }, { id: 'fable[1m]', label: 'fable[1m] (latest, 1M)' }, { id: 'opus', label: 'opus (latest, 200k)' }, { id: 'opus[1m]', label: 'opus[1m] (latest, 1M)' }, { id: 'sonnet', label: 'sonnet (latest)' }, { id: 'sonnet[1m]', label: 'sonnet[1m] (latest, 1M)' }, { id: 'haiku', label: 'haiku (latest)' }],
+    models: [{ id: '', label: t('Default') }, { id: 'fable', label: t('fable (latest, 200k)') }, { id: 'fable[1m]', label: t('fable[1m] (latest, 1M)') }, { id: 'opus', label: t('opus (latest, 200k)') }, { id: 'opus[1m]', label: t('opus[1m] (latest, 1M)') }, { id: 'sonnet', label: t('sonnet (latest)') }, { id: 'sonnet[1m]', label: t('sonnet[1m] (latest, 1M)') }, { id: 'haiku', label: t('haiku (latest)') }],
     permissions: [
-      { value: '', label: 'Default' },
-      { value: 'auto', label: 'Auto' },
-      { value: 'bypassPermissions', label: 'Bypass' },
-      { value: 'plan', label: 'Plan' },
-      { value: 'acceptEdits', label: 'Accept Edits' },
+      { value: '', label: t('Default') },
+      { value: 'auto', label: t('Auto') },
+      { value: 'bypassPermissions', label: t('Bypass') },
+      { value: 'plan', label: t('Plan') },
+      { value: 'acceptEdits', label: t('Accept Edits') },
     ],
     efforts: [
-      { value: '', label: 'Auto (model default)' },
-      { value: 'low', label: 'Low' },
-      { value: 'medium', label: 'Medium' },
-      { value: 'high', label: 'High' },
-      { value: 'xhigh', label: 'XHigh' },
-      { value: 'max', label: 'Max (Opus only)' },
-      { value: 'ultracode', label: 'Ultracode (xhigh + workflows)' },
+      { value: '', label: t('Auto (model default)') },
+      { value: 'low', label: t('Low') },
+      { value: 'medium', label: t('Medium') },
+      { value: 'high', label: t('High') },
+      { value: 'xhigh', label: t('XHigh') },
+      { value: 'max', label: t('Max (Opus only)') },
+      { value: 'ultracode', label: t('Ultracode (xhigh + workflows)') },
     ],
   },
   codex: {
-    models: [{ id: '', label: 'Default' }],
+    models: [{ id: '', label: t('Default') }],
     permissions: [
-      { value: '', label: 'Default' },
-      { value: 'read-only', label: 'Read Only' },
-      { value: 'safe-yolo', label: 'Safe Yolo' },
-      { value: 'yolo', label: 'Yolo' },
+      { value: '', label: t('Default') },
+      { value: 'read-only', label: t('Read Only') },
+      { value: 'safe-yolo', label: t('Safe Yolo') },
+      { value: 'yolo', label: t('Yolo') },
     ],
     efforts: [
-      { value: '', label: 'Auto (model default)' },
-      { value: 'minimal', label: 'Minimal' },
-      { value: 'low', label: 'Low' },
-      { value: 'medium', label: 'Medium' },
-      { value: 'high', label: 'High' },
-      { value: 'xhigh', label: 'XHigh' },
+      { value: '', label: t('Auto (model default)') },
+      { value: 'minimal', label: t('Minimal') },
+      { value: 'low', label: t('Low') },
+      { value: 'medium', label: t('Medium') },
+      { value: 'high', label: t('High') },
+      { value: 'xhigh', label: t('XHigh') },
     ],
   },
 };
@@ -72,7 +72,7 @@ const BACKEND_SESSION_OPTIONS = {
 // Fetch available models from server (Claude from bootstrap/v1/models API, Codex from cache)
 fetchJson('/api/available-models').then(data => {
   if (!data) return;
-  const toSchemaOptions = (models) => models.map(m => ({ value: m.id, label: m.label || m.id || 'Default' }));
+  const toSchemaOptions = (models) => models.map(m => ({ value: m.id, label: m.label || m.id || t('Default') }));
   if (data.claude?.length) {
     BACKEND_SESSION_OPTIONS.claude.models = data.claude;
     SETTINGS_SCHEMA['claude.defaultModel'].options = toSchemaOptions(data.claude);
@@ -86,12 +86,12 @@ fetchJson('/api/available-models').then(data => {
 fetchJson('/api/session-options').then(data => {
   if (!data) return;
   if (data.effortLevels?.length) {
-    const efforts = [{ value: '', label: 'Auto (model default)' }, ...data.effortLevels.map(e => ({ value: e, label: e.charAt(0).toUpperCase() + e.slice(1) }))];
+    const efforts = [{ value: '', label: t('Auto (model default)') }, ...data.effortLevels.map(e => ({ value: e, label: e.charAt(0).toUpperCase() + e.slice(1) }))];
     BACKEND_SESSION_OPTIONS.claude.efforts = efforts;
     SETTINGS_SCHEMA['claude.defaultEffort'].options = efforts.map(e => ({ value: e.value, label: e.label }));
   }
   if (data.permissionModes?.length) {
-    const perms = [{ value: '', label: 'Default' }, ...data.permissionModes.map(p => ({ value: p, label: p }))];
+    const perms = [{ value: '', label: t('Default') }, ...data.permissionModes.map(p => ({ value: p, label: p }))];
     BACKEND_SESSION_OPTIONS.claude.permissions = perms;
     SETTINGS_SCHEMA['claude.defaultPermissionMode'].options = perms.map(p => ({ value: p.value, label: p.label }));
   }
@@ -239,7 +239,7 @@ class App {
       if (!hostsList.length) return this.openShellTerminal();
       const r = btn.getBoundingClientRect();
       showContextMenu(r.left, r.bottom + 4, [
-        { label: 'Local', action: () => this.openShellTerminal() },
+        { label: t('Local'), action: () => this.openShellTerminal() },
         ...hostsList.map(h => ({ label: h.name, action: () => this.openShellTerminal(undefined, { hostId: h.id }) })),
       ]);
     });
@@ -349,14 +349,14 @@ class App {
       e.preventDefault();
       const vis = s.get('taskbar.visibility') || 'show';
       showContextMenu(e.clientX, e.clientY, [
-        { label: 'Customize UI…', action: () => this._customize.enter() },
+        { label: t('Customize UI…'), action: () => this._customize.enter() },
         { separator: true },
-        { label: check('Dock to top', s.get('taskbar.position') === 'top'), action: () => s.set('taskbar.position', s.get('taskbar.position') === 'top' ? 'bottom' : 'top') },
-        { label: check('Auto-hide', vis === 'autohide'), action: () => s.set('taskbar.visibility', vis === 'autohide' ? 'show' : 'autohide') },
-        { label: check('Desktop previews', s.get('taskbar.showDesktopPreviews')), action: () => s.set('taskbar.showDesktopPreviews', !s.get('taskbar.showDesktopPreviews')) },
-        { label: check('Usage meters', s.get('taskbar.showUsage')), action: () => s.set('taskbar.showUsage', !s.get('taskbar.showUsage')) },
-        { label: check('Window count', s.get('taskbar.showWindowCount')), action: () => s.set('taskbar.showWindowCount', !s.get('taskbar.showWindowCount')) },
-        { label: 'All settings\u2026', action: () => this._settingsUI?.open() },
+        { label: check(t('Dock to top'), s.get('taskbar.position') === 'top'), action: () => s.set('taskbar.position', s.get('taskbar.position') === 'top' ? 'bottom' : 'top') },
+        { label: check(t('Auto-hide'), vis === 'autohide'), action: () => s.set('taskbar.visibility', vis === 'autohide' ? 'show' : 'autohide') },
+        { label: check(t('Desktop previews'), s.get('taskbar.showDesktopPreviews')), action: () => s.set('taskbar.showDesktopPreviews', !s.get('taskbar.showDesktopPreviews')) },
+        { label: check(t('Usage meters'), s.get('taskbar.showUsage')), action: () => s.set('taskbar.showUsage', !s.get('taskbar.showUsage')) },
+        { label: check(t('Window count'), s.get('taskbar.showWindowCount')), action: () => s.set('taskbar.showWindowCount', !s.get('taskbar.showWindowCount')) },
+        { label: t('All settings\u2026'), action: () => this._settingsUI?.open() },
       ]);
     });
     const toolbar = document.getElementById('toolbar');
@@ -364,13 +364,13 @@ class App {
       if (e.target.closest('button, select, input')) return;
       e.preventDefault();
       showContextMenu(e.clientX, e.clientY, [
-        { label: 'Customize UI…', action: () => this._customize.enter() },
+        { label: t('Customize UI…'), action: () => this._customize.enter() },
         { separator: true },
-        { label: check('Layout presets', s.get('toolbar.showLayoutPresets')), action: () => s.set('toolbar.showLayoutPresets', !s.get('toolbar.showLayoutPresets')) },
-        { label: check('Browser button', s.get('toolbar.showBrowserButton')), action: () => s.set('toolbar.showBrowserButton', !s.get('toolbar.showBrowserButton')) },
-        { label: check('Files button', s.get('toolbar.showFileExplorerButton')), action: () => s.set('toolbar.showFileExplorerButton', !s.get('toolbar.showFileExplorerButton')) },
-        { label: check('Sidebar on right', s.get('sidebar.position') === 'right'), action: () => s.set('sidebar.position', s.get('sidebar.position') === 'right' ? 'left' : 'right') },
-        { label: 'All settings\u2026', action: () => this._settingsUI?.open() },
+        { label: check(t('Layout presets'), s.get('toolbar.showLayoutPresets')), action: () => s.set('toolbar.showLayoutPresets', !s.get('toolbar.showLayoutPresets')) },
+        { label: check(t('Browser button'), s.get('toolbar.showBrowserButton')), action: () => s.set('toolbar.showBrowserButton', !s.get('toolbar.showBrowserButton')) },
+        { label: check(t('Files button'), s.get('toolbar.showFileExplorerButton')), action: () => s.set('toolbar.showFileExplorerButton', !s.get('toolbar.showFileExplorerButton')) },
+        { label: check(t('Sidebar on right'), s.get('sidebar.position') === 'right'), action: () => s.set('sidebar.position', s.get('sidebar.position') === 'right' ? 'left' : 'right') },
+        { label: t('All settings\u2026'), action: () => this._settingsUI?.open() },
       ]);
     });
   }
@@ -414,8 +414,8 @@ class App {
     overlay.className = 'dialog-overlay';
     overlay.style.zIndex = '99998';
     const dialog = document.createElement('div'); dialog.className = 'dialog';
-    dialog.innerHTML = `<div class="dialog-header"><h3>Set up both Anthropic accounts</h3><button class="dialog-close">✕</button></div>
-      <div class="dialog-body acct-wizard-body"><div class="ob-loading">Checking…</div></div>`;
+    dialog.innerHTML = `<div class="dialog-header"><h3>${t('Set up both Anthropic accounts')}</h3><button class="dialog-close">✕</button></div>
+      <div class="dialog-body acct-wizard-body"><div class="ob-loading">${t('Checking…')}</div></div>`;
     overlay.appendChild(dialog);
     document.body.appendChild(overlay);
     const done = () => { overlay.remove(); if (this._acctWatch) { clearInterval(this._acctWatch); this._acctWatch = null; } };
@@ -442,7 +442,7 @@ class App {
     const render = async () => {
       let d = null;
       try { d = await fetchJson('/api/accounts'); } catch {}
-      if (!d) { body.innerHTML = '<div class="ob-loading">Server unreachable</div>'; return; }
+      if (!d) { body.innerHTML = `<div class="ob-loading">${t('Server unreachable')}</div>`; return; }
       const sub = !!d.subscription?.loggedIn;
       const hasKey = (d.accounts || []).length > 0;
       const importable = d.cliKey?.present && !d.cliKey.imported;
@@ -452,48 +452,52 @@ class App {
           <div class="acct-step-body"><b>${title}</b><div class="agents-note">${desc}</div>${btn || ''}</div>
         </div>`;
       if (sub && hasKey) {
-        body.innerHTML = `<div class="acct-wizard-done"><span class="ob-ok" style="font-size:15px">✓ All set</span>
-          <p class="agents-note">Subscription is the global login and ${(d.accounts.length)} API key${d.accounts.length > 1 ? 's are' : ' is'} saved. Every session can pick its account in the New Session dialog or the card's ⚙ — you'll never need /login switching again.</p></div>`;
+        const nKeys = d.accounts.length;
+        const savedLine = nKeys > 1
+          ? t("Subscription is the global login and {n} API keys are saved. Every session can pick its account in the New Session dialog or the card's ⚙ — you'll never need /login switching again.", { n: nKeys })
+          : t("Subscription is the global login and {n} API key is saved. Every session can pick its account in the New Session dialog or the card's ⚙ — you'll never need /login switching again.", { n: nKeys });
+        body.innerHTML = `<div class="acct-wizard-done"><span class="ob-ok" style="font-size:15px">${t('✓ All set')}</span>
+          <p class="agents-note">${savedLine}</p></div>`;
         return;
       }
       let html = '';
       // Step 1 — get an API key into VibeSpace
       if (hasKey) {
-        html += step(1, 'done', 'API key saved', `${escHtml(d.accounts[0].name)} (…${escHtml(d.accounts[0].tail)})`);
+        html += step(1, 'done', t('API key saved'), `${escHtml(d.accounts[0].name)} (…${escHtml(d.accounts[0].tail)})`);
       } else if (importable) {
-        html += step(1, 'active', 'Save your Console key', 'Your current Console login already minted an API key — one click saves it into VibeSpace (encrypted).', '<button class="agent-btn primary" id="acct-w-import">Import it</button>');
+        html += step(1, 'active', t('Save your Console key'), t('Your current Console login already minted an API key — one click saves it into VibeSpace (encrypted).'), `<button class="agent-btn primary" id="acct-w-import">${t('Import it')}</button>`);
       } else {
-        html += step(1, 'active', 'Log in to your Console account once',
-          'A terminal will open — in the login menu pick <b>“Anthropic Console account”</b>. This temporarily replaces the subscription login; step 2 restores it right after. VibeSpace auto-captures the key the moment it appears.',
-          '<button class="agent-btn primary" id="acct-w-console">Open login terminal</button>'
-          + '<div class="agents-note" style="margin-top:4px">Or, if you already have a key: <a href="#" id="acct-w-paste">paste an API key</a></div>');
+        html += step(1, 'active', t('Log in to your Console account once'),
+          t('A terminal will open — in the login menu pick <b>“Anthropic Console account”</b>. This temporarily replaces the subscription login; step 2 restores it right after. VibeSpace auto-captures the key the moment it appears.'),
+          `<button class="agent-btn primary" id="acct-w-console">${t('Open login terminal')}</button>`
+          + `<div class="agents-note" style="margin-top:4px">${t('Or, if you already have a key: <a href="#" id="acct-w-paste">paste an API key</a>')}</div>`);
       }
       // Step 2 — subscription owns the global login
       if (sub) {
-        html += step(2, 'done', 'Subscription logged in', escHtml(d.subscription.email || ''));
+        html += step(2, 'done', t('Subscription logged in'), escHtml(d.subscription.email || ''));
       } else {
-        html += step(2, hasKey || importable ? 'active' : 'pending', 'Log back in to your subscription',
-          'A terminal will open — pick <b>“Claude account with subscription”</b> and finish in the browser. VibeSpace detects it automatically.',
-          (hasKey || importable) ? '<button class="agent-btn primary" id="acct-w-sub">Open login terminal</button>' : '');
+        html += step(2, hasKey || importable ? 'active' : 'pending', t('Log back in to your subscription'),
+          t('A terminal will open — pick <b>“Claude account with subscription”</b> and finish in the browser. VibeSpace detects it automatically.'),
+          (hasKey || importable) ? `<button class="agent-btn primary" id="acct-w-sub">${t('Open login terminal')}</button>` : '');
       }
       body.innerHTML = html;
       body.querySelector('#acct-w-import')?.addEventListener('click', async () => {
-        try { const r = await fetchJson('/api/accounts/import-cli', { method: 'POST' }); showToast('Imported: ' + r.account.name); } catch { showToast('Import failed', { type: 'error' }); }
+        try { const r = await fetchJson('/api/accounts/import-cli', { method: 'POST' }); showToast(t('Imported: {name}', { name: r.account.name })); } catch { showToast(t('Import failed'), { type: 'error' }); }
         render();
       });
       body.querySelector('#acct-w-console')?.addEventListener('click', () => {
         done();
         this.openShellTerminal(undefined, { initialCommand: 'claude /login' });
-        showToast('Complete the Console login — setup continues automatically');
+        showToast(t('Complete the Console login — setup continues automatically'));
         watch((x) => x.cliKey?.present && !x.cliKey.imported, async () => {
           try { await fetchJson('/api/accounts/import-cli', { method: 'POST' }); } catch {}
-          showToast('Console key captured ✓ — one step left');
+          showToast(t('Console key captured ✓ — one step left'));
           this._showAccountsWizard();
         });
       });
       body.querySelector('#acct-w-paste')?.addEventListener('click', async (e) => {
         e.preventDefault();
-        const key = await showInputDialog({ title: 'Add API key', label: 'Anthropic API key (from console.anthropic.com)', placeholder: 'sk-ant-…', confirmText: 'Save' });
+        const key = await showInputDialog({ title: t('Add API key'), label: t('Anthropic API key (from console.anthropic.com)'), placeholder: 'sk-ant-…', confirmText: t('Save') });
         if (key && key.trim()) {
           try { await fetchJson('/api/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: key.trim() }) }); } catch {}
         }
@@ -502,9 +506,9 @@ class App {
       body.querySelector('#acct-w-sub')?.addEventListener('click', () => {
         done();
         this.openShellTerminal(undefined, { initialCommand: 'claude /login' });
-        showToast('Complete the subscription login — setup continues automatically');
+        showToast(t('Complete the subscription login — setup continues automatically'));
         watch((x) => x.subscription?.loggedIn, async () => {
-          showToast('Subscription restored ✓ — accounts setup complete');
+          showToast(t('Subscription restored ✓ — accounts setup complete'));
           this._showAccountsWizard();
         });
       });
@@ -520,11 +524,11 @@ class App {
     overlay.style.zIndex = '99998';
     const dialog = document.createElement('div'); dialog.className = 'dialog agents-dialog';
     const header = document.createElement('div'); header.className = 'dialog-header';
-    const h3 = document.createElement('h3'); h3.textContent = 'Agents';
+    const h3 = document.createElement('h3'); h3.textContent = t('Agents');
     const closeBtn = document.createElement('button'); closeBtn.className = 'dialog-close'; closeBtn.textContent = '\u2715';
     header.append(h3, closeBtn);
     const body = document.createElement('div'); body.className = 'dialog-body agents-dialog-body';
-    body.innerHTML = '<div class="ob-loading">Checking\u2026</div>';
+    body.innerHTML = `<div class="ob-loading">${t('Checking\u2026')}</div>`;
     dialog.append(header, body);
     overlay.appendChild(dialog);
     document.body.appendChild(overlay);
@@ -554,9 +558,9 @@ class App {
       // Host dropdown row
       const hostRow = document.createElement('div');
       hostRow.className = 'agents-host-row';
-      const hostLabel = document.createElement('span'); hostLabel.textContent = 'Machine:';
+      const hostLabel = document.createElement('span'); hostLabel.textContent = t('Machine:');
       const hostSel = document.createElement('select'); hostSel.className = 'agents-host-select';
-      hostSel.innerHTML = '<option value="">This machine (local)</option>';
+      hostSel.innerHTML = `<option value="">${t('This machine (local)')}</option>`;
       try {
         const hd = await fetchJson('/api/hosts');
         for (const h of hd?.hosts || []) {
@@ -573,18 +577,18 @@ class App {
         const row = document.createElement('div'); row.className = 'ob-backend';
         const left = document.createElement('div');
         left.innerHTML = `<b>${b.label}</b> ${info.version ? `<span class="ob-ver">${escHtml(info.version)}</span>` : ''}<div>${
-          !info.installed ? '<span class="ob-bad">not installed</span>'
-          : info.loggedIn ? '<span class="ob-ok">\u2713 logged in</span>'
-          : '<span class="ob-warn">not logged in</span>'
+          !info.installed ? `<span class="ob-bad">${t('not installed')}</span>`
+          : info.loggedIn ? `<span class="ob-ok">\u2713 ${t('logged in')}</span>`
+          : `<span class="ob-warn">${t('not logged in')}</span>`
         }</div>`;
         const actions = document.createElement('div'); actions.className = 'agent-actions';
         if (info.installed && !info.loggedIn) {
-          const loginBtn = document.createElement('button'); loginBtn.className = 'agent-btn primary'; loginBtn.textContent = 'Log in';
+          const loginBtn = document.createElement('button'); loginBtn.className = 'agent-btn primary'; loginBtn.textContent = t('Log in');
           loginBtn.onclick = () => run(b.loginCmd);
           actions.appendChild(loginBtn);
         }
         if (info.installed) {
-          const updBtn = document.createElement('button'); updBtn.className = 'agent-btn'; updBtn.textContent = 'Update';
+          const updBtn = document.createElement('button'); updBtn.className = 'agent-btn'; updBtn.textContent = t('Update');
           updBtn.title = b.updateCmd;
           updBtn.onclick = () => run(b.updateCmd);
           actions.appendChild(updBtn);
@@ -605,35 +609,35 @@ class App {
           const stateOf = (k, label) => {
             const st = hs[k] || {};
             if (st.installed) return `<span class="ob-ok">✓ ${label}</span>`;
-            if (st.stale) return `<span class="ob-warn">${label}: needs update</span>`;
-            if (st.parseError) return `<span class="ob-bad">${label}: config unreadable</span>`;
-            if (!st.fileExists) return `<span class="ob-warn">${label}: run the CLI once first</span>`;
-            return `<span class="ob-warn">${label}: not installed</span>`;
+            if (st.stale) return `<span class="ob-warn">${t('{label}: needs update', { label })}</span>`;
+            if (st.parseError) return `<span class="ob-bad">${t('{label}: config unreadable', { label })}</span>`;
+            if (!st.fileExists) return `<span class="ob-warn">${t('{label}: run the CLI once first', { label })}</span>`;
+            return `<span class="ob-warn">${t('{label}: not installed', { label })}</span>`;
           };
           const allGood = hs.claude?.installed && hs.codex?.installed;
-          left.innerHTML = `<b>VibeSpace integration</b><div>${stateOf('claude', 'Claude')} &nbsp; ${stateOf('codex', 'Codex')}</div>`
-            + `<div class="agents-note" style="margin:4px 0 0">Lets sessions in a Task Group automatically receive the group's context (objective, checklist, shared files).</div>`;
+          left.innerHTML = `<b>${t('VibeSpace integration')}</b><div>${stateOf('claude', 'Claude')} &nbsp; ${stateOf('codex', 'Codex')}</div>`
+            + `<div class="agents-note" style="margin:4px 0 0">${t("Lets sessions in a Task Group automatically receive the group's context (objective, checklist, shared files).")}</div>`;
           const actions = document.createElement('div'); actions.className = 'agent-actions';
           const installBtn = document.createElement('button');
           installBtn.className = 'agent-btn' + (allGood ? '' : ' primary');
-          installBtn.textContent = allGood ? 'Reinstall' : 'Install';
+          installBtn.textContent = allGood ? t('Reinstall') : t('Install');
           installBtn.onclick = async () => {
             installBtn.disabled = true;
             try {
               const r = await fetchJson('/api/agent-hooks/install', { method: 'POST' });
               const errs = Object.entries(r?.results || {}).filter(([, v]) => !v.ok);
               if (errs.length) showToast(errs.map(([k, v]) => `${k}: ${v.error}`).join('; '), { type: 'error' });
-              else showToast('Task Group context hook installed');
-            } catch { showToast('Install failed', { type: 'error' }); }
+              else showToast(t('Task Group context hook installed'));
+            } catch { showToast(t('Install failed'), { type: 'error' }); }
             refresh();
           };
           actions.appendChild(installBtn);
           if (hs.claude?.installed || hs.codex?.installed || hs.claude?.stale || hs.codex?.stale) {
-            const rmBtn = document.createElement('button'); rmBtn.className = 'agent-btn'; rmBtn.textContent = 'Remove';
-            rmBtn.title = 'Unregister the hook from both CLIs (sessions stop receiving Task Group context)';
+            const rmBtn = document.createElement('button'); rmBtn.className = 'agent-btn'; rmBtn.textContent = t('Remove');
+            rmBtn.title = t('Unregister the hook from both CLIs (sessions stop receiving Task Group context)');
             rmBtn.onclick = async () => {
               rmBtn.disabled = true;
-              try { await fetchJson('/api/agent-hooks/uninstall', { method: 'POST' }); showToast('Hook removed'); } catch {}
+              try { await fetchJson('/api/agent-hooks/uninstall', { method: 'POST' }); showToast(t('Hook removed')); } catch {}
               refresh();
             };
             actions.appendChild(rmBtn);
@@ -651,31 +655,31 @@ class App {
         try { racct = await fetchJson(`/api/hosts/${encodeURIComponent(selectedHost)}/accounts-status`); } catch {}
         if (racct && !racct.error) {
           const accts = this._accounts || { accounts: [] };
-          const hostLabel = hostSel.options[hostSel.selectedIndex]?.textContent?.split(' (')[0] || 'host';
+          const hostLabel = hostSel.options[hostSel.selectedIndex]?.textContent?.split(' (')[0] || t('host');
           const row = document.createElement('div'); row.className = 'ob-backend acct-section';
           const left = document.createElement('div'); left.style.flex = '1';
           const importedTails = new Set((accts.accounts || []).map(a => a.tail));
-          left.innerHTML = `<b>Anthropic accounts on ${escHtml(hostLabel)}</b>
+          left.innerHTML = `<b>${t('Anthropic accounts on {host}', { host: escHtml(hostLabel) })}</b>
             <div style="margin:3px 0">${racct.subscription?.loggedIn
-              ? '<span class="ob-ok">✓ Subscription logged in (on the host)</span>'
-              : `<span class="ob-warn">Subscription: not logged in${racct.cliKey?.present ? ' (a Console login replaced it)' : ''}</span>`}</div>
-            ${racct.cliKey?.present ? `<div style="margin:3px 0">Console key on host: …${escHtml(racct.cliKey.tail)} ${importedTails.has(racct.cliKey.tail) ? '<span class="ob-ok">✓ imported</span>' : '<span class="ob-warn">not imported</span>'}</div>` : ''}
-            <div class="agents-note" style="margin:4px 0 0">API keys live in the central store (${(accts.accounts || []).length} saved) and are pushed to the host per session — pick the account in the New Session dialog / card ⚙. 'Subscription' there means THIS host's own login.</div>`;
+              ? `<span class="ob-ok">${t('✓ Subscription logged in (on the host)')}</span>`
+              : `<span class="ob-warn">${racct.cliKey?.present ? t('Subscription: not logged in (a Console login replaced it)') : t('Subscription: not logged in')}</span>`}</div>
+            ${racct.cliKey?.present ? `<div style="margin:3px 0">${t('Console key on host: …{tail}', { tail: escHtml(racct.cliKey.tail) })} ${importedTails.has(racct.cliKey.tail) ? `<span class="ob-ok">${t('✓ imported')}</span>` : `<span class="ob-warn">${t('not imported')}</span>`}</div>` : ''}
+            <div class="agents-note" style="margin:4px 0 0">${t("API keys live in the central store ({n} saved) and are pushed to the host per session — pick the account in the New Session dialog / card ⚙. 'Subscription' there means THIS host's own login.", { n: (accts.accounts || []).length })}</div>`;
           const actions = document.createElement('div'); actions.className = 'agent-actions';
           const loginBtn = document.createElement('button');
           loginBtn.className = 'agent-btn' + (racct.subscription?.loggedIn ? '' : ' primary');
-          loginBtn.textContent = 'Log in on host…';
-          loginBtn.title = 'Opens a terminal ON the host running claude /login';
+          loginBtn.textContent = t('Log in on host…');
+          loginBtn.title = t('Opens a terminal ON the host running claude /login');
           loginBtn.onclick = () => run('claude /login');
           actions.appendChild(loginBtn);
           if (racct.cliKey?.present && !importedTails.has(racct.cliKey.tail)) {
             const impBtn = document.createElement('button'); impBtn.className = 'agent-btn primary';
-            impBtn.textContent = 'Import host key';
+            impBtn.textContent = t('Import host key');
             impBtn.onclick = async () => {
               try {
                 const r = await fetchJson('/api/accounts/import-cli-host', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hostId: selectedHost }) });
-                if (r?.account) showToast('Imported: ' + r.account.name); else showToast(r?.error || 'Import failed', { type: 'error' });
-              } catch { showToast('Import failed', { type: 'error' }); }
+                if (r?.account) showToast(t('Imported: {name}', { name: r.account.name })); else showToast(r?.error || t('Import failed'), { type: 'error' });
+              } catch { showToast(t('Import failed'), { type: 'error' }); }
               refresh();
             };
             actions.appendChild(impBtn);
@@ -694,50 +698,50 @@ class App {
           left.style.flex = '1';
           const sub = acct.subscription || {};
           const subLine = sub.loggedIn
-            ? `<span class="ob-ok">✓ Subscription — ${escHtml(sub.email || 'logged in')}</span>`
-            : `<span class="ob-warn">Subscription: not logged in${acct.cliKey?.present ? ' (a Console login replaced it)' : ''}</span>`;
+            ? `<span class="ob-ok">${t('✓ Subscription — {info}', { info: escHtml(sub.email || t('logged in')) })}</span>`
+            : `<span class="ob-warn">${acct.cliKey?.present ? t('Subscription: not logged in (a Console login replaced it)') : t('Subscription: not logged in')}</span>`;
           const keyLines = (accts.accounts || []).map(a => {
             const isDef = accts.defaultAccountId === a.id;
             return `<div class="acct-key-row" data-id="${escHtml(a.id)}">
               <span class="ob-ok">✓</span> <span class="acct-key-name">${escHtml(a.name)}</span>
-              <span class="acct-key-tail">API …${escHtml(a.tail)}</span>${isDef ? '<span class="acct-def-badge">default</span>' : ''}
+              <span class="acct-key-tail">API …${escHtml(a.tail)}</span>${isDef ? `<span class="acct-def-badge">${t('default')}</span>` : ''}
               <span class="acct-key-actions">
-                <button class="agent-btn acct-test" title="Open a terminal session using this key (approve the CLI's one-time trust prompt here if it appears)">Test</button>
-                <button class="agent-btn acct-def" title="Use for new sessions unless a session picks otherwise">${isDef ? 'Unset default' : 'Set default'}</button>
-                <button class="agent-btn acct-del" title="Remove from VibeSpace (the key itself stays valid)">✕</button>
+                <button class="agent-btn acct-test" title="${t("Open a terminal session using this key (approve the CLI's one-time trust prompt here if it appears)")}">${t('Test')}</button>
+                <button class="agent-btn acct-def" title="${t('Use for new sessions unless a session picks otherwise')}">${isDef ? t('Unset default') : t('Set default')}</button>
+                <button class="agent-btn acct-del" title="${t('Remove from VibeSpace (the key itself stays valid)')}">✕</button>
               </span></div>`;
           }).join('');
-          left.innerHTML = `<b>Anthropic accounts</b>
+          left.innerHTML = `<b>${t('Anthropic accounts')}</b>
             <div style="margin:3px 0">${subLine}</div>
-            ${keyLines || '<div class="agents-note">No API keys saved — sessions can only use the CLI’s global login.</div>'}
-            <div class="agents-note" style="margin:4px 0 0">Each session can pick its account (New Session dialog / card ⚙). Subscription = your Pro/Max plan; API keys bill pay-per-use.</div>`;
+            ${keyLines || `<div class="agents-note">${t('No API keys saved — sessions can only use the CLI’s global login.')}</div>`}
+            <div class="agents-note" style="margin:4px 0 0">${t('Each session can pick its account (New Session dialog / card ⚙). Subscription = your Pro/Max plan; API keys bill pay-per-use.')}</div>`;
           const actions = document.createElement('div'); actions.className = 'agent-actions';
           const needsSetup = !sub.loggedIn || !(accts.accounts || []).length;
           const wizardBtn = document.createElement('button');
           wizardBtn.className = 'agent-btn' + (needsSetup ? ' primary' : '');
-          wizardBtn.textContent = 'Set up both…';
+          wizardBtn.textContent = t('Set up both…');
           wizardBtn.onclick = () => { done(); this._showAccountsWizard(); };
           actions.appendChild(wizardBtn);
           if (acct.cliKey?.present && !acct.cliKey.imported) {
             const impBtn = document.createElement('button'); impBtn.className = 'agent-btn primary';
-            impBtn.textContent = 'Import CLI key';
-            impBtn.title = `Save the key your Console login minted (${escHtml(acct.cliKey.org || '')} …${escHtml(acct.cliKey.tail || '')}) into VibeSpace`;
+            impBtn.textContent = t('Import CLI key');
+            impBtn.title = t('Save the key your Console login minted ({org} …{tail}) into VibeSpace', { org: escHtml(acct.cliKey.org || ''), tail: escHtml(acct.cliKey.tail || '') });
             impBtn.onclick = async () => {
-              try { const r = await fetchJson('/api/accounts/import-cli', { method: 'POST' }); showToast('Imported: ' + r.account.name); } catch (e) { showToast('Import failed', { type: 'error' }); }
+              try { const r = await fetchJson('/api/accounts/import-cli', { method: 'POST' }); showToast(t('Imported: {name}', { name: r.account.name })); } catch (e) { showToast(t('Import failed'), { type: 'error' }); }
               refresh();
             };
             actions.appendChild(impBtn);
           }
-          const addBtn = document.createElement('button'); addBtn.className = 'agent-btn'; addBtn.textContent = 'Add key…';
+          const addBtn = document.createElement('button'); addBtn.className = 'agent-btn'; addBtn.textContent = t('Add key…');
           addBtn.onclick = async () => {
-            const key = await showInputDialog({ title: 'Add API key', label: 'Anthropic API key (from console.anthropic.com)', placeholder: 'sk-ant-…', confirmText: 'Save' });
+            const key = await showInputDialog({ title: t('Add API key'), label: t('Anthropic API key (from console.anthropic.com)'), placeholder: 'sk-ant-…', confirmText: t('Save') });
             if (!key || !key.trim()) return;
-            const name = await showInputDialog({ title: 'Name this account', label: 'Shown in account pickers', placeholder: 'e.g. Company API', confirmText: 'Save' });
+            const name = await showInputDialog({ title: t('Name this account'), label: t('Shown in account pickers'), placeholder: t('e.g. Company API'), confirmText: t('Save') });
             try {
               const r = await fetchJson('/api/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: key.trim(), name: (name || '').trim() }) });
-              if (r?.account) showToast('Saved: ' + r.account.name + ' — use Test once to approve the CLI’s trust prompt');
-              else showToast(r?.error || 'Save failed', { type: 'error' });
-            } catch { showToast('Save failed', { type: 'error' }); }
+              if (r?.account) showToast(t('Saved: {name} — use Test once to approve the CLI’s trust prompt', { name: r.account.name }));
+              else showToast(r?.error || t('Save failed'), { type: 'error' });
+            } catch { showToast(t('Save failed'), { type: 'error' }); }
             refresh();
           };
           actions.appendChild(addBtn);
@@ -757,7 +761,7 @@ class App {
               refresh();
             } else if (e.target.classList.contains('acct-del')) {
               const a = (accts.accounts || []).find(x => x.id === id);
-              if (!(await showConfirmDialog({ title: 'Remove account', message: `Remove "${a?.name}" from VibeSpace? Sessions already running keep working; the key itself stays valid.` }))) return;
+              if (!(await showConfirmDialog({ title: t('Remove account'), message: t('Remove "{name}" from VibeSpace? Sessions already running keep working; the key itself stays valid.', { name: a?.name }) }))) return;
               try { await fetchJson(`/api/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }); } catch {}
               refresh();
             }
@@ -767,8 +771,8 @@ class App {
       const foot = document.createElement('div');
       foot.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:10px;';
       const note = document.createElement('p'); note.className = 'agents-note';
-      note.textContent = 'Actions open in a terminal window so you can see exactly what runs.';
-      const recheck = document.createElement('button'); recheck.className = 'agent-btn'; recheck.textContent = 'Re-check';
+      note.textContent = t('Actions open in a terminal window so you can see exactly what runs.');
+      const recheck = document.createElement('button'); recheck.className = 'agent-btn'; recheck.textContent = t('Re-check');
       recheck.onclick = refresh;
       foot.append(note, recheck);
       body.appendChild(foot);
@@ -805,7 +809,7 @@ class App {
   // ── Backup & migrate (one dialog, Export | Import tabs) ──
   // Merged into a single gs-menu entry after the menu grew too long.
   _showTransferDialog(initialTab = 'export', presetFile = null) {
-    const { body: shell, close } = this._modal('Backup & migrate', { wide: true });
+    const { body: shell, close } = this._modal(t('Backup & migrate'), { wide: true });
     const tabs = document.createElement('div');
     tabs.className = 'cfg-tabs';
     const body = document.createElement('div');
@@ -820,8 +824,8 @@ class App {
       tabs.appendChild(b);
       return b;
     };
-    mk('export', 'Export to file');
-    mk('import', 'Import from file');
+    mk('export', t('Export to file'));
+    mk('import', t('Import from file'));
     const show = (id) => {
       for (const t of tabs.children) t.classList.toggle('active', t.dataset.tab === id);
       body.innerHTML = '';
@@ -834,10 +838,10 @@ class App {
   // Non-sensitive sections default-checked; sensitive items (password record,
   // agent CLI credentials) are opt-in and AES-encrypted under a passphrase.
   async _buildExportBody(body, close) {
-    body.innerHTML = '<div class="ob-loading">Checking…</div>';
+    body.innerHTML = `<div class="ob-loading">${t('Checking…')}</div>`;
     let info;
     try { info = await fetchJson('/api/config/export-info'); }
-    catch { body.innerHTML = '<p class="agents-note">Failed to load export info.</p>'; return; }
+    catch { body.innerHTML = `<p class="agents-note">${t('Failed to load export info.')}</p>`; return; }
 
     body.innerHTML = '';
     const mkRow = (id, label, desc, { checked = true, disabled = false } = {}) => {
@@ -851,28 +855,28 @@ class App {
     const secWrap = document.createElement('div');
     secWrap.className = 'cfg-rows';
     secWrap.append(
-      mkRow('settings', 'Settings', `${s.settings.count} customized option(s), incl. Customize-UI arrangement`),
-      mkRow('customThemes', 'Custom themes', `${s.customThemes.count} theme(s)`),
-      mkRow('layouts', 'Layouts & desktops', `${s.layouts.count} layout(s), ${s.layouts.desktops} desktop(s), custom grids`),
-      mkRow('userState', 'Session metadata', `stars, renames, ${s.userState.groups} group(s), per-session configs`),
-      mkRow('bookmarks', 'File bookmarks', `${s.bookmarks.count} bookmark(s)`),
-      mkRow('clientPrefs', 'This browser’s preferences', 'theme, font, taskbar height'),
+      mkRow('settings', t('Settings'), t('{count} customized option(s), incl. Customize-UI arrangement', { count: s.settings.count })),
+      mkRow('customThemes', t('Custom themes'), t('{count} theme(s)', { count: s.customThemes.count })),
+      mkRow('layouts', t('Layouts & desktops'), t('{count} layout(s), {desktops} desktop(s), custom grids', { count: s.layouts.count, desktops: s.layouts.desktops })),
+      mkRow('userState', t('Session metadata'), t('stars, renames, {groups} group(s), per-session configs', { groups: s.userState.groups })),
+      mkRow('bookmarks', t('File bookmarks'), t('{count} bookmark(s)', { count: s.bookmarks.count })),
+      mkRow('clientPrefs', t('This browser’s preferences'), t('theme, font, taskbar height')),
     );
     const sensHead = document.createElement('div');
     sensHead.className = 'cfg-sens-head';
-    sensHead.innerHTML = '<b>Sensitive</b><span> — off by default; encrypted with a passphrase. The file lets anyone who has it (and the passphrase) log in / use your agent accounts. Treat it like a key.</span>';
+    sensHead.innerHTML = `<b>${t('Sensitive')}</b><span> — ${t('off by default; encrypted with a passphrase. The file lets anyone who has it (and the passphrase) log in / use your agent accounts. Treat it like a key.')}</span>`;
     const sensWrap = document.createElement('div');
     sensWrap.className = 'cfg-rows cfg-rows-sens';
     sensWrap.append(
-      mkRow('vsPassword', 'VibeSpace password', info.sensitive.vsPassword ? 'password hash — same password works after import' : 'no password configured', { checked: false, disabled: !info.sensitive.vsPassword }),
-      mkRow('claudeCreds', 'Claude CLI credentials', info.sensitive.claudeCreds ? '~/.claude/.credentials.json — no re-login on the new instance' : 'not found on this machine', { checked: false, disabled: !info.sensitive.claudeCreds }),
-      mkRow('codexCreds', 'Codex CLI credentials', info.sensitive.codexCreds ? '~/.codex/auth.json' : 'not found on this machine', { checked: false, disabled: !info.sensitive.codexCreds }),
-      mkRow('hosts', 'Remote hosts', info.sensitive.hosts ? `${info.sensitive.hosts} ssh host(s) + uploaded keys` : 'no hosts configured', { checked: false, disabled: !info.sensitive.hosts }),
-      mkRow('mounts', 'S3 mounts & shares', info.sensitive.mounts ? `${info.sensitive.mounts} mount(s) incl. credentials` : 'no mounts configured', { checked: false, disabled: !info.sensitive.mounts }),
+      mkRow('vsPassword', t('VibeSpace password'), info.sensitive.vsPassword ? t('password hash — same password works after import') : t('no password configured'), { checked: false, disabled: !info.sensitive.vsPassword }),
+      mkRow('claudeCreds', t('Claude CLI credentials'), info.sensitive.claudeCreds ? t('~/.claude/.credentials.json — no re-login on the new instance') : t('not found on this machine'), { checked: false, disabled: !info.sensitive.claudeCreds }),
+      mkRow('codexCreds', t('Codex CLI credentials'), info.sensitive.codexCreds ? '~/.codex/auth.json' : t('not found on this machine'), { checked: false, disabled: !info.sensitive.codexCreds }),
+      mkRow('hosts', t('Remote hosts'), info.sensitive.hosts ? t('{n} ssh host(s) + uploaded keys', { n: info.sensitive.hosts }) : t('no hosts configured'), { checked: false, disabled: !info.sensitive.hosts }),
+      mkRow('mounts', t('S3 mounts & shares'), info.sensitive.mounts ? t('{n} mount(s) incl. credentials', { n: info.sensitive.mounts }) : t('no mounts configured'), { checked: false, disabled: !info.sensitive.mounts }),
     );
     const passRow = document.createElement('div');
     passRow.className = 'cfg-pass-row hidden';
-    passRow.innerHTML = '<label>Encryption passphrase <input type="password" id="cfg-exp-pass" placeholder="min 4 chars" autocomplete="new-password"></label>';
+    passRow.innerHTML = `<label>${t('Encryption passphrase')} <input type="password" id="cfg-exp-pass" placeholder="${t('min 4 chars')}" autocomplete="new-password"></label>`;
     const syncPass = () => {
       const anySens = [...sensWrap.querySelectorAll('input:checked')].length > 0;
       passRow.classList.toggle('hidden', !anySens);
@@ -884,14 +888,14 @@ class App {
     actions.className = 'dialog-actions';
     const exportBtn = document.createElement('button');
     exportBtn.className = 'btn-create';
-    exportBtn.textContent = 'Export';
+    exportBtn.textContent = t('Export');
     exportBtn.onclick = async () => {
       err.textContent = '';
       const sections = [...secWrap.querySelectorAll('input:checked')].map(i => i.dataset.sec);
       const includeSensitive = [...sensWrap.querySelectorAll('input:checked')].map(i => i.dataset.sec);
       const passphrase = passRow.querySelector('input')?.value || '';
-      if (!sections.length && !includeSensitive.length) { err.textContent = 'Nothing selected'; return; }
-      if (includeSensitive.length && passphrase.length < 4) { err.textContent = 'Passphrase must be at least 4 characters'; return; }
+      if (!sections.length && !includeSensitive.length) { err.textContent = t('Nothing selected'); return; }
+      if (includeSensitive.length && passphrase.length < 4) { err.textContent = t('Passphrase must be at least 4 characters'); return; }
       const clientPrefs = {};
       for (const k of ['theme', 'termFontSize', 'termFontFamily', 'taskbarHeight']) {
         const v = localStorage.getItem(k);
@@ -902,7 +906,7 @@ class App {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sections, includeSensitive, passphrase, clientPrefs }),
         });
-        if (!res.ok) { err.textContent = (await res.json().catch(() => ({}))).error || 'Export failed'; return; }
+        if (!res.ok) { err.textContent = (await res.json().catch(() => ({}))).error || t('Export failed'); return; }
         const blob = await res.blob();
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
@@ -910,8 +914,8 @@ class App {
         a.click();
         URL.revokeObjectURL(a.href);
         close();
-        showToast('Configuration exported');
-      } catch { err.textContent = 'Export failed'; }
+        showToast(t('Configuration exported'));
+      } catch { err.textContent = t('Export failed'); }
     };
     actions.appendChild(exportBtn);
     body.append(secWrap, sensHead, sensWrap, passRow, err, actions);
@@ -923,27 +927,27 @@ class App {
   _buildImportBody(body, close, presetFile = null) {
     const pick = document.createElement('div');
     pick.className = 'cfg-import-pick';
-    pick.innerHTML = '<button class="btn-create" id="cfg-imp-pick">Choose config file…</button><span class="agents-note">a vibespace-config-*.json export</span>';
+    pick.innerHTML = `<button class="btn-create" id="cfg-imp-pick">${t('Choose config file…')}</button><span class="agents-note">${t('a vibespace-config-*.json export')}</span>`;
     const fileInput = document.createElement('input');
     fileInput.type = 'file'; fileInput.accept = 'application/json,.json'; fileInput.style.display = 'none';
     body.append(pick, fileInput);
     pick.querySelector('#cfg-imp-pick').onclick = () => fileInput.click();
 
     const SEC_LABELS = {
-      settings: ['Settings', (d) => `${Object.keys(d).length} option(s)`],
-      customThemes: ['Custom themes', (d) => `${Object.keys(d || {}).length} theme(s)`],
-      layouts: ['Layouts & desktops', (d) => `${Object.keys(d?.layouts || {}).length} layout(s), ${(d?.desktopMeta || []).length} desktop(s)`],
-      userState: ['Session metadata', (d) => `${Object.keys(d?.sessionGroups || {}).length} group(s), ${Object.keys(d?.customNames || {}).length} rename(s), ${Object.keys(d?.starredSessions || {}).length} star(s)`],
-      bookmarks: ['File bookmarks', (d) => `${(d || []).length} bookmark(s)`],
-      clientPrefs: ['Browser preferences', (d) => Object.keys(d || {}).join(', ') || 'empty'],
+      settings: [t('Settings'), (d) => t('{n} option(s)', { n: Object.keys(d).length })],
+      customThemes: [t('Custom themes'), (d) => t('{n} theme(s)', { n: Object.keys(d || {}).length })],
+      layouts: [t('Layouts & desktops'), (d) => t('{a} layout(s), {b} desktop(s)', { a: Object.keys(d?.layouts || {}).length, b: (d?.desktopMeta || []).length })],
+      userState: [t('Session metadata'), (d) => t('{a} group(s), {b} rename(s), {c} star(s)', { a: Object.keys(d?.sessionGroups || {}).length, b: Object.keys(d?.customNames || {}).length, c: Object.keys(d?.starredSessions || {}).length })],
+      bookmarks: [t('File bookmarks'), (d) => t('{n} bookmark(s)', { n: (d || []).length })],
+      clientPrefs: [t('Browser preferences'), (d) => Object.keys(d || {}).join(', ') || t('empty')],
     };
-    const SENS_LABELS = { vsPassword: 'VibeSpace password', claudeCreds: 'Claude CLI credentials', codexCreds: 'Codex CLI credentials', hosts: 'Remote hosts', mounts: 'S3 mounts & shares' };
+    const SENS_LABELS = { vsPassword: t('VibeSpace password'), claudeCreds: t('Claude CLI credentials'), codexCreds: t('Codex CLI credentials'), hosts: t('Remote hosts'), mounts: t('S3 mounts & shares') };
 
     const renderFile = (file) => {
       body.innerHTML = '';
       const head = document.createElement('p');
       head.className = 'agents-note';
-      head.textContent = `Exported ${file.exportedAt ? new Date(file.exportedAt).toLocaleString() : '(unknown date)'} — each selected section REPLACES the current data.`;
+      head.textContent = t('Exported {date} — each selected section REPLACES the current data.', { date: file.exportedAt ? new Date(file.exportedAt).toLocaleString() : t('(unknown date)') });
       const secWrap = document.createElement('div');
       secWrap.className = 'cfg-rows';
       for (const [id, data] of Object.entries(file.sections || {})) {
@@ -959,17 +963,17 @@ class App {
       sensWrap.className = 'cfg-rows cfg-rows-sens';
       const passRow = document.createElement('div');
       passRow.className = 'cfg-pass-row hidden';
-      passRow.innerHTML = '<label>Decryption passphrase <input type="password" autocomplete="off"></label>';
+      passRow.innerHTML = `<label>${t('Decryption passphrase')} <input type="password" autocomplete="off"></label>`;
       if (file.sensitive?.manifest?.length) {
         const sensHead = document.createElement('div');
         sensHead.className = 'cfg-sens-head';
-        sensHead.innerHTML = '<b>Sensitive (encrypted)</b><span> — requires the export passphrase</span>';
+        sensHead.innerHTML = `<b>${t('Sensitive (encrypted)')}</b><span> — ${t('requires the export passphrase')}</span>`;
         body.appendChild(sensHead);
         for (const id of file.sensitive.manifest) {
           const row = document.createElement('label');
           row.className = 'cfg-row';
           row.innerHTML = `<input type="checkbox" data-sec="${id}">
-            <span class="cfg-row-text"><b>${escHtml(SENS_LABELS[id] || id)}</b><span>${id === 'vsPassword' ? 'enables password auth; all other devices are logged out' : 'written to this machine'}</span></span>`;
+            <span class="cfg-row-text"><b>${escHtml(SENS_LABELS[id] || id)}</b><span>${id === 'vsPassword' ? t('enables password auth; all other devices are logged out') : t('written to this machine')}</span></span>`;
           sensWrap.appendChild(row);
         }
         sensWrap.addEventListener('change', () => {
@@ -981,30 +985,30 @@ class App {
       actions.className = 'dialog-actions';
       const importBtn = document.createElement('button');
       importBtn.className = 'btn-create';
-      importBtn.textContent = 'Import';
+      importBtn.textContent = t('Import');
       importBtn.onclick = async () => {
         err.textContent = '';
         const sections = [...secWrap.querySelectorAll('input:checked')].map(i => i.dataset.sec);
         const includeSensitive = [...sensWrap.querySelectorAll('input:checked')].map(i => i.dataset.sec);
         const passphrase = passRow.querySelector('input')?.value || '';
-        if (!sections.length && !includeSensitive.length) { err.textContent = 'Nothing selected'; return; }
-        if (includeSensitive.length && !passphrase) { err.textContent = 'Enter the passphrase'; return; }
+        if (!sections.length && !includeSensitive.length) { err.textContent = t('Nothing selected'); return; }
+        if (includeSensitive.length && !passphrase) { err.textContent = t('Enter the passphrase'); return; }
         try {
           const res = await fetch('/api/config/import', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ file, sections, includeSensitive, passphrase }),
           });
           const d = await res.json().catch(() => ({}));
-          if (!res.ok) { err.textContent = d.error || 'Import failed'; return; }
+          if (!res.ok) { err.textContent = d.error || t('Import failed'); return; }
           if (d.clientPrefs) {
             for (const [k, v] of Object.entries(d.clientPrefs)) {
               if (['theme', 'termFontSize', 'termFontFamily', 'taskbarHeight'].includes(k)) localStorage.setItem(k, v);
             }
           }
           close();
-          showToast(`Imported: ${d.applied.join(', ')} — reloading…`);
+          showToast(t('Imported: {sections} — reloading…', { sections: d.applied.join(', ') }));
           setTimeout(() => location.reload(), 900);
-        } catch { err.textContent = 'Import failed'; }
+        } catch { err.textContent = t('Import failed'); }
       };
       actions.appendChild(importBtn);
       body.append(head, secWrap, sensWrap, passRow, err, actions);
@@ -1017,7 +1021,7 @@ class App {
           const file = JSON.parse(reader.result);
           if (file.app !== 'vibespace-config') throw new Error('not a config');
           renderFile(file);
-        } catch { body.querySelector('.agents-note').textContent = 'Not a valid VibeSpace config file.'; }
+        } catch { body.querySelector('.agents-note').textContent = t('Not a valid VibeSpace config file.'); }
       };
       reader.readAsText(f);
     };
@@ -1031,18 +1035,18 @@ class App {
   // state on the next boot.
   _showPasswordDialog() {
     const enabled = !!this._authEnabled;
-    const { body, close } = this._modal(enabled ? 'Change password' : 'Set a password');
+    const { body, close } = this._modal(enabled ? t('Change password') : t('Set a password'));
     const form = document.createElement('form');
     form.className = 'cfg-pass-form';
     form.innerHTML = `
-      ${enabled ? '<label>Current password<input type="password" id="pw-cur" autocomplete="current-password"></label>' : ''}
-      <label>New password<input type="password" id="pw-new" autocomplete="new-password" placeholder="min 4 chars"></label>
-      <label>Confirm<input type="password" id="pw-conf" autocomplete="new-password"></label>
-      <p class="agents-note">${enabled ? 'Changing the password logs out every other device.' : 'Everything (pages, APIs, terminals) will require login afterwards. Other open devices are logged out.'}</p>
+      ${enabled ? `<label>${t('Current password')}<input type="password" id="pw-cur" autocomplete="current-password"></label>` : ''}
+      <label>${t('New password')}<input type="password" id="pw-new" autocomplete="new-password" placeholder="${t('min 4 chars')}"></label>
+      <label>${t('Confirm')}<input type="password" id="pw-conf" autocomplete="new-password"></label>
+      <p class="agents-note">${enabled ? t('Changing the password logs out every other device.') : t('Everything (pages, APIs, terminals) will require login afterwards. Other open devices are logged out.')}</p>
       <div class="cfg-err"></div>
       <div class="dialog-actions">
-        ${enabled ? '<button type="button" class="btn-cancel cfg-danger" id="pw-remove">Remove password…</button>' : ''}
-        <button type="submit" class="btn-create">${enabled ? 'Change' : 'Set password'}</button>
+        ${enabled ? `<button type="button" class="btn-cancel cfg-danger" id="pw-remove">${t('Remove password…')}</button>` : ''}
+        <button type="submit" class="btn-create">${enabled ? t('Change') : t('Set password')}</button>
       </div>`;
     body.appendChild(form);
     const err = form.querySelector('.cfg-err');
@@ -1050,25 +1054,25 @@ class App {
       e.preventDefault();
       err.textContent = '';
       const nw = form.querySelector('#pw-new').value;
-      if (nw.length < 4) { err.textContent = 'At least 4 characters'; return; }
-      if (nw !== form.querySelector('#pw-conf').value) { err.textContent = 'Passwords don’t match'; return; }
+      if (nw.length < 4) { err.textContent = t('At least 4 characters'); return; }
+      if (nw !== form.querySelector('#pw-conf').value) { err.textContent = t('Passwords don’t match'); return; }
       try {
         const res = await fetch('/api/auth/set-password', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ current: form.querySelector('#pw-cur')?.value, newPassword: nw }),
         });
         const d = await res.json().catch(() => ({}));
-        if (!res.ok) { err.textContent = d.error || 'Failed'; return; }
+        if (!res.ok) { err.textContent = d.error || t('Failed'); return; }
         this._authEnabled = true;
         close();
-        showToast('Password ' + (enabled ? 'changed' : 'set') + ' — other devices were logged out');
-      } catch { err.textContent = 'Failed'; }
+        showToast(enabled ? t('Password changed — other devices were logged out') : t('Password set — other devices were logged out'));
+      } catch { err.textContent = t('Failed'); }
     };
     form.querySelector('#pw-remove')?.addEventListener('click', async () => {
       err.textContent = '';
       const cur = form.querySelector('#pw-cur')?.value || '';
-      if (!cur) { err.textContent = 'Enter the current password first'; return; }
-      const ok = await showConfirmDialog({ title: 'Remove password?', message: 'Auth will be disabled — anyone who can reach this server gets full access.', confirmText: 'Remove', danger: true });
+      if (!cur) { err.textContent = t('Enter the current password first'); return; }
+      const ok = await showConfirmDialog({ title: t('Remove password?'), message: t('Auth will be disabled — anyone who can reach this server gets full access.'), confirmText: t('Remove'), danger: true });
       if (!ok) return;
       try {
         const res = await fetch('/api/auth/set-password', {
@@ -1076,11 +1080,11 @@ class App {
           body: JSON.stringify({ current: cur, remove: true }),
         });
         const d = await res.json().catch(() => ({}));
-        if (!res.ok) { err.textContent = d.error || 'Failed'; return; }
+        if (!res.ok) { err.textContent = d.error || t('Failed'); return; }
         this._authEnabled = false;
         close();
-        showToast('Password removed — auth disabled');
-      } catch { err.textContent = 'Failed'; }
+        showToast(t('Password removed — auth disabled'));
+      } catch { err.textContent = t('Failed'); }
     });
   }
 
@@ -1107,28 +1111,28 @@ class App {
       const dots = [0, 1, 2, 3].map(i => `<span class="ob-dot${i === step ? ' active' : ''}"></span>`).join('');
       if (step === 0) {
         content.innerHTML = `
-          <h1>Welcome to VibeSpace</h1>
-          <p class="ob-sub">Your workspace for coding agents</p>
+          <h1>${t('Welcome to VibeSpace')}</h1>
+          <p class="ob-sub">${t('Your workspace for coding agents')}</p>
           <div class="ob-points">
-            <div class="ob-point"><b>Sessions that never die</b><span>Agents keep running through restarts, refreshes, and network drops — reattach from any device.</span></div>
-            <div class="ob-point"><b>A real window manager</b><span>Tile agent chats, terminals, files and editors across virtual desktops.</span></div>
-            <div class="ob-point"><b>Chat or terminal, your choice</b><span>Every session can run as a structured chat or a raw terminal TUI.</span></div>
+            <div class="ob-point"><b>${t('Sessions that never die')}</b><span>${t('Agents keep running through restarts, refreshes, and network drops — reattach from any device.')}</span></div>
+            <div class="ob-point"><b>${t('A real window manager')}</b><span>${t('Tile agent chats, terminals, files and editors across virtual desktops.')}</span></div>
+            <div class="ob-point"><b>${t('Chat or terminal, your choice')}</b><span>${t('Every session can run as a structured chat or a raw terminal TUI.')}</span></div>
           </div>
           <div class="welcome-actions">
-            <button class="welcome-btn" id="ob-next">Get started</button>
-            <button class="welcome-btn welcome-btn-secondary" id="ob-skip">Skip tour</button>
+            <button class="welcome-btn" id="ob-next">${t('Get started')}</button>
+            <button class="welcome-btn welcome-btn-secondary" id="ob-skip">${t('Skip tour')}</button>
           </div>
           <div class="ob-dots">${dots}</div>`;
         content.querySelector('#ob-next').onclick = () => { step = 1; render(); };
         content.querySelector('#ob-skip').onclick = done;
       } else if (step === 1) {
         content.innerHTML = `
-          <h1>Connect your agents</h1>
-          <p class="ob-sub">VibeSpace drives the official CLIs — log in once, credentials persist</p>
-          <div class="ob-backends" id="ob-backends"><div class="ob-loading">Checking…</div></div>
+          <h1>${t('Connect your agents')}</h1>
+          <p class="ob-sub">${t('VibeSpace drives the official CLIs — log in once, credentials persist')}</p>
+          <div class="ob-backends" id="ob-backends"><div class="ob-loading">${t('Checking…')}</div></div>
           <div class="welcome-actions">
-            <button class="welcome-btn" id="ob-next">Continue</button>
-            <button class="welcome-btn welcome-btn-secondary" id="ob-back">Back</button>
+            <button class="welcome-btn" id="ob-next">${t('Continue')}</button>
+            <button class="welcome-btn welcome-btn-secondary" id="ob-back">${t('Back')}</button>
           </div>
           <div class="ob-dots">${dots}</div>`;
         content.querySelector('#ob-next').onclick = () => { step = 2; render(); };
@@ -1138,16 +1142,16 @@ class App {
           try { st = await fetchJson('/api/backend-status'); } catch {}
           const card = (key, label, loginCmd) => {
             const b = st[key] || {};
-            const state = !b.installed ? '<span class="ob-bad">not installed</span>'
-              : b.loggedIn ? '<span class="ob-ok">✓ ready</span>'
-              : '<span class="ob-warn">installed, not logged in</span>';
-            const btn = !b.installed ? '' : b.loggedIn ? '' : `<button class="welcome-btn ob-login" data-cmd="${loginCmd}">Log in</button>`;
+            const state = !b.installed ? `<span class="ob-bad">${t('not installed')}</span>`
+              : b.loggedIn ? `<span class="ob-ok">✓ ${t('ready')}</span>`
+              : `<span class="ob-warn">${t('installed, not logged in')}</span>`;
+            const btn = !b.installed ? '' : b.loggedIn ? '' : `<button class="welcome-btn ob-login" data-cmd="${loginCmd}">${t('Log in')}</button>`;
             return `<div class="ob-backend"><div><b>${label}</b> ${b.version ? `<span class="ob-ver">${escHtml(b.version)}</span>` : ''}</div><div>${state} ${btn}</div></div>`;
           };
           const el = content.querySelector('#ob-backends');
           if (!el) return;
           el.innerHTML = card('claude', 'Claude Code', 'claude') + card('codex', 'Codex', 'codex login')
-            + '<button class="welcome-btn welcome-btn-secondary ob-recheck">Re-check</button>';
+            + `<button class="welcome-btn welcome-btn-secondary ob-recheck">${t('Re-check')}</button>`;
           el.querySelectorAll('.ob-login').forEach(btn => {
             btn.onclick = () => this.openShellTerminal(undefined, { initialCommand: btn.dataset.cmd });
           });
@@ -1157,20 +1161,20 @@ class App {
       } else if (step === 2) {
         const protectedAlready = !!this._authEnabled;
         content.innerHTML = `
-          <h1>Protect this workspace</h1>
-          <p class="ob-sub">${protectedAlready ? 'Password auth is already enabled ✓' : 'Optional — anyone who can reach this server gets full shell access. A password gates pages, APIs, and terminals.'}</p>
+          <h1>${t('Protect this workspace')}</h1>
+          <p class="ob-sub">${protectedAlready ? t('Password auth is already enabled ✓') : t('Optional — anyone who can reach this server gets full shell access. A password gates pages, APIs, and terminals.')}</p>
           ${protectedAlready ? '' : `
           <div class="ob-pass">
-            <input type="password" id="ob-pw" placeholder="Password (min 4 chars)" autocomplete="new-password">
-            <button class="welcome-btn welcome-btn-secondary" id="ob-gen" title="Generate a random password">Generate</button>
+            <input type="password" id="ob-pw" placeholder="${t('Password (min 4 chars)')}" autocomplete="new-password">
+            <button class="welcome-btn welcome-btn-secondary" id="ob-gen" title="${t('Generate a random password')}">${t('Generate')}</button>
           </div>
           <div class="cfg-err" id="ob-pw-err"></div>`}
           <div class="welcome-actions">
-            ${protectedAlready ? '' : '<button class="welcome-btn" id="ob-setpw">Set password</button>'}
-            <button class="welcome-btn ${protectedAlready ? '' : 'welcome-btn-secondary'}" id="ob-next">${protectedAlready ? 'Continue' : 'Skip'}</button>
-            <button class="welcome-btn welcome-btn-secondary" id="ob-back">Back</button>
+            ${protectedAlready ? '' : `<button class="welcome-btn" id="ob-setpw">${t('Set password')}</button>`}
+            <button class="welcome-btn ${protectedAlready ? '' : 'welcome-btn-secondary'}" id="ob-next">${protectedAlready ? t('Continue') : t('Skip')}</button>
+            <button class="welcome-btn welcome-btn-secondary" id="ob-back">${t('Back')}</button>
           </div>
-          <div class="ob-alt"><a href="#" id="ob-import">Import a config file from another VibeSpace…</a></div>
+          <div class="ob-alt"><a href="#" id="ob-import">${t('Import a config file from another VibeSpace…')}</a></div>
           <div class="ob-dots">${dots}</div>`;
         content.querySelector('#ob-next').onclick = () => { step = 3; render(); };
         content.querySelector('#ob-back').onclick = () => { step = 1; render(); };
@@ -1186,28 +1190,28 @@ class App {
           const errEl = content.querySelector('#ob-pw-err');
           errEl.textContent = '';
           const pw = pwInput.value;
-          if (pw.length < 4) { errEl.textContent = 'At least 4 characters'; return; }
+          if (pw.length < 4) { errEl.textContent = t('At least 4 characters'); return; }
           try {
             const res = await fetch('/api/auth/set-password', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ newPassword: pw }),
             });
             const d = await res.json().catch(() => ({}));
-            if (!res.ok) { errEl.textContent = d.error || 'Failed'; return; }
+            if (!res.ok) { errEl.textContent = d.error || t('Failed'); return; }
             this._authEnabled = true;
             step = 3; render();
-          } catch { errEl.textContent = 'Failed'; }
+          } catch { errEl.textContent = t('Failed'); }
         });
       } else {
         content.innerHTML = `
-          <h1>Start your first session</h1>
-          <p class="ob-sub">Pick a project folder — the agent works inside it</p>
+          <h1>${t('Start your first session')}</h1>
+          <p class="ob-sub">${t('Pick a project folder — the agent works inside it')}</p>
           <input type="text" id="ob-cwd" class="ob-cwd" placeholder="~/projects/my-app" autocomplete="off">
           <div class="welcome-actions">
-            <button class="welcome-btn" id="ob-chat">Start Chat Session</button>
-            <button class="welcome-btn welcome-btn-secondary" id="ob-term">Start Terminal Session</button>
+            <button class="welcome-btn" id="ob-chat">${t('Start Chat Session')}</button>
+            <button class="welcome-btn welcome-btn-secondary" id="ob-term">${t('Start Terminal Session')}</button>
           </div>
-          <div class="ob-alt"><a href="#" id="ob-files">or browse files first</a> · <a href="#" id="ob-finish">finish tour</a></div>
+          <div class="ob-alt"><a href="#" id="ob-files">${t('or browse files first')}</a> · <a href="#" id="ob-finish">${t('finish tour')}</a></div>
           <div class="ob-dots">${dots}</div>`;
         const cwdInput = content.querySelector('#ob-cwd');
         fetchJson('/api/home').then(d => { cwdInput.placeholder = d.home; }).catch(() => {});
@@ -1225,7 +1229,7 @@ class App {
       const close = document.createElement('button');
       close.className = 'ob-close';
       close.innerHTML = '\u2715';
-      close.title = 'Close tour';
+      close.title = t('Close tour');
       close.onclick = done;
       content.appendChild(close);
     };
@@ -1257,7 +1261,7 @@ class App {
     const opt = (v, l) => { const o = document.createElement('option'); o.value = v; o.textContent = l; return o; };
 
     // Theme
-    const themeLabel = document.createElement('label'); themeLabel.textContent = 'Theme';
+    const themeLabel = document.createElement('label'); themeLabel.textContent = t('Theme');
     const themeSel = document.createElement('select');
     themeSel.id = 'global-theme-select';
     this._populateThemeSelect(themeSel);
@@ -1273,11 +1277,11 @@ class App {
     const editBtn = document.createElement('button');
     editBtn.className = 'file-tool-btn';
     editBtn.textContent = '\u270E';
-    editBtn.title = 'Theme Editor';
+    editBtn.title = t('Theme Editor');
     editBtn.onclick = (e) => { e.stopPropagation(); if (!this._themeEditor) this._themeEditor = new ThemeEditor(this); this._themeEditor.open(); };
 
     // Font size
-    const sizeLabel = document.createElement('label'); sizeLabel.textContent = 'Font Size';
+    const sizeLabel = document.createElement('label'); sizeLabel.textContent = t('Font Size');
     const sizeRow = document.createElement('div'); sizeRow.className = 'font-size-ctrl';
     const sizeDown = document.createElement('button'); sizeDown.textContent = 'A-';
     const sizeVal = document.createElement('span'); sizeVal.textContent = this._fontSize;
@@ -1303,7 +1307,7 @@ class App {
     sizeUp.onclick = () => { if (this._fontSize < 28) { this._fontSize++; applyFontSize(); } };
 
     // Font family
-    const fontLabel = document.createElement('label'); fontLabel.textContent = 'Font';
+    const fontLabel = document.createElement('label'); fontLabel.textContent = t('Font');
     const fontSel = document.createElement('select');
     for (const f of getAvailableFonts()) {
       const o = opt(f.value === '_sep' ? '' : f.value, f.label);
@@ -1314,8 +1318,8 @@ class App {
     // A stored font that matches no option (stale localStorage, font list not
     // yet loaded, uninstalled font) left the select BLANK — surface it instead
     if (fontSel.selectedIndex === -1) {
-      const curLabel = (this._fontFamily.split(',')[0] || 'Current').replace(/"/g, '').trim() || 'Current';
-      const cur = opt(this._fontFamily, `${curLabel} (current)`);
+      const curLabel = (this._fontFamily.split(',')[0] || t('Current')).replace(/"/g, '').trim() || t('Current');
+      const cur = opt(this._fontFamily, t('{name} (current)', { name: curLabel }));
       fontSel.insertBefore(cur, fontSel.firstChild);
       fontSel.value = this._fontFamily;
     }
@@ -1335,7 +1339,7 @@ class App {
     // "All Settings" link
     const allSettingsLink = document.createElement('div');
     allSettingsLink.className = 'settings-all-link';
-    allSettingsLink.textContent = 'All Settings...';
+    allSettingsLink.textContent = t('All Settings...');
     allSettingsLink.onclick = () => { pop.remove(); this._settingsUI.open(); };
 
     const themeRow = document.createElement('div');
@@ -1364,8 +1368,8 @@ class App {
     };
     const sep = () => { const s = document.createElement('div'); s.className = 'gs-menu-sep'; return s; };
     // workspace tools / data & security / help — grouped, the flat list grew too long
-    if (!this.isMobile) menu.append(item(I.brush, 'Customize UI\u2026', () => this._customize.enter()));
-    menu.append(item(I.key, 'Manage agents\u2026', () => this._showAgentsDialog()));
+    if (!this.isMobile) menu.append(item(I.brush, t('Customize UI\u2026'), () => this._customize.enter()));
+    menu.append(item(I.key, t('Manage agents\u2026'), () => this._showAgentsDialog()));
     // Language is PER-DEVICE (localStorage, not a synced setting) \u2014 names shown
     // in their own language, never translated. Switching reloads the page.
     {
@@ -1383,11 +1387,11 @@ class App {
       menu.append(langItem);
     }
     menu.append(sep(),
-      item(I.exp, 'Backup & migrate\u2026', () => this._showTransferDialog()),
-      item(I.lock, this._authEnabled ? 'Change password\u2026' : 'Set password\u2026', () => this._showPasswordDialog()));
-    menu.append(sep(), item(I.tour, 'Welcome tour', () => this._showOnboarding(true)));
+      item(I.exp, t('Backup & migrate\u2026'), () => this._showTransferDialog()),
+      item(I.lock, this._authEnabled ? t('Change password\u2026') : t('Set password\u2026'), () => this._showPasswordDialog()));
+    menu.append(sep(), item(I.tour, t('Welcome tour'), () => this._showOnboarding(true)));
     if (this._authEnabled) {
-      menu.append(item(I.out, 'Sign out', async () => {
+      menu.append(item(I.out, t('Sign out'), async () => {
         try { await fetch('/api/logout', { method: 'POST' }); } catch {}
         location.href = '/login';
       }, true));
@@ -1450,7 +1454,7 @@ class App {
   _renderCustomGridButton(rows, cols) {
     const btn = document.createElement('button');
     btn.className = 'layout-btn custom-grid-btn';
-    btn.title = `${rows}×${cols} grid`;
+    btn.title = t('{rows}×{cols} grid', { rows, cols });
     btn.innerHTML = this._gridIcon(rows, cols);
     btn.dataset.gridRows = rows;
     btn.dataset.gridCols = cols;
@@ -1533,7 +1537,7 @@ class App {
 
     if (!rl && !codex) {
       usageEl.innerHTML = '';
-      popup.innerHTML = '<div class="empty-hint">No usage data</div>';
+      popup.innerHTML = `<div class="empty-hint">${t('No usage data')}</div>`;
       return;
     }
 
@@ -1564,15 +1568,15 @@ class App {
     const agoText = (ts) => {
       if (!ts) return '—';
       const m = Math.round((Date.now() - ts) / 60000);
-      return m < 1 ? 'just now' : m + 'min ago';
+      return m < 1 ? t('just now') : t('{m}min ago', { m });
     };
     const fmtReset = (ts) => {
       if (!ts) return '?';
       const d = new Date(ts * 1000), now = new Date();
       const time = d.toLocaleTimeString([], {hour:'numeric',minute:'2-digit'});
-      if (d.toDateString() === now.toDateString()) return `Today ${time}`;
+      if (d.toDateString() === now.toDateString()) return t('Today {time}', { time });
       const tmr = new Date(now); tmr.setDate(tmr.getDate() + 1);
-      if (d.toDateString() === tmr.toDateString()) return `Tomorrow ${time}`;
+      if (d.toDateString() === tmr.toDateString()) return t('Tomorrow {time}', { time });
       return d.toLocaleDateString([], {month:'short',day:'numeric'}) + ' ' + time;
     };
 
@@ -1588,33 +1592,33 @@ class App {
         const colorSc = usageColor(pctSc);
         scopedSections.push(`
       <div class="usage-session">
-        <div class="usage-session-name">${escHtml(sc.name)} weekly limit</div>
+        <div class="usage-session-name">${t('{name} weekly limit', { name: escHtml(sc.name) })}</div>
         <div class="usage-bar" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pctSc}%;background:${colorSc}"></div></div>
         <div class="usage-session-stats">
-          <span class="usage-stat">${pctSc}% used</span>
-          <span class="usage-stat"><span class="usage-stat-label">Resets</span> ${fmtReset(sc.resetsAt)}</span>
+          <span class="usage-stat">${t('{pct}% used', { pct: pctSc })}</span>
+          <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(sc.resetsAt)}</span>
         </div>
       </div>`);
       }
       sections.push(`${renderSectionTitle('claude', 'Claude')}
       <div class="usage-session">
-        <div class="usage-session-name">5-hour limit</div>
+        <div class="usage-session-name">${t('5-hour limit')}</div>
         <div class="usage-bar" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pct5h}%;background:${color}"></div></div>
         <div class="usage-session-stats">
-          <span class="usage-stat">${pct5h}% used</span>
-          <span class="usage-stat"><span class="usage-stat-label">Resets</span> ${fmtReset(rl.fiveHour?.resetsAt)}</span>
+          <span class="usage-stat">${t('{pct}% used', { pct: pct5h })}</span>
+          <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(rl.fiveHour?.resetsAt)}</span>
         </div>
       </div>
       <div class="usage-session">
-        <div class="usage-session-name">7-day limit</div>
+        <div class="usage-session-name">${t('7-day limit')}</div>
         <div class="usage-bar" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pct7d}%;background:${color7d}"></div></div>
         <div class="usage-session-stats">
-          <span class="usage-stat">${pct7d}% used</span>
-          <span class="usage-stat"><span class="usage-stat-label">Resets</span> ${fmtReset(rl.sevenDay?.resetsAt)}</span>
+          <span class="usage-stat">${t('{pct}% used', { pct: pct7d })}</span>
+          <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(rl.sevenDay?.resetsAt)}</span>
         </div>
       </div>${scopedSections.join('')}
-      ${this._subSignedOut ? `<div class="usage-note">⚠ Subscription signed out (a Console login replaced it) — pies show its last-known quota. API-billed sessions never appear here.</div>` : ''}
-      <div class="usage-updated">Updated ${agoText(rl.fetchedAt)}</div>`);
+      ${this._subSignedOut ? `<div class="usage-note">${t('⚠ Subscription signed out (a Console login replaced it) — pies show its last-known quota. API-billed sessions never appear here.')}</div>` : ''}
+      <div class="usage-updated">${t('Updated {ago}', { ago: agoText(rl.fetchedAt) })}</div>`);
     }
 
     if (codex?.fiveHour || codex?.sevenDay) {
@@ -1625,23 +1629,23 @@ class App {
       rows.push(renderRow('codex', '5h', pct5h, '7d', pct7d));
       sections.push(`${renderSectionTitle('codex', 'Codex')}
       <div class="usage-session">
-        <div class="usage-session-name">5-hour limit</div>
+        <div class="usage-session-name">${t('5-hour limit')}</div>
         <div class="usage-bar" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pct5h}%;background:${color5h}"></div></div>
         <div class="usage-session-stats">
-          <span class="usage-stat">${pct5h}% used</span>
-          <span class="usage-stat"><span class="usage-stat-label">Resets</span> ${fmtReset(codex.fiveHour?.resetsAt)}</span>
+          <span class="usage-stat">${t('{pct}% used', { pct: pct5h })}</span>
+          <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(codex.fiveHour?.resetsAt)}</span>
         </div>
       </div>
       <div class="usage-session">
-        <div class="usage-session-name">7-day limit</div>
+        <div class="usage-session-name">${t('7-day limit')}</div>
         <div class="usage-bar" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pct7d}%;background:${color7d}"></div></div>
         <div class="usage-session-stats">
-          <span class="usage-stat">${pct7d}% used</span>
-          <span class="usage-stat"><span class="usage-stat-label">Resets</span> ${fmtReset(codex.sevenDay?.resetsAt)}</span>
-          ${codex.planType ? `<span class="usage-stat"><span class="usage-stat-label">Plan</span> ${escHtml(codex.planType)}</span>` : ''}
+          <span class="usage-stat">${t('{pct}% used', { pct: pct7d })}</span>
+          <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(codex.sevenDay?.resetsAt)}</span>
+          ${codex.planType ? `<span class="usage-stat"><span class="usage-stat-label">${t('Plan')}</span> ${escHtml(codex.planType)}</span>` : ''}
         </div>
       </div>
-      <div class="usage-updated">Updated ${agoText(codex.fetchedAt)}</div>`);
+      <div class="usage-updated">${t('Updated {ago}', { ago: agoText(codex.fetchedAt) })}</div>`);
     }
 
     usageEl.innerHTML = rows.join('');
@@ -1677,7 +1681,7 @@ class App {
     const presets = this.layoutManager._savedPresets;
     const names = Object.keys(presets).sort();
     if (!names.length) {
-      list.innerHTML = '<div class="empty-hint">No saved presets. Save current workspace as a preset.</div>';
+      list.innerHTML = `<div class="empty-hint">${t('No saved presets. Save current workspace as a preset.')}</div>`;
       return;
     }
     for (const name of names) {
@@ -1687,17 +1691,17 @@ class App {
 
       const info = document.createElement('div'); info.className = 'layout-card-info';
       info.innerHTML = `<div class="layout-card-name">${isCurrent ? '● ' : ''}${escHtml(name)}</div>
-        <div class="layout-card-meta">${preset.windows?.length || 0} windows · ${escHtml(preset.theme || 'dark')} · ${preset.updatedAt ? new Date(preset.updatedAt).toLocaleString() : ''}</div>`;
+        <div class="layout-card-meta">${t('{n} windows', { n: preset.windows?.length || 0 })} · ${escHtml(preset.theme || 'dark')} · ${preset.updatedAt ? new Date(preset.updatedAt).toLocaleString() : ''}</div>`;
       info.onclick = () => {
         this.layoutManager.loadPreset(name).then(() => this.hideDialogs());
       };
 
       const actions = document.createElement('div'); actions.className = 'layout-card-actions';
       const btnOverwrite = document.createElement('button'); btnOverwrite.className = 'layout-card-btn'; btnOverwrite.textContent = '⟳';
-      btnOverwrite.title = 'Overwrite with current';
+      btnOverwrite.title = t('Overwrite with current');
       btnOverwrite.onclick = (e) => { e.stopPropagation(); this.layoutManager.savePreset(name).then(() => this._renderPresetsList()); };
       const btnDel = document.createElement('button'); btnDel.className = 'layout-card-btn delete'; btnDel.textContent = '✕';
-      btnDel.title = 'Delete';
+      btnDel.title = t('Delete');
       btnDel.onclick = (e) => { e.stopPropagation(); this.layoutManager.deletePreset(name).then(() => this._renderPresetsList()); };
       actions.append(btnOverwrite, btnDel);
 
@@ -1841,7 +1845,7 @@ class App {
     for (const m of cfg.models) {
       const opt = document.createElement('option');
       const id = typeof m === 'string' ? m : m.id;
-      const label = typeof m === 'string' ? (m || 'Default') : (m.label || m.id || 'Default');
+      const label = typeof m === 'string' ? (m || t('Default')) : (m.label || m.id || t('Default'));
       opt.value = id;
       opt.textContent = label;
       modelSel.appendChild(opt);
@@ -1850,7 +1854,7 @@ class App {
     // "Custom..." option for free-text model entry
     const customOpt = document.createElement('option');
     customOpt.value = '__custom__';
-    customOpt.textContent = 'Custom...';
+    customOpt.textContent = t('Custom...');
     modelSel.appendChild(customOpt);
 
     const nextModel = applyDefaults
@@ -1932,7 +1936,7 @@ class App {
       }
     };
     if (hostId) {
-      recentEl.innerHTML = '<span class="cwd-recent-loading">loading host paths…</span>';
+      recentEl.innerHTML = `<span class="cwd-recent-loading">${t('loading host paths…')}</span>`;
       fetchJson(`/api/hosts/${hostId}/recent-cwds`).then(d => {
         // strip the "host: " display prefix discovery may add
         paint((d?.cwds || []).map(c => c.includes(': ') ? c.split(': ').pop() : c));
@@ -1965,11 +1969,11 @@ class App {
     // and spawned with VIBESPACE_TASK_ID.
     const taskSel = document.getElementById('input-task');
     if (taskSel) {
-      taskSel.innerHTML = '<option value="">None</option>';
-      for (const t of this.sidebar?._taskBoardOrder?.() || []) {
+      taskSel.innerHTML = `<option value="">${t('None')}</option>`;
+      for (const tg of this.sidebar?._taskBoardOrder?.() || []) {
         const o = document.createElement('option');
-        o.value = t.id;
-        o.textContent = t.title + (t.archived ? ' (archived)' : '');
+        o.value = tg.id;
+        o.textContent = tg.title + (tg.archived ? ' ' + t('(archived)') : '');
         taskSel.appendChild(o);
       }
       taskSel.value = taskId || '';
@@ -1994,13 +1998,13 @@ class App {
       acctRow.style.display = show ? '' : 'none';
       if (!show) { acctSel.value = ''; return; }
       const defId = this._accounts?.defaultAccountId;
-      const defName = defId ? (list.find(a => a.id === defId)?.name || 'API key') : 'Subscription';
+      const defName = defId ? (list.find(a => a.id === defId)?.name || t('API key')) : t('Subscription');
       const prev = acctSel.value;
       acctSel.innerHTML = '';
       for (const [v, label] of [
-        ['', `Default (${defName})`],
-        ['subscription', 'Subscription (Pro/Max login)'],
-        ...list.map(a => [a.id, `${a.name} — API key …${a.tail}`]),
+        ['', t('Default ({name})', { name: defName })],
+        ['subscription', t('Subscription (Pro/Max login)')],
+        ...list.map(a => [a.id, t('{name} — API key …{tail}', { name: a.name, tail: a.tail })]),
       ]) {
         const o = document.createElement('option');
         o.value = v; o.textContent = label;
@@ -2021,7 +2025,7 @@ class App {
     const hostSel = document.getElementById('input-host');
     if (hostSel) {
       fetchJson('/api/hosts').then(d => {
-        hostSel.innerHTML = '<option value="">Local</option>';
+        hostSel.innerHTML = `<option value="">${t('Local')}</option>`;
         for (const h of d?.hosts || []) {
           const o = document.createElement('option');
           o.value = h.id; o.textContent = `${h.name} (${h.user}@${h.host})`;
@@ -2076,7 +2080,7 @@ class App {
     const sessionPermission = permission !== undefined ? permission : defaults.permission;
     const sessionEffort = effort !== undefined ? effort : defaults.effort;
     const sessionExtraArgs = extraArgs !== undefined ? extraArgs : defaults.extraArgs;
-    const sessionName = name || (resumeId ? `Resume ${resumeId.substring(0,8)}` : `Session ${this.wm.windowCounter+1}`);
+    const sessionName = name || (resumeId ? t('Resume {id}', { id: resumeId.substring(0,8) }) : t('Session {n}', { n: this.wm.windowCounter+1 }));
     const sessionKey = backendSessionId || resumeId ? `${backend}:${backendSessionId || resumeId}` : '';
     const winType = sessionMode === 'chat' ? 'chat' : 'terminal';
     const titleMeta = this._buildTitleMeta({ backend, agentKind, agentRole, agentNickname, sourceKind, parentThreadId });
@@ -2490,7 +2494,7 @@ class App {
       name: sessionName,
     };
     const winInfo = this.wm.createWindow({
-      title: `${sessionName || 'History'} — ${cwd}`,
+      title: `${sessionName || t('History')} — ${cwd}`,
       type: 'chat',
       syncId,
       openSpec,
@@ -2618,7 +2622,7 @@ class App {
         });
         break;
       case 'viewSubagent': {
-        const title = `Agent: ${spec.description || 'Subagent'}`;
+        const title = t('Agent: {desc}', { desc: spec.description || t('Subagent') });
         const winInfo = this.wm.createWindow({
           title,
           type: 'chat',
@@ -2662,7 +2666,7 @@ class App {
   openFileExplorer(startPath, { syncId, host } = {}) {
     this._hideWelcome();
     const openSpec = { action: 'openFileExplorer', path: startPath, host: host || undefined };
-    const winInfo = this.wm.createWindow({ title: 'File Explorer', type: 'files', syncId, openSpec });
+    const winInfo = this.wm.createWindow({ title: t('File Explorer'), type: 'files', syncId, openSpec });
     if (host) winInfo._explorerHost = host; // read by FileExplorer constructor
     const explorer = new FileExplorer(winInfo, this, startPath);
     winInfo._explorer = explorer;
@@ -2715,7 +2719,7 @@ class App {
     this._hideWelcome();
     // Front-truncate the path (like the file explorer) so the taskbar/title-bar
     // CSS end-ellipsis keeps the filename visible instead of cutting it off.
-    const title = opts._tempFile ? `View: ${fileName}` : frontTruncate(filePath);
+    const title = opts._tempFile ? t('View: {name}', { name: fileName }) : frontTruncate(filePath);
     const openSpec = opts._tempFile ? undefined : { action: 'openEditor', path: filePath, name: fileName };
     const winInfo = this.wm.createWindow({ title, type: 'editor', syncId: opts.syncId, openSpec });
     winInfo._filePath = filePath; winInfo._fileName = fileName;
@@ -2935,7 +2939,7 @@ class App {
         });
       }
       if (win._openSpec?.action === 'viewSession' || win._openSpec?.action === 'attachSession') {
-        const displayName = this.sidebar.getCustomName?.(match) || match.webuiName || match.name || win._openSpec?.name || win.title || 'Session';
+        const displayName = this.sidebar.getCustomName?.(match) || match.webuiName || match.name || win._openSpec?.name || win.title || t('Session');
         const cwd = match.cwd || win._openSpec?.cwd || '';
         this.wm.setTitle(winId, cwd ? `${displayName} — ${cwd}` : displayName);
       }

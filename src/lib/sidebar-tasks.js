@@ -1,4 +1,5 @@
 import { escHtml, createPopover, showContextMenu, showInputDialog, showConfirmDialog, showToast } from './utils.js';
+import { t as tr } from './i18n.js';
 
 /**
  * Sidebar tasks mixin — the task system's client (docs/design-task-system.md).
@@ -22,17 +23,17 @@ const ICON_DETAIL = '<svg style="width:10px;height:10px" viewBox="0 0 16 16" fil
 // values are relayed to the agent on the next message (server-side).
 const _si = (d) => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 export const SESSION_STATE_META = {
-  working: { label: 'working', color: 'var(--green)', icon: _si('<path d="M1.5 8h3l1.5-4 2 8 1.5-4h3.5"/>') },
-  'needs-input': { label: 'needs input', color: 'var(--yellow, #e5c07b)', icon: _si('<path d="M6 6a2 2 0 113 1.7c-.6.5-1 .9-1 1.8"/><circle cx="8" cy="12" r=".7" fill="currentColor" stroke="none"/>') },
-  blocked: { label: 'blocked', color: 'var(--red, #e55)', icon: _si('<circle cx="8" cy="8" r="6"/><path d="M4 4l8 8"/>') },
-  review: { label: 'review', color: 'var(--blue, #6af)', icon: _si('<path d="M1.5 8s2.5-4 6.5-4 6.5 4 6.5 4-2.5 4-6.5 4-6.5-4-6.5-4z"/><circle cx="8" cy="8" r="1.7"/>') },
-  done: { label: 'done', color: 'var(--text-dim)', icon: _si('<path d="M2.5 8.5l3.5 3.5 7.5-9"/>') },
+  working: { label: tr('working'), color: 'var(--green)', icon: _si('<path d="M1.5 8h3l1.5-4 2 8 1.5-4h3.5"/>') },
+  'needs-input': { label: tr('needs input'), color: 'var(--yellow, #e5c07b)', icon: _si('<path d="M6 6a2 2 0 113 1.7c-.6.5-1 .9-1 1.8"/><circle cx="8" cy="12" r=".7" fill="currentColor" stroke="none"/>') },
+  blocked: { label: tr('blocked'), color: 'var(--red, #e55)', icon: _si('<circle cx="8" cy="8" r="6"/><path d="M4 4l8 8"/>') },
+  review: { label: tr('review'), color: 'var(--blue, #6af)', icon: _si('<path d="M1.5 8s2.5-4 6.5-4 6.5 4 6.5 4-2.5 4-6.5 4-6.5-4-6.5-4z"/><circle cx="8" cy="8" r="1.7"/>') },
+  done: { label: tr('done'), color: 'var(--text-dim)', icon: _si('<path d="M2.5 8.5l3.5 3.5 7.5-9"/>') },
 };
 export const SESSION_URGENCY_META = {
-  low: { label: 'low', mark: '', color: 'var(--text-dim)' },
-  normal: { label: 'normal', mark: '', color: 'var(--blue, #61afef)' },
-  high: { label: 'high', mark: '!', color: 'var(--yellow, #e5c07b)' },
-  urgent: { label: 'urgent', mark: '!!', color: 'var(--red, #e06c75)' },
+  low: { label: tr('low'), mark: '', color: 'var(--text-dim)' },
+  normal: { label: tr('normal'), mark: '', color: 'var(--blue, #61afef)' },
+  high: { label: tr('high'), mark: '!', color: 'var(--yellow, #e5c07b)' },
+  urgent: { label: tr('urgent'), mark: '!!', color: 'var(--red, #e06c75)' },
 };
 
 export function installSidebarTasks(SidebarClass) {
@@ -115,9 +116,9 @@ export function installSidebarTasks(SidebarClass) {
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
-        showToast(d.error || 'Failed to set status', { type: 'error' });
+        showToast(d.error || tr('Failed to set status'), { type: 'error' });
       }
-    } catch { showToast('Failed to set status — server unreachable', { type: 'error' }); }
+    } catch { showToast(tr('Failed to set status — server unreachable'), { type: 'error' }); }
   };
 
   proto._showSessionStatusPopover = function(anchor, sessionRef) {
@@ -140,32 +141,32 @@ export function installSidebarTasks(SidebarClass) {
       pop.appendChild(row);
       return sel;
     };
-    const stateSel = mkSel('State', SESSION_STATE_META, cur.state);
-    const urgSel = mkSel('Urgency', SESSION_URGENCY_META, cur.urgency);
+    const stateSel = mkSel(tr('State'), SESSION_STATE_META, cur.state);
+    const urgSel = mkSel(tr('Urgency'), SESSION_URGENCY_META, cur.urgency);
     const reasonRow = document.createElement('label');
     reasonRow.className = 'session-status-pop-row';
-    reasonRow.appendChild(document.createTextNode('Reason'));
+    reasonRow.appendChild(document.createTextNode(tr('Reason')));
     const reasonInp = document.createElement('input');
-    reasonInp.type = 'text'; reasonInp.value = cur.reason || ''; reasonInp.placeholder = 'optional';
+    reasonInp.type = 'text'; reasonInp.value = cur.reason || ''; reasonInp.placeholder = tr('optional');
     reasonRow.appendChild(reasonInp);
     pop.appendChild(reasonRow);
     if (cur.setBy === 'agent') {
       const hint = document.createElement('div');
       hint.className = 'session-status-pop-hint';
-      hint.textContent = 'Set by the agent — if you change it, the agent is told on your next message.';
+      hint.textContent = tr('Set by the agent — if you change it, the agent is told on your next message.');
       pop.appendChild(hint);
     }
     const btnRow = document.createElement('div');
     btnRow.className = 'session-status-pop-btns';
     const apply = document.createElement('button');
-    apply.className = 'task-detail-btn'; apply.textContent = 'Apply';
+    apply.className = 'task-detail-btn'; apply.textContent = tr('Apply');
     apply.onclick = (e) => {
       e.stopPropagation();
       this.setSessionStatusUser(sessionRef, { state: stateSel.value || null, urgency: urgSel.value || null, reason: reasonInp.value });
       pop.remove();
     };
     const clearB = document.createElement('button');
-    clearB.className = 'task-detail-btn'; clearB.textContent = 'Clear';
+    clearB.className = 'task-detail-btn'; clearB.textContent = tr('Clear');
     clearB.onclick = (e) => { e.stopPropagation(); this.setSessionStatusUser(sessionRef, { clear: true }); pop.remove(); };
     btnRow.append(apply, clearB);
     pop.appendChild(btnRow);
@@ -229,10 +230,10 @@ export function installSidebarTasks(SidebarClass) {
         body: body !== undefined ? JSON.stringify(body) : undefined,
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) { showToast(data.error || 'Task Group operation failed', { type: 'error' }); return null; }
+      if (!res.ok) { showToast(data.error || tr('Task Group operation failed'), { type: 'error' }); return null; }
       return data;
     } catch {
-      showToast('Task Group operation failed — server unreachable', { type: 'error' });
+      showToast(tr('Task Group operation failed — server unreachable'), { type: 'error' });
       return null;
     }
   };
@@ -413,14 +414,14 @@ export function installSidebarTasks(SidebarClass) {
       pop.appendChild(row);
     }
     if (!tasks.length) {
-      const hint = document.createElement('div'); hint.className = 'empty-hint'; hint.textContent = 'No Task Groups yet';
+      const hint = document.createElement('div'); hint.className = 'empty-hint'; hint.textContent = tr('No Task Groups yet');
       pop.appendChild(hint);
     }
     const createRow = document.createElement('div'); createRow.className = 'session-detail-group-create';
-    createRow.textContent = '+ New task';
+    createRow.textContent = tr('+ New task');
     createRow.onclick = async (e) => {
       e.stopPropagation();
-      const name = await showInputDialog({ title: 'New Task Group', label: 'Task Group title', confirmText: 'Create' });
+      const name = await showInputDialog({ title: tr('New Task Group'), label: tr('Task Group title'), confirmText: tr('Create') });
       if (name && name.trim()) {
         const t = await this._taskCreate({ title: name.trim() });
         if (t) { onToggleFn(t, true, pop); pop.remove(); }
@@ -434,7 +435,7 @@ export function installSidebarTasks(SidebarClass) {
     const folders = this._taskById(taskId)?.folders || [];
     if (folders.length === 0) {
       const hint = document.createElement('div'); hint.className = 'empty-hint';
-      hint.textContent = 'No linked folders. Sessions under a linked folder join this task automatically. Link via the file explorer right-click menu or drag a folder onto the task.';
+      hint.textContent = tr('No linked folders. Sessions under a linked folder join this task automatically. Link via the file explorer right-click menu or drag a folder onto the task.');
       pop.appendChild(hint);
     } else {
       for (const f of folders) {
@@ -443,10 +444,10 @@ export function installSidebarTasks(SidebarClass) {
         row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:6px;padding:4px 8px;cursor:default';
         const pathSpan = document.createElement('span');
         pathSpan.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px';
-        pathSpan.textContent = rec.path.replace(/^\/home\/[^/]+/, '~') + (rec.recursive ? '' : ' (this folder only)'); pathSpan.title = rec.path;
+        pathSpan.textContent = rec.path.replace(/^\/home\/[^/]+/, '~') + (rec.recursive ? '' : tr(' (this folder only)')); pathSpan.title = rec.path;
         const removeBtn = document.createElement('button');
         removeBtn.style.cssText = 'background:none;border:none;color:var(--red,#e55);cursor:pointer;font-size:12px;padding:0 4px;flex-shrink:0';
-        removeBtn.textContent = '×'; removeBtn.title = 'Unlink folder';
+        removeBtn.textContent = '×'; removeBtn.title = tr('Unlink folder');
         removeBtn.onclick = (e) => { e.stopPropagation(); this._taskRemoveFolder(taskId, rec.path); pop.remove(); };
         row.append(pathSpan, removeBtn);
         pop.appendChild(row);
@@ -458,20 +459,20 @@ export function installSidebarTasks(SidebarClass) {
     const t = this._taskById(taskId);
     if (!t) return;
     const items = [
-      { label: 'Details…', action: () => this.app.openTaskDetail(taskId) },
-      { label: 'New session in this task…', action: () => this.app.showNewSessionDialog({ cwd: this._folderPaths(t)[0], taskId }) },
-      { label: 'Rename', action: async () => {
-        const n = await showInputDialog({ title: 'Rename Task Group', label: 'Title', value: t.title, confirmText: 'Rename' });
+      { label: tr('Details…'), action: () => this.app.openTaskDetail(taskId) },
+      { label: tr('New session in this task…'), action: () => this.app.showNewSessionDialog({ cwd: this._folderPaths(t)[0], taskId }) },
+      { label: tr('Rename'), action: async () => {
+        const n = await showInputDialog({ title: tr('Rename Task Group'), label: tr('Title'), value: t.title, confirmText: tr('Rename') });
         if (n && n.trim() && n.trim() !== t.title) this._taskUpdate(taskId, { title: n.trim() });
       } },
     ];
     // A Task Group (岗位) has no status — only archive.
-    items.push({ label: t.archived ? 'Unarchive' : 'Archive', action: () => this._taskUpdate(taskId, { archived: !t.archived }) });
+    items.push({ label: t.archived ? tr('Unarchive') : tr('Archive'), action: () => this._taskUpdate(taskId, { archived: !t.archived }) });
     if (t.kind !== 'task') {
-      items.push({ label: 'Convert to task', action: () => this._taskUpdate(taskId, { kind: 'task' }) });
+      items.push({ label: tr('Convert to task'), action: () => this._taskUpdate(taskId, { kind: 'task' }) });
     }
     items.push(
-      { label: 'Linked folders', action: () => {
+      { label: tr('Linked folders'), action: () => {
         const anchor = document.createElement('span');
         anchor.style.cssText = 'position:fixed;left:' + x + 'px;top:' + y + 'px;width:0;height:0';
         document.body.appendChild(anchor);
@@ -479,8 +480,8 @@ export function installSidebarTasks(SidebarClass) {
         anchor.remove();
       } },
       { separator: true },
-      { label: 'Delete Task Group', style: 'color:var(--red,#e55)', action: async () => {
-        if (await showConfirmDialog({ title: 'Delete Task Group', message: `Delete "${t.title}"? Sessions will not be deleted.`, confirmText: 'Delete', danger: true })) this._taskDelete(taskId);
+      { label: tr('Delete Task Group'), style: 'color:var(--red,#e55)', action: async () => {
+        if (await showConfirmDialog({ title: tr('Delete Task Group'), message: tr('Delete "{title}"? Sessions will not be deleted.', { title: t.title }), confirmText: tr('Delete'), danger: true })) this._taskDelete(taskId);
       } },
     );
     showContextMenu(x, y, items);
@@ -494,8 +495,8 @@ export function installSidebarTasks(SidebarClass) {
     const wrap = document.createElement('div');
     wrap.className = 'sidebar-subtabs';
     for (const [view, label, tip] of [
-      ['groups', 'Groups', 'Task Groups (岗位) with their member sessions'],
-      ['tasks', 'Tasks', 'Every session (活儿) flat, sorted by status + urgency; untagged at the bottom'],
+      ['groups', tr('Groups'), tr('Task Groups (岗位) with their member sessions')],
+      ['tasks', tr('Tasks'), tr('Every session (活儿) flat, sorted by status + urgency; untagged at the bottom')],
     ]) {
       const b = document.createElement('button');
       b.className = 'sidebar-subtab' + (this._boardView === view ? ' active' : '');
@@ -604,8 +605,8 @@ export function installSidebarTasks(SidebarClass) {
       const empty = document.createElement('div');
       empty.className = 'empty-hint task-view-empty';
       empty.textContent = (this._taskViewStatusFilter && this._taskViewStatusFilter.length)
-        ? 'No sessions match the current status filter.'
-        : 'No sessions yet. Sessions tagged into a Task Group sort to the top here.';
+        ? tr('No sessions match the current status filter.')
+        : tr('No sessions yet. Sessions tagged into a Task Group sort to the top here.');
       this.listEl.appendChild(empty);
       return;
     }
@@ -615,8 +616,8 @@ export function installSidebarTasks(SidebarClass) {
     if (untagged.length || untaggedStopped) {
       const h = document.createElement('div');
       h.className = 'task-view-untagged-header';
-      h.innerHTML = `<span>Untagged</span>`
-        + (untaggedStopped ? `<span class="tv-untagged-note">${untaggedStopped} stopped · see Folders</span>` : '')
+      h.innerHTML = `<span>${tr('Untagged')}</span>`
+        + (untaggedStopped ? `<span class="tv-untagged-note">${tr('{n} stopped · see Folders', { n: untaggedStopped })}</span>` : '')
         + `<span class="folder-count">${untagged.length}</span>`;
       list.appendChild(h);
       for (const s of untagged) list.appendChild(this._taskViewRow(s, false));
@@ -644,9 +645,9 @@ export function installSidebarTasks(SidebarClass) {
     addRow.className = 'task-board-addrow';
     const addCard = document.createElement('div');
     addCard.className = 'session-item-card new-session-card';
-    addCard.innerHTML = '<div class="session-card-name" style="color:var(--accent-hover)">+ New Task Group</div>';
+    addCard.innerHTML = `<div class="session-card-name" style="color:var(--accent-hover)">${tr('+ New Task Group')}</div>`;
     addCard.onclick = async () => {
-      const name = await showInputDialog({ title: 'New Task Group', label: 'Task Group title', confirmText: 'Create' });
+      const name = await showInputDialog({ title: tr('New Task Group'), label: tr('Task Group title'), confirmText: tr('Create') });
       if (name && name.trim()) {
         const t = await this._taskCreate({ title: name.trim() });
         if (t) this.app.openTaskDetail(t.id);
@@ -655,13 +656,13 @@ export function installSidebarTasks(SidebarClass) {
     // Import a task from a committable repo file (P4)
     const importCard = document.createElement('div');
     importCard.className = 'session-item-card new-session-card task-board-import';
-    importCard.innerHTML = '<div class="session-card-name" style="color:var(--text-secondary)">Import…</div>';
-    importCard.title = 'Import a task from a VibeSpace task markdown file';
+    importCard.innerHTML = `<div class="session-card-name" style="color:var(--text-secondary)">${tr('Import…')}</div>`;
+    importCard.title = tr('Import a task from a VibeSpace task markdown file');
     importCard.onclick = async () => {
-      const p = await showInputDialog({ title: 'Import Task Group', label: 'Absolute path to a VibeSpace task .md file', placeholder: '/path/to/repo/T-xxxxxx.md', confirmText: 'Import' });
+      const p = await showInputDialog({ title: tr('Import Task Group'), label: tr('Absolute path to a VibeSpace task .md file'), placeholder: '/path/to/repo/T-xxxxxx.md', confirmText: tr('Import') });
       if (!p || !p.trim()) return;
       const data = await this._taskApi('POST', '/api/tasks/import', { path: p.trim() });
-      if (data?.task) { showToast('Imported: ' + data.task.title); this.app.openTaskDetail(data.task.id); }
+      if (data?.task) { showToast(tr('Imported: {title}', { title: data.task.title })); this.app.openTaskDetail(data.task.id); }
     };
     addRow.append(addCard, importCard);
     this.listEl.appendChild(addRow);
@@ -681,13 +682,13 @@ export function installSidebarTasks(SidebarClass) {
 
       const hasLive = taskSessions.some(s => s.status === 'live' || s.status === 'tmux');
       const linkedFolders = task.folders || [];
-      const folderHint = linkedFolders.length ? ` (${linkedFolders.length} folder${linkedFolders.length > 1 ? 's' : ''})` : '';
+      const folderHint = linkedFolders.length ? tr(' ({n} folders)', { n: linkedFolders.length }) : '';
       const statusChip = task.archived
-        ? `<span class="task-status-chip" style="--chip-color:var(--text-dim)">archived</span>`
+        ? `<span class="task-status-chip" style="--chip-color:var(--text-dim)">${tr('archived')}</span>`
         : '';
       const attnCount = (attn.waiting || 0) + (attn.blocked || 0);
-      const attnTip = attn.declared ? (attn.declared.reason || 'needs attention')
-        : [attn.waiting ? `${attn.waiting} waiting for input` : '', attn.blocked ? `${attn.blocked} blocked` : ''].filter(Boolean).join(' · ');
+      const attnTip = attn.declared ? (attn.declared.reason || tr('needs attention'))
+        : [attn.waiting ? tr('{n} waiting for input', { n: attn.waiting }) : '', attn.blocked ? tr('{n} blocked', { n: attn.blocked }) : ''].filter(Boolean).join(' · ');
       const attnBadge = (attnCount || attn.declared)
         ? `<span class="task-attn-badge" title="${escHtml(attnTip)}">⚠${attnCount ? ' ' + attnCount : ''}</span>`
         : '';
@@ -708,16 +709,16 @@ export function installSidebarTasks(SidebarClass) {
       if (nameSpan) {
         nameSpan.addEventListener('dblclick', async (e) => {
           e.stopPropagation();
-          const newName = await showInputDialog({ title: 'Rename Task Group', label: 'Title', value: task.title, confirmText: 'Rename' });
+          const newName = await showInputDialog({ title: tr('Rename Task Group'), label: tr('Title'), value: task.title, confirmText: tr('Rename') });
           if (newName && newName.trim() && newName.trim() !== task.title) this._taskUpdate(task.id, { title: newName.trim() });
         });
-        nameSpan.title = 'Double-click to rename';
+        nameSpan.title = tr('Double-click to rename');
       }
 
       const plusBtn = document.createElement('button');
       plusBtn.className = 'folder-add-btn';
       plusBtn.textContent = '+';
-      plusBtn.title = 'New session in this task' + (this._folderPaths(task)[0] ? ` (${this._folderPaths(task)[0]})` : '');
+      plusBtn.title = tr('New session in this task') + (this._folderPaths(task)[0] ? ` (${this._folderPaths(task)[0]})` : '');
       plusBtn.onclick = (e) => {
         e.stopPropagation();
         // Reuse the normal dialog PRE-FILLED (user confirms all params):
@@ -729,14 +730,14 @@ export function installSidebarTasks(SidebarClass) {
       const detailBtn = document.createElement('button');
       detailBtn.className = 'folder-add-btn';
       detailBtn.innerHTML = ICON_DETAIL;
-      detailBtn.title = 'Task Group details (objective, checklist, activity log)';
+      detailBtn.title = tr('Task Group details (objective, checklist, activity log)');
       detailBtn.onclick = (e) => { e.stopPropagation(); this.app.openTaskDetail(task.id); };
       header.appendChild(detailBtn);
 
       const resumeAllBtn = document.createElement('button');
       resumeAllBtn.className = 'folder-add-btn';
       resumeAllBtn.textContent = '▶';
-      resumeAllBtn.title = 'Resume all sessions in "' + task.title + '"';
+      resumeAllBtn.title = tr('Resume all sessions in "{title}"', { title: task.title });
       resumeAllBtn.onclick = (e) => {
         e.stopPropagation();
         for (const s of taskSessions) {
@@ -791,7 +792,7 @@ export function installSidebarTasks(SidebarClass) {
 
       if (taskSessions.length === 0) {
         const empty = document.createElement('div'); empty.className = 'empty-hint';
-        empty.textContent = 'No sessions in this task';
+        empty.textContent = tr('No sessions in this task');
         sessionsDiv.appendChild(empty);
       } else {
         this._observeFolder(groupEl, sessionsDiv, taskSessions, { showCwd: true });
@@ -809,7 +810,7 @@ export function installSidebarTasks(SidebarClass) {
       groupEl._collapseKey = collapseKey; // for highlightSession to expand on jump
       if (this._collapsedFolders.has(collapseKey)) groupEl.classList.add('collapsed');
       const header = document.createElement('div'); header.className = 'folder-header';
-      header.innerHTML = `<span class="folder-chevron">▼</span><span class="folder-path" style="direction:ltr;font-style:italic">Untagged</span><span class="folder-count">${untagged.length}</span>`;
+      header.innerHTML = `<span class="folder-chevron">▼</span><span class="folder-path" style="direction:ltr;font-style:italic">${tr('Untagged')}</span><span class="folder-count">${untagged.length}</span>`;
       header.onclick = () => this._toggleCollapse(groupEl, collapseKey);
       const sessionsDiv = document.createElement('div'); sessionsDiv.className = 'folder-sessions';
       this._sortSessions(untagged);
@@ -847,7 +848,7 @@ export function installSidebarTasks(SidebarClass) {
       const card = document.createElement('div'); card.className = 'mobile-folder-card';
       card.innerHTML = MOBILE_ICON_TASK
         + `<span class="mobile-folder-path">${escHtml(task.title)}${attn.waiting || attn.declared ? ' <span class="task-attn-badge">⚠</span>' : ''}</span>`
-        + `<span class="mobile-folder-meta">${task.archived ? 'archived · ' : ''}${taskSessions.length} session${taskSessions.length === 1 ? '' : 's'}${liveCount ? ' · ' + liveCount + ' live' : ''}</span>`
+        + `<span class="mobile-folder-meta">${task.archived ? tr('archived') + ' · ' : ''}${tr('{n} sessions', { n: taskSessions.length })}${liveCount ? ' · ' + tr('{n} live', { n: liveCount }) : ''}</span>`
         + `<span class="mobile-folder-arrow">›</span>`;
       if (liveCount) card.classList.add('has-live');
       card.onclick = () => { this._mobileDrilldown = { type: 'group', key: task.id, label: task.title }; this._renderMobileTaskDetail(task.title, taskSessions, sessions); };
@@ -867,10 +868,10 @@ export function installSidebarTasks(SidebarClass) {
     if (untagged.length > 0 || untaggedStopped > 0) {
       const card = document.createElement('div'); card.className = 'mobile-folder-card';
       card.innerHTML = MOBILE_ICON_TASK
-        + `<span class="mobile-folder-path" style="font-style:italic">Untagged</span>`
-        + `<span class="mobile-folder-meta">${untagged.length} active${untaggedStopped ? ' · ' + untaggedStopped + ' stopped (see Folders)' : ''}</span>`
+        + `<span class="mobile-folder-path" style="font-style:italic">${tr('Untagged')}</span>`
+        + `<span class="mobile-folder-meta">${tr('{n} active', { n: untagged.length })}${untaggedStopped ? ' · ' + tr('{n} stopped (see Folders)', { n: untaggedStopped }) : ''}</span>`
         + `<span class="mobile-folder-arrow">›</span>`;
-      card.onclick = () => { this._mobileDrilldown = { type: 'group', key: '__ungrouped__' }; this._renderMobileTaskDetail('Untagged', untagged, sessions); };
+      card.onclick = () => { this._mobileDrilldown = { type: 'group', key: '__ungrouped__' }; this._renderMobileTaskDetail(tr('Untagged'), untagged, sessions); };
       this.listEl.appendChild(card);
     }
   };
@@ -878,7 +879,7 @@ export function installSidebarTasks(SidebarClass) {
   proto._renderMobileTaskDetail = function(title, taskSessions, allSessions) {
     this.listEl.innerHTML = '';
     const back = document.createElement('div'); back.className = 'mobile-folder-back';
-    back.innerHTML = `<span class="mobile-folder-back-arrow">‹</span> <span>All Task Groups</span>`;
+    back.innerHTML = `<span class="mobile-folder-back-arrow">‹</span> <span>${tr('All Task Groups')}</span>`;
     back.onclick = () => { this._mobileDrilldown = null; this._render(); }; // full re-render restores the sub-tab bar
     this.listEl.appendChild(back);
     const titleRow = document.createElement('div'); titleRow.className = 'mobile-folder-title';

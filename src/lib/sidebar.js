@@ -1,5 +1,6 @@
 import { Resizer } from './resizer.js';
 import { escHtml, createPopover, showContextMenu } from './utils.js';
+import { t as tr } from './i18n.js';
 import { createAgentKindIcon, createBackendIcon, getAgentKindMeta, getBackendMeta, getSessionKey } from './agent-meta.js';
 import { installSidebarState } from './sidebar-state.js';
 import { installSidebarRender } from './sidebar-render.js';
@@ -87,7 +88,7 @@ class Sidebar {
         // Task View sort menu (urgency/status/recent/name) — same control
         // position as the Folders sort, per-context contents.
         const r = sortBtn.getBoundingClientRect();
-        const SORTS = { urgency: 'Urgency + status', status: 'Status', recent: 'Recent', name: 'Name' };
+        const SORTS = { urgency: tr('Urgency + status'), status: tr('Status'), recent: tr('Recent'), name: tr('Name') };
         showContextMenu(r.left, r.bottom + 2, Object.entries(SORTS).map(([k, label]) => ({
           label: (this._taskViewSortMode === k ? '✓ ' : '  ') + label,
           action: () => {
@@ -188,17 +189,17 @@ class Sidebar {
     tabBar.className = 'sidebar-tabs';
     const foldersTab = document.createElement('button');
     foldersTab.className = 'sidebar-tab active';
-    foldersTab.textContent = 'Folders';
+    foldersTab.textContent = tr('Folders');
     foldersTab.dataset.tab = 'folders';
     foldersTab.onclick = () => { this._tabTouched = true; this._activeTab = 'folders'; this._updateTabs(); this._render(); };
     const tasksTab = document.createElement('button');
     tasksTab.className = 'sidebar-tab';
-    tasksTab.textContent = 'Task Groups';
+    tasksTab.textContent = tr('Task Groups');
     tasksTab.dataset.tab = 'tasks';
     tasksTab.onclick = () => { this._tabTouched = true; this._activeTab = 'tasks'; this._updateTabs(); this._render(); };
     const mountsTab = document.createElement('button');
     mountsTab.className = 'sidebar-tab';
-    mountsTab.textContent = 'Remote';
+    mountsTab.textContent = tr('Remote');
     mountsTab.dataset.tab = 'mounts';
     mountsTab.onclick = () => { this._tabTouched = true; this._activeTab = 'mounts'; this._updateTabs(); this._render(); };
     tabBar.append(foldersTab, tasksTab, mountsTab);
@@ -282,22 +283,22 @@ class Sidebar {
     // Task View sort menu; on Folders it cycles recent/folder grouping.
     if (this._activeTab === 'tasks') {
       btn.innerHTML = '<svg style="width:11px;height:11px;vertical-align:-1px" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v10M5 13l-2.5-2.5M5 13l2.5-2.5M11 13V3M11 3L8.5 5.5M11 3l2.5 2.5"/></svg>';
-      btn.title = `Sort by: ${({ urgency: 'Urgency + status', status: 'Status', recent: 'Recent', name: 'Name' })[this._taskViewSortMode] || 'Urgency + status'}`;
+      btn.title = tr('Sort by: {mode}', { mode: ({ urgency: tr('Urgency + status'), status: tr('Status'), recent: tr('Recent'), name: tr('Name') })[this._taskViewSortMode] || tr('Urgency + status') });
       return;
     }
     btn.innerHTML = this._sortMode === 'recent' ? '<svg style="width:11px;height:11px;vertical-align:-1px" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="6"/><path d="M8 4v4l3 1.5"/></svg>' : '<svg style="width:11px;height:11px;vertical-align:-1px" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h4l2 2h6v7a1 1 0 01-1 1H3a1 1 0 01-1-1V4z"/></svg>';
-    btn.title = `Sort by: ${this._sortMode === 'recent' ? 'Recent' : 'Folder'}`;
+    btn.title = tr('Sort by: {mode}', { mode: this._sortMode === 'recent' ? tr('Recent') : tr('Folder') });
   }
 
   _showStatusFilterMenu(anchor) {
     const menu = createPopover(anchor, 'status-filter-menu');
 
     const items = [
-      { id: 'live', label: 'Live', color: 'var(--green)' },
-      { id: 'tmux', label: 'Tmux', color: 'var(--blue)' },
-      { id: 'external', label: 'External', color: 'var(--yellow)' },
-      { id: 'stopped', label: 'Stopped', color: 'var(--text-dim)' },
-      { id: 'archived', label: 'Archived', color: 'var(--text-dim)' },
+      { id: 'live', label: tr('Live'), color: 'var(--green)' },
+      { id: 'tmux', label: tr('Tmux'), color: 'var(--blue)' },
+      { id: 'external', label: tr('External'), color: 'var(--yellow)' },
+      { id: 'stopped', label: tr('Stopped'), color: 'var(--text-dim)' },
+      { id: 'archived', label: tr('Archived'), color: 'var(--text-dim)' },
     ];
     for (const item of items) {
       const row = document.createElement('label'); row.className = 'status-filter-item';
@@ -338,7 +339,7 @@ class Sidebar {
       const head = document.createElement('div');
       head.className = 'status-filter-sec';
       head.style.borderTop = 'none';
-      head.textContent = 'State';
+      head.textContent = tr('State');
       menu.appendChild(head);
       const cur = new Set(this._taskViewStatusFilter || []);
       const apply = () => {
@@ -357,7 +358,7 @@ class Sidebar {
       }
       const hint = document.createElement('div');
       hint.className = 'status-filter-hint';
-      hint.textContent = 'none checked = show all states';
+      hint.textContent = tr('none checked = show all states');
       menu.appendChild(hint);
     }
     // The connection-Status section is FOLDERS-ONLY: the Task Groups tab
@@ -368,9 +369,9 @@ class Sidebar {
       const head = document.createElement('div');
       head.className = 'status-filter-sec';
       head.style.borderTop = 'none';
-      head.textContent = 'Status';
+      head.textContent = tr('Status');
       menu.appendChild(head);
-      for (const [id, label] of [['live', 'Live'], ['tmux', 'Tmux'], ['external', 'External'], ['stopped', 'Stopped'], ['archived', 'Archived']]) {
+      for (const [id, label] of [['live', tr('Live')], ['tmux', tr('Tmux')], ['external', tr('External')], ['stopped', tr('Stopped')], ['archived', tr('Archived')]]) {
         const row = document.createElement('label'); row.className = 'status-filter-item';
         const cb = document.createElement('input');
         cb.type = 'checkbox';
@@ -390,7 +391,7 @@ class Sidebar {
       const bhead = document.createElement('div');
       bhead.className = 'status-filter-sec';
       if (this._activeTab === 'tasks' && this._boardView !== 'tasks') bhead.style.borderTop = 'none';
-      bhead.textContent = 'Backend';
+      bhead.textContent = tr('Backend');
       menu.appendChild(bhead);
     }
     const backends = this._getAvailableBackends();
@@ -416,13 +417,13 @@ class Sidebar {
     }
 
     // ── Location section (local / each remote host) ──
-    const hosts = new Map([['local', 'Local']]);
+    const hosts = new Map([['local', tr('Local')]]);
     for (const s of this._allSessions || []) if (s.host) hosts.set(s.host, s.hostName || s.host);
     for (const h of this._hostsData?.hosts || []) hosts.set(h.id, h.name);
     if (hosts.size > 1) {
       const head = document.createElement('div');
       head.className = 'status-filter-sec';
-      head.textContent = 'Location';
+      head.textContent = tr('Location');
       menu.appendChild(head);
       const all = [...hosts.keys()];
       for (const [hid, label] of hosts) {
@@ -449,13 +450,13 @@ class Sidebar {
     // Default state: 4 non-archived filters on, archived off
     const isDefault = this._statusFilter.size === 4 && !this._statusFilter.has('archived');
     btn.style.color = isDefault ? '' : 'var(--accent-hover)';
-    btn.title = isDefault ? 'Filter by status' : `Showing: ${[...this._statusFilter].join(', ')}`;
+    btn.title = isDefault ? tr('Filter by status') : tr('Showing: {list}', { list: [...this._statusFilter].join(', ') });
   }
 
   _updateBackendFilterBtn(btn) {
     const isDefault = this._backendFilter.size === 0;
     btn.style.color = isDefault ? '' : 'var(--accent-hover)';
-    btn.title = isDefault ? 'Filter by agent backend' : `Agents: ${[...this._backendFilter].join(', ')}`;
+    btn.title = isDefault ? tr('Filter by agent backend') : tr('Agents: {list}', { list: [...this._backendFilter].join(', ') });
     const iconIds = isDefault ? this._getAvailableBackends().slice(0, 2) : [...this._backendFilter].slice(0, 2);
     btn.replaceChildren();
     const stack = document.createElement('span');
@@ -477,13 +478,13 @@ class Sidebar {
     // Only show tabs if enabled and more than 1 filter is selected
     if (!enabled || filters.length <= 1) return;
 
-    const labelMap = { live: 'LIVE', tmux: 'TMUX', external: 'EXT', stopped: 'STOP', archived: 'ARCH' };
+    const labelMap = { live: tr('LIVE'), tmux: tr('TMUX'), external: tr('EXT'), stopped: tr('STOP'), archived: tr('ARCH') };
     const colorMap = { live: 'var(--green)', tmux: 'var(--blue)', external: 'var(--yellow)', stopped: 'var(--text-dim)', archived: 'var(--text-dim)' };
 
     // ALL button
     const allBtn = document.createElement('button'); allBtn.className = 'status-quick-tab';
     if (this._activeView === null) allBtn.classList.add('active');
-    allBtn.textContent = 'ALL';
+    allBtn.textContent = tr('ALL');
     allBtn.onclick = () => { this._activeView = null; this._renderQuickTabs(); this._render(); };
     container.appendChild(allBtn);
 
@@ -514,8 +515,8 @@ class Sidebar {
 
     const allBtn = document.createElement('button'); allBtn.className = 'status-quick-tab';
     if (!this._agentKindFilter) allBtn.classList.add('active');
-    allBtn.textContent = 'ALL';
-    allBtn.title = 'Show all agent types';
+    allBtn.textContent = tr('ALL');
+    allBtn.title = tr('Show all agent types');
     allBtn.onclick = () => {
       this._agentKindFilter = '';
       localStorage.removeItem('agentKindFilter');
@@ -805,13 +806,13 @@ class Sidebar {
     // "+ New Task Group" card; a bare New Session there is meaningless).
     if (this._activeTab !== 'tasks') {
       const newCard = document.createElement('div'); newCard.className = 'session-item-card new-session-card';
-      newCard.innerHTML = '<div class="session-card-name" style="color:var(--accent-hover)">+ New Session</div>';
+      newCard.innerHTML = `<div class="session-card-name" style="color:var(--accent-hover)">${tr('+ New Session')}</div>`;
       newCard.onclick = () => this.app.showNewSessionDialog();
       this.listEl.appendChild(newCard);
     }
 
     // Tasks tab renders its board (groups + view toggle) even with zero sessions.
-    if (!sessions.length && this._activeTab !== 'tasks') { this.listEl.insertAdjacentHTML('beforeend', '<div class="empty-hint">No sessions</div>'); return; }
+    if (!sessions.length && this._activeTab !== 'tasks') { this.listEl.insertAdjacentHTML('beforeend', `<div class="empty-hint">${tr('No sessions')}</div>`); return; }
 
     if (this._mobileMode) {
       // Restore drill-down state if we were inside a folder/group
@@ -832,7 +833,7 @@ class Sidebar {
             // them all in the drill-down would freeze the phone).
             const untagged = sessions.filter(s => (s.status === 'live' || s.status === 'tmux')
               && !assignedIds.has(this._getSessionStateKey(s)) && !assignedIds.has(s.sessionId));
-            if (untagged.length) { this._renderMobileTaskDetail('Untagged', untagged, sessions); return; }
+            if (untagged.length) { this._renderMobileTaskDetail(tr('Untagged'), untagged, sessions); return; }
           } else {
             const task = this._taskById(dd.key);
             if (task) {
