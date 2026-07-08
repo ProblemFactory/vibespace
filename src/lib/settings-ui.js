@@ -1,5 +1,6 @@
 import { SETTINGS_SCHEMA, SETTINGS_CATEGORIES } from './settings-schema.js';
 import { showConfirmDialog } from './utils.js';
+import { t } from './i18n.js';
 
 /**
  * SettingsUI — VS Code-style settings page.
@@ -31,14 +32,14 @@ class SettingsUI {
     const header = document.createElement('div');
     header.className = 'settings-header';
     const title = document.createElement('h3');
-    title.textContent = 'Settings';
+    title.textContent = t('Settings');
     const headerRight = document.createElement('div');
     headerRight.className = 'settings-header-actions';
     const resetAllBtn = document.createElement('button');
     resetAllBtn.className = 'settings-header-btn';
-    resetAllBtn.textContent = 'Reset All';
-    resetAllBtn.title = 'Reset all settings to defaults';
-    resetAllBtn.onclick = async () => { if (await showConfirmDialog({ title: 'Reset Settings', message: 'Reset all settings to defaults?', confirmText: 'Reset', danger: true })) { this.settings.resetAll(); this._renderContent(content, nav); } };
+    resetAllBtn.textContent = t('Reset All');
+    resetAllBtn.title = t('Reset all settings to defaults');
+    resetAllBtn.onclick = async () => { if (await showConfirmDialog({ title: t('Reset Settings'), message: t('Reset all settings to defaults?'), confirmText: t('Reset'), danger: true })) { this.settings.resetAll(); this._renderContent(content, nav); } };
     const closeBtn = document.createElement('button');
     closeBtn.className = 'dialog-close';
     closeBtn.textContent = '✕';
@@ -51,7 +52,7 @@ class SettingsUI {
     searchWrap.className = 'settings-search-wrap';
     const searchInput = document.createElement('input');
     searchInput.className = 'settings-search';
-    searchInput.placeholder = 'Search settings...';
+    searchInput.placeholder = t('Search settings...');
     this._search = ''; // clear filter on open
     searchInput.oninput = () => { this._search = searchInput.value.toLowerCase(); this._renderContent(content, nav); };
     searchWrap.appendChild(searchInput);
@@ -123,7 +124,7 @@ class SettingsUI {
     }
 
     if (!content.children.length) {
-      content.innerHTML = '<div class="settings-empty">No settings match your search.</div>';
+      content.innerHTML = '<div class="settings-empty">' + t('No settings match your search.') + '</div>';
     }
   }
 
@@ -140,8 +141,8 @@ class SettingsUI {
     if (!schema.liveApply) {
       const badge = document.createElement('span');
       badge.className = 'settings-reload-badge';
-      badge.textContent = 'reload';
-      badge.title = 'Requires page reload to take effect';
+      badge.textContent = t('reload');
+      badge.title = t('Requires page reload to take effect');
       label.appendChild(badge);
     }
     const desc = document.createElement('div');
@@ -163,7 +164,7 @@ class SettingsUI {
       const resetBtn = document.createElement('button');
       resetBtn.className = 'settings-reset-btn';
       resetBtn.textContent = '↺';
-      resetBtn.title = 'Reset to default';
+      resetBtn.title = t('Reset to default');
       resetBtn.onclick = () => { this.settings.reset(path); row.classList.remove('modified'); this._refreshControl(row, path, schema); };
       controlWrap.appendChild(resetBtn);
     }
@@ -215,7 +216,7 @@ class SettingsUI {
         const select = document.createElement('select');
         select.className = 'settings-select';
         const customOpt = document.createElement('option');
-        customOpt.value = '__custom__'; customOpt.textContent = 'Custom...';
+        customOpt.value = '__custom__'; customOpt.textContent = t('Custom...');
         for (const opt of schema.options) {
           const o = document.createElement('option');
           o.value = opt.value; o.textContent = opt.label;
