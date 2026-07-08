@@ -45,15 +45,15 @@
   <!-- Sidebar -->
   <aside id="sidebar" class="sidebar">
     <div class="sidebar-header">
-      <span class="sidebar-title">Sessions</span>
-      <button id="sidebar-close" class="icon-btn" title="Close sidebar">✕</button>
+      <span class="sidebar-title" data-i18n>Sessions</span>
+      <button id="sidebar-close" class="icon-btn" title="Close sidebar" data-i18n-attr="title">✕</button>
     </div>
     <div class="sidebar-section" style="flex:1;overflow-y:auto;display:flex;flex-direction:column">
       <div style="display:flex;gap:4px;padding:4px 6px;align-items:center">
-        <input type="text" id="session-filter" class="filter-input" style="margin:0;flex:1" placeholder="Search...">
+        <input type="text" id="session-filter" class="filter-input" style="margin:0;flex:1" placeholder="Search..." data-i18n-attr="placeholder">
         <button id="backend-filter" class="icon-btn backend-filter-btn" title="Filter sessions (status / backend / machine)"></button>
         <button id="live-filter" class="icon-btn" title="Filter by status" style="display:none">●</button>
-        <button id="manage-toggle" class="icon-btn" title="Manage mode — show quick terminate buttons" style="font-size:12px;width:auto;padding:0 6px"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/><circle cx="5" cy="4.5" r="1.3" fill="currentColor" stroke="none"/><circle cx="10" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="6" cy="11.5" r="1.3" fill="currentColor" stroke="none"/></svg></button>
+        <button id="manage-toggle" class="icon-btn" title="Manage mode — show quick terminate buttons" style="font-size:12px;width:auto;padding:0 6px" data-i18n-attr="title"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/><circle cx="5" cy="4.5" r="1.3" fill="currentColor" stroke="none"/><circle cx="10" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="6" cy="11.5" r="1.3" fill="currentColor" stroke="none"/></svg></button>
         <button id="sort-toggle" class="icon-btn" title="Sort by: Recent" style="font-size:11px;width:auto;padding:0 6px">⏱</button>
       </div>
       <div id="agent-kind-quick-tabs" class="status-quick-tabs"></div>
@@ -69,42 +69,42 @@
     <!-- Top Toolbar -->
     <header id="toolbar">
       <div class="toolbar-left">
-        <button id="sidebar-toggle" class="icon-btn" title="Toggle sidebar">☰</button>
+        <button id="sidebar-toggle" class="icon-btn" title="Toggle sidebar" data-i18n-attr="title">☰</button>
         <span class="toolbar-title">VibeSpace</span>
       </div>
       <div class="toolbar-center" data-zone="toolbar-center">
         <div class="layout-presets" id="layout-presets">
-          <button class="layout-btn" data-layout="freeform" title="Freeform (no grid)">
+          <button class="layout-btn" data-layout="freeform" title="Freeform (no grid)" data-i18n-attr="title">
             <svg viewBox="0 0 16 16" width="14" height="14"><rect x="1" y="1" width="5" height="4" rx="0.5" fill="none" stroke="currentColor" stroke-width="1" transform="rotate(-5 3.5 3)"/><rect x="7" y="3" width="7" height="5" rx="0.5" fill="none" stroke="currentColor" stroke-width="1" transform="rotate(3 10.5 5.5)"/><rect x="2" y="8" width="6" height="6" rx="0.5" fill="none" stroke="currentColor" stroke-width="1" transform="rotate(2 5 11)"/></svg>
           </button>
-          <button class="layout-btn" data-layout="maximize" title="Maximize">
+          <button class="layout-btn" data-layout="maximize" title="Maximize" data-i18n-attr="title">
             <svg viewBox="0 0 16 16" width="14" height="14"><rect x="2" y="2" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
           </button>
-          <button class="layout-btn" data-layout="two-vertical" title="Split vertical">
+          <button class="layout-btn" data-layout="two-vertical" title="Split vertical" data-i18n-attr="title">
             <svg viewBox="0 0 16 16" width="14" height="14"><rect x="1" y="2" width="6" height="12" fill="none" stroke="currentColor" stroke-width="1.2"/><rect x="9" y="2" width="6" height="12" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
           </button>
-          <button class="layout-btn" data-layout="two-horizontal" title="Split horizontal">
+          <button class="layout-btn" data-layout="two-horizontal" title="Split horizontal" data-i18n-attr="title">
             <svg viewBox="0 0 16 16" width="14" height="14"><rect x="2" y="1" width="12" height="6" fill="none" stroke="currentColor" stroke-width="1.2"/><rect x="2" y="9" width="12" height="6" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
           </button>
-          <button class="layout-btn" data-layout="quad" title="Quad">
+          <button class="layout-btn" data-layout="quad" title="Quad" data-i18n-attr="title">
             <svg viewBox="0 0 16 16" width="14" height="14"><rect x="1" y="1" width="6" height="6" fill="none" stroke="currentColor" stroke-width="1.2"/><rect x="9" y="1" width="6" height="6" fill="none" stroke="currentColor" stroke-width="1.2"/><rect x="1" y="9" width="6" height="6" fill="none" stroke="currentColor" stroke-width="1.2"/><rect x="9" y="9" width="6" height="6" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
           </button>
-          <button class="layout-btn" data-layout="three-columns" title="3 columns">
+          <button class="layout-btn" data-layout="three-columns" title="3 columns" data-i18n-attr="title">
             <svg viewBox="0 0 16 16" width="14" height="14"><rect x="0.5" y="2" width="4.3" height="12" fill="none" stroke="currentColor" stroke-width="1"/><rect x="5.8" y="2" width="4.3" height="12" fill="none" stroke="currentColor" stroke-width="1"/><rect x="11.2" y="2" width="4.3" height="12" fill="none" stroke="currentColor" stroke-width="1"/></svg>
           </button>
           <span id="custom-grids-container"></span>
-          <button id="btn-add-grid" class="layout-btn" title="Add custom grid">
+          <button id="btn-add-grid" class="layout-btn" title="Add custom grid" data-i18n-attr="title">
             <svg viewBox="0 0 16 16" width="14" height="14"><line x1="8" y1="3" x2="8" y2="13" stroke="currentColor" stroke-width="1.5"/><line x1="3" y1="8" x2="13" y2="8" stroke="currentColor" stroke-width="1.5"/></svg>
           </button>
         </div>
       </div>
       <div class="toolbar-right" data-zone="toolbar-right">
-        <button id="btn-global-settings" class="icon-btn" title="Global settings" style="font-size:14px;width:28px;height:28px"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></button>
-        <button id="btn-presets" class="toolbar-action" title="Saved presets"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 2h12v12H2z"/><path d="M4 2v5l2-1.5L8 7V2"/></svg> Presets</button>
-        <button id="btn-new-session" class="toolbar-action"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v10M3 8h10"/></svg> New Session</button>
-        <button id="btn-terminal" class="toolbar-action"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M4.5 6l2.5 2-2.5 2M8.5 10.5h3"/></svg> Terminal</button>
-        <button id="btn-file-explorer" class="toolbar-action"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h4l2 2h6v8H2V3z"/></svg> Files</button>
-        <button id="btn-browser" class="toolbar-action"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c-2 2-2 10 0 12M8 2c2 2 2 10 0 12"/></svg> Browser</button>
+        <button id="btn-global-settings" class="icon-btn" title="Global settings" style="font-size:14px;width:28px;height:28px" data-i18n-attr="title"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></button>
+        <button id="btn-presets" class="toolbar-action" title="Saved presets" data-i18n-attr="title"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 2h12v12H2z"/><path d="M4 2v5l2-1.5L8 7V2"/></svg><span data-i18n>Presets</span></button>
+        <button id="btn-new-session" class="toolbar-action"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v10M3 8h10"/></svg><span data-i18n>New Session</span></button>
+        <button id="btn-terminal" class="toolbar-action"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M4.5 6l2.5 2-2.5 2M8.5 10.5h3"/></svg><span data-i18n>Terminal</span></button>
+        <button id="btn-file-explorer" class="toolbar-action"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h4l2 2h6v8H2V3z"/></svg><span data-i18n>Files</span></button>
+        <button id="btn-browser" class="toolbar-action"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c-2 2-2 10 0 12M8 2c2 2 2 10 0 12"/></svg><span data-i18n>Browser</span></button>
       </div>
     </header>
     <!-- Optional extra bar row (auto-hidden when empty; populate via Customize mode drag) -->
@@ -113,10 +113,10 @@
     <!-- Main Workspace -->
     <!-- Mobile nav bar (hidden on desktop) -->
     <div id="mobile-nav">
-      <button id="mobile-nav-menu" title="Sessions">&#9776;</button>
-      <span id="mobile-nav-title" title="Switch window">VibeSpace</span>
-      <button id="mobile-nav-close" title="Close window">&#10005;</button>
-      <button id="mobile-nav-new" title="New session">+</button>
+      <button id="mobile-nav-menu" title="Sessions" data-i18n-attr="title">&#9776;</button>
+      <span id="mobile-nav-title" title="Switch window" data-i18n-attr="title">VibeSpace</span>
+      <button id="mobile-nav-close" title="Close window" data-i18n-attr="title">&#10005;</button>
+      <button id="mobile-nav-new" title="New session" data-i18n-attr="title">+</button>
     </div>
 
     <main id="workspace">
@@ -125,13 +125,13 @@
       <div id="welcome">
         <div class="welcome-content">
           <h1>VibeSpace</h1>
-          <p>Multi-session terminal manager with tiling window support</p>
+          <p data-i18n>Multi-session terminal manager with tiling window support</p>
           <div class="welcome-actions">
-            <button class="welcome-btn" id="welcome-new">Create New Session</button>
-            <button class="welcome-btn welcome-btn-secondary" id="welcome-files">Open File Explorer</button>
+            <button class="welcome-btn" id="welcome-new" data-i18n>Create New Session</button>
+            <button class="welcome-btn welcome-btn-secondary" id="welcome-files" data-i18n>Open File Explorer</button>
           </div>
           <div class="welcome-shortcuts">
-            <p>Drag windows to edges to snap | Use toolbar for layout presets | Toggle sidebar for sessions</p>
+            <p data-i18n>Drag windows to edges to snap | Use toolbar for layout presets | Toggle sidebar for sessions</p>
           </div>
         </div>
       </div>
@@ -142,11 +142,11 @@
     <div id="taskbar-row2" data-zone="taskbar-row2"></div>
     <div id="taskbar-resize-handle"></div>
     <footer id="taskbar">
-      <span id="cmd-indicator">[CMD]</span>
+      <span id="cmd-indicator" data-i18n>[CMD]</span>
       <div id="taskbar-items"></div>
       <div id="taskbar-tray" data-zone="taskbar-tray">
         <div id="desktop-previews"></div>
-        <div id="taskbar-usage" class="taskbar-usage" title="Click for usage details"></div>
+        <div id="taskbar-usage" class="taskbar-usage" title="Click for usage details" data-i18n-attr="title"></div>
         <div id="taskbar-status" title="Window list"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="4.5" width="10" height="8" rx="1"/><path d="M4.5 4.5v-2a1 1 0 011-1h8a1 1 0 011 1v6a1 1 0 01-1 1h-2"/></svg><span id="active-count">0</span></div>
       </div>
     </footer>
@@ -158,68 +158,68 @@
   <div id="dialog-overlay" class="dialog-overlay hidden">
     <!-- New Session Dialog -->
     <div id="dialog-new-session" class="dialog hidden">
-      <div class="dialog-header"><h3>New Agent Session</h3><button class="dialog-close">✕</button></div>
+      <div class="dialog-header"><h3 data-i18n>New Agent Session</h3><button class="dialog-close">✕</button></div>
       <div class="dialog-body">
-        <label>Backend<select id="input-backend"><option value="claude">Claude</option><option value="codex">Codex</option><option value="shell">Terminal (plain shell)</option></select></label>
-        <label>Host<select id="input-host"><option value="">Local</option></select></label>
-        <label>Task<select id="input-task"><option value="">None</option></select></label>
-        <label id="row-mode">Mode<select id="input-mode"><option value="terminal">Terminal</option><option value="chat">Chat</option></select></label>
-        <label>Working Directory
+        <label><span data-i18n>Backend</span><select id="input-backend"><option value="claude">Claude</option><option value="codex">Codex</option><option value="shell" data-i18n>Terminal (plain shell)</option></select></label>
+        <label><span data-i18n>Host</span><select id="input-host"><option value="">Local</option></select></label>
+        <label><span data-i18n>Task</span><select id="input-task"><option value="">None</option></select></label>
+        <label id="row-mode"><span data-i18n>Mode</span><select id="input-mode"><option value="terminal" data-i18n>Terminal</option><option value="chat" data-i18n>Chat</option></select></label>
+        <label><span data-i18n>Working Directory</span>
           <div class="autocomplete-wrapper">
             <input type="text" id="input-cwd" placeholder="/home/user/project" autocomplete="off">
             <div id="cwd-suggestions" class="autocomplete-dropdown hidden"></div>
           </div>
           <div id="cwd-recent" class="cwd-recent"></div>
         </label>
-        <label>Session Name<input type="text" id="input-session-name" placeholder="My Project"></label>
-        <label id="row-model">Model<select id="input-model"></select></label>
-        <label class="hidden" id="custom-model-row">Custom Model<input type="text" id="input-model-custom" placeholder="model-name"></label>
-        <label id="row-permission">Permission Mode<select id="input-permission"></select></label>
-        <label id="row-effort">Effort<select id="input-effort"></select></label>
-        <label id="row-account">Account<select id="input-account"><option value="">Default (Subscription)</option></select></label>
-        <label id="row-extra-args">Additional Arguments<input type="text" id="input-extra-args" placeholder="--verbose"></label>
+        <label><span data-i18n>Session Name</span><input type="text" id="input-session-name" placeholder="My Project" data-i18n-attr="placeholder"></label>
+        <label id="row-model"><span data-i18n>Model</span><select id="input-model"></select></label>
+        <label class="hidden" id="custom-model-row"><span data-i18n>Custom Model</span><input type="text" id="input-model-custom" placeholder="model-name" data-i18n-attr="placeholder"></label>
+        <label id="row-permission"><span data-i18n>Permission Mode</span><select id="input-permission"></select></label>
+        <label id="row-effort"><span data-i18n>Effort</span><select id="input-effort"></select></label>
+        <label id="row-account"><span data-i18n>Account</span><select id="input-account"><option value="">Default (Subscription)</option></select></label>
+        <label id="row-extra-args"><span data-i18n>Additional Arguments</span><input type="text" id="input-extra-args" placeholder="--verbose"></label>
       </div>
-      <div class="dialog-footer"><button class="btn-cancel">Cancel</button><button class="btn-create">Create Session</button></div>
+      <div class="dialog-footer"><button class="btn-cancel" data-i18n>Cancel</button><button class="btn-create" data-i18n>Create Session</button></div>
     </div>
 
     <!-- Fork Session Dialog -->
     <div id="dialog-fork" class="dialog hidden">
-      <div class="dialog-header"><h3>Fork Session</h3><button class="dialog-close">✕</button></div>
+      <div class="dialog-header"><h3 data-i18n>Fork Session</h3><button class="dialog-close">✕</button></div>
       <div class="dialog-body">
-        <p class="dialog-hint" id="fork-hint-general">A fork branches from the shared history into its own independent session — the original is left untouched. Send a first message to make the branch diverge now (otherwise it looks identical to a plain resume until you continue it).</p>
-        <p class="dialog-hint hidden" id="fork-hint-at">Forking from the selected message — the new session contains the conversation up to and including that point, then continues with your message. The original is left untouched.</p>
-        <label>Title<input type="text" id="fork-title" placeholder="Forked session title"></label>
-        <label>First message
-          <textarea id="fork-first-message" rows="4" placeholder="Continue the forked conversation…"></textarea>
+        <p class="dialog-hint" id="fork-hint-general" data-i18n>A fork branches from the shared history into its own independent session — the original is left untouched. Send a first message to make the branch diverge now (otherwise it looks identical to a plain resume until you continue it).</p>
+        <p class="dialog-hint hidden" id="fork-hint-at" data-i18n>Forking from the selected message — the new session contains the conversation up to and including that point, then continues with your message. The original is left untouched.</p>
+        <label><span data-i18n>Title</span><input type="text" id="fork-title" placeholder="Forked session title" data-i18n-attr="placeholder"></label>
+        <label><span data-i18n>First message</span>
+          <textarea id="fork-first-message" rows="4" placeholder="Continue the forked conversation…" data-i18n-attr="placeholder"></textarea>
         </label>
       </div>
-      <div class="dialog-footer"><button class="btn-cancel">Cancel</button><button class="btn-create" id="btn-fork-send" disabled>Fork &amp; Send</button></div>
+      <div class="dialog-footer"><button class="btn-cancel" data-i18n>Cancel</button><button class="btn-create" id="btn-fork-send" disabled data-i18n>Fork &amp; Send</button></div>
     </div>
 
     <!-- Grid Config Dialog -->
     <div id="dialog-grid" class="dialog hidden">
-      <div class="dialog-header"><h3>Add Grid Layout</h3><button class="dialog-close">✕</button></div>
+      <div class="dialog-header"><h3 data-i18n>Add Grid Layout</h3><button class="dialog-close">✕</button></div>
       <div class="dialog-body">
         <div class="grid-config-row">
-          <label>Rows<input type="number" id="grid-rows" min="1" max="6" value="2"></label>
-          <label>Columns<input type="number" id="grid-cols" min="1" max="6" value="3"></label>
+          <label><span data-i18n>Rows</span><input type="number" id="grid-rows" min="1" max="6" value="2"></label>
+          <label><span data-i18n>Columns</span><input type="number" id="grid-cols" min="1" max="6" value="3"></label>
         </div>
         <div id="grid-preview" class="grid-preview"></div>
       </div>
-      <div class="dialog-footer"><button class="btn-cancel">Cancel</button><button class="btn-create" id="btn-apply-grid">Add</button></div>
+      <div class="dialog-footer"><button class="btn-cancel" data-i18n>Cancel</button><button class="btn-create" id="btn-apply-grid" data-i18n>Add</button></div>
     </div>
 
     <!-- Preset Manager Dialog -->
     <div id="dialog-presets" class="dialog hidden">
-      <div class="dialog-header"><h3>Saved Presets</h3><button class="dialog-close">✕</button></div>
+      <div class="dialog-header"><h3 data-i18n>Saved Presets</h3><button class="dialog-close">✕</button></div>
       <div class="dialog-body">
         <div class="layout-save-row">
-          <input type="text" id="preset-save-name" placeholder="Preset name...">
-          <button class="btn-create" id="btn-preset-save" style="white-space:nowrap">Save Current</button>
+          <input type="text" id="preset-save-name" placeholder="Preset name..." data-i18n-attr="placeholder">
+          <button class="btn-create" id="btn-preset-save" style="white-space:nowrap" data-i18n>Save Current</button>
         </div>
         <div id="saved-presets-list" class="session-items" style="margin-top:8px"></div>
       </div>
-      <div class="dialog-footer"><button class="btn-cancel">Cancel</button></div>
+      <div class="dialog-footer"><button class="btn-cancel" data-i18n>Cancel</button></div>
     </div>
   </div>
 
