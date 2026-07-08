@@ -11,6 +11,7 @@ import { LayoutManager } from './layout.js';
 import { ChatView } from './chat-view.js';
 import { Resizer } from './resizer.js';
 import { createPopover, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog } from './utils.js';
+import { t, getLangPref, setLang } from './i18n.js';
 import { MobileNav } from './mobile-nav.js';
 import { setupDirAutocomplete } from './autocomplete.js';
 import { getAvailableFonts } from './terminal.js';
@@ -1365,6 +1366,22 @@ class App {
     // workspace tools / data & security / help — grouped, the flat list grew too long
     if (!this.isMobile) menu.append(item(I.brush, 'Customize UI\u2026', () => this._customize.enter()));
     menu.append(item(I.key, 'Manage agents\u2026', () => this._showAgentsDialog()));
+    // Language is PER-DEVICE (localStorage, not a synced setting) \u2014 names shown
+    // in their own language, never translated. Switching reloads the page.
+    {
+      const I_globe = '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.5"/><path d="M1.5 8h13M8 1.5c-1.8 1.8-2.7 4-2.7 6.5S6.2 12.7 8 14.5c1.8-1.8 2.7-4 2.7-6.5S9.8 3.3 8 1.5z"/></svg>';
+      const pref = getLangPref();
+      const cur = { auto: t('Auto (system)'), en: 'English', zh: '\u4e2d\u6587', ja: '\u65e5\u672c\u8a9e' }[pref] || pref;
+      const langItem = item(I_globe, `${t('Language')}: ${cur}`, () => {});
+      langItem.onclick = (e) => {
+        const choices = [['auto', t('Auto (system)')], ['en', 'English'], ['zh', '\u4e2d\u6587'], ['ja', '\u65e5\u672c\u8a9e']];
+        showContextMenu(e.clientX, e.clientY, choices.map(([code, label]) => ({
+          label: (pref === code ? '\u2713 ' : '\u2007 ') + label,
+          onClick: () => setLang(code),
+        })));
+      };
+      menu.append(langItem);
+    }
     menu.append(sep(),
       item(I.exp, 'Backup & migrate\u2026', () => this._showTransferDialog()),
       item(I.lock, this._authEnabled ? 'Change password\u2026' : 'Set password\u2026', () => this._showPasswordDialog()));

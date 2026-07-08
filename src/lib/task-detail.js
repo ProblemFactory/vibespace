@@ -48,6 +48,9 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
     const _typing = root.contains(_ae) && /^(INPUT|TEXTAREA)$/.test(_ae.tagName);
     if (_typing && _ae.value) return;
     const _refocusPlaceholder = _typing ? _ae.placeholder : null;
+    // Rebuilding wipes root's scroll position — a color/toggle edit at the
+    // bottom of the window must not yank the view back to the top.
+    const _scrollTop = root.scrollTop;
     app.wm.setTitle(winInfo.id, task.title);
     root.innerHTML = '';
 
@@ -356,6 +359,7 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
       const inp = [...root.querySelectorAll('input, textarea')].find((i) => i.placeholder === _refocusPlaceholder);
       if (inp) inp.focus();
     }
+    root.scrollTop = _scrollTop;
   };
 
   render();
