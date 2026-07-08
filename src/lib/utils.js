@@ -1,3 +1,5 @@
+import { t } from './i18n.js';
+
 export function formatSize(b) { if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
 
 // ── In-app modal dialogs (replace native prompt/confirm/alert) ──
@@ -18,7 +20,7 @@ function _modalShell(title) {
   header.append(h3, closeBtn);
   const body = document.createElement('div'); body.className = 'dialog-body';
   const footer = document.createElement('div'); footer.className = 'dialog-footer';
-  const cancelBtn = document.createElement('button'); cancelBtn.className = 'btn-cancel'; cancelBtn.textContent = 'Cancel';
+  const cancelBtn = document.createElement('button'); cancelBtn.className = 'btn-cancel'; cancelBtn.textContent = t('Cancel');
   const okBtn = document.createElement('button'); okBtn.className = 'btn-create';
   footer.append(cancelBtn, okBtn);
   dialog.append(header, body, footer);
@@ -27,7 +29,7 @@ function _modalShell(title) {
   return { overlay, body, okBtn, cancelBtn, closeBtn };
 }
 
-export function showInputDialog({ title = 'Input', label = '', value = '', placeholder = '', confirmText = 'OK', multiline = false } = {}) {
+export function showInputDialog({ title = t('Input'), label = '', value = '', placeholder = '', confirmText = t('OK'), multiline = false } = {}) {
   return new Promise((resolve) => {
     const { overlay, body, okBtn, cancelBtn, closeBtn } = _modalShell(title);
     okBtn.textContent = confirmText;
@@ -54,7 +56,7 @@ export function showInputDialog({ title = 'Input', label = '', value = '', place
   });
 }
 
-export function showConfirmDialog({ title = 'Confirm', message = '', confirmText = 'OK', danger = false } = {}) {
+export function showConfirmDialog({ title = t('Confirm'), message = '', confirmText = t('OK'), danger = false } = {}) {
   return new Promise((resolve) => {
     const { overlay, body, okBtn, cancelBtn, closeBtn } = _modalShell(title);
     okBtn.textContent = confirmText;
