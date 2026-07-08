@@ -1,5 +1,6 @@
 import { escHtml, showInputDialog } from './utils.js';
 import { UI_ICONS } from './icons.js';
+import { t } from './i18n.js';
 
 /**
  * ChatStatusBar — status bar for chat mode sessions.
@@ -195,19 +196,19 @@ export class ChatStatusBar {
       const known = !!this._statusModel;
       const mismatch = this._modelMismatch();
       const title = mismatch
-        ? `Auto-fallback: the harness is serving ${this._servedModel} instead of ${this._statusModel} (capacity/overload). Click to re-pick.`
+        ? t('Auto-fallback: the harness is serving {served} instead of {model} (capacity/overload). Click to re-pick.', { served: this._servedModel, model: this._statusModel })
         : known
-          ? 'Model (as last reported by the CLI) — click to change'
-          : 'Model not reported by the CLI yet — click to set';
-      const label = mismatch ? `\u26a0 ${escHtml(this._servedModel)}` : (known ? escHtml(this._statusModel) : 'model: ?');
+          ? t('Model (as last reported by the CLI) — click to change')
+          : t('Model not reported by the CLI yet — click to set');
+      const label = mismatch ? `\u26a0 ${escHtml(this._servedModel)}` : (known ? escHtml(this._statusModel) : t('model: ?'));
       parts.push(`<span class="chat-status-model chat-status-clickable${known ? '' : ' chat-status-dim'}${mismatch ? ' chat-status-model-fallback' : ''}" title="${escHtml(title)}">${label}</span>`);
       const eKnown = !!this._statusEffort;
       const eTitle = eKnown
         ? (this._backend === 'codex'
-          ? 'Reasoning effort (as reported per turn) — click to change (applies from the next turn)'
-          : 'Reasoning effort (as last commanded — the CLI does not report it back) — click to change')
-        : 'Reasoning effort not set/reported — click to change';
-      parts.push(`<span class="chat-status-effort chat-status-clickable${eKnown ? '' : ' chat-status-dim'}" title="${escHtml(eTitle)}">${eKnown ? escHtml(this._statusEffort) : 'effort: ?'}</span>`);
+          ? t('Reasoning effort (as reported per turn) — click to change (applies from the next turn)')
+          : t('Reasoning effort (as last commanded — the CLI does not report it back) — click to change'))
+        : t('Reasoning effort not set/reported — click to change');
+      parts.push(`<span class="chat-status-effort chat-status-clickable${eKnown ? '' : ' chat-status-dim'}" title="${escHtml(eTitle)}">${eKnown ? escHtml(this._statusEffort) : t('effort: ?')}</span>`);
     }
 
     // Goal indicator — always rendered so there's a discoverable entry point
@@ -220,39 +221,39 @@ export class ChatStatusBar {
       // resumes only via explicit reactivation), budgetLimited (token budget)
       const statusIcon = status === 'active' ? UI_ICONS.play : status === 'paused' ? UI_ICONS.pause : status === 'blocked' ? UI_ICONS.block : status === 'complete' ? UI_ICONS.check
         : status === 'usagelimited' ? UI_ICONS.hourglass : status === 'budgetlimited' ? UI_ICONS.coin : '';
-      const statusHint = status === 'usagelimited' ? ' — paused by usage limit, click → Continue Goal to resume'
-        : status === 'budgetlimited' ? ' — token budget exhausted, click → Continue Goal to resume' : '';
+      const statusHint = status === 'usagelimited' ? t(' — paused by usage limit, click → Continue Goal to resume')
+        : status === 'budgetlimited' ? t(' — token budget exhausted, click → Continue Goal to resume') : '';
       const shortGoal = this._goal.length > 30 ? this._goal.substring(0, 30) + '…' : this._goal;
       parts.push(`<span class="chat-status-goal chat-status-clickable" title="${escHtml(this._goal + statusHint)}">${UI_ICONS.goal}${statusIcon ? ' ' + statusIcon : ''} <span class="chat-goal-timer">${elapsed}</span> ${escHtml(shortGoal)}</span>`);
     } else {
-      parts.push(`<span class="chat-status-goal chat-status-goal-empty chat-status-clickable" title="Set a goal \u2014 the agent keeps working until the condition is met">${UI_ICONS.goal}</span>`);
+      parts.push(`<span class="chat-status-goal chat-status-goal-empty chat-status-clickable" title="${escHtml(t('Set a goal \u2014 the agent keeps working until the condition is met'))}">${UI_ICONS.goal}</span>`);
     }
 
     // Permission mode (always show, click to change; Codex sandbox policy in tooltip)
     const permLabel = this._statusPermMode || 'default';
-    const permTitle = this._statusSandbox ? `Click to change permission mode \u00B7 sandbox: ${this._statusSandbox}` : 'Click to change permission mode';
+    const permTitle = this._statusSandbox ? t('Click to change permission mode \u00B7 sandbox: {sandbox}', { sandbox: this._statusSandbox }) : t('Click to change permission mode');
     parts.push(`<span class="chat-status-perm chat-status-clickable" title="${escHtml(permTitle)}">${UI_ICONS.lock} ${escHtml(permLabel)}</span>`);
 
     // Background tasks
     if (this._activeTasks?.size > 0) {
       const count = this._activeTasks.size;
       const tasks = [...this._activeTasks.values()];
-      const label = count === 1 ? tasks[0].description : `${count} tasks`;
+      const label = count === 1 ? tasks[0].description : t('{count} tasks', { count });
       parts.push(`<span class="chat-status-tasks chat-status-clickable" title="${escHtml(tasks.map(t => t.description).join(', '))}">${UI_ICONS.refresh} ${escHtml(label)}</span>`);
     }
 
     if (this._backend === 'codex' && this._allowReview) {
       const reviewClass = this._reviewEnabled ? 'chat-status-clickable' : 'chat-status-dim';
       const reviewTitle = this._reviewEnabled
-        ? 'Start Codex review'
-        : 'Review becomes available after the first completed assistant turn';
-      parts.push(`<span class="chat-status-review ${reviewClass}" title="${escHtml(reviewTitle)}">\u2713 Review</span>`);
+        ? t('Start Codex review')
+        : t('Review becomes available after the first completed assistant turn');
+      parts.push(`<span class="chat-status-review ${reviewClass}" title="${escHtml(reviewTitle)}">\u2713 ${escHtml(t('Review'))}</span>`);
     }
 
     // Context: used tokens without a fake percentage when the window is unknown
     if (!this._statusContextWindow && this._statusLastInputTokens) {
       const usedK = fmtK(this._statusLastInputTokens);
-      parts.push(`<span class="chat-status-ctx chat-status-dim" title="Context used last turn: ${escHtml(usedK)} tokens. The context window size was not reported by the CLI, so no percentage is shown.">${escHtml(usedK)}/?</span>`);
+      parts.push(`<span class="chat-status-ctx chat-status-dim" title="${escHtml(t('Context used last turn: {used} tokens. The context window size was not reported by the CLI, so no percentage is shown.', { used: usedK }))}">${escHtml(usedK)}/?</span>`);
     }
     // Context % with pie chart
     if (this._statusContextWindow && this._statusLastInputTokens) {
@@ -261,10 +262,13 @@ export class ChatStatusBar {
       const deg = Math.round(pct * 3.6);
       const usedK = fmtK(this._statusLastInputTokens);
       const totalK = fmtK(this._statusContextWindow);
-      let ctxTitle = `Context: ${usedK} of ${totalK} tokens`;
+      let ctxTitle = t('Context: {used} of {total} tokens', { used: usedK, total: totalK });
       if (this._statusTotalUsage) {
-        const t = this._statusTotalUsage;
-        ctxTitle += ` \u00B7 session total: ${fmtK(t.total_tokens || 0)} (in ${fmtK(t.input_tokens || 0)}, cached ${fmtK(t.cached_input_tokens || 0)}, out ${fmtK(t.output_tokens || 0)}${t.reasoning_output_tokens ? `, reasoning ${fmtK(t.reasoning_output_tokens)}` : ''})`;
+        const u = this._statusTotalUsage;
+        ctxTitle += ' \u00B7 ' + t('session total: {total} (in {inp}, cached {cached}, out {out}{reasoning})', {
+          total: fmtK(u.total_tokens || 0), inp: fmtK(u.input_tokens || 0), cached: fmtK(u.cached_input_tokens || 0),
+          out: fmtK(u.output_tokens || 0), reasoning: u.reasoning_output_tokens ? t(', reasoning {n}', { n: fmtK(u.reasoning_output_tokens) }) : '',
+        });
       }
       parts.push(`<span class="chat-status-ctx" title="${escHtml(ctxTitle)}"><span class="chat-status-ctx-pie" style="background:conic-gradient(${color} ${deg}deg, var(--bg-input) ${deg}deg)"></span> <span style="color:${color}">${pct}%</span><span class="chat-status-dim">[${usedK}/${totalK}]</span></span>`);
     }
@@ -332,7 +336,7 @@ export class ChatStatusBar {
         item.className = 'chat-status-dropdown-item chat-task-detail';
         const icon = task.type === 'agent' ? UI_ICONS.robot : UI_ICONS.tasks;
         let detail = `<div class="chat-task-title">${icon} ${escHtml(task.description)}</div>`;
-        if (task.lastTool) detail += `<div class="chat-status-dim">Running: ${escHtml(task.lastTool)}</div>`;
+        if (task.lastTool) detail += `<div class="chat-status-dim">${escHtml(t('Running: {tool}', { tool: task.lastTool }))}</div>`;
         item.innerHTML = detail;
         item.onclick = (ev) => {
           ev.stopPropagation(); dropdown.remove();
@@ -352,8 +356,8 @@ export class ChatStatusBar {
             const toolName = task.toolName || block?.toolName || 'Bash';
             const command = task.command || input.command || JSON.stringify(input, null, 2);
             const output = task.resultText || block?.output || '';
-            let text = `[${toolName}] ${task.description}\n\n--- Command ---\n${command}\n`;
-            if (output) text += `\n--- Output ---\n${output}\n`;
+            let text = `[${toolName}] ${task.description}\n\n--- ${t('Command')} ---\n${command}\n`;
+            if (output) text += `\n--- ${t('Output')} ---\n${output}\n`;
             this._openInTempEditor(text);
           }
         };
@@ -378,14 +382,14 @@ export class ChatStatusBar {
       const elapsed = document.createElement('div');
       elapsed.style.cssText = 'font-size:11px;color:var(--text-dim)';
       const statusLabel = this._goalStatus ? ` · ${this._goalStatus}` : '';
-      elapsed.textContent = `Pursued for ${this._fmtElapsed(this._goalElapsed || 0)}${statusLabel}`;
+      elapsed.textContent = t('Pursued for {time}', { time: this._fmtElapsed(this._goalElapsed || 0) }) + statusLabel;
       const actions = document.createElement('div');
       actions.style.cssText = 'display:flex;gap:6px';
       const isActive = (this._goalStatus || '').toLowerCase() === 'active';
       if (!isActive) {
         const continueBtn = document.createElement('button');
         continueBtn.className = 'chat-perm-btn chat-perm-allow';
-        continueBtn.textContent = 'Continue Goal';
+        continueBtn.textContent = t('Continue Goal');
         continueBtn.onclick = () => {
           dropdown.remove();
           this._ws.send({ type: 'set-goal', sessionId: this._sessionId, goal: this._goal });
@@ -394,7 +398,7 @@ export class ChatStatusBar {
       }
       const clearBtn = document.createElement('button');
       clearBtn.className = 'chat-perm-btn chat-perm-deny';
-      clearBtn.textContent = 'Clear';
+      clearBtn.textContent = t('Clear');
       clearBtn.onclick = () => { dropdown.remove(); this._ws.send({ type: 'set-goal', sessionId: this._sessionId, goal: null }); };
       actions.append(clearBtn);
       content.append(text, elapsed, actions);
@@ -413,11 +417,11 @@ export class ChatStatusBar {
       content.style.cssText = 'display:flex;flex-direction:column;gap:8px;padding:4px';
       const hint = document.createElement('div');
       hint.style.cssText = 'font-size:11px;color:var(--text-dim)';
-      hint.textContent = 'The agent keeps working until this condition is met:';
+      hint.textContent = t('The agent keeps working until this condition is met:');
       const input = document.createElement('textarea');
       input.className = 'chat-ask-custom';
       input.rows = 2;
-      input.placeholder = 'e.g. all tests in tests/ pass';
+      input.placeholder = t('e.g. all tests in tests/ pass');
       input.style.cssText = 'resize:vertical;font-size:12px;width:100%';
       const submit = () => {
         const goal = input.value.trim();
@@ -430,13 +434,13 @@ export class ChatStatusBar {
       actions.style.cssText = 'display:flex;gap:6px;align-items:center';
       const setBtn = document.createElement('button');
       setBtn.className = 'chat-perm-btn chat-perm-allow';
-      setBtn.textContent = 'Set Goal';
+      setBtn.textContent = t('Set Goal');
       setBtn.onclick = submit;
       actions.append(setBtn);
       const resumeLink = document.createElement('button');
       resumeLink.className = 'chat-perm-btn';
-      resumeLink.textContent = 'Resume previous';
-      resumeLink.title = 'Re-activate the last cleared/completed goal';
+      resumeLink.textContent = t('Resume previous');
+      resumeLink.title = t('Re-activate the last cleared/completed goal');
       resumeLink.onclick = () => { dropdown.remove(); this._ws.send({ type: 'set-goal', sessionId: this._sessionId, action: 'resume' }); };
       actions.append(resumeLink);
       content.append(hint, input, actions);
@@ -451,14 +455,14 @@ export class ChatStatusBar {
       const dropdown = showDropdown(reviewEl);
       if (!dropdown) return;
       const reviewOptions = [
-        { label: 'Working Tree', target: { type: 'uncommittedChanges' }, delivery: 'inline' },
-        { label: 'Working Tree (Detached)', target: { type: 'uncommittedChanges' }, delivery: 'detached' },
-        { label: 'Base Branch...', kind: 'baseBranch', delivery: 'inline' },
-        { label: 'Base Branch... (Detached)', kind: 'baseBranch', delivery: 'detached' },
-        { label: 'Commit...', kind: 'commit', delivery: 'inline' },
-        { label: 'Commit... (Detached)', kind: 'commit', delivery: 'detached' },
-        { label: 'Custom...', kind: 'custom', delivery: 'inline' },
-        { label: 'Custom... (Detached)', kind: 'custom', delivery: 'detached' },
+        { label: t('Working Tree'), target: { type: 'uncommittedChanges' }, delivery: 'inline' },
+        { label: t('Working Tree (Detached)'), target: { type: 'uncommittedChanges' }, delivery: 'detached' },
+        { label: t('Base Branch...'), kind: 'baseBranch', delivery: 'inline' },
+        { label: t('Base Branch... (Detached)'), kind: 'baseBranch', delivery: 'detached' },
+        { label: t('Commit...'), kind: 'commit', delivery: 'inline' },
+        { label: t('Commit... (Detached)'), kind: 'commit', delivery: 'detached' },
+        { label: t('Custom...'), kind: 'custom', delivery: 'inline' },
+        { label: t('Custom... (Detached)'), kind: 'custom', delivery: 'detached' },
       ];
       for (const option of reviewOptions) {
         const item = document.createElement('div');
@@ -469,15 +473,15 @@ export class ChatStatusBar {
           dropdown.remove();
           let target = option.target || null;
           if (option.kind === 'baseBranch') {
-            const branch = await showInputDialog({ title: 'Review vs Branch', label: 'Base branch to review against', value: 'main', confirmText: 'Review' });
+            const branch = await showInputDialog({ title: t('Review vs Branch'), label: t('Base branch to review against'), value: 'main', confirmText: t('Review') });
             if (!branch) return;
             target = { type: 'baseBranch', branch: branch.trim() };
           } else if (option.kind === 'commit') {
-            const sha = await showInputDialog({ title: 'Review Commit', label: 'Commit SHA to review', confirmText: 'Review' });
+            const sha = await showInputDialog({ title: t('Review Commit'), label: t('Commit SHA to review'), confirmText: t('Review') });
             if (!sha) return;
             target = { type: 'commit', sha: sha.trim() };
           } else if (option.kind === 'custom') {
-            const instructions = await showInputDialog({ title: 'Custom Review', label: 'Review instructions', confirmText: 'Review', multiline: true });
+            const instructions = await showInputDialog({ title: t('Custom Review'), label: t('Review instructions'), confirmText: t('Review'), multiline: true });
             if (!instructions) return;
             target = { type: 'custom', instructions: instructions.trim() };
           }
@@ -516,7 +520,7 @@ export class ChatStatusBar {
       };
       if (this._backend === 'codex') {
         addItems([
-          { value: '', label: 'Auto (model default)' },
+          { value: '', label: t('Auto (model default)') },
           { value: 'minimal', label: 'minimal' }, { value: 'low', label: 'low' },
           { value: 'medium', label: 'medium' }, { value: 'high', label: 'high' }, { value: 'xhigh', label: 'xhigh' },
         ]);
@@ -528,7 +532,7 @@ export class ChatStatusBar {
           // to the ladder; mirror that. The adapter wires it via the ultracode
           // settings key, not effortLevel. (Gated CLI-side on an xhigh-capable
           // model + dynamic workflows — a no-op if unsupported.)
-          addItems([{ value: '', label: 'Default (reset)' }, ...levels, { value: 'ultracode', label: 'ultracode (xhigh + workflows)' }]);
+          addItems([{ value: '', label: t('Default (reset)') }, ...levels, { value: 'ultracode', label: t('ultracode (xhigh + workflows)') }]);
         }).catch(() => { dropdown.remove(); });
       }
       return;
@@ -560,10 +564,10 @@ export class ChatStatusBar {
         }
         const custom = document.createElement('div');
         custom.className = 'chat-status-dropdown-item';
-        custom.textContent = 'Custom\u2026';
+        custom.textContent = t('Custom\u2026');
         custom.onclick = async (ev) => {
           ev.stopPropagation(); dropdown.remove();
-          const v = await showInputDialog({ title: 'Set model', label: 'Model ID or alias', confirmText: 'Set' });
+          const v = await showInputDialog({ title: t('Set model'), label: t('Model ID or alias'), confirmText: t('Set') });
           if (v && v.trim()) pick(v.trim());
         };
         dropdown.appendChild(custom);
