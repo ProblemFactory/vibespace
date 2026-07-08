@@ -94,6 +94,11 @@ const SETTINGS_SCHEMA = {
     description: t('Shake a window vigorously for ~1 second while dragging to turn off grid/edge snap for the rest of that drag (a mouse-only alternative to holding Alt)'),
     category: t('Toolbar & Layout'), liveApply: true,
   },
+  'layout.shakeBypassSeconds': {
+    type: 'number', default: 1, min: 0.3, max: 3, step: 0.1, label: t('Shake duration (seconds)'),
+    description: t('How long you must keep shaking before grid snap turns off. Lower = triggers faster (but easier to trigger by accident).'),
+    category: t('Toolbar & Layout'), liveApply: true,
+  },
 
   'taskbar.desktopPreviewRatio': {
     type: 'number', default: 70, min: 30, max: 100, step: 5,

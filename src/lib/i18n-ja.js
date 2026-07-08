@@ -896,4 +896,6 @@ export default {
   'Grid snap off': 'グリッドスナップ オフ',
   'Shake to bypass snap': 'シェイクでスナップ解除',
   'Shake a window vigorously for ~1 second while dragging to turn off grid/edge snap for the rest of that drag (a mouse-only alternative to holding Alt)': 'ドラッグ中にウィンドウを約1秒間激しく振ると、そのドラッグの残りの間だけグリッド/エッジスナップを無効化します（Alt キー長押しの代わりになるマウス操作）',
+  'Shake duration (seconds)': 'シェイク判定時間（秒）',
+  'How long you must keep shaking before grid snap turns off. Lower = triggers faster (but easier to trigger by accident).': 'グリッドスナップがオフになるまで振り続ける時間。小さいほど速く発動します（ただし誤発動しやすくなります）。',
 };

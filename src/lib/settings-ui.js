@@ -14,21 +14,26 @@ class SettingsUI {
   }
 
   open() {
-    this._showDialog();
-  }
-
-  _showDialog() {
-    // Remove any existing settings dialog
-    document.querySelectorAll('.settings-overlay').forEach(el => el.remove());
-
-    const overlay = document.createElement('div');
-    overlay.className = 'settings-overlay';
-    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) overlay.remove(); });
-
+    // Non-blocking: Settings is a normal same-level WINDOW (not a modal overlay)
+    // so you can tweak a setting and watch the effect on the workspace live.
+    // Singleton — focus an already-open settings window instead of stacking.
+    const existing = [...this.app.wm.windows.values()].find(w => w.type === 'settings');
+    if (existing) {
+      if (existing.isMinimized) this.app.wm.restore?.(existing.id);
+      this.app.wm.focusWindow(existing.id);
+      const inp = existing.content.querySelector('.settings-search');
+      inp?.focus();
+      return;
+    }
+    // No openSpec on purpose — Settings is transient (not persisted in the
+    // layout, not re-created on refresh or synced to other clients).
+    const winInfo = this.app.wm.createWindow({ title: t('Settings'), type: 'settings', width: 720, height: 560 });
     const dialog = document.createElement('div');
-    dialog.className = 'settings-dialog';
+    dialog.className = 'settings-dialog settings-window';
+    winInfo.content.appendChild(dialog);
 
-    // Header
+    // Header — the window titlebar provides the title + close; keep only the
+    // in-content Reset All action here.
     const header = document.createElement('div');
     header.className = 'settings-header';
     const title = document.createElement('h3');
@@ -40,11 +45,7 @@ class SettingsUI {
     resetAllBtn.textContent = t('Reset All');
     resetAllBtn.title = t('Reset all settings to defaults');
     resetAllBtn.onclick = async () => { if (await showConfirmDialog({ title: t('Reset Settings'), message: t('Reset all settings to defaults?'), confirmText: t('Reset'), danger: true })) { this.settings.resetAll(); this._renderContent(content, nav); } };
-    const closeBtn = document.createElement('button');
-    closeBtn.className = 'dialog-close';
-    closeBtn.textContent = '✕';
-    closeBtn.onclick = () => overlay.remove();
-    headerRight.append(resetAllBtn, closeBtn);
+    headerRight.append(resetAllBtn);
     header.append(title, headerRight);
 
     // Search
@@ -67,8 +68,6 @@ class SettingsUI {
     body.append(nav, content);
 
     dialog.append(header, searchWrap, body);
-    overlay.appendChild(dialog);
-    document.body.appendChild(overlay);
 
     this._renderContent(content, nav);
     searchInput.focus();

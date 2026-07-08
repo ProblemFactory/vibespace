@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.53.0] — 2026-07-08
+
+### Changed — Settings is now a non-blocking window
+The settings page opens as a normal, same-level workspace **window** instead
+of a blocking modal overlay — drag it aside, resize it, and change a setting
+while watching the effect on your workspace live. It's a singleton (opening it
+again focuses the existing window) and transient (not persisted in the layout,
+not restored on refresh, not synced to other clients).
+
+### Added
+- **Configurable shake duration**: how long you must shake a window before grid
+  snap turns off is now a setting (**Toolbar & Layout → Shake duration
+  (seconds)**, `layout.shakeBypassSeconds`, default 1s, range 0.3–3s). It's
+  re-read at the start of each drag, so changes apply immediately — pair it with
+  the now-windowed Settings to dial it in live.
+
 ## [2.52.0] — 2026-07-08
 
 ### Added — shake to bypass grid snap
