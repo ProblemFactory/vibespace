@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.55.3] — 2026-07-08
+
+### Fixed
+- The model auto-fallback chat notice ("⚠ Model auto-fallback: X → Y …") was
+  hardcoded English — it's built server-side in the normalizer, so client
+  t() never saw it. The structured from/to now ride the message and
+  renderSystemMsg localizes it client-side (en/zh/ja). The status-bar
+  fallback tooltip was already localized.
+
 ## [2.55.2] — 2026-07-08
 
 ### Added

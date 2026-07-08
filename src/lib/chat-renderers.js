@@ -345,6 +345,16 @@ class ChatRenderers {
    */
   renderSystemMsg(msg) {
     const text = msg.content?.[0]?.text || '';
+    // Model auto-fallback notice: the server bakes an English sentence (it
+    // can't know the per-device language), so localize it here from the
+    // structured from/to that ride the block.
+    if (msg.noticeKind === 'model-fallback' && msg.content?.[0]?.fallbackTo) {
+      const b = msg.content[0];
+      const el = document.createElement('div');
+      el.className = 'chat-msg chat-msg-system chat-system-notification';
+      el.innerHTML = `<span class="chat-system-text">${escHtml(t('⚠ Model auto-fallback: {from} → {to} (the harness switched models, e.g. capacity/overload; /model or the badge menu sets it back)', { from: b.fallbackFrom || '?', to: b.fallbackTo || '?' }))}</span>`;
+      return { el, sideEffect: null };
+    }
     // system.init — extract metadata, don't render
     if (msg.content?.[0]?.initData) {
       const d = msg.content[0].initData;

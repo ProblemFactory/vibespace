@@ -904,4 +904,5 @@ export default {
   'No group': '不加入任何组',
   'billing::Plan': '套餐',
   'Open working directory': '打开工作目录',
+  "⚠ Model auto-fallback: {from} → {to} (the harness switched models, e.g. capacity/overload; /model or the badge menu sets it back)": "⚠ 模型自动回退：{from} → {to}（harness 因容量/过载等切换了模型；用 /model 或徽章菜单可切回）",
 };

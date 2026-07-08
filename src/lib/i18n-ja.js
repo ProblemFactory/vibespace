@@ -904,4 +904,5 @@ export default {
   'No group': 'グループなし',
   'billing::Plan': 'プラン',
   'Open working directory': '作業ディレクトリを開く',
+  "⚠ Model auto-fallback: {from} → {to} (the harness switched models, e.g. capacity/overload; /model or the badge menu sets it back)": "⚠ モデルの自動フォールバック：{from} → {to}（容量/過負荷などでharnessがモデルを切り替えました。/model またはバッジメニューで戻せます）",
 };
