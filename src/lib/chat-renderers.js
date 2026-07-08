@@ -17,6 +17,9 @@ import { t } from './i18n.js';
 // which normalize to Bash/Terminal).
 const SHELL_TOOL_NAMES = new Set(['Bash', 'BashOutput', 'KillShell', 'Terminal']);
 const toolCardIcon = (name) => (name === 'Agent' ? UI_ICONS.robot : SHELL_TOOL_NAMES.has(name) ? UI_ICONS.terminal : UI_ICONS.wrench);
+// Model chip on Agent cards — shows the DECLARED model (tool input) at render;
+// _onSubagentMessage upgrades it to the model actually observed serving.
+const agentModelChip = (model) => (model ? `<span class="chat-agent-model">${escHtml(model)}</span>` : '');
 
 function normalizeUserInputAnswers(rawAnswers) {
   if (!rawAnswers || typeof rawAnswers !== 'object') return {};
@@ -237,7 +240,7 @@ class ChatRenderers {
         const label = `${UI_ICONS.hourglass} ${escHtml(block.toolName)} ${this.clickablePath(fp)}`;
         html = `<div class="chat-tool-pending"><span class="chat-tool-label">${label}</span><span class="chat-spinner"></span></div>`;
       } else {
-        const desc = isAgent && block.input?.description ? `${icon} Agent: ${escHtml(block.input.description)}` : `${icon} ${escHtml(block.toolName)}`;
+        const desc = isAgent && block.input?.description ? `${icon} Agent: ${escHtml(block.input.description)}${agentModelChip(block.input?.model)}` : `${icon} ${escHtml(block.toolName)}`;
         const inputStr = stripAnsi(typeof block.input === 'string' ? block.input : JSON.stringify(block.input, null, 2));
         const statusHtml = isPending
           ? `<div class="chat-tool-output-pending"><span class="chat-spinner"></span> ${t('running...')}</div>`
@@ -315,7 +318,7 @@ class ChatRenderers {
       const viewBtn = dataAttrs
         ? ` <button class="chat-agent-view-btn"${dataAttrs} data-desc="${escHtml(desc)}">${t('View Log')}</button>`
         : '';
-      return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.robot} Agent: ${escHtml(desc)}${viewBtn}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLine)}</summary><pre>${this.linkifyText(resultText)}</pre></details></div>`;
+      return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.robot} Agent: ${escHtml(desc)}${agentModelChip(block.input?.model)}${viewBtn}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLine)}</summary><pre>${this.linkifyText(resultText)}</pre></details></div>`;
     }
     if (block.toolName === 'Workflow') {
       // Dynamic workflow (ultracode). The tool_result is the launch ack, which
