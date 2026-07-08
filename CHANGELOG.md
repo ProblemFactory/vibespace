@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.54.2] — 2026-07-08
+
+### Fixed
+- Model / effort status-bar dropdowns sometimes "did nothing" on click (a
+  faint dark sliver, then nothing): the dropdown box was created EMPTY and
+  populated by an async fetch whose failure silently removed it. Now a
+  Loading… row shows immediately, and on fetch failure the dropdown falls
+  back to the client-side ladder (effort: low…max + ultracode; model: CLI
+  aliases + Custom…) instead of vanishing. Also guards against a
+  non-positioned popup container re-anchoring the dropdown off-screen.
+
 ## [2.54.1] — 2026-07-08
 
 ### Changed — injected context reframes the shared context folder
