@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.55.2] — 2026-07-08
+
+### Added
+- Session right-click menu: **Open working directory** — opens the file
+  explorer at the session's cwd (host-aware: a remote session's folder opens
+  on its host).
+
 ## [2.55.1] — 2026-07-08
 
 ### Fixed — i18n homograph collision ("Plan")

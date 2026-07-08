@@ -903,4 +903,5 @@ export default {
   '+ New session in a Task Group…': '＋ タスクグループで新規セッション…',
   'No group': 'グループなし',
   'billing::Plan': 'プラン',
+  'Open working directory': '作業ディレクトリを開く',
 };

@@ -903,4 +903,5 @@ export default {
   '+ New session in a Task Group…': '＋ 在任务组中新建会话…',
   'No group': '不加入任何组',
   'billing::Plan': '套餐',
+  'Open working directory': '打开工作目录',
 };

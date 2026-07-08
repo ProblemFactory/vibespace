@@ -710,6 +710,8 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     items.push({ separator: true });
     items.push({ label: tr('Copy session ID'), action: () => copyText(s.sessionId || '') });
     items.push({ label: tr('Copy path'), action: () => copyText(s.cwd || '') });
+    // Host-aware: a remote session's cwd opens in the explorer ON its host
+    if (s.cwd) items.push({ label: tr('Open working directory'), action: () => app.openFileExplorer(s.cwd, { host: s.host || undefined }) });
     if (s.webuiId) {
       items.push({ label: tr('Find window'), action: () => app.flashWindow(s.webuiId) });
       items.push({ label: tr('Go to window'), action: () => app.goToWindow(s.webuiId) });
