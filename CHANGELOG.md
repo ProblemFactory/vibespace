@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.54.1] — 2026-07-08
+
+### Changed — injected context reframes the shared context folder
+The per-turn Task Group injection now describes the context folder as the
+group's **shared memory between agents** (documents/records passed session ↔
+session), explicitly *not* a place to publish deliverables for the user — and
+instructs agents to proactively curate knowledge there when other sessions of
+the group will need it (conventions, gotchas, decisions with reasons,
+cross-role details — e.g. a dev session writing up technical specifics a
+compliance session depends on), preferring consolidation over piling up new
+files. Both local and remote (live-synced copy) variants updated.
+
 ## [2.54.0] — 2026-07-08
 
 ### Added — Task Group folders pinned in the New Session quick-fill chips
