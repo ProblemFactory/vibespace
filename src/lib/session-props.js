@@ -196,12 +196,30 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
         if (!stepList.isConnected) return;
         const todos = (d?.todos || []).filter(t => (t.content || t.step || '').trim());
         stepList.innerHTML = todos.length ? '' : '<div class="empty-hint" style="padding:2px 0">The agent hasn\'t kept a todo list</div>';
-        for (const t of todos) {
+        const mkStep = (t) => {
           const li = document.createElement('div');
           li.className = 'session-step ' + (t.status === 'completed' ? 'done' : t.status === 'in_progress' ? 'active' : '');
           li.textContent = (t.status === 'completed' ? '✓ ' : t.status === 'in_progress' ? '▸ ' : '○ ') + (t.content || t.step || '');
-          stepList.appendChild(li);
+          return li;
+        };
+        // Open work first; completed collapsed to the last 2 with an
+        // expandable "N more" row (long histories drowned the actionable steps).
+        const open = todos.filter(t => t.status !== 'completed');
+        const done = todos.filter(t => t.status === 'completed');
+        for (const t of open) stepList.appendChild(mkStep(t));
+        const hidden = done.slice(0, -2);
+        if (hidden.length) {
+          const toggle = document.createElement('div');
+          toggle.className = 'session-step session-step-more';
+          toggle.textContent = `✓ ${hidden.length} more completed…`;
+          toggle.onclick = () => {
+            const frag = document.createDocumentFragment();
+            for (const t of hidden) frag.appendChild(mkStep(t));
+            toggle.replaceWith(frag);
+          };
+          stepList.appendChild(toggle);
         }
+        for (const t of done.slice(-2)) stepList.appendChild(mkStep(t));
       }).catch(() => {});
   };
 
