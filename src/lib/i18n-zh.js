@@ -902,4 +902,5 @@ export default {
   'In a Task Group folder — {n} session(s) here': '位于任务组文件夹内——此处已有 {n} 个会话',
   '+ New session in a Task Group…': '＋ 在任务组中新建会话…',
   'No group': '不加入任何组',
+  'billing::Plan': '套餐',
 };

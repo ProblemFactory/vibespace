@@ -902,4 +902,5 @@ export default {
   'In a Task Group folder — {n} session(s) here': 'タスクグループのフォルダ内——ここに {n} 件のセッションがあります',
   '+ New session in a Task Group…': '＋ タスクグループで新規セッション…',
   'No group': 'グループなし',
+  'billing::Plan': 'プラン',
 };

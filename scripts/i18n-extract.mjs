@@ -12,6 +12,8 @@ const keys = new Set();
 // ── JS: t('...') / tr('...') with escaped-quote support (tr = the alias used
 // where a local `t` variable would shadow the import, e.g. sidebar cluster) ──
 const tRe = /\bt(?:r)?\(\s*(?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)")/g;
+// tc('ctx', 'str') — pgettext-style contextual keys, emitted as "ctx::str"
+const tcRe = /\btc\(\s*'((?:[^'\\]|\\.)*)'\s*,\s*'((?:[^'\\]|\\.)*)'/g;
 const walk = (dir) => {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name);
@@ -23,6 +25,10 @@ const walk = (dir) => {
         // Unescape JS string escapes (\' \" \\ \n … …)
         const key = JSON.parse('"' + raw.replace(/\\'/g, "'").replace(/"/g, '\\"') + '"');
         keys.add(key);
+      }
+      for (const m of src.matchAll(tcRe)) {
+        const un = (r) => JSON.parse('"' + r.replace(/\\'/g, "'").replace(/"/g, '\\"') + '"');
+        keys.add(un(m[1]) + '::' + un(m[2]));
       }
     }
   }
