@@ -1520,6 +1520,23 @@ class ChatView {
         else card.appendChild(statusEl);
       }
       const count = this._subagentCounts.get(parentToolUseId);
+      // Upgrade the header model chip to the model ACTUALLY serving this agent
+      // (subagent assistant messages carry message.model) — the render-time chip
+      // only knows the declared tool-input model, which may be absent/an alias.
+      const servedModel = msg.message?.model;
+      if (servedModel && !servedModel.startsWith('<')) {
+        let chip = card.querySelector('.chat-tool-label .chat-agent-model');
+        if (!chip) {
+          const lbl = card.querySelector('.chat-tool-label');
+          if (lbl) {
+            chip = document.createElement('span');
+            chip.className = 'chat-agent-model';
+            const btn = lbl.querySelector('.chat-agent-view-btn');
+            if (btn) btn.before(chip); else lbl.appendChild(chip);
+          }
+        }
+        if (chip && chip.textContent !== servedModel) chip.textContent = servedModel;
+      }
       // Detect activity from raw subagent message
       let activity = '';
       const c = msg.message?.content || msg.content;
