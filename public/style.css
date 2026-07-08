@@ -141,12 +141,16 @@ html, body {
 .session-todo-pill svg { width: 10px; height: 10px; display: block; }
 .session-detail-steps .session-detail-row { align-items: flex-start; }
 .session-steps-list { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
-.session-step { font-size: 10px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* flex-shrink:0 — inside the scrolling Properties list (max-height + flex column)
+   shrinkable rows compressed below line-height and the text overlapped */
+.session-step { font-size: 10px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; }
+.session-step-more { cursor: pointer; color: var(--text-dim); }
+.session-step-more:hover { color: var(--text-secondary); text-decoration: underline; }
 .session-step.done { color: var(--text-dim); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--text-dim) 50%, transparent); }
 .session-step.active { color: var(--text); font-weight: 600; }
 /* Status history timeline (expanded card) */
 .session-history-list { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
-.session-history-item { display: flex; align-items: center; gap: 5px; font-size: 10px; color: var(--text-secondary); min-width: 0; }
+.session-history-item { display: flex; align-items: center; gap: 5px; font-size: 10px; color: var(--text-secondary); min-width: 0; flex-shrink: 0; }
 .session-history-time { color: var(--text-dim); flex-shrink: 0; font-variant-numeric: tabular-nums; }
 .session-history-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--h-color, var(--text-dim)); flex-shrink: 0; }
 .session-history-state { font-weight: 600; color: var(--h-color, var(--text)); flex-shrink: 0; }
