@@ -336,7 +336,10 @@ class MessageManager {
       // { type:'fallback', from:{model}, to:{model} } — surface it as a notice.
       if (block.type === 'fallback' && (block.from?.model || block.to?.model)) {
         const from = block.from?.model || '?', to = block.to?.model || '?';
-        const msg = this._create({ role: 'system', content: [{ type: 'text', text: `⚠ Model auto-fallback: ${from} → ${to} (the harness switched models, e.g. capacity/overload; /model or the badge menu sets it back)` }], noticeKind: 'model-fallback' });
+        // Text kept as an English fallback; the CLIENT localizes it at render
+        // time (renderSystemMsg, keyed on noticeKind) since language is a
+        // per-device choice the server can't know. from/to ride the block.
+        const msg = this._create({ role: 'system', content: [{ type: 'text', text: `⚠ Model auto-fallback: ${from} → ${to} (the harness switched models, e.g. capacity/overload; /model or the badge menu sets it back)`, fallbackFrom: from, fallbackTo: to }], noticeKind: 'model-fallback' });
         if (emit) this._emit({ op: 'create', message: msg });
         continue;
       }
