@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.55.1] — 2026-07-08
+
+### Fixed — i18n homograph collision ("Plan")
+The usage popup labeled the Codex subscription plan "规划模式" — the
+English-string-as-key design collided the permission mode "Plan" with the
+billing "Plan". Added pgettext-style contexts: `tc(ctx, str)` looks up
+`ctx::str` and falls back to English (never the un-contexted translation).
+The usage popup now uses `tc('billing', 'Plan')` → 套餐 / プラン. Swept every
+short key used in multiple files for further homograph collisions — "Plan"
+was the only one.
+
 ## [2.55.0] — 2026-07-08
 
 ### Added — create a session for a Task Group from the flat Tasks view

@@ -39,6 +39,19 @@ export function t(str, params) {
   return s;
 }
 
+/**
+ * pgettext-style contextual translation — for English strings whose ONE
+ * spelling has SEVERAL meanings ("Plan" = the permission mode vs. the
+ * subscription plan). Dictionary key is `${ctx}::${str}`; fallback is the
+ * plain ENGLISH string, deliberately NOT the un-contexted translation
+ * (that would reintroduce the collision this exists to avoid).
+ */
+export function tc(ctx, str, params) {
+  let s = (_dict && _dict[ctx + '::' + str]) || str;
+  if (params) s = s.replace(/\{(\w+)\}/g, (m, k) => (params[k] !== undefined ? String(params[k]) : m));
+  return s;
+}
+
 export function setLang(lang) {
   if (!hasDom) return;
   if (lang === 'auto') localStorage.removeItem(STORAGE_KEY);

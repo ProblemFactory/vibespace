@@ -11,7 +11,7 @@ import { LayoutManager } from './layout.js';
 import { ChatView } from './chat-view.js';
 import { Resizer } from './resizer.js';
 import { createPopover, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog } from './utils.js';
-import { t, getLangPref, setLang } from './i18n.js';
+import { t, tc, getLangPref, setLang } from './i18n.js';
 import { MobileNav } from './mobile-nav.js';
 import { setupDirAutocomplete } from './autocomplete.js';
 import { getAvailableFonts } from './terminal.js';
@@ -1642,7 +1642,7 @@ class App {
         <div class="usage-session-stats">
           <span class="usage-stat">${t('{pct}% used', { pct: pct7d })}</span>
           <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(codex.sevenDay?.resetsAt)}</span>
-          ${codex.planType ? `<span class="usage-stat"><span class="usage-stat-label">${t('Plan')}</span> ${escHtml(codex.planType)}</span>` : ''}
+          ${codex.planType ? `<span class="usage-stat"><span class="usage-stat-label">${tc('billing', 'Plan')}</span> ${escHtml(codex.planType)}</span>` : ''}
         </div>
       </div>
       <div class="usage-updated">${t('Updated {ago}', { ago: agoText(codex.fetchedAt) })}</div>`);
