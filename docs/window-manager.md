@@ -52,6 +52,9 @@ When a window snaps to a grid cell or edge zone, its original size is saved. If 
 ### Bypass snap
 Hold **Alt** while dragging to bypass all snap behavior.
 
+### Shake to bypass snap
+If you don't want to reach for the keyboard, **shake the window vigorously for about a second** while dragging — a "Grid snap off" badge appears next to the cursor and the window outlines with a dashed border. Snap (grid and edge) stays off for the rest of that drag; drop the window wherever you like. It re-enables automatically on the next drag. The gesture requires *sustained* shaking (a couple of accidental jiggles won't trigger it). Toggle the feature with **Settings → Toolbar & Layout → Shake to bypass snap** (on by default).
+
 ### Shift+drag cell range
 While dragging a window title bar in grid mode, press and hold **Shift** to activate rectangular cell selection. The selected range highlights in blue — release to span the window across all selected cells.
 

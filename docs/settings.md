@@ -81,6 +81,7 @@ Overrides persist in the layout auto-save.
 | `taskbar.showWindowCount` | boolean | `true` | Show the "N windows" counter/list |
 | `layout.enableDragSnap` | boolean | `true` | Snap windows to grid cells or screen edges when dragging |
 | `layout.enableShiftDragSelection` | boolean | `true` | Hold Shift while dragging to select a range of grid cells |
+| `layout.shakeBypassSnap` | boolean | `true` | Shake a window vigorously for ~1s while dragging to turn off grid/edge snap for the rest of that drag |
 | `taskbar.desktopPreviewRatio` | number | `70` | Desktop preview size as % of taskbar height (30-100) |
 | `chrome.arrangement` | json | `null` | Which bar hosts each movable element, in what order — written by Customize-mode drag |
 | `chrome.zoneAlign` | json | `null` | Per-area alignment: window items left/center (Win11-style), toolbar center left/center/right, tray left/right end — written by Customize-mode chips |

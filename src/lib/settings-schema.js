@@ -89,6 +89,11 @@ const SETTINGS_SCHEMA = {
     description: t('Hold Shift while dragging title bar to select a range of grid cells'),
     category: t('Toolbar & Layout'), liveApply: true,
   },
+  'layout.shakeBypassSnap': {
+    type: 'boolean', default: true, label: t('Shake to bypass snap'),
+    description: t('Shake a window vigorously for ~1 second while dragging to turn off grid/edge snap for the rest of that drag (a mouse-only alternative to holding Alt)'),
+    category: t('Toolbar & Layout'), liveApply: true,
+  },
 
   'taskbar.desktopPreviewRatio': {
     type: 'number', default: 70, min: 30, max: 100, step: 5,

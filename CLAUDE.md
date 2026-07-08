@@ -738,6 +738,7 @@ Server → Client: `created`, `output`, `msg` (normalized: op=create/edit/meta),
 - Drag threshold (5px): prevents accidental snap when clicking title bar to focus
 - Pre-snap size memory: snapping saves original window size, dragging out of snap restores it (persisted in layout)
 - Freeform mode (no grid) + custom MxN grid with snap-to-cell (drag + resize snap, Alt to bypass)
+- Shake-to-bypass-snap: shaking a window vigorously for ~1s mid-drag latches "grid/edge snap off" for the rest of that drag (mouse-only alternative to holding Alt; cursor-following "Grid snap off" badge + dashed window outline; per-drag, re-enables next drag; `window.js` titlebar-drag path only — reversal-count detector, `layout.shakeBypassSnap` setting, default on)
 - Built-in presets: maximize, 2-col, 2-row, quad, 3-col (all via grid mechanism)
 - Custom grid presets: + button to add, right-click to remove, auto SVG icons, persisted
 - Grid overflow: round-robin distribution when windows > cells (`i % totalCells`)

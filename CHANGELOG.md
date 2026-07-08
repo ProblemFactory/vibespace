@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.52.0] — 2026-07-08
+
+### Added — shake to bypass grid snap
+Shaking a window vigorously for about a second while dragging now latches
+"grid/edge snap off" for the rest of that drag — a mouse-only alternative to
+holding **Alt**. A "Grid snap off" badge follows the cursor and the window
+gets a dashed outline while active; it re-enables automatically on the next
+drag. Detected by counting per-frame direction reversals (≥3 in a 500ms
+sliding window = vigorous) sustained for ~1s, so a couple of accidental
+jiggles never trigger it. New setting **Toolbar & Layout → Shake to bypass
+snap** (`layout.shakeBypassSnap`, default on). Scoped to the title-bar move
+drag (not resize). Fully i18n'd (en/zh/ja).
+
 ## [2.51.0] — 2026-07-08
 
 ### Added — full-UI i18n (English / 中文 / 日本語)
