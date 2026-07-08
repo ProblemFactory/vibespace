@@ -1381,7 +1381,7 @@ class App {
         const choices = [['auto', t('Auto (system)')], ['en', 'English'], ['zh', '\u4e2d\u6587'], ['ja', '\u65e5\u672c\u8a9e']];
         showContextMenu(e.clientX, e.clientY, choices.map(([code, label]) => ({
           label: (pref === code ? '\u2713 ' : '\u2007 ') + label,
-          onClick: () => setLang(code),
+          action: () => setLang(code), // showContextMenu items use .action, not .onClick
         })));
       };
       menu.append(langItem);
