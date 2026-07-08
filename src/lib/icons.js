@@ -37,7 +37,10 @@ export const FILE_ICONS = {
 // ── UI icons (used across chat, session cards, toolbar, etc.) ──
 export const UI_ICONS = {
   // Tool cards
-  wrench:    _s('<path d="M10.5 1.5L14 5l-1.5 1.5L9 3M4 7l-2.5 2.5a1.4 1.4 0 002 2L6 9M7 4l5 5"/>'),
+  // Classic open-end wrench (Lucide 'wrench' scaled to 16) — the old path
+  // (diagonal shaft + angular head) read as an eyedropper/color picker.
+  wrench:    _s('<path d="M9.8 4.2a.67.67 0 000 .93l1.07 1.07a.67.67 0 00.93 0l2.51-2.51a4 4 0 01-5.29 5.29l-4.61 4.61a1.41 1.41 0 01-2-2l4.61-4.61a4 4 0 015.29-5.29L9.8 4.2z"/>'),
+  terminal:  _s('<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M4.5 7l2 2-2 2M8.5 11h3"/>'),
   robot:     _s('<rect x="3" y="4" width="10" height="9" rx="2"/><circle cx="6" cy="8" r="1" fill="currentColor" stroke="none"/><circle cx="10" cy="8" r="1" fill="currentColor" stroke="none"/><path d="M8 1v3M4 7h8"/><path d="M1 8v3M15 8v3"/>'),
   workflow:  _s('<circle cx="3" cy="8" r="2"/><circle cx="13" cy="3.5" r="1.8"/><circle cx="13" cy="8" r="1.8"/><circle cx="13" cy="12.5" r="1.8"/><path d="M5 8h2M11.2 3.5H8a1 1 0 00-1 1v6a1 1 0 001 1h3.2M7 8h4"/>'),
   lock:      _s('<rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5 7V5a3 3 0 016 0v2"/>'),
