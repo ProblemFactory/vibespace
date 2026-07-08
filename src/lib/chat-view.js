@@ -1505,13 +1505,18 @@ class ChatView {
     // Update pending Agent card status
     const pending = this._messageList.querySelector(`[data-tool-id="${parentToolUseId}"]`);
     if (pending) {
-      let statusEl = pending.querySelector('.chat-agent-live-status');
+      // [data-tool-id] is the .chat-msg WRAPPER — the visual card is the inner
+      // .chat-tool-use. Background agents complete the tool call instantly (no
+      // .chat-tool-output-pending), so appending to the wrapper drew the status
+      // line OUTSIDE the card. Always anchor inside the card.
+      const card = pending.querySelector('.chat-tool-use') || pending;
+      let statusEl = card.querySelector('.chat-agent-live-status');
       if (!statusEl) {
         statusEl = document.createElement('div');
         statusEl.className = 'chat-agent-live-status';
-        const outputPending = pending.querySelector('.chat-tool-output-pending');
+        const outputPending = card.querySelector('.chat-tool-output-pending');
         if (outputPending) outputPending.before(statusEl);
-        else pending.appendChild(statusEl);
+        else card.appendChild(statusEl);
       }
       const count = this._subagentCounts.get(parentToolUseId);
       // Detect activity from raw subagent message
@@ -1528,7 +1533,11 @@ class ChatView {
       const desc = toolMsg?.content?.[0]?.input?.description || '';
       const threadId = toolMsg?.taskInfo?.receiverThreadIds?.[0] || '';
       const threadAttr = threadId ? ` data-thread-id="${escHtml(threadId)}"` : ` data-parent-tool-id="${escHtml(parentToolUseId)}"`;
-      statusEl.innerHTML = `<span class="chat-agent-live-count">${count} messages${activity ? ' \u2022 ' + escHtml(activity) : ''}</span> <button class="chat-agent-view-btn"${threadAttr} data-desc="${escHtml(desc)}">View Log</button>`;
+      // A completed Agent card already has a View Log button in its header \u2014
+      // the live status line only adds one when the card has none (pending).
+      const hasHeaderBtn = !!card.querySelector('.chat-tool-label .chat-agent-view-btn');
+      const btnHtml = hasHeaderBtn ? '' : ` <button class="chat-agent-view-btn"${threadAttr} data-desc="${escHtml(desc)}">View Log</button>`;
+      statusEl.innerHTML = `<span class="chat-agent-live-count">${count} messages${activity ? ' \u2022 ' + escHtml(activity) : ''}</span>${btnHtml}`;
     }
   }
 
