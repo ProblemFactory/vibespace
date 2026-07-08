@@ -1205,12 +1205,13 @@ const api = process.env.VIBESPACE_API;
 const token = process.env.VIBESPACE_SESSION_TOKEN;
 if (!api || !token) { console.error('vibespace-status: not running inside a VibeSpace session (missing env)'); process.exit(2); }
 const args = process.argv.slice(2);
+if (args[0] === 'set') args.shift(); // tolerated alias: "vibespace-status set working" — agents guess it
 const cmd = args[0];
 const opt = (name) => { const i = args.indexOf('--' + name); return i >= 0 ? args[i + 1] : undefined; };
 const STATES = ['working', 'needs-input', 'blocked', 'review', 'done'];
 const USAGE = [
   'usage — report THIS Task\\'s (this session\\'s) own state; done = this work is finished:',
-  '  vibespace-status <working|needs-input|blocked|review|done> [--urgency low|normal|high|urgent] [--reason "why"]',
+  '  vibespace-status <working|needs-input|blocked|review|done> ["why"] [--urgency low|normal|high|urgent] [--reason "why"]',
   '  vibespace-status clear      remove the indicator',
   '  vibespace-status show       print the current indicator',
 ].join('\\n');
@@ -1233,7 +1234,11 @@ async function main() {
     console.error('vibespace-status: unknown state "' + cmd + '"\\n  valid states: ' + STATES.join('/') + '\\n' + USAGE);
     process.exit(1);
   }
-  await post({ state: cmd, urgency: opt('urgency'), reason: opt('reason') });
+  // A bare quoted string after the state is a reason too — agents pass it
+  // positionally at least as often as via --reason; dropping it silently
+  // meant boards showed states with no explanation.
+  const posReason = args[1] && !args[1].startsWith('--') ? args[1] : undefined;
+  await post({ state: cmd, urgency: opt('urgency'), reason: opt('reason') ?? posReason });
   console.log('status set: ' + cmd + (opt('urgency') ? ' / ' + opt('urgency') : ''));
 }
 main().catch((e) => { console.error('vibespace-status:', e.message); process.exit(1); });
