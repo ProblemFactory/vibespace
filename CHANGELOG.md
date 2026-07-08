@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.51.0] — 2026-07-08
+
+### Added — full-UI i18n (English / 中文 / 日本語)
+The entire human-facing UI now switches language: ⚙ menu → **Language**
+(Auto / English / 中文 / 日本語; per-device, stored in localStorage — a
+Japanese phone and an English desktop can share one server). Gettext-style
+design: the English string IS the dictionary key (`t('New Session')`),
+missing entries fall back to English, switching reloads the page.
+`src/lib/i18n.js` runtime + `i18n-zh.js`/`i18n-ja.js` dictionaries (869
+entries each, generated from 880 extracted keys — brands/model ids stay
+English by design). Covered surfaces: index.html chrome (data-i18n), sidebar
++ session cards + context menus, app dialogs (New Session / Manage Agents /
+accounts wizard / backup / onboarding / usage popup), Task Group detail,
+Session Properties, chat chrome (tool cards / permissions / search /
+minimap / status bar / input), full settings schema + dialog. Agent-facing
+injected context and docs remain English. `scripts/i18n-extract.mjs`
+extracts all keys for dictionary audits (key exactness, {param} and HTML-tag
+preservation checks).
+
+### Added
+- **Agent tool cards show the model**: a chip next to the description —
+  declared `input.model` at render, upgraded live to the actually-serving
+  `message.model` from the subagent stream.
+
+### Fixed
+- Subagent live status ("N messages · View Log") rendered OUTSIDE the tool
+  card for background agents (instant tool completion skipped the pending
+  anchor), and completed cards got a duplicate View Log button.
+- The generic tool-card "wrench" icon read as an eyedropper/color picker —
+  redrawn as a real open-end wrench; Bash/shell tools (incl. Codex
+  exec_command) now use a dedicated terminal icon instead.
+- Task Group detail window no longer scrolls back to the top after every
+  edit (color, toggles) — scroll position is preserved across re-renders.
+- Session Properties "Agent steps": rows compressed and overlapped inside
+  the 180px scroller (flex-shrink) — fixed; open steps now list first and
+  completed ones collapse to the last 2 with an expandable "N more" row.
+- `vibespace-status` CLI tolerates the `set` prefix alias and a positional
+  reason argument (both observed agent misuses; the reason was silently
+  dropped before).
+
 ## [2.50.0] — 2026-07-08
 
 ### Added — mobile flat Task View

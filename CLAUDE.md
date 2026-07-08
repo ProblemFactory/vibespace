@@ -120,6 +120,8 @@ src/
     taskbar.js         — Taskbar rendering + window list popup (extracted from app.js)
     browser-window.js  — Embedded browser window (iframe + URL bar + proxy toggle)
     utils.js           — Shared utilities (escHtml, createPopover, showContextMenu, fetchJson, copyText, StateSync)
+    i18n.js            — i18n runtime: t(str, params?) with ENGLISH-STRING-AS-KEY, per-device lang (localStorage vibespace.lang), applyI18nToDom for index.html data-i18n/-attr; reload-on-switch (see §16)
+    i18n-zh.js / i18n-ja.js — dictionaries ({'English': '翻译'}, 869 entries each; missing key = English fallback)
     autocomplete.js    — Shared directory autocomplete (setupDirAutocomplete)
     settings.js        — SettingsManager (sparse storage, server persist, WS sync, event listeners)
     settings-schema.js — Settings schema (all options with types, defaults, categories)
@@ -190,6 +192,7 @@ docs/
 | **Command mode** | `src/lib/command-mode.js` | Ctrl+\ prefix key, tmux-style window commands |
 | **Embedded browser** | `src/lib/browser-window.js` | iframe + URL bar + proxy toggle |
 | **Shared utilities** | `src/lib/utils.js` | escHtml, createPopover, showContextMenu, fetchJson, copyText, StateSync |
+| **i18n / translations** | `src/lib/i18n.js` + `i18n-zh.js`/`i18n-ja.js` + `scripts/i18n-extract.mjs` | t() wrapping rules + dictionary workflow in §16 — read it BEFORE adding UI strings |
 | **CSS / visual styling** | `public/style.css` + `public/chat.css` + `public/viewers.css` | Split by component area |
 | **HTML structure** | `public/index.html` | Sidebar, toolbar, workspace, dialogs |
 
@@ -559,6 +562,18 @@ Read/Write tool output uses highlight.js for syntax highlighting with line numbe
 - **Minification**: esbuild `--minify` flag (2.5MB → 1.4MB)
 - **Gzip compression**: `compression` middleware on all Express responses (1.4MB → ~420KB over the wire, 83% total reduction)
 - **Cache-busting**: `index.html` is served by a route (not static) that injects `?v=<mtime>` onto every local `js`/`css` asset URL and sets `Cache-Control: no-cache`, so a changed bundle/CSS always gets a fresh fetch. Browsers serve unversioned `<script>`/`<link>` from memory cache on a soft reload without revalidating — users were stuck on a stale bundle after an update until a hard refresh; versioning the URL fixes that permanently. Other static files keep `maxAge=0` + etag.
+
+### 16. Full-UI i18n (en/zh/ja, 2.51.0)
+**Design**: gettext-style — the ENGLISH STRING IS THE KEY: `t('New Session')`, `t('Delete "{name}"?', {name})` (`{k}` interpolation). Missing dictionary entry → English fallback, so partial coverage never breaks. Language is **PER-DEVICE** (localStorage `vibespace.lang`: auto|en|zh|ja; auto = navigator.language) — deliberately NOT a synced setting (phone-ja + desktop-en share one server). Switcher: ⚙ gs-menu → Language → `setLang()` → `location.reload()` — NO live re-render machinery, which is what makes `t()` safe at module top-level (settings-schema wraps labels at definition time). index.html static text: `data-i18n` (whole textContent = key) / `data-i18n-attr="title,placeholder"`; one `applyI18nToDom()` pass in client.js BEFORE `new App()`.
+
+**Rules when adding/changing UI strings (do not regress):**
+- Wrap ONLY human-visible chrome with `t()`. NEVER wrap: protocol values (permission modes, effort levels, state enums, tool names), strings COMPARED or STORED anywhere (fork-name uniqueness, filter values in localStorage, category strings are OK only because BOTH match sides wrap identically), session/account/task names (user data), parse-regex literals in chat-renderers (`Set model to`, `Run ID:`…), brands and model ids. Agent-facing injected content (renderContext, CLI usage text) stays English.
+- Keep `escHtml()` AROUND `t()`. Keys keep leading spaces/punctuation verbatim (`' (folder)'`, `' — Properties'`).
+- **The sidebar cluster imports `t as tr`** (a local `t` is pervasively a task variable there); everywhere else plain `t`. Watch for `const t = …` shadowing before wrapping inside a scope (bit 3 times: session-props history/groups loops, chat-status-bar usage tooltip — locals renamed `tm`/`g`/`u`).
+- Counters keep the English plural as key (`t('{n} sessions', {n})`) — zh/ja don't inflect; "1 sessions" in English is accepted.
+- `Fork &amp; Send` in index.html decodes to `Fork & Send` at runtime — dictionary keys are the DECODED text.
+- **Dictionary workflow**: `node scripts/i18n-extract.mjs` prints every key (t()/tr() literals + index.html data-i18n/-attr, JSON-encoded one per line). Add zh+ja entries for new keys; audit invariants (script-checkable): dict keys ⊆ extracted keys, every `{param}` and HTML tag in a key appears in its translation, zh/ja parity. ~11 keys are deliberately untranslated (brands, model-spec labels, `[CMD]`).
+- **Verification gotcha**: esbuild `--minify` emits non-ASCII as UPPERCASE `\uXXXX` — grepping the bundle for raw CJK (or lowercase escapes) finds nothing and looks like the dicts were tree-shaken. They weren't.
 
 ## API Reference
 

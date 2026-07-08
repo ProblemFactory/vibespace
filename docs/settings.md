@@ -28,6 +28,15 @@ The toolbar gear opens a popover with:
 
 Changes apply immediately to all terminals that don't have per-terminal overrides.
 
+## Language (English / 中文 / 日本語)
+
+The ⚙ menu has a **Language** entry: Auto (follows your browser/system), English,
+中文, or 日本語. The choice is **per device** (stored in this browser, not synced) —
+your phone can run in Japanese while your desktop stays in English against the
+same server. Switching reloads the page. Untranslated strings fall back to
+English automatically. Agent-facing content (injected task context, CLI help
+text) intentionally stays English.
+
 ## Backend Defaults
 
 The full settings dialog has separate **Claude** and **Codex** sections. These defaults are applied when:
