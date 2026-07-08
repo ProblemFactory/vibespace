@@ -181,7 +181,7 @@ Click **"+ New Task Group"** on the board (opens the detail window), or "+ New t
 
 ### New session in a Task Group
 
-The **+** button on a group header (or right-click → "New session in this task…") opens the normal New Session dialog **pre-filled**: the group pre-selected in the **Task** dropdown and the working directory set to the group's first auto-include folder — you confirm every parameter as usual. The Task dropdown is also available when creating a session from anywhere else. The created session is tagged to the group automatically; membership is otherwise **live-derived** server-side (there is no `VIBESPACE_TASK_ID` env — a fresh session records `_initialGroupId` only to cover the window before the tag lands).
+The **+** button on a group header (or right-click → "New session in this task…") opens the normal New Session dialog **pre-filled**: the group pre-selected in the **Task** dropdown and the working directory set to the group's first auto-include folder — you confirm every parameter as usual. With a group selected, the quick-fill chips under the Working Directory input **pin the group's folders first** (marked with the group's color dot) — and for folders with subfolders included, nested folders that already contain sessions are suggested too (e.g. group folder `/a` plus sessions at `/a/too` ⇒ chips for both `/a` and `/a/too`, session-count in the tooltip). The Task dropdown is also available when creating a session from anywhere else. The created session is tagged to the group automatically; membership is otherwise **live-derived** server-side (there is no `VIBESPACE_TASK_ID` env — a fresh session records `_initialGroupId` only to cover the window before the tag lands).
 
 ### Tagging sessions (many-to-many)
 

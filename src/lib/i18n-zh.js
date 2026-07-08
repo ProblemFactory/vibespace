@@ -898,4 +898,6 @@ export default {
   'Shake a window vigorously for ~1 second while dragging to turn off grid/edge snap for the rest of that drag (a mouse-only alternative to holding Alt)': '拖动时剧烈摇晃窗口约 1 秒，即可在本次拖动的剩余过程中关闭网格/边缘吸附（无需键盘，相当于按住 Alt 的替代方式）',
   'Shake duration (seconds)': '摇晃触发时长（秒）',
   'How long you must keep shaking before grid snap turns off. Lower = triggers faster (but easier to trigger by accident).': '需要持续摇晃多久才关闭网格吸附。数值越小触发越快（但也更容易误触发）。',
+  'Task Group folder ({name})': '任务组文件夹（{name}）',
+  'In a Task Group folder — {n} session(s) here': '位于任务组文件夹内——此处已有 {n} 个会话',
 };

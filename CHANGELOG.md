@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.54.0] — 2026-07-08
+
+### Added — Task Group folders pinned in the New Session quick-fill chips
+When a Task Group is selected in the New Session dialog, the click-to-fill
+directory chips under Working Directory now **pin the group's linked folders
+first**, marked with the group's color dot. For folders with "subfolders"
+enabled, nested folders that **already contain sessions** are suggested too —
+group folder `/a` plus sessions at `/a/too` yields chips for both `/a` and
+`/a/too` (tooltip shows the session count; symlinked checkouts match via the
+real path). Chips re-render when you change the Task dropdown. (This is the
+chip row — distinct from the autocomplete dropdown, which already floated
+group folders.)
+
+### Fixed
+- Task Group detail: Activity log entries now have a subtle divider between
+  them (multi-line notes visually ran together), and rows can no longer
+  compress/overlap inside the scroller.
+
 ## [2.53.0] — 2026-07-08
 
 ### Changed — Settings is now a non-blocking window

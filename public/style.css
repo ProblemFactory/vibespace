@@ -1486,6 +1486,18 @@ html, body {
   direction: rtl; text-align: left; /* front-truncate: keep the path's tail visible */
 }
 .cwd-recent-chip:hover { border-color: var(--accent); color: var(--text); }
+/* Task-Group folder chips — pinned first, marked with the group's color dot.
+   ltr flex wrapper (the color dot must stay leftmost); the inner path span
+   keeps the rtl front-truncation trick. */
+.cwd-task-chip {
+  direction: ltr; display: inline-flex; align-items: center; gap: 5px;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--text);
+}
+.cwd-task-chip .cwd-chip-path {
+  direction: rtl; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+}
 
 /* ── Chrome position customization (taskbar.position / sidebar.position) ── */
 /* Taskbar docked to the top: reorder the main-wrapper flex column (taskbar,
@@ -2160,8 +2172,13 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 .task-detail-plan-item.done span { text-decoration: line-through; color: var(--text-dim); }
 .task-detail-x { background: none; border: none; color: var(--red, #e55); cursor: pointer; font-size: 12px; padding: 0 4px; flex-shrink: 0; opacity: 0.6; }
 .task-detail-x:hover { opacity: 1; }
-.task-detail-progress { max-height: 140px; overflow-y: auto; display: flex; flex-direction: column; gap: 3px; }
-.task-detail-progress-item { font-size: 11px; color: var(--text-secondary); line-height: 1.4; }
+.task-detail-progress { max-height: 140px; overflow-y: auto; display: flex; flex-direction: column; }
+/* Entries are multi-line notes — without a divider they visually run together */
+.task-detail-progress-item {
+  font-size: 11px; color: var(--text-secondary); line-height: 1.4; flex-shrink: 0;
+  padding: 4px 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+.task-detail-progress-item:last-child { border-bottom: none; }
 .task-detail-progress-time { color: var(--text-dim); font-size: 10px; margin-right: 6px; }
 .task-detail-sessions { display: flex; flex-direction: column; gap: 2px; }
 .task-detail-session { display: flex; align-items: center; gap: 6px; padding: 2px 0; min-width: 0; }
