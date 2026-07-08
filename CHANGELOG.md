@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.54.3] — 2026-07-08
+
+### Fixed
+- Path chips showed the `~` at the END (`/workspace/vibespace~`): the rtl
+  front-truncation trick reorders leading bidi-neutral characters to the
+  visual end. Added the LTR-mark anchor (same as session cards) to the New
+  Session cwd chips, Task-Group chips, mount paths, and the Ctrl+K palette
+  paths.
+
 ## [2.54.2] — 2026-07-08
 
 ### Fixed

@@ -1486,6 +1486,10 @@ html, body {
   direction: rtl; text-align: left; /* front-truncate: keep the path's tail visible */
 }
 .cwd-recent-chip:hover { border-color: var(--accent); color: var(--text); }
+/* LTR mark: under direction:rtl the leading '~' (bidi-neutral) is reordered to
+   the visual END ("/foo/bar~") — anchor the run LTR so it reads normally while
+   still truncating on the left. Same trick as .session-card-cwd. */
+.cwd-recent-chip::before { content: '\200e'; }
 /* Task-Group folder chips — pinned first, marked with the group's color dot.
    ltr flex wrapper (the color dot must stay leftmost); the inner path span
    keeps the rtl front-truncation trick. */
@@ -1498,6 +1502,9 @@ html, body {
 .cwd-task-chip .cwd-chip-path {
   direction: rtl; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
 }
+.cwd-task-chip .cwd-chip-path::before { content: '\200e'; }
+/* the chip itself is ltr flex (dot leftmost) — the ::before LRM belongs on the inner path span, not the button */
+.cwd-task-chip.cwd-recent-chip::before { content: none; }
 
 /* ── Chrome position customization (taskbar.position / sidebar.position) ── */
 /* Taskbar docked to the top: reorder the main-wrapper flex column (taskbar,
@@ -1880,6 +1887,7 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
   padding-left: 14px; font-size: 10px; color: var(--text-dim);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left;
 }
+.mounts-path::before { content: '\200e'; } /* LTR mark — leading '~'/neutrals reorder to the end under rtl otherwise */
 .mounts-errline { padding-left: 14px; font-size: 10px; color: var(--red, #e55); line-height: 1.4; }
 .mounts-btn {
   border: 1px solid var(--border); background: var(--bg-input); color: var(--text-secondary);
@@ -1992,6 +2000,7 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 .palette-dot.on { background: var(--green, #3fb950); opacity: 1; box-shadow: 0 0 4px var(--green, #3fb950); }
 .palette-name { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .palette-path { color: var(--text-dim); font-size: 10px; margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; direction: rtl; }
+.palette-path::before { content: '\200e'; } /* LTR mark — leading '~'/neutrals reorder to the end under rtl otherwise */
 
 /* Manage Agents: host selector row */
 .agents-host-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); padding-bottom: 6px; border-bottom: 1px solid var(--border); }
