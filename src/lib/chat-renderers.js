@@ -10,6 +10,7 @@ import { escHtml, copyText, showContextMenu } from './utils.js';
 import { renderCodeBlock, rehighlightCodeBlock, stripAnsi, getHljsLanguages } from './highlight.js';
 import { UI_ICONS } from './icons.js';
 import { createBackendIconHtml, getBackendMeta } from './agent-meta.js';
+import { t } from './i18n.js';
 
 // Shell-command tools get a terminal icon instead of the generic wrench
 // (covers Claude Bash/BashOutput/KillShell and Codex exec_command/write_stdin
@@ -148,10 +149,10 @@ class ChatRenderers {
     }).join('');
 
     const textHtml = rawText.length > 500
-      ? `<details class="chat-long-msg"><summary><span>${escHtml(rawText.substring(0, 120))}... (${rawText.length} chars)</span></summary>${parts}</details>`
+      ? `<details class="chat-long-msg"><summary><span>${escHtml(rawText.substring(0, 120))}... ${t('({n} chars)', { n: rawText.length })}</span></summary>${parts}</details>`
       : parts;
 
-    this.wrapMsg(el, 'user', 'You', textHtml);
+    this.wrapMsg(el, 'user', t('You'), textHtml);
     return el;
   }
 
@@ -177,13 +178,13 @@ class ChatRenderers {
       if (stdoutMatch[1].length > 80) label += '...';
     } else if (hookMatch) {
       labelIcon = UI_ICONS.goal;
-      label = `Goal: ${hookMatch[1].substring(0, 60)}${hookMatch[1].length > 60 ? '...' : ''}`;
+      label = t('Goal: {text}', { text: `${hookMatch[1].substring(0, 60)}${hookMatch[1].length > 60 ? '...' : ''}` });
     } else if (hookFeedback) {
       labelIcon = UI_ICONS.goal;
-      label = 'Goal check: not met';
+      label = t('Goal check: not met');
       detail = hookFeedback[1].trim();
     } else {
-      label = rawText.replace(/<[^>]+>/g, '').trim().substring(0, 80) || 'notification';
+      label = rawText.replace(/<[^>]+>/g, '').trim().substring(0, 80) || t('notification');
     }
 
     const labelHtml = (labelIcon ? labelIcon + ' ' : '') + escHtml(label);
@@ -203,7 +204,7 @@ class ChatRenderers {
     el._rawMsg = msg;
     let html;
     if (block.type === 'thinking') {
-      html = `<details class="chat-thinking"${msg.status === 'streaming' ? ' open' : ''}><summary>Thinking</summary><pre>${escHtml(stripAnsi(block.text || ''))}</pre></details>`;
+      html = `<details class="chat-thinking"${msg.status === 'streaming' ? ' open' : ''}><summary>${t('Thinking')}</summary><pre>${escHtml(stripAnsi(block.text || ''))}</pre></details>`;
     } else if (block.type === 'text') {
       html = `<div class="chat-text">${this.renderMarkdown(stripAnsi(block.text || ''))}</div>`;
     } else {
@@ -239,9 +240,9 @@ class ChatRenderers {
         const desc = isAgent && block.input?.description ? `${icon} Agent: ${escHtml(block.input.description)}` : `${icon} ${escHtml(block.toolName)}`;
         const inputStr = stripAnsi(typeof block.input === 'string' ? block.input : JSON.stringify(block.input, null, 2));
         const statusHtml = isPending
-          ? `<div class="chat-tool-output-pending"><span class="chat-spinner"></span> running...</div>`
-          : `<details class="chat-diff" open><summary class="chat-diff-summary chat-tool-error-label">\u2717 Interrupted</summary></details>`;
-        html = `<div class="chat-tool-use"><span class="chat-tool-label">${desc}</span><details class="chat-diff"><summary class="chat-diff-summary">Input</summary><pre>${this.linkifyText(inputStr)}</pre></details>${statusHtml}</div>`;
+          ? `<div class="chat-tool-output-pending"><span class="chat-spinner"></span> ${t('running...')}</div>`
+          : `<details class="chat-diff" open><summary class="chat-diff-summary chat-tool-error-label">\u2717 ${t('Interrupted')}</summary></details>`;
+        html = `<div class="chat-tool-use"><span class="chat-tool-label">${desc}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details>${statusHtml}</div>`;
       }
     } else if (block.type === 'tool_result') {
       // Completed tool call — show full result
@@ -277,7 +278,7 @@ class ChatRenderers {
     const inputStr = stripAnsi(typeof block.input === 'string' ? block.input : JSON.stringify(block.input, null, 2));
 
     if (block.status === 'error') {
-      return `<div class="chat-tool-use"><span class="chat-tool-label">${toolCardIcon(block.toolName)} ${escHtml(block.toolName)} ${this.clickablePath(fp)}</span><details class="chat-diff"><summary class="chat-diff-summary">Input</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff" open><summary class="chat-diff-summary chat-tool-error-label">\u2717 Error</summary><pre class="chat-tool-error-text">${this.linkifyText(resultText)}</pre></details></div>`;
+      return `<div class="chat-tool-use"><span class="chat-tool-label">${toolCardIcon(block.toolName)} ${escHtml(block.toolName)} ${this.clickablePath(fp)}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff" open><summary class="chat-diff-summary chat-tool-error-label">\u2717 ${t('Error')}</summary><pre class="chat-tool-error-text">${this.linkifyText(resultText)}</pre></details></div>`;
     }
     if (block.toolName === 'Patch') {
       const patchHtml = this.renderPatchDiff(block);
@@ -292,16 +293,16 @@ class ChatRenderers {
       const byteCount = new Blob([content]).size;
       const sizeStr = byteCount > 1024 ? (byteCount / 1024).toFixed(1) + ' KB' : byteCount + ' B';
       const codeBlock = this.renderCodeBlock(content, fp);
-      return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.memo} Write ${this.clickablePath(fp)}</span><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${lineCount} lines, ${sizeStr}</summary>${codeBlock}</details></div>`;
+      return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.memo} Write ${this.clickablePath(fp)}</span><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${t('{n} lines, {size}', { n: lineCount, size: sizeStr })}</summary>${codeBlock}</details></div>`;
     }
     if (block.toolName === 'Read') {
       const lineCount = resultText.split('\n').length;
       const codeBlock = this.renderCodeBlock(resultText, fp);
-      return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.book} Read ${this.clickablePath(fp)}</span><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${lineCount} lines</summary>${codeBlock}</details></div>`;
+      return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.book} Read ${this.clickablePath(fp)}</span><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${t('{n} lines', { n: lineCount })}</summary>${codeBlock}</details></div>`;
     }
     if (block.toolName === 'Agent') {
       const desc = block.input?.description || '';
-      const firstLine = resultText.split('\n')[0].substring(0, 120) || '(empty)';
+      const firstLine = resultText.split('\n')[0].substring(0, 120) || t('(empty)');
       const reviewThreadId = msg?.taskInfo?.receiverThreadIds?.[0] || '';
       const agentId = msg?.taskInfo?.id || (resultText.match(/agentId:\s*([a-z0-9]+)/)?.[1]) || '';
       const dataAttrs = reviewThreadId
@@ -312,9 +313,9 @@ class ChatRenderers {
             ? ` data-parent-tool-id="${escHtml(block.toolCallId)}"`
             : '';
       const viewBtn = dataAttrs
-        ? ` <button class="chat-agent-view-btn"${dataAttrs} data-desc="${escHtml(desc)}">View Log</button>`
+        ? ` <button class="chat-agent-view-btn"${dataAttrs} data-desc="${escHtml(desc)}">${t('View Log')}</button>`
         : '';
-      return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.robot} Agent: ${escHtml(desc)}${viewBtn}</span><details class="chat-diff"><summary class="chat-diff-summary">Input</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLine)}</summary><pre>${this.linkifyText(resultText)}</pre></details></div>`;
+      return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.robot} Agent: ${escHtml(desc)}${viewBtn}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLine)}</summary><pre>${this.linkifyText(resultText)}</pre></details></div>`;
     }
     if (block.toolName === 'Workflow') {
       // Dynamic workflow (ultracode). The tool_result is the launch ack, which
@@ -324,14 +325,14 @@ class ChatRenderers {
         || (resultText.match(/"runId":\s*"(wf_[\w-]+)"/)?.[1]) || '';
       const wfName = resultText.match(/Summary:\s*(.+)/)?.[1]?.trim().substring(0, 120) || '';
       const viewBtn = runId
-        ? ` <button class="chat-workflow-view-btn" data-wf-run="${escHtml(runId)}" data-wf-name="${escHtml(wfName)}">View Workflow</button>`
+        ? ` <button class="chat-workflow-view-btn" data-wf-run="${escHtml(runId)}" data-wf-name="${escHtml(wfName)}">${t('View Workflow')}</button>`
         : '';
-      const firstLineW = resultText.split('\n')[0].substring(0, 120) || '(empty)';
-      return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.workflow || UI_ICONS.robot} Workflow${wfName ? ': ' + escHtml(wfName) : ''}${viewBtn}</span><details class="chat-diff"><summary class="chat-diff-summary">Script</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLineW)}</summary><pre>${this.linkifyText(resultText)}</pre></details></div>`;
+      const firstLineW = resultText.split('\n')[0].substring(0, 120) || t('(empty)');
+      return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.workflow || UI_ICONS.robot} Workflow${wfName ? ': ' + escHtml(wfName) : ''}${viewBtn}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Script')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLineW)}</summary><pre>${this.linkifyText(resultText)}</pre></details></div>`;
     }
     // Generic tool
-    const firstLine = resultText.split('\n')[0].substring(0, 120) || '(empty)';
-    return `<div class="chat-tool-use"><span class="chat-tool-label">${toolCardIcon(block.toolName)} ${escHtml(block.toolName)}</span><details class="chat-diff"><summary class="chat-diff-summary">Input</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLine)}</summary><pre>${this.linkifyText(resultText)}</pre></details></div>`;
+    const firstLine = resultText.split('\n')[0].substring(0, 120) || t('(empty)');
+    return `<div class="chat-tool-use"><span class="chat-tool-label">${toolCardIcon(block.toolName)} ${escHtml(block.toolName)}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLine)}</summary><pre>${this.linkifyText(resultText)}</pre></details></div>`;
   }
 
   /**
@@ -435,7 +436,7 @@ class ChatRenderers {
 
         const customInput = document.createElement('input');
         customInput.className = 'filter-input chat-ask-custom';
-        customInput.placeholder = 'Or type a custom answer...';
+        customInput.placeholder = t('Or type a custom answer...');
         customInput.oninput = () => {
           const val = customInput.value.trim();
           if (val) {
@@ -473,7 +474,7 @@ class ChatRenderers {
 
       const submitBtn = document.createElement('button');
       submitBtn.className = 'chat-perm-btn chat-perm-allow chat-ask-submit';
-      submitBtn.textContent = 'Submit';
+      submitBtn.textContent = t('Submit');
       submitBtn.disabled = true;
       submitBtn.onclick = () => {
         const answers = {};
@@ -490,7 +491,7 @@ class ChatRenderers {
       };
       const cancelBtn = document.createElement('button');
       cancelBtn.className = 'chat-perm-btn chat-perm-deny';
-      cancelBtn.textContent = 'Cancel';
+      cancelBtn.textContent = t('Cancel');
       cancelBtn.onclick = () => {
         this.ws.send({
           type: 'permission-response', sessionId: this.sessionId,
@@ -525,7 +526,7 @@ class ChatRenderers {
       prompt.className = 'chat-permission-prompt';
       const resolved = document.createElement('div');
       resolved.className = `chat-permission-resolved ${msg.permission.resolved === 'denied' ? 'chat-permission-denied' : 'chat-permission-allowed'}`;
-      resolved.textContent = msg.permission.resolved === 'denied' ? '\u2717 Cancelled' : '\u2713 Answered';
+      resolved.textContent = msg.permission.resolved === 'denied' ? '\u2717 ' + t('Cancelled') : '\u2713 ' + t('Answered');
       prompt.appendChild(resolved);
 
       if (msg.permission.resolved !== 'denied' && msg.permission.selectedAnswers) {
@@ -540,11 +541,11 @@ class ChatRenderers {
       section.appendChild(prompt);
     } else if (msg.permission.resolved) {
       const icon = msg.permission.resolved === 'denied' ? '\u2717' : '\u2713';
-      const label = msg.permission.resolved === 'denied' ? 'Denied' : 'Allowed';
+      const label = msg.permission.resolved === 'denied' ? t('Denied') : t('Allowed');
       const cls = msg.permission.resolved === 'denied' ? 'chat-permission-denied' : 'chat-permission-allowed';
       section.innerHTML = `<details class="chat-diff"><summary class="chat-diff-summary"><span class="chat-permission-resolved ${cls}">${icon} ${label}</span></summary></details>`;
     } else {
-      section.innerHTML = `<div class="chat-permission-prompt"><span class="chat-permission-label">${UI_ICONS.lock} Permission: ${escHtml(msg.permission.toolName)}</span><div class="chat-permission-actions"><button class="chat-perm-btn chat-perm-allow">Allow</button>${msg.permission.suggestions?.length ? '<button class="chat-perm-btn chat-perm-always">Always Allow</button>' : ''}<button class="chat-perm-btn chat-perm-deny">Deny</button></div></div>`;
+      section.innerHTML = `<div class="chat-permission-prompt"><span class="chat-permission-label">${UI_ICONS.lock} ${t('Permission: {tool}', { tool: escHtml(msg.permission.toolName) })}</span><div class="chat-permission-actions"><button class="chat-perm-btn chat-perm-allow">${t('Allow')}</button>${msg.permission.suggestions?.length ? `<button class="chat-perm-btn chat-perm-always">${t('Always Allow')}</button>` : ''}<button class="chat-perm-btn chat-perm-deny">${t('Deny')}</button></div></div>`;
       section.querySelector('.chat-perm-allow')?.addEventListener('click', () => {
         this.ws.send({ type: 'permission-response', sessionId: this.sessionId, requestId: msg.permission.requestId, approved: true, toolInput: msg.permission.input });
         msg.permission.resolved = 'allowed';
@@ -600,7 +601,7 @@ class ChatRenderers {
 
     const addCount = diffLines.filter(l => l.type === 'add').length;
     const delCount = diffLines.filter(l => l.type === 'del').length;
-    const summary = `\u2713 Added ${addCount} lines, removed ${delCount} lines`;
+    const summary = `\u2713 ${t('Added {a} lines, removed {d} lines', { a: addCount, d: delCount })}`;
 
     let body = '';
     for (const line of diffLines) {
@@ -609,7 +610,7 @@ class ChatRenderers {
       body += `<div class="${cls}"><span class="chat-diff-prefix">${prefix}</span><span class="chat-diff-text">${escHtml(line.text)}</span></div>`;
     }
 
-    return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.memo} Update ${this.clickablePath(filePath)}</span><details class="chat-diff"><summary class="chat-diff-summary">${summary}</summary><div class="chat-diff-body">${body}</div></details></div>`;
+    return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.memo} ${t('Update')} ${this.clickablePath(filePath)}</span><details class="chat-diff"><summary class="chat-diff-summary">${summary}</summary><div class="chat-diff-body">${body}</div></details></div>`;
   }
 
   renderPatchDiff(block) {
@@ -636,20 +637,20 @@ class ChatRenderers {
       const addCount = diffLines.filter((line) => line.type === 'add').length;
       const delCount = diffLines.filter((line) => line.type === 'del').length;
       const action = change.changeType === 'add'
-        ? 'Write'
+        ? t('Write')
         : change.changeType === 'delete'
-          ? 'Delete'
+          ? t('Delete')
           : change.changeType === 'move'
-            ? 'Move'
-            : 'Update';
+            ? t('Move')
+            : t('Update');
       const pathLabel = change.movePath && fromPath
         ? `${this.clickablePath(fromPath)} \u2192 ${this.clickablePath(change.movePath)}`
         : this.clickablePath(filePath);
       const summary = change.changeType === 'move' && !addCount && !delCount
-        ? `\u2713 Moved to ${escHtml(change.movePath || filePath)}`
+        ? `\u2713 ${t('Moved to {path}', { path: escHtml(change.movePath || filePath) })}`
         : change.changeType === 'delete' && !addCount && !delCount
-          ? '\u2713 Removed file'
-          : `\u2713 Added ${addCount} lines, removed ${delCount} lines`;
+          ? `\u2713 ${t('Removed file')}`
+          : `\u2713 ${t('Added {a} lines, removed {d} lines', { a: addCount, d: delCount })}`;
       const body = diffLines.map((line) => {
         const cls = line.type === 'add' ? 'chat-diff-add' : line.type === 'del' ? 'chat-diff-del' : 'chat-diff-ctx';
         return `<div class="${cls}"><span class="chat-diff-prefix">${escHtml(line.prefix)}</span><span class="chat-diff-text">${escHtml(line.text)}</span></div>`;
@@ -705,7 +706,7 @@ class ChatRenderers {
 
   /** Make a file path clickable (click=copy, ctrl+click=open) */
   clickablePath(fp) {
-    return `<span class="chat-link chat-link-path" data-path="${escHtml(fp)}" title="Click to copy, Ctrl+Click to open">${escHtml(fp)}</span>`;
+    return `<span class="chat-link chat-link-path" data-path="${escHtml(fp)}" title="${t('Click to copy, Ctrl+Click to open')}">${escHtml(fp)}</span>`;
   }
 
   /** Strip trailing punctuation from matched paths/URLs */
@@ -724,7 +725,7 @@ class ChatRenderers {
     return text.replace(re, (raw) => {
       const url = this.cleanPath(raw);
       const after = raw.slice(url.length);
-      return `<span class="chat-link" data-href="${url}" title="Click to copy, Ctrl+Click to open">${url}</span>${after}`;
+      return `<span class="chat-link" data-href="${url}" title="${t('Click to copy, Ctrl+Click to open')}">${url}</span>${after}`;
     });
   }
 
@@ -741,7 +742,7 @@ class ChatRenderers {
         const fp = this.cleanPath(raw);
         const after = raw.slice(fp.length);
         if (fp.length < 4) return raw;
-        return `<span class="chat-link chat-link-path" data-path="${e(fp)}" title="Click to copy, Ctrl+Click to open">${e(fp)}</span>${e(after)}`;
+        return `<span class="chat-link chat-link-path" data-path="${e(fp)}" title="${t('Click to copy, Ctrl+Click to open')}">${e(fp)}</span>${e(after)}`;
       });
     });
   }
@@ -787,12 +788,12 @@ class ChatRenderers {
       const url = link.dataset.href || link.getAttribute('href');
       const fp = link.dataset.path;
       const open = () => this._openLinkTarget(link, url, fp);
-      const copy = () => copyText(fp || url).then(() => this.flashLink(link, 'Copied!'));
+      const copy = () => copyText(fp || url).then(() => this.flashLink(link, t('Copied!')));
       if (isTouch) {
         // No Ctrl/hover on touch — tap shows both actions (copy used to be impossible)
         showContextMenu(e.clientX, e.clientY, [
-          { label: fp ? 'Open' : 'Open link', action: open },
-          { label: fp ? 'Copy path' : 'Copy URL', action: copy },
+          { label: fp ? t('Open') : t('Open link'), action: open },
+          { label: fp ? t('Copy path') : t('Copy URL'), action: copy },
         ]);
       } else if (e.ctrlKey || e.metaKey) {
         open();
@@ -810,8 +811,8 @@ class ChatRenderers {
       const url = link.dataset.href || link.getAttribute('href');
       const fp = link.dataset.path;
       showContextMenu(e.clientX, e.clientY, [
-        { label: fp ? 'Open' : 'Open link', action: () => this._openLinkTarget(link, url, fp) },
-        { label: fp ? 'Copy path' : 'Copy URL', action: () => copyText(fp || url).then(() => this.flashLink(link, 'Copied!')) },
+        { label: fp ? t('Open') : t('Open link'), action: () => this._openLinkTarget(link, url, fp) },
+        { label: fp ? t('Copy path') : t('Copy URL'), action: () => copyText(fp || url).then(() => this.flashLink(link, t('Copied!'))) },
       ]);
     });
   }
@@ -827,14 +828,14 @@ class ChatRenderers {
         .then(r => r.json())
         .then(info => {
           if (info.error) {
-            this.flashLink(link, 'Not found');
+            this.flashLink(link, t('Not found'));
           } else if (info.isDirectory) {
             this.app.openFileExplorer(cleanPath);
           } else {
             this.app.openFile(cleanPath, cleanPath.split('/').pop(), { line: lineNum });
           }
         })
-        .catch(() => this.flashLink(link, 'Error'));
+        .catch(() => this.flashLink(link, t('Error')));
     } else if (url) {
       window.open(url, '_blank');
     }
@@ -877,7 +878,7 @@ class ChatRenderers {
     const btn = document.createElement('button');
     btn.className = 'chat-open-editor-btn';
     btn.innerHTML = UI_ICONS.clipboard;
-    btn.title = 'Open in editor';
+    btn.title = t('Open in editor');
     btn.onclick = (e) => {
       e.stopPropagation();
       const text = this.extractMsgText(msg);
@@ -902,7 +903,7 @@ class ChatRenderers {
     const btn = document.createElement('button');
     btn.className = 'chat-open-editor-btn chat-fork-btn';
     btn.innerHTML = UI_ICONS.forkBranch;
-    btn.title = 'Fork from here — branch a new session up to this message';
+    btn.title = t('Fork from here — branch a new session up to this message');
     btn.onclick = (e) => { e.stopPropagation(); this._onFork(msg.uuid, msg); };
     el.appendChild(btn);
   }
@@ -953,7 +954,7 @@ class ChatRenderers {
         const langBtn = document.createElement('button');
         langBtn.className = 'chat-lang-btn';
         langBtn.textContent = block.dataset.lang || 'plain';
-        langBtn.title = 'Change syntax highlighting';
+        langBtn.title = t('Change syntax highlighting');
         langBtn.onclick = (e) => {
           e.stopPropagation();
           if (langPicker.querySelector('.chat-lang-dropdown')) { langPicker.querySelector('.chat-lang-dropdown').remove(); return; }
@@ -961,7 +962,7 @@ class ChatRenderers {
           dd.className = 'chat-lang-dropdown';
           const input = document.createElement('input');
           input.className = 'chat-lang-search';
-          input.placeholder = 'Filter...';
+          input.placeholder = t('Filter...');
           dd.appendChild(input);
           const list = document.createElement('div');
           list.className = 'chat-lang-list';
@@ -1002,8 +1003,8 @@ class ChatRenderers {
       // inside scrollable code blocks is impractical.
       const copyBtn = document.createElement('button');
       copyBtn.className = 'chat-wrap-toggle';
-      copyBtn.textContent = 'Copy';
-      copyBtn.title = 'Copy to clipboard';
+      copyBtn.textContent = t('Copy');
+      copyBtn.title = t('Copy to clipboard');
       copyBtn.onclick = (e) => {
         e.stopPropagation();
         let text;
@@ -1020,20 +1021,20 @@ class ChatRenderers {
             : block.textContent.replace(/\n$/, '');
         }
         copyText(text).then(() => {
-          copyBtn.textContent = 'Copied';
-          setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1200);
+          copyBtn.textContent = t('Copied');
+          setTimeout(() => { copyBtn.textContent = t('Copy'); }, 1200);
         });
       };
       toolbar.appendChild(copyBtn);
 
       const btn = document.createElement('button');
       btn.className = 'chat-wrap-toggle';
-      btn.textContent = 'Wrap';
-      btn.title = 'Toggle word wrap';
+      btn.textContent = t('Wrap');
+      btn.title = t('Toggle word wrap');
       btn.onclick = (e) => {
         e.stopPropagation();
         const on = block.classList.toggle('chat-pre-wrapped');
-        btn.textContent = on ? 'No Wrap' : 'Wrap';
+        btn.textContent = on ? t('No Wrap') : t('Wrap');
       };
       toolbar.appendChild(btn);
       wrapper.appendChild(toolbar);

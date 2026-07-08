@@ -1,3 +1,5 @@
+import { t } from './i18n.js';
+
 /**
  * ChatSearch — extracted search functionality for ChatView.
  * Handles search bar DOM, server-side search, highlight layer, and navigation.
@@ -36,7 +38,7 @@ class ChatSearch {
 
     this._input = document.createElement('input');
     this._input.className = 'chat-search-input';
-    this._input.placeholder = 'Search messages...';
+    this._input.placeholder = t('Search messages...');
     this._input.type = 'text';
 
     this._searchStatus = document.createElement('span');
@@ -45,13 +47,13 @@ class ChatSearch {
     const prevBtn = document.createElement('button');
     prevBtn.className = 'chat-search-nav';
     prevBtn.textContent = '\u25B2';
-    prevBtn.title = 'Previous';
+    prevBtn.title = t('Previous');
     prevBtn.onclick = () => this._searchNav(-1);
 
     const nextBtn = document.createElement('button');
     nextBtn.className = 'chat-search-nav';
     nextBtn.textContent = '\u25BC';
-    nextBtn.title = 'Next';
+    nextBtn.title = t('Next');
     nextBtn.onclick = () => this._searchNav(1);
 
     const closeBtn = document.createElement('button');
@@ -98,7 +100,7 @@ class ChatSearch {
     const token = (this._searchToken = (this._searchToken || 0) + 1);
     const stale = () => this._searchToken !== token;
 
-    this._searchStatus.textContent = 'Searching...';
+    this._searchStatus.textContent = t('Searching...');
     this._searchQuery = q;
     this._highlightQuery = q;
     this.applyHighlightLayer(); // highlight current view immediately
@@ -125,7 +127,7 @@ class ChatSearch {
     this._fullFileMode = false;
     this._truncated = false;
     this._searching = false;
-    if (!backendSessionId) { if (!stale()) this._searchStatus.textContent = 'No results'; return; }
+    if (!backendSessionId) { if (!stale()) this._searchStatus.textContent = t('No results'); return; }
 
     // Huge session: stream-search the ENTIRE file server-side. Results arrive
     // progressively (less-style) so the count updates live ("N… searching") and
@@ -145,7 +147,7 @@ class ChatSearch {
     } catch {}
     if (stale()) return; // a newer search superseded this one
     this._serverSearchResults = matches;
-    if (!this._serverSearchResults.length) { this._searchStatus.textContent = 'No results'; return; }
+    if (!this._serverSearchResults.length) { this._searchStatus.textContent = t('No results'); return; }
     this._searchResultIdx = 0;
     this._updateSearchStatus();
     this._jumpToSearchResult(0);
@@ -190,7 +192,7 @@ class ChatSearch {
       this._searching = false;
     }
     if (stale()) return;
-    if (!this._serverSearchResults.length) this._searchStatus.textContent = 'No results';
+    if (!this._serverSearchResults.length) this._searchStatus.textContent = t('No results');
     else this._updateSearchStatus();
   }
 
@@ -199,7 +201,7 @@ class ChatSearch {
     const idx = this._searchResultIdx >= 0 ? this._searchResultIdx + 1 : 0;
     if (this._searching) {
       // less-style: keep counting while the scan is still running
-      this._searchStatus.textContent = n ? `${idx}/${n}… searching` : 'Searching…';
+      this._searchStatus.textContent = n ? t('{idx}/{n}… searching', { idx, n }) : t('Searching…');
     } else {
       this._searchStatus.textContent = `${idx}/${n}${this._truncated ? '+' : ''}`;
     }

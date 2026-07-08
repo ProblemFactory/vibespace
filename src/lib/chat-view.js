@@ -6,6 +6,7 @@ import { ChatRenderers } from './chat-renderers.js';
 import { ChatInput } from './chat-input.js';
 import { ChatStatusBar } from './chat-status-bar.js';
 import { UI_ICONS } from './icons.js';
+import { t } from './i18n.js';
 
 /**
  * ChatView — renders a chat interface for stream-json mode sessions.
@@ -114,7 +115,7 @@ class ChatView {
     this._scrollBtn = document.createElement('button');
     this._scrollBtn.className = 'chat-scroll-btn hidden';
     this._scrollBtn.innerHTML = '\u2193';
-    this._scrollBtn.title = 'Scroll to bottom';
+    this._scrollBtn.title = t('Scroll to bottom');
     this._scrollBtn.onclick = () => {
       if (this._teleported) { this.jumpToBottom(); return; }   // return to latest
       if (this._readOnly || !this.sessionId) {
@@ -335,11 +336,11 @@ class ChatView {
       } else if (msg.type === 'exited' && msg.sessionId === sessionId) {
         this._hideTyping();
         if (msg.reason === 'not_logged_in') {
-          this._renderers.appendSystem('Not logged in — please log in to continue.');
+          this._renderers.appendSystem(t('Not logged in — please log in to continue.'));
           this._setReadOnly();
           this._showLoginBar();
         } else {
-          this._renderers.appendSystem('Session ended.');
+          this._renderers.appendSystem(t('Session ended.'));
           this._setReadOnly();
         }
       } else if (msg.type === 'attached' && msg.sessionId === sessionId) {
@@ -351,7 +352,7 @@ class ChatView {
         // Attach failed (e.g. stale serverId replayed from a saved layout) —
         // surface it instead of waiting forever on a blank window
         this._hideTyping();
-        this._renderers.appendSystem(msg.message || 'Session not found.');
+        this._renderers.appendSystem(msg.message || t('Session not found.'));
         this._setReadOnly();
       }
     };
@@ -366,9 +367,9 @@ class ChatView {
       if (this._chatInput) this._chatInput.setDisconnected(!connected);
       if (!connected) {
         this._hideTyping();
-        this._renderers.appendSystem('Disconnected from server');
+        this._renderers.appendSystem(t('Disconnected from server'));
       } else if (this._hasConnected) {
-        this._renderers.appendSystem('Reconnected');
+        this._renderers.appendSystem(t('Reconnected'));
         this._reattach(true);
       }
       this._hasConnected = true;
@@ -438,7 +439,7 @@ class ChatView {
     // sessions — jsonlGapInfo returns null without building an index.)
     if (this._total > 50) this._initGapMinimap();
 
-    if (isStreaming) this._showTyping(meta?.streamingLabel || 'thinking...');
+    if (isStreaming) this._showTyping(meta?.streamingLabel || t('thinking...'));
     this._scrollToBottom();
     // Auto-load more if content doesn't fill viewport (no scrollbar to trigger scroll event)
     setTimeout(() => {
@@ -733,7 +734,7 @@ class ChatView {
     if (!this._teleported && this._windowStart > 0) { await this._extendTop(); return; }
     markerEl._gapLoading = true;
     const origLabel = btn ? btn.textContent : '';
-    if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+    if (btn) { btn.disabled = true; btn.textContent = t('Loading…'); }
     try {
       const { backend, backendSessionId, cwd } = this._getSessionIds();
       if (!backendSessionId) return;
@@ -1218,14 +1219,14 @@ class ChatView {
       // showing a permanent 'responding...' indicator.
       if (msg.role === 'user') return '';
       if (msg.role === 'tool' && msg.status === 'pending') {
-        return `running ${msg.toolName || 'tool'}...`;
+        return t('running {tool}...', { tool: msg.toolName || t('tool') });
       }
       if (msg.status !== 'streaming') continue;
       const block = msg.content?.[0];
-      if (msg.role === 'tool') return `running ${msg.toolName || block?.toolName || 'tool'}...`;
-      if (block?.type === 'thinking') return 'thinking...';
-      if (block?.type === 'text') return 'responding...';
-      return 'thinking...';
+      if (msg.role === 'tool') return t('running {tool}...', { tool: msg.toolName || block?.toolName || t('tool') });
+      if (block?.type === 'thinking') return t('thinking...');
+      if (block?.type === 'text') return t('responding...');
+      return t('thinking...');
     }
     return '';
   }
@@ -1254,7 +1255,7 @@ class ChatView {
       if (reviewThreadId && !this._openedDetachedReviews.has(reviewThreadId)) {
         this._openedDetachedReviews.add(reviewThreadId);
         const { backend, backendSessionId, cwd } = this._getSessionIds();
-        this.app.viewSession(reviewThreadId, cwd, 'Review', {
+        this.app.viewSession(reviewThreadId, cwd, t('Review'), {
           backend: backend || 'codex',
           backendSessionId: reviewThreadId,
           agentKind: 'review',
@@ -1420,7 +1421,7 @@ class ChatView {
       const preEl = oldEl.querySelector('.chat-thinking pre');
       const detailsEl = oldEl.querySelector('.chat-thinking');
       if (detailsEl) detailsEl.open = true;
-      if (summaryEl) summaryEl.textContent = 'Thinking';
+      if (summaryEl) summaryEl.textContent = t('Thinking');
       if (preEl) preEl.textContent = stripAnsi(msg.content[0].text || '');
     }
     if (this._pinned) this._scrollToBottom();
@@ -1459,10 +1460,10 @@ class ChatView {
       const gs = op.data;
       if (gs?.met) {
         this._statusBar.setGoal(null);
-        this._renderers.appendSystem(`Goal met: ${gs.condition}`);
+        this._renderers.appendSystem(t('Goal met: {condition}', { condition: gs.condition }));
       } else if (gs?.condition) {
         this._statusBar.setGoal(gs.condition);
-        if (gs.sentinel) this._renderers.appendSystem(`Goal set: ${gs.condition}`);
+        if (gs.sentinel) this._renderers.appendSystem(t('Goal set: {condition}', { condition: gs.condition }));
       }
     } else if (op.subtype === 'turn_complete') {
       this._hideTyping();
@@ -1476,7 +1477,7 @@ class ChatView {
   }
 
   // _showTyping / _hideTyping delegate to ChatInput (normal) or readOnly _streamStatus
-  _showTyping(label = 'thinking...') {
+  _showTyping(label = t('thinking...')) {
     if (this._chatInput) { this._chatInput.showTyping(label); return; }
     // readOnly fallback
     if (!this._streamStatus) return;
@@ -1524,9 +1525,9 @@ class ChatView {
       const c = msg.message?.content || msg.content;
       if (Array.isArray(c)) {
         const last = c[c.length - 1];
-        if (last?.type === 'tool_use' || last?.type === 'tool_call') activity = `running ${last.name || last.toolName || 'tool'}`;
-        else if (last?.type === 'thinking') activity = 'thinking';
-        else if (last?.type === 'text') activity = 'responding';
+        if (last?.type === 'tool_use' || last?.type === 'tool_call') activity = t('running {tool}', { tool: last.name || last.toolName || t('tool') });
+        else if (last?.type === 'thinking') activity = t('thinking');
+        else if (last?.type === 'text') activity = t('responding');
       }
       // Find description from stored messages
       const toolMsg = this._messages.find(m => m.toolCallId === parentToolUseId);
@@ -1536,8 +1537,8 @@ class ChatView {
       // A completed Agent card already has a View Log button in its header \u2014
       // the live status line only adds one when the card has none (pending).
       const hasHeaderBtn = !!card.querySelector('.chat-tool-label .chat-agent-view-btn');
-      const btnHtml = hasHeaderBtn ? '' : ` <button class="chat-agent-view-btn"${threadAttr} data-desc="${escHtml(desc)}">View Log</button>`;
-      statusEl.innerHTML = `<span class="chat-agent-live-count">${count} messages${activity ? ' \u2022 ' + escHtml(activity) : ''}</span>${btnHtml}`;
+      const btnHtml = hasHeaderBtn ? '' : ` <button class="chat-agent-view-btn"${threadAttr} data-desc="${escHtml(desc)}">${t('View Log')}</button>`;
+      statusEl.innerHTML = `<span class="chat-agent-live-count">${t('{n} messages', { n: count })}${activity ? ' \u2022 ' + escHtml(activity) : ''}</span>${btnHtml}`;
     }
   }
 
@@ -1583,7 +1584,7 @@ class ChatView {
       return;
     }
 
-    const title = `Agent: ${description || 'Subagent'}`;
+    const title = `Agent: ${description || t('Subagent')}`;
     const openSpec = {
       action: 'viewSubagent',
       virtualId,
@@ -1700,7 +1701,7 @@ class ChatView {
     const completed = this._todos.filter(t => t.status === 'completed').length;
     const total = this._todos.length;
     if (!inProgress && completed === total) { this._todoDisplay.classList.add('hidden'); return; }
-    const label = inProgress ? inProgress.activeForm || inProgress.content : `${completed}/${total} done`;
+    const label = inProgress ? inProgress.activeForm || inProgress.content : t('{done}/{total} done', { done: completed, total });
     const icon = inProgress ? UI_ICONS.hourglass : UI_ICONS.check;
     this._todoDisplay.innerHTML = `<span class="chat-todo-current">${icon} ${escHtml(label)} <span class="chat-status-dim">(${completed}/${total})</span></span>`;
     this._todoDisplay.classList.remove('hidden');
@@ -1724,7 +1725,7 @@ class ChatView {
   _setupChatDrop(container) {
     const overlay = document.createElement('div');
     overlay.className = 'chat-drop-overlay hidden';
-    overlay.innerHTML = '<div class="chat-drop-hint">Drop to upload to the working directory</div>';
+    overlay.innerHTML = `<div class="chat-drop-hint">${t('Drop to upload to the working directory')}</div>`;
     container.appendChild(overlay);
     this._dropOverlay = overlay;
     const isFileDrag = (e) => Array.from(e.dataTransfer?.types || []).includes('Files');
@@ -1805,7 +1806,7 @@ class ChatView {
       if (msg.normEpoch) this._normEpoch = msg.normEpoch;
       if (epochChanged) { this._fullViewReset(msg); return; }
       // Sync streaming label from server
-      if (msg.isStreaming) this._showTyping(msg.streamingLabel || 'thinking...');
+      if (msg.isStreaming) this._showTyping(msg.streamingLabel || t('thinking...'));
       else this._hideTyping();
       this._reattachCatchUp();
     };
@@ -1910,13 +1911,13 @@ class ChatView {
     bar.className = 'chat-resume-bar';
     const btn = document.createElement('button');
     btn.className = 'chat-resume-btn';
-    btn.innerHTML = `${UI_ICONS.refresh} <span>Resume this session</span>`;
-    btn.title = 'Resume the session and continue chatting';
+    btn.innerHTML = `${UI_ICONS.refresh} <span>${t('Resume this session')}</span>`;
+    btn.title = t('Resume the session and continue chatting');
     btn.onclick = () => this._resumeAndClose();
 
     const note = document.createElement('div');
     note.className = 'chat-resume-note';
-    note.textContent = 'Session is read-only.';
+    note.textContent = t('Session is read-only.');
 
     bar.append(note, btn);
     // Insert before status bar (which is the last child)
@@ -1940,11 +1941,11 @@ class ChatView {
 
     const note = document.createElement('div');
     note.className = 'chat-resume-note';
-    note.textContent = 'Claude CLI is not logged in. Open a terminal to run /login, then retry.';
+    note.textContent = t('Claude CLI is not logged in. Open a terminal to run /login, then retry.');
 
     const loginBtn = document.createElement('button');
     loginBtn.className = 'chat-resume-btn';
-    loginBtn.innerHTML = `${UI_ICONS.wrench} <span>Open Login Terminal</span>`;
+    loginBtn.innerHTML = `${UI_ICONS.wrench} <span>${t('Open Login Terminal')}</span>`;
     loginBtn.onclick = () => {
       // Open a terminal window running claude (user can /login there)
       const ids = this._getSessionIds();
@@ -1954,7 +1955,7 @@ class ChatView {
 
     const retryBtn = document.createElement('button');
     retryBtn.className = 'chat-resume-btn';
-    retryBtn.innerHTML = `${UI_ICONS.refresh} <span>Retry</span>`;
+    retryBtn.innerHTML = `${UI_ICONS.refresh} <span>${t('Retry')}</span>`;
     retryBtn.onclick = () => this._resumeAndClose();
 
     bar.append(note, loginBtn, retryBtn);
