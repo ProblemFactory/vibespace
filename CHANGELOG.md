@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.55.0] — 2026-07-08
+
+### Added — create a session for a Task Group from the flat Tasks view
+The Task Groups tab's flat **Tasks** sub-view now has a "+ New session in a
+Task Group…" card at the top: it opens a group picker (color-marked, board
+order) and launches the pre-filled New Session dialog for the chosen group
+(first auto-include folder as cwd, group folders pinned in the chips) — no
+more switching back to the Groups board just to spawn into a group.
+Right-clicking a session card's group color bar also opens that group's full
+action menu (New session in this task…, Details, Rename, …).
+
 ## [2.54.3] — 2026-07-08
 
 ### Fixed

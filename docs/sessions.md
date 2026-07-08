@@ -46,7 +46,7 @@ Sessions grouped by working directory. Each folder header shows:
 ### Task Groups tab
 The Task Group board. Two sub-views (**Groups | Tasks**):
 - **Groups** — each Task Group with its member sessions grouped under it.
-- **Tasks** — a flat list of every session (活儿), sorted by urgency/status; sessions tagged into ≥1 group sort to the top, untagged ones sink to the bottom.
+- **Tasks** — a flat list of every session (活儿), sorted by urgency/status; sessions tagged into ≥1 group sort to the top, untagged ones sink to the bottom. A "+ New session in a Task Group…" card at the top opens a group picker → the pre-filled New Session dialog; right-clicking a card's group color bar opens that group's full action menu.
 
 See [Task Groups](#task-groups) below.
 

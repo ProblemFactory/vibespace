@@ -578,6 +578,13 @@ export function installSidebarTasks(SidebarClass) {
         bar.style.setProperty('--g-color', g.color || 'var(--text-dim)');
         bar.dataset.tip = g.title + (g.objective ? ' — ' + g.objective.slice(0, 100) : '');
         bar.onclick = (e) => { e.stopPropagation(); this.app.openTaskDetail(g.id); };
+        // Right-click (long-press on touch) = the group's full action menu —
+        // incl. "New session in this task…" — so the flat view can act on a
+        // group without switching to the Groups board.
+        bar.addEventListener('contextmenu', (e) => {
+          e.preventDefault(); e.stopPropagation();
+          this._showTaskContextMenu(e.clientX, e.clientY, g.id);
+        });
         bars.appendChild(bar);
       }
       row.appendChild(bars);
@@ -601,17 +608,36 @@ export function installSidebarTasks(SidebarClass) {
     const untaggedAll = sessions.filter(s => this._getSessionTaskGroups(s).length === 0 && match(s));
     const untagged = untaggedAll.filter(s => s.status === 'live' || s.status === 'tmux').sort(sortFn);
     const untaggedStopped = untaggedAll.length - untagged.length;
+    const list = document.createElement('div');
+    list.className = 'task-view-list';
+    // "+ New session" with a Task-Group picker — the flat view's equivalent of
+    // the Groups board's per-header + button (this view has no group headers).
+    const addCard = document.createElement('div');
+    addCard.className = 'session-item-card new-session-card';
+    addCard.innerHTML = `<div class="session-card-name" style="color:var(--accent-hover)">${tr('+ New session in a Task Group…')}</div>`;
+    addCard.onclick = (e) => {
+      const groupsAll = (this._taskBoardOrder?.() || []).filter(g => !g.archived);
+      showContextMenu(e.clientX, e.clientY, [
+        ...groupsAll.map(g => ({
+          label: g.title,
+          style: g.color ? `box-shadow: inset 3px 0 0 ${g.color}` : '',
+          action: () => this.app.showNewSessionDialog({ taskId: g.id, cwd: this._folderPaths(g)[0] }),
+        })),
+        ...(groupsAll.length ? [{ separator: true }] : []),
+        { label: tr('No group'), action: () => this.app.showNewSessionDialog({}) },
+      ]);
+    };
+    list.appendChild(addCard);
     if (!tagged.length && !untagged.length && !untaggedStopped) {
       const empty = document.createElement('div');
       empty.className = 'empty-hint task-view-empty';
       empty.textContent = (this._taskViewStatusFilter && this._taskViewStatusFilter.length)
         ? tr('No sessions match the current status filter.')
         : tr('No sessions yet. Sessions tagged into a Task Group sort to the top here.');
-      this.listEl.appendChild(empty);
+      list.appendChild(empty);
+      this.listEl.appendChild(list);
       return;
     }
-    const list = document.createElement('div');
-    list.className = 'task-view-list';
     for (const s of tagged) list.appendChild(this._taskViewRow(s, true));
     if (untagged.length || untaggedStopped) {
       const h = document.createElement('div');
