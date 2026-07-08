@@ -15,3 +15,18 @@ data/bin/code
 *.nfs*
 .agent-context/
 data/.agent-hooks-optout
+# ── Sensitive runtime state (NEVER track — key files + their ciphertext = plaintext) ──
+data/auth.json
+data/accounts.json
+data/.accounts-key
+data/mounts.json
+data/.mounts-key
+data/mount-tokens.json
+data/mount-logs/
+data/hosts.json
+data/ssh/
+data/remote-jsonl/
+data/session-status.json
+data/task-groups.json
+data/tasks.json
+data/uploads-sync.json
