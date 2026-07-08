@@ -1919,21 +1919,61 @@ class App {
     });
   }
 
-  // Fill the recent-cwd chip row for the selected host (or local).
+  // The selected Task Group's folder suggestions for the New Session dialog
+  // chips: every linked folder, plus — for recursive folders — nested folders
+  // that already contain sessions (e.g. group folder /a with sessions at /a
+  // and /a/too ⇒ suggest BOTH /a and /a/too). Subfolder discovery is local
+  // sessions only; with a remote host selected we still pin the folder paths
+  // themselves (remote cwds aren't reliably in _allSessions).
+  _taskCwdSuggestions(hostId) {
+    const tid = document.getElementById('input-task')?.value;
+    const tg = tid ? this.sidebar?._taskById?.(tid) : null;
+    if (!tg) return [];
+    const out = []; const seen = new Set();
+    const add = (path, tip) => { if (path && !seen.has(path)) { seen.add(path); out.push({ path, tip, color: tg.color || '' }); } };
+    for (const f of tg.folders || []) {
+      const rec = this.sidebar._folderRec(f);
+      add(rec.path, t('Task Group folder ({name})', { name: tg.title }));
+      if (rec.recursive && !hostId) {
+        const subs = new Map(); // session cwd strictly under the folder -> count
+        for (const s of this.sidebar?._allSessions || []) {
+          if (s.host || !s.cwd) continue;
+          const under = s.cwd.startsWith(rec.path + '/') || (s.realCwd && s.realCwd.startsWith(rec.path + '/'));
+          if (under) subs.set(s.cwd, (subs.get(s.cwd) || 0) + 1);
+        }
+        for (const [c, n] of [...subs.entries()].sort((a, b) => b[1] - a[1]))
+          add(c, t('In a Task Group folder — {n} session(s) here', { n }));
+      }
+    }
+    return out;
+  }
+
+  // Fill the recent-cwd chip row for the selected host (or local). The
+  // selected Task Group's folders are PINNED first as marked chips.
   _fillCwdRecent(hostId) {
     const recentEl = document.getElementById('cwd-recent');
     if (!recentEl) return;
+    const taskChips = this._taskCwdSuggestions(hostId);
     const paint = (cwds) => {
       recentEl.innerHTML = '';
-      for (const cwd of cwds.slice(0, 8)) {
+      const mkChip = (cwd, { cls, tip, color } = {}) => {
         const chip = document.createElement('button');
         chip.type = 'button';
-        chip.className = 'cwd-recent-chip';
-        chip.textContent = cwd.replace(/^\/home\/[^/]+/, '~');
-        chip.title = cwd;
+        chip.className = 'cwd-recent-chip' + (cls ? ' ' + cls : '');
+        const short = cwd.replace(/^\/home\/[^/]+/, '~');
+        if (cls) {
+          if (color) { const dot = document.createElement('span'); dot.className = 'tvg-dot'; dot.style.setProperty('--g-color', color); chip.appendChild(dot); }
+          const p = document.createElement('span'); p.className = 'cwd-chip-path'; p.textContent = short; chip.appendChild(p);
+        } else {
+          chip.textContent = short;
+        }
+        chip.title = tip ? `${tip}\n${cwd}` : cwd;
         chip.onclick = () => { document.getElementById('input-cwd').value = cwd; };
         recentEl.appendChild(chip);
-      }
+      };
+      for (const s of taskChips) mkChip(s.path, { cls: 'cwd-task-chip', tip: s.tip, color: s.color });
+      const pinned = new Set(taskChips.map((s) => s.path));
+      for (const cwd of cwds.filter((c) => !pinned.has(c)).slice(0, 8)) mkChip(cwd);
     };
     if (hostId) {
       recentEl.innerHTML = `<span class="cwd-recent-loading">${t('loading host paths…')}</span>`;
@@ -1978,10 +2018,12 @@ class App {
       }
       taskSel.value = taskId || '';
       taskSel.onchange = () => {
-        const t = this.sidebar?._taskById?.(taskSel.value);
+        const tg = this.sidebar?._taskById?.(taskSel.value);
         const cwdInput = document.getElementById('input-cwd');
-        const firstFolder = t?.folders?.[0] && (typeof t.folders[0] === 'string' ? t.folders[0] : t.folders[0].path);
+        const firstFolder = tg?.folders?.[0] && (typeof tg.folders[0] === 'string' ? tg.folders[0] : tg.folders[0].path);
         if (firstFolder && !cwdInput.value.trim()) cwdInput.value = firstFolder;
+        // Re-render the quick-fill chips — the group's folders pin to the front
+        this._fillCwdRecent(document.getElementById('input-host')?.value || '');
       };
     }
     // Account dropdown (billing identity: subscription OAuth vs an API key).
