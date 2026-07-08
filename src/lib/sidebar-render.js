@@ -5,6 +5,7 @@
  * Installed on Sidebar.prototype via installSidebarRender(Sidebar).
  */
 import { escHtml, createPopover, showContextMenu, copyText, showToast, showInputDialog, showConfirmDialog } from './utils.js';
+import { t as tr } from './i18n.js';
 import { createBackendIcon, getBackendMeta, getSessionKey } from './agent-meta.js';
 import { renderSessionCard } from './session-card.js';
 
@@ -103,12 +104,12 @@ export function installSidebarRender(SidebarClass) {
       }
 
       const addBtn = document.createElement('button'); addBtn.className = 'folder-add-btn';
-      addBtn.textContent = '+'; addBtn.title = 'New session in ' + cwdShort;
+      addBtn.textContent = '+'; addBtn.title = tr('New session in {dir}', { dir: cwdShort });
       addBtn.onclick = (e) => { e.stopPropagation(); this.app.showNewSessionDialog({ cwd }); };
       header.appendChild(addBtn);
 
       const linkBtn = document.createElement('button'); linkBtn.className = 'folder-add-btn';
-      linkBtn.innerHTML = '<svg style="width:10px;height:10px" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M7 9l2-2M6 12l-1.5 1.5a2 2 0 01-3-3L4 8M10 4l1.5-1.5a2 2 0 013 3L12 8"/></svg>'; linkBtn.title = 'Link folder to a task';
+      linkBtn.innerHTML = '<svg style="width:10px;height:10px" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M7 9l2-2M6 12l-1.5 1.5a2 2 0 01-3-3L4 8M10 4l1.5-1.5a2 2 0 013 3L12 8"/></svg>'; linkBtn.title = tr('Link folder to a task');
       linkBtn.style.fontSize = '10px';
       linkBtn.onclick = (e) => {
         e.stopPropagation();
@@ -130,9 +131,9 @@ export function installSidebarRender(SidebarClass) {
         e.preventDefault(); e.stopPropagation();
         const stopped = items.filter(s => s.status === 'stopped' && !this.isArchived(s));
         showContextMenu(e.clientX, e.clientY, [
-          { label: `Archive ${stopped.length} stopped session${stopped.length === 1 ? '' : 's'}`, disabled: !stopped.length, action: () => this.archiveSessions(stopped) },
-          { label: 'New session here', action: () => this.app.showNewSessionDialog({ cwd }) },
-          { label: 'Copy path', action: () => copyText(cwd) },
+          { label: tr('Archive {n} stopped sessions', { n: stopped.length }), disabled: !stopped.length, action: () => this.archiveSessions(stopped) },
+          { label: tr('New session here'), action: () => this.app.showNewSessionDialog({ cwd }) },
+          { label: tr('Copy path'), action: () => copyText(cwd) },
         ]);
       });
 

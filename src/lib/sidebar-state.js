@@ -7,6 +7,7 @@
  */
 import { getSessionKey } from './agent-meta.js';
 import { showToast, showInputDialog } from './utils.js';
+import { t as tr } from './i18n.js';
 
 export function installSidebarState(SidebarClass) {
   const proto = SidebarClass.prototype;
@@ -330,7 +331,7 @@ export function installSidebarState(SidebarClass) {
       if (stateKey && !this._archivedIds.has(stateKey)) { this._archivedIds.add(stateKey); n++; }
     }
     this._pushUserState(); this._render(); this.app.updateTaskbar();
-    showToast(`Archived ${n} session${n === 1 ? '' : 's'} — new sessions here start archived`);
+    showToast(tr('Archived {n} sessions — new sessions here start archived', { n }));
   };
 
   proto.unarchiveProject = function(cwd, host) {
@@ -345,7 +346,7 @@ export function installSidebarState(SidebarClass) {
       if (legacy) this._archivedIds.delete(legacy);
     }
     this._pushUserState(); this._render(); this.app.updateTaskbar();
-    showToast(`Unarchived project (${n} session${n === 1 ? '' : 's'})`);
+    showToast(tr('Unarchived project ({n} sessions)', { n }));
   };
 
   // Bulk archive (folder header context menu) — one state push + render for
@@ -358,7 +359,7 @@ export function installSidebarState(SidebarClass) {
     }
     if (!n) return;
     this._pushUserState(); this._render(); this.app.updateTaskbar();
-    showToast(`Archived ${n} session${n === 1 ? '' : 's'}`);
+    showToast(tr('Archived {n} sessions', { n }));
   };
 
   proto.getCustomName = function(sessionOrKey) { return this._stateMapGet(this._customNames, sessionOrKey); };
@@ -412,9 +413,9 @@ export function installSidebarState(SidebarClass) {
   proto.renameSession = async function(sessionOrKey, currentName) {
     const stateKey = this._getSessionStateKey(sessionOrKey);
     const name = await showInputDialog({
-      title: 'Rename Session', label: 'Session name',
+      title: tr('Rename Session'), label: tr('Session name'),
       value: this.getCustomName(sessionOrKey) || currentName || '',
-      confirmText: 'Rename',
+      confirmText: tr('Rename'),
     });
     if (name === null) return;
     if (!stateKey) return;
@@ -423,7 +424,7 @@ export function installSidebarState(SidebarClass) {
     const legacyId = this._getLegacySessionId(sessionOrKey);
     if (legacyId && legacyId !== stateKey) delete this._customNames[legacyId];
     this._pushUserState(); this._render();
-    const newName = name.trim() || currentName || (legacyId ? legacyId.substring(0, 12) + '...' : 'Session');
+    const newName = name.trim() || currentName || (legacyId ? legacyId.substring(0, 12) + '...' : tr('Session'));
     if (sessionOrKey?.backend === 'codex' && name.trim()) this.app.renameBackendSession?.(sessionOrKey, name.trim());
     this.app.syncSessionName(sessionOrKey, newName);
   };
