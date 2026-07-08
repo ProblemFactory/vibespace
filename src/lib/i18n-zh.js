@@ -900,4 +900,6 @@ export default {
   'How long you must keep shaking before grid snap turns off. Lower = triggers faster (but easier to trigger by accident).': '需要持续摇晃多久才关闭网格吸附。数值越小触发越快（但也更容易误触发）。',
   'Task Group folder ({name})': '任务组文件夹（{name}）',
   'In a Task Group folder — {n} session(s) here': '位于任务组文件夹内——此处已有 {n} 个会话',
+  '+ New session in a Task Group…': '＋ 在任务组中新建会话…',
+  'No group': '不加入任何组',
 };

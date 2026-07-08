@@ -900,4 +900,6 @@ export default {
   'How long you must keep shaking before grid snap turns off. Lower = triggers faster (but easier to trigger by accident).': 'グリッドスナップがオフになるまで振り続ける時間。小さいほど速く発動します（ただし誤発動しやすくなります）。',
   'Task Group folder ({name})': 'タスクグループのフォルダ（{name}）',
   'In a Task Group folder — {n} session(s) here': 'タスクグループのフォルダ内——ここに {n} 件のセッションがあります',
+  '+ New session in a Task Group…': '＋ タスクグループで新規セッション…',
+  'No group': 'グループなし',
 };
