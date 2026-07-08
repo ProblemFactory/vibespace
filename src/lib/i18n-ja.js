@@ -891,4 +891,9 @@ export default {
   "✓ Subscription — {info}": "✓ サブスクリプション — {info}",
   "✓ imported": "✓ インポート済み",
   "✓ {n} more completed…": "✓ 他 {n} 件完了…",
+
+  // ── Sweep 3: shake-to-bypass-snap (2.52.0) ──
+  'Grid snap off': 'グリッドスナップ オフ',
+  'Shake to bypass snap': 'シェイクでスナップ解除',
+  'Shake a window vigorously for ~1 second while dragging to turn off grid/edge snap for the rest of that drag (a mouse-only alternative to holding Alt)': 'ドラッグ中にウィンドウを約1秒間激しく振ると、そのドラッグの残りの間だけグリッド/エッジスナップを無効化します（Alt キー長押しの代わりになるマウス操作）',
 };

@@ -891,4 +891,9 @@ export default {
   '✓ Subscription — {info}': '✓ 订阅 — {info}',
   '✓ imported': '✓ 已导入',
   '✓ {n} more completed…': '✓ 另有 {n} 个已完成…',
+
+  // ── Sweep 3: shake-to-bypass-snap (2.52.0) ──
+  'Grid snap off': '已关闭网格吸附',
+  'Shake to bypass snap': '摇晃取消吸附',
+  'Shake a window vigorously for ~1 second while dragging to turn off grid/edge snap for the rest of that drag (a mouse-only alternative to holding Alt)': '拖动时剧烈摇晃窗口约 1 秒，即可在本次拖动的剩余过程中关闭网格/边缘吸附（无需键盘，相当于按住 Alt 的替代方式）',
 };

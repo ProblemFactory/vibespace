@@ -1,4 +1,5 @@
 import { attachPopoverClose, escHtml } from './utils.js';
+import { t } from './i18n.js';
 import { TYPE_ICONS, installTabGroupMixin } from './tab-group.js';
 import { createAgentKindIcon, createBackendIcon, createModeBackendIcon, getAgentKindMeta } from './agent-meta.js';
 
@@ -155,12 +156,64 @@ class WindowManager {
     let deskSavedBounds = null; // window bounds saved before entering desktop preview
     const DRAG_THRESHOLD = 5;
 
+    // Shake-to-bypass-snap: vigorously shaking the window for ≥1s during a drag
+    // latches "grid snap off" for the REST of that drag — a mouse-only alternative
+    // to holding Alt. Detected by counting per-frame direction reversals: ≥3
+    // reversals inside a 500ms sliding window = "vigorous", and vigor sustained
+    // for SHAKE_HOLD ms latches the bypass.
+    const SHAKE_MIN_SPEED = 6;   // px/frame on an axis to count as intentional motion
+    const SHAKE_WINDOW = 500;    // ms sliding window for the reversal count
+    const SHAKE_REVERSALS = 3;   // reversals within the window ⇒ vigorous
+    const SHAKE_HOLD = 1000;     // ms of sustained vigor ⇒ latch (the ">1 second")
+    let shakeBypass = false, shakeReversals = [], shakeActiveSince = 0;
+    let shakeDirX = 0, shakeDirY = 0, shakeLastX = 0, shakeLastY = 0, shakeBadge = null;
+    const resetShake = (e) => {
+      shakeBypass = false; shakeReversals = []; shakeActiveSince = 0;
+      shakeDirX = 0; shakeDirY = 0; shakeLastX = e.clientX; shakeLastY = e.clientY;
+    };
+    const clearShakeBadge = () => {
+      if (shakeBadge) { shakeBadge.remove(); shakeBadge = null; }
+      element.classList.remove('snap-bypassed');
+    };
+    const updateShake = (e) => {
+      if (shakeBypass) return; // already latched — stays on for the rest of the drag
+      if (!(this._settings?.get('layout.shakeBypassSnap') ?? true)) return;
+      const now = e.timeStamp || performance.now();
+      const mdx = e.clientX - shakeLastX, mdy = e.clientY - shakeLastY;
+      shakeLastX = e.clientX; shakeLastY = e.clientY;
+      let reversed = false;
+      if (Math.abs(mdx) >= SHAKE_MIN_SPEED) { const s = Math.sign(mdx); if (shakeDirX && s !== shakeDirX) reversed = true; shakeDirX = s; }
+      if (Math.abs(mdy) >= SHAKE_MIN_SPEED) { const s = Math.sign(mdy); if (shakeDirY && s !== shakeDirY) reversed = true; shakeDirY = s; }
+      if (reversed) shakeReversals.push(now);
+      const cutoff = now - SHAKE_WINDOW;
+      while (shakeReversals.length && shakeReversals[0] < cutoff) shakeReversals.shift();
+      if (shakeReversals.length >= SHAKE_REVERSALS) {
+        if (!shakeActiveSince) shakeActiveSince = now;
+        else if (now - shakeActiveSince >= SHAKE_HOLD) {
+          shakeBypass = true; // latch — the drop handler now skips snap
+          element.classList.add('snap-bypassed');
+          this.snapIndicator.style.display = 'none';
+          this._clearGridHighlight();
+          if (shiftDragStart >= 0) shiftDragStart = -1;
+          if (!shakeBadge) {
+            shakeBadge = document.createElement('div');
+            shakeBadge.className = 'snap-bypass-badge';
+            shakeBadge.textContent = t('Grid snap off');
+            document.body.appendChild(shakeBadge);
+          }
+        }
+      } else {
+        shakeActiveSince = 0; // vigor lapsed — the 1s must be continuous
+      }
+    };
+
     titleBar.addEventListener('mousedown', (e) => {
       if (e.target.closest('.window-controls') || e.target.closest('.tab-item') || e.target.closest('.window-icon-stack') || e.button !== 0) return;
       mouseDown = true; dragging = false; tabMergeTarget = null;
       startX = e.clientX; startY = e.clientY;
       initL = element.offsetLeft; initT = element.offsetTop;
       shiftDragStart = -1;
+      resetShake(e);
       e.preventDefault();
     });
 
@@ -200,6 +253,10 @@ class WindowManager {
 
       element.style.left = (initL + dx) + 'px'; element.style.top = (initT + dy) + 'px';
 
+      // Shake detection runs on the raw cursor path (before any snap decision).
+      updateShake(e);
+      if (shakeBadge) { shakeBadge.style.left = (e.clientX + 14) + 'px'; shakeBadge.style.top = (e.clientY - 26) + 'px'; }
+
       // Live-update this window's rect in the active desktop preview
       if (!deskPreviewTarget) {
         const wr = this.workspace.getBoundingClientRect();
@@ -212,7 +269,7 @@ class WindowManager {
 
       const snapEnabled = this._settings?.get('layout.enableDragSnap') ?? true;
       const shiftDragEnabled = this._settings?.get('layout.enableShiftDragSelection') ?? true;
-      if (!e.altKey && snapEnabled) {
+      if (!e.altKey && !shakeBypass && snapEnabled) {
         if (e.shiftKey && this.grid && shiftDragEnabled) {
           if (shiftDragStart < 0) shiftDragStart = this._getGridCell(e.clientX, e.clientY);
           const current = this._getGridCell(e.clientX, e.clientY);
@@ -350,6 +407,7 @@ class WindowManager {
       mouseDown = false;
       if (!dragging) return;
       dragging = false; element.classList.remove('dragging');
+      clearShakeBadge(); // remove the "snap off" indicator (all drop paths below may early-return)
       this.snapIndicator.style.display = 'none';
       for (const [, w] of this.windows) w.element.classList.remove('tab-drop-target');
       if (mergeGhost) { mergeGhost.remove(); mergeGhost = null; }
@@ -432,7 +490,7 @@ class WindowManager {
       const snapEnabled = this._settings?.get('layout.enableDragSnap') ?? true;
       const shiftDragEnabled = this._settings?.get('layout.enableShiftDragSelection') ?? true;
       let snapped = false;
-      if (!e.altKey && snapEnabled) {
+      if (!e.altKey && !shakeBypass && snapEnabled) {
         if (shiftDragStart >= 0 && e.shiftKey && this.grid && shiftDragEnabled) {
           const endCell = this._getGridCell(e.clientX, e.clientY);
           if (endCell >= 0) { this._snapToGridRange(win.id, shiftDragStart, endCell); snapped = true; }
