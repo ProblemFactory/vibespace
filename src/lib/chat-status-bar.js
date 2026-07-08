@@ -307,6 +307,11 @@ export class ChatStatusBar {
     const showDropdown = (anchor) => {
       const existing = container.querySelector('.chat-status-dropdown');
       if (existing) { existing.remove(); return null; }
+      // The bottom/left math is relative to the container — which is only what
+      // position:absolute resolves against if the container is itself
+      // positioned. A static container silently re-anchors the dropdown to
+      // some ancestor and it lands off-screen (invisible "dead" click).
+      if (getComputedStyle(container).position === 'static') container.style.position = 'relative';
       const dropdown = document.createElement('div');
       dropdown.className = 'chat-status-dropdown';
       const rect = anchor.getBoundingClientRect();
@@ -525,15 +530,29 @@ export class ChatStatusBar {
           { value: 'medium', label: 'medium' }, { value: 'high', label: 'high' }, { value: 'xhigh', label: 'xhigh' },
         ]);
       } else {
+        // Async population: show a Loading row immediately (a bare empty box
+        // reads as a dead click), and NEVER vanish on fetch failure — the
+        // effort enum is stable, so fall back to the hardcoded ladder.
+        const claudeLadder = (levels) => [{ value: '', label: t('Default (reset)') }, ...levels, { value: 'ultracode', label: t('ultracode (xhigh + workflows)') }];
+        const loading = document.createElement('div');
+        loading.className = 'chat-status-dropdown-item chat-status-dim';
+        loading.textContent = t('Loading…');
+        dropdown.appendChild(loading);
         fetch('/api/session-options').then(r => r.json()).then(data => {
+          if (!dropdown.isConnected) return;
+          loading.remove();
           const levels = (data?.effortLevels || ['low', 'medium', 'high', 'xhigh', 'max']).map(v => ({ value: v, label: v }));
           // "ultracode" isn't an effortLevel — it's a separate mode (xhigh +
           // dynamic-workflow orchestration). The CLI's own /effort UI appends it
           // to the ladder; mirror that. The adapter wires it via the ultracode
           // settings key, not effortLevel. (Gated CLI-side on an xhigh-capable
           // model + dynamic workflows — a no-op if unsupported.)
-          addItems([{ value: '', label: t('Default (reset)') }, ...levels, { value: 'ultracode', label: t('ultracode (xhigh + workflows)') }]);
-        }).catch(() => { dropdown.remove(); });
+          addItems(claudeLadder(levels));
+        }).catch(() => {
+          if (!dropdown.isConnected) return;
+          loading.remove();
+          addItems(claudeLadder(['low', 'medium', 'high', 'xhigh', 'max'].map(v => ({ value: v, label: v }))));
+        });
       }
       return;
     }
@@ -545,16 +564,15 @@ export class ChatStatusBar {
       const dropdown = showDropdown(modelEl);
       if (!dropdown) return;
       const backend = this._backend === 'codex' ? 'codex' : 'claude';
-      fetch('/api/available-models').then(r => r.json()).then(data => {
-        const models = (data?.[backend] || []).filter(m => m.id);
-        const pick = (model) => {
-          this._ws.send({ type: 'set-model', sessionId: this._sessionId, model });
-          this._onConfigChange?.({ model });
-          // optimistic; the CLI's own confirmation (set_model echo / codex
-          // turn_context) overwrites this with the RESOLVED id
-          this._statusModel = model;
-          this.render();
-        };
+      const pick = (model) => {
+        this._ws.send({ type: 'set-model', sessionId: this._sessionId, model });
+        this._onConfigChange?.({ model });
+        // optimistic; the CLI's own confirmation (set_model echo / codex
+        // turn_context) overwrites this with the RESOLVED id
+        this._statusModel = model;
+        this.render();
+      };
+      const addModelItems = (models) => {
         for (const m of models) {
           const item = document.createElement('div');
           item.className = 'chat-status-dropdown-item' + (m.id === this._statusModel ? ' active' : '');
@@ -571,7 +589,22 @@ export class ChatStatusBar {
           if (v && v.trim()) pick(v.trim());
         };
         dropdown.appendChild(custom);
-      }).catch(() => { dropdown.remove(); });
+      };
+      // Loading row while the model list fetches; on failure fall back to the
+      // CLI alias ladder (+ Custom\u2026) instead of silently vanishing.
+      const loading = document.createElement('div');
+      loading.className = 'chat-status-dropdown-item chat-status-dim';
+      loading.textContent = t('Loading\u2026');
+      dropdown.appendChild(loading);
+      fetch('/api/available-models').then(r => r.json()).then(data => {
+        if (!dropdown.isConnected) return;
+        loading.remove();
+        addModelItems((data?.[backend] || []).filter(m => m.id));
+      }).catch(() => {
+        if (!dropdown.isConnected) return;
+        loading.remove();
+        addModelItems(backend === 'claude' ? ['fable', 'opus', 'sonnet', 'haiku'].map(id => ({ id })) : []);
+      });
       return;
     }
 
