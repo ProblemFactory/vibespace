@@ -4,6 +4,7 @@
  * TOC button (top of the track) opens a filterable outline of all user messages.
  */
 import { createPopover } from './utils.js';
+import { t } from './i18n.js';
 
 export class ChatMinimap {
   /**
@@ -46,7 +47,7 @@ export class ChatMinimap {
     this._tocBtn = document.createElement('button');
     this._tocBtn.className = 'chat-minimap-toc-btn hidden';
     this._tocBtn.innerHTML = '&#9776;';
-    this._tocBtn.title = 'Your messages (outline)';
+    this._tocBtn.title = t('Your messages (outline)');
     this._tocBtn.addEventListener('click', (e) => { e.stopPropagation(); this._showToc(); });
     container.appendChild(this._tocBtn);
 
@@ -368,7 +369,7 @@ export class ChatMinimap {
     const pop = createPopover(this._tocBtn, 'chat-minimap-toc');
     const filter = document.createElement('input');
     filter.className = 'chat-minimap-toc-filter';
-    filter.placeholder = `Filter ${turns.length} messages…`;
+    filter.placeholder = t('Filter {n} messages…', { n: turns.length });
     pop.appendChild(filter);
     const list = document.createElement('div');
     list.className = 'chat-minimap-toc-list';
@@ -387,7 +388,7 @@ export class ChatMinimap {
         time.textContent = turn.ts ? d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
         const text = document.createElement('span');
         text.className = 'chat-minimap-toc-text';
-        text.textContent = preview || '(empty)';
+        text.textContent = preview || t('(empty)');
         row.append(time, text);
         row.onclick = () => {
           pop.remove();
@@ -400,7 +401,7 @@ export class ChatMinimap {
         const empty = document.createElement('div');
         empty.className = 'chat-minimap-toc-row';
         empty.style.opacity = '0.5';
-        empty.textContent = 'No matches';
+        empty.textContent = t('No matches');
         list.appendChild(empty);
       }
     };
