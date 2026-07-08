@@ -93,6 +93,7 @@ You only need to install the CLI(s) for the backend(s) you actually use — at l
 - **Embedded browser** with URL bar and a node-unblocker proxy mode for iframe-restricted sites
 - **6 color themes** (Dark, Light, Dracula, Nord, Solarized, Monokai) + a custom theme editor (~50 CSS vars + 16 ANSI colors, live preview)
 - **Settings system** — VS Code-style UI, per-terminal overrides, per-backend launch defaults (model/effort/permission)
+- **Multilingual UI** — English / 中文 / 日本語, per-device choice (⚙ → Language), English fallback for anything untranslated
 - **Presets** — save/restore full workspace state (windows, positions, grid, theme, fonts)
 - **Usage monitoring** — per-backend rate-limit pie charts (e.g. 5h / 7d) in the taskbar, click for details
 - **WebSocket auto-reconnect** — re-attaches all active sessions on connection recovery
