@@ -921,4 +921,6 @@ export default {
   "subscription": "サブスクリプション",
   "✓ Added {name}": "✓ {name} を追加しました",
   "👑 {name} (subscription)": "👑 {name}（サブスク）",
+  "Add API key…": "API キーを追加…",
+  "Paste a raw Anthropic API key (sk-ant-…) — bills pay-per-use, separate from the console-login import": "生の Anthropic API キー（sk-ant-…）を貼り付け——従量課金、コンソールログインの取り込みとは別",
 };
