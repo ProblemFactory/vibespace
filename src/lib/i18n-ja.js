@@ -948,7 +948,6 @@ export default {
   "This machine's own login — lives on {host}, not in VibeSpace": "このマシン自身のログイン——{host} 上にあり、VibeSpace にはありません",
   "account": "アカウント",
   "e.g. Work ChatGPT": "例：仕事用 ChatGPT",
-  "logged in (on {host})": "ログイン済み（{host} 上）",
   "model-name": "モデル名",
   "remote host": "リモートホスト",
   "unreachable": "接続不可",

@@ -277,7 +277,7 @@ html, body {
    tracks and break the cross-row column alignment. The list's padding provides
    the left/right inset; the .is-default background spans the grid content box. */
 .acct-key-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; padding: 3px 0; font-size: 11px; }
-.acct-key-main { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.acct-key-main { display: flex; align-items: baseline; gap: 6px; min-width: 0; flex-wrap: wrap; row-gap: 0; }
 .acct-key-name { font-weight: 500; white-space: nowrap; }
 .acct-key-tail { color: var(--text-dim); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .acct-usage-cell { display: flex; justify-content: flex-end; }

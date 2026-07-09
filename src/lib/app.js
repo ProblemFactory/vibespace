@@ -519,7 +519,7 @@ class App {
     const gDef = !accts.defaultCodexAccountId;
     const gName = selectedHost ? t('CLI login on {host}', { host: escHtml(hostLabel) }) : t('CLI login');
     const gIdent = gLoggedIn
-      ? (selectedHost ? `<span class="ob-ok">${t('logged in (on {host})', { host: escHtml(hostLabel) })}</span>` : t('logged in'))
+      ? (selectedHost ? `<span class="ob-ok">${t('logged in')}</span>` : t('logged in'))
       : `<span class="ob-warn">${t('not logged in')}</span>`;
     const gExtraActions = selectedHost
       ? `<button class="agent-btn acct-host-login" title="${t('Opens a terminal ON {host} — this login lands on that machine, not in VibeSpace', { host: escHtml(hostLabel) })}">${t('Log in on {host}…', { host: escHtml(hostLabel) })}</button>` : '';
@@ -943,7 +943,7 @@ class App {
       gName = t('CLI login on {host}', { host: escHtml(hostLabel) });
       gIdent = racct && !racct.error
         ? (racct.subscription?.loggedIn
-            ? `<span class="ob-ok">${t('logged in (on {host})', { host: escHtml(hostLabel) })}</span>`
+            ? `<span class="ob-ok">${t('logged in')}</span>`
             : `<span class="ob-warn">${racct.cliKey?.present ? t('not logged in (a Console login replaced it)') : t('not logged in')}</span>`)
         : `<span class="ob-warn">${t('unreachable')}</span>`;
       gExtraActions = `<button class="agent-btn acct-host-login" title="${t('Opens a terminal ON {host} — this login lands on that machine, not in VibeSpace', { host: escHtml(hostLabel) })}">${t('Log in on {host}…', { host: escHtml(hostLabel) })}</button>`
