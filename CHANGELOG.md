@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.57.0] — 2026-07-08
+
+### Changed — account manager polish (multi-subscription)
+- Accounts now read as **peers**: every row carries the same controls, and the
+  "default for new sessions" is a single **star toggle** (filled = default,
+  click to set/clear) instead of an asymmetric "Set default / Unset default"
+  button.
+- **Rename** any account (subscription or API key) — a pencil button per row.
+- Manage Agents account rows use **SVG icons** (crown / key / star / pencil / ✕)
+  instead of emoji.
+- The session card's subscription billing badge shows a crown SVG + just the
+  account's **first character** (full name in the tooltip), so it stays compact.
+
 ## [2.56.3] — 2026-07-08
 
 ### Fixed — terminal paste broke non-TUI prompts (root cause of the login failure)

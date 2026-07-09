@@ -758,29 +758,39 @@ class App {
           const subLine = sub.loggedIn
             ? `<span class="ob-ok">${t('✓ Subscription — {info}', { info: escHtml(sub.email || t('logged in')) })}</span>`
             : `<span class="ob-warn">${acct.cliKey?.present ? t('Subscription: not logged in (a Console login replaced it)') : t('Subscription: not logged in')}</span>`;
+          // SVG icons (no emoji) — crown for a subscription, key for an API key,
+          // star for the default toggle, pencil for rename, ✕ for remove.
+          const svg = (d, sw = 1.4) => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+          const CROWN = svg('<path d="M2.5 12.5h11M3 12.5L2 4.5l3.2 2.6L8 3l2.8 4.1L14 4.5l-1 8z"/>');
+          const KEY = svg('<circle cx="5" cy="9" r="2.6"/><path d="M7.4 8.2 14 3M11.5 5.2l1.6 1.6M13 3.7l1.6 1.6"/>', 1.5);
+          const STAR_F = svg('<path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 11.6 4.1 13.6l.8-4.3-3.1-3 4.3-.6z" fill="currentColor"/>');
+          const STAR_O = svg('<path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 11.6 4.1 13.6l.8-4.3-3.1-3 4.3-.6z"/>');
+          const PENCIL = svg('<path d="M11 2.5 13.5 5 5.5 13H3v-2.5z"/>');
           const keyLines = (accts.accounts || []).map(a => {
             const isDef = accts.defaultAccountId === a.id;
             const isSub = a.type === 'subscription';
-            // Subscription = 👑 name · email/plan (its OWN securestorage login);
-            // API key = 🔑 name · tail.
             const ident = isSub
               ? (a.loggedIn ? escHtml((a.email || '') + (a.subscriptionType ? (a.email ? ' · ' : '') + a.subscriptionType : '')) || t('logged in')
                             : `<span class="ob-warn">${t('not logged in')}</span>`)
               : `API …${escHtml(a.tail || '')}`;
             const testTitle = isSub ? t('Open a terminal session on this subscription') : t("Open a terminal session using this key (approve the CLI's one-time trust prompt here if it appears)");
-            return `<div class="acct-key-row" data-id="${escHtml(a.id)}" data-sub="${isSub ? '1' : ''}">
-              <span class="acct-type-icon">${isSub ? '👑' : '🔑'}</span> <span class="acct-key-name">${escHtml(a.name)}</span>
-              <span class="acct-key-tail">${ident}</span>${isDef ? `<span class="acct-def-badge">${t('default')}</span>` : ''}
+            // Every row carries the SAME controls (peers) — the default is just a
+            // star toggle whose fill differs; no row is privileged in layout.
+            return `<div class="acct-key-row${isDef ? ' is-default' : ''}" data-id="${escHtml(a.id)}" data-sub="${isSub ? '1' : ''}">
+              <span class="acct-type-icon" title="${isSub ? t('Subscription (Pro/Max)') : t('API key')}">${isSub ? CROWN : KEY}</span>
+              <span class="acct-key-name">${escHtml(a.name)}</span>
+              <span class="acct-key-tail">${ident}</span>
               <span class="acct-key-actions">
+                <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
+                <button class="acct-icon acct-rename" title="${t('Rename')}">${PENCIL}</button>
                 <button class="agent-btn acct-test" title="${testTitle}">${t('Test')}</button>
-                <button class="agent-btn acct-def" title="${t('Use for new sessions unless a session picks otherwise')}">${isDef ? t('Unset default') : t('Set default')}</button>
-                <button class="agent-btn acct-del" title="${isSub ? t('Remove this subscription from VibeSpace (deletes its stored login)') : t('Remove from VibeSpace (the key itself stays valid)')}">✕</button>
+                <button class="acct-icon acct-del" title="${isSub ? t('Remove this subscription from VibeSpace (deletes its stored login)') : t('Remove from VibeSpace (the key itself stays valid)')}">${svg('<path d="M4 4l8 8M12 4l-8 8"/>', 1.6)}</button>
               </span></div>`;
           }).join('');
           left.innerHTML = `<b>${t('Anthropic accounts')}</b>
             <div style="margin:3px 0">${subLine}</div>
             ${keyLines || `<div class="agents-note">${t('No accounts saved yet — sessions use the CLI’s global login. Add a subscription to hold several Pro/Max logins and pick one per session.')}</div>`}
-            <div class="agents-note" style="margin:4px 0 0">${t('Each session can pick its account (New Session dialog / card ⚙). 👑 subscriptions bill your Pro/Max plan; 🔑 API keys bill pay-per-use.')}</div>`;
+            <div class="agents-note" style="margin:4px 0 0">${t('Each session can pick its account (New Session dialog / card ⚙). Subscriptions bill your Pro/Max plan; API keys bill pay-per-use. The starred account is the default when a session doesn’t pick one.')}</div>`;
           const actions = document.createElement('div'); actions.className = 'agent-actions';
           const needsSetup = !sub.loggedIn || !(accts.accounts || []).length;
           const wizardBtn = document.createElement('button');
@@ -827,22 +837,28 @@ class App {
             const keyRow = e.target.closest?.('.acct-key-row');
             if (!keyRow) return;
             const id = keyRow.dataset.id;
-            if (e.target.classList.contains('acct-test')) {
+            const a = (accts.accounts || []).find(x => x.id === id);
+            // closest() — the click can land on an <svg>/<path> inside the button.
+            if (e.target.closest('.acct-test')) {
               // A not-logged-in subscription can't spawn — the server would
               // reject the create and leave a blank window. Guard it here.
-              const acct = (accts.accounts || []).find(x => x.id === id);
-              if (acct?.type === 'subscription' && !acct.loggedIn) {
+              if (a?.type === 'subscription' && !a.loggedIn) {
                 showToast(t('This subscription isn’t signed in yet — use “Add subscription…” to finish the login first.'), { type: 'error' });
                 return;
               }
               done();
               this.createSession({ backend: 'claude', mode: 'terminal', cwd: '', accountId: id });
-            } else if (e.target.classList.contains('acct-def')) {
+            } else if (e.target.closest('.acct-def')) {
               const isDef = accts.defaultAccountId === id;
               try { await fetchJson('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: isDef ? null : id }) }); } catch {}
               refresh();
-            } else if (e.target.classList.contains('acct-del')) {
-              const a = (accts.accounts || []).find(x => x.id === id);
+            } else if (e.target.closest('.acct-rename')) {
+              const name = await showInputDialog({ title: t('Rename account'), label: t('Account name'), value: a?.name || '', confirmText: t('Save') });
+              if (name && name.trim() && name.trim() !== a?.name) {
+                try { await fetchJson(`/api/accounts/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) }); } catch {}
+                refresh();
+              }
+            } else if (e.target.closest('.acct-del')) {
               if (!(await showConfirmDialog({ title: t('Remove account'), message: t('Remove "{name}" from VibeSpace? Sessions already running keep working; the key itself stays valid.', { name: a?.name }) }))) return;
               try { await fetchJson(`/api/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }); } catch {}
               refresh();
@@ -2133,7 +2149,7 @@ class App {
       for (const a of list) {
         // Named subscription accounts are LOCAL-only in P1 (their creds dir is
         // on this machine); skip them when a remote host is selected.
-        if (a.type === 'subscription') { if (!onHost && a.loggedIn) opts.push([a.id, t('👑 {name} (subscription)', { name: a.name })]); }
+        if (a.type === 'subscription') { if (!onHost && a.loggedIn) opts.push([a.id, t('{name} (subscription)', { name: a.name })]); }
         else opts.push([a.id, t('{name} — API key …{tail}', { name: a.name, tail: a.tail })]);
       }
       for (const [v, label] of opts) {
