@@ -790,9 +790,8 @@ class App {
             : `<span class="ob-warn">${acct.cliKey?.present ? t('not logged in (a Console login replaced it)') : t('not logged in')}</span>`;
           const globalRow = `<div class="acct-key-row${gDef ? ' is-default' : ''}" data-id="__global__">
             <span class="acct-type-icon" title="${t('The CLI’s own global login')}">${GLOBE}</span>
-            <span class="acct-key-name">${t('CLI login')}</span>
-            <span class="acct-key-tail">${gIdent}</span>
-            ${sub.loggedIn ? usageHtml(this._rateLimit) : ''}
+            <span class="acct-key-main"><span class="acct-key-name">${t('CLI login')}</span><span class="acct-key-tail">${gIdent}</span></span>
+            <span class="acct-usage-cell">${sub.loggedIn ? usageHtml(this._rateLimit) : ''}</span>
             <span class="acct-key-actions">
               <button class="acct-icon acct-def ${gDef ? 'on' : ''}" title="${gDef ? t('Default for new sessions — pick another to change') : t('Set as default for new sessions')}">${gDef ? STAR_F : STAR_O}</button>
             </span></div>`;
@@ -808,9 +807,8 @@ class App {
             // star toggle whose fill differs; no row is privileged in layout.
             return `<div class="acct-key-row${isDef ? ' is-default' : ''}" data-id="${escHtml(a.id)}" data-sub="${isSub ? '1' : ''}">
               <span class="acct-type-icon" title="${isSub ? t('Subscription (Pro/Max)') : t('API key')}">${isSub ? CROWN : KEY}</span>
-              <span class="acct-key-name">${escHtml(a.name)}</span>
-              <span class="acct-key-tail">${ident}</span>
-              ${isSub && a.loggedIn ? usageHtml(this._accountUsage?.[a.id]) : ''}
+              <span class="acct-key-main"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}</span></span>
+              <span class="acct-usage-cell">${isSub && a.loggedIn ? usageHtml(this._accountUsage?.[a.id]) : ''}</span>
               <span class="acct-key-actions">
                 <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
                 <button class="acct-icon acct-rename" title="${t('Rename')}">${PENCIL}</button>
