@@ -146,12 +146,15 @@
       <div id="taskbar-items"></div>
       <div id="taskbar-tray" data-zone="taskbar-tray">
         <div id="desktop-previews"></div>
+        <div id="taskbar-user-todos" class="taskbar-user-todos" title="Items waiting on you" data-i18n-attr="title"></div>
         <div id="taskbar-usage" class="taskbar-usage" title="Click for usage details" data-i18n-attr="title"></div>
         <div id="taskbar-status" title="Window list"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="4.5" width="10" height="8" rx="1"/><path d="M4.5 4.5v-2a1 1 0 011-1h8a1 1 0 011 1v6a1 1 0 01-1 1h-2"/></svg><span id="active-count">0</span></div>
       </div>
     </footer>
     <!-- Usage popup -->
     <div id="usage-popup" class="usage-popup hidden"></div>
+    <!-- Global user-TODO inbox popup ("For you") -->
+    <div id="user-todos-popup" class="usage-popup ut-popup hidden"></div>
   </div>
 
   <!-- Dialogs -->

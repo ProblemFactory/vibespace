@@ -253,9 +253,32 @@ It authenticates with a per-session token from the environment, so an agent can 
 
 **You can overwrite it.** Click the chip (or the Status row in the expanded card) → pick state/urgency, or Clear. If you change or clear a status the **agent** had set, the agent is told about it in a note attached to your next message — so it learns your preference instead of silently fighting you over the indicator.
 
+## The "For you" inbox (global user TODO list)
+
+The status indicator says *that* a session is waiting on you; the **"For you"
+inbox** says *what for* — as discrete, checkable items. When an agent hits
+something only you can settle (a decision between approaches, credentials or
+content only you have, something it wants reviewed), it files an item:
+
+```
+vibespace-ask "Which auth flow should signup use?" --detail "Option A ... Option B ... I lean A." --urgency high
+vibespace-ask list
+vibespace-ask resolve <id|text>     # the agent resolves it once you answer in chat
+```
+
+Each item belongs to the session that filed it (that session's own TODO list
+for you); the **taskbar inbox button** merges every session's open items into
+one panel — grouped by session, sorted urgent-first, with a count badge and a
+toast when something new arrives. Click a group header (or an item) to **jump
+straight to that session** and handle it; ✓ marks it done, ✕ dismisses, ↺
+reopens. Recently-resolved items stay visible (dimmed) for context. Re-filing
+the same open question refreshes it instead of duplicating, and a per-session
+cap keeps a looping agent from flooding the list. Works from remote-host
+sessions too (the CLI ships with the other VibeSpace tools).
+
 ### Multi-client sync
 
-Task Groups live server-side in `data/task-groups.json`, session statuses in `data/session-status.json`; both broadcast to all connected clients (`tasks-updated` / `session-status-updated`). Star/archive/name state stays in `data/user-state.json`. Changes made on one device appear instantly on all others. (These runtime files are gitignored — never committed.)
+Task Groups live server-side in `data/task-groups.json`, session statuses in `data/session-status.json`, the "For you" inbox in `data/user-todos.json`; all broadcast to connected clients (`tasks-updated` / `session-status-updated` / `user-todos-updated`). Star/archive/name state stays in `data/user-state.json`. Changes made on one device appear instantly on all others. (These runtime files are gitignored — never committed.)
 
 ### Archiving whole projects
 

@@ -247,7 +247,12 @@ class TaskGroupManager {
       '`vibespace-status` — report the state of THIS SESSION (your own work) right now. A Task Group has no status; the SESSION does:',
       `- \`vibespace-status <working|needs-input|blocked|review|done> [--urgency low|normal|high|urgent] [--reason "why"]\``,
       `- \`vibespace-status clear\`  /  \`vibespace-status show\``,
-      `- Keep it honest and current — the user reads it on the board. Set \`blocked\` or \`needs-input\` (with a higher urgency) the moment you are stuck or waiting on the user; \`done\` when this piece of work is finished.`);
+      `- Keep it honest and current — the user reads it on the board. Set \`blocked\` or \`needs-input\` (with a higher urgency) the moment you are stuck or waiting on the user; \`done\` when this piece of work is finished.`,
+      '',
+      '`vibespace-ask` — file an item on the USER\'s global inbox when something specifically needs THEM (a decision, input only they can give, something to review). They see every session\'s items in one list and can jump here to answer:',
+      `- \`vibespace-ask "question or decision needed" [--detail "context + your recommendation"] [--urgency low|normal|high|urgent]\``,
+      `- \`vibespace-ask list\`  /  \`vibespace-ask resolve <id|text>\` — resolve it yourself once the user answers (in chat or otherwise).`,
+      `- ONLY for things that genuinely depend on the user — not your own working steps (normal todo list) and not group work items (\`vibespace-task plan-add\`).`);
     if (t.contextDir) {
       const cbase = ctxBase || t.contextDir;
       parts.push('', '### Using the shared context folder', '',
