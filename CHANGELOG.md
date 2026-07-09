@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.59.0] — 2026-07-08
+
+### Added — multiple ChatGPT (Codex) logins, switchable per session
+Codex now supports the same multi-account model Claude Code got in 2.56–2.58:
+hold **several ChatGPT logins at once** and pick one per session. Each account
+gets its own isolated `CODEX_HOME` whose `sessions/` and `config.toml` are
+symlinks to the shared `~/.codex` — so **auth is isolated per account** while
+your **threads and settings stay unified** (one session list, one config). Add
+one via **Manage agents → ChatGPT / OpenAI accounts → Add ChatGPT account…**; it
+opens a terminal running `codex login --device-auth` (a URL + one-time code, so
+it works even when your browser is on a different machine). Star an account to
+make it the default for new Codex sessions; pick a specific one in the New
+Session dialog or the card ⚙. Local machine only for now (remote hosts pending).
+
+### Changed — accounts grouped under their CLI in Manage agents
+The account rosters now render **directly under their backend**: Anthropic
+accounts under **Claude Code**, ChatGPT/OpenAI accounts under **Codex** — instead
+of one Anthropic-only section at the bottom. Each backend keeps its own default
+account. Row columns (icon · name · usage · actions) are grid-aligned so the
+CLI-login peer row lines up with the richer account rows.
+
 ## [2.58.0] — 2026-07-08
 
 ### Added — per-subscription usage in the account manager

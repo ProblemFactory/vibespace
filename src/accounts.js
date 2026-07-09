@@ -30,8 +30,15 @@ class AccountManager {
     // stay shared). Verified vs claude 2.1.205 (Wde() = env ?? sn()). This is
     // how we hold MANY subscription logins at once.
     this._subsDir = path.join(dataDir, 'subs');
+    // Per-CODEX-account homes. Codex has NO auth-only relocation env (CODEX_HOME
+    // moves the WHOLE config dir), so we isolate auth by giving each account its
+    // own CODEX_HOME whose `sessions/` + `config.toml` are SYMLINKS to the
+    // shared ~/.codex — auth.json stays real per-account, threads land in the
+    // shared sessions dir (unified discovery), settings stay shared. Verified vs
+    // codex 0.142.5 (symlinks survive a run; rollout written to shared dir).
+    this._codexSubsDir = path.join(dataDir, 'codex-subs');
     this._onChange = onChange || (() => {});
-    this._state = { version: 1, defaultAccountId: null, accounts: [] };
+    this._state = { version: 1, defaultAccountId: null, defaultCodexAccountId: null, accounts: [] };
     this._load();
     // Console-login scratch dirs (con-*) are transient; drop any abandoned by a
     // login that never completed before a prior restart.
@@ -39,8 +46,10 @@ class AccountManager {
   }
 
   _acctType(a) { return a.type || 'api'; } // legacy records (no type) = API key
+  _acctBackend(a) { return a.backend || 'claude'; } // legacy records = Claude
   subDir(id) { return path.join(this._subsDir, id); }
   subCredsPath(id) { return path.join(this.subDir(id), '.credentials.json'); }
+  codexSubDir(id) { return path.join(this._codexSubsDir, id); }
 
   // Pre-seed an isolated login dir's .claude.json with the onboarding-complete
   // flags (hasCompletedOnboarding/hasTrustDialogAccepted) so the login (run with
@@ -96,9 +105,15 @@ class AccountManager {
   list() {
     return {
       defaultAccountId: this._state.defaultAccountId || null,
+      defaultCodexAccountId: this._state.defaultCodexAccountId || null,
       accounts: this._state.accounts.map((a) => {
         const type = this._acctType(a);
-        const base = { id: a.id, name: a.name, type, source: a.source, createdAt: a.createdAt };
+        const backend = this._acctBackend(a);
+        const base = { id: a.id, name: a.name, type, backend, source: a.source, createdAt: a.createdAt };
+        if (backend === 'codex') {
+          const info = this.readCodexSubAuth(a.id);
+          return { ...base, loggedIn: info.loggedIn, email: info.email, subscriptionType: info.plan, authMode: info.authMode };
+        }
         if (type === 'subscription') {
           const info = this.readSubCreds(a.id);
           return { ...base, loggedIn: info.loggedIn, email: info.email, subscriptionType: info.subscriptionType };
@@ -167,6 +182,75 @@ class AccountManager {
     return { id, ...info, name: a.name };
   }
 
+  // ── Codex subscription accounts (each = its own CODEX_HOME, auth isolated) ──
+
+  // The shared ~/.codex the per-account homes symlink into. Ensure the symlink
+  // TARGETS exist (sessions dir + config.toml) so codex reads/writes go there.
+  _codexSharedHome() { return process.env.CODEX_HOME || path.join(os.homedir(), '.codex'); }
+  _seedCodexDir(dir) {
+    const shared = this._codexSharedHome();
+    try { fs.mkdirSync(path.join(shared, 'sessions'), { recursive: true }); } catch { }
+    try { if (!fs.existsSync(path.join(shared, 'config.toml'))) fs.writeFileSync(path.join(shared, 'config.toml'), ''); } catch { }
+    const link = (name) => {
+      const p = path.join(dir, name);
+      try { fs.rmSync(p, { recursive: true, force: true }); } catch { }
+      try { fs.symlinkSync(path.join(shared, name), p); } catch { }
+    };
+    link('sessions');   // threads land in the shared dir → unified discovery
+    link('config.toml'); // model/approval settings shared across accounts
+  }
+
+  createCodexSubscription({ name } = {}) {
+    const id = 'cxs-' + crypto.randomBytes(6).toString('hex');
+    fs.mkdirSync(this.codexSubDir(id), { recursive: true, mode: 0o700 });
+    this._seedCodexDir(this.codexSubDir(id));
+    const a = { id, name: String(name || '').trim().slice(0, 60) || 'ChatGPT', type: 'subscription', backend: 'codex', source: 'login', createdAt: Date.now() };
+    this._state.accounts.push(a);
+    this._save();
+    this._notify();
+    return { id, dir: this.codexSubDir(id) };
+  }
+
+  // Decode a JWT payload without verifying (identity display only — never trust
+  // for auth). Returns {} on any malformation.
+  _jwtPayload(tok) {
+    try {
+      const seg = String(tok).split('.')[1];
+      return JSON.parse(Buffer.from(seg.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf-8')) || {};
+    } catch { return {}; }
+  }
+
+  // Read-only parse of a codex account's auth.json (never refreshes). Reports
+  // loggedIn + auth mode + identity (email/plan) from the id_token claims.
+  readCodexSubAuth(id) {
+    try {
+      const raw = JSON.parse(fs.readFileSync(path.join(this.codexSubDir(id), 'auth.json'), 'utf-8'));
+      const mode = raw.auth_mode || (raw.tokens ? 'chatgpt' : (raw.OPENAI_API_KEY ? 'apikey' : null));
+      const hasTok = !!(raw.tokens?.access_token || raw.tokens?.id_token || raw.OPENAI_API_KEY);
+      if (!hasTok) return { loggedIn: false };
+      let email = null, plan = null;
+      if (raw.tokens?.id_token) {
+        const c = this._jwtPayload(raw.tokens.id_token);
+        email = c.email || null;
+        const auth = c['https://api.openai.com/auth'] || {};
+        plan = auth.chatgpt_plan_type || auth.plan_type || null;
+      }
+      return { loggedIn: true, authMode: mode, email, plan };
+    } catch { return { loggedIn: false }; }
+  }
+
+  finalizeCodexSubscription(id) {
+    const a = this.get(id);
+    if (!a || this._acctBackend(a) !== 'codex') throw new Error('not a codex account');
+    const info = this.readCodexSubAuth(id);
+    if (info.loggedIn && (!a.name || a.name === 'ChatGPT')) {
+      a.name = (info.email || (info.plan ? 'ChatGPT ' + info.plan : 'ChatGPT')).slice(0, 60);
+      this._save();
+    }
+    this._notify();
+    return { id, ...info, name: a.name };
+  }
+
   add({ name, key, source = 'manual' } = {}) {
     key = String(key || '').trim();
     if (!/^sk-ant-/.test(key)) throw new Error('not an Anthropic API key (must start with sk-ant-)');
@@ -206,16 +290,26 @@ class AccountManager {
     const a = this._state.accounts[i];
     this._state.accounts.splice(i, 1);
     if (this._state.defaultAccountId === id) this._state.defaultAccountId = null;
-    // Subscription accounts own a creds dir — wipe it (best-effort).
-    if (this._acctType(a) === 'subscription') { try { fs.rmSync(this.subDir(id), { recursive: true, force: true }); } catch { } }
+    if (this._state.defaultCodexAccountId === id) this._state.defaultCodexAccountId = null;
+    // Isolated-login accounts own a creds dir — wipe it (best-effort).
+    if (this._acctBackend(a) === 'codex') { try { fs.rmSync(this.codexSubDir(id), { recursive: true, force: true }); } catch { } }
+    else if (this._acctType(a) === 'subscription') { try { fs.rmSync(this.subDir(id), { recursive: true, force: true }); } catch { } }
     this._save();
     this._notify();
   }
 
-  // null = subscription is the default for new sessions.
-  setDefault(id) {
-    if (id != null && !this._state.accounts.some((a) => a.id === id)) throw new Error('account not found');
-    this._state.defaultAccountId = id || null;
+  // null = the CLI's own global login is the default for new sessions. Each
+  // backend has its OWN default (claude vs codex). When id is given the backend
+  // is derived from the account; when clearing (id null) the caller passes it.
+  setDefault(id, backend = 'claude') {
+    let be = backend;
+    if (id != null) {
+      const a = this.get(id);
+      if (!a) throw new Error('account not found');
+      be = this._acctBackend(a);
+    }
+    if (be === 'codex') this._state.defaultCodexAccountId = id || null;
+    else this._state.defaultAccountId = id || null;
     this._save();
     this._notify();
   }
@@ -235,12 +329,14 @@ class AccountManager {
   //   { id, name, tail?, kind:'api'|'subscription',
   //     localEnv: {VAR:val},          // set in the LOCAL process spawn env
   //     secret: {var,value} | null }  // shipped over ssh-stdin for REMOTE (api only)
-  resolveForSpawn(requested) {
+  resolveForSpawn(requested, backend = 'claude') {
+    if (backend === 'codex') return this._resolveCodexSpawn(requested);
     if (requested === 'subscription') return null; // the CLI's own global login
     const id = requested || this._state.defaultAccountId;
     if (!id) return null;
     const a = this.get(id);
     if (!a) throw new Error('unknown account: ' + id);
+    if (this._acctBackend(a) !== 'claude') throw new Error('not a Claude account: ' + a.name);
     if (this._acctType(a) === 'subscription') {
       const info = this.readSubCreds(id);
       if (!info.loggedIn) throw new Error('subscription not logged in: ' + a.name);
@@ -249,6 +345,20 @@ class AccountManager {
     const key = this.getKey(id);
     if (!key) throw new Error('account key unavailable (decryption failed): ' + a.name);
     return { id: a.id, name: a.name, tail: a.tail, kind: 'api', localEnv: { ANTHROPIC_API_KEY: key }, secret: { var: 'ANTHROPIC_API_KEY', value: key } };
+  }
+
+  // Codex spawn: undefined/null → the account's own global login (default) or
+  // ~/.codex when none; a 'cxs-…' id → that account's isolated CODEX_HOME.
+  _resolveCodexSpawn(requested) {
+    if (requested === 'subscription') return null; // codex's own global login
+    const id = requested || this._state.defaultCodexAccountId;
+    if (!id) return null;
+    const a = this.get(id);
+    if (!a) throw new Error('unknown account: ' + id);
+    if (this._acctBackend(a) !== 'codex') throw new Error('not a Codex account: ' + a.name);
+    const info = this.readCodexSubAuth(id);
+    if (!info.loggedIn) throw new Error('codex account not logged in: ' + a.name);
+    return { id: a.id, name: a.name, kind: 'codex-subscription', localEnv: { CODEX_HOME: this.codexSubDir(id) }, secret: null };
   }
 
   // ── Add a CONSOLE account (its minted API key) WITHOUT nuking the global
@@ -287,7 +397,8 @@ class AccountManager {
   // it). Used by server.js to poll per-account /api/oauth/usage.
   usageToken(id) {
     const a = this.get(id);
-    if (!a || this._acctType(a) !== 'subscription') return null;
+    // Anthropic-only poll — codex usage is OpenAI-side, not surfaced here.
+    if (!a || this._acctBackend(a) !== 'claude' || this._acctType(a) !== 'subscription') return null;
     return this.readSubCreds(id).accessToken || null;
   }
 

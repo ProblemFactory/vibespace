@@ -153,7 +153,7 @@ class App {
         this._applyCustomThemesFromServer(msg.themes);
       }
       if (msg.type === 'accounts-updated' && Array.isArray(msg.accounts)) {
-        this._accounts = { ...(this._accounts || {}), accounts: msg.accounts, defaultAccountId: msg.defaultAccountId || null };
+        this._accounts = { ...(this._accounts || {}), accounts: msg.accounts, defaultAccountId: msg.defaultAccountId || null, defaultCodexAccountId: msg.defaultCodexAccountId || null };
       }
     });
 
@@ -464,6 +464,123 @@ class App {
     }, 3000);
   }
 
+  // Add a Codex (ChatGPT) subscription — same isolation idea via CODEX_HOME.
+  async _addCodexSubscription() {
+    const name = await showInputDialog({
+      title: t('Add ChatGPT account'),
+      label: t('Name this account (e.g. Work ChatGPT, Personal)'),
+      placeholder: t('e.g. Work ChatGPT'),
+      confirmText: t('Continue'),
+    });
+    if (name === null) return; // cancelled
+    let created;
+    try {
+      created = await fetchJson('/api/accounts/codex-subscription', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: (name || '').trim() }),
+      });
+    } catch { showToast(t('Could not start — server unreachable'), { type: 'error' }); return; }
+    if (!created?.loginCmd) { showToast(created?.error || t('Could not start'), { type: 'error' }); return; }
+    // Login writes THIS account's auth.json into its own CODEX_HOME; sessions
+    // stay shared (symlinked). Your other logins are untouched.
+    this.openShellTerminal(undefined, { initialCommand: created.loginCmd });
+    showToast(t('A terminal opened — sign in with the ChatGPT account you want to add. Your other logins are untouched; VibeSpace captures it automatically.'), { duration: 6000 });
+    let tries = 0;
+    const iv = setInterval(async () => {
+      if (++tries > 100) { clearInterval(iv); return; }
+      try {
+        const r = await fetchJson(`/api/accounts/codex-subscription/${encodeURIComponent(created.id)}/finalize`, { method: 'POST' });
+        if (r?.loggedIn) { clearInterval(iv); showToast(t('✓ Added {name}', { name: r.name || t('account') })); }
+      } catch { /* keep polling */ }
+    }, 3000);
+  }
+
+  // ── Codex/OpenAI accounts roster (rendered UNDER Codex in Manage Agents).
+  // Codex holds ChatGPT subscriptions via isolated CODEX_HOMEs. No Anthropic
+  // usage bar (OpenAI quota isn't polled). Local machine only for now.
+  async _renderCodexAccounts(ctx) {
+    const { body, done, refresh, st } = ctx;
+    let accts;
+    try { accts = await this.refreshAccounts(); } catch { return; }
+    const codexAccts = (accts.accounts || []).filter(a => a.backend === 'codex');
+    const gLoggedIn = !!(st?.codex?.loggedIn);
+    const svg = (d, sw = 1.4) => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+    const CROWN = svg('<path d="M2.5 12.5h11M3 12.5L2 4.5l3.2 2.6L8 3l2.8 4.1L14 4.5l-1 8z"/>');
+    const GLOBE = svg('<circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c-2 2-2 10 0 12M8 2c2 2 2 10 0 12"/>');
+    const STAR_F = svg('<path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 11.6 4.1 13.6l.8-4.3-3.1-3 4.3-.6z" fill="currentColor"/>');
+    const STAR_O = svg('<path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 11.6 4.1 13.6l.8-4.3-3.1-3 4.3-.6z"/>');
+    const PENCIL = svg('<path d="M11 2.5 13.5 5 5.5 13H3v-2.5z"/>');
+    const row = document.createElement('div'); row.className = 'ob-backend acct-section';
+    const left = document.createElement('div'); left.style.flex = '1';
+    const gDef = !accts.defaultCodexAccountId;
+    const gIdent = gLoggedIn ? t('logged in') : `<span class="ob-warn">${t('not logged in')}</span>`;
+    const globalRow = `<div class="acct-key-row${gDef ? ' is-default' : ''}" data-id="__codex_global__">
+      <span class="acct-type-icon" title="${t('The CLI’s own global login')}">${GLOBE}</span>
+      <span class="acct-key-main"><span class="acct-key-name">${t('CLI login')}</span><span class="acct-key-tail">${gIdent}</span></span>
+      <span class="acct-usage-cell"></span>
+      <span class="acct-key-actions">
+        <button class="acct-icon acct-def ${gDef ? 'on' : ''}" title="${gDef ? t('Default for new sessions — pick another to change') : t('Set as default for new sessions')}">${gDef ? STAR_F : STAR_O}</button>
+      </span></div>`;
+    const keyLines = codexAccts.map(a => {
+      const isDef = accts.defaultCodexAccountId === a.id;
+      const ident = a.loggedIn
+        ? escHtml((a.email || '') + (a.subscriptionType ? (a.email ? ' · ' : '') + a.subscriptionType : '')) || t('logged in')
+        : `<span class="ob-warn">${t('not logged in')}</span>`;
+      return `<div class="acct-key-row${isDef ? ' is-default' : ''}" data-id="${escHtml(a.id)}">
+        <span class="acct-type-icon" title="${t('ChatGPT account')}">${CROWN}</span>
+        <span class="acct-key-main"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}</span></span>
+        <span class="acct-usage-cell"></span>
+        <span class="acct-key-actions">
+          <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
+          <button class="acct-icon acct-rename" title="${t('Rename')}">${PENCIL}</button>
+          <button class="agent-btn acct-test" title="${t('Open a terminal session on this account')}">${t('Test')}</button>
+          <button class="acct-icon acct-del" title="${t('Remove this account from VibeSpace (deletes its stored login)')}">${svg('<path d="M4 4l8 8M12 4l-8 8"/>', 1.6)}</button>
+        </span></div>`;
+    }).join('');
+    left.innerHTML = `<b>${t('ChatGPT / OpenAI accounts')}</b>
+      <div class="acct-list">${globalRow}${keyLines}</div>
+      <div class="agents-note" style="margin:4px 0 0">${t('Each Codex session can pick its ChatGPT login (New Session dialog / card ⚙). Held in isolated logins, switchable per session; threads stay shared.')}</div>`;
+    const actions = document.createElement('div'); actions.className = 'agent-actions';
+    const addBtn = document.createElement('button'); addBtn.className = 'agent-btn' + (codexAccts.length ? '' : ' primary'); addBtn.textContent = t('Add ChatGPT account…');
+    addBtn.title = t('Sign in another ChatGPT account — held in its own isolated login, switchable per session');
+    addBtn.onclick = () => { done(); this._addCodexSubscription(); };
+    actions.appendChild(addBtn);
+    row.append(left, actions);
+    body.appendChild(row);
+    left.onclick = async (e) => {
+      const keyRow = e.target.closest?.('.acct-key-row');
+      if (!keyRow) return;
+      const id = keyRow.dataset.id;
+      if (id === '__codex_global__') {
+        if (e.target.closest('.acct-def')) {
+          try { await fetchJson('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: null, backend: 'codex' }) }); } catch {}
+          refresh();
+        }
+        return;
+      }
+      const a = codexAccts.find(x => x.id === id);
+      if (e.target.closest('.acct-test')) {
+        if (!a?.loggedIn) { showToast(t('This account isn’t signed in yet — use “Add ChatGPT account…” to finish the login first.'), { type: 'error' }); return; }
+        done();
+        this.createSession({ backend: 'codex', mode: 'terminal', cwd: '', accountId: id, ephemeral: true });
+      } else if (e.target.closest('.acct-def')) {
+        const isDef = accts.defaultCodexAccountId === id;
+        try { await fetchJson('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: isDef ? null : id, backend: 'codex' }) }); } catch {}
+        refresh();
+      } else if (e.target.closest('.acct-rename')) {
+        const name = await showInputDialog({ title: t('Rename account'), label: t('Account name'), value: a?.name || '', confirmText: t('Save') });
+        if (name && name.trim() && name.trim() !== a?.name) {
+          try { await fetchJson(`/api/accounts/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) }); } catch {}
+          refresh();
+        }
+      } else if (e.target.closest('.acct-del')) {
+        if (!(await showConfirmDialog({ title: t('Remove account'), message: t('Remove "{name}" from VibeSpace? Sessions already running keep working.', { name: a?.name }) }))) return;
+        try { await fetchJson(`/api/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }); } catch {}
+        refresh();
+      }
+    };
+  }
+
   _showAccountsWizard() {
     document.getElementById('acct-wizard-overlay')?.remove();
     if (this._acctWatch) { clearInterval(this._acctWatch); this._acctWatch = null; }
@@ -630,6 +747,10 @@ class App {
       hostSel.onchange = () => { selectedHost = hostSel.value; refresh(); };
       hostRow.append(hostLabel, hostSel);
       body.appendChild(hostRow);
+      // Accounts render UNDER their CLI: Anthropic accounts below Claude Code,
+      // OpenAI/Codex accounts below Codex. Shared context for the extracted
+      // renderers (they capture the same closures the dialog builds).
+      const actx = { body, selectedHost, hostSel, done, run, refresh, st };
       for (const b of BACKENDS) {
         const info = st[b.key] || {};
         const row = document.createElement('div'); row.className = 'ob-backend';
@@ -653,6 +774,9 @@ class App {
         }
         row.append(left, actions);
         body.appendChild(row);
+        // Account roster for THIS backend, right under its status row.
+        if (b.key === 'claude') { try { await this._renderClaudeAccounts(actx); } catch {} }
+        else if (b.key === 'codex' && !selectedHost) { try { await this._renderCodexAccounts(actx); } catch {} }
       }
       // ── VibeSpace integration (task context hook) — local machine only.
       // Auto-installed at server start; this row makes the state VISIBLE and
@@ -704,6 +828,23 @@ class App {
           body.appendChild(row);
         }
       }
+      const foot = document.createElement('div');
+      foot.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:10px;';
+      const note = document.createElement('p'); note.className = 'agents-note';
+      note.textContent = t('Actions open in a terminal window so you can see exactly what runs.');
+      const recheck = document.createElement('button'); recheck.className = 'agent-btn'; recheck.textContent = t('Re-check');
+      recheck.onclick = refresh;
+      foot.append(note, recheck);
+      body.appendChild(foot);
+    };
+    refresh();
+  }
+
+  // ── Anthropic accounts roster (rendered UNDER Claude Code in Manage
+  // Agents). Extracted from _showAgentsDialog so accounts sit beside their
+  // CLI. ctx carries the dialog closures the block already used.
+  async _renderClaudeAccounts(ctx) {
+    const { body, selectedHost, hostSel, done, run, refresh } = ctx;
       // ── Anthropic accounts (billing identity: subscription ↔ API keys). ──
       // Remote host selected: probe the HOST's login state + offer importing
       // its console key into the central store (keys are host-agnostic — they
@@ -904,16 +1045,6 @@ class App {
           };
         }
       }
-      const foot = document.createElement('div');
-      foot.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:10px;';
-      const note = document.createElement('p'); note.className = 'agents-note';
-      note.textContent = t('Actions open in a terminal window so you can see exactly what runs.');
-      const recheck = document.createElement('button'); recheck.className = 'agent-btn'; recheck.textContent = t('Re-check');
-      recheck.onclick = refresh;
-      foot.append(note, recheck);
-      body.appendChild(foot);
-    };
-    refresh();
   }
 
   // ── Shared modal shell for the config/password dialogs ──
@@ -2172,22 +2303,26 @@ class App {
     const updateAcctRow = () => {
       if (!acctRow || !acctSel) return;
       const be = document.getElementById('input-backend')?.value || 'claude';
-      const list = this._accounts?.accounts || [];
-      const show = be === 'claude' && list.length > 0;
+      const all = this._accounts?.accounts || [];
+      const list = all.filter(a => (a.backend || 'claude') === be);
+      const onHost = !!document.getElementById('input-host')?.value;
+      // Codex accounts are LOCAL-only for now (isolated CODEX_HOME on this box).
+      const usable = be === 'codex' ? (onHost ? [] : list) : list;
+      const show = (be === 'claude' || be === 'codex') && usable.length > 0;
       acctRow.style.display = show ? '' : 'none';
       if (!show) { acctSel.value = ''; return; }
-      const defId = this._accounts?.defaultAccountId;
-      const defName = defId ? (list.find(a => a.id === defId)?.name || t('API key')) : t('Subscription');
+      const defId = be === 'codex' ? this._accounts?.defaultCodexAccountId : this._accounts?.defaultAccountId;
+      const globalLabel = be === 'codex' ? t('ChatGPT login') : t('Subscription');
+      const defName = defId ? (list.find(a => a.id === defId)?.name || t('API key')) : globalLabel;
       const prev = acctSel.value;
-      const onHost = !!document.getElementById('input-host')?.value;
       acctSel.innerHTML = '';
       const opts = [
         ['', t('Default ({name})', { name: defName })],
-        ['subscription', t('Subscription (Pro/Max login)')], // the CLI's global login
+        ['subscription', be === 'codex' ? t('ChatGPT login (this machine)') : t('Subscription (Pro/Max login)')], // the CLI's global login
       ];
       for (const a of list) {
-        // Named subscription accounts are LOCAL-only in P1 (their creds dir is
-        // on this machine); skip them when a remote host is selected.
+        // Named subscription accounts are LOCAL-only (their creds dir is on this
+        // machine); skip them when a remote host is selected.
         if (a.type === 'subscription') { if (!onHost && a.loggedIn) opts.push([a.id, t('{name} (subscription)', { name: a.name })]); }
         else opts.push([a.id, t('{name} — API key …{tail}', { name: a.name, tail: a.tail })]);
       }
@@ -2871,7 +3006,7 @@ class App {
   // list fresh between refreshes.
   refreshAccounts() {
     return fetchJson('/api/accounts').then(d => {
-      if (d) this._accounts = { accounts: d.accounts || [], defaultAccountId: d.defaultAccountId || null, subscription: d.subscription || {}, cliKey: d.cliKey || {} };
+      if (d) this._accounts = { accounts: d.accounts || [], defaultAccountId: d.defaultAccountId || null, defaultCodexAccountId: d.defaultCodexAccountId || null, subscription: d.subscription || {}, cliKey: d.cliKey || {} };
       return this._accounts;
     }).catch(() => this._accounts);
   }
