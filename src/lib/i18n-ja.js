@@ -936,4 +936,6 @@ export default {
   "CLI login": "CLI ログイン",
   "not logged in (a Console login replaced it)": "未ログイン（コンソールログインに置き換えられました）",
   "Default for new sessions — pick another to change": "新規セッションの既定——他を選ぶと変更",
+  "Last refreshed {n} min ago": "{n} 分前に更新",
+  "{n}m": "{n}分",
 };

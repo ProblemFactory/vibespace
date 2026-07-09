@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.58.0] — 2026-07-08
+
+### Added — per-subscription usage in the account manager
+Each subscription row in **Manage agents → Anthropic accounts** now shows a
+compact **5h / 7d usage readout** (mini bars + %, green/amber/red by level), so
+you can see at a glance which account has quota left before switching to it. The
+CLI global-login row shows the same from the main usage poll. Data is the
+per-account poll (server round-robins it, read-only token); idle accounts show
+last-known with a "Nm ago" staleness note (their usage isn't changing anyway).
+
 ## [2.57.1] — 2026-07-08
 
 ### Fixed — account identity no longer clobbered; global login shown as a peer
