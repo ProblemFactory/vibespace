@@ -927,4 +927,5 @@ export default {
   "Sign in to an Anthropic Console account — its API key is captured in an isolated login, so your subscription stays intact": "登录一个 Anthropic Console 账号——在隔离登录中捕获其 API key,你的订阅登录不受影响",
   "A terminal opened — pick “Anthropic Console account” and sign in. Your subscription login stays intact.": "已打开一个终端——选择“Anthropic Console account”并登录。你的订阅登录不受影响。",
   "Console account": "Console 账号",
+  "This subscription isn’t signed in yet — use “Add subscription…” to finish the login first.": "这个订阅还没登录——请先用「添加订阅…」完成登录。",
 };

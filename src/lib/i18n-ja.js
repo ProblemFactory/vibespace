@@ -927,4 +927,5 @@ export default {
   "Sign in to an Anthropic Console account — its API key is captured in an isolated login, so your subscription stays intact": "Anthropic Console アカウントにサインイン——隔離ログインで API キーを取得するため、サブスクログインは無傷",
   "A terminal opened — pick “Anthropic Console account” and sign in. Your subscription login stays intact.": "ターミナルが開きました——「Anthropic Console account」を選んでサインインしてください。サブスクログインは無傷です。",
   "Console account": "Console アカウント",
+  "This subscription isn’t signed in yet — use “Add subscription…” to finish the login first.": "このサブスクはまだサインインしていません——先に「サブスクリプションを追加…」でログインを完了してください。",
 };

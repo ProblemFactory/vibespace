@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.56.2] — 2026-07-08
+
+### Fixed
+- Subscription/Console login FAILED — 2.56.1 used `claude /login`, but that TUI
+  slash-command errors from a shell ("/login isn't available in this
+  environment"). Now uses the real subcommand `claude auth login --claudeai`
+  (subscription) / `--console` (Console account), which prints an OAuth URL to a
+  hosted callback + a paste-code prompt (works headlessly), with
+  CLAUDE_SECURESTORAGE_CONFIG_DIR only (no onboarding).
+- Testing a not-yet-signed-in subscription opened a blank window (the server
+  correctly rejects the spawn). Now it shows a clear message instead, and
+  not-logged-in subscriptions are hidden from the New Session account picker.
+
 ## [2.56.1] — 2026-07-08
 
 ### Fixed
