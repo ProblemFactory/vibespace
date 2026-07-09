@@ -3,6 +3,7 @@
 // mount list with live status, share-a-folder minting, import-a-link.
 import { showToast, showConfirmDialog, copyText, escHtml } from './utils.js';
 import { setupDirAutocomplete } from './autocomplete.js';
+import { t as tr } from './i18n.js'; // sidebar cluster convention: local `t` is pervasively a task var
 
 // 16x16 stroke icons (project convention — no emoji in chrome)
 const MI = {
@@ -60,12 +61,12 @@ export function installSidebarMounts(Sidebar) {
       // ── Hosts section (remote machines over ssh) ──
       const hHead = document.createElement('div');
       hHead.className = 'mounts-sec-head';
-      hHead.innerHTML = 'Machines<span class="mounts-sec-sub">Run agent sessions on other computers</span>';
+      hHead.innerHTML = `${escHtml(tr('Remote hosts'))}<span class="mounts-sec-sub">${escHtml(tr('Run agent sessions on other computers'))}</span>`;
       root.appendChild(hHead);
       if (!hd.hosts.length) {
         const empty = document.createElement('div');
         empty.className = 'mounts-empty';
-        empty.textContent = 'No machines added yet. Add one to run agent sessions on another computer.';
+        empty.textContent = tr('No remote hosts added yet. Add one to run agent sessions on another computer.');
         root.appendChild(empty);
       } else {
         const hlist = document.createElement('div');
@@ -82,7 +83,7 @@ export function installSidebarMounts(Sidebar) {
 
       const sHead = document.createElement('div');
       sHead.className = 'mounts-sec-head';
-      sHead.innerHTML = 'Storage<span class="mounts-sec-sub">Connect cloud folders and shared datasets</span>';
+      sHead.innerHTML = `${escHtml(tr('Storage'))}<span class="mounts-sec-sub">${escHtml(tr('Connect cloud folders and shared datasets'))}</span>`;
       root.appendChild(sHead);
 
       // rclone powers every mount type — offer a one-click install when absent

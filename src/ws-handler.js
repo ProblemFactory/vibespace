@@ -314,8 +314,13 @@ function registerWsHandler(wss, ctx) {
             // Subscription (Claude securestorage dir / Codex CODEX_HOME): ship
             // the account's creds DIR to the host over an ssh-stdin tar stream
             // (channel-encrypted, lands in a 0700 dir), symlink the shared
-            // subdirs, and point the env var at the remote copy. Token refreshes
-            // on the host rewrite the host's copy (authoritative there).
+            // subdirs, and point the env var at the remote copy. NEWEST WINS
+            // per file (tar --keep-newer-files, GNU; verified exit 0): OAuth
+            // refresh tokens ROTATE, so after a remote session refreshes, the
+            // HOST copy holds the live token — blindly re-shipping the stale
+            // local copy would invalid_grant the account there. No rm -rf
+            // either: a concurrent session of the same account on the same
+            // host must not have its creds dir yanked mid-run.
             const rc = spawnAccount.remoteCreds;
             if (!rc) throw new Error('this account cannot run on a remote host');
             const files = (rc.files || []).filter(f => { try { return fs.statSync(path.join(rc.srcDir, f)).isFile(); } catch { return false; } });
@@ -323,7 +328,19 @@ function registerWsHandler(wss, ctx) {
             const tar = execFileSync('tar', ['-c', '-C', rc.srcDir, ...files], { timeout: 15000, maxBuffer: 8 * 1024 * 1024 });
             const rdir = `$HOME/.vibespace/${rc.dirName}`; // dirName = subs/<id> | codex-subs/<id>, metachar-free
             const links = Object.entries(rc.symlinks || {}).map(([n, tgt]) => `ln -sfn ${tgt} "${rdir}/${n}"`);
-            const script = [`umask 077`, `rm -rf "${rdir}"`, `mkdir -p "${rdir}"`, `tar -x -C "${rdir}"`, ...(rc.ensureTargets || []), ...links].join('; ');
+            // Poison-heal: a remote primary creds file that LOST its validity
+            // marker (a Console /login inside a remote session wipes it to {}
+            // with a fresh mtime) would win newest-wins forever — delete it
+            // first so the valid local copy restores it. Known residual risk:
+            // clock skew between machines can misorder newest-wins when both
+            // sides refreshed within the skew window (NTP makes this ~ms).
+            const heal = rc.probe
+              ? [`if [ -f "${rdir}/${rc.probe.file}" ] && ! grep -qE '${rc.probe.marker}' "${rdir}/${rc.probe.file}"; then rm -f "${rdir}/${rc.probe.file}"; fi`]
+              : [];
+            // GNU-tar-only flag; no `|| tar -x` fallback — the first tar already
+            // consumed the ssh stdin stream, a fallback would extract nothing
+            // and silently spawn with missing creds. Non-GNU hosts fail LOUD.
+            const script = [`umask 077`, `mkdir -p "${rdir}"`, ...heal, `tar -x --keep-newer-files -C "${rdir}"`, ...(rc.ensureTargets || []), ...links].join('; ');
             execFileSync('ssh', [...hosts.sshArgs(h), '--', script], { input: tar, timeout: 20000 });
             return `${rc.envVar}="${rdir}" `;
           };

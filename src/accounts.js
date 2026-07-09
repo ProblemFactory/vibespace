@@ -345,7 +345,11 @@ class AccountManager {
         localEnv: { CLAUDE_SECURESTORAGE_CONFIG_DIR: this.subDir(id) }, secret: null,
         // REMOTE: ship the creds dir to the host so the remote CLI reads THIS
         // account's login (securestorage relocated; config stays ~/.claude).
-        remoteCreds: { srcDir: this.subDir(id), dirName: 'subs/' + id, envVar: 'CLAUDE_SECURESTORAGE_CONFIG_DIR', files: ['.credentials.json', '.claude.json'], symlinks: {}, ensureTargets: [] },
+        // probe: newest-wins keeps a POISONED remote file forever (e.g. a
+        // Console /login inside a remote session wipes .credentials.json to {}
+        // with a fresh mtime) — a remote primary file MISSING the marker is
+        // deleted before extract so the valid local copy always restores it.
+        remoteCreds: { srcDir: this.subDir(id), dirName: 'subs/' + id, envVar: 'CLAUDE_SECURESTORAGE_CONFIG_DIR', files: ['.credentials.json', '.claude.json'], symlinks: {}, ensureTargets: [], probe: { file: '.credentials.json', marker: 'accessToken' } },
       };
     }
     const key = this.getKey(id);
@@ -375,6 +379,7 @@ class AccountManager {
         files: ['auth.json'],
         symlinks: { sessions: '$HOME/.codex/sessions', 'config.toml': '$HOME/.codex/config.toml' },
         ensureTargets: ['mkdir -p "$HOME/.codex/sessions"', 'touch "$HOME/.codex/config.toml"'],
+        probe: { file: 'auth.json', marker: 'auth_mode|tokens|OPENAI_API_KEY' },
       },
     };
   }
