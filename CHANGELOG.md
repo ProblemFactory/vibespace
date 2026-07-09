@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.63.0] — 2026-07-09
+
+### Added — Codex usage in the ledger (it was never mined)
+The Usage window's ledger only scanned Claude transcripts — Codex sessions
+never produced a single event and the Backend=Codex filter was always empty.
+The scanner now also mines **Codex rollouts** (`~/.codex/sessions`): each
+`token_count` event's `last_token_usage` is one request (fresh input = input −
+cached; output includes reasoning), deduped by a synthetic id built from the
+thread's strictly-monotonic cumulative total; model/cwd come from the preceding
+`turn_context` and persist in the scan cursor. Account attribution works the
+same as Claude (codex-subscription accounts split correctly). Ships **real
+OpenAI pricing tiers** (GPT-5.6 Sol $5/$30 · Terra $2.50/$15 · Luna $1/$6,
+GPT-5.5 $5/$30, 5.4 $2.50/$15, 5.4-mini $0.75/$4.50, 5.3-codex $1.75/$14;
+cached input at 10%) — tier matching is now data-driven (longest key in
+pricing.json wins), and the Pricing editor lists every tier. Scanning is
+**chunked** (a 1.9GB rollout exceeds Node's string limit) — first pass over
+2.3GB ≈ 8s, incremental after.
+
+### Added — Usage window: account filter + custom date range
+The dashboard gained an **Account** chip row (All / each account / CLI login) —
+the whole window (tiles, trend, every breakdown) follows the selection. When
+the machine's CLI login IS a named account (email link), the two buckets render
+as **one** chip covering both. And the Range control gained **Custom…** with
+from/to date pickers.
+
 ## [2.62.0] — 2026-07-09
 
 ### Added — per-account usage switching

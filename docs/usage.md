@@ -40,9 +40,10 @@ them to its status-line — VibeSpace caches what the CLI already knows. There i
 ## Usage window (historical per-request ledger)
 
 Open from **⚙ → Usage**. It reads a **permanent, append-only ledger**
-(`data/usage-history/`) mined from Claude Code's own JSONL transcripts — so it
-covers **both terminal and chat** sessions (the transcript is mode-independent)
-and keeps the atomic facts forever, surviving transcript rotation/deletion.
+(`data/usage-history/`) mined from the CLIs' own transcripts — Claude Code
+JSONLs **and Codex rollouts** — so it covers **both terminal and chat** sessions
+(transcripts are mode-independent) and keeps the atomic facts forever,
+surviving transcript rotation/deletion.
 
 **Accurate by construction:**
 - Each record is **one API request, deduped by `requestId`** — a single request
@@ -62,7 +63,9 @@ and keeps the atomic facts forever, surviving transcript rotation/deletion.
 - **Daily trend** chart (cost or tokens).
 - Breakdowns **by billing type, account, model, project, mode, cache
   efficiency, hour-of-day, weekday, and top sessions**.
-- **Range** (7d / 30d / 90d / all) and **backend** filters, and **CSV export**.
+- **Range** (7d / 30d / 90d / all / **custom from→to dates**), **backend** and
+  **account** filters (the whole dashboard follows the selected account; a CLI
+  login that IS a named account appears as one chip), and **CSV export**.
 
 ### Cost is an estimate
 

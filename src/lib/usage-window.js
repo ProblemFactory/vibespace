@@ -11,7 +11,9 @@ const RANGES = [
   { key: '30d', label: () => t('30 days'), ms: 30 * DAY },
   { key: '90d', label: () => t('90 days'), ms: 90 * DAY },
   { key: 'all', label: () => t('All time'), ms: null },
+  { key: 'custom', label: () => t('Custom…') },
 ];
+const isoDay = (ms) => new Date(ms).toISOString().slice(0, 10);
 
 const fmtNum = (n) => {
   n = n || 0;
@@ -35,17 +37,34 @@ export function openUsageWindow(app, opts = {}) {
   root.className = 'usage-win';
   winInfo.content.appendChild(root);
 
-  const state = { range: '30d', backend: '', metric: 'cost', data: null, loading: false, view: 'dash' };
+  const state = {
+    range: '30d', backend: '', account: '', metric: 'cost', data: null, loading: false, view: 'dash',
+    customFrom: isoDay(Date.now() - 7 * DAY), customTo: isoDay(Date.now()),
+    acctOptions: null, // account rows from the last UNFILTERED load — the chip set must not shrink while filtered
+  };
 
   const load = async () => {
     state.loading = true; render();
-    const r = RANGES.find(x => x.key === state.range);
-    const from = r && r.ms ? (Date.now() - r.ms) : '';
     const qs = new URLSearchParams();
-    if (from) qs.set('from', String(from));
+    if (state.range === 'custom') {
+      const f = Date.parse(state.customFrom), to = Date.parse(state.customTo);
+      if (Number.isFinite(f)) qs.set('from', String(f));
+      if (Number.isFinite(to)) qs.set('to', String(to + DAY - 1)); // inclusive end of day
+    } else {
+      const r = RANGES.find(x => x.key === state.range);
+      if (r && r.ms) qs.set('from', String(Date.now() - r.ms));
+    }
     if (state.backend) qs.set('backend', state.backend);
+    if (state.account) qs.set('account', state.account);
     try { state.data = await fetchJson('/api/usage-stats?' + qs.toString()); }
     catch { state.data = null; showToast(t('Could not load usage'), { type: 'error' }); }
+    if (!state.account && state.data?.groups?.account) {
+      // Union, not replace: switching to a narrower range must not drop chips
+      // for accounts that simply have no data there.
+      const have = new Map((state.acctOptions || []).map(r => [r.key, r]));
+      for (const r of state.data.groups.account) have.set(r.key, r);
+      state.acctOptions = [...have.values()];
+    }
     state.loading = false; render();
   };
 
@@ -97,15 +116,49 @@ function renderControls(app, state, load, rerender) {
       const b = document.createElement('button');
       b.className = 'usage-seg-btn' + (it.key === cur ? ' on' : '');
       b.textContent = typeof it.label === 'function' ? it.label() : it.label;
+      if (it.tip) b.title = it.tip;
       b.onclick = () => onPick(it.key);
       wrap.appendChild(b);
     }
     return wrap;
   };
   bar.appendChild(labelled(t('Range'), seg(RANGES, state.range, k => { state.range = k; load(); })));
+  if (state.range === 'custom') {
+    const dates = document.createElement('div'); dates.className = 'usage-seg usage-dates';
+    const mk = (val, on) => {
+      const i = document.createElement('input'); i.type = 'date'; i.className = 'usage-date';
+      i.value = val;
+      i.onchange = () => { if (i.value) { on(i.value); load(); } };
+      return i;
+    };
+    const arrow = document.createElement('span'); arrow.className = 'usage-ctl-label'; arrow.textContent = '→';
+    dates.append(mk(state.customFrom, v => { state.customFrom = v; }), arrow, mk(state.customTo, v => { state.customTo = v; }));
+    bar.appendChild(dates);
+  }
   bar.appendChild(labelled(t('Backend'), seg([
     { key: '', label: t('All') }, { key: 'claude', label: 'Claude' }, { key: 'codex', label: 'Codex' },
   ], state.backend, k => { state.backend = k; load(); })));
+  // Account filter — one chip per ledger bucket. When the machine's CLI login
+  // IS a named account (email link), the two buckets render as ONE chip whose
+  // filter spans both (comma key), mirroring the taskbar-pies dedupe.
+  const acctRows = state.acctOptions || [];
+  if (acctRows.length > 1) {
+    const glId = app._usageGlobal?.accountId || null;
+    const globalRow = acctRows.find(r => r.key === '__global__');
+    const opts = [{ key: '', label: t('All') }];
+    for (const r of acctRows) {
+      if (r.key === '__global__') continue;
+      if (glId && r.key === glId && globalRow) {
+        opts.push({ key: `${r.key},__global__`, label: (r.name || r.key) + ' ✦', tip: t('Same account as the machine CLI login — includes its (unattributed) usage too') });
+      } else {
+        opts.push({ key: r.key, label: r.name || r.key, tip: r.deleted ? t('Account was removed from VibeSpace — history kept') : (r.tail ? `…${r.tail}` : '') });
+      }
+    }
+    if (globalRow && !(glId && acctRows.some(r => r.key === glId))) {
+      opts.push({ key: '__global__', label: t('CLI login'), tip: t('Sessions that ran on the machine’s own login (no VibeSpace account selected)') });
+    }
+    bar.appendChild(labelled(t('Account'), seg(opts, state.account, k => { state.account = k; load(); })));
+  }
   bar.appendChild(labelled(t('Bars show'), seg([
     { key: 'cost', label: t('Cost') }, { key: 'totalTokens', label: t('Tokens') },
   ], state.metric, k => { state.metric = k; load(); })));
@@ -127,7 +180,7 @@ function renderPricingEditor(state, rerender, reload) {
   const wrap = document.createElement('div'); wrap.className = 'usage-pricing';
   const pricing = (state.data && state.data.pricing) || { tiers: {}, accounts: {} };
   const accounts = ((state.data && state.data.groups && state.data.groups.account) || []).filter(a => a.key !== '__global__');
-  const TIERS = ['fable', 'opus', 'sonnet', 'haiku'];
+  const TIERS = Object.keys(pricing.tiers || {}).filter(k => k !== '_default');
   const FIELDS = [['input', t('Input')], ['output', t('Output')], ['cacheWrite5m', t('Cache write 5m')], ['cacheWrite1h', t('Cache write 1h')], ['cacheRead', t('Cache read')]];
   const edited = { tiers: {}, accounts: {} };
 

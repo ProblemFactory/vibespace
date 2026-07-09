@@ -1771,7 +1771,9 @@ app.get('/api/usage-stats', (req, res) => {
     const from = req.query.from ? parseInt(req.query.from, 10) : null;
     const to = req.query.to ? parseInt(req.query.to, 10) : null;
     const backend = req.query.backend || null;
-    res.json(usageHistory.aggregate({ from, to, backend }));
+    // account = comma list of ledger bucket keys (account ids / '__global__')
+    const accounts = req.query.account ? new Set(String(req.query.account).split(',').filter(Boolean)) : null;
+    res.json(usageHistory.aggregate({ from, to, backend, accounts }));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/usage-stats/pricing', (req, res) => res.json({ pricing: usageHistory.pricingTable() }));
