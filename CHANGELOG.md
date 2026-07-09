@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.61.1] — 2026-07-09
+
+### Changed — real Anthropic prices + per-account pricing
+Cost estimates now use the current official API prices (researched + verified):
+**Fable 5 is $10/$50 per Mtok** (it's a published price, not a placeholder), and
+a bug where Opus used the *deprecated* $15/$75 instead of the current **$5/$25**
+was fixed — estimates were ~3× too high. Pricing is now **per-account**: give any
+API-key account its own **discount %** or full rate override (different keys bill
+differently) via the new **Pricing** editor in the Usage window; subscriptions
+use the default as the API-equivalent reference.
+
+### Fixed — Usage tiles now reconcile
+"Total tokens" is dominated by cached reads (usually >95%), which wasn't shown as
+its own tile — so it looked like the numbers didn't add up. Cached reads / cache
+writes / fresh input / output are now peer tiles that visibly sum to the total.
+
+### Changed — snappier usage refresh
+`/api/usage` is a cheap local read now (passive capture, no Anthropic call), so
+the taskbar pies refresh every **8s** (was 30s; 30s when the tab is hidden) and
+the passive statusline write throttle dropped 25s → 8s — usage reflects a
+just-finished turn within seconds, still zero Anthropic calls.
+
 ## [2.61.0] — 2026-07-09
 
 ### Added — Usage window (permanent per-request token ledger)

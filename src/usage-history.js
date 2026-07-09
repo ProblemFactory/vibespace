@@ -18,17 +18,20 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-// Estimated API-equivalent prices, USD per MILLION tokens. Subscription sessions
-// don't actually cost this — it's shown as a reference ("what this would cost on
-// the API"). Editable at data/usage-history/pricing.json (seeded on first run).
+// API-equivalent prices, USD per MILLION tokens. Subscription sessions don't
+// actually cost this — it's shown as a reference ("what this would cost on the
+// API"). Official Anthropic pricing per platform.claude.com/docs/.../pricing,
+// as of 2026-07-09 (researched + cross-verified). Tier matched by substring of
+// the model id (current flagship rates; deprecated Opus 4.1/4 were $15/$75 —
+// override per-account in pricing.json if you still run those). Editable at
+// data/usage-history/pricing.json.
 const DEFAULT_PRICING = {
-  // tier matched by substring of the model id
-  opus:   { input: 15, output: 75, cacheWrite5m: 18.75, cacheWrite1h: 30, cacheRead: 1.5 },
-  sonnet: { input: 3,  output: 15, cacheWrite5m: 3.75,  cacheWrite1h: 6,  cacheRead: 0.3 },
-  haiku:  { input: 0.8, output: 4, cacheWrite5m: 1,     cacheWrite1h: 1.6, cacheRead: 0.08 },
-  // Fable is new (Mythos-class, above Opus) — no public price yet; opus-tier is a
-  // placeholder ESTIMATE. Edit pricing.json with the real numbers when known.
-  fable:  { input: 15, output: 75, cacheWrite5m: 18.75, cacheWrite1h: 30, cacheRead: 1.5 },
+  // Fable 5 — $10/$50 (2× Opus; Mythos-class). NOTE: Fable uses a newer tokenizer
+  // (~30% more tokens per unit of English text), so effective $/word is higher.
+  fable:  { input: 10, output: 50, cacheWrite5m: 12.5, cacheWrite1h: 20, cacheRead: 1.0 },
+  opus:   { input: 5,  output: 25, cacheWrite5m: 6.25, cacheWrite1h: 10, cacheRead: 0.5 },  // Opus 4.5–4.8
+  sonnet: { input: 3,  output: 15, cacheWrite5m: 3.75, cacheWrite1h: 6,  cacheRead: 0.3 },  // standard (intro $2/$10 through 2026-08-31)
+  haiku:  { input: 1,  output: 5,  cacheWrite5m: 1.25, cacheWrite1h: 2,  cacheRead: 0.1 },
   _default: { input: 3, output: 15, cacheWrite5m: 3.75, cacheWrite1h: 6, cacheRead: 0.3 },
 };
 
@@ -95,9 +98,22 @@ class UsageHistory {
   }
 
   _loadJson(f, fallback) { try { return JSON.parse(fs.readFileSync(f, 'utf-8')); } catch { return fallback; } }
+  // Pricing schema v2: { version, tiers:{opus,sonnet,haiku,fable,_default}, accounts:{ <id>: {discount} | {tiers:{...}} } }.
+  // Subscriptions use the default tiers (the "API-equivalent" reference). API-key
+  // accounts can carry a per-account DISCOUNT (negotiated rate) or a full tier
+  // override — because different keys really do bill at different rates.
   _loadPricing() {
     let p = this._loadJson(this.pricingFile, null);
-    if (!p) { p = DEFAULT_PRICING; try { fs.writeFileSync(this.pricingFile, JSON.stringify(p, null, 2)); } catch {} }
+    if (!p) {
+      p = { version: 2, tiers: DEFAULT_PRICING, accounts: {} };
+      try { fs.writeFileSync(this.pricingFile, JSON.stringify(p, null, 2)); } catch {}
+    } else if (!p.tiers) {
+      // migrate the old FLAT {opus:{...},...} file to v2 in place
+      p = { version: 2, tiers: p, accounts: {} };
+      try { fs.writeFileSync(this.pricingFile, JSON.stringify(p, null, 2)); } catch {}
+    }
+    if (!p.accounts) p.accounts = {};
+    if (!p.tiers) p.tiers = DEFAULT_PRICING;
     return p;
   }
   _writeAtomic(f, data) { const t = f + '.tmp'; fs.writeFileSync(t, data); fs.renameSync(t, f); }
@@ -227,8 +243,19 @@ class UsageHistory {
     for (const k of ['opus', 'sonnet', 'haiku', 'fable']) if (m.includes(k)) return k;
     return '_default';
   }
+  // The rate for a given account + tier: an account may override specific tiers
+  // and/or carry a flat discount (0..1). Subscriptions/global have no override →
+  // default tiers (the API-equivalent reference).
+  _rateFor(acct, tier) {
+    const ov = acct ? this._pricing.accounts?.[acct] : null;
+    const base = (ov?.tiers && ov.tiers[tier]) || this._pricing.tiers[tier] || this._pricing.tiers._default;
+    const disc = ov && typeof ov.discount === 'number' ? Math.max(0, Math.min(0.99, ov.discount)) : 0;
+    if (!disc) return base;
+    const f = 1 - disc;
+    return { input: base.input * f, output: base.output * f, cacheWrite5m: base.cacheWrite5m * f, cacheWrite1h: base.cacheWrite1h * f, cacheRead: base.cacheRead * f };
+  }
   _cost(ev) {
-    const p = this._pricing[this._tier(ev.model)] || this._pricing._default;
+    const p = this._rateFor(ev.acct, this._tier(ev.model));
     return (ev.i * p.input + ev.o * p.output + ev.cw5 * p.cacheWrite5m + ev.cw1 * p.cacheWrite1h + ev.cr * p.cacheRead) / 1e6;
   }
 
@@ -339,7 +366,22 @@ class UsageHistory {
   // Attach human names to account/session groups (server enriches with account
   // names + session names it knows).
   pricingTable() { return this._pricing; }
-  setPricing(p) { this._pricing = p; this._writeAtomic(this.pricingFile, JSON.stringify(p, null, 2)); }
+  // Accept a full v2 object OR a partial patch ({tiers?, accounts?}). Merges so a
+  // UI editor can PATCH just one account's discount without resending everything.
+  setPricing(patch) {
+    if (!patch || typeof patch !== 'object') return this._pricing;
+    const cur = this._pricing;
+    const next = { version: 2, tiers: { ...cur.tiers, ...(patch.tiers || {}) }, accounts: { ...cur.accounts } };
+    if (patch.accounts) {
+      for (const [id, cfg] of Object.entries(patch.accounts)) {
+        if (cfg == null) delete next.accounts[id];       // null clears an override
+        else next.accounts[id] = cfg;
+      }
+    }
+    this._pricing = next;
+    this._writeAtomic(this.pricingFile, JSON.stringify(next, null, 2));
+    return next;
+  }
 }
 
 module.exports = { UsageHistory, DEFAULT_PRICING };

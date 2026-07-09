@@ -1872,7 +1872,11 @@ class App {
     this._subSignedOut = !!data?.subscriptionSignedOut;
     this._accountUsage = data?.accounts || {}; // per-subscription usage (Manage Agents rows)
     this._renderUsage();
-    setTimeout(() => this._pollUsage(), 30000);
+    // 8s: /api/usage is now a cheap LOCAL read (server just returns the passively
+    // captured cache) — decoupled from any Anthropic call — so a snappy refresh
+    // is free. Pause while the tab is hidden (no point polling a background tab).
+    const next = document.hidden ? 30000 : 8000;
+    setTimeout(() => this._pollUsage(), next);
   }
 
   _renderUsage() {
