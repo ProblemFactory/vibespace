@@ -277,6 +277,13 @@ html, body {
    tracks and break the cross-row column alignment. The list's padding provides
    the left/right inset; the .is-default background spans the grid content box. */
 .acct-key-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; padding: 3px 0; font-size: 11px; }
+/* Subscription on a remote host with the opt-in off: dim the identity + the
+   Test button so it reads as "not available here" (still renamable/removable). */
+.acct-key-row.acct-row-blocked .acct-type-icon,
+.acct-key-row.acct-row-blocked .acct-key-name,
+.acct-key-row.acct-row-blocked .acct-key-tail { opacity: 0.5; }
+.acct-blocked-hint { color: var(--yellow, #e5c07b); font-size: 9px; white-space: nowrap; }
+.agent-btn.acct-test-blocked { opacity: 0.45; }
 .acct-key-main { display: flex; align-items: baseline; gap: 6px; min-width: 0; flex-wrap: wrap; row-gap: 0; }
 .acct-key-name { font-weight: 500; white-space: nowrap; }
 .acct-key-tail { color: var(--text-dim); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

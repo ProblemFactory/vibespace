@@ -31,6 +31,7 @@ process.stdin.on('end', () => {
   let payload = {};
   try { payload = JSON.parse(input); } catch {}
   try { writeUsage(payload); } catch {}
+  try { learnModel(payload); } catch {}
   // Transparent pass-through: if the user has their own statusline, render it so
   // VibeSpace terminals look identical to their normal setup. Otherwise emit a
   // compact model + usage line (better than a blank status area).
@@ -72,6 +73,28 @@ function writeUsage(p) {
   try { fs.mkdirSync(CACHE_DIR, { recursive: true }); } catch {}
   const tmp = f + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(out));
+  fs.renameSync(tmp, f);
+}
+
+// Passive MODEL discovery: the statusLine payload names the session's current
+// model (full id + display_name). Accumulate the ones you actually run into a
+// shared cache so the model dropdown learns full IDs WITHOUT a /v1/models API
+// call. (Claude Code has no on-disk model cache, and stream-json doesn't emit
+// the model list, so this is the only zero-call way to grow the list.)
+function learnModel(p) {
+  const m = p && p.model;
+  const id = m && (m.id || (typeof m === 'string' ? m : null));
+  if (!id || typeof id !== 'string' || !/^claude-/.test(id)) return; // only full ids
+  const label = (m.display_name || id);
+  const f = path.join(CACHE_DIR, '__models__.json');
+  let list = [];
+  try { list = JSON.parse(fs.readFileSync(f, 'utf-8')); if (!Array.isArray(list)) list = []; } catch {}
+  if (list.some((x) => x && x.id === id)) return; // already known
+  list.push({ id, label });
+  if (list.length > 50) list = list.slice(-50);
+  try { fs.mkdirSync(CACHE_DIR, { recursive: true }); } catch {}
+  const tmp = f + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(list));
   fs.renameSync(tmp, f);
 }
 

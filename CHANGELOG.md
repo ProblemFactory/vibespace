@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.60.2] — 2026-07-09
+
+### Changed — the taskbar usage pies now follow your DEFAULT account
+The 5h / 7d pies used to always show the machine's global login. If you'd starred
+a named subscription as your default (so new sessions bill to it), running a
+session on it appeared to do nothing — its usage updated in Manage Agents but not
+the taskbar. Now the pies follow the **default account** (the popup shows its
+name + "refreshes when you run it in a terminal session"), falling back to the
+global login when nothing is starred.
+
+### Added — passive model discovery
+The model dropdown now **learns the full model IDs of models you actually run**,
+harvested from the same status-line hook — no `/v1/models` API call. Built-in
+aliases (fable/opus/sonnet/haiku[+1m]) are always present; used models add their
+exact dated IDs. (Claude Code keeps no local model cache and stream-json doesn't
+emit the model list, so this is the only zero-call way to grow it.)
+
+### Fixed — account roster on a remote host reflects the local-only rule
+With a remote host selected, subscription rows are now dimmed with a "· this
+machine only" hint and their Test button explains the situation instead of firing
+a create the server rejects; the section note says API keys ship to the host
+while subscriptions are local-only (unless you enable the opt-in). Matches the
+2.60.0 default.
+
 ## [2.60.1] — 2026-07-09
 
 ### Added — active usage polling as an explicit opt-in (default off)
