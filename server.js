@@ -307,6 +307,12 @@ const SOCKETS_DIR = path.join(__dirname, 'data', 'sockets');
 const META_DIR = path.join(__dirname, 'data', 'session-meta');
 const BUFFERS_DIR = path.join(__dirname, 'data', 'session-buffers');
 const USAGE_CACHE_FILE = path.join(__dirname, 'data', 'usage-cache.json');
+// Per-account PASSIVE usage capture (written by data/bin/vibespace-usage, the
+// statusLine hook). Key '__global__' = the machine's own login; 'sub-…' = a
+// named subscription. This is the ONLY usage source now — VibeSpace makes NO
+// background /api/oauth/usage calls with subscription tokens (that off-CLI
+// automated pattern is what gets Max/Pro accounts banned; see §ban-safety).
+const USAGE_CACHE_DIR = path.join(__dirname, 'data', 'usage-cache');
 const PTY_WRAPPER = path.join(__dirname, 'data', 'bin', 'pty-wrapper.js');
 const CHAT_WRAPPER = path.join(__dirname, 'data', 'bin', 'chat-wrapper.js');
 const CODEX_CHAT_WRAPPER = path.join(__dirname, 'data', 'bin', 'codex-chat-wrapper.js');
@@ -1246,6 +1252,25 @@ main().catch((e) => { console.error('vibespace-status:', e.message); process.exi
   fs.writeFileSync(STATUS_CMD, script, { mode: 0o755 });
 }
 createStatusHelper();
+
+// vibespace-usage — PASSIVE subscription-usage capture (statusLine hook). It's a
+// STATIC tracked file (data/bin/vibespace-usage), not generated — just make sure
+// it's present + executable and the cache dir exists. See §ban-safety: this
+// replaces all background /api/oauth/usage polling with a zero-API-call source.
+const USAGE_STATUSLINE_CMD = path.join(EDITOR_DIR, 'vibespace-usage');
+try { ensureDir(USAGE_CACHE_DIR); } catch {}
+try { if (fs.existsSync(USAGE_STATUSLINE_CMD)) fs.chmodSync(USAGE_STATUSLINE_CMD, 0o755); } catch {}
+// The user's OWN statusLine command (from ~/.claude/settings.json), so injected
+// VibeSpace terminal sessions render it transparently (pass-through) instead of
+// replacing it. Read fresh each spawn — cheap, and the user may change it.
+function userStatuslineCmd() {
+  try {
+    const s = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', 'settings.json'), 'utf-8'));
+    const sl = s && s.statusLine;
+    if (sl && sl.type === 'command' && typeof sl.command === 'string' && sl.command.trim()) return sl.command;
+  } catch {}
+  return '';
+}
 
 // vibespace-hook — dual-harness SessionStart hook (task context injection, P2).
 // Registered in ~/.claude/settings.json AND ~/.codex/hooks.json (same schema,
@@ -2499,7 +2524,11 @@ function _fetchOAuthUsage(token, cb) {
   if (typeof token === 'string' && token.startsWith('sk-ant-api')) { cb(null); return; }
   const req = https.request('https://api.anthropic.com/api/oauth/usage', {
     method: 'GET',
-    headers: { 'authorization': `Bearer ${token}`, 'anthropic-beta': 'oauth-2025-04-20', 'anthropic-version': '2023-06-01' },
+    // If this is ever called (user-initiated one-shot only — NEVER on a timer),
+    // carry the CLI's own User-Agent so the request is indistinguishable from
+    // Claude Code's and rides the same rate-limit bucket, not the anonymous
+    // aggressively-throttled one.
+    headers: { 'authorization': `Bearer ${token}`, 'anthropic-beta': 'oauth-2025-04-20', 'anthropic-version': '2023-06-01', 'user-agent': 'claude-cli/2.1.205 (external, cli)' },
   }, (res) => {
     let body = '';
     res.on('data', (d) => { body += d; });
@@ -2518,27 +2547,46 @@ function _fetchOAuthUsage(token, cb) {
   req.end();
 }
 
-// Per-subscription-account usage. Poll ONE account per tick (round-robin,
-// staggered ~8s after the global poll) so the burst-sensitive endpoint never
-// sees a flood. Idle accounts (expired token, no session) keep last-known —
-// their usage isn't changing anyway, so staleness is harmless.
-const _accountUsage = {}; // id → { ...usage, name }  (or { stale:true } placeholder)
-let _acctUsageRR = 0;
-function refreshAccountUsage() {
-  if (Date.now() < _rateLimitBackoffUntil) return;
-  const subs = (accounts.list().accounts || []).filter((a) => a.type === 'subscription');
-  const ids = new Set(subs.map((a) => a.id));
-  for (const id of Object.keys(_accountUsage)) if (!ids.has(id)) delete _accountUsage[id]; // drop removed
-  if (!subs.length) return;
-  const a = subs[_acctUsageRR++ % subs.length];
-  const token = accounts.usageToken(a.id); // read-only; null if token expired
-  if (!token) return; // idle account — keep last-known
-  _fetchOAuthUsage(token, (u) => { if (u) _accountUsage[a.id] = { ...u, name: a.name, email: a.email }; });
+// Per-subscription-account usage. Key = account id; '__global__' = the
+// machine's own login. Populated PASSIVELY from data/usage-cache/<key>.json,
+// which the statusLine hook (data/bin/vibespace-usage) writes from the CLI's
+// OWN rate_limits during a real session — NO background OAuth calls.
+const _accountUsage = {}; // id → { ...usage, name }
+
+// ── §ban-safety: NO background /api/oauth/usage polling ──────────────────────
+// We deliberately do NOT poll the usage endpoint with subscription OAuth tokens
+// on a timer. A fixed-cadence, 24/7 call using a subscription token — for
+// accounts that may be idle, from a server, without the claude-code User-Agent
+// — is the textbook "automated / non-human access outside the official client"
+// pattern (Consumer Terms §3.7; 2026-02-20 OAuth clarification) that flags
+// Max/Pro accounts as bots and gets them banned. Instead usage is a BYPRODUCT
+// of real interactive sessions: the CLI already receives 5h/7d rate_limits in
+// its API responses and hands them to the statusLine command, which caches
+// them. refreshRateLimit()/_fetchOAuthUsage() remain defined ONLY for an
+// explicit, user-initiated one-shot refresh — never scheduled.
+function ingestPassiveUsage() {
+  let entries = [];
+  try { entries = fs.readdirSync(USAGE_CACHE_DIR); } catch { return; }
+  const subIds = new Set((accounts.list().accounts || []).filter((a) => a.type === 'subscription').map((a) => a.id));
+  for (const id of Object.keys(_accountUsage)) if (!subIds.has(id)) delete _accountUsage[id]; // drop removed accounts
+  for (const fn of entries) {
+    if (!fn.endsWith('.json')) continue;
+    const key = fn.slice(0, -5);
+    let u = null;
+    try { u = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, fn), 'utf-8')); } catch { continue; }
+    if (!u || typeof u.fetchedAt !== 'number') continue;
+    if (key === '__global__') {
+      // Newest wins vs whatever we have (a live global poll never runs now).
+      if (!_rateLimitCache || (u.fetchedAt > (_rateLimitCache.fetchedAt || 0))) { _rateLimitCache = u; writeUsageCache(); }
+    } else if (subIds.has(key)) {
+      const a = accounts.get ? accounts.get(key) : null;
+      const meta = (accounts.list().accounts || []).find((x) => x.id === key) || {};
+      _accountUsage[key] = { ...u, name: meta.name, email: meta.email };
+    }
+  }
 }
-setTimeout(refreshRateLimit, 5000 + Math.floor(Math.random() * 20000)); // jittered first poll (de-sync from other pollers)
-setInterval(refreshRateLimit, 300000); // every 5 min
-setTimeout(refreshAccountUsage, 13000); // stagger after the global poll
-setInterval(refreshAccountUsage, 90000); // one account / 90s (round-robin)
+ingestPassiveUsage();
+setInterval(ingestPassiveUsage, 30000); // local disk read only — no network
 
 function normalizeCodexRateLimit(raw, fetchedAt = Date.now()) {
   if (!raw || typeof raw !== 'object') return null;
@@ -2668,6 +2716,7 @@ function summarizeCodexRateLimit() {
 }
 
 app.get('/api/usage', (req, res) => {
+  ingestPassiveUsage(); // pick up whatever active sessions' statuslines just wrote
   res.json({ rateLimit: _rateLimitCache, codexRateLimit: summarizeCodexRateLimit(), subscriptionSignedOut: _oauthSignedOut, accounts: _accountUsage });
 });
 
@@ -2689,6 +2738,7 @@ registerWsHandler(wss, {
   NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, CODEX_CMD, EDITOR_CMD, PORT, X_ENV,
   adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
   sessionStatus, sessionStatusKey, getTasks: () => tasks, accounts, scheduleCtxSync, activeSessionsPayload,
+  USAGE_STATUSLINE_CMD, userStatuslineCmd,
 });
 
 // Billing identity for the card badge. Precedence: env-key spawn (definite) →

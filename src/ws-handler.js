@@ -75,6 +75,7 @@ function registerWsHandler(wss, ctx) {
     NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, PORT, X_ENV,
     adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
     sessionStatus, sessionStatusKey, accounts, scheduleCtxSync, activeSessionsPayload,
+    USAGE_STATUSLINE_CMD, userStatuslineCmd,
   } = ctx;
 
   // Monotonic sequence for layout-sync rebroadcasts (shared across all
@@ -304,12 +305,26 @@ function registerWsHandler(wss, ctx) {
           const remoteAccountEnv = (h) => {
             if (!spawnAccount) return '';
             // API key: ship the single value to a 0600 file, reference via a
-            // shell prefix assignment (the VALUE never enters any argv).
+            // shell prefix assignment (the VALUE never enters any argv). API
+            // keys are the SANCTIONED programmatic path — always shippable.
             if (spawnAccount.secret) {
               const kf = `$HOME/.vibespace/${spawnAccount.id}.key`; // id shape acct-/sub-<hex>, metachar-free
               execFileSync('ssh', [...hosts.sshArgs(h), '--', `umask 077; mkdir -p "$HOME/.vibespace"; cat > "${kf}"`],
                 { input: spawnAccount.secret.value, timeout: 15000 });
               return `${spawnAccount.secret.var}="$(cat "${kf}")" `;
+            }
+            // §ban-safety GATE: shipping a SUBSCRIPTION's OAuth creds to a remote
+            // host means that subscription token is live from a (likely
+            // datacenter) IP different from where you normally use it — an
+            // impossible-travel / datacenter-ASN signal that helped get a Max
+            // account banned. OFF BY DEFAULT: the user must instead LOG IN ON
+            // THE HOST (the host's own login bills there). Opt in via
+            // Settings → accounts.shipSubscriptionToRemote only if you accept
+            // the risk. API keys (above) are unaffected.
+            let allowSubRemote = false;
+            try { allowSubRemote = !!getSyncStore('settings')?.get('accounts.shipSubscriptionToRemote'); } catch {}
+            if (!allowSubRemote) {
+              throw new Error('shipping a subscription login to a remote host is disabled (it risks the account — a subscription token from a datacenter IP looks like abuse). Log in on the host instead (Manage agents → select the host → "Log in on host…"), or use an API-key account. To override: Settings → "Ship subscription logins to remote hosts".');
             }
             // Subscription (Claude securestorage dir / Codex CODEX_HOME): ship
             // the account's creds DIR to the host over an ssh-stdin tar stream
@@ -396,12 +411,34 @@ function registerWsHandler(wss, ctx) {
             session.host = h.id;
             session.hostName = h.name;
           }
+          // PASSIVE usage capture (§ban-safety): for LOCAL TERMINAL sessions
+          // (a statusLine only renders in the TUI — chat/stream-json has none),
+          // inject a statusLine command that harvests the CLI's OWN 5h/7d
+          // rate_limits into data/usage-cache/. This is why VibeSpace makes NO
+          // background /api/oauth/usage calls with subscription tokens. Merged
+          // into any existing --settings (e.g. ultracode) so there's ONE flag.
+          const usageEnvPairs = [];
+          if (sessionMode === 'terminal' && !data.hostId && USAGE_STATUSLINE_CMD) {
+            try {
+              let settingsObj = {};
+              const si = spawnArgs.indexOf('--settings');
+              if (si >= 0 && spawnArgs[si + 1]) { try { settingsObj = JSON.parse(spawnArgs[si + 1]) || {}; } catch {} }
+              settingsObj.statusLine = { type: 'command', command: USAGE_STATUSLINE_CMD, padding: 0 };
+              const sjson = JSON.stringify(settingsObj);
+              if (si >= 0) spawnArgs[si + 1] = sjson; else spawnArgs = [...spawnArgs, '--settings', sjson];
+              const acctKey = spawnAccount?.id || '__global__';
+              const orig = (userStatuslineCmd && userStatuslineCmd()) || '';
+              usageEnvPairs.push(`VIBESPACE_ACCOUNT_KEY=${acctKey}`);
+              if (orig) usageEnvPairs.push(`VIBESPACE_ORIG_STATUSLINE=${orig}`);
+            } catch {}
+          }
           let createPty;
           try {
             createPty = pty.spawn(DTACH_CMD, ['-c', socketPath, '-E', '-r', 'none',
               NODE_CMD, wrapper,
               bufFile, metaFileW,
               ENV_CMD, `EDITOR=${EDITOR_CMD}`, `CLAUDE_WEBUI_PORT=${PORT}`, `CLAUDE_WEBUI_SESSION_ID=${id}`,
+              ...usageEnvPairs,
               // Agent-facing env: the vibespace tools (data/bin on PATH)
               // authenticate with the per-session token; Task Group belonging is
               // resolved server-side from that token (no task id in the env).

@@ -96,7 +96,8 @@ You only need to install the CLI(s) for the backend(s) you actually use — at l
 - **Settings system** — VS Code-style UI, per-terminal overrides, per-backend launch defaults (model/effort/permission)
 - **Multilingual UI** — English / 中文 / 日本語, per-device choice (⚙ → Language), English fallback for anything untranslated
 - **Presets** — save/restore full workspace state (windows, positions, grid, theme, fonts)
-- **Usage monitoring** — per-backend rate-limit pie charts (e.g. 5h / 7d) in the taskbar, click for details
+- **Multiple logins per backend** — keep several of your own subscriptions / API keys signed in at once and pick one per session; uses the official CLIs interactively, no background credential use ([docs/accounts.md](docs/accounts.md))
+- **Usage monitoring** — 5h / 7d rate-limit pie charts in the taskbar, captured passively from your live sessions (no background API polling), click for details
 - **WebSocket auto-reconnect** — re-attaches all active sessions on connection recovery
 
 ## Quick Install

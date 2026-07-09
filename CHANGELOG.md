@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.60.0] — 2026-07-09
+
+### Changed — subscription usage is now captured passively (no background API polling)
+VibeSpace no longer calls Anthropic's usage endpoint on a timer with a
+subscription's OAuth token. A fixed-cadence, 24/7 background call using a
+subscription token — for accounts that may be idle, from a server — is exactly
+the "automated / non-human access outside the official client" pattern that can
+get a Pro/Max account flagged and banned (Consumer Terms §3.7; the 2026-02-20
+OAuth clarification). Instead the **5h / 7d usage bars are captured passively**:
+a new status-line hook (`data/bin/vibespace-usage`) reads the rate-limit figures
+the CLI **already** receives during a real interactive session and caches them —
+**zero extra API calls**, and only for accounts you're actually using. Terminal
+sessions refresh usage this way; chat (stream-json) sessions have no status line,
+so a chat-only account shows its last-known value. Idle accounts are never
+contacted.
+
+### Changed — subscriptions no longer ship to remote hosts by default
+Running a subscription (Pro/Max or ChatGPT) on a **remote host** is now **off by
+default**. Putting a subscription's login on another machine (often a datacenter
+IP) is both outside the spirit of a personal subscription and an
+impossible-travel / datacenter signal that can look like account abuse. The
+recommended path is now to **log in on the host itself** ("Manage agents → select
+host → Log in on host…"), so the work bills to that machine's own login.
+**API-key accounts still ship to remote hosts** (that's the sanctioned path for
+server/automation use). To opt in for subscriptions anyway, enable **Settings →
+"Ship subscription logins to remote hosts."** The server enforces the gate — a
+blocked attempt fails with a clear message rather than silently shipping creds.
+
+### Docs
+New **[docs/accounts.md](docs/accounts.md)** now includes a "Staying within
+Anthropic's terms" section documenting these design choices; README and CLAUDE.md
+reworded to describe multi-account support as switching between **your own**
+logins (like signing in/out), using the official CLIs interactively.
+
 ## [2.59.1] — 2026-07-09
 
 ### Changed — account scoping made unambiguous in Manage agents
