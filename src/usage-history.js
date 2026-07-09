@@ -82,9 +82,14 @@ class UsageHistory {
   _acctAt(sid, ts, attrib, metaAcct) {
     const list = attrib[sid];
     if (list && list.length) {
-      let chosen = null;
-      for (const e of list) { if (e.ts <= ts) chosen = e.acct; else break; }
-      if (chosen !== null || list[0].ts > ts) return chosen != null ? chosen : (list[0].acct); // before first entry → use earliest known
+      // A global-login entry legitimately stores acct=null, so track WHETHER an
+      // entry matched (found) separately from its value — otherwise a null match
+      // followed by a later account switch would fall through to metaAcct and
+      // mis-bill a global-login request to the later account.
+      let found = false, chosen = null;
+      for (const e of list) { if (e.ts <= ts) { found = true; chosen = e.acct; } else break; }
+      if (found) return chosen;                 // exact account active at that time (may be null = global)
+      return list[0].acct;                      // request predates the first entry → earliest known
     }
     return metaAcct || null;
   }
@@ -186,7 +191,13 @@ class UsageHistory {
             (shardBuffers[shard] = shardBuffers[shard] || []).push(JSON.stringify(ev));
             added++;
           }
-          cur.offset += consumed;
+          // CRITICAL: cur.offset is a BYTE position (fs.readSync/st.size are
+          // bytes), but `consumed` is a UTF-16 code-unit count. Advancing by the
+          // string length under-shoots on any non-ASCII (CJK paths, Chinese/JP
+          // transcript text) → the next scan re-reads already-counted records
+          // and re-appends them, inflating totals. Advance by the BYTE length of
+          // the consumed chunk.
+          cur.offset += Buffer.byteLength(chunk, 'utf-8');
           this._cursors[fp] = cur;
         }
       }
@@ -221,8 +232,13 @@ class UsageHistory {
     return (ev.i * p.input + ev.o * p.output + ev.cw5 * p.cacheWrite5m + ev.cw1 * p.cacheWrite1h + ev.cr * p.cacheRead) / 1e6;
   }
 
-  // Stream shard files in [from,to] (epoch ms) and yield parsed events.
+  // Stream shard files in [from,to] (epoch ms) and yield UNIQUE events (deduped
+  // by requestId). The ledger is append-only and can contain a duplicate rid if
+  // a crash (e.g. OOM respawn) hit between a shard append and the cursor write —
+  // read-time dedup makes totals correct regardless of how a dup got there.
+  // requestIds are globally unique, so this never drops a distinct request.
   * _events(from, to) {
+    const seen = new Set();
     let files = [];
     try { files = fs.readdirSync(this.dir).filter(f => /^events-\d{4}-\d{2}\.ndjson$/.test(f)).sort(); } catch {}
     for (const fn of files) {
@@ -236,6 +252,7 @@ class UsageHistory {
         let ev; try { ev = JSON.parse(line); } catch { continue; }
         if (from && ev.ts < from) continue;
         if (to && ev.ts > to) continue;
+        if (ev.rid) { if (seen.has(ev.rid)) continue; seen.add(ev.rid); }
         yield ev;
       }
     }
