@@ -181,7 +181,21 @@ class SettingsUI {
       const input = document.createElement('input');
       input.type = 'checkbox';
       input.checked = value;
-      input.onchange = () => { this.settings.set(path, input.checked); row.classList.toggle('modified', this.settings.isModified(path)); };
+      input.onchange = async () => {
+        // confirmOn settings (e.g. the automation-risk usage poll) demand an
+        // explicit acknowledgement before being ENABLED; disabling is free.
+        if (schema.confirmOn && input.checked) {
+          const ok = await showConfirmDialog({
+            title: schema.label || t('Enable this setting?'),
+            message: schema.description || t('Are you sure?'),
+            confirmText: t('Enable anyway'),
+            danger: true,
+          });
+          if (!ok) { input.checked = false; return; }
+        }
+        this.settings.set(path, input.checked);
+        row.classList.toggle('modified', this.settings.isModified(path));
+      };
       const slider = document.createElement('span');
       slider.className = 'settings-toggle-slider';
       toggle.append(input, slider);

@@ -224,6 +224,12 @@ const SETTINGS_SCHEMA = {
     description: t('OFF (recommended): a subscription (Pro/Max) account can only run on THIS machine; for a remote host, log in on the host instead. Turning this ON copies the subscription’s login to the remote host — its token then appears from that host’s IP (often a datacenter), which can look like account abuse to Anthropic and risk a ban. API-key accounts are always allowed on remote hosts and are unaffected by this.'),
     category: t('Session'), liveApply: true,
   },
+  'accounts.activeUsagePolling': {
+    type: 'boolean', default: false, confirmOn: true,
+    label: t('⚠ Actively poll subscription usage (automation risk)'),
+    description: t('OFF (recommended): usage bars are captured passively from your live terminal sessions — VibeSpace never contacts Anthropic on its own. Turning this ON restores the old behavior: the server calls Anthropic’s usage endpoint on a ~90s timer with each subscription’s token, even for idle accounts. That off-CLI, fixed-cadence, non-human traffic is exactly what can get a Pro/Max account flagged as automated and BANNED — a real account was banned+refunded for this. Only enable it if you accept that risk (e.g. to see live usage for chat-only or idle accounts).'),
+    category: t('Session'), liveApply: true,
+  },
 
   // ── Claude ──
   'claude.defaultModel': {
