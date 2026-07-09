@@ -33,6 +33,9 @@ class AccountManager {
     this._onChange = onChange || (() => {});
     this._state = { version: 1, defaultAccountId: null, accounts: [] };
     this._load();
+    // Console-login scratch dirs (con-*) are transient; drop any abandoned by a
+    // login that never completed before a prior restart.
+    try { for (const d of fs.readdirSync(this._subsDir)) if (/^con-/.test(d)) fs.rmSync(path.join(this._subsDir, d), { recursive: true, force: true }); } catch { }
   }
 
   _acctType(a) { return a.type || 'api'; } // legacy records (no type) = API key
@@ -234,6 +237,33 @@ class AccountManager {
     const key = this.getKey(id);
     if (!key) throw new Error('account key unavailable (decryption failed): ' + a.name);
     return { id: a.id, name: a.name, tail: a.tail, kind: 'api', localEnv: { ANTHROPIC_API_KEY: key }, secret: { var: 'ANTHROPIC_API_KEY', value: key } };
+  }
+
+  // ── Add a CONSOLE account (its minted API key) WITHOUT nuking the global
+  // subscription. A console /login mints primaryApiKey into ~/.claude.json AND
+  // wipes .credentials.json (destructive). We protect the global creds by
+  // pointing CLAUDE_SECURESTORAGE_CONFIG_DIR at a throwaway dir — the wipe lands
+  // THERE, ~/.claude/.credentials.json is untouched (its token reads from
+  // securestorage). The minted key still lands in the shared ~/.claude.json, so
+  // capture reads it via importFromCli. Config dir stays ~/.claude → no
+  // first-run onboarding. Throwaway dir discarded after.
+  beginConsoleLogin() {
+    const id = 'con-' + crypto.randomBytes(6).toString('hex');
+    const dir = path.join(this._subsDir, id);
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    return { id, dir };
+  }
+  captureConsoleLogin(id, { name } = {}) {
+    if (!/^con-[a-f0-9]+$/.test(id)) throw new Error('bad login id');
+    const dir = path.join(this._subsDir, id);
+    const pk = this.cliPrimaryKey(); // reads ~/.claude.json primaryApiKey
+    if (!pk.present || pk.imported) { // not yet, or already saved
+      return { captured: false };
+    }
+    const account = this.importFromCli();
+    if (name) { try { this.rename(account.id, name); account.name = name; } catch { } }
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { }
+    return { captured: true, account };
   }
 
   // A subscription account's read-only access token for the usage poll (null if

@@ -923,4 +923,8 @@ export default {
   "👑 {name} (subscription)": "👑 {name}（サブスク）",
   "Add API key…": "API キーを追加…",
   "Paste a raw Anthropic API key (sk-ant-…) — bills pay-per-use, separate from the console-login import": "生の Anthropic API キー（sk-ant-…）を貼り付け——従量課金、コンソールログインの取り込みとは別",
+  "Add Console account…": "Console アカウントを追加…",
+  "Sign in to an Anthropic Console account — its API key is captured in an isolated login, so your subscription stays intact": "Anthropic Console アカウントにサインイン——隔離ログインで API キーを取得するため、サブスクログインは無傷",
+  "A terminal opened — pick “Anthropic Console account” and sign in. Your subscription login stays intact.": "ターミナルが開きました——「Anthropic Console account」を選んでサインインしてください。サブスクログインは無傷です。",
+  "Console account": "Console アカウント",
 };

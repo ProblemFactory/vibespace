@@ -1730,18 +1730,37 @@ app.delete('/api/accounts/:id', (req, res) => {
 app.post('/api/accounts/subscription', (req, res) => {
   try {
     const { id, dir } = accounts.createSubscription(req.body || {});
-    // The client opens a shell terminal with this exact command. LOGIN sets BOTH
-    // env vars → dir: the whole login (creds .credentials.json + identity
-    // .claude.json) lands in the isolated dir, so ~/.claude AND ~/.claude.json
-    // are untouched (no clobber of the global login's shown identity). At SPAWN
-    // we set ONLY CLAUDE_SECURESTORAGE_CONFIG_DIR, so transcripts stay shared.
-    const q = JSON.stringify(dir);
-    const loginCmd = `CLAUDE_CONFIG_DIR=${q} CLAUDE_SECURESTORAGE_CONFIG_DIR=${q} claude auth login`;
+    // The client opens a shell terminal with this exact command. Set ONLY
+    // CLAUDE_SECURESTORAGE_CONFIG_DIR → the login's CREDS go to the isolated dir
+    // (that's what bills), while the CONFIG dir stays ~/.claude — so claude does
+    // NOT show its first-run onboarding (an empty CLAUDE_CONFIG_DIR would, which
+    // broke the login flow). `/login` matches the proven console-wizard command.
+    // (Identity in ~/.claude.json is cosmetically overwritten — the global's
+    // TOKENS in ~/.claude/.credentials.json are untouched since they read from
+    // the securestorage dir.)
+    const loginCmd = `CLAUDE_SECURESTORAGE_CONFIG_DIR=${JSON.stringify(dir)} claude /login`;
     res.json({ success: true, id, dir, loginCmd });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.post('/api/accounts/subscription/:id/finalize', (req, res) => {
   try { res.json({ success: true, ...accounts.finalizeSubscription(req.params.id) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+// Add a Console account safely: the /login runs in an isolated dir so it can't
+// wipe the global subscription; we capture the minted key from that dir.
+app.post('/api/accounts/console-login', (req, res) => {
+  try {
+    const { id, dir } = accounts.beginConsoleLogin();
+    // securestorage=throwaway → the console login's .credentials.json wipe lands
+    // there (global subscription creds safe); the minted key lands in the shared
+    // ~/.claude.json (captured via importFromCli). Config dir stays ~/.claude →
+    // no onboarding.
+    const loginCmd = `CLAUDE_SECURESTORAGE_CONFIG_DIR=${JSON.stringify(dir)} claude /login`;
+    res.json({ success: true, id, loginCmd });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/accounts/console-login/:id/capture', (req, res) => {
+  try { res.json({ success: true, ...accounts.captureConsoleLogin(req.params.id, req.body || {}) }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
