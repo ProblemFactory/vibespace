@@ -17,7 +17,16 @@ one via **Manage agents → ChatGPT / OpenAI accounts → Add ChatGPT account…
 opens a terminal running `codex login --device-auth` (a URL + one-time code, so
 it works even when your browser is on a different machine). Star an account to
 make it the default for new Codex sessions; pick a specific one in the New
-Session dialog or the card ⚙. Local machine only for now (remote hosts pending).
+Session dialog or the card ⚙.
+
+### Added — subscriptions on remote hosts
+Named subscription accounts (both Claude and Codex) can now be picked for a
+**remote-host session**. The account's creds dir ships to the host per session
+over an ssh-stdin **tar stream** (channel-encrypted, lands in a 0700 dir) and
+the CLI is pointed at it (`CLAUDE_SECURESTORAGE_CONFIG_DIR` / `CODEX_HOME`) — the
+same process-env-only, never-argv discipline as the API-key path. For Codex the
+host's `sessions/` + `config.toml` are symlinked so threads/settings stay shared
+on the host. (Previously subscriptions were local-only.)
 
 ### Changed — accounts grouped under their CLI in Manage agents
 The account rosters now render **directly under their backend**: Anthropic

@@ -340,7 +340,13 @@ class AccountManager {
     if (this._acctType(a) === 'subscription') {
       const info = this.readSubCreds(id);
       if (!info.loggedIn) throw new Error('subscription not logged in: ' + a.name);
-      return { id: a.id, name: a.name, kind: 'subscription', localEnv: { CLAUDE_SECURESTORAGE_CONFIG_DIR: this.subDir(id) }, secret: null };
+      return {
+        id: a.id, name: a.name, kind: 'subscription',
+        localEnv: { CLAUDE_SECURESTORAGE_CONFIG_DIR: this.subDir(id) }, secret: null,
+        // REMOTE: ship the creds dir to the host so the remote CLI reads THIS
+        // account's login (securestorage relocated; config stays ~/.claude).
+        remoteCreds: { srcDir: this.subDir(id), dirName: 'subs/' + id, envVar: 'CLAUDE_SECURESTORAGE_CONFIG_DIR', files: ['.credentials.json', '.claude.json'], symlinks: {}, ensureTargets: [] },
+      };
     }
     const key = this.getKey(id);
     if (!key) throw new Error('account key unavailable (decryption failed): ' + a.name);
@@ -358,7 +364,19 @@ class AccountManager {
     if (this._acctBackend(a) !== 'codex') throw new Error('not a Codex account: ' + a.name);
     const info = this.readCodexSubAuth(id);
     if (!info.loggedIn) throw new Error('codex account not logged in: ' + a.name);
-    return { id: a.id, name: a.name, kind: 'codex-subscription', localEnv: { CODEX_HOME: this.codexSubDir(id) }, secret: null };
+    return {
+      id: a.id, name: a.name, kind: 'codex-subscription',
+      localEnv: { CODEX_HOME: this.codexSubDir(id) }, secret: null,
+      // REMOTE: ship auth.json to the host's CODEX_HOME copy; sessions/config
+      // symlink the host's own ~/.codex (targets ensured first) so threads +
+      // settings stay shared on the host, auth isolated per account.
+      remoteCreds: {
+        srcDir: this.codexSubDir(id), dirName: 'codex-subs/' + id, envVar: 'CODEX_HOME',
+        files: ['auth.json'],
+        symlinks: { sessions: '$HOME/.codex/sessions', 'config.toml': '$HOME/.codex/config.toml' },
+        ensureTargets: ['mkdir -p "$HOME/.codex/sessions"', 'touch "$HOME/.codex/config.toml"'],
+      },
+    };
   }
 
   // ── Add a CONSOLE account (its minted API key) WITHOUT nuking the global

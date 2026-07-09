@@ -1711,13 +1711,16 @@ app.patch('/api/accounts/:id', (req, res) => {
 app.delete('/api/accounts/:id', (req, res) => {
   try {
     accounts.remove(req.params.id); // throws for unknown ids → only real (shape-safe) ids continue
-    // Best-effort: clear the 0600 key file remote sessions may have left on
-    // each host (fire-and-forget; unreachable hosts are fine — the file is
-    // useless without the account anyway, but tidy up when we can).
-    if (/^acct-[a-f0-9]+$/.test(req.params.id) && hosts) {
+    // Best-effort: clear whatever this account left on each host — a 0600 key
+    // file (API), a securestorage creds dir (Claude sub), or a CODEX_HOME copy
+    // (Codex sub). Fire-and-forget; unreachable hosts are fine (the leftovers
+    // are useless without the account, but tidy up when we can).
+    const rid = req.params.id;
+    if (/^(acct|sub|cxs)-[a-f0-9]+$/.test(rid) && hosts) {
       const { execFile } = require('child_process');
+      const rm = `rm -f "$HOME/.vibespace/${rid}.key"; rm -rf "$HOME/.vibespace/subs/${rid}" "$HOME/.vibespace/codex-subs/${rid}"`;
       for (const h of hosts.list() || []) {
-        try { execFile('ssh', [...hosts.sshArgs(h), '--', `rm -f "$HOME/.vibespace/${req.params.id}.key"`], { timeout: 15000 }, () => {}); } catch { }
+        try { execFile('ssh', [...hosts.sshArgs(h), '--', rm], { timeout: 15000 }, () => {}); } catch { }
       }
     }
     res.json({ success: true });

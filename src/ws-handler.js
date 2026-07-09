@@ -303,14 +303,29 @@ function registerWsHandler(wss, ctx) {
           // worse than failing the create.
           const remoteAccountEnv = (h) => {
             if (!spawnAccount) return '';
-            // P1: subscription accounts are LOCAL-only (the creds dir lives on
-            // this machine). A remote session can't use one — fail loud rather
-            // than silently bill the host's global login.
-            if (!spawnAccount.secret) throw new Error('subscription accounts are not supported on remote hosts yet — pick a subscription only for local sessions');
-            const kf = `$HOME/.vibespace/${spawnAccount.id}.key`; // id shape acct-/sub-<hex>, metachar-free
-            execFileSync('ssh', [...hosts.sshArgs(h), '--', `umask 077; mkdir -p "$HOME/.vibespace"; cat > "${kf}"`],
-              { input: spawnAccount.secret.value, timeout: 15000 });
-            return `${spawnAccount.secret.var}="$(cat "${kf}")" `;
+            // API key: ship the single value to a 0600 file, reference via a
+            // shell prefix assignment (the VALUE never enters any argv).
+            if (spawnAccount.secret) {
+              const kf = `$HOME/.vibespace/${spawnAccount.id}.key`; // id shape acct-/sub-<hex>, metachar-free
+              execFileSync('ssh', [...hosts.sshArgs(h), '--', `umask 077; mkdir -p "$HOME/.vibespace"; cat > "${kf}"`],
+                { input: spawnAccount.secret.value, timeout: 15000 });
+              return `${spawnAccount.secret.var}="$(cat "${kf}")" `;
+            }
+            // Subscription (Claude securestorage dir / Codex CODEX_HOME): ship
+            // the account's creds DIR to the host over an ssh-stdin tar stream
+            // (channel-encrypted, lands in a 0700 dir), symlink the shared
+            // subdirs, and point the env var at the remote copy. Token refreshes
+            // on the host rewrite the host's copy (authoritative there).
+            const rc = spawnAccount.remoteCreds;
+            if (!rc) throw new Error('this account cannot run on a remote host');
+            const files = (rc.files || []).filter(f => { try { return fs.statSync(path.join(rc.srcDir, f)).isFile(); } catch { return false; } });
+            if (!files.length) throw new Error('account creds unreadable');
+            const tar = execFileSync('tar', ['-c', '-C', rc.srcDir, ...files], { timeout: 15000, maxBuffer: 8 * 1024 * 1024 });
+            const rdir = `$HOME/.vibespace/${rc.dirName}`; // dirName = subs/<id> | codex-subs/<id>, metachar-free
+            const links = Object.entries(rc.symlinks || {}).map(([n, tgt]) => `ln -sfn ${tgt} "${rdir}/${n}"`);
+            const script = [`umask 077`, `rm -rf "${rdir}"`, `mkdir -p "${rdir}"`, `tar -x -C "${rdir}"`, ...(rc.ensureTargets || []), ...links].join('; ');
+            execFileSync('ssh', [...hosts.sshArgs(h), '--', script], { input: tar, timeout: 20000 });
+            return `${rc.envVar}="${rdir}" `;
           };
           if (data.hostId && hosts && sessionMode === 'terminal') {
             let h;
