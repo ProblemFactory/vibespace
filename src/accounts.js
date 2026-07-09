@@ -23,10 +23,21 @@ class AccountManager {
   constructor({ dataDir, onChange }) {
     this._file = path.join(dataDir, 'accounts.json');
     this._keyFile = path.join(dataDir, '.accounts-key');
+    // Per-SUBSCRIPTION credential dirs. A subscription account is a real dir
+    // holding ONLY that account's .credentials.json; the CLI reads it via
+    // CLAUDE_SECURESTORAGE_CONFIG_DIR (relocates the SECRET store only —
+    // projects/sessions/settings stay in ~/.claude, so transcripts + discovery
+    // stay shared). Verified vs claude 2.1.205 (Wde() = env ?? sn()). This is
+    // how we hold MANY subscription logins at once.
+    this._subsDir = path.join(dataDir, 'subs');
     this._onChange = onChange || (() => {});
     this._state = { version: 1, defaultAccountId: null, accounts: [] };
     this._load();
   }
+
+  _acctType(a) { return a.type || 'api'; } // legacy records (no type) = API key
+  subDir(id) { return path.join(this._subsDir, id); }
+  subCredsPath(id) { return path.join(this.subDir(id), '.credentials.json'); }
 
   _load() {
     try {
@@ -66,14 +77,79 @@ class AccountManager {
     return Buffer.concat([d.update(data), d.final()]).toString('utf-8');
   }
 
-  // Sanitized — NEVER includes key material.
+  // Sanitized — NEVER includes key material. Subscription accounts add a
+  // read-only identity probe (email/plan/loggedIn) from their creds dir.
   list() {
     return {
       defaultAccountId: this._state.defaultAccountId || null,
-      accounts: this._state.accounts.map((a) => ({
-        id: a.id, name: a.name, tail: a.tail, source: a.source, createdAt: a.createdAt,
-      })),
+      accounts: this._state.accounts.map((a) => {
+        const type = this._acctType(a);
+        const base = { id: a.id, name: a.name, type, source: a.source, createdAt: a.createdAt };
+        if (type === 'subscription') {
+          const info = this.readSubCreds(a.id);
+          return { ...base, loggedIn: info.loggedIn, email: info.email, subscriptionType: info.subscriptionType };
+        }
+        return { ...base, tail: a.tail };
+      }),
     };
+  }
+
+  // ── Subscription accounts (each = its own securestorage creds dir) ──
+
+  // Allocate an empty account + dir. The OAuth login happens externally
+  // (a terminal running `CLAUDE_SECURESTORAGE_CONFIG_DIR=<dir> claude /login`);
+  // the caller watches for the creds file, then calls finalizeSubscription.
+  createSubscription({ name } = {}) {
+    const id = 'sub-' + crypto.randomBytes(6).toString('hex');
+    fs.mkdirSync(this.subDir(id), { recursive: true, mode: 0o700 });
+    const a = { id, name: String(name || '').trim().slice(0, 60) || 'Subscription', type: 'subscription', source: 'login', createdAt: Date.now() };
+    this._state.accounts.push(a);
+    this._save();
+    this._notify();
+    return { id, dir: this.subDir(id) };
+  }
+
+  // Read-only parse of a subscription account's creds. NEVER writes/refreshes
+  // (rotation would break the account, issue #20). Returns loggedIn + identity
+  // + the access token IF currently valid (for the usage poll).
+  readSubCreds(id) {
+    try {
+      const raw = JSON.parse(fs.readFileSync(this.subCredsPath(id), 'utf-8'));
+      const o = raw?.claudeAiOauth;
+      if (!o?.accessToken) return { loggedIn: false };
+      const valid = !o.expiresAt || Date.now() < o.expiresAt - 60000;
+      // Identity (email/org) is NOT in .credentials.json — it's in the dir's
+      // .claude.json (written because LOGIN also set CLAUDE_CONFIG_DIR=dir).
+      let email = o.email || o.emailAddress || null, org = null;
+      if (!email) {
+        try {
+          const cfg = JSON.parse(fs.readFileSync(path.join(this.subDir(id), '.claude.json'), 'utf-8'));
+          email = cfg?.oauthAccount?.emailAddress || null;
+          org = cfg?.oauthAccount?.organizationName || null;
+        } catch { }
+      }
+      return {
+        loggedIn: true,
+        subscriptionType: o.subscriptionType || null,
+        email, org,
+        accessToken: valid ? o.accessToken : null,
+        expiresAt: o.expiresAt || null,
+      };
+    } catch { return { loggedIn: false }; }
+  }
+
+  // After the login terminal wrote creds: pull identity, default the name to
+  // the email/plan if the user didn't set one. Returns loggedIn.
+  finalizeSubscription(id) {
+    const a = this.get(id);
+    if (!a || this._acctType(a) !== 'subscription') throw new Error('not a subscription account');
+    const info = this.readSubCreds(id);
+    if (info.loggedIn && (!a.name || a.name === 'Subscription')) {
+      a.name = (info.email || (info.subscriptionType ? info.subscriptionType[0].toUpperCase() + info.subscriptionType.slice(1) : 'Subscription')).slice(0, 60);
+      this._save();
+    }
+    this._notify();
+    return { id, ...info, name: a.name };
   }
 
   add({ name, key, source = 'manual' } = {}) {
@@ -112,8 +188,11 @@ class AccountManager {
   remove(id) {
     const i = this._state.accounts.findIndex((x) => x.id === id);
     if (i < 0) throw new Error('account not found');
+    const a = this._state.accounts[i];
     this._state.accounts.splice(i, 1);
     if (this._state.defaultAccountId === id) this._state.defaultAccountId = null;
+    // Subscription accounts own a creds dir — wipe it (best-effort).
+    if (this._acctType(a) === 'subscription') { try { fs.rmSync(this.subDir(id), { recursive: true, force: true }); } catch { } }
     this._save();
     this._notify();
   }
@@ -134,17 +213,36 @@ class AccountManager {
     try { return this._dec(a.keyEnc); } catch { return null; }
   }
 
-  // Resolve what a create request means. undefined/null → server default;
-  // 'subscription' → force none; 'acct-…' → that key (must exist).
+  // Resolve what a create request means into a spawn descriptor.
+  //   undefined/null → server default; 'subscription' → the CLI's GLOBAL login
+  //   (no env override); 'acct-…'/'sub-…' → that account.
+  // Returns null (= global login, no env change) or:
+  //   { id, name, tail?, kind:'api'|'subscription',
+  //     localEnv: {VAR:val},          // set in the LOCAL process spawn env
+  //     secret: {var,value} | null }  // shipped over ssh-stdin for REMOTE (api only)
   resolveForSpawn(requested) {
-    if (requested === 'subscription') return null;
+    if (requested === 'subscription') return null; // the CLI's own global login
     const id = requested || this._state.defaultAccountId;
     if (!id) return null;
     const a = this.get(id);
     if (!a) throw new Error('unknown account: ' + id);
+    if (this._acctType(a) === 'subscription') {
+      const info = this.readSubCreds(id);
+      if (!info.loggedIn) throw new Error('subscription not logged in: ' + a.name);
+      return { id: a.id, name: a.name, kind: 'subscription', localEnv: { CLAUDE_SECURESTORAGE_CONFIG_DIR: this.subDir(id) }, secret: null };
+    }
     const key = this.getKey(id);
     if (!key) throw new Error('account key unavailable (decryption failed): ' + a.name);
-    return { id: a.id, name: a.name, tail: a.tail, key };
+    return { id: a.id, name: a.name, tail: a.tail, kind: 'api', localEnv: { ANTHROPIC_API_KEY: key }, secret: { var: 'ANTHROPIC_API_KEY', value: key } };
+  }
+
+  // A subscription account's read-only access token for the usage poll (null if
+  // expired/absent — we NEVER refresh; a running session or a next-use refreshes
+  // it). Used by server.js to poll per-account /api/oauth/usage.
+  usageToken(id) {
+    const a = this.get(id);
+    if (!a || this._acctType(a) !== 'subscription') return null;
+    return this.readSubCreds(id).accessToken || null;
   }
 
   // ── Read-only probes of the CLI's own login state (NEVER written) ──

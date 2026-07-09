@@ -205,7 +205,8 @@ function registerWsHandler(wss, ctx) {
             // warn about API-billed sessions even after the user re-logins to
             // the subscription. The stream's init record (apiKeySource) later
             // CONFIRMS/overrides this guess (chat sessions).
-            _authAtSpawn: spawnAccount ? 'env-key'
+            _authAtSpawn: spawnAccount?.kind === 'subscription' ? 'subscription-acct'
+              : spawnAccount ? 'env-key'
               : backend !== 'claude' ? null
               : data.hostId ? 'remote-global'
               : (accounts?.subscriptionStatus?.().loggedIn ? 'subscription'
@@ -301,10 +302,14 @@ function registerWsHandler(wss, ctx) {
           // worse than failing the create.
           const remoteAccountEnv = (h) => {
             if (!spawnAccount) return '';
-            const kf = `$HOME/.vibespace/${spawnAccount.id}.key`; // id shape acct-<hex>, metachar-free
+            // P1: subscription accounts are LOCAL-only (the creds dir lives on
+            // this machine). A remote session can't use one — fail loud rather
+            // than silently bill the host's global login.
+            if (!spawnAccount.secret) throw new Error('subscription accounts are not supported on remote hosts yet — pick a subscription only for local sessions');
+            const kf = `$HOME/.vibespace/${spawnAccount.id}.key`; // id shape acct-/sub-<hex>, metachar-free
             execFileSync('ssh', [...hosts.sshArgs(h), '--', `umask 077; mkdir -p "$HOME/.vibespace"; cat > "${kf}"`],
-              { input: spawnAccount.key, timeout: 15000 });
-            return `ANTHROPIC_API_KEY="$(cat "${kf}")" `;
+              { input: spawnAccount.secret.value, timeout: 15000 });
+            return `${spawnAccount.secret.var}="$(cat "${kf}")" `;
           };
           if (data.hostId && hosts && sessionMode === 'terminal') {
             let h;
@@ -396,7 +401,12 @@ function registerWsHandler(wss, ctx) {
                 // is world-readable in /proc/cmdline. No account → explicitly
                 // strip any ambient key so the CLI uses its global login.
                 delete env.ANTHROPIC_API_KEY;
-                if (spawnAccount) env.ANTHROPIC_API_KEY = spawnAccount.key;
+                delete env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
+                // API key → ANTHROPIC_API_KEY; subscription account → its own
+                // CLAUDE_SECURESTORAGE_CONFIG_DIR (relocates ONLY the creds
+                // store, transcripts stay shared). Both ride process-env, never
+                // argv. No account → strip both so the CLI uses its global login.
+                if (spawnAccount?.localEnv) Object.assign(env, spawnAccount.localEnv);
                 return env;
               })(),
             });

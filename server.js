@@ -1723,6 +1723,28 @@ app.delete('/api/accounts/:id', (req, res) => {
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// ── Multi-subscription: hold several Claude Max/Pro logins at once, each in
+// its own securestorage creds dir (CLAUDE_SECURESTORAGE_CONFIG_DIR). Create
+// allocates the dir + returns the login command the client runs in a terminal;
+// finalize reads back the identity once the OAuth login has written creds. ──
+app.post('/api/accounts/subscription', (req, res) => {
+  try {
+    const { id, dir } = accounts.createSubscription(req.body || {});
+    // The client opens a shell terminal with this exact command. LOGIN sets BOTH
+    // env vars → dir: the whole login (creds .credentials.json + identity
+    // .claude.json) lands in the isolated dir, so ~/.claude AND ~/.claude.json
+    // are untouched (no clobber of the global login's shown identity). At SPAWN
+    // we set ONLY CLAUDE_SECURESTORAGE_CONFIG_DIR, so transcripts stay shared.
+    const q = JSON.stringify(dir);
+    const loginCmd = `CLAUDE_CONFIG_DIR=${q} CLAUDE_SECURESTORAGE_CONFIG_DIR=${q} claude auth login`;
+    res.json({ success: true, id, dir, loginCmd });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/accounts/subscription/:id/finalize', (req, res) => {
+  try { res.json({ success: true, ...accounts.finalizeSubscription(req.params.id) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 // ── Session status (agent-set via vibespace-status CLI, user-overridable) ──
 // The user's override of an agent-set status is injected as a system-reminder
 // into the NEXT chat message (see ws-handler chat-input) so the agent learns
@@ -2388,9 +2410,41 @@ function refreshRateLimit() {
   _fetchOAuthUsage(token);
 }
 
-function _fetchOAuthUsage(token) {
+function _parseUsage(u) {
+  // Frontend expects utilization as a 0–1 fraction and resetsAt as unix
+  // seconds; the endpoint gives a 0–100 percent and an ISO timestamp.
+  const toWin = (w) => (w && typeof w === 'object') ? {
+    utilization: (typeof w.utilization === 'number' ? w.utilization : 0) / 100,
+    status: (typeof w.utilization === 'number' && w.utilization >= 100) ? 'limited' : 'allowed',
+    resetsAt: w.resets_at ? Math.floor(Date.parse(w.resets_at) / 1000) || 0 : 0,
+  } : { utilization: 0, status: 'unknown', resetsAt: 0 };
+  const fiveHour = toWin(u.five_hour);
+  const sevenDay = toWin(u.seven_day);
+  const scopedWeekly = [];
+  if (Array.isArray(u.limits)) {
+    for (const lim of u.limits) {
+      if (lim?.kind === 'weekly_scoped' && lim.scope?.model?.display_name) {
+        scopedWeekly.push({
+          name: lim.scope.model.display_name,
+          utilization: (typeof lim.percent === 'number' ? lim.percent : 0) / 100,
+          resetsAt: lim.resets_at ? Math.floor(Date.parse(lim.resets_at) / 1000) || 0 : 0,
+          severity: lim.severity || 'normal',
+        });
+      }
+    }
+  }
+  return {
+    fiveHour, sevenDay, scopedWeekly,
+    overallStatus: (fiveHour.status === 'limited' || sevenDay.status === 'limited') ? 'limited' : 'allowed',
+    fetchedAt: Date.now(),
+  };
+}
+
+// cb(usageObj) on a 200; cb(null) on any failure (caller keeps last-known).
+function _fetchOAuthUsage(token, cb) {
+  cb = cb || ((u) => { if (u) { _rateLimitCache = u; writeUsageCache(); } });
   // OAuth-only endpoint; a real API key can't read subscription usage.
-  if (typeof token === 'string' && token.startsWith('sk-ant-api')) return;
+  if (typeof token === 'string' && token.startsWith('sk-ant-api')) { cb(null); return; }
   const req = https.request('https://api.anthropic.com/api/oauth/usage', {
     method: 'GET',
     headers: { 'authorization': `Bearer ${token}`, 'anthropic-beta': 'oauth-2025-04-20', 'anthropic-version': '2023-06-01' },
@@ -2402,49 +2456,37 @@ function _fetchOAuthUsage(token) {
         const ra = parseInt(res.headers['retry-after'] || '300', 10);
         _rateLimitBackoffUntil = Date.now() + (Number.isFinite(ra) ? ra : 300) * 1000;
         console.warn(`[rate-limit] /api/oauth/usage 429 — backing off ${ra}s (keeping last-known)`);
-        return;
+        cb(null); return;
       }
-      if (res.statusCode !== 200) { console.warn(`[rate-limit] /api/oauth/usage HTTP ${res.statusCode}`); return; }
-      try {
-        const u = JSON.parse(body);
-        // Frontend expects utilization as a 0–1 fraction and resetsAt as unix
-        // seconds; the endpoint gives a 0–100 percent and an ISO timestamp.
-        const toWin = (w) => (w && typeof w === 'object') ? {
-          utilization: (typeof w.utilization === 'number' ? w.utilization : 0) / 100,
-          status: (typeof w.utilization === 'number' && w.utilization >= 100) ? 'limited' : 'allowed',
-          resetsAt: w.resets_at ? Math.floor(Date.parse(w.resets_at) / 1000) || 0 : 0,
-        } : { utilization: 0, status: 'unknown', resetsAt: 0 };
-        const fiveHour = toWin(u.five_hour);
-        const sevenDay = toWin(u.seven_day);
-        // Model-scoped weekly limits (e.g. Anthropic's separate Fable cap) ride
-        // in the limits[] array as kind:"weekly_scoped" with scope.model.
-        const scopedWeekly = [];
-        if (Array.isArray(u.limits)) {
-          for (const lim of u.limits) {
-            if (lim?.kind === 'weekly_scoped' && lim.scope?.model?.display_name) {
-              scopedWeekly.push({
-                name: lim.scope.model.display_name,
-                utilization: (typeof lim.percent === 'number' ? lim.percent : 0) / 100,
-                resetsAt: lim.resets_at ? Math.floor(Date.parse(lim.resets_at) / 1000) || 0 : 0,
-                severity: lim.severity || 'normal',
-              });
-            }
-          }
-        }
-        _rateLimitCache = {
-          fiveHour, sevenDay, scopedWeekly,
-          overallStatus: (fiveHour.status === 'limited' || sevenDay.status === 'limited') ? 'limited' : 'allowed',
-          fetchedAt: Date.now(),
-        };
-        writeUsageCache();
-      } catch {}
+      if (res.statusCode !== 200) { console.warn(`[rate-limit] /api/oauth/usage HTTP ${res.statusCode}`); cb(null); return; }
+      try { cb(_parseUsage(JSON.parse(body))); } catch { cb(null); }
     });
   });
-  req.on('error', () => {});
+  req.on('error', () => cb(null));
   req.end();
+}
+
+// Per-subscription-account usage. Poll ONE account per tick (round-robin,
+// staggered ~8s after the global poll) so the burst-sensitive endpoint never
+// sees a flood. Idle accounts (expired token, no session) keep last-known —
+// their usage isn't changing anyway, so staleness is harmless.
+const _accountUsage = {}; // id → { ...usage, name }  (or { stale:true } placeholder)
+let _acctUsageRR = 0;
+function refreshAccountUsage() {
+  if (Date.now() < _rateLimitBackoffUntil) return;
+  const subs = (accounts.list().accounts || []).filter((a) => a.type === 'subscription');
+  const ids = new Set(subs.map((a) => a.id));
+  for (const id of Object.keys(_accountUsage)) if (!ids.has(id)) delete _accountUsage[id]; // drop removed
+  if (!subs.length) return;
+  const a = subs[_acctUsageRR++ % subs.length];
+  const token = accounts.usageToken(a.id); // read-only; null if token expired
+  if (!token) return; // idle account — keep last-known
+  _fetchOAuthUsage(token, (u) => { if (u) _accountUsage[a.id] = { ...u, name: a.name, email: a.email }; });
 }
 setTimeout(refreshRateLimit, 5000 + Math.floor(Math.random() * 20000)); // jittered first poll (de-sync from other pollers)
 setInterval(refreshRateLimit, 300000); // every 5 min
+setTimeout(refreshAccountUsage, 13000); // stagger after the global poll
+setInterval(refreshAccountUsage, 90000); // one account / 90s (round-robin)
 
 function normalizeCodexRateLimit(raw, fetchedAt = Date.now()) {
   if (!raw || typeof raw !== 'object') return null;
@@ -2574,7 +2616,7 @@ function summarizeCodexRateLimit() {
 }
 
 app.get('/api/usage', (req, res) => {
-  res.json({ rateLimit: _rateLimitCache, codexRateLimit: summarizeCodexRateLimit(), subscriptionSignedOut: _oauthSignedOut });
+  res.json({ rateLimit: _rateLimitCache, codexRateLimit: summarizeCodexRateLimit(), subscriptionSignedOut: _oauthSignedOut, accounts: _accountUsage });
 });
 
 app.get('/api/available-models', (req, res) => {
@@ -2607,6 +2649,9 @@ function sessionAuth(s) {
   if ((s.backend || 'claude') !== 'claude') return null;
   if (s._accountId) {
     const a = accounts.get(s._accountId);
+    // A named SUBSCRIPTION account bills the subscription (not API) — show its
+    // name, no amber key warning.
+    if (a && (a.type || 'api') === 'subscription') return { source: 'subscription', name: a.name };
     return { source: 'api-key', name: a?.name || 'API key', tail: a?.tail || null };
   }
   const src = s._apiKeySource;
