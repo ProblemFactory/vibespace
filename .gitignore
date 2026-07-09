@@ -23,6 +23,7 @@ data/subs/
 data/codex-subs/
 data/usage-cache/
 data/usage-history/
+data/codex-models-seen.json
 data/mounts.json
 data/.mounts-key
 data/mount-tokens.json
