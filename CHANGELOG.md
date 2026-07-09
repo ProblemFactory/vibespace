@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.60.1] — 2026-07-09
+
+### Added — active usage polling as an explicit opt-in (default off)
+The old OAuth-based usage auto-refresh is back, but only as a clearly-labeled
+opt-in: **Settings → "⚠ Actively poll subscription usage (automation risk)"**
+(default **off**). Off (the default) means VibeSpace never contacts Anthropic on
+its own — usage stays passive (captured from your live terminal sessions).
+Turning it on restores the background poll (global login ~5 min + one named
+subscription per 90 s) and pops a **danger confirm dialog** spelling out that
+this off-CLI, fixed-cadence traffic is what can get a Pro/Max account flagged as
+automated and banned. Use it only if you accept that risk (e.g. to see live
+usage for chat-only or idle accounts).
+
+The hourly `/v1/models` fetch with a subscription OAuth token is gated behind the
+**same** toggle (it's the same off-CLI background pattern). Off by default, the
+model dropdown falls back to the built-in CLI aliases; an API key is always used
+when present.
+
 ## [2.60.0] — 2026-07-09
 
 ### Changed — subscription usage is now captured passively (no background API polling)
