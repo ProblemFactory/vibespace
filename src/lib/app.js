@@ -2306,9 +2306,7 @@ class App {
       const all = this._accounts?.accounts || [];
       const list = all.filter(a => (a.backend || 'claude') === be);
       const onHost = !!document.getElementById('input-host')?.value;
-      // Codex accounts are LOCAL-only for now (isolated CODEX_HOME on this box).
-      const usable = be === 'codex' ? (onHost ? [] : list) : list;
-      const show = (be === 'claude' || be === 'codex') && usable.length > 0;
+      const show = (be === 'claude' || be === 'codex') && list.length > 0;
       acctRow.style.display = show ? '' : 'none';
       if (!show) { acctSel.value = ''; return; }
       const defId = be === 'codex' ? this._accounts?.defaultCodexAccountId : this._accounts?.defaultAccountId;
@@ -2318,12 +2316,12 @@ class App {
       acctSel.innerHTML = '';
       const opts = [
         ['', t('Default ({name})', { name: defName })],
-        ['subscription', be === 'codex' ? t('ChatGPT login (this machine)') : t('Subscription (Pro/Max login)')], // the CLI's global login
+        ['subscription', be === 'codex' ? (onHost ? t('ChatGPT login (on the host)') : t('ChatGPT login')) : t('Subscription (Pro/Max login)')], // the CLI's global login
       ];
+      // Subscription accounts work on remote hosts too now — their creds dir
+      // ships to the host per session (P3).
       for (const a of list) {
-        // Named subscription accounts are LOCAL-only (their creds dir is on this
-        // machine); skip them when a remote host is selected.
-        if (a.type === 'subscription') { if (!onHost && a.loggedIn) opts.push([a.id, t('{name} (subscription)', { name: a.name })]); }
+        if (a.type === 'subscription') { if (a.loggedIn) opts.push([a.id, t('{name} (subscription)', { name: a.name })]); }
         else opts.push([a.id, t('{name} — API key …{tail}', { name: a.name, tail: a.tail })]);
       }
       for (const [v, label] of opts) {
