@@ -1738,7 +1738,10 @@ app.post('/api/accounts/subscription', (req, res) => {
     // (Identity in ~/.claude.json is cosmetically overwritten — the global's
     // TOKENS in ~/.claude/.credentials.json are untouched since they read from
     // the securestorage dir.)
-    const loginCmd = `CLAUDE_SECURESTORAGE_CONFIG_DIR=${JSON.stringify(dir)} claude /login`;
+    // `claude auth login` (subcommand — NOT the TUI `/login`, which errors from
+    // a shell) prints an OAuth URL to a HOSTED callback + a "Paste code" prompt,
+    // so it works headlessly. --claudeai = the subscription flow.
+    const loginCmd = `CLAUDE_SECURESTORAGE_CONFIG_DIR=${JSON.stringify(dir)} claude auth login --claudeai`;
     res.json({ success: true, id, dir, loginCmd });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -1755,7 +1758,7 @@ app.post('/api/accounts/console-login', (req, res) => {
     // there (global subscription creds safe); the minted key lands in the shared
     // ~/.claude.json (captured via importFromCli). Config dir stays ~/.claude →
     // no onboarding.
-    const loginCmd = `CLAUDE_SECURESTORAGE_CONFIG_DIR=${JSON.stringify(dir)} claude /login`;
+    const loginCmd = `CLAUDE_SECURESTORAGE_CONFIG_DIR=${JSON.stringify(dir)} claude auth login --console`;
     res.json({ success: true, id, loginCmd });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });

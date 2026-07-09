@@ -828,6 +828,13 @@ class App {
             if (!keyRow) return;
             const id = keyRow.dataset.id;
             if (e.target.classList.contains('acct-test')) {
+              // A not-logged-in subscription can't spawn — the server would
+              // reject the create and leave a blank window. Guard it here.
+              const acct = (accts.accounts || []).find(x => x.id === id);
+              if (acct?.type === 'subscription' && !acct.loggedIn) {
+                showToast(t('This subscription isn’t signed in yet — use “Add subscription…” to finish the login first.'), { type: 'error' });
+                return;
+              }
               done();
               this.createSession({ backend: 'claude', mode: 'terminal', cwd: '', accountId: id });
             } else if (e.target.classList.contains('acct-def')) {
@@ -2126,7 +2133,7 @@ class App {
       for (const a of list) {
         // Named subscription accounts are LOCAL-only in P1 (their creds dir is
         // on this machine); skip them when a remote host is selected.
-        if (a.type === 'subscription') { if (!onHost) opts.push([a.id, t('👑 {name} (subscription)', { name: a.name })]); }
+        if (a.type === 'subscription') { if (!onHost && a.loggedIn) opts.push([a.id, t('👑 {name} (subscription)', { name: a.name })]); }
         else opts.push([a.id, t('{name} — API key …{tail}', { name: a.name, tail: a.tail })]);
       }
       for (const [v, label] of opts) {
