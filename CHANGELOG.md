@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.61.0] — 2026-07-09
+
+### Added — Usage window (permanent per-request token ledger)
+New **⚙ → Usage** window with a full analytics dashboard over your token usage.
+A permanent, append-only ledger (`data/usage-history/`) is mined from Claude
+Code's own JSONL transcripts — **works for both terminal and chat sessions**
+(the transcript is mode-independent) — and keeps the atomic facts forever, so it
+survives transcript rotation/deletion and any future report can just read it.
+
+Each record is one API request, **deduped by requestId** (a single request
+appears on 2–3 transcript records with identical usage — summing raw records
+would multi-count). Scanning is incremental (per-file byte cursor), so even
+hundreds of MB of history scan in a few seconds.
+
+**Accurate account attribution (no mixing):** every request records WHICH
+account it billed to and its billing **type**, so **subscription usage and
+API-key usage are never conflated** (they're covered by your plan vs real $).
+Attribution is per-request **by time** — a session resumed under a different
+account is split correctly — via a permanent attribution log; unattributed
+sessions (the CLI's own global login) are their own clearly-labeled bucket.
+
+The dashboard shows: headline tiles (est. API-equivalent cost, total tokens,
+cache-hit ratio, requests/sessions, fresh input, cache writes), a daily trend
+chart, and breakdowns **by billing type, account, model, project, mode, cache
+efficiency, hour-of-day and weekday activity, and top sessions** — with a
+range/backend filter and **CSV export**. Cost is an estimate (API-equivalent;
+subscriptions are plan-covered) from an editable price table
+(`data/usage-history/pricing.json`).
+
 ## [2.60.2] — 2026-07-09
 
 ### Changed — the taskbar usage pies now follow your DEFAULT account

@@ -999,6 +999,7 @@ function readSessionMeta(sockName) {
 function writeSessionMeta(sockName, meta) {
   ensureDir(META_DIR);
   fs.writeFileSync(path.join(META_DIR, sockName + '.json'), JSON.stringify(meta));
+  try { recordUsageAttribution(meta); } catch {} // usage-ledger account-by-time
 }
 function deleteSessionMeta(sockName) {
   try { fs.unlinkSync(path.join(META_DIR, sockName + '.json')); } catch {}
@@ -1697,6 +1698,49 @@ const accounts = new AccountManager({
     for (const client of wss.clients) if (client.readyState === WS_OPEN) client.send(json);
     broadcastActiveSessions(); // account names on live session cards may change
   },
+});
+// ── Usage history: a PERMANENT per-request token ledger mined from Claude's
+// JSONL transcripts (terminal + chat), for the Usage window. resolveAccount
+// bakes WHICH account + its billing TYPE into each event so subscription and
+// API-key usage are never conflated. ──
+const { UsageHistory } = require('./src/usage-history');
+const usageHistory = new UsageHistory({
+  dataDir: path.join(__dirname, 'data'),
+  resolveAccount: (id) => {
+    const a = (accounts.list().accounts || []).find((x) => x.id === id);
+    if (!a) return null;
+    return { type: a.backend === 'codex' ? 'codex-subscription' : a.type, name: a.name, tail: a.tail };
+  },
+});
+// Attribution log: dedup'd per (sid,acct) so a resume under a DIFFERENT account
+// is captured with its timestamp (per-request-by-time attribution). Called from
+// writeSessionMeta whenever a session has both a claudeSessionId and account.
+const _lastAttrib = new Map();
+function recordUsageAttribution(meta) {
+  const sid = meta && (meta.claudeSessionId || meta.backendSessionId);
+  if (!sid) return;
+  const acct = meta.accountId || null;
+  if (_lastAttrib.get(sid) === (acct || '')) return;
+  _lastAttrib.set(sid, acct || '');
+  usageHistory.recordAttribution({ sid, acct, ts: Date.now() });
+}
+// Rescan the ledger periodically (incremental — only new JSONL bytes). Also
+// rescanned on demand when the Usage window opens.
+setTimeout(() => { try { usageHistory.scan(); } catch {} }, 8000);
+setInterval(() => { try { usageHistory.scan(); } catch {} }, 180000);
+app.get('/api/usage-stats', (req, res) => {
+  try {
+    usageHistory.scan(); // pick up anything new before answering
+    const from = req.query.from ? parseInt(req.query.from, 10) : null;
+    const to = req.query.to ? parseInt(req.query.to, 10) : null;
+    const backend = req.query.backend || null;
+    res.json(usageHistory.aggregate({ from, to, backend }));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/usage-stats/pricing', (req, res) => res.json({ pricing: usageHistory.pricingTable() }));
+app.post('/api/usage-stats/pricing', (req, res) => {
+  try { usageHistory.setPricing(req.body || {}); res.json({ success: true, pricing: usageHistory.pricingTable() }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.get('/api/accounts', (req, res) => {
   res.json({

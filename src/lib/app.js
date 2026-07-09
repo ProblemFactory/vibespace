@@ -23,6 +23,7 @@ import { CommandMode } from './command-mode.js';
 import { updateTaskbar as updateTaskbarFn } from './taskbar.js';
 import { openBrowser as openBrowserFn } from './browser-window.js';
 import { openTaskDetail as openTaskDetailFn } from './task-detail.js';
+import { openUsageWindow } from './usage-window.js';
 import { openSessionProps as openSessionPropsFn } from './session-props.js';
 import { openWorkflowDetail as openWorkflowDetailFn } from './workflow-detail.js';
 import { DesktopManager } from './desktop-manager.js';
@@ -1707,11 +1708,13 @@ class App {
       exp: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 10V2M5 5l3-3 3 3M3 10v3h10v-3"/></svg>',
       imp: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8M5 7l3 3 3-3M3 10v3h10v-3"/></svg>',
       lock: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="7" width="9" height="6.5" rx="1"/><path d="M5.5 7V5a2.5 2.5 0 015 0v2"/></svg>',
+      chart: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 13h12"/><rect x="3" y="8" width="2.4" height="4"/><rect x="6.8" y="5" width="2.4" height="7"/><rect x="10.6" y="2.5" width="2.4" height="9.5"/></svg>',
     };
     const sep = () => { const s = document.createElement('div'); s.className = 'gs-menu-sep'; return s; };
     // workspace tools / data & security / help — grouped, the flat list grew too long
     if (!this.isMobile) menu.append(item(I.brush, t('Customize UI\u2026'), () => this._customize.enter()));
     menu.append(item(I.key, t('Manage agents\u2026'), () => this._showAgentsDialog()));
+    menu.append(item(I.chart, t('Usage\u2026'), () => this.openUsage()));
     // Language is PER-DEVICE (localStorage, not a synced setting) \u2014 names shown
     // in their own language, never translated. Switching reloads the page.
     {
@@ -3006,6 +3009,9 @@ class App {
       case 'openTaskDetail':
         this.openTaskDetail(spec.taskId, { syncId });
         break;
+      case 'openUsage':
+        this.openUsage({ syncId });
+        break;
       case 'openSessionProps':
         this.openSessionProps(spec.sessionKey, { syncId });
         break;
@@ -3084,6 +3090,7 @@ class App {
   openBrowser(url, opts) { return openBrowserFn(this, url, opts); }
 
   openTaskDetail(taskId, opts) { return openTaskDetailFn(this, taskId, opts); }
+  openUsage(opts) { return openUsageWindow(this, opts || {}); }
 
   openSessionProps(sessionRef, opts) { return openSessionPropsFn(this, sessionRef, opts); }
 

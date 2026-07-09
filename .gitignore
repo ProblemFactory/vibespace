@@ -22,6 +22,7 @@ data/.accounts-key
 data/subs/
 data/codex-subs/
 data/usage-cache/
+data/usage-history/
 data/mounts.json
 data/.mounts-key
 data/mount-tokens.json
