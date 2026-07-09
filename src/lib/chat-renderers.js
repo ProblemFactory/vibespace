@@ -369,7 +369,10 @@ class ChatRenderers {
       const h = msg.content[0].hookData;
       const el = document.createElement('div');
       el.className = 'chat-msg chat-msg-system chat-system-notification';
-      const output = h.output ? escHtml(h.output).substring(0, 500) : '';
+      // Full hook output (was truncated to 500 chars — and substring-after-escHtml
+      // could even slice a mid-entity). Kept inside a collapsed <details>; the
+      // CSS caps its height with a scroll so a huge output can't flood the view.
+      const output = h.output ? escHtml(h.output) : '';
       el.innerHTML = `<details class="chat-hook-details"><summary class="chat-hook-summary">${escHtml(text)}</summary>${output ? `<pre class="chat-hook-output">${output}</pre>` : ''}</details>`;
       return { el, sideEffect: null };
     }
