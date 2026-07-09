@@ -35,7 +35,7 @@ export function openUsageWindow(app, opts = {}) {
   root.className = 'usage-win';
   winInfo.content.appendChild(root);
 
-  const state = { range: '30d', backend: '', metric: 'cost', data: null, loading: false };
+  const state = { range: '30d', backend: '', metric: 'cost', data: null, loading: false, view: 'dash' };
 
   const load = async () => {
     state.loading = true; render();
@@ -51,9 +51,10 @@ export function openUsageWindow(app, opts = {}) {
 
   const render = () => {
     root.innerHTML = '';
-    root.appendChild(renderControls(app, state, load));
+    root.appendChild(renderControls(app, state, load, render));
     const body = document.createElement('div'); body.className = 'usage-body';
     root.appendChild(body);
+    if (state.view === 'pricing') { body.appendChild(renderPricingEditor(state, render, load)); return; }
     if (state.loading && !state.data) { body.innerHTML = `<div class="usage-empty">${t('Loading…')}</div>`; return; }
     const d = state.data;
     if (!d || !d.totals || !d.totals.requests) {
@@ -81,8 +82,15 @@ export function openUsageWindow(app, opts = {}) {
   return winInfo;
 }
 
-function renderControls(app, state, load) {
+function renderControls(app, state, load, rerender) {
   const bar = document.createElement('div'); bar.className = 'usage-controls';
+  if (state.view === 'pricing') {
+    const back = document.createElement('button'); back.className = 'usage-btn'; back.textContent = '← ' + t('Back to dashboard');
+    back.onclick = () => { state.view = 'dash'; rerender(); };
+    const title = document.createElement('div'); title.className = 'usage-ctl-label'; title.style.fontSize = '13px'; title.textContent = t('Pricing (per model + per account)');
+    bar.append(back, title);
+    return bar;
+  }
   const seg = (items, cur, onPick) => {
     const wrap = document.createElement('div'); wrap.className = 'usage-seg';
     for (const it of items) {
@@ -102,12 +110,90 @@ function renderControls(app, state, load) {
     { key: 'cost', label: t('Cost') }, { key: 'totalTokens', label: t('Tokens') },
   ], state.metric, k => { state.metric = k; load(); })));
   const spacer = document.createElement('div'); spacer.style.flex = '1'; bar.appendChild(spacer);
+  const priceBtn = document.createElement('button'); priceBtn.className = 'usage-btn'; priceBtn.textContent = t('Pricing…');
+  priceBtn.title = t('Edit per-model rates and per-account discounts');
+  priceBtn.onclick = () => { state.view = 'pricing'; rerender(); };
   const csv = document.createElement('button'); csv.className = 'usage-btn'; csv.textContent = t('Export CSV');
   csv.onclick = () => exportCsv(state.data);
   const refresh = document.createElement('button'); refresh.className = 'usage-btn'; refresh.textContent = t('Refresh');
   refresh.onclick = load;
-  bar.append(csv, refresh);
+  bar.append(priceBtn, csv, refresh);
   return bar;
+}
+
+// Per-model rates + per-account discount/override editor. Saves via PATCH to
+// /api/usage-stats/pricing (merges), then reloads the dashboard so costs update.
+function renderPricingEditor(state, rerender, reload) {
+  const wrap = document.createElement('div'); wrap.className = 'usage-pricing';
+  const pricing = (state.data && state.data.pricing) || { tiers: {}, accounts: {} };
+  const accounts = ((state.data && state.data.groups && state.data.groups.account) || []).filter(a => a.key !== '__global__');
+  const TIERS = ['fable', 'opus', 'sonnet', 'haiku'];
+  const FIELDS = [['input', t('Input')], ['output', t('Output')], ['cacheWrite5m', t('Cache write 5m')], ['cacheWrite1h', t('Cache write 1h')], ['cacheRead', t('Cache read')]];
+  const edited = { tiers: {}, accounts: {} };
+
+  const note = document.createElement('div'); note.className = 'usage-note';
+  note.innerHTML = escHtml(t('USD per million tokens. Default rates apply to every account (subscriptions bill as this API-equivalent reference). Give an API-key account a discount % or its own rates — different keys really do bill differently.'));
+  wrap.appendChild(note);
+
+  // Default per-model rates
+  const tsec = document.createElement('div'); tsec.className = 'usage-section';
+  tsec.innerHTML = `<div class="usage-section-title">${t('Default rates ($ / Mtok)')}</div>`;
+  const tbl = document.createElement('table'); tbl.className = 'usage-price-tbl';
+  tbl.innerHTML = `<tr><th>${t('Model')}</th>${FIELDS.map(f => `<th>${f[1]}</th>`).join('')}</tr>`;
+  for (const tier of TIERS) {
+    const row = document.createElement('tr');
+    row.innerHTML = `<td>${tier}</td>`;
+    for (const [fk] of FIELDS) {
+      const td = document.createElement('td');
+      const inp = document.createElement('input'); inp.type = 'number'; inp.step = '0.01'; inp.className = 'usage-price-inp';
+      inp.value = (pricing.tiers?.[tier]?.[fk] ?? '');
+      inp.oninput = () => { (edited.tiers[tier] = edited.tiers[tier] || { ...(pricing.tiers?.[tier] || {}) })[fk] = parseFloat(inp.value) || 0; };
+      td.appendChild(inp); row.appendChild(td);
+    }
+    tbl.appendChild(row);
+  }
+  tsec.appendChild(tbl); wrap.appendChild(tsec);
+
+  // Per-account discount / override
+  const asec = document.createElement('div'); asec.className = 'usage-section';
+  asec.innerHTML = `<div class="usage-section-title">${t('Per-account discount')}</div>`;
+  if (!accounts.length) { asec.appendChild(emptyLine()); }
+  for (const a of accounts) {
+    const cur = pricing.accounts?.[a.key] || {};
+    const row = document.createElement('div'); row.className = 'usage-bar-row';
+    const badge = a.type ? typeBadge(a.type, a.deleted) : '';
+    const discPct = typeof cur.discount === 'number' ? Math.round(cur.discount * 100) : '';
+    row.innerHTML = `<span class="usage-bar-label">${badge}${escHtml(a.name || a.key)}</span>`;
+    const ctrl = document.createElement('span'); ctrl.style.cssText = 'display:flex;align-items:center;gap:6px;grid-column:2/4';
+    const inp = document.createElement('input'); inp.type = 'number'; inp.min = '0'; inp.max = '99'; inp.step = '1'; inp.className = 'usage-price-inp'; inp.style.width = '64px'; inp.value = discPct; inp.placeholder = '0';
+    const suffix = document.createElement('span'); suffix.className = 'usage-note'; suffix.style.margin = '0'; suffix.textContent = t('% off (subscriptions ignore this)');
+    inp.oninput = () => {
+      const v = parseFloat(inp.value);
+      edited.accounts[a.key] = (Number.isFinite(v) && v > 0) ? { discount: Math.min(0.99, v / 100) } : null; // null clears
+    };
+    ctrl.append(inp, suffix); row.appendChild(ctrl); asec.appendChild(row);
+  }
+  wrap.appendChild(asec);
+
+  const actions = document.createElement('div'); actions.style.cssText = 'display:flex;gap:8px;padding:6px 0';
+  const save = document.createElement('button'); save.className = 'usage-btn'; save.textContent = t('Save prices');
+  save.onclick = async () => {
+    save.disabled = true;
+    const patch = {};
+    if (Object.keys(edited.tiers).length) patch.tiers = edited.tiers;
+    if (Object.keys(edited.accounts).length) patch.accounts = edited.accounts;
+    try {
+      await fetchJson('/api/usage-stats/pricing', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
+      showToast(t('Prices saved'));
+      state.view = 'dash';
+      reload(); // re-fetch so costs reflect the new prices
+    } catch { showToast(t('Save failed'), { type: 'error' }); save.disabled = false; }
+  };
+  const cancel = document.createElement('button'); cancel.className = 'usage-btn'; cancel.textContent = t('Cancel');
+  cancel.onclick = () => { state.view = 'dash'; rerender(); };
+  actions.append(save, cancel);
+  wrap.appendChild(actions);
+  return wrap;
 }
 function labelled(label, el) {
   const w = document.createElement('div'); w.className = 'usage-ctl';
@@ -118,14 +204,20 @@ function labelled(label, el) {
 function renderTiles(d) {
   const T = d.totals;
   const wrap = document.createElement('div'); wrap.className = 'usage-tiles';
-  const tile = (label, value, sub, accent) => `<div class="usage-tile${accent ? ' accent' : ''}"><div class="usage-tile-v">${value}</div><div class="usage-tile-l">${label}</div>${sub ? `<div class="usage-tile-s">${sub}</div>` : ''}</div>`;
+  const tile = (label, value, sub, cls) => `<div class="usage-tile${cls ? ' ' + cls : ''}"><div class="usage-tile-v">${value}</div><div class="usage-tile-l">${label}</div>${sub ? `<div class="usage-tile-s">${sub}</div>` : ''}</div>`;
+  // Total tokens = cached reads + cache writes + fresh input + output. Cached
+  // reads usually DOMINATE (>95%), so it gets its own tile — otherwise the total
+  // looks like it doesn't add up from what's shown. The four component tiles are
+  // grouped (.comp) right after Total so they visibly sum to it.
   wrap.innerHTML = [
-    tile(t('Est. API-equivalent cost'), fmtCost(T.cost), t('subscriptions are plan-covered'), true),
-    tile(t('Total tokens'), fmtNum(T.totalTokens), `${fmtNum(T.output)} ${t('output')}`),
-    tile(t('Cache hit ratio'), fmtPct(T.cacheHitRatio), `${fmtNum(T.cacheRead)} ${t('cached reads')}`),
+    tile(t('Est. API-equivalent cost'), fmtCost(T.cost), t('subscriptions are plan-covered'), 'accent'),
     tile(t('Requests'), fmtNum(T.requests), `${fmtNum(T.sessions)} ${t('sessions')}`),
-    tile(t('Fresh input'), fmtNum(T.input), t('non-cached')),
-    tile(t('Cache writes'), fmtNum(T.cacheWrite), `${fmtNum(T.cacheWrite1h || 0)} 1h`),
+    tile(t('Cache hit ratio'), fmtPct(T.cacheHitRatio), t('of input tokens')),
+    tile(t('Total tokens'), fmtNum(T.totalTokens), t('= the 4 components →'), 'total'),
+    tile(t('Cached reads'), fmtNum(T.cacheRead), `${fmtPct(T.cacheHitRatio)} · ${t('billed ~10%')}`, 'comp'),
+    tile(t('Cache writes'), fmtNum(T.cacheWrite), `${fmtNum(T.cacheWrite1h || 0)} 1h · ${t('~1.25–2×')}`, 'comp'),
+    tile(t('Fresh input'), fmtNum(T.input), t('non-cached'), 'comp'),
+    tile(t('Output'), fmtNum(T.output), t('generated'), 'comp'),
   ].join('');
   return wrap;
 }

@@ -22,7 +22,9 @@ const path = require('path');
 const cp = require('child_process');
 
 const CACHE_DIR = path.join(__dirname, '..', 'usage-cache');
-const THROTTLE_MS = 25000;
+const THROTTLE_MS = 8000; // write at most once/8s per account — the taskbar polls
+// /api/usage at ~8s (a cheap local read, no Anthropic call), so fresher writes
+// let usage reflect a just-finished turn within a few seconds.
 
 let input = '';
 process.stdin.setEncoding('utf8');

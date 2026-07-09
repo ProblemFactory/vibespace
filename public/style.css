@@ -301,6 +301,14 @@ html, body {
 .usage-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 14px; }
 .usage-tile { background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
 .usage-tile.accent { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); background: color-mix(in srgb, var(--accent) 8%, var(--bg-input)); }
+.usage-tile.total { border-color: color-mix(in srgb, var(--text-secondary) 40%, var(--border)); }
+.usage-tile.comp { background: color-mix(in srgb, var(--text-dim) 6%, var(--bg-input)); }
+.usage-tile.comp .usage-tile-v { font-size: 17px; }
+.usage-pricing { display: flex; flex-direction: column; gap: 6px; }
+.usage-price-tbl { width: 100%; border-collapse: collapse; font-size: 11px; }
+.usage-price-tbl th { text-align: left; color: var(--text-dim); font-weight: 500; padding: 3px 6px; font-size: 10px; }
+.usage-price-tbl td { padding: 2px 6px; }
+.usage-price-inp { width: 72px; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 4px; padding: 2px 5px; font-size: 11px; font-variant-numeric: tabular-nums; }
 .usage-tile-v { font-size: 20px; font-weight: 650; line-height: 1.1; }
 .usage-tile-l { font-size: 10px; color: var(--text-secondary); margin-top: 3px; }
 .usage-tile-s { font-size: 9px; color: var(--text-dim); margin-top: 1px; }
