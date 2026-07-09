@@ -749,6 +749,9 @@ class App {
       if (!selectedHost) {
         let acct = null;
         try { acct = await fetchJson('/api/accounts'); } catch {}
+        // Prime per-account usage so the rows show current quota on open (the
+        // 30s poll also keeps it fresh). Best-effort — rows render regardless.
+        try { const u = await fetchJson('/api/usage'); if (u) { this._accountUsage = u.accounts || {}; if (u.rateLimit) this._rateLimit = u.rateLimit; } } catch {}
         if (acct) {
           const accts = await this.refreshAccounts(); // keep app cache in sync
           const row = document.createElement('div'); row.className = 'ob-backend acct-section';
@@ -764,6 +767,20 @@ class App {
           const STAR_F = svg('<path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 11.6 4.1 13.6l.8-4.3-3.1-3 4.3-.6z" fill="currentColor"/>');
           const STAR_O = svg('<path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 11.6 4.1 13.6l.8-4.3-3.1-3 4.3-.6z"/>');
           const PENCIL = svg('<path d="M11 2.5 13.5 5 5.5 13H3v-2.5z"/>');
+          // Compact per-account usage readout (5h + 7d mini bars). Data is the
+          // per-subscription poll (server round-robins it, read-only; idle
+          // accounts keep last-known → a "Nm ago" staleness note).
+          const usageHtml = (u) => {
+            if (!u) return '';
+            const pct = (x) => Math.min(100, Math.round((x?.utilization || 0) * 100));
+            const bar = (label, x) => {
+              const p = pct(x);
+              const c = p > 95 ? 'var(--red,#e55)' : p > 80 ? 'var(--yellow,#e5c07b)' : 'var(--green,#3fb950)';
+              return `<span class="acct-usage-item" title="${label}: ${p}%"><span class="acct-usage-label">${label}</span><span class="acct-usage-bar"><span style="width:${p}%;background:${c}"></span></span><span class="acct-usage-pct">${p}%</span></span>`;
+            };
+            const age = u.fetchedAt ? Math.round((Date.now() - u.fetchedAt) / 60000) : null;
+            return `<span class="acct-usage">${bar('5h', u.fiveHour)}${bar('7d', u.sevenDay)}${age != null && age > 5 ? `<span class="acct-usage-age" title="${t('Last refreshed {n} min ago', { n: age })}">${t('{n}m', { n: age })}</span>` : ''}</span>`;
+          };
           // The CLI's OWN global (~/.claude) login, shown as a PEER row: it's the
           // default whenever no named account is starred. Not renamable/removable
           // (it's the CLI's own login), but otherwise equal in the list.
@@ -775,6 +792,7 @@ class App {
             <span class="acct-type-icon" title="${t('The CLI’s own global login')}">${GLOBE}</span>
             <span class="acct-key-name">${t('CLI login')}</span>
             <span class="acct-key-tail">${gIdent}</span>
+            ${sub.loggedIn ? usageHtml(this._rateLimit) : ''}
             <span class="acct-key-actions">
               <button class="acct-icon acct-def ${gDef ? 'on' : ''}" title="${gDef ? t('Default for new sessions — pick another to change') : t('Set as default for new sessions')}">${gDef ? STAR_F : STAR_O}</button>
             </span></div>`;
@@ -792,6 +810,7 @@ class App {
               <span class="acct-type-icon" title="${isSub ? t('Subscription (Pro/Max)') : t('API key')}">${isSub ? CROWN : KEY}</span>
               <span class="acct-key-name">${escHtml(a.name)}</span>
               <span class="acct-key-tail">${ident}</span>
+              ${isSub && a.loggedIn ? usageHtml(this._accountUsage?.[a.id]) : ''}
               <span class="acct-key-actions">
                 <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
                 <button class="acct-icon acct-rename" title="${t('Rename')}">${PENCIL}</button>
@@ -1644,6 +1663,7 @@ class App {
     if (data?.codexRateLimit) this._codexRateLimit = data.codexRateLimit;
     else if (this._codexRateLimit === undefined) this._codexRateLimit = null;
     this._subSignedOut = !!data?.subscriptionSignedOut;
+    this._accountUsage = data?.accounts || {}; // per-subscription usage (Manage Agents rows)
     this._renderUsage();
     setTimeout(() => this._pollUsage(), 30000);
   }

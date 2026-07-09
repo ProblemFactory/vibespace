@@ -936,4 +936,6 @@ export default {
   "CLI login": "CLI 登录",
   "not logged in (a Console login replaced it)": "未登录（被 Console 登录替换了）",
   "Default for new sessions — pick another to change": "新会话的默认账号——选另一个即可更改",
+  "Last refreshed {n} min ago": "{n} 分钟前刷新",
+  "{n}m": "{n}分",
 };
