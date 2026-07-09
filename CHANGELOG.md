@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.56.3] — 2026-07-08
+
+### Fixed — terminal paste broke non-TUI prompts (root cause of the login failure)
+Pasting text into a terminal ALWAYS wrapped it in bracketed-paste markers
+(`\x1b[200~…\x1b[201~`), even when the running program hadn't enabled
+bracketed-paste mode. For a plain (non-TUI) stdin prompt like `claude auth
+login`'s "Paste code here", the markers landed in the input as literal bytes
+(and there's no submit newline), so the paste looked dead and then failed the
+code exchange. Now paste goes through xterm's `terminal.paste()`, which emits
+the markers ONLY when the app set `\x1b[?2004h` (TUIs do; plain prompts
+don't) — correct in both cases. Fixed across desktop paste, the clipboard-API
+path, and the mobile paste pad. This is what blocked the add-subscription /
+add-Console login.
+
 ## [2.56.2] — 2026-07-08
 
 ### Fixed
