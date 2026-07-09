@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.57.1] — 2026-07-08
+
+### Fixed — account identity no longer clobbered; global login shown as a peer
+- Adding a subscription/Console account no longer overwrites the GLOBAL login's
+  displayed identity in `~/.claude.json`. The login now runs with BOTH
+  `CLAUDE_CONFIG_DIR` and `CLAUDE_SECURESTORAGE_CONFIG_DIR` pointed at the
+  account's own pre-seeded dir (seeded with onboarding-complete flags, so no
+  first-run screen), isolating creds AND identity. `~/.claude` is untouched.
+  NOTE: this isolation is LOGIN-only — running a session on an account sets only
+  `CLAUDE_SECURESTORAGE_CONFIG_DIR`, so `.claude.json`/settings/projects stay
+  SHARED across all accounts (config never reverts on switch).
+- The CLI's own global (~/.claude) login is now a **peer row** in the account
+  list with the same star toggle, instead of a separate status line — it's the
+  default whenever no named account is starred.
+- The Manage Agents **Test** session is now ephemeral (closing its window always
+  terminates it, never leaves a detached test session).
+
 ## [2.57.0] — 2026-07-08
 
 ### Changed — account manager polish (multi-subscription)

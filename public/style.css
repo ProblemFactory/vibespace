@@ -266,6 +266,10 @@ html, body {
 .acct-icon:hover { background: var(--bg-hover); color: var(--text); }
 .acct-icon.acct-def.on { color: var(--accent); }
 .acct-icon.acct-del:hover { color: var(--red, #e55); }
+.acct-list { display: flex; flex-direction: column; gap: 1px; margin: 4px 0; }
+.acct-key-row { display: flex; align-items: center; gap: 7px; padding: 2px 4px; font-size: 11px; }
+.acct-key-name { font-weight: 500; }
+.acct-key-tail { color: var(--text-dim); font-size: 10px; }
 .acct-key-row.is-default { background: color-mix(in srgb, var(--accent) 6%, transparent); border-radius: var(--radius-sm); }
 /* Manage Agents dialog: wider than the 440px default — its rows carry real
    button groups (login/update, accounts) that truncate/wrap at 440px */

@@ -42,6 +42,17 @@ class AccountManager {
   subDir(id) { return path.join(this._subsDir, id); }
   subCredsPath(id) { return path.join(this.subDir(id), '.credentials.json'); }
 
+  // Pre-seed an isolated login dir's .claude.json with the onboarding-complete
+  // flags (hasCompletedOnboarding/hasTrustDialogAccepted) so the login (run with
+  // CLAUDE_CONFIG_DIR=dir) does NOT show the first-run onboarding screen. Setting
+  // CLAUDE_CONFIG_DIR isolates the identity (oauthAccount) INTO the dir, so the
+  // GLOBAL ~/.claude.json is never clobbered — the whole point.
+  _seedConfigDir(dir) {
+    const seed = { hasCompletedOnboarding: true, hasTrustDialogAccepted: true, theme: 'dark' };
+    try { const g = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude.json'), 'utf-8')); if (g.theme) seed.theme = g.theme; } catch { }
+    try { fs.writeFileSync(path.join(dir, '.claude.json'), JSON.stringify(seed), { mode: 0o600 }); } catch { }
+  }
+
   _load() {
     try {
       const parsed = JSON.parse(fs.readFileSync(this._file, 'utf-8'));
@@ -105,6 +116,7 @@ class AccountManager {
   createSubscription({ name } = {}) {
     const id = 'sub-' + crypto.randomBytes(6).toString('hex');
     fs.mkdirSync(this.subDir(id), { recursive: true, mode: 0o700 });
+    this._seedConfigDir(this.subDir(id));
     const a = { id, name: String(name || '').trim().slice(0, 60) || 'Subscription', type: 'subscription', source: 'login', createdAt: Date.now() };
     this._state.accounts.push(a);
     this._save();
@@ -251,17 +263,21 @@ class AccountManager {
     const id = 'con-' + crypto.randomBytes(6).toString('hex');
     const dir = path.join(this._subsDir, id);
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    this._seedConfigDir(dir);
     return { id, dir };
   }
   captureConsoleLogin(id, { name } = {}) {
     if (!/^con-[a-f0-9]+$/.test(id)) throw new Error('bad login id');
     const dir = path.join(this._subsDir, id);
-    const pk = this.cliPrimaryKey(); // reads ~/.claude.json primaryApiKey
-    if (!pk.present || pk.imported) { // not yet, or already saved
-      return { captured: false };
-    }
-    const account = this.importFromCli();
-    if (name) { try { this.rename(account.id, name); account.name = name; } catch { } }
+    // With CLAUDE_CONFIG_DIR=dir the console login minted primaryApiKey into
+    // dir/.claude.json (isolated — ~/.claude.json untouched). Read it there.
+    let pk = null, org = null;
+    try {
+      const cfg = JSON.parse(fs.readFileSync(path.join(dir, '.claude.json'), 'utf-8'));
+      pk = cfg?.primaryApiKey; org = cfg?.oauthAccount?.organizationName || null;
+    } catch { }
+    if (typeof pk !== 'string' || !/^sk-ant-/.test(pk)) return { captured: false };
+    const account = this.add({ name: name || (org ? org + ' (Console)' : 'Console API'), key: pk, source: 'console-login' });
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch { }
     return { captured: true, account };
   }
