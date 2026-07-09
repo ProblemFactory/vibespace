@@ -277,7 +277,7 @@ function registerWsHandler(wss, ctx) {
             // UserPromptSubmit hooks deliver task context + status notices
             // (our LOCAL hook never fires on the remote). node available: the
             // remote agent CLIs are node apps, and we source nvm first.
-            const files = { 'vibespace-status': b64('vibespace-status'), 'vibespace-task': b64('vibespace-task'), 'vibespace-hook.mjs': b64('vibespace-hook.mjs'), 'vibespace-hook-register.mjs': b64('vibespace-hook-register.mjs') };
+            const files = { 'vibespace-status': b64('vibespace-status'), 'vibespace-task': b64('vibespace-task'), 'vibespace-ask': b64('vibespace-ask'), 'vibespace-hook.mjs': b64('vibespace-hook.mjs'), 'vibespace-hook-register.mjs': b64('vibespace-hook-register.mjs') };
             const haveAll = Object.values(files).every(Boolean);
             const writes = Object.entries(files).map(([n, b]) => `printf %s ${b} | base64 -d > "$HOME/.vibespace/bin/${n}";`).join(' ');
             const prelude = haveAll

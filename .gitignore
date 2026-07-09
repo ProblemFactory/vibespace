@@ -32,6 +32,7 @@ data/hosts.json
 data/ssh/
 data/remote-jsonl/
 data/session-status.json
+data/user-todos.json
 data/task-groups.json
 data/tasks.json
 data/uploads-sync.json

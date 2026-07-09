@@ -1931,6 +1931,42 @@ function sessionStatusKey(session, id) {
   const bsid = session?.backendSessionId || session?.claudeSessionId;
   return bsid ? `${session.backend || 'claude'}:${bsid}` : `webui:${id}`;
 }
+// ── Global user-facing TODO list (vibespace-ask) — items an agent filed that
+// need the USER (decision/input/review). Merged inbox in the taskbar; each
+// item belongs to one session and jumps back to it.
+const { UserTodoManager } = require('./src/user-todos');
+const userTodos = new UserTodoManager({
+  dataDir: path.join(__dirname, 'data'),
+  onChange: (todos) => {
+    const json = JSON.stringify({ type: 'user-todos-updated', todos });
+    wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
+  },
+});
+app.get('/api/user-todos', (req, res) => res.json({ todos: userTodos.snapshot() }));
+// User actions from the panel: done / dismissed / open (reopen)
+app.post('/api/user-todos/:id', (req, res) => {
+  try { res.json({ success: true, item: userTodos.setStatus(req.params.id, req.body?.status, 'user') }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+// Agent endpoint (vibespace-ask) — per-session vsst_ token, same auth model as
+// /api/agent/session-status; writes scoped to the calling agent's own session.
+app.post('/api/agent/user-todo', (req, res) => {
+  const hit = agentSession(req, res);
+  if (!hit) return;
+  const [s, id] = hit;
+  const key = sessionStatusKey(s, id);
+  if (!key.startsWith('webui:')) userTodos.rekey(`webui:${id}`, key); // migrate early items once the real id exists
+  const { add, list, resolve } = req.body || {};
+  try {
+    if (list) return res.json({ success: true, sessionKey: key, items: userTodos.forSession([key, `webui:${id}`]) });
+    if (resolve) return res.json({ success: true, item: userTodos.resolveByAgent(key, resolve) });
+    if (add && add.text) {
+      const item = userTodos.add(key, { text: add.text, detail: add.detail, urgency: add.urgency, by: 'agent', sessionName: s.name || null });
+      return res.json({ success: true, item });
+    }
+    res.status(400).json({ error: 'pass {add:{text,...}} | {list:true} | {resolve:"id or text"}' });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
 app.get('/api/session-status', (req, res) => res.json({ statuses: sessionStatus.snapshot() }));
 // User set/override/clear from the UI (cookie-authed like every route)
 app.post('/api/session-status', (req, res) => {
@@ -2013,6 +2049,10 @@ const SESSION_TOOLS_INTRO = [
   '  vibespace-status <working|needs-input|blocked|review|done> [--urgency low|normal|high|urgent] [--reason "why"]',
   '  vibespace-status show   (or run it with no arguments) — prints usage + your current status',
   'Keep it honest and current: `working` while making progress; `blocked` or `needs-input` (with a higher urgency) the moment you are stuck or waiting on the user; `review` when you want them to look; `done` when this piece of work is finished.',
+  'When something specifically needs the USER (a decision, input only they can give, something to review), also FILE IT on their global inbox with `vibespace-ask` — they see all sessions\' items in one list and can jump here to answer:',
+  '  vibespace-ask "question or decision needed" [--detail "context + your recommendation"] [--urgency low|normal|high|urgent]',
+  '  vibespace-ask list  /  vibespace-ask resolve <id|text>   (resolve it yourself once the user answers)',
+  'File items ONLY for things that genuinely depend on the user — your own working steps belong in your normal todo list.',
   '(If this session is later linked to a VibeSpace task, you will also get `vibespace-task` for task-level progress/plan/status — you have no task right now, so it is not active yet.)',
   '</vibespace-session-tools>',
 ].join('\n');
@@ -3080,6 +3120,7 @@ function shutdown() {
   for (const store of Object.values(syncStores)) { try { store.flush(); } catch {} }
   try { flushLayouts(); } catch {}
   try { sessionStatus.flush(); } catch {} // debounced session-status writes
+  try { userTodos.flush(); } catch {} // debounced user-todo writes
   process.exit(0);
 }
 process.on('SIGINT', () => {

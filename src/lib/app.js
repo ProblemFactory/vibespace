@@ -29,6 +29,7 @@ import { openWorkflowDetail as openWorkflowDetailFn } from './workflow-detail.js
 import { DesktopManager } from './desktop-manager.js';
 import { CustomizeMode, applyArrangement } from './customize-mode.js';
 import { installSessionPalette } from './session-palette.js';
+import { installUserTodos } from './user-todos-panel.js';
 import { createBackendIconHtml, getSessionKey, pickAgentIdentity } from './agent-meta.js';
 
 const BACKEND_SESSION_OPTIONS = {
@@ -186,6 +187,7 @@ class App {
     this._setupGridConfig();
     this._setupLayoutManager();
     this._setupUsage();
+    installUserTodos(this); // global "For you" inbox (agent-filed user TODOs)
     this._commandMode = new CommandMode(this, this.settings);
 
     // Listen for editor open/close requests (from editor-helper.sh via server HTTP→WebSocket)
@@ -279,6 +281,7 @@ class App {
       // NOTE: no `vis` coupling — previews may be hosted in the toolbar now
       // (chrome.arrangement); a hidden taskbar hides only its own children
       show('desktop-previews', s.get('taskbar.showDesktopPreviews'));
+      show('taskbar-user-todos', s.get('taskbar.showUserTodos'));
       show('taskbar-usage', s.get('taskbar.showUsage'));
       show('taskbar-status', s.get('taskbar.showWindowCount'));
       document.body.classList.toggle('taskbar-top', s.get('taskbar.position') === 'top');
@@ -306,7 +309,7 @@ class App {
     applyChromeSettings();
     for (const k of ['toolbar.showLayoutPresets', 'toolbar.showPresetsButton', 'toolbar.showTerminalButton',
                      'toolbar.showBrowserButton', 'toolbar.showFileExplorerButton',
-                     'taskbar.visibility', 'taskbar.showDesktopPreviews', 'taskbar.showUsage', 'taskbar.showWindowCount',
+                     'taskbar.visibility', 'taskbar.showDesktopPreviews', 'taskbar.showUserTodos', 'taskbar.showUsage', 'taskbar.showWindowCount',
                      'taskbar.position', 'sidebar.position', 'chrome.zoneAlign']) {
       this.settings.on(k, applyChromeSettings);
     }
@@ -367,6 +370,7 @@ class App {
         { label: check(t('Dock to top'), s.get('taskbar.position') === 'top'), action: () => s.set('taskbar.position', s.get('taskbar.position') === 'top' ? 'bottom' : 'top') },
         { label: check(t('Auto-hide'), vis === 'autohide'), action: () => s.set('taskbar.visibility', vis === 'autohide' ? 'show' : 'autohide') },
         { label: check(t('Desktop previews'), s.get('taskbar.showDesktopPreviews')), action: () => s.set('taskbar.showDesktopPreviews', !s.get('taskbar.showDesktopPreviews')) },
+        { label: check(t('For-you inbox'), s.get('taskbar.showUserTodos')), action: () => s.set('taskbar.showUserTodos', !s.get('taskbar.showUserTodos')) },
         { label: check(t('Usage meters'), s.get('taskbar.showUsage')), action: () => s.set('taskbar.showUsage', !s.get('taskbar.showUsage')) },
         { label: check(t('Window count'), s.get('taskbar.showWindowCount')), action: () => s.set('taskbar.showWindowCount', !s.get('taskbar.showWindowCount')) },
         { label: t('All settings\u2026'), action: () => this._settingsUI?.open() },

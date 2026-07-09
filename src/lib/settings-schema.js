@@ -69,6 +69,11 @@ const SETTINGS_SCHEMA = {
     description: t('Show the 5h/7d rate-limit donuts in the taskbar'),
     category: t('Toolbar & Layout'), liveApply: true,
   },
+  'taskbar.showUserTodos': {
+    type: 'boolean', default: true, label: t('Show the "For you" inbox'),
+    description: t('Show the inbox of items agents filed for you (decisions/input needed) in the taskbar'),
+    category: t('Toolbar & Layout'), liveApply: true,
+  },
   'taskbar.showWindowCount': {
     type: 'boolean', default: true, label: t('Show window count'),
     description: t('Show the "N windows" counter/list button in the taskbar'),

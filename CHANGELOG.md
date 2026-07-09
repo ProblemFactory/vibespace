@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.65.0] — 2026-07-09
+
+### Added — the "For you" inbox (global user-facing TODO list)
+Agents can now file things that need **you** — a decision to make, input only
+you can give, something to review — with the new `vibespace-ask` CLI (taught to
+every VibeSpace session, local and remote). Each item belongs to its session
+(your "task"); the new **taskbar inbox** merges every session's items into one
+list, grouped by session, sorted urgent-first, with a count badge, a toast when
+a new item arrives, and **one click to jump to the owning session** to handle
+it (✓ done / ✕ dismiss / ↺ reopen; agents can also resolve their own items once
+you answer in chat). This is the inverse of the agent's own todo list — it's
+the queue of what the fleet is waiting on *you* for. Persisted in
+`data/user-todos.json`; re-filing the same open question refreshes instead of
+duplicating; a per-session open cap keeps a looping agent from flooding you.
+
 ## [2.64.1] — 2026-07-09
 
 ### Fixed / clarified — Usage window vendor separation

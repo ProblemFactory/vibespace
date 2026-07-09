@@ -989,6 +989,57 @@ html, body {
 .usage-note { font-size: 11px; color: var(--yellow, #e5c07b); white-space: normal; line-height: 1.45; margin-top: 6px; }
 .usage-updated { font-size: 10px; color: var(--text-dim); margin: 4px 0 10px; }
 .usage-popup.hidden { display: none; }
+/* ── Global user-TODO inbox ("For you") ── */
+.taskbar-user-todos {
+  display: flex; align-items: center; gap: 3px; cursor: pointer;
+  color: var(--text-dim); padding: 2px 5px; border-radius: var(--radius-sm);
+}
+.taskbar-user-todos:hover { color: var(--text); background: var(--hover-overlay, rgba(255,255,255,0.06)); }
+.taskbar-user-todos.ut-has-items { color: var(--text-secondary); }
+.taskbar-user-todos.ut-has-items[data-urgency="high"] .ut-count { background: var(--yellow, #e5c07b); color: #000; }
+.taskbar-user-todos.ut-has-items[data-urgency="urgent"] .ut-count { background: var(--red, #e55); color: #fff; }
+.ut-count {
+  min-width: 14px; height: 14px; padding: 0 4px; border-radius: 7px;
+  background: var(--accent); color: var(--accent-fg, #fff);
+  font-size: 9px; font-weight: 700; line-height: 14px; text-align: center;
+}
+.taskbar-user-todos.ut-blink { animation: ut-blink 0.9s ease 2; }
+@keyframes ut-blink { 50% { background: color-mix(in srgb, var(--accent) 35%, transparent); color: var(--text); } }
+.ut-popup { min-width: 320px; max-width: 400px; max-height: 480px; }
+.ut-head-sub { font-weight: 400; color: var(--text-dim); margin-left: 8px; font-size: 10px; }
+.ut-group { border-top: 1px solid var(--border); padding: 4px 0; }
+.ut-group-head {
+  display: flex; align-items: center; gap: 6px; width: 100%; text-align: left;
+  background: none; border: none; cursor: pointer; padding: 3px 2px;
+  color: var(--text); font-size: 11px; font-weight: 600;
+}
+.ut-group-head:hover { color: var(--accent); }
+.ut-group-n { color: var(--text-dim); font-weight: 400; }
+.ut-group-go { margin-left: auto; color: var(--text-dim); }
+.ut-group-head:hover .ut-group-go { color: var(--accent); }
+.ut-item { display: flex; gap: 7px; padding: 4px 2px 5px 8px; cursor: pointer; border-radius: var(--radius-sm); }
+.ut-item:hover { background: var(--hover-overlay, rgba(255,255,255,0.05)); }
+.ut-dot { width: 7px; height: 7px; border-radius: 50%; margin-top: 4px; flex: 0 0 auto; background: var(--text-dim); }
+.ut-dot[data-urgency="normal"] { background: var(--accent); }
+.ut-dot[data-urgency="high"] { background: var(--yellow, #e5c07b); }
+.ut-dot[data-urgency="urgent"] { background: var(--red, #e55); animation: ut-pulse 1.4s ease infinite; }
+@keyframes ut-pulse { 50% { opacity: 0.35; } }
+.ut-body { flex: 1; min-width: 0; }
+.ut-text { font-size: 11.5px; color: var(--text); line-height: 1.4; }
+.ut-detail { font-size: 10.5px; color: var(--text-secondary); white-space: pre-wrap; margin-top: 2px; line-height: 1.4; max-height: 84px; overflow-y: auto; }
+.ut-meta { font-size: 9.5px; color: var(--text-dim); margin-top: 2px; }
+.ut-actions { display: flex; gap: 2px; align-items: flex-start; opacity: 0.35; }
+.ut-item:hover .ut-actions { opacity: 1; }
+.ut-act {
+  background: none; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  color: var(--text-secondary); cursor: pointer; font-size: 10px; width: 20px; height: 20px; line-height: 1;
+}
+.ut-act:hover { color: var(--text); border-color: var(--border-active); }
+.ut-done:hover { color: var(--green, #3fb950); }
+.ut-dismiss:hover { color: var(--red, #e55); }
+.ut-resolved-head { font-size: 10px; color: var(--text-dim); margin: 8px 0 2px; text-transform: uppercase; letter-spacing: .03em; }
+.ut-item-resolved { opacity: 0.55; }
+.ut-item-resolved .ut-text { text-decoration: line-through; }
 .usage-popup h4 { font-size: 12px; color: var(--text); margin-bottom: 8px; }
 .usage-section-title {
   display: flex; align-items: center; gap: 6px;

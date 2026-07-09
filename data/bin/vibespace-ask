@@ -1,0 +1,84 @@
+#!/usr/bin/env node
+// vibespace-ask — file something the USER needs to act on (a decision to make,
+// input only they can give, something to review). Items land on the user's
+// GLOBAL "For you" inbox (taskbar), grouped under THIS session, where they can
+// jump straight here to handle them. Scoped to this session by the per-session
+// token in the env — you never pass a session id. Run with NO arguments to see
+// usage AND this session's open items, so a wrong guess self-corrects.
+//
+// This is NOT your own working todo list (use your normal todo tool for that),
+// and NOT the Task Group checklist (vibespace-task plan-add). File an item here
+// ONLY when progress genuinely depends on the user. When the user answers in
+// chat, resolve the item yourself.
+const api = process.env.VIBESPACE_API;
+const token = process.env.VIBESPACE_SESSION_TOKEN;
+if (!api || !token) { console.error('vibespace-ask: not running inside a VibeSpace session (missing env)'); process.exit(2); }
+
+const rawArgs = process.argv.slice(2);
+const opt = (name) => {
+  const i = rawArgs.indexOf('--' + name);
+  if (i >= 0 && rawArgs[i + 1] !== undefined) { const v = rawArgs[i + 1]; rawArgs.splice(i, 2); return v; }
+  const pref = '--' + name + '=';
+  const j = rawArgs.findIndex((a) => a.startsWith(pref));
+  if (j >= 0) { const v = rawArgs[j].slice(pref.length); rawArgs.splice(j, 1); return v; }
+  return undefined;
+};
+const URGENCIES = ['low', 'normal', 'high', 'urgent'];
+const urgency = opt('urgency');
+const detail = opt('detail');
+const USAGE = [
+  'usage — file an item the USER must act on (decision / input / review):',
+  '  vibespace-ask "question or decision needed" [--detail "context, options, your recommendation"] [--urgency low|normal|high|urgent]',
+  '  vibespace-ask list                    print this session\'s open items',
+  '  vibespace-ask resolve <id|text>       mark one handled (do this yourself once the user answers)',
+  '  (your own working steps belong in your normal todo list, not here)',
+].join('\n');
+
+async function call(body) {
+  const res = await fetch(api + '/api/agent/user-todo', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { console.error('vibespace-ask:', data.error || res.status); process.exit(1); }
+  return data;
+}
+const printItems = (items) => {
+  if (!items.length) { console.log('  (no open items for this session)'); return; }
+  for (const i of items) {
+    console.log('  ' + i.id + '  [' + (i.urgency || 'normal') + '] ' + i.text + (i.detail ? '\n      ' + i.detail.split('\n').join('\n      ') : ''));
+  }
+};
+
+async function main() {
+  const [cmd, ...rest] = rawArgs;
+  if (!cmd) {
+    console.log(USAGE + '\n\ncurrent open items:');
+    printItems((await call({ list: true })).items || []);
+    return;
+  }
+  if (cmd === 'list') { printItems((await call({ list: true })).items || []); return; }
+  if (cmd === 'resolve' || cmd === 'done') {
+    const ref = rest.join(' ').trim();
+    if (!ref) { console.error('vibespace-ask: resolve needs an item id or unique text fragment\n' + USAGE); process.exit(1); }
+    const { item } = await call({ resolve: ref });
+    console.log('resolved: ' + item.text);
+    return;
+  }
+  if (cmd === 'add' && rest.length) { // tolerated alias: "vibespace-ask add ..." — agents guess it
+    return fileItem(rest.join(' ').trim());
+  }
+  if (urgency && !URGENCIES.includes(urgency)) {
+    console.error('vibespace-ask: unknown urgency "' + urgency + '" (valid: ' + URGENCIES.join('/') + ')');
+    process.exit(1);
+  }
+  // Default form: the whole argv is the question text.
+  return fileItem(rawArgs.join(' ').trim());
+}
+async function fileItem(text) {
+  if (!text) { console.error(USAGE); process.exit(1); }
+  const { item } = await call({ add: { text, detail, urgency } });
+  console.log((item.existing ? 'already filed (refreshed): ' : 'filed for the user: ') + item.text + '  (' + item.id + ')');
+}
+main().catch((e) => { console.error('vibespace-ask:', e.message); process.exit(1); });
