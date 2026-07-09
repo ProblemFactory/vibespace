@@ -406,6 +406,44 @@ class App {
   // login, the API key lives in our store, sessions pick per-spawn. Each login
   // step opens a terminal; a background watcher detects completion and reopens
   // the wizard at the next step.
+  // Add another Claude subscription: name it, allocate an isolated creds dir,
+  // open a login terminal scoped to that dir (does NOT disturb the CLI's global
+  // login), and watch for the OAuth login to land. Held per-account, switchable
+  // per session. (Local Claude only in P1.)
+  async _addSubscription() {
+    const name = await showInputDialog({
+      title: t('Add subscription'),
+      label: t('Name this subscription (e.g. Work Max, Personal Max)'),
+      placeholder: t('e.g. Work Max'),
+      confirmText: t('Continue'),
+    });
+    if (name === null) return; // cancelled
+    let created;
+    try {
+      created = await fetchJson('/api/accounts/subscription', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: (name || '').trim() }),
+      });
+    } catch { showToast(t('Could not start — server unreachable'), { type: 'error' }); return; }
+    if (!created?.loginCmd) { showToast(created?.error || t('Could not start'), { type: 'error' }); return; }
+    // Open a login terminal with the env-scoped command. The sign-in writes THIS
+    // account's creds into its own dir — your current/global login is untouched.
+    this.openShellTerminal(undefined, { initialCommand: created.loginCmd });
+    showToast(t('A terminal opened — sign in with the account you want to add. Your other logins are untouched; VibeSpace captures it automatically.'), { duration: 6000 });
+    // Poll finalize until the creds file appears (or give up after ~5 min).
+    let tries = 0;
+    const iv = setInterval(async () => {
+      if (++tries > 100) { clearInterval(iv); return; }
+      try {
+        const r = await fetchJson(`/api/accounts/subscription/${encodeURIComponent(created.id)}/finalize`, { method: 'POST' });
+        if (r?.loggedIn) {
+          clearInterval(iv);
+          showToast(t('✓ Added {name}', { name: r.name || t('subscription') }));
+        }
+      } catch { /* keep polling */ }
+    }, 3000);
+  }
+
   _showAccountsWizard() {
     document.getElementById('acct-wizard-overlay')?.remove();
     if (this._acctWatch) { clearInterval(this._acctWatch); this._acctWatch = null; }
@@ -702,19 +740,27 @@ class App {
             : `<span class="ob-warn">${acct.cliKey?.present ? t('Subscription: not logged in (a Console login replaced it)') : t('Subscription: not logged in')}</span>`;
           const keyLines = (accts.accounts || []).map(a => {
             const isDef = accts.defaultAccountId === a.id;
-            return `<div class="acct-key-row" data-id="${escHtml(a.id)}">
-              <span class="ob-ok">✓</span> <span class="acct-key-name">${escHtml(a.name)}</span>
-              <span class="acct-key-tail">API …${escHtml(a.tail)}</span>${isDef ? `<span class="acct-def-badge">${t('default')}</span>` : ''}
+            const isSub = a.type === 'subscription';
+            // Subscription = 👑 name · email/plan (its OWN securestorage login);
+            // API key = 🔑 name · tail.
+            const ident = isSub
+              ? (a.loggedIn ? escHtml((a.email || '') + (a.subscriptionType ? (a.email ? ' · ' : '') + a.subscriptionType : '')) || t('logged in')
+                            : `<span class="ob-warn">${t('not logged in')}</span>`)
+              : `API …${escHtml(a.tail || '')}`;
+            const testTitle = isSub ? t('Open a terminal session on this subscription') : t("Open a terminal session using this key (approve the CLI's one-time trust prompt here if it appears)");
+            return `<div class="acct-key-row" data-id="${escHtml(a.id)}" data-sub="${isSub ? '1' : ''}">
+              <span class="acct-type-icon">${isSub ? '👑' : '🔑'}</span> <span class="acct-key-name">${escHtml(a.name)}</span>
+              <span class="acct-key-tail">${ident}</span>${isDef ? `<span class="acct-def-badge">${t('default')}</span>` : ''}
               <span class="acct-key-actions">
-                <button class="agent-btn acct-test" title="${t("Open a terminal session using this key (approve the CLI's one-time trust prompt here if it appears)")}">${t('Test')}</button>
+                <button class="agent-btn acct-test" title="${testTitle}">${t('Test')}</button>
                 <button class="agent-btn acct-def" title="${t('Use for new sessions unless a session picks otherwise')}">${isDef ? t('Unset default') : t('Set default')}</button>
-                <button class="agent-btn acct-del" title="${t('Remove from VibeSpace (the key itself stays valid)')}">✕</button>
+                <button class="agent-btn acct-del" title="${isSub ? t('Remove this subscription from VibeSpace (deletes its stored login)') : t('Remove from VibeSpace (the key itself stays valid)')}">✕</button>
               </span></div>`;
           }).join('');
           left.innerHTML = `<b>${t('Anthropic accounts')}</b>
             <div style="margin:3px 0">${subLine}</div>
-            ${keyLines || `<div class="agents-note">${t('No API keys saved — sessions can only use the CLI’s global login.')}</div>`}
-            <div class="agents-note" style="margin:4px 0 0">${t('Each session can pick its account (New Session dialog / card ⚙). Subscription = your Pro/Max plan; API keys bill pay-per-use.')}</div>`;
+            ${keyLines || `<div class="agents-note">${t('No accounts saved yet — sessions use the CLI’s global login. Add a subscription to hold several Pro/Max logins and pick one per session.')}</div>`}
+            <div class="agents-note" style="margin:4px 0 0">${t('Each session can pick its account (New Session dialog / card ⚙). 👑 subscriptions bill your Pro/Max plan; 🔑 API keys bill pay-per-use.')}</div>`;
           const actions = document.createElement('div'); actions.className = 'agent-actions';
           const needsSetup = !sub.loggedIn || !(accts.accounts || []).length;
           const wizardBtn = document.createElement('button');
@@ -732,6 +778,10 @@ class App {
             };
             actions.appendChild(impBtn);
           }
+          const addSubBtn = document.createElement('button'); addSubBtn.className = 'agent-btn primary'; addSubBtn.textContent = t('Add subscription…');
+          addSubBtn.title = t('Sign in another Claude Pro/Max account — held in its own isolated login, switchable per session');
+          addSubBtn.onclick = () => { done(); this._addSubscription(); };
+          actions.appendChild(addSubBtn);
           const addBtn = document.createElement('button'); addBtn.className = 'agent-btn'; addBtn.textContent = t('Add key…');
           addBtn.onclick = async () => {
             const key = await showInputDialog({ title: t('Add API key'), label: t('Anthropic API key (from console.anthropic.com)'), placeholder: 'sk-ant-…', confirmText: t('Save') });
@@ -2042,12 +2092,19 @@ class App {
       const defId = this._accounts?.defaultAccountId;
       const defName = defId ? (list.find(a => a.id === defId)?.name || t('API key')) : t('Subscription');
       const prev = acctSel.value;
+      const onHost = !!document.getElementById('input-host')?.value;
       acctSel.innerHTML = '';
-      for (const [v, label] of [
+      const opts = [
         ['', t('Default ({name})', { name: defName })],
-        ['subscription', t('Subscription (Pro/Max login)')],
-        ...list.map(a => [a.id, t('{name} — API key …{tail}', { name: a.name, tail: a.tail })]),
-      ]) {
+        ['subscription', t('Subscription (Pro/Max login)')], // the CLI's global login
+      ];
+      for (const a of list) {
+        // Named subscription accounts are LOCAL-only in P1 (their creds dir is
+        // on this machine); skip them when a remote host is selected.
+        if (a.type === 'subscription') { if (!onHost) opts.push([a.id, t('👑 {name} (subscription)', { name: a.name })]); }
+        else opts.push([a.id, t('{name} — API key …{tail}', { name: a.name, tail: a.tail })]);
+      }
+      for (const [v, label] of opts) {
         const o = document.createElement('option');
         o.value = v; o.textContent = label;
         acctSel.appendChild(o);

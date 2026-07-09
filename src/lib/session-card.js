@@ -148,7 +148,13 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
           // sessions that keep burning API money after a subscription
           // re-login stay visible. Subscription = quiet (no badge).
           const a = s.auth;
-          if (!a || a.source === 'subscription') return '';
+          if (!a) return '';
+          // A NAMED subscription account shows which one it bills (so you never
+          // burn the wrong plan); the plain CLI global login stays quiet.
+          if (a.source === 'subscription') {
+            if (!a.name) return '';
+            return `<span class="session-card-badge badge-sub" data-tip="${escHtml(tr('Subscription — {name}', { name: a.name }))}">👑 ${escHtml(a.name)}</span>`;
+          }
           const KEY = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="8" r="3"/><path d="M8 8h6.5M12 8v2.5M14.5 8v2"/></svg>';
           if (a.source === 'api-key' || a.source === 'api-console' || a.source === 'api-other') {
             const who = a.source === 'api-console' ? tr('Console login')
@@ -617,7 +623,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       if (backend === 'claude' && acctList.length) {
         pop.appendChild(makeRow(tr('Account'), [
           { value: 'subscription', label: tr('Subscription (Pro/Max)') },
-          ...acctList.map(a => ({ value: a.id, label: `${a.name} — API …${a.tail}` })),
+          ...acctList.map(a => ({ value: a.id, label: a.type === 'subscription' ? `👑 ${a.name}` : `${a.name} — API …${a.tail}` })),
         ], 'account'));
       }
     };

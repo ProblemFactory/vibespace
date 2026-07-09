@@ -245,6 +245,14 @@ html, body {
   display: inline-flex; align-items: center; padding: 1px 3px;
 }
 .badge-account svg { width: 10px; height: 10px; flex-shrink: 0; }
+/* Named subscription account badge — a quiet accent (which Pro/Max plan bills
+   this session), distinct from the amber API-billing key. */
+.badge-sub {
+  background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent);
+  display: inline-flex; align-items: center; gap: 2px; padding: 1px 5px; font-size: 9px;
+  border-radius: 8px; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.acct-type-icon { flex-shrink: 0; }
 /* Manage Agents dialog: wider than the 440px default — its rows carry real
    button groups (login/update, accounts) that truncate/wrap at 440px */
 .dialog.agents-dialog { width: 560px; max-width: 92vw; }

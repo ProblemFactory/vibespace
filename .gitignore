@@ -19,6 +19,7 @@ data/.agent-hooks-optout
 data/auth.json
 data/accounts.json
 data/.accounts-key
+data/subs/
 data/mounts.json
 data/.mounts-key
 data/mount-tokens.json
