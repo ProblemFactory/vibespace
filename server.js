@@ -230,28 +230,54 @@ function refreshAvailableModels() {
   } else if (usagePollingEnabled()) {
     getOAuthToken((oauthToken) => { if (oauthToken) fetchModels(oauthToken, true); });
   }
-  // Codex: read from ~/.codex/models_cache.json
+  refreshCodexModels();
+}
+
+// ── Codex model list (from ~/.codex/models_cache.json) ──
+// That cache is last-writer-wins AND version-gated server-side: a still-running
+// OLD codex CLI re-fetches it and writes it back WITHOUT newer models (observed
+// live TWICE: a 0.142.5 session erased the gpt-5.6 entries minutes after
+// 0.144.0 fetched them — and once it happened right before a server restart,
+// leaving the dropdown stale for the whole hourly re-read cycle). Two guards:
+// (1) union every model ever seen, PERSISTED across restarts;
+// (2) mtime-guarded re-read ON DEMAND from /api/available-models — the model/
+//     effort dropdowns fetch per click, so they're always current, no timers.
+const CODEX_MODELS_SEEN_FILE = path.join(__dirname, 'data', 'codex-models-seen.json');
+const _codexModelsSeen = new Map();
+try { for (const m of JSON.parse(fs.readFileSync(CODEX_MODELS_SEEN_FILE, 'utf-8'))) if (m && m.id) _codexModelsSeen.set(m.id, m); } catch {}
+if (_codexModelsSeen.size) AVAILABLE_MODELS.codex = [{ id: '', label: 'Default' }, ..._codexModelsSeen.values()];
+let _codexCacheMtime = 0;
+function refreshCodexModels() {
   try {
-    const codexCache = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.codex', 'models_cache.json'), 'utf-8'));
-    if (codexCache.models?.length) {
-      const fresh = codexCache.models.map(m => {
-        const ctx = m.context_window ? (m.context_window >= 1000000 ? Math.round(m.context_window / 1000000) + 'M' : Math.round(m.context_window / 1000) + 'k') : '';
-        // Per-model reasoning levels ride along: GPT-5.6 made efforts
-        // model-specific (sol/terra add max+ultra, luna tops out at max) —
-        // clients derive dropdowns from this instead of a stale hardcoded list.
-        return { id: m.slug, label: (m.display_name || m.slug) + (ctx ? ` (${ctx})` : ''), efforts: (m.supported_reasoning_levels || []).map(l => l && l.effort).filter(Boolean) };
-      }).filter(m => m.id);
-      // The cache is last-writer-wins and the model list is version-gated
-      // server-side: a still-running OLD codex session re-fetches and writes it
-      // back WITHOUT newer models (observed: a live 0.142.5 erased the gpt-5.6
-      // entries minutes after 0.144.0 fetched them). Union everything seen this
-      // server lifetime so the dropdown doesn't flap while old sessions live.
-      for (const m of fresh) _codexModelsSeen.set(m.id, m);
-      AVAILABLE_MODELS.codex = [{ id: '', label: 'Default' }, ..._codexModelsSeen.values()];
+    const fp = path.join(os.homedir(), '.codex', 'models_cache.json');
+    const mt = fs.statSync(fp).mtimeMs;
+    if (mt === _codexCacheMtime) return;
+    _codexCacheMtime = mt;
+    const codexCache = JSON.parse(fs.readFileSync(fp, 'utf-8'));
+    if (!codexCache.models?.length) return;
+    const fresh = codexCache.models.map(m => {
+      const ctx = m.context_window ? (m.context_window >= 1000000 ? Math.round(m.context_window / 1000000) + 'M' : Math.round(m.context_window / 1000) + 'k') : '';
+      // Per-model reasoning levels ride along: GPT-5.6 made efforts
+      // model-specific (sol/terra add max+ultra, luna tops out at max) —
+      // clients derive dropdowns from this instead of a stale hardcoded list.
+      return { id: m.slug, label: (m.display_name || m.slug) + (ctx ? ` (${ctx})` : ''), efforts: (m.supported_reasoning_levels || []).map(l => l && l.effort).filter(Boolean) };
+    }).filter(m => m.id);
+    let changed = false;
+    for (const m of fresh) {
+      const prev = _codexModelsSeen.get(m.id);
+      if (!prev || JSON.stringify(prev) !== JSON.stringify(m)) { _codexModelsSeen.set(m.id, m); changed = true; }
+    }
+    AVAILABLE_MODELS.codex = [{ id: '', label: 'Default' }, ..._codexModelsSeen.values()];
+    if (changed) {
+      try {
+        const tmp = CODEX_MODELS_SEEN_FILE + '.tmp';
+        fs.writeFileSync(tmp, JSON.stringify([..._codexModelsSeen.values()]));
+        fs.renameSync(tmp, CODEX_MODELS_SEEN_FILE);
+      } catch {}
     }
   } catch {}
 }
-const _codexModelsSeen = new Map();
+refreshCodexModels();
 setTimeout(refreshAvailableModels, 3000);
 setInterval(refreshAvailableModels, 3600000); // refresh hourly
 
@@ -2868,6 +2894,7 @@ app.get('/api/usage', (req, res) => {
 });
 
 app.get('/api/available-models', (req, res) => {
+  refreshCodexModels(); // mtime-guarded local read — stays current despite old-CLI cache rewrites
   res.json(AVAILABLE_MODELS);
 });
 app.get('/api/session-options', (req, res) => {
