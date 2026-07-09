@@ -252,7 +252,21 @@ html, body {
   display: inline-flex; align-items: center; gap: 2px; padding: 1px 5px; font-size: 9px;
   border-radius: 8px; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.acct-type-icon { flex-shrink: 0; }
+.badge-sub svg { width: 10px; height: 10px; flex-shrink: 0; }
+.acct-type-icon { flex-shrink: 0; display: inline-flex; color: var(--text-secondary); }
+.acct-type-icon svg { width: 14px; height: 14px; }
+/* Icon action buttons (default star / rename / delete) — consistent across all
+   account rows so accounts read as peers. */
+.acct-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; padding: 0; border: none; background: transparent;
+  color: var(--text-dim); cursor: pointer; border-radius: var(--radius-sm);
+}
+.acct-icon svg { width: 14px; height: 14px; }
+.acct-icon:hover { background: var(--bg-hover); color: var(--text); }
+.acct-icon.acct-def.on { color: var(--accent); }
+.acct-icon.acct-del:hover { color: var(--red, #e55); }
+.acct-key-row.is-default { background: color-mix(in srgb, var(--accent) 6%, transparent); border-radius: var(--radius-sm); }
 /* Manage Agents dialog: wider than the 440px default — its rows carry real
    button groups (login/update, accounts) that truncate/wrap at 440px */
 .dialog.agents-dialog { width: 560px; max-width: 92vw; }

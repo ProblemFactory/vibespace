@@ -153,7 +153,11 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
           // burn the wrong plan); the plain CLI global login stays quiet.
           if (a.source === 'subscription') {
             if (!a.name) return '';
-            return `<span class="session-card-badge badge-sub" data-tip="${escHtml(tr('Subscription — {name}', { name: a.name }))}">👑 ${escHtml(a.name)}</span>`;
+            // Compact: crown SVG + just the first character of the name (full
+            // name in the tooltip). No emoji.
+            const CROWN = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12.5h11M3 12.5L2 4.5l3.2 2.6L8 3l2.8 4.1L14 4.5l-1 8z"/></svg>';
+            const first = [...String(a.name)][0] || '';
+            return `<span class="session-card-badge badge-sub" data-tip="${escHtml(tr('Subscription — {name}', { name: a.name }))}">${CROWN}${escHtml(first)}</span>`;
           }
           const KEY = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="8" r="3"/><path d="M8 8h6.5M12 8v2.5M14.5 8v2"/></svg>';
           if (a.source === 'api-key' || a.source === 'api-console' || a.source === 'api-other') {
@@ -623,7 +627,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       if (backend === 'claude' && acctList.length) {
         pop.appendChild(makeRow(tr('Account'), [
           { value: 'subscription', label: tr('Subscription (Pro/Max)') },
-          ...acctList.map(a => ({ value: a.id, label: a.type === 'subscription' ? `👑 ${a.name}` : `${a.name} — API …${a.tail}` })),
+          ...acctList.map(a => ({ value: a.id, label: a.type === 'subscription' ? `${a.name} (${tr('subscription')})` : `${a.name} — API …${a.tail}` })),
         ], 'account'));
       }
     };
