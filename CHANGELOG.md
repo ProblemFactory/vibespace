@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.56.0] — 2026-07-08
+
+### Added — multiple Claude subscriptions, switchable per session
+You can now hold several Claude Pro/Max logins at once and pick which one bills
+each session — the counterpart to per-session API-key switching. **Manage agents
+→ Anthropic accounts → "+ Add subscription…"**: name it, and a terminal opens to
+sign in with that account; the login is captured into its own isolated store, so
+it does NOT disturb your current/global login. Each account then appears in the
+New Session dialog, the card ⚙, and Session Properties account pickers (👑), and
+a session's card shows 👑<name> so you never burn the wrong plan. The usage popup
+tracks each subscription's 5h/7d quota (idle accounts show last-known).
+
+Mechanism (verified against claude 2.1.205): each subscription is a real dir
+holding only its `.credentials.json`, read by the CLI via
+`CLAUDE_SECURESTORAGE_CONFIG_DIR` — this relocates the credential store ONLY, so
+transcripts, session discovery and settings stay shared in `~/.claude`. Local
+Claude sessions in this release (remote hosts + Codex are later phases). Holding
+your own paid accounts and driving the official CLI per-account is Anthropic's
+acknowledged "accepted" pattern (not the banned third-party-OAuth-proxy path).
+
+### Changed
+- Chat hook notices show their FULL detail — the 500-char truncation is gone
+  (the output stays inside the collapsed disclosure, height-capped with a scroll).
+
 ## [2.55.3] — 2026-07-08
 
 ### Fixed
