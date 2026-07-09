@@ -266,10 +266,17 @@ html, body {
 .acct-icon:hover { background: var(--bg-hover); color: var(--text); }
 .acct-icon.acct-def.on { color: var(--accent); }
 .acct-icon.acct-del:hover { color: var(--red, #e55); }
-.acct-list { display: flex; flex-direction: column; gap: 1px; margin: 4px 0; }
-/* Grid so every row's columns (icon | name+ident | usage | actions) line up,
-   even though the CLI-login row has fewer action buttons than the others. */
-.acct-key-row { display: grid; grid-template-columns: auto minmax(90px, 1fr) auto auto; align-items: center; gap: 10px; padding: 3px 6px; font-size: 11px; }
+/* ONE shared grid over the whole list so every row's columns (icon | name+ident
+   | usage | actions) line up — the CLI-login row has fewer action buttons than
+   the others, so per-row grids would NOT align (grid tracks are per-container).
+   Rows are subgrid items spanning all 4 tracks: columns inherit the parent's
+   sizing (aligned across rows) while the row element still exists for the
+   .is-default background + click delegation. */
+.acct-list { display: grid; grid-template-columns: auto minmax(90px, 1fr) auto auto; align-items: center; column-gap: 10px; row-gap: 1px; margin: 4px 0; padding: 0 6px; }
+/* vertical padding only — horizontal padding on a subgrid item would shift its
+   tracks and break the cross-row column alignment. The list's padding provides
+   the left/right inset; the .is-default background spans the grid content box. */
+.acct-key-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; padding: 3px 0; font-size: 11px; }
 .acct-key-main { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .acct-key-name { font-weight: 500; white-space: nowrap; }
 .acct-key-tail { color: var(--text-dim); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
