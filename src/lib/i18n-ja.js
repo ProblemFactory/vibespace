@@ -1069,4 +1069,5 @@ export default {
   "No usage captured yet for this account — run a session on it.": "このアカウントの使用量はまだ記録されていません — このアカウントでセッションを実行してください。",
   "Refreshes as this account’s sessions run": "このアカウントのセッション実行時に自動更新",
   "The machine login and this VibeSpace account are the same ChatGPT account — usage is shown merged": "このマシンのログインとこの VibeSpace アカウントは同一の ChatGPT アカウントです — 使用量は統合して表示されます",
+  "not reported by Codex": "Codex は報告しません",
 };

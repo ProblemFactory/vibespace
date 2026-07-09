@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.64.1] — 2026-07-09
+
+### Fixed / clarified — Usage window vendor separation
+- **Codex "cache writes 0" was misleading**: codex rollouts do not report
+  cache-write token counts at all (verified against records written minutes ago
+  by 0.144.0 — the usage struct has no such field), so a codex-only view now
+  shows **"— · not reported by Codex"** instead of a fake 0. (Historical
+  context: cache writes were also free on GPT-5.5-era OpenAI billing; 5.6+
+  bills them 1.25× but the data still isn't reported, so cost estimates can't
+  include it.)
+- **Account chips follow the Backend filter** — Backend=Codex no longer shows
+  Claude accounts (and vice versa); an account selection from the other backend
+  is cleared instead of yielding a permanently empty view.
+- **Vendor logos everywhere identities/models mix**: account chips, By-account
+  rows, By-model rows, and the Pricing editor's account list all carry the
+  Claude/Codex brand mark.
+- **Pricing editor listed only what the current filter left visible** (e.g. a
+  codex-filtered dashboard shrank it to one row) — it now lists every account
+  from the unfiltered union.
+- **Top sessions show session names** (from session-meta; sessions not created
+  in VibeSpace keep the id).
+
 ## [2.64.0] — 2026-07-09
 
 ### Added — Codex multi-account parity (Usage window + quota pies)

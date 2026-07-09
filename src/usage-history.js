@@ -160,6 +160,7 @@ class UsageHistory {
     let added = 0, filesTouched = 0;
     try {
       const meta = this._metaMap();
+      this._lastMetaMap = meta; // reused by aggregate() for session-name labels
       const attrib = this._attribMap();
       const shardBuffers = {}; // shardPath → [lines]
       const push = (ev) => {
@@ -443,16 +444,27 @@ class UsageHistory {
         (dims[dim][k] = dims[dim][k] || this._emptyBucket());
         this._add(dims[dim][k], ev);
       }
-      // Freeze human labels for the account dimension (name + billing type).
+      // Freeze human labels for the account dimension (name + billing type +
+      // backend, so the UI can badge accounts/models with the vendor logo).
       if (!dimMeta.account) dimMeta.account = {};
       if (!dimMeta.account[acctKey]) {
         const live = ev.acct ? this._resolveAccount(ev.acct) : null;
         dimMeta.account[acctKey] = {
           name: ev.acct ? (live?.name || ev.aname || ev.acct) : (ev.be === 'codex' ? 'Codex CLI login' : 'Claude CLI login'),
           type: ev.atype || (ev.acct ? 'unknown' : 'global'),
+          be: ev.be || 'claude',
           tail: live?.tail || null,
           deleted: ev.acct ? !live : false,
         };
+      }
+      if (!dimMeta.model) dimMeta.model = {};
+      if (!dimMeta.model[keyOf.model]) dimMeta.model[keyOf.model] = { be: ev.be || 'claude' };
+      // Session names from session-meta (VibeSpace-created sessions carry one;
+      // foreign sessions fall back to the id in the UI).
+      if (!dimMeta.session) dimMeta.session = {};
+      if (!dimMeta.session[ev.sid]) {
+        const sm = this._lastMetaMap ? this._lastMetaMap[ev.sid] : null;
+        dimMeta.session[ev.sid] = { name: sm?.name || null, be: ev.be || 'claude' };
       }
     }
     const groupOut = {};

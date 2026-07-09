@@ -1069,4 +1069,5 @@ export default {
   "No usage captured yet for this account — run a session on it.": "该账号还没有捕获到用量——用它跑一个会话即可。",
   "Refreshes as this account’s sessions run": "该账号的会话运行时自动刷新",
   "The machine login and this VibeSpace account are the same ChatGPT account — usage is shown merged": "本机登录与这个 VibeSpace 账号是同一个 ChatGPT 账号——用量已合并显示",
+  "not reported by Codex": "Codex 不上报此项",
 };
