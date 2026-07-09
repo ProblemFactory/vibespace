@@ -16,8 +16,16 @@ CLI already receives your 5h/7d figures in its normal API responses and hands
 them to its status-line — VibeSpace caches what the CLI already knows. There is
 **no background call to Anthropic**.
 
-- The pies follow your **default account** (the starred one — what new sessions
-  bill to), falling back to the machine's own login when none is starred.
+- By default (**Auto**) the pies follow your **default account** (the starred
+  one — what new sessions bill to), falling back to the machine's own login when
+  none is starred. Click the pies and use the **account chips** at the top of
+  the popup to view any other account instead — the CLI login or any named
+  subscription (★ marks the default). The choice is per-device.
+- **Same-account dedupe**: if the machine's CLI login *is* one of your named
+  accounts (same email), they appear as **one** chip and their captured usage is
+  merged newest-wins — one real account never shows two conflicting values. If
+  an account's login didn't record its email (VibeSpace then can't know it's the
+  same account), use **"set email…"** on its row in Manage Agents to declare it.
 - Because it's a byproduct of real use, usage refreshes when you run the account
   in a **terminal** session. Chat (stream-json) sessions have no status line, so
   a chat-only account shows its last-known value.

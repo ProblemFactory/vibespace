@@ -81,6 +81,18 @@ fetchJson('/api/available-models').then(data => {
   if (data.codex?.length) {
     BACKEND_SESSION_OPTIONS.codex.models = data.codex;
     SETTINGS_SCHEMA['codex.defaultModel'].options = toSchemaOptions(data.codex);
+    // Codex effort levels are model-specific since GPT-5.6 (sol/terra add
+    // max+ultra) — build the dropdown from the union of the models' reported
+    // levels instead of the stale hardcoded ladder. Rank keeps a sane order.
+    const rank = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+    const union = [...new Set(data.codex.flatMap(m => m.efforts || []))]
+      .sort((a, b) => (rank.indexOf(a) + 1 || 99) - (rank.indexOf(b) + 1 || 99));
+    if (union.length) {
+      const efforts = [{ value: '', label: t('Auto (model default)') },
+        ...union.map(e => ({ value: e, label: e.charAt(0).toUpperCase() + e.slice(1) }))];
+      BACKEND_SESSION_OPTIONS.codex.efforts = efforts;
+      SETTINGS_SCHEMA['codex.defaultEffort'].options = efforts.map(e => ({ value: e.value, label: e.label }));
+    }
   }
 });
 // Fetch effort levels + permission modes from server (parsed from claude --help)
@@ -972,6 +984,12 @@ class App {
       gIdent = sub.loggedIn
         ? escHtml((sub.email || '') + (sub.plan ? (sub.email ? ' · ' : '') + sub.plan : '')) || t('logged in')
         : `<span class="ob-warn">${acct.cliKey?.present ? t('not logged in (a Console login replaced it)') : t('not logged in')}</span>`;
+      // The machine's login may BE one of the named accounts (same email) —
+      // say so, since their rows then show the same (merged) usage.
+      const linkedSub = sub.loggedIn && sub.email
+        ? claudeAccts.find(a => a.type === 'subscription' && a.email && a.email.toLowerCase() === String(sub.email).toLowerCase())
+        : null;
+      if (linkedSub) gIdent += ` <span class="acct-linked-hint" title="${escHtml(t('The machine login and this VibeSpace account are the same Anthropic account — usage is shown merged'))}">${t('= “{name}”', { name: escHtml(linkedSub.name) })}</span>`;
     }
     const globalRow = `<div class="acct-key-row${gDef ? ' is-default' : ''}" data-id="__global__">
       <span class="acct-type-icon" title="${selectedHost ? t("This machine's own login — lives on {host}, not in VibeSpace", { host: escHtml(hostLabel) }) : t('The CLI’s own global login on this machine')}">${GLOBE}</span>
@@ -984,10 +1002,16 @@ class App {
       const isDef = accts.defaultAccountId === a.id;
       const isSub = a.type === 'subscription';
       const blocked = isSub && subBlocked; // subscription on a remote host, opt-in off
-      const ident = isSub
+      let ident = isSub
         ? (a.loggedIn ? escHtml((a.email || '') + (a.subscriptionType ? (a.email ? ' · ' : '') + a.subscriptionType : '')) || t('logged in')
                       : `<span class="ob-warn">${t('not logged in')}</span>`)
         : `API …${escHtml(a.tail || '')}`;
+      // Some login flows leave the creds dir without an identity file — the
+      // email is then unknowable from disk, which breaks same-account detection
+      // vs the machine login (merged usage). Let the user declare/fix it.
+      if (isSub && a.loggedIn && (!a.email || a.emailDeclared)) {
+        ident += ` <button class="acct-set-email" title="${escHtml(t('Declare which Anthropic account this is — the email links it to the machine login for merged usage'))}">${a.email ? t('edit email') : t('set email…')}</button>`;
+      }
       const hint = blocked ? ` <span class="acct-blocked-hint" title="${t('Runs on this machine only. For {host}, log in on the host — or enable Settings → “Ship subscription logins to remote hosts.”', { host: escHtml(hostLabel) })}">${t('· this machine only')}</span>` : '';
       const testTitle = blocked
         ? t('Subscriptions can’t run on {host} by default — log in on the host, or enable the setting', { host: escHtml(hostLabel) })
@@ -1109,6 +1133,16 @@ class App {
         const isDef = accts.defaultAccountId === id;
         try { await fetchJson('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: isDef ? null : id }) }); } catch {}
         refresh();
+      } else if (e.target.closest('.acct-set-email')) {
+        const email = await showInputDialog({
+          title: t('Account email'),
+          label: t('Email of this Anthropic account. Used to recognize when it is the same account as a machine login (their usage then shows merged).'),
+          value: a?.email || '', placeholder: 'you@example.com', confirmText: t('Save'),
+        });
+        if (email != null) {
+          try { await fetchJson(`/api/accounts/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: email.trim() }) }); } catch {}
+          refresh();
+        }
       } else if (e.target.closest('.acct-rename')) {
         const name = await showInputDialog({ title: t('Rename account'), label: t('Account name'), value: a?.name || '', confirmText: t('Save') });
         if (name && name.trim() && name.trim() !== a?.name) {
@@ -1851,12 +1885,25 @@ class App {
   _setupUsage() {
     this._usageData = new Map(); // sessionId → usage
     this._codexRateLimit = null;
+    // Which account the pies/popup show: 'auto' (follow the default account),
+    // '__global__' (the machine's own CLI login) or a named claude-subscription
+    // id. A VIEW preference, so per-device (localStorage), not a synced setting.
+    try { this._usageAcctSel = localStorage.getItem('vibespace.usageAccount') || 'auto'; } catch { this._usageAcctSel = 'auto'; }
     const usageEl = document.getElementById('taskbar-usage');
     const popup = document.getElementById('usage-popup');
 
     usageEl.onclick = () => popup.classList.toggle('hidden');
     document.addEventListener('mousedown', (e) => {
       if (!popup.contains(e.target) && !usageEl.contains(e.target)) popup.classList.add('hidden');
+    });
+    // Account switcher chips (popup re-renders every poll → delegate)
+    popup.addEventListener('click', (e) => {
+      const chip = e.target.closest('.usage-acct-chip');
+      if (!chip) return;
+      e.stopPropagation();
+      this._usageAcctSel = chip.dataset.key || 'auto';
+      try { localStorage.setItem('vibespace.usageAccount', this._usageAcctSel); } catch {}
+      this._renderUsage();
     });
 
     // Poll usage for active sessions
@@ -1871,6 +1918,7 @@ class App {
     else if (this._codexRateLimit === undefined) this._codexRateLimit = null;
     this._subSignedOut = !!data?.subscriptionSignedOut;
     this._accountUsage = data?.accounts || {}; // per-subscription usage (Manage Agents rows)
+    this._usageGlobal = data?.globalLogin || null; // CLI-login identity (+ linked named account)
     this._renderUsage();
     // 8s: /api/usage is now a cheap LOCAL read (server just returns the passively
     // captured cache) — decoupled from any Anthropic call — so a snappy refresh
@@ -1882,20 +1930,38 @@ class App {
   _renderUsage() {
     const usageEl = document.getElementById('taskbar-usage');
     const popup = document.getElementById('usage-popup');
-    // The Claude pies follow the DEFAULT account — that's what new sessions
-    // actually bill to, and its usage is refreshed passively when you run a
-    // terminal session on it (statusLine capture). If no named account is
-    // starred, fall back to the machine's own global login. This is why running
-    // a session on your starred subscription updates the taskbar (it used to
-    // always show the global login, so a session on a named account looked like
-    // "nothing refreshed").
+    // Which Claude account the pies show: by default ('auto') they follow the
+    // DEFAULT account — that's what new sessions actually bill to — falling
+    // back to the machine's own global login. The popup's switcher chips let
+    // you view any named subscription (or the CLI login) instead. When the CLI
+    // login IS one of the named accounts (email match — the server merges their
+    // caches newest-wins), '__global__' resolves to that account so there is
+    // one entry, not a duplicate pair.
+    const claudeSubs = (this._accounts?.accounts || []).filter(a => (a.backend || 'claude') !== 'codex' && a.type === 'subscription');
+    const gl = this._usageGlobal || {};
     const claudeDefId = this._accounts?.defaultAccountId;
-    const claudeDefAcct = claudeDefId ? (this._accounts?.accounts || []).find(a => a.id === claudeDefId) : null;
-    const rl = (claudeDefId && this._accountUsage?.[claudeDefId]) ? this._accountUsage[claudeDefId] : this._rateLimit;
-    const claudeUsageLabel = claudeDefAcct ? claudeDefAcct.name : 'Claude';
+    let sel = this._usageAcctSel || 'auto';
+    if (sel === '__global__' && gl.accountId) sel = gl.accountId;
+    if (sel !== 'auto' && sel !== '__global__' && !claudeSubs.some(a => a.id === sel)) sel = 'auto'; // account removed
+    let rl, claudeUsageLabel, usageNote = '';
+    if (sel === 'auto') {
+      const defAcct = claudeDefId ? claudeSubs.find(a => a.id === claudeDefId) : null;
+      rl = (claudeDefId && this._accountUsage?.[claudeDefId]) ? this._accountUsage[claudeDefId] : this._rateLimit;
+      claudeUsageLabel = defAcct ? defAcct.name : 'Claude';
+      if (defAcct) usageNote = t('Default account · refreshes when you run it in a terminal session');
+    } else if (sel === '__global__') {
+      rl = this._rateLimit;
+      claudeUsageLabel = t('CLI login') + (gl.email ? ` · ${gl.email}` : '');
+    } else {
+      const a = claudeSubs.find(x => x.id === sel);
+      rl = this._accountUsage?.[sel] || null;
+      claudeUsageLabel = a?.name || sel;
+      usageNote = t('Refreshes passively when you run this account in a terminal session');
+    }
     const codex = this._codexRateLimit;
+    const hasSwitch = claudeSubs.length > 0;
 
-    if (!rl && !codex) {
+    if (!rl && !codex && !hasSwitch) {
       usageEl.innerHTML = '';
       popup.innerHTML = `<div class="empty-hint">${t('No usage data')}</div>`;
       return;
@@ -1904,18 +1970,19 @@ class App {
     const usageColor = (pct) => (pct > 80 ? 'var(--red)' : pct > 50 ? 'var(--yellow)' : 'var(--green)');
     // Donut with the window label in the hole — 5h vs 7d distinguishable at a
     // glance instead of two identical pies
-    const renderPie = (label, pct) => {
+    const renderPie = (label, pct, noData) => {
       const clamped = Math.max(0, Math.min(100, Math.round(pct || 0)));
       const color = usageColor(clamped);
-      const deg = Math.round(clamped * 3.6);
-      return `<div class="usage-pie usage-donut" title="${label}: ${clamped}%" style="background:conic-gradient(${color} ${deg}deg, var(--bg-input) ${deg}deg)"><span class="usage-donut-label">${label}</span></div>`;
+      const deg = noData ? 0 : Math.round(clamped * 3.6);
+      const tip = noData ? `${label}: ${t('no data yet')}` : `${label}: ${clamped}%`;
+      return `<div class="usage-pie usage-donut" title="${tip}" style="background:conic-gradient(${color} ${deg}deg, var(--bg-input) ${deg}deg)"><span class="usage-donut-label">${label}</span></div>`;
     };
-    const renderRow = (backend, primaryLabel, primaryPct, secondaryLabel, secondaryPct) => (
+    const renderRow = (backend, primaryLabel, primaryPct, secondaryLabel, secondaryPct, noData) => (
       `<div class="taskbar-usage-row">
         ${createBackendIconHtml(backend, { className: 'taskbar-usage-backend', title: backend === 'codex' ? 'Codex' : 'Claude' })}
         <div class="taskbar-usage-pair">
-          ${renderPie(primaryLabel, primaryPct)}
-          ${renderPie(secondaryLabel, secondaryPct)}
+          ${renderPie(primaryLabel, primaryPct, noData)}
+          ${renderPie(secondaryLabel, secondaryPct, noData)}
         </div>
       </div>`
     );
@@ -1940,14 +2007,27 @@ class App {
       return d.toLocaleDateString([], {month:'short',day:'numeric'}) + ' ' + time;
     };
 
-    if (rl) {
-      const pct5h = Math.round((rl.fiveHour?.utilization || 0) * 100);
+    if (rl || hasSwitch) {
+      const noData = !rl;
+      const pct5h = Math.round((rl?.fiveHour?.utilization || 0) * 100);
       const color = usageColor(pct5h);
-      const pct7d = Math.round((rl.sevenDay?.utilization || 0) * 100);
+      const pct7d = Math.round((rl?.sevenDay?.utilization || 0) * 100);
       const color7d = usageColor(pct7d);
-      rows.push(renderRow('claude', '5h', pct5h, '7d', pct7d));
+      rows.push(renderRow('claude', '5h', pct5h, '7d', pct7d, noData));
+      // Account switcher — one chip per viewable identity. When the CLI login
+      // is a named account (gl.accountId), NO separate CLI-login chip renders:
+      // that account's chip covers both (tooltip says so). ★ marks the default.
+      const activeKey = (this._usageAcctSel || 'auto') === 'auto' ? 'auto' : sel;
+      const entries = [{ key: 'auto', label: t('Auto'), tip: t('Follow the default account (what new sessions bill to)') }];
+      if (!gl.accountId) entries.push({ key: '__global__', label: t('CLI login'), tip: gl.email || t("The machine's own CLI login") });
+      for (const a of claudeSubs) entries.push({
+        key: a.id, label: (claudeDefId === a.id ? '★ ' : '') + a.name,
+        tip: (a.email || '') + (gl.accountId === a.id ? (a.email ? ' · ' : '') + t('also the CLI login on this machine') : ''),
+      });
+      const switcher = hasSwitch ? `<div class="usage-acct-switch">${entries.map(en =>
+        `<button class="usage-acct-chip${en.key === activeKey ? ' active' : ''}" data-key="${escHtml(en.key)}" title="${escHtml(en.tip || '')}">${escHtml(en.label)}</button>`).join('')}</div>` : '';
       const scopedSections = [];
-      for (const sc of rl.scopedWeekly || []) {
+      for (const sc of rl?.scopedWeekly || []) {
         const pctSc = Math.round((sc.utilization || 0) * 100);
         const colorSc = usageColor(pctSc);
         scopedSections.push(`
@@ -1960,9 +2040,12 @@ class App {
         </div>
       </div>`);
       }
-      sections.push(`${renderSectionTitle('claude', claudeUsageLabel)}
-      ${claudeDefAcct ? `<div class="usage-note">${t('Default account · refreshes when you run it in a terminal session')}</div>` : ''}
-      <div class="usage-session">
+      // The signed-out warning concerns the GLOBAL login's data — only shown
+      // when that's what's displayed (directly or via the linked account).
+      const showingGlobal = sel === '__global__' || (gl.accountId && sel === gl.accountId) || (sel === 'auto' && rl === this._rateLimit);
+      const body = noData
+        ? `<div class="usage-note">${t('No usage captured yet for this account — run a terminal session on it.')}</div>`
+        : `<div class="usage-session">
         <div class="usage-session-name">${t('5-hour limit')}</div>
         <div class="usage-bar" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pct5h}%;background:${color}"></div></div>
         <div class="usage-session-stats">
@@ -1978,8 +2061,11 @@ class App {
           <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(rl.sevenDay?.resetsAt)}</span>
         </div>
       </div>${scopedSections.join('')}
-      ${this._subSignedOut ? `<div class="usage-note">${t('⚠ Subscription signed out (a Console login replaced it) — pies show its last-known quota. API-billed sessions never appear here.')}</div>` : ''}
-      <div class="usage-updated">${t('Updated {ago}', { ago: agoText(rl.fetchedAt) })}</div>`);
+      ${this._subSignedOut && showingGlobal ? `<div class="usage-note">${t('⚠ Subscription signed out (a Console login replaced it) — pies show its last-known quota. API-billed sessions never appear here.')}</div>` : ''}
+      <div class="usage-updated">${t('Updated {ago}', { ago: agoText(rl.fetchedAt) })}</div>`;
+      sections.push(`${renderSectionTitle('claude', escHtml(claudeUsageLabel))}${switcher}
+      ${usageNote ? `<div class="usage-note">${usageNote}</div>` : ''}
+      ${body}`);
     }
 
     if (codex?.fiveHour || codex?.sevenDay) {
@@ -2101,10 +2187,21 @@ class App {
       document.querySelector('#dialog-new-session .btn-create').click();
     });
 
-    document.querySelector('#dialog-new-session .btn-create').addEventListener('click', () => {
+    document.querySelector('#dialog-new-session .btn-create').addEventListener('click', async (ev) => {
+      const createBtn = ev.currentTarget;
+      if (createBtn.dataset.busy) return; // Enter + click racing the async check
       const backend = document.getElementById('input-backend').value || 'claude';
       const hostId = document.getElementById('input-host')?.value || undefined;
       const cwd = document.getElementById('input-cwd').value.trim();
+      // A typo'd/nonexistent cwd used to fail opaquely at spawn time (pty chdir
+      // error → instant "terminated"; remote silently fell back to $HOME).
+      // Stat it first and offer to create the folder; on cancel the dialog
+      // stays open for correction.
+      if (cwd) {
+        createBtn.dataset.busy = '1';
+        const ok = await this._ensureCwdExists(cwd, hostId).finally(() => delete createBtn.dataset.busy);
+        if (!ok) return;
+      }
       if (backend === 'shell') {
         // Plain terminal — reuse openShellTerminal (handles host + defaults)
         this.openShellTerminal(cwd || undefined, { hostId });
@@ -2475,6 +2572,40 @@ class App {
   }
 
   // Plain shell terminal — no AI backend, same dtach persistence + window
+  // New Session guard: stat the typed cwd (host-aware, '~' ok) and offer to
+  // create it when missing. Returns true when the path is a usable directory
+  // (possibly just created). Any stat failure is treated as "missing" — if the
+  // real problem is elsewhere (permissions, unreachable host), the mkdir
+  // attempt surfaces the actual error instead of us guessing.
+  async _ensureCwdExists(cwd, hostId) {
+    const hostQ = hostId ? `&host=${encodeURIComponent(hostId)}` : '';
+    const info = await fetchJson(`/api/file/info?path=${encodeURIComponent(cwd)}${hostQ}`);
+    if (info && !info.error) {
+      if (info.isDirectory === false) {
+        showToast(t('“{path}” is a file — a session needs a folder', { path: cwd }), { type: 'error' });
+        return false;
+      }
+      return true;
+    }
+    const ok = await showConfirmDialog({
+      title: t('Folder does not exist'),
+      message: hostId
+        ? t('“{path}” does not exist on the selected remote host. Create it and start the session there?', { path: cwd })
+        : t('“{path}” does not exist. Create it and start the session there?', { path: cwd }),
+      confirmText: t('Create folder'),
+    });
+    if (!ok) return false;
+    const r = await fetchJson('/api/mkdir', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: cwd, host: hostId || undefined }),
+    });
+    if (!r || r.error) {
+      showToast(t('Could not create “{path}”: {err}', { path: cwd, err: (r && r.error) || t('server unreachable') }), { type: 'error' });
+      return false;
+    }
+    return true;
+  }
+
   // management. Optional initialCommand is typed for the user once the shell
   // is up (e.g. the in-product "Log in to Claude" helper).
   openShellTerminal(cwd, { initialCommand, hostId } = {}) {

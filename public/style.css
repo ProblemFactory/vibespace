@@ -353,6 +353,12 @@ html, body {
 .acct-usage-bar > span { display: block; height: 100%; border-radius: 3px; }
 .acct-usage-pct { min-width: 26px; text-align: right; font-variant-numeric: tabular-nums; }
 .acct-usage-age { opacity: 0.6; font-style: italic; }
+.acct-linked-hint { color: var(--accent); opacity: 0.85; }
+.acct-set-email {
+  font-size: 9px; padding: 0 5px; border-radius: 8px; cursor: pointer;
+  background: none; border: 1px dashed var(--border); color: var(--text-dim);
+}
+.acct-set-email:hover { color: var(--text); border-color: var(--border-active); }
 /* When a usage readout is present the actions no longer push right (usage takes
    the auto margin) — give the actions their own small gap. */
 /* Manage Agents dialog: wider than the 440px default — its rows carry real
@@ -981,6 +987,19 @@ html, body {
   font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 8px;
 }
 .usage-section-backend { width: 14px; height: 14px; font-size: 8px; }
+/* Per-account usage switcher (usage popup) — one chip per viewable identity */
+.usage-acct-switch { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 8px; }
+.usage-acct-chip {
+  font-size: 10px; padding: 2px 8px; border-radius: 10px; cursor: pointer;
+  background: var(--bg-input); border: 1px solid var(--border); color: var(--text-secondary);
+  max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  transition: all var(--transition);
+}
+.usage-acct-chip:hover { border-color: var(--border-active); color: var(--text); }
+.usage-acct-chip.active {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-color: var(--accent); color: var(--text);
+}
 .usage-session { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 11px; }
 .usage-session:last-child { border-bottom: none; }
 .usage-session-name { font-weight: 600; color: var(--text); margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

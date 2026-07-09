@@ -116,7 +116,9 @@ class AccountManager {
         }
         if (type === 'subscription') {
           const info = this.readSubCreds(a.id);
-          return { ...base, loggedIn: info.loggedIn, email: info.email, subscriptionType: info.subscriptionType };
+          // a.email = manual backfill (setEmail) for dirs whose login never
+          // wrote the identity file; the dir's own identity wins when present.
+          return { ...base, loggedIn: info.loggedIn, email: info.email || a.email || null, emailDeclared: !info.email && !!a.email, subscriptionType: info.subscriptionType };
         }
         return { ...base, tail: a.tail };
       }),
@@ -282,6 +284,20 @@ class AccountManager {
     this._save();
     this._notify();
     return { id: a.id, name: a.name, tail: a.tail };
+  }
+
+  // Manual identity backfill: some login flows leave a subscription's creds dir
+  // without the identity file (.claude.json oauthAccount) — creds work, but the
+  // email is unknowable from disk. The email is what links a named account to
+  // the machine's own CLI login (usage merge/dedup), so let the user declare it.
+  // Stored on the account record; list() uses it only when the dir has none.
+  setEmail(id, email) {
+    const a = this._state.accounts.find((x) => x.id === id);
+    if (!a) throw new Error('account not found');
+    a.email = String(email || '').trim().slice(0, 120) || undefined;
+    this._save();
+    this._notify();
+    return { id: a.id, name: a.name, email: a.email || null };
   }
 
   remove(id) {

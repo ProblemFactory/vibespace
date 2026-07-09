@@ -411,14 +411,18 @@ function registerWsHandler(wss, ctx) {
             session.host = h.id;
             session.hostName = h.name;
           }
-          // PASSIVE usage capture (§ban-safety): for LOCAL TERMINAL sessions
-          // (a statusLine only renders in the TUI — chat/stream-json has none),
-          // inject a statusLine command that harvests the CLI's OWN 5h/7d
-          // rate_limits into data/usage-cache/. This is why VibeSpace makes NO
-          // background /api/oauth/usage calls with subscription tokens. Merged
-          // into any existing --settings (e.g. ultracode) so there's ONE flag.
+          // PASSIVE usage capture (§ban-safety): for LOCAL CLAUDE TERMINAL
+          // sessions (a statusLine only renders in the TUI — chat/stream-json
+          // has none), inject a statusLine command that harvests the CLI's OWN
+          // 5h/7d rate_limits into data/usage-cache/. This is why VibeSpace
+          // makes NO background /api/oauth/usage calls with subscription
+          // tokens. Merged into any existing --settings (e.g. ultracode) so
+          // there's ONE flag. The claude gate is load-bearing: only the claude
+          // CLI understands --settings — appending it to `zsh -l` (shell
+          // terminals, incl. the Manage-Agents update/login helpers) or codex
+          // made them exit instantly ("terminated").
           const usageEnvPairs = [];
-          if (sessionMode === 'terminal' && !data.hostId && USAGE_STATUSLINE_CMD) {
+          if (backend === 'claude' && sessionMode === 'terminal' && !data.hostId && USAGE_STATUSLINE_CMD) {
             try {
               let settingsObj = {};
               const si = spawnArgs.indexOf('--settings');
