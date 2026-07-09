@@ -1699,7 +1699,9 @@ app.post('/api/accounts/import-cli-host', async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.post('/api/accounts/default', (req, res) => {
-  try { accounts.setDefault(req.body?.id || null); res.json({ success: true }); }
+  // backend needed only when CLEARING (id null) — otherwise it's derived from
+  // the account. Each backend (claude/codex) keeps its own default.
+  try { accounts.setDefault(req.body?.id || null, req.body?.backend || 'claude'); res.json({ success: true }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.patch('/api/accounts/:id', (req, res) => {
@@ -1768,6 +1770,27 @@ app.post('/api/accounts/console-login', (req, res) => {
 });
 app.post('/api/accounts/console-login/:id/capture', (req, res) => {
   try { res.json({ success: true, ...accounts.captureConsoleLogin(req.params.id, req.body || {}) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// ── Codex multi-subscription: same idea via CODEX_HOME. Codex has no auth-only
+// relocation env, so each account is an isolated CODEX_HOME whose sessions/ +
+// config.toml SYMLINK the shared ~/.codex — auth.json is real per-account,
+// threads land in the shared sessions dir (unified discovery). `codex login`
+// prints an OAuth URL to a hosted callback (headless-friendly). ──
+app.post('/api/accounts/codex-subscription', (req, res) => {
+  try {
+    const { id, dir } = accounts.createCodexSubscription(req.body || {});
+    // --device-auth: prints a URL + one-time code (no localhost:1455 callback
+    // server), so it works when the browser is on a DIFFERENT machine than this
+    // server (team/remote deploys) — same headless philosophy as claude's
+    // paste-code login. CODEX_HOME points at the isolated per-account dir.
+    const loginCmd = `CODEX_HOME=${JSON.stringify(dir)} codex login --device-auth`;
+    res.json({ success: true, id, dir, loginCmd });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/accounts/codex-subscription/:id/finalize', (req, res) => {
+  try { res.json({ success: true, ...accounts.finalizeCodexSubscription(req.params.id) }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 

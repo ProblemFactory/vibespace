@@ -147,8 +147,10 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
     acctSel.className = 'session-config-select';
     acctSel.style.flex = '1';
     const savedCfg = sidebar.getSessionConfig?.(s) || {};
-    const accts = app._accounts?.accounts || [];
-    for (const [v, label] of [['', t('Default')], ['subscription', t('Subscription')], ...accts.map(x => [x.id, x.type === 'subscription' ? `${x.name} (${t('subscription')})` : `${x.name} — API …${x.tail}`])]) {
+    const sbe = s.backend || 'claude';
+    const accts = (app._accounts?.accounts || []).filter(x => (x.backend || 'claude') === sbe);
+    const globalLabel = sbe === 'codex' ? t('ChatGPT login') : t('Subscription');
+    for (const [v, label] of [['', t('Default')], ['subscription', globalLabel], ...accts.map(x => [x.id, x.type === 'subscription' ? `${x.name} (${t('subscription')})` : `${x.name} — API …${x.tail}`])]) {
       const o = document.createElement('option'); o.value = v; o.textContent = label;
       acctSel.appendChild(o);
     }

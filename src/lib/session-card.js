@@ -623,10 +623,10 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       // different account = the quota-escape hatch: subscription limit hit →
       // switch to an API key here and Resume, the conversation continues on
       // API billing.
-      const acctList = app._accounts?.accounts || [];
-      if (backend === 'claude' && acctList.length) {
+      const acctList = (app._accounts?.accounts || []).filter(a => (a.backend || 'claude') === backend);
+      if ((backend === 'claude' || backend === 'codex') && acctList.length) {
         pop.appendChild(makeRow(tr('Account'), [
-          { value: 'subscription', label: tr('Subscription (Pro/Max)') },
+          { value: 'subscription', label: backend === 'codex' ? tr('ChatGPT login') : tr('Subscription (Pro/Max)') },
           ...acctList.map(a => ({ value: a.id, label: a.type === 'subscription' ? `${a.name} (${tr('subscription')})` : `${a.name} — API …${a.tail}` })),
         ], 'account'));
       }

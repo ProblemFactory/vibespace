@@ -170,14 +170,15 @@ function registerWsHandler(wss, ctx) {
           ensureDir(SOCKETS_DIR);
           ensureDir(BUFFERS_DIR);
 
-          // Billing identity (subscription ↔ API/console account). Claude only
-          // (codex has its own auth). Local sessions get the key via the spawn
-          // process env; REMOTE sessions get it via an ssh-stdin-shipped 0600
-          // file + shell prefix assignment (see remoteAccountEnv). Resolved
+          // Billing identity (Claude: subscription ↔ API/console account; Codex:
+          // ChatGPT subscription via an isolated CODEX_HOME). Local sessions get
+          // the auth via the spawn process env; REMOTE sessions get an API key
+          // via an ssh-stdin-shipped 0600 file + shell prefix assignment (see
+          // remoteAccountEnv — subscription accounts stay local-only). Resolved
           // BEFORE the session object so a bad account aborts the create cleanly.
           let spawnAccount = null;
-          if (backend === 'claude' && accounts) {
-            try { spawnAccount = accounts.resolveForSpawn(data.accountId); }
+          if ((backend === 'claude' || backend === 'codex') && accounts) {
+            try { spawnAccount = accounts.resolveForSpawn(data.accountId, backend); }
             catch (e) {
               ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'Account error: ' + e.message }));
               return;
@@ -205,7 +206,7 @@ function registerWsHandler(wss, ctx) {
             // warn about API-billed sessions even after the user re-logins to
             // the subscription. The stream's init record (apiKeySource) later
             // CONFIRMS/overrides this guess (chat sessions).
-            _authAtSpawn: spawnAccount?.kind === 'subscription' ? 'subscription-acct'
+            _authAtSpawn: (spawnAccount?.kind === 'subscription' || spawnAccount?.kind === 'codex-subscription') ? 'subscription-acct'
               : spawnAccount ? 'env-key'
               : backend !== 'claude' ? null
               : data.hostId ? 'remote-global'
@@ -402,10 +403,12 @@ function registerWsHandler(wss, ctx) {
                 // strip any ambient key so the CLI uses its global login.
                 delete env.ANTHROPIC_API_KEY;
                 delete env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
-                // API key → ANTHROPIC_API_KEY; subscription account → its own
-                // CLAUDE_SECURESTORAGE_CONFIG_DIR (relocates ONLY the creds
-                // store, transcripts stay shared). Both ride process-env, never
-                // argv. No account → strip both so the CLI uses its global login.
+                // Claude API key → ANTHROPIC_API_KEY; Claude subscription → its
+                // own CLAUDE_SECURESTORAGE_CONFIG_DIR (relocates ONLY the creds
+                // store, transcripts stay shared); Codex subscription → its own
+                // CODEX_HOME (auth isolated, sessions/config symlinked shared).
+                // All ride process-env, never argv. No account → the CLI's env
+                // is left as-is (CODEX_HOME inherited from the server, if any).
                 if (spawnAccount?.localEnv) Object.assign(env, spawnAccount.localEnv);
                 return env;
               })(),
