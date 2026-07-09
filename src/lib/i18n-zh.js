@@ -951,4 +951,6 @@ export default {
   "model-name": "模型名称",
   "remote host": "远程主机",
   "unreachable": "无法连接",
+  "Ship subscription logins to remote hosts": "将订阅登录下发到远程主机",
+  "OFF (recommended): a subscription (Pro/Max) account can only run on THIS machine; for a remote host, log in on the host instead. Turning this ON copies the subscription’s login to the remote host — its token then appears from that host’s IP (often a datacenter), which can look like account abuse to Anthropic and risk a ban. API-key accounts are always allowed on remote hosts and are unaffected by this.": "关闭(推荐):订阅(Pro/Max)账号只能在本机运行;要在远程主机上跑,请改为在该主机上登录。开启后会把订阅的登录复制到远程主机——它的 token 就会从那台主机的 IP(通常是数据中心)出现,可能被 Anthropic 判定为账号滥用、面临封号风险。API key 账号始终允许在远程主机使用,不受此项影响。",
 };

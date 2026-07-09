@@ -2365,10 +2365,12 @@ class App {
         ['', t('Default ({name})', { name: defName })],
         ['subscription', be === 'codex' ? (onHost ? t('ChatGPT login (on the host)') : t('ChatGPT login')) : t('Subscription (Pro/Max login)')], // the CLI's global login
       ];
-      // Subscription accounts work on remote hosts too now — their creds dir
-      // ships to the host per session (P3).
+      // Subscription accounts on a REMOTE host require the opt-in toggle (their
+      // creds ship to the host, exposing the token from that host's IP — a ban
+      // risk; default OFF). API keys always ship. Local: always available.
+      const allowSubRemote = !!this.settings?.get?.('accounts.shipSubscriptionToRemote');
       for (const a of list) {
-        if (a.type === 'subscription') { if (a.loggedIn) opts.push([a.id, t('{name} (subscription)', { name: a.name })]); }
+        if (a.type === 'subscription') { if (a.loggedIn && (!onHost || allowSubRemote)) opts.push([a.id, t('{name} (subscription)', { name: a.name })]); }
         else opts.push([a.id, t('{name} — API key …{tail}', { name: a.name, tail: a.tail })]);
       }
       for (const [v, label] of opts) {

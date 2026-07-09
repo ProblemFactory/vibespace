@@ -951,4 +951,6 @@ export default {
   "model-name": "モデル名",
   "remote host": "リモートホスト",
   "unreachable": "接続不可",
+  "Ship subscription logins to remote hosts": "サブスクリプションのログインをリモートホストへ配布",
+  "OFF (recommended): a subscription (Pro/Max) account can only run on THIS machine; for a remote host, log in on the host instead. Turning this ON copies the subscription’s login to the remote host — its token then appears from that host’s IP (often a datacenter), which can look like account abuse to Anthropic and risk a ban. API-key accounts are always allowed on remote hosts and are unaffected by this.": "オフ(推奨):サブスクリプション(Pro/Max)アカウントはこのマシンでのみ実行できます。リモートホストで使う場合は、そのホスト上でログインしてください。オンにすると、サブスクリプションのログインがリモートホストへコピーされ、その token がそのホストの IP(多くはデータセンター)から現れます。これは Anthropic にアカウント不正利用と見なされ、BAN のリスクがあります。API キーのアカウントは常にリモートホストで利用でき、この設定の影響を受けません。",
 };

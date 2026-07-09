@@ -218,6 +218,12 @@ const SETTINGS_SCHEMA = {
     description: t('Default mode for new sessions and single-click resume from sidebar'),
     category: t('Session'), liveApply: true,
   },
+  'accounts.shipSubscriptionToRemote': {
+    type: 'boolean', default: false,
+    label: t('Ship subscription logins to remote hosts'),
+    description: t('OFF (recommended): a subscription (Pro/Max) account can only run on THIS machine; for a remote host, log in on the host instead. Turning this ON copies the subscription’s login to the remote host — its token then appears from that host’s IP (often a datacenter), which can look like account abuse to Anthropic and risk a ban. API-key accounts are always allowed on remote hosts and are unaffected by this.'),
+    category: t('Session'), liveApply: true,
+  },
 
   // ── Claude ──
   'claude.defaultModel': {

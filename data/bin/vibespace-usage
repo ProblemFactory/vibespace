@@ -1,0 +1,87 @@
+#!/usr/bin/env node
+// vibespace-usage — PASSIVE subscription usage capture (statusLine hook).
+//
+// WHY THIS EXISTS: reading Claude.ai subscription usage by calling
+// GET /api/oauth/usage with the subscription's OAuth token — on a background
+// timer, decoupled from interactive sessions — is exactly the "use the OAuth
+// token in another tool / automated non-human access" pattern that gets
+// Max/Pro accounts flagged as bots and banned (Anthropic Consumer Terms §3.7 +
+// the 2026-02-20 OAuth clarification). So VibeSpace makes ZERO such calls.
+//
+// Instead this runs as the session's `statusLine` command. Claude Code feeds it
+// a JSON payload on STDIN that ALREADY contains `.rate_limits` (5h/7d
+// used_percentage + reset), which the CLI derived from the REAL API responses
+// of the session you're actually running — no extra request, and only while a
+// session is genuinely active. We write that to data/usage-cache/<key>.json
+// (throttled) for the server to read, then render the user's own statusline
+// (transparent pass-through) or a compact default. Terminal sessions only —
+// stream-json/chat mode has no statusLine, so those accounts show last-known.
+'use strict';
+const fs = require('fs');
+const path = require('path');
+const cp = require('child_process');
+
+const CACHE_DIR = path.join(__dirname, '..', 'usage-cache');
+const THROTTLE_MS = 25000;
+
+let input = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (d) => { input += d; });
+process.stdin.on('end', () => {
+  let payload = {};
+  try { payload = JSON.parse(input); } catch {}
+  try { writeUsage(payload); } catch {}
+  // Transparent pass-through: if the user has their own statusline, render it so
+  // VibeSpace terminals look identical to their normal setup. Otherwise emit a
+  // compact model + usage line (better than a blank status area).
+  const orig = process.env.VIBESPACE_ORIG_STATUSLINE;
+  if (orig) {
+    try {
+      const out = cp.execSync(orig, { input, encoding: 'utf8', timeout: 4000, stdio: ['pipe', 'pipe', 'ignore'] });
+      process.stdout.write(out);
+      return;
+    } catch {}
+  }
+  process.stdout.write(defaultLine(payload));
+});
+
+function win(w) {
+  if (!w || typeof w.used_percentage !== 'number') return null;
+  return {
+    utilization: w.used_percentage / 100,
+    status: w.used_percentage >= 100 ? 'limited' : 'allowed',
+    resetsAt: typeof w.resets_at === 'number' ? w.resets_at : 0,
+  };
+}
+
+function writeUsage(p) {
+  const rl = p && p.rate_limits;
+  if (!rl) return; // absent for API-key sessions / before the first API response
+  const key = String(process.env.VIBESPACE_ACCOUNT_KEY || '__global__').replace(/[^\w.-]/g, '_');
+  const f = path.join(CACHE_DIR, key + '.json');
+  // Throttle: the statusline re-renders often; one write / 25s per account is
+  // plenty (usage windows move slowly) and keeps disk churn negligible.
+  try { const st = fs.statSync(f); if (Date.now() - st.mtimeMs < THROTTLE_MS) return; } catch {}
+  const fiveHour = win(rl.five_hour) || { utilization: 0, status: 'unknown', resetsAt: 0 };
+  const sevenDay = win(rl.seven_day) || { utilization: 0, status: 'unknown', resetsAt: 0 };
+  const out = {
+    fiveHour, sevenDay, scopedWeekly: [],
+    overallStatus: (fiveHour.status === 'limited' || sevenDay.status === 'limited') ? 'limited' : 'allowed',
+    fetchedAt: Date.now(), source: 'passive',
+  };
+  try { fs.mkdirSync(CACHE_DIR, { recursive: true }); } catch {}
+  const tmp = f + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(out));
+  fs.renameSync(tmp, f);
+}
+
+function defaultLine(p) {
+  const model = (p && p.model && (p.model.display_name || p.model.id)) || '';
+  const rl = (p && p.rate_limits) || {};
+  const pct = (w) => (w && typeof w.used_percentage === 'number') ? Math.round(w.used_percentage) : null;
+  const f = pct(rl.five_hour), s = pct(rl.seven_day);
+  const parts = [model];
+  if (f != null) parts.push('5h ' + f + '%');
+  if (s != null) parts.push('7d ' + s + '%');
+  return parts.filter(Boolean).join('  ');
+}
