@@ -215,12 +215,16 @@ class TerminalSession {
         }
       }
 
-      // No image — forward text paste to terminal via bracketed paste
+      // No image — let xterm handle the text paste so it respects the app's
+      // bracketed-paste MODE. Wrapping EVERY paste in \x1b[200~…\x1b[201~ broke
+      // plain (non-TUI) stdin prompts like `claude auth login`'s "Paste code
+      // here": the markers landed in the input as literal bytes AND there's no
+      // submit newline, so the paste looked dead and then failed the code
+      // exchange. terminal.paste() emits bracketed markers ONLY when the app set
+      // \x1b[?2004h (TUIs do; plain prompts don't) → correct in both cases.
       const text = e.clipboardData.getData('text/plain');
       e.preventDefault();
-      if (text) {
-        this.ws.send({ type: 'input', sessionId, data: '\x1b[200~' + text + '\x1b[201~' });
-      }
+      if (text) this.terminal.paste(text);
       this.terminal.focus();
     });
 
@@ -441,7 +445,7 @@ class TerminalSession {
           if (imgType) { const blob = await it.getType(imgType); await this._uploadImageBlob(blob); this.terminal.focus(); return; }
         }
         const text = await navigator.clipboard.readText();
-        if (text) { this.ws.send({ type: 'input', sessionId: this.sessionId, data: '\x1b[200~' + text + '\x1b[201~' }); this.terminal.focus(); return; }
+        if (text) { this.terminal.paste(text); this.terminal.focus(); return; } // paste() respects the app's bracketed-paste mode
       }
     } catch {} // permission denied / HTTP — fall through to the paste pad
     this._showPastePad();
@@ -468,7 +472,7 @@ class TerminalSession {
         }
       }
       const text = e.clipboardData?.getData('text/plain');
-      if (text) this.ws.send({ type: 'input', sessionId: this.sessionId, data: '\x1b[200~' + text + '\x1b[201~' });
+      if (text) this.terminal.paste(text); // respects the app's bracketed-paste mode
       hide();
       this.terminal.focus();
     });
