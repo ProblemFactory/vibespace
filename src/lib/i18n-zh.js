@@ -953,4 +953,9 @@ export default {
   "unreachable": "无法连接",
   "Ship subscription logins to remote hosts": "将订阅登录下发到远程主机",
   "OFF (recommended): a subscription (Pro/Max) account can only run on THIS machine; for a remote host, log in on the host instead. Turning this ON copies the subscription’s login to the remote host — its token then appears from that host’s IP (often a datacenter), which can look like account abuse to Anthropic and risk a ban. API-key accounts are always allowed on remote hosts and are unaffected by this.": "关闭(推荐):订阅(Pro/Max)账号只能在本机运行;要在远程主机上跑,请改为在该主机上登录。开启后会把订阅的登录复制到远程主机——它的 token 就会从那台主机的 IP(通常是数据中心)出现,可能被 Anthropic 判定为账号滥用、面临封号风险。API key 账号始终允许在远程主机使用,不受此项影响。",
+  "⚠ Actively poll subscription usage (automation risk)": "⚠ 主动轮询订阅用量(有自动化风险)",
+  "OFF (recommended): usage bars are captured passively from your live terminal sessions — VibeSpace never contacts Anthropic on its own. Turning this ON restores the old behavior: the server calls Anthropic’s usage endpoint on a ~90s timer with each subscription’s token, even for idle accounts. That off-CLI, fixed-cadence, non-human traffic is exactly what can get a Pro/Max account flagged as automated and BANNED — a real account was banned+refunded for this. Only enable it if you accept that risk (e.g. to see live usage for chat-only or idle accounts).": "关闭(推荐):用量条从你的实时终端会话被动捕获——VibeSpace 绝不主动联系 Anthropic。开启后恢复旧行为:服务器每约 90 秒用每个订阅的 token 调用 Anthropic 用量接口,连闲置账号也照打。这种绕过 CLI、固定节律、非人类的流量,正是会让 Pro/Max 账号被判定为自动化并封号的行为——已有真实账号因此被封+退款。仅在你接受该风险时开启(例如为了看聊天专用或闲置账号的实时用量)。",
+  "Are you sure?": "确定吗?",
+  "Enable anyway": "仍然开启",
+  "Enable this setting?": "开启此设置?",
 };

@@ -219,11 +219,17 @@ function refreshAvailableModels() {
     req.end();
   }
 
+  // §ban-safety: a /v1/models fetch with the OAuth (subscription) token is the
+  // same off-CLI background-call pattern as the usage poll, so it's gated behind
+  // the SAME opt-in. Default OFF → the dropdown falls back to the hardcoded CLI
+  // aliases (fable/opus/sonnet/haiku[+1m]); only full model IDs are missed, and
+  // "Custom…" still lets you type one. An API KEY (sanctioned) is always used.
   const apiKey = process.env.ANTHROPIC_API_KEY || null;
-  getOAuthToken((oauthToken) => {
-    if (oauthToken) fetchModels(oauthToken, true);
-    else if (apiKey) fetchModels(apiKey, false);
-  });
+  if (apiKey) {
+    fetchModels(apiKey, false);
+  } else if (usagePollingEnabled()) {
+    getOAuthToken((oauthToken) => { if (oauthToken) fetchModels(oauthToken, true); });
+  }
   // Codex: read from ~/.codex/models_cache.json
   try {
     const codexCache = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.codex', 'models_cache.json'), 'utf-8'));
@@ -2554,17 +2560,19 @@ function _fetchOAuthUsage(token, cb) {
 // OWN rate_limits during a real session — NO background OAuth calls.
 const _accountUsage = {}; // id → { ...usage, name }
 
-// ── §ban-safety: NO background /api/oauth/usage polling ──────────────────────
-// We deliberately do NOT poll the usage endpoint with subscription OAuth tokens
-// on a timer. A fixed-cadence, 24/7 call using a subscription token — for
-// accounts that may be idle, from a server, without the claude-code User-Agent
-// — is the textbook "automated / non-human access outside the official client"
-// pattern (Consumer Terms §3.7; 2026-02-20 OAuth clarification) that flags
-// Max/Pro accounts as bots and gets them banned. Instead usage is a BYPRODUCT
-// of real interactive sessions: the CLI already receives 5h/7d rate_limits in
-// its API responses and hands them to the statusLine command, which caches
-// them. refreshRateLimit()/_fetchOAuthUsage() remain defined ONLY for an
-// explicit, user-initiated one-shot refresh — never scheduled.
+// ── §ban-safety: background /api/oauth/usage polling is OPT-IN, default OFF ───
+// By DEFAULT we do NOT poll the usage endpoint with subscription OAuth tokens.
+// A fixed-cadence call using a subscription token — for accounts that may be
+// idle, from a server — is the textbook "automated / non-human access outside
+// the official client" pattern (Consumer Terms §3.7; 2026-02-20 OAuth
+// clarification) that flags Max/Pro accounts as bots and gets them banned. So
+// usage is normally a BYPRODUCT of real sessions (the statusLine hook caches
+// the CLI's own rate_limits). The user can OPT IN to the old active poll via
+// the setting below (with a stark automation-risk warning) — e.g. to see live
+// usage for chat-only/idle accounts — accepting the ban risk.
+function usagePollingEnabled() {
+  try { return !!getSyncStore('settings')?.get('accounts.activeUsagePolling'); } catch { return false; }
+}
 function ingestPassiveUsage() {
   let entries = [];
   try { entries = fs.readdirSync(USAGE_CACHE_DIR); } catch { return; }
@@ -2588,6 +2596,36 @@ function ingestPassiveUsage() {
 }
 ingestPassiveUsage();
 setInterval(ingestPassiveUsage, 30000); // local disk read only — no network
+
+// OPT-IN active poll (default OFF; see usagePollingEnabled + the stark warning
+// on accounts.activeUsagePolling). When enabled it restores the pre-2.60.0
+// behavior: global login every ~5 min + one named subscription per 90s tick
+// (round-robin). No-op every tick while the setting is off, so toggling it takes
+// effect live without a restart. This is the ONLY code path that contacts
+// Anthropic for usage, and the user explicitly accepted the risk to enable it.
+let _acctUsageRR = 0;
+let _lastGlobalUsagePoll = 0;
+function pollUsageActive() {
+  if (!usagePollingEnabled()) return;               // OPT-IN gate
+  if (Date.now() < _rateLimitBackoffUntil) return;  // honoring a prior 429
+  // Global login (the machine's own) — at most every 5 min.
+  if (Date.now() - _lastGlobalUsagePoll > 300000) {
+    _lastGlobalUsagePoll = Date.now();
+    const gtok = getOAuthToken();
+    if (gtok) _fetchOAuthUsage(gtok, (u) => { if (u) { _rateLimitCache = u; writeUsageCache(); } });
+  }
+  // One named subscription per tick (round-robin); idle/expired-token accounts
+  // are skipped and keep last-known.
+  const subs = (accounts.list().accounts || []).filter((a) => a.type === 'subscription');
+  const ids = new Set(subs.map((a) => a.id));
+  for (const id of Object.keys(_accountUsage)) if (!ids.has(id)) delete _accountUsage[id];
+  if (!subs.length) return;
+  const a = subs[_acctUsageRR++ % subs.length];
+  const token = accounts.usageToken(a.id);
+  if (!token) return;
+  _fetchOAuthUsage(token, (u) => { if (u) _accountUsage[a.id] = { ...u, name: a.name, email: a.email }; });
+}
+setInterval(pollUsageActive, 90000);
 
 function normalizeCodexRateLimit(raw, fetchedAt = Date.now()) {
   if (!raw || typeof raw !== 'object') return null;
