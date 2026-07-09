@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.56.1] — 2026-07-08
+
+### Fixed
+- Add-subscription / add-Console-account login opened with an empty
+  `CLAUDE_CONFIG_DIR`, which triggered Claude's first-run onboarding ("weird UI")
+  and broke the OAuth code paste (no echo → 400). The login now sets ONLY
+  `CLAUDE_SECURESTORAGE_CONFIG_DIR` (config dir stays `~/.claude`, no onboarding)
+  and uses `claude /login` (the proven flow). Credentials are still isolated;
+  the global login's tokens stay untouched.
+- Added a standalone **"Add Console account…"** entry (its API key is captured in
+  an isolated login so your subscription creds aren't wiped by the console
+  `/login`).
+
 ## [2.56.0] — 2026-07-08
 
 ### Added — multiple Claude subscriptions, switchable per session

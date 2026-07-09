@@ -444,6 +444,26 @@ class App {
     }, 3000);
   }
 
+  // Add a Console account (its minted API key) without disturbing the global
+  // subscription — the /login runs in an isolated dir server-side, we poll for
+  // the minted key and import it.
+  async _addConsoleAccount() {
+    let r;
+    try { r = await fetchJson('/api/accounts/console-login', { method: 'POST' }); }
+    catch { showToast(t('Could not start — server unreachable'), { type: 'error' }); return; }
+    if (!r?.loginCmd) { showToast(r?.error || t('Could not start'), { type: 'error' }); return; }
+    this.openShellTerminal(undefined, { initialCommand: r.loginCmd });
+    showToast(t('A terminal opened — pick “Anthropic Console account” and sign in. Your subscription login stays intact.'), { duration: 6000 });
+    let tries = 0;
+    const iv = setInterval(async () => {
+      if (++tries > 100) { clearInterval(iv); return; }
+      try {
+        const c = await fetchJson(`/api/accounts/console-login/${encodeURIComponent(r.id)}/capture`, { method: 'POST' });
+        if (c?.captured) { clearInterval(iv); showToast(t('✓ Added {name}', { name: c.account?.name || t('Console account') })); }
+      } catch { /* keep polling */ }
+    }, 3000);
+  }
+
   _showAccountsWizard() {
     document.getElementById('acct-wizard-overlay')?.remove();
     if (this._acctWatch) { clearInterval(this._acctWatch); this._acctWatch = null; }
@@ -782,6 +802,10 @@ class App {
           addSubBtn.title = t('Sign in another Claude Pro/Max account — held in its own isolated login, switchable per session');
           addSubBtn.onclick = () => { done(); this._addSubscription(); };
           actions.appendChild(addSubBtn);
+          const addConBtn = document.createElement('button'); addConBtn.className = 'agent-btn'; addConBtn.textContent = t('Add Console account…');
+          addConBtn.title = t('Sign in to an Anthropic Console account — its API key is captured in an isolated login, so your subscription stays intact');
+          addConBtn.onclick = () => { done(); this._addConsoleAccount(); };
+          actions.appendChild(addConBtn);
           const addBtn = document.createElement('button'); addBtn.className = 'agent-btn'; addBtn.textContent = t('Add API key…');
           addBtn.title = t('Paste a raw Anthropic API key (sk-ant-…) — bills pay-per-use, separate from the console-login import');
           addBtn.onclick = async () => {

@@ -923,4 +923,8 @@ export default {
   "👑 {name} (subscription)": "👑 {name}（订阅）",
   "Add API key…": "添加 API key…",
   "Paste a raw Anthropic API key (sk-ant-…) — bills pay-per-use, separate from the console-login import": "粘贴一个原始 Anthropic API key（sk-ant-…）——按量付费,与 Console 登录导入是两回事",
+  "Add Console account…": "添加 Console 账号…",
+  "Sign in to an Anthropic Console account — its API key is captured in an isolated login, so your subscription stays intact": "登录一个 Anthropic Console 账号——在隔离登录中捕获其 API key,你的订阅登录不受影响",
+  "A terminal opened — pick “Anthropic Console account” and sign in. Your subscription login stays intact.": "已打开一个终端——选择“Anthropic Console account”并登录。你的订阅登录不受影响。",
+  "Console account": "Console 账号",
 };
