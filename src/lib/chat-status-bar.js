@@ -524,11 +524,31 @@ export class ChatStatusBar {
         }
       };
       if (this._backend === 'codex') {
-        addItems([
-          { value: '', label: t('Auto (model default)') },
-          { value: 'minimal', label: 'minimal' }, { value: 'low', label: 'low' },
-          { value: 'medium', label: 'medium' }, { value: 'high', label: 'high' }, { value: 'xhigh', label: 'xhigh' },
-        ]);
+        // Effort levels are MODEL-SPECIFIC since GPT-5.6 (sol/terra go up to
+        // ultra, luna to max, older models stop at xhigh) — prefer the current
+        // model's reported levels from the models cache, fall back to the union
+        // of all models, then to the classic ladder if the fetch fails.
+        const codexLadder = (levels) => [{ value: '', label: t('Auto (model default)') },
+          ...levels.map(v => ({ value: v, label: v }))];
+        const loading = document.createElement('div');
+        loading.className = 'chat-status-dropdown-item chat-status-dim';
+        loading.textContent = t('Loading…');
+        dropdown.appendChild(loading);
+        fetch('/api/available-models').then(r => r.json()).then(data => {
+          if (!dropdown.isConnected) return;
+          loading.remove();
+          const models = (data?.codex || []).filter(m => m.id);
+          const rank = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+          const cur = models.find(m => m.id === this._statusModel);
+          let levels = (cur?.efforts?.length ? cur.efforts : [...new Set(models.flatMap(m => m.efforts || []))])
+            .sort((a, b) => (rank.indexOf(a) + 1 || 99) - (rank.indexOf(b) + 1 || 99));
+          if (!levels.length) levels = ['minimal', 'low', 'medium', 'high', 'xhigh'];
+          addItems(codexLadder(levels));
+        }).catch(() => {
+          if (!dropdown.isConnected) return;
+          loading.remove();
+          addItems(codexLadder(['minimal', 'low', 'medium', 'high', 'xhigh']));
+        });
       } else {
         // Async population: show a Loading row immediately (a bare empty box
         // reads as a dead click), and NEVER vanish on fetch failure — the

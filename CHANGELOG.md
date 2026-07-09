@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.62.0] — 2026-07-09
+
+### Added — per-account usage switching
+The taskbar usage pies (and their popup) can now show **any** Claude account,
+not just the default: the popup gained a chip row — **Auto** (follow the default
+account, the old behavior), the machine's **CLI login**, and every named
+subscription (★ marks the default). Per-device preference. When the CLI login
+**is** one of the named accounts (same email), the two render as **one** entry
+and their passively-captured usage merges **newest-wins** in both directions —
+no duplicate/conflicting pies for the same real account. Accounts whose login
+flow didn't record an email (identity is unknowable from creds alone) get a
+**"set email…"** affordance in Manage Agents so you can declare the identity and
+enable the merge; the Manage-Agents CLI-login row also says `= "Name"` when linked.
+
+### Added — create missing folders from New Session
+Typing a nonexistent path in the New Session dialog now offers to **create the
+folder** (works for remote hosts too) instead of failing opaquely at spawn time
+("terminated" locally, silent $HOME fallback remotely). A file path is rejected
+with a clear message; cancel keeps the dialog open.
+
+### Fixed — shell/codex terminals died instantly ("terminated")
+Since 2.60.0 the passive-usage statusLine injection appended `--settings` to
+**every** local terminal spawn — but only the claude CLI understands that flag,
+so plain shell terminals (including the Manage Agents **Update/Log in** helpers)
+and local codex terminal sessions exited immediately. The injection is now gated
+on the claude backend.
+
+### Added — GPT-5.6 (Sol/Terra/Luna) support
+Codex reasoning-effort options are now **dynamic per model** from the CLI's own
+models cache instead of a hardcoded ladder — GPT-5.6 Sol/Terra expose the new
+**max** and **ultra** efforts (ultra = multi-agent), Luna up to max, and the chat
+status-bar effort dropdown offers exactly what the session's current model
+supports. The server also keeps a **union** of models seen across cache rewrites:
+a still-running old codex CLI re-fetches the (version-gated) cache and would
+otherwise erase the 5.6 entries minutes after they appeared. The 5.6 models
+themselves arrive via the codex CLI (≥0.144.0) — use Manage Agents → Update
+(fixed above), then start a new codex session.
+
 ## [2.61.1] — 2026-07-09
 
 ### Changed — real Anthropic prices + per-account pricing

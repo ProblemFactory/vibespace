@@ -234,13 +234,24 @@ function refreshAvailableModels() {
   try {
     const codexCache = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.codex', 'models_cache.json'), 'utf-8'));
     if (codexCache.models?.length) {
-      AVAILABLE_MODELS.codex = [{ id: '', label: 'Default' }, ...codexCache.models.map(m => {
+      const fresh = codexCache.models.map(m => {
         const ctx = m.context_window ? (m.context_window >= 1000000 ? Math.round(m.context_window / 1000000) + 'M' : Math.round(m.context_window / 1000) + 'k') : '';
-        return { id: m.slug, label: (m.display_name || m.slug) + (ctx ? ` (${ctx})` : '') };
-      }).filter(m => m.id)];
+        // Per-model reasoning levels ride along: GPT-5.6 made efforts
+        // model-specific (sol/terra add max+ultra, luna tops out at max) —
+        // clients derive dropdowns from this instead of a stale hardcoded list.
+        return { id: m.slug, label: (m.display_name || m.slug) + (ctx ? ` (${ctx})` : ''), efforts: (m.supported_reasoning_levels || []).map(l => l && l.effort).filter(Boolean) };
+      }).filter(m => m.id);
+      // The cache is last-writer-wins and the model list is version-gated
+      // server-side: a still-running OLD codex session re-fetches and writes it
+      // back WITHOUT newer models (observed: a live 0.142.5 erased the gpt-5.6
+      // entries minutes after 0.144.0 fetched them). Union everything seen this
+      // server lifetime so the dropdown doesn't flap while old sessions live.
+      for (const m of fresh) _codexModelsSeen.set(m.id, m);
+      AVAILABLE_MODELS.codex = [{ id: '', label: 'Default' }, ..._codexModelsSeen.values()];
     }
   } catch {}
 }
+const _codexModelsSeen = new Map();
 setTimeout(refreshAvailableModels, 3000);
 setInterval(refreshAvailableModels, 3600000); // refresh hourly
 
@@ -1780,8 +1791,12 @@ app.post('/api/accounts/default', (req, res) => {
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.patch('/api/accounts/:id', (req, res) => {
-  try { res.json({ success: true, account: accounts.rename(req.params.id, req.body?.name) }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  try {
+    let account = null;
+    if (req.body?.name !== undefined) account = accounts.rename(req.params.id, req.body.name);
+    if (req.body?.email !== undefined) account = accounts.setEmail(req.params.id, req.body.email);
+    res.json({ success: true, account });
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.delete('/api/accounts/:id', (req, res) => {
   try {
@@ -2617,11 +2632,26 @@ const _accountUsage = {}; // id → { ...usage, name }
 function usagePollingEnabled() {
   try { return !!getSyncStore('settings')?.get('accounts.activeUsagePolling'); } catch { return false; }
 }
+// Which NAMED claude subscription IS the machine's own ~/.claude login (email
+// match)? When linked, the '__global__' cache and that account's cache are two
+// views of ONE quota: sessions on the global login write __global__.json,
+// sessions with the account explicitly selected write <subId>.json — so we
+// merge them newest-wins BOTH ways and tell the client (usage switcher shows
+// ONE entry for the account instead of a confusing duplicate pair).
+let _usageGlobalLink = { email: null, loggedIn: false, accountId: null };
 function ingestPassiveUsage() {
-  let entries = [];
-  try { entries = fs.readdirSync(USAGE_CACHE_DIR); } catch { return; }
-  const subIds = new Set((accounts.list().accounts || []).filter((a) => a.type === 'subscription').map((a) => a.id));
+  const roster = (accounts.list().accounts || [])
+    .filter((a) => (a.backend || 'claude') !== 'codex' && a.type === 'subscription');
+  const subIds = new Set(roster.map((a) => a.id));
   for (const id of Object.keys(_accountUsage)) if (!subIds.has(id)) delete _accountUsage[id]; // drop removed accounts
+  try {
+    const st = accounts.subscriptionStatus();
+    const em = st.loggedIn && st.email ? String(st.email).toLowerCase() : null;
+    const m = em ? roster.find((a) => a.email && String(a.email).toLowerCase() === em) : null;
+    _usageGlobalLink = { email: st.email || null, loggedIn: !!st.loggedIn, accountId: m ? m.id : null };
+  } catch { _usageGlobalLink = { email: null, loggedIn: false, accountId: null }; }
+  let entries = [];
+  try { entries = fs.readdirSync(USAGE_CACHE_DIR); } catch { entries = []; }
   for (const fn of entries) {
     if (!fn.endsWith('.json')) continue;
     const key = fn.slice(0, -5);
@@ -2633,9 +2663,23 @@ function ingestPassiveUsage() {
       // Newest wins vs whatever we have (a live global poll never runs now).
       if (!_rateLimitCache || (u.fetchedAt > (_rateLimitCache.fetchedAt || 0))) { _rateLimitCache = u; writeUsageCache(); }
     } else if (subIds.has(key)) {
-      const a = accounts.get ? accounts.get(key) : null;
-      const meta = (accounts.list().accounts || []).find((x) => x.id === key) || {};
+      const meta = roster.find((x) => x.id === key) || {};
       _accountUsage[key] = { ...u, name: meta.name, email: meta.email };
+    }
+  }
+  // Same-account merge (see _usageGlobalLink above): freshest view wins for both.
+  const gid = _usageGlobalLink.accountId;
+  if (gid) {
+    const a = _accountUsage[gid] || null;
+    const g = _rateLimitCache || null;
+    const newest = (a && (!g || (a.fetchedAt || 0) > (g.fetchedAt || 0))) ? a : g;
+    if (newest) {
+      const meta = roster.find((x) => x.id === gid) || {};
+      if (newest !== g) {
+        const { name, email, ...usage } = newest;
+        _rateLimitCache = usage; writeUsageCache();
+      }
+      _accountUsage[gid] = { ...newest, name: meta.name, email: meta.email };
     }
   }
 }
@@ -2814,7 +2858,13 @@ function summarizeCodexRateLimit() {
 
 app.get('/api/usage', (req, res) => {
   ingestPassiveUsage(); // pick up whatever active sessions' statuslines just wrote
-  res.json({ rateLimit: _rateLimitCache, codexRateLimit: summarizeCodexRateLimit(), subscriptionSignedOut: _oauthSignedOut, accounts: _accountUsage });
+  res.json({
+    rateLimit: _rateLimitCache, codexRateLimit: summarizeCodexRateLimit(),
+    subscriptionSignedOut: _oauthSignedOut, accounts: _accountUsage,
+    // Identity of the machine's own CLI login (+ the named account it IS, when
+    // an email matches) — the usage switcher renders one entry, not two.
+    globalLogin: _usageGlobalLink,
+  });
 });
 
 app.get('/api/available-models', (req, res) => {
