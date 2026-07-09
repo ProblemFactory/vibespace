@@ -2667,9 +2667,10 @@ function usagePollingEnabled() {
 // merge them newest-wins BOTH ways and tell the client (usage switcher shows
 // ONE entry for the account instead of a confusing duplicate pair).
 let _usageGlobalLink = { email: null, loggedIn: false, accountId: null };
+let _codexUsageGlobalLink = { email: null, loggedIn: false, accountId: null };
 function ingestPassiveUsage() {
-  const roster = (accounts.list().accounts || [])
-    .filter((a) => (a.backend || 'claude') !== 'codex' && a.type === 'subscription');
+  const allAccts = accounts.list().accounts || [];
+  const roster = allAccts.filter((a) => (a.backend || 'claude') !== 'codex' && a.type === 'subscription');
   const subIds = new Set(roster.map((a) => a.id));
   for (const id of Object.keys(_accountUsage)) if (!subIds.has(id)) delete _accountUsage[id]; // drop removed accounts
   try {
@@ -2678,6 +2679,14 @@ function ingestPassiveUsage() {
     const m = em ? roster.find((a) => a.email && String(a.email).toLowerCase() === em) : null;
     _usageGlobalLink = { email: st.email || null, loggedIn: !!st.loggedIn, accountId: m ? m.id : null };
   } catch { _usageGlobalLink = { email: null, loggedIn: false, accountId: null }; }
+  // Same-account link for CODEX: the machine's own ~/.codex login vs the named
+  // ChatGPT accounts (cxs-*) — email from the id_token claims on both sides.
+  try {
+    const cst = accounts.codexGlobalStatus();
+    const cem = cst.loggedIn && cst.email ? String(cst.email).toLowerCase() : null;
+    const cm = cem ? allAccts.find((a) => a.backend === 'codex' && a.email && String(a.email).toLowerCase() === cem) : null;
+    _codexUsageGlobalLink = { email: cst.email || null, loggedIn: !!cst.loggedIn, accountId: cm ? cm.id : null };
+  } catch { _codexUsageGlobalLink = { email: null, loggedIn: false, accountId: null }; }
   let entries = [];
   try { entries = fs.readdirSync(USAGE_CACHE_DIR); } catch { entries = []; }
   for (const fn of entries) {
@@ -2857,41 +2866,86 @@ function listRecentCodexJsonlFiles(limit = 24) {
   return files.slice(0, limit);
 }
 
-function summarizeCodexRateLimit() {
-  const now = Date.now();
-  if (now - _codexRateLimitCacheAt < 30000) return _codexRateLimitCache;
+// threadId → accountId from session-meta (codex quota is PER ACCOUNT — each
+// snapshot must land in the bucket of the account its session billed to).
+function codexThreadAccountMap() {
+  const map = {};
+  let files = [];
+  try { files = fs.readdirSync(META_DIR); } catch {}
+  for (const fn of files) {
+    if (!fn.endsWith('.json')) continue;
+    try {
+      const m = JSON.parse(fs.readFileSync(path.join(META_DIR, fn), 'utf-8'));
+      if ((m.backend || 'claude') === 'codex' && m.backendSessionId) map[m.backendSessionId] = m.accountId || null;
+    } catch {}
+  }
+  return map;
+}
 
-  let freshest = null;
+// Overall freshest snapshot (back-compat) + per-account buckets keyed by
+// account id / '__global_codex__' (sessions with no VibeSpace account = the
+// machine's own codex login). Sources: live wrapper meta (account = the
+// session's own), then recent rollout tails (account via session-meta lookup
+// on the thread id in the filename).
+function summarizeCodexRateLimits() {
+  const now = Date.now();
+  if (now - _codexRateLimitCacheAt < 30000) return _codexRateLimitCache || { overall: null, byAccount: {} };
+
+  const byAccount = {};
+  const keep = (key, snapshot) => {
+    if (!snapshot) return;
+    if (!byAccount[key] || (snapshot.fetchedAt || 0) > (byAccount[key].fetchedAt || 0)) byAccount[key] = snapshot;
+  };
   for (const [id, session] of activeSessions) {
     if (session.backend !== 'codex' || session.mode !== 'chat') continue;
-    const snapshot = readCodexWrapperRateLimit(id);
-    if (!snapshot) continue;
-    if (!freshest || (snapshot.fetchedAt || 0) > (freshest.fetchedAt || 0)) freshest = snapshot;
+    keep(session._accountId || '__global_codex__', readCodexWrapperRateLimit(id));
   }
-
-  if (!freshest) {
+  {
+    const threadAcct = codexThreadAccountMap();
     const recentFiles = listRecentCodexJsonlFiles();
+    let freshEnough = 0;
     for (const entry of recentFiles) {
+      const tm = /rollout-.*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i.exec(entry.path);
       const snapshot = readLatestCodexRateLimitFromJsonl(entry.path);
       if (!snapshot) continue;
-      if (!freshest || (snapshot.fetchedAt || 0) > (freshest.fetchedAt || 0)) freshest = snapshot;
-      if (snapshot && snapshot.fetchedAt && (Date.now() - snapshot.fetchedAt) < 5 * 60 * 1000) break;
+      const acct = tm ? (threadAcct[tm[1].toLowerCase()] || null) : null;
+      keep(acct || '__global_codex__', snapshot);
+      if (snapshot.fetchedAt && (now - snapshot.fetchedAt) < 5 * 60 * 1000 && ++freshEnough >= 3) break;
     }
   }
-
-  _codexRateLimitCache = freshest;
+  let overall = null;
+  for (const s of Object.values(byAccount)) if (!overall || (s.fetchedAt || 0) > (overall.fetchedAt || 0)) overall = s;
+  // Same-account merge (codex global ↔ linked named account): newest wins both.
+  const gid = _codexUsageGlobalLink.accountId;
+  if (gid) {
+    const a = byAccount[gid], g = byAccount['__global_codex__'];
+    const newest = (a && (!g || (a.fetchedAt || 0) > (g.fetchedAt || 0))) ? a : g;
+    if (newest) { byAccount[gid] = newest; byAccount['__global_codex__'] = newest; }
+  }
+  _codexRateLimitCache = { overall, byAccount };
   _codexRateLimitCacheAt = now;
   return _codexRateLimitCache;
 }
+function summarizeCodexRateLimit() { return summarizeCodexRateLimits().overall; }
 
 app.get('/api/usage', (req, res) => {
   ingestPassiveUsage(); // pick up whatever active sessions' statuslines just wrote
+  const codexRl = summarizeCodexRateLimits();
+  const codexAccounts = {};
+  const acctList = Object.keys(codexRl.byAccount || {}).length ? (accounts.list().accounts || []) : [];
+  for (const [key, snap] of Object.entries(codexRl.byAccount || {})) {
+    const meta = key === '__global_codex__' ? null : acctList.find((a) => a.id === key);
+    codexAccounts[key] = { ...snap, name: meta?.name || null, email: meta?.email || null };
+  }
   res.json({
-    rateLimit: _rateLimitCache, codexRateLimit: summarizeCodexRateLimit(),
+    rateLimit: _rateLimitCache, codexRateLimit: codexRl.overall,
     subscriptionSignedOut: _oauthSignedOut, accounts: _accountUsage,
-    // Identity of the machine's own CLI login (+ the named account it IS, when
-    // an email matches) — the usage switcher renders one entry, not two.
+    // Identity of each CLI's machine login (+ the named account it IS, when an
+    // email matches) — the usage switchers render one entry, not two.
     globalLogin: _usageGlobalLink,
+    codexGlobalLogin: _codexUsageGlobalLink,
+    // Per-account codex quota snapshots (key = cxs id / '__global_codex__')
+    codexAccounts,
   });
 });
 

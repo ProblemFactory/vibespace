@@ -413,10 +413,13 @@ class UsageHistory {
     let firstTs = null, lastTs = null;
     for (const ev of this._events(from, to)) {
       if (backend && ev.be !== backend) continue;
-      const acctKey = ev.acct || '__global__';
-      // accounts = Set of bucket keys (account ids / '__global__'); the UI can
-      // pass several at once (e.g. a named sub + '__global__' when the machine
-      // login IS that account) — the whole dashboard then shows one account.
+      // The two CLIs' machine logins are DIFFERENT identities — separate buckets
+      // ('__global__' = claude, '__global_codex__' = codex), else the account
+      // dimension/filter conflates them.
+      const acctKey = ev.acct || (ev.be === 'codex' ? '__global_codex__' : '__global__');
+      // accounts = Set of bucket keys (account ids / globals); the UI can pass
+      // several at once (e.g. a named sub + its global when the machine login
+      // IS that account) — the whole dashboard then shows one account.
       if (accounts && !accounts.has(acctKey)) continue;
       this._add(totals, ev);
       if (firstTs == null || ev.ts < firstTs) firstTs = ev.ts;
@@ -427,7 +430,7 @@ class UsageHistory {
         model: ev.model || 'unknown',
         account: acctKey,
         // billing = the coarse category, so subscription $ and API $ never merge
-        billing: ev.atype === 'api' ? 'api-key' : ev.atype === 'subscription' ? 'subscription' : ev.atype === 'codex-subscription' ? 'chatgpt' : (ev.acct ? 'unknown-account' : 'cli-global-login'),
+        billing: ev.atype === 'api' ? 'api-key' : ev.atype === 'subscription' ? 'subscription' : ev.atype === 'codex-subscription' ? 'chatgpt' : (ev.acct ? 'unknown-account' : (ev.be === 'codex' ? 'codex-cli-login' : 'cli-global-login')),
         project: ev.cwd || 'unknown',
         mode: ev.mode || 'unknown',
         host: ev.host || 'local',
@@ -445,7 +448,7 @@ class UsageHistory {
       if (!dimMeta.account[acctKey]) {
         const live = ev.acct ? this._resolveAccount(ev.acct) : null;
         dimMeta.account[acctKey] = {
-          name: ev.acct ? (live?.name || ev.aname || ev.acct) : 'CLI global login',
+          name: ev.acct ? (live?.name || ev.aname || ev.acct) : (ev.be === 'codex' ? 'Codex CLI login' : 'Claude CLI login'),
           type: ev.atype || (ev.acct ? 'unknown' : 'global'),
           tail: live?.tail || null,
           deleted: ev.acct ? !live : false,
