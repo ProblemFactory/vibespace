@@ -267,12 +267,16 @@ html, body {
 .acct-icon.acct-def.on { color: var(--accent); }
 .acct-icon.acct-del:hover { color: var(--red, #e55); }
 .acct-list { display: flex; flex-direction: column; gap: 1px; margin: 4px 0; }
-.acct-key-row { display: flex; align-items: center; gap: 7px; padding: 2px 4px; font-size: 11px; }
-.acct-key-name { font-weight: 500; }
-.acct-key-tail { color: var(--text-dim); font-size: 10px; }
+/* Grid so every row's columns (icon | name+ident | usage | actions) line up,
+   even though the CLI-login row has fewer action buttons than the others. */
+.acct-key-row { display: grid; grid-template-columns: auto minmax(90px, 1fr) auto auto; align-items: center; gap: 10px; padding: 3px 6px; font-size: 11px; }
+.acct-key-main { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.acct-key-name { font-weight: 500; white-space: nowrap; }
+.acct-key-tail { color: var(--text-dim); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct-usage-cell { display: flex; justify-content: flex-end; }
 .acct-key-row.is-default { background: color-mix(in srgb, var(--accent) 6%, transparent); border-radius: var(--radius-sm); }
 /* Per-account usage readout (5h / 7d mini bars) inside an account row. */
-.acct-usage { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; font-size: 9px; color: var(--text-dim); }
+.acct-usage { display: inline-flex; align-items: center; gap: 8px; font-size: 9px; color: var(--text-dim); }
 .acct-usage-item { display: inline-flex; align-items: center; gap: 3px; }
 .acct-usage-label { opacity: 0.7; }
 .acct-usage-bar { width: 34px; height: 5px; border-radius: 3px; background: var(--bg-input); overflow: hidden; display: inline-block; }
@@ -281,7 +285,6 @@ html, body {
 .acct-usage-age { opacity: 0.6; font-style: italic; }
 /* When a usage readout is present the actions no longer push right (usage takes
    the auto margin) — give the actions their own small gap. */
-.acct-usage + .acct-key-actions { margin-left: 8px; }
 /* Manage Agents dialog: wider than the 440px default — its rows carry real
    button groups (login/update, accounts) that truncate/wrap at 440px */
 .dialog.agents-dialog { width: 560px; max-width: 92vw; }
@@ -290,7 +293,7 @@ html, body {
 .acct-section { flex-direction: column; align-items: stretch; }
 .acct-section > .agent-actions { flex-wrap: wrap; justify-content: flex-start; margin-top: 8px; padding-top: 8px; border-top: 1px solid color-mix(in srgb, var(--border) 50%, transparent); }
 .acct-def-badge { font-size: 9px; padding: 0 5px; border-radius: 7px; background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent-hover); }
-.acct-key-actions { margin-left: auto; display: inline-flex; gap: 4px; }
+.acct-key-actions { display: inline-flex; gap: 4px; justify-content: flex-start; }
 .acct-key-actions .agent-btn { padding: 1px 7px; font-size: 10px; }
 .acct-step { display: flex; gap: 10px; padding: 10px 4px; border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent); }
 .acct-step:last-child { border-bottom: none; }
