@@ -948,7 +948,6 @@ export default {
   "This machine's own login — lives on {host}, not in VibeSpace": "这台机器自己的登录——保存在 {host} 上，不在 VibeSpace 中",
   "account": "账号",
   "e.g. Work ChatGPT": "例如：工作 ChatGPT",
-  "logged in (on {host})": "已登录（在 {host} 上）",
   "model-name": "模型名称",
   "remote host": "远程主机",
   "unreachable": "无法连接",
