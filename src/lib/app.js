@@ -782,7 +782,8 @@ class App {
           addSubBtn.title = t('Sign in another Claude Pro/Max account — held in its own isolated login, switchable per session');
           addSubBtn.onclick = () => { done(); this._addSubscription(); };
           actions.appendChild(addSubBtn);
-          const addBtn = document.createElement('button'); addBtn.className = 'agent-btn'; addBtn.textContent = t('Add key…');
+          const addBtn = document.createElement('button'); addBtn.className = 'agent-btn'; addBtn.textContent = t('Add API key…');
+          addBtn.title = t('Paste a raw Anthropic API key (sk-ant-…) — bills pay-per-use, separate from the console-login import');
           addBtn.onclick = async () => {
             const key = await showInputDialog({ title: t('Add API key'), label: t('Anthropic API key (from console.anthropic.com)'), placeholder: 'sk-ant-…', confirmText: t('Save') });
             if (!key || !key.trim()) return;
