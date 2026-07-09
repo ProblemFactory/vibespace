@@ -278,9 +278,6 @@ html, body {
 /* Anthropic accounts section (Manage Agents) + setup wizard */
 .acct-section { flex-direction: column; align-items: stretch; }
 .acct-section > .agent-actions { flex-wrap: wrap; justify-content: flex-start; margin-top: 8px; padding-top: 8px; border-top: 1px solid color-mix(in srgb, var(--border) 50%, transparent); }
-.acct-key-row { display: flex; align-items: center; gap: 6px; margin: 3px 0; font-size: 11px; }
-.acct-key-name { font-weight: 600; }
-.acct-key-tail { color: var(--text-dim); font-size: 10px; }
 .acct-def-badge { font-size: 9px; padding: 0 5px; border-radius: 7px; background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent-hover); }
 .acct-key-actions { margin-left: auto; display: inline-flex; gap: 4px; }
 .acct-key-actions .agent-btn { padding: 1px 7px; font-size: 10px; }
