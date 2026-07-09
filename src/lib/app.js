@@ -513,6 +513,21 @@ class App {
   // the SELECTED machine's own codex login; the named ChatGPT accounts below
   // are stored by VibeSpace (machine-independent, ship per session). No usage
   // bars (OpenAI quota isn't polled).
+  // Compact per-account usage readout (5h + 7d mini bars) shared by the Claude
+  // and Codex rosters. Data: Claude = the passive statusline cache; Codex = the
+  // per-account rate-limit buckets (both ride /api/usage).
+  _acctUsageHtml(u) {
+    if (!u) return '';
+    const pct = (x) => Math.min(100, Math.round(x?.usedPercent ?? ((x?.utilization || 0) * 100)));
+    const bar = (label, x) => {
+      const p = pct(x);
+      const c = p > 95 ? 'var(--red,#e55)' : p > 80 ? 'var(--yellow,#e5c07b)' : 'var(--green,#3fb950)';
+      return `<span class="acct-usage-item" title="${label}: ${p}%"><span class="acct-usage-label">${label}</span><span class="acct-usage-bar"><span style="width:${p}%;background:${c}"></span></span><span class="acct-usage-pct">${p}%</span></span>`;
+    };
+    const age = u.fetchedAt ? Math.round((Date.now() - u.fetchedAt) / 60000) : null;
+    return `<span class="acct-usage">${bar('5h', u.fiveHour)}${bar('7d', u.sevenDay)}${age != null && age > 5 ? `<span class="acct-usage-age" title="${t('Last refreshed {n} min ago', { n: age })}">${t('{n}m', { n: age })}</span>` : ''}</span>`;
+  }
+
   async _renderCodexAccounts(ctx) {
     const { body, selectedHost, hostSel, done, run, refresh, st } = ctx;
     let accts;
@@ -530,16 +545,22 @@ class App {
     const row = document.createElement('div'); row.className = 'ob-backend acct-section';
     const left = document.createElement('div'); left.style.flex = '1';
     const gDef = !accts.defaultCodexAccountId;
+    const usageHtml = (u) => this._acctUsageHtml(u);
+    const cgl = !selectedHost ? (this._usageCodexGlobal || {}) : {};
     const gName = selectedHost ? t('CLI login on {host}', { host: escHtml(hostLabel) }) : t('CLI login');
-    const gIdent = gLoggedIn
-      ? (selectedHost ? `<span class="ob-ok">${t('logged in')}</span>` : t('logged in'))
+    let gIdent = gLoggedIn
+      ? (selectedHost ? `<span class="ob-ok">${t('logged in')}</span>` : (escHtml(cgl.email || '') || t('logged in')))
       : `<span class="ob-warn">${t('not logged in')}</span>`;
+    // The machine's codex login may BE one of the named ChatGPT accounts (same
+    // email) — say so; their quota buckets are then merged newest-wins.
+    const linkedCx = !selectedHost && gLoggedIn && cgl.accountId ? codexAccts.find(a => a.id === cgl.accountId) : null;
+    if (linkedCx) gIdent += ` <span class="acct-linked-hint" title="${escHtml(t('The machine login and this VibeSpace account are the same ChatGPT account — usage is shown merged'))}">${t('= “{name}”', { name: escHtml(linkedCx.name) })}</span>`;
     const gExtraActions = selectedHost
       ? `<button class="agent-btn acct-host-login" title="${t('Opens a terminal ON {host} — this login lands on that machine, not in VibeSpace', { host: escHtml(hostLabel) })}">${t('Log in on {host}…', { host: escHtml(hostLabel) })}</button>` : '';
     const globalRow = `<div class="acct-key-row${gDef ? ' is-default' : ''}" data-id="__codex_global__">
       <span class="acct-type-icon" title="${selectedHost ? t("This machine's own login — lives on {host}, not in VibeSpace", { host: escHtml(hostLabel) }) : t('The CLI’s own global login on this machine')}">${GLOBE}</span>
       <span class="acct-key-main"><span class="acct-key-name">${gName}</span><span class="acct-key-tail">${gIdent}</span></span>
-      <span class="acct-usage-cell"></span>
+      <span class="acct-usage-cell">${!selectedHost && gLoggedIn ? usageHtml(this._codexAccountUsage?.['__global_codex__']) : ''}</span>
       <span class="acct-key-actions">
         <button class="acct-icon acct-def ${gDef ? 'on' : ''}" title="${gDef ? t('Default for new sessions — pick another to change') : t('Set as default for new sessions')}">${gDef ? STAR_F : STAR_O}</button>${gExtraActions}
       </span></div>`;
@@ -550,9 +571,14 @@ class App {
     const keyLines = codexAccts.map(a => {
       const isDef = accts.defaultCodexAccountId === a.id;
       const blocked = subBlocked;
-      const ident = a.loggedIn
+      let ident = a.loggedIn
         ? escHtml((a.email || '') + (a.subscriptionType ? (a.email ? ' · ' : '') + a.subscriptionType : '')) || t('logged in')
         : `<span class="ob-warn">${t('not logged in')}</span>`;
+      // API-key-mode codex logins have no id_token → no email; let the user
+      // declare it (enables the same-account link vs the machine login).
+      if (a.loggedIn && (!a.email || a.emailDeclared)) {
+        ident += ` <button class="acct-set-email" title="${escHtml(t('Declare which ChatGPT account this is — the email links it to the machine login for merged usage'))}">${a.email ? t('edit email') : t('set email…')}</button>`;
+      }
       const hint = blocked ? ` <span class="acct-blocked-hint" title="${t('Runs on this machine only. For {host}, log in on the host — or enable Settings → “Ship subscription logins to remote hosts.”', { host: escHtml(hostLabel) })}">${t('· this machine only')}</span>` : '';
       const testTitle = blocked
         ? t('Subscriptions can’t run on {host} by default — log in on the host, or enable the setting', { host: escHtml(hostLabel) })
@@ -562,7 +588,7 @@ class App {
       return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}"${blocked ? ' data-blocked="1"' : ''}>
         <span class="acct-type-icon" title="${t('ChatGPT account — runs on this machine (or a host you log into)')}">${CROWN}</span>
         <span class="acct-key-main"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span></span>
-        <span class="acct-usage-cell"></span>
+        <span class="acct-usage-cell">${a.loggedIn ? usageHtml(this._codexAccountUsage?.[a.id]) : ''}</span>
         <span class="acct-key-actions">
           <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
           <button class="acct-icon acct-rename" title="${t('Rename')}">${PENCIL}</button>
@@ -601,7 +627,17 @@ class App {
         return;
       }
       const a = codexAccts.find(x => x.id === id);
-      if (e.target.closest('.acct-test')) {
+      if (e.target.closest('.acct-set-email')) {
+        const email = await showInputDialog({
+          title: t('Account email'),
+          label: t('Email of this ChatGPT account. Used to recognize when it is the same account as a machine login (their usage then shows merged).'),
+          value: a?.email || '', placeholder: 'you@example.com', confirmText: t('Save'),
+        });
+        if (email != null) {
+          try { await fetchJson(`/api/accounts/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: email.trim() }) }); } catch {}
+          refresh();
+        }
+      } else if (e.target.closest('.acct-test')) {
         if (!a?.loggedIn) { showToast(t('This account isn’t signed in yet — use “Add ChatGPT account…” to finish the login first.'), { type: 'error' }); return; }
         if (keyRow.dataset.blocked) {
           showToast(t('“{name}” runs on this machine only. For {host}, use “Log in on host…” on the CLI-login row, or turn on Settings → “Ship subscription logins to remote hosts.”', { name: a?.name, host: escHtml(hostLabel) }), { type: 'error', duration: 6000 });
@@ -949,20 +985,8 @@ class App {
     const STAR_F = svg('<path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 11.6 4.1 13.6l.8-4.3-3.1-3 4.3-.6z" fill="currentColor"/>');
     const STAR_O = svg('<path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 11.6 4.1 13.6l.8-4.3-3.1-3 4.3-.6z"/>');
     const PENCIL = svg('<path d="M11 2.5 13.5 5 5.5 13H3v-2.5z"/>');
-    // Compact per-account usage readout (5h + 7d mini bars). Data is the
-    // per-subscription poll (server round-robins it, read-only; idle
-    // accounts keep last-known → a "Nm ago" staleness note).
-    const usageHtml = (u) => {
-      if (!u) return '';
-      const pct = (x) => Math.min(100, Math.round((x?.utilization || 0) * 100));
-      const bar = (label, x) => {
-        const p = pct(x);
-        const c = p > 95 ? 'var(--red,#e55)' : p > 80 ? 'var(--yellow,#e5c07b)' : 'var(--green,#3fb950)';
-        return `<span class="acct-usage-item" title="${label}: ${p}%"><span class="acct-usage-label">${label}</span><span class="acct-usage-bar"><span style="width:${p}%;background:${c}"></span></span><span class="acct-usage-pct">${p}%</span></span>`;
-      };
-      const age = u.fetchedAt ? Math.round((Date.now() - u.fetchedAt) / 60000) : null;
-      return `<span class="acct-usage">${bar('5h', u.fiveHour)}${bar('7d', u.sevenDay)}${age != null && age > 5 ? `<span class="acct-usage-age" title="${t('Last refreshed {n} min ago', { n: age })}">${t('{n}m', { n: age })}</span>` : ''}</span>`;
-    };
+    // Compact per-account usage readout — shared with the Codex roster.
+    const usageHtml = (u) => this._acctUsageHtml(u);
     // Peer row: the SELECTED MACHINE's own global login. It's the default
     // whenever no named account is starred (a session with no account uses
     // the login of whatever machine it runs on). Not renamable/removable.
@@ -1889,6 +1913,7 @@ class App {
     // '__global__' (the machine's own CLI login) or a named claude-subscription
     // id. A VIEW preference, so per-device (localStorage), not a synced setting.
     try { this._usageAcctSel = localStorage.getItem('vibespace.usageAccount') || 'auto'; } catch { this._usageAcctSel = 'auto'; }
+    try { this._usageAcctSelCodex = localStorage.getItem('vibespace.usageAccountCodex') || 'auto'; } catch { this._usageAcctSelCodex = 'auto'; }
     const usageEl = document.getElementById('taskbar-usage');
     const popup = document.getElementById('usage-popup');
 
@@ -1901,8 +1926,13 @@ class App {
       const chip = e.target.closest('.usage-acct-chip');
       if (!chip) return;
       e.stopPropagation();
-      this._usageAcctSel = chip.dataset.key || 'auto';
-      try { localStorage.setItem('vibespace.usageAccount', this._usageAcctSel); } catch {}
+      if (chip.dataset.be === 'codex') {
+        this._usageAcctSelCodex = chip.dataset.key || 'auto';
+        try { localStorage.setItem('vibespace.usageAccountCodex', this._usageAcctSelCodex); } catch {}
+      } else {
+        this._usageAcctSel = chip.dataset.key || 'auto';
+        try { localStorage.setItem('vibespace.usageAccount', this._usageAcctSel); } catch {}
+      }
       this._renderUsage();
     });
 
@@ -1919,6 +1949,8 @@ class App {
     this._subSignedOut = !!data?.subscriptionSignedOut;
     this._accountUsage = data?.accounts || {}; // per-subscription usage (Manage Agents rows)
     this._usageGlobal = data?.globalLogin || null; // CLI-login identity (+ linked named account)
+    this._usageCodexGlobal = data?.codexGlobalLogin || null;
+    this._codexAccountUsage = data?.codexAccounts || {}; // per-account codex quota buckets
     this._renderUsage();
     // 8s: /api/usage is now a cheap LOCAL read (server just returns the passively
     // captured cache) — decoupled from any Anthropic call — so a snappy refresh
@@ -1958,10 +1990,34 @@ class App {
       claudeUsageLabel = a?.name || sel;
       usageNote = t('Refreshes passively when you run this account in a terminal session');
     }
-    const codex = this._codexRateLimit;
+    // Codex mirrors the Claude selection model: per-account quota buckets from
+    // /api/usage codexAccounts (key = cxs id / '__global_codex__'), the machine
+    // login linked to a named ChatGPT account by email, 'auto' = default account.
+    const codexSubs = (this._accounts?.accounts || []).filter(a => a.backend === 'codex');
+    const cgl = this._usageCodexGlobal || {};
+    const cBuckets = this._codexAccountUsage || {};
+    const codexDefId = this._accounts?.defaultCodexAccountId;
+    let cSel = this._usageAcctSelCodex || 'auto';
+    if (cSel === '__global_codex__' && cgl.accountId) cSel = cgl.accountId;
+    if (cSel !== 'auto' && cSel !== '__global_codex__' && !codexSubs.some(a => a.id === cSel)) cSel = 'auto';
+    let codex, codexLabel = 'Codex', codexNote = '';
+    if (cSel === 'auto') {
+      const defAcct = codexDefId ? codexSubs.find(a => a.id === codexDefId) : null;
+      codex = (codexDefId && cBuckets[codexDefId]) ? cBuckets[codexDefId] : this._codexRateLimit;
+      codexLabel = defAcct ? defAcct.name : 'Codex';
+      if (defAcct) codexNote = t('Default account · refreshes as its sessions run');
+    } else if (cSel === '__global_codex__') {
+      codex = cBuckets['__global_codex__'] || null;
+      codexLabel = t('Codex CLI login') + (cgl.email ? ` · ${cgl.email}` : '');
+    } else {
+      codex = cBuckets[cSel] || null;
+      codexLabel = codexSubs.find(a => a.id === cSel)?.name || cSel;
+      codexNote = t('Refreshes as this account’s sessions run');
+    }
     const hasSwitch = claudeSubs.length > 0;
+    const codexHasSwitch = codexSubs.length > 0;
 
-    if (!rl && !codex && !hasSwitch) {
+    if (!rl && !codex && !hasSwitch && !codexHasSwitch) {
       usageEl.innerHTML = '';
       popup.innerHTML = `<div class="empty-hint">${t('No usage data')}</div>`;
       return;
@@ -2068,14 +2124,30 @@ class App {
       ${body}`);
     }
 
-    if (codex?.fiveHour || codex?.sevenDay) {
-      const pct5h = Math.round(codex.fiveHour?.usedPercent || ((codex.fiveHour?.utilization || 0) * 100));
-      const pct7d = Math.round(codex.sevenDay?.usedPercent || ((codex.sevenDay?.utilization || 0) * 100));
+    if (codex?.fiveHour || codex?.sevenDay || codexHasSwitch) {
+      const cNoData = !(codex?.fiveHour || codex?.sevenDay);
+      const pct5h = Math.round(codex?.fiveHour?.usedPercent || ((codex?.fiveHour?.utilization || 0) * 100));
+      const pct7d = Math.round(codex?.sevenDay?.usedPercent || ((codex?.sevenDay?.utilization || 0) * 100));
       const color5h = usageColor(pct5h);
       const color7d = usageColor(pct7d);
-      rows.push(renderRow('codex', '5h', pct5h, '7d', pct7d));
-      sections.push(`${renderSectionTitle('codex', 'Codex')}
-      <div class="usage-session">
+      rows.push(renderRow('codex', '5h', pct5h, '7d', pct7d, cNoData));
+      // Account switcher — same model as Claude's: merged chip when the machine
+      // login IS a named account, ★ marks the default; data-be routes the click.
+      let cSwitcher = '';
+      if (codexHasSwitch) {
+        const cActive = (this._usageAcctSelCodex || 'auto') === 'auto' ? 'auto' : cSel;
+        const cEntries = [{ key: 'auto', label: t('Auto'), tip: t('Follow the default account (what new sessions bill to)') }];
+        if (!cgl.accountId) cEntries.push({ key: '__global_codex__', label: t('CLI login'), tip: cgl.email || t("The machine's own CLI login") });
+        for (const a of codexSubs) cEntries.push({
+          key: a.id, label: (codexDefId === a.id ? '★ ' : '') + a.name,
+          tip: (a.email || '') + (cgl.accountId === a.id ? (a.email ? ' · ' : '') + t('also the CLI login on this machine') : ''),
+        });
+        cSwitcher = `<div class="usage-acct-switch">${cEntries.map(en =>
+          `<button class="usage-acct-chip${en.key === cActive ? ' active' : ''}" data-key="${escHtml(en.key)}" data-be="codex" title="${escHtml(en.tip || '')}">${escHtml(en.label)}</button>`).join('')}</div>`;
+      }
+      const cBody = cNoData
+        ? `<div class="usage-note">${t('No usage captured yet for this account — run a session on it.')}</div>`
+        : `<div class="usage-session">
         <div class="usage-session-name">${t('5-hour limit')}</div>
         <div class="usage-bar" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pct5h}%;background:${color5h}"></div></div>
         <div class="usage-session-stats">
@@ -2092,7 +2164,10 @@ class App {
           ${codex.planType ? `<span class="usage-stat"><span class="usage-stat-label">${tc('billing', 'Plan')}</span> ${escHtml(codex.planType)}</span>` : ''}
         </div>
       </div>
-      <div class="usage-updated">${t('Updated {ago}', { ago: agoText(codex.fetchedAt) })}</div>`);
+      <div class="usage-updated">${t('Updated {ago}', { ago: agoText(codex.fetchedAt) })}</div>`;
+      sections.push(`${renderSectionTitle('codex', escHtml(codexLabel))}${cSwitcher}
+      ${codexNote ? `<div class="usage-note">${codexNote}</div>` : ''}
+      ${cBody}`);
     }
 
     usageEl.innerHTML = rows.join('');

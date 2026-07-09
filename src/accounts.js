@@ -112,7 +112,7 @@ class AccountManager {
         const base = { id: a.id, name: a.name, type, backend, source: a.source, createdAt: a.createdAt };
         if (backend === 'codex') {
           const info = this.readCodexSubAuth(a.id);
-          return { ...base, loggedIn: info.loggedIn, email: info.email, subscriptionType: info.plan, authMode: info.authMode };
+          return { ...base, loggedIn: info.loggedIn, email: info.email || a.email || null, emailDeclared: !info.email && !!a.email, subscriptionType: info.plan, authMode: info.authMode };
         }
         if (type === 'subscription') {
           const info = this.readSubCreds(a.id);
@@ -222,11 +222,11 @@ class AccountManager {
     } catch { return {}; }
   }
 
-  // Read-only parse of a codex account's auth.json (never refreshes). Reports
-  // loggedIn + auth mode + identity (email/plan) from the id_token claims.
-  readCodexSubAuth(id) {
+  // Read-only parse of a codex auth.json (never refreshes). Reports loggedIn +
+  // auth mode + identity (email/plan) from the id_token claims.
+  _parseCodexAuthFile(file) {
     try {
-      const raw = JSON.parse(fs.readFileSync(path.join(this.codexSubDir(id), 'auth.json'), 'utf-8'));
+      const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
       const mode = raw.auth_mode || (raw.tokens ? 'chatgpt' : (raw.OPENAI_API_KEY ? 'apikey' : null));
       const hasTok = !!(raw.tokens?.access_token || raw.tokens?.id_token || raw.OPENAI_API_KEY);
       if (!hasTok) return { loggedIn: false };
@@ -240,6 +240,10 @@ class AccountManager {
       return { loggedIn: true, authMode: mode, email, plan };
     } catch { return { loggedIn: false }; }
   }
+  readCodexSubAuth(id) { return this._parseCodexAuthFile(path.join(this.codexSubDir(id), 'auth.json')); }
+  // The machine's OWN codex login (~/.codex/auth.json) — the codex counterpart
+  // of subscriptionStatus(); identity feeds the codex global↔named-account link.
+  codexGlobalStatus() { return this._parseCodexAuthFile(path.join(this._codexSharedHome(), 'auth.json')); }
 
   finalizeCodexSubscription(id) {
     const a = this.get(id);

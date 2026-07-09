@@ -138,24 +138,32 @@ function renderControls(app, state, load, rerender) {
   bar.appendChild(labelled(t('Backend'), seg([
     { key: '', label: t('All') }, { key: 'claude', label: 'Claude' }, { key: 'codex', label: 'Codex' },
   ], state.backend, k => { state.backend = k; load(); })));
-  // Account filter — one chip per ledger bucket. When the machine's CLI login
-  // IS a named account (email link), the two buckets render as ONE chip whose
-  // filter spans both (comma key), mirroring the taskbar-pies dedupe.
+  // Account filter — one chip per ledger bucket. The two CLIs' machine logins
+  // are separate buckets ('__global__' claude, '__global_codex__' codex); when
+  // a machine login IS a named account (email link), the two buckets render as
+  // ONE chip whose filter spans both (comma key), mirroring the pies' dedupe.
   const acctRows = state.acctOptions || [];
   if (acctRows.length > 1) {
-    const glId = app._usageGlobal?.accountId || null;
-    const globalRow = acctRows.find(r => r.key === '__global__');
+    const GLOBALS = [
+      { key: '__global__', label: t('Claude CLI login'), link: app._usageGlobal },
+      { key: '__global_codex__', label: t('Codex CLI login'), link: app._usageCodexGlobal },
+    ];
+    const isGlobalKey = (k) => GLOBALS.some(G => G.key === k);
     const opts = [{ key: '', label: t('All') }];
+    const mergedGlobals = new Set();
     for (const r of acctRows) {
-      if (r.key === '__global__') continue;
-      if (glId && r.key === glId && globalRow) {
-        opts.push({ key: `${r.key},__global__`, label: (r.name || r.key) + ' ✦', tip: t('Same account as the machine CLI login — includes its (unattributed) usage too') });
+      if (isGlobalKey(r.key)) continue;
+      const g = GLOBALS.find(G => G.link?.accountId === r.key && acctRows.some(x => x.key === G.key));
+      if (g) {
+        mergedGlobals.add(g.key);
+        opts.push({ key: `${r.key},${g.key}`, label: (r.name || r.key) + ' ✦', tip: t('Same account as the machine CLI login — includes its (unattributed) usage too') });
       } else {
         opts.push({ key: r.key, label: r.name || r.key, tip: r.deleted ? t('Account was removed from VibeSpace — history kept') : (r.tail ? `…${r.tail}` : '') });
       }
     }
-    if (globalRow && !(glId && acctRows.some(r => r.key === glId))) {
-      opts.push({ key: '__global__', label: t('CLI login'), tip: t('Sessions that ran on the machine’s own login (no VibeSpace account selected)') });
+    for (const G of GLOBALS) {
+      if (mergedGlobals.has(G.key)) continue;
+      if (acctRows.some(r => r.key === G.key)) opts.push({ key: G.key, label: G.label, tip: t('Sessions that ran on the machine’s own login (no VibeSpace account selected)') });
     }
     bar.appendChild(labelled(t('Account'), seg(opts, state.account, k => { state.account = k; load(); })));
   }
@@ -179,7 +187,7 @@ function renderControls(app, state, load, rerender) {
 function renderPricingEditor(state, rerender, reload) {
   const wrap = document.createElement('div'); wrap.className = 'usage-pricing';
   const pricing = (state.data && state.data.pricing) || { tiers: {}, accounts: {} };
-  const accounts = ((state.data && state.data.groups && state.data.groups.account) || []).filter(a => a.key !== '__global__');
+  const accounts = ((state.data && state.data.groups && state.data.groups.account) || []).filter(a => a.key !== '__global__' && a.key !== '__global_codex__');
   const TIERS = Object.keys(pricing.tiers || {}).filter(k => k !== '_default');
   const FIELDS = [['input', t('Input')], ['output', t('Output')], ['cacheWrite5m', t('Cache write 5m')], ['cacheWrite1h', t('Cache write 1h')], ['cacheRead', t('Cache read')]];
   const edited = { tiers: {}, accounts: {} };
@@ -322,7 +330,8 @@ const BILLING_META = {
   'subscription': { label: () => t('Claude subscription'), cls: 'sub' },
   'api-key': { label: () => t('API key (pay-per-use)'), cls: 'api' },
   'chatgpt': { label: () => t('ChatGPT (Codex)'), cls: 'sub' },
-  'cli-global-login': { label: () => t('CLI global login (unattributed)'), cls: 'global' },
+  'cli-global-login': { label: () => t('Claude CLI login (unattributed)'), cls: 'global' },
+  'codex-cli-login': { label: () => t('Codex CLI login (unattributed)'), cls: 'global' },
   'unknown-account': { label: () => t('Unknown account'), cls: 'global' },
 };
 function renderBilling(d) {

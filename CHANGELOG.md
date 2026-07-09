@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.64.0] — 2026-07-09
+
+### Added — Codex multi-account parity (Usage window + quota pies)
+The 2.62/2.63 account features only handled Claude — Codex accounts were
+invisible (user-reported):
+- **Ledger**: the two CLIs' machine logins were conflated into one bucket — now
+  split (`Claude CLI login` vs `Codex CLI login`, separate billing categories),
+  and the Usage window's Account chips list both plus every named ChatGPT
+  account, with the same email-linked merge (machine login == named account →
+  one chip).
+- **Quota pies**: codex rate-limit snapshots are now bucketed **per account**
+  (live sessions report their own account; recent rollout tails attribute via
+  the thread's session-meta), and the codex popup section gained the same
+  account switcher chips as Claude — Auto (default account) / CLI login / each
+  ChatGPT account, with email-linked dedupe and newest-wins merge.
+- **Manage Agents**: the Codex roster now shows the machine login's email, a
+  `= "Name"` hint when it IS a named account, per-account 5h/7d usage bars,
+  and "set email…" for API-key-mode logins whose identity isn't in the token.
+
 ## [2.63.0] — 2026-07-09
 
 ### Added — Codex usage in the ledger (it was never mined)

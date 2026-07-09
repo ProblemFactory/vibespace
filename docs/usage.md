@@ -26,6 +26,9 @@ them to its status-line — VibeSpace caches what the CLI already knows. There i
   merged newest-wins — one real account never shows two conflicting values. If
   an account's login didn't record its email (VibeSpace then can't know it's the
   same account), use **"set email…"** on its row in Manage Agents to declare it.
+- **Codex too**: the Codex pies have their own account chips (Auto / CLI login /
+  each ChatGPT account) with the same linking rules; codex quota snapshots are
+  bucketed per account (each session reports the account it billed to).
 - Because it's a byproduct of real use, usage refreshes when you run the account
   in a **terminal** session. Chat (stream-json) sessions have no status line, so
   a chat-only account shows its last-known value.
