@@ -295,6 +295,9 @@ html, body {
 .usage-seg-btn:last-child { border-right: none; }
 .usage-seg-btn.on { background: var(--accent); color: var(--accent-fg, #fff); }
 .usage-dates { align-items: center; gap: 4px; border: none; overflow: visible; }
+/* Vendor logo on account chips / account-model-session rows in the Usage window */
+.usage-be-ic { width: 11px; height: 11px; font-size: 7px; display: inline-flex; vertical-align: -1.5px; margin-right: 4px; flex: 0 0 auto; }
+.usage-seg-btn { display: inline-flex; align-items: center; }
 .usage-date {
   background: var(--bg-input); border: 1px solid var(--border); color: var(--text);
   border-radius: 6px; font-size: 11px; padding: 2px 5px; color-scheme: dark light;

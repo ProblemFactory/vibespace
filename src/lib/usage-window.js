@@ -4,6 +4,14 @@
 // efficiency, hour/weekday activity, top sessions. Opened from ⚙ → Usage.
 import { t } from './i18n.js';
 import { escHtml, fetchJson, showToast, copyText } from './utils.js';
+import { createBackendIconHtml } from './agent-meta.js';
+
+// Small vendor logo — accounts and models from BOTH CLIs mix in one dashboard,
+// so every such row/chip carries the backend brand to keep them apart.
+const beIc = (be) => be ? createBackendIconHtml(be, { className: 'usage-be-ic', title: be === 'codex' ? 'Codex' : 'Claude' }) : '';
+const bucketBe = (r) => r.key === '__global__' ? 'claude'
+  : r.key === '__global_codex__' ? 'codex'
+  : (r.be || (r.type === 'codex-subscription' ? 'codex' : 'claude'));
 
 const DAY = 86400000;
 const RANGES = [
@@ -85,7 +93,7 @@ export function openUsageWindow(app, opts = {}) {
     body.appendChild(sectionGrid([
       renderBilling(d),
       renderGroup(t('By account'), d.groups.account, state, { badge: true }),
-      renderGroup(t('By model'), d.groups.model, state, {}),
+      renderGroup(t('By model'), d.groups.model, state, { beIcon: true }),
       renderCache(d),
       renderGroup(t('By project'), d.groups.project, state, { path: true }),
       renderGroup(t('By mode'), d.groups.mode, state, { small: true }),
@@ -115,7 +123,9 @@ function renderControls(app, state, load, rerender) {
     for (const it of items) {
       const b = document.createElement('button');
       b.className = 'usage-seg-btn' + (it.key === cur ? ' on' : '');
-      b.textContent = typeof it.label === 'function' ? it.label() : it.label;
+      const label = typeof it.label === 'function' ? it.label() : it.label;
+      if (it.iconHtml) b.innerHTML = it.iconHtml + escHtml(label);
+      else b.textContent = label;
       if (it.tip) b.title = it.tip;
       b.onclick = () => onPick(it.key);
       wrap.appendChild(b);
@@ -136,13 +146,29 @@ function renderControls(app, state, load, rerender) {
     bar.appendChild(dates);
   }
   bar.appendChild(labelled(t('Backend'), seg([
-    { key: '', label: t('All') }, { key: 'claude', label: 'Claude' }, { key: 'codex', label: 'Codex' },
-  ], state.backend, k => { state.backend = k; load(); })));
-  // Account filter — one chip per ledger bucket. The two CLIs' machine logins
-  // are separate buckets ('__global__' claude, '__global_codex__' codex); when
-  // a machine login IS a named account (email link), the two buckets render as
-  // ONE chip whose filter spans both (comma key), mirroring the pies' dedupe.
-  const acctRows = state.acctOptions || [];
+    { key: '', label: t('All') }, { key: 'claude', label: 'Claude', iconHtml: beIc('claude') }, { key: 'codex', label: 'Codex', iconHtml: beIc('codex') },
+  ], state.backend, k => {
+    state.backend = k;
+    // A selected account from the OTHER backend makes the filtered view
+    // permanently empty — drop it (mixed comma keys checked per key).
+    if (k && state.account) {
+      const rows = state.acctOptions || [];
+      const ok = state.account.split(',').every(key => {
+        const r = rows.find(x => x.key === key);
+        return r ? bucketBe(r) === k : true;
+      });
+      if (!ok) state.account = '';
+    }
+    load();
+  })));
+  // Account filter — one chip per ledger bucket, each with its vendor logo.
+  // Backend-scoped: with Backend=Codex only codex identities show (and vice
+  // versa). The two CLIs' machine logins are separate buckets ('__global__'
+  // claude, '__global_codex__' codex); when a machine login IS a named account
+  // (email link), the two buckets render as ONE chip whose filter spans both
+  // (comma key), mirroring the pies' dedupe.
+  let acctRows = state.acctOptions || [];
+  if (state.backend) acctRows = acctRows.filter(r => bucketBe(r) === state.backend);
   if (acctRows.length > 1) {
     const GLOBALS = [
       { key: '__global__', label: t('Claude CLI login'), link: app._usageGlobal },
@@ -156,14 +182,14 @@ function renderControls(app, state, load, rerender) {
       const g = GLOBALS.find(G => G.link?.accountId === r.key && acctRows.some(x => x.key === G.key));
       if (g) {
         mergedGlobals.add(g.key);
-        opts.push({ key: `${r.key},${g.key}`, label: (r.name || r.key) + ' ✦', tip: t('Same account as the machine CLI login — includes its (unattributed) usage too') });
+        opts.push({ key: `${r.key},${g.key}`, label: (r.name || r.key) + ' ✦', iconHtml: beIc(bucketBe(r)), tip: t('Same account as the machine CLI login — includes its (unattributed) usage too') });
       } else {
-        opts.push({ key: r.key, label: r.name || r.key, tip: r.deleted ? t('Account was removed from VibeSpace — history kept') : (r.tail ? `…${r.tail}` : '') });
+        opts.push({ key: r.key, label: r.name || r.key, iconHtml: beIc(bucketBe(r)), tip: r.deleted ? t('Account was removed from VibeSpace — history kept') : (r.tail ? `…${r.tail}` : '') });
       }
     }
     for (const G of GLOBALS) {
       if (mergedGlobals.has(G.key)) continue;
-      if (acctRows.some(r => r.key === G.key)) opts.push({ key: G.key, label: G.label, tip: t('Sessions that ran on the machine’s own login (no VibeSpace account selected)') });
+      if (acctRows.some(r => r.key === G.key)) opts.push({ key: G.key, label: G.label, iconHtml: beIc(bucketBe({ key: G.key })), tip: t('Sessions that ran on the machine’s own login (no VibeSpace account selected)') });
     }
     bar.appendChild(labelled(t('Account'), seg(opts, state.account, k => { state.account = k; load(); })));
   }
@@ -187,7 +213,10 @@ function renderControls(app, state, load, rerender) {
 function renderPricingEditor(state, rerender, reload) {
   const wrap = document.createElement('div'); wrap.className = 'usage-pricing';
   const pricing = (state.data && state.data.pricing) || { tiers: {}, accounts: {} };
-  const accounts = ((state.data && state.data.groups && state.data.groups.account) || []).filter(a => a.key !== '__global__' && a.key !== '__global_codex__');
+  // Accounts from the UNFILTERED union — the editor must list every account,
+  // not just whatever the currently-active backend/account filter left visible
+  // (a codex-filtered dashboard used to shrink this to one row).
+  const accounts = (state.acctOptions || (state.data?.groups?.account) || []).filter(a => a.key !== '__global__' && a.key !== '__global_codex__');
   const TIERS = Object.keys(pricing.tiers || {}).filter(k => k !== '_default');
   const FIELDS = [['input', t('Input')], ['output', t('Output')], ['cacheWrite5m', t('Cache write 5m')], ['cacheWrite1h', t('Cache write 1h')], ['cacheRead', t('Cache read')]];
   const edited = { tiers: {}, accounts: {} };
@@ -222,7 +251,7 @@ function renderPricingEditor(state, rerender, reload) {
   for (const a of accounts) {
     const cur = pricing.accounts?.[a.key] || {};
     const row = document.createElement('div'); row.className = 'usage-bar-row';
-    const badge = a.type ? typeBadge(a.type, a.deleted) : '';
+    const badge = beIc(bucketBe(a)) + (a.type ? typeBadge(a.type, a.deleted) : '');
     const discPct = typeof cur.discount === 'number' ? Math.round(cur.discount * 100) : '';
     row.innerHTML = `<span class="usage-bar-label">${badge}${escHtml(a.name || a.key)}</span>`;
     const ctrl = document.createElement('span'); ctrl.style.cssText = 'display:flex;align-items:center;gap:6px;grid-column:2/4';
@@ -266,6 +295,11 @@ function renderTiles(d) {
   const T = d.totals;
   const wrap = document.createElement('div'); wrap.className = 'usage-tiles';
   const tile = (label, value, sub, cls) => `<div class="usage-tile${cls ? ' ' + cls : ''}"><div class="usage-tile-v">${value}</div><div class="usage-tile-l">${label}</div>${sub ? `<div class="usage-tile-s">${sub}</div>` : ''}</div>`;
+  // Codex rollouts don't report cache-write token counts at all — when the view
+  // is codex-only, an honest "—" beats a fake 0 (in mixed views the number is
+  // the Claude-side sum; codex contributes nothing by construction).
+  const billingKeys = (d.groups?.billing || []).map(r => r.key);
+  const codexOnly = billingKeys.length > 0 && billingKeys.every(k => k === 'chatgpt' || k === 'codex-cli-login');
   // Total tokens = cached reads + cache writes + fresh input + output. Cached
   // reads usually DOMINATE (>95%), so it gets its own tile — otherwise the total
   // looks like it doesn't add up from what's shown. The four component tiles are
@@ -276,7 +310,9 @@ function renderTiles(d) {
     tile(t('Cache hit ratio'), fmtPct(T.cacheHitRatio), t('of input tokens')),
     tile(t('Total tokens'), fmtNum(T.totalTokens), t('= the 4 components →'), 'total'),
     tile(t('Cached reads'), fmtNum(T.cacheRead), `${fmtPct(T.cacheHitRatio)} · ${t('billed ~10%')}`, 'comp'),
-    tile(t('Cache writes'), fmtNum(T.cacheWrite), `${fmtNum(T.cacheWrite1h || 0)} 1h · ${t('~1.25–2×')}`, 'comp'),
+    codexOnly
+      ? tile(t('Cache writes'), '—', t('not reported by Codex'), 'comp')
+      : tile(t('Cache writes'), fmtNum(T.cacheWrite), `${fmtNum(T.cacheWrite1h || 0)} 1h · ${t('~1.25–2×')}`, 'comp'),
     tile(t('Fresh input'), fmtNum(T.input), t('non-cached'), 'comp'),
     tile(t('Output'), fmtNum(T.output), t('generated'), 'comp'),
   ].join('');
@@ -358,13 +394,13 @@ function renderGroup(title, rows, state, opts = {}) {
     let label = r.key;
     if (opts.badge && r.name) label = r.name;
     if (opts.path && r.key !== 'unknown') label = r.key.split('/').slice(-2).join('/');
-    if (opts.session) label = (app_sessionName(r.key)) || r.key.slice(0, 8);
-    const badge = opts.badge && r.type ? typeBadge(r.type, r.deleted) : '';
+    if (opts.session) label = r.name || r.key.slice(0, 8); // name from session-meta (VibeSpace sessions)
+    let badge = opts.badge && r.type ? typeBadge(r.type, r.deleted) : '';
+    if (opts.beIcon || opts.badge || opts.session) badge = beIc(r.be || (opts.badge ? bucketBe(r) : null)) + badge;
     sec.appendChild(barRow(label, r, max, metric, { badge, title: opts.path ? r.key : (opts.session ? r.key : label) }));
   }
   return sec;
 }
-function app_sessionName() { return null; } // session names not resolved server-side yet
 
 function renderCache(d) {
   const sec = section(t('Cache efficiency'));
