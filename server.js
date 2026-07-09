@@ -2524,11 +2524,12 @@ function _fetchOAuthUsage(token, cb) {
   if (typeof token === 'string' && token.startsWith('sk-ant-api')) { cb(null); return; }
   const req = https.request('https://api.anthropic.com/api/oauth/usage', {
     method: 'GET',
-    // If this is ever called (user-initiated one-shot only — NEVER on a timer),
-    // carry the CLI's own User-Agent so the request is indistinguishable from
-    // Claude Code's and rides the same rate-limit bucket, not the anonymous
-    // aggressively-throttled one.
-    headers: { 'authorization': `Bearer ${token}`, 'anthropic-beta': 'oauth-2025-04-20', 'anthropic-version': '2023-06-01', 'user-agent': 'claude-cli/2.1.205 (external, cli)' },
+    // DORMANT: nothing schedules this anymore (usage is captured passively via
+    // the statusLine hook). Kept ONLY as a user-initiated one-shot primitive.
+    // Deliberately NOT spoofing the claude-code User-Agent — impersonating the
+    // official harness is itself an enforced-against pattern; the honest fix was
+    // to remove the background poll, not to disguise it.
+    headers: { 'authorization': `Bearer ${token}`, 'anthropic-beta': 'oauth-2025-04-20', 'anthropic-version': '2023-06-01' },
   }, (res) => {
     let body = '';
     res.on('data', (d) => { body += d; });
