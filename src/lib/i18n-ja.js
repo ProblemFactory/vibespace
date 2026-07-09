@@ -932,4 +932,8 @@ export default {
   "Set as default for new sessions": "新規セッションの既定に設定",
   "Rename account": "アカウント名を変更",
   "Account name": "アカウント名",
+  "The CLI’s own global login": "CLI 自身のグローバルログイン",
+  "CLI login": "CLI ログイン",
+  "not logged in (a Console login replaced it)": "未ログイン（コンソールログインに置き換えられました）",
+  "Default for new sessions — pick another to change": "新規セッションの既定——他を選ぶと変更",
 };

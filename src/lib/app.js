@@ -755,17 +755,29 @@ class App {
           const left = document.createElement('div');
           left.style.flex = '1';
           const sub = acct.subscription || {};
-          const subLine = sub.loggedIn
-            ? `<span class="ob-ok">${t('✓ Subscription — {info}', { info: escHtml(sub.email || t('logged in')) })}</span>`
-            : `<span class="ob-warn">${acct.cliKey?.present ? t('Subscription: not logged in (a Console login replaced it)') : t('Subscription: not logged in')}</span>`;
           // SVG icons (no emoji) — crown for a subscription, key for an API key,
           // star for the default toggle, pencil for rename, ✕ for remove.
           const svg = (d, sw = 1.4) => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
           const CROWN = svg('<path d="M2.5 12.5h11M3 12.5L2 4.5l3.2 2.6L8 3l2.8 4.1L14 4.5l-1 8z"/>');
+          const GLOBE = svg('<circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c-2 2-2 10 0 12M8 2c2 2 2 10 0 12"/>');
           const KEY = svg('<circle cx="5" cy="9" r="2.6"/><path d="M7.4 8.2 14 3M11.5 5.2l1.6 1.6M13 3.7l1.6 1.6"/>', 1.5);
           const STAR_F = svg('<path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 11.6 4.1 13.6l.8-4.3-3.1-3 4.3-.6z" fill="currentColor"/>');
           const STAR_O = svg('<path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 11.6 4.1 13.6l.8-4.3-3.1-3 4.3-.6z"/>');
           const PENCIL = svg('<path d="M11 2.5 13.5 5 5.5 13H3v-2.5z"/>');
+          // The CLI's OWN global (~/.claude) login, shown as a PEER row: it's the
+          // default whenever no named account is starred. Not renamable/removable
+          // (it's the CLI's own login), but otherwise equal in the list.
+          const gDef = !accts.defaultAccountId;
+          const gIdent = sub.loggedIn
+            ? escHtml((sub.email || '') + (sub.plan ? (sub.email ? ' · ' : '') + sub.plan : '')) || t('logged in')
+            : `<span class="ob-warn">${acct.cliKey?.present ? t('not logged in (a Console login replaced it)') : t('not logged in')}</span>`;
+          const globalRow = `<div class="acct-key-row${gDef ? ' is-default' : ''}" data-id="__global__">
+            <span class="acct-type-icon" title="${t('The CLI’s own global login')}">${GLOBE}</span>
+            <span class="acct-key-name">${t('CLI login')}</span>
+            <span class="acct-key-tail">${gIdent}</span>
+            <span class="acct-key-actions">
+              <button class="acct-icon acct-def ${gDef ? 'on' : ''}" title="${gDef ? t('Default for new sessions — pick another to change') : t('Set as default for new sessions')}">${gDef ? STAR_F : STAR_O}</button>
+            </span></div>`;
           const keyLines = (accts.accounts || []).map(a => {
             const isDef = accts.defaultAccountId === a.id;
             const isSub = a.type === 'subscription';
@@ -788,8 +800,7 @@ class App {
               </span></div>`;
           }).join('');
           left.innerHTML = `<b>${t('Anthropic accounts')}</b>
-            <div style="margin:3px 0">${subLine}</div>
-            ${keyLines || `<div class="agents-note">${t('No accounts saved yet — sessions use the CLI’s global login. Add a subscription to hold several Pro/Max logins and pick one per session.')}</div>`}
+            <div class="acct-list">${globalRow}${keyLines}</div>
             <div class="agents-note" style="margin:4px 0 0">${t('Each session can pick its account (New Session dialog / card ⚙). Subscriptions bill your Pro/Max plan; API keys bill pay-per-use. The starred account is the default when a session doesn’t pick one.')}</div>`;
           const actions = document.createElement('div'); actions.className = 'agent-actions';
           const needsSetup = !sub.loggedIn || !(accts.accounts || []).length;
@@ -837,6 +848,14 @@ class App {
             const keyRow = e.target.closest?.('.acct-key-row');
             if (!keyRow) return;
             const id = keyRow.dataset.id;
+            // The global CLI-login peer row only has the default star.
+            if (id === '__global__') {
+              if (e.target.closest('.acct-def')) {
+                try { await fetchJson('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: null }) }); } catch {}
+                refresh();
+              }
+              return;
+            }
             const a = (accts.accounts || []).find(x => x.id === id);
             // closest() — the click can land on an <svg>/<path> inside the button.
             if (e.target.closest('.acct-test')) {
@@ -847,7 +866,9 @@ class App {
                 return;
               }
               done();
-              this.createSession({ backend: 'claude', mode: 'terminal', cwd: '', accountId: id });
+              // Diagnostic session — closing its window always terminates it
+              // (ephemeral), never leaves a detached test session lingering.
+              this.createSession({ backend: 'claude', mode: 'terminal', cwd: '', accountId: id, ephemeral: true });
             } else if (e.target.closest('.acct-def')) {
               const isDef = accts.defaultAccountId === id;
               try { await fetchJson('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: isDef ? null : id }) }); } catch {}
@@ -2219,7 +2240,7 @@ class App {
     });
   }
 
-  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, fork, hostId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, accountId }) {
+  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, fork, hostId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, accountId, ephemeral = false }) {
     this._hideWelcome();
     const defaults = this._getBackendSessionDefaults(backend);
     const sessionMode = mode || this.settings.get('session.defaultMode') || 'chat';
@@ -2323,7 +2344,7 @@ class App {
           // throwaway — closing the window should terminate them directly,
           // never leave a detached login shell lingering, regardless of the
           // global close-behavior setting.
-          this._wireTerminalWindow(winInfo, term, msg.sessionId, { ephemeral: !!initialCommand });
+          this._wireTerminalWindow(winInfo, term, msg.sessionId, { ephemeral: ephemeral || !!initialCommand });
           // Type a starter command for the user (shell terminals: login helpers
           // etc.) once the shell has had a beat to print its prompt
           if (initialCommand) {

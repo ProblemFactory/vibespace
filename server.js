@@ -1740,8 +1740,12 @@ app.post('/api/accounts/subscription', (req, res) => {
     // the securestorage dir.)
     // `claude auth login` (subcommand — NOT the TUI `/login`, which errors from
     // a shell) prints an OAuth URL to a HOSTED callback + a "Paste code" prompt,
-    // so it works headlessly. --claudeai = the subscription flow.
-    const loginCmd = `CLAUDE_SECURESTORAGE_CONFIG_DIR=${JSON.stringify(dir)} claude auth login --claudeai`;
+    // so it works headlessly. --claudeai = the subscription flow. Set BOTH env
+    // vars → dir: creds AND identity (.claude.json oauthAccount) isolate into the
+    // dir, so the GLOBAL ~/.claude.json is NOT clobbered. The dir is pre-seeded
+    // with onboarding-complete flags so no first-run screen appears.
+    const q = JSON.stringify(dir);
+    const loginCmd = `CLAUDE_CONFIG_DIR=${q} CLAUDE_SECURESTORAGE_CONFIG_DIR=${q} claude auth login --claudeai`;
     res.json({ success: true, id, dir, loginCmd });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -1754,11 +1758,11 @@ app.post('/api/accounts/subscription/:id/finalize', (req, res) => {
 app.post('/api/accounts/console-login', (req, res) => {
   try {
     const { id, dir } = accounts.beginConsoleLogin();
-    // securestorage=throwaway → the console login's .credentials.json wipe lands
-    // there (global subscription creds safe); the minted key lands in the shared
-    // ~/.claude.json (captured via importFromCli). Config dir stays ~/.claude →
-    // no onboarding.
-    const loginCmd = `CLAUDE_SECURESTORAGE_CONFIG_DIR=${JSON.stringify(dir)} claude auth login --console`;
+    // BOTH env vars → dir (pre-seeded, no onboarding): the console login's
+    // .credentials.json wipe AND the minted primaryApiKey land in the isolated
+    // dir; ~/.claude and ~/.claude.json are untouched. capture reads the dir.
+    const q = JSON.stringify(dir);
+    const loginCmd = `CLAUDE_CONFIG_DIR=${q} CLAUDE_SECURESTORAGE_CONFIG_DIR=${q} claude auth login --console`;
     res.json({ success: true, id, loginCmd });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });

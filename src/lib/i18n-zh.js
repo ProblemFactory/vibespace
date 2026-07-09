@@ -932,4 +932,8 @@ export default {
   "Set as default for new sessions": "设为新会话的默认账号",
   "Rename account": "重命名账号",
   "Account name": "账号名称",
+  "The CLI’s own global login": "CLI 自己的全局登录",
+  "CLI login": "CLI 登录",
+  "not logged in (a Console login replaced it)": "未登录（被 Console 登录替换了）",
+  "Default for new sessions — pick another to change": "新会话的默认账号——选另一个即可更改",
 };
