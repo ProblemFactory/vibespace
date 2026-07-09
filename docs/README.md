@@ -14,6 +14,7 @@ VibeSpace is a backend-agnostic web workspace for **coding agents** — it drive
 - **[Embedded Browser](browser.md)** — Iframe browser with proxy mode
 - **[Customize UI](customize-ui.md)** — Edit mode for the chrome: show/hide, drag between bars, springs, alignment, extra rows
 - **[Settings](settings.md)** — Global/per-terminal/chat settings plus Claude and Codex launch defaults
+- **[Accounts & Billing](accounts.md)** — Multiple subscriptions/API keys per backend, per-session billing identity, machine logins vs VibeSpace accounts, remote hosts
 - **[Deployment](deployment.md)** — Password authentication, Docker/compose, team server setup
 - **[Mounts](mounts.md)** — Shared storage: rclone-backed mounts (S3 / Google Drive / WebDAV / SFTP / VibeSpace↔VibeSpace), per-connection S3 share minting, import links
 - **[Files across hosts](files-cross-host.md)** — Browse/edit remote files over ssh, cross-host copy

@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.59.1] — 2026-07-09
+
+### Changed — account scoping made unambiguous in Manage agents
+Picking a remote host used to silently change what the accounts section meant —
+it was unclear whether a login would land in VibeSpace or on the host. Now ONE
+unified roster with explicit scoping: the first row is always the **selected
+machine's own CLI login** (pick AIDev → "CLI login on AIDev", with a
+"Log in on AIDev…" button that clearly acts ON that machine, plus an inline
+"Import its key" when the host has an unimported Console key). Every named
+account below is **stored in VibeSpace** — machine-independent, usable by
+sessions on any machine (credentials ship per session) — and no longer
+disappears when you switch machines. The note under the list spells out the
+split. The ChatGPT/OpenAI roster gets the same treatment (remote login uses
+`codex login --device-auth` — a plain `codex login` would open a callback
+server on the host, unreachable from your browser). Test buttons run ON the
+selected machine.
+
+### Changed — "远程主机" terminology (zh)
+Remote machines are now consistently called **远程主机** in the Chinese UI
+(was the ambiguous 主机): sidebar Remote-tab section header, New Session row,
+session Properties, filter labels. The Manage-agents machine dropdown (which
+includes 本机) is labeled 机器. The sidebar Remote-tab section headers are now
+translatable (they were hardcoded English).
+
+### Fixed — remote creds shipping is concurrency- and rotation-safe
+Shipping a subscription's creds dir to a host no longer `rm -rf`s the remote
+copy (a concurrent session of the same account on the same host would have had
+its creds yanked mid-run). Extraction is per-file **newest-wins**
+(`tar --keep-newer-files`): OAuth refresh tokens rotate, so after a remote
+session refreshes, the host copy holds the live token — re-shipping the stale
+local copy over it would have broken the account on that host.
+
 ## [2.59.0] — 2026-07-08
 
 ### Added — multiple ChatGPT (Codex) logins, switchable per session

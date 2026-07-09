@@ -496,14 +496,18 @@ class App {
   }
 
   // ── Codex/OpenAI accounts roster (rendered UNDER Codex in Manage Agents).
-  // Codex holds ChatGPT subscriptions via isolated CODEX_HOMEs. No Anthropic
-  // usage bar (OpenAI quota isn't polled). Local machine only for now.
+  // Same unified model as the Anthropic roster: the peer "CLI login" row is
+  // the SELECTED machine's own codex login; the named ChatGPT accounts below
+  // are stored by VibeSpace (machine-independent, ship per session). No usage
+  // bars (OpenAI quota isn't polled).
   async _renderCodexAccounts(ctx) {
-    const { body, done, refresh, st } = ctx;
+    const { body, selectedHost, hostSel, done, run, refresh, st } = ctx;
     let accts;
     try { accts = await this.refreshAccounts(); } catch { return; }
     const codexAccts = (accts.accounts || []).filter(a => a.backend === 'codex');
+    // st is already machine-scoped: /api/hosts/<id>/backend-status on a host.
     const gLoggedIn = !!(st?.codex?.loggedIn);
+    const hostLabel = selectedHost ? (hostSel.options[hostSel.selectedIndex]?.textContent?.split(' (')[0] || t('remote host')) : null;
     const svg = (d, sw = 1.4) => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
     const CROWN = svg('<path d="M2.5 12.5h11M3 12.5L2 4.5l3.2 2.6L8 3l2.8 4.1L14 4.5l-1 8z"/>');
     const GLOBE = svg('<circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c-2 2-2 10 0 12M8 2c2 2 2 10 0 12"/>');
@@ -513,38 +517,50 @@ class App {
     const row = document.createElement('div'); row.className = 'ob-backend acct-section';
     const left = document.createElement('div'); left.style.flex = '1';
     const gDef = !accts.defaultCodexAccountId;
-    const gIdent = gLoggedIn ? t('logged in') : `<span class="ob-warn">${t('not logged in')}</span>`;
+    const gName = selectedHost ? t('CLI login on {host}', { host: escHtml(hostLabel) }) : t('CLI login');
+    const gIdent = gLoggedIn
+      ? (selectedHost ? `<span class="ob-ok">${t('logged in (on {host})', { host: escHtml(hostLabel) })}</span>` : t('logged in'))
+      : `<span class="ob-warn">${t('not logged in')}</span>`;
+    const gExtraActions = selectedHost
+      ? `<button class="agent-btn acct-host-login" title="${t('Opens a terminal ON {host} — this login lands on that machine, not in VibeSpace', { host: escHtml(hostLabel) })}">${t('Log in on {host}…', { host: escHtml(hostLabel) })}</button>` : '';
     const globalRow = `<div class="acct-key-row${gDef ? ' is-default' : ''}" data-id="__codex_global__">
-      <span class="acct-type-icon" title="${t('The CLI’s own global login')}">${GLOBE}</span>
-      <span class="acct-key-main"><span class="acct-key-name">${t('CLI login')}</span><span class="acct-key-tail">${gIdent}</span></span>
+      <span class="acct-type-icon" title="${selectedHost ? t("This machine's own login — lives on {host}, not in VibeSpace", { host: escHtml(hostLabel) }) : t('The CLI’s own global login on this machine')}">${GLOBE}</span>
+      <span class="acct-key-main"><span class="acct-key-name">${gName}</span><span class="acct-key-tail">${gIdent}</span></span>
       <span class="acct-usage-cell"></span>
       <span class="acct-key-actions">
-        <button class="acct-icon acct-def ${gDef ? 'on' : ''}" title="${gDef ? t('Default for new sessions — pick another to change') : t('Set as default for new sessions')}">${gDef ? STAR_F : STAR_O}</button>
+        <button class="acct-icon acct-def ${gDef ? 'on' : ''}" title="${gDef ? t('Default for new sessions — pick another to change') : t('Set as default for new sessions')}">${gDef ? STAR_F : STAR_O}</button>${gExtraActions}
       </span></div>`;
     const keyLines = codexAccts.map(a => {
       const isDef = accts.defaultCodexAccountId === a.id;
       const ident = a.loggedIn
         ? escHtml((a.email || '') + (a.subscriptionType ? (a.email ? ' · ' : '') + a.subscriptionType : '')) || t('logged in')
         : `<span class="ob-warn">${t('not logged in')}</span>`;
+      const testTitle = selectedHost
+        ? t('Open a terminal session ON {host} billing through this account', { host: escHtml(hostLabel) })
+        : t('Open a terminal session on this account');
       return `<div class="acct-key-row${isDef ? ' is-default' : ''}" data-id="${escHtml(a.id)}">
-        <span class="acct-type-icon" title="${t('ChatGPT account')}">${CROWN}</span>
+        <span class="acct-type-icon" title="${t('ChatGPT account — stored in VibeSpace, works on any machine')}">${CROWN}</span>
         <span class="acct-key-main"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}</span></span>
         <span class="acct-usage-cell"></span>
         <span class="acct-key-actions">
           <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
           <button class="acct-icon acct-rename" title="${t('Rename')}">${PENCIL}</button>
-          <button class="agent-btn acct-test" title="${t('Open a terminal session on this account')}">${t('Test')}</button>
+          <button class="agent-btn acct-test" title="${testTitle}">${t('Test')}</button>
           <button class="acct-icon acct-del" title="${t('Remove this account from VibeSpace (deletes its stored login)')}">${svg('<path d="M4 4l8 8M12 4l-8 8"/>', 1.6)}</button>
         </span></div>`;
     }).join('');
+    const note = selectedHost
+      ? t("The “CLI login” row is {host}'s own login (lives on that machine). All named accounts below are stored in VibeSpace — sessions on ANY machine can use them; the credentials ship securely to the machine per session.", { host: escHtml(hostLabel) })
+      : t('Each Codex session can pick its ChatGPT login (New Session dialog / card ⚙). Held in isolated logins, switchable per session; threads stay shared.');
     left.innerHTML = `<b>${t('ChatGPT / OpenAI accounts')}</b>
       <div class="acct-list">${globalRow}${keyLines}</div>
-      <div class="agents-note" style="margin:4px 0 0">${t('Each Codex session can pick its ChatGPT login (New Session dialog / card ⚙). Held in isolated logins, switchable per session; threads stay shared.')}</div>`;
+      <div class="agents-note" style="margin:4px 0 0">${note}</div>`;
     const actions = document.createElement('div'); actions.className = 'agent-actions';
     const addBtn = document.createElement('button'); addBtn.className = 'agent-btn' + (codexAccts.length ? '' : ' primary'); addBtn.textContent = t('Add ChatGPT account…');
-    addBtn.title = t('Sign in another ChatGPT account — held in its own isolated login, switchable per session');
+    addBtn.title = t('Sign in another ChatGPT account — stored in VibeSpace (not on any one machine), switchable per session');
     addBtn.onclick = () => { done(); this._addCodexSubscription(); };
     actions.appendChild(addBtn);
+    if (ctx.stale?.()) return; // a newer refresh took over mid-await
     row.append(left, actions);
     body.appendChild(row);
     left.onclick = async (e) => {
@@ -552,7 +568,12 @@ class App {
       if (!keyRow) return;
       const id = keyRow.dataset.id;
       if (id === '__codex_global__') {
-        if (e.target.closest('.acct-def')) {
+        if (e.target.closest('.acct-host-login')) {
+          // Runs ON the selected host — lands in ITS ~/.codex, not VibeSpace.
+          // --device-auth: a plain `codex login` would open localhost:1455 on
+          // the host, unreachable from the user's browser.
+          run('codex login --device-auth');
+        } else if (e.target.closest('.acct-def')) {
           try { await fetchJson('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: null, backend: 'codex' }) }); } catch {}
           refresh();
         }
@@ -562,7 +583,9 @@ class App {
       if (e.target.closest('.acct-test')) {
         if (!a?.loggedIn) { showToast(t('This account isn’t signed in yet — use “Add ChatGPT account…” to finish the login first.'), { type: 'error' }); return; }
         done();
-        this.createSession({ backend: 'codex', mode: 'terminal', cwd: '', accountId: id, ephemeral: true });
+        // With a remote host selected the test runs ON that host (auth.json
+        // ships to it) — proving the full remote path.
+        this.createSession({ backend: 'codex', mode: 'terminal', cwd: '', accountId: id, ephemeral: true, hostId: selectedHost || undefined });
       } else if (e.target.closest('.acct-def')) {
         const isDef = accts.defaultCodexAccountId === id;
         try { await fetchJson('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: isDef ? null : id, backend: 'codex' }) }); } catch {}
@@ -716,7 +739,10 @@ class App {
 
     const BACKENDS = [
       { key: 'claude', label: 'Claude Code', loginCmd: 'claude', updateCmd: 'claude update' },
-      { key: 'codex', label: 'Codex', loginCmd: 'codex login', updateCmd: 'npm install -g @openai/codex@latest' },
+      // remoteLoginCmd: on a remote host `codex login` starts a localhost:1455
+      // callback server ON THE HOST — unreachable from the user's browser.
+      // --device-auth prints a URL + one-time code instead (location-agnostic).
+      { key: 'codex', label: 'Codex', loginCmd: 'codex login', remoteLoginCmd: 'codex login --device-auth', updateCmd: 'npm install -g @openai/codex@latest' },
     ];
     // Host selector: agent lifecycle can target a remote machine too. Login/
     // update then run in a shell ON that host (ssh -t).
@@ -726,9 +752,19 @@ class App {
       if (selectedHost) this.openShellTerminal(undefined, { hostId: selectedHost, initialCommand: cmd });
       else this.openShellTerminal(undefined, { initialCommand: cmd });
     };
+    // Reentrancy guard: switching machines mid-render (host probes take
+    // seconds over ssh) starts a NEW refresh whose innerHTML='' wipes the old
+    // one's partial rows — but the OLD run resumes after its next await and
+    // keeps appending sections scoped to the old machine (duplicate rosters,
+    // handlers acting on the wrong host). Each refresh takes a generation
+    // ticket; stale runs stop at every await/append point.
+    let refreshGen = 0;
     const refresh = async () => {
+      const myGen = ++refreshGen;
+      const stale = () => myGen !== refreshGen;
       let st = {};
       try { st = await fetchJson(selectedHost ? `/api/hosts/${selectedHost}/backend-status` : '/api/backend-status'); } catch {}
+      if (stale()) return;
       body.innerHTML = '';
       // Host dropdown row
       const hostRow = document.createElement('div');
@@ -743,6 +779,7 @@ class App {
           hostSel.appendChild(o);
         }
       } catch {}
+      if (stale()) return;
       hostSel.value = selectedHost;
       hostSel.onchange = () => { selectedHost = hostSel.value; refresh(); };
       hostRow.append(hostLabel, hostSel);
@@ -750,7 +787,7 @@ class App {
       // Accounts render UNDER their CLI: Anthropic accounts below Claude Code,
       // OpenAI/Codex accounts below Codex. Shared context for the extracted
       // renderers (they capture the same closures the dialog builds).
-      const actx = { body, selectedHost, hostSel, done, run, refresh, st };
+      const actx = { body, selectedHost, hostSel, done, run, refresh, st, stale };
       for (const b of BACKENDS) {
         const info = st[b.key] || {};
         const row = document.createElement('div'); row.className = 'ob-backend';
@@ -763,7 +800,8 @@ class App {
         const actions = document.createElement('div'); actions.className = 'agent-actions';
         if (info.installed && !info.loggedIn) {
           const loginBtn = document.createElement('button'); loginBtn.className = 'agent-btn primary'; loginBtn.textContent = t('Log in');
-          loginBtn.onclick = () => run(b.loginCmd);
+          loginBtn.title = selectedHost ? t('Logs in ON the selected remote host (its own login, not VibeSpace)') : '';
+          loginBtn.onclick = () => run(selectedHost && b.remoteLoginCmd ? b.remoteLoginCmd : b.loginCmd);
           actions.appendChild(loginBtn);
         }
         if (info.installed) {
@@ -772,11 +810,13 @@ class App {
           updBtn.onclick = () => run(b.updateCmd);
           actions.appendChild(updBtn);
         }
+        if (stale()) return;
         row.append(left, actions);
         body.appendChild(row);
         // Account roster for THIS backend, right under its status row.
         if (b.key === 'claude') { try { await this._renderClaudeAccounts(actx); } catch {} }
-        else if (b.key === 'codex' && !selectedHost) { try { await this._renderCodexAccounts(actx); } catch {} }
+        else if (b.key === 'codex') { try { await this._renderCodexAccounts(actx); } catch {} }
+        if (stale()) return;
       }
       // ── VibeSpace integration (task context hook) — local machine only.
       // Auto-installed at server start; this row makes the state VISIBLE and
@@ -785,6 +825,7 @@ class App {
       if (!selectedHost) {
         let hs = null;
         try { hs = await fetchJson('/api/agent-hooks'); } catch {}
+        if (stale()) return;
         if (hs) {
           const row = document.createElement('div'); row.className = 'ob-backend';
           const left = document.createElement('div');
@@ -845,206 +886,212 @@ class App {
   // CLI. ctx carries the dialog closures the block already used.
   async _renderClaudeAccounts(ctx) {
     const { body, selectedHost, hostSel, done, run, refresh } = ctx;
-      // ── Anthropic accounts (billing identity: subscription ↔ API keys). ──
-      // Remote host selected: probe the HOST's login state + offer importing
-      // its console key into the central store (keys are host-agnostic — they
-      // ship to whichever host a session spawns on).
-      if (selectedHost) {
-        let racct = null;
-        try { racct = await fetchJson(`/api/hosts/${encodeURIComponent(selectedHost)}/accounts-status`); } catch {}
-        if (racct && !racct.error) {
-          const accts = this._accounts || { accounts: [] };
-          const hostLabel = hostSel.options[hostSel.selectedIndex]?.textContent?.split(' (')[0] || t('host');
-          const row = document.createElement('div'); row.className = 'ob-backend acct-section';
-          const left = document.createElement('div'); left.style.flex = '1';
-          const importedTails = new Set((accts.accounts || []).map(a => a.tail));
-          left.innerHTML = `<b>${t('Anthropic accounts on {host}', { host: escHtml(hostLabel) })}</b>
-            <div style="margin:3px 0">${racct.subscription?.loggedIn
-              ? `<span class="ob-ok">${t('✓ Subscription logged in (on the host)')}</span>`
-              : `<span class="ob-warn">${racct.cliKey?.present ? t('Subscription: not logged in (a Console login replaced it)') : t('Subscription: not logged in')}</span>`}</div>
-            ${racct.cliKey?.present ? `<div style="margin:3px 0">${t('Console key on host: …{tail}', { tail: escHtml(racct.cliKey.tail) })} ${importedTails.has(racct.cliKey.tail) ? `<span class="ob-ok">${t('✓ imported')}</span>` : `<span class="ob-warn">${t('not imported')}</span>`}</div>` : ''}
-            <div class="agents-note" style="margin:4px 0 0">${t("API keys live in the central store ({n} saved) and are pushed to the host per session — pick the account in the New Session dialog / card ⚙. 'Subscription' there means THIS host's own login.", { n: (accts.accounts || []).length })}</div>`;
-          const actions = document.createElement('div'); actions.className = 'agent-actions';
-          const loginBtn = document.createElement('button');
-          loginBtn.className = 'agent-btn' + (racct.subscription?.loggedIn ? '' : ' primary');
-          loginBtn.textContent = t('Log in on host…');
-          loginBtn.title = t('Opens a terminal ON the host running claude /login');
-          loginBtn.onclick = () => run('claude /login');
-          actions.appendChild(loginBtn);
-          if (racct.cliKey?.present && !importedTails.has(racct.cliKey.tail)) {
-            const impBtn = document.createElement('button'); impBtn.className = 'agent-btn primary';
-            impBtn.textContent = t('Import host key');
-            impBtn.onclick = async () => {
-              try {
-                const r = await fetchJson('/api/accounts/import-cli-host', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hostId: selectedHost }) });
-                if (r?.account) showToast(t('Imported: {name}', { name: r.account.name })); else showToast(r?.error || t('Import failed'), { type: 'error' });
-              } catch { showToast(t('Import failed'), { type: 'error' }); }
-              refresh();
-            };
-            actions.appendChild(impBtn);
-          }
-          row.append(left, actions);
-          body.appendChild(row);
-        }
+    // ── Anthropic accounts (billing identity) — ONE unified roster whose
+    // meaning is machine-scoped ONLY on the first row: the peer "CLI login"
+    // row is the SELECTED machine's own global login (pick a remote host →
+    // that host's login, with a clearly-labeled "Log in on <host>…" action).
+    // Every NAMED account below is stored by VibeSpace (machine-independent)
+    // and ships to whichever machine a session spawns on. This split is what
+    // answers "if I pick AIDev, where does a login land?" — the peer row's
+    // login lands ON AIDev; the Add… buttons always land in VibeSpace.
+    let acct = null;
+    try { acct = await fetchJson('/api/accounts'); } catch {}
+    if (!acct) return;
+    // Prime per-account usage so the rows show current quota on open (the
+    // 30s poll also keeps it fresh). Best-effort — rows render regardless.
+    try { const u = await fetchJson('/api/usage'); if (u) { this._accountUsage = u.accounts || {}; if (u.rateLimit) this._rateLimit = u.rateLimit; } } catch {}
+    // Remote host selected → probe ITS login state for the peer row.
+    let racct = null;
+    const hostLabel = selectedHost ? (hostSel.options[hostSel.selectedIndex]?.textContent?.split(' (')[0] || t('remote host')) : null;
+    if (selectedHost) { try { racct = await fetchJson(`/api/hosts/${encodeURIComponent(selectedHost)}/accounts-status`); } catch {} }
+    const accts = await this.refreshAccounts(); // keep app cache in sync
+    const claudeAccts = (accts.accounts || []).filter(x => (x.backend || 'claude') === 'claude');
+    const row = document.createElement('div'); row.className = 'ob-backend acct-section';
+    const left = document.createElement('div');
+    left.style.flex = '1';
+    const sub = acct.subscription || {};
+    // SVG icons (no emoji) — crown for a subscription, key for an API key,
+    // star for the default toggle, pencil for rename, ✕ for remove.
+    const svg = (d, sw = 1.4) => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+    const CROWN = svg('<path d="M2.5 12.5h11M3 12.5L2 4.5l3.2 2.6L8 3l2.8 4.1L14 4.5l-1 8z"/>');
+    const GLOBE = svg('<circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c-2 2-2 10 0 12M8 2c2 2 2 10 0 12"/>');
+    const KEY = svg('<circle cx="5" cy="9" r="2.6"/><path d="M7.4 8.2 14 3M11.5 5.2l1.6 1.6M13 3.7l1.6 1.6"/>', 1.5);
+    const STAR_F = svg('<path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 11.6 4.1 13.6l.8-4.3-3.1-3 4.3-.6z" fill="currentColor"/>');
+    const STAR_O = svg('<path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 11.6 4.1 13.6l.8-4.3-3.1-3 4.3-.6z"/>');
+    const PENCIL = svg('<path d="M11 2.5 13.5 5 5.5 13H3v-2.5z"/>');
+    // Compact per-account usage readout (5h + 7d mini bars). Data is the
+    // per-subscription poll (server round-robins it, read-only; idle
+    // accounts keep last-known → a "Nm ago" staleness note).
+    const usageHtml = (u) => {
+      if (!u) return '';
+      const pct = (x) => Math.min(100, Math.round((x?.utilization || 0) * 100));
+      const bar = (label, x) => {
+        const p = pct(x);
+        const c = p > 95 ? 'var(--red,#e55)' : p > 80 ? 'var(--yellow,#e5c07b)' : 'var(--green,#3fb950)';
+        return `<span class="acct-usage-item" title="${label}: ${p}%"><span class="acct-usage-label">${label}</span><span class="acct-usage-bar"><span style="width:${p}%;background:${c}"></span></span><span class="acct-usage-pct">${p}%</span></span>`;
+      };
+      const age = u.fetchedAt ? Math.round((Date.now() - u.fetchedAt) / 60000) : null;
+      return `<span class="acct-usage">${bar('5h', u.fiveHour)}${bar('7d', u.sevenDay)}${age != null && age > 5 ? `<span class="acct-usage-age" title="${t('Last refreshed {n} min ago', { n: age })}">${t('{n}m', { n: age })}</span>` : ''}</span>`;
+    };
+    // Peer row: the SELECTED MACHINE's own global login. It's the default
+    // whenever no named account is starred (a session with no account uses
+    // the login of whatever machine it runs on). Not renamable/removable.
+    const gDef = !accts.defaultAccountId;
+    const importedTails = new Set(claudeAccts.map(a => a.tail));
+    let gName, gIdent, gExtraActions = '';
+    if (selectedHost) {
+      gName = t('CLI login on {host}', { host: escHtml(hostLabel) });
+      gIdent = racct && !racct.error
+        ? (racct.subscription?.loggedIn
+            ? `<span class="ob-ok">${t('logged in (on {host})', { host: escHtml(hostLabel) })}</span>`
+            : `<span class="ob-warn">${racct.cliKey?.present ? t('not logged in (a Console login replaced it)') : t('not logged in')}</span>`)
+        : `<span class="ob-warn">${t('unreachable')}</span>`;
+      gExtraActions = `<button class="agent-btn acct-host-login" title="${t('Opens a terminal ON {host} — this login lands on that machine, not in VibeSpace', { host: escHtml(hostLabel) })}">${t('Log in on {host}…', { host: escHtml(hostLabel) })}</button>`
+        + (racct?.cliKey?.present && !importedTails.has(racct.cliKey.tail)
+            ? `<button class="agent-btn acct-host-import" title="${t('Copy the Console key found on {host} (…{tail}) into VibeSpace so any machine can use it', { host: escHtml(hostLabel), tail: escHtml(racct.cliKey.tail) })}">${t('Import its key')}</button>` : '');
+    } else {
+      gName = t('CLI login');
+      gIdent = sub.loggedIn
+        ? escHtml((sub.email || '') + (sub.plan ? (sub.email ? ' · ' : '') + sub.plan : '')) || t('logged in')
+        : `<span class="ob-warn">${acct.cliKey?.present ? t('not logged in (a Console login replaced it)') : t('not logged in')}</span>`;
+    }
+    const globalRow = `<div class="acct-key-row${gDef ? ' is-default' : ''}" data-id="__global__">
+      <span class="acct-type-icon" title="${selectedHost ? t("This machine's own login — lives on {host}, not in VibeSpace", { host: escHtml(hostLabel) }) : t('The CLI’s own global login on this machine')}">${GLOBE}</span>
+      <span class="acct-key-main"><span class="acct-key-name">${gName}</span><span class="acct-key-tail">${gIdent}</span></span>
+      <span class="acct-usage-cell">${!selectedHost && sub.loggedIn ? usageHtml(this._rateLimit) : ''}</span>
+      <span class="acct-key-actions">
+        <button class="acct-icon acct-def ${gDef ? 'on' : ''}" title="${gDef ? t('Default for new sessions — pick another to change') : t('Set as default for new sessions')}">${gDef ? STAR_F : STAR_O}</button>${gExtraActions}
+      </span></div>`;
+    const keyLines = claudeAccts.map(a => {
+      const isDef = accts.defaultAccountId === a.id;
+      const isSub = a.type === 'subscription';
+      const ident = isSub
+        ? (a.loggedIn ? escHtml((a.email || '') + (a.subscriptionType ? (a.email ? ' · ' : '') + a.subscriptionType : '')) || t('logged in')
+                      : `<span class="ob-warn">${t('not logged in')}</span>`)
+        : `API …${escHtml(a.tail || '')}`;
+      const testTitle = selectedHost
+        ? t('Open a terminal session ON {host} billing through this account', { host: escHtml(hostLabel) })
+        : (isSub ? t('Open a terminal session on this subscription') : t("Open a terminal session using this key (approve the CLI's one-time trust prompt here if it appears)"));
+      // Every row carries the SAME controls (peers) — the default is just a
+      // star toggle whose fill differs; no row is privileged in layout.
+      return `<div class="acct-key-row${isDef ? ' is-default' : ''}" data-id="${escHtml(a.id)}" data-sub="${isSub ? '1' : ''}">
+        <span class="acct-type-icon" title="${isSub ? t('Subscription (Pro/Max) — stored in VibeSpace, works on any machine') : t('API key — stored in VibeSpace, works on any machine')}">${isSub ? CROWN : KEY}</span>
+        <span class="acct-key-main"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}</span></span>
+        <span class="acct-usage-cell">${isSub && a.loggedIn ? usageHtml(this._accountUsage?.[a.id]) : ''}</span>
+        <span class="acct-key-actions">
+          <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
+          <button class="acct-icon acct-rename" title="${t('Rename')}">${PENCIL}</button>
+          <button class="agent-btn acct-test" title="${testTitle}">${t('Test')}</button>
+          <button class="acct-icon acct-del" title="${isSub ? t('Remove this subscription from VibeSpace (deletes its stored login)') : t('Remove from VibeSpace (the key itself stays valid)')}">${svg('<path d="M4 4l8 8M12 4l-8 8"/>', 1.6)}</button>
+        </span></div>`;
+    }).join('');
+    const note = selectedHost
+      ? t("The “CLI login” row is {host}'s own login (lives on that machine). All named accounts below are stored in VibeSpace — sessions on ANY machine can use them; the credentials ship securely to the machine per session.", { host: escHtml(hostLabel) })
+      : t('Each session can pick its account (New Session dialog / card ⚙). Subscriptions bill your Pro/Max plan; API keys bill pay-per-use. The starred account is the default when a session doesn’t pick one.');
+    left.innerHTML = `<b>${t('Anthropic accounts')}</b>
+      <div class="acct-list">${globalRow}${keyLines}</div>
+      <div class="agents-note" style="margin:4px 0 0">${note}</div>`;
+    const actions = document.createElement('div'); actions.className = 'agent-actions';
+    if (!selectedHost) {
+      const needsSetup = !sub.loggedIn || !claudeAccts.length;
+      const wizardBtn = document.createElement('button');
+      wizardBtn.className = 'agent-btn' + (needsSetup ? ' primary' : '');
+      wizardBtn.textContent = t('Set up both…');
+      wizardBtn.onclick = () => { done(); this._showAccountsWizard(); };
+      actions.appendChild(wizardBtn);
+      if (acct.cliKey?.present && !acct.cliKey.imported) {
+        const impBtn = document.createElement('button'); impBtn.className = 'agent-btn primary';
+        impBtn.textContent = t('Import CLI key');
+        impBtn.title = t('Save the key your Console login minted ({org} …{tail}) into VibeSpace', { org: escHtml(acct.cliKey.org || ''), tail: escHtml(acct.cliKey.tail || '') });
+        impBtn.onclick = async () => {
+          try { const r = await fetchJson('/api/accounts/import-cli', { method: 'POST' }); showToast(t('Imported: {name}', { name: r.account.name })); } catch (e) { showToast(t('Import failed'), { type: 'error' }); }
+          refresh();
+        };
+        actions.appendChild(impBtn);
       }
-      if (!selectedHost) {
-        let acct = null;
-        try { acct = await fetchJson('/api/accounts'); } catch {}
-        // Prime per-account usage so the rows show current quota on open (the
-        // 30s poll also keeps it fresh). Best-effort — rows render regardless.
-        try { const u = await fetchJson('/api/usage'); if (u) { this._accountUsage = u.accounts || {}; if (u.rateLimit) this._rateLimit = u.rateLimit; } } catch {}
-        if (acct) {
-          const accts = await this.refreshAccounts(); // keep app cache in sync
-          const row = document.createElement('div'); row.className = 'ob-backend acct-section';
-          const left = document.createElement('div');
-          left.style.flex = '1';
-          const sub = acct.subscription || {};
-          // SVG icons (no emoji) — crown for a subscription, key for an API key,
-          // star for the default toggle, pencil for rename, ✕ for remove.
-          const svg = (d, sw = 1.4) => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
-          const CROWN = svg('<path d="M2.5 12.5h11M3 12.5L2 4.5l3.2 2.6L8 3l2.8 4.1L14 4.5l-1 8z"/>');
-          const GLOBE = svg('<circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c-2 2-2 10 0 12M8 2c2 2 2 10 0 12"/>');
-          const KEY = svg('<circle cx="5" cy="9" r="2.6"/><path d="M7.4 8.2 14 3M11.5 5.2l1.6 1.6M13 3.7l1.6 1.6"/>', 1.5);
-          const STAR_F = svg('<path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 11.6 4.1 13.6l.8-4.3-3.1-3 4.3-.6z" fill="currentColor"/>');
-          const STAR_O = svg('<path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 11.6 4.1 13.6l.8-4.3-3.1-3 4.3-.6z"/>');
-          const PENCIL = svg('<path d="M11 2.5 13.5 5 5.5 13H3v-2.5z"/>');
-          // Compact per-account usage readout (5h + 7d mini bars). Data is the
-          // per-subscription poll (server round-robins it, read-only; idle
-          // accounts keep last-known → a "Nm ago" staleness note).
-          const usageHtml = (u) => {
-            if (!u) return '';
-            const pct = (x) => Math.min(100, Math.round((x?.utilization || 0) * 100));
-            const bar = (label, x) => {
-              const p = pct(x);
-              const c = p > 95 ? 'var(--red,#e55)' : p > 80 ? 'var(--yellow,#e5c07b)' : 'var(--green,#3fb950)';
-              return `<span class="acct-usage-item" title="${label}: ${p}%"><span class="acct-usage-label">${label}</span><span class="acct-usage-bar"><span style="width:${p}%;background:${c}"></span></span><span class="acct-usage-pct">${p}%</span></span>`;
-            };
-            const age = u.fetchedAt ? Math.round((Date.now() - u.fetchedAt) / 60000) : null;
-            return `<span class="acct-usage">${bar('5h', u.fiveHour)}${bar('7d', u.sevenDay)}${age != null && age > 5 ? `<span class="acct-usage-age" title="${t('Last refreshed {n} min ago', { n: age })}">${t('{n}m', { n: age })}</span>` : ''}</span>`;
-          };
-          // The CLI's OWN global (~/.claude) login, shown as a PEER row: it's the
-          // default whenever no named account is starred. Not renamable/removable
-          // (it's the CLI's own login), but otherwise equal in the list.
-          const gDef = !accts.defaultAccountId;
-          const gIdent = sub.loggedIn
-            ? escHtml((sub.email || '') + (sub.plan ? (sub.email ? ' · ' : '') + sub.plan : '')) || t('logged in')
-            : `<span class="ob-warn">${acct.cliKey?.present ? t('not logged in (a Console login replaced it)') : t('not logged in')}</span>`;
-          const globalRow = `<div class="acct-key-row${gDef ? ' is-default' : ''}" data-id="__global__">
-            <span class="acct-type-icon" title="${t('The CLI’s own global login')}">${GLOBE}</span>
-            <span class="acct-key-main"><span class="acct-key-name">${t('CLI login')}</span><span class="acct-key-tail">${gIdent}</span></span>
-            <span class="acct-usage-cell">${sub.loggedIn ? usageHtml(this._rateLimit) : ''}</span>
-            <span class="acct-key-actions">
-              <button class="acct-icon acct-def ${gDef ? 'on' : ''}" title="${gDef ? t('Default for new sessions — pick another to change') : t('Set as default for new sessions')}">${gDef ? STAR_F : STAR_O}</button>
-            </span></div>`;
-          const keyLines = (accts.accounts || []).map(a => {
-            const isDef = accts.defaultAccountId === a.id;
-            const isSub = a.type === 'subscription';
-            const ident = isSub
-              ? (a.loggedIn ? escHtml((a.email || '') + (a.subscriptionType ? (a.email ? ' · ' : '') + a.subscriptionType : '')) || t('logged in')
-                            : `<span class="ob-warn">${t('not logged in')}</span>`)
-              : `API …${escHtml(a.tail || '')}`;
-            const testTitle = isSub ? t('Open a terminal session on this subscription') : t("Open a terminal session using this key (approve the CLI's one-time trust prompt here if it appears)");
-            // Every row carries the SAME controls (peers) — the default is just a
-            // star toggle whose fill differs; no row is privileged in layout.
-            return `<div class="acct-key-row${isDef ? ' is-default' : ''}" data-id="${escHtml(a.id)}" data-sub="${isSub ? '1' : ''}">
-              <span class="acct-type-icon" title="${isSub ? t('Subscription (Pro/Max)') : t('API key')}">${isSub ? CROWN : KEY}</span>
-              <span class="acct-key-main"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}</span></span>
-              <span class="acct-usage-cell">${isSub && a.loggedIn ? usageHtml(this._accountUsage?.[a.id]) : ''}</span>
-              <span class="acct-key-actions">
-                <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
-                <button class="acct-icon acct-rename" title="${t('Rename')}">${PENCIL}</button>
-                <button class="agent-btn acct-test" title="${testTitle}">${t('Test')}</button>
-                <button class="acct-icon acct-del" title="${isSub ? t('Remove this subscription from VibeSpace (deletes its stored login)') : t('Remove from VibeSpace (the key itself stays valid)')}">${svg('<path d="M4 4l8 8M12 4l-8 8"/>', 1.6)}</button>
-              </span></div>`;
-          }).join('');
-          left.innerHTML = `<b>${t('Anthropic accounts')}</b>
-            <div class="acct-list">${globalRow}${keyLines}</div>
-            <div class="agents-note" style="margin:4px 0 0">${t('Each session can pick its account (New Session dialog / card ⚙). Subscriptions bill your Pro/Max plan; API keys bill pay-per-use. The starred account is the default when a session doesn’t pick one.')}</div>`;
-          const actions = document.createElement('div'); actions.className = 'agent-actions';
-          const needsSetup = !sub.loggedIn || !(accts.accounts || []).length;
-          const wizardBtn = document.createElement('button');
-          wizardBtn.className = 'agent-btn' + (needsSetup ? ' primary' : '');
-          wizardBtn.textContent = t('Set up both…');
-          wizardBtn.onclick = () => { done(); this._showAccountsWizard(); };
-          actions.appendChild(wizardBtn);
-          if (acct.cliKey?.present && !acct.cliKey.imported) {
-            const impBtn = document.createElement('button'); impBtn.className = 'agent-btn primary';
-            impBtn.textContent = t('Import CLI key');
-            impBtn.title = t('Save the key your Console login minted ({org} …{tail}) into VibeSpace', { org: escHtml(acct.cliKey.org || ''), tail: escHtml(acct.cliKey.tail || '') });
-            impBtn.onclick = async () => {
-              try { const r = await fetchJson('/api/accounts/import-cli', { method: 'POST' }); showToast(t('Imported: {name}', { name: r.account.name })); } catch (e) { showToast(t('Import failed'), { type: 'error' }); }
-              refresh();
-            };
-            actions.appendChild(impBtn);
-          }
-          const addSubBtn = document.createElement('button'); addSubBtn.className = 'agent-btn primary'; addSubBtn.textContent = t('Add subscription…');
-          addSubBtn.title = t('Sign in another Claude Pro/Max account — held in its own isolated login, switchable per session');
-          addSubBtn.onclick = () => { done(); this._addSubscription(); };
-          actions.appendChild(addSubBtn);
-          const addConBtn = document.createElement('button'); addConBtn.className = 'agent-btn'; addConBtn.textContent = t('Add Console account…');
-          addConBtn.title = t('Sign in to an Anthropic Console account — its API key is captured in an isolated login, so your subscription stays intact');
-          addConBtn.onclick = () => { done(); this._addConsoleAccount(); };
-          actions.appendChild(addConBtn);
-          const addBtn = document.createElement('button'); addBtn.className = 'agent-btn'; addBtn.textContent = t('Add API key…');
-          addBtn.title = t('Paste a raw Anthropic API key (sk-ant-…) — bills pay-per-use, separate from the console-login import');
-          addBtn.onclick = async () => {
-            const key = await showInputDialog({ title: t('Add API key'), label: t('Anthropic API key (from console.anthropic.com)'), placeholder: 'sk-ant-…', confirmText: t('Save') });
-            if (!key || !key.trim()) return;
-            const name = await showInputDialog({ title: t('Name this account'), label: t('Shown in account pickers'), placeholder: t('e.g. Company API'), confirmText: t('Save') });
-            try {
-              const r = await fetchJson('/api/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: key.trim(), name: (name || '').trim() }) });
-              if (r?.account) showToast(t('Saved: {name} — use Test once to approve the CLI’s trust prompt', { name: r.account.name }));
-              else showToast(r?.error || t('Save failed'), { type: 'error' });
-            } catch { showToast(t('Save failed'), { type: 'error' }); }
-            refresh();
-          };
-          actions.appendChild(addBtn);
-          row.append(left, actions);
-          body.appendChild(row);
-          // Per-key row actions (event delegation on the section)
-          left.onclick = async (e) => {
-            const keyRow = e.target.closest?.('.acct-key-row');
-            if (!keyRow) return;
-            const id = keyRow.dataset.id;
-            // The global CLI-login peer row only has the default star.
-            if (id === '__global__') {
-              if (e.target.closest('.acct-def')) {
-                try { await fetchJson('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: null }) }); } catch {}
-                refresh();
-              }
-              return;
-            }
-            const a = (accts.accounts || []).find(x => x.id === id);
-            // closest() — the click can land on an <svg>/<path> inside the button.
-            if (e.target.closest('.acct-test')) {
-              // A not-logged-in subscription can't spawn — the server would
-              // reject the create and leave a blank window. Guard it here.
-              if (a?.type === 'subscription' && !a.loggedIn) {
-                showToast(t('This subscription isn’t signed in yet — use “Add subscription…” to finish the login first.'), { type: 'error' });
-                return;
-              }
-              done();
-              // Diagnostic session — closing its window always terminates it
-              // (ephemeral), never leaves a detached test session lingering.
-              this.createSession({ backend: 'claude', mode: 'terminal', cwd: '', accountId: id, ephemeral: true });
-            } else if (e.target.closest('.acct-def')) {
-              const isDef = accts.defaultAccountId === id;
-              try { await fetchJson('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: isDef ? null : id }) }); } catch {}
-              refresh();
-            } else if (e.target.closest('.acct-rename')) {
-              const name = await showInputDialog({ title: t('Rename account'), label: t('Account name'), value: a?.name || '', confirmText: t('Save') });
-              if (name && name.trim() && name.trim() !== a?.name) {
-                try { await fetchJson(`/api/accounts/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) }); } catch {}
-                refresh();
-              }
-            } else if (e.target.closest('.acct-del')) {
-              if (!(await showConfirmDialog({ title: t('Remove account'), message: t('Remove "{name}" from VibeSpace? Sessions already running keep working; the key itself stays valid.', { name: a?.name }) }))) return;
-              try { await fetchJson(`/api/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }); } catch {}
-              refresh();
-            }
-          };
+    }
+    // The Add… buttons ALWAYS add to VibeSpace's store (machine-independent) —
+    // available with a remote host selected too; the login terminal runs
+    // locally and the resulting account works everywhere.
+    const addSubBtn = document.createElement('button'); addSubBtn.className = 'agent-btn primary'; addSubBtn.textContent = t('Add subscription…');
+    addSubBtn.title = t('Sign in another Claude Pro/Max account — stored in VibeSpace (not on any one machine), switchable per session');
+    addSubBtn.onclick = () => { done(); this._addSubscription(); };
+    actions.appendChild(addSubBtn);
+    const addConBtn = document.createElement('button'); addConBtn.className = 'agent-btn'; addConBtn.textContent = t('Add Console account…');
+    addConBtn.title = t('Sign in to an Anthropic Console account — its API key is captured in an isolated login, so your subscription stays intact');
+    addConBtn.onclick = () => { done(); this._addConsoleAccount(); };
+    actions.appendChild(addConBtn);
+    const addBtn = document.createElement('button'); addBtn.className = 'agent-btn'; addBtn.textContent = t('Add API key…');
+    addBtn.title = t('Paste a raw Anthropic API key (sk-ant-…) — bills pay-per-use, separate from the console-login import');
+    addBtn.onclick = async () => {
+      const key = await showInputDialog({ title: t('Add API key'), label: t('Anthropic API key (from console.anthropic.com)'), placeholder: 'sk-ant-…', confirmText: t('Save') });
+      if (!key || !key.trim()) return;
+      const name = await showInputDialog({ title: t('Name this account'), label: t('Shown in account pickers'), placeholder: t('e.g. Company API'), confirmText: t('Save') });
+      try {
+        const r = await fetchJson('/api/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: key.trim(), name: (name || '').trim() }) });
+        if (r?.account) showToast(t('Saved: {name} — use Test once to approve the CLI’s trust prompt', { name: r.account.name }));
+        else showToast(r?.error || t('Save failed'), { type: 'error' });
+      } catch { showToast(t('Save failed'), { type: 'error' }); }
+      refresh();
+    };
+    actions.appendChild(addBtn);
+    if (ctx.stale?.()) return; // a newer refresh took over mid-await
+    row.append(left, actions);
+    body.appendChild(row);
+    // Per-key row actions (event delegation on the section)
+    left.onclick = async (e) => {
+      const keyRow = e.target.closest?.('.acct-key-row');
+      if (!keyRow) return;
+      const id = keyRow.dataset.id;
+      // The peer CLI-login row: default star + (host) login/import actions.
+      if (id === '__global__') {
+        if (e.target.closest('.acct-host-login')) {
+          // Runs ON the selected host (run() targets it) — lands in the
+          // host's own ~/.claude, NOT in VibeSpace's store.
+          run('claude /login');
+        } else if (e.target.closest('.acct-host-import')) {
+          try {
+            const r = await fetchJson('/api/accounts/import-cli-host', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hostId: selectedHost }) });
+            if (r?.account) showToast(t('Imported: {name}', { name: r.account.name })); else showToast(r?.error || t('Import failed'), { type: 'error' });
+          } catch { showToast(t('Import failed'), { type: 'error' }); }
+          refresh();
+        } else if (e.target.closest('.acct-def')) {
+          try { await fetchJson('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: null }) }); } catch {}
+          refresh();
         }
+        return;
       }
+      const a = claudeAccts.find(x => x.id === id);
+      // closest() — the click can land on an <svg>/<path> inside the button.
+      if (e.target.closest('.acct-test')) {
+        // A not-logged-in subscription can't spawn — the server would
+        // reject the create and leave a blank window. Guard it here.
+        if (a?.type === 'subscription' && !a.loggedIn) {
+          showToast(t('This subscription isn’t signed in yet — use “Add subscription…” to finish the login first.'), { type: 'error' });
+          return;
+        }
+        done();
+        // Diagnostic session — closing its window always terminates it
+        // (ephemeral), never leaves a detached test session lingering.
+        // With a remote host selected the test runs ON that host (the
+        // account's creds ship to it), proving the full remote path.
+        this.createSession({ backend: 'claude', mode: 'terminal', cwd: '', accountId: id, ephemeral: true, hostId: selectedHost || undefined });
+      } else if (e.target.closest('.acct-def')) {
+        const isDef = accts.defaultAccountId === id;
+        try { await fetchJson('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: isDef ? null : id }) }); } catch {}
+        refresh();
+      } else if (e.target.closest('.acct-rename')) {
+        const name = await showInputDialog({ title: t('Rename account'), label: t('Account name'), value: a?.name || '', confirmText: t('Save') });
+        if (name && name.trim() && name.trim() !== a?.name) {
+          try { await fetchJson(`/api/accounts/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) }); } catch {}
+          refresh();
+        }
+      } else if (e.target.closest('.acct-del')) {
+        if (!(await showConfirmDialog({ title: t('Remove account'), message: t('Remove "{name}" from VibeSpace? Sessions already running keep working; the key itself stays valid.', { name: a?.name }) }))) return;
+        try { await fetchJson(`/api/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }); } catch {}
+        refresh();
+      }
+    };
   }
 
   // ── Shared modal shell for the config/password dialogs ──
