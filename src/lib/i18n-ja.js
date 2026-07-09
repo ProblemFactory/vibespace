@@ -1057,4 +1057,7 @@ export default {
   "Declare which Anthropic account this is — the email links it to the machine login for merged usage": "どの Anthropic アカウントかを指定 — メールでマシンのログインと同一アカウントか判定します(使用量は統合表示)",
   "Account email": "アカウントのメール",
   "Email of this Anthropic account. Used to recognize when it is the same account as a machine login (their usage then shows merged).": "この Anthropic アカウントのメールアドレス。マシンのログインと同一アカウントかの判定に使われます(同一なら使用量が統合表示されます)。",
+  "Account was removed from VibeSpace — history kept": "このアカウントは VibeSpace から削除済み — 履歴は保持",
+  "Same account as the machine CLI login — includes its (unattributed) usage too": "このマシンの CLI ログインと同一アカウント — その(未帰属の)使用量も含みます",
+  "Sessions that ran on the machine’s own login (no VibeSpace account selected)": "マシン自身のログインで実行されたセッション(VibeSpace アカウント未選択)",
 };
