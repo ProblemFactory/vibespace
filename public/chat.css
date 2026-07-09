@@ -254,6 +254,9 @@
 .chat-hook-summary::-webkit-details-marker { display: none; }
 .chat-hook-summary::before { content: '\25B8  '; }
 .chat-hook-details[open] > .chat-hook-summary::before { content: '\25BE  '; }
+/* Full hook output (no char truncation) — cap the height + scroll so a large
+   hook payload stays fully readable without flooding the transcript. */
+.chat-hook-output { max-height: 420px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
 [data-role-indicator="border"] .chat-system-notification { border-left-color: var(--text-dim); }
 
 
