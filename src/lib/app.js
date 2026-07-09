@@ -530,27 +530,35 @@ class App {
       <span class="acct-key-actions">
         <button class="acct-icon acct-def ${gDef ? 'on' : ''}" title="${gDef ? t('Default for new sessions — pick another to change') : t('Set as default for new sessions')}">${gDef ? STAR_F : STAR_O}</button>${gExtraActions}
       </span></div>`;
+    // §ban-safety: a ChatGPT account (isolated CODEX_HOME) can't run on a
+    // remote host unless the opt-in is set — same as Claude subscriptions.
+    const allowSubRemote = !!this.settings?.get?.('accounts.shipSubscriptionToRemote');
+    const subBlocked = !!selectedHost && !allowSubRemote;
     const keyLines = codexAccts.map(a => {
       const isDef = accts.defaultCodexAccountId === a.id;
+      const blocked = subBlocked;
       const ident = a.loggedIn
         ? escHtml((a.email || '') + (a.subscriptionType ? (a.email ? ' · ' : '') + a.subscriptionType : '')) || t('logged in')
         : `<span class="ob-warn">${t('not logged in')}</span>`;
-      const testTitle = selectedHost
-        ? t('Open a terminal session ON {host} billing through this account', { host: escHtml(hostLabel) })
-        : t('Open a terminal session on this account');
-      return `<div class="acct-key-row${isDef ? ' is-default' : ''}" data-id="${escHtml(a.id)}">
-        <span class="acct-type-icon" title="${t('ChatGPT account — stored in VibeSpace, works on any machine')}">${CROWN}</span>
-        <span class="acct-key-main"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}</span></span>
+      const hint = blocked ? ` <span class="acct-blocked-hint" title="${t('Runs on this machine only. For {host}, log in on the host — or enable Settings → “Ship subscription logins to remote hosts.”', { host: escHtml(hostLabel) })}">${t('· this machine only')}</span>` : '';
+      const testTitle = blocked
+        ? t('Subscriptions can’t run on {host} by default — log in on the host, or enable the setting', { host: escHtml(hostLabel) })
+        : selectedHost
+          ? t('Open a terminal session ON {host} billing through this account', { host: escHtml(hostLabel) })
+          : t('Open a terminal session on this account');
+      return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}"${blocked ? ' data-blocked="1"' : ''}>
+        <span class="acct-type-icon" title="${t('ChatGPT account — runs on this machine (or a host you log into)')}">${CROWN}</span>
+        <span class="acct-key-main"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span></span>
         <span class="acct-usage-cell"></span>
         <span class="acct-key-actions">
           <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
           <button class="acct-icon acct-rename" title="${t('Rename')}">${PENCIL}</button>
-          <button class="agent-btn acct-test" title="${testTitle}">${t('Test')}</button>
+          <button class="agent-btn acct-test${blocked ? ' acct-test-blocked' : ''}" title="${testTitle}">${t('Test')}</button>
           <button class="acct-icon acct-del" title="${t('Remove this account from VibeSpace (deletes its stored login)')}">${svg('<path d="M4 4l8 8M12 4l-8 8"/>', 1.6)}</button>
         </span></div>`;
     }).join('');
     const note = selectedHost
-      ? t("The “CLI login” row is {host}'s own login (lives on that machine). All named accounts below are stored in VibeSpace — sessions on ANY machine can use them; the credentials ship securely to the machine per session.", { host: escHtml(hostLabel) })
+      ? t("The “CLI login” row is {host}'s own login (lives on that machine). Named accounts run on THIS machine only — for {host}, use “Log in on host…”, or enable Settings → “Ship subscription logins to remote hosts.”", { host: escHtml(hostLabel) })
       : t('Each Codex session can pick its ChatGPT login (New Session dialog / card ⚙). Held in isolated logins, switchable per session; threads stay shared.');
     left.innerHTML = `<b>${t('ChatGPT / OpenAI accounts')}</b>
       <div class="acct-list">${globalRow}${keyLines}</div>
@@ -582,6 +590,10 @@ class App {
       const a = codexAccts.find(x => x.id === id);
       if (e.target.closest('.acct-test')) {
         if (!a?.loggedIn) { showToast(t('This account isn’t signed in yet — use “Add ChatGPT account…” to finish the login first.'), { type: 'error' }); return; }
+        if (keyRow.dataset.blocked) {
+          showToast(t('“{name}” runs on this machine only. For {host}, use “Log in on host…” on the CLI-login row, or turn on Settings → “Ship subscription logins to remote hosts.”', { name: a?.name, host: escHtml(hostLabel) }), { type: 'error', duration: 6000 });
+          return;
+        }
         done();
         // With a remote host selected the test runs ON that host (auth.json
         // ships to it) — proving the full remote path.
@@ -906,6 +918,11 @@ class App {
     if (selectedHost) { try { racct = await fetchJson(`/api/hosts/${encodeURIComponent(selectedHost)}/accounts-status`); } catch {} }
     const accts = await this.refreshAccounts(); // keep app cache in sync
     const claudeAccts = (accts.accounts || []).filter(x => (x.backend || 'claude') === 'claude');
+    // §ban-safety: on a REMOTE host a subscription can't run unless the opt-in
+    // is set (its creds would ship to the host's — likely datacenter — IP). Its
+    // rows render disabled with guidance; API keys are unaffected.
+    const allowSubRemote = !!this.settings?.get?.('accounts.shipSubscriptionToRemote');
+    const subBlocked = !!selectedHost && !allowSubRemote;
     const row = document.createElement('div'); row.className = 'ob-backend acct-section';
     const left = document.createElement('div');
     left.style.flex = '1';
@@ -965,28 +982,33 @@ class App {
     const keyLines = claudeAccts.map(a => {
       const isDef = accts.defaultAccountId === a.id;
       const isSub = a.type === 'subscription';
+      const blocked = isSub && subBlocked; // subscription on a remote host, opt-in off
       const ident = isSub
         ? (a.loggedIn ? escHtml((a.email || '') + (a.subscriptionType ? (a.email ? ' · ' : '') + a.subscriptionType : '')) || t('logged in')
                       : `<span class="ob-warn">${t('not logged in')}</span>`)
         : `API …${escHtml(a.tail || '')}`;
-      const testTitle = selectedHost
-        ? t('Open a terminal session ON {host} billing through this account', { host: escHtml(hostLabel) })
-        : (isSub ? t('Open a terminal session on this subscription') : t("Open a terminal session using this key (approve the CLI's one-time trust prompt here if it appears)"));
+      const hint = blocked ? ` <span class="acct-blocked-hint" title="${t('Runs on this machine only. For {host}, log in on the host — or enable Settings → “Ship subscription logins to remote hosts.”', { host: escHtml(hostLabel) })}">${t('· this machine only')}</span>` : '';
+      const testTitle = blocked
+        ? t('Subscriptions can’t run on {host} by default — log in on the host, or enable the setting', { host: escHtml(hostLabel) })
+        : selectedHost
+          ? t('Open a terminal session ON {host} billing through this account', { host: escHtml(hostLabel) })
+          : (isSub ? t('Open a terminal session on this subscription') : t("Open a terminal session using this key (approve the CLI's one-time trust prompt here if it appears)"));
+      const iconTitle = isSub ? t('Subscription (Pro/Max) — runs on this machine (or a host you log into)') : t('API key — stored in VibeSpace, runs on any machine');
       // Every row carries the SAME controls (peers) — the default is just a
       // star toggle whose fill differs; no row is privileged in layout.
-      return `<div class="acct-key-row${isDef ? ' is-default' : ''}" data-id="${escHtml(a.id)}" data-sub="${isSub ? '1' : ''}">
-        <span class="acct-type-icon" title="${isSub ? t('Subscription (Pro/Max) — stored in VibeSpace, works on any machine') : t('API key — stored in VibeSpace, works on any machine')}">${isSub ? CROWN : KEY}</span>
-        <span class="acct-key-main"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}</span></span>
+      return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}" data-sub="${isSub ? '1' : ''}"${blocked ? ' data-blocked="1"' : ''}>
+        <span class="acct-type-icon" title="${iconTitle}">${isSub ? CROWN : KEY}</span>
+        <span class="acct-key-main"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span></span>
         <span class="acct-usage-cell">${isSub && a.loggedIn ? usageHtml(this._accountUsage?.[a.id]) : ''}</span>
         <span class="acct-key-actions">
           <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
           <button class="acct-icon acct-rename" title="${t('Rename')}">${PENCIL}</button>
-          <button class="agent-btn acct-test" title="${testTitle}">${t('Test')}</button>
+          <button class="agent-btn acct-test${blocked ? ' acct-test-blocked' : ''}" title="${testTitle}">${t('Test')}</button>
           <button class="acct-icon acct-del" title="${isSub ? t('Remove this subscription from VibeSpace (deletes its stored login)') : t('Remove from VibeSpace (the key itself stays valid)')}">${svg('<path d="M4 4l8 8M12 4l-8 8"/>', 1.6)}</button>
         </span></div>`;
     }).join('');
     const note = selectedHost
-      ? t("The “CLI login” row is {host}'s own login (lives on that machine). All named accounts below are stored in VibeSpace — sessions on ANY machine can use them; the credentials ship securely to the machine per session.", { host: escHtml(hostLabel) })
+      ? t("The “CLI login” row is {host}'s own login (lives on that machine). API-key accounts below ship to {host} per session; subscription accounts run on THIS machine only — for {host}, use “Log in on host…”, or enable Settings → “Ship subscription logins to remote hosts.”", { host: escHtml(hostLabel) })
       : t('Each session can pick its account (New Session dialog / card ⚙). Subscriptions bill your Pro/Max plan; API keys bill pay-per-use. The starred account is the default when a session doesn’t pick one.');
     left.innerHTML = `<b>${t('Anthropic accounts')}</b>
       <div class="acct-list">${globalRow}${keyLines}</div>
@@ -1068,6 +1090,12 @@ class App {
         // reject the create and leave a blank window. Guard it here.
         if (a?.type === 'subscription' && !a.loggedIn) {
           showToast(t('This subscription isn’t signed in yet — use “Add subscription…” to finish the login first.'), { type: 'error' });
+          return;
+        }
+        // §ban-safety: a subscription can't run on a remote host by default.
+        // Explain instead of firing a create the server will reject.
+        if (keyRow.dataset.blocked) {
+          showToast(t('“{name}” runs on this machine only. For {host}, use “Log in on host…” on the CLI-login row, or turn on Settings → “Ship subscription logins to remote hosts.”', { name: a?.name, host: escHtml(hostLabel) }), { type: 'error', duration: 6000 });
           return;
         }
         done();
@@ -1847,7 +1875,17 @@ class App {
   _renderUsage() {
     const usageEl = document.getElementById('taskbar-usage');
     const popup = document.getElementById('usage-popup');
-    const rl = this._rateLimit;
+    // The Claude pies follow the DEFAULT account — that's what new sessions
+    // actually bill to, and its usage is refreshed passively when you run a
+    // terminal session on it (statusLine capture). If no named account is
+    // starred, fall back to the machine's own global login. This is why running
+    // a session on your starred subscription updates the taskbar (it used to
+    // always show the global login, so a session on a named account looked like
+    // "nothing refreshed").
+    const claudeDefId = this._accounts?.defaultAccountId;
+    const claudeDefAcct = claudeDefId ? (this._accounts?.accounts || []).find(a => a.id === claudeDefId) : null;
+    const rl = (claudeDefId && this._accountUsage?.[claudeDefId]) ? this._accountUsage[claudeDefId] : this._rateLimit;
+    const claudeUsageLabel = claudeDefAcct ? claudeDefAcct.name : 'Claude';
     const codex = this._codexRateLimit;
 
     if (!rl && !codex) {
@@ -1915,7 +1953,8 @@ class App {
         </div>
       </div>`);
       }
-      sections.push(`${renderSectionTitle('claude', 'Claude')}
+      sections.push(`${renderSectionTitle('claude', claudeUsageLabel)}
+      ${claudeDefAcct ? `<div class="usage-note">${t('Default account · refreshes when you run it in a terminal session')}</div>` : ''}
       <div class="usage-session">
         <div class="usage-session-name">${t('5-hour limit')}</div>
         <div class="usage-bar" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pct5h}%;background:${color}"></div></div>

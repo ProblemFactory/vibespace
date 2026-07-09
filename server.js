@@ -2581,6 +2581,7 @@ function ingestPassiveUsage() {
   for (const fn of entries) {
     if (!fn.endsWith('.json')) continue;
     const key = fn.slice(0, -5);
+    if (key === '__models__') { ingestPassiveModels(fn); continue; }
     let u = null;
     try { u = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, fn), 'utf-8')); } catch { continue; }
     if (!u || typeof u.fetchedAt !== 'number') continue;
@@ -2593,6 +2594,19 @@ function ingestPassiveUsage() {
       _accountUsage[key] = { ...u, name: meta.name, email: meta.email };
     }
   }
+}
+// Merge PASSIVELY-discovered full model IDs (from the statusLine hook — models
+// you actually ran) into the Claude dropdown, after the hardcoded aliases and
+// deduped by id. Zero API calls; this is the passive counterpart to the
+// (now opt-in) /v1/models fetch.
+function ingestPassiveModels(fn) {
+  let list = [];
+  try { list = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, fn), 'utf-8')); } catch { return; }
+  if (!Array.isArray(list) || !list.length) return;
+  const have = new Set((AVAILABLE_MODELS.claude || []).map((m) => m.id));
+  const add = list.filter((m) => m && typeof m.id === 'string' && !have.has(m.id))
+                  .map((m) => ({ id: m.id, label: m.label || m.id }));
+  if (add.length) AVAILABLE_MODELS.claude = [...(AVAILABLE_MODELS.claude || []), ...add];
 }
 ingestPassiveUsage();
 setInterval(ingestPassiveUsage, 30000); // local disk read only — no network
