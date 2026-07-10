@@ -781,6 +781,8 @@ class TerminalSession {
 
   focus() { this.terminal.focus(); this._setBell(false); this._setWaiting(false); }
   dispose() {
+    if (this._fitTimer) { clearTimeout(this._fitTimer); this._fitTimer = null; }
+    if (this._pastePad) { try { this._pastePad.remove(); } catch {} this._pastePad = null; }
     if (this._dprCleanup) this._dprCleanup();
     if (this._webgl) { try { this._webgl.dispose(); } catch {} this._webgl = null; }
     if (this._capEls) { for (const el of this._capEls) el.remove(); this._capEls = null; }

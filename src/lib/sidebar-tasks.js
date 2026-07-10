@@ -74,10 +74,18 @@ export function installSidebarTasks(SidebarClass) {
         this.refreshTaskAttention();
         this.app.onTasksUpdated?.(msg.tasks);
       } else if (msg.type === 'session-status-updated' && msg.statuses) {
+        // Change-guard (audit round-2): every agent's vibespace-status call
+        // broadcasts to every client — identical snapshots must not trigger a
+        // full sidebar rebuild (folder grouping over ~5k sessions).
+        const sig = JSON.stringify(msg.statuses);
+        const changed = sig !== this._statusSig;
+        this._statusSig = sig;
         this._sessionStatuses = msg.statuses;
-        this._render();
-        this._lastAttnSig = null; // blocked counts feed task attention
-        this.refreshTaskAttention();
+        if (changed) {
+          this._render();
+          this._lastAttnSig = null; // blocked counts feed task attention
+          this.refreshTaskAttention();
+        }
       }
     });
   };

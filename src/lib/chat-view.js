@@ -1410,7 +1410,14 @@ class ChatView {
       }
       this._chatMinimap.setViewport(this._windowStart, this._windowEnd, this._total);
     }
-    if (this._pinned) this._scrollToBottom();
+    if (this._pinned) {
+      // Live path trim (audit-confirmed): _trimTop was only ever called from
+      // pagination, so a pinned chat streaming for DAYS grew the DOM without
+      // bound. While pinned the user is at the bottom — dropping the oldest
+      // rendered rows is invisible; scrolling up re-loads them via _extendTop.
+      this._trimTop();
+      this._scrollToBottom();
+    }
   }
 
   // Edit an existing message → re-render in place
@@ -1716,8 +1723,12 @@ class ChatView {
       cwd,
     });
 
-    // One-time handler for attach response
+    // One-time handler for attach response — MUST self-guard (documented
+    // invariant: closing the window mid-attach otherwise leaks the handler
+    // and leaves a phantom viewer entry; same fix as app.js attachSession)
     const handler = (msg) => {
+      if (!this.app.wm.windows.has(winInfo.id)) { this.ws.offGlobal(handler); return; }
+      if (msg.type === 'error' && msg.sessionId === virtualId) { this.ws.offGlobal(handler); return; }
       if (msg.type === 'attached' && msg.sessionId === virtualId) {
         this.ws.offGlobal(handler);
         if (msg.messages?.length) {
@@ -1753,6 +1764,9 @@ class ChatView {
     if (backend !== 'codex') return;
     const tick = async () => {
       if (this._disposed) return;
+      // Hidden tab: 2s polling of a read-only view is pure waste — heartbeat
+      // at 30s and catch up when visible again (sidebar poll pattern).
+      if (document.hidden) { this._readOnlyPollTimer = setTimeout(tick, 30000); return; }
       try {
         const nextOffset = this._windowEnd || 0;
         const page = await this._fetchMessagePage(nextOffset, 200, { withStatus: true });

@@ -203,7 +203,10 @@ function extractSessionMeta(filePath) {
   } catch {}
 
   const meta = { cwd, name };
-  try { _sessionMetaCache.set(filePath, { mtimeMs: fs.statSync(filePath).mtimeMs, meta }); } catch {}
+  try {
+    _sessionMetaCache.set(filePath, { mtimeMs: fs.statSync(filePath).mtimeMs, meta });
+    if (_sessionMetaCache.size > 8192) _sessionMetaCache.delete(_sessionMetaCache.keys().next().value);
+  } catch {}
   return meta;
 }
 

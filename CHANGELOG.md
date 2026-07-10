@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.83.0] — 2026-07-10
+
+### Performance — audit round 2 (6 agents: server + cross lanes, 4 verifications)
+Server, weeks-uptime class:
+- Killed sessions leaked every subagent fs.watch/retry-timer/normalizer (the
+  kill path deleted the session before onExit's teardown could run — teardown
+  now runs inside the kill case); completed agents' buffered messages are
+  freed 60s after task_notification (previously retained twice, unbounded).
+- Codex sessions were renamed on EVERY tool call (function_call payload.name
+  is the tool name) — two sync meta writes + two broadcasts each, forever.
+  Names now come only from session_meta/wrapper_meta.
+- /api/sessions: cache TTL 2s→4.5s (every 5s poll used to miss), per-session
+  blocking pgrep now 15s-cached, codex /proc fd-walk 10s-cached. Measured:
+  0.36s sweep → 0.011s cached poll.
+- Unbounded maps capped: _lastAttrib, _sessionMetaCache, _realCwdCache.
+Client, days-uptime class:
+- Live pinned chats now trim their DOM (verified: trim previously ran only on
+  pagination — a streaming chat open for days grew without bound).
+- Desktop switcher no longer rebuilds all previews on every window
+  mousedown/focus/blink (digest guard); Session Properties debounces its
+  full re-render off the 5s broadcast storm; sidebar text filter debounced;
+  session-status broadcasts skip identical snapshots; workflow-detail and
+  read-only-view polls back off while the tab is hidden; usage pies/popup
+  skip identical HTML; syncSessionIdentity indexes sessions once per merge;
+  language-picker list memoized; terminal fit-timer/paste-pad cleaned on
+  dispose; onboarding keydown released on finish; taskbar hotzone listeners
+  no longer stack; fork/create pending-name maps cleaned on window close;
+  subagent viewer attach handler self-guards (documented invariant).
+
 ## [2.82.0] — 2026-07-10
 
 ### Refactor — app.js split into prototype mixins (3,861 → 2,045 lines)

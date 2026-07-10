@@ -360,10 +360,14 @@ export function installUsageMeter(App, ctx = {}) {
       ${cBody}`);
     }
 
-    usageEl.innerHTML = rows.join('');
+    // Change-guard: this runs every 8s poll; unchanged HTML must not churn
+    // the taskbar pie DOM / popup subtree (constant layout + GC pressure).
+    const rowsHtml = rows.join('');
+    if (rowsHtml !== this._usageRowsHtml) { this._usageRowsHtml = rowsHtml; usageEl.innerHTML = rowsHtml; }
     // Per-SECTION freshness: claude and codex poll independently — a stalled
     // claude poll (e.g. signed out) must not make codex's data look stale too.
-    popup.innerHTML = sections.join('');
+    const secHtml = sections.join('');
+    if (secHtml !== this._usageSecHtml) { this._usageSecHtml = secHtml; popup.innerHTML = secHtml; }
   },
   });
 }

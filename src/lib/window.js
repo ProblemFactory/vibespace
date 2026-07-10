@@ -893,6 +893,7 @@ class WindowManager {
   }
   setTitle(id, t) {
     const win = this.windows.get(id); if (!win) return;
+    if (win.title === t) return; // no-op guard: called per 5s identity sync for every window
     win.title = t; win.titleSpan.textContent = t;
     // Update tab label if in a chain
     if (win._tabChain) {

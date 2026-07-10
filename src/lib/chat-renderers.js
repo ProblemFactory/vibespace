@@ -1018,7 +1018,9 @@ class ChatRenderers {
 
   /** Add wrap toggle button to all <pre> blocks inside an element */
   addWrapToggles(el) {
-    const LANGS = ['plain', ...getHljsLanguages().sort()];
+    // Memoized — this ran (registry + sort) for every message create/edit
+    if (!ChatRenderers._LANGS) ChatRenderers._LANGS = ['plain', ...getHljsLanguages().sort()];
+    const LANGS = ChatRenderers._LANGS;
 
     for (const block of el.querySelectorAll('pre, .chat-diff-body, .chat-code-block')) {
       if (block.parentNode?.classList?.contains('chat-pre-wrap')) continue;
