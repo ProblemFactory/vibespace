@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.89.2 — 2026-07-10
+
+**THE restart history-truncation bug (root cause of "重启之后消息都没了")**
+- A 2.80.0 typo in the hook-card normalizer (`output` instead of `raw.output`, message-manager.js) threw a ReferenceError on EVERY `system/hook_response` record. The live path swallowed it per-line, and hook_response exists only in the stdout buffer (never in the JSONL), so it hid for 9 releases — but the attach-time HISTORY REBUILD after a server restart crashed at the first buffered hook record, amputating everything after it: later replies missing, stale user message pinned at the end, pending tool cards gone. Adversarially root-caused with an offline reproduction over the affected session's real data (3,946 messages restored vs 3,883 truncated).
+- Hardening so this class can't recur: `convertHistory` isolates each record (a malformed record skips, never amputates), and `_historyLoaded` is set only AFTER a successful rebuild (set-before-work turned one crash into a permanently truncated view because re-attaches skipped the rebuild).
+
 ## 2.89.1 — 2026-07-10
 
 **Restart data-loss hardening (real incident chain)**

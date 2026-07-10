@@ -40,7 +40,11 @@ class MessageManager {
    */
   convertHistory(claudeMessages) {
     for (const msg of claudeMessages) {
-      this._processMessage(msg, false);
+      // Per-record isolation: a single malformed/crashing record must skip,
+      // not amputate everything after it (a ReferenceError here once truncated
+      // every rebuilt session view at the first hook record — fleet-wide).
+      try { this._processMessage(msg, false); }
+      catch (e) { console.error('[normalizer] record skipped during history rebuild:', e.message); }
     }
     // Finalize any trailing streaming text
     this._finalizeStreaming(false);
@@ -215,7 +219,11 @@ class MessageManager {
         role: 'system', status: ok ? 'complete' : 'error',
         content: [{ type: 'system_info', text: `${icon} Hook: ${name}`, hookData: { name, event: raw.hook_event, outcome: raw.outcome, exitCode: raw.exit_code, output: raw.output } }],
       });
-      this._lastHookCard = { name, ts: this._currentTs, msgId: msg.id, outHead: output ? output.slice(0, 200) : null };
+      // raw.output, NOT bare `output` — the 2.80.0 typo threw ReferenceError on
+      // EVERY hook_response during convertHistory, amputating rebuilt history at
+      // the first buffer hook record (live path swallowed it per-line; the
+      // "restart 之后消息都没了" incident).
+      this._lastHookCard = { name, ts: this._currentTs, msgId: msg.id, outHead: raw.output ? String(raw.output).slice(0, 200) : null };
       if (emit) this._emit({ op: 'create', message: msg });
     }
 
