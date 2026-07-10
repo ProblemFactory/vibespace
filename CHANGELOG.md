@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.73.0] — 2026-07-10
+
+### Added — systemd user service
+`./scripts/install-service.sh` installs VibeSpace as a systemd user service
+(`vibespace.service`): Restart=always (verified surviving SIGKILL),
+OOMScoreAdjust=-500, unlimited start retries for late-appearing network
+mounts, lingering enabled so it runs without an active login. Manage with
+`systemctl --user restart vibespace`, logs via `journalctl --user -u
+vibespace`. The service runs a prebuilt tree — build at deploy, then restart.
+
 ## [2.72.0] — 2026-07-10
 
 ### Added — on-demand quota refresh is now configurable, with a warning

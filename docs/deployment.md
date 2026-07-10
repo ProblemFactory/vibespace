@@ -48,6 +48,23 @@ Auth is **off by default** (local single-user use). Enable it by giving the serv
 
 **Reverse proxy note:** run behind HTTPS (nginx/caddy) for anything non-localhost. The cookie sets `Secure` automatically when the request arrives as HTTPS (`X-Forwarded-Proto: https` respected).
 
+## systemd user service (bare-metal Linux)
+
+For a persistent bare-metal install, run VibeSpace as a systemd *user* service —
+it runs as your user (the server spawns agent CLIs and reads `~/.claude`), needs
+no root, restarts on crash/OOM, and logs to journald:
+
+```bash
+./scripts/install-service.sh        # install + enable + start (also enables lingering)
+systemctl --user status vibespace
+systemctl --user restart vibespace  # after every `npm run build`
+journalctl --user -u vibespace -f
+./scripts/install-service.sh --uninstall
+```
+
+The unit intentionally does not build; build at deploy time and restart. Running
+agent sessions survive restarts (dtach owns them, not the server process).
+
 ## Docker
 
 ```bash

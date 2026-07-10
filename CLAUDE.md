@@ -13,6 +13,14 @@ npm install
 npm run build   # esbuild bundles src/client.js → public/bundle.js (~1.8MB)
 node server.js  # starts on port 3456 (or PORT env var)
 # ./run.sh      # supervised: build once, then respawn on exit (survives an OOM kill)
+
+# PRODUCTION (this machine runs it this way since 2.73.0): systemd USER service
+./scripts/install-service.sh        # installs+enables ~/.config/systemd/user/vibespace.service (linger on)
+systemctl --user restart vibespace  # THE way to restart after a build — do NOT kill+nohup by hand
+journalctl --user -u vibespace -f   # logs (no more /tmp/vibespace-server.log)
+# Unit: Restart=always/RestartSec=5 (survives OOM/crash — verified via SIGKILL), OOMScoreAdjust=-500,
+# StartLimitIntervalSec=0 (retries forever while the NFS workspace mounts late). The service does NOT
+# build — build at deploy, then restart. dtach sessions survive restarts by design.
 ```
 
 ## Architecture
