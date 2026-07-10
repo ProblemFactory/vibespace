@@ -69,7 +69,7 @@ function registerWsHandler(wss, ctx) {
   const {
     activeSessions, WS_OPEN, broadcastActiveSessions, broadcastToSession, resizeSessionToMin,
     setupSessionPty, refreshWebuiPids, deleteSessionMeta, writeSessionMeta, readSessionMeta,
-    readLayouts, writeLayouts, getSyncStore,
+    readLayouts, writeLayouts, getSyncStore, serverSetting,
     sessionCounterRef, createSessionMessages, PERMISSION_MODES,
     SOCKETS_DIR, BUFFERS_DIR, META_DIR, PTY_WRAPPER, CHAT_WRAPPER,
     NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, PORT, X_ENV,
@@ -322,7 +322,7 @@ function registerWsHandler(wss, ctx) {
             // Settings → accounts.shipSubscriptionToRemote only if you accept
             // the risk. API keys (above) are unaffected.
             let allowSubRemote = false;
-            try { allowSubRemote = !!getSyncStore('settings')?.get('accounts.shipSubscriptionToRemote'); } catch {}
+            try { allowSubRemote = !!serverSetting('accounts.shipSubscriptionToRemote'); } catch {}
             if (!allowSubRemote) {
               throw new Error('shipping a subscription login to a remote host is disabled (it risks the account — a subscription token from a datacenter IP looks like abuse). Log in on the host instead (Manage agents → select the host → "Log in on host…"), or use an API-key account. To override: Settings → "Ship subscription logins to remote hosts".');
             }

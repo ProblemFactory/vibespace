@@ -18,7 +18,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     });
   },
 
-  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, fork, hostId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, accountId, ephemeral = false }) {
+  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, fork, hostId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, accountId, ephemeral = false, winBounds }) {
     try { track('event', `session-create:${backend || 'claude'}:${mode || 'default'}`); } catch {}
     this._hideWelcome();
     const defaults = this._getBackendSessionDefaults(backend);
@@ -32,6 +32,14 @@ export function installSessionLifecycle(App, ctx = {}) {
     const winType = sessionMode === 'chat' ? 'chat' : 'terminal';
     const titleMeta = this._buildTitleMeta({ backend, agentKind, agentRole, agentNickname, sourceKind, parentThreadId });
     const winInfo = this.wm.createWindow({ title: sessionName, type: winType, syncId, titleMeta });
+    // Geometry carried over from a window this session replaces (billing
+    // switch kill+resume, resume of a terminated read-only window) — without
+    // it the conversation "moves" into a default-sized centered window.
+    if (winBounds) {
+      if (winBounds.gridBounds) { winInfo.gridBounds = { ...winBounds.gridBounds }; this.wm._applyGridBounds(winInfo); }
+      if (winBounds.preSnapBounds) winInfo.preSnapBounds = { ...winBounds.preSnapBounds };
+      if (winBounds.isMaximized) this.wm.toggleMaximize(winInfo.id);
+    }
     // Correlation id: concurrent creates (e.g. group resume-all) must each
     // match their OWN 'created' reply — an untagged match binds the ChatView
     // to whichever session the server happens to answer first.
@@ -294,7 +302,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     this.ws.onGlobal(handler);
   },
 
-  resumeSession(sessionId, cwd, sessionName, { mode, model, effort, permission, accountId, syncId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, hostId } = {}) {
+  resumeSession(sessionId, cwd, sessionName, { mode, model, effort, permission, accountId, syncId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, hostId, winBounds } = {}) {
     this._closeSidebarOnMobile();
     const targetBackendId = backendSessionId || sessionId;
     // If this session is already open in a LIVE window, focus it
@@ -314,6 +322,8 @@ export function installSessionLifecycle(App, ctx = {}) {
       const win = this.wm.windows.get(winId);
       const spec = win?._openSpec;
       if (spec?.backend === backend && spec?.backendSessionId === targetBackendId) {
+        // The resumed conversation should stay where the old window was.
+        if (!winBounds) winBounds = this._snapshotWinBounds(win);
         this.wm.closeWindow(winId);
       }
     }
@@ -345,7 +355,17 @@ export function installSessionLifecycle(App, ctx = {}) {
       sourceKind,
       parentThreadId,
       taskId: contextTask?.id,
+      winBounds,
     });
+  },
+
+  _snapshotWinBounds(win) {
+    if (!win) return undefined;
+    return {
+      gridBounds: win.gridBounds ? { ...win.gridBounds } : null,
+      preSnapBounds: win.preSnapBounds ? { ...win.preSnapBounds } : null,
+      isMaximized: !!win.isMaximized,
+    };
   },
 
   // "Hot-switch" a session's billing account (title-bar badge click). A true
@@ -385,7 +405,8 @@ export function installSessionLifecycle(App, ctx = {}) {
       const cwd = live?.cwd || spec.cwd || '';
       const mode = live?.webuiMode || (win.type === 'terminal' ? 'terminal' : 'chat');
       const hostId = live?.host || undefined;
-      const finish = () => this.resumeSession(backendSessionId, cwd, name, { mode, backend, backendSessionId, accountId: acctVal, hostId });
+      const winBounds = this._snapshotWinBounds(this.wm.windows.get(winId));
+      const finish = () => this.resumeSession(backendSessionId, cwd, name, { mode, backend, backendSessionId, accountId: acctVal, hostId, winBounds });
       if (live?.webuiId) {
         this.ws.send({ type: 'kill', sessionId: live.webuiId });
         setTimeout(finish, 900); // let the CLI flush its transcript before --resume

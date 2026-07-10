@@ -534,6 +534,36 @@ export function installManageAgents(App, ctx = {}) {
           body.appendChild(row);
         }
       }
+      // ── Custom agent instructions (injected preamble) — user-configurable
+      // standing guidance placed at the TOP of every VibeSpace hook delivery
+      // (task context / baseline tools intro). Applies to local AND remote
+      // sessions (both read the same injection routes); delivered once per
+      // session + re-delivered on change, never per turn.
+      {
+        const row = document.createElement('div'); row.className = 'ob-backend';
+        row.style.flexDirection = 'column'; row.style.alignItems = 'stretch';
+        const head = document.createElement('div');
+        head.innerHTML = `<b>${t('Agent instructions')}</b>`
+          + `<div class="agents-note">${t('Injected at the top of the VibeSpace context every agent session receives — customize behavior fleet-wide (e.g. reply language, reporting habits, house rules). Delivered once per session and again when you change it.')}</div>`;
+        const ta = document.createElement('textarea');
+        ta.className = 'settings-json';
+        ta.rows = 4;
+        ta.maxLength = 4000;
+        ta.placeholder = t('e.g. Always reply in Chinese. File a vibespace-ask before starting anything destructive.');
+        ta.value = this.settings.get('agents.injectPreamble') || '';
+        const btnRow = document.createElement('div');
+        btnRow.style.cssText = 'display:flex;justify-content:flex-end;gap:6px;margin-top:6px;';
+        const save = document.createElement('button');
+        save.className = 'agent-btn'; save.textContent = t('Save');
+        save.onclick = () => {
+          this.settings.set('agents.injectPreamble', ta.value.trim());
+          showToast(t('Saved — new/updated sessions receive it on their next turn'));
+        };
+        btnRow.appendChild(save);
+        row.append(head, ta, btnRow);
+        body.appendChild(row);
+      }
+
       const foot = document.createElement('div');
       foot.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:10px;';
       const note = document.createElement('p'); note.className = 'agents-note';

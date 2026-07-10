@@ -747,7 +747,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
           // Belt-and-braces liveness: a killed session must not keep re-scanning
           // the projects dir through this retry chain (audit round-2)
           const retry = setTimeout(() => { session.subagentWatchers.delete(toolUseId); if (!activeSessions.has(id)) return; startSubagentWatcher(toolUseId, agentId, attempt + 1); }, delay);
-          session.subagentWatchers.set(toolUseId, { watcher: null, retry });
+          session.subagentWatchers.set(toolUseId, { watcher: null, retry, lastActivity: Date.now() });
           return;
         }
         if (!session.subagentEmittedUuids.has(toolUseId)) session.subagentEmittedUuids.set(toolUseId, new Set());
@@ -788,8 +788,8 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
           } catch {}
         };
         readNewLines(); // read any existing content
-        const watcher = fs.watch(watchFile, () => readNewLines());
-        session.subagentWatchers.set(toolUseId, { watcher });
+        const watcher = fs.watch(watchFile, () => { const e = session.subagentWatchers.get(toolUseId); if (e) e.lastActivity = Date.now(); readNewLines(); });
+        session.subagentWatchers.set(toolUseId, { watcher, lastActivity: Date.now() });
       };
 
       const stopSubagentWatcher = (toolUseId) => {
@@ -963,20 +963,35 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
             if (msg.type === 'system' && msg.subtype === 'task_started' && msg.task_type === 'local_agent' && msg.task_id && msg.tool_use_id) {
               startSubagentWatcher(msg.tool_use_id, msg.task_id);
             }
+            // Completed agents are served from DISK on attach (sub-agent-*),
+            // so the live buffers are dead weight once done — a long session
+            // driving dozens of agents retained every subagent message twice
+            // (raw buffer + normalizer), unbounded (audit round-2). Grace
+            // period lets an already-open live viewer finish rendering.
+            const gcSubagent = (tuid) => setTimeout(() => {
+              if (!activeSessions.has(id)) return;
+              session.subagentBuffers?.delete?.(tuid);
+              session.subagentEmittedUuids?.delete?.(tuid);
+              session._subNormalizers?.delete?.(tuid);
+            }, 60000);
             if (msg.type === 'system' && msg.subtype === 'task_notification' && msg.tool_use_id) {
               stopSubagentWatcher(msg.tool_use_id);
-              // Completed agents are served from DISK on attach (sub-agent-*),
-              // so the live buffers are dead weight once done — a long session
-              // driving dozens of agents retained every subagent message twice
-              // (raw buffer + normalizer), unbounded (audit round-2). Grace
-              // period lets an already-open live viewer finish rendering.
-              const tuid = msg.tool_use_id;
-              setTimeout(() => {
-                if (!activeSessions.has(id)) return;
-                session.subagentBuffers?.delete?.(tuid);
-                session.subagentEmittedUuids?.delete?.(tuid);
-                session._subNormalizers?.delete?.(tuid);
-              }, 60000);
+              gcSubagent(msg.tool_use_id);
+            }
+            // Inactivity sweep (audit round-3): an agent whose turn was
+            // interrupted / whose CLI died NEVER emits task_notification — its
+            // fs.watch handle + double-buffered transcript lived for the
+            // session's whole (weeks-long) life. At each turn end, tear down
+            // watchers idle >10min; genuinely running background agents keep
+            // writing JSONL so their lastActivity stays fresh.
+            if (msg.type === 'result' && session.subagentWatchers?.size) {
+              const now = Date.now();
+              for (const [tuid, entry] of [...session.subagentWatchers]) {
+                if (now - (entry.lastActivity || 0) > 10 * 60 * 1000) {
+                  stopSubagentWatcher(tuid);
+                  gcSubagent(tuid);
+                }
+              }
             }
 
             if (msg.parent_tool_use_id || msg.isSidechain) {
@@ -1680,6 +1695,12 @@ app.post('/api/editor/signal', (req, res) => {
 // ── Persistence API (extracted to src/routes/persistence.js) ──
 const syncStores = {};
 function getSyncStore(name) { return syncStores[name]; }
+// THE server-side settings reader (data/settings.json via persistence.js's
+// cached accessor). getSyncStore('settings') is NOT it — that SyncStore is an
+// empty migration target; reads through it silently return undefined.
+function serverSetting(key) {
+  try { return persistenceRouter.readSettings ? persistenceRouter.readSettings()[key] : undefined; } catch { return undefined; }
+}
 
 syncStores.drafts = new SyncStore('drafts', path.join(__dirname, 'data', 'drafts.json'), wss);
 syncStores.settings = new SyncStore('settings', path.join(__dirname, 'data', 'settings-sync.json'), wss);
@@ -1829,7 +1850,7 @@ const { UsageHistory } = require('./src/usage-history');
 const telemetry = new Telemetry({
   dataDir: path.join(__dirname, 'data'),
   version: require('./package.json').version,
-  getForwardUrl: () => { try { return getSyncStore('settings')?.get('telemetry.forwardUrl') || ''; } catch { return ''; } },
+  getForwardUrl: () => { try { return serverSetting('telemetry.forwardUrl') || ''; } catch { return ''; } },
 });
 // Server-side fatals land in the same ledger (journald has them too, but the
 // diagnostics report should show one unified picture).
@@ -1865,7 +1886,7 @@ setInterval(() => { try { usageHistory.scan(); } catch {} }, 180000);
 app.post('/api/telemetry', (req, res) => {
   try {
     let enabled = true;
-    try { enabled = getSyncStore('settings')?.get('telemetry.enabled') !== false; } catch {}
+    try { enabled = serverSetting('telemetry.enabled') !== false; } catch {}
     if (enabled) {
       const events = Array.isArray(req.body?.events) ? req.body.events.slice(0, 20) : [];
       for (const ev of events) telemetry.record(ev);
@@ -2158,6 +2179,30 @@ function resolveAgentGroup(hit, req, res) {
 // Baseline tools intro for ANY VibeSpace-managed session (even without a task):
 // teaches the agent to report its own status. Task-bound sessions get the full
 // task context instead (which already includes both tools' usage).
+// User-configured extra instructions injected at the TOP of hook deliveries
+// (Manage Agents → Agent instructions). Delivered like group content: once per
+// session, re-delivered when the text changes (seen-hash gate) — never per turn.
+function customPreamble() {
+  try {
+    const v = String(serverSetting('agents.injectPreamble') || '').trim();
+    return v ? v.slice(0, 4000) : '';
+  } catch { return ''; }
+}
+function preambleBlock(text) {
+  return `<vibespace-user-instructions>\nThe VibeSpace user configured these standing instructions for every agent session — follow them alongside your other guidance:\n\n${text}\n</vibespace-user-instructions>`;
+}
+// Prepend the preamble to an outgoing delivery when unseen/changed; returns the
+// (possibly unchanged) parts array. sessionObj carries the seen-hash.
+function withPreamble(sessionObj, parts) {
+  const text = customPreamble();
+  if (!text) return parts;
+  const hash = require('crypto').createHash('sha1').update(text).digest('hex').slice(0, 12);
+  if (sessionObj._preambleSeen === hash) return parts;
+  // Deliver with (or without) other content — the preamble alone still counts.
+  sessionObj._preambleSeen = hash;
+  return [preambleBlock(text), ...parts];
+}
+
 const SESSION_TOOLS_INTRO = [
   '<vibespace-session-tools>',
   'This session is running inside VibeSpace. Report your OWN status so the user can see it on their session board — use the `vibespace-status` command (already on your PATH):',
@@ -2210,6 +2255,10 @@ app.get('/api/agent/task-context', (req, res) => {
       // codex ignores SessionStart output, so it gets this via prompt-context.
       context = SESSION_TOOLS_INTRO;
       s._toolsIntroSeen = true;
+    }
+    if (s.backend !== 'codex') { // codex ignores SessionStart output — don't burn the seen-gate
+      const withPre = withPreamble(s, context ? [context] : []);
+      context = withPre.length ? withPre.join('\n\n') : context;
     }
     res.json({ success: true, context });
   } catch (e) { res.status(404).json({ error: e.message }); }
@@ -2286,11 +2335,14 @@ app.get('/api/agent/prompt-context', (req, res) => {
     // in the agent's working context (the full rules injected at session start
     // scroll far behind on long sessions and usage decays). Gated by the
     // agents.perTurnToolReminder setting (default on).
-    if (!parts.length && perTurnReminderEnabled()) {
+    // User preamble rides on top of whatever this prompt delivers (or alone,
+    // when newly set/changed) — codex's only delivery path is this route.
+    const outParts = withPreamble(s, parts);
+    if (!outParts.length && perTurnReminderEnabled()) {
       const multi = injectGroups.length > 1;
-      parts.push(`<vibespace-reminder>Tools on PATH: vibespace-status <state> — keep your board state honest · vibespace-ask "q" — MIRROR every question you ask the user in chat onto their inbox, and resolve <id|text> the moment they answer · vibespace-task ${multi ? '--group <id> ' : ''}progress "summary" — log finished work. Run any with no args for usage.</vibespace-reminder>`);
+      outParts.push(`<vibespace-reminder>Tools on PATH: vibespace-status <state> — keep your board state honest · vibespace-ask "q" — MIRROR every question you ask the user in chat onto their inbox, and resolve <id|text> the moment they answer · vibespace-task ${multi ? '--group <id> ' : ''}progress "summary" — log finished work. Run any with no args for usage.</vibespace-reminder>`);
     }
-    res.json({ success: true, context: parts.join('\n\n') });
+    res.json({ success: true, context: outParts.join('\n\n') });
   } catch (e) { res.json({ success: true, context: '' }); }
 });
 // Stop-time bookkeeping nudge (2.79.0): fired by the Stop hook (claude) and
@@ -2316,10 +2368,10 @@ app.get('/api/agent/stop-check', (req, res) => {
   } catch { res.json({ block: false }); }
 });
 function stopNudgeEnabled() {
-  try { return getSyncStore('settings')?.get('agents.stopBookkeepingNudge') !== false; } catch { return true; }
+  try { return serverSetting('agents.stopBookkeepingNudge') !== false; } catch { return true; }
 }
 function perTurnReminderEnabled() {
-  try { return getSyncStore('settings')?.get('agents.perTurnToolReminder') !== false; } catch { return true; }
+  try { return serverSetting('agents.perTurnToolReminder') !== false; } catch { return true; }
 }
 // ── vibespace-task agent endpoints (P3): validated task-level writes,
 // SCOPED to the session's own context task (VIBESPACE_TASK_ID at spawn) —
@@ -2851,7 +2903,7 @@ const _accountUsage = {}; // id → { ...usage, name }
 // the setting below (with a stark automation-risk warning) — e.g. to see live
 // usage for chat-only/idle accounts — accepting the ban risk.
 function usagePollingEnabled() {
-  try { return !!getSyncStore('settings')?.get('accounts.activeUsagePolling'); } catch { return false; }
+  try { return !!serverSetting('accounts.activeUsagePolling'); } catch { return false; }
 }
 // Which NAMED claude subscription IS the machine's own ~/.claude login (email
 // match)? When linked, the '__global__' cache and that account's cache are two
@@ -2929,7 +2981,7 @@ function ingestPassiveModels(fn) {
 ingestPassiveUsage();
 setInterval(ingestPassiveUsage, 30000); // local disk read only — no network
 // Normalizer-visible settings (chat.hideEmptyHooks) — lazy, store-safe getter.
-_MM.getSetting = (k) => { try { return getSyncStore('settings')?.get(k); } catch { return undefined; } };
+_MM.getSetting = (k) => { try { return serverSetting(k); } catch { return undefined; } };
 
 // OPT-IN active poll (default OFF; see usagePollingEnabled + the stark warning
 // on accounts.activeUsagePolling). When enabled it restores the pre-2.60.0
@@ -2975,7 +3027,7 @@ app.post('/api/usage/refresh', (req, res) => {
   // User-facing kill switch (accounts.onDemandQuotaRefresh = 'off'): never
   // contact Anthropic, even if a stale client asks.
   let odMode = 'manual';
-  try { odMode = getSyncStore('settings')?.get('accounts.onDemandQuotaRefresh') || 'manual'; } catch {}
+  try { odMode = serverSetting('accounts.onDemandQuotaRefresh') || 'manual'; } catch {}
   if (odMode === 'off') return res.status(403).json({ error: 'on-demand quota refresh is disabled in Settings' });
   const key = String(req.body?.account || '__global__');
   if (Date.now() < _rateLimitBackoffUntil) return res.json({ throttled: true, reason: 'backoff' });
@@ -3083,6 +3135,20 @@ function readLatestCodexRateLimitFromJsonl(filePath) {
 function listRecentCodexJsonlFiles(limit = 24) {
   const files = [];
   const stack = [CODEX_SESSIONS_DIR];
+  // Rollouts are organized sessions/YYYY/MM/DD/ and this walk runs every ~30s
+  // forever (usage snapshot refresh) — unpruned it is O(all rollouts ever).
+  // Skip date subtrees older than the cutoff; freshest-24 is all we keep anyway.
+  const cutoff = new Date(Date.now() - 14 * 86400000);
+  const cutoffYMD = [cutoff.getFullYear(), cutoff.getMonth() + 1, cutoff.getDate()];
+  const tooOld = (rel) => {
+    const segs = rel.split(path.sep).filter(Boolean).map(Number);
+    for (let i = 0; i < Math.min(segs.length, 3); i++) {
+      if (!Number.isFinite(segs[i])) return false; // not a date layout — keep descending
+      if (segs[i] < cutoffYMD[i]) return true;
+      if (segs[i] > cutoffYMD[i]) return false;
+    }
+    return false;
+  };
   while (stack.length) {
     const current = stack.pop();
     let entries = [];
@@ -3094,6 +3160,7 @@ function listRecentCodexJsonlFiles(limit = 24) {
     for (const entry of entries) {
       const fp = path.join(current, entry.name);
       if (entry.isDirectory()) {
+        if (tooOld(path.relative(CODEX_SESSIONS_DIR, fp))) continue;
         stack.push(fp);
         continue;
       }
@@ -3110,7 +3177,12 @@ function listRecentCodexJsonlFiles(limit = 24) {
 
 // threadId → accountId from session-meta (codex quota is PER ACCOUNT — each
 // snapshot must land in the bucket of the account its session billed to).
+let _codexAcctMapCache = null;
 function codexThreadAccountMap() {
+  // META_DIR lives on the (possibly NFS) workspace — same cost class as
+  // usage-history's _metaMap, same fix: 60s TTL (attribution of a snapshot
+  // to an account tolerates a minute of staleness).
+  if (_codexAcctMapCache && Date.now() - _codexAcctMapCache.at < 60000) return _codexAcctMapCache.map;
   const map = {};
   let files = [];
   try { files = fs.readdirSync(META_DIR); } catch {}
@@ -3121,6 +3193,7 @@ function codexThreadAccountMap() {
       if ((m.backend || 'claude') === 'codex' && m.backendSessionId) map[m.backendSessionId] = m.accountId || null;
     } catch {}
   }
+  _codexAcctMapCache = { at: Date.now(), map };
   return map;
 }
 
@@ -3204,7 +3277,7 @@ const { registerWsHandler } = require('./src/ws-handler');
 registerWsHandler(wss, {
   activeSessions, WS_OPEN, broadcastActiveSessions, broadcastToSession, resizeSessionToMin,
   setupSessionPty, refreshWebuiPids, deleteSessionMeta, writeSessionMeta, readSessionMeta,
-  readLayouts, writeLayouts, getSyncStore,
+  readLayouts, writeLayouts, getSyncStore, serverSetting,
   sessionCounterRef, createSessionMessages, PERMISSION_MODES,
   SOCKETS_DIR, BUFFERS_DIR, META_DIR, PTY_WRAPPER, CHAT_WRAPPER,
   NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, CODEX_CMD, EDITOR_CMD, PORT, X_ENV,

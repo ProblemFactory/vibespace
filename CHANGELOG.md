@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.87.0 — 2026-07-10
+
+**Server-side settings reads were ALL broken (real config bug)**
+- 9 server code paths read settings via `getSyncStore('settings')` — the dormant, EMPTY migration-target store — instead of data/settings.json where /api/settings actually persists. Every server-honored setting silently behaved as its default no matter what you configured: `accounts.onDemandQuotaRefresh` (off/auto modes never applied), `accounts.activeUsagePolling`, `accounts.shipSubscriptionToRemote` (could never be enabled), `agents.perTurnToolReminder` / `agents.stopBookkeepingNudge` (couldn't be turned off), `telemetry.enabled` / `telemetry.forwardUrl`, `chat.hideEmptyHooks`. New `serverSetting()` reads the real store (persistence.js exposes its cached `readSettings`); all sites migrated and E2E-verified.
+
+**Custom agent instructions (Manage Agents → Agent instructions)**
+- A user-configured preamble injected at the TOP of every VibeSpace hook delivery (`<vibespace-user-instructions>` block) — customize fleet-wide agent behavior (reply language, house rules). Delivered once per session and re-delivered when edited (sha-gated), never per turn. Textarea in Manage Agents; also a Settings entry (`agents.injectPreamble`, ≤4000 chars). Works for claude (SessionStart) and codex (prompt-context) alike.
+
+**Fixes**
+- Billing switch / resume no longer teleports the conversation into a default centered window: the old window's geometry (bounds, pre-snap size, maximized) is snapshotted before kill and applied to the resumed window; plain resume of a terminated read-only window inherits its geometry the same way.
+- A user message that happens to START with hook-ish text (e.g. pasting "Stop hook feedback: …") is no longer misclassified as a dim notification card: provenance now beats text shape (CLI's promptSource marker / our _fromWebui flag → real user message; isSynthetic → notification).
+- Stop-hook block reasons and other tagged notifications were hard-truncated at 80 chars with no way to read the rest — now full text behind the expander (generic Stop hook feedback gets its own labeled card).
+- Perf (audit round 3, adversarially verified): subagent fs.watch handles + double-buffered transcripts leaked for agents that never emit task_notification (interrupted turn / CLI death) — 10-min inactivity sweep at turn end; /api/usage codex fallback no longer walks the entire ~/.codex/sessions tree every 30s (date-pruned to 14 days) and the session-meta account map is TTL-cached 60s.
+
 ## 2.86.0 — 2026-07-10
 
 **Checklist items get the summary+detail split (matching Activity entries, 2.69.0)**

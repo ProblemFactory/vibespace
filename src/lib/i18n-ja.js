@@ -1180,4 +1180,11 @@ export default {
   "Attach full context to the new item": "新しい項目に完全なコンテキストを添付",
   "Detail — acceptance criteria, paths, background (optional)": "詳細 — 受け入れ基準・パス・背景（任意）",
   "Edit text and detail": "テキストと詳細を編集",
+  "Stop hook feedback": "Stop hook フィードバック",
+  "Agent instructions": "エージェント指示",
+  "Custom agent instructions (injected)": "カスタムエージェント指示（注入）",
+  "Injected at the top of the VibeSpace context every agent session receives — customize behavior fleet-wide (e.g. reply language, reporting habits, house rules). Delivered once per session and again when you change it.": "すべてのエージェントセッションが受け取る VibeSpace コンテキストの先頭に注入されます——返信言語・報告習慣・ルールなど、全体の挙動をカスタマイズできます。セッションごとに一度だけ配信され、変更時に再配信されます。",
+  "Saved — new/updated sessions receive it on their next turn": "保存しました——新規・既存セッションは次のターンで受け取ります",
+  "Your own standing instructions for every agent session, injected at the TOP of the VibeSpace hook context (task context or the baseline tools intro). Delivered once per session and re-delivered when you change it — never on every turn. Edit comfortably in Manage Agents → Agent instructions. Max 4000 chars.": "すべてのエージェントセッション向けの常設指示。VibeSpace hook コンテキスト（タスクコンテキストまたは基本ツール紹介）の先頭に注入されます。セッションごとに一度、変更時に再配信——毎ターンは配信しません。編集は エージェント管理 → エージェント指示 で。最大 4000 文字。",
+  "e.g. Always reply in Chinese. File a vibespace-ask before starting anything destructive.": "例：常に日本語で返信する。破壊的な操作の前に vibespace-ask で確認する。",
 };

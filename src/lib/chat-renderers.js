@@ -135,9 +135,15 @@ class ChatRenderers {
 
     // Detect system notifications: command tags, meta directives, reminders
     const rawText = content.map(b => b.text || '').join('');
-    const isNotification = /^<(command-name|local-command|task-notification|system-reminder|vibespace-task-context|vibespace-reminder)/.test(rawText.trim())
+    // Provenance beats text-shape: a HUMAN-submitted prompt (msg.typed, from
+    // the CLI's promptSource marker) is never a notification even if the user
+    // pasted hook text verbatim; a CLI-synthesized record (msg.synthetic)
+    // always is. The text regexes remain the fallback for old records that
+    // predate these flags.
+    const isNotification = !msg.typed && (msg.synthetic
+      || /^<(command-name|local-command|task-notification|system-reminder|vibespace-task-context|vibespace-reminder)/.test(rawText.trim())
       || /^A session-scoped Stop hook is now active/.test(rawText.trim())
-      || /^Stop hook feedback:/.test(rawText.trim());
+      || /^Stop hook feedback:/.test(rawText.trim()));
     if (isNotification) {
       return this._renderNotificationMsg(rawText);
     }
@@ -177,8 +183,9 @@ class ChatRenderers {
       label = `/${cmdMatch[1]}`;
       if (argsMatch) detail = argsMatch[1].trim();
     } else if (stdoutMatch) {
-      label = stdoutMatch[1].trim().substring(0, 80);
-      if (stdoutMatch[1].length > 80) label += '...';
+      const so = stdoutMatch[1].trim();
+      label = so.substring(0, 80);
+      if (so.length > 80) { label += '…'; detail = so; }
     } else if (hookMatch) {
       labelIcon = UI_ICONS.goal;
       label = t('Goal: {text}', { text: `${hookMatch[1].substring(0, 60)}${hookMatch[1].length > 60 ? '...' : ''}` });
@@ -186,8 +193,18 @@ class ChatRenderers {
       labelIcon = UI_ICONS.goal;
       label = t('Goal check: not met');
       detail = hookFeedback[1].trim();
+    } else if (/^Stop hook feedback:/.test(rawText.trim())) {
+      // Generic (non-goal) Stop hook block reason — e.g. the VibeSpace
+      // bookkeeping nudge. Full text behind the expander, never cut off.
+      label = t('Stop hook feedback');
+      detail = rawText.trim().replace(/^Stop hook feedback:\s*/, '');
     } else {
-      label = rawText.replace(/<[^>]+>/g, '').trim().substring(0, 80) || t('notification');
+      // Fallback for any tagged notification: a long payload must stay
+      // reachable — 80-char label + the FULL text behind the expander
+      // (this used to hard-truncate at 80 with no way to read the rest).
+      const stripped = rawText.replace(/<[^>]+>/g, '').trim();
+      label = stripped.substring(0, 80) || t('notification');
+      if (stripped.length > 80) { label += '…'; detail = stripped; }
     }
 
     const labelHtml = (labelIcon ? labelIcon + ' ' : '') + escHtml(label);
