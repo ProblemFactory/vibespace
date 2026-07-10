@@ -219,14 +219,25 @@ class MessageManager {
       const count = raw.hookCount || 0;
       const infos = raw.hookInfos || [];
       const failed = infos.filter(h => h.exitCode !== 0 && h.exitCode != null);
-      // Name the hooks instead of a bare count ("2 hooks ran" told the user
-      // nothing) — first three names, ellipsized.
-      const names = infos.map(h => h.name || h.hookName || h.command || '').filter(Boolean);
+      // Inline: SHORT names only. hookInfos often has no name field, just the
+      // raw command — which can be a whole embedded shell script (claude-mem's
+      // is ~1KB; dumping it inline made the card an unreadable wall — user
+      // report). Derive a short name (first script filename in the command);
+      // the full commands live in the expandable hookData body instead.
+      const shortName = (h) => {
+        const n = h.name || h.hookName;
+        if (n) return String(n).slice(0, 40);
+        const cmd = String(h.command || '');
+        const m = cmd.match(/([\w.-]+\.(?:mjs|cjs|js|sh|py|ts))\b/);
+        return (m ? m[1] : (cmd.trim().split(/\s+/)[0] || 'hook')).slice(0, 40);
+      };
+      const names = [...new Set(infos.map(shortName).filter(Boolean))];
       const nameStr = names.length ? ` (${names.slice(0, 3).join(', ')}${names.length > 3 ? ', …' : ''})` : '';
       const text = (failed.length ? `${count} hooks ran, ${failed.length} failed` : `${count} hooks ran`) + nameStr;
+      const detail = infos.map((h) => `- ${shortName(h)}${h.exitCode != null ? ` (exit ${h.exitCode})` : ''}${h.command ? `\n  ${String(h.command).slice(0, 600)}` : ''}`).join('\n');
       const msg = this._create({
         role: 'system', status: failed.length ? 'error' : 'complete',
-        content: [{ type: 'system_info', text }],
+        content: [{ type: 'system_info', text, ...(detail ? { hookData: { name: `${count} hooks`, event: 'Stop', outcome: failed.length ? 'partial' : 'success', exitCode: null, output: detail } } : {}) }],
       });
       if (emit) this._emit({ op: 'create', message: msg });
     }

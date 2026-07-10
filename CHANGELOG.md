@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.79.2] — 2026-07-10
+
+### Fixed — "N hooks ran" dumped raw shell scripts inline
+hookInfos often carries no name, only the command — which can be an embedded
+~1KB shell script (claude-mem's is), and 2.76.0's "name the hooks" change
+pasted it inline. The summary now shows short script names ("3 hooks ran
+(vibespace-hook.mjs, bun-runner.js, hook.mjs)") with the full commands behind
+the expandable card body.
+
 ## [2.79.1] — 2026-07-10
 
 ### Fixed — empty hook cards flooding the chat
