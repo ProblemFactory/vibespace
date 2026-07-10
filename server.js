@@ -10,6 +10,7 @@ const compression = require('compression');
 const { MessageManager } = require('./src/message-manager');
 const { createMessageManager } = require('./src/normalizers');
 const { MessageManager: _MM } = require('./src/message-manager');
+const { Telemetry } = require('./src/telemetry');
 const { SyncStore } = require('./src/sync-store');
 const { cwdToProjectDir, SessionMessages, findSessionJsonlPath } = require('./src/session-store');
 const { CodexSessionMessages } = require('./src/codex-session-store');
@@ -1825,6 +1826,16 @@ const accounts = new AccountManager({
 // bakes WHICH account + its billing TYPE into each event so subscription and
 // API-key usage are never conflated. ──
 const { UsageHistory } = require('./src/usage-history');
+const telemetry = new Telemetry({
+  dataDir: path.join(__dirname, 'data'),
+  version: require('./package.json').version,
+  getForwardUrl: () => { try { return getSyncStore('settings')?.get('telemetry.forwardUrl') || ''; } catch { return ''; } },
+});
+// Server-side fatals land in the same ledger (journald has them too, but the
+// diagnostics report should show one unified picture).
+process.on('uncaughtException', (e) => { try { telemetry.record({ kind: 'server-error', name: e.message || 'uncaughtException', stack: e.stack }); telemetry.flush(); } catch {} console.error(e); process.exit(1); });
+process.on('unhandledRejection', (e) => { try { telemetry.record({ kind: 'server-error', name: (e && e.message) || 'unhandledRejection', stack: e && e.stack }); } catch {} console.error('unhandledRejection:', e); });
+
 const usageHistory = new UsageHistory({
   dataDir: path.join(__dirname, 'data'),
   resolveAccount: (id) => {
@@ -1849,6 +1860,26 @@ function recordUsageAttribution(meta) {
 // rescanned on demand when the Usage window opens.
 setTimeout(() => { try { usageHistory.scan(); usageHistory.warm(); } catch {} }, 8000);
 setInterval(() => { try { usageHistory.scan(); } catch {} }, 180000);
+// Telemetry ingest (client errors + feature events) + diagnostics summary.
+// telemetry.enabled=false drops ingest silently (client still posts — cheap).
+app.post('/api/telemetry', (req, res) => {
+  try {
+    let enabled = true;
+    try { enabled = getSyncStore('settings')?.get('telemetry.enabled') !== false; } catch {}
+    if (enabled) {
+      const events = Array.isArray(req.body?.events) ? req.body.events.slice(0, 20) : [];
+      for (const ev of events) telemetry.record(ev);
+    }
+    res.json({ success: true });
+  } catch { res.json({ success: true }); }
+});
+app.get('/api/telemetry/summary', (req, res) => {
+  try {
+    telemetry.flush();
+    res.json(telemetry.summary({ days: Math.min(parseInt(req.query.days) || 14, 90) }));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/usage-stats', (req, res) => {
   try {
     usageHistory.scan(); // pick up anything new before answering

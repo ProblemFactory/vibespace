@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.84.0 — 2026-07-10
+
+**Observability (for team rollout iteration)**
+- Local-first telemetry: client global error capture (window.onerror / unhandledrejection / App-constructor boot crashes — installed BEFORE App so the "silent blank page" class is caught), coarse feature events (window opened, session created — names only, never content), server fatals. Appends to `data/telemetry/events-YYYY-MM.ndjson`; nothing leaves the instance unless `telemetry.forwardUrl` is set (team deployments: batches POST with an anonymous per-instance id).
+- ⚙ → Diagnostics report…: grouped recent errors (with stacks), events/day chart, by-event and by-version tables — rendered in the embedded browser.
+- Settings: `telemetry.enabled` (default on, local-only), `telemetry.forwardUrl` (default empty).
+
+**Usage ledger attribution fix (real data bug)**
+- A newly added subscription showed usage from BEFORE it was registered: `_acctAt`'s "request predates the first attribution entry" fallback billed pre-binding history to the account's earliest entry, and the meta-account fallback did the same for the initial backfill (the ledger shipped 2.61.0 and scanned week-old transcripts AFTER accounts were attached). Fixed: pre-binding requests → global (10-min grace for spawn-ordering skew); one-time rebake re-attributed 20,304 baked events (94% of one account's total was misattributed).
+
+**Fixes**
+- Embedded browser: `blob:`/`data:` URLs no longer get an `http://` prefix (blank iframe) — this had silently broken the chat html Preview button too.
+
 All notable changes to this project will be documented in this file.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),

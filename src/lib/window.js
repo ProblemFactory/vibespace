@@ -1,4 +1,5 @@
 import { attachPopoverClose, escHtml } from './utils.js';
+import { track } from './telemetry-client.js';
 import { t } from './i18n.js';
 import { TYPE_ICONS, installTabGroupMixin } from './tab-group.js';
 import { createAgentKindIcon, createBackendIcon, createModeBackendIcon, getAgentKindMeta } from './agent-meta.js';
@@ -86,6 +87,7 @@ class WindowManager {
       this._showOverlapSwitcher(winInfo, e.clientX, e.clientY);
     });
     if (openSpec) winInfo._openSpec = openSpec;
+    track('event', 'window-open:' + type);
     this.focusWindow(id); this._notify(); this._scheduleOverlapUpdate(); return winInfo;
   }
 

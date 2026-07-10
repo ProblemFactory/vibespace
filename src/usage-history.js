@@ -107,7 +107,13 @@ class UsageHistory {
       let found = false, chosen = null;
       for (const e of list) { if (e.ts <= ts) { found = true; chosen = e.acct; } else break; }
       if (found) return chosen;                 // exact account active at that time (may be null = global)
-      return list[0].acct;                      // request predates the first entry → earliest known
+      // Request predates the first attribution entry. A small grace window
+      // covers spawn-ordering skew (first request can land seconds before the
+      // meta write). Anything older genuinely happened before this session was
+      // ever bound to an account → global. Returning list[0].acct here billed
+      // a week of pre-registration usage to a newly added subscription (the
+      // initial ledger backfill ran AFTER the account was attached).
+      return ts >= list[0].ts - 10 * 60 * 1000 ? list[0].acct : null;
     }
     return metaAcct || null;
   }
@@ -160,8 +166,50 @@ class UsageHistory {
 
   // Incrementally scan every transcript (Claude JSONLs + Codex rollouts),
   // appending new per-request events.
+  // One-time repair of events baked with the old _acctAt fallback (which
+  // attributed pre-binding history to the account's first attribution entry).
+  // Only events whose sid HAS attribution entries are recomputed — for sids
+  // without any, the baked value is the only record we have, leave it.
+  _maybeRebakeAttribution() {
+    const marker = path.join(this.dir, '.attrib-rebake-v1');
+    try { if (fs.existsSync(marker)) return; } catch {}
+    const attrib = this._attribMap();
+    const meta = this._metaMap();
+    let shards = [];
+    try { shards = fs.readdirSync(this.dir).filter((f) => /^events-\d{4}-\d{2}\.ndjson$/.test(f)); } catch {}
+    let changed = 0;
+    for (const fn of shards) {
+      const fp = path.join(this.dir, fn);
+      let data = ''; try { data = fs.readFileSync(fp, 'utf-8'); } catch { continue; }
+      const out = [];
+      let dirty = false;
+      for (const line of data.split('\n')) {
+        if (!line) continue;
+        let e; try { e = JSON.parse(line); } catch { out.push(line); continue; }
+        if (e.sid && attrib[e.sid]) {
+          const acct = this._acctAt(e.sid, e.ts, attrib, meta[e.sid]?.acct);
+          if ((acct || null) !== (e.acct || null)) {
+            const ainfo = acct ? (this._resolveAccount(acct) || null) : null;
+            e.acct = acct || null;
+            e.atype = ainfo ? ainfo.type : (acct ? 'unknown' : 'global');
+            e.aname = ainfo ? (ainfo.name || null) : null;
+            dirty = true; changed++;
+            out.push(JSON.stringify(e));
+            continue;
+          }
+        }
+        out.push(line);
+      }
+      if (dirty) this._writeAtomic(fp, out.join('\n') + '\n');
+    }
+    if (changed) this._evCache = null; // sizes may match — force a clean reload
+    try { fs.writeFileSync(marker, JSON.stringify({ at: Date.now(), changed })); } catch {}
+    if (changed) console.log(`[usage-history] re-attributed ${changed} events (pre-binding history → global)`);
+  }
+
   scan(force = false) {
     if (this._scanning) return { skipped: true };
+    try { this._maybeRebakeAttribution(); } catch (e) { console.error('[usage-history] rebake failed:', e.message); }
     // The Usage window fires a request per filter/range change — each used to
     // redo the full transcript stat-sweep (+ meta/attrib reload). Throttle:
     // new events land at most ~15s late; the 3-min background rescan and the
