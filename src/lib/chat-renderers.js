@@ -368,7 +368,7 @@ class ChatRenderers {
     if (msg.content?.[0]?.hookData) {
       const h = msg.content[0].hookData;
       const el = document.createElement('div');
-      el.className = 'chat-msg chat-msg-system chat-system-notification';
+      el.className = 'chat-msg chat-msg-system chat-system-notification chat-msg-hook';
       // Full hook output (was truncated to 500 chars — and substring-after-escHtml
       // could even slice a mid-entity). Kept inside a collapsed <details>; the
       // CSS caps its height with a scroll so a huge output can't flood the view.
@@ -383,7 +383,7 @@ class ChatRenderers {
     // Other system messages (hook summary, etc.)
     if (text) {
       const el = document.createElement('div');
-      el.className = 'chat-msg chat-msg-system chat-system-notification';
+      el.className = 'chat-msg chat-msg-system chat-system-notification' + (/^([✓✗] Hook:|\d+ hooks ran)/.test(text) ? ' chat-msg-hook' : '');
       el.innerHTML = `<span class="chat-system-text">${escHtml(text)}</span>`;
       return { el, sideEffect: null };
     }

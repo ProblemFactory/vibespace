@@ -14,6 +14,10 @@
  */
 
 class MessageManager {
+  // Injected by the server once the settings SyncStore exists (the normalizer
+  // can't reach server state directly). null in tests → defaults apply.
+  static getSetting = null;
+
   constructor(sessionId) {
     this.sessionId = sessionId;
     this.seq = 0;
@@ -205,13 +209,13 @@ class MessageManager {
     if (raw.subtype === 'hook_response') {
       const name = raw.hook_name || raw.hook_event || 'hook';
       if (this._lastHookCard && this._lastHookCard.name === name && Math.abs(this._currentTs - this._lastHookCard.ts) < 5000) return;
-      this._lastHookCard = { name, ts: this._currentTs };
       const ok = raw.outcome === 'success' || raw.exit_code === 0;
       const icon = ok ? '✓' : '✗';
       const msg = this._create({
         role: 'system', status: ok ? 'complete' : 'error',
         content: [{ type: 'system_info', text: `${icon} Hook: ${name}`, hookData: { name, event: raw.hook_event, outcome: raw.outcome, exitCode: raw.exit_code, output: raw.output } }],
       });
+      this._lastHookCard = { name, ts: this._currentTs, msgId: msg.id, outHead: output ? output.slice(0, 200) : null };
       if (emit) this._emit({ op: 'create', message: msg });
     }
 
@@ -275,6 +279,23 @@ class MessageManager {
       if (emit) this._emit({ op: 'meta', subtype: 'goal_status', data: this._goalState });
       return;
     }
+    // The CANONICAL carrier of injected context is its OWN attachment type —
+    // {type:'hook_additional_context', content:[strings]} (no hookName). This
+    // was the missing piece behind "hook注入的context看不到" (user report).
+    if (a.type === 'hook_additional_context') {
+      const text = (Array.isArray(a.content) ? a.content : [a.content]).filter((x) => typeof x === 'string').join('\n').trim();
+      if (!text) return;
+      const prior = this._lastHookCard;
+      if (prior && prior.outHead && text.slice(0, 200) === prior.outHead && Math.abs(this._currentTs - prior.ts) < 5000) return; // same payload already shown via the hook's stdout card
+      const tag = (text.match(/^<([\w-]+)/) || [])[1] || null;
+      const msg = this._create({
+        role: 'system', status: 'complete',
+        content: [{ type: 'system_info', text: `✓ Hook context${tag ? `: ${tag}` : ''}`, hookData: { name: tag || 'injected context', event: null, outcome: 'context', exitCode: null, output: text.slice(0, 20000) } }],
+      });
+      this._lastHookCard = { name: tag || 'injected context', ts: this._currentTs, msgId: msg.id, outHead: text.slice(0, 200) };
+      if (emit) this._emit({ op: 'create', message: msg });
+      return;
+    }
     // Hook attachments (JSONL-only) carry the FULL per-hook record — name,
     // event, stdout (incl. any injected additionalContext). Without this,
     // history replay showed only the bare "N hooks ran" summary (user report).
@@ -282,14 +303,11 @@ class MessageManager {
       const isSys = a.type === 'hook_system_message';
       const name = a.hookName || a.hookEvent || 'hook';
       const ok = a.type === 'hook_success' || isSys;
-      // A live session emits system/hook_response on stdout AND writes this
-      // attachment to the JSONL — after a restart replay both survive the
-      // merge (different record shapes, no shared uuid). Collapse doubles by
-      // name within a 5s window.
-      if (this._lastHookCard && this._lastHookCard.name === name && Math.abs(this._currentTs - this._lastHookCard.ts) < 5000) return;
       // stderr counts only for FAILED hooks — successful plugins routinely spew
-      // warnings there (Node ExperimentalWarning etc.), which is noise.
-      const raw = [a.content, a.stdout, ...(ok ? [] : [a.stderr])].filter((x) => typeof x === 'string' && x.trim()).join('\n');
+      // warnings there (Node ExperimentalWarning etc.), which is noise. content
+      // can be a LIST of strings (harness content blocks) — flatten it.
+      const contentStr = Array.isArray(a.content) ? a.content.filter((x) => typeof x === 'string').join('\n') : a.content;
+      const raw = [contentStr, a.stdout, ...(ok ? [] : [a.stderr])].filter((x) => typeof x === 'string' && x.trim()).join('\n');
       // Unwrap the machine ack: hook stdout is usually a protocol JSON like
       // {"continue":true,"suppressOutput":true} — the only human-relevant part
       // is hookSpecificOutput.additionalContext (or a block decision/reason).
@@ -302,16 +320,35 @@ class MessageManager {
           if (!meaningful && (j.decision || j.reason)) meaningful = [j.decision, j.reason].filter(Boolean).join(': ');
         }
       } catch { /* not JSON — keep the raw text */ }
+      const output = (meaningful || (ok ? '' : raw)).slice(0, 20000);
+      // Live/replay double-render dedup — the two copies are ASYMMETRIC: the
+      // stdout hook_response usually has NO output while the JSONL attachment
+      // carries the FULL injected context. Skipping the newcomer blindly hid
+      // every injected context (user report) — UPGRADE the existing card when
+      // the newcomer knows more.
+      const prior = this._lastHookCard;
+      const sameContent = prior && prior.outHead && output && output.slice(0, 200) === prior.outHead;
+      if (prior && (prior.name === name || sameContent) && Math.abs(this._currentTs - prior.ts) < 5000) {
+        if (output && prior.msgId != null) {
+          const ex = this.messageIndex.get(prior.msgId);
+          const exOut = ex?.content?.[0]?.hookData?.output || '';
+          if (ex && output.length > exOut.length) {
+            ex.content[0].hookData.output = output;
+            if (emit) this._emit({ op: 'edit', id: ex.id, fields: { content: ex.content } });
+          }
+        }
+        return;
+      }
       // Empty SUCCESSFUL hooks are pure noise (PostToolUse etc. fire per tool
       // call with no output — user report: chat flooded with blank hook cards).
-      // Failures always show, even without output.
-      if (ok && !meaningful) return;
-      this._lastHookCard = { name, ts: this._currentTs };
-      const output = (meaningful || raw).slice(0, 20000);
+      // Failures always show. Overridable via chat.hideEmptyHooks (2.80.0).
+      const hideEmpty = !MessageManager.getSetting || MessageManager.getSetting('chat.hideEmptyHooks') !== false;
+      if (ok && !output && hideEmpty) return;
       const msg = this._create({
         role: 'system', status: ok ? 'complete' : 'error',
         content: [{ type: 'system_info', text: `${ok ? '✓' : '✗'} Hook: ${isSys ? (name !== 'hook' ? name + ' ' : '') + 'message' : name}`, hookData: { name, event: a.hookEvent || null, outcome: a.type, exitCode: a.exitCode ?? null, output } }],
       });
+      this._lastHookCard = { name, ts: this._currentTs, msgId: msg.id };
       if (emit) this._emit({ op: 'create', message: msg });
     }
   }

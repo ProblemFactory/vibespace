@@ -229,6 +229,18 @@ const SETTINGS_SCHEMA = {
     description: t('OFF (recommended): a subscription (Pro/Max) account can only run on THIS machine; for a remote host, log in on the host instead. Turning this ON copies the subscription’s login to the remote host — its token then appears from that host’s IP (often a datacenter), which can look like account abuse to Anthropic and risk a ban. API-key accounts are always allowed on remote hosts and are unaffected by this.'),
     category: t('Session'), liveApply: true,
   },
+  'chat.showHookCards': {
+    type: 'boolean', default: true,
+    label: t('Show hook cards in chat'),
+    description: t('Hook events (context injections, plugin hooks, stop nudges) render as collapsible ✓/✗ cards. Turn off to hide them all — applies to open chats instantly.'),
+    category: t('Chat'), liveApply: true,
+  },
+  'chat.hideEmptyHooks': {
+    type: 'boolean', default: true,
+    label: t('Hide hooks with no output'),
+    description: t('Hooks like PostToolUse fire on every tool call with nothing to show — by default those render no card at all. Turn off to see every hook event. Applies to newly loaded history (reopen the window for existing views).'),
+    category: t('Chat'), liveApply: true,
+  },
   'agents.stopBookkeepingNudge': {
     type: 'boolean', default: true,
     label: t('Stop-time bookkeeping nudge for agents'),

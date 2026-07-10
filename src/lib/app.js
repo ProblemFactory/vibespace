@@ -128,6 +128,12 @@ class App {
     this.wm._settings = this.settings;
     this.wm._app = this;
     // Re-render all tab bars when tab wrap setting changes
+    // Hook-card visibility: pure CSS toggle so flipping the setting applies
+    // to every open chat instantly, both directions (no re-render).
+    const applyHookVis = () => document.body.classList.toggle('hide-hook-cards', this.settings.get('chat.showHookCards') === false);
+    applyHookVis();
+    this.settings.on('chat.showHookCards', applyHookVis);
+    setTimeout(applyHookVis, 2000); // re-apply once the async settings load lands
     this.settings.on('window.tabWrap', () => {
       for (const [, win] of this.wm.windows) {
         if (win._tabChain && win._tabChain.tabs[0] === win.id) this.wm._renderTabBar(win._tabChain);
