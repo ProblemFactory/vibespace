@@ -333,6 +333,15 @@ html, body {
   color: var(--text-secondary); margin-bottom: 8px;
 }
 .usage-section-title > span { text-transform: none; }
+.usage-refresh-btn {
+  margin-left: auto; width: 20px; height: 20px; padding: 0; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  color: var(--text-secondary); font-size: 12px; cursor: pointer; transition: var(--transition);
+}
+.usage-refresh-btn:hover { border-color: var(--accent); color: var(--accent); }
+.usage-refresh-btn.usage-refresh-spin { animation: usage-refresh-spin 0.8s linear infinite; pointer-events: none; }
+@keyframes usage-refresh-spin { to { transform: rotate(360deg); } }
 .usage-note { font-size: 10px; color: var(--text-dim); margin: 4px 0; line-height: 1.45; white-space: normal; }
 .usage-bar-row { display: grid; grid-template-columns: minmax(90px, 40%) 1fr auto; align-items: center; gap: 8px; padding: 2.5px 0; }
 .usage-bar-row.small { padding: 1.5px 0; }
@@ -362,12 +371,12 @@ html, body {
 .acct-usage-cell { display: flex; justify-content: flex-end; }
 .acct-key-row.is-default { background: color-mix(in srgb, var(--accent) 6%, transparent); border-radius: var(--radius-sm); }
 /* Per-account usage readout (5h / 7d mini bars) inside an account row. */
-.acct-usage { display: inline-flex; align-items: center; gap: 8px; font-size: 9px; color: var(--text-dim); }
-.acct-usage-item { display: inline-flex; align-items: center; gap: 3px; }
-.acct-usage-label { opacity: 0.7; }
-.acct-usage-bar { width: 34px; height: 5px; border-radius: 3px; background: var(--bg-input); overflow: hidden; display: inline-block; }
-.acct-usage-bar > span { display: block; height: 100%; border-radius: 3px; }
-.acct-usage-pct { min-width: 26px; text-align: right; font-variant-numeric: tabular-nums; }
+.acct-usage { display: inline-flex; align-items: center; gap: 5px; font-size: 9px; color: var(--text-dim); }
+/* Mini quota donuts (Manage Agents rosters) — same conic-gradient language as
+   the taskbar pies; the hole is punched with an ::after in the dialog bg. */
+.acct-usage-donut { position: relative; width: 22px; height: 22px; border-radius: 50%; flex: none; display: inline-flex; align-items: center; justify-content: center; }
+.acct-usage-donut::after { content: ''; position: absolute; inset: 4px; border-radius: 50%; background: var(--bg-dialog); }
+.acct-usage-donut > span { position: relative; z-index: 1; font-size: 7px; font-weight: 600; color: var(--text-secondary); letter-spacing: -0.2px; }
 .acct-usage-age { opacity: 0.6; font-style: italic; }
 .acct-linked-hint { color: var(--accent); opacity: 0.85; }
 .acct-set-email {

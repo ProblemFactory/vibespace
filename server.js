@@ -1805,7 +1805,7 @@ function recordUsageAttribution(meta) {
 }
 // Rescan the ledger periodically (incremental — only new JSONL bytes). Also
 // rescanned on demand when the Usage window opens.
-setTimeout(() => { try { usageHistory.scan(); } catch {} }, 8000);
+setTimeout(() => { try { usageHistory.scan(); usageHistory.warm(); } catch {} }, 8000);
 setInterval(() => { try { usageHistory.scan(); } catch {} }, 180000);
 app.get('/api/usage-stats', (req, res) => {
   try {
@@ -2847,6 +2847,48 @@ function pollUsageActive() {
   _fetchOAuthUsage(token, (u) => { if (u) _accountUsage[a.id] = { ...u, name: a.name, email: a.email }; });
 }
 setInterval(pollUsageActive, 90000);
+
+// ── On-demand quota refresh (USER-INITIATED, throttled) ──────────────────────
+// The statusline payload carries ONLY five_hour/seven_day — model-scoped weekly
+// buckets (e.g. the Fable cap) are never in it (verified against the 2.1.206
+// payload builder: rate_limits spreads exactly those two windows), so passive
+// capture cannot show them. This endpoint is the human-gated equivalent of
+// running /usage in the CLI: fired from the usage popup (open / ⟳ click),
+// NEVER on a timer, one account per call, ≥60s per account, honoring the
+// global 429 backoff. §ban-safety: interactive user action, not background
+// automation — do NOT wire this to any scheduler.
+const _onDemandUsageAt = {};
+app.post('/api/usage/refresh', (req, res) => {
+  const key = String(req.body?.account || '__global__');
+  if (Date.now() < _rateLimitBackoffUntil) return res.json({ throttled: true, reason: 'backoff' });
+  if (Date.now() - (_onDemandUsageAt[key] || 0) < 60000) return res.json({ throttled: true });
+  const isGlobal = key === '__global__';
+  let acctMeta = null;
+  if (!isGlobal) {
+    acctMeta = (accounts.list().accounts || []).find((x) => x.id === key && x.type === 'subscription');
+    if (!acctMeta) return res.status(404).json({ error: 'unknown subscription account' });
+  }
+  const token = isGlobal ? getOAuthToken() : accounts.usageToken(key);
+  if (!token) return res.json({ error: 'no currently-valid token for this account — run a session on it (the CLI refreshes its own login), then retry' });
+  _onDemandUsageAt[key] = Date.now();
+  _fetchOAuthUsage(token, (u) => {
+    if (!u) return res.json({ error: 'refresh failed (rate-limited or offline) — kept last-known' });
+    u.source = 'on-demand';
+    u.scopedFetchedAt = Date.now(); // scoped buckets only ever come from here — track their own age
+    // Persist to the same per-account cache file the statusline hook writes:
+    // survives restarts, and the hook's preserve-merge keeps scopedWeekly alive
+    // through subsequent passive (5h/7d-only) writes.
+    try {
+      fs.mkdirSync(USAGE_CACHE_DIR, { recursive: true });
+      const f = path.join(USAGE_CACHE_DIR, key.replace(/[^\w.-]/g, '_') + '.json');
+      fs.writeFileSync(f + '.tmp', JSON.stringify(u)); fs.renameSync(f + '.tmp', f);
+    } catch {}
+    if (isGlobal) { _rateLimitCache = u; writeUsageCache(); }
+    else _accountUsage[key] = { ...u, name: acctMeta.name, email: acctMeta.email };
+    try { ingestPassiveUsage(); } catch {} // re-run the global↔named same-account merge
+    res.json({ success: true });
+  });
+});
 
 function normalizeCodexRateLimit(raw, fetchedAt = Date.now()) {
   if (!raw || typeof raw !== 'object') return null;

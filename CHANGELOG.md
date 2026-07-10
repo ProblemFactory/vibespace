@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.70.0] — 2026-07-10
+
+### Fixed — Fable weekly quota back in the usage popup
+The passive statusline feed only ever carries the 5h/7d windows (verified
+against the CLI 2.1.206 payload builder) AND each passive write clobbered the
+stored model-scoped buckets to [] — so Fable vanished with 2.60.0. Now: the
+statusline hook preserves scoped data, and a new user-initiated
+`POST /api/usage/refresh` (popup ⟳ / auto on open when >30min stale, ≥60s per
+account, honors 429 backoff, never scheduled) fetches the full window set —
+the human-gated equivalent of running /usage in the CLI. Scoped bars show
+their own "as of" age.
+
+### Changed — Manage Agents usage readouts are mini donuts
+Per-account usage in the rosters is now compact conic-gradient donuts
+(5h / 7d / scoped), same visual language as the taskbar quota pies, replacing
+the wide label+bar+percent rows.
+
+### Performance — Usage window no longer re-reads the ledger per request
+The workspace can live on network storage (FUSE NFS: ~40ms per file read) and
+/api/usage-stats re-read every shard on every request (18s observed). Events
+are now cached in memory with append-only incremental reads, scan() is
+throttled (15s), session-meta reads are TTL-cached, and the ledger warms at
+boot. 18s → ~0.3s.
+
 ## [2.69.1] — 2026-07-10
 
 ### Fixed — "For you" inbox: details viewable, origin session visible

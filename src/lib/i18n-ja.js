@@ -1096,4 +1096,8 @@ export default {
   "Waiting for the editor below": "下のエディタの完了待ち",
   "The terminal resumes after Save & Close.": "保存して閉じるとターミナルが再開します。",
   "detail": "詳細",
+  'Model-scoped data comes from the ⟳ refresh, not the passive feed': 'モデル別クォータは ⟳ 手動更新から取得（パッシブ収集には含まれません）',
+  'Model-scoped weekly limits (e.g. Fable) aren’t in the passive feed — ⟳ fetches them on demand': 'モデル別の週次上限（Fable など）はパッシブ収集に含まれません — ⟳ でオンデマンド取得',
+  'Refresh from Anthropic now (also fetches model-scoped limits like Fable) — user-initiated, min 60s apart': 'Anthropic から今すぐ更新（Fable などモデル別上限も取得）— ユーザー操作時のみ、最短 60 秒間隔',
+  'as of {ago}': '{ago}時点',
 };
