@@ -3102,7 +3102,17 @@ registerWsHandler(wss, {
 // the user WHICH sessions still burn API money after they re-login to the
 // subscription: env-key/console sessions keep their auth for their lifetime.
 function sessionAuth(s) {
-  if ((s.backend || 'claude') !== 'claude') return null;
+  const be = s.backend || 'claude';
+  if (be === 'codex') {
+    // Codex billing identity: named ChatGPT account (isolated CODEX_HOME) or
+    // the machine's own ~/.codex login. Feeds the title-bar billing badge.
+    if (s._accountId) {
+      const a = accounts.get(s._accountId);
+      return { source: 'codex-subscription', name: a?.name || 'ChatGPT' };
+    }
+    return { source: 'codex-cli' };
+  }
+  if (be !== 'claude') return null; // shell terminals — nothing billed
   if (s._accountId) {
     const a = accounts.get(s._accountId);
     // A named SUBSCRIPTION account bills the subscription (not API) — show its
