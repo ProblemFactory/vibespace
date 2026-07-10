@@ -2095,6 +2095,7 @@ const SESSION_TOOLS_INTRO = [
   '  vibespace-ask "question or decision needed" [--detail "context + your recommendation"] [--urgency low|normal|high|urgent]',
   '  vibespace-ask list  /  vibespace-ask resolve <id|text>   (resolve it yourself once the user answers)',
   'File items ONLY for things that genuinely depend on the user — your own working steps belong in your normal todo list.',
+  'When your reply references files you created or discuss (audio, images, reports, code, HTML…), write their ABSOLUTE paths — the chat UI turns absolute paths into clickable links that open in the right viewer (audio plays, images preview, HTML renders). Bare filenames or project-relative paths may not resolve.',
   '(If this session is later linked to a VibeSpace task, you will also get `vibespace-task` for task-level progress/plan/status — you have no task right now, so it is not active yet.)',
   '</vibespace-session-tools>',
 ].join('\n');

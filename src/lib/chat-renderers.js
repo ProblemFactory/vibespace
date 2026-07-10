@@ -778,7 +778,25 @@ class ChatRenderers {
       if (code) {
         // Linkify paths/URLs inside <code> blocks while preserving the <code> wrapper
         return code.replace(/^(<code[^>]*>)([\s\S]*?)(<\/code>)$/i, (_, open, inner, close) => {
-          return open + this.linkifySegment(inner, true) + close;
+          const linked = this.linkifySegment(inner, true);
+          if (linked === inner) {
+            // No absolute match — but a code span that IS a relative path or
+            // bare filename (`B2BTasks/x/final/`, `SCRIPTS.md`, `generate.py`)
+            // is how agents actually reference files (real transcripts, where
+            // none of it linkified). Make it clickable and resolve against the
+            // session cwd at CLICK time (existence-probed, no render-time IO).
+            const txt = inner.trim().replace(/&amp;/g, '&');
+            const looksRel = /^[\w@%+=.\-][^\s<>"'`|]*$/.test(txt) && txt.length >= 3 && txt.length <= 200
+              && (txt.includes('/') || /\.[A-Za-z0-9]{1,8}$/.test(txt))
+              // digits/dots/slashes only = versions, IPs, CIDR ranges (10.0.0.0/8);
+              // digit-dot stem = IP-ish tokens like 10.0.0.x — never file refs
+              && !/^[\d./]+$/.test(txt) && !/^[\d.]+$/.test(txt.replace(/\.[A-Za-z0-9]+$/, ''))
+              && !txt.endsWith('.') && !txt.includes('//');
+            if (looksRel) {
+              return open + `<span class="chat-link chat-link-path chat-link-rel" data-rel="${escHtml(txt)}" title="${t('Click to copy, Ctrl+Click to locate & open')}">${inner}</span>` + close;
+            }
+          }
+          return open + linked + close;
         });
       }
       if (tag) return tag;
@@ -803,13 +821,14 @@ class ChatRenderers {
       e.stopPropagation();
       const url = link.dataset.href || link.getAttribute('href');
       const fp = link.dataset.path;
-      const open = () => this._openLinkTarget(link, url, fp);
-      const copy = () => copyText(fp || url).then(() => this.flashLink(link, t('Copied!')));
+      const rel = link.dataset.rel;
+      const open = () => rel ? this._openRelTarget(link, rel) : this._openLinkTarget(link, url, fp);
+      const copy = () => copyText(fp || rel || url).then(() => this.flashLink(link, t('Copied!')));
       if (isTouch) {
         // No Ctrl/hover on touch — tap shows both actions (copy used to be impossible)
         showContextMenu(e.clientX, e.clientY, [
-          { label: fp ? t('Open') : t('Open link'), action: open },
-          { label: fp ? t('Copy path') : t('Copy URL'), action: copy },
+          { label: (fp || rel) ? t('Open') : t('Open link'), action: open },
+          { label: (fp || rel) ? t('Copy path') : t('Copy URL'), action: copy },
         ]);
       } else if (e.ctrlKey || e.metaKey) {
         open();
@@ -826,11 +845,49 @@ class ChatRenderers {
       e.stopPropagation();
       const url = link.dataset.href || link.getAttribute('href');
       const fp = link.dataset.path;
+      const rel = link.dataset.rel;
       showContextMenu(e.clientX, e.clientY, [
-        { label: fp ? t('Open') : t('Open link'), action: () => this._openLinkTarget(link, url, fp) },
-        { label: fp ? t('Copy path') : t('Copy URL'), action: () => copyText(fp || url).then(() => this.flashLink(link, t('Copied!'))) },
+        { label: (fp || rel) ? t('Open') : t('Open link'), action: () => rel ? this._openRelTarget(link, rel) : this._openLinkTarget(link, url, fp) },
+        { label: (fp || rel) ? t('Copy path') : t('Copy URL'), action: () => copyText(fp || rel || url).then(() => this.flashLink(link, t('Copied!'))) },
       ]);
     });
+  }
+
+  /** Resolve a RELATIVE path / bare filename against the session cwd and open
+   * it. Agents reference files relative to ambiguous roots (real case: cwd
+   * .../B2BTasks with the reply saying `B2BTasks/x/final/`), so we probe, in
+   * order: cwd/rel → overlap-merge (rel's first segment matches a trailing cwd
+   * segment) → cwd-parent/rel; first existing wins. Host-aware for remote
+   * sessions. Probing happens only on an explicit open click. */
+  async _openRelTarget(link, rel) {
+    const sess = (this.app?.sidebar?._allSessions || []).find(s => s.webuiId === this.sessionId);
+    const cwd = sess?.cwd || '';
+    const host = sess?.host || null;
+    const norm = rel.replace(/\/+$/, '');
+    const cands = [];
+    if (rel.startsWith('~/')) cands.push(rel);
+    else if (cwd) {
+      cands.push(cwd + '/' + norm);
+      const cwdSegs = cwd.split('/'), relSegs = norm.split('/');
+      const at = cwdSegs.lastIndexOf(relSegs[0]);
+      if (at >= 0) cands.push([...cwdSegs.slice(0, at), ...relSegs].join('/'));
+      cands.push(cwdSegs.slice(0, -1).join('/') + '/' + norm);
+    }
+    const seen = new Set();
+    for (const c of cands) {
+      if (!c || seen.has(c)) continue;
+      seen.add(c);
+      try {
+        const r = await fetch(`/api/file/info?path=${encodeURIComponent(c)}${host ? '&host=' + encodeURIComponent(host) : ''}`);
+        const info = await r.json();
+        if (info && !info.error) {
+          if (info.isDirectory) this.app.openFileExplorer(c);
+          else this.app.openFile(c, c.split('/').pop());
+          return;
+        }
+      } catch {}
+    }
+    this.flashLink(link, t('Not found near the session folder'));
   }
 
   /** Open a chat link target: file path (with optional :line suffix) in viewer/explorer, URL in new tab */
@@ -1018,6 +1075,20 @@ class ChatRenderers {
       // Copy button — extracts code text without line-number gutters / diff
       // prefixes. Especially valuable on touch devices where text selection
       // inside scrollable code blocks is impractical.
+      // Agent replied with an ```html block → one-click render in the embedded
+      // browser (blob URL, sandboxed by the iframe; transient — not persisted).
+      if (block.classList.contains('chat-code-block') && (block.dataset.lang === 'html' || block.dataset.lang === 'xml')) {
+        const prevBtn = document.createElement('button');
+        prevBtn.className = 'chat-wrap-toggle';
+        prevBtn.textContent = t('Preview');
+        prevBtn.title = t('Render this HTML in the embedded browser');
+        prevBtn.onclick = (e) => {
+          e.stopPropagation();
+          const code = [...block.querySelectorAll('.chat-code-text')].map(x => x.textContent).join('\n');
+          this.app?.openBrowser?.(URL.createObjectURL(new Blob([code], { type: 'text/html' })));
+        };
+        toolbar.appendChild(prevBtn);
+      }
       const copyBtn = document.createElement('button');
       copyBtn.className = 'chat-wrap-toggle';
       copyBtn.textContent = t('Copy');

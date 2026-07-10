@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.75.0] — 2026-07-10
+
+### Fixed — CRITICAL: sessions created after the service migration died on every restart
+systemd's default KillMode=control-group killed every dtach session spawned by
+the service on each restart (pre-migration sessions lived outside the cgroup
+and survived — which is why only newly-resumed sessions kept "terminating").
+The unit now uses KillMode=process: only the node server is killed; dtach
+masters survive. Verified: a freshly resumed session's master lived through a
+restart and reconnected.
+
+### Added — relative-path linkify + click-time resolution
+Agents reference files as `SCRIPTS.md`, `generate.py`, `B2BTasks/x/final/` —
+absolute-only linkify missed all of it. Backtick code spans that look like a
+relative path or filename are now clickable: Ctrl+click resolves against the
+session cwd (direct join, overlap-merge on a shared segment, cwd parent; first
+existing candidate opens in the right viewer/explorer, host-aware). Injected
+session context now also teaches agents to write absolute paths. ```html code
+blocks get a Preview button (renders in the embedded browser).
+
 ## [2.74.0] — 2026-07-10
 
 ### Added — per-message metadata popup

@@ -50,6 +50,12 @@ Environment=PORT=${PORT:-3456}
 Environment=PATH=$(dirname "$NODE_BIN"):$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin
 # Prefer killing memory hogs (browsers, builds) over the workspace server.
 OOMScoreAdjust=-500
+# CRITICAL: only kill the node server on stop/restart — NOT the whole cgroup.
+# Agent sessions run in dtach and must survive server restarts (that's the
+# whole persistence design); the default control-group KillMode killed every
+# dtach session spawned after the service migration on each restart (real
+# incident: one session died on every restart while pre-migration ones lived).
+KillMode=process
 
 [Install]
 WantedBy=default.target

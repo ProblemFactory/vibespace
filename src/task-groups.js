@@ -250,7 +250,9 @@ class TaskGroupManager {
       '`vibespace-ask` — file an item on the USER\'s global inbox when something specifically needs THEM (a decision, input only they can give, something to review). They see every session\'s items in one list and can jump here to answer:',
       `- \`vibespace-ask "question or decision needed" [--detail "context + your recommendation"] [--urgency low|normal|high|urgent]\``,
       `- \`vibespace-ask list\`  /  \`vibespace-ask resolve <id|text>\` — resolve it yourself once the user answers (in chat or otherwise).`,
-      `- ONLY for things that genuinely depend on the user — not your own working steps (normal todo list) and not group work items (\`vibespace-task plan-add\`).`);
+      `- ONLY for things that genuinely depend on the user — not your own working steps (normal todo list) and not group work items (\`vibespace-task plan-add\`).`,
+      '',
+      'Referencing files in chat replies: write ABSOLUTE paths (e.g. /home/user/project/out/final.wav) — the chat UI turns them into clickable links that open in the right viewer (audio plays, images preview, HTML renders). Bare filenames and project-relative paths may not resolve for the user.');
     if (t.contextDir) {
       const base = ctxBase || t.contextDir;
       parts.push('', `## Shared context folder (the group's shared memory)`, '',

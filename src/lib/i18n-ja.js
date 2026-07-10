@@ -1134,4 +1134,7 @@ export default {
   'Click to copy': 'クリックでコピー',
   'Copy as JSON': 'JSON としてコピー',
   'Update VibeSpace…': 'VibeSpace を更新…',
+  'Click to copy, Ctrl+Click to locate & open': 'クリックでコピー、Ctrl+クリックで特定して開く',
+  'Not found near the session folder': 'セッションフォルダ付近に見つかりません',
+  'Render this HTML in the embedded browser': 'この HTML を内蔵ブラウザで表示',
 };
