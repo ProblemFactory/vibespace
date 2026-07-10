@@ -1,3 +1,4 @@
+import uPlot from 'uplot';
 import { escHtml, createPopover, showContextMenu } from './utils.js';
 import { t } from './i18n.js';
 
@@ -12,16 +13,25 @@ import { t } from './i18n.js';
  */
 
 export const METRICS = () => ([
-  { key: 'cost', label: t('Est. cost'), fmt: fmtCost },
-  { key: 'requests', label: t('Requests'), fmt: fmtNum },
-  { key: 'totalTokens', label: t('Total tokens'), fmt: fmtTok },
-  { key: 'output', label: t('Output tokens'), fmt: fmtTok },
-  { key: 'input', label: t('Fresh input tokens'), fmt: fmtTok },
-  { key: 'cacheRead', label: t('Cache read tokens'), fmt: fmtTok },
-  { key: 'cacheWrite', label: t('Cache write tokens'), fmt: fmtTok },
-  { key: 'cacheHitRatio', label: t('Cache hit ratio'), fmt: fmtPct },
-  { key: 'sessions', label: t('Sessions'), fmt: fmtNum },
+  // unit → axis grouping: metrics sharing a unit share a y-scale; a chart with
+  // two units gets a right axis for the second (cost + requests on one line
+  // chart Just Works).
+  { key: 'cost', label: t('Est. cost'), fmt: fmtCost, unit: '$' },
+  { key: 'requests', label: t('Requests'), fmt: fmtNum, unit: 'n' },
+  { key: 'totalTokens', label: t('Total tokens'), fmt: fmtTok, unit: 'tok' },
+  { key: 'output', label: t('Output tokens'), fmt: fmtTok, unit: 'tok' },
+  { key: 'input', label: t('Fresh input tokens'), fmt: fmtTok, unit: 'tok' },
+  { key: 'cacheRead', label: t('Cache read tokens'), fmt: fmtTok, unit: 'tok' },
+  { key: 'cacheWrite', label: t('Cache write tokens'), fmt: fmtTok, unit: 'tok' },
+  { key: 'cacheHitRatio', label: t('Cache hit ratio'), fmt: fmtPct, unit: '%' },
+  { key: 'sessions', label: t('Sessions'), fmt: fmtNum, unit: 'n' },
 ]);
+
+// Panel metric list — panels predating 2.97.0 carry a single `metric`.
+export function panelMetrics(panel) {
+  const list = Array.isArray(panel.metrics) && panel.metrics.length ? panel.metrics : [panel.metric || 'cost'];
+  return list.filter((k) => METRICS().some((m) => m.key === k));
+}
 
 export const DIMENSIONS = () => ([
   { key: 'total', label: t('Total (no grouping)') },
@@ -52,7 +62,7 @@ export const PRESETS = () => ({
     panels: [
       { metric: 'cost', dim: 'total', chart: 'stat', span: 1 },
       { metric: 'requests', dim: 'total', chart: 'stat', span: 1 },
-      { metric: 'cost', dim: 'day', chart: 'line', span: 2 },
+      { metrics: ['cost', 'requests'], dim: 'day', chart: 'line', span: 2 },
       { metric: 'cost', dim: 'model', chart: 'pie', span: 1 },
       { metric: 'cost', dim: 'account', chart: 'bars', span: 1 },
       { metric: 'cost', dim: 'project', chart: 'bars', span: 2, topN: 10 },
@@ -63,7 +73,7 @@ export const PRESETS = () => ({
     panels: [
       { metric: 'totalTokens', dim: 'total', chart: 'stat', span: 1 },
       { metric: 'cacheHitRatio', dim: 'total', chart: 'stat', span: 1 },
-      { metric: 'totalTokens', dim: 'day', chart: 'line', span: 2 },
+      { metrics: ['totalTokens', 'output'], dim: 'day', chart: 'line', span: 2 },
       { metric: 'output', dim: 'model', chart: 'bars', span: 1 },
       { metric: 'cacheRead', dim: 'model', chart: 'bars', span: 1 },
       { metric: 'cacheHitRatio', dim: 'day', chart: 'line', span: 2 },
@@ -109,12 +119,14 @@ function metricOf(key) { return METRICS().find((m) => m.key === key) || METRICS(
 // summed in group rows — derive it from the token fields.
 function panelRows(data, panel) {
   const dim = DIMENSIONS().find((d) => d.key === panel.dim);
+  const mkeys = panelMetrics(panel);
+  const first = mkeys[0];
   if (!dim || panel.dim === 'total') {
     const totals = data.totals || {};
-    return [{ key: t('Total'), value: valueOf(totals, panel.metric) }];
+    return [{ key: t('Total'), raw: totals, value: valueOf(totals, first), values: mkeys.map((k) => valueOf(totals, k)) }];
   }
   let rows = (data.groups?.[panel.dim] || []).map((r) => ({
-    key: r.name || r.key, raw: r, value: valueOf(r, panel.metric),
+    key: r.name || r.key, raw: r, value: valueOf(r, first), values: mkeys.map((k) => valueOf(r, k)),
   }));
   if (!dim.seq) {
     rows.sort((a, b) => b.value - a.value);
@@ -133,58 +145,114 @@ function valueOf(r, metric) {
 
 // ── Chart renderers (all theme-token based, no deps) ──
 
-function chartStat(body, rows, m) {
-  const el = document.createElement('div');
-  el.className = 'udash-stat';
-  el.textContent = m.fmt(rows[0]?.value || 0);
-  body.appendChild(el);
+function chartStat(body, rows, mlist) {
+  const wrap = document.createElement('div');
+  wrap.className = 'udash-stat-row';
+  mlist.forEach((m, i) => {
+    const cell = document.createElement('div');
+    cell.className = 'udash-stat-cell';
+    cell.innerHTML = `<div class="udash-stat">${escHtml(m.fmt(rows[0]?.values?.[i] ?? 0))}</div>`
+      + (mlist.length > 1 ? `<div class="udash-stat-label">${escHtml(m.label)}</div>` : '');
+    wrap.appendChild(cell);
+  });
+  body.appendChild(wrap);
 }
 
-function chartBars(body, rows, m) {
+function chartBars(body, rows, mlist) {
   if (!rows.length) return empty(body);
-  const max = Math.max(...rows.map((r) => r.value), 1e-9);
+  // Per-metric max: metrics live on wildly different ranges (cost $ vs
+  // cache-read billions) — each metric's bar normalizes to its own max.
+  const maxes = mlist.map((_, i) => Math.max(...rows.map((r) => r.values[i]), 1e-9));
+  if (mlist.length > 1) body.appendChild(miniLegend(mlist));
   for (const r of rows) {
     const row = document.createElement('div');
-    row.className = 'udash-barrow';
-    row.innerHTML = `<span class="udash-barlabel" title="${escHtml(String(r.key))}">${escHtml(String(r.key))}</span>`
-      + `<span class="udash-bartrack"><span class="udash-barfill" style="width:${Math.max(1, (r.value / max) * 100)}%"></span></span>`
-      + `<span class="udash-barval">${escHtml(m.fmt(r.value))}</span>`;
+    row.className = 'udash-barrow' + (mlist.length > 1 ? ' udash-barrow-multi' : '');
+    const bars = mlist.map((m, i) =>
+      `<span class="udash-bartrack"><span class="udash-barfill" style="width:${Math.max(1, (r.values[i] / maxes[i]) * 100)}%;background:${PALETTE[i % PALETTE.length]}"></span></span>`
+      + `<span class="udash-barval">${escHtml(m.fmt(r.values[i]))}</span>`).join('');
+    row.innerHTML = `<span class="udash-barlabel" title="${escHtml(String(r.key))}">${escHtml(String(r.key))}</span><span class="udash-barset">${bars}</span>`;
     body.appendChild(row);
   }
 }
 
-function chartLine(body, rows, m) {
+function miniLegend(mlist) {
+  const lg = document.createElement('div');
+  lg.className = 'udash-minilegend';
+  lg.innerHTML = mlist.map((m, i) => `<span class="udash-legend-item"><span class="udash-dot" style="background:${PALETTE[i % PALETTE.length]}"></span>${escHtml(m.label)}</span>`).join('');
+  return lg;
+}
+
+function chartLine(body, rows, mlist) {
   if (!rows.length) return empty(body);
-  const canvas = document.createElement('canvas');
-  canvas.className = 'udash-canvas';
-  body.appendChild(canvas);
+  const holder = document.createElement('div');
+  holder.className = 'udash-uplot';
+  body.appendChild(holder);
   requestAnimationFrame(() => {
-    const rect = canvas.parentElement.getBoundingClientRect();
-    const W = canvas.width = Math.max(200, rect.width - 4) * devicePixelRatio;
-    const H = canvas.height = 150 * devicePixelRatio;
-    canvas.style.height = '150px';
-    const ctx = canvas.getContext('2d');
-    const cs = getComputedStyle(canvas);
-    const accent = cs.getPropertyValue('--accent').trim() || '#0f766e';
-    const dim = cs.getPropertyValue('--text-dim').trim() || '#888';
-    const max = Math.max(...rows.map((r) => r.value), 1e-9);
-    const px = (i) => rows.length === 1 ? W / 2 : (i / (rows.length - 1)) * (W - 20 * devicePixelRatio) + 10 * devicePixelRatio;
-    const py = (v) => H - 18 * devicePixelRatio - (v / max) * (H - 34 * devicePixelRatio);
-    // area fill + line
-    ctx.beginPath();
-    rows.forEach((r, i) => { i ? ctx.lineTo(px(i), py(r.value)) : ctx.moveTo(px(0), py(r.value)); });
-    ctx.strokeStyle = accent; ctx.lineWidth = 2 * devicePixelRatio; ctx.stroke();
-    ctx.lineTo(px(rows.length - 1), H); ctx.lineTo(px(0), H); ctx.closePath();
-    ctx.globalAlpha = 0.12; ctx.fillStyle = accent; ctx.fill(); ctx.globalAlpha = 1;
-    // x labels: first / middle / last; y max label
-    ctx.fillStyle = dim; ctx.font = `${10 * devicePixelRatio}px system-ui`;
-    ctx.textAlign = 'left'; ctx.fillText(String(rows[0].key), 4 * devicePixelRatio, H - 4 * devicePixelRatio);
-    ctx.textAlign = 'right'; ctx.fillText(String(rows[rows.length - 1].key), W - 4 * devicePixelRatio, H - 4 * devicePixelRatio);
-    ctx.textAlign = 'left'; ctx.fillText(m.fmt(max), 4 * devicePixelRatio, 12 * devicePixelRatio);
+    const rect = holder.parentElement.getBoundingClientRect();
+    const cs = getComputedStyle(holder);
+    const gridColor = 'rgba(128,128,128,0.15)';
+    const textColor = cs.getPropertyValue('--text-dim').trim() || '#888';
+    // Unit → scale/axis: first unit owns the left axis, second the right;
+    // further units share the right axis (rare in practice).
+    const units = [...new Set(mlist.map((mm) => mm.unit))];
+    const scaleOf = (u) => 'y' + Math.min(units.indexOf(u), 1);
+    const xs = rows.map((_, i) => i);
+    const data = [xs, ...mlist.map((_, i) => rows.map((r) => r.values[i]))];
+    const series = [
+      {},
+      ...mlist.map((mm, i) => ({
+        label: mm.label,
+        stroke: resolveColor(holder, PALETTE[i % PALETTE.length]),
+        width: 2,
+        fill: i === 0 ? resolveColor(holder, PALETTE[0], 0.10) : undefined,
+        scale: scaleOf(mm.unit),
+        value: (u, v) => v == null ? '' : mm.fmt(v),
+      })),
+    ];
+    const axes = [
+      { stroke: textColor, grid: { stroke: gridColor }, values: (u, splits) => splits.map((i2) => rows[Math.round(i2)]?.key ?? '') },
+      { stroke: textColor, grid: { stroke: gridColor }, scale: 'y0', size: 56,
+        values: (u, splits) => splits.map((v) => metricForUnit(mlist, units[0]).fmt(v)) },
+    ];
+    if (units.length > 1) {
+      axes.push({ stroke: textColor, grid: { show: false }, scale: 'y1', side: 1, size: 56,
+        values: (u, splits) => splits.map((v) => metricForUnit(mlist, units[1]).fmt(v)) });
+    }
+    const u = new uPlot({
+      width: Math.max(220, rect.width - 8), height: 170,
+      series, axes,
+      scales: { x: { time: false }, y0: {}, y1: {} },
+      cursor: { drag: { setScale: false } },
+      legend: { live: true },
+    }, data, holder);
+    // re-fit when the panel resizes with the window
+    const ro = new ResizeObserver(() => {
+      const w = holder.parentElement?.getBoundingClientRect().width;
+      if (w && Math.abs(w - 8 - u.width) > 4) u.setSize({ width: Math.max(220, w - 8), height: 170 });
+    });
+    ro.observe(holder.parentElement);
+    holder._udashRo = ro; // GC'd with the panel re-render (observer on detached node is inert)
   });
 }
 
-function chartPie(body, rows, m) {
+function metricForUnit(mlist, unit) { return mlist.find((mm) => mm.unit === unit) || mlist[0]; }
+
+// PALETTE entries are var() strings — canvas/uPlot need resolved colors.
+function resolveColor(el, varStr, alpha) {
+  const probe = document.createElement('span');
+  probe.style.color = varStr;
+  el.appendChild(probe);
+  const c = getComputedStyle(probe).color;
+  probe.remove();
+  if (alpha == null) return c;
+  const m2 = c.match(/rgba?\(([^)]+)\)/);
+  if (!m2) return c;
+  const [r, g, b] = m2[1].split(',').map((x) => parseFloat(x));
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function chartPie(body, rows, mlist) {
+  const m = mlist[0]; // a donut is single-metric by nature — first metric wins
   if (!rows.length) return empty(body);
   const top = rows.slice(0, 7);
   const rest = rows.slice(7).reduce((s, r) => s + r.value, 0);
@@ -214,15 +282,16 @@ function chartPie(body, rows, m) {
   body.appendChild(wrap);
 }
 
-function chartTable(body, rows, m, panel, data) {
+function chartTable(body, rows, mlist, panel) {
   if (!rows.length) return empty(body);
   const tbl = document.createElement('table');
   tbl.className = 'udash-table';
-  const cols = ['requests', panel.metric === 'cost' ? 'totalTokens' : 'cost', panel.metric];
-  const uniqCols = [...new Set(cols)];
-  tbl.innerHTML = `<tr><th></th>${uniqCols.map((c) => `<th>${escHtml(metricOf(c).label)}</th>`).join('')}</tr>`
+  // Selected metrics ARE the columns; a lone metric gets requests+cost context.
+  const keys = panelMetrics(panel);
+  const cols = keys.length > 1 ? keys : [...new Set(['requests', keys[0] === 'cost' ? 'totalTokens' : 'cost', keys[0]])];
+  tbl.innerHTML = `<tr><th></th>${cols.map((c) => `<th>${escHtml(metricOf(c).label)}</th>`).join('')}</tr>`
     + rows.map((r) => `<tr><td class="udash-td-key" title="${escHtml(String(r.key))}">${escHtml(String(r.key))}</td>`
-      + uniqCols.map((c) => `<td class="udash-td-num">${escHtml(metricOf(c).fmt(r.raw ? valueOf(r.raw, c) : r.value))}</td>`).join('') + '</tr>').join('');
+      + cols.map((c) => `<td class="udash-td-num">${escHtml(metricOf(c).fmt(r.raw ? valueOf(r.raw, c) : r.value))}</td>`).join('') + '</tr>').join('');
   body.appendChild(tbl);
 }
 
@@ -248,13 +317,14 @@ export function renderDashboard(container, data, panels, { onChange }) {
 }
 
 function renderPanel(data, panels, panel, idx, onChange) {
-  const m = metricOf(panel.metric);
+  const mlist = panelMetrics(panel).map(metricOf);
   const dimMeta = DIMENSIONS().find((d) => d.key === panel.dim);
   const card = document.createElement('div');
   card.className = 'udash-panel' + (panel.span === 2 ? ' udash-span2' : '');
   const head = document.createElement('div');
   head.className = 'udash-panel-head';
-  const title = panel.title || (panel.dim === 'total' ? m.label : `${m.label} · ${dimMeta?.label || panel.dim}`);
+  const mLabel = mlist.map((mm) => mm.label).join(' + ');
+  const title = panel.title || (panel.dim === 'total' ? mLabel : `${mLabel} · ${dimMeta?.label || panel.dim}`);
   head.innerHTML = `<span class="udash-panel-title" title="${escHtml(title)}">${escHtml(title)}</span>`;
   const tools = document.createElement('span');
   tools.className = 'udash-panel-tools';
@@ -279,7 +349,7 @@ function renderPanel(data, panels, panel, idx, onChange) {
   const body = document.createElement('div');
   body.className = 'udash-panel-body';
   const rows = panelRows(data, panel);
-  ({ stat: chartStat, bars: chartBars, line: chartLine, pie: chartPie, table: chartTable }[panel.chart] || chartBars)(body, rows, m, panel, data);
+  ({ stat: chartStat, bars: chartBars, line: chartLine, pie: chartPie, table: chartTable }[panel.chart] || chartBars)(body, rows, mlist, panel, data);
   card.append(head, body);
   return card;
 }
@@ -306,7 +376,30 @@ function openPanelEditor(e, existing, commit) {
     pop.appendChild(wrap);
     return s;
   };
-  sel(t('Metric'), METRICS(), panel.metric, (v) => { panel.metric = v; });
+  // Metrics: MULTI-select — checkbox list (the whole point of 2.97.0).
+  {
+    const wrap = document.createElement('div');
+    wrap.className = 'udash-editor-row udash-editor-metrics';
+    const span = document.createElement('span'); span.textContent = t('Metrics');
+    const list = document.createElement('div');
+    list.className = 'udash-metric-list';
+    const chosen = new Set(panelMetrics(panel));
+    for (const mm of METRICS()) {
+      const lab = document.createElement('label');
+      lab.className = 'udash-metric-check';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.checked = chosen.has(mm.key);
+      cb.onchange = () => {
+        if (cb.checked) chosen.add(mm.key); else if (chosen.size > 1) chosen.delete(mm.key); else cb.checked = true;
+        panel.metrics = METRICS().map((x) => x.key).filter((k) => chosen.has(k));
+        panel.metric = panel.metrics[0];
+      };
+      lab.append(cb, document.createTextNode(mm.label));
+      list.appendChild(lab);
+    }
+    wrap.append(span, list);
+    pop.appendChild(wrap);
+  }
   sel(t('Group by'), DIMENSIONS(), panel.dim, (v) => { panel.dim = v; });
   sel(t('Chart'), CHARTS(), panel.chart, (v) => { panel.chart = v; });
   sel(t('Top N'), [5, 8, 10, 15, 25].map((n) => ({ key: String(n), label: String(n) })), String(panel.topN || 8), (v) => { panel.topN = Number(v); });

@@ -1424,4 +1424,5 @@ export default {
   "Usage dashboard panels": "用量仪表盘面板",
   "Weekday": "按星期",
   "Width": "宽度",
+  "Metrics": "指标（可多选）",
 };

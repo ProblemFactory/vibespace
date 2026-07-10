@@ -1422,4 +1422,5 @@ export default {
   "Weekday": "曜日別",
   "Width": "幅",
   "Group by": "グループ化の軸",
+  "Metrics": "指標（複数選択可）",
 };
