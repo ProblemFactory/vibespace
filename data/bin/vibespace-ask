@@ -27,11 +27,11 @@ const URGENCIES = ['low', 'normal', 'high', 'urgent'];
 const urgency = opt('urgency');
 const detail = opt('detail');
 const USAGE = [
-  'usage — file an item the USER must act on (decision / input / review):',
+  'usage — mirror questions for the USER onto their global inbox (they may not be watching this window):',
   '  vibespace-ask "question or decision needed" [--detail "context, options, your recommendation"] [--urgency low|normal|high|urgent]',
   '  vibespace-ask list                    print this session\'s open items',
-  '  vibespace-ask resolve <id|text>       mark one handled (do this yourself once the user answers)',
-  '  (your own working steps belong in your normal todo list, not here)',
+  '  vibespace-ask resolve <id|text>       the user answered (in chat counts)? resolve it YOURSELF immediately',
+  '  (whenever you ask in chat, ALSO file it here — both channels, always; your own working steps still belong in your todo list)',
 ].join('\n');
 
 async function call(body) {
