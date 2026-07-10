@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.95.0 — 2026-07-10
+
+**Telemetry: full observation-point sweep**
+- Client: `ws-outage-ms` (per reconnect — verified capturing a real 9.7s restart outage), `gap-slab-load-ms` (huge-session scroll slabs, both directions), `history-render-ms` (chat attach render), `chat-search-ms` (streaming full-file search), `session-create-roundtrip-ms` (create → created), `upload-mbps` (>1MB uploads).
+- Server 5-min sampler additions: `srv-ws-clients`, `srv-subagent-watchers` + `srv-normalizer-msgs` + `srv-buffer-files` (leak canaries for the exact classes the 2.81–2.91 audits kept finding), rolling HTTP window (`srv-http-reqs-5min` / `avg-ms` / `max-ms`) with slow-request events (>1.5s, route sanitized to 3 path segments — user paths never enter the ledger), `srv-usage-scan-ms`, and `srv-jsonl-parse-ms` (slow tail re-parses >200ms, via a zero-coupling global hook).
+- First real finding on day one: the server event loop blocks for seconds during boot (restoreSessions' synchronous scans) — now measured instead of anecdotal.
+
 ## 2.94.0 — 2026-07-10
 
 **Telemetry: performance metrics**

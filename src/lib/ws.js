@@ -1,3 +1,5 @@
+import { metric } from './telemetry-client.js';
+
 class WsManager {
   constructor() {
     this.ws = null; this.handlers = new Map(); this.globalHandlers = []; this.pending = [];
@@ -10,6 +12,8 @@ class WsManager {
     this.ws = new WebSocket(`${proto}//${location.host}/ws`);
     this.ws.onopen = () => {
       this._connected = true;
+      // Reconnect after an outage → record how long the client was cut off
+      if (this._outageStart) { metric('ws-outage-ms', Date.now() - this._outageStart); this._outageStart = null; }
       this._notifyState(true);
       for (const m of this.pending) this.ws.send(m); this.pending = [];
     };
@@ -30,7 +34,7 @@ class WsManager {
       // another "Disconnected from server" marker to every chat window.
       const wasConnected = this._connected;
       this._connected = false;
-      if (wasConnected) this._notifyState(false);
+      if (wasConnected) { this._outageStart = Date.now(); this._notifyState(false); }
       // Auth token revoked/expired? The WS upgrade gets rejected before open —
       // probe once per close and bounce to the login page instead of retrying
       // forever against a 401.

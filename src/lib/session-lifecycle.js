@@ -1,6 +1,6 @@
 // Session lifecycle: create/attach/resume/fork/view/kill + billing switcher + openSpec replay (mixin split from app.js, 2.82.0 audit seam).
 import { ChatView } from './chat-view.js';
-import { track } from './telemetry-client.js';
+import { track, metric } from './telemetry-client.js';
 import { t } from './i18n.js';
 import { TerminalSession } from './terminal.js';
 import { showConfirmDialog, showContextMenu, showToast } from './utils.js';
@@ -44,6 +44,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     // match their OWN 'created' reply — an untagged match binds the ChatView
     // to whichever session the server happens to answer first.
     const reqId = `req-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const _createT0 = performance.now();
 
     this.ws.send({
       type:'create', backend, hostId: hostId||undefined, mode: sessionMode, cwd: cwd||undefined, sessionName: name||undefined, model: sessionModel||undefined,
@@ -61,6 +62,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       // doesn't hold winInfo forever (and can't bind a session to a dead window)
       if (!this.wm.windows.has(winInfo.id)) { this.ws.offGlobal(handler); return; }
       if (msg.type === 'created' && msg.reqId === reqId) {
+        metric('session-create-roundtrip-ms', performance.now() - _createT0);
         // Set openSpec now that we have the server session ID (for cross-client sync)
         winInfo._openSpec = {
           action: 'attachSession',

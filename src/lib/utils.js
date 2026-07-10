@@ -1,4 +1,5 @@
 import { t } from './i18n.js';
+import { metric } from './telemetry-client.js';
 
 export function formatSize(b) { if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
 
@@ -168,6 +169,8 @@ export async function uploadFilesBatched(files, { destDir, preservePaths, onProg
   };
 
   const uploaded = [], failed = [];
+  const _t0 = performance.now();
+  const _totalBytes = list.reduce((s2, f) => s2 + (f.size || 0), 0);
   let done = 0;
   for (const chunk of chunks) {
     try {
@@ -186,6 +189,8 @@ export async function uploadFilesBatched(files, { destDir, preservePaths, onProg
     done += chunk.length;
     onProgress?.(done, list.length);
   }
+  const _dt = (performance.now() - _t0) / 1000;
+  if (_dt > 0.5 && _totalBytes > 1048576) metric('upload-mbps', (_totalBytes / 1048576) / _dt);
   return { uploaded, failed };
 }
 // Front-truncate a path-like string: keep the END (the meaningful filename),

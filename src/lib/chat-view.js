@@ -1,5 +1,6 @@
 import { copyText, escHtml, showToast } from './utils.js';
 import { installChatSeek } from './chat-view-seek.js';
+import { metric } from './telemetry-client.js';
 import { stripAnsi } from './highlight.js';
 import { ChatMinimap } from './chat-minimap.js';
 import { ChatSearch } from './chat-search.js';
@@ -403,6 +404,7 @@ class ChatView {
   // Load initial messages from attach response
   // Load normalized messages from attach response
   loadHistory(messages, totalCount, isStreaming, meta) {
+    const _t0 = performance.now();
     if (meta?.normEpoch) this._normEpoch = meta.normEpoch;
     this._total = totalCount || messages.length;
     this._windowStart = this._total - messages.length;
@@ -462,6 +464,7 @@ class ChatView {
 
     if (isStreaming) this._showTyping(meta?.streamingLabel || t('thinking...'));
     this._scrollToBottom();
+    metric('history-render-ms', performance.now() - _t0);
     // Auto-load more if content doesn't fill viewport (no scrollbar to trigger scroll event)
     setTimeout(() => {
       if (this._windowStart > 0 && this._messageList.scrollHeight <= this._messageList.clientHeight) {

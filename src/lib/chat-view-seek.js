@@ -1,4 +1,5 @@
 import { t } from './i18n.js';
+import { metric } from './telemetry-client.js';
 
 /**
  * ChatView gap-seek mixin — the huge-JSONL continuous-scroll machinery
@@ -54,6 +55,7 @@ export function installChatSeek(ChatView) {
   },
 
     async _loadLaterGap() {
+      const _t0 = performance.now();
     this._gapDownLoading = true;
     try {
       const { backend, backendSessionId, cwd } = this._getSessionIds();
@@ -72,6 +74,7 @@ export function installChatSeek(ChatView) {
       if (this._gapBounds && this._gapCursorDown >= this._gapBounds.totalLines) this._gapDownIdleUntil = Date.now() + 3000;
       this._trimGapDom('top');
       this._reportVisibleTsRange();
+      metric('gap-slab-load-ms', performance.now() - _t0);
     } finally {
       this._gapDownLoading = false;
     }
@@ -128,6 +131,7 @@ export function installChatSeek(ChatView) {
   },
 
     async _loadEarlierGap(markerEl, btn) {
+      const _t0 = performance.now();
     if (!markerEl || markerEl._gapLoading) return;
     // Tail mode: load the registered tail to completion first — the sentinel
     // loads history BELOW line tailStartLine, which must sit above a fully
@@ -169,6 +173,7 @@ export function installChatSeek(ChatView) {
       // Next (older) slab inserts above the one we just added
       if (firstInserted) markerEl._gapAnchor = firstInserted;
       markerEl._gapCursor = (data && Number.isFinite(data.fromLine)) ? data.fromLine : 0;
+      metric('gap-slab-load-ms', performance.now() - _t0);
       // Keep the viewport stable: we inserted content below the sentinel
       this._messageList.scrollTop = scrollTopBefore + (this._messageList.scrollHeight - scrollHeightBefore);
       if (this._teleported) this._trimGapDom('bottom');

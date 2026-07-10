@@ -1,4 +1,5 @@
 import { t } from './i18n.js';
+import { metric } from './telemetry-client.js';
 
 /**
  * ChatSearch — extracted search functionality for ChatView.
@@ -156,6 +157,7 @@ class ChatSearch {
   // Read the NDJSON match stream: jump to the first hit immediately, then keep
   // updating the live count until the server signals `done`.
   async _streamFullFileSearch(backend, backendSessionId, cwd, q, token, stale) {
+    const _t0 = performance.now();
     this._searchAbort?.abort();
     const ac = (this._searchAbort = new AbortController());
     this._searching = true;
@@ -192,6 +194,7 @@ class ChatSearch {
       this._searching = false;
     }
     if (stale()) return;
+    metric('chat-search-ms', performance.now() - _t0);
     if (!this._serverSearchResults.length) this._searchStatus.textContent = t('No results');
     else this._updateSearchStatus();
   }
