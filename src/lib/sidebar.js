@@ -75,7 +75,12 @@ class Sidebar {
 
     document.getElementById('sidebar-toggle').onclick = () => this.toggle();
     document.getElementById('sidebar-close').onclick = () => this.toggle(false);
-    document.getElementById('session-filter').oninput = () => this._render();
+    // 150ms debounce: every keystroke re-ran the full folder-grouping render
+    // over ~5k sessions (audit round-2)
+    document.getElementById('session-filter').oninput = () => {
+      clearTimeout(this._filterTimer);
+      this._filterTimer = setTimeout(() => this._render(), 150);
+    };
 
     // Build tab bar
     this._buildTabBar();

@@ -358,8 +358,13 @@ class App {
       document.body.classList.remove('taskbar-revealed');
     };
     hz.addEventListener('mouseenter', reveal);
-    taskbar.addEventListener('mouseenter', reveal);
-    taskbar.addEventListener('mouseleave', conceal);
+    // The taskbar element PERSISTS across hotzone recreation (toggling
+    // autohide off/on) — re-adding its listeners each time stacked duplicates.
+    if (!taskbar._hzWired) {
+      taskbar._hzWired = true;
+      taskbar.addEventListener('mouseenter', reveal);
+      taskbar.addEventListener('mouseleave', conceal);
+    }
     hz.addEventListener('mouseleave', (e) => { if (e.relatedTarget !== taskbar && !taskbar.contains(e.relatedTarget)) conceal(e); });
   }
 
@@ -741,6 +746,9 @@ class App {
     content.dataset.saved = content.dataset.saved || content.innerHTML; // restore target on finish
     let step = 0;
     const done = () => {
+      // release the capture-phase keydown regardless of HOW the tour ended
+      // (finishing via the last step used to leave it attached forever)
+      this._obKeyHandler?.abort?.(); this._obKeyHandler = null;
       localStorage.setItem('vs-onboarded', '1');
       welcome.classList.remove('onboarding');
       welcome.classList.add('hidden'); // _checkWelcome re-shows it only on an empty desktop
@@ -1902,16 +1910,25 @@ class App {
   }
 
   syncSessionIdentity(allSessions = []) {
+    // Runs on every 5s merge — index once instead of find() per window over
+    // the full ~5k-entry list (which also allocated two template strings per
+    // probed entry; audit round-2 confirmed hot path).
+    const byWebui = new Map();
+    const byKey = new Map();
+    for (const entry of allSessions) {
+      if (entry.webuiId && !byWebui.has(entry.webuiId)) byWebui.set(entry.webuiId, entry);
+      const k = entry.sessionKey || `${entry.backend || 'claude'}:${entry.backendSessionId || entry.sessionId}`;
+      if (!byKey.has(k)) byKey.set(k, entry);
+    }
     for (const [winId, session] of this.sessions) {
       const win = this.wm.windows.get(winId);
       if (!win) continue;
       const spec = win._openSpec || {};
-      const match = allSessions.find((entry) => {
-        if (entry.webuiId && session.sessionId === entry.webuiId) return true;
-        const entryKey = entry.sessionKey || `${entry.backend || 'claude'}:${entry.backendSessionId || entry.sessionId}`;
+      let match = byWebui.get(session.sessionId) || null;
+      if (!match && (spec.sessionKey || spec.backendSessionId || spec.sessionId)) {
         const specKey = spec.sessionKey || `${spec.backend || win.titleMeta?.backend || 'claude'}:${spec.backendSessionId || spec.sessionId || ''}`;
-        return !!(spec.sessionKey || spec.backendSessionId || spec.sessionId) && entryKey === specKey;
-      });
+        match = byKey.get(specKey) || null;
+      }
       if (!match) continue;
       // Persist a fork's chosen title as a custom name once its NEW backend id
       // is adopted (after the first turn) — before that, match.backendSessionId

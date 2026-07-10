@@ -97,6 +97,10 @@ export function installSessionLifecycle(App, ctx = {}) {
           winInfo.onClose = () => {
             const shouldKill = (this.settings.get('window.closeBehavior') ?? 'terminate') === 'terminate';
             if (shouldKill) this.ws.send({ type: 'kill', sessionId: msg.sessionId });
+            // pending name/fork-title entries otherwise only clear on identity
+            // adoption — a window closed before that leaked them forever
+            this._pendingForkTitles?.delete(msg.sessionId);
+            this._pendingCreateNames?.delete(msg.sessionId);
             chatView.dispose(); this.sessions.delete(winInfo.id); this._checkWelcome();
           };
           winInfo._notifyChanged = () => this.updateTaskbar();

@@ -1089,6 +1089,21 @@ function registerWsHandler(wss, ctx) {
             // delete the session from activeSessions right below, and the pty's
             // async onExit starts with `if (!activeSessions.has(id)) return`
             // (the 46de4ec stale-PTY guard) — so relying on onExit to emit
+            // Teardown watchers/normalizers HERE: onExit early-returns once
+            // the session leaves activeSessions (stale-PTY guard), so killed
+            // sessions leaked every subagent fs.watch + retry timer +
+            // normalizer + buffered subagent messages (audit round-2, high).
+            if (session.subagentWatchers) {
+              for (const [, entry] of session.subagentWatchers) {
+                try { entry.watcher?.close(); } catch {}
+                if (entry.retry) clearTimeout(entry.retry);
+              }
+              session.subagentWatchers.clear();
+            }
+            session._subNormalizers?.clear?.();
+            if (session._normalizer) session._normalizer.listeners.length = 0;
+            session.subagentBuffers = null;
+            session.subagentEmittedUuids = null;
             // 'exited' silently broke terminate-from-sidebar.
             broadcastToSession(session, data.sessionId, { type: 'exited', sessionId: data.sessionId, reason: 'terminated' });
             activeSessions.delete(data.sessionId);

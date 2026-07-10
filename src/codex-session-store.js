@@ -107,7 +107,16 @@ function listOpenCodexThreadIdsFromLsof() {
   return openThreadIds;
 }
 
+let _openThreadsCache = null; // {ids, at} — the /proc walk (readdir all pids +
+// per-codex-fd readlinks) ran every ~5s sweep; external-codex detection
+// tolerates 10s staleness easily (audit round-2)
 function listOpenCodexThreadIds() {
+  if (_openThreadsCache && Date.now() - _openThreadsCache.at < 10000) return _openThreadsCache.ids;
+  const ids = _listOpenCodexThreadIdsUncached();
+  _openThreadsCache = { ids, at: Date.now() };
+  return ids;
+}
+function _listOpenCodexThreadIdsUncached() {
   if (process.platform === 'linux') return listOpenCodexThreadIdsFromProc();
   return listOpenCodexThreadIdsFromLsof();
 }

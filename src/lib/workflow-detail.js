@@ -197,7 +197,8 @@ export function openWorkflowDetail(app, runId, opts = {}) {
       const wf = await res.json();
       render(wf);
       if (wf.live || wf.status === 'running') {
-        if (!pollTimer) pollTimer = setInterval(load, 2500);
+        // hidden-tab backoff: 2.5s polling of a background tab is waste
+        if (!pollTimer) pollTimer = setInterval(() => { if (!document.hidden) load(); }, 2500);
       } else {
         stopPoll();
       }

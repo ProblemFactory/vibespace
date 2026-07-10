@@ -36,6 +36,7 @@ function realCwdOf(cwd) {
   let rp = null;
   try { const r = fs.realpathSync(cwd); if (r && r !== cwd) rp = r; } catch { /* gone/unreadable */ }
   _realCwdCache.set(cwd, rp);
+  if (_realCwdCache.size > 4096) _realCwdCache.delete(_realCwdCache.keys().next().value);
   return rp;
 }
 function withSessionKey(session = {}) {
@@ -450,10 +451,13 @@ function setup(ctx) {
   // paid the full cost. 2s TTL collapses concurrent polls into one scan.
   let _sessionsCache = null;
   let _sessionsCacheAt = 0;
+  const _childPidCache = new Map(); // childPid -> {pids, at} — see pgrep note below
 
   router.get('/api/sessions', (req, res) => {
     try {
-      if (_sessionsCache && Date.now() - _sessionsCacheAt < 2000) return res.json(_sessionsCache);
+      // 4500ms: clients poll at 5s — a 2s TTL guaranteed every poll missed
+      // the cache and ran the full sweep (audit round-2, high)
+      if (_sessionsCache && Date.now() - _sessionsCacheAt < 4500) return res.json(_sessionsCache);
       const projectsDir = path.join(os.homedir(), '.claude', 'projects');
 
       // Step 0: Use cached webuiPids (updated on session create/kill/restore)
@@ -466,10 +470,20 @@ function setup(ctx) {
           // Map childPid + its direct children (claude forks from node-pty spawn)
           if (s._childPid) {
             webuiPidToSessionId.set(s._childPid, s.claudeSessionId);
-            try {
-              const ch = execFileSync('pgrep', ['-P', String(s._childPid)], { encoding: 'utf-8', timeout: 2000 }).trim();
-              for (const line of ch.split('\n')) { const p = parseInt(line.trim()); if (p) webuiPidToSessionId.set(p, s.claudeSessionId); }
-            } catch {}
+            // pgrep is a BLOCKING fork+exec per live session per sweep — the
+            // wrapper's child pids rarely change, cache them 15s (audit round-2)
+            const hit = _childPidCache.get(s._childPid);
+            let pids = hit && Date.now() - hit.at < 15000 ? hit.pids : null;
+            if (!pids) {
+              pids = [];
+              try {
+                const ch = execFileSync('pgrep', ['-P', String(s._childPid)], { encoding: 'utf-8', timeout: 2000 }).trim();
+                for (const line of ch.split('\n')) { const p = parseInt(line.trim()); if (p) pids.push(p); }
+              } catch {}
+              _childPidCache.set(s._childPid, { pids, at: Date.now() });
+              if (_childPidCache.size > 512) _childPidCache.delete(_childPidCache.keys().next().value);
+            }
+            for (const p of pids) webuiPidToSessionId.set(p, s.claudeSessionId);
           }
         }
       }

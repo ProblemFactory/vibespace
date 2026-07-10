@@ -318,6 +318,15 @@ export class DesktopManager {
   _renderSwitcher() {
     const container = document.getElementById('desktop-previews');
     if (!container) return;
+    // Digest guard (audit round-2, high): updateTaskbar funnels EVERY window
+    // mousedown/focus/blink here and this rebuilt all previews + listeners
+    // each time. Rebuild only when the rendered content would differ.
+    const digest = JSON.stringify([this._activeId, this._desktops.map(d => [d.id, d.name]),
+      [...this.app.wm.windows.values()].map(w => [w._desktopId, w.isMinimized,
+        !!w.element?.classList.contains('window-waiting'),
+        w.gridBounds ? [w.gridBounds.left, w.gridBounds.top, w.gridBounds.width, w.gridBounds.height] : w.element?.style.left])]);
+    if (digest === this._switcherDigest) return;
+    this._switcherDigest = digest;
     container.innerHTML = '';
 
     for (const desk of this._desktops) {

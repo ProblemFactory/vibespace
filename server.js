@@ -613,12 +613,14 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
               : msg.type === 'wrapper_meta'
                 ? payload.threadId
                 : null;
-            const nextThreadName = payload.session_name
-              || payload.sessionName
-              || payload.threadName
-              || payload.name
-              || payload.thread?.name
-              || null;
+            // Name ONLY from meta records: every codex function_call carries
+            // payload.name = the TOOL name ('shell'…) — ungated, each tool call
+            // renamed the session + 2 sync meta writes + 2 broadcasts, forever
+            // (audit round-2, high). Real thread names arrive via
+            // session_meta/wrapper_meta only.
+            const nextThreadName = (msg.type === 'session_meta' || msg.type === 'wrapper_meta')
+              ? (payload.session_name || payload.sessionName || payload.threadName || payload.name || payload.thread?.name || null)
+              : null;
             const sourceMeta = payload.source ? normalizeCodexSource(payload.source) : null;
             let changed = false;
             if (nextThreadId && session.backendSessionId !== nextThreadId) {
@@ -741,7 +743,9 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
           // spin for the session's lifetime
           if (attempt >= 30) { session.subagentWatchers.delete(toolUseId); return; }
           const delay = Math.min(10000, 1000 * Math.pow(1.3, attempt));
-          const retry = setTimeout(() => { session.subagentWatchers.delete(toolUseId); startSubagentWatcher(toolUseId, agentId, attempt + 1); }, delay);
+          // Belt-and-braces liveness: a killed session must not keep re-scanning
+          // the projects dir through this retry chain (audit round-2)
+          const retry = setTimeout(() => { session.subagentWatchers.delete(toolUseId); if (!activeSessions.has(id)) return; startSubagentWatcher(toolUseId, agentId, attempt + 1); }, delay);
           session.subagentWatchers.set(toolUseId, { watcher: null, retry });
           return;
         }
@@ -960,6 +964,18 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
             }
             if (msg.type === 'system' && msg.subtype === 'task_notification' && msg.tool_use_id) {
               stopSubagentWatcher(msg.tool_use_id);
+              // Completed agents are served from DISK on attach (sub-agent-*),
+              // so the live buffers are dead weight once done — a long session
+              // driving dozens of agents retained every subagent message twice
+              // (raw buffer + normalizer), unbounded (audit round-2). Grace
+              // period lets an already-open live viewer finish rendering.
+              const tuid = msg.tool_use_id;
+              setTimeout(() => {
+                if (!activeSessions.has(id)) return;
+                session.subagentBuffers?.delete?.(tuid);
+                session.subagentEmittedUuids?.delete?.(tuid);
+                session._subNormalizers?.delete?.(tuid);
+              }, 60000);
             }
 
             if (msg.parent_tool_use_id || msg.isSidechain) {

@@ -227,8 +227,14 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
   };
 
   render();
+  // Debounced (audit round-2, high): 'active-sessions' fires every 5s poll +
+  // every broadcast — an open Properties window re-rendered its whole body
+  // (plus a /api/session-todos fetch) each time. 300ms trailing-edge coalesce.
+  let renderTimer = null;
   const onMsg = (msg) => {
-    if (['tasks-updated', 'session-status-updated', 'active-sessions', 'accounts-updated', 'user-state-updated'].includes(msg.type)) render();
+    if (!['tasks-updated', 'session-status-updated', 'active-sessions', 'accounts-updated', 'user-state-updated'].includes(msg.type)) return;
+    clearTimeout(renderTimer);
+    renderTimer = setTimeout(() => { renderTimer = null; render(); }, 300);
   };
   app.ws.onGlobal(onMsg);
   const prevClose = winInfo.onClose;
