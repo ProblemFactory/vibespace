@@ -1024,6 +1024,7 @@ class App {
     if (!this.isMobile) menu.append(item(I.brush, t('Customize UI\u2026'), () => this._customize.enter()));
     menu.append(item(I.key, t('Manage agents\u2026'), () => this._showAgentsDialog()));
     menu.append(item(I.chart, t('Usage\u2026'), () => this.openUsage()));
+    menu.append(item(I.chart, t('Diagnostics report\u2026'), () => this._openDiagnostics()));
     // Language is PER-DEVICE (localStorage, not a synced setting) \u2014 names shown
     // in their own language, never translated. Switching reloads the page.
     {
@@ -1683,6 +1684,40 @@ class App {
 
   openTaskDetail(taskId, opts) { return openTaskDetailFn(this, taskId, opts); }
   openUsage(opts) { return openUsageWindow(this, opts || {}); }
+
+  // Diagnostics report: renders the local telemetry summary (client errors,
+  // boot crashes, feature usage) as a static HTML page in the embedded
+  // browser — same blob-URL pattern as the chat html Preview button.
+  async _openDiagnostics() {
+    const d = await fetchJson('/api/telemetry/summary?days=14');
+    if (!d) { showToast(t('Could not load diagnostics'), { type: 'error' }); return; }
+    const esc = escHtml;
+    const kv = (obj) => Object.entries(obj || {}).map(([k, v]) =>
+      `<tr><td>${esc(k)}</td><td class="n">${v}</td></tr>`).join('') || `<tr><td colspan="2" class="dim">${esc(t('No data'))}</td></tr>`;
+    const errs = (d.errors || []).map((e) =>
+      `<details><summary><b>${esc(e.name || '?')}</b> ×${e.count} <span class="dim">— ${new Date(e.lastTs).toLocaleString()}${e.version ? ' · v' + esc(e.version) : ''}</span></summary><pre>${esc(e.stack || e.detail || t('(no stack)'))}</pre></details>`).join('')
+      || `<p class="dim">${esc(t('No errors recorded — nothing crashed in this window.'))}</p>`;
+    const days = Object.entries(d.byDay || {}).sort();
+    const maxDay = Math.max(1, ...days.map(([, v]) => v));
+    const bars = days.map(([day, v]) =>
+      `<div class="bar" title="${esc(day)}: ${v}"><i style="height:${Math.max(2, Math.round(v / maxDay * 60))}px"></i><s>${esc(day.slice(5))}</s></div>`).join('');
+    const html = `<!doctype html><meta charset="utf-8"><title>${esc(t('VibeSpace diagnostics'))}</title><style>
+      body{font:13px/1.5 system-ui;max-width:880px;margin:24px auto;padding:0 16px;color:#24292f}
+      h2{margin:18px 0 6px} table{border-collapse:collapse;min-width:320px} td{border-bottom:1px solid #eee;padding:3px 10px 3px 0} td.n{text-align:right;font-variant-numeric:tabular-nums}
+      .dim{color:#888} pre{background:#f6f8fa;padding:8px;border-radius:6px;white-space:pre-wrap;font-size:12px}
+      details{margin:4px 0;border:1px solid #eee;border-radius:6px;padding:4px 8px} summary{cursor:pointer}
+      .chart{display:flex;align-items:flex-end;gap:3px;height:84px;margin:8px 0}
+      .bar{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%} .bar i{display:block;width:16px;background:#54aeff;border-radius:2px 2px 0 0} .bar s{text-decoration:none;font-size:9px;color:#888;margin-top:2px}
+    </style><body>
+    <h1>${esc(t('VibeSpace diagnostics'))} <span class="dim" style="font-size:13px">— ${esc(t('last {n} days', { n: d.days }))} · ${esc(t('instance'))} ${esc(d.instance || '?')}</span></h1>
+    <p class="dim">${esc(t('Local-only data from data/telemetry/. Total events: {n}.', { n: d.total }))}</p>
+    <h2>${esc(t('Errors'))}</h2>${errs}
+    <h2>${esc(t('Events per day'))}</h2><div class="chart">${bars || `<span class="dim">${esc(t('No data'))}</span>`}</div>
+    <h2>${esc(t('By event'))}</h2><table>${kv(d.byName)}</table>
+    <h2>${esc(t('By version'))}</h2><table>${kv(d.byVersion)}</table>
+    </body>`;
+    this.openBrowser(URL.createObjectURL(new Blob([html], { type: 'text/html' })));
+  }
 
   openSessionProps(sessionRef, opts) { return openSessionPropsFn(this, sessionRef, opts); }
 

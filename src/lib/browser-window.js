@@ -52,7 +52,9 @@ export function openBrowser(app, url, { syncId } = {}) {
 
   const navigate = (u) => {
     if (!u) return;
-    if (!u.match(/^https?:\/\//)) u = 'http://' + u;
+    // blob:/data:/about: are complete URLs (chat html Preview, diagnostics
+    // report) — prefixing them with http:// produced a blank iframe.
+    if (!u.match(/^(https?|blob|data|about):/)) u = 'http://' + u;
     urlInput.value = u;
     errorMsg.style.display = 'none';
     iframe.style.display = '';

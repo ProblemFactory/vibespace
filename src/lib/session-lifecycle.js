@@ -1,5 +1,6 @@
 // Session lifecycle: create/attach/resume/fork/view/kill + billing switcher + openSpec replay (mixin split from app.js, 2.82.0 audit seam).
 import { ChatView } from './chat-view.js';
+import { track } from './telemetry-client.js';
 import { t } from './i18n.js';
 import { TerminalSession } from './terminal.js';
 import { showConfirmDialog, showContextMenu, showToast } from './utils.js';
@@ -18,6 +19,7 @@ export function installSessionLifecycle(App, ctx = {}) {
   },
 
   createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, fork, hostId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, accountId, ephemeral = false }) {
+    try { track('event', `session-create:${backend || 'claude'}:${mode || 'default'}`); } catch {}
     this._hideWelcome();
     const defaults = this._getBackendSessionDefaults(backend);
     const sessionMode = mode || this.settings.get('session.defaultMode') || 'chat';

@@ -264,6 +264,18 @@ const SETTINGS_SCHEMA = {
     description: t('The passive statusline feed only carries the 5h/7d windows — model-scoped weekly limits (e.g. Fable) can ONLY come from asking Anthropic’s usage endpoint with the account’s own login token. This is the same non-billable call the CLI makes when you run /usage, throttled to ≥60s per account and honoring rate-limit backoff, and it NEVER runs on a timer. It is user-initiated traffic, categorically different from the background polling that has gotten accounts banned — but it is still an off-CLI request with a subscription token, so it is your call: Manual = only when you click ⟳; Auto = also once when you open the quota popup and the data is stale; Off = never (the ⟳ button disappears and scoped limits stay unknown).'),
     category: t('Session'), liveApply: true,
   },
+  'telemetry.enabled': {
+    type: 'boolean', default: true,
+    label: t('Local diagnostics (errors + feature usage)'),
+    description: t('Records page errors, boot crashes and coarse feature events (window opened, session created — names only, never content) into data/telemetry/ on THIS server. Nothing leaves your instance unless a forward URL is set below. Powers the ⚙ → Diagnostics report.'),
+    category: t('Session'), liveApply: true,
+  },
+  'telemetry.forwardUrl': {
+    type: 'text', default: '',
+    label: t('Forward diagnostics to a central collector (URL)'),
+    description: t('Optional, for team deployments: POST event batches (with an anonymous per-instance id) to this URL so one maintainer can see errors across all instances. Leave empty to keep everything local.'),
+    category: t('Session'), liveApply: true,
+  },
   'accounts.activeUsagePolling': {
     type: 'boolean', default: false, confirmOn: true,
     label: t('⚠ Actively poll subscription usage (automation risk)'),
