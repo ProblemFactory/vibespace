@@ -1425,4 +1425,5 @@ export default {
   "Weekday": "按星期",
   "Width": "宽度",
   "Metrics": "指标（可多选）",
+  "Model comparison": "模型对比",
 };

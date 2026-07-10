@@ -1,4 +1,9 @@
-import uPlot from 'uplot';
+import {
+  Chart, LineController, BarController, DoughnutController,
+  LineElement, PointElement, BarElement, ArcElement,
+  CategoryScale, LinearScale, Tooltip, Legend, Filler,
+} from 'chart.js';
+Chart.register(LineController, BarController, DoughnutController, LineElement, PointElement, BarElement, ArcElement, CategoryScale, LinearScale, Tooltip, Legend, Filler);
 import { escHtml, createPopover, showContextMenu } from './utils.js';
 import { t } from './i18n.js';
 
@@ -60,41 +65,57 @@ export const PRESETS = () => ({
   overview: {
     label: t('Cost overview'),
     panels: [
-      { metric: 'cost', dim: 'total', chart: 'stat', span: 1 },
-      { metric: 'requests', dim: 'total', chart: 'stat', span: 1 },
+      { metrics: ['cost'], dim: 'total', chart: 'stat', span: 1 },
+      { metrics: ['requests', 'sessions'], dim: 'total', chart: 'stat', span: 1 },
       { metrics: ['cost', 'requests'], dim: 'day', chart: 'line', span: 2 },
-      { metric: 'cost', dim: 'model', chart: 'pie', span: 1 },
-      { metric: 'cost', dim: 'account', chart: 'bars', span: 1 },
-      { metric: 'cost', dim: 'project', chart: 'bars', span: 2, topN: 10 },
+      { metrics: ['cost'], dim: 'model', chart: 'pie', span: 1 },
+      { metrics: ['cost'], dim: 'billing', chart: 'pie', span: 1 },
+      { metrics: ['cost', 'requests'], dim: 'account', chart: 'bars', span: 1 },
+      { metrics: ['cost'], dim: 'hour', chart: 'bars', span: 1 },
+      { metrics: ['cost'], dim: 'project', chart: 'bars', span: 2, topN: 10 },
     ],
   },
   tokens: {
     label: t('Token throughput'),
     panels: [
-      { metric: 'totalTokens', dim: 'total', chart: 'stat', span: 1 },
-      { metric: 'cacheHitRatio', dim: 'total', chart: 'stat', span: 1 },
+      { metrics: ['totalTokens', 'output'], dim: 'total', chart: 'stat', span: 1 },
+      { metrics: ['cacheHitRatio'], dim: 'total', chart: 'stat', span: 1 },
       { metrics: ['totalTokens', 'output'], dim: 'day', chart: 'line', span: 2 },
-      { metric: 'output', dim: 'model', chart: 'bars', span: 1 },
-      { metric: 'cacheRead', dim: 'model', chart: 'bars', span: 1 },
-      { metric: 'cacheHitRatio', dim: 'day', chart: 'line', span: 2 },
+      { metrics: ['cacheRead', 'cacheWrite', 'input'], dim: 'model', chart: 'bars', span: 2, topN: 8 },
+      { metrics: ['cacheHitRatio', 'requests'], dim: 'day', chart: 'line', span: 2 },
+      { metrics: ['output'], dim: 'model', chart: 'pie', span: 1 },
+      { metrics: ['totalTokens'], dim: 'project', chart: 'pie', span: 1 },
     ],
   },
   accounts: {
     label: t('Account reconciliation'),
     panels: [
-      { metric: 'cost', dim: 'billing', chart: 'pie', span: 1 },
-      { metric: 'cost', dim: 'account', chart: 'pie', span: 1 },
-      { metric: 'cost', dim: 'account', chart: 'table', span: 2, topN: 12 },
-      { metric: 'requests', dim: 'account', chart: 'bars', span: 2 },
+      { metrics: ['cost'], dim: 'billing', chart: 'pie', span: 1 },
+      { metrics: ['cost'], dim: 'account', chart: 'pie', span: 1 },
+      { metrics: ['cost', 'requests', 'totalTokens'], dim: 'account', chart: 'table', span: 2, topN: 12 },
+      { metrics: ['cost', 'requests'], dim: 'account', chart: 'bars', span: 2 },
+      { metrics: ['cost'], dim: 'day', chart: 'line', span: 2 },
     ],
   },
   rhythm: {
     label: t('Time patterns'),
     panels: [
-      { metric: 'requests', dim: 'hour', chart: 'bars', span: 1 },
-      { metric: 'requests', dim: 'weekday', chart: 'bars', span: 1 },
-      { metric: 'cost', dim: 'day', chart: 'line', span: 2 },
-      { metric: 'requests', dim: 'session', chart: 'table', span: 2, topN: 10 },
+      { metrics: ['requests', 'cost'], dim: 'hour', chart: 'bars', span: 2 },
+      { metrics: ['requests', 'cost'], dim: 'weekday', chart: 'bars', span: 1 },
+      { metrics: ['sessions'], dim: 'weekday', chart: 'bars', span: 1 },
+      { metrics: ['cost', 'requests'], dim: 'day', chart: 'line', span: 2 },
+      { metrics: ['cost', 'requests', 'totalTokens'], dim: 'session', chart: 'table', span: 2, topN: 10 },
+    ],
+  },
+  models: {
+    label: t('Model comparison'),
+    panels: [
+      { metrics: ['cost'], dim: 'model', chart: 'pie', span: 1 },
+      { metrics: ['requests'], dim: 'model', chart: 'pie', span: 1 },
+      { metrics: ['cost', 'requests', 'output', 'cacheHitRatio'], dim: 'model', chart: 'table', span: 2, topN: 10 },
+      { metrics: ['output', 'input'], dim: 'model', chart: 'bars', span: 2 },
+      { metrics: ['cost'], dim: 'mode', chart: 'pie', span: 1 },
+      { metrics: ['cost'], dim: 'host', chart: 'bars', span: 1 },
     ],
   },
 });
@@ -158,86 +179,24 @@ function chartStat(body, rows, mlist) {
   body.appendChild(wrap);
 }
 
-function chartBars(body, rows, mlist) {
-  if (!rows.length) return empty(body);
-  // Per-metric max: metrics live on wildly different ranges (cost $ vs
-  // cache-read billions) — each metric's bar normalizes to its own max.
-  const maxes = mlist.map((_, i) => Math.max(...rows.map((r) => r.values[i]), 1e-9));
-  if (mlist.length > 1) body.appendChild(miniLegend(mlist));
-  for (const r of rows) {
-    const row = document.createElement('div');
-    row.className = 'udash-barrow' + (mlist.length > 1 ? ' udash-barrow-multi' : '');
-    const bars = mlist.map((m, i) =>
-      `<span class="udash-bartrack"><span class="udash-barfill" style="width:${Math.max(1, (r.values[i] / maxes[i]) * 100)}%;background:${PALETTE[i % PALETTE.length]}"></span></span>`
-      + `<span class="udash-barval">${escHtml(m.fmt(r.values[i]))}</span>`).join('');
-    row.innerHTML = `<span class="udash-barlabel" title="${escHtml(String(r.key))}">${escHtml(String(r.key))}</span><span class="udash-barset">${bars}</span>`;
-    body.appendChild(row);
-  }
+// ── Chart.js shared plumbing ──
+// One library, one interaction model: hover tooltips, clickable legends and
+// animations behave identically across line/bar/donut. Instances MUST be
+// destroyed before their canvas is dropped (Chart.js keeps a global registry
+// + a ResizeObserver per chart) — destroyCharts() below, called by the
+// usage window before every re-render and on window close.
+
+export function destroyCharts(rootEl) {
+  rootEl?.querySelectorAll?.('canvas').forEach((c) => Chart.getChart(c)?.destroy());
 }
 
-function miniLegend(mlist) {
-  const lg = document.createElement('div');
-  lg.className = 'udash-minilegend';
-  lg.innerHTML = mlist.map((m, i) => `<span class="udash-legend-item"><span class="udash-dot" style="background:${PALETTE[i % PALETTE.length]}"></span>${escHtml(m.label)}</span>`).join('');
-  return lg;
+function themeColors(el) {
+  const cs = getComputedStyle(el);
+  const v = (n, fb) => (cs.getPropertyValue(n) || '').trim() || fb;
+  return { text: v('--text-secondary', '#888'), dim: v('--text-dim', '#777'), grid: 'rgba(128,128,128,0.14)' };
 }
 
-function chartLine(body, rows, mlist) {
-  if (!rows.length) return empty(body);
-  const holder = document.createElement('div');
-  holder.className = 'udash-uplot';
-  body.appendChild(holder);
-  requestAnimationFrame(() => {
-    const rect = holder.parentElement.getBoundingClientRect();
-    const cs = getComputedStyle(holder);
-    const gridColor = 'rgba(128,128,128,0.15)';
-    const textColor = cs.getPropertyValue('--text-dim').trim() || '#888';
-    // Unit → scale/axis: first unit owns the left axis, second the right;
-    // further units share the right axis (rare in practice).
-    const units = [...new Set(mlist.map((mm) => mm.unit))];
-    const scaleOf = (u) => 'y' + Math.min(units.indexOf(u), 1);
-    const xs = rows.map((_, i) => i);
-    const data = [xs, ...mlist.map((_, i) => rows.map((r) => r.values[i]))];
-    const series = [
-      {},
-      ...mlist.map((mm, i) => ({
-        label: mm.label,
-        stroke: resolveColor(holder, PALETTE[i % PALETTE.length]),
-        width: 2,
-        fill: i === 0 ? resolveColor(holder, PALETTE[0], 0.10) : undefined,
-        scale: scaleOf(mm.unit),
-        value: (u, v) => v == null ? '' : mm.fmt(v),
-      })),
-    ];
-    const axes = [
-      { stroke: textColor, grid: { stroke: gridColor }, values: (u, splits) => splits.map((i2) => rows[Math.round(i2)]?.key ?? '') },
-      { stroke: textColor, grid: { stroke: gridColor }, scale: 'y0', size: 56,
-        values: (u, splits) => splits.map((v) => metricForUnit(mlist, units[0]).fmt(v)) },
-    ];
-    if (units.length > 1) {
-      axes.push({ stroke: textColor, grid: { show: false }, scale: 'y1', side: 1, size: 56,
-        values: (u, splits) => splits.map((v) => metricForUnit(mlist, units[1]).fmt(v)) });
-    }
-    const u = new uPlot({
-      width: Math.max(220, rect.width - 8), height: 170,
-      series, axes,
-      scales: { x: { time: false }, y0: {}, y1: {} },
-      cursor: { drag: { setScale: false } },
-      legend: { live: true },
-    }, data, holder);
-    // re-fit when the panel resizes with the window
-    const ro = new ResizeObserver(() => {
-      const w = holder.parentElement?.getBoundingClientRect().width;
-      if (w && Math.abs(w - 8 - u.width) > 4) u.setSize({ width: Math.max(220, w - 8), height: 170 });
-    });
-    ro.observe(holder.parentElement);
-    holder._udashRo = ro; // GC'd with the panel re-render (observer on detached node is inert)
-  });
-}
-
-function metricForUnit(mlist, unit) { return mlist.find((mm) => mm.unit === unit) || mlist[0]; }
-
-// PALETTE entries are var() strings — canvas/uPlot need resolved colors.
+// PALETTE entries are var() strings — canvas needs resolved colors.
 function resolveColor(el, varStr, alpha) {
   const probe = document.createElement('span');
   probe.style.color = varStr;
@@ -251,35 +210,134 @@ function resolveColor(el, varStr, alpha) {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
-function chartPie(body, rows, mlist) {
-  const m = mlist[0]; // a donut is single-metric by nature — first metric wins
+function chartHolder(body, tall) {
+  const holder = document.createElement('div');
+  holder.className = 'udash-chart' + (tall ? ' udash-chart-tall' : '');
+  const canvas = document.createElement('canvas');
+  holder.appendChild(canvas);
+  body.appendChild(holder);
+  return canvas;
+}
+
+// unit → axis id: first unit owns the primary axis, everything else shares
+// the secondary (a third unit on one chart is past the point of readability).
+function axisAssign(mlist) {
+  const units = [...new Set(mlist.map((m) => m.unit))];
+  return { units, idOf: (u) => (units.indexOf(u) > 0 ? 'sec' : 'pri') };
+}
+
+function scaleTicks(mlist, unit, colors) {
+  const m = mlist.find((mm) => mm.unit === unit) || mlist[0];
+  return { color: colors.dim, callback: (v) => m.fmt(v), maxTicksLimit: 6 };
+}
+
+function commonOpts(mlist, colors, { horizontal, showLegend } = {}) {
+  const { units, idOf } = axisAssign(mlist);
+  const valueAxis = horizontal ? 'x' : 'y';
+  const catAxis = horizontal ? 'y' : 'x';
+  const scales = {
+    [catAxis]: { ticks: { color: colors.dim, autoSkip: true, maxTicksLimit: horizontal ? 20 : 12 }, grid: { display: false } },
+    pri: { axis: valueAxis, position: horizontal ? 'bottom' : 'left', beginAtZero: true,
+      ticks: scaleTicks(mlist, units[0], colors), grid: { color: colors.grid } },
+  };
+  if (units.length > 1) {
+    scales.sec = { axis: valueAxis, position: horizontal ? 'top' : 'right', beginAtZero: true,
+      ticks: scaleTicks(mlist, units[1], colors), grid: { display: false } };
+  }
+  return {
+    responsive: true, maintainAspectRatio: false, animation: { duration: 250 },
+    indexAxis: horizontal ? 'y' : 'x',
+    scales,
+    plugins: {
+      legend: { display: showLegend, labels: { color: colors.text, boxWidth: 10, boxHeight: 10, font: { size: 10 } } },
+      tooltip: {
+        callbacks: {
+          label: (ctx) => {
+            const m = mlist[ctx.datasetIndex] || mlist[0];
+            const v = horizontal ? ctx.parsed.x : ctx.parsed.y;
+            return `${m.label}: ${m.fmt(v)}`;
+          },
+        },
+      },
+    },
+  };
+}
+
+function chartBars(body, rows, mlist, panel) {
   if (!rows.length) return empty(body);
+  const dimMeta = DIMENSIONS().find((d) => d.key === panel.dim);
+  const horizontal = !dimMeta?.seq; // categorical reads better horizontally
+  const canvas = chartHolder(body, horizontal && rows.length > 8);
+  const colors = themeColors(canvas);
+  const { idOf } = axisAssign(mlist);
+  new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: rows.map((r) => String(r.key)),
+      datasets: mlist.map((m, i) => ({
+        label: m.label,
+        data: rows.map((r) => r.values[i]),
+        backgroundColor: resolveColor(canvas, PALETTE[i % PALETTE.length], 0.75),
+        borderRadius: 3,
+        [horizontal ? 'xAxisID' : 'yAxisID']: idOf(m.unit),
+      })),
+    },
+    options: commonOpts(mlist, colors, { horizontal, showLegend: mlist.length > 1 }),
+  });
+}
+
+function chartLine(body, rows, mlist) {
+  if (!rows.length) return empty(body);
+  const canvas = chartHolder(body);
+  const colors = themeColors(canvas);
+  const { idOf } = axisAssign(mlist);
+  new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: rows.map((r) => String(r.key)),
+      datasets: mlist.map((m, i) => ({
+        label: m.label,
+        data: rows.map((r) => r.values[i]),
+        borderColor: resolveColor(canvas, PALETTE[i % PALETTE.length]),
+        backgroundColor: resolveColor(canvas, PALETTE[i % PALETTE.length], 0.10),
+        fill: i === 0,
+        tension: 0.25,
+        pointRadius: rows.length > 40 ? 0 : 2,
+        borderWidth: 2,
+        yAxisID: idOf(m.unit),
+      })),
+    },
+    options: commonOpts(mlist, colors, { showLegend: mlist.length > 1 }),
+  });
+}
+
+function chartPie(body, rows, mlist) {
+  if (!rows.length) return empty(body);
+  const m = mlist[0]; // a donut is single-metric by nature — first metric wins
   const top = rows.slice(0, 7);
-  const rest = rows.slice(7).reduce((s, r) => s + r.value, 0);
+  const rest = rows.slice(7).reduce((s2, r) => s2 + r.value, 0);
   const parts = rest > 0 ? [...top, { key: t('Other'), value: rest }] : top;
-  const total = parts.reduce((s, r) => s + r.value, 0) || 1;
-  let acc = 0;
-  const stops = parts.map((r, i) => {
-    const from = (acc / total) * 360; acc += r.value;
-    return `${PALETTE[i % PALETTE.length]} ${from}deg ${(acc / total) * 360}deg`;
+  const total = parts.reduce((s2, r) => s2 + r.value, 0) || 1;
+  const canvas = chartHolder(body);
+  const colors = themeColors(canvas);
+  new Chart(canvas, {
+    type: 'doughnut',
+    data: {
+      labels: parts.map((r) => String(r.key)),
+      datasets: [{
+        data: parts.map((r) => r.value),
+        backgroundColor: parts.map((_, i) => resolveColor(canvas, PALETTE[i % PALETTE.length], 0.85)),
+        borderWidth: 0,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: { duration: 250 }, cutout: '58%',
+      plugins: {
+        legend: { position: 'right', labels: { color: colors.text, boxWidth: 9, boxHeight: 9, font: { size: 10 } } },
+        tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${m.fmt(ctx.parsed)} · ${Math.round((ctx.parsed / total) * 100)}%` } },
+      },
+    },
   });
-  const wrap = document.createElement('div');
-  wrap.className = 'udash-pie-wrap';
-  const pie = document.createElement('div');
-  pie.className = 'udash-pie';
-  pie.style.background = `conic-gradient(${stops.join(',')})`;
-  const legend = document.createElement('div');
-  legend.className = 'udash-legend';
-  parts.forEach((r, i) => {
-    const li = document.createElement('div');
-    li.className = 'udash-legend-item';
-    li.innerHTML = `<span class="udash-dot" style="background:${PALETTE[i % PALETTE.length]}"></span>`
-      + `<span class="udash-legend-label" title="${escHtml(String(r.key))}">${escHtml(String(r.key))}</span>`
-      + `<span class="udash-legend-val">${escHtml(m.fmt(r.value))} · ${Math.round((r.value / total) * 100)}%</span>`;
-    legend.appendChild(li);
-  });
-  wrap.append(pie, legend);
-  body.appendChild(wrap);
 }
 
 function chartTable(body, rows, mlist, panel) {
@@ -307,7 +365,11 @@ function empty(body) {
 export function renderDashboard(container, data, panels, { onChange }) {
   const grid = document.createElement('div');
   grid.className = 'udash-grid';
-  panels.forEach((panel, idx) => grid.appendChild(renderPanel(data, panels, panel, idx, onChange)));
+  // Attach BEFORE rendering panels: chart color resolution probes computed
+  // styles (var(--accent) etc.) — in a detached tree they resolve to nothing
+  // and every chart renders black (real regression).
+  container.appendChild(grid);
+  panels.forEach((panel, idx) => renderPanel(grid, data, panels, panel, idx, onChange));
   const add = document.createElement('button');
   add.className = 'udash-add';
   add.textContent = '+ ' + t('Add panel');
@@ -316,7 +378,7 @@ export function renderDashboard(container, data, panels, { onChange }) {
   container.appendChild(grid);
 }
 
-function renderPanel(data, panels, panel, idx, onChange) {
+function renderPanel(grid, data, panels, panel, idx, onChange) {
   const mlist = panelMetrics(panel).map(metricOf);
   const dimMeta = DIMENSIONS().find((d) => d.key === panel.dim);
   const card = document.createElement('div');
@@ -348,10 +410,10 @@ function renderPanel(data, panels, panel, idx, onChange) {
   head.appendChild(tools);
   const body = document.createElement('div');
   body.className = 'udash-panel-body';
+  card.append(head, body);
+  grid.appendChild(card); // must be IN the document before charts resolve theme colors
   const rows = panelRows(data, panel);
   ({ stat: chartStat, bars: chartBars, line: chartLine, pie: chartPie, table: chartTable }[panel.chart] || chartBars)(body, rows, mlist, panel, data);
-  card.append(head, body);
-  return card;
 }
 
 // Panel editor popover — metric / dimension / chart / topN selects.

@@ -3,7 +3,7 @@
 // (subscription vs API — never mixed), account, model, project, mode, cache
 // efficiency, hour/weekday activity, top sessions. Opened from ⚙ → Usage.
 import { t } from './i18n.js';
-import { renderDashboard, PRESETS } from './usage-dashboard.js';
+import { renderDashboard, PRESETS, destroyCharts } from './usage-dashboard.js';
 import { showContextMenu } from './utils.js';
 import { escHtml, fetchJson, showToast, copyText } from './utils.js';
 import { createBackendIconHtml } from './agent-meta.js';
@@ -79,6 +79,7 @@ export function openUsageWindow(app, opts = {}) {
   };
 
   const render = () => {
+    destroyCharts(root); // Chart.js instances must not outlive their canvases
     root.innerHTML = '';
     root.appendChild(renderControls(app, state, load, render));
     const body = document.createElement('div'); body.className = 'usage-body';
@@ -117,6 +118,8 @@ export function openUsageWindow(app, opts = {}) {
     body.appendChild(renderFooter(d));
   };
 
+  const prevClose = winInfo.onClose;
+  winInfo.onClose = () => { destroyCharts(root); prevClose?.(); };
   winInfo._reloadUsage = load;
   load();
   return winInfo;
