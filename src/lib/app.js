@@ -10,7 +10,7 @@ import { CodeEditor } from './code-editor.js';
 import { LayoutManager } from './layout.js';
 import { ChatView } from './chat-view.js';
 import { Resizer } from './resizer.js';
-import { anchorFixedPopup, createPopover, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog } from './utils.js';
+import { anchorFixedPopup, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog } from './utils.js';
 import { t, tc, getLangPref, setLang } from './i18n.js';
 import { installManageAgents } from './manage-agents.js';
 import { installUsageMeter } from './usage-meter.js';
@@ -432,27 +432,10 @@ class App {
 
   // ── Shared modal shell for the config/password dialogs ──
   _modal(title, { wide = false } = {}) {
-    document.getElementById('cfg-dialog-overlay')?.remove();
-    const overlay = document.createElement('div');
-    overlay.id = 'cfg-dialog-overlay';
-    overlay.className = 'dialog-overlay';
-    overlay.style.zIndex = '99998';
-    const dialog = document.createElement('div'); dialog.className = 'dialog';
-    if (wide) dialog.style.minWidth = '440px';
-    const header = document.createElement('div'); header.className = 'dialog-header';
-    const h3 = document.createElement('h3'); h3.textContent = title;
-    const closeBtn = document.createElement('button'); closeBtn.className = 'dialog-close'; closeBtn.textContent = '✕';
-    header.append(h3, closeBtn);
-    const body = document.createElement('div'); body.className = 'dialog-body cfg-dialog-body';
-    dialog.append(header, body);
-    overlay.appendChild(dialog);
-    document.body.appendChild(overlay);
-    const close = () => overlay.remove();
-    closeBtn.onclick = close;
-    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) close(); });
-    overlay.tabIndex = -1;
-    overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
-    setTimeout(() => overlay.focus(), 0);
+    const { overlay, body, close } = createModalShell({
+      id: 'cfg-dialog-overlay', title, bodyClass: 'cfg-dialog-body',
+      minWidth: wide ? '440px' : null, escapeToClose: true,
+    });
     return { overlay, body, close };
   }
 
