@@ -2188,6 +2188,15 @@ function customPreamble() {
     return v ? v.slice(0, 4000) : '';
   } catch { return ''; }
 }
+// Per-surface extras (2.88.0): short user text prepended INSIDE the other two
+// injection surfaces. Kept separate from the preamble — the per-turn one costs
+// tokens EVERY prompt, so it gets its own (small) budget and its own field.
+function customExtra(key, cap) {
+  try {
+    const v = String(serverSetting(key) || '').trim();
+    return v ? v.slice(0, cap) : '';
+  } catch { return ''; }
+}
 function preambleBlock(text) {
   return `<vibespace-user-instructions>\nThe VibeSpace user configured these standing instructions for every agent session — follow them alongside your other guidance:\n\n${text}\n</vibespace-user-instructions>`;
 }
@@ -2338,9 +2347,19 @@ app.get('/api/agent/prompt-context', (req, res) => {
     // User preamble rides on top of whatever this prompt delivers (or alone,
     // when newly set/changed) — codex's only delivery path is this route.
     const outParts = withPreamble(s, parts);
-    if (!outParts.length && perTurnReminderEnabled()) {
+    const extra = customExtra('agents.perTurnExtra', 500);
+    // "Per turn" means per turn: on prompts that already carry a bigger
+    // delivery the extra still rides at the very top as its own block.
+    if (outParts.length && extra) outParts.unshift(`<vibespace-reminder>${extra}</vibespace-reminder>`);
+    if (!outParts.length) {
       const multi = injectGroups.length > 1;
-      outParts.push(`<vibespace-reminder>Tools on PATH: vibespace-status <state> — keep your board state honest · vibespace-ask "q" — MIRROR every question you ask the user in chat onto their inbox, and resolve <id|text> the moment they answer · vibespace-task ${multi ? '--group <id> ' : ''}progress "summary" — log finished work. Run any with no args for usage.</vibespace-reminder>`);
+      const std = perTurnReminderEnabled()
+        ? `Tools on PATH: vibespace-status <state> — keep your board state honest · vibespace-ask "q" — MIRROR every question you ask the user in chat onto their inbox, and resolve <id|text> the moment they answer · vibespace-task ${multi ? '--group <id> ' : ''}progress "summary" — log finished work. Run any with no args for usage.`
+        : '';
+      // User extra rides at the TOP of the reminder block (per-hook custom,
+      // 2.88.0); it delivers even with the standard reminder toggled off.
+      const body = [extra, std].filter(Boolean).join('\n');
+      if (body) outParts.push(`<vibespace-reminder>${body}</vibespace-reminder>`);
     }
     res.json({ success: true, context: outParts.join('\n\n') });
   } catch (e) { res.json({ success: true, context: '' }); }
@@ -2361,9 +2380,11 @@ app.get('/api/agent/stop-check', (req, res) => {
     const rec = sessionStatus.get(key) || sessionStatus.get(`webui:${id}`);
     if (rec && rec.at && now - rec.at < 10 * 60 * 1000) return res.json({ block: false });
     s._lastStopNudge = now;
+    // Per-hook custom text (2.88.0): user extra rides at the top of the nudge.
+    const extra = customExtra('agents.stopNudgeExtra', 500);
     res.json({
       block: true,
-      reason: 'VibeSpace bookkeeping before you stop (your board state is stale): (1) set your CURRENT state — vibespace-status <working|needs-input|blocked|review|done> --reason "one line" (done if this piece of work is finished; needs-input/review if you are waiting on the user); (2) if you asked the user anything this turn or are waiting on them, MIRROR it — vibespace-ask "question" — and vibespace-ask resolve anything they already answered; (3) if you completed meaningful work, log it — vibespace-task progress "summary". Then stop again.',
+      reason: (extra ? extra + '\n' : '') + 'VibeSpace bookkeeping before you stop (your board state is stale): (1) set your CURRENT state — vibespace-status <working|needs-input|blocked|review|done> --reason "one line" (done if this piece of work is finished; needs-input/review if you are waiting on the user); (2) if you asked the user anything this turn or are waiting on them, MIRROR it — vibespace-ask "question" — and vibespace-ask resolve anything they already answered; (3) if you completed meaningful work, log it — vibespace-task progress "summary". Then stop again.',
     });
   } catch { res.json({ block: false }); }
 });

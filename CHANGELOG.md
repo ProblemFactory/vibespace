@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.88.0 — 2026-07-10
+
+**Mid-turn user messages no longer vanish from history (real data-visibility loss)**
+- Messages sent while the agent is working are recorded in the JSONL ONLY as `queued_command` attachments — never as user records. The normalizer dropped every non-hook attachment, so any history rebuilt from the JSONL (server restart, resume under another account, view-only) silently ERASED the user's own words — 211 records in one real session. Now rendered as normal user messages (typed-flagged, echo-deduped against the live buffer copy).
+
+**Per-hook agent instruction customization (Manage Agents → Agent instructions)**
+- The single preamble box is now three fields, one per injection surface, each with its own cadence and cost profile: **Session context** (once per session + on edit, ≤4000), **Per-turn reminder** (rides at the very top of EVERY prompt — even on prompts that carry a bigger delivery, and even with the standard tool reminder off; ≤500), **Stop nudge** (prepended to the end-of-turn bookkeeping reminder; ≤500). Settings keys: `agents.injectPreamble` / `agents.perTurnExtra` / `agents.stopNudgeExtra`.
+
 ## 2.87.0 — 2026-07-10
 
 **Server-side settings reads were ALL broken (real config bug)**
