@@ -2671,7 +2671,7 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 .udash-table td.udash-td-num { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-secondary); }
 .udash-add { grid-column: span 2; background: none; border: 1px dashed var(--border); border-radius: var(--radius); color: var(--text-dim); cursor: pointer; padding: 10px; font-size: 12px; transition: var(--transition); }
 .udash-add:hover { border-color: var(--accent); color: var(--accent); }
-.udash-editor { display: flex; flex-direction: column; gap: 6px; padding: 10px; min-width: 220px; }
+.udash-editor { display: flex; flex-direction: column; gap: 6px; padding: 10px; min-width: 220px; background: var(--bg-dialog); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,0.35); }
 .udash-editor-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 11px; color: var(--text-secondary); }
 .udash-editor-row select { max-width: 150px; }
 .udash-editor-actions { display: flex; justify-content: flex-end; margin-top: 4px; }
