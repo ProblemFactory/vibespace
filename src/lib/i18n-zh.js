@@ -1206,4 +1206,7 @@ export default {
   "The nudge only fires when the session has not updated its board status for this long. Lower = agents are reminded more eagerly; higher = quieter.": "只有当会话的状态板超过这个时长没有更新时才触发提醒。调低 = 更积极地提醒 agent；调高 = 更安静。",
   "Stop nudge: cooldown per session (minutes)": "停止提醒：每会话冷却时间（分钟）",
   "After nudging a session once, wait at least this long before nudging it again — the ceiling on how often an agent pays the bookkeeping mini-turn.": "提醒过一次后至少间隔这么久才再次提醒同一会话——这是 agent 为簿记小轮付出成本的频率上限。",
+  "customized": "已自定义",
+  "advanced — custom text injected into every agent session": "高级——注入到每个 agent 会话的自定义文本",
+  "Stop nudge conditions": "停止提醒触发条件",
 };
