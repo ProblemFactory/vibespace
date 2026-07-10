@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.75.1] — 2026-07-10
+
+### Fixed — relative-path links now find files deeper than the session folder
+Clicking `SCRIPTS.md` failed when the file actually lived at
+`cwd/default_voice_examples/SCRIPTS.md`. After the direct candidates miss, the
+resolver now runs a bounded server-side search under the session cwd (depth 5,
+deps/VCS pruned, 3s cap): a single hit opens directly, several hits show a
+picker. Verified on the exact conversation that prompted the report.
+
 ## [2.75.0] — 2026-07-10
 
 ### Fixed — CRITICAL: sessions created after the service migration died on every restart

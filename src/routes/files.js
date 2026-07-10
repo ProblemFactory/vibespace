@@ -39,6 +39,26 @@ router.get('/api/home', async (req, res) => {
   res.json({ home: os.homedir(), authEnabled: !!req.app.locals.authEnabled, repoDir: path.resolve(__dirname, '..', '..') });
 });
 
+// Bounded filename search — the chat's relative-path resolver's last resort
+// (`SCRIPTS.md` clicked in a reply, not directly under the session cwd). Depth-
+// capped, dep/VCS dirs pruned, 3s kill, first 16 hits — a user-initiated click,
+// never a background scan. Local machine only (remote sessions return empty).
+router.get('/api/file/locate', (req, res) => {
+  if (req.query.host) return res.json({ hits: [] });
+  const name = String(req.query.name || '').trim();
+  const root = path.resolve(String(req.query.root || os.homedir()));
+  const type = req.query.type === 'd' ? 'd' : 'f';
+  if (!name || name.includes('/') || name.includes('..') || name.length > 120) return res.status(400).json({ error: 'bad name' });
+  const args = [root, '-maxdepth', '5',
+    '(', '-name', 'node_modules', '-o', '-name', '.git', '-o', '-name', '.venv', '-o', '-name', '__pycache__', ')', '-prune',
+    '-o', '-name', name, '-type', type, '-print'];
+  execFile('find', args, { timeout: 3000, maxBuffer: 256 * 1024 }, (err, stdout) => {
+    // find exits non-zero on permission noise — hits on stdout still count
+    const hits = String(stdout || '').split('\n').filter(Boolean).slice(0, 16);
+    res.json({ hits });
+  });
+});
+
 // System monospace fonts via fc-list (cached)
 let _cachedMonoFonts = null;
 router.get('/api/fonts', (req, res) => {
