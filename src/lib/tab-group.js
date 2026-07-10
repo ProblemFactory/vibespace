@@ -34,6 +34,23 @@ export function installTabGroupMixin(wm) {
 
 const tabGroupMethods = {
 
+  // Mirror each grouped window's waiting blink onto its TAB header — a guest's
+  // own titlebar is hidden inside the group, so without this the blink was
+  // invisible until you happened to be on that tab. Called from the taskbar
+  // update funnel (every waiting toggle passes through it); cheap class sync.
+  refreshTabWaiting() {
+    for (const [id, win] of this.windows) {
+      const chain = win._tabChain;
+      if (!chain || chain.tabs[0] !== id) continue; // hosts only
+      const bar = win.titleBar?.querySelector('.tab-bar-tabs');
+      if (!bar) continue;
+      for (const tab of bar.children) {
+        const tw = this.windows.get(tab.dataset?.winId);
+        if (tw) tab.classList.toggle('waiting', tw.element.classList.contains('window-waiting'));
+      }
+    }
+  },
+
   _syncChainBounds(chain) {
     const host = this.windows.get(chain.tabs[0]);
     if (!host) return;
@@ -238,6 +255,9 @@ const tabGroupMethods = {
       closeBtn.textContent = '\u2715';
       closeBtn.addEventListener('click', (e) => { e.stopPropagation(); this.removeFromTabChain(chain, tabWinId); });
 
+      // A grouped guest's own titlebar is hidden — the tab carries its
+      // waiting blink (kept live by refreshTabWaiting via the taskbar funnel).
+      if (tabWin.element.classList.contains('window-waiting')) tab.classList.add('waiting');
       tab.append(iconWrap, label, closeBtn);
       tab.addEventListener('mousedown', (e) => {
         if (e.target.closest('.tab-close')) return;
@@ -261,7 +281,14 @@ const tabGroupMethods = {
     if (prevWin) prevWin.content.classList.add('tab-hidden');
     chain.active = index;
     const newWin = this.windows.get(chain.tabs[index]);
-    if (newWin) newWin.content.classList.remove('tab-hidden');
+    if (newWin) {
+      newWin.content.classList.remove('tab-hidden');
+      // Switching to the tab acknowledges its waiting blink — its own titlebar
+      // is hidden (the shared tab bar stands in), so the usual focus-clears
+      // path doesn't reach it. The class IS the indicator contract (terminal
+      // and chat both read/toggle it directly), so clearing here is consistent.
+      newWin.element.classList.remove('window-waiting');
+    }
     const tabs = hostWin.titleBar.querySelectorAll('.tab-item');
     tabs.forEach((t, i) => t.classList.toggle('active', i === index));
     this.activeWindowId = chain.tabs[index];
