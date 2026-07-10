@@ -808,22 +808,35 @@ class WindowManager {
     el.style.pointerEvents = 'none';
 
     const wr = this.workspace.getBoundingClientRect();
-    const onMove = (e) => {
+    // rAF-coalesced like every other drag path (project invariant): raw
+    // mousemove fires at pointer rate and this handler interleaves layout
+    // reads (offsetWidth/offsetLeft) with style writes — uncoalesced it
+    // thrashed layout at up to 1000Hz (audit round-3). The preview rect is
+    // resolved ONCE per move session, not per event.
+    const srcRect = document.querySelector(`.desktop-preview.active .desktop-preview-win[data-win-id="${win.id}"]`);
+    let pendingEv = null, rafId = null;
+    const processMove = () => {
+      rafId = null;
+      const e = pendingEv; if (!e) return;
+      pendingEv = null;
       const w = el.offsetWidth || parseInt(el.style.width) || 350;
       el.style.left = (e.clientX - w / 2) + 'px';
       el.style.top = (e.clientY - 15) + 'px';
       // Live-update desktop preview rect
-      if (wr.width > 0 && wr.height > 0) {
-        const srcRect = document.querySelector(`.desktop-preview.active .desktop-preview-win[data-win-id="${win.id}"]`);
-        if (srcRect) {
-          srcRect.style.left = ((el.offsetLeft / wr.width) * 100) + '%';
-          srcRect.style.top = ((el.offsetTop / wr.height) * 100) + '%';
-        }
+      if (wr.width > 0 && wr.height > 0 && srcRect) {
+        srcRect.style.left = ((el.offsetLeft / wr.width) * 100) + '%';
+        srcRect.style.top = ((el.offsetTop / wr.height) * 100) + '%';
       }
+    };
+    const onMove = (e) => {
+      pendingEv = e;
+      if (!rafId) rafId = requestAnimationFrame(processMove);
     };
     const onClick = (e) => {
       e.preventDefault();
       e.stopImmediatePropagation();
+      if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+      pendingEv = null;
       overlay.remove();
       el.style.pointerEvents = '';
       el.style.zIndex = this.zIndex++;

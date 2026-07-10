@@ -90,7 +90,32 @@ class HostManager {
     }
     this._state.hosts = this._state.hosts.filter(x => x.id !== id);
     this._discoveryCache.delete(id);
+    // The host's remote-transcript cache is dead weight once the host is gone
+    // (files up to 64MB each accumulated forever — audit round-3).
+    try { fs.rmSync(path.join(this.dataDir, 'remote-jsonl', id), { recursive: true, force: true }); } catch {}
     this._save();
+  }
+
+  // Boot sweep: remote-jsonl dirs whose host no longer exists (orphaned before
+  // remove() learned to clean up) + cached transcripts unused for 30 days.
+  sweepJsonlCache() {
+    const base = path.join(this.dataDir, 'remote-jsonl');
+    let dirs = [];
+    try { dirs = fs.readdirSync(base); } catch { return; }
+    const live = new Set(this._state.hosts.map((h) => h.id));
+    const cutoff = Date.now() - 30 * 86400000;
+    for (const d of dirs) {
+      const dir = path.join(base, d);
+      if (!live.has(d)) { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} continue; }
+      let files = [];
+      try { files = fs.readdirSync(dir); } catch { continue; }
+      for (const f of files) {
+        try {
+          const fp = path.join(dir, f);
+          if (fs.statSync(fp).mtimeMs < cutoff) fs.unlinkSync(fp);
+        } catch {}
+      }
+    }
   }
 
   /** Config transfer: host records + the private-key TEXT of any uploaded keys. */

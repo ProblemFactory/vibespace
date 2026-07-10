@@ -193,9 +193,24 @@ export class ChatMinimap {
    */
   appendFullTurn(turn) {
     if (!this._fullExtent || !turn?.ts) return;
-    this._fullExtent.fullTurns.push({ ts: turn.ts, preview: turn.preview, isCompact: turn.isCompact, line: turn.line });
-    if (turn.ts > this._fullExtent.lastTs) this._fullExtent.lastTs = turn.ts;
-    this.renderFullExtent(this._fullExtent);
+    const ext = this._fullExtent;
+    const rec = { ts: turn.ts, preview: turn.preview, isCompact: turn.isCompact, line: turn.line };
+    ext.fullTurns.push(rec);
+    if (turn.ts > ext.lastTs) ext.lastTs = turn.ts;
+    // Incremental: ONE new marker + reposition existing ones (the span end
+    // moved). Rebuilding everything (renderFullExtent) removed + recreated one
+    // DOM node per user turn in the WHOLE file on every live user message
+    // (audit round-3).
+    const span = Math.max(1, ext.lastTs - ext.firstTs);
+    for (const [t, marker] of this._markerByTurn) {
+      marker.style.top = Math.max(0, Math.min(100, ((t.ts - ext.firstTs) / span) * 100)) + '%';
+    }
+    const marker = document.createElement('div');
+    marker.className = 'chat-minimap-marker ' + (rec.isCompact ? 'chat-minimap-compact' : 'chat-minimap-user-mark');
+    marker.style.top = Math.max(0, Math.min(100, ((rec.ts - ext.firstTs) / span) * 100)) + '%';
+    this._minimap.appendChild(marker);
+    this._markerByTurn.set(rec, marker);
+    this.updateThumb();
   }
 
   /** Sync minimap position/height to match message list within the container */

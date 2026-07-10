@@ -271,6 +271,11 @@ class CodeEditor {
     // Follow global theme changes
     this._themeObserver = new MutationObserver(() => this._applyTheme());
     this._themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    // closeWindow aborts _listenerCtl on EVERY close path — the onClose chain
+    // alone missed windows closed during the initial async file load, leaking
+    // this document-level observer (and the full file text via a detached
+    // EditorView) permanently (audit round-3).
+    winInfo._listenerCtl?.signal.addEventListener('abort', () => this._themeObserver?.disconnect());
   }
 
   _btn(text) {

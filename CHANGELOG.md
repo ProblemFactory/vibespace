@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.91.0 — 2026-07-10
+
+**Audit round-3: all 10 remaining verified findings landed** (each adversarially verified against real data before fixing)
+- Server: `_lastAttrib` capped (cap-only — delete-on-kill would re-append duplicate attribution lines on resume); remote-transcript cache cleaned on host removal + 30-day boot sweep for orphans; rclone mount logs drop to NOTICE (the INFO vfs heartbeat grew logs unrotated for weeks and polluted the failure diagnostic tail).
+- Leaks: host-bootstrap dialog's ws handler (TDZ + orphan-removal path, now self-unregistering); CodeEditor's document-level theme MutationObserver (now tied to the window's abort signal — the onClose chain missed closes during the initial async load); Google-Drive OAuth token poll dies with its dialog instead of running 10 more minutes.
+- Hot paths: chat minimap visible-range scan breaks at the viewport edge and resumes from the last frame's index (was getBoundingClientRect on EVERY rendered message per scroll frame); taskbar Move mode is rAF-coalesced like every other drag path; sidebar merge builds a webui Map once instead of an Array.find per system session (O(n×m) on 5000-entry lists per 5s poll); minimap live-turn append is incremental (was a full marker rebuild per message).
+
 ## 2.90.1 — 2026-07-10
 
 - Layout-sync hardening: the user-dirty send gate now EXPIRES 60s after the last real input. A client whose dirty bit stuck (an idle tab left open, a stray automation client) used to echo STALE window positions after every remote apply — reverting other clients' fresh drags and replaying old layouts after drag end (observed as "multi-client sync broken: drags don't propagate, then old drags replay"). The echo carries a fresh seq, so the anti-ping-pong seq guard can't catch it; expiring the dirty bit closes the hole at the source.

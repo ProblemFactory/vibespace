@@ -1885,6 +1885,9 @@ function recordUsageAttribution(meta) {
   const acct = meta.accountId || null;
   if (_lastAttrib.get(sid) === (acct || '')) return;
   _lastAttrib.set(sid, acct || '');
+  // Cap only — never delete-on-kill: kill→resume of the same sid (terminate/
+  // resume, billing switch) would re-append a duplicate attribution line.
+  if (_lastAttrib.size > 4096) _lastAttrib.delete(_lastAttrib.keys().next().value);
   usageHistory.recordAttribution({ sid, acct, ts: Date.now() });
 }
 // Rescan the ledger periodically (incremental — only new JSONL bytes). Also
@@ -2485,6 +2488,7 @@ app.post('/api/agent-hooks/uninstall', (req, res) => {
 // ── Hosts (ssh host registry for remote sessions — collaboration P2) ──
 const { HostManager } = require('./src/hosts');
 const hosts = new HostManager({ dataDir: path.join(__dirname, 'data') });
+setTimeout(() => { try { hosts.sweepJsonlCache(); } catch {} }, 60000); // orphaned/stale remote-transcript cache
 const { RemoteFs } = require('./src/remote-fs');
 const remoteFs = new RemoteFs(hosts);
 app.get('/api/hosts', (req, res) => {
