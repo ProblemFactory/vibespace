@@ -87,19 +87,22 @@ class SessionStatusManager {
 
   history(key) { return this._state.history?.[key] || []; }
 
-  _validate({ state, urgency, reason }) {
+  _validate({ state, urgency, reason, detail }) {
     if (state != null && !STATES.includes(state)) throw new Error(`state must be one of ${STATES.join('/')}`);
     if (urgency != null && !URGENCIES.includes(urgency)) throw new Error(`urgency must be one of ${URGENCIES.join('/')}`);
     return {
       state: state ?? null,
       urgency: urgency ?? null,
       reason: typeof reason === 'string' && reason.trim() ? reason.trim().slice(0, 300) : null,
+      // reason = the one-liner shown on chips/board; detail = optional full
+      // context, surfaced in Session Properties / on demand only.
+      detail: typeof detail === 'string' && detail.trim() ? detail.trim().slice(0, 2000) : null,
     };
   }
 
   setByAgent(key, fields) {
     const v = this._validate(fields);
-    if (!v.state && !v.urgency && !v.reason) return this.clear(key, 'agent');
+    if (!v.state && !v.urgency && !v.reason && !v.detail) return this.clear(key, 'agent');
     const prev = this._state.statuses[key];
     this._state.statuses[key] = {
       ...v, setBy: 'agent', at: Date.now(),

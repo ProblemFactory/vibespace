@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.69.0] — 2026-07-10
+
+### Added — summary + detail split for agent reports
+`vibespace-task progress` and `vibespace-status` now take a one-line summary
+plus an optional `--detail "full context"`. Everything inline shows only the
+summary — board rows, status chips, and the injected context (entries with
+detail carry a `†` marker) — so the byte-budgeted injection fits far more
+history without losing information. Details are on demand: `vibespace-task
+show --full`, click-to-expand rows in the Task Group window, a "detail"
+expander in Session Properties, and indented blockquotes in TASK.md.
+
 ## [2.68.0] — 2026-07-10
 
 ### Fixed — agents never learned the vibespace tools (hook payload truncation)

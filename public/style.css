@@ -411,6 +411,15 @@ html, body {
 .badge-agent-role { background: color-mix(in srgb, var(--green, #3fb950) 14%, transparent); color: var(--green); letter-spacing: 0.35px; padding: 1px 4px; }
 .empty-hint-inline { padding: 2px 0 !important; text-align: left; }
 .sp-dim-note { color: var(--text-dim); font-size: 9px; }
+/* status/progress detail expanders — summary stays the one-liner, the full
+   context the agent filed opens on demand */
+.sp-status-detail { margin-top: 3px; font-size: 10px; }
+.sp-status-detail summary { cursor: pointer; color: var(--text-dim); }
+.sp-status-detail > div { margin-top: 2px; white-space: pre-wrap; color: var(--text-secondary); line-height: 1.45; }
+.task-detail-progress-exp summary { cursor: pointer; list-style: none; }
+.task-detail-progress-exp summary::after { content: ' †'; color: var(--text-dim); }
+.task-detail-progress-exp[open] summary::after { content: ''; }
+.task-detail-progress-detail { margin: 3px 0 4px 14px; padding-left: 8px; border-left: 2px solid var(--border); white-space: pre-wrap; color: var(--text-secondary); font-size: 10px; line-height: 1.45; }
 .empty-hint { padding: 12px; text-align: center; color: var(--text-dim); font-size: 11px; }
 .session-item-card.archived { opacity: 0.5; }
 .session-item-card.archived .session-card-name { text-decoration: line-through; }

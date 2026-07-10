@@ -151,11 +151,21 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
       const entries = (task.progress || []).slice(-30);
       if (!entries.length) progList.innerHTML = `<div class="empty-hint">${escHtml(t('No progress notes yet'))}</div>`;
       for (const p of entries) {
-        const row = document.createElement('div');
-        row.className = 'task-detail-progress-item';
         const when = new Date(p.at);
-        row.innerHTML = `<span class="task-detail-progress-time">${when.toLocaleDateString()} ${when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>${escHtml(p.note)}`;
-        progList.appendChild(row);
+        const stamp = `<span class="task-detail-progress-time">${when.toLocaleDateString()} ${when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>`;
+        if (p.detail) {
+          // summary+detail entries expand on click — the summary is the log
+          // line, the detail is the full context the agent filed with it
+          const row = document.createElement('details');
+          row.className = 'task-detail-progress-item task-detail-progress-exp';
+          row.innerHTML = `<summary>${stamp}${escHtml(p.note)}</summary><div class="task-detail-progress-detail">${escHtml(p.detail)}</div>`;
+          progList.appendChild(row);
+        } else {
+          const row = document.createElement('div');
+          row.className = 'task-detail-progress-item';
+          row.innerHTML = `${stamp}${escHtml(p.note)}`;
+          progList.appendChild(row);
+        }
       }
       progSec.appendChild(progList);
       progList.scrollTop = progList.scrollHeight;

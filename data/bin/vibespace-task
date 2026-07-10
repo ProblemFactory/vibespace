@@ -11,20 +11,28 @@ if (!api || !token) { console.error('vibespace-task: not running inside a VibeSp
 // with a single group the server infers it. Stripped before parsing the command.
 const rawArgs = process.argv.slice(2);
 let group = '';
+let detail = '';
+let full = false;
 const argv = [];
 for (let i = 0; i < rawArgs.length; i++) {
   const a = rawArgs[i];
   if ((a === '--group' || a === '-g') && rawArgs[i + 1] !== undefined) { group = rawArgs[++i]; continue; }
   const m = /^--group=(.*)$/.exec(a);
   if (m) { group = m[1]; continue; }
+  if (a === '--detail' && rawArgs[i + 1] !== undefined) { detail = rawArgs[++i]; continue; }
+  const md = /^--detail=([\s\S]*)$/.exec(a);
+  if (md) { detail = md[1]; continue; }
+  if (a === '--full') { full = true; continue; }
   argv.push(a);
 }
 const [cmd, ...rest] = argv;
 const arg = rest.join(' ').trim();
 const USAGE = [
   'usage (updates the Task Group / 岗位 this session belongs to):',
-  '  vibespace-task show                          objective, checklist, recent activity',
-  '  vibespace-task progress "what you did"       append to the Activity log',
+  '  vibespace-task show [--full]                 objective, checklist, recent activity (--full includes entry details)',
+  '  vibespace-task progress "one-line summary" [--detail "full context"]',
+  '      append to the Activity log. The SUMMARY is what everyone sees inline — keep it one tight line;',
+  '      put specifics (numbers, paths, caveats other agents may need) in --detail.',
   '  vibespace-task plan-check <step#|text>       tick a Checklist step',
   '  vibespace-task plan-uncheck <step#|text>     untick a Checklist step',
   '  vibespace-task plan-add "new step"           add a Checklist step',
@@ -52,7 +60,11 @@ async function printShow() {
   if (task.plan && task.plan.length) { console.log('\nChecklist:'); fmtPlan(task.plan); }
   if (task.progress && task.progress.length) {
     console.log('\nActivity log (recent):');
-    for (const pr of task.progress) console.log('  - ' + new Date(pr.at).toISOString().slice(0, 16).replace('T', ' ') + ' ' + pr.note);
+    for (const pr of task.progress) {
+      console.log('  - ' + new Date(pr.at).toISOString().slice(0, 16).replace('T', ' ') + ' ' + pr.note + (pr.detail && !full ? '  †' : ''));
+      if (full && pr.detail) for (const dl of pr.detail.split('\n')) console.log('      ' + dl);
+    }
+    if (!full && task.progress.some((pr) => pr.detail)) console.log('  († = has detail — rerun with --full)');
   }
 }
 async function main() {
@@ -62,9 +74,9 @@ async function main() {
   if (cmd === 'show') {
     await printShow();
   } else if (cmd === 'progress') {
-    if (!arg) { console.error('vibespace-task: progress needs a note, e.g. vibespace-task progress "fixed the parser"'); process.exit(1); }
-    await call('POST', '/api/agent/task-progress', { note: arg });
-    console.log('progress recorded');
+    if (!arg) { console.error('vibespace-task: progress needs a summary, e.g. vibespace-task progress "fixed the parser" --detail "root cause was ..."'); process.exit(1); }
+    await call('POST', '/api/agent/task-progress', { note: arg, ...(detail ? { detail } : {}) });
+    console.log('progress recorded' + (detail ? ' (with detail)' : ''));
   } else if (cmd === 'plan-check' || cmd === 'plan-uncheck') {
     if (!arg) { console.error('vibespace-task: ' + cmd + ' needs a step number or unique text (run `vibespace-task show` to see the checklist)'); process.exit(1); }
     const { plan } = await call('POST', '/api/agent/task-plan', cmd === 'plan-check' ? { check: arg } : { uncheck: arg });

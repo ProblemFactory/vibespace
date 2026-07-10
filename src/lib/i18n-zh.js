@@ -1095,4 +1095,5 @@ export default {
   "Editing below — Save & Close to hand the file back": "正在下方编辑 — 保存并关闭后文件交还给 agent",
   "Waiting for the editor below": "等待下方编辑器",
   "The terminal resumes after Save & Close.": "保存并关闭后终端恢复。",
+  "detail": "详情",
 };
