@@ -36,3 +36,4 @@ data/user-todos.json
 data/task-groups.json
 data/tasks.json
 data/uploads-sync.json
+.claude/worktrees/
