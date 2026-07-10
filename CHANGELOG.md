@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.65.2] — 2026-07-10
+
+### Fixed — inbox/usage popups follow their buttons
+The "For you" inbox and usage-pies popups were pinned to the bottom-right by
+CSS, so moving their buttons (customize mode — another bar, left alignment,
+top-docked taskbar) left the popup opening far away from the icon. They now
+anchor to the button's live position on open: flip above/below by screen half,
+align to the button edge, clamp into the viewport, and grow away from the
+button so live re-renders stay glued to it.
+
 ## [2.65.1] — 2026-07-09
 
 ### Fixed — New Session custom names now stick in the sidebar
