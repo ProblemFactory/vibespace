@@ -573,6 +573,11 @@ class TaskGroupManager {
         // P5: loose, informational link — which session ticked this step
         // (recorded by vibespace-task plan-check; never enforced).
         ...(it?.by ? { by: String(it.by).slice(0, 120) } : {}),
+        // 2.85.0 attribution: who queued the item / when, when it was ticked.
+        // ('user' = added from the UI.) Older items simply lack these.
+        ...(it?.addedBy ? { addedBy: String(it.addedBy).slice(0, 120) } : {}),
+        ...(Number(it?.addedAt) ? { addedAt: Number(it.addedAt) } : {}),
+        ...(Number(it?.doneAt) ? { doneAt: Number(it.doneAt) } : {}),
       })).filter((it) => it.text);
     }
     if (patch.attention !== undefined) {

@@ -614,6 +614,9 @@ export function installSessionLifecycle(App, ctx = {}) {
       case 'openTaskDetail':
         this.openTaskDetail(spec.taskId, { syncId });
         break;
+      case 'openTaskLog':
+        this.openTaskLog(spec.taskId, { tab: spec.tab, syncId });
+        break;
       case 'openUsage':
         this.openUsage({ syncId });
         break;

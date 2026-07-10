@@ -82,10 +82,19 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
     }
     root.appendChild(head);
 
-    const section = (label, hint) => {
+    const section = (label, hint, action) => {
       const s = document.createElement('div');
       s.className = 'task-detail-section';
       s.innerHTML = `<div class="task-detail-label">${escHtml(label)}${hint ? `<span class="task-detail-hint">${escHtml(hint)}</span>` : ''}</div>`;
+      if (action) {
+        // ⧉ opens the full-window log viewer (checklist/activity outgrow this editor)
+        const btn = document.createElement('button');
+        btn.className = 'task-detail-open-log';
+        btn.textContent = '⧉';
+        btn.title = action.title;
+        btn.onclick = action.onClick;
+        s.firstChild.appendChild(btn);
+      }
       root.appendChild(s);
       return s;
     };
@@ -101,7 +110,7 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
       objSec.appendChild(obj);
 
       // ── Checklist (was "Plan") ──
-      const planSec = section(t('Checklist'), t("the group's backlog of work items — you queue them, any session picks one up and ticks it off (agents keep their own working steps in their session TODO, shown on each card)"));
+      const planSec = section(t('Checklist'), t("the group's backlog of work items — you queue them, any session picks one up and ticks it off (agents keep their own working steps in their session TODO, shown on each card)"), { title: t('Open full checklist viewer (attribution, filters, search)'), onClick: () => app.openTaskLog(taskId, { tab: 'checklist' }) });
       const planList = document.createElement('div');
       planList.className = 'task-detail-plan';
       (task.plan || []).forEach((item, i) => {
@@ -112,7 +121,8 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
           const plan = task.plan.map((p, j) => {
             if (j !== i) return p;
             const np = { ...p, done: cb.checked };
-            if (!cb.checked) delete np.by; // P5: unticking clears the "done by" link
+            if (cb.checked) { np.by = 'user'; np.doneAt = Date.now(); }
+            else { delete np.by; delete np.doneAt; } // P5: unticking clears the "done by" link
             return np;
           });
           patch({ plan });
@@ -138,14 +148,14 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
       planAdd.placeholder = t('+ Add checklist step (Enter)');
       planAdd.onkeydown = (e) => {
         if (e.key === 'Enter' && planAdd.value.trim()) {
-          patch({ plan: [...(task.plan || []), { text: planAdd.value.trim(), done: false }] });
+          patch({ plan: [...(task.plan || []), { text: planAdd.value.trim(), done: false, addedBy: 'user', addedAt: Date.now() }] });
           planAdd.value = '';
         }
       };
       planSec.appendChild(planAdd);
 
       // ── Activity log (was "Progress") ──
-      const progSec = section(t('Activity log'), t('timestamped notes of what was done — agents append via vibespace-task, you can too'));
+      const progSec = section(t('Activity log'), t('timestamped notes of what was done — agents append via vibespace-task, you can too'), { title: t('Open full activity viewer (by day, by session, search)'), onClick: () => app.openTaskLog(taskId, { tab: 'activity' }) });
       const progList = document.createElement('div');
       progList.className = 'task-detail-progress';
       const entries = (task.progress || []).slice(-30);

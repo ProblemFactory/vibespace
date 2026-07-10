@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.85.0 — 2026-07-10
+
+**Task Group log viewer (Checklist + Activity outgrow the detail editor)**
+- New full-window viewer (`src/lib/task-log.js`, window type task, openSpec `openTaskLog`): two tabs — **Checklist** (open/done sections, write-through checkboxes, add/delete) and **Activity log** (all entries newest-first, grouped by day with per-day counts, † details expand inline). Text search, per-session filter dropdown, "Copy as Markdown" of the current filtered view.
+- **Session attribution everywhere**: activity rows show the filing session as a chip (resolved to its display name; click a chip to filter to that session); checklist items now record who queued them (`addedBy`/`addedAt` — agent session key or `user` for UI adds) and who ticked them (`by` existed, `doneAt` new). Older items simply have no chips.
+- Entry points: ⧉ buttons on the Checklist and Activity sections in task-detail, and "Checklist & activity…" in the board header context menu.
+
 ## 2.84.0 — 2026-07-10
 
 **Observability (for team rollout iteration)**

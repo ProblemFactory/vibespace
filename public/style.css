@@ -2579,3 +2579,35 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 .session-props-group { display: flex; align-items: center; gap: 6px; font-size: 11px; padding: 2px 0; cursor: pointer; color: var(--text-secondary); }
 .session-props-group input { margin: 0; width: 12px; height: 12px; }
 .session-props .session-history-list, .session-props .session-steps-list { max-height: 180px; overflow-y: auto; }
+
+/* ── Task Group log viewer (task-log.js — full-window Checklist + Activity browser) ── */
+.task-log { display: flex; flex-direction: column; height: 100%; font-size: 12px; }
+.task-log-head { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--bg-panel, var(--bg-titlebar)); flex-wrap: wrap; flex-shrink: 0; }
+.task-log-tabs { margin: 0; border: none; }
+.task-log-count { font-size: 9px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.task-log-search { flex: 1; min-width: 110px; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); font-size: 11px; padding: 3px 8px; }
+.task-log-search:focus { outline: none; border-color: var(--accent); }
+.task-log-sessfilter { background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-secondary); font-size: 11px; padding: 3px 4px; max-width: 170px; }
+.task-log-body { flex: 1; overflow-y: auto; padding: 4px 10px 10px; }
+.task-log-day { display: flex; align-items: baseline; gap: 6px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-secondary); padding: 10px 0 4px; position: sticky; top: 0; background: var(--bg-window, var(--bg-dialog)); z-index: 1; }
+.task-log-day-n { font-weight: 400; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.task-log-row { display: flex; align-items: baseline; gap: 6px; padding: 3px 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent); line-height: 1.45; }
+.task-log-exp { display: block; }
+.task-log-exp > summary { display: flex; align-items: baseline; gap: 6px; cursor: pointer; list-style: none; }
+.task-log-exp > summary::-webkit-details-marker { display: none; }
+.task-log-dagger { color: var(--text-dim); flex-shrink: 0; }
+.task-log-exp[open] .task-log-dagger { display: none; }
+.task-log-detail { white-space: pre-wrap; background: var(--bg-input); border-radius: var(--radius-sm); padding: 6px 8px; margin: 4px 0 4px 44px; font-size: 11px; color: var(--text-secondary); max-height: 320px; overflow-y: auto; }
+.task-log-time { color: var(--text-dim); font-size: 10px; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.task-log-note { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.task-log-chip { display: inline-block; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; font-size: 10px; padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); flex-shrink: 0; }
+.task-log-chip.user { background: color-mix(in srgb, var(--green, #3fb950) 12%, transparent); color: var(--green, #3fb950); }
+.task-log-chip.clickable { cursor: pointer; }
+.task-log-chip.clickable:hover, .task-log-chip.active { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+.task-log-plan input[type="checkbox"] { margin: 0; flex-shrink: 0; align-self: center; }
+.task-log-plan.done .task-log-note { text-decoration: line-through; color: var(--text-dim); }
+.task-log-attr { display: flex; gap: 8px; flex-shrink: 0; align-items: baseline; }
+.task-log-attr-part { display: flex; gap: 3px; align-items: baseline; font-size: 10px; color: var(--text-dim); }
+.task-log-add { margin-top: 8px; }
+.task-detail-open-log { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 11px; padding: 0 2px; margin-left: auto; }
+.task-detail-open-log:hover { color: var(--accent); }
