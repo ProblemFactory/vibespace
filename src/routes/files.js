@@ -34,7 +34,9 @@ const remotePath = (p) => String(p || '~');
 router.get('/api/home', async (req, res) => {
   const R = rfs(req);
   if (R) { try { return res.json({ home: await R.fs.home(R.host) }); } catch (e) { return res.status(400).json({ error: e.message }); } }
-  res.json({ home: os.homedir(), authEnabled: !!req.app.locals.authEnabled });
+  // repoDir: where THIS server runs from — the ⚙ "Update VibeSpace…" action
+  // runs scripts/update.sh there (the client can't know the install path).
+  res.json({ home: os.homedir(), authEnabled: !!req.app.locals.authEnabled, repoDir: path.resolve(__dirname, '..', '..') });
 });
 
 // System monospace fonts via fc-list (cached)

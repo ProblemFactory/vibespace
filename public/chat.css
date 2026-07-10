@@ -825,3 +825,22 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
   animation: chat-fallback-pulse 2s ease-in-out 3;
 }
 @keyframes chat-fallback-pulse { 50% { opacity: 0.45; } }
+
+/* Per-message metadata popup (left-strip right-click) */
+.msg-meta-pop {
+  background: var(--bg-dialog); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.35); padding: 8px 10px; min-width: 240px; max-width: 360px;
+  font-size: 11px; color: var(--text);
+}
+.msg-meta-title { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--text-dim); margin-bottom: 5px; }
+.msg-meta-row { display: flex; gap: 8px; padding: 1.5px 0; align-items: baseline; }
+.msg-meta-label { flex: none; width: 88px; color: var(--text-dim); font-size: 10px; }
+.msg-meta-val { min-width: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.msg-meta-val.copyable { cursor: pointer; }
+.msg-meta-val.copyable:hover { color: var(--accent); }
+.msg-meta-copy {
+  margin-top: 6px; width: 100%; padding: 3px 8px; font-size: 11px;
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  color: var(--text-secondary); cursor: pointer; transition: var(--transition);
+}
+.msg-meta-copy:hover { border-color: var(--accent); color: var(--accent); }

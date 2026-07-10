@@ -206,6 +206,7 @@ class App {
     }).then(d => {
       document.getElementById('input-cwd').placeholder = d.home;
       this._authEnabled = !!d.authEnabled;
+      this._repoDir = d.repoDir || null; // server install dir (⚙ self-update)
     }).catch(()=>{});
 
     // Initialize unified state sync (server-persisted, versioned diff broadcast, reconnect recovery)
@@ -1802,6 +1803,12 @@ class App {
     menu.append(sep(),
       item(I.exp, t('Backup & migrate\u2026'), () => this._showTransferDialog()),
       item(I.lock, this._authEnabled ? t('Change password\u2026') : t('Set password\u2026'), () => this._showPasswordDialog()));
+    // Self-update: runs scripts/update.sh visibly in a shell terminal (same
+    // pattern as Manage Agents' CLI updates). The dtach terminal survives the
+    // service restart at the end, so the log stays readable throughout.
+    if (this._repoDir) menu.append(item(I.key, t('Update VibeSpace\u2026'), () => {
+      this.openShellTerminal(this._repoDir, { initialCommand: 'bash scripts/update.sh' });
+    }));
     menu.append(sep(), item(I.tour, t('Welcome tour'), () => this._showOnboarding(true)));
     if (this._authEnabled) {
       menu.append(item(I.out, t('Sign out'), async () => {
