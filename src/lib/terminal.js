@@ -270,8 +270,15 @@ class TerminalSession {
           if (!this._pinned) { this._pendingOutput = (this._pendingOutput || '') + msg.data; this._repin(); }
           else this.terminal.write(msg.data);
         } else if (!this._pinned) {
-          // Queue output while user is scrolled up — write all at once when re-pinned
+          // Queue output while user is scrolled up — write all at once when re-pinned.
+          // CAP the queue (audit 2.81.0): scrollback is 10k lines, so anything
+          // beyond a few MB is discarded by xterm at repin anyway — but a busy
+          // agent left unpinned for hours grew this string toward hundreds of
+          // MB (one giant string, multi-second repin stall).
           this._pendingOutput = (this._pendingOutput || '') + msg.data;
+          if (this._pendingOutput.length > 4_000_000) {
+            this._pendingOutput = '\r\n\x1b[90m[… older output dropped while scrolled up …]\x1b[0m\r\n' + this._pendingOutput.slice(-2_000_000);
+          }
         } else {
           this.terminal.write(msg.data, () => this.terminal.scrollToBottom());
         }

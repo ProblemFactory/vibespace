@@ -75,6 +75,12 @@ class ChatView {
       // config (same store as the Resume gear popover) so the next resume
       // starts with the same choice.
       onConfigChange: (patch) => this._persistSessionConfig(patch),
+      // Running-workflow chips: click → live detail window; poll needs ids
+      onOpenWorkflow: (runId, name) => {
+        const ids = this._getSessionIds();
+        this.app.openWorkflowDetail(runId, { claudeSessionId: ids.claudeId, cwd: ids.cwd, name });
+      },
+      getWorkflowIds: () => { const ids = this._getSessionIds(); return { claudeId: ids.claudeId, cwd: ids.cwd }; },
     });
     // Initial render: a brand-new session has no chatStatus yet — show the
     // honest unknown badges (model: ? / effort: ?) instead of an empty bar.
@@ -1414,6 +1420,12 @@ class ChatView {
     if (msgIdx < 0) return;
     const msg = this._messages[msgIdx];
     Object.assign(msg, fields);
+    // A Workflow launch ack just landed → status-bar chip for the running run
+    if (msg.toolName === 'Workflow' && fields.content && !this._loadingHistory) {
+      const out = msg.content?.[0]?.output || '';
+      const runId = out.match(/Run ID:\s*(wf_[\w-]+)/)?.[1];
+      if (runId) this._statusBar.trackWorkflow(runId, out.match(/Workflow ["“]([^"”]+)["”]/)?.[1] || msg.content?.[0]?.input?.name || null);
+    }
     this._syncReviewAvailability();
 
     // Status transitions
@@ -1764,6 +1776,15 @@ class ChatView {
   _applyTaskState(taskState) {
     const tasks = taskState?.tasks || {};
     this._statusBar.setTasks(tasks);
+    // Re-arm running-workflow chips after attach/refresh: any Workflow result
+    // in the loaded tail gets probed once — /api/workflow drops non-running
+    // ones on the first poll, so finished runs never chip.
+    for (const m of this._messages.slice(-60)) {
+      if (m.toolName !== 'Workflow') continue;
+      const out = m.content?.[0]?.output || '';
+      const runId = out.match(/Run ID:\s*(wf_[\w-]+)/)?.[1];
+      if (runId) this._statusBar.trackWorkflow(runId, m.content?.[0]?.input?.name || null);
+    }
 
     const todos = Array.isArray(taskState?.todos) ? taskState.todos : [];
     if (this._chatInput) {
@@ -2078,6 +2099,7 @@ class ChatView {
   }
 
   dispose() {
+    this._statusBar?.dispose?.();
     this._disposed = true;
     if (this._readOnlyPollTimer) clearTimeout(this._readOnlyPollTimer);
     this.ws.offGlobal(this._handler);

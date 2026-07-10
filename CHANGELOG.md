@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.81.0] — 2026-07-10
+
+### Performance — long-session leak fixes (multi-agent audit, round 1)
+- FileExplorer gained a real dispose(): its ws handler + ResizeObserver +
+  in-flight upload XHRs used to outlive the window and pin the whole instance
+  (detached DOM included) forever. Verified: handler count returns to baseline
+  on close.
+- Terminal scroll-up output queue is capped (4MB→keep 2MB): a busy agent left
+  unpinned for hours grew one giant string toward hundreds of MB that xterm
+  discarded at repin anyway.
+- Upload history pruned to the newest 100 entries (grew forever, synced to
+  every client on every load).
+- Server: session buffer/wrapper-meta files now unlink on real teardown + a
+  boot sweep removes orphans (193 files / 28MB swept on first run).
+
+### Added — running workflows visible in the chat status bar
+Dynamic-workflow launches show a live chip (name + done/agents, 8s poll while
+running) in the session's status bar; click opens the live workflow detail
+window. Chips re-arm after refresh from the loaded history tail.
+
 ## [2.80.1] — 2026-07-10
 
 ### Fixed — title-bar billing badges vanished on fresh page loads

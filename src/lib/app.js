@@ -3475,7 +3475,7 @@ class App {
     if (host) winInfo._explorerHost = host; // read by FileExplorer constructor
     const explorer = new FileExplorer(winInfo, this, startPath);
     winInfo._explorer = explorer;
-    winInfo.onClose = () => this._checkWelcome();
+    winInfo.onClose = () => { explorer.dispose(); this._checkWelcome(); };
     return winInfo;
   }
 

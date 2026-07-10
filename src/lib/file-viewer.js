@@ -56,7 +56,7 @@ class FileViewer {
     winInfo._filePath = filePath; winInfo._fileName = fileName;
     const container = document.createElement('div'); container.className = 'file-viewer';
     winInfo.content.appendChild(container);
-    winInfo.onClose = () => {};
+    winInfo.onClose = () => { try { container._viewerCtl?.abort(); } catch {} };
     const rendered = await FileViewer.renderInto(container, filePath, fileName, app);
     if (!rendered) {
       // No dedicated viewer — open in code editor
@@ -71,6 +71,13 @@ class FileViewer {
    * no dedicated viewer exists for this file type.
    */
   static async renderInto(container, filePath, fileName, app = null) {
+    // Per-render lifecycle: document-level listeners (image pan, PPTX keyboard
+    // nav) and observers register against this signal. Re-rendering into the
+    // same container (explorer preview panel) aborts the previous render's
+    // listeners; window close aborts the last one (openFile onClose). Without
+    // this, every image/PPTX ever viewed left permanent document listeners.
+    if (container._viewerCtl) { try { container._viewerCtl.abort(); } catch {} }
+    container._viewerCtl = new AbortController();
     const ext = (fileName || filePath.split('/').pop()).split('.').pop().toLowerCase();
     const viewerType = getViewerType(ext);
     const rawUrl = `/api/file/raw?path=${encodeURIComponent(filePath)}`;
@@ -286,12 +293,13 @@ class FileViewer {
       imgWrap.style.cursor = 'grabbing';
       e.preventDefault();
     });
+    const panSignal = container?._viewerCtl?.signal;
     document.addEventListener('mousemove', (e) => {
       if (!dragging) return;
       panX = e.clientX - startX; panY = e.clientY - startY;
       applyPan();
-    });
-    document.addEventListener('mouseup', () => { dragging = false; imgWrap.style.cursor = 'grab'; });
+    }, panSignal ? { signal: panSignal } : undefined);
+    document.addEventListener('mouseup', () => { dragging = false; imgWrap.style.cursor = 'grab'; }, panSignal ? { signal: panSignal } : undefined);
     imgWrap.style.cursor = 'grab';
 
     // Reset pan on fit
@@ -502,7 +510,8 @@ class FileViewer {
       if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); if (activeIdx < count - 1) renderMain(activeIdx + 1); thumbEls[activeIdx]?.scrollIntoView({ block: 'nearest' }); }
       if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); if (activeIdx > 0) renderMain(activeIdx - 1); thumbEls[activeIdx]?.scrollIntoView({ block: 'nearest' }); }
     };
-    document.addEventListener('keydown', onKey);
+    const pptxSignal = container?._viewerCtl?.signal;
+    document.addEventListener('keydown', onKey, pptxSignal ? { signal: pptxSignal } : undefined);
 
     // Responsive resize
     let resizeTimer = null;

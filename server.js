@@ -1052,6 +1052,14 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
     broadcastToSession(session, id, { type: 'exited', sessionId: id, reason: exitReason });
     activeSessions.delete(id);
     if (cleanupOnExit && session.sockName) deleteSessionMeta(session.sockName);
+    // Buffer + wrapper-meta files are only meaningful while the dtach session
+    // lives (restore reads them) — on real teardown they're dead weight that
+    // used to accumulate forever (129 files / 28MB observed for 8 live
+    // sessions; known-backlog item, fixed 2.81.0).
+    if (cleanupOnExit) {
+      try { fs.unlinkSync(path.join(BUFFERS_DIR, id + '.buf')); } catch {}
+      try { fs.unlinkSync(path.join(BUFFERS_DIR, id + '.json')); } catch {}
+    }
     broadcastActiveSessions();
   });
 }
@@ -3264,6 +3272,21 @@ server.listen(PORT, HOST, () => {
 
   // Restore existing dtach sessions from before restart
   restoreSessions();
+
+  // Orphan sweep: buffer/wrapper-meta files whose session did NOT survive the
+  // restore are dead (nothing ever reads them again) — before 2.81.0 they
+  // accumulated forever. Delayed so late-restoring sessions aren't raced.
+  setTimeout(() => {
+    let swept = 0;
+    try {
+      for (const fn of fs.readdirSync(BUFFERS_DIR)) {
+        const m = fn.match(/^(.+)\.(buf|json)$/);
+        if (!m || activeSessions.has(m[1])) continue;
+        try { fs.unlinkSync(path.join(BUFFERS_DIR, fn)); swept++; } catch {}
+      }
+    } catch {}
+    if (swept) console.log(`  Swept ${swept} orphaned session-buffer files`);
+  }, 30000);
 
   console.log(`  Ready.\n`);
 });
