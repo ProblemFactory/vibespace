@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.67.1] — 2026-07-10
+
+### Fixed — terminal image paste + Ctrl+G editor
+Two long-standing breakages, both environmental:
+- **Ctrl+G** broke the moment password auth was enabled: the `code` helper
+  script's POST to `/api/editor/open` has no cookie and there was never an
+  exemption — 401, and claude hung on "Save and close editor to continue…".
+  The script now authenticates with its per-session token (same trust model as
+  the agent endpoints), validated by the route.
+- **Image paste** died when the compositor restarted (Xwayland mints a NEW
+  auth-cookie file; every running session keeps the old path → "Invalid
+  MIT-MAGIC-COOKIE-1"). The server now merges the working cookie into
+  `~/.Xauthority` and hands sessions that stable path, so future rotations heal
+  via a re-probe (the paste route retries through it once) — no respawns
+  needed. Existing sessions were healed in place by merging the new cookie into
+  the old file.
+
 ## [2.67.0] — 2026-07-10
 
 ### Changed — new default accent: teal (goodbye AI-indigo)

@@ -180,6 +180,10 @@ class Auth {
       // agent's env (vsst_ — see /api/agent/session-status); no cookie exists
       // inside an agent's shell, so these must bypass cookie auth.
       if (p.startsWith('/api/agent/')) return next();
+      // Ctrl+G editor bridge: the fake `code` script runs inside the session
+      // shell (no cookie) and sends the same vsst_ token — the ROUTE validates
+      // it. Cookie-gating this silently broke Ctrl+G whenever auth was on.
+      if (p === '/api/editor/open') return next();
       if (this.requestAuthed(req)) return next();
       // Browsers navigating to pages get the login form; API calls get 401
       const wantsHtml = req.method === 'GET' && (req.headers.accept || '').includes('text/html');

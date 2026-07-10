@@ -342,26 +342,35 @@ router.post('/api/paste-image', (req, res) => {
       } else {
         // Use the display the server PROBED at startup (app.locals.xEnv) — the
         // inherited DISPLAY is often stale, and XWayland needs the compositor's
-        // XAUTHORITY cookie or xclip fails with "Can't open display".
-        const xEnv = req.app.locals.xEnv || {};
-        const clipEnv = { ...process.env, DISPLAY: xEnv.DISPLAY || process.env.DISPLAY || ':0' };
-        if (xEnv.XAUTHORITY) clipEnv.XAUTHORITY = xEnv.XAUTHORITY;
-        const cp = spawn('bash', ['-c', `cat "${tmpPath}" | xclip -selection clipboard -t ${mimeType}`], {
-          env: clipEnv, detached: true, stdio: 'ignore',
-        });
-        cp.unref();
-        const pollStart = Date.now();
-        const poll = () => {
-          try {
-            const out = execFileSync('xclip', ['-selection', 'clipboard', '-t', 'TARGETS', '-o'], {
-              env: clipEnv, encoding: 'utf-8', timeout: 1000,
-            });
-            if (out.includes('image/')) return res.json({ path: tmpPath, ready: true });
-          } catch {}
-          if (Date.now() - pollStart < 5000) setTimeout(poll, 200);
-          else res.json({ path: tmpPath, ready: false });
+        // XAUTHORITY cookie or xclip fails with "Can't open display". If the
+        // cycle fails, re-probe ONCE and retry: a compositor restart rotates
+        // the cookie out from under a long-running server (real incident).
+        const attempt = (retriesLeft) => {
+          const xEnv = req.app.locals.xEnv || {};
+          const clipEnv = { ...process.env, DISPLAY: xEnv.DISPLAY || process.env.DISPLAY || ':0' };
+          if (xEnv.XAUTHORITY) clipEnv.XAUTHORITY = xEnv.XAUTHORITY;
+          const cp = spawn('bash', ['-c', `cat "${tmpPath}" | xclip -selection clipboard -t ${mimeType}`], {
+            env: clipEnv, detached: true, stdio: 'ignore',
+          });
+          cp.unref();
+          const pollStart = Date.now();
+          const poll = () => {
+            try {
+              const out = execFileSync('xclip', ['-selection', 'clipboard', '-t', 'TARGETS', '-o'], {
+                env: clipEnv, encoding: 'utf-8', timeout: 1000,
+              });
+              if (out.includes('image/')) return res.json({ path: tmpPath, ready: true });
+            } catch {}
+            if (Date.now() - pollStart < 5000) return setTimeout(poll, 200);
+            if (retriesLeft > 0 && req.app.locals.refreshXEnv) {
+              req.app.locals.refreshXEnv();
+              return attempt(retriesLeft - 1);
+            }
+            res.json({ path: tmpPath, ready: false });
+          };
+          setTimeout(poll, 300);
         };
-        setTimeout(poll, 300);
+        attempt(1);
       }
     } catch {
       res.json({ path: tmpPath, ready: false });
