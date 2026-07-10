@@ -44,6 +44,10 @@ ExecStart=$NODE_BIN server.js
 Restart=always
 RestartSec=5
 Environment=PORT=${PORT:-3456}
+# systemd's minimal user env has no ~/.local/bin or nvm bin — without this the
+# server (and every CLI it spawns) can't find claude/codex/node ('/usr/bin/env:
+# claude: No such file or directory' on resume; real incident).
+Environment=PATH=$(dirname "$NODE_BIN"):$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin
 # Prefer killing memory hogs (browsers, builds) over the workspace server.
 OOMScoreAdjust=-500
 
