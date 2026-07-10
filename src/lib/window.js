@@ -967,11 +967,17 @@ class WindowManager {
       el.dataset.tip = tip + ' · ' + t('Click to switch billing');
       el.onclick = (e) => { e.stopPropagation(); this.app?.showBillingSwitcher?.(id, el); };
     };
-    if (win.titleSpan.parentElement === win.titleBar) applyAfter(win.titleSpan);
     if (win._tabChain) {
+      // Grouped: the badge lives ONLY on this window's tab item. A leftover
+      // standalone badge (inserted before the merge) reads as a meaningless
+      // "global" chip to the left of the tabs (real report) — remove it.
       const host = this.windows.get(win._tabChain.tabs[0]);
+      host?.titleBar.querySelector(':scope > .win-auth-badge')?.remove();
+      win.titleBar.querySelector(':scope > .win-auth-badge')?.remove();
       const tabEl = host?.titleBar.querySelector(`.tab-item[data-win-id="${id}"] .tab-label`);
       applyAfter(tabEl);
+    } else if (win.titleSpan.parentElement === win.titleBar) {
+      applyAfter(win.titleSpan);
     }
   }
 

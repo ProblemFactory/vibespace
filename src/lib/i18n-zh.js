@@ -1198,4 +1198,12 @@ export default {
   "Short custom text placed at the top of the per-turn reminder — reaches the agent on EVERY message you send, so keep it tight (≤500 chars; it costs tokens each turn). Delivers even if the standard tool reminder is turned off. Edit in Manage Agents → Agent instructions.": "置于每轮提醒顶部的简短自定义文本——你发的每条消息都会送达 agent，务必精炼（≤500 字符；每轮都消耗 token）。即使关闭标准工具提醒也会单独下发。建议在 管理 Agents → Agent 指令 里编辑。",
   "Stop-nudge extra (injected when the bookkeeping nudge fires)": "停止提醒附加内容（簿记提醒触发时注入）",
   "Custom text placed at the top of the stop-time bookkeeping nudge (≤500 chars) — e.g. extra end-of-turn duties for your agents. Edit in Manage Agents → Agent instructions.": "置于停止时簿记提醒顶部的自定义文本（≤500 字符）——例如给 agent 追加轮末职责。建议在 管理 Agents → Agent 指令 里编辑。",
+  "fire after {n} min without a status update": "状态超过 {n} 分钟未更新时触发",
+  "at most once per {n} min per session": "每个会话最多每 {n} 分钟一次",
+  "The nudge only fires when the session has not updated its board status for this long.": "只有当会话的状态板超过这个时长没有更新时才会提醒。",
+  "After nudging a session once, wait at least this long before nudging it again.": "提醒过一次后，至少间隔这么久才会再次提醒同一会话。",
+  "Stop nudge: staleness threshold (minutes)": "停止提醒：状态过期阈值（分钟）",
+  "The nudge only fires when the session has not updated its board status for this long. Lower = agents are reminded more eagerly; higher = quieter.": "只有当会话的状态板超过这个时长没有更新时才触发提醒。调低 = 更积极地提醒 agent；调高 = 更安静。",
+  "Stop nudge: cooldown per session (minutes)": "停止提醒：每会话冷却时间（分钟）",
+  "After nudging a session once, wait at least this long before nudging it again — the ceiling on how often an agent pays the bookkeeping mini-turn.": "提醒过一次后至少间隔这么久才再次提醒同一会话——这是 agent 为簿记小轮付出成本的频率上限。",
 };

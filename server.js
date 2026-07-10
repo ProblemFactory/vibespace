@@ -2375,10 +2375,15 @@ app.get('/api/agent/stop-check', (req, res) => {
     if (!stopNudgeEnabled()) return res.json({ block: false });
     const [s, id] = hit;
     const now = Date.now();
-    if (s._lastStopNudge && now - s._lastStopNudge < 30 * 60 * 1000) return res.json({ block: false });
+    // Both thresholds user-configurable (2.89.0) — clamped to sane bounds so a
+    // typo can't turn the nudge into a per-stop tax or disable it silently
+    // (use the on/off toggle for that).
+    const staleMin = Math.min(240, Math.max(1, Number(serverSetting('agents.stopNudgeStaleMinutes')) || 10));
+    const cooldownMin = Math.min(720, Math.max(2, Number(serverSetting('agents.stopNudgeCooldownMinutes')) || 30));
+    if (s._lastStopNudge && now - s._lastStopNudge < cooldownMin * 60 * 1000) return res.json({ block: false });
     const key = sessionStatusKey(s, id);
     const rec = sessionStatus.get(key) || sessionStatus.get(`webui:${id}`);
-    if (rec && rec.at && now - rec.at < 10 * 60 * 1000) return res.json({ block: false });
+    if (rec && rec.at && now - rec.at < staleMin * 60 * 1000) return res.json({ block: false });
     s._lastStopNudge = now;
     // Per-hook custom text (2.88.0): user extra rides at the top of the nudge.
     const extra = customExtra('agents.stopNudgeExtra', 500);

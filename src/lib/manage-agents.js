@@ -574,12 +574,46 @@ export function installManageAgents(App, ctx = {}) {
           tas.push([key, ta]);
           row.append(lab, ta);
         }
+        // Stop-nudge firing conditions (2.89.0): staleness threshold + per-
+        // session cooldown, editable next to the stop-nudge text they gate.
+        const numRow = document.createElement('div');
+        numRow.style.cssText = 'display:flex;gap:14px;align-items:center;margin-top:6px;flex-wrap:wrap;';
+        const numInputs = [];
+        for (const [key, label, tip] of [
+          // t() WITHOUT params keeps the literal {n} — it marks where the
+          // number input embeds into the translated sentence.
+          ['agents.stopNudgeStaleMinutes', t('fire after {n} min without a status update'), t('The nudge only fires when the session has not updated its board status for this long.')],
+          ['agents.stopNudgeCooldownMinutes', t('at most once per {n} min per session'), t('After nudging a session once, wait at least this long before nudging it again.')],
+        ]) {
+          const wrap = document.createElement('label');
+          wrap.className = 'agents-note';
+          wrap.style.cssText = 'display:flex;align-items:center;gap:5px;margin:0;';
+          wrap.title = tip;
+          const inp = document.createElement('input');
+          inp.type = 'number';
+          inp.className = 'settings-input-text';
+          inp.style.cssText = 'width:58px;padding:2px 6px;';
+          const schema = { 'agents.stopNudgeStaleMinutes': [1, 240, 10], 'agents.stopNudgeCooldownMinutes': [2, 720, 30] }[key];
+          inp.min = schema[0]; inp.max = schema[1];
+          inp.value = this.settings.get(key) ?? schema[2];
+          numInputs.push([key, inp, schema]);
+          // label text with the input embedded where {n} was
+          const [before, after] = label.split('{n}').length === 2 ? label.split('{n}') : [label + ' ', ''];
+          wrap.append(document.createTextNode(before), inp, document.createTextNode(after));
+          numRow.appendChild(wrap);
+        }
+        row.append(numRow);
         const btnRow = document.createElement('div');
         btnRow.style.cssText = 'display:flex;justify-content:flex-end;gap:6px;margin-top:6px;';
         const save = document.createElement('button');
         save.className = 'agent-btn'; save.textContent = t('Save');
         save.onclick = () => {
           for (const [key, ta] of tas) this.settings.set(key, ta.value.trim());
+          for (const [key, inp, [mn, mx, dft]] of numInputs) {
+            const v = Math.min(mx, Math.max(mn, Number(inp.value) || dft));
+            inp.value = v;
+            this.settings.set(key, v);
+          }
           showToast(t('Saved — new/updated sessions receive it on their next turn'));
         };
         btnRow.appendChild(save);

@@ -241,6 +241,18 @@ const SETTINGS_SCHEMA = {
     description: t('Hooks like PostToolUse fire on every tool call with nothing to show — by default those render no card at all. Turn off to see every hook event. Applies to newly loaded history (reopen the window for existing views).'),
     category: t('Chat'), liveApply: true,
   },
+  'agents.stopNudgeStaleMinutes': {
+    type: 'number', default: 10, min: 1, max: 240, step: 1,
+    label: t('Stop nudge: staleness threshold (minutes)'),
+    description: t('The nudge only fires when the session has not updated its board status for this long. Lower = agents are reminded more eagerly; higher = quieter.'),
+    category: t('Session'), liveApply: true,
+  },
+  'agents.stopNudgeCooldownMinutes': {
+    type: 'number', default: 30, min: 2, max: 720, step: 1,
+    label: t('Stop nudge: cooldown per session (minutes)'),
+    description: t('After nudging a session once, wait at least this long before nudging it again — the ceiling on how often an agent pays the bookkeeping mini-turn.'),
+    category: t('Session'), liveApply: true,
+  },
   'agents.stopBookkeepingNudge': {
     type: 'boolean', default: true,
     label: t('Stop-time bookkeeping nudge for agents'),

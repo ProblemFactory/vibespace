@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.89.0 — 2026-07-10
+
+- **Stop-nudge firing conditions configurable**: `agents.stopNudgeStaleMinutes` (default 10, clamp 1–240) and `agents.stopNudgeCooldownMinutes` (default 30, clamp 2–720) — editable inline next to the stop-nudge text in Manage Agents → Agent instructions, and in Settings.
+- Tab groups no longer show a stray "global" billing badge left of the tabs (the host's pre-merge standalone badge survived the merge); badges now live ONLY on tab items while grouped, and the last remaining window gets its standalone badge back immediately when a group dissolves.
+
 ## 2.88.1 — 2026-07-10
 
 - Billing badges on tabbed windows: tab-bar rebuilds (switch/merge/detach/drag) destroyed the badge span while the identity-keyed no-op guard prevented re-insertion until the billing identity changed — badges randomly vanished on grouped windows. The guard is now self-healing (verifies the badge actually exists before skipping), tab-bar renders re-apply all tabs' badges immediately, and a detached window's standalone title bar gets its badge back.

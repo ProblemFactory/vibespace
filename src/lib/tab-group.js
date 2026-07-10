@@ -209,6 +209,9 @@ const tabGroupMethods = {
     // Rebuilding the tab DOM destroys per-tab auth badges — re-apply them
     // after this render instead of waiting for the next identity broadcast.
     queueMicrotask(() => {
+      // Purge the host's pre-merge standalone badge (it reads as a stray
+      // "global" chip left of the tabs), then re-apply per-tab badges.
+      hostWin.titleBar.querySelector(':scope > .win-auth-badge')?.remove();
       for (const tid of chain.tabs) {
         const w = this.windows.get(tid);
         if (w && w._authBadge !== undefined) this.setAuthBadge(tid, w._authBadge);
@@ -522,6 +525,10 @@ const tabGroupMethods = {
 
     if (chain.tabs.length <= 1) {
       this._ungroupLast(chain);
+      // The remaining (now standalone) window's title bar needs its badge
+      // back immediately — not on the next identity broadcast.
+      const last = this.windows.get(chain.tabs[0]);
+      queueMicrotask(() => { if (last && last._authBadge !== undefined) this.setAuthBadge(last.id, last._authBadge); });
     } else {
       const currentHost = this.windows.get(chain.tabs[0]);
       if (currentHost) {
