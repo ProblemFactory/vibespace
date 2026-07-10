@@ -887,6 +887,27 @@ class ChatRenderers {
         }
       } catch {}
     }
+    // Last resort: bounded server-side search under the cwd — the reply may
+    // reference a file that lives deeper (real case: `SCRIPTS.md` actually at
+    // cwd/default_voice_examples/SCRIPTS.md). One hit opens; several offer a
+    // picker; prefer hits whose tail matches the full relative reference.
+    if (cwd && !host) {
+      try {
+        const base = norm.split('/').pop();
+        const type = rel.endsWith('/') ? 'd' : 'f';
+        const r = await fetch(`/api/file/locate?name=${encodeURIComponent(base)}&root=${encodeURIComponent(cwd)}&type=${type}`);
+        const { hits = [] } = await r.json();
+        const exact = hits.filter(h => h.endsWith('/' + norm));
+        const use = exact.length ? exact : hits;
+        const openHit = (h) => type === 'd' ? this.app.openFileExplorer(h) : this.app.openFile(h, h.split('/').pop());
+        if (use.length === 1) { openHit(use[0]); return; }
+        if (use.length > 1) {
+          const rect = link.getBoundingClientRect();
+          showContextMenu(rect.left, rect.bottom + 4, use.map(h => ({ label: h, action: () => openHit(h) })));
+          return;
+        }
+      } catch {}
+    }
     this.flashLink(link, t('Not found near the session folder'));
   }
 
