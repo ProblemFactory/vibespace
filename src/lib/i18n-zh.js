@@ -1143,4 +1143,8 @@ export default {
   'Injects a one-line (~250 byte) reminder of the vibespace tools (status / ask / task) with every prompt you send, so agents keep using them in long sessions — the full rules injected at session start scroll out of the working context over time. Turn off to save the few tokens per turn.': '随你发送的每条消息注入一行（约 250 字节）vibespace 工具提醒（status / ask / task），让 agent 在长会话中持续使用它们——会话开始时注入的完整规范会随时间滚出工作上下文。关闭可节省每轮的少量 token。',
   'Stop-time bookkeeping nudge for agents': 'Agent 停止时的簿记提醒',
   'When an agent finishes a turn while its board state is stale (no status update in 10 minutes), it gets one short follow-up asking it to set vibespace-status, mirror open questions with vibespace-ask, and log finished work — then it stops. At most once per 30 minutes per session. Claude enforces this via a blocking Stop hook; Codex via its wrapper at turn end.': 'Agent 结束一轮时若看板状态陈旧（10 分钟内没更新过状态），会收到一次简短追问：设置 vibespace-status、用 vibespace-ask 镜像待答问题、记录已完成的工作——然后再停止。每会话每 30 分钟至多一次。Claude 通过阻塞式 Stop hook 强制，Codex 由其 wrapper 在轮次结束时执行。',
+  'Show hook cards in chat': '在聊天中显示 hook 卡片',
+  'Hook events (context injections, plugin hooks, stop nudges) render as collapsible ✓/✗ cards. Turn off to hide them all — applies to open chats instantly.': 'Hook 事件（上下文注入、插件 hook、停止提醒）渲染为可折叠的 ✓/✗ 卡片。关闭则全部隐藏——对已打开的聊天即时生效。',
+  'Hide hooks with no output': '隐藏无输出的 hook',
+  'Hooks like PostToolUse fire on every tool call with nothing to show — by default those render no card at all. Turn off to see every hook event. Applies to newly loaded history (reopen the window for existing views).': 'PostToolUse 这类 hook 每次工具调用都触发但没有可展示内容——默认完全不渲染卡片。关闭此项可看到每个 hook 事件。对新加载的历史生效（已打开的视图需重开窗口）。',
 };

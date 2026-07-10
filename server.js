@@ -9,6 +9,7 @@ const { execFileSync, spawn } = require('child_process');
 const compression = require('compression');
 const { MessageManager } = require('./src/message-manager');
 const { createMessageManager } = require('./src/normalizers');
+const { MessageManager: _MM } = require('./src/message-manager');
 const { SyncStore } = require('./src/sync-store');
 const { cwdToProjectDir, SessionMessages, findSessionJsonlPath } = require('./src/session-store');
 const { CodexSessionMessages } = require('./src/codex-session-store');
@@ -2872,6 +2873,8 @@ function ingestPassiveModels(fn) {
 }
 ingestPassiveUsage();
 setInterval(ingestPassiveUsage, 30000); // local disk read only — no network
+// Normalizer-visible settings (chat.hideEmptyHooks) — lazy, store-safe getter.
+_MM.getSetting = (k) => { try { return getSyncStore('settings')?.get(k); } catch { return undefined; } };
 
 // OPT-IN active poll (default OFF; see usagePollingEnabled + the stark warning
 // on accounts.activeUsagePolling). When enabled it restores the pre-2.60.0

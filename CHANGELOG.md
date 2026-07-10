@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.80.0] — 2026-07-10
+
+### Fixed — injected hook context is now actually visible
+The context a hook injects rides its own attachment type
+(hook_additional_context) which the 2.77.0 renderer didn't handle — so
+context injections never showed. They now render as "✓ Hook context:
+<tag>" cards with the full payload expandable, deduped against the same
+hook's stdout copy by content.
+
+### Added — hook visibility settings
+`chat.showHookCards` (default on): hide ALL hook cards — a pure CSS toggle,
+applies to open chats instantly. `chat.hideEmptyHooks` (default on): hooks
+with no output render no card; turn off to see every hook event (applies to
+newly loaded history).
+
 ## [2.79.2] — 2026-07-10
 
 ### Fixed — "N hooks ran" dumped raw shell scripts inline

@@ -844,3 +844,6 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
   color: var(--text-secondary); cursor: pointer; transition: var(--transition);
 }
 .msg-meta-copy:hover { border-color: var(--accent); color: var(--accent); }
+
+/* chat.showHookCards=false — hides every hook card instantly (class on body) */
+body.hide-hook-cards .chat-msg-hook { display: none; }
