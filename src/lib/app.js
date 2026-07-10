@@ -536,7 +536,11 @@ class App {
     const parts = [donut('5h', u.fiveHour), donut('7d', u.sevenDay)];
     for (const sc of (u.scopedWeekly || [])) parts.push(donut(String(sc.name || '?').slice(0, 2), sc, sc.name));
     const age = u.fetchedAt ? Math.round((Date.now() - u.fetchedAt) / 60000) : null;
-    return `<span class="acct-usage">${parts.join('')}${age != null && age > 5 ? `<span class="acct-usage-age" title="${t('Last refreshed {n} min ago', { n: age })}">${t('{n}m', { n: age })}</span>` : ''}</span>`;
+    // The age span ALWAYS renders (empty when fresh) at a fixed min-width —
+    // conditional rendering shifted the right-aligned donut group per row and
+    // broke the column alignment across the roster (measured: 28px jump).
+    const ageLabel = age != null && age > 5 ? (age < 100 ? t('{n}m', { n: age }) : t('{n}h', { n: Math.round(age / 60) })) : '';
+    return `<span class="acct-usage">${parts.join('')}<span class="acct-usage-age" title="${age != null ? t('Last refreshed {n} min ago', { n: age }) : ''}">${ageLabel}</span></span>`;
   }
 
   async _renderCodexAccounts(ctx) {

@@ -1136,4 +1136,5 @@ export default {
   'Click to copy, Ctrl+Click to locate & open': '点击复制，Ctrl+点击定位并打开',
   'Not found near the session folder': '在会话目录附近找不到该文件',
   'Render this HTML in the embedded browser': '在内嵌浏览器中渲染这段 HTML',
+  '{n}h': '{n}h',
 };

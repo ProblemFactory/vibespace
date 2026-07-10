@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.75.2] — 2026-07-10
+
+### Fixed — account roster donut columns misaligned
+The "last refreshed" age label only rendered when >5 min old, so a freshly
+refreshed row's right-aligned donuts shifted 28px relative to its neighbors.
+The age slot now always renders at a fixed min-width (and switches to hours
+past 99 min); measured: donut and star columns identical across all rows.
+
 ## [2.75.1] — 2026-07-10
 
 ### Fixed — relative-path links now find files deeper than the session folder
