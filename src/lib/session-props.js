@@ -95,7 +95,7 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
     stRow.className = 'session-detail-row';
     stRow.innerHTML = `<span class="session-detail-label">${escHtml(t('Now'))}</span>
       <span class="session-detail-value" style="flex:1">${meta
-        ? `<span style="color:${meta.color};font-weight:600">${escHtml(meta.label)}${urgMark ? ' ' + urgMark : ''}</span>${st.reason ? ` <span style="color:var(--text-dim)">— ${escHtml(st.reason)}</span>` : ''} <span class="sp-dim-note">(${st.setBy === 'agent' ? escHtml(t('agent')) : escHtml(t('you'))})</span>`
+        ? `<span style="color:${meta.color};font-weight:600">${escHtml(meta.label)}${urgMark ? ' ' + urgMark : ''}</span>${st.reason ? ` <span style="color:var(--text-dim)">— ${escHtml(st.reason)}</span>` : ''} <span class="sp-dim-note">(${st.setBy === 'agent' ? escHtml(t('agent')) : escHtml(t('you'))})</span>${st.detail ? `<details class="sp-status-detail"><summary>${escHtml(t('detail'))}</summary><div>${escHtml(st.detail)}</div></details>` : ''}`
         : `<span style="color:var(--text-dim)">${escHtml(t('none declared'))}</span>`}</span>`;
     const chg = document.createElement('button');
     chg.className = 'task-detail-btn';

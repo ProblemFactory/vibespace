@@ -1288,7 +1288,7 @@ const opt = (name) => { const i = args.indexOf('--' + name); return i >= 0 ? arg
 const STATES = ['working', 'needs-input', 'blocked', 'review', 'done'];
 const USAGE = [
   'usage — report THIS Task\\'s (this session\\'s) own state; done = this work is finished:',
-  '  vibespace-status <working|needs-input|blocked|review|done> ["why"] [--urgency low|normal|high|urgent] [--reason "why"]',
+  '  vibespace-status <working|needs-input|blocked|review|done> ["why"] [--urgency low|normal|high|urgent] [--reason "one-line why"] [--detail "full context"]',
   '  vibespace-status clear      remove the indicator',
   '  vibespace-status show       print the current indicator',
 ].join('\\n');
@@ -1301,6 +1301,7 @@ async function post(body) {
 function printStatus(data) {
   const s = data.status;
   console.log(s ? \`state=\${s.state || 'unset'} urgency=\${s.urgency || 'unset'}\${s.reason ? ' reason=' + JSON.stringify(s.reason) : ''} (set by \${s.setBy})\` : 'no status set');
+  if (s && s.detail) console.log('  detail: ' + s.detail);
 }
 async function main() {
   if (cmd === '--help' || cmd === '-h') { console.log(USAGE); return; }
@@ -1315,7 +1316,7 @@ async function main() {
   // positionally at least as often as via --reason; dropping it silently
   // meant boards showed states with no explanation.
   const posReason = args[1] && !args[1].startsWith('--') ? args[1] : undefined;
-  await post({ state: cmd, urgency: opt('urgency'), reason: opt('reason') ?? posReason });
+  await post({ state: cmd, urgency: opt('urgency'), reason: opt('reason') ?? posReason, detail: opt('detail') });
   console.log('status set: ' + cmd + (opt('urgency') ? ' / ' + opt('urgency') : ''));
 }
 main().catch((e) => { console.error('vibespace-status:', e.message); process.exit(1); });
@@ -2030,11 +2031,11 @@ app.post('/api/agent/session-status', (req, res) => {
   const key = sessionStatusKey(found, foundId);
   // migrate an early webui:<id> record once the real backend id exists
   if (!key.startsWith('webui:')) sessionStatus.rekey(`webui:${foundId}`, key);
-  const { state, urgency, reason, clear, show } = req.body || {};
+  const { state, urgency, reason, detail, clear, show } = req.body || {};
   try {
     const rec = show ? sessionStatus.get(key)
       : clear ? sessionStatus.clear(key, 'agent')
-      : sessionStatus.setByAgent(key, { state, urgency, reason });
+      : sessionStatus.setByAgent(key, { state, urgency, reason, detail });
     res.json({ success: true, sessionKey: key, status: rec });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -2229,7 +2230,7 @@ app.post('/api/agent/task-progress', (req, res) => {
   const gid = resolveAgentGroup(hit, req, res);
   if (!gid) return;
   try {
-    const t = tasks.addProgress(gid, { note: req.body?.note, session: sessionStatusKey(hit[0], hit[1]) });
+    const t = tasks.addProgress(gid, { note: req.body?.note, detail: req.body?.detail, session: sessionStatusKey(hit[0], hit[1]) });
     res.json({ success: true, progress: t.progress.slice(-3) });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });

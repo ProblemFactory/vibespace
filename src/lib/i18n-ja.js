@@ -1095,4 +1095,5 @@ export default {
   "Editing below — Save & Close to hand the file back": "下のペインで編集中 — 保存して閉じるとファイルがエージェントに戻ります",
   "Waiting for the editor below": "下のエディタの完了待ち",
   "The terminal resumes after Save & Close.": "保存して閉じるとターミナルが再開します。",
+  "detail": "詳細",
 };

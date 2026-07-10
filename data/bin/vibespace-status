@@ -13,7 +13,7 @@ const opt = (name) => { const i = args.indexOf('--' + name); return i >= 0 ? arg
 const STATES = ['working', 'needs-input', 'blocked', 'review', 'done'];
 const USAGE = [
   'usage — report THIS Task\'s (this session\'s) own state; done = this work is finished:',
-  '  vibespace-status <working|needs-input|blocked|review|done> ["why"] [--urgency low|normal|high|urgent] [--reason "why"]',
+  '  vibespace-status <working|needs-input|blocked|review|done> ["why"] [--urgency low|normal|high|urgent] [--reason "one-line why"] [--detail "full context"]',
   '  vibespace-status clear      remove the indicator',
   '  vibespace-status show       print the current indicator',
 ].join('\n');
@@ -40,7 +40,7 @@ async function main() {
   // positionally at least as often as via --reason; dropping it silently
   // meant boards showed states with no explanation.
   const posReason = args[1] && !args[1].startsWith('--') ? args[1] : undefined;
-  await post({ state: cmd, urgency: opt('urgency'), reason: opt('reason') ?? posReason });
+  await post({ state: cmd, urgency: opt('urgency'), reason: opt('reason') ?? posReason, detail: opt('detail') });
   console.log('status set: ' + cmd + (opt('urgency') ? ' / ' + opt('urgency') : ''));
 }
 main().catch((e) => { console.error('vibespace-status:', e.message); process.exit(1); });
