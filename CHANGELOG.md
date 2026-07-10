@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.67.0] — 2026-07-10
+
+### Changed — new default accent: teal (goodbye AI-indigo)
+The Dark and Light themes' default accent moves from the ubiquitous
+AI-product indigo (#6366f1) to a modern teal — vivid `#2dd4bf` with dark
+foreground text on Dark (the contemporary dark-on-vivid treatment, ~8:1
+contrast), deep `#0f766e` with white text on Light (5.9:1). Deliberately
+distinct from the semantic green/blue/yellow/red so badges stay readable.
+Carried through everywhere the old indigo was hardcoded: terminal cursor and
+selection colors, CodeMirror caret/cursor/fold (now theme-var driven — fixes
+the audit backlog item), the favicon/splash logo gradient and loading bar, and
+the login page. Dracula/Nord/Solarized/Monokai and custom themes keep their own
+accents; the theme editor can restyle everything as before.
+
 ## [2.66.1] — 2026-07-10
 
 ### Fixed — waiting blink reaches tabs and window lists

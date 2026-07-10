@@ -3,15 +3,15 @@
 // ANSI "black" on dark bg is intentionally dim (~1.4:1) — it's rarely used as foreground.
 const THEMES = {
   dark: {
-    terminal: { background:'#12122a',foreground:'#e4e4e8',cursor:'#6366f1',cursorAccent:'#12122a',
-      selectionBackground:'rgba(99,102,241,0.35)',black:'#2d2d50',red:'#ff5370',green:'#c3e88d',
+    terminal: { background:'#12122a',foreground:'#e4e4e8',cursor:'#2dd4bf',cursorAccent:'#12122a',
+      selectionBackground:'rgba(45,212,191,0.30)',black:'#2d2d50',red:'#ff5370',green:'#c3e88d',
       yellow:'#ffcb6b',blue:'#82aaff',magenta:'#c792ea',cyan:'#89ddff',white:'#e4e4e8',
       brightBlack:'#6a6a9e',brightRed:'#ff5370',brightGreen:'#c3e88d',brightYellow:'#ffcb6b',
       brightBlue:'#82aaff',brightMagenta:'#c792ea',brightCyan:'#89ddff',brightWhite:'#ffffff' },
   },
   light: {
-    terminal: { background:'#ffffff',foreground:'#1e293b',cursor:'#6366f1',cursorAccent:'#ffffff',
-      selectionBackground:'rgba(99,102,241,0.2)',black:'#000000',red:'#dc2626',green:'#15803d',
+    terminal: { background:'#ffffff',foreground:'#1e293b',cursor:'#0f766e',cursorAccent:'#ffffff',
+      selectionBackground:'rgba(15,118,110,0.18)',black:'#000000',red:'#dc2626',green:'#15803d',
       yellow:'#a16207',blue:'#2563eb',magenta:'#9333ea',cyan:'#0e7490',white:'#6b7280',
       brightBlack:'#64748b',brightRed:'#dc2626',brightGreen:'#15803d',brightYellow:'#b45309',
       brightBlue:'#2563eb',brightMagenta:'#7c3aed',brightCyan:'#0e7490',brightWhite:'#374151' },

@@ -57,8 +57,8 @@ const LANGUAGES = [
 // Light theme for CodeMirror (used when editor theme is 'light')
 const editorLightTheme = EditorView.theme({
   '&': { backgroundColor: '#ffffff', color: '#1e293b' },
-  '.cm-content': { caretColor: '#6366f1' },
-  '.cm-cursor, .cm-dropCursor': { borderLeftColor: '#6366f1' },
+  '.cm-content': { caretColor: 'var(--accent, #0f766e)' },
+  '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--accent, #0f766e)' },
   '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection': { backgroundColor: '#d7d4f0' },
   '.cm-panels': { backgroundColor: '#f5f5fa', color: '#1e293b' },
   '.cm-panels.cm-panels-top': { borderBottom: '1px solid #e0e0e8' },
@@ -70,7 +70,7 @@ const editorLightTheme = EditorView.theme({
   '&.cm-focused .cm-matchingBracket, &.cm-focused .cm-nonmatchingBracket': { backgroundColor: '#e0e7ff' },
   '.cm-gutters': { backgroundColor: '#f8fafc', color: '#94a3b8', borderRight: '1px solid #e2e8f0' },
   '.cm-activeLineGutter': { backgroundColor: '#e2e8f0' },
-  '.cm-foldPlaceholder': { backgroundColor: 'transparent', border: 'none', color: '#6366f1' },
+  '.cm-foldPlaceholder': { backgroundColor: 'transparent', border: 'none', color: 'var(--accent, #0f766e)' },
   '.cm-tooltip': { border: '1px solid #e2e8f0', backgroundColor: '#f5f5fa' },
   '.cm-tooltip .cm-tooltip-arrow:before': { borderTopColor: 'transparent', borderBottomColor: 'transparent' },
   '.cm-tooltip .cm-tooltip-arrow:after': { borderTopColor: '#f5f5fa', borderBottomColor: '#f5f5fa' },

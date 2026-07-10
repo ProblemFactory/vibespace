@@ -1,31 +1,32 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root, [data-theme="dark"] {
-  --accent-fg: #ffffff; --magenta: #c678dd; --cyan: #56b6c2; --hover-overlay: rgba(255,255,255,0.1);
+  --accent-fg: #042f2a; --magenta: #c678dd; --cyan: #56b6c2; --hover-overlay: rgba(255,255,255,0.1);
   --bg-root: #0c0c18; --bg-workspace: #111122; --bg-window: #1a1a30;
   --bg-titlebar: #14142a; --bg-titlebar-active: #1a1a38; --bg-toolbar: #0e0e1e;
-  --bg-taskbar: #0e0e1e; --bg-input: #12122a; --bg-hover: rgba(99,102,241,0.12);
+  --bg-taskbar: #0e0e1e; --bg-input: #12122a; --bg-hover: rgba(45,212,191,0.10);
   --bg-dialog: #1a1a30; --bg-sidebar: #0e0e1e;
-  --accent: #6366f1; --accent-hover: #818cf8; --accent-dim: rgba(99,102,241,0.25);
+  --accent: #2dd4bf; --accent-hover: #5eead4; --accent-dim: rgba(45,212,191,0.25);
   --text: #e2e8f0; --text-secondary: #94a3b8; --text-dim: #8890a8;
-  --border: rgba(255,255,255,0.07); --border-active: rgba(99,102,241,0.4);
+  --border: rgba(255,255,255,0.07); --border-active: rgba(45,212,191,0.4);
   --green: #22c55e; --red: #ef4444; --yellow: #f59e0b; --blue: #3b82f6;
   --radius: 8px; --radius-sm: 4px;
   --title-height: 32px; --toolbar-height: 40px; --taskbar-height: 44px;
   --shadow-window: 0 8px 32px rgba(0,0,0,0.4); --shadow-active: 0 12px 40px rgba(0,0,0,0.5);
   --transition: 0.15s ease;
-  --terminal-bg: #12122a; --terminal-fg: #e4e4e8; --terminal-cursor: #6366f1;
+  --terminal-bg: #12122a; --terminal-fg: #e4e4e8; --terminal-cursor: #2dd4bf;
 }
 [data-theme="light"] {
+  --accent: #0f766e; --accent-hover: #0d9488; --accent-dim: rgba(15,118,110,0.22);
   --accent-fg: #ffffff; --magenta: #9333ea; --cyan: #0e7490; --hover-overlay: rgba(0,0,0,0.08);
   --bg-root: #f0f0f5; --bg-workspace: #e8e8f0; --bg-window: #ffffff;
   --bg-titlebar: #f0f0f5; --bg-titlebar-active: #e8e8f0; --bg-toolbar: #ffffff;
-  --bg-taskbar: #ffffff; --bg-input: #f5f5fa; --bg-hover: rgba(99,102,241,0.08);
+  --bg-taskbar: #ffffff; --bg-input: #f5f5fa; --bg-hover: rgba(15,118,110,0.08);
   --bg-dialog: #ffffff; --bg-sidebar: #f5f5fa;
   --text: #1e293b; --text-secondary: #475569; --text-dim: #6b7280;
-  --border: rgba(0,0,0,0.1); --border-active: rgba(99,102,241,0.5);
+  --border: rgba(0,0,0,0.1); --border-active: rgba(15,118,110,0.5);
   --shadow-window: 0 4px 16px rgba(0,0,0,0.1); --shadow-active: 0 8px 24px rgba(0,0,0,0.15);
-  --terminal-bg: #ffffff; --terminal-fg: #1e293b; --terminal-cursor: #6366f1;
+  --terminal-bg: #ffffff; --terminal-fg: #1e293b; --terminal-cursor: #0f766e;
   --chat-green: #15803d;
 }
 [data-theme="dracula"] {
