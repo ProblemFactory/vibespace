@@ -220,6 +220,29 @@ class TaskGroupManager {
   // and simply didn't use them. Now: identity/objective/checklist → TOOL RULES
   // → context folder → Activity log LAST, with the log byte-budgeted so the
   // whole payload stays inline (< ~8KB) in the common case.
+  // Newest-first byte-budgeted Activity-log picker (≥3, ≤12 entries).
+  _pickLogLines(t, room) {
+    const total = (t.progress || []).length;
+    const picked = [];
+    for (let i = total - 1; i >= 0 && picked.length < 12; i--) {
+      const p = t.progress[i];
+      const line = `- ${this._tsShort(p.at)} ${p.note}${p.detail ? ' †' : ''}${p.session ? ` _(${p.session})_` : ''}`;
+      const len = Buffer.byteLength(line, 'utf-8') + 1;
+      if (picked.length >= 3 && len > room) break;
+      picked.unshift(line); room -= len;
+    }
+    return { picked, total };
+  }
+
+  // Self-rescue for the CLI's oversized-hook handling: past ~10KB Claude Code
+  // persists the payload to disk and the agent sees only a ~2KB head preview —
+  // but the preview NAMES the full file (verified empirically, 2.77.0). One
+  // early line teaches the agent to Read it, which makes truncation recoverable
+  // instead of fatal.
+  _persistRescueLine() {
+    return '(If this arrives wrapped in <persisted-output> with only a 2KB preview, FIRST use the Read tool on the full-output file path named in it, THEN continue — the rules and group state matter.)';
+  }
+
   // The shared tools teaching, one emission per payload. gid = the --group
   // prefix agents must use ('' single-group; '--group <id> ' generic in the
   // shared multi-group section).
@@ -253,6 +276,7 @@ class TaskGroupManager {
     const parts = [
       `<vibespace-task-context>`,
       `This session belongs to VibeSpace Task Group "${t.title}" (${t.id}). The state below is shared across ALL sessions of this group.`,
+      this._persistRescueLine(),
       '',
       // cap=0: meta/objective/checklist only — the log is appended LAST below.
       this.renderTaskMd(t, 0).replace(/\n---\n[\s\S]*$/, '').trim(),
@@ -293,16 +317,8 @@ class TaskGroupManager {
     const totalLog = (t.progress || []).length;
     if (totalLog) {
       const used = Buffer.byteLength(parts.join('\n'), 'utf-8');
-      let room = Math.max(1200, logBudget - used);
-      const picked = [];
-      for (let i = totalLog - 1; i >= 0 && picked.length < 12; i--) {
-        const p = t.progress[i];
-        const line = `- ${this._tsShort(p.at)} ${p.note}${p.detail ? ' †' : ''}${p.session ? ` _(${p.session})_` : ''}`;
-        const len = Buffer.byteLength(line, 'utf-8') + 1;
-        if (picked.length >= 3 && len > room) break;
-        picked.unshift(line); room -= len;
-      }
-      parts.push('', '## Activity log' + (picked.length < totalLog ? `  _(last ${picked.length} of ${totalLog} — \`vibespace-task show\` prints more)_` : '') + (picked.some(l => l.includes(' †')) ? '  _(† = has detail — \`vibespace-task show --full\`)_' : ''), '');
+      const { picked } = this._pickLogLines(t, Math.max(1200, logBudget - used));
+      parts.push('', '## Activity log' + (picked.length < totalLog ? `  _(last ${picked.length} of ${totalLog} — \`vibespace-task show\` prints more)_` : '') + (picked.some(l => l.includes(' †')) ? `  _(† = has detail — \`vibespace-task show --full\`)_` : ''), '');
       parts.push(...picked);
     }
     parts.push(`</vibespace-task-context>`);
@@ -355,28 +371,56 @@ class TaskGroupManager {
     if (!ids.length) return '';
     const baseOf = (id) => (ctxBaseFor ? ctxBaseFor(id) : null);
     if (ids.length === 1) return this.renderContext(ids[0], { ctxBase: baseOf(ids[0]) });
-    // The WHOLE payload must stay inline (~8KB) — Claude Code persists an
-    // oversized hook context to disk and shows the agent only a ~2KB head
-    // preview (the 2.68.0 fleet-wide failure). Two things keep multi-group
-    // under budget: the tools section is emitted ONCE (was ~2.3KB × N), and
-    // the per-group Activity-log budget shrinks until the TOTAL fits
-    // (measured pre-fix: 2 groups = 9.8KB, 3 groups = 15.7KB).
-    const build = (logBudget) => {
-      const blocks = ids.map((id) => this.renderContext(id, { multi: true, ctxBase: baseOf(id), logBudget, skipTools: true }));
-      // Tools FIRST (right after the header): if the payload still exceeds the
-      // persist threshold (3+ groups with fat checklists), the ~2KB head
-      // preview must contain the tool teaching — losing trailing group logs is
-      // fine, losing the rules recreates the 2.68.0 fleet-wide failure.
-      return `This session belongs to ${ids.length} VibeSpace Task Groups (岗位). Each group's shared context follows; use \`vibespace-task --group <id> …\` to act on a specific one.\n`
-        + this._toolsSectionParts('--group <id> ', true).join('\n')
-        + '\n\n' + blocks.join('\n\n');
+    // LAYERED, not per-group blocks (user directive): tools → ALL identities →
+    // ALL shared folders → ALL activity logs. Truncation then degrades by
+    // LAYER — the first group's bulk can no longer erase the very EXISTENCE of
+    // groups 2..N from a persisted payload's 2KB preview.
+    const ts = Object.fromEntries(ids.map((id) => [id, this.get(id)]));
+    const titles = ids.map((id) => `"${ts[id].title}" (${id})`).join(', ');
+    const head = [
+      `<vibespace-task-context>`,
+      `This session belongs to ${ids.length} VibeSpace Task Groups (岗位): ${titles}. Their shared state follows in LAYERS (all groups' identities → shared folders → recent activity); use \`vibespace-task --group <id> …\` to act on a specific group.`,
+      this._persistRescueLine(),
+    ];
+    head.push(...this._toolsSectionParts('--group <id> ', true));
+    head.push('', '## Your Task Groups');
+    for (const id of ids) {
+      // renderTaskMd's H1/H2 demoted one level so groups nest under the layer heading
+      const md = this.renderTaskMd(ts[id], 0).replace(/\n---\n[\s\S]*$/, '').trim().replace(/^(#{1,2}) /gm, '#$1 ');
+      head.push('', md);
+    }
+    const withDir = ids.filter((id) => ts[id].contextDir);
+    if (withDir.length) {
+      head.push('', `## Shared context folders (each group's shared memory)`, '',
+        `Each folder below is that group's SHARED MEMORY between agents — every session working the group, now and future, reads it (NOT a place for user-facing deliverables). When you learn something other agents of a group will likely need (conventions, gotchas, decisions and their reasons, cross-role details), organize it into a file in that group's folder yourself, without waiting to be asked — skimmable, factual, dated; prefer updating existing files over piling up new ones. The \`.vibespace/\` subfolder inside each is GENERATED and read-only (its TASK.md mirrors the group state).`);
+      for (const id of withDir) {
+        const t = ts[id];
+        const base = baseOf(id) || t.contextDir;
+        head.push('', `### "${t.title}" → \`${base}\`` + (baseOf(id) ? ' _(live-synced copy, newer file wins, ~1 min lag)_' : ''));
+        const files = this._listContextFiles(t.contextDir);
+        if (files.length) for (const f of files) head.push(`- ${base}/${f.path} (${f.size < 1024 ? f.size + ' B' : Math.round(f.size / 1024) + ' KB'})`);
+        else head.push('(no shared files yet)');
+      }
+    }
+    const withLog = ids.filter((id) => (ts[id].progress || []).length);
+    const build = (roomPer) => {
+      const parts = [...head];
+      if (withLog.length) {
+        parts.push('', `## Recent activity  _(newest last; \`vibespace-task --group <id> show --full\` prints more; † = has detail)_`);
+        for (const id of withLog) {
+          const { picked, total } = this._pickLogLines(ts[id], roomPer);
+          parts.push('', `### "${ts[id].title}"` + (picked.length < total ? `  _(last ${picked.length} of ${total})_` : ''), ...picked);
+        }
+      }
+      parts.push(`</vibespace-task-context>`);
+      return parts.join('\n');
     };
-    let logBudget = Math.max(1200, Math.floor(5000 / ids.length));
-    let out = build(logBudget);
-    while (Buffer.byteLength(out) > 8200 && logBudget > 700) {
-      logBudget = Math.max(700, Math.floor(logBudget / 2));
-      out = build(logBudget);
-      if (logBudget === 700) break;
+    const headBytes = Buffer.byteLength(head.join('\n'), 'utf-8');
+    let roomPer = Math.max(700, Math.floor((8200 - headBytes) / Math.max(1, withLog.length)));
+    let out = build(roomPer);
+    while (Buffer.byteLength(out, 'utf-8') > 8400 && roomPer > 700) {
+      roomPer = Math.max(700, Math.floor(roomPer / 2));
+      out = build(roomPer);
     }
     return out;
   }

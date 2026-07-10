@@ -204,6 +204,8 @@ class MessageManager {
 
     if (raw.subtype === 'hook_response') {
       const name = raw.hook_name || raw.hook_event || 'hook';
+      if (this._lastHookCard && this._lastHookCard.name === name && Math.abs(this._currentTs - this._lastHookCard.ts) < 5000) return;
+      this._lastHookCard = { name, ts: this._currentTs };
       const ok = raw.outcome === 'success' || raw.exit_code === 0;
       const icon = ok ? '✓' : '✗';
       const msg = this._create({
@@ -217,7 +219,11 @@ class MessageManager {
       const count = raw.hookCount || 0;
       const infos = raw.hookInfos || [];
       const failed = infos.filter(h => h.exitCode !== 0 && h.exitCode != null);
-      const text = failed.length ? `${count} hooks ran, ${failed.length} failed` : `${count} hooks ran`;
+      // Name the hooks instead of a bare count ("2 hooks ran" told the user
+      // nothing) — first three names, ellipsized.
+      const names = infos.map(h => h.name || h.hookName || h.command || '').filter(Boolean);
+      const nameStr = names.length ? ` (${names.slice(0, 3).join(', ')}${names.length > 3 ? ', …' : ''})` : '';
+      const text = (failed.length ? `${count} hooks ran, ${failed.length} failed` : `${count} hooks ran`) + nameStr;
       const msg = this._create({
         role: 'system', status: failed.length ? 'error' : 'complete',
         content: [{ type: 'system_info', text }],
@@ -252,9 +258,32 @@ class MessageManager {
 
   _processAttachment(raw, emit) {
     const a = raw.attachment;
-    if (!a || a.type !== 'goal_status') return;
-    this._goalState = { condition: a.condition || '', met: !!a.met, sentinel: !!a.sentinel };
-    if (emit) this._emit({ op: 'meta', subtype: 'goal_status', data: this._goalState });
+    if (!a) return;
+    if (a.type === 'goal_status') {
+      this._goalState = { condition: a.condition || '', met: !!a.met, sentinel: !!a.sentinel };
+      if (emit) this._emit({ op: 'meta', subtype: 'goal_status', data: this._goalState });
+      return;
+    }
+    // Hook attachments (JSONL-only) carry the FULL per-hook record — name,
+    // event, stdout (incl. any injected additionalContext). Without this,
+    // history replay showed only the bare "N hooks ran" summary (user report).
+    if (a.type === 'hook_success' || a.type === 'hook_failure' || a.type === 'hook_error' || a.type === 'hook_system_message') {
+      const isSys = a.type === 'hook_system_message';
+      const name = a.hookName || a.hookEvent || 'hook';
+      const ok = a.type === 'hook_success' || isSys;
+      // A live session emits system/hook_response on stdout AND writes this
+      // attachment to the JSONL — after a restart replay both survive the
+      // merge (different record shapes, no shared uuid). Collapse doubles by
+      // name within a 5s window.
+      if (this._lastHookCard && this._lastHookCard.name === name && Math.abs(this._currentTs - this._lastHookCard.ts) < 5000) return;
+      this._lastHookCard = { name, ts: this._currentTs };
+      const output = [a.content, a.stdout, a.stderr].filter((x) => typeof x === 'string' && x.trim()).join('\n').slice(0, 20000);
+      const msg = this._create({
+        role: 'system', status: ok ? 'complete' : 'error',
+        content: [{ type: 'system_info', text: `${ok ? '✓' : '✗'} Hook: ${isSys ? (name !== 'hook' ? name + ' ' : '') + 'message' : name}`, hookData: { name, event: a.hookEvent || null, outcome: a.type, exitCode: a.exitCode ?? null, output } }],
+      });
+      if (emit) this._emit({ op: 'create', message: msg });
+    }
   }
 
   goalState() { return this._goalState || null; }

@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.77.0] — 2026-07-10
+
+### Changed — multi-group injection is layered, and truncation is now recoverable
+Per-group blocks meant group 1's activity log could push groups 2..N entirely
+out of a truncated view. The payload is now layered: every group is named on
+line 1, then the tool rules once, then all identities, all shared folders,
+all activity logs (budget-converged; 3 groups = 8.1KB vs 10.2KB before).
+Verified empirically how the CLI handles oversized hook context (30KB marker
+probe): it persists to disk and shows a 2KB head preview that NAMES the full
+file — so both payload shapes now open with one line teaching agents to Read
+that file first. Truncation degrades by layer and is self-rescuing.
+
+### Added — hook details visible in chat history
+Hook attachments in the transcript (name + full output, including injected
+context) now render as expandable ✓/✗ Hook cards in history replay, and the
+"N hooks ran" summary names the hooks. Live/replay double-render deduped.
+
 ## [2.76.1] — 2026-07-10
 
 ### Changed — vibespace-ask semantics: mirror every chat question
