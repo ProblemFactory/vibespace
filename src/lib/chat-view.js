@@ -924,14 +924,29 @@ class ChatView {
     // results). Ignore those or they'd stretch the thumb to the recent end.
     const ceil = this._teleported && this._convoLastTs ? this._convoLastTs + 1000 : Infinity;
     let minTs = null, maxTs = null;
-    for (const el of list.querySelectorAll('.chat-msg')) {
+    // Document order lets us skip both tails: resume near the last frame's
+    // first-visible index instead of rect-measuring the whole above-viewport
+    // prefix, and break at the first element below the viewport — this ran
+    // getBoundingClientRect on EVERY rendered message per scroll frame
+    // (thousands in a teleport slab; audit round-3).
+    const els = list.querySelectorAll('.chat-msg');
+    let start = Math.min(this._visStartIdx || 0, Math.max(0, els.length - 1));
+    // The remembered index may now be past the viewport (scrolled up) — walk
+    // back while the element at start is still below the viewport top.
+    while (start > 0 && els[start].getBoundingClientRect().bottom >= lr.top) start--;
+    let firstVisible = -1;
+    for (let i = start; i < els.length; i++) {
+      const el = els[i];
       const rc = el.getBoundingClientRect();
-      if (rc.bottom < lr.top || rc.top > lr.bottom) continue; // not actually visible
+      if (rc.top > lr.bottom) break; // document order: everything after is below the viewport
+      if (rc.bottom < lr.top) continue; // above the viewport
+      if (firstVisible < 0) firstVisible = i;
       const ts = Number(el.dataset.ts) || this._tsOfRenderedEl(el);
       if (!ts || ts > ceil) continue;
       if (minTs == null || ts < minTs) minTs = ts;
       if (maxTs == null || ts > maxTs) maxTs = ts;
     }
+    this._visStartIdx = firstVisible >= 0 ? firstVisible : 0;
     if (minTs != null) this._chatMinimap.setVisibleTsRange(minTs, maxTs);
   }
 

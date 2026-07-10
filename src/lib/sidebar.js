@@ -645,11 +645,17 @@ class Sidebar {
     const webui = this._webuiSessions || [];
     const matchedWebuiIds = new Set();
 
+    // One Map instead of an Array.find per system session — this was
+    // O(system × webui) on every 5s poll / active-sessions broadcast
+    // (5000-entry lists on this deployment; audit round-3). First-wins on
+    // duplicate keys preserves Array.find semantics.
+    const webuiByKey = new Map();
+    for (const ws of webui) {
+      const k = (ws.backend || 'claude') + ':' + (ws.backendSessionId || ws.claudeSessionId || ws.id);
+      if (!webuiByKey.has(k)) webuiByKey.set(k, ws);
+    }
     const unified = system.map(s => {
-      const wm = webui.find(ws =>
-        (ws.backend || 'claude') === (s.backend || 'claude')
-        && (ws.backendSessionId || ws.claudeSessionId || ws.id) === (s.backendSessionId || s.sessionId)
-      );
+      const wm = webuiByKey.get((s.backend || 'claude') + ':' + (s.backendSessionId || s.sessionId));
       if (wm) matchedWebuiIds.add(wm.id);
       // Only upgrade to 'live' for dtach-managed sessions (not tmux/external — those keep their status)
       const status = (wm && s.status !== 'tmux' && s.status !== 'external') ? 'live' : s.status;

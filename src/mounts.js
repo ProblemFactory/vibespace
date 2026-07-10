@@ -522,7 +522,10 @@ class MountManager {
     const args = ['mount', remote, mp,
       '--vfs-cache-mode', 'writes',
       '--dir-cache-time', '30s',
-      '--log-level', 'INFO'];
+      // NOTICE (rclone's default): the INFO per-minute vfs-cache heartbeat grew
+      // mount logs unrotated for weeks AND polluted the tail-2 failure
+      // diagnostic; ERROR/NOTICE lines are what that diagnostic actually reads.
+      '--log-level', 'NOTICE'];
     // Proxy-safe signing: old aws-sdk-go signs Accept-Encoding into the V4
     // signature and CDN proxies (Cloudflare) rewrite that header on plain
     // object GETs → SignatureDoesNotMatch on every read (silent retry loop

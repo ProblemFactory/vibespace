@@ -432,6 +432,7 @@ export function installSidebarMounts(Sidebar) {
           <div class="dialog-actions"><button class="btn-create bs-start">Start</button></div>
         </div></div>`;
       document.body.appendChild(overlay);
+      let off = null; // assigned after the handler registers — close() can run first (TDZ trap)
       const close = () => { overlay.remove(); off?.(); };
       overlay.querySelector('.dialog-close').onclick = close;
       const stepsEl = overlay.querySelector('.bs-steps');
@@ -451,13 +452,16 @@ export function installSidebarMounts(Sidebar) {
       paint();
       const appendLog = (line) => { logEl.textContent += line + '\n'; logEl.scrollTop = logEl.scrollHeight; };
       const handler = (msg) => {
+        // Overlay can be removed by paths that never call close() (another
+        // dialog's dedup overlay.remove()) — self-unregister on first message.
+        if (!overlay.isConnected) { this.app.ws.offGlobal(handler); return; }
         if (msg.type !== 'host-bootstrap' || msg.hostId !== h.id) return;
         if (msg.kind === 'step' && msg.key) { state[msg.key] = msg.status; paint(); }
         else if (msg.kind === 'log' && msg.line) appendLog(msg.line);
         else if (msg.kind === 'done' && msg.steps) { Object.assign(state, msg.steps); paint(); }
       };
       this.app.ws.onGlobal(handler);
-      const off = () => { const i = this.app.ws.globalHandlers.indexOf(handler); if (i >= 0) this.app.ws.globalHandlers.splice(i, 1); };
+      off = () => this.app.ws.offGlobal(handler);
       const startBtn = overlay.querySelector('.bs-start');
       startBtn.onclick = async () => {
         startBtn.disabled = true; startBtn.textContent = 'Running…';
@@ -818,6 +822,9 @@ export function installSidebarMounts(Sidebar) {
           }
           // same-machine flow completes on its own — poll for the token
           poll = setInterval(async () => {
+            // Dialog gone (closed or replaced) → stop polling the token
+            // endpoint (used to keep firing for the full 10 minutes).
+            if (!status.isConnected) { stopPoll(); return; }
             try {
               const st = await api('/api/mounts/gdrive-auth/status');
               if (st.token) finish(st.token);
