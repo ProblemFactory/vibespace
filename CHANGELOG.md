@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.88.1 — 2026-07-10
+
+- Billing badges on tabbed windows: tab-bar rebuilds (switch/merge/detach/drag) destroyed the badge span while the identity-keyed no-op guard prevented re-insertion until the billing identity changed — badges randomly vanished on grouped windows. The guard is now self-healing (verifies the badge actually exists before skipping), tab-bar renders re-apply all tabs' badges immediately, and a detached window's standalone title bar gets its badge back.
+
 ## 2.88.0 — 2026-07-10
 
 **Mid-turn user messages no longer vanish from history (real data-visibility loss)**
