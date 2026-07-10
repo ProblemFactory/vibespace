@@ -2355,9 +2355,9 @@ app.post('/api/agent/task-plan', (req, res) => {
   try {
     const t = tasks.get(gid);
     const plan = (t.plan || []).map(p => ({ ...p }));
-    const { check, uncheck, add } = req.body || {};
+    const { check, uncheck, add, detail } = req.body || {};
     if (typeof add === 'string' && add.trim()) {
-      plan.push({ text: add.trim(), done: false, addedBy: sessionStatusKey(hit[0], hit[1]), addedAt: Date.now() });
+      plan.push({ text: add.trim(), done: false, ...(typeof detail === 'string' && detail.trim() ? { detail: detail.trim() } : {}), addedBy: sessionStatusKey(hit[0], hit[1]), addedAt: Date.now() });
     } else if (check !== undefined || uncheck !== undefined) {
       const ref = check !== undefined ? check : uncheck;
       const done = check !== undefined;

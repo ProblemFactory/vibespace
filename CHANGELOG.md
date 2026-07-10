@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.86.0 — 2026-07-10
+
+**Checklist items get the summary+detail split (matching Activity entries, 2.69.0)**
+- A checklist item now carries an optional `detail` (≤6000 chars: acceptance criteria, paths, background) next to its one-line text — no more cramming full context into one line.
+- Log viewer checklist tab: items with detail expand in place (†), every item has ✎ **inline edit** (text + detail) and the add-row has a † toggle for attaching detail to new items; attribution tooltips show full timestamps; markdown export includes details as blockquotes.
+- End-to-end: `vibespace-task plan-add "text" --detail "..."`; `show` marks † and `show --full` prints them; TASK.md renders details as blockquotes; the injected context stays dense († marker only, budget-safe) and teaches agents to read details via `show --full` before picking an item up; repo export/import round-trips details.
+- task-detail compact editor: † on detailed items expands in place (full editing lives in the ⧉ viewer).
+
 ## 2.85.0 — 2026-07-10
 
 **Task Group log viewer (Checklist + Activity outgrow the detail editor)**

@@ -35,7 +35,7 @@ const USAGE = [
   '      put specifics (numbers, paths, caveats other agents may need) in --detail.',
   '  vibespace-task plan-check <step#|text>       tick a Checklist step',
   '  vibespace-task plan-uncheck <step#|text>     untick a Checklist step',
-  '  vibespace-task plan-add "new step"           add a Checklist step',
+  '  vibespace-task plan-add "new step" [--detail "full context"]   add a Checklist step († in lists = has detail)',
   '  --group <id>   target a specific group if this session belongs to more than one',
   '  (a Task Group has NO status; to report THIS session\'s own state use: vibespace-status)',
 ].join('\n');
@@ -52,12 +52,15 @@ async function call(method, url, body) {
   if (!res.ok) { console.error('vibespace-task:', data.error || res.status); process.exit(1); }
   return data;
 }
-const fmtPlan = (plan) => plan.forEach((p, i) => console.log('  ' + (i + 1) + '. [' + (p.done ? 'x' : ' ') + '] ' + p.text));
+const fmtPlan = (plan, showDetail) => plan.forEach((p, i) => {
+  console.log('  ' + (i + 1) + '. [' + (p.done ? 'x' : ' ') + '] ' + p.text + (p.detail && !showDetail ? '  †' : ''));
+  if (showDetail && p.detail) for (const dl of p.detail.split('\n')) console.log('       ' + dl);
+});
 async function printShow() {
   const { task } = await call('GET', '/api/agent/task');
   console.log('# ' + task.title + ' (' + task.id + ')' + (task.archived ? ' [archived]' : ''));
   if (task.objective) console.log('\nObjective: ' + task.objective);
-  if (task.plan && task.plan.length) { console.log('\nChecklist:'); fmtPlan(task.plan); }
+  if (task.plan && task.plan.length) { console.log('\nChecklist:'); fmtPlan(task.plan, full); }
   if (task.progress && task.progress.length) {
     console.log('\nActivity log (recent):');
     for (const pr of task.progress) {
@@ -82,9 +85,9 @@ async function main() {
     const { plan } = await call('POST', '/api/agent/task-plan', cmd === 'plan-check' ? { check: arg } : { uncheck: arg });
     fmtPlan(plan);
   } else if (cmd === 'plan-add') {
-    if (!arg) { console.error('vibespace-task: plan-add needs text, e.g. vibespace-task plan-add "write tests"'); process.exit(1); }
-    const { plan } = await call('POST', '/api/agent/task-plan', { add: arg });
-    console.log('added as step ' + plan.length);
+    if (!arg) { console.error('vibespace-task: plan-add needs text, e.g. vibespace-task plan-add "write tests" --detail "acceptance criteria ..."'); process.exit(1); }
+    const { plan } = await call('POST', '/api/agent/task-plan', { add: arg, ...(detail ? { detail } : {}) });
+    console.log('added as step ' + plan.length + (detail ? ' (with detail)' : ''));
   } else if (cmd === 'status') {
     console.error('vibespace-task: a Task Group (岗位) has NO status. To report THIS session\'s own state use:\n   vibespace-status <working|needs-input|blocked|review|done>');
     process.exit(1);

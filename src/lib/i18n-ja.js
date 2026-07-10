@@ -1177,4 +1177,7 @@ export default {
   "Open full checklist viewer (attribution, filters, search)": "チェックリストの完全ビューアを開く（帰属・フィルター・検索）",
   "Queued by": "追加者",
   "Ticked by": "チェック者",
+  "Attach full context to the new item": "新しい項目に完全なコンテキストを添付",
+  "Detail — acceptance criteria, paths, background (optional)": "詳細 — 受け入れ基準・パス・背景（任意）",
+  "Edit text and detail": "テキストと詳細を編集",
 };
