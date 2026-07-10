@@ -1,7 +1,7 @@
 // Sidebar "Mounts" tab — rclone S3 mounts + share minting (collaboration P1).
 // Third tab next to Folders | Groups: my-storage card (env-provisioned),
 // mount list with live status, share-a-folder minting, import-a-link.
-import { showToast, showConfirmDialog, copyText, escHtml } from './utils.js';
+import { createModalShell, showToast, showConfirmDialog, copyText, escHtml } from './utils.js';
 import { setupDirAutocomplete } from './autocomplete.js';
 import { t as tr } from './i18n.js'; // sidebar cluster convention: local `t` is pervasively a task var
 
@@ -419,22 +419,15 @@ export function installSidebarMounts(Sidebar) {
     // Bootstrap: dedicated step-progress UI with an expandable live log
     // (user-specified design — not a bare terminal window).
     async _showBootstrapDialog(h) {
-      document.getElementById('mounts-dialog-overlay')?.remove();
-      const overlay = document.createElement('div');
-      overlay.id = 'mounts-dialog-overlay';
-      overlay.className = 'dialog-overlay';
-      overlay.style.zIndex = '99998';
-      overlay.innerHTML = `<div class="dialog" style="min-width:400px">
-        <div class="dialog-header"><h3>Set up ${escHtml(h.name)}</h3><button class="dialog-close">✕</button></div>
-        <div class="dialog-body">
-          <div class="bs-steps"></div>
-          <details class="bs-log-wrap"><summary>Log</summary><pre class="bs-log"></pre></details>
-          <div class="dialog-actions"><button class="btn-create bs-start">Start</button></div>
-        </div></div>`;
-      document.body.appendChild(overlay);
       let off = null; // assigned after the handler registers — close() can run first (TDZ trap)
-      const close = () => { overlay.remove(); off?.(); };
-      overlay.querySelector('.dialog-close').onclick = close;
+      // No backdrop close: a stray click mid-bootstrap must not dismiss the progress view.
+      const { overlay, body } = createModalShell({
+        id: 'mounts-dialog-overlay', title: `Set up ${h.name}`, minWidth: '400px',
+        closeOnBackdrop: false, onClose: () => off?.(),
+      });
+      body.innerHTML = `<div class="bs-steps"></div>
+        <details class="bs-log-wrap"><summary>Log</summary><pre class="bs-log"></pre></details>
+        <div class="dialog-actions"><button class="btn-create bs-start">Start</button></div>`;
       const stepsEl = overlay.querySelector('.bs-steps');
       const logEl = overlay.querySelector('.bs-log');
       const { steps } = await api('/api/hosts/bootstrap-steps');
@@ -479,16 +472,7 @@ export function installSidebarMounts(Sidebar) {
     },
 
     _mountsDialog(title, fields, submitLabel, onSubmit) {
-      document.getElementById('mounts-dialog-overlay')?.remove();
-      const overlay = document.createElement('div');
-      overlay.id = 'mounts-dialog-overlay';
-      overlay.className = 'dialog-overlay';
-      overlay.style.zIndex = '99998';
-      const dialog = document.createElement('div');
-      dialog.className = 'dialog';
-      dialog.innerHTML = `<div class="dialog-header"><h3>${escHtml(title)}</h3><button class="dialog-close">✕</button></div>`;
-      const body = document.createElement('div');
-      body.className = 'dialog-body';
+      const { body, close } = createModalShell({ id: 'mounts-dialog-overlay', title });
       const inputs = {};
       const rows = []; // {field, label, el} for conditional visibility
       let advBody = null;
@@ -576,12 +560,6 @@ export function installSidebarMounts(Sidebar) {
       submit.textContent = submitLabel;
       actions.appendChild(submit);
       body.append(err, actions);
-      dialog.appendChild(body);
-      overlay.appendChild(dialog);
-      document.body.appendChild(overlay);
-      const close = () => overlay.remove();
-      dialog.querySelector('.dialog-close').onclick = close;
-      overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) close(); });
       submit.onclick = async () => {
         err.textContent = '';
         submit.disabled = true;
@@ -596,16 +574,7 @@ export function installSidebarMounts(Sidebar) {
     },
 
     _showRcloneConfDialog() {
-      document.getElementById('mounts-dialog-overlay')?.remove();
-      const overlay = document.createElement('div');
-      overlay.id = 'mounts-dialog-overlay';
-      overlay.className = 'dialog-overlay';
-      overlay.style.zIndex = '99998';
-      const dialog = document.createElement('div');
-      dialog.className = 'dialog';
-      dialog.innerHTML = `<div class="dialog-header"><h3>Import rclone config</h3><button class="dialog-close">✕</button></div>`;
-      const body = document.createElement('div');
-      body.className = 'dialog-body';
+      const { body, close } = createModalShell({ id: 'mounts-dialog-overlay', title: 'Import rclone config' });
       const hint = document.createElement('div');
       hint.className = 'mounts-field-hint';
       hint.textContent = 'Paste the contents of your rclone.conf (from `rclone config file` — usually ~/.config/rclone/rclone.conf). Every remote inside it becomes a mount you can pick.';
@@ -620,12 +589,6 @@ export function installSidebarMounts(Sidebar) {
       const err = document.createElement('div');
       err.className = 'cfg-err';
       body.append(hint, ta, parseBtn, list, err);
-      dialog.appendChild(body);
-      overlay.appendChild(dialog);
-      document.body.appendChild(overlay);
-      const close = () => overlay.remove();
-      dialog.querySelector('.dialog-close').onclick = close;
-      overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) close(); });
 
       let confText = '';
       parseBtn.onclick = async () => {

@@ -1,6 +1,6 @@
 // Manage-Agents dialog + Anthropic/ChatGPT account rosters (mixin split from app.js, 2.82.0 audit seam). Methods run with the App instance as `this`.
 import { t } from './i18n.js';
-import { escHtml, fetchJson, showConfirmDialog, showInputDialog, showToast } from './utils.js';
+import { createModalShell, escHtml, fetchJson, showConfirmDialog, showInputDialog, showToast } from './utils.js';
 
 export function installManageAgents(App, ctx = {}) {
   Object.assign(App.prototype, {
@@ -270,21 +270,12 @@ export function installManageAgents(App, ctx = {}) {
   },
 
   _showAccountsWizard() {
-    document.getElementById('acct-wizard-overlay')?.remove();
     if (this._acctWatch) { clearInterval(this._acctWatch); this._acctWatch = null; }
-    const overlay = document.createElement('div');
-    overlay.id = 'acct-wizard-overlay';
-    overlay.className = 'dialog-overlay';
-    overlay.style.zIndex = '99998';
-    const dialog = document.createElement('div'); dialog.className = 'dialog';
-    dialog.innerHTML = `<div class="dialog-header"><h3>${t('Set up both Anthropic accounts')}</h3><button class="dialog-close">✕</button></div>
-      <div class="dialog-body acct-wizard-body"><div class="ob-loading">${t('Checking…')}</div></div>`;
-    overlay.appendChild(dialog);
-    document.body.appendChild(overlay);
-    const done = () => { overlay.remove(); if (this._acctWatch) { clearInterval(this._acctWatch); this._acctWatch = null; } };
-    dialog.querySelector('.dialog-close').onclick = done;
-    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) done(); });
-    const body = dialog.querySelector('.acct-wizard-body');
+    const { body, close: done } = createModalShell({
+      id: 'acct-wizard-overlay', title: t('Set up both Anthropic accounts'), bodyClass: 'acct-wizard-body',
+      onClose: () => { if (this._acctWatch) { clearInterval(this._acctWatch); this._acctWatch = null; } },
+    });
+    body.innerHTML = `<div class="ob-loading">${t('Checking…')}</div>`;
 
     // Background watcher: poll until cond(data) is true, then act. Used while a
     // login terminal is open (the wizard closes so the terminal is usable) —
@@ -380,27 +371,11 @@ export function installManageAgents(App, ctx = {}) {
   },
 
   _showAgentsDialog() {
-    document.getElementById('agents-dialog-overlay')?.remove();
-    const overlay = document.createElement('div');
-    overlay.id = 'agents-dialog-overlay';
-    overlay.className = 'dialog-overlay';
-    overlay.style.zIndex = '99998';
-    const dialog = document.createElement('div'); dialog.className = 'dialog agents-dialog';
-    const header = document.createElement('div'); header.className = 'dialog-header';
-    const h3 = document.createElement('h3'); h3.textContent = t('Agents');
-    const closeBtn = document.createElement('button'); closeBtn.className = 'dialog-close'; closeBtn.textContent = '\u2715';
-    header.append(h3, closeBtn);
-    const body = document.createElement('div'); body.className = 'dialog-body agents-dialog-body';
+    const { body, close: done } = createModalShell({
+      id: 'agents-dialog-overlay', title: t('Agents'), dialogClass: 'agents-dialog',
+      bodyClass: 'agents-dialog-body', escapeToClose: true,
+    });
     body.innerHTML = `<div class="ob-loading">${t('Checking\u2026')}</div>`;
-    dialog.append(header, body);
-    overlay.appendChild(dialog);
-    document.body.appendChild(overlay);
-    const done = () => overlay.remove();
-    closeBtn.onclick = done;
-    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) done(); });
-    overlay.tabIndex = -1;
-    overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); done(); } });
-    setTimeout(() => overlay.focus(), 0);
 
     const BACKENDS = [
       { key: 'claude', label: 'Claude Code', loginCmd: 'claude', updateCmd: 'claude update' },

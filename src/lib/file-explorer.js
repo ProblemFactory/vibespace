@@ -1,4 +1,4 @@
-import { formatSize, attachPopoverClose, createPopover, showContextMenu, getStateSync, copyText, escHtml, frontTruncate, uploadFilesBatched, showInputDialog, showConfirmDialog, showToast } from './utils.js';
+import { formatSize, attachPopoverClose, createPopover, createModalShell, showContextMenu, getStateSync, copyText, escHtml, frontTruncate, uploadFilesBatched, showInputDialog, showConfirmDialog, showToast } from './utils.js';
 import { setupDirAutocomplete } from './autocomplete.js';
 import { getFileIcon, hasDedicatedViewer, getCategory } from './file-types.js';
 import { FILE_ICONS, UI_ICONS } from './icons.js';
@@ -1465,13 +1465,8 @@ class FileExplorer {
     const fp = name ? this.currentPath + '/' + name : this.currentPath;
     // Open INSTANTLY with placeholders; a recursive-size du on a big tree can
     // take many seconds and a click with no response reads as broken.
-    const overlay = document.createElement('div'); overlay.className = 'dialog-overlay'; overlay.style.zIndex = '99998';
-    const dialog = document.createElement('div'); dialog.className = 'dialog';
-    const header = document.createElement('div'); header.className = 'dialog-header';
-    const h3 = document.createElement('h3'); h3.textContent = 'Properties';
-    const closeBtn = document.createElement('button'); closeBtn.className = 'dialog-close'; closeBtn.textContent = '\u2715';
-    header.append(h3, closeBtn);
-    const body = document.createElement('div'); body.className = 'dialog-body';
+    const { overlay, body, close: done } = createModalShell({ title: 'Properties', escapeToClose: true });
+    overlay.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); done(); } });
     const rows = [
       ['Name', fp.split('/').pop() || '/'],
       ['Path', fp],
@@ -1503,15 +1498,6 @@ class FileExplorer {
         }).catch(() => { if (overlay.isConnected) cells.Size.textContent = 'unknown'; });
       }
     }).catch(() => { cells.Type.textContent = 'Could not read properties'; });
-    dialog.append(header, body);
-    overlay.appendChild(dialog);
-    document.body.appendChild(overlay);
-    const done = () => overlay.remove();
-    closeBtn.onclick = done;
-    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) done(); });
-    overlay.tabIndex = -1;
-    overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape' || e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); done(); } });
-    setTimeout(() => overlay.focus(), 0);
   }
 
   async _rename(oldName) {

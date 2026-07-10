@@ -2,30 +2,61 @@ import { t } from './i18n.js';
 
 export function formatSize(b) { if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
 
+// ── Shared modal shell (dynamic overlay dialogs) ──
+// ONE implementation of the hand-rolled overlay pattern (dialog-overlay +
+// .dialog + header/✕ + body) that used to be copy-pasted across app.js,
+// manage-agents.js, sidebar-mounts.js and file-explorer.js. Deliberately NOT
+// [data-popover]: the global Escape handler blind-.remove()s popovers, which
+// would skip onClose side effects (e.g. the bootstrap dialog's ws-handler
+// unregistration) — Escape support is opt-in and self-contained instead.
+//   const { overlay, dialog, body, close } = createModalShell({ title, id });
+// id: singleton dedup — an existing overlay with the same id is removed first.
+// escapeToClose: focuses the overlay and closes on Escape (stopPropagation so
+// the global #dialog-overlay handler doesn't also fire).
+export function createModalShell({ id, title = '', dialogClass = '', bodyClass = '', minWidth = null, closeOnBackdrop = true, escapeToClose = false, onClose = null } = {}) {
+  if (id) document.getElementById(id)?.remove();
+  const overlay = document.createElement('div');
+  if (id) overlay.id = id;
+  overlay.className = 'dialog-overlay';
+  overlay.style.zIndex = '99998';
+  const dialog = document.createElement('div');
+  dialog.className = 'dialog' + (dialogClass ? ' ' + dialogClass : '');
+  if (minWidth) dialog.style.minWidth = minWidth;
+  const header = document.createElement('div');
+  header.className = 'dialog-header';
+  const h3 = document.createElement('h3'); h3.textContent = title;
+  const closeBtn = document.createElement('button'); closeBtn.className = 'dialog-close'; closeBtn.textContent = '✕';
+  header.append(h3, closeBtn);
+  const body = document.createElement('div');
+  body.className = 'dialog-body' + (bodyClass ? ' ' + bodyClass : '');
+  dialog.append(header, body);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+  const close = () => { overlay.remove(); onClose?.(); };
+  closeBtn.onclick = close;
+  if (closeOnBackdrop) overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) close(); });
+  if (escapeToClose) {
+    overlay.tabIndex = -1;
+    overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
+    setTimeout(() => overlay.focus(), 0);
+  }
+  return { overlay, dialog, body, closeBtn, close };
+}
+
 // ── In-app modal dialogs (replace native prompt/confirm/alert) ──
 // Native dialogs block the event loop, ignore the theme, and are awkward on
 // mobile. These reuse the existing .dialog CSS. Promise-based:
 //   const name = await showInputDialog({ title: 'Rename', value: old });  // null on cancel
 //   if (await showConfirmDialog({ title: 'Delete?', message: '...', danger: true })) …
+// closeOnBackdrop off: the callers wire backdrop mousedown themselves so the
+// Promise resolves (a bare overlay.remove() would leave the await hanging).
 function _modalShell(title) {
-  const overlay = document.createElement('div');
-  overlay.className = 'dialog-overlay';
-  overlay.style.zIndex = '99998';
-  const dialog = document.createElement('div');
-  dialog.className = 'dialog';
-  const header = document.createElement('div');
-  header.className = 'dialog-header';
-  const h3 = document.createElement('h3'); h3.textContent = title || '';
-  const closeBtn = document.createElement('button'); closeBtn.className = 'dialog-close'; closeBtn.textContent = '✕';
-  header.append(h3, closeBtn);
-  const body = document.createElement('div'); body.className = 'dialog-body';
+  const { overlay, dialog, body, closeBtn } = createModalShell({ title, closeOnBackdrop: false });
   const footer = document.createElement('div'); footer.className = 'dialog-footer';
   const cancelBtn = document.createElement('button'); cancelBtn.className = 'btn-cancel'; cancelBtn.textContent = t('Cancel');
   const okBtn = document.createElement('button'); okBtn.className = 'btn-create';
   footer.append(cancelBtn, okBtn);
-  dialog.append(header, body, footer);
-  overlay.appendChild(dialog);
-  document.body.appendChild(overlay);
+  dialog.appendChild(footer);
   return { overlay, body, okBtn, cancelBtn, closeBtn };
 }
 
