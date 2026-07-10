@@ -133,6 +133,7 @@ function parseSessionJsonl(claudeSessionId, cwd) {
     // string limit (and blocks the event loop for hundreds of MB below it).
     // Tail-only: the client seek-loads the earlier history as a continuous
     // virtual scroll, so no seam marker is stitched in.
+    const _t0 = Date.now();
     const content = readJsonlBounded(fp, { tailOnly: true });
     const messages = [];
     for (const line of content.split('\n')) {
@@ -143,6 +144,10 @@ function parseSessionJsonl(claudeSessionId, cwd) {
         if (!isSubagentMessage(msg)) messages.push(msg);
       } catch {}
     }
+    // Slow-parse observation (>200ms — a big tail re-read). global hook keeps
+    // this module decoupled from the telemetry instance living in server.js.
+    const _dt = Date.now() - _t0;
+    if (_dt > 200) global.__vsMetric?.('srv-jsonl-parse-ms', _dt);
     _jsonlCache.delete(claudeSessionId);
     _jsonlCache.set(claudeSessionId, { mtimeMs: stat.mtimeMs, size: stat.size, messages });
     while (_jsonlCache.size > JSONL_CACHE_MAX) {

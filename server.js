@@ -338,6 +338,22 @@ const wss = new WebSocketServer({
 });
 
 app.use(compression());
+// HTTP latency observation (names-and-numbers only): rolling 5-min window
+// flushed by the metrics sampler; slow requests (>1.5s) recorded as events
+// with the SANITIZED route (first 3 path segments — /api/file/serve/* etc.
+// carry user paths that must never enter the ledger).
+const _httpWin = { n: 0, sum: 0, max: 0, slow: [] };
+app.use((req, res, next) => {
+  const t0 = process.hrtime.bigint();
+  res.on('finish', () => {
+    const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+    _httpWin.n++; _httpWin.sum += ms; if (ms > _httpWin.max) _httpWin.max = ms;
+    if (ms > 1500 && _httpWin.slow.length < 20) {
+      _httpWin.slow.push({ route: req.path.split('/').slice(0, 4).join('/') || '/', ms: Math.round(ms) });
+    }
+  });
+  next();
+});
 auth.registerRoutes(app);
 app.use(auth.middleware());
 // Serve index.html with cache-busting query params on every local js/css asset
@@ -1885,10 +1901,31 @@ process.on('unhandledRejection', (e) => { try { telemetry.record({ kind: 'server
       telemetry.record({ kind: 'metric', name: 'srv-heap-mb', value: Math.round(mu.heapUsed / 1048576) });
       telemetry.record({ kind: 'metric', name: 'srv-evloop-max-lag-ms', value: Math.max(0, maxLagMs) });
       telemetry.record({ kind: 'metric', name: 'srv-live-sessions', value: activeSessions.size });
+      telemetry.record({ kind: 'metric', name: 'srv-ws-clients', value: wss.clients.size });
+      // Leak canaries — the exact classes the 2.81-2.91 audits kept finding:
+      // subagent watchers that outlive their agent, normalizer message piles.
+      let watchers = 0, normMsgs = 0;
+      for (const [, sess] of activeSessions) {
+        watchers += sess.subagentWatchers?.size || 0;
+        normMsgs += sess._normalizer?.total || 0;
+      }
+      telemetry.record({ kind: 'metric', name: 'srv-subagent-watchers', value: watchers });
+      telemetry.record({ kind: 'metric', name: 'srv-normalizer-msgs', value: normMsgs });
+      try { telemetry.record({ kind: 'metric', name: 'srv-buffer-files', value: fs.readdirSync(BUFFERS_DIR).length }); } catch {}
+      if (_httpWin.n) {
+        telemetry.record({ kind: 'metric', name: 'srv-http-reqs-5min', value: _httpWin.n });
+        telemetry.record({ kind: 'metric', name: 'srv-http-avg-ms', value: Math.round(_httpWin.sum / _httpWin.n) });
+        telemetry.record({ kind: 'metric', name: 'srv-http-max-ms', value: Math.round(_httpWin.max) });
+        for (const sl of _httpWin.slow) telemetry.record({ kind: 'event', name: `slow-request ${sl.route}`, value: sl.ms });
+        _httpWin.n = 0; _httpWin.sum = 0; _httpWin.max = 0; _httpWin.slow.length = 0;
+      }
       maxLagMs = 0;
     } catch {}
   }, 300000);
 }
+
+// Zero-coupling metric hook for deep modules (session-store slow-parse etc.)
+global.__vsMetric = (name, value) => { try { telemetry.record({ kind: 'metric', name, value }); } catch {} };
 
 const usageHistory = new UsageHistory({
   dataDir: path.join(__dirname, 'data'),
@@ -1916,7 +1953,11 @@ function recordUsageAttribution(meta) {
 // Rescan the ledger periodically (incremental — only new JSONL bytes). Also
 // rescanned on demand when the Usage window opens.
 setTimeout(() => { try { usageHistory.scan(); usageHistory.warm(); } catch {} }, 8000);
-setInterval(() => { try { usageHistory.scan(); } catch {} }, 180000);
+setInterval(() => { try {
+  const t0 = Date.now();
+  const r = usageHistory.scan();
+  if (!r?.skipped) telemetry.record({ kind: 'metric', name: 'srv-usage-scan-ms', value: Date.now() - t0 });
+} catch {} }, 180000);
 // Telemetry ingest (client errors + feature events) + diagnostics summary.
 // telemetry.enabled=false drops ingest silently (client still posts — cheap).
 app.post('/api/telemetry', (req, res) => {
