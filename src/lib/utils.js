@@ -344,6 +344,42 @@ export function installLongPressContextMenu() {
   document.addEventListener('contextmenu', (e) => { if (e.isTrusted) cancel(); }, { capture: true });
 }
 
+/**
+ * Anchor a persistent position:fixed popup next to its trigger element.
+ * The trigger can live ANYWHERE (customize mode moves chrome elements between
+ * bars), so hardcoded bottom/right CSS is wrong the moment it's dragged — this
+ * flips above/below by the trigger's screen half, right/left-aligns to it, and
+ * clamps into the viewport. Growth-direction friendly: anchored-above popups
+ * pin `bottom` (grow upward), anchored-below pin `top` — so live re-renders
+ * that change the height stay glued to the trigger without re-measuring.
+ */
+export function anchorFixedPopup(popup, anchor, { gap = 6 } = {}) {
+  if (!popup || !anchor) return;
+  const r = anchor.getBoundingClientRect();
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const openUp = r.top + r.height / 2 > vh / 2;
+  if (openUp) {
+    popup.style.bottom = `${Math.max(8, vh - r.top + gap)}px`;
+    popup.style.top = 'auto';
+    popup.style.maxHeight = `${Math.max(120, r.top - gap - 16)}px`;
+  } else {
+    popup.style.top = `${Math.min(vh - 40, r.bottom + gap)}px`;
+    popup.style.bottom = 'auto';
+    popup.style.maxHeight = `${Math.max(120, vh - r.bottom - gap - 16)}px`;
+  }
+  if (r.left + r.width / 2 > vw / 2) {
+    popup.style.right = `${Math.max(8, vw - r.right)}px`;
+    popup.style.left = 'auto';
+  } else {
+    popup.style.left = `${Math.max(8, r.left)}px`;
+    popup.style.right = 'auto';
+  }
+  // width clamp needs the rendered size — nudge back inside if overflowing
+  const pr = popup.getBoundingClientRect();
+  if (pr.right > vw - 8) { popup.style.left = `${Math.max(8, vw - 8 - pr.width)}px`; popup.style.right = 'auto'; }
+  else if (pr.left < 8) { popup.style.left = '8px'; popup.style.right = 'auto'; }
+}
+
 /** Fetch JSON with silent error handling. Returns null on failure. */
 export async function fetchJson(url, opts) {
   try {

@@ -10,7 +10,7 @@ import { CodeEditor } from './code-editor.js';
 import { LayoutManager } from './layout.js';
 import { ChatView } from './chat-view.js';
 import { Resizer } from './resizer.js';
-import { createPopover, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog } from './utils.js';
+import { anchorFixedPopup, createPopover, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog } from './utils.js';
 import { t, tc, getLangPref, setLang } from './i18n.js';
 import { MobileNav } from './mobile-nav.js';
 import { setupDirAutocomplete } from './autocomplete.js';
@@ -1921,7 +1921,12 @@ class App {
     const usageEl = document.getElementById('taskbar-usage');
     const popup = document.getElementById('usage-popup');
 
-    usageEl.onclick = () => popup.classList.toggle('hidden');
+    usageEl.onclick = () => {
+      popup.classList.toggle('hidden');
+      // Anchor to the button's CURRENT position — customize mode can move it
+      // to any bar, so the old fixed bottom-right CSS pointed nowhere.
+      if (!popup.classList.contains('hidden')) anchorFixedPopup(popup, usageEl);
+    };
     document.addEventListener('mousedown', (e) => {
       if (!popup.contains(e.target) && !usageEl.contains(e.target)) popup.classList.add('hidden');
     });

@@ -5,7 +5,7 @@
 // session to handle them. Items arrive via `vibespace-ask` (agent CLI) and are
 // resolved/dismissed here (or by the agent once the user answers in chat).
 import { t } from './i18n.js';
-import { escHtml, fetchJson, showToast } from './utils.js';
+import { anchorFixedPopup, escHtml, fetchJson, showToast } from './utils.js';
 
 const URG_RANK = { low: 0, normal: 1, high: 2, urgent: 3 };
 
@@ -112,7 +112,13 @@ export function installUserTodos(app) {
       ${resolvedHtml}`;
   };
 
-  btn.onclick = () => { popup.classList.toggle('hidden'); renderPanel(); };
+  btn.onclick = () => {
+    popup.classList.toggle('hidden');
+    renderPanel();
+    // Anchor to the button's CURRENT position — customize mode can move it to
+    // any bar, so the old fixed bottom-right CSS pointed nowhere.
+    if (!popup.classList.contains('hidden')) anchorFixedPopup(popup, btn);
+  };
   document.addEventListener('mousedown', (e) => {
     if (!popup.contains(e.target) && !btn.contains(e.target)) popup.classList.add('hidden');
   });
