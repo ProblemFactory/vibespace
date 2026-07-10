@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.78.0] — 2026-07-10
+
+### Added — per-turn tool micro-reminder for agents
+Every prompt you send now carries a one-line (~330 byte) reminder of the
+vibespace tools (status / ask / task) when no bigger context is being
+delivered — the full rules injected at session start scroll out of the
+agent's working context over long sessions and tool usage decays. Setting
+`agents.perTurnToolReminder` (default on) turns it off. Claude receives it
+via the UserPromptSubmit hook, Codex via the wrapper's per-turn inject.
+
 ## [2.77.0] — 2026-07-10
 
 ### Changed — multi-group injection is layered, and truncation is now recoverable

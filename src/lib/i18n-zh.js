@@ -1139,4 +1139,6 @@ export default {
   '{n}h': '{n}h',
   'Preview': '预览',
   'uuid': 'uuid',
+  'Per-turn tool reminder for agents': '每轮给 Agent 的工具提醒',
+  'Injects a one-line (~250 byte) reminder of the vibespace tools (status / ask / task) with every prompt you send, so agents keep using them in long sessions — the full rules injected at session start scroll out of the working context over time. Turn off to save the few tokens per turn.': '随你发送的每条消息注入一行（约 250 字节）vibespace 工具提醒（status / ask / task），让 agent 在长会话中持续使用它们——会话开始时注入的完整规范会随时间滚出工作上下文。关闭可节省每轮的少量 token。',
 };

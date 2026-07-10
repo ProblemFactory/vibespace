@@ -2208,9 +2208,21 @@ app.get('/api/agent/prompt-context', (req, res) => {
     // Remote session about to receive a fresh/updated context → make sure the
     // synced copy refreshes promptly too (busy-guard makes over-calling cheap).
     if (s.host && parts.length) scheduleCtxSync(s, id);
+    // Per-turn micro-reminder (2.78.0, user request): when nothing bigger is
+    // being delivered this prompt, a ~250-byte nudge keeps the tools present
+    // in the agent's working context (the full rules injected at session start
+    // scroll far behind on long sessions and usage decays). Gated by the
+    // agents.perTurnToolReminder setting (default on).
+    if (!parts.length && perTurnReminderEnabled()) {
+      const multi = injectGroups.length > 1;
+      parts.push(`<vibespace-reminder>Tools on PATH: vibespace-status <state> — keep your board state honest · vibespace-ask "q" — MIRROR every question you ask the user in chat onto their inbox, and resolve <id|text> the moment they answer · vibespace-task ${multi ? '--group <id> ' : ''}progress "summary" — log finished work. Run any with no args for usage.</vibespace-reminder>`);
+    }
     res.json({ success: true, context: parts.join('\n\n') });
   } catch (e) { res.json({ success: true, context: '' }); }
 });
+function perTurnReminderEnabled() {
+  try { return getSyncStore('settings')?.get('agents.perTurnToolReminder') !== false; } catch { return true; }
+}
 // ── vibespace-task agent endpoints (P3): validated task-level writes,
 // SCOPED to the session's own context task (VIBESPACE_TASK_ID at spawn) —
 // an agent cannot touch arbitrary tasks. All writes flow through TaskManager,

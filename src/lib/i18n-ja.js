@@ -1140,4 +1140,6 @@ export default {
   '{n}h': '{n}h',
   'Preview': 'プレビュー',
   'uuid': 'uuid',
+  'Per-turn tool reminder for agents': 'エージェントへの毎ターンツールリマインダー',
+  'Injects a one-line (~250 byte) reminder of the vibespace tools (status / ask / task) with every prompt you send, so agents keep using them in long sessions — the full rules injected at session start scroll out of the working context over time. Turn off to save the few tokens per turn.': '送信する各プロンプトに vibespace ツール（status / ask / task）の 1 行（約 250 バイト）リマインダーを注入し、長いセッションでもエージェントがツールを使い続けるようにします — セッション開始時の完全なルールは時間とともに作業コンテキストから流れ出てしまいます。オフにすると毎ターンのわずかなトークンを節約できます。',
 };
