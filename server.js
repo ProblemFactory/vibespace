@@ -115,13 +115,39 @@ function detectXDisplay() {
           env: { ...process.env, DISPLAY: d, ...(xa ? { XAUTHORITY: xa } : {}) },
           timeout: 1500, stdio: 'ignore',
         });
-        return { DISPLAY: d, XAUTHORITY: xa, probed: true };
+        return stabilizeXAuth({ DISPLAY: d, XAUTHORITY: xa, probed: true });
       } catch {}
     }
   }
   return { DISPLAY: process.env.DISPLAY || '', XAUTHORITY: process.env.XAUTHORITY || '', probed: false }; // best effort
 }
+// Compositor restarts mint a NEW per-instance cookie file
+// (.mutter-Xwaylandauth.XXXXXX) while every already-running session keeps the
+// OLD path in its env — the clipboard silently dies for all of them (real
+// incident 2026-07-09: an Xwayland restart at 18:42 broke image paste in 11
+// live sessions at once). Stabilize: merge the working cookie into
+// ~/.Xauthority and hand THAT path to sessions — processes re-open the auth
+// file on every X request, so after a future rotation one refreshXEnv() merge
+// heals everything, old sessions included, without respawns.
+function stabilizeXAuth(found) {
+  if (!found.probed || !found.XAUTHORITY) return found;
+  const home = path.join(os.homedir(), '.Xauthority');
+  if (found.XAUTHORITY === home) return found;
+  try {
+    execFileSync(resolveCmd('xauth'), ['merge', found.XAUTHORITY], {
+      env: { ...process.env, XAUTHORITY: home }, timeout: 3000, stdio: 'ignore',
+    });
+    // switch to the stable path only if it actually answers
+    execFileSync(resolveCmd('xset'), ['q'], {
+      env: { ...process.env, DISPLAY: found.DISPLAY, XAUTHORITY: home }, timeout: 1500, stdio: 'ignore',
+    });
+    return { ...found, XAUTHORITY: home };
+  } catch { return found; }
+}
+// ONE mutable object — ws-handler and app.locals hold references to it, so a
+// refresh propagates everywhere (new spawns + the paste route) without rewiring.
 const X_ENV = detectXDisplay();
+function refreshXEnv() { Object.assign(X_ENV, detectXDisplay()); return X_ENV; }
 const CLAUDE_CMD = CLAUDE_CMD_RAW.startsWith('/') ? CLAUDE_CMD_RAW : resolveCmd(CLAUDE_CMD_RAW);
 const CODEX_CMD = CODEX_CMD_RAW.startsWith('/') ? CODEX_CMD_RAW : resolveCmd(CODEX_CMD_RAW);
 const CODEX_LINUX_SANDBOX_CMD = resolveCmd('codex-linux-sandbox');
@@ -1231,6 +1257,7 @@ PORT="\${CLAUDE_WEBUI_PORT:-${PORT}}"
 SESS="\${CLAUDE_WEBUI_SESSION_ID}"
 curl -sf -X POST "http://localhost:\${PORT}/api/editor/open" \\
   -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer \${VIBESPACE_SESSION_TOKEN}" \\
   -d "{\\"file\\":\\"\$FILE\\",\\"signal\\":\\"\$SIGNAL\\",\\"sessionId\\":\\"\$SESS\\"}" >/dev/null 2>&1 &
 while [ ! -f "\$SIGNAL" ]; do sleep 0.2; done
 rm -f "\$SIGNAL"
@@ -1547,6 +1574,7 @@ ensureAgentHooks({ auto: true });
 
 // ── File System API (extracted to src/routes/files.js) ──
 app.locals.xEnv = X_ENV;
+app.locals.refreshXEnv = refreshXEnv; // paste route retries through this after an X cookie rotation
 // Remote fs (Files cross-host) — resolved lazily; `hosts` is created below.
 app.locals.getRemoteFs = () => remoteFs;
 app.use(fileRoutes);
@@ -1564,8 +1592,21 @@ const unblocker = new Unblocker({
 });
 app.use(unblocker);
 
-// Editor: open request from editor-helper.sh (via HTTP, not terminal output)
+// Editor: open request from the `code` helper script (via HTTP, not terminal
+// output). The caller lives INSIDE the session shell — no cookie exists there,
+// so auth.middleware exempts this path and WE validate the per-session vsst_
+// token instead (same trust model as /api/agent/*). Without this, enabling
+// password auth silently broke Ctrl+G: the script's POST got 401 and claude
+// sat on "Save and close editor to continue…" forever.
 app.post('/api/editor/open', (req, res) => {
+  if (app.locals.authEnabled) {
+    const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    let ok = false;
+    if (token && token.startsWith('vsst_')) {
+      for (const [, s] of activeSessions) { if (s.agentToken === token) { ok = true; break; } }
+    }
+    if (!ok) return res.status(401).json({ error: 'unauthorized (session token required)' });
+  }
   const { file, signal, sessionId } = req.body;
   // Broadcast to all WebSocket clients — include sessionId so each client opens editor on the right window
   const msg = JSON.stringify({ type: 'editor-open', filePath: file, signalPath: signal, sessionId: sessionId || null });
