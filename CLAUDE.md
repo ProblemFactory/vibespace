@@ -20,7 +20,11 @@ systemctl --user restart vibespace  # THE way to restart after a build — do NO
 ./scripts/update.sh                 # pull+install+build+restart in one step (⚙ → Update VibeSpace… runs this in a shell terminal; dtach sessions survive)
 journalctl --user -u vibespace -f   # logs (no more /tmp/vibespace-server.log)
 # Unit: Restart=always/RestartSec=5 (survives OOM/crash — verified via SIGKILL), OOMScoreAdjust=-500,
-# StartLimitIntervalSec=0 (retries forever while the NFS workspace mounts late). The service does NOT
+# StartLimitIntervalSec=0 (retries forever while the NFS workspace mounts late), **KillMode=process**
+# (CRITICAL — the default control-group KillMode killed every dtach session spawned AFTER the service
+# migration on each restart, while pre-migration sessions survived; real incident, one session died on
+# every restart. Only the node main process may be killed on stop), and baked PATH (node dir +
+# ~/.local/bin — systemd's minimal env broke every CLI spawn; real incident). The service does NOT
 # build — build at deploy, then restart. dtach sessions survive restarts by design.
 ```
 
@@ -738,6 +742,7 @@ Server → Client: `created`, `output`, `msg` (normalized: op=create/edit/meta),
 - Compact mode (default): document-style layout with role labels (You/Claude)
 - Role indicator styles: `chat.roleIndicator` setting — border (default, continuous colored bars), background, icon, label
 - All tool_use rendered as collapsible cards with first-line preview. Non-file tools show Input while running. Per-tool open-in-editor button. No output truncation. Unified error styling.
+- Relative-path linkify (2.75.0): a `code` span that IS a relative path or bare filename (`B2BTasks/x/final/`, `SCRIPTS.md`, `generate.py` — how agents actually reference files; absolute-only linkify missed all of them in real transcripts) becomes a `chat-link-rel`; Ctrl+click resolves it at CLICK time against the session cwd (probe order: cwd/rel → overlap-merge on a shared segment (`B2BTasks/...` from cwd `.../B2BTasks`) → cwd-parent/rel; host-aware; first existing wins → viewer/explorer). Guards: no spaces, needs a slash or a ≤8-char extension, rejects digit/dot/slash-only tokens (versions, IPs, CIDR — `10.0.0.0/8` was a live false positive). Agents are also TAUGHT to prefer absolute paths (SESSION_TOOLS_INTRO + renderContext line). ```html code blocks get a Preview toolbar button (blob URL → embedded browser).
 - Message metadata popup (2.74.0): right-click a message's LEFT indicator strip (≤18px from the edge; long-press on touch) → `.msg-meta-pop` with role/time/model/token usage (input, cache read/write, output)/service tier/stop reason/requestId/message.id/uuid/transcript line, copyable ids + Copy-as-JSON. Data = `msg.meta` threaded by the normalizer per assistant record ({model, usage, requestId, msgId, stopReason}; streaming edits refresh it so the final usage wins); normal right-click elsewhere keeps the native menu
 - System notifications: `<task-notification>`, `<system-reminder>` etc rendered as collapsible dim cards
 - Background task tracking: Agent (`task_started`) and background commands (`run_in_background`) shown in status bar with click-to-view popup
