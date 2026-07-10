@@ -24,6 +24,20 @@ async function run(input) {
       path = '/api/agent/task-context';
     } else if (event === 'UserPromptSubmit') {
       path = '/api/agent/prompt-context';
+    } else if (event === 'Stop') {
+      // Bookkeeping nudge with teeth: the SERVER decides (status freshness +
+      // 30min cooldown) whether the agent must update its board before this
+      // stop sticks. stop_hook_active = we already nudged — never loop.
+      if (input.stop_hook_active) return process.exit(0);
+      const c2 = new AbortController();
+      const t2 = setTimeout(() => c2.abort(), 2500);
+      const r = await fetch(api + '/api/agent/stop-check', { headers: { Authorization: 'Bearer ' + token }, signal: c2.signal });
+      clearTimeout(t2);
+      if (r.ok) {
+        const d = await r.json();
+        if (d && d.block && d.reason) process.stdout.write(JSON.stringify({ decision: 'block', reason: d.reason }));
+      }
+      return process.exit(0);
     } else {
       return process.exit(0);
     }

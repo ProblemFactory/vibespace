@@ -4,13 +4,12 @@ import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 const hookCmd = 'node ' + join(dirname(fileURLToPath(import.meta.url)), 'vibespace-hook.mjs');
-const EVENTS = ['SessionStart', 'UserPromptSubmit'];
 const files = [
-  { f: join(homedir(), '.claude', 'settings.json'), create: false },
-  { f: join(homedir(), '.codex', 'hooks.json'), create: true },
+  { f: join(homedir(), '.claude', 'settings.json'), create: false, EVENTS: ['SessionStart', 'UserPromptSubmit', 'Stop'] },
+  { f: join(homedir(), '.codex', 'hooks.json'), create: true, EVENTS: ['SessionStart', 'UserPromptSubmit'] },
 ];
 const findOur = (list) => { for (const g of (Array.isArray(list) ? list : [])) { const h = (g.hooks || []).find(h => typeof h.command === 'string' && h.command.includes('vibespace-hook.mjs')); if (h) return h; } return null; };
-for (const { f, create } of files) {
+for (const { f, create, EVENTS } of files) {
   try {
     let root = null; try { root = JSON.parse(readFileSync(f, 'utf-8')); } catch { root = null; }
     if (!root) { if (existsSync(f)) continue; if (!create) continue; root = {}; }
