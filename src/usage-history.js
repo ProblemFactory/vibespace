@@ -138,7 +138,12 @@ class UsageHistory {
   _shardFor(ts) { const d = new Date(ts); return path.join(this.dir, `events-${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}.ndjson`); }
 
   // Build claudeSessionId → {acct, mode, host, backend, name} from session-meta.
+  // TTL-cached: data/ can live on network storage (real deployment: a FUSE NFS
+  // mount where every readFileSync is a ~40ms round trip — 66 meta files took
+  // 2.7s PER SCAN). Meta only affects labels/attribution of NEW events, so up
+  // to 60s staleness is invisible.
   _metaMap() {
+    if (this._metaMapCache && Date.now() - this._metaMapCache.at < 60000) return this._metaMapCache.map;
     const map = {};
     let files = [];
     try { files = fs.readdirSync(this.metaDir); } catch {}
@@ -149,13 +154,20 @@ class UsageHistory {
       if (!sid) continue;
       map[sid] = { acct: m.accountId || m._accountId || null, mode: m.mode || null, host: m.host || null, backend: m.backend || 'claude', name: m.name || null };
     }
+    this._metaMapCache = { at: Date.now(), map };
     return map;
   }
 
   // Incrementally scan every transcript (Claude JSONLs + Codex rollouts),
   // appending new per-request events.
-  scan() {
+  scan(force = false) {
     if (this._scanning) return { skipped: true };
+    // The Usage window fires a request per filter/range change — each used to
+    // redo the full transcript stat-sweep (+ meta/attrib reload). Throttle:
+    // new events land at most ~15s late; the 3-min background rescan and the
+    // in-memory event cache (below) make requests read-only in the common case.
+    if (!force && this._lastScanAt && Date.now() - this._lastScanAt < 15000) return { skipped: true };
+    this._lastScanAt = Date.now();
     this._scanning = true;
     let added = 0, filesTouched = 0;
     try {
@@ -341,9 +353,14 @@ class UsageHistory {
     if (!this._tierKeys || this._tierKeysFor !== this._pricing.tiers) {
       this._tierKeys = Object.keys(this._pricing.tiers).filter(k => k !== '_default').sort((a, b) => b.length - a.length);
       this._tierKeysFor = this._pricing.tiers;
+      this._tierMemo = new Map(); // per-model result — substring matching per event was the aggregate hot spot
     }
-    for (const k of this._tierKeys) if (m.includes(k)) return k;
-    return '_default';
+    const hit = this._tierMemo.get(m);
+    if (hit !== undefined) return hit;
+    let out = '_default';
+    for (const k of this._tierKeys) if (m.includes(k)) { out = k; break; }
+    this._tierMemo.set(m, out);
+    return out;
   }
   // The rate for a given account + tier: an account may override specific tiers
   // and/or carry a flat discount (0..1). Subscriptions/global have no override →
@@ -361,29 +378,56 @@ class UsageHistory {
     return (ev.i * p.input + ev.o * p.output + ev.cw5 * p.cacheWrite5m + ev.cw1 * p.cacheWrite1h + ev.cr * p.cacheRead) / 1e6;
   }
 
-  // Stream shard files in [from,to] (epoch ms) and yield UNIQUE events (deduped
-  // by requestId). The ledger is append-only and can contain a duplicate rid if
-  // a crash (e.g. OOM respawn) hit between a shard append and the cursor write —
-  // read-time dedup makes totals correct regardless of how a dup got there.
-  // requestIds are globally unique, so this never drops a distinct request.
-  * _events(from, to) {
-    const seen = new Set();
+  // In-memory event cache — the "database" behind aggregate(). Shards are
+  // append-only NDJSON, so after the first full load each call reads ONLY the
+  // appended bytes of each shard (byte-offset per file, last-newline aligned —
+  // BYTES not chars, same CJK lesson as the scan cursors). Dedup by rid happens
+  // once at load time (the ledger can contain a duplicate rid if a crash hit
+  // between a shard append and the cursor write). Without this, every Usage
+  // window request re-read + re-parsed every shard (~seconds at 100k+ events).
+  _loadEvents() {
+    if (!this._evCache) this._evCache = { consumed: new Map(), events: [], rids: new Set() };
+    const c = this._evCache;
     let files = [];
     try { files = fs.readdirSync(this.dir).filter(f => /^events-\d{4}-\d{2}\.ndjson$/.test(f)).sort(); } catch {}
     for (const fn of files) {
-      // Skip whole shards outside the range (by the month in the name).
-      const [, y, mo] = fn.match(/events-(\d{4})-(\d{2})/) || [];
-      if (y && to) { const mStart = Date.UTC(+y, +mo - 1, 1); if (mStart > to) continue; }
-      if (y && from) { const mEnd = Date.UTC(+y, +mo, 1); if (mEnd < from) continue; }
-      let data; try { data = fs.readFileSync(path.join(this.dir, fn), 'utf-8'); } catch { continue; }
-      for (const line of data.split('\n')) {
+      const fp = path.join(this.dir, fn);
+      let st; try { st = fs.statSync(fp); } catch { continue; }
+      const consumed = c.consumed.get(fn) || 0;
+      if (st.size === consumed) continue;
+      if (st.size < consumed) { // shard shrank (manual edit/rotation) — rebuild from scratch
+        this._evCache = null;
+        return this._loadEvents();
+      }
+      let buf;
+      const fd = fs.openSync(fp, 'r');
+      try {
+        buf = Buffer.alloc(st.size - consumed);
+        fs.readSync(fd, buf, 0, buf.length, consumed);
+      } finally { fs.closeSync(fd); }
+      const lastNl = buf.lastIndexOf(10); // complete lines only — a concurrent append may be mid-write
+      if (lastNl < 0) continue;
+      for (const line of buf.slice(0, lastNl + 1).toString('utf-8').split('\n')) {
         if (!line) continue;
         let ev; try { ev = JSON.parse(line); } catch { continue; }
-        if (from && ev.ts < from) continue;
-        if (to && ev.ts > to) continue;
-        if (ev.rid) { if (seen.has(ev.rid)) continue; seen.add(ev.rid); }
-        yield ev;
+        if (ev.rid) { if (c.rids.has(ev.rid)) continue; c.rids.add(ev.rid); }
+        c.events.push(ev);
       }
+      c.consumed.set(fn, consumed + lastNl + 1);
+    }
+    return c.events;
+  }
+
+  // Pre-load the event cache (called once at boot so the first Usage window
+  // open doesn't pay the full-ledger parse).
+  warm() { try { this._loadEvents(); } catch {} }
+
+  // Yield UNIQUE events in [from,to] (epoch ms) from the in-memory cache.
+  * _events(from, to) {
+    for (const ev of this._loadEvents()) {
+      if (from && ev.ts < from) continue;
+      if (to && ev.ts > to) continue;
+      yield ev;
     }
   }
 

@@ -517,19 +517,24 @@ class App {
   // the SELECTED machine's own codex login; the named ChatGPT accounts below
   // are stored by VibeSpace (machine-independent, ship per session). No usage
   // bars (OpenAI quota isn't polled).
-  // Compact per-account usage readout (5h + 7d mini bars) shared by the Claude
-  // and Codex rosters. Data: Claude = the passive statusline cache; Codex = the
-  // per-account rate-limit buckets (both ride /api/usage).
+  // Compact per-account usage readout (mini donuts, same visual language as
+  // the taskbar quota pies) shared by the Claude and Codex rosters. Data:
+  // Claude = the passive statusline cache; Codex = the per-account rate-limit
+  // buckets (both ride /api/usage). Scoped weekly buckets (e.g. Fable) get
+  // their own donut when present.
   _acctUsageHtml(u) {
     if (!u) return '';
     const pct = (x) => Math.min(100, Math.round(x?.usedPercent ?? ((x?.utilization || 0) * 100)));
-    const bar = (label, x) => {
+    const donut = (label, x, tipName) => {
       const p = pct(x);
       const c = p > 95 ? 'var(--red,#e55)' : p > 80 ? 'var(--yellow,#e5c07b)' : 'var(--green,#3fb950)';
-      return `<span class="acct-usage-item" title="${label}: ${p}%"><span class="acct-usage-label">${label}</span><span class="acct-usage-bar"><span style="width:${p}%;background:${c}"></span></span><span class="acct-usage-pct">${p}%</span></span>`;
+      const deg = Math.round(p * 3.6);
+      return `<span class="acct-usage-donut" title="${escHtml(tipName || label)}: ${p}%" style="background:conic-gradient(${c} ${deg}deg, var(--bg-input) ${deg}deg)"><span>${escHtml(label)}</span></span>`;
     };
+    const parts = [donut('5h', u.fiveHour), donut('7d', u.sevenDay)];
+    for (const sc of (u.scopedWeekly || [])) parts.push(donut(String(sc.name || '?').slice(0, 2), sc, sc.name));
     const age = u.fetchedAt ? Math.round((Date.now() - u.fetchedAt) / 60000) : null;
-    return `<span class="acct-usage">${bar('5h', u.fiveHour)}${bar('7d', u.sevenDay)}${age != null && age > 5 ? `<span class="acct-usage-age" title="${t('Last refreshed {n} min ago', { n: age })}">${t('{n}m', { n: age })}</span>` : ''}</span>`;
+    return `<span class="acct-usage">${parts.join('')}${age != null && age > 5 ? `<span class="acct-usage-age" title="${t('Last refreshed {n} min ago', { n: age })}">${t('{n}m', { n: age })}</span>` : ''}</span>`;
   }
 
   async _renderCodexAccounts(ctx) {
@@ -1925,13 +1930,18 @@ class App {
       popup.classList.toggle('hidden');
       // Anchor to the button's CURRENT position — customize mode can move it
       // to any bar, so the old fixed bottom-right CSS pointed nowhere.
-      if (!popup.classList.contains('hidden')) anchorFixedPopup(popup, usageEl);
+      if (!popup.classList.contains('hidden')) {
+        anchorFixedPopup(popup, usageEl);
+        this._maybeAutoRefreshQuota();
+      }
     };
     document.addEventListener('mousedown', (e) => {
       if (!popup.contains(e.target) && !usageEl.contains(e.target)) popup.classList.add('hidden');
     });
     // Account switcher chips (popup re-renders every poll → delegate)
     popup.addEventListener('click', (e) => {
+      const rbtn = e.target.closest('.usage-refresh-btn');
+      if (rbtn) { e.stopPropagation(); this._refreshQuotaOnDemand(rbtn); return; }
       const chip = e.target.closest('.usage-acct-chip');
       if (!chip) return;
       e.stopPropagation();
@@ -1941,6 +1951,7 @@ class App {
       } else {
         this._usageAcctSel = chip.dataset.key || 'auto';
         try { localStorage.setItem('vibespace.usageAccount', this._usageAcctSel); } catch {}
+        this._maybeAutoRefreshQuota();
       }
       this._renderUsage();
     });
@@ -1949,8 +1960,7 @@ class App {
     this._pollUsage();
   }
 
-  async _pollUsage() {
-    const data = await fetchJson('/api/usage');
+  _applyUsage(data) {
     if (data?.rateLimit) this._rateLimit = data.rateLimit;
     else if (this._rateLimit === undefined) this._rateLimit = null;
     if (data?.codexRateLimit) this._codexRateLimit = data.codexRateLimit;
@@ -1960,6 +1970,58 @@ class App {
     this._usageGlobal = data?.globalLogin || null; // CLI-login identity (+ linked named account)
     this._usageCodexGlobal = data?.codexGlobalLogin || null;
     this._codexAccountUsage = data?.codexAccounts || {}; // per-account codex quota buckets
+  }
+
+  // Resolve the Claude account the pies/popup currently DISPLAY (same rules as
+  // _renderUsage) + the refresh `target` key for /api/usage/refresh. Target
+  // prefers '__global__' when the selection IS the machine's CLI login (its
+  // token is the freshest — the CLI keeps it alive), and follows the default
+  // account under 'auto' only when that default is a subscription.
+  _claudeSelResolved() {
+    const claudeSubs = (this._accounts?.accounts || []).filter(a => (a.backend || 'claude') !== 'codex' && a.type === 'subscription');
+    const gl = this._usageGlobal || {};
+    const claudeDefId = this._accounts?.defaultAccountId;
+    let sel = this._usageAcctSel || 'auto';
+    if (sel === '__global__' && gl.accountId) sel = gl.accountId;
+    if (sel !== 'auto' && sel !== '__global__' && !claudeSubs.some(a => a.id === sel)) sel = 'auto';
+    let rl;
+    if (sel === 'auto') rl = (claudeDefId && this._accountUsage?.[claudeDefId]) ? this._accountUsage[claudeDefId] : this._rateLimit;
+    else if (sel === '__global__') rl = this._rateLimit;
+    else rl = this._accountUsage?.[sel] || null;
+    let target = sel === 'auto'
+      ? (claudeDefId && claudeSubs.some(a => a.id === claudeDefId) ? claudeDefId : '__global__')
+      : sel;
+    if (target !== '__global__' && gl.accountId === target) target = '__global__';
+    return { sel, rl, target };
+  }
+
+  // User-initiated quota refresh (⟳ / popup open) — the only way to get the
+  // model-scoped weekly buckets (Fable), which the passive statusline feed
+  // never carries. Server enforces ≥60s per account + the 429 backoff.
+  async _refreshQuotaOnDemand(btn, { silent } = {}) {
+    const { target } = this._claudeSelResolved();
+    if (btn) btn.classList.add('usage-refresh-spin');
+    const r = await fetchJson('/api/usage/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ account: target }) });
+    if (r?.error && !silent) showToast(r.error, { type: 'error' });
+    const data = await fetchJson('/api/usage');
+    if (data) { this._applyUsage(data); this._renderUsage(); }
+  }
+
+  // Popup open / chip switch: silently refresh the displayed account when its
+  // scoped data is stale (>30 min) — paced per target so this stays at CLI
+  // /usage-command frequency, never a background cadence.
+  _maybeAutoRefreshQuota() {
+    const { rl, target } = this._claudeSelResolved();
+    this._quotaAutoPace = this._quotaAutoPace || {};
+    if (Date.now() - (this._quotaAutoPace[target] || 0) < 60000) return;
+    if (rl && Date.now() - (rl.scopedFetchedAt || 0) < 30 * 60 * 1000) return;
+    this._quotaAutoPace[target] = Date.now();
+    this._refreshQuotaOnDemand(null, { silent: true });
+  }
+
+  async _pollUsage() {
+    const data = await fetchJson('/api/usage');
+    this._applyUsage(data);
     this._renderUsage();
     // 8s: /api/usage is now a cheap LOCAL read (server just returns the passively
     // captured cache) — decoupled from any Anthropic call — so a snappy refresh
@@ -2051,8 +2113,8 @@ class App {
         </div>
       </div>`
     );
-    const renderSectionTitle = (backend, label) => (
-      `<div class="usage-section-title">${createBackendIconHtml(backend, { className: 'usage-section-backend', title: label })}<span>${label}</span></div>`
+    const renderSectionTitle = (backend, label, extra = '') => (
+      `<div class="usage-section-title">${createBackendIconHtml(backend, { className: 'usage-section-backend', title: label })}<span>${label}</span>${extra}</div>`
     );
 
     const rows = [];
@@ -2095,6 +2157,9 @@ class App {
       for (const sc of rl?.scopedWeekly || []) {
         const pctSc = Math.round((sc.utilization || 0) * 100);
         const colorSc = usageColor(pctSc);
+        // Scoped buckets only arrive via on-demand refresh (⟳) — show THEIR
+        // age, which can lag the passively-updated 5h/7d above.
+        const scAge = rl.scopedFetchedAt ? `<span class="usage-stat" title="${escHtml(t('Model-scoped data comes from the ⟳ refresh, not the passive feed'))}">${escHtml(t('as of {ago}', { ago: agoText(rl.scopedFetchedAt) }))}</span>` : '';
         scopedSections.push(`
       <div class="usage-session">
         <div class="usage-session-name">${t('{name} weekly limit', { name: escHtml(sc.name) })}</div>
@@ -2102,8 +2167,12 @@ class App {
         <div class="usage-session-stats">
           <span class="usage-stat">${t('{pct}% used', { pct: pctSc })}</span>
           <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(sc.resetsAt)}</span>
+          ${scAge}
         </div>
       </div>`);
+      }
+      if (!scopedSections.length && !noData) {
+        scopedSections.push(`<div class="usage-note">${t('Model-scoped weekly limits (e.g. Fable) aren’t in the passive feed — ⟳ fetches them on demand')}</div>`);
       }
       // The signed-out warning concerns the GLOBAL login's data — only shown
       // when that's what's displayed (directly or via the linked account).
@@ -2128,7 +2197,8 @@ class App {
       </div>${scopedSections.join('')}
       ${this._subSignedOut && showingGlobal ? `<div class="usage-warn">${t('⚠ Subscription signed out (a Console login replaced it) — pies show its last-known quota. API-billed sessions never appear here.')}</div>` : ''}
       <div class="usage-updated">${t('Updated {ago}', { ago: agoText(rl.fetchedAt) })}</div>`;
-      sections.push(`${renderSectionTitle('claude', escHtml(claudeUsageLabel))}${switcher}
+      const refreshBtn = `<button class="usage-refresh-btn" title="${escHtml(t('Refresh from Anthropic now (also fetches model-scoped limits like Fable) — user-initiated, min 60s apart'))}">⟳</button>`;
+      sections.push(`${renderSectionTitle('claude', escHtml(claudeUsageLabel), refreshBtn)}${switcher}
       ${usageNote ? `<div class="usage-note">${usageNote}</div>` : ''}
       ${body}`);
     }

@@ -1096,4 +1096,8 @@ export default {
   "Waiting for the editor below": "等待下方编辑器",
   "The terminal resumes after Save & Close.": "保存并关闭后终端恢复。",
   "detail": "详情",
+  'Model-scoped data comes from the ⟳ refresh, not the passive feed': '模型级配额数据来自 ⟳ 手动刷新，被动采集不携带',
+  'Model-scoped weekly limits (e.g. Fable) aren’t in the passive feed — ⟳ fetches them on demand': '模型级周配额（如 Fable）不在被动采集里 — 点 ⟳ 按需获取',
+  'Refresh from Anthropic now (also fetches model-scoped limits like Fable) — user-initiated, min 60s apart': '立即从 Anthropic 刷新（含 Fable 等模型级配额）— 用户手动触发，间隔至少 60 秒',
+  'as of {ago}': '数据时间 {ago}',
 };
