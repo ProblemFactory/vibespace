@@ -1421,4 +1421,5 @@ export default {
   "Usage dashboard panels": "使用量ダッシュボードパネル",
   "Weekday": "曜日別",
   "Width": "幅",
+  "Group by": "グループ化の軸",
 };
