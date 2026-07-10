@@ -2623,3 +2623,17 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 .task-log-addwrap { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
 .task-log-addwrap .task-log-add { margin-top: 0; flex: 1; }
 .task-log-plan.task-log-exp .task-log-detail { margin-left: 24px; }
+
+/* ── Manage Agents: collapsed advanced "Agent instructions" section ── */
+.agents-adv { border: 1px solid var(--border); border-radius: var(--radius); padding: 0; margin-top: 4px; }
+.agents-adv > summary { cursor: pointer; list-style: none; display: flex; align-items: baseline; gap: 8px; padding: 8px 12px; font-size: 12px; }
+.agents-adv > summary::-webkit-details-marker { display: none; }
+.agents-adv > summary::before { content: '▸'; color: var(--text-dim); font-size: 10px; }
+.agents-adv[open] > summary::before { content: '▾'; }
+.agents-adv-hint { font-size: 10px; color: var(--text-dim); }
+.agents-adv-body { padding: 0 12px 10px; display: flex; flex-direction: column; gap: 10px; }
+.agents-field { display: flex; flex-direction: column; gap: 4px; }
+.agents-field-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-secondary); }
+.agents-adv-body label.agents-cond { display: block; font-size: 11px; color: var(--text-secondary); padding: 1px 0; }
+.agents-adv-body .agents-cond-num { display: inline-block; width: 56px !important; padding: 2px 6px; margin: 0 5px; text-align: center; vertical-align: baseline; }
+.agents-adv-actions { display: flex; justify-content: flex-end; }

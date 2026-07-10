@@ -534,20 +534,25 @@ export function installManageAgents(App, ctx = {}) {
           body.appendChild(row);
         }
       }
-      // ── Custom agent instructions (injected preamble) — user-configurable
-      // standing guidance placed at the TOP of every VibeSpace hook delivery
-      // (task context / baseline tools intro). Applies to local AND remote
-      // sessions (both read the same injection routes); delivered once per
-      // session + re-delivered on change, never per turn.
+      // ── Agent instructions — ADVANCED, collapsed by default (user request:
+      // the expanded form dominated the dialog). Lives right under the
+      // VibeSpace integration row it belongs with. Layout: one labelled field
+      // per injection surface; each nudge condition is a full sentence with
+      // the number input embedded (the two-column flex wrap read broken).
       {
-        const row = document.createElement('div'); row.className = 'ob-backend';
-        row.style.flexDirection = 'column'; row.style.alignItems = 'stretch';
-        const head = document.createElement('div');
-        head.innerHTML = `<b>${t('Agent instructions')}</b>`
-          + `<div class="agents-note">${t('Your custom text rides at the TOP of each VibeSpace injection surface — customize behavior fleet-wide (reply language, reporting habits, house rules). Each surface has its own field and cost profile.')}</div>`;
-        row.appendChild(head);
-        // One field per injection surface — each with its own delivery cadence
-        // (and therefore its own token cost the user should see spelled out).
+        const adv = document.createElement('details');
+        adv.className = 'agents-adv';
+        const sum = document.createElement('summary');
+        const hasAny = ['agents.injectPreamble', 'agents.perTurnExtra', 'agents.stopNudgeExtra']
+          .some((k) => (this.settings.get(k) || '').trim());
+        sum.innerHTML = `<b>${t('Agent instructions')}</b><span class="agents-adv-hint">${hasAny ? escHtml(t('customized')) : escHtml(t('advanced — custom text injected into every agent session'))}</span>`;
+        adv.appendChild(sum);
+        const body2 = document.createElement('div');
+        body2.className = 'agents-adv-body';
+        const note = document.createElement('div');
+        note.className = 'agents-note';
+        note.textContent = t('Your custom text rides at the TOP of each VibeSpace injection surface — customize behavior fleet-wide (reply language, reporting habits, house rules). Each surface has its own field and cost profile.');
+        body2.appendChild(note);
         const FIELDS = [
           ['agents.injectPreamble', 4000, 4,
             t('Session context (once per session + when edited)'),
@@ -561,9 +566,10 @@ export function installManageAgents(App, ctx = {}) {
         ];
         const tas = [];
         for (const [key, cap, rows, label, ph] of FIELDS) {
-          const lab = document.createElement('div');
-          lab.className = 'agents-note';
-          lab.style.marginTop = '6px';
+          const field = document.createElement('div');
+          field.className = 'agents-field';
+          const lab = document.createElement('label');
+          lab.className = 'agents-field-label';
           lab.textContent = label;
           const ta = document.createElement('textarea');
           ta.className = 'settings-json';
@@ -572,39 +578,41 @@ export function installManageAgents(App, ctx = {}) {
           ta.placeholder = ph;
           ta.value = this.settings.get(key) || '';
           tas.push([key, ta]);
-          row.append(lab, ta);
+          field.append(lab, ta);
+          body2.appendChild(field);
         }
-        // Stop-nudge firing conditions (2.89.0): staleness threshold + per-
-        // session cooldown, editable next to the stop-nudge text they gate.
-        const numRow = document.createElement('div');
-        numRow.style.cssText = 'display:flex;gap:14px;align-items:center;margin-top:6px;flex-wrap:wrap;';
+        // Stop-nudge firing conditions — one full sentence per line, the
+        // number input embedded where {n} sits in the translation.
         const numInputs = [];
+        const condWrap = document.createElement('div');
+        condWrap.className = 'agents-field';
+        const condLab = document.createElement('label');
+        condLab.className = 'agents-field-label';
+        condLab.textContent = t('Stop nudge conditions');
+        condWrap.appendChild(condLab);
         for (const [key, label, tip] of [
           // t() WITHOUT params keeps the literal {n} — it marks where the
           // number input embeds into the translated sentence.
           ['agents.stopNudgeStaleMinutes', t('fire after {n} min without a status update'), t('The nudge only fires when the session has not updated its board status for this long.')],
           ['agents.stopNudgeCooldownMinutes', t('at most once per {n} min per session'), t('After nudging a session once, wait at least this long before nudging it again.')],
         ]) {
-          const wrap = document.createElement('label');
-          wrap.className = 'agents-note';
-          wrap.style.cssText = 'display:flex;align-items:center;gap:5px;margin:0;';
-          wrap.title = tip;
+          const line = document.createElement('label');
+          line.className = 'agents-cond';
+          line.title = tip;
           const inp = document.createElement('input');
           inp.type = 'number';
-          inp.className = 'settings-input-text';
-          inp.style.cssText = 'width:58px;padding:2px 6px;';
+          inp.className = 'settings-input-text agents-cond-num';
           const schema = { 'agents.stopNudgeStaleMinutes': [1, 240, 10], 'agents.stopNudgeCooldownMinutes': [2, 720, 30] }[key];
           inp.min = schema[0]; inp.max = schema[1];
           inp.value = this.settings.get(key) ?? schema[2];
           numInputs.push([key, inp, schema]);
-          // label text with the input embedded where {n} was
-          const [before, after] = label.split('{n}').length === 2 ? label.split('{n}') : [label + ' ', ''];
-          wrap.append(document.createTextNode(before), inp, document.createTextNode(after));
-          numRow.appendChild(wrap);
+          const [before, after] = label.includes('{n}') ? label.split('{n}') : [label + ' ', ''];
+          line.append(document.createTextNode(before), inp, document.createTextNode(after));
+          condWrap.appendChild(line);
         }
-        row.append(numRow);
+        body2.appendChild(condWrap);
         const btnRow = document.createElement('div');
-        btnRow.style.cssText = 'display:flex;justify-content:flex-end;gap:6px;margin-top:6px;';
+        btnRow.className = 'agents-adv-actions';
         const save = document.createElement('button');
         save.className = 'agent-btn'; save.textContent = t('Save');
         save.onclick = () => {
@@ -617,8 +625,9 @@ export function installManageAgents(App, ctx = {}) {
           showToast(t('Saved — new/updated sessions receive it on their next turn'));
         };
         btnRow.appendChild(save);
-        row.append(btnRow);
-        body.appendChild(row);
+        body2.appendChild(btnRow);
+        adv.appendChild(body2);
+        body.appendChild(adv);
       }
 
       const foot = document.createElement('div');

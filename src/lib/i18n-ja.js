@@ -1205,4 +1205,7 @@ export default {
   "The nudge only fires when the session has not updated its board status for this long. Lower = agents are reminded more eagerly; higher = quieter.": "セッションのボードステータスがこの時間更新されていない場合のみ発火します。小さく = より積極的に、大きく = より静かに。",
   "Stop nudge: cooldown per session (minutes)": "停止ナッジ：セッションごとのクールダウン（分）",
   "After nudging a session once, wait at least this long before nudging it again — the ceiling on how often an agent pays the bookkeeping mini-turn.": "一度ナッジした後、再度ナッジするまで最低この時間待ちます——エージェントが記帳ミニターンを支払う頻度の上限です。",
+  "customized": "カスタマイズ済み",
+  "advanced — custom text injected into every agent session": "上級 — すべてのエージェントセッションに注入されるカスタムテキスト",
+  "Stop nudge conditions": "停止ナッジの発火条件",
 };

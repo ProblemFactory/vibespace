@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.89.3 — 2026-07-10
+
+- Manage Agents → Agent instructions is now a collapsed-by-default advanced section grouped with the VibeSpace integration row (summary shows "customized" when any field is set). Layout redone: labelled field per injection surface, and the stop-nudge conditions read as complete sentences with the number inputs embedded inline (they used to wrap one word per line).
+
 ## 2.89.2 — 2026-07-10
 
 **THE restart history-truncation bug (root cause of "重启之后消息都没了")**
