@@ -87,6 +87,7 @@ src/
   hosts.js             — HostManager (ssh host registry, connectivity test, keygen, remote discovery + first-user-message names, bootstrap, backend-status, dir-complete, fetchSessionJsonl = remote transcript → data/remote-jsonl cache)
   remote-fs.js         — RemoteFs (ssh-per-op remote filesystem: list/read/write/mkdir/rename/rm/stat/copy/move/download/archive/tar-stream folder transfer — mirrors /api/file* shapes; files.js dispatches on ?host=, cross-host copy = server relay)
   auth.js              — Optional password auth (scrypt, server-side cookie tokens in data/auth.json, per-IP rate limit; VIBESPACE_PASSWORD / VIBESPACE_GENERATE_PASSWORD=1)
+  usage-routes.js      — setupUsage() (2.92.0 split): the ENTIRE usage/rate-limit cluster from server.js — passive statusline ingest, read-only OAuth token, opt-in active poll, on-demand quota refresh, codex rollout-tail summarizer (§ban-safety rules apply — see CLAUDE.md §9)
   telemetry.js         — Telemetry (2.84.0, local-first observability): monthly ndjson shards data/telemetry/events-YYYY-MM.ndjson of {ts,kind:error|event|boot|server-error,name,detail,stack,version,ua}; summary() = grouped errors + byName/byDay/byVersion; optional batch forwarding to telemetry.forwardUrl with an anonymous instance id (data/telemetry/.instance-id). Client side = src/lib/telemetry-client.js (window.onerror/unhandledrejection + boot event + coarse feature events like window-open:<type>/session-create; installed in client.js BEFORE new App() so App-constructor boot crashes are captured — the 'silent blank page' class; 60-events/page-session cap, 5 per identical error). ⚙ → Diagnostics report… (app.js _openDiagnostics) renders GET /api/telemetry/summary as a blob-URL HTML page in the embedded browser. NAMES ONLY, never content — see settings telemetry.enabled/forwardUrl
   adapters/
     base.js            — BackendAdapter + SessionHandle (abstract interface for AI backends)
@@ -128,7 +129,8 @@ src/
     file-viewer.js     — FileViewer (dispatch by type via file-types registry, renderInto shared method)
     file-types.js      — File type registry (extension → category, icon, viewer, bypassBinary)
     code-editor.js     — CodeEditor (CodeMirror 6, Prettier format, server-side format, HTML/MD preview)
-    chat-view.js       — ChatView controller (virtual scroll, op dispatch, lifecycle, ~2000 lines)
+    chat-view.js       — ChatView controller (virtual scroll, op dispatch, lifecycle; gap-seek mixin split out 2.92.0)
+    chat-view-seek.js  — installChatSeek(ChatView): the huge-JSONL continuous-scroll machinery (sentinel, slab loading, teleport, stable-height landings; 17 methods)
     chat-renderers.js  — Message rendering (user/assistant/tool/system, linkify, diffs, permissions)
     chat-input.js      — ChatInput (textarea, send, attachments, drafts, slash commands, TODO display)
     chat-status-bar.js — ChatStatusBar (model, context%, cost, permission mode, task popup)
@@ -618,7 +620,7 @@ One design language, DENSITY-PRESERVING (pro tool — compact stays compact). A 
 - **Notes**: `.usage-note` = neutral dim info; `.usage-warn` = amber warning. They are SEPARATE classes — don't reuse one for the other semantic.
 - **Colors**: theme vars ONLY; tints = `color-mix(in srgb, var(--token) N%, transparent)`; text on accent/colored fills = `var(--accent-fg)`; canonical var fallbacks: `--red,#e55` `--green,#3fb950` `--yellow,#e5c07b` `--blue,#61afef`. JS inline styles may use `var()` strings (they resolve in inline styles + conic-gradients).
 - **Focus**: `border-color: var(--accent)` only (no rings). **Transitions**: `var(--transition)`. **Empty states**: `.empty-hint` (+`.empty-hint-inline` inside compact sections). **State dots**: 6px. **Toolbars** (in-window): `padding 6px 10px; gap 6px; bg var(--bg-panel, var(--bg-titlebar)); border-bottom var(--border)`.
-- DEFERRED backlog from the audit (do not consider these conventions settled): menu-label casing standardization (i18n key churn), workflow-detail + file-explorer/viewers i18n, path-autocomplete dedup, modal-shell dedup (4 hand-rolled copies), CSV/XLSX/PPTX inline-style architecture, CodeMirror light-theme accent var.
+- The 2.66.0 audit's deferred backlog was CLOSED in 2.92.0: menu casing (sentence case for menu items, Custom… unified), workflow-detail + file-explorer/viewers full i18n, modal-shell dedup (createModalShell in utils.js, 8 sites), CSV/XLSX/PPTX classes in viewers.css, CodeMirror light accents via color-mix. New dialogs use createModalShell, not hand-rolled overlays.
 
 
 ## API Reference
