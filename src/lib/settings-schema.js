@@ -229,6 +229,12 @@ const SETTINGS_SCHEMA = {
     description: t('OFF (recommended): a subscription (Pro/Max) account can only run on THIS machine; for a remote host, log in on the host instead. Turning this ON copies the subscription’s login to the remote host — its token then appears from that host’s IP (often a datacenter), which can look like account abuse to Anthropic and risk a ban. API-key accounts are always allowed on remote hosts and are unaffected by this.'),
     category: t('Session'), liveApply: true,
   },
+  'agents.perTurnToolReminder': {
+    type: 'boolean', default: true,
+    label: t('Per-turn tool reminder for agents'),
+    description: t('Injects a one-line (~250 byte) reminder of the vibespace tools (status / ask / task) with every prompt you send, so agents keep using them in long sessions — the full rules injected at session start scroll out of the working context over time. Turn off to save the few tokens per turn.'),
+    category: t('Session'), liveApply: true,
+  },
   'accounts.onDemandQuotaRefresh': {
     type: 'enum', default: 'manual',
     options: [
