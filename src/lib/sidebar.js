@@ -662,6 +662,7 @@ class Sidebar {
         webuiId: wm?.id || null,
         webuiName: wm?.name || null,
         webuiMode: wm ? (wm.mode || 'terminal') : null,
+        accountId: wm?.accountId || null, // billing account id (title-badge switcher's "current")
         accountName: wm?.accountName || null, // billing identity badge (API key sessions)
         accountTail: wm?.accountTail || null,
         auth: wm?.auth || null, // billing identity (subscription/api-console/api-key/unknown)
@@ -694,6 +695,7 @@ class Sidebar {
           webuiName: ws.name,
           name: ws.name || '',
           webuiMode: ws.mode || 'terminal',
+          accountId: ws.accountId || null,
           accountName: ws.accountName || null,
           accountTail: ws.accountTail || null,
           auth: ws.auth || null,

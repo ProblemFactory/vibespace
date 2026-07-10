@@ -501,9 +501,14 @@ class ChatView {
       };
     }
     const match = allSess.find(s => s.webuiId === this.sessionId);
-    const backend = match?.backend || 'claude';
-    const backendSessionId = match?.backendSessionId || match?.sessionId || null;
-    return { backend, backendSessionId, claudeId: backend === 'claude' ? backendSessionId : null, cwd: match?.cwd || '' };
+    // A terminated window's server session is GONE from the live list
+    // (discovery re-lists it as STOPPED with no webuiId) — fall back to the
+    // identity captured in the openSpec while it was live, else the Resume
+    // bar's click silently no-ops (real user report).
+    const spec = this.winInfo?._openSpec || {};
+    const backend = match?.backend || spec.backend || 'claude';
+    const backendSessionId = match?.backendSessionId || match?.sessionId || spec.backendSessionId || null;
+    return { backend, backendSessionId, claudeId: backend === 'claude' ? backendSessionId : null, cwd: match?.cwd || spec.cwd || '' };
   }
 
   // Fetch a range of messages from server

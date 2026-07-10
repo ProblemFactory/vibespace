@@ -2560,11 +2560,17 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 .status-filter-hint { font-size: 9px; color: var(--text-dim); padding: 2px 8px 4px; }
 /* Billing key in the window title bar (mirrors the card badge) */
 .win-auth-badge {
-  display: inline-flex; align-items: center; gap: 1px; flex-shrink: 0; margin-left: 6px;
-  color: var(--yellow, #e5c07b); font-size: 9px;
+  display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0; margin-left: 6px;
+  color: var(--yellow, #e5c07b); font-size: 9px; cursor: pointer;
+  padding: 0 4px; border-radius: 999px; border: 1px solid transparent; line-height: 14px;
 }
+.win-auth-badge:hover { border-color: var(--accent); color: var(--accent); }
 .win-auth-badge svg { width: 11px; height: 11px; display: block; }
 .win-auth-badge.unknown { color: var(--text-dim); opacity: 0.8; }
+/* Subscription/CLI-login identity: neutral chip (only API billing stays amber) */
+.win-auth-badge.sub { color: var(--text-secondary); background: var(--bg-input); border-color: var(--border); }
+.win-auth-badge.sub:hover { border-color: var(--accent); color: var(--accent); }
+.win-auth-badge .wab-name { max-width: 88px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tab-item .win-auth-badge { margin-left: 3px; }
 .tab-item .win-auth-badge svg { width: 10px; height: 10px; }
 /* Session Properties window */

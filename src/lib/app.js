@@ -124,6 +124,7 @@ class App {
     this.themeManager = new ThemeManager();
     this.ws = new WsManager();
     this.wm = new WindowManager(document.getElementById('workspace'));
+    this.wm.app = this; // mediator back-ref (title-bar billing badge → switcher)
     this.wm._settings = this.settings;
     this.wm._app = this;
     // Re-render all tab bars when tab wrap setting changes
@@ -3096,6 +3097,62 @@ class App {
     });
   }
 
+  // "Hot-switch" a session's billing account (title-bar badge click). A true
+  // in-process swap is impossible — the account rides the spawn env
+  // (ANTHROPIC_API_KEY / CLAUDE_SECURESTORAGE_CONFIG_DIR / CODEX_HOME), fixed
+  // for the CLI's lifetime — so this is the honest next best thing: persist
+  // the choice (sessionConfigs.account), kill the CLI, resume the SAME
+  // conversation on the new account. Also works on already-terminated
+  // (read-only) windows, where it just resumes on the picked account.
+  showBillingSwitcher(winId, anchor) {
+    const term = this.sessions.get(winId);
+    const win = this.wm.windows.get(winId);
+    if (!win) return;
+    const spec = win._openSpec || {};
+    const allSess = this.sidebar?._allSessions || [];
+    const live = term ? allSess.find(s => s.webuiId === term.sessionId) : null;
+    const backend = live?.backend || spec.backend || 'claude';
+    if (backend !== 'claude' && backend !== 'codex') return;
+    const backendSessionId = live?.backendSessionId || spec.backendSessionId || null;
+    const isCodex = backend === 'codex';
+    const accts = (this._accounts?.accounts || []).filter(a => ((a.backend || 'claude') === 'codex') === isCodex);
+    const currentId = live ? (live.accountId || null) : null;
+    const doSwitch = async (acctVal, label) => {
+      if (!backendSessionId) {
+        showToast(t('Nothing to resume yet — send a message first, or pick the account in the New Session dialog'), { type: 'error' });
+        return;
+      }
+      const ok = await showConfirmDialog({
+        title: t('Switch billing to “{name}”?', { name: label }),
+        message: t('The account is fixed when the CLI starts, so the session restarts and the conversation continues via resume.'),
+        confirmText: t('Switch & restart'),
+      });
+      if (!ok) return;
+      const key = spec.sessionKey || `${backend}:${backendSessionId}`;
+      this.sidebar?.setSessionConfig?.(key, { ...(this.sidebar?.getSessionConfig?.(key) || {}), account: acctVal });
+      const name = this.sidebar?.getCustomName?.({ backend, backendSessionId }) || live?.name || spec.name || win.title || t('Session');
+      const cwd = live?.cwd || spec.cwd || '';
+      const mode = live?.webuiMode || (win.type === 'terminal' ? 'terminal' : 'chat');
+      const hostId = live?.host || undefined;
+      const finish = () => this.resumeSession(backendSessionId, cwd, name, { mode, backend, backendSessionId, accountId: acctVal, hostId });
+      if (live?.webuiId) {
+        this.ws.send({ type: 'kill', sessionId: live.webuiId });
+        setTimeout(finish, 900); // let the CLI flush its transcript before --resume
+      } else finish();
+    };
+    const items = [];
+    // 'subscription' = accounts.resolveForSpawn's force-the-CLI's-own-login
+    // sentinel (a bare '' would fall through to the default account).
+    items.push({ label: (currentId === null ? '✓ ' : '') + t('CLI login'), action: () => { if (currentId !== null) doSwitch('subscription', t('CLI login')); } });
+    for (const a of accts) {
+      const cur = currentId === a.id;
+      const suffix = (!isCodex && (a.type || 'api') !== 'subscription') ? ' · API' : '';
+      items.push({ label: (cur ? '✓ ' : '') + a.name + suffix, action: () => { if (!cur) doSwitch(a.id, a.name); } });
+    }
+    const r = anchor.getBoundingClientRect();
+    showContextMenu(r.left, r.bottom + 4, items);
+  }
+
   // Clicking Fork opens a popup for the first message. The fork only diverges
   // into its own session once that message is sent (the backend mints the
   // fork's new id on first input), so prompting up front gives the user an
@@ -3673,7 +3730,18 @@ class App {
     const term = this.sessions.get(activeWinId);
     if (term && term.sessionId) {
       const allSess = this.sidebar?._allSessions || [];
-      const match = allSess.find(s => s.webuiId === term.sessionId);
+      let match = allSess.find(s => s.webuiId === term.sessionId);
+      if (!match) {
+        // Terminated/read-only windows: the live entry is gone — match the
+        // STOPPED sidebar entry via the identity in the openSpec (also covers
+        // view-history windows, whose sessionId never matches a webuiId).
+        const spec = this.wm.windows.get(activeWinId)?._openSpec;
+        const bsid = spec?.backendSessionId;
+        if (bsid) {
+          const be = spec.backend || 'claude';
+          match = allSess.find(s => (s.backendSessionId || s.sessionId) === bsid && (s.backend || 'claude') === be);
+        }
+      }
       if (match) {
         this.sidebar.highlightSession(match.sessionId);
         return;

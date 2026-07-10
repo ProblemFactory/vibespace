@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.71.0] — 2026-07-10
+
+### Added — billing identity on every window title + in-place switching
+Every Claude/Codex window now carries a billing chip in its title bar
+(subscription account name / CLI login as a neutral chip, API keys amber,
+codex accounts included). Clicking it opens a switcher: pick another account,
+confirm, and the session restarts on it with the conversation continuing via
+resume (a true in-process swap is impossible — the account is spawn env). The
+choice persists as the session's per-session config, and it also works on
+already-terminated read-only windows.
+
+### Fixed — terminated windows lost their identity
+After a sidebar terminate, the read-only window's Resume button silently did
+nothing and focusing the window no longer highlighted the session in the
+sidebar — the live-list entry is gone at that point. Both paths now fall back
+to the identity captured in the window's openSpec.
+
 ## [2.70.0] — 2026-07-10
 
 ### Fixed — Fable weekly quota back in the usage popup

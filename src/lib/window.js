@@ -922,19 +922,35 @@ class WindowManager {
     const applyAfter = (anchorEl) => {
       if (!anchorEl || !anchorEl.parentElement) return;
       let el = anchorEl.parentElement.querySelector(':scope > .win-auth-badge');
-      const isApi = auth && (auth.source === 'api-key' || auth.source === 'api-console' || auth.source === 'api-other');
-      const isUnknown = auth && auth.source === 'unknown';
-      if (!isApi && !isUnknown) { el?.remove(); return; }
+      // ALWAYS render for a billed session (2.71.0 — the old badge only marked
+      // API/unknown, so subscription windows showed nothing and you couldn't
+      // tell which account a window bills to without the sidebar).
+      if (!auth) { el?.remove(); return; }
       if (!el) {
         el = document.createElement('span');
         el.className = 'win-auth-badge';
         anchorEl.insertAdjacentElement('afterend', el);
       }
+      const isApi = auth.source === 'api-key' || auth.source === 'api-console' || auth.source === 'api-other';
+      const isUnknown = auth.source === 'unknown';
       el.classList.toggle('unknown', isUnknown);
-      el.innerHTML = KEY_SVG + (isUnknown ? '?' : '');
-      el.dataset.tip = isApi
-        ? `API billing (pay per use) — ${auth.source === 'api-console' ? 'Console login' : (auth.name ? auth.name + (auth.tail ? ' (…' + auth.tail + ')' : '') : (auth.detail || 'API key'))}${auth.guessed ? ' · estimated from the login state at spawn' : ''}`
-        : 'Billing identity unknown (started before tracking)';
+      el.classList.toggle('sub', !isApi && !isUnknown);
+      let tip;
+      if (isApi) {
+        el.innerHTML = KEY_SVG + `<span class="wab-name">${escHtml(auth.name || (auth.source === 'api-console' ? 'Console' : 'API'))}</span>`;
+        tip = t('API billing (pay per use)') + ` — ${auth.source === 'api-console' ? 'Console login' : (auth.name ? auth.name + (auth.tail ? ' (…' + auth.tail + ')' : '') : (auth.detail || 'API key'))}${auth.guessed ? ' · ' + t('estimated from the login state at spawn') : ''}`;
+      } else if (isUnknown) {
+        el.innerHTML = KEY_SVG + '?';
+        tip = t('Billing identity unknown (started before tracking)');
+      } else {
+        el.innerHTML = `<span class="wab-name">${escHtml(auth.name || t('CLI login'))}</span>`;
+        tip = (auth.source === 'codex-subscription' ? t('ChatGPT account')
+          : auth.source === 'codex-cli' ? t("The machine's own CLI login")
+          : auth.name ? t('Subscription account') : t("The machine's own CLI login"))
+          + (auth.guessed ? ' · ' + t('estimated from the login state at spawn') : '');
+      }
+      el.dataset.tip = tip + ' · ' + t('Click to switch billing');
+      el.onclick = (e) => { e.stopPropagation(); this.app?.showBillingSwitcher?.(id, el); };
     };
     if (win.titleSpan.parentElement === win.titleBar) applyAfter(win.titleSpan);
     if (win._tabChain) {
