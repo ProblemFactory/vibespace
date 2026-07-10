@@ -242,7 +242,7 @@ export function renderDashboard(container, data, panels, { onChange }) {
   const add = document.createElement('button');
   add.className = 'udash-add';
   add.textContent = '+ ' + t('Add panel');
-  add.onclick = (e) => openPanelEditor(e.currentTarget, null, (p) => onChange([...panels, p]));
+  add.onclick = (e) => openPanelEditor(e, null, (p) => onChange([...panels, p]));
   grid.appendChild(add);
   container.appendChild(grid);
 }
@@ -260,7 +260,7 @@ function renderPanel(data, panels, panel, idx, onChange) {
   tools.className = 'udash-panel-tools';
   const edit = document.createElement('button');
   edit.className = 'udash-tool'; edit.textContent = '✎'; edit.title = t('Edit panel');
-  edit.onclick = (e) => openPanelEditor(e.currentTarget, panel, (p) => {
+  edit.onclick = (e) => openPanelEditor(e, panel, (p) => {
     const next = panels.slice(); next[idx] = p; onChange(next);
   });
   const menu = document.createElement('button');
@@ -285,8 +285,10 @@ function renderPanel(data, panels, panel, idx, onChange) {
 }
 
 // Panel editor popover — metric / dimension / chart / topN selects.
-function openPanelEditor(anchor, existing, commit) {
-  const pop = createPopover(anchor, 'udash-editor', {});
+function openPanelEditor(e, existing, commit) {
+  // Cursor-anchored: the "+ Add panel" button spans the full grid width, so
+  // its left edge reads as detached from the click.
+  const pop = createPopover(e.currentTarget, 'udash-editor', { position: 'cursor', x: e.clientX, y: e.clientY + 6 });
   const panel = { metric: 'cost', dim: 'day', chart: 'line', span: 1, topN: 8, ...(existing || {}) };
   const sel = (label, options, cur, onSet) => {
     const wrap = document.createElement('label');
