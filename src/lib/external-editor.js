@@ -65,15 +65,41 @@ export function openExternalEditor(app, filePath, signalPath, sessionId) {
   // Store editor state on winInfo for layout save/restore
   targetWinInfo._editorState = { filePath, signalPath };
 
-  // Hint pill over the terminal half: while the CLI waits on the editor its
-  // fullscreen TUI leaves the alt screen, so the pane sits BLANK — which reads
-  // as broken. (Mouse-report suppression for the same window rides
-  // _editorState in terminal.js.) Removed by both teardown paths.
+  // Hint over the terminal half while the CLI blocks on the editor. (Mouse-
+  // report suppression for the same window rides _editorState in terminal.js.)
+  // Removed by both teardown paths. If the pane still shows blank after the
+  // fit+scrollToBottom below settle (rare — e.g. an empty fresh buffer), the
+  // pill upgrades to a centered explainer so the void doesn't read as a crash.
+  // NOTE the historical trap here: a "random per-window blank screen" was NOT
+  // a renderer difference (buffers showed zero alt-screen use in both) — it was
+  // the missing scrollToBottom parking the viewport below the content.
   const termVeil = document.createElement('div');
   termVeil.className = 'editor-term-veil';
   termVeil.textContent = t('Editing below — Save & Close to hand the file back');
   termContainer.appendChild(termVeil);
   targetWinInfo._editorTermVeil = termVeil;
+  setTimeout(() => {
+    if (!targetWinInfo._editorTermVeil) return; // already closed
+    try {
+      const term = [...app.sessions.values()].find(s => s.winInfo === targetWinInfo)?.terminal;
+      if (!term) return;
+      const buf = term.buffer.active;
+      let hasContent = false;
+      for (let i = buf.viewportY; i < buf.viewportY + term.rows; i++) {
+        const line = buf.getLine(i);
+        if (line && line.translateToString(true).trim()) { hasContent = true; break; }
+      }
+      if (!hasContent) {
+        termVeil.classList.add('editor-term-veil-center');
+        termVeil.textContent = '';
+        const b = document.createElement('b');
+        b.textContent = t('Waiting for the editor below');
+        const s = document.createElement('span');
+        s.textContent = t('The terminal resumes after Save & Close.');
+        termVeil.append(b, s);
+      }
+    } catch {}
+  }, 350);
 
   // Create the editor pane
   const editorPane = document.createElement('div');
@@ -127,7 +153,11 @@ export function openExternalEditor(app, filePath, signalPath, sessionId) {
   const termSession = [...app.sessions.values()].find(s => {
     return s.winInfo === targetWinInfo;
   }) || [...app.sessions.values()][0];
-  if (termSession) setTimeout(() => termSession.fit(), 100);
+  // fit() shrinks the terminal for the split — without the follow-up
+  // scrollToBottom the viewport can park in the blank region BELOW the content
+  // (looked like a random per-window "blank screen"; the close path always had
+  // the scrollToBottom, the open path forgot it).
+  if (termSession) setTimeout(() => { termSession.fit(); termSession.terminal.scrollToBottom(); }, 100);
 
   // Load file and create CodeMirror editor
   fetch(`/api/file/content?path=${encodeURIComponent(filePath)}`)

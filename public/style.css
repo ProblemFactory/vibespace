@@ -878,6 +878,16 @@ html, body {
   color: var(--text-secondary); font-size: 10px; white-space: nowrap;
   box-shadow: 0 2px 8px rgba(0,0,0,0.3);
 }
+/* Fullscreen-renderer sessions leave the pane FULLY blank — upgrade the pill
+   to a centered explainer so the void doesn't read as a crash */
+.editor-term-veil.editor-term-veil-center {
+  bottom: auto; top: 50%; transform: translate(-50%, -50%);
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 12px 18px; border-radius: var(--radius); white-space: normal;
+  text-align: center; max-width: 80%;
+}
+.editor-term-veil-center b { font-size: 11px; color: var(--text); font-weight: 600; }
+.editor-term-veil-center span { font-size: 10px; color: var(--text-dim); }
 /* tmux-style boundary: hatched unused region when a smaller client caps the PTY */
 .term-cap-strip {
   position: absolute; pointer-events: none; z-index: 5; display: none;
