@@ -206,6 +206,14 @@ const tabGroupMethods = {
   _renderTabBar(chain) {
     const hostWin = this.windows.get(chain.tabs[0]);
     if (!hostWin) return;
+    // Rebuilding the tab DOM destroys per-tab auth badges — re-apply them
+    // after this render instead of waiting for the next identity broadcast.
+    queueMicrotask(() => {
+      for (const tid of chain.tabs) {
+        const w = this.windows.get(tid);
+        if (w && w._authBadge !== undefined) this.setAuthBadge(tid, w._authBadge);
+      }
+    });
     // Tab-drag listeners are now scoped per-drag (created on mousedown, aborted
     // on mouseup in _setupTabDrag) instead of per-render, so re-rendering the
     // tab bar mid-drag no longer kills an in-flight drag.
@@ -457,6 +465,8 @@ const tabGroupMethods = {
     if (idx < 0) return;
     const win = this.windows.get(winId);
     if (!win) return;
+    // The detached window's standalone title bar needs its badge back.
+    queueMicrotask(() => { if (win._authBadge !== undefined) this.setAuthBadge(winId, win._authBadge); });
     const hostWin = this.windows.get(chain.tabs[0]);
     const isHost = idx === 0;
 

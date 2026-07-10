@@ -916,7 +916,19 @@ class WindowManager {
   setAuthBadge(id, auth) {
     const win = this.windows.get(id); if (!win) return;
     const key = auth ? `${auth.source}:${auth.name || ''}:${auth.guessed ? 1 : 0}` : '';
-    if (win._authBadgeKey === key) return; // unchanged — avoid churn per broadcast
+    win._authBadge = auth; // kept for re-apply after tab-bar rebuilds
+    // No-op guard, but SELF-HEALING: tab-bar re-renders (switch/merge/detach/
+    // drag) rebuild the tab DOM and destroy the badge span — with a pure key
+    // guard it never came back until the billing identity changed (real
+    // report: badges flaky on tabbed windows). Verify the badge actually
+    // exists where it should before skipping.
+    if (win._authBadgeKey === key) {
+      if (!key) return;
+      const there = win._tabChain
+        ? !!this.windows.get(win._tabChain.tabs[0])?.titleBar.querySelector(`.tab-item[data-win-id="${id}"] .win-auth-badge`)
+        : !!win.titleBar.querySelector(':scope > .win-auth-badge');
+      if (there) return;
+    }
     win._authBadgeKey = key;
     const KEY_SVG = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="8" r="3"/><path d="M8 8h6.5M12 8v2.5M14.5 8v2"/></svg>';
     // Standalone: SIBLING right after the title span (setTitle wipes
