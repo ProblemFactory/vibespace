@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.76.1] — 2026-07-10
+
+### Changed — vibespace-ask semantics: mirror every chat question
+Per user directive: agents must file an inbox item WHENEVER they ask the user
+something in chat (or end a turn waiting on decision/input/review) — not only
+for "things that specifically need the user" — because the user is often not
+watching that window. And the moment the user answers anywhere (chat counts),
+the agent resolves the item itself. Rewritten in all three teaching surfaces
+(no-task intro, task-group context, the CLI usage text). Payload budgets
+re-measured: single 7.4KB, 2-group 7.2KB, 3-group 10.2KB (tools still first).
+
 ## [2.76.0] — 2026-07-10
 
 ### Fixed — multi-group sessions could never learn the vibespace tools

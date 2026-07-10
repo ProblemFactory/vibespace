@@ -240,10 +240,10 @@ class TaskGroupManager {
       `- \`vibespace-status clear\`  /  \`vibespace-status show\``,
       `- Keep it honest and current — the user reads it on the board. Set \`blocked\` or \`needs-input\` (with a higher urgency) the moment you are stuck or waiting on the user; \`done\` when this piece of work is finished.`,
       '',
-      '`vibespace-ask` — file an item on the USER\'s global inbox when something specifically needs THEM (a decision, input only they can give, something to review). They see every session\'s items in one list and can jump here to answer:',
-      `- \`vibespace-ask "question or decision needed" [--detail "context + your recommendation"] [--urgency low|normal|high|urgent]\``,
-      `- \`vibespace-ask list\`  /  \`vibespace-ask resolve <id|text>\` — resolve it yourself once the user answers (in chat or otherwise).`,
-      `- ONLY for things that genuinely depend on the user — not your own working steps (normal todo list) and not group work items (\`vibespace-task plan-add\`).`,
+      '`vibespace-ask` — mirror EVERY question you have for the user onto their global inbox. The user is often NOT watching this window; the inbox is how they find waiting questions across all their sessions:',
+      `- Whenever you ask the user something in chat, end a turn waiting on their decision/input/review, or set status \`needs-input\`/\`blocked\`/\`review\` — ALSO file it: \`vibespace-ask "question" [--detail "context + your recommendation"] [--urgency low|normal|high|urgent]\`. Ask in chat AND file it — both, always.`,
+      `- The MOMENT the user answers (in chat or anywhere), resolve it YOURSELF: \`vibespace-ask resolve <id|text>\` — never leave your own answered items for the user to tick. \`vibespace-ask list\` shows what's open.`,
+      `- Still NOT for your own working steps (normal todo list) or group work items (\`vibespace-task plan-add\`).`,
       '',
       'Referencing files in chat replies: write ABSOLUTE paths (e.g. /home/user/project/out/final.wav) — the chat UI turns them into clickable links that open in the right viewer (audio plays, images preview, HTML renders). Bare filenames and project-relative paths may not resolve for the user.'];
   }
