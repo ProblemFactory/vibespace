@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.72.0] — 2026-07-10
+
+### Added — on-demand quota refresh is now configurable, with a warning
+New setting "On-demand quota refresh": Manual (default — ⟳ button only),
+Auto (also once on popup open when scoped data is >30 min stale), or Off
+(never contact Anthropic; the server refuses too). The first ⟳ click shows a
+one-time explainer of exactly what the call is. The setting description spells
+out the risk model: user-initiated /usage-equivalent traffic vs the background
+polling that has gotten accounts banned.
+
+### Fixed — sidebar re-rendered every few seconds (Remote tab / expanded cards flicker)
+The change-digest was order-sensitive while discovery orders sessions by
+transcript mtime — with several busy sessions the array reshuffled on nearly
+every 5s poll with zero content change (measured live: 5058 entries, 0
+changed), fully re-rendering the sidebar. The digest is now order-insensitive;
+25s instrumented after the fix: 0 re-renders.
+
 ## [2.71.0] — 2026-07-10
 
 ### Added — billing identity on every window title + in-place switching

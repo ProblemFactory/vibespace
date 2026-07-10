@@ -1110,4 +1110,13 @@ export default {
   'The account is fixed when the CLI starts, so the session restarts and the conversation continues via resume.': '账号在 CLI 启动时固定，所以会话将重启，对话通过 resume 无缝延续。',
   'Switch & restart': '切换并重启',
   'Nothing to resume yet — send a message first, or pick the account in the New Session dialog': '还没有可恢复的对话——先发一条消息，或在新建会话对话框里选账号',
+  'Manual only (⟳ button)': '仅手动（⟳ 按钮）',
+  'Auto on popup open (when >30 min stale)': '打开弹窗时自动（数据超 30 分钟陈旧才刷）',
+  'Off (never contact Anthropic)': '关闭（绝不主动请求 Anthropic）',
+  'On-demand quota refresh (model-scoped limits like Fable)': '按需刷新配额（Fable 等模型级限额）',
+  'The passive statusline feed only carries the 5h/7d windows — model-scoped weekly limits (e.g. Fable) can ONLY come from asking Anthropic’s usage endpoint with the account’s own login token. This is the same non-billable call the CLI makes when you run /usage, throttled to ≥60s per account and honoring rate-limit backoff, and it NEVER runs on a timer. It is user-initiated traffic, categorically different from the background polling that has gotten accounts banned — but it is still an off-CLI request with a subscription token, so it is your call: Manual = only when you click ⟳; Auto = also once when you open the quota popup and the data is stale; Off = never (the ⟳ button disappears and scoped limits stay unknown).': '被动 statusline 只携带 5h/7d 窗口——模型级周限额（如 Fable）只能用该账号自己的登录 token 请求 Anthropic 的用量端点获得。这与你在 CLI 里运行 /usage 时 CLI 自己发出的调用完全相同（非计费），每账号至少间隔 60 秒并遵守限流退避，且绝不会定时运行。这是用户触发的流量，与导致封号的后台轮询有本质区别——但它仍是携带订阅 token 的 CLI 外请求，由你决定：手动 = 仅点 ⟳ 时；自动 = 打开配额弹窗且数据陈旧时也刷一次；关闭 = 永不（⟳ 按钮消失，模型级限额保持未知）。',
+  'Fetch quota from Anthropic?': '向 Anthropic 获取配额？',
+  'This makes ONE non-billable request to Anthropic’s usage endpoint with this account’s own login token — the same call the CLI makes when you run /usage. It only ever fires when you ask (never on a timer) and is throttled to ≥60s per account. Configure or disable it in Settings → “On-demand quota refresh”. This notice is shown once.': '这将用该账号自己的登录 token 向 Anthropic 的用量端点发出一次非计费请求——与你在 CLI 里运行 /usage 时发出的调用相同。仅在你主动操作时触发（绝不定时），每账号至少间隔 60 秒。可在 设置 → "按需刷新配额" 中配置或关闭。此提示只显示一次。',
+  'Fetch': '获取',
+  'Model-scoped weekly limits (e.g. Fable) aren’t in the passive feed — on-demand refresh is disabled in Settings': '模型级周配额（如 Fable）不在被动采集里——按需刷新已在设置中关闭',
 };
