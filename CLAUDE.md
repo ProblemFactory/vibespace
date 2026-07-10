@@ -521,6 +521,8 @@ Mobile-specific UI code extracted into dedicated modules to keep desktop and mob
 
 **Session management**: `mode` field on session object. Stored in session metadata + wrapper metadata. `/api/active` and WebSocket `active-sessions` include mode. Sidebar shows badge for chat sessions. Default mode controlled by `session.defaultMode` setting (default: `chat`). All `createSession` paths respect this setting. Resume: split button toggles Terminal/Chat mode per session, persisted in user state.
 
+**Hook detail in history (2.77.0)**: JSONL `attachment` records of type hook_success/hook_failure/hook_system_message (they carry hookName + full stdout incl. injected additionalContext) render as expandable ✓/✗ Hook cards — previously dropped, so history showed only the bare stop_hook_summary; that summary now also names the first 3 hooks. Live hook_response + replayed attachment double-render is collapsed by a name+5s dedup window (`_lastHookCard`).
+
 **JSONL history**: On chat attach, server normalizes all messages via MessageManager (`convertHistory`) and sends last 50 normalized messages + totalCount. Paginated API: `GET /api/session-messages?claudeSessionId=...&cwd=...&offset=&limit=&search=&turnmap=1`. All responses return normalized messages (tool calls merged, stable IDs).
 
 **Virtual scroll**: Sliding DOM window keeps max ~150 rendered messages. `_extendTop()` loads older messages and trims bottom (`_trimBottom`). `_extendBottom()` loads newer messages when scrolling back down and trims top (`_trimTop`) with scroll position preservation. Live messages while viewing history are deferred (only `_total` incremented, scroll button shows badge count). Position indicator shows `120–170 / 3000` when not pinned to bottom.
