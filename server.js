@@ -1100,12 +1100,22 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
 function readSessionMeta(sockName) {
   try { return JSON.parse(fs.readFileSync(path.join(META_DIR, sockName + '.json'), 'utf-8')); } catch { return {}; }
 }
+// Tombstones (2.89.1): teardown deletes the meta, but debounced/straggler
+// writers (status flush, todo coalesce, attribution) can fire AFTER the delete
+// and resurrect the file from a PARTIAL object — observed as metas with
+// sessionId/sockName null, which then confuse the next restore (a real
+// restart-data-loss chain). sockNames are unique per spawn, so a deleted one
+// is never legitimately written again.
+const _metaTombstones = new Map(); // sockName → deletedAt
 function writeSessionMeta(sockName, meta) {
+  if (_metaTombstones.has(sockName)) return;
   ensureDir(META_DIR);
   fs.writeFileSync(path.join(META_DIR, sockName + '.json'), JSON.stringify(meta));
   try { recordUsageAttribution(meta); } catch {} // usage-ledger account-by-time
 }
 function deleteSessionMeta(sockName) {
+  _metaTombstones.set(sockName, Date.now());
+  if (_metaTombstones.size > 4096) _metaTombstones.delete(_metaTombstones.keys().next().value);
   try { fs.unlinkSync(path.join(META_DIR, sockName + '.json')); } catch {}
 }
 
@@ -3419,19 +3429,29 @@ server.listen(PORT, HOST, () => {
   // Restore existing dtach sessions from before restart
   restoreSessions();
 
-  // Orphan sweep: buffer/wrapper-meta files whose session did NOT survive the
-  // restore are dead (nothing ever reads them again) — before 2.81.0 they
-  // accumulated forever. Delayed so late-restoring sessions aren't raced.
+  // Orphan sweep — AGE-BASED (2.89.1). The activeSessions-keyed sweep was a
+  // real data-loss race: a live dtach session the restore didn't re-adopt
+  // within 30s (or re-adopted under a different id after meta corruption) had
+  // its buffer UNLINKED while the wrapper kept writing the deleted inode —
+  // live streaming looked fine, but every restart rebuilt history without the
+  // buffer ("重启之后消息就都没了", real incident). Dead buffers stop being
+  // WRITTEN, so age is race-free by construction: only files untouched for
+  // 7 days are ever deleted, and never for a currently-active session.
   setTimeout(() => {
     let swept = 0;
+    const cutoff = Date.now() - 7 * 86400000;
     try {
       for (const fn of fs.readdirSync(BUFFERS_DIR)) {
         const m = fn.match(/^(.+)\.(buf|json)$/);
         if (!m || activeSessions.has(m[1])) continue;
-        try { fs.unlinkSync(path.join(BUFFERS_DIR, fn)); swept++; } catch {}
+        try {
+          const st = fs.statSync(path.join(BUFFERS_DIR, fn));
+          if (st.mtimeMs > cutoff) continue; // recently written → possibly a live-but-unadopted session
+          fs.unlinkSync(path.join(BUFFERS_DIR, fn)); swept++;
+        } catch {}
       }
     } catch {}
-    if (swept) console.log(`  Swept ${swept} orphaned session-buffer files`);
+    if (swept) console.log(`  Swept ${swept} orphaned session-buffer files (>7d untouched)`);
   }, 30000);
 
   console.log(`  Ready.\n`);

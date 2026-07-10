@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.89.1 — 2026-07-10
+
+**Restart data-loss hardening (real incident chain)**
+- The 30s-post-boot orphan sweep (2.83.0) keyed on activeSessions — a live dtach session the restore didn't re-adopt in time had its buffer UNLINKED while the wrapper kept writing the deleted inode: live streaming looked fine, but every later restart rebuilt history without the buffer. Sweep is now AGE-BASED (only files untouched for 7 days; dead buffers stop being written, so age is race-free by construction).
+- Session-meta tombstones: teardown deletes the meta, but debounced/straggler writers could fire after the delete and resurrect the file from a partial object — sockNames are unique per spawn, so writes to a tombstoned name are now dropped.
+
 ## 2.89.0 — 2026-07-10
 
 - **Stop-nudge firing conditions configurable**: `agents.stopNudgeStaleMinutes` (default 10, clamp 1–240) and `agents.stopNudgeCooldownMinutes` (default 30, clamp 2–720) — editable inline next to the stop-nudge text in Manage Agents → Agent instructions, and in Settings.
