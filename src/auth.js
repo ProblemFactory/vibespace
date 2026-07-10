@@ -277,9 +277,9 @@ const LOGIN_HTML = `<!DOCTYPE html>
   p  { margin:0 0 22px; font-size:12px; color:#8a93a3; }
   input { width:100%; box-sizing:border-box; padding:10px 12px; font-size:14px; border-radius:8px;
           border:1px solid #2b3341; background:#0d1015; color:#e2e5ea; outline:none; }
-  input:focus { border-color:#6366f1; }
+  input:focus { border-color:#2dd4bf; }
   button { width:100%; margin-top:14px; padding:10px; font-size:14px; font-weight:600; border:none;
-           border-radius:8px; background:#6366f1; color:#fff; cursor:pointer; }
+           border-radius:8px; background:#2dd4bf; color:#042f2a; cursor:pointer; }
   button:hover { background:#575af0; }
   .err { color:#f87171; font-size:12px; min-height:16px; margin-top:10px; }
 </style></head>
