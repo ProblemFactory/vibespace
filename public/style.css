@@ -869,6 +869,15 @@ html, body {
 
 /* ── Terminal ── */
 .terminal-container { width: 100%; flex: 1; min-height: 0; padding: 4px 10px 4px 4px; box-sizing: border-box; position: relative; }
+/* Ctrl+G hint pill — the CLI's fullscreen TUI blanks the pane while it waits on
+   the editor, which reads as broken without a word of explanation */
+.editor-term-veil {
+  position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%);
+  padding: 3px 12px; border-radius: 999px; pointer-events: none; z-index: 5;
+  background: var(--bg-dialog); border: 1px solid var(--border-active);
+  color: var(--text-secondary); font-size: 10px; white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
 /* tmux-style boundary: hatched unused region when a smaller client caps the PTY */
 .term-cap-strip {
   position: absolute; pointer-events: none; z-index: 5; display: none;

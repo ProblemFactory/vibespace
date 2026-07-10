@@ -5,6 +5,7 @@
  */
 
 import { CodeEditor, detectLang, getLangExtension, loadEditorSettings, saveEditorSettings, editorLightTheme, activeLineSelectionPatch } from './code-editor.js';
+import { t } from './i18n.js';
 import { Resizer } from './resizer.js';
 import { EditorView, basicSetup } from 'codemirror';
 import { oneDark } from '@codemirror/theme-one-dark';
@@ -63,6 +64,16 @@ export function openExternalEditor(app, filePath, signalPath, sessionId) {
 
   // Store editor state on winInfo for layout save/restore
   targetWinInfo._editorState = { filePath, signalPath };
+
+  // Hint pill over the terminal half: while the CLI waits on the editor its
+  // fullscreen TUI leaves the alt screen, so the pane sits BLANK — which reads
+  // as broken. (Mouse-report suppression for the same window rides
+  // _editorState in terminal.js.) Removed by both teardown paths.
+  const termVeil = document.createElement('div');
+  termVeil.className = 'editor-term-veil';
+  termVeil.textContent = t('Editing below — Save & Close to hand the file back');
+  termContainer.appendChild(termVeil);
+  targetWinInfo._editorTermVeil = termVeil;
 
   // Create the editor pane
   const editorPane = document.createElement('div');
@@ -196,6 +207,7 @@ export function openExternalEditor(app, filePath, signalPath, sessionId) {
         // Remove editor pane + resizer, restore terminal to full height
         targetWinInfo._editorState = null;
         targetWinInfo._editorDoSave = null;
+        targetWinInfo._editorTermVeil?.remove(); targetWinInfo._editorTermVeil = null;
         editorView.destroy();
         splitResizer.destroy();
         editorPane.remove();
@@ -255,6 +267,7 @@ export function closeExternalEditor(app, signalPath) {
         editorPane.remove();
         win._editorState = null;
         win._editorDoSave = null;
+        win._editorTermVeil?.remove(); win._editorTermVeil = null;
         if (win._splitResizer) { win._splitResizer.destroy(); win._splitResizer = null; }
         if (termContainer) {
           win.content.style.display = '';
