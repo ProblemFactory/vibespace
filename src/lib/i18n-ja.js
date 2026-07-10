@@ -1197,4 +1197,12 @@ export default {
   "Short custom text placed at the top of the per-turn reminder — reaches the agent on EVERY message you send, so keep it tight (≤500 chars; it costs tokens each turn). Delivers even if the standard tool reminder is turned off. Edit in Manage Agents → Agent instructions.": "毎ターンリマインダーの先頭に置かれる短いテキスト——送信するすべてのメッセージでエージェントに届くため簡潔に（≤500 文字、毎ターン token を消費）。標準リマインダーをオフにしても単独で配信されます。編集は エージェント管理 → エージェント指示 で。",
   "Stop-nudge extra (injected when the bookkeeping nudge fires)": "停止ナッジ追加テキスト（記帳リマインダー発火時に注入）",
   "Custom text placed at the top of the stop-time bookkeeping nudge (≤500 chars) — e.g. extra end-of-turn duties for your agents. Edit in Manage Agents → Agent instructions.": "停止時の記帳ナッジの先頭に置かれるテキスト（≤500 文字）——例：エージェントへの追加のターン末タスク。編集は エージェント管理 → エージェント指示 で。",
+  "fire after {n} min without a status update": "ステータスが {n} 分更新されないと発火",
+  "at most once per {n} min per session": "セッションごとに最大 {n} 分に 1 回",
+  "The nudge only fires when the session has not updated its board status for this long.": "セッションのボードステータスがこの時間更新されていない場合のみ発火します。",
+  "After nudging a session once, wait at least this long before nudging it again.": "一度ナッジした後、再度ナッジするまで最低この時間待ちます。",
+  "Stop nudge: staleness threshold (minutes)": "停止ナッジ：ステータス失効しきい値（分）",
+  "The nudge only fires when the session has not updated its board status for this long. Lower = agents are reminded more eagerly; higher = quieter.": "セッションのボードステータスがこの時間更新されていない場合のみ発火します。小さく = より積極的に、大きく = より静かに。",
+  "Stop nudge: cooldown per session (minutes)": "停止ナッジ：セッションごとのクールダウン（分）",
+  "After nudging a session once, wait at least this long before nudging it again — the ceiling on how often an agent pays the bookkeeping mini-turn.": "一度ナッジした後、再度ナッジするまで最低この時間待ちます——エージェントが記帳ミニターンを支払う頻度の上限です。",
 };
