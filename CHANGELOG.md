@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.67.3] — 2026-07-10
+
+### Fixed — Ctrl+G editor toolbar buttons were never styled
+The split-editor's Wrap/A-/A+/Theme buttons had NO CSS rule at all — raw
+browser-default buttons (thick borders, wrong font), which the design pass
+missed because `external-editor.js` sat in no auditor's file list. They now use
+the canonical secondary-button recipe. A follow-up sweep for other JS-built
+buttons with no CSS rule confirmed this was the only one.
+
 ## [2.67.2] — 2026-07-10
 
 ### Fixed — Ctrl+G polish: no more mouse-garbage or mystery blank pane

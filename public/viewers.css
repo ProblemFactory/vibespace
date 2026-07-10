@@ -375,6 +375,14 @@
 .editor-toolbar-sep {
   width: 1px; height: 16px; background: var(--border); margin: 0 2px; flex-shrink: 0;
 }
+/* Ctrl+G split-editor toolbar buttons (external-editor.js) — these had NO rule
+   at all and rendered as raw UA-default buttons; canonical secondary recipe. */
+.editor-setting-btn {
+  background: var(--bg-input); border: 1px solid var(--border); color: var(--text-secondary);
+  border-radius: var(--radius-sm); padding: 3px 10px; font-size: 11px; cursor: pointer;
+  flex-shrink: 0; white-space: nowrap;
+}
+.editor-setting-btn:hover { border-color: var(--accent); color: var(--accent); }
 .save-indicator { font-size: 10px; white-space: nowrap; flex-shrink: 0; }
 .editor-font-size-display {
   font-size: 10px; color: var(--text-secondary); min-width: 18px; text-align: center;
