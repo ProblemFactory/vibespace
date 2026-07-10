@@ -603,6 +603,12 @@ function handleNotification(method, params) {
     pendingServerRequests.clear();
     scheduleMeta();
 
+    // Stop-equivalent bookkeeping nudge (codex has no blockable Stop hook in
+    // JSON-RPC mode — the wrapper's turn/completed IS the stop point). The
+    // server gates by status freshness + a 30min cooldown; the nudge turn
+    // itself must never re-nudge (nudgeTurnActive).
+    if (nudgeTurnActive) { nudgeTurnActive = false; }
+    else if (normalEnd) maybeStopNudge();
     // Refresh goal state after each turn (time_used_seconds updated in DB)
     if (meta.goal && meta.threadId) {
       request('thread/goal/get', { threadId: meta.threadId }, 5000).then(resp => {
@@ -731,6 +737,23 @@ async function injectTaskContextForTurn() {
       log(`injected task context (${data.context.length} chars) via thread/inject_items`);
     }
   } catch (e) { log(`task context inject skipped: ${e.message}`); }
+}
+
+let nudgeTurnActive = false;
+async function maybeStopNudge() {
+  const api = process.env.VIBESPACE_API, token = process.env.VIBESPACE_SESSION_TOKEN;
+  if (!api || !token || !meta.threadId) return;
+  try {
+    const res = await fetch(api + '/api/agent/stop-check', {
+      headers: { Authorization: 'Bearer ' + token }, signal: AbortSignal.timeout(2500),
+    });
+    if (!res.ok) return;
+    const d = await res.json();
+    if (!d || !d.block || !d.reason) return;
+    nudgeTurnActive = true;
+    log('stop nudge: starting one bookkeeping turn');
+    await startTurn('<vibespace-reminder>' + d.reason + '</vibespace-reminder>');
+  } catch (e) { nudgeTurnActive = false; log('stop nudge skipped: ' + e.message); }
 }
 
 async function startTurn(text, attachments = []) {

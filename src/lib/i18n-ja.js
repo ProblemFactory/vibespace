@@ -1142,4 +1142,6 @@ export default {
   'uuid': 'uuid',
   'Per-turn tool reminder for agents': 'エージェントへの毎ターンツールリマインダー',
   'Injects a one-line (~250 byte) reminder of the vibespace tools (status / ask / task) with every prompt you send, so agents keep using them in long sessions — the full rules injected at session start scroll out of the working context over time. Turn off to save the few tokens per turn.': '送信する各プロンプトに vibespace ツール（status / ask / task）の 1 行（約 250 バイト）リマインダーを注入し、長いセッションでもエージェントがツールを使い続けるようにします — セッション開始時の完全なルールは時間とともに作業コンテキストから流れ出てしまいます。オフにすると毎ターンのわずかなトークンを節約できます。',
+  'Stop-time bookkeeping nudge for agents': 'エージェント停止時の記帳リマインダー',
+  'When an agent finishes a turn while its board state is stale (no status update in 10 minutes), it gets one short follow-up asking it to set vibespace-status, mirror open questions with vibespace-ask, and log finished work — then it stops. At most once per 30 minutes per session. Claude enforces this via a blocking Stop hook; Codex via its wrapper at turn end.': 'エージェントがターンを終える際にボード状態が古い場合（10 分間ステータス更新なし）、vibespace-status の設定・vibespace-ask での未回答質問のミラー・完了作業の記録を求める短いフォローアップを 1 回受けてから停止します。セッションごとに 30 分に最大 1 回。Claude はブロッキング Stop フック、Codex はラッパーがターン終了時に実行します。',
 };

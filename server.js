@@ -1379,6 +1379,20 @@ async function run(input) {
       path = '/api/agent/task-context';
     } else if (event === 'UserPromptSubmit') {
       path = '/api/agent/prompt-context';
+    } else if (event === 'Stop') {
+      // Bookkeeping nudge with teeth: the SERVER decides (status freshness +
+      // 30min cooldown) whether the agent must update its board before this
+      // stop sticks. stop_hook_active = we already nudged — never loop.
+      if (input.stop_hook_active) return process.exit(0);
+      const c2 = new AbortController();
+      const t2 = setTimeout(() => c2.abort(), 2500);
+      const r = await fetch(api + '/api/agent/stop-check', { headers: { Authorization: 'Bearer ' + token }, signal: c2.signal });
+      clearTimeout(t2);
+      if (r.ok) {
+        const d = await r.json();
+        if (d && d.block && d.reason) process.stdout.write(JSON.stringify({ decision: 'block', reason: d.reason }));
+      }
+      return process.exit(0);
     } else {
       return process.exit(0);
     }
@@ -1421,13 +1435,12 @@ import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 const hookCmd = 'node ' + join(dirname(fileURLToPath(import.meta.url)), 'vibespace-hook.mjs');
-const EVENTS = ['SessionStart', 'UserPromptSubmit'];
 const files = [
-  { f: join(homedir(), '.claude', 'settings.json'), create: false },
-  { f: join(homedir(), '.codex', 'hooks.json'), create: true },
+  { f: join(homedir(), '.claude', 'settings.json'), create: false, EVENTS: ['SessionStart', 'UserPromptSubmit', 'Stop'] },
+  { f: join(homedir(), '.codex', 'hooks.json'), create: true, EVENTS: ['SessionStart', 'UserPromptSubmit'] },
 ];
 const findOur = (list) => { for (const g of (Array.isArray(list) ? list : [])) { const h = (g.hooks || []).find(h => typeof h.command === 'string' && h.command.includes('vibespace-hook.mjs')); if (h) return h; } return null; };
-for (const { f, create } of files) {
+for (const { f, create, EVENTS } of files) {
   try {
     let root = null; try { root = JSON.parse(readFileSync(f, 'utf-8')); } catch { root = null; }
     if (!root) { if (existsSync(f)) continue; if (!create) continue; root = {}; }
@@ -1459,6 +1472,9 @@ const HOOK_FILES = {
 // Both events are natively supported by Claude Code and Codex; SessionStart
 // delivers task context, UserPromptSubmit delivers pending status notices.
 const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit'];
+// Stop is CLAUDE-ONLY: codex's app-server (JSON-RPC mode) has no blockable
+// Stop hook — its stop-time nudge rides the codex wrapper's turn/completed.
+const HOOK_EVENTS_FOR = (harness) => harness === 'claude' ? [...HOOK_EVENTS, 'Stop'] : HOOK_EVENTS;
 // Persisted opt-out: when the user clicks Remove in Manage Agents, we drop this
 // marker so startup does NOT silently re-register the hooks they removed.
 const HOOK_OPTOUT_FILE = path.join(__dirname, 'data', '.agent-hooks-optout');
@@ -1511,7 +1527,8 @@ function agentHooksStatus() {
     try { root = JSON.parse(fs.readFileSync(file, 'utf-8')); }
     catch { parseError = fs.existsSync(file); }
     let found = [];
-    try { found = HOOK_EVENTS.map(ev => root ? _findOurHookIn(root.hooks?.[ev]) : null); } catch { found = HOOK_EVENTS.map(() => null); }
+    const evs = HOOK_EVENTS_FOR(key);
+    try { found = evs.map(ev => root ? _findOurHookIn(root.hooks?.[ev]) : null); } catch { found = evs.map(() => null); }
     out[key] = {
       file,
       fileExists: fs.existsSync(file),
@@ -1533,7 +1550,7 @@ function ensureAgentHooks({ auto = false } = {}) {
     try {
       _patchHookFile(def.file(), def.createIfMissing, (root) => {
         let changed = false;
-        for (const ev of HOOK_EVENTS) {
+        for (const ev of HOOK_EVENTS_FOR(key)) {
           if (!Array.isArray(root.hooks[ev])) root.hooks[ev] = [];
           const ours = _findOurHookIn(root.hooks[ev]);
           if (ours) { if (ours.command !== hookCmd) { ours.command = hookCmd; changed = true; } }
@@ -1556,7 +1573,7 @@ function removeAgentHooks() {
     try {
       _patchHookFile(def.file(), false, (root) => {
         let changed = false;
-        for (const ev of HOOK_EVENTS) {
+        for (const ev of [...HOOK_EVENTS, 'Stop']) {
           if (!Array.isArray(root.hooks[ev])) continue;
           for (const group of root.hooks[ev]) {
             if (!group || !Array.isArray(group.hooks)) continue;
@@ -2220,6 +2237,31 @@ app.get('/api/agent/prompt-context', (req, res) => {
     res.json({ success: true, context: parts.join('\n\n') });
   } catch (e) { res.json({ success: true, context: '' }); }
 });
+// Stop-time bookkeeping nudge (2.79.0): fired by the Stop hook (claude) and
+// the codex wrapper's turn/completed. Returns block+reason ONLY when the
+// session's board state is stale (no status update in 10 min) AND we haven't
+// nudged in 30 min — one bounded bookkeeping mini-turn, not a per-stop tax.
+app.get('/api/agent/stop-check', (req, res) => {
+  const hit = agentSession(req, res);
+  if (!hit) return;
+  try {
+    if (!stopNudgeEnabled()) return res.json({ block: false });
+    const [s, id] = hit;
+    const now = Date.now();
+    if (s._lastStopNudge && now - s._lastStopNudge < 30 * 60 * 1000) return res.json({ block: false });
+    const key = sessionStatusKey(s, id);
+    const rec = sessionStatus.get(key) || sessionStatus.get(`webui:${id}`);
+    if (rec && rec.at && now - rec.at < 10 * 60 * 1000) return res.json({ block: false });
+    s._lastStopNudge = now;
+    res.json({
+      block: true,
+      reason: 'VibeSpace bookkeeping before you stop (your board state is stale): (1) set your CURRENT state — vibespace-status <working|needs-input|blocked|review|done> --reason "one line" (done if this piece of work is finished; needs-input/review if you are waiting on the user); (2) if you asked the user anything this turn or are waiting on them, MIRROR it — vibespace-ask "question" — and vibespace-ask resolve anything they already answered; (3) if you completed meaningful work, log it — vibespace-task progress "summary". Then stop again.',
+    });
+  } catch { res.json({ block: false }); }
+});
+function stopNudgeEnabled() {
+  try { return getSyncStore('settings')?.get('agents.stopBookkeepingNudge') !== false; } catch { return true; }
+}
 function perTurnReminderEnabled() {
   try { return getSyncStore('settings')?.get('agents.perTurnToolReminder') !== false; } catch { return true; }
 }

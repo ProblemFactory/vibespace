@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.79.0] — 2026-07-10
+
+### Added — stop-time bookkeeping nudge (with teeth)
+When an agent finishes a turn while its board state is stale (no vibespace-
+status update in 10 minutes), it now gets one short follow-up — set your
+status, mirror open questions to the inbox, log finished work — and then
+stops. Claude: a blocking Stop hook (stop_hook_active-guarded, never loops).
+Codex: the wrapper fires the same server arbiter at turn/completed and runs
+one synthetic bookkeeping turn (the app-server has no blockable Stop in
+JSON-RPC mode). At most once per 30 minutes per session; setting
+`agents.stopBookkeepingNudge` (default on) disables it.
+
 ## [2.78.0] — 2026-07-10
 
 ### Added — per-turn tool micro-reminder for agents
