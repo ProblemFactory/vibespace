@@ -74,7 +74,7 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
 
     // ── Identity ──
     const idSec = section(t('Identity'));
-    row(idSec, t('Name'), escHtml(displayName) + (customName ? ` <span style="color:var(--text-dim);font-size:9px">${escHtml(t('(custom)'))}</span>` : ''));
+    row(idSec, t('Name'), escHtml(displayName) + (customName ? ` <span class="sp-dim-note">${escHtml(t('(custom)'))}</span>` : ''));
     row(idSec, t('ID'), escHtml(s.sessionId || ''), { copy: s.sessionId || '' });
     const bm = getBackendMeta(s.backend || 'claude');
     const agentBits = [bm.label, (s.agentKind && s.agentKind !== 'primary') ? getAgentKindMeta(s.agentKind).label : null, getAgentRoleLabel(s.agentRole), s.agentNickname || null].filter(Boolean).join(' / ');
@@ -95,7 +95,7 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
     stRow.className = 'session-detail-row';
     stRow.innerHTML = `<span class="session-detail-label">${escHtml(t('Now'))}</span>
       <span class="session-detail-value" style="flex:1">${meta
-        ? `<span style="color:${meta.color};font-weight:600">${escHtml(meta.label)}${urgMark ? ' ' + urgMark : ''}</span>${st.reason ? ` <span style="color:var(--text-dim)">— ${escHtml(st.reason)}</span>` : ''} <span style="color:var(--text-dim);font-size:9px">(${st.setBy === 'agent' ? escHtml(t('agent')) : escHtml(t('you'))})</span>`
+        ? `<span style="color:${meta.color};font-weight:600">${escHtml(meta.label)}${urgMark ? ' ' + urgMark : ''}</span>${st.reason ? ` <span style="color:var(--text-dim)">— ${escHtml(st.reason)}</span>` : ''} <span class="sp-dim-note">(${st.setBy === 'agent' ? escHtml(t('agent')) : escHtml(t('you'))})</span>`
         : `<span style="color:var(--text-dim)">${escHtml(t('none declared'))}</span>`}</span>`;
     const chg = document.createElement('button');
     chg.className = 'task-detail-btn';

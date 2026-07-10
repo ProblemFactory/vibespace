@@ -605,7 +605,7 @@ class App {
       : t('Each Codex session can pick its ChatGPT login (New Session dialog / card ⚙). Held in isolated logins, switchable per session; threads stay shared.');
     left.innerHTML = `<b>${t('ChatGPT / OpenAI accounts')}</b>
       <div class="acct-list">${globalRow}${keyLines}</div>
-      <div class="agents-note" style="margin:4px 0 0">${note}</div>`;
+      <div class="agents-note">${note}</div>`;
     const actions = document.createElement('div'); actions.className = 'agent-actions';
     const addBtn = document.createElement('button'); addBtn.className = 'agent-btn' + (codexAccts.length ? '' : ' primary'); addBtn.textContent = t('Add ChatGPT account…');
     addBtn.title = t('Sign in another ChatGPT account — stored in VibeSpace (not on any one machine), switchable per session');
@@ -733,7 +733,7 @@ class App {
         html += step(1, 'active', t('Log in to your Console account once'),
           t('A terminal will open — in the login menu pick <b>“Anthropic Console account”</b>. This temporarily replaces the subscription login; step 2 restores it right after. VibeSpace auto-captures the key the moment it appears.'),
           `<button class="agent-btn primary" id="acct-w-console">${t('Open login terminal')}</button>`
-          + `<div class="agents-note" style="margin-top:4px">${t('Or, if you already have a key: <a href="#" id="acct-w-paste">paste an API key</a>')}</div>`);
+          + `<div class="agents-note">${t('Or, if you already have a key: <a href="#" id="acct-w-paste">paste an API key</a>')}</div>`);
       }
       // Step 2 — subscription owns the global login
       if (sub) {
@@ -904,7 +904,7 @@ class App {
           };
           const allGood = hs.claude?.installed && hs.codex?.installed;
           left.innerHTML = `<b>${t('VibeSpace integration')}</b><div>${stateOf('claude', 'Claude')} &nbsp; ${stateOf('codex', 'Codex')}</div>`
-            + `<div class="agents-note" style="margin:4px 0 0">${t("Lets sessions in a Task Group automatically receive the group's context (objective, checklist, shared files).")}</div>`;
+            + `<div class="agents-note">${t("Lets sessions in a Task Group automatically receive the group's context (objective, checklist, shared files).")}</div>`;
           const actions = document.createElement('div'); actions.className = 'agent-actions';
           const installBtn = document.createElement('button');
           installBtn.className = 'agent-btn' + (allGood ? '' : ' primary');
@@ -1065,7 +1065,7 @@ class App {
       : t('Each session can pick its account (New Session dialog / card ⚙). Subscriptions bill your Pro/Max plan; API keys bill pay-per-use. The starred account is the default when a session doesn’t pick one.');
     left.innerHTML = `<b>${t('Anthropic accounts')}</b>
       <div class="acct-list">${globalRow}${keyLines}</div>
-      <div class="agents-note" style="margin:4px 0 0">${note}</div>`;
+      <div class="agents-note">${note}</div>`;
     const actions = document.createElement('div'); actions.className = 'agent-actions';
     if (!selectedHost) {
       const needsSetup = !sub.loggedIn || !claudeAccts.length;
@@ -2126,7 +2126,7 @@ class App {
           <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(rl.sevenDay?.resetsAt)}</span>
         </div>
       </div>${scopedSections.join('')}
-      ${this._subSignedOut && showingGlobal ? `<div class="usage-note">${t('⚠ Subscription signed out (a Console login replaced it) — pies show its last-known quota. API-billed sessions never appear here.')}</div>` : ''}
+      ${this._subSignedOut && showingGlobal ? `<div class="usage-warn">${t('⚠ Subscription signed out (a Console login replaced it) — pies show its last-known quota. API-billed sessions never appear here.')}</div>` : ''}
       <div class="usage-updated">${t('Updated {ago}', { ago: agoText(rl.fetchedAt) })}</div>`;
       sections.push(`${renderSectionTitle('claude', escHtml(claudeUsageLabel))}${switcher}
       ${usageNote ? `<div class="usage-note">${usageNote}</div>` : ''}

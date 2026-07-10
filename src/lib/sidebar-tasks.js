@@ -26,14 +26,14 @@ export const SESSION_STATE_META = {
   working: { label: tr('working'), color: 'var(--green)', icon: _si('<path d="M1.5 8h3l1.5-4 2 8 1.5-4h3.5"/>') },
   'needs-input': { label: tr('needs input'), color: 'var(--yellow, #e5c07b)', icon: _si('<path d="M6 6a2 2 0 113 1.7c-.6.5-1 .9-1 1.8"/><circle cx="8" cy="12" r=".7" fill="currentColor" stroke="none"/>') },
   blocked: { label: tr('blocked'), color: 'var(--red, #e55)', icon: _si('<circle cx="8" cy="8" r="6"/><path d="M4 4l8 8"/>') },
-  review: { label: tr('review'), color: 'var(--blue, #6af)', icon: _si('<path d="M1.5 8s2.5-4 6.5-4 6.5 4 6.5 4-2.5 4-6.5 4-6.5-4-6.5-4z"/><circle cx="8" cy="8" r="1.7"/>') },
+  review: { label: tr('review'), color: 'var(--blue, #61afef)', icon: _si('<path d="M1.5 8s2.5-4 6.5-4 6.5 4 6.5 4-2.5 4-6.5 4-6.5-4-6.5-4z"/><circle cx="8" cy="8" r="1.7"/>') },
   done: { label: tr('done'), color: 'var(--text-dim)', icon: _si('<path d="M2.5 8.5l3.5 3.5 7.5-9"/>') },
 };
 export const SESSION_URGENCY_META = {
   low: { label: tr('low'), mark: '', color: 'var(--text-dim)' },
   normal: { label: tr('normal'), mark: '', color: 'var(--blue, #61afef)' },
   high: { label: tr('high'), mark: '!', color: 'var(--yellow, #e5c07b)' },
-  urgent: { label: tr('urgent'), mark: '!!', color: 'var(--red, #e06c75)' },
+  urgent: { label: tr('urgent'), mark: '!!', color: 'var(--red, #e55)' },
 };
 
 export function installSidebarTasks(SidebarClass) {
@@ -446,7 +446,8 @@ export function installSidebarTasks(SidebarClass) {
         pathSpan.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px';
         pathSpan.textContent = rec.path.replace(/^\/home\/[^/]+/, '~') + (rec.recursive ? '' : tr(' (this folder only)')); pathSpan.title = rec.path;
         const removeBtn = document.createElement('button');
-        removeBtn.style.cssText = 'background:none;border:none;color:var(--red,#e55);cursor:pointer;font-size:12px;padding:0 4px;flex-shrink:0';
+        removeBtn.className = 'task-detail-x'; // shared red × (was an inline clone of it)
+        removeBtn.style.flexShrink = '0';
         removeBtn.textContent = '×'; removeBtn.title = tr('Unlink folder');
         removeBtn.onclick = (e) => { e.stopPropagation(); this._taskRemoveFolder(taskId, rec.path); pop.remove(); };
         row.append(pathSpan, removeBtn);

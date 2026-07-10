@@ -187,6 +187,12 @@ export class ChatStatusBar {
 
   render() {
     const fmtK = (n) => n >= 1000000 ? (n / 1000000).toFixed(1) + 'm' : n >= 1000 ? Math.round(n / 1000) + 'k' : String(n);
+    // Semantic tier colors — theme vars (CSS vars work in inline styles), never
+    // hardcoded hexes; "orange" is the midpoint between the red and yellow tiers.
+    const tierRed = 'var(--red, #e55)';
+    const tierYellow = 'var(--yellow, #e5c07b)';
+    const tierOrange = `color-mix(in srgb, ${tierRed} 50%, ${tierYellow})`;
+    const tierGreen = 'var(--green, #3fb950)';
     const parts = [];
 
     // Model + effort badges — separate clickable segments, both ALWAYS
@@ -258,7 +264,7 @@ export class ChatStatusBar {
     // Context % with pie chart
     if (this._statusContextWindow && this._statusLastInputTokens) {
       const pct = Math.min(100, Math.round((this._statusLastInputTokens / this._statusContextWindow) * 100));
-      const color = pct > 95 ? '#ef4444' : pct > 85 ? '#f97316' : pct > 70 ? '#eab308' : '#22c55e';
+      const color = pct > 95 ? tierRed : pct > 85 ? tierOrange : pct > 70 ? tierYellow : tierGreen;
       const deg = Math.round(pct * 3.6);
       const usedK = fmtK(this._statusLastInputTokens);
       const totalK = fmtK(this._statusContextWindow);
@@ -277,14 +283,14 @@ export class ChatStatusBar {
     if (this._statusLastCacheRead != null && this._statusLastInputTokens) {
       const cacheTotal = this._statusLastInputTokens;
       const cachePct = cacheTotal > 0 ? Math.round((this._statusLastCacheRead / cacheTotal) * 100) : 0;
-      const cacheColor = cachePct >= 80 ? '#22c55e' : cachePct >= 50 ? '#eab308' : '#f97316';
-      const cacheTip = `Prompt cache hit rate (last turn): ${cachePct}% of input tokens were read from cache (${fmtK(this._statusLastCacheRead)} of ${fmtK(cacheTotal)}). Higher = cheaper + faster.`;
+      const cacheColor = cachePct >= 80 ? tierGreen : cachePct >= 50 ? tierYellow : tierOrange;
+      const cacheTip = t('Prompt cache hit rate (last turn): {pct}% of input tokens were read from cache ({read} of {total}). Higher = cheaper + faster.', { pct: cachePct, read: fmtK(this._statusLastCacheRead), total: fmtK(cacheTotal) });
       parts.push(`<span style="color:${cacheColor}" title="${escHtml(cacheTip)}">${UI_ICONS.bolt}${cachePct}%</span><span class="chat-status-dim" title="${escHtml(cacheTip)}">[${fmtK(this._statusLastCacheRead)}]</span>`);
     }
 
     // Cost with color tiers
     if (this._statusCost > 0) {
-      const costColor = this._statusCost > 5 ? '#ef4444' : this._statusCost > 1 ? '#f97316' : '#22c55e';
+      const costColor = this._statusCost > 5 ? tierRed : this._statusCost > 1 ? tierOrange : tierGreen;
       parts.push(`<span style="color:${costColor}">$${this._statusCost.toFixed(2)}</span>`);
     }
 
@@ -314,6 +320,7 @@ export class ChatStatusBar {
       if (getComputedStyle(container).position === 'static') container.style.position = 'relative';
       const dropdown = document.createElement('div');
       dropdown.className = 'chat-status-dropdown';
+      dropdown.dataset.popover = '1'; // app-wide Escape-dismiss protocol (app.js removes [data-popover])
       const rect = anchor.getBoundingClientRect();
       const containerRect = container.getBoundingClientRect();
       dropdown.style.position = 'absolute';
@@ -424,10 +431,10 @@ export class ChatStatusBar {
       hint.style.cssText = 'font-size:11px;color:var(--text-dim)';
       hint.textContent = t('The agent keeps working until this condition is met:');
       const input = document.createElement('textarea');
-      input.className = 'chat-ask-custom';
+      input.className = 'filter-input chat-ask-custom'; // filter-input themes it like .chat-input (bg-input/border/radius/focus-accent)
       input.rows = 2;
       input.placeholder = t('e.g. all tests in tests/ pass');
-      input.style.cssText = 'resize:vertical;font-size:12px;width:100%';
+      input.style.cssText = 'resize:vertical;font-size:12px;width:100%;margin:0';
       const submit = () => {
         const goal = input.value.trim();
         if (!goal) return;

@@ -16,19 +16,20 @@ import { escHtml, showToast } from './utils.js';
  * openSpec 'openWorkflowDetail' persists it across restore / multi-client.
  */
 
+// Theme vars, not palette hexes — these render on all 6 themes + custom ones.
 const STATE_META = {
-  done:     { label: 'done',     color: '#98c379' },
-  progress: { label: 'running',  color: '#61afef' },
+  done:     { label: 'done',     color: 'var(--green, #98c379)' },
+  progress: { label: 'running',  color: 'var(--blue, #61afef)' },
   queued:   { label: 'queued',   color: 'var(--text-dim)' },
-  error:    { label: 'error',    color: '#e06c75' },
+  error:    { label: 'error',    color: 'var(--red, #e55)' },
   skipped:  { label: 'skipped',  color: 'var(--text-dim)' },
 };
 
 const RUN_STATUS_META = {
-  completed: { label: 'Completed', color: '#98c379' },
-  running:   { label: 'Running',   color: '#61afef' },
-  killed:    { label: 'Killed',    color: '#e5a04c' },
-  failed:    { label: 'Failed',    color: '#e06c75' },
+  completed: { label: 'Completed', color: 'var(--green, #98c379)' },
+  running:   { label: 'Running',   color: 'var(--blue, #61afef)' },
+  killed:    { label: 'Killed',    color: 'var(--yellow, #e5a04c)' },
+  failed:    { label: 'Failed',    color: 'var(--red, #e55)' },
 };
 
 function fmtDuration(ms) {

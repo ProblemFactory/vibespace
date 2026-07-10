@@ -586,6 +586,20 @@ Read/Write tool output uses highlight.js for syntax highlighting with line numbe
 - **Same spelling, different meaning ⇒ `tc(ctx, str)`** (pgettext msgctxt; dict key `ctx::str`, fallback = ENGLISH, never the un-contexted translation). Real case: "Plan" = the permission mode (规划模式) AND the subscription plan in the usage popup (`tc('billing','Plan')` → 套餐) — the plain-t collision shipped "规划模式" next to a Codex plan type. Before reusing a short existing key for a NEW meaning, check its translation fits; if not, context it.
 - **Verification gotcha**: esbuild `--minify` emits non-ASCII as UPPERCASE `\uXXXX` — grepping the bundle for raw CJK (or lowercase escapes) finds nothing and looks like the dicts were tree-shaken. They weren't.
 
+
+### 17. UI design conventions (2.66.0 consistency pass — follow these for ALL new UI)
+One design language, DENSITY-PRESERVING (pro tool — compact stays compact). A 6-surface/86-finding audit converged everything onto:
+- **Radii**: `var(--radius)`=8px cards/popovers/dialogs; `var(--radius-sm)`=4px buttons/inputs/chips; `999px` pills. Never literal 3/6/8px in these roles.
+- **Type scale**: integer px only — 9 micro-labels / 10 meta / 11 secondary+buttons / 12 body / 13 emphasis.
+- **Buttons**: PRIMARY = `background var(--accent); color var(--accent-fg); border 1px var(--accent); hover background var(--accent-hover)` (never `#fff` text, never opacity/brightness hovers); `.btn-create.danger` = same with `--red`. SECONDARY (agent-btn/usage-btn/mounts-btn/tv-tool-btn/media-btn/task-detail-btn…) = `bg var(--bg-input); border var(--border); color var(--text-secondary); radius-sm; hover border-color+color var(--accent)`.
+- **Popover chrome** (menus, dropdowns, panels): `bg var(--bg-dialog)` (NOTE: `--bg-panel` is NOT a defined token — only use it as `var(--bg-panel, var(--bg-dialog|--bg-titlebar))` fallback form); `border var(--border); radius var(--radius); shadow 0 8px 24px rgba(0,0,0,0.35)`; carry `data-popover` for the global Esc protocol IF the element is created-and-removed (never on persistent hidden/show elements — Esc `.remove()`s them).
+- **Section titles**: `.usage-section-title` is the canonical spec (11px/600/uppercase/.03em/--text-secondary; child `<span>`s keep their casing — account names/emails never uppercase). Micro labels in menus: 9px/700/uppercase/.5px/--text-dim.
+- **Notes**: `.usage-note` = neutral dim info; `.usage-warn` = amber warning. They are SEPARATE classes — don't reuse one for the other semantic.
+- **Colors**: theme vars ONLY; tints = `color-mix(in srgb, var(--token) N%, transparent)`; text on accent/colored fills = `var(--accent-fg)`; canonical var fallbacks: `--red,#e55` `--green,#3fb950` `--yellow,#e5c07b` `--blue,#61afef`. JS inline styles may use `var()` strings (they resolve in inline styles + conic-gradients).
+- **Focus**: `border-color: var(--accent)` only (no rings). **Transitions**: `var(--transition)`. **Empty states**: `.empty-hint` (+`.empty-hint-inline` inside compact sections). **State dots**: 6px. **Toolbars** (in-window): `padding 6px 10px; gap 6px; bg var(--bg-panel, var(--bg-titlebar)); border-bottom var(--border)`.
+- DEFERRED backlog from the audit (do not consider these conventions settled): menu-label casing standardization (i18n key churn), workflow-detail + file-explorer/viewers i18n, path-autocomplete dedup, modal-shell dedup (4 hand-rolled copies), CSV/XLSX/PPTX inline-style architecture, CodeMirror light-theme accent var.
+
+
 ## API Reference
 
 ### REST Endpoints

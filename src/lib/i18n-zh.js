@@ -1091,4 +1091,5 @@ export default {
   "{h}h ago": "{h}小时前",
   "{n} items waiting on you": "{n} 个事项等你处理",
   "{n} open": "{n} 个未处理",
+  "Prompt cache hit rate (last turn): {pct}% of input tokens were read from cache ({read} of {total}). Higher = cheaper + faster.": "提示词缓存命中率（上一轮）：{pct}% 的输入 tokens 读取自缓存（{total} 中的 {read}）。越高越省钱、越快。",
 };

@@ -140,7 +140,7 @@ class FileViewer {
       }
       return true;
     } catch (err) {
-      container.innerHTML = `<div class="empty-hint" style="color:var(--red);padding:20px">Error: ${escHtml(err.message)}</div>`;
+      container.innerHTML = `<div class="empty-hint" style="color:var(--red)">Error: ${escHtml(err.message)}</div>`;
       return true; // error shown, don't fall through to editor
     }
   }
@@ -621,7 +621,7 @@ class FileViewer {
         const rowEl = document.createElement('div');
         rowEl.className = 'csv-row';
         rowEl.style.cssText = `position:absolute;top:${rowIdx * ROW_HEIGHT}px;left:0;right:0;height:${ROW_HEIGHT}px;display:flex;align-items:center;font-size:11px;border-bottom:1px solid var(--border)`;
-        if (rowIdx % 2) rowEl.style.background = 'rgba(128,128,128,0.03)';
+        if (rowIdx % 2) rowEl.style.background = 'color-mix(in srgb, var(--text) 3%, transparent)';
 
         // Row number
         const rn = document.createElement('div');
