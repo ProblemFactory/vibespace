@@ -733,10 +733,16 @@ class Sidebar {
     // on nearly every poll with zero content change — measured live: 5058
     // entries, 0 changed, order-only diff, full re-render every ~5-10s
     // (flickering the Remote tab and expanded cards; two user reports).
+    // Identity sync runs on EVERY merge, NOT behind the digest gate: it feeds
+    // window title-bar badges/titleMeta/openSpec identity, all internally
+    // no-op-guarded. Behind the gate, a freshly loaded page whose windows
+    // restore AFTER the first merge never got billing badges — the 2.72.0
+    // order-insensitive digest made changes so rare it never re-fired
+    // (real report: 订阅徽章消失 on reload).
+    this.app.syncSessionIdentity?.(this._allSessions);
     const digest = JSON.stringify(this._allSessions.map(s => `${this._getSessionStateKey(s)}:${s.status}:${s.name || ''}:${s.webuiName || ''}:${s.webuiId || ''}:${s.agentKind || 'primary'}:${s.agentRole || ''}:${s.agentNickname || ''}`).sort());
     if (digest === this._sessionDigest) return;
     this._sessionDigest = digest;
-    this.app.syncSessionIdentity?.(this._allSessions);
     this._updateBackendFilterBtn(document.getElementById('backend-filter'));
     this._renderAgentKindQuickTabs();
     // Preserve scroll position across the auto-refresh re-render so browsing a

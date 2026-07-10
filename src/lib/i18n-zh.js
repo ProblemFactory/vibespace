@@ -1147,4 +1147,5 @@ export default {
   'Hook events (context injections, plugin hooks, stop nudges) render as collapsible ✓/✗ cards. Turn off to hide them all — applies to open chats instantly.': 'Hook 事件（上下文注入、插件 hook、停止提醒）渲染为可折叠的 ✓/✗ 卡片。关闭则全部隐藏——对已打开的聊天即时生效。',
   'Hide hooks with no output': '隐藏无输出的 hook',
   'Hooks like PostToolUse fire on every tool call with nothing to show — by default those render no card at all. Turn off to see every hook event. Applies to newly loaded history (reopen the window for existing views).': 'PostToolUse 这类 hook 每次工具调用都触发但没有可展示内容——默认完全不渲染卡片。关闭此项可看到每个 hook 事件。对新加载的历史生效（已打开的视图需重开窗口）。',
+  'Editor': '编辑器',
 };

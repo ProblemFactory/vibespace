@@ -256,7 +256,8 @@
 .chat-hook-details[open] > .chat-hook-summary::before { content: '\25BE  '; }
 /* Full hook output (no char truncation) — cap the height + scroll so a large
    hook payload stays fully readable without flooding the transcript. */
-.chat-hook-output { max-height: 420px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+.chat-hook-output { max-height: 420px; overflow: auto; } /* wrap via the standard chat-pre-wrapped toggle */
+.chat-hook-summary .chat-hook-edit { margin-left: 8px; font-size: 10px; }
 [data-role-indicator="border"] .chat-system-notification { border-left-color: var(--text-dim); }
 
 

@@ -1148,4 +1148,5 @@ export default {
   'Hook events (context injections, plugin hooks, stop nudges) render as collapsible ✓/✗ cards. Turn off to hide them all — applies to open chats instantly.': 'フックイベント（コンテキスト注入、プラグインフック、停止リマインダー）は折りたたみ可能な ✓/✗ カードとして表示されます。オフにするとすべて非表示 — 開いているチャットに即時適用されます。',
   'Hide hooks with no output': '出力のないフックを隠す',
   'Hooks like PostToolUse fire on every tool call with nothing to show — by default those render no card at all. Turn off to see every hook event. Applies to newly loaded history (reopen the window for existing views).': 'PostToolUse などのフックはツール呼び出しごとに発火しますが表示する内容がありません — デフォルトではカード自体を表示しません。オフにするとすべてのフックイベントが見えます。新しく読み込む履歴に適用されます（既存ビューはウィンドウを開き直してください）。',
+  'Editor': 'エディタ',
 };
