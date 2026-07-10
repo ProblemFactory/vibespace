@@ -87,6 +87,7 @@ src/
   hosts.js             — HostManager (ssh host registry, connectivity test, keygen, remote discovery + first-user-message names, bootstrap, backend-status, dir-complete, fetchSessionJsonl = remote transcript → data/remote-jsonl cache)
   remote-fs.js         — RemoteFs (ssh-per-op remote filesystem: list/read/write/mkdir/rename/rm/stat/copy/move/download/archive/tar-stream folder transfer — mirrors /api/file* shapes; files.js dispatches on ?host=, cross-host copy = server relay)
   auth.js              — Optional password auth (scrypt, server-side cookie tokens in data/auth.json, per-IP rate limit; VIBESPACE_PASSWORD / VIBESPACE_GENERATE_PASSWORD=1)
+  agent-routes.js      — setupAgentRoutes() (2.93.0 split): every agent-facing endpoint — vibespace-ask/status/task routes, task-context/prompt-context injection (incl. user preamble + per-turn extras), stop-check nudge arbiter. Injection ORDER + SIZE are load-bearing — read the renderContext notes before touching payloads
   usage-routes.js      — setupUsage() (2.92.0 split): the ENTIRE usage/rate-limit cluster from server.js — passive statusline ingest, read-only OAuth token, opt-in active poll, on-demand quota refresh, codex rollout-tail summarizer (§ban-safety rules apply — see CLAUDE.md §9)
   telemetry.js         — Telemetry (2.84.0, local-first observability): monthly ndjson shards data/telemetry/events-YYYY-MM.ndjson of {ts,kind:error|event|boot|server-error,name,detail,stack,version,ua}; summary() = grouped errors + byName/byDay/byVersion; optional batch forwarding to telemetry.forwardUrl with an anonymous instance id (data/telemetry/.instance-id). Client side = src/lib/telemetry-client.js (window.onerror/unhandledrejection + boot event + coarse feature events like window-open:<type>/session-create; installed in client.js BEFORE new App() so App-constructor boot crashes are captured — the 'silent blank page' class; 60-events/page-session cap, 5 per identical error). ⚙ → Diagnostics report… (app.js _openDiagnostics) renders GET /api/telemetry/summary as a blob-URL HTML page in the embedded browser. NAMES ONLY, never content — see settings telemetry.enabled/forwardUrl
   adapters/
@@ -125,7 +126,10 @@ src/
     mobile-nav.js      — MobileNav class (window switcher, close, desktop tabs, gestures)
     session-card.js    — Session card renderer (SVG icons, composite backend+mode icons)
     agent-meta.js      — Backend/agent metadata, SVG icon creation (createBackendIcon, createModeBackendIcon)
-    file-explorer.js   — FileExplorer (browse/upload/download, View menu, resizable columns, preview panel)
+    file-explorer.js   — FileExplorer (browse, View menu, resizable columns, preview panel; uploads + ops clusters split out 2.93.0)
+    file-explorer-uploads.js — installExplorerUploads: upload popover, batched multipart, inline progress + ring, synced history
+    file-explorer-ops.js — installExplorerOps: context/background menus, clipboard copy/cut/paste, rename/delete/duplicate, archive compress/extract, properties
+    setup-flows.js     — installSetupFlows(App): onboarding wizard, Backup & migrate, password dialogs, diagnostics report (2.93.0 split from app.js)
     file-viewer.js     — FileViewer (dispatch by type via file-types registry, renderInto shared method)
     file-types.js      — File type registry (extension → category, icon, viewer, bypassBinary)
     code-editor.js     — CodeEditor (CodeMirror 6, Prettier format, server-side format, HTML/MD preview)

@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.93.0 — 2026-07-10
+
+**File-split backlog closed — every named split landed**
+- server.js → src/agent-routes.js (`setupAgentRoutes`, 375 lines: user-todo / session-status / task-context / prompt-context / stop-check / task CRUD endpoints + injection helpers) on top of 2.92.0's usage-cluster split; server.js 3306 → 2578 lines.
+- file-explorer.js → file-explorer-uploads.js (upload popover/batches/history/ring) + file-explorer-ops.js (context/background menus, clipboard, rename/delete/duplicate, archive ops, properties); 1668 → 1113 lines.
+- app.js → setup-flows.js (onboarding wizard, Backup & migrate, password dialogs, diagnostics report); 2082 → 1817 lines.
+- Every extraction verified with the free-identifier lint (eslint no-undef) + a live boot/dialog smoke — the class of silent boot crash that bit the 2.82.0 and 2.92.0 splits (esbuild and node --check both pass free identifiers).
+
 ## 2.92.0 — 2026-07-10
 
 **Design-audit backlog: ALL six deferred items closed**
