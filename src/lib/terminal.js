@@ -139,6 +139,14 @@ class TerminalSession {
     // spam when clicking between terminal and other UI elements (e.g. split-pane editor).
     this.terminal.onData((data) => {
       let filtered = data.replace(/\x1b\[I|\x1b\[O/g, '');
+      // While the Ctrl+G split editor is open, the CLI is blocked on the editor
+      // subprocess with the tty back in COOKED+ECHO mode — but it left mouse
+      // tracking enabled, so xterm keeps emitting SGR reports which the tty
+      // ECHOES as literal "^[[<55;26;14M" junk (and buffers them as input for
+      // the CLI to choke on later). Drop mouse reports for the duration.
+      if (this.winInfo?._editorState) {
+        filtered = filtered.replace(/\x1b\[<\d+;\d+;\d+[Mm]/g, '').replace(/\x1b\[M[\s\S]{3}/g, '');
+      }
       if (!filtered) return;
       // Sticky Ctrl (mobile key row): the next typed letter becomes a control
       // byte — soft keyboards have no Ctrl, this is the standard workaround.

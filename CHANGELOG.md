@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.67.2] — 2026-07-10
+
+### Fixed — Ctrl+G polish: no more mouse-garbage or mystery blank pane
+While the CLI waits on the Ctrl+G editor its fullscreen TUI leaves the alt
+screen (blank terminal half) and the tty sits in cooked+echo mode with mouse
+tracking still enabled — so moving the mouse over the terminal echoed literal
+`^[[<55;26;14M` junk (and buffered it as input for the CLI). Mouse reports are
+now suppressed for that window while the editor is open, and the blank half
+carries a hint pill ("Editing below — Save & Close to hand the file back").
+
 ## [2.67.1] — 2026-07-10
 
 ### Fixed — terminal image paste + Ctrl+G editor
