@@ -130,6 +130,23 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
         const txt = document.createElement('span'); txt.textContent = item.text;
         const del = document.createElement('button'); del.className = 'task-detail-x'; del.textContent = '×'; del.title = t('Remove step');
         del.onclick = () => patch({ plan: task.plan.filter((_, j) => j !== i) });
+        // † = item carries a detail — expands in place (full editing lives in
+        // the ⧉ log viewer; this stays the compact editor)
+        if (item.detail) {
+          const dg = document.createElement('span');
+          dg.className = 'task-detail-plan-by'; dg.textContent = '†';
+          dg.style.cursor = 'pointer';
+          dg.title = t('Show details');
+          dg.onclick = () => {
+            let d = row.nextElementSibling;
+            if (d && d.classList.contains('task-detail-progress-detail')) { d.remove(); return; }
+            d = document.createElement('div');
+            d.className = 'task-detail-progress-detail';
+            d.textContent = item.detail;
+            row.after(d);
+          };
+          txt.after(dg);
+        }
         row.append(cb, txt);
         if (item.done && item.by) {
           // P5: loose, informational link — which session ticked this step.

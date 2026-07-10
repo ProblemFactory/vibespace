@@ -2611,3 +2611,15 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 .task-log-add { margin-top: 8px; }
 .task-detail-open-log { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 11px; padding: 0 2px; margin-left: auto; }
 .task-detail-open-log:hover { color: var(--accent); }
+.task-log-planline { display: flex; align-items: baseline; gap: 6px; flex: 1; min-width: 0; }
+.task-log-exp .task-log-planline { cursor: pointer; }
+.task-log-edit { display: flex; flex-direction: column; gap: 6px; padding: 6px 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent); }
+.task-log-edit-detail { background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); font-size: 11px; padding: 4px 8px; resize: vertical; font-family: inherit; }
+.task-log-edit-detail:focus { outline: none; border-color: var(--accent); }
+.task-log-edit-detail.hidden { display: none; }
+.task-log-edit-btns { display: flex; gap: 6px; }
+.task-log-editbtn { color: var(--text-dim); }
+.task-log-editbtn:hover { color: var(--accent); }
+.task-log-addwrap { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.task-log-addwrap .task-log-add { margin-top: 0; flex: 1; }
+.task-log-plan.task-log-exp .task-log-detail { margin-left: 24px; }

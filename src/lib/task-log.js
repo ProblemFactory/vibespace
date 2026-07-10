@@ -200,50 +200,107 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
     wireChips(body);
   };
 
-  // ── Checklist tab: open first, then done; attribution chips + timestamps ──
+  // ── Checklist tab: open first, then done; expandable detail + inline edit ──
   const renderChecklist = (body) => {
     const plan = (task.plan || []).map((p, i) => ({ ...p, _i: i }));
     const visible = plan.filter((it) =>
       (state.doneFilter === 'all' || (state.doneFilter === 'done') === !!it.done)
       && (!state.session || it.addedBy === state.session || it.by === state.session)
-      && matches(it.text));
+      && (matches(it.text) || matches(it.detail)));
     if (!visible.length && !plan.length) { body.innerHTML = `<div class="empty-hint">${escHtml(t('No checklist items yet'))}</div>`; return; }
 
+    const patchItem = (idx, fn) => {
+      const next = task.plan.map((p, j) => (j === idx ? fn({ ...p }) : p));
+      sidebar._taskUpdate(taskId, { plan: next.filter(Boolean) });
+    };
+
+    const attrHtml = (it) => {
+      let html = '';
+      if (it.addedBy || it.addedAt) {
+        html += `<span class="task-log-attr-part" title="${escHtml(t('Queued by') + (it.addedAt ? ' · ' + new Date(it.addedAt).toLocaleString() : ''))}">+ ${sessionChip(it.addedBy)}${it.addedAt ? ` <span class="task-log-time">${escHtml(fmtDay(it.addedAt))}</span>` : ''}</span>`;
+      }
+      if (it.done && (it.by || it.doneAt)) {
+        html += `<span class="task-log-attr-part" title="${escHtml(t('Ticked by') + (it.doneAt ? ' · ' + new Date(it.doneAt).toLocaleString() : ''))}">✓ ${sessionChip(it.by)}${it.doneAt ? ` <span class="task-log-time">${escHtml(fmtDay(it.doneAt))}</span>` : ''}</span>`;
+      }
+      return html;
+    };
+
+    // Inline editor: text input + detail textarea in place of the row.
+    const editForm = (it, replaceEl) => {
+      const form = document.createElement('div');
+      form.className = 'task-log-edit';
+      const ti = document.createElement('input');
+      ti.className = 'task-detail-input'; ti.value = it.text;
+      const ta = document.createElement('textarea');
+      ta.className = 'task-log-edit-detail'; ta.rows = 5;
+      ta.placeholder = t('Detail — acceptance criteria, paths, background (optional)');
+      ta.value = it.detail || '';
+      const btns = document.createElement('div');
+      btns.className = 'task-log-edit-btns';
+      const save = document.createElement('button');
+      save.className = 'btn-create'; save.textContent = t('Save');
+      save.onclick = () => {
+        const text = ti.value.trim();
+        if (!text) return;
+        patchItem(it._i, (p) => { p.text = text; if (ta.value.trim()) p.detail = ta.value.trim(); else delete p.detail; return p; });
+      };
+      const cancel = document.createElement('button');
+      cancel.className = 'task-detail-btn'; cancel.textContent = t('Cancel');
+      cancel.onclick = () => render();
+      btns.append(save, cancel);
+      form.append(ti, ta, btns);
+      replaceEl.replaceWith(form);
+      ti.focus();
+    };
+
     const addItemRow = (it) => {
-      const row = document.createElement('div');
-      row.className = 'task-log-row task-log-plan' + (it.done ? ' done' : '');
+      const isExp = !!it.detail;
+      const row = document.createElement(isExp ? 'details' : 'div');
+      row.className = 'task-log-row task-log-plan' + (it.done ? ' done' : '') + (isExp ? ' task-log-exp' : '');
+      const line = document.createElement(isExp ? 'summary' : 'div');
+      line.className = 'task-log-planline';
+
       const cb = document.createElement('input');
       cb.type = 'checkbox'; cb.checked = !!it.done;
-      cb.onchange = () => {
-        const next = task.plan.map((p, j) => {
-          if (j !== it._i) return p;
-          const np = { ...p, done: cb.checked };
-          if (cb.checked) { np.by = 'user'; np.doneAt = Date.now(); }
-          else { delete np.by; delete np.doneAt; }
-          return np;
-        });
-        sidebar._taskUpdate(taskId, { plan: next });
-      };
-      row.appendChild(cb);
+      cb.onclick = (e) => e.stopPropagation(); // don't toggle the <details>
+      cb.onchange = () => patchItem(it._i, (p) => {
+        p.done = cb.checked;
+        if (cb.checked) { p.by = 'user'; p.doneAt = Date.now(); }
+        else { delete p.by; delete p.doneAt; }
+        return p;
+      });
+      line.appendChild(cb);
       const txt = document.createElement('span');
       txt.className = 'task-log-note';
       txt.textContent = it.text;
-      row.appendChild(txt);
+      line.appendChild(txt);
+      if (isExp) {
+        const dg = document.createElement('span');
+        dg.className = 'task-log-dagger'; dg.textContent = '†';
+        line.appendChild(dg);
+      }
       const chips = document.createElement('span');
       chips.className = 'task-log-attr';
-      let html = '';
-      if (it.addedBy || it.addedAt) {
-        html += `<span class="task-log-attr-part" title="${escHtml(t('Queued by'))}">+ ${sessionChip(it.addedBy)}${it.addedAt ? ` <span class="task-log-time">${escHtml(fmtDay(it.addedAt))}</span>` : ''}</span>`;
-      }
-      if (it.done && (it.by || it.doneAt)) {
-        html += `<span class="task-log-attr-part" title="${escHtml(t('Ticked by'))}">✓ ${sessionChip(it.by)}${it.doneAt ? ` <span class="task-log-time">${escHtml(fmtDay(it.doneAt))}</span>` : ''}</span>`;
-      }
-      chips.innerHTML = html;
-      row.appendChild(chips);
+      chips.innerHTML = attrHtml(it);
+      line.appendChild(chips);
+
+      const edit = document.createElement('button');
+      edit.className = 'task-detail-x task-log-editbtn'; edit.textContent = '✎';
+      edit.title = t('Edit text and detail');
+      edit.onclick = (e) => { e.preventDefault(); e.stopPropagation(); editForm(it, row); };
+      line.appendChild(edit);
       const del = document.createElement('button');
       del.className = 'task-detail-x'; del.textContent = '×'; del.title = t('Remove step');
-      del.onclick = () => sidebar._taskUpdate(taskId, { plan: task.plan.filter((_, j) => j !== it._i) });
-      row.appendChild(del);
+      del.onclick = (e) => { e.preventDefault(); e.stopPropagation(); patchItem(it._i, () => null); };
+      line.appendChild(del);
+
+      row.appendChild(line);
+      if (isExp) {
+        const d = document.createElement('div');
+        d.className = 'task-log-detail';
+        d.textContent = it.detail;
+        row.appendChild(d);
+      }
       return row;
     };
 
@@ -262,17 +319,35 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
       for (const it of done) body.appendChild(addItemRow(it));
     }
 
-    // Add-item input at the bottom (records UI attribution).
+    // Add-item row (records UI attribution) — the † toggle reveals an optional
+    // detail textarea so a new backlog item can carry its full context.
+    const addWrap = document.createElement('div');
+    addWrap.className = 'task-log-addwrap';
+    const addLine = document.createElement('div');
+    addLine.className = 'task-log-planline';
     const add = document.createElement('input');
     add.className = 'task-detail-input task-log-add';
     add.placeholder = t('+ Add checklist step (Enter)');
-    add.onkeydown = (e) => {
-      if (e.key === 'Enter' && add.value.trim()) {
-        sidebar._taskUpdate(taskId, { plan: [...(task.plan || []), { text: add.value.trim(), done: false, addedBy: 'user', addedAt: Date.now() }] });
-        add.value = '';
-      }
+    const addDetail = document.createElement('textarea');
+    addDetail.className = 'task-log-edit-detail hidden';
+    addDetail.rows = 4;
+    addDetail.placeholder = t('Detail — acceptance criteria, paths, background (optional)');
+    const dToggle = document.createElement('button');
+    dToggle.className = 'task-detail-btn';
+    dToggle.textContent = '† ' + t('detail');
+    dToggle.title = t('Attach full context to the new item');
+    dToggle.onclick = () => addDetail.classList.toggle('hidden');
+    const commit = () => {
+      if (!add.value.trim()) return;
+      const item = { text: add.value.trim(), done: false, addedBy: 'user', addedAt: Date.now() };
+      if (addDetail.value.trim()) item.detail = addDetail.value.trim();
+      sidebar._taskUpdate(taskId, { plan: [...(task.plan || []), item] });
+      add.value = ''; addDetail.value = '';
     };
-    body.appendChild(add);
+    add.onkeydown = (e) => { if (e.key === 'Enter') commit(); };
+    addLine.append(add, dToggle);
+    addWrap.append(addLine, addDetail);
+    body.appendChild(addWrap);
     wireChips(body);
   };
 
@@ -300,8 +375,8 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
       }).join('\n');
     } else {
       md = (task.plan || [])
-        .filter((it) => (state.doneFilter === 'all' || (state.doneFilter === 'done') === !!it.done) && matches(it.text))
-        .map((it) => `- [${it.done ? 'x' : ' '}] ${it.text}${it.by ? ` _(${sessionLabel(it.by)})_` : ''}`).join('\n');
+        .filter((it) => (state.doneFilter === 'all' || (state.doneFilter === 'done') === !!it.done) && (matches(it.text) || matches(it.detail)))
+        .map((it) => `- [${it.done ? 'x' : ' '}] ${it.text}${it.by ? ` _(${sessionLabel(it.by)})_` : ''}${it.detail ? '\n' + it.detail.split('\n').map((l) => '  > ' + l).join('\n') : ''}`).join('\n');
     }
     import('./utils.js').then(({ copyText }) => copyText(md).then(() => showToast(t('Copied'))));
   };

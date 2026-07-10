@@ -1177,4 +1177,8 @@ export default {
   "Open full checklist viewer (attribution, filters, search)": "打开完整清单查看器（归属、过滤、搜索）",
   "Queued by": "添加者",
   "Ticked by": "勾选者",
+  "Attach full context to the new item": "为新条目附上完整上下文",
+  "Detail — acceptance criteria, paths, background (optional)": "详情——验收标准、路径、背景（可选）",
+  "Edit text and detail": "编辑文本和详情",
+  "Show details": "显示详情",
 };

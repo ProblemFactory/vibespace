@@ -121,7 +121,7 @@ class TaskGroupManager {
   // cap = how many Activity-log entries to include (TASK.md keeps 50).
   // cap = 0 omits the log entirely (renderContext appends its own budgeted log
   // section LAST instead — see the truncation note there).
-  renderTaskMd(t, cap = 50) {
+  renderTaskMd(t, cap = 50, { planDetail = cap > 0 } = {}) {
     const ts = (ms) => this._tsShort(ms);
     const lines = [
       `# ${t.title}`,
@@ -134,7 +134,12 @@ class TaskGroupManager {
     lines.push('', '## Objective', '', t.objective?.trim() || '_(not set yet)_');
     if (t.plan?.length) {
       lines.push('', '## Checklist', '');
-      for (const p of t.plan) lines.push(`- [${p.done ? 'x' : ' '}] ${p.text}`);
+      // Injection (cap 0) stays dense: items mark detail with † (read via
+      // `vibespace-task show --full`); TASK.md carries it as a blockquote.
+      for (const p of t.plan) {
+        lines.push(`- [${p.done ? 'x' : ' '}] ${p.text}${p.detail && !planDetail ? ' †' : ''}`);
+        if (planDetail && p.detail) for (const dl of p.detail.split('\n')) lines.push(`  > ${dl}`);
+      }
     }
     const total = (t.progress || []).length;
     const prog = cap > 0 ? (t.progress || []).slice(-cap) : [];
@@ -255,7 +260,7 @@ class TaskGroupManager {
       '`vibespace-task` — update the SHARED Task Group (every session of it, and the user on the board, see it):',
       `- \`vibespace-task ${gid}progress "one-line summary" [--detail "full context"]\` — append to the Activity log after finishing a meaningful piece of work. The SUMMARY is what every session sees inline — keep it one tight line; put specifics (numbers, paths, caveats) in \`--detail\` (read via \`vibespace-task show --full\`).`,
       `- \`vibespace-task ${gid}plan-check <item# or unique text>\` (and \`plan-uncheck\`) — tick a Checklist item when you complete one. The Checklist is the group's BACKLOG of work items (usually user-curated) — keep your own working steps in your normal per-session todo list, NOT here.`,
-      `- \`vibespace-task ${gid}plan-add "new work item"\` — queue a NEW work item for the group (something someone should pick up later, not your current steps).`,
+      `- \`vibespace-task ${gid}plan-add "new work item" [--detail "full context"]\` — queue a NEW work item for the group (something someone should pick up later, not your current steps). A checklist † marks an item with detail — read it via \`vibespace-task show --full\` before picking the item up.`,
       `- \`vibespace-task ${gid}show\` — reprint the objective / checklist / activity log.`,
       '',
       '`vibespace-status` — report the state of THIS SESSION (your own work) right now. A Task Group has no status; the SESSION does:',
@@ -573,6 +578,9 @@ class TaskGroupManager {
         // P5: loose, informational link — which session ticked this step
         // (recorded by vibespace-task plan-check; never enforced).
         ...(it?.by ? { by: String(it.by).slice(0, 120) } : {}),
+        // 2.86.0: optional full context per item (acceptance criteria, paths,
+        // background) — same summary+detail split as Activity entries.
+        ...(typeof it?.detail === 'string' && it.detail.trim() ? { detail: it.detail.trim().slice(0, CAPS.detail) } : {}),
         // 2.85.0 attribution: who queued the item / when, when it was ticked.
         // ('user' = added from the UI.) Older items simply lack these.
         ...(it?.addedBy ? { addedBy: String(it.addedBy).slice(0, 120) } : {}),
@@ -679,7 +687,10 @@ class TaskGroupManager {
     ];
     if (t.plan?.length) {
       body.push('', '## Checklist', '');
-      for (const p of t.plan) body.push(`- [${p.done ? 'x' : ' '}] ${p.text}`);
+      for (const p of t.plan) {
+        body.push(`- [${p.done ? 'x' : ' '}] ${p.text}`);
+        if (p.detail) for (const dl of p.detail.split('\n')) body.push(`  > ${dl}`);
+      }
     }
     const prog = (t.progress || []).slice(-30);
     if (prog.length) {
@@ -737,7 +748,13 @@ class TaskGroupManager {
     if (planM) {
       for (const line of planM[1].split('\n')) {
         const pm = line.match(/^\s*-\s*\[([ xX])\]\s+(.+)$/);
-        if (pm) plan.push({ text: pm[2].trim().slice(0, CAPS.planItem), done: pm[1].toLowerCase() === 'x' });
+        if (pm) { plan.push({ text: pm[2].trim().slice(0, CAPS.planItem), done: pm[1].toLowerCase() === 'x' }); continue; }
+        // blockquote continuation = the preceding item's detail (round-trip of export)
+        const dm = line.match(/^\s*>\s?(.*)$/);
+        if (dm && plan.length) {
+          const it = plan[plan.length - 1];
+          it.detail = ((it.detail ? it.detail + '\n' : '') + dm[1]).slice(0, CAPS.detail);
+        }
       }
     }
     // Progress = "- <ISO date> <note> _(session)_" lines under "## Progress".
