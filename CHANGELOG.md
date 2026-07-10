@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.97.0 — 2026-07-10
+
+**Dashboard: multi-metric panels on uPlot**
+- Adopted uPlot (~50KB, the time-series engine Grafana's ecosystem uses) for line charts — the one place a focused library beats hand-rolled canvas. Donut/bars/stat/table stay dependency-free.
+- A panel now takes MULTIPLE metrics (`metrics: []`, editor = checkbox grid; old single-metric configs migrate transparently): line charts render one series per metric with **automatic dual axes by unit** (cost $ left, requests count right — mixing units Just Works), live legend with hover readouts and per-series toggling, and resize-aware fitting.
+- Grouped bar rows (per-metric bars normalized to their own max + mini legend), stat panels render a row of big numbers, tables use the selected metrics as columns. Default presets show it off (cost+requests dual-axis trend; total+output tokens).
+
 ## 2.96.0 — 2026-07-10
 
 **Usage window: configurable panel dashboard (Grafana/Posthog-style)**
