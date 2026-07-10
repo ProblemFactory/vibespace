@@ -976,12 +976,15 @@ function registerWsHandler(wss, ctx) {
               // Can't use total===0: PTY output via processLive may have populated the
               // normalizer with partial buffer data before any client connected.
               if (session._normalizer && !session._historyLoaded) {
-                session._historyLoaded = true;
                 const opHandlers = [...session._normalizer.listeners]; // carry over ALL subscribers, not just the first
                 session._normalizer = createMessageManager(session.backend || 'claude', data.sessionId);
                 session._normEpoch = Date.now();
                 for (const h of opHandlers) session._normalizer.onOp(h);
                 session._normalizer.convertHistory(sm.raw());
+                // Flag AFTER the rebuild succeeds — set-before-work turned one
+                // throwing record into a permanently truncated session view
+                // (the re-attach saw the flag and never rebuilt again).
+                session._historyLoaded = true;
               }
               // Recover goal state from wrapper meta (populated by thread/goal/get on startup)
               if (!session._goal) {
