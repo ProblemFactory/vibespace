@@ -2637,3 +2637,41 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 .agents-adv-body label.agents-cond { display: block; font-size: 11px; color: var(--text-secondary); padding: 1px 0; }
 .agents-adv-body .agents-cond-num { display: inline-block; width: 56px !important; padding: 2px 6px; margin: 0 5px; text-align: center; vertical-align: baseline; }
 .agents-adv-actions { display: flex; justify-content: flex-end; }
+
+/* ── Usage dashboard panels (usage-dashboard.js, 2.96.0) ── */
+.udash-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+.udash-panel { background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; min-height: 90px; display: flex; flex-direction: column; }
+.udash-span2 { grid-column: span 2; }
+.udash-panel-head { display: flex; align-items: baseline; gap: 6px; margin-bottom: 6px; }
+.udash-panel-title { flex: 1; min-width: 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.udash-panel-tools { display: flex; gap: 2px; opacity: 0; transition: var(--transition); }
+.udash-panel:hover .udash-panel-tools { opacity: 1; }
+.udash-tool { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 11px; padding: 0 3px; }
+.udash-tool:hover { color: var(--accent); }
+.udash-panel-body { flex: 1; min-height: 0; overflow-y: auto; }
+.udash-stat { font-size: 30px; font-weight: 700; color: var(--text); padding: 12px 0; text-align: center; font-variant-numeric: tabular-nums; }
+.udash-barrow { display: flex; align-items: center; gap: 6px; padding: 2px 0; font-size: 11px; }
+.udash-barlabel { width: 34%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+.udash-bartrack { flex: 1; height: 8px; background: color-mix(in srgb, var(--border) 40%, transparent); border-radius: 999px; overflow: hidden; }
+.udash-barfill { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+.udash-barval { min-width: 54px; text-align: right; color: var(--text-dim); font-variant-numeric: tabular-nums; font-size: 10px; }
+.udash-canvas { width: 100%; display: block; }
+.udash-pie-wrap { display: flex; gap: 12px; align-items: center; }
+.udash-pie { width: 96px; height: 96px; border-radius: 50%; flex-shrink: 0; position: relative; }
+.udash-pie::after { content: ''; position: absolute; inset: 26%; border-radius: 50%; background: var(--bg-input); }
+.udash-legend { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.udash-legend-item { display: flex; align-items: baseline; gap: 5px; font-size: 10px; }
+.udash-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; align-self: center; }
+.udash-legend-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+.udash-legend-val { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.udash-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.udash-table th { text-align: right; color: var(--text-dim); font-weight: 400; font-size: 10px; padding: 2px 6px; }
+.udash-table th:first-child, .udash-table td.udash-td-key { text-align: left; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.udash-table td { padding: 2px 6px; border-top: 1px solid color-mix(in srgb, var(--border) 40%, transparent); }
+.udash-table td.udash-td-num { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+.udash-add { grid-column: span 2; background: none; border: 1px dashed var(--border); border-radius: var(--radius); color: var(--text-dim); cursor: pointer; padding: 10px; font-size: 12px; transition: var(--transition); }
+.udash-add:hover { border-color: var(--accent); color: var(--accent); }
+.udash-editor { display: flex; flex-direction: column; gap: 6px; padding: 10px; min-width: 220px; }
+.udash-editor-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 11px; color: var(--text-secondary); }
+.udash-editor-row select { max-width: 150px; }
+.udash-editor-actions { display: flex; justify-content: flex-end; margin-top: 4px; }
