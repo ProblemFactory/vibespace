@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.94.0 — 2026-07-10
+
+**Telemetry: performance metrics**
+- Client (passive, numbers-only): `boot-to-ready-ms` (nav start → workspace restored), `js-heap-mb` + `dom-nodes` + `open-windows` sampled at +30s then every 10 min (the long-lived-tab leak signals), and long-task jank aggregated per minute (`longtask-count/max/total`) via PerformanceObserver. Metrics have their own 500-sample budget so periodic sampling can't eat the error cap.
+- Server: `srv-rss-mb` / `srv-heap-mb` / `srv-evloop-max-lag-ms` (1s-probe max drift) / `srv-live-sessions` every 5 min.
+- Diagnostics report gains a Performance metrics table: n / p50 / p95 / max / latest per metric. Aggregation lives in `Telemetry.summary()` (`kind:'metric'` records carry a numeric `value`).
+
 ## 2.93.0 — 2026-07-10
 
 **File-split backlog closed — every named split landed**

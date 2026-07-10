@@ -1,6 +1,6 @@
 import { App } from './lib/app.js';
 import { applyI18nToDom } from './lib/i18n.js';
-import { installTelemetry, track } from './lib/telemetry-client.js';
+import { installTelemetry, track, reportBootTime } from './lib/telemetry-client.js';
 installTelemetry(); // BEFORE App: a boot crash must be captured, not silent
 window.addEventListener('DOMContentLoaded', async () => {
   applyI18nToDom(); // translate index.html static text BEFORE App reads/moves DOM
@@ -11,6 +11,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     throw e;
   }
   await window.app.ready;
+  reportBootTime(); // nav start → workspace restored (telemetry metric)
   const splash = document.getElementById('loading-screen');
   if (splash) { splash.style.opacity = '0'; setTimeout(() => splash.remove(), 300); }
 });

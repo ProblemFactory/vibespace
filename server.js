@@ -1867,6 +1867,29 @@ const telemetry = new Telemetry({
 process.on('uncaughtException', (e) => { try { telemetry.record({ kind: 'server-error', name: e.message || 'uncaughtException', stack: e.stack }); telemetry.flush(); } catch {} console.error(e); process.exit(1); });
 process.on('unhandledRejection', (e) => { try { telemetry.record({ kind: 'server-error', name: (e && e.message) || 'unhandledRejection', stack: e && e.stack }); } catch {} console.error('unhandledRejection:', e); });
 
+// Server performance metrics — RSS/heap, event-loop lag, live session count.
+// Every 5 min; names-and-numbers only, same ndjson ledger as everything else.
+{
+  let lagProbeAt = Date.now();
+  let maxLagMs = 0;
+  setInterval(() => { // 1s cadence lag probe (cheap): drift beyond the interval = loop blocked
+    const now = Date.now();
+    const lag = now - lagProbeAt - 1000;
+    if (lag > maxLagMs) maxLagMs = lag;
+    lagProbeAt = now;
+  }, 1000);
+  setInterval(() => {
+    try {
+      const mu = process.memoryUsage();
+      telemetry.record({ kind: 'metric', name: 'srv-rss-mb', value: Math.round(mu.rss / 1048576) });
+      telemetry.record({ kind: 'metric', name: 'srv-heap-mb', value: Math.round(mu.heapUsed / 1048576) });
+      telemetry.record({ kind: 'metric', name: 'srv-evloop-max-lag-ms', value: Math.max(0, maxLagMs) });
+      telemetry.record({ kind: 'metric', name: 'srv-live-sessions', value: activeSessions.size });
+      maxLagMs = 0;
+    } catch {}
+  }, 300000);
+}
+
 const usageHistory = new UsageHistory({
   dataDir: path.join(__dirname, 'data'),
   resolveAccount: (id) => {

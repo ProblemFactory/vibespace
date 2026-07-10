@@ -279,6 +279,13 @@ export function installSetupFlows(App) {
     <h1>${esc(t('VibeSpace diagnostics'))} <span class="dim" style="font-size:13px">— ${esc(t('last {n} days', { n: d.days }))} · ${esc(t('instance'))} ${esc(d.instance || '?')}</span></h1>
     <p class="dim">${esc(t('Local-only data from data/telemetry/. Total events: {n}.', { n: d.total }))}</p>
     <h2>${esc(t('Errors'))}</h2>${errs}
+    <h2>${esc(t('Performance metrics'))}</h2>${(() => {
+      const m = d.metrics || {};
+      const names = Object.keys(m).sort();
+      if (!names.length) return `<p class="dim">${esc(t('No metrics yet — they accumulate as the app runs.'))}</p>`;
+      const row = (n) => `<tr><td>${esc(n)}</td><td class="n">${m[n].count}</td><td class="n">${m[n].p50}</td><td class="n">${m[n].p95}</td><td class="n">${m[n].max}</td><td class="n"><b>${m[n].last}</b></td></tr>`;
+      return `<table><tr><td class="dim">${esc(t('metric'))}</td><td class="n dim">n</td><td class="n dim">p50</td><td class="n dim">p95</td><td class="n dim">max</td><td class="n dim">${esc(t('latest'))}</td></tr>${names.map(row).join('')}</table>`;
+    })()}
     <h2>${esc(t('Events per day'))}</h2><div class="chart">${bars || `<span class="dim">${esc(t('No data'))}</span>`}</div>
     <h2>${esc(t('By event'))}</h2><table>${kv(d.byName)}</table>
     <h2>${esc(t('By version'))}</h2><table>${kv(d.byVersion)}</table>
