@@ -1,4 +1,5 @@
 import { escHtml, showToast } from './utils.js';
+import { t } from './i18n.js';
 
 /**
  * Workflow detail window (window type 'workflow') — POST-HOC viewer for a
@@ -18,18 +19,18 @@ import { escHtml, showToast } from './utils.js';
 
 // Theme vars, not palette hexes — these render on all 6 themes + custom ones.
 const STATE_META = {
-  done:     { label: 'done',     color: 'var(--green, #98c379)' },
-  progress: { label: 'running',  color: 'var(--blue, #61afef)' },
-  queued:   { label: 'queued',   color: 'var(--text-dim)' },
-  error:    { label: 'error',    color: 'var(--red, #e55)' },
-  skipped:  { label: 'skipped',  color: 'var(--text-dim)' },
+  done:     { label: t('done'),     color: 'var(--green, #98c379)' },
+  progress: { label: t('running'),  color: 'var(--blue, #61afef)' },
+  queued:   { label: t('queued'),   color: 'var(--text-dim)' },
+  error:    { label: t('error'),    color: 'var(--red, #e55)' },
+  skipped:  { label: t('skipped'),  color: 'var(--text-dim)' },
 };
 
 const RUN_STATUS_META = {
-  completed: { label: 'Completed', color: 'var(--green, #98c379)' },
-  running:   { label: 'Running',   color: 'var(--blue, #61afef)' },
-  killed:    { label: 'Killed',    color: 'var(--yellow, #e5a04c)' },
-  failed:    { label: 'Failed',    color: 'var(--red, #e55)' },
+  completed: { label: t('Completed'), color: 'var(--green, #98c379)' },
+  running:   { label: t('Running'),   color: 'var(--blue, #61afef)' },
+  killed:    { label: t('Killed'),    color: 'var(--yellow, #e5a04c)' },
+  failed:    { label: t('Failed'),    color: 'var(--red, #e55)' },
 };
 
 function fmtDuration(ms) {
@@ -61,14 +62,14 @@ export function openWorkflowDetail(app, runId, opts = {}) {
 
   const root = document.createElement('div');
   root.className = 'workflow-detail';
-  root.innerHTML = '<div class="empty-hint">Loading workflow…</div>';
+  root.innerHTML = `<div class="empty-hint">${escHtml(t('Loading workflow…'))}</div>`;
   winInfo.content.appendChild(root);
 
   // Dedup for agent-log viewers opened from this window
   const agentViewers = new Map(); // virtualId -> winId
 
   const openAgentLog = (agentId, label) => {
-    if (!agentId) { showToast('This agent has no transcript on disk', { type: 'error' }); return; }
+    if (!agentId) { showToast(t('This agent has no transcript on disk'), { type: 'error' }); return; }
     const virtualId = `sub-agent-${agentId}`;
     const openWinId = agentViewers.get(virtualId);
     if (openWinId && app.wm.windows.has(openWinId)) { app.wm.focusWindow(openWinId); return; }
@@ -116,9 +117,9 @@ export function openWorkflowDetail(app, runId, opts = {}) {
     meta.className = 'workflow-detail-meta';
     let bits;
     if (wf.live) {
-      bits = [`${wf.agentCount || 0} agents`, `${wf.doneCount || 0} done`, 'running…'];
+      bits = [t('{n} agents', { n: wf.agentCount || 0 }), t('{n} done', { n: wf.doneCount || 0 }), t('running…')];
     } else {
-      bits = [`${wf.agentCount || 0} agents`, `${fmtTokens(wf.totalTokens)} tokens`, `${wf.totalToolCalls || 0} tool calls`];
+      bits = [t('{n} agents', { n: wf.agentCount || 0 }), t('{n} tokens', { n: fmtTokens(wf.totalTokens) }), t('{n} tool calls', { n: wf.totalToolCalls || 0 })];
       if (wf.durationMs) bits.push(fmtDuration(wf.durationMs));
     }
     meta.textContent = bits.join(' · ');
@@ -127,7 +128,7 @@ export function openWorkflowDetail(app, runId, opts = {}) {
     if (wf.live) {
       const note = document.createElement('div');
       note.className = 'workflow-live-note';
-      note.textContent = 'Live view — updates every few seconds. Phase names, labels and token totals appear when the run finishes. Open any agent to watch its transcript.';
+      note.textContent = t('Live view — updates every few seconds. Phase names, labels and token totals appear when the run finishes. Open any agent to watch its transcript.');
       root.appendChild(note);
     }
 
@@ -154,7 +155,7 @@ export function openWorkflowDetail(app, runId, opts = {}) {
           (model ? `<span class="workflow-agent-model">${escHtml(model)}</span>` : '');
         const btn = document.createElement('button');
         btn.className = 'workflow-agent-view-btn';
-        btn.textContent = 'View Log';
+        btn.textContent = t('View Log');
         btn.disabled = !ag.agentId;
         btn.title = ag.agentId ? 'Open this agent’s transcript' : 'No transcript on disk';
         btn.onclick = () => openAgentLog(ag.agentId, ag.label);
@@ -168,12 +169,12 @@ export function openWorkflowDetail(app, runId, opts = {}) {
     if (wf.error) {
       const box = document.createElement('details');
       box.className = 'workflow-detail-box workflow-detail-error';
-      box.innerHTML = `<summary>Error</summary><pre>${escHtml(wf.error)}</pre>`;
+      box.innerHTML = `<summary>${escHtml(t('Error'))}</summary><pre>${escHtml(wf.error)}</pre>`;
       root.appendChild(box);
     } else if (wf.result) {
       const box = document.createElement('details');
       box.className = 'workflow-detail-box';
-      box.innerHTML = `<summary>Result</summary><pre>${escHtml(wf.result)}</pre>`;
+      box.innerHTML = `<summary>${escHtml(t('Result'))}</summary><pre>${escHtml(wf.result)}</pre>`;
       root.appendChild(box);
     }
   };
@@ -191,7 +192,7 @@ export function openWorkflowDetail(app, runId, opts = {}) {
       if (!res.ok) {
         stopPoll();
         const body = await res.json().catch(() => ({}));
-        root.innerHTML = `<div class="empty-hint">${escHtml(body.error || 'Workflow not found.')}<br><span class="workflow-hint-sub">Live tracking needs the run's working directory — open this from the workflow's own chat session.</span></div>`;
+        root.innerHTML = `<div class="empty-hint">${escHtml(body.error || t('Workflow not found.'))}<br><span class="workflow-hint-sub">${escHtml(t("Live tracking needs the run's working directory — open this from the workflow's own chat session."))}</span></div>`;
         return;
       }
       const wf = await res.json();
@@ -204,7 +205,7 @@ export function openWorkflowDetail(app, runId, opts = {}) {
       }
     } catch (e) {
       // transient (server restart mid-run) — keep polling if we already are
-      if (!pollTimer) root.innerHTML = `<div class="empty-hint">Failed to load workflow: ${escHtml(e.message)}</div>`;
+      if (!pollTimer) root.innerHTML = `<div class="empty-hint">${escHtml(t('Failed to load workflow:'))} ${escHtml(e.message)}</div>`;
     }
   };
   load();

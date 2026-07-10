@@ -525,14 +525,14 @@ export class ChatStatusBar {
       const dropdown = showDropdown(reviewEl);
       if (!dropdown) return;
       const reviewOptions = [
-        { label: t('Working Tree'), target: { type: 'uncommittedChanges' }, delivery: 'inline' },
-        { label: t('Working Tree (Detached)'), target: { type: 'uncommittedChanges' }, delivery: 'detached' },
-        { label: t('Base Branch...'), kind: 'baseBranch', delivery: 'inline' },
-        { label: t('Base Branch... (Detached)'), kind: 'baseBranch', delivery: 'detached' },
-        { label: t('Commit...'), kind: 'commit', delivery: 'inline' },
-        { label: t('Commit... (Detached)'), kind: 'commit', delivery: 'detached' },
-        { label: t('Custom...'), kind: 'custom', delivery: 'inline' },
-        { label: t('Custom... (Detached)'), kind: 'custom', delivery: 'detached' },
+        { label: t('Working tree'), target: { type: 'uncommittedChanges' }, delivery: 'inline' },
+        { label: t('Working tree (detached)'), target: { type: 'uncommittedChanges' }, delivery: 'detached' },
+        { label: t('Base branch…'), kind: 'baseBranch', delivery: 'inline' },
+        { label: t('Base branch… (detached)'), kind: 'baseBranch', delivery: 'detached' },
+        { label: t('Commit…'), kind: 'commit', delivery: 'inline' },
+        { label: t('Commit… (detached)'), kind: 'commit', delivery: 'detached' },
+        { label: t('Custom…'), kind: 'custom', delivery: 'inline' },
+        { label: t('Custom… (detached)'), kind: 'custom', delivery: 'detached' },
       ];
       for (const option of reviewOptions) {
         const item = document.createElement('div');
@@ -551,7 +551,7 @@ export class ChatStatusBar {
             if (!sha) return;
             target = { type: 'commit', sha: sha.trim() };
           } else if (option.kind === 'custom') {
-            const instructions = await showInputDialog({ title: t('Custom Review'), label: t('Review instructions'), confirmText: t('Review'), multiline: true });
+            const instructions = await showInputDialog({ title: t('Custom review'), label: t('Review instructions'), confirmText: t('Review'), multiline: true });
             if (!instructions) return;
             target = { type: 'custom', instructions: instructions.trim() };
           }
