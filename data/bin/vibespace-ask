@@ -53,6 +53,14 @@ const printItems = (items) => {
 
 async function main() {
   const [cmd, ...rest] = rawArgs;
+  // -h/--help/help print usage — a real agent ran `vibespace-ask --help` and
+  // FILED "--help" as a user todo (observed in data). Any flag-looking "text"
+  // is a mistake, never a question for the user.
+  if (cmd === 'help' || cmd === '-h' || cmd === '--help' || (cmd && cmd.startsWith('-'))) {
+    console.log(USAGE);
+    if (cmd.startsWith('-') && cmd !== '-h' && cmd !== '--help') process.exit(1);
+    return;
+  }
   if (!cmd) {
     console.log(USAGE + '\n\ncurrent open items:');
     printItems((await call({ list: true })).items || []);

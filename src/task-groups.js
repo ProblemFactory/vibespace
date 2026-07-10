@@ -220,20 +220,13 @@ class TaskGroupManager {
   // and simply didn't use them. Now: identity/objective/checklist → TOOL RULES
   // → context folder → Activity log LAST, with the log byte-budgeted so the
   // whole payload stays inline (< ~8KB) in the common case.
-  renderContext(id, { multi = false, ctxBase = null, logBudget = 8000 } = {}) {
-    const t = this.get(id);
-    const parts = [
-      `<vibespace-task-context>`,
-      `This session belongs to VibeSpace Task Group "${t.title}" (${t.id}). The state below is shared across ALL sessions of this group.`,
-      '',
-      // cap=0: meta/objective/checklist only — the log is appended LAST below.
-      this.renderTaskMd(t, 0).replace(/\n---\n[\s\S]*$/, '').trim(),
-    ];
-    // ── How to report back — self-documenting + scoped + enum-disambiguated ──
-    const gid = multi ? `--group ${t.id} ` : '';
-    parts.push('', '### How to report back  (IMPORTANT — read this before using the tools)', '',
+  // The shared tools teaching, one emission per payload. gid = the --group
+  // prefix agents must use ('' single-group; '--group <id> ' generic in the
+  // shared multi-group section).
+  _toolsSectionParts(gid, multi) {
+    return ['', '### How to report back  (IMPORTANT — read this before using the tools)', '',
       multi
-        ? `You belong to more than one Task Group, so \`vibespace-task\` needs \`--group ${t.id}\` to target THIS group (each block above names its group). You can only ever act on groups THIS session belongs to. \`vibespace-status\` always reports THIS session and needs no group.`
+        ? `This session belongs to MORE THAN ONE Task Group, so \`vibespace-task\` needs \`--group <id>\` to target one (each block above names its group id). You can only ever act on groups THIS session belongs to. \`vibespace-status\` always reports THIS session and needs no group.`
         : `Two commands are already on your PATH and are already bound to THIS session's Task Group. You NEVER pass a group id — they only ever act on your own group. If you forget the exact syntax, just run the command with NO arguments: it prints its usage AND the current state.`,
       '',
       '`vibespace-task` — update the SHARED Task Group (every session of it, and the user on the board, see it):',
@@ -252,7 +245,25 @@ class TaskGroupManager {
       `- \`vibespace-ask list\`  /  \`vibespace-ask resolve <id|text>\` — resolve it yourself once the user answers (in chat or otherwise).`,
       `- ONLY for things that genuinely depend on the user — not your own working steps (normal todo list) and not group work items (\`vibespace-task plan-add\`).`,
       '',
-      'Referencing files in chat replies: write ABSOLUTE paths (e.g. /home/user/project/out/final.wav) — the chat UI turns them into clickable links that open in the right viewer (audio plays, images preview, HTML renders). Bare filenames and project-relative paths may not resolve for the user.');
+      'Referencing files in chat replies: write ABSOLUTE paths (e.g. /home/user/project/out/final.wav) — the chat UI turns them into clickable links that open in the right viewer (audio plays, images preview, HTML renders). Bare filenames and project-relative paths may not resolve for the user.'];
+  }
+
+  renderContext(id, { multi = false, ctxBase = null, logBudget = 8000, skipTools = false } = {}) {
+    const t = this.get(id);
+    const parts = [
+      `<vibespace-task-context>`,
+      `This session belongs to VibeSpace Task Group "${t.title}" (${t.id}). The state below is shared across ALL sessions of this group.`,
+      '',
+      // cap=0: meta/objective/checklist only — the log is appended LAST below.
+      this.renderTaskMd(t, 0).replace(/\n---\n[\s\S]*$/, '').trim(),
+    ];
+    // ── How to report back — self-documenting + scoped + enum-disambiguated ──
+    // In multi-group payloads the tools section is emitted ONCE by
+    // renderMultiContext (skipTools) — repeating ~2.3KB per group is what blew
+    // a 2-group payload to 9.8KB / 3-group to 15.7KB, past the hook persist
+    // threshold (agents then see only a ~2KB head preview and never learn the
+    // tools — the same fleet-wide failure 2.68.0 fixed for the single-group case).
+    if (!skipTools) parts.push(...this._toolsSectionParts(multi ? `--group ${t.id} ` : '', multi));
     if (t.contextDir) {
       const base = ctxBase || t.contextDir;
       parts.push('', `## Shared context folder (the group's shared memory)`, '',
@@ -344,11 +355,30 @@ class TaskGroupManager {
     if (!ids.length) return '';
     const baseOf = (id) => (ctxBaseFor ? ctxBaseFor(id) : null);
     if (ids.length === 1) return this.renderContext(ids[0], { ctxBase: baseOf(ids[0]) });
-    // Split the inline-size budget across groups so the combined payload stays
-    // under the hook-preview persist threshold too.
-    const perGroupBudget = Math.max(2500, Math.floor(8000 / ids.length));
-    const blocks = ids.map((id) => this.renderContext(id, { multi: true, ctxBase: baseOf(id), logBudget: perGroupBudget }));
-    return `This session belongs to ${ids.length} VibeSpace Task Groups (岗位). Each group's shared context follows; use \`vibespace-task --group <id> …\` to act on a specific one.\n\n` + blocks.join('\n\n');
+    // The WHOLE payload must stay inline (~8KB) — Claude Code persists an
+    // oversized hook context to disk and shows the agent only a ~2KB head
+    // preview (the 2.68.0 fleet-wide failure). Two things keep multi-group
+    // under budget: the tools section is emitted ONCE (was ~2.3KB × N), and
+    // the per-group Activity-log budget shrinks until the TOTAL fits
+    // (measured pre-fix: 2 groups = 9.8KB, 3 groups = 15.7KB).
+    const build = (logBudget) => {
+      const blocks = ids.map((id) => this.renderContext(id, { multi: true, ctxBase: baseOf(id), logBudget, skipTools: true }));
+      // Tools FIRST (right after the header): if the payload still exceeds the
+      // persist threshold (3+ groups with fat checklists), the ~2KB head
+      // preview must contain the tool teaching — losing trailing group logs is
+      // fine, losing the rules recreates the 2.68.0 fleet-wide failure.
+      return `This session belongs to ${ids.length} VibeSpace Task Groups (岗位). Each group's shared context follows; use \`vibespace-task --group <id> …\` to act on a specific one.\n`
+        + this._toolsSectionParts('--group <id> ', true).join('\n')
+        + '\n\n' + blocks.join('\n\n');
+    };
+    let logBudget = Math.max(1200, Math.floor(5000 / ids.length));
+    let out = build(logBudget);
+    while (Buffer.byteLength(out) > 8200 && logBudget > 700) {
+      logBudget = Math.max(700, Math.floor(logBudget / 2));
+      out = build(logBudget);
+      if (logBudget === 700) break;
+    }
+    return out;
   }
 
   _notify() { try { this._onChange(this.list()); } catch { } }
