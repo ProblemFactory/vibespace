@@ -26,6 +26,7 @@ async function post(body) {
 function printStatus(data) {
   const s = data.status;
   console.log(s ? `state=${s.state || 'unset'} urgency=${s.urgency || 'unset'}${s.reason ? ' reason=' + JSON.stringify(s.reason) : ''} (set by ${s.setBy})` : 'no status set');
+  if (s && s.detail) console.log('  detail: ' + s.detail);
 }
 async function main() {
   if (cmd === '--help' || cmd === '-h') { console.log(USAGE); return; }
