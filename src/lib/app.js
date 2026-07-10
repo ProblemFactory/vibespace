@@ -1376,7 +1376,7 @@ class App {
     // "Custom..." option for free-text model entry
     const customOpt = document.createElement('option');
     customOpt.value = '__custom__';
-    customOpt.textContent = t('Custom...');
+    customOpt.textContent = t('Custom…');
     modelSel.appendChild(customOpt);
 
     const nextModel = applyDefaults

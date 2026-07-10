@@ -582,7 +582,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
           sel.appendChild(o);
         }
         // All rows support Custom... for free-form input (model IDs, effort levels like xhigh, etc.)
-        const customOpt = document.createElement('option'); customOpt.value = '__custom__'; customOpt.textContent = tr('Custom...');
+        const customOpt = document.createElement('option'); customOpt.value = '__custom__'; customOpt.textContent = tr('Custom…');
         sel.appendChild(customOpt);
         const input = document.createElement('input'); input.type = 'text'; input.className = 'session-config-input';
         input.placeholder = isModel ? 'e.g. claude-opus-4-6' : 'e.g. xhigh';

@@ -229,7 +229,7 @@ class SettingsUI {
         const select = document.createElement('select');
         select.className = 'settings-select';
         const customOpt = document.createElement('option');
-        customOpt.value = '__custom__'; customOpt.textContent = t('Custom...');
+        customOpt.value = '__custom__'; customOpt.textContent = t('Custom…');
         for (const opt of schema.options) {
           const o = document.createElement('option');
           o.value = opt.value; o.textContent = opt.label;
