@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.98.0 — 2026-07-10
+
+**Dashboard: ONE chart engine for everything (Chart.js v4, modular)**
+- Replaced uPlot + homegrown bars/donut with Chart.js across all chart types — line, bar and doughnut now share ONE interaction model: hover tooltips with per-metric formatting, clickable legends (toggle series), subtle animations, uniform theming from CSS tokens. uPlot removed (it can't do donuts; two chart engines was the inconsistency being complained about). Modular registration keeps the cost at ~150KB.
+- Bars auto-orient: sequential dimensions (hour/weekday/day) render vertical, categorical (model/account/project) horizontal; multi-metric bars get per-unit dual axes like lines.
+- Chart lifecycle managed: instances destroyed before every re-render and on window close (Chart.js keeps a global registry + per-chart ResizeObserver — undisposed instances leak).
+- Fixed a black-charts regression: color resolution probed computed styles in a detached DOM tree — panels now attach to the document before charts render.
+- **Richer presets** (5 now): Cost overview (8 panels incl. hour-of-day cost), Token throughput (cache read/write/fresh-input grouped bars, hit-ratio+requests dual line), Account reconciliation (multi-metric table + grouped bars), Time patterns, NEW Model comparison (cost/requests donuts + 4-metric table + output-vs-input bars).
+
 ## 2.97.0 — 2026-07-10
 
 **Dashboard: multi-metric panels on uPlot**

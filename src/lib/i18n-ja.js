@@ -1423,4 +1423,5 @@ export default {
   "Width": "幅",
   "Group by": "グループ化の軸",
   "Metrics": "指標（複数選択可）",
+  "Model comparison": "モデル比較",
 };

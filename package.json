@@ -1,6 +1,6 @@
 {
   "name": "vibespace",
-  "version": "2.97.0",
+  "version": "2.98.0",
   "description": "VibeSpace \u2014 a backend-agnostic web workspace for coding agents (Claude Code, Codex, \u2026) with a multi-session tiling window manager",
   "main": "server.js",
   "scripts": {
@@ -21,6 +21,7 @@
     "@xterm/addon-web-links": "^0.11.0",
     "@xterm/addon-webgl": "^0.19.0",
     "@xterm/xterm": "^5.5.0",
+    "chart.js": "^4.5.1",
     "codemirror": "^6.0.1",
     "compression": "^1.8.1",
     "docx-preview": "^0.3.7",
@@ -35,7 +36,6 @@
     "pptx-preview": "^1.0.7",
     "prettier": "^3.8.2",
     "unblocker": "^2.3.1",
-    "uplot": "^1.6.32",
     "ws": "^8.18.0",
     "xlsx": "^0.18.5"
   },
