@@ -17,7 +17,7 @@ export class ChatStatusBar {
    * @param {function} opts.openInTempEditor - (text) => void
    * @param {function} [opts.startReview] - ({ target, delivery }) => void
    */
-  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange }) {
+  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds }) {
     this._ws = ws;
     this._sessionId = sessionId;
     this._backend = backend;
@@ -29,6 +29,8 @@ export class ChatStatusBar {
     this._openSubagentViewer = openSubagentViewer;
     this._openInTempEditor = openInTempEditor;
     this._startReview = startReview || (() => {});
+    this._onOpenWorkflow = onOpenWorkflow || null;
+    this._getWorkflowIds = getWorkflowIds || (() => ({}));
 
     // Status state
     this._statusModel = '';
@@ -57,6 +59,11 @@ export class ChatStatusBar {
   }
 
   /** The .chat-status-bar element */
+  dispose() {
+    this._disposed = true;
+    if (this._wfTimer) { clearTimeout(this._wfTimer); this._wfTimer = null; }
+  }
+
   get element() { return this._element; }
 
   /** Current model name */
@@ -116,6 +123,44 @@ export class ChatStatusBar {
       this._activeTasks.set(toolCallId, task);
     }
     this.render();
+  }
+
+  // ── Running dynamic-workflow chips (2.81.0, user request: 状态栏可快速查看
+  // 正在执行的工作流). Tracked from Workflow tool results ("Run ID: wf_…");
+  // a light poll against /api/workflow keeps agent counts fresh and drops the
+  // chip the moment the run leaves 'running'. Click → the workflow detail
+  // window (live view). Poll only runs while chips exist.
+  trackWorkflow(runId, name) {
+    if (!runId) return;
+    if (!this._workflows) this._workflows = new Map();
+    if (this._workflows.has(runId)) return;
+    this._workflows.set(runId, { runId, name: name || runId, agents: 0, done: 0, probed: false });
+    this.render();
+    this._pollWorkflows();
+  }
+
+  _pollWorkflows() {
+    if (this._wfTimer || !this._workflows?.size) return;
+    const tick = async () => {
+      this._wfTimer = null;
+      if (this._disposed || !this._workflows?.size) return;
+      const ids = this._getWorkflowIds() || {};
+      for (const [runId, wf] of [...this._workflows]) {
+        try {
+          const r = await fetch(`/api/workflow?runId=${encodeURIComponent(runId)}&claudeSessionId=${encodeURIComponent(ids.claudeId || '')}&cwd=${encodeURIComponent(ids.cwd || '')}`);
+          if (r.status === 404) { this._workflows.delete(runId); continue; }
+          const d = await r.json().catch(() => null);
+          if (!d || (d.status && d.status !== 'running')) { this._workflows.delete(runId); continue; }
+          wf.agents = d.agentCount || 0;
+          wf.done = d.doneCount || 0;
+          if (d.workflowName) wf.name = d.workflowName;
+          wf.probed = true;
+        } catch { /* transient — keep the chip */ }
+      }
+      this.render();
+      if (this._workflows.size) this._wfTimer = setTimeout(tick, 8000);
+    };
+    this._wfTimer = setTimeout(tick, 1200);
   }
 
   setTasks(tasks) {
@@ -248,6 +293,14 @@ export class ChatStatusBar {
       parts.push(`<span class="chat-status-tasks chat-status-clickable" title="${escHtml(tasks.map(t => t.description).join(', '))}">${UI_ICONS.refresh} ${escHtml(label)}</span>`);
     }
 
+    // Running dynamic workflows — one chip each (rare to have >2)
+    if (this._workflows?.size) {
+      for (const wf of this._workflows.values()) {
+        const prog = wf.probed && wf.agents ? ` ${wf.done}/${wf.agents}` : '';
+        parts.push(`<span class="chat-status-wf chat-status-clickable" data-wf-run="${escHtml(wf.runId)}" data-wf-name="${escHtml(wf.name)}" title="${escHtml(t('Workflow running — click for the live view'))}">⛭ ${escHtml(String(wf.name).slice(0, 24))}${prog}</span>`);
+      }
+    }
+
     if (this._backend === 'codex' && this._allowReview) {
       const reviewClass = this._reviewEnabled ? 'chat-status-clickable' : 'chat-status-dim';
       const reviewTitle = this._reviewEnabled
@@ -309,6 +362,11 @@ export class ChatStatusBar {
   }
 
   _onClick(e) {
+    const wfChip = e.target.closest('.chat-status-wf');
+    if (wfChip && this._onOpenWorkflow) {
+      this._onOpenWorkflow(wfChip.dataset.wfRun, wfChip.dataset.wfName);
+      return;
+    }
     const container = this._popupContainer || this._element.parentElement;
     const showDropdown = (anchor) => {
       const existing = container.querySelector('.chat-status-dropdown');

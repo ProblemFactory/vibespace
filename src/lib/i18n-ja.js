@@ -1149,4 +1149,5 @@ export default {
   'Hide hooks with no output': '出力のないフックを隠す',
   'Hooks like PostToolUse fire on every tool call with nothing to show — by default those render no card at all. Turn off to see every hook event. Applies to newly loaded history (reopen the window for existing views).': 'PostToolUse などのフックはツール呼び出しごとに発火しますが表示する内容がありません — デフォルトではカード自体を表示しません。オフにするとすべてのフックイベントが見えます。新しく読み込む履歴に適用されます（既存ビューはウィンドウを開き直してください）。',
   'Editor': 'エディタ',
+  'Workflow running — click for the live view': 'ワークフロー実行中 — クリックでライブ表示',
 };

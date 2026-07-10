@@ -848,3 +848,6 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
 
 /* chat.showHookCards=false — hides every hook card instantly (class on body) */
 body.hide-hook-cards .chat-msg-hook { display: none; }
+
+/* Running-workflow status chip */
+.chat-status-wf { color: var(--accent); }

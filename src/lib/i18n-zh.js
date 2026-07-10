@@ -1148,4 +1148,5 @@ export default {
   'Hide hooks with no output': '隐藏无输出的 hook',
   'Hooks like PostToolUse fire on every tool call with nothing to show — by default those render no card at all. Turn off to see every hook event. Applies to newly loaded history (reopen the window for existing views).': 'PostToolUse 这类 hook 每次工具调用都触发但没有可展示内容——默认完全不渲染卡片。关闭此项可看到每个 hook 事件。对新加载的历史生效（已打开的视图需重开窗口）。',
   'Editor': '编辑器',
+  'Workflow running — click for the live view': '工作流运行中 — 点击查看实时详情',
 };

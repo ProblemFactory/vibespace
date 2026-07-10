@@ -207,13 +207,16 @@ class FileExplorer {
     // Load bookmarks from server
     this._loadBookmarks();
 
-    // Listen for bookmark sync from other clients/windows
-    this.app.ws.onGlobal((msg) => {
+    // Listen for bookmark sync from other clients/windows (stored so dispose
+    // can offGlobal it — audit 2.81.0: the anonymous handler outlived closed
+    // explorers, pinning the whole instance incl. its detached DOM forever)
+    this._bkHandler = (msg) => {
       if (msg.type === 'bookmarks-updated') {
         this._bookmarks = msg.bookmarks;
         this._renderBookmarks();
       }
-    });
+    };
+    this.app.ws.onGlobal(this._bkHandler);
 
     if (this._startPath) this.navigate(this._startPath);
     else this._loadHome();
@@ -685,6 +688,16 @@ class FileExplorer {
     document.addEventListener('mouseup', onUp);
   }
 
+  // Full teardown (audit 2.81.0 — FileExplorer previously had NO dispose: the
+  // ws.onGlobal closure + ResizeObserver + in-flight upload XHRs outlived the
+  // window and pinned the instance + its detached DOM tree forever).
+  dispose() {
+    if (this._bkHandler) { this.app.ws.offGlobal(this._bkHandler); this._bkHandler = null; }
+    if (this._previewRO) { this._previewRO.disconnect(); this._previewRO = null; }
+    if (this._activeUploads) for (const u of this._activeUploads.values()) { try { u.xhr?.abort(); } catch {} }
+    try { this._previewEl?._viewerCtl?.abort(); } catch {} // preview-panel viewer listeners (image pan etc.)
+  }
+
   _getExtension(name) {
     const idx = name.lastIndexOf('.');
     return idx > 0 ? name.slice(idx + 1).toLowerCase() : '';
@@ -1020,6 +1033,12 @@ class FileExplorer {
         date: now, status,
       });
     }
+    // Prune: upload history grew forever (every entry synced to every client
+    // on every load — audit 2.81.0). Keep the newest 100.
+    try {
+      const all = Object.keys(sync.getAll('uploads') || {}).filter((k) => k.startsWith('upload:')).sort();
+      for (const k of all.slice(0, Math.max(0, all.length - 100))) sync.set('uploads', k, '');
+    } catch {}
   }
 
   // ── Upload with inline file-list progress ──
