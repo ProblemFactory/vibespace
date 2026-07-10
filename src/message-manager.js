@@ -276,8 +276,27 @@ class MessageManager {
       // merge (different record shapes, no shared uuid). Collapse doubles by
       // name within a 5s window.
       if (this._lastHookCard && this._lastHookCard.name === name && Math.abs(this._currentTs - this._lastHookCard.ts) < 5000) return;
+      // stderr counts only for FAILED hooks — successful plugins routinely spew
+      // warnings there (Node ExperimentalWarning etc.), which is noise.
+      const raw = [a.content, a.stdout, ...(ok ? [] : [a.stderr])].filter((x) => typeof x === 'string' && x.trim()).join('\n');
+      // Unwrap the machine ack: hook stdout is usually a protocol JSON like
+      // {"continue":true,"suppressOutput":true} — the only human-relevant part
+      // is hookSpecificOutput.additionalContext (or a block decision/reason).
+      let meaningful = raw.trim();
+      try {
+        const j = JSON.parse(meaningful);
+        if (j && typeof j === 'object' && !Array.isArray(j)) {
+          const extra = j.hookSpecificOutput?.additionalContext;
+          meaningful = typeof extra === 'string' ? extra.trim() : '';
+          if (!meaningful && (j.decision || j.reason)) meaningful = [j.decision, j.reason].filter(Boolean).join(': ');
+        }
+      } catch { /* not JSON — keep the raw text */ }
+      // Empty SUCCESSFUL hooks are pure noise (PostToolUse etc. fire per tool
+      // call with no output — user report: chat flooded with blank hook cards).
+      // Failures always show, even without output.
+      if (ok && !meaningful) return;
       this._lastHookCard = { name, ts: this._currentTs };
-      const output = [a.content, a.stdout, a.stderr].filter((x) => typeof x === 'string' && x.trim()).join('\n').slice(0, 20000);
+      const output = (meaningful || raw).slice(0, 20000);
       const msg = this._create({
         role: 'system', status: ok ? 'complete' : 'error',
         content: [{ type: 'system_info', text: `${ok ? '✓' : '✗'} Hook: ${isSys ? (name !== 'hook' ? name + ' ' : '') + 'message' : name}`, hookData: { name, event: a.hookEvent || null, outcome: a.type, exitCode: a.exitCode ?? null, output } }],

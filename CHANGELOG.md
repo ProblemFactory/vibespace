@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.79.1] — 2026-07-10
+
+### Fixed — empty hook cards flooding the chat
+2.77.0 rendered a card for EVERY hook attachment; hooks like PostToolUse fire
+per tool call with no output (or just the {"continue":true} protocol ack) and
+flooded the view. Successful hooks now render only when they produced real
+content (protocol-ack JSON unwrapped to its additionalContext; stderr-only
+warnings from successful plugins ignored); failures always show.
+
 ## [2.79.0] — 2026-07-10
 
 ### Added — stop-time bookkeeping nudge (with teeth)
