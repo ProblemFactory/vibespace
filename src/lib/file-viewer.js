@@ -100,8 +100,8 @@ class FileViewer {
         const data = await res.json();
         if (data.error) throw new Error(data.error);
         // Sheet tabs + table viewer
-        const viewer = document.createElement('div'); viewer.style.cssText = 'display:flex;flex-direction:column;height:100%';
-        const tableWrap = document.createElement('div'); tableWrap.style.cssText = 'flex:1;overflow:auto';
+        const viewer = document.createElement('div'); viewer.className = 'sheet-viewer';
+        const tableWrap = document.createElement('div'); tableWrap.className = 'sheet-table-wrap';
         const renderSheet = (sheet) => {
           tableWrap.innerHTML = '';
           const table = document.createElement('table'); table.className = 'file-viewer-table';
@@ -115,17 +115,17 @@ class FileViewer {
         };
         if (data.sheets.length > 1) {
           const tabs = document.createElement('div');
-          tabs.style.cssText = 'display:flex;gap:0;border-top:1px solid var(--border);background:var(--bg-titlebar);flex-shrink:0;overflow-x:auto';
+          tabs.className = 'sheet-tabs';
           data.sheets.forEach((sheet, i) => {
             const tab = document.createElement('div');
+            tab.className = 'sheet-tab';
             tab.textContent = sheet.name;
-            tab.style.cssText = 'padding:4px 12px;font-size:11px;cursor:pointer;border-right:1px solid var(--border);white-space:nowrap;color:var(--text-secondary)';
             tab.onclick = () => {
-              tabs.querySelectorAll('div').forEach(t => { t.style.background = ''; t.style.color = 'var(--text-secondary)'; });
-              tab.style.background = 'var(--bg-window)'; tab.style.color = 'var(--text)';
+              tabs.querySelectorAll('.sheet-tab').forEach(t => t.classList.remove('active'));
+              tab.classList.add('active');
               renderSheet(sheet);
             };
-            if (i === 0) { tab.style.background = 'var(--bg-window)'; tab.style.color = 'var(--text)'; }
+            if (i === 0) tab.classList.add('active');
             tabs.appendChild(tab);
           });
           viewer.append(tableWrap, tabs);
@@ -370,30 +370,28 @@ class FileViewer {
     const buf = await res.arrayBuffer();
 
     const viewer = document.createElement('div');
-    viewer.style.cssText = 'display:flex;height:100%;overflow:hidden;background:var(--bg-workspace);user-select:text';
+    viewer.className = 'pptx-viewer';
 
     const sidebar = document.createElement('div');
-    sidebar.style.cssText = 'width:180px;min-width:120px;max-width:400px;flex-shrink:0;overflow-y:auto;border-right:1px solid var(--border);background:var(--bg-sidebar);padding:8px';
+    sidebar.className = 'pptx-sidebar';
 
-    // Sidebar resize handle
+    // Sidebar resize handle (hover highlight via CSS :hover; width stays inline — user-dragged)
     const sidebarHandle = document.createElement('div');
-    sidebarHandle.style.cssText = 'width:4px;flex-shrink:0;cursor:col-resize;background:transparent;transition:background 0.15s';
-    sidebarHandle.onmouseenter = () => { sidebarHandle.style.background = 'var(--accent-dim)'; };
-    sidebarHandle.onmouseleave = () => { sidebarHandle.style.background = ''; };
+    sidebarHandle.className = 'pptx-sidebar-handle';
     sidebarHandle.addEventListener('mousedown', (e) => {
       e.preventDefault();
       const startX = e.clientX, startW = sidebar.offsetWidth;
       const onMove = (ev) => { sidebar.style.width = Math.max(120, Math.min(400, startW + ev.clientX - startX)) + 'px'; if (viewer._resizeThumbs) viewer._resizeThumbs(); };
-      const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); sidebarHandle.style.background = ''; };
+      const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
     });
 
     const main = document.createElement('div');
-    main.style.cssText = 'flex:1;display:flex;align-items:center;justify-content:center;overflow:auto;padding:16px;min-width:0';
+    main.className = 'pptx-main';
 
     const slideContainer = document.createElement('div');
-    slideContainer.style.cssText = 'position:relative';
+    slideContainer.className = 'pptx-slide';
     main.appendChild(slideContainer);
 
     viewer.append(sidebar, sidebarHandle, main);
@@ -435,17 +433,14 @@ class FileViewer {
         currentPreviewer.renderSingleSlide(idx);
       }
 
-      thumbEls.forEach((t, i) => {
-        t.style.borderColor = i === idx ? 'var(--accent)' : 'var(--border)';
-        t.style.opacity = i === idx ? '1' : '0.7';
-      });
+      thumbEls.forEach((t, i) => t.classList.toggle('active', i === idx));
     };
 
     // Build thumbnails: render at high resolution, CSS scale to fit sidebar
     const THUMB_RENDER_W = 800;
     const THUMB_RENDER_H = 450;
     const thumbHidden = document.createElement('div');
-    thumbHidden.style.cssText = 'position:absolute;left:-9999px;top:0';
+    thumbHidden.className = 'pptx-thumb-offscreen';
     document.body.appendChild(thumbHidden);
     const thumbPreviewer = initPptx(thumbHidden, { width: THUMB_RENDER_W, height: THUMB_RENDER_H, mode: 'list' });
     await thumbPreviewer.preview(buf);
@@ -457,15 +452,18 @@ class FileViewer {
     const thumbContents = []; // store references for resize
     for (let i = 0; i < count; i++) {
       const thumb = document.createElement('div');
-      thumb.style.cssText = 'margin-bottom:6px;cursor:pointer;border:2px solid var(--border);border-radius:4px;overflow:hidden;opacity:0.7;transition:all 0.15s;position:relative';
+      thumb.className = 'pptx-thumb';
 
       const label = document.createElement('div');
-      label.style.cssText = 'position:absolute;top:2px;left:4px;font-size:9px;z-index:1;background:rgba(0,0,0,0.5);padding:0 3px;border-radius:2px;color:#fff';
+      label.className = 'pptx-thumb-num';
       label.textContent = i + 1;
 
       const thumbContent = document.createElement('div');
-      thumbContent.style.cssText = 'overflow:hidden;pointer-events:none;position:relative';
+      thumbContent.className = 'pptx-thumb-content';
       if (thumbSource[i]) {
+        // Clone styles stay INLINE: this is foreign DOM from pptx-preview (own
+        // classes/inline styles) and the width/height/scale are tied to the
+        // THUMB_RENDER_* constants + dynamic sidebar width.
         const clone = thumbSource[i].cloneNode(true);
         clone.style.transformOrigin = 'top left';
         clone.style.width = THUMB_RENDER_W + 'px';
@@ -478,8 +476,6 @@ class FileViewer {
 
       thumb.append(label, thumbContent);
       thumb.onclick = () => { renderMain(i); thumb.scrollIntoView({ block: 'nearest' }); };
-      thumb.onmouseenter = () => { if (activeIdx !== i) thumb.style.opacity = '0.9'; };
-      thumb.onmouseleave = () => { if (activeIdx !== i) thumb.style.opacity = '0.7'; };
       thumbEls.push(thumb);
       sidebar.appendChild(thumb);
     }
@@ -567,35 +563,35 @@ class FileViewer {
 
     // Build viewer
     const viewer = document.createElement('div');
-    viewer.style.cssText = 'display:flex;flex-direction:column;height:100%;overflow:hidden';
+    viewer.className = 'csv-viewer';
 
     // Status bar
     const status = document.createElement('div');
-    status.style.cssText = 'padding:2px 8px;font-size:10px;color:var(--text-dim);border-bottom:1px solid var(--border);flex-shrink:0';
+    status.className = 'csv-status';
     status.textContent = `${total.toLocaleString()} rows × ${header.length} columns`;
 
     // Header
     const thead = document.createElement('div');
-    thead.style.cssText = 'display:flex;border-bottom:1px solid var(--border);background:var(--bg-titlebar);flex-shrink:0';
+    thead.className = 'csv-header';
     // Row number header
     const rnH = document.createElement('div');
-    rnH.style.cssText = 'width:50px;padding:3px 6px;font-size:10px;font-weight:600;color:var(--text-dim);flex-shrink:0;text-align:right;border-right:1px solid var(--border)';
+    rnH.className = 'csv-th-num';
     rnH.textContent = '#';
     thead.appendChild(rnH);
     for (const col of header) {
       const th = document.createElement('div');
-      th.style.cssText = 'flex:1;min-width:80px;padding:3px 6px;font-size:10px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-right:1px solid var(--border)';
+      th.className = 'csv-th';
       th.textContent = col;
       th.title = col;
       thead.appendChild(th);
     }
 
-    // Virtual scroll area
+    // Virtual scroll area (spacer height = row estimate — stays inline, dynamic)
     const scrollArea = document.createElement('div');
-    scrollArea.style.cssText = 'flex:1;overflow:auto;position:relative';
+    scrollArea.className = 'csv-scroll';
     const spacer = document.createElement('div');
+    spacer.className = 'csv-spacer';
     spacer.style.height = ((total - 1) * ROW_HEIGHT) + 'px';
-    spacer.style.position = 'relative';
     scrollArea.appendChild(spacer);
 
     onTotalChanged = () => {
@@ -628,19 +624,20 @@ class FileViewer {
         if (!row) continue;
 
         const rowEl = document.createElement('div');
-        rowEl.className = 'csv-row';
-        rowEl.style.cssText = `position:absolute;top:${rowIdx * ROW_HEIGHT}px;left:0;right:0;height:${ROW_HEIGHT}px;display:flex;align-items:center;font-size:11px;border-bottom:1px solid var(--border)`;
-        if (rowIdx % 2) rowEl.style.background = 'color-mix(in srgb, var(--text) 3%, transparent)';
+        rowEl.className = 'csv-row' + (rowIdx % 2 ? ' csv-row-alt' : '');
+        // Virtual-scroll offset + row height (tied to the ROW_HEIGHT constant) stay inline
+        rowEl.style.top = (rowIdx * ROW_HEIGHT) + 'px';
+        rowEl.style.height = ROW_HEIGHT + 'px';
 
         // Row number
         const rn = document.createElement('div');
-        rn.style.cssText = 'width:50px;padding:0 6px;font-size:9px;color:var(--text-dim);flex-shrink:0;text-align:right;border-right:1px solid var(--border)';
+        rn.className = 'csv-td-num';
         rn.textContent = rowIdx + 1;
         rowEl.appendChild(rn);
 
         for (const cell of row) {
           const td = document.createElement('div');
-          td.style.cssText = 'flex:1;min-width:80px;padding:0 6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-right:1px solid var(--border);color:var(--text)';
+          td.className = 'csv-td';
           td.textContent = cell;
           td.title = cell;
           rowEl.appendChild(td);

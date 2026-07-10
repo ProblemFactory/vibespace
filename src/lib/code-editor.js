@@ -54,27 +54,34 @@ const LANGUAGES = [
   { id: 'plain', label: 'Plain Text', ext: ['txt','log'] },
 ];
 
-// Light theme for CodeMirror (used when editor theme is 'light')
+// Light theme for CodeMirror (used when editor theme is 'light').
+// Accent-derived colors follow the app theme's `--accent` (CM6 theme values are
+// plain CSS strings, so var()/color-mix resolve at paint time). The mixes go
+// into the theme's own light surfaces (#ffffff / #f8fafc) — NOT transparent —
+// so the palette stays light even when this theme runs inside a dark app theme
+// (the external editor's Light toggle is independent of the app theme). The
+// neutral scaffolding (bg/panels/gutters/borders/text) IS the light palette and
+// deliberately stays literal.
 const editorLightTheme = EditorView.theme({
   '&': { backgroundColor: '#ffffff', color: '#1e293b' },
   '.cm-content': { caretColor: 'var(--accent, #0f766e)' },
   '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--accent, #0f766e)' },
-  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection': { backgroundColor: '#d7d4f0' },
+  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection': { backgroundColor: 'color-mix(in srgb, var(--accent, #0f766e) 22%, #ffffff)' },
   '.cm-panels': { backgroundColor: '#f5f5fa', color: '#1e293b' },
   '.cm-panels.cm-panels-top': { borderBottom: '1px solid #e0e0e8' },
   '.cm-panels.cm-panels-bottom': { borderTop: '1px solid #e0e0e8' },
-  '.cm-searchMatch': { backgroundColor: '#fde68a', outline: '1px solid #fbbf24' },
-  '.cm-searchMatch.cm-searchMatch-selected': { backgroundColor: '#bbf7d0' },
-  '.cm-activeLine': { backgroundColor: '#f1f5f9' },
-  '.cm-selectionMatch': { backgroundColor: '#c8e6c9' },
-  '&.cm-focused .cm-matchingBracket, &.cm-focused .cm-nonmatchingBracket': { backgroundColor: '#e0e7ff' },
+  '.cm-searchMatch': { backgroundColor: 'color-mix(in srgb, var(--yellow, #e5c07b) 45%, #ffffff)', outline: '1px solid var(--yellow, #e5c07b)' },
+  '.cm-searchMatch.cm-searchMatch-selected': { backgroundColor: 'color-mix(in srgb, var(--green, #3fb950) 30%, #ffffff)' },
+  '.cm-activeLine': { backgroundColor: 'color-mix(in srgb, var(--accent, #0f766e) 6%, #ffffff)' },
+  '.cm-selectionMatch': { backgroundColor: 'color-mix(in srgb, var(--green, #3fb950) 25%, #ffffff)' },
+  '&.cm-focused .cm-matchingBracket, &.cm-focused .cm-nonmatchingBracket': { backgroundColor: 'color-mix(in srgb, var(--accent, #0f766e) 15%, #ffffff)' },
   '.cm-gutters': { backgroundColor: '#f8fafc', color: '#94a3b8', borderRight: '1px solid #e2e8f0' },
-  '.cm-activeLineGutter': { backgroundColor: '#e2e8f0' },
+  '.cm-activeLineGutter': { backgroundColor: 'color-mix(in srgb, var(--accent, #0f766e) 10%, #f8fafc)' },
   '.cm-foldPlaceholder': { backgroundColor: 'transparent', border: 'none', color: 'var(--accent, #0f766e)' },
   '.cm-tooltip': { border: '1px solid #e2e8f0', backgroundColor: '#f5f5fa' },
   '.cm-tooltip .cm-tooltip-arrow:before': { borderTopColor: 'transparent', borderBottomColor: 'transparent' },
   '.cm-tooltip .cm-tooltip-arrow:after': { borderTopColor: '#f5f5fa', borderBottomColor: '#f5f5fa' },
-  '.cm-tooltip-autocomplete': { '& > ul > li[aria-selected]': { backgroundColor: '#d7d4f0', color: '#1e293b' } },
+  '.cm-tooltip-autocomplete': { '& > ul > li[aria-selected]': { backgroundColor: 'color-mix(in srgb, var(--accent, #0f766e) 22%, #ffffff)', color: '#1e293b' } },
 }, { dark: false });
 
 // Active-line highlight competes with multi-line selection: `highlightActiveLine`
