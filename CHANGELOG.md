@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.80.1] — 2026-07-10
+
+### Fixed — title-bar billing badges vanished on fresh page loads
+Identity sync (badges, title metadata) was gated behind the sidebar's
+change-digest; 2.72.0 made the digest so stable that a freshly loaded page —
+whose windows restore after the first merge — never got badges at all. The
+sync now runs on every merge (it is internally no-op-guarded).
+
+### Changed — hook cards: full content, standard toolbars
+Hook outputs are never truncated anymore (20000/600-char caps removed). The
+expandable body starts word-wrapped, carries the standard Wrap/Copy toolbar,
+and the summary row gains an Editor button that opens the full payload in a
+temp editor.
+
 ## [2.80.0] — 2026-07-10
 
 ### Fixed — injected hook context is now actually visible

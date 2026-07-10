@@ -238,7 +238,7 @@ class MessageManager {
       const names = [...new Set(infos.map(shortName).filter(Boolean))];
       const nameStr = names.length ? ` (${names.slice(0, 3).join(', ')}${names.length > 3 ? ', …' : ''})` : '';
       const text = (failed.length ? `${count} hooks ran, ${failed.length} failed` : `${count} hooks ran`) + nameStr;
-      const detail = infos.map((h) => `- ${shortName(h)}${h.exitCode != null ? ` (exit ${h.exitCode})` : ''}${h.command ? `\n  ${String(h.command).slice(0, 600)}` : ''}`).join('\n');
+      const detail = infos.map((h) => `- ${shortName(h)}${h.exitCode != null ? ` (exit ${h.exitCode})` : ''}${h.command ? `\n  ${String(h.command)}` : ''}`).join('\n');
       const msg = this._create({
         role: 'system', status: failed.length ? 'error' : 'complete',
         content: [{ type: 'system_info', text, ...(detail ? { hookData: { name: `${count} hooks`, event: 'Stop', outcome: failed.length ? 'partial' : 'success', exitCode: null, output: detail } } : {}) }],
@@ -290,7 +290,7 @@ class MessageManager {
       const tag = (text.match(/^<([\w-]+)/) || [])[1] || null;
       const msg = this._create({
         role: 'system', status: 'complete',
-        content: [{ type: 'system_info', text: `✓ Hook context${tag ? `: ${tag}` : ''}`, hookData: { name: tag || 'injected context', event: null, outcome: 'context', exitCode: null, output: text.slice(0, 20000) } }],
+        content: [{ type: 'system_info', text: `✓ Hook context${tag ? `: ${tag}` : ''}`, hookData: { name: tag || 'injected context', event: null, outcome: 'context', exitCode: null, output: text } }],
       });
       this._lastHookCard = { name: tag || 'injected context', ts: this._currentTs, msgId: msg.id, outHead: text.slice(0, 200) };
       if (emit) this._emit({ op: 'create', message: msg });
@@ -320,7 +320,7 @@ class MessageManager {
           if (!meaningful && (j.decision || j.reason)) meaningful = [j.decision, j.reason].filter(Boolean).join(': ');
         }
       } catch { /* not JSON — keep the raw text */ }
-      const output = (meaningful || (ok ? '' : raw)).slice(0, 20000);
+      const output = meaningful || (ok ? '' : raw); // full output — never truncated (expandable card + scroll cap handle size)
       // Live/replay double-render dedup — the two copies are ASYMMETRIC: the
       // stdout hook_response usually has NO output while the JSONL attachment
       // carries the FULL injected context. Skipping the newcomer blindly hid

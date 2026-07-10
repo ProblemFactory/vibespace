@@ -369,11 +369,14 @@ class ChatRenderers {
       const h = msg.content[0].hookData;
       const el = document.createElement('div');
       el.className = 'chat-msg chat-msg-system chat-system-notification chat-msg-hook';
-      // Full hook output (was truncated to 500 chars — and substring-after-escHtml
-      // could even slice a mid-entity). Kept inside a collapsed <details>; the
-      // CSS caps its height with a scroll so a huge output can't flood the view.
+      // Full hook output, NEVER truncated — collapsed <details> + the CSS
+      // scroll cap handle size. The <pre> starts pre-wrapped (hook payloads
+      // are prose-ish) and the STANDARD addWrapToggles toolbar (Wrap/Copy)
+      // picks it up like any other pre; an editor button opens the full text.
       const output = h.output ? escHtml(h.output) : '';
-      el.innerHTML = `<details class="chat-hook-details"><summary class="chat-hook-summary">${escHtml(text)}</summary>${output ? `<pre class="chat-hook-output">${output}</pre>` : ''}</details>`;
+      el.innerHTML = `<details class="chat-hook-details"><summary class="chat-hook-summary">${escHtml(text)}${h.output ? `<button class="chat-wrap-toggle chat-hook-edit" title="${t('Open in editor')}">${t('Editor')}</button>` : ''}</summary>${output ? `<pre class="chat-hook-output chat-pre-wrapped">${output}</pre>` : ''}</details>`;
+      const editBtn = el.querySelector('.chat-hook-edit');
+      if (editBtn) editBtn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); this.openInTempEditor(h.output); };
       return { el, sideEffect: null };
     }
     // Error / interrupted
