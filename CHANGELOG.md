@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.90.0 — 2026-07-10
+
+**Deleting the active desktop no longer wipes the adjacent desktop's layout (real report)**
+- `deleteDesktop` on the active desktop hand-rolled its switch: it only un-hid windows already IN THE DOM. A target desktop never visited since page load keeps its windows only in saved state (they lazy-replay on first `switchTo`) — so it presented EMPTY, and the closing autosave then persisted that emptiness over the target's real layout. Repro: create a desktop → switch to it → delete it → the previously-last desktop's layout wiped (and its taskbar preview went blank). The delete now runs the FULL `switchTo` pipeline (lazy window replay + grid restore), waits out an in-flight switch (whose re-entry guard would otherwise leave the active pointer on a deleted desktop), and falls back to the old path only if the switch bails.
+
 ## 2.89.3 — 2026-07-10
 
 - Manage Agents → Agent instructions is now a collapsed-by-default advanced section grouped with the VibeSpace integration row (summary shows "customized" when any field is set). Layout redone: labelled field per injection surface, and the stop-nudge conditions read as complete sentences with the number inputs embedded inline (they used to wrap one word per line).

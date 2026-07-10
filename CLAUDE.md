@@ -390,7 +390,7 @@ Each desktop is an independent layout slot with its own windows and grid mode. W
 
 **Data model**: `layouts.json` has `desktopMeta: [{id, name}]` and `desktops: { [id]: { autoSave: {...} } }`. First load auto-migrates legacy `autoSave` to "Desktop 1". Every window gets `win._desktopId` tag at creation (intercepted `createWindow`). `captureState()` only serializes the active desktop's windows.
 
-**Switching**: `switchTo()` hides current desktop windows, shows target desktop windows, applies target grid. No re-rendering — `visibility:hidden` windows stay alive with full state (chat scroll, terminal content, etc.). Waiting blink (`window-waiting`) propagates to desktop preview rects in real-time.
+**Switching**: `switchTo()` hides current desktop windows, shows target desktop windows, applies target grid. **Deleting the ACTIVE desktop runs the full switchTo pipeline (2.90.0)** — the old DOM-only show left a never-visited target desktop empty (its windows lazy-replay from _savedStates on first switch) and the closing autosave persisted that emptiness over the target's real layout; deleteDesktop is async now and waits out switchTo's re-entry guard. No re-rendering — `visibility:hidden` windows stay alive with full state (chat scroll, terminal content, etc.). Waiting blink (`window-waiting`) propagates to desktop preview rects in real-time.
 
 **UI**: Ubuntu-style miniature previews in taskbar right corner. Each preview shows proportional window rectangles from `gridBounds`. Active desktop has accent border. Waiting windows blink yellow in preview. Click to switch, right-click for rename/delete, drag window onto preview to move it. "+" button to add desktop. Ctrl+Alt+Left/Right keyboard shortcut.
 

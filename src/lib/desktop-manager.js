@@ -86,20 +86,36 @@ export class DesktopManager {
     return id;
   }
 
-  deleteDesktop(desktopId) {
+  async deleteDesktop(desktopId) {
     if (this._desktops.length <= 1) return; // can't delete last desktop
-    const idx = this._desktops.findIndex(d => d.id === desktopId);
+    let idx = this._desktops.findIndex(d => d.id === desktopId);
     if (idx < 0) return;
 
-    // If deleting the active desktop, switch to adjacent first
+    // If deleting the active desktop, run the FULL switch pipeline to the
+    // adjacent one. The old hand-rolled path only _showWin'ed windows already
+    // in the DOM — a target desktop never visited since page load keeps its
+    // windows ONLY in _savedStates (they lazy-replay on first switchTo), so it
+    // presented EMPTY and the closing autosave then saved that emptiness over
+    // the target's real layout (real report: create desktop → switch → delete
+    // → the previously-last desktop's layout wiped). switchTo also restores
+    // the target's grid, which this path never did.
     const wasActive = this._activeId === desktopId;
     if (wasActive) {
-      const targetIdx = idx > 0 ? idx - 1 : 1;
-      this._activeId = this._desktops[targetIdx].id;
-      // Show the new active desktop's windows
-      for (const [, win] of this.app.wm.windows) {
-        if (win._desktopId === this._activeId && win._hiddenByDesktop) this._showWin(win);
+      const targetDeskId = this._desktops[idx > 0 ? idx - 1 : 1].id;
+      // Wait out an in-flight switch — switchTo's re-entry guard would
+      // silently bail and leave _activeId pointing at the deleted desktop.
+      for (let i = 0; i < 12 && this._restoring; i++) await new Promise(r => setTimeout(r, 150));
+      await this.switchTo(targetDeskId);
+      if (this._activeId !== targetDeskId) {
+        // Switch still bailed — minimal fallback (DOM-only show), never leave
+        // the active pointer on a deleted desktop.
+        this._activeId = targetDeskId;
+        for (const [, win] of this.app.wm.windows) {
+          if (win._desktopId === this._activeId && win._hiddenByDesktop) this._showWin(win);
+        }
       }
+      idx = this._desktops.findIndex(d => d.id === desktopId); // list may have shifted while awaiting
+      if (idx < 0) return;
     }
     const targetId = this._activeId;
 
