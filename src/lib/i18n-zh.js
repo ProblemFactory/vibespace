@@ -1022,7 +1022,6 @@ export default {
   "% off (subscriptions ignore this)": "% 折扣(订阅不受此影响)",
   "= the 4 components →": "= 右侧 4 项之和 →",
   "Back to dashboard": "返回仪表盘",
-  "Cache read": "缓存读",
   "Cache write 1h": "缓存写 1h",
   "Cache write 5m": "缓存写 5m",
   "Default rates ($ / Mtok)": "默认单价($ / 百万 token)",
