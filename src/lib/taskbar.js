@@ -242,6 +242,9 @@ export function showTabGroupList(app, anchor, chain) {
     const item = document.createElement('div');
     item.className = 'overlap-switcher-item';
     if (i === chain.active) item.classList.add('active');
+    // carry the waiting blink into the list — the stacked icon only says "one
+    // of these is waiting"; the row says WHICH
+    if (win.element.classList.contains('window-waiting')) item.classList.add('waiting');
     const icon = document.createElement('span');
     icon.style.cssText = 'flex-shrink:0;display:inline-flex;align-items:center';
     icon.appendChild(_cloneTabIcon(win));
@@ -298,6 +301,10 @@ export function showWindowList(app, anchor) {
       const item = document.createElement('div');
       item.className = 'overlap-switcher-item';
       if (id === app.wm.activeWindowId && !win.isMinimized) item.classList.add('active');
+      // waiting blink — for a tab-group host, aggregate over ALL its tabs
+      // (guests are skipped from this list, so the host row speaks for them)
+      const tabIds = win._tabChain ? win._tabChain.tabs : [id];
+      if (tabIds.some(tid => app.wm.windows.get(tid)?.element.classList.contains('window-waiting'))) item.classList.add('waiting');
 
       const icon = document.createElement('span');
       icon.innerHTML = win._typeIcon || '';

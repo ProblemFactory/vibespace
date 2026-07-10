@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.66.1] — 2026-07-10
+
+### Fixed — waiting blink reaches tabs and window lists
+When windows are grouped or stacked, the "agent replied" blink only lived on
+the (hidden) window titlebar — the tab headers didn't blink, and neither did
+the rows in the taskbar stack popup, the window-list popup, or the overlap
+switcher, so you couldn't tell WHICH window wanted attention. Now: tab headers
+carry the blink (kept live through the same update funnel as the taskbar) and
+all three list popups blink the exact row (group rows aggregate their tabs).
+Switching to a waiting tab acknowledges the blink.
+
 ## [2.66.0] — 2026-07-10
 
 ### Changed — one design language across every window

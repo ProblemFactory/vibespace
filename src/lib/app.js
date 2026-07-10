@@ -3616,6 +3616,10 @@ class App {
   updateTaskbar() {
     updateTaskbarFn(this);
     if (this.desktopManager) this.desktopManager._renderSwitcher();
+    // Waiting-blink propagation to tab headers rides the same funnel (every
+    // waiting toggle calls winInfo._notifyChanged → here) — a grouped guest's
+    // own titlebar is hidden, so its TAB must carry the blink instead.
+    this.wm.refreshTabWaiting?.();
     // Task attention rides the same signal: every waiting-blink toggle and
     // window open/close funnels through here (winInfo._notifyChanged), so the
     // board's ⚠ badges stay live without their own event plumbing. Debounced —

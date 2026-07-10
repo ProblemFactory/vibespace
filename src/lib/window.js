@@ -1059,6 +1059,9 @@ class WindowManager {
     for (const w of overlapping) {
       const item = document.createElement('div');
       item.className = 'overlap-switcher-item';
+      // waiting blink — hosts aggregate their grouped tabs (guests skipped above)
+      const tabIds = w._tabChain ? w._tabChain.tabs : [w.id];
+      if (tabIds.some(tid => this.windows.get(tid)?.element.classList.contains('window-waiting'))) item.classList.add('waiting');
       const icon = document.createElement('span');
       icon.innerHTML = w._typeIcon || '';
       icon.style.cssText = 'font-size:11px;flex-shrink:0;display:inline-flex;align-items:center';
