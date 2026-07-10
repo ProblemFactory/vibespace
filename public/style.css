@@ -1063,7 +1063,13 @@ html, body {
 @keyframes ut-pulse { 50% { opacity: 0.35; } }
 .ut-body { flex: 1; min-width: 0; }
 .ut-text { font-size: 11px; color: var(--text); line-height: 1.4; }
-.ut-detail { font-size: 10px; color: var(--text-secondary); white-space: pre-wrap; margin-top: 2px; line-height: 1.4; max-height: 84px; overflow-y: auto; }
+.ut-detail { font-size: 10px; color: var(--text-secondary); white-space: pre-wrap; margin-top: 2px; line-height: 1.4; max-height: 120px; overflow-y: auto; }
+.ut-detail-exp { margin-top: 1px; }
+.ut-detail-exp > summary { font-size: 9px; color: var(--text-dim); cursor: pointer; list-style: none; user-select: none; }
+.ut-detail-exp > summary::-webkit-details-marker { display: none; }
+.ut-detail-exp > summary::before { content: '▸ '; }
+.ut-detail-exp[open] > summary::before { content: '▾ '; }
+.ut-detail-exp > summary:hover { color: var(--accent); }
 .ut-meta { font-size: 9px; color: var(--text-dim); margin-top: 2px; }
 .ut-actions { display: flex; gap: 2px; align-items: flex-start; opacity: 0.35; }
 .ut-item:hover .ut-actions { opacity: 1; }
@@ -1076,7 +1082,10 @@ html, body {
 .ut-dismiss:hover { color: var(--red, #e55); }
 .ut-resolved-head { font-size: 10px; color: var(--text-dim); margin: 8px 0 2px; text-transform: uppercase; letter-spacing: .03em; }
 .ut-item-resolved { opacity: 0.55; }
+.ut-item-resolved:hover { opacity: 0.85; }
 .ut-item-resolved .ut-text { text-decoration: line-through; }
+.ut-sess { color: var(--text-secondary); }
+.ut-item:hover .ut-sess { color: var(--accent); }
 .usage-section-backend { width: 14px; height: 14px; font-size: 8px; }
 /* Per-account usage switcher (usage popup) — one chip per viewable identity */
 .usage-acct-switch { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 8px; }

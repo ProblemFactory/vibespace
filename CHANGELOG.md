@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.69.1] — 2026-07-10
+
+### Fixed — "For you" inbox: details viewable, origin session visible
+Item details now render behind a collapsed "detail" expander on BOTH open and
+resolved rows (previously resolved rows showed no detail at all). Resolved
+rows also name the session that filed them and jump to it on click, same as
+open rows. Expander clicks no longer bubble into the jump-and-close.
+
 ## [2.69.0] — 2026-07-10
 
 ### Added — summary + detail split for agent reports

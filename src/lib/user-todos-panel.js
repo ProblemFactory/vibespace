@@ -79,12 +79,15 @@ export function installUserTodos(app) {
       const w = (items) => Math.max(...items.map((i) => URG_RANK[i.urgency || 'normal'] || 1));
       return (w(b[1]) - w(a[1])) || (Math.max(...b[1].map(i => i.createdAt)) - Math.max(...a[1].map(i => i.createdAt)));
     });
+    // Detail rides behind a collapsed expander (open items ship up to 2000
+    // chars of agent context — inline it would swamp the list).
+    const detailHtml = (i) => (i.detail ? `<details class="ut-detail-exp"><summary>${escHtml(t('detail'))}</summary><div class="ut-detail">${escHtml(i.detail)}</div></details>` : '');
     const itemHtml = (i) => `
       <div class="ut-item" data-id="${escHtml(i.id)}">
         <span class="ut-dot" data-urgency="${escHtml(i.urgency || 'normal')}" title="${escHtml(i.urgency || 'normal')}"></span>
         <div class="ut-body">
           <div class="ut-text">${escHtml(i.text)}</div>
-          ${i.detail ? `<div class="ut-detail">${escHtml(i.detail)}</div>` : ''}
+          ${detailHtml(i)}
           <div class="ut-meta">${agoText(i.createdAt)}</div>
         </div>
         <span class="ut-actions">
@@ -98,7 +101,8 @@ export function installUserTodos(app) {
         <div class="ut-item ut-item-resolved" data-id="${escHtml(i.id)}">
           <span class="ut-dot" data-urgency=""></span>
           <div class="ut-body"><div class="ut-text">${escHtml(i.text)}</div>
-          <div class="ut-meta">${i.status === 'dismissed' ? t('dismissed') : t('done')}${i.resolvedBy === 'agent' ? ' · ' + t('by the agent') : ''} · ${agoText(i.resolvedAt || i.createdAt)}</div></div>
+          ${detailHtml(i)}
+          <div class="ut-meta"><span class="ut-sess" title="${t('Go to this session')}">${escHtml(nameFor(i.sessionKey, [i]))}</span> · ${i.status === 'dismissed' ? t('dismissed') : t('done')}${i.resolvedBy === 'agent' ? ' · ' + t('by the agent') : ''} · ${agoText(i.resolvedAt || i.createdAt)}</div></div>
           <span class="ut-actions"><button class="ut-act ut-reopen" title="${t('Reopen')}">↺</button></span>
         </div>`).join('')}` : '';
     popup.innerHTML = `
@@ -125,6 +129,9 @@ export function installUserTodos(app) {
   popup.addEventListener('click', (e) => {
     const head = e.target.closest('.ut-group-head');
     if (head) { jump(head.dataset.key); return; }
+    // A click on the detail expander is a toggle, not a jump — without this
+    // guard opening the detail would bubble into the row's jump-and-close.
+    if (e.target.closest('.ut-detail-exp')) return;
     const item = e.target.closest('.ut-item');
     if (!item) return;
     const id = item.dataset.id;
@@ -132,7 +139,7 @@ export function installUserTodos(app) {
     else if (e.target.closest('.ut-dismiss')) setStatus(id, 'dismissed');
     else if (e.target.closest('.ut-reopen')) setStatus(id, 'open');
     else {
-      const rec = todos.open.find((i) => i.id === id);
+      const rec = todos.open.find((i) => i.id === id) || todos.resolved.find((i) => i.id === id);
       if (rec) jump(rec.sessionKey);
     }
   });
