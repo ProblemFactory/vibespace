@@ -2753,6 +2753,14 @@ class App {
         if (forkTitle && resumeId) {
           (this._pendingForkTitles ??= new Map()).set(msg.sessionId, { name: forkTitle, parentId: backendSessionId || resumeId });
         }
+        // Same for a USER-TYPED name on a brand-new session (New Session dialog):
+        // the window title carried it, but the sidebar names sessions from the
+        // first user message unless a CUSTOM NAME exists — so the typed name
+        // silently lost to the first message once the transcript appeared.
+        // Persist it as the custom name when the backend id is adopted.
+        else if (name && name.trim() && !resumeId && backend !== 'shell' && !ephemeral) {
+          (this._pendingCreateNames ??= new Map()).set(msg.sessionId, name.trim());
+        }
         // Session created "in" a task — bind once the backend session id shows
         // up in active-sessions (unknown at creation for claude; folder
         // auto-include already covers tasks with linked folders, this makes
@@ -3550,6 +3558,16 @@ class App {
       if (pendingFork && match.backendSessionId && match.backendSessionId !== pendingFork.parentId) {
         this.sidebar.setCustomName?.(match.sessionKey || getSessionKey(match), pendingFork.name);
         this._pendingForkTitles.delete(session.sessionId);
+      }
+      // A user-typed New Session name becomes the custom name once the backend
+      // id exists (before that there is no stable key to attach it to). A
+      // manual rename in the meantime wins — don't clobber it.
+      const pendingName = this._pendingCreateNames?.get(session.sessionId);
+      if (pendingName && match.backendSessionId) {
+        if (!this.sidebar.getCustomName?.(match)) {
+          this.sidebar.setCustomName?.(match.sessionKey || getSessionKey(match), pendingName);
+        }
+        this._pendingCreateNames.delete(session.sessionId);
       }
       this.wm.setTitleMeta(winId, this._buildTitleMeta(match));
       this.wm.setAuthBadge?.(winId, match.auth || null); // billing key in the title bar

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.65.1] — 2026-07-09
+
+### Fixed — New Session custom names now stick in the sidebar
+A name typed in the New Session dialog showed on the window title but the
+sidebar silently replaced it with your first message: sidebar names come from
+the transcript's first user message unless a **custom name** exists, and the
+dialog's name was never persisted as one. It now becomes the session's custom
+name once the backend session id is adopted (same mechanism as fork titles);
+a manual rename done in the meantime wins.
+
 ## [2.65.0] — 2026-07-09
 
 ### Added — the "For you" inbox (global user-facing TODO list)
