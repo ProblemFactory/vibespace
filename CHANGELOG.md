@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.92.0 — 2026-07-10
+
+**Design-audit backlog: ALL six deferred items closed**
+- Full i18n for the file explorer, file/hex viewers and the workflow detail window (+171 keys, zh/ja complete, params/orphans audited; `tc('table','Columns')` disambiguates table columns from grid column count).
+- Menu-label casing standardized (review menu Title Case → sentence case; `Custom...` unified to `Custom…` everywhere; dictionary keys migrated in lockstep).
+- Modal shells deduplicated: one `createModalShell` helper in utils.js now backs 8 formerly hand-rolled overlays (−62 lines; per-site close-lifecycle side effects preserved; deliberately NOT data-popover — the global Escape blind-remove would skip onClose side effects).
+- path-autocomplete dedup verified already done (stale backlog entry — all 7 consumers route through setupDirAutocomplete).
+- CSV/XLSX/PPTX viewers restyled from inline styles onto viewers.css classes with theme tokens (virtual-scroll offsets/slide transforms stay inline — genuinely dynamic); CodeMirror light theme accent-derived via color-mix into light surfaces.
+
+**Splits (perf backlog, part 2)**
+- chat-view.js gap-seek machinery (17 methods, ~390 lines) → src/lib/chat-view-seek.js prototype mixin.
+- server.js usage/rate-limit cluster (536 lines) → src/usage-routes.js setupUsage() (verified with a stub-eval harness after two free-identifier boot crashes — esbuild/node --check don't catch those).
+
+**Fixes**
+- Telemetry-captured gap-seek crash: `_extendTop`'s insertion anchor used a bare `.chat-msg` selector that can match a NESTED element → NotFoundError; now `:scope >` + validated fragment insert.
+
 ## 2.91.0 — 2026-07-10
 
 **Audit round-3: all 10 remaining verified findings landed** (each adversarially verified against real data before fixing)
