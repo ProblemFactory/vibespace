@@ -308,6 +308,81 @@
 .file-viewer-table th { background: var(--bg-titlebar); font-weight: 600; position: sticky; top: 0; }
 .file-viewer-table tr:hover { background: var(--bg-hover); }
 
+/* ── Spreadsheet viewer (XLSX): sheet tabs at the bottom, like Excel ── */
+.sheet-viewer { display: flex; flex-direction: column; height: 100%; }
+.sheet-table-wrap { flex: 1; overflow: auto; }
+.sheet-tabs {
+  display: flex; border-top: 1px solid var(--border); background: var(--bg-titlebar);
+  flex-shrink: 0; overflow-x: auto;
+}
+.sheet-tab {
+  padding: 4px 12px; font-size: 11px; cursor: pointer; white-space: nowrap;
+  color: var(--text-secondary); border-right: 1px solid var(--border);
+}
+.sheet-tab.active { background: var(--bg-window); color: var(--text); }
+
+/* ── CSV/TSV virtual-scroll viewer ── */
+.csv-viewer { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
+.csv-status {
+  padding: 2px 8px; font-size: 10px; color: var(--text-dim);
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.csv-header { display: flex; border-bottom: 1px solid var(--border); background: var(--bg-titlebar); flex-shrink: 0; }
+.csv-th-num, .csv-td-num {
+  width: 50px; flex-shrink: 0; text-align: right; color: var(--text-dim);
+  border-right: 1px solid var(--border);
+}
+.csv-th-num { padding: 3px 6px; font-size: 10px; font-weight: 600; }
+.csv-td-num { padding: 0 6px; font-size: 9px; }
+.csv-th, .csv-td {
+  flex: 1; min-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  border-right: 1px solid var(--border); color: var(--text);
+}
+.csv-th { padding: 3px 6px; font-size: 10px; font-weight: 600; }
+.csv-td { padding: 0 6px; }
+.csv-scroll { flex: 1; overflow: auto; position: relative; }
+.csv-spacer { position: relative; }
+/* Rows are absolutely positioned by the virtual scroller — top/height stay inline (JS) */
+.csv-row {
+  position: absolute; left: 0; right: 0; display: flex; align-items: center;
+  font-size: 11px; border-bottom: 1px solid var(--border);
+}
+.csv-row-alt { background: color-mix(in srgb, var(--text) 3%, transparent); }
+
+/* ── PPTX viewer: thumbnail sidebar + main slide ── */
+.pptx-viewer { display: flex; height: 100%; overflow: hidden; background: var(--bg-workspace); user-select: text; }
+.pptx-sidebar {
+  width: 180px; min-width: 120px; max-width: 400px; flex-shrink: 0;
+  overflow-y: auto; border-right: 1px solid var(--border);
+  background: var(--bg-sidebar); padding: 8px;
+}
+.pptx-sidebar-handle {
+  width: 4px; flex-shrink: 0; cursor: col-resize; background: transparent;
+  transition: background var(--transition);
+}
+.pptx-sidebar-handle:hover { background: var(--accent-dim); }
+.pptx-main {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  overflow: auto; padding: 16px; min-width: 0;
+}
+.pptx-slide { position: relative; }
+.pptx-thumb {
+  margin-bottom: 6px; cursor: pointer; border: 2px solid var(--border);
+  border-radius: var(--radius-sm); overflow: hidden; opacity: 0.7;
+  transition: all var(--transition); position: relative;
+}
+.pptx-thumb:not(.active):hover { opacity: 0.9; }
+.pptx-thumb.active { border-color: var(--accent); opacity: 1; }
+.pptx-thumb-num {
+  position: absolute; top: 2px; left: 4px; z-index: 1;
+  font-size: 9px; padding: 0 3px; border-radius: var(--radius-sm);
+  /* fixed scrim over arbitrary slide artwork — deliberately theme-independent */
+  background: rgba(0, 0, 0, 0.5); color: #fff;
+}
+.pptx-thumb-content { overflow: hidden; pointer-events: none; position: relative; }
+/* Offscreen scratch container for high-res thumbnail rendering */
+.pptx-thumb-offscreen { position: absolute; left: -9999px; top: 0; }
+
 /* ── Media Viewer (images, video, audio, PDF) ── */
 .media-viewer {
   display: flex; flex-direction: column; width: 100%; height: 100%; overflow: hidden;
