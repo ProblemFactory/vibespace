@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.90.1 — 2026-07-10
+
+- Layout-sync hardening: the user-dirty send gate now EXPIRES 60s after the last real input. A client whose dirty bit stuck (an idle tab left open, a stray automation client) used to echo STALE window positions after every remote apply — reverting other clients' fresh drags and replaying old layouts after drag end (observed as "multi-client sync broken: drags don't propagate, then old drags replay"). The echo carries a fresh seq, so the anti-ping-pong seq guard can't catch it; expiring the dirty bit closes the hole at the source.
+
 ## 2.90.0 — 2026-07-10
 
 **Deleting the active desktop no longer wipes the adjacent desktop's layout (real report)**
