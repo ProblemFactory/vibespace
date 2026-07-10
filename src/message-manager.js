@@ -412,6 +412,13 @@ class MessageManager {
       if (normalizedContent.length === 0) return;
       // Use original msgId if present (for dedup with client-side local preview)
       const msg = this._create({ role: 'user', status: 'complete', content: normalizedContent, turnIndex: this.turnIndex });
+      // Provenance for the notification classifier: promptSource = the CLI's
+      // marker on HUMAN-submitted prompts (JSONL 'sdk'; our own live sends
+      // stamp it too), isSynthetic = CLI-synthesized records (hook feedback on
+      // the live stream). A user who literally types "Stop hook feedback: …"
+      // must NOT get their message demoted to a dim notification card.
+      if (raw.promptSource || raw._fromWebui) msg.typed = true;
+      if (raw.isSynthetic) msg.synthetic = true;
       if (emit) this._emit({ op: 'create', message: msg });
     }
   }

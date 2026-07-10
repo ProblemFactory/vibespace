@@ -1181,4 +1181,11 @@ export default {
   "Detail — acceptance criteria, paths, background (optional)": "详情——验收标准、路径、背景（可选）",
   "Edit text and detail": "编辑文本和详情",
   "Show details": "显示详情",
+  "Stop hook feedback": "Stop hook 反馈",
+  "Agent instructions": "Agent 指令",
+  "Custom agent instructions (injected)": "自定义 Agent 指令（注入）",
+  "Injected at the top of the VibeSpace context every agent session receives — customize behavior fleet-wide (e.g. reply language, reporting habits, house rules). Delivered once per session and again when you change it.": "注入到每个 agent 会话收到的 VibeSpace 上下文顶部——全局定制 agent 行为（例如回复语言、汇报习惯、团队守则）。每个会话只发一次，修改后会再次下发。",
+  "Saved — new/updated sessions receive it on their next turn": "已保存——新会话和已有会话都会在下一轮收到",
+  "Your own standing instructions for every agent session, injected at the TOP of the VibeSpace hook context (task context or the baseline tools intro). Delivered once per session and re-delivered when you change it — never on every turn. Edit comfortably in Manage Agents → Agent instructions. Max 4000 chars.": "你为每个 agent 会话设置的常驻指令，注入在 VibeSpace hook 上下文（任务上下文或基础工具介绍）的顶部。每个会话只发一次，修改后重新下发——绝不逐轮重复。建议在 管理 Agents → Agent 指令 里编辑。上限 4000 字符。",
+  "e.g. Always reply in Chinese. File a vibespace-ask before starting anything destructive.": "例如：总是用中文回复。做任何破坏性操作前先用 vibespace-ask 询问。",
 };

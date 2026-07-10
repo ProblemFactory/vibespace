@@ -374,6 +374,13 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     broadcast({ type: 'settings-updated', settings: data });
   }
 
+  // Server-side settings accessor: /api/settings persists HERE
+  // (data/settings.json) — NOT in the 'settings' SyncStore (settings-sync.json,
+  // a dormant migration target). Server code must read via this, never via
+  // getSyncStore('settings') (that store is empty — a real bug class: 9 server
+  // reads silently saw defaults regardless of what the user configured).
+  router.readSettings = readSettings;
+
   router.get('/api/settings', (req, res) => res.json(readSettings()));
 
   router.post('/api/settings', (req, res) => {

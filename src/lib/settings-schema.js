@@ -247,6 +247,12 @@ const SETTINGS_SCHEMA = {
     description: t('When an agent finishes a turn while its board state is stale (no status update in 10 minutes), it gets one short follow-up asking it to set vibespace-status, mirror open questions with vibespace-ask, and log finished work — then it stops. At most once per 30 minutes per session. Claude enforces this via a blocking Stop hook; Codex via its wrapper at turn end.'),
     category: t('Session'), liveApply: true,
   },
+  'agents.injectPreamble': {
+    type: 'text', default: '',
+    label: t('Custom agent instructions (injected)'),
+    description: t('Your own standing instructions for every agent session, injected at the TOP of the VibeSpace hook context (task context or the baseline tools intro). Delivered once per session and re-delivered when you change it — never on every turn. Edit comfortably in Manage Agents → Agent instructions. Max 4000 chars.'),
+    category: t('Session'), liveApply: true,
+  },
   'agents.perTurnToolReminder': {
     type: 'boolean', default: true,
     label: t('Per-turn tool reminder for agents'),
