@@ -26,6 +26,16 @@ function flush() {
   send(QUEUE.splice(0));
 }
 
+// Numeric metric — its own budget (periodic samples would eat the error cap).
+let metricSeq = 0;
+export function metric(name, value) {
+  if (!Number.isFinite(value) || metricSeq >= 500) return;
+  metricSeq++;
+  QUEUE.push({ kind: 'metric', name, value: Math.round(value * 10) / 10 });
+  if (QUEUE.length >= 10) flush();
+  else if (!flushTimer) flushTimer = setTimeout(flush, 15000);
+}
+
 export function track(kind, name, detail, stack) {
   // Bound the queue and rate: a hot error loop must not DoS the server —
   // cap 60 events per page session, identical-name errors capped at 5.
@@ -55,4 +65,43 @@ export function installTelemetry() {
     flush();
   });
   track('boot', 'page-load');
+
+  // ── Performance metrics (all passive, all names-and-numbers only) ──
+  // Long tasks: the direct measure of UI jank. Aggregated per minute so a
+  // stutter burst is one event, not fifty.
+  try {
+    let ltCount = 0, ltTotal = 0, ltMax = 0;
+    const po = new PerformanceObserver((list) => {
+      for (const e of list.getEntries()) { ltCount++; ltTotal += e.duration; ltMax = Math.max(ltMax, e.duration); }
+    });
+    po.observe({ entryTypes: ['longtask'] });
+    setInterval(() => {
+      if (!ltCount) return;
+      metric('longtask-count-per-min', ltCount);
+      metric('longtask-max-ms', ltMax);
+      metric('longtask-total-ms-per-min', ltTotal);
+      ltCount = 0; ltTotal = 0; ltMax = 0;
+    }, 60000);
+  } catch {}
+
+  // Heap + DOM growth: the long-lived-tab leak signals (heap is Chrome-only).
+  // First sample after the workspace settles, then every 10 minutes.
+  const sampleFootprint = () => {
+    try {
+      if (performance.memory) metric('js-heap-mb', performance.memory.usedJSHeapSize / 1048576);
+      metric('dom-nodes', document.getElementsByTagName('*').length);
+      const app = window.app;
+      if (app?.wm) metric('open-windows', app.wm.windows.size);
+    } catch {}
+  };
+  setTimeout(sampleFootprint, 30000);
+  setInterval(sampleFootprint, 600000);
+}
+
+// Boot duration — call from client.js once app.ready resolves (nav start → workspace restored).
+export function reportBootTime() {
+  try {
+    const ms = performance.now();
+    if (ms > 0 && ms < 300000) metric('boot-to-ready-ms', ms);
+  } catch {}
 }

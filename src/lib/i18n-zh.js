@@ -1378,4 +1378,8 @@ export default {
   "{size} — too large to preview": "{size} — 过大，无法预览",
   "★ Bookmarked": "★ 已加入书签",
   "☆ Add to bookmarks": "☆ 添加到书签",
+  "Performance metrics": "性能指标",
+  "No metrics yet — they accumulate as the app runs.": "还没有指标数据——随着应用运行会逐渐累积。",
+  "metric": "指标",
+  "latest": "最新",
 };

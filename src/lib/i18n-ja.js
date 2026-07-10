@@ -1376,4 +1376,8 @@ export default {
   "{size} — too large to preview": "{size} — 大きすぎてプレビューできません",
   "★ Bookmarked": "★ ブックマーク済み",
   "☆ Add to bookmarks": "☆ ブックマークに追加",
+  "Performance metrics": "パフォーマンス指標",
+  "No metrics yet — they accumulate as the app runs.": "指標データはまだありません——アプリの稼働に伴い蓄積されます。",
+  "metric": "指標",
+  "latest": "最新",
 };

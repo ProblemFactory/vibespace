@@ -37,6 +37,8 @@ class Telemetry {
       stack: ev.stack != null ? String(ev.stack).slice(0, 4000) : undefined,
       version: ev.version || this.version,
       ua: ev.ua ? String(ev.ua).slice(0, 160) : undefined,
+      // Numeric metrics (kind:'metric') — aggregated into percentiles by summary()
+      value: Number.isFinite(ev.value) ? ev.value : undefined,
     };
     this._buf.push(rec);
     if (!this._flushTimer) this._flushTimer = setTimeout(() => this.flush(), 2000);
@@ -89,6 +91,7 @@ class Telemetry {
     const from = Date.now() - days * 86400000;
     const byName = {}; const byDay = {}; const byVersion = {};
     const errors = [];
+    const metricVals = {}; // name → number[] (kind:'metric')
     let total = 0;
     let files = [];
     try { files = fs.readdirSync(this.dir).filter((f) => /^events-\d{4}-\d{2}\.ndjson$/.test(f)).sort().slice(-3); } catch {}
@@ -108,6 +111,9 @@ class Telemetry {
         if (r.kind === 'error' || r.kind === 'server-error') {
           errors.push({ ts: r.ts, name: r.name, detail: r.detail, stack: r.stack, version: r.version });
         }
+        if (r.kind === 'metric' && Number.isFinite(r.value)) {
+          (metricVals[r.name] = metricVals[r.name] || []).push(r.value);
+        }
       }
     }
     errors.sort((a, b) => b.ts - a.ts);
@@ -119,10 +125,23 @@ class Telemetry {
       if (g) { g.count++; g.lastTs = Math.max(g.lastTs, e.ts); }
       else grouped.set(k, { ...e, count: 1, lastTs: e.ts });
     }
+    // Percentile aggregation per metric — vals arrive in file order, i.e.
+    // chronological, so `last` is the newest sample.
+    const metrics = {};
+    for (const [name, vals] of Object.entries(metricVals)) {
+      const sorted = [...vals].sort((a, b) => a - b);
+      const pick = (p) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))];
+      metrics[name] = {
+        count: vals.length,
+        avg: Math.round((vals.reduce((s, v) => s + v, 0) / vals.length) * 10) / 10,
+        p50: pick(0.5), p95: pick(0.95), max: sorted[sorted.length - 1],
+        last: vals[vals.length - 1],
+      };
+    }
     return {
       days, total,
       byName: Object.fromEntries(Object.entries(byName).sort((a, b) => b[1] - a[1])),
-      byDay, byVersion,
+      byDay, byVersion, metrics,
       errors: [...grouped.values()].sort((a, b) => b.lastTs - a.lastTs).slice(0, 50),
       instance: this._instanceId(),
     };
