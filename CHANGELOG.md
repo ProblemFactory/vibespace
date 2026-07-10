@@ -23,11 +23,12 @@ Per-account usage in the rosters is now compact conic-gradient donuts
 the wide label+bar+percent rows.
 
 ### Performance — Usage window no longer re-reads the ledger per request
-The workspace can live on network storage (FUSE NFS: ~40ms per file read) and
-/api/usage-stats re-read every shard on every request (18s observed). Events
-are now cached in memory with append-only incremental reads, scan() is
-throttled (15s), session-meta reads are TTL-cached, and the ledger warms at
-boot. 18s → ~0.3s.
+/api/usage-stats re-read + re-parsed every shard on every request — seconds of
+CPU at 218k events, and 18s observed while a concurrent full-disk scan was
+saturating IO (contention, not baseline storage latency). Events are now
+cached in memory with append-only incremental reads, scan() is throttled
+(15s), session-meta reads are TTL-cached, and the ledger warms at boot.
+18s → ~0.3s under load; also immune to future background-IO contention.
 
 ## [2.69.1] — 2026-07-10
 
