@@ -976,6 +976,7 @@ class ChatRenderers {
           if (langPicker.querySelector('.chat-lang-dropdown')) { langPicker.querySelector('.chat-lang-dropdown').remove(); return; }
           const dd = document.createElement('div');
           dd.className = 'chat-lang-dropdown';
+          dd.dataset.popover = '1'; // app-wide Escape-dismiss protocol (app.js removes [data-popover])
           const input = document.createElement('input');
           input.className = 'chat-lang-search';
           input.placeholder = t('Filter...');

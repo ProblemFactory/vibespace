@@ -75,9 +75,7 @@ class FileExplorer {
     // View menu button
     const btnView = this._btn('', 'View options');
     btnView.innerHTML = '<svg style="width:12px;height:12px;vertical-align:-1px" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 8s3-5.5 7-5.5S15 8 15 8s-3 5.5-7 5.5S1 8 1 8z"/><circle cx="8" cy="8" r="2.5"/></svg> \u25BE';
-    btnView.style.width = 'auto';
-    btnView.style.padding = '2px 6px';
-    btnView.style.fontSize = '11px';
+    btnView.classList.add('media-btn');
     btnView.onclick = () => this._showViewMenu(btnView);
 
     const btnNewFile = this._btn('+', 'New file'); btnNewFile.onclick = () => this.createFile();

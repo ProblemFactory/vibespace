@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.66.0] — 2026-07-10
+
+### Changed — one design language across every window
+A 6-surface design audit (86 findings) drove a consistency pass over all
+windows, dialogs, popups and toolbars — density preserved (this is a pro tool),
+divergence removed:
+
+- **One button system**: primary = accent fill + `--accent-fg` text + accent-hover
+  (fixes white-on-pastel text on Dracula/Nord/Monokai; no more opacity/brightness
+  hover tricks), secondary = one compact recipe with the accent border+text hover,
+  plus a proper `.danger` variant (was a red fill inside an accent border).
+- **One popover chrome** for every dropdown/menu/panel (bg, border, radius,
+  shadow) — chat's four hand-rolled dropdowns join the app-wide spec and now
+  dismiss on Escape like everything else.
+- **Theme correctness**: ~40 hardcoded palette colors (badge tints, status chips,
+  chat tier colors, workflow states, diff/permission tints, scrollbar hover,
+  CSV zebra) now flow through theme vars / `color-mix` — custom themes and all 6
+  built-ins render them correctly; Firefox gets themed thin scrollbars.
+- **Conflicting duplicate rules fixed**: `.usage-note` (warnings amber via a new
+  `.usage-warn`, info notes back to neutral), `.usage-section-title` (one
+  canonical section-title spec: 11px caps for titles, child spans keep their
+  casing — emails/account names never uppercase), `.usage-bar-fill`.
+- **Scales normalized**: radii on the `--radius`/`--radius-sm`/pill(999px)
+  tokens, integer type scale (9/10/11/12/13), one toolbar spec across
+  explorer/media/editor/hex/archive, one section-title + micro-label spec,
+  aligned empty states, 6px state dots, onboarding aligned with the dialog spec.
+
 ## [2.65.2] — 2026-07-10
 
 ### Fixed — inbox/usage popups follow their buttons

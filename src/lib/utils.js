@@ -60,7 +60,7 @@ export function showConfirmDialog({ title = t('Confirm'), message = '', confirmT
   return new Promise((resolve) => {
     const { overlay, body, okBtn, cancelBtn, closeBtn } = _modalShell(title);
     okBtn.textContent = confirmText;
-    if (danger) okBtn.style.background = 'var(--red)';
+    if (danger) okBtn.classList.add('danger'); // red fill+border+hover as a set (inline bg kept the accent border)
     const p = document.createElement('p');
     p.className = 'dialog-hint';
     p.style.fontSize = '12px';

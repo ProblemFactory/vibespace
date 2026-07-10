@@ -529,6 +529,7 @@ export class ChatInput {
       if (existing) { existing.remove(); return; }
       const popup = document.createElement('div');
       popup.className = 'chat-todo-popup';
+      popup.dataset.popover = '1'; // app-wide Escape-dismiss protocol (app.js removes [data-popover])
       for (const t of this._todos) {
         const icon = t.status === 'completed' ? UI_ICONS.check : t.status === 'in_progress' ? UI_ICONS.hourglass : UI_ICONS.circle;
         const item = document.createElement('div');

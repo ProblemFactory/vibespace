@@ -257,7 +257,7 @@ class CodeEditor {
     toolbar.append(toolbarLeft, toolbarRight);
 
     this.editorBody = document.createElement('div'); this.editorBody.className = 'editor-body';
-    this._previewBody = document.createElement('div'); this._previewBody.className = 'markdown-preview editor-body'; this._previewBody.style.display = 'none'; this._previewBody.style.overflow = 'auto'; this._previewBody.style.padding = '12px 16px';
+    this._previewBody = document.createElement('div'); this._previewBody.className = 'markdown-preview editor-body'; this._previewBody.style.display = 'none'; this._previewBody.style.overflow = 'auto';
     container.append(toolbar, this.editorBody, this._previewBody);
     winInfo.content.appendChild(container);
 
@@ -274,8 +274,8 @@ class CodeEditor {
   }
 
   _btn(text) {
-    const b = document.createElement('button'); b.className = 'file-tool-btn'; b.textContent = text;
-    b.style.width = 'auto'; b.style.padding = '2px 8px'; b.style.fontSize = '11px'; return b;
+    const b = document.createElement('button'); b.className = 'file-tool-btn media-btn'; b.textContent = text;
+    return b;
   }
 
   _getThemeExtension() {
@@ -323,13 +323,13 @@ class CodeEditor {
         const res = await fetch(`/api/file/content?path=${encodeURIComponent(this.filePath)}`);
         const data = await res.json();
         if (data.error) {
-          this.editorBody.innerHTML = `<div class="empty-hint" style="color:var(--red);padding:20px">${escHtml(data.error)}</div>`;
+          this.editorBody.innerHTML = `<div class="empty-hint" style="color:var(--red)">${escHtml(data.error)}</div>`;
           this._themeObserver?.disconnect(); // load failed — editor never constructed, observer would leak
           return;
         }
         content = data.content || '';
       } catch (err) {
-        this.editorBody.innerHTML = `<div class="empty-hint" style="color:var(--red);padding:20px">Failed to load file: ${escHtml(err.message)}</div>`;
+        this.editorBody.innerHTML = `<div class="empty-hint" style="color:var(--red)">Failed to load file: ${escHtml(err.message)}</div>`;
         this._themeObserver?.disconnect();
         return;
       }

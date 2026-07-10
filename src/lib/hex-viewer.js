@@ -21,10 +21,10 @@ class HexViewer {
     `;
     const jumpInput = document.createElement('input');
     jumpInput.className = 'toolbar-select'; jumpInput.placeholder = 'Jump to offset (hex)';
-    jumpInput.style.cssText = 'width:140px;font-size:10px;font-family:monospace';
+    jumpInput.style.cssText = 'width:140px;font-family:monospace';
     jumpInput.onkeydown = (e) => { if (e.key === 'Enter') this._jumpTo(jumpInput.value); };
-    const loadMoreBtn = document.createElement('button'); loadMoreBtn.className = 'file-tool-btn';
-    loadMoreBtn.style.cssText = 'width:auto;padding:2px 8px;font-size:11px'; loadMoreBtn.textContent = 'Load more';
+    const loadMoreBtn = document.createElement('button'); loadMoreBtn.className = 'file-tool-btn media-btn';
+    loadMoreBtn.textContent = 'Load more';
     loadMoreBtn.onclick = () => this._loadChunk();
     toolbar.append(jumpInput, loadMoreBtn);
 
