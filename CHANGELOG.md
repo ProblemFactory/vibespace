@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.76.0] — 2026-07-10
+
+### Fixed — multi-group sessions could never learn the vibespace tools
+A session in 2+ Task Groups got the "How to report back" section repeated per
+group (2 groups = 9.8KB, 3 = 15.7KB) — past the hook persist threshold, so
+those agents saw only a ~2KB head preview and never learned vibespace-ask /
+shared-context (the 2.68.0 failure, back through a different door). Now the
+tools section is emitted once, FIRST (byte ~158), and per-group log budgets
+shrink until the total fits: 2 groups = 6.9KB inline, 3 = 10.0KB with the
+rules still inside any preview.
+
+### Fixed — localization audit (user-requested)
+Full sweep of today's 8 releases: coverage-gap + param/tag parity checks were
+clean except 'Preview'; a multi-agent review of every changed file found three
+unwrapped tooltip/label strings (billing-badge 'Console login' / 'API key',
+metadata popup 'uuid'). All wrapped, dictionaries complete (zh/ja 1126 keys).
+
+### Fixed — `vibespace-ask --help` filed "--help" as a user todo
+Observed in real data. help/-h/--help (and any flag-looking first argument)
+now print usage instead of filing an item.
+
 ## [2.75.2] — 2026-07-10
 
 ### Fixed — account roster donut columns misaligned

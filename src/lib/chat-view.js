@@ -502,7 +502,7 @@ class ChatView {
     add(t('Stop reason'), meta.stopReason);
     add(t('Request ID'), meta.requestId, true);
     add(t('Message ID'), meta.msgId, true);
-    add('uuid', msg.uuid, true);
+    add(t('uuid'), msg.uuid, true);
     if (msg.srcLine != null) add(t('Transcript line'), msg.srcLine + 1);
     const pop = document.createElement('div');
     pop.className = 'msg-meta-pop';

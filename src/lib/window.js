@@ -938,7 +938,7 @@ class WindowManager {
       let tip;
       if (isApi) {
         el.innerHTML = KEY_SVG + `<span class="wab-name">${escHtml(auth.name || (auth.source === 'api-console' ? 'Console' : 'API'))}</span>`;
-        tip = t('API billing (pay per use)') + ` — ${auth.source === 'api-console' ? 'Console login' : (auth.name ? auth.name + (auth.tail ? ' (…' + auth.tail + ')' : '') : (auth.detail || 'API key'))}${auth.guessed ? ' · ' + t('estimated from the login state at spawn') : ''}`;
+        tip = t('API billing (pay per use)') + ` — ${auth.source === 'api-console' ? t('Console login') : (auth.name ? auth.name + (auth.tail ? ' (…' + auth.tail + ')' : '') : (auth.detail || t('API key')))}${auth.guessed ? ' · ' + t('estimated from the login state at spawn') : ''}`;
       } else if (isUnknown) {
         el.innerHTML = KEY_SVG + '?';
         tip = t('Billing identity unknown (started before tracking)');

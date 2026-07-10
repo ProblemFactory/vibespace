@@ -1138,4 +1138,6 @@ export default {
   'Not found near the session folder': 'セッションフォルダ付近に見つかりません',
   'Render this HTML in the embedded browser': 'この HTML を内蔵ブラウザで表示',
   '{n}h': '{n}h',
+  'Preview': 'プレビュー',
+  'uuid': 'uuid',
 };
