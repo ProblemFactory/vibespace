@@ -377,7 +377,7 @@ html, body {
 .acct-usage-donut { position: relative; width: 22px; height: 22px; border-radius: 50%; flex: none; display: inline-flex; align-items: center; justify-content: center; }
 .acct-usage-donut::after { content: ''; position: absolute; inset: 4px; border-radius: 50%; background: var(--bg-dialog); }
 .acct-usage-donut > span { position: relative; z-index: 1; font-size: 7px; font-weight: 600; color: var(--text-secondary); letter-spacing: -0.2px; }
-.acct-usage-age { opacity: 0.6; font-style: italic; }
+.acct-usage-age { opacity: 0.6; font-style: italic; min-width: 4.5ch; text-align: right; flex: none; font-variant-numeric: tabular-nums; }
 .acct-linked-hint { color: var(--accent); opacity: 0.85; }
 .acct-set-email {
   font-size: 9px; padding: 0 5px; border-radius: var(--radius); cursor: pointer;
