@@ -274,6 +274,29 @@ class MessageManager {
   _processAttachment(raw, emit) {
     const a = raw.attachment;
     if (!a) return;
+    // Mid-turn user messages ("sent while you were working") are recorded in
+    // the JSONL ONLY as queued_command attachments — never as user records.
+    // Dropping them (pre-2.88.0) ERASED the user's own words from any history
+    // rebuilt from the JSONL (restart re-normalization, resume under another
+    // account, view-only) — a real 211-records-in-one-session data-visibility
+    // loss. Render as a normal user message; dedup against the live-send echo
+    // (same text sent via chat-input lands in the buffer too).
+    if (a.type === 'queued_command') {
+      const blocks = (Array.isArray(a.prompt) ? a.prompt : [])
+        .filter((b) => b && b.type === 'text' && typeof b.text === 'string' && b.text.trim())
+        .map((b) => ({ type: 'text', text: b.text }));
+      const text = blocks.map((b) => b.text).join('');
+      if (!text.trim()) return;
+      for (let i = this.messages.length - 1, seen = 0; i >= 0 && seen < 12; i--, seen++) {
+        const m = this.messages[i];
+        if (m.role === 'user' && (m.content || []).map((b) => b.text || '').join('') === text) return;
+      }
+      this.turnIndex++;
+      const msg = this._create({ role: 'user', status: 'complete', content: blocks, turnIndex: this.turnIndex });
+      msg.typed = true; // the user's own words — never a notification card
+      if (emit) this._emit({ op: 'create', message: msg });
+      return;
+    }
     if (a.type === 'goal_status') {
       this._goalState = { condition: a.condition || '', met: !!a.met, sentinel: !!a.sentinel };
       if (emit) this._emit({ op: 'meta', subtype: 'goal_status', data: this._goalState });

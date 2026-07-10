@@ -253,6 +253,18 @@ const SETTINGS_SCHEMA = {
     description: t('Your own standing instructions for every agent session, injected at the TOP of the VibeSpace hook context (task context or the baseline tools intro). Delivered once per session and re-delivered when you change it — never on every turn. Edit comfortably in Manage Agents → Agent instructions. Max 4000 chars.'),
     category: t('Session'), liveApply: true,
   },
+  'agents.perTurnExtra': {
+    type: 'text', default: '',
+    label: t('Per-turn reminder extra (injected EVERY prompt)'),
+    description: t('Short custom text placed at the top of the per-turn reminder — reaches the agent on EVERY message you send, so keep it tight (≤500 chars; it costs tokens each turn). Delivers even if the standard tool reminder is turned off. Edit in Manage Agents → Agent instructions.'),
+    category: t('Session'), liveApply: true,
+  },
+  'agents.stopNudgeExtra': {
+    type: 'text', default: '',
+    label: t('Stop-nudge extra (injected when the bookkeeping nudge fires)'),
+    description: t('Custom text placed at the top of the stop-time bookkeeping nudge (≤500 chars) — e.g. extra end-of-turn duties for your agents. Edit in Manage Agents → Agent instructions.'),
+    category: t('Session'), liveApply: true,
+  },
   'agents.perTurnToolReminder': {
     type: 'boolean', default: true,
     label: t('Per-turn tool reminder for agents'),

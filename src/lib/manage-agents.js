@@ -544,23 +544,46 @@ export function installManageAgents(App, ctx = {}) {
         row.style.flexDirection = 'column'; row.style.alignItems = 'stretch';
         const head = document.createElement('div');
         head.innerHTML = `<b>${t('Agent instructions')}</b>`
-          + `<div class="agents-note">${t('Injected at the top of the VibeSpace context every agent session receives — customize behavior fleet-wide (e.g. reply language, reporting habits, house rules). Delivered once per session and again when you change it.')}</div>`;
-        const ta = document.createElement('textarea');
-        ta.className = 'settings-json';
-        ta.rows = 4;
-        ta.maxLength = 4000;
-        ta.placeholder = t('e.g. Always reply in Chinese. File a vibespace-ask before starting anything destructive.');
-        ta.value = this.settings.get('agents.injectPreamble') || '';
+          + `<div class="agents-note">${t('Your custom text rides at the TOP of each VibeSpace injection surface — customize behavior fleet-wide (reply language, reporting habits, house rules). Each surface has its own field and cost profile.')}</div>`;
+        row.appendChild(head);
+        // One field per injection surface — each with its own delivery cadence
+        // (and therefore its own token cost the user should see spelled out).
+        const FIELDS = [
+          ['agents.injectPreamble', 4000, 4,
+            t('Session context (once per session + when edited)'),
+            t('e.g. Always reply in Chinese. File a vibespace-ask before starting anything destructive.')],
+          ['agents.perTurnExtra', 500, 2,
+            t('Per-turn reminder (EVERY prompt — keep it short, costs tokens each turn)'),
+            t('e.g. Prefer minimal diffs; never commit without asking.')],
+          ['agents.stopNudgeExtra', 500, 2,
+            t('Stop nudge (when the end-of-turn bookkeeping reminder fires)'),
+            t('e.g. Also update the shared context folder if you learned something reusable.')],
+        ];
+        const tas = [];
+        for (const [key, cap, rows, label, ph] of FIELDS) {
+          const lab = document.createElement('div');
+          lab.className = 'agents-note';
+          lab.style.marginTop = '6px';
+          lab.textContent = label;
+          const ta = document.createElement('textarea');
+          ta.className = 'settings-json';
+          ta.rows = rows;
+          ta.maxLength = cap;
+          ta.placeholder = ph;
+          ta.value = this.settings.get(key) || '';
+          tas.push([key, ta]);
+          row.append(lab, ta);
+        }
         const btnRow = document.createElement('div');
         btnRow.style.cssText = 'display:flex;justify-content:flex-end;gap:6px;margin-top:6px;';
         const save = document.createElement('button');
         save.className = 'agent-btn'; save.textContent = t('Save');
         save.onclick = () => {
-          this.settings.set('agents.injectPreamble', ta.value.trim());
+          for (const [key, ta] of tas) this.settings.set(key, ta.value.trim());
           showToast(t('Saved — new/updated sessions receive it on their next turn'));
         };
         btnRow.appendChild(save);
-        row.append(head, ta, btnRow);
+        row.append(btnRow);
         body.appendChild(row);
       }
 
