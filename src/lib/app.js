@@ -26,6 +26,7 @@ import { CommandMode } from './command-mode.js';
 import { updateTaskbar as updateTaskbarFn } from './taskbar.js';
 import { openBrowser as openBrowserFn } from './browser-window.js';
 import { openTaskDetail as openTaskDetailFn } from './task-detail.js';
+import { openTaskLog as openTaskLogFn } from './task-log.js';
 import { openUsageWindow } from './usage-window.js';
 import { openSessionProps as openSessionPropsFn } from './session-props.js';
 import { openWorkflowDetail as openWorkflowDetailFn } from './workflow-detail.js';
@@ -1683,6 +1684,7 @@ class App {
   openBrowser(url, opts) { return openBrowserFn(this, url, opts); }
 
   openTaskDetail(taskId, opts) { return openTaskDetailFn(this, taskId, opts); }
+  openTaskLog(taskId, opts) { return openTaskLogFn(this, taskId, opts); }
   openUsage(opts) { return openUsageWindow(this, opts || {}); }
 
   // Diagnostics report: renders the local telemetry summary (client errors,

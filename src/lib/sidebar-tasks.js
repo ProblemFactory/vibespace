@@ -469,6 +469,7 @@ export function installSidebarTasks(SidebarClass) {
     if (!t) return;
     const items = [
       { label: tr('Details…'), action: () => this.app.openTaskDetail(taskId) },
+      { label: tr('Checklist & activity…'), action: () => this.app.openTaskLog(taskId, { tab: 'activity' }) },
       { label: tr('New session in this task…'), action: () => this.app.showNewSessionDialog({ cwd: this._folderPaths(t)[0], taskId }) },
       { label: tr('Rename'), action: async () => {
         const n = await showInputDialog({ title: tr('Rename Task Group'), label: tr('Title'), value: t.title, confirmText: tr('Rename') });

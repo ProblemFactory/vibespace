@@ -2357,7 +2357,7 @@ app.post('/api/agent/task-plan', (req, res) => {
     const plan = (t.plan || []).map(p => ({ ...p }));
     const { check, uncheck, add } = req.body || {};
     if (typeof add === 'string' && add.trim()) {
-      plan.push({ text: add.trim(), done: false });
+      plan.push({ text: add.trim(), done: false, addedBy: sessionStatusKey(hit[0], hit[1]), addedAt: Date.now() });
     } else if (check !== undefined || uncheck !== undefined) {
       const ref = check !== undefined ? check : uncheck;
       const done = check !== undefined;
@@ -2371,9 +2371,9 @@ app.post('/api/agent/task-plan', (req, res) => {
         else return res.status(400).json({ error: matches.length ? 'ambiguous step — use its number' : 'no matching plan step' });
       }
       plan[idx].done = done;
-      // P5: record who ticked it (loose, informational — never enforced).
-      if (done) plan[idx].by = sessionStatusKey(hit[0], hit[1]);
-      else delete plan[idx].by;
+      // P5: record who ticked it / when (loose, informational — never enforced).
+      if (done) { plan[idx].by = sessionStatusKey(hit[0], hit[1]); plan[idx].doneAt = Date.now(); }
+      else { delete plan[idx].by; delete plan[idx].doneAt; }
     } else {
       return res.status(400).json({ error: 'need add, check, or uncheck' });
     }
