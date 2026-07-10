@@ -20,8 +20,8 @@ class LayoutManager {
     this._pendingRemote = null;
     this._pointerDown = false;
     this._lastSentJson = null;
-    document.addEventListener('pointerdown', () => { this._userDirty = true; this._pointerDown = true; }, { capture: true, passive: true });
-    document.addEventListener('keydown', () => { this._userDirty = true; }, { capture: true, passive: true });
+    document.addEventListener('pointerdown', () => { this._userDirty = true; this._lastUserInputAt = Date.now(); this._pointerDown = true; }, { capture: true, passive: true });
+    document.addEventListener('keydown', () => { this._userDirty = true; this._lastUserInputAt = Date.now(); }, { capture: true, passive: true });
     const flushPending = () => {
       this._pointerDown = false;
       if (this._pendingRemote) {
@@ -516,6 +516,12 @@ class LayoutManager {
     // schedule autosaves with a state that differs only by rounding — sending
     // those bounced every operation between clients several times.
     if (!this._userDirty) return;
+    // Dirty EXPIRES: a client whose last real input was minutes ago must not
+    // broadcast — an idle tab (phone left open, a stray automation client)
+    // with a stuck dirty bit would echo STALE positions after every remote
+    // apply, reverting other clients' fresh drags and replaying old layouts
+    // (real incident: leftover test tabs fought the user's two clients).
+    if (!this._lastUserInputAt || Date.now() - this._lastUserInputAt > 60000) { this._userDirty = false; return; }
     const state = this.captureState();
     const desktopId = this.app.desktopManager?.activeDesktopId;
     // No-op guard: focus clicks and timers frequently schedule saves with an
