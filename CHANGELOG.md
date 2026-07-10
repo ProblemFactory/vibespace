@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.67.4] — 2026-07-10
+
+### Fixed — the Ctrl+G "blank terminal" was a scroll bug, not a renderer quirk
+Investigation (buffer forensics on two identically-spawned sessions) disproved
+the earlier "fullscreen renderer" explanation: neither session ever used the
+alt screen and both had identical env — the content was there all along, but
+the editor-open path called `fit()` WITHOUT the follow-up `scrollToBottom()`
+(the close path had it), so the shrunken viewport could park in the blank
+region below the content — randomly per window, which is why two windows
+"behaved differently". Now the open path scrolls to bottom; the centered
+explainer remains only as a fallback for genuinely empty buffers, with honest
+neutral wording.
+
 ## [2.67.3] — 2026-07-10
 
 ### Fixed — Ctrl+G editor toolbar buttons were never styled

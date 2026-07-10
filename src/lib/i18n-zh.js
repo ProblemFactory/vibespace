@@ -1093,4 +1093,6 @@ export default {
   "{n} open": "{n} 个未处理",
   "Prompt cache hit rate (last turn): {pct}% of input tokens were read from cache ({read} of {total}). Higher = cheaper + faster.": "提示词缓存命中率（上一轮）：{pct}% 的输入 tokens 读取自缓存（{total} 中的 {read}）。越高越省钱、越快。",
   "Editing below — Save & Close to hand the file back": "正在下方编辑 — 保存并关闭后文件交还给 agent",
+  "Waiting for the editor below": "等待下方编辑器",
+  "The terminal resumes after Save & Close.": "保存并关闭后终端恢复。",
 };

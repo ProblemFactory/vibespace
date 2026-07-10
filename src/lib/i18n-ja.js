@@ -1093,4 +1093,6 @@ export default {
   "{n} open": "{n} 件未対応",
   "Prompt cache hit rate (last turn): {pct}% of input tokens were read from cache ({read} of {total}). Higher = cheaper + faster.": "プロンプトキャッシュのヒット率（直前のターン）：入力トークンの {pct}% がキャッシュから読み込まれました（{total} 中 {read}）。高いほど安く高速です。",
   "Editing below — Save & Close to hand the file back": "下のペインで編集中 — 保存して閉じるとファイルがエージェントに戻ります",
+  "Waiting for the editor below": "下のエディタの完了待ち",
+  "The terminal resumes after Save & Close.": "保存して閉じるとターミナルが再開します。",
 };
