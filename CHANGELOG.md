@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.68.0] — 2026-07-10
+
+### Fixed — agents never learned the vibespace tools (hook payload truncation)
+Field report + forensics from an agent: Claude Code persists an oversized hook
+context to disk and shows the agent only a ~2KB head preview — and our payload
+put a ~24KB Activity log FIRST with the tool instructions LAST, so agents saw a
+pure-log preview and never discovered `vibespace-task/-status/-ask` (observed:
+almost no tool usage fleet-wide). The injected context is now ordered
+identity → objective/checklist → **tool instructions** → shared folder →
+Activity log last, and the log is byte-budgeted (whole payload ≈8KB, stays
+inline; newest entries win, with a "last N of M" pointer). Multi-group
+sessions split the budget. Real-data check: 27.5KB → 7.9KB with instructions
+starting at byte 557.
+
 ## [2.67.4] — 2026-07-10
 
 ### Fixed — the Ctrl+G "blank terminal" was a scroll bug, not a renderer quirk

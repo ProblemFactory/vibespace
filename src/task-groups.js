@@ -116,10 +116,13 @@ class TaskGroupManager {
 
   // ── Context folder: generated TASK.md + injection payload (P2) ──
 
-  // cap = how many Activity-log entries to include (TASK.md keeps 50; the
-  // injected context passes 30). A truncation notice points to the full log.
+  _tsShort(ms) { return new Date(ms).toISOString().slice(0, 16).replace('T', ' '); }
+
+  // cap = how many Activity-log entries to include (TASK.md keeps 50).
+  // cap = 0 omits the log entirely (renderContext appends its own budgeted log
+  // section LAST instead — see the truncation note there).
   renderTaskMd(t, cap = 50) {
-    const ts = (ms) => new Date(ms).toISOString().slice(0, 16).replace('T', ' ');
+    const ts = (ms) => this._tsShort(ms);
     const lines = [
       `# ${t.title}`,
       '',
@@ -134,7 +137,7 @@ class TaskGroupManager {
       for (const p of t.plan) lines.push(`- [${p.done ? 'x' : ' '}] ${p.text}`);
     }
     const total = (t.progress || []).length;
-    const prog = (t.progress || []).slice(-cap);
+    const prog = cap > 0 ? (t.progress || []).slice(-cap) : [];
     if (prog.length) {
       lines.push('', '## Activity log', '');
       if (total > cap) lines.push(`_(showing the last ${cap} of ${total} entries — run \`vibespace-task show\` or read this file for the rest)_`, '');
@@ -207,30 +210,22 @@ class TaskGroupManager {
   // <remoteHome>/.vibespace/ctx/<groupId> — pass that as ctxBase and every
   // file path in the injection is translated to the remote copy (an agent on
   // the host can't read the local paths).
-  renderContext(id, { multi = false, ctxBase = null } = {}) {
+  // ORDER + SIZE MATTER (real incident): Claude Code persists an oversized hook
+  // additionalContext to disk and hands the agent only a ~2KB HEAD preview.
+  // The old layout put a ~24KB Activity log FIRST and the tool rules LAST — so
+  // agents saw a pure log preview, never learned vibespace-task/-status/-ask,
+  // and simply didn't use them. Now: identity/objective/checklist → TOOL RULES
+  // → context folder → Activity log LAST, with the log byte-budgeted so the
+  // whole payload stays inline (< ~8KB) in the common case.
+  renderContext(id, { multi = false, ctxBase = null, logBudget = 8000 } = {}) {
     const t = this.get(id);
     const parts = [
       `<vibespace-task-context>`,
       `This session belongs to VibeSpace Task Group "${t.title}" (${t.id}). The state below is shared across ALL sessions of this group.`,
       '',
-      // Injected copy shows the last 30 Activity-log entries (TASK.md keeps 50).
-      this.renderTaskMd(t, 30).replace(/\n---\n[\s\S]*$/, '').trim(),
+      // cap=0: meta/objective/checklist only — the log is appended LAST below.
+      this.renderTaskMd(t, 0).replace(/\n---\n[\s\S]*$/, '').trim(),
     ];
-    if (t.contextDir) {
-      const base = ctxBase || t.contextDir;
-      parts.push('', `## Shared context folder (the group's shared memory)`, '',
-        (ctxBase
-          ? `\`${base}\` — a live-synced copy (newer file wins, ~1 min lag) of this group's shared context folder.`
-          : `\`${base}\` — this group's shared context folder.`)
-        + ` It is the group's SHARED MEMORY between agents: every session working this Task Group — now and in the future — reads it. It is NOT a place to publish deliverables for the user (put user-facing output wherever the user asked for it).`);
-      const files = this._listContextFiles(t.contextDir);
-      if (files.length) {
-        parts.push('', 'Files (read what you need with your normal file tools):');
-        for (const f of files) parts.push(`- ${base}/${f.path} (${f.size < 1024 ? f.size + ' B' : Math.round(f.size / 1024) + ' KB'})`);
-      } else {
-        parts.push('', '(No shared files yet.)');
-      }
-    }
     // ── How to report back — self-documenting + scoped + enum-disambiguated ──
     const gid = multi ? `--group ${t.id} ` : '';
     parts.push('', '### How to report back  (IMPORTANT — read this before using the tools)', '',
@@ -254,6 +249,21 @@ class TaskGroupManager {
       `- \`vibespace-ask list\`  /  \`vibespace-ask resolve <id|text>\` — resolve it yourself once the user answers (in chat or otherwise).`,
       `- ONLY for things that genuinely depend on the user — not your own working steps (normal todo list) and not group work items (\`vibespace-task plan-add\`).`);
     if (t.contextDir) {
+      const base = ctxBase || t.contextDir;
+      parts.push('', `## Shared context folder (the group's shared memory)`, '',
+        (ctxBase
+          ? `\`${base}\` — a live-synced copy (newer file wins, ~1 min lag) of this group's shared context folder.`
+          : `\`${base}\` — this group's shared context folder.`)
+        + ` It is the group's SHARED MEMORY between agents: every session working this Task Group — now and in the future — reads it. It is NOT a place to publish deliverables for the user (put user-facing output wherever the user asked for it).`);
+      const files = this._listContextFiles(t.contextDir);
+      if (files.length) {
+        parts.push('', 'Files (read what you need with your normal file tools):');
+        for (const f of files) parts.push(`- ${base}/${f.path} (${f.size < 1024 ? f.size + ' B' : Math.round(f.size / 1024) + ' KB'})`);
+      } else {
+        parts.push('', '(No shared files yet.)');
+      }
+    }
+    if (t.contextDir) {
       const cbase = ctxBase || t.contextDir;
       parts.push('', '### Using the shared context folder', '',
         `Whenever you learn something that OTHER agents working this group will likely need — conventions you discovered, gotchas, decisions and their reasons, or details another ROLE depends on (e.g. a compliance-focused session needs technical specifics that only a development session knows — the dev session should write them up) — organize it into a file in \`${cbase}\` yourself, without waiting to be asked. Write for a fellow agent starting cold: skimmable, factual, dated where it matters. Prefer updating/consolidating an existing file over piling up new ones.`,
@@ -261,6 +271,23 @@ class TaskGroupManager {
         ctxBase
           ? `Files you write to \`${cbase}\` sync back to the group's shared folder (newer file wins, within ~1 minute). Do not create a \`.vibespace/\` subfolder there.`
           : `Everything under \`${t.contextDir}/.vibespace/\` is GENERATED by VibeSpace and read-only for you — never create, edit, or delete anything there (\`TASK.md\` in it always mirrors the state above). Write your shared files in the context folder itself, outside \`.vibespace/\`.`);
+    }
+    // Activity log LAST — the one section that can safely lose its tail to the
+    // hook-preview truncation. Newest entries win the byte budget (≥3, ≤12).
+    const totalLog = (t.progress || []).length;
+    if (totalLog) {
+      const used = Buffer.byteLength(parts.join('\n'), 'utf-8');
+      let room = Math.max(1200, logBudget - used);
+      const picked = [];
+      for (let i = totalLog - 1; i >= 0 && picked.length < 12; i--) {
+        const p = t.progress[i];
+        const line = `- ${this._tsShort(p.at)} ${p.note}${p.session ? ` _(${p.session})_` : ''}`;
+        const len = Buffer.byteLength(line, 'utf-8') + 1;
+        if (picked.length >= 3 && len > room) break;
+        picked.unshift(line); room -= len;
+      }
+      parts.push('', '## Activity log' + (picked.length < totalLog ? `  _(last ${picked.length} of ${totalLog} — \`vibespace-task show\` prints more)_` : ''), '');
+      parts.push(...picked);
     }
     parts.push(`</vibespace-task-context>`);
     return parts.join('\n');
@@ -312,7 +339,10 @@ class TaskGroupManager {
     if (!ids.length) return '';
     const baseOf = (id) => (ctxBaseFor ? ctxBaseFor(id) : null);
     if (ids.length === 1) return this.renderContext(ids[0], { ctxBase: baseOf(ids[0]) });
-    const blocks = ids.map((id) => this.renderContext(id, { multi: true, ctxBase: baseOf(id) }));
+    // Split the inline-size budget across groups so the combined payload stays
+    // under the hook-preview persist threshold too.
+    const perGroupBudget = Math.max(2500, Math.floor(8000 / ids.length));
+    const blocks = ids.map((id) => this.renderContext(id, { multi: true, ctxBase: baseOf(id), logBudget: perGroupBudget }));
     return `This session belongs to ${ids.length} VibeSpace Task Groups (岗位). Each group's shared context follows; use \`vibespace-task --group <id> …\` to act on a specific one.\n\n` + blocks.join('\n\n');
   }
 
