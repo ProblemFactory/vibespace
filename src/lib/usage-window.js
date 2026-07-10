@@ -3,6 +3,8 @@
 // (subscription vs API — never mixed), account, model, project, mode, cache
 // efficiency, hour/weekday activity, top sessions. Opened from ⚙ → Usage.
 import { t } from './i18n.js';
+import { renderDashboard, PRESETS } from './usage-dashboard.js';
+import { showContextMenu } from './utils.js';
 import { escHtml, fetchJson, showToast, copyText } from './utils.js';
 import { createBackendIconHtml } from './agent-meta.js';
 
@@ -89,18 +91,29 @@ export function openUsageWindow(app, opts = {}) {
       return;
     }
     body.appendChild(renderTiles(d));
-    body.appendChild(renderTrend(d, state));
-    body.appendChild(sectionGrid([
-      renderBilling(d),
-      renderGroup(t('By account'), d.groups.account, state, { badge: true }),
-      renderGroup(t('By model'), d.groups.model, state, { beIcon: true }),
-      renderCache(d),
-      renderGroup(t('By project'), d.groups.project, state, { path: true }),
-      renderGroup(t('By mode'), d.groups.mode, state, { small: true }),
-      renderHours(d),
-      renderWeekdays(d),
-      renderGroup(t('Top sessions'), d.groups.session, state, { session: true, limit: 12 }),
-    ]));
+    if (state.view === 'classic') {
+      // The pre-2.96 fixed layout, kept as an escape hatch.
+      body.appendChild(renderTrend(d, state));
+      body.appendChild(sectionGrid([
+        renderBilling(d),
+        renderGroup(t('By account'), d.groups.account, state, { badge: true }),
+        renderGroup(t('By model'), d.groups.model, state, { beIcon: true }),
+        renderCache(d),
+        renderGroup(t('By project'), d.groups.project, state, { path: true }),
+        renderGroup(t('By mode'), d.groups.mode, state, { small: true }),
+        renderHours(d),
+        renderWeekdays(d),
+        renderGroup(t('Top sessions'), d.groups.session, state, { session: true, limit: 12 }),
+      ]));
+    } else {
+      // Configurable dashboard (2.96.0): panels persist in settings and sync
+      // across clients like everything else.
+      const saved = app.settings.get('usage.dashboard');
+      const panels = Array.isArray(saved) && saved.length ? saved : PRESETS().overview.panels;
+      renderDashboard(body, d, panels, {
+        onChange: (next) => { app.settings.set('usage.dashboard', next); render(); },
+      });
+    }
     body.appendChild(renderFooter(d));
   };
 
@@ -197,6 +210,21 @@ function renderControls(app, state, load, rerender) {
     { key: 'cost', label: t('Cost') }, { key: 'totalTokens', label: t('Tokens') },
   ], state.metric, k => { state.metric = k; load(); })));
   const spacer = document.createElement('div'); spacer.style.flex = '1'; bar.appendChild(spacer);
+  // Dashboard controls (2.96.0): preset templates + classic-layout escape hatch
+  const dashBtn = document.createElement('button'); dashBtn.className = 'usage-btn';
+  dashBtn.textContent = state.view === 'classic' ? t('Classic view') : t('Panels…');
+  dashBtn.onclick = (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const presets = PRESETS();
+    showContextMenu(r.left, r.bottom + 4, [
+      ...Object.entries(presets).map(([key, p]) => ({
+        label: t('Preset: {name}', { name: p.label }),
+        action: () => { app.settings.set('usage.dashboard', p.panels); state.view = 'dash'; rerender(); },
+      })),
+      { label: state.view === 'classic' ? t('Switch to panel dashboard') : t('Switch to classic layout'),
+        action: () => { state.view = state.view === 'classic' ? 'dash' : 'classic'; rerender(); } },
+    ]);
+  };
   const priceBtn = document.createElement('button'); priceBtn.className = 'usage-btn'; priceBtn.textContent = t('Pricing…');
   priceBtn.title = t('Edit per-model rates and per-account discounts');
   priceBtn.onclick = () => { state.view = 'pricing'; rerender(); };
@@ -204,7 +232,7 @@ function renderControls(app, state, load, rerender) {
   csv.onclick = () => exportCsv(state.data);
   const refresh = document.createElement('button'); refresh.className = 'usage-btn'; refresh.textContent = t('Refresh');
   refresh.onclick = load;
-  bar.append(priceBtn, csv, refresh);
+  bar.append(dashBtn, priceBtn, csv, refresh);
   return bar;
 }
 

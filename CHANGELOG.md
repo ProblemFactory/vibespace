@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.96.0 — 2026-07-10
+
+**Usage window: configurable panel dashboard (Grafana/Posthog-style)**
+- A panel = METRIC × DIMENSION × CHART: 9 metrics (est. cost, requests, total/output/fresh-input/cache-read/cache-write tokens, cache hit ratio, sessions) × 11 dimensions (total, day, model, account, billing, project, mode, host, hour, weekday, session) × 5 chart types (big-number stat, bar rows, line, donut, table). All panels feed off the single existing /api/usage-stats fetch.
+- Per-panel ✎ editor (metric/dimension/chart/top-N/width) and ⋯ menu (move, half/full width, remove); "+ Add panel"; four presets (Cost overview / Token throughput / Account reconciliation / Time patterns) under the Panels… menu; the pre-2.96 fixed layout survives as "Classic view".
+- Layout persists in settings (`usage.dashboard`) → synced across clients like all settings. Charts are dependency-free (canvas line, conic-gradient donut, DOM bar rows) and fully theme-tokened.
+
 ## 2.95.0 — 2026-07-10
 
 **Telemetry: full observation-point sweep**
