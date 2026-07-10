@@ -226,7 +226,7 @@ class TaskGroupManager {
   _toolsSectionParts(gid, multi) {
     return ['', '### How to report back  (IMPORTANT — read this before using the tools)', '',
       multi
-        ? `This session belongs to MORE THAN ONE Task Group, so \`vibespace-task\` needs \`--group <id>\` to target one (each block above names its group id). You can only ever act on groups THIS session belongs to. \`vibespace-status\` always reports THIS session and needs no group.`
+        ? `This session belongs to MORE THAN ONE Task Group, so \`vibespace-task\` needs \`--group <id>\` to target one (each block below names its group id). You can only ever act on groups THIS session belongs to. \`vibespace-status\` always reports THIS session and needs no group.`
         : `Two commands are already on your PATH and are already bound to THIS session's Task Group. You NEVER pass a group id — they only ever act on your own group. If you forget the exact syntax, just run the command with NO arguments: it prints its usage AND the current state.`,
       '',
       '`vibespace-task` — update the SHARED Task Group (every session of it, and the user on the board, see it):',
