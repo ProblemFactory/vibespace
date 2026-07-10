@@ -3,14 +3,15 @@ import { setupDirAutocomplete } from './autocomplete.js';
 import { getFileIcon, hasDedicatedViewer, getCategory } from './file-types.js';
 import { FILE_ICONS, UI_ICONS } from './icons.js';
 import { FileViewer } from './file-viewer.js';
+import { t, tc } from './i18n.js';
 
 const DEFAULT_COLUMNS = { name: true, size: true, modified: true, created: false, type: false };
 const ALL_COLUMNS = [
-  { key: 'name', label: 'Name', defaultWidth: 250, alwaysOn: true },
-  { key: 'size', label: 'Size', defaultWidth: 80 },
-  { key: 'modified', label: 'Modified', defaultWidth: 140 },
-  { key: 'created', label: 'Created', defaultWidth: 140 },
-  { key: 'type', label: 'Type', defaultWidth: 70 },
+  { key: 'name', label: t('Name'), defaultWidth: 250, alwaysOn: true },
+  { key: 'size', label: t('Size'), defaultWidth: 80 },
+  { key: 'modified', label: t('Modified'), defaultWidth: 140 },
+  { key: 'created', label: t('Created'), defaultWidth: 140 },
+  { key: 'type', label: t('Type'), defaultWidth: 70 },
 ];
 
 function _loadSettings() {
@@ -57,30 +58,30 @@ class FileExplorer {
 
     // Toolbar
     const toolbar = document.createElement('div'); toolbar.className = 'file-toolbar';
-    const btnUp = this._btn('\u2191', 'Go up'); btnUp.onclick = () => this.navigateUp();
+    const btnUp = this._btn('\u2191', t('Go up')); btnUp.onclick = () => this.navigateUp();
     // Host selector (Files cross-host): Local + each registered ssh host.
     // Switching re-browses that host's filesystem from its home dir.
     this._hostSelect = document.createElement('select');
     this._hostSelect.className = 'file-host-select';
-    this._hostSelect.title = 'Browse files on this machine or a remote host';
-    this._hostSelect.innerHTML = '<option value="">Local</option>';
+    this._hostSelect.title = t('Browse files on this machine or a remote host');
+    this._hostSelect.innerHTML = `<option value="">${escHtml(t('Local'))}</option>`;
     this._hostSelect.onchange = () => this.setHost(this._hostSelect.value);
     this._refreshHostOptions();
     this.pathInput = document.createElement('input'); this.pathInput.className = 'file-path-input';
     this.pathInput.addEventListener('keydown', e => { if (e.key === 'Enter') { if (this._hideAC) this._hideAC(); this.navigate(this.pathInput.value); } });
     this._acDropdown = document.createElement('div'); this._acDropdown.className = 'path-autocomplete hidden';
     this._setupPathAutocomplete();
-    const btnRefresh = this._btn('\u21BB', 'Refresh'); btnRefresh.onclick = () => this.refresh();
+    const btnRefresh = this._btn('\u21BB', t('Refresh')); btnRefresh.onclick = () => this.refresh();
 
     // View menu button
-    const btnView = this._btn('', 'View options');
+    const btnView = this._btn('', t('View options'));
     btnView.innerHTML = '<svg style="width:12px;height:12px;vertical-align:-1px" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 8s3-5.5 7-5.5S15 8 15 8s-3 5.5-7 5.5S1 8 1 8z"/><circle cx="8" cy="8" r="2.5"/></svg> \u25BE';
     btnView.classList.add('media-btn');
     btnView.onclick = () => this._showViewMenu(btnView);
 
-    const btnNewFile = this._btn('+', 'New file'); btnNewFile.onclick = () => this.createFile();
-    const btnNewDir = this._btn('', 'New folder'); btnNewDir.innerHTML = FILE_ICONS.folderOpen; btnNewDir.onclick = () => this.createDir();
-    const btnUpload = this._btn('\u2B06', 'Upload'); btnUpload.onclick = () => this._triggerUpload(btnUpload);
+    const btnNewFile = this._btn('+', t('New file')); btnNewFile.onclick = () => this.createFile();
+    const btnNewDir = this._btn('', t('New folder')); btnNewDir.innerHTML = FILE_ICONS.folderOpen; btnNewDir.onclick = () => this.createDir();
+    const btnUpload = this._btn('\u2B06', t('Upload')); btnUpload.onclick = () => this._triggerUpload(btnUpload);
     btnUpload.style.position = 'relative';
     this._uploadBtn = btnUpload;
     // Ring progress indicator (Chrome-style, shown during active uploads)
@@ -110,7 +111,7 @@ class FileExplorer {
     this._bookmarkPanel = document.createElement('div'); this._bookmarkPanel.className = 'file-bookmark-panel';
     this._bookmarkList = document.createElement('div'); this._bookmarkList.className = 'file-bookmark-list';
     const bkHeader = document.createElement('div'); bkHeader.className = 'file-bookmark-header';
-    const bkTitle = document.createElement('span'); bkTitle.textContent = 'Bookmarks'; bkTitle.className = 'file-bookmark-title';
+    const bkTitle = document.createElement('span'); bkTitle.textContent = t('Bookmarks'); bkTitle.className = 'file-bookmark-title';
     bkHeader.append(bkTitle);
     this._bookmarkPanel.append(bkHeader, this._bookmarkList);
 
@@ -142,7 +143,7 @@ class FileExplorer {
     previewHeader.className = 'file-preview-header';
     this._previewTitle = document.createElement('span');
     this._previewTitle.className = 'file-preview-title';
-    this._previewTitle.textContent = 'No file selected';
+    this._previewTitle.textContent = t('No file selected');
     previewHeader.append(this._previewTitle);
     this._previewPanel.append(previewHeader, this._previewContent);
 
@@ -316,14 +317,14 @@ class FileExplorer {
       item.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         showContextMenu(e.clientX, e.clientY, [
-          { label: 'Open', action: () => { this.setHost(bkHost, { navigate: false }); this.navigate(bk.path); } },
-          { label: 'Open in new window', action: () => this.app.openFileExplorer(bk.path, { host: bkHost || undefined }) },
-          { label: 'Remove from bookmarks', action: () => {
+          { label: t('Open'), action: () => { this.setHost(bkHost, { navigate: false }); this.navigate(bk.path); } },
+          { label: t('Open in new window'), action: () => this.app.openFileExplorer(bk.path, { host: bkHost || undefined }) },
+          { label: t('Remove from bookmarks'), action: () => {
             this._bookmarks.splice(i, 1);
             this._saveBookmarks(); this._renderBookmarks();
           }},
-          { label: 'Rename bookmark', action: async () => {
-            const n = await showInputDialog({ title: 'Rename Bookmark', label: 'Bookmark name', value: bk.label, confirmText: 'Rename' });
+          { label: t('Rename bookmark'), action: async () => {
+            const n = await showInputDialog({ title: t('Rename Bookmark'), label: t('Bookmark name'), value: bk.label, confirmText: t('Rename') });
             if (n && n.trim()) { bk.label = n.trim(); this._saveBookmarks(); this._renderBookmarks(); }
           }},
         ]);
@@ -333,7 +334,7 @@ class FileExplorer {
     // Drop zone at bottom
     const dropZone = document.createElement('div');
     dropZone.className = 'file-bookmark-dropzone';
-    dropZone.textContent = this._bookmarks.length === 0 ? 'Drop folders here' : '';
+    dropZone.textContent = this._bookmarks.length === 0 ? t('Drop folders here') : '';
     dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
     dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
     dropZone.addEventListener('drop', (e) => {
@@ -367,10 +368,10 @@ class FileExplorer {
     const rebuild = () => { pop.remove(); this._showViewMenu(anchor); };
 
     // Section: View Mode
-    this._viewMenuSection(pop, 'View Mode');
+    this._viewMenuSection(pop, t('View Mode'));
     this._viewMenuRadio(pop, [
-      { label: 'List', value: 'list' },
-      { label: 'Icons', value: 'icon' },
+      { label: t('List'), value: 'list' },
+      { label: t('Icons'), value: 'icon' },
     ], this._viewMode, (v) => {
       this._viewMode = v;
       this._renderSortHeader();
@@ -381,19 +382,19 @@ class FileExplorer {
     this._viewMenuSep(pop);
 
     // Section: Options
-    this._viewMenuSection(pop, 'Options');
-    this._viewMenuCheckbox(pop, 'Show hidden files', this._showHidden, (v) => {
+    this._viewMenuSection(pop, t('Options'));
+    this._viewMenuCheckbox(pop, t('Show hidden files'), this._showHidden, (v) => {
       this._showHidden = v; this._persistSettings(); this._renderItems();
     });
-    this._viewMenuCheckbox(pop, 'Mixed sort (no dirs-first)', this._mixedSort, (v) => {
+    this._viewMenuCheckbox(pop, t('Mixed sort (no dirs-first)'), this._mixedSort, (v) => {
       this._mixedSort = v; this._persistSettings(); this._renderItems();
     });
-    this._viewMenuCheckbox(pop, 'Show bookmarks panel', this._bookmarksPanelVisible, (v) => {
+    this._viewMenuCheckbox(pop, t('Show bookmarks panel'), this._bookmarksPanelVisible, (v) => {
       this._bookmarksPanelVisible = v;
       this._bookmarkPanel.classList.toggle('hidden', !v);
       this._persistSettings();
     });
-    this._viewMenuCheckbox(pop, 'Show preview panel', this._previewVisible, (v) => {
+    this._viewMenuCheckbox(pop, t('Show preview panel'), this._previewVisible, (v) => {
       this._previewVisible = v;
       this._previewPanel.classList.toggle('hidden', !v);
       this._persistSettings();
@@ -403,12 +404,12 @@ class FileExplorer {
     this._viewMenuSep(pop);
 
     // Section: Group By
-    this._viewMenuSection(pop, 'Group By');
+    this._viewMenuSection(pop, t('Group By'));
     this._viewMenuRadio(pop, [
-      { label: 'None', value: 'none' },
-      { label: 'Type', value: 'type' },
-      { label: 'Modified', value: 'modified' },
-      { label: 'Size', value: 'size' },
+      { label: t('None'), value: 'none' },
+      { label: t('Type'), value: 'type' },
+      { label: t('Modified'), value: 'modified' },
+      { label: t('Size'), value: 'size' },
     ], this._groupBy, (v) => {
       this._groupBy = v;
       this._collapsedGroups.clear();
@@ -420,7 +421,7 @@ class FileExplorer {
     // Section: Columns (only in list mode)
     if (this._viewMode === 'list') {
       this._viewMenuSep(pop);
-      this._viewMenuSection(pop, 'Columns');
+      this._viewMenuSection(pop, tc('table', 'Columns'));
       for (const col of ALL_COLUMNS) {
         if (col.alwaysOn) continue;
         this._viewMenuCheckbox(pop, col.label, !!this._columns[col.key], (v) => {
@@ -522,7 +523,7 @@ class FileExplorer {
       };
     });
     menuItems.push({ separator: true });
-    menuItems.push({ label: 'Auto-fit column widths', action: () => this._autoFitColumns() });
+    menuItems.push({ label: t('Auto-fit column widths'), action: () => this._autoFitColumns() });
     showContextMenu(x, y, menuItems);
   }
 
@@ -535,7 +536,7 @@ class FileExplorer {
     try {
       const r = await fetch('/api/hosts'); const d = await r.json();
       const cur = this._host;
-      this._hostSelect.innerHTML = '<option value="">Local</option>';
+      this._hostSelect.innerHTML = `<option value="">${escHtml(t('Local'))}</option>`;
       this._hostNames = {};
       for (const h of d?.hosts || []) {
         const o = document.createElement('option');
@@ -574,7 +575,7 @@ class FileExplorer {
     const destPath = (this.currentPath.endsWith('/') ? this.currentPath : this.currentPath + '/') + base;
     if (srcHost === destHost && srcPath === destPath) return; // same place
     const sameHost = srcHost === destHost;
-    const label = sameHost ? '' : ` (${srcHost || 'local'} -> ${destHost || 'local'})`;
+    const label = sameHost ? '' : ` (${srcHost || t('local')} -> ${destHost || t('local')})`;
     try {
       const body = { src: srcPath, dest: destPath };
       if (srcHost) body.srcHost = srcHost;
@@ -584,10 +585,10 @@ class FileExplorer {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
       const d = await r.json().catch(() => ({}));
-      if (!r.ok || d.error) { showToast('Copy failed: ' + (d.error || r.status), { type: 'error' }); return; }
-      showToast('Copied ' + base + label);
+      if (!r.ok || d.error) { showToast(t('Copy failed: {msg}', { msg: d.error || r.status }), { type: 'error' }); return; }
+      showToast(t('Copied {name}', { name: base + label }));
       this.refresh();
-    } catch (e) { showToast('Copy failed: ' + e.message, { type: 'error' }); }
+    } catch (e) { showToast(t('Copy failed: {msg}', { msg: e.message }), { type: 'error' }); }
   }
 
   async navigate(dirPath) {
@@ -781,7 +782,7 @@ class FileExplorer {
       const remaining = totalItems - this._renderLimit;
       if (remaining > 0) {
         const loadMoreBtn = document.createElement('div'); loadMoreBtn.className = 'file-load-more';
-        loadMoreBtn.textContent = `Load more (${remaining} remaining)`;
+        loadMoreBtn.textContent = t('Load more ({n} remaining)', { n: remaining });
         loadMoreBtn.onclick = () => { this._renderLimit += 100; this._renderItems(); };
         this.listEl.appendChild(loadMoreBtn);
       }
@@ -794,7 +795,7 @@ class FileExplorer {
       const remaining = sorted.length - this._renderLimit;
       if (remaining > 0) {
         const loadMoreBtn = document.createElement('div'); loadMoreBtn.className = 'file-load-more';
-        loadMoreBtn.textContent = `Load more (${remaining} remaining)`;
+        loadMoreBtn.textContent = t('Load more ({n} remaining)', { n: remaining });
         loadMoreBtn.onclick = () => { this._renderLimit += 100; this._renderItems(); };
         this.listEl.appendChild(loadMoreBtn);
       }
@@ -888,7 +889,7 @@ class FileExplorer {
           row.appendChild(crEl);
         } else if (col.key === 'type') {
           const tyEl = document.createElement('span'); tyEl.className = 'file-meta file-type';
-          tyEl.textContent = item.isDirectory ? 'dir' : (this._getExtension(item.name) || '-');
+          tyEl.textContent = item.isDirectory ? t('dir') : (this._getExtension(item.name) || '-');
           row.appendChild(tyEl);
         }
       }
@@ -908,17 +909,17 @@ class FileExplorer {
   refresh() { this.navigate(this.currentPath); }
 
   async createFile() {
-    const n = await showInputDialog({ title: 'New File', label: 'File name', confirmText: 'Create' });
+    const n = await showInputDialog({ title: t('New File'), label: t('File name'), confirmText: t('Create') });
     if (!n || !n.trim()) return;
     const r = await fetch('/api/file/write', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this._hb({ path: this.currentPath + '/' + n.trim(), content: '' })) }).catch(() => null);
-    if (!r?.ok) showToast('Create file failed', { type: 'error' });
+    if (!r?.ok) showToast(t('Create file failed'), { type: 'error' });
     this.refresh();
   }
   async createDir() {
-    const n = await showInputDialog({ title: 'New Folder', label: 'Folder name', confirmText: 'Create' });
+    const n = await showInputDialog({ title: t('New Folder'), label: t('Folder name'), confirmText: t('Create') });
     if (!n || !n.trim()) return;
     const r = await fetch('/api/mkdir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this._hb({ path: this.currentPath + '/' + n.trim() })) }).catch(() => null);
-    if (!r?.ok) showToast('Create folder failed', { type: 'error' });
+    if (!r?.ok) showToast(t('Create folder failed'), { type: 'error' });
     this.refresh();
   }
 
@@ -927,11 +928,11 @@ class FileExplorer {
     const pop = createPopover(anchor, 'upload-popover');
     // Upload Files
     const fileBtn = document.createElement('div'); fileBtn.className = 'upload-menu-item';
-    fileBtn.innerHTML = `${UI_ICONS.upload} Upload Files`;
+    fileBtn.innerHTML = `${UI_ICONS.upload} ${escHtml(t('Upload Files'))}`;
     fileBtn.onclick = () => { pop.remove(); this.uploadInput.click(); };
     // Upload Folder
     const folderBtn = document.createElement('div'); folderBtn.className = 'upload-menu-item';
-    folderBtn.innerHTML = `${FILE_ICONS.folder} Upload Folder`;
+    folderBtn.innerHTML = `${FILE_ICONS.folder} ${escHtml(t('Upload Folder'))}`;
     folderBtn.onclick = () => { pop.remove(); this._folderInput.click(); };
     pop.append(fileBtn, folderBtn);
 
@@ -939,7 +940,7 @@ class FileExplorer {
     if (this._activeUploads.size > 0) {
       const divider = document.createElement('div'); divider.className = 'upload-menu-divider';
       pop.appendChild(divider);
-      const activeLabel = document.createElement('div'); activeLabel.className = 'upload-menu-label'; activeLabel.textContent = 'Uploading';
+      const activeLabel = document.createElement('div'); activeLabel.className = 'upload-menu-label'; activeLabel.textContent = t('Uploading');
       pop.appendChild(activeLabel);
       for (const [id, upload] of this._activeUploads) {
         const item = document.createElement('div'); item.className = 'upload-active-item';
@@ -947,7 +948,7 @@ class FileExplorer {
         const row1 = document.createElement('div'); row1.className = 'upload-active-row1';
         const spinner = document.createElement('span'); spinner.className = 'upload-active-spinner';
         const nameList = upload.displayNames || [];
-        const label = nameList.length > 1 ? `${nameList.length} files` : (nameList[0] || 'uploading...');
+        const label = nameList.length > 1 ? t('{n} files', { n: nameList.length }) : (nameList[0] || t('uploading...'));
         const name = document.createElement('span'); name.className = 'upload-active-name'; name.textContent = label;
         const cancelBtn = document.createElement('span'); cancelBtn.className = 'upload-active-cancel'; cancelBtn.textContent = '\u2715';
         cancelBtn.onclick = (e) => { e.stopPropagation(); upload.xhr.abort(); pop.remove(); };
@@ -973,7 +974,7 @@ class FileExplorer {
     if (historyData.length > 0) {
       const divider = document.createElement('div'); divider.className = 'upload-menu-divider';
       pop.appendChild(divider);
-      const histLabel = document.createElement('div'); histLabel.className = 'upload-menu-label'; histLabel.textContent = 'Recent Uploads';
+      const histLabel = document.createElement('div'); histLabel.className = 'upload-menu-label'; histLabel.textContent = t('Recent Uploads');
       pop.appendChild(histLabel);
       for (const entry of historyData.slice(0, 10)) {
         const item = document.createElement('div'); item.className = 'upload-history-item';
@@ -993,7 +994,7 @@ class FileExplorer {
       }
       if (historyData.length > 0) {
         const clearBtn = document.createElement('div'); clearBtn.className = 'upload-menu-item upload-menu-clear';
-        clearBtn.textContent = 'Clear History';
+        clearBtn.textContent = t('Clear History');
         clearBtn.onclick = () => { pop.remove(); this._clearUploadHistory(); };
         pop.appendChild(clearBtn);
       }
@@ -1121,7 +1122,7 @@ class FileExplorer {
       // file in the folder is unreadable). Salvage by retrying resiliently
       // (chunked + per-file) so the readable files still land; only the
       // unreadable ones are reported as failed.
-      for (const ref of upload.domRefs.values()) ref.pctLabel.textContent = 'Retrying…';
+      for (const ref of upload.domRefs.values()) ref.pctLabel.textContent = t('Retrying…');
       const { uploaded, failed } = await uploadFilesBatched(files, {
         destDir, preservePaths: isFolder,
         onProgress: (d, total) => {
@@ -1134,14 +1135,14 @@ class FileExplorer {
         upload.status = failed.length ? 'error' : 'done'; upload.pct = 100;
         for (const ref of upload.domRefs.values()) {
           ref.fill.style.width = '100%';
-          ref.pctLabel.textContent = failed.length ? `${failed.length} failed` : '100%';
+          ref.pctLabel.textContent = failed.length ? t('{n} failed', { n: failed.length }) : '100%';
           ref.row.classList.add(failed.length ? 'file-upload-error' : 'file-upload-done');
         }
         setTimeout(() => { this._activeUploads.delete(uploadId); this._updateUploadRing(); this.refresh(); }, failed.length ? 3000 : 800);
       } else {
         this._saveUploadHistory(files.map((f, i) => ({ name: names[i], size: f.size })), 'fail');
         upload.status = 'error';
-        for (const ref of upload.domRefs.values()) { ref.row.classList.add('file-upload-error'); ref.pctLabel.textContent = 'Failed'; }
+        for (const ref of upload.domRefs.values()) { ref.row.classList.add('file-upload-error'); ref.pctLabel.textContent = t('Failed'); }
         setTimeout(() => { this._activeUploads.delete(uploadId); this._updateUploadRing(); if (this.currentPath === destDir) this._renderItems(); }, 3000);
       }
     };
@@ -1176,9 +1177,9 @@ class FileExplorer {
         progressFill.style.width = upload.pct + '%';
         progressTrack.appendChild(progressFill);
         const pctLabel = document.createElement('span'); pctLabel.className = 'file-upload-pct';
-        pctLabel.textContent = upload.status === 'error' ? 'Failed' : upload.pct + '%';
+        pctLabel.textContent = upload.status === 'error' ? t('Failed') : upload.pct + '%';
         const cancelBtn = document.createElement('button'); cancelBtn.className = 'file-upload-cancel'; cancelBtn.textContent = '\u2715';
-        cancelBtn.title = 'Cancel upload';
+        cancelBtn.title = t('Cancel upload');
         cancelBtn.onclick = () => upload.xhr?.abort();
         progressWrap.append(progressTrack, pctLabel, cancelBtn);
         row.append(iconEl, nameEl, progressWrap);
@@ -1213,51 +1214,51 @@ class FileExplorer {
     const items = [];
 
     if (multi) {
-      items.push({ label: `Compress ${sel.length} items\u2026`, action: () => this._compressSelection(sel) });
-      items.push({ label: `Copy (${sel.length})`, action: () => this._clipboardSet('copy') });
-      items.push({ label: `Cut (${sel.length})`, action: () => this._clipboardSet('cut') });
+      items.push({ label: t('Compress {n} items\u2026', { n: sel.length }), action: () => this._compressSelection(sel) });
+      items.push({ label: t('Copy ({n})', { n: sel.length }), action: () => this._clipboardSet('copy') });
+      items.push({ label: t('Cut ({n})', { n: sel.length }), action: () => this._clipboardSet('cut') });
       items.push({ sep: true });
-      items.push({ label: `Delete ${sel.length} items`, action: () => this._deleteSelection() });
+      items.push({ label: t('Delete {n} items', { n: sel.length }), action: () => this._deleteSelection() });
       return this._buildMenu(x, y, items);
     }
 
     if (isDir) {
-      items.push({ label: 'Open', action: () => this.navigate(fullPath) });
-      items.push({ label: 'Open in new window', action: () => this.app.openFileExplorer(fullPath) });
+      items.push({ label: t('Open'), action: () => this.navigate(fullPath) });
+      items.push({ label: t('Open in new window'), action: () => this.app.openFileExplorer(fullPath) });
     } else {
-      items.push({ label: 'Open', action: () => this.app.openFile(fullPath, dataset.name) });
-      items.push({ label: 'Edit', action: () => this.app.openEditor(fullPath, dataset.name) });
-      items.push({ label: 'Open as Hex', action: () => this.app.openFile(fullPath, dataset.name, { hex: true }) });
+      items.push({ label: t('Open'), action: () => this.app.openFile(fullPath, dataset.name) });
+      items.push({ label: t('Edit'), action: () => this.app.openEditor(fullPath, dataset.name) });
+      items.push({ label: t('Open as Hex'), action: () => this.app.openFile(fullPath, dataset.name, { hex: true }) });
     }
     if (isArchive && !isDir) {
       items.push({ sep: true });
-      items.push({ label: 'Extract Here', action: () => this._extractArchive(dataset.name, true) });
-      items.push({ label: 'Extract to Folder\u2026', action: () => this._extractArchive(dataset.name, false) });
+      items.push({ label: t('Extract Here'), action: () => this._extractArchive(dataset.name, true) });
+      items.push({ label: t('Extract to Folder\u2026'), action: () => this._extractArchive(dataset.name, false) });
     }
     items.push({ sep: true });
-    items.push({ label: 'Copy', action: () => this._clipboardSet('copy') });
-    items.push({ label: 'Cut', action: () => this._clipboardSet('cut') });
-    items.push({ label: 'Duplicate', action: () => this._duplicate(dataset.name) });
-    items.push({ label: 'Compress to Archive\u2026', action: () => this._compressSelection([dataset.name]) });
-    if (isDir) items.push({ label: 'Download as Zip', action: () => { window.open(`/api/download-zip?path=${encodeURIComponent(fullPath)}${this._hp()}`); } });
-    else items.push({ label: 'Download', action: () => { window.open(`/api/download?path=${encodeURIComponent(fullPath)}${this._hp()}`); } });
-    items.push({ label: 'Copy Path', action: () => copyText(fullPath) });
+    items.push({ label: t('Copy'), action: () => this._clipboardSet('copy') });
+    items.push({ label: t('Cut'), action: () => this._clipboardSet('cut') });
+    items.push({ label: t('Duplicate'), action: () => this._duplicate(dataset.name) });
+    items.push({ label: t('Compress to Archive\u2026'), action: () => this._compressSelection([dataset.name]) });
+    if (isDir) items.push({ label: t('Download as Zip'), action: () => { window.open(`/api/download-zip?path=${encodeURIComponent(fullPath)}${this._hp()}`); } });
+    else items.push({ label: t('Download'), action: () => { window.open(`/api/download?path=${encodeURIComponent(fullPath)}${this._hp()}`); } });
+    items.push({ label: t('Copy Path'), action: () => copyText(fullPath) });
 
     if (isDir) {
       items.push({ sep: true });
       const isBookmarked = this._bookmarks.some(b => b.path === fullPath);
-      items.push({ label: isBookmarked ? '\u2605 Bookmarked' : '\u2606 Add to bookmarks', action: () => {
+      items.push({ label: isBookmarked ? t('\u2605 Bookmarked') : t('\u2606 Add to bookmarks'), action: () => {
         if (!isBookmarked) {
           const label = dataset.name || fullPath.split('/').pop();
           this._bookmarks.push({ label, path: fullPath });
           this._saveBookmarks(); this._renderBookmarks();
         }
       }});
-      items.push({ label: 'Open Terminal Here', action: () => this.app.openShellTerminal(fullPath, { hostId: this._host || undefined }) });
-      if (!this._host) items.push({ label: 'Share this folder…', action: () => this.app.sidebar?._showBridgeShareDialog?.(fullPath) });
-      items.push({ label: 'Sessions', submenu: () => {
+      items.push({ label: t('Open Terminal Here'), action: () => this.app.openShellTerminal(fullPath, { hostId: this._host || undefined }) });
+      if (!this._host) items.push({ label: t('Share this folder…'), action: () => this.app.sidebar?._showBridgeShareDialog?.(fullPath) });
+      items.push({ label: t('Sessions'), submenu: () => {
         const sub = [];
-        sub.push({ label: '+ New session', action: () => this.app.showNewSessionDialog({ cwd: fullPath }) });
+        sub.push({ label: t('+ New session'), action: () => this.app.showNewSessionDialog({ cwd: fullPath }) });
         const sessionsHere = (this.app.sidebar?._allSessions || []).filter(s => s.cwd === fullPath);
         for (const s of sessionsHere) {
           const customName = this.app.sidebar?.getCustomName(s);
@@ -1282,15 +1283,15 @@ class FileExplorer {
       }});
       const tasks = this.app.sidebar?._tasks || [];
       if (tasks.length > 0) {
-        items.push({ label: 'Add to task', submenu: () => {
+        items.push({ label: t('Add to task'), submenu: () => {
           return tasks.map(t => ({ label: t.title, action: () => this.app.sidebar?._taskAddFolder(t.id, fullPath) }));
         }});
       }
     }
     items.push({ sep: true });
-    items.push({ label: 'Rename', action: () => this._rename(dataset.name) });
-    items.push({ label: 'Properties', action: () => this._showProperties(dataset.name) });
-    items.push({ label: 'Delete', action: () => this._delete(dataset.name, isDir) });
+    items.push({ label: t('Rename'), action: () => this._rename(dataset.name) });
+    items.push({ label: t('Properties'), action: () => this._showProperties(dataset.name) });
+    items.push({ label: t('Delete'), action: () => this._delete(dataset.name, isDir) });
     this._buildMenu(x, y, items);
   }
 
@@ -1298,16 +1299,16 @@ class FileExplorer {
   _showBackgroundMenu(x, y) {
     const clip = this.app._fileClipboard;
     const items = [];
-    if (clip?.paths?.length) items.push({ label: `Paste ${clip.paths.length} item${clip.paths.length > 1 ? 's' : ''}`, action: () => this._paste() });
-    items.push({ label: 'New File', action: () => this.createFile() });
-    items.push({ label: 'Open Terminal Here', action: () => this.app.openShellTerminal(this.currentPath, { hostId: this._host || undefined }) });
-    items.push({ label: 'New Folder', action: () => this.createDir() });
+    if (clip?.paths?.length) items.push({ label: t('Paste {n} items', { n: clip.paths.length }), action: () => this._paste() });
+    items.push({ label: t('New File'), action: () => this.createFile() });
+    items.push({ label: t('Open Terminal Here'), action: () => this.app.openShellTerminal(this.currentPath, { hostId: this._host || undefined }) });
+    items.push({ label: t('New Folder'), action: () => this.createDir() });
     items.push({ sep: true });
-    items.push({ label: 'Select All', action: () => { this._selection = new Set(this._renderOrder); this._applySelectionClasses(); } });
-    items.push({ label: 'Refresh', action: () => this.refresh() });
-    items.push({ label: 'Copy Path', action: () => copyText(this.currentPath) });
-    if (!this._host) items.push({ label: 'Share this folder…', action: () => this.app.sidebar?._showBridgeShareDialog?.(this.currentPath) });
-    items.push({ label: 'Properties', action: () => this._showProperties(null) });
+    items.push({ label: t('Select All'), action: () => { this._selection = new Set(this._renderOrder); this._applySelectionClasses(); } });
+    items.push({ label: t('Refresh'), action: () => this.refresh() });
+    items.push({ label: t('Copy Path'), action: () => copyText(this.currentPath) });
+    if (!this._host) items.push({ label: t('Share this folder…'), action: () => this.app.sidebar?._showBridgeShareDialog?.(this.currentPath) });
+    items.push({ label: t('Properties'), action: () => this._showProperties(null) });
     this._buildMenu(x, y, items);
   }
 
@@ -1351,7 +1352,7 @@ class FileExplorer {
     const paths = [...this._selection].map(n => this.currentPath + '/' + n);
     if (!paths.length) return;
     this.app._fileClipboard = { op, paths, host: this._host || '' };
-    showToast(`${op === 'cut' ? 'Cut' : 'Copied'} ${paths.length} item${paths.length > 1 ? 's' : ''}`);
+    showToast(op === 'cut' ? t('Cut {n} items', { n: paths.length }) : t('Copied {n} items', { n: paths.length }));
     this._applySelectionClasses();
   }
 
@@ -1389,7 +1390,7 @@ class FileExplorer {
       let r = await post(src, dest, false);
       if (r && r.status === 409) {
         if (overwriteAll === null) {
-          overwriteAll = await showConfirmDialog({ title: 'Overwrite?', message: `"${base}" already exists here. Overwrite existing item(s)?`, confirmText: 'Overwrite', danger: true });
+          overwriteAll = await showConfirmDialog({ title: t('Overwrite?'), message: t('"{name}" already exists here. Overwrite existing item(s)?', { name: base }), confirmText: t('Overwrite'), danger: true });
         }
         if (!overwriteAll) { failed++; continue; }
         r = await post(src, dest, true);
@@ -1397,34 +1398,34 @@ class FileExplorer {
       if (r?.ok) done++; else failed++;
     }
     if (clip.op === 'cut' && done) this.app._fileClipboard = null;
-    showToast(failed ? `Pasted ${done}, failed ${failed}` : `Pasted ${done} item${done > 1 ? 's' : ''}`, failed ? { type: 'error' } : {});
+    showToast(failed ? t('Pasted {done}, failed {failed}', { done, failed }) : t('Pasted {n} items', { n: done }), failed ? { type: 'error' } : {});
     this.refresh();
   }
 
   async _duplicate(name) {
     const r = await fetch('/api/file/copy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this._hb({ src: this.currentPath + '/' + name, dest: this._uniqueName(name) })) }).catch(() => null);
-    if (!r?.ok) showToast('Duplicate failed', { type: 'error' });
+    if (!r?.ok) showToast(t('Duplicate failed'), { type: 'error' });
     this.refresh();
   }
 
   async _compressSelection(names) {
     if (!names.length) return;
     const def = (names.length === 1 ? names[0] : (this.currentPath.split('/').pop() || 'archive')) + '.zip';
-    const out = await showInputDialog({ title: `Compress ${names.length} item${names.length > 1 ? 's' : ''}`, label: 'Archive name (.zip / .tar.gz / .tar / .tar.xz)', value: def, confirmText: 'Compress' });
+    const out = await showInputDialog({ title: t('Compress {n} items', { n: names.length }), label: t('Archive name (.zip / .tar.gz / .tar / .tar.xz)'), value: def, confirmText: t('Compress') });
     if (!out || !out.trim()) return;
     const dest = this.currentPath + '/' + out.trim();
     const paths = names.map(n => this.currentPath + '/' + n);
     const post = (overwrite) => fetch('/api/archive', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this._hb({ paths, dest, overwrite })) }).catch(() => null);
-    showToast('Compressing\u2026');
+    showToast(t('Compressing\u2026'));
     let r = await post(false);
     if (r && r.status === 409) {
-      const ok = await showConfirmDialog({ title: 'Overwrite', message: `"${out.trim()}" already exists. Overwrite?`, confirmText: 'Overwrite', danger: true });
+      const ok = await showConfirmDialog({ title: t('Overwrite'), message: t('"{name}" already exists. Overwrite?', { name: out.trim() }), confirmText: t('Overwrite'), danger: true });
       if (!ok) return;
       r = await post(true);
     }
     const d = await r?.json().catch(() => ({}));
-    if (!r?.ok) showToast('Compress failed: ' + (d?.error || 'unknown error'), { type: 'error' });
-    else showToast(`Created ${out.trim()} (${formatSize(d.size || 0)})`);
+    if (!r?.ok) showToast(t('Compress failed: {msg}', { msg: d?.error || t('unknown error') }), { type: 'error' });
+    else showToast(t('Created {name} ({size})', { name: out.trim(), size: formatSize(d.size || 0) }));
     this.refresh();
   }
 
@@ -1433,30 +1434,30 @@ class FileExplorer {
     let dest = this.currentPath;
     if (!here) {
       const defFolder = name.replace(/\.(zip|tar\.gz|tar\.bz2|tar\.xz|tar|tgz|tbz2|txz|gz|bz2|xz)$/i, '');
-      const d = await showInputDialog({ title: 'Extract to Folder', label: 'Destination folder (under current directory)', value: defFolder, confirmText: 'Extract' });
+      const d = await showInputDialog({ title: t('Extract to Folder'), label: t('Destination folder (under current directory)'), value: defFolder, confirmText: t('Extract') });
       if (!d || !d.trim()) return;
       dest = this.currentPath + '/' + d.trim();
     }
-    showToast('Extracting\u2026');
+    showToast(t('Extracting\u2026'));
     // overwrite:false = skip files that already exist (never destructive)
     const r = await fetch('/api/archive/extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this._hb({ path: src, dest, overwrite: false })) }).catch(() => null);
     const dd = await r?.json().catch(() => ({}));
-    if (!r?.ok) showToast('Extract failed: ' + (dd?.error || 'unknown error'), { type: 'error' });
-    else showToast(here ? 'Extracted here' : `Extracted to ${dest.split('/').pop()}`);
+    if (!r?.ok) showToast(t('Extract failed: {msg}', { msg: dd?.error || t('unknown error') }), { type: 'error' });
+    else showToast(here ? t('Extracted here') : t('Extracted to {name}', { name: dest.split('/').pop() }));
     this.refresh();
   }
 
   async _deleteSelection() {
     const names = [...this._selection];
     if (!names.length) return;
-    const ok = await showConfirmDialog({ title: 'Delete', message: names.length === 1 ? `Delete "${names[0]}"?` : `Delete ${names.length} items? Folders are removed with all contents.`, confirmText: 'Delete', danger: true });
+    const ok = await showConfirmDialog({ title: t('Delete'), message: names.length === 1 ? t('Delete "{name}"?', { name: names[0] }) : t('Delete {n} items? Folders are removed with all contents.', { n: names.length }), confirmText: t('Delete'), danger: true });
     if (!ok) return;
     let failed = 0;
     for (const n of names) {
       const r = await fetch(`/api/file?path=${encodeURIComponent(this.currentPath + '/' + n)}${this._hp()}`, { method: 'DELETE' }).catch(() => null);
       if (!r?.ok) failed++;
     }
-    if (failed) showToast(`Delete failed for ${failed} item(s)`, { type: 'error' });
+    if (failed) showToast(t('Delete failed for {n} item(s)', { n: failed }), { type: 'error' });
     this._selection.clear();
     this.refresh();
   }
@@ -1465,18 +1466,20 @@ class FileExplorer {
     const fp = name ? this.currentPath + '/' + name : this.currentPath;
     // Open INSTANTLY with placeholders; a recursive-size du on a big tree can
     // take many seconds and a click with no response reads as broken.
-    const { overlay, body, close: done } = createModalShell({ title: 'Properties', escapeToClose: true });
+    const { overlay, body, close: done } = createModalShell({ title: t('Properties'), escapeToClose: true });
     overlay.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); done(); } });
     const rows = [
       ['Name', fp.split('/').pop() || '/'],
       ['Path', fp],
       ['Type', '…'], ['Size', '…'], ['Modified', '…'], ['Created', '…'], ['Permissions', '…'],
     ];
+    // Display labels — `cells` stays keyed by the English ids in `rows`
+    const rowLabels = { Name: t('Name'), Path: t('Path'), Type: t('Type'), Size: t('Size'), Modified: t('Modified'), Created: t('Created'), Permissions: t('Permissions') };
     const table = document.createElement('div');
     table.style.cssText = 'display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:12px;';
     const cells = {};
     for (const [k, v] of rows) {
-      const kEl = document.createElement('div'); kEl.textContent = k; kEl.style.color = 'var(--text-dim)';
+      const kEl = document.createElement('div'); kEl.textContent = rowLabels[k] || k; kEl.style.color = 'var(--text-dim)';
       const vEl = document.createElement('div'); vEl.textContent = v; vEl.style.cssText = 'word-break:break-all;user-select:text;';
       cells[k] = vEl;
       table.append(kEl, vEl);
@@ -1484,9 +1487,9 @@ class FileExplorer {
     body.appendChild(table);
     // fast stat (no recursive size) fills everything visible immediately…
     fetch(`/api/file/stat?path=${encodeURIComponent(fp)}${this._hp()}`).then(r => r.json()).then((d) => {
-      if (!d || d.error) { cells.Type.textContent = 'Could not read properties'; return; }
-      cells.Type.textContent = d.isDirectory ? `Folder (${d.entryCount ?? '?'} items)` : 'File';
-      cells.Size.textContent = d.isDirectory ? 'calculating…' : formatSize(d.size);
+      if (!d || d.error) { cells.Type.textContent = t('Could not read properties'); return; }
+      cells.Type.textContent = d.isDirectory ? t('Folder ({n} items)', { n: d.entryCount ?? '?' }) : t('File');
+      cells.Size.textContent = d.isDirectory ? t('calculating…') : formatSize(d.size);
       cells.Modified.textContent = d.modified ? new Date(d.modified).toLocaleString() : '-';
       cells.Created.textContent = d.created ? new Date(d.created).toLocaleString() : '-';
       cells.Permissions.textContent = d.mode || '-';
@@ -1494,35 +1497,35 @@ class FileExplorer {
       if (d.isDirectory) {
         fetch(`/api/file/stat?path=${encodeURIComponent(fp)}&du=1${this._hp()}`).then(r => r.json()).then((d2) => {
           if (!overlay.isConnected) return; // dialog closed meanwhile
-          cells.Size.textContent = d2?.duSize != null ? `${formatSize(d2.duSize)} (recursive)` : 'unknown';
-        }).catch(() => { if (overlay.isConnected) cells.Size.textContent = 'unknown'; });
+          cells.Size.textContent = d2?.duSize != null ? t('{size} (recursive)', { size: formatSize(d2.duSize) }) : t('unknown');
+        }).catch(() => { if (overlay.isConnected) cells.Size.textContent = t('unknown'); });
       }
-    }).catch(() => { cells.Type.textContent = 'Could not read properties'; });
+    }).catch(() => { cells.Type.textContent = t('Could not read properties'); });
   }
 
   async _rename(oldName) {
-    const n = await showInputDialog({ title: 'Rename', label: 'New name', value: oldName, confirmText: 'Rename' });
+    const n = await showInputDialog({ title: t('Rename'), label: t('New name'), value: oldName, confirmText: t('Rename') });
     if (!n || n === oldName) return;
     const r = await fetch('/api/rename', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this._hb({ oldPath: this.currentPath + '/' + oldName, newPath: this.currentPath + '/' + n })) }).catch(() => null);
-    if (!r?.ok) showToast('Rename failed', { type: 'error' });
+    if (!r?.ok) showToast(t('Rename failed'), { type: 'error' });
     this.refresh();
   }
   async _delete(name, isDir) {
-    const ok = await showConfirmDialog({ title: isDir ? 'Delete Folder' : 'Delete File', message: `Delete "${name}"?${isDir ? ' All contents will be removed.' : ''}`, confirmText: 'Delete', danger: true });
+    const ok = await showConfirmDialog({ title: isDir ? t('Delete Folder') : t('Delete File'), message: t('Delete "{name}"?', { name }) + (isDir ? t(' All contents will be removed.') : ''), confirmText: t('Delete'), danger: true });
     if (!ok) return;
     const r = await fetch(`/api/file?path=${encodeURIComponent(this.currentPath + '/' + name)}${this._hp()}`, { method: 'DELETE' }).catch(() => null);
-    if (!r?.ok) showToast('Delete failed', { type: 'error' });
+    if (!r?.ok) showToast(t('Delete failed'), { type: 'error' });
     this.refresh();
   }
 
   _getFileExtension(name) {
     const dot = name.lastIndexOf('.');
-    if (dot <= 0) return '(no extension)';
+    if (dot <= 0) return t('(no extension)');
     return name.substring(dot).toLowerCase();
   }
 
   _getModifiedGroup(ts) {
-    if (!ts) return 'Unknown';
+    if (!ts) return t('Unknown');
     const now = new Date();
     const d = new Date(ts);
     const diffMs = now - d;
@@ -1532,20 +1535,20 @@ class FileExplorer {
     const yesterday = new Date(today - 86400000);
     const fileDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
 
-    if (fileDay >= today) return 'Today';
-    if (fileDay >= yesterday) return 'Yesterday';
-    if (diffDays < 7) return 'This Week';
-    if (diffDays < 30) return 'This Month';
-    return 'Older';
+    if (fileDay >= today) return t('Today');
+    if (fileDay >= yesterday) return t('Yesterday');
+    if (diffDays < 7) return t('This Week');
+    if (diffDays < 30) return t('This Month');
+    return t('Older');
   }
 
   _getSizeGroup(size) {
-    if (size == null) return 'Unknown';
-    if (size < 1024) return 'Tiny (<1 KB)';
-    if (size < 102400) return 'Small (<100 KB)';
-    if (size < 1048576) return 'Medium (<1 MB)';
-    if (size < 10485760) return 'Large (<10 MB)';
-    return 'Huge (>10 MB)';
+    if (size == null) return t('Unknown');
+    if (size < 1024) return t('Tiny (<1 KB)');
+    if (size < 102400) return t('Small (<100 KB)');
+    if (size < 1048576) return t('Medium (<1 MB)');
+    if (size < 10485760) return t('Large (<10 MB)');
+    return t('Huge (>10 MB)');
   }
 
   _groupItems(sorted) {
@@ -1555,26 +1558,26 @@ class FileExplorer {
     for (const item of sorted) {
       let key;
       if (this._groupBy === 'type') {
-        key = item.isDirectory ? 'Folders' : this._getFileExtension(item.name);
+        key = item.isDirectory ? t('Folders') : this._getFileExtension(item.name);
       } else if (this._groupBy === 'modified') {
         key = this._getModifiedGroup(item.modified);
       } else if (this._groupBy === 'size') {
-        key = item.isDirectory ? 'Folders' : this._getSizeGroup(item.size);
+        key = item.isDirectory ? t('Folders') : this._getSizeGroup(item.size);
       }
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(item);
     }
 
     if (this._groupBy === 'modified') {
-      const order = ['Today', 'Yesterday', 'This Week', 'This Month', 'Older', 'Unknown'];
+      const order = [t('Today'), t('Yesterday'), t('This Week'), t('This Month'), t('Older'), t('Unknown')];
       return new Map(order.filter(k => groups.has(k)).map(k => [k, groups.get(k)]));
     }
     if (this._groupBy === 'size') {
-      const order = ['Folders', 'Tiny (<1 KB)', 'Small (<100 KB)', 'Medium (<1 MB)', 'Large (<10 MB)', 'Huge (>10 MB)', 'Unknown'];
+      const order = [t('Folders'), t('Tiny (<1 KB)'), t('Small (<100 KB)'), t('Medium (<1 MB)'), t('Large (<10 MB)'), t('Huge (>10 MB)'), t('Unknown')];
       return new Map(order.filter(k => groups.has(k)).map(k => [k, groups.get(k)]));
     }
     const result = new Map();
-    if (groups.has('Folders')) { result.set('Folders', groups.get('Folders')); groups.delete('Folders'); }
+    if (groups.has(t('Folders'))) { result.set(t('Folders'), groups.get(t('Folders'))); groups.delete(t('Folders')); }
     const extKeys = [...groups.keys()].sort();
     for (const k of extKeys) result.set(k, groups.get(k));
     return result;
@@ -1619,8 +1622,8 @@ class FileExplorer {
   async _updatePreview() {
     if (!this._previewVisible) return;
     if (!this._selectedPath) {
-      this._previewTitle.textContent = 'No file selected';
-      this._previewContent.innerHTML = '<div class="empty-hint">Select a file to preview</div>';
+      this._previewTitle.textContent = t('No file selected');
+      this._previewContent.innerHTML = `<div class="empty-hint">${escHtml(t('Select a file to preview'))}</div>`;
       return;
     }
     const fp = this._selectedPath;
@@ -1628,7 +1631,7 @@ class FileExplorer {
     const ext = name.split('.').pop().toLowerCase();
     const rawUrl = `/api/file/raw?path=${encodeURIComponent(fp)}${this._hp()}`;
     this._previewTitle.textContent = name;
-    this._previewContent.innerHTML = '<div class="empty-hint">Loading...</div>';
+    this._previewContent.innerHTML = `<div class="empty-hint">${escHtml(t('Loading...'))}</div>`;
 
     try {
       // Try dedicated viewer first (reuses FileViewer.renderInto for all formats)
@@ -1641,11 +1644,11 @@ class FileExplorer {
       const info = await infoRes.json();
       if (info.error) { this._previewContent.innerHTML = `<div class="empty-hint">${escHtml(info.error)}</div>`; return; }
       if (info.isBinary) {
-        this._previewContent.innerHTML = `<div class="empty-hint">${formatSize(info.size)} binary file</div>`;
+        this._previewContent.innerHTML = `<div class="empty-hint">${escHtml(t('{size} binary file', { size: formatSize(info.size) }))}</div>`;
         return;
       }
       if (info.size > 512 * 1024) {
-        this._previewContent.innerHTML = `<div class="empty-hint">${formatSize(info.size)} — too large to preview</div>`;
+        this._previewContent.innerHTML = `<div class="empty-hint">${escHtml(t('{size} — too large to preview', { size: formatSize(info.size) }))}</div>`;
         return;
       }
       const res = await fetch(`/api/file/content?path=${encodeURIComponent(fp)}${this._hp()}`);
@@ -1656,7 +1659,7 @@ class FileExplorer {
       pre.textContent = data.content;
       this._previewContent.appendChild(pre);
     } catch (err) {
-      this._previewContent.innerHTML = `<div class="empty-hint">Error: ${escHtml(err.message)}</div>`;
+      this._previewContent.innerHTML = `<div class="empty-hint">${escHtml(t('Error: {msg}', { msg: err.message }))}</div>`;
     }
   }
 
