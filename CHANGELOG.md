@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.82.0] — 2026-07-10
+
+### Refactor — app.js split into prototype mixins (3,861 → 2,045 lines)
+Three cohesive clusters extracted verbatim (AST-based, acorn) into
+install-mixins following the existing sidebar-*.js pattern: manage-agents.js
+(accounts dialog/rosters/wizard), usage-meter.js (quota pies + popup +
+on-demand refresh), session-lifecycle.js (create/attach/resume/fork/view/kill
++ billing switcher + openSpec replay). Zero call-site changes — everything
+still runs as App methods. Smoke-verified live: window restore, badges,
+usage popup, shell terminal create/close, Manage Agents rosters.
+
 ## [2.81.0] — 2026-07-10
 
 ### Performance — long-session leak fixes (multi-agent audit, round 1)

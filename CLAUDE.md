@@ -98,7 +98,10 @@ src/
     persistence.js     — Persistence routes (layouts, bookmarks, themes, settings, user state, groups)
     sessions.js        — Session API routes (discovery, messages, subagents, kill)
   lib/
-    app.js             — App controller / mediator (~3000 lines)
+    app.js             — App controller / mediator (~2000 lines; 2.82.0 split three prototype-mixin clusters out — installed at module tail, BEFORE client.js instantiates App)
+    manage-agents.js   — installManageAgents(App): Manage-Agents dialog + Anthropic/ChatGPT account rosters/wizard (~790 lines, split from app.js)
+    usage-meter.js     — installUsageMeter(App): taskbar quota pies + usage popup + on-demand refresh (~370 lines, split from app.js)
+    session-lifecycle.js — installSessionLifecycle(App): create/attach/resume/fork/view/kill + billing switcher + replayOpenSpec (~680 lines, split from app.js)
     themes.js          — THEMES constant + ThemeManager class
     ws.js              — WsManager (WebSocket with reconnect)
     window.js          — WindowManager (drag/resize/snap/grid)
