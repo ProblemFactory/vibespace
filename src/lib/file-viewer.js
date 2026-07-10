@@ -6,6 +6,7 @@ import { hasDedicatedViewer, getViewerType, getFileIcon } from './file-types.js'
 import { FILE_ICONS } from './icons.js';
 import { renderAsync as renderDocx } from 'docx-preview';
 import { init as initPptx } from 'pptx-preview';
+import { t } from './i18n.js';
 
 class FileViewer {
   static async open(app, filePath, fileName, opts = {}) {
@@ -22,7 +23,7 @@ class FileViewer {
 
     // Force hex mode
     if (opts.hex) {
-      const winInfo = app.wm.createWindow({ title: `Hex: ${fileName}`, type: 'hex-viewer', syncId: opts.syncId, openSpec });
+      const winInfo = app.wm.createWindow({ title: t('Hex: {name}', { name: fileName }), type: 'hex-viewer', syncId: opts.syncId, openSpec });
       winInfo._filePath = filePath; winInfo._fileName = fileName;
       new HexViewer(winInfo, filePath, fileInfo);
       return;
@@ -30,7 +31,7 @@ class FileViewer {
 
     // Binary file without a dedicated viewer → hex viewer
     if (fileInfo.isBinary && !hasDedicatedViewer(ext)) {
-      const winInfo = app.wm.createWindow({ title: `Hex: ${fileName}`, type: 'hex-viewer', syncId: opts.syncId, openSpec });
+      const winInfo = app.wm.createWindow({ title: t('Hex: {name}', { name: fileName }), type: 'hex-viewer', syncId: opts.syncId, openSpec });
       winInfo._filePath = filePath; winInfo._fileName = fileName;
       new HexViewer(winInfo, filePath, fileInfo);
       return;
@@ -40,7 +41,7 @@ class FileViewer {
 
     // Large file warning (only for text files opened in editor)
     if (!hasDedicatedViewer(ext) && fileInfo.size > 1024 * 1024) {
-      const ok = await showConfirmDialog({ title: 'Large File', message: `This file is ${formatSize(fileInfo.size)}. Opening may slow down the UI. Continue?`, confirmText: 'Open' });
+      const ok = await showConfirmDialog({ title: t('Large File'), message: t('This file is {size}. Opening may slow down the UI. Continue?', { size: formatSize(fileInfo.size) }), confirmText: t('Open') });
       if (!ok) return;
     }
 
@@ -147,7 +148,7 @@ class FileViewer {
       }
       return true;
     } catch (err) {
-      container.innerHTML = `<div class="empty-hint" style="color:var(--red)">Error: ${escHtml(err.message)}</div>`;
+      container.innerHTML = `<div class="empty-hint" style="color:var(--red)">${escHtml(t('Error: {msg}', { msg: err.message }))}</div>`;
       return true; // error shown, don't fall through to editor
     }
   }
@@ -163,7 +164,7 @@ class FileViewer {
     const root = document.createElement('div'); root.className = 'archive-viewer';
     if (!res.ok || data.error) {
       const err = document.createElement('div'); err.className = 'archive-empty';
-      err.textContent = `Cannot read archive: ${data.error || 'unknown error'}`;
+      err.textContent = t('Cannot read archive: {msg}', { msg: data.error || t('unknown error') });
       root.appendChild(err);
       container.appendChild(root);
       return;
@@ -174,10 +175,14 @@ class FileViewer {
 
     const toolbar = document.createElement('div'); toolbar.className = 'archive-toolbar';
     const summary = document.createElement('span');
-    summary.textContent = `${files.length} file${files.length === 1 ? '' : 's'}${entries.length > files.length ? `, ${entries.length - files.length} folders` : ''} \u00b7 ${formatSize(totalSize)} uncompressed${data.truncated ? ' \u00b7 list truncated' : ''}`;
+    let summaryText = t('{n} files', { n: files.length });
+    if (entries.length > files.length) summaryText += t(', {n} folders', { n: entries.length - files.length });
+    summaryText += ' \u00b7 ' + t('{size} uncompressed', { size: formatSize(totalSize) });
+    if (data.truncated) summaryText += ' \u00b7 ' + t('list truncated');
+    summary.textContent = summaryText;
     const filter = document.createElement('input');
-    filter.placeholder = 'Filter\u2026'; filter.type = 'text';
-    const extractBtn = document.createElement('button'); extractBtn.className = 'archive-extract-btn'; extractBtn.textContent = 'Extract All\u2026';
+    filter.placeholder = t('Filter\u2026'); filter.type = 'text';
+    const extractBtn = document.createElement('button'); extractBtn.className = 'archive-extract-btn'; extractBtn.textContent = t('Extract All\u2026');
     toolbar.append(summary, filter, extractBtn);
 
     const list = document.createElement('div'); list.className = 'archive-list';
@@ -206,7 +211,7 @@ class FileViewer {
             try {
               const r = await fetch('/api/archive/extract-entry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: filePath, entry: e.name }) });
               const d = await r.json().catch(() => ({}));
-              if (!r.ok) { showToast('Open failed: ' + (d.error || ''), { type: 'error' }); return; }
+              if (!r.ok) { showToast(t('Open failed: {msg}', { msg: d.error || '' }), { type: 'error' }); return; }
               app.openFile(d.path, e.name.split('/').pop());
             } finally { row.style.opacity = ''; }
           };
@@ -215,7 +220,7 @@ class FileViewer {
       }
       if (!shown) {
         const empty = document.createElement('div'); empty.className = 'archive-empty';
-        empty.textContent = needle ? 'No matching entries' : 'Empty archive';
+        empty.textContent = needle ? t('No matching entries') : t('Empty archive');
         list.appendChild(empty);
       }
     };
@@ -225,13 +230,13 @@ class FileViewer {
     extractBtn.onclick = async () => {
       const base = filePath.split('/').pop().replace(/\.(zip|tar\.gz|tar\.bz2|tar\.xz|tar|tgz|tbz2|txz|gz|bz2|xz)$/i, '');
       const parent = filePath.substring(0, filePath.lastIndexOf('/'));
-      const d = await showInputDialog({ title: 'Extract All', label: 'Destination folder', value: parent + '/' + base, confirmText: 'Extract' });
+      const d = await showInputDialog({ title: t('Extract All'), label: t('Destination folder'), value: parent + '/' + base, confirmText: t('Extract') });
       if (!d || !d.trim()) return;
-      showToast('Extracting\u2026');
+      showToast(t('Extracting\u2026'));
       const r = await fetch('/api/archive/extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: filePath, dest: d.trim(), overwrite: false }) }).catch(() => null);
       const dd = await r?.json().catch(() => ({}));
-      if (!r?.ok) showToast('Extract failed: ' + (dd?.error || ''), { type: 'error' });
-      else showToast('Extracted to ' + d.trim());
+      if (!r?.ok) showToast(t('Extract failed: {msg}', { msg: dd?.error || '' }), { type: 'error' });
+      else showToast(t('Extracted to {name}', { name: d.trim() }));
     };
 
     root.append(toolbar, list);
@@ -251,7 +256,7 @@ class FileViewer {
     zoomLabel.className = 'media-zoom-label';
     zoomLabel.textContent = '100%';
 
-    const btnFit = FileViewer._mediaBtn('Fit');
+    const btnFit = FileViewer._mediaBtn(t('Fit'));
     const btnZoomOut = FileViewer._mediaBtn('-');
     const btnZoomIn = FileViewer._mediaBtn('+');
     const btnActual = FileViewer._mediaBtn('1:1');
@@ -559,7 +564,7 @@ class FileViewer {
 
     // Initial fetch
     await fetchPage(0);
-    if (!header) { container.innerHTML = '<div class="empty-hint">Empty file</div>'; return; }
+    if (!header) { container.innerHTML = `<div class="empty-hint">${escHtml(t('Empty file'))}</div>`; return; }
 
     // Build viewer
     const viewer = document.createElement('div');
@@ -568,7 +573,7 @@ class FileViewer {
     // Status bar
     const status = document.createElement('div');
     status.className = 'csv-status';
-    status.textContent = `${total.toLocaleString()} rows × ${header.length} columns`;
+    status.textContent = t('{rows} rows × {cols} columns', { rows: total.toLocaleString(), cols: header.length });
 
     // Header
     const thead = document.createElement('div');
@@ -596,7 +601,7 @@ class FileViewer {
 
     onTotalChanged = () => {
       spacer.style.height = ((total - 1) * ROW_HEIGHT) + 'px';
-      status.textContent = `${total.toLocaleString()} rows × ${header.length} columns`;
+      status.textContent = t('{rows} rows × {cols} columns', { rows: total.toLocaleString(), cols: header.length });
     };
 
     const renderRows = () => {

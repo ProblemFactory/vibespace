@@ -1,4 +1,5 @@
 import { formatSize, escHtml } from './utils.js';
+import { t } from './i18n.js';
 
 const BYTES_PER_ROW = 16;
 const CHUNK_SIZE = 65536; // 64KB chunks
@@ -20,11 +21,11 @@ class HexViewer {
       <span class="hex-info">${formatSize(fileInfo.size)}</span>
     `;
     const jumpInput = document.createElement('input');
-    jumpInput.className = 'toolbar-select'; jumpInput.placeholder = 'Jump to offset (hex)';
+    jumpInput.className = 'toolbar-select'; jumpInput.placeholder = t('Jump to offset (hex)');
     jumpInput.style.cssText = 'width:140px;font-family:monospace';
     jumpInput.onkeydown = (e) => { if (e.key === 'Enter') this._jumpTo(jumpInput.value); };
     const loadMoreBtn = document.createElement('button'); loadMoreBtn.className = 'file-tool-btn media-btn';
-    loadMoreBtn.textContent = 'Load more';
+    loadMoreBtn.textContent = t('Load more');
     loadMoreBtn.onclick = () => this._loadChunk();
     toolbar.append(jumpInput, loadMoreBtn);
 
@@ -52,12 +53,12 @@ class HexViewer {
     this._loading = true;
     try {
       const fileOffset = this.baseOffset + this.data.length;
-      if (fileOffset >= this.fileSize) { this.statusEl.textContent = 'End of file'; return; }
+      if (fileOffset >= this.fileSize) { this.statusEl.textContent = t('End of file'); return; }
       const res = await fetch(`/api/file/binary?path=${encodeURIComponent(this.filePath)}&offset=${fileOffset}&length=${CHUNK_SIZE}`);
-      if (!res.ok) throw new Error('Failed to load');
+      if (!res.ok) throw new Error(t('Failed to load'));
       const buf = await res.arrayBuffer();
       const newData = new Uint8Array(buf);
-      if (newData.length === 0) { this.statusEl.textContent = 'End of file'; return; }
+      if (newData.length === 0) { this.statusEl.textContent = t('End of file'); return; }
 
       // Append to existing data
       const combined = new Uint8Array(this.data.length + newData.length);
@@ -68,10 +69,10 @@ class HexViewer {
       this._render();
       const upTo = this.baseOffset + this.data.length;
       this.statusEl.textContent = this.baseOffset > 0
-        ? `Showing 0x${this.baseOffset.toString(16)}–0x${upTo.toString(16)} / ${formatSize(this.fileSize)}`
-        : `Loaded ${formatSize(upTo)} / ${formatSize(this.fileSize)}`;
+        ? t('Showing {from}–{to} / {size}', { from: '0x' + this.baseOffset.toString(16), to: '0x' + upTo.toString(16), size: formatSize(this.fileSize) })
+        : t('Loaded {loaded} / {total}', { loaded: formatSize(upTo), total: formatSize(this.fileSize) });
     } catch (err) {
-      this.statusEl.textContent = 'Error: ' + err.message;
+      this.statusEl.textContent = t('Error: {msg}', { msg: err.message });
     } finally {
       this._loading = false;
     }
