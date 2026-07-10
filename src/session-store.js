@@ -273,24 +273,65 @@ class SessionMessages {
     }
 
     this._pendingPerms = {};
-    const live = [];
+    // Surviving buffer records are INTERLEAVED at their true chronological
+    // position (right after the JSONL record their buffer-neighborhood dedups
+    // against) instead of all appended at the end. Stream-json stdout-only
+    // records (result/init/control_*) never dedup — appended at the end, an
+    // EARLIER turn's `result` replayed AFTER a still-running tool_use and the
+    // normalizer flushed the live pending tool card to ✗ Interrupted on every
+    // server restart (real user report); end-append also scrambled turn
+    // boundaries in the replay. The buffer is chronological, so the index of
+    // the last JSONL-matched record is a correct position anchor.
+    const jsonlPos = new Map(); // 'u:<uuid>' | 'm:<message.id>' → jsonl index
+    jsonl.forEach((m, i) => {
+      if (m.uuid) jsonlPos.set('u:' + m.uuid, i);
+      const mid = m.message?.id;
+      if (mid && !jsonlPos.has('m:' + mid)) jsonlPos.set('m:' + mid, i);
+    });
+    const parsed = [];
     for (const line of (session.buffer || '').split('\n')) {
       const trimmed = line.replace(/\r/g, '').trim();
       if (!trimmed) continue;
-      try {
-        const msg = JSON.parse(trimmed);
-        if (msg.type === 'control_request' && msg.request?.tool_use_id) { this._pendingPerms[msg.request.tool_use_id] = msg; }
-        if (msg.type === 'control_request' || msg.type === 'control_response' || msg.type === 'control_cancel_request') { live.push(msg); continue; }
+      try { parsed.push(JSON.parse(trimmed)); } catch {}
+    }
+    // A ROTATED buffer can start with unmatched stdout-only records from mid-
+    // history; anchor those just before the first matched record (not at the
+    // very start) — much closer to their true position.
+    let firstHit = -1;
+    for (const msg of parsed) {
+      const hitU = msg.uuid != null ? jsonlPos.get('u:' + msg.uuid) : undefined;
+      const hit = hitU !== undefined ? hitU : (msg.message?.id ? jsonlPos.get('m:' + msg.message.id) : undefined);
+      if (hit !== undefined) { firstHit = hit; break; }
+    }
+    let anchor = firstHit >= 0 ? firstHit - 1 : jsonl.length - 1;
+    const inserts = new Map(); // jsonl index (-1 = before all) → [records]
+    let anyInsert = false;
+    for (const msg of parsed) {
+      if (msg.type === 'control_request' && msg.request?.tool_use_id) { this._pendingPerms[msg.request.tool_use_id] = msg; }
+      const hitU = msg.uuid != null ? jsonlPos.get('u:' + msg.uuid) : undefined;
+      const hit = hitU !== undefined ? hitU : (msg.message?.id ? jsonlPos.get('m:' + msg.message.id) : undefined);
+      if (hit !== undefined) { if (hit > anchor) anchor = hit; continue; } // in JSONL — advances the position cursor
+      const isControl = msg.type === 'control_request' || msg.type === 'control_response' || msg.type === 'control_cancel_request';
+      if (!isControl) {
         if (isSubagentMessage(msg)) continue;
-        if (msg.uuid && uuids.has(msg.uuid)) continue;
-        if (msg.message?.id && msgIds.has(msg.message.id)) continue;
         if (msg._fromWebui && msg.timestamp) {
           if (jsonl.some(m => m.type === 'user' && m.timestamp >= msg.timestamp)) continue;
         }
-        live.push(msg);
-      } catch {}
+      }
+      const list = inserts.get(anchor) || inserts.set(anchor, []).get(anchor);
+      list.push(msg);
+      anyInsert = true;
     }
-    this._all = live.length ? [...jsonl, ...live] : jsonl;
+    if (!anyInsert) this._all = jsonl;
+    else {
+      const all = [...(inserts.get(-1) || [])];
+      for (let i = 0; i < jsonl.length; i++) {
+        all.push(jsonl[i]);
+        const ins = inserts.get(i);
+        if (ins) all.push(...ins);
+      }
+      this._all = all;
+    }
     this._display = this._all.filter(isDisplayMessage);
   }
 

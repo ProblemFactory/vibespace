@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project uses [Semantic Versioning](https://semver.org/).
 
+## [2.74.0] — 2026-07-10
+
+### Added — per-message metadata popup
+Right-click a chat message's left color strip (long-press on touch) to see
+everything known about that record: serving model, token usage (input / cache
+read / cache write / output), service tier, stop reason, request ID, message
+ID, uuid, transcript line — with click-to-copy ids and a Copy-as-JSON button.
+
+### Added — one-step update
+`./scripts/update.sh` pulls, installs, builds, and restarts the service in one
+go; ⚙ → "Update VibeSpace…" runs it in a shell terminal (which survives the
+restart thanks to dtach). The systemd unit also gained the PATH fix (hotfix)
+so spawned CLIs resolve claude/codex under systemd's minimal environment.
+
+### Fixed — tool calls no longer show "Interrupted" after a server restart
+A long-running tool survived the restart fine (dtach), but the history replay
+appended every stream-json-only record (earlier turns' `result`s) after the
+whole JSONL — so a stale result replayed after the still-pending tool_use and
+flushed it to ✗ Interrupted. The JSONL+buffer merge is now position-preserving.
+
 ## [2.73.0] — 2026-07-10
 
 ### Added — systemd user service

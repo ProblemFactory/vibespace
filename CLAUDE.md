@@ -17,6 +17,7 @@ node server.js  # starts on port 3456 (or PORT env var)
 # PRODUCTION (this machine runs it this way since 2.73.0): systemd USER service
 ./scripts/install-service.sh        # installs+enables ~/.config/systemd/user/vibespace.service (linger on)
 systemctl --user restart vibespace  # THE way to restart after a build — do NOT kill+nohup by hand
+./scripts/update.sh                 # pull+install+build+restart in one step (⚙ → Update VibeSpace… runs this in a shell terminal; dtach sessions survive)
 journalctl --user -u vibespace -f   # logs (no more /tmp/vibespace-server.log)
 # Unit: Restart=always/RestartSec=5 (survives OOM/crash — verified via SIGKILL), OOMScoreAdjust=-500,
 # StartLimitIntervalSec=0 (retries forever while the NFS workspace mounts late). The service does NOT
@@ -67,7 +68,7 @@ src/
   client.js            — Entry point (2 lines): imports App and initializes
   ws-handler.js        — WebSocket protocol handler (all WS message cases, extracted from server.js)
   sync-store.js        — SyncStore class (versioned state sync with diff broadcast)
-  session-store.js     — SessionMessages + JSONL parsing + session discovery helpers
+  session-store.js     — SessionMessages + JSONL parsing + session discovery helpers. **Merge is POSITION-PRESERVING (2.74.0):** surviving buffer records interleave at their true chronological spot (anchor = jsonl index of the last buffer record that deduped; a rotated buffer's unmatched head anchors just before the first match) instead of all appending at the end — end-append made an EARLIER turn's stream-json-only `result` replay AFTER a still-running tool_use, flushing the live pending tool card to ✗ Interrupted on every server restart (real report), and scrambled turn boundaries in the replay
   message-manager.js   — MessageManager (Claude stream-json → normalized messages with stable IDs)
   codex-message-manager.js — CodexMessageManager (Codex JSON-RPC → normalized messages)
   codex-session-store.js — Codex session discovery (thread listing, JSONL parsing, forkedFrom chain merge)
@@ -737,6 +738,7 @@ Server → Client: `created`, `output`, `msg` (normalized: op=create/edit/meta),
 - Compact mode (default): document-style layout with role labels (You/Claude)
 - Role indicator styles: `chat.roleIndicator` setting — border (default, continuous colored bars), background, icon, label
 - All tool_use rendered as collapsible cards with first-line preview. Non-file tools show Input while running. Per-tool open-in-editor button. No output truncation. Unified error styling.
+- Message metadata popup (2.74.0): right-click a message's LEFT indicator strip (≤18px from the edge; long-press on touch) → `.msg-meta-pop` with role/time/model/token usage (input, cache read/write, output)/service tier/stop reason/requestId/message.id/uuid/transcript line, copyable ids + Copy-as-JSON. Data = `msg.meta` threaded by the normalizer per assistant record ({model, usage, requestId, msgId, stopReason}; streaming edits refresh it so the final usage wins); normal right-click elsewhere keeps the native menu
 - System notifications: `<task-notification>`, `<system-reminder>` etc rendered as collapsible dim cards
 - Background task tracking: Agent (`task_started`) and background commands (`run_in_background`) shown in status bar with click-to-view popup
 - TODO display: above input area, shows current in-progress item from TodoWrite, click for full list popup

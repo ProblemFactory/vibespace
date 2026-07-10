@@ -1,4 +1,4 @@
-import { escHtml } from './utils.js';
+import { copyText, escHtml, showToast } from './utils.js';
 import { stripAnsi } from './highlight.js';
 import { ChatMinimap } from './chat-minimap.js';
 import { ChatSearch } from './chat-search.js';
@@ -136,6 +136,20 @@ class ChatView {
 
     // Wheel at top edge: scroll event won't fire when already at scrollTop=0,
     // so use wheel to detect upward scroll intent and trigger pagination
+    // Right-click on a message's LEFT INDICATOR STRIP (the role color bar) →
+    // per-message metadata popup (model / token usage / request id / uuid).
+    // Restricted to the strip so normal right-click (copy text…) keeps the
+    // native menu everywhere else; long-press synthesizes contextmenu on touch.
+    this._messageList.addEventListener('contextmenu', (e) => {
+      const msgEl = e.target.closest('.chat-msg');
+      if (!msgEl || !msgEl.dataset.msgId) return;
+      if (e.clientX - msgEl.getBoundingClientRect().left > 18) return; // strip only
+      const id = isNaN(+msgEl.dataset.msgId) ? msgEl.dataset.msgId : +msgEl.dataset.msgId;
+      const msg = this._messages.find(m => m.id === id || String(m.id) === String(msgEl.dataset.msgId));
+      if (!msg) return;
+      e.preventDefault();
+      this._showMsgMeta(msg, e.clientX, e.clientY);
+    });
     this._messageList.addEventListener('wheel', () => { this._lastUserScrollAt = Date.now(); }, { passive: true });
     this._messageList.addEventListener('touchmove', () => { this._lastUserScrollAt = Date.now(); }, { passive: true });
     this._messageList.addEventListener('wheel', (e) => {
@@ -463,6 +477,54 @@ class ChatView {
   }
 
   // Get session identifiers for API calls
+  // Per-message metadata popup (left-strip right-click): everything the
+  // normalizer knows about the record — serving model, token usage, request
+  // identity, transcript position — plus a Copy-JSON escape hatch.
+  _showMsgMeta(msg, x, y) {
+    document.querySelectorAll('.msg-meta-pop').forEach(p => p.remove());
+    const meta = msg.meta || {};
+    const u = meta.usage || {};
+    const cc = u.cache_creation || {};
+    const fmt = (n) => (typeof n === 'number' ? n.toLocaleString() : null);
+    const rows = [];
+    const add = (label, val, copyable) => { if (val != null && val !== '') rows.push({ label, val: String(val), copyable }); };
+    add(t('Role'), msg.role === 'assistant' ? 'assistant' : msg.role === 'user' ? 'user' : msg.role === 'tool' ? `tool (${msg.toolName || '?'})` : msg.role);
+    add(t('Time'), msg.ts ? new Date(msg.ts).toLocaleString() : null);
+    add(t('Model'), meta.model);
+    if (u.input_tokens != null || u.output_tokens != null) {
+      add(t('Input tokens'), fmt(u.input_tokens));
+      add(t('Cache read'), fmt(u.cache_read_input_tokens));
+      const cw = (cc.ephemeral_5m_input_tokens || 0) + (cc.ephemeral_1h_input_tokens || 0);
+      add(t('Cache write'), cw ? fmt(cw) : null);
+      add(t('Output tokens'), fmt(u.output_tokens));
+      if (u.service_tier) add(t('Service tier'), u.service_tier);
+    }
+    add(t('Stop reason'), meta.stopReason);
+    add(t('Request ID'), meta.requestId, true);
+    add(t('Message ID'), meta.msgId, true);
+    add('uuid', msg.uuid, true);
+    if (msg.srcLine != null) add(t('Transcript line'), msg.srcLine + 1);
+    const pop = document.createElement('div');
+    pop.className = 'msg-meta-pop';
+    pop.dataset.popover = '1';
+    pop.innerHTML = `<div class="msg-meta-title">${t('Message metadata')}</div>` + rows.map(r =>
+      `<div class="msg-meta-row"><span class="msg-meta-label">${escHtml(r.label)}</span><span class="msg-meta-val${r.copyable ? ' copyable' : ''}" title="${r.copyable ? t('Click to copy') : ''}">${escHtml(r.val)}</span></div>`).join('')
+      + `<button class="msg-meta-copy">${t('Copy as JSON')}</button>`;
+    document.body.appendChild(pop);
+    pop.style.position = 'fixed'; pop.style.zIndex = '99999';
+    pop.style.left = Math.min(x, window.innerWidth - pop.offsetWidth - 8) + 'px';
+    pop.style.top = Math.min(y, window.innerHeight - pop.offsetHeight - 8) + 'px';
+    pop.addEventListener('click', (e) => {
+      if (e.target.classList.contains('copyable')) { copyText(e.target.textContent); showToast(t('Copied')); }
+      else if (e.target.classList.contains('msg-meta-copy')) {
+        copyText(JSON.stringify({ role: msg.role, ts: msg.ts, uuid: msg.uuid, srcLine: msg.srcLine, toolName: msg.toolName, ...meta }, null, 2));
+        showToast(t('Copied')); pop.remove();
+      }
+    });
+    const close = (e) => { if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener('mousedown', close, true); } };
+    document.addEventListener('mousedown', close, true);
+  }
+
   _getSessionIds() {
     const allSess = this.app.sidebar?._allSessions || [];
     // View-only sessions: accept both legacy `view-<claudeId>` and backend-aware `view-<backend>-<backendSessionId>`

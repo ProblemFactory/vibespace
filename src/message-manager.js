@@ -139,6 +139,7 @@ class MessageManager {
       permission: fields.permission || null,
       usage: fields.usage || null,
       taskInfo: fields.taskInfo || null,
+      meta: fields.meta || null, // per-record metadata (model/usage/requestId) for the message-info popup
     };
     this.messages.push(msg);
     this.messageIndex.set(msg.id, msg);
@@ -326,6 +327,15 @@ class MessageManager {
     // Per-turn serving model — lets the UI detect silent auto-fallback
     // (harness swapped models mid-session; e.g. fable-5 → opus under load).
     const servedModel = raw.message?.model;
+    // Per-message metadata for the left-strip right-click popup: which model
+    // actually served this record, its token usage, and the request identity.
+    const recMeta = {
+      model: (servedModel && servedModel !== '<synthetic>') ? servedModel : null,
+      usage: raw.message?.usage || null,
+      requestId: raw.requestId || null,
+      msgId: raw.message?.id || null,
+      stopReason: raw.message?.stop_reason || null,
+    };
     if (servedModel && servedModel !== '<synthetic>' && emit && servedModel !== this._lastServedModel) {
       this._lastServedModel = servedModel;
       this._emit({ op: 'meta', subtype: 'served-model', data: { model: servedModel } });
@@ -345,7 +355,7 @@ class MessageManager {
       }
       if (block.type === 'thinking') {
         // Claude's thinking blocks carry the text in `thinking`, not `text`
-        const msg = this._create({ role: 'assistant', content: [{ type: 'thinking', text: block.thinking || block.text || '' }] });
+        const msg = this._create({ role: 'assistant', content: [{ type: 'thinking', text: block.thinking || block.text || '' }], meta: recMeta });
         if (emit) this._emit({ op: 'create', message: msg });
 
       } else if (block.type === 'text') {
@@ -353,10 +363,11 @@ class MessageManager {
         const last = this.messages[this.messages.length - 1];
         if (last && last.role === 'assistant' && last.status === 'streaming' && last.content[0]?.type === 'text') {
           last.content = [{ type: 'text', text: block.text || '' }];
-          if (emit) this._emit({ op: 'edit', id: last.id, fields: { content: last.content } });
+          last.meta = recMeta; // later records of the same message carry the final usage
+          if (emit) this._emit({ op: 'edit', id: last.id, fields: { content: last.content, meta: recMeta } });
         } else {
           this._finalizeStreaming(emit);
-          const msg = this._create({ role: 'assistant', status: 'streaming', content: [{ type: 'text', text: block.text || '' }] });
+          const msg = this._create({ role: 'assistant', status: 'streaming', content: [{ type: 'text', text: block.text || '' }], meta: recMeta });
           if (emit) this._emit({ op: 'create', message: msg });
         }
 
@@ -385,7 +396,7 @@ class MessageManager {
           content: [{ type: 'tool_call', toolCallId: block.id, toolName: block.name, input: block.input }],
           ts: Date.now(), turnIndex: this.turnIndex,
           toolCallId: block.id, toolName: block.name, toolStatus: null,
-          permission: null, usage: null, taskInfo: null,
+          permission: null, usage: null, taskInfo: null, meta: recMeta,
         };
         this.messages.push(msg);
         this.messageIndex.set(msgId, msg);
