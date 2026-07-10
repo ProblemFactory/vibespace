@@ -2859,6 +2859,11 @@ setInterval(pollUsageActive, 90000);
 // automation — do NOT wire this to any scheduler.
 const _onDemandUsageAt = {};
 app.post('/api/usage/refresh', (req, res) => {
+  // User-facing kill switch (accounts.onDemandQuotaRefresh = 'off'): never
+  // contact Anthropic, even if a stale client asks.
+  let odMode = 'manual';
+  try { odMode = getSyncStore('settings')?.get('accounts.onDemandQuotaRefresh') || 'manual'; } catch {}
+  if (odMode === 'off') return res.status(403).json({ error: 'on-demand quota refresh is disabled in Settings' });
   const key = String(req.body?.account || '__global__');
   if (Date.now() < _rateLimitBackoffUntil) return res.json({ throttled: true, reason: 'backoff' });
   if (Date.now() - (_onDemandUsageAt[key] || 0) < 60000) return res.json({ throttled: true });

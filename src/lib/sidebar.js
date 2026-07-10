@@ -728,7 +728,12 @@ class Sidebar {
     // digest now only changes when the visible content does (which sessions,
     // their status/name/identity). Recency re-sorting is picked up on the next
     // real change instead of churning continuously.
-    const digest = JSON.stringify(this._allSessions.map(s => `${this._getSessionStateKey(s)}:${s.status}:${s.name || ''}:${s.webuiName || ''}:${s.webuiId || ''}:${s.agentKind || 'primary'}:${s.agentRole || ''}:${s.agentNickname || ''}`));
+    // The digest is also ORDER-INSENSITIVE (.sort()): discovery orders by
+    // transcript mtime, so with several busy sessions the ARRAY ORDER reshuffles
+    // on nearly every poll with zero content change — measured live: 5058
+    // entries, 0 changed, order-only diff, full re-render every ~5-10s
+    // (flickering the Remote tab and expanded cards; two user reports).
+    const digest = JSON.stringify(this._allSessions.map(s => `${this._getSessionStateKey(s)}:${s.status}:${s.name || ''}:${s.webuiName || ''}:${s.webuiId || ''}:${s.agentKind || 'primary'}:${s.agentRole || ''}:${s.agentNickname || ''}`).sort());
     if (digest === this._sessionDigest) return;
     this._sessionDigest = digest;
     this.app.syncSessionIdentity?.(this._allSessions);

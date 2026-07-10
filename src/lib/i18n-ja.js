@@ -1110,4 +1110,13 @@ export default {
   'The account is fixed when the CLI starts, so the session restarts and the conversation continues via resume.': 'アカウントは CLI 起動時に固定されるため、セッションを再起動します。会話は resume で継続されます。',
   'Switch & restart': '切り替えて再起動',
   'Nothing to resume yet — send a message first, or pick the account in the New Session dialog': 'まだ再開できる会話がありません — まずメッセージを送るか、新規セッションでアカウントを選んでください',
+  'Manual only (⟳ button)': '手動のみ（⟳ ボタン）',
+  'Auto on popup open (when >30 min stale)': 'ポップアップを開いた時に自動（30 分以上古い場合のみ）',
+  'Off (never contact Anthropic)': 'オフ（Anthropic に一切リクエストしない）',
+  'On-demand quota refresh (model-scoped limits like Fable)': 'オンデマンドのクォータ更新（Fable などモデル別上限）',
+  'The passive statusline feed only carries the 5h/7d windows — model-scoped weekly limits (e.g. Fable) can ONLY come from asking Anthropic’s usage endpoint with the account’s own login token. This is the same non-billable call the CLI makes when you run /usage, throttled to ≥60s per account and honoring rate-limit backoff, and it NEVER runs on a timer. It is user-initiated traffic, categorically different from the background polling that has gotten accounts banned — but it is still an off-CLI request with a subscription token, so it is your call: Manual = only when you click ⟳; Auto = also once when you open the quota popup and the data is stale; Off = never (the ⟳ button disappears and scoped limits stay unknown).': 'パッシブなステータスライン収集には 5h/7d ウィンドウしか含まれず、モデル別の週次上限（Fable など）はアカウント自身のログイントークンで Anthropic の使用量エンドポイントに問い合わせる以外に取得手段がありません。これは CLI で /usage を実行した時と同一の非課金リクエストで、アカウントごとに最短 60 秒、レート制限バックオフを遵守し、タイマーでは決して実行されません。ユーザー起点のトラフィックであり、BAN の原因となったバックグラウンドポーリングとは本質的に異なりますが、サブスクリプショントークンを使う CLI 外リクエストであることに変わりはないため、選択はあなた次第です：手動 = ⟳ クリック時のみ／自動 = クォータポップアップを開いてデータが古い時にも 1 回／オフ = 一切行わない（⟳ ボタンは消え、モデル別上限は不明のまま）。',
+  'Fetch quota from Anthropic?': 'Anthropic からクォータを取得しますか？',
+  'This makes ONE non-billable request to Anthropic’s usage endpoint with this account’s own login token — the same call the CLI makes when you run /usage. It only ever fires when you ask (never on a timer) and is throttled to ≥60s per account. Configure or disable it in Settings → “On-demand quota refresh”. This notice is shown once.': 'このアカウント自身のログイントークンで Anthropic の使用量エンドポイントに 1 回だけ非課金リクエストを送ります — CLI で /usage を実行した時と同じ呼び出しです。あなたが操作した時のみ実行され（タイマーでは決して実行されません）、アカウントごとに最短 60 秒に制限されます。設定 →「オンデマンドのクォータ更新」で設定・無効化できます。この通知は一度だけ表示されます。',
+  'Fetch': '取得',
+  'Model-scoped weekly limits (e.g. Fable) aren’t in the passive feed — on-demand refresh is disabled in Settings': 'モデル別の週次上限（Fable など）はパッシブ収集に含まれません — オンデマンド更新は設定で無効化されています',
 };

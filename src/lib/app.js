@@ -1999,7 +1999,23 @@ class App {
   // User-initiated quota refresh (⟳ / popup open) — the only way to get the
   // model-scoped weekly buckets (Fable), which the passive statusline feed
   // never carries. Server enforces ≥60s per account + the 429 backoff.
+  // Gated by accounts.onDemandQuotaRefresh (manual/auto/off) + a one-time
+  // first-use warning so the user knows an off-CLI call happens.
   async _refreshQuotaOnDemand(btn, { silent } = {}) {
+    if ((this.settings.get('accounts.onDemandQuotaRefresh') || 'manual') === 'off') return;
+    if (!silent) {
+      let acked = false;
+      try { acked = localStorage.getItem('vibespace.quotaRefreshAck') === '1'; } catch {}
+      if (!acked) {
+        const ok = await showConfirmDialog({
+          title: t('Fetch quota from Anthropic?'),
+          message: t('This makes ONE non-billable request to Anthropic’s usage endpoint with this account’s own login token — the same call the CLI makes when you run /usage. It only ever fires when you ask (never on a timer) and is throttled to ≥60s per account. Configure or disable it in Settings → “On-demand quota refresh”. This notice is shown once.'),
+          confirmText: t('Fetch'),
+        });
+        if (!ok) return;
+        try { localStorage.setItem('vibespace.quotaRefreshAck', '1'); } catch {}
+      }
+    }
     const { target } = this._claudeSelResolved();
     if (btn) btn.classList.add('usage-refresh-spin');
     const r = await fetchJson('/api/usage/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ account: target }) });
@@ -2012,6 +2028,7 @@ class App {
   // scoped data is stale (>30 min) — paced per target so this stays at CLI
   // /usage-command frequency, never a background cadence.
   _maybeAutoRefreshQuota() {
+    if ((this.settings.get('accounts.onDemandQuotaRefresh') || 'manual') !== 'auto') return;
     const { rl, target } = this._claudeSelResolved();
     this._quotaAutoPace = this._quotaAutoPace || {};
     if (Date.now() - (this._quotaAutoPace[target] || 0) < 60000) return;
@@ -2173,7 +2190,10 @@ class App {
       </div>`);
       }
       if (!scopedSections.length && !noData) {
-        scopedSections.push(`<div class="usage-note">${t('Model-scoped weekly limits (e.g. Fable) aren’t in the passive feed — ⟳ fetches them on demand')}</div>`);
+        const odOff = (this.settings.get('accounts.onDemandQuotaRefresh') || 'manual') === 'off';
+        scopedSections.push(`<div class="usage-note">${odOff
+          ? t('Model-scoped weekly limits (e.g. Fable) aren’t in the passive feed — on-demand refresh is disabled in Settings')
+          : t('Model-scoped weekly limits (e.g. Fable) aren’t in the passive feed — ⟳ fetches them on demand')}</div>`);
       }
       // The signed-out warning concerns the GLOBAL login's data — only shown
       // when that's what's displayed (directly or via the linked account).
@@ -2198,7 +2218,8 @@ class App {
       </div>${scopedSections.join('')}
       ${this._subSignedOut && showingGlobal ? `<div class="usage-warn">${t('⚠ Subscription signed out (a Console login replaced it) — pies show its last-known quota. API-billed sessions never appear here.')}</div>` : ''}
       <div class="usage-updated">${t('Updated {ago}', { ago: agoText(rl.fetchedAt) })}</div>`;
-      const refreshBtn = `<button class="usage-refresh-btn" title="${escHtml(t('Refresh from Anthropic now (also fetches model-scoped limits like Fable) — user-initiated, min 60s apart'))}">⟳</button>`;
+      const odMode = this.settings.get('accounts.onDemandQuotaRefresh') || 'manual';
+      const refreshBtn = odMode === 'off' ? '' : `<button class="usage-refresh-btn" title="${escHtml(t('Refresh from Anthropic now (also fetches model-scoped limits like Fable) — user-initiated, min 60s apart'))}">⟳</button>`;
       sections.push(`${renderSectionTitle('claude', escHtml(claudeUsageLabel), refreshBtn)}${switcher}
       ${usageNote ? `<div class="usage-note">${usageNote}</div>` : ''}
       ${body}`);

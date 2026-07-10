@@ -229,6 +229,17 @@ const SETTINGS_SCHEMA = {
     description: t('OFF (recommended): a subscription (Pro/Max) account can only run on THIS machine; for a remote host, log in on the host instead. Turning this ON copies the subscription’s login to the remote host — its token then appears from that host’s IP (often a datacenter), which can look like account abuse to Anthropic and risk a ban. API-key accounts are always allowed on remote hosts and are unaffected by this.'),
     category: t('Session'), liveApply: true,
   },
+  'accounts.onDemandQuotaRefresh': {
+    type: 'enum', default: 'manual',
+    options: [
+      { value: 'manual', label: t('Manual only (⟳ button)') },
+      { value: 'auto', label: t('Auto on popup open (when >30 min stale)') },
+      { value: 'off', label: t('Off (never contact Anthropic)') },
+    ],
+    label: t('On-demand quota refresh (model-scoped limits like Fable)'),
+    description: t('The passive statusline feed only carries the 5h/7d windows — model-scoped weekly limits (e.g. Fable) can ONLY come from asking Anthropic’s usage endpoint with the account’s own login token. This is the same non-billable call the CLI makes when you run /usage, throttled to ≥60s per account and honoring rate-limit backoff, and it NEVER runs on a timer. It is user-initiated traffic, categorically different from the background polling that has gotten accounts banned — but it is still an off-CLI request with a subscription token, so it is your call: Manual = only when you click ⟳; Auto = also once when you open the quota popup and the data is stale; Off = never (the ⟳ button disappears and scoped limits stay unknown).'),
+    category: t('Session'), liveApply: true,
+  },
   'accounts.activeUsagePolling': {
     type: 'boolean', default: false, confirmOn: true,
     label: t('⚠ Actively poll subscription usage (automation risk)'),
