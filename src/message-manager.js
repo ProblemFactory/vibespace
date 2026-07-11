@@ -407,12 +407,22 @@ class MessageManager {
       const resultText = typeof tr.content === 'string' ? tr.content : JSON.stringify(tr.content || '');
       existing.status = tr.is_error ? 'error' : 'complete';
       existing.toolStatus = tr.is_error ? 'error' : 'ok';
+      // A tool_result implies the pending permission was answered. The
+      // control_response only exists in server memory (it goes to claude's
+      // STDIN — the wrapper's .buf tees stdout only), so a restart-rebuilt
+      // history is request-without-response and the card would render
+      // awaiting-approval forever (real report: an answered AskUserQuestion
+      // questionnaire stuck interactive). Mirror of the completed-before-
+      // request auto-resolve in _processControlRequest.
+      if (existing.permission && !existing.permission.resolved) {
+        existing.permission.resolved = tr.is_error ? 'denied' : 'allowed';
+      }
       // Replace tool_call content with tool_result (keeps input + adds output)
       existing.content = [{
         type: 'tool_result', toolCallId: toolUseId, toolName: pending.block.name,
         input: pending.block.input, output: resultText, status: tr.is_error ? 'error' : 'ok',
       }];
-      if (emit) this._emit({ op: 'edit', id: existing.id, fields: { status: existing.status, toolStatus: existing.toolStatus, content: existing.content } });
+      if (emit) this._emit({ op: 'edit', id: existing.id, fields: { status: existing.status, toolStatus: existing.toolStatus, content: existing.content, ...(existing.permission ? { permission: existing.permission } : {}) } });
       // harness TaskCreate: "Task #N created successfully" carries the id
       const subj = this._pendingTaskCreates?.get(toolUseId);
       if (subj && !tr.is_error) {

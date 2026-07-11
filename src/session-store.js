@@ -552,7 +552,13 @@ class SessionMessages {
   activePendingPermissions() {
     this._ensureParsed();
     const resolved = new Set();
-    for (const m of this._all.slice(-100)) {
+    // Scan ALL records for tool_results, not a tail window — a session that
+    // kept running after answering pushes the tool_result out of any fixed
+    // window and the stale control_request re-injects an awaiting-approval
+    // overlay on every attach (real report: an answered AskUserQuestion
+    // questionnaire resurrected after each server restart). Same class as
+    // the chatStatus 200→2000 scan-depth bug.
+    for (const m of this._all) {
       if (m.type !== 'user') continue;
       const c = m.message?.content;
       if (!Array.isArray(c)) continue;
