@@ -1402,6 +1402,8 @@ export default {
   "last seen": "最終受信",
   "runs on the selected remote host": "選択したリモートホスト上で実行されます",
   "Desktop": "デスクトップ",
+  "Session create failed": "セッションの作成に失敗しました",
+  "Create failed": "作成失敗",
   "Connecting…": "接続中…",
   "Starting desktop…": "デスクトップを起動中…",
   "Desktop unavailable on this server": "このサーバーではデスクトップを利用できません",

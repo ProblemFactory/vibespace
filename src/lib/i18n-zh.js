@@ -1404,6 +1404,8 @@ export default {
   "last seen": "最后上报",
   "runs on the selected remote host": "在所选远程主机上执行",
   "Desktop": "桌面",
+  "Session create failed": "会话创建失败",
+  "Create failed": "创建失败",
   "Connecting…": "连接中…",
   "Starting desktop…": "正在启动桌面…",
   "Desktop unavailable on this server": "此服务器上没有可用的桌面",

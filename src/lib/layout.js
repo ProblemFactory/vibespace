@@ -254,7 +254,11 @@ class LayoutManager {
         const match = allSess.find(s => s.webuiId === termSession.sessionId);
         if (match) {
           winState.backend = match.backend || 'claude';
-          winState.backendSessionId = match.backendSessionId || match.sessionId;
+          // never the webui id (match.sessionId === match.webuiId before the
+          // CLI reports a real id — long window on remote spawns); a bogus
+          // backendSessionId makes every other client's rematch miss
+          winState.backendSessionId = match.backendSessionId
+            || (match.sessionId && match.sessionId !== match.webuiId ? match.sessionId : null);
           winState.claudeSessionId = winState.backend === 'claude' ? winState.backendSessionId : null;
           winState.cwd = match.cwd || '';
         }
@@ -270,7 +274,8 @@ class LayoutManager {
         const match = allSess.find(s => s.webuiId === termSession.sessionId);
         if (match) {
           winState.backend = match.backend || 'claude';
-          winState.backendSessionId = match.backendSessionId || match.sessionId;
+          winState.backendSessionId = match.backendSessionId
+            || (match.sessionId && match.sessionId !== match.webuiId ? match.sessionId : null); // see terminal branch
           winState.claudeSessionId = winState.backend === 'claude' ? winState.backendSessionId : null;
           winState.cwd = match.cwd || '';
         }
@@ -411,14 +416,15 @@ class LayoutManager {
           );
           if (stoppedMatch) {
             const viewWin = this.app.viewSession(stoppedMatch.sessionId, stoppedMatch.cwd, customName || stoppedMatch.name || ws.title || 'Session', {
-              backend, backendSessionId,
+              backend, backendSessionId, hostId: ws.openSpec?.hostId || undefined,
             });
             if (viewWin) applyPosition(viewWin, ws);
           }
         }
       } else if (ws.type === 'chat') {
         const backend = ws.backend || ws.openSpec?.backend || 'claude';
-        const backendSessionId = ws.backendSessionId || ws.claudeSessionId || ws.openSpec?.backendSessionId;
+        const bsid0 = ws.backendSessionId || ws.claudeSessionId || ws.openSpec?.backendSessionId; // see terminal branch
+        const backendSessionId = bsid0 && bsid0 !== ws.serverSessionId ? bsid0 : null;
         let alive = null;
         if (backendSessionId) {
           alive = activeSessions.find(s => (s.backend || 'claude') === backend && (s.backendSessionId || s.claudeSessionId) === backendSessionId);
@@ -440,7 +446,7 @@ class LayoutManager {
           );
           if (stoppedMatch) {
             const viewWin = this.app.viewSession(stoppedMatch.sessionId, stoppedMatch.cwd, customName || stoppedMatch.name || ws.title || 'Session', {
-              backend, backendSessionId,
+              backend, backendSessionId, hostId: ws.openSpec?.hostId || undefined,
             });
             if (viewWin) applyPosition(viewWin, ws);
           }

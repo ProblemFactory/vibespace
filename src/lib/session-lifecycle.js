@@ -61,6 +61,21 @@ export function installSessionLifecycle(App, ctx = {}) {
       // Window closed before the server answered — clean up the handler so it
       // doesn't hold winInfo forever (and can't bind a session to a dead window)
       if (!this.wm.windows.has(winInfo.id)) { this.ws.offGlobal(handler); return; }
+      // Server refused the create (e.g. remote subscription-shipping policy):
+      // surface it — without this the window stayed BLANK forever with no
+      // feedback and no openSpec (found reproducing the remote-blank report).
+      if (msg.type === 'error' && msg.reqId === reqId) {
+        this.ws.offGlobal(handler);
+        const text = msg.message || t('Session create failed');
+        showToast(text, { type: 'error' });
+        const err = document.createElement('div');
+        err.className = 'empty-hint';
+        err.style.cssText = 'padding:24px;white-space:pre-wrap;user-select:text';
+        err.textContent = text;
+        winInfo.content.appendChild(err);
+        this.wm.setTitle(winInfo.id, t('Create failed'));
+        return;
+      }
       if (msg.type === 'created' && msg.reqId === reqId) {
         metric('session-create-roundtrip-ms', performance.now() - _createT0);
         // Set openSpec now that we have the server session ID (for cross-client sync)
@@ -69,6 +84,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           serverId: msg.sessionId,
           backend,
           backendSessionId: backendSessionId || resumeId || null,
+          hostId: hostId || null,
           sessionKey,
           agentKind: agentKind || 'primary',
           agentRole: agentRole || '',
@@ -197,7 +213,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     if (window.innerWidth <= 768 && this.sidebar.isOpen) this.sidebar.toggle(false);
   },
 
-  attachSession(serverId, name, cwd, { mode, syncId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId } = {}) {
+  attachSession(serverId, name, cwd, { mode, syncId, backend = 'claude', backendSessionId, hostId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId } = {}) {
     this._closeSidebarOnMobile();
     // If we already have a window for this session, just focus it
     if (this._focusExistingSession(serverId)) return null;
@@ -212,6 +228,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       mode,
       backend,
       backendSessionId: backendSessionId || null,
+      hostId: hostId || null,
       sessionKey: backendSessionId ? `${backend}:${backendSessionId}` : '',
       agentKind: agentKind || 'primary',
       agentRole: agentRole || '',
@@ -604,7 +621,13 @@ export function installSessionLifecycle(App, ctx = {}) {
         // does; a spec replayed verbatim attaches to a nonexistent session and
         // leaves a blank window that re-persists the stale spec forever.
         const backend = spec.backend || 'claude';
-        const bsid = spec.backendSessionId || null;
+        // A bsid equal to the serverId is POLLUTION from pre-2.105.2 specs
+        // (the webui id was baked in before the CLI reported a real id —
+        // long window on remote spawns): treat it as no bsid, or the
+        // re-resolution below misses on it and opens a bogus view-only
+        // window (real report: remote-host session blank on other clients).
+        const bsid = (spec.backendSessionId && spec.backendSessionId !== spec.serverId)
+          ? spec.backendSessionId : null;
         const live = this.sidebar?._webuiSessions || [];
         let serverId = spec.serverId;
         let name = spec.name;
@@ -616,11 +639,16 @@ export function installSessionLifecycle(App, ctx = {}) {
             serverId = alive.id;
             name = alive.name || name;
             cwd = alive.cwd || cwd;
-          } else if (live.length) {
+          } else if (live.length && !serverId) {
             // Session is dead — open read-only history with a Resume bar
-            // instead of a blank window stuck on a failed attach
+            // instead of a blank window stuck on a failed attach. Only when
+            // there is NO serverId to try: a serverId the local list doesn't
+            // know yet is usually a RACE (layout-sync beat the active-sessions
+            // push for a just-created session) — attach directly and let the
+            // server be authoritative; a genuinely dead session's attach
+            // errors into the read-only path anyway.
             this.viewSession(bsid, cwd, this.sidebar?.getCustomName(spec.sessionKey || bsid) || name, {
-              syncId, backend, backendSessionId: bsid,
+              syncId, backend, backendSessionId: bsid, hostId: spec.hostId,
               agentKind: spec.agentKind, agentRole: spec.agentRole,
               agentNickname: spec.agentNickname, sourceKind: spec.sourceKind,
               parentThreadId: spec.parentThreadId,
@@ -634,6 +662,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           syncId,
           backend,
           backendSessionId: bsid,
+          hostId: spec.hostId,
           agentKind: spec.agentKind,
           agentRole: spec.agentRole,
           agentNickname: spec.agentNickname,
