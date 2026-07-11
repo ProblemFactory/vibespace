@@ -160,7 +160,6 @@ export default {
   'Per-spring config: {mode:"flex", weight:1-9} (strength = flex-grow share) or {mode:"fixed", px:N} (rigid spacer). Managed by Customize mode (click a spring).': 'スプリングごとの設定：{mode:"flex", weight:1-9}（強さ = flex-grow の配分）または {mode:"fixed", px:N}（固定スペーサ）。カスタマイズモードで管理（スプリングをクリック）。',
   'Briefly scale-bounce windows when focused from sidebar or taskbar': 'サイドバーやタスクバーからフォーカスした際にウィンドウを一瞬バウンス',
   'Allow tab bar to wrap into multiple rows when there are many tabs (like a flow layout)': 'タブが多いときにタブバーを複数行に折り返す（フローレイアウト）',
-  'What happens when closing a terminal window: terminate the session, or detach and keep it running': 'ターミナルウィンドウを閉じたときの動作：セッションを終了、またはデタッチして実行を継続',
   'How prominently the focused window is highlighted (subtle = shadow only, normal = accent border, strong = border + glow)': 'フォーカス中ウィンドウの強調度（控えめ = 影のみ、標準 = アクセント枠、強め = 枠 + グロー）',
   'Auto-adjust text colors to meet this contrast ratio (4.5 = WCAG AA). Set to 1 to disable.': 'このコントラスト比を満たすよう文字色を自動調整（4.5 = WCAG AA）。1 で無効化。',
   "Prevent Claude's OSC title updates from overwriting user-set session names": 'Claude の OSC タイトル更新がユーザー設定のセッション名を上書きするのを防ぐ',
@@ -1514,4 +1513,5 @@ export default {
   'Add a submount (a specific bucket/path of this storage)': 'サブマウントを追加(このストレージの特定のバケット/パス)',
   'This storage type doesn’t support submounts': 'このストレージタイプはサブマウントに対応していません',
   'New submount under "{name}"': '"{name}" の下に新しいサブマウント',
+  'What happens when closing a session window: terminate the session, or detach and keep it running. Until you set this explicitly, plain shell terminals default to DETACH (they have no transcript to resume — closing would destroy them; detached ones stay in the sidebar, tmux-style) while agent sessions default to terminate.': 'セッションウィンドウを閉じたときの動作：セッションを終了するか、切り離して実行を継続するか。明示的に設定するまで、プレーンなシェルターミナルは「切り離す」がデフォルトです（再開できる記録がなく、終了すると完全に失われます。切り離されたものは tmux のようにサイドバーに残ります）。エージェントセッションのデフォルトは「終了」です。',
 };

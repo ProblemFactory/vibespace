@@ -49,6 +49,12 @@ class SettingsManager {
     return undefined;
   }
 
+  /** True when the USER set this key (get() can't tell — it falls back to the
+   *  schema default). Lets a caller apply a context-sensitive default that an
+   *  explicit user choice still overrides (e.g. shell terminals detach on
+   *  close unless closeBehavior was set by hand). */
+  isSet(path) { return path in this._values; }
+
   /** Set a setting value. Pass undefined to reset to default. */
   set(path, value) {
     const schema = SETTINGS_SCHEMA[path];
