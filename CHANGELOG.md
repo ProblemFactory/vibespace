@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.106.1 — 2026-07-11
+
+- **Sidebar scroll no longer breaks on refresh (real report)**: EVERY `_render()` now preserves the list scroll — broadcast-triggered re-renders (tasks-updated / session-status-updated / user-state-updated, fired constantly by agents' vibespace-task/status calls) used to reset it to top; only the 5s-poll digest path preserved it. A view change (tab / board sub-view / mobile drill-down) still resets deliberately.
+- **Top bars no longer follow the bottom taskbar's drag-resize (real report)**: the adaptive size vars live on :root for cross-bar hosting — they're now pinned to defaults inside #toolbar and #toolbar-row2.
+- **Taskbar sizing is recoverable (real report: "margin grows after one resize, never returns")**: the JS-derived size vars never matched the CSS defaults even at the same height, and nothing cleared the inline override. Double-click the resize handle to reset; a synced height at the CSS default is applied as a reset too.
+
 ## 2.106.0 — 2026-07-11
 
 **Chat: TUI-style run collapse (new setting, default ON)**

@@ -2043,6 +2043,15 @@ body.taskbar-top .cz-panel { bottom: 32px; }
   display: flex; align-items: center; gap: 4px; padding: 3px 10px;
   flex-shrink: 0; min-height: 34px;
 }
+/* TOP bars must not follow the BOTTOM taskbar's drag-resize (real report):
+   the adaptive size vars land on :root for cross-bar hosting — pin them to
+   defaults inside the toolbar + its extra row so only taskbar-hosted elements
+   scale with the taskbar. */
+#toolbar, #toolbar-row2 {
+  --taskbar-icon-size: 14px; --taskbar-icon-scale: 1; --taskbar-title-size: 10px;
+  --taskbar-sub-size: 8px; --usage-pie-size: 16px; --taskbar-item-pad: 2px;
+  --desktop-preview-h: 20px; --desktop-preview-w: 30px; --desktop-label-size: 8px;
+}
 #toolbar-row2 { background: var(--bg-toolbar); border-bottom: 1px solid var(--border); }
 #taskbar-row2 { background: var(--bg-taskbar); border-top: 1px solid var(--border); }
 body.taskbar-top #taskbar-row2 { order: -1; border-top: none; border-bottom: 1px solid var(--border); }

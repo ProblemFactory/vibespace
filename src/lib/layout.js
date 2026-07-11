@@ -906,7 +906,21 @@ class LayoutManager {
 
   _applyTaskbarHeight(h) {
     const taskbar = document.getElementById('taskbar');
-    if (!taskbar || Math.abs(taskbar.offsetHeight - h) < 2) return;
+    if (!taskbar) return;
+    // A height at the CSS default means "no override" — apply it as a RESET
+    // (clear inline height + adaptive vars) instead of pinning the default as
+    // an inline override, which permanently inflated item sizing (the
+    // JS-derived vars ≠ the CSS defaults even at the same height).
+    const def = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--taskbar-height')) || 44;
+    if (Math.abs(h - def) < 2) {
+      if (taskbar.style.height) {
+        taskbar.style.height = '';
+        localStorage.removeItem('taskbarHeight');
+        this.app.desktopManager?._clearTaskbarSizeVars?.();
+      }
+      return;
+    }
+    if (Math.abs(taskbar.offsetHeight - h) < 2) return;
     taskbar.style.height = h + 'px';
     localStorage.setItem('taskbarHeight', h);
     this.app.desktopManager?._adaptTaskbarSize(h);
