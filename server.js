@@ -2298,6 +2298,8 @@ const mounts = new MountManager({
   broadcast: (msg) => {
     const json = JSON.stringify(msg);
     wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
+// Rename guard: bridge-share chroots are filesystem paths under the mount
+mounts.pathGuard = (p) => mountTokens.list().some((t) => String(t.root || '').startsWith(p));
   },
 });
 setTimeout(() => mounts.restore().catch(e => console.error('[mounts] restore:', e.message)), 2000);
@@ -2455,6 +2457,14 @@ app.post('/api/mounts/:id/mount', async (req, res) => {
 app.post('/api/mounts/:id/unmount', async (req, res) => {
   try { res.json({ success: await mounts.unmount(req.params.id) }); }
   catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.patch('/api/mounts/:id', async (req, res) => {
+  try { await mounts.update(req.params.id, req.body || {}); res.json({ success: true, mounts: mounts.list() }); }
+  catch (e) { res.status(400).json({ error: e.message, mounts: mounts.list() }); }
+});
+app.post('/api/mounts/:id/duplicate', async (req, res) => {
+  try { const id = await mounts.duplicate(req.params.id, req.body || {}); res.json({ success: true, id, mounts: mounts.list() }); }
+  catch (e) { res.status(400).json({ error: e.message, mounts: mounts.list() }); }
 });
 app.delete('/api/mounts/:id', async (req, res) => {
   try { await mounts.remove(req.params.id); res.json({ success: true }); }

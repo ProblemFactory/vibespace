@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.107.0 — 2026-07-11
+
+**Storage: edit + derive (user request — a mis-pathed mount had no fix but delete/re-add)**
+- ✎ **Edit** on every mount row: name, and per-type connection fields (S3 endpoint/bucket/prefix/keys with blank-keeps-secret; custom-rclone remote path — the FishR2-class fix; Drive folder). A connected mount reconnects with the new settings. Renaming is refused while a bridge share points into the mount (its chroot path would silently break).
+- ⧉ **New mount from this connection**: same credentials, different bucket/path/prefix — one imported R2/S3 credential can back any number of mounts (PATCH /api/mounts/:id + POST /api/mounts/:id/duplicate).
+- Env-provisioned "My storage" can no longer be deleted in-app (deployment-managed; a changed provisioning re-imports it) — edit/rename/unmount only, per user directive.
+
 ## 2.106.5 — 2026-07-11
 
 - **Run collapse, tuned live with the user**: thinking + Bash fold as ONE mixed group; ANY Bash starts a fold immediately (single included, pending/running included — the bottom streaming indicator shows activity, and a running member adds "· running…" to the fold header); pure-thinking folds at ≥2; the newest-message exemption is gone. Fold headers carry the assistant color bar in border mode.
