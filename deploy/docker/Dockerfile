@@ -36,8 +36,13 @@ RUN mkdir -p /etc/chromium.d && printf '%s\n' 'export CHROMIUM_FLAGS="$CHROMIUM_
 # xfce4-settings-manager. (2) the Terminal/File Manager launchers use
 # `exo-open --launch <Category>` which silently no-ops with no preferred app
 # registered — helpers.rc sets all three (Terminal/Files/Browser).
+# The panel launchers bind DIRECTLY to their apps (xfce4-terminal / thunar /
+# chromium / xfce4-settings-manager) instead of `exo-open --launch <Category>`
+# — the exo indirection silently no-ops without a registered preferred app and
+# was a recurring "the button does nothing" source (user directive: bind the
+# browser straight to chromium).
 COPY deploy/docker/xfce/xfconf/xfce-perchannel-xml/xfce4-panel.xml /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml
-COPY deploy/docker/xfce/panel/launcher-20/settings.desktop /etc/xdg/xfce4/panel/launcher-20/settings.desktop
+COPY deploy/docker/xfce/panel/ /etc/xdg/xfce4/panel/
 COPY deploy/docker/xfce/helpers.rc /etc/xdg/xfce4/helpers.rc
 # fuse mounts as the non-root user: fusermount3 must be SETUID ROOT — the
 # standard desktop-Linux mechanism. In-container capability grants don't

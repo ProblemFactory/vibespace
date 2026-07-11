@@ -2834,16 +2834,20 @@ app.get('/api/changelog-diff', async (req, res) => {
       if (r.ok) versionInfo.changelog = await r.text();
     } catch {}
   }
-  const entries = [];
+  const all = [];
   for (const block of String(versionInfo.changelog || '').split(/\n## /).slice(1)) {
     const nl = block.indexOf('\n');
     const head = (nl < 0 ? block : block.slice(0, nl)).trim();
     const ver = (head.match(/^(\d+\.\d+\.\d+)/) || [])[1];
     if (!ver) continue;
-    if (!versionNewerThan(ver, cur)) break; // newest-first — everything above cur is the diff
-    entries.push({ version: ver, head, body: nl < 0 ? '' : block.slice(nl + 1).trim() });
+    all.push({ version: ver, head, body: nl < 0 ? '' : block.slice(nl + 1).trim() });
   }
-  res.json({ current: cur, latest: versionInfo.latest || null, entries });
+  const entries = all.filter((e) => versionNewerThan(e.version, cur));
+  // Already on the latest? Show the CURRENT version's own changelog entry
+  // (matched, else the newest) instead of an empty dialog (user request).
+  const atLatest = entries.length === 0;
+  if (atLatest && all.length) entries.push(all.find((e) => e.version === cur) || all[0]);
+  res.json({ current: cur, latest: versionInfo.latest || null, entries, atLatest });
 });
 
 server.listen(PORT, HOST, () => {

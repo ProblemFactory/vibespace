@@ -18,6 +18,14 @@ if [ ! -e "$APP/server.js" ]; then
 fi
 mkdir -p "$APP/data"
 
+# Chromium's profile SingletonLock (in the PVC ~/.config/chromium) records the
+# hostname+pid of the last pod that ran it. After a pod recreation the lock is
+# STALE — it points at a dead pod, and chromium refuses to launch ("the profile
+# appears to be in use ... on another computer"), so the desktop browser is
+# dead until cleared (real report). The lock is only meaningful within one pod
+# lifetime; clear the stale one every boot.
+rm -f "$HOME/.config/chromium/Singleton"* 2>/dev/null || true
+
 
 # 2. User boot hook — persistent customization (apt installs, env, dotfiles) that
 #    the ephemeral rootfs can't keep across pod rebuilds. Runs every boot.

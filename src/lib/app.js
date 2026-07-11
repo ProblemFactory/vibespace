@@ -893,19 +893,25 @@ class App {
     const latest = v?.latest || cl?.latest || null;
     const newer = latest && this._versionNewer(latest, cur);
     const entries = cl?.entries || [];
+    const atLatest = !!cl?.atLatest || !newer;
     const list = entries.length
       ? entries.map((e) => `
         <div class="ucl-entry">
           <div class="ucl-ver">v${escHtml(e.version)}</div>
           <pre class="ucl-body">${escHtml(e.body || '')}</pre>
         </div>`).join('')
-      : `<div class="empty-hint">${newer ? t('No changelog details available for the new version.') : t('You are already on the latest version.')}</div>`;
+      : `<div class="empty-hint">${t('No changelog details available.')}</div>`;
+    // Already on latest: show the current version's own changelog (server
+    // returns it) under a "what's in this version" heading (user request).
     body.innerHTML = `
-      <div class="ucl-head">${escHtml(newer ? `v${cur} \u2192 v${latest}` : `v${cur}`)}${newer ? `<span class="gs-ver-new ucl-newtag">${t('Update available')}</span>` : ''}</div>
+      <div class="ucl-head">${escHtml(newer ? `v${cur} \u2192 v${latest}` : `v${cur}`)}${
+        newer ? `<span class="gs-ver-new ucl-newtag">${t('Update available')}</span>`
+              : `<span class="ucl-newtag ucl-latesttag">${t('Latest version')}</span>`}</div>
+      ${atLatest && entries.length ? `<div class="ucl-sub">${t('What’s in this version:')}</div>` : ''}
       <div class="ucl-list">${list}</div>
       <div class="dialog-actions">
-        <button type="button" class="mounts-btn" data-act="cancel">${t('Cancel')}</button>
-        <button type="button" class="btn-create" data-act="go">${newer ? t('Update now') : t('Update anyway')}</button>
+        <button type="button" class="mounts-btn" data-act="cancel">${t('Close')}</button>
+        <button type="button" class="btn-create" data-act="go">${newer ? t('Update now') : t('Re-run update')}</button>
       </div>`;
     body.querySelector('[data-act=cancel]').onclick = () => close();
     body.querySelector('[data-act=go]').onclick = () => {
