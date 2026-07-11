@@ -297,7 +297,7 @@ export function installSidebarMounts(Sidebar) {
       if (m.type && m.type !== 's3') {
         const tag = document.createElement('span');
         tag.className = 'mounts-typetag';
-        tag.textContent = { drive: 'Drive', webdav: 'WebDAV', sftp: 'SFTP', vibespace: 'VibeSpace', rclone: (m.source || 'rclone').split(':')[0] }[m.type] || m.type;
+        tag.textContent = { drive: 'Drive', webdav: 'WebDAV', sftp: 'SFTP', vibespace: 'VibeSpace', cephfs: 'CephFS', rclone: (m.source || 'rclone').split(':')[0] }[m.type] || m.type;
         top.querySelector('.mounts-name')?.after(tag);
       }
       row.append(top, pathEl);

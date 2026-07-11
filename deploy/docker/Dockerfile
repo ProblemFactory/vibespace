@@ -14,7 +14,7 @@ FROM node:22-bookworm-slim
 # fontconfig = /api/fonts; openssh-client = remote hosts; rclone/fuse3 = S3 mounts.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       dtach procps psmisc zip unzip tar git curl ca-certificates \
-      python3 make g++ fontconfig openssh-client rclone fuse3 sudo \
+      python3 make g++ fontconfig openssh-client rclone fuse3 sudo ceph-common \
     && rm -rf /var/lib/apt/lists/*
 
 # In-container desktop (noVNC through VibeSpace's own auth — src/vnc.js):

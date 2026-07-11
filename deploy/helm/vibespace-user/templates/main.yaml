@@ -20,6 +20,9 @@ stringData:
   s3AccessKey: {{ .Values.s3.accessKey | quote }}
   s3SecretKey: {{ .Values.s3.secretKey | quote }}
   {{- end }}
+  {{- if .Values.cephfs.secret }}
+  cephfsSecret: {{ .Values.cephfs.secret | quote }}
+  {{- end }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -66,13 +69,13 @@ spec:
         - name: vibespace
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          {{- if .Values.fuse.enabled }}
-          # fuse needs THREE gates opened (all verified live, one by one):
-          # the /dev/fuse device (resource below), CAP_SYS_ADMIN in the
-          # bounding set (setuid fusermount3 transitions into it), and
-          # AppArmor unconfined — the containerd default profile denies
-          # mount() even with the cap. K8s ≥1.30 GA field; the old beta
-          # annotation is REMOVED on 1.35 and silently did nothing.
+          {{- if or .Values.fuse.enabled .Values.cephfs.mons }}
+          # fuse AND cephfs need the same gates: CAP_SYS_ADMIN in the bounding
+          # set (setuid fusermount3 / mount -t ceph transition into it) +
+          # AppArmor unconfined — the containerd default profile denies mount()
+          # even with the cap. K8s ≥1.30 GA field; the old beta annotation is
+          # REMOVED on 1.35 and silently did nothing. (fuse also needs the
+          # /dev/fuse device below; cephfs uses the host kernel ceph client.)
           securityContext:
             capabilities:
               add: ["SYS_ADMIN"]
@@ -105,6 +108,21 @@ spec:
               valueFrom: { secretKeyRef: { name: {{ $name }}, key: s3AccessKey } }
             - name: VIBESPACE_S3_SECRET_KEY
               valueFrom: { secretKeyRef: { name: {{ $name }}, key: s3SecretKey } }
+            {{- end }}
+            {{- if and .Values.cephfs.mons .Values.cephfs.secret }}
+            # All-flash CephFS "My storage" (native kernel mount; REPLACES S3
+            # when both set). Needs securityContext SYS_ADMIN + AppArmor
+            # Unconfined (already on for fuse) + passwordless sudo (image).
+            - name: VIBESPACE_CEPHFS_MONS
+              value: {{ .Values.cephfs.mons | quote }}
+            - name: VIBESPACE_CEPHFS_NAME
+              value: {{ .Values.cephfs.fsName | default "cephfs" | quote }}
+            - name: VIBESPACE_CEPHFS_PATH
+              value: {{ .Values.cephfs.path | quote }}
+            - name: VIBESPACE_CEPHFS_USER
+              value: {{ .Values.cephfs.user | quote }}
+            - name: VIBESPACE_CEPHFS_SECRET
+              valueFrom: { secretKeyRef: { name: {{ $name }}, key: cephfsSecret } }
             {{- end }}
             {{- with .Values.telemetry.forwardUrl }}
             - name: VIBESPACE_TELEMETRY_FORWARD_URL
