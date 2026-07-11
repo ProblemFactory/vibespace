@@ -1406,6 +1406,8 @@ export default {
   "Desktop": "桌面",
   "Session create failed": "会话创建失败",
   "Back to setup": "返回设置向导",
+  "running…": "运行中…",
+  "{t} thinking · {b} Bash": "{t} 段思考 · {b} 条 Bash",
   "{n} Bash commands": "{n} 条 Bash 命令",
   "{n} thinking steps": "{n} 段思考",
   "Collapse runs of thinking/Bash cards": "折叠连续的思考/Bash 卡片",

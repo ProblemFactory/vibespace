@@ -1404,6 +1404,8 @@ export default {
   "Desktop": "デスクトップ",
   "Session create failed": "セッションの作成に失敗しました",
   "Back to setup": "セットアップに戻る",
+  "running…": "実行中…",
+  "{t} thinking · {b} Bash": "思考 {t} 件 · Bash {b} 件",
   "{n} Bash commands": "{n} 件の Bash コマンド",
   "{n} thinking steps": "{n} 件の思考",
   "Collapse runs of thinking/Bash cards": "連続する思考/Bash カードを折りたたむ",

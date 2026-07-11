@@ -733,7 +733,10 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
 [data-role-indicator="border"] .chat-role { display: none; }
 [data-role-indicator="border"] .chat-compact-msg { padding-left: 8px; }
 [data-role-indicator="border"] .chat-msg { border-left: 3px solid transparent; }
-[data-role-indicator="border"] .chat-msg-user { border-left-color: var(--accent); }
+/* USER bar = blue, not accent: the default accent is TEAL — visually adjacent
+   to the assistant's green (worse still in green-accent themes; real report
+   after the theme chips shipped). Blue is distinct from green in all themes. */
+[data-role-indicator="border"] .chat-msg-user { border-left-color: var(--chat-user-bar, var(--blue, #61afef)); }
 [data-role-indicator="border"] .chat-msg-assistant { border-left-color: var(--chat-green, var(--green)); }
 [data-role-indicator="border"] .chat-msg-tool-result { border-left-color: var(--chat-green, var(--green)); }
 /* Space between different role groups */
@@ -860,6 +863,11 @@ body.hide-hook-cards .chat-msg-hook { display: none; }
   font-size: 11px; color: var(--text-dim); cursor: pointer; user-select: none;
   padding: 3px 12px; margin: 2px 0; border: 1px dashed var(--border);
   border-radius: var(--radius); display: flex; align-items: center; gap: 6px;
+}
+/* keep the continuous assistant color bar through a collapsed run (border mode) */
+[data-role-indicator="border"] .chat-run-header {
+  border-left: 3px solid var(--chat-green, var(--green));
+  border-top-left-radius: 0; border-bottom-left-radius: 0;
 }
 .chat-run-header:hover { color: var(--text-secondary); border-color: var(--accent); }
 .chat-run-header .chat-run-arrow { display: inline-block; transition: var(--transition); font-size: 9px; }

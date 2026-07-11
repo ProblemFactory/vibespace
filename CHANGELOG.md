@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.106.5 — 2026-07-11
+
+- **Run collapse, tuned live with the user**: thinking + Bash fold as ONE mixed group; ANY Bash starts a fold immediately (single included, pending/running included — the bottom streaming indicator shows activity, and a running member adds "· running…" to the fold header); pure-thinking folds at ≥2; the newest-message exemption is gone. Fold headers carry the assistant color bar in border mode.
+- **User vs assistant role bars distinguishable in every theme**: the user bar was `--accent` — TEAL by default, visually adjacent to the assistant's green (worse in green-accent themes, surfaced by the new theme chips). User bar is now blue.
+
 ## 2.106.4 — 2026-07-11
 
 - **Remote tab broken on a fresh instance (real report: "remote 功能直接坏了")**: with ZERO sessions, the sidebar's no-sessions early-return fired before the mounts dispatch — the Remote tab rendered the Folders empty state ("+ New Session" / "No sessions") instead of machines+storage. Latent since the tab existed; invisible on any instance with sessions. The mounts branch now dispatches first (it doesn't depend on the session list at all).
