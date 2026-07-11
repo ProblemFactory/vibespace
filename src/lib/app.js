@@ -1262,6 +1262,10 @@ class App {
   }
 
   _showDialog(id) {
+    // Mobile: #dialog-overlay sits BELOW the full-screen sidebar — every
+    // index.html dialog opened from the sidebar was invisible (fork/new-session
+    // patched this per-site before; central now).
+    if (this.isMobile && this.sidebar?.isOpen) this.sidebar.toggle(false);
     const overlay = document.getElementById('dialog-overlay'); overlay.classList.remove('hidden');
     overlay.querySelectorAll('.dialog').forEach(d => d.classList.add('hidden'));
     document.getElementById(id).classList.remove('hidden');

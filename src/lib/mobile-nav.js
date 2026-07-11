@@ -96,7 +96,15 @@ export class MobileNav {
     renderContent();
 
     document.body.appendChild(pop);
-    const onTap = (e) => { if (!pop.contains(e.target) && e.target !== anchor) { pop.remove(); document.removeEventListener('pointerdown', onTap); } };
+    // Chained-popover rule (same as attachPopoverClose): a context menu or
+    // dialog opened FROM a row (billing switcher + its confirm) is a child
+    // interaction, not a dismissal of the list.
+    const onTap = (e) => {
+      if (pop.contains(e.target) || e.target === anchor) return;
+      if (e.target.closest('[data-popover], .dialog-overlay, #dialog-overlay')) return;
+      pop.remove();
+      document.removeEventListener('pointerdown', onTap);
+    };
     setTimeout(() => document.addEventListener('pointerdown', onTap), 0);
   }
 
@@ -125,10 +133,11 @@ export class MobileNav {
         : (auth.name || (isApi ? (auth.source === 'api-console' ? 'Console' : 'API') : t('CLI login')));
       billChip.title = t('Click to switch billing');
       billChip.onclick = (e) => {
+        // Keep the window list open underneath — closing it left the switcher
+        // menu floating context-less (real report). The list's outside-tap
+        // close exempts [data-popover]/dialogs, same as attachPopoverClose.
         e.stopPropagation();
-        const r = billChip.getBoundingClientRect();
-        pop.remove(); // capture the rect first — the menu anchors to it after the pop is gone
-        this.app.showBillingSwitcher?.(win.id, { x: r.left, y: r.bottom + 4 });
+        this.app.showBillingSwitcher?.(win.id, billChip);
       };
     }
 
