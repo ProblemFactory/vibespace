@@ -25,7 +25,18 @@ Click **Connect Google Drive** in the Add-mount dialog. VibeSpace runs the OAuth
 
 Storage is a single list of connected places — S3, Google Drive, Nextcloud/WebDAV, SFTP, a folder someone shared, or another VibeSpace. They're all equal; there is no special "my storage" slot. **Connect storage** adds any type (add = connect, one step). Each row is one connection: a green dot when connected, a folder button to browse it in the file explorer, and a disconnect/remove button.
 
-> Team deployments can still set `VIBESPACE_S3_*` — on first boot it's imported once as a normal S3 connection named "My storage" (auto-connected). After that it's just another row you can edit or remove; the env var isn't needed again.
+> Team deployments can still set `VIBESPACE_S3_*` — on first boot it's imported once as a normal S3 connection named "My storage" (auto-connected). After that it's just another row you can rename or re-point (its connection settings stay deployment-managed and can't be edited or deleted in-app).
+
+## Credentials and mount points (`remote:path`)
+
+Think of it as rclone syntax: the part before the colon is a **credential** (connection settings), the part after is the path a **mount point** shows. A credential row (key badge) can hold any number of mount points nested under it (↳ rows) — one R2/S3 token or one Google Drive sign-in backing many mounts. Refreshing the credential (new token, new secret) heals every mount point under it at once.
+
+- A credential itself still connects fine when its token can list the remote's root (Google Drive, account-wide S3 keys) — connecting it mounts the root.
+- **Bucket-scoped tokens are auto-detected**: some S3/R2 tokens can only access specific buckets and can't list the account root. Mounting such a token at the root would "succeed" and then error on every file. VibeSpace probes first, keeps the record as a credential, and asks you to add a mount point with a specific bucket (＋ on the credential row).
+- Bucket names are strict: lowercase letters, digits and hyphens only (`example-prod-data`, not `Example_Prod_Data`). If the token can't access the path you typed, the mount fails immediately with a pointer instead of connecting a dead folder.
+- **Google Drive re-authorization**: if Google reports the saved sign-in as expired/revoked (`invalid_grant`), the row's error line and the edit dialog offer **Re-authorize Google Drive…** — the same guided sign-in used when adding a Drive connection, writing the fresh token back into the existing record.
+
+**Edit** (✎) exposes every connection field for your own mounts — S3 endpoint/bucket/keys, custom-rclone parameters (blank keeps the stored value, `-` removes a parameter), WebDAV/SFTP hosts and secrets, Drive token. Secrets are never shown back, only replaceable. **Duplicate** (⧉) derives a new standalone mount from an existing connection.
 
 ## Sharing a folder from your S3 storage
 
