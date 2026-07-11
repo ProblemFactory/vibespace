@@ -1,41 +1,48 @@
-# One VibeSpace instance per user. `helm install u-<user> . --set user=<user> --set password=<pw>`
+# One VibeSpace instance per user (one Helm release = one user).
+#   helm install u-<user> . --set user=<user> --set password=<pw> --set domain=<your-domain>
+# All values below are PLACEHOLDERS — supply your own via --set or a private
+# values file. Nothing here is environment-specific.
 user: ""                       # REQUIRED — the user's short name (drives host + labels)
-password: ""                   # REQUIRED — VIBESPACE_PASSWORD (also gates the future /api/vnc desktop)
+password: ""                   # REQUIRED — VIBESPACE_PASSWORD
 
 image:
-  repository: ghcr.io/problemfactory/vibespace
-  tag: "3.0.0-rc1"
+  repository: ghcr.io/problemfactory/vibespace   # the public VibeSpace image
+  tag: "3.0.0-rc3"
   pullPolicy: IfNotPresent
-# imagePullSecret: ""           # set if the registry is private (ghcr public → none needed)
+  imagePullSecret: ""          # set if the registry is private
 
-# Hostname. Default = <user>.<domain>. For the first test we ride the EXISTING
-# working wildcard *.kube.internal.example.com (cert-manager auto-issues);
-# switch `domain` to vibe.example.com once that Cloudflare record + wildcard
-# cert exist. `host` overrides the computed name entirely.
-domain: "vibe.example.com"
-host: ""                        # explicit override, e.g. xingweil-vibe.kube.internal.example.com
+# Hostname = <user>.<domain> (or override `host` entirely). Supply your own domain.
+domain: "vibespace.example.com"
+host: ""
 
 ingress:
-  className: traefik
-  clusterIssuer: cloudflare-issuer   # cert-manager DNS-01 for *.example.com
+  className: nginx             # your ingress controller's class (nginx / traefik / …)
   tls: true
+  # Option A (preferred): reference a pre-issued WILDCARD cert secret you created
+  # once for *.<domain> (a wildcard REQUIRES a DNS-01 issuer) — adding a user then
+  # needs no per-host ACME issuance.
+  wildcardCertSecret: ""
+  # Option B: let cert-manager issue a per-host cert via this issuer (used only
+  # when wildcardCertSecret is empty).
+  clusterIssuer: ""
 
 storage:
-  className: vibespace-rbd      # the SC created in P0 (Ceph RBD, Retain, expandable)
-  size: 100Gi                   # thin-provisioned; the pool's 10 TiB quota is the real ceiling
+  className: ""                # your RWO StorageClass (e.g. an RBD/CSI class)
+  size: 100Gi                  # thin-provisioned per user
 
 resources:
   requests: { cpu: "1", memory: "4Gi" }
   limits:   { cpu: "8", memory: "16Gi" }
 
-# Pin to the untainted control-plane nodes (cpu04-06). b300 GPU nodes are tainted.
-nodeSelector:
-  node-role.kubernetes.io/control-plane: ""
-tolerations:
-  - { key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule }
+# Schedule onto whatever nodes you want VibeSpace pods on.
+nodeSelector: {}
+tolerations: []
 
-# Agent-container egress lockdown (Cilium NetworkPolicy). OFF for the first
-# bring-up to keep connectivity variables out of the smoke test — enable +
-# verify (Anthropic/GitHub reachable, node/BMC net blocked) in P2. See design §6.
+# Agent-container egress lockdown (needs a NetworkPolicy-enforcing CNI). OFF by
+# default — enable once you've set the allow-lists for YOUR network.
 networkPolicy:
   enabled: false
+  # CIDRs the agent may reach on your internal network (e.g. object storage).
+  # Everything else internal (node net, management/BMC, k8s API) is blocked;
+  # public internet (minus RFC1918) is allowed for the agent's own API calls.
+  allowedInternalCidrs: []     # e.g. ["10.x.y.z/32"]

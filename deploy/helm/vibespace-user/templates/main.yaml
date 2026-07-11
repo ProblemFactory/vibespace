@@ -92,7 +92,7 @@ metadata:
   name: {{ $name }}
   labels: {{- include "vs.labels" . | nindent 4 }}
   annotations:
-    {{- if .Values.ingress.tls }}
+    {{- if and .Values.ingress.tls (not .Values.ingress.wildcardCertSecret) }}
     cert-manager.io/cluster-issuer: {{ .Values.ingress.clusterIssuer }}
     {{- end }}
 spec:
@@ -100,7 +100,7 @@ spec:
   {{- if .Values.ingress.tls }}
   tls:
     - hosts: [{{ $host | quote }}]
-      secretName: {{ $name }}-tls
+      secretName: {{ .Values.ingress.wildcardCertSecret | default (printf "%s-tls" $name) }}
   {{- end }}
   rules:
     - host: {{ $host | quote }}
@@ -133,10 +133,12 @@ spec:
       ports:
         - { protocol: UDP, port: 53 }
         - { protocol: TCP, port: 53 }
-    - to:                                    # RGW S3 (internal object storage)
-        - ipBlock: { cidr: 10.0.0.1/32 }
-        - ipBlock: { cidr: 10.0.0.2/32 }
-        - ipBlock: { cidr: 10.0.0.3/32 }
+    {{- with .Values.networkPolicy.allowedInternalCidrs }}
+    - to:                                    # allow-listed internal endpoints (e.g. object storage)
+        {{- range . }}
+        - ipBlock: { cidr: {{ . | quote }} }
+        {{- end }}
+    {{- end }}
     - to:                                    # public internet, minus private ranges
         - ipBlock:
             cidr: 0.0.0.0/0
