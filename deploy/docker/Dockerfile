@@ -39,6 +39,11 @@ RUN chmod u+s /usr/bin/fusermount3 && ln -sf /proc/self/mounts /etc/mtab
 # Agent CLIs + mc (share-credential minting). bypassPermissions is blocked for
 # root → the app runs as the non-root `vibe` user below.
 RUN curl -fsSL https://dl.min.io/client/mc/release/linux-$(dpkg --print-architecture | sed 's/armhf/arm/')/mc -o /usr/local/bin/mc && chmod +x /usr/local/bin/mc
+# Pinned rclone 1.65.2 at /usr/local/bin (shadows Debian's 1.60): old rclone
+# signs the Accept-Encoding header into V4 signatures — Cloudflare-fronted S3
+# (R2!) rewrites it and every object GET 403s; the counter-flag needs >=1.63.
+RUN curl -fsSL https://downloads.rclone.org/v1.65.2/rclone-v1.65.2-linux-amd64.zip -o /tmp/rc.zip \
+    && unzip -j /tmp/rc.zip -d /usr/local/bin '*/rclone' && chmod +x /usr/local/bin/rclone && rm /tmp/rc.zip
 RUN npm install -g @anthropic-ai/claude-code @openai/codex
 
 # node:22 ships a `node` user at UID 1000 — remove it so `vibe` gets 1000

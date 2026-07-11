@@ -18,12 +18,6 @@ if [ ! -e "$APP/server.js" ]; then
 fi
 mkdir -p "$APP/data"
 
-# fuse mountpoints must live OFF the PVC: fusermount3 refuses a mountpoint on
-# the RBD bind-mount (Permission denied — verified empirically; container-local
-# overlay paths work). Mountpoints are runtime attach points, nothing
-# persistent lives there, so an ephemeral base is correct.
-export VIBESPACE_MOUNT_BASE="${VIBESPACE_MOUNT_BASE:-/var/tmp/vibespace-mounts}"
-mkdir -p "$VIBESPACE_MOUNT_BASE"
 
 # 2. User boot hook — persistent customization (apt installs, env, dotfiles) that
 #    the ephemeral rootfs can't keep across pod rebuilds. Runs every boot.
