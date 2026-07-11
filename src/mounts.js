@@ -912,9 +912,84 @@ class MountManager {
       let tail = '';
       try { tail = fs.readFileSync(path.join(this._logDir, `${m.id}.log`), 'utf-8').trim().split('\n').slice(-2).join(' '); } catch {}
       this._errors.set(id, tail || 'mount did not appear within 5s');
+      this._notify();
+      return false;
+    }
+    // Post-mount IO health probe: a fuse mount to an UNREACHABLE backend
+    // "succeeds" and then HANGS every IO — node's libuv threadpool fills with
+    // stuck fs ops and the whole server stops answering (real incident: an
+    // SMB mount whose host only resolves on the user's home LAN wedged a
+    // deployed instance — /login took 130s, readiness failed, pod dropped
+    // from the Service). Probe in a CHILD process (never node fs), and cut
+    // the mount loose instead of serving a folder that would wedge us.
+    if (await this._probeMountpointHung(mp)) {
+      this._errors.set(id, 'storage connected but IO hangs (host unreachable from this machine?) — disconnected to protect the server');
+      m.desired = 'unmounted';
+      this._save();
+      await this.unmount(id);
+      this._killMountDaemon(mp);
+      this._notify();
+      return false;
     }
     this._notify();
     return this.isMounted(m);
+  }
+
+  /** True when listing the mountpoint HANGS (child `ls`, 6s guard). An error
+   *  exit (EIO etc.) is RESPONSIVE — only a stuck child counts. */
+  _probeMountpointHung(mp, timeoutMs = 6000) {
+    return new Promise((resolve) => {
+      const c = spawn('ls', [mp], { stdio: 'ignore' });
+      const t = setTimeout(() => { try { c.kill('SIGKILL'); } catch {} resolve(true); }, timeoutMs);
+      c.on('exit', () => { clearTimeout(t); resolve(false); });
+      c.on('error', () => { clearTimeout(t); resolve(false); });
+    });
+  }
+
+  /** Kill the detached rclone daemon serving a mountpoint (a WEDGED daemon
+   *  survives fusermount -uz and keeps dial-retrying forever). Exact-argv
+   *  match via /proc — pkill -f patterns can't safely quote arbitrary paths. */
+  _killMountDaemon(mp) {
+    try {
+      for (const pid of fs.readdirSync('/proc').filter(d => /^\d+$/.test(d))) {
+        let argv;
+        try { argv = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf-8').split('\0'); } catch { continue; }
+        if (argv.includes('mount') && argv.includes(mp) && /rclone/.test(argv[0] || '')) {
+          try { process.kill(+pid, 'SIGKILL'); } catch {}
+        }
+      }
+    } catch {} // non-Linux: no /proc — daemon exits with the unmount anyway
+  }
+
+  /**
+   * Watchdog: every 60s, health-probe every mounted record from a child
+   * process. A mount whose IO hangs is auto-disconnected (desired persisted,
+   * daemon killed) — one bad mount must never take the whole server down.
+   */
+  startHealthWatchdog() {
+    if (this._watchdog) return;
+    this._watchdog = setInterval(() => { this._healthSweep().catch(() => {}); }, 60000);
+    this._watchdog.unref?.();
+    setTimeout(() => { this._healthSweep().catch(() => {}); }, 15000).unref?.();
+  }
+
+  async _healthSweep() {
+    if (this._sweepBusy) return;
+    this._sweepBusy = true;
+    try {
+      for (const m of [...this._state.mounts]) {
+        if (this._kindOf(m) === 'credential') continue;
+        if (!this.isMounted(m)) continue;
+        const mp = this.pathOf(m);
+        if (!(await this._probeMountpointHung(mp))) continue;
+        this._errors.set(m.id, 'storage stopped responding (unreachable host?) — auto-disconnected to protect the server');
+        m.desired = 'unmounted';
+        this._save();
+        await this.unmount(m.id);
+        this._killMountDaemon(mp);
+        this._notify();
+      }
+    } finally { this._sweepBusy = false; }
   }
 
   _waitMounted(m, timeoutMs) {

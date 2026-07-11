@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.108.3 — 2026-07-11
+
+**Hung-mount defense (real incident: the xingweil instance went unreachable)** — an SMB mount whose host only resolves on the user's home LAN stayed fuse-"mounted" while every IO on it hung; node's libuv threadpool filled with stuck fs ops, `/login` took 130s, the readiness probe (1s) failed and the pod dropped out of the Service. The main event loop was IDLE the whole time (`ep_poll`) — the threadpool was the choke point. Two defenses, both e2e-verified against a reproduced dead-SMB mount:
+- **Post-mount IO probe** (`mount()`): after the fuse mount appears, list the mountpoint from a CHILD process with a 6s guard — a hang unmounts immediately, kills the rclone daemon, persists `desired: unmounted`, and reports "storage connected but IO hangs (host unreachable from this machine?)". An error exit (EIO) counts as responsive — only a stuck child trips it.
+- **Health watchdog** (`startHealthWatchdog`, 60s + one sweep 15s after boot): covers mounts ADOPTED at boot (restore() skips mount()'s probe) and mounts that die later — same child-process probe, same auto-disconnect ("storage stopped responding … auto-disconnected to protect the server"). One bad mount can never take the server down again.
+- Daemon teardown matches by exact `/proc/*/cmdline` argv (a wedged rclone survives lazy unmount and dial-retries forever; `pkill -f` can't safely quote arbitrary mountpoint paths).
+
 ## 2.108.2 — 2026-07-11
 
 **Storage submounts — the "credential" concept dissolved (user directive after testing 2.108.0):**
