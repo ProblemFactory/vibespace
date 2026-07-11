@@ -141,13 +141,17 @@ function recordFingerprint(record, turnId) {
       if (webuiMsgId) return `${turnId}:response_item:user:${webuiMsgId}`;
     }
     const key = payload.call_id || payload.callId || payload.role || payload.type || 'item';
-    // Strip volatile fields (item_id present in JSONL but absent in buffer)
-    const { item_id, itemId, ...stablePayload } = payload;
+    // Strip volatile fields — the SAME item serializes differently on each
+    // side: the wrapper's buffer copy carries item_id, the rollout JSONL copy
+    // carries id + internal_chat_message_metadata_passthrough instead. Any of
+    // them surviving into the fingerprint made buffer/JSONL twins never dedup
+    // (assistant text rendered twice in a row on every attach).
+    const { item_id, itemId, id, internal_chat_message_metadata_passthrough, ...stablePayload } = payload;
     return `${turnId}:response_item:${payload.type}:${key}:${JSON.stringify(stablePayload)}`;
   }
   if (record.type === 'event_msg') {
     const key = payload.turn_id || payload.turnId || payload.call_id || payload.callId || payload.item_id || payload.itemId || payload.type || 'event';
-    const { item_id, itemId, ...stablePayload } = payload;
+    const { item_id, itemId, id, internal_chat_message_metadata_passthrough, ...stablePayload } = payload;
     return `${turnId}:event_msg:${payload.type}:${key}:${JSON.stringify(stablePayload)}`;
   }
   return null;

@@ -392,7 +392,11 @@ class CodexMessageManager {
     if (role === 'assistant') {
       const text = asArray(item.content).filter((block) => block.type === 'output_text').map((block) => block.text || '').join('');
       if (!text) return;
-      const streamKey = item.item_id || item.itemId || item.phase || this._currentTurnId || 'assistant';
+      // The rollout JSONL copy carries the item id under `id` (the wrapper's
+      // buffer copy uses item_id) — both must resolve to the same stream key
+      // as the agent_message_delta events, else the finalized message can't
+      // find the streamed one and renders the same text twice.
+      const streamKey = item.item_id || item.itemId || item.id || item.phase || this._currentTurnId || 'assistant';
       const existingId = this.streamingAgentMessages.get(streamKey);
       if (existingId) {
         const existing = this.messageIndex.get(existingId);
