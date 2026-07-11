@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.106.3 — 2026-07-11
+
+- **VIBESPACE_S3_* env import works on existing instances**: the one-shot `_envImported` flag burned on the very FIRST boot even with no env set, so a managed instance that gained the S3 env later (helm upgrade) never imported its personal storage. Import is now keyed by the env's endpoint|bucket|prefix SIGNATURE — set/changed env imports on next boot, a user-deleted mount stays deleted while the signature is unchanged.
+
 ## 2.106.2 — 2026-07-11
 
 - **Remote session with NO account picked no longer fails on the default subscription (real report)**: resuming/creating on a remote host without specifying an account resolved the LOCAL default (a subscription) and died on the §ban-safety shipping gate. When the account came from the default (not an explicit pick) and could only reach the host by shipping subscription creds, the spawn now falls back to the HOST's own CLI login. An explicitly chosen subscription still errors with guidance; an opted-in shipSubscriptionToRemote still ships.

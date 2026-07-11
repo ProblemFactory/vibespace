@@ -55,7 +55,6 @@ class MountManager {
     // One-time migration of VIBESPACE_S3_* → a normal S3 mount (auto-mounted).
     // Storage is now ONE flat list of connections — no special "My storage"
     // slot. Legacy state.myStorage (from earlier builds) also migrates here.
-    if (this._state._envImported) return;
     const e = process.env;
     const legacy = this._state.myStorage; // earlier-build config
     const src = legacy
@@ -63,9 +62,24 @@ class MountManager {
       : (e.VIBESPACE_S3_ENDPOINT && e.VIBESPACE_S3_BUCKET && e.VIBESPACE_S3_ACCESS_KEY)
         ? { endpoint: e.VIBESPACE_S3_ENDPOINT, bucket: e.VIBESPACE_S3_BUCKET, prefix: e.VIBESPACE_S3_PREFIX || '', accessKey: e.VIBESPACE_S3_ACCESS_KEY, secretKey: e.VIBESPACE_S3_SECRET_KEY || '' }
         : null;
-    this._state._envImported = true;
-    if (!src) { this._save(); return; }
-    if (!this._state.mounts.some(m => m.origin === 'my-storage')) {
+    // Import by SIGNATURE, not a one-shot flag (2.106.3): the old boolean
+    // burned on the very FIRST boot even with no env set, so a managed
+    // instance that gained VIBESPACE_S3_* later (helm upgrade) never imported.
+    // Now: import whenever the env's endpoint|bucket|prefix differs from the
+    // last import — a user-deleted mount stays deleted (same signature), a
+    // changed provisioning re-imports.
+    const sig = src ? (src.endpoint + '|' + src.bucket + '|' + (src.prefix || '')) : '';
+    const already = this._state._envImportedSig !== undefined
+      ? this._state._envImportedSig
+      : (this._state._envImported ? sig : undefined); // legacy flag: treat current env as imported ONLY if it predates the signature scheme AND a my-storage mount exists
+    this._state._envImported = true; // kept for downgrade compat
+    const hasMyStorage = this._state.mounts.some(m => m.origin === 'my-storage');
+    if (!src || (already === sig && (hasMyStorage || this._state._envImportedSig !== undefined))) {
+      this._state._envImportedSig = already !== undefined ? already : '';
+      this._save(); return;
+    }
+    this._state._envImportedSig = sig;
+    if (!hasMyStorage) {
       try {
         const id = this.add({ type: 's3', origin: 'my-storage', name: 'My storage', mode: 'rw', ...src });
         const m = this._state.mounts.find(x => x.id === id);
