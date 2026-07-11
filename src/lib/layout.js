@@ -480,6 +480,17 @@ class LayoutManager {
       } else if (ws.type === 'browser' && ws.browserUrl) {
         const winInfo = this.app.openBrowser(ws.browserUrl);
         applyPosition(winInfo, ws);
+      } else if (ws.openSpec?.action) {
+        // Generic fallback: any window that records an openSpec (settings,
+        // desktop, usage, task detail/log, session props, workflow…) restores
+        // by replaying it. The typed branches above only cover the legacy
+        // window kinds — newer types silently VANISHED on refresh (real
+        // report: "设置/桌面窗口没能持久化").
+        const before = new Set(this.app.wm.windows.keys());
+        try { this.app.replayOpenSpec(ws.openSpec, ws.winId || undefined); } catch {}
+        for (const [id, win] of this.app.wm.windows) {
+          if (!before.has(id)) { applyPosition(win, ws); break; }
+        }
       }
     }
 

@@ -842,6 +842,11 @@ export function installSidebarMounts(Sidebar) {
     // bucket/path fix with no edit UI; one credential → many mounts) ──
     _mountEditFields(m) {
       // [key, label, placeholder, prefillValue] per type; secret fields blank = keep
+      // Env-provisioned storage: connection is deployment-owned — only the
+      // mount point (and name, added by the caller) are editable.
+      if (m.origin === 'my-storage') return [
+        ['customPath', tr('Mount point (blank = default)'), '/absolute/path', m.customPath || ''],
+      ];
       const type = m.type || 's3';
       if (type === 's3') return [
         ['endpoint', 'Endpoint', 'https://…', m.endpoint || ''],
@@ -864,6 +869,7 @@ export function installSidebarMounts(Sidebar) {
       const form = document.createElement('form');
       form.className = 'mounts-form';
       const fields = [['name', tr('Name'), '', m.name], ...this._mountEditFields(m)];
+      if (m.origin !== 'my-storage') fields.push(['customPath', tr('Mount point (blank = default)'), '/absolute/path', m.customPath || '']);
       form.innerHTML = fields.map(([k, label, ph, val]) =>
         `<label>${escHtml(label)}<input name="${k}" value="${escHtml(val)}" placeholder="${escHtml(ph)}" autocomplete="off"></label>`).join('')
         + `<div class="mounts-note">${tr('Applied on save — a connected mount reconnects with the new settings.')}</div>

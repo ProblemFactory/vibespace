@@ -1406,6 +1406,7 @@ export default {
   "Desktop": "桌面",
   "Session create failed": "会话创建失败",
   "Back to setup": "返回设置向导",
+  "Mount point (blank = default)": "挂载点(留空=默认)",
   "Bucket": "Bucket",
   "Prefix (optional)": "前缀(可选)",
   "Remote path (bucket[/prefix])": "远程路径(bucket[/前缀])",
