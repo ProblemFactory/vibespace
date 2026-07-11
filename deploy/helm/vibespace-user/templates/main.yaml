@@ -23,6 +23,7 @@ stringData:
   {{- if and .Values.cephfs .Values.cephfs.secret }}
   cephfsSecret: {{ .Values.cephfs.secret | quote }}
   {{- end }}
+{{- if not .Values.storage.existingClaim }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -35,6 +36,7 @@ spec:
   resources:
     requests:
       storage: {{ .Values.storage.size }}
+{{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -164,7 +166,7 @@ spec:
               {{- end }}
       volumes:
         - name: home
-          persistentVolumeClaim: { claimName: {{ $name }} }
+          persistentVolumeClaim: { claimName: {{ .Values.storage.existingClaim | default $name }} }
 ---
 apiVersion: v1
 kind: Service

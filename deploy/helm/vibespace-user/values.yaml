@@ -29,6 +29,10 @@ ingress:
 storage:
   className: ""                # your RWO StorageClass (e.g. an RBD/CSI class)
   size: 100Gi                  # thin-provisioned per user
+  # Point the pod at a PVC you created out-of-band instead of the chart's own
+  # (e.g. after migrating home to a different StorageClass). When set, the
+  # chart does NOT create its PVC — the named claim must already exist.
+  existingClaim: ""
 
 resources:
   requests: { cpu: "1", memory: "4Gi" }
