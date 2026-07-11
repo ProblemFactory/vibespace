@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.100.5 — 2026-07-11
+
+- Chat links: a local filesystem path opened as an http URL. A **markdown link to a local file** (`[doc](/home/x/y.md)` → `<a href="/home/x/y.md">`) reached the click handler as a URL and `window.open('/home/…')` made the browser resolve it to `http://<host>/home/…`. Now any link whose href is an absolute (`/…`) or home (`~/…`) path that isn't a real URL scheme is reclassified as a file path and opens in the file viewer (centralized in `_linkTargets`, so Open/Copy labels are right too). Bare (non-markdown) absolute paths already classified correctly — this covers the markdown-link case.
+
 ## 2.100.4 — 2026-07-11
 
 - Removed the temporary drag tracer (2.100.3's coordinate-space fix confirmed by the user). The viewport→workspace conversion invariant is documented in CLAUDE.md for future drag code.

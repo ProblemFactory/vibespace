@@ -830,6 +830,20 @@ class ChatRenderers {
     return this.linkifySegment(escHtml(text), false);
   }
 
+  // Resolve a clicked link into {url, fp, rel}. A local filesystem path — our
+  // data-path OR a markdown `<a href="/home/…">` — is classified as fp so it
+  // opens in the file viewer and never window.open()s (which would resolve it
+  // to http://<host>/home/…). Shared by the click + contextmenu handlers.
+  _linkTargets(link) {
+    const rel = link.dataset.rel;
+    let fp = link.dataset.path;
+    let url = link.dataset.href || link.getAttribute('href');
+    if (!fp && !rel && url && /^(\/[^/]|~\/)/.test(url) && !/^(https?|ftp|blob|data|about|mailto):/i.test(url)) {
+      fp = url; url = null;
+    }
+    return { url, fp, rel };
+  }
+
   /** Set up delegated click handler on message list for links/paths */
   setupLinkHandler() {
     const isTouch = this.app?.isTouch || this.app?.isMobile;
@@ -839,9 +853,7 @@ class ChatRenderers {
       if (!link) return;
       e.preventDefault();
       e.stopPropagation();
-      const url = link.dataset.href || link.getAttribute('href');
-      const fp = link.dataset.path;
-      const rel = link.dataset.rel;
+      const { url, fp, rel } = this._linkTargets(link);
       const open = () => rel ? this._openRelTarget(link, rel) : this._openLinkTarget(link, url, fp);
       const copy = () => copyText(fp || rel || url).then(() => this.flashLink(link, t('Copied!')));
       if (isTouch) {
@@ -863,9 +875,7 @@ class ChatRenderers {
       if (!link) return;
       e.preventDefault();
       e.stopPropagation();
-      const url = link.dataset.href || link.getAttribute('href');
-      const fp = link.dataset.path;
-      const rel = link.dataset.rel;
+      const { url, fp, rel } = this._linkTargets(link);
       showContextMenu(e.clientX, e.clientY, [
         { label: (fp || rel) ? t('Open') : t('Open link'), action: () => rel ? this._openRelTarget(link, rel) : this._openLinkTarget(link, url, fp) },
         { label: (fp || rel) ? t('Copy path') : t('Copy URL'), action: () => copyText(fp || rel || url).then(() => this.flashLink(link, t('Copied!'))) },
@@ -933,6 +943,14 @@ class ChatRenderers {
 
   /** Open a chat link target: file path (with optional :line suffix) in viewer/explorer, URL in new tab */
   _openLinkTarget(link, url, fp) {
+    // A local filesystem path is NEVER an http target. Markdown links to local
+    // files — `[doc](/home/x/y.md)` → `<a href="/home/x/y.md">` — arrive here as
+    // `url` (from href), and window.open('/home/…') makes the browser resolve it
+    // to http://<host>/home/… (real report: a path opened as an http url).
+    // Reclassify absolute/home paths as fp so they open in the file viewer.
+    if (!fp && url && /^(\/[^/]|~\/)/.test(url) && !/^(https?|ftp|blob|data|about|mailto):/i.test(url)) {
+      fp = url; url = null;
+    }
     if (fp) {
       // Parse optional :line, :line:col, or :line-line suffix
       const lineMatch = fp.match(/^(.+?):(\d+)(?:[:\-]\d+)?$/);
