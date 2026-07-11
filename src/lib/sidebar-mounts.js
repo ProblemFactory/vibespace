@@ -9,7 +9,7 @@ import { t as tr } from './i18n.js'; // sidebar cluster convention: local `t` is
 const MI = {
   folder: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h4l2 2h6v8H2V3z"/></svg>',
   eject: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l5-5 5 5H3z"/><path d="M3 12h10"/></svg>',
-  plug: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v7M4.5 6l3.5 3.5L11.5 6"/><path d="M3 13h10"/></svg>',
+  plug: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v6"/><path d="M4.7 4.6a4.9 4.9 0 1 0 6.6 0"/></svg>',
   cross: '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>',
   importL: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8M5 7l3 3 3-3M3 10v3h10v-3"/></svg>',
   link: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 9.5l3-3M5 8L3.5 9.5a2.5 2.5 0 003.5 3.5L8.5 11.5M8 5l1.5-1.5a2.5 2.5 0 013.5 3.5L11.5 8.5"/></svg>',
@@ -252,21 +252,13 @@ export function installSidebarMounts(Sidebar) {
           ibtn(MI.eject, 'Disconnect', () => api(`/api/mounts/${m.id}/unmount`, { method: 'POST' })),
         );
       } else if (!isCred) {
-        // TEXT chip, not an icon (user: the plug icon read as a "download"
-        // button). Adds auto-connect and supervision keeps mounts up, so this
-        // only appears on deliberately-disconnected / errored rows.
-        const cb = document.createElement('button');
-        cb.className = 'mounts-btn mounts-connect-chip';
-        cb.textContent = tr('Connect');
-        cb.onclick = async (e) => {
-          e.stopPropagation(); cb.disabled = true;
-          try {
-            const r = await api(`/api/mounts/${m.id}/mount`, { method: 'POST' });
-            if (!r.success) throw new Error('Couldn’t connect — hover the status dot for details');
-          } catch (err2) { showToast(err2.message || 'Failed', { type: 'error' }); }
-          this._renderMounts();
-        };
-        actions.append(cb);
+        // Power icon (⏻) in the same icon-button family — the old glyph read
+        // as a "download" button and a text chip among icons read worse
+        // (user feedback, twice). The ROW itself is also click-to-connect.
+        actions.append(ibtn(MI.plug, tr('Connect'), async () => {
+          const r = await api(`/api/mounts/${m.id}/mount`, { method: 'POST' });
+          if (!r.success) throw new Error('Couldn’t connect — hover the status dot for details');
+        }, 'mounts-icon-accent'));
       }
       // Share a folder FROM this connection — only S3 with full owner creds.
       // Doesn't hit the network here, so it's fine to offer while unmounted.
@@ -304,6 +296,23 @@ export function installSidebarMounts(Sidebar) {
       pt.textContent = isCred ? (m.source || '') : m.path;
       pathEl.append(tag, pt);
       row.append(top, pathEl);
+      // Row body = the primary action users try anyway: a disconnected row
+      // CONNECTS on click, a mounted row opens its folder. Buttons/expanders
+      // inside keep their own handlers.
+      if (!isCred) {
+        row.classList.add('mounts-row-clickable');
+        row.setAttribute('data-tip', m.mounted ? tr('Open in file explorer') : tr('Click to connect'));
+        row.onclick = async (e) => {
+          if (e.target.closest('button, a, input, details, .mounts-row-actions')) return;
+          if (m.mounted) { this.app.openFileExplorer(m.path); return; }
+          row.style.opacity = '0.6';
+          try {
+            const r = await api(`/api/mounts/${m.id}/mount`, { method: 'POST' });
+            if (!r.success) throw new Error('Couldn’t connect — hover the status dot for details');
+          } catch (err2) { showToast(err2.message || 'Failed', { type: 'error' }); }
+          this._renderMounts();
+        };
+      }
       if (m.error) {
         const err = document.createElement('div');
         err.className = 'mounts-errline';

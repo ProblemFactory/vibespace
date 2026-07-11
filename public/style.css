@@ -2264,7 +2264,8 @@ label.cfg-row {
 .mounts-btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
 .mounts-btn-danger { border-color: color-mix(in srgb, var(--red, #e55) 45%, transparent); color: var(--red, #e55); }
 .mounts-btn-danger:hover:not(:disabled) { border-color: var(--red, #e55); color: var(--red, #e55); }
-.mounts-connect-chip { padding: 0 8px; font-size: 10px; line-height: 17px; border-color: color-mix(in srgb, var(--accent) 55%, transparent); color: var(--accent); }
+.mounts-row-clickable { cursor: pointer; }
+.mounts-row-clickable:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
 .mounts-btn-primary:hover:not(:disabled) { opacity: 0.85; color: var(--accent-fg); }
 .mounts-btn-danger:hover:not(:disabled) { border-color: var(--red, #e55); color: var(--red, #e55); }
 .mounts-share-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border: 1px dashed var(--border); border-radius: var(--radius-sm); }

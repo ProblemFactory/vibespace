@@ -1171,6 +1171,8 @@ export default {
   'Share a local folder': 'ローカルフォルダを共有',
   'Bridge tokens': 'ブリッジトークン',
   'Revoke': '取り消す',
+  'Click to connect': 'クリックして接続',
+  'Open in file explorer': 'ファイルマネージャで開く',
   'Revoke share?': '共有を取り消しますか？',
   'Revoke bridge token?': 'ブリッジトークンを取り消しますか？',
   'Everyone who imported \"{name}\" loses access immediately.': '「{name}」をインポートした全員が直ちにアクセスを失います。',
