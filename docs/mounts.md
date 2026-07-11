@@ -35,7 +35,7 @@ Think of it as rclone syntax: the part before the colon is the connection, the p
 - Bucket names are strict: lowercase letters, digits and hyphens only (`example-prod-data`, not `Example_Prod_Data`). If the token can't access the path you typed, the mount fails immediately with a pointer instead of connecting a dead folder.
 - **Google Drive re-authorization**: if Google reports the saved sign-in as expired/revoked (`invalid_grant`), the row's error line and the edit dialog offer **Re-authorize Google Drive…** — the same guided sign-in used when adding a Drive connection, writing the fresh token back into the existing record.
 
-**Edit** (✎) exposes every connection field for your own mounts — S3 endpoint/bucket/keys, custom-rclone parameters (blank keeps the stored value, `-` removes a parameter), WebDAV/SFTP hosts and secrets, Drive token. Secrets are never shown back, only replaceable. **Duplicate** (⧉) derives a new standalone mount from an existing connection.
+**Edit** (✎) exposes every connection field for your own mounts — S3 endpoint/bucket/keys, custom-rclone parameters, WebDAV/SFTP hosts and secrets, Drive token. Every field is **prefilled with its real current value, secrets included** (access/secret keys, OAuth tokens, passwords, bearer tokens, rclone params), so you read and edit them directly; on save only the fields you changed are written (an unchanged secret isn't re-encrypted). For custom-rclone mounts, clearing a parameter's value removes it. **Duplicate** (⧉) derives a new standalone mount from an existing connection.
 
 ## Sharing a folder from your S3 storage
 

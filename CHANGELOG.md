@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.109.0 — 2026-07-11
+
+**Structural IO isolation (user directive "把IO隔离，不用重写")** — every LOCAL user-path filesystem op in the file routes now runs in a dedicated `worker_threads` pool (`src/safe-fs.js` + `src/safe-fs-worker.js`, 4 workers, each with its own libuv threadpool) with a per-op deadline and kill+respawn on a stuck worker. A hung mount can no longer starve the main event loop / shared pool — the structural fix behind today's tactical guards. Path resolution / traversal checks stay in the main process; the worker only executes the already-resolved absolute path. `?host=` remote ops are untouched. Verified: during a 6.3s dead-mount connect, 41 concurrent good listings (max 7ms) + 41 logins (max 6ms) stayed fast, zero failures.
+
+**Revoked/expired share now surfaces to the receiver (user-flagged: "revoke了token接受方如何提示")** — a fuse mount to a revoked share still "mounts" and a cached mountpoint `ls` lies about it, so the health probe is now 3-state (ok / error / **hung**) and revocable mounts (imported shares, VibeSpace bridges, expiring credentials) get an uncached BACKEND re-auth probe that catches a 401/403. The row shows "connected but every file errors — the share may have been revoked…" instead of a green mount whose files all error; it clears automatically if access is re-granted. Non-revocable mounts (your own S3/Drive) skip the extra round-trip. Verified e2e across mount-of-already-revoked and revoke-while-mounted.
+
+**Storage Edit dialog prefills real values** — `GET /api/mounts/:id/config` returns the decrypted connection config so the Edit dialog shows the actual tokens/keys/params (user directive: no "blank = keep" placeholders). Save diffs against the fetched original (unchanged secrets aren't re-encrypted; an emptied rclone param is removed). Env-provisioned records return no secrets.
+
+Verified against two password-auth instances end to end: bridge shares (RO/RW, RO-write rejected at fuse AND /dav), path-traversal rejection, self-mount refusal, garbage-link errors, credential/submount unmount lifecycle (unmount one submount leaves siblings + credential intact; remove-credential-with-children refused; mountpoint left empty & re-mountable), and source-instance-frozen keeping the receiver responsive.
+
 ## 2.108.8 — 2026-07-11
 
 - **`window.closeBehavior` default is now DETACH** (user directive — no per-type exception): closing a session window keeps the session alive in the sidebar for re-attach. Automation helper terminals still always terminate. (Replaces the 2.108.7 shell-only default.)
