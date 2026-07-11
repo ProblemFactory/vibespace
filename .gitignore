@@ -1,5 +1,6 @@
 node_modules/
 public/bundle.js
+public/novnc.js
 # ── ALL of data/ is runtime state — NEVER track — EXCEPT data/bin/ (the static
 # tools the server ships). Belt-and-suspenders over the explicit list below so a
 # NEW data file (e.g. data/telemetry/) can never be committed by accident. ──

@@ -17,6 +17,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       python3 make g++ fontconfig openssh-client rclone fuse3 \
     && rm -rf /var/lib/apt/lists/*
 
+# In-container desktop (noVNC through VibeSpace's own auth — src/vnc.js):
+# TigerVNC bound to localhost + XFCE + Chromium. Started LAZILY by the server
+# on the first desktop window; nothing runs for users who never open one.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      tigervnc-standalone-server dbus-x11 xfce4-session xfwm4 xfce4-panel \
+      xfdesktop4 xfce4-terminal thunar chromium \
+      fonts-noto-cjk fonts-noto-color-emoji xdg-utils \
+    && rm -rf /var/lib/apt/lists/*
+
 # Agent CLIs + mc (share-credential minting). bypassPermissions is blocked for
 # root → the app runs as the non-root `vibe` user below.
 RUN curl -fsSL https://dl.min.io/client/mc/release/linux-$(dpkg --print-architecture | sed 's/armhf/arm/')/mc -o /usr/local/bin/mc && chmod +x /usr/local/bin/mc
