@@ -241,10 +241,16 @@ const SETTINGS_SCHEMA = {
     description: t('Hooks like PostToolUse fire on every tool call with nothing to show — by default those render no card at all. Turn off to see every hook event. Applies to newly loaded history (reopen the window for existing views).'),
     category: t('Chat'), liveApply: true,
   },
+  'chat.hideEmptyThinking': {
+    type: 'boolean', default: true,
+    label: t('Hide empty thinking blocks'),
+    description: t('Thinking cards with no visible text (redacted or zero-length thinking) are hidden. They never count toward or break run collapsing. Turn off to see every thinking card — applies to open chats instantly.'),
+    category: t('Chat'), liveApply: true,
+  },
   'chat.collapseRuns': {
     type: 'boolean', default: true,
     label: t('Collapse runs of thinking/Bash cards'),
-    description: t('Three or more consecutive thinking blocks (or Bash commands) fold behind a "N × …" line, like the Claude Code TUI — click to expand. The newest message always stays visible, and searching expands everything.'),
+    description: t('Consecutive thinking blocks (two or more) and Bash commands (any run containing one) fold behind a "N × …" line, like the Claude Code TUI — click to expand. Searching expands everything.'),
     category: t('Chat'), liveApply: true,
   },
   'chat.reducedMotionSpin': {

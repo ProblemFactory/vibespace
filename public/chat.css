@@ -855,6 +855,12 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
 /* chat.showHookCards=false — hides every hook card instantly (class on body) */
 body.hide-hook-cards .chat-msg-hook { display: none; }
 
+/* chat.hideEmptyThinking (default ON) — thinking cards with no text
+   (redacted/zero-length) render a useless "Thinking" stub; hidden instantly
+   via body class. Doubled selector beats .chat-compact .chat-msg specificity. */
+body.hide-empty-thinking .chat-msg.chat-empty-thinking,
+body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: none; }
+
 /* Running-workflow status chip */
 .chat-status-wf { color: var(--accent); }
 

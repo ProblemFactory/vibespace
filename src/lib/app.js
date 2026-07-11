@@ -150,6 +150,16 @@ class App {
     applyHookVis();
     this.settings.on('chat.showHookCards', applyHookVis);
     setTimeout(applyHookVis, 2000); // re-apply once the async settings load lands
+    // Empty-thinking visibility (chat.hideEmptyThinking, default ON): same
+    // pure-CSS body-class toggle. Flipping it changes run-collapse adjacency
+    // (hidden cards are transparent to runs) — re-decorate open chats too.
+    const applyEmptyThink = () => {
+      document.body.classList.toggle('hide-empty-thinking', this.settings.get('chat.hideEmptyThinking') !== false);
+      for (const [, s] of this.sessions || []) s._updateRuns?.(); // constructor runs this before this.sessions exists
+    };
+    applyEmptyThink();
+    this.settings.on('chat.hideEmptyThinking', applyEmptyThink);
+    setTimeout(applyEmptyThink, 2000);
     // Keep the activity spinner ROTATING under prefers-reduced-motion (opt-in
     // — the default pulse read as "blinking/broken" to some users).
     const applySpinRM = () => document.body.classList.toggle('spin-under-rm', this.settings.get('chat.reducedMotionSpin') === true);

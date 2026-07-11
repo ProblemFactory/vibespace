@@ -17,6 +17,7 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
+const { claimJsonls } = require('./session-store');
 
 const SSH_BASE_OPTS = [
   '-o', 'BatchMode=yes',
@@ -340,17 +341,28 @@ class HostManager {
       find "$HOME"/.claude/projects -maxdepth 2 -name '*.jsonl' ! -name 'agent-*' -printf '%T@ %p\\n' 2>/dev/null | sort -rn | head -60 | while read -r _ f; do
         printf 'H %s\\t' "$f"; head -c 16000 "$f" | grep -o '"cwd":"[^"]*"' | head -n 1; echo
         printf 'N %s\\t' "$f"; grep -m1 '"type":"user"' "$f" 2>/dev/null | head -c 1500; echo
+        # T = sessionIds seen in the file TAIL (last = current writer; records
+        # carry the CURRENT id even when a resume kept the ORIGINAL filename).
+        # uniq collapses runs (records from one session are consecutive).
+        printf 'T %s\\t' "$f"; tail -c 65536 -- "$f" 2>/dev/null | grep -o '"sessionId":"[^"]*"' | cut -d'"' -f4 | uniq | tail -n 8 | tr '\\n' ','; echo
       done
     `.trim();
     const out = await this._ssh(h, script, { timeoutMs: 20000 });
     const locks = [];
     const jsonls = [];
     const heads = new Map(); // jsonl path -> first record (cwd source)
+    const tailIds = new Map(); // jsonl path -> [sessionIds in tail, last = current writer]
     for (const line of out.split('\n')) {
       if (line.startsWith('LOCK ')) { try { locks.push(JSON.parse(line.slice(5))); } catch {} }
       else if (line.startsWith('J ')) {
         const m = line.match(/^J ([\d.]+) (\d+) (.+)$/);
         if (m) jsonls.push({ mtime: parseFloat(m[1]) * 1000, size: +m[2], path: m[3] });
+      } else if (line.startsWith('T ')) {
+        const t = line.indexOf('\t');
+        if (t > 2) {
+          const ids = line.slice(t + 1).split(',').map(s => s.trim()).filter(s => /^[\w-]+$/.test(s));
+          if (ids.length) tailIds.set(line.slice(2, t), ids);
+        }
       } else if (line.startsWith('H ')) {
         const t = line.indexOf('\t');
         const m = t > 2 && line.slice(t + 1).match(/^"cwd":"([^"]*)"/);
@@ -374,23 +386,54 @@ class HostManager {
         }
       }
     }
-    // lock-first claim: newest JSONL in the lock's project dir = RUNNING
-    const encode = (cwd) => cwd.replace(/[/._]/g, '-');
-    const claimed = new Set();
+    // lock-first claim per project dir — shared claimJsonls (same algorithm as
+    // local /api/sessions): exact id (lock.sessionId = filename for non-resumed
+    // sessions) → tail ids (resumed: records carry the CURRENT id while the
+    // filename keeps the ORIGINAL) → mtime fallback. The old "newest JSONL in
+    // the lock's dir" attributed files arbitrarily with N parallel sessions in
+    // one cwd (real incident: 4 running read as 5; kill → wrong id stopped).
+    const encode = (cwd) => (cwd || '').replace(/[/._]/g, '-');
+    const byDir = new Map(); // projDirName -> { locks: [], jsonls: [] }
+    const dirGroup = (d) => {
+      if (!byDir.has(d)) byDir.set(d, { locks: [], jsonls: [] });
+      return byDir.get(d);
+    };
+    for (const j of jsonls) dirGroup(path.basename(path.dirname(j.path))).jsonls.push(j);
+    for (const lock of locks) dirGroup(encode(lock.cwd)).locks.push(lock);
+    const claimed = new Set(); // jsonl paths
+    const runningIds = new Set();
     const sessions = [];
-    for (const lock of locks) {
-      const dir = encode(lock.cwd || '');
-      const cand = jsonls.filter(j => path.basename(path.dirname(j.path)) === dir && !claimed.has(j.path))
-        .sort((a, b) => b.mtime - a.mtime)[0];
-      if (cand) {
-        claimed.add(cand.path);
-        sessions.push({ sessionId: path.basename(cand.path, '.jsonl'), cwd: lock.cwd, status: 'remote-running', host: h.id, hostName: h.name, mtime: cand.mtime });
+    for (const [, g] of byDir) {
+      if (!g.locks.length) continue;
+      const jmetas = g.jsonls.map(j => ({ id: path.basename(j.path, '.jsonl'), mtime: j.mtime, path: j.path }));
+      const claims = claimJsonls(
+        g.locks.map(l => ({ sessionId: l.sessionId || null, exactOnly: false, lock: l })),
+        jmetas,
+        (j) => tailIds.get(j.path) || null,
+      );
+      const matchedLocks = new Set();
+      for (const [jid, w] of claims) {
+        const jm = jmetas.find(j => j.id === jid);
+        claimed.add(jm.path);
+        runningIds.add(jid);
+        matchedLocks.add(w.lock);
+        sessions.push({ sessionId: jid, cwd: w.lock.cwd, status: 'remote-running', host: h.id, hostName: h.name, mtime: jm.mtime });
+      }
+      // Locks with no JSONL yet (brand-new session, nothing flushed): list by
+      // the lock's own sessionId instead of dropping them (or, before this fix,
+      // stealing another session's transcript) — parity with local Step 3.
+      for (const l of g.locks) {
+        if (matchedLocks.has(l) || !l.sessionId || runningIds.has(l.sessionId)) continue;
+        runningIds.add(l.sessionId);
+        sessions.push({ sessionId: l.sessionId, cwd: l.cwd || null, status: 'remote-running', host: h.id, hostName: h.name, mtime: l.startedAt || Date.now() });
       }
     }
     for (const j of jsonls) {
       if (claimed.has(j.path)) continue;
+      const sid = path.basename(j.path, '.jsonl');
+      if (runningIds.has(sid)) continue; // already listed via a lock
       const head = heads.get(j.path);
-      sessions.push({ sessionId: path.basename(j.path, '.jsonl'), cwd: head?.cwd || null, name: head?.name || null, projDir: path.basename(path.dirname(j.path)), status: 'remote-stopped', host: h.id, hostName: h.name, mtime: j.mtime });
+      sessions.push({ sessionId: sid, cwd: head?.cwd || null, name: head?.name || null, projDir: path.basename(path.dirname(j.path)), status: 'remote-stopped', host: h.id, hostName: h.name, mtime: j.mtime });
     }
     this._discoveryCache.set(id, { at: Date.now(), sessions });
     return sessions;

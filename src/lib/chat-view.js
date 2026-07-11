@@ -472,9 +472,9 @@ class ChatView {
       this._chatMinimap.render(meta.turnMap);
     } else if (this._total > 50) {
       // Fallback: fetch turn map via API
-      const { backend, backendSessionId, cwd } = this._getSessionIds();
+      const { backend, backendSessionId, cwd, host } = this._getSessionIds();
       if (backendSessionId) {
-        fetch(`/api/session-messages?backend=${encodeURIComponent(backend)}&backendSessionId=${encodeURIComponent(backendSessionId)}&cwd=${encodeURIComponent(cwd)}&turnmap=1`)
+        fetch(`/api/session-messages?backend=${encodeURIComponent(backend)}&backendSessionId=${encodeURIComponent(backendSessionId)}&cwd=${encodeURIComponent(cwd)}&turnmap=1${host ? `&host=${encodeURIComponent(host)}` : ''}`)
           .then(r => r.json()).then(d => { if (d.turns?.length) this._chatMinimap.render(d.turns); }).catch(() => {});
       }
     }
@@ -559,6 +559,13 @@ class ChatView {
 
   _getSessionIds() {
     const allSess = this.app.sidebar?._allSessions || [];
+    // Remote sessions: every history consumer (initial load, pagination,
+    // turnmap, search) must carry the host so /api/session-messages can pull
+    // the transcript into the local cache — a REMOTE session that was never
+    // started/viewed through this instance has a COLD cache, and a host-less
+    // fetch silently returns nothing (real report: externally-started server
+    // sessions opened blank in chat mode).
+    const specHost = this.winInfo?._openSpec?.hostId || null;
     // View-only sessions: accept both legacy `view-<claudeId>` and backend-aware `view-<backend>-<backendSessionId>`
     if (this.sessionId.startsWith('view-')) {
       const match = allSess.find((s) => {
@@ -571,11 +578,15 @@ class ChatView {
       if (match) {
         const backend = match.backend || 'claude';
         const backendSessionId = match.backendSessionId || match.sessionId;
-        return { backend, backendSessionId, claudeId: backend === 'claude' ? backendSessionId : null, cwd: match?.cwd || '' };
+        return { backend, backendSessionId, claudeId: backend === 'claude' ? backendSessionId : null, cwd: match?.cwd || '', host: match.host || specHost };
       }
       const rawId = this.sessionId.slice('view-'.length);
       const sep = rawId.indexOf('-');
-      if (sep > 0) {
+      // `view-<backend>-<id>` only when the prefix is a KNOWN backend name —
+      // a claude view id is `view-<uuid>` and the first UUID segment used to
+      // be misread as a backend here, breaking pagination/search for any view
+      // window whose session isn't in the local list (remote sessions never are).
+      if (sep > 0 && /^(codex|claude|shell)$/.test(rawId.slice(0, sep))) {
         const backend = rawId.slice(0, sep);
         const backendSessionId = rawId.slice(sep + 1);
         if (backend && backendSessionId) {
@@ -584,6 +595,7 @@ class ChatView {
             backendSessionId,
             claudeId: backend === 'claude' ? backendSessionId : null,
             cwd: this.winInfo?._openSpec?.cwd || '',
+            host: specHost,
           };
         }
       }
@@ -592,6 +604,7 @@ class ChatView {
         backendSessionId: rawId,
         claudeId: rawId,
         cwd: this.winInfo?._openSpec?.cwd || '',
+        host: specHost,
       };
     }
     const match = allSess.find(s => s.webuiId === this.sessionId);
@@ -602,7 +615,7 @@ class ChatView {
     const spec = this.winInfo?._openSpec || {};
     const backend = match?.backend || spec.backend || 'claude';
     const backendSessionId = match?.backendSessionId || match?.sessionId || spec.backendSessionId || null;
-    return { backend, backendSessionId, claudeId: backend === 'claude' ? backendSessionId : null, cwd: match?.cwd || spec.cwd || '' };
+    return { backend, backendSessionId, claudeId: backend === 'claude' ? backendSessionId : null, cwd: match?.cwd || spec.cwd || '', host: match?.host || specHost };
   }
 
   // Fetch a range of messages from server
@@ -612,7 +625,7 @@ class ChatView {
   }
 
   async _fetchMessagePage(offset, limit, { withStatus = false } = {}) {
-    const { backend, backendSessionId, cwd } = this._getSessionIds();
+    const { backend, backendSessionId, cwd, host } = this._getSessionIds();
     if (!backendSessionId) return { messages: [], total: 0 };
     const query = new URLSearchParams({
       backend: backend || 'claude',
@@ -621,6 +634,7 @@ class ChatView {
       offset: String(offset),
       limit: String(limit),
     });
+    if (host) query.set('host', host); // remote transcript: refresh local cache server-side
     if (withStatus) query.set('withStatus', '1');
     const res = await fetch(`/api/session-messages?${query.toString()}`);
     const data = await res.json();
@@ -1216,6 +1230,9 @@ class ChatView {
       if (detailsEl) detailsEl.open = true;
       if (summaryEl) summaryEl.textContent = t('Thinking');
       if (preEl) preEl.textContent = stripAnsi(msg.content[0].text || '');
+      // A streaming thinking card can start empty (tagged hidden at create)
+      // and fill in — untag the moment real text lands so it becomes visible.
+      if ((msg.content[0].text || '').trim()) oldEl.classList.remove('chat-empty-thinking');
     }
     if (this._pinned) this._scrollToBottom();
   }
@@ -1826,12 +1843,16 @@ class ChatView {
   }
 
   // ── Consecutive thinking/Bash run collapse (chat.collapseRuns) ──
-  // Decoration-only pass: runs of ≥3 adjacent thinking-only messages (or Bash
-  // tool cards) get a "N × …" header and the members hide behind it. Nothing
-  // is reparented and headers don't match .chat-msg, so virtual-scroll trims,
-  // index→element mapping and gap-seek are untouched. The NEWEST message never
-  // joins a run (live progress stays visible), and an open search bar expands
-  // everything (search reveal must be able to scroll to any member).
+  // Decoration-only pass: adjacent thinking/Bash cards get a "N × …" header
+  // and the members hide behind it (any Bash folds immediately, pure-thinking
+  // needs ≥2). Nothing is reparented and headers don't match .chat-msg, so
+  // virtual-scroll trims, index→element mapping and gap-seek are untouched.
+  // HIDDEN cards (empty thinking under chat.hideEmptyThinking, hook cards
+  // under chat.showHookCards=false) are TRANSPARENT: they neither count
+  // toward the threshold nor break adjacency of the visible cards around
+  // them — without this, invisible empty-thinking stubs wedged between real
+  // cards silently broke every run. An open search bar expands everything
+  // (search reveal must be able to scroll to any member).
   _updateRuns() {
     const list = this._messageList;
     if (!list || this._disposed) return;
@@ -1845,8 +1866,13 @@ class ChatView {
       // thinking and Bash count as ONE collapsible kind — the TUI folds the
       // interleaved think→run→think noise as a single group (user directive;
       // same-kind-only grouping never reached its threshold in real turns).
+      const hideEmptyThink = this.app?.settings?.get('chat.hideEmptyThinking') !== false;
+      const hooksHidden = document.body.classList.contains('hide-hook-cards');
       const kindOf = (el) => {
         if (!el.classList?.contains('chat-msg') || el.classList.contains('chat-gap-msg')) return null;
+        // display:none'd cards are invisible glue — 'skip' (never break a run)
+        if (hideEmptyThink && el.classList.contains('chat-empty-thinking')) return 'skip';
+        if (hooksHidden && el.classList.contains('chat-msg-hook')) return 'skip';
         const m = el._rawMsg;
         if (!m) return null;
         if (el.classList.contains('chat-msg-tool-result')) {
@@ -1899,6 +1925,7 @@ class ChatView {
       };
       for (const el of kids) {
         const k = kindOf(el);
+        if (k === 'skip') continue; // hidden card — transparent to the run
         if (k && k === runKind) { run.push(el); continue; }
         flush();
         if (k) { run = [el]; runKind = k; }

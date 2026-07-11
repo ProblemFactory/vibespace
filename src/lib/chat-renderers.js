@@ -224,7 +224,13 @@ class ChatRenderers {
     el._rawMsg = msg;
     let html;
     if (block.type === 'thinking') {
-      html = `<details class="chat-thinking"${msg.status === 'streaming' ? ' open' : ''}><summary>${t('Thinking')}</summary><pre>${escHtml(stripAnsi(block.text || ''))}</pre></details>`;
+      const thinkTxt = stripAnsi(block.text || '');
+      // Empty thinking (redacted / zero-length — real transcripts carry
+      // thousands) renders a useless "Thinking" stub. Tagged so
+      // chat.hideEmptyThinking (default on) hides it via a body class, and so
+      // _updateRuns treats it as transparent for run-collapse adjacency.
+      if (!thinkTxt.trim()) el.classList.add('chat-empty-thinking');
+      html = `<details class="chat-thinking"${msg.status === 'streaming' ? ' open' : ''}><summary>${t('Thinking')}</summary><pre>${escHtml(thinkTxt)}</pre></details>`;
     } else if (block.type === 'text') {
       html = `<div class="chat-text">${this.renderMarkdown(stripAnsi(block.text || ''))}</div>`;
     } else {

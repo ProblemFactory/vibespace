@@ -107,7 +107,7 @@ class ChatSearch {
     this.applyHighlightLayer(); // highlight current view immediately
 
     // Server-side search — find backend session ID for this webui session
-    let { backend, backendSessionId, cwd, claudeId } = this._getSessionIds();
+    let { backend, backendSessionId, cwd, claudeId, host } = this._getSessionIds();
     // Fallback: check active sessions API directly
     if (!backendSessionId) {
       try {
@@ -121,6 +121,7 @@ class ChatSearch {
           backendSessionId = s.backendSessionId || s.claudeSessionId;
           claudeId = s.claudeSessionId || null;
           cwd = s.cwd || '';
+          host = s.host || null;
         }
       } catch {}
     }
@@ -142,7 +143,7 @@ class ChatSearch {
 
     let matches = [];
     try {
-      const res = await fetch(`/api/session-messages?backend=${encodeURIComponent(backend || 'claude')}&backendSessionId=${encodeURIComponent(backendSessionId)}&cwd=${encodeURIComponent(cwd)}&search=${encodeURIComponent(q)}`);
+      const res = await fetch(`/api/session-messages?backend=${encodeURIComponent(backend || 'claude')}&backendSessionId=${encodeURIComponent(backendSessionId)}&cwd=${encodeURIComponent(cwd)}&search=${encodeURIComponent(q)}${host ? `&host=${encodeURIComponent(host)}` : ''}`);
       const data = await res.json();
       matches = data.matches || [];
     } catch {}

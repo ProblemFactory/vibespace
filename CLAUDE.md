@@ -330,13 +330,14 @@ With dtach, there is NO middle layer — xterm.js talks directly to Claude Code'
 1. Scan lock files → filter alive PIDs → verify process is actually `claude` (avoids PID reuse)
 2. Also scan tmux panes to determine if running claude is inside tmux (attachable)
 3. For each alive lock, derive project dir from `lock.cwd` using the encoding formula
-4. In that project dir, find the most recently modified JSONL → assign it as the running session
-5. Each lock claims at most ONE JSONL (most recent in its project dir)
+4. In that project dir, match locks to JSONLs via `claimJsonls` (session-store, PURE + unit-tested `scripts/test-claim-jsonls.mjs`; shared by local /api/sessions AND remote hosts.discoverSessions): **exact** (lock.sessionId or webui claudeSessionId = filename id) → **tail** (last 64KB scanned for `"sessionId":"<lock id>"` — a resumed session writes its CURRENT id into the ORIGINAL-named file; last-tail-id = current writer beats a mere mention) → **mtime fallback over NO-tail-evidence files only** (empty/unreadable — the brand-new-not-yet-flushed case; a file whose tail names some other dead id is a stopped session's transcript and is NEVER stolen; the leftover lock lists by its own sessionId instead). The pre-2026-07-11 "newest JSONL takes the lock" claim misattributed files whenever SEVERAL sessions ran in ONE cwd (real incident: 4 parallel external sessions read as 5 running; kill → WRONG id showed stopped → resume collided with a live session)
+5. Each lock claims at most ONE JSONL; webui locks (known claudeSessionId) match exact-only; single-lock-single-jsonl dirs short-circuit with no tail read (the common case — full sweep stays well under the 4.5s cache TTL). Remote parity: the ssh discovery script emits `T <path>\t<tail ids>` lines (tail -c 65536 | grep, `2>/dev/null` — a host with broken tail degrades to the old mtime behavior)
 6. All unclaimed JONLs → STOPPED
 7. Status values: `tmux` (in tmux, attachable), `external` (unknown terminal, not attachable), `stopped`
 
 **Why previous approaches failed:**
-- ❌ Match lock to JSONL by sessionId: fails after `--resume` (new lock ID, old JSONL filename)
+- ❌ Match lock to JSONL by sessionId ALONE: fails after `--resume` (new lock ID, old JSONL filename) — hence the tail pass
+- ❌ Match by mtime alone: arbitrary attribution with N parallel sessions in one cwd (the 2026-07-11 lengyue incident) — mtime is now only the last-resort pass
 - ❌ Match by cwd from inside JSONL: JSONL stores original cwd which may be stale after a directory move
 - ❌ Match by cwd without dedup: one alive lock matches ALL JONLs in same directory (32 "running" for 10 PIDs)
 - ❌ `recoverCwdFromProjDir()` greedy filesystem check: slow, fragile, wrong for moved directories
