@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.106.4 — 2026-07-11
+
+- **Remote tab broken on a fresh instance (real report: "remote 功能直接坏了")**: with ZERO sessions, the sidebar's no-sessions early-return fired before the mounts dispatch — the Remote tab rendered the Folders empty state ("+ New Session" / "No sessions") instead of machines+storage. Latent since the tab existed; invisible on any instance with sessions. The mounts branch now dispatches first (it doesn't depend on the session list at all).
+
 ## 2.106.3 — 2026-07-11
 
 - **VIBESPACE_S3_* env import works on existing instances**: the one-shot `_envImported` flag burned on the very FIRST boot even with no env set, so a managed instance that gained the S3 env later (helm upgrade) never imported its personal storage. Import is now keyed by the env's endpoint|bucket|prefix SIGNATURE — set/changed env imports on next boot, a user-deleted mount stays deleted while the signature is unchanged.
