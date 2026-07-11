@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.111.5 — 2026-07-11
+
+- **Paging up no longer jumps / slams to the top (root fix, tracer-diagnosed)**. The scroll compensation used scrollHeight DELTAS — but under `content-visibility: auto` a freshly inserted batch measures at its ~80px per-message ESTIMATE while the trimmed batch had REAL heights, so the delta could go NEGATIVE: the tracer caught an insert-50/trim-50 page SHRINKING scrollHeight by 312px, the compensation clamping scrollTop to 0 (slammed to the very top), and the top sentinel then load-looping at the clamp. All four paging paths (extend-top, trim-top-adjacent flows, gap slab loads, gap trims) now preserve position by ANCHORING the topmost visible element and restoring its offset after the mutation — layout ground truth regardless of estimated heights. The scroll tracer stays in for verification.
+
 ## 2.111.4 — 2026-07-11
 
 - **Sidebar localization pass (user reports)**: the Folders tab zone headers (Active / Recent / History), "No running sessions" and the other workbench empty states, and the Remote tab's action rows (Add machine / Connect storage / Import share link / Import rclone config / Share a local folder), Bridge tokens section, Revoke buttons+confirms, and the footer notes are now translated (zh/ja).

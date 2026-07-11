@@ -665,35 +665,39 @@ class ChatView {
       const msgs = await this._fetchMessages(newStart, fetchCount);
 
       const scrollHeightBefore = this._messageList.scrollHeight;
-      // :scope > — a bare '.chat-msg' can match a NESTED element (inside a
-      // card), whose parent isn't the list → insertBefore throws NotFoundError
-      // (telemetry-captured real user error). Fragment + one validated insert.
-      const firstEl = this._messageList.querySelector(':scope > .chat-msg');
-      this._loadingHistory = true;
-      const frag = document.createDocumentFragment();
-      for (const msg of msgs) {
-        const el = this._renderDetached(msg);
-        if (el) frag.appendChild(el);
+      // Element-anchored position preservation (see _withViewportAnchor —
+      // the scrollHeight-delta math this replaces measured fresh inserts at
+      // their content-visibility ESTIMATE against trimmed REAL heights; the
+      // tracer caught the delta going NEGATIVE, clamping scrollTop to 0 and
+      // load-looping the top sentinel). The fold (_updateRuns) runs INSIDE
+      // the anchored section so the restore covers every height mutation of
+      // this batch in one task.
+      const anchored = this._withViewportAnchor(() => {
+        // :scope > — a bare '.chat-msg' can match a NESTED element (inside a
+        // card), whose parent isn't the list → insertBefore throws NotFoundError
+        // (telemetry-captured real user error). Fragment + one validated insert.
+        const firstEl = this._messageList.querySelector(':scope > .chat-msg');
+        this._loadingHistory = true;
+        const frag = document.createDocumentFragment();
+        for (const msg of msgs) {
+          const el = this._renderDetached(msg);
+          if (el) frag.appendChild(el);
+        }
+        const ref = (firstEl && firstEl.parentNode === this._messageList) ? firstEl : this._messageList.firstChild;
+        this._messageList.insertBefore(frag, ref);
+        this._loadingHistory = false;
+        this._windowStart = newStart;
+
+        // Trim bottom if DOM window too large (keep max ~150 rendered messages)
+        this._trimBottom();
+        this._updateRuns();
+      });
+      if (!anchored) {
+        // no usable anchor (very top / empty list) — old delta-math fallback
+        this._traceExpect();
+        this._messageList.scrollTop += (this._messageList.scrollHeight - scrollHeightBefore);
       }
-      const ref = (firstEl && firstEl.parentNode === this._messageList) ? firstEl : this._messageList.firstChild;
-      this._messageList.insertBefore(frag, ref);
-      this._loadingHistory = false;
-      this._windowStart = newStart;
-
-      // Trim bottom if DOM window too large (keep max ~150 rendered messages)
-      this._trimBottom();
-
-      this._trace('extendTop', { ws: newStart, n: msgs.length, st0: Math.round(this._messageList.scrollTop), sh0: scrollHeightBefore, sh1: this._messageList.scrollHeight });
-      // Preserve scroll position
-      this._traceExpect();
-      this._messageList.scrollTop += (this._messageList.scrollHeight - scrollHeightBefore);
-      // Fold the freshly loaded cards NOW, inside the same task as the scroll
-      // compensation — the observer's debounced pass (180ms) used to collapse
-      // them after the fact, yanking the viewport and re-triggering the top
-      // sentinel in a load loop. _updateRuns anchors the viewport itself, so
-      // the later debounced pass becomes a height no-op.
-      this._updateRuns();
-      this._trace('extendTop:done', { st: Math.round(this._messageList.scrollTop), sh: this._messageList.scrollHeight });
+      this._trace('extendTop:done', { ws: newStart, n: msgs.length, anchored, st: Math.round(this._messageList.scrollTop), sh: this._messageList.scrollHeight });
       if (this._search?.hasHighlight) this._search.applyHighlightLayer();
     } finally {
       setTimeout(() => { this._loading = false; }, 300);
@@ -929,7 +933,11 @@ class ChatView {
     if (removedIds.size) this._messages = this._messages.filter(m => !removedIds.has(m.id));
     this._windowStart += toRemove;
     this._trace('trimTop', { removed: toRemove });
-    // Preserve scroll position after removing from top
+    // Preserve scroll position after removing from top. NOTE: still the
+    // delta math — trimTop only ever removes REAL-height (long-rendered)
+    // elements from the window top, where estimate-vs-real skew doesn't
+    // apply the way it does for extendTop's fresh inserts; and the caller
+    // (_extendBottom) has no content-visibility churn in flight.
     this._traceExpect();
     this._messageList.scrollTop -= (scrollHeightBefore - this._messageList.scrollHeight);
   }
@@ -1893,6 +1901,33 @@ class ChatView {
   // them — without this, invisible empty-thinking stubs wedged between real
   // cards silently broke every run. An open search bar expands everything
   // (search reveal must be able to scroll to any member).
+  // ── Viewport-anchored mutation (the scroll-jump root fix, 2.111.5) ──
+  // scrollHeight-DELTA compensation is mathematically wrong under
+  // content-visibility:auto: freshly inserted off-screen elements measure at
+  // their ~80px ESTIMATE while trimmed ones had REAL heights, so the delta
+  // can even go NEGATIVE — the tracer caught insert-50/trim-50 shrinking
+  // scrollHeight by 312px, the compensation clamping scrollTop to 0, and the
+  // top sentinel then load-looping at the clamp (the reported 乱跳+翻不回来).
+  // Anchor the topmost visible element instead: its offsetTop delta IS the
+  // ground truth in the same units the browser scrolls by.
+  _withViewportAnchor(fn) {
+    const list = this._messageList;
+    const st = list.scrollTop;
+    let el = null, delta = 0;
+    if (st > 0) {
+      for (const c of list.children) {
+        if (c.offsetHeight > 0 && c.offsetTop + c.offsetHeight > st) { el = c; delta = c.offsetTop - st; break; }
+      }
+    }
+    fn();
+    if (el && el.isConnected && el.offsetParent !== null) {
+      this._traceExpect?.();
+      list.scrollTop = el.offsetTop - delta;
+      return true;
+    }
+    return false;
+  }
+
   // ── Scroll-jump tracer (temporary diagnostic) ──
   _trace(ev, data) {
     const b = (this._traceBuf = this._traceBuf || []);
