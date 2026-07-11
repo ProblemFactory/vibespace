@@ -14,6 +14,7 @@ const {
   SESSIONS_DIR, isPidAlive, cwdToProjectDir, recoverCwdFromProjDir,
   getTmuxPaneMap, findTmuxTarget, isProcessClaude,
   extractSessionMeta, isSubagentMessage,
+  readJsonlTailIds, claimJsonls,
 } = require('../session-store');
 const { createMessageManager } = require('../normalizers');
 const { listCodexThreads } = require('../codex-session-store');
@@ -519,11 +520,26 @@ function setup(ctx) {
           for (const f of jsonls) {
             try { statMap.set(f, fs.statSync(path.join(projPath, f)).mtimeMs); } catch { statMap.set(f, 0); }
           }
-          // Sort by mtime desc so most recent JSONL gets the running lock
+          // Sort by mtime desc (display recency; claiming no longer relies on it alone)
           jsonls.sort((a, b) => (statMap.get(b) || 0) - (statMap.get(a) || 0));
 
           // Check if there are running locks for this project dir
           const runningEntries = runningByProjDir.get(projDir) || [];
+
+          // Match running locks to JSONLs (claimJsonls in session-store):
+          // 1. exact — webui-tracked claudeSessionId, or the lock file's own
+          //    sessionId equals a JSONL filename (non-resumed sessions)
+          // 2. tail — resumed sessions write their CURRENT id into the
+          //    ORIGINAL-named file; scan the last 64KB for the lock's id
+          // 3. mtime fallback — brand-new session with nothing flushed yet.
+          // With N parallel sessions in ONE cwd, the old "newest unclaimed
+          // JSONL takes the next lock" attributed files arbitrarily (kill one
+          // → the WRONG id showed stopped → resume collided with a live one).
+          const claims = runningEntries.length ? claimJsonls(
+            runningEntries.map(e => ({ sessionId: e.claudeSessionId || e.lock.sessionId || null, exactOnly: !!e.claudeSessionId, entry: e })),
+            jsonls.map(f => ({ id: f.replace(/\.jsonl$/, ''), mtime: statMap.get(f) || 0 })),
+            (j) => readJsonlTailIds(path.join(projPath, j.id + '.jsonl')),
+          ) : new Map();
 
           for (const f of jsonls) {
             const sessionId = f.replace('.jsonl', '');
@@ -534,13 +550,8 @@ function setup(ctx) {
             const firstRunning = runningEntries.find(e => !e.assigned);
             const cwd = (firstRunning?.lock.cwd) || meta.cwd || recoverCwdFromProjDir(projDir);
 
-            // Match running lock to JSONL:
-            // 1. If a lock has claudeSessionId (WebUI), only match to that exact JSONL
-            // 2. Otherwise (tmux/external), match to most recent unassigned JSONL (sorted by mtime desc)
             let status = 'stopped', pid = null, tmuxTarget = null;
-            const exactMatch = runningEntries.find(e => !e.assigned && e.claudeSessionId === sessionId);
-            const fallbackMatch = runningEntries.find(e => !e.assigned && !e.claudeSessionId);
-            const match = exactMatch || fallbackMatch;
+            const match = claims.get(sessionId)?.entry || null;
             // Also check if any active webui session claims this claudeSessionId (covers race during resume)
             let isWebuiSession = false;
             if (match) isWebuiSession = webuiPids.has(match.lock.pid);

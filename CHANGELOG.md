@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.108.1 — 2026-07-11
+
+Three long-open bugs fixed by parallel root-cause agents, each verified end-to-end in isolated instances:
+
+- **Discovery misclaim with parallel same-cwd sessions** (real incident: 4 external sessions read as 5; killing one flagged the WRONG id stopped; resuming it collided with a live session): lock→JSONL claiming no longer trusts mtime. New shared pure `claimJsonls` (unit-tested, `scripts/test-claim-jsonls.mjs`): exact id → tail scan (a resumed session writes its CURRENT id into the ORIGINAL-named file; last-tail-id = current writer) → mtime only over no-evidence files (brand-new sessions). Local `/api/sessions` AND remote ssh discovery share it; a lock with no transcript yet lists under its own id instead of stealing one. Full 5263-session sweep: 780ms.
+- **Externally-started remote sessions opened BLANK in chat mode**: the resume history fetch never passed `?host=`, so a remote transcript nothing had ever cached came back empty (VibeSpace-started sessions only worked because attach/view had warmed the cache). Every history consumer (resume load, pagination, turn map, search) now carries the host; `view-<uuid>` ids are no longer misparsed as `view-<backend>-…` (that broke remote View-History pagination/search); zero-message transcripts say so instead of rendering a silent blank pane.
+- **Thinking runs never folded** ("只有Bash折叠了"): real thinking cards are structurally never adjacent — the adjacent pairs are EMPTY thinking stubs (redacted/zero-length; 1383 pairs in one real 442MB transcript), and those invisible stubs also broke Bash-run adjacency. New `chat.hideEmptyThinking` (default ON, instant toggle) hides empty thinking cards, and hidden cards (empty thinking, hidden hook cards) are now TRANSPARENT to run collapsing — they neither count nor break adjacency. Corrected the stale `collapseRuns` setting description.
+
 ## 2.108.0 — 2026-07-11
 
 **Storage: credentials as first-class items (user request — the rclone `remote:path` model)**

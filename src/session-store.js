@@ -76,6 +76,136 @@ function isProcessClaude(pid) {
   } catch { return false; }
 }
 
+// ── Lock → JSONL claiming (discovery) ──
+// "Newest JSONL in the lock's project dir" misattributes files when SEVERAL
+// sessions run in parallel in ONE cwd — mtime order among concurrent writers is
+// arbitrary (real incident: 4 parallel external sessions read as 5 running;
+// killing one flagged the WRONG session id stopped, and resuming that id
+// collided with a still-running process). The lock file carries the CURRENT
+// sessionId and every JSONL RECORD carries a sessionId field; after --resume
+// the FILENAME keeps the original id but recent records carry the current one.
+// So: claim by exact id first, tail-scan second, mtime-recency last.
+
+// Last `bytes` of a JSONL as the sessionIds seen in it, in occurrence order
+// (last element = the file's current writer). null = unreadable.
+function readJsonlTailIds(fp, bytes = 65536) {
+  let fd = null;
+  try {
+    fd = fs.openSync(fp, 'r');
+    const size = fs.fstatSync(fd).size;
+    const len = Math.min(bytes, size);
+    if (!len) return [];
+    const buf = Buffer.alloc(len);
+    fs.readSync(fd, buf, 0, len, size - len);
+    let text = buf.toString('utf-8');
+    if (len < size) { // line-align: drop the partial first line
+      const nl = text.indexOf('\n');
+      if (nl >= 0) text = text.slice(nl + 1);
+    }
+    const ids = [];
+    const re = /"sessionId":"([\w-]+)"/g;
+    let m;
+    while ((m = re.exec(text))) ids.push(m[1]);
+    return ids;
+  } catch { return null; } finally {
+    if (fd !== null) { try { fs.closeSync(fd); } catch {} }
+  }
+}
+
+/**
+ * Match alive locks to JSONL files within ONE project dir. Pure — testable
+ * without live processes; shared by local (/api/sessions) and remote
+ * (hosts.discoverSessions) discovery.
+ *
+ * @param locks  [{ sessionId: string|null, exactOnly: bool, ...caller fields }]
+ *               exactOnly (webui-tracked ids) never fall through to tail/mtime.
+ * @param jsonls [{ id: filename-id, mtime, ...caller fields }] any order
+ * @param tailIdsFor (jsonl) => [sessionIds in tail, occurrence order] | null
+ * @returns Map<jsonlId, lock> — each JSONL claimed by at most one lock.
+ *
+ * Passes:
+ *  1. exact — the lock's current sessionId IS a JSONL filename (non-resumed).
+ *  2. tail  — a resumed session writes records carrying its CURRENT id into the
+ *             ORIGINAL-named file; prefer the file whose LAST tail id is the
+ *             lock's (its current writer) over a mere mention.
+ *  3. mtime — locks with no id evidence (brand-new session that hasn't flushed
+ *             a record yet, unreadable tail, old lock without sessionId) take
+ *             the newest unclaimed JSONL among files with NO tail evidence
+ *             (empty file / unreadable / no tail data). Files whose tail names
+ *             some OTHER (dead) session are NEVER fallback-claimed — they are a
+ *             stopped session's transcript, and stealing one is the bug above
+ *             (the unmatched lock is instead listed by its own sessionId).
+ * Tail reads only happen when the dir is ambiguous — single-lock-single-jsonl
+ * short-circuits without touching the file (the overwhelmingly common case).
+ */
+function claimJsonls(locks, jsonls, tailIdsFor) {
+  const claims = new Map(); // jsonl id -> lock
+  const sorted = [...jsonls].sort((a, b) => (b.mtime || 0) - (a.mtime || 0));
+  const byId = new Map(sorted.map(j => [j.id, j]));
+  const claimedIds = new Set();
+  const unmatched = [];
+
+  // Pass 1 — exact filename match.
+  for (const lock of locks) {
+    const want = lock.sessionId;
+    if (want && byId.has(want) && !claimedIds.has(want)) {
+      claims.set(want, lock);
+      claimedIds.add(want);
+    } else if (!lock.exactOnly) {
+      unmatched.push(lock);
+    }
+  }
+  if (!unmatched.length) return claims;
+
+  const unclaimed = () => sorted.filter(j => !claimedIds.has(j.id));
+
+  // Short-circuit — unambiguous dir: one lock, one JSONL, no tail read.
+  if (locks.length === 1 && jsonls.length === 1) {
+    const j = unclaimed()[0];
+    if (j) claims.set(j.id, unmatched[0]);
+    return claims;
+  }
+
+  // Pass 2 — tail match (bounded: newest candidates only).
+  const TAIL_CANDIDATES_MAX = 30;
+  const tails = new Map(); // jsonl id -> [ids] | null
+  for (const j of unclaimed().slice(0, TAIL_CANDIDATES_MAX)) {
+    let ids = null;
+    try { ids = tailIdsFor ? tailIdsFor(j) : null; } catch {}
+    tails.set(j.id, Array.isArray(ids) ? ids : null);
+  }
+  const stillUnmatched = [];
+  for (const lock of unmatched) {
+    if (!lock.sessionId) { stillUnmatched.push(lock); continue; }
+    let best = null, bestScore = 0;
+    for (const j of unclaimed()) {
+      const ids = tails.get(j.id);
+      if (!ids || !ids.length) continue;
+      const at = ids.lastIndexOf(lock.sessionId);
+      if (at < 0) continue;
+      const score = at === ids.length - 1 ? 2 : 1; // current writer beats mention
+      if (score > bestScore) { best = j; bestScore = score; }
+    }
+    if (best) { claims.set(best.id, lock); claimedIds.add(best.id); }
+    else stillUnmatched.push(lock);
+  }
+
+  // Pass 3 — mtime fallback over NO-EVIDENCE files only. A file whose tail
+  // names some other (dead) session is a stopped session's transcript — never
+  // hand it to an unrelated lock; the caller lists leftover locks by their own
+  // sessionId instead.
+  if (stillUnmatched.length) {
+    const order = unclaimed().filter(j => !(tails.get(j.id) || []).length); // mtime-desc
+    for (const lock of stillUnmatched) {
+      const j = order.shift();
+      if (!j) break;
+      claims.set(j.id, lock);
+      claimedIds.add(j.id);
+    }
+  }
+  return claims;
+}
+
 // ── JSONL helpers ──
 
 function isSubagentMessage(msg) { return !!(msg.parent_tool_use_id || msg.isSidechain); }
@@ -534,6 +664,8 @@ module.exports = {
   isProcessClaude,
   isSubagentMessage,
   isDisplayMessage,
+  readJsonlTailIds,
+  claimJsonls,
   findSessionJsonlPath,
   parseSessionJsonl,
   extractSessionMeta,

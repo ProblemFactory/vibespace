@@ -525,6 +525,7 @@ export default {
   "No color": "色なし",
   "No linked folders. Sessions under a linked folder join this task automatically. Link via the file explorer right-click menu or drag a folder onto the task.": "リンク済みフォルダはありません。リンクされたフォルダ配下のセッションはこのタスクに自動的に参加します。ファイルエクスプローラの右クリックメニューからリンクするか、フォルダをタスクにドラッグしてください。",
   "No matches": "一致なし",
+  "No messages in this session's transcript yet.": "このセッションの記録にはまだメッセージがありません。",
   "No progress notes yet": "進捗ノートはまだありません",
   "No results": "結果なし",
   "No saved presets. Save current workspace as a preset.": "保存済みプリセットはありません。現在のワークスペースをプリセットとして保存してください。",

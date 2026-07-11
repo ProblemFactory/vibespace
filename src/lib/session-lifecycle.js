@@ -135,8 +135,14 @@ export function installSessionLifecycle(App, ctx = {}) {
           // Load JSONL history for resumed sessions (truncated at the fork
           // point when forking from a specific message, so the displayed history
           // matches the fork's actual --resume-session-at boundary).
+          // REMOTE sessions must pass host: the transcript lives on the host and
+          // /api/session-messages only pulls it into the local cache when asked
+          // (?host=). Without it, an externally-started server session — whose
+          // cache nothing ever warmed — resumed into a BLANK conversation
+          // (real user report 2026-07-11); VibeSpace-started ones appeared fine
+          // only because attach/view paths had already cached their transcript.
           if (resumeId) {
-            fetch(`/api/session-messages?backend=${encodeURIComponent(backend)}&backendSessionId=${encodeURIComponent(backendSessionId || resumeId)}&cwd=${encodeURIComponent(cwd||'')}&withStatus=1${forkAtUuid ? `&untilUuid=${encodeURIComponent(forkAtUuid)}` : ''}`)
+            fetch(`/api/session-messages?backend=${encodeURIComponent(backend)}&backendSessionId=${encodeURIComponent(backendSessionId || resumeId)}&cwd=${encodeURIComponent(cwd||'')}&withStatus=1${hostId ? `&host=${encodeURIComponent(hostId)}` : ''}${forkAtUuid ? `&untilUuid=${encodeURIComponent(forkAtUuid)}` : ''}`)
               .then(r => r.json())
               .then(data => {
                 if (data.messages?.length) chatView.loadHistory(data.messages, data.total);
@@ -601,6 +607,11 @@ export function installSessionLifecycle(App, ctx = {}) {
         this.ws.offGlobal(handler);
         if (msg.messages?.length) {
           chatView.loadHistory(msg.messages, msg.totalCount, false, { chatStatus: msg.chatStatus });
+        } else {
+          // Zero messages (empty/aborted transcript, or a brand-new session
+          // whose JSONL hasn't flushed yet) — say so instead of a silent blank
+          // pane (blank windows read as bugs; real user report).
+          chatView._renderers.appendSystem(t("No messages in this session's transcript yet."));
         }
       }
     };
