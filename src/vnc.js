@@ -26,7 +26,7 @@ const { spawn, execFileSync } = require('child_process');
 
 const VNC_PORT = parseInt(process.env.VIBESPACE_VNC_PORT || '', 10) || 5901;
 const VNC_DISPLAY = process.env.VIBESPACE_VNC_DISPLAY || ':7';
-const VNC_GEOMETRY = process.env.VIBESPACE_VNC_GEOMETRY || '1440x900';
+const VNC_GEOMETRY = process.env.VIBESPACE_VNC_GEOMETRY || '1920x1080';
 
 function which(cmd) {
   try { return execFileSync('which', [cmd], { timeout: 2000 }).toString().trim() || null; } catch { return null; }
