@@ -1,7 +1,7 @@
 {
   "name": "vibespace",
-  "version": "2.98.0",
-  "description": "VibeSpace \u2014 a backend-agnostic web workspace for coding agents (Claude Code, Codex, \u2026) with a multi-session tiling window manager",
+  "version": "2.99.0",
+  "description": "VibeSpace — a backend-agnostic web workspace for coding agents (Claude Code, Codex, …) with a multi-session tiling window manager",
   "main": "server.js",
   "scripts": {
     "build": "esbuild src/client.js --bundle --outfile=public/bundle.js --format=iife --platform=browser --target=es2020 --loader:.css=css --minify",

@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.99.0 — 2026-07-10
+
+**Mobile adaptation of the recent feature batch (usage, quota, multi-account)**
+- **Mobile nav gained two entry points** the phone never had (the taskbar — quota pies, inbox, gear — is hidden ≤768px): a **⚙ gear** opening the full gs-menu (Usage window, Manage agents, Diagnostics report, Settings, Backup…) and a **worst-of quota donut chip** (max utilization across all Claude/Codex buckets, usual green/amber/red coloring) opening the usage popup — 剩余用量 + the per-account switcher chips now fully reachable on phones.
+- Usage popup + global-settings popover render as full-width sheets under the nav bar on phones (stylesheet `!important` clamps deliberately beat the JS anchor's inline position).
+- **Usage dashboard: one panel per row on phones** — the 2-col grid pushed the right column off a 390px screen. Also fixed `.udash-add` forcing an implicit second grid track via `grid-column: span 2` (→ `1 / -1`, correct at any column count), which kept the whole grid at 712px even in 1-col mode.
+- **Billing switcher from the session card context menu** (right-click / long-press → “Switch billing…”): `showBillingSwitcher` now accepts a session object + `{x,y}` anchor — no window needed, which is what phones require (no title bars → no identity badge). A stopped session's “current” account is its saved on-resume config. Desktop badge path unchanged.
+- Verified on a 390×844 viewport: task-log viewer, Manage Agents dialog (account rosters + donuts), and the Diagnostics report already render well full-screen — no changes needed there.
+
 ## 2.98.0 — 2026-07-10
 
 **Dashboard: ONE chart engine for everything (Chart.js v4, modular)**

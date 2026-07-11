@@ -728,6 +728,12 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       if (!app.isMobile) items.push({ label: tr('Move window…'), action: () => app.moveSessionWindow(s.webuiId) });
     }
     items.push({ separator: true });
+    // Billing switch straight from the card — on phones there are no window
+    // title bars, so the title-bar identity badge (the desktop entry point)
+    // doesn't exist; this menu is the universal path.
+    if ((s.backend || 'claude') === 'claude' || s.backend === 'codex') {
+      items.push({ label: tr('Switch billing…'), action: () => app.showBillingSwitcher(s, { x: e.clientX, y: e.clientY }) });
+    }
     items.push({ label: tr('Properties…'), action: () => app.openSessionProps(s) });
     if (s.status !== 'stopped') {
       items.push({

@@ -16,17 +16,22 @@ export function installUsageMeter(App, ctx = {}) {
     const usageEl = document.getElementById('taskbar-usage');
     const popup = document.getElementById('usage-popup');
 
-    usageEl.onclick = () => {
+    const togglePopup = (anchorEl) => {
       popup.classList.toggle('hidden');
       // Anchor to the button's CURRENT position — customize mode can move it
       // to any bar, so the old fixed bottom-right CSS pointed nowhere.
       if (!popup.classList.contains('hidden')) {
-        anchorFixedPopup(popup, usageEl);
+        anchorFixedPopup(popup, anchorEl);
         this._maybeAutoRefreshQuota();
       }
     };
+    usageEl.onclick = () => togglePopup(usageEl);
+    // Phone entry point: the taskbar is hidden ≤768px, so the mobile nav's
+    // quota chip is the only way to reach the popup (incl. account switching).
+    const mChip = document.getElementById('mobile-nav-usage');
+    if (mChip) mChip.onclick = () => togglePopup(mChip);
     document.addEventListener('mousedown', (e) => {
-      if (!popup.contains(e.target) && !usageEl.contains(e.target)) popup.classList.add('hidden');
+      if (!popup.contains(e.target) && !usageEl.contains(e.target) && !(mChip && mChip.contains(e.target))) popup.classList.add('hidden');
     });
     // Account switcher chips (popup re-renders every poll → delegate)
     popup.addEventListener('click', (e) => {
@@ -226,6 +231,7 @@ export function installUsageMeter(App, ctx = {}) {
 
     const rows = [];
     const sections = [];
+    let chipWorst = -1; // worst utilization across all shown buckets — feeds the mobile nav chip
     const agoText = (ts) => {
       if (!ts) return '—';
       const m = Math.round((Date.now() - ts) / 60000);
@@ -248,6 +254,7 @@ export function installUsageMeter(App, ctx = {}) {
       const pct7d = Math.round((rl?.sevenDay?.utilization || 0) * 100);
       const color7d = usageColor(pct7d);
       rows.push(renderRow('claude', '5h', pct5h, '7d', pct7d, noData));
+      if (!noData) chipWorst = Math.max(chipWorst, pct5h, pct7d);
       // Account switcher — one chip per viewable identity. When the CLI login
       // is a named account (gl.accountId), NO separate CLI-login chip renders:
       // that account's chip covers both (tooltip says so). ★ marks the default.
@@ -321,6 +328,7 @@ export function installUsageMeter(App, ctx = {}) {
       const color5h = usageColor(pct5h);
       const color7d = usageColor(pct7d);
       rows.push(renderRow('codex', '5h', pct5h, '7d', pct7d, cNoData));
+      if (!cNoData) chipWorst = Math.max(chipWorst, pct5h, pct7d);
       // Account switcher — same model as Claude's: merged chip when the machine
       // login IS a named account, ★ marks the default; data-be routes the click.
       let cSwitcher = '';
@@ -368,6 +376,19 @@ export function installUsageMeter(App, ctx = {}) {
     // claude poll (e.g. signed out) must not make codex's data look stale too.
     const secHtml = sections.join('');
     if (secHtml !== this._usageSecHtml) { this._usageSecHtml = secHtml; popup.innerHTML = secHtml; }
+    // Mobile nav quota chip: one worst-of donut (there's no room for the full
+    // per-backend pie rows in the nav bar). Same change-guard discipline.
+    const mChip = document.getElementById('mobile-nav-usage');
+    if (mChip) {
+      const deg = Math.round(Math.max(0, Math.min(100, chipWorst)) * 3.6);
+      const chipHtml = chipWorst < 0 ? '' :
+        `<div class="usage-pie usage-donut" style="background:conic-gradient(${usageColor(chipWorst)} ${deg}deg, var(--bg-input) ${deg}deg)"><span class="usage-donut-label">${Math.round(chipWorst)}</span></div>`;
+      if (chipHtml !== this._usageChipHtml) {
+        this._usageChipHtml = chipHtml;
+        mChip.innerHTML = chipHtml;
+        mChip.classList.toggle('hidden', !chipHtml);
+      }
+    }
   },
   });
 }

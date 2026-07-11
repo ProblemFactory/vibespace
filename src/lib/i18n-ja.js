@@ -1104,6 +1104,8 @@ export default {
   'Subscription account': 'サブスクリプションアカウント',
   'Click to switch billing': 'クリックで課金アカウントを切り替え',
   'Switch billing to “{name}”?': '課金を「{name}」に切り替えますか？',
+  'Switch billing…': '課金を切り替え…',
+  'Usage & quota': '使用量とクォータ',
   'The account is fixed when the CLI starts, so the session restarts and the conversation continues via resume.': 'アカウントは CLI 起動時に固定されるため、セッションを再起動します。会話は resume で継続されます。',
   'Switch & restart': '切り替えて再起動',
   'Nothing to resume yet — send a message first, or pick the account in the New Session dialog': 'まだ再開できる会話がありません — まずメッセージを送るか、新規セッションでアカウントを選んでください',

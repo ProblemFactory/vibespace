@@ -378,18 +378,30 @@ export function installSessionLifecycle(App, ctx = {}) {
   // conversation on the new account. Also works on already-terminated
   // (read-only) windows, where it just resumes on the picked account.
   showBillingSwitcher(winId, anchor) {
-    const term = this.sessions.get(winId);
-    const win = this.wm.windows.get(winId);
-    if (!win) return;
-    const spec = win._openSpec || {};
-    const allSess = this.sidebar?._allSessions || [];
-    const live = term ? allSess.find(s => s.webuiId === term.sessionId) : null;
+    // Two call shapes: (windowId, anchorElement) from the title-bar identity
+    // badge, or (sessionObject, {x,y}) from the sidebar card context menu —
+    // the card path has no window (and phones have no title-bar badges).
+    let win = null, spec = {}, live = null;
+    if (winId && typeof winId === 'object') {
+      live = winId;
+    } else {
+      const term = this.sessions.get(winId);
+      win = this.wm.windows.get(winId);
+      if (!win) return;
+      spec = win._openSpec || {};
+      const allSess = this.sidebar?._allSessions || [];
+      live = term ? allSess.find(s => s.webuiId === term.sessionId) : null;
+    }
     const backend = live?.backend || spec.backend || 'claude';
     if (backend !== 'claude' && backend !== 'codex') return;
-    const backendSessionId = live?.backendSessionId || spec.backendSessionId || null;
+    const backendSessionId = live?.backendSessionId || spec.backendSessionId || live?.sessionId || null;
     const isCodex = backend === 'codex';
     const accts = (this._accounts?.accounts || []).filter(a => ((a.backend || 'claude') === 'codex') === isCodex);
-    const currentId = live ? (live.accountId || null) : null;
+    // A stopped session has no live accountId — its saved on-resume account
+    // config is the honest "current" (that's what the next resume bills to).
+    const savedAcct = !live?.webuiId
+      ? this.sidebar?.getSessionConfig?.(`${backend}:${backendSessionId}`)?.account : null;
+    const currentId = live?.accountId || (savedAcct && savedAcct !== 'subscription' ? savedAcct : null) || null;
     const doSwitch = async (acctVal, label) => {
       if (!backendSessionId) {
         showToast(t('Nothing to resume yet — send a message first, or pick the account in the New Session dialog'), { type: 'error' });
@@ -403,11 +415,11 @@ export function installSessionLifecycle(App, ctx = {}) {
       if (!ok) return;
       const key = spec.sessionKey || `${backend}:${backendSessionId}`;
       this.sidebar?.setSessionConfig?.(key, { ...(this.sidebar?.getSessionConfig?.(key) || {}), account: acctVal });
-      const name = this.sidebar?.getCustomName?.({ backend, backendSessionId }) || live?.name || spec.name || win.title || t('Session');
+      const name = this.sidebar?.getCustomName?.({ backend, backendSessionId }) || live?.name || spec.name || win?.title || t('Session');
       const cwd = live?.cwd || spec.cwd || '';
-      const mode = live?.webuiMode || (win.type === 'terminal' ? 'terminal' : 'chat');
+      const mode = live?.webuiMode || (win ? (win.type === 'terminal' ? 'terminal' : 'chat') : (this.settings.get('session.defaultMode') || 'chat'));
       const hostId = live?.host || undefined;
-      const winBounds = this._snapshotWinBounds(this.wm.windows.get(winId));
+      const winBounds = win ? this._snapshotWinBounds(this.wm.windows.get(winId)) : undefined;
       const finish = () => this.resumeSession(backendSessionId, cwd, name, { mode, backend, backendSessionId, accountId: acctVal, hostId, winBounds });
       if (live?.webuiId) {
         this.ws.send({ type: 'kill', sessionId: live.webuiId });
@@ -423,8 +435,12 @@ export function installSessionLifecycle(App, ctx = {}) {
       const suffix = (!isCodex && (a.type || 'api') !== 'subscription') ? ' · API' : '';
       items.push({ label: (cur ? '✓ ' : '') + a.name + suffix, action: () => { if (!cur) doSwitch(a.id, a.name); } });
     }
-    const r = anchor.getBoundingClientRect();
-    showContextMenu(r.left, r.bottom + 4, items);
+    if (anchor && typeof anchor.getBoundingClientRect === 'function') {
+      const r = anchor.getBoundingClientRect();
+      showContextMenu(r.left, r.bottom + 4, items);
+    } else {
+      showContextMenu(anchor?.x || 40, anchor?.y || 40, items);
+    }
   },
 
   // Clicking Fork opens a popup for the first message. The fork only diverges

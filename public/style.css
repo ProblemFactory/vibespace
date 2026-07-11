@@ -1565,6 +1565,19 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
 #mobile-nav-new { color: var(--accent); font-weight: 700; }
 #mobile-nav-close { font-size: 16px; color: var(--text-dim); display: none; }
 @media (max-width: 768px) { #mobile-nav-close { display: block; } }
+/* ⚙ + quota chip — the taskbar (gear, pies, popup anchors) is hidden ≤768px,
+   so these are the phone's only entry points to the gs-menu / usage popup */
+#mobile-nav-gear {
+  background: none; border: none; color: var(--text-secondary); cursor: pointer;
+  padding: 4px 6px; flex-shrink: 0; display: flex; align-items: center;
+}
+#mobile-nav-usage {
+  background: none; border: none; cursor: pointer; padding: 2px 4px;
+  flex-shrink: 0; display: flex; align-items: center;
+}
+#mobile-nav-usage.hidden { display: none; }
+#mobile-nav-usage { --usage-pie-size: 22px; }
+#mobile-nav-usage .usage-donut::before { background: var(--bg-toolbar); }
 #mobile-nav-title {
   flex: 1; font-size: 14px; font-weight: 600; color: var(--text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center;
@@ -1590,6 +1603,21 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
     display: flex !important; position: sticky; top: 0; z-index: 100;
     background: var(--bg-toolbar);
   }
+
+  /* Popups anchored to mobile-nav buttons: full-width sheets under the nav.
+     !important intentionally beats the inline left/top that anchorFixedPopup /
+     _showGlobalSettings set (stylesheet !important > inline non-important). */
+  .usage-popup {
+    left: 8px !important; right: 8px !important; top: 48px !important;
+    bottom: auto !important; width: auto !important; max-width: none;
+    max-height: calc(100dvh - 60px); z-index: 90001;
+  }
+  .global-settings-popover {
+    left: 8px !important; right: 8px !important; top: 48px !important;
+    width: auto !important; max-width: none;
+    max-height: calc(100dvh - 60px); overflow-y: auto; z-index: 90001;
+  }
+
 
   /* Windows: fill workspace, only active visible, no chrome */
   .window {
@@ -2642,6 +2670,12 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 .udash-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
 .udash-panel { background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; min-height: 90px; display: flex; flex-direction: column; }
 .udash-span2 { grid-column: span 2; }
+/* Phones: one panel per row — the 2-col grid pushed the right column off a
+   390px screen. Must live AFTER the base rules (equal specificity). */
+@media (max-width: 768px) {
+  .udash-grid { grid-template-columns: 1fr; }
+  .udash-span2 { grid-column: auto; }
+}
 .udash-panel-head { display: flex; align-items: baseline; gap: 6px; margin-bottom: 6px; }
 .udash-panel-title { flex: 1; min-width: 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .udash-panel-tools { display: flex; gap: 2px; opacity: 0; transition: var(--transition); }
@@ -2669,7 +2703,7 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 .udash-table th:first-child, .udash-table td.udash-td-key { text-align: left; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .udash-table td { padding: 2px 6px; border-top: 1px solid color-mix(in srgb, var(--border) 40%, transparent); }
 .udash-table td.udash-td-num { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-secondary); }
-.udash-add { grid-column: span 2; background: none; border: 1px dashed var(--border); border-radius: var(--radius); color: var(--text-dim); cursor: pointer; padding: 10px; font-size: 12px; transition: var(--transition); }
+.udash-add { grid-column: 1 / -1; background: none; border: 1px dashed var(--border); border-radius: var(--radius); color: var(--text-dim); cursor: pointer; padding: 10px; font-size: 12px; transition: var(--transition); }
 .udash-add:hover { border-color: var(--accent); color: var(--accent); }
 .udash-editor { display: flex; flex-direction: column; gap: 6px; padding: 10px; min-width: 220px; background: var(--bg-dialog); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,0.35); }
 .udash-editor-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 11px; color: var(--text-secondary); }
