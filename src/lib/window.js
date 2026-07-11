@@ -33,7 +33,24 @@ class WindowManager {
     installTabGroupMixin(this);
   }
 
+  // Mobile: the sidebar is a full-screen overlay, so creating/focusing a
+  // window with it open looks like a no-op (window lands BEHIND it — real
+  // report: card menu → Properties "did nothing"). Any window navigation
+  // yields the sidebar. Guard: layout restore / remote layout-sync apply
+  // (layoutManager._restoring covers both) must not yank a sidebar the user
+  // is browsing. Deliberately NOT guarded on desktopManager._restoring — it
+  // stays true for 1s past switchTo's resolve, which would make cross-desktop
+  // goToWindow (the sidebar's own 前往窗口) leave the sidebar open; on mobile
+  // no other switchTo path can run while the sidebar is open.
+  _mobileYieldSidebar() {
+    const app = this.app;
+    if (!app?.isMobile || !app.sidebar?.isOpen) return;
+    if (app.layoutManager?._restoring) return;
+    app.sidebar.toggle(false);
+  }
+
   createWindow({ title, type, x, y, width, height, syncId, openSpec, titleMeta }) {
+    this._mobileYieldSidebar();
     const id = syncId || ('win-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6));
     this.windowCounter++;
     if (x === undefined) { const o = (this.windowCounter % 8) * 30; x = 40 + o; y = 40 + o; }
@@ -752,6 +769,7 @@ class WindowManager {
   // ── Layout Presets ──
   focusWindow(id, { bounce = false } = {}) {
     const win = this.windows.get(id); if (!win) return;
+    this._mobileYieldSidebar();
     // If this window is a grouped guest, focus the host and switch to this tab
     if (win._tabChain && win._tabChain.tabs[0] !== win.id) {
       const idx = win._tabChain.tabs.indexOf(win.id);

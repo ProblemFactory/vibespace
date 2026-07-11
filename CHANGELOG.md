@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.99.2 — 2026-07-11
+
+**Mobile navigation coherence + usage window horizontal-scrollbar elimination**
+- **Sidebar now auto-yields on mobile whenever a window opens or gets focused** (real report: card menu → Properties looked like a no-op — the window landed BEHIND the full-screen sidebar overlay). Centralized in `wm.createWindow`/`wm.focusWindow` (`_mobileYieldSidebar`, guarded by `layoutManager._restoring` so boot restore / remote layout-sync never yank the sidebar mid-browse) instead of per-call-site patches — covers Properties, task detail/log, file explorer, View History, viewers, cross-desktop Go-to-window, everything. `_showDialog` closes it too (the `#dialog-overlay` dialogs sit below the sidebar; fork/new-session had per-site patches, now central). Audited the rest: utils dialogs (z 99998) and context menus/popovers (z 99999) already render above the sidebar (z 90000) — no change needed.
+- **Mobile window-switcher billing chip no longer strands its menu** (report: tapping the chip closed the window list, leaving the switcher menu floating context-less). The list now stays open underneath — its outside-tap close follows the app's chained-popover rule (taps inside `[data-popover]` / dialogs are child interactions, not dismissals).
+- **Usage window: horizontal scrollbars eliminated across sizes** (report: adaptivity was still insufficient). The whole class of blowouts was grid items' default `min-width:auto`: `.udash-grid` tracks are now `minmax(0,1fr)`, panels are `min-width:0` + `container-type:inline-size` (content can never dictate panel width), stat numbers scale with the panel (`font-size: clamp(14px,10cqw,30px)`), tables scroll inside their panel body, `.usage-seg` segments wrap, classic view's `minmax(340px,…)` floors at `min(340px,100%)`, and `.usage-body` is `overflow-x:hidden` as the final guarantee. Verified zero overflow at 420–1100px in both dashboard and classic views.
+
 ## 2.99.1 — 2026-07-11
 
 **Current-session billing switcher on mobile + dashboard window-width adaptivity**
