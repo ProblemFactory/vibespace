@@ -126,6 +126,12 @@ class WindowManager {
       width: q(el.offsetWidth / r.width),
       height: q(el.offsetHeight / r.height),
     };
+    // Keep the desktop previews honest: the drag path mutates preview rects
+    // DIRECTLY (live tracking), which the switcher's digest guard cannot see —
+    // a drag that ends back on the same bounds (re-snap to the same zone)
+    // left the rect frozen mid-drag forever. Every bounds capture forces a
+    // (debounced, digest-invalidating) re-render.
+    this.app?.desktopManager?.refreshSwitcher?.();
   }
 
   _applyGridBounds(win) {
@@ -272,7 +278,14 @@ class WindowManager {
         if (this.grid) this.gridOverlay.classList.add('dragging');
       }
 
-      element.style.left = (initL + dx) + 'px'; element.style.top = (initT + dy) + 'px';
+      // Recompute against the CURRENT drag base — the un-snap/un-maximize
+      // branches above re-anchor initL/startX mid-frame (center on cursor),
+      // and applying the dx computed against the OLD startX offset the window
+      // by however far the pointer had traveled since mousedown (with rAF
+      // coalescing that's the whole first-frame sweep — the reported
+      // "snapped window drifts away from the pointer").
+      element.style.left = (initL + (e.clientX - startX)) + 'px';
+      element.style.top = (initT + (e.clientY - startY)) + 'px';
 
       // Shake detection runs on the raw cursor path (before any snap decision).
       updateShake(e);

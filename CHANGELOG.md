@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.100.2 — 2026-07-11
+
+**Desktop-preview staleness + snapped-window drag drift**
+- **Blank preview after switching desktops** (report): lazy-replayed windows get their `gridBounds` from async capture timers AFTER the switcher's last render, and nothing re-rendered it — the newly active desktop's preview stayed white until the next unrelated interaction. `switchTo` now schedules digest-invalidating refreshes (+400ms/+1300ms); verified across a full 3-desktop round trip.
+- **Preview rect frozen mid-drag after re-snapping to the same zone** (report): the drag path live-mutates the active preview's rects DIRECTLY, which the switcher's change-digest cannot see — a drag ending on identical bounds skipped the rebuild and the stale rect persisted forever. Every `_captureGridBounds` (drag end, snap timers, resize, applyLayout) now triggers a debounced digest-invalidating `refreshSwitcher()`.
+- **Snapped window drifting away from the pointer while dragged** (report): `processMove` computed the drag delta against `startX` BEFORE the un-snap branch re-anchored `initL/startX` mid-frame, then applied the stale delta on top of the new anchor — the window rode at a constant offset equal to the pointer's first-frame sweep (large under rAF coalescing). Position now derives from the current anchor at application time; the un-maximize drag path had the same defect and is fixed by the same line.
+
 ## 2.100.1 — 2026-07-11
 
 **Backup & migrate dialog layout fixed**

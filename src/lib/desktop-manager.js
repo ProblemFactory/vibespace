@@ -232,6 +232,13 @@ export class DesktopManager {
       this._renderSwitcher();
       this.app.updateTaskbar();
       this.app._checkWelcome();
+      // Lazy-replayed windows get their gridBounds AFTER this render (async
+      // capture timers) and nothing re-renders the switcher on its own — the
+      // newly active desktop's preview stayed white until the next unrelated
+      // interaction (real report). Two delayed digest-invalidating refreshes
+      // (the second covers slow replays, e.g. chat windows re-attaching).
+      setTimeout(() => this.refreshSwitcher(), 400);
+      setTimeout(() => this.refreshSwitcher(), 1300);
 
       // 8. Broadcast (save previous desktop's state, then save current desktop)
       // Use non-restoring doAutoSave for the previous desktop
@@ -330,6 +337,19 @@ export class DesktopManager {
   }
 
   // ── UI: Ubuntu-style desktop previews in taskbar ──
+
+  // Digest-invalidating re-render, debounced. Needed when the preview DOM is
+  // stale in a way the digest can't detect (the drag path live-mutates rects
+  // directly) or when gridBounds arrive after the last render (async capture
+  // timers after switch/snap). Called from wm._captureGridBounds + switchTo.
+  refreshSwitcher() {
+    if (this._refreshT) return;
+    this._refreshT = setTimeout(() => {
+      this._refreshT = null;
+      this._switcherDigest = null;
+      this._renderSwitcher();
+    }, 60);
+  }
 
   _renderSwitcher() {
     const container = document.getElementById('desktop-previews');
