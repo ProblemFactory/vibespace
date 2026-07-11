@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.105.2 — 2026-07-11
+
+**Remote-host session blank on other clients (real report) — three cooperating fixes**
+- ROOT CAUSE 1 (pollution): `syncSessionIdentity` and `captureState` wrote the WEBUI server id into `backendSessionId` whenever the CLI hadn't reported its real id yet — remote spawns stay in that state for a long time (the id only arrives via remote discovery). Other clients then re-resolved the openSpec against that bogus id, missed, and opened a BLANK view-only window. All three sites now refuse to bake a webui id (`match.sessionId === match.webuiId` guard).
+- ROOT CAUSE 2 (race): a layout-sync replay can arrive BEFORE the receiving client's session list knows a just-created serverId — `replayOpenSpec` treated that as "session dead" and fell to viewSession-with-bogus-id. It now attaches directly by serverId (the server is authoritative; a genuinely dead session's attach errors into the read-only path anyway) and treats a bsid equal to the serverId (legacy polluted autosaves) as no bsid. Same legacy guard in `restoreState`.
+- `hostId` now rides in attachSession openSpecs (create + attach + identity sync) and is threaded to the dead-session viewSession fallbacks, so a remote session's history view resolves over ssh after the session dies.
+- Bonus (found reproducing): a REFUSED create (e.g. the remote subscription-shipping policy) left a permanently blank window with no feedback — the create handler now surfaces the server's error in the window + a toast.
+- Verified by controlled repro: polluted spec + session-unknown race on a second client → was a blank viewOnly shell, now a live chat with input.
+
 ## 2.105.1 — 2026-07-11
 
 - **First-terminal ugly font, the OTHER half (still reproduced on managed instances after 2.105.0)**: the font LIST builds asynchronously (queryLocalFonts + /api/fonts, which runs fc-list server-side — slow on a container's first call). A terminal created before it resolves fell back to bare `monospace` and KEPT it forever — the reported "switch fonts and it heals" is exactly that. A fallback-created terminal now upgrades to the real default the moment the list lands (atlas rebuild + refit + the 2.105.0 FOUT watcher re-armed for the new family). The 2.105.0 registration-polling half was verified on a true cleared-cache run: faces registered-but-unloaded at terminal open → poll → load() pulls the binaries → repaint.

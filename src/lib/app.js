@@ -1738,10 +1738,18 @@ class App {
       // the identity chip there instead (same click-to-switch).
       if (this.isMobile) session.setBillingIdentity?.(match.auth || null, (el) => this.showBillingSwitcher(winId, el));
       if (win._openSpec) {
+        // NEVER write the webui server id into backendSessionId: a session
+        // whose CLI hasn't reported its real id yet (remote spawns stay in
+        // that state for a long time) used to get `sess-N-…` baked into the
+        // spec — other clients then re-resolved against that bogus id, missed,
+        // and opened a BLANK view-only window (real report, remote hosts).
+        const realBsid = match.backendSessionId
+          || (match.sessionId && match.sessionId !== match.webuiId ? match.sessionId : null);
         Object.assign(win._openSpec, {
           backend: match.backend || win._openSpec.backend || 'claude',
-          backendSessionId: match.backendSessionId || match.sessionId,
-          sessionKey: match.sessionKey || getSessionKey(match),
+          backendSessionId: realBsid || win._openSpec.backendSessionId || null,
+          sessionKey: realBsid ? (match.sessionKey || getSessionKey(match)) : (win._openSpec.sessionKey || ''),
+          hostId: match.hostId ?? win._openSpec.hostId ?? null,
           name: match.name || win._openSpec.name || '',
           agentKind: match.agentKind || 'primary',
           agentRole: match.agentRole || '',
