@@ -16,11 +16,11 @@ stringData:
   {{- with .Values.telemetry.ingestToken }}
   telemetryIngestToken: {{ . | quote }}
   {{- end }}
-  {{- if .Values.s3.accessKey }}
+  {{- if and .Values.s3 .Values.s3.accessKey }}
   s3AccessKey: {{ .Values.s3.accessKey | quote }}
   s3SecretKey: {{ .Values.s3.secretKey | quote }}
   {{- end }}
-  {{- if .Values.cephfs.secret }}
+  {{- if and .Values.cephfs .Values.cephfs.secret }}
   cephfsSecret: {{ .Values.cephfs.secret | quote }}
   {{- end }}
 ---
@@ -69,7 +69,7 @@ spec:
         - name: vibespace
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          {{- if or .Values.fuse.enabled .Values.cephfs.mons }}
+          {{- if or (and .Values.fuse .Values.fuse.enabled) (and .Values.cephfs .Values.cephfs.mons) }}
           # fuse AND cephfs need the same gates: CAP_SYS_ADMIN in the bounding
           # set (setuid fusermount3 / mount -t ceph transition into it) +
           # AppArmor unconfined — the containerd default profile denies mount()
@@ -95,7 +95,7 @@ spec:
             - name: VIBESPACE_CLERK_ALLOWED_EMAILS
               value: {{ . | quote }}
             {{- end }}
-            {{- if and .Values.s3.endpoint .Values.s3.bucket .Values.s3.accessKey }}
+            {{- if and .Values.s3 .Values.s3.endpoint .Values.s3.bucket .Values.s3.accessKey }}
             - name: VIBESPACE_S3_ENDPOINT
               value: {{ .Values.s3.endpoint | quote }}
             - name: VIBESPACE_S3_BUCKET
@@ -109,7 +109,7 @@ spec:
             - name: VIBESPACE_S3_SECRET_KEY
               valueFrom: { secretKeyRef: { name: {{ $name }}, key: s3SecretKey } }
             {{- end }}
-            {{- if and .Values.cephfs.mons .Values.cephfs.secret }}
+            {{- if and .Values.cephfs .Values.cephfs.mons .Values.cephfs.secret }}
             # All-flash CephFS "My storage" (native kernel mount; REPLACES S3
             # when both set). Needs securityContext SYS_ADMIN + AppArmor
             # Unconfined (already on for fuse) + passwordless sudo (image).
@@ -159,7 +159,7 @@ spec:
             requests: {{- toYaml .Values.resources.requests | nindent 14 }}
             limits:
               {{- toYaml .Values.resources.limits | nindent 14 }}
-              {{- if .Values.fuse.enabled }}
+              {{- if and .Values.fuse .Values.fuse.enabled }}
               {{ .Values.fuse.resource | default "github.com/fuse" }}: 1
               {{- end }}
       volumes:
