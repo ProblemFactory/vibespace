@@ -1,7 +1,8 @@
 import { App } from './lib/app.js';
 import { applyI18nToDom } from './lib/i18n.js';
-import { installTelemetry, track, reportBootTime } from './lib/telemetry-client.js';
+import { installTelemetry, track, reportBootTime, installOverlapTracer } from './lib/telemetry-client.js';
 installTelemetry(); // BEFORE App: a boot crash must be captured, not silent
+installOverlapTracer(); // TEMPORARY (code-line overlap diagnosis — see telemetry-client.js)
 window.addEventListener('DOMContentLoaded', async () => {
   applyI18nToDom(); // translate index.html static text BEFORE App reads/moves DOM
   try {

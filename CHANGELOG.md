@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.105.0 — 2026-07-11
+
+**Terminal font FOUT: the real fix (registration polling)**
+- 2.100.6's fix didn't survive a COLD-CACHE first visit (real report from a fresh managed instance): before the Google Fonts CSS itself loads, EVERY fonts API lies — `document.fonts.load(spec)` resolves empty immediately (no face registered), `fonts.ready` resolves early ("no loads pending" ≠ "my font arrived"), and `check(spec)` returns TRUE for an unregistered family (verified live — it only returns false for a registered-but-unloaded face). Both old triggers fired before the font existed.
+- The one honest signal is REGISTRATION: the family appears in `document.fonts` only once its CSS has landed. `_refreshOnFontReady` now polls for that (500ms × 40), then `load()`s for real and rebuilds the texture atlas when faces actually deliver. Warm cache = zero work; system/local fonts = no repaint needed (first paint was already correct). Verified deterministically: late-injected font CSS → repaint 513ms after it lands; warm path → 0 spurious repaints.
+
+**Onboarding: theme choice on step 0 (user request)**
+- Theme chips (all 6 built-ins, with color dots) next to the language chips — applied LIVE via ThemeManager (per-device, like the ⚙ picker), the wizard itself recolors as immediate feedback.
+
+**TEMPORARY: code-line overlap tracer**
+- A long code-block line painting its wrapped continuation over itself (Chrome/mac, persistent, scroll doesn't heal; a fresh rebuild of the same card measures clean). `installOverlapTracer` (telemetry-client.js) samples visible code lines every 10s and ships one geometry+computed-style diagnostic when sibling rows overlap or a row paints taller than its box. Removed once diagnosed — same playbook as the 2.100.3 drag tracer.
+
 ## 2.104.1 — 2026-07-11
 
 - Clerk login page: clerk-js v5 from the CDN self-bootstraps `window.Clerk` as an INSTANCE via the `data-clerk-publishable-key` script attribute — constructing it threw "window.Clerk is not a constructor" (real report from the first deployed test). The loader now sets the attribute and accepts both shapes.

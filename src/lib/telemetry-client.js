@@ -105,3 +105,57 @@ export function reportBootTime() {
     if (ms > 0 && ms < 300000) metric('boot-to-ready-ms', ms);
   } catch {}
 }
+
+// ── TEMPORARY code-line overlap tracer (2.105.x, remove after diagnosis) ──
+// Real report: in a chat code block a LONG line paints its wrapped
+// continuation ON TOP of itself (Chrome/mac, persistent — scrolling away and
+// back does not heal it). A fresh view-only rebuild of the same card measures
+// clean, so the bad state depends on the live window's history. This scanner
+// samples VISIBLE code lines every 10s and, when two sibling rows' rects
+// overlap vertically (or a row paints taller than its layout box), ships ONE
+// diagnostic event with the geometry + computed styles that matter
+// (white-space, content-visibility/contain of the enclosing .chat-msg, wrap
+// class, char length). Names/numbers only — never text content.
+let overlapReports = 0;
+export function installOverlapTracer() {
+  const scan = () => {
+    if (overlapReports >= 3) return;
+    try {
+      for (const block of document.querySelectorAll('.chat-code-block')) {
+        const brect = block.getBoundingClientRect();
+        if (!brect.height || brect.bottom < 0 || brect.top > innerHeight) continue; // offscreen
+        const lines = block.querySelectorAll('.chat-code-line');
+        let prev = null;
+        for (const row of lines) {
+          const r = row.getBoundingClientRect();
+          if (!r.height) { prev = { row, r }; continue; }
+          const text = row.querySelector('.chat-code-text');
+          const overlapPrev = prev && r.top < prev.r.bottom - 2;
+          const paintsTaller = text && text.scrollHeight > r.height + 4;
+          if (overlapPrev || paintsTaller) {
+            overlapReports++;
+            const msg = block.closest('.chat-msg');
+            const cs = text ? getComputedStyle(text) : null;
+            const csMsg = msg ? getComputedStyle(msg) : null;
+            track('error', 'code-line-overlap', JSON.stringify({
+              kind: overlapPrev ? 'sibling-overlap' : 'paints-taller',
+              rowH: Math.round(r.height), textScrollH: text?.scrollHeight,
+              prevBottom: prev ? Math.round(prev.r.bottom) : null, top: Math.round(r.top),
+              chars: text?.textContent?.length, nLines: lines.length,
+              ws: cs?.whiteSpace, wb: cs?.wordBreak, lh: cs?.lineHeight,
+              wrapped: block.classList.contains('chat-pre-wrapped'),
+              cv: csMsg?.contentVisibility, contain: csMsg?.contain,
+              inDetails: !!row.closest('details'), detailsOpen: !!row.closest('details[open]'),
+              dpr: devicePixelRatio,
+            }));
+            flush();
+            if (overlapReports >= 3) return;
+            break; // one report per block per pass
+          }
+          prev = { row, r };
+        }
+      }
+    } catch {}
+  };
+  setInterval(scan, 10000);
+}

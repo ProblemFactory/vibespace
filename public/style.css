@@ -1842,6 +1842,9 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .ob-lang:hover { border-color: var(--accent); color: var(--accent); }
 .ob-lang.active { border-color: var(--accent); color: var(--accent);
   background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.ob-themes { flex-wrap: wrap; margin-top: -10px; }
+.ob-theme i { display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+  border: 1px solid var(--border); margin-right: 5px; vertical-align: -1px; }
 .ob-points { display: flex; flex-direction: column; gap: 12px; text-align: left; margin-bottom: 22px; }
 .ob-point { display: flex; flex-direction: column; gap: 2px; padding: 10px 14px;
   background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius); }

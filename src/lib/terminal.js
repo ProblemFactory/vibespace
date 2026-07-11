@@ -634,21 +634,51 @@ class TerminalSession {
   // is absent. The family string may be a fallback list ("Fira Code", monospace)
   // — load() wants a single family, so try the first token.
   _refreshOnFontReady(family, size) {
-    if (!family || typeof document === 'undefined' || !document.fonts?.ready) return;
+    if (!family || typeof document === 'undefined' || !document.fonts?.check) return;
     const first = String(family).split(',')[0].trim().replace(/^["']|["']$/g, '');
+    if (!first || first.toLowerCase() === 'monospace') return;
+    const spec = `${size || 14}px "${first}"`;
     const repaint = () => {
       if (this._disposed || !this.terminal) return;
       try { this.terminal.clearTextureAtlas(); } catch {}
       this.fit();
     };
-    const spec = `${size || 14}px "${first}"`;
-    const done = () => { repaint(); setTimeout(repaint, 250); };
-    try {
-      // Explicit load (a canvas-used font isn't guaranteed to trigger a fetch),
-      // then the global ready as a backstop.
-      if (first && first.toLowerCase() !== 'monospace') document.fonts.load(spec).then(done, () => {});
-      document.fonts.ready.then(done);
-    } catch {}
+    // POLL for FontFace REGISTRATION (2.105.0, real report from a fresh
+    // instance): on a COLD-CACHE first visit the Google Fonts CSS itself
+    // hasn't loaded when the first terminal opens. In that window EVERY
+    // fonts API lies: load(spec) resolves EMPTY immediately (no face to
+    // load), fonts.ready resolves early ("no loads pending" ≠ "my font
+    // arrived"), and check(spec) returns TRUE for an unregistered family
+    // (no @font-face ⇒ "would render with a system fallback, nothing to
+    // load" — verified live; it only returns false for a registered-but-
+    // unloaded face). The one honest signal is REGISTRATION: the family
+    // appears in document.fonts only once its CSS has landed. Poll for
+    // that, then load(spec) for real, repaint when it delivers faces.
+    // No face after 20s ⇒ it's a local/system font — the first paint was
+    // already correct and no repaint is needed.
+    const norm = (s) => String(s || '').replace(/^["']|["']$/g, '').toLowerCase();
+    const findFace = () => {
+      try { for (const f of document.fonts) { if (norm(f.family) === norm(first)) return f; } } catch {}
+      return null;
+    };
+    const f0 = findFace();
+    if (f0 && f0.status === 'loaded') return; // warm cache — first paint was right
+    let tries = 0;
+    const timer = setInterval(() => {
+      if (this._disposed || !this.terminal) { clearInterval(timer); return; }
+      tries++;
+      if (findFace()) {
+        clearInterval(timer);
+        try {
+          document.fonts.load(spec).then((faces) => {
+            if (faces.length) { repaint(); setTimeout(repaint, 250); } // settle pass
+          }, () => {});
+        } catch {}
+        return;
+      }
+      if (tries >= 40) clearInterval(timer); // 20s cap: local/system font
+    }, 500);
+    this._fontPollTimer = timer;
   }
 
   fit() {
