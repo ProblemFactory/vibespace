@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.105.1 — 2026-07-11
+
+- **First-terminal ugly font, the OTHER half (still reproduced on managed instances after 2.105.0)**: the font LIST builds asynchronously (queryLocalFonts + /api/fonts, which runs fc-list server-side — slow on a container's first call). A terminal created before it resolves fell back to bare `monospace` and KEPT it forever — the reported "switch fonts and it heals" is exactly that. A fallback-created terminal now upgrades to the real default the moment the list lands (atlas rebuild + refit + the 2.105.0 FOUT watcher re-armed for the new family). The 2.105.0 registration-polling half was verified on a true cleared-cache run: faces registered-but-unloaded at terminal open → poll → load() pulls the binaries → repaint.
+- **Codex login is always `--device-auth`** (user directive): plain `codex login` starts a localhost:1455 callback server on the machine running the CLI — unreachable from the user's browser on remote hosts AND managed/container instances. Device auth (URL + one-time code) works everywhere; wizard + Manage Agents updated.
+
 ## 2.105.0 — 2026-07-11
 
 **Terminal font FOUT: the real fix (registration polling)**
