@@ -1917,13 +1917,16 @@ class ChatView {
       const d = st - lastSt;
       const now = performance.now();
       this._trace('scroll', { st: Math.round(st), d: Math.round(d), sh: list.scrollHeight });
-      const userRecent = now - (this._traceWheelAt || 0) < 300;
+      const wheelRecent = now - (this._traceWheelAt || 0) < 300;
       const expected = now - (this._traceExpectAt || 0) < 300;
-      if (Math.abs(d) > 600 && !userRecent && !expected && !this._pinned
+      // Wheel-recent does NOT exempt: the reported jumps happen WHILE the
+      // user pages — a wheel tick moves ~100-200px, so a >600px single-event
+      // delta is a jump regardless. Only our own compensation windows exempt.
+      if (Math.abs(d) > 600 && !expected && !this._pinned
           && now - lastDump > 30000 && (this._traceBuf?.length || 0) > 10) {
         lastDump = now;
-        this._trace('JUMP', { d: Math.round(d) });
-        const payload = JSON.stringify({ sid: this.sessionId, jump: Math.round(d), buf: this._traceBuf });
+        this._trace('JUMP', { d: Math.round(d), wheelRecent });
+        const payload = JSON.stringify({ sid: this.sessionId, jump: Math.round(d), wheelRecent, buf: this._traceBuf });
         try {
           fetch('/api/telemetry', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
