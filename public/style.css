@@ -2201,6 +2201,13 @@ label.cfg-row {
   border-radius: 3px; padding: 0 4px; flex-shrink: 0;
 }
 .mounts-badge-red { color: var(--red, #e55); border-color: color-mix(in srgb, var(--red, #e55) 50%, transparent); }
+/* Credential rows (2.108.0): the rclone remote before the colon — mount
+   points nest beneath it with an ↳ indent */
+.mounts-badge-cred { display: inline-flex; align-items: center; gap: 3px; color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.mounts-badge-cred svg { width: 10px; height: 10px; }
+.mounts-row-child { margin-left: 16px; border-left: 2px solid color-mix(in srgb, var(--accent) 25%, transparent); padding-left: 6px; }
+.mounts-child-arrow { color: var(--text-dim); font-size: 11px; flex-shrink: 0; }
+.mounts-reauth-btn { display: block; margin-top: 4px; }
 .mounts-row-actions { display: flex; gap: 2px; flex-shrink: 0; }
 .mounts-icon-btn {
   display: inline-flex; align-items: center; justify-content: center;
@@ -2441,9 +2448,14 @@ label.cfg-row {
 .mounts-rclone-warn { border-color: var(--yellow, #b58900); }
 
 .mounts-conf-list { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
-.mounts-conf-row { display: flex; align-items: center; gap: 8px; font-size: 12px; cursor: pointer; }
+/* label.: must out-rank `.dialog-body label` (0,1,1) which forces
+   flex-direction:column — the checkbox stacked ABOVE the remote name
+   (same class of clash as label.cfg-row below) */
+label.mounts-conf-row { display: flex; flex-direction: row; align-items: center; gap: 8px; font-size: 12px; cursor: pointer; color: var(--text); font-weight: 400; }
+.mounts-conf-row input[type="checkbox"] { width: auto; margin: 0; flex: 0 0 auto; }
 .mounts-conf-row input[disabled] + span { opacity: 0.5; }
 .mounts-conf-mode { display: flex; align-items: center; gap: 8px; margin: 10px 0 6px; }
+.mounts-conf-mode label { flex-direction: row; align-items: center; }
 
 .mounts-sec-head { display: flex; flex-direction: column; }
 .mounts-sec-sub { font-size: 10px; font-weight: 400; color: var(--text-dim); margin-top: 1px; }

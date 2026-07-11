@@ -2407,9 +2407,18 @@ app.post('/api/mounts/rclone/install', async (req, res) => {
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-// Guided Google Drive OAuth (see mounts.js startDriveAuth for the model)
+// Guided Google Drive OAuth (see mounts.js startDriveAuth for the model).
+// With mountId: re-authorize an EXISTING Drive mount/credential using its own
+// OAuth client creds (invalid_grant recovery).
 app.post('/api/mounts/gdrive-auth/start', async (req, res) => {
-  try { res.json(await mounts.startDriveAuth(req.body || {})); }
+  try {
+    const { mountId, ...opts } = req.body || {};
+    res.json(mountId ? await mounts.startDriveAuthForMount(mountId) : await mounts.startDriveAuth(opts));
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+// Write a minted token back into an existing Drive record + bounce its mounts
+app.post('/api/mounts/:id/drive-token', async (req, res) => {
+  try { await mounts.applyDriveToken(req.params.id, req.body?.token); res.json({ success: true, mounts: mounts.list() }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.get('/api/mounts/gdrive-auth/status', (req, res) => res.json(mounts.driveAuthStatus()));
@@ -2464,6 +2473,15 @@ app.patch('/api/mounts/:id', async (req, res) => {
 });
 app.post('/api/mounts/:id/duplicate', async (req, res) => {
   try { const id = await mounts.duplicate(req.params.id, req.body || {}); res.json({ success: true, id, mounts: mounts.list() }); }
+  catch (e) { res.status(400).json({ error: e.message, mounts: mounts.list() }); }
+});
+// Credentials (2.108.0): mount points under a credential + manual convert
+app.post('/api/mounts/:id/children', (req, res) => {
+  try { const id = mounts.addChild(req.params.id, req.body || {}); res.json({ success: true, id, mounts: mounts.list() }); }
+  catch (e) { res.status(400).json({ error: e.message, mounts: mounts.list() }); }
+});
+app.post('/api/mounts/:id/convert', async (req, res) => {
+  try { await mounts.convert(req.params.id, req.body?.to === 'credential' ? 'credential' : 'mount'); res.json({ success: true, mounts: mounts.list() }); }
   catch (e) { res.status(400).json({ error: e.message, mounts: mounts.list() }); }
 });
 app.delete('/api/mounts/:id', async (req, res) => {

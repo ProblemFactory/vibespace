@@ -20,6 +20,7 @@ const MI = {
   bolt: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 1.5L3.5 9h3l-1 5.5L10.5 7h-3l1-5.5z"/></svg>',
   wrench: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2.5a3.5 3.5 0 00-3.3 4.6L2.5 10.8a1.4 1.4 0 002 2l3.7-3.7a3.5 3.5 0 004.5-4.4L10.5 7 9 5.5l2.3-2.2a3.5 3.5 0 00-1.8-.8z"/></svg>',
   termNew: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M4 6l2.5 2L4 10M8.5 10.5h3.5"/></svg>',
+  key: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="8" r="3"/><path d="M8 8h6M11.5 8v2.5M14 8v2"/></svg>',
 };
 
 // fetch wrapper that THROWS on HTTP/{error} responses (utils fetchJson swallows)
@@ -115,7 +116,19 @@ export function installSidebarMounts(Sidebar) {
       if (!d.mounts.length) {
         list.innerHTML = `<div class="mounts-empty">Nothing connected yet. Click “Connect storage” below to add a cloud folder (S3, Google Drive, Nextcloud, SFTP…), or “Import share link” to open a folder someone shared with you.</div>`;
       }
-      for (const m of d.mounts) list.appendChild(this._buildMountRow(m));
+      // Credentials render as parent rows with their mount points nested under
+      // them; standalone mounts render flat as before.
+      const byParent = new Map();
+      for (const m of d.mounts) {
+        if (!m.parentId) continue;
+        if (!byParent.has(m.parentId)) byParent.set(m.parentId, []);
+        byParent.get(m.parentId).push(m);
+      }
+      for (const m of d.mounts) {
+        if (m.parentId && d.mounts.some(r => r.id === m.parentId)) continue; // rendered under parent
+        list.appendChild(this._buildMountRow(m));
+        for (const c of byParent.get(m.id) || []) list.appendChild(this._buildMountRow(c));
+      }
       root.appendChild(list);
 
       // Shares I minted
@@ -199,15 +212,18 @@ export function installSidebarMounts(Sidebar) {
     },
 
     _buildMountRow(m) {
+      const isCred = m.kind === 'credential';
       const row = document.createElement('div');
-      row.className = 'mounts-row';
+      row.className = 'mounts-row' + (isCred ? ' mounts-row-cred' : '') + (m.parentId ? ' mounts-row-child' : '');
       const dot = m.mounted ? 'ok' : (m.error ? 'err' : 'off');
       const expired = m.expiresAt && Date.now() > m.expiresAt;
       const top = document.createElement('div');
       top.className = 'mounts-row-top';
       top.innerHTML = `
         <span class="mounts-dot mounts-dot-${dot}" title="${m.mounted ? 'Mounted' : escHtml(m.error || 'Not mounted')}"></span>
+        ${m.parentId ? '<span class="mounts-child-arrow">↳</span>' : ''}
         <b class="mounts-name" title="${escHtml(m.name)}">${escHtml(m.name)}</b>
+        ${isCred ? `<span class="mounts-badge mounts-badge-cred" title="${escHtml(tr('Credential — the remote before the colon; mount points under it are remote:path. Connecting it mounts the root (when the token allows).'))}">${MI.key}${escHtml(tr('Credential'))}</span>` : ''}
         ${m.mode === 'ro' ? '<span class="mounts-badge">RO</span>' : ''}
         ${expired ? '<span class="mounts-badge mounts-badge-red">EXPIRED</span>' : ''}`;
       const actions = document.createElement('span');
@@ -245,10 +261,13 @@ export function installSidebarMounts(Sidebar) {
         shareBtn.onclick = (e) => { e.stopPropagation(); this._showMintShareDialog(m); };
         actions.append(shareBtn);
       }
-      actions.append(
-        ibtn(MI.pencil, 'Edit connection (path, credentials, name)', () => { this._showEditMountDialog(m); }),
-        ibtn(MI.copy, 'New mount from this connection (same credentials, different bucket/path)', () => { this._showDuplicateMountDialog(m); }),
-      );
+      if (m.kind === 'credential') {
+        actions.append(ibtn(MI.plus, tr('Add a mount point under this credential (remote:path)'), () => { this._showAddChildDialog(m); }, 'mounts-icon-accent'));
+      }
+      actions.append(ibtn(MI.pencil, 'Edit connection (path, credentials, name)', () => { this._showEditMountDialog(m); }));
+      if (m.kind !== 'credential') {
+        actions.append(ibtn(MI.copy, 'New mount from this connection (same credentials, different bucket/path)', () => { this._showDuplicateMountDialog(m); }));
+      }
       // Env-provisioned personal storage is deployment-managed: no delete
       // (a changed provisioning re-imports it) — edit/rename/unmount only.
       if (m.origin !== 'my-storage') {
@@ -276,9 +295,108 @@ export function installSidebarMounts(Sidebar) {
         const err = document.createElement('div');
         err.className = 'mounts-errline';
         err.textContent = 'Couldn’t connect: ' + m.error.slice(0, 100);
+        // Dead Google OAuth token (invalid_grant: revoked/expired) — offer the
+        // guided re-authorization right where the failure is visible.
+        if (this._isDriveBacked(m) && /invalid_grant|token expired|couldn.t fetch token/i.test(m.error)) {
+          const fix = document.createElement('button');
+          fix.className = 'mounts-btn mounts-btn-primary mounts-reauth-btn';
+          fix.textContent = tr('Re-authorize Google Drive…');
+          fix.onclick = (e) => { e.stopPropagation(); this._showDriveReauthDialog(m); };
+          err.appendChild(fix);
+        }
         row.appendChild(err);
       }
       return row;
+    },
+
+    _isDriveBacked(m) { return m.type === 'drive' || (m.type === 'rclone' && m.rcloneType === 'drive'); },
+
+    // Re-authorize an EXISTING Drive mount/credential whose token died. Same
+    // guided flow as adding one (server runs `rclone authorize drive` with the
+    // mount's own OAuth client), but the minted token writes back into the
+    // record (+ its children) instead of a form field.
+    _showDriveReauthDialog(m) {
+      const { body, close } = createModalShell({ id: 'mount-reauth-dialog', title: tr('Re-authorize "{name}"', { name: m.name }), bodyClass: 'mounts-dialog-body', escapeToClose: true });
+      const hint = document.createElement('div');
+      hint.className = 'mounts-field-hint';
+      hint.textContent = tr('Google reported the saved sign-in as expired or revoked. Sign in again to mint a fresh token — nothing else about the mount changes.');
+      const btn = document.createElement('button');
+      btn.className = 'mounts-btn mounts-btn-primary';
+      btn.textContent = tr('Sign in with Google');
+      const status = document.createElement('div');
+      status.className = 'mounts-field-hint';
+      body.append(hint, btn, status);
+      let pasteBox = null, poll = null;
+      const stopPoll = () => { clearInterval(poll); poll = null; };
+      const finish = async (token) => {
+        stopPoll();
+        status.textContent = tr('Saving token & reconnecting…');
+        try {
+          await api(`/api/mounts/${m.id}/drive-token`, { method: 'POST', body: JSON.stringify({ token }) });
+          showToast(tr('Google Drive re-authorized'));
+          close(); this._renderMounts();
+        } catch (e) { status.textContent = e.message || 'Failed'; btn.disabled = false; }
+      };
+      btn.onclick = async () => {
+        btn.disabled = true;
+        status.textContent = tr('Preparing authorization…');
+        try {
+          const r = await api('/api/mounts/gdrive-auth/start', { method: 'POST', body: JSON.stringify({ mountId: m.id }) });
+          if (r.error) throw new Error(r.error);
+          window.open(r.url, '_blank');
+          status.textContent = tr('A Google sign-in page opened. Approve access, then come back here.');
+          if (!pasteBox) {
+            pasteBox = document.createElement('div');
+            pasteBox.innerHTML = `<div class="mounts-field-hint">${escHtml(tr("If this VibeSpace runs on ANOTHER machine, the final page won't load (address starts with 127.0.0.1) — copy that address and paste it here:"))}</div>`;
+            const inp = document.createElement('input');
+            inp.placeholder = 'http://127.0.0.1:53682/?state=…&code=…';
+            inp.onchange = async () => {
+              try {
+                status.textContent = tr('Completing…');
+                const fr = await api('/api/mounts/gdrive-auth/callback', { method: 'POST', body: JSON.stringify({ url: inp.value }) });
+                finish(fr.token);
+              } catch (e) { status.textContent = e.message || 'Failed'; }
+            };
+            pasteBox.appendChild(inp);
+            body.appendChild(pasteBox);
+          }
+          poll = setInterval(async () => {
+            if (!status.isConnected) { stopPoll(); return; } // dialog closed
+            try {
+              const st = await api('/api/mounts/gdrive-auth/status');
+              if (st.token) finish(st.token);
+            } catch {}
+          }, 1500);
+          setTimeout(stopPoll, 10 * 60 * 1000);
+        } catch (e) {
+          status.textContent = e.message || 'Failed to start authorization';
+          btn.disabled = false;
+        }
+      };
+    },
+
+    // Add a mount point under a credential — the rclone remote:path model:
+    // the credential is the part before the colon, this adds the path.
+    _showAddChildDialog(cred) {
+      const type = cred.type || 's3';
+      const pathField = type === 's3' ? { key: 'bucket', label: tr('Bucket'), placeholder: 'bucket-name' }
+        : type === 'rclone' ? { key: 'remotePath', label: tr('Remote path (bucket[/prefix])'), placeholder: 'bucket-name/optional/prefix' }
+        : type === 'drive' ? { key: 'driveFolder', label: tr('Folder path'), placeholder: 'My Folder/sub' }
+        : type === 'sftp' ? { key: 'sshPath', label: tr('Remote path'), placeholder: '/data' }
+        : null;
+      if (!pathField) { showToast(tr('This credential type doesn’t support mount points'), { type: 'error' }); return; }
+      this._mountsDialog(tr('New mount point under "{name}"', { name: cred.name }), [
+        { key: 'name', label: tr('Name'), value: `${cred.name}-`, placeholder: 'datasets' },
+        { key: pathField.key, label: pathField.label, placeholder: pathField.placeholder },
+        ...(type === 's3' ? [{ key: 'prefix', label: tr('Prefix (optional)'), placeholder: 'sub/path' }] : []),
+        { key: 'customPath', label: tr('Mount point (blank = default)'), placeholder: '/absolute/path' },
+        { key: 'mode', label: tr('Access'), type: 'select', options: [['rw', 'Read-write'], ['ro', 'Read-only']] },
+      ], tr('Create & connect'), async (v, { close }) => {
+        const r = await api(`/api/mounts/${cred.id}/children`, { method: 'POST', body: JSON.stringify(v) });
+        try { await api(`/api/mounts/${r.id}/mount`, { method: 'POST' }); }
+        catch (e) { showToast(e.message || tr('Created, but connecting failed — check the path'), { type: 'error' }); }
+        close(); this._renderMounts();
+      });
     },
 
     // Auto-probe connectivity so the dots are meaningful without clicking:
@@ -840,6 +958,10 @@ export function installSidebarMounts(Sidebar) {
     // Mint an S3 share link FROM a specific mount (uses that mount's own creds).
     // ── Edit / derive (2.107.0, user request: FishR2-class mounts needed a
     // bucket/path fix with no edit UI; one credential → many mounts) ──
+    // Secret-typed keys: blank input = keep the stored value (never prefilled —
+    // secret VALUES never leave the server).
+    _SECRET_KEYS: ['secretKey', 'accessKey', 'sessionToken', 'pass', 'bearerToken', 'token', 'clientSecret'],
+
     _mountEditFields(m) {
       // [key, label, placeholder, prefillValue] per type; secret fields blank = keep
       // Env-provisioned storage: connection is deployment-owned — only the
@@ -848,6 +970,18 @@ export function installSidebarMounts(Sidebar) {
         ['customPath', tr('Mount point (blank = default)'), '/absolute/path', m.customPath || ''],
       ];
       const type = m.type || 's3';
+      // A mount point under a credential owns ONLY its path — connection
+      // params are edited on the credential itself.
+      if (m.parentId) {
+        if (type === 's3') return [
+          ['bucket', tr('Bucket'), 'bucket-name', m.bucket || ''],
+          ['prefix', tr('Prefix (optional)'), 'sub/path', m.prefix || ''],
+        ];
+        if (type === 'rclone') return [['remotePath', tr('Remote path (bucket[/prefix])'), 'bucket-name/optional/prefix', m.remotePath || '']];
+        if (type === 'drive') return [['driveFolder', tr('Folder path (optional)'), 'My Folder/sub', m.driveFolder || '']];
+        if (type === 'sftp') return [['sshPath', tr('Remote path'), '/data', m.sshPath || '']];
+        return [];
+      }
       if (type === 's3') return [
         ['endpoint', 'Endpoint', 'https://…', m.endpoint || ''],
         ['bucket', 'Bucket', 'bucket-name', m.bucket || ''],
@@ -856,10 +990,30 @@ export function installSidebarMounts(Sidebar) {
         ['secretKey', 'Secret key (blank = keep)', '••••••••', ''],
       ];
       if (type === 'rclone') return [
-        ['remotePath', 'Remote path (bucket[/prefix])', 'bucket-name/optional/prefix', m.remotePath || ''],
+        ['remotePath', tr('Remote path (bucket[/prefix])'), 'bucket-name/optional/prefix', m.remotePath || ''],
+        // every stored parameter is replaceable: blank = keep, "-" = remove
+        ...(m.paramKeys || []).map((k) => [`param:${k}`, k, tr('(blank = keep, "-" = remove)'), '']),
+        ['newParamKey', tr('Add parameter — name'), 'e.g. region', ''],
+        ['newParamValue', tr('Add parameter — value'), '', ''],
       ];
       if (type === 'drive') return [
-        ['driveFolder', 'Folder path (optional)', 'My Folder/sub', m.driveFolder || ''],
+        ['driveFolder', tr('Folder path (optional)'), 'My Folder/sub', m.driveFolder || ''],
+        ['token', tr('OAuth token (blank = keep)'), '{"access_token":…}', ''],
+        ['clientId', tr('OAuth client id (optional)'), '', m.clientId || ''],
+        ['clientSecret', tr('OAuth client secret (blank = keep)'), '••••••••', ''],
+      ];
+      if (type === 'webdav' || type === 'vibespace') return [
+        ['url', 'URL', 'https://…', m.url || ''],
+        ...(type === 'webdav' ? [['user', tr('User'), '', m.user || ''], ['pass', tr('Password (blank = keep)'), '••••••••', '']] : []),
+        ['bearerToken', tr('Bearer token (blank = keep)'), '••••••••', ''],
+      ];
+      if (type === 'sftp') return [
+        ['sshHost', tr('Host'), 'example.com', m.sshHost || ''],
+        ['sshUser', tr('User'), '', m.sshUser || ''],
+        ['sshPort', tr('Port'), '22', m.sshPort ? String(m.sshPort) : ''],
+        ['sshPath', tr('Remote path (optional)'), '/data', m.sshPath || ''],
+        ['keyPath', tr('Private key path (absolute, optional)'), '/home/me/.ssh/id_ed25519', m.keyPath || ''],
+        ['pass', tr('Password (blank = keep)'), '••••••••', ''],
       ];
       return [];
     },
@@ -876,18 +1030,39 @@ export function installSidebarMounts(Sidebar) {
            <div class="cfg-err"></div>
            <div class="dialog-actions"><button type="submit" class="btn-create">${tr('Save')}</button></div>`;
       body.appendChild(form);
+      // Drive-backed records get the guided re-auth right in the edit dialog
+      // (the error-line button only shows once a mount has FAILED).
+      if (this._isDriveBacked(m) && m.origin !== 'my-storage' && !m.parentId) {
+        const rb = document.createElement('button');
+        rb.type = 'button';
+        rb.className = 'mounts-btn';
+        rb.textContent = tr('Re-authorize Google Drive…');
+        rb.onclick = () => { close(); this._showDriveReauthDialog(m); };
+        form.querySelector('.dialog-actions').prepend(rb);
+      }
       const err = form.querySelector('.cfg-err');
       form.onsubmit = async (e) => {
         e.preventDefault(); err.textContent = '';
         const patch = {};
+        const params = {};
+        let newKey = '', newVal = '';
         for (const [k, , , orig] of fields) {
           const v = form.querySelector(`[name="${k}"]`).value;
-          if (k === 'secretKey' || k === 'accessKey') { if (v) patch[k] = v; }
+          if (k.startsWith('param:')) {
+            // blank = keep; "-" = remove (server deletes on empty value)
+            if (v === '-') params[k.slice(6)] = '';
+            else if (v) params[k.slice(6)] = v;
+          }
+          else if (k === 'newParamKey') newKey = v.trim();
+          else if (k === 'newParamValue') newVal = v;
+          else if (this._SECRET_KEYS.includes(k)) { if (v) patch[k] = v; }
           else if (v !== orig) patch[k] = v;
         }
+        if (newKey && newVal) params[newKey] = newVal;
+        if (Object.keys(params).length) patch.params = params;
         if (!Object.keys(patch).length) { close(); return; }
-        const r = await api(`/api/mounts/${m.id}`, { method: 'PATCH', body: JSON.stringify(patch), headers: { 'Content-Type': 'application/json' } });
-        if (r?.error) { err.textContent = r.error; return; }
+        try { await api(`/api/mounts/${m.id}`, { method: 'PATCH', body: JSON.stringify(patch), headers: { 'Content-Type': 'application/json' } }); }
+        catch (e2) { err.textContent = e2.message || 'Failed'; return; }
         close(); this._renderMounts();
       };
     },
@@ -914,8 +1089,9 @@ export function installSidebarMounts(Sidebar) {
         e.preventDefault(); err.textContent = '';
         const payload = { name: form.querySelector('[name="name"]').value.trim() };
         for (const el of form.querySelectorAll('input:not([name="name"])')) payload[el.name] = el.value;
-        const r = await api(`/api/mounts/${m.id}/duplicate`, { method: 'POST', body: JSON.stringify(payload), headers: { 'Content-Type': 'application/json' } });
-        if (r?.error) { err.textContent = r.error; return; }
+        let r;
+        try { r = await api(`/api/mounts/${m.id}/duplicate`, { method: 'POST', body: JSON.stringify(payload), headers: { 'Content-Type': 'application/json' } }); }
+        catch (e2) { err.textContent = e2.message || 'Failed'; return; }
         if (r?.id) await api(`/api/mounts/${r.id}/mount`, { method: 'POST' }).catch(() => {});
         close(); this._renderMounts();
       };

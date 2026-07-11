@@ -254,6 +254,9 @@ class MountManager {
   exportBundle() {
     const mounts = this._state.mounts.map(m => ({
       name: m.name, type: m.type || 's3', origin: m.origin, mode: m.mode,
+      kind: m.kind || undefined,
+      parentName: m.parentId ? (this._state.mounts.find(x => x.id === m.parentId)?.name || undefined) : undefined,
+      sshPath: m.sshPath,
       customPath: m.customPath, expiresAt: m.expiresAt,
       // s3
       endpoint: m.endpoint, bucket: m.bucket, prefix: m.prefix,
@@ -285,9 +288,22 @@ class MountManager {
       try { this.setMyStorageConfig(bundle.myStorage); } catch {}
     }
     if (!Array.isArray(bundle.mounts)) return;
+    // pass 1: credentials + standalone mounts (children need their parent first)
     for (const m of bundle.mounts) {
+      if (m.parentName) continue;
       if (this._state.mounts.some(x => x.name === m.name)) continue; // skip dupes
-      try { this.add(m); } catch {}
+      try {
+        const nid = this.add(m);
+        if (m.kind === 'credential') this._get(nid).kind = 'credential';
+      } catch {}
+    }
+    // pass 2: mount points under credentials, re-linked by parent NAME
+    for (const m of bundle.mounts) {
+      if (!m.parentName) continue;
+      if (this._state.mounts.some(x => x.name === m.name)) continue;
+      const parent = this._state.mounts.find(x => x.name === m.parentName && this._kindOf(x) === 'credential');
+      if (!parent) continue;
+      try { this.addChild(parent.id, m); } catch {}
     }
     if (Array.isArray(bundle.shares)) {
       for (const s of bundle.shares) if (!this._state.shares.some(x => x.id === s.id)) this._state.shares.push(s);
@@ -315,7 +331,32 @@ class MountManager {
     return m.customPath || path.join(this.mountBase, m.name.replace(/[^\w.-]+/g, '_'));
   }
 
+  // ── Credentials (2.108.0) ──
+  // A record with kind:'credential' holds ONLY connection settings (typically a
+  // bucket-scoped S3/R2 token that can't list the account root — mounting it at
+  // root fuse-mounts fine but EIOs on every IO, the FishR2 trap). It is not
+  // mountable; MOUNT records reference it via parentId and add their own
+  // path (bucket/prefix / remotePath / folder). _connOf() resolves a child to
+  // its effective connection: parent's credentials + the child's path fields —
+  // so refreshing a token on the credential heals every mount under it.
+  _kindOf(m) { return m.kind === 'credential' ? 'credential' : 'mount'; }
+
+  _childrenOf(id) { return this._state.mounts.filter(x => x.parentId === id); }
+
+  _connOf(m) {
+    if (!m.parentId) return m;
+    const p = this._get(m.parentId);
+    const conn = { ...p, id: m.id, name: m.name, mode: m.mode, kind: undefined, parentId: undefined, customPath: m.customPath, origin: m.origin };
+    // child's own path fields override the parent's (that's the whole point)
+    for (const k of ['remotePath', 'bucket', 'prefix', 'driveFolder', 'sshPath']) {
+      if (m[k] !== undefined && m[k] !== null) conn[k] = m[k];
+    }
+    if (m.extraParamsEnc) conn.extraParamsEnc = { ...p.extraParamsEnc, ...m.extraParamsEnc };
+    return conn;
+  }
+
   _sourceLabel(m) {
+    m = this._connOf(m);
     switch (m.type || 's3') {
       case 'drive': return 'Google Drive' + (m.driveFolder ? `: ${m.driveFolder}` : '');
       case 'webdav': return m.url;
@@ -327,18 +368,30 @@ class MountManager {
   }
 
   list() {
-    return this._state.mounts.map(m => ({
-      id: m.id, name: m.name, type: m.type || 's3', origin: m.origin, mode: m.mode,
-      endpoint: m.endpoint, bucket: m.bucket, prefix: m.prefix,
-      rcloneType: m.rcloneType, remotePath: m.remotePath, driveFolder: m.driveFolder,
-      accessKeyTail: m.accessKey ? String(m.accessKey).slice(-4) : undefined,
-      customPath: m.customPath || null,
-      source: this._sourceLabel(m),
-      canShare: this.canShareFromMount(m),
-      path: this.pathOf(m), desired: m.desired, expiresAt: m.expiresAt || null,
-      mounted: this.isMounted(m), error: this._errors.get(m.id) || null,
-      createdAt: m.createdAt,
-    }));
+    return this._state.mounts.map(m => {
+      const cred = this._kindOf(m) === 'credential';
+      const conn = this._connOf(m);
+      return {
+        id: m.id, name: m.name, type: conn.type || 's3', origin: m.origin, mode: m.mode,
+        kind: this._kindOf(m), parentId: m.parentId || null,
+        childCount: cred ? this._childrenOf(m.id).length : undefined,
+        endpoint: conn.endpoint, bucket: conn.bucket, prefix: conn.prefix,
+        rcloneType: conn.rcloneType, remotePath: conn.remotePath, driveFolder: conn.driveFolder,
+        // secret VALUES never leave the server; keys let the edit dialog offer
+        // per-parameter replacement (blank = keep) for custom rclone records
+        paramKeys: (conn.type === 'rclone' && !m.parentId) ? Object.keys(conn.paramsEnc || {}) : undefined,
+        url: conn.url, user: conn.user, vendor: conn.vendor,
+        sshHost: conn.sshHost, sshUser: conn.sshUser, sshPort: conn.sshPort, sshPath: conn.sshPath, keyPath: conn.keyPath,
+        clientId: conn.clientId,
+        accessKeyTail: conn.accessKey ? String(conn.accessKey).slice(-4) : undefined,
+        customPath: m.customPath || null,
+        source: this._sourceLabel(m),
+        canShare: this.canShareFromMount(m),
+        path: this.pathOf(m), desired: m.desired, expiresAt: m.expiresAt || null,
+        mounted: this.isMounted(m), error: this._errors.get(m.id) || null,
+        createdAt: m.createdAt,
+      };
+    });
   }
 
   listShares() { return this._state.shares.map(s => ({ ...s, secretKey: undefined })); }
@@ -445,6 +498,71 @@ class MountManager {
     return m.id;
   }
 
+  /**
+   * Add a MOUNT POINT under a credential: the child record carries only its
+   * own path (+ name/mode/mountpoint) and resolves connection settings from
+   * the parent at use time — refreshing the credential heals every child.
+   */
+  addChild(parentId, cfg = {}) {
+    const p = this._get(parentId);
+    if (this._kindOf(p) !== 'credential') throw new Error('Mount points can only be added under a credential');
+    if (!cfg.name) throw new Error('name required');
+    if (this._state.mounts.some(m => m.name === cfg.name)) throw new Error('A mount with that name exists');
+    if (cfg.customPath && !path.isAbsolute(cfg.customPath)) throw new Error('Custom path must be absolute');
+    const m = {
+      id: 'mnt-' + crypto.randomBytes(5).toString('hex'),
+      name: String(cfg.name).slice(0, 60),
+      parentId,
+      origin: 'manual',
+      mode: cfg.mode === 'ro' ? 'ro' : 'rw',
+      customPath: cfg.customPath || null,
+      desired: 'unmounted',
+      createdAt: Date.now(),
+    };
+    switch (p.type || 's3') {
+      case 's3':
+        if (!cfg.bucket) throw new Error('bucket required');
+        m.bucket = String(cfg.bucket);
+        m.prefix = String(cfg.prefix || '').replace(/^\/+|\/+$/g, '');
+        break;
+      case 'rclone':
+        if (!cfg.remotePath) throw new Error('remote path required (e.g. bucket-name or bucket/prefix)');
+        m.remotePath = String(cfg.remotePath).replace(/^\/+/, '');
+        break;
+      case 'drive':
+        m.driveFolder = String(cfg.driveFolder || '').replace(/^\/+|\/+$/g, '');
+        break;
+      case 'sftp':
+        m.sshPath = String(cfg.sshPath || '');
+        break;
+      default:
+        throw new Error(`credentials of type "${p.type}" don't support mount points yet`);
+    }
+    this._state.mounts.push(m);
+    this._save();
+    this._notify();
+    return m.id;
+  }
+
+  /** Manual convert: mount ⇄ credential (auto-detect covers the common case). */
+  async convert(id, to) {
+    const m = this._get(id);
+    if (m.parentId) throw new Error('A mount point under a credential can\'t be converted');
+    if (m.origin === 'my-storage') throw new Error('Deployment-provisioned storage can\'t be converted');
+    if (to === 'credential') {
+      if (this.isMounted(m)) await this.unmount(id);
+      m.kind = 'credential';
+      m.desired = 'unmounted';
+      this._errors.delete(id);
+    } else {
+      if (this._childrenOf(id).length) throw new Error('Remove its mount points first');
+      delete m.kind;
+    }
+    this._save();
+    this._notify();
+    return m.id;
+  }
+
   async remove(id) {
     const m = this._get(id);
     // Env-provisioned personal storage is managed by the DEPLOYMENT (user
@@ -452,6 +570,11 @@ class MountManager {
     // re-imports it) — rename/edit instead. Unmount still works.
     if (m.origin === 'my-storage') {
       throw new Error('This storage is provisioned by your deployment and can\'t be deleted here — you can rename or edit it, and Unmount disconnects it.');
+    }
+    // Children resolve their connection through the parent — deleting the
+    // credential out from under them would break every one of them.
+    if (this._kindOf(m) === 'credential' && this._childrenOf(id).length) {
+      throw new Error('This credential still has mount points under it — remove those first.');
     }
     if (this.isMounted(m)) await this.unmount(id);
     this._state.mounts = this._state.mounts.filter(x => x.id !== id);
@@ -491,12 +614,28 @@ class MountManager {
     // bucket/keys come from env and a change re-imports) — name, mountpoint
     // and mode are the only editable fields (user directive).
     const envLocked = m.origin === 'my-storage';
-    const connectionKeys = ['endpoint', 'bucket', 'prefix', 'accessKey', 'secretKey', 'sessionToken', 'rcloneType', 'remotePath', 'params', 'driveFolder', 'token', 'url', 'host', 'user', 'path', 'pass'];
+    const connectionKeys = ['endpoint', 'bucket', 'prefix', 'accessKey', 'secretKey', 'sessionToken', 'rcloneType', 'remotePath', 'params', 'driveFolder', 'token', 'clientId', 'clientSecret', 'url', 'user', 'pass', 'bearerToken', 'sshHost', 'sshUser', 'sshPort', 'sshPath', 'keyPath'];
     if (envLocked && connectionKeys.some((k) => patch[k] !== undefined && patch[k] !== '')) {
       throw new Error('This storage is provisioned by your deployment — its connection settings can\'t be edited here (name and mount point can).');
     }
     const setIf = (k, transform = (v) => String(v)) => { if (patch[k] !== undefined && patch[k] !== '') m[k] = transform(patch[k]); };
-    switch (envLocked ? '__locked__' : (m.type || 's3')) {
+    // A mount point under a credential owns ONLY its path — connection fields
+    // live on (and are edited via) the parent credential.
+    const parentType = m.parentId ? (this._get(m.parentId).type || 's3') : null;
+    switch (envLocked ? '__locked__' : (parentType ? '__child_' + parentType : (m.type || 's3'))) {
+      case '__child_s3':
+        setIf('bucket');
+        if (patch.prefix !== undefined) m.prefix = String(patch.prefix || '').replace(/^\/+|\/+$/g, '');
+        break;
+      case '__child_rclone':
+        if (patch.remotePath !== undefined && patch.remotePath !== '') m.remotePath = String(patch.remotePath).replace(/^\/+/, '');
+        break;
+      case '__child_drive':
+        if (patch.driveFolder !== undefined) m.driveFolder = String(patch.driveFolder || '').replace(/^\/+|\/+$/g, '');
+        break;
+      case '__child_sftp':
+        if (patch.sshPath !== undefined) m.sshPath = String(patch.sshPath || '');
+        break;
       case 's3':
         setIf('endpoint'); setIf('bucket');
         if (patch.prefix !== undefined) m.prefix = String(patch.prefix || '').replace(/^\/+|\/+$/g, '');
@@ -516,6 +655,8 @@ class MountManager {
         break;
       case 'drive':
         if (patch.driveFolder !== undefined) m.driveFolder = String(patch.driveFolder || '').replace(/^\/+|\/+$/g, '');
+        setIf('clientId');
+        if (patch.clientSecret) m.clientSecretEnc = this._enc(String(patch.clientSecret));
         if (patch.token) {
           let tok = String(patch.token).trim();
           const jm = tok.match(/\{[\s\S]*\}/); if (jm) tok = jm[0];
@@ -523,15 +664,35 @@ class MountManager {
           m.tokenEnc = this._enc(tok);
         }
         break;
-      case 'webdav': case 'sftp': case 'vibespace':
-        setIf('url'); setIf('host'); setIf('user'); setIf('path');
+      case 'webdav': case 'vibespace':
+        setIf('url', (v) => String(v).replace(/\/+$/, ''));
+        setIf('user');
         if (patch.pass) m.passEnc = this._enc(String(patch.pass));
-        if (patch.token) m.tokenEnc = this._enc(String(patch.token));
+        if (patch.bearerToken) m.bearerTokenEnc = this._enc(String(patch.bearerToken));
+        break;
+      case 'sftp':
+        setIf('sshHost'); setIf('sshUser');
+        if (patch.sshPort) m.sshPort = parseInt(patch.sshPort) || 22;
+        if (patch.sshPath !== undefined) m.sshPath = String(patch.sshPath || '');
+        if (patch.keyPath) {
+          if (!path.isAbsolute(String(patch.keyPath))) throw new Error('keyPath must be absolute');
+          m.keyPath = String(patch.keyPath);
+        }
+        if (patch.pass) m.passEnc = this._enc(String(patch.pass));
         break;
     }
     this._save();
     this._notify();
     if (wasMounted) { try { await this.mount(id); } catch {} }
+    // Editing a CREDENTIAL (token refresh, endpoint change) must reach every
+    // mount point that resolves through it — bounce the mounted children.
+    if (this._kindOf(m) === 'credential') {
+      for (const c of this._childrenOf(id)) {
+        if (this.isMounted(c) || c.desired === 'mounted') {
+          try { await this.unmount(c.id); await this.mount(c.id); } catch {}
+        }
+      }
+    }
     return m.id;
   }
 
@@ -580,6 +741,7 @@ class MountManager {
 
   /** Per-type rclone env + remote string for a mount record. */
   _rcloneFor(m) {
+    m = this._connOf(m); // child mounts resolve to credential + own path
     const R = 'VS';
     const P = (k) => `RCLONE_CONFIG_${R}_${k}`;
     const env = { ...process.env };
@@ -638,9 +800,41 @@ class MountManager {
     return { env, remote };
   }
 
+  // Backends where the account root and a bucket/container are DIFFERENT
+  // permission scopes — a bucket-scoped token root-mounts "successfully" and
+  // then EIOs on every IO. Detection (below) only fires for these.
+  static BUCKETY_BACKENDS = new Set(['s3', 'b2', 'azureblob', 'googlecloudstorage', 'swift', 'oos', 'qingstor']);
+
+  /** Probe whether this record's token can list the account ROOT. */
+  _probeRootDenied(m) {
+    const { env } = this._rcloneFor(m);
+    return new Promise((resolve) => {
+      execFile(this.rcloneBin(), ['lsf', 'VS:', '--max-depth', '1', '--retries', '1', '--low-level-retries', '1'],
+        { env, timeout: 20000 },
+        (err, _o, stderr) => resolve(err ? /AccessDenied|Access Denied|status code: 403/i.test(String(stderr || err.message)) : false));
+    });
+  }
+
   async mount(id) {
     const m = this._get(id);
     if (this.isMounted(m)) { m.desired = 'mounted'; this._save(); this._notify(); return; }
+    // Credential model (user-refined): a credential IS the rclone remote (the
+    // part before the colon); a mount is remote:path. A credential itself IS
+    // mountable when its token can reach the remote's root (Google Drive,
+    // account-wide S3 keys) — mounting it mounts the root. Bucket-scoped S3
+    // tokens CAN'T list the root: the fuse mount would "succeed" and EIO on
+    // every IO, so probe first and convert such records to credentials with
+    // guidance instead of mounting a dead folder.
+    if (!m.parentId && m.type === 'rclone' && MountManager.BUCKETY_BACKENDS.has(m.rcloneType) && !m.remotePath) {
+      if (await this._probeRootDenied(m)) {
+        m.kind = 'credential';
+        m.desired = 'unmounted';
+        this._errors.delete(id);
+        this._save();
+        this._notify();
+        throw new Error('This token can’t list the account root (it’s bucket-scoped) — kept as a credential. Add a mount point with a specific bucket under it.');
+      }
+    }
     const mp = this.pathOf(m);
     fs.mkdirSync(mp, { recursive: true });
     fs.mkdirSync(this._logDir, { recursive: true });
@@ -679,6 +873,16 @@ class MountManager {
       });
       const v4err = await probe({});
       if (!v4err) { m.v2Auth = false; }
+      else if (/AccessDenied|Access Denied/i.test(v4err)) {
+        // Definitive server answer: the token can't list this path. Fail NOW
+        // with a pointer instead of fuse-mounting a folder that EIOs on every
+        // read (the FishR2 trap: bucket typo / out-of-scope bucket). v2Auth
+        // stays undefined so a fixed path re-probes on the next mount.
+        const target = remote.split(':').slice(1).join(':') || '(account root)';
+        this._errors.set(id, `the credential can’t access “${target}” (AccessDenied) — check the bucket name (S3 buckets are lowercase letters/digits/hyphens) and the token’s bucket scope`);
+        this._notify();
+        return false;
+      }
       else if (/SignatureDoesNotMatch/i.test(v4err)) {
         if (m.sessionTokenEnc) {
           this._errors.set(id, 'endpoint proxy rewrites signed headers (Cloudflare?) — temporary-credential (STS) shares need rclone 1.63–1.69, a service-account share, or an un-proxied endpoint');
@@ -850,6 +1054,53 @@ class MountManager {
     });
   }
 
+  /**
+   * Re-authorize an EXISTING Drive-backed mount/credential whose token died
+   * (Google invalid_grant — revoked/expired). Runs the same guided flow with
+   * the mount's OWN OAuth client (if it has one; rclone's built-in otherwise)
+   * so the minted token matches the client that will use it.
+   */
+  startDriveAuthForMount(id) {
+    const m = this._connOf(this._get(id));
+    let clientId, clientSecret;
+    if (m.type === 'drive') {
+      clientId = m.clientId || undefined;
+      clientSecret = m.clientSecretEnc ? this._dec(m.clientSecretEnc) : undefined;
+    } else if (m.type === 'rclone' && m.rcloneType === 'drive') {
+      const p = (k) => m.paramsEnc?.[k] ? this._dec(m.paramsEnc[k]) : undefined;
+      clientId = p('client_id');
+      clientSecret = p('client_secret');
+    } else {
+      throw new Error('Not a Google Drive connection');
+    }
+    return this.startDriveAuth({ clientId, clientSecret });
+  }
+
+  /** Write a freshly minted token back into a Drive-backed record + remount. */
+  async applyDriveToken(id, token) {
+    const rec = this._get(id);
+    // token may target a child's parent credential — write where the token lives
+    const holder = rec.parentId ? this._get(rec.parentId) : rec;
+    let tok = String(token).trim();
+    const jm = tok.match(/\{[\s\S]*\}/); if (jm) tok = jm[0];
+    JSON.parse(tok); // validate
+    if (holder.type === 'drive') holder.tokenEnc = this._enc(tok);
+    else if (holder.type === 'rclone' && holder.rcloneType === 'drive') {
+      holder.paramsEnc = holder.paramsEnc || {};
+      holder.paramsEnc.token = this._enc(tok);
+    } else throw new Error('Not a Google Drive connection');
+    this._save();
+    this._notify();
+    const bounce = async (m) => {
+      if (this.isMounted(m) || m.desired === 'mounted') {
+        try { await this.unmount(m.id); await this.mount(m.id); } catch {}
+      }
+    };
+    if (this._kindOf(holder) === 'credential') { for (const c of this._childrenOf(holder.id)) await bounce(c); }
+    else await bounce(holder);
+    return holder.id;
+  }
+
   driveAuthStatus() {
     const st = this._driveAuth;
     if (!st) return { active: false };
@@ -944,12 +1195,14 @@ class MountManager {
   // Which mounts can mint an S3 share: full-credential S3 mounts (not an
   // imported down-scoped share, not a session-token STS credential).
   canShareFromMount(m) {
+    m = this._connOf(m); // a child mount shares with its credential's keys
     return (m.type || 's3') === 's3' && !!m.secretKeyEnc && !m.sessionTokenEnc && m.origin !== 'imported';
   }
 
   async mintShareFromMount(mountId, { folder, mode, name, expiryDays }) {
-    const m = this._get(mountId);
-    if (!this.canShareFromMount(m)) throw new Error('This connection can’t create share links (only your own S3 storage can).');
+    const rec = this._get(mountId);
+    if (!this.canShareFromMount(rec)) throw new Error('This connection can’t create share links (only your own S3 storage can).');
+    const m = this._connOf(rec);
     const prefix = [m.prefix, folder].filter(Boolean).join('/').replace(/\/+/g, '/').replace(/^\/+|\/+$/g, '');
     return this.mintShare({
       name: name || m.name, endpoint: m.endpoint, bucket: m.bucket, prefix,

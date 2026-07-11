@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.108.0 — 2026-07-11
+
+**Storage: credentials as first-class items (user request — the rclone `remote:path` model)**
+- A **credential** is the remote before the colon (connection settings only); **mount points** nest under it as `remote:path` rows (↳ indented, key badge on the parent). One credential backs any number of mounts, and refreshing its token/keys heals all of them at once (children resolve connection through the parent at mount time).
+- **Auto-detection**: mounting a pathless S3-family record whose token can't list the account root (bucket-scoped R2/S3 tokens — the FishR2 trap: fuse mount "succeeds", every IO returns EIO) probes first, converts the record to a credential, and says exactly what to do. A credential whose token CAN list root (Google Drive, account-wide keys) mounts normally — no artificial restriction.
+- **AccessDenied with a path now fails fast with guidance** ("check the bucket name — S3 buckets are lowercase letters/digits/hyphens") instead of mounting a dead folder. Root-caused live: `Example_Prod_Data` is the display name; the actual bucket is `example-prod-data` (S3 names can't contain uppercase/underscores).
+- New: `POST /api/mounts/:id/children`, `POST /api/mounts/:id/convert`; credential delete refused while mount points exist; export/import carries kind+parent links (re-linked by name on the target instance).
+- **Full parameter editing for non-env mounts** (user directive: only env-provisioned connections are locked): every type's edit dialog now exposes ALL its connection fields — custom-rclone per-parameter rows (blank = keep, `-` = remove, add-new pair), Drive token/client, WebDAV/SFTP hosts+secrets. Server PATCH branches for sftp/webdav actually write the right fields now (they set unused keys before).
+- **Google Drive re-authorization**: when Google reports `invalid_grant` (revoked/expired token — real case on a deployed instance), the error line and the edit dialog offer "Re-authorize Google Drive…" — the guided OAuth flow runs with the mount's own client creds and writes the fresh token back into the record (and its children), then reconnects. `POST /api/mounts/gdrive-auth/start {mountId}` + `POST /api/mounts/:id/drive-token`.
+- Import-rclone-config dialog layout fix: `.dialog-body label` (0,1,1) crushed the remote checkbox rows into columns — same specificity clash class as `label.cfg-row`.
+
+**Codex: duplicate assistant messages fixed (user report)**
+- Newer Codex serializes the SAME assistant message differently in the wrapper buffer (`item_id`) vs the rollout JSONL (`id` + a metadata passthrough object) — the merge fingerprint missed the twins AND the normalizer's stream-key missed the in-place update, so every buffered assistant message rendered twice after attach/restart. Both layers fixed; verified on the reporter's real 2GB rollout (3 duplicated texts → 0).
+
 ## 2.107.1 — 2026-07-11
 
 - **openSpec windows survive page refresh**: restoreState's typed branches ended at `browser` — settings/desktop/usage/task-detail/workflow windows silently VANISHED on reload (real report). A generic fallback now replays any saved openSpec (verified: settings window save→reload→restored).
