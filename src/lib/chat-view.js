@@ -1982,6 +1982,13 @@ class ChatView {
         while (a && a.offsetParent === null) a = a.nextElementSibling;
         if (a) list.scrollTop = a === anchorEl ? a.offsetTop - anchorDelta : a.offsetTop;
       }
+      // Drain OUR OWN mutation records: the observer callback is delivered at
+      // a microtask checkpoint AFTER this finally resets _runsMutating, so the
+      // flag alone never suppressed self-triggering — every pass scheduled
+      // another identical pass in a permanent 180ms rebuild loop
+      // (review-confirmed, pre-existing). Nothing else mutates the list
+      // synchronously between our pass and this drain.
+      this._runsObserver?.takeRecords();
     }
   }
 
