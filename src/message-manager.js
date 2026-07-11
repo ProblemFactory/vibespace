@@ -413,16 +413,22 @@ class MessageManager {
       // history is request-without-response and the card would render
       // awaiting-approval forever (real report: an answered AskUserQuestion
       // questionnaire stuck interactive). Mirror of the completed-before-
-      // request auto-resolve in _processControlRequest.
+      // request auto-resolve in _processControlRequest. Emit `permission`
+      // ONLY when newly resolved HERE — unconditionally re-emitting a
+      // long-resolved permission made the live completion edit re-append the
+      // "✓ Allowed" chip renderToolMsg deliberately omits AND clobbered the
+      // client's selectedAnswers (review-confirmed).
+      let permResolved = false;
       if (existing.permission && !existing.permission.resolved) {
-        existing.permission.resolved = tr.is_error ? 'denied' : 'allowed';
+        existing.permission.resolved = this._resolutionFromResult(resultText, tr.is_error);
+        permResolved = true;
       }
       // Replace tool_call content with tool_result (keeps input + adds output)
       existing.content = [{
         type: 'tool_result', toolCallId: toolUseId, toolName: pending.block.name,
         input: pending.block.input, output: resultText, status: tr.is_error ? 'error' : 'ok',
       }];
-      if (emit) this._emit({ op: 'edit', id: existing.id, fields: { status: existing.status, toolStatus: existing.toolStatus, content: existing.content, ...(existing.permission ? { permission: existing.permission } : {}) } });
+      if (emit) this._emit({ op: 'edit', id: existing.id, fields: { status: existing.status, toolStatus: existing.toolStatus, content: existing.content, ...(permResolved ? { permission: existing.permission } : {}) } });
       // harness TaskCreate: "Task #N created successfully" carries the id
       const subj = this._pendingTaskCreates?.get(toolUseId);
       if (subj && !tr.is_error) {
@@ -594,6 +600,16 @@ class MessageManager {
     }
   }
 
+  // Deduce a permission's resolution from the tool_result that answered it.
+  // is_error alone must NOT read as denied: a user-APPROVED tool that then
+  // fails (nonzero exit, bad edit — hundreds per real transcript) is is_error
+  // too, and labeling it "✗ Denied" misrecords the user's action
+  // (review-confirmed). Only the CLI's canned user-rejection text is a denial.
+  _resolutionFromResult(outputText, isError) {
+    if (!isError) return 'allowed';
+    return /user (doesn'?t want|rejected|declined|chose not)/i.test(outputText || '') ? 'denied' : 'allowed';
+  }
+
   _processControlRequest(raw, emit) {
     if (raw.request?.subtype !== 'can_use_tool') return;
     const toolUseId = raw.request.tool_use_id;
@@ -611,15 +627,26 @@ class MessageManager {
     }
     if (!existing) return;
 
-    // Restore from error to pending if this was incorrectly flushed
-    if (existing.status === 'error') {
+    // A REAL tool_result (content already merged) means the permission
+    // question was settled — never flip such a card back to pending. Only an
+    // interrupt-FLUSHED tool (content still tool_call, errored by
+    // _processResult) is "incorrectly flushed" and restorable. Without this
+    // the [tool_use, tool_result, control_request] replay order (end-appended
+    // buffer records after an anchorless merge) resurrected denied/errored
+    // cards as awaiting-approval — the exact bug the merge auto-resolve fixes
+    // for the other order (review-confirmed).
+    const rblock = existing.content?.[0];
+    const hasRealResult = rblock?.type === 'tool_result';
+    if (existing.status === 'error' && !hasRealResult) {
       existing.status = 'pending';
       existing.toolStatus = null;
       if (emit) this._emit({ op: 'edit', id: existing.id, fields: { status: 'pending', toolStatus: null } });
     }
 
-    // If the tool already completed, the permission was implicitly approved
-    const autoResolved = existing.status === 'complete' ? 'allowed' : null;
+    // If the tool already ran, the permission was implicitly settled
+    const autoResolved = hasRealResult
+      ? this._resolutionFromResult(rblock.output, rblock.status === 'error')
+      : (existing.status === 'complete' ? 'allowed' : null);
 
     const isAskUser = raw.request.tool_name === 'AskUserQuestion';
     existing.permission = {
