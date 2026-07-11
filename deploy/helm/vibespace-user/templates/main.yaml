@@ -10,6 +10,12 @@ metadata:
 type: Opaque
 stringData:
   password: {{ .Values.password | quote }}
+  {{- with .Values.telemetry.forwardToken }}
+  telemetryForwardToken: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.telemetry.ingestToken }}
+  telemetryIngestToken: {{ . | quote }}
+  {{- end }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -61,6 +67,18 @@ spec:
           env:
             - name: VIBESPACE_PASSWORD
               valueFrom: { secretKeyRef: { name: {{ $name }}, key: password } }
+            {{- with .Values.telemetry.forwardUrl }}
+            - name: VIBESPACE_TELEMETRY_FORWARD_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if .Values.telemetry.forwardToken }}
+            - name: VIBESPACE_TELEMETRY_FORWARD_TOKEN
+              valueFrom: { secretKeyRef: { name: {{ $name }}, key: telemetryForwardToken } }
+            {{- end }}
+            {{- if .Values.telemetry.ingestToken }}
+            - name: VIBESPACE_TELEMETRY_INGEST_TOKEN
+              valueFrom: { secretKeyRef: { name: {{ $name }}, key: telemetryIngestToken } }
+            {{- end }}
           volumeMounts:
             - name: home
               mountPath: /home/vibe

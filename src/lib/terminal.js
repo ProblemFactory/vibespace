@@ -11,6 +11,13 @@ const WEB_FONTS = [
   'Fira Code', 'JetBrains Mono', 'Source Code Pro', 'IBM Plex Mono', 'Inconsolata',
 ];
 
+// Terminal QUERY-RESPONSE sequences xterm.js auto-emits when an app queries the
+// terminal: CPR/DECXCPR (\e[n;mR), DA1/DA2 (\e[?…c / \e[>…c), DSR-ok (\e[0n),
+// DECRPM (\e[?n;m$y), OSC 4/10/11/12 color reports, DCS replies (XTVERSION/
+// XTGETTCAP/DECRQSS/DA3). Used to drop re-answers during buffer replay — keep
+// in sync with TERM_QUERY_RESP_RE in ws-handler.js (server-side arbitration).
+const TERM_QUERY_RESP_RE = /\x1b\[\??\d+(?:;\d+){0,2}R|\x1b\[[?>][\d;]*c|\x1b\[0n|\x1b\[\?\d+;\d+\$y|\x1b\](?:4|1[0-2]);[^\x07\x1b]*(?:\x07|\x1b\\)|\x1bP[^\x1b]*\x1b\\/g;
+
 // Detect monospace via canvas: in a monospace font, 'i' and 'M' have equal width
 const _monoCtx = document.createElement('canvas').getContext('2d');
 function _isMonospace(family) {
@@ -147,6 +154,12 @@ class TerminalSession {
     // spam when clicking between terminal and other UI elements (e.g. split-pane editor).
     this.terminal.onData((data) => {
       let filtered = data.replace(/\x1b\[I|\x1b\[O/g, '');
+      // While restored buffer content REPLAYS (attach), xterm.js re-ANSWERS
+      // every query sequence stored in it (\e[6n cursor pos, \e]11;? bg color,
+      // DA…) — those queries were answered live long ago; the re-answers just
+      // echo as literal "^[]11;rgb:…^[[3;1R" junk at the prompt (real report).
+      // Server-side ws-handler has the matching multi-client arbitration.
+      if (this._replaying) filtered = filtered.replace(TERM_QUERY_RESP_RE, '');
       // While the Ctrl+G split editor is open, the CLI is blocked on the editor
       // subprocess with the tty back in COOKED+ECHO mode — but it left mouse
       // tracking enabled, so xterm keeps emitting SGR reports which the tty

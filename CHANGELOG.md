@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.101.0 — 2026-07-11
+
+**Fleet telemetry: any instance can be the central collector (deployment queue ①)**
+- New `POST /api/telemetry/ingest`: enabled only when `VIBESPACE_TELEMETRY_INGEST_TOKEN` is set (the shared Bearer token is both the on-switch and the gate, timing-safe compare; cookie-auth exempt — senders have no cookie). Forwarded batches land in per-month `central-YYYY-MM.ndjson` shards, each record stamped with the sender's anonymous instance id, original timestamps/versions preserved (clamped to a sane window). Same privacy model as local events: names/stacks/metrics only, never content.
+- Forwarding now sends `Authorization: Bearer <token>` (new setting `telemetry.forwardToken`); `telemetry.forwardUrl`/`forwardToken` fall back to `VIBESPACE_TELEMETRY_FORWARD_URL`/`_TOKEN` env vars so a managed deployment configures the whole fleet via helm/compose without touching per-user settings (user setting still wins).
+- ⚙ → Diagnostics report grows a **Fleet** section on a collector instance: per-instance events/errors/versions/last-seen table + errors grouped across instances (`GET /api/telemetry/central-summary`).
+- Helm chart: new `telemetry.forwardUrl/forwardToken/ingestToken` values → env (tokens via the instance Secret).
+- Verified E2E: forward→ingest with correct token lands (inst id + remote version + original ts preserved); wrong/missing token rejected; instance id sanitized.
+
+**Terminal query-response junk (`^[]11;rgb:ffff/ffff/ffff^[[3;1R` echoed at the prompt — real report)**
+- Root cause: with dtach every attached browser client is a full terminal emulator, so an app's terminal query (OSC 11 background color, `\e[6n` cursor position, DA…) was answered by EVERY attached client — the app consumes one answer and the tty ECHOES the extras as literal junk. Buffer replay on re-attach re-answered the stored queries the same way.
+- Server fix (ws-handler `input`): pure query-response chunks are forwarded from ONE designated client only (the size owner, else the oldest attached) when >1 client is attached. Known accepted collision: modified-F3 (`\e[1;2R`) from a non-owner client in a multi-client session.
+- Client fix (terminal.js + session-lifecycle.js): while restored buffer content replays, xterm.js's auto-answers to stored query sequences are dropped (`_replaying` flag) — they were answered live long ago.
+
 ## 2.100.6 — 2026-07-11
 
 - Terminal font FOUT: on a fresh page load the web fonts (Fira Code etc.) can finish loading AFTER the terminal's first paint, which already cached the fallback glyph in the WebGL texture atlas — so the terminal stayed on an ugly fallback font until a manual font switch rebuilt the atlas (real report: "ugly until I switch fonts a few times"). `_refreshOnFontReady` now explicitly `document.fonts.load()`s the configured family + awaits `document.fonts.ready`, then `clearTextureAtlas()` + refits (with a settle pass) so the terminal repaints in the real font automatically.

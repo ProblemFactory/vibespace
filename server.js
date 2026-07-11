@@ -1874,10 +1874,20 @@ const accounts = new AccountManager({
 // bakes WHICH account + its billing TYPE into each event so subscription and
 // API-key usage are never conflated. ──
 const { UsageHistory } = require('./src/usage-history');
+// Forward URL/token: user setting wins; the VIBESPACE_TELEMETRY_FORWARD_* env
+// vars are the DEPLOYMENT defaults (helm/compose set them fleet-wide so no
+// per-user settings edit is needed on managed instances).
 const telemetry = new Telemetry({
   dataDir: path.join(__dirname, 'data'),
   version: require('./package.json').version,
-  getForwardUrl: () => { try { return serverSetting('telemetry.forwardUrl') || ''; } catch { return ''; } },
+  getForwardUrl: () => {
+    try { return serverSetting('telemetry.forwardUrl') || process.env.VIBESPACE_TELEMETRY_FORWARD_URL || ''; }
+    catch { return process.env.VIBESPACE_TELEMETRY_FORWARD_URL || ''; }
+  },
+  getForwardToken: () => {
+    try { return serverSetting('telemetry.forwardToken') || process.env.VIBESPACE_TELEMETRY_FORWARD_TOKEN || ''; }
+    catch { return process.env.VIBESPACE_TELEMETRY_FORWARD_TOKEN || ''; }
+  },
 });
 // Server-side fatals land in the same ledger (journald has them too, but the
 // diagnostics report should show one unified picture).
@@ -1976,6 +1986,31 @@ app.get('/api/telemetry/summary', (req, res) => {
   try {
     telemetry.flush();
     res.json(telemetry.summary({ days: Math.min(parseInt(req.query.days) || 14, 90) }));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// ── Central collector (team deployments): other instances POST their batches
+// here (telemetry.forwardUrl → https://<collector>/api/telemetry/ingest).
+// Enabled ONLY when VIBESPACE_TELEMETRY_INGEST_TOKEN is set — the shared
+// Bearer token is both the on-switch and the whole gate (cookie-auth exempt
+// in auth.js: remote instances have no cookie). Same privacy model as local
+// events: names/stacks/metrics only, never content. ──
+const TELEMETRY_INGEST_TOKEN = (process.env.VIBESPACE_TELEMETRY_INGEST_TOKEN || '').trim();
+app.post('/api/telemetry/ingest', (req, res) => {
+  if (!TELEMETRY_INGEST_TOKEN) return res.status(404).json({ error: 'collector disabled' });
+  const crypto = require('crypto');
+  const got = Buffer.from(String(req.headers.authorization || ''));
+  const want = Buffer.from(`Bearer ${TELEMETRY_INGEST_TOKEN}`);
+  if (got.length !== want.length || !crypto.timingSafeEqual(got, want)) {
+    return res.status(403).json({ error: 'bad token' });
+  }
+  try {
+    const n = telemetry.ingestRemote(req.body?.instance, req.body?.events);
+    res.json({ success: true, n });
+  } catch { res.json({ success: true, n: 0 }); }
+});
+app.get('/api/telemetry/central-summary', (req, res) => {
+  try {
+    res.json({ collector: !!TELEMETRY_INGEST_TOKEN, ...telemetry.centralSummary({ days: Math.min(parseInt(req.query.days) || 14, 90) }) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

@@ -257,7 +257,11 @@ export function installSessionLifecycle(App, ctx = {}) {
           if (msg.buffer) {
             const buf = msg.buffer;
             term._suppressWaiting = true;
-            setTimeout(() => { term.terminal.write(buf, () => { term._suppressWaiting = false; term.terminal.scrollToBottom(); term.fit(); }); }, 300);
+            // _replaying: suppress xterm's auto-answers to query sequences
+            // stored in the buffer (they were answered live long ago — the
+            // re-answers echo as ^[]11;rgb:… junk; see terminal.js onData).
+            term._replaying = true;
+            setTimeout(() => { term.terminal.write(buf, () => { term._suppressWaiting = false; term._replaying = false; term.terminal.scrollToBottom(); term.fit(); }); }, 300);
           }
           this._wireTerminalWindow(winInfo, term, serverId);
           term.focus();
