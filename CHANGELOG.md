@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.99.1 — 2026-07-11
+
+**Current-session billing switcher on mobile + dashboard window-width adaptivity**
+- **切换当前会话的 sub**: mobile windows have no title bars, so the desktop's identity badge (the current-session switch entry) simply didn't exist there. Two stand-ins: a **billing chip in the chat status bar** (account name pill next to model/effort, mobile-only — desktop keeps the title-bar badge; fed by the same `syncSessionIdentity` broadcast, click → the switcher menu) and a **billing chip on every mobile window-switcher row** (tap title → each session window shows its account; tap chip → switcher).
+- **Usage dashboard now adapts to the WINDOW's width, not the screen's** — `.usage-body` is a `container-type: inline-size` container and the panel grid folds to one column under 700px container width, so a narrow usage window on a wide desktop reflows too (Chart.js re-fits via its own ResizeObserver). The phone media query stays as a no-container-query fallback.
+
 ## 2.99.0 — 2026-07-10
 
 **Mobile adaptation of the recent feature batch (usage, quota, multi-account)**

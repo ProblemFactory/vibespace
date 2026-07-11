@@ -80,7 +80,7 @@ On mobile (≤768px), the sidebar uses a **two-level navigation** instead of the
 
 The mobile nav bar provides: ☰ sidebar toggle, session title (tap for window switcher with desktop tabs), a quota donut chip (worst-of utilization across your accounts; tap for the full usage popup with per-account switching), ⚙ settings (Usage window, Manage agents, Diagnostics, all settings), ✕ close window, + new session. Image upload button appears next to the chat input on mobile.
 
-Switching a session's billing account on mobile: long-press its card → **Switch billing…** (the same menu the desktop title-bar badge opens).
+Switching a session's billing account on mobile (windows have no title bars there, so the desktop badge doesn't exist): tap the **account chip in the chat status bar** (next to model/effort), tap the **chip on a window-switcher row** (tap title first), or long-press the session's card → **Switch billing…** — all three open the same menu the desktop title-bar badge does.
 
 ## Forking
 

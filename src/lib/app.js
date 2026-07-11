@@ -1704,6 +1704,9 @@ class App {
       }
       this.wm.setTitleMeta(winId, this._buildTitleMeta(match));
       this.wm.setAuthBadge?.(winId, match.auth || null); // billing key in the title bar
+      // Mobile has no window title bars → no badge; the chat status bar hosts
+      // the identity chip there instead (same click-to-switch).
+      if (this.isMobile) session.setBillingIdentity?.(match.auth || null, (el) => this.showBillingSwitcher(winId, el));
       if (win._openSpec) {
         Object.assign(win._openSpec, {
           backend: match.backend || win._openSpec.backend || 'claude',
