@@ -2201,10 +2201,11 @@ label.cfg-row {
   border-radius: 3px; padding: 0 4px; flex-shrink: 0;
 }
 .mounts-badge-red { color: var(--red, #e55); border-color: color-mix(in srgb, var(--red, #e55) 50%, transparent); }
-/* Credential rows (2.108.0): the rclone remote before the colon — mount
-   points nest beneath it with an ↳ indent */
-.mounts-badge-cred { display: inline-flex; align-items: center; gap: 3px; color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
-.mounts-badge-cred svg { width: 10px; height: 10px; }
+/* Submounts (2.108.x): any storage can hold remote:path children — ↳ indent.
+   Credential-only parents (root unmountable) show a key ICON where the status
+   dot would be (icon-only marker, user directive — no text badge). */
+.mounts-cred-key { display: inline-flex; align-items: center; color: var(--accent); flex-shrink: 0; width: 13px; }
+.mounts-cred-key svg { width: 13px; height: 13px; }
 .mounts-row-child { margin-left: 16px; border-left: 2px solid color-mix(in srgb, var(--accent) 25%, transparent); padding-left: 6px; }
 .mounts-child-arrow { color: var(--text-dim); font-size: 11px; flex-shrink: 0; }
 .mounts-reauth-btn { display: block; margin-top: 4px; }

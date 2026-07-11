@@ -27,12 +27,11 @@ Storage is a single list of connected places — S3, Google Drive, Nextcloud/Web
 
 > Team deployments can still set `VIBESPACE_S3_*` — on first boot it's imported once as a normal S3 connection named "My storage" (auto-connected). After that it's just another row you can rename or re-point (its connection settings stay deployment-managed and can't be edited or deleted in-app).
 
-## Credentials and mount points (`remote:path`)
+## Submounts (`remote:path`)
 
-Think of it as rclone syntax: the part before the colon is a **credential** (connection settings), the part after is the path a **mount point** shows. A credential row (key badge) can hold any number of mount points nested under it (↳ rows) — one R2/S3 token or one Google Drive sign-in backing many mounts. Refreshing the credential (new token, new secret) heals every mount point under it at once.
+Think of it as rclone syntax: the part before the colon is the connection, the part after is a path. **Every storage row can hold submounts** (↳ rows nested under it) — one R2/S3 token, one Google Drive sign-in or one SFTP host backing any number of mounted paths (＋ on the row). Refreshing the parent's token/keys heals every submount under it at once.
 
-- A credential itself still connects fine when its token can list the remote's root (Google Drive, account-wide S3 keys) — connecting it mounts the root.
-- **Bucket-scoped tokens are auto-detected**: some S3/R2 tokens can only access specific buckets and can't list the account root. Mounting such a token at the root would "succeed" and then error on every file. VibeSpace probes first, keeps the record as a credential, and asks you to add a mount point with a specific bucket (＋ on the credential row).
+- **Bucket-scoped tokens are auto-detected**: some S3/R2 tokens can only access specific buckets and can't open the account root. Mounting such a token at the root would "succeed" and then error on every file. VibeSpace probes first and marks the record **credential-only** — a key icon in place of the status dot, no Connect action — and asks you to add a submount with a specific bucket.
 - Bucket names are strict: lowercase letters, digits and hyphens only (`example-prod-data`, not `Example_Prod_Data`). If the token can't access the path you typed, the mount fails immediately with a pointer instead of connecting a dead folder.
 - **Google Drive re-authorization**: if Google reports the saved sign-in as expired/revoked (`invalid_grant`), the row's error line and the edit dialog offer **Re-authorize Google Drive…** — the same guided sign-in used when adding a Drive connection, writing the fresh token back into the existing record.
 

@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.108.2 — 2026-07-11
+
+**Storage submounts — the "credential" concept dissolved (user directive after testing 2.108.0):**
+- EVERY top-level storage row can now hold submounts (＋ on S3/rclone/Drive/SFTP rows — `remote:path` children under any connection, not just converted credentials). Children still resolve connection through the parent, so a token refresh heals all of them.
+- Root-unmountable records (auto-detected bucket-scoped S3/R2 tokens) are now marked **credential-only with a key ICON in place of the status dot** — no text badge, and **no Connect action** (its root is known dead; submounts carry the mount state). The row shows the remote source instead of a meaningless local path.
+- Auto-heal: if a credential-only record's token later CAN open the root (rescoped), the next mount attempt clears the flag.
+- Submounts can't nest (clear error), duplicate (⧉) stays top-level-only.
+
+**Instance image 3.2.0** (deploy): the instance user gets passwordless sudo (user request — in-terminal apt installs; rootfs is ephemeral, persistent setup belongs in `~/.vibespace-init.sh` which can now sudo). Live on xingweil.
+
 ## 2.108.1 — 2026-07-11
 
 Three long-open bugs fixed by parallel root-cause agents, each verified end-to-end in isolated instances:
