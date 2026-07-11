@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.109.2 — 2026-07-11
+
+- **CephFS health-probe tolerance**: the native cephfs mount gets a longer probe window (12s — an MDS session on a cold mount can spike a first `ls`) and requires TWO consecutive hangs before the watchdog auto-disconnects a trusted deployment mount (a single blip won't tear it down).
+
+## 2.109.1 — 2026-07-11
+
+**Native all-flash CephFS "My storage" (user-approved, replaces the slow RGW S3)** — a new `cephfs` mount type does a kernel `mount -t ceph` via sudo (the container has passwordless sudo + SYS_ADMIN + AppArmor Unconfined). Env-provisioned (`VIBESPACE_CEPHFS_MONS/NAME/PATH/USER/SECRET`) as "My storage", taking precedence over S3 when both are set. Per-user quota is enforced on the CephFS subtree (`ceph.quota.max_bytes`), shown as the filesystem size. Editable name + mount point, connection env-locked (like the S3 My storage). Helm: `cephfs.*` values + a widened securityContext gate (fuse OR cephfs); image adds `ceph-common`. Verified live on a deployed instance: mounts at boot, survives both health sweeps, 1T quota, writable, server stays responsive. No CSI driver needed — the pod's kernel ceph client mounts the scoped subtree directly.
+
 ## 2.109.0 — 2026-07-11
 
 **Structural IO isolation (user directive "把IO隔离，不用重写")** — every LOCAL user-path filesystem op in the file routes now runs in a dedicated `worker_threads` pool (`src/safe-fs.js` + `src/safe-fs-worker.js`, 4 workers, each with its own libuv threadpool) with a per-op deadline and kill+respawn on a stuck worker. A hung mount can no longer starve the main event loop / shared pool — the structural fix behind today's tactical guards. Path resolution / traversal checks stay in the main process; the worker only executes the already-resolved absolute path. `?host=` remote ops are untouched. Verified: during a 6.3s dead-mount connect, 41 concurrent good listings (max 7ms) + 41 logins (max 6ms) stayed fast, zero failures.
