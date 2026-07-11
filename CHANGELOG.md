@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.111.2 — 2026-07-11
+
+- **In-container Desktop: the panel "Settings" button did nothing (real report)**. The stock XFCE panel generated on first desktop boot ships an EMPTY 4th launcher — a button with no command — plus Terminal/File-Manager launchers that use `exo-open --launch <Category>`, which silently no-ops when no preferred app is registered. The deployment image now bakes a curated XFCE default (`/etc/xdg/xfce4/…`): the empty launcher becomes a real Settings Manager launcher, and `helpers.rc` registers Terminal=xfce4-terminal / Files=Thunar / Browser=chromium so all the panel buttons work. Applies to FRESH desktops; an already-generated user config is repaired with a one-line fix (see the private deploy README). Image-level change — carried on the next image build.
+
 ## 2.111.1 — 2026-07-11
 
 - **In-container Desktop stopped opening ("Too many security failures", real report)**: TigerVNC blacklists a source host after a few unauthenticated connect-then-drop attempts — but EVERY desktop connection comes from 127.0.0.1 (the cookie-authed WS bridge), and VibeSpace's own `portListening` health probe connects and immediately closes the socket, which TigerVNC counts as a failed attempt. A handful of status polls poisoned the blacklist and locked the desktop out. The VNC server now launches with `-UseBlacklist 0` (safe — the bridge is the only route in and it already authenticates; the blacklist protected nothing and only self-DoSed). Restart the desktop once (kill the stale Xtigervnc / redeploy) to clear an already-tripped blacklist.

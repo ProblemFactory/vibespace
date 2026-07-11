@@ -29,6 +29,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # unavailable (couldn't launch at all) and /dev/shm is tiny. Acceptable for a
 # single-user container. Debian chromium sources /etc/chromium.d/*.
 RUN mkdir -p /etc/chromium.d && printf '%s\n' 'export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-sandbox --disable-dev-shm-usage"' > /etc/chromium.d/99-container
+# Curated XFCE defaults (system-wide, read from /etc/xdg when the user has no
+# config yet — i.e. a fresh desktop). Fixes two stock-panel bugs on first boot:
+# (1) the default panel ships an EMPTY 4th launcher — a "Settings" button with
+# no command that does nothing when clicked (real report); we point it at
+# xfce4-settings-manager. (2) the Terminal/File Manager launchers use
+# `exo-open --launch <Category>` which silently no-ops with no preferred app
+# registered — helpers.rc sets all three (Terminal/Files/Browser).
+COPY deploy/docker/xfce/xfconf/xfce-perchannel-xml/xfce4-panel.xml /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml
+COPY deploy/docker/xfce/panel/launcher-20/settings.desktop /etc/xdg/xfce4/panel/launcher-20/settings.desktop
+COPY deploy/docker/xfce/helpers.rc /etc/xdg/xfce4/helpers.rc
 # fuse mounts as the non-root user: fusermount3 must be SETUID ROOT — the
 # standard desktop-Linux mechanism. In-container capability grants don't
 # survive a non-root execve (CapEff stays 0), so setuid is the only reliable
