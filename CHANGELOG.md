@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.100.1 — 2026-07-11
+
+**Backup & migrate dialog layout fixed**
+- The section checkboxes rendered ABOVE their labels (one tall stack per row, endless scrolling — real report): `.dialog-body label`'s `flex-direction: column` out-ranked `.cfg-row` by specificity. Rows are `label.cfg-row` flex-row now, laid out in a **two-column grid** (one column on phones) — the whole dialog fits without scrolling.
+- Phone: `createModalShell`'s wide-variant inline `min-width: 440px` overflowed 390px screens past the `width: 95vw` clamp (width and min-width are separate properties) — the mobile dialog rule now forces `min-width: 0 !important`, fixing every wide modal on phones.
+
 ## 2.100.0 — 2026-07-11
 
 **Config export covers everything recent (centralized-deployment migration review)**

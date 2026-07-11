@@ -1691,7 +1691,9 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
   .chat-scroll-btn { width: 40px; height: 40px; font-size: 18px; right: 12px; bottom: 80px; }
 
   /* Dialogs */
-  .dialog { width: 95vw !important; max-width: none; max-height: 85vh; max-height: 85dvh; overflow-y: auto; }
+  /* min-width !important: createModalShell's wide variant sets an inline
+     min-width (440px) that would out-rank the width clamp and overflow phones */
+  .dialog { width: 95vw !important; min-width: 0 !important; max-width: none; max-height: 85vh; max-height: 85dvh; overflow-y: auto; }
   /* Settings is a window now; the .settings-window rule fills its window. Keep
      the stacked nav layout on narrow screens. */
   .settings-body { flex-direction: column; }
@@ -2076,10 +2078,15 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 
 /* ── Config export/import + password dialogs ── */
 .cfg-dialog-body { max-width: 520px; }
-.cfg-rows { display: flex; flex-direction: column; gap: 2px; }
-.cfg-row {
-  display: flex; align-items: flex-start; gap: 9px; padding: 6px 8px;
-  border-radius: var(--radius-sm); cursor: pointer;
+/* Two columns — the dialog is wide and one row per line made it scroll past
+   the sensitive section (real report). Falls to one column on phones. */
+.cfg-rows { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; }
+@media (max-width: 768px) { .cfg-rows { grid-template-columns: 1fr; } }
+/* label.cfg-row: must out-rank `.dialog-body label` (0,1,1), whose
+   flex-direction:column stacked the checkbox ABOVE the text (the layout bug). */
+label.cfg-row {
+  display: flex; flex-direction: row; align-items: flex-start; gap: 9px; padding: 6px 8px;
+  border-radius: var(--radius-sm); cursor: pointer; min-width: 0;
 }
 .cfg-row:hover { background: var(--hover-overlay); }
 .cfg-row.disabled { opacity: 0.45; cursor: default; }
