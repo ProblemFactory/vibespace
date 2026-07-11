@@ -31,6 +31,24 @@ function rfs(req) {
 // remote); '~' expands remotely inside RemoteFs
 const remotePath = (p) => String(p || '~');
 
+// Hung-mount circuit breaker (2.108.4): while a mount is CONNECTING (IO-probe
+// window) or was detected hanging, every file op under its root fails fast —
+// an open explorer window pointed at a dead mountpoint used to stuff the
+// libuv threadpool with never-returning fs ops and starve the whole server
+// (real outage; the watchdog reclaims the mount but in-flight ops drain for
+// minutes). Remote (?host=) ops don't touch the local fs and pass through.
+router.use((req, res, next) => {
+  const mounts = req.app.locals.mounts;
+  if (!mounts?.pathBlocked) return next();
+  const raw = req.query.path || req.query.dir || req.body?.path || req.body?.destDir || req.body?.dest || req.body?.src;
+  if (!raw || req.query.host || req.body?.host) return next();
+  let p; try { p = safePath(String(raw)); } catch { return next(); }
+  if (mounts.pathBlocked(p)) {
+    return res.status(503).json({ error: 'This storage is connecting or not responding — try again in a moment.' });
+  }
+  next();
+});
+
 router.get('/api/home', async (req, res) => {
   const R = rfs(req);
   if (R) { try { return res.json({ home: await R.fs.home(R.host) }); } catch (e) { return res.status(400).json({ error: e.message }); } }
