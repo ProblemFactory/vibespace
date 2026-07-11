@@ -1,16 +1,10 @@
 node_modules/
 public/bundle.js
-data/sockets/
-data/session-meta/
-data/session-buffers/
-data/layouts.json
-data/user-state.json
-data/bookmarks.json
-data/settings.json
-data/usage-cache.json
-data/custom-themes.json
-data/drafts.json
-data/settings-sync.json
+# ── ALL of data/ is runtime state — NEVER track — EXCEPT data/bin/ (the static
+# tools the server ships). Belt-and-suspenders over the explicit list below so a
+# NEW data file (e.g. data/telemetry/) can never be committed by accident. ──
+data/*
+!data/bin/
 data/bin/code
 *.nfs*
 .agent-context/

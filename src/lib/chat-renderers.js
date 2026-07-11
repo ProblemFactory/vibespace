@@ -809,7 +809,7 @@ class ChatRenderers {
             const looksRel = /^[\w@%+=.\-][^\s<>"'`|]*$/.test(txt) && txt.length >= 3 && txt.length <= 200
               && (txt.includes('/') || /\.[A-Za-z0-9]{1,8}$/.test(txt))
               // digits/dots/slashes only = versions, IPs, CIDR ranges (10.0.0.0/8);
-              // digit-dot stem = IP-ish tokens like 10.0.0.x — never file refs
+              // digit-dot stem = IP-ish tokens like 192.0.2.10 — never file refs
               && !/^[\d./]+$/.test(txt) && !/^[\d.]+$/.test(txt.replace(/\.[A-Za-z0-9]+$/, ''))
               && !txt.endsWith('.') && !txt.includes('//');
             if (looksRel) {
