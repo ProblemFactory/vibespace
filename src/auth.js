@@ -382,10 +382,15 @@ function loginHtml({ clerk = null, passwordEnabled = true } = {}) {
     const s = document.createElement('script');
     s.src = ${JSON.stringify(`https://${clerk.frontendApi}/npm/@clerk/clerk-js@5/dist/clerk.browser.js`)};
     s.async = true;
+    s.crossOrigin = 'anonymous';
+    // clerk-js v5 from the CDN self-bootstraps window.Clerk as an INSTANCE
+    // using this attribute ("window.Clerk is not a constructor" without it).
+    s.setAttribute('data-clerk-publishable-key', PK);
     s.onerror = () => { ssoBtn.textContent = 'SSO unavailable'; };
     s.onload = async () => {
       try {
-        const clerk = new window.Clerk(PK);
+        // Instance (v5 CDN) or constructor (older builds) — accept both.
+        const clerk = typeof window.Clerk === 'function' ? new window.Clerk(PK) : window.Clerk;
         await clerk.load({ standardBrowser: true });
         const exchange = async () => {
           ssoBtn.disabled = true;
