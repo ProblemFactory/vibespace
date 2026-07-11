@@ -2356,6 +2356,7 @@ app.get('/api/hosts/:id/recent-cwds', async (req, res) => {
 const { MountManager } = require('./src/mounts');
 const mounts = new MountManager({
   dataDir: path.join(__dirname, 'data'),
+  getSetting: serverSetting,
   broadcast: (msg) => {
     const json = JSON.stringify(msg);
     wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
@@ -2787,9 +2788,36 @@ server.on('upgrade', (req, socket, head) => {
   }
 });
 
+// ── Version / update visibility (⚙ menu shows current + latest at the Update entry) ──
+// Latest = the canonical repo's master package.json — fetched LAZILY on
+// request only (never a background timer), cached 6h, best-effort: offline
+// instances just show the local version.
+const versionInfo = { fetchedAt: 0, latest: null, commit: null };
+app.get('/api/version', async (req, res) => {
+  if (versionInfo.commit === null) {
+    try { versionInfo.commit = execFileSync('git', ['-C', __dirname, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf-8', timeout: 3000 }).trim(); }
+    catch { versionInfo.commit = ''; }
+  }
+  if (Date.now() - versionInfo.fetchedAt > 6 * 3600 * 1000) {
+    versionInfo.fetchedAt = Date.now(); // stamped even on failure — no hammering while offline
+    try {
+      const ctl = new AbortController();
+      const t = setTimeout(() => ctl.abort(), 5000);
+      const r = await fetch('https://raw.githubusercontent.com/ProblemFactory/vibespace/master/package.json', { signal: ctl.signal });
+      clearTimeout(t);
+      if (r.ok) versionInfo.latest = (await r.json()).version || null;
+    } catch {}
+  }
+  res.json({ version: require('./package.json').version, commit: versionInfo.commit || null, latest: versionInfo.latest });
+});
+
 server.listen(PORT, HOST, () => {
   const ver = require('./package.json').version;
   console.log(`\n  VibeSpace v${ver} running at http://localhost:${PORT}`);
+  // PID file for the supervised-restart path (scripts/update.sh in a container:
+  // no systemd — the entrypoint respawn loop restarts us when update.sh kills
+  // this pid; dtach sessions live in the same PID namespace and survive).
+  try { fs.writeFileSync(path.join(__dirname, 'data', 'server.pid'), String(process.pid)); } catch {}
   console.log(`  dtach: ${DTACH_CMD}, node: ${NODE_CMD}, env: ${ENV_CMD}, claude: ${CLAUDE_CMD}, codex: ${CODEX_CMD}`);
   if (process.platform === 'linux') console.log(`  X display: ${X_ENV.DISPLAY || '(none)'}${X_ENV.XAUTHORITY ? ' (xauth: ' + X_ENV.XAUTHORITY + ')' : ''} — clipboard image paste ${X_ENV.probed ? 'ready' : 'UNAVAILABLE (no working X display found)'}`);
 

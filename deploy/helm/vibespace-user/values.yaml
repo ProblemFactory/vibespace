@@ -7,7 +7,7 @@ password: ""                   # REQUIRED — VIBESPACE_PASSWORD
 
 image:
   repository: ghcr.io/problemfactory/vibespace   # the public VibeSpace image
-  tag: "3.0.0-rc3"
+  tag: "3.3.0"
   pullPolicy: IfNotPresent
   imagePullSecret: ""          # set if the registry is private
 
