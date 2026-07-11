@@ -1187,6 +1187,12 @@ class ChatView {
         if (newEl) {
           newEl.dataset.msgId = id;
           if (msg.ts) newEl.dataset.ts = msg.ts; // keep time-coordinate minimap data on re-render
+          // Run open/closed memory is keyed by ELEMENT — transfer it across the
+          // swap or a run whose every member gets replaced within one debounce
+          // window re-collapses on the user (review-confirmed: a single-Bash
+          // fold opened to watch live output snapped shut the moment the
+          // result landed).
+          if (this._runExpanded?.has(oldEl)) this._runExpanded.add(newEl);
           oldEl.replaceWith(newEl);
           this._elements.set(id, newEl);
           this._renderers.addWrapToggles(newEl);
