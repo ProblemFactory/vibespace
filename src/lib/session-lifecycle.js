@@ -654,6 +654,9 @@ export function installSessionLifecycle(App, ctx = {}) {
       case 'openBrowser':
         this.openBrowser(spec.url, { syncId });
         break;
+      case 'openDesktop':
+        this.openDesktop({ syncId });
+        break;
       case 'openTaskDetail':
         this.openTaskDetail(spec.taskId, { syncId });
         break;

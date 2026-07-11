@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.104.0 — 2026-07-11
+
+**In-container desktop via integrated noVNC (deployment queue ④) — single login, no second password**
+- New `desktop` window type: noVNC renders a LOCALHOST-bound VNC server through the cookie-authenticated `/api/vnc` WebSocket bridge (websockify semantics, backpressure-paused TCP). The ⚙ menu gains a **Desktop** entry only where a VNC stack exists (one startup probe).
+- `src/vnc.js` VncManager: lazy lifecycle — nothing runs until the first desktop window POSTs `/api/vnc/start`; Xvnc + XFCE session spawn DETACHED so an app-only VibeSpace restart doesn't kill the desktop, and an already-listening port is ADOPTED (also the bring-your-own-VNC/KasmVNC path). `-localhost -SecurityTypes None` is safe because the cookie-authed bridge is the only route in.
+- noVNC ships as a SEPARATE ESM bundle (`public/novnc.js`, dynamic-imported on first use) — it uses top-level await, which can't live in the IIFE main bundle; non-desktop users never download it.
+- Deploy image: TigerVNC + XFCE + Chromium + Noto CJK fonts (lazy — zero cost for users who never open a desktop).
+- **Fixed a latent WS bug found on the way**: `ws`'s `WebSocketServer({server, path:'/ws'})` upgrade listener `abortHandshake(400)`s EVERY non-matching upgrade — it had been silently killing `/proxy/` site WebSockets, and killed the VNC bridge on arrival. The main wss is now `noServer` and ONE upgrade dispatcher routes `/ws`, `/proxy/`, `/api/vnc` (each cookie-authed) and destroys the rest.
+- Verified E2E locally (adopt path): status→start→bridge→RFB handshake→1280×800 framebuffer canvas, reconnect overlay, clipboard both ways wired.
+
 ## 2.103.0 — 2026-07-11
 
 **Clerk SSO (deployment queue ③) — optional, env-gated, zero new dependencies**

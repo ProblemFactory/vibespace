@@ -1825,6 +1825,12 @@ body.taskbar-autohide.taskbar-revealed #taskbar { transform: translateY(0); }
 }
 body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 
+/* ── Desktop window (noVNC) ── */
+.desktop-bar { display: flex; align-items: center; gap: 6px; padding: 4px 10px; flex-shrink: 0;
+  background: var(--bg-panel, var(--bg-titlebar)); border-bottom: 1px solid var(--border); }
+.desktop-status { flex: 1; font-size: 11px; color: var(--text-secondary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 /* ── First-run onboarding wizard (upgrades #welcome) ── */
 #welcome.onboarding .welcome-content { max-width: 520px; }
 .ob-sub { color: var(--text-secondary); margin: -6px 0 18px; font-size: 13px; }

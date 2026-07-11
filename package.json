@@ -1,10 +1,10 @@
 {
   "name": "vibespace",
-  "version": "2.103.0",
+  "version": "2.104.0",
   "description": "VibeSpace — a backend-agnostic web workspace for coding agents (Claude Code, Codex, …) with a multi-session tiling window manager",
   "main": "server.js",
   "scripts": {
-    "build": "esbuild src/client.js --bundle --outfile=public/bundle.js --format=iife --platform=browser --target=es2020 --loader:.css=css --minify",
+    "build": "esbuild src/client.js --bundle --outfile=public/bundle.js --format=iife --platform=browser --target=es2020 --loader:.css=css --minify && esbuild node_modules/@novnc/novnc/core/rfb.js --bundle --outfile=public/novnc.js --format=esm --platform=browser --target=es2022 --minify",
     "start": "npm run build && node server.js",
     "dev": "npm run build && node server.js"
   },
@@ -16,6 +16,7 @@
     "@codemirror/lang-markdown": "^6.2.0",
     "@codemirror/lang-python": "^6.1.0",
     "@codemirror/theme-one-dark": "^6.1.0",
+    "@novnc/novnc": "^1.7.0",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-unicode11": "^0.9.0",
     "@xterm/addon-web-links": "^0.11.0",

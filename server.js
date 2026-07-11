@@ -335,11 +335,12 @@ const auth = new Auth(path.join(__dirname, 'data'), { clerk: clerkAuth });
   Object.defineProperty(app.locals, 'authEnabled', { get: () => auth.enabled });
 }
 
-const wss = new WebSocketServer({
-  server, path: '/ws',
-  // Reject unauthenticated WebSocket upgrades (cookie carries the login token)
-  verifyClient: (info) => auth.requestAuthed(info.req),
-});
+// noServer + ONE manual upgrade dispatcher (registered at the bottom of this
+// file): ws's own {server, path} listener calls handleUpgrade UNCONDITIONALLY
+// and abortHandshake(400)s every non-matching path — it was killing /proxy/
+// WebSockets silently and the /api/vnc bridge on arrival. Auth happens in the
+// dispatcher (cookie token, same as HTTP).
+const wss = new WebSocketServer({ noServer: true });
 
 app.use(compression());
 // HTTP latency observation (names-and-numbers only): rolling 5-min window
@@ -2622,12 +2623,59 @@ function broadcastActiveSessions() {
   });
 }
 
+// ── In-container desktop (noVNC through our own cookie auth — src/vnc.js) ──
+const { VncManager } = require('./src/vnc');
+const vnc = new VncManager({ dataDir: path.join(__dirname, 'data') });
+app.get('/api/vnc/status', async (req, res) => {
+  try { res.json(await vnc.status()); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/vnc/start', async (req, res) => {
+  try { res.json(await vnc.ensureRunning()); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// RFB over WebSocket (websockify semantics: binary frames ↔ raw TCP). The
+// bridge is the ONLY route to the localhost-bound VNC server, and it sits
+// behind the same cookie auth as everything else — single login by design.
+const vncWss = new WebSocketServer({ noServer: true });
+function bridgeVncSocket(ws) {
+  const net = require('net');
+  const sock = net.connect(vnc.port, '127.0.0.1');
+  sock.on('data', (d) => {
+    if (ws.readyState !== 1) return;
+    ws.send(d);
+    // Backpressure: a fast framebuffer + slow client would balloon the WS
+    // buffer — pause the TCP side until the browser drains.
+    if (ws.bufferedAmount > 8 * 1024 * 1024) {
+      sock.pause();
+      const t = setInterval(() => {
+        if (ws.readyState !== 1) { clearInterval(t); return; }
+        if (ws.bufferedAmount < 1024 * 1024) { clearInterval(t); sock.resume(); }
+      }, 50);
+    }
+  });
+  ws.on('message', (m) => { try { sock.write(m); } catch {} });
+  ws.on('close', () => sock.destroy());
+  ws.on('error', () => sock.destroy());
+  sock.on('close', () => { try { ws.close(); } catch {} });
+  sock.on('error', () => { try { ws.close(); } catch {} });
+}
+
 // ── Start Server ──
-// Unblocker WebSocket proxy (for proxied sites' WebSockets, not our /ws)
+// THE single WebSocket upgrade dispatcher: /ws (main app), /proxy/ (unblocker
+// site WebSockets), /api/vnc (desktop bridge). Everything else is destroyed.
 server.on('upgrade', (req, socket, head) => {
-  if (req.url.startsWith('/proxy/')) {
-    if (!auth.requestAuthed(req)) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); return; }
+  const pathname = (req.url || '').split('?')[0];
+  const deny = () => { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); };
+  if (pathname === '/ws') {
+    if (!auth.requestAuthed(req)) return deny();
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
+  } else if (pathname.startsWith('/proxy/')) {
+    if (!auth.requestAuthed(req)) return deny();
     unblocker.onUpgrade(req, socket, head);
+  } else if (pathname === '/api/vnc') {
+    if (!auth.requestAuthed(req)) return deny();
+    vncWss.handleUpgrade(req, socket, head, (ws) => bridgeVncSocket(ws));
+  } else {
+    socket.destroy();
   }
 });
 

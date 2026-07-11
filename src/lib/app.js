@@ -26,6 +26,7 @@ import { openExternalEditor, closeExternalEditor } from './external-editor.js';
 import { CommandMode } from './command-mode.js';
 import { updateTaskbar as updateTaskbarFn } from './taskbar.js';
 import { openBrowser as openBrowserFn } from './browser-window.js';
+import { openDesktop as openDesktopFn } from './desktop-window.js';
 import { openTaskDetail as openTaskDetailFn } from './task-detail.js';
 import { openTaskLog as openTaskLogFn } from './task-log.js';
 import { openUsageWindow } from './usage-window.js';
@@ -255,6 +256,9 @@ class App {
         }
       }
     });
+
+    // Desktop (noVNC) availability — one startup probe gates the ⚙ menu entry
+    fetchJson('/api/vnc/status').then((d) => { this._vncAvailable = !!d?.available; }).catch(() => {});
 
     // Mobile nav bar + gestures (only on mobile)
     this._mobileNav = this.isMobile ? new MobileNav(this) : null;
@@ -787,6 +791,12 @@ class App {
     menu.append(item(I.key, t('Manage agents\u2026'), () => this._showAgentsDialog()));
     menu.append(item(I.chart, t('Usage\u2026'), () => this.openUsage()));
     menu.append(item(I.chart, t('Diagnostics report\u2026'), () => this._openDiagnostics()));
+    // In-container desktop (noVNC) \u2014 only where a VNC stack exists (probed
+    // once at startup; hidden entirely on desktop-less deployments).
+    if (this._vncAvailable) {
+      const I_desk = '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="9" rx="1"/><path d="M8 11.5V14M5 14h6"/></svg>';
+      menu.append(item(I_desk, t('Desktop'), () => this.openDesktop()));
+    }
     // Language is PER-DEVICE (localStorage, not a synced setting) \u2014 names shown
     // in their own language, never translated. Switching reloads the page.
     {
@@ -1447,6 +1457,7 @@ class App {
   }
 
   openBrowser(url, opts) { return openBrowserFn(this, url, opts); }
+  openDesktop(opts) { return openDesktopFn(this, opts); }
 
   openTaskDetail(taskId, opts) { return openTaskDetailFn(this, taskId, opts); }
   openTaskLog(taskId, opts) { return openTaskLogFn(this, taskId, opts); }
