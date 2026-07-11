@@ -1,3 +1,5 @@
+import { t } from './i18n.js';
+
 /**
  * MobileNav — mobile navigation bar controller.
  *
@@ -111,12 +113,32 @@ export class MobileNav {
     label.style.cssText = 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;color:var(--text)';
     label.textContent = win.title || 'Window';
 
+    // Billing identity chip — mirrors the desktop title-bar badge (which has
+    // no home on mobile). setAuthBadge stashes the auth object on the window.
+    let billChip = null;
+    const auth = win._authBadge;
+    if (auth) {
+      const isApi = auth.source === 'api-key' || auth.source === 'api-console' || auth.source === 'api-other';
+      billChip = document.createElement('span');
+      billChip.className = 'mobile-win-billing' + (isApi ? ' api' : '');
+      billChip.textContent = auth.source === 'unknown' ? '?'
+        : (auth.name || (isApi ? (auth.source === 'api-console' ? 'Console' : 'API') : t('CLI login')));
+      billChip.title = t('Click to switch billing');
+      billChip.onclick = (e) => {
+        e.stopPropagation();
+        const r = billChip.getBoundingClientRect();
+        pop.remove(); // capture the rect first — the menu anchors to it after the pop is gone
+        this.app.showBillingSwitcher?.(win.id, { x: r.left, y: r.bottom + 4 });
+      };
+    }
+
     const closeBtn = document.createElement('button');
     closeBtn.style.cssText = 'background:none;border:none;color:var(--text-dim);font-size:16px;padding:4px 8px;cursor:pointer;flex-shrink:0;min-width:32px;min-height:32px;display:flex;align-items:center;justify-content:center';
     closeBtn.textContent = '\u2715';
     closeBtn.onclick = (e) => { e.stopPropagation(); wm.closeWindow(win.id); item.remove(); };
 
-    item.append(icon, label, closeBtn);
+    if (billChip) item.append(icon, label, billChip, closeBtn);
+    else item.append(icon, label, closeBtn);
     item.addEventListener('pointerdown', () => { item.style.background = 'var(--bg-hover)'; });
     item.onclick = () => { pop.remove(); wm.focusWindow(win.id); };
     return item;

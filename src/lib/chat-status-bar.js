@@ -81,6 +81,17 @@ export class ChatStatusBar {
   /** Set the container for popup positioning (the .chat-view element) */
   set popupContainer(el) { this._popupContainer = el; }
 
+  /** Billing identity chip (mobile — windows have no title bar there, so the
+      title-bar badge's click-to-switch has no home; this is its stand-in). */
+  setBilling(auth, onSwitch) {
+    if (onSwitch) this._onBillingSwitch = onSwitch;
+    const key = auth ? `${auth.source}:${auth.name || ''}` : '';
+    if (key === this._billingKey) return;
+    this._billingKey = key;
+    this._billing = auth;
+    this.render();
+  }
+
   // ── Public API ──
 
   applyStatus(status) {
@@ -280,6 +291,18 @@ export class ChatStatusBar {
       parts.push(`<span class="chat-status-goal chat-status-goal-empty chat-status-clickable" title="${escHtml(t('Set a goal \u2014 the agent keeps working until the condition is met'))}">${UI_ICONS.goal}</span>`);
     }
 
+    // Billing identity chip — only rendered when fed (app gates it to mobile)
+    if (this._billing) {
+      const a = this._billing;
+      const isApi = a.source === 'api-key' || a.source === 'api-console' || a.source === 'api-other';
+      const label = a.source === 'unknown' ? '?'
+        : (a.name || (isApi ? (a.source === 'api-console' ? 'Console' : 'API') : t('CLI login')));
+      const tip = (isApi ? t('API billing (pay per use)') : t('Subscription account'))
+        + (a.guessed ? ' · ' + t('estimated from the login state at spawn') : '')
+        + ' · ' + t('Click to switch billing');
+      parts.push(`<span class="chat-status-billing chat-status-clickable${isApi ? ' api' : ''}" title="${escHtml(tip)}">${escHtml(label)}</span>`);
+    }
+
     // Permission mode (always show, click to change; Codex sandbox policy in tooltip)
     const permLabel = this._statusPermMode || 'default';
     const permTitle = this._statusSandbox ? t('Click to change permission mode \u00B7 sandbox: {sandbox}', { sandbox: this._statusSandbox }) : t('Click to change permission mode');
@@ -365,6 +388,12 @@ export class ChatStatusBar {
     const wfChip = e.target.closest('.chat-status-wf');
     if (wfChip && this._onOpenWorkflow) {
       this._onOpenWorkflow(wfChip.dataset.wfRun, wfChip.dataset.wfName);
+      return;
+    }
+    const bChip = e.target.closest('.chat-status-billing');
+    if (bChip && this._onBillingSwitch) {
+      e.stopPropagation();
+      this._onBillingSwitch(bChip);
       return;
     }
     const container = this._popupContainer || this._element.parentElement;

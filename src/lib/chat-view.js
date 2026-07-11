@@ -1797,6 +1797,12 @@ class ChatView {
     if (winId) this.app.wm?.closeWindow?.(winId);
   }
 
+  // Billing identity chip in the status bar (fed by app.syncSessionIdentity,
+  // mobile only — desktop shows the same identity in the window title bar).
+  setBillingIdentity(auth, onSwitch) {
+    this._statusBar?.setBilling?.(auth, onSwitch);
+  }
+
   dispose() {
     this._statusBar?.dispose?.();
     this._disposed = true;
