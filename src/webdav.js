@@ -79,6 +79,15 @@ class MountTokens {
     }));
   }
 
+  /** True when this raw token was minted BY this instance (no lastUsedAt
+   *  bump) — the self-mount guard asks this: mounting your own /dav back
+   *  onto yourself is a fuse→HTTP→self loop that deadlocks the threadpool. */
+  has(raw) {
+    if (!raw || !String(raw).startsWith(TOKEN_PREFIX)) return false;
+    const h = MountTokens._hash(String(raw));
+    return this._state.tokens.some(x => x.tokenHash === h);
+  }
+
   /** Resolve a Bearer value to its token record (or null). */
   resolve(raw) {
     if (!raw || !raw.startsWith(TOKEN_PREFIX)) return null;
