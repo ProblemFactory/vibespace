@@ -104,6 +104,12 @@ class MountManager {
     if (!e.VIBESPACE_CEPHFS_MONS || !e.VIBESPACE_CEPHFS_SECRET) return;
     const path0 = e.VIBESPACE_CEPHFS_PATH || '/';
     const sig = 'cephfs|' + e.VIBESPACE_CEPHFS_MONS + '|' + path0;
+    // Self-heal on EVERY boot: an env-provisioned CephFS "My storage" must
+    // always want to be mounted (the user can't un-provision it — only
+    // unmount transiently). This also covers the one-shot where a prior boot
+    // (e.g. running the pre-cephfs code, or an import race) left it unmounted.
+    const cephMs = this._state.mounts.find(m => m.origin === 'my-storage' && m.type === 'cephfs');
+    if (cephMs && cephMs.desired !== 'mounted') { cephMs.desired = 'mounted'; this._save(); }
     if (this._state._cephImportedSig === sig) return;
     const hadMyStorage = this._state.mounts.some(m => m.origin === 'my-storage');
     // A prior S3 my-storage is REPLACED by cephfs (user directive) — unmount
