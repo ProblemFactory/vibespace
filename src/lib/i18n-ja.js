@@ -1513,5 +1513,5 @@ export default {
   'Add a submount (a specific bucket/path of this storage)': 'サブマウントを追加(このストレージの特定のバケット/パス)',
   'This storage type doesn’t support submounts': 'このストレージタイプはサブマウントに対応していません',
   'New submount under "{name}"': '"{name}" の下に新しいサブマウント',
-  'What happens when closing a session window: terminate the session, or detach and keep it running. Until you set this explicitly, plain shell terminals default to DETACH (they have no transcript to resume — closing would destroy them; detached ones stay in the sidebar, tmux-style) while agent sessions default to terminate.': 'セッションウィンドウを閉じたときの動作：セッションを終了するか、切り離して実行を継続するか。明示的に設定するまで、プレーンなシェルターミナルは「切り離す」がデフォルトです（再開できる記録がなく、終了すると完全に失われます。切り離されたものは tmux のようにサイドバーに残ります）。エージェントセッションのデフォルトは「終了」です。',
+  'What happens when closing a session window: detach and keep it running (default — the session stays in the sidebar for re-attach), or terminate it. Automation helper terminals always terminate.': 'セッションウィンドウを閉じたときの動作：切り離して実行を継続（デフォルト — セッションはサイドバーに残り再アタッチできます）、または終了。自動化ヘルパーターミナルは常に終了します。',
 };

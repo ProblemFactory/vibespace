@@ -395,6 +395,51 @@ class MountManager {
 
   listShares() { return this._state.shares.map(s => ({ ...s, secretKey: undefined })); }
 
+  /**
+   * Full DECRYPTED connection config for the edit dialog (user directive:
+   * prefill the REAL current values — tokens and keys included — instead of
+   * "blank = keep" placeholders). Served only on the cookie-authed config
+   * route; single-user instance model. Env-provisioned records return no
+   * secrets (their connection is deployment-owned and not editable anyway).
+   */
+  config(id) {
+    const m = this._get(id);
+    const dec = (b) => (b ? this._dec(b) : undefined);
+    const base = {
+      id: m.id, name: m.name, kind: this._kindOf(m), parentId: m.parentId || null,
+      mode: m.mode, customPath: m.customPath || '', origin: m.origin,
+    };
+    if (m.origin === 'my-storage') return { ...base, type: m.type || 's3', envLocked: true };
+    if (m.parentId) {
+      const p = this._get(m.parentId);
+      return {
+        ...base, type: p.type || 's3',
+        bucket: m.bucket, prefix: m.prefix, remotePath: m.remotePath,
+        driveFolder: m.driveFolder, sshPath: m.sshPath,
+      };
+    }
+    const out = { ...base, type: m.type || 's3' };
+    switch (m.type || 's3') {
+      case 's3':
+        Object.assign(out, { endpoint: m.endpoint, bucket: m.bucket, prefix: m.prefix, accessKey: m.accessKey, secretKey: dec(m.secretKeyEnc), sessionToken: dec(m.sessionTokenEnc) });
+        break;
+      case 'drive':
+        Object.assign(out, { driveFolder: m.driveFolder, token: dec(m.tokenEnc), clientId: m.clientId, clientSecret: dec(m.clientSecretEnc) });
+        break;
+      case 'webdav': case 'vibespace':
+        Object.assign(out, { url: m.url, vendor: m.vendor, user: m.user, pass: dec(m.passEnc), bearerToken: dec(m.bearerTokenEnc) });
+        break;
+      case 'sftp':
+        Object.assign(out, { sshHost: m.sshHost, sshUser: m.sshUser, sshPort: m.sshPort, sshPath: m.sshPath, keyPath: m.keyPath, pass: dec(m.passEnc) });
+        break;
+      case 'rclone':
+        Object.assign(out, { rcloneType: m.rcloneType, remotePath: m.remotePath, params: Object.fromEntries(Object.entries(m.paramsEnc || {}).map(([k, v]) => [k, this._dec(v)])) });
+        break;
+    }
+    if (m.extraParamsEnc) out.extraParams = Object.fromEntries(Object.entries(m.extraParamsEnc).map(([k, v]) => [k, this._dec(v)]));
+    return out;
+  }
+
   // ── CRUD ──
 
   add(cfg) {
