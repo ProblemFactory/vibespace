@@ -61,6 +61,18 @@ s3:
   accessKey: ""
   secretKey: ""
 
+# All-flash CephFS "My storage" (native kernel mount, per-user quota enforced
+# on the CephFS subdir). REPLACES the S3 "My storage" when both are set.
+# Requires the same securityContext as fuse (SYS_ADMIN + AppArmor Unconfined)
+# + passwordless sudo (in the image). The scoped cephx key is minted with
+# `ceph fs authorize <fs> client.<user> <path> rw`.
+cephfs:
+  mons: ""       # comma list, e.g. "10.0.0.1,10.0.0.2,10.0.0.3"
+  fsName: cephfs
+  path: ""       # the per-user subtree, e.g. "/vibespace/<user>"
+  user: ""       # scoped cephx client name (without the "client." prefix)
+  secret: ""     # the cephx key (base64, from `ceph auth get-key client.<user>`)
+
 # /dev/fuse for in-container rclone mounts (Storage/Mounts UI). Requires a
 # fuse device plugin on the cluster exposing the resource named below
 # (a DaemonSet like fuse-device-plugin advertising github.com/fuse).

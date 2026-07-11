@@ -52,6 +52,11 @@ class MountManager {
   // no myStorage config exists yet; afterwards the in-app config is canonical
   // (edit/remove in the UI, included in export/import).
   _maybeImportEnvStorage() {
+    // CephFS takes precedence over S3 when both are provisioned (the all-flash
+    // storage REPLACES the slow RGW S3 — user directive). Handled first so a
+    // deployment that switched from VIBESPACE_S3_* to VIBESPACE_CEPHFS_* imports
+    // the new backing and (if it deleted the S3 mount) doesn't re-import S3.
+    this._maybeImportEnvCephfs();
     // One-time migration of VIBESPACE_S3_* → a normal S3 mount (auto-mounted).
     // Storage is now ONE flat list of connections — no special "My storage"
     // slot. Legacy state.myStorage (from earlier builds) also migrates here.
@@ -87,6 +92,42 @@ class MountManager {
       } catch {}
     }
     delete this._state.myStorage;
+    this._save();
+  }
+
+  // Env-provisioned all-flash CephFS as "My storage" (deployment-managed).
+  // Signature-gated like the S3 import: a helm change re-imports, a user
+  // delete stays deleted (same sig). Precedence: if a cephfs my-storage
+  // exists, the S3 import below no-ops (hasMyStorage true).
+  _maybeImportEnvCephfs() {
+    const e = process.env;
+    if (!e.VIBESPACE_CEPHFS_MONS || !e.VIBESPACE_CEPHFS_SECRET) return;
+    const path0 = e.VIBESPACE_CEPHFS_PATH || '/';
+    const sig = 'cephfs|' + e.VIBESPACE_CEPHFS_MONS + '|' + path0;
+    if (this._state._cephImportedSig === sig) return;
+    const hadMyStorage = this._state.mounts.some(m => m.origin === 'my-storage');
+    // A prior S3 my-storage is REPLACED by cephfs (user directive) — unmount
+    // + drop it so the flash mount takes the "My storage" slot.
+    if (!hadMyStorage || !this._state.mounts.some(m => m.origin === 'my-storage' && m.type === 'cephfs')) {
+      for (const old of this._state.mounts.filter(m => m.origin === 'my-storage' && m.type !== 'cephfs')) {
+        try { this.unmount(old.id); } catch {}
+        this._state.mounts = this._state.mounts.filter(x => x.id !== old.id);
+      }
+      try {
+        const id = this.add({
+          type: 'cephfs', origin: 'my-storage', name: 'My storage', mode: 'rw',
+          cephMonHosts: e.VIBESPACE_CEPHFS_MONS,
+          cephFsName: e.VIBESPACE_CEPHFS_NAME || 'cephfs',
+          cephPath: path0,
+          cephUser: e.VIBESPACE_CEPHFS_USER || 'admin',
+          cephSecret: e.VIBESPACE_CEPHFS_SECRET,
+        });
+        const m = this._state.mounts.find(x => x.id === id);
+        if (m) m.desired = 'mounted'; // restore() connects it on boot
+      } catch {}
+    }
+    this._state._cephImportedSig = sig;
+    // Mark S3 as "already imported" to this sig so the S3 path won't re-add it.
     this._save();
   }
 
@@ -321,9 +362,11 @@ class MountManager {
   isMounted(m) {
     // /proc/mounts escapes spaces as \040
     const p = this.pathOf(m).replace(/ /g, '\\040');
+    // cephfs = native KERNEL mount (fstype 'ceph'), not fuse.rclone
+    const fstypeRe = (m.type === 'cephfs') ? /^ceph$/ : /fuse\.rclone/;
     return this._liveMounts().split('\n').some(l => {
       const parts = l.split(' ');
-      return parts[1] === p && /fuse\.rclone/.test(parts[2] || '');
+      return parts[1] === p && fstypeRe.test(parts[2] || '');
     });
   }
 
@@ -363,6 +406,7 @@ class MountManager {
       case 'vibespace': return m.url;
       case 'sftp': return `${m.sshUser}@${m.sshHost}:${m.sshPath || '~'}`;
       case 'rclone': return `${m.rcloneType}:${m.remotePath || ''}`;
+      case 'cephfs': return `CephFS ${m.cephPath || '/'} @ ${(m.cephMonHosts || '').split(',')[0] || '?'}`;
       default: return `${m.bucket}${m.prefix ? '/' + m.prefix : ''} @ ${m.endpoint}`;
     }
   }
@@ -434,6 +478,9 @@ class MountManager {
         break;
       case 'rclone':
         Object.assign(out, { rcloneType: m.rcloneType, remotePath: m.remotePath, params: Object.fromEntries(Object.entries(m.paramsEnc || {}).map(([k, v]) => [k, this._dec(v)])) });
+        break;
+      case 'cephfs':
+        Object.assign(out, { cephMonHosts: m.cephMonHosts, cephFsName: m.cephFsName, cephPath: m.cephPath, cephUser: m.cephUser }); // secret withheld
         break;
     }
     if (m.extraParamsEnc) out.extraParams = Object.fromEntries(Object.entries(m.extraParamsEnc).map(([k, v]) => [k, this._dec(v)]));
@@ -532,6 +579,21 @@ class MountManager {
         m.paramsEnc = {};
         for (const [k, v] of Object.entries(params)) m.paramsEnc[k] = this._enc(String(v));
         m.remotePath = String(cfg.remotePath || '').replace(/^\/+/, '');
+        break;
+      }
+      case 'cephfs': {
+        // Native KERNEL CephFS mount (all-flash shared storage; deployment-
+        // provisioned). `mount -t ceph <mons>:<path> <mp> -o name=…,secret=…`
+        // — needs root, so the app sudo's it (the container has passwordless
+        // sudo). NOT rclone; mount()/unmount()/isMounted() have cephfs branches.
+        for (const k of ['cephMonHosts', 'cephSecret']) if (!cfg[k]) throw new Error(`${k} required`);
+        Object.assign(m, {
+          cephMonHosts: String(cfg.cephMonHosts),          // "10.0.0.1,10.0.0.2:6789"
+          cephFsName: String(cfg.cephFsName || 'cephfs'),
+          cephPath: '/' + String(cfg.cephPath || '/').replace(/^\/+/, ''),
+          cephUser: String(cfg.cephUser || 'admin'),
+          cephSecretEnc: this._enc(cfg.cephSecret),
+        });
         break;
       }
       default: throw new Error('unknown mount type: ' + type);
@@ -666,7 +728,7 @@ class MountManager {
     // bucket/keys come from env and a change re-imports) — name, mountpoint
     // and mode are the only editable fields (user directive).
     const envLocked = m.origin === 'my-storage';
-    const connectionKeys = ['endpoint', 'bucket', 'prefix', 'accessKey', 'secretKey', 'sessionToken', 'rcloneType', 'remotePath', 'params', 'driveFolder', 'token', 'clientId', 'clientSecret', 'url', 'user', 'pass', 'bearerToken', 'sshHost', 'sshUser', 'sshPort', 'sshPath', 'keyPath'];
+    const connectionKeys = ['endpoint', 'bucket', 'prefix', 'accessKey', 'secretKey', 'sessionToken', 'rcloneType', 'remotePath', 'params', 'driveFolder', 'token', 'clientId', 'clientSecret', 'url', 'user', 'pass', 'bearerToken', 'sshHost', 'sshUser', 'sshPort', 'sshPath', 'keyPath', 'cephMonHosts', 'cephFsName', 'cephPath', 'cephUser', 'cephSecret'];
     if (envLocked && connectionKeys.some((k) => patch[k] !== undefined && patch[k] !== '')) {
       throw new Error('This storage is provisioned by your deployment — its connection settings can\'t be edited here (name and mount point can).');
     }
@@ -870,6 +932,8 @@ class MountManager {
   async mount(id) {
     const m = this._get(id);
     if (this.isMounted(m)) { m.desired = 'mounted'; this._save(); this._notify(); return; }
+    // CephFS = native kernel mount (not rclone) — its own path.
+    if (m.type === 'cephfs') return this._mountCephfs(id);
     // Self-mount guard for EXISTING records too (imported before the add()
     // guard existed): our own bridge token = the URL points back at this
     // instance — refuse instead of fuse-mounting a self-referential loop.
@@ -1162,11 +1226,45 @@ class MountManager {
     });
   }
 
+  // ── CephFS (native kernel mount; deployment-provisioned all-flash storage) ──
+  async _mountCephfs(id) {
+    const m = this._get(id);
+    const mp = this.pathOf(m);
+    try { fs.mkdirSync(mp, { recursive: true }); } catch {}
+    // `sudo mount -t ceph <mons>:<path> <mp> -o name=<user>,secret=<key>,mds_namespace=<fs>`
+    // Root-only, so sudo (the container has passwordless sudo). Secret rides in
+    // the -o options (argv is world-readable in /proc for the ~1s the mount
+    // runs — acceptable for a deployment-provisioned mount; the k8s secret is
+    // the real boundary). Use secretfile? mount.ceph reads it, but writing a
+    // temp keyfile is worse (persists); the option form is standard.
+    const src = `${m.cephMonHosts}:${m.cephPath || '/'}`;
+    const opts = `name=${m.cephUser},secret=${this._dec(m.cephSecretEnc)},mds_namespace=${m.cephFsName || 'cephfs'}${m.mode === 'ro' ? ',ro' : ''}`;
+    return new Promise((resolve) => {
+      execFile('sudo', ['-n', 'mount', '-t', 'ceph', src, mp, '-o', opts], { timeout: 30000 }, (err, _o, stderr) => {
+        if (err || !this.isMounted(m)) {
+          this._errors.set(id, ('CephFS mount failed: ' + String(stderr || err?.message || 'unknown')).slice(0, 200));
+          this._notify();
+          return resolve(false);
+        }
+        m.desired = 'mounted';
+        this._errors.delete(id);
+        this._save();
+        this._notify();
+        resolve(true);
+      });
+    });
+  }
+
   unmount(id) {
     const m = this._get(id);
     const mp = this.pathOf(m);
     m.desired = 'unmounted';
     this._save();
+    if (m.type === 'cephfs') {
+      return new Promise((resolve) => {
+        execFile('sudo', ['-n', 'umount', '-l', mp], () => { this._notify(); resolve(!this.isMounted(m)); });
+      });
+    }
     return new Promise((resolve) => {
       execFile('fusermount3', ['-uz', mp], (err) => {
         if (!err) { this._notify(); return resolve(true); }
