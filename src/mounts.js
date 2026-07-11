@@ -236,29 +236,42 @@ class MountManager {
   // to a machine-local cache keyed by (size, mtime) and exec that instead.
   _fastBin(binPath) {
     if (this._fastBinMemo?.src === binPath) return this._fastBinMemo.use;
-    let use = binPath;
     try {
-      if (process.platform === 'linux' && this._onNetworkFs(binPath)) {
-        const st = fs.statSync(binPath);
-        const cacheDir = path.join(os.homedir(), '.cache', 'vibespace');
-        const cached = path.join(cacheDir, `rclone-${st.size}-${Math.floor(st.mtimeMs)}`);
-        if (!fs.existsSync(cached)) {
-          fs.mkdirSync(cacheDir, { recursive: true });
-          const tmp = `${cached}.tmp-${process.pid}`;
-          fs.copyFileSync(binPath, tmp);
-          fs.chmodSync(tmp, 0o755);
-          fs.renameSync(tmp, cached);
-          for (const f of fs.readdirSync(cacheDir)) { // prune superseded copies
-            if (f.startsWith('rclone-') && f !== path.basename(cached)) {
-              try { fs.unlinkSync(path.join(cacheDir, f)); } catch {}
-            }
-          }
-        }
-        use = cached;
+      if (process.platform !== 'linux' || !this._onNetworkFs(binPath)) {
+        this._fastBinMemo = { src: binPath, use: binPath };
+        return binPath;
       }
-    } catch { use = binPath; }
-    this._fastBinMemo = { src: binPath, use };
-    return use;
+      const st = fs.statSync(binPath);
+      const cacheDir = path.join(os.homedir(), '.cache', 'vibespace');
+      const cached = path.join(cacheDir, `rclone-${st.size}-${Math.floor(st.mtimeMs)}`);
+      if (fs.existsSync(cached)) {
+        this._fastBinMemo = { src: binPath, use: cached }; // memoize the settled state only
+        return cached;
+      }
+      // Copy in a CHILD process — 57MB over slow network storage is seconds
+      // to tens of seconds and a sync copy would stall the whole event loop.
+      // This call still returns the network path (one slow exec); the next
+      // resolution finds the cache.
+      if (!this._fastBinCopying) {
+        this._fastBinCopying = true;
+        fs.mkdirSync(cacheDir, { recursive: true });
+        const tmp = `${cached}.tmp-${process.pid}`;
+        execFile('sh', ['-c', `cp "${binPath}" "${tmp}" && chmod 755 "${tmp}" && mv "${tmp}" "${cached}"`], { timeout: 180000 }, (err) => {
+          this._fastBinCopying = false;
+          if (!err) {
+            try {
+              for (const f of fs.readdirSync(cacheDir)) { // prune superseded copies
+                if (f.startsWith('rclone-') && f !== path.basename(cached)) fs.unlinkSync(path.join(cacheDir, f));
+              }
+            } catch {}
+          }
+        });
+      }
+      return binPath;
+    } catch {
+      this._fastBinMemo = { src: binPath, use: binPath };
+      return binPath;
+    }
   }
 
   /** True when the path lives on a network-ish filesystem (fuse/nfs/cifs/…). */
@@ -751,7 +764,10 @@ class MountManager {
     this._state.mounts = this._state.mounts.filter(x => x.id !== id);
     this._errors.delete(id);
     this._reconnects?.delete(id);
-    try { fs.rmSync(path.join(this._vfsCacheRoot(), id), { recursive: true, force: true }); } catch {}
+    // async — the cache can be up to vfsCacheMaxSizeGB; a sync rm would hold
+    // the event loop hostage for seconds (the IO-hostage class this module
+    // exists to prevent)
+    try { fs.rm(path.join(this._vfsCacheRoot(), id), { recursive: true, force: true }, () => {}); } catch {}
     this._save();
     this._notify();
   }
