@@ -1842,16 +1842,21 @@ class ChatView {
       list.querySelectorAll(':scope > .chat-run-header').forEach((h) => h.remove());
       list.querySelectorAll(':scope > .chat-run-collapsed').forEach((el) => el.classList.remove('chat-run-collapsed'));
       if (!enabled || searchOpen) return;
+      // thinking and Bash count as ONE collapsible kind — the TUI folds the
+      // interleaved think→run→think noise as a single group (user directive;
+      // same-kind-only grouping never reached its threshold in real turns).
       const kindOf = (el) => {
         if (!el.classList?.contains('chat-msg') || el.classList.contains('chat-gap-msg')) return null;
         const m = el._rawMsg;
         if (!m) return null;
         if (el.classList.contains('chat-msg-tool-result')) {
           const b = m.content?.[0];
-          return (b?.toolName === 'Bash' && m.status !== 'pending') ? 'bash' : null;
+          // pending/running Bash collapses too (user directive — the bottom
+          // streaming indicator already shows live activity)
+          return b?.toolName === 'Bash' ? 'noise' : null;
         }
         if (m.role === 'assistant' && Array.isArray(m.content) && m.content.length
-            && m.content.every((b) => b.type === 'thinking')) return 'thinking';
+            && m.content.every((b) => b.type === 'thinking')) return 'noise';
         return null;
       };
       const kids = [...list.children];
@@ -1859,13 +1864,23 @@ class ChatView {
       let runKind = null;
       const flush = () => {
         // the newest message stays visible — live activity must not vanish
-        const members = run.filter((el) => el !== list.lastElementChild);
-        if (members.length >= 3) {
+        const members = run; // the newest message collapses too (user directive)
+        // A run containing ANY Bash collapses immediately — even a single one
+        // (user directive: "看到 bash 直接开始折叠, 无论多少条"). Pure-thinking
+        // runs still need ≥2 so a lone thought stays inline.
+        const hasBash = members.some((el) => el.classList.contains('chat-msg-tool-result'));
+        if (members.length >= (hasBash ? 1 : 2)) {
           const header = document.createElement('div');
           header.className = 'chat-run-header';
-          const label = runKind === 'bash'
-            ? t('{n} Bash commands', { n: members.length })
-            : t('{n} thinking steps', { n: members.length });
+          const nBash = members.filter((el) => el.classList.contains('chat-msg-tool-result')).length;
+          const nThink = members.length - nBash;
+          let label = nThink === 0 ? t('{n} Bash commands', { n: nBash })
+            : nBash === 0 ? t('{n} thinking steps', { n: nThink })
+            : t('{t} thinking · {b} Bash', { t: nThink, b: nBash });
+          // live state on the fold: a running member shows through the header
+          if (members.some((el) => el._rawMsg?.status === 'pending' || el._rawMsg?.status === 'streaming')) {
+            label += ' · ' + t('running…');
+          }
           header.innerHTML = `<span class="chat-run-arrow">▸</span><span>${label}</span>`;
           // Rebuilds happen on every list mutation — remember runs the user
           // opened (keyed by first member) so a new message doesn't re-collapse
