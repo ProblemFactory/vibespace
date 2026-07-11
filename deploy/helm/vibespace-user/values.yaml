@@ -1,0 +1,41 @@
+# One VibeSpace instance per user. `helm install u-<user> . --set user=<user> --set password=<pw>`
+user: ""                       # REQUIRED — the user's short name (drives host + labels)
+password: ""                   # REQUIRED — VIBESPACE_PASSWORD (also gates the future /api/vnc desktop)
+
+image:
+  repository: ghcr.io/problemfactory/vibespace
+  tag: "3.0.0-rc1"
+  pullPolicy: IfNotPresent
+# imagePullSecret: ""           # set if the registry is private (ghcr public → none needed)
+
+# Hostname. Default = <user>.<domain>. For the first test we ride the EXISTING
+# working wildcard *.kube.internal.example.com (cert-manager auto-issues);
+# switch `domain` to vibe.example.com once that Cloudflare record + wildcard
+# cert exist. `host` overrides the computed name entirely.
+domain: "vibe.example.com"
+host: ""                        # explicit override, e.g. xingweil-vibe.kube.internal.example.com
+
+ingress:
+  className: traefik
+  clusterIssuer: cloudflare-issuer   # cert-manager DNS-01 for *.example.com
+  tls: true
+
+storage:
+  className: vibespace-rbd      # the SC created in P0 (Ceph RBD, Retain, expandable)
+  size: 100Gi                   # thin-provisioned; the pool's 10 TiB quota is the real ceiling
+
+resources:
+  requests: { cpu: "1", memory: "4Gi" }
+  limits:   { cpu: "8", memory: "16Gi" }
+
+# Pin to the untainted control-plane nodes (cpu04-06). b300 GPU nodes are tainted.
+nodeSelector:
+  node-role.kubernetes.io/control-plane: ""
+tolerations:
+  - { key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule }
+
+# Agent-container egress lockdown (Cilium NetworkPolicy). OFF for the first
+# bring-up to keep connectivity variables out of the smoke test — enable +
+# verify (Anthropic/GitHub reachable, node/BMC net blocked) in P2. See design §6.
+networkPolicy:
+  enabled: false

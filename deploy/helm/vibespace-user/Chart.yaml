@@ -1,0 +1,6 @@
+apiVersion: v2
+name: vibespace-user
+description: One VibeSpace instance per user (one Helm release = one user) on K8s + Ceph RBD.
+type: application
+version: 0.1.0
+appVersion: "3.0.0"
