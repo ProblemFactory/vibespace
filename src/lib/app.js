@@ -840,9 +840,24 @@ class App {
     // Self-update: runs scripts/update.sh visibly in a shell terminal (same
     // pattern as Manage Agents' CLI updates). The dtach terminal survives the
     // service restart at the end, so the log stays readable throughout.
-    if (this._repoDir) menu.append(item(I.key, t('Update VibeSpace\u2026'), () => {
-      this.openShellTerminal(this._repoDir, { initialCommand: 'bash scripts/update.sh' });
-    }));
+    // The item also shows the running version and \u2014 when the canonical repo
+    // has a newer one \u2014 "vX \u2192 vY" highlighted (user request).
+    if (this._repoDir) {
+      const upd = item(I.key, t('Update VibeSpace\u2026'), () => {
+        this.openShellTerminal(this._repoDir, { initialCommand: 'bash scripts/update.sh' });
+      });
+      const vspan = document.createElement('span');
+      vspan.className = 'gs-ver';
+      upd.appendChild(vspan);
+      fetchJson('/api/version').then(v => {
+        if (!v?.version || !vspan.isConnected) return;
+        const newer = v.latest && this._versionNewer(v.latest, v.version);
+        vspan.textContent = newer ? `v${v.version} \u2192 v${v.latest}` : `v${v.version}`;
+        if (newer) vspan.classList.add('gs-ver-new');
+        vspan.title = newer ? t('Update available') : (v.latest ? t('Up to date') : '');
+      }).catch(() => {});
+      menu.append(upd);
+    }
     menu.append(sep(), item(I.tour, t('Welcome tour'), () => this._showOnboarding(true)));
     if (this._authEnabled) {
       menu.append(item(I.out, t('Sign out'), async () => {
@@ -851,6 +866,16 @@ class App {
       }, true));
     }
     pop.append(menu);
+  }
+
+  /** Is semver a newer than b? (plain x.y.z compare) */
+  _versionNewer(a, b) {
+    const pa = String(a).split('.').map(Number), pb = String(b).split('.').map(Number);
+    for (let i = 0; i < 3; i++) {
+      if ((pa[i] || 0) > (pb[i] || 0)) return true;
+      if ((pa[i] || 0) < (pb[i] || 0)) return false;
+    }
+    return false;
   }
 
   _setupGridConfig() {

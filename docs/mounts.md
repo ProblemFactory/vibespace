@@ -49,6 +49,14 @@ Any S3 connection that holds your own full credentials shows a **share** button 
 - Status dots: green = mounted, red = error (hover for the rclone log tail), grey = unmounted. **Open** browses the mount in the file explorer.
 - rclone mounts are right for **datasets, artifacts, docs, checkpoints** — not live git working trees or `~/.claude` (no POSIX locking).
 
+### Read/write caching (since 2.110.0)
+
+Every rclone mount runs with `--vfs-cache-mode full`: reads are cached chunk-wise on local disk, writes land locally first and upload in the background (~5s after close). The cache is **persistent per mount** (`data/vfs-cache/<id>`, override the root with `VIBESPACE_VFS_CACHE_DIR`) — a write that hadn't finished uploading when the daemon crashed **resumes uploading after reconnect**. Per-mount disk budget: Settings → *Storage mount cache size (GB)* (default 10 GB, applied on the next connect). Caveat: a "saved" file may still be uploading for a few seconds — the object store lags the local view briefly.
+
+### Auto-recovery (since 2.110.0)
+
+A connected mount is **supervised**: if the rclone daemon dies (crash, OOM kill) or the mount starts hanging IO (unreachable backend — it's torn down to protect the server), the health watchdog reconnects it automatically with backoff (1 → 2 → 5 → 10 min cap). The row shows "auto-reconnecting (attempt N)" while it retries. Auth-class failures (revoked share, expired credential) are **not** retried — those need you, and the row keeps the actionable error instead. Only an explicit **Unmount** stops the supervision.
+
 ## Sharing a folder
 
 The **share** button on an S3 connection row mints a **down-scoped credential** for a subfolder, using that connection's own key:

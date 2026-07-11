@@ -1914,6 +1914,8 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 }
 .gs-menu-item:hover { background: var(--bg-hover); }
 .gs-menu-item.danger { color: var(--red); }
+.gs-menu-item .gs-ver { margin-left: auto; font-size: 10px; color: var(--text-dim); white-space: nowrap; }
+.gs-menu-item .gs-ver-new { color: var(--accent); font-weight: 600; }
 .gs-menu-icon { display: inline-flex; width: 15px; justify-content: center; color: var(--text-secondary); }
 .gs-menu-item.danger .gs-menu-icon { color: var(--red); }
 

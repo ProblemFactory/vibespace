@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.110.0 — 2026-07-11
+
+**Hardened rclone mounts: read/write caching + auto-recovery (user directive: 最稳定、性能最好、自动恢复)**
+
+- **`--vfs-cache-mode full`** on every rclone mount: reads cached chunk-wise on local disk, writes land locally and upload in the background. The cache is **persistent per mount** (`data/vfs-cache/<id>`; `VIBESPACE_VFS_CACHE_DIR` overrides the root) — dirty writes survive a daemon crash and resume uploading on reconnect (verified: SIGKILL the daemon 0.5s after a write, auto-remount, object lands). Bounded IO (`--timeout 60s --contimeout 15s` + retries) so a flaky backend degrades instead of hanging; new setting `mounts.vfsCacheMaxSizeGB` (default 10). Flags are gated on the installed rclone knowing them (an old system rclone falls back to `writes` mode).
+- **Auto-reconnect supervision**: a mount whose daemon died or whose IO hung (torn down by the hung-mount defense) now self-heals — the health watchdog remounts it with backoff (1→2→5→10 min cap), surfacing "auto-reconnecting (attempt N)". Auth-class failures (revoked/expired) are excluded — they need the user and keep their actionable error. Only an explicit Unmount stops supervision (`desired` now only ever reflects USER intent; internal teardowns keep it).
+- **rclone binary NFS trap fixed**: executing the 57 MB pinned binary from a network filesystem demand-pages it through the mount on every run (~22 s wall, measured). `rcloneBin()` now copies it once to `~/.cache/vibespace/` (keyed by size+mtime) and execs the local copy — 22 s → 0.03 s.
+
+**Containers: in-place update + restart (user report: "miku cc里部署的instance不能自动更新+重启")**
+
+- The pod entrypoint now runs the server under a **respawn supervisor** instead of `exec` — `scripts/update.sh` (⚙ → Update VibeSpace…) kills the server pid and the loop respawns it on the new code; dtach agent sessions share the PID namespace and **survive the restart**. The server writes `data/server.pid`; `VIBESPACE_SUPERVISED=1` advertises the restart path (also exported by `run.sh`). Needs one new image rollout; after that, updates are fully in-place.
+
+**Version visibility**: the ⚙ menu's *Update VibeSpace…* row now shows the running version, and highlights `vX → vY` when the canonical repo has a newer release (`GET /api/version`; latest checked lazily, cached 6 h, offline-safe).
+
 ## 2.109.5 — 2026-07-11
 
 Three chat-card bugs (all user-reported):

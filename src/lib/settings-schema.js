@@ -343,6 +343,13 @@ const SETTINGS_SCHEMA = {
     category: t('Session'), liveApply: true,
   },
 
+  'mounts.vfsCacheMaxSizeGB': {
+    type: 'number', default: 10, min: 1, max: 500,
+    label: t('Storage mount cache size (GB)'),
+    description: t('Per-mount disk budget for the rclone read/write cache (vfs-cache-mode full). Reads are cached chunk-wise on local disk; writes land locally and upload in the background — the cache survives crashes and resumes uploading on reconnect. Applied when a mount (re)connects.'),
+    category: t('Session'), liveApply: true,
+  },
+
   // ── Claude ──
   'claude.defaultModel': {
     type: 'enum', default: '', combobox: true,

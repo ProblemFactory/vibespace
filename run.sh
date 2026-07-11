@@ -13,6 +13,10 @@
 set -u
 cd "$(dirname "$0")"
 LOG="${VIBESPACE_LOG:-/tmp/vs-server.log}"
+# scripts/update.sh restarts a supervised server by killing its pid — the
+# loop below respawns it on the new code (same contract as the container
+# entrypoint's supervisor).
+export VIBESPACE_SUPERVISED=1
 
 if [ -z "${VIBESPACE_NO_BUILD:-}" ]; then
   echo "[run.sh] building…" | tee -a "$LOG"

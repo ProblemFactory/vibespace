@@ -34,5 +34,22 @@ if [ ! -f public/bundle.js ]; then
   npm run build
 fi
 
-echo "[entrypoint] starting VibeSpace on :${PORT:-3456}"
-exec node server.js
+# 4. SUPERVISED run (not exec): node exiting must NOT kill the container —
+#    dtach agent sessions live in this PID namespace and a pod restart kills
+#    them all. The respawn loop is what makes in-place self-update work:
+#    scripts/update.sh (⚙ → Update VibeSpace…) kills the server pid, the loop
+#    respawns it on the new code, sessions survive. VIBESPACE_SUPERVISED=1
+#    advertises this restart path to update.sh. SIGTERM (pod shutdown)
+#    forwards to node and exits the loop.
+export VIBESPACE_SUPERVISED=1
+echo "[entrypoint] starting VibeSpace on :${PORT:-3456} (supervised)"
+child=0
+on_term() { [ "$child" != 0 ] && kill -TERM "$child" 2>/dev/null; wait "$child" 2>/dev/null; exit 0; }
+trap on_term TERM INT
+while true; do
+  node server.js &
+  child=$!
+  rc=0; wait "$child" || rc=$?
+  echo "[entrypoint] server exited rc=$rc — respawning in 2s (update restart or crash; dtach sessions survive)"
+  sleep 2
+done

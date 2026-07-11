@@ -35,9 +35,10 @@ const { spawn, execFile, execFileSync } = require('child_process');
 const SHARE_PREFIX = 'vibespace-share:v1:';
 
 class MountManager {
-  constructor({ dataDir, broadcast }) {
+  constructor({ dataDir, broadcast, getSetting }) {
     this.dataDir = dataDir;
     this.broadcast = broadcast || (() => {});
+    this._getSetting = getSetting || (() => undefined);
     this._file = path.join(dataDir, 'mounts.json');
     this._keyFile = path.join(dataDir, '.mounts-key');
     this._logDir = path.join(dataDir, 'mount-logs');
@@ -224,8 +225,56 @@ class MountManager {
 
   rcloneBin() {
     const local = path.join(this.dataDir, 'bin', 'rclone');
-    if (fs.existsSync(local)) return local;
+    if (fs.existsSync(local)) return this._fastBin(local);
     return 'rclone'; // PATH
+  }
+
+  // EXEC from a network/FUSE filesystem demand-pages the whole binary through
+  // the mount on EVERY run — the 57MB pinned rclone measured ~22s wall per
+  // invocation on an NFS-hosted workspace (419 major faults; page cache does
+  // not persist through FUSE) vs 0.06s from local disk. Copy the binary ONCE
+  // to a machine-local cache keyed by (size, mtime) and exec that instead.
+  _fastBin(binPath) {
+    if (this._fastBinMemo?.src === binPath) return this._fastBinMemo.use;
+    let use = binPath;
+    try {
+      if (process.platform === 'linux' && this._onNetworkFs(binPath)) {
+        const st = fs.statSync(binPath);
+        const cacheDir = path.join(os.homedir(), '.cache', 'vibespace');
+        const cached = path.join(cacheDir, `rclone-${st.size}-${Math.floor(st.mtimeMs)}`);
+        if (!fs.existsSync(cached)) {
+          fs.mkdirSync(cacheDir, { recursive: true });
+          const tmp = `${cached}.tmp-${process.pid}`;
+          fs.copyFileSync(binPath, tmp);
+          fs.chmodSync(tmp, 0o755);
+          fs.renameSync(tmp, cached);
+          for (const f of fs.readdirSync(cacheDir)) { // prune superseded copies
+            if (f.startsWith('rclone-') && f !== path.basename(cached)) {
+              try { fs.unlinkSync(path.join(cacheDir, f)); } catch {}
+            }
+          }
+        }
+        use = cached;
+      }
+    } catch { use = binPath; }
+    this._fastBinMemo = { src: binPath, use };
+    return use;
+  }
+
+  /** True when the path lives on a network-ish filesystem (fuse/nfs/cifs/…). */
+  _onNetworkFs(p) {
+    try {
+      const rp = fs.realpathSync(p);
+      let best = null, bestLen = -1;
+      for (const line of fs.readFileSync('/proc/mounts', 'utf-8').split('\n')) {
+        const [, mp, fstype] = line.split(' ');
+        if (!mp) continue;
+        if ((rp === mp || rp.startsWith(mp.endsWith('/') ? mp : mp + '/')) && mp.length > bestLen) {
+          best = fstype; bestLen = mp.length;
+        }
+      }
+      return !!best && /^(fuse|nfs|cifs|smb|sshfs|9p|ceph|afs)/.test(best);
+    } catch { return false; }
   }
 
   rcloneAvailable() {
@@ -252,6 +301,8 @@ class MountManager {
     fs.chmodSync(path.join(binDir, 'rclone'), 0o755);
     try { fs.unlinkSync(zipPath); } catch {}
     this._rcloneAEFlag = undefined; // re-probe flags with the new binary
+    this._rcloneFlagsHelp = undefined;
+    this._fastBinMemo = undefined;
     if (!this.rcloneAvailable()) throw new Error('installed binary failed to run');
     return { version: ver, path: path.join(binDir, 'rclone') };
   }
@@ -699,6 +750,8 @@ class MountManager {
     if (this.isMounted(m)) await this.unmount(id);
     this._state.mounts = this._state.mounts.filter(x => x.id !== id);
     this._errors.delete(id);
+    this._reconnects?.delete(id);
+    try { fs.rmSync(path.join(this._vfsCacheRoot(), id), { recursive: true, force: true }); } catch {}
     this._save();
     this._notify();
   }
@@ -936,6 +989,16 @@ class MountManager {
   }
 
   async mount(id) {
+    // One connect in flight per record — the watchdog's auto-reconnect must
+    // never race a user-initiated connect (or itself).
+    this._connecting = this._connecting || new Set();
+    if (this._connecting.has(id)) return false;
+    this._connecting.add(id);
+    try { return await this._mountInner(id); }
+    finally { this._connecting.delete(id); }
+  }
+
+  async _mountInner(id) {
     const m = this._get(id);
     if (this.isMounted(m)) { m.desired = 'mounted'; this._save(); this._notify(); return; }
     // CephFS = native kernel mount (not rclone) — its own path.
@@ -975,13 +1038,35 @@ class MountManager {
     fs.mkdirSync(this._logDir, { recursive: true });
     const { env, remote } = this._rcloneFor(m);
     const log = fs.openSync(path.join(this._logDir, `${m.id}.log`), 'w');
+    // Read+write caching (user directive: 最稳定 + 性能最好 + 开读写cache).
+    // --vfs-cache-mode full = reads cached chunk-wise on local disk AND writes
+    // land locally first, uploading async. With a PERSISTENT per-mount
+    // --cache-dir, DIRTY WRITES SURVIVE a daemon crash / server restart and
+    // resume uploading on remount — the crash-safety half of "最稳定". Bounded
+    // timeouts make a flaky backend DEGRADE (IO error) instead of hanging the
+    // fuse op; the hung-mount defense stays the backstop. Flags gated on the
+    // installed rclone actually knowing them (an old system rclone would
+    // refuse to mount at all on an unknown flag).
+    const cacheDir = path.join(this._vfsCacheRoot(), m.id);
+    try { fs.mkdirSync(cacheDir, { recursive: true }); } catch {}
+    const cacheGB = Math.max(1, Number(this._getSetting('mounts.vfsCacheMaxSizeGB')) || 10);
     const args = ['mount', remote, mp,
-      '--vfs-cache-mode', 'writes',
+      '--vfs-cache-mode', this._rcloneHasFlag('vfs-fast-fingerprint') ? 'full' : 'writes',
+      '--cache-dir', cacheDir,
+      '--vfs-cache-max-size', `${cacheGB}G`,
+      '--vfs-cache-max-age', '168h',
+      '--vfs-cache-poll-interval', '1m',
+      '--vfs-write-back', '5s',
+      '--buffer-size', '16M',
+      '--timeout', '60s', '--contimeout', '15s',
+      '--low-level-retries', '10', '--retries', '3',
       '--dir-cache-time', '30s',
       // NOTICE (rclone's default): the INFO per-minute vfs-cache heartbeat grew
       // mount logs unrotated for weeks AND polluted the tail-2 failure
       // diagnostic; ERROR/NOTICE lines are what that diagnostic actually reads.
       '--log-level', 'NOTICE'];
+    if (this._rcloneHasFlag('vfs-fast-fingerprint')) args.push('--vfs-fast-fingerprint');
+    if (this._rcloneHasFlag('vfs-read-ahead')) args.push('--vfs-read-ahead', '128M');
     // Proxy-safe signing: old aws-sdk-go signs Accept-Encoding into the V4
     // signature and CDN proxies (Cloudflare) rewrite that header on plain
     // object GETs → SignatureDoesNotMatch on every read (silent retry loop
@@ -1060,11 +1145,14 @@ class MountManager {
     const health = await this._probeMountpoint(mp);
     if (health === 'hung') {
       this.blockPath(mp, 90000); // keep failing fast while teardown + stragglers drain
-      this._errors.set(id, 'storage connected but IO hangs (host unreachable from this machine?) — disconnected to protect the server');
-      m.desired = 'unmounted';
-      this._save();
-      await this.unmount(id);
+      // desired stays 'mounted' — the watchdog auto-reconnects with backoff
+      // (each attempt re-runs this same probe + teardown, so a still-dead
+      // backend is cut loose again within seconds). Only an explicit user
+      // Unmount stops the supervision.
+      this._errors.set(id, 'storage connected but IO hangs (host unreachable from this machine?) — disconnected to protect the server; will retry');
+      await this.unmount(id, { internal: true });
       this._killMountDaemon(mp);
+      this._noteReconnectBackoff(id);
       this._notify();
       return false;
     }
@@ -1147,6 +1235,21 @@ class MountManager {
     });
   }
 
+  /** Is an rclone daemon still serving this mountpoint? A SIGKILLed/crashed
+   *  daemon leaves a ZOMBIE fuse entry in /proc/mounts ("Transport endpoint
+   *  is not connected") — isMounted() lies, so recovery must key off the
+   *  PROCESS (same exact-argv /proc scan as _killMountDaemon). */
+  _daemonAlive(mp) {
+    try {
+      for (const pid of fs.readdirSync('/proc').filter(d => /^\d+$/.test(d))) {
+        let argv;
+        try { argv = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf-8').split('\0'); } catch { continue; }
+        if (argv.includes('mount') && argv.includes(mp) && /rclone/.test(argv[0] || '')) return true;
+      }
+      return false;
+    } catch { return true; } // no /proc (non-Linux) — can't tell, assume alive
+  }
+
   /** Kill the detached rclone daemon serving a mountpoint (a WEDGED daemon
    *  survives fusermount -uz and keeps dial-retrying forever). Exact-argv
    *  match via /proc — pkill -f patterns can't safely quote arbitrary paths. */
@@ -1187,8 +1290,26 @@ class MountManager {
     try {
       for (const m of [...this._state.mounts]) {
         if (this._kindOf(m) === 'credential') continue;
-        if (!this.isMounted(m)) continue;
+        if (!this.isMounted(m)) {
+          // Self-heal: desired-but-dead (daemon crashed/OOM-killed, kernel
+          // mount evicted, or a prior hang teardown) — auto-remount with
+          // backoff. Auth/revoke errors wait for the USER instead of looping.
+          if (m.desired === 'mounted') await this._maybeAutoRemount(m);
+          continue;
+        }
         const mp = this.pathOf(m);
+        // Daemon death check FIRST: a crashed daemon leaves a zombie fuse
+        // entry, so isMounted() above said true — and the IO probe below
+        // would read the zombie's ENOTCONN as an access error, poisoning the
+        // record with a "revoked?" message that blocks auto-remount (found by
+        // the 2.110.0 e2e). Overwrite any stale error and reconnect NOW.
+        if (m.type !== 'cephfs' && !this._daemonAlive(mp)) {
+          this._errors.set(m.id, 'mount daemon died — reconnecting…');
+          await this.unmount(m.id, { internal: true }); // clears the zombie entry
+          if (m.desired === 'mounted') await this._maybeAutoRemount(m);
+          this._notify();
+          continue;
+        }
         // cephfs (native kernel mount) gets a longer probe window — an MDS
         // session on a cold mount can spike a first `ls` past the fuse budget,
         // and a single blip must not disconnect a trusted deployment mount.
@@ -1203,11 +1324,12 @@ class MountManager {
           if (m.type === 'cephfs' && strikes < 2) { this._hungStrikes.set(m.id, strikes); continue; }
           this._hungStrikes.delete(m.id);
           this.blockPath(mp, 90000); // fail fast while teardown + in-flight stragglers drain
-          this._errors.set(m.id, 'storage stopped responding (unreachable host?) — auto-disconnected to protect the server');
-          m.desired = 'unmounted';
-          this._save();
-          await this.unmount(m.id);
+          // desired stays 'mounted' → the sweep's dead-mount branch reconnects
+          // with backoff; only an explicit user Unmount ends the supervision.
+          this._errors.set(m.id, 'storage stopped responding (unreachable host?) — auto-disconnected to protect the server; will retry');
+          await this.unmount(m.id, { internal: true });
           this._killMountDaemon(mp);
+          this._noteReconnectBackoff(m.id);
           this._notify();
         } else {
           this._hungStrikes?.delete(m.id); // recovered — reset the strike count
@@ -1230,6 +1352,44 @@ class MountManager {
         }
       }
     } finally { this._sweepBusy = false; }
+  }
+
+  // ── Auto-reconnect supervision (2.110.0) ──
+  // A record whose desired='mounted' but whose mount is DEAD self-heals:
+  // exponential backoff 1m → 2m → 5m → 10m (cap), reset on success. Each
+  // attempt re-runs the full mount() pipeline (probe + circuit breaker), so a
+  // still-unreachable backend is cut loose again within seconds per attempt —
+  // bounded, threadpool-safe. Auth-class failures are excluded: retrying a
+  // revoked/expired credential just hammers the backend and OVERWRITES the
+  // actionable error the user needs to see.
+  _noteReconnectBackoff(id) {
+    const r = (this._reconnects = this._reconnects || new Map());
+    const st = r.get(id) || { attempts: 0, nextAt: 0 };
+    st.attempts++;
+    st.nextAt = Date.now() + [60, 120, 300, 600][Math.min(st.attempts - 1, 3)] * 1000;
+    r.set(id, st);
+  }
+
+  async _maybeAutoRemount(m) {
+    const mp = this.pathOf(m);
+    if (this.pathBlocked(mp) || this._connecting?.has(m.id)) return; // connect/teardown in flight
+    if (m.expiresAt && Date.now() > m.expiresAt) return;             // expired — user must re-import
+    const err = this._errors.get(m.id) || '';
+    if (/denied|revoked|expired|AccessDenied|SignatureDoesNotMatch|self-mount|bucket-scoped|credential|log ?in|invalid_grant|unauthorized|401|403/i.test(err)) return;
+    const st = this._reconnects?.get(m.id);
+    if (st && Date.now() < st.nextAt) return;
+    this._noteReconnectBackoff(m.id);
+    const n = this._reconnects.get(m.id).attempts;
+    this._errors.set(m.id, `storage disconnected — auto-reconnecting (attempt ${n})…`);
+    this._notify();
+    // A crashed daemon leaves a dead fuse endpoint ("Transport endpoint is
+    // not connected") that blocks the fresh mount — clear it first.
+    if (m.type !== 'cephfs') {
+      await new Promise((res) => execFile('fusermount3', ['-uz', mp], () =>
+        execFile('fusermount', ['-uz', mp], () => res())));
+    }
+    const ok = await this.mount(m.id).catch(() => false);
+    if (ok) this._reconnects.delete(m.id); // mount() already cleared the error
   }
 
   _waitMounted(m, timeoutMs) {
@@ -1273,11 +1433,23 @@ class MountManager {
     });
   }
 
-  unmount(id) {
+  /** VFS cache root — per-mount subdirs. On K8s this rides the PVC (fast,
+   *  persistent — dirty write-back survives pod-level restarts). Overridable
+   *  for hosts whose data dir sits on slow network storage. */
+  _vfsCacheRoot() {
+    return process.env.VIBESPACE_VFS_CACHE_DIR || path.join(this.dataDir, 'vfs-cache');
+  }
+
+  unmount(id, opts = {}) {
     const m = this._get(id);
     const mp = this.pathOf(m);
-    m.desired = 'unmounted';
-    this._save();
+    // internal teardown (hang defense / reconnect cycle) must NOT rewrite the
+    // user's intent — only an explicit user Unmount clears desired.
+    if (!opts.internal) {
+      m.desired = 'unmounted';
+      this._reconnects?.delete(id);
+      this._save();
+    }
     if (m.type === 'cephfs') {
       return new Promise((resolve) => {
         execFile('sudo', ['-n', 'umount', '-l', mp], () => { this._notify(); resolve(!this.isMounted(m)); });
@@ -1346,11 +1518,24 @@ class MountManager {
 
   _rcloneSupportsAcceptEncodingFlag() {
     if (this._rcloneAEFlag !== undefined) return this._rcloneAEFlag;
-    try {
-      const out = execFileSync(this.rcloneBin(), ['help', 'flags'], { encoding: 'utf-8', timeout: 5000, maxBuffer: 4 * 1024 * 1024 });
-      this._rcloneAEFlag = out.includes('use-accept-encoding-gzip');
-    } catch { this._rcloneAEFlag = false; }
+    this._rcloneAEFlag = this._rcloneHasFlag('use-accept-encoding-gzip');
     return this._rcloneAEFlag;
+  }
+
+  /** Does the installed rclone know this flag? Cached probe over BOTH help
+   *  outputs — `help flags` lists global/backend flags but NOT the vfs/mount
+   *  flags (those only appear in `mount --help`; verified on 1.65.2). Passing
+   *  an unknown flag makes rclone refuse to start at all, so gate every
+   *  version-sensitive flag through this. */
+  _rcloneHasFlag(flag) {
+    if (this._rcloneFlagsHelp === undefined) {
+      let out = '';
+      for (const argv of [['help', 'flags'], ['mount', '--help']]) {
+        try { out += execFileSync(this.rcloneBin(), argv, { encoding: 'utf-8', timeout: 10000, maxBuffer: 4 * 1024 * 1024 }); } catch {}
+      }
+      this._rcloneFlagsHelp = out;
+    }
+    return this._rcloneFlagsHelp.includes(flag);
   }
 
   // ── Guided Google Drive OAuth (no terminal needed) ──
