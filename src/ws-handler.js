@@ -191,6 +191,18 @@ function registerWsHandler(wss, ctx) {
               ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'Account error: ' + e.message }));
               return;
             }
+            // REMOTE + the account came from the DEFAULT (nothing specified) +
+            // it could only reach the host by shipping subscription creds →
+            // fall back to the HOST's own CLI login instead of failing the
+            // spawn later with the shipping-disabled error (real report:
+            // resuming a remote session with no account picked errored).
+            // An EXPLICITLY chosen subscription still errors with guidance,
+            // and an opted-in shipSubscriptionToRemote still ships.
+            if (spawnAccount?.remoteCreds && data.hostId && !data.accountId) {
+              let allowShip = false;
+              try { allowShip = !!serverSetting('accounts.shipSubscriptionToRemote'); } catch {}
+              if (!allowShip) spawnAccount = null; // = the host's own login
+            }
           }
 
           const session = {
