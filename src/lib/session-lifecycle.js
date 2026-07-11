@@ -695,6 +695,9 @@ export function installSessionLifecycle(App, ctx = {}) {
       case 'openUsage':
         this.openUsage({ syncId });
         break;
+      case 'openSettings':
+        this._settingsUI?.open({ syncId });
+        break;
       case 'openSessionProps':
         this.openSessionProps(spec.sessionKey, { syncId });
         break;

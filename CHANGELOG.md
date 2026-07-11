@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.106.0 — 2026-07-11
+
+**Chat: TUI-style run collapse (new setting, default ON)**
+- `chat.collapseRuns`: three or more consecutive thinking-only messages (or Bash tool cards) fold behind a clickable "N × …" line, like the Claude Code TUI. Decoration-only (a MutationObserver re-decorates on appends/edits/trims — nothing reparents, so virtual scroll/gap-seek/index mapping are untouched); the newest message never collapses (live progress stays visible); an open search bar expands everything (reveal must reach members); user-opened runs stay open across rebuilds (WeakSet by first member).
+- `chat.reducedMotionSpin` (opt-in): keep the activity spinner ROTATING under prefers-reduced-motion instead of the default opacity pulse (the pulse read as "blinking" — user request).
+
+**Onboarding**
+- Log in / Install from the wizard no longer abandons the tour (real report: "clicking Log in skips onboarding") — the wizard PAUSES (not marked done) and a floating "↩ Back to setup" pill re-enters at the same step.
+- Backend card layout polish: name+version ellipsize on one line, actions no longer squeeze.
+
+**Settings window syncs across clients** (user request): it now carries an `openSpec` like every other window — persisted in the layout and replayed on other clients (was deliberately transient since 2.53.0).
+
+**Deploy image**: Chromium launches in the container now (`/etc/chromium.d/99-container`: `--no-sandbox --disable-dev-shm-usage` — the sandbox can't work unprivileged and /dev/shm is tiny; acceptable in a single-user container).
+
 ## 2.105.2 — 2026-07-11
 
 **Remote-host session blank on other clients (real report) — three cooperating fixes**
