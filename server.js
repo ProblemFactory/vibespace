@@ -2518,6 +2518,12 @@ app.post('/api/mounts/:id/unmount', async (req, res) => {
   try { res.json({ success: await mounts.unmount(req.params.id) }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
+// Decrypted connection config for the edit dialog (prefill REAL values —
+// user directive; cookie-authed, single-user instance model)
+app.get('/api/mounts/:id/config', (req, res) => {
+  try { res.json(mounts.config(req.params.id)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
 app.patch('/api/mounts/:id', async (req, res) => {
   try { await mounts.update(req.params.id, req.body || {}); res.json({ success: true, mounts: mounts.list() }); }
   catch (e) { res.status(400).json({ error: e.message, mounts: mounts.list() }); }

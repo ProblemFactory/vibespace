@@ -1515,5 +1515,5 @@ export default {
   'Add a submount (a specific bucket/path of this storage)': '添加子挂载(此存储下的具体 bucket/路径)',
   'This storage type doesn’t support submounts': '该存储类型不支持子挂载',
   'New submount under "{name}"': '在 "{name}" 下新建子挂载',
-  'What happens when closing a session window: terminate the session, or detach and keep it running. Until you set this explicitly, plain shell terminals default to DETACH (they have no transcript to resume — closing would destroy them; detached ones stay in the sidebar, tmux-style) while agent sessions default to terminate.': '关闭会话窗口时的行为：终止会话，或分离并保持运行。在你显式设置之前，纯 shell 终端默认「分离」（它们没有可恢复的记录——终止即彻底丢失；分离后留在侧边栏，类似 tmux），agent 会话默认「终止」。',
+  'What happens when closing a session window: detach and keep it running (default — the session stays in the sidebar for re-attach), or terminate it. Automation helper terminals always terminate.': '关闭会话窗口时的行为：分离并保持运行（默认——会话留在侧边栏可随时重新打开），或终止会话。自动化辅助终端总是终止。',
 };

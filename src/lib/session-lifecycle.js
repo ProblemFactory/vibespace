@@ -186,17 +186,9 @@ export function installSessionLifecycle(App, ctx = {}) {
     winInfo._ephemeral = ephemeral;
     winInfo.onClose = () => {
       // ephemeral (automation helper) terminals always terminate on close;
-      // otherwise honor the global close-behavior (terminate vs detach).
-      // SHELL terminals default to DETACH when the user never set the option
-      // (real report: "关闭就没了"): a shell has no transcript/resume path, so
-      // terminating on close destroys it irrecoverably — detached it stays in
-      // the sidebar's LIVE list (dtach, survives restarts), tmux-style. Agent
-      // sessions keep the terminate default (they resume from transcripts).
-      // An EXPLICIT user setting overrides the per-type default either way.
-      const behavior = this.settings.isSet('window.closeBehavior')
-        ? this.settings.get('window.closeBehavior')
-        : (backend === 'shell' ? 'detach' : 'terminate');
-      const shouldKill = ephemeral || (killOnClose && behavior === 'terminate');
+      // otherwise honor the global close-behavior (default: detach — user
+      // directive, no per-type exceptions; sessions stay re-attachable)
+      const shouldKill = ephemeral || (killOnClose && this.settings.get('window.closeBehavior') === 'terminate');
       if (shouldKill) this.ws.send({ type: 'kill', sessionId });
       term.dispose(); this.sessions.delete(winInfo.id); this._checkWelcome();
     };
