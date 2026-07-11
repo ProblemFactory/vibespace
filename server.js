@@ -1,3 +1,8 @@
+// libuv threadpool headroom (default 4): a few fs ops stuck on a dying fuse
+// mount used to starve EVERY async fs/dns op server-wide (real outage — see
+// mounts.js hung-mount defense). Must be set before the pool first spins up,
+// i.e. before any require that performs async I/O.
+process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || '32';
 const express = require('express');
 const http = require('http');
 const { WebSocketServer } = require('ws');
@@ -2306,6 +2311,7 @@ setTimeout(() => mounts.restore().catch(e => console.error('[mounts] restore:', 
 // Hung-mount watchdog: one unreachable backend must never wedge the server
 // (libuv threadpool saturation — see mounts.js _healthSweep).
 mounts.startHealthWatchdog();
+app.locals.mounts = mounts; // files.js circuit breaker asks it about blocked mount roots
 
 app.get('/api/mounts', async (req, res) => {
   const cfg = mounts.getMyStorageConfig(); // redacted (no secret)

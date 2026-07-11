@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.108.4 — 2026-07-11
+
+**Hung-mount defense, part 2 — close the pile-up window.** 2.108.3's watchdog reclaims a dead mount, but during the ~6s connect-probe window an open file-explorer window pointed at the mountpoint could still stuff the libuv threadpool with never-returning fs ops — the server then degraded for minutes while they drained (real follow-up incident: user clicked Connect on the unreachable-host mount, instance stalled again). Now:
+- **Path circuit breaker**: the whole connect window (block before the fuse mount is spawned, release on probe pass) and any detected-hung mount root fail EVERY file-route op under them fast with 503 "storage is connecting or not responding" — verified: 8 concurrent listings against a dead mountpoint mid-connect all return in 0.0s, server stays at 1ms.
+- **libuv threadpool 4 → 32** (`UV_THREADPOOL_SIZE`, set at the top of server.js): headroom so a handful of stragglers can't starve every async fs/dns op server-wide.
+
 ## 2.108.3 — 2026-07-11
 
 **Hung-mount defense (real incident: the xingweil instance went unreachable)** — an SMB mount whose host only resolves on the user's home LAN stayed fuse-"mounted" while every IO on it hung; node's libuv threadpool filled with stuck fs ops, `/login` took 130s, the readiness probe (1s) failed and the pod dropped out of the Service. The main event loop was IDLE the whole time (`ep_poll`) — the threadpool was the choke point. Two defenses, both e2e-verified against a reproduced dead-SMB mount:

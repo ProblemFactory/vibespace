@@ -906,12 +906,16 @@ class MountManager {
     m.desired = 'mounted';
     this._errors.delete(id);
     this._save();
+    // Circuit-break the path for the whole connect window: nothing may issue
+    // node-fs IO against this root until the health probe has passed.
+    this.blockPath(mp, 30000);
     // rclone daemonizes the fuse mount asynchronously — poll up to 5s
     const ok = await this._waitMounted(m, 5000);
     if (!ok) {
       let tail = '';
       try { tail = fs.readFileSync(path.join(this._logDir, `${m.id}.log`), 'utf-8').trim().split('\n').slice(-2).join(' '); } catch {}
       this._errors.set(id, tail || 'mount did not appear within 5s');
+      this.unblockPath(mp);
       this._notify();
       return false;
     }
@@ -923,6 +927,7 @@ class MountManager {
     // from the Service). Probe in a CHILD process (never node fs), and cut
     // the mount loose instead of serving a folder that would wedge us.
     if (await this._probeMountpointHung(mp)) {
+      this.blockPath(mp, 90000); // keep failing fast while teardown + stragglers drain
       this._errors.set(id, 'storage connected but IO hangs (host unreachable from this machine?) — disconnected to protect the server');
       m.desired = 'unmounted';
       this._save();
@@ -931,8 +936,28 @@ class MountManager {
       this._notify();
       return false;
     }
+    this.unblockPath(mp);
     this._notify();
     return this.isMounted(m);
+  }
+
+  // ── Path circuit breaker (2.108.4) ──
+  // While a mount is CONNECTING (IO-probe window) or detected hanging, every
+  // file-route op under its root fails fast instead of entering the libuv
+  // threadpool — an open file-explorer window pointed at a dead mountpoint
+  // stuffed the pool during the 6s probe window and degraded the whole server
+  // for minutes even with the watchdog (real outage tail).
+  blockPath(mp, ms) { (this._blockedPaths = this._blockedPaths || new Map()).set(mp, Date.now() + ms); }
+  unblockPath(mp) { this._blockedPaths?.delete(mp); }
+  /** Blocked mount root containing p, or false. */
+  pathBlocked(p) {
+    if (!p || !this._blockedPaths?.size) return false;
+    const rp = String(p);
+    for (const [mp, until] of this._blockedPaths) {
+      if (Date.now() > until) { this._blockedPaths.delete(mp); continue; }
+      if (rp === mp || rp.startsWith(mp + '/')) return mp;
+    }
+    return false;
   }
 
   /** True when listing the mountpoint HANGS (child `ls`, 6s guard). An error
@@ -982,6 +1007,7 @@ class MountManager {
         if (!this.isMounted(m)) continue;
         const mp = this.pathOf(m);
         if (!(await this._probeMountpointHung(mp))) continue;
+        this.blockPath(mp, 90000); // fail fast while teardown + in-flight stragglers drain
         this._errors.set(m.id, 'storage stopped responding (unreachable host?) — auto-disconnected to protect the server');
         m.desired = 'unmounted';
         this._save();
