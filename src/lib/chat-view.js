@@ -1982,10 +1982,13 @@ class ChatView {
     } finally {
       this._runsMutating = false;
       if (anchorEl && anchorEl.isConnected) {
-        // the anchor itself may have folded (display:none) — fall forward to
-        // its nearest visible sibling
+        // the anchor itself may have folded (display:none) — prefer falling
+        // BACK to its run header (it sits directly above, exactly where the
+        // folded content was, and clicking it restores the view); fall
+        // forward only when nothing visible precedes the anchor
         let a = anchorEl;
-        while (a && a.offsetParent === null) a = a.nextElementSibling;
+        while (a && a.offsetParent === null) a = a.previousElementSibling;
+        if (!a) { a = anchorEl; while (a && a.offsetParent === null) a = a.nextElementSibling; }
         if (a) list.scrollTop = a === anchorEl ? a.offsetTop - anchorDelta : a.offsetTop;
       }
       // Drain OUR OWN mutation records: the observer callback is delivered at
