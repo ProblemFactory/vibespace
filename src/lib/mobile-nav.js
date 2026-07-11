@@ -15,6 +15,11 @@ export class MobileNav {
 
     document.getElementById('mobile-nav-menu').onclick = () => app.sidebar.toggle(true);
     document.getElementById('mobile-nav-new').onclick = () => app.showNewSessionDialog();
+    // ⚙ — the taskbar (and its gear-adjacent chrome) is hidden on phones, so
+    // without this the gs-menu (Usage/Manage agents/Diagnostics/Settings…)
+    // has no entry point at all on mobile.
+    const gear = document.getElementById('mobile-nav-gear');
+    if (gear) gear.onclick = (e) => { e.stopPropagation(); app._showGlobalSettings(gear); };
 
     document.getElementById('mobile-nav-close').onclick = () => {
       const activeId = app.wm.activeWindowId;

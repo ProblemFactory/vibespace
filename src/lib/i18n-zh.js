@@ -1106,6 +1106,8 @@ export default {
   'Subscription account': '订阅账号',
   'Click to switch billing': '点击切换计费账号',
   'Switch billing to “{name}”?': '切换计费到"{name}"？',
+  'Switch billing…': '切换计费…',
+  'Usage & quota': '用量与配额',
   'The account is fixed when the CLI starts, so the session restarts and the conversation continues via resume.': '账号在 CLI 启动时固定，所以会话将重启，对话通过 resume 无缝延续。',
   'Switch & restart': '切换并重启',
   'Nothing to resume yet — send a message first, or pick the account in the New Session dialog': '还没有可恢复的对话——先发一条消息，或在新建会话对话框里选账号',

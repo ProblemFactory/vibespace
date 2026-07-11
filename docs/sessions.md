@@ -78,7 +78,9 @@ On mobile (≤768px), the sidebar uses a **two-level navigation** instead of the
 - **Level 1**: folder or group list — each entry shows a folder/group icon, path (middle-truncated), session count, and live count. Tap to drill in.
 - **Level 2**: session cards inside one folder/group, with a back button at top. Only this folder's sessions are rendered (~5-20 cards instead of 1600+).
 
-The mobile nav bar provides: ☰ sidebar toggle, session title (tap for window switcher with desktop tabs), ✕ close window, + new session. Image upload button appears next to the chat input on mobile.
+The mobile nav bar provides: ☰ sidebar toggle, session title (tap for window switcher with desktop tabs), a quota donut chip (worst-of utilization across your accounts; tap for the full usage popup with per-account switching), ⚙ settings (Usage window, Manage agents, Diagnostics, all settings), ✕ close window, + new session. Image upload button appears next to the chat input on mobile.
+
+Switching a session's billing account on mobile: long-press its card → **Switch billing…** (the same menu the desktop title-bar badge opens).
 
 ## Forking
 
