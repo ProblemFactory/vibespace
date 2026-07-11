@@ -1168,6 +1168,7 @@ export default {
   'Share a local folder': '分享本地文件夹',
   'Bridge tokens': '桥接令牌',
   'Revoke': '撤销',
+  'Open in viewer (copyable, rendered)': '在查看器中打开（可复制、渲染）',
   'Couldn’t connect:': '连接失败:',
   'Click to connect': '点击连接',
   'Open in file explorer': '在文件管理器中打开',

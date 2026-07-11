@@ -269,7 +269,7 @@ class TaskGroupManager {
       `- Keep it honest and current — the user reads it on the board. Set \`blocked\` or \`needs-input\` (with a higher urgency) the moment you are stuck or waiting on the user; \`done\` when this piece of work is finished.`,
       '',
       '`vibespace-ask` — mirror EVERY question you have for the user onto their global inbox. The user is often NOT watching this window; the inbox is how they find waiting questions across all their sessions:',
-      `- Whenever you ask the user something in chat, end a turn waiting on their decision/input/review, or set status \`needs-input\`/\`blocked\`/\`review\` — ALSO file it: \`vibespace-ask "question" [--detail "context + your recommendation"] [--urgency low|normal|high|urgent]\`. Ask in chat AND file it — both, always.`,
+      `- Whenever you ask the user something in chat, end a turn waiting on their decision/input/review, or set status \`needs-input\`/\`blocked\`/\`review\` — ALSO file it: \`vibespace-ask "question" [--detail "context + your recommendation"] [--urgency low|normal|high|urgent]\`. Ask in chat AND file it — both, always. The inbox is a NOTIFICATION MIRROR: the full content (question, options, recommendation) must also appear in your chat reply — never only in the inbox.`,
       `- The MOMENT the user answers (in chat or anywhere), resolve it YOURSELF: \`vibespace-ask resolve <id|text>\` — never leave your own answered items for the user to tick. \`vibespace-ask list\` shows what's open.`,
       `- Still NOT for your own working steps (normal todo list) or group work items (\`vibespace-task plan-add\`).`,
       '',

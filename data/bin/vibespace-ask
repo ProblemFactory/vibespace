@@ -31,7 +31,7 @@ const USAGE = [
   '  vibespace-ask "question or decision needed" [--detail "context, options, your recommendation"] [--urgency low|normal|high|urgent]',
   '  vibespace-ask list                    print this session\'s open items',
   '  vibespace-ask resolve <id|text>       the user answered (in chat counts)? resolve it YOURSELF immediately',
-  '  (whenever you ask in chat, ALSO file it here — both channels, always; your own working steps still belong in your todo list)',
+  '  (whenever you ask in chat, ALSO file it here — both channels, always; the FULL content goes in your CHAT reply, this inbox only notifies; your own working steps still belong in your todo list)',
 ].join('\n');
 
 async function call(body) {

@@ -2858,3 +2858,12 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .ucl-entry { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; }
 .ucl-ver { font-size: 12px; font-weight: 600; color: var(--accent); margin-bottom: 4px; }
 .ucl-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; font-size: 11px; line-height: 1.5; color: var(--text-secondary); }
+
+/* Inbox readability (user request): selectable text + dedicated viewer */
+.ut-text, .ut-detail, .ut-hist-msg { user-select: text; cursor: text; }
+.ut-viewer-body { width: min(560px, 92vw); }
+.ut-viewer-md { user-select: text; font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; max-height: min(480px, 60vh); overflow-y: auto; }
+.ut-viewer-md p { margin: 0 0 8px; }
+.ut-viewer-md code { background: var(--bg-input); padding: 0 4px; border-radius: 3px; font-size: 11px; }
+.ut-viewer-md pre { background: var(--bg-input); padding: 8px; border-radius: var(--radius-sm); overflow-x: auto; }
+.ut-viewer-md ul, .ut-viewer-md ol { padding-left: 18px; margin: 0 0 8px; }
