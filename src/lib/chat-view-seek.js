@@ -151,7 +151,14 @@ export function installChatSeek(ChatView) {
           ?? (await fetch(`/api/session-history-gap?${base}&info=1`).then(r => r.json()).catch(() => null))?.gap?.tailStartLine;
         if (!Number.isFinite(tailStartLine)) { if (btn) btn.remove(); return; }
         markerEl._gapCursor = tailStartLine;
-        markerEl._gapAnchor = markerEl.nextElementSibling; // insert new (older) slabs before this
+        // Insert new (older) slabs before this. NEVER anchor on a run-fold
+        // header — _updateRuns destroys and rebuilds every header on each
+        // pass, and a dead anchor used to fall back to insertBefore(null)
+        // = APPEND, landing an older slab BELOW the live tail (review
+        // finding). Members (.chat-msg) only ever get class-toggled — stable.
+        let gapA = markerEl.nextElementSibling;
+        while (gapA && gapA.classList?.contains('chat-run-header')) gapA = gapA.nextElementSibling;
+        markerEl._gapAnchor = gapA;
       }
       if (markerEl._gapCursor <= 0) { this._finishSeek(markerEl, btn); return; }
       // Teleport mode reads across the whole file (whole=1); tail mode stops at
@@ -161,8 +168,11 @@ export function installChatSeek(ChatView) {
       const msgs = data?.messages || [];
       const scrollHeightBefore = this._messageList.scrollHeight;
       const scrollTopBefore = this._messageList.scrollTop;
+      // Dead anchor (removed by a runs pass / trim) → insert right after the
+      // sentinel, i.e. at the TOP of history — never null (= list end, which
+      // corrupted ordering by appending older records below the live tail).
       const anchor = markerEl._gapAnchor && markerEl._gapAnchor.parentNode === this._messageList
-        ? markerEl._gapAnchor : null;
+        ? markerEl._gapAnchor : markerEl.nextSibling;
       let firstInserted = null;
       for (const msg of msgs) {
         const el = this._renderGapMsg(msg);
