@@ -257,6 +257,82 @@ class AccountManager {
     return { id, ...info, name: a.name };
   }
 
+  // ── Config export / import (Backup & migrate, 2.100.0) ──
+  // Returns PLAINTEXT secrets — the caller MUST put this inside the export's
+  // passphrase-encrypted sensitive blob. API keys are decrypted out of the
+  // machine-local .accounts-key store (the key file itself never travels);
+  // subscription creds ride as whitelisted dir files. Import re-encrypts under
+  // the TARGET machine's own key and recreates the dirs.
+  exportBundle() {
+    const CLAUDE_SUB_FILES = ['.credentials.json', '.claude.json'];
+    const CODEX_SUB_FILES = ['auth.json'];
+    const readFiles = (dir, names) => {
+      const out = {};
+      for (const n of names) {
+        try { out[n] = fs.readFileSync(path.join(dir, n), 'utf-8'); } catch { }
+      }
+      return out;
+    };
+    const accounts = this._state.accounts.map((a) => {
+      const backend = this._acctBackend(a);
+      const type = this._acctType(a);
+      const rec = { id: a.id, name: a.name, backend, type, source: a.source, createdAt: a.createdAt };
+      if (a.email) rec.email = a.email;
+      if (a.tail) rec.tail = a.tail;
+      if (a.keyEnc) { try { rec.key = this._dec(a.keyEnc); } catch { } }
+      if (backend === 'codex') rec.files = readFiles(this.codexSubDir(a.id), CODEX_SUB_FILES);
+      else if (type === 'subscription') rec.files = readFiles(this.subDir(a.id), CLAUDE_SUB_FILES);
+      return rec;
+    });
+    return {
+      version: 1,
+      defaultAccountId: this._state.defaultAccountId || null,
+      defaultCodexAccountId: this._state.defaultCodexAccountId || null,
+      accounts,
+    };
+  }
+
+  importBundle(bundle) {
+    if (!bundle || !Array.isArray(bundle.accounts)) return { imported: 0, skipped: 0 };
+    const FILE_OK = /^[.\w][\w.-]*$/; // whitelist shape — no separators, no traversal
+    let imported = 0, skipped = 0;
+    for (const rec of bundle.accounts) {
+      if (!rec || typeof rec.id !== 'string' || !/^(acct|sub|cxs)-[a-f0-9]{6,}$/.test(rec.id)) { skipped++; continue; }
+      if (this._state.accounts.some((a) => a.id === rec.id)) { skipped++; continue; } // never clobber an existing account
+      const a = {
+        id: rec.id,
+        name: String(rec.name || '').slice(0, 60) || rec.id,
+        source: rec.source || 'import',
+        createdAt: rec.createdAt || Date.now(),
+      };
+      if (rec.email) a.email = String(rec.email).slice(0, 120);
+      const isCodex = rec.backend === 'codex';
+      if (isCodex) { a.backend = 'codex'; a.type = 'subscription'; }
+      else if (rec.type === 'subscription') a.type = 'subscription';
+      if (rec.key && /^sk-ant-/.test(rec.key)) { a.keyEnc = this._enc(String(rec.key)); a.tail = String(rec.key).slice(-8); }
+      else if (rec.tail) a.tail = rec.tail;
+      if (rec.files && typeof rec.files === 'object' && (isCodex || a.type === 'subscription')) {
+        const dir = isCodex ? this.codexSubDir(a.id) : this.subDir(a.id);
+        fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+        if (isCodex) this._seedCodexDir(dir); // sessions/config.toml symlinks into the shared ~/.codex
+        else this._seedConfigDir(dir);
+        for (const [n, content] of Object.entries(rec.files)) {
+          if (!FILE_OK.test(n) || typeof content !== 'string') continue;
+          fs.writeFileSync(path.join(dir, n), content, { mode: 0o600 });
+        }
+      }
+      this._state.accounts.push(a);
+      imported++;
+    }
+    // Defaults only when the referenced account actually landed and none is set
+    // locally — an import must not silently re-route existing sessions' billing.
+    for (const [k, v] of [['defaultAccountId', bundle.defaultAccountId], ['defaultCodexAccountId', bundle.defaultCodexAccountId]]) {
+      if (v && !this._state[k] && this._state.accounts.some((a) => a.id === v)) this._state[k] = v;
+    }
+    if (imported) { this._save(); this._notify(); }
+    return { imported, skipped };
+  }
+
   add({ name, key, source = 'manual' } = {}) {
     key = String(key || '').trim();
     if (!/^sk-ant-/.test(key)) throw new Error('not an Anthropic API key (must start with sk-ant-)');

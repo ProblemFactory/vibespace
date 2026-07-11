@@ -34,15 +34,20 @@ Auth is **off by default** (local single-user use). Enable it by giving the serv
 | Layouts & desktops | window layouts, virtual desktops, custom grid presets |
 | Session metadata | stars, renames, groups, per-session model/effort/permission configs |
 | File bookmarks | file-explorer bookmarks |
-| Browser preferences | theme choice, terminal font, taskbar height (this browser's localStorage) |
+| Task Groups | 岗位 definitions — objective, checklists (incl. item details), activity logs, linked folders, context-dir config |
+| Usage pricing table | per-model rates + per-account discounts from the Usage window's Pricing editor |
+| Browser preferences | theme choice, terminal font, language, usage-view account choices (this browser's localStorage) |
 
 **Sensitive items are opt-in and always encrypted** (AES-256-GCM under a passphrase you type at export; the file only reveals *which* sensitive items it contains, not their contents):
 - *VibeSpace password* — the scrypt hash; after import the same password logs in (and all other devices are logged out).
 - *Claude / Codex CLI credentials* — `~/.claude/.credentials.json` / `~/.codex/auth.json`; the imported instance needs no re-login. Treat a file containing these like an SSH key.
 - *Remote hosts* — ssh host records plus any private keys you uploaded in-app (re-keyed under the new instance).
 - *Mounts & shares* — mount definitions with their credentials (any type — S3 / Google Drive / WebDAV / SFTP / VibeSpace↔VibeSpace; decrypted from the instance-local key and re-encrypted under your passphrase). S3 share minting is the S3-specific part.
+- *Billing accounts* — the multi-account roster: API keys plus each subscription's login credentials (Claude creds dirs / Codex account homes). On import the keys are re-encrypted under the new instance's own store key, the credential dirs are recreated with tight permissions, and the imported subscriptions are immediately logged in — no re-login per account.
 
-**Import** (⚙ → Backup & migrate… → Import tab, or the wizard) shows what the file contains with per-section checkboxes — each selected section *replaces* the corresponding data; sensitive items ask for the passphrase. The page reloads after import. Login tokens are never exported.
+**Import** (⚙ → Backup & migrate… → Import tab, or the wizard) shows what the file contains with per-section checkboxes — each selected section *replaces* the corresponding data (billing accounts merge: existing account ids are never overwritten); sensitive items ask for the passphrase. The page reloads after import. Login tokens are never exported.
+
+**Not in the config file** (by design): the per-request usage **ledger** (`data/usage-history/` — can be tens of MB; copy that directory during migration if you want to keep usage analytics history), session status chips and the For-you inbox (runtime state that decays), and regenerable caches. Live sessions don't migrate either — transcripts live in `~/.claude` / `~/.codex`, so move those separately if the new deployment should see old conversations.
 
 > This is a single shared-password model (one workspace = one team). Per-user accounts are part of the collaboration roadmap — see [design-collaboration.md](design-collaboration.md).
 
