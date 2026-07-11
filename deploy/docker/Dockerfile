@@ -27,13 +27,17 @@ RUN npm install -g @anthropic-ai/claude-code
 RUN userdel -r node 2>/dev/null || true; \
     useradd -m -u 1000 -s /bin/bash vibe
 
-# Build the app into the SEED location (not the run location). npm ci + build at
-# image-build time so first boot is a fast offline copy, not a network clone.
-WORKDIR /opt/vibespace-dist
-COPY package.json package-lock.json* ./
-RUN npm ci
-COPY . .
-RUN npm run build \
+# Bake the app into the SEED location as a REAL git checkout (public repo), so
+# the entrypoint's copy into the PVC is a working checkout — users can then
+# ⚙ → Update (git pull) and fork/modify (the pets model). A plain `COPY . .`
+# would drop .git (.dockerignore) and break self-update. npm ci + build here so
+# first boot is a fast offline copy, not a network clone.
+ARG VIBESPACE_REF=master
+RUN git clone https://github.com/ProblemFactory/vibespace /opt/vibespace-dist \
+    && cd /opt/vibespace-dist \
+    && git checkout "$VIBESPACE_REF" \
+    && npm ci \
+    && npm run build \
     && rm -rf data \
     && chown -R vibe:vibe /opt/vibespace-dist
 
