@@ -95,13 +95,15 @@ export function installChatSeek(ChatView) {
       }
       if (Number.isFinite(firstDroppedLine)) { this._gapCursorDown = firstDroppedLine; this._gapDownIdleUntil = 0; }
     } else {
-      // dropping ABOVE the viewport — compensate scrollTop; advance the up-cursor
+      // dropping ABOVE the viewport — element-anchored (see _withViewportAnchor)
       const before = list.scrollHeight;
       let lastKeptFirstLine = null;
-      for (let i = 0; i < n; i++) els[i].remove();
+      const ok = this._withViewportAnchor(() => {
+        for (let i = 0; i < n; i++) els[i].remove();
+      });
       const first = list.querySelector('.chat-gap-msg[data-line]');
       if (first) lastKeptFirstLine = Number(first.dataset.line);
-      list.scrollTop -= (before - list.scrollHeight);
+      if (!ok) list.scrollTop -= (before - list.scrollHeight);
       const marker = this._seekSentinel;
       if (marker && Number.isFinite(lastKeptFirstLine)) {
         marker._gapCursor = lastKeptFirstLine;
@@ -169,25 +171,31 @@ export function installChatSeek(ChatView) {
       this._trace?.('gapUp', { n: msgs.length, cursor: markerEl._gapCursor });
       const scrollHeightBefore = this._messageList.scrollHeight;
       const scrollTopBefore = this._messageList.scrollTop;
-      // Dead anchor (removed by a runs pass / trim) → insert right after the
-      // sentinel, i.e. at the TOP of history — never null (= list end, which
-      // corrupted ordering by appending older records below the live tail).
-      const anchor = markerEl._gapAnchor && markerEl._gapAnchor.parentNode === this._messageList
-        ? markerEl._gapAnchor : markerEl.nextSibling;
+      // Element-anchored viewport preservation (same estimate-vs-real
+      // content-visibility flaw as _extendTop — see _withViewportAnchor).
       let firstInserted = null;
-      for (const msg of msgs) {
-        const el = this._renderGapMsg(msg);
-        if (!el) continue;
-        this._messageList.insertBefore(el, anchor);
-        if (!firstInserted) firstInserted = el;
-      }
+      const anchoredOk = this._withViewportAnchor(() => {
+        // Dead anchor (removed by a runs pass / trim) → insert right after the
+        // sentinel, i.e. at the TOP of history — never null (= list end, which
+        // corrupted ordering by appending older records below the live tail).
+        const insRef = markerEl._gapAnchor && markerEl._gapAnchor.parentNode === this._messageList
+          ? markerEl._gapAnchor : markerEl.nextSibling;
+        for (const msg of msgs) {
+          const el = this._renderGapMsg(msg);
+          if (!el) continue;
+          this._messageList.insertBefore(el, insRef);
+          if (!firstInserted) firstInserted = el;
+        }
+      });
       // Next (older) slab inserts above the one we just added
       if (firstInserted) markerEl._gapAnchor = firstInserted;
       markerEl._gapCursor = (data && Number.isFinite(data.fromLine)) ? data.fromLine : 0;
       metric('gap-slab-load-ms', performance.now() - _t0);
-      // Keep the viewport stable: we inserted content below the sentinel
-      this._traceExpect?.();
-      this._messageList.scrollTop = scrollTopBefore + (this._messageList.scrollHeight - scrollHeightBefore);
+      if (!anchoredOk) {
+        // fallback: old delta math (no usable anchor)
+        this._traceExpect?.();
+        this._messageList.scrollTop = scrollTopBefore + (this._messageList.scrollHeight - scrollHeightBefore);
+      }
       if (this._teleported) this._trimGapDom('bottom');
       if (markerEl._gapCursor <= 0) this._finishSeek(markerEl, btn);
     } finally {
