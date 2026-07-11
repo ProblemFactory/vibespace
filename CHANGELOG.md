@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.100.4 — 2026-07-11
+
+- Removed the temporary drag tracer (2.100.3's coordinate-space fix confirmed by the user). The viewport→workspace conversion invariant is documented in CLAUDE.md for future drag code.
+
 ## 2.100.3 — 2026-07-11
 
 **Drag drift: the REAL fix (coordinate-space mixup, diagnosed from a live trace)**
