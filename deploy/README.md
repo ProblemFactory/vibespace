@@ -35,6 +35,28 @@ The user reaches `https://<user>.<domain>`. TLS: set `ingress.wildcardCertSecret
 to a pre-issued `*.<domain>` wildcard secret (recommended — a wildcard needs a
 DNS-01 issuer), or `ingress.clusterIssuer` for a cert-manager per-host cert.
 
+## Clerk SSO (optional)
+
+Set `clerk.publishableKey` + `clerk.allowedEmails` to put an instance behind
+Clerk sign-in (password auth still works alongside; with no password set, Clerk
+alone enables auth). `allowedEmails` is a comma list — `@example.com` entries
+allow a whole domain; an EMPTY list rejects everyone, so each per-user instance
+must name its owner. One-time Clerk dashboard step: the session token must
+carry an email claim — add `{"email": "{{user.primary_email_address}}"}` under
+**Sessions → Customize session token** (or create a JWT template named
+`vibespace` with that claim; the login page tries the template first). The
+server verifies tokens against Clerk's JWKS (derived from the publishable key)
+— no Clerk secret key is needed anywhere.
+
+## Fleet telemetry (optional)
+
+Point every instance's `telemetry.forwardUrl` at
+`https://<collector-host>/api/telemetry/ingest` with a shared
+`telemetry.forwardToken`; give ONE instance the same token as
+`telemetry.ingestToken` — that instance becomes the collector and its
+⚙ → Diagnostics report gains a per-instance **Fleet** section. Batches carry
+anonymous instance ids and error names/stacks/metrics only, never content.
+
 ## Notes
 
 - **Home volume ownership**: the pod sets `fsGroup: 1000` so the non-root `vibe`

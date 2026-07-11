@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.103.0 — 2026-07-11
+
+**Clerk SSO (deployment queue ③) — optional, env-gated, zero new dependencies**
+- `VIBESPACE_CLERK_PUBLISHABLE_KEY` turns the login page into a dual-mode page: password form (when a password is set) + "Sign in with SSO" via Clerk's hosted UI (ClerkJS loaded from the Clerk frontend-API host derived from the publishable key). With no password set, Clerk alone enables auth.
+- `POST /api/clerk-login`: verifies the Clerk session JWT against Clerk's JWKS (RS256 via pure node:crypto — kid lookup with rotation refetch, exp/nbf ±60s, issuer check, alg pinned), gates on `VIBESPACE_CLERK_ALLOWED_EMAILS` (comma list, `@domain` entries allow a domain, EMPTY rejects everyone — authn ≠ authz on a per-user instance), then issues the SAME cookie token as password login — middleware/WS/agent tokens all unchanged. No Clerk secret key needed anywhere.
+- Already-signed-in-at-Clerk visitors are exchanged automatically on page load; a 403 (wrong account) offers a "Switch account" sign-out link. The email claim requirement (dashboard: session-token custom claims or a `vibespace` JWT template) is surfaced as an actionable error.
+- `Auth` grew a `passwordEnabled` (vs `enabled`) split so Clerk-only instances behave: set-password needs no "current" when none exists, remove-password keeps auth on under Clerk, token store initializes without auth.json.
+- Helm: `clerk.publishableKey/allowedEmails` values → env. Verified by unit tests (signature/expiry/issuer/alg-none/unknown-kid attack cases) + route-level E2E (Clerk-only 401 gate, exchange→cookie→authed, allowlist 403, missing-claim hint).
+
 ## 2.102.0 — 2026-07-11
 
 **Onboarding for managed deployments (deployment queue ②)**

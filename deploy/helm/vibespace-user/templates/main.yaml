@@ -67,6 +67,14 @@ spec:
           env:
             - name: VIBESPACE_PASSWORD
               valueFrom: { secretKeyRef: { name: {{ $name }}, key: password } }
+            {{- with .Values.clerk.publishableKey }}
+            - name: VIBESPACE_CLERK_PUBLISHABLE_KEY
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.clerk.allowedEmails }}
+            - name: VIBESPACE_CLERK_ALLOWED_EMAILS
+              value: {{ . | quote }}
+            {{- end }}
             {{- with .Values.telemetry.forwardUrl }}
             - name: VIBESPACE_TELEMETRY_FORWARD_URL
               value: {{ . | quote }}

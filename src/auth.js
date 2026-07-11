@@ -18,10 +18,11 @@ const TOKEN_TTL_MS = 180 * 24 * 3600 * 1000; // 180 days
 const MAX_TOKENS = 200;
 
 class Auth {
-  constructor(dataDir) {
+  constructor(dataDir, { clerk = null } = {}) {
     this._file = path.join(dataDir, 'auth.json');
     this._state = null; // { passwordHash, salt, tokens: { token: {createdAt, ua} } }
     this._attempts = new Map(); // ip -> { fails, lockUntil }
+    this._clerk = clerk; // optional ClerkAuth (src/clerk-auth.js)
     this._load();
   }
 
@@ -36,7 +37,10 @@ class Auth {
     fs.renameSync(tmp, this._file);
   }
 
-  get enabled() { return !!(this._state && this._state.passwordHash); }
+  /** A configured password specifically (Clerk SSO alone also enables auth). */
+  get passwordEnabled() { return !!(this._state && this._state.passwordHash); }
+
+  get enabled() { return this.passwordEnabled || !!this._clerk?.enabled; }
 
   _hash(password, salt) {
     return crypto.scryptSync(String(password), Buffer.from(salt, 'hex'), 32).toString('hex');
@@ -70,7 +74,7 @@ class Auth {
 
   /** Export the password record for config transfer (hash + salt, never tokens). */
   exportPasswordRecord() {
-    if (!this.enabled) return null;
+    if (!this.passwordEnabled) return null;
     return { passwordHash: this._state.passwordHash, salt: this._state.salt };
   }
 
@@ -95,12 +99,12 @@ class Auth {
     if (this._state?.userSet) return {};
     const envPw = process.env.VIBESPACE_PASSWORD;
     if (envPw) {
-      if (!this.enabled || this._hash(envPw, this._state.salt) !== this._state.passwordHash) {
+      if (!this.passwordEnabled || this._hash(envPw, this._state.salt) !== this._state.passwordHash) {
         this.setPassword(envPw);
       }
       return {};
     }
-    if (this.enabled) return {};
+    if (this.passwordEnabled) return {};
     if (generateIfMissing) {
       const pw = crypto.randomBytes(9).toString('base64url'); // 12 chars, url-safe
       this.setPassword(pw);
@@ -110,7 +114,7 @@ class Auth {
   }
 
   verifyPassword(password) {
-    if (!this.enabled) return false;
+    if (!this.passwordEnabled) return false;
     const got = Buffer.from(this._hash(password, this._state.salt), 'hex');
     const want = Buffer.from(this._state.passwordHash, 'hex');
     return got.length === want.length && crypto.timingSafeEqual(got, want);
@@ -118,6 +122,8 @@ class Auth {
 
   issueToken(ua = '') {
     const token = crypto.randomBytes(24).toString('hex');
+    // Clerk-only instances may have no auth.json yet — tokens still persist
+    this._state = this._state || { tokens: {} };
     this._state.tokens = this._state.tokens || {};
     this._state.tokens[token] = { createdAt: Date.now(), ua: String(ua).slice(0, 120) };
     // Evict expired + cap total (oldest first)
@@ -173,7 +179,7 @@ class Auth {
     return (req, res, next) => {
       if (!this.enabled) return next();
       const p = req.path;
-      if (p === '/login' || p === '/api/login' || p === '/favicon.ico') return next();
+      if (p === '/login' || p === '/api/login' || p === '/api/clerk-login' || p === '/favicon.ico') return next();
       // WebDAV bridge authenticates with scoped Bearer mount tokens (webdav.js)
       if (p === '/dav' || p.startsWith('/dav/')) return next();
       // Agent endpoints authenticate with per-session tokens spawned into the
@@ -196,11 +202,45 @@ class Auth {
     };
   }
 
-  /** Register /login + /api/login + /api/logout on the app */
+  /** Issue a login token + set the cookie (shared by password + Clerk login). */
+  _grantSession(req, res) {
+    const token = this.issueToken(req.headers['user-agent']);
+    const secure = req.secure || req.headers['x-forwarded-proto'] === 'https' ? ' Secure;' : '';
+    res.setHeader('Set-Cookie', `${TOKEN_COOKIE}=${token}; HttpOnly; Path=/; Max-Age=${Math.floor(TOKEN_TTL_MS / 1000)}; SameSite=Lax;${secure}`);
+    return token;
+  }
+
+  /** Register /login + /api/login + /api/clerk-login + /api/logout on the app */
   registerRoutes(app) {
     app.get('/login', (req, res) => {
       if (!this.enabled || this.requestAuthed(req)) return res.redirect('/');
-      res.type('html').send(LOGIN_HTML);
+      res.type('html').send(loginHtml({ clerk: this._clerk, passwordEnabled: this.passwordEnabled }));
+    });
+
+    // Clerk SSO exchange: the login page verified the user on Clerk's hosted
+    // UI and posts the session JWT here. Verify signature/exp/iss vs Clerk's
+    // JWKS, gate on the email allowlist, then issue OUR cookie token — from
+    // here on the session is indistinguishable from a password login.
+    app.post('/api/clerk-login', express_json_lite, async (req, res) => {
+      if (!this._clerk?.enabled) return res.status(404).json({ error: 'SSO not configured' });
+      const ip = req.socket.remoteAddress || '?';
+      if (!this._rateCheck(ip)) return res.status(429).json({ error: 'Too many attempts — wait a minute' });
+      try {
+        const { email } = await this._clerk.verifyToken(String(req.body?.token || ''));
+        if (!email) {
+          return res.status(403).json({ error: 'Token has no email claim — add {"email": "{{user.primary_email_address}}"} to the Clerk session token custom claims (or a "vibespace" JWT template)' });
+        }
+        if (!this._clerk.emailAllowed(email)) {
+          this._rateFail(ip);
+          return res.status(403).json({ error: `${email} is not allowed on this instance` });
+        }
+        this._rateOk(ip);
+        this._grantSession(req, res);
+        res.json({ success: true, email });
+      } catch (e) {
+        this._rateFail(ip);
+        res.status(401).json({ error: `SSO verification failed: ${e.message}` });
+      }
     });
 
     app.post('/api/login', express_json_lite, (req, res) => {
@@ -213,9 +253,7 @@ class Auth {
         return res.status(401).json({ error: 'Wrong password' });
       }
       this._rateOk(ip);
-      const token = this.issueToken(req.headers['user-agent']);
-      const secure = req.secure || req.headers['x-forwarded-proto'] === 'https' ? ' Secure;' : '';
-      res.setHeader('Set-Cookie', `${TOKEN_COOKIE}=${token}; HttpOnly; Path=/; Max-Age=${Math.floor(TOKEN_TTL_MS / 1000)}; SameSite=Lax;${secure}`);
+      this._grantSession(req, res);
       res.json({ success: true });
     });
 
@@ -236,7 +274,9 @@ class Auth {
       const ip = req.socket.remoteAddress || '?';
       if (!this._rateCheck(ip)) return res.status(429).json({ error: 'Too many attempts — wait a minute' });
       const { current, newPassword, remove } = req.body || {};
-      if (this.enabled) {
+      // Gate on the PASSWORD being set (not this.enabled): a Clerk-only
+      // instance has no current password — its cookie-authed user may set one.
+      if (this.passwordEnabled) {
         if (!this.verifyPassword(String(current ?? ''))) {
           this._rateFail(ip);
           return res.status(401).json({ error: 'Current password is wrong' });
@@ -244,10 +284,10 @@ class Auth {
         this._rateOk(ip);
       }
       if (remove) {
-        if (!this.enabled) return res.json({ success: true, enabled: false });
+        if (!this.passwordEnabled) return res.json({ success: true, enabled: this.enabled });
         this.removePassword();
         res.setHeader('Set-Cookie', `${TOKEN_COOKIE}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax`);
-        return res.json({ success: true, enabled: false });
+        return res.json({ success: true, enabled: this.enabled }); // Clerk may keep auth on
       }
       const pw = String(newPassword ?? '');
       if (pw.length < 4) return res.status(400).json({ error: 'Password must be at least 4 characters' });
@@ -272,7 +312,21 @@ function express_json_lite(req, res, next) {
   });
 }
 
-const LOGIN_HTML = `<!DOCTYPE html>
+/**
+ * The login page. Password form when a password is set; Clerk SSO section
+ * when Clerk is configured (either alone or alongside the password). The
+ * ClerkJS bundle is served from the instance's own Clerk frontend-API host.
+ * SSO flow: button → Clerk hosted sign-in (redirect back here) → on load with
+ * a live Clerk session, auto-exchange the session JWT at /api/clerk-login →
+ * our cookie. A 403 (email not allowed / missing claim) offers an SSO
+ * sign-out link so the user can retry with a different account.
+ */
+function loginHtml({ clerk = null, passwordEnabled = true } = {}) {
+  const clerkOn = !!clerk?.enabled;
+  const sub = passwordEnabled
+    ? 'Enter the workspace password'
+    : 'Sign in with your organization account';
+  return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>VibeSpace — Login</title>
 <style>
@@ -289,28 +343,83 @@ const LOGIN_HTML = `<!DOCTYPE html>
   button { width:100%; margin-top:14px; padding:10px; font-size:14px; font-weight:600; border:none;
            border-radius:8px; background:#2dd4bf; color:#042f2a; cursor:pointer; }
   button:hover { background:#575af0; }
+  button.sso { background:#3b4252; color:#e2e5ea; }
+  button.sso:hover { background:#4c566a; }
+  .or { display:flex; align-items:center; gap:10px; margin:16px 0 2px; color:#5b6270; font-size:11px; }
+  .or::before, .or::after { content:''; flex:1; height:1px; background:#262c37; }
   .err { color:#f87171; font-size:12px; min-height:16px; margin-top:10px; }
+  .err a { color:#8a93a3; }
 </style></head>
 <body><form class="card" id="f">
   <h1>VibeSpace</h1>
-  <p>Enter the workspace password</p>
+  <p>${sub}</p>
+  ${passwordEnabled ? `
   <input type="password" id="pw" placeholder="Password" autofocus autocomplete="current-password">
-  <button type="submit">Sign in</button>
+  <button type="submit">Sign in</button>` : ''}
+  ${clerkOn ? `${passwordEnabled ? `<div class="or">or</div>` : ''}
+  <button type="button" class="sso" id="sso" disabled>Loading SSO…</button>` : ''}
   <div class="err" id="err"></div>
 </form>
 <script>
+  const err = document.getElementById('err');
   document.getElementById('f').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const err = document.getElementById('err');
+    const pwEl = document.getElementById('pw');
+    if (!pwEl) return;
     err.textContent = '';
     try {
       const r = await fetch('/api/login', { method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ password: document.getElementById('pw').value }) });
+        body: JSON.stringify({ password: pwEl.value }) });
       const d = await r.json().catch(() => ({}));
       if (r.ok) location.href = '/';
       else err.textContent = d.error || 'Login failed';
     } catch { err.textContent = 'Network error'; }
   });
+  ${clerkOn ? `
+  (() => {
+    const PK = ${JSON.stringify(clerk.publishableKey)};
+    const ssoBtn = document.getElementById('sso');
+    const s = document.createElement('script');
+    s.src = ${JSON.stringify(`https://${clerk.frontendApi}/npm/@clerk/clerk-js@5/dist/clerk.browser.js`)};
+    s.async = true;
+    s.onerror = () => { ssoBtn.textContent = 'SSO unavailable'; };
+    s.onload = async () => {
+      try {
+        const clerk = new window.Clerk(PK);
+        await clerk.load({ standardBrowser: true });
+        const exchange = async () => {
+          ssoBtn.disabled = true;
+          ssoBtn.textContent = 'Signing in…';
+          let token = null;
+          // Prefer a "vibespace" JWT template (guaranteed email claim); fall
+          // back to the plain session token (works when the dashboard adds
+          // email to the session token's custom claims).
+          try { token = await clerk.session.getToken({ template: 'vibespace' }); } catch {}
+          if (!token) token = await clerk.session.getToken();
+          const r = await fetch('/api/clerk-login', { method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ token }) });
+          const d = await r.json().catch(() => ({}));
+          if (r.ok) { location.href = '/'; return; }
+          ssoBtn.disabled = false;
+          ssoBtn.textContent = 'Sign in with SSO';
+          err.innerHTML = '';
+          err.appendChild(document.createTextNode(d.error || 'SSO failed'));
+          const out = document.createElement('a');
+          out.href = '#'; out.textContent = ' Switch account';
+          out.onclick = (e) => { e.preventDefault(); clerk.signOut({ redirectUrl: location.href }); };
+          err.appendChild(out);
+        };
+        if (clerk.user) { exchange(); }
+        else {
+          ssoBtn.disabled = false;
+          ssoBtn.textContent = 'Sign in with SSO';
+          ssoBtn.onclick = () => clerk.redirectToSignIn({ redirectUrl: location.href });
+        }
+      } catch (e) { ssoBtn.textContent = 'SSO unavailable'; err.textContent = String(e.message || e); }
+    };
+    document.head.appendChild(s);
+  })();` : ''}
 </script></body></html>`;
+}
 
 module.exports = { Auth, TOKEN_COOKIE };

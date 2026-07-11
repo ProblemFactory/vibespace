@@ -314,9 +314,12 @@ const HOST = process.env.HOST || '0.0.0.0';
 const app = express();
 const server = http.createServer(app);
 
-// ── Optional password auth (VIBESPACE_PASSWORD env / data/auth.json) ──
+// ── Optional password auth (VIBESPACE_PASSWORD env / data/auth.json) +
+//    optional Clerk SSO (VIBESPACE_CLERK_PUBLISHABLE_KEY — src/clerk-auth.js) ──
 const { Auth } = require('./src/auth');
-const auth = new Auth(path.join(__dirname, 'data'));
+const { ClerkAuth } = require('./src/clerk-auth');
+const clerkAuth = new ClerkAuth();
+const auth = new Auth(path.join(__dirname, 'data'), { clerk: clerkAuth });
 {
   const { generated } = auth.ensurePassword({ generateIfMissing: process.env.VIBESPACE_GENERATE_PASSWORD === '1' });
   if (generated) {
@@ -326,7 +329,8 @@ const auth = new Auth(path.join(__dirname, 'data'));
     console.log('  ║   VIBESPACE_PASSWORD to choose your own)        ║');
     console.log('  ╚════════════════════════════════════════════════╝\n');
   }
-  if (auth.enabled) console.log('  Password auth: ENABLED');
+  if (auth.passwordEnabled) console.log('  Password auth: ENABLED');
+  if (clerkAuth.enabled) console.log(`  Clerk SSO: ENABLED (${clerkAuth.frontendApi})`);
   // getter — auth can be enabled/disabled at runtime via /api/auth/set-password
   Object.defineProperty(app.locals, 'authEnabled', { get: () => auth.enabled });
 }
