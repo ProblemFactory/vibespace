@@ -38,6 +38,17 @@ resources:
 nodeSelector: {}
 tolerations: []
 
+# Clerk SSO (optional): setting publishableKey puts the instance behind Clerk
+# sign-in (password auth still works alongside if set). allowedEmails is a
+# comma list — "@example.com" entries allow a whole domain; EMPTY rejects
+# everyone (each per-user instance must name its owner). The Clerk session
+# token must carry an email claim — in the Clerk dashboard add
+#   {"email": "{{user.primary_email_address}}"}
+# to Sessions → Customize session token (or a JWT template named "vibespace").
+clerk:
+  publishableKey: ""
+  allowedEmails: ""
+
 # Fleet telemetry (optional). forwardUrl/forwardToken make THIS instance ship
 # its anonymous diagnostics batches (error names/stacks/metrics — never
 # content) to a central collector; ingestToken turns THIS instance INTO the
