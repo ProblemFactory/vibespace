@@ -764,7 +764,25 @@ class Sidebar {
     if (sc && savedScroll) { sc.scrollTop = savedScroll; requestAnimationFrame(() => { sc.scrollTop = savedScroll; }); }
   }
 
+  // EVERY render preserves the list scroll (2.106.1, real report: "sidebar 不断
+  // 被刷新, scroll 位置被破坏"): broadcast-triggered re-renders (tasks-updated /
+  // session-status-updated / user-state-updated — agents' vibespace-task and
+  // vibespace-status calls fire these constantly) reset the scroll to top;
+  // only the 5s-poll digest path used to preserve it. A view change (tab /
+  // board sub-view / mobile drill-down) resets deliberately — different content.
   _render() {
+    const sc = this.listEl?.closest('.sidebar-section');
+    const view = `${this._activeTab}:${this._boardView || ''}:${JSON.stringify(this._mobileDrilldown || null)}`;
+    const keep = sc && this._lastRenderView === view ? sc.scrollTop : 0;
+    this._renderInner();
+    this._lastRenderView = view;
+    if (sc && keep) {
+      sc.scrollTop = keep;
+      requestAnimationFrame(() => { if (Math.abs(sc.scrollTop - keep) > 2) sc.scrollTop = keep; });
+    }
+  }
+
+  _renderInner() {
     const f = (document.getElementById('session-filter')?.value || '').toLowerCase();
     let sessions = this._allSessions;
 

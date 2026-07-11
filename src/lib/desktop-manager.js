@@ -500,6 +500,20 @@ export class DesktopManager {
       this._adaptTaskbarSize(saved);
     }
 
+    // Double-click = reset to the CSS default: clears the inline height, the
+    // persisted override AND the adaptive size vars. The first drag used to
+    // permanently inflate item sizing — the JS-derived vars don't equal the
+    // CSS defaults even at the same 44px height — with no way back (real
+    // report: "margin一resize就变大再也回不去").
+    handle.addEventListener('dblclick', () => {
+      taskbar.style.height = '';
+      localStorage.removeItem('taskbarHeight');
+      this._clearTaskbarSizeVars();
+      this.app.wm._reflowWindows?.();
+      this.app.layoutManager.scheduleAutoSave();
+    });
+    handle.title = 'Drag to resize · double-click to reset';
+
     handle.addEventListener('mousedown', (e) => {
       e.preventDefault();
       const startY = e.clientY;
@@ -537,6 +551,15 @@ export class DesktopManager {
   }
 
   /** Adapt desktop preview and taskbar element sizes to current height */
+  _clearTaskbarSizeVars() {
+    const root = document.documentElement;
+    for (const v of ['--desktop-preview-h', '--desktop-preview-w', '--desktop-label-size',
+      '--taskbar-icon-size', '--taskbar-icon-scale', '--taskbar-title-size',
+      '--taskbar-sub-size', '--usage-pie-size', '--taskbar-item-pad']) {
+      root.style.removeProperty(v);
+    }
+  }
+
   _adaptTaskbarSize(h) {
     const root = document.documentElement;
     // Preview: ratio of taskbar height, rest for label. Default 70%.
