@@ -1,5 +1,6 @@
 import { escHtml, showToast, showConfirmDialog, fetchJson, createModalShell } from './utils.js';
 import { t, setLang, getLangPref } from './i18n.js';
+import { THEMES, BUILTIN_THEMES } from './themes.js';
 
 /**
  * App setup/config flows mixin — the onboarding wizard, Backup & migrate
@@ -129,10 +130,20 @@ export function installSetupFlows(App) {
         const lang = getLangPref();
         const langChip = (code, label) =>
           `<button class="ob-lang${lang === code ? ' active' : ''}" data-lang="${code}">${label}</button>`;
+        // Theme chips: applied LIVE (themeManager.apply persists per-device),
+        // no reload — the wizard itself recolors as immediate feedback.
+        const curTheme = this.themeManager?.current || 'dark';
+        const themeChip = (name) => {
+          const term = THEMES[name]?.terminal || {};
+          const label = name.charAt(0).toUpperCase() + name.slice(1); // brand-ish names, untranslated
+          return `<button class="ob-lang ob-theme${curTheme === name ? ' active' : ''}" data-theme-name="${name}">
+            <i style="background:${term.background || '#222'}"></i>${label}</button>`;
+        };
         content.innerHTML = `
           <h1>${t('Welcome to VibeSpace')}</h1>
           <p class="ob-sub">${t('Your workspace for coding agents')}</p>
           <div class="ob-langs">${langChip('auto', t('Auto'))}${langChip('en', 'English')}${langChip('zh', '中文')}${langChip('ja', '日本語')}</div>
+          <div class="ob-langs ob-themes">${[...BUILTIN_THEMES].map(themeChip).join('')}</div>
           <div class="ob-points">
             <div class="ob-point"><b>${t('Sessions that never die')}</b><span>${t('Agents keep running through restarts, refreshes, and network drops — reattach from any device.')}</span></div>
             <div class="ob-point"><b>${t('A real window manager')}</b><span>${t('Tile agent chats, terminals, files and editors across virtual desktops.')}</span></div>
@@ -145,8 +156,11 @@ export function installSetupFlows(App) {
           <div class="ob-dots">${dots}</div>`;
         content.querySelector('#ob-next').onclick = () => { step = 1; render(); };
         content.querySelector('#ob-skip').onclick = done;
-        content.querySelectorAll('.ob-lang').forEach((b) => {
+        content.querySelectorAll('.ob-lang:not(.ob-theme)').forEach((b) => {
           b.onclick = () => { if (b.dataset.lang !== getLangPref()) setLang(b.dataset.lang); };
+        });
+        content.querySelectorAll('.ob-theme').forEach((b) => {
+          b.onclick = () => { this.themeManager?.apply(b.dataset.themeName); render(); };
         });
       } else if (step === 1) {
         content.innerHTML = `
