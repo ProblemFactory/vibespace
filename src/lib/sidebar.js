@@ -844,6 +844,13 @@ class Sidebar {
 
     this.listEl.innerHTML = '';
 
+    // Remote tab renders machines + storage — it doesn't depend on the session
+    // list AT ALL. Dispatch before the new-session card and the no-sessions
+    // early-return: with ZERO sessions (fresh managed instance) that return
+    // fired first and the Remote tab showed the Folders empty state instead
+    // of the mounts panel (real report: "remote 功能直接坏了").
+    if (this._activeTab === 'mounts') { this._renderMounts(); return; }
+
     // "New Session" card at the top — NOT on the Tasks tab (it has its own
     // "+ New Task Group" card; a bare New Session there is meaningless).
     if (this._activeTab !== 'tasks') {
