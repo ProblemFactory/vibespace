@@ -124,7 +124,7 @@ class ChatView {
       backend: winInfo.backend || winInfo.titleMeta?.backend || 'claude',
       compact: this._compact,
       messageList: this._messageList,
-      onPermissionResolve: () => this._hideTyping(),
+      onPermissionResolve: () => { this._hideTyping(); this._updateRuns(); },
       onFork: (uuid, msg) => this._forkFromMessage(uuid, msg),
     });
 
@@ -452,7 +452,11 @@ class ChatView {
           for (const [id, el] of this._elements) {
             if (el.dataset?.toolId === toolUseId || el.querySelector(`[data-tool-id="${toolUseId}"]`)) {
               const msg = this._messages.find(m => m.id === id);
-              if (msg && !msg.permission) {
+              // Skip completed/errored tools — a tool_result means the
+              // permission was answered; injecting an unresolved overlay
+              // here resurrects an already-answered prompt (defense against
+              // a stale server-side pending list).
+              if (msg && !msg.permission && msg.status !== 'complete' && msg.status !== 'error') {
                 msg.permission = { requestId: cr.request_id, toolName: cr.request?.tool_name, input: cr.request?.input || {}, suggestions: cr.request?.permission_suggestions || [], resolved: null };
                 this._renderers.renderPermissionOverlay(el, msg);
               }
@@ -1206,6 +1210,11 @@ class ChatView {
     if (fields.permission) {
       const el = this._elements.get(id);
       if (el) this._renderers.renderPermissionOverlay(el, msg);
+      // The overlay mutates the card IN PLACE — no childList change, so the
+      // runs observer never fires. Re-evaluate directly: an unresolved
+      // permission must pop its card out of a collapsed run (and a resolve
+      // lets it fold back in).
+      this._updateRuns();
     }
 
     // Task info update — delegate to status bar
@@ -1875,6 +1884,11 @@ class ChatView {
         if (hooksHidden && el.classList.contains('chat-msg-hook')) return 'skip';
         const m = el._rawMsg;
         if (!m) return null;
+        // A card waiting for the user's Allow/Deny (or an AskUserQuestion
+        // answer) must stay visible — folding it hides the approval buttons
+        // and the turn stalls unnoticed (real report). Returning null also
+        // BREAKS the run so the surrounding fold can't swallow it.
+        if (m.permission && !m.permission.resolved) return null;
         if (el.classList.contains('chat-msg-tool-result')) {
           const b = m.content?.[0];
           // pending/running Bash collapses too (user directive — the bottom

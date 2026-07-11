@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.109.5 — 2026-07-11
+
+Two chat-card visibility bugs (both user-reported):
+
+- **A tool card waiting for permission approval no longer folds into a run-collapse group.** The thinking/Bash run fold used to swallow a Bash card whose Allow/Deny buttons were pending — the turn stalled with no visible prompt. An unresolved permission now breaks the run and stays visible; it folds back after resolve. (The permission overlay is injected in place, which the runs MutationObserver can't see — the permission edit path re-evaluates the fold directly.)
+- **An answered AskUserQuestion questionnaire can no longer resurrect as awaiting-input.** Three cooperating gaps: (1) the `control_response` only ever lived in server memory (it goes to claude's stdin; the wrapper's `.buf` tees stdout only) so a restart-rebuilt history was request-without-response — the normalizer's tool_result merge now auto-resolves an unresolved permission (a result proves the question was answered; is_error ⇒ denied); (2) `activePendingPermissions()` judged "resolved" from only the last 100 records — a session that kept working pushed the answer out of the window and every attach re-advertised the stale request (same class as the old chatStatus 200-record scan bug; now scans all records); (3) the client-side attach injection now skips tools that already completed. Verified against the real stuck session's JSONL+buffer through the actual rebuild pipeline.
+
+## 2.109.4 — 2026-07-11
+
+- **Env-provisioned My storage unmounted on first boot**: `mounts.pathGuard` was mis-nested INSIDE the broadcast callback, so a construction-time broadcast (env-import add→_notify→broadcast) hit the mounts-const TDZ and threw out of `add()` before it set desired=mounted — the root cause behind the cephfs/S3 first-boot glitch.
+- Helm: nil-safe s3/cephfs/fuse conditionals (`--reuse-values` on an instance without an s3 block nil-pointered).
+
+## 2.109.3 — 2026-07-11
+
+- **Env-provisioned CephFS My storage self-heals to desired=mounted on every boot** — a first-import race / pre-cephfs-code boot could leave it permanently unmounted.
+
 ## 2.109.2 — 2026-07-11
 
 - **CephFS health-probe tolerance**: the native cephfs mount gets a longer probe window (12s — an MDS session on a cold mount can spike a first `ls`) and requires TWO consecutive hangs before the watchdog auto-disconnects a trusted deployment mount (a single blip won't tear it down).
