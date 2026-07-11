@@ -14,6 +14,8 @@ const MI = {
   importL: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8M5 7l3 3 3-3M3 10v3h10v-3"/></svg>',
   link: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 9.5l3-3M5 8L3.5 9.5a2.5 2.5 0 003.5 3.5L8.5 11.5M8 5l1.5-1.5a2.5 2.5 0 013.5 3.5L11.5 8.5"/></svg>',
   plus: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>',
+  pencil: '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 1.5l3 3L5 14H2v-3z"/></svg>',
+  copy: '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 5.5v-2a1 1 0 00-1-1h-6a1 1 0 00-1 1v6a1 1 0 001 1h2"/></svg>',
   server: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2.5" width="12" height="4.5" rx="1"/><rect x="2" y="9" width="12" height="4.5" rx="1"/><path d="M4.5 4.75h.01M4.5 11.25h.01"/></svg>',
   bolt: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 1.5L3.5 9h3l-1 5.5L10.5 7h-3l1-5.5z"/></svg>',
   wrench: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2.5a3.5 3.5 0 00-3.3 4.6L2.5 10.8a1.4 1.4 0 002 2l3.7-3.7a3.5 3.5 0 004.5-4.4L10.5 7 9 5.5l2.3-2.2a3.5 3.5 0 00-1.8-.8z"/></svg>',
@@ -243,10 +245,21 @@ export function installSidebarMounts(Sidebar) {
         shareBtn.onclick = (e) => { e.stopPropagation(); this._showMintShareDialog(m); };
         actions.append(shareBtn);
       }
-      actions.append(ibtn(MI.cross, 'Remove mount (nothing is deleted remotely)', async () => {
-        const ok = await showConfirmDialog({ title: `Remove "${m.name}"?`, message: 'The mount record and local mountpoint go away. Nothing is deleted remotely.', confirmText: 'Remove', danger: true });
-        if (ok) await api(`/api/mounts/${m.id}`, { method: 'DELETE' });
-      }, 'mounts-icon-danger'));
+      actions.append(
+        ibtn(MI.pencil, 'Edit connection (path, credentials, name)', () => { this._showEditMountDialog(m); }),
+        ibtn(MI.copy, 'New mount from this connection (same credentials, different bucket/path)', () => { this._showDuplicateMountDialog(m); }),
+      );
+      // Env-provisioned personal storage is deployment-managed: no delete
+      // (a changed provisioning re-imports it) — edit/rename/unmount only.
+      if (m.origin !== 'my-storage') {
+        actions.append(ibtn(MI.cross, 'Remove mount (nothing is deleted remotely)', async () => {
+          const ok = await showConfirmDialog({ title: `Remove "${m.name}"?`, message: 'The mount record and local mountpoint go away. Nothing is deleted remotely.', confirmText: 'Remove', danger: true });
+          if (ok) {
+            const r = await api(`/api/mounts/${m.id}`, { method: 'DELETE' });
+            if (r?.error) throw new Error(r.error);
+          }
+        }, 'mounts-icon-danger'));
+      }
       top.appendChild(actions);
       const pathEl = document.createElement('div');
       pathEl.className = 'mounts-path';
@@ -825,6 +838,83 @@ export function installSidebarMounts(Sidebar) {
     },
 
     // Mint an S3 share link FROM a specific mount (uses that mount's own creds).
+    // ── Edit / derive (2.107.0, user request: FishR2-class mounts needed a
+    // bucket/path fix with no edit UI; one credential → many mounts) ──
+    _mountEditFields(m) {
+      // [key, label, placeholder, prefillValue] per type; secret fields blank = keep
+      const type = m.type || 's3';
+      if (type === 's3') return [
+        ['endpoint', 'Endpoint', 'https://…', m.endpoint || ''],
+        ['bucket', 'Bucket', 'bucket-name', m.bucket || ''],
+        ['prefix', 'Prefix (optional)', 'sub/path', m.prefix || ''],
+        ['accessKey', 'Access key', m.accessKeyTail ? `…${m.accessKeyTail} (keep)` : '', ''],
+        ['secretKey', 'Secret key (blank = keep)', '••••••••', ''],
+      ];
+      if (type === 'rclone') return [
+        ['remotePath', 'Remote path (bucket[/prefix])', 'bucket-name/optional/prefix', m.remotePath || ''],
+      ];
+      if (type === 'drive') return [
+        ['driveFolder', 'Folder path (optional)', 'My Folder/sub', m.driveFolder || ''],
+      ];
+      return [];
+    },
+
+    _showEditMountDialog(m) {
+      const { body, close } = createModalShell({ id: 'mount-edit-dialog', title: `${tr('Edit')} "${m.name}"`, bodyClass: 'mounts-dialog-body', escapeToClose: true });
+      const form = document.createElement('form');
+      form.className = 'mounts-form';
+      const fields = [['name', tr('Name'), '', m.name], ...this._mountEditFields(m)];
+      form.innerHTML = fields.map(([k, label, ph, val]) =>
+        `<label>${escHtml(label)}<input name="${k}" value="${escHtml(val)}" placeholder="${escHtml(ph)}" autocomplete="off"></label>`).join('')
+        + `<div class="mounts-note">${tr('Applied on save — a connected mount reconnects with the new settings.')}</div>
+           <div class="cfg-err"></div>
+           <div class="dialog-actions"><button type="submit" class="btn-create">${tr('Save')}</button></div>`;
+      body.appendChild(form);
+      const err = form.querySelector('.cfg-err');
+      form.onsubmit = async (e) => {
+        e.preventDefault(); err.textContent = '';
+        const patch = {};
+        for (const [k, , , orig] of fields) {
+          const v = form.querySelector(`[name="${k}"]`).value;
+          if (k === 'secretKey' || k === 'accessKey') { if (v) patch[k] = v; }
+          else if (v !== orig) patch[k] = v;
+        }
+        if (!Object.keys(patch).length) { close(); return; }
+        const r = await api(`/api/mounts/${m.id}`, { method: 'PATCH', body: JSON.stringify(patch), headers: { 'Content-Type': 'application/json' } });
+        if (r?.error) { err.textContent = r.error; return; }
+        close(); this._renderMounts();
+      };
+    },
+
+    _showDuplicateMountDialog(m) {
+      const { body, close } = createModalShell({ id: 'mount-dup-dialog', title: tr('New mount from "{name}"', { name: m.name }), bodyClass: 'mounts-dialog-body', escapeToClose: true });
+      const form = document.createElement('form');
+      form.className = 'mounts-form';
+      const type = m.type || 's3';
+      const pathField = type === 's3' ? ['bucket', tr('Bucket'), m.bucket || '']
+        : type === 'rclone' ? ['remotePath', tr('Remote path (bucket[/prefix])'), m.remotePath || '']
+        : type === 'drive' ? ['driveFolder', tr('Folder path'), m.driveFolder || '']
+        : null;
+      form.innerHTML = `
+        <label>${tr('Name')}<input name="name" value="${escHtml(m.name)}-2" autocomplete="off"></label>
+        ${pathField ? `<label>${escHtml(pathField[1])}<input name="${pathField[0]}" value="${escHtml(pathField[2])}" autocomplete="off"></label>` : ''}
+        ${type === 's3' ? `<label>${tr('Prefix (optional)')}<input name="prefix" value="${escHtml(m.prefix || '')}" autocomplete="off"></label>` : ''}
+        <div class="mounts-note">${tr('Same credentials, different location — one connection can back any number of mounts.')}</div>
+        <div class="cfg-err"></div>
+        <div class="dialog-actions"><button type="submit" class="btn-create">${tr('Create & connect')}</button></div>`;
+      body.appendChild(form);
+      const err = form.querySelector('.cfg-err');
+      form.onsubmit = async (e) => {
+        e.preventDefault(); err.textContent = '';
+        const payload = { name: form.querySelector('[name="name"]').value.trim() };
+        for (const el of form.querySelectorAll('input:not([name="name"])')) payload[el.name] = el.value;
+        const r = await api(`/api/mounts/${m.id}/duplicate`, { method: 'POST', body: JSON.stringify(payload), headers: { 'Content-Type': 'application/json' } });
+        if (r?.error) { err.textContent = r.error; return; }
+        if (r?.id) await api(`/api/mounts/${r.id}/mount`, { method: 'POST' }).catch(() => {});
+        close(); this._renderMounts();
+      };
+    },
+
     _showMintShareDialog(m) {
       const under = `${m.bucket}${m.prefix ? '/' + m.prefix : ''}`;
       const mc = this._mountsData?.mcAvailable;

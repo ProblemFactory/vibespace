@@ -239,14 +239,24 @@ class Sidebar {
 
   highlightSession(sessionId) {
     this.listEl.querySelectorAll('.session-item-card').forEach(c => c.classList.remove('highlighted', 'highlight-flash'));
+    // Only a focus CHANGE may expand folders / scroll the card into view.
+    // This runs repeatedly (every focus notify + broadcast re-render) and the
+    // old unconditional scrollIntoView dragged the list back to the focused
+    // card while the user browsed OTHER cards — the "sidebar keeps jumping
+    // back" mystery (user-diagnosed). While the pointer is inside the sidebar
+    // the user owns the scroll — never yank it.
+    const isNew = this._lastHighlightId !== sessionId;
+    this._lastHighlightId = sessionId;
     if (!sessionId) return;
+    const userBrowsing = !!this.el?.matches?.(':hover');
+    const mayScroll = isNew && !userBrowsing;
 
     // The target card may be inside a COLLAPSED folder/group (CSS-hidden) or a
     // LAZY folder whose cards haven't rendered yet — in both cases a plain
     // scroll finds nothing or a hidden node. First locate the containing
     // folder-group via its stored lazy item list (present even before render),
     // expand it (persisting so it stays open), and force-render its cards.
-    for (const group of this.listEl.querySelectorAll('.folder-group')) {
+    for (const group of mayScroll ? this.listEl.querySelectorAll('.folder-group') : []) {
       const sessionsDiv = group.querySelector('.folder-sessions');
       const items = sessionsDiv?._lazyItems;
       if (!items || !items.some(s => s.sessionId === sessionId)) continue;
@@ -274,9 +284,11 @@ class Sidebar {
     for (const card of this.listEl.querySelectorAll('.session-item-card')) {
       if (card._sessionId === sessionId) {
         card.classList.add('highlighted');
-        requestAnimationFrame(() => card.classList.add('highlight-flash'));
-        if (card.scrollIntoViewIfNeeded) card.scrollIntoViewIfNeeded(false);
-        else card.scrollIntoView({ block: 'nearest' });
+        if (isNew) requestAnimationFrame(() => card.classList.add('highlight-flash'));
+        if (mayScroll) {
+          if (card.scrollIntoViewIfNeeded) card.scrollIntoViewIfNeeded(false);
+          else card.scrollIntoView({ block: 'nearest' });
+        }
         break;
       }
     }

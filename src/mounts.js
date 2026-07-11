@@ -330,6 +330,8 @@ class MountManager {
     return this._state.mounts.map(m => ({
       id: m.id, name: m.name, type: m.type || 's3', origin: m.origin, mode: m.mode,
       endpoint: m.endpoint, bucket: m.bucket, prefix: m.prefix,
+      rcloneType: m.rcloneType, remotePath: m.remotePath, driveFolder: m.driveFolder,
+      accessKeyTail: m.accessKey ? String(m.accessKey).slice(-4) : undefined,
       source: this._sourceLabel(m),
       canShare: this.canShareFromMount(m),
       path: this.pathOf(m), desired: m.desired, expiresAt: m.expiresAt || null,
@@ -444,11 +446,108 @@ class MountManager {
 
   async remove(id) {
     const m = this._get(id);
+    // Env-provisioned personal storage is managed by the DEPLOYMENT (user
+    // directive): deleting it in-app is confusing (a changed provisioning
+    // re-imports it) — rename/edit instead. Unmount still works.
+    if (m.origin === 'my-storage') {
+      throw new Error('This storage is provisioned by your deployment and can\'t be deleted here — you can rename or edit it, and Unmount disconnects it.');
+    }
     if (this.isMounted(m)) await this.unmount(id);
     this._state.mounts = this._state.mounts.filter(x => x.id !== id);
     this._errors.delete(id);
     this._save();
     this._notify();
+  }
+
+  /**
+   * Edit a mount's connection settings. Empty/undefined secret fields keep
+   * the stored value. A mounted target is unmounted, patched, and remounted.
+   * Renaming is refused while a bridge share references the mount's path
+   * (the share's chroot would silently break — user-flagged risk).
+   */
+  async update(id, patch = {}) {
+    const m = this._get(id);
+    const wasMounted = this.isMounted(m) || m.desired === 'mounted';
+    if (patch.name && patch.name !== m.name) {
+      if (this._state.mounts.some(x => x.id !== id && x.name === patch.name)) throw new Error('A mount with that name exists');
+      const myPath = this.pathOf(m);
+      // pathGuard is injected by the server (bridge-share tokens live in
+      // webdav.js's MountTokens — their chroot roots are filesystem paths
+      // that a rename would silently break; user-flagged risk).
+      if (this.pathGuard && this.pathGuard(myPath)) {
+        throw new Error('A shared link points into this mount — revoke it before renaming (the share path would break).');
+      }
+    }
+    if (this.isMounted(m)) await this.unmount(id);
+    if (patch.name) m.name = String(patch.name).slice(0, 60);
+    if (patch.mode === 'ro' || patch.mode === 'rw') m.mode = patch.mode;
+    const setIf = (k, transform = (v) => String(v)) => { if (patch[k] !== undefined && patch[k] !== '') m[k] = transform(patch[k]); };
+    switch (m.type || 's3') {
+      case 's3':
+        setIf('endpoint'); setIf('bucket');
+        if (patch.prefix !== undefined) m.prefix = String(patch.prefix || '').replace(/^\/+|\/+$/g, '');
+        setIf('accessKey');
+        if (patch.secretKey) m.secretKeyEnc = this._enc(String(patch.secretKey));
+        if (patch.sessionToken) m.sessionTokenEnc = this._enc(String(patch.sessionToken));
+        break;
+      case 'rclone':
+        setIf('rcloneType', (v) => String(v).trim());
+        if (patch.remotePath !== undefined) m.remotePath = String(patch.remotePath || '').replace(/^\/+/, '');
+        if (patch.params && typeof patch.params === 'object') {
+          for (const [k, v] of Object.entries(patch.params)) {
+            if (v === '' || v == null) delete m.paramsEnc[k];
+            else m.paramsEnc[k] = this._enc(String(v));
+          }
+        }
+        break;
+      case 'drive':
+        if (patch.driveFolder !== undefined) m.driveFolder = String(patch.driveFolder || '').replace(/^\/+|\/+$/g, '');
+        if (patch.token) {
+          let tok = String(patch.token).trim();
+          const jm = tok.match(/\{[\s\S]*\}/); if (jm) tok = jm[0];
+          JSON.parse(tok); // validate
+          m.tokenEnc = this._enc(tok);
+        }
+        break;
+      case 'webdav': case 'sftp': case 'vibespace':
+        setIf('url'); setIf('host'); setIf('user'); setIf('path');
+        if (patch.pass) m.passEnc = this._enc(String(patch.pass));
+        if (patch.token) m.tokenEnc = this._enc(String(patch.token));
+        break;
+    }
+    this._save();
+    this._notify();
+    if (wasMounted) { try { await this.mount(id); } catch {} }
+    return m.id;
+  }
+
+  /**
+   * Derive a NEW mount from an existing one's connection (same credentials,
+   * different bucket/path/prefix) — one imported R2/S3 credential can back
+   * any number of mounts (user request). Encrypted fields copy verbatim
+   * (same instance key).
+   */
+  async duplicate(id, { name, ...overrides } = {}) {
+    const src = this._get(id);
+    if (!name) throw new Error('name required');
+    if (this._state.mounts.some(x => x.name === name)) throw new Error('A mount with that name exists');
+    const copy = JSON.parse(JSON.stringify(src));
+    copy.id = 'mnt-' + crypto.randomBytes(5).toString('hex');
+    copy.name = String(name).slice(0, 60);
+    copy.origin = 'manual';
+    copy.createdAt = Date.now();
+    copy.desired = 'unmounted';
+    copy.customPath = null;
+    this._state.mounts.push(copy);
+    this._save();
+    try {
+      await this.update(copy.id, overrides); // reuse the per-type field logic
+    } catch (e) {
+      this._state.mounts = this._state.mounts.filter(x => x.id !== copy.id);
+      this._save(); this._notify();
+      throw e;
+    }
+    return copy.id;
   }
 
   _get(id) {
