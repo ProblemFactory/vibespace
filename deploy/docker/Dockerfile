@@ -29,6 +29,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # unavailable (couldn't launch at all) and /dev/shm is tiny. Acceptable for a
 # single-user container. Debian chromium sources /etc/chromium.d/*.
 RUN mkdir -p /etc/chromium.d && printf '%s\n' 'export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-sandbox --disable-dev-shm-usage"' > /etc/chromium.d/99-container
+# fuse mounts as the non-root user: fusermount3 must be SETUID ROOT — the
+# standard desktop-Linux mechanism. In-container capability grants don't
+# survive a non-root execve (CapEff stays 0), so setuid is the only reliable
+# path (pod still needs the /dev/fuse device + default allowPrivilegeEscalation).
+# fusermount also wants /etc/mtab.
+RUN chmod u+s /usr/bin/fusermount3 && ln -sf /proc/self/mounts /etc/mtab
 
 # Agent CLIs + mc (share-credential minting). bypassPermissions is blocked for
 # root → the app runs as the non-root `vibe` user below.
