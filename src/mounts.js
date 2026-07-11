@@ -987,7 +987,8 @@ class MountManager {
     // deployed instance — /login took 130s, readiness failed, pod dropped
     // from the Service). Probe in a CHILD process (never node fs), and cut
     // the mount loose instead of serving a folder that would wedge us.
-    if (await this._probeMountpointHung(mp)) {
+    const health = await this._probeMountpoint(mp);
+    if (health === 'hung') {
       this.blockPath(mp, 90000); // keep failing fast while teardown + stragglers drain
       this._errors.set(id, 'storage connected but IO hangs (host unreachable from this machine?) — disconnected to protect the server');
       m.desired = 'unmounted';
@@ -998,6 +999,15 @@ class MountManager {
       return false;
     }
     this.unblockPath(mp);
+    // Revoke/expiry surfacing: a fuse mount to a REVOKED share still "mounts"
+    // (and a cached mountpoint `ls` lies about it), so probe the BACKEND fresh
+    // — it re-auths and returns 401/403. Stay mounted (may recover; the user
+    // decides) but surface the error (user-flagged: "revoke了token接受方如何提示").
+    if (this._revocable(m) && (await this._probeBackendAccess(m)) === 'denied') {
+      this._errors.set(id, this._accessErrorMsg(m));
+    } else if (health === 'error') {
+      this._errors.set(id, this._accessErrorMsg(m));
+    }
     this._notify();
     return this.isMounted(m);
   }
@@ -1021,14 +1031,49 @@ class MountManager {
     return false;
   }
 
-  /** True when listing the mountpoint HANGS (child `ls`, 6s guard). An error
-   *  exit (EIO etc.) is RESPONSIVE — only a stuck child counts. */
-  _probeMountpointHung(mp, timeoutMs = 6000) {
+  /** Health of a mountpoint via a child `ls` (never node fs — that's what
+   *  wedges the threadpool). Returns:
+   *   'hung'  — the child timed out (unreachable backend; the dangerous case)
+   *   'error' — non-zero exit (EIO / access denied — a REVOKED or expired
+   *             share, changed creds; responsive but broken → surface it)
+   *   'ok'    — listed fine.  */
+  _probeMountpoint(mp, timeoutMs = 6000) {
     return new Promise((resolve) => {
       const c = spawn('ls', [mp], { stdio: 'ignore' });
-      const t = setTimeout(() => { try { c.kill('SIGKILL'); } catch {} resolve(true); }, timeoutMs);
-      c.on('exit', () => { clearTimeout(t); resolve(false); });
-      c.on('error', () => { clearTimeout(t); resolve(false); });
+      const t = setTimeout(() => { try { c.kill('SIGKILL'); } catch {} resolve('hung'); }, timeoutMs);
+      c.on('exit', (code) => { clearTimeout(t); resolve(code === 0 ? 'ok' : 'error'); });
+      c.on('error', () => { clearTimeout(t); resolve('error'); });
+    });
+  }
+  /** Back-compat: true only when the mountpoint HANGS. */
+  async _probeMountpointHung(mp, timeoutMs = 6000) { return (await this._probeMountpoint(mp, timeoutMs)) === 'hung'; }
+
+  /** A mount whose access can be REVOKED/EXPIRE out from under us (an imported
+   *  share, a VibeSpace bridge, or an STS-style expiring credential). Only
+   *  these get the (heavier) backend re-auth probe — my own S3/Drive don't. */
+  _revocable(m) { return m.origin === 'imported' || m.type === 'vibespace' || !!m.expiresAt; }
+
+  /** Uncached BACKEND access probe (fresh rclone process re-auths, bypassing
+   *  the fuse/dir cache that makes a mountpoint `ls` lie about a revoked
+   *  token). Returns 'ok' | 'denied' | 'hung'. */
+  _probeBackendAccess(m, timeoutMs = 15000) {
+    let env, remote;
+    try { ({ env, remote } = this._rcloneFor(m)); } catch { return Promise.resolve('ok'); }
+    if (m.v2Auth) env.RCLONE_CONFIG_VS_V2_AUTH = 'true';
+    const args = ['lsf', remote, '--max-depth', '1', '--retries', '1', '--low-level-retries', '1'];
+    if (((m.type || 's3') === 's3' || m.rcloneType === 's3') && this._rcloneSupportsAcceptEncodingFlag()) args.push('--s3-use-accept-encoding-gzip=false');
+    return new Promise((resolve) => {
+      let done = false;
+      const child = execFile(this.rcloneBin(), args, { env, timeout: timeoutMs },
+        (err, _o, stderr) => {
+          if (done) return; done = true;
+          if (!err) return resolve('ok');
+          const s = String(stderr || err.message || '');
+          if (err.killed || /ETIMEDOUT/.test(s)) return resolve('hung');
+          if (/401|403|Unauthorized|AccessDenied|Access Denied|expired|Forbidden|SignatureDoesNotMatch|InvalidAccessKeyId|no longer valid/i.test(s)) return resolve('denied');
+          return resolve('denied'); // any other list failure on a share = broken access
+        });
+      child.on('error', () => { if (!done) { done = true; resolve('denied'); } });
     });
   }
 
@@ -1059,6 +1104,13 @@ class MountManager {
     setTimeout(() => { this._healthSweep().catch(() => {}); }, 15000).unref?.();
   }
 
+  /** Human error for a mount whose IO is denied (revoked/expired share). */
+  _accessErrorMsg(m) {
+    if (m.type === 'vibespace') return 'connected but every file errors — the share may have been revoked, or the source instance is unreachable';
+    if (m.expiresAt && Date.now() > m.expiresAt) return 'connected but access denied — this share credential has expired';
+    return 'connected but access denied — the share may have been revoked or its credentials changed';
+  }
+
   async _healthSweep() {
     if (this._sweepBusy) return;
     this._sweepBusy = true;
@@ -1067,14 +1119,33 @@ class MountManager {
         if (this._kindOf(m) === 'credential') continue;
         if (!this.isMounted(m)) continue;
         const mp = this.pathOf(m);
-        if (!(await this._probeMountpointHung(mp))) continue;
-        this.blockPath(mp, 90000); // fail fast while teardown + in-flight stragglers drain
-        this._errors.set(m.id, 'storage stopped responding (unreachable host?) — auto-disconnected to protect the server');
-        m.desired = 'unmounted';
-        this._save();
-        await this.unmount(m.id);
-        this._killMountDaemon(mp);
-        this._notify();
+        const health = await this._probeMountpoint(mp);
+        if (health === 'hung') {
+          this.blockPath(mp, 90000); // fail fast while teardown + in-flight stragglers drain
+          this._errors.set(m.id, 'storage stopped responding (unreachable host?) — auto-disconnected to protect the server');
+          m.desired = 'unmounted';
+          this._save();
+          await this.unmount(m.id);
+          this._killMountDaemon(mp);
+          this._notify();
+        } else {
+          // Not hung. For a REVOCABLE share, a cached mountpoint `ls` can't
+          // tell us the token was revoked — probe the backend fresh. Normal
+          // mounts (my own S3/Drive) skip the extra round-trip.
+          let denied = health === 'error';
+          if (this._revocable(m)) {
+            const acc = await this._probeBackendAccess(m);
+            if (acc === 'hung') continue; // transient; mountpoint wasn't hung — leave as-is
+            denied = acc === 'denied';
+          }
+          if (denied) {
+            const msg = this._accessErrorMsg(m);
+            if (this._errors.get(m.id) !== msg) { this._errors.set(m.id, msg); this._notify(); }
+          } else if (this._errors.has(m.id)) {
+            // Recovered (re-granted share) — clear a previously surfaced error.
+            this._errors.delete(m.id); this._notify();
+          }
+        }
       }
     } finally { this._sweepBusy = false; }
   }

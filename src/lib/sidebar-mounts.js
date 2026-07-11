@@ -968,81 +968,92 @@ export function installSidebarMounts(Sidebar) {
     // Mint an S3 share link FROM a specific mount (uses that mount's own creds).
     // ── Edit / derive (2.107.0, user request: FishR2-class mounts needed a
     // bucket/path fix with no edit UI; one credential → many mounts) ──
-    // Secret-typed keys: blank input = keep the stored value (never prefilled —
-    // secret VALUES never leave the server).
-    _SECRET_KEYS: ['secretKey', 'accessKey', 'sessionToken', 'pass', 'bearerToken', 'token', 'clientSecret'],
+    // Fields are PREFILLED with the real current connection settings — secrets
+    // (access/secret keys, OAuth tokens, passwords, bearer tokens, rclone
+    // params) included — fetched decrypted from GET /api/mounts/:id/config, so
+    // the user reads and edits every value directly (single-user instance).
 
-    _mountEditFields(m) {
-      // [key, label, placeholder, prefillValue] per type; secret fields blank = keep
+    _mountEditFields(cfg) {
+      // [key, label, placeholder, currentValue] per type. `cfg` is the DECRYPTED
+      // config from /api/mounts/:id/config, so every value below is the real,
+      // current setting (prefilled), secrets included.
       // Env-provisioned storage: connection is deployment-owned — only the
-      // mount point (and name, added by the caller) are editable.
-      if (m.origin === 'my-storage') return [
-        ['customPath', tr('Mount point (blank = default)'), '/absolute/path', m.customPath || ''],
-      ];
-      const type = m.type || 's3';
+      // mount point (and name) are editable, both added by the caller.
+      if (cfg.envLocked || cfg.origin === 'my-storage') return [];
+      const type = cfg.type || 's3';
       // A mount point under a credential owns ONLY its path — connection
       // params are edited on the credential itself.
-      if (m.parentId) {
+      if (cfg.parentId) {
         if (type === 's3') return [
-          ['bucket', tr('Bucket'), 'bucket-name', m.bucket || ''],
-          ['prefix', tr('Prefix (optional)'), 'sub/path', m.prefix || ''],
+          ['bucket', tr('Bucket'), 'bucket-name', cfg.bucket || ''],
+          ['prefix', tr('Prefix (optional)'), 'sub/path', cfg.prefix || ''],
         ];
-        if (type === 'rclone') return [['remotePath', tr('Remote path (bucket[/prefix])'), 'bucket-name/optional/prefix', m.remotePath || '']];
-        if (type === 'drive') return [['driveFolder', tr('Folder path (optional)'), 'My Folder/sub', m.driveFolder || '']];
-        if (type === 'sftp') return [['sshPath', tr('Remote path'), '/data', m.sshPath || '']];
+        if (type === 'rclone') return [['remotePath', tr('Remote path (bucket[/prefix])'), 'bucket-name/optional/prefix', cfg.remotePath || '']];
+        if (type === 'drive') return [['driveFolder', tr('Folder path (optional)'), 'My Folder/sub', cfg.driveFolder || '']];
+        if (type === 'sftp') return [['sshPath', tr('Remote path'), '/data', cfg.sshPath || '']];
         return [];
       }
       if (type === 's3') return [
-        ['endpoint', 'Endpoint', 'https://…', m.endpoint || ''],
-        ['bucket', 'Bucket', 'bucket-name', m.bucket || ''],
-        ['prefix', 'Prefix (optional)', 'sub/path', m.prefix || ''],
-        ['accessKey', 'Access key', m.accessKeyTail ? `…${m.accessKeyTail} (keep)` : '', ''],
-        ['secretKey', 'Secret key (blank = keep)', '••••••••', ''],
+        ['endpoint', 'Endpoint', 'https://…', cfg.endpoint || ''],
+        ['bucket', 'Bucket', 'bucket-name', cfg.bucket || ''],
+        ['prefix', 'Prefix (optional)', 'sub/path', cfg.prefix || ''],
+        ['accessKey', 'Access key', '', cfg.accessKey || ''],
+        ['secretKey', 'Secret key', '', cfg.secretKey || ''],
       ];
       if (type === 'rclone') return [
-        ['remotePath', tr('Remote path (bucket[/prefix])'), 'bucket-name/optional/prefix', m.remotePath || ''],
-        // every stored parameter is replaceable: blank = keep, "-" = remove
-        ...(m.paramKeys || []).map((k) => [`param:${k}`, k, tr('(blank = keep, "-" = remove)'), '']),
+        ['remotePath', tr('Remote path (bucket[/prefix])'), 'bucket-name/optional/prefix', cfg.remotePath || ''],
+        // each stored parameter is prefilled; clearing its value removes it
+        ...Object.entries(cfg.params || {}).map(([k, v]) => [`param:${k}`, k, '', v == null ? '' : String(v)]),
         ['newParamKey', tr('Add parameter — name'), 'e.g. region', ''],
         ['newParamValue', tr('Add parameter — value'), '', ''],
       ];
       if (type === 'drive') return [
-        ['driveFolder', tr('Folder path (optional)'), 'My Folder/sub', m.driveFolder || ''],
-        ['token', tr('OAuth token (blank = keep)'), '{"access_token":…}', ''],
-        ['clientId', tr('OAuth client id (optional)'), '', m.clientId || ''],
-        ['clientSecret', tr('OAuth client secret (blank = keep)'), '••••••••', ''],
+        ['driveFolder', tr('Folder path (optional)'), 'My Folder/sub', cfg.driveFolder || ''],
+        ['token', tr('OAuth token'), '{"access_token":…}', cfg.token || ''],
+        ['clientId', tr('OAuth client id (optional)'), '', cfg.clientId || ''],
+        ['clientSecret', tr('OAuth client secret'), '', cfg.clientSecret || ''],
       ];
       if (type === 'webdav' || type === 'vibespace') return [
-        ['url', 'URL', 'https://…', m.url || ''],
-        ...(type === 'webdav' ? [['user', tr('User'), '', m.user || ''], ['pass', tr('Password (blank = keep)'), '••••••••', '']] : []),
-        ['bearerToken', tr('Bearer token (blank = keep)'), '••••••••', ''],
+        ['url', 'URL', 'https://…', cfg.url || ''],
+        ...(type === 'webdav' ? [['user', tr('User'), '', cfg.user || ''], ['pass', tr('Password'), '', cfg.pass || '']] : []),
+        ['bearerToken', tr('Bearer token'), '', cfg.bearerToken || ''],
       ];
       if (type === 'sftp') return [
-        ['sshHost', tr('Host'), 'example.com', m.sshHost || ''],
-        ['sshUser', tr('User'), '', m.sshUser || ''],
-        ['sshPort', tr('Port'), '22', m.sshPort ? String(m.sshPort) : ''],
-        ['sshPath', tr('Remote path (optional)'), '/data', m.sshPath || ''],
-        ['keyPath', tr('Private key path (absolute, optional)'), '/home/me/.ssh/id_ed25519', m.keyPath || ''],
-        ['pass', tr('Password (blank = keep)'), '••••••••', ''],
+        ['sshHost', tr('Host'), 'example.com', cfg.sshHost || ''],
+        ['sshUser', tr('User'), '', cfg.sshUser || ''],
+        ['sshPort', tr('Port'), '22', cfg.sshPort ? String(cfg.sshPort) : ''],
+        ['sshPath', tr('Remote path (optional)'), '/data', cfg.sshPath || ''],
+        ['keyPath', tr('Private key path (absolute, optional)'), '/home/me/.ssh/id_ed25519', cfg.keyPath || ''],
+        ['pass', tr('Password'), '', cfg.pass || ''],
       ];
       return [];
     },
 
-    _showEditMountDialog(m) {
-      const { body, close } = createModalShell({ id: 'mount-edit-dialog', title: `${tr('Edit')} "${m.name}"`, bodyClass: 'mounts-dialog-body', escapeToClose: true });
+    async _showEditMountDialog(m) {
+      // Fetch the fully DECRYPTED connection first so every field (secrets
+      // included) can be prefilled with its real current value.
+      let cfg;
+      try { cfg = await api(`/api/mounts/${m.id}/config`); }
+      catch (e) { showToast(e.message || tr('Failed to load connection'), { type: 'error' }); return; }
+      const name = cfg.name || m.name;
+      const { body, close } = createModalShell({ id: 'mount-edit-dialog', title: `${tr('Edit')} "${name}"`, bodyClass: 'mounts-dialog-body', escapeToClose: true });
       const form = document.createElement('form');
       form.className = 'mounts-form';
-      const fields = [['name', tr('Name'), '', m.name], ...this._mountEditFields(m)];
-      if (m.origin !== 'my-storage') fields.push(['customPath', tr('Mount point (blank = default)'), '/absolute/path', m.customPath || '']);
+      const fields = [['name', tr('Name'), '', name], ...this._mountEditFields(cfg)];
+      // Mount point: empty = default location — m.path shows the current/default
+      // spot as a placeholder (prefilling the computed default would freeze it).
+      fields.push(['customPath', tr('Mount point'), m.path || '/absolute/path', cfg.customPath || '']);
+      const isRclone = (cfg.type || 's3') === 'rclone' && !cfg.parentId && !cfg.envLocked && cfg.origin !== 'my-storage';
       form.innerHTML = fields.map(([k, label, ph, val]) =>
         `<label>${escHtml(label)}<input name="${k}" value="${escHtml(val)}" placeholder="${escHtml(ph)}" autocomplete="off"></label>`).join('')
-        + `<div class="mounts-note">${tr('Applied on save — a connected mount reconnects with the new settings.')}</div>
-           <div class="cfg-err"></div>
+        + `<div class="mounts-note">${tr('Applied on save — a connected mount reconnects with the new settings.')}</div>`
+        + (isRclone ? `<div class="mounts-note">${tr("Clear a parameter's value to remove it.")}</div>` : '')
+        + `<div class="cfg-err"></div>
            <div class="dialog-actions"><button type="submit" class="btn-create">${tr('Save')}</button></div>`;
       body.appendChild(form);
       // Drive-backed records get the guided re-auth right in the edit dialog
       // (the error-line button only shows once a mount has FAILED).
-      if (this._isDriveBacked(m) && m.origin !== 'my-storage' && !m.parentId) {
+      if (this._isDriveBacked(cfg) && !cfg.envLocked && cfg.origin !== 'my-storage' && !cfg.parentId) {
         const rb = document.createElement('button');
         rb.type = 'button';
         rb.className = 'mounts-btn';
@@ -1053,19 +1064,20 @@ export function installSidebarMounts(Sidebar) {
       const err = form.querySelector('.cfg-err');
       form.onsubmit = async (e) => {
         e.preventDefault(); err.textContent = '';
+        // Fields are prefilled with their real values, so send only what CHANGED
+        // (an unchanged secret isn't re-encrypted; a cleared field is a change).
         const patch = {};
         const params = {};
         let newKey = '', newVal = '';
         for (const [k, , , orig] of fields) {
           const v = form.querySelector(`[name="${k}"]`).value;
           if (k.startsWith('param:')) {
-            // blank = keep; "-" = remove (server deletes on empty value)
-            if (v === '-') params[k.slice(6)] = '';
-            else if (v) params[k.slice(6)] = v;
+            // prefilled with the current value; clearing it removes the
+            // parameter (server deletes on empty), any other change updates it.
+            if (v !== orig) params[k.slice(6)] = v;
           }
           else if (k === 'newParamKey') newKey = v.trim();
           else if (k === 'newParamValue') newVal = v;
-          else if (this._SECRET_KEYS.includes(k)) { if (v) patch[k] = v; }
           else if (v !== orig) patch[k] = v;
         }
         if (newKey && newVal) params[newKey] = newVal;

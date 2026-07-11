@@ -22,6 +22,7 @@ const { CodexSessionMessages } = require('./src/codex-session-store');
 const { normalizeCodexSource, CODEX_SESSIONS_DIR } = require('./src/adapters/codex');
 const { createAdapterRegistry } = require('./src/adapters');
 const fileRoutes = require('./src/routes/files');
+const { SafeFs } = require('./src/safe-fs');
 const { router: persistenceRouter, setup: setupPersistence } = require('./src/routes/persistence');
 
 // ── Env sanitation: the server may have been (re)started from INSIDE a Claude
@@ -1672,6 +1673,22 @@ app.locals.xEnv = X_ENV;
 app.locals.refreshXEnv = refreshXEnv; // paste route retries through this after an X cookie rotation
 // Remote fs (Files cross-host) — resolved lazily; `hosts` is created below.
 app.locals.getRemoteFs = () => remoteFs;
+// ── SafeFs: dedicated worker_threads pool for LOCAL user-path fs ops ──
+// STRUCTURAL isolation for the hung-mount class (complements the tactical
+// canary/watchdog/circuit-breaker + UV_THREADPOOL_SIZE=32 above): every local
+// file-route fs call runs on a worker's own thread with a per-op deadline and
+// kill-and-respawn, so a wedged mount can never again saturate the shared libuv
+// pool and freeze /login. path.resolve/permission decisions stay in-main; the
+// worker only executes the already-resolved absolute path. mounts.pathBlocked
+// still fails known-hung roots fast in the route middleware BEFORE dispatch.
+try {
+  app.locals.safeFs = new SafeFs({
+    poolSize: parseInt(process.env.VIBESPACE_SAFEFS_POOL || '', 10) || 4,
+  });
+  console.log(`[safe-fs] worker pool up (${app.locals.safeFs.poolSize} workers)`);
+} catch (e) {
+  console.error('[safe-fs] pool init failed, file ops fall back to in-main fs:', e.message);
+}
 app.use(fileRoutes);
 
 // Browser proxy — full-rewriting web proxy via node-unblocker

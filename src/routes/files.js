@@ -31,6 +31,23 @@ function rfs(req) {
 // remote); '~' expands remotely inside RemoteFs
 const remotePath = (p) => String(p || '~');
 
+// ── SafeFs facade (2.109.0) ──
+// LOCAL (non-?host=) filesystem calls run in a dedicated worker_threads pool
+// (own thread, per-op deadline, kill+respawn) so a hung mount can NEVER starve
+// the main event loop / shared libuv pool again — the structural fix behind the
+// tactical canary/watchdog/circuit-breaker. path.resolve / safePath / traversal
+// checks stay HERE in the main process; the worker only executes the already-
+// resolved absolute path. app.locals.safeFs is wired in server.js; if the pool
+// couldn't start, sfs() falls back to the SAME op implementation run in-main
+// (no isolation, but file browsing keeps working). Timeouts surface as
+// err.status===503 → the routes map that to a "storage not responding" reply.
+const { runOp: _runOpInline } = require('../safe-fs-worker');
+function sfs(req) {
+  return req.app.locals.safeFs || {
+    call: async (op, payload) => (await _runOpInline(op, payload)).result,
+  };
+}
+
 // Hung-mount circuit breaker (2.108.4): while a mount is CONNECTING (IO-probe
 // window) or was detected hanging, every file op under its root fails fast —
 // an open explorer window pointed at a dead mountpoint used to stuff the
@@ -109,10 +126,10 @@ router.get('/api/dir-complete', async (req, res) => {
     const prefix = lastSlash >= 0 ? expanded.substring(lastSlash + 1).toLowerCase() : expanded.toLowerCase();
     const resolved = path.resolve(parentDir);
 
-    const entries = fs.readdirSync(resolved, { withFileTypes: true });
+    const { entries } = await sfs(req).call('readdirNames', { path: resolved });
     const dirs = [];
     for (const e of entries) {
-      if (!e.isDirectory() && !(e.isSymbolicLink() && (() => { try { return fs.statSync(path.join(resolved, e.name)).isDirectory(); } catch { return false; } })())) continue;
+      if (!e.isDirectory) continue;
       if (e.name.startsWith('.') && !prefix.startsWith('.')) continue;
       if (prefix && !e.name.toLowerCase().startsWith(prefix)) continue;
       dirs.push(path.join(resolved, e.name));
@@ -131,24 +148,13 @@ router.get('/api/files', async (req, res) => {
   if (R) { try { return res.json(await R.fs.list(R.host, remotePath(req.query.path))); } catch (e) { return res.status(400).json({ error: e.message }); } }
   const dirPath = safePath(req.query.path || os.homedir());
   try {
-    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
-    const items = entries.map(e => {
-      let stat = null;
-      try { stat = fs.statSync(path.join(dirPath, e.name)); } catch {}
-      return {
-        name: e.name,
-        isDirectory: e.isDirectory() || (e.isSymbolicLink() && stat?.isDirectory()),
-        size: stat?.size || 0,
-        modified: stat?.mtimeMs || 0,
-        created: stat?.birthtimeMs || 0,
-      };
-    });
+    const { items } = await sfs(req).call('listDir', { path: dirPath });
     items.sort((a, b) => {
       if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
       return a.name.localeCompare(b.name);
     });
     res.json({ path: dirPath, items });
-  } catch (err) { res.status(400).json({ error: err.message }); }
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
 });
 
 // File info (size + binary detection) without reading full content
@@ -157,17 +163,9 @@ router.get('/api/file/info', async (req, res) => {
   if (R) { try { return res.json(await R.fs.info(R.host, remotePath(req.query.path))); } catch (e) { return res.status(400).json({ error: e.message }); } }
   const filePath = safePath(req.query.path);
   try {
-    const stat = fs.statSync(filePath);
-    let isBinary = false;
-    try {
-      const fd = fs.openSync(filePath, 'r');
-      const buf = Buffer.alloc(8192);
-      const bytesRead = fs.readSync(fd, buf, 0, 8192, 0);
-      fs.closeSync(fd);
-      for (let i = 0; i < bytesRead; i++) { if (buf[i] === 0) { isBinary = true; break; } }
-    } catch {}
-    res.json({ path: filePath, size: stat.size, modified: stat.mtimeMs, isBinary, isDirectory: stat.isDirectory() });
-  } catch (err) { res.status(400).json({ error: err.message }); }
+    const info = await sfs(req).call('fileInfo', { path: filePath });
+    res.json({ path: filePath, size: info.size, modified: info.modified, isBinary: info.isBinary, isDirectory: info.isDirectory });
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
 });
 
 // Read text file content (limit raised to 10MB)
@@ -176,11 +174,9 @@ router.get('/api/file/content', async (req, res) => {
   if (R) { try { return res.json(await R.fs.readText(R.host, remotePath(req.query.path))); } catch (e) { return res.status(400).json({ error: e.message, size: e.size }); } }
   const filePath = safePath(req.query.path);
   try {
-    const stat = fs.statSync(filePath);
-    if (stat.size > 10 * 1024 * 1024) return res.status(400).json({ error: 'File too large (>10MB). Use hex viewer.', size: stat.size });
-    const content = fs.readFileSync(filePath, 'utf-8');
-    res.json({ path: filePath, content, size: stat.size });
-  } catch (err) { res.status(400).json({ error: err.message }); }
+    const r = await sfs(req).call('readText', { path: filePath, maxSize: 10 * 1024 * 1024 });
+    res.json({ path: filePath, content: r.content, size: r.size });
+  } catch (err) { res.status(err.status || 400).json({ error: err.message, size: err.size }); }
 });
 
 // Read binary file chunk as raw bytes
@@ -198,21 +194,22 @@ router.get('/api/file/binary', async (req, res) => {
   }
   const filePath = safePath(req.query.path);
   try {
-    const fd = fs.openSync(filePath, 'r');
-    const buf = Buffer.alloc(length);
-    const bytesRead = fs.readSync(fd, buf, 0, length, offset);
-    fs.closeSync(fd);
-    const stat = fs.statSync(filePath);
-    res.set({ 'Content-Type': 'application/octet-stream', 'X-File-Size': stat.size, 'X-Offset': offset, 'X-Bytes-Read': bytesRead });
-    res.send(buf.slice(0, bytesRead));
-  } catch (err) { res.status(400).json({ error: err.message }); }
+    const r = await sfs(req).call('readChunk', { path: filePath, offset, length });
+    res.set({ 'Content-Type': 'application/octet-stream', 'X-File-Size': r.size, 'X-Offset': offset, 'X-Bytes-Read': r.bytesRead });
+    res.send(Buffer.from(r.buffer, 0, r.bytesRead));
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
 });
 
 // Serve raw files (PDF, images, etc.)
-router.get('/api/file/raw', (req, res) => {
+router.get('/api/file/raw', async (req, res) => {
   const R = rfs(req);
   if (R) return R.fs.downloadTo(R.host, remotePath(req.query.path), res);
   const filePath = safePath(req.query.path);
+  // Fail-fast on a wedged mount (sendFile itself streams via main-thread fs and
+  // can't be pooled without a rewrite); a missing file (non-503) falls through
+  // to sendFile's own 404 so behaviour is unchanged for the normal cases.
+  try { await sfs(req).call('stat', { path: filePath }, { timeoutMs: 8000 }); }
+  catch (e) { if (e.status === 503) return res.status(503).json({ error: 'Storage not responding — try again in a moment.' }); }
   try {
     res.sendFile(filePath);
   } catch (err) { res.status(400).json({ error: err.message }); }
@@ -221,31 +218,35 @@ router.get('/api/file/raw', (req, res) => {
 // Path-based file serving — enables <base href> for HTML preview.
 // /api/file/serve/home/user/project/style.css → serves /home/user/project/style.css
 // This allows relative paths in HTML previews (CSS, images, fonts, JS) to resolve correctly.
-router.get('/api/file/serve/*', (req, res) => {
+router.get('/api/file/serve/*', async (req, res) => {
   const filePath = '/' + req.params[0]; // reconstruct absolute path
   try {
-    if (!fs.existsSync(filePath)) return res.status(404).end();
+    if (!(await sfs(req).call('exists', { path: filePath })).exists) return res.status(404).end();
     res.sendFile(filePath);
-  } catch (err) { res.status(400).json({ error: err.message }); }
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
 });
 
 // Download file
-router.get('/api/download', (req, res) => {
+router.get('/api/download', async (req, res) => {
   const R = rfs(req);
   if (R) return R.fs.downloadTo(R.host, remotePath(req.query.path), res, { attachment: true });
   const filePath = safePath(req.query.path);
+  try { await sfs(req).call('stat', { path: filePath }, { timeoutMs: 8000 }); }
+  catch (e) { if (e.status === 503) return res.status(503).json({ error: 'Storage not responding — try again in a moment.' }); }
   try {
     res.download(filePath);
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 // Preview Excel files
-router.get('/api/file/excel', (req, res) => {
+router.get('/api/file/excel', async (req, res) => {
   const filePath = safePath(req.query.path);
   try {
     // Size guard (like /api/file/content's 10MB cap): XLSX.readFile parses the
-    // whole workbook synchronously — a huge file blocks the entire server
-    const stat = fs.statSync(filePath);
+    // whole workbook synchronously — a huge file blocks the entire server. The
+    // stat runs in the SafeFs pool; the XLSX.readFile lib parse stays in-main
+    // (size-capped at 20MB), fronted by this fail-fast size guard.
+    const stat = await sfs(req).call('stat', { path: filePath });
     if (stat.size > 20 * 1024 * 1024) {
       return res.status(413).json({ error: `Excel file too large to preview (${(stat.size / 1048576).toFixed(1)} MB > 20 MB)` });
     }
@@ -257,7 +258,7 @@ router.get('/api/file/excel', (req, res) => {
       data: XLSX.utils.sheet_to_json(workbook.Sheets[name], { header: 1 }).slice(0, 5000),
     }));
     res.json({ sheets });
-  } catch (err) { res.status(400).json({ error: err.message }); }
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
 });
 
 // Preview Word files
@@ -274,22 +275,22 @@ router.get('/api/file/docx', (req, res) => {
 router.post('/api/mkdir', async (req, res) => {
   const R = rfs(req);
   if (R) { try { return res.json(await R.fs.mkdir(R.host, remotePath(req.body.path))); } catch (e) { return res.status(400).json({ error: e.message }); } }
-  try { fs.mkdirSync(safePath(req.body.path), { recursive: true }); res.json({ success: true }); }
-  catch (err) { res.status(400).json({ error: err.message }); }
+  try { await sfs(req).call('mkdir', { path: safePath(req.body.path) }); res.json({ success: true }); }
+  catch (err) { res.status(err.status || 400).json({ error: err.message }); }
 });
 
 router.post('/api/file/write', async (req, res) => {
   const R = rfs(req);
   if (R) { try { return res.json(await R.fs.write(R.host, remotePath(req.body.path), Buffer.from(req.body.content || ''))); } catch (e) { return res.status(400).json({ error: e.message }); } }
-  try { fs.writeFileSync(safePath(req.body.path), req.body.content || ''); res.json({ success: true }); }
-  catch (err) { res.status(400).json({ error: err.message }); }
+  try { await sfs(req).call('writeFile', { path: safePath(req.body.path), content: req.body.content || '' }); res.json({ success: true }); }
+  catch (err) { res.status(err.status || 400).json({ error: err.message }); }
 });
 
 router.post('/api/rename', async (req, res) => {
   const R = rfs(req);
   if (R) { try { return res.json(await R.fs.rename(R.host, remotePath(req.body.oldPath), remotePath(req.body.newPath))); } catch (e) { return res.status(400).json({ error: e.message }); } }
-  try { fs.renameSync(safePath(req.body.oldPath), safePath(req.body.newPath)); res.json({ success: true }); }
-  catch (err) { res.status(400).json({ error: err.message }); }
+  try { await sfs(req).call('rename', { oldPath: safePath(req.body.oldPath), newPath: safePath(req.body.newPath) }); res.json({ success: true }); }
+  catch (err) { res.status(err.status || 400).json({ error: err.message }); }
 });
 
 router.delete('/api/file', async (req, res) => {
@@ -297,11 +298,9 @@ router.delete('/api/file', async (req, res) => {
   if (R) { try { return res.json(await R.fs.remove(R.host, remotePath(req.query.path))); } catch (e) { return res.status(400).json({ error: e.message }); } }
   const filePath = safePath(req.query.path);
   try {
-    const stat = fs.statSync(filePath);
-    if (stat.isDirectory()) fs.rmSync(filePath, { recursive: true });
-    else fs.unlinkSync(filePath);
+    await sfs(req).call('remove', { path: filePath });
     res.json({ success: true });
-  } catch (err) { res.status(400).json({ error: err.message }); }
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
 });
 
 // File upload
@@ -335,7 +334,9 @@ router.post('/api/upload', upload.array('files'), async (req, res) => {
   try {
     const results = [];
     const destRoot = path.resolve(destDir);
-    fs.mkdirSync(destRoot, { recursive: true }); // ensure target exists (plain-file uploads to a fresh dir)
+    // dest side may be a mount → all dest-touching fs ops go through SafeFs.
+    // The multer temp files live in /tmp (fast, local) — their unlink stays fs.
+    await sfs(req).call('mkdir', { path: destRoot }); // ensure target exists (plain-file uploads to a fresh dir)
     for (let i = 0; i < req.files.length; i++) {
       const file = req.files[i];
       const name = clientNames[i] || file.originalname;
@@ -347,9 +348,9 @@ router.post('/api/upload', upload.array('files'), async (req, res) => {
       }
       // For folder uploads, create intermediate directories
       if (preservePaths && name.includes('/')) {
-        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        await sfs(req).call('mkdir', { path: path.dirname(dest) });
       }
-      fs.copyFileSync(file.path, dest);
+      await sfs(req).call('copy', { src: file.path, dest, overwrite: true });
       fs.unlinkSync(file.path);
       results.push({ name, path: dest, size: file.size });
     }
@@ -357,7 +358,7 @@ router.post('/api/upload', upload.array('files'), async (req, res) => {
   } catch (err) {
     // Clean up remaining multer temp files on failure (they leaked in /tmp)
     for (const f of req.files || []) { try { fs.unlinkSync(f.path); } catch {} }
-    res.status(400).json({ error: err.message });
+    res.status(err.status || 400).json({ error: err.message });
   }
 });
 
@@ -441,65 +442,20 @@ function splitCsvLine(line, sep) {
   return out;
 }
 
-// CSV/TSV streaming: read only requested row range from a file
-// Supports large files by reading line-by-line without loading entire file
-router.get('/api/file/csv', (req, res) => {
+// CSV/TSV row-range read. The line-scan (offset/limit/sep threaded through)
+// runs in the SafeFs pool via the csvRange op — a SYNC port of the old
+// streaming reader that returns the identical response shape — so a huge or
+// mount-backed CSV never touches the main thread. Handles arbitrarily large
+// files by chunked reads inside the worker.
+router.get('/api/file/csv', async (req, res) => {
   const filePath = safePath(req.query.path);
   const offset = parseInt(req.query.offset) || 0;
   const limit = parseInt(req.query.limit) || 100;
   const sep = req.query.sep || ',';
-
   try {
-    const stat = fs.statSync(filePath);
-    const stream = fs.createReadStream(filePath, { encoding: 'utf-8' });
-    let lineNum = 0, headerRow = null;
-    const rows = [];
-    let partial = '';
-    let totalLines = 0;
-    let done = false;
-    let bytesConsumed = 0; // bytes covered by fully-processed lines (for the size-based estimate)
-
-    stream.on('data', (chunk) => {
-      if (done) return;
-      const lines = (partial + chunk).split('\n');
-      partial = lines.pop(); // last partial line
-      for (const line of lines) {
-        bytesConsumed += Buffer.byteLength(line) + 1;
-        const trimmed = line.replace(/\r$/, '');
-        if (!trimmed) continue;
-        if (lineNum === 0) {
-          headerRow = splitCsvLine(trimmed, sep);
-        } else if (lineNum > offset && rows.length < limit) {
-          rows.push(splitCsvLine(trimmed, sep));
-        }
-        lineNum++;
-        totalLines = lineNum;
-        // Stop reading early if we have enough data and want a rough total estimate
-        if (rows.length >= limit && lineNum > offset + limit + 10000) {
-          done = true;
-          stream.destroy();
-          break;
-        }
-      }
-    });
-
-    stream.on('end', () => {
-      if (partial.trim()) { totalLines++; if (lineNum > offset && rows.length < limit) rows.push(splitCsvLine(partial, sep)); }
-      res.json({ header: headerRow, rows, offset: offset, total: totalLines, fileSize: stat.size });
-    });
-    stream.on('close', () => {
-      if (!res.headersSent) {
-        // Estimate total rows from average bytes/line over what we actually
-        // read. (The old formula divided stat.size by stat.size/totalLines,
-        // which algebraically just returned totalLines — large CSVs reported
-        // ~10k rows no matter their real size.)
-        const bytesPerLine = Math.max(1, bytesConsumed) / Math.max(1, totalLines);
-        const estimatedTotal = Math.round(stat.size / bytesPerLine);
-        res.json({ header: headerRow, rows, offset, total: done ? estimatedTotal : totalLines, fileSize: stat.size, estimated: done });
-      }
-    });
-    stream.on('error', (err) => { if (!res.headersSent) res.status(400).json({ error: err.message }); });
-  } catch (err) { res.status(400).json({ error: err.message }); }
+    const r = await sfs(req).call('csvRange', { path: filePath, offset, limit, sep });
+    res.json(r);
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
 });
 
 // Format code via server-side CLI tools (for languages not supported by Prettier)
@@ -579,10 +535,14 @@ router.post('/api/archive', async (req, res) => {
   const parent = path.dirname(absPaths[0]);
   if (!absPaths.every(p => path.dirname(p) === parent)) return res.status(400).json({ error: 'all paths must share one parent directory' });
   const names = absPaths.map(p => path.basename(p));
-  if (fs.existsSync(destPath)) {
-    if (!overwrite) return res.status(409).json({ error: 'exists', dest: destPath });
-    try { fs.unlinkSync(destPath); } catch (e) { return res.status(400).json({ error: e.message }); }
-  }
+  // dest existence/cleanup on a mount → SafeFs; the zip/tar work is a child
+  // process (kept as-is — child procs don't touch the libuv pool).
+  try {
+    if ((await sfs(req).call('exists', { path: destPath })).exists) {
+      if (!overwrite) return res.status(409).json({ error: 'exists', dest: destPath });
+      await sfs(req).call('unlink', { path: destPath });
+    }
+  } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   const type = archiveType(destPath);
   let cmd, args;
   if (type === 'zip') { cmd = 'zip'; args = ['-r', '-q', '-y', destPath, ...names]; }
@@ -591,9 +551,9 @@ router.post('/api/archive', async (req, res) => {
     const flag = n.endsWith('.tar') ? '-cf' : (n.endsWith('.bz2') || n.endsWith('.tbz2')) ? '-cjf' : (n.endsWith('.xz') || n.endsWith('.txz')) ? '-cJf' : '-czf';
     cmd = 'tar'; args = [flag, destPath, ...names];
   } else return res.status(400).json({ error: 'dest must end in .zip, .tar, .tar.gz/.tgz, .tar.bz2 or .tar.xz' });
-  execFile(cmd, args, { cwd: parent, timeout: 10 * 60 * 1000, maxBuffer: 8 * 1024 * 1024 }, (err, _o, stderr) => {
-    if (err) { try { fs.unlinkSync(destPath); } catch {} return res.status(400).json({ error: (stderr || err.message).split('\n')[0] }); }
-    let size = 0; try { size = fs.statSync(destPath).size; } catch {}
+  execFile(cmd, args, { cwd: parent, timeout: 10 * 60 * 1000, maxBuffer: 8 * 1024 * 1024 }, async (err, _o, stderr) => {
+    if (err) { try { await sfs(req).call('unlink', { path: destPath }); } catch {} return res.status(400).json({ error: (stderr || err.message).split('\n')[0] }); }
+    let size = 0; try { size = (await sfs(req).call('stat', { path: destPath })).size; } catch {}
     res.json({ success: true, dest: destPath, size });
   });
 });
@@ -605,7 +565,8 @@ router.get('/api/archive/list', async (req, res) => {
   const fp = safePath(req.query.path || '');
   const type = archiveType(fp);
   if (!type) return res.status(400).json({ error: 'unsupported archive type' });
-  if (!fs.existsSync(fp)) return res.status(404).json({ error: 'not found' });
+  try { if (!(await sfs(req).call('exists', { path: fp })).exists) return res.status(404).json({ error: 'not found' }); }
+  catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   const MAX = 20000;
   const opts = { timeout: 60000, maxBuffer: 64 * 1024 * 1024 };
   if (type === 'zip') {
@@ -685,7 +646,7 @@ router.post('/api/archive/extract', async (req, res) => {
   const destDir = safePath(dest);
   const type = archiveType(fp);
   if (!type) return res.status(400).json({ error: 'unsupported archive type' });
-  try { fs.mkdirSync(destDir, { recursive: true }); } catch (e) { return res.status(400).json({ error: e.message }); }
+  try { await sfs(req).call('mkdir', { path: destDir }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   let cmd, args;
   if (type === 'zip') { cmd = 'unzip'; args = [overwrite ? '-o' : '-n', '-q', fp, '-d', destDir]; }
   else { cmd = 'tar'; args = [overwrite ? '-xf' : '-xkf', fp, '-C', destDir]; }
@@ -785,11 +746,11 @@ router.post('/api/file/copy', async (req, res) => {
   const s = safePath(src), d = safePath(dest);
   if (s === d) return res.status(400).json({ error: 'source and destination are the same' });
   if (d.startsWith(s + '/')) return res.status(400).json({ error: 'cannot copy a folder into itself' });
-  if (fs.existsSync(d) && !overwrite) return res.status(409).json({ error: 'exists', dest: d });
   try {
-    fs.cpSync(s, d, { recursive: true, force: !!overwrite, errorOnExist: !overwrite });
+    if (!overwrite && (await sfs(req).call('exists', { path: d })).exists) return res.status(409).json({ error: 'exists', dest: d });
+    await sfs(req).call('copy', { src: s, dest: d, overwrite: !!overwrite });
     res.json({ success: true, dest: d });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(e.status || 400).json({ error: e.message }); }
 });
 
 // Move file/dir. dest is the FULL target path. Falls back to copy+rm across devices.
@@ -803,25 +764,21 @@ router.post('/api/file/move', async (req, res) => {
   const s = safePath(src), d = safePath(dest);
   if (s === d) return res.json({ success: true, dest: d }); // no-op
   if (d.startsWith(s + '/')) return res.status(400).json({ error: 'cannot move a folder into itself' });
-  if (fs.existsSync(d) && !overwrite) return res.status(409).json({ error: 'exists', dest: d });
   try {
-    if (fs.existsSync(d) && overwrite) fs.rmSync(d, { recursive: true, force: true });
-    try { fs.renameSync(s, d); }
-    catch (e) {
-      if (e.code !== 'EXDEV') throw e;
-      fs.cpSync(s, d, { recursive: true });
-      fs.rmSync(s, { recursive: true, force: true });
-    }
+    if (!overwrite && (await sfs(req).call('exists', { path: d })).exists) return res.status(409).json({ error: 'exists', dest: d });
+    // worker `move` handles the overwrite-rm + rename/EXDEV-fallback atomically
+    await sfs(req).call('move', { src: s, dest: d, overwrite: !!overwrite });
     res.json({ success: true, dest: d });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(e.status || 400).json({ error: e.message }); }
 });
 
 // Stream a folder (or file) as a zip download — no temp archive on disk
-router.get('/api/download-zip', (req, res) => {
+router.get('/api/download-zip', async (req, res) => {
   const R = rfs(req);
   if (R) return R.fs.downloadZipTo(R.host, remotePath(req.query.path), res);
   const fp = safePath(req.query.path || '');
-  if (!fs.existsSync(fp)) return res.status(404).json({ error: 'not found' });
+  try { if (!(await sfs(req).call('exists', { path: fp })).exists) return res.status(404).json({ error: 'not found' }); }
+  catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   const base = path.basename(fp) || 'archive';
   res.setHeader('Content-Type', 'application/zip');
   res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(base)}.zip`);
@@ -843,20 +800,21 @@ router.get('/api/file/stat', async (req, res) => {
   }
   const fp = safePath(req.query.path || '');
   try {
-    const st = fs.statSync(fp);
+    const st = await sfs(req).call('stat', { path: fp, entryCount: true });
     const out = {
       path: fp,
-      isDirectory: st.isDirectory(),
+      isDirectory: st.isDirectory,
       size: st.size,
       modified: st.mtimeMs,
       created: st.birthtimeMs,
       mode: '0' + (st.mode & 0o777).toString(8),
       uid: st.uid, gid: st.gid,
     };
-    if (st.isDirectory()) {
-      try { out.entryCount = fs.readdirSync(fp).length; } catch {}
+    if (st.isDirectory) {
+      if (st.entryCount != null) out.entryCount = st.entryCount;
       if (req.query.du) {
-        // du can crawl for a while on huge trees — bounded, best-effort
+        // du can crawl for a while on huge trees — bounded, best-effort (child
+        // process, not the libuv pool — kept as-is)
         return execFile('du', ['-sb', fp], { timeout: 15000, maxBuffer: 1024 * 1024 }, (err, o) => {
           if (!err) { const n = parseInt(o.split('\t')[0]); if (Number.isFinite(n)) out.duSize = n; }
           res.json(out);
@@ -864,7 +822,7 @@ router.get('/api/file/stat', async (req, res) => {
       }
     }
     res.json(out);
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(e.status || 400).json({ error: e.message }); }
 });
 
 module.exports = router;
