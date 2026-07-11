@@ -118,6 +118,14 @@ class TerminalSession {
     container.style.background = effectiveTheme.background || '#000';
     requestAnimationFrame(() => this.fit());
     setTimeout(() => this.fit(), 500);
+    // FOUT fix (real report: "ugly font until I switch fonts a few times"): the
+    // web fonts (Fira Code etc.) can finish loading AFTER the terminal's first
+    // render, which already cached the FALLBACK glyph in the WebGL texture atlas
+    // — and nothing rebuilds it until a manual font change. Once the configured
+    // family is actually loaded, clear the atlas + refit so it repaints in the
+    // real font. Explicit load() + fonts.ready both, then a couple of settle
+    // refits (atlas rebuild is async).
+    this._refreshOnFontReady(effectiveFont, effectiveFontSize);
     // Device-pixel-ratio change (browser zoom, moving between monitors): glyph
     // atlas + measured cell size are stale — rebuild and refit.
     this._dprCleanup = null;
@@ -605,6 +613,28 @@ class TerminalSession {
           setTimeout(() => { if (this._pinned) this.terminal.scrollToBottom(); }, 300);
         }, 100);
       }
+    } catch {}
+  }
+
+  // Rebuild the glyph atlas once the configured web font is actually loaded (see
+  // the FOUT note at construction). No-ops gracefully where the Font Loading API
+  // is absent. The family string may be a fallback list ("Fira Code", monospace)
+  // — load() wants a single family, so try the first token.
+  _refreshOnFontReady(family, size) {
+    if (!family || typeof document === 'undefined' || !document.fonts?.ready) return;
+    const first = String(family).split(',')[0].trim().replace(/^["']|["']$/g, '');
+    const repaint = () => {
+      if (this._disposed || !this.terminal) return;
+      try { this.terminal.clearTextureAtlas(); } catch {}
+      this.fit();
+    };
+    const spec = `${size || 14}px "${first}"`;
+    const done = () => { repaint(); setTimeout(repaint, 250); };
+    try {
+      // Explicit load (a canvas-used font isn't guaranteed to trigger a fetch),
+      // then the global ready as a backstop.
+      if (first && first.toLowerCase() !== 'monospace') document.fonts.load(spec).then(done, () => {});
+      document.fonts.ready.then(done);
     } catch {}
   }
 

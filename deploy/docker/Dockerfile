@@ -38,8 +38,10 @@ RUN git clone https://github.com/ProblemFactory/vibespace /opt/vibespace-dist \
     && git checkout "$VIBESPACE_REF" \
     && npm ci \
     && npm run build \
-    && rm -rf data \
     && chown -R vibe:vibe /opt/vibespace-dist
+# NOTE: do NOT `rm -rf data` — data/bin/ holds TRACKED static tools the server
+# references (pty-wrapper.js, chat-wrapper.js, vibespace-*). A fresh clone's
+# data/ contains only those (runtime state is gitignored), so keep it.
 
 COPY deploy/docker/entrypoint.sh /usr/local/bin/vibespace-entrypoint
 RUN chmod +x /usr/local/bin/vibespace-entrypoint
