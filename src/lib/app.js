@@ -284,7 +284,13 @@ class App {
     });
 
     // Desktop (noVNC) availability — one startup probe gates the ⚙ menu entry
-    fetchJson('/api/vnc/status').then((d) => { this._vncAvailable = !!d?.available; }).catch(() => {});
+    fetchJson('/api/vnc/status').then((d) => {
+      this._vncAvailable = !!d?.available;
+      // Toolbar Desktop button (next to Browser, user directive) — shown only
+      // where a VNC stack exists AND the chrome setting keeps it on.
+      const b = document.getElementById('btn-desktop');
+      if (b) b.style.display = (this._vncAvailable && this.settings.get('toolbar.showDesktopButton') !== false) ? '' : 'none';
+    }).catch(() => {});
 
     // Mobile nav bar + gestures (only on mobile)
     this._mobileNav = this.isMobile ? new MobileNav(this) : null;
@@ -312,6 +318,7 @@ class App {
       ]);
     });
     document.getElementById('btn-browser').addEventListener('click', () => this.openBrowser());
+    document.getElementById('btn-desktop').addEventListener('click', () => this.openDesktop());
 
     // Apply toolbar/taskbar/sidebar chrome customization settings.
     // While CustomizeMode is active, hidden elements stay ON the canvas
@@ -325,6 +332,7 @@ class App {
       show('btn-presets', s.get('toolbar.showPresetsButton'));
       show('btn-terminal', s.get('toolbar.showTerminalButton'));
       show('btn-browser', s.get('toolbar.showBrowserButton'));
+      show('btn-desktop', s.get('toolbar.showDesktopButton') && this._vncAvailable);
       show('btn-file-explorer', s.get('toolbar.showFileExplorerButton'));
       const vis = s.get('taskbar.visibility') || 'show';
       show('taskbar', vis !== 'hidden');
@@ -817,12 +825,8 @@ class App {
     menu.append(item(I.key, t('Manage agents\u2026'), () => this._showAgentsDialog()));
     menu.append(item(I.chart, t('Usage\u2026'), () => this.openUsage()));
     menu.append(item(I.chart, t('Diagnostics report\u2026'), () => this._openDiagnostics()));
-    // In-container desktop (noVNC) \u2014 only where a VNC stack exists (probed
-    // once at startup; hidden entirely on desktop-less deployments).
-    if (this._vncAvailable) {
-      const I_desk = '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="9" rx="1"/><path d="M8 11.5V14M5 14h6"/></svg>';
-      menu.append(item(I_desk, t('Desktop'), () => this.openDesktop()));
-    }
+    // Desktop moved to a TOOLBAR button next to Browser (user directive) —
+    // no gear-menu entry anymore.
     // Language is PER-DEVICE (localStorage, not a synced setting) \u2014 names shown
     // in their own language, never translated. Switching reloads the page.
     {

@@ -38,6 +38,7 @@ export const CHROME_ELEMENTS = [
   { id: 'btn-terminal',      label: 'Terminal button',    hideKey: 'toolbar.showTerminalButton',     defaultZone: 'toolbar-right' },
   { id: 'btn-file-explorer', label: 'Files button',       hideKey: 'toolbar.showFileExplorerButton', defaultZone: 'toolbar-right' },
   { id: 'btn-browser',       label: 'Browser button',     hideKey: 'toolbar.showBrowserButton',      defaultZone: 'toolbar-right' },
+  { id: 'btn-desktop',       label: 'Desktop button',     hideKey: 'toolbar.showDesktopButton',      defaultZone: 'toolbar-right' },
   { id: 'desktop-previews',  label: 'Desktop previews',   hideKey: 'taskbar.showDesktopPreviews',    defaultZone: 'taskbar-tray' },
   { id: 'taskbar-user-todos', label: 'For-you inbox',     hideKey: 'taskbar.showUserTodos',          defaultZone: 'taskbar-tray' },
   { id: 'taskbar-usage',     label: 'Usage meters',       hideKey: 'taskbar.showUsage',              defaultZone: 'taskbar-tray' },
