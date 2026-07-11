@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.106.2 — 2026-07-11
+
+- **Remote session with NO account picked no longer fails on the default subscription (real report)**: resuming/creating on a remote host without specifying an account resolved the LOCAL default (a subscription) and died on the §ban-safety shipping gate. When the account came from the default (not an explicit pick) and could only reach the host by shipping subscription creds, the spawn now falls back to the HOST's own CLI login. An explicitly chosen subscription still errors with guidance; an opted-in shipSubscriptionToRemote still ships.
+- **Regression fixes from 2.106.0/1 (both user-reported within the hour)**: (1) the wizard backend-card polish leaked into Manage Agents — `.ob-backend` is SHARED, and the unscoped nowrap/ellipsis blew the dialog open horizontally while the edit orphaned the row background/padding; original rule restored, polish scoped under `#welcome`. (2) Run-collapse didn't actually hide anything: `.chat-compact .chat-msg { display: block }` (compact is the DEFAULT) out-specified the bare `.chat-run-collapsed` — verified by COMPUTED display this time (9/9 none), not class presence.
+
 ## 2.106.1 — 2026-07-11
 
 - **Sidebar scroll no longer breaks on refresh (real report)**: EVERY `_render()` now preserves the list scroll — broadcast-triggered re-renders (tasks-updated / session-status-updated / user-state-updated, fired constantly by agents' vibespace-task/status calls) used to reset it to top; only the 5s-poll digest path preserved it. A view change (tab / board sub-view / mobile drill-down) still resets deliberately.

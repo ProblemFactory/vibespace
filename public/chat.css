@@ -864,4 +864,5 @@ body.hide-hook-cards .chat-msg-hook { display: none; }
 .chat-run-header:hover { color: var(--text-secondary); border-color: var(--accent); }
 .chat-run-header .chat-run-arrow { display: inline-block; transition: var(--transition); font-size: 9px; }
 .chat-run-header.open .chat-run-arrow { transform: rotate(90deg); }
-.chat-run-collapsed { display: none; }
+.chat-msg.chat-run-collapsed,
+.chat-compact .chat-msg.chat-run-collapsed { display: none; }

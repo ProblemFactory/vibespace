@@ -1860,12 +1860,13 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .ob-point b { font-size: 13px; color: var(--text); }
 .ob-point span { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
 .ob-backends { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
-.ob-backend { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.ob-backend > div:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
-.ob-backend > div:last-child { flex-shrink: 0; display: flex; align-items: center; gap: 8px; }
-.ob-backend-legacy { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+.ob-backend { display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 12px 14px; background: var(--bg-input); border: 1px solid var(--border);
   border-radius: var(--radius); font-size: 13px; }
+/* Wizard-ONLY layout polish — .ob-backend is SHARED with Manage Agents rows;
+   unscoped nowrap/ellipsis here blew that dialog wide open (real report). */
+#welcome .ob-backend > div:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+#welcome .ob-backend > div:last-child { flex-shrink: 0; display: flex; align-items: center; gap: 8px; }
 .ob-backend .ob-ver { font-size: 11px; color: var(--text-dim); margin-left: 6px; }
 .ob-ok { color: var(--green); font-weight: 600; font-size: 12px; }
 .ob-warn { color: var(--yellow); font-size: 12px; }
