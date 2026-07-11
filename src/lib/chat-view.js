@@ -678,6 +678,12 @@ class ChatView {
 
       // Preserve scroll position
       this._messageList.scrollTop += (this._messageList.scrollHeight - scrollHeightBefore);
+      // Fold the freshly loaded cards NOW, inside the same task as the scroll
+      // compensation — the observer's debounced pass (180ms) used to collapse
+      // them after the fact, yanking the viewport and re-triggering the top
+      // sentinel in a load loop. _updateRuns anchors the viewport itself, so
+      // the later debounced pass becomes a height no-op.
+      this._updateRuns();
       if (this._search?.hasHighlight) this._search.applyHighlightLayer();
     } finally {
       setTimeout(() => { this._loading = false; }, 300);
@@ -868,6 +874,8 @@ class ChatView {
       // Trim top if DOM window too large
       this._trimTop();
 
+      // Same-task fold of the newly appended cards (see _extendTop)
+      this._updateRuns();
       // Newly rendered messages need the search highlight re-applied
       if (this._search?.hasHighlight) this._search.applyHighlightLayer();
     } finally {
@@ -1867,6 +1875,21 @@ class ChatView {
     if (!list || this._disposed) return;
     const enabled = this.app?.settings?.get('chat.collapseRuns') !== false;
     const searchOpen = this._search?._bar && !this._search._bar.classList.contains('hidden');
+    // Viewport anchor: collapsing/expanding runs ABOVE the viewport shifts
+    // everything the user is reading — the debounced observer pass lands
+    // ~180ms AFTER _extendTop's scroll compensation, so freshly loaded Bash
+    // cards folded, the view jumped and the top sentinel re-triggered another
+    // load in a loop (real report: 往上翻阅跳动+翻不回来). Keep the topmost
+    // visible element fixed across the pass. Skip when pinned (bottom-follow
+    // owns the scroll) and skip run headers (they're removed by the pass).
+    let anchorEl = null, anchorDelta = 0;
+    if (!this._pinned && list.scrollTop > 0) {
+      const st = list.scrollTop;
+      for (const el of list.children) {
+        if (el.classList.contains('chat-run-header')) continue;
+        if (el.offsetTop + el.offsetHeight > st) { anchorEl = el; anchorDelta = el.offsetTop - st; break; }
+      }
+    }
     this._runsMutating = true;
     try {
       list.querySelectorAll(':scope > .chat-run-header').forEach((h) => h.remove());
@@ -1923,16 +1946,21 @@ class ChatView {
           }
           header.innerHTML = `<span class="chat-run-arrow">▸</span><span>${label}</span>`;
           // Rebuilds happen on every list mutation — remember runs the user
-          // opened (keyed by first member) so a new message doesn't re-collapse
-          // what they're reading.
-          const wasOpen = this._runExpanded.has(members[0]);
+          // opened so a new message doesn't re-collapse what they're reading.
+          // Keyed by ANY member, not just the first: scroll-up pagination
+          // prepends older members onto an existing run, changing its first
+          // element — a first-member-only key re-collapsed the run the user
+          // was reading on every _extendTop (real report).
+          const wasOpen = members.some((el) => this._runExpanded.has(el));
           header.onclick = () => {
             const open = header.classList.toggle('open');
-            if (open) this._runExpanded.add(members[0]); else this._runExpanded.delete(members[0]);
-            for (const el of members) el.classList.toggle('chat-run-collapsed', !open);
+            for (const el of members) {
+              if (open) this._runExpanded.add(el); else this._runExpanded.delete(el);
+              el.classList.toggle('chat-run-collapsed', !open);
+            }
           };
           list.insertBefore(header, members[0]);
-          if (wasOpen) header.classList.add('open');
+          if (wasOpen) { header.classList.add('open'); for (const el of members) this._runExpanded.add(el); }
           else for (const el of members) el.classList.add('chat-run-collapsed');
         }
         run = []; runKind = null;
@@ -1947,6 +1975,13 @@ class ChatView {
       flush();
     } finally {
       this._runsMutating = false;
+      if (anchorEl && anchorEl.isConnected) {
+        // the anchor itself may have folded (display:none) — fall forward to
+        // its nearest visible sibling
+        let a = anchorEl;
+        while (a && a.offsetParent === null) a = a.nextElementSibling;
+        if (a) list.scrollTop = a === anchorEl ? a.offsetTop - anchorDelta : a.offsetTop;
+      }
     }
   }
 
