@@ -1402,6 +1402,8 @@ export default {
   "errors": "错误",
   "versions": "版本",
   "last seen": "最后上报",
+  "Auto": "自动",
+  "runs on the selected remote host": "在所选远程主机上执行",
   "Account reconciliation": "账号对账",
   "Add panel": "添加面板",
   "Bar rows": "横条",

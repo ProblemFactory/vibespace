@@ -1400,6 +1400,8 @@ export default {
   "errors": "エラー",
   "versions": "バージョン",
   "last seen": "最終受信",
+  "Auto": "自動",
+  "runs on the selected remote host": "選択したリモートホスト上で実行されます",
   "Account reconciliation": "アカウント突合",
   "Add panel": "パネルを追加",
   "Bar rows": "バー行",

@@ -378,11 +378,14 @@ export function installManageAgents(App, ctx = {}) {
     body.innerHTML = `<div class="ob-loading">${t('Checking\u2026')}</div>`;
 
     const BACKENDS = [
-      { key: 'claude', label: 'Claude Code', loginCmd: 'claude', updateCmd: 'claude update' },
+      // installCmd: claude's official native installer is user-local
+      // (~/.local/bin, no root, no npm-prefix permission trap); codex has no
+      // native installer — npm -g is its official install AND update path.
+      { key: 'claude', label: 'Claude Code', loginCmd: 'claude', updateCmd: 'claude update', installCmd: 'curl -fsSL https://claude.ai/install.sh | bash' },
       // remoteLoginCmd: on a remote host `codex login` starts a localhost:1455
       // callback server ON THE HOST — unreachable from the user's browser.
       // --device-auth prints a URL + one-time code instead (location-agnostic).
-      { key: 'codex', label: 'Codex', loginCmd: 'codex login', remoteLoginCmd: 'codex login --device-auth', updateCmd: 'npm install -g @openai/codex@latest' },
+      { key: 'codex', label: 'Codex', loginCmd: 'codex login', remoteLoginCmd: 'codex login --device-auth', updateCmd: 'npm install -g @openai/codex@latest', installCmd: 'npm install -g @openai/codex@latest' },
     ];
     // Host selector: agent lifecycle can target a remote machine too. Login/
     // update then run in a shell ON that host (ssh -t).
@@ -438,6 +441,12 @@ export function installManageAgents(App, ctx = {}) {
           : `<span class="ob-warn">${t('not logged in')}</span>`
         }</div>`;
         const actions = document.createElement('div'); actions.className = 'agent-actions';
+        if (!info.installed && b.installCmd) {
+          const instBtn = document.createElement('button'); instBtn.className = 'agent-btn primary'; instBtn.textContent = t('Install');
+          instBtn.title = b.installCmd + (selectedHost ? ` — ${t('runs on the selected remote host')}` : '');
+          instBtn.onclick = () => run(b.installCmd);
+          actions.appendChild(instBtn);
+        }
         if (info.installed && !info.loggedIn) {
           const loginBtn = document.createElement('button'); loginBtn.className = 'agent-btn primary'; loginBtn.textContent = t('Log in');
           loginBtn.title = selectedHost ? t('Logs in ON the selected remote host (its own login, not VibeSpace)') : '';
