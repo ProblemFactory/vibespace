@@ -40,7 +40,9 @@ class Telemetry {
       ts,
       kind: String(ev.kind || 'event').slice(0, 24),
       name: String(ev.name || '').slice(0, 120),
-      detail: ev.detail != null ? String(ev.detail).slice(0, 2000) : undefined,
+      // kind:'trace' = diagnostic ring-buffer dumps (e.g. chat-scroll-jump)
+      // — they need the whole buffer, not a 2KB head
+      detail: ev.detail != null ? String(ev.detail).slice(0, ev.kind === 'trace' ? 65536 : 2000) : undefined,
       stack: ev.stack != null ? String(ev.stack).slice(0, 4000) : undefined,
       version: ev.version || (remote ? undefined : this.version),
       ua: ev.ua ? String(ev.ua).slice(0, 160) : undefined,

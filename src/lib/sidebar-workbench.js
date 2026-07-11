@@ -8,6 +8,7 @@
 //   HISTORY — everything older; collapsed and SEARCH-FIRST (typing in the
 //             main filter searches it; expanding renders capped pages).
 // Starred sessions float to the top of their zone.
+import { t as tr } from './i18n.js'; // sidebar cluster convention
 import { escHtml, showConfirmDialog, showToast } from './utils.js';
 
 const RECENT_MS = 7 * 86400e3;
@@ -51,7 +52,7 @@ export function installSidebarWorkbench(Sidebar) {
         ? (st?.sessions
           ? st.sessions.filter(s => (s.mtime || 0) >= cutoff || s.status === 'remote-running').length : '…')
         : localCount;
-      const h = zoneHead('Recent', count);
+      const h = zoneHead(tr('Recent'), count);
       this._ensureHostsData();
       const hostsList = this._hostsData?.hosts || [];
       if (hostsList.length || recentHost) {
@@ -109,7 +110,7 @@ export function installSidebarWorkbench(Sidebar) {
       const sel = document.createElement('select');
       sel.className = 'wb-recent-host';
       sel.title = 'Show sessions from this machine or a remote host';
-      sel.innerHTML = '<option value="">Local</option>';
+      sel.innerHTML = `<option value="">${tr('Local')}</option>`;
       for (const hh of this._hostsData?.hosts || []) {
         const o = document.createElement('option');
         o.value = hh.id; o.textContent = hh.name;
@@ -148,7 +149,7 @@ export function installSidebarWorkbench(Sidebar) {
       const cutoff = Date.now() - RECENT_MS;
       const sessions = all.filter(s => (s.mtime || 0) >= cutoff || s.status === 'remote-running');
       if (!all.length) { empty('No sessions found on ' + hostLabelFallback); return; }
-      if (!sessions.length) { empty(`Nothing in the last 7 days on ${hostLabelFallback} — check History below`); return; }
+      if (!sessions.length) { empty(tr('Nothing in the last 7 days on {host} — check History below', { host: hostLabelFallback })); return; }
       const byProj = new Map();
       for (const s of sessions) {
         const k = s.cwd || `(${s.projDir || 'unknown'})`;
@@ -237,7 +238,7 @@ export function installSidebarWorkbench(Sidebar) {
       const label = document.createElement('div');
       label.className = 'wb-manage-label';
       if (!marks.size) {
-        label.innerHTML = '<span class="wb-manage-hint">Tap cards to mark</span>';
+        label.innerHTML = `<span class="wb-manage-hint">${tr('Tap cards to mark')}</span>`;
       } else {
         // icon + number chips — compact, fixed footprint (no text wrap)
         const TERM = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>';
@@ -249,7 +250,7 @@ export function installSidebarWorkbench(Sidebar) {
       actions.className = 'wb-manage-actions';
       const applyBtn = document.createElement('button');
       applyBtn.className = 'wb-manage-apply';
-      applyBtn.textContent = 'Apply';
+      applyBtn.textContent = tr('Apply');
       // hidden (not just disabled) when nothing's marked — frees the row so
       // the empty-state hint shows in full
       applyBtn.style.display = marks.size ? '' : 'none';
@@ -345,11 +346,11 @@ export function installSidebarWorkbench(Sidebar) {
       };
 
       // ── ACTIVE ──
-      this.listEl.appendChild(zoneHead('Active', live.length));
+      this.listEl.appendChild(zoneHead(tr('Active'), live.length));
       if (!live.length) {
         const e = document.createElement('div');
         e.className = 'wb-empty';
-        e.textContent = 'No running sessions';
+        e.textContent = tr('No running sessions');
         this.listEl.appendChild(e);
       }
       for (const s of live) {
@@ -459,7 +460,7 @@ export function installSidebarWorkbench(Sidebar) {
       if (!recent.length) {
         const e = document.createElement('div');
         e.className = 'wb-empty';
-        e.textContent = 'Nothing stopped in the last 7 days';
+        e.textContent = tr('Nothing stopped in the last 7 days');
         this.listEl.appendChild(e);
       }
       } // end local RECENT branch
@@ -478,7 +479,7 @@ export function installSidebarWorkbench(Sidebar) {
       hHead.className = 'wb-zone-head wb-history-head';
       const filterActive = !!(document.getElementById('session-filter')?.value || '').trim();
       const open = this._wbHistoryOpen || filterActive; // searching implies looking at history
-      hHead.innerHTML = `<span class="wb-hist-arrow">${open ? '▾' : '▸'}</span><span>History</span><span class="wb-zone-count">${histLoading ? '…' : histList.length}</span>`;
+      hHead.innerHTML = `<span class="wb-hist-arrow">${open ? '▾' : '▸'}</span><span>${tr('History')}</span><span class="wb-zone-count">${histLoading ? '…' : histList.length}</span>`;
       hHead.onclick = () => { this._wbHistoryOpen = !this._wbHistoryOpen; this._render(); };
       if ((this._hostsData?.hosts || []).length || histHost) {
         hHead.appendChild(this._buildHostSelect(histHost, (v) => {
@@ -528,7 +529,7 @@ export function installSidebarWorkbench(Sidebar) {
       } else if (histList.length) {
         const hint = document.createElement('div');
         hint.className = 'wb-empty';
-        hint.textContent = 'Type in the filter box to search, or click to expand';
+        hint.textContent = tr('Type in the filter box to search, or click to expand');
         this.listEl.appendChild(hint);
       }
     },
