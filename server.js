@@ -1948,6 +1948,45 @@ process.on('unhandledRejection', (e) => { try { telemetry.record({ kind: 'server
 // Zero-coupling metric hook for deep modules (session-store slow-parse etc.)
 global.__vsMetric = (name, value) => { try { telemetry.record({ kind: 'metric', name, value }); } catch {} };
 
+// ── Threadpool canary (2.108.6) ──
+// The wedge class that took the instance down twice today (hung fuse IO) fills
+// the libuv threadpool while the EVENT LOOP stays healthy — evloop-lag metrics
+// see nothing. Canary: a stat() of our own package.json (always-fast local
+// disk) must round-trip through the pool; when it exceeds the deadline three
+// times in a row, the pool is wedged by SOMETHING — log loudly, record
+// telemetry, and kick the mount health sweep (the known culprit class) without
+// waiting for its 60s timer. Self-healing for known causes, loud for unknown.
+{
+  const CANARY_FILE = path.join(__dirname, 'package.json');
+  let canaryStrikes = 0;
+  let canaryBusy = false;
+  setInterval(() => {
+    if (canaryBusy) return; // previous canary still in flight = already wedged; strikes accrue on its resolution
+    canaryBusy = true;
+    const t0 = Date.now();
+    const deadline = setTimeout(() => {
+      canaryBusy = false;
+      canaryStrikes++;
+      console.error(`[canary] threadpool stat() exceeded 5s (strike ${canaryStrikes}) — pool likely wedged`);
+      telemetry.record({ kind: 'metric', name: 'srv-fs-canary-ms', value: 5000 });
+      if (canaryStrikes >= 3) {
+        canaryStrikes = 0;
+        telemetry.record({ kind: 'event', name: 'srv-threadpool-wedged' });
+        try { mounts._healthSweep().catch(() => {}); } catch {}
+      }
+    }, 5000);
+    fs.promises.stat(CANARY_FILE).then(() => {
+      clearTimeout(deadline);
+      if (!canaryBusy) return; // deadline already fired for this run
+      canaryBusy = false;
+      canaryStrikes = 0;
+      const ms = Date.now() - t0;
+      // record anomalies only — a healthy sub-ms canary every 10s is noise
+      if (ms > 1000) telemetry.record({ kind: 'metric', name: 'srv-fs-canary-ms', value: ms });
+    }).catch(() => { clearTimeout(deadline); canaryBusy = false; });
+  }, 10000).unref();
+}
+
 const usageHistory = new UsageHistory({
   dataDir: path.join(__dirname, 'data'),
   resolveAccount: (id) => {

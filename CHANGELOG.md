@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.108.6 — 2026-07-11
+
+**Robustness, phase 1 (user directive: "让后端稍微robust一点")**
+- **Threadpool canary**: every 10s a stat() of the server's own package.json must round-trip through the libuv pool within 5s — the wedge class that took an instance down twice today is INVISIBLE to event-loop-lag metrics (the loop stays idle while the pool starves). Three consecutive breaches log loudly, record a `srv-threadpool-wedged` telemetry event, and kick the mount health sweep immediately instead of waiting its 60s timer. Detects ANY future pool-wedge cause, not just mounts.
+- **K8s livenessProbe** (helm): a SUSTAINED unresponsive instance (up-but-wedged livelock — crash-restart never fires) now self-restarts after ~5min of failed probes. Deliberately generous: a restart kills in-pod dtach sessions, so only a truly dead instance trips it.
+
 ## 2.108.5 — 2026-07-11
 
 **Self-mount guard (real incident: "test-share 打开就卡住")** — a VibeSpace bridge share minted by an instance and then imported back into the SAME instance mounts its own `/dav` through fuse: every file op becomes fuse → HTTP → the same node process → threadpool → waiting on fuse — a self-referential loop that deadlocks under a couple of concurrent ops. Bridge tokens are minted locally, so the check is trivial: a bearer token found in OUR OWN token store means the link points back at us. Refused in all three places with "open the shared folder directly instead": add, share-link import, and mount() of pre-existing records (the user's imported test share now shows the explanation instead of freezing).
