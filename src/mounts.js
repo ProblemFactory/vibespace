@@ -369,12 +369,11 @@ class MountManager {
 
   list() {
     return this._state.mounts.map(m => {
-      const cred = this._kindOf(m) === 'credential';
       const conn = this._connOf(m);
       return {
         id: m.id, name: m.name, type: conn.type || 's3', origin: m.origin, mode: m.mode,
         kind: this._kindOf(m), parentId: m.parentId || null,
-        childCount: cred ? this._childrenOf(m.id).length : undefined,
+        childCount: m.parentId ? undefined : this._childrenOf(m.id).length,
         endpoint: conn.endpoint, bucket: conn.bucket, prefix: conn.prefix,
         rcloneType: conn.rcloneType, remotePath: conn.remotePath, driveFolder: conn.driveFolder,
         // secret VALUES never leave the server; keys let the edit dialog offer
@@ -499,13 +498,15 @@ class MountManager {
   }
 
   /**
-   * Add a MOUNT POINT under a credential: the child record carries only its
-   * own path (+ name/mode/mountpoint) and resolves connection settings from
-   * the parent at use time — refreshing the credential heals every child.
+   * Add a SUBMOUNT under any storage record (user-refined model: EVERY
+   * connection can act as a credential — remote:path children). The child
+   * carries only its own path (+ name/mode/mountpoint) and resolves
+   * connection settings from the parent at use time — refreshing the
+   * parent's token/keys heals every child.
    */
   addChild(parentId, cfg = {}) {
     const p = this._get(parentId);
-    if (this._kindOf(p) !== 'credential') throw new Error('Mount points can only be added under a credential');
+    if (p.parentId) throw new Error('Submounts can\'t nest — add it under the top-level connection');
     if (!cfg.name) throw new Error('name required');
     if (this._state.mounts.some(m => m.name === cfg.name)) throw new Error('A mount with that name exists');
     if (cfg.customPath && !path.isAbsolute(cfg.customPath)) throw new Error('Custom path must be absolute');
@@ -832,8 +833,11 @@ class MountManager {
         this._errors.delete(id);
         this._save();
         this._notify();
-        throw new Error('This token can’t list the account root (it’s bucket-scoped) — kept as a credential. Add a mount point with a specific bucket under it.');
+        throw new Error('This token can’t list the account root (it’s bucket-scoped) — add a submount with a specific bucket under it.');
       }
+      // Auto-heal: a previously credential-only record whose token can NOW
+      // list the root (rescoped token) becomes root-mountable again.
+      if (m.kind === 'credential') { delete m.kind; this._save(); }
     }
     const mp = this.pathOf(m);
     fs.mkdirSync(mp, { recursive: true });

@@ -219,11 +219,15 @@ export function installSidebarMounts(Sidebar) {
       const expired = m.expiresAt && Date.now() > m.expiresAt;
       const top = document.createElement('div');
       top.className = 'mounts-row-top';
+      // Credential-only records (bucket-scoped token, root not mountable):
+      // ICON-ONLY marker in place of the status dot (user directive — no text
+      // label, no Connect action; its submounts carry the mount state).
       top.innerHTML = `
-        <span class="mounts-dot mounts-dot-${dot}" title="${m.mounted ? 'Mounted' : escHtml(m.error || 'Not mounted')}"></span>
+        ${isCred
+          ? `<span class="mounts-cred-key" title="${escHtml(tr('Credential only — this token can’t open the storage root; add submounts (specific buckets/paths) under it.'))}">${MI.key}</span>`
+          : `<span class="mounts-dot mounts-dot-${dot}" title="${m.mounted ? 'Mounted' : escHtml(m.error || 'Not mounted')}"></span>`}
         ${m.parentId ? '<span class="mounts-child-arrow">↳</span>' : ''}
         <b class="mounts-name" title="${escHtml(m.name)}">${escHtml(m.name)}</b>
-        ${isCred ? `<span class="mounts-badge mounts-badge-cred" title="${escHtml(tr('Credential — the remote before the colon; mount points under it are remote:path. Connecting it mounts the root (when the token allows).'))}">${MI.key}${escHtml(tr('Credential'))}</span>` : ''}
         ${m.mode === 'ro' ? '<span class="mounts-badge">RO</span>' : ''}
         ${expired ? '<span class="mounts-badge mounts-badge-red">EXPIRED</span>' : ''}`;
       const actions = document.createElement('span');
@@ -240,12 +244,14 @@ export function installSidebarMounts(Sidebar) {
         };
         return b;
       };
+      // Credential-only records get NO Connect — their root is known
+      // unmountable; submounts carry the mount state.
       if (m.mounted) {
         actions.append(
           ibtn(MI.folder, 'Browse in file explorer', () => { this.app.openFileExplorer(m.path); }),
           ibtn(MI.eject, 'Disconnect', () => api(`/api/mounts/${m.id}/unmount`, { method: 'POST' })),
         );
-      } else {
+      } else if (!isCred) {
         actions.append(ibtn(MI.plug, 'Connect', async () => {
           const r = await api(`/api/mounts/${m.id}/mount`, { method: 'POST' });
           if (!r.success) throw new Error('Couldn’t connect — hover the status dot for details');
@@ -261,11 +267,13 @@ export function installSidebarMounts(Sidebar) {
         shareBtn.onclick = (e) => { e.stopPropagation(); this._showMintShareDialog(m); };
         actions.append(shareBtn);
       }
-      if (m.kind === 'credential') {
-        actions.append(ibtn(MI.plus, tr('Add a mount point under this credential (remote:path)'), () => { this._showAddChildDialog(m); }, 'mounts-icon-accent'));
+      // EVERY top-level storage can act as a credential (user directive):
+      // ＋ adds a submount (remote:path) under it, for types with a path notion.
+      if (!m.parentId && ['s3', 'rclone', 'drive', 'sftp'].includes(m.type || 's3')) {
+        actions.append(ibtn(MI.plus, tr('Add a submount (a specific bucket/path of this storage)'), () => { this._showAddChildDialog(m); }, isCred ? 'mounts-icon-accent' : ''));
       }
       actions.append(ibtn(MI.pencil, 'Edit connection (path, credentials, name)', () => { this._showEditMountDialog(m); }));
-      if (m.kind !== 'credential') {
+      if (!isCred && !m.parentId) {
         actions.append(ibtn(MI.copy, 'New mount from this connection (same credentials, different bucket/path)', () => { this._showDuplicateMountDialog(m); }));
       }
       // Env-provisioned personal storage is deployment-managed: no delete
@@ -282,8 +290,10 @@ export function installSidebarMounts(Sidebar) {
       top.appendChild(actions);
       const pathEl = document.createElement('div');
       pathEl.className = 'mounts-path';
-      pathEl.title = `${m.source || ''} → ${m.path}`;
-      pathEl.textContent = m.path;
+      // A credential-only row never mounts — its local path is meaningless;
+      // show the remote source instead.
+      pathEl.title = isCred ? (m.source || '') : `${m.source || ''} → ${m.path}`;
+      pathEl.textContent = isCred ? (m.source || '') : m.path;
       if (m.type && m.type !== 's3') {
         const tag = document.createElement('span');
         tag.className = 'mounts-typetag';
@@ -375,8 +385,8 @@ export function installSidebarMounts(Sidebar) {
       };
     },
 
-    // Add a mount point under a credential — the rclone remote:path model:
-    // the credential is the part before the colon, this adds the path.
+    // Add a submount under any storage — the rclone remote:path model:
+    // the parent connection is the part before the colon, this adds the path.
     _showAddChildDialog(cred) {
       const type = cred.type || 's3';
       const pathField = type === 's3' ? { key: 'bucket', label: tr('Bucket'), placeholder: 'bucket-name' }
@@ -384,8 +394,8 @@ export function installSidebarMounts(Sidebar) {
         : type === 'drive' ? { key: 'driveFolder', label: tr('Folder path'), placeholder: 'My Folder/sub' }
         : type === 'sftp' ? { key: 'sshPath', label: tr('Remote path'), placeholder: '/data' }
         : null;
-      if (!pathField) { showToast(tr('This credential type doesn’t support mount points'), { type: 'error' }); return; }
-      this._mountsDialog(tr('New mount point under "{name}"', { name: cred.name }), [
+      if (!pathField) { showToast(tr('This storage type doesn’t support submounts'), { type: 'error' }); return; }
+      this._mountsDialog(tr('New submount under "{name}"', { name: cred.name }), [
         { key: 'name', label: tr('Name'), value: `${cred.name}-`, placeholder: 'datasets' },
         { key: pathField.key, label: pathField.label, placeholder: pathField.placeholder },
         ...(type === 's3' ? [{ key: 'prefix', label: tr('Prefix (optional)'), placeholder: 'sub/path' }] : []),
