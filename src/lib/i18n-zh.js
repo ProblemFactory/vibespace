@@ -1402,6 +1402,7 @@ export default {
   "Full": "整行",
   "Full width": "整行宽",
   "Group by": "分组维度",
+  "Split series by": "序列拆分维度",
   "Half": "半行",
   "Half width": "半行宽",
   "Hour of day": "按小时",

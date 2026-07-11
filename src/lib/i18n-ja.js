@@ -1424,6 +1424,7 @@ export default {
   "Weekday": "曜日別",
   "Width": "幅",
   "Group by": "グループ化の軸",
+  "Split series by": "系列の分割軸",
   "Metrics": "指標（複数選択可）",
   "Model comparison": "モデル比較",
 };
