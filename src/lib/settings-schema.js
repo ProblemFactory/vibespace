@@ -149,7 +149,7 @@ const SETTINGS_SCHEMA = {
       { value: 'detach', label: t('Detach (keep alive)') },
     ],
     label: t('Window close behavior'),
-    description: t('What happens when closing a terminal window: terminate the session, or detach and keep it running'),
+    description: t('What happens when closing a session window: terminate the session, or detach and keep it running. Until you set this explicitly, plain shell terminals default to DETACH (they have no transcript to resume — closing would destroy them; detached ones stay in the sidebar, tmux-style) while agent sessions default to terminate.'),
     category: t('Window'), liveApply: true,
   },
   'window.activeHighlightIntensity': {

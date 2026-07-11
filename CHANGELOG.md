@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.108.7 — 2026-07-11
+
+**Shell terminals detach on close by default (user report: "创建terminal关闭就没了，这是预期吗？")** — it WAS the documented default (`window.closeBehavior: terminate`), but it's the wrong default for plain shells: an agent session resumes from its transcript, a shell has nothing to resume — terminate destroys it irrecoverably. Now, until the user sets closeBehavior explicitly, shell terminals DETACH on window close (dtach keeps them alive, they stay in the sidebar's LIVE list, restarts don't kill them — tmux semantics) while agent sessions keep the terminate default. An explicit setting overrides both. New `SettingsManager.isSet()` distinguishes user-set from schema-default (get() can't). Automation helper terminals (Log in / Update) still always terminate. Verified e2e: open → close → session alive + listed → reattach works.
+
 ## 2.108.6 — 2026-07-11
 
 **Robustness, phase 1 (user directive: "让后端稍微robust一点")**

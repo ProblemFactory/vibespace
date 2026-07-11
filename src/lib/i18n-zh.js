@@ -161,7 +161,6 @@ export default {
   'Per-spring config: {mode:"flex", weight:1-9} (strength = flex-grow share) or {mode:"fixed", px:N} (rigid spacer). Managed by Customize mode (click a spring).': '每个弹性间隔的配置：{mode:"flex", weight:1-9}（权重 = flex-grow 份额）或 {mode:"fixed", px:N}（固定间隔）。由自定义模式管理（点击间隔）。',
   'Briefly scale-bounce windows when focused from sidebar or taskbar': '从侧栏或任务栏聚焦窗口时短暂弹跳提示',
   'Allow tab bar to wrap into multiple rows when there are many tabs (like a flow layout)': '标签很多时允许标签栏换行为多行（流式布局）',
-  'What happens when closing a terminal window: terminate the session, or detach and keep it running': '关闭终端窗口时的行为：终止会话，或分离并保持运行',
   'How prominently the focused window is highlighted (subtle = shadow only, normal = accent border, strong = border + glow)': '聚焦窗口的高亮强度（轻微 = 仅阴影，普通 = 强调色边框，强烈 = 边框 + 光晕）',
   'Auto-adjust text colors to meet this contrast ratio (4.5 = WCAG AA). Set to 1 to disable.': '自动调整文字颜色以满足此对比度（4.5 = WCAG AA）。设为 1 禁用。',
   "Prevent Claude's OSC title updates from overwriting user-set session names": '阻止 Claude 的 OSC 标题更新覆盖用户设置的会话名称',
@@ -1516,4 +1515,5 @@ export default {
   'Add a submount (a specific bucket/path of this storage)': '添加子挂载(此存储下的具体 bucket/路径)',
   'This storage type doesn’t support submounts': '该存储类型不支持子挂载',
   'New submount under "{name}"': '在 "{name}" 下新建子挂载',
+  'What happens when closing a session window: terminate the session, or detach and keep it running. Until you set this explicitly, plain shell terminals default to DETACH (they have no transcript to resume — closing would destroy them; detached ones stay in the sidebar, tmux-style) while agent sessions default to terminate.': '关闭会话窗口时的行为：终止会话，或分离并保持运行。在你显式设置之前，纯 shell 终端默认「分离」（它们没有可恢复的记录——终止即彻底丢失；分离后留在侧边栏，类似 tmux），agent 会话默认「终止」。',
 };

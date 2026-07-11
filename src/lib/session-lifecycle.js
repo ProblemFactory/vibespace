@@ -167,7 +167,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           // throwaway — closing the window should terminate them directly,
           // never leave a detached login shell lingering, regardless of the
           // global close-behavior setting.
-          this._wireTerminalWindow(winInfo, term, msg.sessionId, { ephemeral: ephemeral || !!initialCommand });
+          this._wireTerminalWindow(winInfo, term, msg.sessionId, { ephemeral: ephemeral || !!initialCommand, backend });
           // Type a starter command for the user (shell terminals: login helpers
           // etc.) once the shell has had a beat to print its prompt
           if (initialCommand) {
@@ -182,12 +182,21 @@ export function installSessionLifecycle(App, ctx = {}) {
     this.ws.onGlobal(handler);
   },
 
-  _wireTerminalWindow(winInfo, term, sessionId, { killOnClose = true, ephemeral = false } = {}) {
+  _wireTerminalWindow(winInfo, term, sessionId, { killOnClose = true, ephemeral = false, backend = 'claude' } = {}) {
     winInfo._ephemeral = ephemeral;
     winInfo.onClose = () => {
       // ephemeral (automation helper) terminals always terminate on close;
-      // otherwise honor the global close-behavior (terminate vs detach)
-      const shouldKill = ephemeral || (killOnClose && (this.settings.get('window.closeBehavior') ?? 'terminate') === 'terminate');
+      // otherwise honor the global close-behavior (terminate vs detach).
+      // SHELL terminals default to DETACH when the user never set the option
+      // (real report: "关闭就没了"): a shell has no transcript/resume path, so
+      // terminating on close destroys it irrecoverably — detached it stays in
+      // the sidebar's LIVE list (dtach, survives restarts), tmux-style. Agent
+      // sessions keep the terminate default (they resume from transcripts).
+      // An EXPLICIT user setting overrides the per-type default either way.
+      const behavior = this.settings.isSet('window.closeBehavior')
+        ? this.settings.get('window.closeBehavior')
+        : (backend === 'shell' ? 'detach' : 'terminate');
+      const shouldKill = ephemeral || (killOnClose && behavior === 'terminate');
       if (shouldKill) this.ws.send({ type: 'kill', sessionId });
       term.dispose(); this.sessions.delete(winInfo.id); this._checkWelcome();
     };
@@ -286,7 +295,7 @@ export function installSessionLifecycle(App, ctx = {}) {
             term._replaying = true;
             setTimeout(() => { term.terminal.write(buf, () => { term._suppressWaiting = false; term._replaying = false; term.terminal.scrollToBottom(); term.fit(); }); }, 300);
           }
-          this._wireTerminalWindow(winInfo, term, serverId);
+          this._wireTerminalWindow(winInfo, term, serverId, { backend });
           term.focus();
         }
         this.ws.offGlobal(handler);
