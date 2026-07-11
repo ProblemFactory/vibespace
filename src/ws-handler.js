@@ -16,6 +16,13 @@ function getSessionKey(session = {}) {
   return backendSessionId ? `${backend}:${backendSessionId}` : '';
 }
 
+// Terminal QUERY-RESPONSE sequences xterm.js auto-emits when an app queries the
+// terminal: CPR/DECXCPR (\e[n;mR), DA1/DA2 (\e[?…c / \e[>…c), DSR-ok (\e[0n),
+// DECRPM (\e[?n;m$y), OSC 4/10/11/12 color reports, DCS replies (XTVERSION/
+// XTGETTCAP/DECRQSS/DA3). Used by the 'input' case to arbitrate multi-client
+// answers — keep in sync with TERM_QUERY_RESP_RE in src/lib/terminal.js.
+const TERM_QUERY_RESP_RE = /\x1b\[\??\d+(?:;\d+){0,2}R|\x1b\[[?>][\d;]*c|\x1b\[0n|\x1b\[\?\d+;\d+\$y|\x1b\](?:4|1[0-2]);[^\x07\x1b]*(?:\x07|\x1b\\)|\x1bP[^\x1b]*\x1b\\/g;
+
 function safeJsonParse(text, fallback = null) {
   try { return JSON.parse(text); } catch { return fallback; }
 }
@@ -668,7 +675,25 @@ function registerWsHandler(wss, ctx) {
 
         case 'input': {
           const session = activeSessions.get(data.sessionId);
-          if (session?.pty) session.pty.write(data.data);
+          if (!session?.pty) break;
+          // Terminal query-response arbitration: with dtach every attached
+          // browser client is a full terminal emulator, so an app's query
+          // (\e[6n cursor pos, \e]11;? bg color, DA…) is answered by EVERY
+          // client — the app consumes one answer and the tty ECHOES the extras
+          // as literal "^[]11;rgb:…^[[3;1R" junk at the prompt (real report,
+          // 2 clients attached). Responses are pure well-known sequences that
+          // never share a chunk with typed input: forward them only from ONE
+          // designated client (the size owner, else the oldest attached).
+          // Known collision (accepted): modified-F3 is \e[1;2R = CPR shape —
+          // a non-owner client's Shift+F3 in a multi-client session is eaten.
+          const chunk = data.data;
+          if (typeof chunk === 'string' && session.clients?.size > 1
+              && chunk.includes('\x1b') && !chunk.replace(TERM_QUERY_RESP_RE, '')) {
+            const owner = (session._sizeOwnerWs && session.clients.has(session._sizeOwnerWs))
+              ? session._sizeOwnerWs : session.clients.keys().next().value;
+            if (owner && owner !== ws) break;
+          }
+          session.pty.write(chunk);
           break;
         }
 

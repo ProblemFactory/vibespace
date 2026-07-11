@@ -256,7 +256,10 @@ export function installSetupFlows(App) {
   },
 
     async _openDiagnostics() {
-    const d = await fetchJson('/api/telemetry/summary?days=14');
+    const [d, c] = await Promise.all([
+      fetchJson('/api/telemetry/summary?days=14'),
+      fetchJson('/api/telemetry/central-summary?days=14'),
+    ]);
     if (!d) { showToast(t('Could not load diagnostics'), { type: 'error' }); return; }
     const esc = escHtml;
     const kv = (obj) => Object.entries(obj || {}).map(([k, v]) =>
@@ -289,6 +292,19 @@ export function installSetupFlows(App) {
     <h2>${esc(t('Events per day'))}</h2><div class="chart">${bars || `<span class="dim">${esc(t('No data'))}</span>`}</div>
     <h2>${esc(t('By event'))}</h2><table>${kv(d.byName)}</table>
     <h2>${esc(t('By version'))}</h2><table>${kv(d.byVersion)}</table>
+    ${(() => {
+      // Fleet section: only on a collector instance that has received batches.
+      if (!c || !c.collector || !Object.keys(c.instances || {}).length) return '';
+      const rows = Object.entries(c.instances).map(([id, g]) =>
+        `<tr><td>${esc(id)}</td><td class="n">${g.total}</td><td class="n">${g.errors}</td><td>${esc(Object.keys(g.versions || {}).join(', '))}</td><td class="dim">${new Date(g.lastTs).toLocaleString()}</td></tr>`).join('');
+      const ferrs = (c.errors || []).map((e) =>
+        `<details><summary><b>${esc(e.name || '?')}</b> ×${e.count} <span class="dim">— ${esc(Object.keys(e.instances || {}).join(', '))} · ${new Date(e.lastTs).toLocaleString()}${e.version ? ' · v' + esc(e.version) : ''}</span></summary><pre>${esc(e.stack || e.detail || t('(no stack)'))}</pre></details>`).join('')
+        || `<p class="dim">${esc(t('No errors recorded — nothing crashed in this window.'))}</p>`;
+      return `<h2>${esc(t('Fleet (central collector)'))}</h2>
+      <p class="dim">${esc(t('Batches forwarded by other instances. Total events: {n}.', { n: c.total }))}</p>
+      <table><tr><td class="dim">${esc(t('instance'))}</td><td class="n dim">${esc(t('events'))}</td><td class="n dim">${esc(t('errors'))}</td><td class="dim">${esc(t('versions'))}</td><td class="dim">${esc(t('last seen'))}</td></tr>${rows}</table>
+      <h2>${esc(t('Fleet errors'))}</h2>${ferrs}`;
+    })()}
     </body>`;
     this.openBrowser(URL.createObjectURL(new Blob([html], { type: 'text/html' })));
   },

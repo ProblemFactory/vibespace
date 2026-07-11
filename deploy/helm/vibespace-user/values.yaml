@@ -38,6 +38,19 @@ resources:
 nodeSelector: {}
 tolerations: []
 
+# Fleet telemetry (optional). forwardUrl/forwardToken make THIS instance ship
+# its anonymous diagnostics batches (error names/stacks/metrics — never
+# content) to a central collector; ingestToken turns THIS instance INTO the
+# collector (enables POST /api/telemetry/ingest + the Fleet section in its
+# ⚙ → Diagnostics report). Point forwardUrl at
+#   https://<collector-host>/api/telemetry/ingest
+# and use ONE shared token as both the collector's ingestToken and every
+# sender's forwardToken.
+telemetry:
+  forwardUrl: ""
+  forwardToken: ""
+  ingestToken: ""
+
 # Agent-container egress lockdown (needs a NetworkPolicy-enforcing CNI). OFF by
 # default — enable once you've set the allow-lists for YOUR network.
 networkPolicy:

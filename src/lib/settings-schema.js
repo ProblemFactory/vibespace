@@ -312,6 +312,12 @@ const SETTINGS_SCHEMA = {
     description: t('Optional, for team deployments: POST event batches (with an anonymous per-instance id) to this URL so one maintainer can see errors across all instances. Leave empty to keep everything local.'),
     category: t('Session'), liveApply: true,
   },
+  'telemetry.forwardToken': {
+    type: 'text', default: '',
+    label: t('Central collector token'),
+    description: t('Sent as a Bearer Authorization header with forwarded batches when the collector requires a shared token (a VibeSpace collector always does). Leave empty if none is required.'),
+    category: t('Session'), liveApply: true,
+  },
   'accounts.activeUsagePolling': {
     type: 'boolean', default: false, confirmOn: true,
     label: t('⚠ Actively poll subscription usage (automation risk)'),
