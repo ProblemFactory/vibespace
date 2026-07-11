@@ -48,14 +48,6 @@ spec:
   template:
     metadata:
       labels: {{- include "vs.labels" . | nindent 8 }}
-      {{- if .Values.fuse.enabled }}
-      # fuse's third gate (after the device + setuid fusermount3): the
-      # containerd default AppArmor profile DENIES mount even with
-      # CAP_SYS_ADMIN in the bounding set — verified live (Seccomp=0,
-      # CapBnd includes SYS_ADMIN, still EPERM until unconfined).
-      annotations:
-        container.apparmor.security.beta.kubernetes.io/vibespace: unconfined
-      {{- end }}
     spec:
       # No cluster credentials inside an agent container.
       automountServiceAccountToken: false
@@ -75,11 +67,17 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           {{- if .Values.fuse.enabled }}
-          # fuse mounts need the device (resource below) AND CAP_SYS_ADMIN in
-          # the container's namespace — still far short of privileged.
+          # fuse needs THREE gates opened (all verified live, one by one):
+          # the /dev/fuse device (resource below), CAP_SYS_ADMIN in the
+          # bounding set (setuid fusermount3 transitions into it), and
+          # AppArmor unconfined — the containerd default profile denies
+          # mount() even with the cap. K8s ≥1.30 GA field; the old beta
+          # annotation is REMOVED on 1.35 and silently did nothing.
           securityContext:
             capabilities:
               add: ["SYS_ADMIN"]
+            appArmorProfile:
+              type: Unconfined
           {{- end }}
           ports:
             - containerPort: 3456
