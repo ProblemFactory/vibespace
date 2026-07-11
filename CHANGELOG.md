@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.108.5 — 2026-07-11
+
+**Self-mount guard (real incident: "test-share 打开就卡住")** — a VibeSpace bridge share minted by an instance and then imported back into the SAME instance mounts its own `/dav` through fuse: every file op becomes fuse → HTTP → the same node process → threadpool → waiting on fuse — a self-referential loop that deadlocks under a couple of concurrent ops. Bridge tokens are minted locally, so the check is trivial: a bearer token found in OUR OWN token store means the link points back at us. Refused in all three places with "open the shared folder directly instead": add, share-link import, and mount() of pre-existing records (the user's imported test share now shows the explanation instead of freezing).
+
 ## 2.108.4 — 2026-07-11
 
 **Hung-mount defense, part 2 — close the pile-up window.** 2.108.3's watchdog reclaims a dead mount, but during the ~6s connect-probe window an open file-explorer window pointed at the mountpoint could still stuff the libuv threadpool with never-returning fs ops — the server then degraded for minutes while they drained (real follow-up incident: user clicked Connect on the unreachable-host mount, instance stalled again). Now:

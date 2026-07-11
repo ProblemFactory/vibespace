@@ -454,6 +454,12 @@ class MountManager {
       case 'vibespace': {
         // another VibeSpace instance's /dav bridge — webdav + scoped bearer token
         for (const k of ['url', 'bearerToken']) if (!cfg[k]) throw new Error(`${k} required`);
+        // Self-mount guard: a token WE minted means the link points back at
+        // THIS instance — fuse→HTTP→self is a threadpool deadlock loop (real
+        // incident: a self-imported test share froze the instance on open).
+        if (this.selfTokenCheck?.(String(cfg.bearerToken))) {
+          throw new Error('This share link was minted by THIS VibeSpace — mounting your own share back onto yourself deadlocks the server. Open the shared folder directly instead.');
+        }
         Object.assign(m, { url: String(cfg.url).replace(/\/+$/, ''), bearerTokenEnc: this._enc(cfg.bearerToken) });
         break;
       }
@@ -819,6 +825,16 @@ class MountManager {
   async mount(id) {
     const m = this._get(id);
     if (this.isMounted(m)) { m.desired = 'mounted'; this._save(); this._notify(); return; }
+    // Self-mount guard for EXISTING records too (imported before the add()
+    // guard existed): our own bridge token = the URL points back at this
+    // instance — refuse instead of fuse-mounting a self-referential loop.
+    if (m.type === 'vibespace' && m.bearerTokenEnc && this.selfTokenCheck?.(this._dec(m.bearerTokenEnc))) {
+      this._errors.set(id, 'this share was minted by this same VibeSpace (self-mount deadlocks the server) — open the shared folder directly instead');
+      m.desired = 'unmounted';
+      this._save();
+      this._notify();
+      return false;
+    }
     // Credential model (user-refined): a credential IS the rclone remote (the
     // part before the colon); a mount is remote:path. A credential itself IS
     // mountable when its token can reach the remote's root (Google Drive,
