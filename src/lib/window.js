@@ -241,6 +241,17 @@ class WindowManager {
       initL = element.offsetLeft; initT = element.offsetTop;
       shiftDragStart = -1;
       resetShake(e);
+      // TEMP DIAG (snap-drift hunt, remove after): trace snapped/maximized drags
+      win.__dragDiag = (win._isSnapped || win.isMaximized) ? {
+        frames: [],
+        meta: JSON.stringify({
+          id: win.id, snapped: !!win._isSnapped, max: !!win.isMaximized,
+          grid: !!this.grid, chain: !!win._tabChain, dpr: window.devicePixelRatio,
+          vvs: window.visualViewport?.scale, ps: win._preSnapBounds,
+          w: element.offsetWidth, h: element.offsetHeight, sx: e.clientX, sy: e.clientY,
+          il: element.offsetLeft, it: element.offsetTop,
+        }),
+      } : null;
       e.preventDefault();
     });
 
@@ -256,10 +267,17 @@ class WindowManager {
         if (!win._preSnapBounds) {
           win._preSnapBounds = { width: element.style.width, height: element.style.height, left: element.style.left, top: element.style.top };
         }
+        // COORDINATE SPACES (the drag-drift bug, diagnosed from a live trace):
+        // e.clientX/Y are VIEWPORT coords; style.left/top are WORKSPACE coords
+        // (offset by the sidebar + toolbar). Every "center on cursor" re-anchor
+        // must convert — raw clientX landed the window a full sidebar-width
+        // away from the pointer whenever the sidebar was open, then it tracked
+        // parallel at that offset for the whole drag.
+        const wsr = this.workspace.getBoundingClientRect();
         if (win.isMaximized) {
           const prev = win.prevBounds, prevW = parseInt(prev.width) || 700;
           win.isMaximized = false; element.style.width = prev.width; element.style.height = prev.height;
-          element.style.left = (e.clientX - prevW * (e.clientX / this.workspace.offsetWidth)) + 'px'; element.style.top = '0px';
+          element.style.left = ((e.clientX - wsr.left) - prevW * (e.clientX / this.workspace.offsetWidth)) + 'px'; element.style.top = '0px';
           initL = element.offsetLeft; initT = element.offsetTop;
           startX = e.clientX; startY = e.clientY;
         }
@@ -267,12 +285,13 @@ class WindowManager {
         if (win._isSnapped && win._preSnapBounds) {
           const ps = win._preSnapBounds;
           element.style.width = ps.width; element.style.height = ps.height;
-          // Center on cursor
-          initL = e.clientX - (parseInt(ps.width) || 350) / 2;
-          initT = e.clientY - 15;
+          // Center on cursor (in workspace space)
+          initL = (e.clientX - wsr.left) - (parseInt(ps.width) || 350) / 2;
+          initT = (e.clientY - wsr.top) - 15;
           element.style.left = initL + 'px'; element.style.top = initT + 'px';
           startX = e.clientX; startY = e.clientY;
           win._isSnapped = false;
+          if (win.__dragDiag) win.__dragDiag.frames.push('UNSNAP');
         }
         element.classList.add('dragging');
         if (this.grid) this.gridOverlay.classList.add('dragging');
@@ -286,6 +305,10 @@ class WindowManager {
       // "snapped window drifts away from the pointer").
       element.style.left = (initL + (e.clientX - startX)) + 'px';
       element.style.top = (initT + (e.clientY - startY)) + 'px';
+      // TEMP DIAG (snap-drift hunt): cursor, anchors, applied vs actual position
+      if (win.__dragDiag && win.__dragDiag.frames.length < 300) {
+        win.__dragDiag.frames.push([e.clientX, e.clientY, startX, startY, Math.round(initL), Math.round(initT), element.offsetLeft, element.offsetTop].join(','));
+      }
 
       // Shake detection runs on the raw cursor path (before any snap decision).
       updateShake(e);
@@ -342,9 +365,10 @@ class WindowManager {
         if (savedBounds) {
           element.style.left = savedBounds.left; element.style.top = savedBounds.top;
           element.style.width = savedBounds.width; element.style.height = savedBounds.height;
-          // Re-sync position to cursor
-          initL = e.clientX - (parseInt(savedBounds.width) || 350) / 2;
-          initT = e.clientY - 15;
+          // Re-sync position to cursor (workspace space — see the un-snap note)
+          const wr2 = this.workspace.getBoundingClientRect();
+          initL = (e.clientX - wr2.left) - (parseInt(savedBounds.width) || 350) / 2;
+          initT = (e.clientY - wr2.top) - 15;
           element.style.left = initL + 'px'; element.style.top = initT + 'px';
           startX = e.clientX; startY = e.clientY;
           savedBounds = null;
@@ -390,8 +414,10 @@ class WindowManager {
         const srcRect = document.querySelector(`.desktop-preview.active .desktop-preview-win[data-win-id="${win.id}"]`);
         if (srcRect) srcRect.style.visibility = '';
         if (deskSavedBounds) {
-          initL = e.clientX - (parseInt(deskSavedBounds.width) || 350) / 2;
-          initT = e.clientY - 15;
+          // workspace space, not viewport — see the un-snap note
+          const wr3 = this.workspace.getBoundingClientRect();
+          initL = (e.clientX - wr3.left) - (parseInt(deskSavedBounds.width) || 350) / 2;
+          initT = (e.clientY - wr3.top) - 15;
           element.style.left = initL + 'px'; element.style.top = initT + 'px';
           element.style.width = deskSavedBounds.width; element.style.height = deskSavedBounds.height;
           startX = e.clientX; startY = e.clientY;
@@ -439,6 +465,18 @@ class WindowManager {
       if (moveRaf) { cancelAnimationFrame(moveRaf); moveRaf = 0; pendingMoveEv = null; }
       if (!mouseDown) return;
       mouseDown = false;
+      // TEMP DIAG (snap-drift hunt): ship the trace regardless of drop path
+      if (win.__dragDiag && win.__dragDiag.frames.length) {
+        try {
+          const d = win.__dragDiag; win.__dragDiag = null;
+          const events = [{ kind: 'event', name: 'drag-trace-meta', detail: d.meta }];
+          const all = d.frames.join(';');
+          for (let i = 0; i < all.length && events.length < 18; i += 1900) {
+            events.push({ kind: 'event', name: 'drag-trace-' + Math.floor(i / 1900), detail: all.slice(i, i + 1900) });
+          }
+          fetch('/api/telemetry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ events }) }).catch(() => {});
+        } catch { }
+      }
       if (!dragging) return;
       dragging = false; element.classList.remove('dragging');
       clearShakeBadge(); // remove the "snap off" indicator (all drop paths below may early-return)

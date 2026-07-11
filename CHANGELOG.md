@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.100.3 — 2026-07-11
+
+**Drag drift: the REAL fix (coordinate-space mixup, diagnosed from a live trace)**
+- 2.100.2's stale-dx fix was correct but not the reported bug. A temporary drag tracer (frames shipped via telemetry from the user's own drag) showed the tracking math was perfect — in the wrong coordinate space: every "center on cursor" re-anchor wrote **viewport** `e.clientX/Y` into **workspace-relative** `style.left/top`. With the sidebar open the window landed a full sidebar-width (~260px) away from the pointer the instant it left its snap, then tracked parallel at that offset — invisible with the sidebar closed, which is why it survived so long.
+- Fixed by converting the cursor into workspace space at all seven re-anchor sites: window.js un-snap, un-maximize, merge-ghost leave, desktop-preview leave; tab-group.js tab detach, cursor-follow, merge-leave (tab drag-out had the same parallel-offset bug).
+- The diagnostic tracer stays in this build for one confirmation round (snapped/maximized drags only, auto-ships frames on mouseup); removed next release.
+
 ## 2.100.2 — 2026-07-11
 
 **Desktop-preview staleness + snapped-window drag drift**
