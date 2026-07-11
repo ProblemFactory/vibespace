@@ -341,9 +341,12 @@ const tabGroupMethods = {
         // Raise to front so the detached window isn't hidden behind others
         // (especially the original tab chain host it came from).
         this.focusWindow(winId);
+        // clientX/Y are viewport coords, style.left/top are workspace coords
+        // (sidebar/toolbar offset) — same fix as window.js's un-snap re-anchor
         const w = parseInt(win.element.style.width) || 700;
-        win.element.style.left = (e.clientX - w / 2) + 'px';
-        win.element.style.top = (e.clientY - 15) + 'px';
+        const wr0 = this.workspace.getBoundingClientRect();
+        win.element.style.left = ((e.clientX - wr0.left) - w / 2) + 'px';
+        win.element.style.top = ((e.clientY - wr0.top) - 15) + 'px';
         win.element.classList.add('dragging');
         if (this.grid) this.gridOverlay.classList.add('dragging');
       }
@@ -388,9 +391,12 @@ const tabGroupMethods = {
         mergeGhost.style.top = (e.clientY + 12) + 'px';
       } else {
         // Not in merge zone: window follows cursor + snap/grid indicators
+        // (cursor converted to workspace space — viewport coords drift by the
+        // sidebar width otherwise)
         const w = parseInt(win.element.style.width) || 700;
-        win.element.style.left = (e.clientX - w / 2) + 'px';
-        win.element.style.top = (e.clientY - 15) + 'px';
+        const wr1 = this.workspace.getBoundingClientRect();
+        win.element.style.left = ((e.clientX - wr1.left) - w / 2) + 'px';
+        win.element.style.top = ((e.clientY - wr1.top) - 15) + 'px';
         if (!e.altKey) {
           if (this.grid) this._showGridHighlight(e.clientX, e.clientY);
           else this._showSnap(e.clientX, e.clientY);
@@ -445,9 +451,11 @@ const tabGroupMethods = {
           savedBounds = null;
         }
         // Reposition to cursor since window was hidden during merge hover
+        // (workspace space — see the detach-site note)
         const w = parseInt(win.element.style.width) || 700;
-        win.element.style.left = (e.clientX - w / 2) + 'px';
-        win.element.style.top = (e.clientY - 15) + 'px';
+        const wr2 = this.workspace.getBoundingClientRect();
+        win.element.style.left = ((e.clientX - wr2.left) - w / 2) + 'px';
+        win.element.style.top = ((e.clientY - wr2.top) - 15) + 'px';
       }
       savedBounds = null;
 
