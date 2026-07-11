@@ -116,6 +116,13 @@ class ChatView {
       this._searchBarObserver.observe(this._search._bar, { attributes: true, attributeFilter: ['class'] });
     });
 
+    // Scroll-jump tracer (TEMPORARY diagnostic — user report: paging up still
+    // jumps). Every scroll-affecting path below records into a ring buffer;
+    // an unexplained scrollTop jump (>600px with no recent wheel/touch and no
+    // expected compensation window) ships the buffer to /api/telemetry as
+    // kind:'trace' name:'chat-scroll-jump'. Remove once the jump is fixed.
+    this._installScrollTracer();
+
     // Renderers (extracted rendering methods)
     this._renderers = new ChatRenderers({
       ws: wsManager,
@@ -676,7 +683,9 @@ class ChatView {
       // Trim bottom if DOM window too large (keep max ~150 rendered messages)
       this._trimBottom();
 
+      this._trace('extendTop', { ws: newStart, n: msgs.length, st0: Math.round(this._messageList.scrollTop), sh0: scrollHeightBefore, sh1: this._messageList.scrollHeight });
       // Preserve scroll position
+      this._traceExpect();
       this._messageList.scrollTop += (this._messageList.scrollHeight - scrollHeightBefore);
       // Fold the freshly loaded cards NOW, inside the same task as the scroll
       // compensation — the observer's debounced pass (180ms) used to collapse
@@ -684,6 +693,7 @@ class ChatView {
       // sentinel in a load loop. _updateRuns anchors the viewport itself, so
       // the later debounced pass becomes a height no-op.
       this._updateRuns();
+      this._trace('extendTop:done', { st: Math.round(this._messageList.scrollTop), sh: this._messageList.scrollHeight });
       if (this._search?.hasHighlight) this._search.applyHighlightLayer();
     } finally {
       setTimeout(() => { this._loading = false; }, 300);
@@ -876,6 +886,7 @@ class ChatView {
 
       // Same-task fold of the newly appended cards (see _extendTop)
       this._updateRuns();
+      this._trace('extendBottom', { we: end, n: msgs.length, st: Math.round(this._messageList.scrollTop) });
       // Newly rendered messages need the search highlight re-applied
       if (this._search?.hasHighlight) this._search.applyHighlightLayer();
     } finally {
@@ -896,6 +907,7 @@ class ChatView {
     }
     if (removedIds.size) this._messages = this._messages.filter(m => !removedIds.has(m.id));
     this._windowEnd -= toRemove;
+    this._trace('trimBottom', { removed: toRemove });
     this._pinned = false; // we trimmed the bottom, can't be pinned
   }
 
@@ -916,12 +928,16 @@ class ChatView {
     }
     if (removedIds.size) this._messages = this._messages.filter(m => !removedIds.has(m.id));
     this._windowStart += toRemove;
+    this._trace('trimTop', { removed: toRemove });
     // Preserve scroll position after removing from top
+    this._traceExpect();
     this._messageList.scrollTop -= (scrollHeightBefore - this._messageList.scrollHeight);
   }
 
   // Jump to a specific message index: replace window entirely
   async jumpToIndex(targetIdx) {
+    this._trace('jumpToIndex', { idx: targetIdx });
+    this._traceExpect();
     const windowSize = 50;
     const start = Math.max(0, targetIdx - 20);
     const end = Math.min(this._total, start + windowSize);
@@ -1876,6 +1892,49 @@ class ChatView {
   // them — without this, invisible empty-thinking stubs wedged between real
   // cards silently broke every run. An open search bar expands everything
   // (search reveal must be able to scroll to any member).
+  // ── Scroll-jump tracer (temporary diagnostic) ──
+  _trace(ev, data) {
+    const b = (this._traceBuf = this._traceBuf || []);
+    b.push({ t: Math.round(performance.now()), ev, ...data });
+    if (b.length > 250) b.shift();
+  }
+
+  /** Mark a short window in which a programmatic scrollTop change is EXPECTED
+   *  (compensation/jump code) so the detector doesn't fire on our own writes. */
+  _traceExpect() { this._traceExpectAt = performance.now(); }
+
+  _installScrollTracer() {
+    const list = this._messageList;
+    let lastSt = 0;
+    let lastDump = 0;
+    list.addEventListener('wheel', (e) => {
+      this._traceWheelAt = performance.now();
+      this._trace('wheel', { dy: Math.round(e.deltaY) });
+    }, { passive: true });
+    list.addEventListener('touchmove', () => { this._traceWheelAt = performance.now(); }, { passive: true });
+    list.addEventListener('scroll', () => {
+      const st = list.scrollTop;
+      const d = st - lastSt;
+      const now = performance.now();
+      this._trace('scroll', { st: Math.round(st), d: Math.round(d), sh: list.scrollHeight });
+      const userRecent = now - (this._traceWheelAt || 0) < 300;
+      const expected = now - (this._traceExpectAt || 0) < 300;
+      if (Math.abs(d) > 600 && !userRecent && !expected && !this._pinned
+          && now - lastDump > 30000 && (this._traceBuf?.length || 0) > 10) {
+        lastDump = now;
+        this._trace('JUMP', { d: Math.round(d) });
+        const payload = JSON.stringify({ sid: this.sessionId, jump: Math.round(d), buf: this._traceBuf });
+        try {
+          fetch('/api/telemetry', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ events: [{ kind: 'trace', name: 'chat-scroll-jump', detail: payload.slice(0, 64000) }] }),
+          }).catch(() => {});
+        } catch {}
+      }
+      lastSt = st;
+    }, { passive: true });
+  }
+
   _updateRuns() {
     const list = this._messageList;
     if (!list || this._disposed) return;
@@ -1989,7 +2048,12 @@ class ChatView {
         let a = anchorEl;
         while (a && a.offsetParent === null) a = a.previousElementSibling;
         if (!a) { a = anchorEl; while (a && a.offsetParent === null) a = a.nextElementSibling; }
-        if (a) list.scrollTop = a === anchorEl ? a.offsetTop - anchorDelta : a.offsetTop;
+        if (a) {
+          const stBefore = list.scrollTop;
+          this._traceExpect();
+          list.scrollTop = a === anchorEl ? a.offsetTop - anchorDelta : a.offsetTop;
+          if (Math.abs(list.scrollTop - stBefore) > 1) this._trace('runsRestore', { same: a === anchorEl, from: Math.round(stBefore), to: Math.round(list.scrollTop) });
+        }
       }
       // Drain OUR OWN mutation records: the observer callback is delivered at
       // a microtask checkpoint AFTER this finally resets _runsMutating, so the

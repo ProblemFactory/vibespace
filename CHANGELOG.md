@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.111.4 — 2026-07-11
+
+- **Sidebar localization pass (user reports)**: the Folders tab zone headers (Active / Recent / History), "No running sessions" and the other workbench empty states, and the Remote tab's action rows (Add machine / Connect storage / Import share link / Import rclone config / Share a local folder), Bridge tokens section, Revoke buttons+confirms, and the footer notes are now translated (zh/ja).
+- **Storage rows**: dropped the `→` arrow between the type tag and the mount path (user request) — the line is now `[Type] /path`.
+- **TEMPORARY: chat scroll-jump tracer.** Paging up in chat still occasionally jumps; every scroll-affecting path (extendTop/Bottom, trims, run-fold anchor restores, gap slabs, jumps) now records into a per-view ring buffer, and an unexplained scrollTop jump (>600px with no recent wheel and no expected compensation) ships the buffer to telemetry as `chat-scroll-jump` (kind `trace`, 64KB detail). Zero overhead beyond object pushes; remove after diagnosis.
+
 ## 2.111.3 — 2026-07-11
 
 - **Update dialog on the latest version now shows this version's changelog** instead of an empty "already latest" line (user request): the `/api/changelog-diff` endpoint returns the current version's own entry when nothing newer exists, and the dialog renders it under "What's in this version" with a *Latest version* tag.

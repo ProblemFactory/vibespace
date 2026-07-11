@@ -80,7 +80,7 @@ export function installSidebarMounts(Sidebar) {
       }
       const addHost = document.createElement('button');
       addHost.className = 'mounts-action';
-      addHost.innerHTML = `<span class="mounts-action-icon">${MI.server}</span><span>Add machine</span>`;
+      addHost.innerHTML = `<span class="mounts-action-icon">${MI.server}</span><span>${escHtml(tr('Add machine'))}</span>`;
       addHost.onclick = () => this._showAddHostDialog(hd);
       root.appendChild(addHost);
 
@@ -114,7 +114,7 @@ export function installSidebarMounts(Sidebar) {
       const list = document.createElement('div');
       list.className = 'mounts-list';
       if (!d.mounts.length) {
-        list.innerHTML = `<div class="mounts-empty">Nothing connected yet. Click “Connect storage” below to add a cloud folder (S3, Google Drive, Nextcloud, SFTP…), or “Import share link” to open a folder someone shared with you.</div>`;
+        list.innerHTML = `<div class="mounts-empty">${escHtml(tr('Nothing connected yet. Click “Connect storage” below to add a cloud folder (S3, Google Drive, Nextcloud, SFTP…), or “Import share link” to open a folder someone shared with you.'))}</div>`;
       }
       // Credentials render as parent rows with their mount points nested under
       // them; standalone mounts render flat as before.
@@ -143,9 +143,9 @@ export function installSidebarMounts(Sidebar) {
           row.innerHTML = `<span class="mounts-share-text"><b>${escHtml(s.name)}</b><span>${escHtml(s.prefix || s.bucket)} · ${s.mode === 'ro' ? 'Read-only' : 'Read-write'} · ${s.method === 'sts' ? 'expires in 7 days' : 'no expiry'}${exp}</span></span>`;
           const rm = document.createElement('button');
           rm.className = 'mounts-btn mounts-btn-danger';
-          rm.textContent = 'Revoke';
+          rm.textContent = tr('Revoke');
           rm.onclick = async () => {
-            const ok = await showConfirmDialog({ title: 'Revoke share?', message: `Everyone who imported "${s.name}" loses access immediately.`, confirmText: 'Revoke', danger: true });
+            const ok = await showConfirmDialog({ title: tr('Revoke share?'), message: tr('Everyone who imported "{name}" loses access immediately.', { name: s.name }), confirmText: tr('Revoke'), danger: true });
             if (!ok) return;
             try { await api(`/api/mounts/shares/${s.id}`, { method: 'DELETE' }); showToast('Share revoked'); }
             catch (e) { showToast(e.message || 'Failed', { type: 'error' }); }
@@ -170,10 +170,10 @@ export function installSidebarMounts(Sidebar) {
         return b;
       };
       foot.append(
-        action(MI.plus, 'Connect storage', () => this._showAddMountDialog()),
-        action(MI.importL, 'Import share link', () => this._showImportShareDialog()),
-        action(MI.importL, 'Import rclone config', () => this._showRcloneConfDialog()),
-        action(MI.server, 'Share a local folder', () => this._showBridgeShareDialog(), {
+        action(MI.plus, tr('Connect storage'), () => this._showAddMountDialog()),
+        action(MI.importL, tr('Import share link'), () => this._showImportShareDialog()),
+        action(MI.importL, tr('Import rclone config'), () => this._showRcloneConfDialog()),
+        action(MI.server, tr('Share a local folder'), () => this._showBridgeShareDialog(), {
           title: 'Create a link that lets another VibeSpace open a folder from this computer.',
         }),
       );
@@ -182,16 +182,16 @@ export function installSidebarMounts(Sidebar) {
       if ((d.mountTokens || []).length) {
         const bt = document.createElement('div');
         bt.className = 'mounts-shares';
-        bt.innerHTML = '<div class="mounts-sec-head">Bridge tokens</div>';
+        bt.innerHTML = `<div class="mounts-sec-head">${escHtml(tr('Bridge tokens'))}</div>`;
         for (const t of d.mountTokens) {
           const row = document.createElement('div');
           row.className = 'mounts-share-row';
           row.innerHTML = `<span class="mounts-share-text"><b>${escHtml(t.name)}</b><span>${escHtml(t.root)} · ${t.mode === 'ro' ? 'Read-only' : 'Read-write'}</span></span>`;
           const rm = document.createElement('button');
           rm.className = 'mounts-btn mounts-btn-danger';
-          rm.textContent = 'Revoke';
+          rm.textContent = tr('Revoke');
           rm.onclick = async () => {
-            const ok = await showConfirmDialog({ title: 'Revoke bridge token?', message: `Anyone mounting "${t.name}" loses access immediately.`, confirmText: 'Revoke', danger: true });
+            const ok = await showConfirmDialog({ title: tr('Revoke bridge token?'), message: tr('Anyone mounting "{name}" loses access immediately.', { name: t.name }), confirmText: tr('Revoke'), danger: true })
             if (!ok) return;
             try { await api(`/api/mount-tokens/${t.id}`, { method: 'DELETE' }); showToast('Token revoked'); }
             catch (e) { showToast(e.message || 'Failed', { type: 'error' }); }
@@ -205,8 +205,8 @@ export function installSidebarMounts(Sidebar) {
       const note = document.createElement('div');
       note.className = 'mounts-note';
       note.textContent = d.mcAvailable
-        ? `Connected folders live under ${d.mountBase}. Shared links stay valid until you revoke them.`
-        : `Connected folders live under ${d.mountBase}. Shared links currently expire after 7 days; to create links that never expire, an admin can install the “mc” tool on the server.`;
+        ? tr('Connected folders live under {base}. Shared links stay valid until you revoke them.', { base: d.mountBase })
+        : tr('Connected folders live under {base}. Shared links currently expire after 7 days; to create links that never expire, an admin can install the “mc” tool on the server.', { base: d.mountBase });
       root.appendChild(note);
       this.listEl.appendChild(root);
     },
@@ -301,7 +301,7 @@ export function installSidebarMounts(Sidebar) {
       // chip must stay outside the rtl context or bidi reorders it to the end.
       const pt = document.createElement('span');
       pt.className = 'mounts-path-text';
-      pt.textContent = isCred ? (m.source || '') : `→ ${m.path}`;
+      pt.textContent = isCred ? (m.source || '') : m.path;
       pathEl.append(tag, pt);
       row.append(top, pathEl);
       if (m.error) {

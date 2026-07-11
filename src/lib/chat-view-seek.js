@@ -166,6 +166,7 @@ export function installChatSeek(ChatView) {
       const whole = this._teleported ? '&whole=1' : '';
       const data = await fetch(`/api/session-history-gap?${base}&endLine=${markerEl._gapCursor}&count=2000${whole}`).then(r => r.json()).catch(() => null);
       const msgs = data?.messages || [];
+      this._trace?.('gapUp', { n: msgs.length, cursor: markerEl._gapCursor });
       const scrollHeightBefore = this._messageList.scrollHeight;
       const scrollTopBefore = this._messageList.scrollTop;
       // Dead anchor (removed by a runs pass / trim) → insert right after the
@@ -185,6 +186,7 @@ export function installChatSeek(ChatView) {
       markerEl._gapCursor = (data && Number.isFinite(data.fromLine)) ? data.fromLine : 0;
       metric('gap-slab-load-ms', performance.now() - _t0);
       // Keep the viewport stable: we inserted content below the sentinel
+      this._traceExpect?.();
       this._messageList.scrollTop = scrollTopBefore + (this._messageList.scrollHeight - scrollHeightBefore);
       if (this._teleported) this._trimGapDom('bottom');
       if (markerEl._gapCursor <= 0) this._finishSeek(markerEl, btn);
