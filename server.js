@@ -2303,6 +2303,9 @@ mounts.pathGuard = (p) => mountTokens.list().some((t) => String(t.root || '').st
   },
 });
 setTimeout(() => mounts.restore().catch(e => console.error('[mounts] restore:', e.message)), 2000);
+// Hung-mount watchdog: one unreachable backend must never wedge the server
+// (libuv threadpool saturation — see mounts.js _healthSweep).
+mounts.startHealthWatchdog();
 
 app.get('/api/mounts', async (req, res) => {
   const cfg = mounts.getMyStorageConfig(); // redacted (no secret)
