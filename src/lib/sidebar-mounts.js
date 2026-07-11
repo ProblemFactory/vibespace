@@ -316,7 +316,11 @@ export function installSidebarMounts(Sidebar) {
       if (m.error) {
         const err = document.createElement('div');
         err.className = 'mounts-errline';
-        err.textContent = 'Couldn’t connect: ' + m.error.slice(0, 100);
+        // no aggressive truncation — our own messages are meaningful to the
+        // END (user report: "…disconnected to protect the s" cut mid-word);
+        // 300 caps only pathological rclone log tails, full text in title
+        err.textContent = tr('Couldn’t connect:') + ' ' + m.error.slice(0, 300);
+        err.title = m.error;
         // Dead Google OAuth token (invalid_grant: revoked/expired) — offer the
         // guided re-authorization right where the failure is visible.
         if (this._isDriveBacked(m) && /invalid_grant|token expired|couldn.t fetch token/i.test(m.error)) {

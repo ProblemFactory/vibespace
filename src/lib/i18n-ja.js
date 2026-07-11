@@ -1171,6 +1171,7 @@ export default {
   'Share a local folder': 'ローカルフォルダを共有',
   'Bridge tokens': 'ブリッジトークン',
   'Revoke': '取り消す',
+  'Couldn’t connect:': '接続できませんでした:',
   'Click to connect': 'クリックして接続',
   'Open in file explorer': 'ファイルマネージャで開く',
   'Revoke share?': '共有を取り消しますか？',
