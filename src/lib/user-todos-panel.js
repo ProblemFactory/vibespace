@@ -5,7 +5,7 @@
 // session to handle them. Items arrive via `vibespace-ask` (agent CLI) and are
 // resolved/dismissed here (or by the agent once the user answers in chat).
 import { t } from './i18n.js';
-import { anchorFixedPopup, escHtml, fetchJson, showToast } from './utils.js';
+import { anchorFixedPopup, escHtml, fetchJson, getToastHistory, showToast } from './utils.js';
 
 const URG_RANK = { low: 0, normal: 1, high: 2, urgent: 3 };
 
@@ -15,6 +15,7 @@ export function installUserTodos(app) {
   if (!btn || !popup) return;
   let todos = { open: [], resolved: [] };
   let knownIds = null; // null until the first load — no toast storm at boot
+  let tab = 'inbox'; // 'inbox' (default) | 'history' — resets to inbox on open
 
   // Match items to sidebar sessions with the sidebar's OWN canonical key
   // derivation (same one the status chips use) — an ad-hoc reimplementation
@@ -73,6 +74,22 @@ export function installUserTodos(app) {
 
   const renderPanel = () => {
     if (popup.classList.contains('hidden')) return;
+    // Two pages (user request): the real inbox (default) and the recent
+    // notification-popup history — messages only, newest first.
+    const tabsHtml = `<div class="ut-tabs">
+      <button class="ut-tab${tab === 'inbox' ? ' on' : ''}" data-tab="inbox">${t('Inbox')}</button>
+      <button class="ut-tab${tab === 'history' ? ' on' : ''}" data-tab="history">${t('Notifications')}</button>
+    </div>`;
+    if (tab === 'history') {
+      const h = getToastHistory();
+      popup.innerHTML = tabsHtml + (h.length
+        ? h.map((e) => `<div class="ut-hist-item${e.type === 'error' ? ' ut-hist-err' : ''}">
+            <div class="ut-hist-msg">${escHtml(e.m)}</div>
+            <div class="ut-meta">${agoText(e.ts)}</div>
+          </div>`).join('')
+        : `<div class="empty-hint">${t('No notifications yet.')}</div>`);
+      return;
+    }
     const groups = new Map();
     for (const i of todos.open) (groups.get(i.sessionKey) || groups.set(i.sessionKey, []).get(i.sessionKey)).push(i);
     const gs = [...groups.entries()].sort((a, b) => {
@@ -105,7 +122,7 @@ export function installUserTodos(app) {
           <div class="ut-meta"><span class="ut-sess" title="${t('Go to this session')}">${escHtml(nameFor(i.sessionKey, [i]))}</span> · ${i.status === 'dismissed' ? t('dismissed') : t('done')}${i.resolvedBy === 'agent' ? ' · ' + t('by the agent') : ''} · ${agoText(i.resolvedAt || i.createdAt)}</div></div>
           <span class="ut-actions"><button class="ut-act ut-reopen" title="${t('Reopen')}">↺</button></span>
         </div>`).join('')}` : '';
-    popup.innerHTML = `
+    popup.innerHTML = tabsHtml + `
       <div class="usage-section-title">${t('For you')}<span class="ut-head-sub">${todos.open.length ? t('{n} open', { n: todos.open.length }) : t('all clear')}</span></div>
       ${gs.length ? gs.map(([key, items]) => `
         <div class="ut-group">
@@ -118,6 +135,7 @@ export function installUserTodos(app) {
 
   btn.onclick = () => {
     popup.classList.toggle('hidden');
+    tab = 'inbox'; // default page on every open (user spec)
     renderPanel();
     // Anchor to the button's CURRENT position — customize mode can move it to
     // any bar, so the old fixed bottom-right CSS pointed nowhere.
@@ -127,6 +145,8 @@ export function installUserTodos(app) {
     if (!popup.contains(e.target) && !btn.contains(e.target)) popup.classList.add('hidden');
   });
   popup.addEventListener('click', (e) => {
+    const tb = e.target.closest('.ut-tab');
+    if (tb) { tab = tb.dataset.tab; renderPanel(); return; }
     const head = e.target.closest('.ut-group-head');
     if (head) { jump(head.dataset.key); return; }
     // A click on the detail expander is a toggle, not a jump — without this
@@ -155,7 +175,7 @@ export function installUserTodos(app) {
     if (prevKnown) {
       for (const i of todos.open) {
         if (prevKnown.has(i.id)) continue;
-        const el = showToast(`${t('For you')} · ${nameFor(i.sessionKey, [i])}: ${i.text}`, { duration: 6000 });
+        const el = showToast(`${t('For you')} · ${nameFor(i.sessionKey, [i])}: ${i.text}`);
         if (el) { el.style.cursor = 'pointer'; el.onclick = () => jump(i.sessionKey); }
         btn.classList.remove('ut-blink'); void btn.offsetWidth; btn.classList.add('ut-blink');
       }
@@ -172,5 +192,7 @@ export function installUserTodos(app) {
     if (connected) fetchJson('/api/user-todos').then((d) => { if (d?.todos) apply(d.todos); });
   });
   fetchJson('/api/user-todos').then((d) => { if (d?.todos && !liveSeen) apply(d.todos); });
+  // A toast fired while the history page is open → live-refresh it
+  window.addEventListener('vs-toast', () => { if (tab === 'history' && !popup.classList.contains('hidden')) renderPanel(); });
   renderBtn();
 }

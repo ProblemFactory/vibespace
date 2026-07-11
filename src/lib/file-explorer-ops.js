@@ -12,7 +12,12 @@ export function installExplorerOps(FileExplorer) {
     const n = await showInputDialog({ title: t('New File'), label: t('File name'), confirmText: t('Create') });
     if (!n || !n.trim()) return;
     const r = await fetch('/api/file/write', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this._hb({ path: this.currentPath + '/' + n.trim(), content: '' })) }).catch(() => null);
-    if (!r?.ok) showToast(t('Create file failed'), { type: 'error' });
+    if (!r?.ok) {
+      // Show WHY (the server appends e.g. a read-only-mount hint) — the bare
+      // "failed" toast hid the actual cause (real report).
+      const d = await r?.json().catch(() => null);
+      showToast(t('Create file failed') + (d?.error ? `: ${d.error}` : ''), { type: 'error' });
+    }
     this.refresh();
   },
 
@@ -20,7 +25,10 @@ export function installExplorerOps(FileExplorer) {
     const n = await showInputDialog({ title: t('New Folder'), label: t('Folder name'), confirmText: t('Create') });
     if (!n || !n.trim()) return;
     const r = await fetch('/api/mkdir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this._hb({ path: this.currentPath + '/' + n.trim() })) }).catch(() => null);
-    if (!r?.ok) showToast(t('Create folder failed'), { type: 'error' });
+    if (!r?.ok) {
+      const d = await r?.json().catch(() => null);
+      showToast(t('Create folder failed') + (d?.error ? `: ${d.error}` : ''), { type: 'error' });
+    }
     this.refresh();
   },
 

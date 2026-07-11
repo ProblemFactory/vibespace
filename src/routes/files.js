@@ -272,25 +272,44 @@ router.get('/api/file/docx', (req, res) => {
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
+// A write failing inside a READ-ONLY mount should SAY so — the bare
+// "EROFS: read-only file system" (or a naked "create failed" toast) doesn't
+// tell the user WHY the folder rejects writes (real report: creating a file
+// in an RO share showed only "创建文件失败"). Matches the failing path
+// against connected read-only mount records; falls back to a generic
+// read-only note on EROFS.
+function roMountHint(req, p, err) {
+  const msg = `${err?.code || ''} ${err?.message || err || ''}`;
+  if (!/EROFS|EACCES|EPERM|read-only/i.test(msg)) return '';
+  try {
+    for (const m of (req.app.locals.mounts?.list?.() || [])) {
+      if (m?.mounted && m.mode === 'ro' && m.path && (p === m.path || String(p).startsWith(m.path + '/'))) {
+        return ` — “${m.name}” is connected READ-ONLY (this share/mount was set up without write access; files under it can’t be created or changed)`;
+      }
+    }
+  } catch {}
+  return /EROFS|read-only/i.test(msg) ? ' — this folder is on a read-only filesystem' : '';
+}
+
 router.post('/api/mkdir', async (req, res) => {
   const R = rfs(req);
   if (R) { try { return res.json(await R.fs.mkdir(R.host, remotePath(req.body.path))); } catch (e) { return res.status(400).json({ error: e.message }); } }
   try { await sfs(req).call('mkdir', { path: safePath(req.body.path) }); res.json({ success: true }); }
-  catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+  catch (err) { res.status(err.status || 400).json({ error: err.message + roMountHint(req, req.body.path, err) }); }
 });
 
 router.post('/api/file/write', async (req, res) => {
   const R = rfs(req);
   if (R) { try { return res.json(await R.fs.write(R.host, remotePath(req.body.path), Buffer.from(req.body.content || ''))); } catch (e) { return res.status(400).json({ error: e.message }); } }
   try { await sfs(req).call('writeFile', { path: safePath(req.body.path), content: req.body.content || '' }); res.json({ success: true }); }
-  catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+  catch (err) { res.status(err.status || 400).json({ error: err.message + roMountHint(req, req.body.path, err) }); }
 });
 
 router.post('/api/rename', async (req, res) => {
   const R = rfs(req);
   if (R) { try { return res.json(await R.fs.rename(R.host, remotePath(req.body.oldPath), remotePath(req.body.newPath))); } catch (e) { return res.status(400).json({ error: e.message }); } }
   try { await sfs(req).call('rename', { oldPath: safePath(req.body.oldPath), newPath: safePath(req.body.newPath) }); res.json({ success: true }); }
-  catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+  catch (err) { res.status(err.status || 400).json({ error: err.message + roMountHint(req, req.body.oldPath, err) }); }
 });
 
 router.delete('/api/file', async (req, res) => {
@@ -300,7 +319,7 @@ router.delete('/api/file', async (req, res) => {
   try {
     await sfs(req).call('remove', { path: filePath });
     res.json({ success: true });
-  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+  } catch (err) { res.status(err.status || 400).json({ error: err.message + roMountHint(req, filePath, err) }); }
 });
 
 // File upload
