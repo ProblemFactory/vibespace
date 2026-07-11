@@ -49,6 +49,25 @@ clerk:
   publishableKey: ""
   allowedEmails: ""
 
+# Personal S3 space auto-import (optional): when ALL of endpoint/bucket/
+# accessKey are set, the instance imports them ONCE on first boot as a normal
+# mount named "My storage" (VIBESPACE_S3_* env → Mounts UI; needs fuse.enabled
+# for the actual mount). Provision per-user credentials on your object store
+# and pass them here.
+s3:
+  endpoint: ""
+  bucket: ""
+  prefix: ""
+  accessKey: ""
+  secretKey: ""
+
+# /dev/fuse for in-container rclone mounts (Storage/Mounts UI). Requires a
+# fuse device plugin on the cluster exposing the resource named below
+# (a DaemonSet like fuse-device-plugin advertising github.com/fuse).
+fuse:
+  enabled: false
+  resource: "github.com/fuse"
+
 # Fleet telemetry (optional). forwardUrl/forwardToken make THIS instance ship
 # its anonymous diagnostics batches (error names/stacks/metrics — never
 # content) to a central collector; ingestToken turns THIS instance INTO the
