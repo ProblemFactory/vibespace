@@ -1183,8 +1183,19 @@ class MountManager {
         if (this._kindOf(m) === 'credential') continue;
         if (!this.isMounted(m)) continue;
         const mp = this.pathOf(m);
-        const health = await this._probeMountpoint(mp);
+        // cephfs (native kernel mount) gets a longer probe window — an MDS
+        // session on a cold mount can spike a first `ls` past the fuse budget,
+        // and a single blip must not disconnect a trusted deployment mount.
+        const health = await this._probeMountpoint(mp, m.type === 'cephfs' ? 12000 : 6000);
         if (health === 'hung') {
+          // Blip tolerance: require TWO consecutive hangs before auto-
+          // disconnecting a trusted deployment mount (cephfs) — a single slow
+          // MDS access shouldn't tear it down. Untrusted mounts disconnect
+          // immediately (a hung fuse mount is the outage class we defend).
+          this._hungStrikes = this._hungStrikes || new Map();
+          const strikes = (this._hungStrikes.get(m.id) || 0) + 1;
+          if (m.type === 'cephfs' && strikes < 2) { this._hungStrikes.set(m.id, strikes); continue; }
+          this._hungStrikes.delete(m.id);
           this.blockPath(mp, 90000); // fail fast while teardown + in-flight stragglers drain
           this._errors.set(m.id, 'storage stopped responding (unreachable host?) — auto-disconnected to protect the server');
           m.desired = 'unmounted';
@@ -1193,6 +1204,7 @@ class MountManager {
           this._killMountDaemon(mp);
           this._notify();
         } else {
+          this._hungStrikes?.delete(m.id); // recovered — reset the strike count
           // Not hung. For a REVOCABLE share, a cached mountpoint `ls` can't
           // tell us the token was revoked — probe the backend fresh. Normal
           // mounts (my own S3/Drive) skip the extra round-trip.
