@@ -2359,10 +2359,16 @@ const mounts = new MountManager({
   broadcast: (msg) => {
     const json = JSON.stringify(msg);
     wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
-// Rename guard: bridge-share chroots are filesystem paths under the mount
-mounts.pathGuard = (p) => mountTokens.list().some((t) => String(t.root || '').startsWith(p));
   },
 });
+// Rename guard: bridge-share chroots are filesystem paths under the mount.
+// MUST be OUTSIDE the broadcast callback — it was mis-nested inside, so every
+// broadcast re-ran it, and a broadcast DURING construction (env-import add →
+// _notify → broadcast) referenced `mounts` while it was still in its TDZ,
+// throwing "Cannot access 'mounts' before initialization" out of add() before
+// it returned the id — which is why an env-provisioned My storage (S3 or
+// CephFS) came up `desired: unmounted` on its very first boot.
+mounts.pathGuard = (p) => mountTokens.list().some((t) => String(t.root || '').startsWith(p));
 setTimeout(() => mounts.restore().catch(e => console.error('[mounts] restore:', e.message)), 2000);
 // Hung-mount watchdog: one unreachable backend must never wedge the server
 // (libuv threadpool saturation — see mounts.js _healthSweep).
