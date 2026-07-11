@@ -66,6 +66,13 @@ spec:
         - name: vibespace
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if .Values.fuse.enabled }}
+          # fuse mounts need the device (resource below) AND CAP_SYS_ADMIN in
+          # the container's namespace — still far short of privileged.
+          securityContext:
+            capabilities:
+              add: ["SYS_ADMIN"]
+          {{- end }}
           ports:
             - containerPort: 3456
           env:
