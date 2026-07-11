@@ -14,7 +14,7 @@ FROM node:22-bookworm-slim
 # fontconfig = /api/fonts; openssh-client = remote hosts; rclone/fuse3 = S3 mounts.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       dtach procps psmisc zip unzip tar git curl ca-certificates \
-      python3 make g++ fontconfig openssh-client rclone fuse3 \
+      python3 make g++ fontconfig openssh-client rclone fuse3 sudo \
     && rm -rf /var/lib/apt/lists/*
 
 # In-container desktop (noVNC through VibeSpace's own auth — src/vnc.js):
@@ -54,6 +54,12 @@ RUN npm install -g @anthropic-ai/claude-code @openai/codex
 RUN userdel -r node 2>/dev/null || true; \
     useradd -m -u 1000 -s /bin/bash vibe; \
     chown -R vibe:vibe /usr/local/lib/node_modules /usr/local/bin
+# The instance user OWNS their container: passwordless sudo (user request —
+# in-terminal apt installs etc.). The rootfs is EPHEMERAL — persistent setup
+# belongs in ~/.vibespace-init.sh (re-run each boot), now with sudo available.
+# Root stays confined to the pod's namespaces/securityContext; the app itself
+# still runs as vibe (Claude blocks bypassPermissions as root).
+RUN echo 'vibe ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/vibe && chmod 0440 /etc/sudoers.d/vibe
 
 # Bake the app into the SEED location as a REAL git checkout (public repo), so
 # the entrypoint's copy into the PVC is a working checkout — users can then
