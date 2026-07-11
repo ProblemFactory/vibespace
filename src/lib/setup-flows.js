@@ -1,5 +1,5 @@
 import { escHtml, showToast, showConfirmDialog, fetchJson, createModalShell } from './utils.js';
-import { t } from './i18n.js';
+import { t, setLang, getLangPref } from './i18n.js';
 
 /**
  * App setup/config flows mixin — the onboarding wizard, Backup & migrate
@@ -124,9 +124,15 @@ export function installSetupFlows(App) {
     const render = () => {
       const dots = [0, 1, 2, 3].map(i => `<span class="ob-dot${i === step ? ' active' : ''}"></span>`).join('');
       if (step === 0) {
+        // Language chips: setLang() reloads the page; vs-onboarded isn't set
+        // yet, so the wizard re-enters in the picked language automatically.
+        const lang = getLangPref();
+        const langChip = (code, label) =>
+          `<button class="ob-lang${lang === code ? ' active' : ''}" data-lang="${code}">${label}</button>`;
         content.innerHTML = `
           <h1>${t('Welcome to VibeSpace')}</h1>
           <p class="ob-sub">${t('Your workspace for coding agents')}</p>
+          <div class="ob-langs">${langChip('auto', t('Auto'))}${langChip('en', 'English')}${langChip('zh', '中文')}${langChip('ja', '日本語')}</div>
           <div class="ob-points">
             <div class="ob-point"><b>${t('Sessions that never die')}</b><span>${t('Agents keep running through restarts, refreshes, and network drops — reattach from any device.')}</span></div>
             <div class="ob-point"><b>${t('A real window manager')}</b><span>${t('Tile agent chats, terminals, files and editors across virtual desktops.')}</span></div>
@@ -139,6 +145,9 @@ export function installSetupFlows(App) {
           <div class="ob-dots">${dots}</div>`;
         content.querySelector('#ob-next').onclick = () => { step = 1; render(); };
         content.querySelector('#ob-skip').onclick = done;
+        content.querySelectorAll('.ob-lang').forEach((b) => {
+          b.onclick = () => { if (b.dataset.lang !== getLangPref()) setLang(b.dataset.lang); };
+        });
       } else if (step === 1) {
         content.innerHTML = `
           <h1>${t('Connect your agents')}</h1>
@@ -154,17 +163,21 @@ export function installSetupFlows(App) {
         const refresh = async () => {
           let st = {};
           try { st = await fetchJson('/api/backend-status'); } catch {}
-          const card = (key, label, loginCmd) => {
+          const card = (key, label, loginCmd, installCmd) => {
             const b = st[key] || {};
             const state = !b.installed ? `<span class="ob-bad">${t('not installed')}</span>`
               : b.loggedIn ? `<span class="ob-ok">✓ ${t('ready')}</span>`
               : `<span class="ob-warn">${t('installed, not logged in')}</span>`;
-            const btn = !b.installed ? '' : b.loggedIn ? '' : `<button class="welcome-btn ob-login" data-cmd="${loginCmd}">${t('Log in')}</button>`;
+            // Not installed → one-click install; installed but logged out →
+            // log in. Both just run the command in a visible shell terminal.
+            const btn = !b.installed ? `<button class="welcome-btn ob-login" data-cmd="${escHtml(installCmd)}" title="${escHtml(installCmd)}">${t('Install')}</button>`
+              : b.loggedIn ? '' : `<button class="welcome-btn ob-login" data-cmd="${escHtml(loginCmd)}">${t('Log in')}</button>`;
             return `<div class="ob-backend"><div><b>${label}</b> ${b.version ? `<span class="ob-ver">${escHtml(b.version)}</span>` : ''}</div><div>${state} ${btn}</div></div>`;
           };
           const el = content.querySelector('#ob-backends');
           if (!el) return;
-          el.innerHTML = card('claude', 'Claude Code', 'claude') + card('codex', 'Codex', 'codex login')
+          el.innerHTML = card('claude', 'Claude Code', 'claude', 'curl -fsSL https://claude.ai/install.sh | bash')
+            + card('codex', 'Codex', 'codex login', 'npm install -g @openai/codex@latest')
             + `<button class="welcome-btn welcome-btn-secondary ob-recheck">${t('Re-check')}</button>`;
           el.querySelectorAll('.ob-login').forEach(btn => {
             btn.onclick = () => this.openShellTerminal(undefined, { initialCommand: btn.dataset.cmd });
@@ -186,12 +199,16 @@ export function installSetupFlows(App) {
           <div class="welcome-actions">
             ${protectedAlready ? '' : `<button class="welcome-btn" id="ob-setpw">${t('Set password')}</button>`}
             <button class="welcome-btn ${protectedAlready ? '' : 'welcome-btn-secondary'}" id="ob-next">${protectedAlready ? t('Continue') : t('Skip')}</button>
+            ${protectedAlready ? `<button class="welcome-btn welcome-btn-secondary" id="ob-chpw">${t('Change password…')}</button>` : ''}
             <button class="welcome-btn welcome-btn-secondary" id="ob-back">${t('Back')}</button>
           </div>
           <div class="ob-alt"><a href="#" id="ob-import">${t('Import a config file from another VibeSpace…')}</a></div>
           <div class="ob-dots">${dots}</div>`;
         content.querySelector('#ob-next').onclick = () => { step = 3; render(); };
         content.querySelector('#ob-back').onclick = () => { step = 1; render(); };
+        // Managed deployments arrive with a preset password (env) — the wizard
+        // is where a new user should be able to change it to their own.
+        content.querySelector('#ob-chpw')?.addEventListener('click', () => this._showPasswordDialog());
         content.querySelector('#ob-import').onclick = (e) => { e.preventDefault(); this._showTransferDialog('import'); };
         const pwInput = content.querySelector('#ob-pw');
         content.querySelector('#ob-gen')?.addEventListener('click', () => {

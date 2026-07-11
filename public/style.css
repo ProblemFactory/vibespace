@@ -1828,6 +1828,14 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 /* ── First-run onboarding wizard (upgrades #welcome) ── */
 #welcome.onboarding .welcome-content { max-width: 520px; }
 .ob-sub { color: var(--text-secondary); margin: -6px 0 18px; font-size: 13px; }
+/* Language chips (step 0): picking one reloads into that language */
+.ob-langs { display: flex; justify-content: center; gap: 6px; margin: -8px 0 16px; }
+.ob-lang { padding: 3px 10px; font-size: 11px; cursor: pointer;
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  color: var(--text-secondary); transition: var(--transition); }
+.ob-lang:hover { border-color: var(--accent); color: var(--accent); }
+.ob-lang.active { border-color: var(--accent); color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .ob-points { display: flex; flex-direction: column; gap: 12px; text-align: left; margin-bottom: 22px; }
 .ob-point { display: flex; flex-direction: column; gap: 2px; padding: 10px 14px;
   background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius); }

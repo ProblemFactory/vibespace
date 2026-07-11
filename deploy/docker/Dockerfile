@@ -20,12 +20,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Agent CLIs + mc (share-credential minting). bypassPermissions is blocked for
 # root → the app runs as the non-root `vibe` user below.
 RUN curl -fsSL https://dl.min.io/client/mc/release/linux-$(dpkg --print-architecture | sed 's/armhf/arm/')/mc -o /usr/local/bin/mc && chmod +x /usr/local/bin/mc
-RUN npm install -g @anthropic-ai/claude-code
+RUN npm install -g @anthropic-ai/claude-code @openai/codex
 
 # node:22 ships a `node` user at UID 1000 — remove it so `vibe` gets 1000
 # (matches the default host user, keeps bind-mount ownership sane).
+# Single-user container: hand the npm global tree to `vibe` so the in-app
+# Update/Install buttons (`npm i -g …`, `claude update`) work without root —
+# root-owned /usr/local is why plain `npm i -g` EACCESes for non-root users.
 RUN userdel -r node 2>/dev/null || true; \
-    useradd -m -u 1000 -s /bin/bash vibe
+    useradd -m -u 1000 -s /bin/bash vibe; \
+    chown -R vibe:vibe /usr/local/lib/node_modules /usr/local/bin
 
 # Bake the app into the SEED location as a REAL git checkout (public repo), so
 # the entrypoint's copy into the PVC is a working checkout — users can then
@@ -47,7 +51,11 @@ COPY deploy/docker/entrypoint.sh /usr/local/bin/vibespace-entrypoint
 RUN chmod +x /usr/local/bin/vibespace-entrypoint
 
 USER vibe
+# ~/.local/bin on PATH: claude's native installer (the onboarding Install
+# button) lands there — on the PVC, so a user-installed CLI survives image
+# rebuilds. The dir may not exist yet; PATH entries may dangle harmlessly.
 ENV HOME=/home/vibe \
+    PATH=/home/vibe/.local/bin:$PATH \
     NO_AUTO_UPDATE=1 \
     VIBESPACE_GENERATE_PASSWORD=1 \
     PORT=3456 \

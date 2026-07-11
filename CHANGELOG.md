@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.102.0 — 2026-07-11
+
+**Onboarding for managed deployments (deployment queue ②)**
+- Wizard step 0 gains language chips (Auto / English / 中文 / 日本語) — picking one reloads into that language; since `vs-onboarded` isn't set yet, the wizard re-enters in the picked language.
+- One-click **Install** for a missing CLI: wizard step 1 and Manage Agents both show an Install button when a backend is `not installed` (claude → official native installer `curl …/install.sh | bash`, user-local ~/.local/bin, no root; codex → `npm install -g @openai/codex@latest`), run in a visible shell terminal like Log in/Update.
+- Wizard step 2: when a password is already set (managed instances arrive with a preset env password), a **Change password…** button opens the standard password dialog so a new user can claim the instance with their own password.
+- Deploy image: codex now pre-installed next to claude; the npm global tree is chown'd to `vibe` (root-owned /usr/local is why `npm i -g`/`claude update` EACCESed in-container); `~/.local/bin` on PATH (native-installer CLIs land on the PVC and survive image rebuilds).
+
 ## 2.101.0 — 2026-07-11
 
 **Fleet telemetry: any instance can be the central collector (deployment queue ①)**
