@@ -46,9 +46,11 @@ RUN userdel -r node 2>/dev/null || true; \
 # would drop .git (.dockerignore) and break self-update. npm ci + build here so
 # first boot is a fast offline copy, not a network clone.
 ARG VIBESPACE_REF=master
+# reset --hard (not checkout): a SHA ref must NOT leave the seed on a detached
+# HEAD — the PVC copy inherits it and `git pull` self-update breaks.
 RUN git clone https://github.com/ProblemFactory/vibespace /opt/vibespace-dist \
     && cd /opt/vibespace-dist \
-    && git checkout "$VIBESPACE_REF" \
+    && git reset --hard "$VIBESPACE_REF" \
     && npm ci \
     && npm run build \
     && chown -R vibe:vibe /opt/vibespace-dist

@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.104.1 — 2026-07-11
+
+- Clerk login page: clerk-js v5 from the CDN self-bootstraps `window.Clerk` as an INSTANCE via the `data-clerk-publishable-key` script attribute — constructing it threw "window.Clerk is not a constructor" (real report from the first deployed test). The loader now sets the attribute and accepts both shapes.
+- Deploy image: seed the PVC checkout with `git reset --hard $VIBESPACE_REF` instead of `git checkout` — a SHA ref left the seed (and thus every user's ~/vibespace) on a detached HEAD, breaking `git pull` self-update.
+
 ## 2.104.0 — 2026-07-11
 
 **In-container desktop via integrated noVNC (deployment queue ④) — single login, no second password**
