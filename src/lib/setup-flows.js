@@ -191,7 +191,7 @@ export function installSetupFlows(App) {
           const el = content.querySelector('#ob-backends');
           if (!el) return;
           el.innerHTML = card('claude', 'Claude Code', 'claude', 'curl -fsSL https://claude.ai/install.sh | bash')
-            + card('codex', 'Codex', 'codex login', 'npm install -g @openai/codex@latest')
+            + card('codex', 'Codex', 'codex login --device-auth', 'npm install -g @openai/codex@latest')
             + `<button class="welcome-btn welcome-btn-secondary ob-recheck">${t('Re-check')}</button>`;
           el.querySelectorAll('.ob-login').forEach(btn => {
             btn.onclick = () => this.openShellTerminal(undefined, { initialCommand: btn.dataset.cmd });

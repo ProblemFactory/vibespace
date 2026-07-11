@@ -130,9 +130,26 @@ class TerminalSession {
     // render, which already cached the FALLBACK glyph in the WebGL texture atlas
     // — and nothing rebuilds it until a manual font change. Once the configured
     // family is actually loaded, clear the atlas + refit so it repaints in the
-    // real font. Explicit load() + fonts.ready both, then a couple of settle
-    // refits (atlas rebuild is async).
+    // real font (see _refreshOnFontReady for the cold-cache subtleties).
     this._refreshOnFontReady(effectiveFont, effectiveFontSize);
+    // THE OTHER HALF of the same report (2.105.1 — the ugly font persisted on
+    // fresh instances even after the FOUT fix): _fontList builds ASYNC
+    // (queryLocalFonts + /api/fonts fetch). A first-visit terminal created
+    // BEFORE it resolves fell back to bare 'monospace' — and KEPT it forever;
+    // a manual font switch was the only cure, which is exactly the reported
+    // workaround. If this terminal was created from the fallback, upgrade to
+    // the real default the moment the list lands.
+    if (!this.overrides.fontFamily && !localStorage.getItem('termFontFamily') && !_fontList) {
+      _fontListReady.then((list) => {
+        if (this._disposed || !this.terminal) return;
+        const def = list?.[0]?.value;
+        if (!def || this.terminal.options.fontFamily === def) return;
+        this.terminal.options.fontFamily = def;
+        try { this.terminal.clearTextureAtlas(); } catch {}
+        this.fit();
+        this._refreshOnFontReady(def, effectiveFontSize); // new family may still be mid-download
+      });
+    }
     // Device-pixel-ratio change (browser zoom, moving between monitors): glyph
     // atlas + measured cell size are stale — rebuild and refit.
     this._dprCleanup = null;

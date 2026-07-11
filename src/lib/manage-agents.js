@@ -382,10 +382,13 @@ export function installManageAgents(App, ctx = {}) {
       // (~/.local/bin, no root, no npm-prefix permission trap); codex has no
       // native installer — npm -g is its official install AND update path.
       { key: 'claude', label: 'Claude Code', loginCmd: 'claude', updateCmd: 'claude update', installCmd: 'curl -fsSL https://claude.ai/install.sh | bash' },
-      // remoteLoginCmd: on a remote host `codex login` starts a localhost:1455
-      // callback server ON THE HOST — unreachable from the user's browser.
-      // --device-auth prints a URL + one-time code instead (location-agnostic).
-      { key: 'codex', label: 'Codex', loginCmd: 'codex login', remoteLoginCmd: 'codex login --device-auth', updateCmd: 'npm install -g @openai/codex@latest', installCmd: 'npm install -g @openai/codex@latest' },
+      // codex login is ALWAYS --device-auth (user directive, 2.105.1): plain
+      // `codex login` starts a localhost:1455 callback server on the machine
+      // running the CLI — unreachable from the user's browser on remote hosts
+      // AND on managed/container instances (the callback would land on the
+      // user's own machine). Device auth prints a URL + one-time code instead
+      // and works everywhere, including this dev box.
+      { key: 'codex', label: 'Codex', loginCmd: 'codex login --device-auth', updateCmd: 'npm install -g @openai/codex@latest', installCmd: 'npm install -g @openai/codex@latest' },
     ];
     // Host selector: agent lifecycle can target a remote machine too. Login/
     // update then run in a shell ON that host (ssh -t).
