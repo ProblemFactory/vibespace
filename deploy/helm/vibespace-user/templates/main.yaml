@@ -1,0 +1,144 @@
+{{- include "vs.require" . -}}
+{{- $name := include "vs.name" . -}}
+{{- $host := include "vs.host" . -}}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  labels: {{- include "vs.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  password: {{ .Values.password | quote }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $name }}
+  labels: {{- include "vs.labels" . | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: {{ .Values.storage.className }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.size }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels: {{- include "vs.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: { type: Recreate }   # single RWO PVC — never two pods at once
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vibespace
+      app.kubernetes.io/instance: {{ .Values.user }}
+  template:
+    metadata:
+      labels: {{- include "vs.labels" . | nindent 8 }}
+    spec:
+      # No cluster credentials inside an agent container.
+      automountServiceAccountToken: false
+      # The RBD home volume mounts root-owned; fsGroup lets uid/gid 1000 write.
+      # OnRootMismatch skips the recursive chown once it's already correct.
+      securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+      nodeSelector: {{- toYaml .Values.nodeSelector | nindent 8 }}
+      tolerations: {{- toYaml .Values.tolerations | nindent 8 }}
+      {{- with .Values.image.imagePullSecret }}
+      imagePullSecrets:
+        - name: {{ . }}
+      {{- end }}
+      containers:
+        - name: vibespace
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 3456
+          env:
+            - name: VIBESPACE_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ $name }}, key: password } }
+          volumeMounts:
+            - name: home
+              mountPath: /home/vibe
+          readinessProbe:
+            httpGet: { path: /login, port: 3456 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: home
+          persistentVolumeClaim: { claimName: {{ $name }} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels: {{- include "vs.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: vibespace
+    app.kubernetes.io/instance: {{ .Values.user }}
+  ports:
+    - port: 80
+      targetPort: 3456
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $name }}
+  labels: {{- include "vs.labels" . | nindent 4 }}
+  annotations:
+    {{- if .Values.ingress.tls }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.clusterIssuer }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls }}
+  tls:
+    - hosts: [{{ $host | quote }}]
+      secretName: {{ $name }}-tls
+  {{- end }}
+  rules:
+    - host: {{ $host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $name }}
+                port: { number: 80 }
+{{- if .Values.networkPolicy.enabled }}
+---
+# Agent-container egress lockdown (see design §6). Allows DNS + public internet
+# (Anthropic/GitHub) + RGW S3; blocks node net / BMC / k8s API. Enable in P2.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  labels: {{- include "vs.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: vibespace
+      app.kubernetes.io/instance: {{ .Values.user }}
+  policyTypes: [Egress]
+  egress:
+    - to:                                    # DNS
+        - namespaceSelector: {}
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    - to:                                    # RGW S3 (internal object storage)
+        - ipBlock: { cidr: 10.0.0.1/32 }
+        - ipBlock: { cidr: 10.0.0.2/32 }
+        - ipBlock: { cidr: 10.0.0.3/32 }
+    - to:                                    # public internet, minus private ranges
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16]
+{{- end }}
