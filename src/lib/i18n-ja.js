@@ -1404,6 +1404,7 @@ export default {
   "Desktop": "デスクトップ",
   "Session create failed": "セッションの作成に失敗しました",
   "Back to setup": "セットアップに戻る",
+  "Mount point (blank = default)": "マウントポイント(空欄=デフォルト)",
   "Bucket": "バケット",
   "Prefix (optional)": "プレフィックス(任意)",
   "Remote path (bucket[/prefix])": "リモートパス(bucket[/prefix])",

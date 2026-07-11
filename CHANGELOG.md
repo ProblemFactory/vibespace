@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.107.1 — 2026-07-11
+
+- **openSpec windows survive page refresh**: restoreState's typed branches ended at `browser` — settings/desktop/usage/task-detail/workflow windows silently VANISHED on reload (real report). A generic fallback now replays any saved openSpec (verified: settings window save→reload→restored).
+- **Env-provisioned storage: connection locked** (user directive): endpoint/bucket/keys come from the deployment env (a change re-imports) — editing them in-app is refused server-side; name and MOUNT POINT are editable (custom mount point field added to the edit dialog for all mounts).
+
 ## 2.107.0 — 2026-07-11
 
 **Storage: edit + derive (user request — a mis-pathed mount had no fix but delete/re-add)**

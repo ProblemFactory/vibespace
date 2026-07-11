@@ -332,6 +332,7 @@ class MountManager {
       endpoint: m.endpoint, bucket: m.bucket, prefix: m.prefix,
       rcloneType: m.rcloneType, remotePath: m.remotePath, driveFolder: m.driveFolder,
       accessKeyTail: m.accessKey ? String(m.accessKey).slice(-4) : undefined,
+      customPath: m.customPath || null,
       source: this._sourceLabel(m),
       canShare: this.canShareFromMount(m),
       path: this.pathOf(m), desired: m.desired, expiresAt: m.expiresAt || null,
@@ -481,8 +482,21 @@ class MountManager {
     if (this.isMounted(m)) await this.unmount(id);
     if (patch.name) m.name = String(patch.name).slice(0, 60);
     if (patch.mode === 'ro' || patch.mode === 'rw') m.mode = patch.mode;
+    if (patch.customPath !== undefined) {
+      const cp = String(patch.customPath || '').trim();
+      if (cp && !path.isAbsolute(cp)) throw new Error('Custom path must be absolute');
+      m.customPath = cp || null;
+    }
+    // Env-provisioned storage: the CONNECTION is deployment-owned (endpoint/
+    // bucket/keys come from env and a change re-imports) — name, mountpoint
+    // and mode are the only editable fields (user directive).
+    const envLocked = m.origin === 'my-storage';
+    const connectionKeys = ['endpoint', 'bucket', 'prefix', 'accessKey', 'secretKey', 'sessionToken', 'rcloneType', 'remotePath', 'params', 'driveFolder', 'token', 'url', 'host', 'user', 'path', 'pass'];
+    if (envLocked && connectionKeys.some((k) => patch[k] !== undefined && patch[k] !== '')) {
+      throw new Error('This storage is provisioned by your deployment — its connection settings can\'t be edited here (name and mount point can).');
+    }
     const setIf = (k, transform = (v) => String(v)) => { if (patch[k] !== undefined && patch[k] !== '') m[k] = transform(patch[k]); };
-    switch (m.type || 's3') {
+    switch (envLocked ? '__locked__' : (m.type || 's3')) {
       case 's3':
         setIf('endpoint'); setIf('bucket');
         if (patch.prefix !== undefined) m.prefix = String(patch.prefix || '').replace(/^\/+|\/+$/g, '');
