@@ -846,9 +846,16 @@ class App {
       const upd = item(I.key, t('Update VibeSpace\u2026'), () => {
         this.openShellTerminal(this._repoDir, { initialCommand: 'bash scripts/update.sh' });
       });
+      // Two-line button (user request): label on top, "vCURRENT \u2192 vLATEST"
+      // below. Restructure item()'s [icon][label] into [icon][column].
+      const labelSpan = upd.children[1];
+      const col = document.createElement('div');
+      col.className = 'gs-item-col';
+      upd.appendChild(col);
+      col.appendChild(labelSpan);
       const vspan = document.createElement('span');
       vspan.className = 'gs-ver';
-      upd.appendChild(vspan);
+      col.appendChild(vspan);
       fetchJson('/api/version').then(v => {
         if (!v?.version || !vspan.isConnected) return;
         const newer = v.latest && this._versionNewer(v.latest, v.version);

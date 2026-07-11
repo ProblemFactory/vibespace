@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.110.1 — 2026-07-11
+
+- The ⚙ *Update VibeSpace…* row is now two lines (user request): action label on top, `vCURRENT → vLATEST` below (highlighted when an update is available; just `vCURRENT` when up to date).
+
 ## 2.110.0 — 2026-07-11
 
 **Hardened rclone mounts: read/write caching + auto-recovery (user directive: 最稳定、性能最好、自动恢复)**
