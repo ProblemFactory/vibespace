@@ -2844,11 +2844,14 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .udash-metric-check { display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--text-secondary); white-space: nowrap; }
 .udash-metric-check input { margin: 0; width: 11px; height: 11px; }
 
-/* Update-confirm dialog (changelog diff between running and latest) */
-.update-confirm-body { width: min(560px, 92vw); }
+/* Update-confirm dialog (changelog diff between running and latest).
+   Width belongs on the DIALOG (via createModalShell minWidth) — .dialog is
+   a fixed 440px box with overflow:hidden, so widening the BODY overflowed
+   it and clipped the right-aligned action buttons (real report). */
 .ucl-head { font-size: 13px; font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; }
 .ucl-newtag { margin-left: 8px; font-size: 10px; }
-.ucl-list { max-height: min(420px, 55vh); overflow-y: auto; display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; }
+.ucl-list { max-height: min(420px, 55vh); overflow-y: auto; display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; min-height: 40px; }
+.ucl-list .empty-hint { padding: 12px 0; }
 .ucl-entry { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; }
 .ucl-ver { font-size: 12px; font-weight: 600; color: var(--accent); margin-bottom: 4px; }
 .ucl-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; font-size: 11px; line-height: 1.5; color: var(--text-secondary); }
