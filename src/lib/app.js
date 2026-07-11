@@ -116,6 +116,16 @@ fetchJson('/api/session-options').then(data => {
   }
 });
 
+// localStorage keys that ride the config export's clientPrefs section — the
+// export gather and the import write-back MUST use the same list (a key only
+// in one direction silently drops). Per-device view prefs included on purpose:
+// migrating to a new deployment shouldn't reset language/usage-view choices.
+const CLIENT_PREF_KEYS = [
+  'theme', 'termFontSize', 'termFontFamily', 'taskbarHeight',
+  'vibespace.lang', 'vibespace.usageAccount', 'vibespace.usageAccountCodex',
+  'vibespace.quotaRefreshAck', 'vs-onboarded',
+];
+
 class App {
   constructor() {
     /** Centralized mobile detection — all code should use app.isMobile instead of matchMedia */
@@ -463,7 +473,9 @@ class App {
       mkRow('layouts', t('Layouts & desktops'), t('{count} layout(s), {desktops} desktop(s), custom grids', { count: s.layouts.count, desktops: s.layouts.desktops })),
       mkRow('userState', t('Session metadata'), t('stars, renames, {groups} group(s), per-session configs', { groups: s.userState.groups })),
       mkRow('bookmarks', t('File bookmarks'), t('{count} bookmark(s)', { count: s.bookmarks.count })),
-      mkRow('clientPrefs', t('This browser’s preferences'), t('theme, font, taskbar height')),
+      mkRow('tasks', t('Task Groups'), t('{count} group(s) incl. checklists & activity logs', { count: s.tasks?.count || 0 })),
+      mkRow('pricing', t('Usage pricing table'), t('{count} model rate(s) / account discount(s)', { count: s.pricing?.count || 0 })),
+      mkRow('clientPrefs', t('This browser’s preferences'), t('theme, font, language, usage-view choices')),
     );
     const sensHead = document.createElement('div');
     sensHead.className = 'cfg-sens-head';
@@ -476,6 +488,7 @@ class App {
       mkRow('codexCreds', t('Codex CLI credentials'), info.sensitive.codexCreds ? '~/.codex/auth.json' : t('not found on this machine'), { checked: false, disabled: !info.sensitive.codexCreds }),
       mkRow('hosts', t('Remote hosts'), info.sensitive.hosts ? t('{n} ssh host(s) + uploaded keys', { n: info.sensitive.hosts }) : t('no hosts configured'), { checked: false, disabled: !info.sensitive.hosts }),
       mkRow('mounts', t('S3 mounts & shares'), info.sensitive.mounts ? t('{n} mount(s) incl. credentials', { n: info.sensitive.mounts }) : t('no mounts configured'), { checked: false, disabled: !info.sensitive.mounts }),
+      mkRow('accounts', t('Billing accounts'), info.sensitive.accounts ? t('{n} account(s) — API keys + subscription logins', { n: info.sensitive.accounts }) : t('no accounts configured'), { checked: false, disabled: !info.sensitive.accounts }),
     );
     const passRow = document.createElement('div');
     passRow.className = 'cfg-pass-row hidden';
@@ -500,7 +513,7 @@ class App {
       if (!sections.length && !includeSensitive.length) { err.textContent = t('Nothing selected'); return; }
       if (includeSensitive.length && passphrase.length < 4) { err.textContent = t('Passphrase must be at least 4 characters'); return; }
       const clientPrefs = {};
-      for (const k of ['theme', 'termFontSize', 'termFontFamily', 'taskbarHeight']) {
+      for (const k of CLIENT_PREF_KEYS) {
         const v = localStorage.getItem(k);
         if (v != null) clientPrefs[k] = v;
       }
@@ -542,9 +555,11 @@ class App {
       layouts: [t('Layouts & desktops'), (d) => t('{a} layout(s), {b} desktop(s)', { a: Object.keys(d?.layouts || {}).length, b: (d?.desktopMeta || []).length })],
       userState: [t('Session metadata'), (d) => t('{a} group(s), {b} rename(s), {c} star(s)', { a: Object.keys(d?.sessionGroups || {}).length, b: Object.keys(d?.customNames || {}).length, c: Object.keys(d?.starredSessions || {}).length })],
       bookmarks: [t('File bookmarks'), (d) => t('{n} bookmark(s)', { n: (d || []).length })],
+      tasks: [t('Task Groups'), (d) => t('{n} group(s)', { n: (d?.tasks || []).length })],
+      pricing: [t('Usage pricing table'), (d) => t('{n} model rate(s) / account discount(s)', { n: Object.keys(d?.tiers || {}).length + Object.keys(d?.accounts || {}).length })],
       clientPrefs: [t('Browser preferences'), (d) => Object.keys(d || {}).join(', ') || t('empty')],
     };
-    const SENS_LABELS = { vsPassword: t('VibeSpace password'), claudeCreds: t('Claude CLI credentials'), codexCreds: t('Codex CLI credentials'), hosts: t('Remote hosts'), mounts: t('S3 mounts & shares') };
+    const SENS_LABELS = { vsPassword: t('VibeSpace password'), claudeCreds: t('Claude CLI credentials'), codexCreds: t('Codex CLI credentials'), hosts: t('Remote hosts'), mounts: t('S3 mounts & shares'), accounts: t('Billing accounts') };
 
     const renderFile = (file) => {
       body.innerHTML = '';
@@ -605,7 +620,7 @@ class App {
           if (!res.ok) { err.textContent = d.error || t('Import failed'); return; }
           if (d.clientPrefs) {
             for (const [k, v] of Object.entries(d.clientPrefs)) {
-              if (['theme', 'termFontSize', 'termFontFamily', 'taskbarHeight'].includes(k)) localStorage.setItem(k, v);
+              if (CLIENT_PREF_KEYS.includes(k)) localStorage.setItem(k, v);
             }
           }
           close();

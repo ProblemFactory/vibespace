@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.100.0 — 2026-07-11
+
+**Config export covers everything recent (centralized-deployment migration review)**
+- Reviewed every store the recent feature era added against Backup & migrate. Already covered (settings section): dashboard panels, agent instructions, stop-nudge thresholds, telemetry toggles, per-session billing configs (userState). Fixed the gaps:
+- **Billing accounts now export/import** (sensitive, passphrase-encrypted): API keys are decrypted out of the machine-local store for transport and re-encrypted under the TARGET machine's own key on import; each Claude subscription's creds dir (`.credentials.json`/`.claude.json`) and each Codex account's `auth.json` travel as whitelisted files, recreated 0700/0600 with the codex shared-home symlinks reseeded. Existing ids are never clobbered; defaults carry over only if unset locally. Verified end-to-end on an isolated instance: both subscriptions arrive `loggedIn:true` with correct identities; wrong passphrase rejected.
+- **Task Groups were silently unexportable** — the server supported the section since 2.53.0 but the export dialog never had the row, and the import dialog's label map skipped unknown sections. Both fixed (checklists + activity logs + context-dir config ride along).
+- **Usage pricing table** (model rates + per-account discounts) is a new export section.
+- **clientPrefs** now include language, usage-view account choices, quota-refresh ack and the onboarding flag (gather + import write-back share one key list).
+- NOT in the config file by design: the usage **ledger** (data/usage-history/, ~80MB — copy the directory during migration to keep analytics history), session statuses & the For-you inbox (runtime state), caches (usage-cache, remote-jsonl, codex-models-seen).
+
 ## 2.99.3 — 2026-07-11
 
 **Dashboard split-series panels (two-dimensional analysis: day × account etc.)**

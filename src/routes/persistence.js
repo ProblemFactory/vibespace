@@ -27,7 +27,7 @@ function writeJsonAtomic(file, data) {
 }
 
 /** Setup persistence routes. Requires { dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth } context. */
-function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getHosts, getMounts, getTasks }) {
+function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getHosts, getMounts, getTasks, getAccounts, getUsageHistory }) {
   const broadcast = (msg) => {
     const json = JSON.stringify(msg);
     wss.clients.forEach(client => {
@@ -453,6 +453,10 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
         },
         bookmarks: { count: (bookmarks || []).length },
         tasks: { count: (getTasks?.()?.list?.() || []).length },
+        pricing: (() => {
+          const p = getUsageHistory?.()?.pricingTable?.() || {};
+          return { count: Object.keys(p.tiers || {}).length + Object.keys(p.accounts || {}).length };
+        })(),
       },
       sensitive: {
         vsPassword: !!auth?.enabled,
@@ -460,6 +464,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
         codexCreds: fs.existsSync(CODEX_CREDS),
         hosts: (getHosts?.()?.list?.() || []).length,
         mounts: (getMounts?.()?.list?.() || []).length,
+        accounts: (getAccounts?.()?.list?.()?.accounts || []).length,
       },
     });
   });
@@ -478,6 +483,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     take('userState', readUserState);
     take('bookmarks', readBookmarks);
     take('tasks', () => getTasks?.()?.exportBundle?.() || null);
+    take('pricing', () => getUsageHistory?.()?.pricingTable?.() || null);
     if (sections.includes('clientPrefs') && clientPrefs && typeof clientPrefs === 'object') {
       file.sections.clientPrefs = clientPrefs;
     }
@@ -506,6 +512,13 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
         const b = getMounts?.()?.exportBundle?.();
         if (b?.mounts?.length || b?.shares?.length || b?.myStorage) sens.mounts = b;
       }
+      if (includeSensitive.includes('accounts')) {
+        // Named billing accounts: API keys decrypted out of the machine-local
+        // store + each subscription's creds-dir files. Plaintext ONLY inside
+        // this passphrase-encrypted blob.
+        const b = getAccounts?.()?.exportBundle?.();
+        if (b?.accounts?.length) sens.accounts = b;
+      }
       if (Object.keys(sens).length) {
         file.sensitive = { manifest: Object.keys(sens), ...encryptSensitive(sens, passphrase) };
       }
@@ -532,6 +545,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     apply('userState', (d) => { if (d && typeof d === 'object') writeUserState(d); });
     apply('bookmarks', (d) => { if (Array.isArray(d)) { writeBookmarks(d); broadcast({ type: 'bookmarks-updated', bookmarks: d }); } });
     apply('tasks', (d) => { if (d && typeof d === 'object') getTasks?.()?.importBundle?.(d); });
+    apply('pricing', (d) => { if (d && typeof d === 'object') getUsageHistory?.()?.setPricing?.(d); });
     // clientPrefs are applied by the CLIENT (localStorage) — echo them back
     const clientPrefs = sections.includes('clientPrefs') ? file.sections.clientPrefs : undefined;
     if (clientPrefs) applied.push('clientPrefs');
@@ -557,6 +571,10 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
       if (includeSensitive.includes('mounts') && sens.mounts) {
         getMounts?.()?.importBundle?.(sens.mounts);
         applied.push('mounts');
+      }
+      if (includeSensitive.includes('accounts') && sens.accounts) {
+        const r = getAccounts?.()?.importBundle?.(sens.accounts);
+        applied.push(`accounts (${r?.imported ?? 0} imported, ${r?.skipped ?? 0} skipped)`);
       }
       if (includeSensitive.includes('vsPassword') && sens.vsPassword && auth) {
         // enables auth + revokes all tokens; keep THIS caller logged in

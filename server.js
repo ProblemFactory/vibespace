@@ -1733,7 +1733,8 @@ syncStores.settings = new SyncStore('settings', path.join(__dirname, 'data', 'se
 syncStores.uploads = new SyncStore('uploads', path.join(__dirname, 'data', 'uploads-sync.json'), wss);
 
 setupPersistence({ dataDir: path.join(__dirname, 'data'), wss, WS_OPEN, getSyncStore, activeSessions, auth,
-  getHosts: () => hosts, getMounts: () => mounts, getTasks: () => tasks });
+  getHosts: () => hosts, getMounts: () => mounts, getTasks: () => tasks,
+  getAccounts: () => accounts, getUsageHistory: () => usageHistory });
 app.use(persistenceRouter);
 
 // ── Task Groups (岗位; task system — docs/design-task-system.md + refactor) ──
