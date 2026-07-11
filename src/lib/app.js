@@ -10,7 +10,7 @@ import { CodeEditor } from './code-editor.js';
 import { LayoutManager } from './layout.js';
 import { ChatView } from './chat-view.js';
 import { Resizer } from './resizer.js';
-import { anchorFixedPopup, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog } from './utils.js';
+import { anchorFixedPopup, configureToasts, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog } from './utils.js';
 import { t, tc, getLangPref, setLang } from './i18n.js';
 import { installManageAgents } from './manage-agents.js';
 import { installUsageMeter } from './usage-meter.js';
@@ -137,6 +137,11 @@ class App {
     if (this.isTouch) installLongPressContextMenu();
 
     this.settings = new SettingsManager();
+    // Toast cards anchor at the inbox button and read their duration live
+    configureToasts({
+      getSeconds: () => this.settings.get('taskbar.toastSeconds'),
+      getAnchor: () => document.getElementById('taskbar-user-todos'),
+    });
     this.themeManager = new ThemeManager();
     this.ws = new WsManager();
     this.wm = new WindowManager(document.getElementById('workspace'));
@@ -843,8 +848,10 @@ class App {
     // The item also shows the running version and \u2014 when the canonical repo
     // has a newer one \u2014 "vX \u2192 vY" highlighted (user request).
     if (this._repoDir) {
+      // Clicking Update opens the changelog-confirm dialog first (user
+      // directive) — the actual update runs only after the user confirms.
       const upd = item(I.key, t('Update VibeSpace\u2026'), () => {
-        this.openShellTerminal(this._repoDir, { initialCommand: 'bash scripts/update.sh' });
+        this._showUpdateConfirmDialog();
       });
       // Two-line button (user request): label on top, "vCURRENT \u2192 vLATEST"
       // below. Restructure item()'s [icon][label] into [icon][column].
@@ -873,6 +880,38 @@ class App {
       }, true));
     }
     pop.append(menu);
+  }
+
+  // Update-confirm dialog: every changelog entry between the RUNNING version
+  // and the canonical repo's latest, then an explicit "Update now".
+  async _showUpdateConfirmDialog() {
+    const { body, close } = createModalShell({ id: 'update-confirm-dialog', title: t('Update VibeSpace'), bodyClass: 'update-confirm-body', escapeToClose: true });
+    body.innerHTML = `<div class="empty-hint">${t('Checking for updates\u2026')}</div>`;
+    const [v, cl] = await Promise.all([fetchJson('/api/version'), fetchJson('/api/changelog-diff')]);
+    if (!body.isConnected) return;
+    const cur = v?.version || cl?.current || '?';
+    const latest = v?.latest || cl?.latest || null;
+    const newer = latest && this._versionNewer(latest, cur);
+    const entries = cl?.entries || [];
+    const list = entries.length
+      ? entries.map((e) => `
+        <div class="ucl-entry">
+          <div class="ucl-ver">v${escHtml(e.version)}</div>
+          <pre class="ucl-body">${escHtml(e.body || '')}</pre>
+        </div>`).join('')
+      : `<div class="empty-hint">${newer ? t('No changelog details available for the new version.') : t('You are already on the latest version.')}</div>`;
+    body.innerHTML = `
+      <div class="ucl-head">${escHtml(newer ? `v${cur} \u2192 v${latest}` : `v${cur}`)}${newer ? `<span class="gs-ver-new ucl-newtag">${t('Update available')}</span>` : ''}</div>
+      <div class="ucl-list">${list}</div>
+      <div class="dialog-actions">
+        <button type="button" class="mounts-btn" data-act="cancel">${t('Cancel')}</button>
+        <button type="button" class="btn-create" data-act="go">${newer ? t('Update now') : t('Update anyway')}</button>
+      </div>`;
+    body.querySelector('[data-act=cancel]').onclick = () => close();
+    body.querySelector('[data-act=go]').onclick = () => {
+      close();
+      this.openShellTerminal(this._repoDir, { initialCommand: 'bash scripts/update.sh' });
+    };
   }
 
   /** Is semver a newer than b? (plain x.y.z compare) */

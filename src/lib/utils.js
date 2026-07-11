@@ -115,6 +115,25 @@ export function showConfirmDialog({ title = t('Confirm'), message = '', confirmT
 // One shared bottom-center stack for transient feedback. Replaces the ad-hoc
 // mix of alert()s, per-component toasts, and silent .catch(() => {}) failures.
 // showToast('Saved');  showToast('Rename failed: ' + e.message, { type: 'error' })
+// ── Toast cards ──
+// Card popups anchored next to the inbox button (user directive: the old
+// centered floating strip had no visible background and went unnoticed).
+// Duration is user-configurable (taskbar.toastSeconds) and EVERY toast —
+// info and error alike — is recorded into a local history that the inbox
+// popup shows as its "Notifications" tab.
+let _toastCfg = {};
+export function configureToasts(cfg) { _toastCfg = cfg || {}; }
+export function getToastHistory() {
+  try { return JSON.parse(localStorage.getItem('vibespace.toastHistory') || '[]'); } catch { return []; }
+}
+function _recordToast(message, type) {
+  try {
+    const h = getToastHistory();
+    h.unshift({ m: String(message).slice(0, 500), type, ts: Date.now() });
+    localStorage.setItem('vibespace.toastHistory', JSON.stringify(h.slice(0, 100)));
+  } catch {}
+  try { window.dispatchEvent(new CustomEvent('vs-toast')); } catch {}
+}
 export function showToast(message, { type = 'info', duration } = {}) {
   let stack = document.getElementById('global-toasts');
   if (!stack) {
@@ -122,13 +141,38 @@ export function showToast(message, { type = 'info', duration } = {}) {
     stack.id = 'global-toasts';
     document.body.appendChild(stack);
   }
+  // Anchor next to the inbox button when it's visible (customize mode can
+  // move it to any bar; mobile hides it → fall back to the centered strip).
+  const anchor = _toastCfg.getAnchor?.();
+  const r = anchor && anchor.offsetParent ? anchor.getBoundingClientRect() : null;
+  if (r) {
+    stack.classList.add('gt-anchored');
+    stack.style.left = 'auto';
+    stack.style.transform = 'none';
+    stack.style.right = Math.max(8, window.innerWidth - r.right) + 'px';
+    if (r.top > window.innerHeight / 2) { stack.style.bottom = (window.innerHeight - r.top + 8) + 'px'; stack.style.top = 'auto'; }
+    else { stack.style.top = (r.bottom + 8) + 'px'; stack.style.bottom = 'auto'; }
+  } else {
+    stack.classList.remove('gt-anchored');
+    stack.style.left = ''; stack.style.right = ''; stack.style.top = ''; stack.style.bottom = ''; stack.style.transform = '';
+  }
   const el = document.createElement('div');
   el.className = `global-toast global-toast-${type}`;
-  el.textContent = message;
+  const body = document.createElement('div');
+  body.className = 'global-toast-body';
+  body.textContent = message;
+  const x = document.createElement('button');
+  x.className = 'global-toast-x';
+  x.setAttribute('aria-label', 'Dismiss');
+  x.textContent = '✕';
+  x.onclick = (e) => { e.stopPropagation(); el.remove(); if (!stack.children.length) stack.remove(); };
+  el.append(body, x);
   stack.appendChild(el);
+  _recordToast(message, type);
   // Cap the stack so a burst of errors doesn't fill the screen
   while (stack.children.length > 4) stack.firstChild.remove();
-  const ttl = duration ?? (type === 'error' ? 6000 : 3000);
+  const secs = Number(_toastCfg.getSeconds?.());
+  const ttl = duration ?? (secs > 0 ? secs * 1000 : (type === 'error' ? 6000 : 3000));
   setTimeout(() => {
     el.classList.add('global-toast-out');
     setTimeout(() => { el.remove(); if (!stack.children.length) stack.remove(); }, 250);

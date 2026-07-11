@@ -343,6 +343,12 @@ const SETTINGS_SCHEMA = {
     category: t('Session'), liveApply: true,
   },
 
+  'taskbar.toastSeconds': {
+    type: 'number', default: 6, min: 2, max: 60,
+    label: t('Notification popup duration (seconds)'),
+    description: t('How long toast cards (new inbox items, errors, confirmations) stay on screen. They appear next to the inbox button and every one is kept in the inbox popup’s Notifications tab.'),
+    category: t('Toolbar & Layout'), liveApply: true,
+  },
   'mounts.vfsCacheMaxSizeGB': {
     type: 'number', default: 10, min: 1, max: 500,
     label: t('Storage mount cache size (GB)'),

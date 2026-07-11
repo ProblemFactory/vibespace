@@ -252,10 +252,21 @@ export function installSidebarMounts(Sidebar) {
           ibtn(MI.eject, 'Disconnect', () => api(`/api/mounts/${m.id}/unmount`, { method: 'POST' })),
         );
       } else if (!isCred) {
-        actions.append(ibtn(MI.plug, 'Connect', async () => {
-          const r = await api(`/api/mounts/${m.id}/mount`, { method: 'POST' });
-          if (!r.success) throw new Error('Couldn’t connect — hover the status dot for details');
-        }, 'mounts-icon-accent'));
+        // TEXT chip, not an icon (user: the plug icon read as a "download"
+        // button). Adds auto-connect and supervision keeps mounts up, so this
+        // only appears on deliberately-disconnected / errored rows.
+        const cb = document.createElement('button');
+        cb.className = 'mounts-btn mounts-connect-chip';
+        cb.textContent = tr('Connect');
+        cb.onclick = async (e) => {
+          e.stopPropagation(); cb.disabled = true;
+          try {
+            const r = await api(`/api/mounts/${m.id}/mount`, { method: 'POST' });
+            if (!r.success) throw new Error('Couldn’t connect — hover the status dot for details');
+          } catch (err2) { showToast(err2.message || 'Failed', { type: 'error' }); }
+          this._renderMounts();
+        };
+        actions.append(cb);
       }
       // Share a folder FROM this connection — only S3 with full owner creds.
       // Doesn't hit the network here, so it's fine to offer while unmounted.
@@ -273,33 +284,25 @@ export function installSidebarMounts(Sidebar) {
         actions.append(ibtn(MI.plus, tr('Add a submount (a specific bucket/path of this storage)'), () => { this._showAddChildDialog(m); }, isCred ? 'mounts-icon-accent' : ''));
       }
       actions.append(ibtn(MI.pencil, 'Edit connection (path, credentials, name)', () => { this._showEditMountDialog(m); }));
-      if (!isCred && !m.parentId) {
-        actions.append(ibtn(MI.copy, 'New mount from this connection (same credentials, different bucket/path)', () => { this._showDuplicateMountDialog(m); }));
-      }
-      // Env-provisioned personal storage is deployment-managed: no delete
-      // (a changed provisioning re-imports it) — edit/rename/unmount only.
-      if (m.origin !== 'my-storage') {
-        actions.append(ibtn(MI.cross, 'Remove mount (nothing is deleted remotely)', async () => {
-          const ok = await showConfirmDialog({ title: `Remove "${m.name}"?`, message: 'The mount record and local mountpoint go away. Nothing is deleted remotely.', confirmText: 'Remove', danger: true });
-          if (ok) {
-            const r = await api(`/api/mounts/${m.id}`, { method: 'DELETE' });
-            if (r?.error) throw new Error(r.error);
-          }
-        }, 'mounts-icon-danger'));
-      }
+      // Duplicate + Remove used to live here as row icons — duplicate is
+      // superseded by submounts, and Remove moved into the Edit dialog
+      // (user directive: fewer per-row icons).
       top.appendChild(actions);
+      // Detail line: [TYPE] → /mount/path — the type tag rides HERE instead
+      // of the name row (user directive: keep the first line lean). Shown for
+      // every type incl. s3; a credential-only row shows its remote source.
       const pathEl = document.createElement('div');
       pathEl.className = 'mounts-path';
-      // A credential-only row never mounts — its local path is meaningless;
-      // show the remote source instead.
       pathEl.title = isCred ? (m.source || '') : `${m.source || ''} → ${m.path}`;
-      pathEl.textContent = isCred ? (m.source || '') : m.path;
-      if (m.type && m.type !== 's3') {
-        const tag = document.createElement('span');
-        tag.className = 'mounts-typetag';
-        tag.textContent = { drive: 'Drive', webdav: 'WebDAV', sftp: 'SFTP', vibespace: 'VibeSpace', cephfs: 'CephFS', rclone: (m.source || 'rclone').split(':')[0] }[m.type] || m.type;
-        top.querySelector('.mounts-name')?.after(tag);
-      }
+      const tag = document.createElement('span');
+      tag.className = 'mounts-typetag';
+      tag.textContent = { s3: 'S3', drive: 'Drive', webdav: 'WebDAV', sftp: 'SFTP', vibespace: 'VibeSpace', cephfs: 'CephFS', rclone: (m.source || 'rclone').split(':')[0] }[m.type || 's3'] || m.type;
+      // The path keeps its rtl left-truncation trick in its OWN span — the
+      // chip must stay outside the rtl context or bidi reorders it to the end.
+      const pt = document.createElement('span');
+      pt.className = 'mounts-path-text';
+      pt.textContent = isCred ? (m.source || '') : `→ ${m.path}`;
+      pathEl.append(tag, pt);
       row.append(top, pathEl);
       if (m.error) {
         const err = document.createElement('div');
@@ -1061,6 +1064,25 @@ export function installSidebarMounts(Sidebar) {
         rb.onclick = () => { close(); this._showDriveReauthDialog(m); };
         form.querySelector('.dialog-actions').prepend(rb);
       }
+      // Remove lives HERE, not as a per-row icon (user directive). Env-
+      // provisioned personal storage stays deployment-managed: no delete.
+      if (m.origin !== 'my-storage') {
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'mounts-btn mounts-btn-danger';
+        del.textContent = tr('Remove…');
+        del.title = tr('Remove this connection (nothing is deleted remotely)');
+        del.onclick = async () => {
+          const ok = await showConfirmDialog({ title: `Remove "${name}"?`, message: 'The mount record and local mountpoint go away. Nothing is deleted remotely.', confirmText: 'Remove', danger: true });
+          if (!ok) return;
+          try {
+            const r = await api(`/api/mounts/${m.id}`, { method: 'DELETE' });
+            if (r?.error) throw new Error(r.error);
+            close(); this._renderMounts();
+          } catch (e2) { form.querySelector('.cfg-err').textContent = e2.message || 'Failed'; }
+        };
+        form.querySelector('.dialog-actions').prepend(del);
+      }
       const err = form.querySelector('.cfg-err');
       form.onsubmit = async (e) => {
         e.preventDefault(); err.textContent = '';
@@ -1085,36 +1107,6 @@ export function installSidebarMounts(Sidebar) {
         if (!Object.keys(patch).length) { close(); return; }
         try { await api(`/api/mounts/${m.id}`, { method: 'PATCH', body: JSON.stringify(patch), headers: { 'Content-Type': 'application/json' } }); }
         catch (e2) { err.textContent = e2.message || 'Failed'; return; }
-        close(); this._renderMounts();
-      };
-    },
-
-    _showDuplicateMountDialog(m) {
-      const { body, close } = createModalShell({ id: 'mount-dup-dialog', title: tr('New mount from "{name}"', { name: m.name }), bodyClass: 'mounts-dialog-body', escapeToClose: true });
-      const form = document.createElement('form');
-      form.className = 'mounts-form';
-      const type = m.type || 's3';
-      const pathField = type === 's3' ? ['bucket', tr('Bucket'), m.bucket || '']
-        : type === 'rclone' ? ['remotePath', tr('Remote path (bucket[/prefix])'), m.remotePath || '']
-        : type === 'drive' ? ['driveFolder', tr('Folder path'), m.driveFolder || '']
-        : null;
-      form.innerHTML = `
-        <label>${tr('Name')}<input name="name" value="${escHtml(m.name)}-2" autocomplete="off"></label>
-        ${pathField ? `<label>${escHtml(pathField[1])}<input name="${pathField[0]}" value="${escHtml(pathField[2])}" autocomplete="off"></label>` : ''}
-        ${type === 's3' ? `<label>${tr('Prefix (optional)')}<input name="prefix" value="${escHtml(m.prefix || '')}" autocomplete="off"></label>` : ''}
-        <div class="mounts-note">${tr('Same credentials, different location — one connection can back any number of mounts.')}</div>
-        <div class="cfg-err"></div>
-        <div class="dialog-actions"><button type="submit" class="btn-create">${tr('Create & connect')}</button></div>`;
-      body.appendChild(form);
-      const err = form.querySelector('.cfg-err');
-      form.onsubmit = async (e) => {
-        e.preventDefault(); err.textContent = '';
-        const payload = { name: form.querySelector('[name="name"]').value.trim() };
-        for (const el of form.querySelectorAll('input:not([name="name"])')) payload[el.name] = el.value;
-        let r;
-        try { r = await api(`/api/mounts/${m.id}/duplicate`, { method: 'POST', body: JSON.stringify(payload), headers: { 'Content-Type': 'application/json' } }); }
-        catch (e2) { err.textContent = e2.message || 'Failed'; return; }
-        if (r?.id) await api(`/api/mounts/${r.id}/mount`, { method: 'POST' }).catch(() => {});
         close(); this._renderMounts();
       };
     },

@@ -2811,6 +2811,41 @@ app.get('/api/version', async (req, res) => {
   res.json({ version: require('./package.json').version, commit: versionInfo.commit || null, latest: versionInfo.latest });
 });
 
+// Changelog diff for the update-confirm dialog (user directive: clicking
+// Update shows every change between the running and latest versions first).
+// Canonical repo's CHANGELOG.md, lazily fetched + cached like /api/version.
+function versionNewerThan(a, b) {
+  const pa = String(a).split('.').map(Number), pb = String(b).split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] || 0) > (pb[i] || 0)) return true;
+    if ((pa[i] || 0) < (pb[i] || 0)) return false;
+  }
+  return false;
+}
+app.get('/api/changelog-diff', async (req, res) => {
+  const cur = require('./package.json').version;
+  if (Date.now() - (versionInfo.clFetchedAt || 0) > 6 * 3600 * 1000) {
+    versionInfo.clFetchedAt = Date.now(); // stamped even on failure — offline-safe
+    try {
+      const ctl = new AbortController();
+      const t = setTimeout(() => ctl.abort(), 8000);
+      const r = await fetch('https://raw.githubusercontent.com/ProblemFactory/vibespace/master/CHANGELOG.md', { signal: ctl.signal });
+      clearTimeout(t);
+      if (r.ok) versionInfo.changelog = await r.text();
+    } catch {}
+  }
+  const entries = [];
+  for (const block of String(versionInfo.changelog || '').split(/\n## /).slice(1)) {
+    const nl = block.indexOf('\n');
+    const head = (nl < 0 ? block : block.slice(0, nl)).trim();
+    const ver = (head.match(/^(\d+\.\d+\.\d+)/) || [])[1];
+    if (!ver) continue;
+    if (!versionNewerThan(ver, cur)) break; // newest-first — everything above cur is the diff
+    entries.push({ version: ver, head, body: nl < 0 ? '' : block.slice(nl + 1).trim() });
+  }
+  res.json({ current: cur, latest: versionInfo.latest || null, entries });
+});
+
 server.listen(PORT, HOST, () => {
   const ver = require('./package.json').version;
   console.log(`\n  VibeSpace v${ver} running at http://localhost:${PORT}`);

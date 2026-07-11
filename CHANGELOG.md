@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.111.0 — 2026-07-11
+
+**Noticeable notifications (user reports: the floating toast had no background and went unseen; error toasts too)**
+
+- All toasts — inbox items, errors, confirmations — are now **cards anchored next to the inbox button**: real background, colored edge, shadow, close button. (Root cause of the invisibility: the old style referenced undefined CSS tokens, so the background resolved transparent.)
+- Toast duration is configurable: Settings → *Notification popup duration (seconds)* (default 6).
+- The inbox popup has **two pages**: the real Inbox (default) and **Notifications** — the recent popup history (messages only, kept locally, live-updating).
+
+**Update flow: changelog confirmation (user directive)**
+
+- Clicking ⚙ *Update VibeSpace…* no longer updates immediately — a dialog lists **every changelog entry between your running version and the latest**, and the update runs only after you confirm (`GET /api/changelog-diff`; offline-safe). Per-patch changelog discipline continues.
+
+**Storage rows decluttered (user directives)**
+
+- The connection-type tag ([S3], [Drive], [OneDrive]…) moved off the name row into the detail line: `[Type] → /mount/path` — and now shows for every type including S3.
+- The confusing plug/download **Connect icon is now a text chip** ("Connect"), only shown on deliberately-disconnected rows (adds auto-connect and 2.110.0's supervision keep mounts up otherwise).
+- The **duplicate-mount button is gone** (superseded by submounts) and **Remove moved into the Edit dialog** (fewer per-row icons; still confirm-guarded, still refuses while a credential has children).
+
+**Read-only mounts explain write failures (user report: "创建文件失败" said nothing)**
+
+- Creating/renaming/deleting files inside a read-only mount now says WHY: the server appends "“<name>” is connected READ-ONLY…" when the failing path is under an RO mount (generic read-only note for other EROFS), and the file explorer surfaces the server's reason instead of a bare "failed" toast.
+
 ## 2.110.1 — 2026-07-11
 
 - The ⚙ *Update VibeSpace…* row is now two lines (user request): action label on top, `vCURRENT → vLATEST` below (highlighted when an update is available; just `vCURRENT` when up to date).
