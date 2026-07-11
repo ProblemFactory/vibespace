@@ -32,7 +32,7 @@ storage:
 
 resources:
   requests: { cpu: "1", memory: "4Gi" }
-  limits:   { cpu: "8", memory: "16Gi" }
+  limits:   { cpu: "8", memory: "32Gi" }
 
 # Schedule onto whatever nodes you want VibeSpace pods on.
 nodeSelector: {}

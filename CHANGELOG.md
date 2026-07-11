@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.111.3 — 2026-07-11
+
+- **Update dialog on the latest version now shows this version's changelog** instead of an empty "already latest" line (user request): the `/api/changelog-diff` endpoint returns the current version's own entry when nothing newer exists, and the dialog renders it under "What's in this version" with a *Latest version* tag.
+- **In-container Desktop: Chromium wouldn't launch after a pod restart** (real report). Chromium's profile `SingletonLock` (persisted in the PVC) records the pod hostname+pid; after a pod recreation it points at a dead pod and Chromium refuses to start ("profile in use on another computer"). The entrypoint now clears the stale lock on every boot.
+- **Desktop panel launchers bind directly to their apps** (`xfce4-terminal` / `thunar` / `chromium` / `xfce4-settings-manager`) instead of `exo-open --launch <Category>`, which silently no-ops without a registered preferred app (user directive: bind the browser straight to Chromium). Image-level; carried on the next image build.
+- **Default pod resources raised to 8 CPU / 32 GiB memory** (limit) in the Helm chart.
+
 ## 2.111.2 — 2026-07-11
 
 - **In-container Desktop: the panel "Settings" button did nothing (real report)**. The stock XFCE panel generated on first desktop boot ships an EMPTY 4th launcher — a button with no command — plus Terminal/File-Manager launchers that use `exo-open --launch <Category>`, which silently no-ops when no preferred app is registered. The deployment image now bakes a curated XFCE default (`/etc/xdg/xfce4/…`): the empty launcher becomes a real Settings Manager launcher, and `helpers.rc` registers Terminal=xfce4-terminal / Files=Thunar / Browser=chromium so all the panel buttons work. Applies to FRESH desktops; an already-generated user config is repaired with a one-line fix (see the private deploy README). Image-level change — carried on the next image build.
