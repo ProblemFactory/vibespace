@@ -5,7 +5,9 @@
 // session to handle them. Items arrive via `vibespace-ask` (agent CLI) and are
 // resolved/dismissed here (or by the agent once the user answers in chat).
 import { t } from './i18n.js';
-import { anchorFixedPopup, escHtml, fetchJson, getToastHistory, showToast } from './utils.js';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
+import { anchorFixedPopup, copyText, createModalShell, escHtml, fetchJson, getToastHistory, showToast } from './utils.js';
 
 const URG_RANK = { low: 0, normal: 1, high: 2, urgent: 3 };
 
@@ -53,6 +55,27 @@ export function installUserTodos(app) {
     // the success flag or the failure is a silent no-op.
     const r = await fetchJson(`/api/user-todos/${encodeURIComponent(id)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
     if (!r || !r.success) showToast(t('Could not update the item') + (r?.error ? `: ${r.error}` : ''), { type: 'error' });
+  };
+
+  // Dedicated item viewer (user request: the popup rows are hard to read and
+  // can't be selected/copied) — markdown-rendered, selectable, with Copy.
+  const openViewer = (i) => {
+    const { body } = createModalShell({ id: 'ut-viewer', title: nameFor(i.sessionKey, [i]), bodyClass: 'ut-viewer-body', minWidth: 'min(560px, 92vw)', escapeToClose: true });
+    const raw = i.text + (i.detail ? '\n\n' + i.detail : '');
+    const md = document.createElement('div');
+    md.className = 'ut-viewer-md';
+    md.innerHTML = DOMPurify.sanitize(marked.parse(raw));
+    const meta = document.createElement('div');
+    meta.className = 'ut-meta';
+    meta.textContent = `${i.urgency || 'normal'} · ${agoText(i.createdAt)}${i.resolvedAt ? ` · ${i.status}` : ''}`;
+    const actionsRow = document.createElement('div');
+    actionsRow.className = 'dialog-actions';
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'mounts-btn';
+    copyBtn.textContent = t('Copy');
+    copyBtn.onclick = () => { copyText(raw); showToast(t('Copied')); };
+    actionsRow.append(copyBtn);
+    body.append(md, meta, actionsRow);
   };
 
   const agoText = (ts) => {
@@ -108,6 +131,7 @@ export function installUserTodos(app) {
           <div class="ut-meta">${agoText(i.createdAt)}</div>
         </div>
         <span class="ut-actions">
+          <button class="ut-act ut-view" title="${t('Open in viewer (copyable, rendered)')}">⤢</button>
           <button class="ut-act ut-done" title="${t('Handled — mark done')}">✓</button>
           <button class="ut-act ut-dismiss" title="${t('Dismiss (not going to act on this)')}">✕</button>
         </span>
@@ -120,7 +144,7 @@ export function installUserTodos(app) {
           <div class="ut-body"><div class="ut-text">${escHtml(i.text)}</div>
           ${detailHtml(i)}
           <div class="ut-meta"><span class="ut-sess" title="${t('Go to this session')}">${escHtml(nameFor(i.sessionKey, [i]))}</span> · ${i.status === 'dismissed' ? t('dismissed') : t('done')}${i.resolvedBy === 'agent' ? ' · ' + t('by the agent') : ''} · ${agoText(i.resolvedAt || i.createdAt)}</div></div>
-          <span class="ut-actions"><button class="ut-act ut-reopen" title="${t('Reopen')}">↺</button></span>
+          <span class="ut-actions"><button class="ut-act ut-view" title="${t('Open in viewer (copyable, rendered)')}">⤢</button><button class="ut-act ut-reopen" title="${t('Reopen')}">↺</button></span>
         </div>`).join('')}` : '';
     popup.innerHTML = tabsHtml + `
       <div class="usage-section-title">${t('For you')}<span class="ut-head-sub">${todos.open.length ? t('{n} open', { n: todos.open.length }) : t('all clear')}</span></div>
@@ -155,10 +179,17 @@ export function installUserTodos(app) {
     const item = e.target.closest('.ut-item');
     if (!item) return;
     const id = item.dataset.id;
+    if (e.target.closest('.ut-view')) {
+      const rec = todos.open.find((i) => i.id === id) || todos.resolved.find((i) => i.id === id);
+      if (rec) openViewer(rec);
+      return;
+    }
     if (e.target.closest('.ut-done')) setStatus(id, 'done');
     else if (e.target.closest('.ut-dismiss')) setStatus(id, 'dismissed');
     else if (e.target.closest('.ut-reopen')) setStatus(id, 'open');
     else {
+      // a real text SELECTION inside the row must not jump-and-close
+      if (String(window.getSelection?.() || '')) return;
       const rec = todos.open.find((i) => i.id === id) || todos.resolved.find((i) => i.id === id);
       if (rec) jump(rec.sessionKey);
     }

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.111.6 — 2026-07-11
+
+- **Inbox readability (user request)**: every item gets a ⤢ viewer — a dedicated dialog with the text+detail rendered as markdown, fully selectable, with a Copy button. Item text in the popup is selectable now too (a real selection no longer triggers the jump-and-close). And the agent guidance is strengthened everywhere (session intro, per-turn reminder, stop nudge, CLI usage, group context): the inbox is a NOTIFICATION MIRROR — the full content must also appear in the chat reply, never only in the inbox.
+
 ## 2.111.5 — 2026-07-11
 
 - **Paging up no longer jumps / slams to the top (root fix, tracer-diagnosed)**. The scroll compensation used scrollHeight DELTAS — but under `content-visibility: auto` a freshly inserted batch measures at its ~80px per-message ESTIMATE while the trimmed batch had REAL heights, so the delta could go NEGATIVE: the tracer caught an insert-50/trim-50 page SHRINKING scrollHeight by 312px, the compensation clamping scrollTop to 0 (slammed to the very top), and the top sentinel then load-looping at the clamp. All four paging paths (extend-top, trim-top-adjacent flows, gap slab loads, gap trims) now preserve position by ANCHORING the topmost visible element and restoring its offset after the mutation — layout ground truth regardless of estimated heights. The scroll tracer stays in for verification.

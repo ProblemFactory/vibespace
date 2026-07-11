@@ -147,6 +147,7 @@ const SESSION_TOOLS_INTRO = [
   '  vibespace-ask "question or decision needed" [--detail "context + your recommendation"] [--urgency low|normal|high|urgent]',
   '  vibespace-ask list  /  vibespace-ask resolve <id|text>',
   'The MOMENT the user answers (in chat or anywhere), resolve the item YOURSELF with `vibespace-ask resolve` — never leave answered items for them to tick. Not for your own working steps — those belong in your normal todo list.',
+  'The inbox item is a NOTIFICATION MIRROR, not the message itself: everything you file (the question, options, your recommendation) must ALSO appear IN FULL in your chat reply — never say something only in the inbox (the user reads and copies from chat; inbox rows are hard to read at length).',
   'When your reply references files you created or discuss (audio, images, reports, code, HTML…), write their ABSOLUTE paths — the chat UI turns absolute paths into clickable links that open in the right viewer (audio plays, images preview, HTML renders). Bare filenames or project-relative paths may not resolve.',
   '(If this session is later linked to a VibeSpace task, you will also get `vibespace-task` for task-level progress/plan/status — you have no task right now, so it is not active yet.)',
   '</vibespace-session-tools>',
@@ -279,7 +280,7 @@ app.get('/api/agent/prompt-context', (req, res) => {
     if (!outParts.length) {
       const multi = injectGroups.length > 1;
       const std = perTurnReminderEnabled()
-        ? `Tools on PATH: vibespace-status <state> — keep your board state honest · vibespace-ask "q" — MIRROR every question you ask the user in chat onto their inbox, and resolve <id|text> the moment they answer · vibespace-task ${multi ? '--group <id> ' : ''}progress "summary" — log finished work. Run any with no args for usage.`
+        ? `Tools on PATH: vibespace-status <state> — keep your board state honest · vibespace-ask "q" — MIRROR every chat question onto their inbox (the FULL content still goes in your chat reply — the inbox is only the notification), and resolve <id|text> the moment they answer · vibespace-task ${multi ? '--group <id> ' : ''}progress "summary" — log finished work. Run any with no args for usage.`
         : '';
       // User extra rides at the TOP of the reminder block (per-hook custom,
       // 2.88.0); it delivers even with the standard reminder toggled off.
@@ -314,7 +315,7 @@ app.get('/api/agent/stop-check', (req, res) => {
     const extra = customExtra('agents.stopNudgeExtra', 500);
     res.json({
       block: true,
-      reason: (extra ? extra + '\n' : '') + 'VibeSpace bookkeeping before you stop (your board state is stale): (1) set your CURRENT state — vibespace-status <working|needs-input|blocked|review|done> --reason "one line" (done if this piece of work is finished; needs-input/review if you are waiting on the user); (2) if you asked the user anything this turn or are waiting on them, MIRROR it — vibespace-ask "question" — and vibespace-ask resolve anything they already answered; (3) if you completed meaningful work, log it — vibespace-task progress "summary". Then stop again.',
+      reason: (extra ? extra + '\n' : '') + 'VibeSpace bookkeeping before you stop (your board state is stale): (1) set your CURRENT state — vibespace-status <working|needs-input|blocked|review|done> --reason "one line" (done if this piece of work is finished; needs-input/review if you are waiting on the user); (2) if you asked the user anything this turn or are waiting on them, MIRROR it — vibespace-ask "question" (the full content must already be in your chat reply; the inbox only notifies) — and vibespace-ask resolve anything they already answered; (3) if you completed meaningful work, log it — vibespace-task progress "summary". Then stop again.',
     });
   } catch { res.json({ block: false }); }
 });
