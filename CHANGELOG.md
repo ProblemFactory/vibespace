@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.99.3 — 2026-07-11
+
+**Dashboard split-series panels (two-dimensional analysis: day × account etc.)**
+- A panel can now cross its main dimension with a second one: the editor's new **“Split series by”** select turns a line chart into one line per split key and a bar chart into **stacked bars** — `总 tokens · 按天 × 账号` (per-account daily token burn, the motivating ask), cost per day per model, requests per hour per project, whatever combination. Top-6 split keys by volume keep their own series, the tail folds into “Other”; account/session keys resolve to their display names.
+- Server side: `UsageHistory.aggregate` accepts `pivots` (pairs of dimension keys) and returns `pivots['a:b']` rows whose cells carry the same finalized bucket shape as group rows — one pass over the event cache, no extra scans. `GET /api/usage-stats?pivot=day:account,day:model` (validated, ≤6 crosses).
+- The window's single fetch requests exactly the pivots the saved panels need (`panelPivots`); an edit or preset that introduces a new cross refetches instead of rendering a hole. The **Account reconciliation preset** now leads with day×account stacked tokens + day×account cost lines.
+- Chart.js gotcha fixed in the process: datasets not bound to a configured scale (`yAxisID`) make Chart.js mint a phantom default axis alongside the real one.
+
 ## 2.99.2 — 2026-07-11
 
 **Mobile navigation coherence + usage window horizontal-scrollbar elimination**

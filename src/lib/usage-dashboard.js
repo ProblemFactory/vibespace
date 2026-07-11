@@ -38,6 +38,15 @@ export function panelMetrics(panel) {
   return list.filter((k) => METRICS().some((m) => m.key === k));
 }
 
+// A panel with splitBy (series split, 2.99.3) needs a 2-D pivot from the
+// server — collect the 'dim:splitBy' keys a panel set requires so the window's
+// one fetch can request them all (and refetch when an edit adds a new one).
+export function panelPivots(panels) {
+  return [...new Set((panels || [])
+    .filter((p) => p.splitBy && p.splitBy !== p.dim && p.dim !== 'total' && (p.chart === 'line' || p.chart === 'bars'))
+    .map((p) => `${p.dim}:${p.splitBy}`))];
+}
+
 export const DIMENSIONS = () => ([
   { key: 'total', label: t('Total (no grouping)') },
   { key: 'day', label: t('Day'), seq: true },
@@ -92,9 +101,10 @@ export const PRESETS = () => ({
     panels: [
       { metrics: ['cost'], dim: 'billing', chart: 'pie', span: 1 },
       { metrics: ['cost'], dim: 'account', chart: 'pie', span: 1 },
+      { metrics: ['totalTokens'], dim: 'day', splitBy: 'account', chart: 'bars', span: 2 },
+      { metrics: ['cost'], dim: 'day', splitBy: 'account', chart: 'line', span: 2 },
       { metrics: ['cost', 'requests', 'totalTokens'], dim: 'account', chart: 'table', span: 2, topN: 12 },
       { metrics: ['cost', 'requests'], dim: 'account', chart: 'bars', span: 2 },
-      { metrics: ['cost'], dim: 'day', chart: 'line', span: 2 },
     ],
   },
   rhythm: {
@@ -340,6 +350,67 @@ function chartPie(body, rows, mlist) {
   });
 }
 
+// Split-series chart (2.99.3): one dataset per key of panel.splitBy, over the
+// main dimension's categories — e.g. dim=day × splitBy=account answers "how
+// many tokens did each account burn per day". Data = the server's 2-D pivot
+// (same finalized cell shape as group rows). Single-metric by nature (the
+// first selected metric); bars stack, lines overlay.
+function chartSplit(body, data, panel, mlist) {
+  const m = mlist[0];
+  const pv = data.pivots?.[`${panel.dim}:${panel.splitBy}`];
+  if (!pv || !pv.length) return empty(body);
+  const dimMeta = DIMENSIONS().find((d) => d.key === panel.dim);
+  const numericKeys = panel.dim === 'hour' || panel.dim === 'weekday';
+  let rows = pv.map((r) => ({
+    key: r.key, cells: r.cells,
+    total: Object.values(r.cells).reduce((s2, c) => s2 + valueOf(c, m.key), 0),
+  }));
+  if (dimMeta?.seq) rows.sort((a, b) => (numericKeys ? Number(a.key) - Number(b.key) : (a.key < b.key ? -1 : 1)));
+  else { rows.sort((a, b) => b.total - a.total); rows = rows.slice(0, panel.topN || 8); }
+  // Series = top split keys by grand total; the tail folds into "Other" so a
+  // session/project split stays readable.
+  const totalsByS = {};
+  for (const r of rows) for (const [k, c] of Object.entries(r.cells)) totalsByS[k] = (totalsByS[k] || 0) + valueOf(c, m.key);
+  const sorted = Object.keys(totalsByS).sort((a, b) => totalsByS[b] - totalsByS[a]);
+  const kept = sorted.slice(0, 6), rest = sorted.slice(6);
+  const labMap = new Map((data.groups?.[panel.splitBy] || []).map((g) => [g.key, g.name || g.key]));
+  const horizontal = panel.chart === 'bars' && !dimMeta?.seq;
+  const canvas = chartHolder(body, rows.length > 20);
+  const colors = themeColors(canvas);
+  const stacked = panel.chart === 'bars';
+  const mkData = (k) => rows.map((r) => valueOf(r.cells[k] || {}, m.key));
+  // Every dataset MUST bind to the configured 'pri' scale — unbound datasets
+  // make Chart.js mint a phantom default axis next to the real one.
+  const axisBind = { [horizontal ? 'xAxisID' : 'yAxisID']: 'pri' };
+  const datasets = kept.map((k, i) => ({
+    label: String(labMap.get(k) || k),
+    data: mkData(k),
+    ...axisBind,
+    ...(stacked
+      ? { backgroundColor: resolveColor(canvas, PALETTE[i % PALETTE.length], 0.75), borderRadius: 2 }
+      : { borderColor: resolveColor(canvas, PALETTE[i % PALETTE.length]), backgroundColor: resolveColor(canvas, PALETTE[i % PALETTE.length], 0.10), tension: 0.25, pointRadius: rows.length > 40 ? 0 : 2, borderWidth: 2 }),
+  }));
+  if (rest.length) {
+    datasets.push({
+      label: t('Other'),
+      data: rows.map((r) => rest.reduce((s2, k) => s2 + valueOf(r.cells[k] || {}, m.key), 0)),
+      ...axisBind,
+      ...(stacked
+        ? { backgroundColor: resolveColor(canvas, 'var(--text-dim)', 0.5), borderRadius: 2 }
+        : { borderColor: resolveColor(canvas, 'var(--text-dim)'), tension: 0.25, pointRadius: 0, borderWidth: 1.5 }),
+    });
+  }
+  const opts = commonOpts([m], colors, { horizontal, showLegend: true });
+  // All datasets share ONE metric — tooltip names the SERIES, not the metric.
+  opts.plugins.tooltip.callbacks.label = (ctx) => `${ctx.dataset.label}: ${m.fmt(horizontal ? ctx.parsed.x : ctx.parsed.y)}`;
+  if (stacked) {
+    const catAxis = horizontal ? 'y' : 'x';
+    opts.scales[catAxis].stacked = true;
+    opts.scales.pri.stacked = true;
+  }
+  new Chart(canvas, { type: stacked ? 'bar' : 'line', data: { labels: rows.map((r) => String(r.key)), datasets }, options: opts });
+}
+
 function chartTable(body, rows, mlist, panel) {
   if (!rows.length) return empty(body);
   const tbl = document.createElement('table');
@@ -386,7 +457,9 @@ function renderPanel(grid, data, panels, panel, idx, onChange) {
   const head = document.createElement('div');
   head.className = 'udash-panel-head';
   const mLabel = mlist.map((mm) => mm.label).join(' + ');
-  const title = panel.title || (panel.dim === 'total' ? mLabel : `${mLabel} · ${dimMeta?.label || panel.dim}`);
+  const splitMeta = panel.splitBy ? DIMENSIONS().find((d) => d.key === panel.splitBy) : null;
+  const title = panel.title || (panel.dim === 'total' ? mLabel
+    : `${mLabel} · ${dimMeta?.label || panel.dim}${splitMeta ? ` × ${splitMeta.label}` : ''}`);
   head.innerHTML = `<span class="udash-panel-title" title="${escHtml(title)}">${escHtml(title)}</span>`;
   const tools = document.createElement('span');
   tools.className = 'udash-panel-tools';
@@ -412,6 +485,12 @@ function renderPanel(grid, data, panels, panel, idx, onChange) {
   body.className = 'udash-panel-body';
   card.append(head, body);
   grid.appendChild(card); // must be IN the document before charts resolve theme colors
+  // Split-series route: line/bars with a splitBy render from the 2-D pivot.
+  // Other chart types ignore the split (a donut/table of a cross isn't a thing).
+  if (panel.splitBy && panel.splitBy !== panel.dim && panel.dim !== 'total' && (panel.chart === 'line' || panel.chart === 'bars')) {
+    chartSplit(body, data, panel, mlist);
+    return;
+  }
   const rows = panelRows(data, panel);
   ({ stat: chartStat, bars: chartBars, line: chartLine, pie: chartPie, table: chartTable }[panel.chart] || chartBars)(body, rows, mlist, panel, data);
 }
@@ -463,6 +542,10 @@ function openPanelEditor(e, existing, commit) {
     pop.appendChild(wrap);
   }
   sel(t('Group by'), DIMENSIONS(), panel.dim, (v) => { panel.dim = v; });
+  // Series split — the 2nd dimension (day×account etc.). Line → one line per
+  // key, bars → stacked. Only meaningful on those two chart types.
+  sel(t('Split series by'), [{ key: '', label: t('None') }, ...DIMENSIONS().filter((d) => d.key !== 'total')],
+    panel.splitBy || '', (v) => { if (v) panel.splitBy = v; else delete panel.splitBy; });
   sel(t('Chart'), CHARTS(), panel.chart, (v) => { panel.chart = v; });
   sel(t('Top N'), [5, 8, 10, 15, 25].map((n) => ({ key: String(n), label: String(n) })), String(panel.topN || 8), (v) => { panel.topN = Number(v); });
   sel(t('Width'), [{ key: '1', label: t('Half') }, { key: '2', label: t('Full') }], String(panel.span || 1), (v) => { panel.span = Number(v); });

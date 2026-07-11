@@ -1986,7 +1986,12 @@ app.get('/api/usage-stats', (req, res) => {
     const backend = req.query.backend || null;
     // account = comma list of ledger bucket keys (account ids / '__global__')
     const accounts = req.query.account ? new Set(String(req.query.account).split(',').filter(Boolean)) : null;
-    res.json(usageHistory.aggregate({ from, to, backend, accounts }));
+    // pivot = comma list of 'dimA:dimB' 2-D crosses (dashboard split-series
+    // panels, e.g. pivot=day:account) — validated + capped in aggregate/here
+    const pivots = req.query.pivot
+      ? String(req.query.pivot).split(',').map((s) => s.split(':')).filter((p) => p.length === 2).slice(0, 6)
+      : null;
+    res.json(usageHistory.aggregate({ from, to, backend, accounts, pivots }));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/usage-stats/pricing', (req, res) => res.json({ pricing: usageHistory.pricingTable() }));

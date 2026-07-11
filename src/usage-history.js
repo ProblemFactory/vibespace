@@ -499,9 +499,15 @@ class UsageHistory {
 
   // The one flexible query the UI uses. groupBy is an array of dimension keys;
   // returns { totals, series(byDay), groups: { <dim>: [{key,...}] }, accounts }.
-  aggregate({ from = null, to = null, backend = null, accounts = null } = {}) {
+  aggregate({ from = null, to = null, backend = null, accounts = null, pivots = null } = {}) {
     const dims = { day: {}, model: {}, account: {}, billing: {}, project: {}, mode: {}, host: {}, hour: {}, weekday: {}, session: {} };
     const dimMeta = {}; // dim → key → {name,type,...} extra labels
+    // pivots = [[dimA, dimB], …] — 2-D crosses for the dashboard's split-series
+    // panels (e.g. day×account = per-account daily token stacks). Cells carry
+    // the same finalized bucket shape as group rows, so the client's metric
+    // extraction works unchanged.
+    const pivotPairs = (pivots || []).filter((p) => Array.isArray(p) && p.length === 2 && p[0] !== p[1] && p[0] in dims && p[1] in dims);
+    const pivotAcc = pivotPairs.map(() => ({}));
     const totals = this._emptyBucket();
     let firstTs = null, lastTs = null;
     for (const ev of this._events(from, to)) {
@@ -536,6 +542,11 @@ class UsageHistory {
         (dims[dim][k] = dims[dim][k] || this._emptyBucket());
         this._add(dims[dim][k], ev);
       }
+      for (let i = 0; i < pivotPairs.length; i++) {
+        const ka = keyOf[pivotPairs[i][0]], kb = keyOf[pivotPairs[i][1]];
+        const row = (pivotAcc[i][ka] = pivotAcc[i][ka] || {});
+        this._add(row[kb] = row[kb] || this._emptyBucket(), ev);
+      }
       // Freeze human labels for the account dimension (name + billing type +
       // backend, so the UI can badge accounts/models with the vendor logo).
       if (!dimMeta.account) dimMeta.account = {};
@@ -566,12 +577,22 @@ class UsageHistory {
         .sort((a, b) => b.cost - a.cost || b.totalTokens - a.totalTokens);
     }
     const series = groupOut.day.slice().sort((a, b) => a.key < b.key ? -1 : 1);
+    const pivotOut = {};
+    pivotPairs.forEach((pair, i) => {
+      pivotOut[pair.join(':')] = Object.entries(pivotAcc[i])
+        .map(([key, cells]) => ({
+          key,
+          cells: Object.fromEntries(Object.entries(cells).map(([k2, b]) => [k2, this._finalize(b)])),
+        }))
+        .sort((a, b) => (a.key < b.key ? -1 : 1)); // lexicographic; client re-orders seq dims
+    });
     return {
       totals: this._finalize(totals),
       range: { from: firstTs, to: lastTs },
       pricing: this._pricing,
       series,
       groups: groupOut,
+      ...(pivotPairs.length ? { pivots: pivotOut } : {}),
     };
   }
 

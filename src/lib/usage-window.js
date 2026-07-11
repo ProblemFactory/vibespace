@@ -3,7 +3,7 @@
 // (subscription vs API — never mixed), account, model, project, mode, cache
 // efficiency, hour/weekday activity, top sessions. Opened from ⚙ → Usage.
 import { t } from './i18n.js';
-import { renderDashboard, PRESETS, destroyCharts } from './usage-dashboard.js';
+import { renderDashboard, PRESETS, destroyCharts, panelPivots } from './usage-dashboard.js';
 import { showContextMenu } from './utils.js';
 import { escHtml, fetchJson, showToast, copyText } from './utils.js';
 import { createBackendIconHtml } from './agent-meta.js';
@@ -53,6 +53,13 @@ export function openUsageWindow(app, opts = {}) {
     acctOptions: null, // account rows from the last UNFILTERED load — the chip set must not shrink while filtered
   };
 
+  // The dashboard's saved panels (or the default preset) — split-series
+  // panels declare 2-D pivots the fetch must request.
+  const currentPanels = () => {
+    const saved = app.settings.get('usage.dashboard');
+    return Array.isArray(saved) && saved.length ? saved : PRESETS().overview.panels;
+  };
+
   const load = async () => {
     state.loading = true; render();
     const qs = new URLSearchParams();
@@ -66,6 +73,8 @@ export function openUsageWindow(app, opts = {}) {
     }
     if (state.backend) qs.set('backend', state.backend);
     if (state.account) qs.set('account', state.account);
+    const pivots = panelPivots(currentPanels());
+    if (pivots.length) qs.set('pivot', pivots.join(','));
     try { state.data = await fetchJson('/api/usage-stats?' + qs.toString()); }
     catch { state.data = null; showToast(t('Could not load usage'), { type: 'error' }); }
     if (!state.account && state.data?.groups?.account) {
@@ -109,10 +118,16 @@ export function openUsageWindow(app, opts = {}) {
     } else {
       // Configurable dashboard (2.96.0): panels persist in settings and sync
       // across clients like everything else.
-      const saved = app.settings.get('usage.dashboard');
-      const panels = Array.isArray(saved) && saved.length ? saved : PRESETS().overview.panels;
+      const panels = currentPanels();
       renderDashboard(body, d, panels, {
-        onChange: (next) => { app.settings.set('usage.dashboard', next); render(); },
+        onChange: (next) => {
+          app.settings.set('usage.dashboard', next);
+          // An edit that introduces a NEW 2-D cross (splitBy) needs data the
+          // last fetch didn't request — refetch instead of rendering a hole.
+          const needed = panelPivots(next);
+          if (needed.some((k) => !state.data?.pivots?.[k])) load();
+          else render();
+        },
       });
     }
     body.appendChild(renderFooter(d));
@@ -222,7 +237,9 @@ function renderControls(app, state, load, rerender) {
     showContextMenu(r.left, r.bottom + 4, [
       ...Object.entries(presets).map(([key, p]) => ({
         label: t('Preset: {name}', { name: p.label }),
-        action: () => { app.settings.set('usage.dashboard', p.panels); state.view = 'dash'; rerender(); },
+        // load(), not rerender(): a preset can carry split-series panels whose
+        // 2-D pivots the last fetch didn't request (accounts preset does).
+        action: () => { app.settings.set('usage.dashboard', p.panels); state.view = 'dash'; load(); },
       })),
       { label: state.view === 'classic' ? t('Switch to panel dashboard') : t('Switch to classic layout'),
         action: () => { state.view = state.view === 'classic' ? 'dash' : 'classic'; rerender(); } },
