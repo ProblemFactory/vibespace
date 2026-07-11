@@ -25,6 +25,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       xfdesktop4 xfce4-terminal thunar chromium \
       fonts-noto-cjk fonts-noto-color-emoji xdg-utils \
     && rm -rf /var/lib/apt/lists/*
+# Chromium in an unprivileged container: the setuid/user-namespace sandbox is
+# unavailable (couldn't launch at all) and /dev/shm is tiny. Acceptable for a
+# single-user container. Debian chromium sources /etc/chromium.d/*.
+RUN mkdir -p /etc/chromium.d && printf '%s\n' 'export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-sandbox --disable-dev-shm-usage"' > /etc/chromium.d/99-container
 
 # Agent CLIs + mc (share-credential minting). bypassPermissions is blocked for
 # root → the app runs as the non-root `vibe` user below.

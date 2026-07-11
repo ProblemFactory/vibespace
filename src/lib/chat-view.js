@@ -93,6 +93,28 @@ class ChatView {
     // Message list
     this._messageList = document.createElement('div');
     this._messageList.className = 'chat-message-list';
+    // Consecutive thinking/Bash run collapse (chat.collapseRuns, default ON —
+    // TUI-style): a MutationObserver keeps the decoration current across live
+    // appends, edits, virtual-scroll trims and jumps without touching any of
+    // those paths. _runsMutating guards against self-triggering (the pass
+    // itself inserts/removes headers).
+    this._runsTimer = null;
+    this._runsMutating = false;
+    this._runsObserver = new MutationObserver(() => {
+      if (this._runsMutating) return;
+      clearTimeout(this._runsTimer);
+      this._runsTimer = setTimeout(() => this._updateRuns(), 180);
+    });
+    this._runsObserver.observe(this._messageList, { childList: true });
+    this._runExpanded = new WeakSet(); // first member of runs the user opened
+    // Search open/close changes no list children — watch the bar's class so
+    // runs expand while searching (reveal must reach hidden members) and
+    // re-collapse after.
+    queueMicrotask(() => {
+      if (this._disposed || !this._search?._bar) return;
+      this._searchBarObserver = new MutationObserver(() => this._updateRuns());
+      this._searchBarObserver.observe(this._search._bar, { attributes: true, attributeFilter: ['class'] });
+    });
 
     // Renderers (extracted rendering methods)
     this._renderers = new ChatRenderers({
@@ -1803,9 +1825,81 @@ class ChatView {
     this._statusBar?.setBilling?.(auth, onSwitch);
   }
 
+  // ── Consecutive thinking/Bash run collapse (chat.collapseRuns) ──
+  // Decoration-only pass: runs of ≥3 adjacent thinking-only messages (or Bash
+  // tool cards) get a "N × …" header and the members hide behind it. Nothing
+  // is reparented and headers don't match .chat-msg, so virtual-scroll trims,
+  // index→element mapping and gap-seek are untouched. The NEWEST message never
+  // joins a run (live progress stays visible), and an open search bar expands
+  // everything (search reveal must be able to scroll to any member).
+  _updateRuns() {
+    const list = this._messageList;
+    if (!list || this._disposed) return;
+    const enabled = this.app?.settings?.get('chat.collapseRuns') !== false;
+    const searchOpen = this._search?._bar && !this._search._bar.classList.contains('hidden');
+    this._runsMutating = true;
+    try {
+      list.querySelectorAll(':scope > .chat-run-header').forEach((h) => h.remove());
+      list.querySelectorAll(':scope > .chat-run-collapsed').forEach((el) => el.classList.remove('chat-run-collapsed'));
+      if (!enabled || searchOpen) return;
+      const kindOf = (el) => {
+        if (!el.classList?.contains('chat-msg') || el.classList.contains('chat-gap-msg')) return null;
+        const m = el._rawMsg;
+        if (!m) return null;
+        if (el.classList.contains('chat-msg-tool-result')) {
+          const b = m.content?.[0];
+          return (b?.toolName === 'Bash' && m.status !== 'pending') ? 'bash' : null;
+        }
+        if (m.role === 'assistant' && Array.isArray(m.content) && m.content.length
+            && m.content.every((b) => b.type === 'thinking')) return 'thinking';
+        return null;
+      };
+      const kids = [...list.children];
+      let run = [];
+      let runKind = null;
+      const flush = () => {
+        // the newest message stays visible — live activity must not vanish
+        const members = run.filter((el) => el !== list.lastElementChild);
+        if (members.length >= 3) {
+          const header = document.createElement('div');
+          header.className = 'chat-run-header';
+          const label = runKind === 'bash'
+            ? t('{n} Bash commands', { n: members.length })
+            : t('{n} thinking steps', { n: members.length });
+          header.innerHTML = `<span class="chat-run-arrow">▸</span><span>${label}</span>`;
+          // Rebuilds happen on every list mutation — remember runs the user
+          // opened (keyed by first member) so a new message doesn't re-collapse
+          // what they're reading.
+          const wasOpen = this._runExpanded.has(members[0]);
+          header.onclick = () => {
+            const open = header.classList.toggle('open');
+            if (open) this._runExpanded.add(members[0]); else this._runExpanded.delete(members[0]);
+            for (const el of members) el.classList.toggle('chat-run-collapsed', !open);
+          };
+          list.insertBefore(header, members[0]);
+          if (wasOpen) header.classList.add('open');
+          else for (const el of members) el.classList.add('chat-run-collapsed');
+        }
+        run = []; runKind = null;
+      };
+      for (const el of kids) {
+        const k = kindOf(el);
+        if (k && k === runKind) { run.push(el); continue; }
+        flush();
+        if (k) { run = [el]; runKind = k; }
+      }
+      flush();
+    } finally {
+      this._runsMutating = false;
+    }
+  }
+
   dispose() {
     this._statusBar?.dispose?.();
     this._disposed = true;
+    if (this._runsObserver) { this._runsObserver.disconnect(); this._runsObserver = null; }
+    if (this._searchBarObserver) { this._searchBarObserver.disconnect(); this._searchBarObserver = null; }
+    if (this._runsTimer) { clearTimeout(this._runsTimer); this._runsTimer = null; }
     if (this._readOnlyPollTimer) clearTimeout(this._readOnlyPollTimer);
     this.ws.offGlobal(this._handler);
     this.ws.offStateChange(this._stateHandler);

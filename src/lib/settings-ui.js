@@ -13,7 +13,7 @@ class SettingsUI {
     this._search = '';
   }
 
-  open() {
+  open({ syncId } = {}) {
     // Non-blocking: Settings is a normal same-level WINDOW (not a modal overlay)
     // so you can tweak a setting and watch the effect on the workspace live.
     // Singleton — focus an already-open settings window instead of stacking.
@@ -25,9 +25,9 @@ class SettingsUI {
       inp?.focus();
       return;
     }
-    // No openSpec on purpose — Settings is transient (not persisted in the
-    // layout, not re-created on refresh or synced to other clients).
-    const winInfo = this.app.wm.createWindow({ title: t('Settings'), type: 'settings', width: 720, height: 560 });
+    // openSpec (2.106.0, user request): the Settings window participates in
+    // layout sync/persistence like any other window — it used to be transient.
+    const winInfo = this.app.wm.createWindow({ title: t('Settings'), type: 'settings', width: 720, height: 560, syncId, openSpec: { action: 'openSettings' } });
     const dialog = document.createElement('div');
     dialog.className = 'settings-dialog settings-window';
     winInfo.content.appendChild(dialog);

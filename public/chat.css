@@ -807,6 +807,9 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
      Swap the rotation (a vestibular trigger) for a gentle opacity pulse so it
      keeps signalling activity without spinning. */
   .chat-spinner { animation: chat-spinner-pulse 1.2s ease-in-out infinite !important; }
+  /* Opt-out (setting chat.reducedMotionSpin): user prefers the rotation even
+     under reduced motion — the pulse read as "blinking/broken" to some. */
+  body.spin-under-rm .chat-spinner { animation: chat-spin 0.8s linear infinite !important; }
 }
 @keyframes chat-spinner-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
 
@@ -851,3 +854,14 @@ body.hide-hook-cards .chat-msg-hook { display: none; }
 
 /* Running-workflow status chip */
 .chat-status-wf { color: var(--accent); }
+
+/* ── Consecutive thinking/Bash run collapse (chat.collapseRuns, 2.106.0) ── */
+.chat-run-header {
+  font-size: 11px; color: var(--text-dim); cursor: pointer; user-select: none;
+  padding: 3px 12px; margin: 2px 0; border: 1px dashed var(--border);
+  border-radius: var(--radius); display: flex; align-items: center; gap: 6px;
+}
+.chat-run-header:hover { color: var(--text-secondary); border-color: var(--accent); }
+.chat-run-header .chat-run-arrow { display: inline-block; transition: var(--transition); font-size: 9px; }
+.chat-run-header.open .chat-run-arrow { transform: rotate(90deg); }
+.chat-run-collapsed { display: none; }

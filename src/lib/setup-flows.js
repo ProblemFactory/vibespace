@@ -100,26 +100,46 @@ export function installSetupFlows(App) {
     });
   },
 
-    _showOnboarding(force = false) {
+    _showOnboarding(force = false, startStep = 0) {
     const welcome = document.getElementById('welcome');
     if (!welcome) return;
     welcome.classList.remove('hidden');
     welcome.classList.add('onboarding');
     const content = welcome.querySelector('.welcome-content');
     content.dataset.saved = content.dataset.saved || content.innerHTML; // restore target on finish
-    let step = 0;
-    const done = () => {
-      // release the capture-phase keydown regardless of HOW the tour ended
-      // (finishing via the last step used to leave it attached forever)
+    let step = startStep;
+    const teardown = () => {
       this._obKeyHandler?.abort?.(); this._obKeyHandler = null;
-      localStorage.setItem('vs-onboarded', '1');
       welcome.classList.remove('onboarding');
       welcome.classList.add('hidden'); // _checkWelcome re-shows it only on an empty desktop
       content.innerHTML = content.dataset.saved;
       // re-wire the plain welcome buttons (innerHTML replace dropped listeners)
       content.querySelector('#welcome-new')?.addEventListener('click', () => this.showNewSessionDialog());
       content.querySelector('#welcome-files')?.addEventListener('click', () => this.openFileExplorer());
+    };
+    const done = () => {
+      // release the capture-phase keydown regardless of HOW the tour ended
+      // (finishing via the last step used to leave it attached forever)
+      document.getElementById('ob-return-pill')?.remove();
+      localStorage.setItem('vs-onboarded', '1');
+      teardown();
       this._checkWelcome();
+    };
+    // PAUSE (not finish): a wizard action that needs the workspace — Log in /
+    // Install open a terminal the user must interact with — used to just hide
+    // the whole wizard, which read as "clicking Log in skips onboarding"
+    // (real report). Hide it WITHOUT marking onboarded and leave a floating
+    // "Back to setup" pill that re-enters at the same step.
+    const pauseFor = (action) => {
+      const returnStep = step;
+      teardown();
+      document.getElementById('ob-return-pill')?.remove();
+      const pill = document.createElement('button');
+      pill.id = 'ob-return-pill';
+      pill.innerHTML = `↩ ${t('Back to setup')}`;
+      pill.onclick = () => { pill.remove(); this._showOnboarding(true, returnStep); };
+      document.body.appendChild(pill);
+      action();
     };
 
     const render = () => {
@@ -194,7 +214,7 @@ export function installSetupFlows(App) {
             + card('codex', 'Codex', 'codex login --device-auth', 'npm install -g @openai/codex@latest')
             + `<button class="welcome-btn welcome-btn-secondary ob-recheck">${t('Re-check')}</button>`;
           el.querySelectorAll('.ob-login').forEach(btn => {
-            btn.onclick = () => this.openShellTerminal(undefined, { initialCommand: btn.dataset.cmd });
+            btn.onclick = () => pauseFor(() => this.openShellTerminal(undefined, { initialCommand: btn.dataset.cmd }));
           });
           el.querySelector('.ob-recheck').onclick = refresh;
         };

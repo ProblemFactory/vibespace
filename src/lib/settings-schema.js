@@ -241,6 +241,18 @@ const SETTINGS_SCHEMA = {
     description: t('Hooks like PostToolUse fire on every tool call with nothing to show — by default those render no card at all. Turn off to see every hook event. Applies to newly loaded history (reopen the window for existing views).'),
     category: t('Chat'), liveApply: true,
   },
+  'chat.collapseRuns': {
+    type: 'boolean', default: true,
+    label: t('Collapse runs of thinking/Bash cards'),
+    description: t('Three or more consecutive thinking blocks (or Bash commands) fold behind a "N × …" line, like the Claude Code TUI — click to expand. The newest message always stays visible, and searching expands everything.'),
+    category: t('Chat'), liveApply: true,
+  },
+  'chat.reducedMotionSpin': {
+    type: 'boolean', default: false,
+    label: t('Keep the spinner rotating under reduced motion'),
+    description: t('With "reduce motion" enabled in your OS, the working spinner normally swaps its rotation for a gentle opacity pulse. Turn this on to keep the rotation instead (the pulse can read as blinking).'),
+    category: t('Chat'), liveApply: true,
+  },
   'agents.stopNudgeStaleMinutes': {
     type: 'number', default: 10, min: 1, max: 240, step: 1,
     label: t('Stop nudge: staleness threshold (minutes)'),
