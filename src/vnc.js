@@ -74,7 +74,16 @@ class VncManager {
     if (!xvnc) throw new Error('no VNC server installed (Xtigervnc/Xvnc not on PATH)');
     // -localhost + SecurityTypes None is safe BECAUSE the only route in is the
     // cookie-authed WS bridge; never expose the raw port.
+    // -UseBlacklist=0 is REQUIRED, not optional: TigerVNC blacklists a source
+    // host after N unauthenticated connect-then-drop attempts (default 5,
+    // timeout doubles each strike). EVERY connection here is 127.0.0.1 (the
+    // bridge), AND our own `portListening` health probe connects+immediately
+    // destroys the socket — which TigerVNC counts as a failed attempt. A few
+    // status polls poisoned the blacklist and locked the desktop out with
+    // "Too many security failures" (real report). Auth is done by the bridge,
+    // so the blacklist protects nothing and only self-DoSes.
     const xArgs = [VNC_DISPLAY, '-localhost', '-SecurityTypes', 'None',
+      '-UseBlacklist', '0',
       '-rfbport', String(this.port), '-geometry', VNC_GEOMETRY, '-depth', '24'];
     const x = spawn(xvnc, xArgs, { detached: true, stdio: 'ignore' });
     x.unref();

@@ -885,7 +885,7 @@ class App {
   // Update-confirm dialog: every changelog entry between the RUNNING version
   // and the canonical repo's latest, then an explicit "Update now".
   async _showUpdateConfirmDialog() {
-    const { body, close } = createModalShell({ id: 'update-confirm-dialog', title: t('Update VibeSpace'), bodyClass: 'update-confirm-body', escapeToClose: true });
+    const { body, close } = createModalShell({ id: 'update-confirm-dialog', title: t('Update VibeSpace'), bodyClass: 'update-confirm-body', minWidth: 'min(560px, 92vw)', escapeToClose: true });
     body.innerHTML = `<div class="empty-hint">${t('Checking for updates\u2026')}</div>`;
     const [v, cl] = await Promise.all([fetchJson('/api/version'), fetchJson('/api/changelog-diff')]);
     if (!body.isConnected) return;

@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.111.1 — 2026-07-11
+
+- **In-container Desktop stopped opening ("Too many security failures", real report)**: TigerVNC blacklists a source host after a few unauthenticated connect-then-drop attempts — but EVERY desktop connection comes from 127.0.0.1 (the cookie-authed WS bridge), and VibeSpace's own `portListening` health probe connects and immediately closes the socket, which TigerVNC counts as a failed attempt. A handful of status polls poisoned the blacklist and locked the desktop out. The VNC server now launches with `-UseBlacklist 0` (safe — the bridge is the only route in and it already authenticates; the blacklist protected nothing and only self-DoSed). Restart the desktop once (kill the stale Xtigervnc / redeploy) to clear an already-tripped blacklist.
+- **Update-confirm dialog was clipped**: the changelog dialog set its width on the BODY, but `.dialog` is a fixed 440px `overflow:hidden` box, so the wider body overflowed and cut off the action buttons. Width now goes on the dialog shell (`minWidth`).
+
 ## 2.111.0 — 2026-07-11
 
 **Noticeable notifications (user reports: the floating toast had no background and went unseen; error toasts too)**
