@@ -19,7 +19,11 @@ class FileViewer {
       fileInfo = await res.json();
     } catch {}
 
-    const openSpec = { action: 'openFile', path: filePath, name: fileName };
+    // Restoration provenance (stage workspaces / layout replay): a window
+    // opened from a DERIVED temp file (archive entry) records the recipe so a
+    // replay can re-derive it when the temp file is gone (docs/design-
+    // dynamic-desktop.md §4b — the zip-PDF case).
+    const openSpec = { action: 'openFile', path: filePath, name: fileName, ...(opts.via ? { via: opts.via } : {}) };
 
     // Force hex mode
     if (opts.hex) {
@@ -212,7 +216,7 @@ class FileViewer {
               const r = await fetch('/api/archive/extract-entry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: filePath, entry: e.name }) });
               const d = await r.json().catch(() => ({}));
               if (!r.ok) { showToast(t('Open failed: {msg}', { msg: d.error || '' }), { type: 'error' }); return; }
-              app.openFile(d.path, e.name.split('/').pop());
+              app.openFile(d.path, e.name.split('/').pop(), { via: { kind: 'archive-entry', archive: filePath, entry: e.name } });
             } finally { row.style.opacity = ''; }
           };
         }

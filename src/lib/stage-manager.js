@@ -265,6 +265,14 @@ export class StageManager {
       if (!evict.has(owner)) continue;
       const win = this.app.wm.windows.get(winId);
       if (!win || !win._hiddenByStage) continue; // only hidden, deactivated sets
+      // VOLATILE exemption (design §4b): a window backed by a temp file with
+      // no re-derivation recipe (or a blob URL) cannot be replayed — closing
+      // it loses it forever. Keep those hidden-alive regardless of LRU.
+      const spec = win._openSpec || {};
+      const volatileNoRecipe =
+        (spec.action === 'openFile' && /^\/tmp\//.test(spec.path || '') && spec.via?.kind !== 'archive-entry')
+        || (spec.action === 'openBrowser' && /^(blob|data):/.test(spec.url || ''));
+      if (volatileNoRecipe) continue;
       this._boundAux.delete(winId); // record already serialized at deactivation
       try { this.app.wm.closeWindow(winId); } catch {}
     }
@@ -445,7 +453,7 @@ export class StageManager {
 
   /** Restore a hero's recorded workspace: show live hidden members, replay
    *  missing ones (walter lesson #2: dedup by key, reconcile never spawns). */
-  _restoreWorkspace(key) {
+  async _restoreWorkspace(key) {
     if (!key) return;
     const wm = this.app.wm;
     const live = new Set();
@@ -458,13 +466,33 @@ export class StageManager {
       if (aux._openSpec) live.add(JSON.stringify(aux._openSpec));
       wm.focusWindow(winId, { _stageBypass: true });
     }
+    let skipped = 0;
     for (const rec of this._workspaceRecords(key)) {
       if (!rec?.openSpec) continue;
       const specKey = JSON.stringify(rec.openSpec);
       if (live.has(specKey) || this._replayingKeys.has(specKey)) continue;
       this._replayingKeys.set(specKey, setTimeout(() => this._replayingKeys.delete(specKey), 15000));
       const winId = 'stage-' + Math.random().toString(36).slice(2, 9);
-      try { this.app.replayOpenSpec(rec.openSpec, winId); } catch { continue; }
+      // Restoration conditions (design §4b): validate what the spec points at
+      // BEFORE replaying — a stale temp file / dead blob must not open a
+      // broken viewer. Derived temps (archive entries) re-derive from their
+      // recorded recipe; unrecoverable ones are skipped with one toast.
+      const spec = { ...rec.openSpec };
+      if (spec.action === 'openBrowser' && /^(blob|data):/.test(spec.url || '')) { skipped++; continue; }
+      if (spec.action === 'openFile' && spec.path) {
+        try {
+          const info = await (await fetch(`/api/file/info?path=${encodeURIComponent(spec.path)}${spec.host ? '&host=' + encodeURIComponent(spec.host) : ''}`)).json();
+          if (info?.error || info?.missing) {
+            if (spec.via?.kind === 'archive-entry') {
+              const r = await fetch('/api/archive/extract-entry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: spec.via.archive, entry: spec.via.entry }) });
+              const d = await r.json().catch(() => ({}));
+              if (r.ok && d.path) spec.path = d.path; // re-derived fresh temp
+              else { skipped++; continue; }
+            } else { skipped++; continue; }
+          }
+        } catch { /* info probe failed (offline host?) — try the replay anyway */ }
+      }
+      try { this.app.replayOpenSpec(spec, winId); } catch { continue; }
       setTimeout(() => {
         const w = wm.windows.get(winId);
         if (!w) return;
@@ -475,6 +503,7 @@ export class StageManager {
         if (!this._active || this._heroKey !== key) this._hideStage(w); // stale replay landed late
       }, 600);
     }
+    if (skipped) showToast(t('{n} workspace window(s) could not be restored (temp/blob source is gone)', { n: skipped }));
     // User decision (2026-07-12 addendum): the incoming hero sits at the
     // BOTTOM of the stage stack — a slot that was moved/resized since this
     // workspace was recorded must not cover its aux windows; the user

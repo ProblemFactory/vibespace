@@ -63,6 +63,20 @@ the dynamic desktop is active.
   not retained across a materialization (user decision ⑤ "这些窗口都不保留") — they are
   closed when a hero materializes or the user leaves the dynamic desktop.
 
+## 4b. Restoration conditions per window class (user probe: "zip 里打开的 PDF?")
+
+The HIDDEN (LRU) tier restores everything for free. The REPLAY tier depends on what the
+openSpec points at — classified at replay time:
+
+| class | examples | replay condition | handling |
+|---|---|---|---|
+| durable | file viewer/editor on a real path, explorer dir, http(s) browser, task/props/usage windows, subagent viewers | target still exists (host reachable) | pre-validated via /api/file/info; probe failure (offline host) still ATTEMPTS the replay |
+| derived | **PDF opened from inside a zip** (extract-entry temp file) | temp gone but the recipe survives | openSpec carries `via: {kind:'archive-entry', archive, entry}` (stamped at open); replay re-extracts a fresh temp and patches the path |
+| volatile | blob:/data: browser pages (chat html preview, diagnostics), temp files with no recipe, Ctrl+G editor tmp | unrecoverable once closed | NEVER LRU-evicted (kept hidden-alive); if already gone at replay → skipped, one summary toast "{n} windows could not be restored" — never an open-but-broken viewer |
+
+Deleted/moved real files degrade to skip+toast too (no recipe). Remote-host files ride the
+same probe with `?host=`.
+
 ## 5. Deactivation policy (hide vs close)
 
 LRU keep-alive of the last **N workspaces** (setting `desktop.stageKeepAlive`, default 3):
