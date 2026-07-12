@@ -252,20 +252,34 @@ class TaskGroupManager {
   // prefix agents must use ('' single-group; '--group <id> ' generic in the
   // shared multi-group section).
   _toolsSectionParts(gid, multi) {
-    // DISCOVERY layer only (2.111.22): name each tool + its trigger. Detailed
-    // syntax, caveats and enums live in each CLI's OWN output (run with no
-    // args, or read the success line) — point-of-use teaching sticks better
-    // and keeps this per-session injection lean. The behaviors that must be
-    // known BEFORE first use (when to reach for a tool) stay here.
-    const g = gid ? `\`${gid.trim()}\` ` : '';
-    return ['', '### Reporting back — three CLIs are on your PATH (run any with no args for full usage)', '',
+    // DISCOVERY layer (2.111.22) with COPY-READY samples (2.111.25, user
+    // directive): every line shows the COMPLETE correct invocation — waiting
+    // states carry both --reason and --detail (enforced server-side), ask
+    // carries --detail — so the first call an agent copies is already valid.
+    // Syntax edge cases still live in each CLI's own no-args output.
+    const g = gid || '';
+    return ['', '### Reporting back — three CLIs on your PATH (run any with no args for full usage)', '',
       multi
         ? `You belong to MORE THAN ONE Task Group; pass \`--group <id>\` to \`vibespace-task\` (each block below names its id). \`vibespace-status\`/\`vibespace-ask\` always mean THIS session.`
         : `They're bound to THIS session — you never pass a group id.`,
       '',
-      `- \`vibespace-task\` ${g}— update the SHARED Task Group everyone sees: \`progress\` (log what you finished), \`plan-check\`/\`plan-add\` (the group's backlog), \`show\`. Run bare for syntax.`,
-      `- \`vibespace-status <working|needs-input|blocked|review|done>\` — YOUR session's live state on the board. Set \`blocked\`/\`needs-input\` the moment you're stuck or waiting on the user; \`done\` when finished. Keep it honest.`,
-      `- \`vibespace-ask "question"\` — the user's global inbox. **Whenever you ask the user anything or end a turn waiting on them, file it here AND write the full question (options + your recommendation) in your CHAT REPLY — the inbox is only a notification mirror, never the sole copy.** Resolve it yourself (\`vibespace-ask resolve\`) the moment they answer.`,
+      'After each meaningful piece of work, log it for the group:',
+      `\`\`\``,
+      `vibespace-task ${g}progress "one-line summary" --detail "specifics other agents may need"`,
+      `\`\`\``,
+      `(also \`vibespace-task ${g}plan-check <item>\` when you complete a backlog item; \`${g ? 'vibespace-task ' + g.trim() + ' ' : 'vibespace-task '}show --full\` to re-read)`,
+      '',
+      "Your session's live state on the board — set it the MOMENT it changes. Waiting states REQUIRE both flags:",
+      `\`\`\``,
+      `vibespace-status blocked --reason "what you're waiting on" --detail "context: options, what you tried, your recommendation" --urgency high`,
+      `\`\`\``,
+      '(states: working | needs-input | blocked | review | done — `done` when this piece of work is finished)',
+      '',
+      'Whenever you ask the user anything or end a turn waiting on them — file it AND write the full question (options + recommendation) in your CHAT REPLY; the inbox only notifies, never the sole copy:',
+      `\`\`\``,
+      `vibespace-ask "the question" --detail "options + your recommendation" --urgency high`,
+      `\`\`\``,
+      'Resolve it YOURSELF the moment they answer (chat counts): `vibespace-ask resolve <id>`',
       '',
       'In chat replies use ABSOLUTE file paths (e.g. /home/user/out/final.wav) — the UI makes them clickable; bare/relative names may not resolve.'];
   }
