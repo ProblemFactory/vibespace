@@ -1398,7 +1398,20 @@ async function main() {
   // positionally at least as often as via --reason; dropping it silently
   // meant boards showed states with no explanation.
   const posReason = args[1] && !args[1].startsWith('--') ? args[1] : undefined;
-  await post({ state: cmd, urgency: opt('urgency'), reason: opt('reason') ?? posReason, detail: opt('detail') });
+  const reasonVal = opt('reason') ?? posReason;
+  if (['blocked', 'needs-input', 'review'].includes(cmd) && !(reasonVal || '').trim()) {
+    // A same-state record that already carries a reason may be tweaked
+    // (e.g. bumping --urgency) without re-sending it — check before failing.
+    let existing = null;
+    try { existing = (await post({ show: true })).status; } catch {}
+    if (!(existing && existing.state === cmd && (existing.reason || '').trim())) {
+      console.error('vibespace-status: "' + cmd + '" needs a reason the user can act on.');
+      console.error('  e.g. vibespace-status ' + cmd + ' --reason "waiting for the S3 credentials" [--urgency high]');
+      console.error('  (then say it in your chat reply and mirror it with: vibespace-ask "...")');
+      process.exit(1);
+    }
+  }
+  await post({ state: cmd, urgency: opt('urgency'), reason: reasonVal, detail: opt('detail') });
   console.log('status set: ' + cmd + (opt('urgency') ? ' / ' + opt('urgency') : ''));
   if (cmd === 'blocked' || cmd === 'needs-input' || cmd === 'review') {
     console.log('REMINDER: you are waiting on the user — write what you need (with your recommendation) in your CHAT REPLY now, and mirror it with: vibespace-ask "..."');

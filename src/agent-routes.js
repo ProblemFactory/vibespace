@@ -51,6 +51,17 @@ app.post('/api/agent/session-status', (req, res) => {
   // migrate an early webui:<id> record once the real backend id exists
   if (!key.startsWith('webui:')) sessionStatus.rekey(`webui:${foundId}`, key);
   const { state, urgency, reason, detail, clear, show } = req.body || {};
+  // Waiting states are USELESS on the board without a reason the user can act
+  // on — reject them (the error text teaches the fix at the point of use).
+  // Grace: a follow-up tweak (e.g. bumping --urgency) on a record that already
+  // carries a reason for the SAME state passes without re-sending it.
+  const WAITING = new Set(['blocked', 'needs-input', 'review']);
+  if (!show && !clear && WAITING.has(state) && !String(reason || '').trim()) {
+    const existing = sessionStatus.get(key);
+    if (!(existing && existing.state === state && String(existing.reason || '').trim())) {
+      return res.status(400).json({ error: `"${state}" needs a reason the user can act on — e.g. vibespace-status ${state} --reason "waiting for the API key" [--urgency high]. Then say it in chat and mirror it with vibespace-ask.` });
+    }
+  }
   try {
     const rec = show ? sessionStatus.get(key)
       : clear ? sessionStatus.clear(key, 'agent')
