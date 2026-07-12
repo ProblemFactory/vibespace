@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.111.8 — 2026-07-12
+
+- **Fixed chat code blocks painting overlapping lines (long-standing, root-caused)**. `.chat-msg` uses `content-visibility: auto` with `contain-intrinsic-size: auto` — which REMEMBERS the last-rendered height. A code block's height is width-sensitive when wrapped (narrower → more wrapped rows → taller), so a message first rendered at desktop width cached a short height; scrolling it off then back on a narrower viewport (mobile, or a window resize) reused that stale short height, making the box shorter than its content and the code lines paint over each other. This exactly explains why it was persistent, never self-healed on scroll, and never reproduced on a fresh narrow-width first render. Code-block messages are now carved out of the content-visibility height cache (`:has(.chat-code-block)`), so their height is always measured live. Also removes the scroll tracer added in 2.111.4-5 (the scroll-jump fix is verified).
+
 ## 2.111.7 — 2026-07-11
 
 - **Direct CephFS subtree sharing (bypasses the WebDAV proxy)**. Sharing a folder from a CephFS "My storage" now mints a PATH-SCOPED cephx key via an in-cluster minter and produces a `vibespace-cephmount:` link; the receiver kernel-mounts the subtree directly at full flash bandwidth instead of relaying every byte through the source instance's Node process. The minted key is scoped to exactly the shared subpath (verified: `mds allow r path=…`), listed under "Shares I created", and Revoke deletes the key cluster-side. Env-gated (`VIBESPACE_CEPHMINT_URL`/`_TOKEN`) — without a minter, sharing falls back to the WebDAV bridge as before. Cross-cluster/external sharing still uses the bridge.
