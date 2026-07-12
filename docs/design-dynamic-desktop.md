@@ -83,6 +83,25 @@ openSpec points at — classified at replay time:
 Deleted/moved real files degrade to skip+toast too (no recipe). Remote-host files ride the
 same probe with `?host=`.
 
+- 2026-07-12 (2.112.6) SHARED HERO (user directive, supersedes the v1 "hero is per-tab"
+  decision): the 挂机/walk-over scenario — a device left idle on the stage must mirror what the
+  user does on another device, so walking over shows the CURRENT workspace. The active hero is
+  SHARED state in the stage store ('hero' → {key, openSpec}): `_publishHero` at materialization
+  (value-compared; skipped while `_applyingRemoteHero`), `_followRemoteHero` on remote ops
+  (150ms debounce, deferred while the local pointer is down) and at `enter()` (walk-over
+  adoption — the shared hero WINS over the tab's stale local hero); hero close publishes a
+  clear → placeholder everywhere. Which tab is staged at all stays per-tab. Follow path: find a
+  local window by session key, else replay the published openSpec (identity adoption then
+  converges the fresh window onto the desktop record).
+- 2026-07-12 (2.112.6) harness-caught: `closeWindow`'s auto-focus-next skipped
+  `_hiddenByDesktop` but NOT `_hiddenByStage` — closing the hero focused a stage-HIDDEN
+  previous hero → re-materialized + re-published it, yanking every staged client back.
+  Stage-hidden windows are now invisible to ALL four visible-window filters in window.js
+  (close auto-focus, applyLayout, overlap switcher, overlap indicators). HARNESS LESSON №2:
+  leftover SyncStore state between suite runs masks/aliases failures — wipe stage-sync.json +
+  layouts.json between suites; and a find()-then-focus test step needs a create fallback or it
+  silently no-ops.
+
 Full audit of every replayOpenSpec action (2026-07-12, user push "别止步于此"):
 
 | action | class | replay risk | handling |
