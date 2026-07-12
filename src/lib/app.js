@@ -818,15 +818,14 @@ class App {
       imp: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8M5 7l3 3 3-3M3 10v3h10v-3"/></svg>',
       lock: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="7" width="9" height="6.5" rx="1"/><path d="M5.5 7V5a2.5 2.5 0 015 0v2"/></svg>',
       chart: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 13h12"/><rect x="3" y="8" width="2.4" height="4"/><rect x="6.8" y="5" width="2.4" height="7"/><rect x="10.6" y="2.5" width="2.4" height="9.5"/></svg>',
+      pulse: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 8h3l1.5-4 3 8L10.5 8h4"/></svg>',
     };
     const sep = () => { const s = document.createElement('div'); s.className = 'gs-menu-sep'; return s; };
-    // workspace tools / data & security / help — grouped, the flat list grew too long
+    // Grouped by nature (user feedback "布局逻辑怪怪的"):
+    // ① UI & preferences (customize / language — the quick appearance
+    //   controls + All settings sit right above) ② admin & monitoring
+    //   ③ maintenance (backup / password / update) ④ help & session.
     if (!this.isMobile) menu.append(item(I.brush, t('Customize UI\u2026'), () => this._customize.enter()));
-    menu.append(item(I.key, t('Manage agents\u2026'), () => this._showAgentsDialog()));
-    menu.append(item(I.chart, t('Usage\u2026'), () => this.openUsage()));
-    menu.append(item(I.chart, t('Diagnostics report\u2026'), () => this._openDiagnostics()));
-    // Desktop moved to a TOOLBAR button next to Browser (user directive) —
-    // no gear-menu entry anymore.
     // Language is PER-DEVICE (localStorage, not a synced setting) \u2014 names shown
     // in their own language, never translated. Switching reloads the page.
     {
@@ -843,6 +842,10 @@ class App {
       };
       menu.append(langItem);
     }
+    menu.append(sep(),
+      item(I.key, t('Manage agents\u2026'), () => this._showAgentsDialog()),
+      item(I.chart, t('Usage\u2026'), () => this.openUsage()),
+      item(I.pulse, t('Diagnostics report\u2026'), () => this._openDiagnostics()));
     menu.append(sep(),
       item(I.exp, t('Backup & migrate\u2026'), () => this._showTransferDialog()),
       item(I.lock, this._authEnabled ? t('Change password\u2026') : t('Set password\u2026'), () => this._showPasswordDialog()));

@@ -125,6 +125,22 @@ class SettingsUI {
     if (!content.children.length) {
       content.innerHTML = '<div class="settings-empty">' + t('No settings match your search.') + '</div>';
     }
+
+    // Scroll-spy: highlight the category currently in view (user request).
+    // Assigned (not addEventListener) so re-renders replace the handler.
+    const spy = () => {
+      const secs = [...content.querySelectorAll('.settings-section')];
+      if (!secs.length) return;
+      const cTop = content.getBoundingClientRect().top;
+      let cur = secs[0];
+      for (const sec of secs) { if (sec.getBoundingClientRect().top - cTop <= 70) cur = sec; else break; }
+      // pinned to the bottom → the last section wins even if its top is below the line
+      if (content.scrollTop + content.clientHeight >= content.scrollHeight - 4) cur = secs[secs.length - 1];
+      const cat = cur.dataset.category;
+      nav.querySelectorAll('.settings-nav-item').forEach((n) => n.classList.toggle('active', n.textContent === cat));
+    };
+    content.onscroll = spy;
+    spy();
   }
 
   _renderSetting(path, schema) {

@@ -94,6 +94,11 @@ const SETTINGS_SCHEMA = {
     description: t('Hold Shift while dragging title bar to select a range of grid cells'),
     category: t('Toolbar & Layout'), liveApply: true,
   },
+  'layout.presetOneShot': {
+    type: 'boolean', default: false, label: t('Layout buttons apply once'),
+    description: t('A layout button arranges the current windows once and returns to free-form. Off (default): it also keeps that grid active, so windows snap to its cells until you pick Freeform'),
+    category: t('Toolbar & Layout'), liveApply: true,
+  },
   'layout.shakeBypassSnap': {
     type: 'boolean', default: true, label: t('Shake to bypass snap'),
     description: t('Shake a window vigorously for ~1 second while dragging to turn off grid/edge snap for the rest of that drag (a mouse-only alternative to holding Alt)'),
