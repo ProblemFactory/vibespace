@@ -57,8 +57,14 @@ the dynamic desktop is active.
   (`replayOpenSpec` + `_applyGridBounds`). Transient windows without an openSpec (Settings)
   simply can't bind — acceptable.
 - Closing a bound window while its hero is active = unbind (removed from the set).
-- Dragging a bound window onto a normal-desktop preview = unbind + move there (it becomes a
-  plain window of that desktop).
+- ~~Dragging a bound window onto a normal-desktop preview = unbind + move there~~ SUPERSEDED
+  2.112.4 (user directive): window drags between the stage and normal desktops are blocked in
+  BOTH directions — stage-view windows (placeholder/hero/aux/stage-created) never drag out to
+  a desktop preview, and the stage preview is not a drop target. `stage.dragToDesktopBlocked(win)`
+  is the single predicate (window.js hover detection + dm.moveWindowToDesktop guard, which also
+  covers the right-click "Move to desktop" menu path). Real report behind it: a dragged
+  placeholder escaped onto a normal desktop and stuck there (further defended by `healStray()`
+  + a captureState exclusion so the placeholder can never enter a desktop record).
 - Windows opened while the stage shows the PLACEHOLDER (no hero) are transient: not bound,
   not retained across a materialization (user decision ⑤ "这些窗口都不保留") — they are
   closed when a hero materializes or the user leaves the dynamic desktop.
@@ -207,3 +213,27 @@ doesn't yet record the active workspace (Phase C); enter() while `dm._restoring`
   Fixed by init ordering + a lazy `_sync()` guard that registers the store on any access.
   LESSON: any new SyncStore consumer must init AFTER initStateSync, and StateSync's silent-drop
   semantics hide this class of bug — guard in the consumer.
+- 2026-07-12 (2.112.4) "回到普通桌面尺寸不还原": `leave()` hid the hero with `_hideStage` but
+  never returned the borrowed geometry — the window came back to its normal desktop at the
+  SLOT size. Fix: leave()/`_deactivateHero()` HAND THE HERO BACK to the desktop system —
+  restore `_stageHomeBounds` → gridBounds, clear `_isStageHero`/`_onStage` (off-stage moves
+  must edit HOME bounds, not the slot), then `dm._hideWin`/target-show it like any desktop
+  window (a bare `_hideStage` left it invisible on its home desktop: the desktop show loops
+  only clear `_hiddenByDesktop`). `enter()` re-borrows via the still-set `_heroWinId` (fresh
+  home-bounds snapshot each time, so home moves made while off-stage are kept). Stage-created
+  heroes (`_desktopId === STAGE_ID`) have no home and stay stage-hidden. `_materializeInner`
+  clears `_hiddenByDesktop` (a stale flag excluded the hero from `_isStageVisible`).
+- 2026-07-12 (2.112.4) "动态桌面里的 grid 配置不保存": desktop autosave is suppressed while
+  staged, so the stage grid had NO persistence path. First fix (gate inside `_doAutoSave`)
+  still lost it — `scheduleAutoSave`'s `_restoring` gates dropped the call before the stage
+  gate ever ran (smoke-caught). The interception must live at the TOP of `scheduleAutoSave`:
+  `if (stage.isActive) { stage.onStageLayoutChanged(); return; }` (content-compared, cheap,
+  no debounce needed). Grid stored in the stage store key 'grid'; `enter()` applies it,
+  `leave()` applies the target desktop's own grid as before.
+- 2026-07-12 (2.112.4) liveApply: `desktop.dynamicEnabled` needed a page refresh — the
+  switcher digest already included `stage.enabled` but nothing kicked `_renderSwitcher()` on
+  the settings change. `stage.init()` registers a settings listener (render kick; disabling
+  while staged leaves first). Same class in the sidebar: `sessionCard.*` settings are read at
+  CARD BUILD time — sidebar constructor now re-renders on change (schema flipped to
+  liveApply: true). LESSON: a `liveApply: true` schema flag is a CLAIM — every setting read
+  at render/build time needs an explicit change listener that re-renders its surface.
