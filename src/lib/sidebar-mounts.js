@@ -384,7 +384,7 @@ export function installSidebarMounts(Sidebar) {
                 status.textContent = tr('Completing…');
                 const fr = await api('/api/mounts/gdrive-auth/callback', { method: 'POST', body: JSON.stringify({ url: inp.value }) });
                 finish(fr.token);
-              } catch (e) { status.textContent = e.message || 'Failed'; }
+              } catch (e) { status.textContent = e.message || tr('Failed'); }
             };
             pasteBox.appendChild(inp);
             body.appendChild(pasteBox);
@@ -398,7 +398,7 @@ export function installSidebarMounts(Sidebar) {
           }, 1500);
           setTimeout(stopPoll, 10 * 60 * 1000);
         } catch (e) {
-          status.textContent = e.message || 'Failed to start authorization';
+          status.textContent = e.message || tr('Failed to start authorization');
           btn.disabled = false;
         }
       };
@@ -734,16 +734,16 @@ export function installSidebarMounts(Sidebar) {
     },
 
     _showRcloneConfDialog() {
-      const { body, close } = createModalShell({ id: 'mounts-dialog-overlay', title: 'Import rclone config' });
+      const { body, close } = createModalShell({ id: 'mounts-dialog-overlay', title: tr('Import rclone config') });
       const hint = document.createElement('div');
       hint.className = 'mounts-field-hint';
-      hint.textContent = 'Paste the contents of your rclone.conf (from `rclone config file` — usually ~/.config/rclone/rclone.conf). Every remote inside it becomes a mount you can pick.';
+      hint.textContent = tr('Paste the contents of your rclone.conf (from `rclone config file` — usually ~/.config/rclone/rclone.conf). Every remote inside it becomes a mount you can pick.');
       const ta = document.createElement('textarea');
       ta.placeholder = '[gdrive]\ntype = drive\ntoken = {…}\n\n[b2]\ntype = b2\naccount = …\nkey = …';
       ta.style.minHeight = '120px'; ta.style.fontSize = '11px'; ta.style.fontFamily = 'monospace';
       const parseBtn = document.createElement('button');
       parseBtn.className = 'btn-create';
-      parseBtn.textContent = 'Find storage in this config';
+      parseBtn.textContent = tr('Find storage in this config');
       const list = document.createElement('div');
       list.className = 'mounts-conf-list';
       const err = document.createElement('div');
@@ -756,8 +756,8 @@ export function installSidebarMounts(Sidebar) {
         confText = ta.value;
         let d;
         try { d = await api('/api/mounts/rclone-conf/parse', { method: 'POST', body: JSON.stringify({ text: confText }), headers: { 'Content-Type': 'application/json' } }); }
-        catch (e) { err.textContent = e.message || 'Parse failed'; return; }
-        if (!d.remotes?.length) { err.textContent = 'No remotes found in that config.'; return; }
+        catch (e) { err.textContent = e.message || tr('Parse failed'); return; }
+        if (!d.remotes?.length) { err.textContent = tr('No remotes found in that config.'); return; }
         const checks = [];
         for (const r of d.remotes) {
           const row = document.createElement('label');
@@ -770,90 +770,90 @@ export function installSidebarMounts(Sidebar) {
           checks.push(cb);
           const txt = document.createElement('span');
           txt.innerHTML = `<b>${escHtml(r.name)}</b> <span class="mounts-typetag">${escHtml(r.type)}</span>` +
-            (r.wraps ? ' <span class="mounts-field-hint" style="display:inline">references another remote — not supported</span>' : '');
+            (r.wraps ? ` <span class="mounts-field-hint" style="display:inline">${escHtml(tr('references another remote — not supported'))}</span>` : '');
           row.append(cb, txt);
           list.appendChild(row);
         }
         // mode + import button
         const modeWrap = document.createElement('div');
         modeWrap.className = 'mounts-conf-mode';
-        modeWrap.innerHTML = '<label>Mount as</label>';
+        modeWrap.innerHTML = `<label>${escHtml(tr('Mount as'))}</label>`;
         const modeSel = document.createElement('select');
-        for (const [v, l] of [['rw', 'Read-write'], ['ro', 'Read-only']]) { const o = document.createElement('option'); o.value = v; o.textContent = l; modeSel.appendChild(o); }
+        for (const [v, l] of [['rw', tr('Read-write')], ['ro', tr('Read-only')]]) { const o = document.createElement('option'); o.value = v; o.textContent = l; modeSel.appendChild(o); }
         modeWrap.appendChild(modeSel);
         const importBtn = document.createElement('button');
         importBtn.className = 'btn-create';
-        importBtn.textContent = 'Import & connect selected';
+        importBtn.textContent = tr('Import & connect selected');
         importBtn.onclick = async () => {
           const names = checks.filter(c => c.checked).map(c => c.dataset.name);
-          if (!names.length) { err.textContent = 'Pick at least one remote.'; return; }
-          importBtn.disabled = true; importBtn.textContent = 'Importing…';
+          if (!names.length) { err.textContent = tr('Pick at least one remote.'); return; }
+          importBtn.disabled = true; importBtn.textContent = tr('Importing…');
           try {
             const r = await api('/api/mounts/rclone-conf/import', { method: 'POST', body: JSON.stringify({ text: confText, names, mode: modeSel.value }), headers: { 'Content-Type': 'application/json' } });
-            close(); showToast(`Imported ${r.added.length} remote${r.added.length === 1 ? '' : 's'}`); this._renderMounts();
-          } catch (e) { err.textContent = e.message || 'Import failed'; importBtn.disabled = false; importBtn.textContent = 'Import & connect selected'; }
+            close(); showToast(tr('Imported {n} remotes', { n: r.added.length })); this._renderMounts();
+          } catch (e) { err.textContent = e.message || tr('Import failed'); importBtn.disabled = false; importBtn.textContent = tr('Import & connect selected'); }
         };
         list.append(modeWrap, importBtn);
       };
     },
 
     _showImportShareDialog() {
-      this._mountsDialog('Import share link', [
-        { key: 'link', label: 'Share link', placeholder: 'vibespace-share:v1:…' },
-        { key: 'name', label: 'Display name (optional)', placeholder: 'team-dataset', hint: 'What to call this folder in your file list.' },
-      ], 'Import & connect', async (v, { close }) => {
-        if (!v.link) throw new Error('Paste the share link');
+      this._mountsDialog(tr('Import share link'), [
+        { key: 'link', label: tr('Share link'), placeholder: 'vibespace-share:v1:…' },
+        { key: 'name', label: tr('Display name (optional)'), placeholder: 'team-dataset', hint: tr('What to call this folder in your file list.') },
+      ], tr('Import & connect'), async (v, { close }) => {
+        if (!v.link) throw new Error(tr('Paste the share link'));
         const r = await api('/api/mounts/import', { method: 'POST', body: JSON.stringify({ link: v.link, name: v.name || undefined }), headers: { 'Content-Type': 'application/json' } });
         await fetch(`/api/mounts/${r.id}/mount`, { method: 'POST' });
-        close(); showToast('Share imported'); this._renderMounts();
+        close(); showToast(tr('Share imported')); this._renderMounts();
       });
     },
 
     _showAddMountDialog() {
       const is = (t) => (v) => v.type === t;
-      this._mountsDialog('Connect storage', [
-        { key: 'type', label: 'Source type', type: 'select', options: [
-          ['s3', 'Cloud storage (S3 / MinIO)'], ['drive', 'Google Drive'], ['webdav', 'Nextcloud / WebDAV'],
-          ['sftp', 'A server over SSH (SFTP)'], ['vibespace', 'Another VibeSpace'], ['rclone', 'Custom / advanced (rclone)'],
+      this._mountsDialog(tr('Connect storage'), [
+        { key: 'type', label: tr('Source type'), type: 'select', options: [
+          ['s3', tr('Cloud storage (S3 / MinIO)')], ['drive', 'Google Drive'], ['webdav', 'Nextcloud / WebDAV'],
+          ['sftp', tr('A server over SSH (SFTP)')], ['vibespace', tr('Another VibeSpace')], ['rclone', tr('Custom / advanced (rclone)')],
         ] },
-        { key: 'name', label: 'Name', placeholder: 'my-mount' },
+        { key: 'name', label: tr('Name'), placeholder: 'my-mount' },
         // S3
-        { key: 'endpoint', label: 'Server address (endpoint)', placeholder: 'https://s3.amazonaws.com  or  https://s3.mycompany.com', when: is('s3'), hint: 'The address your storage provider gave you. For Amazon S3 use https://s3.amazonaws.com; for MinIO/other providers use the link from their console.' },
-        { key: 'bucket', label: 'Bucket (storage container)', placeholder: 'company-workspace', when: is('s3'), hint: 'The container name from your provider’s console — like a top-level drive.' },
-        { key: 'prefix', label: 'Subfolder (optional)', placeholder: 'users/alice', when: is('s3'), hint: 'Limit this connection to one folder inside the bucket. Leave blank for the whole bucket.' },
-        { key: 'accessKey', label: 'Access key', when: is('s3'), hint: 'From your provider’s “Access Keys” / API credentials page.' },
-        { key: 'secretKey', label: 'Secret key', type: 'password', when: is('s3'), hint: 'The secret half of the access key — treat it like a password.' },
+        { key: 'endpoint', label: tr('Server address (endpoint)'), placeholder: 'https://s3.amazonaws.com  or  https://s3.mycompany.com', when: is('s3'), hint: tr('The address your storage provider gave you. For Amazon S3 use https://s3.amazonaws.com; for MinIO/other providers use the link from their console.') },
+        { key: 'bucket', label: tr('Bucket (storage container)'), placeholder: 'company-workspace', when: is('s3'), hint: tr('The container name from your provider’s console — like a top-level drive.') },
+        { key: 'prefix', label: tr('Subfolder (optional)'), placeholder: 'users/alice', when: is('s3'), hint: tr('Limit this connection to one folder inside the bucket. Leave blank for the whole bucket.') },
+        { key: 'accessKey', label: tr('Access key'), when: is('s3'), hint: tr('From your provider’s “Access Keys” / API credentials page.') },
+        { key: 'secretKey', label: tr('Secret key'), type: 'password', when: is('s3'), hint: tr('The secret half of the access key — treat it like a password.') },
         // Google Drive
-        { key: 'token', label: 'Google Drive access', type: 'textarea', placeholder: 'click "Connect Google Drive" below — no terminal needed', when: is('drive'), hint: 'Advanced: you can also paste the JSON from `rclone authorize "drive"` run elsewhere.' },
-        { key: 'driveFolder', label: 'Folder (optional, blank = whole Drive)', placeholder: 'Projects/Data', when: is('drive') },
-        { key: 'clientId', label: 'Custom OAuth client ID (optional)', placeholder: 'leave blank to use the built-in client', when: is('drive'), hint: 'Advanced: your own Google Cloud OAuth client — avoids rclone\'s shared quota. Used by Connect too.' },
-        { key: 'clientSecret', label: 'Custom OAuth client secret (optional)', type: 'password', when: is('drive') },
+        { key: 'token', label: tr('Google Drive access'), type: 'textarea', placeholder: tr('click "Connect Google Drive" below — no terminal needed'), when: is('drive'), hint: tr('Advanced: you can also paste the JSON from `rclone authorize "drive"` run elsewhere.') },
+        { key: 'driveFolder', label: tr('Folder (optional, blank = whole Drive)'), placeholder: 'Projects/Data', when: is('drive') },
+        { key: 'clientId', label: tr('Custom OAuth client ID (optional)'), placeholder: tr('leave blank to use the built-in client'), when: is('drive'), hint: tr("Advanced: your own Google Cloud OAuth client — avoids rclone's shared quota. Used by Connect too.") },
+        { key: 'clientSecret', label: tr('Custom OAuth client secret (optional)'), type: 'password', when: is('drive') },
         // WebDAV / Nextcloud
-        { key: 'url', label: 'WebDAV URL', placeholder: 'https://cloud.example.com/remote.php/dav/files/me', when: is('webdav'), hint: 'Nextcloud: Settings → Files shows this address. Use an app password if you have 2FA.' },
-        { key: 'vendor', label: 'Vendor', type: 'select', options: [['other', 'Generic WebDAV'], ['nextcloud', 'Nextcloud']], when: is('webdav') },
-        { key: 'user', label: 'Username', when: is('webdav') },
-        { key: 'pass', label: 'Password / app token', type: 'password', when: is('webdav') },
+        { key: 'url', label: tr('WebDAV URL'), placeholder: 'https://cloud.example.com/remote.php/dav/files/me', when: is('webdav'), hint: tr('Nextcloud: Settings → Files shows this address. Use an app password if you have 2FA.') },
+        { key: 'vendor', label: tr('Vendor'), type: 'select', options: [['other', tr('Generic WebDAV')], ['nextcloud', 'Nextcloud']], when: is('webdav') },
+        { key: 'user', label: tr('Username'), when: is('webdav') },
+        { key: 'pass', label: tr('Password / app token'), type: 'password', when: is('webdav') },
         // SFTP
-        { key: 'fromHost', label: 'From registered host (optional)', type: 'select', when: is('sftp'),
-          options: [['', '— pick to prefill —'], ...((this._hostsData?.hosts || []).map(h => [h.id, h.name]))] },
-        { key: 'sshHost', label: 'SSH host', placeholder: 'box.example.com', when: is('sftp') },
-        { key: 'sshUser', label: 'SSH user', placeholder: 'ubuntu', when: is('sftp') },
-        { key: 'sshPort', label: 'Port', placeholder: '22', when: is('sftp') },
-        { key: 'sshPath', label: 'Remote path (optional)', placeholder: '/home/ubuntu/data', when: is('sftp'), autocomplete: (inputs) => inputs.fromHost?.value ? `/api/hosts/${inputs.fromHost.value}/dir-complete` : '/api/hosts/none/dir-complete' },
-        { key: 'keyPath', label: 'Private key path (absolute) — or use password', placeholder: '~/.ssh/id_ed25519', when: is('sftp'), autocomplete: 'local' },
-        { key: 'pass', label: 'Password (if no key)', type: 'password', when: is('sftp') },
+        { key: 'fromHost', label: tr('From registered host (optional)'), type: 'select', when: is('sftp'),
+          options: [['', tr('— pick to prefill —')], ...((this._hostsData?.hosts || []).map(h => [h.id, h.name]))] },
+        { key: 'sshHost', label: tr('SSH host'), placeholder: 'box.example.com', when: is('sftp') },
+        { key: 'sshUser', label: tr('SSH user'), placeholder: 'ubuntu', when: is('sftp') },
+        { key: 'sshPort', label: tr('Port'), placeholder: '22', when: is('sftp') },
+        { key: 'sshPath', label: tr('Remote path (optional)'), placeholder: '/home/ubuntu/data', when: is('sftp'), autocomplete: (inputs) => inputs.fromHost?.value ? `/api/hosts/${inputs.fromHost.value}/dir-complete` : '/api/hosts/none/dir-complete' },
+        { key: 'keyPath', label: tr('Private key path (absolute) — or use password'), placeholder: '~/.ssh/id_ed25519', when: is('sftp'), autocomplete: 'local' },
+        { key: 'pass', label: tr('Password (if no key)'), type: 'password', when: is('sftp') },
         // Another VibeSpace
-        { key: 'url', label: 'VibeSpace URL', placeholder: 'https://vibespace.example.com', when: is('vibespace') },
-        { key: 'bearerToken', label: 'Mount token (vsmt_…)', type: 'password', when: is('vibespace'), hint: 'Ask the other VibeSpace to create one under Storage → “Share a local folder”.' },
+        { key: 'url', label: tr('VibeSpace URL'), placeholder: 'https://vibespace.example.com', when: is('vibespace') },
+        { key: 'bearerToken', label: tr('Mount token (vsmt_…)'), type: 'password', when: is('vibespace'), hint: tr('Ask the other VibeSpace to create one under Storage → “Share a local folder”.') },
         // Custom rclone backend
-        { key: 'rcloneType', label: 'rclone backend', placeholder: 'dropbox / b2 / azureblob / mega / …', when: is('rclone'), hint: 'Any backend rclone supports — see rclone.org/docs. Params below map to that backend\'s config keys.' },
-        { key: 'params', label: 'Parameters (one key = value per line)', type: 'textarea', placeholder: 'token = {"access_token":…}\naccount = my-account\nkey = …', when: is('rclone'), hint: 'e.g. b2 wants account + key; dropbox wants token. All values encrypted at rest.' },
-        { key: 'remotePath', label: 'Path within the remote (optional)', placeholder: 'folder/subfolder', when: is('rclone') },
+        { key: 'rcloneType', label: tr('rclone backend'), placeholder: 'dropbox / b2 / azureblob / mega / …', when: is('rclone'), hint: tr("Any backend rclone supports — see rclone.org/docs. Params below map to that backend's config keys.") },
+        { key: 'params', label: tr('Parameters (one key = value per line)'), type: 'textarea', placeholder: 'token = {"access_token":…}\naccount = my-account\nkey = …', when: is('rclone'), hint: tr('e.g. b2 wants account + key; dropbox wants token. All values encrypted at rest.') },
+        { key: 'remotePath', label: tr('Path within the remote (optional)'), placeholder: 'folder/subfolder', when: is('rclone') },
         // common
-        { key: 'extraParams', label: 'Extra options (key = value per line)', type: 'textarea', placeholder: 'e.g.  chunk_size = 64M', hint: 'Passed to the underlying transfer engine (rclone) — custom API keys, tuning, provider quirks. See rclone.org/docs.', advanced: true },
-        { key: 'mode', label: 'Mode', type: 'select', options: [['rw', 'Read-write'], ['ro', 'Read-only']] },
-        { key: 'customPath', label: 'Where to put it on this computer (optional)', placeholder: 'leave blank — we choose automatically', hint: 'Advanced: an absolute path if you need it in a specific place.', advanced: true, autocomplete: 'local' },
-      ], 'Connect', async (v, { close }) => {
+        { key: 'extraParams', label: tr('Extra options (key = value per line)'), type: 'textarea', placeholder: 'e.g.  chunk_size = 64M', hint: tr('Passed to the underlying transfer engine (rclone) — custom API keys, tuning, provider quirks. See rclone.org/docs.'), advanced: true },
+        { key: 'mode', label: tr('Mode'), type: 'select', options: [['rw', tr('Read-write')], ['ro', tr('Read-only')]] },
+        { key: 'customPath', label: tr('Where to put it on this computer (optional)'), placeholder: tr('leave blank — we choose automatically'), hint: tr('Advanced: an absolute path if you need it in a specific place.'), advanced: true, autocomplete: 'local' },
+      ], tr('Connect'), async (v, { close }) => {
         delete v.fromHost; // UI-only prefill helper
         const parseKV = (text) => {
           const o = {};
@@ -869,7 +869,7 @@ export function installSidebarMounts(Sidebar) {
         if (v.extraParams) v.extraParams = parseKV(v.extraParams);
         const r = await api('/api/mounts', { method: 'POST', body: JSON.stringify(v), headers: { 'Content-Type': 'application/json' } });
         await fetch(`/api/mounts/${r.id}/mount`, { method: 'POST' });
-        close(); showToast('Storage connected'); this._renderMounts();
+        close(); showToast(tr('Storage connected')); this._renderMounts();
       });
       const ctx = this._lastMountsDialog;
       if (!ctx) return;
@@ -897,7 +897,7 @@ export function installSidebarMounts(Sidebar) {
       wrap.className = 'mounts-drive-connect';
       const btn = document.createElement('button');
       btn.className = 'mounts-btn mounts-btn-primary';
-      btn.textContent = 'Connect Google Drive';
+      btn.textContent = tr('Connect Google Drive');
       const status = document.createElement('div');
       status.className = 'mounts-field-hint';
       wrap.append(btn, status);
@@ -911,14 +911,14 @@ export function installSidebarMounts(Sidebar) {
       const finish = (token) => {
         stopPoll();
         tokenInput.value = token;
-        status.textContent = '✓ Connected — finish with the “Connect” button below.';
-        btn.textContent = 'Reconnect';
+        status.textContent = tr('✓ Connected — finish with the “Connect” button below.');
+        btn.textContent = tr('Reconnect');
         btn.disabled = false;
         pasteBox?.remove(); pasteBox = null;
       };
       btn.onclick = async () => {
         btn.disabled = true;
-        status.textContent = 'Preparing authorization…';
+        status.textContent = tr('Preparing authorization…');
         try {
           const r = await api('/api/mounts/gdrive-auth/start', {
             method: 'POST',
@@ -927,18 +927,18 @@ export function installSidebarMounts(Sidebar) {
           });
           if (r.error) throw new Error(r.error);
           window.open(r.url, '_blank');
-          status.textContent = 'A Google sign-in page opened. Approve access, then come back here.';
+          status.textContent = tr('A Google sign-in page opened. Approve access, then come back here.');
           if (!pasteBox) {
             pasteBox = document.createElement('div');
-            pasteBox.innerHTML = `<div class="mounts-field-hint">If this VibeSpace runs on ANOTHER machine, the final page won't load (address starts with 127.0.0.1) — copy that address and paste it here:</div>`;
+            pasteBox.innerHTML = `<div class="mounts-field-hint">${escHtml(tr("If this VibeSpace runs on ANOTHER machine, the final page won't load (address starts with 127.0.0.1) — copy that address and paste it here:"))}</div>`;
             const inp = document.createElement('input');
             inp.placeholder = 'http://127.0.0.1:53682/?state=…&code=…';
             inp.onchange = async () => {
               try {
-                status.textContent = 'Completing…';
+                status.textContent = tr('Completing…');
                 const fr = await api('/api/mounts/gdrive-auth/callback', { method: 'POST', body: JSON.stringify({ url: inp.value }), headers: { 'Content-Type': 'application/json' } });
                 finish(fr.token);
-              } catch (e) { status.textContent = e.message || 'Failed'; }
+              } catch (e) { status.textContent = e.message || tr('Failed'); }
             };
             pasteBox.appendChild(inp);
             wrap.appendChild(pasteBox);
@@ -955,7 +955,7 @@ export function installSidebarMounts(Sidebar) {
           }, 1500);
           setTimeout(stopPoll, 10 * 60 * 1000);
         } catch (e) {
-          status.textContent = e.message || 'Failed to start authorization';
+          status.textContent = e.message || tr('Failed to start authorization');
           btn.disabled = false;
         }
       };
@@ -964,19 +964,19 @@ export function installSidebarMounts(Sidebar) {
     // Mint a scoped WebDAV mount token so another VibeSpace can mount a folder
     // of THIS instance (the "VibeSpace互挂" bridge).
     _showBridgeShareDialog(prefillRoot) {
-      this._mountsDialog('Share a local folder', [
-        { key: 'name', label: 'Label', placeholder: 'shared-with-bob' },
-        { key: 'root', label: 'Folder to share (absolute path on this machine)', placeholder: '/home/me/project', autocomplete: 'local', value: prefillRoot || '' },
-        { key: 'mode', label: 'Access', type: 'select', options: [['ro', 'Read-only'], ['rw', 'Read-write']] },
-      ], 'Create link', async (v, { close, body }) => {
+      this._mountsDialog(tr('Share a local folder'), [
+        { key: 'name', label: tr('Label'), placeholder: 'shared-with-bob' },
+        { key: 'root', label: tr('Folder to share (absolute path on this machine)'), placeholder: '/home/me/project', autocomplete: 'local', value: prefillRoot || '' },
+        { key: 'mode', label: tr('Access'), type: 'select', options: [['ro', tr('Read-only')], ['rw', tr('Read-write')]] },
+      ], tr('Create link'), async (v, { close, body }) => {
         const r = await api('/api/mount-tokens', { method: 'POST', body: JSON.stringify(v), headers: { 'Content-Type': 'application/json' } });
-        body.innerHTML = `<label>Bridge link — embeds a scoped token; treat it like a key</label>
+        body.innerHTML = `<label>${escHtml(tr('Bridge link — embeds a scoped token; treat it like a key'))}</label>
           <textarea readonly style="min-height:84px;font-size:11px">${escHtml(r.link)}</textarea>
-          <div class="mounts-note">The other side pastes this into “Import share link” (or Connect storage → Another VibeSpace). Revoke any time under Bridge tokens.</div>`;
+          <div class="mounts-note">${escHtml(tr('The other side pastes this into “Import share link” (or Connect storage → Another VibeSpace). Revoke any time under Bridge tokens.'))}</div>`;
         const copyBtn = document.createElement('button');
         copyBtn.className = 'btn-create';
-        copyBtn.textContent = 'Copy link';
-        copyBtn.onclick = () => { copyText(r.link); showToast('Link copied'); close(); this._renderMounts(); };
+        copyBtn.textContent = tr('Copy link');
+        copyBtn.onclick = () => { copyText(r.link); showToast(tr('Link copied')); close(); this._renderMounts(); };
         const actions = document.createElement('div');
         actions.className = 'dialog-actions';
         actions.appendChild(copyBtn);
@@ -1013,11 +1013,11 @@ export function installSidebarMounts(Sidebar) {
         return [];
       }
       if (type === 's3') return [
-        ['endpoint', 'Endpoint', 'https://…', cfg.endpoint || ''],
-        ['bucket', 'Bucket', 'bucket-name', cfg.bucket || ''],
-        ['prefix', 'Prefix (optional)', 'sub/path', cfg.prefix || ''],
-        ['accessKey', 'Access key', '', cfg.accessKey || ''],
-        ['secretKey', 'Secret key', '', cfg.secretKey || ''],
+        ['endpoint', tr('Endpoint'), 'https://…', cfg.endpoint || ''],
+        ['bucket', tr('Bucket'), 'bucket-name', cfg.bucket || ''],
+        ['prefix', tr('Prefix (optional)'), 'sub/path', cfg.prefix || ''],
+        ['accessKey', tr('Access key'), '', cfg.accessKey || ''],
+        ['secretKey', tr('Secret key'), '', cfg.secretKey || ''],
       ];
       if (type === 'rclone') return [
         ['remotePath', tr('Remote path (bucket[/prefix])'), 'bucket-name/optional/prefix', cfg.remotePath || ''],
@@ -1089,7 +1089,7 @@ export function installSidebarMounts(Sidebar) {
         del.textContent = tr('Remove…');
         del.title = tr('Remove this connection (nothing is deleted remotely)');
         del.onclick = async () => {
-          const ok = await showConfirmDialog({ title: `Remove "${name}"?`, message: 'The mount record and local mountpoint go away. Nothing is deleted remotely.', confirmText: 'Remove', danger: true });
+          const ok = await showConfirmDialog({ title: tr('Remove "{name}"?', { name }), message: tr('The mount record and local mountpoint go away. Nothing is deleted remotely.'), confirmText: tr('Remove'), danger: true });
           if (!ok) return;
           try {
             const r = await api(`/api/mounts/${m.id}`, { method: 'DELETE' });
@@ -1130,20 +1130,20 @@ export function installSidebarMounts(Sidebar) {
     _showMintShareDialog(m) {
       const under = `${m.bucket}${m.prefix ? '/' + m.prefix : ''}`;
       const mc = this._mountsData?.mcAvailable;
-      this._mountsDialog(`Share a folder from “${m.name}”`, [
-        { key: 'name', label: 'Share name', placeholder: 'dataset-v2', value: m.name + '-share' },
-        { key: 'folder', label: `Folder under ${under} (empty = share everything)`, placeholder: 'datasets/v2' },
-        { key: 'mode', label: 'Access', type: 'select', options: [['ro', 'Read-only'], ['rw', 'Read-write']] },
-        ...(mc ? [] : [{ key: 'expiryDays', label: 'Link expires after (days, max 7)', value: '7' }]),
-      ], 'Create link', async (v, { close, body, err }) => {
+      this._mountsDialog(tr('Share a folder from “{name}”', { name: m.name }), [
+        { key: 'name', label: tr('Share name'), placeholder: 'dataset-v2', value: m.name + '-share' },
+        { key: 'folder', label: tr('Folder under {path} (empty = share everything)', { path: under }), placeholder: 'datasets/v2' },
+        { key: 'mode', label: tr('Access'), type: 'select', options: [['ro', tr('Read-only')], ['rw', tr('Read-write')]] },
+        ...(mc ? [] : [{ key: 'expiryDays', label: tr('Link expires after (days, max 7)'), value: '7' }]),
+      ], tr('Create link'), async (v, { close, body, err }) => {
         const r = await api(`/api/mounts/${m.id}/share`, { method: 'POST', body: JSON.stringify(v), headers: { 'Content-Type': 'application/json' } });
         // show the link with a copy button (it embeds the credential — a secret)
-        body.innerHTML = `<label>Share link — treat it like a key; send over company chat only</label>
+        body.innerHTML = `<label>${escHtml(tr('Share link — treat it like a key; send over company chat only'))}</label>
           <textarea readonly style="min-height:84px;font-size:11px">${escHtml(r.link)}</textarea>`;
         const copyBtn = document.createElement('button');
         copyBtn.className = 'btn-create';
-        copyBtn.textContent = 'Copy link';
-        copyBtn.onclick = () => { copyText(r.link); showToast('Link copied'); close(); this._renderMounts(); };
+        copyBtn.textContent = tr('Copy link');
+        copyBtn.onclick = () => { copyText(r.link); showToast(tr('Link copied')); close(); this._renderMounts(); };
         const actions = document.createElement('div');
         actions.className = 'dialog-actions';
         actions.appendChild(copyBtn);
