@@ -1233,7 +1233,7 @@ class ChatRenderers {
         fetch('/api/telemetry', { method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ events: [{ kind: 'trace', name: 'code-block-overlap', detail: JSON.stringify(diag).slice(0, 60000) }] }) }).catch(() => {});
       } catch {}
-    });
+    }));
   }
 }
 
