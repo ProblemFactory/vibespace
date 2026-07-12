@@ -1682,4 +1682,6 @@ export default {
   "Restarting the service…": "正在重启服务…",
   "Timed out — check the log below or data/update.log on the server": "超时——请查看下方日志或服务器上的 data/update.log",
   "Updating VibeSpace": "正在更新 VibeSpace",
+  "Reload now": "立即刷新",
+  "Update complete — reloading…": "更新完成——正在刷新…",
 };

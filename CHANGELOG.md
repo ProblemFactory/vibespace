@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.111.22 — 2026-07-12
+
+- **Self-update dialog now reliably auto-reloads** (real report: it didn't). It keyed the reload on the version NUMBER changing, so re-running the update while already on the latest never reloaded. Now it detects the restart itself — the server going unreachable then reachable again (or a version bump) — cache-busts `/api/version`, and reloads on that. Non-zero exit / genuine no-op / timeout are distinguished, with a manual "Reload now" fallback button always available.
+- **Agent tool injection slimmed to a discovery layer**: the per-session `<vibespace-task-context>` "how to report back" block is now a compact list (each tool + when to reach for it) instead of the full ~2.3KB rules dump — detailed syntax/caveats moved to each CLI's own output (run with no args) and to point-of-use reminders. `vibespace-status` prints a "you're waiting on the user — say it in chat + mirror with vibespace-ask" reminder when set to blocked/needs-input/review; its usage carries the honesty guidance.
+
 ## 2.111.21 — 2026-07-12
 
 - **Onboarding CLI login/install now runs in an EMBEDDED terminal modal** (user directive: no more "opens a detached terminal, hides the wizard, never comes back"). The wizard stays on screen; the modal polls `/api/backend-status` and closes itself with a ✓ the moment the login/install lands, refreshing the status cards.

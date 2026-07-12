@@ -1369,6 +1369,10 @@ const USAGE = [
   '  vibespace-status <working|needs-input|blocked|review|done> ["why"] [--urgency low|normal|high|urgent] [--reason "one-line why"] [--detail "full context"]',
   '  vibespace-status clear      remove the indicator',
   '  vibespace-status show       print the current indicator',
+  '',
+  'The user reads this on the board — keep it honest and current. Set blocked or needs-input',
+  '(bump --urgency) the MOMENT you are stuck or waiting on the user, and done when finished.',
+  'If you are waiting on the user, ALSO ask in chat + file it with vibespace-ask (both).',
 ].join('\\n');
 async function post(body) {
   const res = await fetch(api + '/api/agent/session-status', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify(body) });
@@ -1396,6 +1400,9 @@ async function main() {
   const posReason = args[1] && !args[1].startsWith('--') ? args[1] : undefined;
   await post({ state: cmd, urgency: opt('urgency'), reason: opt('reason') ?? posReason, detail: opt('detail') });
   console.log('status set: ' + cmd + (opt('urgency') ? ' / ' + opt('urgency') : ''));
+  if (cmd === 'blocked' || cmd === 'needs-input' || cmd === 'review') {
+    console.log('REMINDER: you are waiting on the user — write what you need (with your recommendation) in your CHAT REPLY now, and mirror it with: vibespace-ask "..."');
+  }
 }
 main().catch((e) => { console.error('vibespace-status:', e.message); process.exit(1); });
 `;

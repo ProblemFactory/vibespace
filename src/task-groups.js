@@ -252,28 +252,22 @@ class TaskGroupManager {
   // prefix agents must use ('' single-group; '--group <id> ' generic in the
   // shared multi-group section).
   _toolsSectionParts(gid, multi) {
-    return ['', '### How to report back  (IMPORTANT — read this before using the tools)', '',
+    // DISCOVERY layer only (2.111.22): name each tool + its trigger. Detailed
+    // syntax, caveats and enums live in each CLI's OWN output (run with no
+    // args, or read the success line) — point-of-use teaching sticks better
+    // and keeps this per-session injection lean. The behaviors that must be
+    // known BEFORE first use (when to reach for a tool) stay here.
+    const g = gid ? `\`${gid.trim()}\` ` : '';
+    return ['', '### Reporting back — three CLIs are on your PATH (run any with no args for full usage)', '',
       multi
-        ? `This session belongs to MORE THAN ONE Task Group, so \`vibespace-task\` needs \`--group <id>\` to target one (each block below names its group id). You can only ever act on groups THIS session belongs to. \`vibespace-status\` always reports THIS session and needs no group.`
-        : `Two commands are already on your PATH and are already bound to THIS session's Task Group. You NEVER pass a group id — they only ever act on your own group. If you forget the exact syntax, just run the command with NO arguments: it prints its usage AND the current state.`,
+        ? `You belong to MORE THAN ONE Task Group; pass \`--group <id>\` to \`vibespace-task\` (each block below names its id). \`vibespace-status\`/\`vibespace-ask\` always mean THIS session.`
+        : `They're bound to THIS session — you never pass a group id.`,
       '',
-      '`vibespace-task` — update the SHARED Task Group (every session of it, and the user on the board, see it):',
-      `- \`vibespace-task ${gid}progress "one-line summary" [--detail "full context"]\` — append to the Activity log after finishing a meaningful piece of work. The SUMMARY is what every session sees inline — keep it one tight line; put specifics (numbers, paths, caveats) in \`--detail\` (read via \`vibespace-task show --full\`).`,
-      `- \`vibespace-task ${gid}plan-check <item# or unique text>\` (and \`plan-uncheck\`) — tick a Checklist item when you complete one. The Checklist is the group's BACKLOG of work items (usually user-curated) — keep your own working steps in your normal per-session todo list, NOT here.`,
-      `- \`vibespace-task ${gid}plan-add "new work item" [--detail "full context"]\` — queue a NEW work item for the group (something someone should pick up later, not your current steps). A checklist † marks an item with detail — read it via \`vibespace-task show --full\` before picking the item up.`,
-      `- \`vibespace-task ${gid}show\` — reprint the objective / checklist / activity log.`,
+      `- \`vibespace-task\` ${g}— update the SHARED Task Group everyone sees: \`progress\` (log what you finished), \`plan-check\`/\`plan-add\` (the group's backlog), \`show\`. Run bare for syntax.`,
+      `- \`vibespace-status <working|needs-input|blocked|review|done>\` — YOUR session's live state on the board. Set \`blocked\`/\`needs-input\` the moment you're stuck or waiting on the user; \`done\` when finished. Keep it honest.`,
+      `- \`vibespace-ask "question"\` — the user's global inbox. **Whenever you ask the user anything or end a turn waiting on them, file it here AND write the full question (options + your recommendation) in your CHAT REPLY — the inbox is only a notification mirror, never the sole copy.** Resolve it yourself (\`vibespace-ask resolve\`) the moment they answer.`,
       '',
-      '`vibespace-status` — report the state of THIS SESSION (your own work) right now. A Task Group has no status; the SESSION does:',
-      `- \`vibespace-status <working|needs-input|blocked|review|done> [--urgency low|normal|high|urgent] [--reason "one-line why"] [--detail "full context"]\``,
-      `- \`vibespace-status clear\`  /  \`vibespace-status show\``,
-      `- Keep it honest and current — the user reads it on the board. Set \`blocked\` or \`needs-input\` (with a higher urgency) the moment you are stuck or waiting on the user; \`done\` when this piece of work is finished.`,
-      '',
-      '`vibespace-ask` — mirror EVERY question you have for the user onto their global inbox. The user is often NOT watching this window; the inbox is how they find waiting questions across all their sessions:',
-      `- Whenever you ask the user something in chat, end a turn waiting on their decision/input/review, or set status \`needs-input\`/\`blocked\`/\`review\` — ALSO file it: \`vibespace-ask "question" [--detail "context + your recommendation"] [--urgency low|normal|high|urgent]\`. Ask in chat AND file it — both, always. The inbox is a NOTIFICATION MIRROR: the full content (question, options, recommendation) must also appear in your chat reply — never only in the inbox.`,
-      `- The MOMENT the user answers (in chat or anywhere), resolve it YOURSELF: \`vibespace-ask resolve <id|text>\` — never leave your own answered items for the user to tick. \`vibespace-ask list\` shows what's open.`,
-      `- Still NOT for your own working steps (normal todo list) or group work items (\`vibespace-task plan-add\`).`,
-      '',
-      'Referencing files in chat replies: write ABSOLUTE paths (e.g. /home/user/project/out/final.wav) — the chat UI turns them into clickable links that open in the right viewer (audio plays, images preview, HTML renders). Bare filenames and project-relative paths may not resolve for the user.'];
+      'In chat replies use ABSOLUTE file paths (e.g. /home/user/out/final.wav) — the UI makes them clickable; bare/relative names may not resolve.'];
   }
 
   renderContext(id, { multi = false, ctxBase = null, logBudget = 8000, skipTools = false } = {}) {
