@@ -2879,7 +2879,11 @@ app.get('/api/version', async (req, res) => {
     try { versionInfo.commit = execFileSync('git', ['-C', __dirname, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf-8', timeout: 3000 }).trim(); }
     catch { versionInfo.commit = ''; }
   }
-  if (Date.now() - versionInfo.fetchedAt > 6 * 3600 * 1000) {
+  // 15min TTL (was 6h — during active release evenings the gear menu showed
+  // "no update" for hours; real report). ?fresh=1 (the update dialog / menu
+  // open) bypasses the cache with a 60s floor so clicks can't hammer GitHub.
+  const _verTtl = req.query.fresh ? 60 * 1000 : 15 * 60 * 1000;
+  if (Date.now() - versionInfo.fetchedAt > _verTtl) {
     versionInfo.fetchedAt = Date.now(); // stamped even on failure — no hammering while offline
     try {
       const ctl = new AbortController();
@@ -2905,7 +2909,7 @@ function versionNewerThan(a, b) {
 }
 app.get('/api/changelog-diff', async (req, res) => {
   const cur = require('./package.json').version;
-  if (Date.now() - (versionInfo.clFetchedAt || 0) > 6 * 3600 * 1000) {
+  if (Date.now() - (versionInfo.clFetchedAt || 0) > (req.query.fresh ? 60 * 1000 : 15 * 60 * 1000)) {
     versionInfo.clFetchedAt = Date.now(); // stamped even on failure — offline-safe
     try {
       const ctl = new AbortController();

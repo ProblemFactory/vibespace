@@ -878,7 +878,7 @@ class App {
       const vspan = document.createElement('span');
       vspan.className = 'gs-ver';
       col.appendChild(vspan);
-      fetchJson('/api/version').then(v => {
+      fetchJson('/api/version?fresh=1').then(v => {
         if (!v?.version || !vspan.isConnected) return;
         const newer = v.latest && this._versionNewer(v.latest, v.version);
         vspan.textContent = newer ? `v${v.version} \u2192 v${v.latest}` : `v${v.version}`;
@@ -902,7 +902,7 @@ class App {
   async _showUpdateConfirmDialog() {
     const { body, close } = createModalShell({ id: 'update-confirm-dialog', title: t('Update VibeSpace'), bodyClass: 'update-confirm-body', minWidth: 'min(560px, 92vw)', escapeToClose: true });
     body.innerHTML = `<div class="empty-hint">${t('Checking for updates\u2026')}</div>`;
-    const [v, cl] = await Promise.all([fetchJson('/api/version'), fetchJson('/api/changelog-diff')]);
+    const [v, cl] = await Promise.all([fetchJson('/api/version?fresh=1'), fetchJson('/api/changelog-diff?fresh=1')]);
     if (!body.isConnected) return;
     const cur = v?.version || cl?.current || '?';
     const latest = v?.latest || cl?.latest || null;

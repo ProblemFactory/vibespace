@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.111.30 — 2026-07-12
+
+- **Update detection no longer lags hours behind** (real report: an instance on 2.111.25 said "no update" while .29 was out). The latest-version + changelog fetches were cached 6 hours server-side; now 15 min, and the gear menu / update dialog pass `?fresh=1` (60s floor) so opening them always checks properly.
+
 ## 2.111.29 — 2026-07-12 (P0)
 
 - **Fixed a syntax error that broke the entire `vibespace-status` CLI** on any instance running 2.111.24–2.111.28. The 2.111.24 "reason + detail required" help text used a shell line-continuation backslash (`… \`) at the END of a single-quoted JS string in the generator template — the `\'` escaped the closing quote, so every regenerated `data/bin/vibespace-status` failed to parse and `vibespace-status <anything>` exited with a SyntaxError. The example is now a single line with no trailing backslash. The file regenerates correctly on the next server start; a live instance can also just re-run its Update.
