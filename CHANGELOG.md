@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.111.18 — 2026-07-12
+
+- **Archive extraction shows a persistent progress bar** (user request: big archives looked frozen for minutes). Extraction now runs as a server-side op — a streamed listing pass counts total entries, then unzip/tar verbose output drives a live per-entry counter — polled by the client and rendered through the same machinery as uploads: inline progress row in the file list, upload-button ring, popover entry, with cancel. Remote-host extraction keeps the plain synchronous path. Also fixed skip-existing tolerance for modern tar ("File exists" vs "already exists" — the old sync path mis-reported success as an error too).
+
 ## 2.111.17 — 2026-07-12
 
 - **Dragging a FOLDER onto the file explorer now works** (real report: "dragging a folder from the Mac always fails"). The explorer's OS-drop handler used the flat `dataTransfer.files` list, which represents a dragged folder as one unreadable pseudo-File — the upload always failed. It now recurses the tree via the entries API (`collectDroppedFiles`, shared with the chat drop path, which already did this correctly) and recreates the folder structure at the destination. Server round-trip verified with CJK names, spaces, and deep nesting.

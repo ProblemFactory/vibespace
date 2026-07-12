@@ -656,6 +656,25 @@ router.post('/api/archive/extract-entry', (req, res) => {
 });
 
 // Extract a whole archive into dest
+// ── Async extraction ops with progress (2.111.18) ──
+// POST /api/archive/extract with progress:1 returns {opId} immediately; the
+// extraction runs detached from the request with a per-entry counter (total
+// from a streamed listing pass), polled via GET /api/archive/extract-status.
+// A big archive used to hold the HTTP request for minutes with zero feedback.
+const extractOps = new Map(); // opId → {done,total,status,error,dest,child}
+router.get('/api/archive/extract-status', (req, res) => {
+  const op = extractOps.get(String(req.query.id || ''));
+  if (!op) return res.status(404).json({ error: 'unknown op' });
+  res.json({ done: op.done, total: op.total, status: op.status, error: op.error, dest: op.dest });
+});
+router.delete('/api/archive/extract-status', (req, res) => {
+  const op = extractOps.get(String(req.query.id || ''));
+  if (!op) return res.status(404).json({ error: 'unknown op' });
+  op.status = 'cancelled';
+  try { op.child?.kill('SIGTERM'); } catch {}
+  res.json({ success: true });
+});
+
 router.post('/api/archive/extract', async (req, res) => {
   const { path: ap, dest, overwrite } = req.body || {};
   if (!ap || !dest) return res.status(400).json({ error: 'path and dest required' });
@@ -666,12 +685,54 @@ router.post('/api/archive/extract', async (req, res) => {
   const type = archiveType(fp);
   if (!type) return res.status(400).json({ error: 'unsupported archive type' });
   try { await sfs(req).call('mkdir', { path: destDir }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+  if (req.body.progress) {
+    const opId = 'ex-' + require('crypto').randomBytes(6).toString('hex');
+    const op = { done: 0, total: 0, status: 'listing', error: null, dest: destDir, child: null };
+    extractOps.set(opId, op);
+    res.json({ success: true, opId });
+    const lineCounter = (onLine) => {
+      let rem = '';
+      return (d) => { const parts = (rem + d.toString()).split('\n'); rem = parts.pop(); onLine(parts.filter(Boolean).length); };
+    };
+    const startExtract = () => {
+      if (op.status === 'cancelled') return;
+      op.status = 'running';
+      const args = type === 'zip'
+        ? [overwrite ? '-o' : '-n', fp, '-d', destDir]          // verbose by default: one " inflating:" line per entry
+        : [overwrite ? '-xvf' : '-xvkf', fp, '-C', destDir];    // -v: one line per entry
+      const child = spawn(type === 'zip' ? 'unzip' : 'tar', args);
+      op.child = child;
+      const bump = lineCounter((n) => { op.done = op.total ? Math.min(op.done + n, op.total) : op.done + n; });
+      let errTail = '';
+      child.stdout.on('data', bump);
+      child.stderr.on('data', (d) => { errTail = (errTail + d.toString()).slice(-2000); bump(d); });
+      child.on('error', (e) => { op.status = 'error'; op.error = e.message; });
+      child.on('close', (code) => {
+        if (op.status === 'cancelled') { setTimeout(() => extractOps.delete(opId), 60000); return; }
+        // tar -k exits non-zero on already-existing files (skip semantics);
+        // unzip exit 1 = warnings only — both are success for our purposes.
+        const ok = code === 0 || (type === 'zip' && code === 1) || (type !== 'zip' && !overwrite && /(already |: File )exists/i.test(errTail));
+        if (ok) { op.status = 'done'; if (op.total) op.done = op.total; }
+        else { op.status = 'error'; op.error = (errTail.split('\n').filter(Boolean)[0] || `exit ${code}`); }
+        setTimeout(() => extractOps.delete(opId), 5 * 60 * 1000);
+      });
+    };
+    // total pass: streamed entry count (never buffers the listing)
+    try {
+      const lister = spawn(type === 'zip' ? 'unzip' : 'tar', type === 'zip' ? ['-Z1', fp] : ['-tf', fp]);
+      let cnt = 0;
+      lister.stdout.on('data', lineCounter((n) => { cnt += n; }));
+      lister.on('close', () => { op.total = cnt; startExtract(); });
+      lister.on('error', () => startExtract()); // no total → indeterminate count
+    } catch { startExtract(); }
+    return;
+  }
   let cmd, args;
   if (type === 'zip') { cmd = 'unzip'; args = [overwrite ? '-o' : '-n', '-q', fp, '-d', destDir]; }
   else { cmd = 'tar'; args = [overwrite ? '-xf' : '-xkf', fp, '-C', destDir]; }
   execFile(cmd, args, { timeout: 10 * 60 * 1000, maxBuffer: 8 * 1024 * 1024 }, (err, _o, stderr) => {
     // tar -k exits non-zero when files already existed — treat as success (skip-existing semantics)
-    if (err && !(cmd === 'tar' && !overwrite && /already exists/i.test(stderr || ''))) {
+    if (err && !(cmd === 'tar' && !overwrite && /(already |: File )exists/i.test(stderr || ''))) {
       return res.status(400).json({ error: (stderr || err.message).split('\n')[0] });
     }
     res.json({ success: true, dest: destDir });
