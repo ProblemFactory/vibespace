@@ -120,6 +120,37 @@ export function getHljsLanguages() {
  * Render code with line numbers + syntax highlighting.
  * Returns HTML string for a .chat-code-block element.
  */
+/**
+ * Split highlighted HTML into per-line fragments with BALANCED span tags.
+ * hljs emits spans that CROSS newlines (markdown strong/inline-code, multi-line
+ * strings, comments). A naive split('\n') leaves one line with an unclosed
+ * <span> and a later line with a stray </span> — embedded in the per-line
+ * <span class="chat-code-text">FRAGMENT</span> template, that stray close ends
+ * chat-code-text EARLY and dumps the rest of the line as extra anonymous flex
+ * items in the .chat-code-line flex row; flex:1+min-width:0 then squeezes the
+ * real text span to near-zero and its pre text paints OVER the siblings (the
+ * long-standing "code block lines overlap themselves" bug — probe-measured on
+ * device: an 82-char span at 47.4px). Carry open spans across lines: close
+ * them at each line end, re-open at the next line start.
+ */
+function splitHighlightedLines(highlighted) {
+  const rawLines = highlighted.split('\n');
+  const out = [];
+  const stack = [];
+  const tagRe = /<span\b[^>]*>|<\/span>/g;
+  for (const line of rawLines) {
+    const prefix = stack.join('');
+    let m;
+    tagRe.lastIndex = 0;
+    while ((m = tagRe.exec(line))) {
+      if (m[0] === '</span>') stack.pop();
+      else stack.push(m[0]);
+    }
+    out.push(prefix + line + '</span>'.repeat(stack.length));
+  }
+  return out;
+}
+
 export function renderCodeBlock(code, filePath) {
   const lang = detectHljsLang(filePath);
   const skipHighlight = code.length > 10000;
@@ -129,7 +160,7 @@ export function renderCodeBlock(code, filePath) {
   } catch {
     highlighted = escHtml(code);
   }
-  const lines = highlighted.split('\n');
+  const lines = splitHighlightedLines(highlighted);
   const gutterW = String(lines.length).length;
   let body = '';
   for (let i = 0; i < lines.length; i++) {
@@ -151,7 +182,7 @@ export function rehighlightCodeBlock(blockEl, langId) {
   } catch {
     highlighted = escHtml(code);
   }
-  const lines = highlighted.split('\n');
+  const lines = splitHighlightedLines(highlighted);
   const lineEls = blockEl.querySelectorAll('.chat-code-text');
   for (let i = 0; i < lineEls.length && i < lines.length; i++) {
     lineEls[i].innerHTML = lines[i] || ' ';
