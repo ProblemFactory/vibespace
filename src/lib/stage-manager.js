@@ -20,8 +20,11 @@
 // Persistence: SyncStore 'stage' (versioned diff sync, reconnect recovery):
 //   'slot'              → JSON {gridBounds}
 //   'ws:<backend:sid>'  → JSON [{openSpec, stageBounds}]   (workspace sets)
+//   'grid'              → JSON {rows, cols}                (stage's own grid)
+//   'hero'              → JSON {key, openSpec}             (SHARED active hero)
 //   'lru'               → JSON [sessionKey…]
-// The ACTIVE hero is per-tab (like the per-tab active desktop) and not synced.
+// The active hero is SHARED across clients (2.112.6, user directive — the
+// 挂机/walk-over scenario); which tab is staged at all stays per-tab.
 
 import { getStateSync, showToast } from './utils.js';
 import { t } from './i18n.js';
@@ -83,6 +86,10 @@ export class StageManager {
       if (!this._active) return;
       const g = this.stageGrid();
       if (g) this.app.wm.setGrid(g.rows, g.cols); else this.app.wm.setGrid(null);
+    } else if (key === 'hero') {
+      if (!this._active) return; // not staged — enter() adopts the shared hero
+      clearTimeout(this._heroFollowTimer);
+      this._heroFollowTimer = setTimeout(() => this._followRemoteHero(), 150);
     } else if (key.startsWith('ws:')) {
       // a workspace set was rewritten — if it's OUR active hero, reconcile
       const k = key.slice(3);
@@ -90,6 +97,67 @@ export class StageManager {
         clearTimeout(this._wsReconcileTimer);
         this._wsReconcileTimer = setTimeout(() => this._reconcileWorkspace(k), 400);
       }
+    }
+  }
+
+  /** Shared-view sync (user directive: 挂机 scenario — a device left idle on
+   *  the stage must mirror what the user does on another device, so walking
+   *  over shows the CURRENT workspace). The active hero is SHARED state in
+   *  the stage store ('hero' → {key, openSpec}); staged clients follow
+   *  changes live, and entering the stage adopts the shared hero. This
+   *  supersedes the v1 "hero is per-tab" decision. */
+  _publishHero(win) {
+    if (this._applyingRemoteHero) return;
+    if (!this._heroKey) return; // brand-new session, id not landed — publish next time
+    const payload = JSON.stringify({ key: this._heroKey, openSpec: this._freshOpenSpec(win) || null });
+    const sync = this._sync();
+    if (sync && (sync.get('stage', 'hero') || '') !== payload) sync.set('stage', 'hero', payload);
+  }
+
+  _publishNoHero() {
+    if (this._applyingRemoteHero) return;
+    const sync = this._sync();
+    if (sync && sync.get('stage', 'hero')) sync.set('stage', 'hero', ''); // '' deletes the key
+  }
+
+  /** Apply the shared hero locally (debounced from the remote op / on enter).
+   *  Deferred while the local pointer is down — never yank mid-interaction. */
+  _followRemoteHero() {
+    if (!this._active || !this.enabled) return;
+    if (this.app.layoutManager?._pointerDown) {
+      clearTimeout(this._heroFollowTimer);
+      this._heroFollowTimer = setTimeout(() => this._followRemoteHero(), 900);
+      return;
+    }
+    let rec = null;
+    try { const raw = this._sync()?.get('stage', 'hero'); rec = raw ? JSON.parse(raw) : null; } catch {}
+    if (!rec || !rec.key) {
+      // shared hero cleared (closed on another client) → placeholder here too
+      if (this._heroWinId) {
+        this._applyingRemoteHero = true;
+        try {
+          this._recordActiveWorkspace();
+          this._deactivateHero();
+          this._ensurePlaceholder();
+          this.app.desktopManager?._renderSwitcher();
+        } finally { this._applyingRemoteHero = false; }
+      }
+      return;
+    }
+    if (rec.key === this._heroKey) return; // already showing it
+    let target = null;
+    for (const [, w] of this.app.wm.windows) {
+      const sid = w._openSpec?.backendSessionId;
+      if (sid && `${w._openSpec.backend || 'claude'}:${sid}` === rec.key) { target = w; break; }
+    }
+    this._applyingRemoteHero = true;
+    try {
+      if (target) this.materialize(target);
+      else if (rec.openSpec) this.app.replayOpenSpec(rec.openSpec, 'stage-' + Math.random().toString(36).slice(2, 9));
+    } finally {
+      // materialize is serialized/async — hold the flag briefly so the inner
+      // publish sees it (a same-value publish is a no-op anyway).
+      setTimeout(() => { this._applyingRemoteHero = false; }, 800);
     }
   }
 
@@ -207,6 +275,14 @@ export class StageManager {
         this._borrowHero(hero);
         const ph = this._placeholderId && this.app.wm.windows.get(this._placeholderId);
         if (ph) this._hideStage(ph);
+      }
+      // Shared-view sync: adopt the shared hero if one is published (the
+      // walk-over-to-the-idle-device case — the OTHER device's operations
+      // win); publish ours only when nothing is shared yet.
+      if (this._sync()?.get('stage', 'hero')) {
+        setTimeout(() => this._followRemoteHero(), 100);
+      } else if (hero) {
+        this._publishHero(hero);
       }
       dm._renderSwitcher();
       this.app.updateTaskbar();
@@ -432,6 +508,7 @@ export class StageManager {
     wm.focusWindow(win.id, { _stageBypass: true });
     // Restore this session's recorded workspace (aux windows).
     this._restoreWorkspace(this._heroKey || this._sessionKeyFor(win));
+    this._publishHero(win); // shared-view sync: other staged clients follow
     this._enforceLru();
     this.app.desktopManager?._renderSwitcher();
     this.app.updateTaskbar();
@@ -536,6 +613,7 @@ export class StageManager {
       }
       this._heroWinId = null;
       this._heroKey = null;
+      this._publishNoHero(); // mirrored intent: placeholder everywhere
       if (this._active) this._ensurePlaceholder();
       return;
     }
