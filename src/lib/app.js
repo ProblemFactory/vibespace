@@ -923,8 +923,62 @@ class App {
     body.querySelector('[data-act=cancel]').onclick = () => close();
     body.querySelector('[data-act=go]').onclick = () => {
       close();
-      this.openShellTerminal(this._repoDir, { initialCommand: 'bash scripts/update.sh' });
+      this._runSelfUpdate();
     };
+  }
+
+  // UI-driven self-update (user directive: no more "terminal opens, runs for
+  // a while, then just sits there"). The update runs as a detached server op;
+  // this dialog streams its log, survives the service restart by polling
+  // /api/version, and reloads the page once the new version answers.
+  async _runSelfUpdate() {
+    const { body } = createModalShell({ id: 'self-update-dialog', title: t('Updating VibeSpace') });
+    body.innerHTML = `
+      <div class="selfupd-phase"><span class="upload-active-spinner"></span><span class="su-msg">${escHtml(t('Starting update…'))}</span></div>
+      <pre class="selfupd-log"></pre>
+      <div class="mounts-field-hint">${escHtml(t('Sessions keep running (dtach) — the page reloads by itself when the new version is up.'))}</div>`;
+    const phaseEl = body.querySelector('.su-msg');
+    const spinEl = body.querySelector('.upload-active-spinner');
+    const logEl = body.querySelector('.selfupd-log');
+    const setPhase = (msg, cls) => { phaseEl.textContent = msg; if (cls) { phaseEl.className = 'su-msg ' + cls; spinEl?.remove(); } };
+    const startVersion = (await fetchJson('/api/version'))?.version || null;
+    const r = await fetchJson('/api/self-update', { method: 'POST' });
+    if (!r?.success) { setPhase(r?.error || t('Failed'), 'ob-bad'); return; }
+    const t0 = Date.now();
+    let done = false;
+    const tick = async () => {
+      if (done || !body.isConnected) return;
+      const st = await fetchJson('/api/self-update/status');
+      if (st?.log) {
+        logEl.textContent = st.log.replace(/__UPDATE_EXIT:\d+\s*$/, '');
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+      const v = await fetchJson('/api/version');
+      // New version answering = update landed; reload onto the new bundle.
+      if (v?.version && startVersion && v.version !== startVersion) {
+        done = true;
+        setPhase(t('Updated to v{v} — reloading…', { v: v.version }), 'ob-ok');
+        setTimeout(() => location.reload(), 1500);
+        return;
+      }
+      const exitM = /__UPDATE_EXIT:(\d+)/.exec(st?.log || '');
+      if (exitM && exitM[1] !== '0') {
+        done = true;
+        setPhase(t('Update failed (exit {code}) — see the log below', { code: exitM[1] }), 'ob-bad');
+        return;
+      }
+      if (exitM && exitM[1] === '0' && v?.version === startVersion && /already up to date/i.test(st?.log || '')) {
+        // Nothing to pull — the script still restarts the service; wait a
+        // moment for it to come back, then confirm and close out.
+        done = true;
+        setPhase(t('Already up to date (v{v})', { v: startVersion }), 'ob-ok');
+        return;
+      }
+      if (!st && !v) setPhase(t('Restarting the service…'));
+      if (Date.now() - t0 > 10 * 60 * 1000) { done = true; setPhase(t('Timed out — check the log below or data/update.log on the server'), 'ob-bad'); return; }
+      setTimeout(tick, 1200);
+    };
+    tick();
   }
 
   /** Is semver a newer than b? (plain x.y.z compare) */

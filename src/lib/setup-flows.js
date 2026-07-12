@@ -1,4 +1,5 @@
 import { escHtml, showToast, showConfirmDialog, fetchJson, createModalShell } from './utils.js';
+import { TerminalSession } from './terminal.js';
 import { t, setLang, getLangPref } from './i18n.js';
 import { THEMES, BUILTIN_THEMES } from './themes.js';
 
@@ -10,6 +11,65 @@ import { THEMES, BUILTIN_THEMES } from './themes.js';
  */
 export function installSetupFlows(App) {
   Object.assign(App.prototype, {
+
+    /**
+     * Guided CLI action in a MODAL with an EMBEDDED terminal (user directive:
+     * fixed flows must not dump people into a detached terminal window that
+     * never comes back). The ephemeral shell session runs INSIDE the dialog;
+     * `checkDone` is polled every 3s and on success the modal shows ✓ and
+     * closes itself — the caller resumes (onboarding stays on screen the
+     * whole time; the modal z-index sits above the wizard overlay).
+     * Returns true when checkDone passed, false on cancel.
+     */
+    runGuidedCli({ title, cmd, hint, checkDone }) {
+      return new Promise((resolve) => {
+        const { body, close } = createModalShell({ id: 'guided-cli-dialog', title, bodyClass: 'guided-cli-body' });
+        body.innerHTML = `
+          <div class="guided-cli-status"><span class="upload-active-spinner"></span><span class="gc-msg">${escHtml(t('Follow the prompts in the terminal below — this closes automatically when done.'))}</span></div>
+          ${hint ? `<div class="mounts-field-hint">${escHtml(hint)}</div>` : ''}
+          <div class="guided-cli-term"></div>`;
+        const statusEl = body.querySelector('.guided-cli-status');
+        const termBox = body.querySelector('.guided-cli-term');
+        let term = null, sid = null, poll = null, settled = false;
+        const cleanup = (killSession) => {
+          clearInterval(poll);
+          try { term?.dispose(); } catch {}
+          if (sid && killSession) { try { this.ws.send({ type: 'kill', sessionId: sid }); } catch {} }
+        };
+        const finish = (ok) => {
+          if (settled) return; settled = true;
+          if (ok) {
+            statusEl.innerHTML = `<span class="ob-ok">✓ ${escHtml(t('Done'))}</span>`;
+            setTimeout(() => { cleanup(true); close(); resolve(true); }, 1000);
+          } else { cleanup(true); close(); resolve(false); }
+        };
+        // Modal close (✕ / Esc) = cancel — make sure the helper session dies.
+        const obs = new MutationObserver(() => {
+          if (!body.isConnected) { obs.disconnect(); if (!settled) { settled = true; cleanup(true); resolve(false); } }
+        });
+        obs.observe(document.body, { childList: true, subtree: true });
+        // Ephemeral shell session, attached to the in-dialog container via a
+        // synthetic winInfo (TerminalSession only touches content/element/
+        // titleSpan/onResize on it).
+        const reqId = 'gc-' + Date.now().toString(36);
+        const onCreated = (msg) => {
+          if (msg.type === 'error' && msg.reqId === reqId) { this.ws.offGlobal(onCreated); statusEl.innerHTML = `<span class="ob-bad">${escHtml(msg.error || t('Failed'))}</span>`; return; }
+          if (msg.type !== 'created' || msg.reqId !== reqId) return;
+          this.ws.offGlobal(onCreated);
+          if (!body.isConnected) { try { this.ws.send({ type: 'kill', sessionId: msg.sessionId }); } catch {} return; }
+          sid = msg.sessionId;
+          const fakeWin = { id: 'guided-' + reqId, content: termBox, element: termBox, titleSpan: document.createElement('span') };
+          term = new TerminalSession(fakeWin, this.ws, sid, this.themeManager, () => {}, {}, this.settings);
+          setTimeout(() => { try { this.ws.send({ type: 'input', sessionId: sid, data: cmd + '\r' }); } catch {} }, 1200);
+          poll = setInterval(async () => {
+            try { if (await checkDone()) finish(true); } catch {}
+          }, 3000);
+        };
+        this.ws.onGlobal(onCreated);
+        this.ws.send({ type: 'create', backend: 'shell', mode: 'terminal', name: cmd.split(' ')[0], reqId, ephemeral: true });
+      });
+    },
+
     _modal(title, { wide = false } = {}) {
     const { overlay, body, close } = createModalShell({
       id: 'cfg-dialog-overlay', title, bodyClass: 'cfg-dialog-body',
@@ -204,8 +264,8 @@ export function installSetupFlows(App) {
               : `<span class="ob-warn">${t('installed, not logged in')}</span>`;
             // Not installed → one-click install; installed but logged out →
             // log in. Both just run the command in a visible shell terminal.
-            const btn = !b.installed ? `<button class="welcome-btn ob-login" data-cmd="${escHtml(installCmd)}" title="${escHtml(installCmd)}">${t('Install')}</button>`
-              : b.loggedIn ? '' : `<button class="welcome-btn ob-login" data-cmd="${escHtml(loginCmd)}">${t('Log in')}</button>`;
+            const btn = !b.installed ? `<button class="welcome-btn ob-login" data-key="${key}" data-kind="install" data-label="${escHtml(label)}" data-cmd="${escHtml(installCmd)}" title="${escHtml(installCmd)}">${t('Install')}</button>`
+              : b.loggedIn ? '' : `<button class="welcome-btn ob-login" data-key="${key}" data-kind="login" data-label="${escHtml(label)}" data-cmd="${escHtml(loginCmd)}">${t('Log in')}</button>`;
             return `<div class="ob-backend"><div><b>${label}</b> ${b.version ? `<span class="ob-ver">${escHtml(b.version)}</span>` : ''}</div><div>${state} ${btn}</div></div>`;
           };
           const el = content.querySelector('#ob-backends');
@@ -214,7 +274,22 @@ export function installSetupFlows(App) {
             + card('codex', 'Codex', 'codex login --device-auth', 'npm install -g @openai/codex@latest')
             + `<button class="welcome-btn welcome-btn-secondary ob-recheck">${t('Re-check')}</button>`;
           el.querySelectorAll('.ob-login').forEach(btn => {
-            btn.onclick = () => pauseFor(() => this.openShellTerminal(undefined, { initialCommand: btn.dataset.cmd }));
+            // Embedded guided modal (stays ON the wizard; auto-detects
+            // completion via /api/backend-status and refreshes the cards) —
+            // replaced the old pause-the-wizard + detached-terminal flow.
+            btn.onclick = async () => {
+              const key = btn.dataset.key, isInstall = btn.dataset.kind === 'install', label = btn.dataset.label;
+              await this.runGuidedCli({
+                title: isInstall ? t('Install {name}', { name: label }) : t('Log in to {name}', { name: label }),
+                cmd: btn.dataset.cmd,
+                checkDone: async () => {
+                  const st2 = await fetchJson('/api/backend-status?t=' + Date.now());
+                  const bb = st2?.[key] || {};
+                  return isInstall ? !!bb.installed : !!bb.loggedIn;
+                },
+              });
+              refresh();
+            };
           });
           el.querySelector('.ob-recheck').onclick = refresh;
         };

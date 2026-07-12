@@ -2877,3 +2877,14 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .ut-viewer-md code { background: var(--bg-input); padding: 0 4px; border-radius: 3px; font-size: 11px; }
 .ut-viewer-md pre { background: var(--bg-input); padding: 8px; border-radius: var(--radius-sm); overflow-x: auto; }
 .ut-viewer-md ul, .ut-viewer-md ol { padding-left: 18px; margin: 0 0 8px; }
+
+/* ── Guided CLI modal (embedded login/install terminal) + self-update dialog ── */
+.guided-cli-body { min-width: min(720px, 92vw); }
+.guided-cli-status { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
+.guided-cli-status .ob-ok { font-size: 13px; font-weight: 600; }
+.guided-cli-term { height: 360px; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; background: #000; }
+.guided-cli-term .terminal-container { width: 100%; height: 100%; }
+.selfupd-phase { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 8px; }
+.selfupd-phase .ob-ok { color: var(--green, #3fb950); font-weight: 600; }
+.selfupd-phase .ob-bad { color: var(--red, #e55); font-weight: 600; }
+.selfupd-log { max-height: 280px; min-width: min(640px, 90vw); overflow: auto; font-family: monospace; font-size: 11px; line-height: 1.45; background: var(--bg-root); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; white-space: pre-wrap; word-break: break-all; color: var(--text-secondary); }

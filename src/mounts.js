@@ -762,8 +762,10 @@ class MountManager {
     if (this._kindOf(m) === 'credential' && this._childrenOf(id).length) {
       throw new Error('This credential still has mount points under it — remove those first.');
     }
+    const mpRemoved = this.pathOf(m);
     if (this.isMounted(m)) await this.unmount(id);
     this._state.mounts = this._state.mounts.filter(x => x.id !== id);
+    setTimeout(() => this._cleanupEmptyMountpoint(mpRemoved), 1500);
     this._errors.delete(id);
     this._reconnects?.delete(id);
     // async — the cache can be up to vfsCacheMaxSizeGB; a sync rm would hold
@@ -799,7 +801,11 @@ class MountManager {
     if (patch.customPath !== undefined) {
       const cp = String(patch.customPath || '').trim();
       if (cp && !path.isAbsolute(cp)) throw new Error('Custom path must be absolute');
+      const oldMp = this.pathOf(m);
       m.customPath = cp || null;
+      // Mountpoint moved → the old (already unmounted above) directory is a
+      // leftover husk; sweep it if empty.
+      if (this.pathOf(m) !== oldMp) setTimeout(() => this._cleanupEmptyMountpoint(oldMp), 1500);
     }
     // Env-provisioned storage: the CONNECTION is deployment-owned (endpoint/
     // bucket/keys come from env and a change re-imports) — name, mountpoint
@@ -1458,6 +1464,17 @@ class MountManager {
     return process.env.VIBESPACE_VFS_CACHE_DIR || path.join(this.dataDir, 'vfs-cache');
   }
 
+  /** Remove a LEFTOVER mountpoint directory — only when it exists, is not a
+   *  live mount, and is EMPTY (rmdir refuses non-empty; never recursive).
+   *  User report: unmount / mountpoint change left empty husks behind. */
+  _cleanupEmptyMountpoint(mp) {
+    try {
+      if (!mp || !path.isAbsolute(mp)) return;
+      if (this._state.mounts.some((x) => this.pathOf(x) === mp && this.isMounted(x))) return;
+      fs.rmdirSync(mp); // throws (swallowed) unless empty
+    } catch {}
+  }
+
   unmount(id, opts = {}) {
     const m = this._get(id);
     const mp = this.pathOf(m);
@@ -1468,17 +1485,25 @@ class MountManager {
       this._reconnects?.delete(id);
       this._save();
     }
+    const finish = (ok) => {
+      // Lazy unmounts detach asynchronously — give the kernel a beat before
+      // the empty-dir sweep. Internal teardowns keep the dir (auto-remount
+      // re-creates it anyway, but skipping avoids churn).
+      if (ok && !opts.internal) setTimeout(() => this._cleanupEmptyMountpoint(mp), 1500);
+      this._notify();
+      return ok;
+    };
     if (m.type === 'cephfs') {
       return new Promise((resolve) => {
-        execFile('sudo', ['-n', 'umount', '-l', mp], () => { this._notify(); resolve(!this.isMounted(m)); });
+        execFile('sudo', ['-n', 'umount', '-l', mp], () => resolve(finish(!this.isMounted(m))));
       });
     }
     return new Promise((resolve) => {
       execFile('fusermount3', ['-uz', mp], (err) => {
-        if (!err) { this._notify(); return resolve(true); }
+        if (!err) return resolve(finish(true));
         execFile('fusermount', ['-uz', mp], (err2) => {
-          if (!err2) { this._notify(); return resolve(true); }
-          execFile('umount', ['-l', mp], () => { this._notify(); resolve(!this.isMounted(m)); });
+          if (!err2) return resolve(finish(true));
+          execFile('umount', ['-l', mp], () => resolve(finish(!this.isMounted(m))));
         });
       });
     });

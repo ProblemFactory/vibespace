@@ -88,5 +88,6 @@ async function fileItem(text) {
   if (!text) { console.error(USAGE); process.exit(1); }
   const { item } = await call({ add: { text, detail, urgency } });
   console.log((item.existing ? 'already filed (refreshed): ' : 'filed for the user: ') + item.text + '  (' + item.id + ')');
+  console.log('REMINDER: the inbox is only a NOTIFICATION MIRROR — now ALSO write the full question/content (options + your recommendation) in your CHAT REPLY to the user. Do not end the turn with the inbox as the only copy.');
 }
 main().catch((e) => { console.error('vibespace-ask:', e.message); process.exit(1); });
