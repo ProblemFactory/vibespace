@@ -64,6 +64,14 @@ class Sidebar {
     // Task store (tasks ⊃ groups — the board data, from /api/tasks)
     this._initTasks();
 
+    // Card-level settings are read at CARD BUILD time — without a re-render
+    // kick, changing them only took effect on the next digest change (users
+    // read that as "needs a page refresh"). _render() preserves scroll.
+    for (const k of ['sessionCard.clickBehavior', 'sessionCard.findMode', 'sessionCard.clickToCopy',
+      'sessionCard.visibleFields', 'sessionCard.detailTruncation']) {
+      app.settings?.on(k, () => this._render());
+    }
+
     // Listen for user-state-updated WebSocket messages from other clients
     app.ws.onGlobal((msg) => {
       if (msg.type === 'user-state-updated' && msg.state) {

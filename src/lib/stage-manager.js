@@ -52,6 +52,15 @@ export class StageManager {
   async init() {
     const sync = getStateSync();
     if (sync) await sync.init('stage');
+    // Live-apply the settings toggle: the switcher's stage preview appears/
+    // disappears immediately (its digest includes stage.enabled — it just
+    // needs a render kick); turning the feature OFF while actually staged
+    // returns to the previous desktop first.
+    this.app.settings?.on('desktop.dynamicEnabled', () => {
+      if (!this.enabled && this._active) this.leave();
+      else this.app.desktopManager?._renderSwitcher();
+    });
+    setTimeout(() => this.healStray(), 3000); // past layout restore
   }
 
   /** Lazy belt-and-braces: every read/write path goes through this — if the
@@ -83,6 +92,26 @@ export class StageManager {
     } }));
   }
 
+  // ── Stage grid (the stage's own MxN snap config) ──
+
+  stageGrid() {
+    try {
+      const g = JSON.parse(this._sync()?.get('stage', 'grid') || 'null');
+      if (g && g.rows > 0 && g.cols > 0) return g;
+    } catch {}
+    return null;
+  }
+
+  /** Called from the layout autosave gate while staged (desktop autosave is
+   *  suppressed then — this is the stage's own persistence for the one piece
+   *  of stage-level layout state outside the workspace records: the grid). */
+  onStageLayoutChanged() {
+    const g = this.app.wm.grid;
+    const next = JSON.stringify(g ? { rows: g.rows, cols: g.cols } : null);
+    const sync = this._sync();
+    if (sync && (sync.get('stage', 'grid') || 'null') !== next) sync.set('stage', 'grid', next);
+  }
+
   // ── Enter / leave the stage view ──
 
   async enter() {
@@ -103,12 +132,29 @@ export class StageManager {
       // it are tagged STAGE_ID; desktop autosave is SUPPRESSED while active
       // (layout.js gate) — the stage persists through its own SyncStore.
       dm._activeId = STAGE_ID;
-      this.app.wm.setGrid(null);
+      const g = this.stageGrid(); // the stage's own persisted grid config
+      if (g) this.app.wm.setGrid(g.rows, g.cols); else this.app.wm.setGrid(null);
+      this.healStray();
       this._ensurePlaceholder();
       // Re-show this tab's live hero workspace if one was active before a
       // temporary leave (windows tagged _hiddenByStage).
       for (const [, win] of this.app.wm.windows) {
         if (win._hiddenByStage) this._showWin(win);
+      }
+      // Re-borrow the live hero: leave() handed it back to its home desktop
+      // (home geometry, desktop-owned hidden flag) — take it onto the slot
+      // again so the stage resumes exactly where it left off.
+      const hero = this._heroWinId && this.app.wm.windows.get(this._heroWinId);
+      if (hero) {
+        if (!hero._stageHomeBounds && hero.gridBounds) hero._stageHomeBounds = { ...hero.gridBounds };
+        hero._onStage = true;
+        hero._isStageHero = true;
+        hero.gridBounds = this.slotBounds();
+        this.app.wm._applyGridBounds(hero);
+        hero._hiddenByDesktop = false;
+        this._showWin(hero);
+        const ph = this._placeholderId && this.app.wm.windows.get(this._placeholderId);
+        if (ph) this._hideStage(ph);
       }
       dm._renderSwitcher();
       this.app.updateTaskbar();
@@ -125,10 +171,27 @@ export class StageManager {
     const dm = this.app.desktopManager;
     const target = targetDesktopId || this._prevDesktopId || dm.desktops[0]?.id;
     this._active = false;
-    // Hide everything stage-visible (placeholder, hero, aux) with the STAGE
+    // Hand the hero back to the desktop system at its HOME geometry (view
+    // model: the slot geometry is stage-only — real report: a hero returned
+    // to its normal desktop at the stage slot size). _heroWinId stays set so
+    // a re-enter re-borrows it. Heroes created ON the stage (_desktopId ===
+    // STAGE_ID) have no home desktop and stay stage-hidden instead.
+    const hero = this._heroWinId && this.app.wm.windows.get(this._heroWinId);
+    if (hero) {
+      if (hero._stageHomeBounds) { hero.gridBounds = { ...hero._stageHomeBounds }; delete hero._stageHomeBounds; }
+      hero._isStageHero = false; // off-stage moves edit HOME bounds, not the slot
+      hero._onStage = false;
+      if (hero._desktopId !== STAGE_ID) {
+        hero._hiddenByStage = false;
+        dm._hideWin(hero); // desktop-owned again; the target loop below re-shows it if home === target
+      } else {
+        this._hideStage(hero);
+      }
+    }
+    // Hide everything else stage-visible (placeholder, aux) with the STAGE
     // flag so a re-enter can restore them instantly.
     for (const [, win] of this.app.wm.windows) {
-      if (this._isStageVisible(win)) this._hideStage(win);
+      if (win !== hero && this._isStageVisible(win)) this._hideStage(win);
     }
     // Restore the target desktop exactly like switchTo steps 4-7.
     dm._activeId = target;
@@ -202,6 +265,28 @@ export class StageManager {
 
   // ── Materialization (hero switching) ──
 
+  /** Stage↔desktop window drags are blocked BOTH directions (user directive
+   *  2.112.4): stage-view windows (placeholder/hero/aux/stage-created) never
+   *  move to a normal desktop, and normal windows never drop onto the stage
+   *  preview. Real report: a dragged placeholder escaped onto a desktop. */
+  dragToDesktopBlocked(win) {
+    if (!win) return false;
+    return win.type === 'stage-placeholder' || !!win._isStagePlaceholder
+      || !!win._onStage || win._desktopId === STAGE_ID || this._boundAux.has(win.id);
+  }
+
+  /** Re-capture a placeholder that leaked onto a normal desktop (pre-guard
+   *  versions let drag-to-preview retag it — real report). */
+  healStray() {
+    for (const [, win] of this.app.wm.windows) {
+      if ((win.type === 'stage-placeholder' || win._isStagePlaceholder) && win._desktopId !== STAGE_ID) {
+        win._desktopId = STAGE_ID;
+        win._hiddenByDesktop = false;
+        if (!this._active) this._hideStage(win);
+      }
+    }
+  }
+
   /** Called from wm.focusWindow — true when the focus is being handled as a
    *  stage materialization (caller should stop its default behavior). */
   shouldIntercept(win) {
@@ -250,7 +335,8 @@ export class StageManager {
     this._heroKey = this._sessionKeyFor(win);
     win.gridBounds = this.slotBounds();
     wm._applyGridBounds(win);
-    this._showWin(win);
+    win._hiddenByDesktop = false; // stage owns it now — a stale desktop-hidden
+    this._showWin(win);           // flag would exclude it from _isStageVisible
     // Raise without re-entering the interception path.
     wm.focusWindow(win.id, { _stageBypass: true });
     // Restore this session's recorded workspace (aux windows).
@@ -299,10 +385,16 @@ export class StageManager {
       if (hero._stageHomeBounds) { hero.gridBounds = { ...hero._stageHomeBounds }; delete hero._stageHomeBounds; }
       hero._isStageHero = false;
       hero._onStage = false;
-      this._hideStage(hero);
       if (hero._desktopId !== STAGE_ID) {
-        // it also lives on a home desktop — geometry there must re-apply when
-        // that desktop shows it again (handled by _reflowWindows on switch).
+        // It also lives on a home desktop — hand it back to the desktop
+        // system (hidden: its desktop isn't active while we're staged) so a
+        // later switchTo/leave to that desktop shows it at HOME geometry.
+        // A plain _hideStage left it invisible there (_hiddenByStage isn't a
+        // flag the desktop show loops clear).
+        hero._hiddenByStage = false;
+        this.app.desktopManager._hideWin(hero);
+      } else {
+        this._hideStage(hero);
       }
     }
     for (const [winId] of this._boundAux) {
@@ -546,15 +638,6 @@ export class StageManager {
       }
       if (Number.isFinite(minZ)) hero.element.style.zIndex = String(minZ - 1);
     }
-  }
-
-  /** Drag-out to a normal desktop preview = unbind (dm.moveWindowToDesktop hook). */
-  unbind(winId) {
-    const owner = this._boundAux.get(winId);
-    this._boundAux.delete(winId);
-    const win = this.app.wm.windows.get(winId);
-    if (win) { win._stageTransient = false; this._showWin(win); }
-    if (owner && owner !== '__pending__' && this._heroKey === owner) this._recordActiveWorkspace();
   }
 
   _sessionKeyFor(win) {
