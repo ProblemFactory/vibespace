@@ -205,8 +205,10 @@ class TaskGroupManager {
     if (!this._sigCache) this._sigCache = new Map();
     const hit = this._sigCache.get(dir);
     if (hit && Date.now() - hit.at < 4000) return hit.sig;
+    // Path is escaped (% then |) so renderContextDiff can parse entries back
+    // out of the joined string — a raw '|' in a filename would shear the entry.
     const sig = this._listContextFiles(dir, 200)
-      .map((f) => `${f.path}:${f.size}:${Math.round(f.mtime || 0)}`)
+      .map((f) => `${f.path.replace(/%/g, '%25').replace(/\|/g, '%7C')}:${f.size}:${Math.round(f.mtime || 0)}`)
       .join('|');
     this._sigCache.set(dir, { sig, at: Date.now() });
     return sig;
@@ -336,6 +338,157 @@ class TaskGroupManager {
     }
     parts.push(`</vibespace-task-context>`);
     return parts.join('\n');
+  }
+
+  // ── Diff-based UPDATE injection (2.113.0, user request) ──
+  // A mid-session group change used to re-inject the ENTIRE group context
+  // (identity + checklist + tools teaching + folder index + activity log) —
+  // several KB per member agent per change, mostly repeating what the agent
+  // already knows. Instead agent-routes keeps a compact per-session SNAPSHOT
+  // of what each group looked like at last delivery (next to _groupSeenAt)
+  // and updates deliver only the DELTA via renderContextDiff. Full context
+  // still goes out on first contact / after a restart (snapshot lost with the
+  // in-memory session — same accepted trade-off as _groupSeenAt).
+
+  _h(s) { return crypto.createHash('sha1').update(String(s)).digest('hex').slice(0, 12); }
+
+  // What the injected context RENDERS, compactly — the diff can only ever be
+  // as good as this coverage, so it mirrors exactly the fields that bump
+  // contentUpdatedAt (title/objective/plan/contextDir) + progress. The
+  // contextDir FILE state is deliberately absent: agent-routes already keeps
+  // the folder signature separately (_ctxSig) and passes old/new to the diff.
+  snapshotForDiff(id) {
+    const t = this.get(id);
+    const prog = t.progress || [];
+    return {
+      title: t.title,
+      objHash: this._h(t.objective || ''),
+      contextDir: t.contextDir || null,
+      plan: (t.plan || []).map((p) => ({ text: p.text, done: !!p.done, d: p.detail ? this._h(p.detail) : '' })),
+      // New activity = entries with at > this. Two writes inside the SAME ms
+      // split by an injection in between could drop one line from a diff —
+      // accepted (unreachable in practice; recoverable via show --full).
+      lastProgressAt: prog.length ? prog[prog.length - 1].at : 0,
+    };
+  }
+
+  // Render the CHANGES between snap (what the session last saw) and the
+  // group's current state. Returns '' when nothing the injection renders
+  // actually changed (e.g. an objective re-saved with identical text — the
+  // old behavior re-injected the whole group for that). Order mirrors
+  // renderContext (identity → objective → checklist → folder → activity LAST)
+  // so the tail-first truncation drops the safest section first.
+  renderContextDiff(id, snap, { multi = false, ctxBase = null, oldSig = '', newSig = '' } = {}) {
+    const t = this.get(id);
+    if (!snap || typeof snap !== 'object' || !Array.isArray(snap.plan)) return null; // unusable snapshot → caller falls back to full context
+    // contextDir designated/changed mid-session is STRUCTURAL, not a delta —
+    // the agent needs the file index + shared-folder conventions the full
+    // context teaches (a one-line "folder is now X" left pre-existing files
+    // permanently invisible; review-caught). Fall back to full delivery.
+    if ((snap.contextDir || null) !== (t.contextDir || null)) return null;
+    const gid = multi ? `--group ${t.id} ` : '';
+    const ch = [];
+    if (snap.title !== t.title) ch.push(`- Renamed: "${snap.title}" → "${t.title}"`);
+    if (this._h(t.objective || '') !== snap.objHash) {
+      const obj = (t.objective || '').trim();
+      if (!obj) ch.push('- Objective CLEARED');
+      else {
+        ch.push('- Objective UPDATED to:');
+        let room = 1800, cut = false; // bounded so a 20KB objective can't evict the sections below
+        for (const l of obj.split('\n')) {
+          const len = Buffer.byteLength(l, 'utf-8') + 4;
+          if (len > room) { if (room > 200) ch.push('  > ' + l.slice(0, Math.floor(room / 2)) + '…'); cut = true; break; }
+          ch.push('  > ' + l); room -= len;
+        }
+        if (cut) ch.push(`  > … _(truncated — \`vibespace-task ${gid}show --full\` for the rest)_`);
+      }
+    }
+    // Checklist: items have no id, so match by text — OCCURRENCE-INDEXED (the
+    // k-th "deploy" pairs with the k-th "deploy"; duplicate texts are legal,
+    // plan-add never dedups). A naive first-match Map made a check on the 2nd
+    // duplicate silently vanish OR emit a phantom CHECKED line in every later
+    // diff forever (review-caught, reproduced). An edited text still reads as
+    // REMOVED + NEW — honest enough.
+    const occKey = (counter, text) => { const n = counter.get(text) || 0; counter.set(text, n + 1); return `${n} ${text}`; };
+    const occOld = new Map();
+    { const c = new Map(); for (const p of snap.plan) occOld.set(occKey(c, p.text), p); }
+    const matchedOld = new Set();
+    const planCh = [];
+    { const c = new Map();
+      for (const p of t.plan || []) {
+        const k = occKey(c, p.text);
+        const o = occOld.get(k);
+        if (!o) { planCh.push(`- Checklist NEW: [${p.done ? 'x' : ' '}] ${p.text}${p.detail ? ' †' : ''}${p.addedBy ? `  _(added by ${p.addedBy})_` : ''}`); continue; }
+        matchedOld.add(k);
+        if (!o.done && p.done) planCh.push(`- Checklist CHECKED: ${p.text}${p.by ? `  _(by ${p.by})_` : ''}`);
+        else if (o.done && !p.done) planCh.push(`- Checklist UNCHECKED: ${p.text}`);
+        if ((p.detail ? this._h(p.detail) : '') !== (o.d || '')) planCh.push(`- Checklist item detail updated: ${p.text}  _(† \`vibespace-task ${gid}show --full\`)_`);
+      }
+    }
+    for (const [k, o] of occOld) if (!matchedOld.has(k)) planCh.push(`- Checklist REMOVED: ${o.text}`);
+    if (planCh.length > 20) {
+      const extra = planCh.length - 20;
+      planCh.length = 20;
+      planCh.push(`- … +${extra} more checklist changes  _(\`vibespace-task ${gid}show --full\`)_`);
+    }
+    ch.push(...planCh);
+    if (t.contextDir && oldSig !== newSig) {
+      // Signature format is path:size:mtime joined by | (contextDirSignature;
+      // path has % and | escaped there) — peel size:mtime off the END so paths
+      // containing ':' stay intact, then unescape the path.
+      const parseSig = (s) => {
+        const m = new Map();
+        for (const e of String(s || '').split('|')) {
+          if (!e) continue;
+          const i = e.lastIndexOf(':'); if (i < 0) continue;
+          const j = e.lastIndexOf(':', i - 1); if (j < 0) continue;
+          m.set(e.slice(0, j).replace(/%7C/g, '|').replace(/%25/g, '%'), e.slice(j));
+        }
+        return m;
+      };
+      const a = parseSig(oldSig), b = parseSig(newSig);
+      const base = ctxBase || t.contextDir;
+      const list = (arr) => arr.slice(0, 8).map((p) => `${base}/${p}`).join(', ') + (arr.length > 8 ? ` (+${arr.length - 8} more)` : '');
+      const upd = [...b.keys()].filter((k) => a.has(k) && a.get(k) !== b.get(k));
+      const add = [...b.keys()].filter((k) => !a.has(k));
+      const del = [...a.keys()].filter((k) => !b.has(k));
+      const bits = [];
+      if (upd.length) bits.push(`updated ${list(upd)}`);
+      if (add.length) bits.push(`new ${list(add)}`);
+      if (del.length) bits.push(`removed ${list(del)}`);
+      if (bits.length) ch.push(`- Shared context folder files — ${bits.join('; ')}`);
+    }
+    const fresh = (t.progress || []).filter((p) => p.at > (snap.lastProgressAt || 0));
+    if (fresh.length) {
+      const picked = [];
+      let room = 2200;
+      for (let i = fresh.length - 1; i >= 0 && picked.length < 8; i--) {
+        const p = fresh[i];
+        const line = `  - ${this._tsShort(p.at)} ${p.note}${p.detail ? ' †' : ''}${p.session ? ` _(${p.session})_` : ''}`;
+        const len = Buffer.byteLength(line, 'utf-8') + 1;
+        if (picked.length >= 1 && len > room) break;
+        picked.unshift(line); room -= len;
+      }
+      ch.push(`- New activity${fresh.length > picked.length ? ` _(last ${picked.length} of ${fresh.length} new)_` : ` (${fresh.length})`}:${picked.some((l) => l.includes(' †')) ? '  _(† = has detail)_' : ''}`);
+      ch.push(...picked);
+    }
+    if (!ch.length) return '';
+    const head = [
+      '<vibespace-task-update>',
+      // TASK.md pointer is LOCAL-only: the remote ctx rsync excludes
+      // .vibespace/, so <ctxBase>/.vibespace/TASK.md never exists on a host.
+      `Task Group "${t.title}" (${t.id}) changed since your last update — DELTAS ONLY below; everything else you already know still stands. Full current state: \`vibespace-task ${gid}show --full\`${t.contextDir && !ctxBase ? ` (or \`${t.contextDir}/.vibespace/TASK.md\`)` : ''}.`,
+      '',
+    ];
+    // Hard cap ~5KB — drop change lines from the END (activity sits last = the
+    // safest to lose; the full-state pointer in the header always survives).
+    let dropped = 0;
+    let lines = [...head, ...ch, '</vibespace-task-update>'];
+    while (Buffer.byteLength(lines.join('\n'), 'utf-8') > 5000 && ch.length > 1) {
+      ch.pop(); dropped++;
+      lines = [...head, ...ch, `- … (+${dropped} more lines — \`vibespace-task ${gid}show --full\`)`, '</vibespace-task-update>'];
+    }
+    return lines.join('\n');
   }
 
   // Reverse lookup: every NON-archived Task Group this session belongs to, by

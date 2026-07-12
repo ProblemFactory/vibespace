@@ -1197,6 +1197,8 @@ export default {
   'Preview': '预览',
   'uuid': 'uuid',
   'Per-turn tool reminder for agents': '每轮给 Agent 的工具提醒',
+  'Task Group updates as diffs': 'Task Group 更新以增量注入',
+  'When a Task Group changes mid-session, agents receive only WHAT changed (new/checked checklist items, new activity entries, objective edits, changed shared files) instead of the whole group context again. The full context is still delivered on first contact and after a server restart. Turn off to always re-send the complete state.': 'Task Group 在会话中途变化时，agent 只收到实际变更的部分（新增/勾选的 checklist 项、新的活动记录、objective 修改、共享文件变动），而不是再次注入整个组上下文。首次接触和服务器重启后仍会下发完整上下文。关闭则始终重发完整状态。',
   'Injects a one-line (~250 byte) reminder of the vibespace tools (status / ask / task) with every prompt you send, so agents keep using them in long sessions — the full rules injected at session start scroll out of the working context over time. Turn off to save the few tokens per turn.': '随你发送的每条消息注入一行（约 250 字节）vibespace 工具提醒（status / ask / task），让 agent 在长会话中持续使用它们——会话开始时注入的完整规范会随时间滚出工作上下文。关闭可节省每轮的少量 token。',
   'Stop-time bookkeeping nudge for agents': 'Agent 停止时的簿记提醒',
   'When an agent finishes a turn while its board state is stale (no status update in 10 minutes), it gets one short follow-up asking it to set vibespace-status, mirror open questions with vibespace-ask, and log finished work — then it stops. At most once per 30 minutes per session. Claude enforces this via a blocking Stop hook; Codex via its wrapper at turn end.': 'Agent 结束一轮时若看板状态陈旧（10 分钟内没更新过状态），会收到一次简短追问：设置 vibespace-status、用 vibespace-ask 镜像待答问题、记录已完成的工作——然后再停止。每会话每 30 分钟至多一次。Claude 通过阻塞式 Stop hook 强制，Codex 由其 wrapper 在轮次结束时执行。',

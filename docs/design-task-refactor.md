@@ -54,6 +54,7 @@ Note the tension: UI already renamed plan→Checklist, progress→Activity log (
 **P4 · Injection full lifecycle (incremental updates).**
 - Per-session per-group seen version: `session._groupSeenAt = { groupId: updatedAt }`.
 - `prompt-context`: for each belonged group, if `group.updatedAt > seen[groupId]` → inject that group's current state marked "UPDATED", bump seen. So ANY group change reaches all its sessions on their NEXT turn.
+- _(Superseded in 2.113.0, user request: an UPDATE now injects only the DELTA — the session snapshots each group at delivery (`s._groupSnap`) and `tasks.renderContextDiff` emits a `<vibespace-task-update>` block of just the changed checklist items / objective edits / changed contextDir files / new activity. Full state still on first delivery + after restart; toggle `agents.contextUpdateDiffs`.)_
 - Trigger sources to cover (user: cover ALL): (1) another session's `vibespace-task` (bumps group.updatedAt — already does via `TaskManager.update/addProgress`), (2) user edits objective/checklist/activity in the UI (bumps updatedAt), (3) **user hand-writes files in `contextDir`** — needs a signal: watch `contextDir` (fs.watch) or compare the file-index/mtimes on each prompt and treat a change as an update. User explicitly wants (3) done now (not deferred).
 
 **P6 · Per-group injection toggle** (user asked): each Task Group gets an `injectContext: bool` (default true) in `task-detail.js`; when false its context isn't injected. Baseline `vibespace-status` intro for sessions belonging to NO group stays (2.38.0).
