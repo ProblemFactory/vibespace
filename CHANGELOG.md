@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.111.23 — 2026-07-12
+
+- **`vibespace-status blocked/needs-input/review` without a reason is now REJECTED** (CLI pre-flight + server-side, matching error text) — a bare waiting state on the board tells the user nothing. The error teaches the fix: `--reason "…" ` + say it in chat + mirror with vibespace-ask. Grace: tweaking (e.g. `--urgency`) a same-state record that already carries a reason still passes.
+
 ## 2.111.22 — 2026-07-12
 
 - **Self-update dialog now reliably auto-reloads** (real report: it didn't). It keyed the reload on the version NUMBER changing, so re-running the update while already on the latest never reloaded. Now it detects the restart itself — the server going unreachable then reachable again (or a version bump) — cache-busts `/api/version`, and reloads on that. Non-zero exit / genuine no-op / timeout are distinguished, with a manual "Reload now" fallback button always available.
