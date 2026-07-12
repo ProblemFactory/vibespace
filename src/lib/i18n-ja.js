@@ -1669,4 +1669,6 @@ export default {
   "Enable Ctrl+\\ command mode for keyboard-driven window management": "Ctrl+\\ コマンドモードを有効化（キーボードでウィンドウ管理）",
   "Mount on a Mac / Windows (Finder / Explorer)": "Mac / Windows でマウント（Finder / エクスプローラー）",
   "Finder: Cmd+K → enter the server address; any username, password = the token below. Windows: map network drive to the same address.": "Finder：Cmd+K → 下のサーバーアドレスを入力。ユーザー名は任意、パスワード = 下のトークン。Windows：同じアドレスにネットワークドライブを割り当て。",
+  "Or paste into your rclone config (~/.config/rclone/rclone.conf)": "または rclone 設定 (~/.config/rclone/rclone.conf) に貼り付け",
+  "Then: rclone mount {name}: /path/to/local/folder": "その後：rclone mount {name}: /ローカル/マウント先",
 };

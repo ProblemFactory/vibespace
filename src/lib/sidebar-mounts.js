@@ -976,7 +976,10 @@ export function installSidebarMounts(Sidebar) {
           + (r.token ? `<label style="margin-top:10px">${escHtml(tr('Mount on a Mac / Windows (Finder / Explorer)'))}</label>
           <div class="mounts-note">${escHtml(tr('Finder: Cmd+K → enter the server address; any username, password = the token below. Windows: map network drive to the same address.'))}</div>
           <div class="mounts-note" style="user-select:all">${escHtml(r.davUrl || '')}</div>
-          <textarea readonly style="min-height:40px;font-size:11px">${escHtml(r.token)}</textarea>` : '');
+          <textarea readonly style="min-height:40px;font-size:11px">${escHtml(r.token)}</textarea>
+          <label style="margin-top:10px">${escHtml(tr('Or paste into your rclone config (~/.config/rclone/rclone.conf)'))}</label>
+          <textarea readonly style="min-height:96px;font-size:11px">${escHtml(`[${(v.name || 'vibespace-share').replace(/[^\w-]+/g, '-')}]\ntype = webdav\nurl = ${r.davUrl || ''}\nvendor = other\nbearer_token = ${r.token}`)}</textarea>
+          <div class="mounts-note">${escHtml(tr('Then: rclone mount {name}: /path/to/local/folder', { name: (v.name || 'vibespace-share').replace(/[^\w-]+/g, '-') }))}</div>` : '');
         const copyBtn = document.createElement('button');
         copyBtn.className = 'btn-create';
         copyBtn.textContent = tr('Copy link');
