@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.112.0 — 2026-07-12
+
+- **NEW: Dynamic desktop ("Stage")** — settings toggle `desktop.dynamicEnabled` (default off). A special desktop at the LEFT of the strip (separated preview with the slot outline): sessions can't be placed there directly; while it's active, ANY switch-to-session action materializes that session into a shared, freely draggable/resizable SLOT, together with its own recorded workspace of helper windows (file explorers, viewers, editors… bound automatically while that session is the hero, replayed via openSpec + stage geometry on return, scroll offsets/live explorer path restored). Closing the hero returns the placeholder; switching heroes hides the previous workspace (LRU keep-alive, setting `desktop.stageKeepAlive`, default 3 — beyond it aux windows close and replay on demand; session windows are never closed by the stage). The incoming hero stacks at the BOTTOM so a moved slot never covers a workspace's aux windows. Same window can live on a normal desktop and the stage (one window, two geometries). Ctrl+Alt+Left from the leftmost desktop enters; Right leaves. Design: docs/design-dynamic-desktop.md. CDP smoke-verified 12/12 on an isolated instance.
+- **Update dialog no longer contradicts itself** (real report: "Latest version" badge above v2.111.30's changelog): `/api/version`'s `latest` and the changelog are cached separately and can disagree — the dialog now trusts whichever source names the newer version.
+
 ## 2.111.30 — 2026-07-12
 
 - **Update detection no longer lags hours behind** (real report: an instance on 2.111.25 said "no update" while .29 was out). The latest-version + changelog fetches were cached 6 hours server-side; now 15 min, and the gear menu / update dialog pass `?fresh=1` (60s floor) so opening them always checks properly.

@@ -196,7 +196,7 @@ export class StageManager {
    *  stage materialization (caller should stop its default behavior). */
   shouldIntercept(win) {
     if (!this._active || !this.enabled) return false;
-    if (!win || win._isStagePlaceholder || win._hiddenByStage === undefined && false) return false;
+    if (!win || win._isStagePlaceholder) return false;
     if (win.id === this._heroWinId) return false;              // already the hero
     if (win.type !== 'chat' && win.type !== 'terminal') return false; // sessions only
     return true;
@@ -245,8 +245,29 @@ export class StageManager {
     wm.focusWindow(win.id, { _stageBypass: true });
     // Restore this session's recorded workspace (aux windows).
     this._restoreWorkspace(this._heroKey || this._sessionKeyFor(win));
+    this._enforceLru();
     this.app.desktopManager?._renderSwitcher();
     this.app.updateTaskbar();
+  }
+
+  /** LRU keep-alive (design §5, v1 CONSERVATIVE): beyond the newest N
+   *  workspaces, hidden AUX windows are closed (their records replay them on
+   *  the next visit). Session windows are NEVER closed by the stage — strictly
+   *  safer than walter's idle-close incident class (killed sessions, messages
+   *  swallowed); hiding a chat/terminal is cheap. */
+  _enforceLru() {
+    const keep = Math.max(0, Number(this.app.settings?.get('desktop.stageKeepAlive') ?? 3));
+    let lru = [];
+    try { lru = JSON.parse(getStateSync()?.get('stage', 'lru') || '[]'); } catch {}
+    const evict = new Set(lru.slice(keep));
+    if (!evict.size) return;
+    for (const [winId, owner] of [...this._boundAux]) {
+      if (!evict.has(owner)) continue;
+      const win = this.app.wm.windows.get(winId);
+      if (!win || !win._hiddenByStage) continue; // only hidden, deactivated sets
+      this._boundAux.delete(winId); // record already serialized at deactivation
+      try { this.app.wm.closeWindow(winId); } catch {}
+    }
   }
 
   /** Hide the current hero + its aux set (Phase C serializes the set). */
@@ -311,7 +332,10 @@ export class StageManager {
    *  Windows created on an EMPTY stage are transient (user decision ⑤). */
   onWindowCreated(win) {
     if (!this._active || !this.enabled || !win) return;
-    if (win._isStagePlaceholder || win.type === 'chat' || win.type === 'terminal') return;
+    // NOTE: check the TYPE — the hook runs inside createWindow's tail, before
+    // _ensurePlaceholder sets the _isStagePlaceholder flag (smoke-caught bug:
+    // the placeholder got tagged transient and swept on materialization).
+    if (win.type === 'stage-placeholder' || win._isStagePlaceholder || win.type === 'chat' || win.type === 'terminal') return;
     if (this._heroWinId) {
       this._boundAux.set(win.id, this._heroKey || '__pending__');
     } else {
@@ -322,6 +346,61 @@ export class StageManager {
   /** Serialize the CURRENT hero's aux set into its SyncStore record.
    *  heroKey is (re)derived NOW — backendSessionId often arrives after
    *  materialization, so record-time derivation is the reliable moment. */
+  /** Capture per-window view state beyond the openSpec (user requirement:
+   *  restore "everything" — scroll positions, explorer path, wrap toggles…).
+   *  LRU-hidden windows keep FULL state for free (visibility:hidden); this
+   *  covers the REPLAY tier: a generic walker records every scrollable
+   *  descendant's offsets by DOM order (index-matched on restore — brittle
+   *  across renders but right for viewers/editors/settings). The live
+   *  explorer path rides the openSpec itself (refreshed at record time). */
+  _captureExtras(win) {
+    const scrolls = [];
+    try {
+      const els = win.content.querySelectorAll('*');
+      let idx = 0;
+      for (const el of els) {
+        if (el.scrollHeight > el.clientHeight + 4 || el.scrollWidth > el.clientWidth + 4) {
+          if (el.scrollTop || el.scrollLeft) scrolls.push({ i: idx, top: el.scrollTop, left: el.scrollLeft });
+          idx++;
+          if (idx > 40) break; // bound the walk
+        }
+      }
+    } catch {}
+    return scrolls.length ? { scrolls } : null;
+  }
+
+  _applyExtras(win, extras) {
+    if (!extras?.scrolls?.length) return;
+    const apply = () => {
+      try {
+        const els = win.content.querySelectorAll('*');
+        const scrollables = [];
+        for (const el of els) {
+          if (el.scrollHeight > el.clientHeight + 4 || el.scrollWidth > el.clientWidth + 4) {
+            scrollables.push(el);
+            if (scrollables.length > 40) break;
+          }
+        }
+        for (const s2 of extras.scrolls) {
+          const el = scrollables[s2.i];
+          if (el) { el.scrollTop = s2.top; el.scrollLeft = s2.left; }
+        }
+      } catch {}
+    };
+    // content renders async (viewer fetch, editor init) — apply twice.
+    setTimeout(apply, 700);
+    setTimeout(apply, 2000);
+  }
+
+  /** openSpec is written at CREATION — refresh the live fields that change
+   *  afterwards so the replay lands where the user left off. */
+  _freshOpenSpec(win) {
+    const spec = { ...(win._openSpec || {}) };
+    if (win._explorerPath && spec.explorerPath !== undefined) spec.explorerPath = win._explorerPath;
+    if (win._explorerPath && spec.path !== undefined) spec.path = win._explorerPath;
+    return spec;
+  }
+
   _recordActiveWorkspace() {
     const hero = this._heroWinId && this.app.wm.windows.get(this._heroWinId);
     if (!hero) return;
@@ -334,7 +413,7 @@ export class StageManager {
       const aux = this.app.wm.windows.get(winId);
       if (!aux || !aux._openSpec) continue;
       this._boundAux.set(winId, key); // settle pending owners
-      records.push({ openSpec: aux._openSpec, stageBounds: aux.gridBounds || null });
+      records.push({ openSpec: this._freshOpenSpec(aux), stageBounds: aux.gridBounds || null, extras: this._captureExtras(aux) });
     }
     const sync = getStateSync();
     sync?.set('stage', 'ws:' + key, JSON.stringify(records));
@@ -392,11 +471,25 @@ export class StageManager {
         w._desktopId = STAGE_ID;
         this._boundAux.set(winId, key);
         if (rec.stageBounds) { w.gridBounds = rec.stageBounds; wm._applyGridBounds(w); }
+        if (rec.extras) this._applyExtras(w, rec.extras);
         if (!this._active || this._heroKey !== key) this._hideStage(w); // stale replay landed late
       }, 600);
     }
-    // hero raised above restored aux
-    if (this._heroWinId) wm.focusWindow(this._heroWinId, { _stageBypass: true });
+    // User decision (2026-07-12 addendum): the incoming hero sits at the
+    // BOTTOM of the stage stack — a slot that was moved/resized since this
+    // workspace was recorded must not cover its aux windows; the user
+    // rearranges from there. Focus (input) stays on the hero; only z changes.
+    const hero = this._heroWinId && wm.windows.get(this._heroWinId);
+    if (hero) {
+      let minZ = Infinity;
+      for (const [winId, owner] of this._boundAux) {
+        if (owner !== key) continue;
+        const aux = wm.windows.get(winId);
+        const z = aux && parseInt(aux.element.style.zIndex);
+        if (Number.isFinite(z)) minZ = Math.min(minZ, z);
+      }
+      if (Number.isFinite(minZ)) hero.element.style.zIndex = String(minZ - 1);
+    }
   }
 
   /** Drag-out to a normal desktop preview = unbind (dm.moveWindowToDesktop hook). */

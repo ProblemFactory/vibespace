@@ -27,11 +27,23 @@ export class CommandMode {
       // Ctrl+Alt+Left/Right: switch virtual desktops
       if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && e.ctrlKey && e.altKey && !e.metaKey) {
         const dm = this.app.desktopManager;
-        if (dm && dm.desktops.length > 1) {
-          e.preventDefault(); e.stopPropagation();
+        const stage = this.app.stage;
+        // Stage sits LEFT of the strip: Left from the leftmost desktop enters
+        // it; Right from the stage leaves to the first desktop.
+        if (stage?.isActive) {
+          if (e.key === 'ArrowRight') { e.preventDefault(); e.stopPropagation(); stage.leave(dm.desktops[0]?.id); }
+          return;
+        }
+        if (dm) {
           const idx = dm.desktops.findIndex(d => d.id === dm.activeDesktopId);
-          const next = e.key === 'ArrowRight' ? (idx + 1) % dm.desktops.length : (idx - 1 + dm.desktops.length) % dm.desktops.length;
-          dm.switchTo(dm.desktops[next].id);
+          if (e.key === 'ArrowLeft' && idx === 0 && stage?.enabled) {
+            e.preventDefault(); e.stopPropagation(); stage.enter(); return;
+          }
+          if (dm.desktops.length > 1) {
+            e.preventDefault(); e.stopPropagation();
+            const next = e.key === 'ArrowRight' ? (idx + 1) % dm.desktops.length : (idx - 1 + dm.desktops.length) % dm.desktops.length;
+            dm.switchTo(dm.desktops[next].id);
+          }
         }
         return;
       }
