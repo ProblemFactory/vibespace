@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.112.2 — 2026-07-12
+
+- **Stage workspaces: full replay audit across every window type** (design §4b matrix covers all 17 openSpec actions). New guards: `openEditor` replays validate the file first; **editors with unsaved changes are never LRU-evicted** (CodeEditor now exposes dirty state on the window record — closing one silently lost the edits); task detail/log replays skip when the task group was deleted (the window used to open then immediately self-close); workflow-detail replays probe `/api/workflow` and skip on 404.
+
 ## 2.112.1 — 2026-07-12
 
 - **Stage workspaces: restoration conditions per window class** (design §4b). Files opened from INSIDE an archive now record their recipe (`via: archive+entry`) — a replay whose temp file is gone re-extracts it fresh. Replays pre-validate their target (file/info probe); unrecoverable windows (dead blob pages, recipe-less temps, deleted files) are skipped with one summary toast instead of opening broken viewers, and temp/blob-backed windows with no recipe are exempt from LRU eviction (closing them would lose them forever).
