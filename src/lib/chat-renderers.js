@@ -1193,7 +1193,47 @@ class ChatRenderers {
       };
       toolbar.appendChild(btn);
       wrapper.appendChild(toolbar);
+
+      // TEMP diagnostic (code-block line overlap, mobile-only repro): after
+      // layout, if adjacent code lines overlap vertically, ship the geometry +
+      // computed styles + font so the real device tells us the cause (desktop
+      // Chrome never reproduces it). Once per page-session. Remove after fix.
+      if (block.classList.contains('chat-code-block')) this._diagCodeOverlap(block);
     }
+  }
+
+  _diagCodeOverlap(block) {
+    if (ChatRenderers._cbDiagSent) return;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      try {
+        const rows = [...block.querySelectorAll('.chat-code-line')];
+        if (rows.length < 2) return;
+        let prevBottom = null, overlap = null;
+        const rects = [];
+        for (let i = 0; i < rows.length; i++) {
+          const b = rows[i].getBoundingClientRect();
+          const tb = rows[i].querySelector('.chat-code-text')?.getBoundingClientRect();
+          rects.push({ i, top: +b.top.toFixed(1), bot: +b.bottom.toFixed(1), h: +b.height.toFixed(1), th: tb ? +tb.height.toFixed(1) : 0 });
+          if (prevBottom !== null && b.top < prevBottom - 1) overlap = { i, gap: +(b.top - prevBottom).toFixed(1) };
+          prevBottom = b.bottom;
+          if (overlap) break;
+        }
+        if (!overlap) return;
+        ChatRenderers._cbDiagSent = true;
+        const txt = block.querySelector('.chat-code-text');
+        const cs = txt ? getComputedStyle(txt) : {};
+        const lineCS = rows[0] ? getComputedStyle(rows[0]) : {};
+        const diag = {
+          overlapAt: overlap, rects: rects.slice(0, Math.min(rects.length, overlap.i + 2)),
+          wrapped: block.classList.contains('chat-pre-wrapped'),
+          textCS: { whiteSpace: cs.whiteSpace, lineHeight: cs.lineHeight, fontSize: cs.fontSize, fontFamily: (cs.fontFamily || '').slice(0, 80), display: cs.display, wordBreak: cs.wordBreak },
+          lineCS: { display: lineCS.display, minHeight: lineCS.minHeight, height: lineCS.height, alignItems: lineCS.alignItems, contain: lineCS.contain },
+          dpr: window.devicePixelRatio, vw: window.innerWidth, zoom: block.closest('.chat-message-list')?.style.zoom || '1', ua: navigator.userAgent.slice(0, 120),
+        };
+        fetch('/api/telemetry', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ events: [{ kind: 'trace', name: 'code-block-overlap', detail: JSON.stringify(diag).slice(0, 60000) }] }) }).catch(() => {});
+      } catch {}
+    });
   }
 }
 
