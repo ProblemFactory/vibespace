@@ -2458,7 +2458,7 @@ app.post('/api/mount-tokens', (req, res) => {
     const { name, root, mode } = req.body || {};
     const { raw, rec } = mountTokens.mint({ name, root, mode });
     const url = `${req.protocol}://${req.get('host')}`;
-    res.json({ success: true, token: rec.id ? undefined : undefined, link: mountTokens.buildLink({ url, raw, rec }), id: rec.id, rec: { id: rec.id, name: rec.name, root: rec.root, mode: rec.mode } });
+    res.json({ success: true, token: raw, davUrl: `${url}/dav`, link: mountTokens.buildLink({ url, raw, rec }), id: rec.id, rec: { id: rec.id, name: rec.name, root: rec.root, mode: rec.mode } });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.delete('/api/mount-tokens/:id', (req, res) => {
