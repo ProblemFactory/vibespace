@@ -7,9 +7,15 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 echo "== VibeSpace update: $(git rev-parse --short HEAD) @ $(git rev-parse --abbrev-ref HEAD)"
-# package-lock.json is derived state — an in-container npm (different version)
-# dirties it and blocks the ff-only pull; upstream's copy is authoritative.
-git checkout -- package-lock.json 2>/dev/null || true
+# Derived/generated tracked files dirty the working tree and block the ff-only
+# pull. package-lock.json: an in-container npm (different version) rewrites it.
+# data/bin/vibespace-status: createStatusHelper() regenerates it every startup
+# (now untracked upstream, but instances predating that still track it). Reset
+# both to the committed version before pulling — upstream is authoritative.
+git checkout -- package-lock.json data/bin/vibespace-status 2>/dev/null || true
+# Any OTHER tracked file the server regenerated (future generated helpers) —
+# discard local changes under data/bin so a stray one never wedges the update.
+git ls-files -m data/bin/ | xargs -r git checkout -- 2>/dev/null || true
 git pull --ff-only
 echo "== npm install"
 npm install --no-audit --no-fund
