@@ -110,6 +110,8 @@ export class StageManager {
 
   async leave(targetDesktopId) {
     if (!this._active) return;
+    this._recordActiveWorkspace();
+    this._sweepTransient();
     const dm = this.app.desktopManager;
     const target = targetDesktopId || this._prevDesktopId || dm.desktops[0]?.id;
     this._active = false;
@@ -219,8 +221,12 @@ export class StageManager {
 
   async _materializeInner(win) {
     const wm = this.app.wm;
-    // 1. Deactivate the previous hero workspace (Phase C records it).
-    if (this._heroWinId && this._heroWinId !== win.id) this._deactivateHero();
+    // 1. Record + deactivate the previous hero workspace.
+    if (this._heroWinId && this._heroWinId !== win.id) {
+      this._recordActiveWorkspace();
+      this._deactivateHero();
+    }
+    this._sweepTransient();
     // 2. Hide the placeholder.
     const ph = this._placeholderId && wm.windows.get(this._placeholderId);
     if (ph) this._hideStage(ph);
@@ -237,6 +243,8 @@ export class StageManager {
     this._showWin(win);
     // Raise without re-entering the interception path.
     wm.focusWindow(win.id, { _stageBypass: true });
+    // Restore this session's recorded workspace (aux windows).
+    this._restoreWorkspace(this._heroKey || this._sessionKeyFor(win));
     this.app.desktopManager?._renderSwitcher();
     this.app.updateTaskbar();
   }
@@ -268,12 +276,24 @@ export class StageManager {
   onWindowClosed(winId) {
     if (winId === this._placeholderId) { this._placeholderId = null; return; }
     if (winId === this._heroWinId) {
+      // Aux set stays recorded (it was serialized on every switch/leave); hide
+      // the on-stage aux windows and bring the placeholder back.
+      for (const [auxId, owner] of this._boundAux) {
+        if (owner !== this._heroKey && owner !== '__pending__') continue;
+        const aux = this.app.wm.windows.get(auxId);
+        if (aux) this._hideStage(aux);
+      }
       this._heroWinId = null;
       this._heroKey = null;
       if (this._active) this._ensurePlaceholder();
       return;
     }
-    this._boundAux.delete(winId);
+    if (this._boundAux.has(winId)) {
+      // closing a bound aux while its hero is active = unbind from the record
+      const owner = this._boundAux.get(winId);
+      this._boundAux.delete(winId);
+      if (owner && owner === this._heroKey) setTimeout(() => this._recordActiveWorkspace(), 0);
+    }
   }
 
   /** Slot geometry edits: called from wm._captureGridBounds for the
@@ -281,6 +301,111 @@ export class StageManager {
   onGeometryCaptured(win) {
     if (!this.enabled) return;
     if (win._isStagePlaceholder || win._isStageHero) this.saveSlot(win.gridBounds);
+  }
+
+  // ── Phase C: workspace binding ──
+
+  /** Called from wm.createWindow. Windows created while a hero is active bind
+   *  to its workspace; session-type windows never bind (they are
+   *  materialization candidates — focusWindow swaps them in as hero).
+   *  Windows created on an EMPTY stage are transient (user decision ⑤). */
+  onWindowCreated(win) {
+    if (!this._active || !this.enabled || !win) return;
+    if (win._isStagePlaceholder || win.type === 'chat' || win.type === 'terminal') return;
+    if (this._heroWinId) {
+      this._boundAux.set(win.id, this._heroKey || '__pending__');
+    } else {
+      win._stageTransient = true;
+    }
+  }
+
+  /** Serialize the CURRENT hero's aux set into its SyncStore record.
+   *  heroKey is (re)derived NOW — backendSessionId often arrives after
+   *  materialization, so record-time derivation is the reliable moment. */
+  _recordActiveWorkspace() {
+    const hero = this._heroWinId && this.app.wm.windows.get(this._heroWinId);
+    if (!hero) return;
+    const key = this._sessionKeyFor(hero);
+    if (!key) return; // id not known yet — nothing durable to record under
+    this._heroKey = key;
+    const records = [];
+    for (const [winId, owner] of this._boundAux) {
+      if (owner !== key && owner !== '__pending__' && owner !== null) continue;
+      const aux = this.app.wm.windows.get(winId);
+      if (!aux || !aux._openSpec) continue;
+      this._boundAux.set(winId, key); // settle pending owners
+      records.push({ openSpec: aux._openSpec, stageBounds: aux.gridBounds || null });
+    }
+    const sync = getStateSync();
+    sync?.set('stage', 'ws:' + key, JSON.stringify(records));
+    this._touchLru(key);
+  }
+
+  _workspaceRecords(key) {
+    try {
+      const raw = getStateSync()?.get('stage', 'ws:' + key);
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    } catch { return []; }
+  }
+
+  _touchLru(key) {
+    const sync = getStateSync();
+    let lru = [];
+    try { lru = JSON.parse(sync?.get('stage', 'lru') || '[]'); } catch {}
+    lru = [key, ...lru.filter((k) => k !== key)].slice(0, 20);
+    sync?.set('stage', 'lru', JSON.stringify(lru));
+  }
+
+  /** Close transient (empty-stage) windows — user decision ⑤. */
+  _sweepTransient() {
+    for (const [id, win] of [...this.app.wm.windows]) {
+      if (win._stageTransient) { try { this.app.wm.closeWindow(id); } catch {} }
+    }
+  }
+
+  /** Restore a hero's recorded workspace: show live hidden members, replay
+   *  missing ones (walter lesson #2: dedup by key, reconcile never spawns). */
+  _restoreWorkspace(key) {
+    if (!key) return;
+    const wm = this.app.wm;
+    const live = new Set();
+    for (const [winId, owner] of this._boundAux) {
+      if (owner !== key) continue;
+      const aux = wm.windows.get(winId);
+      if (!aux) { this._boundAux.delete(winId); continue; }
+      this._showWin(aux);
+      if (aux.gridBounds) wm._applyGridBounds(aux);
+      if (aux._openSpec) live.add(JSON.stringify(aux._openSpec));
+      wm.focusWindow(winId, { _stageBypass: true });
+    }
+    for (const rec of this._workspaceRecords(key)) {
+      if (!rec?.openSpec) continue;
+      const specKey = JSON.stringify(rec.openSpec);
+      if (live.has(specKey) || this._replayingKeys.has(specKey)) continue;
+      this._replayingKeys.set(specKey, setTimeout(() => this._replayingKeys.delete(specKey), 15000));
+      const winId = 'stage-' + Math.random().toString(36).slice(2, 9);
+      try { this.app.replayOpenSpec(rec.openSpec, winId); } catch { continue; }
+      setTimeout(() => {
+        const w = wm.windows.get(winId);
+        if (!w) return;
+        w._desktopId = STAGE_ID;
+        this._boundAux.set(winId, key);
+        if (rec.stageBounds) { w.gridBounds = rec.stageBounds; wm._applyGridBounds(w); }
+        if (!this._active || this._heroKey !== key) this._hideStage(w); // stale replay landed late
+      }, 600);
+    }
+    // hero raised above restored aux
+    if (this._heroWinId) wm.focusWindow(this._heroWinId, { _stageBypass: true });
+  }
+
+  /** Drag-out to a normal desktop preview = unbind (dm.moveWindowToDesktop hook). */
+  unbind(winId) {
+    const owner = this._boundAux.get(winId);
+    this._boundAux.delete(winId);
+    const win = this.app.wm.windows.get(winId);
+    if (win) { win._stageTransient = false; this._showWin(win); }
+    if (owner && owner !== '__pending__' && this._heroKey === owner) this._recordActiveWorkspace();
   }
 
   _sessionKeyFor(win) {

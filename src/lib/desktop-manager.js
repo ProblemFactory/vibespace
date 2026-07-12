@@ -256,6 +256,9 @@ export class DesktopManager {
   moveWindowToDesktop(winId, desktopId) {
     let win = this.app.wm.windows.get(winId);
     if (!win) return;
+    // Dragging a stage-bound window onto a normal desktop = unbind + move
+    // (design §4); it becomes a plain window of that desktop.
+    this.app.stage?.unbind(winId);
     // Tab chains live on ONE desktop (invariant enforced at creation):
     // move the whole group together, anchored at the host. Moving a single
     // guest used to split the chain across desktops, which captureState /

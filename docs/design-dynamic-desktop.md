@@ -132,12 +132,14 @@ with their own workspace of helper windows."
   wm window (type 'stage-placeholder', dashed chrome, hint text, TYPE_ICONS entry); CSS + zh/ja.
   Enter/leave reuse dm primitives (capture→hide→retag activeId→show/replay); hero borrow keeps
   `_stageHomeBounds` and restores on deactivation.
-- [ ] **Phase C**: workspace binding — tag windows created while a hero is active
-  (hook wm.createWindow or app-level create paths → `stage.onWindowCreated(win)`), record
-  `{openSpec, stageBounds}` sets into SyncStore `ws:<heroKey>` on deactivation, replay on
-  materialization (walter dedup `_replayingKeys` ready in the class), unbind on close/drag-out,
-  transient cleanup for empty-stage windows, `_sessionKeyFor` backfill once backendSessionId
-  arrives (syncSessionIdentity hook).
+- [x] **Phase C (committed)**: workspace binding — tag windows created while a hero is active
+  DONE: wm.createWindow tail → `stage.onWindowCreated` (session-type windows never bind — they
+  swap in as hero; empty-stage windows tagged `_stageTransient`); `_recordActiveWorkspace()`
+  serializes `{openSpec, stageBounds}` per aux into `ws:<key>` at every switch/leave/hero-close,
+  with heroKey RE-DERIVED AT RECORD TIME (backendSessionId arrives late); `_restoreWorkspace()`
+  shows live hidden members + replays missing via openSpec with `_replayingKeys` dedup (15s) and
+  hides stale late-landing replays; `_sweepTransient()` closes empty-stage windows on
+  materialize/leave; aux close → unbind + re-record; dm.moveWindowToDesktop → `stage.unbind`.
 - [ ] **Phase D**: LRU keep-alive (setting exists) + busy re-check at close time (streaming/
   bg tasks/goal/permission/draft — see chatStatus/taskState surfaces), preview polish,
   Ctrl+Alt+Left entry from leftmost desktop, CLAUDE.md + docs/window-manager.md sections,
