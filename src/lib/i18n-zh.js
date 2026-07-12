@@ -1686,4 +1686,11 @@ export default {
   "Update complete — reloading…": "更新完成——正在刷新…",
   "Single sign-on (SSO) is already configured ✓ — login is handled by your identity provider, so no password is needed.": "已配置单点登录（SSO）✓ —— 登录由你的身份提供商处理，无需设置密码。",
   "ignored — this instance uses SSO login": "将被忽略 —— 本实例使用 SSO 登录",
+  "Stage": "动态桌面",
+  "Stage — sessions materialize here with their workspace": "动态桌面——会话连同其工作区在此物化",
+  "Click any session (sidebar, taskbar, Ctrl+K) — it materializes here with its workspace.": "点击任意会话（侧栏、任务栏、Ctrl+K）——它会连同自己的工作区在这里物化。",
+  "Dynamic desktop (Stage)": "动态桌面（Stage）",
+  "A special desktop at the left of the strip: sessions materialize into a shared slot together with their own workspace of helper windows. See docs/design-dynamic-desktop.md": "桌面条最左侧的特殊桌面：会话物化到共享槽位，并带上各自的辅助窗口工作区。详见 docs/design-dynamic-desktop.md",
+  "Stage: workspaces kept alive": "动态桌面：保活工作区数",
+  "How many recent session workspaces stay loaded (hidden) for instant switching; older ones are saved and closed": "最近多少个会话工作区保持加载（隐藏）以便秒切；更早的会被保存并关闭",
 };

@@ -116,3 +116,33 @@ Restore on boot: stage records replay lazily on first entry, not at startup.
 
 "动态桌面" in zh; English label "Stage". Preview tooltip explains: "Sessions materialize here
 with their own workspace of helper windows."
+
+---
+
+## Implementation progress (update per phase — post-compact continuation anchor)
+
+- [x] **Phase A+B (committed)**: `src/lib/stage-manager.js` (StageManager, STAGE_ID='__stage__');
+  SyncStore 'stage' registered in server.js (data/stage-sync.json; keys: slot / ws:<key> / lru);
+  settings `desktop.dynamicEnabled` + `desktop.stageKeepAlive`; app.js instantiates `this.stage`;
+  window.js hooks — focusWindow interception (`_stageBypass` opt), `_captureGridBounds` →
+  `stage.onGeometryCaptured` (slot persistence), closeWindow → `stage.onWindowClosed`;
+  layout.js `_doAutoSave` suppressed while stage active; desktop-manager `_renderSwitcher`
+  prepends the separated Stage preview (slot outline + live rects, digest includes stage state),
+  normal-preview click while staged routes through `stage.leave(deskId)`; placeholder is a REAL
+  wm window (type 'stage-placeholder', dashed chrome, hint text, TYPE_ICONS entry); CSS + zh/ja.
+  Enter/leave reuse dm primitives (capture→hide→retag activeId→show/replay); hero borrow keeps
+  `_stageHomeBounds` and restores on deactivation.
+- [ ] **Phase C**: workspace binding — tag windows created while a hero is active
+  (hook wm.createWindow or app-level create paths → `stage.onWindowCreated(win)`), record
+  `{openSpec, stageBounds}` sets into SyncStore `ws:<heroKey>` on deactivation, replay on
+  materialization (walter dedup `_replayingKeys` ready in the class), unbind on close/drag-out,
+  transient cleanup for empty-stage windows, `_sessionKeyFor` backfill once backendSessionId
+  arrives (syncSessionIdentity hook).
+- [ ] **Phase D**: LRU keep-alive (setting exists) + busy re-check at close time (streaming/
+  bg tasks/goal/permission/draft — see chatStatus/taskState surfaces), preview polish,
+  Ctrl+Alt+Left entry from leftmost desktop, CLAUDE.md + docs/window-manager.md sections,
+  CHANGELOG + version bump, e2e smoke via headless where possible.
+
+Known Phase A+B caveats to revisit: `shouldIntercept` has a dead `_hiddenByStage === undefined
+&& false` clause (harmless, clean up); placeholder close button should be disabled; leave()
+doesn't yet record the active workspace (Phase C); enter() while `dm._restoring` silently bails.

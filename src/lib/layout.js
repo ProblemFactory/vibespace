@@ -526,6 +526,11 @@ class LayoutManager {
   }
 
   async _doAutoSave() {
+    // Dynamic desktop: while the STAGE view is active the desktop-layout
+    // autosave/broadcast is suppressed — the stage persists through its own
+    // SyncStore, and capturing here would write stage-visible windows into a
+    // normal desktop's record (cross-client chaos).
+    if (this.app.stage?.isActive) return;
     if (this._restoring) return;
     if (this.app.desktopManager?._restoring) return;
     // Anti-echo: only broadcast state the USER caused. After applying a remote
