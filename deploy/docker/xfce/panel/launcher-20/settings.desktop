@@ -4,5 +4,5 @@ Type=Application
 Name=Settings
 Comment=Desktop settings
 Exec=xfce4-settings-manager
-Icon=preferences-desktop
+Icon=org.xfce.settings.manager
 Categories=Settings;
