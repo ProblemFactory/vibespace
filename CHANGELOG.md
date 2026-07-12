@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.111.13 — 2026-07-12
+
+- **Desktop feature no longer vanishes for the whole page session** when the page happens to load during a server restart (real report: walter onboarded mid-update and the Desktop button was "disabled"). The `/api/vnc/status` availability probe ran once at startup with failures swallowed; it now re-probes on every WebSocket reconnect until it succeeds.
+
 ## 2.111.12 — 2026-07-12
 
 - **Terminal wide-spaced font (FOUT) can no longer get stuck permanently** (hit during walter's onboarding). The 2.105.0 fix polls for the web font's registration for only 20s — on a slow route to Google Fonts (cold-cache first visit, cross-border) the CSS lands after the cap, the repaint never fires, and the terminal keeps fallback-measured wide cells with web-font glyphs forever. Added an event-driven backstop: `document.fonts` `loadingdone` (no time limit) triggers the atlas-clear + refit whenever the font finally arrives; watchers are de-duplicated on re-entry and cleaned in dispose. Immediate user workaround on an affected session: reload the page (warm cache paints correctly) or nudge the font size.
