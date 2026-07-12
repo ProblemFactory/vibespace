@@ -1688,4 +1688,6 @@ export default {
   "Updating VibeSpace": "VibeSpace を更新中",
   "Reload now": "今すぐリロード",
   "Update complete — reloading…": "更新完了——リロード中…",
+  "Single sign-on (SSO) is already configured ✓ — login is handled by your identity provider, so no password is needed.": "シングルサインオン（SSO）が既に構成されています ✓ —— ログインは ID プロバイダーが処理するため、パスワードは不要です。",
+  "ignored — this instance uses SSO login": "無視されます —— このインスタンスは SSO ログインを使用します",
 };

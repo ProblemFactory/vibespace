@@ -42,6 +42,10 @@ class Auth {
 
   get enabled() { return this.passwordEnabled || !!this._clerk?.enabled; }
 
+  /** SSO (Clerk) specifically — login is handled by the IdP; a local password
+   *  is redundant and is skipped in onboarding / ignored on config import. */
+  get ssoEnabled() { return !!this._clerk?.enabled; }
+
   _hash(password, salt) {
     return crypto.scryptSync(String(password), Buffer.from(salt, 'hex'), 32).toString('hex');
   }

@@ -254,6 +254,7 @@ class App {
     }).then(d => {
       document.getElementById('input-cwd').placeholder = d.home;
       this._authEnabled = !!d.authEnabled;
+      this._ssoEnabled = !!d.ssoEnabled; // Clerk SSO on → password step/import ignored
       this._repoDir = d.repoDir || null; // server install dir (⚙ self-update)
     }).catch(()=>{});
 
@@ -628,8 +629,15 @@ class App {
         for (const id of file.sensitive.manifest) {
           const row = document.createElement('label');
           row.className = 'cfg-row';
-          row.innerHTML = `<input type="checkbox" data-sec="${id}">
-            <span class="cfg-row-text"><b>${escHtml(SENS_LABELS[id] || id)}</b><span>${id === 'vsPassword' ? t('enables password auth; all other devices are logged out') : t('written to this machine')}</span></span>`;
+          // SSO on → an imported password is redundant (login goes through the
+          // IdP) and is ignored on the server; disable the row + say why.
+          const pwIgnored = id === 'vsPassword' && this._ssoEnabled;
+          const sub = id === 'vsPassword'
+            ? (pwIgnored ? t('ignored — this instance uses SSO login') : t('enables password auth; all other devices are logged out'))
+            : t('written to this machine');
+          row.innerHTML = `<input type="checkbox" data-sec="${id}"${pwIgnored ? ' disabled' : ''}>
+            <span class="cfg-row-text"><b>${escHtml(SENS_LABELS[id] || id)}</b><span>${sub}</span></span>`;
+          if (pwIgnored) row.style.opacity = '0.55';
           sensWrap.appendChild(row);
         }
         sensWrap.addEventListener('change', () => {

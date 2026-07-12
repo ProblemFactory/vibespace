@@ -1684,4 +1684,6 @@ export default {
   "Updating VibeSpace": "正在更新 VibeSpace",
   "Reload now": "立即刷新",
   "Update complete — reloading…": "更新完成——正在刷新…",
+  "Single sign-on (SSO) is already configured ✓ — login is handled by your identity provider, so no password is needed.": "已配置单点登录（SSO）✓ —— 登录由你的身份提供商处理，无需设置密码。",
+  "ignored — this instance uses SSO login": "将被忽略 —— 本实例使用 SSO 登录",
 };

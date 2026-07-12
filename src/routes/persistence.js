@@ -576,7 +576,11 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
         const r = getAccounts?.()?.importBundle?.(sens.accounts);
         applied.push(`accounts (${r?.imported ?? 0} imported, ${r?.skipped ?? 0} skipped)`);
       }
-      if (includeSensitive.includes('vsPassword') && sens.vsPassword && auth) {
+      if (includeSensitive.includes('vsPassword') && sens.vsPassword && auth && auth.ssoEnabled) {
+        // SSO configured → a local password is redundant (login goes through
+        // the IdP); ignore the imported record instead of silently applying it.
+        applied.push('vsPassword: skipped (SSO configured)');
+      } else if (includeSensitive.includes('vsPassword') && sens.vsPassword && auth) {
         // enables auth + revokes all tokens; keep THIS caller logged in
         auth.importPasswordRecord(sens.vsPassword);
         const token = auth.issueToken(req.headers['user-agent']);
