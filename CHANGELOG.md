@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.112.7 — 2026-07-12
+- Self-update: fixed a recurring "update failed — package-lock.json local changes would be overwritten" abort. update.sh reset the generated files with a COMBINED `git checkout -- package-lock.json data/bin/vibespace-status`; on instances where data/bin/vibespace-status is untracked (generated + gitignored), that whole command aborts on the bad pathspec and resets NEITHER file, so package-lock.json stayed dirty and the ff pull aborted. Now each path is reset independently (package-lock.json alone; tracked data/bin helpers per-path), with a stash-and-retry belt.
+
 ## 2.112.6 — 2026-07-12
 - Window manager: stage-hidden windows are now invisible to every "visible windows" filter (close-time auto-focus-next, layout presets, overlap switcher/indicator) — closing the hero used to auto-focus a stage-hidden previous hero and yank every staged client back to it
 - Stage: the ACTIVE HERO is now SHARED across clients (user directive — the walk-over scenario: a device left idle on the stage mirrors what you do on another device, so walking over shows the current workspace). Staged clients follow hero switches live (deferred while you're mid-drag); closing the hero shows the placeholder everywhere; ENTERING the stage adopts the shared hero. Which tab is staged at all remains per-tab, like the active desktop.
