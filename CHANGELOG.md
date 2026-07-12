@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.112.1 — 2026-07-12
+
+- **Stage workspaces: restoration conditions per window class** (design §4b). Files opened from INSIDE an archive now record their recipe (`via: archive+entry`) — a replay whose temp file is gone re-extracts it fresh. Replays pre-validate their target (file/info probe); unrecoverable windows (dead blob pages, recipe-less temps, deleted files) are skipped with one summary toast instead of opening broken viewers, and temp/blob-backed windows with no recipe are exempt from LRU eviction (closing them would lose them forever).
+
 ## 2.112.0 — 2026-07-12
 
 - **NEW: Dynamic desktop ("Stage")** — settings toggle `desktop.dynamicEnabled` (default off). A special desktop at the LEFT of the strip (separated preview with the slot outline): sessions can't be placed there directly; while it's active, ANY switch-to-session action materializes that session into a shared, freely draggable/resizable SLOT, together with its own recorded workspace of helper windows (file explorers, viewers, editors… bound automatically while that session is the hero, replayed via openSpec + stage geometry on return, scroll offsets/live explorer path restored). Closing the hero returns the placeholder; switching heroes hides the previous workspace (LRU keep-alive, setting `desktop.stageKeepAlive`, default 3 — beyond it aux windows close and replay on demand; session windows are never closed by the stage). The incoming hero stacks at the BOTTOM so a moved slot never covers a workspace's aux windows. Same window can live on a normal desktop and the stage (one window, two geometries). Ctrl+Alt+Left from the leftmost desktop enters; Right leaves. Design: docs/design-dynamic-desktop.md. CDP smoke-verified 12/12 on an isolated instance.
