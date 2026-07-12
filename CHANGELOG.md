@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.111.21 — 2026-07-12
+
+- **Onboarding CLI login/install now runs in an EMBEDDED terminal modal** (user directive: no more "opens a detached terminal, hides the wizard, never comes back"). The wizard stays on screen; the modal polls `/api/backend-status` and closes itself with a ✓ the moment the login/install lands, refreshing the status cards.
+- **Update VibeSpace is now a UI progress dialog** — the update runs as a detached server op streaming its log into the dialog; the dialog survives the service restart and **reloads the page automatically** once the new version answers. Failure shows the exit code + log. No more terminal that "runs for a while then just sits there".
+- **Unmount / mountpoint change / remove now sweep the leftover mountpoint directory when it is empty** (never recursive — non-empty dirs are left alone).
+- `vibespace-ask` now reminds the agent, in its own output, to ALSO post the full question in the chat reply (real pattern: agents filed the inbox item and ended the turn silently).
+
 ## 2.111.20 — 2026-07-12
 
 - **Usage meters no longer vanish on instances without captured data** (real report: k8s instances with showUsage on showed nothing). Chat sessions never produce the passive statusline feed, so a fresh chat-only instance had zero usage cache and the meter row was skipped entirely. A machine with a CLI login now renders gray "no data yet" donuts + a popup note explaining where data comes from (terminal sessions, or the on-demand ⟳).

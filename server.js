@@ -2812,6 +2812,45 @@ server.on('upgrade', (req, socket, head) => {
 // request only (never a background timer), cached 6h, best-effort: offline
 // instances just show the local version.
 const versionInfo = { fetchedAt: 0, latest: null, commit: null };
+// ── UI-driven self-update (2.111.21): the update runs as a DETACHED op with
+// its output in data/update.log; the client shows a progress dialog, keeps
+// polling across the restart (KillMode=process / the container supervisor
+// leave the detached script alive), and reloads when /api/version changes.
+// Replaced the "suddenly opens a terminal that just sits there" flow.
+let _selfUpdate = null; // { pid, startedAt }
+const _updateLogPath = path.join(__dirname, 'data', 'update.log');
+app.post('/api/self-update', (req, res) => {
+  try {
+    if (!fs.existsSync(path.join(__dirname, 'scripts', 'update.sh'))) return res.status(400).json({ error: 'update script not found' });
+    if (_selfUpdate) { try { process.kill(_selfUpdate.pid, 0); return res.json({ success: true, already: true }); } catch { _selfUpdate = null; } }
+    try { fs.unlinkSync(_updateLogPath); } catch {}
+    const fd = fs.openSync(_updateLogPath, 'a');
+    const child = spawn('bash', ['-c', 'bash scripts/update.sh; echo "__UPDATE_EXIT:$?"'], {
+      cwd: __dirname, detached: true, stdio: ['ignore', fd, fd],
+      env: { ...process.env, VIBESPACE_SUPERVISED: process.env.VIBESPACE_SUPERVISED || '1' },
+    });
+    fs.closeSync(fd);
+    child.unref();
+    _selfUpdate = { pid: child.pid, startedAt: Date.now() };
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/self-update/status', (req, res) => {
+  let log = '';
+  try {
+    const st = fs.statSync(_updateLogPath);
+    const fd = fs.openSync(_updateLogPath, 'r');
+    const len = Math.min(st.size, 6000);
+    const buf = Buffer.alloc(len);
+    fs.readSync(fd, buf, 0, len, st.size - len);
+    fs.closeSync(fd);
+    log = buf.toString('utf8');
+  } catch {}
+  let running = false;
+  if (_selfUpdate) { try { process.kill(_selfUpdate.pid, 0); running = true; } catch {} }
+  res.json({ running, log });
+});
+
 app.get('/api/version', async (req, res) => {
   if (versionInfo.commit === null) {
     try { versionInfo.commit = execFileSync('git', ['-C', __dirname, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf-8', timeout: 3000 }).trim(); }
