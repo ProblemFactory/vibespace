@@ -1204,36 +1204,51 @@ class ChatRenderers {
 
   _diagCodeOverlap(block) {
     if (ChatRenderers._cbDiagSent) return;
-    requestAnimationFrame(() => requestAnimationFrame(() => {
+    const check = () => {
+      if (ChatRenderers._cbDiagSent || !block.isConnected) return;
       try {
         const rows = [...block.querySelectorAll('.chat-code-line')];
         if (rows.length < 2) return;
+        const blockRect = block.getBoundingClientRect();
+        if (!blockRect.height) return; // hidden (closed details) — try again later
         let prevBottom = null, overlap = null;
         const rects = [];
         for (let i = 0; i < rows.length; i++) {
           const b = rows[i].getBoundingClientRect();
-          const tb = rows[i].querySelector('.chat-code-text')?.getBoundingClientRect();
-          rects.push({ i, top: +b.top.toFixed(1), bot: +b.bottom.toFixed(1), h: +b.height.toFixed(1), th: tb ? +tb.height.toFixed(1) : 0 });
-          if (prevBottom !== null && b.top < prevBottom - 1) overlap = { i, gap: +(b.top - prevBottom).toFixed(1) };
+          const ts = rows[i].querySelector('.chat-code-text');
+          const tb = ts?.getBoundingClientRect();
+          rects.push({ i, top: +b.top.toFixed(1), h: +b.height.toFixed(1),
+            tx: tb ? +tb.left.toFixed(1) : 0, tw: tb ? +tb.width.toFixed(1) : 0, th: tb ? +tb.height.toFixed(1) : 0,
+            len: (ts?.textContent || '').length });
+          if (prevBottom !== null && b.top < prevBottom - 1 && !overlap) overlap = { i, gap: +(b.top - prevBottom).toFixed(1) };
           prevBottom = b.bottom;
-          if (overlap) break;
         }
-        if (!overlap) return;
+        // also flag a "narrow column": text span squeezed far below the block width
+        const narrow = rects.find(r => r.len > 40 && r.tw > 0 && r.tw < blockRect.width * 0.35);
+        if (!overlap && !narrow) return;
         ChatRenderers._cbDiagSent = true;
         const txt = block.querySelector('.chat-code-text');
         const cs = txt ? getComputedStyle(txt) : {};
         const lineCS = rows[0] ? getComputedStyle(rows[0]) : {};
+        const bcs = getComputedStyle(block);
         const diag = {
-          overlapAt: overlap, rects: rects.slice(0, Math.min(rects.length, overlap.i + 2)),
+          overlapAt: overlap, narrow, blockW: +blockRect.width.toFixed(1), rects: rects.slice(0, 14),
           wrapped: block.classList.contains('chat-pre-wrapped'),
-          textCS: { whiteSpace: cs.whiteSpace, lineHeight: cs.lineHeight, fontSize: cs.fontSize, fontFamily: (cs.fontFamily || '').slice(0, 80), display: cs.display, wordBreak: cs.wordBreak },
-          lineCS: { display: lineCS.display, minHeight: lineCS.minHeight, height: lineCS.height, alignItems: lineCS.alignItems, contain: lineCS.contain },
-          dpr: window.devicePixelRatio, vw: window.innerWidth, zoom: block.closest('.chat-message-list')?.style.zoom || '1', ua: navigator.userAgent.slice(0, 120),
+          textCS: { whiteSpace: cs.whiteSpace, lineHeight: cs.lineHeight, fontSize: cs.fontSize, fontFamily: (cs.fontFamily || '').slice(0, 80), wordBreak: cs.wordBreak, tsa: cs.webkitTextSizeAdjust || cs.textSizeAdjust },
+          lineCS: { display: lineCS.display, minHeight: lineCS.minHeight, alignItems: lineCS.alignItems },
+          blockCS: { overflowX: bcs.overflowX, maxHeight: bcs.maxHeight, width: bcs.width },
+          dpr: window.devicePixelRatio, vw: window.innerWidth,
+          zoom: block.closest('.chat-message-list')?.style.zoom || '1', ua: navigator.userAgent.slice(0, 120),
         };
         fetch('/api/telemetry', { method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ events: [{ kind: 'trace', name: 'code-block-overlap', detail: JSON.stringify(diag).slice(0, 60000) }] }) }).catch(() => {});
       } catch {}
-    }));
+    };
+    requestAnimationFrame(() => requestAnimationFrame(check));
+    // Write/Read cards render inside a CLOSED <details> (rects all 0 — the
+    // first check can't see anything). Re-check when it opens + timed sweeps.
+    block.closest('details')?.addEventListener('toggle', () => setTimeout(check, 120));
+    for (const d of [1500, 4000, 10000]) setTimeout(check, d);
   }
 }
 
