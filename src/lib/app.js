@@ -187,7 +187,10 @@ class App {
     this.layoutManager = new LayoutManager(this);
     this.desktopManager = new DesktopManager(this);
     this.stage = new StageManager(this); // dynamic desktop view (docs/design-dynamic-desktop.md)
-    this.stage.init();
+    // NOTE: stage.init() (its SyncStore registration) runs AFTER initStateSync
+    // below — calling it here dropped every slot/workspace write silently
+    // (getStateSync() was still undefined; real report: the placeholder
+    // "never moved" because the dragged slot never persisted).
 
     // Tag every new window with the active desktop ID
     const origCreateWindow = this.wm.createWindow.bind(this.wm);
@@ -263,6 +266,7 @@ class App {
 
     // Initialize unified state sync (server-persisted, versioned diff broadcast, reconnect recovery)
     initStateSync(this.ws);
+    this.stage.init(); // stage SyncStore — must follow initStateSync (see constructor note)
 
     // Restore layout after WebSocket is connected (needs active sessions)
     this.ready = new Promise(resolve => {

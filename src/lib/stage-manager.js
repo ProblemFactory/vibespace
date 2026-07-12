@@ -54,11 +54,21 @@ export class StageManager {
     if (sync) await sync.init('stage');
   }
 
+  /** Lazy belt-and-braces: every read/write path goes through this — if the
+   *  store isn't registered yet (init-order regression), register it now.
+   *  StateSync.set() silently drops writes for unknown stores (that's how the
+   *  "placeholder never moves" bug hid). */
+  _sync() {
+    const sync = getStateSync();
+    if (sync && !sync.stores?.stage) sync.init('stage');
+    return sync;
+  }
+
   // ── Slot (shared geometry) ──
 
   slotBounds() {
     try {
-      const raw = getStateSync()?.get('stage', 'slot');
+      const raw = this._sync()?.get('stage', 'slot');
       const gb = raw ? JSON.parse(raw).gridBounds : null;
       if (gb && [gb.left, gb.top, gb.width, gb.height].every(Number.isFinite)) return gb;
     } catch {}
@@ -68,7 +78,7 @@ export class StageManager {
   saveSlot(gridBounds) {
     if (!gridBounds) return;
     const q = (n) => Math.round(n * 10000) / 10000;
-    getStateSync()?.set('stage', 'slot', JSON.stringify({ gridBounds: {
+    this._sync()?.set('stage', 'slot', JSON.stringify({ gridBounds: {
       left: q(gridBounds.left), top: q(gridBounds.top), width: q(gridBounds.width), height: q(gridBounds.height),
     } }));
   }
@@ -258,7 +268,7 @@ export class StageManager {
   _enforceLru() {
     const keep = Math.max(0, Number(this.app.settings?.get('desktop.stageKeepAlive') ?? 3));
     let lru = [];
-    try { lru = JSON.parse(getStateSync()?.get('stage', 'lru') || '[]'); } catch {}
+    try { lru = JSON.parse(this._sync()?.get('stage', 'lru') || '[]'); } catch {}
     const evict = new Set(lru.slice(keep));
     if (!evict.size) return;
     for (const [winId, owner] of [...this._boundAux]) {
@@ -432,7 +442,7 @@ export class StageManager {
 
   _workspaceRecords(key) {
     try {
-      const raw = getStateSync()?.get('stage', 'ws:' + key);
+      const raw = this._sync()?.get('stage', 'ws:' + key);
       const arr = raw ? JSON.parse(raw) : [];
       return Array.isArray(arr) ? arr : [];
     } catch { return []; }

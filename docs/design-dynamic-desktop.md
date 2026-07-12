@@ -198,3 +198,12 @@ with their own workspace of helper windows."
 Known Phase A+B caveats to revisit: `shouldIntercept` has a dead `_hiddenByStage === undefined
 && false` clause (harmless, clean up); placeholder close button should be disabled; leave()
 doesn't yet record the active workspace (Phase C); enter() while `dm._restoring` silently bails.
+
+### Field bug log
+
+- 2026-07-12 "placeholder never moves": dragging worked; persistence didn't. `stage.init()` ran
+  before `initStateSync()` → the 'stage' SyncStore was never registered → `StateSync.set()`
+  SILENTLY DROPS writes for unknown stores → slotBounds() always returned the default top-left.
+  Fixed by init ordering + a lazy `_sync()` guard that registers the store on any access.
+  LESSON: any new SyncStore consumer must init AFTER initStateSync, and StateSync's silent-drop
+  semantics hide this class of bug — guard in the consumer.
