@@ -316,6 +316,12 @@ const SETTINGS_SCHEMA = {
     description: t('Injects a one-line (~250 byte) reminder of the vibespace tools (status / ask / task) with every prompt you send, so agents keep using them in long sessions — the full rules injected at session start scroll out of the working context over time. Turn off to save the few tokens per turn.'),
     category: t('Session'), liveApply: true,
   },
+  'agents.contextUpdateDiffs': {
+    type: 'boolean', default: true,
+    label: t('Task Group updates as diffs'),
+    description: t('When a Task Group changes mid-session, agents receive only WHAT changed (new/checked checklist items, new activity entries, objective edits, changed shared files) instead of the whole group context again. The full context is still delivered on first contact and after a server restart. Turn off to always re-send the complete state.'),
+    category: t('Session'), liveApply: true,
+  },
   'accounts.onDemandQuotaRefresh': {
     type: 'enum', default: 'manual',
     options: [
