@@ -976,7 +976,7 @@ class WindowManager {
       this.activeWindowId = null;
       let best = null, bestZ = -1;
       for (const [wid, w] of this.windows) {
-        if (w._hiddenByDesktop || w.isMinimized) continue;
+        if (w._hiddenByDesktop || w._hiddenByStage || w.isMinimized) continue;
         if (w._tabChain && w._tabChain.tabs[0] !== w.id) continue; // skip tab guests
         const z = parseInt(w.element.style.zIndex) || 0;
         if (z > bestZ) { best = wid; bestZ = z; }
@@ -1147,7 +1147,7 @@ class WindowManager {
     // Skip grouped guests, minimized, and windows on other desktops
     const activeDesk = this._app?.desktopManager?.activeDesktopId;
     const visible = [...this.windows.values()].filter(w =>
-      !w.isMinimized && !w._hiddenByDesktop
+      !w.isMinimized && !w._hiddenByDesktop && !w._hiddenByStage
       && !(w._tabChain && w._tabChain.tabs[0] !== w.id)
       && (!activeDesk || !w._desktopId || w._desktopId === activeDesk)
     );
@@ -1178,7 +1178,7 @@ class WindowManager {
 
     const overlapping = [];
     for (const [id, w] of this.windows) {
-      if (id === win.id || w.isMinimized || w._hiddenByDesktop) continue;
+      if (id === win.id || w.isMinimized || w._hiddenByDesktop || w._hiddenByStage) continue;
       if (w._tabChain && w._tabChain.tabs[0] !== w.id) continue; // skip grouped guests
       const wEl = w.element;
       const wr = { left: wEl.offsetLeft, top: wEl.offsetTop, right: wEl.offsetLeft + wEl.offsetWidth, bottom: wEl.offsetTop + wEl.offsetHeight };
@@ -1225,7 +1225,7 @@ class WindowManager {
   _updateOverlapIndicators() {
     // _hiddenByDesktop windows are geometrically present (visibility:hidden) —
     // counting them lit the ⧉ indicator for windows the user can't see
-    const allWins = [...this.windows.values()].filter(w => !w.isMinimized && !w._hiddenByDesktop && !(w._tabChain && w._tabChain.tabs[0] !== w.id));
+    const allWins = [...this.windows.values()].filter(w => !w.isMinimized && !w._hiddenByDesktop && !w._hiddenByStage && !(w._tabChain && w._tabChain.tabs[0] !== w.id));
     // Build rects for all visible windows
     const rects = new Map();
     for (const w of allWins) {

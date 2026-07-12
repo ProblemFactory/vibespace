@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.112.6 — 2026-07-12
+- Window manager: stage-hidden windows are now invisible to every "visible windows" filter (close-time auto-focus-next, layout presets, overlap switcher/indicator) — closing the hero used to auto-focus a stage-hidden previous hero and yank every staged client back to it
+- Stage: the ACTIVE HERO is now SHARED across clients (user directive — the walk-over scenario: a device left idle on the stage mirrors what you do on another device, so walking over shows the current workspace). Staged clients follow hero switches live (deferred while you're mid-drag); closing the hero shows the placeholder everywhere; ENTERING the stage adopts the shared hero. Which tab is staged at all remains per-tab, like the active desktop.
+
 ## 2.112.5 — 2026-07-12
 - Stage MULTI-CLIENT: fixed a data-loss bug — materializing a session that had no local window created a stage-owned copy under a fresh winId; leaving to the desktop that (per other clients) held that session's window then broadcast a state without it, CLOSING the window on every client ("窗口A两个客户端都看不到了"). Materialization now ADOPTS the desktop record's identity (rekey to its winId + home desktop + geometry + maximize state), with a leave-time retry for late-arriving session ids. Reproduced and verified with a two-browser-client harness.
 - Stage: maximized heroes handled first-class — borrow un-maximizes onto the slot, hand-back restores home geometry BEFORE re-maximizing (so a later un-maximize lands at home size, not slot size)
