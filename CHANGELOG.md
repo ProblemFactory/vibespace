@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.111.25 — 2026-07-12
+
+- The injected context's "Reporting back" section now shows COPY-READY complete invocations (fenced one-liners with `--detail`, and `--reason` + `--detail` on the status sample) — the first call an agent copies is already the valid form, instead of learning the required flags via rejection.
+
 ## 2.111.24 — 2026-07-12
 
 - Waiting states now require the COMPLETE reason: `blocked`/`needs-input`/`review` must carry BOTH `--reason` (one line for the board chip) AND `--detail` (full context: options, what was tried, the recommendation) — rejected at CLI pre-flight and the agent route otherwise. Same-state records already carrying both still accept reason-less tweaks (urgency bumps). The status CLI usage spells the requirement out.
