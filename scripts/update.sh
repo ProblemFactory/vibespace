@@ -9,14 +9,19 @@ cd "$(dirname "$0")/.."
 echo "== VibeSpace update: $(git rev-parse --short HEAD) @ $(git rev-parse --abbrev-ref HEAD)"
 # Derived/generated tracked files dirty the working tree and block the ff-only
 # pull. package-lock.json: an in-container npm (different version) rewrites it.
-# data/bin/vibespace-status: createStatusHelper() regenerates it every startup
-# (now untracked upstream, but instances predating that still track it). Reset
-# both to the committed version before pulling — upstream is authoritative.
-git checkout -- package-lock.json data/bin/vibespace-status 2>/dev/null || true
-# Any OTHER tracked file the server regenerated (future generated helpers) —
-# discard local changes under data/bin so a stray one never wedges the update.
-git ls-files -m data/bin/ | xargs -r git checkout -- 2>/dev/null || true
-git pull --ff-only
+# RESET EACH PATH INDEPENDENTLY — the real recurring failure was a COMBINED
+# `git checkout -- package-lock.json data/bin/vibespace-status`: on instances
+# where data/bin/vibespace-status is UNTRACKED (it's generated + gitignored
+# now), the whole checkout aborts "pathspec did not match" and resets NEITHER,
+# so package-lock.json stays dirty and the pull aborts "local changes would be
+# overwritten". package-lock.json is always tracked → reset it on its own.
+git checkout HEAD -- package-lock.json 2>/dev/null || true
+# Any tracked-and-modified generated helper under data/bin (per-path so one bad
+# pathspec can't wedge the rest); untracked ones don't block a ff pull.
+git ls-files -m data/bin/ 2>/dev/null | xargs -r -n1 git checkout HEAD -- 2>/dev/null || true
+# Last-resort belt: if the tree is STILL dirty enough to block a ff pull, stash
+# the leftover noise away (kept, not dropped) so the pull can proceed.
+git pull --ff-only || { git stash push -u -m "vibespace-update-autostash" >/dev/null 2>&1 || true; git pull --ff-only; }
 echo "== npm install"
 npm install --no-audit --no-fund
 echo "== build"
