@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.111.19 — 2026-07-12
+
+- Desktop availability probe retries with backoff (3s→90s, 5 attempts) when it fails — a page loaded during a server-restart window now self-heals without an F5 or a WebSocket reconnect (the button vanished repeatedly for a user during an update storm).
+
 ## 2.111.18 — 2026-07-12
 
 - **Archive extraction shows a persistent progress bar** (user request: big archives looked frozen for minutes). Extraction now runs as a server-side op — a streamed listing pass counts total entries, then unzip/tar verbose output drives a live per-entry counter — polled by the client and rendered through the same machinery as uploads: inline progress row in the file list, upload-button ring, popover entry, with cancel. Remote-host extraction keeps the plain synchronous path. Also fixed skip-existing tolerance for modern tar ("File exists" vs "already exists" — the old sync path mis-reported success as an error too).

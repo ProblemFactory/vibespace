@@ -1558,12 +1558,20 @@ class App {
     return winInfo;
   }
 
-  _probeVncAvailability() {
+  _probeVncAvailability(attempt = 0) {
     fetchJson('/api/vnc/status').then((d) => {
-      this._vncAvailable = !!d?.available;
+      // fetchJson resolves null/undefined on HTTP errors — treat as a failed
+      // probe (retry), not as "server says unavailable".
+      if (d == null) throw new Error('probe failed');
+      this._vncAvailable = !!d.available;
       const b = document.getElementById('btn-desktop');
       if (b) b.style.display = (this._vncAvailable && this.settings.get('toolbar.showDesktopButton') !== false) ? '' : 'none';
-    }).catch(() => {});
+    }).catch(() => {
+      // Page loaded during a server-restart window: retry with backoff so the
+      // Desktop entry self-heals without needing an F5 or a ws transition
+      // (walter hit the vanish repeatedly during an update storm).
+      if (attempt < 5) setTimeout(() => this._probeVncAvailability(attempt + 1), [3000, 8000, 20000, 45000, 90000][attempt]);
+    });
   }
 
   openBrowser(url, opts) { return openBrowserFn(this, url, opts); }
