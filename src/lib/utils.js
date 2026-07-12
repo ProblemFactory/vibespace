@@ -188,6 +188,35 @@ const _uploadName = (f) => f._relPath || f.webkitRelativePath || f.name;
 // thing with net::ERR_ACCESS_DENIED. This chunks the files and, when a chunk
 // fails, retries it FILE-BY-FILE so the readable files still land and only the
 // bad ones are reported. Returns { uploaded:[{name,path,size}], failed:[{name,error}] }.
+/**
+ * Recurse a drop's DataTransfer into a flat File list. Directories are walked
+ * via webkitGetAsEntry/readEntries (looped — one readEntries call returns at
+ * most 100 entries); each file gets `_relPath` ("dir/sub/name") so uploads can
+ * recreate the tree. MUST be CALLED synchronously from the drop handler: the
+ * entries are grabbed before the first await (DataTransferItems are neutered
+ * once the handler yields). Falls back to the flat files list when the
+ * entries API is unavailable.
+ */
+export async function collectDroppedFiles(dt) {
+  const entries = Array.from(dt.items || []).map((i) => i.webkitGetAsEntry?.()).filter(Boolean);
+  if (!entries.length) return Array.from(dt.files || []);
+  const out = [];
+  const walk = async (entry, prefix) => {
+    if (entry.isFile) {
+      const file = await new Promise((res, rej) => entry.file(res, rej));
+      try { file._relPath = prefix + entry.name; } catch {}
+      out.push(file);
+    } else if (entry.isDirectory) {
+      const reader = entry.createReader();
+      const readBatch = () => new Promise((res, rej) => reader.readEntries(res, rej));
+      let batch;
+      do { batch = await readBatch(); for (const e of batch) await walk(e, prefix + entry.name + '/'); } while (batch.length);
+    }
+  };
+  for (const entry of entries) await walk(entry, '');
+  return out;
+}
+
 export async function uploadFilesBatched(files, { destDir, preservePaths, onProgress } = {}) {
   const list = (files || []).filter(Boolean);
   const CHUNK_FILES = 40, CHUNK_BYTES = 64 * 1024 * 1024;

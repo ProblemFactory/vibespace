@@ -1,4 +1,4 @@
-import { copyText, escHtml, showToast } from './utils.js';
+import { copyText, escHtml, showToast, collectDroppedFiles } from './utils.js';
 import { installChatSeek } from './chat-view-seek.js';
 import { metric } from './telemetry-client.js';
 import { stripAnsi } from './highlight.js';
@@ -1650,23 +1650,7 @@ class ChatView {
   // must be read synchronously before the first await), tagging each File with
   // its relative path so folder trees are recreated under the cwd.
   async _collectDroppedFiles(dt) {
-    const entries = Array.from(dt.items || []).map((i) => i.webkitGetAsEntry?.()).filter(Boolean);
-    if (!entries.length) return Array.from(dt.files || []);
-    const out = [];
-    const walk = async (entry, prefix) => {
-      if (entry.isFile) {
-        const file = await new Promise((res, rej) => entry.file(res, rej));
-        try { file._relPath = prefix + entry.name; } catch {}
-        out.push(file);
-      } else if (entry.isDirectory) {
-        const reader = entry.createReader();
-        const readBatch = () => new Promise((res, rej) => reader.readEntries(res, rej));
-        let batch;
-        do { batch = await readBatch(); for (const e of batch) await walk(e, prefix + entry.name + '/'); } while (batch.length);
-      }
-    };
-    for (const entry of entries) await walk(entry, '');
-    return out;
+    return collectDroppedFiles(dt); // shared with the file explorer (utils.js)
   }
 
   // Re-attach to session after reconnect: re-register with server + sync missed messages

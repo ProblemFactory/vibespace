@@ -139,7 +139,7 @@ export function installExplorerUploads(FileExplorer) {
     const names = [];
     for (const f of files) {
       fd.append('files', f);
-      const rel = isFolder && f.webkitRelativePath ? f.webkitRelativePath : f.name;
+      const rel = isFolder ? (f._relPath || f.webkitRelativePath || f.name) : f.name;
       names.push(rel);
     }
     fd.append('fileNames', JSON.stringify(names));
