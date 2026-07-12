@@ -79,6 +79,18 @@ LRU keep-alive of the last **N workspaces** (setting `desktop.stageKeepAlive`, d
   global (layouts.json + layout-sync). Close decisions act on shared windows → only the
   LRU/close pass runs them, guarded by the busy re-check.
 
+## 5b. User addenda (2026-07-12, mid-implementation)
+
+- **Incoming hero sits at the BOTTOM of the stage z-order**: the shared slot may have been
+  moved/resized since a workspace was recorded, so the materializing hero must not cover that
+  workspace's aux windows — the user rearranges from there. Input focus stays on the hero.
+- **Aux state restoration is maximal**: the LRU-hidden tier preserves everything for free
+  (visibility:hidden). The REPLAY tier additionally records per-window `extras` (a generic
+  walker captures every scrollable descendant's scroll offsets, index-matched on restore) and
+  refreshes live openSpec fields at record time (e.g. the file explorer's CURRENT path, not its
+  creation path). Deep per-type state (wrap toggles etc.) rides the hidden tier; replay-tier
+  fidelity can grow per-type as needed.
+
 ## 6. Ported defensive mechanisms (walter's field lessons — do not skip)
 
 1. **Serialize hero switches** (lock-and-queue, latest-wins): rapid A→B clicks running two
@@ -140,10 +152,16 @@ with their own workspace of helper windows."
   shows live hidden members + replays missing via openSpec with `_replayingKeys` dedup (15s) and
   hides stale late-landing replays; `_sweepTransient()` closes empty-stage windows on
   materialize/leave; aux close → unbind + re-record; dm.moveWindowToDesktop → `stage.unbind`.
-- [ ] **Phase D**: LRU keep-alive (setting exists) + busy re-check at close time (streaming/
-  bg tasks/goal/permission/draft — see chatStatus/taskState surfaces), preview polish,
-  Ctrl+Alt+Left entry from leftmost desktop, CLAUDE.md + docs/window-manager.md sections,
-  CHANGELOG + version bump, e2e smoke via headless where possible.
+- [x] **Phase D (committed)**: LRU eviction `_enforceLru` — v1 CONSERVATIVE: only hidden AUX
+  windows beyond keep-alive N are closed (records replay them); session windows are NEVER
+  closed by the stage (strictly avoids walter's killed-session class). Ctrl+Alt+Left enters
+  from the leftmost desktop / Right leaves (command-mode.js). Placeholder window controls
+  hidden via CSS. Hero-at-bottom z placement + extras capture/restore (addenda §5b).
+  SMOKE-VERIFIED via CDP-driven headless Chrome on an isolated worktree instance (12/12):
+  enter/placeholder/materialize-at-slot/aux-bind/swap-hides-set/hero-close-returns-placeholder/
+  leave-restores-desktop; caught+fixed: onWindowCreated must check win.type==='stage-placeholder'
+  (the _isStagePlaceholder flag is set AFTER createWindow's tail hook ran — the placeholder got
+  tagged transient and swept on first materialization).
 
 Known Phase A+B caveats to revisit: `shouldIntercept` has a dead `_hiddenByStage === undefined
 && false` clause (harmless, clean up); placeholder close button should be disabled; leave()

@@ -2897,3 +2897,4 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .window.stage-placeholder { border-style: dashed; background: color-mix(in srgb, var(--accent) 4%, var(--bg-window)); }
 .window.stage-placeholder .window-content { display: flex; align-items: center; justify-content: center; }
 .stage-placeholder-hint { max-width: 320px; padding: 20px; text-align: center; font-size: 12px; color: var(--text-dim); }
+.window.stage-placeholder .win-close, .window.stage-placeholder .win-minimize, .window.stage-placeholder .win-maximize { display: none; }

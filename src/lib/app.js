@@ -908,10 +908,16 @@ class App {
     const [v, cl] = await Promise.all([fetchJson('/api/version?fresh=1'), fetchJson('/api/changelog-diff?fresh=1')]);
     if (!body.isConnected) return;
     const cur = v?.version || cl?.current || '?';
-    const latest = v?.latest || cl?.latest || null;
-    const newer = latest && this._versionNewer(latest, cur);
     const entries = cl?.entries || [];
-    const atLatest = !!cl?.atLatest || !newer;
+    // /api/version's `latest` and the changelog are fetched+cached SEPARATELY —
+    // their stamps can disagree (real report: badge said "latest" while the
+    // list showed the next version's entries). The newest changelog entry
+    // carries a version too; trust whichever source is newer.
+    const newestEntry = entries[0]?.version || null;
+    let latest = v?.latest || cl?.latest || null;
+    if (newestEntry && (!latest || this._versionNewer(newestEntry, latest))) latest = newestEntry;
+    const newer = latest && this._versionNewer(latest, cur);
+    const atLatest = !newer;
     const list = entries.length
       ? entries.map((e) => `
         <div class="ucl-entry">
