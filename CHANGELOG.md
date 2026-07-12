@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.111.24 — 2026-07-12
+
+- Waiting states now require the COMPLETE reason: `blocked`/`needs-input`/`review` must carry BOTH `--reason` (one line for the board chip) AND `--detail` (full context: options, what was tried, the recommendation) — rejected at CLI pre-flight and the agent route otherwise. Same-state records already carrying both still accept reason-less tweaks (urgency bumps). The status CLI usage spells the requirement out.
+
 ## 2.111.23 — 2026-07-12
 
 - **`vibespace-status blocked/needs-input/review` without a reason is now REJECTED** (CLI pre-flight + server-side, matching error text) — a bare waiting state on the board tells the user nothing. The error teaches the fix: `--reason "…" ` + say it in chat + mirror with vibespace-ask. Grace: tweaking (e.g. `--urgency`) a same-state record that already carries a reason still passes.

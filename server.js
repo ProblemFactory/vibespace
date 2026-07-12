@@ -1370,8 +1370,9 @@ const USAGE = [
   '  vibespace-status clear      remove the indicator',
   '  vibespace-status show       print the current indicator',
   '',
-  'The user reads this on the board — keep it honest and current. Set blocked or needs-input',
-  '(bump --urgency) the MOMENT you are stuck or waiting on the user, and done when finished.',
+  'The user reads this on the board — keep it honest and current. blocked/needs-input/review REQUIRE',
+  '--reason (one line) + --detail (full context). Set them the MOMENT you are stuck or waiting;',
+  'done when finished.',
   'If you are waiting on the user, ALSO ask in chat + file it with vibespace-ask (both).',
 ].join('\\n');
 async function post(body) {
@@ -1399,19 +1400,21 @@ async function main() {
   // meant boards showed states with no explanation.
   const posReason = args[1] && !args[1].startsWith('--') ? args[1] : undefined;
   const reasonVal = opt('reason') ?? posReason;
-  if (['blocked', 'needs-input', 'review'].includes(cmd) && !(reasonVal || '').trim()) {
-    // A same-state record that already carries a reason may be tweaked
-    // (e.g. bumping --urgency) without re-sending it — check before failing.
+  const detailVal = opt('detail');
+  if (['blocked', 'needs-input', 'review'].includes(cmd) && (!(reasonVal || '').trim() || !(detailVal || '').trim())) {
+    // A same-state record that already carries BOTH may be tweaked
+    // (e.g. bumping --urgency) without re-sending them — check before failing.
     let existing = null;
     try { existing = (await post({ show: true })).status; } catch {}
-    if (!(existing && existing.state === cmd && (existing.reason || '').trim())) {
-      console.error('vibespace-status: "' + cmd + '" needs a reason the user can act on.');
-      console.error('  e.g. vibespace-status ' + cmd + ' --reason "waiting for the S3 credentials" [--urgency high]');
+    if (!(existing && existing.state === cmd && (existing.reason || '').trim() && (existing.detail || '').trim())) {
+      console.error('vibespace-status: "' + cmd + '" needs BOTH --reason (one line) AND --detail (full context).');
+      console.error('  e.g. vibespace-status ' + cmd + ' --reason "waiting for the S3 credentials" \\');
+      console.error('         --detail "Deploy needs the bucket keys; checked .env and the mounts config, not there. Recommend pasting them in chat." [--urgency high]');
       console.error('  (then say it in your chat reply and mirror it with: vibespace-ask "...")');
       process.exit(1);
     }
   }
-  await post({ state: cmd, urgency: opt('urgency'), reason: reasonVal, detail: opt('detail') });
+  await post({ state: cmd, urgency: opt('urgency'), reason: reasonVal, detail: detailVal });
   console.log('status set: ' + cmd + (opt('urgency') ? ' / ' + opt('urgency') : ''));
   if (cmd === 'blocked' || cmd === 'needs-input' || cmd === 'review') {
     console.log('REMINDER: you are waiting on the user — write what you need (with your recommendation) in your CHAT REPLY now, and mirror it with: vibespace-ask "..."');

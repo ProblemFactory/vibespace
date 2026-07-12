@@ -56,10 +56,12 @@ app.post('/api/agent/session-status', (req, res) => {
   // Grace: a follow-up tweak (e.g. bumping --urgency) on a record that already
   // carries a reason for the SAME state passes without re-sending it.
   const WAITING = new Set(['blocked', 'needs-input', 'review']);
-  if (!show && !clear && WAITING.has(state) && !String(reason || '').trim()) {
+  if (!show && !clear && WAITING.has(state) && (!String(reason || '').trim() || !String(detail || '').trim())) {
     const existing = sessionStatus.get(key);
-    if (!(existing && existing.state === state && String(existing.reason || '').trim())) {
-      return res.status(400).json({ error: `"${state}" needs a reason the user can act on — e.g. vibespace-status ${state} --reason "waiting for the API key" [--urgency high]. Then say it in chat and mirror it with vibespace-ask.` });
+    const existingComplete = existing && existing.state === state
+      && String(existing.reason || '').trim() && String(existing.detail || '').trim();
+    if (!existingComplete) {
+      return res.status(400).json({ error: `"${state}" needs BOTH a one-line --reason (what you're waiting on) AND --detail (full context: options, what you tried, your recommendation) — e.g. vibespace-status ${state} --reason "waiting for the API key" --detail "Deploy needs OPENAI_API_KEY; .env and 1Password checked, not there. Recommend the user paste it in chat." [--urgency high]. Then say it in chat and mirror it with vibespace-ask.` });
     }
   }
   try {
