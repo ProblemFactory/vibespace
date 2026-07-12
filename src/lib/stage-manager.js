@@ -271,7 +271,9 @@ export class StageManager {
       const spec = win._openSpec || {};
       const volatileNoRecipe =
         (spec.action === 'openFile' && /^\/tmp\//.test(spec.path || '') && spec.via?.kind !== 'archive-entry')
-        || (spec.action === 'openBrowser' && /^(blob|data):/.test(spec.url || ''));
+        || (spec.action === 'openBrowser' && /^(blob|data):/.test(spec.url || ''))
+        // an editor with UNSAVED CHANGES: closing = silent data loss
+        || (typeof win._editorDirty === 'function' && win._editorDirty());
       if (volatileNoRecipe) continue;
       this._boundAux.delete(winId); // record already serialized at deactivation
       try { this.app.wm.closeWindow(winId); } catch {}
@@ -479,7 +481,22 @@ export class StageManager {
       // recorded recipe; unrecoverable ones are skipped with one toast.
       const spec = { ...rec.openSpec };
       if (spec.action === 'openBrowser' && /^(blob|data):/.test(spec.url || '')) { skipped++; continue; }
-      if (spec.action === 'openFile' && spec.path) {
+      // Deleted task groups: the detail/log window would open and immediately
+      // self-close (tasks-updated) — skip cleanly instead.
+      if ((spec.action === 'openTaskDetail' || spec.action === 'openTaskLog') && spec.taskId) {
+        const tasks = this.app.sidebar?._tasks;
+        // unknown store shape → default to attempting the replay
+        const exists = Array.isArray(tasks) && tasks.length ? tasks.some((x) => x.id === spec.taskId) : true;
+        if (!exists) { skipped++; continue; }
+      }
+      // Workflow snapshots/journals can be gone (project dir cleaned) — probe.
+      if (spec.action === 'openWorkflowDetail' && spec.runId) {
+        try {
+          const r = await fetch(`/api/workflow?runId=${encodeURIComponent(spec.runId)}&claudeSessionId=${encodeURIComponent(spec.claudeSessionId || '')}&cwd=${encodeURIComponent(spec.cwd || '')}`);
+          if (r.status === 404) { skipped++; continue; }
+        } catch {}
+      }
+      if ((spec.action === 'openFile' || spec.action === 'openEditor') && spec.path) {
         try {
           const info = await (await fetch(`/api/file/info?path=${encodeURIComponent(spec.path)}${spec.host ? '&host=' + encodeURIComponent(spec.host) : ''}`)).json();
           if (info?.error || info?.missing) {

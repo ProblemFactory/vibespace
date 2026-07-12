@@ -142,6 +142,9 @@ function detectLang(filePath) {
 class CodeEditor {
   constructor(winInfo, filePath, fileName, app, opts = {}) {
     this.winInfo = winInfo; this.filePath = filePath; this.app = app;
+    // Stage/layout machinery reads dirty state through the window record —
+    // an editor with unsaved changes must never be auto-closed (LRU eviction).
+    winInfo._editorDirty = () => !!this.modified;
     this.onSaveAndClose = opts.onSaveAndClose || null;
     this._gotoLine = opts.line || null;
     this._isReadOnly = opts._tempFile || false;

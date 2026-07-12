@@ -77,6 +77,24 @@ openSpec points at — classified at replay time:
 Deleted/moved real files degrade to skip+toast too (no recipe). Remote-host files ride the
 same probe with `?host=`.
 
+Full audit of every replayOpenSpec action (2026-07-12, user push "别止步于此"):
+
+| action | class | replay risk | handling |
+|---|---|---|---|
+| attachSession | hero (never aux) | stale serverId / dead session | existing re-resolution + viewSession fallback ✓ |
+| openFileExplorer | durable | dir deleted / host offline | opens + navigates; graceful in-window error, user re-navigates (live CURRENT path refreshed into the spec at record time) |
+| openFile | durable/derived | temp gone / file deleted | file/info probe; archive-entry recipe re-extracts; else skip+toast |
+| openEditor | durable | file deleted; **unsaved edits** | same probe+skip; `winInfo._editorDirty()` (new — CodeEditor.modified exposed) makes dirty editors VOLATILE: never LRU-evicted |
+| openBrowser | durable/volatile | blob:/data: dead after session | http(s) replays (page state lost — inherent); blob/data skip+toast, never evicted |
+| openDesktop | durable | VNC server restarted | reconnect handles; desktop session persists server-side ✓ |
+| openTaskDetail / openTaskLog | durable | task group DELETED | pre-checked against sidebar._tasks → skip (the window would open then self-close on tasks-updated) |
+| openUsage / openSettings | durable | none (server data / pure UI) | ✓ |
+| openSessionProps | durable | session gone | window renders from live lists, degrades to stale info — acceptable |
+| openWorkflowDetail | durable | wf snapshot/journal cleaned | GET /api/workflow probe → 404 skips |
+| attachTmuxSession | hero-class (terminal → never aux) | tmux target gone | attach errors into existing handling; N/A for workspaces |
+| viewSession / viewSubagent | hero-class (type chat → never aux) | JSONL gone | N/A for workspaces; NOTE: focusing a read-only view on stage materializes it as hero (harmless — a read-only hero) |
+| Ctrl+G editor / Settings-style transient | unbindable (no openSpec) | — | hide/show only; never recorded (correct: they're turn-scoped) |
+
 ## 5. Deactivation policy (hide vs close)
 
 LRU keep-alive of the last **N workspaces** (setting `desktop.stageKeepAlive`, default 3):
