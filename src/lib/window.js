@@ -1122,7 +1122,11 @@ class WindowManager {
       this._positionToCell(w, cellIdx, true);
       setTimeout(() => { this._captureGridBounds(w); if (w._tabChain) this._syncChainBounds(w._tabChain); }, 250);
     });
-    setTimeout(() => { this._scheduleOverlapUpdate(); this._notify(); }, 300);
+    // One-shot mode (layout.presetOneShot): the arrangement is a single
+    // action — drop back to free-form once windows have settled, instead of
+    // keeping the grid armed for every future drag.
+    const oneShot = this._app?.settings?.get('layout.presetOneShot') === true;
+    setTimeout(() => { this._scheduleOverlapUpdate(); this._notify(); if (oneShot) this.setGrid(null); }, 300);
   }
   // ── Overlap Switcher (middle-click on title bar) ──
   _rectsOverlap(a, b) {

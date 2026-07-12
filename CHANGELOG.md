@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.111.20 — 2026-07-12
+
+- **Usage meters no longer vanish on instances without captured data** (real report: k8s instances with showUsage on showed nothing). Chat sessions never produce the passive statusline feed, so a fresh chat-only instance had zero usage cache and the meter row was skipped entirely. A machine with a CLI login now renders gray "no data yet" donuts + a popup note explaining where data comes from (terminal sessions, or the on-demand ⟳).
+- **New setting `layout.presetOneShot`**: layout buttons arrange windows once and return to free-form, instead of keeping the grid armed for every future drag (default remains the persistent grid).
+- **Settings window scroll-spy**: the left category nav highlights the section currently in view as you scroll.
+- **Gear menu regrouped by nature**: ① Customize UI / Language ② Manage agents / Usage / Diagnostics ③ Backup / Password / Update ④ Welcome tour / Sign out; Diagnostics got its own pulse icon (was sharing Usage's chart icon).
+
 ## 2.111.19 — 2026-07-12
 
 - Desktop availability probe retries with backoff (3s→90s, 5 attempts) when it fails — a page loaded during a server-restart window now self-heals without an F5 or a WebSocket reconnect (the button vanished repeatedly for a user during an update storm).

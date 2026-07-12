@@ -200,7 +200,14 @@ export function installUsageMeter(App, ctx = {}) {
     const hasSwitch = claudeSubs.length > 0;
     const codexHasSwitch = codexSubs.length > 0;
 
-    if (!rl && !codex && !hasSwitch && !codexHasSwitch) {
+    // A login WITHOUT captured data still renders gray "no data yet" donuts —
+    // chat-mode sessions never produce the passive statusline feed, so fresh
+    // instances looked like the meters had vanished despite showUsage being
+    // on (real report from the k8s instances). Only a machine with no logins
+    // and no accounts at all hides the meters.
+    const glKnown = !!(gl.loggedIn || gl.email);
+    const cglKnown = !!(cgl.loggedIn || cgl.email);
+    if (!rl && !codex && !hasSwitch && !codexHasSwitch && !glKnown && !cglKnown) {
       usageEl.innerHTML = '';
       popup.innerHTML = `<div class="empty-hint">${t('No usage data')}</div>`;
       return;
@@ -247,7 +254,7 @@ export function installUsageMeter(App, ctx = {}) {
       return d.toLocaleDateString([], {month:'short',day:'numeric'}) + ' ' + time;
     };
 
-    if (rl || hasSwitch) {
+    if (rl || hasSwitch || glKnown) {
       const noData = !rl;
       const pct5h = Math.round((rl?.fiveHour?.utilization || 0) * 100);
       const color = usageColor(pct5h);
@@ -295,7 +302,7 @@ export function installUsageMeter(App, ctx = {}) {
       // when that's what's displayed (directly or via the linked account).
       const showingGlobal = sel === '__global__' || (gl.accountId && sel === gl.accountId) || (sel === 'auto' && rl === this._rateLimit);
       const body = noData
-        ? `<div class="usage-note">${t('No usage captured yet for this account — run a terminal session on it.')}</div>`
+        ? `<div class="usage-note">${t('No usage captured yet — quota data arrives passively from terminal sessions (chat sessions don’t report it), or use ⟳ to fetch it on demand.')}</div>`
         : `<div class="usage-session">
         <div class="usage-session-name">${t('5-hour limit')}</div>
         <div class="usage-bar" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pct5h}%;background:${color}"></div></div>
@@ -321,7 +328,7 @@ export function installUsageMeter(App, ctx = {}) {
       ${body}`);
     }
 
-    if (codex?.fiveHour || codex?.sevenDay || codexHasSwitch) {
+    if (codex?.fiveHour || codex?.sevenDay || codexHasSwitch || cglKnown) {
       const cNoData = !(codex?.fiveHour || codex?.sevenDay);
       const pct5h = Math.round(codex?.fiveHour?.usedPercent || ((codex?.fiveHour?.utilization || 0) * 100));
       const pct7d = Math.round(codex?.sevenDay?.usedPercent || ((codex?.sevenDay?.utilization || 0) * 100));

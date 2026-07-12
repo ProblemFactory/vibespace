@@ -1672,4 +1672,7 @@ export default {
   "Or paste into your rclone config (~/.config/rclone/rclone.conf)": "または rclone 設定 (~/.config/rclone/rclone.conf) に貼り付け",
   "Then: rclone mount {name}: /path/to/local/folder": "その後：rclone mount {name}: /ローカル/マウント先",
   "Extracting {name}…": "{name} を展開中…",
+  "Layout buttons apply once": "レイアウトボタンを一回限りにする",
+  "A layout button arranges the current windows once and returns to free-form. Off (default): it also keeps that grid active, so windows snap to its cells until you pick Freeform": "レイアウトボタンは現在のウィンドウを一度整列してフリーフォームに戻ります。オフ（既定）：そのグリッドが有効のままになり、以降のドラッグはセルにスナップします",
+  "No usage captured yet — quota data arrives passively from terminal sessions (chat sessions don’t report it), or use ⟳ to fetch it on demand.": "まだ使用量データがありません——クォータはターミナルセッションから受動的に届きます（チャットセッションでは報告されません）。⟳ でオンデマンド取得も可能。",
 };

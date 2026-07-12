@@ -1668,4 +1668,7 @@ export default {
   "Or paste into your rclone config (~/.config/rclone/rclone.conf)": "或直接粘贴进你的 rclone 配置 (~/.config/rclone/rclone.conf)",
   "Then: rclone mount {name}: /path/to/local/folder": "然后：rclone mount {name}: /本地/挂载点",
   "Extracting {name}…": "正在解压 {name}…",
+  "Layout buttons apply once": "布局按钮只生效一次",
+  "A layout button arranges the current windows once and returns to free-form. Off (default): it also keeps that grid active, so windows snap to its cells until you pick Freeform": "点布局按钮只把当前窗口排列一次，随后回到自由模式。关闭（默认）：会同时启用该网格，之后拖动窗口都吸附到格子，直到你选“自由布局”",
+  "No usage captured yet — quota data arrives passively from terminal sessions (chat sessions don’t report it), or use ⟳ to fetch it on demand.": "暂无用量数据——配额数据由终端会话被动上报（聊天会话不产生），也可点 ⟳ 主动获取。",
 };
