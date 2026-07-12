@@ -1,5 +1,14 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* Kill Android Chrome's text autosizer (font boosting). With text-size-adjust
+   left at `auto`, mobile Chrome inflates/REWRAPS text runs it deems too small
+   — the 11px code font on a dpr-3 phone is its prime target. It rewraps
+   white-space:pre code into narrow columns and paints it OVERLAPPING adjacent
+   lines while the layout boxes stay clean (probe-measured: an 82-char line's
+   span squeezed to 47.4px vs 353.2px siblings; rows perfectly stacked). Purely
+   engine-side, so desktop never reproduces it. 100% = no adjustment. */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+
 :root, [data-theme="dark"] {
   --accent-fg: #042f2a; --magenta: #c678dd; --cyan: #56b6c2; --hover-overlay: rgba(255,255,255,0.1);
   --bg-root: #0c0c18; --bg-workspace: #111122; --bg-window: #1a1a30;

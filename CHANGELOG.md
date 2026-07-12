@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.111.9 — 2026-07-12
+
+- **Actually fixed the mobile code-block text overlap** (2.111.8's content-visibility theory was refuted by an on-device probe). Real cause: `text-size-adjust` was never set, so Android Chrome's text autosizer (font boosting) inflated/rewrapped the 11px code font — rewrapping `white-space: pre` lines into narrow columns painted over adjacent rows while layout stayed clean (probe: rows perfectly stacked, one 82-char span squeezed to 47.4px vs 353.2px siblings). Fix: `html { -webkit-text-size-adjust: 100%; text-size-adjust: 100% }`. The on-device diagnostic probe stays one release for verification.
+
 ## 2.111.8 — 2026-07-12
 
 - **Fixed chat code blocks painting overlapping lines (long-standing, root-caused)**. `.chat-msg` uses `content-visibility: auto` with `contain-intrinsic-size: auto` — which REMEMBERS the last-rendered height. A code block's height is width-sensitive when wrapped (narrower → more wrapped rows → taller), so a message first rendered at desktop width cached a short height; scrolling it off then back on a narrower viewport (mobile, or a window resize) reused that stale short height, making the box shorter than its content and the code lines paint over each other. This exactly explains why it was persistent, never self-healed on scroll, and never reproduced on a fresh narrow-width first render. Code-block messages are now carved out of the content-visibility height cache (`:has(.chat-code-block)`), so their height is always measured live. Also removes the scroll tracer added in 2.111.4-5 (the scroll-jump fix is verified).
