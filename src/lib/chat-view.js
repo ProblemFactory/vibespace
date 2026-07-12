@@ -1928,90 +1928,13 @@ class ChatView {
     return false;
   }
 
-  // ── Scroll-jump tracer (temporary diagnostic) ──
-  _trace(ev, data) {
-    const b = (this._traceBuf = this._traceBuf || []);
-    b.push({ t: Math.round(performance.now()), ev, ...data });
-    if (b.length > 250) b.shift();
-  }
-
-  /** Mark a short window in which a programmatic scrollTop change is EXPECTED
-   *  (compensation/jump code) so the detector doesn't fire on our own writes. */
-  _traceExpect() { this._traceExpectAt = performance.now(); }
-
-  _traceDump(reason, extra = {}) {
-    const now = performance.now();
-    if (now - (this._traceLastDump || 0) < 15000) return;
-    this._traceLastDump = now;
-    this._trace('DUMP:' + reason, extra);
-    const payload = JSON.stringify({ sid: this.sessionId, reason, ...extra, buf: this._traceBuf || [] });
-    try {
-      fetch('/api/telemetry', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ events: [{ kind: 'trace', name: 'chat-scroll-jump', detail: payload.slice(0, 64000) }] }),
-      }).catch(() => {});
-    } catch {}
-  }
-
-  _installScrollTracer() {
-    const list = this._messageList;
-    let lastSt = 0;
-    list.addEventListener('wheel', (e) => {
-      this._traceWheelAt = performance.now();
-      this._trace('wheel', { dy: Math.round(e.deltaY) });
-    }, { passive: true });
-    list.addEventListener('touchmove', () => { this._traceWheelAt = performance.now(); }, { passive: true });
-    list.addEventListener('scroll', () => {
-      const st = list.scrollTop;
-      const d = st - lastSt;
-      const now = performance.now();
-      this._trace('scroll', { st: Math.round(st), d: Math.round(d), sh: list.scrollHeight });
-      const wheelRecent = now - (this._traceWheelAt || 0) < 300;
-      const expected = now - (this._traceExpectAt || 0) < 300;
-      // Wheel-recent does NOT exempt: a wheel tick moves ~100-200px, so a
-      // >600px single-event delta is a jump regardless. Only our own
-      // compensation windows exempt.
-      if (Math.abs(d) > 600 && !expected && !this._pinned && (this._traceBuf?.length || 0) > 10) {
-        this._traceDump('scrolltop-jump', { jump: Math.round(d), wheelRecent });
-      }
-      lastSt = st;
-    }, { passive: true });
-    // CONTENT-displacement jumps produce NO scroll event: content above the
-    // viewport changes height, scrollTop stays put, and what the user reads
-    // slides away. Watch the topmost visible element's offset drift instead.
-    let anchor = null; // { el, delta, st }
-    this._traceWatchTimer = setInterval(() => {
-      if (this._disposed) { clearInterval(this._traceWatchTimer); return; }
-      if (document.hidden || !list.isConnected || this._pinned) { anchor = null; return; }
-      const st = list.scrollTop;
-      let el = null;
-      for (const c of list.children) {
-        if (c.offsetHeight > 0 && c.offsetTop + c.offsetHeight > st) { el = c; break; }
-      }
-      if (!el) { anchor = null; return; }
-      if (anchor && anchor.el === el && anchor.el.isConnected) {
-        const delta = el.offsetTop - st;
-        const drift = delta - anchor.delta;
-        const stMoved = Math.abs(st - anchor.st);
-        // big drift NOT explained by the user scrolling = content jumped
-        if (Math.abs(drift) > 400 && Math.abs(Math.abs(drift) - stMoved) > 300
-            && performance.now() - (this._traceExpectAt || 0) > 400) {
-          this._trace('CONTENT-DRIFT', { drift: Math.round(drift), stMoved: Math.round(stMoved) });
-          this._traceDump('content-drift', { drift: Math.round(drift), stMoved: Math.round(stMoved) });
-        }
-      }
-      anchor = { el, delta: el.offsetTop - st, st };
-    }, 300);
-    // Manual capture: Ctrl+Shift+J right after SEEING a jump ships the buffer.
-    this._container?.addEventListener('keydown', (e) => {
-      if (e.ctrlKey && e.shiftKey && (e.key === 'J' || e.key === 'j')) {
-        e.preventDefault();
-        this._traceLastDump = 0; // manual always ships
-        this._traceDump('manual', { st: Math.round(list.scrollTop) });
-        showToast('Scroll trace captured', {});
-      }
-    });
-  }
+  // Scroll-jump tracer removed in 2.111.8 (the 2.111.5 element-anchored paging
+  // fix is user-verified). These stay as no-op stubs so the anchoring code's
+  // `_traceExpect()` marks and the scattered `_trace()` breadcrumbs don't need
+  // to be scrubbed from every call site.
+  _trace() {}
+  _traceExpect() {}
+  _installScrollTracer() {}
 
   _updateRuns() {
     const list = this._messageList;

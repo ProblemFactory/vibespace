@@ -104,6 +104,17 @@
 
 /* Messages */
 .chat-msg { max-width: 100%; min-width: 0; contain: layout style paint; content-visibility: auto; contain-intrinsic-size: auto 80px; }
+/* content-visibility:auto REMEMBERS the last-rendered height (the `auto` in
+   contain-intrinsic-size). A code block's height is WIDTH-SENSITIVE when
+   wrapped (narrower viewport -> more wrapped rows -> taller). A message first
+   rendered at desktop width caches a SHORT height; scroll it off then back on
+   a NARROWER viewport (mobile / resize) and content-visibility reuses that
+   stale short height, so the box is shorter than its content and the code
+   block's lines paint OVERLAPPING themselves (real report, mobile; persistent,
+   never self-heals on scroll, never repros on a fresh narrow-width first
+   render — all three explained by the stale cached height). Carve code-block
+   messages out of the height cache so their height is always measured live. */
+.chat-msg:has(.chat-code-block) { content-visibility: visible; contain: layout style; }
 .chat-msg-user { display: flex; justify-content: flex-end; }
 .chat-msg-assistant { display: flex; justify-content: flex-start; }
 .chat-msg-system { display: flex; justify-content: center; }
