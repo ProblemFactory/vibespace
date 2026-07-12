@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.111.16 — 2026-07-12
+
+- **Mac Finder can now WRITE into mounted shares** (real report: walter's Finder mount was read-only). Finder requires WebDAV class 2 (locking) to mount read-write — with class 1 it silently mounts read-only regardless of permissions. /dav now advertises `DAV: 1, 2` and implements advisory LOCK/UNLOCK (fake single-writer locks, nginx-dav_ext-style) + accept-and-ignore PROPPATCH; read-only tokens reject LOCK (403) so Finder correctly shows them read-only. Verified: OPTIONS/LOCK/PUT/PROPPATCH/UNLOCK green, rclone Bearer path unaffected.
+- Share dialog also emits a ready-to-paste **rclone config section** (webdav + bearer_token) next to the Finder info.
+
 ## 2.111.15 — 2026-07-12
 
 - "Share a local folder" now also shows the Finder/Explorer connection info (dav URL + raw token) so a Mac can mount the share natively without decoding the bridge link.

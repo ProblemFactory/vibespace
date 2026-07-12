@@ -16,8 +16,8 @@
  *
  * Implemented verbs (the subset rclone + common clients need): OPTIONS,
  * PROPFIND (Depth 0/1), HEAD, GET (with Range), PUT, MKCOL, DELETE, MOVE,
- * COPY. Locks are not implemented (rclone doesn't use them); LOCK/UNLOCK
- * return 501 with DAV:1 compliance only.
+ * COPY, plus ADVISORY (fake) LOCK/UNLOCK + accept-and-ignore PROPPATCH —
+ * DAV class 2, required for macOS Finder to mount read-write.
  */
 
 const fs = require('fs');
@@ -144,7 +144,7 @@ ${isDir ? '' : `<D:getcontentlength>${st.size}</D:getcontentlength>`}
  * body parser (PUT bodies stream straight to disk).
  */
 function registerWebdav(app, { tokens }) {
-  const WRITE_METHODS = new Set(['PUT', 'MKCOL', 'DELETE', 'MOVE', 'COPY', 'PROPPATCH']);
+  const WRITE_METHODS = new Set(['PUT', 'MKCOL', 'DELETE', 'MOVE', 'COPY', 'PROPPATCH', 'LOCK']);
 
   app.use('/dav', (req, res) => {
     // ── auth: Bearer mount token (rclone) OR Basic with the token as the
@@ -192,8 +192,29 @@ function registerWebdav(app, { tokens }) {
     try {
       switch (req.method) {
         case 'OPTIONS': {
-          res.set({ DAV: '1', Allow: 'OPTIONS, PROPFIND, HEAD, GET, PUT, MKCOL, DELETE, MOVE, COPY', 'MS-Author-Via': 'DAV' });
+          // DAV class 2 (locking) is REQUIRED for macOS Finder to mount
+          // read-write — with class 1 only, Finder silently mounts the volume
+          // READ-ONLY no matter what the token allows (real report: walter's
+          // Mac couldn't write into an rw share). Locks below are advisory
+          // fakes (single-writer semantics don't matter for this bridge —
+          // same approach as nginx dav_ext / many minimal servers).
+          res.set({ DAV: '1, 2', Allow: 'OPTIONS, PROPFIND, PROPPATCH, HEAD, GET, PUT, MKCOL, DELETE, MOVE, COPY, LOCK, UNLOCK', 'MS-Author-Via': 'DAV' });
           return res.status(200).end();
+        }
+        case 'LOCK': {
+          const lockToken = 'opaquelocktoken:' + crypto.randomUUID();
+          const timeout = /Second-\d+/.exec(req.headers.timeout || '')?.[0] || 'Second-3600';
+          res.set('Lock-Token', `<${lockToken}>`);
+          res.type('application/xml');
+          return res.status(200).send(`<?xml version="1.0" encoding="utf-8"?>\n<D:prop xmlns:D="DAV:"><D:lockdiscovery><D:activelock><D:locktype><D:write/></D:locktype><D:lockscope><D:exclusive/></D:lockscope><D:depth>infinity</D:depth><D:timeout>${timeout}</D:timeout><D:locktoken><D:href>${lockToken}</D:href></D:locktoken><D:lockroot><D:href>${req.baseUrl}${req.path}</D:href></D:lockroot></D:activelock></D:lockdiscovery></D:prop>`);
+        }
+        case 'UNLOCK':
+          return res.status(204).end();
+        case 'PROPPATCH': {
+          // Accept-and-ignore (Finder sets mod times / Finder-info props on
+          // every copy; failing this makes it roll back the whole write).
+          res.type('application/xml');
+          return res.status(207).send(`<?xml version="1.0" encoding="utf-8"?>\n<D:multistatus xmlns:D="DAV:"><D:response><D:href>${req.baseUrl}${req.path}</D:href><D:propstat><D:prop/><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response></D:multistatus>`);
         }
         case 'PROPFIND': {
           let st;

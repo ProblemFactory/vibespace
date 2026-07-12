@@ -1665,4 +1665,6 @@ export default {
   "Enable Ctrl+\\ command mode for keyboard-driven window management": "启用 Ctrl+\\ 命令模式，用键盘管理窗口",
   "Mount on a Mac / Windows (Finder / Explorer)": "在 Mac / Windows 上挂载（Finder / 资源管理器）",
   "Finder: Cmd+K → enter the server address; any username, password = the token below. Windows: map network drive to the same address.": "Finder：Cmd+K → 输入下方服务器地址；用户名任意，密码 = 下方令牌。Windows：映射网络驱动器到同一地址。",
+  "Or paste into your rclone config (~/.config/rclone/rclone.conf)": "或直接粘贴进你的 rclone 配置 (~/.config/rclone/rclone.conf)",
+  "Then: rclone mount {name}: /path/to/local/folder": "然后：rclone mount {name}: /本地/挂载点",
 };
