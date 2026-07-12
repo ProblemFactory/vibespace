@@ -936,51 +936,55 @@ class App {
     body.innerHTML = `
       <div class="selfupd-phase"><span class="upload-active-spinner"></span><span class="su-msg">${escHtml(t('Starting update…'))}</span></div>
       <pre class="selfupd-log"></pre>
-      <div class="mounts-field-hint">${escHtml(t('Sessions keep running (dtach) — the page reloads by itself when the new version is up.'))}</div>`;
+      <div class="mounts-field-hint">${escHtml(t('Sessions keep running (dtach) — the page reloads by itself when the new version is up.'))}</div>
+      <div class="dialog-actions"><button type="button" class="mounts-btn su-reload" style="display:none">${escHtml(t('Reload now'))}</button></div>`;
     const phaseEl = body.querySelector('.su-msg');
     const spinEl = body.querySelector('.upload-active-spinner');
     const logEl = body.querySelector('.selfupd-log');
+    const reloadBtn = body.querySelector('.su-reload');
+    reloadBtn.onclick = () => location.reload();
     const setPhase = (msg, cls) => { phaseEl.textContent = msg; if (cls) { phaseEl.className = 'su-msg ' + cls; spinEl?.remove(); } };
-    const startVersion = (await fetchJson('/api/version'))?.version || null;
+    const ver = () => fetchJson('/api/version?t=' + Date.now()); // cache-bust so a restart is actually observed
+    const startVersion = (await ver())?.version || null;
     const r = await fetchJson('/api/self-update', { method: 'POST' });
     if (!r?.success) { setPhase(r?.error || t('Failed'), 'ob-bad'); return; }
     const t0 = Date.now();
-    let done = false;
+    let done = false, wasDown = false, restartSeen = false;
+    const reload = (msg) => { done = true; setPhase(msg, 'ob-ok'); setTimeout(() => location.reload(), 1200); };
     const tick = async () => {
       if (done || !body.isConnected) return;
       const st = await fetchJson('/api/self-update/status');
+      const v = await ver();
       if (st?.log) {
         logEl.textContent = st.log.replace(/__UPDATE_EXIT:\d+\s*$/, '');
         logEl.scrollTop = logEl.scrollHeight;
-      }
-      const v = await fetchJson('/api/version');
-      // New version answering = update landed; reload onto the new bundle.
-      if (v?.version && startVersion && v.version !== startVersion) {
-        done = true;
-        setPhase(t('Updated to v{v} — reloading…', { v: v.version }), 'ob-ok');
-        setTimeout(() => location.reload(), 1500);
-        return;
+        if (/restarting/i.test(st.log)) restartSeen = true;
       }
       const exitM = /__UPDATE_EXIT:(\d+)/.exec(st?.log || '');
+      // Failure first — a non-zero exit means the build/pull broke; stop.
       if (exitM && exitM[1] !== '0') {
-        done = true;
-        setPhase(t('Update failed (exit {code}) — see the log below', { code: exitM[1] }), 'ob-bad');
-        return;
+        done = true; setPhase(t('Update failed (exit {code}) — see the log below', { code: exitM[1] }), 'ob-bad');
+        reloadBtn.style.display = ''; return;
       }
-      if (exitM && exitM[1] === '0' && v?.version === startVersion && /already up to date/i.test(st?.log || '')) {
-        // Nothing to pull — the script still restarts the service; wait a
-        // moment for it to come back, then confirm and close out.
-        done = true;
-        setPhase(t('Already up to date (v{v})', { v: startVersion }), 'ob-ok');
-        return;
+      // The server going unreachable then reachable again IS the restart —
+      // the robust signal that new code is serving (works even when the
+      // version number is unchanged, e.g. re-running update on the latest).
+      if (!v) { wasDown = true; setPhase(t('Restarting the service…')); }
+      else if (startVersion && v.version !== startVersion) { reload(t('Updated to v{v} — reloading…', { v: v.version })); return; }
+      else if (v && (wasDown || (restartSeen && exitM && exitM[1] === '0'))) { reload(t('Update complete — reloading…')); return; }
+      // Finished, exit 0, but no restart happened at all (no service manager
+      // branch of update.sh) — nothing to reload onto; just confirm.
+      else if (exitM && exitM[1] === '0' && !restartSeen && Date.now() - t0 > 8000) {
+        done = true; setPhase(t('Already up to date (v{v})', { v: v?.version || startVersion }), 'ob-ok'); return;
       }
-      if (!st && !v) setPhase(t('Restarting the service…'));
-      if (Date.now() - t0 > 10 * 60 * 1000) { done = true; setPhase(t('Timed out — check the log below or data/update.log on the server'), 'ob-bad'); return; }
-      setTimeout(tick, 1200);
+      if (Date.now() - t0 > 10 * 60 * 1000) {
+        done = true; setPhase(t('Timed out — check the log below or data/update.log on the server'), 'ob-bad');
+        reloadBtn.style.display = ''; return;
+      }
+      setTimeout(tick, 900);
     };
     tick();
   }
-
   /** Is semver a newer than b? (plain x.y.z compare) */
   _versionNewer(a, b) {
     const pa = String(a).split('.').map(Number), pb = String(b).split('.').map(Number);

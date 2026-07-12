@@ -1686,4 +1686,6 @@ export default {
   "Restarting the service…": "サービスを再起動中…",
   "Timed out — check the log below or data/update.log on the server": "タイムアウト——下のログかサーバーの data/update.log を確認",
   "Updating VibeSpace": "VibeSpace を更新中",
+  "Reload now": "今すぐリロード",
+  "Update complete — reloading…": "更新完了——リロード中…",
 };
