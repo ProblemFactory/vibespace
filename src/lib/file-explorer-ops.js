@@ -267,13 +267,60 @@ export function installExplorerOps(FileExplorer) {
       if (!d || !d.trim()) return;
       dest = this.currentPath + '/' + d.trim();
     }
-    showToast(t('Extracting\u2026'));
-    // overwrite:false = skip files that already exist (never destructive)
-    const r = await fetch('/api/archive/extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this._hb({ path: src, dest, overwrite: false })) }).catch(() => null);
+    // overwrite:false = skip files that already exist (never destructive).
+    // Local extraction runs as a server-side op with a PERSISTENT progress row
+    // (reuses the upload rows + button ring — a big archive used to look
+    // frozen for minutes); remote hosts keep the plain synchronous call.
+    const wantProgress = !this._host;
+    const r = await fetch('/api/archive/extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this._hb({ path: src, dest, overwrite: false, progress: wantProgress ? 1 : 0 })) }).catch(() => null);
     const dd = await r?.json().catch(() => ({}));
-    if (!r?.ok) showToast(t('Extract failed: {msg}', { msg: dd?.error || t('unknown error') }), { type: 'error' });
-    else showToast(here ? t('Extracted here') : t('Extracted to {name}', { name: dest.split('/').pop() }));
+    if (!r?.ok) { showToast(t('Extract failed: {msg}', { msg: dd?.error || t('unknown error') }), { type: 'error' }); return; }
+    if (wantProgress && dd.opId) { this._trackExtractOp(dd.opId, name, dest); return; }
+    showToast(here ? t('Extracted here') : t('Extracted to {name}', { name: dest.split('/').pop() }));
     this.refresh();
+  },
+
+  // Poll a server-side extraction op and surface it as a persistent inline
+  // progress row (same machinery as uploads: list row + button ring + popover).
+  _trackExtractOp(opId, name, dest) {
+    const label = t('Extracting {name}\u2026', { name });
+    const upload = {
+      xhr: { abort: () => fetch('/api/archive/extract-status?id=' + encodeURIComponent(opId), { method: 'DELETE' }).catch(() => {}) },
+      files: [], destDir: dest, displayNames: [label], isFolder: false,
+      pct: 0, status: 'uploading', domRefs: new Map(),
+    };
+    const key = 'extract-' + opId;
+    this._activeUploads.set(key, upload);
+    this._updateUploadRing();
+    if (this.currentPath === dest) this._renderItems();
+    const finish = (ok, st) => {
+      upload.status = ok ? 'done' : 'error';
+      upload.pct = 100;
+      for (const ref of upload.domRefs.values()) {
+        ref.row.classList.add(ok ? 'file-upload-done' : 'file-upload-error');
+        ref.fill.style.width = '100%';
+        ref.pctLabel.textContent = ok ? '100%' : t('Failed');
+      }
+      if (ok) showToast(t('Extracted to {name}', { name: (st?.dest || dest).split('/').pop() }));
+      else if (st?.status !== 'cancelled') showToast(t('Extract failed: {msg}', { msg: st?.error || t('unknown error') }), { type: 'error' });
+      setTimeout(() => { this._activeUploads.delete(key); this._updateUploadRing(); this.refresh(); }, ok ? 1200 : 4000);
+    };
+    const poll = setInterval(async () => {
+      let st = null;
+      try { const rr = await fetch('/api/archive/extract-status?id=' + encodeURIComponent(opId)); st = rr.ok ? await rr.json() : null; } catch {}
+      if (!st) { clearInterval(poll); finish(false, null); return; }
+      if (st.status === 'listing' || st.status === 'running') {
+        const pct = st.total ? Math.min(99, Math.round(st.done / st.total * 100)) : 0;
+        upload.pct = pct;
+        for (const ref of upload.domRefs.values()) {
+          ref.fill.style.width = pct + '%';
+          ref.pctLabel.textContent = st.total ? pct + '%' : t('{n} files', { n: st.done });
+        }
+        return;
+      }
+      clearInterval(poll);
+      finish(st.status === 'done', st);
+    }, 700);
   },
 
     async _deleteSelection() {
