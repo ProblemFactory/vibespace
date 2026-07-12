@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.111.17 — 2026-07-12
+
+- **Dragging a FOLDER onto the file explorer now works** (real report: "dragging a folder from the Mac always fails"). The explorer's OS-drop handler used the flat `dataTransfer.files` list, which represents a dragged folder as one unreadable pseudo-File — the upload always failed. It now recurses the tree via the entries API (`collectDroppedFiles`, shared with the chat drop path, which already did this correctly) and recreates the folder structure at the destination. Server round-trip verified with CJK names, spaces, and deep nesting.
+
 ## 2.111.16 — 2026-07-12
 
 - **Mac Finder can now WRITE into mounted shares** (real report: walter's Finder mount was read-only). Finder requires WebDAV class 2 (locking) to mount read-write — with class 1 it silently mounts read-only regardless of permissions. /dav now advertises `DAV: 1, 2` and implements advisory LOCK/UNLOCK (fake single-writer locks, nginx-dav_ext-style) + accept-and-ignore PROPPATCH; read-only tokens reject LOCK (403) so Finder correctly shows them read-only. Verified: OPTIONS/LOCK/PUT/PROPPATCH/UNLOCK green, rclone Bearer path unaffected.

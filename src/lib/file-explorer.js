@@ -1,4 +1,4 @@
-import { formatSize, attachPopoverClose, createPopover, createModalShell, showContextMenu, getStateSync, copyText, escHtml, frontTruncate, uploadFilesBatched, showInputDialog, showConfirmDialog, showToast } from './utils.js';
+import { formatSize, attachPopoverClose, createPopover, createModalShell, showContextMenu, getStateSync, copyText, escHtml, frontTruncate, uploadFilesBatched, showInputDialog, showConfirmDialog, showToast, collectDroppedFiles } from './utils.js';
 import { installExplorerUploads } from './file-explorer-uploads.js';
 import { installExplorerOps } from './file-explorer-ops.js';
 import { setupDirAutocomplete } from './autocomplete.js';
@@ -181,8 +181,22 @@ class FileExplorer {
     el.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); });
     el.addEventListener('drop', (e) => {
       e.preventDefault(); e.stopPropagation();
-      // OS file drop → upload; internal explorer→explorer drag → transfer
-      if (e.dataTransfer.files.length) { this._uploadFiles(e.dataTransfer.files); return; }
+      // OS file drop → upload; internal explorer→explorer drag → transfer.
+      // MUST go through collectDroppedFiles: the flat dataTransfer.files list
+      // represents a dragged FOLDER as one unreadable pseudo-File (size 0,
+      // empty type) — uploading that always fails (real report: "dragging a
+      // folder from the Mac always fails"). The entries API recurses the tree
+      // and stamps _relPath so the folder structure is recreated. The call is
+      // made synchronously (entries are neutered once the handler yields).
+      if (e.dataTransfer.items?.length || e.dataTransfer.files.length) {
+        const p = collectDroppedFiles(e.dataTransfer);
+        p.then((files) => {
+          if (!files.length) return;
+          const isFolder = files.some((f) => (f._relPath || f.webkitRelativePath || '').includes('/'));
+          this._uploadFiles(files, isFolder);
+        });
+        return;
+      }
       const srcPath = e.dataTransfer.getData('application/x-file-path');
       if (srcPath) this._receiveDraggedFile(srcPath, e.dataTransfer.getData('application/x-file-host') || '');
     });
