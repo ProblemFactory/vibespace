@@ -271,6 +271,7 @@ class App {
     // Re-attach all terminal sessions on reconnect (chat sessions handle their own)
     this.ws.onStateChange((connected) => {
       if (!connected) return;
+      if (!this._vncAvailable) this._probeVncAvailability(); // may have failed during a restart-window page load
       for (const [winId, session] of this.sessions) {
         if (session instanceof TerminalSession && session.sessionId) {
           this.ws.send({ type: 'attach', sessionId: session.sessionId });
@@ -283,14 +284,13 @@ class App {
       }
     });
 
-    // Desktop (noVNC) availability — one startup probe gates the ⚙ menu entry
-    fetchJson('/api/vnc/status').then((d) => {
-      this._vncAvailable = !!d?.available;
-      // Toolbar Desktop button (next to Browser, user directive) — shown only
-      // where a VNC stack exists AND the chrome setting keeps it on.
-      const b = document.getElementById('btn-desktop');
-      if (b) b.style.display = (this._vncAvailable && this.settings.get('toolbar.showDesktopButton') !== false) ? '' : 'none';
-    }).catch(() => {});
+    // Desktop (noVNC) availability gates the ⚙ menu entry + toolbar button.
+    // Probed at startup AND re-probed on every ws reconnect: a page that
+    // loads during a server restart window gets a failed probe, and a
+    // once-only check would hide the Desktop feature for the whole page
+    // session (real report — walter onboarded mid-update, "desktop功能直接
+    // 被禁用"; F5 was the only cure).
+    this._probeVncAvailability();
 
     // Mobile nav bar + gestures (only on mobile)
     this._mobileNav = this.isMobile ? new MobileNav(this) : null;
@@ -1556,6 +1556,14 @@ class App {
     winInfo._explorer = explorer;
     winInfo.onClose = () => { explorer.dispose(); this._checkWelcome(); };
     return winInfo;
+  }
+
+  _probeVncAvailability() {
+    fetchJson('/api/vnc/status').then((d) => {
+      this._vncAvailable = !!d?.available;
+      const b = document.getElementById('btn-desktop');
+      if (b) b.style.display = (this._vncAvailable && this.settings.get('toolbar.showDesktopButton') !== false) ? '' : 'none';
+    }).catch(() => {});
   }
 
   openBrowser(url, opts) { return openBrowserFn(this, url, opts); }
