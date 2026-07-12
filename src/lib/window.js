@@ -372,8 +372,13 @@ class WindowManager {
       // Desktop preview: detect hover, collapse window into mini preview inside it
       const prevVis = element.style.visibility;
       element.style.visibility = 'hidden';
-      const hoverPreview = document.elementFromPoint(e.clientX, e.clientY)?.closest('.desktop-preview');
+      let hoverPreview = document.elementFromPoint(e.clientX, e.clientY)?.closest('.desktop-preview');
       element.style.visibility = prevVis;
+      // Stage↔desktop drags are blocked BOTH directions: the stage preview is
+      // not a drop target, and stage-view windows (placeholder/hero/aux) never
+      // drag out to a desktop preview (real report: an escaped placeholder).
+      if (hoverPreview && (hoverPreview.classList.contains('stage-preview')
+        || this._app?.stage?.dragToDesktopBlocked?.(win))) hoverPreview = null;
 
       const prevDeskTarget = deskPreviewTarget;
       deskPreviewTarget = hoverPreview || null;

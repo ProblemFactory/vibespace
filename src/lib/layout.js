@@ -233,6 +233,10 @@ class LayoutManager {
     for (const [id, win] of this.app.wm.windows) {
       // Skip windows on other desktops
       if (activeDesk && win._desktopId && win._desktopId !== activeDesk) continue;
+      // The stage placeholder is a stage-only pseudo-window — it must never
+      // enter a desktop record (a pre-guard drag once retagged one onto a
+      // normal desktop and autosave captured it).
+      if (win.type === 'stage-placeholder' || win._isStagePlaceholder) continue;
       const el = win.element;
       const termSession = this.app.sessions.get(id);
       // Ensure gridBounds is up to date
@@ -529,8 +533,9 @@ class LayoutManager {
     // Dynamic desktop: while the STAGE view is active the desktop-layout
     // autosave/broadcast is suppressed — the stage persists through its own
     // SyncStore, and capturing here would write stage-visible windows into a
-    // normal desktop's record (cross-client chaos).
-    if (this.app.stage?.isActive) return;
+    // normal desktop's record (cross-client chaos). Stage-level layout state
+    // (its grid config) persists through the stage's own store instead.
+    if (this.app.stage?.isActive) { this.app.stage.onStageLayoutChanged(); return; }
     if (this._restoring) return;
     if (this.app.desktopManager?._restoring) return;
     // Anti-echo: only broadcast state the USER caused. After applying a remote

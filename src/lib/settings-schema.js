@@ -527,7 +527,7 @@ const SETTINGS_SCHEMA = {
     ],
     label: t('Card click behavior'),
     description: t('What happens when clicking a session card: focus/open the window, expand card details, or flash/bounce the window'),
-    category: t('Session Card'), liveApply: false,
+    category: t('Session Card'), liveApply: true,
   },
   'sessionCard.findMode': {
     type: 'enum', default: 'find',
@@ -542,7 +542,7 @@ const SETTINGS_SCHEMA = {
   'sessionCard.clickToCopy': {
     type: 'boolean', default: false, label: t('Click detail values to copy'),
     description: t('Click on ID, Path, Time, or Tasks values to copy them to clipboard'),
-    category: t('Session Card'), liveApply: false,
+    category: t('Session Card'), liveApply: true,
   },
   'sessionCard.visibleFields': {
     type: 'multiSelect', default: ['id', 'backend', 'cwd', 'started', 'status', 'groups'],
@@ -556,7 +556,7 @@ const SETTINGS_SCHEMA = {
     ],
     label: t('Visible detail fields'),
     description: t('Choose which fields to show in the expanded session card'),
-    category: t('Session Card'), liveApply: false,
+    category: t('Session Card'), liveApply: true,
   },
   'sessionCard.detailTruncation': {
     type: 'enum', default: 'left',
@@ -566,7 +566,7 @@ const SETTINGS_SCHEMA = {
     ],
     label: t('Detail value truncation'),
     description: t('When text overflows, truncate from the left (shows filename) or right (shows path start)'),
-    category: t('Session Card'), liveApply: false,
+    category: t('Session Card'), liveApply: true,
   },
 };
 

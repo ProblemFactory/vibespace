@@ -256,9 +256,10 @@ export class DesktopManager {
   moveWindowToDesktop(winId, desktopId) {
     let win = this.app.wm.windows.get(winId);
     if (!win) return;
-    // Dragging a stage-bound window onto a normal desktop = unbind + move
-    // (design §4); it becomes a plain window of that desktop.
-    this.app.stage?.unbind(winId);
+    // Stage↔desktop moves are blocked in BOTH directions (user directive
+    // 2.112.4, superseding the earlier unbind+move design): stage-view
+    // windows stay on the stage, and nothing moves ONTO the stage.
+    if (this.app.stage?.dragToDesktopBlocked?.(win) || desktopId === '__stage__') return;
     // Tab chains live on ONE desktop (invariant enforced at creation):
     // move the whole group together, anchored at the host. Moving a single
     // guest used to split the chain across desktops, which captureState /

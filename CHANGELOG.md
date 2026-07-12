@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.112.4 — 2026-07-12
+- Stage: leaving the stage returns the hero window to its normal desktop at its HOME geometry (it kept the stage slot size before); temporary leave + re-enter re-borrows the slot seamlessly
+- Stage: grid config set while on the stage now persists (stage SyncStore `grid` key; desktop autosave stays suppressed)
+- Stage: window drags between the stage and normal desktops are blocked in BOTH directions (previews are not drop targets across the boundary); the placeholder can no longer escape onto a normal desktop (guard + self-heal + never captured into desktop records)
+- Settings live-apply: the Dynamic desktop toggle takes effect immediately (stage preview appears/disappears; disabling while staged returns to the previous desktop) — no page refresh
+- Settings live-apply: session-card settings (click behavior, click-to-copy, visible fields, detail truncation) re-render the sidebar immediately — no page refresh
+
 ## 2.112.3 — 2026-07-12
 
 - **Fixed the Stage slot never persisting** (real report: the placeholder "never moved" — it dragged fine but every materialization landed back top-left). `stage.init()` ran BEFORE `initStateSync()` in the app constructor, so the 'stage' SyncStore was never registered and every slot/workspace write was **silently dropped** (StateSync.set no-ops on unknown stores). Init reordered + a lazy store-registration guard on every stage read/write. CDP-verified closed loop: drag → slot persists across page loads → placeholder AND materialized hero land at the persisted position.
