@@ -1,0 +1,4 @@
+# repo-guard allowlist — regex or literal per line, # for comments.
+# Matches here are NOT flagged (line OR matched snippet).
+# UI placeholder for the SSH-key paste textarea (not a real key):
+placeholder.*BEGIN OPENSSH PRIVATE KEY
