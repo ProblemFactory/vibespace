@@ -1,4 +1,5 @@
 import { showContextMenu, showInputDialog } from './utils.js';
+import { t } from './i18n.js';
 
 /**
  * DesktopManager — virtual desktop system.
@@ -357,13 +358,56 @@ export class DesktopManager {
     // Digest guard (audit round-2, high): updateTaskbar funnels EVERY window
     // mousedown/focus/blink here and this rebuilt all previews + listeners
     // each time. Rebuild only when the rendered content would differ.
-    const digest = JSON.stringify([this._activeId, this._desktops.map(d => [d.id, d.name]),
+    const digest = JSON.stringify([this._activeId, !!this.app.stage?.enabled, !!this.app.stage?.isActive, this.app.stage?.enabled ? this.app.stage.slotBounds() : 0, this._desktops.map(d => [d.id, d.name]),
       [...this.app.wm.windows.values()].map(w => [w._desktopId, w.isMinimized,
         !!w.element?.classList.contains('window-waiting'),
         w.gridBounds ? [w.gridBounds.left, w.gridBounds.top, w.gridBounds.width, w.gridBounds.height] : w.element?.style.left])]);
     if (digest === this._switcherDigest) return;
     this._switcherDigest = digest;
     container.innerHTML = '';
+
+    // Dynamic desktop (Stage): leftmost, visually separated. Clicking enters
+    // the stage view; clicking a normal desktop while staged leaves it.
+    const stage = this.app.stage;
+    if (stage?.enabled) {
+      const wrap = document.createElement('div');
+      wrap.className = 'desktop-preview-wrapper stage-preview-wrapper';
+      const pv = document.createElement('div');
+      pv.className = 'desktop-preview stage-preview' + (stage.isActive ? ' active' : '');
+      pv.title = t('Stage — sessions materialize here with their workspace');
+      // slot outline (always) + stage-visible windows when active
+      const slot = stage.slotBounds();
+      const slotRect = document.createElement('div');
+      slotRect.className = 'desktop-preview-win stage-preview-slot';
+      slotRect.style.left = (slot.left * 100) + '%';
+      slotRect.style.top = (slot.top * 100) + '%';
+      slotRect.style.width = (slot.width * 100) + '%';
+      slotRect.style.height = (slot.height * 100) + '%';
+      pv.appendChild(slotRect);
+      if (stage.isActive) {
+        for (const [id, win] of this.app.wm.windows) {
+          if (stage._isStageVisible(win) && win.gridBounds && !win._isStagePlaceholder) {
+            const r = document.createElement('div');
+            r.className = 'desktop-preview-win';
+            r.dataset.winId = id;
+            r.style.left = (win.gridBounds.left * 100) + '%';
+            r.style.top = (win.gridBounds.top * 100) + '%';
+            r.style.width = (win.gridBounds.width * 100) + '%';
+            r.style.height = (win.gridBounds.height * 100) + '%';
+            pv.appendChild(r);
+          }
+        }
+      }
+      const label = document.createElement('div');
+      label.className = 'desktop-preview-label';
+      label.textContent = t('Stage');
+      wrap.append(pv, label);
+      wrap.addEventListener('click', () => { if (!stage.isActive) stage.enter(); });
+      container.appendChild(wrap);
+      const divider = document.createElement('div');
+      divider.className = 'stage-preview-divider';
+      container.appendChild(divider);
+    }
 
     for (const desk of this._desktops) {
       const preview = document.createElement('div');
@@ -426,8 +470,11 @@ export class DesktopManager {
       label.textContent = desk.name;
       wrapper.append(preview, label);
 
-      // Click to switch
-      wrapper.addEventListener('click', () => this.switchTo(desk.id));
+      // Click to switch (leaving the stage view first when active)
+      wrapper.addEventListener('click', () => {
+        if (this.app.stage?.isActive) return this.app.stage.leave(desk.id);
+        this.switchTo(desk.id);
+      });
 
       // Right-click context menu
       wrapper.addEventListener('contextmenu', (e) => {

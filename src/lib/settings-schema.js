@@ -94,6 +94,16 @@ const SETTINGS_SCHEMA = {
     description: t('Hold Shift while dragging title bar to select a range of grid cells'),
     category: t('Toolbar & Layout'), liveApply: true,
   },
+  'desktop.dynamicEnabled': {
+    type: 'boolean', default: false, label: t('Dynamic desktop (Stage)'),
+    description: t('A special desktop at the left of the strip: sessions materialize into a shared slot together with their own workspace of helper windows. See docs/design-dynamic-desktop.md'),
+    category: t('Window'), liveApply: true,
+  },
+  'desktop.stageKeepAlive': {
+    type: 'number', default: 3, min: 0, max: 10, step: 1, label: t('Stage: workspaces kept alive'),
+    description: t('How many recent session workspaces stay loaded (hidden) for instant switching; older ones are saved and closed'),
+    category: t('Window'), liveApply: true,
+  },
   'layout.presetOneShot': {
     type: 'boolean', default: false, label: t('Layout buttons apply once'),
     description: t('A layout button arranges the current windows once and returns to free-form. Off (default): it also keeps that grid active, so windows snap to its cells until you pick Freeform'),

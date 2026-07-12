@@ -2888,3 +2888,12 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .selfupd-phase .ob-ok { color: var(--green, #3fb950); font-weight: 600; }
 .selfupd-phase .ob-bad { color: var(--red, #e55); font-weight: 600; }
 .selfupd-log { max-height: 280px; min-width: min(640px, 90vw); overflow: auto; font-family: monospace; font-size: 11px; line-height: 1.45; background: var(--bg-root); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; white-space: pre-wrap; word-break: break-all; color: var(--text-secondary); }
+
+/* ── Dynamic desktop (Stage) ── */
+.stage-preview { border-style: dashed !important; }
+.stage-preview.active { border-color: var(--accent); border-style: solid !important; box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 40%, transparent); }
+.stage-preview-slot { border: 1px dashed var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent) !important; }
+.stage-preview-divider { width: 1px; align-self: stretch; margin: 2px 3px; background: var(--border); }
+.window.stage-placeholder { border-style: dashed; background: color-mix(in srgb, var(--accent) 4%, var(--bg-window)); }
+.window.stage-placeholder .window-content { display: flex; align-items: center; justify-content: center; }
+.stage-placeholder-hint { max-width: 320px; padding: 20px; text-align: center; font-size: 12px; color: var(--text-dim); }

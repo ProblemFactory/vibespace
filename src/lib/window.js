@@ -112,6 +112,11 @@ class WindowManager {
   // Store window position as fractions of workspace (0-1) so it scales with resize.
   // Set on grid snap or applyLayout. Updated on user resize. Cleared on manual drag or freeform.
   _captureGridBounds(win) {
+    // Stage slot: geometry edits on the placeholder OR the hero persist the
+    // shared slot record (user decision: hero resize edits the slot).
+    if (win && (win._isStagePlaceholder || win._isStageHero)) {
+      setTimeout(() => this._app?.stage?.onGeometryCaptured(win), 0);
+    }
     // Skip grouped guests — they share host bounds via _syncChainBounds
     if (win._tabChain && win._tabChain.tabs[0] !== win.id) return;
     const r = this.workspace.getBoundingClientRect();
@@ -790,8 +795,17 @@ class WindowManager {
   }
 
   // ── Layout Presets ──
-  focusWindow(id, { bounce = false } = {}) {
+  focusWindow(id, { bounce = false, _stageBypass = false } = {}) {
     const win = this.windows.get(id); if (!win) return;
+    // Dynamic desktop (Stage): while the stage view is active, focusing a
+    // session window MATERIALIZES it into the slot instead (the one choke
+    // point every switch-to-session path funnels through — sidebar, taskbar,
+    // palette, find/goto, createWindow's trailing focus). _stageBypass lets
+    // the stage itself raise the hero without recursing.
+    if (!_stageBypass && this._app?.stage?.shouldIntercept(win)) {
+      this._app.stage.materialize(win);
+      return;
+    }
     this._mobileYieldSidebar();
     // If this window is a grouped guest, focus the host and switch to this tab
     if (win._tabChain && win._tabChain.tabs[0] !== win.id) {
@@ -925,6 +939,7 @@ class WindowManager {
     win.element.style.display=''; win.isMinimized=false; this.focusWindow(id); setTimeout(() => { if (win.onResize) win.onResize(); this._captureGridBounds(win); }, 50); this._scheduleOverlapUpdate();
   }
   closeWindow(id) {
+    this._app?.stage?.onWindowClosed(id);
     const win = this.windows.get(id); if (!win) return;
     win._listenerCtl?.abort(); // release document-level drag/icon listeners
     if (win._tabChain) {

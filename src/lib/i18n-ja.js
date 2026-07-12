@@ -1690,4 +1690,11 @@ export default {
   "Update complete — reloading…": "更新完了——リロード中…",
   "Single sign-on (SSO) is already configured ✓ — login is handled by your identity provider, so no password is needed.": "シングルサインオン（SSO）が既に構成されています ✓ —— ログインは ID プロバイダーが処理するため、パスワードは不要です。",
   "ignored — this instance uses SSO login": "無視されます —— このインスタンスは SSO ログインを使用します",
+  "Stage": "ダイナミックデスクトップ",
+  "Stage — sessions materialize here with their workspace": "ダイナミックデスクトップ——セッションがワークスペースと共にここに現れます",
+  "Click any session (sidebar, taskbar, Ctrl+K) — it materializes here with its workspace.": "任意のセッション（サイドバー、タスクバー、Ctrl+K）をクリック——ワークスペースと共にここに現れます。",
+  "Dynamic desktop (Stage)": "ダイナミックデスクトップ（Stage）",
+  "A special desktop at the left of the strip: sessions materialize into a shared slot together with their own workspace of helper windows. See docs/design-dynamic-desktop.md": "ストリップ左端の特別なデスクトップ：セッションは共有スロットに、補助ウィンドウのワークスペースと共に現れます。docs/design-dynamic-desktop.md 参照",
+  "Stage: workspaces kept alive": "Stage：保持するワークスペース数",
+  "How many recent session workspaces stay loaded (hidden) for instant switching; older ones are saved and closed": "直近いくつのワークスペースを（非表示のまま）保持して即切替できるようにするか。それ以前は保存して閉じます",
 };

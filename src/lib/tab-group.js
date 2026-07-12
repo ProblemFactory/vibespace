@@ -12,6 +12,7 @@ import { escHtml } from './utils.js';
 
 const _i = (d) => `<svg style="width:1em;height:1em;vertical-align:-0.1em" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 export const TYPE_ICONS = {
+  'stage-placeholder': '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2 2"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/></svg>',
   terminal: _i('<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M4.5 7l2 2-2 2M8.5 11h3"/>'),
   chat:     _i('<path d="M2 3a2 2 0 012-2h8a2 2 0 012 2v6a2 2 0 01-2 2H6l-4 3V3z"/>'),
   files:    _i('<path d="M2 3h4l2 2h6v8H2V3z"/>'),

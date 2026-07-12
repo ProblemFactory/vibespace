@@ -1781,6 +1781,7 @@ function serverSetting(key) {
 syncStores.drafts = new SyncStore('drafts', path.join(__dirname, 'data', 'drafts.json'), wss);
 syncStores.settings = new SyncStore('settings', path.join(__dirname, 'data', 'settings-sync.json'), wss);
 syncStores.uploads = new SyncStore('uploads', path.join(__dirname, 'data', 'uploads-sync.json'), wss);
+syncStores.stage = new SyncStore('stage', path.join(__dirname, 'data', 'stage-sync.json'), wss); // dynamic desktop (docs/design-dynamic-desktop.md)
 
 setupPersistence({ dataDir: path.join(__dirname, 'data'), wss, WS_OPEN, getSyncStore, activeSessions, auth,
   getHosts: () => hosts, getMounts: () => mounts, getTasks: () => tasks,

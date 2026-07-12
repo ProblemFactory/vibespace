@@ -33,6 +33,7 @@ import { openUsageWindow } from './usage-window.js';
 import { openSessionProps as openSessionPropsFn } from './session-props.js';
 import { openWorkflowDetail as openWorkflowDetailFn } from './workflow-detail.js';
 import { DesktopManager } from './desktop-manager.js';
+import { StageManager, STAGE_ID } from './stage-manager.js';
 import { CustomizeMode, applyArrangement } from './customize-mode.js';
 import { installSessionPalette } from './session-palette.js';
 import { installUserTodos } from './user-todos-panel.js';
@@ -185,6 +186,8 @@ class App {
     this.attachedServerSessions = new Set();
     this.layoutManager = new LayoutManager(this);
     this.desktopManager = new DesktopManager(this);
+    this.stage = new StageManager(this); // dynamic desktop view (docs/design-dynamic-desktop.md)
+    this.stage.init();
 
     // Tag every new window with the active desktop ID
     const origCreateWindow = this.wm.createWindow.bind(this.wm);
