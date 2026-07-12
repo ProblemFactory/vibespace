@@ -105,6 +105,7 @@ class WindowManager {
     });
     if (openSpec) winInfo._openSpec = openSpec;
     track('event', 'window-open:' + type);
+    this._app?.stage?.onWindowCreated(winInfo); // stage aux binding / transient tag
     this.focusWindow(id); this._notify(); this._scheduleOverlapUpdate(); return winInfo;
   }
 
