@@ -196,7 +196,10 @@ class App {
     const origCreateWindow = this.wm.createWindow.bind(this.wm);
     this.wm.createWindow = (opts) => {
       const win = origCreateWindow(opts);
-      if (this.desktopManager.activeDesktopId) {
+      // Don't clobber a _desktopId set DURING creation: createWindow's tail
+      // focus runs the stage materialization, whose identity adoption may
+      // already have assigned the window's true home desktop.
+      if (!win._desktopId && this.desktopManager.activeDesktopId) {
         win._desktopId = this.desktopManager.activeDesktopId;
       }
       return win;
