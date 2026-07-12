@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.112.3 — 2026-07-12
+
+- **Fixed the Stage slot never persisting** (real report: the placeholder "never moved" — it dragged fine but every materialization landed back top-left). `stage.init()` ran BEFORE `initStateSync()` in the app constructor, so the 'stage' SyncStore was never registered and every slot/workspace write was **silently dropped** (StateSync.set no-ops on unknown stores). Init reordered + a lazy store-registration guard on every stage read/write. CDP-verified closed loop: drag → slot persists across page loads → placeholder AND materialized hero land at the persisted position.
+
 ## 2.112.2 — 2026-07-12
 
 - **Stage workspaces: full replay audit across every window type** (design §4b matrix covers all 17 openSpec actions). New guards: `openEditor` replays validate the file first; **editors with unsaved changes are never LRU-evicted** (CodeEditor now exposes dirty state on the window record — closing one silently lost the edits); task detail/log replays skip when the task group was deleted (the window used to open then immediately self-close); workflow-detail replays probe `/api/workflow` and skip on 404.
