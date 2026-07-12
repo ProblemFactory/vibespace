@@ -16,6 +16,9 @@ stringData:
   {{- with .Values.telemetry.ingestToken }}
   telemetryIngestToken: {{ . | quote }}
   {{- end }}
+  {{- if and .Values.cephMint .Values.cephMint.token }}
+  cephMintToken: {{ .Values.cephMint.token | quote }}
+  {{- end }}
   {{- if and .Values.s3 .Values.s3.accessKey }}
   s3AccessKey: {{ .Values.s3.accessKey | quote }}
   s3SecretKey: {{ .Values.s3.secretKey | quote }}
@@ -137,6 +140,14 @@ spec:
             {{- if .Values.telemetry.ingestToken }}
             - name: VIBESPACE_TELEMETRY_INGEST_TOKEN
               valueFrom: { secretKeyRef: { name: {{ $name }}, key: telemetryIngestToken } }
+            {{- end }}
+            {{- if and .Values.cephMint .Values.cephMint.url }}
+            - name: VIBESPACE_CEPHMINT_URL
+              value: {{ .Values.cephMint.url | quote }}
+            {{- end }}
+            {{- if and .Values.cephMint .Values.cephMint.token }}
+            - name: VIBESPACE_CEPHMINT_TOKEN
+              valueFrom: { secretKeyRef: { name: {{ $name }}, key: cephMintToken } }
             {{- end }}
           volumeMounts:
             - name: home

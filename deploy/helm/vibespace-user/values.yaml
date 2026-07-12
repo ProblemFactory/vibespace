@@ -105,3 +105,11 @@ networkPolicy:
   # Everything else internal (node net, management/BMC, k8s API) is blocked;
   # public internet (minus RFC1918) is allowed for the agent's own API calls.
   allowedInternalCidrs: []     # e.g. ["10.x.y.z/32"]
+
+# Direct CephFS subtree sharing (optional). When url+token are set, "Share a
+# folder" on a CephFS My-storage row mints a path-scoped cephx key via the
+# in-cluster ceph-mint service so the receiver kernel-mounts the subtree
+# directly (bypassing the WebDAV proxy). Absent it, sharing uses the bridge.
+cephMint:
+  url: ""      # e.g. http://ceph-mint.vibespace.svc:8900
+  token: ""    # shared bearer, matches ceph-mint's CEPHMINT_TOKEN
