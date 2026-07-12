@@ -680,6 +680,28 @@ class TerminalSession {
     };
     const f0 = findFace();
     if (f0 && f0.status === 'loaded') return; // warm cache — first paint was right
+    // Re-entry (font switch / list-upgrade): drop the previous watchers first.
+    if (this._fontPollTimer) { clearInterval(this._fontPollTimer); this._fontPollTimer = null; }
+    this._fontLoadingDoneCleanup?.();
+    // EVENT-DRIVEN BACKSTOP (2.111.12, Walter's onboarding report): on a slow
+    // route to Google Fonts (cold cache + cross-border first visit) the CSS
+    // lands AFTER the 20s poll cap below — registration is then never noticed
+    // and the terminal stays wide-spaced FOREVER (fallback-measured cells,
+    // web-font glyphs). document.fonts 'loadingdone' fires on every completed
+    // font batch with NO time limit: heal whenever the font finally arrives.
+    const onLoadingDone = () => {
+      if (this._disposed || !this.terminal) { this._fontLoadingDoneCleanup?.(); return; }
+      const f = findFace();
+      if (f && f.status === 'loaded') {
+        this._fontLoadingDoneCleanup?.();
+        repaint(); setTimeout(repaint, 250);
+      }
+    };
+    document.fonts.addEventListener('loadingdone', onLoadingDone);
+    this._fontLoadingDoneCleanup = () => {
+      document.fonts.removeEventListener('loadingdone', onLoadingDone);
+      this._fontLoadingDoneCleanup = null;
+    };
     let tries = 0;
     const timer = setInterval(() => {
       if (this._disposed || !this.terminal) { clearInterval(timer); return; }
@@ -872,6 +894,8 @@ class TerminalSession {
   focus() { this.terminal.focus(); this._setBell(false); this._setWaiting(false); }
   dispose() {
     if (this._fitTimer) { clearTimeout(this._fitTimer); this._fitTimer = null; }
+    if (this._fontPollTimer) { clearInterval(this._fontPollTimer); this._fontPollTimer = null; }
+    this._fontLoadingDoneCleanup?.();
     if (this._pastePad) { try { this._pastePad.remove(); } catch {} this._pastePad = null; }
     if (this._dprCleanup) this._dprCleanup();
     if (this._webgl) { try { this._webgl.dispose(); } catch {} this._webgl = null; }
