@@ -944,6 +944,23 @@ class WindowManager {
     }
     win.element.style.display=''; win.isMinimized=false; this.focusWindow(id); setTimeout(() => { if (win.onResize) win.onResize(); this._captureGridBounds(win); }, 50); this._scheduleOverlapUpdate();
   }
+  /** Re-key a window to a different unique id (stage identity adoption: a
+   *  session window created locally must CONVERGE onto the winId other
+   *  clients/desktop records already use for that session — same precedent as
+   *  the layout-restore ID remap; all UI references read winInfo.id live).
+   *  Safe only for chain-less windows; returns false when it can't rekey. */
+  rekeyWindow(oldId, newId) {
+    const win = this.windows.get(oldId);
+    if (!win || !newId || newId === oldId || this.windows.has(newId) || win._tabChain) return false;
+    this.windows.delete(oldId);
+    win.id = newId;
+    this.windows.set(newId, win);
+    const sess = this._app?.sessions?.get(oldId);
+    if (sess) { this._app.sessions.delete(oldId); this._app.sessions.set(newId, sess); }
+    this._app?.updateTaskbar?.();
+    return true;
+  }
+
   closeWindow(id) {
     this._app?.stage?.onWindowClosed(id);
     const win = this.windows.get(id); if (!win) return;

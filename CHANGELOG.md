@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.112.5 — 2026-07-12
+- Stage MULTI-CLIENT: fixed a data-loss bug — materializing a session that had no local window created a stage-owned copy under a fresh winId; leaving to the desktop that (per other clients) held that session's window then broadcast a state without it, CLOSING the window on every client ("窗口A两个客户端都看不到了"). Materialization now ADOPTS the desktop record's identity (rekey to its winId + home desktop + geometry + maximize state), with a leave-time retry for late-arriving session ids. Reproduced and verified with a two-browser-client harness.
+- Stage: maximized heroes handled first-class — borrow un-maximizes onto the slot, hand-back restores home geometry BEFORE re-maximizing (so a later un-maximize lands at home size, not slot size)
+- Stage live sync across clients: slot moves, stage grid changes, and the active hero's workspace set (aux open/close/move) now mirror to other staged clients in real time; which view a tab shows (staged or not, which hero) stays per-tab like the active desktop
+
 ## 2.112.4 — 2026-07-12
 - Stage: leaving the stage returns the hero window to its normal desktop at its HOME geometry (it kept the stage slot size before); temporary leave + re-enter re-borrows the slot seamlessly
 - Stage: grid config set while on the stage now persists (stage SyncStore `grid` key; desktop autosave stays suppressed)

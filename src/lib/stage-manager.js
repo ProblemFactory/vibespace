@@ -51,7 +51,12 @@ export class StageManager {
 
   async init() {
     const sync = getStateSync();
-    if (sync) await sync.init('stage');
+    if (sync) {
+      await sync.init('stage');
+      // Multi-client live sync: StateSync events fire for REMOTE ops only
+      // (the server excludes the sender), so no self-echo guard is needed.
+      sync.on('stage', '*', (value, key) => { try { this._onRemoteStageOp(key); } catch (e) { console.error('[Stage] remote op failed:', e); } });
+    }
     // Live-apply the settings toggle: the switcher's stage preview appears/
     // disappears immediately (its digest includes stage.enabled — it just
     // needs a render kick); turning the feature OFF while actually staged
@@ -61,6 +66,59 @@ export class StageManager {
       else this.app.desktopManager?._renderSwitcher();
     });
     setTimeout(() => this.healStray(), 3000); // past layout restore
+  }
+
+  /** Another client changed stage state — mirror it live (same philosophy as
+   *  layout-sync: CONTENT mirrors across clients; which VIEW a tab looks at
+   *  — staged or not, which hero — stays per-tab like the active desktop). */
+  _onRemoteStageOp(key) {
+    if (!this.enabled) return;
+    if (key === 'slot') {
+      if (this._active && !this.app.layoutManager?._pointerDown) {
+        const occ = this.app.wm.windows.get(this._heroWinId || this._placeholderId);
+        if (occ && !occ._hiddenByStage) { occ.gridBounds = this.slotBounds(); this.app.wm._applyGridBounds(occ); }
+      }
+      this.app.desktopManager?.refreshSwitcher?.();
+    } else if (key === 'grid') {
+      if (!this._active) return;
+      const g = this.stageGrid();
+      if (g) this.app.wm.setGrid(g.rows, g.cols); else this.app.wm.setGrid(null);
+    } else if (key.startsWith('ws:')) {
+      // a workspace set was rewritten — if it's OUR active hero, reconcile
+      const k = key.slice(3);
+      if (this._active && this._heroWinId && this._heroKey && k === this._heroKey) {
+        clearTimeout(this._wsReconcileTimer);
+        this._wsReconcileTimer = setTimeout(() => this._reconcileWorkspace(k), 400);
+      }
+    }
+  }
+
+  /** Debounced re-record of the active workspace — keeps the ws:<key> record
+   *  live for other staged clients (aux create/close/move), not just at
+   *  switch/leave time. */
+  _scheduleRecord() {
+    if (!this._active || !this._heroWinId) return;
+    clearTimeout(this._recordTimer);
+    this._recordTimer = setTimeout(() => { if (this._active && this._heroWinId) this._recordActiveWorkspace(); }, 500);
+  }
+
+  /** Remote-driven reconcile: show/replay members per the record (that's
+   *  _restoreWorkspace), then close local bound aux whose spec is GONE from
+   *  the record (another client closed it) — except dirty editors. */
+  _reconcileWorkspace(key) {
+    if (!this._active || key !== this._heroKey) return;
+    const specs = new Set(this._workspaceRecords(key).map((r) => JSON.stringify(r.openSpec || null)));
+    for (const [winId, owner] of [...this._boundAux]) {
+      if (owner !== key) continue;
+      const aux = this.app.wm.windows.get(winId);
+      if (!aux) { this._boundAux.delete(winId); continue; }
+      if (aux._openSpec && !specs.has(JSON.stringify(aux._openSpec))) {
+        if (typeof aux._editorDirty === 'function' && aux._editorDirty()) continue; // never lose unsaved edits
+        this._boundAux.delete(winId);
+        try { this.app.wm.closeWindow(winId); } catch {}
+      }
+    }
+    this._restoreWorkspace(key);
   }
 
   /** Lazy belt-and-braces: every read/write path goes through this — if the
@@ -146,13 +204,7 @@ export class StageManager {
       // again so the stage resumes exactly where it left off.
       const hero = this._heroWinId && this.app.wm.windows.get(this._heroWinId);
       if (hero) {
-        if (!hero._stageHomeBounds && hero.gridBounds) hero._stageHomeBounds = { ...hero.gridBounds };
-        hero._onStage = true;
-        hero._isStageHero = true;
-        hero.gridBounds = this.slotBounds();
-        this.app.wm._applyGridBounds(hero);
-        hero._hiddenByDesktop = false;
-        this._showWin(hero);
+        this._borrowHero(hero);
         const ph = this._placeholderId && this.app.wm.windows.get(this._placeholderId);
         if (ph) this._hideStage(ph);
       }
@@ -178,9 +230,11 @@ export class StageManager {
     // STAGE_ID) have no home desktop and stay stage-hidden instead.
     const hero = this._heroWinId && this.app.wm.windows.get(this._heroWinId);
     if (hero) {
-      if (hero._stageHomeBounds) { hero.gridBounds = { ...hero._stageHomeBounds }; delete hero._stageHomeBounds; }
-      hero._isStageHero = false; // off-stage moves edit HOME bounds, not the slot
-      hero._onStage = false;
+      // Late adoption retry: a hero whose backendSessionId arrived AFTER
+      // materialization (createSession/resume fills openSpec async) still
+      // must converge onto the desktop record before we capture/broadcast.
+      if (hero._desktopId === STAGE_ID) this._adoptDesktopIdentity(hero);
+      this._handBackHero(hero);
       if (hero._desktopId !== STAGE_ID) {
         hero._hiddenByStage = false;
         dm._hideWin(hero); // desktop-owned again; the target loop below re-shows it if home === target
@@ -203,9 +257,15 @@ export class StageManager {
     }
     this.app.wm._reflowWindows();
     if (targetState?.windows) {
+      // Sessions already open locally under a DIFFERENT winId must not be
+      // replayed: attachSession's same-session dedup would silently create
+      // nothing and the follow-up autosave would broadcast a state missing
+      // the recorded window — closing it on every other client.
+      const liveSids = new Set([...this.app.wm.windows.values()].map((w) => w._openSpec?.backendSessionId).filter(Boolean));
       for (const ws of targetState.windows) {
         const winId = ws.winId || ws.id;
         if (!this.app.wm.windows.has(winId) && ws.openSpec) {
+          if (ws.openSpec.backendSessionId && liveSids.has(ws.openSpec.backendSessionId)) continue;
           this.app.replayOpenSpec(ws.openSpec, winId);
           setTimeout(() => {
             const newWin = this.app.wm.windows.get(winId);
@@ -264,6 +324,34 @@ export class StageManager {
   }
 
   // ── Materialization (hero switching) ──
+
+  /** Find the desktop record (any desktop, usually written by another client)
+   *  that already holds a window for this session; converge onto it — rekey
+   *  to its winId, adopt its home desktop + geometry. New sessions with no
+   *  record anywhere stay stage-owned (correct: the stage created them). */
+  _adoptDesktopIdentity(win) {
+    const sid = win._openSpec?.backendSessionId;
+    if (!sid) return; // id not known yet — a brand-new session, nothing to converge on
+    const dm = this.app.desktopManager;
+    for (const desk of dm.desktops) {
+      const st = dm._savedStates.get(desk.id);
+      for (const rw of st?.windows || []) {
+        if (rw.openSpec?.backendSessionId !== sid) continue;
+        const recId = rw.winId || rw.id;
+        if (recId && recId !== win.id) {
+          // another live local window already owns that id → divergence we
+          // can't safely resolve here; leave the window stage-owned
+          if (this.app.wm.windows.has(recId)) return;
+          this.app.wm.rekeyWindow(win.id, recId);
+          if (win.id === this._heroWinId) this._heroWinId = recId;
+        }
+        win._desktopId = desk.id;
+        if (rw.gridBounds) win._stageHomeBounds = { ...rw.gridBounds };
+        win._stageHomeMax = !!rw.isMaximized;
+        return;
+      }
+    }
+  }
 
   /** Stage↔desktop window drags are blocked BOTH directions (user directive
    *  2.112.4): stage-view windows (placeholder/hero/aux/stage-created) never
@@ -325,18 +413,21 @@ export class StageManager {
     // 2. Hide the placeholder.
     const ph = this._placeholderId && wm.windows.get(this._placeholderId);
     if (ph) this._hideStage(ph);
-    // 3. Borrow geometry: remember the window's home bounds once, then apply
-    //    the shared slot. Home gridBounds are restored on deactivation so the
-    //    normal-desktop layout is untouched (view model).
-    if (!win._stageHomeBounds && win.gridBounds) win._stageHomeBounds = { ...win.gridBounds };
-    win._onStage = true;
-    win._isStageHero = true;
+    // 3. Identity adoption (multi-client data-loss fix): a session window
+    //    CREATED while staged is tagged _desktopId=STAGE_ID — but if some
+    //    desktop's record (often written by ANOTHER client) already holds a
+    //    window for this session, we must become THAT window (same winId,
+    //    home desktop + geometry). Without this, leaving to that desktop
+    //    captured a state missing the recorded winId and the broadcast CLOSED
+    //    the window on every other client (real report: 窗口A两个客户端都消失).
+    // (at creation-tail time _desktopId is still UNSET — the app.js wrapper
+    // assigns it after createWindow returns, and skips windows we adopt here)
+    if (!win._desktopId || win._desktopId === STAGE_ID) this._adoptDesktopIdentity(win);
+    // 4. Borrow the window onto the slot (home geometry remembered; restored
+    //    at hand-back so the normal-desktop layout is untouched — view model).
+    this._borrowHero(win);
     this._heroWinId = win.id;
     this._heroKey = this._sessionKeyFor(win);
-    win.gridBounds = this.slotBounds();
-    wm._applyGridBounds(win);
-    win._hiddenByDesktop = false; // stage owns it now — a stale desktop-hidden
-    this._showWin(win);           // flag would exclude it from _isStageVisible
     // Raise without re-entering the interception path.
     wm.focusWindow(win.id, { _stageBypass: true });
     // Restore this session's recorded workspace (aux windows).
@@ -377,14 +468,41 @@ export class StageManager {
   }
 
   /** Hide the current hero + its aux set (Phase C serializes the set). */
+  /** Borrow a window onto the slot: snapshot its home state (geometry +
+   *  maximize — a maximized hero must un-maximize for the slot, else the
+   *  fullscreen styles override the slot bounds), then apply the shared slot.
+   *  Fresh snapshot on every borrow so home edits made off-stage are kept. */
+  _borrowHero(win) {
+    if (!win._stageHomeBounds && win.gridBounds) win._stageHomeBounds = { ...win.gridBounds };
+    if (win.isMaximized) { win._stageHomeMax = true; try { this.app.wm.toggleMaximize(win.id); } catch {} }
+    win._onStage = true;
+    win._isStageHero = true;
+    win.gridBounds = this.slotBounds();
+    this.app.wm._applyGridBounds(win);
+    win._hiddenByDesktop = false; // stage owns it now — a stale desktop-hidden
+    this._showWin(win);           // flag would exclude it from _isStageVisible
+  }
+
+  /** Return a borrowed window to the desktop system at its HOME state.
+   *  Element geometry is applied BEFORE re-maximizing so toggleMaximize
+   *  records the HOME pixels as prevBounds (else a later un-maximize would
+   *  land the window at the slot size). Off-stage moves then edit HOME
+   *  bounds, never the slot. */
+  _handBackHero(hero) {
+    if (hero._stageHomeBounds) { hero.gridBounds = { ...hero._stageHomeBounds }; delete hero._stageHomeBounds; }
+    hero._isStageHero = false;
+    hero._onStage = false;
+    if (hero.gridBounds && !hero.isMaximized) this.app.wm._applyGridBounds(hero);
+    if (hero._stageHomeMax && !hero.isMaximized) { try { this.app.wm.toggleMaximize(hero.id); } catch {} }
+    delete hero._stageHomeMax;
+  }
+
   _deactivateHero() {
     const wm = this.app.wm;
     const hero = wm.windows.get(this._heroWinId);
     if (hero) {
-      // Return the borrowed geometry to its home value.
-      if (hero._stageHomeBounds) { hero.gridBounds = { ...hero._stageHomeBounds }; delete hero._stageHomeBounds; }
-      hero._isStageHero = false;
-      hero._onStage = false;
+      if (hero._desktopId === STAGE_ID) this._adoptDesktopIdentity(hero); // late-id retry
+      this._handBackHero(hero);
       if (hero._desktopId !== STAGE_ID) {
         // It also lives on a home desktop — hand it back to the desktop
         // system (hidden: its desktop isn't active while we're staged) so a
@@ -434,6 +552,7 @@ export class StageManager {
   onGeometryCaptured(win) {
     if (!this.enabled) return;
     if (win._isStagePlaceholder || win._isStageHero) this.saveSlot(win.gridBounds);
+    else if (this._active && this._boundAux.has(win.id)) this._scheduleRecord(); // aux move → live-mirror
   }
 
   // ── Phase C: workspace binding ──
@@ -450,6 +569,7 @@ export class StageManager {
     if (win.type === 'stage-placeholder' || win._isStagePlaceholder || win.type === 'chat' || win.type === 'terminal') return;
     if (this._heroWinId) {
       this._boundAux.set(win.id, this._heroKey || '__pending__');
+      this._scheduleRecord(); // live-mirror the new aux to other staged clients
     } else {
       win._stageTransient = true;
     }
@@ -527,8 +647,7 @@ export class StageManager {
       this._boundAux.set(winId, key); // settle pending owners
       records.push({ openSpec: this._freshOpenSpec(aux), stageBounds: aux.gridBounds || null, extras: this._captureExtras(aux) });
     }
-    const sync = getStateSync();
-    sync?.set('stage', 'ws:' + key, JSON.stringify(records));
+    this._sync()?.set('stage', 'ws:' + key, JSON.stringify(records));
     this._touchLru(key);
   }
 
@@ -541,7 +660,7 @@ export class StageManager {
   }
 
   _touchLru(key) {
-    const sync = getStateSync();
+    const sync = this._sync();
     let lru = [];
     try { lru = JSON.parse(sync?.get('stage', 'lru') || '[]'); } catch {}
     lru = [key, ...lru.filter((k) => k !== key)].slice(0, 20);
