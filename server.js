@@ -339,6 +339,7 @@ const auth = new Auth(path.join(__dirname, 'data'), { clerk: clerkAuth });
   if (clerkAuth.enabled) console.log(`  Clerk SSO: ENABLED (${clerkAuth.frontendApi})`);
   // getter — auth can be enabled/disabled at runtime via /api/auth/set-password
   Object.defineProperty(app.locals, 'authEnabled', { get: () => auth.enabled });
+  Object.defineProperty(app.locals, 'ssoEnabled', { get: () => auth.ssoEnabled });
 }
 
 // noServer + ONE manual upgrade dispatcher (registered at the bottom of this

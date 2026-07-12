@@ -296,6 +296,21 @@ export function installSetupFlows(App) {
         refresh();
       } else if (step === 2) {
         const protectedAlready = !!this._authEnabled;
+        // SSO configured → login is handled by the identity provider; a local
+        // password is redundant, so skip the whole password step (show why).
+        if (this._ssoEnabled) {
+          content.innerHTML = `
+            <h1>${t('Protect this workspace')}</h1>
+            <p class="ob-sub">${t('Single sign-on (SSO) is already configured ✓ — login is handled by your identity provider, so no password is needed.')}</p>
+            <div class="welcome-actions">
+              <button class="welcome-btn" id="ob-next">${t('Continue')}</button>
+              <button class="welcome-btn welcome-btn-secondary" id="ob-back">${t('Back')}</button>
+            </div>
+            <div class="ob-dots">${dots}</div>`;
+          content.querySelector('#ob-next').onclick = () => { step = 3; render(); };
+          content.querySelector('#ob-back').onclick = () => { step = 1; render(); };
+          return;
+        }
         content.innerHTML = `
           <h1>${t('Protect this workspace')}</h1>
           <p class="ob-sub">${protectedAlready ? t('Password auth is already enabled ✓') : t('Optional — anyone who can reach this server gets full shell access. A password gates pages, APIs, and terminals.')}</p>

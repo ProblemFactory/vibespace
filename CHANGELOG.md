@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.111.27 — 2026-07-12
+
+- **When SSO (Clerk) is configured, the onboarding password step is skipped** — login is handled by the identity provider, so a local password is redundant. The step shows a short "SSO is configured, no password needed" note + Continue instead of the password inputs. On config import, an included `vsPassword` record is now IGNORED under SSO (the import row is disabled with an "ignored — this instance uses SSO login" note, and the server reports `vsPassword: skipped (SSO configured)`). New `auth.ssoEnabled` surfaced through `/api/home`.
+
 ## 2.111.26 — 2026-07-12
 
 - **Fixed self-update failing with "Your local changes to data/bin/vibespace-status would be overwritten"**. That file is REGENERATED on every server startup by createStatusHelper() but was also tracked in git, so each boot dirtied the working tree and blocked `git pull --ff-only`. It's now untracked (.gitignore, like data/bin/code) and update.sh resets it — plus any other regenerated tracked file under data/bin/ — before pulling. One-time manual unblock for an instance stuck on the old update.sh: in its shell run `cd ~/vibespace && git checkout -- data/bin/vibespace-status && git pull --ff-only` (or just discard it, then re-click Update).
