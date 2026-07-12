@@ -237,3 +237,26 @@ doesn't yet record the active workspace (Phase C); enter() while `dm._restoring`
   CARD BUILD time — sidebar constructor now re-renders on change (schema flipped to
   liveApply: true). LESSON: a `liveApply: true` schema flag is a CLAIM — every setting read
   at render/build time needs an explicit change listener that re-renders its surface.
+- 2026-07-12 (2.112.5) MULTI-CLIENT DATA LOSS "窗口A两个客户端都看不到了": materializing a
+  session with NO local window created a stage-owned hero under a FRESH winId; leaving to the
+  desktop that (per other clients' records) held that session's window replayed nothing
+  (attachSession same-session dedup) → the post-leave capture missed the recorded winId → the
+  broadcast CLOSED the window on every client. Fix = IDENTITY ADOPTION: `_adoptDesktopIdentity`
+  scans all desktops' saved states for the session and converges — `wm.rekeyWindow` onto the
+  recorded winId + home desktop + gridBounds + isMaximized (retried at leave/_deactivateHero
+  for late-arriving session ids, e.g. resume). TWO structural gotchas: (a) createWindow's tail
+  focus runs materialization BEFORE app.js's desktop-tag wrapper assigns _desktopId — the
+  adoption gate must accept `!win._desktopId`, and the wrapper must NOT clobber an id assigned
+  during creation; (b) maximized heroes: borrow un-maximizes onto the slot, hand-back applies
+  home element geometry BEFORE re-maximizing so toggleMaximize records HOME pixels as
+  prevBounds. Verified with a two-CDP-client harness (10/10) + single-client regression (11/11).
+  HARNESS LESSONS: background tabs throttle the 500ms autosave timer (launch chrome with
+  --disable-background-timer-throttling …); broadcasts need REAL input per client (_userDirty).
+- 2026-07-12 (2.112.5) live sync layer (user: "动态桌面完全没做多客户端同步"): stage store ops
+  now MIRROR live — StateSync events fire for remote ops only (server excludes sender), so
+  `init()` subscribes a 'stage'/'*' listener: 'slot' re-applies to the local slot occupant,
+  'grid' re-applies setGrid, 'ws:<key>' reconciles the ACTIVE hero's workspace (400ms debounce;
+  `_reconcileWorkspace` = _restoreWorkspace + close local aux missing from the record, dirty
+  editors exempt). Recording is no longer switch/leave-only: `_scheduleRecord` (500ms) fires on
+  aux create/move. Which VIEW a tab shows (staged or not, which hero) stays PER-TAB by design —
+  same philosophy as the per-tab active desktop.
