@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.111.14 — 2026-07-12
+
+- **/dav accepts Basic auth with the mount token as the password** — macOS Finder (Cmd+K) and Windows Explorer can now mount a shared folder natively: server `https://<instance>/dav`, any username, password = the `vsmt_…` token from "Share a local folder". rclone Bearer unchanged.
+- **Storage dialogs fully localized** (real report: Share a local folder / Import rclone config / Import share link / Connect storage were English-only) — 82 strings wrapped, zh+ja dictionaries +98 entries each.
+
 ## 2.111.13 — 2026-07-12
 
 - **Desktop feature no longer vanishes for the whole page session** when the page happens to load during a server restart (real report: walter onboarded mid-update and the Desktop button was "disabled"). The `/api/vnc/status` availability probe ran once at startup with failures swallowed; it now re-probes on every WebSocket reconnect until it succeeds.

@@ -147,12 +147,25 @@ function registerWebdav(app, { tokens }) {
   const WRITE_METHODS = new Set(['PUT', 'MKCOL', 'DELETE', 'MOVE', 'COPY', 'PROPPATCH']);
 
   app.use('/dav', (req, res) => {
-    // ── auth: Bearer mount token ──
+    // ── auth: Bearer mount token (rclone) OR Basic with the token as the
+    // password (macOS Finder / Windows Explorer WebDAV clients only speak
+    // Basic — Cmd+K → https://…/dav, any username, password = vsmt_…). Same
+    // scoped-token model, different framing. ──
     const auth = req.headers.authorization || '';
-    const bearer = auth.startsWith('Bearer ') ? auth.slice(7).trim() : null;
+    let bearer = auth.startsWith('Bearer ') ? auth.slice(7).trim() : null;
+    if (!bearer && auth.startsWith('Basic ')) {
+      try {
+        const dec = Buffer.from(auth.slice(6).trim(), 'base64').toString('utf8');
+        const i = dec.indexOf(':');
+        const user = i >= 0 ? dec.slice(0, i) : dec;
+        const pass = i >= 0 ? dec.slice(i + 1) : '';
+        bearer = pass.startsWith('vsmt_') ? pass : (user.startsWith('vsmt_') ? user : null);
+      } catch {}
+    }
     const tok = tokens.resolve(bearer);
     if (!tok) {
-      res.set('WWW-Authenticate', 'Bearer realm="vibespace-dav"');
+      // Basic first: Finder needs a Basic challenge to show its login prompt.
+      res.set('WWW-Authenticate', 'Basic realm="vibespace-dav", Bearer realm="vibespace-dav"');
       return res.status(401).end();
     }
     if (tok.mode === 'ro' && WRITE_METHODS.has(req.method)) return res.status(403).end();
