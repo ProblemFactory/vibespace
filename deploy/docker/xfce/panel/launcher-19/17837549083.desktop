@@ -4,5 +4,5 @@ Type=Application
 Name=Browser
 Comment=Web Browser
 Exec=chromium %u
-Icon=web-browser
+Icon=chromium
 Categories=Network;
