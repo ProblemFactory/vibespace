@@ -2409,6 +2409,20 @@ app.post('/api/mounts/import', (req, res) => {
       });
       return res.json({ success: true, id });
     }
+    // vibespace-cephmount:v1 = a direct CephFS subtree share (path-scoped cephx
+    // key minted cluster-side) → a normal kernel cephfs mount, no proxy.
+    const cm = MountManager.parseCephMountLink(link);
+    if (cm) {
+      const id = mounts.add({
+        type: 'cephfs', origin: 'imported',
+        name: req.body?.name || cm.name || 'ceph-share',
+        mode: cm.mode === 'rw' ? 'rw' : 'ro',
+        cephMonHosts: cm.mons, cephFsName: cm.fsName || 'cephfs',
+        cephPath: cm.path, cephUser: cm.user, cephSecret: cm.secret,
+        customPath: req.body?.customPath || null,
+      });
+      return res.json({ success: true, id });
+    }
     const p = MountManager.parseShareLink(link);
     const id = mounts.add({
       ...p, origin: 'imported',
@@ -2418,6 +2432,11 @@ app.post('/api/mounts/import', (req, res) => {
     });
     res.json({ success: true, id });
   } catch (e) { res.status(400).json({ error: e.message }); }
+});
+// Direct CephFS subtree share — mint a path-scoped key (ceph-mint service).
+app.post('/api/mounts/:id/ceph-share', async (req, res) => {
+  try { res.json(await mounts.mintCephShare(req.params.id, req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message }); }
 });
 // My storage config — in-app, canonical (env imported once at first boot)
 app.get('/api/mounts/my-storage-config', (req, res) => {

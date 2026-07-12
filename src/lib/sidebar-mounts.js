@@ -135,12 +135,15 @@ export function installSidebarMounts(Sidebar) {
       if (d.shares.length) {
         const sh = document.createElement('div');
         sh.className = 'mounts-shares';
-        sh.innerHTML = '<div class="mounts-sec-head">Shares I created</div>';
+        sh.innerHTML = `<div class="mounts-sec-head">${escHtml(tr('Shares I created'))}</div>`;
         for (const s of d.shares) {
           const row = document.createElement('div');
           row.className = 'mounts-share-row';
           const exp = s.expiresAt ? ` · expires ${new Date(s.expiresAt).toLocaleDateString()}` : '';
-          row.innerHTML = `<span class="mounts-share-text"><b>${escHtml(s.name)}</b><span>${escHtml(s.prefix || s.bucket)} · ${s.mode === 'ro' ? 'Read-only' : 'Read-write'} · ${s.method === 'sts' ? 'expires in 7 days' : 'no expiry'}${exp}</span></span>`;
+          const sub = s.kind === 'cephmount'
+            ? `${escHtml(s.path || '')} · ${s.mode === 'ro' ? tr('Read-only') : tr('Read-write')} · ${escHtml(tr('direct CephFS'))}`
+            : `${escHtml(s.prefix || s.bucket || '')} · ${s.mode === 'ro' ? tr('Read-only') : tr('Read-write')} · ${s.method === 'sts' ? tr('expires in 7 days') : tr('no expiry')}${exp}`;
+          row.innerHTML = `<span class="mounts-share-text"><b>${escHtml(s.name)}</b><span>${sub}</span></span>`;
           const rm = document.createElement('button');
           rm.className = 'mounts-btn mounts-btn-danger';
           rm.textContent = tr('Revoke');
@@ -260,14 +263,14 @@ export function installSidebarMounts(Sidebar) {
           if (!r.success) throw new Error('Couldn’t connect — hover the status dot for details');
         }, 'mounts-icon-accent'));
       }
-      // Share a folder FROM this connection — only S3 with full owner creds.
-      // Doesn't hit the network here, so it's fine to offer while unmounted.
-      if (m.canShare) {
+      // Share a folder FROM this connection — S3 (STS/service-account link) or
+      // CephFS My storage (direct kernel-mount link, minted path-scoped key).
+      if (m.canShare || m.canCephShare) {
         const shareBtn = document.createElement('button');
         shareBtn.className = 'mounts-icon-btn';
         shareBtn.innerHTML = MI.link;
-        shareBtn.title = 'Share a folder from this storage (creates a link)';
-        shareBtn.onclick = (e) => { e.stopPropagation(); this._showMintShareDialog(m); };
+        shareBtn.title = tr('Share a folder from this storage (creates a link)');
+        shareBtn.onclick = (e) => { e.stopPropagation(); if (m.canCephShare) this._showCephShareDialog(m); else this._showMintShareDialog(m); };
         actions.append(shareBtn);
       }
       // EVERY top-level storage can act as a credential (user directive):
@@ -1141,6 +1144,29 @@ export function installSidebarMounts(Sidebar) {
         copyBtn.className = 'btn-create';
         copyBtn.textContent = 'Copy link';
         copyBtn.onclick = () => { copyText(r.link); showToast('Link copied'); close(); this._renderMounts(); };
+        const actions = document.createElement('div');
+        actions.className = 'dialog-actions';
+        actions.appendChild(copyBtn);
+        body.appendChild(actions);
+      });
+    },
+
+    // Direct CephFS subtree share (My storage): mints a path-scoped cephx key
+    // cluster-side; the receiver kernel-mounts the subtree (no WebDAV proxy).
+    _showCephShareDialog(m) {
+      this._mountsDialog(tr('Share a folder from “{name}” (direct)', { name: m.name }), [
+        { key: 'name', label: tr('Share name'), placeholder: 'dataset-v2', value: m.name + '-share' },
+        { key: 'subpath', label: tr('Folder under this storage (empty = share everything)'), placeholder: 'datasets/v2' },
+        { key: 'mode', label: tr('Access'), type: 'select', options: [['ro', tr('Read-only')], ['rw', tr('Read-write')]] },
+      ], tr('Create link'), async (v, { close, body }) => {
+        const r = await api(`/api/mounts/${m.id}/ceph-share`, { method: 'POST', body: JSON.stringify(v), headers: { 'Content-Type': 'application/json' } });
+        if (r?.error) throw new Error(r.error);
+        body.innerHTML = `<label>${escHtml(tr('Direct CephFS link — embeds a scoped key; only works inside this cluster. Send over company chat only; Revoke under Bridge tokens.'))}</label>
+          <textarea readonly style="min-height:84px;font-size:11px">${escHtml(r.link)}</textarea>`;
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'btn-create';
+        copyBtn.textContent = tr('Copy link');
+        copyBtn.onclick = () => { copyText(r.link); showToast(tr('Link copied')); close(); this._renderMounts(); };
         const actions = document.createElement('div');
         actions.className = 'dialog-actions';
         actions.appendChild(copyBtn);

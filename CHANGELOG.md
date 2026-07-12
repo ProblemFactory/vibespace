@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.111.7 — 2026-07-11
+
+- **Direct CephFS subtree sharing (bypasses the WebDAV proxy)**. Sharing a folder from a CephFS "My storage" now mints a PATH-SCOPED cephx key via an in-cluster minter and produces a `vibespace-cephmount:` link; the receiver kernel-mounts the subtree directly at full flash bandwidth instead of relaying every byte through the source instance's Node process. The minted key is scoped to exactly the shared subpath (verified: `mds allow r path=…`), listed under "Shares I created", and Revoke deletes the key cluster-side. Env-gated (`VIBESPACE_CEPHMINT_URL`/`_TOKEN`) — without a minter, sharing falls back to the WebDAV bridge as before. Cross-cluster/external sharing still uses the bridge.
+
 ## 2.111.6 — 2026-07-11
 
 - **Inbox readability (user request)**: every item gets a ⤢ viewer — a dedicated dialog with the text+detail rendered as markdown, fully selectable, with a Copy button. Item text in the popup is selectable now too (a real selection no longer triggers the jump-and-close). And the agent guidance is strengthened everywhere (session intro, per-turn reminder, stop nudge, CLI usage, group context): the inbox is a NOTIFICATION MIRROR — the full content must also appear in the chat reply, never only in the inbox.

@@ -33,6 +33,7 @@ const crypto = require('crypto');
 const { spawn, execFile, execFileSync } = require('child_process');
 
 const SHARE_PREFIX = 'vibespace-share:v1:';
+const CEPHMOUNT_PREFIX = 'vibespace-cephmount:v1:';
 
 class MountManager {
   constructor({ dataDir, broadcast, getSetting }) {
@@ -500,6 +501,7 @@ class MountManager {
         customPath: m.customPath || null,
         source: this._sourceLabel(m),
         canShare: this.canShareFromMount(m),
+        canCephShare: this.canCephShare(m),
         path: this.pathOf(m), desired: m.desired, expiresAt: m.expiresAt || null,
         mounted: this.isMounted(m), error: this._errors.get(m.id) || null,
         createdAt: m.createdAt,
@@ -1797,9 +1799,70 @@ class MountManager {
     return run().finally(() => { try { fs.unlinkSync(policyFile); } catch {} });
   }
 
+  // ── Direct CephFS subtree sharing (bypasses the WebDAV proxy) ──
+  // Same-cluster instances mount a shared My-storage subfolder via the KERNEL
+  // ceph client (full flash bandwidth) instead of relaying every byte through
+  // the source instance's Node process. A cluster-side minter (ceph-mint,
+  // holds ceph admin) issues a PATH-SCOPED cephx key on demand; the link
+  // embeds it, the receiver adds a normal `cephfs` mount. Env-gated: absent
+  // the minter, the row keeps only the WebDAV bridge.
+  cephMintAvailable() { return !!(process.env.VIBESPACE_CEPHMINT_URL && process.env.VIBESPACE_CEPHMINT_TOKEN); }
+  canCephShare(m) { return !!m && m.type === 'cephfs' && this.cephMintAvailable(); }
+
+  async _mintCall(path, body) {
+    const url = process.env.VIBESPACE_CEPHMINT_URL.replace(/\/+$/, '') + path;
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 20000);
+    try {
+      const r = await fetch(url, { method: 'POST', signal: ctl.signal,
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + process.env.VIBESPACE_CEPHMINT_TOKEN },
+        body: JSON.stringify(body) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || ('mint service ' + r.status));
+      return j;
+    } finally { clearTimeout(t); }
+  }
+
+  /** Mint a path-scoped key for a subfolder of a cephfs mount → share link. */
+  async mintCephShare(id, { subpath = '', mode = 'ro', name } = {}) {
+    const m = this._get(id);
+    if (!this.canCephShare(m)) throw new Error('Direct CephFS sharing is not available for this storage.');
+    const base = (m.cephPath || '/').replace(/\/+$/, '');
+    const rel = String(subpath || '').replace(/^\/+|\/+$/g, '');
+    const full = rel ? base + '/' + rel : base;
+    const minted = await this._mintCall('/mint', { path: full, mode: mode === 'rw' ? 'rw' : 'ro' });
+    const shareName = name || (rel ? rel.split('/').pop() : m.name) + '-share';
+    const share = {
+      id: 'cs_' + crypto.randomBytes(6).toString('hex'), kind: 'cephmount',
+      name: shareName, path: full, mode: minted.mode, client: minted.client, createdAt: Date.now(),
+    };
+    this._state.shares.push(share);
+    this._save();
+    const payload = {
+      name: shareName, mons: minted.mons, fsName: minted.fsName, path: minted.path,
+      user: minted.client, secret: minted.key, mode: minted.mode,
+    };
+    const link = CEPHMOUNT_PREFIX + Buffer.from(JSON.stringify(payload)).toString('base64url');
+    return { link, id: share.id };
+  }
+
+  static parseCephMountLink(link) {
+    const str = String(link || '').trim();
+    if (!str.startsWith(CEPHMOUNT_PREFIX)) return null;
+    const p = JSON.parse(Buffer.from(str.slice(CEPHMOUNT_PREFIX.length), 'base64url').toString('utf8'));
+    for (const k of ['mons', 'path', 'user', 'secret']) if (!p[k]) throw new Error('malformed cephmount link');
+    return p;
+  }
+
   async revokeShare(id) {
     const share = this._state.shares.find(s => s.id === id);
     if (!share) throw new Error('share not found');
+    if (share.kind === 'cephmount' && share.client && this.cephMintAvailable()) {
+      await this._mintCall('/revoke', { client: share.client }).catch(() => {});
+      this._state.shares = this._state.shares.filter(x => x.id !== id);
+      this._save(); this._notify();
+      return;
+    }
     if (share.method === 'service-account') {
       // need the OWNER credential again — my-storage env is the canonical owner
       const env = this.envStorage();
