@@ -240,7 +240,9 @@ app.get('/api/agent/prompt-context', (req, res) => {
       s._groupSnap = s._groupSnap || {};
       const multi = injectGroups.length > 1;
       const ctxBaseFor = remoteCtxBaseFor(s); // remote → translated file paths
-      const firstGroups = []; // never-delivered groups → ONE full context below
+      const firstGroups = [];   // never-delivered groups → full context below
+      const changedDiffs = [];  // updated groups delivering as a DELTA
+      const updatedFulls = [];  // updated groups needing a FULL re-delivery
       for (const g of injectGroups) {
         const seenAt = s._groupSeenAt[g.id];
         // User-written contextDir files don't bump updatedAt — a signature diff
@@ -258,7 +260,8 @@ app.get('/api/agent/prompt-context', (req, res) => {
           // UPDATE, not first delivery — deliver only the DIFF vs the snapshot
           // from the last delivery (2.113.0, user request: the full re-inject
           // was several KB of repetition per change). No snapshot (older
-          // session object / toggle off) → the old full "was UPDATED" payload.
+          // session object / toggle off) or a STRUCTURAL change (contextDir)
+          // → the old full "was UPDATED" payload.
           // Markers/snapshot advance at RENDER, not receipt — a delivery the
           // harness drops (hook 3s timeout) stays lost until the agent reads
           // `show --full`/TASK.md or the server restarts (ACCEPTED: same class
@@ -267,16 +270,15 @@ app.get('/api/agent/prompt-context', (req, res) => {
           // did not need but also did not have).
           const snap = s._groupSnap[g.id];
           const ctxBase = ctxBaseFor ? ctxBaseFor(g.id) : null;
-          const diff = (injectDiffsEnabled() && snap)
-            ? tasks.renderContextDiff(g.id, snap, { multi, ctxBase, oldSig: s._ctxSig[g.id] || '', newSig: sig })
+          const changes = (injectDiffsEnabled() && snap)
+            ? tasks.diffChanges(g.id, snap, { gid: multi ? `--group ${g.id} ` : '', ctxBase, oldSig: s._ctxSig[g.id] || '', newSig: sig })
             : null;
-          if (diff !== null) {
-            // '' = a no-op edit (nothing the injection renders changed) — say
-            // nothing, just advance the seen markers so it isn't re-diffed.
-            if (diff) parts.push(diff);
+          if (changes) {
+            // empty lines = a no-op edit (nothing the injection renders
+            // changed) — say nothing, just advance the markers below.
+            if (changes.lines.length) changedDiffs.push({ g, changes, ctxBase });
           } else {
-            const ctx = tasks.renderContext(g.id, { multi, ctxBase });
-            if (ctx) parts.push(`The Task Group below was UPDATED since you last saw it — this is the current state (supersedes any earlier copy).\n\n${ctx}`);
+            updatedFulls.push(g);
           }
           s._groupSeenAt[g.id] = contentAt;
           s._ctxSig[g.id] = sig;
@@ -290,6 +292,21 @@ app.get('/api/agent/prompt-context', (req, res) => {
         // _groupSnap unset — the next change falls back to full delivery once,
         // which records the snapshot.
       }
+      // ── Assemble the delivery: [manifest?] + ONE diff block + full blocks ──
+      // N changed groups collapse into ONE combined <vibespace-task-update>
+      // whose header ENUMERATES every changed group (user directive: stacked
+      // per-group blocks + the ~2KB persisted-preview truncation could hide
+      // the very fact that a second group changed).
+      const diffBlock = !changedDiffs.length ? null
+        : changedDiffs.length === 1
+          ? tasks.renderDiffBlock(changedDiffs[0].g.id, changedDiffs[0].changes, { multi, ctxBase: changedDiffs[0].ctxBase })
+          : tasks.renderContextDiffMulti(changedDiffs.map((x) => ({ id: x.g.id, changes: x.changes })));
+      const fullBlocks = [];
+      for (const g of updatedFulls) {
+        const ctx = tasks.renderContext(g.id, { multi, ctxBase: ctxBaseFor ? ctxBaseFor(g.id) : null });
+        if (ctx) fullBlocks.push(`The Task Group below was UPDATED since you last saw it — this is the current state (supersedes any earlier copy).\n\n${ctx}`);
+      }
+      let newFullGroups = [];
       if (firstGroups.length) {
         // First delivery. ALL of the membership new (the codex first-prompt
         // path) → ONE layered multi-context (same format SessionStart uses)
@@ -304,19 +321,8 @@ app.get('/api/agent/prompt-context', (req, res) => {
           ? [tasks.renderMultiContext(firstGroups.map((g) => g.id), { ctxBaseFor })].filter(Boolean)
           : firstGroups.map((g) => tasks.renderContext(g.id, { multi, ctxBase: ctxBaseFor ? ctxBaseFor(g.id) : null })).filter(Boolean);
         if (fulls.length) {
-          if (parts.length) {
-            // MIXED delivery (update diffs already queued alongside a new
-            // group's full context): Claude truncates an oversized persisted
-            // payload to a ~2KB HEAD preview, so a plain one-after-the-other
-            // order can erase one kind ENTIRELY (user directive). Structure:
-            // head MANIFEST that names both kinds + the rescue path (always
-            // inside any preview), the small diffs next (likely fully visible),
-            // the big full context(s) last (recoverable via the manifest).
-            parts.unshift(`<vibespace-delivery-note>This delivery contains BOTH: (1) update diffs for Task Group(s) you already know — right below; (2) the FULL context for Task Group(s) NEW to this session: ${firstGroups.map((g) => `"${g.title}" (${g.id})`).join(', ')} — after the diffs. ${tasks._persistRescueLine()}</vibespace-delivery-note>`);
-            parts.push(...fulls);
-          } else {
-            parts.push(...fulls);
-          }
+          fullBlocks.push(...fulls);
+          newFullGroups = firstGroups;
           for (const g of firstGroups) {
             s._groupSeenAt[g.id] = g.contentUpdatedAt || g.updatedAt;
             s._ctxSig[g.id] = g.contextDir ? tasks.contextDirSignature(g.contextDir) : '';
@@ -324,6 +330,21 @@ app.get('/api/agent/prompt-context', (req, res) => {
           }
         }
       }
+      const blocks = [...(diffBlock ? [diffBlock] : []), ...fullBlocks];
+      if (blocks.length > 1) {
+        // MULTI-BLOCK delivery: Claude truncates an oversized persisted payload
+        // to a ~2KB HEAD preview, so a plain one-after-the-other order can
+        // erase every block after the first ENTIRELY (user directive). Head
+        // MANIFEST names EVERY block + the rescue path (always inside any
+        // preview); the small diff block goes first, big fulls last.
+        const name = (g) => `"${g.title}" (${g.id})`;
+        const kinds = [];
+        if (diffBlock) kinds.push(`update diffs for: ${changedDiffs.map((x) => name(x.g)).join(', ')}`);
+        if (updatedFulls.length) kinds.push(`FULL re-delivery of changed group(s): ${updatedFulls.map(name).join(', ')}`);
+        if (newFullGroups.length) kinds.push(`the FULL context for group(s) NEW to this session: ${newFullGroups.map(name).join(', ')}`);
+        parts.push(`<vibespace-delivery-note>This delivery contains, in order: ${kinds.join('; ')}. ${tasks._persistRescueLine()}</vibespace-delivery-note>`);
+      }
+      parts.push(...blocks);
     } else if (!s._toolsIntroSeen) {
       // No injectable group → baseline tools intro once (see task-context note).
       // In no group: deliver the baseline tools intro on the FIRST prompt (covers

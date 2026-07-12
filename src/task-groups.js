@@ -372,24 +372,28 @@ class TaskGroupManager {
     };
   }
 
-  // Render the CHANGES between snap (what the session last saw) and the
-  // group's current state. Returns '' when nothing the injection renders
-  // actually changed (e.g. an objective re-saved with identical text — the
-  // old behavior re-injected the whole group for that). Order mirrors
+  // Compute one group's delta between snap (what the session last saw) and its
+  // current state → { lines, bits } (bits = phrase-level summary fragments for
+  // enumeration headers, e.g. ['2 checklist changes', '3 new activity']).
+  // lines EMPTY when nothing the injection renders actually changed (e.g. an
+  // objective re-saved with identical text — the old behavior re-injected the
+  // whole group for that; caller skips injection, still advances markers).
+  // Returns null when the snapshot is unusable OR the change is STRUCTURAL
+  // (contextDir designated/changed/cleared mid-session — the agent needs the
+  // file index + shared-folder conventions only the full context teaches; a
+  // one-line "folder is now X" left pre-existing files permanently invisible,
+  // review-caught) → caller falls back to full delivery. Line order mirrors
   // renderContext (identity → objective → checklist → folder → activity LAST)
-  // so the tail-first truncation drops the safest section first.
-  renderContextDiff(id, snap, { multi = false, ctxBase = null, oldSig = '', newSig = '' } = {}) {
+  // so tail-first truncation drops the safest section first.
+  diffChanges(id, snap, { gid = '', ctxBase = null, oldSig = '', newSig = '' } = {}) {
     const t = this.get(id);
-    if (!snap || typeof snap !== 'object' || !Array.isArray(snap.plan)) return null; // unusable snapshot → caller falls back to full context
-    // contextDir designated/changed mid-session is STRUCTURAL, not a delta —
-    // the agent needs the file index + shared-folder conventions the full
-    // context teaches (a one-line "folder is now X" left pre-existing files
-    // permanently invisible; review-caught). Fall back to full delivery.
+    if (!snap || typeof snap !== 'object' || !Array.isArray(snap.plan)) return null;
     if ((snap.contextDir || null) !== (t.contextDir || null)) return null;
-    const gid = multi ? `--group ${t.id} ` : '';
     const ch = [];
-    if (snap.title !== t.title) ch.push(`- Renamed: "${snap.title}" → "${t.title}"`);
+    const bits = []; // summary fragments, same order as the sections
+    if (snap.title !== t.title) { ch.push(`- Renamed: "${snap.title}" → "${t.title}"`); bits.push('renamed'); }
     if (this._h(t.objective || '') !== snap.objHash) {
+      bits.push('objective updated');
       const obj = (t.objective || '').trim();
       if (!obj) ch.push('- Objective CLEARED');
       else {
@@ -426,12 +430,14 @@ class TaskGroupManager {
       }
     }
     for (const [k, o] of occOld) if (!matchedOld.has(k)) planCh.push(`- Checklist REMOVED: ${o.text}`);
+    const nPlanChanges = planCh.length;
     if (planCh.length > 20) {
       const extra = planCh.length - 20;
       planCh.length = 20;
       planCh.push(`- … +${extra} more checklist changes  _(\`vibespace-task ${gid}show --full\`)_`);
     }
     ch.push(...planCh);
+    if (nPlanChanges) bits.push(`${nPlanChanges} checklist change${nPlanChanges > 1 ? 's' : ''}`);
     if (t.contextDir && oldSig !== newSig) {
       // Signature format is path:size:mtime joined by | (contextDirSignature;
       // path has % and | escaped there) — peel size:mtime off the END so paths
@@ -452,11 +458,11 @@ class TaskGroupManager {
       const upd = [...b.keys()].filter((k) => a.has(k) && a.get(k) !== b.get(k));
       const add = [...b.keys()].filter((k) => !a.has(k));
       const del = [...a.keys()].filter((k) => !b.has(k));
-      const bits = [];
-      if (upd.length) bits.push(`updated ${list(upd)}`);
-      if (add.length) bits.push(`new ${list(add)}`);
-      if (del.length) bits.push(`removed ${list(del)}`);
-      if (bits.length) ch.push(`- Shared context folder files — ${bits.join('; ')}`);
+      const fbits = [];
+      if (upd.length) fbits.push(`updated ${list(upd)}`);
+      if (add.length) fbits.push(`new ${list(add)}`);
+      if (del.length) fbits.push(`removed ${list(del)}`);
+      if (fbits.length) { ch.push(`- Shared context folder files — ${fbits.join('; ')}`); bits.push('shared files changed'); }
     }
     const fresh = (t.progress || []).filter((p) => p.at > (snap.lastProgressAt || 0));
     if (fresh.length) {
@@ -471,8 +477,27 @@ class TaskGroupManager {
       }
       ch.push(`- New activity${fresh.length > picked.length ? ` _(last ${picked.length} of ${fresh.length} new)_` : ` (${fresh.length})`}:${picked.some((l) => l.includes(' †')) ? '  _(† = has detail)_' : ''}`);
       ch.push(...picked);
+      bits.push(`${fresh.length} new activity`);
     }
-    if (!ch.length) return '';
+    return { lines: ch, bits };
+  }
+
+  // ONE group's delta as a standalone <vibespace-task-update> block.
+  // Back-compat single-group API: computes + renders. Returns null (fall back
+  // to full) / '' (no-op change, skip) / the block.
+  renderContextDiff(id, snap, { multi = false, ctxBase = null, oldSig = '', newSig = '' } = {}) {
+    const gid = multi ? `--group ${id} ` : '';
+    const r = this.diffChanges(id, snap, { gid, ctxBase, oldSig, newSig });
+    if (r === null) return null;
+    if (!r.lines.length) return '';
+    return this.renderDiffBlock(id, r, { multi, ctxBase });
+  }
+
+  // Render a single group's precomputed diffChanges result as a block.
+  renderDiffBlock(id, changes, { multi = false, ctxBase = null } = {}) {
+    const t = this.get(id);
+    const gid = multi ? `--group ${t.id} ` : '';
+    const ch = changes.lines.slice(); // cap loop mutates
     const head = [
       '<vibespace-task-update>',
       // TASK.md pointer is LOCAL-only: the remote ctx rsync excludes
@@ -487,6 +512,39 @@ class TaskGroupManager {
     while (Buffer.byteLength(lines.join('\n'), 'utf-8') > 5000 && ch.length > 1) {
       ch.pop(); dropped++;
       lines = [...head, ...ch, `- … (+${dropped} more lines — \`vibespace-task ${gid}show --full\`)`, '</vibespace-task-update>'];
+    }
+    return lines.join('\n');
+  }
+
+  // SEVERAL groups changed on one turn → ONE combined block, LAYERED like
+  // renderMultiContext (same directive class as 2.68.0): stacking per-group
+  // blocks one after another meant a ~2KB persisted-preview truncation could
+  // show ONLY the first group — the agent never learned the FACT that a second
+  // group also changed (user directive). The HEADER enumerates every changed
+  // group with a phrase summary, so truncation can only cost details, never
+  // the existence of a group's update; per-group sections follow SMALLEST
+  // FIRST (a big group's bulk truncates last, and the tail-drop hits it first).
+  // items: [{ id, changes }] from diffChanges, each with non-empty lines.
+  renderContextDiffMulti(items) {
+    const metas = items
+      .map((it) => ({ ...it, t: this.get(it.id), size: Buffer.byteLength(it.changes.lines.join('\n'), 'utf-8') }))
+      .sort((a, b) => a.size - b.size);
+    const enumStr = metas.map((m) => `"${m.t.title}" (${m.t.id}): ${m.changes.bits.join(' + ') || 'changed'}`).join(' · ');
+    const head = [
+      '<vibespace-task-update>',
+      `${metas.length} of your Task Groups changed since your last update — DELTAS ONLY below; everything else you already know still stands. Changed: ${enumStr}. Full state per group: \`vibespace-task --group <id> show --full\`.`,
+    ];
+    const body = [];
+    for (const m of metas) body.push('', `## "${m.t.title}" (${m.t.id})`, ...m.changes.lines);
+    let lines = [...head, ...body, '</vibespace-task-update>'];
+    // Cap ~6.5KB total — drop body lines from the END (the biggest group sits
+    // last); a section emptied down to its heading loses the heading too. The
+    // enumeration header always survives, so no group's update can vanish.
+    let over = false;
+    while (Buffer.byteLength(lines.join('\n'), 'utf-8') > 6500 && body.length > 3) {
+      body.pop(); over = true;
+      while (body.length && (body[body.length - 1].startsWith('## ') || body[body.length - 1] === '')) body.pop();
+      lines = [...head, ...body, `- … (truncated — per-group \`vibespace-task --group <id> show --full\`)`, '</vibespace-task-update>'];
     }
     return lines.join('\n');
   }

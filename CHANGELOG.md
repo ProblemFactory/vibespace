@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.113.1 — 2026-07-12
+- Diff injection: SEVERAL Task Groups changing on one turn now deliver as ONE combined `<vibespace-task-update>` block whose header line enumerates every changed group with a phrase summary ("工作: 3 new activity · 个人项目: 1 checklist change + 3 new activity"), per-group sections following smallest-first (user directive: stacked per-group blocks meant the ~2KB truncation preview could hide the very fact that a second group changed). Same rule extended to every multi-block delivery: the manifest now names EVERY block (diff groups, full re-deliveries, newly-bound groups), not just kinds.
+
 ## 2.113.0 — 2026-07-12
 - Agent context injection: Task Group UPDATES now deliver as DIFFS (user request — the full re-injection was several KB of repetition per change). Each session snapshots what it last saw per group; a mid-session change injects a compact `<vibespace-task-update>` block listing only the actual deltas: added/checked/unchecked/removed checklist items (with who), objective/title edits, changed shared-context files, and the new activity entries — with `show --full` pointers and a ~5KB cap. Full context still goes out on first contact and after a server restart; no-op edits (e.g. re-saving an unchanged objective) now inject nothing at all. Toggle: Settings → Session → "Task Group updates as diffs" (default on).
 - Agent context injection: several first-time groups arriving on one prompt (the codex first-prompt path) now deliver as ONE layered multi-group context instead of N full payloads each repeating the tools section.
