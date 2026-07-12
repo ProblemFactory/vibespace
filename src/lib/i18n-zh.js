@@ -1663,4 +1663,6 @@ export default {
   "— pick to prefill —": "— 选择以自动填充 —",
   "✓ Connected — finish with the “Connect” button below.": "✓ 已连接——点下方“连接”按钮完成。",
   "Enable Ctrl+\\ command mode for keyboard-driven window management": "启用 Ctrl+\\ 命令模式，用键盘管理窗口",
+  "Mount on a Mac / Windows (Finder / Explorer)": "在 Mac / Windows 上挂载（Finder / 资源管理器）",
+  "Finder: Cmd+K → enter the server address; any username, password = the token below. Windows: map network drive to the same address.": "Finder：Cmd+K → 输入下方服务器地址；用户名任意，密码 = 下方令牌。Windows：映射网络驱动器到同一地址。",
 };

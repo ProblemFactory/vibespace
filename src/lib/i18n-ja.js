@@ -1667,4 +1667,6 @@ export default {
   "— pick to prefill —": "— 選択して自動入力 —",
   "✓ Connected — finish with the “Connect” button below.": "✓ 接続済み——下の「接続」ボタンで完了。",
   "Enable Ctrl+\\ command mode for keyboard-driven window management": "Ctrl+\\ コマンドモードを有効化（キーボードでウィンドウ管理）",
+  "Mount on a Mac / Windows (Finder / Explorer)": "Mac / Windows でマウント（Finder / エクスプローラー）",
+  "Finder: Cmd+K → enter the server address; any username, password = the token below. Windows: map network drive to the same address.": "Finder：Cmd+K → 下のサーバーアドレスを入力。ユーザー名は任意、パスワード = 下のトークン。Windows：同じアドレスにネットワークドライブを割り当て。",
 };

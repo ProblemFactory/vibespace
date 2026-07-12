@@ -972,7 +972,11 @@ export function installSidebarMounts(Sidebar) {
         const r = await api('/api/mount-tokens', { method: 'POST', body: JSON.stringify(v), headers: { 'Content-Type': 'application/json' } });
         body.innerHTML = `<label>${escHtml(tr('Bridge link — embeds a scoped token; treat it like a key'))}</label>
           <textarea readonly style="min-height:84px;font-size:11px">${escHtml(r.link)}</textarea>
-          <div class="mounts-note">${escHtml(tr('The other side pastes this into “Import share link” (or Connect storage → Another VibeSpace). Revoke any time under Bridge tokens.'))}</div>`;
+          <div class="mounts-note">${escHtml(tr('The other side pastes this into “Import share link” (or Connect storage → Another VibeSpace). Revoke any time under Bridge tokens.'))}</div>`
+          + (r.token ? `<label style="margin-top:10px">${escHtml(tr('Mount on a Mac / Windows (Finder / Explorer)'))}</label>
+          <div class="mounts-note">${escHtml(tr('Finder: Cmd+K → enter the server address; any username, password = the token below. Windows: map network drive to the same address.'))}</div>
+          <div class="mounts-note" style="user-select:all">${escHtml(r.davUrl || '')}</div>
+          <textarea readonly style="min-height:40px;font-size:11px">${escHtml(r.token)}</textarea>` : '');
         const copyBtn = document.createElement('button');
         copyBtn.className = 'btn-create';
         copyBtn.textContent = tr('Copy link');

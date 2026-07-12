@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.111.15 — 2026-07-12
+
+- "Share a local folder" now also shows the Finder/Explorer connection info (dav URL + raw token) so a Mac can mount the share natively without decoding the bridge link.
+
 ## 2.111.14 — 2026-07-12
 
 - **/dav accepts Basic auth with the mount token as the password** — macOS Finder (Cmd+K) and Windows Explorer can now mount a shared folder natively: server `https://<instance>/dav`, any username, password = the `vsmt_…` token from "Share a local folder". rclone Bearer unchanged.
