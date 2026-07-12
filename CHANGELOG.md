@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.111.29 — 2026-07-12 (P0)
+
+- **Fixed a syntax error that broke the entire `vibespace-status` CLI** on any instance running 2.111.24–2.111.28. The 2.111.24 "reason + detail required" help text used a shell line-continuation backslash (`… \`) at the END of a single-quoted JS string in the generator template — the `\'` escaped the closing quote, so every regenerated `data/bin/vibespace-status` failed to parse and `vibespace-status <anything>` exited with a SyntaxError. The example is now a single line with no trailing backslash. The file regenerates correctly on the next server start; a live instance can also just re-run its Update.
+
 ## 2.111.28 — 2026-07-12
 
 - Follow-up to 2.111.26: the `.gitignore` entry for the generated `data/bin/vibespace-status` had an INLINE comment (`path  # ...`) — .gitignore has no inline comments, so the whole line became the pattern and never matched, letting `git add -A` re-track the file. Comment moved to its own line; verified `git check-ignore` now ignores it and `git add -A` no longer picks it up.

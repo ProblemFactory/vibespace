@@ -1409,8 +1409,7 @@ async function main() {
     try { existing = (await post({ show: true })).status; } catch {}
     if (!(existing && existing.state === cmd && (existing.reason || '').trim() && (existing.detail || '').trim())) {
       console.error('vibespace-status: "' + cmd + '" needs BOTH --reason (one line) AND --detail (full context).');
-      console.error('  e.g. vibespace-status ' + cmd + ' --reason "waiting for the S3 credentials" \\');
-      console.error('         --detail "Deploy needs the bucket keys; checked .env and the mounts config, not there. Recommend pasting them in chat." [--urgency high]');
+      console.error('  e.g. vibespace-status ' + cmd + ' --reason "waiting for the S3 credentials" --detail "Deploy needs the bucket keys; checked .env and the mounts config, not there. Recommend pasting them in chat." --urgency high');
       console.error('  (then say it in your chat reply and mirror it with: vibespace-ask "...")');
       process.exit(1);
     }
