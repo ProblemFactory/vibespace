@@ -519,6 +519,12 @@ class LayoutManager {
   // Auto-save (debounced, triggered on every window change)
   // Won't fire until initial restore is complete
   scheduleAutoSave() {
+    // Dynamic desktop: while staged, the ONLY thing to persist is the stage's
+    // own grid config (through the stage store — desktop autosave stays
+    // suppressed). Intercept BEFORE the restore gates: they exist to protect
+    // desktop records, and letting them drop this call silently lost the grid
+    // (smoke-caught: _restoring was still true when the user set a grid).
+    if (this.app.stage?.isActive) { this.app.stage.onStageLayoutChanged(); return; }
     if (this._restoring) return; // Don't autosave while restoring
     if (this.app.desktopManager?._restoring) return; // Don't autosave during desktop switch
     if (this._autoSaveTimer) clearTimeout(this._autoSaveTimer);
