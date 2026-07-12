@@ -7,7 +7,8 @@ public/novnc.js
 data/*
 !data/bin/
 data/bin/code
-data/bin/vibespace-status  # generated at startup by createStatusHelper() — never track (dirties the tree, blocks git pull)
+# generated at startup by createStatusHelper() — never track (dirties the tree, blocks git pull)
+data/bin/vibespace-status
 *.nfs*
 .agent-context/
 data/.agent-hooks-optout

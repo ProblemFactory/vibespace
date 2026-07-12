@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.111.28 — 2026-07-12
+
+- Follow-up to 2.111.26: the `.gitignore` entry for the generated `data/bin/vibespace-status` had an INLINE comment (`path  # ...`) — .gitignore has no inline comments, so the whole line became the pattern and never matched, letting `git add -A` re-track the file. Comment moved to its own line; verified `git check-ignore` now ignores it and `git add -A` no longer picks it up.
+
 ## 2.111.27 — 2026-07-12
 
 - **When SSO (Clerk) is configured, the onboarding password step is skipped** — login is handled by the identity provider, so a local password is redundant. The step shows a short "SSO is configured, no password needed" note + Continue instead of the password inputs. On config import, an included `vsPassword` record is now IGNORED under SSO (the import row is disabled with an "ignored — this instance uses SSO login" note, and the server reports `vsPassword: skipped (SSO configured)`). New `auth.ssoEnabled` surfaced through `/api/home`.
