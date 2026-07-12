@@ -409,7 +409,7 @@ class TaskGroupManager {
     // duplicate silently vanish OR emit a phantom CHECKED line in every later
     // diff forever (review-caught, reproduced). An edited text still reads as
     // REMOVED + NEW — honest enough.
-    const occKey = (counter, text) => { const n = counter.get(text) || 0; counter.set(text, n + 1); return `${n} ${text}`; };
+    const occKey = (counter, text) => { const n = counter.get(text) || 0; counter.set(text, n + 1); return `${n}\u0000${text}`; };
     const occOld = new Map();
     { const c = new Map(); for (const p of snap.plan) occOld.set(occKey(c, p.text), p); }
     const matchedOld = new Set();
