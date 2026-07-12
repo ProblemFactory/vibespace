@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.111.26 — 2026-07-12
+
+- **Fixed self-update failing with "Your local changes to data/bin/vibespace-status would be overwritten"**. That file is REGENERATED on every server startup by createStatusHelper() but was also tracked in git, so each boot dirtied the working tree and blocked `git pull --ff-only`. It's now untracked (.gitignore, like data/bin/code) and update.sh resets it — plus any other regenerated tracked file under data/bin/ — before pulling. One-time manual unblock for an instance stuck on the old update.sh: in its shell run `cd ~/vibespace && git checkout -- data/bin/vibespace-status && git pull --ff-only` (or just discard it, then re-click Update).
+
 ## 2.111.25 — 2026-07-12
 
 - The injected context's "Reporting back" section now shows COPY-READY complete invocations (fenced one-liners with `--detail`, and `--reason` + `--detail` on the status sample) — the first call an agent copies is already the valid form, instead of learning the required flags via rejection.
