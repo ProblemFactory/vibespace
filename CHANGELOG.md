@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.111.11 — 2026-07-12
+
+- Removed the temporary code-block overlap diagnostic probe (2.111.10 fix user-verified on device).
+
 ## 2.111.10 — 2026-07-12
 
 - **Code-block line overlap: the REAL fix, proven by construction.** `renderCodeBlock` split `hljs.highlight()` output by `\n`, but hljs emits spans that CROSS newlines (markdown emphasis paired `_` from `min_size`…`max_bytes` across lines). The split left one line with an unclosed `<span>` and a later line with a stray `</span>`; embedded in the per-line template, that stray close ended `.chat-code-text` EARLY, dumping the rest of the line as extra anonymous flex items — `flex:1 + min-width:0` squeezed the real span to ~47px and its `white-space:pre` text painted OVER the siblings (overprint when unwrapped, a ~7-char narrow column when wrapped). Byte-exact match with the on-device probe (82-char span at 47.4px, layout rows clean). Fix: `splitHighlightedLines()` carries open spans across line fragments (close at line end, re-open at next start) — every row self-contained and balanced; also applied to `rehighlightCodeBlock`. Verified: the previously-corrupt real document renders 60 rows, 0 anomalies, in headless Chrome at mobile width. (2.111.8's content-visibility and 2.111.9's text-size-adjust theories were both refuted by the probe — kept as hygiene, documented as not-the-cause.)
