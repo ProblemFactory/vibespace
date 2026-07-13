@@ -2144,7 +2144,9 @@ app.get('/api/usage-stats', (req, res) => {
     const pivots = req.query.pivot
       ? String(req.query.pivot).split(',').map((s) => s.split(':')).filter((p) => p.length === 2).slice(0, 6)
       : null;
-    res.json(usageHistory.aggregate({ from, to, backend, accounts, pivots }));
+    // host = the DEVICE filter ('local' | a host id) — top-level over the view
+    const hostFilter = req.query.host ? String(req.query.host) : null;
+    res.json(usageHistory.aggregate({ from, to, backend, accounts, hostFilter, pivots }));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/usage-stats/pricing', (req, res) => res.json({ pricing: usageHistory.pricingTable() }));

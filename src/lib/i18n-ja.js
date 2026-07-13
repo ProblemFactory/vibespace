@@ -1687,4 +1687,6 @@ export default {
   "The connection to the remote host dropped — reconnecting. The session keeps running on the host; nothing is lost.": "リモートホストへの接続が切断されました — 再接続中です。セッションはホスト上で動き続けており、何も失われません。",
   "Fetch this host’s quota (reads its own login token over ssh — one on-demand request)": "このホストのクォータを取得（ssh 経由で自身のログイントークンを読み取り — 1 回のオンデマンド要求）",
   "No data yet — ⟳ reads the host’s own login quota on demand": "データなし — ⟳ がホスト自身のログインのクォータをオンデマンドで取得します",
+  "Device": "デバイス",
+  "This machine": "このマシン",
 };

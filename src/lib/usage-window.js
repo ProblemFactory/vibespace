@@ -51,6 +51,8 @@ export function openUsageWindow(app, opts = {}) {
     range: '30d', backend: '', account: '', metric: 'cost', data: null, loading: false, view: 'dash',
     customFrom: isoDay(Date.now() - 7 * DAY), customTo: isoDay(Date.now()),
     acctOptions: null, // account rows from the last UNFILTERED load — the chip set must not shrink while filtered
+    device: '',        // DEVICE filter: '' all · 'local' · a host id (2.128.0)
+    deviceOptions: null, // host rows union (like acctOptions)
   };
 
   // The dashboard's saved panels (or the default preset) — split-series
@@ -73,16 +75,23 @@ export function openUsageWindow(app, opts = {}) {
     }
     if (state.backend) qs.set('backend', state.backend);
     if (state.account) qs.set('account', state.account);
+    if (state.device) qs.set('host', state.device);
     const pivots = panelPivots(currentPanels());
     if (pivots.length) qs.set('pivot', pivots.join(','));
     try { state.data = await fetchJson('/api/usage-stats?' + qs.toString()); }
     catch { state.data = null; showToast(t('Could not load usage'), { type: 'error' }); }
     if (!state.account && state.data?.groups?.account) {
       // Union, not replace: switching to a narrower range must not drop chips
-      // for accounts that simply have no data there.
+      // for accounts that simply have no data there. Host buckets are DEVICES,
+      // not accounts — they live in the Device row (2.128.0).
       const have = new Map((state.acctOptions || []).map(r => [r.key, r]));
-      for (const r of state.data.groups.account) have.set(r.key, r);
+      for (const r of state.data.groups.account) if (r.type !== 'host') have.set(r.key, r);
       state.acctOptions = [...have.values()];
+    }
+    if (!state.device && state.data?.groups?.host) {
+      const have = new Map((state.deviceOptions || []).map(r => [r.key, r]));
+      for (const r of state.data.groups.host) have.set(r.key, r);
+      state.deviceOptions = [...have.values()];
     }
     state.loading = false; render();
   };
@@ -199,6 +208,23 @@ function renderControls(app, state, load, rerender) {
     }
     load();
   })));
+  // Device filter (2.128.0): '' all · local · each remote host — a TOP-LEVEL
+  // gate over the whole view (hosts are devices, not accounts). Only rendered
+  // once a remote device has data.
+  const devRows = (state.deviceOptions || []).filter(r => r.key !== 'local');
+  if (devRows.length) {
+    const dopts = [
+      { key: '', label: t('All') },
+      { key: 'local', label: t('This machine') },
+      ...devRows.map(r => ({ key: r.key, label: r.name || r.key })),
+    ];
+    bar.appendChild(labelled(t('Device'), seg(dopts, state.device, k => {
+      state.device = k;
+      // account filters are local identities — meaningless under a remote device
+      if (k && k !== 'local' && state.account) state.account = '';
+      load();
+    })));
+  }
   // Account filter — one chip per ledger bucket, each with its vendor logo.
   // Backend-scoped: with Backend=Codex only codex identities show (and vice
   // versa). The two CLIs' machine logins are separate buckets ('__global__'
@@ -206,6 +232,7 @@ function renderControls(app, state, load, rerender) {
   // (email link), the two buckets render as ONE chip whose filter spans both
   // (comma key), mirroring the pies' dedupe.
   let acctRows = state.acctOptions || [];
+  if (state.device && state.device !== 'local') acctRows = []; // remote device = its own login, no local accounts
   if (state.backend) acctRows = acctRows.filter(r => bucketBe(r) === state.backend);
   if (acctRows.length > 1) {
     const GLOBALS = [
