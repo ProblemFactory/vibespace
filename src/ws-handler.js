@@ -414,6 +414,16 @@ function registerWsHandler(wss, ctx) {
             session.host = h.id;
             session.hostName = h.name;
           } else if (data.hostId && hosts && sessionMode === 'chat') {
+            // Codex remote chat was NEVER wired (this branch force-appends
+            // claude stream-json flags — into codex argv they just made the
+            // spawn die opaquely). Fail fast with the honest state instead of
+            // creating a broken session; full support is parked (backlog
+            // B-0588: codex wrapper needs the keeper/offset machinery +
+            // remote thread discovery). Terminal mode works remotely today.
+            if (backend === 'codex') {
+              ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'Codex chat on a remote host isn\'t supported yet — use Terminal mode on the host, or run the chat locally.' }));
+              return;
+            }
             // Remote CHAT (P3): ssh -T gives a CLEAN pipe — stream-json must
             // NOT cross a remote dtach/pty layer (echo + CRLF corrupt JSON).
             // Local dtach still keeps the pipeline across server restarts; an

@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.129.1 — 2026-07-13
+- Creating a **Codex CHAT session on a remote host now fails fast with an honest error** instead of silently spawning a broken session (the remote-chat branch force-appends claude stream-json flags — into codex argv they just killed the spawn opaquely). Terminal mode on the host and local codex chat are unaffected; full remote codex chat support stays parked (backlog B-0588 — needs the keeper/offset machinery in the codex wrapper + remote thread discovery).
+
 ## 2.129.0 — 2026-07-13
 - **Manage Agents shows the VibeSpace footprint on a remote host** (transparency follow-up to the 2.126.0 argv incident, backlog B-34bb): selecting a machine now renders a "VibeSpace integration on <host>" row — per-tool state under `~/.vibespace/bin` compared against the LOCAL copies by content hash (current / outdated / absent; per-tool detail in the tooltip), hook registration in the HOST's own Claude/Codex configs, node availability, and keeper session files — with explicit **Install/Reinstall** (same tar-over-stdin channel the per-spawn distribution uses; registers the hook) and a danger-confirmed **Remove** (unregisters ONLY our hook entry from the host's CLI configs via the register script's new `--uninstall` mode, then deletes exactly our tool files; per-session token files are left alone). The row says plainly that creating a remote session re-installs everything automatically (per-spawn distribution is the zero-drift design). Probe is one read-only ssh round trip (`GET /api/hosts/:id/agent-tools`); verified live: outdated detection → install → uninstall (both harnesses' hooks cleanly unregistered, foreign hooks untouched) → reinstall.
 
