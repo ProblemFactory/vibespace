@@ -227,13 +227,24 @@ class TaskGroupManager {
   // and simply didn't use them. Now: identity/objective/checklist → TOOL RULES
   // → context folder → Activity log LAST, with the log byte-budgeted so the
   // whole payload stays inline (< ~8KB) in the common case.
-  // Newest-first byte-budgeted Activity-log picker (≥3, ≤12 entries).
+  // Newest-first Activity-log picker. THREE layers of truncation so one very
+  // long entry can't starve the rest (user directive 2026-07-13): (1) at most
+  // MAX_ENTRIES lines, (2) each note capped to PER_NOTE chars (the overflow is
+  // recoverable via `show --full`, flagged with †), then (3) the byte budget as
+  // a floor-guarded stop — and the route applies a final hard byte-cap on top.
   _pickLogLines(t, room) {
+    const MAX_ENTRIES = 12;   // how many history lines at most
+    const PER_NOTE = 200;     // per-entry char cap so long notes don't hog the budget
     const total = (t.progress || []).length;
     const picked = [];
-    for (let i = total - 1; i >= 0 && picked.length < 12; i--) {
+    for (let i = total - 1; i >= 0 && picked.length < MAX_ENTRIES; i--) {
       const p = t.progress[i];
-      const line = `- ${this._tsShort(p.at)} ${p.note}${p.detail ? ' †' : ''}${p.session ? ` _(${p.session})_` : ''}`;
+      let note = String(p.note || '');
+      const clipped = note.length > PER_NOTE;
+      // clean char-slice (no word-boundary regex — that gutted CJK notes, which
+      // have no spaces: /\s+\S*$/ stripped back to the first space)
+      if (clipped) note = note.slice(0, PER_NOTE - 1).trimEnd() + '…';
+      const line = `- ${this._tsShort(p.at)} ${note}${(p.detail || clipped) ? ' †' : ''}${p.session ? ` _(${p.session})_` : ''}`;
       const len = Buffer.byteLength(line, 'utf-8') + 1;
       if (picked.length >= 3 && len > room) break;
       picked.unshift(line); room -= len;
@@ -470,7 +481,10 @@ class TaskGroupManager {
       let room = 2200;
       for (let i = fresh.length - 1; i >= 0 && picked.length < 8; i--) {
         const p = fresh[i];
-        const line = `  - ${this._tsShort(p.at)} ${p.note}${p.detail ? ' †' : ''}${p.session ? ` _(${p.session})_` : ''}`;
+        let note = String(p.note || '');            // per-entry cap so one long
+        const clipped = note.length > 200;          // note can't starve the diff
+        if (clipped) note = note.slice(0, 199).trimEnd() + '…'; // clean slice (CJK has no spaces)
+        const line = `  - ${this._tsShort(p.at)} ${note}${(p.detail || clipped) ? ' †' : ''}${p.session ? ` _(${p.session})_` : ''}`;
         const len = Buffer.byteLength(line, 'utf-8') + 1;
         if (picked.length >= 1 && len > room) break;
         picked.unshift(line); room -= len;

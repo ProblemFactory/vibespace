@@ -1,5 +1,7 @@
 # Changelog
 
+## 2.120.0 — 2026-07-13
+- Injected activity log: per-entry char cap so one very long progress note can't starve the rest (user directive). Three layers now: at most 12 newest entries, each note truncated to 200 chars (overflow flagged † and recoverable via `show --full`), then the byte budget, then the route's final 9600-byte inline hard-cap. Result: you see MORE history lines rather than a couple of long ones eating the whole budget. Applied to both the full-context and the diff-update activity rendering. (The per-entry truncation uses a clean char slice — an earlier word-boundary regex gutted CJK notes, which have no spaces.)
 ## 2.119.0 — 2026-07-13
 - Agent context injection now stays INLINE: the prompt-context route hard-caps the final `additionalContext` at 9600 bytes. Binary-search established that Claude Code wraps a hook's additionalContext into a `<persisted-output>` 2KB-preview + on-disk file at EXACTLY 10240 bytes (10 KiB) — below that it's fully in the model's context, at/above it the agent must Read a file (the 2.68.0 "never learned the tools" failure mode). The cap tail-truncates the oldest activity-log lines at a UTF-8-safe newline boundary and appends a `vibespace-task show --full` pointer, so the tools-first head is always inline and nothing critical is lost. (Corrects the old "~2KB truncation" belief — there was never a 2KB cap.)
 ## 2.118.0 — 2026-07-13
