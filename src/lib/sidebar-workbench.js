@@ -193,7 +193,13 @@ export function installSidebarWorkbench(Sidebar) {
       if (st.error) { empty('Discovery failed: ' + st.error); return; }
       const all = this._wbFilterRemote(st.sessions || []);
       const cutoff = Date.now() - RECENT_MS;
-      const sessions = all.filter(s => (s.mtime || 0) >= cutoff || s.status === 'remote-running');
+      // SEARCHING = search EVERYTHING on this host (2.124.0 parity fix): the
+      // recency cutoff hid old sessions from an id search, and the cross-host
+      // "Remote matches" section deliberately skips the SELECTED host — so an
+      // old session here was findable nowhere. _wbFilterRemote already applied
+      // the text filter (name/cwd/session id).
+      const searching = !!(document.getElementById('session-filter')?.value || '').trim();
+      const sessions = searching ? all : all.filter(s => (s.mtime || 0) >= cutoff || s.status === 'remote-running');
       if (!all.length) { empty('No sessions found on ' + hostLabelFallback); return; }
       if (!sessions.length) { empty(tr('Nothing in the last 7 days on {host} — check History below', { host: hostLabelFallback })); return; }
       const byProj = new Map();
@@ -523,8 +529,13 @@ export function installSidebarWorkbench(Sidebar) {
       const histLabel = histHost ? (this._hostsData?.hosts?.find(x => x.id === histHost)?.name || histHost) : '';
       if (histHost) this._loadRemoteHost(histHost);
       const cutoffH = Date.now() - RECENT_MS;
+      const searchingH = !!(document.getElementById('session-filter')?.value || '').trim();
       const histList = histHost
-        ? this._wbFilterRemote(histState?.sessions || []).filter(s => (s.mtime || 0) < cutoffH && s.status !== 'remote-running')
+        // while searching, the RECENT zone shows every match for its selected
+        // host (cutoff dropped, 2.124.0) — suppress the duplicate here when the
+        // history switcher points at the SAME host
+        ? (searchingH && histHost === (this._wbRecentHost || '') ? []
+          : this._wbFilterRemote(histState?.sessions || []).filter(s => (s.mtime || 0) < cutoffH && s.status !== 'remote-running'))
         : history;
       const histLoading = histHost && (!histState || (histState.loading && !histState.sessions));
       const hHead = document.createElement('div');

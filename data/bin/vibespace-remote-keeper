@@ -1,0 +1,178 @@
+#!/usr/bin/env node
+// vibespace-remote-keeper — REMOTE-side persistence for VibeSpace remote CHAT
+// sessions (2.124.0). Distributed to ~/.vibespace/bin like the other tools.
+//
+// Problem it solves: remote chat runs claude over a bare `ssh -T` pipe
+// (stream-json must not cross a pty) — an ssh drop used to SIGHUP claude and
+// kill the conversation. Now claude runs under a detached (setsid) keeper
+// daemon on the host: stdout is appended to a buffer FILE, stdin arrives via
+// a unix SOCKET — both survive any number of ssh drops. The local
+// chat-wrapper (re)attaches with a byte offset and loses nothing.
+//
+// Modes (sid = the VibeSpace session id, shell-safe [A-Za-z0-9_-]):
+//   run <sid> <offset> -- <cmd...>   ensure the daemon runs (start it on
+//                                    first call), then attach: buffer bytes
+//                                    from <offset> → stdout, own stdin →
+//                                    socket. stdout carries ONLY raw buffer
+//                                    bytes (the wrapper counts them for the
+//                                    next offset); diagnostics go to stderr.
+//   daemon <sid> -- <cmd...>         internal (spawned by run, detached)
+//   stop <sid>                       kill the child + daemon (UI kill path)
+//
+// Lifecycle: the daemon exits when claude exits, appending a final
+//   {"type":"_remote_exit","code":N} sentinel line to the buffer — the
+//   wrapper sees it through any attach and finalizes the session (run never
+//   restarts an exited session: meta.exited guards it). Files under
+//   ~/.vibespace/run/ ; a best-effort sweep removes leftovers older than 7d.
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const net = require('net');
+const { spawn } = require('child_process');
+
+const RUN_DIR = process.env.VIBESPACE_KEEPER_DIR || path.join(os.homedir(), '.vibespace', 'run');
+const [mode, sid] = [process.argv[2], process.argv[3]];
+if (!mode || !sid || !/^[\w-]+$/.test(sid)) { console.error('keeper: usage run|daemon|stop <sid> ...'); process.exit(2); }
+const P = {
+  sock: path.join(RUN_DIR, sid + '.sock'),
+  out: path.join(RUN_DIR, sid + '.out'),
+  meta: path.join(RUN_DIR, sid + '.json'),
+  err: path.join(RUN_DIR, sid + '.err'),
+};
+const readMeta = () => { try { return JSON.parse(fs.readFileSync(P.meta, 'utf-8')); } catch { return null; } };
+const writeMeta = (m) => { try { fs.writeFileSync(P.meta, JSON.stringify(m)); } catch { } };
+const log = (m) => { try { process.stderr.write('[keeper] ' + m + '\n'); } catch { } };
+
+function sweepOld() { // best-effort hygiene: dead sessions' files, 7d+
+  try {
+    const cutoff = Date.now() - 7 * 864e5;
+    for (const f of fs.readdirSync(RUN_DIR)) {
+      const fp = path.join(RUN_DIR, f);
+      try { if (fs.statSync(fp).mtimeMs < cutoff) fs.unlinkSync(fp); } catch { }
+    }
+  } catch { }
+}
+
+function alive() { // daemon liveness = socket exists + keeper pid runs
+  const m = readMeta();
+  if (!m || !m.keeperPid || m.exited !== undefined) return false;
+  try { process.kill(m.keeperPid, 0); } catch { return false; }
+  return fs.existsSync(P.sock);
+}
+
+// ── attach: raw buffer bytes from <offset> → stdout; stdin → socket ──
+function attach(offset) {
+  let pos = Math.max(0, Number(offset) || 0);
+  let fd = null;
+  try { fd = fs.openSync(P.out, 'r'); } catch { }
+  const pump = () => { // poll-tail: read appended bytes, byte-exact
+    if (fd === null) { try { fd = fs.openSync(P.out, 'r'); } catch { return; } }
+    try {
+      const size = fs.fstatSync(fd).size;
+      if (pos > size) pos = 0; // truncated/rotated upstream (shouldn't happen) — restart
+      while (pos < size) {
+        const want = Math.min(65536, size - pos);
+        const buf = Buffer.alloc(want);
+        const n = fs.readSync(fd, buf, 0, want, pos);
+        if (n <= 0) break;
+        pos += n;
+        process.stdout.write(buf.subarray(0, n));
+      }
+    } catch { }
+  };
+  const timer = setInterval(pump, 150);
+  pump();
+  const finish = (code) => { clearInterval(timer); pump(); process.exit(code); };
+  const m0 = readMeta();
+  if (!fs.existsSync(P.sock) || !alive()) {
+    // daemon gone: drain what's in the buffer (incl. the _remote_exit
+    // sentinel if claude ended) and exit; 3 = ended, 4 = unknown state
+    setTimeout(() => finish(m0 && m0.exited !== undefined ? 3 : 4), 400);
+    return;
+  }
+  const sock = net.connect(P.sock);
+  sock.on('error', () => finish(5));
+  sock.on('close', () => setTimeout(() => finish(3), 400)); // daemon exiting — drain tail
+  process.stdin.on('data', (d) => { try { sock.write(d); } catch { } });
+  process.stdin.on('end', () => { /* ssh stdin closed — keep tailing until killed */ });
+  process.stdin.resume();
+}
+
+if (mode === 'run') {
+  const offset = process.argv[4];
+  const sep = process.argv.indexOf('--');
+  const cmd = sep >= 0 ? process.argv.slice(sep + 1) : [];
+  try { fs.mkdirSync(RUN_DIR, { recursive: true, mode: 0o700 }); } catch { }
+  sweepOld();
+  const m = readMeta();
+  if (m && m.exited !== undefined) {
+    log('session already exited (code ' + m.exited + ') — draining buffer');
+    attach(offset); // sentinel is in the buffer; NEVER restart an exited session
+  } else if (alive()) {
+    attach(offset);
+  } else if (!cmd.length) {
+    log('no daemon and no command'); process.exit(2);
+  } else {
+    // first contact — start the detached daemon, wait for its socket
+    try { fs.unlinkSync(P.sock); } catch { }
+    try { fs.unlinkSync(P.meta); } catch { }
+    const errFd = fs.openSync(P.err, 'a');
+    const child = spawn(process.execPath, [__filename, 'daemon', sid, '--', ...cmd], {
+      detached: true, stdio: ['ignore', errFd, errFd], cwd: process.cwd(), env: process.env,
+    });
+    child.unref();
+    log('daemon starting pid=' + child.pid);
+    const t0 = Date.now();
+    const wait = setInterval(() => {
+      if (fs.existsSync(P.sock)) { clearInterval(wait); attach(offset); }
+      else if (Date.now() - t0 > 15000) { clearInterval(wait); log('daemon failed to start (see ' + P.err + ')'); process.exit(6); }
+    }, 200);
+  }
+} else if (mode === 'daemon') {
+  const sep = process.argv.indexOf('--');
+  const cmd = sep >= 0 ? process.argv.slice(sep + 1) : [];
+  if (!cmd.length) process.exit(2);
+  try { fs.mkdirSync(RUN_DIR, { recursive: true, mode: 0o700 }); } catch { }
+  const outFd = fs.openSync(P.out, 'a');
+  const child = spawn(cmd[0], cmd.slice(1), { stdio: ['pipe', 'pipe', 'pipe'], env: process.env, cwd: process.cwd() });
+  writeMeta({ keeperPid: process.pid, childPid: child.pid, startedAt: Date.now(), cmd: cmd.slice(0, 4) });
+  child.stdout.on('data', (d) => { try { fs.writeSync(outFd, d); } catch { } });
+  child.stderr.on('data', (d) => { try { fs.appendFileSync(P.err, d); } catch { } });
+  const server = net.createServer((sock) => {
+    sock.on('data', (d) => { try { if (child.stdin.writable) child.stdin.write(d); } catch { } });
+    sock.on('error', () => { });
+  });
+  try { fs.unlinkSync(P.sock); } catch { }
+  server.listen(P.sock, () => { try { fs.chmodSync(P.sock, 0o600); } catch { } });
+  let done = false;
+  const finalize = (code) => {
+    if (done) return; done = true;
+    try { fs.writeSync(outFd, Buffer.from(JSON.stringify({ type: '_remote_exit', code: code ?? 0 }) + '\n')); } catch { }
+    const m = readMeta() || {};
+    writeMeta({ ...m, exited: code ?? 0, exitedAt: Date.now() });
+    try { server.close(); } catch { }
+    try { fs.unlinkSync(P.sock); } catch { }
+    setTimeout(() => process.exit(0), 300); // let attachers drain the sentinel
+  };
+  child.on('exit', (code) => finalize(code));
+  child.on('error', () => finalize(1));
+  process.on('SIGTERM', () => { try { child.kill('SIGTERM'); } catch { } setTimeout(() => finalize(143), 3000); });
+} else if (mode === 'stop') {
+  const m = readMeta();
+  if (m) {
+    for (const pid of [m.childPid, m.keeperPid]) {
+      if (pid) { try { process.kill(pid, 'SIGTERM'); } catch { } }
+    }
+    setTimeout(() => {
+      for (const pid of [m.childPid, m.keeperPid]) {
+        if (pid) { try { process.kill(pid, 'SIGKILL'); } catch { } }
+      }
+      try { fs.unlinkSync(P.sock); } catch { }
+      console.log('stopped');
+      process.exit(0);
+    }, 2500);
+  } else { console.log('no session'); process.exit(0); }
+} else {
+  console.error('keeper: unknown mode ' + mode);
+  process.exit(2);
+}
