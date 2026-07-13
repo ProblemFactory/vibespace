@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.125.1 — 2026-07-13
+- Fixed (for real this time) searching a remote session by id showing "No sessions": the sidebar's zero-local-matches empty-state RETURNED before the workbench ever rendered — the 2.124.0 remote-search fixes lived downstream of that return and were unreachable whenever the query matched nothing local (exactly the session-id case). With a search active the workbench now always renders (selected-host zone without the 7-day cutoff + cross-host Remote matches). Applies to desktop and the mobile sidebar alike (both share the workbench).
+
 ## 2.125.0 — 2026-07-13
 - **SSH connection reuse (ControlMaster)** for every short-lived per-op ssh (remote discovery, remote file browsing, transcript fetch, rsync): the first op pays the handshake, the next ~10 minutes ride a persisted shared master — per-op latency drops from ~1s to tens of ms and auth storms disappear. Deliberately NOT applied to session pipes (a session becoming the master would couple unrelated sessions to its lifetime). Masters live under a short per-uid tmp dir (`/tmp/vs-cm-<uid>/`) — the deep data-dir path overflowed the ~104-char unix-socket limit on the first attempt.
 - **Reconnect state is visible**: while a remote chat session's ssh pipe is down, the chat status bar shows a pulsing amber "⟳ host reconnecting (n)…" chip (tooltip explains the session keeps running on the host); it clears the moment bytes flow again. Rides a `_remote_state` line from the wrapper → `remote-state` WS broadcast + the attach payload (survives refresh).
