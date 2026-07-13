@@ -49,51 +49,67 @@ console.log('— removed checklist stays out —');
   check('list() carries no plan', mgr.list().every((x) => x.plan === undefined), '');
 }
 
-console.log('— backlog (parking lot, 2.122.0) —');
+console.log('— backlog (parking lot 2.122.0; claim model 2.123.0) —');
 {
   const ME = 'claude:me', OTHER = 'codex:other';
   const snap = mgr.snapshotForDiff(t.id);
   mgr.update(t.id, { backlog: [
-    { text: 'user will pick a DB later', status: 'open', addedBy: ME, addedAt: Date.now(), detail: 'options: pg vs sqlite' },
-    { text: 'revisit pricing page', status: 'open', addedBy: OTHER, addedAt: Date.now() },
+    { text: 'user will pick a DB later', status: 'open', addedBy: ME, claimedBy: [ME], addedAt: Date.now(), detail: 'options: pg vs sqlite' },
+    { text: 'revisit pricing page', status: 'open', addedBy: OTHER, claimedBy: [OTHER], addedAt: Date.now() },
   ] });
+  const items = mgr.get(t.id).backlog;
+  check('sanitizer mints stable unique ids', items.every((b) => /^B-[0-9a-f]{4}$/.test(b.id)) && items[0].id !== items[1].id, JSON.stringify(items.map((b) => b.id)));
+  const [idA, idB] = [items[0].id, items[1].id];
+  // unfiltered diff (no sessionKey — legacy/test callers) carries every event, with ids
   const d = mgr.renderContextDiff(t.id, snap, {});
-  check('PARKED items in diff with by-attribution', d.includes('Backlog PARKED: user will pick a DB later †') && d.includes(`_(by ${ME})_`) && d.includes('Backlog PARKED: revisit pricing page'), d);
+  check('PARKED items in diff with id + by-attribution', d.includes(`Backlog PARKED [${idA}]: user will pick a DB later †`) && d.includes(`_(by ${ME})_`) && d.includes(`Backlog PARKED [${idB}]: revisit pricing page`), d);
 
-  // injection: only MY items dump as reminders; others = a one-line pointer
+  // injection reminders: CLAIMED items only; others = a one-line pointer
   const ctxMine = mgr.renderContext(t.id, { sessionKey: ME });
-  check('own-parked items appear as reminders', ctxMine.includes('Backlog reminders — parked by THIS session') && ctxMine.includes('user will pick a DB later'), ctxMine);
-  check('others’ items NOT dumped for me', !ctxMine.includes('revisit pricing page') && ctxMine.includes('incl. 1 from others'), ctxMine);
+  check('claimed items appear as reminders (with id)', ctxMine.includes('Backlog reminders — items CLAIMED by THIS session') && ctxMine.includes(`[${idA}] user will pick a DB later`), ctxMine);
+  check('unclaimed-by-me items NOT dumped', !ctxMine.includes('revisit pricing page') && ctxMine.includes('incl. 1 not claimed by you'), ctxMine);
   const ctxOther = mgr.renderContext(t.id, { sessionKey: 'claude:third' });
-  check('no own items → one-line pointer only', !ctxOther.includes('Backlog reminders') && ctxOther.includes('2 open parked items') && !ctxOther.includes('user will pick a DB later'), ctxOther);
-  check('TASK.md carries the full open backlog', mgr.renderTaskMd(mgr.get(t.id)).includes('## Backlog') && mgr.renderTaskMd(mgr.get(t.id)).includes('revisit pricing page'), '');
+  check('no claims → one-line pointer teaching backlog-claim', !ctxOther.includes('Backlog reminders') && ctxOther.includes('2 open parked items') && ctxOther.includes('backlog-claim') && !ctxOther.includes('user will pick a DB later'), ctxOther);
+  const md = mgr.renderTaskMd(mgr.get(t.id));
+  check('TASK.md carries full open backlog with ids + claimants', md.includes('## Backlog') && md.includes(`[${idB}] revisit pricing page`) && md.includes(`claimed by ${OTHER}`), md);
 
-  // resolve / drop / remove flow through the diff
+  // TARGETED diff: an item's events reach only its creator/claimants
   const snap2 = mgr.snapshotForDiff(t.id);
   let bl = mgr.get(t.id).backlog.map((b) => ({ ...b }));
   bl[0] = { ...bl[0], status: 'done', resolvedBy: OTHER, resolvedAt: Date.now() };
   mgr.update(t.id, { backlog: bl });
-  const d2 = mgr.renderContextDiff(t.id, snap2, {});
-  check('RESOLVED with resolver', d2.includes('Backlog RESOLVED: user will pick a DB later') && d2.includes(`_(by ${OTHER})_`), d2);
+  const dMine = mgr.renderContextDiff(t.id, snap2, { sessionKey: ME });
+  check('RESOLVED reaches the claimer (with resolver + id)', dMine.includes(`Backlog RESOLVED [${idA}]: user will pick a DB later`) && dMine.includes(`_(by ${OTHER})_`), dMine);
+  const dThird = mgr.renderContextDiff(t.id, snap2, { sessionKey: 'claude:third' });
+  check('unrelated session gets NO backlog event (empty diff)', dThird === '', JSON.stringify(dThird && dThird.slice(0, 120)));
 
+  // CLAIMED / UNCLAIMED events notify the other holders
   const snap3 = mgr.snapshotForDiff(t.id);
+  bl = mgr.get(t.id).backlog.map((b) => ({ ...b }));
+  bl[1] = { ...bl[1], claimedBy: [OTHER, ME] };
+  mgr.update(t.id, { backlog: bl });
+  const dClaim = mgr.renderContextDiff(t.id, snap3, { sessionKey: OTHER });
+  check('CLAIMED event names the new claimer', dClaim.includes(`Backlog CLAIMED [${idB}]: revisit pricing page`) && dClaim.includes(`_(by ${ME})_`), dClaim);
+
+  // text edit with a stable id reads as REWORDED (not REMOVED+NEW)
+  const snap4 = mgr.snapshotForDiff(t.id);
+  bl = mgr.get(t.id).backlog.map((b) => ({ ...b }));
+  bl[1] = { ...bl[1], text: 'revisit pricing page copy' };
+  mgr.update(t.id, { backlog: bl });
+  const dRw = mgr.renderContextDiff(t.id, snap4, { sessionKey: ME });
+  check('id-stable text edit → reworded', dRw.includes(`Backlog item reworded [${idB}]: revisit pricing page copy`) && !dRw.includes('REMOVED') && !dRw.includes('PARKED'), dRw);
+
+  // DROPPED + no phantom lines on unrelated changes
+  const snap5 = mgr.snapshotForDiff(t.id);
   bl = mgr.get(t.id).backlog.map((b) => ({ ...b }));
   bl[1] = { ...bl[1], status: 'dropped', resolvedBy: 'user', resolvedAt: Date.now() };
   mgr.update(t.id, { backlog: bl });
-  check('DROPPED listed', mgr.renderContextDiff(t.id, snap3, {}).includes('Backlog DROPPED: revisit pricing page'), '');
-
-  // duplicate-text items pair occurrence-indexed (the retired checklist diff's
-  // silent-loss/phantom bug class — same construction, keep it covered)
-  mgr.update(t.id, { backlog: [ { text: 'deploy', status: 'done' }, { text: 'deploy', status: 'open' } ] });
-  const snap4 = mgr.snapshotForDiff(t.id);
-  mgr.update(t.id, { backlog: [ { text: 'deploy', status: 'done' }, { text: 'deploy', status: 'done', resolvedBy: 'claude:x' } ] });
-  const d4 = mgr.renderContextDiff(t.id, snap4, {});
-  check('resolving the 2nd duplicate is DELIVERED', d4.includes('Backlog RESOLVED: deploy') && d4.includes('(by claude:x)'), d4);
-  const snap5 = mgr.snapshotForDiff(t.id);
+  check('DROPPED listed', mgr.renderContextDiff(t.id, snap5, { sessionKey: ME }).includes(`Backlog DROPPED [${idB}]`), '');
+  const snap6 = mgr.snapshotForDiff(t.id);
   await sleep(3);
-  mgr.addProgress(t.id, { note: 'unrelated note for backlog dup test' });
-  const d5 = mgr.renderContextDiff(t.id, snap5, {});
-  check('unchanged duplicates emit NO phantom lines', !d5.includes('Backlog'), d5);
+  mgr.addProgress(t.id, { note: 'unrelated note for backlog phantom test' });
+  const d6 = mgr.renderContextDiff(t.id, snap6, { sessionKey: ME });
+  check('unchanged backlog emits NO phantom lines', !d6.includes('Backlog'), d6);
 
   mgr.update(t.id, { backlog: [] }); // reset for later sections
 }
@@ -197,6 +213,7 @@ console.log('— legacy checklist → backlog seed (one-time migration) —');
   const m2 = new TaskGroupManager({ dataDir: tmp2, onChange: () => {} });
   const bl = m2.get('T-9').backlog;
   check('unchecked plan items seed the backlog (open, detail kept)', bl.length === 1 && bl[0].text === 'still open item' && bl[0].status === 'open' && bl[0].detail === 'ctx', JSON.stringify(bl));
+  check('seeded items get an id; user-added → unclaimed', /^B-[0-9a-f]{4}$/.test(bl[0].id) && Array.isArray(bl[0].claimedBy) && bl[0].claimedBy.length === 0, JSON.stringify(bl[0]));
   check('checked plan items are NOT seeded', !bl.some((b) => b.text === 'done item'), '');
   check('dormant plan untouched by the seed', m2.get('T-9').plan.length === 2, '');
   // a second load must not re-seed (backlog now defined — even if emptied)

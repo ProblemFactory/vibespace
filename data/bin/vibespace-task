@@ -33,12 +33,15 @@ const USAGE = [
   '  vibespace-task progress "one-line summary" [--detail "full context"]',
   '      append to the Activity log. The SUMMARY is what everyone sees inline — keep it one tight line;',
   '      put specifics (numbers, paths, caveats other agents may need) in --detail.',
-  '  vibespace-task backlog [--full]              list the group\'s open backlog items (numbered)',
+  '  vibespace-task backlog [<id|#|text>] [--full]   list open backlog items — or show ONE in full (by its B-xxxx id,',
+  '      open-list number, or unique text; works for resolved items too — if the user hands you an id, start here)',
   '  vibespace-task backlog-add "item" [--detail "context"]',
   '      PARK a non-immediate item: a decision the user deferred, or work they said comes later.',
-  '      NOT for your own working steps (session todo) and NOT things to start now.',
-  '  vibespace-task backlog-done <n|text>         mark a parked item decided/finished',
-  '  vibespace-task backlog-drop <n|text>         drop a parked item as obsolete',
+  '      NOT for your own working steps (session todo) and NOT things to start now. Parking auto-CLAIMS it for you.',
+  '  vibespace-task backlog-claim <id|#|text>     claim an item — claimed items are re-surfaced to you and their changes notify you',
+  '  vibespace-task backlog-unclaim <id|#|text>   hand a claimed item back',
+  '  vibespace-task backlog-done <id|#|text>      mark a parked item decided/finished',
+  '  vibespace-task backlog-drop <id|#|text>      drop a parked item as obsolete',
   '  --group <id>   target a specific group if this session belongs to more than one',
   '  (a Task Group has NO status — report THIS session\'s state via vibespace-status;',
   '   keep working steps in your own session todo list)',
@@ -58,10 +61,21 @@ async function call(method, url, body) {
 }
 const fmtBacklog = (items, showDetail) => {
   items.forEach((b, i) => {
-    console.log('  ' + (i + 1) + '. ' + b.text + (b.detail && !showDetail ? '  †' : '') + (b.addedBy && showDetail ? '   (parked by ' + b.addedBy + ')' : ''));
+    const claims = (b.claimedBy || []).length;
+    console.log('  ' + (i + 1) + '. [' + (b.id || '?') + '] ' + b.text
+      + (b.detail && !showDetail ? '  †' : '')
+      + (claims ? '  (claimed' + (showDetail ? ' by ' + b.claimedBy.join(', ') : ' ×' + claims) + ')' : '  (unclaimed)'));
+    if (showDetail && b.addedBy) console.log('       parked by ' + b.addedBy + (b.addedAt ? ' at ' + new Date(b.addedAt).toISOString().slice(0, 16).replace('T', ' ') : ''));
     if (showDetail && b.detail) for (const dl of b.detail.split('\n')) console.log('       ' + dl);
   });
   if (!showDetail && items.some((b) => b.detail)) console.log('  († = has detail — rerun with --full)');
+};
+const printItem = (b) => {
+  console.log('[' + (b.id || '?') + '] ' + b.text + '   status: ' + (b.status || 'open'));
+  if (b.addedBy) console.log('  parked by: ' + b.addedBy + (b.addedAt ? '  at ' + new Date(b.addedAt).toISOString().slice(0, 16).replace('T', ' ') : ''));
+  console.log('  claimed by: ' + ((b.claimedBy || []).join(', ') || '(no one — `vibespace-task backlog-claim ' + (b.id || '<id>') + '` to take it)'));
+  if (b.resolvedBy) console.log('  resolved by: ' + b.resolvedBy + (b.resolvedAt ? '  at ' + new Date(b.resolvedAt).toISOString().slice(0, 16).replace('T', ' ') : ''));
+  if (b.detail) { console.log('  detail:'); for (const dl of b.detail.split('\n')) console.log('    ' + dl); }
 };
 async function printShow() {
   const { task } = await call('GET', '/api/agent/task');
@@ -91,16 +105,29 @@ async function main() {
     await call('POST', '/api/agent/task-progress', { note: arg, ...(detail ? { detail } : {}) });
     console.log('progress recorded' + (detail ? ' (with detail)' : ''));
   } else if (cmd === 'backlog') {
+    if (arg) {
+      // show ONE item in full (any status) — the "user handed me an id" path
+      const { item } = await call('POST', '/api/agent/task-backlog', { show: arg });
+      printItem(item);
+      return;
+    }
     const { task } = await call('GET', '/api/agent/task');
     if (!task.backlog || !task.backlog.length) { console.log('backlog empty — park a non-immediate item with: vibespace-task backlog-add "item" [--detail "context"]'); return; }
-    console.log('Open backlog (parked, NOT immediate — never start one unasked):');
+    console.log('Open backlog (parked, NOT immediate — never start one unasked; claim with backlog-claim <id>):');
     fmtBacklog(task.backlog, full);
   } else if (cmd === 'backlog-add') {
     if (!arg) { console.error('vibespace-task: backlog-add needs text, e.g. vibespace-task backlog-add "user will pick a DB later" --detail "options discussed: ..."'); process.exit(1); }
     const { backlog } = await call('POST', '/api/agent/task-backlog', { add: arg, ...(detail ? { detail } : {}) });
-    console.log('parked as backlog item ' + backlog.length + (detail ? ' (with detail)' : '') + ' — it will be surfaced back to you; do not start it unasked');
+    const mine = backlog[backlog.length - 1];
+    console.log('parked as [' + (mine && mine.id || '?') + ']' + (detail ? ' (with detail)' : '') + ' — auto-claimed by you; it will be re-surfaced to you; do not start it unasked');
+  } else if (cmd === 'backlog-claim' || cmd === 'backlog-unclaim') {
+    if (!arg) { console.error('vibespace-task: ' + cmd + ' needs an item id, number or unique text (run `vibespace-task backlog` to see them)'); process.exit(1); }
+    await call('POST', '/api/agent/task-backlog', cmd === 'backlog-claim' ? { claim: arg } : { unclaim: arg });
+    console.log(cmd === 'backlog-claim'
+      ? 'claimed — the item will be re-surfaced to you and its changes will notify you'
+      : 'unclaimed — you will no longer be reminded of it');
   } else if (cmd === 'backlog-done' || cmd === 'backlog-drop') {
-    if (!arg) { console.error('vibespace-task: ' + cmd + ' needs an item number or unique text (run `vibespace-task backlog` to see them)'); process.exit(1); }
+    if (!arg) { console.error('vibespace-task: ' + cmd + ' needs an item id, number or unique text (run `vibespace-task backlog` to see them)'); process.exit(1); }
     const { backlog } = await call('POST', '/api/agent/task-backlog', cmd === 'backlog-done' ? { done: arg } : { drop: arg });
     console.log((cmd === 'backlog-done' ? 'resolved' : 'dropped') + '; ' + backlog.length + ' still open');
   } else if (cmd === 'plan-check' || cmd === 'plan-uncheck' || cmd === 'plan-add') {
@@ -111,7 +138,7 @@ async function main() {
     process.exit(1);
   } else {
     console.error('vibespace-task: unknown command "' + cmd + '"'
-      + '\n  valid: show, progress, backlog, backlog-add, backlog-done, backlog-drop\n' + USAGE);
+      + '\n  valid: show, progress, backlog, backlog-add, backlog-claim, backlog-unclaim, backlog-done, backlog-drop\n' + USAGE);
     process.exit(1);
   }
 }

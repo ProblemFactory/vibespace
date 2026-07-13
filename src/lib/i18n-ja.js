@@ -1712,4 +1712,10 @@ export default {
   "{count} group(s) incl. backlogs & activity logs": "{count} 件のグループ（バックログ・アクティビティログ含む）",
   "{n} resolved/dropped — see full viewer": "{n} 件解決/破棄済み — 完全ビューアを参照",
   "{n} workspace window(s) could not be restored (temp/blob source is gone)": "{n} 個のワークスペースウィンドウを復元できませんでした（一時/blob ソースが失効）",
+  "Claimed by {n} session(s)": "{n} 個のセッションがクレーム中",
+  "Click to copy — paste it to any agent of this group (\"look at backlog {id}\")": "クリックでコピー — このグループの任意のエージェントに渡せます（「backlog {id} を見て」）",
+  "Copied {id}": "{id} をコピーしました",
+  "No session has claimed this item": "この項目をクレームしたセッションはありません",
+  "Remove this claim": "このクレームを外す",
+  "unclaimed": "未クレーム",
 };
