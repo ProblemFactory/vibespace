@@ -122,10 +122,15 @@ async function main() {
     console.log('parked as [' + (mine && mine.id || '?') + ']' + (detail ? ' (with detail)' : '') + ' — auto-claimed by you; it will be re-surfaced to you; do not start it unasked');
   } else if (cmd === 'backlog-claim' || cmd === 'backlog-unclaim') {
     if (!arg) { console.error('vibespace-task: ' + cmd + ' needs an item id, number or unique text (run `vibespace-task backlog` to see them)'); process.exit(1); }
-    await call('POST', '/api/agent/task-backlog', cmd === 'backlog-claim' ? { claim: arg } : { unclaim: arg });
-    console.log(cmd === 'backlog-claim'
-      ? 'claimed — the item will be re-surfaced to you and its changes will notify you'
-      : 'unclaimed — you will no longer be reminded of it');
+    const r = await call('POST', '/api/agent/task-backlog', cmd === 'backlog-claim' ? { claim: arg } : { unclaim: arg });
+    if (cmd === 'backlog-claim') {
+      const id = r.item && r.item.id ? '[' + r.item.id + '] ' : '';
+      console.log((r.alreadyMine ? 'you had already claimed ' + id : 'claimed ' + id) + '— the item will be re-surfaced to you and its changes will notify you');
+      const others = r.others || [];
+      if (others.length) console.log('note: ALSO claimed by ' + others.join(', ') + ' — coordinate with them to avoid duplicate work');
+    } else {
+      console.log('unclaimed — you will no longer be reminded of it');
+    }
   } else if (cmd === 'backlog-done' || cmd === 'backlog-drop') {
     if (!arg) { console.error('vibespace-task: ' + cmd + ' needs an item id, number or unique text (run `vibespace-task backlog` to see them)'); process.exit(1); }
     const { backlog } = await call('POST', '/api/agent/task-backlog', cmd === 'backlog-done' ? { done: arg } : { drop: arg });

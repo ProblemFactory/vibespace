@@ -172,8 +172,13 @@ function hitRoute(method, path, { query = {}, body = {} } = {}) {
   check('GET task carries open backlog with id + claims', r2.out.task.backlog.length === 1 && r2.out.task.backlog[0].id === bid && r2.out.task.backlog[0].claimedBy.length === 1, JSON.stringify(r2.out.task.backlog));
   const rU = hitRoute('POST', '/api/agent/task-backlog', { body: { group: g, unclaim: bid } });
   check('unclaim by id empties claims', rU.code === 200 && tasks.get(g).backlog[0].claimedBy.length === 0, JSON.stringify(tasks.get(g).backlog[0]));
+  // seed a co-claimant so the claim ack must WARN about it (user directive)
+  tasks.update(g, { backlog: tasks.get(g).backlog.map((b) => ({ ...b, claimedBy: ['codex:elsewhere'] })) });
   const rC = hitRoute('POST', '/api/agent/task-backlog', { body: { group: g, claim: bid.toUpperCase() } });
   check('claim by id (case-insensitive) re-adds the caller', rC.code === 200 && tasks.get(g).backlog[0].claimedBy.includes('claude:sess1'), JSON.stringify(tasks.get(g).backlog[0]));
+  check('claim ack lists CO-CLAIMANTS + item echo', rC.out.others.length === 1 && rC.out.others[0] === 'codex:elsewhere' && rC.out.item.id === bid && rC.out.alreadyMine === false, JSON.stringify(rC.out));
+  const rC2 = hitRoute('POST', '/api/agent/task-backlog', { body: { group: g, claim: bid } });
+  check('re-claim is idempotent and says so', rC2.code === 200 && rC2.out.alreadyMine === true && tasks.get(g).backlog[0].claimedBy.filter((k) => k === 'claude:sess1').length === 1, JSON.stringify(rC2.out));
   const r3 = hitRoute('POST', '/api/agent/task-backlog', { body: { group: g, done: bid } });
   check('backlog-done by id resolves', r3.code === 200 && r3.out.backlog.length === 0 && tasks.get(g).backlog[0].status === 'done' && tasks.get(g).backlog[0].resolvedBy === 'claude:sess1', JSON.stringify(tasks.get(g).backlog));
   const rS = hitRoute('POST', '/api/agent/task-backlog', { body: { group: g, show: bid } });
