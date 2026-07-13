@@ -1,0 +1,108 @@
+#!/usr/bin/env node
+// vibespace-usage-scan — REMOTE-side usage ledger scanner (2.127.0). Shipped
+// over ssh stdin and run on the host; walks ~/.claude/projects transcripts
+// with per-file BYTE cursors (kept remotely in ~/.vibespace/usage-cursor.json)
+// and emits one NDJSON usage event per API request on stdout:
+//   {rid, ts, sid, model, cwd, i, cw5, cw1, cr, o, tier}
+// Claude-only v1 (codex rollouts: not yet). Mirrors the local UsageHistory
+// scan semantics: assistant records with message.usage, contiguous
+// requestId dedup, byte offsets (never string lengths — CJK), rotate guard.
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+const HOME = os.homedir();
+const PROJECTS = path.join(HOME, '.claude', 'projects');
+const CUR_FILE = process.env.VIBESPACE_USAGE_CURSOR || path.join(HOME, '.vibespace', 'usage-cursor.json');
+
+let cursors = {};
+try { cursors = JSON.parse(fs.readFileSync(CUR_FILE, 'utf-8')) || {}; } catch { }
+
+const out = [];
+function scanFile(fp, cur, size) {
+  let fd;
+  try { fd = fs.openSync(fp, 'r'); } catch { return; }
+  try {
+    let pos = cur.offset;
+    let rest = Buffer.alloc(0);
+    const CHUNK = 8 * 1024 * 1024;
+    while (pos < size) {
+      const want = Math.min(CHUNK, size - pos);
+      const buf = Buffer.alloc(want);
+      const n = fs.readSync(fd, buf, 0, want, pos);
+      if (n <= 0) break;
+      pos += n;
+      let data = rest.length ? Buffer.concat([rest, buf.subarray(0, n)]) : buf.subarray(0, n);
+      let idx;
+      let lineStart = 0;
+      while ((idx = data.indexOf(10, lineStart)) !== -1) {
+        const line = data.subarray(lineStart, idx).toString('utf8');
+        lineStart = idx + 1;
+        cur.offset += Buffer.byteLength(line, 'utf8') + 1;
+        handleLine(line, cur);
+      }
+      rest = data.subarray(lineStart);
+    }
+    // incomplete trailing line stays unconsumed (offset not advanced past it)
+  } finally { try { fs.closeSync(fd); } catch { } }
+}
+
+function handleLine(line, cur) {
+  if (line.indexOf('"usage"') < 0) return;
+  let r; try { r = JSON.parse(line); } catch { return; }
+  if (r.type !== 'assistant') return;
+  const msg = r.message; if (!msg || typeof msg !== 'object') return;
+  const u = msg.usage; if (!u || typeof u !== 'object') return;
+  const rid = r.requestId || msg.id || r.uuid;
+  if (!rid) return;
+  if (rid === cur.lastRid) return; // contiguous duplicate of the same request
+  cur.lastRid = rid;
+  const cc = u.cache_creation || {};
+  out.push(JSON.stringify({
+    rid,
+    ts: Date.parse(r.timestamp) || Date.now(),
+    sid: cur.sid,
+    model: msg.model || null,
+    cwd: r.cwd || null,
+    i: u.input_tokens || 0,
+    cw5: cc.ephemeral_5m_input_tokens || 0,
+    cw1: cc.ephemeral_1h_input_tokens || 0,
+    cr: u.cache_read_input_tokens || 0,
+    o: u.output_tokens || 0,
+    tier: u.service_tier || null,
+  }));
+}
+
+let projDirs = [];
+try { projDirs = fs.readdirSync(PROJECTS); } catch { }
+for (const pd of projDirs) {
+  const pdAbs = path.join(PROJECTS, pd);
+  let entries = [];
+  try { entries = fs.readdirSync(pdAbs); } catch { continue; }
+  for (const fn of entries) {
+    if (!fn.endsWith('.jsonl')) continue; // top-level session transcripts only
+    const fp = path.join(pdAbs, fn);
+    let st; try { st = fs.statSync(fp); } catch { continue; }
+    if (!st.isFile()) continue;
+    const cur = cursors[fp] || { offset: 0, lastRid: null };
+    if (st.size < cur.offset) { cur.offset = 0; cur.lastRid = null; } // rotated/truncated
+    cur.sid = fn.replace(/\.jsonl$/, '');
+    if (st.size === cur.offset) { cursors[fp] = cur; continue; }
+    scanFile(fp, cur, st.size);
+    delete cur.sid;
+    cursors[fp] = cur;
+  }
+}
+
+// cursor persists ONLY after stdout is fully flushed: if the ssh pipe dies
+// mid-transfer the cursor stays put and the next harvest re-emits the same
+// events — the server-side rid dedup absorbs the duplicates (lost events are
+// unrecoverable the other way round).
+process.stdout.on('error', () => process.exit(1));
+process.stdout.write(out.join('\n') + (out.length ? '\n' : ''), () => {
+  try {
+    fs.mkdirSync(path.dirname(CUR_FILE), { recursive: true });
+    fs.writeFileSync(CUR_FILE + '.tmp', JSON.stringify(cursors));
+    fs.renameSync(CUR_FILE + '.tmp', CUR_FILE);
+  } catch { }
+});

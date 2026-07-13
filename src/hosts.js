@@ -374,6 +374,45 @@ class HostManager {
     return cachePath;
   }
 
+  // ── Remote usage (2.127.0) ──
+
+  /** Harvest per-request usage events from the host's ~/.claude transcripts.
+   *  Ships the scanner over ssh STDIN (never argv) and runs it; the remote
+   *  keeps its own byte cursors (~/.vibespace/usage-cursor.json), so after the
+   *  first full pass each harvest returns only NEW events. Throttled 15min per
+   *  host unless forced. Returns the raw NDJSON text ('' when throttled). */
+  async harvestUsage(id, { force = false, scannerPath } = {}) {
+    const h = this.get(id);
+    if (!this._usageHarvestAt) this._usageHarvestAt = new Map();
+    const last = this._usageHarvestAt.get(id) || 0;
+    if (!force && Date.now() - last < 15 * 60 * 1000) return '';
+    this._usageHarvestAt.set(id, Date.now());
+    const script = fs.readFileSync(scannerPath, 'utf-8');
+    return new Promise((resolve, reject) => {
+      const child = execFile('ssh', [...this.sshArgs(h, { multiplex: true }), '--',
+        'umask 077; mkdir -p "$HOME/.vibespace/bin"; cat > "$HOME/.vibespace/bin/vibespace-usage-scan"; export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; node "$HOME/.vibespace/bin/vibespace-usage-scan"'],
+        { timeout: 180000, maxBuffer: 128 * 1024 * 1024 }, (err, stdout, stderr) => {
+          if (err) { this._usageHarvestAt.set(id, 0); return reject(new Error((stderr || err.message || '').toString().slice(0, 200))); }
+          resolve(stdout.toString());
+        });
+      child.stdin.end(script);
+    });
+  }
+
+  /** READ-ONLY peek at the host's own claude login token (ban-safety: never
+   *  refresh, never write — expired/absent → null; the host's own CLI usage
+   *  refreshes it). Powers the on-demand quota ⟳ for remote hosts. */
+  async readRemoteOAuth(id) {
+    const h = this.get(id);
+    let raw;
+    try { raw = String(await this._ssh(h, 'cat "$HOME/.claude/.credentials.json" 2>/dev/null || true', { timeoutMs: 10000 })); } catch { return null; }
+    try {
+      const o = JSON.parse(raw).claudeAiOauth;
+      if (o?.accessToken && (!o.expiresAt || o.expiresAt > Date.now() + 60000)) return o.accessToken;
+    } catch { }
+    return null;
+  }
+
   // ── Remote session discovery (lock-first, same algorithm as local) ──
 
   async discoverSessions(id, { ttlMs = 15000 } = {}) {

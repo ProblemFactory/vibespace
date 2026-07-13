@@ -188,7 +188,10 @@ class UsageHistory {
         let e; try { e = JSON.parse(line); } catch { out.push(line); continue; }
         if (e.sid && attrib[e.sid]) {
           const acct = this._acctAt(e.sid, e.ts, attrib, meta[e.sid]?.acct);
-          if ((acct || null) !== (e.acct || null)) {
+          // remote-host events (atype 'host') are attributed at ingest — the
+          // LOCAL attribution log knows nothing about remote sids and would
+          // silently re-bucket them to global here (2.127.0)
+          if (e.atype !== 'host' && (acct || null) !== (e.acct || null)) {
             const ainfo = acct ? (this._resolveAccount(acct) || null) : null;
             e.acct = acct || null;
             e.atype = ainfo ? ainfo.type : (acct ? 'unknown' : 'global');
@@ -365,6 +368,44 @@ class UsageHistory {
     return { added, filesTouched };
   }
 
+  /** Remote-host events (2.127.0): ingest the NDJSON a host-side
+   *  vibespace-usage-scan run returned. Attribution is baked per host
+   *  (acct 'host-<id>', atype 'host') so remote usage NEVER mixes with local
+   *  accounts; rid is namespaced per host and the read-time Set dedup absorbs
+   *  re-emitted events (remote cursor loss / interrupted transfer). Appends to
+   *  the SAME monthly shards, so aggregation/window filters just work. */
+  ingestRemoteEvents(hostId, hostName, text) {
+    let added = 0;
+    const shardBuffers = {};
+    for (const line of String(text || '').split('\n')) {
+      if (!line.trim()) continue;
+      let e; try { e = JSON.parse(line); } catch { continue; }
+      if (!e || !e.rid || !e.ts) continue;
+      const ev = {
+        rid: `h:${hostId}:${e.rid}`,
+        ts: Number(e.ts) || Date.now(),
+        sid: e.sid || null,
+        be: 'claude',
+        model: e.model || null,
+        acct: hostId, // host ids are already 'host-…' — distinct from acct-/sub-/cxs- account ids
+        atype: 'host',
+        aname: hostName || hostId,
+        mode: null,
+        host: hostId,
+        cwd: e.cwd || null,
+        i: e.i || 0, cw5: e.cw5 || 0, cw1: e.cw1 || 0, cr: e.cr || 0, o: e.o || 0,
+        tier: e.tier || null,
+      };
+      const shard = this._shardFor(ev.ts);
+      (shardBuffers[shard] = shardBuffers[shard] || []).push(JSON.stringify(ev));
+      added++;
+    }
+    for (const [shard, lines] of Object.entries(shardBuffers)) {
+      if (lines.length) fs.appendFileSync(shard, lines.join('\n') + '\n');
+    }
+    return { added };
+  }
+
   // Feed a file's UNSCANNED bytes to onLine, in bounded chunks — a rollout can
   // exceed Node's max string length (real case: 1.9GB), so the file must never
   // be materialized whole. Only complete lines are consumed; a partial tail
@@ -529,7 +570,7 @@ class UsageHistory {
         model: ev.model || 'unknown',
         account: acctKey,
         // billing = the coarse category, so subscription $ and API $ never merge
-        billing: ev.atype === 'api' ? 'api-key' : ev.atype === 'subscription' ? 'subscription' : ev.atype === 'codex-subscription' ? 'chatgpt' : (ev.acct ? 'unknown-account' : (ev.be === 'codex' ? 'codex-cli-login' : 'cli-global-login')),
+        billing: ev.atype === 'api' ? 'api-key' : ev.atype === 'subscription' ? 'subscription' : ev.atype === 'codex-subscription' ? 'chatgpt' : ev.atype === 'host' ? 'remote-host' : (ev.acct ? 'unknown-account' : (ev.be === 'codex' ? 'codex-cli-login' : 'cli-global-login')),
         project: ev.cwd || 'unknown',
         mode: ev.mode || 'unknown',
         host: ev.host || 'local',

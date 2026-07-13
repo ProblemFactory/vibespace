@@ -2687,7 +2687,7 @@ app.use(sessionsRouter);
 // refreshed every ~5 min. See _fetchOAuthUsage below for the why.
 // ── Usage / Rate Limit ── (extracted to src/usage-routes.js in the 2.92.0 split)
 const { setupUsage } = require('./src/usage-routes');
-const usage = setupUsage({ app, accounts, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR });
+const usage = setupUsage({ app, accounts, hosts, usageHistory, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR });
 // Normalizer-level settings reads (chat.hideEmptyHooks) go through the REAL store
 _MM.getSetting = (k) => { try { return serverSetting(k); } catch { return undefined; } };
 const { getOAuthToken, usagePollingEnabled, summarizeCodexRateLimit, summarizeCodexRateLimits } = usage;

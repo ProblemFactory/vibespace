@@ -11,7 +11,7 @@ const path = require('path');
 const os = require('os');
 const { execFileSync } = require('child_process');
 
-function setupUsage({ app, accounts, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR }) {
+function setupUsage({ app, accounts, hosts, usageHistory, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR }) {
 const https = require('https');
 function readUsageCache() {
   try {
@@ -359,12 +359,71 @@ setInterval(pollUsageActive, 90000);
 // global 429 backoff. §ban-safety: interactive user action, not background
 // automation — do NOT wire this to any scheduler.
 const _onDemandUsageAt = {};
+// Remote-host quota snapshots (2.127.0): keyed by host id, persisted to
+// usage-cache/host-<id>.json by the on-demand ⟳ (read-only remote token —
+// never refreshed, §ban-safety; no scheduler anywhere near this).
+const _hostUsage = {};
+try {
+  for (const f of fs.readdirSync(USAGE_CACHE_DIR)) {
+    const m = /^host-([\w-]+)\.json$/.exec(f);
+    if (m) { try { _hostUsage[m[1]] = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, f), 'utf-8')); } catch {} }
+  }
+} catch {}
+// Ledger harvest from remote hosts (ssh, incremental via remote-side cursors).
+// One at a time per server; throttling lives in hosts.harvestUsage (15min).
+let _harvestBusy = false;
+app.post('/api/usage-stats/harvest-hosts', async (req, res) => {
+  if (!hosts || !usageHistory) return res.json({ hosts: {} });
+  if (_harvestBusy) return res.json({ busy: true });
+  _harvestBusy = true;
+  const out = {};
+  try {
+    const scannerPath = path.join(path.dirname(USAGE_CACHE_DIR), 'bin', 'vibespace-usage-scan');
+    const want = req.body?.host ? [req.body.host] : hosts.list().map((h) => h.id);
+    for (const id of want) {
+      try {
+        const h = hosts.get(id);
+        const text = await hosts.harvestUsage(id, { force: !!req.body?.force, scannerPath });
+        out[id] = text ? usageHistory.ingestRemoteEvents(id, h.name, text) : { added: 0, throttled: !text };
+      } catch (e) { out[id] = { error: String(e.message || e).slice(0, 160) }; }
+    }
+  } finally { _harvestBusy = false; }
+  res.json({ hosts: out });
+});
 app.post('/api/usage/refresh', (req, res) => {
   // User-facing kill switch (accounts.onDemandQuotaRefresh = 'off'): never
   // contact Anthropic, even if a stale client asks.
   let odMode = 'manual';
   try { odMode = serverSetting('accounts.onDemandQuotaRefresh') || 'manual'; } catch {}
   if (odMode === 'off') return res.status(403).json({ error: 'on-demand quota refresh is disabled in Settings' });
+  // Remote host (2.127.0): read the host's own login token over ssh
+  // (READ-ONLY — never refreshed) and do the same single human-gated call.
+  if (req.body?.host && hosts) {
+    const hid = String(req.body.host);
+    if (Date.now() < _rateLimitBackoffUntil) return res.json({ throttled: true, reason: 'backoff' });
+    if (Date.now() - (_onDemandUsageAt['host:' + hid] || 0) < 60000) return res.json({ throttled: true });
+    let hMeta; try { hMeta = hosts.get(hid); } catch { return res.status(404).json({ error: 'unknown host' }); }
+    _onDemandUsageAt['host:' + hid] = Date.now();
+    hosts.readRemoteOAuth(hid).then((token) => {
+      if (!token) return res.json({ error: 'no currently-valid login token on the host — log in / run claude there first' });
+      _fetchOAuthUsage(token, (u) => {
+        if (!u) return res.json({ error: 'refresh failed (rate-limited or offline) — kept last-known' });
+        u.source = 'on-demand-remote';
+        u.scopedFetchedAt = Date.now();
+        _fetchOAuthRoles(token, (org) => {
+          if (org) Object.assign(u, org);
+          _hostUsage[hid] = { ...u, name: hMeta.name };
+          try {
+            fs.mkdirSync(USAGE_CACHE_DIR, { recursive: true });
+            const f = path.join(USAGE_CACHE_DIR, 'host-' + hid.replace(/[^\w-]/g, '_') + '.json');
+            fs.writeFileSync(f + '.tmp', JSON.stringify(_hostUsage[hid])); fs.renameSync(f + '.tmp', f);
+          } catch {}
+          res.json({ success: true });
+        });
+      });
+    }).catch((e) => res.json({ error: String(e.message || e).slice(0, 160) }));
+    return;
+  }
   const key = String(req.body?.account || '__global__');
   if (Date.now() < _rateLimitBackoffUntil) return res.json({ throttled: true, reason: 'backoff' });
   if (Date.now() - (_onDemandUsageAt[key] || 0) < 60000) return res.json({ throttled: true });
@@ -603,6 +662,16 @@ app.get('/api/usage', (req, res) => {
     codexGlobalLogin: _codexUsageGlobalLink,
     // Per-account codex quota snapshots (key = cxs id / '__global_codex__')
     codexAccounts,
+    // Remote hosts' own-login quota snapshots (on-demand ⟳ only), keyed by
+    // host id — every CONFIGURED host is listed (no-data hosts included, so
+    // the popup offers the first ⟳)
+    hosts: (() => {
+      try {
+        const out = {};
+        for (const h of hosts?.list() || []) out[h.id] = { ...(_hostUsage[h.id] || {}), name: h.name };
+        return out;
+      } catch { return _hostUsage; }
+    })(),
   });
 });
 
