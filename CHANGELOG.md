@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.129.0 — 2026-07-13
+- **Manage Agents shows the VibeSpace footprint on a remote host** (transparency follow-up to the 2.126.0 argv incident, backlog B-34bb): selecting a machine now renders a "VibeSpace integration on <host>" row — per-tool state under `~/.vibespace/bin` compared against the LOCAL copies by content hash (current / outdated / absent; per-tool detail in the tooltip), hook registration in the HOST's own Claude/Codex configs, node availability, and keeper session files — with explicit **Install/Reinstall** (same tar-over-stdin channel the per-spawn distribution uses; registers the hook) and a danger-confirmed **Remove** (unregisters ONLY our hook entry from the host's CLI configs via the register script's new `--uninstall` mode, then deletes exactly our tool files; per-session token files are left alone). The row says plainly that creating a remote session re-installs everything automatically (per-spawn distribution is the zero-drift design). Probe is one read-only ssh round trip (`GET /api/hosts/:id/agent-tools`); verified live: outdated detection → install → uninstall (both harnesses' hooks cleanly unregistered, foreign hooks untouched) → reinstall.
+
 ## 2.128.0 — 2026-07-13
 - Usage window: remote hosts moved OUT of the Account chips into their own **Device** filter row (user directive — hosts are devices, not accounts): All / This machine / each remote host, gating the ENTIRE view (totals, panels, breakdowns) top-level via a new `host` param on /api/usage-stats. Selecting a remote device hides the local Account row (its usage is the host's own login); host buckets no longer appear as account chips. Host rows in the ledger's host dimension now carry the device's display name.
 

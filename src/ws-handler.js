@@ -300,7 +300,7 @@ function registerWsHandler(wss, ctx) {
             // 0600 files, NEVER argv). One tar stream ships everything; the
             // inner command references the token via a shell prefix
             // assignment `VAR="$(cat …)"` — the value never enters any argv.
-            const names = ['vibespace-status', 'vibespace-task', 'vibespace-ask', 'vibespace-hook.mjs', 'vibespace-hook-register.mjs', 'vibespace-remote-keeper'];
+            const names = require('./hosts').HostManager.AGENT_TOOLS;
             const present = names.filter((n) => { try { return fs.statSync(path.join(toolDir, n)).isFile(); } catch { return false; } });
             let prelude = '';
             let tokenAssign = '';
