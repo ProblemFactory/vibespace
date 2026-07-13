@@ -90,7 +90,7 @@ export function installSessionPalette(app) {
       const scored = [];
       for (const s of all) {
         const label = app.sidebar.getCustomName(s) || s.name || s.webuiName || (s.cwd || '').split('/').pop() || s.sessionId?.slice(0, 8) || '';
-        const hay = `${label} ${s.cwd || ''} ${s.hostName || ''} ${s.backend || ''}`;
+        const hay = `${label} ${s.cwd || ''} ${s.hostName || ''} ${s.backend || ''} ${s.sessionId || ''} ${s.backendSessionId || ''} ${s.claudeSessionId || ''}`;
         const sc = q ? score(q, hay) : 1;
         if (sc < 0) continue;
         const live = s.status === 'live' || s.status === 'tmux' || s.status === 'external';

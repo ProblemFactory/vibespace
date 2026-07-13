@@ -90,7 +90,9 @@ export function installSidebarWorkbench(Sidebar) {
       if (!fresh && cur && (cur.loading || cur.sessions)) return;
       map.set(hostId, { loading: true, sessions: cur?.sessions || null, error: null });
       if (fresh) this._render(); // show the scanning row immediately
-      const relevant = () => this._wbRecentHost === hostId || this._wbHistoryHost === hostId;
+      // re-render for the selected zones OR whenever a search is active (so
+      // cross-host search matches appear as each host's scan lands)
+      const relevant = () => this._wbRecentHost === hostId || this._wbHistoryHost === hostId || !!(document.getElementById('session-filter')?.value || '').trim();
       fetch(`/api/hosts/${hostId}/sessions${fresh ? '?fresh=1' : ''}`)
         .then(r => r.json())
         .then(d => {
@@ -146,6 +148,38 @@ export function installSidebarWorkbench(Sidebar) {
       if (!f) return list;
       return list.filter(s => (s.cwd || s.projDir || '').toLowerCase().includes(f)
         || (s.name || '').toLowerCase().includes(f) || (s.sessionId || '').toLowerCase().includes(f));
+    },
+
+    // Cross-host remote search: when the sidebar filter is active, surface
+    // matching sessions from EVERY loaded remote host (skipping skipHost, which
+    // the switcher already renders). Deduped against live webui sessions.
+    _renderRemoteSearchAll(f, skipHost) {
+      const hosts = this._hostsData?.hosts || [];
+      if (!hosts.length) return;
+      const liveIds = new Set();
+      for (const x of this._allSessions || []) if (x.status === 'live') { const id = x.backendSessionId || x.claudeSessionId; if (id) liveIds.add(id); }
+      let headDone = false;
+      for (const h of hosts) {
+        if (h.id === skipHost) continue;
+        const st = this._remoteHostState(h.id);
+        if (!st || !st.sessions) continue;
+        const matches = st.sessions.filter(s => !liveIds.has(s.sessionId) && (
+          (s.cwd || s.projDir || '').toLowerCase().includes(f)
+          || (s.name || '').toLowerCase().includes(f)
+          || (s.sessionId || '').toLowerCase().includes(f)));
+        if (!matches.length) continue;
+        if (!headDone) { const hd = document.createElement('div'); hd.className = 'wb-zone-head'; hd.innerHTML = `<span class="wb-zone-title">${escHtml(tr('Remote matches'))}</span>`; this.listEl.appendChild(hd); headDone = true; }
+        const hlabel = st.sessions[0]?.hostName || h.name || h.id;
+        const color = `hsl(${projectHue('host:' + h.id)} 55% 52%)`;
+        for (const s of matches.slice(0, 20)) {
+          const card = this._buildRemoteCard(s);
+          card.classList.add('wb-proj-card');
+          card.style.setProperty('--wb-strip', color);
+          card.title = hlabel + ': ' + (s.cwd || s.projDir || '');
+          applyHostStrip(card, h.id);
+          this.listEl.appendChild(card);
+        }
+      }
     },
 
     // Renders the RECENT slice (last 7 days) of a remote host's sessions.
@@ -391,6 +425,12 @@ export function installSidebarWorkbench(Sidebar) {
       // while the zone shows Local.
       const recentHost = this._wbRecentHost ?? (this._wbRecentHost = localStorage.getItem('wbRecentHost') || '');
       this.listEl.appendChild(this._buildRecentHead(recentHost, recent.length, zoneHead));
+      // With an active search query, sidebar search covers EVERY configured
+      // remote host (not just the one selected in the switcher). Loads them on
+      // demand and renders cross-host matches (the selected host is skipped —
+      // _renderRemoteRecent below already shows it).
+      const _wbQ = (document.getElementById('session-filter')?.value || '').toLowerCase().trim();
+      if (_wbQ) { this._ensureHostsData?.(); for (const h of (this._hostsData?.hosts || [])) if (h.id !== recentHost) this._loadRemoteHost(h.id); this._renderRemoteSearchAll(_wbQ, recentHost); }
       if (recentHost) {
         this._renderRemoteRecent(recentHost);
       } else {

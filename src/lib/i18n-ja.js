@@ -1704,4 +1704,5 @@ export default {
   "Stage: workspaces kept alive": "Stage：保持するワークスペース数",
   "How many recent session workspaces stay loaded (hidden) for instant switching; older ones are saved and closed": "直近いくつのワークスペースを（非表示のまま）保持して即切替できるようにするか。それ以前は保存して閉じます",
   "⚠ The CLI config file says {cfg}, but the login token actually belongs to {actual} — quotas shown are {actual}’s. Run /login in a terminal to refresh the recorded identity.": "⚠ CLI 設定ファイルには {cfg} と記録されていますが、ログイントークンは実際には {actual} のものです —— 表示中のクォータは {actual} のものです。ターミナルで /login を実行すると記録が更新されます。",
+  "Remote matches": "リモート一致",
 };

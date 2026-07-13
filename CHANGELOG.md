@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.117.0 — 2026-07-13
+- Session naming: sessions whose first turn is an injected `<vibespace-task-context>`/`<system-reminder>` (or a slash-command echo) no longer fall back to the directory name — both local and remote discovery now SKIP synthetic first-turn records and take the first REAL user message. Remote discovery previously grep'd only ONE user record (`-m1`) and gave up on a `<`-tag; it now scans the first several and picks the first real one (matches local naming). (VibeSpace names from the first user message; it does not read claude's own session summary/title, which older CLIs don't write anyway.)
+- Sidebar search now covers ALL remote hosts: with an active filter query the Folders workbench loads every configured host on demand and shows a "Remote matches" section across hosts (not just the one selected in the Recent/History switcher). Deduped against live sessions.
+- Ctrl+K palette now matches on session id (backendSessionId/claudeSessionId/sessionId), not just name/cwd/host.
+
 ## 2.116.0 — 2026-07-13
 - Remote session sidebar: fixed a duplicate card after resuming a remote session — the same session showed BOTH live (in Running, as a webui-managed session) AND stopped (in Recent, from the independent remote ssh-discovery path, which reports remote CHAT sessions as stopped since they have no remote dtach lock). The Recent/History remote zones now dedup discovered sessions against the live webui list by session id (`_wbFilterRemote`).
 - Ctrl+K session palette now searches REMOTE sessions too (it previously only saw local + live-remote sessions, never remote stopped ones). It merges already-discovered remote sessions, kicks a one-time ssh scan of every configured host on open (results stream in), and resumes a remote pick with its `hostId` so `--resume` runs on the right machine.

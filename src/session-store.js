@@ -327,7 +327,11 @@ function extractSessionMeta(filePath) {
                 const content = Array.isArray(msg.content)
                   ? (msg.content.find(c => c.type === 'text')?.text || '')
                   : String(msg.content);
-                name = content.split('\n')[0].substring(0, 80);
+                const cand = content.split('\n')[0].substring(0, 80).trim();
+                // skip synthetic first turns — an injected <vibespace-task-context>/
+                // <system-reminder> or a slash-command echo isn't the session's name;
+                // keep scanning for the first REAL user message (matches remote).
+                if (cand && !cand.startsWith('<') && !cand.startsWith('/')) name = cand;
               }
             }
           } catch {}
