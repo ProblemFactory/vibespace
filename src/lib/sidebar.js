@@ -881,7 +881,12 @@ class Sidebar {
     }
 
     // Tasks tab renders its board (groups + view toggle) even with zero sessions.
-    if (!sessions.length && this._activeTab !== 'tasks') { this.listEl.insertAdjacentHTML('beforeend', `<div class="empty-hint">${tr('No sessions')}</div>`); return; }
+    // A SEARCH with zero LOCAL matches must still reach the workbench (2.125.1,
+    // real report: searching a remote session's id showed "No sessions" — this
+    // early-return fired before the workbench's cross-host Remote-matches
+    // section ever rendered; the 2.124.0 cutoff fix was unreachable).
+    const searchActive = !!(document.getElementById('session-filter')?.value || '').trim();
+    if (!sessions.length && this._activeTab !== 'tasks' && !searchActive) { this.listEl.insertAdjacentHTML('beforeend', `<div class="empty-hint">${tr('No sessions')}</div>`); return; }
 
     if (this._mobileMode) {
       // Restore drill-down state if we were inside a folder/group
