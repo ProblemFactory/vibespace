@@ -1,214 +1,236 @@
-# Design: Remote C/S Architecture (远程常驻 agent daemon)
+# Design: C/S Architecture — Unified Device Model (控制面/会话面分离)
 
-Status: APPROVED direction, pre-implementation blueprint + progress anchor. Decisions
-settled with the user 2026-07-13 (chat session 9f4cd444; backlog item **B-55e2**).
-Supersedes the ssh-pipe-per-capability model for daemon-equipped hosts; the 2.124.0–2.127.0
-transitional layer (keeper / reconnect / keepalive / harvest) remains the design's proven
-seed — the daemon GENERALIZES it, it does not discard it.
+Status: APPROVED direction, pre-implementation blueprint + progress anchor. Two decision
+rounds with the user 2026-07-13 (chat session 9f4cd444; backlog item **B-55e2**).
+Round 2 upgraded the scope from "remote hosts get a daemon" to a **unified device model**
+(user: "本机也变成了'远程'的一种，只是连接的 daemon 在本地而已 … 逼迫所有功能都必须保证
+远程能用，所有设备不管是本地还是远程一视同仁").
 
-## 1. Problem
+The 2.124.0–2.127.0 transitional layer (keeper / reconnect / keepalive / harvest) is the
+proven seed; the daemon GENERALIZES it.
 
-Today every remote capability is its own bespoke ssh plumbing:
+## 1. The model
 
-| capability | mechanism today |
-|---|---|
-| remote chat session | local chat-wrapper → `ssh -T` → remote keeper daemon → claude |
-| remote terminal | local pty-wrapper → `ssh -t` → remote `dtach -A` → CLI |
-| session discovery | per-poll ssh shell script scanning `~/.claude` (claude ONLY), 15s cache |
-| agent tools / API | per-spawn tar over ssh stdin + per-session REVERSE TUNNEL (random port 20000-60000) |
-| file ops | ssh-per-op (remote-fs.js), ~50ms each even with ControlMaster |
-| usage ledger | per-open ssh harvest scanner (15min throttle) |
-| quota | read-only ssh token peek |
-| ctx sync | rsync on a 60s timer |
+**Split VibeSpace into a control plane and a session plane:**
 
-Consequences: the protocol stream (stream-json / JSON-RPC) crosses the WAN — every
-resilience feature is a patch on that (keeper+offset is exactly such a patch); codex remote
-chat was never wired (B-0588); everything is poll-based; discovery is a PARALLEL shell
-implementation that drifts from the local JS (the 2.117.0 naming-degradation class);
-per-session reverse tunnels bind random ports on the remote.
+- **Server (control plane)** — the workspace: HTTP/UI, browser WS, auth, layouts/desktops,
+  Task Groups, session-status board, user-todos, accounts store, usage LEDGER + pricing,
+  settings, themes, drafts, telemetry, and ALL normalizers (MessageManager & friends).
+  Owns no machine. After full migration the server needs no node-pty (pure JS — deployment
+  simplification).
+- **Daemon (session plane / "machine agent", `vibespace-agentd`)** — one per DEVICE,
+  **including localhost**: session spawn/supervision (dtach + pty-wrapper + chat wrappers),
+  session discovery (shared JS + fs.watch push), file ops, transcript seek/search
+  primitives, usage transcript scanning, quota creds peek, clipboard/X display, editor
+  helper bridge, VNC bridge, mounts (late milestone).
+
+**Localhost is device #0**: the server auto-spawns and supervises a REAL local daemon and
+talks to it over the SAME mux protocol on a unix socket. No in-process shortcut, no
+special-cased local path — that is the forcing function: every feature works remotely
+*by construction* because there is no other code path. The M0 "loopback test mode" is
+simply the production local configuration.
+
+```
+                    ┌──────────────── SERVER (control plane) ───────────────┐
+   browsers ══WS══▶ │ UI · auth · boards · tasks · ledger · normalizers     │
+                    └───┬————————————————┬———————————————————┬─────────────┘
+                        │ unix socket    │ transport A (ssh   │ transport B (daemon
+                        │ (same mux!)    │ stdio bridge)      │ dials out, wss)
+                  ┌─────▼─────┐    ┌─────▼─────┐        ┌─────▼─────┐
+                  │ agentd    │    │ agentd    │        │ agentd    │
+                  │ LOCALHOST │    │ ssh host  │        │ paired    │
+                  └───────────┘    └───────────┘        └───────────┘
+                  each daemon: sessions (dtach+wrappers, detached) · discovery(push)
+                  · fs ops · transcript seek/search · usage scan · quota peek
+                  · clipboard/X · editor bridge · VNC bridge · [mounts later]
+```
 
 ## 2. Decision record (2026-07-13, user-confirmed)
 
-1. **Transport topology: BOTH directions in v1** (user: "双向都做v1").
-   A) server dials the host over ssh (stdio bridge to the daemon's unix socket) — zero new
-   ports, reuses ssh trust, works from a NAT'd home server to cloud hosts;
-   B) daemon dials OUT to the server (`wss://<server>/agentd`, VS Code tunnel-style) — for
-   hosts the server cannot ssh into but which can reach the server (fleet pods; tailnet
-   peers). One protocol, transport-agnostic framing.
-2. **Terminals migrate too** (user: "都迁移吧 但是考虑用性能更高更稳定的方案").
-   Scheme chosen for stability: the daemon runs the LOCAL server's proven pty stack ON the
-   host — `dtach -c` + pty-wrapper as the persistent pty OWNER, daemon attaches via node-pty
-   and relays bytes. NOT daemon-owned ptys: a daemon-held pty master dies with the daemon
-   (SIGHUP to the CLI — the VS Code weakness). Daemon restart/upgrade = re-attach, sessions
-   never die. Zero WAN inside the pty pipeline; the channel carries only bytes + resize.
-3. **Lifecycle: VS Code Remote model, NO systemd requirement** (user: "学习vscode类似的方案…
-   可以ssh上去主动启动。也可以是用户手动在remote上安装后反向连回vibespace").
-   On-demand: first connection ssh-spawns a flock-singleton, setsid-detached daemon from a
-   versioned install dir; it persists after ssh exits and never idle-exits while sessions
-   live. Host reboot → next connect re-spawns (acceptable cold start). Manual/reverse mode:
-   a one-liner installer on the host + a pairing token → daemon dials out (transport B).
-4. **Coexistence: HARD CUT per host** (user: "装了 daemon 就硬切"). Once a host runs the
-   daemon, legacy ssh paths are DISABLED for it (per capability as each milestone lands;
-   full cutover at the final milestone). Rescue path = the daemon install/uninstall itself
-   still rides plain ssh (Manage Agents / Machines UI), so a bricked daemon is always
-   recoverable by reinstall — but there is no silent fallback double-path to maintain.
+1. **Transport topology: BOTH in v1** ("双向都做v1"). A) server dials over ssh (stdio
+   bridge / unix-socket forward) — zero new ports, ssh trust, NAT-friendly; B) daemon dials
+   OUT (`wss://<server>/agentd`, VS Code tunnel-style, pairing token) — for hosts the
+   server can't ssh into. Localhost uses the unix socket directly. One transport-agnostic
+   protocol.
+2. **Terminals migrate too** ("都迁移吧 但是考虑用性能更高更稳定的方案") — via the
+   HIGHEST-STABILITY scheme: the daemon runs the local server's proven pty stack on the
+   device — `dtach -c` + pty-wrapper as the persistent pty OWNER, daemon attaches via
+   node-pty and relays bytes. NOT daemon-owned ptys: a daemon-held pty master dies with the
+   daemon (SIGHUP → CLI death — the VS Code Remote weakness). Daemon restart/upgrade =
+   re-attach; sessions never die. Zero WAN (and zero cross-process hops) inside the pty
+   pipeline itself.
+3. **Lifecycle: VS Code model, NO systemd** ("学习vscode类似的方案 … ssh上去主动启动 …
+   也可以用户手动在remote上安装后反向连回"). On-demand flock-singleton, setsid-detached,
+   spawned from a versioned install dir on first connect; persists after ssh exits; host
+   reboot → next connect re-spawns. Manual install + pairing token = transport B entry.
+   The LOCAL daemon is spawned/supervised by the server itself (crash → backoff respawn) —
+   zero user management.
+4. **Hard cut** ("装了 daemon 就硬切"): a device with a daemon uses ONLY daemon paths
+   (per capability as milestones land). Localhost is hard-cut from the milestone that ships
+   it. Rescue = the ssh install/repair/uninstall path works with the daemon fully broken;
+   local rescue = pin to previous release.
+5. **Unified device model** (round 2, quoted above): localhost is a device like any other;
+   "host" generalizes to "device"; the Machines UI grows a permanent, undeletable
+   **This machine** row with the same status/integration/health surface as remote devices
+   (the 2.129.0 integration row and the 2.128.0 usage Device filter were the precursors).
 
 Derived decisions (stated in review, not objected):
 
-5. **Thin daemon, fat server**: normalization (MessageManager & friends) STAYS server-side.
-   The daemon relays raw buffer bytes / raw CLI stream lines with offsets. Rationale: the
-   normalizers are the fastest-evolving code in the repo; keeping them local means daemon
-   upgrades are rare and the protocol stays byte-oriented and stable.
-6. **Sessions are NEVER daemon children** (the keeper lesson, now an invariant): every
-   session process is setsid-detached with its own buffer/meta files; the daemon is a
-   SUPERVISOR that (re)attaches. Daemon death/upgrade never kills a session.
-7. **Auth: host-level long-lived token** (`vsht_…`), minted at install, stored 0600 on the
-   host, sha256-hashed in `data/hosts.json`. BOTH transports authenticate with it in the
-   hello frame (yes, even over ssh — defense in depth); revocable per host in the UI. This
-   retires per-session reverse tunnels AND per-spawn token shipping: agent tools talk to the
-   daemon's 0700 unix socket, the daemon relays to the server over the one channel.
-8. **Node runtime**: install prefers host node ≥18 (probed like today's bootstrap); if
-   absent, the installer downloads the pinned official static build into the install dir
-   (VS Code-style). Never depends on nvm being sourced at spawn time again.
-9. **§ban-safety invariants carry over unchanged**: quota reads stay read-only + human-gated;
-   no background OAuth polling; subscription creds shipping stays opt-in; nothing secret or
-   bulky ever enters argv (protocol is all stdio/socket).
+6. **Thin daemon, fat server**: normalization stays server-side; the daemon ships bytes and
+   runs only MECHANICAL byte/line-level primitives (buffer relay, JSONL line-index/seek/
+   search-stream — these must run next to the file; shipping a 500MB transcript to the
+   server to seek it would be absurd). Semantics never move.
+7. **Sessions are NEVER daemon children** (keeper lesson → invariant): setsid-detached,
+   own buffer/meta files; the daemon is a supervisor that (re)attaches. Daemon death or
+   upgrade kills nothing. Same guarantee now applies LOCALLY to server restarts too —
+   strictly better than today.
+8. **Auth: host-level long-lived token** (`vsht_`), minted at install (auto for localhost),
+   0600 on device, sha256-hashed server-side, presented in hello on EVERY transport (unix
+   socket included — uniformity). Retires per-session reverse tunnels and per-spawn token
+   shipping: agent tools + hooks talk to the daemon's 0700 unix socket
+   (`VIBESPACE_AGENTD_SOCK`), daemon relays; per-session `vsst_` tokens still scope
+   requests but never leave the device.
+9. **Node runtime**: prefer device node ≥18; else installer downloads the pinned official
+   static build into the install dir. node-pty ships as prebuilt binaries (linux-x64/arm64,
+   darwin-arm64/x64) in the daemon bundle; unsupported arch = that device's terminals stay
+   on the legacy path (the ONE hard-cut exception).
+10. **§ban-safety invariants unchanged**: quota reads read-only + human-gated; no scheduled
+    OAuth calls; subscription-to-remote opt-in; nothing secret/bulky in argv ever.
+11. **Migration order: LOCAL-FIRST extraction.** Build the daemon by extracting the local
+    session layer and hard-cutting localhost first; remote is then "the same daemon over
+    ssh". Daily driving exercises the new path immediately; remote rides proven code.
 
-## 3. Architecture
-
-```
-LOCAL SERVER                                REMOTE HOST
-┌─────────────────────────┐                 ┌──────────────────────────────────┐
-│ hosts.js → AgentdClient │══ transport A ══│ vibespace-agentd (flock single-  │
-│  (mux protocol, one     │   ssh stdio     │  ton, setsid, versioned dir)     │
-│   channel per host)     │══ transport B ══│  ├─ session supervisor           │
-│ normalizers / UI /      │   wss dial-out  │  │   ├─ chat: chat-wrapper +     │
-│ usage ledger / tasks    │                 │  │   │   codex-chat-wrapper      │
-│  (ALL stay local)       │                 │  │   │   (run ON host, keeper-   │
-└─────────────────────────┘                 │  │   │    style detached)        │
-                                            │  │   └─ term: dtach -c + pty-    │
-        one binary-framed mux:              │  │       wrapper, node-pty attach│
-        chan 0 = JSON control               │  ├─ discovery (session-store.js  │
-        chan N = byte streams               │  │   + codex-session-store.js,   │
-        (pty, buffers, files)               │  │   fs.watch → push)            │
-                                            │  ├─ fs ops / ctx sync / usage    │
-                                            │  │   scan / quota peek           │
-                                            │  └─ 0700 unix socket ← agent     │
-                                            │      tools (vibespace-status/…)  │
-                                            └──────────────────────────────────┘
-```
-
-The daemon is best understood as **a headless mini VibeSpace session layer**: the pty/dtach
-infrastructure, wrappers, and discovery code of server.js, running on the host, speaking a
-mux protocol instead of serving browsers. Maximum code reuse, one implementation of
-discovery/wrappers everywhere (kills the shell-script drift class).
-
-## 4. Protocol
+## 3. Protocol
 
 - **Framing**: length-prefixed binary mux — `[u32 len][u8 type][u32 chan][payload]`.
-  Channel 0 carries newline-JSON control messages; numbered channels carry raw byte streams
-  (pty io, buffer replay, file transfer). Hand-rolled (~200 lines, unit-tested) — the daemon
-  must stay a zero-dependency single-file bundle. Simple per-channel credit flow control so
-  a fat file transfer can't starve a pty stream.
+  Chan 0 = newline-JSON control; chan N = byte streams (pty io, buffer replay, file
+  transfer, search results). Hand-rolled (~200 lines, unit-tested; daemon stays a
+  zero-dependency single-file bundle + node-pty prebuilds). Per-channel credit flow control
+  (a fat upload must not starve a pty stream). Binary channels are REQUIRED for local
+  performance parity (uploads/downloads/CSV streaming relay through server↔daemon pipes,
+  no JSON re-encoding).
 - **Handshake**: `hello {protoVersion, daemonVersion, platform, arch, nodeVersion,
-  capabilities[], hostToken}` → server verifies token + compares versions → `ok` or
-  `upgrade` (server streams the new bundle; daemon swaps its versioned dir and restarts
-  itself — sessions survive by invariant #6; server reconnects).
-- **Heartbeat**: ping/pong on chan 0 every 10s, 3 misses = dead on both sides (no more
-  half-open ambiguity).
-- **Resync**: connection is stateless-resumable. Server attaches sessions with
-  `{sessionId, offset}` (byte offset into the host-side buffer — the keeper model);
-  discovery sends a full snapshot on connect then incremental push (fs.watch on
-  `~/.claude/projects` + `~/.codex/sessions` + lock dirs); non-session events (usage) use a
-  cursor the daemon persists (today's remote cursor file, unchanged semantics).
-- **Multi-server**: the daemon accepts multiple concurrent server connections (the user
-  works from more than one machine; dtach allowed this implicitly — keep it). Sessions are
-  host-global, not per-server.
+  capabilities[], hostToken}` → `ok | upgrade` (server streams new bundle; daemon swaps
+  versioned dir + re-execs; sessions survive by invariant #7).
+- **Heartbeat**: ping/pong 10s, 3 misses = dead, both sides.
+- **Resync**: stateless-resumable — session attach carries `{sessionId, offset}` (byte
+  offset into device-side buffers, the keeper heritage); discovery = full snapshot on
+  connect + fs.watch incremental push; usage scan keeps a device-side cursor.
+- **Multi-server**: a daemon accepts multiple concurrent servers (the user works from
+  several machines; dtach allowed this implicitly). Corollary of the unified model: machine
+  A's LOCAL daemon can simultaneously be machine B's REMOTE daemon — two VibeSpace servers
+  sharing devices is a supported topology, not an accident.
 
-## 5. Daemon lifecycle (VS Code model)
+## 4. Daemon lifecycle
 
-- **Install layout**: `~/.vibespace/agentd/<version>/` (bundle + optional pinned node),
-  `~/.vibespace/agentd/current` symlink, state in `~/.vibespace/agentd/state/` (host token
-  0600, usage cursor, logs w/ rotation). The existing `~/.vibespace/bin` agent tools remain
-  (now installed once by the daemon installer, refreshed on daemon upgrade — the 2.129.0
-  Manage Agents row becomes the daemon status/install/upgrade UI).
-- **Spawn**: transport A connects → if socket absent, run the launcher (flock singleton →
-  setsid daemon → wait for socket). Reboot cold-start is one extra round trip.
-- **Self-upgrade**: server-initiated on handshake mismatch. Atomic dir swap + re-exec.
-  Never touches session processes. A failed upgrade is recovered by the ssh install path
-  (rescue invariant from decision #4).
-- **Uninstall**: stop daemon, remove install dir + unregister hook (reuses the 2.129.0
-  `--uninstall` machinery), leave session transcripts alone.
+- **Install layout**: `~/.vibespace/agentd/<version>/` + `current` symlink; state in
+  `~/.vibespace/agentd/state/` (host token, usage cursor, rotated logs). On localhost the
+  daemon POINTS AT the existing `data/` session dirs (sockets/buffers/session-meta) so the
+  M-local flip adopts running sessions with zero file moves — adoption IS today's
+  restoreSessions, executed by a different process.
+- **Spawn**: local = server child-with-backoff supervision; remote A = ssh launcher (flock
+  singleton → setsid → wait for socket); remote B = user-run installer + pairing code.
+- **Self-upgrade**: server-initiated on handshake mismatch; atomic dir swap + re-exec;
+  never touches sessions. Broken daemon → ssh reinstall (remote) / release rollback (local).
+- **Uninstall**: stop daemon, remove install dir, unregister hook (2.129.0 `--uninstall`
+  machinery), transcripts untouched.
 
-## 6. Session transport details
+## 5. Session transport
 
-**Chat (claude + codex)**: chat-wrapper / codex-chat-wrapper run ON the host under the
-daemon (spawned detached exactly like the local dtach model; the keeper's buffer+socket
-pattern becomes the daemon's internal session supervisor). Raw stream lines land in host-side
-buffer files; the daemon relays bytes from a requested offset over a mux channel; the SERVER
-feeds its normalizers exactly as if reading a local buffer. This wires codex remote chat
-(B-0588) structurally: the JSON-RPC pipe never leaves the host. Interrupt/permission/control
-messages ride chan 0 as JSON (`session-stdin` writes).
+**Chat (claude + codex)**: wrappers run ON the device under the daemon (detached, keeper
+pattern as internal supervisor). Raw stream lines land in device-side buffer files; daemon
+relays from requested offsets; SERVER normalizers consume as if local. Codex remote chat
+(B-0588) is structurally absorbed: the JSON-RPC pipe never leaves the device.
+Control (interrupt/permission/set-model/goal) rides chan 0 JSON.
 
-**Terminal**: daemon spawns `dtach -c <sock> -E pty-wrapper …` on the host (same argv the
-local server builds today), attaches via node-pty, relays pty bytes on a mux channel;
-resize = control message → daemon's node-pty resize (multi-client min-size arbitration
-stays server-side, unchanged). Scrollback buffer file is written by pty-wrapper on the host
-as today → reconnect replay identical to local restore. node-pty ships as prebuilt binaries
-for linux-x64/arm64 + darwin-arm64/x64 inside the daemon bundle; an unsupported arch keeps
-that host's terminals on the legacy path (the ONE documented exception to hard-cut).
+**Terminal**: daemon spawns `dtach -c + pty-wrapper` (same argv the server builds today —
+spawn SPECS are still assembled server-side: adapters/settings/billing are semantics),
+attaches via node-pty, relays bytes; resize = control message; multi-client min-size
+arbitration stays server-side. Scrollback buffers written by pty-wrapper on the device;
+reconnect replay identical to today's local restore.
 
-**Agent tools / hooks**: `vibespace-status/-task/-ask` + the hook connect to the daemon's
-unix socket (env `VIBESPACE_AGENTD_SOCK` replaces `VIBESPACE_API`+tunnel); the daemon relays
-to the server over the channel, tagging the session identity server-side from the session
-registry (per-session `vsst_` tokens remain for request scoping, but never leave the host —
-the daemon holds them).
+**Transcript access**: seek/line-index/streaming-search primitives (readJsonlBounded,
+getJsonlLineIndex, searchJsonlFullStream — already mechanical, shared modules) run
+daemon-side; the server requests slabs/results over channels. The whole-file remote-jsonl
+cache retires — huge remote transcripts get the SAME lazy seek behavior as local ones
+(today remote history pulls entire files; this is a major win).
 
-## 7. Capability migration table
+## 6. Capability migration table
 
-| legacy mechanism | daemon-host replacement | milestone |
-|---|---|---|
-| remote chat keeper (2.124.0) | absorbed as daemon session supervisor | M1 |
-| per-spawn tools tar (2.126.0) | installed once at daemon install, refreshed on upgrade | M1 |
-| reverse tunnel + random port | deleted → daemon socket relay | M1 |
-| discovery shell script + cache | daemon push (shared JS discovery); cache stays as last-known while disconnected | M2 |
-| remote terminal dtach-over-ssh | daemon-attached dtach + byte relay | M2 |
-| remote-fs ssh-per-op | protocol file ops (same `?host=` shapes client-side) | M3 |
-| rsync ctx sync (60s timer) | daemon file sync, event-driven | M3 |
-| usage-scan per-open harvest (2.127.0) | daemon incremental scan + push (cursor in daemon state) | M3 |
-| quota ssh token peek | daemon local read (read-only, human-gated — unchanged) | M3 |
-| accounts key shipping over ssh stdin | over the channel into 0600 files (same rules) | M3 |
-| ControlMaster (2.125.0) | kept for transport A bootstrap + rescue ssh | — |
-| host bootstrap flow | extended: installs the daemon (idempotent steps + UI progress) | M0 |
-| Manage Agents integration row (2.129.0) | becomes daemon install/status/upgrade surface | M0 |
+| capability | today | unified-model home | milestone |
+|---|---|---|---|
+| local session spawn/restore | server in-process (pty/dtach infra) | LOCAL daemon (extracted) | M1 |
+| remote chat keeper (2.124.0) | per-session keeper | absorbed as daemon session supervisor | M2 |
+| remote terminal | dtach-over-ssh | daemon-attached dtach + byte relay | M2 |
+| per-spawn tools tar (2.126.0) | every spawn | installed once with daemon, refreshed on upgrade | M2 |
+| reverse tunnels + random ports | per session | DELETED → daemon socket relay (local too) | M1/M2 |
+| discovery | local: in-process scan; remote: shell script + cache | daemon push (shared JS), everywhere | M3 |
+| file ops | local: routes/files.js + safe-fs pool; remote: ssh-per-op | daemon fs ops (safe-fs pool + hung-mount defense move in); `?host=` shapes unchanged; remote-fs.js retires | M3 |
+| transcript seek/search | local: direct fs; remote: whole-file cache | daemon-side primitives + slab streaming | M3 |
+| usage transcript scan | local: in-process; remote: harvest scanner | daemon incremental scan + push | M3 |
+| passive statusline capture | LOCAL terminals only | all devices (daemon syncs usage-cache) — remote passive capture unlocked, still zero API calls | M3 |
+| quota peek | local read / remote ssh peek | daemon local read (read-only, human-gated) | M3 |
+| ctx folder sync | rsync timer | daemon file sync, event-driven | M3 |
+| clipboard / X display | server-machine only | daemon capability → remote paste works | M4 |
+| Ctrl+G editor helper | server HTTP (local-biased) | daemon socket bridge → uniform incl. remote | M4 |
+| VNC bridge | server-machine only | daemon capability (per-device desktop) | M4+ |
+| accounts key provisioning | ssh stdin files | over channel into 0600 files (same rules) | M2 |
+| mounts (rclone) | server-machine only | per-device daemon management | M5+ |
+| ControlMaster (2.125.0) | per-op ssh accel | kept: transport A bootstrap + rescue ssh | — |
+| host bootstrap / Manage Agents row (2.129.0) | tools install UI | daemon install/status/upgrade surface; Machines gets permanent "This machine" row | M0/M1 |
 
-## 8. Milestones
+## 7. Milestones (local-first)
 
-- **M0** — protocol mux + daemon skeleton + install/launch (transport A) + handshake/
-  self-upgrade + **loopback test mode** (spawn the daemon locally and treat localhost as a
-  "remote" — the e2e harness for everything after).
-- **M1** — chat sessions through the daemon (claude AND codex), agent-tool socket relay,
-  reverse tunnels retired. Hard-cut chat on daemon hosts.
-- **M2** — terminals through the daemon (node-pty prebuilds), discovery push. Hard-cut.
-- **M3** — fs ops, ctx sync, usage/quota, account provisioning. Hard-cut; legacy per-op
-  code now runs only for daemon-less hosts.
-- **M4** — transport B (dial-out) + manual installer + pairing-code UX in Machines UI.
-- **M5** — cleanup: gate legacy paths behind "host has no daemon", docs, migration notes.
+- **M0** — mux protocol + daemon skeleton + LOCAL lifecycle (server spawns/supervises,
+  unix socket, vsht_ auto-mint) + handshake/self-upgrade + e2e harness (= the local config).
+- **M1** — extract the SESSION layer into the daemon; localhost hard-cuts: chat + terminal
+  locally through the daemon (dtach adoption migrates running sessions in place); agent
+  tools + hooks move to the daemon socket; local reverse of the tunnel model gone.
+- **M2** — the same daemon over ssh (install/handshake/upgrade); remote chat (claude AND
+  codex — B-0588 lands here) + terminals; reverse tunnels + per-spawn tar retired.
+- **M3** — capabilities unify: discovery push, fs ops, transcript slabs, usage scan +
+  passive capture, quota, ctx sync. remote-fs.js / discovery scripts / harvest scanner /
+  remote-jsonl cache retire.
+- **M4** — transport B (dial-out + pairing UX); device-parity features: clipboard, editor
+  helper, VNC bridge.
+- **M5** — mounts per device; legacy-path cleanup (daemon-less ssh paths remain only as
+  the documented rescue/bootstrap layer); docs.
 
-## 9. Invariants (do not regress)
+## 8. Invariants (do not regress)
 
-1. Session processes are setsid-detached, never daemon children; daemon death/upgrade
+1. Sessions are setsid-detached, never daemon children; daemon OR server death/upgrade
    kills nothing.
-2. Normalization stays server-side; the daemon ships bytes, not semantics.
-3. Nothing secret or bulky in argv, ever (2.126.0); tokens live in 0600 files / sockets.
-4. §ban-safety: no scheduled OAuth calls, quota reads read-only + human-gated,
-   subscription-to-remote stays opt-in.
-5. Daemon listens ONLY on a 0700 unix socket (+ dial-out client connections); never TCP.
-6. Hard cut is per-capability per-milestone; the ssh rescue path (install/uninstall/repair)
-   must always work with the daemon fully broken.
-7. The buffer-offset resume contract (keeper heritage) is the compatibility surface —
-   changing it requires a protocol version bump, not a silent format change.
+2. Normalization and spawn-spec assembly stay server-side; the daemon ships bytes and runs
+   only mechanical primitives.
+3. NO special-cased local path: localhost goes through the same daemon + protocol as every
+   device. (The forcing function — resist every "just for local" shortcut.)
+4. Nothing secret or bulky in argv (2.126.0); tokens in 0600 files/sockets only.
+5. §ban-safety: no scheduled OAuth calls; quota human-gated read-only; sub-creds-to-remote
+   opt-in; passive statusline capture stays zero-API-call.
+6. Daemon listens ONLY on a 0700 unix socket (+ outbound dial); never TCP-listens.
+7. Hard cut is per-capability per-milestone; ssh rescue (install/repair/uninstall) must
+   work with the daemon fully broken.
+8. The buffer-offset resume contract is the compatibility surface — protocol version bump
+   to change, never a silent format change.
+
+## 9. Honest costs / risks
+
+- **Two processes on every deployment** (server + local daemon): ~1 extra node process;
+  supervision + log surfacing are new server duties. Accepted for uniformity.
+- **M1 is the riskiest flip** (the most-used path changes). Mitigations: dtach adoption ==
+  today's restoreSessions; developed behind a branch/flag, flipped in ONE release, sessions
+  survive the flip by construction.
+- **Local perf**: unix-socket hop is ~µs latency (imperceptible for pty echo); throughput
+  paths (upload/download/CSV) MUST use binary channels end-to-end — no JSON re-encoding.
+- **Debugging indirection**: two processes + protocol for any local bug — mitigated by the
+  local config being identical to remote (bugs reproduce locally by definition).
+- **node-pty prebuilds**: bundle grows; exotic arch → documented terminal fallback.
+- **Data split**: device state (sockets/buffers/session-meta/usage-cursor) vs server state
+  (layouts/tasks/ledger/settings) must be explicit; localhost daemon reuses existing dirs
+  to make the split a no-move migration.
 
 ## 10. Progress
 
-- 2026-07-13 — direction + the 4 fork decisions settled with the user; this document.
+- 2026-07-13 — round 1: daemon direction + 4 fork decisions settled.
+- 2026-07-13 — round 2: **unified device model** (localhost = device #0, no special local
+  path) settled; local-first milestone reorder; doc rewritten.
