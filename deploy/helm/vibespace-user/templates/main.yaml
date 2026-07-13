@@ -151,6 +151,23 @@ spec:
             - name: VIBESPACE_METRICS_PORT
               value: {{ .Values.metrics.port | default 3457 | quote }}
             {{- end }}
+            {{- if and .Values.opslog .Values.opslog.enabled }}
+            {{- $oslSecret := .Values.opslog.secretName | default (printf "u-%s-opslog" .Values.user) }}
+            - name: VIBESPACE_OPSLOG_DIR
+              value: {{ .Values.opslog.dir | default "/var/opslog" | quote }}
+            - name: VIBESPACE_OPSLOG_KEEP_DAYS
+              value: {{ .Values.opslog.keepDays | default 30 | quote }}
+            - name: VIBESPACE_OPSLOG_CEPHFS_MONS
+              valueFrom: { secretKeyRef: { name: {{ $oslSecret }}, key: mons } }
+            - name: VIBESPACE_OPSLOG_CEPHFS_FSNAME
+              valueFrom: { secretKeyRef: { name: {{ $oslSecret }}, key: fsName } }
+            - name: VIBESPACE_OPSLOG_CEPHFS_NAME
+              valueFrom: { secretKeyRef: { name: {{ $oslSecret }}, key: client } }
+            - name: VIBESPACE_OPSLOG_CEPHFS_SECRET
+              valueFrom: { secretKeyRef: { name: {{ $oslSecret }}, key: key } }
+            - name: VIBESPACE_OPSLOG_CEPHFS_PATH
+              valueFrom: { secretKeyRef: { name: {{ $oslSecret }}, key: path } }
+            {{- end }}
             {{- if .Values.telemetry.forwardToken }}
             - name: VIBESPACE_TELEMETRY_FORWARD_TOKEN
               valueFrom: { secretKeyRef: { name: {{ $name }}, key: telemetryForwardToken } }
