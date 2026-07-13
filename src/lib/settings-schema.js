@@ -345,6 +345,18 @@ const SETTINGS_SCHEMA = {
     description: t('Records page errors, boot crashes and coarse feature events (window opened, session created — names only, never content) into data/telemetry/ on THIS server. Nothing leaves your instance unless a forward URL is set below. Powers the ⚙ → Diagnostics report.'),
     category: t('Session'), liveApply: true,
   },
+  'posthog.host': {
+    type: 'text', default: '',
+    label: t('Product analytics: PostHog host'),
+    description: t('Base URL of a self-hosted PostHog (or compatible) instance, e.g. https://posthog.example.com. Together with the project key below, enables autocapture analytics and FULLY MASKED session recording (all inputs and text hidden). Empty = off. Requires local diagnostics to be enabled.'),
+    category: t('Session'), liveApply: false,
+  },
+  'posthog.key': {
+    type: 'text', default: '',
+    label: t('Product analytics: PostHog project key'),
+    description: t('The PostHog project API key (phc_…). Only used together with the host above.'),
+    category: t('Session'), liveApply: false,
+  },
   'telemetry.forwardUrl': {
     type: 'text', default: '',
     label: t('Forward diagnostics to a central collector (URL)'),

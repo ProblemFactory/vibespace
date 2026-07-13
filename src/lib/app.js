@@ -1,4 +1,5 @@
 import { ThemeManager, THEMES, BUILTIN_THEMES } from './themes.js';
+import { initPosthog } from './posthog-loader.js';
 import { ThemeEditor } from './theme-editor.js';
 import { WsManager } from './ws.js';
 import { WindowManager } from './window.js';
@@ -265,6 +266,7 @@ class App {
       this._authEnabled = !!d.authEnabled;
       this._ssoEnabled = !!d.ssoEnabled; // Clerk SSO on → password step/import ignored
       this._repoDir = d.repoDir || null; // server install dir (⚙ self-update)
+      initPosthog(d.posthog); // optional self-hosted analytics (masked recording)
     }).catch(()=>{});
 
     // Initialize unified state sync (server-persisted, versioned diff broadcast, reconnect recovery)

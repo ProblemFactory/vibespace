@@ -113,3 +113,15 @@ networkPolicy:
 cephMint:
   url: ""      # e.g. http://ceph-mint.vibespace.svc:8900
   token: ""    # shared bearer, matches ceph-mint's CEPHMINT_TOKEN
+
+# Optional self-hosted product analytics (PostHog or compatible). Both set →
+# the app serves autocapture + FULLY MASKED session recording config to clients.
+posthog:
+  host: ""
+  key: ""
+
+# Optional Prometheus metrics exporter on a SEPARATE (non-ingress) port,
+# scraped in-cluster via the standard prometheus.io/* pod annotations.
+metrics:
+  enabled: false
+  port: 3457

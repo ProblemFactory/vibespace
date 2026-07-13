@@ -55,6 +55,12 @@ spec:
       app.kubernetes.io/instance: {{ .Values.user }}
   template:
     metadata:
+      {{- if and .Values.metrics .Values.metrics.enabled }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ .Values.metrics.port | default 3457 | quote }}
+        prometheus.io/path: "/metrics"
+      {{- end }}
       labels: {{- include "vs.labels" . | nindent 8 }}
     spec:
       # No cluster credentials inside an agent container.
@@ -132,6 +138,18 @@ spec:
             {{- with .Values.telemetry.forwardUrl }}
             - name: VIBESPACE_TELEMETRY_FORWARD_URL
               value: {{ . | quote }}
+            {{- end }}
+            - name: VIBESPACE_INSTANCE_NAME
+              value: {{ .Values.user | quote }}
+            {{- if and .Values.posthog .Values.posthog.host }}
+            - name: VIBESPACE_POSTHOG_HOST
+              value: {{ .Values.posthog.host | quote }}
+            - name: VIBESPACE_POSTHOG_KEY
+              value: {{ .Values.posthog.key | quote }}
+            {{- end }}
+            {{- if and .Values.metrics .Values.metrics.enabled }}
+            - name: VIBESPACE_METRICS_PORT
+              value: {{ .Values.metrics.port | default 3457 | quote }}
             {{- end }}
             {{- if .Values.telemetry.forwardToken }}
             - name: VIBESPACE_TELEMETRY_FORWARD_TOKEN

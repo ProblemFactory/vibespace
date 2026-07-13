@@ -71,7 +71,7 @@ router.get('/api/home', async (req, res) => {
   if (R) { try { return res.json({ home: await R.fs.home(R.host) }); } catch (e) { return res.status(400).json({ error: e.message }); } }
   // repoDir: where THIS server runs from — the ⚙ "Update VibeSpace…" action
   // runs scripts/update.sh there (the client can't know the install path).
-  res.json({ home: os.homedir(), authEnabled: !!req.app.locals.authEnabled, ssoEnabled: !!req.app.locals.ssoEnabled, repoDir: path.resolve(__dirname, '..', '..') });
+  res.json({ home: os.homedir(), authEnabled: !!req.app.locals.authEnabled, ssoEnabled: !!req.app.locals.ssoEnabled, repoDir: path.resolve(__dirname, '..', '..'), posthog: req.app.locals.posthogCfg ? req.app.locals.posthogCfg() : null });
 });
 
 // Bounded filename search — the chat's relative-path resolver's last resort
