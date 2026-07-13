@@ -324,6 +324,82 @@ class HostManager {
     return st;
   }
 
+  // ── VibeSpace integration on the host (2.129.0, backlog B-34bb) ─────────
+  // Transparency for the ~/.vibespace footprint remote sessions leave on a
+  // box (the user was rightly startled finding it unannounced): what's
+  // installed, whether it matches the local copies, whether the hook is
+  // registered in the REMOTE's own CLI configs, and how many keeper session
+  // files exist — plus explicit install/refresh + remove.
+
+  /** The agent-tool set shipped to remotes (same list the per-spawn
+   *  distribution in ws-handler uses — keep in sync). */
+  static AGENT_TOOLS = ['vibespace-status', 'vibespace-task', 'vibespace-ask', 'vibespace-hook.mjs', 'vibespace-hook-register.mjs', 'vibespace-remote-keeper'];
+
+  /** Integration state ON THE HOST in one ssh round trip: per-tool presence +
+   *  sha256 (content compare beats mtime — the local hook/status tools are
+   *  REGENERATED every server boot with identical content), hook registration
+   *  (grep in the remote's own settings), node availability, keeper session
+   *  files. Read-only probe. */
+  async agentToolsStatus(id) {
+    const h = this.get(id);
+    const probe = 'export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; '
+      + `for f in ${HostManager.AGENT_TOOLS.join(' ')}; do `
+      + 'p="$HOME/.vibespace/bin/$f"; if [ -f "$p" ]; then s=$( (sha256sum "$p" 2>/dev/null || shasum -a 256 "$p" 2>/dev/null) | cut -d" " -f1 ); echo "T|$f|$s"; else echo "T|$f|"; fi; done; '
+      + 'command -v node >/dev/null 2>&1 && echo "NODE|yes" || echo "NODE|no"; '
+      + 'grep -q vibespace-hook.mjs "$HOME/.claude/settings.json" 2>/dev/null && echo "HOOK|claude|yes" || echo "HOOK|claude|no"; '
+      + 'grep -q vibespace-hook.mjs "$HOME/.codex/hooks.json" 2>/dev/null && echo "HOOK|codex|yes" || echo "HOOK|codex|no"; '
+      + 'echo "KEEP|$(ls "$HOME/.vibespace/run" 2>/dev/null | grep -c "\\.sock$")"';
+    const out = String(await this._ssh(h, probe, { timeoutMs: 12000 }));
+    const st = { tools: {}, node: false, hooks: {}, keeperSessions: 0 };
+    for (const line of out.split('\n')) {
+      const p = line.trim().split('|');
+      if (p[0] === 'T') st.tools[p[1]] = { present: !!p[2], sha256: p[2] || null };
+      else if (p[0] === 'NODE') st.node = p[1] === 'yes';
+      else if (p[0] === 'HOOK') st.hooks[p[1]] = p[2] === 'yes';
+      else if (p[0] === 'KEEP') st.keeperSessions = parseInt(p[1], 10) || 0;
+    }
+    return st;
+  }
+
+  /** Install/refresh the tools + register the hook — the SAME tar-over-stdin
+   *  channel the per-spawn distribution uses (nothing bulky/secret in argv;
+   *  no token here, tokens stay strictly per-session). */
+  installAgentTools(id, toolDir) {
+    const h = this.get(id);
+    const present = HostManager.AGENT_TOOLS.filter((n) => { try { return fs.statSync(path.join(toolDir, n)).isFile(); } catch { return false; } });
+    if (!present.length) throw new Error('no agent tools found locally');
+    const { execFileSync } = require('child_process');
+    const tar = execFileSync('tar', ['-c', '-C', toolDir, ...present], { timeout: 15000, maxBuffer: 8 * 1024 * 1024 });
+    return new Promise((resolve, reject) => {
+      const child = execFile('ssh', [...this.sshArgs(h, { multiplex: true }), '--',
+        'umask 077; mkdir -p "$HOME/.vibespace/bin"; tar -x -C "$HOME/.vibespace/bin"; chmod +x "$HOME/.vibespace/bin"/vibespace-* 2>/dev/null || true; '
+        + 'export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; '
+        + 'node "$HOME/.vibespace/bin/vibespace-hook-register.mjs" 2>/dev/null || true; echo VS-INSTALLED'],
+        { timeout: 30000 }, (err, stdout, stderr) => {
+          if (err) return reject(new Error((stderr?.toString() || err.message || '').trim().slice(0, 300)));
+          if (!String(stdout).includes('VS-INSTALLED')) return reject(new Error('unexpected response'));
+          resolve({ installed: present });
+        });
+      child.stdin.end(tar);
+    });
+  }
+
+  /** Remove the integration: unregister the hook from the remote CLI configs
+   *  (needs the register script still present — runs BEFORE the rm), then rm
+   *  exactly our tool files. Per-session token files (.tok-*) and account key
+   *  files are left alone (running sessions own them); NOTE a future remote
+   *  session spawn re-installs everything by design (per-spawn distribution). */
+  async uninstallAgentTools(id) {
+    const h = this.get(id);
+    const rms = HostManager.AGENT_TOOLS.map((n) => `"$HOME/.vibespace/bin/${n}"`).join(' ');
+    const cmd = 'export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; '
+      + 'if [ -f "$HOME/.vibespace/bin/vibespace-hook-register.mjs" ]; then node "$HOME/.vibespace/bin/vibespace-hook-register.mjs" --uninstall 2>/dev/null || true; fi; '
+      + `rm -f ${rms}; echo VS-REMOVED`;
+    const out = String(await this._ssh(h, cmd, { timeoutMs: 15000 }));
+    if (!out.includes('VS-REMOVED')) throw new Error('unexpected response');
+    return { ok: true };
+  }
+
   // ── In-app key generation (optional; default is the user's own ~/.ssh) ──
 
   keyInfo() {

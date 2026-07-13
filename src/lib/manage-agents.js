@@ -520,6 +520,75 @@ export function installManageAgents(App, ctx = {}) {
           row.append(left, actions);
           body.appendChild(row);
         }
+      } else {
+        // ── VibeSpace integration ON THE HOST (2.129.0, backlog B-34bb):
+        // remote sessions drop tools + a hook + keeper files under
+        // ~/.vibespace there (per-spawn, silently — a user was rightly
+        // startled finding them). This row makes that footprint VISIBLE:
+        // per-tool freshness vs the local copies, remote hook registration,
+        // keeper session files — with explicit Install/refresh + Remove.
+        let rs = null;
+        try { rs = await fetchJson(`/api/hosts/${encodeURIComponent(selectedHost)}/agent-tools`); } catch {}
+        if (stale()) return;
+        if (rs && rs.tools) {
+          const hostName = hostSel.options[hostSel.selectedIndex]?.textContent?.split(' (')[0] || t('remote host');
+          const row = document.createElement('div'); row.className = 'ob-backend';
+          const left = document.createElement('div');
+          const names = Object.keys(rs.tools);
+          const presentN = names.filter(n => rs.tools[n].present).length;
+          const outdatedN = names.filter(n => rs.tools[n].present && !rs.tools[n].current).length;
+          const perTool = names.map(n => `${rs.tools[n].present ? (rs.tools[n].current ? '✓' : '≠') : '✗'} ${n}`).join('\n');
+          let toolsHtml;
+          if (!presentN) toolsHtml = `<span class="ob-warn">${t('tools: not installed')}</span>`;
+          else if (presentN < names.length || outdatedN) toolsHtml = `<span class="ob-warn">${t('tools: {n}/{total} present, {stale} outdated', { n: presentN, total: names.length, stale: outdatedN })}</span>`;
+          else toolsHtml = `<span class="ob-ok">✓ ${t('{n} tools current', { n: presentN })}</span>`;
+          const hookHtml = ['claude', 'codex'].map((k) => rs.hooks?.[k]
+            ? `<span class="ob-ok">✓ ${k === 'claude' ? 'Claude' : 'Codex'} ${t('hook')}</span>`
+            : `<span class="ob-warn">${k === 'claude' ? 'Claude' : 'Codex'} ${t('hook')}: ${t('not registered')}</span>`).join(' &nbsp; ');
+          const extras = [];
+          if (!rs.node) extras.push(`<span class="ob-bad">${t('node missing on the host — agent tools cannot run')}</span>`);
+          if (rs.keeperSessions) extras.push(`<span>${t('{n} keeper session file(s)', { n: rs.keeperSessions })}</span>`);
+          left.innerHTML = `<b>${t('VibeSpace integration on {host}', { host: escHtml(hostName) })}</b>`
+            + `<div title="${escHtml(perTool)}">${toolsHtml} &nbsp; ${hookHtml}${extras.length ? ' &nbsp; ' + extras.join(' &nbsp; ') : ''}</div>`
+            + `<div class="agents-note">${t('Reporting tools, the Task Group context hook, and the session keeper live under ~/.vibespace on the host. Creating a remote session re-installs them automatically.')}</div>`;
+          const actions = document.createElement('div'); actions.className = 'agent-actions';
+          const allGood = presentN === names.length && !outdatedN;
+          const installBtn = document.createElement('button');
+          installBtn.className = 'agent-btn' + (allGood ? '' : ' primary');
+          installBtn.textContent = presentN ? t('Reinstall') : t('Install');
+          installBtn.onclick = async () => {
+            installBtn.disabled = true;
+            try {
+              const r = await fetchJson(`/api/hosts/${encodeURIComponent(selectedHost)}/agent-tools/install`, { method: 'POST' });
+              if (r?.success) showToast(t('Integration installed on {host}', { host: hostName }));
+              else showToast(r?.error || t('Install failed'), { type: 'error' });
+            } catch { showToast(t('Install failed'), { type: 'error' }); }
+            refresh();
+          };
+          actions.appendChild(installBtn);
+          if (presentN) {
+            const rmBtn = document.createElement('button'); rmBtn.className = 'agent-btn'; rmBtn.textContent = t('Remove');
+            rmBtn.title = t('Unregisters the hook from the host\'s CLIs and deletes the tools. A future remote session on this host re-installs them.');
+            rmBtn.onclick = async () => {
+              const ok = await showConfirmDialog({
+                title: t('Remove VibeSpace integration from {host}?', { host: hostName }),
+                message: t("Unregisters the hook from the host's CLIs and deletes the tools under ~/.vibespace/bin. Running remote sessions lose their reporting tools; a future remote session re-installs everything."),
+                confirmText: t('Remove'), danger: true,
+              });
+              if (!ok) return;
+              rmBtn.disabled = true;
+              try {
+                const r = await fetchJson(`/api/hosts/${encodeURIComponent(selectedHost)}/agent-tools/uninstall`, { method: 'POST' });
+                if (r?.success) showToast(t('Integration removed from {host}', { host: hostName }));
+                else showToast(r?.error || t('Remove failed'), { type: 'error' });
+              } catch { showToast(t('Remove failed'), { type: 'error' }); }
+              refresh();
+            };
+            actions.appendChild(rmBtn);
+          }
+          row.append(left, actions);
+          body.appendChild(row);
+        }
       }
       // ── Agent instructions — ADVANCED, collapsed by default (user request:
       // the expanded form dominated the dialog). Lives right under the

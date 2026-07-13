@@ -1543,11 +1543,14 @@ setTimeout(() => process.exit(0), 8000); // never hang a session start
   // (our LOCAL registration can't reach the remote box). Self-locating: it
   // registers `node <its own dir>/vibespace-hook.mjs`. Same non-destructive
   // logic as ensureAgentHooks; best-effort (a failure just means no injection).
+  // `--uninstall` (2.129.0, Manage Agents remote Remove) strips ONLY our entry
+  // from the remote configs — mirror of the local removeAgentHooks.
   const reg = `#!/usr/bin/env node
 import { readFileSync, writeFileSync, renameSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
+const UNINSTALL = process.argv.includes('--uninstall');
 const hookCmd = 'node ' + join(dirname(fileURLToPath(import.meta.url)), 'vibespace-hook.mjs');
 const files = [
   { f: join(homedir(), '.claude', 'settings.json'), create: false, EVENTS: ['SessionStart', 'UserPromptSubmit', 'Stop'] },
@@ -1557,14 +1560,27 @@ const findOur = (list) => { for (const g of (Array.isArray(list) ? list : [])) {
 for (const { f, create, EVENTS } of files) {
   try {
     let root = null; try { root = JSON.parse(readFileSync(f, 'utf-8')); } catch { root = null; }
-    if (!root) { if (existsSync(f)) continue; if (!create) continue; root = {}; }
-    if (!root.hooks || typeof root.hooks !== 'object') root.hooks = {};
+    if (!root) { if (existsSync(f)) continue; if (UNINSTALL || !create) continue; root = {}; }
+    if (!root.hooks || typeof root.hooks !== 'object') { if (UNINSTALL) continue; root.hooks = {}; }
     let changed = false;
-    for (const ev of EVENTS) {
-      if (!Array.isArray(root.hooks[ev])) root.hooks[ev] = [];
-      const ours = findOur(root.hooks[ev]);
-      if (ours) { if (ours.command !== hookCmd) { ours.command = hookCmd; changed = true; } }
-      else { root.hooks[ev].push({ hooks: [{ type: 'command', command: hookCmd, timeout: 10 }] }); changed = true; }
+    if (UNINSTALL) {
+      for (const ev of Object.keys(root.hooks)) {
+        if (!Array.isArray(root.hooks[ev])) continue;
+        for (const g of root.hooks[ev]) {
+          if (!g || !Array.isArray(g.hooks)) continue;
+          const before = g.hooks.length;
+          g.hooks = g.hooks.filter(h => !(h && typeof h.command === 'string' && h.command.includes('vibespace-hook.mjs')));
+          if (g.hooks.length !== before) changed = true;
+        }
+        root.hooks[ev] = root.hooks[ev].filter(g => g && Array.isArray(g.hooks) && g.hooks.length);
+      }
+    } else {
+      for (const ev of EVENTS) {
+        if (!Array.isArray(root.hooks[ev])) root.hooks[ev] = [];
+        const ours = findOur(root.hooks[ev]);
+        if (ours) { if (ours.command !== hookCmd) { ours.command = hookCmd; changed = true; } }
+        else { root.hooks[ev].push({ hooks: [{ type: 'command', command: hookCmd, timeout: 10 }] }); changed = true; }
+      }
     }
     if (changed) { const tmp = f + '.tmp'; writeFileSync(tmp, JSON.stringify(root, null, 2) + '\\n'); renameSync(tmp, f); }
   } catch { }
@@ -2394,6 +2410,33 @@ app.get('/api/hosts/:id/dir-complete', async (req, res) => {
 // Backend (CLI) status on a host — Manage Agents dialog when a host is chosen.
 app.get('/api/hosts/:id/backend-status', async (req, res) => {
   try { res.json(await hosts.backendStatus(req.params.id)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+// VibeSpace integration on a host (2.129.0, backlog B-34bb): the ~/.vibespace
+// footprint remote sessions leave there — per-tool presence compared against
+// the LOCAL copies by sha256 (`current`), remote hook registration, node
+// availability, keeper session files — plus explicit install/refresh + remove.
+// (A future remote session spawn re-installs by design; the UI says so.)
+app.get('/api/hosts/:id/agent-tools', async (req, res) => {
+  try {
+    const st = await hosts.agentToolsStatus(req.params.id);
+    const toolDir = path.dirname(EDITOR_CMD);
+    const crypto = require('crypto');
+    for (const [n, t] of Object.entries(st.tools)) {
+      let local = null;
+      try { local = crypto.createHash('sha256').update(fs.readFileSync(path.join(toolDir, n))).digest('hex'); } catch { }
+      t.current = !!(t.present && local && t.sha256 === local);
+      delete t.sha256;
+    }
+    res.json(st);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/hosts/:id/agent-tools/install', async (req, res) => {
+  try { res.json({ success: true, ...(await hosts.installAgentTools(req.params.id, path.dirname(EDITOR_CMD))) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/hosts/:id/agent-tools/uninstall', async (req, res) => {
+  try { res.json({ success: true, ...(await hosts.uninstallAgentTools(req.params.id)) }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.get('/api/hosts/:id/recent-cwds', async (req, res) => {
