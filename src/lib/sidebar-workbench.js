@@ -130,9 +130,21 @@ export function installSidebarWorkbench(Sidebar) {
     },
 
     _wbFilterRemote(sessions) {
+      // Dedup vs the live list: a remote session that's CURRENTLY a live
+      // webui-managed session (resumed/attached here) already shows in the
+      // Running list — don't ALSO render its stale discovered card. Remote chat
+      // has no remote dtach lock, so discovery reports it 'stopped' while it's
+      // live locally → the same session appeared twice (live + stopped). Session
+      // ids are UUIDs (collision-free) so matching on id alone is safe.
+      const liveIds = new Set();
+      for (const x of this._allSessions || []) {
+        if (x.status !== 'live') continue;
+        const id = x.backendSessionId || x.claudeSessionId; if (id) liveIds.add(id);
+      }
+      let list = liveIds.size ? sessions.filter(s => !liveIds.has(s.sessionId)) : sessions;
       const f = (document.getElementById('session-filter')?.value || '').toLowerCase().trim();
-      if (!f) return sessions;
-      return sessions.filter(s => (s.cwd || s.projDir || '').toLowerCase().includes(f)
+      if (!f) return list;
+      return list.filter(s => (s.cwd || s.projDir || '').toLowerCase().includes(f)
         || (s.name || '').toLowerCase().includes(f) || (s.sessionId || '').toLowerCase().includes(f));
     },
 
