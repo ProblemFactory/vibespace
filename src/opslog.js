@@ -100,15 +100,24 @@ function setupOpslog(version) {
   const mons = process.env.VIBESPACE_OPSLOG_CEPHFS_MONS || '';
   const done = () => fs.mkdir(DIR, { recursive: true }, () => _activate(version));
   if (!mons) return done();
-  // CephFS-backed dir: kernel-mount the subtree first (idempotent).
+  // CephFS-backed dir: kernel-mount the subtree first (idempotent). The mount
+  // point usually lives under a root-owned path (e.g. /var/opslog) while the
+  // server runs unprivileged, so BOTH the mkdir and the mount go through sudo
+  // (fs.mkdir would EACCES). mount.ceph may print a harmless "modprobe not
+  // found" line while the kernel module is already loaded — that is NOT a
+  // failure (exit 0), so gate on the exit code + a /proc/mounts re-check only.
   _isMounted(DIR, (mounted) => {
     if (mounted) return _activate(version);
-    fs.mkdir(DIR, { recursive: true }, () => {
-      const src = `${mons}:${process.env.VIBESPACE_OPSLOG_CEPHFS_PATH || '/'}`;
-      const opts = `name=${process.env.VIBESPACE_OPSLOG_CEPHFS_NAME || ''},secret=${process.env.VIBESPACE_OPSLOG_CEPHFS_SECRET || ''},mds_namespace=${process.env.VIBESPACE_OPSLOG_CEPHFS_FSNAME || 'cephfs'}`;
-      execFile('sudo', ['-n', 'mount', '-t', 'ceph', src, DIR, '-o', opts], { timeout: 30000 }, (err, _o, stderr) => {
-        if (err) { console.warn('[opslog] cephfs mount failed — ops log disabled:', String(stderr || err.message).slice(0, 160)); return; }
-        _activate(version);
+    const src = `${mons}:${process.env.VIBESPACE_OPSLOG_CEPHFS_PATH || '/'}`;
+    const opts = `name=${process.env.VIBESPACE_OPSLOG_CEPHFS_NAME || ''},secret=${process.env.VIBESPACE_OPSLOG_CEPHFS_SECRET || ''},mds_namespace=${process.env.VIBESPACE_OPSLOG_CEPHFS_FSNAME || 'cephfs'}`;
+    // Two sudo calls with plain argv (same shape as the known-good My-storage
+    // cephfs mount) — no `sudo sh -c`, so a command-restricted sudoers still works.
+    execFile('sudo', ['-n', 'mkdir', '-p', DIR], { timeout: 15000 }, () => {
+      execFile('sudo', ['-n', 'mount', '-t', 'ceph', src, DIR, '-o', opts], { timeout: 30000 }, (err) => {
+        _isMounted(DIR, (nowMounted) => {
+          if (!nowMounted) { console.warn('[opslog] cephfs mount failed — ops log disabled:', String(err?.message || 'not mounted').slice(0, 160)); return; }
+          _activate(version);
+        });
       });
     });
   });
