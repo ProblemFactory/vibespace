@@ -182,7 +182,7 @@ app.get('/api/agent/task-context', (req, res) => {
     let context = '';
     if (injectGroups.length) {
       // Remote sessions read the auto-synced copy — translate file paths
-      context = tasks.renderMultiContext(injectGroups.map((g) => g.id), { ctxBaseFor: remoteCtxBaseFor(s) });
+      context = tasks.renderMultiContext(injectGroups.map((g) => g.id), { ctxBaseFor: remoteCtxBaseFor(s), sessionKey: key });
       // Only Claude injects the SessionStart output; codex runs the command but
       // ignores it, so don't mark groups "seen" for codex (that would starve its
       // UserPromptSubmit delivery).
@@ -303,7 +303,7 @@ app.get('/api/agent/prompt-context', (req, res) => {
           : tasks.renderContextDiffMulti(changedDiffs.map((x) => ({ id: x.g.id, changes: x.changes })));
       const fullBlocks = [];
       for (const g of updatedFulls) {
-        const ctx = tasks.renderContext(g.id, { multi, ctxBase: ctxBaseFor ? ctxBaseFor(g.id) : null });
+        const ctx = tasks.renderContext(g.id, { multi, ctxBase: ctxBaseFor ? ctxBaseFor(g.id) : null, sessionKey: key });
         if (ctx) fullBlocks.push(`The Task Group below was UPDATED since you last saw it — this is the current state (supersedes any earlier copy).\n\n${ctx}`);
       }
       let newFullGroups = [];
@@ -318,8 +318,8 @@ app.get('/api/agent/prompt-context', (req, res) => {
         // count-free multi phrasing instead.
         const allNew = firstGroups.length === injectGroups.length;
         const fulls = (firstGroups.length > 1 && allNew)
-          ? [tasks.renderMultiContext(firstGroups.map((g) => g.id), { ctxBaseFor })].filter(Boolean)
-          : firstGroups.map((g) => tasks.renderContext(g.id, { multi, ctxBase: ctxBaseFor ? ctxBaseFor(g.id) : null })).filter(Boolean);
+          ? [tasks.renderMultiContext(firstGroups.map((g) => g.id), { ctxBaseFor, sessionKey: key })].filter(Boolean)
+          : firstGroups.map((g) => tasks.renderContext(g.id, { multi, ctxBase: ctxBaseFor ? ctxBaseFor(g.id) : null, sessionKey: key })).filter(Boolean);
         if (fulls.length) {
           fullBlocks.push(...fulls);
           newFullGroups = firstGroups;
@@ -459,7 +459,9 @@ app.get('/api/agent/task', (req, res) => {
   if (!gid) return;
   try {
     const t = tasks.get(gid);
-    res.json({ success: true, task: { id: t.id, title: t.title, archived: !!t.archived, objective: t.objective, progress: (t.progress || []).slice(-10), contextDir: t.contextDir } });
+    // backlog: OPEN items only — that's what the CLI numbers for backlog-done
+    // (the resolve route indexes the same open-items list)
+    res.json({ success: true, task: { id: t.id, title: t.title, archived: !!t.archived, objective: t.objective, backlog: (t.backlog || []).filter((b) => b.status === 'open'), progress: (t.progress || []).slice(-10), contextDir: t.contextDir } });
   } catch (e) { res.status(404).json({ error: e.message }); }
 });
 app.post('/api/agent/task-progress', (req, res) => {
@@ -474,13 +476,50 @@ app.post('/api/agent/task-progress', (req, res) => {
 });
 // (Removed /api/agent/task-status — a Task Group has no status. A session
 // reports its own state via /api/agent/session-status (vibespace-status).)
-// (Removed /api/agent/task-plan — the group-level checklist/backlog was cut in
+// (Removed /api/agent/task-plan — the group-level checklist was cut in
 // 2.121.0. Old vibespace-task copies — e.g. on remote hosts — may still call
 // it; answer 410 with guidance instead of a confusing 404.)
 app.post('/api/agent/task-plan', (req, res) => {
   const hit = agentSession(req, res);
   if (!hit) return;
-  res.status(410).json({ error: 'the Task Group checklist was removed — keep working steps in your own session todo list (e.g. TodoWrite); log finished work with `vibespace-task progress "summary"`' });
+  res.status(410).json({ error: 'the Task Group checklist was removed — keep working steps in your own session todo list; log finished work with `vibespace-task progress "summary"`; park NON-immediate items (deferred decisions / future work) with `vibespace-task backlog-add "item"`' });
+});
+// Backlog (2.122.0): the group's parking lot for NON-immediate items —
+// deferred user decisions, "later" work. add / done / drop; done|drop resolve
+// by 1-based index into the OPEN-items list (what `show`/`backlog` display)
+// or a unique text substring. Attribution = the calling session's key.
+app.post('/api/agent/task-backlog', (req, res) => {
+  const hit = agentSession(req, res);
+  if (!hit) return;
+  const gid = resolveAgentGroup(hit, req, res);
+  if (!gid) return;
+  try {
+    const t = tasks.get(gid);
+    const backlog = (t.backlog || []).map((b) => ({ ...b }));
+    const { add, detail, done, drop } = req.body || {};
+    const key = sessionStatusKey(hit[0], hit[1]);
+    if (typeof add === 'string' && add.trim()) {
+      backlog.push({ text: add.trim(), status: 'open', ...(typeof detail === 'string' && detail.trim() ? { detail: detail.trim() } : {}), addedBy: key, addedAt: Date.now() });
+    } else if (done !== undefined || drop !== undefined) {
+      const ref = done !== undefined ? done : drop;
+      const open = backlog.map((b, i) => [b, i]).filter(([b]) => b.status === 'open');
+      let idx = -1;
+      const n = Number(ref);
+      if (Number.isInteger(n) && n >= 1 && n <= open.length) idx = open[n - 1][1];
+      else {
+        const matches = open.filter(([b]) => b.text.includes(String(ref)));
+        if (matches.length === 1) idx = matches[0][1];
+        else return res.status(400).json({ error: matches.length ? 'ambiguous item — use its number from `vibespace-task backlog`' : 'no matching open backlog item' });
+      }
+      backlog[idx].status = done !== undefined ? 'done' : 'dropped';
+      backlog[idx].resolvedBy = key;
+      backlog[idx].resolvedAt = Date.now();
+    } else {
+      return res.status(400).json({ error: 'need add, done, or drop' });
+    }
+    const updated = tasks.update(gid, { backlog });
+    res.json({ success: true, backlog: updated.backlog.filter((b) => b.status === 'open') });
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 // ── Hook install management (Manage Agents dialog — auto-registers at boot,
 // this surfaces status + one-click repair/remove for non-engineers) ──

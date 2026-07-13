@@ -21,11 +21,14 @@
  * user-facing concept is Task Group / Activity log; wire names (JSON fields,
  * API paths, the `tasks-updated` event, CLI commands) are kept for data +
  * contract compatibility.
- * CHECKLIST REMOVED (2.121.0, user decision): a group-level checklist/backlog
- * never made sense — agents don't care about other agents' backlogs; work
- * items live at the SESSION level (the agent's own native todo list, surfaced
- * as the card's Steps). Stored `plan` arrays are kept DORMANT in the JSON
- * (never rendered, never written) so nothing is destroyed.
+ * CHECKLIST REMOVED (2.121.0, user decision): a group-level checklist of agent
+ * WORK ITEMS never made sense — agents don't care about other agents' work
+ * items; those live at the SESSION level (the agent's own native todo list,
+ * surfaced as the card's Steps). Stored `plan` arrays are kept DORMANT in the
+ * JSON (never rendered, never written) so nothing is destroyed.
+ * BACKLOG ADDED (2.122.0, user decision): a different concept with the same
+ * shelf — the group's PARKING LOT for NON-immediate items (deferred user
+ * decisions, "later" work). See the BACKLOG_STATUSES note.
  */
 
 const fs = require('fs');
@@ -36,7 +39,13 @@ const crypto = require('crypto');
 // `archived` flag. Task STATUS lives on the session (session-status.js STATES,
 // which now includes `done`).
 const KINDS = ['task', 'group'];
-const CAPS = { title: 120, objective: 20000, note: 2000, detail: 6000, reason: 500 };
+const CAPS = { title: 120, objective: 20000, note: 2000, detail: 6000, reason: 500, backlogItem: 500, backlogItems: 200 };
+// Backlog (2.122.0) = the group's PARKING LOT for non-immediate items: deferred
+// user decisions, "later" work. Semantically NOT the removed checklist (agent
+// work items — those live on each session's own todo): injection never dumps
+// it (only a summary of items THIS session parked + a one-line query pointer),
+// and agents are taught to never start backlog items unasked.
+const BACKLOG_STATUSES = ['open', 'done', 'dropped'];
 
 function slugify(title) {
   return String(title || '')
@@ -79,6 +88,22 @@ class TaskGroupManager {
       // Backfill (in-memory is enough; persisted on the next change): content
       // gate falls back to the coarse updatedAt until a content edit happens.
       if (t.contentUpdatedAt === undefined) t.contentUpdatedAt = t.updatedAt;
+      // One-time Backlog seed (2.122.0, user decision): the removed checklist's
+      // dormant UNCHECKED items become open backlog items (they were exactly
+      // "not done yet" = parked). Guard = backlog undefined, so this runs once;
+      // the dormant plan array itself stays untouched.
+      if (t.backlog === undefined) {
+        t.backlog = (Array.isArray(t.plan) ? t.plan : [])
+          .filter((p) => p && p.text && !p.done)
+          .map((p) => ({
+            text: String(p.text).slice(0, CAPS.backlogItem),
+            status: 'open',
+            ...(typeof p.detail === 'string' && p.detail ? { detail: String(p.detail).slice(0, CAPS.detail) } : {}),
+            ...(p.addedBy ? { addedBy: String(p.addedBy).slice(0, 120) } : {}),
+            ...(Number(p.addedAt) ? { addedAt: Number(p.addedAt) } : {}),
+          }));
+        migrated = true;
+      }
     }
     if (!existed && typeof readUserState === 'function') {
       // One-time legacy Groups migration (file existence is the guard: once the
@@ -137,6 +162,18 @@ class TaskGroupManager {
     const folders = this._sanitizeFolders(t.folders);
     if (folders.length) lines.push(`- Auto-include folders: ${folders.map((f) => f.path + (f.recursive ? '/**' : '')).join(', ')}`);
     lines.push('', '## Objective', '', t.objective?.trim() || '_(not set yet)_');
+    // Backlog rides in the FULL renderings only (TASK.md / show) — the
+    // injection payload (cap 0) deliberately omits it (user directive 2.122.0:
+    // don't dump the backlog every hook; renderContext adds only a summary of
+    // items THIS session parked + a one-line query pointer).
+    const openBl = (t.backlog || []).filter((b) => b.status === 'open');
+    if (cap > 0 && openBl.length) {
+      lines.push('', '## Backlog  _(parked — deferred decisions / future work, NOT immediate tasks)_', '');
+      for (const b of openBl) {
+        lines.push(`- ${b.text}`);
+        if (b.detail) for (const dl of b.detail.split('\n')) lines.push(`  > ${dl}`);
+      }
+    }
     const total = (t.progress || []).length;
     const prog = cap > 0 ? (t.progress || []).slice(-cap) : [];
     if (prog.length) {
@@ -278,6 +315,12 @@ class TaskGroupManager {
       `\`\`\``,
       `(\`${g ? 'vibespace-task ' + g.trim() + ' ' : 'vibespace-task '}show --full\` re-reads the group's full state; keep your own working steps in your session todo list, not here)`,
       '',
+      "When the user DEFERS something ('later' / 'let me think about it') — park it in the group's backlog so it isn't lost (backlog = NON-immediate items only: deferred decisions, future work; never start one unasked):",
+      `\`\`\``,
+      `vibespace-task ${g}backlog-add "one-line item" --detail "context for whoever picks it up later"`,
+      `\`\`\``,
+      `(\`vibespace-task ${g}backlog\` lists/queries it; \`backlog-done <n|text>\` once decided or finished)`,
+      '',
       "Your session's live state on the board — set it the MOMENT it changes. Waiting states REQUIRE both flags:",
       `\`\`\``,
       `vibespace-status blocked --reason "what you're waiting on" --detail "context: options, what you tried, your recommendation" --urgency high`,
@@ -293,7 +336,31 @@ class TaskGroupManager {
       'In chat replies use ABSOLUTE file paths (e.g. /home/user/out/final.wav) — the UI makes them clickable; bare/relative names may not resolve.'];
   }
 
-  renderContext(id, { multi = false, ctxBase = null, logBudget = 8000, skipTools = false } = {}) {
+  // Backlog note for INJECTION (user directive 2.122.0): never dump the whole
+  // backlog per hook — show a summary reminder of the OPEN items THIS session
+  // parked (so the agent that deferred something re-surfaces it to the user),
+  // otherwise just one line saying how to query/modify it. Returns lines.
+  _backlogNoteLines(t, { gid = '', sessionKey = null } = {}) {
+    const open = (t.backlog || []).filter((b) => b.status === 'open');
+    if (!open.length) return [];
+    const mine = sessionKey ? open.filter((b) => b.addedBy === sessionKey) : [];
+    const out = [''];
+    if (mine.length) {
+      out.push(`### Backlog reminders — parked by THIS session, still open  _(surface them to the user when relevant; \`vibespace-task ${gid}backlog-done <n|text>\` once decided/finished)_`);
+      for (const b of mine.slice(0, 5)) {
+        const clipped = b.text.length > 160;
+        out.push(`- ${clipped ? b.text.slice(0, 159).trimEnd() + '…' : b.text}${(b.detail || clipped) ? ' †' : ''}`);
+      }
+      if (mine.length > 5) out.push(`- … +${mine.length - 5} more of yours`);
+      const others = open.length - mine.length;
+      out.push(`(group backlog holds ${open.length} open parked item${open.length > 1 ? 's' : ''}${others ? ` incl. ${others} from others` : ''} — \`vibespace-task ${gid}backlog\` lists/edits them)`);
+    } else {
+      out.push(`Group backlog: ${open.length} open parked item${open.length > 1 ? 's' : ''} (deferred decisions / future work — NOT immediate tasks; never start one unasked). \`vibespace-task ${gid}backlog\` lists/edits them.`);
+    }
+    return out;
+  }
+
+  renderContext(id, { multi = false, ctxBase = null, logBudget = 8000, skipTools = false, sessionKey = null } = {}) {
     const t = this.get(id);
     const parts = [
       `<vibespace-task-context>`,
@@ -302,6 +369,7 @@ class TaskGroupManager {
       '',
       // cap=0: meta/objective only — the log is appended LAST below.
       this.renderTaskMd(t, 0).replace(/\n---\n[\s\S]*$/, '').trim(),
+      ...this._backlogNoteLines(t, { gid: multi ? `--group ${t.id} ` : '', sessionKey }),
     ];
     // ── How to report back — self-documenting + scoped + enum-disambiguated ──
     // In multi-group payloads the tools section is emitted ONCE by
@@ -371,6 +439,7 @@ class TaskGroupManager {
       title: t.title,
       objHash: this._h(t.objective || ''),
       contextDir: t.contextDir || null,
+      backlog: (t.backlog || []).map((b) => ({ text: b.text, status: b.status || 'open', d: b.detail ? this._h(b.detail) : '' })),
       // New activity = entries with at > this. Two writes inside the SAME ms
       // split by an injection in between could drop one line from a diff —
       // accepted (unreachable in practice; recoverable via show --full).
@@ -413,6 +482,47 @@ class TaskGroupManager {
         if (cut) ch.push(`  > … _(truncated — \`vibespace-task ${gid}show --full\` for the rest)_`);
       }
     }
+    // Backlog changes are EVENTS (a parked/resolved item), so they do ride the
+    // diff — unlike the standing content, which injection never dumps (2.122.0).
+    // Items have no id, so match by text — OCCURRENCE-INDEXED (the k-th
+    // duplicate pairs with the k-th; duplicate texts are legal, backlog-add
+    // never dedups). A naive first-match Map silently LOSES a status flip on
+    // the 2nd duplicate and emits phantom lines forever (the retired checklist
+    // diff had this bug, reproduced — same construction here).
+    const occKey = (counter, text) => { const n = counter.get(text) || 0; counter.set(text, n + 1); return `${n}\u0000${text}`; };
+    const occOld = new Map();
+    { const c = new Map(); for (const b of (snap.backlog || [])) occOld.set(occKey(c, b.text), b); }
+    const matchedOld = new Set();
+    const blCh = [];
+    { const c = new Map();
+      for (const b of t.backlog || []) {
+        const k = occKey(c, b.text);
+        const o = occOld.get(k);
+        const st = b.status || 'open';
+        if (!o) {
+          // brand-new items: only OPEN ones are worth announcing (a new item
+          // already resolved is history, not a pending parked thing)
+          if (st === 'open') blCh.push(`- Backlog PARKED: ${b.text}${b.detail ? ' †' : ''}${b.addedBy ? `  _(by ${b.addedBy})_` : ''}`);
+          continue;
+        }
+        matchedOld.add(k);
+        if ((o.status || 'open') !== st) {
+          const verb = st === 'done' ? 'RESOLVED' : st === 'dropped' ? 'DROPPED' : 'REOPENED';
+          blCh.push(`- Backlog ${verb}: ${b.text}${b.resolvedBy && st !== 'open' ? `  _(by ${b.resolvedBy})_` : ''}`);
+        } else if (st === 'open' && (b.detail ? this._h(b.detail) : '') !== (o.d || '')) {
+          blCh.push(`- Backlog item detail updated: ${b.text}  _(† \`vibespace-task ${gid}show --full\`)_`);
+        }
+      }
+    }
+    for (const [k, o] of occOld) if (!matchedOld.has(k) && (o.status || 'open') === 'open') blCh.push(`- Backlog REMOVED: ${o.text}`);
+    const nBlChanges = blCh.length;
+    if (blCh.length > 15) {
+      const extra = blCh.length - 15;
+      blCh.length = 15;
+      blCh.push(`- … +${extra} more backlog changes  _(\`vibespace-task ${gid}backlog\`)_`);
+    }
+    ch.push(...blCh);
+    if (nBlChanges) bits.push(`${nBlChanges} backlog change${nBlChanges > 1 ? 's' : ''}`);
     if (t.contextDir && oldSig !== newSig) {
       // Signature format is path:size:mtime joined by | (contextDirSignature;
       // path has % and | escaped there) — peel size:mtime off the END so paths
@@ -568,11 +678,11 @@ class TaskGroupManager {
   // to the baseline tools intro). 1 → the normal single-group context. N → each
   // group's context, prefaced so the agent knows it spans multiple 岗位 and must
   // use `--group <id>` to act on a specific one.
-  renderMultiContext(groupIds, { ctxBaseFor = null } = {}) {
+  renderMultiContext(groupIds, { ctxBaseFor = null, sessionKey = null } = {}) {
     const ids = (groupIds || []).filter((id) => this._state.tasks[id] && !this._state.tasks[id].archived);
     if (!ids.length) return '';
     const baseOf = (id) => (ctxBaseFor ? ctxBaseFor(id) : null);
-    if (ids.length === 1) return this.renderContext(ids[0], { ctxBase: baseOf(ids[0]) });
+    if (ids.length === 1) return this.renderContext(ids[0], { ctxBase: baseOf(ids[0]), sessionKey });
     // LAYERED, not per-group blocks (user directive): tools → ALL identities →
     // ALL shared folders → ALL activity logs. Truncation then degrades by
     // LAYER — the first group's bulk can no longer erase the very EXISTENCE of
@@ -590,6 +700,10 @@ class TaskGroupManager {
       // renderTaskMd's H1/H2 demoted one level so groups nest under the layer heading
       const md = this.renderTaskMd(ts[id], 0).replace(/\n---\n[\s\S]*$/, '').trim().replace(/^(#{1,2}) /gm, '#$1 ');
       head.push('', md);
+      // per-group backlog note (own-parked summary or a one-line pointer)
+      const bl = this._backlogNoteLines(ts[id], { gid: `--group ${id} `, sessionKey })
+        .map((l) => l.replace(/^### /, '#### '));
+      head.push(...bl);
     }
     const withDir = ids.filter((id) => ts[id].contextDir);
     if (withDir.length) {
@@ -645,6 +759,7 @@ class TaskGroupManager {
         archived: false,
         attention: null,
         objective: '',
+        backlog: [],
         progress: [],
         sessions: sanitizeStrArray(groups[name], 2000),
         folders: sanitizeStrArray(folders[name], 100),
@@ -672,7 +787,7 @@ class TaskGroupManager {
 
   list() {
     return Object.values(this._state.tasks)
-      .map((t) => ({ ...t, plan: undefined, progress: [...(t.progress || [])], sessions: [...(t.sessions || [])], folders: this._sanitizeFolders(t.folders) }))
+      .map((t) => ({ ...t, plan: undefined, backlog: (t.backlog || []).map((b) => ({ ...b })), progress: [...(t.progress || [])], sessions: [...(t.sessions || [])], folders: this._sanitizeFolders(t.folders) }))
       .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
   }
 
@@ -694,6 +809,7 @@ class TaskGroupManager {
       archived: !!archived, // a Task Group (岗位) has NO status — persistent role; only archived
       attention: null,
       objective: typeof objective === 'string' ? objective.slice(0, CAPS.objective) : '',
+      backlog: [],
       progress: [],
       sessions: sanitizeStrArray(sessions, 2000),
       folders: this._sanitizeFolders(folders),
@@ -767,6 +883,20 @@ class TaskGroupManager {
     if (patch.injectContext !== undefined) t.injectContext = !!patch.injectContext;
     // patch.plan is deliberately IGNORED (checklist removed 2.121.0) — an old
     // client bundle may still send it; a stored dormant t.plan stays untouched.
+    if (patch.backlog !== undefined) {
+      if (!Array.isArray(patch.backlog)) throw new Error('backlog must be an array');
+      t.backlog = patch.backlog.slice(0, CAPS.backlogItems).map((it) => ({
+        text: String(it?.text || '').slice(0, CAPS.backlogItem),
+        status: BACKLOG_STATUSES.includes(it?.status) ? it.status : 'open',
+        // optional full context behind the one-liner (same split as Activity)
+        ...(typeof it?.detail === 'string' && it.detail.trim() ? { detail: it.detail.trim().slice(0, CAPS.detail) } : {}),
+        // attribution: who parked it / who resolved it ('user' = from the UI)
+        ...(it?.addedBy ? { addedBy: String(it.addedBy).slice(0, 120) } : {}),
+        ...(Number(it?.addedAt) ? { addedAt: Number(it.addedAt) } : {}),
+        ...(it?.resolvedBy ? { resolvedBy: String(it.resolvedBy).slice(0, 120) } : {}),
+        ...(Number(it?.resolvedAt) ? { resolvedAt: Number(it.resolvedAt) } : {}),
+      })).filter((it) => it.text);
+    }
     if (patch.attention !== undefined) {
       t.attention = patch.attention
         ? { reason: String(patch.attention.reason || '').slice(0, CAPS.reason), since: Number(patch.attention.since) || Date.now() }
@@ -774,11 +904,11 @@ class TaskGroupManager {
     }
     t.updatedAt = Date.now();
     // contentUpdatedAt gates AGENT re-injection: only what the injected context
-    // actually renders (title/objective/contextDir) counts. Cosmetic
+    // actually renders (title/objective/backlog/contextDir) counts. Cosmetic
     // patches (color, injectContext, archived, kind, folders, binds) bump only
     // updatedAt — they used to trigger a full "was UPDATED" re-injection to
     // every member agent.
-    if (['title', 'objective', 'contextDir'].some((k) => patch[k] !== undefined)) {
+    if (['title', 'objective', 'backlog', 'contextDir'].some((k) => patch[k] !== undefined)) {
       t.contentUpdatedAt = t.updatedAt;
     }
     this._save();
@@ -864,6 +994,15 @@ class TaskGroupManager {
       '',
       (t.objective && t.objective.trim()) || '_(none)_',
     ];
+    const bl = t.backlog || [];
+    if (bl.length) {
+      body.push('', '## Backlog', '');
+      // [ ] open · [x] done · [-] dropped — parsed back on import
+      for (const b of bl) {
+        body.push(`- [${b.status === 'done' ? 'x' : b.status === 'dropped' ? '-' : ' '}] ${b.text}`);
+        if (b.detail) for (const dl of b.detail.split('\n')) body.push(`  > ${dl}`);
+      }
+    }
     const prog = (t.progress || []).slice(-30);
     if (prog.length) {
       body.push('', '## Activity log', '');
@@ -915,8 +1054,27 @@ class TaskGroupManager {
     // or EOF, so an objective that itself contains a markdown heading
     // (e.g. "## Constraints") is preserved, not truncated.
     let objective = '';
-    const objM = body.match(/##\s+Objective\s*\n([\s\S]*?)(?=\n##\s+(?:Plan|Checklist|Progress|Activity log)\b|$)/i);
+    const objM = body.match(/##\s+Objective\s*\n([\s\S]*?)(?=\n##\s+(?:Backlog|Plan|Checklist|Progress|Activity log)\b|$)/i);
     if (objM) { objective = objM[1].trim(); if (objective === '_(none)_') objective = ''; }
+    // Backlog = "- [ |x|-] text" lines under "## Backlog" (open/done/dropped);
+    // blockquote continuations = the preceding item's detail (export round-trip)
+    const backlog = [];
+    const blM = body.match(/##\s+Backlog\s*\n([\s\S]*?)(?=\n##\s+(?:Plan|Checklist|Progress|Activity log)\b|$)/i);
+    if (blM) {
+      for (const line of blM[1].split('\n')) {
+        const bm = line.match(/^\s*-\s*\[([ xX-])\]\s+(.+)$/);
+        if (bm) {
+          const mark = bm[1].toLowerCase();
+          backlog.push({ text: bm[2].trim().slice(0, CAPS.backlogItem), status: mark === 'x' ? 'done' : mark === '-' ? 'dropped' : 'open' });
+          continue;
+        }
+        const dm = line.match(/^\s*>\s?(.*)$/);
+        if (dm && backlog.length) {
+          const it = backlog[backlog.length - 1];
+          it.detail = ((it.detail ? it.detail + '\n' : '') + dm[1]).slice(0, CAPS.detail);
+        }
+      }
+    }
     // Progress = "- <ISO date> <note> _(session)_" lines under "## Progress".
     // Round-trip fidelity: on a machine without the task yet, the FILE is the
     // only source of the progress log, so parse it rather than dropping it.
@@ -943,6 +1101,9 @@ class TaskGroupManager {
       archived: existing?.archived ?? (String(fm.archived) === 'true'),
       attention: existing?.attention || null,
       objective: objective.slice(0, CAPS.objective),
+      // file wins when it carries a backlog; else keep the store's (an absent
+      // section is indistinguishable from an empty one — prefer not to wipe)
+      backlog: backlog.length ? backlog.slice(0, CAPS.backlogItems) : (existing?.backlog || []),
       // a dormant stored checklist survives re-import untouched
       ...(existing?.plan?.length ? { plan: existing.plan } : {}),
       // prefer the store's live log if the task already exists (it's fuller —
@@ -977,6 +1138,15 @@ class TaskGroupManager {
         attention: raw.attention && typeof raw.attention === 'object'
           ? { reason: String(raw.attention.reason || '').slice(0, CAPS.reason), since: Number(raw.attention.since) || now } : null,
         objective: typeof raw.objective === 'string' ? raw.objective.slice(0, CAPS.objective) : '',
+        backlog: Array.isArray(raw.backlog) ? raw.backlog.slice(0, CAPS.backlogItems).map((it) => ({
+          text: String(it?.text || '').slice(0, CAPS.backlogItem),
+          status: BACKLOG_STATUSES.includes(it?.status) ? it.status : 'open',
+          ...(typeof it?.detail === 'string' && it.detail ? { detail: it.detail.slice(0, CAPS.detail) } : {}),
+          ...(it?.addedBy ? { addedBy: String(it.addedBy).slice(0, 120) } : {}),
+          ...(Number(it?.addedAt) ? { addedAt: Number(it.addedAt) } : {}),
+          ...(it?.resolvedBy ? { resolvedBy: String(it.resolvedBy).slice(0, 120) } : {}),
+          ...(Number(it?.resolvedAt) ? { resolvedAt: Number(it.resolvedAt) } : {}),
+        })).filter((it) => it.text) : [],
         // dormant passthrough: a config bundle from an older instance may carry
         // a checklist — keep the data (never rendered), don't destroy it
         ...(Array.isArray(raw.plan) && raw.plan.length ? { plan: raw.plan.slice(0, 200) } : {}),
