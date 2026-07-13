@@ -39,6 +39,12 @@ class HostManager {
     this.dataDir = dataDir;
     this._file = path.join(dataDir, 'hosts.json');
     this._sshDir = path.join(dataDir, 'ssh');
+    // ControlPath sockets must stay under the ~104-char unix-socket limit —
+    // the data dir can be arbitrarily deep (bit on first try: workspace path
+    // + cm-<40hex>.<tmpsuffix> overflowed), so masters live in a short
+    // per-uid tmp dir instead.
+    this._cmDir = path.join(os.tmpdir(), `vs-cm-${process.getuid ? process.getuid() : 'u'}`);
+    try { fs.mkdirSync(this._cmDir, { recursive: true, mode: 0o700 }); } catch { }
     this._state = { hosts: [] };
     this._discoveryCache = new Map(); // hostId -> {at, sessions}
     // LAST-KNOWN discovery results, persisted across restarts (2.124.0): the
@@ -186,10 +192,19 @@ class HostManager {
     this._save();
   }
 
-  /** ssh argv for a host (shared by test/discovery/bootstrap/session spawn). */
-  sshArgs(h, { tty = false, reverse = null } = {}) {
+  /** ssh argv for a host (shared by test/discovery/bootstrap/session spawn).
+   *  multiplex (2.125.0): ControlMaster connection reuse for SHORT-LIVED
+   *  per-op ssh (discovery probes, remote-fs, rsync) — first op pays the
+   *  handshake, the next ~10min ride the persisted master (~1s → ~50ms).
+   *  NEVER set it on SESSION pipes: if a session's ssh became the master,
+   *  its death would kill every multiplexed connection with it (coupling
+   *  unrelated sessions), and long-lived pipes pin the master forever. */
+  sshArgs(h, { tty = false, reverse = null, multiplex = false } = {}) {
     const args = [...SSH_BASE_OPTS, '-p', String(h.port || 22)];
     if (h.keyPath) args.push('-i', h.keyPath, '-o', 'IdentitiesOnly=yes');
+    if (multiplex) {
+      args.push('-o', 'ControlMaster=auto', '-o', `ControlPath=${path.join(this._cmDir, '%C')}`, '-o', 'ControlPersist=600');
+    }
     if (tty) args.push('-t');
     // Reverse tunnel (remote 127.0.0.1:<rport> → this server): remote agent
     // tools (vibespace-status/-task) call VIBESPACE_API through it. Placed
@@ -205,6 +220,8 @@ class HostManager {
   sshCmd(h) {
     const args = [...SSH_BASE_OPTS, '-p', String(h.port || 22)];
     if (h.keyPath) args.push('-i', h.keyPath, '-o', 'IdentitiesOnly=yes');
+    // rsync transports are short-lived per-op — ride the shared master too
+    args.push('-o', 'ControlMaster=auto', '-o', `ControlPath=${path.join(this._cmDir, '%C')}`, '-o', 'ControlPersist=600');
     return 'ssh ' + args.map((a) => (/[\s"']/.test(a) ? JSON.stringify(a) : a)).join(' ');
   }
 
@@ -251,7 +268,7 @@ class HostManager {
 
   _ssh(h, remoteCmd, { timeoutMs = 15000, maxBuffer = 4 * 1024 * 1024, encoding } = {}) {
     return new Promise((resolve, reject) => {
-      execFile('ssh', [...this.sshArgs(h), '--', remoteCmd], { timeout: timeoutMs, maxBuffer, ...(encoding !== undefined ? { encoding } : {}) }, (err, stdout, stderr) => {
+      execFile('ssh', [...this.sshArgs(h, { multiplex: true }), '--', remoteCmd], { timeout: timeoutMs, maxBuffer, ...(encoding !== undefined ? { encoding } : {}) }, (err, stdout, stderr) => {
         if (err) return reject(new Error((stderr?.toString() || err.message || '').trim().slice(0, 300)));
         resolve(stdout);
       });

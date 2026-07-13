@@ -1718,4 +1718,6 @@ export default {
   "No session has claimed this item": "この項目をクレームしたセッションはありません",
   "Remove this claim": "このクレームを外す",
   "unclaimed": "未クレーム",
+  "host reconnecting": "ホスト再接続中",
+  "The connection to the remote host dropped — reconnecting. The session keeps running on the host; nothing is lost.": "リモートホストへの接続が切断されました — 再接続中です。セッションはホスト上で動き続けており、何も失われません。",
 };

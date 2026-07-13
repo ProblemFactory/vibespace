@@ -236,6 +236,9 @@ function startChild() {
         reconnectAttempts = 0;
         meta.remote = { state: 'connected', at: Date.now() };
         scheduleMeta();
+        // tell the server (→ status-bar chip clears); rides the same PTY line
+        // channel as claude output, filtered out before the normalizer
+        try { process.stdout.write(JSON.stringify({ type: '_remote_state', state: 'connected' }) + '\n'); } catch {}
       }
     }
     lineBufB = lineBufB.length ? Buffer.concat([lineBufB, chunk]) : chunk;
@@ -294,6 +297,7 @@ function scheduleReconnect() {
   reconnectAttempts++;
   const delay = [1000, 2000, 5000, 10000, 30000][Math.min(4, reconnectAttempts - 1)];
   log(`reconnect #${reconnectAttempts} in ${delay}ms (offset=${remoteOffset})`);
+  try { process.stdout.write(JSON.stringify({ type: '_remote_state', state: 'reconnecting', attempts: reconnectAttempts }) + '\n'); } catch {}
   reconnectTimer = setTimeout(startChild, delay);
 }
 

@@ -1714,4 +1714,6 @@ export default {
   "No session has claimed this item": "还没有会话认领此项",
   "Remove this claim": "移除该认领",
   "unclaimed": "无人认领",
+  "host reconnecting": "主机重连中",
+  "The connection to the remote host dropped — reconnecting. The session keeps running on the host; nothing is lost.": "与远程主机的连接中断——正在重连。会话仍在主机上运行，不会丢失任何内容。",
 };

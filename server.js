@@ -846,6 +846,15 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
           try {
             const msg = JSON.parse(line);
             if (msg.type === '_stdin_ack') { session._stdinAckReceived = true; continue; }
+            // Remote transport state from the chat-wrapper (2.125.0): the ssh
+            // pipe died and the wrapper is reconnecting to the host-side keeper
+            // (the REMOTE session is fine). Surfaced as a status-bar chip; the
+            // attach payload carries the current value for refreshes.
+            if (msg.type === '_remote_state') {
+              session._remoteState = { state: msg.state, attempts: msg.attempts || 0, at: Date.now() };
+              broadcastToSession(session, id, { type: 'remote-state', sessionId: id, ...session._remoteState });
+              continue;
+            }
 
             // Claude fork: adopt the new session id. --fork-session makes claude
             // mint a fresh id at startup — the very first system/hook_started
