@@ -1,5 +1,7 @@
 # Changelog
 
+## 2.119.0 — 2026-07-13
+- Agent context injection now stays INLINE: the prompt-context route hard-caps the final `additionalContext` at 9600 bytes. Binary-search established that Claude Code wraps a hook's additionalContext into a `<persisted-output>` 2KB-preview + on-disk file at EXACTLY 10240 bytes (10 KiB) — below that it's fully in the model's context, at/above it the agent must Read a file (the 2.68.0 "never learned the tools" failure mode). The cap tail-truncates the oldest activity-log lines at a UTF-8-safe newline boundary and appends a `vibespace-task show --full` pointer, so the tools-first head is always inline and nothing critical is lost. (Corrects the old "~2KB truncation" belief — there was never a 2KB cap.)
 ## 2.118.0 — 2026-07-13
 - Blank-window telemetry: the chat view now emits diagnostic events for the un-debuggable "session window blank" class — `chat-view-blank-with-content` (server reports the session has messages but nothing rendered), `chat-view-blank-persistent` (a deferred 2.5s check finds the DOM still empty despite claimed content), and `chat-attach-failed` (attach errored → read-only). Each carries NON-CONTENT debug context only (backend, local-vs-remote + host, read-only/streaming/ws-off flags, window bounds, session id — never message text), so a user's "it went blank" report arrives with enough to reproduce. Surfaces in the admin Investigate/breakdown by event name.
 ## 2.117.0 — 2026-07-13

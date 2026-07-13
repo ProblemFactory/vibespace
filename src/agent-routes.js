@@ -389,7 +389,25 @@ app.get('/api/agent/prompt-context', (req, res) => {
       const body = [extra, std].filter(Boolean).join('\n');
       if (body) outParts.push(`<vibespace-reminder>${body}</vibespace-reminder>`);
     }
-    res.json({ success: true, context: outParts.join('\n\n') });
+    // ── Stay INLINE (verified 2026-07-13 by binary search) ──
+    // Claude Code wraps a hook's additionalContext into a <persisted-output>
+    // 2KB-preview + on-disk file at EXACTLY 10240 bytes = 10 KiB (10000 inline,
+    // 10240 wrapped). Beyond that the agent must Read a file to see the full
+    // context — exactly the 2.68.0 "never learned the tools" failure. Cap with
+    // margin so the critical HEAD (tools/identity/objective/checklist — ordered
+    // first) is always in-context; only the TAIL (oldest activity-log lines) is
+    // dropped, and it's recoverable via `vibespace-task show --full`.
+    let ctx = outParts.join('\n\n');
+    const INLINE_CAP = 9600; // bytes; margin under the 10240 wrap threshold
+    if (Buffer.byteLength(ctx, 'utf-8') > INLINE_CAP) {
+      const ptr = `\n\n…[context trimmed to stay inline — run \`vibespace-task${injectGroups.length > 1 ? ' --group <id>' : ''} show --full\` for the rest]`;
+      const room = INLINE_CAP - Buffer.byteLength(ptr, 'utf-8');
+      let head = Buffer.from(ctx, 'utf-8').subarray(0, room).toString('utf-8');
+      const nl = head.lastIndexOf('\n'); // clean cut at a line boundary (also avoids a split multibyte char)
+      if (nl > room * 0.5) head = head.slice(0, nl);
+      ctx = head + ptr;
+    }
+    res.json({ success: true, context: ctx });
   } catch (e) { res.json({ success: true, context: '' }); }
 });
 // Stop-time bookkeeping nudge (2.79.0): fired by the Stop hook (claude) and
