@@ -23,6 +23,15 @@ const SSH_BASE_OPTS = [
   '-o', 'BatchMode=yes',
   '-o', 'ConnectTimeout=6',
   '-o', 'StrictHostKeyChecking=accept-new',
+  // Keepalive (2.124.0, remote-stability pass): silent NAT drops / network
+  // blips used to leave half-open ssh pipes lingering for the whole TCP
+  // timeout — sessions looked alive but were dead, and nothing could react.
+  // 15s app-level probes, 4 misses ⇒ ssh exits within ~60s so the reconnect
+  // layers (chat-wrapper remote retry / pty-wrapper retry) can act. Applies
+  // to EVERY ssh use (session spawns, discovery, remote-fs, rsync via sshCmd).
+  '-o', 'ServerAliveInterval=15',
+  '-o', 'ServerAliveCountMax=4',
+  '-o', 'TCPKeepAlive=yes',
 ];
 
 class HostManager {
@@ -32,8 +41,33 @@ class HostManager {
     this._sshDir = path.join(dataDir, 'ssh');
     this._state = { hosts: [] };
     this._discoveryCache = new Map(); // hostId -> {at, sessions}
+    // LAST-KNOWN discovery results, persisted across restarts (2.124.0): the
+    // sidebar shows remote sessions immediately after a reload / while a host
+    // is unreachable, marked stale, instead of an empty zone.
+    this._discFile = path.join(dataDir, 'remote-sessions-cache.json');
+    this._persistedDisc = {};
+    try { this._persistedDisc = JSON.parse(fs.readFileSync(this._discFile, 'utf-8')) || {}; } catch { }
+    this._discPersistTimer = null;
     this._load();
   }
+
+  _persistDiscovery(id, sessions) {
+    this._persistedDisc[id] = { at: Date.now(), sessions };
+    if (this._discPersistTimer) return;
+    this._discPersistTimer = setTimeout(() => {
+      this._discPersistTimer = null;
+      try {
+        const tmp = this._discFile + '.tmp';
+        fs.writeFileSync(tmp, JSON.stringify(this._persistedDisc));
+        fs.renameSync(tmp, this._discFile);
+      } catch { }
+    }, 2000);
+  }
+
+  /** Drop the in-memory discovery cache for a host so the NEXT sidebar poll
+   *  re-probes immediately — called after remote create/kill/exit so the list
+   *  doesn't stay wrong for the cache TTL (state-sync pass, 2.124.0). */
+  invalidateDiscovery(id) { this._discoveryCache.delete(id); }
 
   _load() {
     try { this._state = JSON.parse(fs.readFileSync(this._file, 'utf-8')); } catch { /* fresh */ }
@@ -350,7 +384,19 @@ class HostManager {
         printf 'T %s\\t' "$f"; tail -c 65536 -- "$f" 2>/dev/null | grep -o '"sessionId":"[^"]*"' | cut -d'"' -f4 | uniq | tail -n 8 | tr '\\n' ','; echo
       done
     `.trim();
-    const out = await this._ssh(h, script, { timeoutMs: 20000 });
+    let out;
+    try {
+      out = await this._ssh(h, script, { timeoutMs: 20000 });
+    } catch (e) {
+      // Host unreachable — serve LAST-KNOWN (expired memory cache, else the
+      // disk-persisted copy from a previous run) marked stale instead of
+      // failing the sidebar into an empty remote zone (2.124.0).
+      const last = this._discoveryCache.get(id) || this._persistedDisc[id];
+      if (last && Array.isArray(last.sessions)) {
+        return last.sessions.map((s) => ({ ...s, stale: true, staleAt: last.at }));
+      }
+      throw e;
+    }
     const locks = [];
     const jsonls = [];
     const heads = new Map(); // jsonl path -> first record (cwd source)
@@ -441,6 +487,7 @@ class HostManager {
       sessions.push({ sessionId: sid, cwd: head?.cwd || null, name: head?.name || null, projDir: path.basename(path.dirname(j.path)), status: 'remote-stopped', host: h.id, hostName: h.name, mtime: j.mtime });
     }
     this._discoveryCache.set(id, { at: Date.now(), sessions });
+    this._persistDiscovery(id, sessions);
     return sessions;
   }
 }

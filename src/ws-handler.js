@@ -9,6 +9,7 @@ const { listCodexThreads } = require('./codex-session-store');
 const { findCodexSessionJsonlPath, extractCodexThreadMeta } = require('./adapters/codex');
 const { cwdToProjectDir } = require('./session-store');
 const crypto = require('crypto');
+const { execFile } = require('child_process');
 
 function getSessionKey(session = {}) {
   const backend = session.backend || 'claude'; // fallback needed: called with API data too
@@ -296,7 +297,7 @@ function registerWsHandler(wss, ctx) {
             // UserPromptSubmit hooks deliver task context + status notices
             // (our LOCAL hook never fires on the remote). node available: the
             // remote agent CLIs are node apps, and we source nvm first.
-            const files = { 'vibespace-status': b64('vibespace-status'), 'vibespace-task': b64('vibespace-task'), 'vibespace-ask': b64('vibespace-ask'), 'vibespace-hook.mjs': b64('vibespace-hook.mjs'), 'vibespace-hook-register.mjs': b64('vibespace-hook-register.mjs') };
+            const files = { 'vibespace-status': b64('vibespace-status'), 'vibespace-task': b64('vibespace-task'), 'vibespace-ask': b64('vibespace-ask'), 'vibespace-hook.mjs': b64('vibespace-hook.mjs'), 'vibespace-hook-register.mjs': b64('vibespace-hook-register.mjs'), 'vibespace-remote-keeper': b64('vibespace-remote-keeper') };
             const haveAll = Object.values(files).every(Boolean);
             const writes = Object.entries(files).map(([n, b]) => `printf %s ${b} | base64 -d > "$HOME/.vibespace/bin/${n}";`).join(' ');
             const prelude = haveAll
@@ -421,8 +422,17 @@ function registerWsHandler(wss, ctx) {
             try { acctEnv = remoteAccountEnv(h); }
             catch (e) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'Failed to place the account key on ' + h.name + ': ' + e.message })); return; }
             // acctEnv = shell prefix assignment (see the terminal branch note)
+            // 2.124.0: claude no longer hangs directly off the ssh pipe — it
+            // runs DETACHED on the host under vibespace-remote-keeper (buffer
+            // file + unix-socket stdin), so an ssh drop kills only the pipe.
+            // __VS_OFFSET__ is substituted by the LOCAL chat-wrapper at every
+            // (re)spawn with the byte offset it has consumed — the keeper
+            // replays exactly the missed bytes. env pairs precede the keeper
+            // so claude (spawned by the keeper daemon) inherits them.
             const inner = ra.prelude + `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ` + acctEnv + `exec env `
-              + [...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq), rcmd, ...rargs.map(shq)].join(' ');
+              + [...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq)].join(' ')
+              + ` node "$HOME/.vibespace/bin/vibespace-remote-keeper" run ${shq(id)} __VS_OFFSET__ -- `
+              + [rcmd, ...rargs.map(shq)].join(' ');
             spawnCmd = 'ssh';
             spawnArgs = [...hosts.sshArgs(h, { reverse: ra.reverse }), '-T', '--', inner];
             spawnEnvPairs = [];
@@ -488,6 +498,10 @@ function registerWsHandler(wss, ctx) {
                   VIBESPACE_API: `http://127.0.0.1:${PORT}`,
                   VIBESPACE_SESSION_TOKEN: session.agentToken,
                   ...Object.fromEntries(Object.entries(sessionSpec.env || {}).map(([k, v]) => [k, v == null ? '' : String(v)])),
+                  // Remote resilience (2.124.0): tell the wrapper HOW to
+                  // survive ssh death — chat reconnects the keeper pipe with
+                  // an offset; terminal respawns ssh (remote dtach -A reattaches).
+                  ...(session.host ? (sessionMode === 'chat' ? { VIBESPACE_REMOTE_SID: id } : { VIBESPACE_REMOTE_RETRY: '1' }) : {}),
                 };
                 // Billing identity: the key rides the PROCESS-ENV channel only
                 // (dtach → wrapper `env: process.env` → CLI), never argv — argv
@@ -514,8 +528,13 @@ function registerWsHandler(wss, ctx) {
           activeSessions.set(id, session);
           attachedSessions.add(id);
           // Remote session: push its groups' context folders to the host now
-          // (the 60s timer + prompt-time trigger keep them fresh afterwards)
-          if (session.host) scheduleCtxSync?.(session, id);
+          // (the 60s timer + prompt-time trigger keep them fresh afterwards);
+          // bust the host's discovery cache so the sidebar's remote zone sees
+          // the new session on the next poll instead of after the TTL.
+          if (session.host) {
+            scheduleCtxSync?.(session, id);
+            setTimeout(() => { try { hosts?.invalidateDiscovery?.(session.host); } catch {} }, 3000);
+          }
 
           writeSessionMeta(sockName, {
             name: session.name,
@@ -1144,6 +1163,21 @@ function registerWsHandler(wss, ctx) {
             if (session._normalizer) session._normalizer.listeners.length = 0;
             session.subagentBuffers = null;
             session.subagentEmittedUuids = null;
+            // Remote CHAT sessions (2.124.0): claude runs DETACHED on the host
+            // under vibespace-remote-keeper — killing the local pipeline no
+            // longer kills it. Stop it remotely (best-effort, async) and bust
+            // the host's discovery cache so the sidebar updates on next poll.
+            if (session.host && hosts) {
+              try {
+                const h = hosts.get(session.host);
+                if (session.mode === 'chat') {
+                  execFile('ssh', [...hosts.sshArgs(h), '--', `node "$HOME/.vibespace/bin/vibespace-remote-keeper" stop ${data.sessionId} 2>/dev/null || true`],
+                    { timeout: 15000 }, () => { try { hosts.invalidateDiscovery(session.host); } catch {} });
+                } else {
+                  setTimeout(() => { try { hosts.invalidateDiscovery(session.host); } catch {} }, 2000);
+                }
+              } catch {}
+            }
             // 'exited' silently broke terminate-from-sidebar.
             broadcastToSession(session, data.sessionId, { type: 'exited', sessionId: data.sessionId, reason: 'terminated' });
             activeSessions.delete(data.sessionId);
