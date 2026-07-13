@@ -1685,4 +1685,6 @@ export default {
   "unclaimed": "无人认领",
   "host reconnecting": "主机重连中",
   "The connection to the remote host dropped — reconnecting. The session keeps running on the host; nothing is lost.": "与远程主机的连接中断——正在重连。会话仍在主机上运行，不会丢失任何内容。",
+  "Fetch this host’s quota (reads its own login token over ssh — one on-demand request)": "获取该主机的配额（经 ssh 读取其自身登录 token——单次按需请求）",
+  "No data yet — ⟳ reads the host’s own login quota on demand": "暂无数据——⟳ 按需读取该主机自身登录的配额",
 };

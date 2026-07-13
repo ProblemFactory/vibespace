@@ -137,6 +137,13 @@ export function openUsageWindow(app, opts = {}) {
   winInfo.onClose = () => { destroyCharts(root); prevClose?.(); };
   winInfo._reloadUsage = load;
   load();
+  // Remote hosts (2.127.0): kick an incremental ledger harvest over ssh on
+  // window open (server-throttled 15min/host); reload once if it added events
+  // so the host buckets/chips appear without a manual refresh.
+  fetchJson('/api/usage-stats/harvest-hosts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then((r) => {
+    const added = Object.values(r?.hosts || {}).reduce((s, x) => s + (x?.added || 0), 0);
+    if (added) load();
+  }).catch(() => {});
   return winInfo;
 }
 
