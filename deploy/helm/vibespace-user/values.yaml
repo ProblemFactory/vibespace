@@ -125,3 +125,14 @@ posthog:
 metrics:
   enabled: false
   port: 3457
+
+# Optional persistent ops log: server logs written to a shared (typically
+# CephFS path-scoped) directory that survives pod recreation, for fleet-admin
+# scanning. secretName points at a Secret with keys: mons/fsName/client/key/path
+# (e.g. minted per-instance by a ceph-mint service). Empty secretName with a
+# user set defaults to "u-<user>-opslog".
+opslog:
+  enabled: false
+  secretName: ""
+  dir: /var/opslog
+  keepDays: 30

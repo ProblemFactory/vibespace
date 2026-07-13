@@ -44,6 +44,10 @@ if (process.env.CLAUDECODE || process.env.CLAUDE_CODE_CHILD_SESSION) {
   console.warn(`[env] Server was started from inside a Claude Code session — stripped inherited session env (${stripped.join(', ')}) so spawned CLIs run top-level. Without this, spawned sessions never write transcripts and their conversations are LOST on resume.`);
 }
 
+// Optional persistent ops log (env-gated no-op without VIBESPACE_OPSLOG_DIR) —
+// installed EARLY so the console tee captures the whole boot narrative.
+try { require('./src/opslog').setupOpslog(require('./package.json').version); } catch (e) { console.warn('[opslog] init failed:', e.message); }
+
 // Auto-update: pull latest + rebuild on startup (skip with NO_AUTO_UPDATE=1)
 if (!process.env.NO_AUTO_UPDATE) {
   try {
