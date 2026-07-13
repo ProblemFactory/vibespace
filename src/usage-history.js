@@ -540,7 +540,7 @@ class UsageHistory {
 
   // The one flexible query the UI uses. groupBy is an array of dimension keys;
   // returns { totals, series(byDay), groups: { <dim>: [{key,...}] }, accounts }.
-  aggregate({ from = null, to = null, backend = null, accounts = null, pivots = null } = {}) {
+  aggregate({ from = null, to = null, backend = null, accounts = null, hostFilter = null, pivots = null } = {}) {
     const dims = { day: {}, model: {}, account: {}, billing: {}, project: {}, mode: {}, host: {}, hour: {}, weekday: {}, session: {} };
     const dimMeta = {}; // dim → key → {name,type,...} extra labels
     // pivots = [[dimA, dimB], …] — 2-D crosses for the dashboard's split-series
@@ -561,6 +561,9 @@ class UsageHistory {
       // several at once (e.g. a named sub + its global when the machine login
       // IS that account) — the whole dashboard then shows one account.
       if (accounts && !accounts.has(acctKey)) continue;
+      // Device dimension (2.128.0): 'local' = this machine, else a host id —
+      // a TOP-LEVEL filter over the whole view (hosts are devices, not accounts)
+      if (hostFilter && (ev.host || 'local') !== hostFilter) continue;
       this._add(totals, ev);
       if (firstTs == null || ev.ts < firstTs) firstTs = ev.ts;
       if (lastTs == null || ev.ts > lastTs) lastTs = ev.ts;
@@ -601,6 +604,11 @@ class UsageHistory {
           deleted: ev.acct ? !live : false,
         };
       }
+      // Device labels (2.128.0): the host dim's rows carry the host's display
+      // name so the window's Device chips need no extra lookup
+      if (!dimMeta.host) dimMeta.host = { local: { name: 'local' } };
+      const hostKey = ev.host || 'local';
+      if (!dimMeta.host[hostKey]) dimMeta.host[hostKey] = { name: ev.aname || hostKey };
       if (!dimMeta.model) dimMeta.model = {};
       if (!dimMeta.model[keyOf.model]) dimMeta.model[keyOf.model] = { be: ev.be || 'claude' };
       // Session names from session-meta (VibeSpace-created sessions carry one;
