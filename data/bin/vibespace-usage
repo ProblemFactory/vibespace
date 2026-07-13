@@ -76,6 +76,9 @@ function writeUsage(p) {
     fiveHour, sevenDay,
     scopedWeekly: (prev && Array.isArray(prev.scopedWeekly)) ? prev.scopedWeekly : [],
     ...(prev && typeof prev.scopedFetchedAt === 'number' ? { scopedFetchedAt: prev.scopedFetchedAt } : {}),
+    // Org identity (orgUuid/orgName/orgEmail) is captured by the server's
+    // on-demand refresh — preserve it the same way as scopedWeekly.
+    ...(prev && prev.orgUuid ? { orgUuid: prev.orgUuid, orgName: prev.orgName || '', ...(prev.orgEmail ? { orgEmail: prev.orgEmail } : {}) } : {}),
     overallStatus: (fiveHour.status === 'limited' || sevenDay.status === 'limited') ? 'limited' : 'allowed',
     fetchedAt: Date.now(), source: 'passive',
   };

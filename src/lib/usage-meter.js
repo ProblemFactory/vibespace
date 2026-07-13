@@ -166,7 +166,9 @@ export function installUsageMeter(App, ctx = {}) {
       if (defAcct) usageNote = t('Default account · refreshes when you run it in a terminal session');
     } else if (sel === '__global__') {
       rl = this._rateLimit;
-      claudeUsageLabel = t('CLI login') + (gl.email ? ` · ${gl.email}` : '');
+      // Prefer the token-derived identity (actualEmail, captured by ⟳) over
+      // ~/.claude.json's oauthAccount, which goes stale after a /login switch.
+      claudeUsageLabel = t('CLI login') + ((gl.actualEmail || gl.email) ? ` · ${gl.actualEmail || gl.email}` : '');
     } else {
       const a = claudeSubs.find(x => x.id === sel);
       rl = this._accountUsage?.[sel] || null;
@@ -320,6 +322,7 @@ export function installUsageMeter(App, ctx = {}) {
         </div>
       </div>${scopedSections.join('')}
       ${this._subSignedOut && showingGlobal ? `<div class="usage-warn">${t('⚠ Subscription signed out (a Console login replaced it) — pies show its last-known quota. API-billed sessions never appear here.')}</div>` : ''}
+      ${gl.identityMismatch && showingGlobal ? `<div class="usage-warn">${t('⚠ The CLI config file says {cfg}, but the login token actually belongs to {actual} — quotas shown are {actual}’s. Run /login in a terminal to refresh the recorded identity.', { cfg: gl.email || '?', actual: gl.actualEmail || '?' })}</div>` : ''}
       <div class="usage-updated">${t('Updated {ago}', { ago: agoText(rl.fetchedAt) })}</div>`;
       const odMode = this.settings.get('accounts.onDemandQuotaRefresh') || 'manual';
       const refreshBtn = odMode === 'off' ? '' : `<button class="usage-refresh-btn" title="${escHtml(t('Refresh from Anthropic now (also fetches model-scoped limits like Fable) — user-initiated, min 60s apart'))}">⟳</button>`;
