@@ -1079,6 +1079,7 @@ function registerWsHandler(wss, ctx) {
               ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, mode: 'chat',
                 messages, totalCount, chatStatus, isStreaming, streamingLabel, taskState: sm.taskState(), turnMap, pendingPermissions: pendingPerms,
                 normEpoch: session._normEpoch || 0,
+                remoteState: session._remoteState || null,
                 goal: session._goal || null, goalElapsed: session._goalElapsed || 0, goalStatus: session._goalStatus || null }));
             } else {
               ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, buffer: session.buffer || '' }));

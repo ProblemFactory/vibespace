@@ -382,6 +382,9 @@ class ChatView {
         this._onGoalUpdated(msg.goal, msg.goalElapsed);
         if (msg.goalStatus) this._statusBar.setGoalStatus(msg.goalStatus);
         if (msg.statusMsg) this._renderers.appendSystem(msg.statusMsg);
+      } else if (msg.type === 'remote-state' && msg.sessionId === sessionId) {
+        // remote transport: ssh pipe reconnecting to the host-side keeper
+        this._statusBar?.setRemoteState(msg);
       } else if (msg.type === 'subagent-message' && msg.sessionId === sessionId) {
         this._onSubagentMessage(msg.parentToolUseId, msg.message);
       } else if (msg.type === 'exited' && msg.sessionId === sessionId) {
@@ -399,6 +402,7 @@ class ChatView {
         // attach, reattach) — _reattach compares against it to detect a
         // server restart (ID-space reset).
         if (msg.normEpoch) this._normEpoch = msg.normEpoch;
+        if (msg.remoteState) this._statusBar?.setRemoteState(msg.remoteState);
       } else if (msg.type === 'error' && msg.sessionId === sessionId) {
         // Attach failed (e.g. stale serverId replayed from a saved layout) —
         // surface it instead of waiting forever on a blank window

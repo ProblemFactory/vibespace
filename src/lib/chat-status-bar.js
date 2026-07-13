@@ -81,6 +81,17 @@ export class ChatStatusBar {
   /** Set the container for popup positioning (the .chat-view element) */
   set popupContainer(el) { this._popupContainer = el; }
 
+  /** Remote transport state (2.125.0): the ssh pipe to the host-side keeper
+      is reconnecting — the REMOTE session itself is fine, nothing is lost.
+      Amber chip while reconnecting; cleared the moment bytes flow again. */
+  setRemoteState(rs) {
+    const key = rs && rs.state === 'reconnecting' ? `r${rs.attempts || 0}` : '';
+    if (key === this._remoteKey) return;
+    this._remoteKey = key;
+    this._remoteState = key ? rs : null;
+    this.render();
+  }
+
   /** Billing identity chip (mobile — windows have no title bar there, so the
       title-bar badge's click-to-switch has no home; this is its stand-in). */
   setBilling(auth, onSwitch) {
@@ -289,6 +300,12 @@ export class ChatStatusBar {
       parts.push(`<span class="chat-status-goal chat-status-clickable" title="${escHtml(this._goal + statusHint)}">${UI_ICONS.goal}${statusIcon ? ' ' + statusIcon : ''} <span class="chat-goal-timer">${elapsed}</span> ${escHtml(shortGoal)}</span>`);
     } else {
       parts.push(`<span class="chat-status-goal chat-status-goal-empty chat-status-clickable" title="${escHtml(t('Set a goal \u2014 the agent keeps working until the condition is met'))}">${UI_ICONS.goal}</span>`);
+    }
+
+    // Remote reconnect chip — amber, only while the ssh pipe is down
+    if (this._remoteState) {
+      const n = this._remoteState.attempts || 0;
+      parts.push(`<span class="chat-status-remote" title="${escHtml(t('The connection to the remote host dropped — reconnecting. The session keeps running on the host; nothing is lost.'))}">⟳ ${escHtml(t('host reconnecting'))}${n > 1 ? ` (${n})` : ''}…</span>`);
     }
 
     // Billing identity chip — only rendered when fed (app gates it to mobile)

@@ -26,6 +26,8 @@
 /* Goal indicator in status bar */
 .chat-status-goal { color: var(--accent); font-weight: 600; }
 .chat-status-goal-empty { opacity: 0.45; filter: grayscale(0.6); }
+.chat-status-remote { color: var(--yellow, #e5c07b); background: color-mix(in srgb, var(--yellow, #e5c07b) 12%, transparent); border-radius: 999px; padding: 0 6px; animation: chat-remote-pulse 1.6s ease-in-out infinite; }
+@keyframes chat-remote-pulse { 50% { opacity: 0.55; } }
 .chat-status-goal-empty:hover { opacity: 1; filter: none; }
 .chat-goal-timer { font-variant-numeric: tabular-nums; }
 .chat-status-bar {
