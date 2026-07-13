@@ -26,7 +26,7 @@ const ICON = {
  * @param {HTMLElement} container - DOM container for groups
  * @param {object|string} sessionRef
  * @param {boolean} clickToCopy
- * @param {object} state - sidebar instance (for _getSessionTasks, _showTaskChecklistPopover, _taskBind, _taskUnbind)
+ * @param {object} state - sidebar instance (for _getSessionTasks, _showTaskBindPopover, _taskBind, _taskUnbind)
  */
 function renderDetailGroups(container, sessionRef, clickToCopy, state) {
   container.innerHTML = '';
@@ -65,7 +65,7 @@ function renderDetailGroups(container, sessionRef, clickToCopy, state) {
   btn.onclick = (e) => {
     e.stopPropagation();
     const taskIds = new Set(state._getSessionTasks(sessionRef).map(t => t.id));
-    state._showTaskChecklistPopover(btn,
+    state._showTaskBindPopover(btn,
       (task) => taskIds.has(task.id),
       (task, checked) => { if (checked) state._taskBind(task.id, sessionRef); else state._taskUnbind(task.id, sessionRef); });
   };

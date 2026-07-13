@@ -49,26 +49,26 @@ const check = (name, cond, extra) => {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const g1 = tasks.create({ title: 'alpha', objective: 'obj one', folders: [session.cwd] });
-tasks.update(g1.id, { plan: [{ text: 'step one', done: false }] });
 
 const c1 = call();
-check('first prompt → full context', c1.includes('<vibespace-task-context>') && c1.includes('step one'), c1.slice(0, 200));
+check('first prompt → full context', c1.includes('<vibespace-task-context>') && c1.includes('obj one'), c1.slice(0, 200));
+check('full context has no checklist teaching (feature removed)', !/plan-check|Checklist/.test(c1), c1);
 const c2 = call();
 check('no change → reminder only', !c2.includes('task-context') && !c2.includes('task-update') && c2.includes('vibespace-reminder'), c2);
 
 await sleep(3);
 tasks.addProgress(g1.id, { note: 'made progress here', session: 'claude:sess1' });
-tasks.update(g1.id, { plan: [{ text: 'step one', done: true, by: 'claude:sess1' }, { text: 'step two', done: false }] });
+tasks.update(g1.id, { objective: 'obj one, refined' });
 const c3 = call();
 check('change → diff only (no full re-inject)', c3.includes('<vibespace-task-update>') && !c3.includes('<vibespace-task-context>'), c3.slice(0, 300));
-check('diff carries the actual deltas', c3.includes('Checklist CHECKED: step one') && c3.includes('Checklist NEW: [ ] step two') && c3.includes('made progress here'), c3);
+check('diff carries the actual deltas', c3.includes('Objective UPDATED to:') && c3.includes('obj one, refined') && c3.includes('made progress here'), c3);
 check('diff omits the tools teaching (already known)', !c3.includes('Reporting back — three CLIs'), c3);
 const c4 = call();
 check('after diff → quiet again', !c4.includes('task-update') && !c4.includes('task-context'), c4);
 
 // no-op edit (same objective re-saved) bumps contentUpdatedAt but changes nothing visible
 await sleep(3);
-tasks.update(g1.id, { objective: 'obj one' });
+tasks.update(g1.id, { objective: 'obj one, refined' });
 const c5 = call();
 check('no-op edit → nothing injected (old code re-sent everything)', !c5.includes('task-update') && !c5.includes('task-context'), c5);
 
@@ -100,9 +100,9 @@ activeSessions.set('sess1', s2);
 const c8 = call();
 check('fresh multi-group first prompt → single layered context', (c8.match(/<vibespace-task-context>/g) || []).length === 1 && c8.includes('2 VibeSpace Task Groups'), c8.slice(0, 300));
 await sleep(3);
-tasks.update(g2.id, { plan: [{ text: 'beta step', done: false }] });
+tasks.update(g2.id, { objective: 'obj two, refined' });
 const c9 = call();
-check('then a beta change → beta diff only', c9.includes('<vibespace-task-update>') && c9.includes('"beta"') && c9.includes('Checklist NEW: [ ] beta step') && !c9.includes('<vibespace-task-context>'), c9.slice(0, 300));
+check('then a beta change → beta diff only', c9.includes('<vibespace-task-update>') && c9.includes('"beta"') && c9.includes('obj two, refined') && !c9.includes('<vibespace-task-context>'), c9.slice(0, 300));
 
 // BOTH groups change on one turn → ONE combined block whose HEADER enumerates
 // every changed group (user directive: stacked per-group blocks + the ~2KB
@@ -120,9 +120,10 @@ check('per-group sections carry the deltas', c9b.includes(`## "alpha" (${g1.id})
 // the tail, and the enumeration header still names both groups
 await sleep(3);
 for (const g of [g1, g2]) {
-  const plan = tasks.get(g.id).plan.map((p) => ({ ...p }));
-  for (let i = 0; i < 40; i++) plan.push({ text: `${g.id} flood ${i} ` + 'q'.repeat(300), done: false });
-  tasks.update(g.id, { plan });
+  // multi-line objective renders its full ~1800B budget (a single huge line is
+  // cut to ~900B); 2 × (objective + activity) ≈ 8KB > the 6.5KB combined cap
+  tasks.update(g.id, { objective: Array.from({ length: 14 }, (_, i) => `${g.id} flood line ${i} ` + 'q'.repeat(140)).join('\n') });
+  for (let i = 0; i < 12; i++) tasks.addProgress(g.id, { note: `${g.id} flood note ${i} ` + 'q'.repeat(300) });
 }
 const c10 = call();
 check('flooded combined block stays bounded (≤ ~6.6KB)', Buffer.byteLength(c10, 'utf-8') <= 6600, `bytes=${Buffer.byteLength(c10, 'utf-8')}`);

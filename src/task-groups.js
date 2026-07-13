@@ -4,7 +4,7 @@
  *
  * A Task Group is a TAG above sessions and a SUPERSET of the old user groups:
  * kind:'group' entries are exactly the old groups, kind:'task' adds
- * objective/checklist/activity/attention. `data/task-groups.json` (migrated
+ * objective/activity/attention. `data/task-groups.json` (migrated
  * once from the legacy data/tasks.json) is AUTHORITATIVE for everything the
  * board renders — the UI never parses agent-authored text (agents are
  * non-deterministic; see §3.2 of the design).
@@ -17,10 +17,15 @@
  *   folder (injection source).
  * - Atomic writes + tasks-updated broadcast via onChange, same manager
  *   pattern as hosts.js/mounts.js. Export/import for config transfer.
- * NOTE: internal identifiers still say `task`/`plan`/`progress` in places — the
- * user-facing concept is Task Group / Checklist / Activity log; wire names
- * (JSON fields, API paths, the `tasks-updated` event, CLI commands) are kept
- * for data + contract compatibility.
+ * NOTE: internal identifiers still say `task`/`progress` in places — the
+ * user-facing concept is Task Group / Activity log; wire names (JSON fields,
+ * API paths, the `tasks-updated` event, CLI commands) are kept for data +
+ * contract compatibility.
+ * CHECKLIST REMOVED (2.121.0, user decision): a group-level checklist/backlog
+ * never made sense — agents don't care about other agents' backlogs; work
+ * items live at the SESSION level (the agent's own native todo list, surfaced
+ * as the card's Steps). Stored `plan` arrays are kept DORMANT in the JSON
+ * (never rendered, never written) so nothing is destroyed.
  */
 
 const fs = require('fs');
@@ -31,7 +36,7 @@ const crypto = require('crypto');
 // `archived` flag. Task STATUS lives on the session (session-status.js STATES,
 // which now includes `done`).
 const KINDS = ['task', 'group'];
-const CAPS = { title: 120, objective: 20000, note: 2000, detail: 6000, planItem: 500, planItems: 200, reason: 500 };
+const CAPS = { title: 120, objective: 20000, note: 2000, detail: 6000, reason: 500 };
 
 function slugify(title) {
   return String(title || '')
@@ -121,7 +126,7 @@ class TaskGroupManager {
   // cap = how many Activity-log entries to include (TASK.md keeps 50).
   // cap = 0 omits the log entirely (renderContext appends its own budgeted log
   // section LAST instead — see the truncation note there).
-  renderTaskMd(t, cap = 50, { planDetail = cap > 0 } = {}) {
+  renderTaskMd(t, cap = 50) {
     const ts = (ms) => this._tsShort(ms);
     const lines = [
       `# ${t.title}`,
@@ -132,15 +137,6 @@ class TaskGroupManager {
     const folders = this._sanitizeFolders(t.folders);
     if (folders.length) lines.push(`- Auto-include folders: ${folders.map((f) => f.path + (f.recursive ? '/**' : '')).join(', ')}`);
     lines.push('', '## Objective', '', t.objective?.trim() || '_(not set yet)_');
-    if (t.plan?.length) {
-      lines.push('', '## Checklist', '');
-      // Injection (cap 0) stays dense: items mark detail with † (read via
-      // `vibespace-task show --full`); TASK.md carries it as a blockquote.
-      for (const p of t.plan) {
-        lines.push(`- [${p.done ? 'x' : ' '}] ${p.text}${p.detail && !planDetail ? ' †' : ''}`);
-        if (planDetail && p.detail) for (const dl of p.detail.split('\n')) lines.push(`  > ${dl}`);
-      }
-    }
     const total = (t.progress || []).length;
     const prog = cap > 0 ? (t.progress || []).slice(-cap) : [];
     if (prog.length) {
@@ -224,7 +220,7 @@ class TaskGroupManager {
   // additionalContext to disk and hands the agent only a ~2KB HEAD preview.
   // The old layout put a ~24KB Activity log FIRST and the tool rules LAST — so
   // agents saw a pure log preview, never learned vibespace-task/-status/-ask,
-  // and simply didn't use them. Now: identity/objective/checklist → TOOL RULES
+  // and simply didn't use them. Now: identity/objective → TOOL RULES
   // → context folder → Activity log LAST, with the log byte-budgeted so the
   // whole payload stays inline (< ~8KB) in the common case.
   // Newest-first Activity-log picker. THREE layers of truncation so one very
@@ -280,7 +276,7 @@ class TaskGroupManager {
       `\`\`\``,
       `vibespace-task ${g}progress "one-line summary" --detail "specifics other agents may need"`,
       `\`\`\``,
-      `(also \`vibespace-task ${g}plan-check <item>\` when you complete a backlog item; \`${g ? 'vibespace-task ' + g.trim() + ' ' : 'vibespace-task '}show --full\` to re-read)`,
+      `(\`${g ? 'vibespace-task ' + g.trim() + ' ' : 'vibespace-task '}show --full\` re-reads the group's full state; keep your own working steps in your session todo list, not here)`,
       '',
       "Your session's live state on the board — set it the MOMENT it changes. Waiting states REQUIRE both flags:",
       `\`\`\``,
@@ -304,7 +300,7 @@ class TaskGroupManager {
       `This session belongs to VibeSpace Task Group "${t.title}" (${t.id}). The state below is shared across ALL sessions of this group.`,
       this._persistRescueLine(),
       '',
-      // cap=0: meta/objective/checklist only — the log is appended LAST below.
+      // cap=0: meta/objective only — the log is appended LAST below.
       this.renderTaskMd(t, 0).replace(/\n---\n[\s\S]*$/, '').trim(),
     ];
     // ── How to report back — self-documenting + scoped + enum-disambiguated ──
@@ -353,7 +349,7 @@ class TaskGroupManager {
 
   // ── Diff-based UPDATE injection (2.113.0, user request) ──
   // A mid-session group change used to re-inject the ENTIRE group context
-  // (identity + checklist + tools teaching + folder index + activity log) —
+  // (identity + tools teaching + folder index + activity log) —
   // several KB per member agent per change, mostly repeating what the agent
   // already knows. Instead agent-routes keeps a compact per-session SNAPSHOT
   // of what each group looked like at last delivery (next to _groupSeenAt)
@@ -365,7 +361,7 @@ class TaskGroupManager {
 
   // What the injected context RENDERS, compactly — the diff can only ever be
   // as good as this coverage, so it mirrors exactly the fields that bump
-  // contentUpdatedAt (title/objective/plan/contextDir) + progress. The
+  // contentUpdatedAt (title/objective/contextDir) + progress. The
   // contextDir FILE state is deliberately absent: agent-routes already keeps
   // the folder signature separately (_ctxSig) and passes old/new to the diff.
   snapshotForDiff(id) {
@@ -375,7 +371,6 @@ class TaskGroupManager {
       title: t.title,
       objHash: this._h(t.objective || ''),
       contextDir: t.contextDir || null,
-      plan: (t.plan || []).map((p) => ({ text: p.text, done: !!p.done, d: p.detail ? this._h(p.detail) : '' })),
       // New activity = entries with at > this. Two writes inside the SAME ms
       // split by an injection in between could drop one line from a diff —
       // accepted (unreachable in practice; recoverable via show --full).
@@ -385,7 +380,7 @@ class TaskGroupManager {
 
   // Compute one group's delta between snap (what the session last saw) and its
   // current state → { lines, bits } (bits = phrase-level summary fragments for
-  // enumeration headers, e.g. ['2 checklist changes', '3 new activity']).
+  // enumeration headers, e.g. ['objective updated', '3 new activity']).
   // lines EMPTY when nothing the injection renders actually changed (e.g. an
   // objective re-saved with identical text — the old behavior re-injected the
   // whole group for that; caller skips injection, still advances markers).
@@ -394,11 +389,11 @@ class TaskGroupManager {
   // file index + shared-folder conventions only the full context teaches; a
   // one-line "folder is now X" left pre-existing files permanently invisible,
   // review-caught) → caller falls back to full delivery. Line order mirrors
-  // renderContext (identity → objective → checklist → folder → activity LAST)
+  // renderContext (identity → objective → folder → activity LAST)
   // so tail-first truncation drops the safest section first.
   diffChanges(id, snap, { gid = '', ctxBase = null, oldSig = '', newSig = '' } = {}) {
     const t = this.get(id);
-    if (!snap || typeof snap !== 'object' || !Array.isArray(snap.plan)) return null;
+    if (!snap || typeof snap !== 'object' || typeof snap.objHash !== 'string') return null;
     if ((snap.contextDir || null) !== (t.contextDir || null)) return null;
     const ch = [];
     const bits = []; // summary fragments, same order as the sections
@@ -418,37 +413,6 @@ class TaskGroupManager {
         if (cut) ch.push(`  > … _(truncated — \`vibespace-task ${gid}show --full\` for the rest)_`);
       }
     }
-    // Checklist: items have no id, so match by text — OCCURRENCE-INDEXED (the
-    // k-th "deploy" pairs with the k-th "deploy"; duplicate texts are legal,
-    // plan-add never dedups). A naive first-match Map made a check on the 2nd
-    // duplicate silently vanish OR emit a phantom CHECKED line in every later
-    // diff forever (review-caught, reproduced). An edited text still reads as
-    // REMOVED + NEW — honest enough.
-    const occKey = (counter, text) => { const n = counter.get(text) || 0; counter.set(text, n + 1); return `${n}\u0000${text}`; };
-    const occOld = new Map();
-    { const c = new Map(); for (const p of snap.plan) occOld.set(occKey(c, p.text), p); }
-    const matchedOld = new Set();
-    const planCh = [];
-    { const c = new Map();
-      for (const p of t.plan || []) {
-        const k = occKey(c, p.text);
-        const o = occOld.get(k);
-        if (!o) { planCh.push(`- Checklist NEW: [${p.done ? 'x' : ' '}] ${p.text}${p.detail ? ' †' : ''}${p.addedBy ? `  _(added by ${p.addedBy})_` : ''}`); continue; }
-        matchedOld.add(k);
-        if (!o.done && p.done) planCh.push(`- Checklist CHECKED: ${p.text}${p.by ? `  _(by ${p.by})_` : ''}`);
-        else if (o.done && !p.done) planCh.push(`- Checklist UNCHECKED: ${p.text}`);
-        if ((p.detail ? this._h(p.detail) : '') !== (o.d || '')) planCh.push(`- Checklist item detail updated: ${p.text}  _(† \`vibespace-task ${gid}show --full\`)_`);
-      }
-    }
-    for (const [k, o] of occOld) if (!matchedOld.has(k)) planCh.push(`- Checklist REMOVED: ${o.text}`);
-    const nPlanChanges = planCh.length;
-    if (planCh.length > 20) {
-      const extra = planCh.length - 20;
-      planCh.length = 20;
-      planCh.push(`- … +${extra} more checklist changes  _(\`vibespace-task ${gid}show --full\`)_`);
-    }
-    ch.push(...planCh);
-    if (nPlanChanges) bits.push(`${nPlanChanges} checklist change${nPlanChanges > 1 ? 's' : ''}`);
     if (t.contextDir && oldSig !== newSig) {
       // Signature format is path:size:mtime joined by | (contextDirSignature;
       // path has % and | escaped there) — peel size:mtime off the END so paths
@@ -681,7 +645,6 @@ class TaskGroupManager {
         archived: false,
         attention: null,
         objective: '',
-        plan: [],
         progress: [],
         sessions: sanitizeStrArray(groups[name], 2000),
         folders: sanitizeStrArray(folders[name], 100),
@@ -709,7 +672,7 @@ class TaskGroupManager {
 
   list() {
     return Object.values(this._state.tasks)
-      .map((t) => ({ ...t, plan: [...(t.plan || [])], progress: [...(t.progress || [])], sessions: [...(t.sessions || [])], folders: this._sanitizeFolders(t.folders) }))
+      .map((t) => ({ ...t, plan: undefined, progress: [...(t.progress || [])], sessions: [...(t.sessions || [])], folders: this._sanitizeFolders(t.folders) }))
       .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
   }
 
@@ -731,7 +694,6 @@ class TaskGroupManager {
       archived: !!archived, // a Task Group (岗位) has NO status — persistent role; only archived
       attention: null,
       objective: typeof objective === 'string' ? objective.slice(0, CAPS.objective) : '',
-      plan: [],
       progress: [],
       sessions: sanitizeStrArray(sessions, 2000),
       folders: this._sanitizeFolders(folders),
@@ -803,24 +765,8 @@ class TaskGroupManager {
     if (patch.contextDir !== undefined) t.contextDir = this._sanitizeContextDir(patch.contextDir);
     if (patch.color !== undefined) t.color = this._sanitizeColor(patch.color);
     if (patch.injectContext !== undefined) t.injectContext = !!patch.injectContext;
-    if (patch.plan !== undefined) {
-      if (!Array.isArray(patch.plan)) throw new Error('plan must be an array');
-      t.plan = patch.plan.slice(0, CAPS.planItems).map((it) => ({
-        text: String(it?.text || '').slice(0, CAPS.planItem),
-        done: !!it?.done,
-        // P5: loose, informational link — which session ticked this step
-        // (recorded by vibespace-task plan-check; never enforced).
-        ...(it?.by ? { by: String(it.by).slice(0, 120) } : {}),
-        // 2.86.0: optional full context per item (acceptance criteria, paths,
-        // background) — same summary+detail split as Activity entries.
-        ...(typeof it?.detail === 'string' && it.detail.trim() ? { detail: it.detail.trim().slice(0, CAPS.detail) } : {}),
-        // 2.85.0 attribution: who queued the item / when, when it was ticked.
-        // ('user' = added from the UI.) Older items simply lack these.
-        ...(it?.addedBy ? { addedBy: String(it.addedBy).slice(0, 120) } : {}),
-        ...(Number(it?.addedAt) ? { addedAt: Number(it.addedAt) } : {}),
-        ...(Number(it?.doneAt) ? { doneAt: Number(it.doneAt) } : {}),
-      })).filter((it) => it.text);
-    }
+    // patch.plan is deliberately IGNORED (checklist removed 2.121.0) — an old
+    // client bundle may still send it; a stored dormant t.plan stays untouched.
     if (patch.attention !== undefined) {
       t.attention = patch.attention
         ? { reason: String(patch.attention.reason || '').slice(0, CAPS.reason), since: Number(patch.attention.since) || Date.now() }
@@ -828,11 +774,11 @@ class TaskGroupManager {
     }
     t.updatedAt = Date.now();
     // contentUpdatedAt gates AGENT re-injection: only what the injected context
-    // actually renders (title/objective/checklist/contextDir) counts. Cosmetic
+    // actually renders (title/objective/contextDir) counts. Cosmetic
     // patches (color, injectContext, archived, kind, folders, binds) bump only
     // updatedAt — they used to trigger a full "was UPDATED" re-injection to
     // every member agent.
-    if (['title', 'objective', 'plan', 'contextDir'].some((k) => patch[k] !== undefined)) {
+    if (['title', 'objective', 'contextDir'].some((k) => patch[k] !== undefined)) {
       t.contentUpdatedAt = t.updatedAt;
     }
     this._save();
@@ -918,13 +864,6 @@ class TaskGroupManager {
       '',
       (t.objective && t.objective.trim()) || '_(none)_',
     ];
-    if (t.plan?.length) {
-      body.push('', '## Checklist', '');
-      for (const p of t.plan) {
-        body.push(`- [${p.done ? 'x' : ' '}] ${p.text}`);
-        if (p.detail) for (const dl of p.detail.split('\n')) body.push(`  > ${dl}`);
-      }
-    }
     const prog = (t.progress || []).slice(-30);
     if (prog.length) {
       body.push('', '## Activity log', '');
@@ -970,26 +909,14 @@ class TaskGroupManager {
     if (typeof id !== 'string' || !/^T-[\w-]{1,60}$/.test(id)) throw new Error('missing/invalid vibespace_task id in frontmatter');
     const body = text.slice(m[0].length);
     // Objective = text under "## Objective". Stop only at a KNOWN next section
-    // (Plan/Progress) or EOF, so an objective that itself contains a markdown
-    // heading (e.g. "## Constraints") is preserved, not truncated.
+    // (legacy Plan/Checklist headings still recognized as STOPS so an old
+    // file's checklist text is never absorbed into the objective — the
+    // checklist content itself is dropped on import, feature removed 2.121.0)
+    // or EOF, so an objective that itself contains a markdown heading
+    // (e.g. "## Constraints") is preserved, not truncated.
     let objective = '';
     const objM = body.match(/##\s+Objective\s*\n([\s\S]*?)(?=\n##\s+(?:Plan|Checklist|Progress|Activity log)\b|$)/i);
     if (objM) { objective = objM[1].trim(); if (objective === '_(none)_') objective = ''; }
-    // Checklist = checkbox lines under "## Checklist" (or legacy "## Plan")
-    const plan = [];
-    const planM = body.match(/##\s+(?:Checklist|Plan)\s*\n([\s\S]*?)(?=\n##\s+(?:Progress|Activity log)\b|$)/i);
-    if (planM) {
-      for (const line of planM[1].split('\n')) {
-        const pm = line.match(/^\s*-\s*\[([ xX])\]\s+(.+)$/);
-        if (pm) { plan.push({ text: pm[2].trim().slice(0, CAPS.planItem), done: pm[1].toLowerCase() === 'x' }); continue; }
-        // blockquote continuation = the preceding item's detail (round-trip of export)
-        const dm = line.match(/^\s*>\s?(.*)$/);
-        if (dm && plan.length) {
-          const it = plan[plan.length - 1];
-          it.detail = ((it.detail ? it.detail + '\n' : '') + dm[1]).slice(0, CAPS.detail);
-        }
-      }
-    }
     // Progress = "- <ISO date> <note> _(session)_" lines under "## Progress".
     // Round-trip fidelity: on a machine without the task yet, the FILE is the
     // only source of the progress log, so parse it rather than dropping it.
@@ -1016,7 +943,8 @@ class TaskGroupManager {
       archived: existing?.archived ?? (String(fm.archived) === 'true'),
       attention: existing?.attention || null,
       objective: objective.slice(0, CAPS.objective),
-      plan: plan.slice(0, CAPS.planItems),
+      // a dormant stored checklist survives re-import untouched
+      ...(existing?.plan?.length ? { plan: existing.plan } : {}),
       // prefer the store's live log if the task already exists (it's fuller —
       // the file caps at the last 30); otherwise seed from the file.
       progress: (existing?.progress?.length ? existing.progress : parsedProgress).slice(-500),
@@ -1049,7 +977,9 @@ class TaskGroupManager {
         attention: raw.attention && typeof raw.attention === 'object'
           ? { reason: String(raw.attention.reason || '').slice(0, CAPS.reason), since: Number(raw.attention.since) || now } : null,
         objective: typeof raw.objective === 'string' ? raw.objective.slice(0, CAPS.objective) : '',
-        plan: Array.isArray(raw.plan) ? raw.plan.slice(0, CAPS.planItems).map((it) => ({ text: String(it?.text || '').slice(0, CAPS.planItem), done: !!it?.done })).filter((it) => it.text) : [],
+        // dormant passthrough: a config bundle from an older instance may carry
+        // a checklist — keep the data (never rendered), don't destroy it
+        ...(Array.isArray(raw.plan) && raw.plan.length ? { plan: raw.plan.slice(0, 200) } : {}),
         progress: Array.isArray(raw.progress) ? raw.progress.slice(-500).map((p) => ({ at: Number(p?.at) || now, note: String(p?.note || '').slice(0, CAPS.note), session: typeof p?.session === 'string' ? p.session.slice(0, 200) : null })) : [],
         sessions: sanitizeStrArray(raw.sessions, 2000),
         folders: this._sanitizeFolders(raw.folders),

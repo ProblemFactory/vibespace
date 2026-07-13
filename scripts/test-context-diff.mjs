@@ -23,7 +23,6 @@ function check(name, cond, extra) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const t = mgr.create({ title: '工作', objective: 'Keep the fleet healthy.' });
-mgr.update(t.id, { plan: [ { text: 'ship the dashboard', done: false }, { text: 'rotate the keys', done: false, detail: 'all four hosts' } ] });
 mgr.addProgress(t.id, { note: 'baseline entry', session: 'claude:aaa' });
 
 console.log('— no change —');
@@ -34,28 +33,20 @@ console.log('— no change —');
   check('unusable snapshot → null (fall back to full)', mgr.renderContextDiff(t.id, { bogus: true }, {}) === null);
 }
 
-console.log('— checklist changes —');
+console.log('— removed checklist stays out —');
 {
+  // checklist removed 2.121.0: a patch carrying `plan` must be IGNORED (old
+  // client bundles may still send it) and never appear in any rendering
   const snap = mgr.snapshotForDiff(t.id);
-  const plan = mgr.get(t.id).plan.map((p) => ({ ...p }));
-  plan.push({ text: 'write the runbook', done: false, addedBy: 'user', addedAt: Date.now() });
-  plan[0].done = true; plan[0].by = 'claude:bbb'; plan[0].doneAt = Date.now();
-  plan[1].detail = 'all five hosts'; // detail edit
-  mgr.update(t.id, { plan });
+  const contentBefore = mgr.get(t.id).contentUpdatedAt;
+  await sleep(3);
+  mgr.update(t.id, { plan: [ { text: 'ghost item', done: false } ] });
   const d = mgr.renderContextDiff(t.id, snap, {});
-  check('NEW item listed', d.includes('Checklist NEW: [ ] write the runbook') && d.includes('added by user'), d);
-  check('CHECKED with by', d.includes('Checklist CHECKED: ship the dashboard') && d.includes('(by claude:bbb)'), d);
-  check('detail edit flagged', d.includes('Checklist item detail updated: rotate the keys'), d);
-  check('wrapped in vibespace-task-update tag', d.startsWith('<vibespace-task-update>') && d.trimEnd().endsWith('</vibespace-task-update>'), d.slice(0, 80));
-  check('unchanged sections absent (no objective/activity noise)', !d.includes('Objective') && !d.includes('New activity'), d);
-
-  const snap2 = mgr.snapshotForDiff(t.id);
-  const plan2 = mgr.get(t.id).plan.map((p) => ({ ...p })).filter((p) => p.text !== 'rotate the keys');
-  plan2[0].done = false; delete plan2[0].by;
-  mgr.update(t.id, { plan: plan2 });
-  const d2 = mgr.renderContextDiff(t.id, snap2, {});
-  check('REMOVED item listed', d2.includes('Checklist REMOVED: rotate the keys'), d2);
-  check('UNCHECKED listed', d2.includes('Checklist UNCHECKED: ship the dashboard'), d2);
+  check('plan patch is a no-op for the diff', d === '', JSON.stringify(d && d.slice(0, 120)));
+  check('plan patch does not bump contentUpdatedAt', mgr.get(t.id).contentUpdatedAt === contentBefore, `${mgr.get(t.id).contentUpdatedAt} vs ${contentBefore}`);
+  check('plan patch does not write a plan', !mgr.get(t.id).plan, JSON.stringify(mgr.get(t.id).plan));
+  check('renderContext has no Checklist section', !mgr.renderContext(t.id).includes('Checklist'), '');
+  check('list() carries no plan', mgr.list().every((x) => x.plan === undefined), '');
 }
 
 console.log('— objective / title —');
@@ -88,31 +79,6 @@ console.log('— activity —');
   check('both new entries listed, old baseline absent', d.includes('fixed the flaky test') && d.includes('shipped 2.113.0') && !d.includes('baseline entry'), d);
   check('count + detail marker', d.includes('New activity (2)') && d.includes('fixed the flaky test †') && d.includes('† = has detail'), d);
   check('session attribution kept', d.includes('_(codex:ddd)_'), d);
-}
-
-console.log('— duplicate-text checklist items (occurrence-indexed pairing) —');
-{
-  // silent-loss repro: [done, undone] with same text; agent checks the 2nd
-  mgr.update(t.id, { plan: [ { text: 'deploy', done: true }, { text: 'deploy', done: false } ] });
-  const snap = mgr.snapshotForDiff(t.id);
-  mgr.update(t.id, { plan: [ { text: 'deploy', done: true }, { text: 'deploy', done: true, by: 'claude:x' } ] });
-  const d = mgr.renderContextDiff(t.id, snap, {});
-  check('checking the 2nd duplicate is DELIVERED (was silently lost)', d.includes('Checklist CHECKED: deploy') && d.includes('(by claude:x)'), d);
-
-  // phantom repro: [undone, done] unchanged + unrelated change → no phantom line
-  mgr.update(t.id, { plan: [ { text: 'deploy', done: false }, { text: 'deploy', done: true } ] });
-  const snap2 = mgr.snapshotForDiff(t.id);
-  await sleep(3);
-  mgr.addProgress(t.id, { note: 'unrelated note' });
-  const d2 = mgr.renderContextDiff(t.id, snap2, {});
-  check('unchanged duplicates emit NO phantom CHECKED/UNCHECKED', !d2.includes('Checklist'), d2);
-
-  // extra occurrence added / removed
-  const snap3 = mgr.snapshotForDiff(t.id);
-  mgr.update(t.id, { plan: [ { text: 'deploy', done: false }, { text: 'deploy', done: true }, { text: 'deploy', done: false } ] });
-  const d3 = mgr.renderContextDiff(t.id, snap3, {});
-  check('3rd occurrence reads as NEW only', d3.includes('Checklist NEW: [ ] deploy') && !d3.includes('CHECKED') && !d3.includes('REMOVED'), d3);
-  mgr.update(t.id, { plan: [ { text: 'ship the dashboard', done: false } ] }); // reset for later sections
 }
 
 console.log('— context folder —');
@@ -149,20 +115,26 @@ console.log('— context folder —');
 console.log('— multi-group pointers + size cap —');
 {
   const snap = mgr.snapshotForDiff(t.id);
-  const plan = mgr.get(t.id).plan.map((p) => ({ ...p }));
-  plan.push({ text: 'multi test item', done: false });
-  mgr.update(t.id, { plan });
+  await sleep(3);
+  mgr.addProgress(t.id, { note: 'multi test entry' });
   const d = mgr.renderContextDiff(t.id, snap, { multi: true });
   check('multi mode teaches --group in pointer', d.includes(`vibespace-task --group ${t.id} show --full`), d);
 
+  // flood every bounded section at once (objective + files list + activity):
+  // per-section budgets keep a natural diff under the block cap
   const snap2 = mgr.snapshotForDiff(t.id);
-  const plan2 = mgr.get(t.id).plan.map((p) => ({ ...p }));
-  for (let i = 0; i < 60; i++) plan2.push({ text: `bulk item ${i} ` + 'y'.repeat(180), done: false });
-  mgr.update(t.id, { plan2: undefined, plan: plan2 });
+  mgr.update(t.id, { objective: 'o'.repeat(3000) });
   for (let i = 0; i < 15; i++) mgr.addProgress(t.id, { note: `bulk note ${i} ` + 'z'.repeat(400) });
-  const d2 = mgr.renderContextDiff(t.id, snap2, {});
+  const manyFiles = Array.from({ length: 20 }, (_, i) => `sub/dir/long-file-name-${i}-${'f'.repeat(80)}.md:10:${i}`).join('|');
+  const d2 = mgr.renderContextDiff(t.id, snap2, { oldSig: '', newSig: manyFiles });
   check('flood capped at ~5KB', Buffer.byteLength(d2, 'utf-8') <= 5200, `bytes=${Buffer.byteLength(d2, 'utf-8')}`);
-  check('cap keeps closing tag + overflow pointer', d2.trimEnd().endsWith('</vibespace-task-update>') && /more (checklist changes|lines)/.test(d2), d2.slice(-200));
+  check('cap keeps closing tag', d2.trimEnd().endsWith('</vibespace-task-update>'), d2.slice(-120));
+
+  // the ~5KB tail-drop itself, exercised directly (a natural diff rarely
+  // crosses it now that every section is internally bounded — keep the belt)
+  const big = { lines: Array.from({ length: 200 }, (_, i) => `- synthetic change line ${i} ` + 'w'.repeat(60)), bits: [] };
+  const d3 = mgr.renderDiffBlock(t.id, big, {});
+  check('renderDiffBlock cap trips + overflow pointer', Buffer.byteLength(d3, 'utf-8') <= 5200 && /more lines/.test(d3) && d3.trimEnd().endsWith('</vibespace-task-update>'), `bytes=${Buffer.byteLength(d3, 'utf-8')} tail=${d3.slice(-150)}`);
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

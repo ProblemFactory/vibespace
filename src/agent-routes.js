@@ -4,7 +4,7 @@
  * user-todo (vibespace-ask), session-status (vibespace-status), the context
  * injection endpoints (task-context / prompt-context, incl. the user preamble
  * + per-turn extras), the stop-check nudge arbiter, and the vibespace-task
- * plan/progress endpoints. Injection ORDER + SIZE are load-bearing — read the
+ * progress endpoints. Injection ORDER + SIZE are load-bearing — read the
  * CLAUDE.md notes on renderContext/persisted-output before touching payloads.
  */
 const path = require('path');
@@ -250,7 +250,7 @@ app.get('/api/agent/prompt-context', (req, res) => {
         const sig = g.contextDir ? tasks.contextDirSignature(g.contextDir) : '';
         const hadSig = s._ctxSig[g.id] !== undefined;
         const ctxChanged = hadSig && s._ctxSig[g.id] !== sig;
-        // Gate on CONTENT changes only (title/objective/checklist/activity/
+        // Gate on CONTENT changes only (title/objective/activity/
         // contextDir) — cosmetic edits (color, toggles, binds) bump updatedAt
         // but must not re-inject the whole group to every member.
         const contentAt = g.contentUpdatedAt || g.updatedAt;
@@ -394,7 +394,7 @@ app.get('/api/agent/prompt-context', (req, res) => {
     // 2KB-preview + on-disk file at EXACTLY 10240 bytes = 10 KiB (10000 inline,
     // 10240 wrapped). Beyond that the agent must Read a file to see the full
     // context — exactly the 2.68.0 "never learned the tools" failure. Cap with
-    // margin so the critical HEAD (tools/identity/objective/checklist — ordered
+    // margin so the critical HEAD (tools/identity/objective — ordered
     // first) is always in-context; only the TAIL (oldest activity-log lines) is
     // dropped, and it's recoverable via `vibespace-task show --full`.
     let ctx = outParts.join('\n\n');
@@ -459,7 +459,7 @@ app.get('/api/agent/task', (req, res) => {
   if (!gid) return;
   try {
     const t = tasks.get(gid);
-    res.json({ success: true, task: { id: t.id, title: t.title, archived: !!t.archived, objective: t.objective, plan: t.plan, progress: (t.progress || []).slice(-10), contextDir: t.contextDir } });
+    res.json({ success: true, task: { id: t.id, title: t.title, archived: !!t.archived, objective: t.objective, progress: (t.progress || []).slice(-10), contextDir: t.contextDir } });
   } catch (e) { res.status(404).json({ error: e.message }); }
 });
 app.post('/api/agent/task-progress', (req, res) => {
@@ -474,39 +474,13 @@ app.post('/api/agent/task-progress', (req, res) => {
 });
 // (Removed /api/agent/task-status — a Task Group has no status. A session
 // reports its own state via /api/agent/session-status (vibespace-status).)
+// (Removed /api/agent/task-plan — the group-level checklist/backlog was cut in
+// 2.121.0. Old vibespace-task copies — e.g. on remote hosts — may still call
+// it; answer 410 with guidance instead of a confusing 404.)
 app.post('/api/agent/task-plan', (req, res) => {
   const hit = agentSession(req, res);
   if (!hit) return;
-  const gid = resolveAgentGroup(hit, req, res);
-  if (!gid) return;
-  try {
-    const t = tasks.get(gid);
-    const plan = (t.plan || []).map(p => ({ ...p }));
-    const { check, uncheck, add, detail } = req.body || {};
-    if (typeof add === 'string' && add.trim()) {
-      plan.push({ text: add.trim(), done: false, ...(typeof detail === 'string' && detail.trim() ? { detail: detail.trim() } : {}), addedBy: sessionStatusKey(hit[0], hit[1]), addedAt: Date.now() });
-    } else if (check !== undefined || uncheck !== undefined) {
-      const ref = check !== undefined ? check : uncheck;
-      const done = check !== undefined;
-      // by 1-based index or unique substring
-      let idx = -1;
-      const n = Number(ref);
-      if (Number.isInteger(n) && n >= 1 && n <= plan.length) idx = n - 1;
-      else {
-        const matches = plan.map((p, i) => [p, i]).filter(([p]) => p.text.includes(String(ref)));
-        if (matches.length === 1) idx = matches[0][1];
-        else return res.status(400).json({ error: matches.length ? 'ambiguous step — use its number' : 'no matching plan step' });
-      }
-      plan[idx].done = done;
-      // P5: record who ticked it / when (loose, informational — never enforced).
-      if (done) { plan[idx].by = sessionStatusKey(hit[0], hit[1]); plan[idx].doneAt = Date.now(); }
-      else { delete plan[idx].by; delete plan[idx].doneAt; }
-    } else {
-      return res.status(400).json({ error: 'need add, check, or uncheck' });
-    }
-    const updated = tasks.update(gid, { plan });
-    res.json({ success: true, plan: updated.plan });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  res.status(410).json({ error: 'the Task Group checklist was removed — keep working steps in your own session todo list (e.g. TodoWrite); log finished work with `vibespace-task progress "summary"`' });
 });
 // ── Hook install management (Manage Agents dialog — auto-registers at boot,
 // this surfaces status + one-click repair/remove for non-engineers) ──
