@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.114.0 — 2026-07-13
+- Observability integrations (both optional, env/settings-gated, off by default): (1) **PostHog product analytics** — set `posthog.host` + `posthog.key` (settings, or `VIBESPACE_POSTHOG_HOST/_KEY` env / helm `posthog.*`) and the client loads posthog-js with autocapture and FULLY MASKED session recording (all inputs and all text hidden — interaction shapes only, in line with the names-only telemetry philosophy); disabled whenever local diagnostics (`telemetry.enabled`) are off. (2) **Prometheus metrics exporter** — `VIBESPACE_METRICS_PORT` (helm `metrics.enabled`) serves a hand-rolled `/metrics` on a SEPARATE non-ingress port (RSS/heap/event-loop/live-sessions/ws-clients/leak canaries + version info), scraped in-cluster via standard `prometheus.io/*` pod annotations.
+
 ## 2.113.1 — 2026-07-12
 - Diff injection: SEVERAL Task Groups changing on one turn now deliver as ONE combined `<vibespace-task-update>` block whose header line enumerates every changed group with a phrase summary ("工作: 3 new activity · 个人项目: 1 checklist change + 3 new activity"), per-group sections following smallest-first (user directive: stacked per-group blocks meant the ~2KB truncation preview could hide the very fact that a second group changed). Same rule extended to every multi-block delivery: the manifest now names EVERY block (diff groups, full re-deliveries, newly-bound groups), not just kinds.
 

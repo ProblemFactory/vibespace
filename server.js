@@ -1734,6 +1734,20 @@ app.use(unblocker);
 // password auth silently broke Ctrl+G: the script's POST got 401 and claude
 // sat on "Save and close editor to continue…" forever.
 app.post('/api/editor/open', (req, res) => {
+  // Optional product analytics (self-hosted PostHog or compatible) — active
+  // ONLY when a host+key are configured (settings posthog.host/posthog.key,
+  // env fallback VIBESPACE_POSTHOG_HOST/_KEY) and telemetry.enabled is on.
+  // The client initializes session recording FULLY MASKED (names-only
+  // philosophy: interaction shapes, never content).
+  app.locals.posthogCfg = () => {
+    try {
+      if (serverSetting('telemetry.enabled') === false) return null;
+      const host = String(serverSetting('posthog.host') || process.env.VIBESPACE_POSTHOG_HOST || '').trim().replace(/\/$/, '');
+      const key = String(serverSetting('posthog.key') || process.env.VIBESPACE_POSTHOG_KEY || '').trim();
+      if (!/^https?:\/\//.test(host) || !key) return null;
+      return { host, key, name: String(process.env.VIBESPACE_INSTANCE_NAME || os.hostname() || '').slice(0, 60) };
+    } catch { return null; }
+  };
   if (app.locals.authEnabled) {
     const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
     let ok = false;
@@ -2935,6 +2949,37 @@ app.get('/api/changelog-diff', async (req, res) => {
   if (atLatest && all.length) entries.push(all.find((e) => e.version === cur) || all[0]);
   res.json({ current: cur, latest: versionInfo.latest || null, entries, atLatest });
 });
+
+
+// ── Prometheus /metrics exporter (opt-in, generic): a SEPARATE listener on
+// VIBESPACE_METRICS_PORT, meant for in-cluster scrapes via pod annotations —
+// it is never routed through the app ingress/auth, so keep the port un-exposed
+// in any public deployment. Hand-rolled text exposition, no dependencies.
+const METRICS_PORT = Number(process.env.VIBESPACE_METRICS_PORT || 0);
+if (METRICS_PORT > 0) {
+  const metricsStarted = Date.now();
+  const pkgVersion = (() => { try { return require('./package.json').version; } catch { return ''; } })();
+  http.createServer((mreq, mres) => {
+    if (!String(mreq.url).startsWith('/metrics')) { mres.writeHead(404); return mres.end(); }
+    let watchers = 0, normMsgs = 0;
+    try { for (const [, sess] of activeSessions) { watchers += sess.subagentWatchers?.size || 0; normMsgs += sess._normalizer?.total || 0; } } catch {}
+    const mu = process.memoryUsage();
+    const L = [];
+    const g = (name, val, help) => { L.push(`# HELP ${name} ${help}`, `# TYPE ${name} gauge`, `${name} ${val}`); };
+    g('vibespace_process_resident_memory_bytes', mu.rss, 'Server process RSS');
+    g('vibespace_nodejs_heap_used_bytes', mu.heapUsed, 'V8 heap used');
+    g('vibespace_nodejs_heap_total_bytes', mu.heapTotal, 'V8 heap total');
+    g('vibespace_live_sessions', activeSessions.size, 'Active (webui-managed) sessions');
+    g('vibespace_ws_clients', (typeof wss !== 'undefined' && wss.clients) ? wss.clients.size : 0, 'Connected WebSocket clients');
+    g('vibespace_subagent_watchers', watchers, 'Live subagent fs watchers (leak canary)');
+    g('vibespace_normalizer_messages', normMsgs, 'Normalized messages held in memory (leak canary)');
+    g('vibespace_uptime_seconds', Math.round((Date.now() - metricsStarted) / 1000), 'Server uptime');
+    L.push('# HELP vibespace_info Build info', '# TYPE vibespace_info gauge', `vibespace_info{version="${pkgVersion}"} 1`);
+    mres.writeHead(200, { 'Content-Type': 'text/plain; version=0.0.4' });
+    mres.end(L.join('\n') + '\n');
+  }).listen(METRICS_PORT, () => console.log(`  metrics exporter on :${METRICS_PORT}`));
+}
+
 
 server.listen(PORT, HOST, () => {
   const ver = require('./package.json').version;
