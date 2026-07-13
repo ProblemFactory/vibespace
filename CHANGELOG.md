@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.126.0 — 2026-07-13
+- **SECURITY / hygiene: remote spawns no longer put secrets or blobs in the command line.** The remote-session prelude used to inline ~300KB of base64 tool blobs AND the per-session `vsst_` token into the ssh inner command — argv is world-readable via /proc/cmdline on the remote host, so any local user could `ps` the token and impersonate the agent through the reverse tunnel (and the wall of base64 looked outright alarming — real user report). Now the tools + token ship over ssh STDIN as one tar stream into `~/.vibespace/bin` (token = 0600 dotfile, removed at kill), and the inner command references the token via a `VAR="$(cat …)"` shell prefix assignment — the same never-in-argv rule the account-key path has always followed. The visible remote process line is now a short PATH/hook-register prelude.
+- i18n dictionaries rebuilt deduplicated (duplicate keys accumulated by earlier bulk merges caused esbuild warnings in every self-update log; last-occurrence values kept — identical runtime behavior).
+
 ## 2.125.1 — 2026-07-13
 - Fixed (for real this time) searching a remote session by id showing "No sessions": the sidebar's zero-local-matches empty-state RETURNED before the workbench ever rendered — the 2.124.0 remote-search fixes lived downstream of that return and were unreachable whenever the query matched nothing local (exactly the session-id case). With a search active the workbench now always renders (selected-host zone without the 7-day cutoff + cross-host Remote matches). Applies to desktop and the mobile sidebar alike (both share the workbench).
 
