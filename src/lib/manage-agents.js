@@ -491,7 +491,7 @@ export function installManageAgents(App, ctx = {}) {
           };
           const allGood = hs.claude?.installed && hs.codex?.installed;
           left.innerHTML = `<b>${t('VibeSpace integration')}</b><div>${stateOf('claude', 'Claude')} &nbsp; ${stateOf('codex', 'Codex')}</div>`
-            + `<div class="agents-note">${t("Lets sessions in a Task Group automatically receive the group's context (objective, checklist, shared files).")}</div>`;
+            + `<div class="agents-note">${t("Lets sessions in a Task Group automatically receive the group's context (objective, shared files).")}</div>`;
           const actions = document.createElement('div'); actions.className = 'agent-actions';
           const installBtn = document.createElement('button');
           installBtn.className = 'agent-btn' + (allGood ? '' : ' primary');

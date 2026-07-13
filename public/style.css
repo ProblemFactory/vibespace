@@ -2560,10 +2560,6 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
   font-size: 11px; padding: 4px 8px; width: 100%; box-sizing: border-box;
 }
 .task-detail-input:focus { outline: none; border-color: var(--accent); }
-.task-detail-plan { display: flex; flex-direction: column; gap: 2px; }
-.task-detail-plan-item { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
-.task-detail-plan-item span { flex: 1; min-width: 0; }
-.task-detail-plan-item.done span { text-decoration: line-through; color: var(--text-dim); }
 .task-detail-x { background: none; border: none; color: var(--red, #e55); cursor: pointer; font-size: 12px; padding: 0 4px; flex-shrink: 0; opacity: 0.6; }
 .task-detail-x:hover { opacity: 1; }
 .task-detail-progress { max-height: 140px; overflow-y: auto; display: flex; flex-direction: column; }
@@ -2585,7 +2581,6 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .task-detail-folder-rec { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; color: var(--text-dim); flex-shrink: 0; cursor: pointer; user-select: none; }
 .task-detail-folder-rec input { margin: 0; width: 12px; height: 12px; }
 .task-detail-inject { display: flex; margin-top: 10px; font-size: 11px; color: var(--text-secondary); }
-.task-detail-plan-by { margin-left: auto; font-size: 9px; color: var(--text-dim); white-space: nowrap; flex-shrink: 0; }
 .task-detail-ctxrow { display: flex; gap: 6px; }
 .task-detail-ctxrow .task-detail-input { flex: 1; }
 .task-detail-swatches { display: flex; gap: 6px; }
@@ -2749,25 +2744,8 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .task-log-chip.user { background: color-mix(in srgb, var(--green, #3fb950) 12%, transparent); color: var(--green, #3fb950); }
 .task-log-chip.clickable { cursor: pointer; }
 .task-log-chip.clickable:hover, .task-log-chip.active { background: color-mix(in srgb, var(--accent) 28%, transparent); }
-.task-log-plan input[type="checkbox"] { margin: 0; flex-shrink: 0; align-self: center; }
-.task-log-plan.done .task-log-note { text-decoration: line-through; color: var(--text-dim); }
-.task-log-attr { display: flex; gap: 8px; flex-shrink: 0; align-items: baseline; }
-.task-log-attr-part { display: flex; gap: 3px; align-items: baseline; font-size: 10px; color: var(--text-dim); }
-.task-log-add { margin-top: 8px; }
 .task-detail-open-log { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 11px; padding: 0 2px; margin-left: auto; }
 .task-detail-open-log:hover { color: var(--accent); }
-.task-log-planline { display: flex; align-items: baseline; gap: 6px; flex: 1; min-width: 0; }
-.task-log-exp .task-log-planline { cursor: pointer; }
-.task-log-edit { display: flex; flex-direction: column; gap: 6px; padding: 6px 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent); }
-.task-log-edit-detail { background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); font-size: 11px; padding: 4px 8px; resize: vertical; font-family: inherit; }
-.task-log-edit-detail:focus { outline: none; border-color: var(--accent); }
-.task-log-edit-detail.hidden { display: none; }
-.task-log-edit-btns { display: flex; gap: 6px; }
-.task-log-editbtn { color: var(--text-dim); }
-.task-log-editbtn:hover { color: var(--accent); }
-.task-log-addwrap { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
-.task-log-addwrap .task-log-add { margin-top: 0; flex: 1; }
-.task-log-plan.task-log-exp .task-log-detail { margin-left: 24px; }
 
 /* ── Manage Agents: collapsed advanced "Agent instructions" section ── */
 .agents-adv { border: 1px solid var(--border); border-radius: var(--radius); padding: 0; margin-top: 4px; }

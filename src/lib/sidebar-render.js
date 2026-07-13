@@ -113,7 +113,7 @@ export function installSidebarRender(SidebarClass) {
       linkBtn.style.fontSize = '10px';
       linkBtn.onclick = (e) => {
         e.stopPropagation();
-        this._showTaskChecklistPopover(linkBtn,
+        this._showTaskBindPopover(linkBtn,
           (task) => this._folderPaths(task).includes(cwd),
           (task, checked, pop) => { if (checked) this._taskAddFolder(task.id, cwd); else this._taskRemoveFolder(task.id, cwd); pop.remove(); });
       };

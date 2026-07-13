@@ -6,7 +6,7 @@ import { t as tr } from './i18n.js';
  *
  * Tasks ⊃ Groups: the old Groups tab grew into the task board. kind:'group'
  * tasks render exactly like the old groups; kind:'task' adds status /
- * objective / plan / attention. Data lives in data/tasks.json on the server
+ * objective / attention. Data lives in data/tasks.json on the server
  * (AUTHORITATIVE — never derived from agent output); this mixin holds a
  * client mirror (`_tasks`), synced via `tasks-updated` WS broadcasts, and
  * writes through /api/tasks (granular bind/unbind so concurrent clients
@@ -315,7 +315,7 @@ export function installSidebarTasks(SidebarClass) {
   };
 
   // Tasks this session is EXPLICITLY tagged with (folder-derived membership is
-  // dynamic and not toggleable from the checklist).
+  // dynamic and not toggleable from the bind popover).
   proto._getSessionTasks = function(sessionOrKey) {
     const stateKey = this._getSessionStateKey(sessionOrKey);
     const legacyId = this._getLegacySessionId(sessionOrKey);
@@ -327,7 +327,7 @@ export function installSidebarTasks(SidebarClass) {
   // match (cwd or its symlink-resolved realCwd). Mirrors the board's
   // _getTaskSessionKeys and the server's groupsForSession, so Task View
   // membership matches Group view. Excludes archived. (Distinct from
-  // _getSessionTasks, which is tag-only for the toggleable checklist popover.)
+  // _getSessionTasks, which is tag-only for the toggleable bind popover.)
   proto._getSessionTaskGroups = function(s) {
     const stateKey = this._getSessionStateKey(s);
     const legacyId = this._getLegacySessionId(s);
@@ -409,7 +409,7 @@ export function installSidebarTasks(SidebarClass) {
 
   // ── Popovers / menus (shared by board, session cards, file explorer) ──
 
-  proto._showTaskChecklistPopover = function(anchor, isCheckedFn, onToggleFn) {
+  proto._showTaskBindPopover = function(anchor, isCheckedFn, onToggleFn) {
     const pop = createPopover(anchor, 'groups-popover');
     const tasks = this._taskBoardOrder();
     for (const t of tasks) {
@@ -469,7 +469,7 @@ export function installSidebarTasks(SidebarClass) {
     if (!t) return;
     const items = [
       { label: tr('Details…'), action: () => this.app.openTaskDetail(taskId) },
-      { label: tr('Checklist & activity…'), action: () => this.app.openTaskLog(taskId, { tab: 'activity' }) },
+      { label: tr('Activity log…'), action: () => this.app.openTaskLog(taskId) },
       { label: tr('New session in this task…'), action: () => this.app.showNewSessionDialog({ cwd: this._folderPaths(t)[0], taskId }) },
       { label: tr('Rename'), action: async () => {
         const n = await showInputDialog({ title: tr('Rename Task Group'), label: tr('Title'), value: t.title, confirmText: tr('Rename') });
@@ -766,7 +766,7 @@ export function installSidebarTasks(SidebarClass) {
       const detailBtn = document.createElement('button');
       detailBtn.className = 'folder-add-btn';
       detailBtn.innerHTML = ICON_DETAIL;
-      detailBtn.title = tr('Task Group details (objective, checklist, activity log)');
+      detailBtn.title = tr('Task Group details (objective, activity log)');
       detailBtn.onclick = (e) => { e.stopPropagation(); this.app.openTaskDetail(task.id); };
       header.appendChild(detailBtn);
 

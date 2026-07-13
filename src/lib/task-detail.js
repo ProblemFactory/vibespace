@@ -4,7 +4,7 @@ import { t } from './i18n.js';
 
 /**
  * Task detail window — the structured editor over data/tasks.json
- * (docs/design-task-system.md §5.3): status, objective, plan checklist,
+ * (docs/design-task-system.md §5.3): status, objective,
  * progress log, bound sessions, auto-include folders, context folder, color.
  * Every edit PATCHes /api/tasks/:id; the tasks-updated broadcast keeps other
  * clients (and this window) in sync. The context folder is only DESIGNATED
@@ -76,7 +76,7 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
       const convert = document.createElement('button');
       convert.className = 'task-detail-btn';
       convert.textContent = t('Convert to task');
-      convert.title = t('Groups are plain tags; a task adds an objective, checklist and activity log');
+      convert.title = t('Groups are plain tags; a task adds an objective and activity log');
       convert.onclick = () => patch({ kind: 'task' });
       head.appendChild(convert);
     }
@@ -87,7 +87,7 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
       s.className = 'task-detail-section';
       s.innerHTML = `<div class="task-detail-label">${escHtml(label)}${hint ? `<span class="task-detail-hint">${escHtml(hint)}</span>` : ''}</div>`;
       if (action) {
-        // ⧉ opens the full-window log viewer (checklist/activity outgrow this editor)
+        // ⧉ opens the full-window log viewer (the activity log outgrows this editor)
         const btn = document.createElement('button');
         btn.className = 'task-detail-open-log';
         btn.textContent = '⧉';
@@ -109,70 +109,11 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
       obj.onchange = () => patch({ objective: obj.value });
       objSec.appendChild(obj);
 
-      // ── Checklist (was "Plan") ──
-      const planSec = section(t('Checklist'), t("the group's backlog of work items — you queue them, any session picks one up and ticks it off (agents keep their own working steps in their session TODO, shown on each card)"), { title: t('Open full checklist viewer (attribution, filters, search)'), onClick: () => app.openTaskLog(taskId, { tab: 'checklist' }) });
-      const planList = document.createElement('div');
-      planList.className = 'task-detail-plan';
-      (task.plan || []).forEach((item, i) => {
-        const row = document.createElement('div');
-        row.className = 'task-detail-plan-item' + (item.done ? ' done' : '');
-        const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!item.done;
-        cb.onchange = () => {
-          const plan = task.plan.map((p, j) => {
-            if (j !== i) return p;
-            const np = { ...p, done: cb.checked };
-            if (cb.checked) { np.by = 'user'; np.doneAt = Date.now(); }
-            else { delete np.by; delete np.doneAt; } // P5: unticking clears the "done by" link
-            return np;
-          });
-          patch({ plan });
-        };
-        const txt = document.createElement('span'); txt.textContent = item.text;
-        const del = document.createElement('button'); del.className = 'task-detail-x'; del.textContent = '×'; del.title = t('Remove step');
-        del.onclick = () => patch({ plan: task.plan.filter((_, j) => j !== i) });
-        // † = item carries a detail — expands in place (full editing lives in
-        // the ⧉ log viewer; this stays the compact editor)
-        if (item.detail) {
-          const dg = document.createElement('span');
-          dg.className = 'task-detail-plan-by'; dg.textContent = '†';
-          dg.style.cursor = 'pointer';
-          dg.title = t('Show details');
-          dg.onclick = () => {
-            let d = row.nextElementSibling;
-            if (d && d.classList.contains('task-detail-progress-detail')) { d.remove(); return; }
-            d = document.createElement('div');
-            d.className = 'task-detail-progress-detail';
-            d.textContent = item.detail;
-            row.after(d);
-          };
-          txt.after(dg);
-        }
-        row.append(cb, txt);
-        if (item.done && item.by) {
-          // P5: loose, informational link — which session ticked this step.
-          const by = document.createElement('span');
-          by.className = 'task-detail-plan-by';
-          by.textContent = item.by.replace(/^(\w+):(.{6}).*/, '$1:$2…');
-          by.title = t('Ticked by session {by}', { by: item.by });
-          row.append(by);
-        }
-        row.append(del);
-        planList.appendChild(row);
-      });
-      planSec.appendChild(planList);
-      const planAdd = document.createElement('input');
-      planAdd.className = 'task-detail-input';
-      planAdd.placeholder = t('+ Add checklist step (Enter)');
-      planAdd.onkeydown = (e) => {
-        if (e.key === 'Enter' && planAdd.value.trim()) {
-          patch({ plan: [...(task.plan || []), { text: planAdd.value.trim(), done: false, addedBy: 'user', addedAt: Date.now() }] });
-          planAdd.value = '';
-        }
-      };
-      planSec.appendChild(planAdd);
+      // (Checklist section removed 2.121.0 — a group-level backlog never made
+      // sense; work items live on each session's own todo list / Steps.)
 
       // ── Activity log (was "Progress") ──
-      const progSec = section(t('Activity log'), t('timestamped notes of what was done — agents append via vibespace-task, you can too'), { title: t('Open full activity viewer (by day, by session, search)'), onClick: () => app.openTaskLog(taskId, { tab: 'activity' }) });
+      const progSec = section(t('Activity log'), t('timestamped notes of what was done — agents append via vibespace-task, you can too'), { title: t('Open full activity viewer (by day, by session, search)'), onClick: () => app.openTaskLog(taskId) });
       const progList = document.createElement('div');
       progList.className = 'task-detail-progress';
       const entries = (task.progress || []).slice(-30);
@@ -311,7 +252,7 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
     // injected into them.
     const injWrap = document.createElement('label');
     injWrap.className = 'task-detail-folder-rec task-detail-inject';
-    injWrap.title = t("When off, this group's objective / checklist / file index is NOT injected into its sessions. They still belong to it — the board, vibespace-task and status keep working.");
+    injWrap.title = t("When off, this group's objective / file index is NOT injected into its sessions. They still belong to it — the board, vibespace-task and status keep working.");
     const injCb = document.createElement('input'); injCb.type = 'checkbox'; injCb.checked = task.injectContext !== false;
     injCb.onchange = () => patch({ injectContext: injCb.checked });
     injWrap.append(injCb, document.createTextNode(t("Inject this group's context into its sessions")));
@@ -336,7 +277,7 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
     colorSec.appendChild(swatchRow);
 
     // ── Export / Import (P4): a task ⇄ a committable markdown file ──
-    const repoSec = section(t('Export / Import'), t('a self-contained markdown file (frontmatter + objective + checklist) — commit it into a git repo so the task travels with the code, or move it between machines'));
+    const repoSec = section(t('Export / Import'), t('a self-contained markdown file (frontmatter + objective + activity) — commit it into a git repo so the task travels with the code, or move it between machines'));
     const repoWrap = document.createElement('div');
     repoWrap.className = 'task-detail-acwrap task-detail-ctxrow';
     const repoInput = document.createElement('input');

@@ -169,9 +169,9 @@ Enable via Settings > Sidebar > **Status quick tabs** to show one-click filter t
 
 ## Task Groups
 
-A **Task Group** (岗位) is a durable *role* that tags sessions across directories — it groups the sessions (活儿) working toward it and carries a shared **objective**, a **Checklist** (backlog of work items), an **Activity log** (timestamped notes), auto-include folders, a shared **context folder**, and a board color. A Task Group has **no status of its own** — it's a persistent role, so the only lifecycle flag is **archived**. Work status lives on the *sessions* (see [Session status](#session-status-agent-set-user-overridable)). Task Groups are a superset of the old Groups — your existing groups were migrated automatically; use **Convert to task** to give one an objective, checklist and activity log.
+A **Task Group** (岗位) is a durable *role* that tags sessions across directories — it groups the sessions (活儿) working toward it and carries a shared **objective**, an **Activity log** (timestamped notes), auto-include folders, a shared **context folder**, and a board color. A Task Group has **no status of its own** — it's a persistent role, so the only lifecycle flag is **archived**. Work status lives on the *sessions* (see [Session status](#session-status-agent-set-user-overridable)). Work *items* live on the sessions too — each agent's own todo list is surfaced as the card's **Steps**; there is deliberately **no group-level checklist/backlog** (removed in 2.121.0: agents don't care about other agents' backlogs). Task Groups are a superset of the old Groups — your existing groups were migrated automatically; use **Convert to task** to give one an objective and activity log.
 
-> Naming note: the code and older internals still say "task" in wire names (`/api/tasks*`, the `tasks-updated` event, JSON fields `plan`/`progress`, CLI subcommands `plan-check`/`plan-add`/`progress`). The user-facing concept is **Task Group**.
+> Naming note: the code and older internals still say "task" in wire names (`/api/tasks*`, the `tasks-updated` event, the JSON field `progress`, the CLI subcommand `progress`). The user-facing concept is **Task Group**.
 
 ### The board (Task Groups tab)
 
@@ -179,7 +179,7 @@ Each Task Group renders as a collapsible section: title, an **archived** chip if
 
 ### Creating a Task Group
 
-Click **"+ New Task Group"** on the board (opens the detail window), or "+ New task" at the bottom of any Task-Group checklist popover.
+Click **"+ New Task Group"** on the board (opens the detail window), or "+ New task" at the bottom of any Task-Group bind popover.
 
 ### New session in a Task Group
 
@@ -206,7 +206,7 @@ Manage: right-click a group header → **Linked folders**, or the detail window 
 
 ### Task Group detail window
 
-The details button (or context menu → Details…) opens a per-group window: title, **objective**, **Checklist** (the group's backlog — tick items as they're done), **Activity log** (timestamped notes), bound sessions (with unbind), auto-include folders (each with a recursive toggle), **context folder** + an **Inject this group's context into its sessions** toggle, and a board color. Everything saves immediately and syncs to all clients. Editing color/toggles no longer scrolls the window back to the top.
+The details button (or context menu → Details…) opens a per-group window: title, **objective**, **Activity log** (timestamped notes), bound sessions (with unbind), auto-include folders (each with a recursive toggle), **context folder** + an **Inject this group's context into its sessions** toggle, and a board color. Everything saves immediately and syncs to all clients. Editing color/toggles no longer scrolls the window back to the top.
 
 The detail window can also **export** the group to a committable markdown file (**Export**), and the board's **Import…** card reads such a file back in — so a Task Group can live in a repo and travel between VibeSpace instances.
 
@@ -223,7 +223,7 @@ When a member session's agent finishes and waits for input (the window-title bli
 
 ## Task context injection
 
-A session that **belongs to a Task Group** begins each turn with the group's context in the agent's head: the group state (objective, checklist, recent activity), an index of the files in the context folder (the agent reads what it needs with its own tools), and the working rules. The injected guidance frames the context folder as the group's **shared memory between agents** — not a place to publish deliverables for the user — and tells agents to proactively write up knowledge other sessions of the group will need (conventions, gotchas, decisions, cross-role details — e.g. a dev session documenting technical specifics a compliance session depends on), to never modify `<contextDir>/.vibespace/` (generated; `TASK.md` there always mirrors the group state), and to report session state with `vibespace-status`. Injection covers **every** group a session belongs to and re-fires when the group's content changes; a per-group **Inject context** toggle can opt a group out while keeping membership/board/`vibespace-task` working. A session in **no** group still gets a one-time baseline intro teaching the `vibespace-status` tool.
+A session that **belongs to a Task Group** begins each turn with the group's context in the agent's head: the group state (objective, recent activity), an index of the files in the context folder (the agent reads what it needs with its own tools), and the working rules. The injected guidance frames the context folder as the group's **shared memory between agents** — not a place to publish deliverables for the user — and tells agents to proactively write up knowledge other sessions of the group will need (conventions, gotchas, decisions, cross-role details — e.g. a dev session documenting technical specifics a compliance session depends on), to never modify `<contextDir>/.vibespace/` (generated; `TASK.md` there always mirrors the group state), and to report session state with `vibespace-status`. Injection covers **every** group a session belongs to and re-fires when the group's content changes; a per-group **Inject context** toggle can opt a group out while keeping membership/board/`vibespace-task` working. A session in **no** group still gets a one-time baseline intro teaching the `vibespace-status` tool.
 
 It is delivered **only through the harness's own hooks / native mechanisms** — VibeSpace never rewrites your message to smuggle it in. `vibespace-hook.mjs` is registered automatically for the `SessionStart` and `UserPromptSubmit` events (a true no-op only *outside* a VibeSpace session, i.e. when the `VIBESPACE_API`/token env is absent).
 
@@ -234,7 +234,7 @@ For **remote** sessions, VibeSpace distributes the hook and the task tools to `~
 
 The hook is installed automatically when the server starts. To check or repair it, open **⚙ → Manage agents…** — the "VibeSpace integration" row shows the status for both CLIs with one-click Install / Remove.
 
-Agents can also **report back** with the `vibespace-task` command (the injected context teaches them): `vibespace-task progress "what I did"` adds a timestamped entry to the Activity log, `plan-check 2` ticks a checklist item, `plan-add "new step"` extends the checklist. Commands are scoped server-side to the session's own group membership via its per-session token — if the session belongs to several groups it passes `--group <id>` (validated to be one it belongs to). There is **no** `vibespace-task status` subcommand: a Task Group has no status; a session reports its *own* state with `vibespace-status <working|needs-input|blocked|review|done>`.
+Agents can also **report back** with the `vibespace-task` command (the injected context teaches them): `vibespace-task progress "what I did"` adds a timestamped entry to the Activity log (`--detail` carries the full context behind the one-liner). Commands are scoped server-side to the session's own group membership via its per-session token — if the session belongs to several groups it passes `--group <id>` (validated to be one it belongs to). There is **no** `vibespace-task status` subcommand: a Task Group has no status; a session reports its *own* state with `vibespace-status <working|needs-input|blocked|review|done>`.
 
 VibeSpace also maintains `<contextDir>/.vibespace/TASK.md` — a generated, always-current markdown mirror of the group state that agents and humans can read from disk.
 

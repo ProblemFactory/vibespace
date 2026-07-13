@@ -34,7 +34,7 @@ Auth is **off by default** (local single-user use). Enable it by giving the serv
 | Layouts & desktops | window layouts, virtual desktops, custom grid presets |
 | Session metadata | stars, renames, groups, per-session model/effort/permission configs |
 | File bookmarks | file-explorer bookmarks |
-| Task Groups | 岗位 definitions — objective, checklists (incl. item details), activity logs, linked folders, context-dir config |
+| Task Groups | 岗位 definitions — objective, activity logs, linked folders, context-dir config (dormant legacy checklists carried through) |
 | Usage pricing table | per-model rates + per-account discounts from the Usage window's Pricing editor |
 | Browser preferences | theme choice, terminal font, language, usage-view account choices (this browser's localStorage) |
 
