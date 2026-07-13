@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.130.0 — 2026-07-13
+- **`vibespace-task backlog-edit <id|#|text> [--text …] [--detail …]`** (agent CLI + `/api/agent/task-backlog` `edit` verb): edit a parked backlog item IN PLACE — the stable `B-xxxx` id stays, so references elsewhere (docs, memory, other agents' notes) survive and the change surfaces to claimants as a "reworded" diff, not a drop+new-id churn. `--detail ""` (or `-`) clears the detail. Fills a real gap: agents previously could only drop+re-add to change an item, minting a fresh id and orphaning every reference (the B-55e2→B-5052 churn that motivated this).
+- **Onboarding/Manage-Agents guided login terminal no longer clipped on the right** (real report — the "Log in to Claude Code" modal cut off the auth URL and status text): the width was a `min-width` on the dialog BODY, but `.dialog` is a fixed `width:440px; overflow:hidden`, so the wider body (and the terminal box inside it) overflowed and got clipped at the dialog edge. Width now sits on the dialog itself (`min(760px, 94vw)`, the same pattern the accounts dialog uses); the status line wraps instead of overflowing.
+
 ## 2.129.1 — 2026-07-13
 - Creating a **Codex CHAT session on a remote host now fails fast with an honest error** instead of silently spawning a broken session (the remote-chat branch force-appends claude stream-json flags — into codex argv they just killed the spawn opaquely). Terminal mode on the host and local codex chat are unaffected; full remote codex chat support stays parked (backlog B-0588 — needs the keeper/offset machinery in the codex wrapper + remote thread discovery).
 

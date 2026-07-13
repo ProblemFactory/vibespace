@@ -23,7 +23,7 @@ export function installSetupFlows(App) {
      */
     runGuidedCli({ title, cmd, hint, checkDone }) {
       return new Promise((resolve) => {
-        const { body, close } = createModalShell({ id: 'guided-cli-dialog', title, bodyClass: 'guided-cli-body' });
+        const { body, close } = createModalShell({ id: 'guided-cli-dialog', title, dialogClass: 'guided-cli-dialog', bodyClass: 'guided-cli-body' });
         body.innerHTML = `
           <div class="guided-cli-status"><span class="upload-active-spinner"></span><span class="gc-msg">${escHtml(t('Follow the prompts in the terminal below — this closes automatically when done.'))}</span></div>
           ${hint ? `<div class="mounts-field-hint">${escHtml(hint)}</div>` : ''}

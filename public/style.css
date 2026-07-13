@@ -2886,8 +2886,15 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .ut-viewer-md ul, .ut-viewer-md ol { padding-left: 18px; margin: 0 0 8px; }
 
 /* ── Guided CLI modal (embedded login/install terminal) + self-update dialog ── */
-.guided-cli-body { min-width: min(720px, 92vw); }
+/* Width belongs on the DIALOG, not the body: .dialog is a fixed width:440px
+   with overflow:hidden, so a body min-width overflowed and got CLIPPED on the
+   right (terminal box + status text ran past the dialog edge — real report).
+   Size the dialog like .agents-dialog does; the body just fills it. */
+.dialog.guided-cli-dialog { width: min(760px, 94vw); }
+.guided-cli-body { width: 100%; }
 .guided-cli-status { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
+.guided-cli-status .gc-msg { min-width: 0; } /* let the message wrap instead of overflowing the flex row */
+.guided-cli-status .upload-active-spinner { flex-shrink: 0; }
 .guided-cli-status .ob-ok { font-size: 13px; font-weight: 600; }
 .guided-cli-term { height: 360px; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; background: #000; }
 .guided-cli-term .terminal-container { width: 100%; height: 100%; }
