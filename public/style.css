@@ -2753,6 +2753,11 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .task-log-blbtn { color: var(--text-dim); }
 .task-log-blbtn:hover { color: var(--accent); }
 .task-log-bl.task-log-exp .task-log-detail { margin-left: 24px; }
+.task-log-blid, .task-detail-blid { flex-shrink: 0; font-size: 9px; padding: 0 4px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--accent); cursor: copy; border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent); }
+.task-log-blid:hover, .task-detail-blid:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.task-log-claim-x { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 10px; padding: 0 2px; }
+.task-log-claim-x:hover { color: var(--red, #e55); }
+.task-log-unclaimed { font-style: italic; opacity: 0.8; }
 .task-log-add { margin-top: 8px; }
 .task-log-addwrap { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
 .task-log-addwrap .task-log-add { margin-top: 0; flex: 1; }

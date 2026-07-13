@@ -271,7 +271,7 @@ app.get('/api/agent/prompt-context', (req, res) => {
           const snap = s._groupSnap[g.id];
           const ctxBase = ctxBaseFor ? ctxBaseFor(g.id) : null;
           const changes = (injectDiffsEnabled() && snap)
-            ? tasks.diffChanges(g.id, snap, { gid: multi ? `--group ${g.id} ` : '', ctxBase, oldSig: s._ctxSig[g.id] || '', newSig: sig })
+            ? tasks.diffChanges(g.id, snap, { gid: multi ? `--group ${g.id} ` : '', ctxBase, oldSig: s._ctxSig[g.id] || '', newSig: sig, sessionKey: key })
             : null;
           if (changes) {
             // empty lines = a no-op edit (nothing the injection renders
@@ -484,10 +484,12 @@ app.post('/api/agent/task-plan', (req, res) => {
   if (!hit) return;
   res.status(410).json({ error: 'the Task Group checklist was removed — keep working steps in your own session todo list; log finished work with `vibespace-task progress "summary"`; park NON-immediate items (deferred decisions / future work) with `vibespace-task backlog-add "item"`' });
 });
-// Backlog (2.122.0): the group's parking lot for NON-immediate items —
-// deferred user decisions, "later" work. add / done / drop; done|drop resolve
-// by 1-based index into the OPEN-items list (what `show`/`backlog` display)
-// or a unique text substring. Attribution = the calling session's key.
+// Backlog (2.122.0; claim model 2.123.0): the group's parking lot for
+// NON-immediate items — deferred user decisions, "later" work.
+// add (auto-claims for the caller) / done / drop / claim / unclaim / show.
+// Refs resolve by stable item id (B-xxxx — the user can copy one to ANY
+// member agent), by 1-based index into the OPEN-items list (what
+// `show`/`backlog` display), or by unique text substring.
 app.post('/api/agent/task-backlog', (req, res) => {
   const hit = agentSession(req, res);
   if (!hit) return;
@@ -495,27 +497,45 @@ app.post('/api/agent/task-backlog', (req, res) => {
   if (!gid) return;
   try {
     const t = tasks.get(gid);
-    const backlog = (t.backlog || []).map((b) => ({ ...b }));
-    const { add, detail, done, drop } = req.body || {};
+    const backlog = (t.backlog || []).map((b) => ({ ...b, claimedBy: [...(b.claimedBy || [])] }));
+    const { add, detail, done, drop, claim, unclaim, show } = req.body || {};
     const key = sessionStatusKey(hit[0], hit[1]);
-    if (typeof add === 'string' && add.trim()) {
-      backlog.push({ text: add.trim(), status: 'open', ...(typeof detail === 'string' && detail.trim() ? { detail: detail.trim() } : {}), addedBy: key, addedAt: Date.now() });
-    } else if (done !== undefined || drop !== undefined) {
-      const ref = done !== undefined ? done : drop;
-      const open = backlog.map((b, i) => [b, i]).filter(([b]) => b.status === 'open');
-      let idx = -1;
-      const n = Number(ref);
-      if (Number.isInteger(n) && n >= 1 && n <= open.length) idx = open[n - 1][1];
-      else {
-        const matches = open.filter(([b]) => b.text.includes(String(ref)));
-        if (matches.length === 1) idx = matches[0][1];
-        else return res.status(400).json({ error: matches.length ? 'ambiguous item — use its number from `vibespace-task backlog`' : 'no matching open backlog item' });
+    const findIdx = (ref, { openOnly = true } = {}) => {
+      const pool = backlog.map((b, i) => [b, i]).filter(([b]) => !openOnly || b.status === 'open');
+      if (typeof ref === 'string' && /^B-[0-9a-f]{4,8}$/i.test(ref.trim())) {
+        const hitById = backlog.findIndex((b) => (b.id || '').toLowerCase() === ref.trim().toLowerCase());
+        if (hitById >= 0) return hitById;
+        return { err: `no backlog item with id ${ref.trim()}` };
       }
-      backlog[idx].status = done !== undefined ? 'done' : 'dropped';
-      backlog[idx].resolvedBy = key;
-      backlog[idx].resolvedAt = Date.now();
+      const n = Number(ref);
+      if (Number.isInteger(n) && n >= 1 && n <= pool.length) return pool[n - 1][1];
+      const matches = pool.filter(([b]) => b.text.includes(String(ref)));
+      if (matches.length === 1) return matches[0][1];
+      return { err: matches.length ? 'ambiguous item — use its id or number from `vibespace-task backlog`' : 'no matching backlog item' };
+    };
+    if (typeof show === 'string' || typeof show === 'number') {
+      const r = findIdx(show, { openOnly: false });
+      if (typeof r !== 'number') return res.status(404).json({ error: r.err });
+      return res.json({ success: true, item: backlog[r] }); // read-only — no update
+    }
+    if (typeof add === 'string' && add.trim()) {
+      // parking auto-CLAIMS for the caller (user directive) — the parker is
+      // the natural owner until it hands the item back
+      backlog.push({ text: add.trim(), status: 'open', claimedBy: [key], ...(typeof detail === 'string' && detail.trim() ? { detail: detail.trim() } : {}), addedBy: key, addedAt: Date.now() });
+    } else if (claim !== undefined || unclaim !== undefined) {
+      const r = findIdx(claim !== undefined ? claim : unclaim);
+      if (typeof r !== 'number') return res.status(400).json({ error: r.err });
+      const b = backlog[r];
+      if (claim !== undefined) { if (!b.claimedBy.includes(key)) b.claimedBy.push(key); }
+      else b.claimedBy = b.claimedBy.filter((k) => k !== key);
+    } else if (done !== undefined || drop !== undefined) {
+      const r = findIdx(done !== undefined ? done : drop);
+      if (typeof r !== 'number') return res.status(400).json({ error: r.err });
+      backlog[r].status = done !== undefined ? 'done' : 'dropped';
+      backlog[r].resolvedBy = key;
+      backlog[r].resolvedAt = Date.now();
     } else {
-      return res.status(400).json({ error: 'need add, done, or drop' });
+      return res.status(400).json({ error: 'need add, done, drop, claim, unclaim, or show' });
     }
     const updated = tasks.update(gid, { backlog });
     res.json({ success: true, backlog: updated.backlog.filter((b) => b.status === 'open') });

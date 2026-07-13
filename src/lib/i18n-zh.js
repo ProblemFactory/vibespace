@@ -1708,4 +1708,10 @@ export default {
   "{count} group(s) incl. backlogs & activity logs": "{count} 个组（含 Backlog 与活动日志）",
   "{n} resolved/dropped — see full viewer": "{n} 条已解决/弃置——见完整查看器",
   "{n} workspace window(s) could not be restored (temp/blob source is gone)": "{n} 个工作区窗口无法恢复（临时/blob 来源已失效）",
+  "Claimed by {n} session(s)": "{n} 个会话已认领",
+  "Click to copy — paste it to any agent of this group (\"look at backlog {id}\")": "点击复制——可粘贴给该组任意 agent（\"看一下 backlog {id}\"）",
+  "Copied {id}": "已复制 {id}",
+  "No session has claimed this item": "还没有会话认领此项",
+  "Remove this claim": "移除该认领",
+  "unclaimed": "无人认领",
 };

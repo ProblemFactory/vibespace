@@ -224,6 +224,13 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
       if (it.addedBy || it.addedAt) {
         html += `<span class="task-log-attr-part" title="${escHtml(t('Parked by') + (it.addedAt ? ' · ' + new Date(it.addedAt).toLocaleString() : ''))}">+ ${sessionChip(it.addedBy)}${it.addedAt ? ` <span class="task-log-time">${escHtml(fmtDay(it.addedAt))}</span>` : ''}</span>`;
       }
+      // claimants — each removable (admin action: strip a stale claim)
+      const claims = it.claimedBy || [];
+      if (claims.length) {
+        html += `<span class="task-log-attr-part" title="${escHtml(t('Claimed by {n} session(s)', { n: claims.length }))}">⚑ ${claims.map((k) => `${sessionChip(k)}<button class="task-log-claim-x" data-unclaim="${escHtml(k)}" data-bidx="${it._i}" title="${escHtml(t('Remove this claim'))}">×</button>`).join('')}</span>`;
+      } else if (it.status === 'open') {
+        html += `<span class="task-log-attr-part task-log-unclaimed" title="${escHtml(t('No session has claimed this item'))}">${escHtml(t('unclaimed'))}</span>`;
+      }
       if (it.status !== 'open' && (it.resolvedBy || it.resolvedAt)) {
         html += `<span class="task-log-attr-part" title="${escHtml((it.status === 'done' ? t('Resolved by') : t('Dropped by')) + (it.resolvedAt ? ' · ' + new Date(it.resolvedAt).toLocaleString() : ''))}">${it.status === 'done' ? '✓' : '⊘'} ${sessionChip(it.resolvedBy)}${it.resolvedAt ? ` <span class="task-log-time">${escHtml(fmtDay(it.resolvedAt))}</span>` : ''}</span>`;
       }
@@ -271,6 +278,19 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
       st.textContent = meta.icon;
       st.title = meta.label;
       line.appendChild(st);
+      if (it.id) {
+        // the stable id — click to copy, so the user can hand it to ANY agent
+        // ("look at backlog B-xxxx"), which can then view/claim it
+        const idc = document.createElement('code');
+        idc.className = 'task-log-blid';
+        idc.textContent = it.id;
+        idc.title = t('Click to copy — paste it to any agent of this group ("look at backlog {id}")', { id: it.id });
+        idc.onclick = (e) => {
+          e.preventDefault(); e.stopPropagation();
+          import('./utils.js').then(({ copyText }) => copyText(it.id).then(() => showToast(t('Copied {id}', { id: it.id }))));
+        };
+        line.appendChild(idc);
+      }
       const txt = document.createElement('span');
       txt.className = 'task-log-note';
       txt.textContent = it.text;
@@ -357,7 +377,7 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
     wireChips(body);
   };
 
-  // Session chips filter the view on click.
+  // Session chips filter the view on click; claim × buttons strip a claim.
   const wireChips = (body) => {
     body.querySelectorAll('.task-log-chip.clickable').forEach((el) => {
       el.onclick = (e) => {
@@ -365,6 +385,15 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
         const k = el.dataset.skey;
         state.session = state.session === k ? null : k;
         render();
+      };
+    });
+    body.querySelectorAll('.task-log-claim-x').forEach((el) => {
+      el.onclick = (e) => {
+        e.stopPropagation(); e.preventDefault();
+        const idx = Number(el.dataset.bidx);
+        const key = el.dataset.unclaim;
+        const next = (task.backlog || []).map((b, j) => (j === idx ? { ...b, claimedBy: (b.claimedBy || []).filter((k) => k !== key) } : b));
+        sidebar._taskUpdate(taskId, { backlog: next });
       };
     });
   };

@@ -66,15 +66,29 @@ check('diff omits the tools teaching (already known)', !c3.includes('Reporting b
 const c4 = call();
 check('after diff → quiet again', !c4.includes('task-update') && !c4.includes('task-context'), c4);
 
-// backlog: a parked item rides the diff; the full context never dumps items
-// this session didn't park (2.122.0 user directive)
+// backlog events are TARGETED (2.123.0): an unrelated session hears nothing;
+// a claimer gets the event line. This session's key is claude:sess1.
 await sleep(3);
-tasks.update(g1.id, { backlog: [{ text: 'parked by someone else', status: 'open', addedBy: 'codex:elsewhere', addedAt: Date.now() }] });
-const cBl = call();
-check('backlog change → diff event line', cBl.includes('<vibespace-task-update>') && cBl.includes('Backlog PARKED: parked by someone else'), cBl.slice(0, 300));
+tasks.update(g1.id, { backlog: [{ text: 'parked by someone else', status: 'open', addedBy: 'codex:elsewhere', claimedBy: ['codex:elsewhere'], addedAt: Date.now() }] });
+const cBl0 = call();
+check('unrelated parked item → NO injection (targeted diff)', !cBl0.includes('task-update') && !cBl0.includes('parked by someone else'), cBl0.slice(0, 200));
+await sleep(3);
+{
+  const bl = tasks.get(g1.id).backlog.map((b) => ({ ...b, claimedBy: [...b.claimedBy, 'claude:sess1'] }));
+  tasks.update(g1.id, { backlog: bl });
+}
+const cBl1 = call();
+check('claiming session hears the CLAIMED event', cBl1.includes('<vibespace-task-update>') && cBl1.includes('Backlog CLAIMED') && cBl1.includes('parked by someone else'), cBl1.slice(0, 300));
+await sleep(3);
+{
+  const bl = tasks.get(g1.id).backlog.map((b) => ({ ...b, status: 'done', resolvedBy: 'codex:elsewhere', resolvedAt: Date.now() }));
+  tasks.update(g1.id, { backlog: bl });
+}
+const cBl2 = call();
+check('claimer notified when another session resolves it', cBl2.includes('Backlog RESOLVED') && cBl2.includes('_(by codex:elsewhere)_'), cBl2.slice(0, 300));
 await sleep(3); // contentUpdatedAt gate is ms-granular — same-ms edits look unseen
 tasks.update(g1.id, { backlog: [] });
-call(); // consume the removal diff so later sections start clean
+call(); // consume any removal diff so later sections start clean
 
 // no-op edit (same objective re-saved) bumps contentUpdatedAt but changes nothing visible
 await sleep(3);
@@ -152,13 +166,22 @@ function hitRoute(method, path, { query = {}, body = {} } = {}) {
 {
   const g = g1.id;
   const r1 = hitRoute('POST', '/api/agent/task-backlog', { body: { group: g, add: 'parked via api', detail: 'the context' } });
-  check('backlog-add → open item with session attribution', r1.code === 200 && r1.out.backlog.length === 1 && r1.out.backlog[0].addedBy === 'claude:sess1' && r1.out.backlog[0].detail === 'the context', JSON.stringify(r1.out));
+  check('backlog-add → open item, id minted, AUTO-CLAIMED by the caller', r1.code === 200 && r1.out.backlog.length === 1 && /^B-[0-9a-f]{4}$/.test(r1.out.backlog[0].id) && r1.out.backlog[0].addedBy === 'claude:sess1' && r1.out.backlog[0].claimedBy.includes('claude:sess1') && r1.out.backlog[0].detail === 'the context', JSON.stringify(r1.out));
+  const bid = r1.out.backlog[0].id;
   const r2 = hitRoute('GET', '/api/agent/task', { query: { group: g } });
-  check('GET task carries open backlog', r2.out.task.backlog.length === 1 && r2.out.task.backlog[0].text === 'parked via api', JSON.stringify(r2.out.task.backlog));
-  const r3 = hitRoute('POST', '/api/agent/task-backlog', { body: { group: g, done: 1 } });
-  check('backlog-done by open-index resolves', r3.code === 200 && r3.out.backlog.length === 0 && tasks.get(g).backlog[0].status === 'done' && tasks.get(g).backlog[0].resolvedBy === 'claude:sess1', JSON.stringify(tasks.get(g).backlog));
+  check('GET task carries open backlog with id + claims', r2.out.task.backlog.length === 1 && r2.out.task.backlog[0].id === bid && r2.out.task.backlog[0].claimedBy.length === 1, JSON.stringify(r2.out.task.backlog));
+  const rU = hitRoute('POST', '/api/agent/task-backlog', { body: { group: g, unclaim: bid } });
+  check('unclaim by id empties claims', rU.code === 200 && tasks.get(g).backlog[0].claimedBy.length === 0, JSON.stringify(tasks.get(g).backlog[0]));
+  const rC = hitRoute('POST', '/api/agent/task-backlog', { body: { group: g, claim: bid.toUpperCase() } });
+  check('claim by id (case-insensitive) re-adds the caller', rC.code === 200 && tasks.get(g).backlog[0].claimedBy.includes('claude:sess1'), JSON.stringify(tasks.get(g).backlog[0]));
+  const r3 = hitRoute('POST', '/api/agent/task-backlog', { body: { group: g, done: bid } });
+  check('backlog-done by id resolves', r3.code === 200 && r3.out.backlog.length === 0 && tasks.get(g).backlog[0].status === 'done' && tasks.get(g).backlog[0].resolvedBy === 'claude:sess1', JSON.stringify(tasks.get(g).backlog));
+  const rS = hitRoute('POST', '/api/agent/task-backlog', { body: { group: g, show: bid } });
+  check('show by id works on a RESOLVED item (the pasted-id path)', rS.code === 200 && rS.out.item.id === bid && rS.out.item.status === 'done' && rS.out.item.detail === 'the context', JSON.stringify(rS.out));
   const r4 = hitRoute('POST', '/api/agent/task-backlog', { body: { group: g, drop: 'no such thing' } });
   check('drop of a non-open/missing item → 400', r4.code === 400, JSON.stringify(r4.out));
+  const r6 = hitRoute('POST', '/api/agent/task-backlog', { body: { group: g, claim: 'B-ffff' } });
+  check('claim of an unknown id → 400 with id in the error', r6.code === 400 && /B-ffff/.test(r6.out.error), JSON.stringify(r6.out));
   const r5 = hitRoute('POST', '/api/agent/task-plan', { body: { group: g, check: 1 } });
   check('legacy task-plan still answers 410 with backlog pointer', r5.code === 410 && /backlog-add/.test(r5.out.error), JSON.stringify(r5.out));
 }

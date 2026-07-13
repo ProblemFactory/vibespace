@@ -126,7 +126,16 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
       for (const item of blOpen) {
         const row = document.createElement('div');
         row.className = 'task-detail-backlog-item';
+        if (item.id) {
+          const idc = document.createElement('code');
+          idc.className = 'task-detail-blid';
+          idc.textContent = item.id;
+          idc.title = t('Click to copy — paste it to any agent of this group ("look at backlog {id}")', { id: item.id });
+          idc.onclick = () => import('./utils.js').then(({ copyText }) => copyText(item.id).then(() => showToast(t('Copied {id}', { id: item.id }))));
+          row.appendChild(idc);
+        }
         const txt = document.createElement('span'); txt.textContent = item.text;
+        if (item.claimedBy?.length) { txt.title = t('Claimed by {n} session(s)', { n: item.claimedBy.length }) + ': ' + item.claimedBy.join(', '); }
         row.appendChild(txt);
         if (item.detail) {
           const dg = document.createElement('span');

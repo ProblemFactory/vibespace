@@ -43,9 +43,22 @@ const CAPS = { title: 120, objective: 20000, note: 2000, detail: 6000, reason: 5
 // Backlog (2.122.0) = the group's PARKING LOT for non-immediate items: deferred
 // user decisions, "later" work. Semantically NOT the removed checklist (agent
 // work items — those live on each session's own todo): injection never dumps
-// it (only a summary of items THIS session parked + a one-line query pointer),
-// and agents are taught to never start backlog items unasked.
+// it (only a summary + a one-line query pointer), and agents are taught to
+// never start backlog items unasked.
+// CLAIM MODEL (2.123.0, user directive): each item has a stable short `id`
+// (B-xxxx — the user can copy it and hand it to ANY member agent, which can
+// then view/claim it) and a `claimedBy` list of session keys. The session that
+// parks an item auto-claims it. Injection reminders show the items a session
+// CLAIMED (not merely created), and diff events for an item go ONLY to
+// sessions that created or claimed it — everyone else just has the count line.
 const BACKLOG_STATUSES = ['open', 'done', 'dropped'];
+const BACKLOG_ID_RE = /^B-[0-9a-f]{4,8}$/i;
+function mintBacklogId(taken) {
+  let id;
+  do { id = 'B-' + crypto.randomBytes(2).toString('hex'); } while (taken.has(id));
+  taken.add(id);
+  return id;
+}
 
 function slugify(title) {
   return String(title || '')
@@ -103,6 +116,19 @@ class TaskGroupManager {
             ...(Number(p.addedAt) ? { addedAt: Number(p.addedAt) } : {}),
           }));
         migrated = true;
+      }
+      // Claim-model backfill (2.123.0): every item gets a stable id; the
+      // creator auto-claims (except UI-added 'user' — claims are session
+      // identities). Idempotent — only touches items missing the fields.
+      {
+        const taken = new Set((t.backlog || []).map((b) => b.id).filter(Boolean));
+        for (const b of t.backlog || []) {
+          if (!b.id || !BACKLOG_ID_RE.test(b.id)) { b.id = mintBacklogId(taken); migrated = true; }
+          if (!Array.isArray(b.claimedBy)) {
+            b.claimedBy = (b.addedBy && b.addedBy !== 'user') ? [b.addedBy] : [];
+            migrated = true;
+          }
+        }
       }
     }
     if (!existed && typeof readUserState === 'function') {
@@ -170,7 +196,7 @@ class TaskGroupManager {
     if (cap > 0 && openBl.length) {
       lines.push('', '## Backlog  _(parked — deferred decisions / future work, NOT immediate tasks)_', '');
       for (const b of openBl) {
-        lines.push(`- ${b.text}`);
+        lines.push(`- [${b.id || '?'}] ${b.text}${b.claimedBy?.length ? `  _(claimed by ${b.claimedBy.join(', ')})_` : ''}`);
         if (b.detail) for (const dl of b.detail.split('\n')) lines.push(`  > ${dl}`);
       }
     }
@@ -319,7 +345,7 @@ class TaskGroupManager {
       `\`\`\``,
       `vibespace-task ${g}backlog-add "one-line item" --detail "context for whoever picks it up later"`,
       `\`\`\``,
-      `(\`vibespace-task ${g}backlog\` lists/queries it; \`backlog-done <n|text>\` once decided or finished)`,
+      `(parking auto-CLAIMS the item for you — claimed items are re-surfaced to you and their changes notify you. \`vibespace-task ${g}backlog\` lists; \`backlog <id>\` shows one in full; \`backlog-claim/-unclaim <id>\` take/hand back ownership — if the user hands you a backlog id, view it and claim it; \`backlog-done <id>\` once decided or finished)`,
       '',
       "Your session's live state on the board — set it the MOMENT it changes. Waiting states REQUIRE both flags:",
       `\`\`\``,
@@ -336,26 +362,27 @@ class TaskGroupManager {
       'In chat replies use ABSOLUTE file paths (e.g. /home/user/out/final.wav) — the UI makes them clickable; bare/relative names may not resolve.'];
   }
 
-  // Backlog note for INJECTION (user directive 2.122.0): never dump the whole
-  // backlog per hook — show a summary reminder of the OPEN items THIS session
-  // parked (so the agent that deferred something re-surfaces it to the user),
-  // otherwise just one line saying how to query/modify it. Returns lines.
+  // Backlog note for INJECTION (user directive 2.122.0/2.123.0): never dump
+  // the whole backlog per hook — show a summary reminder of the OPEN items
+  // THIS session CLAIMED (the session that parks one auto-claims it), so the
+  // responsible agent re-surfaces them; otherwise just one line saying how to
+  // query/claim. Returns lines.
   _backlogNoteLines(t, { gid = '', sessionKey = null } = {}) {
     const open = (t.backlog || []).filter((b) => b.status === 'open');
     if (!open.length) return [];
-    const mine = sessionKey ? open.filter((b) => b.addedBy === sessionKey) : [];
+    const mine = sessionKey ? open.filter((b) => (b.claimedBy || []).includes(sessionKey)) : [];
     const out = [''];
     if (mine.length) {
-      out.push(`### Backlog reminders — parked by THIS session, still open  _(surface them to the user when relevant; \`vibespace-task ${gid}backlog-done <n|text>\` once decided/finished)_`);
+      out.push(`### Backlog reminders — items CLAIMED by THIS session, still open  _(surface them to the user when relevant; \`vibespace-task ${gid}backlog-done <id>\` once decided/finished; \`backlog-unclaim <id>\` to hand one back)_`);
       for (const b of mine.slice(0, 5)) {
         const clipped = b.text.length > 160;
-        out.push(`- ${clipped ? b.text.slice(0, 159).trimEnd() + '…' : b.text}${(b.detail || clipped) ? ' †' : ''}`);
+        out.push(`- [${b.id || '?'}] ${clipped ? b.text.slice(0, 159).trimEnd() + '…' : b.text}${(b.detail || clipped) ? ' †' : ''}`);
       }
-      if (mine.length > 5) out.push(`- … +${mine.length - 5} more of yours`);
+      if (mine.length > 5) out.push(`- … +${mine.length - 5} more claimed by you`);
       const others = open.length - mine.length;
-      out.push(`(group backlog holds ${open.length} open parked item${open.length > 1 ? 's' : ''}${others ? ` incl. ${others} from others` : ''} — \`vibespace-task ${gid}backlog\` lists/edits them)`);
+      out.push(`(group backlog holds ${open.length} open parked item${open.length > 1 ? 's' : ''}${others ? ` incl. ${others} not claimed by you` : ''} — \`vibespace-task ${gid}backlog\` lists them)`);
     } else {
-      out.push(`Group backlog: ${open.length} open parked item${open.length > 1 ? 's' : ''} (deferred decisions / future work — NOT immediate tasks; never start one unasked). \`vibespace-task ${gid}backlog\` lists/edits them.`);
+      out.push(`Group backlog: ${open.length} open parked item${open.length > 1 ? 's' : ''} (deferred decisions / future work — NOT immediate tasks; never start one unasked). \`vibespace-task ${gid}backlog\` lists them; \`backlog-claim <id>\` takes ownership of one.`);
     }
     return out;
   }
@@ -439,7 +466,7 @@ class TaskGroupManager {
       title: t.title,
       objHash: this._h(t.objective || ''),
       contextDir: t.contextDir || null,
-      backlog: (t.backlog || []).map((b) => ({ text: b.text, status: b.status || 'open', d: b.detail ? this._h(b.detail) : '' })),
+      backlog: (t.backlog || []).map((b) => ({ id: b.id, text: b.text, status: b.status || 'open', d: b.detail ? this._h(b.detail) : '', addedBy: b.addedBy || null, claimedBy: [...(b.claimedBy || [])] })),
       // New activity = entries with at > this. Two writes inside the SAME ms
       // split by an injection in between could drop one line from a diff —
       // accepted (unreachable in practice; recoverable via show --full).
@@ -460,7 +487,7 @@ class TaskGroupManager {
   // review-caught) → caller falls back to full delivery. Line order mirrors
   // renderContext (identity → objective → folder → activity LAST)
   // so tail-first truncation drops the safest section first.
-  diffChanges(id, snap, { gid = '', ctxBase = null, oldSig = '', newSig = '' } = {}) {
+  diffChanges(id, snap, { gid = '', ctxBase = null, oldSig = '', newSig = '', sessionKey = null } = {}) {
     const t = this.get(id);
     if (!snap || typeof snap !== 'object' || typeof snap.objHash !== 'string') return null;
     if ((snap.contextDir || null) !== (t.contextDir || null)) return null;
@@ -484,37 +511,42 @@ class TaskGroupManager {
     }
     // Backlog changes are EVENTS (a parked/resolved item), so they do ride the
     // diff — unlike the standing content, which injection never dumps (2.122.0).
-    // Items have no id, so match by text — OCCURRENCE-INDEXED (the k-th
-    // duplicate pairs with the k-th; duplicate texts are legal, backlog-add
-    // never dedups). A naive first-match Map silently LOSES a status flip on
-    // the 2nd duplicate and emits phantom lines forever (the retired checklist
-    // diff had this bug, reproduced — same construction here).
-    const occKey = (counter, text) => { const n = counter.get(text) || 0; counter.set(text, n + 1); return `${n}\u0000${text}`; };
-    const occOld = new Map();
-    { const c = new Map(); for (const b of (snap.backlog || [])) occOld.set(occKey(c, b.text), b); }
-    const matchedOld = new Set();
+    // Matched by the stable per-item `id` (2.123.0 — text edits read as
+    // "reworded", not REMOVED+NEW; the old occurrence-indexed text pairing is
+    // gone with the ids). TARGETED (user directive): an item's events go ONLY
+    // to sessions that created OR claimed it — pass sessionKey to filter; a
+    // null sessionKey (tests/legacy callers) keeps every event.
+    const relevant = (it) => !sessionKey || it.addedBy === sessionKey || (it.claimedBy || []).includes(sessionKey);
+    const oldById = new Map();
+    for (const b of (snap.backlog || [])) if (b.id) oldById.set(b.id, b);
     const blCh = [];
-    { const c = new Map();
-      for (const b of t.backlog || []) {
-        const k = occKey(c, b.text);
-        const o = occOld.get(k);
-        const st = b.status || 'open';
-        if (!o) {
-          // brand-new items: only OPEN ones are worth announcing (a new item
-          // already resolved is history, not a pending parked thing)
-          if (st === 'open') blCh.push(`- Backlog PARKED: ${b.text}${b.detail ? ' †' : ''}${b.addedBy ? `  _(by ${b.addedBy})_` : ''}`);
-          continue;
-        }
-        matchedOld.add(k);
-        if ((o.status || 'open') !== st) {
-          const verb = st === 'done' ? 'RESOLVED' : st === 'dropped' ? 'DROPPED' : 'REOPENED';
-          blCh.push(`- Backlog ${verb}: ${b.text}${b.resolvedBy && st !== 'open' ? `  _(by ${b.resolvedBy})_` : ''}`);
-        } else if (st === 'open' && (b.detail ? this._h(b.detail) : '') !== (o.d || '')) {
-          blCh.push(`- Backlog item detail updated: ${b.text}  _(† \`vibespace-task ${gid}show --full\`)_`);
-        }
+    for (const b of t.backlog || []) {
+      const o = b.id ? oldById.get(b.id) : null;
+      const st = b.status || 'open';
+      if (!o) {
+        // brand-new items: only OPEN ones are worth announcing (a new item
+        // already resolved is history, not a pending parked thing)
+        if (st === 'open' && relevant(b)) blCh.push(`- Backlog PARKED [${b.id}]: ${b.text}${b.detail ? ' †' : ''}${b.addedBy ? `  _(by ${b.addedBy})_` : ''}`);
+        continue;
+      }
+      oldById.delete(b.id); // remaining at the end = removed items
+      if (!relevant(b) && !relevant(o)) continue; // not this session's item — the count line covers it
+      if ((o.status || 'open') !== st) {
+        const verb = st === 'done' ? 'RESOLVED' : st === 'dropped' ? 'DROPPED' : 'REOPENED';
+        blCh.push(`- Backlog ${verb} [${b.id}]: ${b.text}${b.resolvedBy && st !== 'open' ? `  _(by ${b.resolvedBy})_` : ''}`);
+        continue; // the status flip is the headline — skip lesser deltas
+      }
+      const oldClaims = o.claimedBy || [], newClaims = b.claimedBy || [];
+      const gained = newClaims.filter((x) => !oldClaims.includes(x));
+      const lost = oldClaims.filter((x) => !newClaims.includes(x));
+      if (gained.length) blCh.push(`- Backlog CLAIMED [${b.id}]: ${b.text}  _(by ${gained.join(', ')})_`);
+      if (lost.length) blCh.push(`- Backlog UNCLAIMED [${b.id}]: ${b.text}  _(${lost.join(', ')} handed it back)_`);
+      if (st === 'open' && o.text !== b.text) blCh.push(`- Backlog item reworded [${b.id}]: ${b.text}`);
+      else if (st === 'open' && (b.detail ? this._h(b.detail) : '') !== (o.d || '')) {
+        blCh.push(`- Backlog item detail updated [${b.id}]: ${b.text}  _(† \`vibespace-task ${gid}show --full\`)_`);
       }
     }
-    for (const [k, o] of occOld) if (!matchedOld.has(k) && (o.status || 'open') === 'open') blCh.push(`- Backlog REMOVED: ${o.text}`);
+    for (const [, o] of oldById) if ((o.status || 'open') === 'open' && relevant(o)) blCh.push(`- Backlog REMOVED [${o.id}]: ${o.text}`);
     const nBlChanges = blCh.length;
     if (blCh.length > 15) {
       const extra = blCh.length - 15;
@@ -573,9 +605,9 @@ class TaskGroupManager {
   // ONE group's delta as a standalone <vibespace-task-update> block.
   // Back-compat single-group API: computes + renders. Returns null (fall back
   // to full) / '' (no-op change, skip) / the block.
-  renderContextDiff(id, snap, { multi = false, ctxBase = null, oldSig = '', newSig = '' } = {}) {
+  renderContextDiff(id, snap, { multi = false, ctxBase = null, oldSig = '', newSig = '', sessionKey = null } = {}) {
     const gid = multi ? `--group ${id} ` : '';
-    const r = this.diffChanges(id, snap, { gid, ctxBase, oldSig, newSig });
+    const r = this.diffChanges(id, snap, { gid, ctxBase, oldSig, newSig, sessionKey });
     if (r === null) return null;
     if (!r.lines.length) return '';
     return this.renderDiffBlock(id, r, { multi, ctxBase });
@@ -885,9 +917,14 @@ class TaskGroupManager {
     // client bundle may still send it; a stored dormant t.plan stays untouched.
     if (patch.backlog !== undefined) {
       if (!Array.isArray(patch.backlog)) throw new Error('backlog must be an array');
+      const taken = new Set(); // ids stay unique — a duplicated id gets re-minted
       t.backlog = patch.backlog.slice(0, CAPS.backlogItems).map((it) => ({
+        // stable identity — survives text edits, referenced by CLI/diff/user
+        id: (typeof it?.id === 'string' && BACKLOG_ID_RE.test(it.id) && !taken.has(it.id)) ? (taken.add(it.id), it.id) : mintBacklogId(taken),
         text: String(it?.text || '').slice(0, CAPS.backlogItem),
         status: BACKLOG_STATUSES.includes(it?.status) ? it.status : 'open',
+        // sessions that CLAIMED the item (reminder + diff-notification targets)
+        claimedBy: sanitizeStrArray(it?.claimedBy, 20),
         // optional full context behind the one-liner (same split as Activity)
         ...(typeof it?.detail === 'string' && it.detail.trim() ? { detail: it.detail.trim().slice(0, CAPS.detail) } : {}),
         // attribution: who parked it / who resolved it ('user' = from the UI)
@@ -997,9 +1034,9 @@ class TaskGroupManager {
     const bl = t.backlog || [];
     if (bl.length) {
       body.push('', '## Backlog', '');
-      // [ ] open · [x] done · [-] dropped — parsed back on import
+      // [ ] open · [x] done · [-] dropped; the [B-xxxx] id round-trips — parsed back on import
       for (const b of bl) {
-        body.push(`- [${b.status === 'done' ? 'x' : b.status === 'dropped' ? '-' : ' '}] ${b.text}`);
+        body.push(`- [${b.status === 'done' ? 'x' : b.status === 'dropped' ? '-' : ' '}]${b.id ? ` [${b.id}]` : ''} ${b.text}`);
         if (b.detail) for (const dl of b.detail.split('\n')) body.push(`  > ${dl}`);
       }
     }
@@ -1062,10 +1099,10 @@ class TaskGroupManager {
     const blM = body.match(/##\s+Backlog\s*\n([\s\S]*?)(?=\n##\s+(?:Plan|Checklist|Progress|Activity log)\b|$)/i);
     if (blM) {
       for (const line of blM[1].split('\n')) {
-        const bm = line.match(/^\s*-\s*\[([ xX-])\]\s+(.+)$/);
+        const bm = line.match(/^\s*-\s*\[([ xX-])\]\s+(?:\[(B-[0-9a-fA-F]{4,8})\]\s+)?(.+)$/);
         if (bm) {
           const mark = bm[1].toLowerCase();
-          backlog.push({ text: bm[2].trim().slice(0, CAPS.backlogItem), status: mark === 'x' ? 'done' : mark === '-' ? 'dropped' : 'open' });
+          backlog.push({ ...(bm[2] ? { id: bm[2] } : {}), text: bm[3].trim().slice(0, CAPS.backlogItem), status: mark === 'x' ? 'done' : mark === '-' ? 'dropped' : 'open' });
           continue;
         }
         const dm = line.match(/^\s*>\s?(.*)$/);
@@ -1102,8 +1139,22 @@ class TaskGroupManager {
       attention: existing?.attention || null,
       objective: objective.slice(0, CAPS.objective),
       // file wins when it carries a backlog; else keep the store's (an absent
-      // section is indistinguishable from an empty one — prefer not to wipe)
-      backlog: backlog.length ? backlog.slice(0, CAPS.backlogItems) : (existing?.backlog || []),
+      // section is indistinguishable from an empty one — prefer not to wipe).
+      // Ids round-trip via the [B-xxxx] prefix; items matching an existing id
+      // keep their claims/attribution (the file doesn't carry those).
+      backlog: (() => {
+        const prevById = new Map((existing?.backlog || []).filter((b) => b.id).map((b) => [b.id, b]));
+        const taken = new Set();
+        return (backlog.length ? backlog.slice(0, CAPS.backlogItems) : (existing?.backlog || [])).map((b) => {
+          const prev = b.id ? prevById.get(b.id) : null;
+          return {
+            ...(prev || {}),
+            ...b,
+            id: (b.id && BACKLOG_ID_RE.test(b.id) && !taken.has(b.id)) ? (taken.add(b.id), b.id) : mintBacklogId(taken),
+            claimedBy: Array.isArray(b.claimedBy) && b.claimedBy.length ? b.claimedBy : (prev?.claimedBy || []),
+          };
+        });
+      })(),
       // a dormant stored checklist survives re-import untouched
       ...(existing?.plan?.length ? { plan: existing.plan } : {}),
       // prefer the store's live log if the task already exists (it's fuller —
@@ -1138,15 +1189,20 @@ class TaskGroupManager {
         attention: raw.attention && typeof raw.attention === 'object'
           ? { reason: String(raw.attention.reason || '').slice(0, CAPS.reason), since: Number(raw.attention.since) || now } : null,
         objective: typeof raw.objective === 'string' ? raw.objective.slice(0, CAPS.objective) : '',
-        backlog: Array.isArray(raw.backlog) ? raw.backlog.slice(0, CAPS.backlogItems).map((it) => ({
-          text: String(it?.text || '').slice(0, CAPS.backlogItem),
-          status: BACKLOG_STATUSES.includes(it?.status) ? it.status : 'open',
-          ...(typeof it?.detail === 'string' && it.detail ? { detail: it.detail.slice(0, CAPS.detail) } : {}),
-          ...(it?.addedBy ? { addedBy: String(it.addedBy).slice(0, 120) } : {}),
-          ...(Number(it?.addedAt) ? { addedAt: Number(it.addedAt) } : {}),
-          ...(it?.resolvedBy ? { resolvedBy: String(it.resolvedBy).slice(0, 120) } : {}),
-          ...(Number(it?.resolvedAt) ? { resolvedAt: Number(it.resolvedAt) } : {}),
-        })).filter((it) => it.text) : [],
+        backlog: (() => {
+          const taken = new Set();
+          return Array.isArray(raw.backlog) ? raw.backlog.slice(0, CAPS.backlogItems).map((it) => ({
+            id: (typeof it?.id === 'string' && BACKLOG_ID_RE.test(it.id) && !taken.has(it.id)) ? (taken.add(it.id), it.id) : mintBacklogId(taken),
+            text: String(it?.text || '').slice(0, CAPS.backlogItem),
+            status: BACKLOG_STATUSES.includes(it?.status) ? it.status : 'open',
+            claimedBy: sanitizeStrArray(it?.claimedBy, 20),
+            ...(typeof it?.detail === 'string' && it.detail ? { detail: it.detail.slice(0, CAPS.detail) } : {}),
+            ...(it?.addedBy ? { addedBy: String(it.addedBy).slice(0, 120) } : {}),
+            ...(Number(it?.addedAt) ? { addedAt: Number(it.addedAt) } : {}),
+            ...(it?.resolvedBy ? { resolvedBy: String(it.resolvedBy).slice(0, 120) } : {}),
+            ...(Number(it?.resolvedAt) ? { resolvedAt: Number(it.resolvedAt) } : {}),
+          })).filter((it) => it.text) : [];
+        })(),
         // dormant passthrough: a config bundle from an older instance may carry
         // a checklist — keep the data (never rendered), don't destroy it
         ...(Array.isArray(raw.plan) && raw.plan.length ? { plan: raw.plan.slice(0, 200) } : {}),
