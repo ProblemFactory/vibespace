@@ -518,6 +518,8 @@ app.post('/api/agent/task-backlog', (req, res) => {
       if (typeof r !== 'number') return res.status(404).json({ error: r.err });
       return res.json({ success: true, item: backlog[r] }); // read-only — no update
     }
+    let actedIdx = -1;      // claim/unclaim → echo the item + co-claimants back
+    let alreadyMine = false; // idempotent re-claim
     if (typeof add === 'string' && add.trim()) {
       // parking auto-CLAIMS for the caller (user directive) — the parker is
       // the natural owner until it hands the item back
@@ -526,8 +528,11 @@ app.post('/api/agent/task-backlog', (req, res) => {
       const r = findIdx(claim !== undefined ? claim : unclaim);
       if (typeof r !== 'number') return res.status(400).json({ error: r.err });
       const b = backlog[r];
-      if (claim !== undefined) { if (!b.claimedBy.includes(key)) b.claimedBy.push(key); }
-      else b.claimedBy = b.claimedBy.filter((k) => k !== key);
+      if (claim !== undefined) {
+        if (b.claimedBy.includes(key)) alreadyMine = true;
+        else b.claimedBy.push(key);
+      } else b.claimedBy = b.claimedBy.filter((k) => k !== key);
+      actedIdx = r;
     } else if (done !== undefined || drop !== undefined) {
       const r = findIdx(done !== undefined ? done : drop);
       if (typeof r !== 'number') return res.status(400).json({ error: r.err });
@@ -538,7 +543,14 @@ app.post('/api/agent/task-backlog', (req, res) => {
       return res.status(400).json({ error: 'need add, done, drop, claim, unclaim, or show' });
     }
     const updated = tasks.update(gid, { backlog });
-    res.json({ success: true, backlog: updated.backlog.filter((b) => b.status === 'open') });
+    // claim ack carries the CO-CLAIMANTS (user directive: claiming must warn
+    // when other sessions already hold the item, so agents coordinate)
+    const acted = actedIdx >= 0 ? updated.backlog[actedIdx] : null;
+    res.json({
+      success: true,
+      backlog: updated.backlog.filter((b) => b.status === 'open'),
+      ...(acted ? { item: acted, others: (acted.claimedBy || []).filter((k) => k !== key), alreadyMine } : {}),
+    });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 // ── Hook install management (Manage Agents dialog — auto-registers at boot,
