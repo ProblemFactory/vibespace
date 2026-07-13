@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.116.0 — 2026-07-13
+- Remote session sidebar: fixed a duplicate card after resuming a remote session — the same session showed BOTH live (in Running, as a webui-managed session) AND stopped (in Recent, from the independent remote ssh-discovery path, which reports remote CHAT sessions as stopped since they have no remote dtach lock). The Recent/History remote zones now dedup discovered sessions against the live webui list by session id (`_wbFilterRemote`).
+- Ctrl+K session palette now searches REMOTE sessions too (it previously only saw local + live-remote sessions, never remote stopped ones). It merges already-discovered remote sessions, kicks a one-time ssh scan of every configured host on open (results stream in), and resumes a remote pick with its `hostId` so `--resume` runs on the right machine.
+
 ## 2.115.0 — 2026-07-13
 - Optional persistent ops log (`src/opslog.js`, env-gated no-op by default): with `VIBESPACE_OPSLOG_DIR` set the server tees its console output to daily-rotated files (`server-YYYY-MM-DD.log`, retention `VIBESPACE_OPSLOG_KEEP_DAYS`, default 30d) plus boot/exit/crash markers — typically pointed at a path-scoped CephFS subtree shared with a fleet admin, so instance logs survive pod recreation and are centrally scannable without any logging infrastructure (no per-node agents, no log database). `VIBESPACE_OPSLOG_CEPHFS_*` env makes the server kernel-mount the subtree itself (same mechanism as My storage). Hung-mount-proof: async writes behind a 10s circuit breaker (one stuck write disables the logger; the app is never blocked — the 2.108.3 threadpool lesson). Helm: `opslog.{enabled,secretName,dir,keepDays}` (secret carries mons/fsName/client/key/path; name defaults to `u-<user>-opslog`).
 

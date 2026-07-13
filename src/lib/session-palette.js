@@ -24,8 +24,10 @@ export function installSessionPalette(app) {
     const name = app.sidebar.getCustomName(s) || s.name || s.webuiName || '';
     if (s.webuiId) {
       app.attachSession(s.webuiId, s.webuiName || name, s.cwd, { mode: s.webuiMode, backend: s.backend || 'claude', backendSessionId: s.backendSessionId || s.sessionId });
-    } else if (s.status === 'stopped') {
-      app.resumeSession(s.sessionId, s.cwd, name, { backend: s.backend || 'claude', backendSessionId: s.backendSessionId || s.sessionId });
+    } else if (s.status === 'stopped' || s.status === 'external' || s.status === 'tmux') {
+      // hostId is REQUIRED for remote sessions or resume runs locally against a
+      // non-existent id (remote sessions reach the palette via _wbRemoteHosts now)
+      app.resumeSession(s.sessionId, s.cwd, name, { backend: s.backend || 'claude', backendSessionId: s.backendSessionId || s.sessionId, hostId: s.host || undefined });
     }
   };
 
@@ -68,11 +70,23 @@ export function installSessionPalette(app) {
 
     const refresh = () => {
       const q = input.value.trim().toLowerCase();
-      const all = app.sidebar?._allSessions || [];
+      const local = app.sidebar?._allSessions || [];
       if (q.startsWith('/') || q.startsWith('~')) {
         items = [{ newSession: true, cwd: input.value.trim() }];
         sel = 0; render(); return;
       }
+      // Include REMOTE-discovered sessions (Ctrl+K used to search only _allSessions
+      // = local + live-remote, never remote STOPPED sessions — real report). Pull
+      // whatever's already discovered per host, deduped against live ids.
+      const liveIds = new Set();
+      for (const s of local) if (s.status === 'live') { const id = s.backendSessionId || s.claudeSessionId; if (id) liveIds.add(id); }
+      const remote = [];
+      const rmap = app.sidebar?._wbRemoteHosts;
+      if (rmap) for (const [hostId, st] of rmap) for (const s of (st?.sessions || [])) {
+        if (liveIds.has(s.sessionId)) continue;
+        remote.push({ ...s, host: s.host || hostId, backendSessionId: s.sessionId, status: s.status === 'remote-running' ? 'external' : 'stopped' });
+      }
+      const all = remote.length ? local.concat(remote) : local;
       const scored = [];
       for (const s of all) {
         const label = app.sidebar.getCustomName(s) || s.name || s.webuiName || (s.cwd || '').split('/').pop() || s.sessionId?.slice(0, 8) || '';
@@ -102,6 +116,19 @@ export function installSessionPalette(app) {
     };
     refresh();
     setTimeout(() => input.focus(), 0);
+    // Kick a one-time discovery of every configured host so remote sessions
+    // become searchable even for hosts not opened in the sidebar yet; re-refresh
+    // a few times as the ssh scans land (each _loadRemoteHost is cached/deduped).
+    try {
+      const sb = app.sidebar;
+      sb?._ensureHostsData?.(); // populate the host list if the workbench hasn't yet
+      let n = 0; const iv = setInterval(() => {
+        if (!overlay || ++n > 8) return clearInterval(iv);
+        const hosts = sb?._hostsData?.hosts || [];
+        if (hosts.length && sb._loadRemoteHost) for (const h of hosts) { try { sb._loadRemoteHost(h.id); } catch {} }
+        refresh();
+      }, 900);
+    } catch {}
   };
 
   document.addEventListener('keydown', (e) => {
