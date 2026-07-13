@@ -49,6 +49,55 @@ console.log('— removed checklist stays out —');
   check('list() carries no plan', mgr.list().every((x) => x.plan === undefined), '');
 }
 
+console.log('— backlog (parking lot, 2.122.0) —');
+{
+  const ME = 'claude:me', OTHER = 'codex:other';
+  const snap = mgr.snapshotForDiff(t.id);
+  mgr.update(t.id, { backlog: [
+    { text: 'user will pick a DB later', status: 'open', addedBy: ME, addedAt: Date.now(), detail: 'options: pg vs sqlite' },
+    { text: 'revisit pricing page', status: 'open', addedBy: OTHER, addedAt: Date.now() },
+  ] });
+  const d = mgr.renderContextDiff(t.id, snap, {});
+  check('PARKED items in diff with by-attribution', d.includes('Backlog PARKED: user will pick a DB later †') && d.includes(`_(by ${ME})_`) && d.includes('Backlog PARKED: revisit pricing page'), d);
+
+  // injection: only MY items dump as reminders; others = a one-line pointer
+  const ctxMine = mgr.renderContext(t.id, { sessionKey: ME });
+  check('own-parked items appear as reminders', ctxMine.includes('Backlog reminders — parked by THIS session') && ctxMine.includes('user will pick a DB later'), ctxMine);
+  check('others’ items NOT dumped for me', !ctxMine.includes('revisit pricing page') && ctxMine.includes('incl. 1 from others'), ctxMine);
+  const ctxOther = mgr.renderContext(t.id, { sessionKey: 'claude:third' });
+  check('no own items → one-line pointer only', !ctxOther.includes('Backlog reminders') && ctxOther.includes('2 open parked items') && !ctxOther.includes('user will pick a DB later'), ctxOther);
+  check('TASK.md carries the full open backlog', mgr.renderTaskMd(mgr.get(t.id)).includes('## Backlog') && mgr.renderTaskMd(mgr.get(t.id)).includes('revisit pricing page'), '');
+
+  // resolve / drop / remove flow through the diff
+  const snap2 = mgr.snapshotForDiff(t.id);
+  let bl = mgr.get(t.id).backlog.map((b) => ({ ...b }));
+  bl[0] = { ...bl[0], status: 'done', resolvedBy: OTHER, resolvedAt: Date.now() };
+  mgr.update(t.id, { backlog: bl });
+  const d2 = mgr.renderContextDiff(t.id, snap2, {});
+  check('RESOLVED with resolver', d2.includes('Backlog RESOLVED: user will pick a DB later') && d2.includes(`_(by ${OTHER})_`), d2);
+
+  const snap3 = mgr.snapshotForDiff(t.id);
+  bl = mgr.get(t.id).backlog.map((b) => ({ ...b }));
+  bl[1] = { ...bl[1], status: 'dropped', resolvedBy: 'user', resolvedAt: Date.now() };
+  mgr.update(t.id, { backlog: bl });
+  check('DROPPED listed', mgr.renderContextDiff(t.id, snap3, {}).includes('Backlog DROPPED: revisit pricing page'), '');
+
+  // duplicate-text items pair occurrence-indexed (the retired checklist diff's
+  // silent-loss/phantom bug class — same construction, keep it covered)
+  mgr.update(t.id, { backlog: [ { text: 'deploy', status: 'done' }, { text: 'deploy', status: 'open' } ] });
+  const snap4 = mgr.snapshotForDiff(t.id);
+  mgr.update(t.id, { backlog: [ { text: 'deploy', status: 'done' }, { text: 'deploy', status: 'done', resolvedBy: 'claude:x' } ] });
+  const d4 = mgr.renderContextDiff(t.id, snap4, {});
+  check('resolving the 2nd duplicate is DELIVERED', d4.includes('Backlog RESOLVED: deploy') && d4.includes('(by claude:x)'), d4);
+  const snap5 = mgr.snapshotForDiff(t.id);
+  await sleep(3);
+  mgr.addProgress(t.id, { note: 'unrelated note for backlog dup test' });
+  const d5 = mgr.renderContextDiff(t.id, snap5, {});
+  check('unchanged duplicates emit NO phantom lines', !d5.includes('Backlog'), d5);
+
+  mgr.update(t.id, { backlog: [] }); // reset for later sections
+}
+
 console.log('— objective / title —');
 {
   const snap = mgr.snapshotForDiff(t.id);
@@ -135,6 +184,26 @@ console.log('— multi-group pointers + size cap —');
   const big = { lines: Array.from({ length: 200 }, (_, i) => `- synthetic change line ${i} ` + 'w'.repeat(60)), bits: [] };
   const d3 = mgr.renderDiffBlock(t.id, big, {});
   check('renderDiffBlock cap trips + overflow pointer', Buffer.byteLength(d3, 'utf-8') <= 5200 && /more lines/.test(d3) && d3.trimEnd().endsWith('</vibespace-task-update>'), `bytes=${Buffer.byteLength(d3, 'utf-8')} tail=${d3.slice(-150)}`);
+}
+
+console.log('— legacy checklist → backlog seed (one-time migration) —');
+{
+  const tmp2 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-blmig-'));
+  fs.writeFileSync(path.join(tmp2, 'task-groups.json'), JSON.stringify({ version: 1, tasks: { 'T-9': {
+    id: 'T-9', title: 'legacy', kind: 'task', archived: false, attention: null, objective: 'obj',
+    plan: [ { text: 'done item', done: true }, { text: 'still open item', done: false, detail: 'ctx', addedBy: 'user' } ],
+    progress: [], sessions: [], folders: [], contextDir: null, color: null, injectContext: true,
+    createdAt: 1, updatedAt: 1, contentUpdatedAt: 1 } } }));
+  const m2 = new TaskGroupManager({ dataDir: tmp2, onChange: () => {} });
+  const bl = m2.get('T-9').backlog;
+  check('unchecked plan items seed the backlog (open, detail kept)', bl.length === 1 && bl[0].text === 'still open item' && bl[0].status === 'open' && bl[0].detail === 'ctx', JSON.stringify(bl));
+  check('checked plan items are NOT seeded', !bl.some((b) => b.text === 'done item'), '');
+  check('dormant plan untouched by the seed', m2.get('T-9').plan.length === 2, '');
+  // a second load must not re-seed (backlog now defined — even if emptied)
+  m2.update('T-9', { backlog: [] });
+  const m3 = new TaskGroupManager({ dataDir: tmp2, onChange: () => {} });
+  check('seed is one-time (empty backlog stays empty on reload)', m3.get('T-9').backlog.length === 0, '');
+  fs.rmSync(tmp2, { recursive: true, force: true });
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

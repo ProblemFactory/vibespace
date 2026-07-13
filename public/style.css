@@ -2744,6 +2744,30 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .task-log-chip.user { background: color-mix(in srgb, var(--green, #3fb950) 12%, transparent); color: var(--green, #3fb950); }
 .task-log-chip.clickable { cursor: pointer; }
 .task-log-chip.clickable:hover, .task-log-chip.active { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+.task-log-attr { display: flex; gap: 8px; flex-shrink: 0; align-items: baseline; }
+.task-log-attr-part { display: flex; gap: 3px; align-items: baseline; font-size: 10px; color: var(--text-dim); }
+.task-log-blline { display: flex; align-items: baseline; gap: 6px; flex: 1; min-width: 0; }
+.task-log-exp .task-log-blline { cursor: pointer; }
+.task-log-bl-status { flex-shrink: 0; color: var(--text-dim); font-size: 11px; }
+.task-log-bl.resolved .task-log-note { text-decoration: line-through; color: var(--text-dim); }
+.task-log-blbtn { color: var(--text-dim); }
+.task-log-blbtn:hover { color: var(--accent); }
+.task-log-bl.task-log-exp .task-log-detail { margin-left: 24px; }
+.task-log-add { margin-top: 8px; }
+.task-log-addwrap { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.task-log-addwrap .task-log-add { margin-top: 0; flex: 1; }
+.task-log-edit { display: flex; flex-direction: column; gap: 6px; padding: 6px 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent); }
+.task-log-edit-detail { background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); font-size: 11px; padding: 4px 8px; resize: vertical; font-family: inherit; }
+.task-log-edit-detail:focus { outline: none; border-color: var(--accent); }
+.task-log-edit-detail.hidden { display: none; }
+.task-log-edit-btns { display: flex; gap: 6px; }
+.task-detail-backlog { display: flex; flex-direction: column; gap: 2px; }
+.task-detail-backlog-item { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+.task-detail-backlog-item span:first-child { flex: 1; min-width: 0; }
+.task-detail-bl-meta { font-size: 9px; color: var(--text-dim); flex-shrink: 0; }
+.task-detail-bl-done { color: var(--green, #3fb950); }
+.task-detail-bl-resolved { font-size: 10px; color: var(--text-dim); cursor: pointer; padding: 2px 0; }
+.task-detail-bl-resolved:hover { color: var(--accent); }
 .task-detail-open-log { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 11px; padding: 0 2px; margin-left: auto; }
 .task-detail-open-log:hover { color: var(--accent); }
 

@@ -319,7 +319,7 @@ const SETTINGS_SCHEMA = {
   'agents.contextUpdateDiffs': {
     type: 'boolean', default: true,
     label: t('Task Group updates as diffs'),
-    description: t('When a Task Group changes mid-session, agents receive only WHAT changed (new activity entries, objective edits, changed shared files) instead of the whole group context again. The full context is still delivered on first contact and after a server restart. Turn off to always re-send the complete state.'),
+    description: t('When a Task Group changes mid-session, agents receive only WHAT changed (new activity entries, objective edits, backlog changes, changed shared files) instead of the whole group context again. The full context is still delivered on first contact and after a server restart. Turn off to always re-send the complete state.'),
     category: t('Session'), liveApply: true,
   },
   'accounts.onDemandQuotaRefresh': {

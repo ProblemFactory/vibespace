@@ -109,8 +109,73 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
       obj.onchange = () => patch({ objective: obj.value });
       objSec.appendChild(obj);
 
-      // (Checklist section removed 2.121.0 — a group-level backlog never made
-      // sense; work items live on each session's own todo list / Steps.)
+      // (Checklist section removed 2.121.0 — agent work items live on each
+      // session's own todo list / Steps.)
+      // ── Backlog (2.122.0): the group's parking lot for NON-immediate items —
+      // deferred decisions, "later" work. Compact editor: OPEN items only;
+      // resolved history lives in the ⧉ full viewer. ──
+      const blSec = section(t('Backlog'), t('parked non-immediate items — decisions you deferred, work for later; agents park items here too and are told never to start them unasked'), { title: t('Open full backlog viewer (status, attribution, search)'), onClick: () => app.openTaskLog(taskId, { tab: 'backlog' }) });
+      const blList = document.createElement('div');
+      blList.className = 'task-detail-backlog';
+      const blAll = task.backlog || [];
+      const blOpen = blAll.map((b, i) => ({ ...b, _i: i })).filter((b) => b.status === 'open');
+      const patchBl = (idx, fn) => {
+        const backlog = blAll.map((b, j) => (j === idx ? fn({ ...b }) : b));
+        patch({ backlog: backlog.filter(Boolean) });
+      };
+      for (const item of blOpen) {
+        const row = document.createElement('div');
+        row.className = 'task-detail-backlog-item';
+        const txt = document.createElement('span'); txt.textContent = item.text;
+        row.appendChild(txt);
+        if (item.detail) {
+          const dg = document.createElement('span');
+          dg.className = 'task-detail-bl-meta'; dg.textContent = '†';
+          dg.style.cursor = 'pointer';
+          dg.title = t('Show details');
+          dg.onclick = () => {
+            let d = row.nextElementSibling;
+            if (d && d.classList.contains('task-detail-progress-detail')) { d.remove(); return; }
+            d = document.createElement('div');
+            d.className = 'task-detail-progress-detail';
+            d.textContent = item.detail;
+            row.after(d);
+          };
+          txt.after(dg);
+        }
+        const doneBtn = document.createElement('button');
+        doneBtn.className = 'task-detail-x task-detail-bl-done'; doneBtn.textContent = '✓';
+        doneBtn.title = t('Mark decided/finished');
+        doneBtn.onclick = () => patchBl(item._i, (b) => ({ ...b, status: 'done', resolvedBy: 'user', resolvedAt: Date.now() }));
+        const dropBtn = document.createElement('button');
+        dropBtn.className = 'task-detail-x'; dropBtn.textContent = '⊘';
+        dropBtn.title = t('Drop as obsolete');
+        dropBtn.onclick = () => patchBl(item._i, (b) => ({ ...b, status: 'dropped', resolvedBy: 'user', resolvedAt: Date.now() }));
+        row.append(doneBtn, dropBtn);
+        blList.appendChild(row);
+      }
+      const nResolved = blAll.length - blOpen.length;
+      if (!blOpen.length) {
+        blList.innerHTML = `<div class="empty-hint">${escHtml(t('Nothing parked'))}</div>`;
+      }
+      blSec.appendChild(blList);
+      if (nResolved) {
+        const res = document.createElement('div');
+        res.className = 'task-detail-bl-resolved';
+        res.textContent = t('{n} resolved/dropped — see full viewer', { n: nResolved });
+        res.onclick = () => app.openTaskLog(taskId, { tab: 'backlog' });
+        blSec.appendChild(res);
+      }
+      const blAdd = document.createElement('input');
+      blAdd.className = 'task-detail-input';
+      blAdd.placeholder = t('+ Park an item (Enter)');
+      blAdd.onkeydown = (e) => {
+        if (e.key === 'Enter' && blAdd.value.trim()) {
+          patch({ backlog: [...blAll, { text: blAdd.value.trim(), status: 'open', addedBy: 'user', addedAt: Date.now() }] });
+          blAdd.value = '';
+        }
+      };
+      blSec.appendChild(blAdd);
 
       // ── Activity log (was "Progress") ──
       const progSec = section(t('Activity log'), t('timestamped notes of what was done — agents append via vibespace-task, you can too'), { title: t('Open full activity viewer (by day, by session, search)'), onClick: () => app.openTaskLog(taskId) });

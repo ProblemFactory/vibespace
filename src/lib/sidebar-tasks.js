@@ -469,7 +469,7 @@ export function installSidebarTasks(SidebarClass) {
     if (!t) return;
     const items = [
       { label: tr('Details…'), action: () => this.app.openTaskDetail(taskId) },
-      { label: tr('Activity log…'), action: () => this.app.openTaskLog(taskId) },
+      { label: tr('Backlog & activity…'), action: () => this.app.openTaskLog(taskId, { tab: 'activity' }) },
       { label: tr('New session in this task…'), action: () => this.app.showNewSessionDialog({ cwd: this._folderPaths(t)[0], taskId }) },
       { label: tr('Rename'), action: async () => {
         const n = await showInputDialog({ title: tr('Rename Task Group'), label: tr('Title'), value: t.title, confirmText: tr('Rename') });
@@ -766,7 +766,7 @@ export function installSidebarTasks(SidebarClass) {
       const detailBtn = document.createElement('button');
       detailBtn.className = 'folder-add-btn';
       detailBtn.innerHTML = ICON_DETAIL;
-      detailBtn.title = tr('Task Group details (objective, activity log)');
+      detailBtn.title = tr('Task Group details (objective, backlog, activity log)');
       detailBtn.onclick = (e) => { e.stopPropagation(); this.app.openTaskDetail(task.id); };
       header.appendChild(detailBtn);
 

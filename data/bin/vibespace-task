@@ -29,12 +29,18 @@ const [cmd, ...rest] = argv;
 const arg = rest.join(' ').trim();
 const USAGE = [
   'usage (updates the Task Group / 岗位 this session belongs to):',
-  '  vibespace-task show [--full]                 objective + recent activity (--full includes entry details)',
+  '  vibespace-task show [--full]                 objective + open backlog + recent activity (--full includes details)',
   '  vibespace-task progress "one-line summary" [--detail "full context"]',
   '      append to the Activity log. The SUMMARY is what everyone sees inline — keep it one tight line;',
   '      put specifics (numbers, paths, caveats other agents may need) in --detail.',
+  '  vibespace-task backlog [--full]              list the group\'s open backlog items (numbered)',
+  '  vibespace-task backlog-add "item" [--detail "context"]',
+  '      PARK a non-immediate item: a decision the user deferred, or work they said comes later.',
+  '      NOT for your own working steps (session todo) and NOT things to start now.',
+  '  vibespace-task backlog-done <n|text>         mark a parked item decided/finished',
+  '  vibespace-task backlog-drop <n|text>         drop a parked item as obsolete',
   '  --group <id>   target a specific group if this session belongs to more than one',
-  '  (a Task Group has NO status and NO checklist — report THIS session\'s state via vibespace-status;',
+  '  (a Task Group has NO status — report THIS session\'s state via vibespace-status;',
   '   keep working steps in your own session todo list)',
 ].join('\n');
 async function call(method, url, body) {
@@ -50,10 +56,21 @@ async function call(method, url, body) {
   if (!res.ok) { console.error('vibespace-task:', data.error || res.status); process.exit(1); }
   return data;
 }
+const fmtBacklog = (items, showDetail) => {
+  items.forEach((b, i) => {
+    console.log('  ' + (i + 1) + '. ' + b.text + (b.detail && !showDetail ? '  †' : '') + (b.addedBy && showDetail ? '   (parked by ' + b.addedBy + ')' : ''));
+    if (showDetail && b.detail) for (const dl of b.detail.split('\n')) console.log('       ' + dl);
+  });
+  if (!showDetail && items.some((b) => b.detail)) console.log('  († = has detail — rerun with --full)');
+};
 async function printShow() {
   const { task } = await call('GET', '/api/agent/task');
   console.log('# ' + task.title + ' (' + task.id + ')' + (task.archived ? ' [archived]' : ''));
   if (task.objective) console.log('\nObjective: ' + task.objective);
+  if (task.backlog && task.backlog.length) {
+    console.log('\nBacklog (parked, NOT immediate — never start one unasked):');
+    fmtBacklog(task.backlog, full);
+  }
   if (task.progress && task.progress.length) {
     console.log('\nActivity log (recent):');
     for (const pr of task.progress) {
@@ -73,15 +90,28 @@ async function main() {
     if (!arg) { console.error('vibespace-task: progress needs a summary, e.g. vibespace-task progress "fixed the parser" --detail "root cause was ..."'); process.exit(1); }
     await call('POST', '/api/agent/task-progress', { note: arg, ...(detail ? { detail } : {}) });
     console.log('progress recorded' + (detail ? ' (with detail)' : ''));
+  } else if (cmd === 'backlog') {
+    const { task } = await call('GET', '/api/agent/task');
+    if (!task.backlog || !task.backlog.length) { console.log('backlog empty — park a non-immediate item with: vibespace-task backlog-add "item" [--detail "context"]'); return; }
+    console.log('Open backlog (parked, NOT immediate — never start one unasked):');
+    fmtBacklog(task.backlog, full);
+  } else if (cmd === 'backlog-add') {
+    if (!arg) { console.error('vibespace-task: backlog-add needs text, e.g. vibespace-task backlog-add "user will pick a DB later" --detail "options discussed: ..."'); process.exit(1); }
+    const { backlog } = await call('POST', '/api/agent/task-backlog', { add: arg, ...(detail ? { detail } : {}) });
+    console.log('parked as backlog item ' + backlog.length + (detail ? ' (with detail)' : '') + ' — it will be surfaced back to you; do not start it unasked');
+  } else if (cmd === 'backlog-done' || cmd === 'backlog-drop') {
+    if (!arg) { console.error('vibespace-task: ' + cmd + ' needs an item number or unique text (run `vibespace-task backlog` to see them)'); process.exit(1); }
+    const { backlog } = await call('POST', '/api/agent/task-backlog', cmd === 'backlog-done' ? { done: arg } : { drop: arg });
+    console.log((cmd === 'backlog-done' ? 'resolved' : 'dropped') + '; ' + backlog.length + ' still open');
   } else if (cmd === 'plan-check' || cmd === 'plan-uncheck' || cmd === 'plan-add') {
-    console.error('vibespace-task: the Task Group checklist was removed — keep working steps in your own session todo list; log finished work with:\n   vibespace-task progress "one-line summary" [--detail "full context"]');
+    console.error('vibespace-task: the Task Group checklist was removed — keep working steps in your own session todo list; log finished work with:\n   vibespace-task progress "one-line summary"\npark NON-immediate items (deferred decisions / future work) with:\n   vibespace-task backlog-add "item" [--detail "context"]');
     process.exit(1);
   } else if (cmd === 'status') {
     console.error('vibespace-task: a Task Group (岗位) has NO status. To report THIS session\'s own state use:\n   vibespace-status <working|needs-input|blocked|review|done>');
     process.exit(1);
   } else {
     console.error('vibespace-task: unknown command "' + cmd + '"'
-      + '\n  valid: show, progress\n' + USAGE);
+      + '\n  valid: show, progress, backlog, backlog-add, backlog-done, backlog-drop\n' + USAGE);
     process.exit(1);
   }
 }
