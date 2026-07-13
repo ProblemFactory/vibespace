@@ -170,6 +170,38 @@ function _fetchOAuthUsage(token, cb) {
   req.end();
 }
 
+// Token → TRUE account identity (org uuid/name). Rides ONLY on the human-gated
+// on-demand refresh (never scheduled) — one extra read-only call per ⟳ click.
+// Exists because ~/.claude.json's oauthAccount goes STALE after a /login
+// account switch (real incident: config said one email, the token actually
+// belonged to another account — the usage popup looked like two subscriptions
+// had swapped quotas). The org uuid is the only trustworthy join key.
+function _fetchOAuthRoles(token, cb) {
+  if (typeof token === 'string' && token.startsWith('sk-ant-api')) { cb(null); return; }
+  const req = https.request('https://api.anthropic.com/api/oauth/claude_cli/roles', {
+    method: 'GET',
+    headers: { 'authorization': `Bearer ${token}`, 'anthropic-beta': 'oauth-2025-04-20', 'anthropic-version': '2023-06-01' },
+    timeout: 8000,
+  }, (res) => {
+    let body = '';
+    res.on('data', (d) => { body += d; });
+    res.on('end', () => {
+      if (res.statusCode !== 200) { cb(null); return; }
+      try {
+        const j = JSON.parse(body);
+        if (!j.organization_uuid) { cb(null); return; }
+        // Personal orgs are named "<email>'s Organization" — extract the email
+        // for display; team orgs just carry their org name.
+        const m = /^(\S+@\S+)'s Organization$/.exec(j.organization_name || '');
+        cb({ orgUuid: j.organization_uuid, orgName: j.organization_name || '', ...(m ? { orgEmail: m[1] } : {}) });
+      } catch { cb(null); }
+    });
+  });
+  req.on('error', () => cb(null));
+  req.on('timeout', () => { req.destroy(); cb(null); });
+  req.end();
+}
+
 // Per-subscription-account usage. Key = account id; '__global__' = the
 // machine's own login. Populated PASSIVELY from data/usage-cache/<key>.json,
 // which the statusLine hook (data/bin/vibespace-usage) writes from the CLI's
@@ -202,12 +234,6 @@ function ingestPassiveUsage() {
   const roster = allAccts.filter((a) => (a.backend || 'claude') !== 'codex' && a.type === 'subscription');
   const subIds = new Set(roster.map((a) => a.id));
   for (const id of Object.keys(_accountUsage)) if (!subIds.has(id)) delete _accountUsage[id]; // drop removed accounts
-  try {
-    const st = accounts.subscriptionStatus();
-    const em = st.loggedIn && st.email ? String(st.email).toLowerCase() : null;
-    const m = em ? roster.find((a) => a.email && String(a.email).toLowerCase() === em) : null;
-    _usageGlobalLink = { email: st.email || null, loggedIn: !!st.loggedIn, accountId: m ? m.id : null };
-  } catch { _usageGlobalLink = { email: null, loggedIn: false, accountId: null }; }
   // Same-account link for CODEX: the machine's own ~/.codex login vs the named
   // ChatGPT accounts (cxs-*) — email from the id_token claims on both sides.
   try {
@@ -233,6 +259,33 @@ function ingestPassiveUsage() {
       _accountUsage[key] = { ...u, name: meta.name, email: meta.email };
     }
   }
+  // Which NAMED claude subscription IS the machine's own ~/.claude login?
+  // Computed AFTER the cache pass so org-uuid evidence (captured by on-demand
+  // refreshes) is available. Evidence order:
+  //   1. org uuid equality (token-derived truth — immune to the stale-config
+  //      problem above); a PROVEN-different org also BREAKS an email match.
+  //   2. email match (~/.claude.json oauthAccount vs account emails) — the
+  //      original heuristic, still the only signal before any ⟳ was clicked.
+  try {
+    const st = accounts.subscriptionStatus();
+    const em = st.loggedIn && st.email ? String(st.email).toLowerCase() : null;
+    const emailMatch = em ? roster.find((a) => a.email && String(a.email).toLowerCase() === em) : null;
+    const gOrg = _rateLimitCache?.orgUuid || null;
+    let m = emailMatch;
+    if (gOrg) {
+      const orgMatch = roster.find((a) => _accountUsage[a.id]?.orgUuid === gOrg) || null;
+      if (orgMatch) m = orgMatch;
+      else if (emailMatch && _accountUsage[emailMatch.id]?.orgUuid) m = null; // both identities known, different orgs
+    }
+    const actualEmail = _rateLimitCache?.orgEmail || null;
+    _usageGlobalLink = {
+      email: st.email || null, loggedIn: !!st.loggedIn, accountId: m ? m.id : null,
+      // Stale-identity surfacing: what the token ACTUALLY belongs to, when the
+      // on-demand refresh captured it and it contradicts the config file.
+      actualEmail,
+      identityMismatch: !!(actualEmail && st.email && actualEmail.toLowerCase() !== String(st.email).toLowerCase()),
+    };
+  } catch { _usageGlobalLink = { email: null, loggedIn: false, accountId: null, actualEmail: null, identityMismatch: false }; }
   // Same-account merge (see _usageGlobalLink above): freshest view wins for both.
   const gid = _usageGlobalLink.accountId;
   if (gid) {
@@ -328,18 +381,24 @@ app.post('/api/usage/refresh', (req, res) => {
     if (!u) return res.json({ error: 'refresh failed (rate-limited or offline) — kept last-known' });
     u.source = 'on-demand';
     u.scopedFetchedAt = Date.now(); // scoped buckets only ever come from here — track their own age
-    // Persist to the same per-account cache file the statusline hook writes:
-    // survives restarts, and the hook's preserve-merge keeps scopedWeekly alive
-    // through subsequent passive (5h/7d-only) writes.
-    try {
-      fs.mkdirSync(USAGE_CACHE_DIR, { recursive: true });
-      const f = path.join(USAGE_CACHE_DIR, key.replace(/[^\w.-]/g, '_') + '.json');
-      fs.writeFileSync(f + '.tmp', JSON.stringify(u)); fs.renameSync(f + '.tmp', f);
-    } catch {}
-    if (isGlobal) { _rateLimitCache = u; writeUsageCache(); }
-    else _accountUsage[key] = { ...u, name: acctMeta.name, email: acctMeta.email };
-    try { ingestPassiveUsage(); } catch {} // re-run the global↔named same-account merge
-    res.json({ success: true });
+    // Same-click identity capture: the token's TRUE org (see _fetchOAuthRoles).
+    // Best-effort — a failure just leaves the fields absent (email heuristics
+    // keep working). This is what un-confuses a stale ~/.claude.json identity.
+    _fetchOAuthRoles(token, (org) => {
+      if (org) Object.assign(u, org);
+      // Persist to the same per-account cache file the statusline hook writes:
+      // survives restarts, and the hook's preserve-merge keeps scopedWeekly and
+      // the org identity alive through subsequent passive (5h/7d-only) writes.
+      try {
+        fs.mkdirSync(USAGE_CACHE_DIR, { recursive: true });
+        const f = path.join(USAGE_CACHE_DIR, key.replace(/[^\w.-]/g, '_') + '.json');
+        fs.writeFileSync(f + '.tmp', JSON.stringify(u)); fs.renameSync(f + '.tmp', f);
+      } catch {}
+      if (isGlobal) { _rateLimitCache = u; writeUsageCache(); }
+      else _accountUsage[key] = { ...u, name: acctMeta.name, email: acctMeta.email };
+      try { ingestPassiveUsage(); } catch {} // re-run the global↔named same-account merge
+      res.json({ success: true });
+    });
   });
 });
 
