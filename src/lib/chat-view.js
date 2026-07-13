@@ -1,6 +1,6 @@
 import { copyText, escHtml, showToast, collectDroppedFiles } from './utils.js';
 import { installChatSeek } from './chat-view-seek.js';
-import { metric } from './telemetry-client.js';
+import { metric, track } from './telemetry-client.js';
 import { stripAnsi } from './highlight.js';
 import { ChatMinimap } from './chat-minimap.js';
 import { ChatSearch } from './chat-search.js';
@@ -405,6 +405,7 @@ class ChatView {
         this._hideTyping();
         this._renderers.appendSystem(msg.message || t('Session not found.'));
         this._setReadOnly();
+        try { track('event', 'chat-attach-failed', this._telemDetail(msg.message)); } catch {}
       }
     };
     this.ws.onGlobal(this._handler);
@@ -426,6 +427,26 @@ class ChatView {
       this._hasConnected = true;
     };
     this.ws.onStateChange(this._stateHandler);
+  }
+
+  // Compact NON-CONTENT debug context for telemetry — ids/flags/counts only,
+  // never message text. Powers the blank-window / attach-failure events so a bug
+  // report ("窗口空白") comes with enough to reproduce: which backend/mode, local
+  // vs remote host, read-only, streaming, window bounds, and the session id.
+  _telemDetail(extra) {
+    try {
+      const { backend, backendSessionId, cwd, host } = this._getSessionIds() || {};
+      const bits = [
+        extra,
+        backend && `be=${backend}`,
+        this._readOnly ? 'ro=1' : null,
+        host ? `remote=1 host=${String(host).slice(0, 24)}` : 'remote=0',
+        this._disconnected ? 'ws=off' : null,
+        (backendSessionId ? `sid=${String(backendSessionId).slice(0, 12)}` : null),
+        `win=${this._windowStart}-${this._windowEnd}`,
+      ].filter(Boolean);
+      return bits.join(' ').slice(0, 300);
+    } catch { return String(extra || '').slice(0, 120); }
   }
 
   // ── View Manager: sliding window over server message list ──
@@ -498,6 +519,20 @@ class ChatView {
     if (isStreaming) this._showTyping(meta?.streamingLabel || t('thinking...'));
     this._scrollToBottom();
     metric('history-render-ms', performance.now() - _t0);
+    // ── Blank-window telemetry (user-reported "session窗口空白" class) ──
+    // The server said this session has messages but NOTHING rendered — the exact
+    // symptom that's un-debuggable from a bug report alone. Emit names/ids only.
+    try {
+      if (this._total > 0 && this._elements.size === 0) track('event', 'chat-view-blank-with-content', this._telemDetail(`total=${this._total} rendered=0`));
+      // Deferred DOM check: catch a view that ends up visually empty ~2.5s later
+      // (silent render failure, cold remote cache) despite claimed content.
+      clearTimeout(this._blankProbe);
+      this._blankProbe = setTimeout(() => {
+        if (this._disconnected || this._disposed) return;
+        const domCount = this._messageList?.querySelectorAll('.chat-msg').length || 0;
+        if (this._total > 0 && domCount === 0) track('event', 'chat-view-blank-persistent', this._telemDetail(`total=${this._total} dom=0`));
+      }, 2500);
+    } catch {}
     // Auto-load more if content doesn't fill viewport (no scrollbar to trigger scroll event)
     setTimeout(() => {
       if (this._windowStart > 0 && this._messageList.scrollHeight <= this._messageList.clientHeight) {
@@ -2053,6 +2088,7 @@ class ChatView {
   dispose() {
     this._statusBar?.dispose?.();
     this._disposed = true;
+    if (this._blankProbe) { clearTimeout(this._blankProbe); this._blankProbe = null; }
     if (this._runsObserver) { this._runsObserver.disconnect(); this._runsObserver = null; }
     if (this._searchBarObserver) { this._searchBarObserver.disconnect(); this._searchBarObserver = null; }
     if (this._runsTimer) { clearTimeout(this._runsTimer); this._runsTimer = null; }
