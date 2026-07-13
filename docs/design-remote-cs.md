@@ -1,7 +1,7 @@
 # Design: C/S Architecture — Unified Device Model (控制面/会话面分离)
 
 Status: APPROVED direction, pre-implementation blueprint + progress anchor. Two decision
-rounds with the user 2026-07-13 (chat session 9f4cd444; backlog item **B-55e2**).
+rounds with the user 2026-07-13 (chat session 9f4cd444; backlog item **B-5052** (原 B-55e2, 换代承载设计定稿)).
 Round 2 upgraded the scope from "remote hosts get a daemon" to a **unified device model**
 (user: "本机也变成了'远程'的一种，只是连接的 daemon 在本地而已 … 逼迫所有功能都必须保证
 远程能用，所有设备不管是本地还是远程一视同仁").
