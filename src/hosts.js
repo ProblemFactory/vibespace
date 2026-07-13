@@ -340,7 +340,10 @@ class HostManager {
       # record may be a summary without cwd, so grep the first cwd field instead)
       find "$HOME"/.claude/projects -maxdepth 2 -name '*.jsonl' ! -name 'agent-*' -printf '%T@ %p\\n' 2>/dev/null | sort -rn | head -60 | while read -r _ f; do
         printf 'H %s\\t' "$f"; head -c 16000 "$f" | grep -o '"cwd":"[^"]*"' | head -n 1; echo
-        printf 'N %s\\t' "$f"; grep -m1 '"type":"user"' "$f" 2>/dev/null | head -c 1500; echo
+        # up to 6 early user records (NOT just the first) — the first user turn is
+        # often an injected <vibespace-task-context>/<system-reminder>; the JS side
+        # skips those and takes the first REAL message (matches local naming).
+        grep -m6 '"type":"user"' "$f" 2>/dev/null | while IFS= read -r u; do printf 'N %s\\t' "$f"; printf '%s' "$u" | head -c 2000; printf '\\n'; done
         # T = sessionIds seen in the file TAIL (last = current writer; records
         # carry the CURRENT id even when a resume kept the ORIGINAL filename).
         # uniq collapses runs (records from one session are consecutive).
@@ -381,7 +384,9 @@ class HostManager {
             let name = null;
             try { name = JSON.parse('"' + m[1] + '"'); } catch { name = m[1]; }
             name = (name || '').replace(/\s+/g, ' ').trim();
-            if (name && !name.startsWith('<')) heads.set(fp, { ...(heads.get(fp) || {}), name: name.slice(0, 80) });
+            // first REAL message wins (multiple N lines per file now) — skip
+            // synthetic <…>-tag context/reminders and slash-command echoes.
+            if (name && !name.startsWith('<') && !name.startsWith('/') && !heads.get(fp)?.name) heads.set(fp, { ...(heads.get(fp) || {}), name: name.slice(0, 80) });
           }
         }
       }

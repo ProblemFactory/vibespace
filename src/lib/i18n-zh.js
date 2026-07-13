@@ -1700,4 +1700,5 @@ export default {
   "Stage: workspaces kept alive": "动态桌面：保活工作区数",
   "How many recent session workspaces stay loaded (hidden) for instant switching; older ones are saved and closed": "最近多少个会话工作区保持加载（隐藏）以便秒切；更早的会被保存并关闭",
   "⚠ The CLI config file says {cfg}, but the login token actually belongs to {actual} — quotas shown are {actual}’s. Run /login in a terminal to refresh the recorded identity.": "⚠ CLI 配置文件记录的是 {cfg}，但登录 token 实际属于 {actual} —— 当前显示的是 {actual} 的配额。在终端里运行 /login 可刷新记录的身份。",
+  "Remote matches": "远程匹配",
 };
