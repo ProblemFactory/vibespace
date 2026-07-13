@@ -498,7 +498,7 @@ app.post('/api/agent/task-backlog', (req, res) => {
   try {
     const t = tasks.get(gid);
     const backlog = (t.backlog || []).map((b) => ({ ...b, claimedBy: [...(b.claimedBy || [])] }));
-    const { add, detail, done, drop, claim, unclaim, show } = req.body || {};
+    const { add, detail, done, drop, claim, unclaim, show, edit, text: newText } = req.body || {};
     const key = sessionStatusKey(hit[0], hit[1]);
     const findIdx = (ref, { openOnly = true } = {}) => {
       const pool = backlog.map((b, i) => [b, i]).filter(([b]) => !openOnly || b.status === 'open');
@@ -524,6 +524,26 @@ app.post('/api/agent/task-backlog', (req, res) => {
       // parking auto-CLAIMS for the caller (user directive) — the parker is
       // the natural owner until it hands the item back
       backlog.push({ text: add.trim(), status: 'open', claimedBy: [key], ...(typeof detail === 'string' && detail.trim() ? { detail: detail.trim() } : {}), addedBy: key, addedAt: Date.now() });
+    } else if (edit !== undefined) {
+      // EDIT an existing item's text and/or detail in place (2.130.0) — the
+      // id stays, so refs elsewhere survive and the diff surfaces as
+      // "reworded" (id-matched), NOT a drop+new-id churn. At least one of
+      // text/detail must be provided; empty text is rejected (an item needs a
+      // one-line summary), empty detail ('' / '-') CLEARS the detail.
+      const r = findIdx(edit, { openOnly: false });
+      if (typeof r !== 'number') return res.status(400).json({ error: r.err });
+      const hasText = typeof newText === 'string';
+      const hasDetail = typeof detail === 'string';
+      if (!hasText && !hasDetail) return res.status(400).json({ error: 'edit needs --text and/or --detail' });
+      if (hasText) {
+        if (!newText.trim()) return res.status(400).json({ error: 'item text cannot be empty' });
+        backlog[r].text = newText.trim();
+      }
+      if (hasDetail) {
+        const d = detail.trim();
+        if (d === '' || d === '-') delete backlog[r].detail; else backlog[r].detail = d;
+      }
+      actedIdx = r;
     } else if (claim !== undefined || unclaim !== undefined) {
       const r = findIdx(claim !== undefined ? claim : unclaim);
       if (typeof r !== 'number') return res.status(400).json({ error: r.err });
