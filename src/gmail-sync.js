@@ -164,9 +164,14 @@ class GmailSync {
 
   _progress(w, total, done) {
     w.progress = total == null ? null : { total, done };
-    // throttled broadcast → the storage card's live progress bar
+    // Throttled broadcast → the storage card's live progress bar. Indeterminate
+    // (total unknown, seed/list phase) broadcasts SLOWLY: every broadcast
+    // rebuilds the card and restarts the bar's CSS animation, so a fast cadence
+    // made the shimmer stutter in place (real report). Determinate progress
+    // stays responsive at 400ms.
     const now = Date.now();
-    if (total == null || now - (this._lastProg || 0) > 400) { this._lastProg = now; try { this._onProgress(); } catch { } }
+    const interval = total == null ? 2500 : 400;
+    if (now - (this._lastProg || 0) > interval) { this._lastProg = now; try { this._onProgress(); } catch { } }
   }
 
   async _loop(w) {
@@ -303,23 +308,35 @@ class GmailSync {
         state.seedHistoryId = prof.historyId;
         this._saveState(w, state);
       }
-      let pageToken = state.seedPageToken || null;
+      // CROSS-RESTART CURSOR = a DATE, not a pageToken. Gmail's messages.list
+      // pageToken is only stable within one run — new mail arriving between
+      // runs can shift or expire it, silently skipping OLD mail (which the
+      // incremental pass never back-fills). So a restart resumes from the
+      // OLDEST already-downloaded message's date via `before:<sec>` and pulls
+      // strictly-older mail; new mail (newer date) is untouched here and caught
+      // by the seed-start historyId incremental. Same-second boundary re-lists
+      // a few already-seen ids (dedup skips them). pageToken stays a per-run
+      // optimization only.
+      const beforeSec = state.seedOldestMs ? Math.floor(state.seedOldestMs / 1000) + 1 : null;
+      let pageToken = null;
       let fetched = state.seedFetched || 0;
+      let oldestMs = state.seedOldestMs || Infinity;
       do {
         if (w.stopped) return;
         const p = qs();
+        if (beforeSec) p.set('q', [(p.get('q') || ''), `before:${beforeSec}`].filter(Boolean).join(' '));
         p.set('maxResults', String(Math.min(500, want - fetched)));
         if (pageToken) p.set('pageToken', pageToken);
         const l = await this._api(w, '/messages?' + p);
         const msgs = l.messages || [];
         for (const m of msgs) {
           if (w.stopped) return;
-          if (!seen.has(m.id)) await this._writeMessage(w, m.id, seen);
+          if (!seen.has(m.id)) { const md = await this._writeMessage(w, m.id, seen); if (md) oldestMs = Math.min(oldestMs, md); }
           this._progress(w, null); // total unknown while listing — count shows on the card
         }
         fetched += msgs.length;
         pageToken = l.nextPageToken || null;
-        state.seedPageToken = pageToken;   // CHECKPOINT after each page
+        if (oldestMs !== Infinity) state.seedOldestMs = oldestMs; // CHECKPOINT: date cursor
         state.seedFetched = fetched;
         state.lastSyncAt = Date.now();
         this._saveState(w, state);
@@ -327,7 +344,7 @@ class GmailSync {
       } while (pageToken && fetched < want);
       // seed complete → switch to incremental from the seed-start historyId
       state.historyId = state.seedHistoryId;
-      delete state.seedPageToken; delete state.seedFetched; delete state.seedHistoryId;
+      delete state.seedOldestMs; delete state.seedPageToken; delete state.seedFetched; delete state.seedHistoryId;
       state.lastSyncAt = Date.now();
       this._saveState(w, state);
       this._progress(w, null);
@@ -383,6 +400,7 @@ class GmailSync {
     fs.renameSync(tmp, path.join(destDir, `${stamp}_${slug}_${id}.eml`));
     seen.add(id);
     w.count = seen.size;
+    return Number(msg.internalDate) || null;
   }
 }
 

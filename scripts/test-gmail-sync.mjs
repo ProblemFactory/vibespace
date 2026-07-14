@@ -30,11 +30,18 @@ const srv = http.createServer((req, res) => {
   const send = (o) => res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(o));
   if (u.pathname.endsWith('/profile')) return send({ emailAddress: 'tester@example.com', historyId: '1000' });
   if (u.pathname.endsWith('/messages')) {
-    // paginated seed: page 1 → m1, nextPageToken; page 2 → m2 (for checkpoint test)
     if (globalThis.__paged) {
+      // seed ordered new→old: m1(ts 200) then m2(ts 100). Honor the date cursor
+      // (before:<sec> in q) so a restart pulls strictly-older mail.
+      const q = u.searchParams.get('q') || '';
+      const beforeSec = (q.match(/before:(\d+)/) || [])[1];
+      let order = [{ id: 'm1aaaa11', ts: 1783900000 }, { id: 'm2bbbb22', ts: 1783900100 }]
+        .sort((a, b) => b.ts - a.ts); // new→old
+      if (beforeSec) order = order.filter((m) => m.ts < Number(beforeSec));
       const pt = u.searchParams.get('pageToken');
-      if (!pt) return send({ messages: [{ id: 'm1aaaa11' }], nextPageToken: 'PAGE2' });
-      return send({ messages: [{ id: 'm2bbbb22' }] });
+      if (!order.length) return send({ messages: [] });
+      if (!pt) return send({ messages: [{ id: order[0].id }], nextPageToken: order.length > 1 ? 'P2' : undefined });
+      return send({ messages: order.slice(1).map((m) => ({ id: m.id })) });
     }
     return send({ messages: ['m1aaaa11', 'm2bbbb22'].map((id) => ({ id })) });
   }
@@ -146,7 +153,7 @@ for (let i = 0; i < 60; i++) { await new Promise((r) => setTimeout(r, 30)); if (
 gs.stop('mnt-cp');
 await new Promise((r) => setTimeout(r, 50));
 const stateAfterP1 = JSON.parse(fs.readFileSync(path.join(dir4, '.vibespace-gmail-state.json'), 'utf-8'));
-check('checkpoint persists seedPageToken after page 1', !!stateAfterP1.seedPageToken || stateAfterP1.historyId, JSON.stringify(stateAfterP1));
+check('checkpoint persists a DATE cursor (seedOldestMs) after page 1', !!stateAfterP1.seedOldestMs || stateAfterP1.historyId, JSON.stringify(stateAfterP1));
 check('seed-start historyId anchored', !!(stateAfterP1.seedHistoryId || stateAfterP1.historyId));
 // restart → should resume, end with BOTH messages, no duplicates
 const w4b = gs.start({ ...cfg, id: 'mnt-cp', dir: dir4, groupBy: 'none' });
