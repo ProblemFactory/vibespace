@@ -599,9 +599,31 @@ export function installSidebarMounts(Sidebar) {
     // Mount one of THIS instance's folders onto a remote host (reverse mount).
     // Primary transport = the agentd tunnel (NAT-proof, no public address);
     // falls back to agentd.publicUrl only for hosts without the device agent.
-    _showHostMountDialog(h) {
+    // Pick a machine to mount a folder onto (from the folder right-click, where
+    // no host is chosen yet). One machine → straight to the mount dialog.
+    async _showHostMountPicker(folder) {
+      let hosts = [];
+      try { hosts = (await api('/api/hosts')).hosts || []; } catch {}
+      if (!hosts.length) { showToast(tr('No remote machines yet — add one in the Remote tab'), { type: 'error' }); return; }
+      if (hosts.length === 1) return this._showHostMountDialog(hosts[0], folder);
+      this._mountsDialog(tr('Mount this folder onto a machine'), [
+        { key: 'hostId', label: tr('Machine'), type: 'select', options: hosts.map((h) => [h.id, h.name]) },
+        { key: 'folder', label: tr('Folder on THIS instance to mount'), value: folder || '', autocomplete: 'local' },
+        { key: 'mode', label: tr('Access'), type: 'select', options: [['ro', tr('Read-only')], ['rw', tr('Read-write')]] },
+      ], tr('Mount'), async (v, { close }) => {
+        if (!v.folder) throw new Error(tr('Choose a folder to share'));
+        const h = hosts.find((x) => x.id === v.hostId) || { id: v.hostId, name: v.hostId };
+        const r = await api(`/api/host-mounts/${v.hostId}`, { method: 'POST', body: JSON.stringify({ folder: v.folder, mode: v.mode }) });
+        close();
+        const via = r.via === 'tunnel' ? tr('over the device tunnel') : tr('over the public address');
+        showToast(tr('Mounted at {mp} on {name} ({via})', { mp: r.mountpoint, name: h.name, via }));
+        this._renderMounts?.();
+      });
+    },
+
+    _showHostMountDialog(h, prefillFolder) {
       this._mountsDialog(tr('Share a folder onto "{name}"', { name: h.name }), [
-        { key: 'folder', label: tr('Folder on THIS instance to mount on the machine'), placeholder: '/home/me/project', autocomplete: 'local' },
+        { key: 'folder', label: tr('Folder on THIS instance to mount on the machine'), placeholder: '/home/me/project', autocomplete: 'local', value: prefillFolder || '' },
         { key: 'mode', label: tr('Access'), type: 'select', options: [['ro', tr('Read-only')], ['rw', tr('Read-write')]] },
         { key: 'mountpoint', label: tr('Mount point on the machine (optional)'), placeholder: tr('default: ~/vibespace-remote/<folder>') },
       ], tr('Mount'), async (v, { close }) => {

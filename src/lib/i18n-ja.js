@@ -1855,4 +1855,12 @@ export default {
   "Where files dropped or attached in chat are saved. Empty = the session’s working directory (default). Set an absolute path (e.g. ~/Downloads or /data/uploads) to collect every upload in one place, or a name (e.g. uploads) for a folder under the working directory. For remote sessions the path is on the remote machine.": "チャットでドロップまたは添付したファイルの保存先。空 = セッションの作業ディレクトリ（デフォルト）。絶対パス（例: ~/Downloads や /data/uploads）を指定するとすべてのアップロードを一か所に集約でき、名前（例: uploads）を指定すると作業ディレクトリ下のフォルダになります。リモートセッションではパスはリモートマシン上です。",
   "Mounts on removed machines — unmount to clean up": "削除済みマシン上のマウント — アンマウントして整理",
   "(removed machine)": "(削除済みマシン)",
+  "Create share link": "共有リンクを作成",
+  "Mount to {name}": "{name} にマウント",
+  "Mount to another machine…": "別のマシンにマウント…",
+  "Mount to a remote machine…": "リモートマシンにマウント…",
+  "Mount this folder onto a machine": "このフォルダをマシンにマウント",
+  "Machine": "マシン",
+  "Folder on THIS instance to mount": "このインスタンス上でマウントするフォルダ",
+  "No remote machines yet — add one in the Remote tab": "リモートマシンがまだありません — 「リモート」タブで追加してください",
 };
