@@ -1789,4 +1789,5 @@ export default {
   "Connect OneDrive": "OneDrive に接続",
   "A Microsoft sign-in page opened. Approve access, then come back here.": "Microsoft のサインインページが開きました。アクセスを許可してから戻ってください。",
   "OAuth token (re-run Connect OneDrive to replace)": "OAuth token（「OneDrive に接続」を再実行で置換）",
+  "Downloading · {n} so far…": "ダウンロード中 · これまで {n} 件…",
 };

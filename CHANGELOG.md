@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.136.3 — 2026-07-14
+- Gmail storage card now shows **"Downloading · N so far…"** during the seed/large download instead of the misleading "Checking for new mail…" (real report — it was clearly downloading but the card didn't show the count). The count updates live; "Checking for new mail…" is now reserved for the quick incremental check with nothing to download.
+
 ## 2.136.2 — 2026-07-14
 - **Gmail seed resume is now robust against new mail arriving between restarts** (user insight): the mid-seed checkpoint switched from a `messages.list` pageToken to a **date cursor** — Gmail's pageToken is only stable within one run (new mail arriving between runs can shift or expire it, silently skipping OLD mail the incremental pass never back-fills). A restart now resumes from the oldest already-downloaded message's date (`before:<sec>`) and pulls strictly-older mail; new mail (newer date) is left to the seed-start historyId incremental; the same-second boundary re-lists a few already-seen ids that dedup skips. pageToken remains a within-run optimization only.
 - **Gmail "checking for new mail" progress bar no longer stutters** (real report — it jittered in the first third): indeterminate progress broadcast every download, rebuilding the card and restarting the bar's one-way slide animation every ~400ms so it never got past a third. Indeterminate broadcasts are now throttled to 2.5s and the bar is a symmetric pulse (a mid-animation rebuild is invisible).
