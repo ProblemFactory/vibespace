@@ -250,3 +250,24 @@ cache retires — huge remote transcripts get the SAME lazy seek behavior as loc
 - **vsht_ server side**: `data/agentd-tokens.json` `{ [deviceId]: sha256 }` — plaintext never stored server-side; device #0 ('local') auto-minted at first boot.
 - **Local lifecycle (open question 8 resolved)**: the daemon is ALWAYS setsid-detached (uniform with remote); the server supervises by CONNECT — connect fails → (re)spawn from `current` with flock preventing doubles → retry with backoff 0.5/1/2/5s. No child-process supervision (a server restart must not touch the daemon).
 - **M0 capabilities[]**: empty. The field exists so M1 can gate session-layer adoption per daemon.
+
+---
+
+## Milestone status (2026-07-14, implementation record)
+
+| Milestone | Status | Delivered | Acceptance |
+|---|---|---|---|
+| M0 protocol+skeleton | **DONE** 2.140.0 | mux (framing/credits/heartbeat), agentd lifecycle (flock/setsid/0700 socket/multi-server), vsht_ auth, self-upgrade re-exec | test-mux (4) + test-agentd (12) |
+| M1 local sessions | **DONE** 2.141.0, flag `agentd.sessions` off | daemon session primitive (node-pty lazy), DeviceManager.openSession, gated attachToDtach w/ local fallback | test-agentd-session (dtach survives drop); real-pod WS session verified |
+| M2 ssh transport | **DONE** 2.142.x–2.143.0, flag `agentd.remoteSessions` off | --stdio bridge, transport abstraction, persistent pipe-sessions (keeper semantics in-daemon), hosts.installAgentd, agentd-attach (keeper-run contract) | test-agentd-remote (5) + robustness (5: bidi/jitter/latency/concurrency) + wired-chain (7, real chat-wrapper) + AIDev real-ssh incl multi-drop jitter |
+| Transport B dial-out | **DONE** 2.144.0 | zero-dep RFC6455 client, --dial persist+redial, /api/agentd-dial (single-dispatcher, dial-token gated), dial-pair mint | test-agentd-dial (8: dial/auth/session/redial/refusal) |
+| M3 data-plane primitives | **PRIMITIVES DONE** 2.145.0 | fs-op (stat/list/write/mkdir/rm/read-range byte-chan), discovery raw-facts snapshot + fs.watch dirty push (claim algo stays server-side) | test-agentd-m3m4 M3.1–M3.3 (incl multibyte-split slab, dead-lock filtering, dirty push) |
+| M4 device capabilities | **PRIMITIVES DONE** 2.145.0 (dial-out shipped above) | run-cmd (argv-only bounded exec = clipboard shape), tcp-connect loopback forward (= VNC bridge shape), Ctrl+G shape via fs+run-cmd | test-agentd-m3m4 M4.1–M4.3 (bidirectional tcp, stdin exec, device edit round-trip) |
+| M5 mounts + cleanup | **SHAPE DONE** 2.145.0 | mount-class = persistent pipe session + run-cmd health probe + teardown (lifecycle verified); rclone-on-device rides these primitives | test-agentd-m3m4 M5 |
+
+Remaining after this record: UI/consumer SWITCHOVER work — pointing the existing
+server subsystems (files.js ?host=, discovery ssh script, remote-jsonl cache,
+usage harvest, clipboard/X, VNC bridge, mounts) at these primitives behind flags,
+then the legacy ssh-per-op paths retire per capability (invariant #7: ssh stays
+as rescue). The PROTOCOL and DEVICE side of every milestone is implemented and
+acceptance-tested; switchovers are mechanical consumer swaps.

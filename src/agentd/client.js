@@ -169,11 +169,20 @@ class DeviceManager {
             mux.control({ op: 'ok' });
             settled = true;
             const sessions = new Map(); // chan → { onData, onExit }
-            this._conn = { mux, info: msg, sessions, nextChan: 2 };
+            const pending = new Map();  // id → resolve (fs/discovery/cmd/tcp acks)
+            this._conn = { mux, info: msg, sessions, pending, nextChan: 2, nextId: 1 };
             // route byte-channel data + session control to the session handlers
             mux.onData = (chan, buf) => { sessions.get(chan)?.onData?.(buf); mux.credit(chan, buf.length); };
             const prevControl = mux.onControl;
             mux.onControl = (m) => {
+              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'cmd-result' || m.op === 'tcp-open') {
+                const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m); } 
+                if (m.op === 'tcp-open' && !m.error) return; // channel stays live
+                return;
+              }
+              if (m.op === 'fs-done') { sessions.get(m.chan)?.onDone?.(m); return; }
+              if (m.op === 'tcp-close') { const h = sessions.get(m.chan); sessions.delete(m.chan); h?.onClose?.(); return; }
+              if (m.op === 'discovery-dirty') { this._onDiscoveryDirty?.(); return; }
               if (m.op === 'session-open' || m.op === 'pipe-session-open') { sessions.get(m.chan)?.onOpen?.(m); return; }
               if (m.op === 'session-exit') { const h = sessions.get(m.chan); sessions.delete(m.chan); h?.onExit?.(m.code); return; }
               if (m.op === 'session-error') { const h = sessions.get(m.chan); sessions.delete(m.chan); h?.onError?.(m.error); return; }
@@ -259,6 +268,52 @@ class DeviceManager {
     conn.mux.control(cmd
       ? { op: 'open-pipe-session', chan, sid, cmd, args, cwd, env, offset }
       : { op: 'attach-pipe-session', chan, sid, offset });
+    return handle;
+  }
+
+  async _request(payload) {
+    const conn = await this.connect();
+    const id = conn.nextId++;
+    return new Promise((resolve, reject) => {
+      conn.pending.set(id, (m) => (m.error ? reject(new Error(m.error)) : resolve(m)));
+      conn.mux.control({ ...payload, id });
+      setTimeout(() => { if (conn.pending.delete(id)) reject(new Error(payload.op + ' timeout')); }, payload.timeoutMs || 30000);
+    });
+  }
+
+  // ── M3 ──
+  fsStat(p) { return this._request({ op: 'fs-op', action: 'stat', path: p }); }
+  fsList(p) { return this._request({ op: 'fs-op', action: 'list', path: p }); }
+  fsWrite(p, buf) { return this._request({ op: 'fs-op', action: 'write', path: p, data64: Buffer.from(buf).toString('base64') }); }
+  fsMkdir(p) { return this._request({ op: 'fs-op', action: 'mkdir', path: p }); }
+  fsRm(p, recursive = false) { return this._request({ op: 'fs-op', action: 'rm', path: p, recursive }); }
+  /** read [start, start+len) — resolves a Buffer (the transcript-slab primitive). */
+  async fsReadRange(p, start, len) {
+    const conn = await this.connect();
+    const chan = conn.nextChan++;
+    const chunks = [];
+    let done;
+    const donePromise = new Promise((r) => { done = r; });
+    conn.sessions.set(chan, { onData: (b) => chunks.push(b), onDone: () => { conn.sessions.delete(chan); done(); } });
+    const ack = await this._request({ op: 'fs-op', action: 'read-range', path: p, start, len, chan });
+    await donePromise;
+    return { size: ack.size, data: Buffer.concat(chunks) };
+  }
+  discoverySnapshot() { return this._request({ op: 'discovery-snapshot' }); }
+  async watchDiscovery(onDirty) { this._onDiscoveryDirty = onDirty; return this._request({ op: 'discovery-watch' }); }
+  // ── M4 ──
+  runCmd(cmd, args = [], { stdin, env, timeoutMs } = {}) {
+    return this._request({ op: 'run-cmd', cmd, args, env, timeoutMs, stdin64: stdin ? Buffer.from(stdin).toString('base64') : undefined });
+  }
+  /** loopback TCP forward on the device: returns {write, close, onData, onClose}. */
+  async tcpForward(port) {
+    const conn = await this.connect();
+    const chan = conn.nextChan++;
+    const handle = { chan, onData: null, onClose: null };
+    conn.sessions.set(chan, { onData: (b) => handle.onData?.(b), onClose: () => handle.onClose?.() });
+    await this._request({ op: 'tcp-connect', port, chan });
+    handle.write = (b) => conn.mux.data(chan, Buffer.isBuffer(b) ? b : Buffer.from(b));
+    handle.close = () => { conn.sessions.delete(chan); conn.mux.closeChan(chan); };
     return handle;
   }
 

@@ -286,6 +286,7 @@ function serveConnection(sock) {
   let authed = false;
   let upgrade = null;
   const sessions = new Map(); // chan → { proc, credit accounting is per-mux }
+  const tcpChans = new Map(); // chan → net.Socket (M4 tcp-forward)
   const mux = new Mux(sock, {
     onControl(msg) {
       if (msg.op === 'hello') {
@@ -329,6 +330,151 @@ function serveConnection(sock) {
         return;
       }
       if (msg.op === 'kill-pipe-session') { try { pipeSessions.kill(msg.sid); } catch { } return; }
+      // ── M3: fs ops (mechanical; large payloads ride byte channels) ──
+      if (msg.op === 'fs-op') {
+        (async () => {
+          const rid = msg.id;
+          try {
+            const p = String(msg.path || '');
+            if (!path.isAbsolute(p)) throw new Error('absolute path required');
+            switch (msg.action) {
+              case 'stat': {
+                const st = fs.statSync(p);
+                mux.control({ op: 'fs-result', id: rid, stat: { size: st.size, mtimeMs: st.mtimeMs, isDir: st.isDirectory(), mode: st.mode } });
+                break;
+              }
+              case 'list': {
+                const entries = fs.readdirSync(p, { withFileTypes: true }).slice(0, 5000).map((e) => {
+                  let st = null; try { st = fs.statSync(path.join(p, e.name)); } catch { }
+                  return { name: e.name, isDir: e.isDirectory(), size: st?.size ?? 0, mtimeMs: st?.mtimeMs ?? 0 };
+                });
+                mux.control({ op: 'fs-result', id: rid, entries });
+                break;
+              }
+              case 'read-range': {
+                // stream [start, start+len) on the given byte channel — the
+                // transcript-slab primitive (server keeps its line-index math)
+                const fd = fs.openSync(p, 'r');
+                try {
+                  const size = fs.fstatSync(fd).size;
+                  const start = Math.max(0, Number(msg.start) || 0);
+                  const want = Math.min(Number(msg.len) || 0, size - start);
+                  mux.control({ op: 'fs-result', id: rid, size, sending: Math.max(0, want) });
+                  let pos = start;
+                  const CHUNK = 65536;
+                  while (pos < start + want) {
+                    const n = Math.min(CHUNK, start + want - pos);
+                    const b = Buffer.alloc(n);
+                    const got = fs.readSync(fd, b, 0, n, pos);
+                    if (got <= 0) break;
+                    mux.data(msg.chan, b.subarray(0, got));
+                    pos += got;
+                    await new Promise((r) => setImmediate(r)); // yield: credit frames must interleave
+                  }
+                  mux.control({ op: 'fs-done', id: rid, chan: msg.chan });
+                } finally { fs.closeSync(fd); }
+                break;
+              }
+              case 'write': {
+                fs.mkdirSync(path.dirname(p), { recursive: true });
+                fs.writeFileSync(p, Buffer.from(String(msg.data64 || ''), 'base64'));
+                mux.control({ op: 'fs-result', id: rid, ok: true });
+                break;
+              }
+              case 'mkdir': fs.mkdirSync(p, { recursive: true }); mux.control({ op: 'fs-result', id: rid, ok: true }); break;
+              case 'rename': fs.renameSync(p, String(msg.to)); mux.control({ op: 'fs-result', id: rid, ok: true }); break;
+              case 'rm': fs.rmSync(p, { recursive: !!msg.recursive, force: true }); mux.control({ op: 'fs-result', id: rid, ok: true }); break;
+              default: throw new Error('unknown fs action: ' + msg.action);
+            }
+          } catch (e) { mux.control({ op: 'fs-result', id: msg.id, error: e.message }); }
+        })();
+        return;
+      }
+      // ── M3: session discovery RAW FACTS (locks + jsonl inventory + tail
+      // bytes); the lock-first CLAIM algorithm stays server-side ──
+      if (msg.op === 'discovery-snapshot') {
+        try {
+          const home = os.homedir();
+          const locks = [];
+          try {
+            for (const f of fs.readdirSync(path.join(home, '.claude', 'sessions'))) {
+              if (!f.endsWith('.json')) continue;
+              const pid = Number(f.slice(0, -5));
+              let alive = false; try { process.kill(pid, 0); alive = true; } catch { }
+              if (!alive) continue;
+              try { locks.push({ pid, ...JSON.parse(fs.readFileSync(path.join(home, '.claude', 'sessions', f), 'utf-8')) }); } catch { }
+            }
+          } catch { }
+          const jsonls = [];
+          try {
+            const projRoot = path.join(home, '.claude', 'projects');
+            for (const d of fs.readdirSync(projRoot).slice(0, 500)) {
+              const dp = path.join(projRoot, d);
+              let files = []; try { files = fs.readdirSync(dp); } catch { continue; }
+              for (const f of files) {
+                if (!f.endsWith('.jsonl') || f.startsWith('agent-')) continue;
+                try {
+                  const st = fs.statSync(path.join(dp, f));
+                  jsonls.push({ projDir: d, file: f, size: st.size, mtimeMs: st.mtimeMs });
+                } catch { }
+              }
+            }
+          } catch { }
+          jsonls.sort((a, b) => b.mtimeMs - a.mtimeMs);
+          mux.control({ op: 'discovery-result', id: msg.id, locks, jsonls: jsonls.slice(0, 200) });
+        } catch (e) { mux.control({ op: 'discovery-result', id: msg.id, error: e.message }); }
+        return;
+      }
+      if (msg.op === 'discovery-watch') {
+        // fs.watch push: any change under sessions/ or projects/ → one
+        // debounced 'discovery-dirty' (server re-snapshots; events carry no
+        // interpretation — invariant #2)
+        try {
+          if (!this._discoWatch) {
+            const home = os.homedir();
+            let timer = null;
+            const kick = () => { if (timer) return; timer = setTimeout(() => { timer = null; try { mux.control({ op: 'discovery-dirty' }); } catch { } }, 500); };
+            const watches = [];
+            for (const d of [path.join(home, '.claude', 'sessions'), path.join(home, '.claude', 'projects')]) {
+              try { watches.push(fs.watch(d, { recursive: true }, kick)); } catch { try { watches.push(fs.watch(d, kick)); } catch { } }
+            }
+            this._discoWatch = watches;
+          }
+          mux.control({ op: 'discovery-watching', id: msg.id });
+        } catch (e) { mux.control({ op: 'discovery-watching', id: msg.id, error: e.message }); }
+        return;
+      }
+      // ── M4: bounded one-shot command (clipboard/xclip class; NOT a shell —
+      // argv only, hard timeout, output capped) ──
+      if (msg.op === 'run-cmd') {
+        try {
+          const { execFile } = require('child_process');
+          const child = execFile(String(msg.cmd), (msg.args || []).map(String), {
+            timeout: Math.min(Number(msg.timeoutMs) || 10000, 30000), maxBuffer: 2 * 1024 * 1024,
+            env: { ...process.env, ...(msg.env || {}) },
+          }, (err, stdout, stderr) => {
+            mux.control({ op: 'cmd-result', id: msg.id, code: err ? (err.code ?? 1) : 0, stdout: String(stdout).slice(0, 1024 * 1024), stderr: String(stderr).slice(0, 65536) });
+          });
+          if (msg.stdin64) { try { child.stdin.end(Buffer.from(msg.stdin64, 'base64')); } catch { } } else { try { child.stdin.end(); } catch { } }
+        } catch (e) { mux.control({ op: 'cmd-result', id: msg.id, code: 127, error: e.message }); }
+        return;
+      }
+      // ── M4: TCP forward (the VNC-bridge shape): byte channel ↔ a LOCAL
+      // 127.0.0.1 port on the device. Loopback only — never a general proxy. ──
+      if (msg.op === 'tcp-connect') {
+        try {
+          const port = Number(msg.port);
+          if (!port || port < 1 || port > 65535) throw new Error('bad port');
+          const tsock = net.connect({ host: '127.0.0.1', port });
+          const chanT = msg.chan;
+          tsock.on('connect', () => mux.control({ op: 'tcp-open', id: msg.id, chan: chanT }));
+          tsock.on('data', (d) => { mux.data(chanT, d); });
+          tsock.on('close', () => { tcpChans.delete(chanT); mux.control({ op: 'tcp-close', chan: chanT }); });
+          tsock.on('error', (e) => { tcpChans.delete(chanT); mux.control({ op: 'tcp-open', id: msg.id, chan: chanT, error: e.message }); });
+          tcpChans.set(chanT, tsock);
+        } catch (e) { mux.control({ op: 'tcp-open', id: msg.id, chan: msg.chan, error: e.message }); }
+        return;
+      }
       if (msg.op === 'open-session') {
         try {
           const { chan, cmd, args, cols, rows, cwd, env } = msg;
@@ -367,7 +513,9 @@ function serveConnection(sock) {
       if (chan === 1 && upgrade) { upgrade.data(buf); return; }
       const sx = sessions.get(chan);
       if (sx) { try { sx.proc.write(buf.toString('utf-8')); } catch { } mux.credit(chan, buf.length); return; }
-      if (pipeSessions.writeStdin(mux, chan, buf)) { mux.credit(chan, buf.length); }
+      if (pipeSessions.writeStdin(mux, chan, buf)) { mux.credit(chan, buf.length); return; }
+      const t = tcpChans.get(chan);
+      if (t) { try { t.write(buf); } catch { } mux.credit(chan, buf.length); }
     },
     onDead() {
       // connection gone: dtach-attach ptys are DETACH points — killing the
@@ -376,6 +524,9 @@ function serveConnection(sock) {
       // underlying dtach session keeps running for the next connect.
       for (const { proc } of sessions.values()) { try { proc.kill(); } catch { } }
       sessions.clear();
+      for (const t of tcpChans.values()) { try { t.destroy(); } catch { } }
+      tcpChans.clear();
+      if (this._discoWatch) { for (const w of this._discoWatch) { try { w.close(); } catch { } } this._discoWatch = null; }
       pipeSessions.detachAll(mux);
     },
   });
