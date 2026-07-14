@@ -2623,9 +2623,10 @@ app.post('/api/mounts/shared-drives', async (req, res) => {
   try { res.json({ drives: await mounts.listSharedDrives(req.body || {}) }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
-// Is an instance-default Google client injected? (UI hint only — never the values.)
+// Instance-preset Google clients for the UI picker: keys+labels ONLY, never secrets.
 app.get('/api/mounts/drive-defaults', (req, res) => {
-  res.json({ hasDefaultClient: !!(process.env.VIBESPACE_GDRIVE_CLIENT_ID && process.env.VIBESPACE_GDRIVE_CLIENT_SECRET) });
+  const presets = require('./src/mounts').MountManager.drivePresets().map((c) => ({ key: c.key, label: c.label }));
+  res.json({ presets, hasDefaultClient: presets.length > 0 });
 });
 
 app.post('/api/mounts/my-storage', (req, res) => {

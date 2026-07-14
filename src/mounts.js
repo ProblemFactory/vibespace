@@ -378,7 +378,7 @@ class MountManager {
       // drive
       token: m.tokenEnc ? this._dec(m.tokenEnc) : undefined,
       driveFolder: m.driveFolder, clientId: m.clientId,
-      driveMode: m.driveMode, teamDriveId: m.teamDriveId, rootFolderId: m.rootFolderId,
+      driveMode: m.driveMode, teamDriveId: m.teamDriveId, rootFolderId: m.rootFolderId, clientPreset: m.clientPreset,
       clientSecret: m.clientSecretEnc ? this._dec(m.clientSecretEnc) : undefined,
       // webdav / vibespace
       url: m.url, vendor: m.vendor, user: m.user,
@@ -495,7 +495,7 @@ class MountManager {
         childCount: m.parentId ? undefined : this._childrenOf(m.id).length,
         endpoint: conn.endpoint, bucket: conn.bucket, prefix: conn.prefix,
         rcloneType: conn.rcloneType, remotePath: conn.remotePath, driveFolder: conn.driveFolder,
-        driveMode: conn.driveMode || (conn.type === 'drive' ? 'mydrive' : undefined), teamDriveId: conn.teamDriveId,
+        driveMode: conn.driveMode || (conn.type === 'drive' ? 'mydrive' : undefined), teamDriveId: conn.teamDriveId, clientPreset: conn.clientPreset,
         // secret VALUES never leave the server; keys let the edit dialog offer
         // per-parameter replacement (blank = keep) for custom rclone records
         paramKeys: (conn.type === 'rclone' && !m.parentId) ? Object.keys(conn.paramsEnc || {}) : undefined,
@@ -608,6 +608,7 @@ class MountManager {
           teamDriveId: cfg.teamDriveId ? String(cfg.teamDriveId).trim() : null,
           rootFolderId: cfg.rootFolderId ? String(cfg.rootFolderId).trim() : null,
           clientId: cfg.clientId || null,
+          clientPreset: cfg.clientPreset ? String(cfg.clientPreset) : null,
           clientSecretEnc: cfg.clientSecret ? this._enc(cfg.clientSecret) : null,
         });
         break;
@@ -822,7 +823,7 @@ class MountManager {
     // bucket/keys come from env and a change re-imports) — name, mountpoint
     // and mode are the only editable fields (user directive).
     const envLocked = m.origin === 'my-storage';
-    const connectionKeys = ['endpoint', 'bucket', 'prefix', 'accessKey', 'secretKey', 'sessionToken', 'rcloneType', 'remotePath', 'params', 'driveFolder', 'driveMode', 'teamDriveId', 'rootFolderId', 'token', 'clientId', 'clientSecret', 'url', 'user', 'pass', 'bearerToken', 'sshHost', 'sshUser', 'sshPort', 'sshPath', 'keyPath', 'cephMonHosts', 'cephFsName', 'cephPath', 'cephUser', 'cephSecret'];
+    const connectionKeys = ['endpoint', 'bucket', 'prefix', 'accessKey', 'secretKey', 'sessionToken', 'rcloneType', 'remotePath', 'params', 'driveFolder', 'driveMode', 'teamDriveId', 'rootFolderId', 'token', 'clientId', 'clientPreset', 'clientSecret', 'url', 'user', 'pass', 'bearerToken', 'sshHost', 'sshUser', 'sshPort', 'sshPath', 'keyPath', 'cephMonHosts', 'cephFsName', 'cephPath', 'cephUser', 'cephSecret'];
     if (envLocked && connectionKeys.some((k) => patch[k] !== undefined && patch[k] !== '')) {
       throw new Error('This storage is provisioned by your deployment — its connection settings can\'t be edited here (name and mount point can).');
     }
@@ -869,6 +870,7 @@ class MountManager {
         if (patch.driveMode !== undefined) m.driveMode = MountManager._driveMode(patch.driveMode);
         if (patch.teamDriveId !== undefined) m.teamDriveId = patch.teamDriveId ? String(patch.teamDriveId).trim() : null;
         if (patch.rootFolderId !== undefined) m.rootFolderId = patch.rootFolderId ? String(patch.rootFolderId).trim() : null;
+        if (patch.clientPreset !== undefined) m.clientPreset = patch.clientPreset ? String(patch.clientPreset) : null;
         setIf('clientId');
         if (patch.clientSecret) m.clientSecretEnc = this._enc(String(patch.clientSecret));
         if (patch.token) {
@@ -966,11 +968,11 @@ class MountManager {
         env[P('TOKEN')] = this._dec(m.tokenEnc);
         env[P('SCOPE')] = 'drive';
         if (m.clientId) { env[P('CLIENT_ID')] = m.clientId; if (m.clientSecretEnc) env[P('CLIENT_SECRET')] = this._dec(m.clientSecretEnc); }
-        else if (process.env.VIBESPACE_GDRIVE_CLIENT_ID) {
-          // Instance-default Google client (admin-injected env, e.g. helm) —
-          // used ONLY when the mount has no client of its own; never persisted.
-          env[P('CLIENT_ID')] = process.env.VIBESPACE_GDRIVE_CLIENT_ID;
-          if (process.env.VIBESPACE_GDRIVE_CLIENT_SECRET) env[P('CLIENT_SECRET')] = process.env.VIBESPACE_GDRIVE_CLIENT_SECRET;
+        else {
+          // Instance-preset client (admin-injected env; record stores only the
+          // preset KEY — see drivePresets). Never persisted app-side.
+          const pc = MountManager._driveClient(m);
+          if (pc) { env[P('CLIENT_ID')] = pc.clientId; env[P('CLIENT_SECRET')] = pc.clientSecret; }
         }
         // Cloud-side SCOPE of the mount (2.131.0): shared-with-me / a Shared
         // Drive are separate namespaces in the Drive API — rclone exposes them
@@ -1626,6 +1628,40 @@ class MountManager {
   // client credentials) and prints the token JSON, which we capture. No
   // Google secrets to configure, no terminal.
 
+  /** Instance-preset Google OAuth clients (admin-injected env, never persisted):
+   *  VIBESPACE_GDRIVE_CLIENTS = JSON [{key, label, clientId, clientSecret}, …]
+   *  Legacy single pair VIBESPACE_GDRIVE_CLIENT_ID/SECRET = preset key 'default'.
+   *  A mount stores only the preset KEY (clientPreset); id/secret resolve at
+   *  authorize/mount time, so rotating the env rotates every mount. */
+  static drivePresets() {
+    const out = [];
+    try {
+      const raw = process.env.VIBESPACE_GDRIVE_CLIENTS;
+      if (raw) {
+        for (const c of JSON.parse(raw)) {
+          if (c && c.key && c.clientId && c.clientSecret) {
+            out.push({ key: String(c.key), label: String(c.label || c.key), clientId: String(c.clientId), clientSecret: String(c.clientSecret) });
+          }
+        }
+      }
+    } catch (e) { console.error('[mounts] VIBESPACE_GDRIVE_CLIENTS unparseable:', e.message); }
+    if (process.env.VIBESPACE_GDRIVE_CLIENT_ID && process.env.VIBESPACE_GDRIVE_CLIENT_SECRET
+        && !out.some((c) => c.key === 'default')) {
+      out.push({ key: 'default', label: 'Default', clientId: process.env.VIBESPACE_GDRIVE_CLIENT_ID, clientSecret: process.env.VIBESPACE_GDRIVE_CLIENT_SECRET });
+    }
+    return out;
+  }
+
+  /** The client a drive record should use: explicit custom client wins; else
+   *  its chosen preset; else the single/first preset; else null (rclone's
+   *  built-in client). */
+  static _driveClient(m) {
+    if (m.clientId) return null; // custom client on the record itself
+    const presets = MountManager.drivePresets();
+    if (m.clientPreset) return presets.find((c) => c.key === m.clientPreset) || null;
+    return presets.length === 1 ? presets[0] : presets.find((c) => c.key === 'default') || null;
+  }
+
   static _driveMode(v) {
     return ['mydrive', 'shared-with-me', 'shared-drive'].includes(v) ? (v === 'mydrive' ? null : v) : null;
   }
@@ -1635,7 +1671,7 @@ class MountManager {
    *  transient {token, clientId, clientSecret} (the add-dialog case, before
    *  any record exists). Runs `rclone backend drives` with the same env
    *  _rcloneFor builds. */
-  listSharedDrives({ id, token, clientId, clientSecret } = {}) {
+  listSharedDrives({ id, token, clientId, clientSecret, clientPreset } = {}) {
     let env;
     if (id) {
       const m = this._connOf(this._get(id));
@@ -1647,8 +1683,8 @@ class MountManager {
       const jm = tok.match(/\{[\s\S]*\}/); if (jm) tok = jm[0];
       JSON.parse(tok); // validate
       env = { ...process.env, RCLONE_CONFIG_VS_TYPE: 'drive', RCLONE_CONFIG_VS_TOKEN: tok, RCLONE_CONFIG_VS_SCOPE: 'drive' };
-      const cid = clientId || process.env.VIBESPACE_GDRIVE_CLIENT_ID;
-      const csec = clientId ? clientSecret : process.env.VIBESPACE_GDRIVE_CLIENT_SECRET;
+      let cid = clientId, csec = clientSecret;
+      if (!cid) { const pc = MountManager._driveClient({ clientPreset: clientPreset || null }); if (pc) { cid = pc.clientId; csec = pc.clientSecret; } }
       if (cid) { env.RCLONE_CONFIG_VS_CLIENT_ID = cid; if (csec) env.RCLONE_CONFIG_VS_CLIENT_SECRET = csec; }
     }
     return new Promise((resolve, reject) => {
@@ -1662,15 +1698,17 @@ class MountManager {
     });
   }
 
-  startDriveAuth({ clientId, clientSecret } = {}) {
+  startDriveAuth({ clientId, clientSecret, clientPreset } = {}) {
     this.cancelDriveAuth();
+    this._driveAuthPreset = clientPreset || null;
     // Custom OAuth client (own Google Cloud project) = positional args to
     // `rclone authorize "drive" <id> <secret>`; no explicit client → the
     // instance-default injected client (VIBESPACE_GDRIVE_CLIENT_ID/SECRET,
     // e.g. a company client set via helm) → else rclone's built-in client.
     const authArgs = ['authorize', 'drive'];
-    if (!clientId && process.env.VIBESPACE_GDRIVE_CLIENT_ID && process.env.VIBESPACE_GDRIVE_CLIENT_SECRET) {
-      clientId = process.env.VIBESPACE_GDRIVE_CLIENT_ID; clientSecret = process.env.VIBESPACE_GDRIVE_CLIENT_SECRET;
+    if (!clientId) {
+      const pc = MountManager._driveClient({ clientPreset: this._driveAuthPreset || null });
+      if (pc) { clientId = pc.clientId; clientSecret = pc.clientSecret; }
     }
     if (clientId && clientSecret) authArgs.push(String(clientId), String(clientSecret));
     authArgs.push('--auth-no-open-browser');
@@ -1721,6 +1759,10 @@ class MountManager {
     if (m.type === 'drive') {
       clientId = m.clientId || undefined;
       clientSecret = m.clientSecretEnc ? this._dec(m.clientSecretEnc) : undefined;
+      if (!clientId) {
+        const pc = MountManager._driveClient(m); // record's preset (or single default)
+        if (pc) { clientId = pc.clientId; clientSecret = pc.clientSecret; }
+      }
     } else if (m.type === 'rclone' && m.rcloneType === 'drive') {
       const p = (k) => m.paramsEnc?.[k] ? this._dec(m.paramsEnc[k]) : undefined;
       clientId = p('client_id');

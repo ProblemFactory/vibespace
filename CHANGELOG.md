@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.133.0 — 2026-07-14
+- **Preset Google OAuth clients** (e.g. one Internal client per organization + one published-external for everyone else): `VIBESPACE_GDRIVE_CLIENTS` env (JSON `[{key,label,clientId,clientSecret},…]`, helm `gdrive.clients`) injects instance-preset clients; the Drive add-dialog gets an **OAuth client picker** (presets / rclone built-in / custom id+secret), a mount stores only the preset KEY — secrets never persist app-side and rotating the env rotates every mount. Authorize flow, shared-drive lister, and re-auth all resolve presets. Legacy single `VIBESPACE_GDRIVE_CLIENT_ID/SECRET` still works as the `default` preset.
+
 ## 2.132.0 — 2026-07-14
 - **Manager-agent Task Group administration** (issue #21, walter's majordomo flow): a session the user designates as **Group manager** (new toggle in Session Properties) can create and configure Task Groups from its CLI — `vibespace-task group-list / group-create / group-update / group-bind / group-unbind`. Double-gated and off by default (new setting **"Allow agents to manage Task Groups"** must ALSO be on); contextDir/auto-include paths are restricted to allowlisted roots (setting, default = home); every operation lands in the group's activity log attributed to the acting session, so the board shows exactly what the majordomo did. Organize-only by design: no delete, no spawning, no agent-loop control — the same config operations the user performs in the UI. Route `/api/agent/group-admin`; smoke test scripts/test-group-admin.mjs.
 
