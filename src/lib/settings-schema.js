@@ -298,6 +298,12 @@ const SETTINGS_SCHEMA = {
     description: t('CS-refactor M1 (opt-in, default off): run local terminal sessions inside the standing vibespace-agentd daemon instead of the server process, over the device mux protocol. The daemon owns the pty and survives server restarts; sessions are unaffected. Experimental — leave off unless you are testing the new architecture. Requires a restart to take effect.'),
     category: t('Session'), liveApply: false,
   },
+  'agentd.remoteSessions': {
+    type: 'boolean', default: false,
+    label: t('Route remote sessions through the device agent (experimental)'),
+    description: t('CS-refactor M2 (opt-in, default off; needs the local device-agent setting too): remote chat sessions run as persistent sessions inside a standing agent daemon on the host — an ssh drop kills only the bridge, the daemon and session survive, and reconnects resume by byte offset. Replaces the per-session keeper. Experimental; leave off unless testing.'),
+    category: t('Session'), liveApply: false,
+  },
   'agents.injectPreamble': {
     type: 'text', default: '',
     label: t('Custom agent instructions (injected)'),

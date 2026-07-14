@@ -425,6 +425,29 @@ const PTY_WRAPPER = path.join(__dirname, 'data', 'bin', 'pty-wrapper.js');
 // to today. daemonPtyShim presents the node-pty interface over a device
 // session handle so setupSessionPty is unchanged.
 let deviceMgr = null;
+// ── M2 host-level agentd provisioning (flag agentd.remoteSessions) ──
+// Per-host vsht_ token: plaintext in a 0600 local file (the attach bridge
+// reads it at spawn; never argv), sha256 recorded alongside for audit.
+const AGENTD_DIR = path.join(__dirname, 'data', 'agentd');
+function agentdHostToken(hostId) {
+  ensureDir(AGENTD_DIR);
+  const f = path.join(AGENTD_DIR, 'host-' + hostId + '.token');
+  try { return fs.readFileSync(f, 'utf-8').trim(); } catch { }
+  const tok = 'vsht_' + require('crypto').randomBytes(24).toString('hex');
+  fs.writeFileSync(f, tok, { mode: 0o600 });
+  return tok;
+}
+// Install/refresh the daemon on a host, throttled per boot+version: a marker
+// records the last version shipped; matching = skip (one ssh round trip saved
+// per spawn; a bundle change reinstalls because the version bumps with it).
+const _agentdInstalled = new Map(); // hostId → version
+async function ensureAgentdOnHost(hostId) {
+  const version = require('./package.json').version;
+  if (_agentdInstalled.get(hostId) === version) return;
+  const bundlePath = path.join(__dirname, 'data', 'bin', 'vibespace-agentd.js');
+  await hosts.installAgentd(hostId, bundlePath, version, agentdHostToken(hostId));
+  _agentdInstalled.set(hostId, version);
+}
 function daemonPtyShim(handle) {
   let dataCb = null, exitCb = null;
   handle.onData = (buf) => { if (dataCb) dataCb(buf.toString('utf-8')); };
@@ -2863,6 +2886,7 @@ app.get('/api/session-options', (req, res) => {
 // ── WebSocket Terminal Handler (extracted to src/ws-handler.js) ──
 const { registerWsHandler } = require('./src/ws-handler');
 registerWsHandler(wss, {
+  agentdRemote: { ensureAgentdOnHost, agentdHostToken, agentdDir: AGENTD_DIR, attachBundle: path.join(__dirname, 'data', 'bin', 'vibespace-agentd-attach.js') },
   activeSessions, WS_OPEN, broadcastActiveSessions, broadcastToSession, resizeSessionToMin,
   setupSessionPty, refreshWebuiPids, deleteSessionMeta, writeSessionMeta, readSessionMeta,
   readLayouts, writeLayouts, getSyncStore, serverSetting,
