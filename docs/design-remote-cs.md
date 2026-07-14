@@ -234,3 +234,19 @@ cache retires — huge remote transcripts get the SAME lazy seek behavior as loc
 - 2026-07-13 — round 1: daemon direction + 4 fork decisions settled.
 - 2026-07-13 — round 2: **unified device model** (localhost = device #0, no special local
   path) settled; local-first milestone reorder; doc rewritten.
+
+---
+
+## M0 wire-level addendum (2026-07-14, implementation decisions — these ARE the protocol-v1 compatibility surface, invariant #8 applies)
+
+- **Frame types** (`[u32 len][u8 type][u32 chan][payload]`, len covers type+chan+payload):
+  `0=DATA` (payload bytes for the channel; chan 0 payload = newline-delimited JSON), `1=CLOSE` (half-close a channel, empty payload), `2=CREDIT` (payload = u32 bytes granted), `3=PING`/`4=PONG` (empty payload, chan ignored).
+- **Channels**: chan 0 always open (control, credit-exempt). Byte channels are opened IMPLICITLY by first DATA/announcement on a fresh id; the CONNECTING side (the server) allocates ids ≥1 — the daemon only ever replies on ids it was given. CLOSE is per-direction; both directions closed = id reusable (don't reuse in practice; u32 space is plenty).
+- **Credit flow control**: per byte-channel, initial window 262144 bytes each direction; the receiver returns consumed bytes via CREDIT; a sender with window 0 buffers (bounded) and waits. Chan 0 exempt (small lines only).
+- **Handshake**: client (server process) sends first — chan0 `{op:'hello', protoVersion, hostToken, serverVersion}`; daemon answers `{op:'hello-ack', protoVersion, daemonVersion, platform, arch, nodeVersion, capabilities:[]}` (bad token → `{op:'auth-fail'}` + close). The SERVER then decides: `{op:'ok'}` (proceed) or `{op:'upgrade', version, size}` followed by the new bundle streamed on chan 1 → daemon writes `~/.vibespace/agentd/<version>/agentd.js`, fsyncs, repoints `current` symlink, replies `{op:'upgrade-done'}`, re-execs itself; the client reconnects and re-handshakes.
+- **daemonVersion = the release version** (package.json) — rollback = repoint `current` to the previous versioned dir.
+- **Heartbeat**: PING every 10s from both sides; 3 missed PONGs = dead (close + client respawn path).
+- **Sockets/paths**: daemon listens on `~/.vibespace/agentd/state/agentd.sock` (0700 dir, 0600 socket); state dir also holds `token` (0600 vsht_ plaintext, device side), `agentd.log` (rotated at 5MB ×2), `agentd.lock` (flock singleton), `agentd.pid`.
+- **vsht_ server side**: `data/agentd-tokens.json` `{ [deviceId]: sha256 }` — plaintext never stored server-side; device #0 ('local') auto-minted at first boot.
+- **Local lifecycle (open question 8 resolved)**: the daemon is ALWAYS setsid-detached (uniform with remote); the server supervises by CONNECT — connect fails → (re)spawn from `current` with flock preventing doubles → retry with backoff 0.5/1/2/5s. No child-process supervision (a server restart must not touch the daemon).
+- **M0 capabilities[]**: empty. The field exists so M1 can gate session-layer adoption per daemon.
