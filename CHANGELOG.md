@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.136.0 — 2026-07-14
+- **Native OneDrive** (new mount type, alongside native Google Drive): connect a Microsoft OneDrive with guided sign-in (no terminal — same loopback flow as Drive, remote paste-back supported), pick Personal / Work-School / SharePoint account type, an optional folder and Drive ID (for a specific or shared drive), optional own Azure OAuth app. rclone.conf import maps a `onedrive` remote to the native type; existing rclone-onedrive records migrate on load (lossless, guarded). First-class fields, edit dialog, submounts (per-folder), and guided re-authorize — no more raw rclone params for OneDrive.
+- Groundwork for the generic OAuth-cloud friendly layer: `rclone authorize` is generalized to any backend (drive/onedrive/dropbox/box/pcloud/…), so the guided sign-in button is reusable. (Full friendly-field editing for the other backends is a follow-on.)
+
 ## 2.135.4 — 2026-07-14
 - **One Google Drive, no more "rclone version vs native version"** (user request): every `rclone`-backend-`drive` mount (rclone.conf import / custom-added) is now MIGRATED to the native `drive` type on load — its client/token/scope/folder carried over from the raw params into the first-class fields, any non-drive tuning params preserved as extra options. rclone.conf import and custom-add both normalize a `drive` backend to the native type up front. The rclone-drive-specific edit/submount UI branches are retired — there is a single Drive concept and code path. Migration is idempotent and lossless (guarded by a one-time marker).
 
