@@ -641,6 +641,14 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
             const msg = JSON.parse(stripAnsi(line).trim());
             if (msg.type === '_stdin_ack') { session._stdinAckReceived = true; continue; }
             const payload = msg.payload || {};
+            // remote transport state (2.139.0 codex remote chat, B-0588) —
+            // rides as an event_msg record from the wrapper; mirror the
+            // claude branch's broadcast so the status-bar chip works
+            if (msg.type === 'event_msg' && payload.type === '_remote_state') {
+              session._remoteState = payload.state === 'connected' ? null : { state: payload.state, attempts: payload.attempts || 0, at: Date.now() };
+              broadcastToSession(session, id, { type: 'remote-state', sessionId: id, state: payload.state, attempts: payload.attempts || 0 });
+              continue;
+            }
             const nextThreadId = msg.type === 'session_meta'
               ? payload.id
               : msg.type === 'wrapper_meta'
