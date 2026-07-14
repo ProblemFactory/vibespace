@@ -194,6 +194,11 @@ class Auth {
       // shell (no cookie) and sends the same vsst_ token — the ROUTE validates
       // it. Cookie-gating this silently broke Ctrl+G whenever auth was on.
       if (p === '/api/editor/open') return next();
+      // Standalone device install: the agentd bundle + installer are public
+      // (the bundle is not secret; the /api/agentd-dial upgrade is gated by the
+      // per-device dial token). A NAT device fetches these before any cookie.
+      if (p === '/agentd.js' || p === '/agentd-install.sh') return next();
+      if (p === '/api/agentd-dial') return next();
       // Telemetry collector ingest: remote VibeSpace instances authenticate
       // with the shared Bearer token — the ROUTE enforces it (404 when the
       // collector is off, 403 on a bad token); no cookie exists on the sender.

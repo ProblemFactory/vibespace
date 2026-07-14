@@ -2447,6 +2447,26 @@ app.post('/api/agent-hooks/uninstall', (req, res) => {
 // ── Hosts (ssh host registry for remote sessions — collaboration P2) ──
 const { HostManager } = require('./src/hosts');
 const hosts = new HostManager({ dataDir: path.join(__dirname, 'data') });
+const { HostMounts } = require('./src/host-mounts');
+const hostMounts = new HostMounts({
+  dataDir: path.join(__dirname, 'data'), hosts, mountTokens,
+  publicUrl: () => { try { return serverSetting('agentd.publicUrl') || null; } catch { return null; } },
+  broadcast: (msg) => { const j = JSON.stringify(msg); wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(j); } catch {} } }); },
+});
+app.get('/api/host-mounts', (req, res) => res.json({ mounts: hostMounts.list() }));
+app.post('/api/host-mounts/:hostId', async (req, res) => {
+  try {
+    // publicUrl fallback: derive from the request if the setting is blank
+    let pub = null; try { pub = serverSetting('agentd.publicUrl'); } catch {}
+    if (!pub && req.body?.publicUrl) { pub = String(req.body.publicUrl); }
+    if (!pub) { const proto = req.headers['x-forwarded-proto'] || 'http'; const host = req.headers['x-forwarded-host'] || req.headers.host; if (host) pub = `${proto}://${host}`; }
+    hostMounts.publicUrl = () => pub;
+    res.json(await hostMounts.mountOnHost(req.params.hostId, { folder: req.body?.folder, mode: req.body?.mode, mountpoint: req.body?.mountpoint }));
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.delete('/api/host-mounts/:hostId/:mountId', async (req, res) => {
+  try { res.json(await hostMounts.unmountOnHost(req.params.hostId, req.params.mountId)); } catch (e) { res.status(400).json({ error: e.message }); }
+});
 setTimeout(() => { try { hosts.sweepJsonlCache(); } catch {} }, 60000); // orphaned/stale remote-transcript cache
 const { RemoteFs } = require('./src/remote-fs');
 const remoteFs = new RemoteFs(hosts);
@@ -2578,6 +2598,17 @@ app.post('/api/agentd/dial-pair', (req, res) => {
     });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
+// Standalone device install: serve the agentd bundle + installer (public — the
+// bundle is not secret; auth is the per-device dial/host token at connect).
+app.get('/agentd.js', (req, res) => {
+  try { res.type('application/javascript').send(fs.readFileSync(path.join(__dirname, 'data', 'bin', 'vibespace-agentd.js'))); }
+  catch { res.status(404).end(); }
+});
+app.get('/agentd-install.sh', (req, res) => {
+  try { res.type('text/x-shellscript').send(fs.readFileSync(path.join(__dirname, 'scripts', 'vibespace-agentd-install.sh'), 'utf-8')); }
+  catch { res.status(404).end(); }
+});
+
 app.get('/api/plugins', (req, res) => {
   try { res.json({ plugins: plugins.list() }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
