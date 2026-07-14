@@ -142,6 +142,7 @@ function detectLang(filePath) {
 class CodeEditor {
   constructor(winInfo, filePath, fileName, app, opts = {}) {
     this.winInfo = winInfo; this.filePath = filePath; this.app = app;
+    this._host = opts.host || ''; // '' = local; else host id (Files cross-host)
     // Stage/layout machinery reads dirty state through the window record —
     // an editor with unsaved changes must never be auto-closed (LRU eviction).
     winInfo._editorDirty = () => !!this.modified;
@@ -335,7 +336,7 @@ class CodeEditor {
     let content = initialContent;
     if (content === undefined) {
       try {
-        const res = await fetch(`/api/file/content?path=${encodeURIComponent(this.filePath)}`);
+        const res = await fetch(`/api/file/content?path=${encodeURIComponent(this.filePath)}${this._host ? '&host=' + encodeURIComponent(this._host) : ''}`);
         const data = await res.json();
         if (data.error) {
           this.editorBody.innerHTML = `<div class="empty-hint" style="color:var(--red)">${escHtml(data.error)}</div>`;
@@ -417,7 +418,7 @@ class CodeEditor {
       this._previewBody.appendChild(this._previewIframe);
     }
     const dir = this.filePath.replace(/\/[^/]*$/, '');
-    const baseHref = '/api/file/serve/' + dir.split('/').map(encodeURIComponent).join('/') + '/';
+    const baseHref = '/api/file/serve/' + dir.split('/').map(encodeURIComponent).join('/') + '/' + (this._host ? '?host=' + encodeURIComponent(this._host) : '');
     const baseTag = `<base href="${baseHref}">`;
     let html = src;
     if (/<head[^>]*>/i.test(html)) {
@@ -450,7 +451,7 @@ class CodeEditor {
       // fetch only rejects on network errors — server-side write failures
       // (permission denied, read-only fs) return 400 with {error} and used to
       // show "✓ Saved" while silently dropping the edits
-      const res = await fetch('/api/file/write', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path:this.filePath,content}) });
+      const res = await fetch('/api/file/write', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path:this.filePath,content,host:this._host||undefined}) });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
       this.modified = false; this.saveIndicator.textContent = '✓ Saved'; this.saveIndicator.style.color = 'var(--green)';

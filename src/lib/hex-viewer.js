@@ -5,8 +5,9 @@ const BYTES_PER_ROW = 16;
 const CHUNK_SIZE = 65536; // 64KB chunks
 
 class HexViewer {
-  constructor(winInfo, filePath, fileInfo) {
+  constructor(winInfo, filePath, fileInfo, host = '') {
     this.filePath = filePath;
+    this._host = host || '';
     this.fileSize = fileInfo.size;
     this.baseOffset = 0; // file offset where this.data starts (non-zero after a jump)
     this.data = new Uint8Array(0);
@@ -54,7 +55,7 @@ class HexViewer {
     try {
       const fileOffset = this.baseOffset + this.data.length;
       if (fileOffset >= this.fileSize) { this.statusEl.textContent = t('End of file'); return; }
-      const res = await fetch(`/api/file/binary?path=${encodeURIComponent(this.filePath)}&offset=${fileOffset}&length=${CHUNK_SIZE}`);
+      const res = await fetch(`/api/file/binary?path=${encodeURIComponent(this.filePath)}&offset=${fileOffset}&length=${CHUNK_SIZE}${this._host ? '&host=' + encodeURIComponent(this._host) : ''}`);
       if (!res.ok) throw new Error(t('Failed to load'));
       const buf = await res.arrayBuffer();
       const newData = new Uint8Array(buf);

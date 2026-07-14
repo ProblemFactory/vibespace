@@ -1718,7 +1718,7 @@ class App {
     // Front-truncate the path (like the file explorer) so the taskbar/title-bar
     // CSS end-ellipsis keeps the filename visible instead of cutting it off.
     const title = opts._tempFile ? t('View: {name}', { name: fileName }) : frontTruncate(filePath);
-    const openSpec = opts._tempFile ? undefined : { action: 'openEditor', path: filePath, name: fileName };
+    const openSpec = opts._tempFile ? undefined : { action: 'openEditor', path: filePath, name: fileName, ...(opts.host ? { host: opts.host } : {}) };
     const winInfo = this.wm.createWindow({ title, type: 'editor', syncId: opts.syncId, openSpec });
     winInfo._filePath = filePath; winInfo._fileName = fileName;
     new CodeEditor(winInfo, filePath, fileName, this, opts);

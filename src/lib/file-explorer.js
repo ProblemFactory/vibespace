@@ -617,7 +617,7 @@ class FileExplorer {
         const infoRes = await fetch(`/api/file/info?path=${encodeURIComponent(dirPath)}${this._hp()}`);
         if (infoRes.ok) {
           const info = await infoRes.json();
-          if (!info.isDirectory) { this.app.openFile(dirPath, dirPath.split('/').pop()); return; }
+          if (!info.isDirectory) { this.app.openFile(dirPath, dirPath.split('/').pop(), { host: this._host || undefined }); return; }
         }
         throw new Error(data.error);
       }
@@ -876,7 +876,7 @@ class FileExplorer {
       cell.addEventListener('click', (e) => this._onItemClick(e, item));
       cell.addEventListener('dblclick', () => {
         if (item.isDirectory) this.navigate(fullPath);
-        else this.app.openFile(fullPath, item.name);
+        else this.app.openFile(fullPath, item.name, { host: this._host || undefined });
       });
       return cell;
     } else {
@@ -915,7 +915,7 @@ class FileExplorer {
       row.addEventListener('click', (e) => this._onItemClick(e, item));
       row.addEventListener('dblclick', () => {
         if (item.isDirectory) this.navigate(fullPath);
-        else this.app.openFile(fullPath, item.name);
+        else this.app.openFile(fullPath, item.name, { host: this._host || undefined });
       });
       return row;
     }
@@ -1091,7 +1091,7 @@ class FileExplorer {
     try {
       // Try dedicated viewer first (reuses FileViewer.renderInto for all formats)
       this._previewContent.innerHTML = '';
-      const rendered = await FileViewer.renderInto(this._previewContent, fp, name, this.app);
+      const rendered = await FileViewer.renderInto(this._previewContent, fp, name, this.app, this._host || '');
       if (rendered) return;
 
       // Fallback: text preview for non-binary files
