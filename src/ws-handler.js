@@ -458,7 +458,26 @@ function registerWsHandler(wss, ctx) {
             // keeper-ATTACH (data.keeperSid — we adopt, not respawn).
             if (data.resume && data.resumeId && !data.keeperSid && /^[\w-]+$/.test(data.resumeId)) {
               try {
+                // ROOT-CAUSE writer sweep (mechanism-agnostic): the ONE thing
+                // that must be true before a resume is that NO other process is
+                // still writing this conversation's transcript — else we get
+                // multiple concurrent writers on one JSONL ("resume did
+                // nothing / session ends"; real incident with agentd.remote
+                // Sessions, whose setsid-detached claude survives a local pod
+                // rebuild that the sidebar-driven cold resume then races). The
+                // fd scan kills ANY claude holding <RID>.jsonl open regardless
+                // of how it was spawned (bare / keeper / agentd pipe-session) —
+                // it subsumes the id-lock grep (a --resumed claude's lock
+                // carries a NEW session id, so grepping the lock for RID missed
+                // it) and the agentd case the keeper-only stop below never
+                // reached. The keeper stop still runs to clean the keeper's own
+                // run-file bookkeeping.
                 const cleanScript = `RID=${shq(data.resumeId)}
+for pdir in /proc/[0-9]*; do
+  ls -l "$pdir/fd" 2>/dev/null | grep -q "/$RID.jsonl" || continue
+  pid=$(basename "$pdir")
+  case "$(tr '\\0' ' ' < "$pdir/cmdline" 2>/dev/null)" in *claude*) kill -TERM "$pid" 2>/dev/null;; esac
+done
 find "$HOME/.claude/sessions" -maxdepth 1 -name '*.json' 2>/dev/null | while read -r f; do
   pid=$(basename "$f" .json)
   grep -q "\"sessionId\":\"$RID\"" "$f" 2>/dev/null || continue
