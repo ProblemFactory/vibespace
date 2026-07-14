@@ -544,7 +544,8 @@ class MountManager {
       return {
         ...base, type: p.type || 's3',
         bucket: m.bucket, prefix: m.prefix, remotePath: m.remotePath,
-        driveFolder: m.driveFolder, sshPath: m.sshPath,
+        driveFolder: m.driveFolder, driveMode: m.driveMode, teamDriveId: m.teamDriveId, rootFolderId: m.rootFolderId,
+        sshPath: m.sshPath,
       };
     }
     const out = { ...base, type: m.type || 's3' };
@@ -553,7 +554,16 @@ class MountManager {
         Object.assign(out, { endpoint: m.endpoint, bucket: m.bucket, prefix: m.prefix, accessKey: m.accessKey, secretKey: dec(m.secretKeyEnc), sessionToken: dec(m.sessionTokenEnc) });
         break;
       case 'drive':
-        Object.assign(out, { driveFolder: m.driveFolder, token: dec(m.tokenEnc), clientId: m.clientId, clientSecret: dec(m.clientSecretEnc) });
+        Object.assign(out, {
+          driveFolder: m.driveFolder, token: dec(m.tokenEnc), clientId: m.clientId, clientSecret: dec(m.clientSecretEnc),
+          driveMode: m.driveMode, teamDriveId: m.teamDriveId, rootFolderId: m.rootFolderId, clientPreset: m.clientPreset,
+        });
+        break;
+      case 'gmail':
+        Object.assign(out, {
+          token: dec(m.tokenEnc), clientId: m.clientId, clientSecret: dec(m.clientSecretEnc), clientPreset: m.clientPreset,
+          syncCount: m.syncCount, labelIds: m.labelIds, query: m.query, groupBy: m.groupBy, email: m.email,
+        });
         break;
       case 'webdav': case 'vibespace':
         Object.assign(out, { url: m.url, vendor: m.vendor, user: m.user, pass: dec(m.passEnc), bearerToken: dec(m.bearerTokenEnc) });
@@ -892,14 +902,22 @@ class MountManager {
           }
         }
         break;
-      case 'gmail':
+      case 'gmail': {
+        // Scope changes (filter/count) must FORCE A RESEED: the persisted
+        // history cursor keeps the sync incremental, so newly-in-scope OLD
+        // mail (e.g. clearing the INBOX filter to sync archived) would never
+        // arrive. Dropping the state file is safe — the directory is the
+        // dedup index, a reseed re-lists and skips every existing file.
+        const scopeChanged = ['syncCount', 'labelIds', 'query'].some((k) => patch[k] !== undefined);
         if (patch.syncCount !== undefined) m.syncCount = String(patch.syncCount).trim() === '' ? 200 : Math.max(0, Math.min(200000, Number(patch.syncCount) || 0));
         if (patch.groupBy !== undefined) m.groupBy = ['none', 'month', 'day', 'label-month', 'label-day'].includes(patch.groupBy) ? patch.groupBy : 'none';
         if (patch.labelIds !== undefined) m.labelIds = String(patch.labelIds || '');
         if (patch.query !== undefined) m.query = String(patch.query || '');
         if (patch.clientPreset !== undefined) m.clientPreset = patch.clientPreset ? String(patch.clientPreset) : null;
         if (patch.token) { JSON.parse(String(patch.token).trim()); m.tokenEnc = this._enc(String(patch.token).trim()); }
+        if (scopeChanged) { try { fs.rmSync(path.join(this.pathOf(m), '.vibespace-gmail-state.json'), { force: true }); } catch { } }
         break;
+      }
       case 'drive':
         if (patch.driveFolder !== undefined) m.driveFolder = String(patch.driveFolder || '').replace(/^\/+|\/+$/g, '');
         if (patch.driveMode !== undefined) m.driveMode = MountManager._driveMode(patch.driveMode);
