@@ -1719,4 +1719,12 @@ export default {
   "Cloud-side scope (mydrive / shared-with-me / shared-drive)": "クラウド側の範囲（mydrive / shared-with-me / shared-drive）",
   "Shared drive id": "共有ドライブ id",
   "Folder ID (advanced)": "フォルダ ID（上級）",
+  "Allow agents to manage Task Groups": "エージェントによるタスクグループ管理を許可",
+  "Lets sessions YOU designate as \"Group manager\" (Session Properties) create and configure Task Groups via their CLI — create/update/bind/unbind, the same organize-only operations you perform in the UI. Paths they may use are limited by the roots setting below; every operation is recorded in the group's activity log. Off = the API refuses all agents.": "セッションのプロパティで「グループ管理者」に指定したセッションが、CLI からタスクグループを作成・設定できるようにします——create/update/bind/unbind、UI で行うのと同じ整理系操作のみ。使用可能なパスは下のルート設定で制限され、すべての操作はグループの活動ログに記録されます。オフ = API はすべてのエージェントを拒否します。",
+  "Group management path roots": "グループ管理のパスルート",
+  "Comma-separated absolute path prefixes a manager agent may use for a group's context folder / auto-include folders (~ = your home). Keeps agents from pointing context injection at arbitrary paths.": "管理者エージェントがグループの共有コンテキスト/自動インクルードフォルダに使える絶対パス接頭辞（カンマ区切り、~ = ホーム）。任意のパスへのコンテキスト注入を防ぎます。",
+  "Agent permissions": "エージェント権限",
+  "Group manager — may create/configure Task Groups from its CLI": "グループ管理者——CLI からタスクグループを作成・設定できます",
+  "Globally enabled — a designated session can run group-create / group-update / group-bind (audited in each group's activity log).": "グローバルに有効——指定されたセッションは group-create / group-update / group-bind を実行できます（各グループの活動ログに記録）。",
+  "Also requires Settings → Session → \"Allow agents to manage Task Groups\" (currently off).": "設定 → セッション → 「エージェントによるタスクグループ管理を許可」も必要です（現在オフ）。",
 };

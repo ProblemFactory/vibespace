@@ -322,6 +322,18 @@ const SETTINGS_SCHEMA = {
     description: t('When a Task Group changes mid-session, agents receive only WHAT changed (new activity entries, objective edits, backlog changes, changed shared files) instead of the whole group context again. The full context is still delivered on first contact and after a server restart. Turn off to always re-send the complete state.'),
     category: t('Session'), liveApply: true,
   },
+  'agents.allowGroupManagement': {
+    type: 'boolean', default: false,
+    label: t('Allow agents to manage Task Groups'),
+    description: t('Lets sessions YOU designate as "Group manager" (Session Properties) create and configure Task Groups via their CLI — create/update/bind/unbind, the same organize-only operations you perform in the UI. Paths they may use are limited by the roots setting below; every operation is recorded in the group\'s activity log. Off = the API refuses all agents.'),
+    category: t('Session'), liveApply: true,
+  },
+  'agents.groupManagementRoots': {
+    type: 'string', default: '~',
+    label: t('Group management path roots'),
+    description: t('Comma-separated absolute path prefixes a manager agent may use for a group\'s context folder / auto-include folders (~ = your home). Keeps agents from pointing context injection at arbitrary paths.'),
+    category: t('Session'), liveApply: true,
+  },
   'accounts.onDemandQuotaRefresh': {
     type: 'enum', default: 'manual',
     options: [

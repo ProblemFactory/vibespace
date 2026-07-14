@@ -2341,7 +2341,7 @@ app.post('/api/user-todos/:id', (req, res) => {
 // /api/agent/session-status; writes scoped to the calling agent's own session.
 // ── Agent-facing routes ── (extracted to src/agent-routes.js in the 2.92.0 split)
 const { setupAgentRoutes } = require('./src/agent-routes');
-setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, scheduleCtxSync, remoteCtxBaseFor });
+setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, scheduleCtxSync, remoteCtxBaseFor, readUserState: () => persistenceRouter.readUserState() });
 app.get('/api/agent-hooks', (req, res) => res.json(agentHooksStatus()));
 app.post('/api/agent-hooks/install', (req, res) => {
   createHookHelper(); // regenerate the script too (repair path)
