@@ -305,6 +305,7 @@ class ChatView {
       },
       onInterrupt: () => this.ws.send({ type: 'interrupt', sessionId: this.sessionId }),
       getCwd: () => this._getSessionIds().cwd,
+      getUploadDir: () => (this.app?.settings?.get('chat.uploadDir') || '').trim(),
     });
     this._chatInput.popupContainer = container;
     this._setupChatDrop(container);
@@ -1655,7 +1656,16 @@ class ChatView {
   _setupChatDrop(container) {
     const overlay = document.createElement('div');
     overlay.className = 'chat-drop-overlay hidden';
-    overlay.innerHTML = `<div class="chat-drop-hint">${t('Drop to upload to the working directory')}</div>`;
+    const hintEl = document.createElement('div');
+    hintEl.className = 'chat-drop-hint';
+    overlay.appendChild(hintEl);
+    // Reflect chat.uploadDir when set so the drop target is never a surprise.
+    const refreshDropHint = () => {
+      const dir = (this.app?.settings?.get('chat.uploadDir') || '').trim();
+      hintEl.textContent = dir ? t('Drop to upload to {dir}', { dir }) : t('Drop to upload to the working directory');
+    };
+    refreshDropHint();
+    this._refreshDropHint = refreshDropHint;
     container.appendChild(overlay);
     this._dropOverlay = overlay;
     const isFileDrag = (e) => Array.from(e.dataTransfer?.types || []).includes('Files');
@@ -1672,6 +1682,7 @@ class ChatView {
     container.addEventListener('dragover', (e) => {
       if (!isFileDrag(e)) return;
       e.preventDefault();
+      this._refreshDropHint?.();
       overlay.classList.remove('hidden');
       if (this._dropHideTimer) clearTimeout(this._dropHideTimer);
       this._dropHideTimer = setTimeout(hide, 150);

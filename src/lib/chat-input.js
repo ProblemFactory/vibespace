@@ -16,12 +16,13 @@ export class ChatInput {
    * @param {function} opts.getStateSync - returns StateSync instance
    * @param {function} opts.onInterrupt - called when user clicks Stop
    */
-  constructor(ws, sessionId, { onSend, onInterrupt, getCwd }) {
+  constructor(ws, sessionId, { onSend, onInterrupt, getCwd, getUploadDir }) {
     this._ws = ws;
     this._sessionId = sessionId;
     this._onSend = onSend;
     this._onInterrupt = onInterrupt;
     this._getCwd = getCwd || (() => null);
+    this._getUploadDir = getUploadDir || (() => '');
 
     // Attachment state
     this._attachments = [];
@@ -285,15 +286,18 @@ export class ChatInput {
     if (!files.length) return;
     const cwd = this._getCwd();
     if (!cwd) { this._uploadToast(t('No working directory for this session'), true); return; }
+    // Destination: the session cwd by default, or a fixed folder from
+    // `chat.uploadDir` — absolute (/… or ~/…) as-is, otherwise relative to cwd.
+    const destDir = this._resolveUploadDir(cwd);
     this._uploadToast(files.length > 1 ? t('Uploading {n} items…', { n: files.length }) : t('Uploading {n} item…', { n: files.length }));
     try {
       // Chunked + per-file fallback: a folder with one unreadable file (the
       // usual net::ERR_ACCESS_DENIED cause) no longer fails the whole upload.
       const { uploaded, failed } = await uploadFilesBatched(files, {
-        destDir: cwd,
+        destDir,
         onProgress: (d, total) => this._uploadToast(t('Uploading {d}/{total}…', { d, total })),
       });
-      if (uploaded.length) this._insertUploadedPaths(cwd, uploaded);
+      if (uploaded.length) this._insertUploadedPaths(destDir, uploaded);
       if (failed.length) {
         this._uploadToast(t("Uploaded {n}, {failed} couldn't be read (e.g. {name})", { n: uploaded.length, failed: failed.length, name: failed[0].name }), true);
       } else if (!uploaded.length) {
@@ -304,6 +308,17 @@ export class ChatInput {
     } catch (e) {
       this._uploadToast(t('Upload failed: {msg}', { msg: e.message }), true);
     }
+  }
+
+  // Resolve the configured upload folder against the session cwd. Empty →
+  // cwd (default). Absolute (/… or ~/…, the server expands ~ to ITS home) →
+  // used verbatim. Relative → joined under cwd (one collect-here folder, e.g.
+  // "Downloads"). For remote sessions the path is on the remote, same as cwd.
+  _resolveUploadDir(cwd) {
+    const d = (this._getUploadDir() || '').trim();
+    if (!d) return cwd;
+    if (d.startsWith('/') || d.startsWith('~')) return d;
+    return cwd.replace(/\/+$/, '') + '/' + d.replace(/^\/+/, '');
   }
 
   _insertUploadedPaths(cwd, uploaded) {

@@ -352,7 +352,7 @@ router.post('/api/upload', upload.array('files'), async (req, res) => {
   }
   try {
     const results = [];
-    const destRoot = path.resolve(destDir);
+    const destRoot = path.resolve(expandTilde(destDir)); // chat.uploadDir may be ~/Downloads
     // dest side may be a mount → all dest-touching fs ops go through SafeFs.
     // The multer temp files live in /tmp (fast, local) — their unlink stays fs.
     await sfs(req).call('mkdir', { path: destRoot }); // ensure target exists (plain-file uploads to a fresh dir)

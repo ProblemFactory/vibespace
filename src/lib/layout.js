@@ -1,3 +1,10 @@
+import { track } from './telemetry-client.js';
+
+// Window types that legitimately carry no openSpec (never persisted/synced):
+// chat/terminal restore by session identity + get their openSpec async after
+// 'created'; the stage placeholder is a stage-only pseudo-window.
+const TRANSIENT_WINDOW_TYPES = new Set(['chat', 'terminal', 'stage-placeholder']);
+
 class LayoutManager {
   constructor(app) {
     this.app = app;
@@ -251,6 +258,21 @@ class LayoutManager {
       if (win._isSnapped) { winState.isSnapped = true; winState.preSnapBounds = win._preSnapBounds; }
       // openSpec: serializable recipe to recreate this window on another client
       if (win._openSpec) winState.openSpec = win._openSpec;
+      // Architectural safeguard: a NON-transient window persisted without an
+      // openSpec can't sync or restore cross-client (it silently vanishes on
+      // the other clients / after refresh — the exact class of bug that hit
+      // desktop/usage/browser). Breadcrumb it once per type so a future window
+      // type added without an openSpec surfaces in Diagnostics instead of
+      // failing quietly. chat/terminal are exempt: they restore by session
+      // identity (backendSessionId) and get their openSpec asynchronously
+      // after the 'created' reply. stage-placeholder is exempt by design.
+      else if (!TRANSIENT_WINDOW_TYPES.has(win.type)) {
+        this._noSpecWarned ||= new Set();
+        if (!this._noSpecWarned.has(win.type)) {
+          this._noSpecWarned.add(win.type);
+          try { track('event', 'window-no-openspec:' + win.type); } catch {}
+        }
+      }
       // For terminals, save both webui session id and claude session id + overrides
       if (win.type === 'terminal' && termSession) {
         winState.serverSessionId = termSession.sessionId;
@@ -482,7 +504,7 @@ class LayoutManager {
         };
         setTimeout(checkWin, 100);
       } else if (ws.type === 'browser' && ws.browserUrl) {
-        const winInfo = this.app.openBrowser(ws.browserUrl);
+        const winInfo = this.app.openBrowser(ws.browserUrl, { proxy: ws.openSpec?.proxy });
         applyPosition(winInfo, ws);
       } else if (ws.openSpec?.action) {
         // Generic fallback: any window that records an openSpec (settings,

@@ -38,7 +38,7 @@ export function installSidebarMounts(Sidebar) {
       if (this._mountsSyncInit) return;
       this._mountsSyncInit = true;
       this.app.ws.onGlobal((msg) => {
-        if (msg.type === 'mounts-updated' && this._activeTab === 'mounts') this._renderMounts();
+        if ((msg.type === 'mounts-updated' || msg.type === 'host-mounts-updated') && this._activeTab === 'mounts') this._renderMounts();
       });
     },
 
@@ -50,11 +50,12 @@ export function installSidebarMounts(Sidebar) {
         this.listEl.innerHTML = '<div class="mounts-loading">Loading…</div>';
       }
       let d, hd;
-      let mt;
-      try { [d, hd, mt] = await Promise.all([api('/api/mounts'), api('/api/hosts'), api('/api/mount-tokens').catch(() => ({ tokens: [] }))]); }
+      let mt, hm;
+      try { [d, hd, mt, hm] = await Promise.all([api('/api/mounts'), api('/api/hosts'), api('/api/mount-tokens').catch(() => ({ tokens: [] })), api('/api/host-mounts').catch(() => ({ mounts: [] }))]); }
       catch { this.listEl.innerHTML = '<div class="mounts-loading">Failed to load</div>'; return; }
       if (this._activeTab !== 'mounts') return; // user switched away mid-fetch
       d.mountTokens = mt?.tokens || [];
+      this._hostMountsData = hm?.mounts || []; // reverse mounts (this instance → a host)
       this._mountsData = d;
       this._hostsData = hd;
       this.listEl.innerHTML = '';
@@ -74,7 +75,13 @@ export function installSidebarMounts(Sidebar) {
       } else {
         const hlist = document.createElement('div');
         hlist.className = 'mounts-list';
-        for (const h of hd.hosts) hlist.appendChild(this._buildHostRow(h));
+        for (const h of hd.hosts) {
+          hlist.appendChild(this._buildHostRow(h));
+          // active reverse-mounts (this instance's folders mounted ON this host)
+          for (const hmr of this._hostMountsData.filter((m) => m.hostId === h.id)) {
+            hlist.appendChild(this._buildHostMountRow(h, hmr));
+          }
+        }
         root.appendChild(hlist);
         this._autoTestHosts(hd.hosts, hlist);
       }
@@ -525,6 +532,7 @@ export function installSidebarMounts(Sidebar) {
           } catch (e) { this._hostStatus[h.id] = { ok: false, error: e.message }; throw e; }
         }),
         ibtn(MI.wrench, 'Set up (install the tools needed to run agents)', () => { this._showBootstrapDialog(h); }),
+        ibtn(MI.folder, tr('Share a folder from this instance onto this machine'), () => { this._showHostMountDialog(h); }),
         ibtn(MI.termNew, 'New session on this host', () => { this.app.showNewSessionDialog?.({ hostId: h.id, hostName: h.name }); }),
         ibtn(MI.cross, 'Remove host', async () => {
           const ok = await showConfirmDialog({ title: `Remove "${h.name}"?`, message: 'Only the registry entry goes away — nothing on the remote machine is touched.', confirmText: 'Remove', danger: true });
@@ -538,6 +546,61 @@ export function installSidebarMounts(Sidebar) {
       sub.textContent = `${h.user}@${h.host}${h.port !== 22 ? ':' + h.port : ''}${h.keyPath ? ' · using VibeSpace key' : ''}`;
       row.append(top, sub);
       return row;
+    },
+
+    // A reverse-mount row: one of THIS instance's folders mounted on the host.
+    // Indented under its host row; shows folder → mountpoint, transport, and an
+    // unmount action.
+    _buildHostMountRow(h, hmr) {
+      const row = document.createElement('div');
+      row.className = 'mounts-row mounts-row-child';
+      const top = document.createElement('div');
+      top.className = 'mounts-row-top';
+      const viaLabel = hmr.via === 'tunnel' ? tr('via tunnel') : tr('via address');
+      const viaTip = hmr.via === 'tunnel'
+        ? tr('Rides the device agent link — no public address or VPN needed')
+        : tr('Reached over agentd.publicUrl (no device agent on this host)');
+      top.innerHTML = `
+        <span class="mounts-dot mounts-dot-ok" title="${escHtml(hmr.mode === 'rw' ? tr('Read-write') : tr('Read-only'))}"></span>
+        <b class="mounts-name" title="${escHtml(hmr.folder)}">${escHtml(hmr.folder.split('/').pop() || hmr.folder)}</b>
+        <span class="mounts-badge" title="${escHtml(viaTip)}">${escHtml(viaLabel)}</span>`;
+      const actions = document.createElement('span');
+      actions.className = 'mounts-row-actions';
+      const unmount = document.createElement('button');
+      unmount.className = 'mounts-icon-btn mounts-icon-danger';
+      unmount.innerHTML = MI.eject; unmount.title = tr('Unmount from this machine');
+      unmount.onclick = async (e) => {
+        e.stopPropagation(); unmount.disabled = true;
+        try { await api(`/api/host-mounts/${h.id}/${hmr.id}`, { method: 'DELETE' }); showToast(tr('Unmounted')); }
+        catch (err) { showToast(err.message || 'Failed', { type: 'error' }); }
+        this._renderMounts();
+      };
+      actions.append(unmount);
+      top.appendChild(actions);
+      const sub = document.createElement('div');
+      sub.className = 'mounts-path';
+      sub.style.direction = 'ltr';
+      sub.textContent = `→ ${hmr.mountpoint}`;
+      row.append(top, sub);
+      return row;
+    },
+
+    // Mount one of THIS instance's folders onto a remote host (reverse mount).
+    // Primary transport = the agentd tunnel (NAT-proof, no public address);
+    // falls back to agentd.publicUrl only for hosts without the device agent.
+    _showHostMountDialog(h) {
+      this._mountsDialog(tr('Share a folder onto "{name}"', { name: h.name }), [
+        { key: 'folder', label: tr('Folder on THIS instance to mount on the machine'), placeholder: '/home/me/project', autocomplete: 'local' },
+        { key: 'mode', label: tr('Access'), type: 'select', options: [['ro', tr('Read-only')], ['rw', tr('Read-write')]] },
+        { key: 'mountpoint', label: tr('Mount point on the machine (optional)'), placeholder: tr('default: ~/vibespace-remote/<folder>') },
+      ], tr('Mount'), async (v, { close }) => {
+        if (!v.folder) throw new Error(tr('Choose a folder to share'));
+        const r = await api(`/api/host-mounts/${h.id}`, { method: 'POST', body: JSON.stringify({ folder: v.folder, mode: v.mode, mountpoint: v.mountpoint || undefined }) });
+        close();
+        const via = r.via === 'tunnel' ? tr('over the device tunnel') : tr('over the public address');
+        showToast(tr('Mounted at {mp} on {name} ({via})', { mp: r.mountpoint, name: h.name, via }));
+        this._renderMounts();
+      });
     },
 
     _showAddHostDialog(hd) {

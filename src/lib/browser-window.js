@@ -4,10 +4,10 @@ import { escHtml } from './utils.js';
  * Open an embedded browser window with URL bar, proxy toggle, and error overlay.
  * Returns the winInfo object.
  */
-export function openBrowser(app, url, { syncId } = {}) {
+export function openBrowser(app, url, { syncId, proxy = false } = {}) {
   app._hideWelcome();
   const startUrl = url || '';
-  const openSpec = { action: 'openBrowser', url: startUrl };
+  const openSpec = { action: 'openBrowser', url: startUrl, proxy: !!proxy };
   let startTitle = 'Browser';
   try { if (startUrl) startTitle = new URL(startUrl).hostname; } catch {} // scheme-less replayed URLs must not abort window creation
   const winInfo = app.wm.createWindow({ title: startTitle, type: 'browser', syncId, openSpec });
@@ -24,15 +24,20 @@ export function openBrowser(app, url, { syncId } = {}) {
   const goBtn = document.createElement('button');
   goBtn.className = 'file-tool-btn'; goBtn.textContent = '\u2192'; goBtn.title = 'Go';
   goBtn.style.width = '28px';
-  let proxyMode = false;
+  let proxyMode = !!proxy; // replayed from openSpec.proxy (multi-client + refresh)
   const proxyBtn = document.createElement('button');
   proxyBtn.className = 'file-tool-btn'; proxyBtn.title = 'Proxy mode (bypass X-Frame-Options)';
   proxyBtn.style.cssText = 'width:auto;padding:0 6px;font-size:10px';
-  proxyBtn.textContent = 'Proxy: Off';
-  proxyBtn.onclick = () => {
-    proxyMode = !proxyMode;
+  const paintProxy = () => {
     proxyBtn.textContent = proxyMode ? 'Proxy: On' : 'Proxy: Off';
     proxyBtn.style.color = proxyMode ? 'var(--accent)' : '';
+  };
+  paintProxy();
+  proxyBtn.onclick = () => {
+    proxyMode = !proxyMode;
+    paintProxy();
+    if (winInfo._openSpec) winInfo._openSpec.proxy = proxyMode;
+    app.layoutManager?.scheduleAutoSave(); // persist + sync the toggle (gated on _userDirty)
     // Re-navigate with new mode
     if (urlInput.value) navigate(urlInput.value);
   };
@@ -62,6 +67,11 @@ export function openBrowser(app, url, { syncId } = {}) {
     try { app.wm.setTitle(winInfo.id, new URL(u).hostname); } catch {}
     winInfo._browserUrl = u;
     if (winInfo._openSpec) winInfo._openSpec.url = u; // keep multi-client replay in sync with navigation
+    // Persist + broadcast the new URL. scheduleAutoSave is a no-op during
+    // restore (_restoring) and until the user touches something (_userDirty),
+    // so replaying/programmatic navigation can't echo — only real navigation
+    // (Enter/link click already set _userDirty) actually sends.
+    app.layoutManager?.scheduleAutoSave();
   };
 
   // Detect load failures (X-Frame-Options, CSP, etc.)
