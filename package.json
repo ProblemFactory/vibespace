@@ -1,13 +1,13 @@
 {
   "name": "vibespace",
-  "version": "2.140.0",
+  "version": "2.141.0",
   "description": "VibeSpace \u2014 a backend-agnostic web workspace for coding agents (Claude Code, Codex, \u2026) with a multi-session tiling window manager",
   "main": "server.js",
   "scripts": {
     "build": "esbuild src/client.js --bundle --outfile=public/bundle.js --format=iife --platform=browser --target=es2020 --loader:.css=css --minify && esbuild node_modules/@novnc/novnc/core/rfb.js --bundle --outfile=public/novnc.js --format=esm --platform=browser --target=es2022 --minify && npm run build:agentd",
     "start": "npm run build && node server.js",
     "dev": "npm run build && node server.js",
-    "build:agentd": "node -e \"const v=require('./package.json').version;require('fs').writeFileSync('src/agentd/version.js','module.exports = { VERSION: '+JSON.stringify(v)+' };\\n')\" && esbuild src/agentd/agentd.js --bundle --platform=node --outfile=data/bin/vibespace-agentd.js"
+    "build:agentd": "node -e \"const v=require('./package.json').version;require('fs').writeFileSync('src/agentd/version.js','module.exports = { VERSION: '+JSON.stringify(v)+' };\\n')\" && esbuild src/agentd/agentd.js --bundle --platform=node --external:node-pty --outfile=data/bin/vibespace-agentd.js"
   },
   "dependencies": {
     "@codemirror/lang-css": "^6.2.0",

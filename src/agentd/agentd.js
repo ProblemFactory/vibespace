@@ -25,6 +25,17 @@ const TOKEN_FILE = path.join(STATE, 'token');
 
 fs.mkdirSync(STATE, { recursive: true, mode: 0o700 });
 
+// node-pty is loaded LAZILY (only when a session opens) so M0's zero-dep
+// bundle keeps working. On localhost the server passes VIBESPACE_NODE_MODULES
+// = the repo's node_modules; M2 (remote) will package prebuilds in the bundle.
+let _pty = null;
+function pty() {
+  if (_pty) return _pty;
+  const nm = process.env.VIBESPACE_NODE_MODULES;
+  _pty = require(nm ? require('path').join(nm, 'node-pty') : 'node-pty');
+  return _pty;
+}
+
 // ── log (rotated at 5MB ×2) ──
 function log(msg) {
   const line = `${new Date().toISOString()} ${msg}\n`;
@@ -122,6 +133,7 @@ try { fs.unlinkSync(SOCK); } catch { }
 const server = net.createServer((sock) => {
   let authed = false;
   let upgrade = null;
+  const sessions = new Map(); // chan → { proc, credit accounting is per-mux }
   const mux = new Mux(sock, {
     onControl(msg) {
       if (msg.op === 'hello') {
@@ -140,14 +152,56 @@ const server = net.createServer((sock) => {
       if (msg.op === 'ok') return; // server accepted us as-is
       if (msg.op === 'upgrade') { upgrade = beginUpgrade(mux, msg); return; }
       if (msg.op === 'ping-info') { mux.control({ op: 'info', version: VERSION, pid: process.pid, uptime: process.uptime() }); return; }
+      // ── M1 session primitive: spawn a pty, relay its bytes on a byte channel
+      // (invariant #2: mechanical only — no normalization/discovery here). The
+      // spawn spec (cmd/args/env) is assembled SERVER-side and shipped here. ──
+      if (msg.op === 'open-session') {
+        try {
+          const { chan, cmd, args, cols, rows, cwd, env } = msg;
+          if (!chan || chan < 1) throw new Error('bad session channel');
+          const proc = pty().spawn(cmd, args || [], {
+            name: 'xterm-256color', cols: cols || 120, rows: rows || 30,
+            cwd: cwd || process.env.HOME,
+            env: { ...process.env, ...(env || {}), TERM: 'xterm-256color', COLORTERM: 'truecolor' },
+          });
+          sessions.set(chan, { proc });
+          proc.onData((d) => { try { mux.data(chan, Buffer.from(d, 'utf-8')); } catch { } });
+          proc.onExit(({ exitCode }) => {
+            sessions.delete(chan);
+            mux.control({ op: 'session-exit', chan, code: exitCode });
+          });
+          mux.control({ op: 'session-open', chan, pid: proc.pid });
+        } catch (e) {
+          mux.control({ op: 'session-error', chan: msg.chan, error: e.message });
+        }
+        return;
+      }
+      if (msg.op === 'resize-session') {
+        const sx = sessions.get(msg.chan);
+        if (sx) { try { sx.proc.resize(msg.cols, msg.rows); } catch { } }
+        return;
+      }
+      if (msg.op === 'kill-session') {
+        const sx = sessions.get(msg.chan);
+        if (sx) { try { sx.proc.kill(); } catch { } sessions.delete(msg.chan); }
+        return;
+      }
       log('unknown control op: ' + msg.op);
     },
     onData(chan, buf) {
       if (!authed) return;
       if (chan === 1 && upgrade) { upgrade.data(buf); return; }
-      // M0: no other byte channels yet
+      const sx = sessions.get(chan);
+      if (sx) { try { sx.proc.write(buf.toString('utf-8')); } catch { } mux.credit(chan, buf.length); }
     },
-    onDead() { /* connection gone — nothing daemon-side depends on it */ },
+    onDead() {
+      // connection gone: dtach-attach ptys are DETACH points — killing the
+      // attach does NOT kill the dtach session (invariant #1: session survives
+      // server/daemon death). So we DETACH (kill the attach proc) but the
+      // underlying dtach session keeps running for the next connect.
+      for (const { proc } of sessions.values()) { try { proc.kill(); } catch { } }
+      sessions.clear();
+    },
   });
 });
 server.listen(SOCK, () => {

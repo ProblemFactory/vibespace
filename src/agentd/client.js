@@ -24,10 +24,11 @@ class DeviceManager {
    *  version      release version (= daemonVersion expected)
    *  log          logger fn
    */
-  constructor({ dataDir, bundlePath, version, log = console.log } = {}) {
+  constructor({ dataDir, bundlePath, version, nodeModules, log = console.log } = {}) {
     this._tokFile = path.join(dataDir, 'agentd-tokens.json');
     this._bundlePath = bundlePath;
     this._version = version;
+    this._nodeModules = nodeModules || null; // so the daemon can require node-pty (M1 localhost)
     this._log = log;
     this._root = process.env.VIBESPACE_AGENTD_ROOT || path.join(os.homedir(), '.vibespace', 'agentd');
     this._state = path.join(this._root, 'state');
@@ -86,7 +87,8 @@ class DeviceManager {
     const cur = path.join(this._root, 'current', 'agentd.js');
     if (!fs.existsSync(cur)) this.installLocal();
     const child = spawn(process.execPath, [path.join(this._root, 'current', 'agentd.js')], {
-      detached: true, stdio: 'ignore', env: { ...process.env },
+      detached: true, stdio: 'ignore',
+      env: { ...process.env, ...(this._nodeModules ? { VIBESPACE_NODE_MODULES: this._nodeModules } : {}) },
     });
     child.unref();
     this._log(`[agentd] spawned local daemon pid=${child.pid}`);
@@ -139,9 +141,18 @@ class DeviceManager {
             }
             mux.control({ op: 'ok' });
             settled = true;
-            this._conn = { mux, info: msg };
+            const sessions = new Map(); // chan → { onData, onExit }
+            this._conn = { mux, info: msg, sessions, nextChan: 2 };
+            // route byte-channel data + session control to the session handlers
+            mux.onData = (chan, buf) => { sessions.get(chan)?.onData?.(buf); mux.credit(chan, buf.length); };
+            const prevControl = mux.onControl;
+            mux.onControl = (m) => {
+              if (m.op === 'session-open') { sessions.get(m.chan)?.onOpen?.(m); return; }
+              if (m.op === 'session-exit') { const h = sessions.get(m.chan); sessions.delete(m.chan); h?.onExit?.(m.code); return; }
+              if (m.op === 'session-error') { const h = sessions.get(m.chan); sessions.delete(m.chan); h?.onError?.(m.error); return; }
+              prevControl(m);
+            };
             mux.onDead = () => { this._conn = null; this._log('[agentd] connection lost'); };
-            // rebind: Mux constructor took our handlers; onDead replacement above
             resolve(this._conn);
             return;
           }
@@ -171,6 +182,31 @@ class DeviceManager {
         mux.data(1, bundle.subarray(off, Math.min(off + 65536, bundle.length)));
       }
     });
+  }
+
+  /**
+   * Open a device-side session: the daemon spawns the pty and relays bytes.
+   * Returns a handle { write(str), resize(cols,rows), kill(), onData, onExit,
+   * ready } — onData/onExit are set by the caller before/after; ready resolves
+   * with {pid} on session-open or rejects on session-error.
+   */
+  async openSession({ cmd, args, cols, rows, cwd, env }) {
+    const conn = await this.connect();
+    const chan = conn.nextChan++;
+    const handle = { chan, onData: null, onExit: null };
+    let resolveReady, rejectReady;
+    handle.ready = new Promise((res, rej) => { resolveReady = res; rejectReady = rej; });
+    conn.sessions.set(chan, {
+      onOpen: (m) => { handle.pid = m.pid; resolveReady({ pid: m.pid }); },
+      onError: (e) => rejectReady(new Error(e)),
+      onData: (buf) => handle.onData?.(buf),
+      onExit: (code) => handle.onExit?.(code),
+    });
+    handle.write = (str) => conn.mux.data(chan, Buffer.from(str, 'utf-8'));
+    handle.resize = (c, r) => conn.mux.control({ op: 'resize-session', chan, cols: c, rows: r });
+    handle.kill = () => conn.mux.control({ op: 'kill-session', chan });
+    conn.mux.control({ op: 'open-session', chan, cmd, args, cols, rows, cwd, env });
+    return handle;
   }
 
   stop() { this._stopped = true; this._conn?.mux?.destroy(); this._conn = null; }

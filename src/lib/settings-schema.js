@@ -292,6 +292,12 @@ const SETTINGS_SCHEMA = {
     description: t('When an agent finishes a turn while its board state is stale (no status update in 10 minutes), it gets one short follow-up asking it to set vibespace-status, mirror open questions with vibespace-ask, and log finished work — then it stops. At most once per 30 minutes per session. Claude enforces this via a blocking Stop hook; Codex via its wrapper at turn end.'),
     category: t('Session'), liveApply: true,
   },
+  'agentd.sessions': {
+    type: 'boolean', default: false,
+    label: t('Route local sessions through the device agent (experimental)'),
+    description: t('CS-refactor M1 (opt-in, default off): run local terminal sessions inside the standing vibespace-agentd daemon instead of the server process, over the device mux protocol. The daemon owns the pty and survives server restarts; sessions are unaffected. Experimental — leave off unless you are testing the new architecture. Requires a restart to take effect.'),
+    category: t('Session'), liveApply: false,
+  },
   'agents.injectPreamble': {
     type: 'text', default: '',
     label: t('Custom agent instructions (injected)'),

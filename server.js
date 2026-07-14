@@ -417,6 +417,28 @@ const USAGE_CACHE_FILE = path.join(__dirname, 'data', 'usage-cache.json');
 // automated pattern is what gets Max/Pro accounts banned; see §ban-safety).
 const USAGE_CACHE_DIR = path.join(__dirname, 'data', 'usage-cache');
 const PTY_WRAPPER = path.join(__dirname, 'data', 'bin', 'pty-wrapper.js');
+
+// ── CS refactor M1 (opt-in, default OFF): route LOCAL terminal sessions
+// through the standing vibespace-agentd daemon. deviceMgr stays null unless
+// serverSetting('agentd.sessions') is on — a default instance never
+// instantiates it, never spawns a daemon, and attachToDtach is byte-identical
+// to today. daemonPtyShim presents the node-pty interface over a device
+// session handle so setupSessionPty is unchanged.
+let deviceMgr = null;
+function daemonPtyShim(handle) {
+  let dataCb = null, exitCb = null;
+  handle.onData = (buf) => { if (dataCb) dataCb(buf.toString('utf-8')); };
+  handle.onExit = (code) => { if (exitCb) exitCb({ exitCode: code }); };
+  return {
+    _daemon: true,
+    get pid() { return handle.pid; },
+    onData(cb) { dataCb = cb; return { dispose() { dataCb = null; } }; },
+    onExit(cb) { exitCb = cb; return { dispose() { exitCb = null; } }; },
+    write(s) { try { handle.write(s); } catch {} },
+    resize(cols, rows) { try { handle.resize(cols, rows); } catch {} },
+    kill() { try { handle.kill(); } catch {} },
+  };
+}
 const CHAT_WRAPPER = path.join(__dirname, 'data', 'bin', 'chat-wrapper.js');
 const CODEX_CHAT_WRAPPER = path.join(__dirname, 'data', 'bin', 'codex-chat-wrapper.js');
 
@@ -1170,11 +1192,23 @@ function deleteSessionMeta(sockName) {
 
 // Attach a PTY to an existing dtach socket for I/O
 function attachToDtach(id, socketPath, session) {
-  const attachPty = pty.spawn(DTACH_CMD, ['-a', socketPath, '-E', '-r', 'winch'], {
-    name: 'xterm-256color', cols: 120, rows: 30,
-    env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' },
-  });
-  setupSessionPty(session, id, attachPty);
+  const localAttach = () => {
+    const attachPty = pty.spawn(DTACH_CMD, ['-a', socketPath, '-E', '-r', 'winch'], {
+      name: 'xterm-256color', cols: 120, rows: 30,
+      env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' },
+    });
+    setupSessionPty(session, id, attachPty);
+  };
+  // M1: daemon owns the pty when enabled — the dtach attach runs INSIDE agentd
+  // and relays over the mux. On ANY failure fall back to the local pty so a
+  // daemon hiccup never loses a session.
+  if (deviceMgr && !session.host) {
+    deviceMgr.openSession({ cmd: DTACH_CMD, args: ['-a', socketPath, '-E', '-r', 'winch'], cols: 120, rows: 30 })
+      .then((h) => { setupSessionPty(session, id, daemonPtyShim(h)); })
+      .catch((e) => { console.warn('[agentd] session attach failed — local pty fallback:', e.message); localAttach(); });
+    return;
+  }
+  localAttach();
 }
 
 // On startup, reconnect to existing dtach sockets
@@ -3124,6 +3158,26 @@ server.listen(PORT, HOST, () => {
   try { fs.writeFileSync(path.join(__dirname, 'data', 'server.pid'), String(process.pid)); } catch {}
   console.log(`  dtach: ${DTACH_CMD}, node: ${NODE_CMD}, env: ${ENV_CMD}, claude: ${CLAUDE_CMD}, codex: ${CODEX_CMD}`);
   if (process.platform === 'linux') console.log(`  X display: ${X_ENV.DISPLAY || '(none)'}${X_ENV.XAUTHORITY ? ' (xauth: ' + X_ENV.XAUTHORITY + ')' : ''} — clipboard image paste ${X_ENV.probed ? 'ready' : 'UNAVAILABLE (no working X display found)'}`);
+
+  // M1 (opt-in): bring up the device agent BEFORE restore so re-adopted
+  // sessions attach through it too. Gated hard — off by default, so a normal
+  // instance never spawns a daemon (see attachToDtach).
+  if (serverSetting('agentd.sessions')) {
+    try {
+      const { DeviceManager } = require('./src/agentd/client.js');
+      deviceMgr = new DeviceManager({
+        dataDir: path.join(__dirname, 'data'),
+        bundlePath: path.join(__dirname, 'data', 'bin', 'vibespace-agentd.js'),
+        version: require('./package.json').version,
+        nodeModules: path.join(__dirname, 'node_modules'),
+        log: console.log,
+      });
+      deviceMgr.connect().then(() => console.log('  agentd: device session routing ENABLED')).catch((e) => {
+        console.warn('  agentd: could not reach the daemon — local pty fallback:', e.message);
+        deviceMgr = null; // fall back cleanly
+      });
+    } catch (e) { console.warn('  agentd: init failed — local pty fallback:', e.message); deviceMgr = null; }
+  }
 
   // Restore existing dtach sessions from before restart
   restoreSessions();
