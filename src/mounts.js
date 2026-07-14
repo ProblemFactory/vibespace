@@ -630,9 +630,10 @@ class MountManager {
           clientPreset: cfg.clientPreset ? String(cfg.clientPreset) : null,
           clientId: cfg.clientId || null,
           clientSecretEnc: cfg.clientSecret ? this._enc(cfg.clientSecret) : null,
-          syncCount: Math.max(1, Math.min(2000, Number(cfg.syncCount) || 200)),
-          groupBy: ['none', 'month', 'day'].includes(cfg.groupBy) ? cfg.groupBy : 'month',
-          labelIds: String(cfg.labelIds || 'INBOX'),
+          // syncCount 0 = EVERYTHING (engine hard-caps at 200k); blank = 200
+          syncCount: String(cfg.syncCount ?? '').trim() === '' ? 200 : Math.max(0, Math.min(200000, Number(cfg.syncCount) || 0)),
+          groupBy: ['none', 'month', 'day', 'label-month', 'label-day'].includes(cfg.groupBy) ? cfg.groupBy : 'label-month',
+          labelIds: String(cfg.labelIds || ''),
           query: String(cfg.query || ''),
           email: cfg.email ? String(cfg.email) : null,
           mode: 'ro', // read-only archive by design
@@ -892,8 +893,8 @@ class MountManager {
         }
         break;
       case 'gmail':
-        if (patch.syncCount !== undefined) m.syncCount = Math.max(1, Math.min(2000, Number(patch.syncCount) || 200));
-        if (patch.groupBy !== undefined) m.groupBy = ['none', 'month', 'day'].includes(patch.groupBy) ? patch.groupBy : 'none';
+        if (patch.syncCount !== undefined) m.syncCount = String(patch.syncCount).trim() === '' ? 200 : Math.max(0, Math.min(200000, Number(patch.syncCount) || 0));
+        if (patch.groupBy !== undefined) m.groupBy = ['none', 'month', 'day', 'label-month', 'label-day'].includes(patch.groupBy) ? patch.groupBy : 'none';
         if (patch.labelIds !== undefined) m.labelIds = String(patch.labelIds || '');
         if (patch.query !== undefined) m.query = String(patch.query || '');
         if (patch.clientPreset !== undefined) m.clientPreset = patch.clientPreset ? String(patch.clientPreset) : null;
@@ -916,6 +917,7 @@ class MountManager {
         break;
       case 'webdav': case 'vibespace':
         setIf('url', (v) => String(v).replace(/\/+$/, ''));
+        setIf('vendor', (v) => (v === 'nextcloud' ? 'nextcloud' : 'other'));
         setIf('user');
         if (patch.pass) m.passEnc = this._enc(String(patch.pass));
         if (patch.bearerToken) m.bearerTokenEnc = this._enc(String(patch.bearerToken));
@@ -1742,6 +1744,23 @@ class MountManager {
         } catch { reject(new Error('unexpected rclone output')); }
       });
     });
+  }
+
+  /** Labels picker data — by existing record id (decrypt its creds) or a
+   *  transient token from the add dialog. */
+  listGmailLabels({ id, token, clientId, clientSecret, clientPreset } = {}) {
+    if (id) {
+      const m = this._get(id);
+      if (m.type !== 'gmail') throw new Error('not a Gmail record');
+      return this.gmail.listLabels({
+        token: this._dec(m.tokenEnc),
+        clientPreset: m.clientPreset || null,
+        clientId: m.clientId || null,
+        clientSecret: m.clientSecretEnc ? this._dec(m.clientSecretEnc) : null,
+      });
+    }
+    if (!token) throw new Error('token required');
+    return this.gmail.listLabels({ token: String(token).trim(), clientId, clientSecret, clientPreset });
   }
 
   _mountGmail(id) {

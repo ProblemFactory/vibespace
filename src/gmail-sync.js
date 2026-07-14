@@ -210,6 +210,17 @@ class GmailSync {
     return r.json();
   }
 
+  /** List the account's labels (system + user) — the labels picker.
+   *  cfg = {token, clientId?, clientSecret?, clientPreset?} (transient) —
+   *  callers with an existing record pass its decrypted fields. */
+  async listLabels(cfg) {
+    const w = { cfg, tok: JSON.parse(String(cfg.token)) };
+    const d = await this._api(w, '/labels');
+    return (d.labels || [])
+      .map((l) => ({ id: l.id, name: l.name, type: l.type }))
+      .sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'system' ? -1 : 1));
+  }
+
   _statePath(w) { return path.join(w.cfg.dir, '.vibespace-gmail-state.json'); }
 
   _seenIds(w) {
@@ -218,15 +229,15 @@ class GmailSync {
     // the date-grouping layouts (YYYY-MM/ or YYYY-MM-DD/); files already in
     // the flat root keep counting after grouping is turned on (no re-download).
     const seen = new Set();
-    const scan = (dir) => {
+    const scan = (dir, depth) => {
       let entries = [];
       try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
       for (const e of entries) {
-        if (e.isDirectory() && /^\d{4}-\d{2}(-\d{2})?$/.test(e.name)) scan(path.join(dir, e.name));
+        if (e.isDirectory() && depth < 2 && !e.name.startsWith('.')) scan(path.join(dir, e.name), depth + 1);
         else { const m = /_([a-f0-9]{8,20})\.eml$/.exec(e.name); if (m) seen.add(m[1]); }
       }
     };
-    scan(w.cfg.dir);
+    scan(w.cfg.dir, 0);
     return seen;
   }
 
@@ -243,9 +254,13 @@ class GmailSync {
       state.email = prof.emailAddress;
     }
 
+    const labelFilter = String(w.cfg.labelIds || '').split(',').map((s) => s.trim()).filter(Boolean);
     const qs = () => {
       const p = new URLSearchParams();
-      if (w.cfg.labelIds) for (const l of String(w.cfg.labelIds).split(',').map((s) => s.trim()).filter(Boolean)) p.append('labelIds', l);
+      for (const l of labelFilter) p.append('labelIds', l);
+      // No label filter = the WHOLE mailbox — including archived (no INBOX
+      // label) and, explicitly, spam/trash (the API excludes them by default).
+      if (!labelFilter.length) p.set('includeSpamTrash', 'true');
       if (w.cfg.query) p.set('q', w.cfg.query);
       return p;
     };
@@ -273,8 +288,10 @@ class GmailSync {
       }
     }
     if (!state.historyId) {
-      // Seed/reseed: newest N matching messages
-      const want = Math.max(1, Math.min(2000, Number(w.cfg.syncCount) || 200));
+      // Seed/reseed: newest N matching messages; syncCount 0 = EVERYTHING
+      // (hard runaway cap 200k — ~11h of quota-paced fetching at worst)
+      const n = Number(w.cfg.syncCount);
+      const want = n === 0 ? 200000 : Math.max(1, Math.min(200000, n || 200));
       let pageToken = null;
       while (ids.length < want) {
         const p = qs();
@@ -302,10 +319,21 @@ class GmailSync {
       const slug = subj.replace(/[^\p{L}\p{N} _.-]/gu, '').trim().replace(/\s+/g, '-').slice(0, 60) || 'no-subject';
       const d = new Date(Number(msg.internalDate) || Date.now());
       const stamp = d.toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-');
-      // date grouping (user option — one flat dir hits fs limits and explorer
-      // pain at 10^5+ mails): none | month (YYYY-MM/) | day (YYYY-MM-DD/)
+      // grouping (user option — one flat dir hits fs limits and explorer
+      // pain at 10^5+ mails): none | month | day | label-month | label-day.
+      // Label layouts put each mail under ONE folder by Gmail's own
+      // precedence (a message carries many labels; "archived" = no INBOX).
       const iso = d.toISOString();
-      const sub = w.cfg.groupBy === 'month' ? iso.slice(0, 7) : w.cfg.groupBy === 'day' ? iso.slice(0, 10) : '';
+      const ls = msg.labelIds || [];
+      const labelDir = ls.includes('SPAM') ? 'Spam' : ls.includes('TRASH') ? 'Trash'
+        : ls.includes('DRAFT') ? 'Drafts' : ls.includes('INBOX') ? 'Inbox'
+        : ls.includes('SENT') ? 'Sent' : 'Archive';
+      const g = w.cfg.groupBy;
+      const sub = g === 'month' ? iso.slice(0, 7)
+        : g === 'day' ? iso.slice(0, 10)
+        : g === 'label-month' ? path.join(labelDir, iso.slice(0, 7))
+        : g === 'label-day' ? path.join(labelDir, iso.slice(0, 10))
+        : '';
       const destDir = sub ? path.join(w.cfg.dir, sub) : w.cfg.dir;
       fs.mkdirSync(destDir, { recursive: true });
       const tmp = path.join(destDir, `.tmp-${id}`);
