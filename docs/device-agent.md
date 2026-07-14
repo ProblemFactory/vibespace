@@ -53,22 +53,36 @@ the remote mounts that URL as a normal folder. OS-aware:
 - **Windows**: `rclone mount` to a drive letter (WinFsp) if present, else the
   **built-in** `net use` WebDAV redirector (no FUSE needed).
 VibeSpace installs rclone on the remote automatically when needed.
-Requires `agentd.publicUrl` (the address the remote uses to reach this instance,
-e.g. `https://vibe.example.com` or a Tailscale `http://100.x.x.x:3456`) — or
-VibeSpace derives it from the request.
+
+**The remote reaches us over the device TUNNEL — no public address needed.**
+When the data-plane flag is on (the default path once the device agent is set
+up), the daemon binds a loopback port ON THE REMOTE and pushes every connection
+back over the device link into our own `127.0.0.1:<serverPort>`. The remote
+mounts `http://127.0.0.1:<port>/dav` — the bytes ride the ssh-stdio or wss
+dial-out link that's already up, so this works through NAT with no public IP,
+no VPN, and no Tailscale. The mount even survives a link drop: the daemon keeps
+the port bound and a reconnecting server re-owns it in place (no remount).
+`agentd.publicUrl` is only the FALLBACK for hosts that have no device agent.
+*(Proven end-to-end with `/dav` bound to `127.0.0.1` only — an address nothing
+external can reach — in `scripts/test-host-mounts-tunnel.mjs`.)*
+
+Do it from the UI: **Remote tab → the host row → "share a folder onto this
+machine"**. Active reverse-mounts appear as child rows under the host (folder →
+mountpoint, a **tunnel**/**address** badge, and an unmount button).
 
 ### The powerful case: your Mac ↔ a cloud VibeSpace, both directions
 Say your Mac runs the agent (dial-out) and connects to `vibe.example.com`:
-- **Mount vibe.example.com's storage on your Mac** — direct: the cloud instance
-  is publicly reachable, your Mac mounts its `/dav` (rclone / native mac WebDAV).
-  ✓ Works today.
+- **Mount vibe.example.com's storage on your Mac** — the Mac's agent binds a
+  loopback port and the cloud's `/dav` is reached back through the SAME tunnel;
+  the Mac mounts `http://127.0.0.1:<port>/dav`. ✓ Works today (the tunnel is
+  bidirectional — the cloud need not even be publicly reachable to the Mac).
 - **Mount your Mac's folder on vibe.example.com** — the Mac is behind NAT, but it
   already holds an outbound connection to the cloud. The Mac's agent serves the
   folder over WebDAV on a loopback port, and the cloud reaches it **through the
-  agent's tcp-forward channel** (no inbound to the Mac needed). This uses the
-  same forward primitive that powers the remote VNC bridge. *(Direction B via
-  dial-out is the relay path; the loopback-serve wiring ships incrementally —
-  the primitives are in place and acceptance-tested.)*
+  agent's tcp-forward channel** (no inbound to the Mac needed) — the same
+  reverse-forward primitive proven above. *(The cloud-side auto-wiring of "spawn
+  `rclone serve webdav` on the Mac loopback + reach it via the tunnel" ships
+  incrementally; the transport primitive is acceptance-tested.)*
 
 ## Enabling (all default OFF — opt-in)
 
