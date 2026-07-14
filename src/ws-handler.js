@@ -402,6 +402,32 @@ function registerWsHandler(wss, ctx) {
             let acctEnv = '';
             try { acctEnv = remoteAccountEnv(h); }
             catch (e) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'Failed to place the account key on ' + h.name + ': ' + e.message })); return; }
+            // ── B-4058 pre-spawn orphan cleanup (resume-with-respawn only) ──
+            // A pod rebuild loses local state; a later plain resume used to
+            // race a still-alive orphan claude holding the SAME claude session
+            // id (double JSONL writers, 'resume did nothing', keeper remnants
+            // that fooled diagnosis). Before respawning with --resume: SIGTERM
+            // any lock-holding claude for this session id (cmdline-verified)
+            // and stop any live keeper session referencing it. Never runs for
+            // keeper-ATTACH (data.keeperSid — we adopt, not respawn).
+            if (data.resume && data.resumeId && !data.keeperSid && /^[\w-]+$/.test(data.resumeId)) {
+              try {
+                const cleanScript = `RID=${shq(data.resumeId)}
+find "$HOME/.claude/sessions" -maxdepth 1 -name '*.json' 2>/dev/null | while read -r f; do
+  pid=$(basename "$f" .json)
+  grep -q "\"sessionId\":\"$RID\"" "$f" 2>/dev/null || continue
+  kill -0 "$pid" 2>/dev/null || continue
+  case "$(tr '\\0' ' ' < /proc/$pid/cmdline 2>/dev/null)" in *claude*) kill -TERM "$pid" 2>/dev/null;; esac
+done
+find "$HOME/.vibespace/run" -maxdepth 1 -name '*.json' 2>/dev/null | while read -r kf; do
+  grep -q "$RID" "$kf" 2>/dev/null || continue
+  grep -q '"exited"' "$kf" 2>/dev/null && continue
+  node "$HOME/.vibespace/bin/vibespace-remote-keeper" stop "$(basename "$kf" .json)" >/dev/null 2>&1 || true
+done`;
+                execFileSync('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', cleanScript], { timeout: 20000, stdio: 'ignore' });
+                hosts.invalidateDiscovery(h.id);
+              } catch (e) { console.warn('[remote] pre-resume cleanup failed (continuing):', e.message); }
+            }
             // acctEnv rides as a SHELL PREFIX ASSIGNMENT before exec — the shell
             // setenvs it internally, so the VALUE never appears in any argv
             // (an `env KEY=$(cat …)` argument would expand into env's argv).
@@ -451,10 +477,19 @@ function registerWsHandler(wss, ctx) {
             // (re)spawn with the byte offset it has consumed — the keeper
             // replays exactly the missed bytes. env pairs precede the keeper
             // so claude (spawned by the keeper daemon) inherits them.
+            // keeper-ATTACH (B-4058): the card carried a live keeper sid —
+            // reattach to the surviving remote claude from byte 0 (full
+            // replay rebuilds the view) instead of killing + respawning.
+            // No command after the sid: keeper adopts (takeover if the
+            // daemon died) or drains/synthesizes an exit — never spawns.
+            const keeperSid = data.keeperSid && /^[\w-]+$/.test(data.keeperSid) ? data.keeperSid : null;
+            session.keeperSid = keeperSid || id;
+            const runTail = keeperSid
+              ? ` node "$HOME/.vibespace/bin/vibespace-remote-keeper" run ${shq(keeperSid)} __VS_OFFSET__`
+              : ` node "$HOME/.vibespace/bin/vibespace-remote-keeper" run ${shq(id)} __VS_OFFSET__ -- ` + [rcmd, ...rargs.map(shq)].join(' ');
             const inner = ra.prelude + `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ` + ra.tokenAssign + acctEnv + `exec env `
               + [...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq)].join(' ')
-              + ` node "$HOME/.vibespace/bin/vibespace-remote-keeper" run ${shq(id)} __VS_OFFSET__ -- `
-              + [rcmd, ...rargs.map(shq)].join(' ');
+              + runTail;
             spawnCmd = 'ssh';
             spawnArgs = [...hosts.sshArgs(h, { reverse: ra.reverse }), '-T', '--', inner];
             spawnEnvPairs = [];
@@ -563,6 +598,7 @@ function registerWsHandler(wss, ctx) {
             cwd,
             host: session.host || null,
             hostName: session.hostName || null,
+            keeperSid: session.keeperSid || null,
             backend: session.backend,
             backendSessionId: session.backendSessionId,
             claudeSessionId: session.claudeSessionId,
@@ -1101,7 +1137,7 @@ function registerWsHandler(wss, ctx) {
               ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, mode: 'chat',
                 messages, totalCount, chatStatus, isStreaming, streamingLabel, taskState: sm.taskState(), turnMap, pendingPermissions: pendingPerms,
                 normEpoch: session._normEpoch || 0,
-                remoteState: session._remoteState || null,
+                remoteState: session._remoteState || (session._bareRemote ? { state: 'unprotected' } : null),
                 goal: session._goal || null, goalElapsed: session._goalElapsed || 0, goalStatus: session._goalStatus || null }));
             } else {
               ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, buffer: session.buffer || '' }));
@@ -1194,7 +1230,7 @@ function registerWsHandler(wss, ctx) {
               try {
                 const h = hosts.get(session.host);
                 if (session.mode === 'chat') {
-                  execFile('ssh', [...hosts.sshArgs(h), '--', `node "$HOME/.vibespace/bin/vibespace-remote-keeper" stop ${data.sessionId} 2>/dev/null || true; rm -f "$HOME/.vibespace/bin/.tok-${data.sessionId}"`],
+                  execFile('ssh', [...hosts.sshArgs(h), '--', `node "$HOME/.vibespace/bin/vibespace-remote-keeper" stop ${session.keeperSid || data.sessionId} 2>/dev/null || true; rm -f "$HOME/.vibespace/bin/.tok-${data.sessionId}"`],
                     { timeout: 15000 }, () => { try { hosts.invalidateDiscovery(session.host); } catch {} });
                 } else {
                   setTimeout(() => { try { hosts.invalidateDiscovery(session.host); } catch {} }, 2000);

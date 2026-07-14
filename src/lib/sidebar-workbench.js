@@ -264,7 +264,11 @@ export function installSidebarWorkbench(Sidebar) {
         cwd: s.cwd || '',
         host: s.host,
         hostName: s.hostName,
-        status: s.status === 'remote-running' ? 'external' : 'stopped',
+        // keeper-managed remote claude (B-4058): the remote daemon+claude
+        // survived a pod rebuild/local loss — present as resumable; Resume
+        // ADOPTS the live process via keeper-attach instead of respawning.
+        status: s.keeperSid ? 'stopped' : (s.status === 'remote-running' ? 'external' : 'stopped'),
+        keeperSid: s.keeperSid || undefined,
         startedAt: s.mtime,
       };
     },

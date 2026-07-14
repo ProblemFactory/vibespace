@@ -112,6 +112,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     backend: s.backend || 'claude',
     backendSessionId: s.backendSessionId || s.sessionId,
     hostId: s.host || undefined, // remote sessions resume/view ON their host
+    keeperSid: s.keeperSid || undefined, // live remote keeper session — resume ADOPTS it (B-4058)
     agentKind: s.agentKind || 'primary',
     agentRole: s.agentRole || '',
     agentNickname: s.agentNickname || '',

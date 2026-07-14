@@ -1798,4 +1798,6 @@ export default {
   "A {provider} sign-in page opened. Approve access, then come back here.": "已打开 {provider} 登录页面。批准访问后回到这里。",
   "OAuth token (re-run Connect to replace)": "OAuth 令牌（重新运行\"连接\"以替换）",
   "Folder (optional)": "文件夹（可选）",
+  "This session was created before disconnect protection existed — a network drop can kill it. Terminate and Resume the session to rebuild it protected.": "此会话建立于断线保护功能之前——网络抖动可能杀死它。终止并 Resume 即可重建为受保护会话。",
+  "no disconnect protection": "无断线保护",
 };

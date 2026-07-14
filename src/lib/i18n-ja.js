@@ -1798,4 +1798,6 @@ export default {
   "A {provider} sign-in page opened. Approve access, then come back here.": "{provider} のサインインページが開きました。アクセスを承認してからここに戻ってください。",
   "OAuth token (re-run Connect to replace)": "OAuth トークン（置き換えるには「接続」を再実行）",
   "Folder (optional)": "フォルダ（任意）",
+  "This session was created before disconnect protection existed — a network drop can kill it. Terminate and Resume the session to rebuild it protected.": "このセッションは切断保護機能より前に作成されました——ネットワーク断で失われる可能性があります。終了して Resume すると保護付きで再構築されます。",
+  "no disconnect protection": "切断保護なし",
 };

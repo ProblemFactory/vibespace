@@ -85,7 +85,7 @@ export class ChatStatusBar {
       is reconnecting — the REMOTE session itself is fine, nothing is lost.
       Amber chip while reconnecting; cleared the moment bytes flow again. */
   setRemoteState(rs) {
-    const key = rs && rs.state === 'reconnecting' ? `r${rs.attempts || 0}` : '';
+    const key = rs && rs.state === 'reconnecting' ? `r${rs.attempts || 0}` : (rs && rs.state === 'unprotected' ? 'u' : '');
     if (key === this._remoteKey) return;
     this._remoteKey = key;
     this._remoteState = key ? rs : null;
@@ -303,7 +303,11 @@ export class ChatStatusBar {
     }
 
     // Remote reconnect chip — amber, only while the ssh pipe is down
-    if (this._remoteState) {
+    if (this._remoteState && this._remoteState.state === 'unprotected') {
+      // B-0845: session predates the keeper (2.124.0) — claude hangs bare off
+      // the ssh pipe; one network wobble kills it. Rebuild = terminate+resume.
+      parts.push(`<span class="chat-status-remote" title="${escHtml(t('This session was created before disconnect protection existed — a network drop can kill it. Terminate and Resume the session to rebuild it protected.'))}">⚠ ${escHtml(t('no disconnect protection'))}</span>`);
+    } else if (this._remoteState) {
       const n = this._remoteState.attempts || 0;
       parts.push(`<span class="chat-status-remote" title="${escHtml(t('The connection to the remote host dropped — reconnecting. The session keeps running on the host; nothing is lost.'))}">⟳ ${escHtml(t('host reconnecting'))}${n > 1 ? ` (${n})` : ''}…</span>`);
     }
