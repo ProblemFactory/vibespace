@@ -7,10 +7,11 @@
  * progress endpoints. Injection ORDER + SIZE are load-bearing — read the
  * CLAUDE.md notes on renderContext/persisted-output before touching payloads.
  */
+const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 
-function setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, scheduleCtxSync, remoteCtxBaseFor }) {
+function setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, scheduleCtxSync, remoteCtxBaseFor, readUserState }) {
 app.post('/api/agent/user-todo', (req, res) => {
   const hit = agentSession(req, res);
   if (!hit) return;
@@ -573,6 +574,93 @@ app.post('/api/agent/task-backlog', (req, res) => {
     });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
+
+// ── Task Group ADMIN for designated MANAGER sessions (2.132.0, issue #21 —
+// walter's majordomo/Jarvis flow: group create/update/bind is a routine
+// agent-driven operation there). DOUBLE-GATED, both off by default:
+//   1. setting agents.allowGroupManagement (user opt-in, Settings)
+//   2. THIS session designated "Group manager" by the user (Session
+//      Properties toggle → sessionConfigs[key].groupManager, user-state)
+// Verbs mirror the UI's organize/present config ops — NO orchestration, no
+// spawn, no delete (destructive stays user-only). contextDir/folders paths
+// are restricted to allowlisted roots; every op is AUDITED into the group's
+// activity log attributed to the calling session (visible on the board).
+app.post('/api/agent/group-admin', (req, res) => {
+  const hit = agentSession(req, res);
+  if (!hit) return;
+  const [s, id] = hit;
+  const key = sessionStatusKey(s, id);
+  try {
+    if (!serverSetting('agents.allowGroupManagement')) {
+      return res.status(403).json({ error: 'agent group management is disabled — the user can enable it (Settings → Session → "Allow agents to manage Task Groups"), then designate this session as a Group manager in its Session Properties' });
+    }
+    const us = (readUserState && readUserState()) || {};
+    const mgr = !key.startsWith('webui:') && ((us.sessionConfigs || {})[key] || {}).groupManager === true;
+    if (!mgr) {
+      return res.status(403).json({ error: 'this session is not a designated Group manager — ask the user to enable the "Group manager" toggle in this session\'s Properties (session key: ' + key + ')' });
+    }
+    // Path allowlist: contextDir/folders must resolve under a configured root
+    // (an agent must not be able to point injection at arbitrary paths).
+    const roots = String(serverSetting('agents.groupManagementRoots') || '~').split(',')
+      .map((r) => r.trim()).filter(Boolean)
+      .map((r) => path.resolve(r.replace(/^~(?=$|\/)/, os.homedir())));
+    const checkPath = (p, what) => {
+      const abs = path.resolve(String(p).replace(/^~(?=$|\/)/, os.homedir()));
+      if (!roots.some((r) => abs === r || abs.startsWith(r.endsWith('/') ? r : r + '/'))) {
+        throw new Error(`${what} must be under: ${roots.join(', ')} (setting agents.groupManagementRoots)`);
+      }
+      return abs;
+    };
+    const sanitizeFolders = (arr) => (Array.isArray(arr) ? arr : []).map((f) => ({
+      path: checkPath(typeof f === 'string' ? f : f && f.path, 'folder'),
+      recursive: typeof f === 'object' && f ? f.recursive !== false : true,
+    }));
+    const audit = (gid, note) => { try { tasks.addProgress(gid, { note, session: key }); } catch { } };
+    const brief = (t) => ({ id: t.id, title: t.title, archived: !!t.archived, contextDir: t.contextDir || null, sessions: (t.sessions || []).length });
+    const { create, update, bind, unbind, list } = req.body || {};
+    if (list) return res.json({ success: true, groups: tasks.list().map(brief) });
+    if (create && typeof create === 'object') {
+      if (!create.title || !String(create.title).trim()) throw new Error('title required');
+      const t = tasks.create({
+        title: String(create.title),
+        kind: 'task',
+        objective: create.objective !== undefined ? String(create.objective) : undefined,
+        contextDir: create.contextDir ? checkPath(create.contextDir, 'contextDir') : undefined,
+        folders: create.folders !== undefined ? sanitizeFolders(create.folders) : undefined,
+        color: create.color ? String(create.color) : undefined,
+      });
+      audit(t.id, '[group-admin] group created by manager agent');
+      return res.json({ success: true, group: brief(tasks.get(t.id)) });
+    }
+    if (update && update.id) {
+      const patch = {};
+      if (update.title !== undefined) patch.title = String(update.title);
+      if (update.objective !== undefined) patch.objective = String(update.objective);
+      if (update.color !== undefined) patch.color = String(update.color);
+      if (update.archived !== undefined) patch.archived = !!update.archived;
+      if (update.contextDir !== undefined) patch.contextDir = update.contextDir ? checkPath(update.contextDir, 'contextDir') : null;
+      if (update.folders !== undefined) patch.folders = sanitizeFolders(update.folders);
+      if (!Object.keys(patch).length) throw new Error('nothing to update — send title/objective/contextDir/folders/color/archived');
+      tasks.update(update.id, patch);
+      audit(update.id, `[group-admin] ${Object.keys(patch).join('+')} updated by manager agent`);
+      return res.json({ success: true, group: brief(tasks.get(update.id)) });
+    }
+    if (bind && bind.id) {
+      const sk = String(bind.sessionKey || key);
+      tasks.bind(bind.id, sk);
+      audit(bind.id, `[group-admin] session ${sk} bound by manager agent`);
+      return res.json({ success: true, group: brief(tasks.get(bind.id)) });
+    }
+    if (unbind && unbind.id) {
+      const sk = String(unbind.sessionKey || key);
+      tasks.unbind(unbind.id, sk);
+      audit(unbind.id, `[group-admin] session ${sk} unbound by manager agent`);
+      return res.json({ success: true, group: brief(tasks.get(unbind.id)) });
+    }
+    return res.status(400).json({ error: 'need create, update, bind, unbind, or list' });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 // ── Hook install management (Manage Agents dialog — auto-registers at boot,
 // this surfaces status + one-click repair/remove for non-engineers) ──
 }

@@ -1719,4 +1719,12 @@ export default {
   "Cloud-side scope (mydrive / shared-with-me / shared-drive)": "云端范围（mydrive / shared-with-me / shared-drive）",
   "Shared drive id": "共享云端硬盘 id",
   "Folder ID (advanced)": "文件夹 ID（高级）",
+  "Allow agents to manage Task Groups": "允许 agent 管理任务组",
+  "Lets sessions YOU designate as \"Group manager\" (Session Properties) create and configure Task Groups via their CLI — create/update/bind/unbind, the same organize-only operations you perform in the UI. Paths they may use are limited by the roots setting below; every operation is recorded in the group's activity log. Off = the API refuses all agents.": "允许你在会话属性里指定为“组管理员”的会话通过其 CLI 创建和配置任务组——create/update/bind/unbind，与你在 UI 里执行的纯组织类操作相同。可用路径受下方根目录设置限制；每次操作都记入该组的活动日志。关闭 = API 拒绝所有 agent。",
+  "Group management path roots": "组管理路径根目录",
+  "Comma-separated absolute path prefixes a manager agent may use for a group's context folder / auto-include folders (~ = your home). Keeps agents from pointing context injection at arbitrary paths.": "组管理员 agent 可用于组的共享上下文目录/自动包含文件夹的绝对路径前缀（逗号分隔，~ = 你的主目录）。防止 agent 把上下文注入指向任意路径。",
+  "Agent permissions": "Agent 权限",
+  "Group manager — may create/configure Task Groups from its CLI": "组管理员——可通过其 CLI 创建/配置任务组",
+  "Globally enabled — a designated session can run group-create / group-update / group-bind (audited in each group's activity log).": "全局已启用——被指定的会话可执行 group-create / group-update / group-bind（记入各组活动日志）。",
+  "Also requires Settings → Session → \"Allow agents to manage Task Groups\" (currently off).": "还需要 设置 → 会话 → “允许 agent 管理任务组”（当前关闭）。",
 };

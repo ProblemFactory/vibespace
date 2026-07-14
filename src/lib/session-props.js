@@ -187,6 +187,29 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
     }
     if (!(sidebar._tasks || []).filter(t => !t.archived).length) tgSec.insertAdjacentHTML('beforeend', `<div class="empty-hint">${escHtml(t('No Task Groups yet'))}</div>`);
 
+    // ── Agent permissions: Group manager delegation (issue #21) ──
+    // Double-gated: this per-session toggle AND the global setting
+    // agents.allowGroupManagement must both be on for /api/agent/group-admin.
+    {
+      const mgrSec = section(t('Agent permissions'));
+      const lbl = document.createElement('label');
+      lbl.className = 'session-props-group';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = !!(sidebar.getSessionConfig?.(s) || {}).groupManager;
+      cb.onchange = () => sidebar.setSessionConfig?.(s, { ...(sidebar.getSessionConfig?.(s) || {}), groupManager: cb.checked || undefined });
+      const txt = document.createElement('span');
+      txt.textContent = t('Group manager — may create/configure Task Groups from its CLI');
+      lbl.append(cb, txt);
+      mgrSec.appendChild(lbl);
+      const hint = document.createElement('div');
+      hint.className = 'empty-hint';
+      hint.textContent = app.settings?.get('agents.allowGroupManagement')
+        ? t('Globally enabled — a designated session can run group-create / group-update / group-bind (audited in each group\'s activity log).')
+        : t('Also requires Settings → Session → "Allow agents to manage Task Groups" (currently off).');
+      mgrSec.appendChild(hint);
+    }
+
     // ── Agent steps (native TODO) ──
     const stepSec = section(t('Agent steps'));
     const stepList = document.createElement('div');

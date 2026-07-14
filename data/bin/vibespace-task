@@ -14,6 +14,8 @@ let group = '';
 let detail = '';
 let hasDetailFlag = false; // distinguish "no --detail" from "--detail ''" (edit clears detail)
 let newText;               // undefined = no --text; '' = explicit empty (rejected for text)
+const gflags = {};         // group-admin verbs: --title/--objective/--context-dir/--color/--archived/--session
+const gfolders = [];       // repeatable --folder
 let full = false;
 const argv = [];
 for (let i = 0; i < rawArgs.length; i++) {
@@ -27,6 +29,11 @@ for (let i = 0; i < rawArgs.length; i++) {
   if (a === '--text' && rawArgs[i + 1] !== undefined) { newText = rawArgs[++i]; continue; }
   const mt = /^--text=([\s\S]*)$/.exec(a);
   if (mt) { newText = mt[1]; continue; }
+  const gm = /^--(title|objective|context-dir|color|archived|session)(?:=([\s\S]*))?$/.exec(a);
+  if (gm) { gflags[gm[1]] = gm[2] !== undefined ? gm[2] : (rawArgs[i + 1] !== undefined ? rawArgs[++i] : ''); continue; }
+  if (a === '--folder' && rawArgs[i + 1] !== undefined) { gfolders.push(rawArgs[++i]); continue; }
+  const gf = /^--folder=([\s\S]*)$/.exec(a);
+  if (gf) { gfolders.push(gf[1]); continue; }
   if (a === '--full') { full = true; continue; }
   argv.push(a);
 }
@@ -48,6 +55,12 @@ const USAGE = [
   '  vibespace-task backlog-done <id|#|text>      mark a parked item decided/finished',
   '  vibespace-task backlog-drop <id|#|text>      drop a parked item as obsolete',
   '  vibespace-task backlog-edit <id|#|text> [--text "new"] [--detail "new"]   edit an item in place (id stays; --detail "" clears)',
+  '  Group manager verbs (need the user-enabled setting + this session designated as Group manager):',
+  '  vibespace-task group-list                    id + title of every group (avoid duplicates before creating)',
+  '  vibespace-task group-create --title "T" [--objective "..."] [--context-dir /abs] [--folder /abs]... [--color #hex]',
+  '  vibespace-task group-update <id> [--title ...] [--objective ...] [--context-dir /abs] [--folder /abs]... [--archived true|false]',
+  '  vibespace-task group-bind <id> [--session backend:sessionId]   attach a session (default: this one)',
+  '  vibespace-task group-unbind <id> [--session backend:sessionId]',
   '  --group <id>   target a specific group if this session belongs to more than one',
   '  (a Task Group has NO status — report THIS session\'s state via vibespace-status;',
   '   keep working steps in your own session todo list)',
@@ -150,6 +163,37 @@ async function main() {
     const r = await call('POST', '/api/agent/task-backlog', body);
     const id = r.item && r.item.id ? '[' + r.item.id + '] ' : '';
     console.log('updated ' + id + (newText !== undefined ? 'text ' : '') + (newText !== undefined && hasDetailFlag ? '+ ' : '') + (hasDetailFlag ? (detail.trim() === '' || detail.trim() === '-' ? 'detail cleared ' : 'detail ') : ''));
+  } else if (cmd === 'group-list') {
+    const { groups } = await call('POST', '/api/agent/group-admin', { list: true });
+    if (!groups.length) { console.log('no Task Groups yet'); return; }
+    for (const g of groups) console.log(`${g.id}  ${g.title}${g.archived ? '  (archived)' : ''}  — ${g.sessions} session(s)${g.contextDir ? '  ctx:' + g.contextDir : ''}`);
+  } else if (cmd === 'group-create') {
+    if (!gflags.title) { console.error('vibespace-task: group-create needs --title "..."'); process.exit(1); }
+    const create = { title: gflags.title };
+    if (gflags.objective !== undefined) create.objective = gflags.objective;
+    if (gflags['context-dir']) create.contextDir = gflags['context-dir'];
+    if (gfolders.length) create.folders = gfolders;
+    if (gflags.color) create.color = gflags.color;
+    const { group } = await call('POST', '/api/agent/group-admin', { create });
+    console.log(`created ${group.id}  "${group.title}" — it appears on the user's board; bind sessions with: vibespace-task group-bind ${group.id} --session <backend:sessionId>`);
+  } else if (cmd === 'group-update') {
+    if (!arg) { console.error('vibespace-task: group-update needs a group id'); process.exit(1); }
+    const update = { id: arg.split(' ')[0] };
+    if (gflags.title !== undefined) update.title = gflags.title;
+    if (gflags.objective !== undefined) update.objective = gflags.objective;
+    if (gflags['context-dir'] !== undefined) update.contextDir = gflags['context-dir'];
+    if (gfolders.length) update.folders = gfolders;
+    if (gflags.color !== undefined) update.color = gflags.color;
+    if (gflags.archived !== undefined) update.archived = gflags.archived === 'true' || gflags.archived === '1';
+    const { group } = await call('POST', '/api/agent/group-admin', { update });
+    console.log(`updated ${group.id}  "${group.title}"`);
+  } else if (cmd === 'group-bind' || cmd === 'group-unbind') {
+    if (!arg) { console.error('vibespace-task: ' + cmd + ' needs a group id'); process.exit(1); }
+    const body = cmd === 'group-bind'
+      ? { bind: { id: arg.split(' ')[0], ...(gflags.session ? { sessionKey: gflags.session } : {}) } }
+      : { unbind: { id: arg.split(' ')[0], ...(gflags.session ? { sessionKey: gflags.session } : {}) } };
+    const { group } = await call('POST', '/api/agent/group-admin', body);
+    console.log(`${cmd === 'group-bind' ? 'bound to' : 'unbound from'} ${group.id}  "${group.title}" — ${group.sessions} session(s) now`);
   } else if (cmd === 'plan-check' || cmd === 'plan-uncheck' || cmd === 'plan-add') {
     console.error('vibespace-task: the Task Group checklist was removed — keep working steps in your own session todo list; log finished work with:\n   vibespace-task progress "one-line summary"\npark NON-immediate items (deferred decisions / future work) with:\n   vibespace-task backlog-add "item" [--detail "context"]');
     process.exit(1);
@@ -158,7 +202,7 @@ async function main() {
     process.exit(1);
   } else {
     console.error('vibespace-task: unknown command "' + cmd + '"'
-      + '\n  valid: show, progress, backlog, backlog-add, backlog-edit, backlog-claim, backlog-unclaim, backlog-done, backlog-drop\n' + USAGE);
+      + '\n  valid: show, progress, backlog, backlog-add, backlog-edit, backlog-claim, backlog-unclaim, backlog-done, backlog-drop, group-list, group-create, group-update, group-bind, group-unbind\n' + USAGE);
     process.exit(1);
   }
 }
