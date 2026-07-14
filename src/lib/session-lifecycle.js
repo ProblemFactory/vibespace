@@ -694,7 +694,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         this.openEditor(spec.path, spec.name, { syncId });
         break;
       case 'openBrowser':
-        this.openBrowser(spec.url, { syncId });
+        this.openBrowser(spec.url, { syncId, proxy: spec.proxy });
         break;
       case 'openDesktop':
         this.openDesktop({ syncId });

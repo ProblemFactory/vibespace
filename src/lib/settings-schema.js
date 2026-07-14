@@ -274,6 +274,12 @@ const SETTINGS_SCHEMA = {
     description: t('With "reduce motion" enabled in your OS, the working spinner normally swaps its rotation for a gentle opacity pulse. Turn this on to keep the rotation instead (the pulse can read as blinking).'),
     category: t('Chat'), liveApply: true,
   },
+  'chat.uploadDir': {
+    type: 'string', default: '',
+    label: t('Upload files to'),
+    description: t('Where files dropped or attached in chat are saved. Empty = the session’s working directory (default). Set an absolute path (e.g. ~/Downloads or /data/uploads) to collect every upload in one place, or a name (e.g. uploads) for a folder under the working directory. For remote sessions the path is on the remote machine.'),
+    category: t('Chat'), liveApply: true,
+  },
   'agents.stopNudgeStaleMinutes': {
     type: 'number', default: 10, min: 1, max: 240, step: 1,
     label: t('Stop nudge: staleness threshold (minutes)'),

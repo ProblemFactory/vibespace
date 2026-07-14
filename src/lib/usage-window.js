@@ -40,7 +40,11 @@ export function openUsageWindow(app, opts = {}) {
   if (existing) { if (existing.isMinimized) app.wm.restore?.(existing.id); app.wm.focusWindow(existing.id); return existing; }
   const winInfo = app.wm.createWindow({
     title: t('Usage'), type: 'usage', width: 860, height: 640,
-    openSpec: opts.syncId ? undefined : { action: 'openUsage' },
+    // Always set openSpec — even when replayed with a syncId. Dropping it on
+    // the replay path left the recreated window transient on the receiving
+    // client (never re-persisted/re-synced onward, never closed by later
+    // diffs) — inconsistent with every other replayed window.
+    openSpec: { action: 'openUsage' },
     syncId: opts.syncId,
   });
   const root = document.createElement('div');
