@@ -154,6 +154,21 @@ const isFork = process.env.CODEX_WEBUI_FORK === '1';
 const forkedFromEnv = process.env.CODEX_WEBUI_FORKED_FROM || '';
 const forkedFrom = forkedFromEnv ? forkedFromEnv.split(',').filter(Boolean) : [];
 const baseCwd = process.env.CODEX_WEBUI_CWD || process.cwd();
+// ── REMOTE MODE (2.139.0, B-0588 — mirrors chat-wrapper.js 2.124.0) ──
+// env VIBESPACE_REMOTE_SID set by the server for remote codex chat: the child
+// is `ssh → vibespace-remote-keeper run <sid> __VS_OFFSET__ -- codex app-server`.
+// The keeper is a content-agnostic byte pipe, so bidirectional JSON-RPC rides
+// it fine; byte-offset replay redelivers missed responses/server-requests
+// exactly once. The HANDSHAKE (initialize/startThread) runs ONCE per wrapper
+// lifetime — a transport reconnect respawns ssh only, never re-initializes
+// (the remote app-server keeps its state; re-running thread/start would fork).
+const REMOTE_SID = process.env.VIBESPACE_REMOTE_SID || '';
+let remoteOffset = 0;      // bytes consumed from the keeper buffer (byte-exact)
+let remoteExited = null;   // set by the _remote_exit sentinel = codex REALLY ended
+let reconnectAttempts = 0;
+let reconnectTimer = null;
+let shuttingDown = false;
+const outQueue = [];       // outbound JSON-RPC lines queued while the pipe is down
 let permissionMode = backendPermissionMode;
 let currentPermission = resolvePermissionMode(permissionMode);
 
@@ -223,8 +238,13 @@ function scheduleMeta() {
 }
 
 function send(payload) {
-  if (!child?.stdin?.writable) return;
   const line = JSON.stringify(payload);
+  if (!child?.stdin?.writable) {
+    // remote: the ssh pipe is down — queue and flush after reconnect (the old
+    // silent drop lost approvals/turn starts). Local: preserve old behavior.
+    if (REMOTE_SID && !shuttingDown && outQueue.length < 200) outQueue.push(line);
+    return;
+  }
   child.stdin.write(`${line}\n`);
 }
 
@@ -940,6 +960,14 @@ function handleStdoutLine(line) {
   const msg = safeJsonParse(line);
   if (!msg) return;
 
+  // keeper sentinel: codex REALLY ended on the host (vs a mere ssh drop)
+  if (msg.type === '_remote_exit') {
+    remoteExited = msg.code ?? 0;
+    log(`remote session ended (code ${remoteExited}${msg.crashed ? ', crashed' : ''}${msg.missing ? ', missing' : ''})`);
+    finalizeExit(remoteExited);
+    return;
+  }
+
   if (Object.prototype.hasOwnProperty.call(msg, 'id') && !msg.method) {
     const pending = pendingRequests.get(msg.id);
     if (!pending) return;
@@ -962,30 +990,63 @@ function handleStdoutLine(line) {
   }
 }
 
-async function boot() {
-  try {
-    fs.mkdirSync(path.dirname(bufferFile), { recursive: true });
-    fs.mkdirSync(path.dirname(metaFile), { recursive: true });
-  } catch {}
+// Shared exit body (natural child exit locally, or the remote sentinel).
+function finalizeExit(code) {
+  shuttingDown = true;
+  meta.streaming = false;
+  meta.activeTurnId = null;
+  scheduleMeta();
+  if (writeTimer) clearTimeout(writeTimer);
+  if (metaTimer) clearTimeout(metaTimer);
+  persistBuffer();
   persistMeta();
+  log(`session ended code=${code}`);
+  process.exit(code ?? 0);
+}
 
-  child = spawn(cmd, args, {
-    cwd: baseCwd,
-    env: process.env,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
+let lineBufB = Buffer.alloc(0); // Buffer-based: byte-exact offsets + no multibyte splits
+
+function startChild() {
+  reconnectTimer = null;
+  // Remote reconnect: substitute the consumed-bytes offset so the keeper
+  // replays exactly what we missed (__VS_OFFSET__ rides inside the ssh
+  // inner-command string).
+  const spawnArgs = REMOTE_SID ? args.map((a) => a.split('__VS_OFFSET__').join(String(remoteOffset))) : args;
+  try {
+    child = spawn(cmd, spawnArgs, {
+      // remote: baseCwd is the REMOTE path — spawning ssh there ENOENTs
+      cwd: REMOTE_SID ? process.cwd() : baseCwd,
+      env: process.env,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch (err) {
+    log(`failed to spawn: ${err.message}`);
+    if (REMOTE_SID && !shuttingDown) { scheduleReconnect(); return; }
+    process.exit(1);
+  }
 
   meta.childPid = child.pid;
   scheduleMeta();
-  log(`spawned ${cmd} ${args.join(' ')} pid=${child.pid}`);
+  log(`spawned ${cmd} ${spawnArgs.length !== args.length ? '(offset-substituted) ' : ''}pid=${child.pid}${REMOTE_SID ? ` offset=${remoteOffset} attempt=${reconnectAttempts}` : ''}`);
 
-  child.stdout.setEncoding('utf8');
+  // Buffer-based line splitting (both modes): remote offsets must be BYTE-exact
+  // across reconnects, and a chunk boundary may split a multibyte char — only
+  // complete lines are utf8-decoded (the chat-wrapper 2.124.0 lesson).
   child.stdout.on('data', (chunk) => {
-    stdoutBuf += chunk;
+    if (REMOTE_SID) {
+      remoteOffset += chunk.length;
+      if (meta.remote?.state !== 'connected') {
+        reconnectAttempts = 0;
+        meta.remote = { state: 'connected', at: Date.now() };
+        scheduleMeta();
+        record('event_msg', { type: '_remote_state', state: 'connected' });
+      }
+    }
+    lineBufB = lineBufB.length ? Buffer.concat([lineBufB, chunk]) : chunk;
     let idx;
-    while ((idx = stdoutBuf.indexOf('\n')) !== -1) {
-      const line = stdoutBuf.slice(0, idx).trim();
-      stdoutBuf = stdoutBuf.slice(idx + 1);
+    while ((idx = lineBufB.indexOf(10)) !== -1) {
+      const line = lineBufB.subarray(0, idx).toString('utf8').trim();
+      lineBufB = lineBufB.subarray(idx + 1);
       if (!line) continue;
       handleStdoutLine(line);
     }
@@ -996,6 +1057,50 @@ async function boot() {
     const text = chunk.trim();
     if (text) log(`[stderr] ${text}`);
   });
+
+  child.on('exit', (code) => {
+    // remote + no sentinel + not told to die = TRANSPORT death → reconnect
+    if (REMOTE_SID && remoteExited === null && !shuttingDown) {
+      meta.remote = { state: 'reconnecting', attempts: reconnectAttempts + 1, at: Date.now() };
+      scheduleMeta();
+      scheduleReconnect();
+      return;
+    }
+    finalizeExit(remoteExited !== null ? remoteExited : code);
+  });
+
+  child.on('error', (err) => {
+    log(`child error: ${err.message}`);
+    if (REMOTE_SID && remoteExited === null && !shuttingDown) { scheduleReconnect(); return; }
+    record('event_msg', { type: 'task_failed', error: err.message });
+  });
+
+  // Flush JSON-RPC lines queued while the pipe was down
+  if (outQueue.length && child.stdin.writable) {
+    log(`flushing ${outQueue.length} queued outbound line(s)`);
+    for (const l of outQueue.splice(0, outQueue.length)) child.stdin.write(l + '\n');
+  }
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer || shuttingDown) return;
+  reconnectAttempts++;
+  const delay = [1000, 2000, 5000, 10000, 30000][Math.min(4, reconnectAttempts - 1)];
+  log(`reconnect #${reconnectAttempts} in ${delay}ms (offset=${remoteOffset})`);
+  meta.remote = { state: 'reconnecting', attempts: reconnectAttempts, at: Date.now() };
+  scheduleMeta();
+  record('event_msg', { type: '_remote_state', state: 'reconnecting', attempts: reconnectAttempts });
+  reconnectTimer = setTimeout(startChild, delay);
+}
+
+async function boot() {
+  try {
+    fs.mkdirSync(path.dirname(bufferFile), { recursive: true });
+    fs.mkdirSync(path.dirname(metaFile), { recursive: true });
+  } catch {}
+  persistMeta();
+
+  startChild();
 
   // Match the Claude wrapper: raw mode avoids PTY line buffering/truncation
   // when the server sends large JSON lines (for example base64 image turns).
@@ -1016,23 +1121,6 @@ async function boot() {
         record('event_msg', { type: 'task_failed', error: err.message });
       });
     }
-  });
-
-  child.on('exit', (code) => {
-    meta.streaming = false;
-    meta.activeTurnId = null;
-    scheduleMeta();
-    if (writeTimer) clearTimeout(writeTimer);
-    if (metaTimer) clearTimeout(metaTimer);
-    persistBuffer();
-    persistMeta();
-    log(`child exited code=${code}`);
-    process.exit(code ?? 0);
-  });
-
-  child.on('error', (err) => {
-    log(`child error: ${err.message}`);
-    record('event_msg', { type: 'task_failed', error: err.message });
   });
 
   await request('initialize', { clientInfo, capabilities: { experimentalApi: true } }, 30000);

@@ -402,6 +402,52 @@ function registerWsHandler(wss, ctx) {
             let acctEnv = '';
             try { acctEnv = remoteAccountEnv(h); }
             catch (e) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'Failed to place the account key on ' + h.name + ': ' + e.message })); return; }
+            // acctEnv rides as a SHELL PREFIX ASSIGNMENT before exec — the shell
+            // setenvs it internally, so the VALUE never appears in any argv
+            // (an `env KEY=$(cat …)` argument would expand into env's argv).
+            const inner = ra.prelude + `cd ${shq(cwd)} 2>/dev/null; ` + ra.tokenAssign + acctEnv + `exec env TERM=xterm-256color COLORTERM=truecolor `
+              + [...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq), rcmd, ...spawnArgs.map(shq)].join(' ');
+            spawnCmd = 'ssh';
+            spawnArgs = [...hosts.sshArgs(h, { tty: true, reverse: ra.reverse }), '--', `dtach -A /tmp/vs-${id} -r winch sh -lc ${shq(inner)}`];
+            spawnEnvPairs = [];
+            spawnCwd = os.homedir(); // remote cwd rides inside the ssh command
+            session.host = h.id;
+            session.hostName = h.name;
+          } else if (data.hostId && hosts && sessionMode === 'chat') {
+            // 2.139.0 (B-0588): codex remote chat rides the SAME keeper —
+            // it's a content-agnostic byte pipe, so app-server JSON-RPC
+            // (bidirectional incl. approvals) replays fine by byte offset.
+            // Claude's stream-json flags are claude-only (they killed codex
+            // spawns opaquely pre-2.129.1 — keep them gated).
+            // Remote CHAT (P3): ssh -T gives a CLEAN pipe — stream-json must
+            // NOT cross a remote dtach/pty layer (echo + CRLF corrupt JSON).
+            // Local dtach still keeps the pipeline across server restarts; an
+            // ssh drop ends the remote process (transcript survives remotely,
+            // resume-able). Stream flags ride INSIDE the remote string; the
+            // wrapper's appended flags land as harmless sh -lc positionals.
+            let h;
+            try { h = hosts.get(data.hostId); }
+            catch { ws.send(JSON.stringify({ type: 'error', message: 'Unknown host: ' + data.hostId })); return; }
+            const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+            const rcmd = spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd;
+            const rargs = [...spawnArgs];
+            if (backend !== 'codex') {
+              for (const fl of [['--output-format', 'stream-json'], ['--input-format', 'stream-json'], ['--verbose'], ['--permission-prompt-tool', 'stdio']]) {
+                if (!rargs.includes(fl[0])) rargs.push(...fl);
+              }
+            }
+            const ra = remoteAgentSetup();
+            let acctEnv = '';
+            try { acctEnv = remoteAccountEnv(h); }
+            catch (e) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'Failed to place the account key on ' + h.name + ': ' + e.message })); return; }
+            // acctEnv = shell prefix assignment (see the terminal branch note)
+            // 2.124.0: claude no longer hangs directly off the ssh pipe — it
+            // runs DETACHED on the host under vibespace-remote-keeper (buffer
+            // file + unix-socket stdin), so an ssh drop kills only the pipe.
+            // __VS_OFFSET__ is substituted by the LOCAL chat-wrapper at every
+            // (re)spawn with the byte offset it has consumed — the keeper
+            // replays exactly the missed bytes. env pairs precede the keeper
+            // so claude (spawned by the keeper daemon) inherits them.
             // ── B-4058 pre-spawn orphan cleanup (resume-with-respawn only) ──
             // A pod rebuild loses local state; a later plain resume used to
             // race a still-alive orphan claude holding the SAME claude session
@@ -428,55 +474,6 @@ done`;
                 hosts.invalidateDiscovery(h.id);
               } catch (e) { console.warn('[remote] pre-resume cleanup failed (continuing):', e.message); }
             }
-            // acctEnv rides as a SHELL PREFIX ASSIGNMENT before exec — the shell
-            // setenvs it internally, so the VALUE never appears in any argv
-            // (an `env KEY=$(cat …)` argument would expand into env's argv).
-            const inner = ra.prelude + `cd ${shq(cwd)} 2>/dev/null; ` + ra.tokenAssign + acctEnv + `exec env TERM=xterm-256color COLORTERM=truecolor `
-              + [...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq), rcmd, ...spawnArgs.map(shq)].join(' ');
-            spawnCmd = 'ssh';
-            spawnArgs = [...hosts.sshArgs(h, { tty: true, reverse: ra.reverse }), '--', `dtach -A /tmp/vs-${id} -r winch sh -lc ${shq(inner)}`];
-            spawnEnvPairs = [];
-            spawnCwd = os.homedir(); // remote cwd rides inside the ssh command
-            session.host = h.id;
-            session.hostName = h.name;
-          } else if (data.hostId && hosts && sessionMode === 'chat') {
-            // Codex remote chat was NEVER wired (this branch force-appends
-            // claude stream-json flags — into codex argv they just made the
-            // spawn die opaquely). Fail fast with the honest state instead of
-            // creating a broken session; full support is parked (backlog
-            // B-0588: codex wrapper needs the keeper/offset machinery +
-            // remote thread discovery). Terminal mode works remotely today.
-            if (backend === 'codex') {
-              ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'Codex chat on a remote host isn\'t supported yet — use Terminal mode on the host, or run the chat locally.' }));
-              return;
-            }
-            // Remote CHAT (P3): ssh -T gives a CLEAN pipe — stream-json must
-            // NOT cross a remote dtach/pty layer (echo + CRLF corrupt JSON).
-            // Local dtach still keeps the pipeline across server restarts; an
-            // ssh drop ends the remote process (transcript survives remotely,
-            // resume-able). Stream flags ride INSIDE the remote string; the
-            // wrapper's appended flags land as harmless sh -lc positionals.
-            let h;
-            try { h = hosts.get(data.hostId); }
-            catch { ws.send(JSON.stringify({ type: 'error', message: 'Unknown host: ' + data.hostId })); return; }
-            const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
-            const rcmd = spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd;
-            const rargs = [...spawnArgs];
-            for (const fl of [['--output-format', 'stream-json'], ['--input-format', 'stream-json'], ['--verbose'], ['--permission-prompt-tool', 'stdio']]) {
-              if (!rargs.includes(fl[0])) rargs.push(...fl);
-            }
-            const ra = remoteAgentSetup();
-            let acctEnv = '';
-            try { acctEnv = remoteAccountEnv(h); }
-            catch (e) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'Failed to place the account key on ' + h.name + ': ' + e.message })); return; }
-            // acctEnv = shell prefix assignment (see the terminal branch note)
-            // 2.124.0: claude no longer hangs directly off the ssh pipe — it
-            // runs DETACHED on the host under vibespace-remote-keeper (buffer
-            // file + unix-socket stdin), so an ssh drop kills only the pipe.
-            // __VS_OFFSET__ is substituted by the LOCAL chat-wrapper at every
-            // (re)spawn with the byte offset it has consumed — the keeper
-            // replays exactly the missed bytes. env pairs precede the keeper
-            // so claude (spawned by the keeper daemon) inherits them.
             // keeper-ATTACH (B-4058): the card carried a live keeper sid —
             // reattach to the surviving remote claude from byte 0 (full
             // replay rebuilds the view) instead of killing + respawning.
