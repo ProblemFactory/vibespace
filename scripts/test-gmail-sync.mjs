@@ -28,7 +28,7 @@ let phase = 'seed'; // seed → incr → expired
 const srv = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://x');
   const send = (o) => res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(o));
-  if (u.pathname.endsWith('/profile')) return send({ emailAddress: 'tester@example.com', historyId: '1000' });
+  if (u.pathname.endsWith('/profile')) return send({ emailAddress: 'tester@example.com', historyId: '1000', messagesTotal: 2 });
   if (u.pathname.endsWith('/messages')) {
     if (globalThis.__paged) {
       // seed ordered new→old: m1(ts 200) then m2(ts 100). Honor the date cursor
@@ -154,6 +154,7 @@ gs.stop('mnt-cp');
 await new Promise((r) => setTimeout(r, 50));
 const stateAfterP1 = JSON.parse(fs.readFileSync(path.join(dir4, '.vibespace-gmail-state.json'), 'utf-8'));
 check('checkpoint persists a DATE cursor (seedOldestMs) after page 1', !!stateAfterP1.seedOldestMs || stateAfterP1.historyId, JSON.stringify(stateAfterP1));
+check('seed captured a determinate total from profile.messagesTotal', stateAfterP1.seedTotal === 2 || stateAfterP1.historyId, JSON.stringify(stateAfterP1));
 check('seed-start historyId anchored', !!(stateAfterP1.seedHistoryId || stateAfterP1.historyId));
 // restart → should resume, end with BOTH messages, no duplicates
 const w4b = gs.start({ ...cfg, id: 'mnt-cp', dir: dir4, groupBy: 'none' });
@@ -163,6 +164,7 @@ const cpIds = cpFiles.map((f) => (f.match(/_([^_]+)\.eml$/) || [])[1]);
 check('resume completes seed — page-1 + page-2 present, no duplicates', cpIds.includes('m1aaaa11') && cpIds.includes('m2bbbb22') && new Set(cpIds).size === cpIds.length, cpFiles.join(','));
 const finalState = JSON.parse(fs.readFileSync(path.join(dir4, '.vibespace-gmail-state.json'), 'utf-8'));
 check('seed done → historyId set, seed cursor cleared', !!finalState.historyId && !finalState.seedPageToken);
+
 gs.stop('mnt-cp');
 fs.rmSync(dir4, { recursive: true, force: true });
 globalThis.__paged = false;
