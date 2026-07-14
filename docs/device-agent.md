@@ -19,8 +19,16 @@ by hand. Works for any Linux/macOS box with an sshd and Node ≥18.
 The machine **dials out** to your VibeSpace instance over a websocket, so no
 inbound access is needed.
 
-1. In VibeSpace: **⚙ → Devices → Pair a device** → you get a device id + a dial
-   token + a ready-to-run command.
+1. Mint a pairing (device id + dial token + a ready-to-run command). Until the
+   Devices pairing UI ships, one authenticated request does it — easiest from
+   the devtools console of a logged-in VibeSpace tab:
+   ```js
+   await (await fetch('/api/agentd/dial-pair', { method: 'POST',
+     headers: { 'Content-Type': 'application/json' },
+     body: JSON.stringify({ deviceId: 'my-mac', serverUrl: location.origin }) })).json()
+   ```
+   The response's `command` is the exact daemon invocation; its `dialToken`
+   feeds the installer below.
 2. On the machine, install Node ≥18 (`brew install node` on a Mac), then run:
    ```bash
    curl -fsSL https://<your-vibespace-host>/agentd-install.sh | bash -s -- \

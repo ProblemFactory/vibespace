@@ -7,8 +7,8 @@
 #   already handles it — you don't need this script.
 #
 #   NAT'd / firewalled machine (laptop, home Mac): use DIAL-OUT — this daemon
-#   dials your VibeSpace instance. In VibeSpace: ⚙ → Devices → "Pair a device"
-#   gives you the exact command with a URL + token; paste it into: 
+#   dials your VibeSpace instance. Mint the pairing via POST /api/agentd/dial-pair
+#   (see docs/device-agent.md) — it returns the URL + token; paste them into:
 #       curl -fsSL <vibespace>/agentd-install.sh | bash -s -- \
 #         --dial wss://<vibespace-host>/api/agentd-dial?device=<id> --dial-token <t>
 #
