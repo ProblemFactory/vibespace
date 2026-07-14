@@ -148,3 +148,10 @@ gdrive:
   # Legacy single default client (used only when clients is empty)
   clientId: ""
   clientSecret: ""
+
+# Optional /dev/net/tun for kernel-mode Tailscale (Plugins, 2.140.0).
+# Needs a device plugin serving the tun device (e.g. squat/generic-device-plugin);
+# without it plugins fall back to userspace-networking + SOCKS5 automatically.
+tun:
+  enabled: false
+  resource: ""   # device-plugin resource name, default squat.ai/tun

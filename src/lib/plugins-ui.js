@@ -1,0 +1,106 @@
+// Plugins dialog (2.140.0, B-2d44) — ⚙ → Plugins…: install / start / guided
+// login / status for host-level plugins (first: Tailscale). Modeled on the
+// Manage-Agents visual language; the login flow mirrors guided Drive OAuth
+// (server captures the auth URL, user opens it, we poll status until Running).
+import { createModalShell, fetchJson, showToast, showConfirmDialog, escHtml, copyText } from './utils.js';
+import { t } from './i18n.js';
+
+export function installPluginsUI(App) {
+  Object.assign(App.prototype, {
+  async openPluginsDialog() {
+    const { body, close } = createModalShell({ id: 'plugins-dialog', title: t('Plugins'), bodyClass: 'mounts-dialog-body', escapeToClose: true });
+    body.innerHTML = `<div class="empty-hint">${escHtml(t('Loading…'))}</div>`;
+    let pollTimer = null;
+    const cleanup = () => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } };
+
+    const render = async () => {
+      const r = await fetchJson('/api/plugins');
+      if (!r?.plugins) { body.innerHTML = `<div class="empty-hint">${escHtml(t('Failed to load'))}</div>`; return; }
+      body.innerHTML = '';
+      for (const p of r.plugins) {
+        const card = document.createElement('div');
+        card.className = 'plugin-card';
+        const running = !!p.running;
+        const stateTxt = p.mode === 'system' ? t('managed by the system (outside VibeSpace)')
+          : running ? (p.backendState === 'Running' ? t('connected') : (p.backendState || t('starting…')))
+            : p.installed ? t('stopped') : t('not installed');
+        const dot = `<span class="plugin-dot ${running && p.backendState === 'Running' ? 'ok' : running ? 'warn' : ''}"></span>`;
+        let detail = '';
+        if (p.self?.ips?.length) detail += `<div class="plugin-detail">${escHtml(t('Tailnet address'))}: <code>${escHtml(p.self.ips[0])}</code>${p.self.dnsName ? ` · ${escHtml(p.self.dnsName.replace(/\.$/, ''))}` : ''}${p.peers ? ` · ${escHtml(t('{n} peers', { n: p.peers }))}` : ''}</div>`;
+        if (running && p.mode === 'userspace') detail += `<div class="plugin-detail">${escHtml(t('Userspace mode — reach tailnet hosts through SOCKS5 localhost:{port} (no tun device in this container)', { port: p.socksPort }))}</div>`;
+        if (running && p.mode === 'kernel') detail += `<div class="plugin-detail">${escHtml(t('Kernel mode — full tunnel, tailnet hosts reachable directly'))}</div>`;
+        card.innerHTML = `
+          <div class="plugin-head">
+            <div class="plugin-name">${dot}${escHtml(p.label)}</div>
+            <div class="plugin-state">${escHtml(stateTxt)}</div>
+          </div>
+          <div class="plugin-desc">${escHtml(t(p.description))}</div>
+          ${detail}
+          <div class="plugin-actions"></div>
+          <div class="plugin-auth"></div>`;
+        const actions = card.querySelector('.plugin-actions');
+        const authBox = card.querySelector('.plugin-auth');
+        const btn = (label, cls, fn) => {
+          const b = document.createElement('button');
+          b.className = 'mounts-btn' + (cls ? ' ' + cls : '');
+          b.textContent = label;
+          b.onclick = async () => {
+            b.disabled = true;
+            try { await fn(); } catch (e) { showToast(e.message || t('Failed'), { type: 'error' }); }
+            b.disabled = false;
+            render();
+          };
+          actions.appendChild(b);
+          return b;
+        };
+        const api = (pathTail, opts) => fetchJson(`/api/plugins/${p.id}/${pathTail}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, ...opts })
+          .then((x) => { if (x?.error) throw new Error(x.error); return x; });
+
+        if (p.mode !== 'system') {
+          if (!p.installed) {
+            btn(t('Install'), 'mounts-btn-primary', async () => {
+              showToast(t('Downloading Tailscale…'));
+              await api('install');
+              showToast(t('Installed'));
+            });
+          } else if (!running) {
+            btn(t('Start'), 'mounts-btn-primary', () => api('start'));
+          } else {
+            if (p.backendState !== 'Running') {
+              btn(t('Log in…'), 'mounts-btn-primary', async () => {
+                const res = await api('login');
+                if (res.done) { showToast(t('Already connected')); return; }
+                if (res.authUrl) {
+                  authBox.innerHTML = `<div class="mounts-field-hint">${escHtml(t('Open this link, approve the device, then come back — the status updates by itself:'))}</div>
+                    <div class="plugin-auth-url"><a href="${escHtml(res.authUrl)}" target="_blank" rel="noopener">${escHtml(res.authUrl)}</a>
+                    <button class="mounts-btn plugin-copy">${escHtml(t('Copy'))}</button></div>`;
+                  authBox.querySelector('.plugin-copy').onclick = () => copyText(res.authUrl).then(() => showToast(t('Copied')));
+                  if (!pollTimer) pollTimer = setInterval(async () => {
+                    if (!body.isConnected) { cleanup(); return; } // dialog closed — stop polling
+                    const st = await fetchJson(`/api/plugins/${p.id}/status`);
+                    if (st?.backendState === 'Running') { cleanup(); showToast(t('Connected to the tailnet')); render(); }
+                  }, 3000);
+                }
+              });
+            }
+            btn(t('Stop'), '', async () => {
+              const ok = await showConfirmDialog(t('Stop {name}?', { name: p.label }), t('Tailnet connections from this instance will drop. The login persists — starting again reconnects without re-auth.'));
+              if (ok) await api('stop');
+            });
+          }
+          // enable-at-boot toggle
+          const lbl = document.createElement('label');
+          lbl.className = 'plugin-boot';
+          const cb = document.createElement('input');
+          cb.type = 'checkbox'; cb.checked = !!p.enabled;
+          cb.onchange = () => api('enabled', { body: JSON.stringify({ enabled: cb.checked }) }).catch((e) => showToast(e.message, { type: 'error' }));
+          lbl.append(cb, document.createTextNode(' ' + t('Start automatically with the server')));
+          actions.appendChild(lbl);
+        }
+        body.appendChild(card);
+      }
+    };
+    await render();
+  },
+  });
+}
