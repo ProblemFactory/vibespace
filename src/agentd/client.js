@@ -174,7 +174,7 @@ class DeviceManager {
             mux.onData = (chan, buf) => { sessions.get(chan)?.onData?.(buf); mux.credit(chan, buf.length); };
             const prevControl = mux.onControl;
             mux.onControl = (m) => {
-              if (m.op === 'session-open') { sessions.get(m.chan)?.onOpen?.(m); return; }
+              if (m.op === 'session-open' || m.op === 'pipe-session-open') { sessions.get(m.chan)?.onOpen?.(m); return; }
               if (m.op === 'session-exit') { const h = sessions.get(m.chan); sessions.delete(m.chan); h?.onExit?.(m.code); return; }
               if (m.op === 'session-error') { const h = sessions.get(m.chan); sessions.delete(m.chan); h?.onError?.(m.error); return; }
               prevControl(m);
@@ -233,6 +233,32 @@ class DeviceManager {
     handle.resize = (c, r) => conn.mux.control({ op: 'resize-session', chan, cols: c, rows: r });
     handle.kill = () => conn.mux.control({ op: 'kill-session', chan });
     conn.mux.control({ op: 'open-session', chan, cmd, args, cols, rows, cwd, env });
+    return handle;
+  }
+
+  /**
+   * Open/attach a PERSISTENT pipe session (chat-class; keeper semantics — the
+   * child is daemon-owned, setsid-detached, buffer-file backed). Reattach with
+   * a byte offset; the {type:'_remote_exit'} sentinel line in the byte stream
+   * means the child really ended. Omit cmd to attach-only.
+   */
+  async openPipeSession({ sid, cmd, args, cwd, env, offset = 0 }) {
+    const conn = await this.connect();
+    const chan = conn.nextChan++;
+    const handle = { chan, sid, onData: null, onExit: null };
+    let resolveReady, rejectReady;
+    handle.ready = new Promise((res, rej) => { resolveReady = res; rejectReady = rej; });
+    conn.sessions.set(chan, {
+      onOpen: (m) => { handle.pid = m.pid; resolveReady({ pid: m.pid, existing: !!m.existing, exited: m.exited }); },
+      onError: (e) => rejectReady(new Error(e)),
+      onData: (buf) => handle.onData?.(buf),
+      onExit: (code) => handle.onExit?.(code),
+    });
+    handle.write = (str) => conn.mux.data(chan, Buffer.from(str, 'utf-8'));
+    handle.kill = () => conn.mux.control({ op: 'kill-pipe-session', sid });
+    conn.mux.control(cmd
+      ? { op: 'open-pipe-session', chan, sid, cmd, args, cwd, env, offset }
+      : { op: 'attach-pipe-session', chan, sid, offset });
     return handle;
   }
 
