@@ -301,12 +301,22 @@ class GmailSync {
       // pageToken is persisted; a restart continues from state.seedPageToken.
       const n = Number(w.cfg.syncCount);
       const want = n === 0 ? 200000 : Math.max(1, Math.min(200000, n || 200));
-      // Capture the historyId ONCE at seed START — incremental later covers any
-      // mail that arrives DURING the (possibly hours-long) seed. Persisted so a
-      // restart keeps the same anchor.
-      if (!state.seedHistoryId) {
+      // Capture the historyId ONCE at seed START (incremental later covers mail
+      // arriving DURING the seed) AND a real TOTAL for the progress bar — cheap:
+      // profile.messagesTotal for the whole mailbox, labels.get.messagesTotal
+      // for a label filter; a free-text query has no cheap total.
+      if (!state.seedHistoryId || state.seedTotal == null) {
         const prof = await this._api(w, '/profile');
-        state.seedHistoryId = prof.historyId;
+        if (!state.seedHistoryId) state.seedHistoryId = prof.historyId;
+        if (state.seedTotal == null) {
+          let tot = null;
+          if (!labelFilter.length && !w.cfg.query) tot = prof.messagesTotal;
+          else if (labelFilter.length && !w.cfg.query) {
+            tot = 0;
+            for (const lid of labelFilter) { try { const lab = await this._api(w, `/labels/${encodeURIComponent(lid)}`); tot += lab.messagesTotal || 0; } catch { } }
+          }
+          state.seedTotal = tot != null ? Math.min(tot, want) : 0; // 0 = unknown
+        }
         this._saveState(w, state);
       }
       // CROSS-RESTART CURSOR = a DATE, not a pageToken. Gmail's messages.list
@@ -333,7 +343,7 @@ class GmailSync {
         for (const m of msgs) {
           if (w.stopped) return;
           if (!seen.has(m.id)) { const md = await this._writeMessage(w, m.id, seen); if (md) oldestMs = Math.min(oldestMs, md); }
-          this._progress(w, null, w.count); // indeterminate, but show the running count
+          this._progress(w, state.seedTotal || null, w.count); // determinate when total known
         }
         fetched += msgs.length;
         pageToken = l.nextPageToken || null;
@@ -345,7 +355,7 @@ class GmailSync {
       } while (pageToken && fetched < want);
       // seed complete → switch to incremental from the seed-start historyId
       state.historyId = state.seedHistoryId;
-      delete state.seedOldestMs; delete state.seedPageToken; delete state.seedFetched; delete state.seedHistoryId;
+      delete state.seedOldestMs; delete state.seedPageToken; delete state.seedFetched; delete state.seedHistoryId; delete state.seedTotal;
       state.lastSyncAt = Date.now();
       this._saveState(w, state);
       this._progress(w, null);

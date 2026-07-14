@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.136.4 — 2026-07-14
+- **Gmail sync shows the real total again** ("N / total" with a determinate bar), restored after the streaming-seed rewrite dropped it. The total now comes cheaply from `users.getProfile` (whole-mailbox `messagesTotal`) or the label's `messagesTotal` (label filter) — captured once at seed start and persisted, so it survives restarts and the progress bar stays determinate through the whole seed (only a free-text query, which has no cheap total, stays indeterminate). This also fixes the card looking "stuck at Checking for new mail" — with a total it renders proper progress instead.
+
 ## 2.136.3 — 2026-07-14
 - Gmail storage card now shows **"Downloading · N so far…"** during the seed/large download instead of the misleading "Checking for new mail…" (real report — it was clearly downloading but the card didn't show the count). The count updates live; "Checking for new mail…" is now reserved for the quick incremental check with nothing to download.
 
