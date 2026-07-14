@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.135.2 — 2026-07-14
+- Fixed the Gmail edit dialog showing a blank (placeholder 200) after you saved "Messages to sync = 0": zero is a valid value (= everything) but was treated as empty, so it round-tripped to blank on reopen. It now prefills 0 correctly.
+
 ## 2.135.1 — 2026-07-14
 - **Edit dialogs now actually show the stored Drive/Gmail settings** (real report: "why does my OAuth client say custom?" — the config endpoint the edit dialog reads never included the drive scope fields or ANY gmail fields, so every select fell back to its default no matter what was stored; an earlier fix had landed in the config-BUNDLE exporter instead). Cloud-side scope, shared-drive id, OAuth preset, sync count, labels, grouping — all prefill correctly now, for submounts too.
 - **Changing a Gmail mount's sync scope (labels filter / query / message count) now forces a reseed**: the persisted history cursor kept the sync incremental, so newly-in-scope OLD mail (e.g. clearing the INBOX filter to pull archived mail) never arrived. The reseed is cheap — the directory is the dedup index, existing files are skipped.
