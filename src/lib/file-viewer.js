@@ -98,6 +98,8 @@ class FileViewer {
         FileViewer._renderAudio(container, filePath, fileName);
       } else if (viewerType === 'pdf') {
         FileViewer._renderPdf(container, filePath);
+      } else if (viewerType === 'eml') {
+        await FileViewer._renderEml(container, filePath);
       } else if (viewerType === 'csv') {
         FileViewer._renderCsv(container, filePath, ext);
       } else if (viewerType === 'xlsx') {
@@ -360,6 +362,83 @@ class FileViewer {
   }
 
   // ── PDF viewer via iframe/embed ──
+  // ── .eml email viewer (2.134.0, Gmail mounts) — dependency-free MIME parse
+  // (src/lib/eml.js) → header card + text/html toggle + attachment downloads.
+  // The HTML part renders in a FULLY sandboxed iframe (sandbox="" — no
+  // scripts, no same-origin, no navigation) via srcdoc.
+  static async _renderEml(container, filePath) {
+    const { parseEml } = await import('./eml.js');
+    const res = await fetch(`/api/file/raw?path=${encodeURIComponent(filePath)}`);
+    if (!res.ok) throw new Error('failed to read file');
+    const mail = parseEml(new Uint8Array(await res.arrayBuffer()));
+    const wrap = document.createElement('div');
+    wrap.className = 'eml-viewer';
+    const esc = (x) => String(x ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const h = mail.headers;
+    wrap.innerHTML = `
+      <div class="eml-head">
+        <div class="eml-subject">${esc(h.subject) || '(no subject)'}</div>
+        <div class="eml-meta">
+          ${h.from ? `<div><span class="eml-k">From</span>${esc(h.from)}</div>` : ''}
+          ${h.to ? `<div><span class="eml-k">To</span>${esc(h.to)}</div>` : ''}
+          ${h.cc ? `<div><span class="eml-k">Cc</span>${esc(h.cc)}</div>` : ''}
+          ${h.date ? `<div><span class="eml-k">Date</span>${esc(h.date)}</div>` : ''}
+        </div>
+      </div>
+      <div class="eml-tools"></div>
+      <div class="eml-body"></div>
+      <div class="eml-atts"></div>`;
+    const body = wrap.querySelector('.eml-body');
+    const tools = wrap.querySelector('.eml-tools');
+    const showHtml = () => {
+      body.innerHTML = '';
+      const frame = document.createElement('iframe');
+      frame.className = 'eml-html-frame';
+      frame.setAttribute('sandbox', ''); // no scripts, no same-origin, no nav
+      frame.srcdoc = mail.htmlBody;
+      body.appendChild(frame);
+    };
+    const showText = () => {
+      body.innerHTML = '';
+      const pre = document.createElement('pre');
+      pre.className = 'eml-text';
+      pre.textContent = mail.textBody || '(empty body)';
+      body.appendChild(pre);
+    };
+    if (mail.htmlBody && mail.textBody) {
+      const btn = document.createElement('button');
+      btn.className = 'tv-tool-btn';
+      let mode = 'html';
+      btn.textContent = 'Text';
+      btn.onclick = () => {
+        mode = mode === 'html' ? 'text' : 'html';
+        btn.textContent = mode === 'html' ? 'Text' : 'HTML';
+        (mode === 'html' ? showHtml : showText)();
+      };
+      tools.appendChild(btn);
+    }
+    if (mail.htmlBody) showHtml(); else showText();
+    const atts = wrap.querySelector('.eml-atts');
+    for (const a of mail.attachments || []) {
+      const row = document.createElement('a');
+      row.className = 'eml-att';
+      row.textContent = `📎 ${a.filename || 'attachment'} (${(a.size / 1024).toFixed(1)} KB)`;
+      row.href = '#';
+      row.onclick = (e) => {
+        e.preventDefault();
+        const blob = new Blob([a.content], { type: a.mime || 'application/octet-stream' });
+        const url = URL.createObjectURL(blob);
+        const dl = document.createElement('a');
+        dl.href = url; dl.download = a.filename || 'attachment.bin';
+        dl.click();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+      };
+      atts.appendChild(row);
+    }
+    container.innerHTML = '';
+    container.appendChild(wrap);
+  }
+
   static _renderPdf(container, filePath) {
     const mediaViewer = document.createElement('div');
     mediaViewer.className = 'media-viewer';

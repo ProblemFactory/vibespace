@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.134.0 — 2026-07-14
+- **Gmail as a folder** (new mount type): connect a Gmail account (guided sign-in, no terminal; uses the instance's preset OAuth clients or a custom one — gmail.readonly scope) and the newest N messages (+ everything new, incrementally) sync into the mount folder as `.eml` files — open them in the new built-in **email viewer** (subject/from/date card, text↔HTML toggle with the HTML part fully sandboxed, attachment downloads). Read-only archive by design: unmounting stops the sync but keeps the files; deletions in Gmail never delete files. Filters: label list and a full Gmail search query. Engine deliberately NOT a filesystem mount — sync-to-folder is the proven design (GYB); the directory itself is the dedup index (message id in the filename), so state can never drift.
+- **Dynamic-desktop fixes** (two user-reproduced bugs): ① activating a stage hero no longer paints a phantom window at the SLOT position on its home desktop's preview (previews now draw staged windows at their home geometry); ② a session card's **GoTo** while the stage is active now materializes the window as the hero instead of switching desktops out from under the stage (which left the preview stuck on the stage while the actual desktop changed).
+
 ## 2.133.0 — 2026-07-14
 - **Preset Google OAuth clients** (e.g. one Internal client per organization + one published-external for everyone else): `VIBESPACE_GDRIVE_CLIENTS` env (JSON `[{key,label,clientId,clientSecret},…]`, helm `gdrive.clients`) injects instance-preset clients; the Drive add-dialog gets an **OAuth client picker** (presets / rclone built-in / custom id+secret), a mount stores only the preset KEY — secrets never persist app-side and rotating the env rotates every mount. Authorize flow, shared-drive lister, and re-auth all resolve presets. Legacy single `VIBESPACE_GDRIVE_CLIENT_ID/SECRET` still works as the `default` preset.
 

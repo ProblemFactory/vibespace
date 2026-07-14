@@ -1800,7 +1800,13 @@ class App {
           targetWin.element.classList.add('window-find-flash');
           setTimeout(() => targetWin.element.classList.remove('window-find-flash'), 3000);
         };
-        if (dm && targetWin._desktopId && targetWin._desktopId !== dm.activeDesktopId) {
+        if (this.stage?.isActive) {
+          // On the stage, "go to" means MATERIALIZE as the hero — focusWindow
+          // is the stage's interception point. Switching desktops out from
+          // under the stage desynced the view (real report: desktop switched
+          // while the preview stayed on the stage).
+          doFlash();
+        } else if (dm && targetWin._desktopId && targetWin._desktopId !== dm.activeDesktopId) {
           dm.switchTo(targetWin._desktopId).then(doFlash);
         } else {
           doFlash();

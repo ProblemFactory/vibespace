@@ -435,7 +435,13 @@ export class DesktopManager {
         for (const [id, win] of this.app.wm.windows) {
           if (win._desktopId === desk.id && win.gridBounds && !win.isMinimized) {
             const waiting = win.element.classList.contains('window-waiting');
-            winEntries.push({ id, gridBounds: win.gridBounds, waiting });
+            // A window currently BORROWED by the stage carries the stage
+            // SLOT's geometry in its live gridBounds — its home desktop's
+            // preview must draw where it actually lives when it returns
+            // (real report: hero activation painted a phantom window at the
+            // slot position on the home desktop's preview).
+            const gb = (win._onStage && win._stageHomeBounds?.gridBounds) ? win._stageHomeBounds.gridBounds : win.gridBounds;
+            winEntries.push({ id, gridBounds: gb, waiting });
             if (waiting) deskHasWaiting = true;
           }
         }
