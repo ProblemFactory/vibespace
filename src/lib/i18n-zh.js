@@ -1855,4 +1855,12 @@ export default {
   "Where files dropped or attached in chat are saved. Empty = the session’s working directory (default). Set an absolute path (e.g. ~/Downloads or /data/uploads) to collect every upload in one place, or a name (e.g. uploads) for a folder under the working directory. For remote sessions the path is on the remote machine.": "在聊天中拖放或附加的文件保存到哪里。留空 = 会话的工作目录（默认）。填绝对路径（如 ~/Downloads 或 /data/uploads）可把所有上传集中到一处，或填一个名字（如 uploads）作为工作目录下的子文件夹。远程会话中该路径位于远程机器上。",
   "Mounts on removed machines — unmount to clean up": "已删除机器上的挂载 — 卸载以清理",
   "(removed machine)": "(已删除的机器)",
+  "Create share link": "创建分享链接",
+  "Mount to {name}": "挂载到 {name}",
+  "Mount to another machine…": "挂载到其他机器…",
+  "Mount to a remote machine…": "挂载到远程机器…",
+  "Mount this folder onto a machine": "把此文件夹挂载到某台机器",
+  "Machine": "机器",
+  "Folder on THIS instance to mount": "本实例上要挂载的文件夹",
+  "No remote machines yet — add one in the Remote tab": "还没有远程机器 — 在“远程”标签页添加",
 };

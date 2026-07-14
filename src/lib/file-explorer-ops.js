@@ -88,7 +88,7 @@ export function installExplorerOps(FileExplorer) {
         }
       }});
       items.push({ label: t('Open Terminal Here'), action: () => this.app.openShellTerminal(fullPath, { hostId: this._host || undefined }) });
-      if (!this._host) items.push({ label: t('Share this folder…'), action: () => this.app.sidebar?._showBridgeShareDialog?.(fullPath) });
+      if (!this._host) items.push({ label: t('Share this folder…'), submenu: () => this._shareFolderSubmenu(fullPath) });
       items.push({ label: t('Sessions'), submenu: () => {
         const sub = [];
         sub.push({ label: t('+ New session'), action: () => this.app.showNewSessionDialog({ cwd: fullPath }) });
@@ -139,9 +139,20 @@ export function installExplorerOps(FileExplorer) {
     items.push({ label: t('Select All'), action: () => { this._selection = new Set(this._renderOrder); this._applySelectionClasses(); } });
     items.push({ label: t('Refresh'), action: () => this.refresh() });
     items.push({ label: t('Copy Path'), action: () => copyText(this.currentPath) });
-    if (!this._host) items.push({ label: t('Share this folder…'), action: () => this.app.sidebar?._showBridgeShareDialog?.(this.currentPath) });
+    if (!this._host) items.push({ label: t('Share this folder…'), submenu: () => this._shareFolderSubmenu(this.currentPath) });
     items.push({ label: t('Properties'), action: () => this._showProperties(null) });
     this._buildMenu(x, y, items);
+  },
+
+  // Submenu for a folder's "Share this folder…": create a share LINK, or mount
+  // this folder onto a remote machine (a flattened "Mount to <host>" per cached
+  // machine + a picker that fetches fresh).
+  _shareFolderSubmenu(fullPath) {
+    const sub = [{ label: t('Create share link'), action: () => this.app.sidebar?._showBridgeShareDialog?.(fullPath) }];
+    const hosts = this.app.sidebar?._hostsData?.hosts || [];
+    for (const h of hosts) sub.push({ label: t('Mount to {name}', { name: h.name }), action: () => this.app.sidebar?._showHostMountDialog?.(h, fullPath) });
+    sub.push({ label: hosts.length ? t('Mount to another machine…') : t('Mount to a remote machine…'), action: () => this.app.sidebar?._showHostMountPicker?.(fullPath) });
+    return sub;
   },
 
     _buildMenu(x, y, items) {

@@ -1519,11 +1519,8 @@ class MountManager {
     // (and a cached mountpoint `ls` lies about it), so probe the BACKEND fresh
     // — it re-auths and returns 401/403. Stay mounted (may recover; the user
     // decides) but surface the error (user-flagged: "revoke了token接受方如何提示").
-    if (this._revocable(m) && (await this._probeBackendAccess(m)) === 'denied') {
-      this._errors.set(id, this._accessErrorMsg(m));
-    } else if (health === 'error') {
-      this._errors.set(id, this._accessErrorMsg(m));
-    }
+    const accErr = await this._accessErrorFor(m, mp, health);
+    if (accErr) this._errors.set(id, accErr);
     this._notify();
     return this.isMounted(m);
   }
@@ -1587,7 +1584,11 @@ class MountManager {
           const s = String(stderr || err.message || '');
           if (err.killed || /ETIMEDOUT/.test(s)) return resolve('hung');
           if (/401|403|Unauthorized|AccessDenied|Access Denied|expired|Forbidden|SignatureDoesNotMatch|InvalidAccessKeyId|no longer valid/i.test(s)) return resolve('denied');
-          return resolve('denied'); // any other list failure on a share = broken access
+          // A NON-auth lsf failure is NOT a revocation — SMB especially fails
+          // to enumerate the server root while the mounted share lists fine
+          // (real report: a working NAS mount kept flashing "access denied").
+          // 'unknown' → callers do not surface a scary revoked/denied banner.
+          return resolve('unknown');
         });
       child.on('error', () => { if (!done) { done = true; resolve('denied'); } });
     });
@@ -1635,11 +1636,42 @@ class MountManager {
     setTimeout(() => { this._healthSweep().catch(() => {}); }, 15000).unref?.();
   }
 
-  /** Human error for a mount whose IO is denied (revoked/expired share). */
+  /** Human error for a mount whose IO is denied. The "revoked / credentials
+   *  changed" wording is ONLY right for a share you IMPORTED (someone else's
+   *  token can be revoked) — for a backend YOU configured (SMB/NAS, SFTP, your
+   *  own S3) there is no share to revoke, so a generic "couldn't list" message
+   *  avoids the misleading banner (user report: a working SMB mount). */
   _accessErrorMsg(m) {
     if (m.type === 'vibespace') return 'connected but every file errors — the share may have been revoked, or the source instance is unreachable';
     if (m.expiresAt && Date.now() > m.expiresAt) return 'connected but access denied — this share credential has expired';
-    return 'connected but access denied — the share may have been revoked or its credentials changed';
+    if (m.origin === 'imported') return 'connected but access denied — the share may have been revoked or its credentials changed';
+    return 'connected but the folder couldn’t be listed — the server may be busy or temporarily unreachable';
+  }
+
+  /** Decide whether to surface an access error, avoiding single-shot false
+   *  positives (an SMB root-enumeration quirk, a transient ls hiccup on a
+   *  working mount — real report). Returns:
+   *    string    — surface this message
+   *    null      — confirmed accessible → CLEAR any prior error
+   *    undefined — inconclusive (transient/unknown) → leave state as-is  */
+  async _accessErrorFor(m, mp, health) {
+    if (this._revocable(m)) {
+      // Imported/expiring share: a cached mountpoint ls can't see a revoked
+      // token, so the fresh backend re-auth is authoritative.
+      const acc = await this._probeBackendAccess(m);
+      if (acc === 'denied') return this._accessErrorMsg(m);
+      if (acc === 'ok') return null;
+      return undefined; // hung/unknown — don't flip the banner either way
+    }
+    if (health === 'error') {
+      // User-owned backend (SMB/NAS, SFTP, own S3): a single non-zero ls is
+      // NOT proof of denial. Re-probe; if it lists now it was transient, and
+      // if the backend itself lists fine the ls error was a benign quirk.
+      if ((await this._probeMountpoint(mp)) !== 'error') return null;
+      if ((await this._probeBackendAccess(m)) === 'ok') return null;
+      return this._accessErrorMsg(m); // persistently broken → honest message
+    }
+    return null; // healthy + not revocable → definitely fine
   }
 
   async _healthSweep() {
@@ -1697,21 +1729,15 @@ class MountManager {
           this._notify();
         } else {
           this._hungStrikes?.delete(m.id); // recovered — reset the strike count
-          // Not hung. For a REVOCABLE share, a cached mountpoint `ls` can't
-          // tell us the token was revoked — probe the backend fresh. Normal
-          // mounts (my own S3/Drive) skip the extra round-trip.
-          let denied = health === 'error';
-          if (this._revocable(m)) {
-            const acc = await this._probeBackendAccess(m);
-            if (acc === 'hung') continue; // transient; mountpoint wasn't hung — leave as-is
-            denied = acc === 'denied';
-          }
-          if (denied) {
-            const msg = this._accessErrorMsg(m);
-            if (this._errors.get(m.id) !== msg) { this._errors.set(m.id, msg); this._notify(); }
+          // Not hung. Decide whether to surface an access error with re-confirm
+          // (no single-shot false positives on a working SMB/NAS mount).
+          const accErr = await this._accessErrorFor(m, mp, health);
+          if (accErr === undefined) {
+            // inconclusive (transient/unknown) — leave the current state as-is
+          } else if (accErr) {
+            if (this._errors.get(m.id) !== accErr) { this._errors.set(m.id, accErr); this._notify(); }
           } else if (this._errors.has(m.id)) {
-            // Recovered (re-granted share) — clear a previously surfaced error.
-            this._errors.delete(m.id); this._notify();
+            this._errors.delete(m.id); this._notify(); // confirmed accessible — clear
           }
         }
       }
