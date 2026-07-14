@@ -40,7 +40,7 @@ export function installPluginsUI(App) {
           <div class="plugin-auth"></div>`;
         const actions = card.querySelector('.plugin-actions');
         const authBox = card.querySelector('.plugin-auth');
-        const btn = (label, cls, fn) => {
+        const btn = (label, cls, fn, { rerender = true } = {}) => {
           const b = document.createElement('button');
           b.className = 'mounts-btn' + (cls ? ' ' + cls : '');
           b.textContent = label;
@@ -48,7 +48,7 @@ export function installPluginsUI(App) {
             b.disabled = true;
             try { await fn(); } catch (e) { showToast(e.message || t('Failed'), { type: 'error' }); }
             b.disabled = false;
-            render();
+            if (rerender) render(); // login skips this — a re-render wipes the auth-URL box it just filled
           };
           actions.appendChild(b);
           return b;
@@ -67,9 +67,10 @@ export function installPluginsUI(App) {
             btn(t('Start'), 'mounts-btn-primary', () => api('start'));
           } else {
             if (p.backendState !== 'Running') {
-              btn(t('Log in…'), 'mounts-btn-primary', async () => {
+              const loginBtn = btn(t('Log in…'), 'mounts-btn-primary', async () => {
                 const res = await api('login');
-                if (res.done) { showToast(t('Already connected')); return; }
+                if (res.done) { showToast(t('Already connected')); render(); return; }
+                if (res.pending) { loginBtn.textContent = t('Waiting for the sign-in page…'); return; }
                 if (res.authUrl) {
                   authBox.innerHTML = `<div class="mounts-field-hint">${escHtml(t('Open this link, approve the device, then come back — the status updates by itself:'))}</div>
                     <div class="plugin-auth-url"><a href="${escHtml(res.authUrl)}" target="_blank" rel="noopener">${escHtml(res.authUrl)}</a>
@@ -81,7 +82,7 @@ export function installPluginsUI(App) {
                     if (st?.backendState === 'Running') { cleanup(); showToast(t('Connected to the tailnet')); render(); }
                   }, 3000);
                 }
-              });
+              }, { rerender: false });
             }
             btn(t('Stop'), '', async () => {
               const ok = await showConfirmDialog(t('Stop {name}?', { name: p.label }), t('Tailnet connections from this instance will drop. The login persists — starting again reconnects without re-auth.'));

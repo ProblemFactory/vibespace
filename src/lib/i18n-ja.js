@@ -1821,4 +1821,5 @@ export default {
   "Tailnet connections from this instance will drop. The login persists — starting again reconnects without re-auth.": "このインスタンスからの tailnet 接続は切断されます。ログイン状態は保持され、再起動時に再認証なしで再接続します。",
   "Start automatically with the server": "サーバーと一緒に自動起動",
   "Join your tailnet — reach home/LAN machines (NAS, dev boxes) from this instance. State persists across container rebuilds; no re-login.": "tailnet に参加——このインスタンスから自宅/LAN のマシン（NAS、開発機）へアクセス。状態はコンテナ再構築後も保持され、再ログイン不要。",
+  "Waiting for the sign-in page…": "サインインページを待っています…",
 };
