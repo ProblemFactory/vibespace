@@ -85,18 +85,24 @@ spec:
         - name: vibespace
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          {{- if or (and .Values.fuse .Values.fuse.enabled) (and .Values.cephfs .Values.cephfs.mons) }}
+          {{- $sysadmin := or (and .Values.fuse .Values.fuse.enabled) (and .Values.cephfs .Values.cephfs.mons) }}
+          {{- $tun := and .Values.tun .Values.tun.enabled }}
+          {{- if or $sysadmin $tun }}
           # fuse AND cephfs need the same gates: CAP_SYS_ADMIN in the bounding
           # set (setuid fusermount3 / mount -t ceph transition into it) +
           # AppArmor unconfined — the containerd default profile denies mount()
           # even with the cap. K8s ≥1.30 GA field; the old beta annotation is
           # REMOVED on 1.35 and silently did nothing. (fuse also needs the
           # /dev/fuse device below; cephfs uses the host kernel ceph client.)
+          # tun (optional, .Values.tun.enabled): NET_ADMIN + a /dev/net/tun
+          # device-plugin resource — kernel-mode Tailscale (plugins, 2.140.0).
           securityContext:
             capabilities:
-              add: ["SYS_ADMIN"]
+              add: [{{ if $sysadmin }}"SYS_ADMIN"{{ if $tun }}, {{ end }}{{ end }}{{ if $tun }}"NET_ADMIN"{{ end }}]
+            {{- if $sysadmin }}
             appArmorProfile:
               type: Unconfined
+            {{- end }}
           {{- end }}
           ports:
             - containerPort: 3456
@@ -227,6 +233,9 @@ spec:
               {{- toYaml .Values.resources.limits | nindent 14 }}
               {{- if and .Values.fuse .Values.fuse.enabled }}
               {{ .Values.fuse.resource | default "github.com/fuse" }}: 1
+              {{- end }}
+              {{- if and .Values.tun .Values.tun.enabled }}
+              {{ .Values.tun.resource | default "squat.ai/tun" }}: 1
               {{- end }}
       volumes:
         - name: home

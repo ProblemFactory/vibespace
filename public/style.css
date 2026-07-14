@@ -2946,3 +2946,18 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .task-log-blmeta .task-log-claim-x { background: none; border: none; color: var(--text-dim); font-size: 10px; padding: 0 2px; cursor: pointer; line-height: 1; }
 .task-log-blmeta .task-log-claim-x:hover { color: var(--red, #e55); }
 .task-log-bl { padding: 5px 0; }
+
+/* ── Plugins dialog (2.140.0) ── */
+.plugin-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 6px; }
+.plugin-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.plugin-name { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.plugin-state { font-size: 10px; color: var(--text-secondary); }
+.plugin-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-dim); flex-shrink: 0; }
+.plugin-dot.ok { background: var(--green, #3fb950); }
+.plugin-dot.warn { background: var(--yellow, #e5c07b); }
+.plugin-desc { font-size: 11px; color: var(--text-secondary); }
+.plugin-detail { font-size: 10px; color: var(--text-dim); }
+.plugin-detail code { color: var(--text-secondary); }
+.plugin-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.plugin-boot { font-size: 10px; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 4px; margin-left: auto; cursor: pointer; }
+.plugin-auth-url { display: flex; align-items: center; gap: 6px; font-size: 11px; overflow-wrap: anywhere; padding: 6px 8px; background: color-mix(in srgb, var(--accent) 8%, transparent); border-radius: var(--radius-sm); }

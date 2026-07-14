@@ -2464,6 +2464,38 @@ app.get('/api/hosts/:id/recent-cwds', async (req, res) => {
 });
 
 // ── Mounts (rclone S3 mounts + share minting — collaboration P1) ──
+// ── Plugins (2.140.0, B-2d44): host-level capabilities with persistent state ──
+const { PluginManager } = require('./src/plugins');
+const plugins = new PluginManager({
+  dataDir: path.join(__dirname, 'data'),
+  broadcast: (msg) => {
+    const json = JSON.stringify(msg);
+    wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
+  },
+});
+setTimeout(() => { try { plugins.bootReplay(); } catch (e) { console.warn('[plugins] boot replay:', e.message); } }, 5000);
+app.get('/api/plugins', (req, res) => {
+  try { res.json({ plugins: plugins.list() }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/plugins/:id/status', (req, res) => {
+  try { res.json(plugins.status(req.params.id)); } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/plugins/:id/install', async (req, res) => {
+  try { res.json(await plugins.install(req.params.id)); } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/plugins/:id/start', (req, res) => {
+  try { res.json(plugins.start(req.params.id)); } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/plugins/:id/stop', (req, res) => {
+  try { res.json(plugins.stop(req.params.id)); } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/plugins/:id/login', async (req, res) => {
+  try { res.json(await plugins.loginStart(req.params.id)); } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/plugins/:id/enabled', (req, res) => {
+  try { plugins.setEnabled(req.params.id, !!req.body?.enabled); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 const { MountManager } = require('./src/mounts');
 const mounts = new MountManager({
   dataDir: path.join(__dirname, 'data'),

@@ -14,6 +14,7 @@ import { Resizer } from './resizer.js';
 import { anchorFixedPopup, configureToasts, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog } from './utils.js';
 import { t, tc, getLangPref, setLang } from './i18n.js';
 import { installManageAgents } from './manage-agents.js';
+import { installPluginsUI } from './plugins-ui.js';
 import { installUsageMeter } from './usage-meter.js';
 import { installSessionLifecycle } from './session-lifecycle.js';
 import { installSetupFlows } from './setup-flows.js';
@@ -831,6 +832,7 @@ class App {
     };
     const I = {
       key: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="11" r="3"/><path d="M7.5 8.5L13 3M11 5l2 2M9 7l1.5 1.5"/></svg>',
+      puzzle: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h4v2.5a1.5 1.5 0 103 0V7h2v7H3V7h2V4.5a1.5 1.5 0 103 0z"/></svg>',
       brush: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 2.5c-2.5.5-5.5 3-7 5l2 2c2-1.5 4.5-4.5 5-7z"/><path d="M6.5 7.5c-1.5.3-2.5 1.5-2.5 3.5-1 .5-1.5.5-2.5.5 1 1.5 2.5 2 4 2s2.8-1.3 3-3"/></svg>',
       tour: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.5"/><path d="M8 7.5v3.5M8 5v.5"/></svg>',
       out: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2H3v12h3M10 11l3-3-3-3M13 8H6"/></svg>',
@@ -864,6 +866,7 @@ class App {
     }
     menu.append(sep(),
       item(I.key, t('Manage agents\u2026'), () => this._showAgentsDialog()),
+      item(I.puzzle, t('Plugins\u2026'), () => this.openPluginsDialog()),
       item(I.chart, t('Usage\u2026'), () => this.openUsage()),
       item(I.pulse, t('Diagnostics report\u2026'), () => this._openDiagnostics()));
     menu.append(sep(),
@@ -2064,6 +2067,8 @@ export { App };
 
 // Prototype mixins split out of this file (2.82.0 audit) — installed at import time, before any instantiation.
 installManageAgents(App);
+installPluginsUI(App);
+
 installUsageMeter(App);
 installSessionLifecycle(App);
 installSetupFlows(App);
