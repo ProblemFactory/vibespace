@@ -143,5 +143,8 @@ opslog:
 # verification and with long-lived tokens. Injected as env, never stored in
 # the instance's data.
 gdrive:
+  # Preferred: preset list — [{key: org1, label: "My Org (internal)", clientId: "...", clientSecret: "..."}, …]
+  clients: []
+  # Legacy single default client (used only when clients is empty)
   clientId: ""
   clientSecret: ""

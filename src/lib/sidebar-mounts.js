@@ -814,8 +814,17 @@ export function installSidebarMounts(Sidebar) {
       });
     },
 
-    _showAddMountDialog() {
+    async _showAddMountDialog() {
       const is = (t) => (v) => v.type === t;
+      // Instance-preset Google clients (admin-injected; keys+labels only)
+      let presets = [];
+      try { presets = (await api('/api/mounts/drive-defaults')).presets || []; } catch {}
+      const clientOpts = [
+        ...presets.map((p) => [p.key, tr('Preset: {name}', { name: p.label })]),
+        ['', tr('Built-in client (rclone shared — being retired by Google)')],
+        ['custom', tr('Custom (own client id/secret)')],
+      ];
+      const isDriveCustom = (v) => v.type === 'drive' && v.clientChoice === 'custom';
       this._mountsDialog(tr('Connect storage'), [
         { key: 'type', label: tr('Source type'), type: 'select', options: [
           ['s3', tr('Cloud storage (S3 / MinIO)')], ['drive', 'Google Drive'], ['webdav', 'Nextcloud / WebDAV'],
@@ -831,8 +840,10 @@ export function installSidebarMounts(Sidebar) {
         // Google Drive
         { key: 'token', label: tr('Google Drive access'), type: 'textarea', placeholder: tr('click "Connect Google Drive" below — no terminal needed'), when: is('drive'), hint: tr('Advanced: you can also paste the JSON from `rclone authorize "drive"` run elsewhere.') },
         { key: 'driveFolder', label: tr('Folder (optional, blank = whole Drive)'), placeholder: 'Projects/Data', when: is('drive') },
-        { key: 'clientId', label: tr('Custom OAuth client ID (optional)'), placeholder: tr('leave blank to use the built-in client'), when: is('drive'), hint: tr("Advanced: your own Google Cloud OAuth client — avoids rclone's shared quota. Used by Connect too.") },
-        { key: 'clientSecret', label: tr('Custom OAuth client secret (optional)'), type: 'password', when: is('drive') },
+        { key: 'clientChoice', label: tr('OAuth client'), type: 'select', options: clientOpts, value: presets[0]?.key || '', when: is('drive'),
+          hint: presets.length ? tr('Pick the preset matching your Google account\'s organization; external accounts may see a one-time "unverified app" warning.') : tr("Advanced: your own Google Cloud OAuth client avoids rclone's shared quota.") },
+        { key: 'clientId', label: tr('Custom OAuth client ID'), placeholder: '….apps.googleusercontent.com', when: isDriveCustom },
+        { key: 'clientSecret', label: tr('Custom OAuth client secret'), type: 'password', when: isDriveCustom },
         { key: 'driveMode', label: tr('Cloud-side scope'), type: 'select', when: is('drive'),
           options: [['mydrive', 'My Drive'], ['shared-with-me', tr('Shared with me')], ['shared-drive', tr('Shared drive (team)')]],
           hint: tr('“Shared with me” and Shared drives are separate spaces in Google Drive — this picks which one the mount shows; the folder path above is inside it.') },
@@ -878,6 +889,11 @@ export function installSidebarMounts(Sidebar) {
         };
         if (v.type === 'rclone') v.params = parseKV(v.params);
         if (v.extraParams) v.extraParams = parseKV(v.extraParams);
+        if (v.type === 'drive') {
+          if (v.clientChoice === 'custom') v.clientPreset = null;
+          else { v.clientPreset = v.clientChoice || null; v.clientId = ''; v.clientSecret = ''; }
+        }
+        delete v.clientChoice;
         const r = await api('/api/mounts', { method: 'POST', body: JSON.stringify(v), headers: { 'Content-Type': 'application/json' } });
         await fetch(`/api/mounts/${r.id}/mount`, { method: 'POST' });
         close(); showToast(tr('Storage connected')); this._renderMounts();
@@ -917,7 +933,11 @@ export function installSidebarMounts(Sidebar) {
       btn.onclick = async () => {
         btn.disabled = true;
         try {
-          const body = { token: ctx.inputs.token?.value || '', clientId: ctx.inputs.clientId?.value || '', clientSecret: ctx.inputs.clientSecret?.value || '' };
+          const choice = ctx.inputs.clientChoice?.value;
+          const body = { token: ctx.inputs.token?.value || '',
+            clientId: (choice === 'custom' && ctx.inputs.clientId?.value) || '',
+            clientSecret: (choice === 'custom' && ctx.inputs.clientSecret?.value) || '',
+            clientPreset: (choice && choice !== 'custom' && choice) || '' };
           if (!body.token.trim()) throw new Error(tr('Connect Google Drive first (the token field must be filled)'));
           const r = await api('/api/mounts/shared-drives', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } });
           const drives = r.drives || [];
@@ -969,7 +989,11 @@ export function installSidebarMounts(Sidebar) {
         try {
           const r = await api('/api/mounts/gdrive-auth/start', {
             method: 'POST',
-            body: JSON.stringify({ clientId: ctx.inputs.clientId?.value || undefined, clientSecret: ctx.inputs.clientSecret?.value || undefined }),
+            body: JSON.stringify({
+              clientId: (ctx.inputs.clientChoice?.value === 'custom' && ctx.inputs.clientId?.value) || undefined,
+              clientSecret: (ctx.inputs.clientChoice?.value === 'custom' && ctx.inputs.clientSecret?.value) || undefined,
+              clientPreset: (ctx.inputs.clientChoice && ctx.inputs.clientChoice.value !== 'custom' && ctx.inputs.clientChoice.value) || undefined,
+            }),
             headers: { 'Content-Type': 'application/json' },
           });
           if (r.error) throw new Error(r.error);
@@ -1091,6 +1115,7 @@ export function installSidebarMounts(Sidebar) {
         ['teamDriveId', tr('Shared drive id'), '0AbC…', cfg.teamDriveId || ''],
         ['rootFolderId', tr('Folder ID (advanced)'), '1AbC…', cfg.rootFolderId || ''],
         ['token', tr('OAuth token'), '{"access_token":…}', cfg.token || ''],
+        ['clientPreset', tr('Preset client key (blank = custom/built-in)'), '39ai', cfg.clientPreset || ''],
         ['clientId', tr('OAuth client id (optional)'), '', cfg.clientId || ''],
         ['clientSecret', tr('OAuth client secret'), '', cfg.clientSecret || ''],
       ];
