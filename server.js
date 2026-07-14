@@ -460,6 +460,29 @@ function agentdMintDialPair(deviceId) {
   // the device token (vsht_) for in-mux auth ships in the install payload
   return { deviceId, dialToken: tok, hostToken: agentdHostToken('dial-' + deviceId) };
 }
+// A DeviceManager over a DIALED-IN device (Transport B consumption): the
+// device's daemon holds the mux-server end; we drive it (fs/serve-folder/
+// tcp-forward) as the client over the live ws stream in agentdDials. Reused
+// per device; reconnects follow the device's --dial retries (getStream picks
+// up the fresh stream). Enables 'device' mounts + remote fs for NAT'd devices.
+const agentdDialDevices = new Map(); // deviceId → DeviceManager
+async function deviceForDial(deviceId) {
+  let dm = agentdDialDevices.get(deviceId);
+  if (dm && dm.status().connected) return dm;
+  if (!dm) {
+    const { DeviceManager } = require('./src/agentd/client.js');
+    dm = new DeviceManager({
+      dataDir: path.join(__dirname, 'data'),
+      bundlePath: path.join(__dirname, 'data', 'bin', 'vibespace-agentd.js'),
+      version: require('./package.json').version,
+      transport: { kind: 'stream', hostToken: agentdHostToken('dial-' + deviceId), getStream: () => agentdDials.get(deviceId) || null },
+      log: (...a) => console.log('[agentd-dial]', ...a),
+    });
+    agentdDialDevices.set(deviceId, dm);
+  }
+  await dm.connect();
+  return dm;
+}
 async function ensureAgentdOnHost(hostId) {
   const version = require('./package.json').version;
   if (_agentdInstalled.get(hostId) === version) return;

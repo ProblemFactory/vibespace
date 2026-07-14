@@ -114,7 +114,7 @@ class DeviceManager {
   }
 
   async _connectLoop() {
-    const token = this._transport.kind === 'ssh' ? this._transport.hostToken : this._ensureLocalToken();
+    const token = this._transport.kind === 'local' ? this._ensureLocalToken() : this._transport.hostToken;
     const backoffs = [500, 1000, 2000, 5000];
     for (let attempt = 0; !this._stopped; attempt++) {
       const conn = await this._tryOnce(token).catch(() => null);
@@ -128,6 +128,16 @@ class DeviceManager {
   }
 
   _openTransport() {
+    if (this._transport.kind === 'stream') {
+      // Transport B consumption: a device that DIALED IN. Its ws stream is
+      // handed to us via getStream() (the server's agentdDials registry). A
+      // single-use stream — if it's gone (device disconnected), throw so the
+      // connect loop backs off and retries; the device's --dial reconnects and
+      // a fresh stream appears.
+      const s = this._transport.getStream?.();
+      if (!s) throw new Error('dial device not connected');
+      return s;
+    }
     if (this._transport.kind === 'ssh') {
       const t = this._transport;
       const remoteCmd = t.remoteCmd || `node ${JSON.stringify(t.remoteAgentd)} --stdio`;
@@ -227,7 +237,9 @@ class DeviceManager {
         onDead: () => fail(new Error('connection died during handshake')),
       });
       const sayHello = () => mux.control({ op: 'hello', protoVersion: PROTO_VERSION, hostToken: token, serverVersion: this._version });
-      if (this._transport.kind === 'ssh') sayHello(); // stdio is ready at spawn
+      // ssh stdio + a dialed-in ws stream are already connected at open; a unix
+      // socket needs its 'connect' event first.
+      if (this._transport.kind === 'ssh' || this._transport.kind === 'stream') sayHello();
       else sock.on('connect', sayHello);
     });
   }
