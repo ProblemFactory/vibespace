@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.135.3 — 2026-07-14
+- **rclone-backed Google Drive mounts are now first-class Drives** (real report: an imported/custom `drive` rclone remote had an incomplete edit dialog — no OAuth client picker, and its submounts had no cloud-side source): a mount whose rclone backend is `drive` now gets the SAME controls as a native Drive record — OAuth client preset picker, cloud-side scope (My Drive / Shared with me / Shared drive), the **List shared drives** picker, and single-folder `root_folder_id` — in both the edit dialog and the "New submount" dialog. Existing records migrate transparently (the scope is inferred from the stored rclone params, then edited via the friendly fields which take over). Preset selection resolves to the instance's env clients, so the secret never lands in the record.
+
 ## 2.135.2 — 2026-07-14
 - Fixed the Gmail edit dialog showing a blank (placeholder 200) after you saved "Messages to sync = 0": zero is a valid value (= everything) but was treated as empty, so it round-tripped to blank on reopen. It now prefills 0 correctly.
 
