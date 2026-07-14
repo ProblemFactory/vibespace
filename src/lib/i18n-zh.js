@@ -1754,4 +1754,10 @@ export default {
   "Sync paused — emails stay in the folder; connect to resume": "同步已暂停——邮件保留在文件夹中；连接以恢复",
   "Stop syncing (synced emails stay)": "停止同步（已同步邮件保留）",
   "This is a SYNC, not a live mount: emails download into the folder as .eml files (read-only archive) and keep syncing while connected.": "这是同步而非实时挂载：邮件以 .eml 文件下载到文件夹（只读归档），连接期间持续同步。",
+  "Organize into folders": "按日期归入子文件夹",
+  "By month (YYYY-MM)": "按月（YYYY-MM）",
+  "By day (YYYY-MM-DD)": "按日（YYYY-MM-DD）",
+  "No grouping (flat)": "不分组（平铺）",
+  "Keeps the folder browsable — hundreds of thousands of emails in one flat directory hurt every file tool.": "保持文件夹可浏览——几十万封邮件平铺在一个目录里会拖垮所有文件工具。",
+  "Organize into folders (month / day / none)": "按日期归入子文件夹（month / day / none）",
 };

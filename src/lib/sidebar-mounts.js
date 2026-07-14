@@ -880,6 +880,9 @@ export function installSidebarMounts(Sidebar) {
         { key: 'gmailToken', label: tr('Gmail access'), type: 'textarea', placeholder: tr('click "Connect Gmail" below — no terminal needed'), when: is('gmail'),
           hint: tr('This is a SYNC, not a live mount: emails download into the folder as .eml files (read-only archive) and keep syncing while connected.') },
         { key: 'syncCount', label: tr('Messages to sync (newest N)'), placeholder: '200', when: is('gmail') },
+        { key: 'groupBy', label: tr('Organize into folders'), type: 'select', when: is('gmail'),
+          options: [['month', tr('By month (YYYY-MM)')], ['day', tr('By day (YYYY-MM-DD)')], ['none', tr('No grouping (flat)')]],
+          hint: tr('Keeps the folder browsable — hundreds of thousands of emails in one flat directory hurt every file tool.') },
         { key: 'labelIds', label: tr('Labels (comma list, blank = whole mailbox)'), placeholder: 'INBOX', when: is('gmail'), advanced: true, hint: tr('Gmail label ids: INBOX, SENT, STARRED, IMPORTANT, or a custom label id.') },
         { key: 'query', label: tr('Search filter (Gmail query, optional)'), placeholder: 'from:boss@example.com newer_than:30d', when: is('gmail'), advanced: true },
         // WebDAV / Nextcloud
@@ -1239,6 +1242,7 @@ export function installSidebarMounts(Sidebar) {
       ];
       if (type === 'gmail') return [
         ['syncCount', tr('Messages to sync (newest N)'), '200', cfg.syncCount ? String(cfg.syncCount) : ''],
+        ['groupBy', tr('Organize into folders (month / day / none)'), 'month', cfg.groupBy || ''],
         ['labelIds', tr('Labels (comma list)'), 'INBOX', cfg.labelIds || ''],
         ['query', tr('Search filter (Gmail query)'), '', cfg.query || ''],
         ['clientPreset', tr('Preset client key'), '39ai', cfg.clientPreset || ''],

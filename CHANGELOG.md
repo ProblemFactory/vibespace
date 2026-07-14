@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.134.2 — 2026-07-14
+- **Fixed "undefined" painted over every .eml filename** in the file explorer (real report): the .eml registration referenced a FILE_ICONS key that doesn't exist, so the literal string "undefined" rendered into the icon slot. Emails now get a proper envelope icon.
+- **Gmail sync progress count no longer truncates** ("53/979…" — the label now never ellipsizes; the bar shrinks instead).
+- **Date grouping option for Gmail mounts** (user request — a flat directory with 10^5+ emails hurts every file tool): synced mail lands in `YYYY-MM/` (default for new mounts) or `YYYY-MM-DD/` subfolders, or flat. Dedup spans subfolders and pre-grouping flat files, so switching it on mid-life re-downloads nothing; existing mounts keep their current flat layout unless edited.
+
 ## 2.134.1 — 2026-07-14
 - Gmail storage cards now say what they ARE (a sync, not a live mount) and show it live: a **progress bar on the card** while a pass downloads ("Syncing 37/200…", server broadcasts throttled updates as it moves), an indeterminate shimmer while checking for new mail, and "Synced — N emails · time · account" when idle; stopping the sync says the synced emails stay. The add dialog states the sync semantics up front.
 

@@ -382,7 +382,7 @@ class MountManager {
       token: m.tokenEnc ? this._dec(m.tokenEnc) : undefined,
       driveFolder: m.driveFolder, clientId: m.clientId,
       driveMode: m.driveMode, teamDriveId: m.teamDriveId, rootFolderId: m.rootFolderId, clientPreset: m.clientPreset,
-      syncCount: m.syncCount, labelIds: m.labelIds, query: m.query, email: m.email,
+      syncCount: m.syncCount, labelIds: m.labelIds, query: m.query, email: m.email, groupBy: m.groupBy,
       clientSecret: m.clientSecretEnc ? this._dec(m.clientSecretEnc) : undefined,
       // webdav / vibespace
       url: m.url, vendor: m.vendor, user: m.user,
@@ -631,6 +631,7 @@ class MountManager {
           clientId: cfg.clientId || null,
           clientSecretEnc: cfg.clientSecret ? this._enc(cfg.clientSecret) : null,
           syncCount: Math.max(1, Math.min(2000, Number(cfg.syncCount) || 200)),
+          groupBy: ['none', 'month', 'day'].includes(cfg.groupBy) ? cfg.groupBy : 'month',
           labelIds: String(cfg.labelIds || 'INBOX'),
           query: String(cfg.query || ''),
           email: cfg.email ? String(cfg.email) : null,
@@ -848,7 +849,7 @@ class MountManager {
     // bucket/keys come from env and a change re-imports) — name, mountpoint
     // and mode are the only editable fields (user directive).
     const envLocked = m.origin === 'my-storage';
-    const connectionKeys = ['endpoint', 'bucket', 'prefix', 'accessKey', 'secretKey', 'sessionToken', 'rcloneType', 'remotePath', 'params', 'driveFolder', 'driveMode', 'teamDriveId', 'rootFolderId', 'token', 'clientId', 'clientPreset', 'clientSecret', 'syncCount', 'labelIds', 'query', 'url', 'user', 'pass', 'bearerToken', 'sshHost', 'sshUser', 'sshPort', 'sshPath', 'keyPath', 'cephMonHosts', 'cephFsName', 'cephPath', 'cephUser', 'cephSecret'];
+    const connectionKeys = ['endpoint', 'bucket', 'prefix', 'accessKey', 'secretKey', 'sessionToken', 'rcloneType', 'remotePath', 'params', 'driveFolder', 'driveMode', 'teamDriveId', 'rootFolderId', 'token', 'clientId', 'clientPreset', 'clientSecret', 'syncCount', 'labelIds', 'query', 'groupBy', 'url', 'user', 'pass', 'bearerToken', 'sshHost', 'sshUser', 'sshPort', 'sshPath', 'keyPath', 'cephMonHosts', 'cephFsName', 'cephPath', 'cephUser', 'cephSecret'];
     if (envLocked && connectionKeys.some((k) => patch[k] !== undefined && patch[k] !== '')) {
       throw new Error('This storage is provisioned by your deployment — its connection settings can\'t be edited here (name and mount point can).');
     }
@@ -892,6 +893,7 @@ class MountManager {
         break;
       case 'gmail':
         if (patch.syncCount !== undefined) m.syncCount = Math.max(1, Math.min(2000, Number(patch.syncCount) || 200));
+        if (patch.groupBy !== undefined) m.groupBy = ['none', 'month', 'day'].includes(patch.groupBy) ? patch.groupBy : 'none';
         if (patch.labelIds !== undefined) m.labelIds = String(patch.labelIds || '');
         if (patch.query !== undefined) m.query = String(patch.query || '');
         if (patch.clientPreset !== undefined) m.clientPreset = patch.clientPreset ? String(patch.clientPreset) : null;
@@ -1752,7 +1754,7 @@ class MountManager {
       clientPreset: m.clientPreset || null,
       clientId: m.clientId || null,
       clientSecret: m.clientSecretEnc ? this._dec(m.clientSecretEnc) : null,
-      syncCount: m.syncCount, labelIds: m.labelIds, query: m.query,
+      syncCount: m.syncCount, labelIds: m.labelIds, query: m.query, groupBy: m.groupBy,
     });
     m.desired = 'mounted';
     this._errors.delete(id);

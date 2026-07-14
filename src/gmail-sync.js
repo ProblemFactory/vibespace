@@ -142,7 +142,7 @@ class GmailSync {
       cfg, state: 'syncing', error: null, count: 0, lastSyncAt: 0,
       tok: JSON.parse(cfg.token), stopped: false, timer: null,
     };
-    try { w.count = fs.readdirSync(cfg.dir).filter((f) => f.endsWith('.eml')).length; } catch { }
+    try { w.count = this._seenIds(w).size; } catch { }
     this._workers.set(cfg.id, w);
     this._loop(w).catch(() => { });
     return w;
@@ -213,15 +213,20 @@ class GmailSync {
   _statePath(w) { return path.join(w.cfg.dir, '.vibespace-gmail-state.json'); }
 
   _seenIds(w) {
-    // message ids ride in the filename tail: …_<id>.eml — the directory IS the
-    // dedup index (no separate DB to drift).
+    // message ids ride in the filename tail: …_<id>.eml — the directory tree
+    // IS the dedup index (no separate DB to drift). One subdir level covers
+    // the date-grouping layouts (YYYY-MM/ or YYYY-MM-DD/); files already in
+    // the flat root keep counting after grouping is turned on (no re-download).
     const seen = new Set();
-    try {
-      for (const f of fs.readdirSync(w.cfg.dir)) {
-        const m = /_([a-f0-9]{8,20})\.eml$/.exec(f);
-        if (m) seen.add(m[1]);
+    const scan = (dir) => {
+      let entries = [];
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+      for (const e of entries) {
+        if (e.isDirectory() && /^\d{4}-\d{2}(-\d{2})?$/.test(e.name)) scan(path.join(dir, e.name));
+        else { const m = /_([a-f0-9]{8,20})\.eml$/.exec(e.name); if (m) seen.add(m[1]); }
       }
-    } catch { }
+    };
+    scan(w.cfg.dir);
     return seen;
   }
 
@@ -297,9 +302,15 @@ class GmailSync {
       const slug = subj.replace(/[^\p{L}\p{N} _.-]/gu, '').trim().replace(/\s+/g, '-').slice(0, 60) || 'no-subject';
       const d = new Date(Number(msg.internalDate) || Date.now());
       const stamp = d.toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-');
-      const tmp = path.join(w.cfg.dir, `.tmp-${id}`);
+      // date grouping (user option — one flat dir hits fs limits and explorer
+      // pain at 10^5+ mails): none | month (YYYY-MM/) | day (YYYY-MM-DD/)
+      const iso = d.toISOString();
+      const sub = w.cfg.groupBy === 'month' ? iso.slice(0, 7) : w.cfg.groupBy === 'day' ? iso.slice(0, 10) : '';
+      const destDir = sub ? path.join(w.cfg.dir, sub) : w.cfg.dir;
+      fs.mkdirSync(destDir, { recursive: true });
+      const tmp = path.join(destDir, `.tmp-${id}`);
       fs.writeFileSync(tmp, raw);
-      fs.renameSync(tmp, path.join(w.cfg.dir, `${stamp}_${slug}_${id}.eml`));
+      fs.renameSync(tmp, path.join(destDir, `${stamp}_${slug}_${id}.eml`));
       seen.add(id);
       w.count = seen.size;
       this._progress(w, todo.length, ++done);
