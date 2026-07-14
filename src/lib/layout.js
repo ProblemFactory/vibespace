@@ -910,7 +910,7 @@ class LayoutManager {
           matchedWinIds.add(existing.winId);
           applyPosition(existing.win, ws);
         } else {
-          const winInfo = this.app.openBrowser(ws.browserUrl);
+          const winInfo = this.app.openBrowser(ws.browserUrl, { proxy: ws.openSpec?.proxy });
           if (winInfo) {
             matchedWinIds.add(winInfo.id);
             applyPosition(winInfo, ws);

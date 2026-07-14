@@ -16,12 +16,13 @@ export class ChatInput {
    * @param {function} opts.getStateSync - returns StateSync instance
    * @param {function} opts.onInterrupt - called when user clicks Stop
    */
-  constructor(ws, sessionId, { onSend, onInterrupt, getCwd, getUploadDir }) {
+  constructor(ws, sessionId, { onSend, onInterrupt, getCwd, getHost, getUploadDir }) {
     this._ws = ws;
     this._sessionId = sessionId;
     this._onSend = onSend;
     this._onInterrupt = onInterrupt;
     this._getCwd = getCwd || (() => null);
+    this._getHost = getHost || (() => null);
     this._getUploadDir = getUploadDir || (() => '');
 
     // Attachment state
@@ -295,6 +296,7 @@ export class ChatInput {
       // usual net::ERR_ACCESS_DENIED cause) no longer fails the whole upload.
       const { uploaded, failed } = await uploadFilesBatched(files, {
         destDir,
+        host: this._getHost(), // remote sessions: upload lands on the host, not locally
         onProgress: (d, total) => this._uploadToast(t('Uploading {d}/{total}…', { d, total })),
       });
       if (uploaded.length) this._insertUploadedPaths(destDir, uploaded);

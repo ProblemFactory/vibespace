@@ -286,12 +286,29 @@ const pipeSessions = {
 // death it is disowned (accepts fail fast) and the reconnecting server
 // re-owns it with the SAME port, so a remote rclone mount pointing at the
 // port heals without remounting. Loopback bind only — never a general proxy.
-const reverseListeners = new Map(); // port → { server, owner: mux|null }
+const reverseListeners = new Map(); // port → { server, owner: mux|null, disownedAt?: ms }
 let pushChanSeq = 0x40000000;
+
+// Reap listeners that were DISOWNED (link dropped) and never re-owned within a
+// grace window — covers the mount-removed-while-device-offline case where the
+// server never gets to send tcp-unlisten (review finding). A legitimate drop
+// re-owns within seconds on reconnect, so 10min is safely past that.
+const REVERSE_REAP_MS = 10 * 60 * 1000;
+const _reverseReaper = setInterval(() => {
+  const now = Date.now();
+  for (const [port, L] of reverseListeners) {
+    if (L.owner || !L.disownedAt) continue;
+    if (now - L.disownedAt < REVERSE_REAP_MS) continue;
+    try { L.server.close(); } catch { }
+    reverseListeners.delete(port);
+    log('reaped stale reverse listener on ' + port + ' (disowned >10min)');
+  }
+}, 60000);
+if (_reverseReaper.unref) _reverseReaper.unref();
 function reverseListen(mux, msg) {
   const want = Number(msg.port) || 0;
   const existing = want ? reverseListeners.get(want) : null;
-  if (existing) { existing.owner = mux; mux.control({ op: 'listen-open', id: msg.id, port: want }); return; }
+  if (existing) { existing.owner = mux; existing.disownedAt = null; mux.control({ op: 'listen-open', id: msg.id, port: want }); return; }
   const srv = net.createServer((tsock) => {
     const L = reverseListeners.get(srv._vsPort);
     const owner = L && L.owner;
@@ -628,8 +645,9 @@ function serveConnection(sock) {
       for (const t of tcpChans.values()) { try { t.destroy(); } catch { } }
       tcpChans.clear();
       // disown (NOT close) reverse listeners: the port stays bound so a
-      // reconnecting server re-owns it and remote mounts heal in place
-      for (const L of reverseListeners.values()) { if (L.owner === mux) L.owner = null; }
+      // reconnecting server re-owns it and remote mounts heal in place. Stamp
+      // disownedAt so the reaper can reclaim it if it's never re-owned.
+      for (const L of reverseListeners.values()) { if (L.owner === mux) { L.owner = null; L.disownedAt = Date.now(); } }
       if (this._discoWatch) { for (const w of this._discoWatch) { try { w.close(); } catch { } } this._discoWatch = null; }
       pipeSessions.detachAll(mux);
     },

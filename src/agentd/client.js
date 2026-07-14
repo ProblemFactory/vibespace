@@ -203,7 +203,17 @@ class DeviceManager {
               if (m.op === 'session-error') { const h = sessions.get(m.chan); sessions.delete(m.chan); h?.onError?.(m.error); return; }
               prevControl(m);
             };
-            mux.onDead = () => { this._conn = null; this._log('[agentd] connection lost'); };
+            mux.onDead = () => {
+              // Tear down local sockets we opened for reverse-forward accepts
+              // (mirrors the daemon's own onDead). Without this, each accepted
+              // /dav connection's socket + its listeners leak on every link
+              // drop — the reconnect self-heal re-listens but never reconciles
+              // the stale sockets (review finding, client.js:206).
+              for (const s of sessions.values()) { try { s.onClose?.(); } catch { } }
+              sessions.clear();
+              this._conn = null;
+              this._log('[agentd] connection lost');
+            };
             resolve(this._conn);
             // self-heal reverse forwards: re-own each registered device port
             for (const [port] of this._reverseForwards) {
