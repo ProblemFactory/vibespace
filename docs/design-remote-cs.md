@@ -265,7 +265,18 @@ cache retires — huge remote transcripts get the SAME lazy seek behavior as loc
 | M4 device capabilities | **PRIMITIVES DONE** 2.145.0 (dial-out shipped above) | run-cmd (argv-only bounded exec = clipboard shape), tcp-connect loopback forward (= VNC bridge shape), Ctrl+G shape via fs+run-cmd | test-agentd-m3m4 M4.1–M4.3 (bidirectional tcp, stdin exec, device edit round-trip) |
 | M5 mounts + cleanup | **SHAPE DONE** 2.145.0 | mount-class = persistent pipe session + run-cmd health probe + teardown (lifecycle verified); rclone-on-device rides these primitives | test-agentd-m3m4 M5 |
 
-Remaining after this record: UI/consumer SWITCHOVER work — pointing the existing
+UPDATE 2026-07-14 (2.146.0): the four DATA-PLANE switchovers are WIRED behind
+`agentd.dataPlane` (default off, per-path ssh fallback): RemoteFs fs ops,
+discovery (raw-facts synthesized into the ssh-script line format → unchanged
+parser), transcript INCREMENTAL slab sync (append-only delta fetch), usage
+harvest via run-stream. Acceptance: test-agentd-switchover.mjs vs a real host
+with legacy-vs-device cross-checks. Still ssh-path-default; graduation =
+flipping defaults after real-world soak. Remaining consumers (clipboard/X,
+VNC-to-device, mounts-on-device) are NEW capabilities (nothing to switch) —
+their primitives (run-cmd / tcp-forward / pipe-session lifecycle) are shipped
+and acceptance-tested; productizing them is feature work, not architecture.
+
+Original note — remaining after this record: UI/consumer SWITCHOVER work — pointing the existing
 server subsystems (files.js ?host=, discovery ssh script, remote-jsonl cache,
 usage harvest, clipboard/X, VNC bridge, mounts) at these primitives behind flags,
 then the legacy ssh-per-op paths retire per capability (invariant #7: ssh stays

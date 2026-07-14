@@ -304,6 +304,12 @@ const SETTINGS_SCHEMA = {
     description: t('CS-refactor M2 (opt-in, default off; needs the local device-agent setting too): remote chat sessions run as persistent sessions inside a standing agent daemon on the host — an ssh drop kills only the bridge, the daemon and session survive, and reconnects resume by byte offset. Replaces the per-session keeper. Experimental; leave off unless testing.'),
     category: t('Session'), liveApply: false,
   },
+  'agentd.dataPlane': {
+    type: 'boolean', default: false,
+    label: t('Route remote data reads through the device agent (experimental)'),
+    description: t('CS-refactor M3 (opt-in, default off): remote file browsing, session discovery, transcript sync and usage harvest use the standing device agent — incremental byte-range transcript sync (no more whole-file pulls), push-based discovery, one persistent connection instead of ssh per operation. Falls back to the classic ssh path automatically on any failure. Experimental; leave off unless testing.'),
+    category: t('Session'), liveApply: true,
+  },
   'agents.injectPreamble': {
     type: 'text', default: '',
     label: t('Custom agent instructions (injected)'),

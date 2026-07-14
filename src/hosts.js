@@ -384,6 +384,33 @@ class HostManager {
     });
   }
 
+  /** ── CS data-plane (2.146.0): per-host DeviceManager over the ssh stdio
+   *  bridge — the shared engine for the fs/discovery/transcript/usage
+   *  switchovers. Gated by the CALLER (serverSetting agentd.dataPlane);
+   *  connection failures surface so callers fall back to the legacy ssh path.
+   *  deps.agentd = { ensureAgentdOnHost, agentdHostToken, bundlePath, version }
+   *  injected by server.js after boot. ── */
+  async device(id) {
+    if (!this._devices) this._devices = new Map();
+    const cached = this._devices.get(id);
+    if (cached?.status().connected) return cached;
+    if (!this.agentdDeps) throw new Error('agentd deps not wired');
+    const h = this.get(id);
+    await this.agentdDeps.ensureAgentdOnHost(id);
+    const remoteCmd = `export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; exec node "$HOME/.vibespace/agentd/current/agentd.js" --stdio`;
+    const { DeviceManager } = require('./agentd/client.js');
+    const dm = new DeviceManager({
+      dataDir: this.dataDir,
+      bundlePath: this.agentdDeps.bundlePath,
+      version: this.agentdDeps.version,
+      transport: { kind: 'ssh', hostToken: this.agentdDeps.agentdHostToken(id), sshBin: 'ssh', sshArgs: this.sshArgs(h, { multiplex: true }), remoteCmd },
+      log: () => {},
+    });
+    await dm.connect();
+    this._devices.set(id, dm);
+    return dm;
+  }
+
   /** M2 remote install: land the agentd bundle into ~/.vibespace/agentd/<ver>/
    *  + symlink `current`, and provision the host vsht_ token (0600) so the
    *  standing remote daemon authenticates the server's ssh-bridge connection.
@@ -468,6 +495,41 @@ class HostManager {
     const metaPath = cachePath + '.meta';
     let meta = null;
     try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8')); } catch {}
+    // CS data-plane: INCREMENTAL slab sync — transcripts are append-only, so
+    // when the cache already holds a prefix we fetch ONLY [cachedSize, size)
+    // via read-range instead of re-pulling the whole file (the remote-jsonl
+    // whole-file cache's biggest cost). Any failure → legacy ssh path below.
+    if (this.dataPlaneOn?.()) {
+      try {
+        const dm = await this.device(id);
+        // locate via the discovery snapshot (cached-ish) or a targeted find
+        const find = await dm.runCmd('sh', ['-c', `find "$HOME"/.claude/projects -maxdepth 2 -name ${JSON.stringify(sessionId + '.jsonl')} 2>/dev/null | head -1`]);
+        const remotePath = find.stdout.trim();
+        if (!remotePath) return fs.existsSync(cachePath) ? cachePath : null;
+        const st = await dm.fsStat(remotePath);
+        const size = st.stat.size, mtime = Math.floor(st.stat.mtimeMs / 1000);
+        if (meta && meta.size === size && meta.mtime === mtime && fs.existsSync(cachePath)) return cachePath;
+        if (size > maxBytes) throw new Error(`remote transcript too large (${(size / 1048576) | 0}MB)`);
+        fs.mkdirSync(dir, { recursive: true });
+        let localSize = 0;
+        try { localSize = fs.statSync(cachePath).size; } catch { }
+        if (localSize > 0 && localSize <= size && meta) {
+          // append-only delta — the slab win
+          if (size > localSize) {
+            const delta = await dm.fsReadRange(remotePath, localSize, size - localSize);
+            fs.appendFileSync(cachePath, delta.data);
+          }
+        } else {
+          // no/invalid prefix (or remote rotated smaller) — full streamed fetch
+          const whole = await dm.fsReadRange(remotePath, 0, size);
+          const tmp2 = cachePath + '.tmp';
+          fs.writeFileSync(tmp2, whole.data);
+          fs.renameSync(tmp2, cachePath);
+        }
+        fs.writeFileSync(metaPath, JSON.stringify({ size, mtime, fetchedAt: Date.now(), slab: true }));
+        return cachePath;
+      } catch (e2) { /* legacy fallback below */ }
+    }
     const probe = `f=$(find "$HOME"/.claude/projects -maxdepth 2 -name ${JSON.stringify(sessionId + '.jsonl')} 2>/dev/null | head -1); [ -n "$f" ] && stat -c '%s %Y' "$f" && echo "$f"`;
     const out = (await this._ssh(h, probe, { timeoutMs: 15000 })).toString().trim();
     if (!out) return fs.existsSync(cachePath) ? cachePath : null; // gone remotely — keep stale cache if any
@@ -498,6 +560,21 @@ class HostManager {
     if (!force && Date.now() - last < 15 * 60 * 1000) return '';
     this._usageHarvestAt.set(id, Date.now());
     const script = fs.readFileSync(scannerPath, 'utf-8');
+    // CS data-plane: ship+run the scanner through the daemon (streaming exec —
+    // NDJSON output can be huge). Same cursor semantics; legacy ssh fallback.
+    if (this.dataPlaneOn?.()) {
+      try {
+        const dm = await this.device(id);
+        const home = (await dm.runCmd('sh', ['-c', 'echo "$HOME"'])).stdout.trim();
+        const scanPath = home + '/.vibespace/bin/vibespace-usage-scan';
+        await dm.fsWrite(scanPath, script); // fsWrite mkdirs the parent
+        const chunks = [];
+        const { code, error } = await dm.runStream('node', [scanPath], { onData: (b) => chunks.push(b) });
+        if (error) throw new Error(error);
+        if (code !== 0) throw new Error('scanner exit ' + code);
+        return Buffer.concat(chunks).toString('utf-8');
+      } catch (e2) { /* legacy ssh fallback below */ }
+    }
     return new Promise((resolve, reject) => {
       const child = execFile('ssh', [...this.sshArgs(h, { multiplex: true }), '--',
         'umask 077; mkdir -p "$HOME/.vibespace/bin"; cat > "$HOME/.vibespace/bin/vibespace-usage-scan"; export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; node "$HOME/.vibespace/bin/vibespace-usage-scan"'],
@@ -558,7 +635,29 @@ class HostManager {
     `.trim();
     let out;
     try {
-      out = await this._ssh(h, script, { timeoutMs: 20000 });
+      // CS data-plane (flag agentd.dataPlane): the daemon's raw-facts snapshot
+      // SYNTHESIZED into the exact LOCK/J/H/N/T line format the ssh script
+      // emits — the parser below runs UNCHANGED (zero interpretation drift).
+      // Any failure falls through to the classic ssh script.
+      out = null;
+      if (this.dataPlaneOn?.()) {
+        try {
+          const dm = await this.device(id);
+          const snap = await dm.discoverySnapshot();
+          const home = '~'; // path prefix only cosmetic in J/H/N/T keys — build real-looking paths
+          const lines = [];
+          for (const l of snap.locks) lines.push('LOCK ' + JSON.stringify(l));
+          for (const j of snap.jsonls) {
+            const fp = `/HOME/.claude/projects/${j.projDir}/${j.file}`;
+            lines.push(`J ${(j.mtimeMs / 1000).toFixed(4)} ${j.size} ${fp}`);
+            if (j.headCwd !== undefined) lines.push(`H ${fp}\t"cwd":"${j.headCwd || ''}"`);
+            for (const u of j.userLines || []) lines.push(`N ${fp}\t${u}`);
+            if (j.tailIds) lines.push(`T ${fp}\t${j.tailIds.join(',')},`);
+          }
+          out = lines.join('\n');
+        } catch (e2) { out = null; /* legacy fallback below */ }
+      }
+      if (out == null) out = await this._ssh(h, script, { timeoutMs: 20000 });
     } catch (e) {
       // Host unreachable — serve LAST-KNOWN (expired memory cache, else the
       // disk-persisted copy from a previous run) marked stale instead of

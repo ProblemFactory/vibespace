@@ -421,7 +421,35 @@ function serveConnection(sock) {
             }
           } catch { }
           jsonls.sort((a, b) => b.mtimeMs - a.mtimeMs);
-          mux.control({ op: 'discovery-result', id: msg.id, locks, jsonls: jsonls.slice(0, 200) });
+          const top = jsonls.slice(0, 200);
+          // raw-facts enrichment for the newest files (the ssh script's H/N/T
+          // lines): head cwd, first user lines (name candidates), tail ids
+          const home2 = os.homedir();
+          for (const j of top.slice(0, 60)) {
+            try {
+              const fp = path.join(home2, '.claude', 'projects', j.projDir, j.file);
+              const fd = fs.openSync(fp, 'r');
+              try {
+                const headB = Buffer.alloc(Math.min(16000, j.size));
+                fs.readSync(fd, headB, 0, headB.length, 0);
+                const head = headB.toString('utf-8');
+                j.headCwd = (head.match(/"cwd":"((?:[^"\\]|\\.)*)"/) || [])[1] || null;
+                const users = [];
+                for (const line of head.split('\n')) {
+                  if (users.length >= 6) break;
+                  if (line.includes('"type":"user"')) users.push(line.slice(0, 2000));
+                }
+                j.userLines = users;
+                const tailStart = Math.max(0, j.size - 65536);
+                const tailB = Buffer.alloc(j.size - tailStart);
+                fs.readSync(fd, tailB, 0, tailB.length, tailStart);
+                const ids = [...tailB.toString('utf-8').matchAll(/"sessionId":"([^"]+)"/g)].map((m) => m[1]);
+                const uniq = []; for (const idv of ids) { if (uniq[uniq.length - 1] !== idv) uniq.push(idv); }
+                j.tailIds = uniq.slice(-8);
+              } finally { fs.closeSync(fd); }
+            } catch { }
+          }
+          mux.control({ op: 'discovery-result', id: msg.id, locks, jsonls: top });
         } catch (e) { mux.control({ op: 'discovery-result', id: msg.id, error: e.message }); }
         return;
       }
@@ -457,6 +485,24 @@ function serveConnection(sock) {
           });
           if (msg.stdin64) { try { child.stdin.end(Buffer.from(msg.stdin64, 'base64')); } catch { } } else { try { child.stdin.end(); } catch { } }
         } catch (e) { mux.control({ op: 'cmd-result', id: msg.id, code: 127, error: e.message }); }
+        return;
+      }
+      // ── M3: streaming exec (usage-scan class: NDJSON output too big for
+      // run-cmd's buffer). argv-only; stdout rides the byte channel. ──
+      if (msg.op === 'run-stream') {
+        try {
+          const { spawn: sp } = require('child_process');
+          const child = sp(String(msg.cmd), (msg.args || []).map(String), {
+            env: { ...process.env, ...(msg.env || {}) }, cwd: msg.cwd || process.env.HOME,
+          });
+          const chanS = msg.chan;
+          child.stdout.on('data', (d) => { try { mux.data(chanS, d); } catch { } });
+          child.stderr.on('data', () => { });
+          child.on('exit', (code) => mux.control({ op: 'stream-exit', chan: chanS, code: code ?? 0 }));
+          child.on('error', (e) => mux.control({ op: 'stream-exit', chan: chanS, code: 127, error: e.message }));
+          if (msg.stdin64) { try { child.stdin.end(Buffer.from(msg.stdin64, 'base64')); } catch { } } else { try { child.stdin.end(); } catch { } }
+          mux.control({ op: 'stream-start', id: msg.id, chan: chanS, pid: child.pid });
+        } catch (e) { mux.control({ op: 'stream-start', id: msg.id, chan: msg.chan, error: e.message }); }
         return;
       }
       // ── M4: TCP forward (the VNC-bridge shape): byte channel ↔ a LOCAL

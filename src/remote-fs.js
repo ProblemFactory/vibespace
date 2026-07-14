@@ -18,6 +18,27 @@ const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 class RemoteFs {
   constructor(hostManager) { this.hosts = hostManager; }
 
+  // ── CS data-plane (2.146.0): device-agent fast path. Returns null when the
+  // flag is off / device unreachable — callers fall back to their ssh body.
+  // Shapes returned here MIRROR the legacy methods exactly. ──
+  async _dev(id) {
+    if (!this.hosts.dataPlaneOn?.()) return null;
+    try { return await this.hosts.device(id); } catch { return null; }
+  }
+  async _devHome(id, dm) {
+    if (!this._homes) this._homes = new Map();
+    if (this._homes.has(id)) return this._homes.get(id);
+    const home = (await dm.runCmd('sh', ['-c', 'echo "$HOME"'])).stdout.trim();
+    if (home) this._homes.set(id, home);
+    return home;
+  }
+  async _devAbs(id, dm, p) {
+    const raw = String(p || '~');
+    if (raw === '~') return this._devHome(id, dm);
+    if (raw.startsWith('~/')) return (await this._devHome(id, dm)) + raw.slice(1);
+    return raw;
+  }
+
   _host(id) { return this.hosts.get(id); }
 
   // Run a remote command, resolve stdout (string). Rejects on non-zero exit.
@@ -48,6 +69,17 @@ class RemoteFs {
   // single round trip (line = "T\tSIZE\tMTIME\tNAME"). Robust vs `ls` parsing.
   async list(id, dir) {
     if (/\n/.test(dir)) throw new Error('invalid path');
+    const dm = await this._dev(id);
+    if (dm) {
+      try {
+        const abs = await this._devAbs(id, dm, dir);
+        const r = await dm.fsList(abs);
+        return {
+          path: abs,
+          items: r.entries.map((e) => ({ name: e.name, isDirectory: !!e.isDir, isSymlink: false, size: e.size || 0, modified: e.mtimeMs || 0, created: 0 })),
+        };
+      } catch { /* legacy ssh below */ }
+    }
     const d = dir && dir !== '~' ? dir : await this.home(id);
     const cmd = `cd ${shq(d)} 2>/dev/null && pwd && find . -maxdepth 1 -mindepth 1 -printf '%y\\t%s\\t%T@\\t%f\\n' 2>/dev/null | LC_ALL=C sort`;
     const out = (await this._run(id, cmd)).toString();
@@ -86,6 +118,16 @@ class RemoteFs {
   }
 
   async readText(id, filePath, maxBytes = 10 * 1024 * 1024) {
+    const dm = await this._dev(id);
+    if (dm) {
+      try {
+        const abs = await this._devAbs(id, dm, filePath);
+        const st = await dm.fsStat(abs);
+        if (st.stat.size > maxBytes) { const e = new Error('File too large (>10MB). Use hex viewer.'); e.size = st.stat.size; throw e; }
+        const rr = await dm.fsReadRange(abs, 0, st.stat.size);
+        return { path: filePath, content: rr.data.toString('utf-8'), size: st.stat.size };
+      } catch (e) { if (e.size) throw e; /* too-large is REAL; others → legacy */ }
+    }
     const info = await this.info(id, filePath);
     if (info.size > maxBytes) { const e = new Error('File too large (>10MB). Use hex viewer.'); e.size = info.size; throw e; }
     const buf = await this._run(id, `cat ${shq(filePath)}`, { maxBuffer: maxBytes + 1024 });
@@ -93,12 +135,28 @@ class RemoteFs {
   }
 
   async readBinary(id, filePath, offset = 0, length = 65536) {
+    const dm = await this._dev(id);
+    if (dm) {
+      try {
+        const abs = await this._devAbs(id, dm, filePath);
+        const rr = await dm.fsReadRange(abs, Math.max(0, offset), Math.min(length, 1048576));
+        return rr.data;
+      } catch { /* legacy */ }
+    }
     const len = Math.min(length, 1048576);
     const cmd = `dd if=${shq(filePath)} bs=1 skip=${offset | 0} count=${len | 0} 2>/dev/null`;
     return this._run(id, cmd, { maxBuffer: len + 4096 });
   }
 
   async write(id, filePath, contentBuffer) {
+    const dm = await this._dev(id);
+    if (dm) {
+      try {
+        const abs = await this._devAbs(id, dm, filePath);
+        await dm.fsWrite(abs, contentBuffer);
+        return;
+      } catch { /* legacy */ }
+    }
     const h = this._host(id);
     await new Promise((resolve, reject) => {
       const child = spawn('ssh', [...this.hosts.sshArgs(h, { multiplex: true }), '--', `mkdir -p "$(dirname ${shq(filePath)})" && cat > ${shq(filePath)}`]);
@@ -110,11 +168,19 @@ class RemoteFs {
     return { success: true };
   }
 
-  async mkdir(id, dirPath) { await this._run(id, `mkdir -p ${shq(dirPath)}`); return { success: true }; }
+  async mkdir(id, dirPath) {
+    const dm = await this._dev(id);
+    if (dm) { try { await dm.fsMkdir(await this._devAbs(id, dm, dirPath)); return { success: true }; } catch { } }
+    await this._run(id, `mkdir -p ${shq(dirPath)}`); return { success: true };
+  }
 
   async rename(id, from, to) { await this._run(id, `mv -n ${shq(from)} ${shq(to)}`); return { success: true }; }
 
-  async remove(id, target) { await this._run(id, `rm -rf ${shq(target)}`); return { success: true }; }
+  async remove(id, target) {
+    const dm = await this._dev(id);
+    if (dm) { try { await dm.fsRm(await this._devAbs(id, dm, target), true); return { success: true }; } catch { } }
+    await this._run(id, `rm -rf ${shq(target)}`); return { success: true };
+  }
 
   async stat(id, target, withDu = false) {
     const cmd = `f=${shq(target)}; stat -c '%s|%Y|%A|%U|%G|%F' "$f"; ${withDu ? '[ -d "$f" ] && du -sb "$f" 2>/dev/null | cut -f1 || echo' : 'echo'}`;
