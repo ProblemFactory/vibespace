@@ -221,14 +221,18 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
 
     const attrHtml = (it) => {
       let html = '';
-      if (it.addedBy || it.addedAt) {
-        html += `<span class="task-log-attr-part" title="${escHtml(t('Parked by') + (it.addedAt ? ' · ' + new Date(it.addedAt).toLocaleString() : ''))}">+ ${sessionChip(it.addedBy)}${it.addedAt ? ` <span class="task-log-time">${escHtml(fmtDay(it.addedAt))}</span>` : ''}</span>`;
-      }
-      // claimants — each removable (admin action: strip a stale claim)
       const claims = it.claimedBy || [];
-      if (claims.length) {
-        html += `<span class="task-log-attr-part" title="${escHtml(t('Claimed by {n} session(s)', { n: claims.length }))}">⚑ ${claims.map((k) => `${sessionChip(k)}<button class="task-log-claim-x" data-unclaim="${escHtml(k)}" data-bidx="${it._i}" title="${escHtml(t('Remove this claim'))}">×</button>`).join('')}</span>`;
-      } else if (it.status === 'open') {
+      // parker == claimant is the common case (parking auto-claims) — collapse it
+      // into ONE part instead of repeating the same session as two loud chips
+      const selfClaim = !!it.addedBy && claims.includes(it.addedBy);
+      const claimX = (k) => `<button class="task-log-claim-x" data-unclaim="${escHtml(k)}" data-bidx="${it._i}" title="${escHtml(t('Remove this claim'))}">×</button>`;
+      if (it.addedBy || it.addedAt) {
+        html += `<span class="task-log-attr-part" title="${escHtml(t('Parked by') + (it.addedAt ? ' · ' + new Date(it.addedAt).toLocaleString() : ''))}">+ ${sessionChip(it.addedBy)}${it.addedAt ? ` <span class="task-log-time">${escHtml(fmtDay(it.addedAt))}</span>` : ''}${selfClaim ? `<span class="task-log-selfclaim" title="${escHtml(t('Claimed by {n} session(s)', { n: claims.length }))}">⚑</span>${claimX(it.addedBy)}` : ''}</span>`;
+      }
+      const foreign = claims.filter((k) => k !== it.addedBy);
+      if (foreign.length) {
+        html += `<span class="task-log-attr-part" title="${escHtml(t('Claimed by {n} session(s)', { n: claims.length }))}">⚑ ${foreign.map((k) => `${sessionChip(k)}${claimX(k)}`).join('')}</span>`;
+      } else if (!claims.length && it.status === 'open') {
         html += `<span class="task-log-attr-part task-log-unclaimed" title="${escHtml(t('No session has claimed this item'))}">${escHtml(t('unclaimed'))}</span>`;
       }
       if (it.status !== 'open' && (it.resolvedBy || it.resolvedAt)) {
@@ -283,7 +287,7 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
       st.className = 'task-log-bl-status';
       st.textContent = meta.icon;
       st.title = meta.label;
-      line.appendChild(st);
+      top.appendChild(st);
       if (it.id) {
         // the stable id — click to copy, so the user can hand it to ANY agent
         // ("look at backlog B-xxxx"), which can then view/claim it

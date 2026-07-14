@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.136.6 — 2026-07-14
+- **Backlog viewer visual pass** (follow-up report — 2.136.5 left the status icon orphaned on its own line): the status circle now leads the top row; the attribution line is QUIET (plain dim text, no pill chips — pills made every row shout); the common self-claim (parker == claimant, since parking auto-claims) collapses into a small `⚑ ×` after the parked-by instead of repeating the same session as two chips; row actions (✎ ✓ ⊘ ×) sit flush right and fade in on hover (always visible on touch).
+
 ## 2.136.5 — 2026-07-14
 - **Backlog rows re-laid-out** (real report — text crammed with actions/attribution): in the Task Group detail window the ✓/⊘ actions now sit in a right-aligned cluster separated from the item text; in the Backlog log viewer each item is now TWO rows — the item text + actions on top, the parked-by / claimed-by / resolved-by attribution chips wrapping on a second line below — instead of one flex row where long session names squeezed the text into a one-character-per-line column.
 

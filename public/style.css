@@ -2926,14 +2926,23 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
    the first third", real report). */
 @keyframes mounts-sync-pulse { 0%, 100% { opacity: 0.35; transform: scaleX(0.4); } 50% { opacity: 1; transform: scaleX(1); } }
 
-/* ── Backlog row layouts (2.136.5): text no longer crammed with actions/attribution ── */
+/* ── Backlog row layouts (2.136.5/2.136.6): text never crammed with actions/attribution ── */
 /* task-detail: actions in a right-aligned cluster, separated from the text */
 .task-detail-bl-actions { margin-left: auto; display: flex; gap: 2px; flex-shrink: 0; }
-/* task-log Backlog tab: TWO rows — top (id+text+actions), meta (attribution) below */
-.task-log-blline { flex-direction: column; align-items: stretch; gap: 3px; }
-.task-log-bltop { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.task-log-bltop .task-log-note { flex: 1; min-width: 0; }
-.task-log-blacts { margin-left: auto; display: flex; gap: 1px; flex-shrink: 0; }
-.task-log-blmeta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding-left: 20px; }
+/* task-log Backlog tab: TWO rows — top (status+id+text+actions), quiet attribution below */
+.task-log-blline { flex-direction: column; align-items: stretch; gap: 2px; }
+.task-log-bltop { display: flex; align-items: center; gap: 6px; min-width: 0; width: 100%; }
+.task-log-bltop .task-log-note { flex: 1 1 auto; min-width: 0; }
+.task-log-blacts { margin-left: auto; display: inline-flex; gap: 2px; flex-shrink: 0; opacity: 0.45; transition: opacity var(--transition); }
+.task-log-row:hover .task-log-blacts, .task-log-row:focus-within .task-log-blacts { opacity: 1; }
+@media (hover: none) { .task-log-blacts { opacity: 1; } }
+/* attribution line: plain dim text, no pill chips — the pills made every row shout */
+.task-log-blmeta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; padding-left: 21px; min-width: 0; }
 .task-log-blmeta:empty { display: none; }
-.task-log-blmeta .task-log-attr-part { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; color: var(--text-secondary); }
+.task-log-blmeta .task-log-attr-part { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: var(--text-dim); min-width: 0; }
+.task-log-blmeta .task-log-chip { background: none; padding: 0; border-radius: 0; color: var(--text-secondary); max-width: 180px; }
+.task-log-blmeta .task-log-chip.clickable:hover, .task-log-blmeta .task-log-chip.active { background: none; color: var(--accent); }
+.task-log-selfclaim { color: var(--text-dim); font-size: 10px; }
+.task-log-blmeta .task-log-claim-x { background: none; border: none; color: var(--text-dim); font-size: 10px; padding: 0 2px; cursor: pointer; line-height: 1; }
+.task-log-blmeta .task-log-claim-x:hover { color: var(--red, #e55); }
+.task-log-bl { padding: 5px 0; }
