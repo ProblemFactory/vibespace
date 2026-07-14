@@ -77,7 +77,7 @@ function registerWsHandler(wss, ctx) {
   const {
     activeSessions, WS_OPEN, broadcastActiveSessions, broadcastToSession, resizeSessionToMin,
     setupSessionPty, refreshWebuiPids, deleteSessionMeta, writeSessionMeta, readSessionMeta,
-    readLayouts, writeLayouts, getSyncStore, serverSetting,
+    readLayouts, writeLayouts, getSyncStore, serverSetting, agentdRemote,
     sessionCounterRef, createSessionMessages, PERMISSION_MODES,
     SOCKETS_DIR, BUFFERS_DIR, META_DIR, PTY_WRAPPER, CHAT_WRAPPER,
     NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, PORT, X_ENV,
@@ -484,15 +484,60 @@ done`;
             const runTail = keeperSid
               ? ` node "$HOME/.vibespace/bin/vibespace-remote-keeper" run ${shq(keeperSid)} __VS_OFFSET__`
               : ` node "$HOME/.vibespace/bin/vibespace-remote-keeper" run ${shq(id)} __VS_OFFSET__ -- ` + [rcmd, ...rargs.map(shq)].join(' ');
-            const inner = ra.prelude + `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ` + ra.tokenAssign + acctEnv + `exec env `
-              + [...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq)].join(' ')
-              + runTail;
-            spawnCmd = 'ssh';
-            spawnArgs = [...hosts.sshArgs(h, { reverse: ra.reverse }), '-T', '--', inner];
-            spawnEnvPairs = [];
-            spawnCwd = os.homedir();
-            session.host = h.id;
-            session.hostName = h.name;
+            // ── M2 (flag agentd.remoteSessions, default OFF): the session runs
+            // as a persistent PIPE SESSION inside the standing remote agentd;
+            // the local chat-wrapper spawns the agentd-attach bridge (SAME
+            // contract as `keeper run`: raw bytes + __VS_OFFSET__ + sentinel),
+            // so the wrapper machinery is untouched. Keeper stays the default
+            // until this graduates. ──
+            let agentdMode = false;
+            try { agentdMode = !!serverSetting('agentd.sessions') && !!serverSetting('agentd.remoteSessions'); } catch { }
+            if (agentdMode && agentdRemote && !keeperSid) {
+              try {
+                await agentdRemote.ensureAgentdOnHost(h.id);
+                // the child claude runs under `sh -lc` on the host so the
+                // existing shell-expanded prefixes (token file reads, $HOME
+                // account paths) keep their exact semantics
+                const shellCmd = ra.prelude + `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ` + ra.tokenAssign + acctEnv + `exec env `
+                  + [...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq)].join(' ')
+                  + ' ' + [rcmd, ...rargs.map(shq)].join(' ');
+                const remoteCmd = `export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; exec node "$HOME/.vibespace/agentd/current/agentd.js" --stdio`;
+                const cfg = {
+                  sshBin: 'ssh',
+                  sshArgs: hosts.sshArgs(h, { reverse: ra.reverse }),
+                  remoteCmd,
+                  hostToken: agentdRemote.agentdHostToken(h.id),
+                  sid: id,
+                  version: require('../package.json').version,
+                  spawn: { cmd: 'sh', args: ['-lc', shellCmd], cwd: os.homedir() },
+                };
+                ensureDir(agentdRemote.agentdDir);
+                const cfgFile = path.join(agentdRemote.agentdDir, 'session-' + id + '.json');
+                fs.writeFileSync(cfgFile, JSON.stringify(cfg), { mode: 0o600 });
+                spawnCmd = NODE_CMD;
+                spawnArgs = [agentdRemote.attachBundle, '--config', cfgFile, '--offset', '__VS_OFFSET__'];
+                spawnEnvPairs = [];
+                spawnCwd = os.homedir();
+                session.host = h.id;
+                session.hostName = h.name;
+                session._agentdSession = true;
+                session._agentdCfgFile = cfgFile;
+              } catch (e) {
+                console.warn('[agentd] remote provisioning failed — keeper fallback:', e.message);
+                agentdMode = false;
+              }
+            }
+            if (!agentdMode || keeperSid) {
+              const inner = ra.prelude + `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ` + ra.tokenAssign + acctEnv + `exec env `
+                + [...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq)].join(' ')
+                + runTail;
+              spawnCmd = 'ssh';
+              spawnArgs = [...hosts.sshArgs(h, { reverse: ra.reverse }), '-T', '--', inner];
+              spawnEnvPairs = [];
+              spawnCwd = os.homedir();
+              session.host = h.id;
+              session.hostName = h.name;
+            }
           }
           // PASSIVE usage capture (§ban-safety): for LOCAL CLAUDE TERMINAL
           // sessions (a statusLine only renders in the TUI — chat/stream-json
@@ -1227,7 +1272,9 @@ done`;
               try {
                 const h = hosts.get(session.host);
                 if (session.mode === 'chat') {
-                  execFile('ssh', [...hosts.sshArgs(h), '--', `node "$HOME/.vibespace/bin/vibespace-remote-keeper" stop ${session.keeperSid || data.sessionId} 2>/dev/null || true; rm -f "$HOME/.vibespace/bin/.tok-${data.sessionId}"`],
+                  execFile('ssh', [...hosts.sshArgs(h), '--', `${session._agentdSession
+                    ? `M="$HOME/.vibespace/agentd/state/sessions/${data.sessionId}.json"; P=$(grep -o '"childPid":[0-9]*' "$M" 2>/dev/null | cut -d: -f2); [ -n "$P" ] && kill $P 2>/dev/null; sleep 2; [ -n "$P" ] && kill -9 $P 2>/dev/null`
+                    : `node "$HOME/.vibespace/bin/vibespace-remote-keeper" stop ${session.keeperSid || data.sessionId}`} 2>/dev/null || true; rm -f "$HOME/.vibespace/bin/.tok-${data.sessionId}"`],
                     { timeout: 15000 }, () => { try { hosts.invalidateDiscovery(session.host); } catch {} });
                 } else {
                   setTimeout(() => { try { hosts.invalidateDiscovery(session.host); } catch {} }, 2000);
