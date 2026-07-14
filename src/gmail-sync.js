@@ -163,12 +163,13 @@ class GmailSync {
   }
 
   _progress(w, total, done) {
-    w.progress = total == null ? null : { total, done };
-    // Throttled broadcast → the storage card's live progress bar. Indeterminate
-    // (total unknown, seed/list phase) broadcasts SLOWLY: every broadcast
-    // rebuilds the card and restarts the bar's CSS animation, so a fast cadence
-    // made the shimmer stutter in place (real report). Determinate progress
-    // stays responsive at 400ms.
+    // total known → determinate {total,done}; total null but a running count →
+    // indeterminate WITH a number (seed/download phase shows "N so far"); null
+    // total and no count → cleared (idle / pure checking).
+    w.progress = total != null ? { total, done }
+      : (done != null ? { indeterminate: true, done } : null);
+    // Indeterminate broadcasts SLOWLY: every broadcast rebuilds the card and
+    // restarts the bar animation; a fast cadence stuttered it (real report).
     const now = Date.now();
     const interval = total == null ? 2500 : 400;
     if (now - (this._lastProg || 0) > interval) { this._lastProg = now; try { this._onProgress(); } catch { } }
@@ -332,7 +333,7 @@ class GmailSync {
         for (const m of msgs) {
           if (w.stopped) return;
           if (!seen.has(m.id)) { const md = await this._writeMessage(w, m.id, seen); if (md) oldestMs = Math.min(oldestMs, md); }
-          this._progress(w, null); // total unknown while listing — count shows on the card
+          this._progress(w, null, w.count); // indeterminate, but show the running count
         }
         fetched += msgs.length;
         pageToken = l.nextPageToken || null;

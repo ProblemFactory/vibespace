@@ -1789,4 +1789,5 @@ export default {
   "Connect OneDrive": "连接 OneDrive",
   "A Microsoft sign-in page opened. Approve access, then come back here.": "已打开 Microsoft 登录页面。批准访问后回到这里。",
   "OAuth token (re-run Connect OneDrive to replace)": "OAuth token（重跑“连接 OneDrive”可替换）",
+  "Downloading · {n} so far…": "下载中 · 已 {n} 封…",
 };
