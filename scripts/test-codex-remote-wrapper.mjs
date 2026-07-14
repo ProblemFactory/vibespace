@@ -71,11 +71,12 @@ const w = spawn(process.execPath, [
 w.outText = '';
 w.stdout.on('data', (d) => { w.outText += d; });
 w.stderr.on('data', () => {});
-await sleep(4500); // keeper daemon start + initialize + thread/start
-const m1 = readMeta();
+let m1 = null; // poll: fixed sleeps flake under sweep load
+for (let i = 0; i < 40 && !(m1?.threadId); i++) { await sleep(300); m1 = readMeta(); }
 check('spawn survived the remote-only cwd (ENOENT trap)', w.exitCode === null, String(w.exitCode));
 check('handshake completed (threadId adopted from thread/start)', m1 && m1.threadId === 'th-stub-1', JSON.stringify(m1 && m1.threadId));
 check('initialize sent exactly once', (fs.readFileSync(path.join(tmp, 'initcount'), 'utf8') || '').length === 1, '');
+await sleep(1500); // the buffer persists on a 1s debounce — let it flush
 check('_remote_state connected recorded', readBuf().includes('"_remote_state"'), '');
 
 console.log('— transport death: reconnect, NO re-initialize —');

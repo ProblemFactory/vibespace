@@ -441,6 +441,25 @@ function agentdHostToken(hostId) {
 // records the last version shipped; matching = skip (one ssh round trip saved
 // per spawn; a bundle change reinstalls because the version bumps with it).
 const _agentdInstalled = new Map(); // hostId → version
+// ── Transport B (dial-out) server side: devices behind NAT dial US. Pairing
+// mints {deviceId, dialToken}; the daemon presents the dial token at the ws
+// upgrade (gates the endpoint), then the normal hello/vsht_ auth runs INSIDE
+// the mux like every transport. Incoming dials land in a registry the
+// device's transport waits on. ──
+const agentdDials = new Map();      // deviceId → ws stream adapter (live dial)
+const agentdDialWaiters = new Map(); // deviceId → [resolve]
+function agentdDialTokens() {
+  try { return JSON.parse(fs.readFileSync(path.join(AGENTD_DIR, 'dial-tokens.json'), 'utf-8')); } catch { return {}; }
+}
+function agentdMintDialPair(deviceId) {
+  ensureDir(AGENTD_DIR);
+  const tok = 'vsdt_' + require('crypto').randomBytes(18).toString('hex');
+  const all = agentdDialTokens();
+  all[deviceId] = require('crypto').createHash('sha256').update(tok).digest('hex');
+  fs.writeFileSync(path.join(AGENTD_DIR, 'dial-tokens.json'), JSON.stringify(all, null, 2), { mode: 0o600 });
+  // the device token (vsht_) for in-mux auth ships in the install payload
+  return { deviceId, dialToken: tok, hostToken: agentdHostToken('dial-' + deviceId) };
+}
 async function ensureAgentdOnHost(hostId) {
   const version = require('./package.json').version;
   if (_agentdInstalled.get(hostId) === version) return;
@@ -2531,6 +2550,22 @@ const plugins = new PluginManager({
   },
 });
 setTimeout(() => { try { plugins.bootReplay(); } catch (e) { console.warn('[plugins] boot replay:', e.message); } }, 5000);
+// Transport B pairing: mint a device id + dial token + the one-liner the user
+// runs on the NAT'd device (no ssh needed). Cookie-authed (user action).
+app.post('/api/agentd/dial-pair', (req, res) => {
+  try {
+    const deviceId = String(req.body?.deviceId || ('dev-' + require('crypto').randomBytes(4).toString('hex'))).replace(/[^\w-]/g, '').slice(0, 32);
+    const pair = agentdMintDialPair(deviceId);
+    const base = String(req.body?.serverUrl || '').replace(/\/$/, '') || null;
+    res.json({
+      ...pair,
+      command: base
+        ? `node vibespace-agentd.js --dial ${base.replace(/^http/, 'ws')}/api/agentd-dial?device=${deviceId} --dial-token ${pair.dialToken}`
+        : null,
+      note: 'install the agentd bundle on the device, write the hostToken to <root>/state/token (0600), then run with --dial',
+    });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
 app.get('/api/plugins', (req, res) => {
   try { res.json({ plugins: plugins.list() }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -3000,6 +3035,7 @@ app.post('/api/vnc/start', async (req, res) => {
 // bridge is the ONLY route to the localhost-bound VNC server, and it sits
 // behind the same cookie auth as everything else — single login by design.
 const vncWss = new WebSocketServer({ noServer: true });
+const agentdDialWss = new WebSocketServer({ noServer: true }); // Transport B dial-in (2.144.0)
 function bridgeVncSocket(ws) {
   const net = require('net');
   const sock = net.connect(vnc.port, '127.0.0.1');
@@ -3038,6 +3074,34 @@ server.on('upgrade', (req, socket, head) => {
   } else if (pathname === '/api/vnc') {
     if (!auth.requestAuthed(req)) return deny();
     vncWss.handleUpgrade(req, socket, head, (ws) => bridgeVncSocket(ws));
+  } else if (pathname === '/api/agentd-dial') {
+    // Transport B: a remote device's daemon dialing IN. Gated by the per-device
+    // dial token (never cookie auth — daemons have no cookies); real protocol
+    // auth (vsht_ hello) happens inside the mux on this stream.
+    const q = new URL(req.url, 'http://x').searchParams;
+    const deviceId = String(q.get('device') || '').slice(0, 64);
+    const tok = String(req.headers['x-vibespace-dial-token'] || '');
+    const want = agentdDialTokens()[deviceId];
+    const got = tok ? require('crypto').createHash('sha256').update(tok).digest('hex') : null;
+    if (!deviceId || !want || got !== want) return deny();
+    agentdDialWss.handleUpgrade(req, socket, head, (ws) => {
+      // adapt the ws to the duplex shape Mux consumes
+      const listeners = { data: [], close: [], error: [] };
+      ws.on('message', (d) => listeners.data.forEach((f) => f(Buffer.isBuffer(d) ? d : Buffer.from(d))));
+      ws.on('close', () => listeners.close.forEach((f) => f()));
+      ws.on('error', () => listeners.error.forEach((f) => f()));
+      const stream = {
+        write: (d) => { try { ws.send(d); return true; } catch { return false; } },
+        on: (ev, fn) => { listeners[ev]?.push(fn); },
+        destroy: () => { try { ws.close(); } catch { } },
+      };
+      agentdDials.set(deviceId, stream);
+      console.log(`[agentd] device '${deviceId}' dialed in`);
+      const waiters = agentdDialWaiters.get(deviceId) || [];
+      agentdDialWaiters.delete(deviceId);
+      waiters.forEach((r) => r(stream));
+      ws.on('close', () => { if (agentdDials.get(deviceId) === stream) agentdDials.delete(deviceId); });
+    });
   } else {
     socket.destroy();
   }

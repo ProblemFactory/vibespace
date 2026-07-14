@@ -127,8 +127,8 @@ c2.kill('SIGKILL');
 console.log('— 2.138.0: both dead + no sentinel → synthetic crash (never a blank restart) —');
 const SID4 = 'testsess-4';
 const d1 = spawn(process.execPath, [KEEPER, 'run', SID4, '0', '--', process.execPath, '-e', STUB], { env, stdio: ['pipe', 'pipe', 'pipe'] });
-await sleep(2500);
-const md = JSON.parse(fs.readFileSync(path.join(tmp, SID4 + '.json'), 'utf8'));
+let md = null; // poll (fixed sleeps flake under load — a 7-suite sweep starved this once)
+for (let i = 0; i < 40 && !md; i++) { await sleep(250); try { md = JSON.parse(fs.readFileSync(path.join(tmp, SID4 + '.json'), 'utf8')); } catch { } }
 process.kill(md.keeperPid, 'SIGKILL');
 process.kill(md.childPid, 'SIGKILL');
 d1.kill('SIGKILL');
