@@ -304,6 +304,12 @@ const SETTINGS_SCHEMA = {
     description: t('CS-refactor M2 (opt-in, default off; needs the local device-agent setting too): remote chat sessions run as persistent sessions inside a standing agent daemon on the host — an ssh drop kills only the bridge, the daemon and session survive, and reconnects resume by byte offset. Replaces the per-session keeper. Experimental; leave off unless testing.'),
     category: t('Session'), liveApply: false,
   },
+  'agentd.publicUrl': {
+    type: 'string', default: '',
+    label: t('This instance\'s public address (for reverse mounts)'),
+    description: t('The https/http URL a remote machine uses to reach THIS VibeSpace — needed to mount this instance\'s storage on a remote host ("互挂云盘" reverse direction). Example: https://vibe.example.com or http://100.x.x.x:3456 (Tailscale). Leave blank to auto-detect from the request when you trigger a mount.'),
+    category: t('Session'), liveApply: true,
+  },
   'agentd.dataPlane': {
     type: 'boolean', default: false,
     label: t('Route remote data reads through the device agent (experimental)'),

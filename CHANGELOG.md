@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.147.0 — 2026-07-14
+- **互挂云盘 (mutual cloud-disk mounting) + standalone device agent.**
+  - **Reverse mount** (a remote machine mounts THIS VibeSpace's storage): new `src/host-mounts.js` (HostMounts) mints a scoped `/dav` WebDAV token and mounts it on the remote, OS-aware — Linux rclone/FUSE (fallback davfs2), macOS rclone/macFUSE or built-in `mount_webdav` (no FUSE), Windows rclone/WinFsp or built-in `net use`. rclone auto-installed on the remote when missing; orchestrated via the device agent when the data-plane flag is on, else ssh. Routes `/api/host-mounts` (list/mount/unmount); setting `agentd.publicUrl` (or request-derived). Forward direction (VibeSpace mounts a remote) is the existing SFTP mount. **Verified end-to-end on a real host** (AIDev over Tailscale): file appears in the remote mountpoint, content + multibyte filename readable, unmount clean.
+  - **Standalone device agent**: run ANY machine (Mac/Linux) as a VibeSpace device without a full server. `scripts/vibespace-agentd-install.sh` fetches the bundle, provisions the token, runs the daemon — standing (reachable) or **dial-out** (NAT'd laptops/Macs dial the instance over wss). Served publicly at `/agentd.js` + `/agentd-install.sh` (auth-exempt; auth = per-device dial/host token at connect). `POST /api/agentd/dial-pair` mints device id + dial token + command. Docs `docs/device-agent.md`. **Verified end-to-end**: the installer set up a daemon that dialed into a running instance and registered as a device.
+  - Hygiene: HostMounts uses async exec (a sync exec blocked the event loop so the in-process /dav couldn't serve the remote's mount requests — real e2e catch); detached rclone redirects all fds (frees the ssh ControlMaster).
+
 ## 2.146.0 — 2026-07-14
 - **CS refactor: the data-plane consumer switchovers are wired** (flag `agentd.dataPlane`, default OFF; every path falls back to classic ssh automatically on any failure). With the flag on, remote operations run through the standing device agent over ONE persistent connection instead of ssh-per-operation:
   - **Remote files** (RemoteFs list/readText/readBinary/write/mkdir/remove) go through device fs ops — verified against a real host with the device output cross-checked item-by-item against the legacy ssh output.
