@@ -30,6 +30,12 @@ const srv = http.createServer((req, res) => {
   const send = (o) => res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(o));
   if (u.pathname.endsWith('/profile')) return send({ emailAddress: 'tester@example.com', historyId: '1000' });
   if (u.pathname.endsWith('/messages')) {
+    // paginated seed: page 1 → m1, nextPageToken; page 2 → m2 (for checkpoint test)
+    if (globalThis.__paged) {
+      const pt = u.searchParams.get('pageToken');
+      if (!pt) return send({ messages: [{ id: 'm1aaaa11' }], nextPageToken: 'PAGE2' });
+      return send({ messages: [{ id: 'm2bbbb22' }] });
+    }
     return send({ messages: ['m1aaaa11', 'm2bbbb22'].map((id) => ({ id })) });
   }
   if (u.pathname.includes('/messages/')) {
@@ -129,6 +135,30 @@ const labs = await gs.listLabels({ token: cfg.token, clientPreset: 't' });
 check('listLabels returns system+user', labs.length === 2 && labs[0].type === 'system' && labs[1].name === 'Receipts');
 gs.stop('mnt-l');
 fs.rmSync(dir3, { recursive: true, force: true });
+
+// SEED CHECKPOINT: interrupt after page 1, restart → resumes from page 2 (no re-list of page 1)
+globalThis.__paged = true;
+const dir4 = fs.mkdtempSync(path.join(os.tmpdir(), 'gmail-cp-'));
+phase = 'seed';
+const w4 = gs.start({ ...cfg, id: 'mnt-cp', dir: dir4, groupBy: 'none' });
+// let it fetch page 1 then stop
+for (let i = 0; i < 60; i++) { await new Promise((r) => setTimeout(r, 30)); if (fs.readdirSync(dir4).filter((f)=>f.endsWith('.eml')).length >= 1) break; }
+gs.stop('mnt-cp');
+await new Promise((r) => setTimeout(r, 50));
+const stateAfterP1 = JSON.parse(fs.readFileSync(path.join(dir4, '.vibespace-gmail-state.json'), 'utf-8'));
+check('checkpoint persists seedPageToken after page 1', !!stateAfterP1.seedPageToken || stateAfterP1.historyId, JSON.stringify(stateAfterP1));
+check('seed-start historyId anchored', !!(stateAfterP1.seedHistoryId || stateAfterP1.historyId));
+// restart → should resume, end with BOTH messages, no duplicates
+const w4b = gs.start({ ...cfg, id: 'mnt-cp', dir: dir4, groupBy: 'none' });
+for (let i = 0; i < 100 && w4b.state !== 'idle'; i++) await new Promise((r) => setTimeout(r, 40));
+const cpFiles = fs.readdirSync(dir4).filter((f) => f.endsWith('.eml'));
+const cpIds = cpFiles.map((f) => (f.match(/_([^_]+)\.eml$/) || [])[1]);
+check('resume completes seed — page-1 + page-2 present, no duplicates', cpIds.includes('m1aaaa11') && cpIds.includes('m2bbbb22') && new Set(cpIds).size === cpIds.length, cpFiles.join(','));
+const finalState = JSON.parse(fs.readFileSync(path.join(dir4, '.vibespace-gmail-state.json'), 'utf-8'));
+check('seed done → historyId set, seed cursor cleared', !!finalState.historyId && !finalState.seedPageToken);
+gs.stop('mnt-cp');
+fs.rmSync(dir4, { recursive: true, force: true });
+globalThis.__paged = false;
 
 gs.stop('mnt-test');
 srv.close();
