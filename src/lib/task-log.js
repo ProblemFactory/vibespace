@@ -272,6 +272,12 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
       row.className = 'task-log-row task-log-bl' + (it.status !== 'open' ? ' resolved' : '') + (isExp ? ' task-log-exp' : '');
       const line = document.createElement(isExp ? 'summary' : 'div');
       line.className = 'task-log-blline';
+      // TWO-ROW layout: top = status+id+text(+†)+actions; bottom = attribution
+      // chips (parked/claimed/resolved). Cramming attribution into the same
+      // flex row squeezed the text to a one-char column (real report).
+      const top = document.createElement('div');
+      top.className = 'task-log-bltop';
+      line.appendChild(top);
 
       const st = document.createElement('span');
       st.className = 'task-log-bl-status';
@@ -289,27 +295,25 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
           e.preventDefault(); e.stopPropagation();
           import('./utils.js').then(({ copyText }) => copyText(it.id).then(() => showToast(t('Copied {id}', { id: it.id }))));
         };
-        line.appendChild(idc);
+        top.appendChild(idc);
       }
       const txt = document.createElement('span');
       txt.className = 'task-log-note';
       txt.textContent = it.text;
-      line.appendChild(txt);
+      top.appendChild(txt);
       if (isExp) {
         const dg = document.createElement('span');
         dg.className = 'task-log-dagger'; dg.textContent = '†';
-        line.appendChild(dg);
+        top.appendChild(dg);
       }
-      const chips = document.createElement('span');
-      chips.className = 'task-log-attr';
-      chips.innerHTML = attrHtml(it);
-      line.appendChild(chips);
-
+      const acts = document.createElement('span');
+      acts.className = 'task-log-blacts';
+      top.appendChild(acts);
       const btn = (txt2, title, onClick) => {
         const b = document.createElement('button');
         b.className = 'task-detail-x task-log-blbtn'; b.textContent = txt2; b.title = title;
         b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); onClick(); };
-        line.appendChild(b);
+        acts.appendChild(b);
       };
       btn('✎', t('Edit text and detail'), () => editForm(it, row));
       if (it.status === 'open') {
@@ -319,6 +323,10 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
         btn('↺', t('Reopen'), () => patchItem(it._i, (b) => { const nb = { ...b, status: 'open' }; delete nb.resolvedBy; delete nb.resolvedAt; return nb; }));
       }
       btn('×', t('Delete item'), () => patchItem(it._i, () => null));
+      const metaRow = document.createElement('div');
+      metaRow.className = 'task-log-blmeta';
+      metaRow.innerHTML = attrHtml(it);
+      line.appendChild(metaRow);
 
       row.appendChild(line);
       if (isExp) {

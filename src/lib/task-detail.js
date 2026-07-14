@@ -152,6 +152,8 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
           };
           txt.after(dg);
         }
+        const acts = document.createElement('span');
+        acts.className = 'task-detail-bl-actions'; // right-aligned cluster (separated from the text)
         const doneBtn = document.createElement('button');
         doneBtn.className = 'task-detail-x task-detail-bl-done'; doneBtn.textContent = '✓';
         doneBtn.title = t('Mark decided/finished');
@@ -160,7 +162,8 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
         dropBtn.className = 'task-detail-x'; dropBtn.textContent = '⊘';
         dropBtn.title = t('Drop as obsolete');
         dropBtn.onclick = () => patchBl(item._i, (b) => ({ ...b, status: 'dropped', resolvedBy: 'user', resolvedAt: Date.now() }));
-        row.append(doneBtn, dropBtn);
+        acts.append(doneBtn, dropBtn);
+        row.appendChild(acts);
         blList.appendChild(row);
       }
       const nResolved = blAll.length - blOpen.length;
