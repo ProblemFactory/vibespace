@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.135.1 — 2026-07-14
+- **Edit dialogs now actually show the stored Drive/Gmail settings** (real report: "why does my OAuth client say custom?" — the config endpoint the edit dialog reads never included the drive scope fields or ANY gmail fields, so every select fell back to its default no matter what was stored; an earlier fix had landed in the config-BUNDLE exporter instead). Cloud-side scope, shared-drive id, OAuth preset, sync count, labels, grouping — all prefill correctly now, for submounts too.
+- **Changing a Gmail mount's sync scope (labels filter / query / message count) now forces a reseed**: the persisted history cursor kept the sync incremental, so newly-in-scope OLD mail (e.g. clearing the INBOX filter to pull archived mail) never arrived. The reseed is cheap — the directory is the dedup index, existing files are skipped.
+
 ## 2.135.0 — 2026-07-14
 - **Gmail can now sync the WHOLE mailbox** (user report "why only 981?" — the default INBOX label filter was the cap; archived mail carries no INBOX label and spam/trash are API-excluded by default): the labels filter now defaults to EMPTY = everything (archived + spam/trash included), and **Messages to sync = 0 means everything** (hard cap 200k, quota-paced with the live card progress).
 - **Label-folder layouts**: new "By label, then month/day" grouping files each mail under `Inbox/ Archive/ Sent/ Spam/ Trash/ Drafts/` (Gmail's own precedence — "archived" = not in the inbox) with date folders inside. Default for new Gmail mounts.
