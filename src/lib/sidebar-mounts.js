@@ -275,7 +275,7 @@ export function installSidebarMounts(Sidebar) {
       }
       // EVERY top-level storage can act as a credential (user directive):
       // ＋ adds a submount (remote:path) under it, for types with a path notion.
-      if (!m.parentId && ['s3', 'rclone', 'drive', 'onedrive', 'sftp'].includes(m.type || 's3')) {
+      if (!m.parentId && ['s3', 'rclone', 'drive', 'onedrive', 'sftp', 'cloud'].includes(m.type || 's3')) {
         actions.append(ibtn(MI.plus, tr('Add a submount (a specific bucket/path of this storage)'), () => { this._showAddChildDialog(m); }, isCred ? 'mounts-icon-accent' : ''));
       }
       actions.append(ibtn(MI.pencil, 'Edit connection (path, credentials, name)', () => { this._showEditMountDialog(m); }));
@@ -291,7 +291,7 @@ export function installSidebarMounts(Sidebar) {
       pathEl.title = isCred ? (m.source || '') : `${m.source || ''} → ${m.path}`;
       const tag = document.createElement('span');
       tag.className = 'mounts-typetag';
-      tag.textContent = { s3: 'S3', drive: 'Drive', onedrive: 'OneDrive', gmail: 'Gmail', webdav: 'WebDAV', sftp: 'SFTP', vibespace: 'VibeSpace', cephfs: 'CephFS', rclone: (m.source || 'rclone').split(':')[0] }[m.type || 's3'] || m.type;
+      tag.textContent = { s3: 'S3', drive: 'Drive', onedrive: 'OneDrive', gmail: 'Gmail', cloud: (m.source || 'Cloud').split(':')[0], webdav: 'WebDAV', sftp: 'SFTP', vibespace: 'VibeSpace', cephfs: 'CephFS', rclone: (m.source || 'rclone').split(':')[0] }[m.type || 's3'] || m.type;
       // The path keeps its rtl left-truncation trick in its OWN span — the
       // chip must stay outside the rtl context or bidi reorders it to the end.
       const pt = document.createElement('span');
@@ -360,7 +360,7 @@ export function installSidebarMounts(Sidebar) {
       return row;
     },
 
-    _isDriveBacked(m) { return m.type === 'drive' || m.type === 'onedrive' || (m.type === 'rclone' && m.rcloneType === 'drive'); },
+    _isDriveBacked(m) { return m.type === 'drive' || m.type === 'onedrive' || m.type === 'cloud' || (m.type === 'rclone' && m.rcloneType === 'drive'); },
 
     // Re-authorize an EXISTING Drive mount/credential whose token died. Same
     // guided flow as adding one (server runs `rclone authorize drive` with the
@@ -859,7 +859,7 @@ export function installSidebarMounts(Sidebar) {
       const isDriveCustom = (v) => v.type === 'drive' && v.clientChoice === 'custom';
       this._mountsDialog(tr('Connect storage'), [
         { key: 'type', label: tr('Source type'), type: 'select', options: [
-          ['s3', tr('Cloud storage (S3 / MinIO)')], ['drive', 'Google Drive'], ['onedrive', 'OneDrive'], ['gmail', 'Gmail'], ['webdav', 'Nextcloud / WebDAV'],
+          ['s3', tr('Cloud storage (S3 / MinIO)')], ['drive', 'Google Drive'], ['onedrive', 'OneDrive'], ['gmail', 'Gmail'], ['cloud', tr('Other cloud (Dropbox / Box / pCloud …)')], ['webdav', 'Nextcloud / WebDAV'],
           ['sftp', tr('A server over SSH (SFTP)')], ['vibespace', tr('Another VibeSpace')], ['rclone', tr('Custom / advanced (rclone)')],
         ] },
         { key: 'name', label: tr('Name'), placeholder: 'my-mount' },
@@ -905,6 +905,15 @@ export function installSidebarMounts(Sidebar) {
         { key: 'driveId', label: tr('Drive ID (advanced — a specific/shared drive)'), placeholder: 'b!… (blank = your main drive)', when: is('onedrive'), advanced: true },
         { key: 'onedriveClientId', label: tr('Custom OAuth client ID (optional — own Azure app)'), placeholder: tr('leave blank to use the built-in client'), when: is('onedrive'), advanced: true },
         { key: 'onedriveClientSecret', label: tr('Custom OAuth client secret (optional)'), type: 'password', when: is('onedrive'), advanced: true },
+
+        { key: 'cloudBackend', label: tr('Provider'), type: 'select', when: is('cloud'), options: [
+          ['dropbox', 'Dropbox'], ['box', 'Box'], ['pcloud', 'pCloud'], ['yandex', 'Yandex Disk'], ['jottacloud', 'Jottacloud'], ['hidrive', 'HiDrive']] },
+        { key: 'cloudToken', label: tr('Access'), type: 'textarea', placeholder: tr('click "Connect" below — no terminal needed'), when: is('cloud'),
+          hint: tr('Advanced: you can also paste the JSON from `rclone authorize "<provider>"` run elsewhere.') },
+        { key: 'cloudPath', label: tr('Folder (optional, blank = whole drive)'), placeholder: 'Projects/Data', when: is('cloud') },
+        { key: 'cloudClientId', label: tr('Custom OAuth client ID (optional — your own app)'), when: is('cloud'), advanced: true,
+          hint: tr('Most providers work with the built-in client — leave blank.') },
+        { key: 'cloudClientSecret', label: tr('Custom OAuth client secret (optional)'), type: 'password', when: is('cloud'), advanced: true },
         // WebDAV / Nextcloud
         { key: 'url', label: tr('WebDAV URL'), placeholder: 'https://cloud.example.com/remote.php/dav/files/me', when: is('webdav'), hint: tr('Nextcloud: Settings → Files shows this address. Use an app password if you have 2FA.') },
         { key: 'vendor', label: tr('Vendor'), type: 'select', options: [['other', tr('Generic WebDAV')], ['nextcloud', 'Nextcloud']], when: is('webdav') },
@@ -962,6 +971,14 @@ export function installSidebarMounts(Sidebar) {
           v.clientSecret = v.onedriveClientSecret || undefined;
         }
         delete v.onedriveToken; delete v.onedriveClientId; delete v.onedriveClientSecret;
+        if (v.type === 'cloud') {
+          v.backend = v.cloudBackend;
+          v.token = v.cloudToken;
+          v.remotePath = v.cloudPath;
+          v.clientId = v.cloudClientId || null;
+          v.clientSecret = v.cloudClientSecret || undefined;
+        }
+        delete v.cloudBackend; delete v.cloudToken; delete v.cloudPath; delete v.cloudClientId; delete v.cloudClientSecret;
         const r = await api('/api/mounts', { method: 'POST', body: JSON.stringify(v), headers: { 'Content-Type': 'application/json' } });
         await fetch(`/api/mounts/${r.id}/mount`, { method: 'POST' });
         close(); showToast(tr('Storage connected')); this._renderMounts();
@@ -984,6 +1001,8 @@ export function installSidebarMounts(Sidebar) {
       this._wireGmailConnect(ctx);
       this._wireGmailLabelsPicker(ctx);
       this._wireOAuthConnect(ctx, { tokenKey: 'onedriveToken', backend: 'onedrive', label: tr('Connect OneDrive') });
+      this._wireOAuthConnect(ctx, { tokenKey: 'cloudToken', backend: () => ctx.inputs.cloudBackend?.value || 'dropbox',
+        label: tr('Connect'), clientIdKey: 'cloudClientId', clientSecretKey: 'cloudClientSecret' });
     },
 
     // Generic guided OAuth (rclone authorize <backend>) for a native record —
@@ -991,6 +1010,7 @@ export function installSidebarMounts(Sidebar) {
     // Drive connect flow: same-machine completes hands-free, remote pastes the
     // 127.0.0.1 redirect back.
     _wireOAuthConnect(ctx, { tokenKey, backend, label, clientIdKey, clientSecretKey }) {
+      const PROVIDER_LABELS = { onedrive: 'Microsoft', drive: 'Google', dropbox: 'Dropbox', box: 'Box', pcloud: 'pCloud', yandex: 'Yandex', jottacloud: 'Jottacloud', hidrive: 'HiDrive' };
       const tokenInput = ctx.inputs[tokenKey];
       if (!tokenInput) return;
       const wrap = document.createElement('div');
@@ -1009,12 +1029,12 @@ export function installSidebarMounts(Sidebar) {
       btn.onclick = async () => {
         btn.disabled = true; status.textContent = tr('Preparing authorization…');
         try {
-          const body = { backend };
+          const body = { backend: typeof backend === 'function' ? backend() : backend };
           if (clientIdKey && ctx.inputs[clientIdKey]?.value) { body.clientId = ctx.inputs[clientIdKey].value; body.clientSecret = ctx.inputs[clientSecretKey]?.value || ''; }
           const r = await api('/api/mounts/gdrive-auth/start', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } });
           if (r.error) throw new Error(r.error);
           window.open(r.url, '_blank');
-          status.textContent = tr('A Microsoft sign-in page opened. Approve access, then come back here.');
+          status.textContent = tr('A {provider} sign-in page opened. Approve access, then come back here.', { provider: PROVIDER_LABELS[body.backend] || body.backend });
           if (!pasteBox) {
             pasteBox = document.createElement('div');
             pasteBox.innerHTML = `<div class="mounts-field-hint">${escHtml(tr("If this VibeSpace runs on ANOTHER machine, the final page won't load (address starts with 127.0.0.1) — copy that address and paste it here:"))}</div>`;
@@ -1321,7 +1341,14 @@ export function installSidebarMounts(Sidebar) {
           ['prefix', tr('Prefix (optional)'), 'sub/path', cfg.prefix || ''],
         ];
         if (type === 'rclone') return [['remotePath', tr('Remote path (bucket[/prefix])'), 'bucket-name/optional/prefix', cfg.remotePath || '']];
-        if (type === 'onedrive') return [['remotePath', tr('Folder path'), 'Documents/sub', cfg.remotePath || '']];
+        if (type === 'cloud') return [
+        ['remotePath', tr('Folder (optional)'), 'Projects/Data', cfg.remotePath || ''],
+        ['clientId', tr('Custom OAuth client id (optional)'), '', cfg.clientId || ''],
+        ['clientSecret', tr('Custom OAuth client secret'), '', cfg.clientSecret || ''],
+        ['token', tr('OAuth token (re-run Connect to replace)'), '', cfg.token || '', { type: 'textarea' }],
+      ];
+      if (type === 'onedrive') return [['remotePath', tr('Folder path'), 'Documents/sub', cfg.remotePath || '']];
+        if (type === 'cloud') return [['remotePath', tr('Folder path'), 'Projects/sub', cfg.remotePath || '']];
         if (type === 'drive') return [
           ['driveFolder', tr('Folder path (optional)'), 'My Folder/sub', cfg.driveFolder || ''],
           ['driveMode', tr('Cloud-side scope'), '', cfg.driveMode || 'mydrive', { type: 'select', options: [['mydrive', 'My Drive'], ['shared-with-me', tr('Shared with me')], ['shared-drive', tr('Shared drive (team)')]] }],
