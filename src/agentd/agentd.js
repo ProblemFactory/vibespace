@@ -362,6 +362,10 @@ function serveFolder(mux, msg) {
     let start = 0, end = size - 1, code = 200;
     const range = req.headers.range && /bytes=(\d*)-(\d*)/.exec(req.headers.range);
     if (range) { if (range[1]) start = parseInt(range[1], 10); if (range[2]) end = parseInt(range[2], 10); code = 206; }
+    // Clamp end to EOF — rclone requests a fixed chunk (e.g. bytes=0-262143)
+    // that overshoots small files; NOT clamping made Content-Length promise
+    // more bytes than we sent → truncated response → the FUSE mount got EIO.
+    if (end > size - 1) end = size - 1;
     if (start > end || start >= size) { res.writeHead(416, { 'Content-Range': `bytes */${size}` }); res.end(); return; }
     const h = { 'Content-Type': 'application/octet-stream', 'Accept-Ranges': 'bytes', 'Content-Length': end - start + 1, 'Last-Modified': st.mtime.toUTCString() };
     if (code === 206) h['Content-Range'] = `bytes ${start}-${end}/${size}`;
@@ -372,6 +376,15 @@ function serveFolder(mux, msg) {
     rs.pipe(res);
   });
   srv.on('error', (e) => { try { mux.control({ op: 'serve-folder-result', id: msg.id, error: e.message }); } catch { } });
+  // Close idle keep-alive connections fast. rclone's `http` backend requests a
+  // huge fixed range (bytes=0-134217727), gets a clamped Content-Length, reads
+  // the bytes, then WAITS for the connection to free before finalizing the read
+  // — on the default ~5s keepAliveTimeout that's ~6s PER read. A short timeout
+  // returns EOF promptly (reads go from seconds to instant). Not Connection:
+  // close per response — that reads as an early close of the 128MB range and
+  // triggers an rclone retry (doubling the latency).
+  srv.keepAliveTimeout = 200;
+  srv.headersTimeout = 2000;
   srv.listen(0, '127.0.0.1', () => {
     const port = srv.address().port;
     folderServers.set(port, { server: srv, root });
