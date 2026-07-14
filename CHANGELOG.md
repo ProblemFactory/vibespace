@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.146.0 — 2026-07-14
+- **CS refactor: the data-plane consumer switchovers are wired** (flag `agentd.dataPlane`, default OFF; every path falls back to classic ssh automatically on any failure). With the flag on, remote operations run through the standing device agent over ONE persistent connection instead of ssh-per-operation:
+  - **Remote files** (RemoteFs list/readText/readBinary/write/mkdir/remove) go through device fs ops — verified against a real host with the device output cross-checked item-by-item against the legacy ssh output.
+  - **Session discovery**: the daemon's raw-facts snapshot (live-filtered locks, jsonl inventory, tail ids, head cwd, first-user-lines) is synthesized into the exact line format the ssh script emits and fed to the UNCHANGED parser — zero interpretation drift (real-host check: identical session sets, 6/6).
+  - **Remote transcripts**: incremental slab sync — transcripts are append-only, so a cached prefix fetches ONLY the [cachedSize, size) delta via read-range instead of re-pulling the whole file (real-host check: byte-identical after a remote append). The whole-file remote-jsonl pull remains only as the fallback.
+  - **Usage harvest**: the scanner ships via device fs write and runs via the new `run-stream` primitive (byte-channel stdout — NDJSON outputs exceed run-cmd's buffer), same cursor semantics.
+  - The daemon's discovery snapshot gained the raw-facts enrichment (tailIds/headCwd/userLines, bounded to the newest 60 files) and a `run-stream` op. `hosts.device(id)` is the shared per-host DeviceManager registry (auto-install + reconnect).
+  - Acceptance: scripts/test-agentd-switchover.mjs — all four switchovers against a REAL remote host, with legacy-vs-device cross-checks. 12/12 suites green.
+
 ## 2.145.0 — 2026-07-14
 - **CS refactor M3–M5 device-side primitives, acceptance-tested end-to-end** (internal; nothing routes user traffic yet): M3 — fs ops (stat/list/write/mkdir/rm + read-range streaming on a byte channel = the transcript-slab primitive, byte-exact across multibyte splits), session-discovery RAW FACTS (live-filtered locks + jsonl inventory; the claim algorithm stays server-side per invariant #2) with fs.watch dirty PUSH; M4 — run-cmd (argv-only bounded exec with stdin, the clipboard shape) and tcp-connect (loopback-only byte-channel forward, the VNC-bridge shape), Ctrl+G shape proven as write→device-edit→read-back; M5 — the mount-class device process lifecycle (persistent pipe session + health probe + teardown). 18-scenario acceptance suite (scripts/test-agentd-m3m4.mjs); design doc gained a milestone status record. With M0–M2 + both transports already shipped, the PROTOCOL and DEVICE side of every CS milestone is now implemented and tested — remaining work is flag-gated consumer switchovers in the server subsystems.
 

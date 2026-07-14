@@ -2550,6 +2550,18 @@ const plugins = new PluginManager({
   },
 });
 setTimeout(() => { try { plugins.bootReplay(); } catch (e) { console.warn('[plugins] boot replay:', e.message); } }, 5000);
+// CS data-plane deps for hosts.device(id) (2.146.0) — wired here (hosts is
+// declared below; function-scope late binding, used only at call time)
+setTimeout(() => {
+  try {
+    hosts.agentdDeps = {
+      ensureAgentdOnHost, agentdHostToken,
+      bundlePath: path.join(__dirname, 'data', 'bin', 'vibespace-agentd.js'),
+      version: require('./package.json').version,
+    };
+    hosts.dataPlaneOn = () => { try { return !!serverSetting('agentd.dataPlane'); } catch { return false; } };
+  } catch (e) { console.warn('[agentd] data-plane deps wiring failed:', e.message); }
+}, 1000);
 // Transport B pairing: mint a device id + dial token + the one-liner the user
 // runs on the NAT'd device (no ssh needed). Cookie-authed (user action).
 app.post('/api/agentd/dial-pair', (req, res) => {

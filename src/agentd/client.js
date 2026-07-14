@@ -181,6 +181,8 @@ class DeviceManager {
                 return;
               }
               if (m.op === 'fs-done') { sessions.get(m.chan)?.onDone?.(m); return; }
+              if (m.op === 'stream-start') { const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m); } return; }
+              if (m.op === 'stream-exit') { const h = sessions.get(m.chan); sessions.delete(m.chan); h?.onExit?.(m.code, m.error); return; }
               if (m.op === 'tcp-close') { const h = sessions.get(m.chan); sessions.delete(m.chan); h?.onClose?.(); return; }
               if (m.op === 'discovery-dirty') { this._onDiscoveryDirty?.(); return; }
               if (m.op === 'session-open' || m.op === 'pipe-session-open') { sessions.get(m.chan)?.onOpen?.(m); return; }
@@ -305,6 +307,19 @@ class DeviceManager {
   runCmd(cmd, args = [], { stdin, env, timeoutMs } = {}) {
     return this._request({ op: 'run-cmd', cmd, args, env, timeoutMs, stdin64: stdin ? Buffer.from(stdin).toString('base64') : undefined });
   }
+  /** streaming argv exec: stdout arrives via onData (byte channel); resolves
+   *  {code} at exit. For outputs too large for runCmd (usage-scan NDJSON). */
+  async runStream(cmd, args = [], { env, cwd, stdin, onData } = {}) {
+    const conn = await this.connect();
+    const chan = conn.nextChan++;
+    let exit;
+    const done = new Promise((r) => { exit = r; });
+    conn.sessions.set(chan, { onData: (b) => onData?.(b), onExit: (code, error) => exit({ code, error }) });
+    const ack = await this._request({ op: 'run-stream', cmd, args, env, cwd, chan, stdin64: stdin ? Buffer.from(stdin).toString('base64') : undefined });
+    if (ack.error) { conn.sessions.delete(chan); throw new Error(ack.error); }
+    return done;
+  }
+
   /** loopback TCP forward on the device: returns {write, close, onData, onClose}. */
   async tcpForward(port) {
     const conn = await this.connect();
