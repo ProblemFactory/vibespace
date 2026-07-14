@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.134.1 — 2026-07-14
+- Gmail storage cards now say what they ARE (a sync, not a live mount) and show it live: a **progress bar on the card** while a pass downloads ("Syncing 37/200…", server broadcasts throttled updates as it moves), an indeterminate shimmer while checking for new mail, and "Synced — N emails · time · account" when idle; stopping the sync says the synced emails stay. The add dialog states the sync semantics up front.
+
 ## 2.134.0 — 2026-07-14
 - **Gmail as a folder** (new mount type): connect a Gmail account (guided sign-in, no terminal; uses the instance's preset OAuth clients or a custom one — gmail.readonly scope) and the newest N messages (+ everything new, incrementally) sync into the mount folder as `.eml` files — open them in the new built-in **email viewer** (subject/from/date card, text↔HTML toggle with the HTML part fully sandboxed, attachment downloads). Read-only archive by design: unmounting stops the sync but keeps the files; deletions in Gmail never delete files. Filters: label list and a full Gmail search query. Engine deliberately NOT a filesystem mount — sync-to-folder is the proven design (GYB); the directory itself is the dedup index (message id in the filename), so state can never drift.
 - **Dynamic-desktop fixes** (two user-reproduced bugs): ① activating a stage hero no longer paints a phantom window at the SLOT position on its home desktop's preview (previews now draw staged windows at their home geometry); ② a session card's **GoTo** while the stage is active now materializes the window as the hero instead of switching desktops out from under the stage (which left the preview stuck on the stage while the actual desktop changed).

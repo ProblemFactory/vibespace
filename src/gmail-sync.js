@@ -40,8 +40,9 @@ function decodeHeaderWord(s) {
 }
 
 class GmailSync {
-  constructor({ presets } = {}) {
+  constructor({ presets, onProgress } = {}) {
     this._presets = presets || (() => []);
+    this._onProgress = onProgress || (() => { });
     this._workers = new Map(); // mount id → worker
     this._auth = null;         // one guided OAuth flow at a time (like drive)
   }
@@ -158,7 +159,14 @@ class GmailSync {
   status(id) {
     const w = this._workers.get(id);
     if (!w) return null;
-    return { state: w.state, error: w.error, count: w.count, lastSyncAt: w.lastSyncAt, email: w.email || null };
+    return { state: w.state, error: w.error, count: w.count, lastSyncAt: w.lastSyncAt, email: w.email || null, progress: w.progress || null };
+  }
+
+  _progress(w, total, done) {
+    w.progress = total == null ? null : { total, done };
+    // throttled broadcast → the storage card's live progress bar
+    const now = Date.now();
+    if (total == null || now - (this._lastProg || 0) > 400) { this._lastProg = now; try { this._onProgress(); } catch { } }
   }
 
   async _loop(w) {
@@ -276,9 +284,11 @@ class GmailSync {
       newHistoryId = prof.historyId;
     }
 
-    for (const id of ids) {
+    const todo = ids.filter((id) => !seen.has(id));
+    if (todo.length) this._progress(w, todo.length, 0);
+    let done = 0;
+    for (const id of todo) {
       if (w.stopped) return;
-      if (seen.has(id)) continue;
       const msg = await this._api(w, `/messages/${id}?format=raw`);
       const raw = Buffer.from(String(msg.raw || ''), 'base64url');
       // filename: sortable date + subject slug + id (id = the dedup key)
@@ -292,7 +302,9 @@ class GmailSync {
       fs.renameSync(tmp, path.join(w.cfg.dir, `${stamp}_${slug}_${id}.eml`));
       seen.add(id);
       w.count = seen.size;
+      this._progress(w, todo.length, ++done);
     }
+    this._progress(w, null);
 
     state.historyId = newHistoryId;
     state.lastSyncAt = Date.now();
