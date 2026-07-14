@@ -11,11 +11,13 @@ import { t } from './i18n.js';
 class FileViewer {
   static async open(app, filePath, fileName, opts = {}) {
     const ext = fileName.split('.').pop().toLowerCase();
+    const host = opts.host || '';
+    const hq = host ? '&host=' + encodeURIComponent(host) : '';
 
     // Check file info first (size, binary detection)
     let fileInfo = { size: 0, isBinary: false };
     try {
-      const res = await fetch(`/api/file/info?path=${encodeURIComponent(filePath)}`);
+      const res = await fetch(`/api/file/info?path=${encodeURIComponent(filePath)}${hq}`);
       fileInfo = await res.json();
     } catch {}
 
@@ -23,13 +25,13 @@ class FileViewer {
     // opened from a DERIVED temp file (archive entry) records the recipe so a
     // replay can re-derive it when the temp file is gone (docs/design-
     // dynamic-desktop.md §4b — the zip-PDF case).
-    const openSpec = { action: 'openFile', path: filePath, name: fileName, ...(opts.via ? { via: opts.via } : {}) };
+    const openSpec = { action: 'openFile', path: filePath, name: fileName, ...(host ? { host } : {}), ...(opts.via ? { via: opts.via } : {}) };
 
     // Force hex mode
     if (opts.hex) {
       const winInfo = app.wm.createWindow({ title: t('Hex: {name}', { name: fileName }), type: 'hex-viewer', syncId: opts.syncId, openSpec });
       winInfo._filePath = filePath; winInfo._fileName = fileName;
-      new HexViewer(winInfo, filePath, fileInfo);
+      new HexViewer(winInfo, filePath, fileInfo, host);
       return;
     }
 
@@ -37,7 +39,7 @@ class FileViewer {
     if (fileInfo.isBinary && !hasDedicatedViewer(ext)) {
       const winInfo = app.wm.createWindow({ title: t('Hex: {name}', { name: fileName }), type: 'hex-viewer', syncId: opts.syncId, openSpec });
       winInfo._filePath = filePath; winInfo._fileName = fileName;
-      new HexViewer(winInfo, filePath, fileInfo);
+      new HexViewer(winInfo, filePath, fileInfo, host);
       return;
     }
 
@@ -53,7 +55,7 @@ class FileViewer {
     if (viewerType === 'html-editor') {
       const winInfo = app.wm.createWindow({ title: fileName, type: 'editor', syncId: opts.syncId, openSpec });
       winInfo._filePath = filePath; winInfo._fileName = fileName;
-      new CodeEditor(winInfo, filePath, fileName, app);
+      new CodeEditor(winInfo, filePath, fileName, app, { host });
       return;
     }
 
@@ -62,7 +64,7 @@ class FileViewer {
     const container = document.createElement('div'); container.className = 'file-viewer';
     winInfo.content.appendChild(container);
     winInfo.onClose = () => { try { container._viewerCtl?.abort(); } catch {} };
-    const rendered = await FileViewer.renderInto(container, filePath, fileName, app);
+    const rendered = await FileViewer.renderInto(container, filePath, fileName, app, host);
     if (!rendered) {
       // No dedicated viewer — open in code editor
       app.openEditor(filePath, fileName, opts);
@@ -75,7 +77,7 @@ class FileViewer {
    * and the file explorer preview panel. Returns true if rendered, false if
    * no dedicated viewer exists for this file type.
    */
-  static async renderInto(container, filePath, fileName, app = null) {
+  static async renderInto(container, filePath, fileName, app = null, host = '') {
     // Per-render lifecycle: document-level listeners (image pan, PPTX keyboard
     // nav) and observers register against this signal. Re-rendering into the
     // same container (explorer preview panel) aborts the previous render's
@@ -85,25 +87,26 @@ class FileViewer {
     container._viewerCtl = new AbortController();
     const ext = (fileName || filePath.split('/').pop()).split('.').pop().toLowerCase();
     const viewerType = getViewerType(ext);
-    const rawUrl = `/api/file/raw?path=${encodeURIComponent(filePath)}`;
+    const hq = host ? '&host=' + encodeURIComponent(host) : '';
+    const rawUrl = `/api/file/raw?path=${encodeURIComponent(filePath)}${hq}`;
 
     try {
       if (viewerType === 'archive') {
-        await FileViewer._renderArchive(container, filePath, app);
+        await FileViewer._renderArchive(container, filePath, app, host);
       } else if (viewerType === 'image') {
-        FileViewer._renderImage(container, filePath);
+        FileViewer._renderImage(container, filePath, host);
       } else if (viewerType === 'video') {
-        FileViewer._renderVideo(container, filePath);
+        FileViewer._renderVideo(container, filePath, host);
       } else if (viewerType === 'audio') {
-        FileViewer._renderAudio(container, filePath, fileName);
+        FileViewer._renderAudio(container, filePath, fileName, host);
       } else if (viewerType === 'pdf') {
-        FileViewer._renderPdf(container, filePath);
+        FileViewer._renderPdf(container, filePath, host);
       } else if (viewerType === 'eml') {
-        await FileViewer._renderEml(container, filePath);
+        await FileViewer._renderEml(container, filePath, host);
       } else if (viewerType === 'csv') {
-        FileViewer._renderCsv(container, filePath, ext);
+        FileViewer._renderCsv(container, filePath, ext, host);
       } else if (viewerType === 'xlsx') {
-        const res = await fetch(`/api/file/excel?path=${encodeURIComponent(filePath)}`);
+        const res = await fetch(`/api/file/excel?path=${encodeURIComponent(filePath)}${hq}`);
         const data = await res.json();
         if (data.error) throw new Error(data.error);
         // Sheet tabs + table viewer
@@ -163,8 +166,9 @@ class FileViewer {
   // Archive contents viewer: entry list + filter + Extract All. Clicking a file
   // entry extracts just that entry to a temp file and opens it through the
   // normal viewer pipeline (editor / image / pdf / ...).
-  static async _renderArchive(container, filePath, app) {
-    const res = await fetch(`/api/archive/list?path=${encodeURIComponent(filePath)}`);
+  static async _renderArchive(container, filePath, app, host = '') {
+    const hq = host ? '&host=' + encodeURIComponent(host) : '';
+    const res = await fetch(`/api/archive/list?path=${encodeURIComponent(filePath)}${hq}`);
     const data = await res.json().catch(() => ({}));
     container.innerHTML = '';
     const root = document.createElement('div'); root.className = 'archive-viewer';
@@ -215,10 +219,10 @@ class FileViewer {
           row.onclick = async () => {
             row.style.opacity = '0.5';
             try {
-              const r = await fetch('/api/archive/extract-entry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: filePath, entry: e.name }) });
+              const r = await fetch('/api/archive/extract-entry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: filePath, entry: e.name, ...(host ? { host } : {}) }) });
               const d = await r.json().catch(() => ({}));
               if (!r.ok) { showToast(t('Open failed: {msg}', { msg: d.error || '' }), { type: 'error' }); return; }
-              app.openFile(d.path, e.name.split('/').pop(), { via: { kind: 'archive-entry', archive: filePath, entry: e.name } });
+              app.openFile(d.path, e.name.split('/').pop(), { via: { kind: 'archive-entry', archive: filePath, entry: e.name }, ...(host ? { host } : {}) });
             } finally { row.style.opacity = ''; }
           };
         }
@@ -239,7 +243,7 @@ class FileViewer {
       const d = await showInputDialog({ title: t('Extract All'), label: t('Destination folder'), value: parent + '/' + base, confirmText: t('Extract') });
       if (!d || !d.trim()) return;
       showToast(t('Extracting\u2026'));
-      const r = await fetch('/api/archive/extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: filePath, dest: d.trim(), overwrite: false }) }).catch(() => null);
+      const r = await fetch('/api/archive/extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: filePath, dest: d.trim(), overwrite: false, ...(host ? { host } : {}) }) }).catch(() => null);
       const dd = await r?.json().catch(() => ({}));
       if (!r?.ok) showToast(t('Extract failed: {msg}', { msg: dd?.error || '' }), { type: 'error' });
       else showToast(t('Extracted to {name}', { name: d.trim() }));
@@ -249,7 +253,8 @@ class FileViewer {
     container.appendChild(root);
   }
 
-  static _renderImage(container, filePath) {
+  static _renderImage(container, filePath, host = '') {
+    const hq = host ? '&host=' + encodeURIComponent(host) : '';
     const mediaViewer = document.createElement('div');
     mediaViewer.className = 'media-viewer';
 
@@ -271,7 +276,7 @@ class FileViewer {
     imgWrap.className = 'media-content';
 
     const img = document.createElement('img');
-    img.src = `/api/file/raw?path=${encodeURIComponent(filePath)}`;
+    img.src = `/api/file/raw?path=${encodeURIComponent(filePath)}${hq}`;
     img.className = 'media-image';
     img.draggable = false;
 
@@ -324,7 +329,8 @@ class FileViewer {
   }
 
   // ── Video viewer with native controls ──
-  static _renderVideo(container, filePath) {
+  static _renderVideo(container, filePath, host = '') {
+    const hq = host ? '&host=' + encodeURIComponent(host) : '';
     const mediaViewer = document.createElement('div');
     mediaViewer.className = 'media-viewer';
 
@@ -332,7 +338,7 @@ class FileViewer {
     videoWrap.className = 'media-content';
 
     const video = document.createElement('video');
-    video.src = `/api/file/raw?path=${encodeURIComponent(filePath)}`;
+    video.src = `/api/file/raw?path=${encodeURIComponent(filePath)}${hq}`;
     video.controls = true;
     video.className = 'media-video';
     video.preload = 'metadata';
@@ -343,7 +349,8 @@ class FileViewer {
   }
 
   // ── Audio viewer with native controls ──
-  static _renderAudio(container, filePath, fileName) {
+  static _renderAudio(container, filePath, fileName, host = '') {
+    const hq = host ? '&host=' + encodeURIComponent(host) : '';
     const mediaViewer = document.createElement('div');
     mediaViewer.className = 'media-viewer media-viewer-audio';
 
@@ -352,7 +359,7 @@ class FileViewer {
     label.textContent = fileName;
 
     const audio = document.createElement('audio');
-    audio.src = `/api/file/raw?path=${encodeURIComponent(filePath)}`;
+    audio.src = `/api/file/raw?path=${encodeURIComponent(filePath)}${hq}`;
     audio.controls = true;
     audio.className = 'media-audio';
     audio.preload = 'metadata';
@@ -366,9 +373,10 @@ class FileViewer {
   // (src/lib/eml.js) → header card + text/html toggle + attachment downloads.
   // The HTML part renders in a FULLY sandboxed iframe (sandbox="" — no
   // scripts, no same-origin, no navigation) via srcdoc.
-  static async _renderEml(container, filePath) {
+  static async _renderEml(container, filePath, host = '') {
+    const hq = host ? '&host=' + encodeURIComponent(host) : '';
     const { parseEml } = await import('./eml.js');
-    const res = await fetch(`/api/file/raw?path=${encodeURIComponent(filePath)}`);
+    const res = await fetch(`/api/file/raw?path=${encodeURIComponent(filePath)}${hq}`);
     if (!res.ok) throw new Error('failed to read file');
     const mail = parseEml(new Uint8Array(await res.arrayBuffer()));
     const wrap = document.createElement('div');
@@ -439,12 +447,13 @@ class FileViewer {
     container.appendChild(wrap);
   }
 
-  static _renderPdf(container, filePath) {
+  static _renderPdf(container, filePath, host = '') {
+    const hq = host ? '&host=' + encodeURIComponent(host) : '';
     const mediaViewer = document.createElement('div');
     mediaViewer.className = 'media-viewer';
 
     const embed = document.createElement('iframe');
-    embed.src = `/api/file/raw?path=${encodeURIComponent(filePath)}`;
+    embed.src = `/api/file/raw?path=${encodeURIComponent(filePath)}${hq}`;
     embed.className = 'media-pdf';
 
     mediaViewer.appendChild(embed);
@@ -614,7 +623,8 @@ class FileViewer {
   }
 
   // ── CSV/TSV viewer with virtual scroll (streaming from server) ──
-  static async _renderCsv(container, filePath, ext) {
+  static async _renderCsv(container, filePath, ext, host = '') {
+    const hq = host ? '&host=' + encodeURIComponent(host) : '';
     const sep = ext === 'tsv' ? '\t' : ',';
     const ROW_HEIGHT = 24;
     const PAGE_SIZE = 200;
@@ -628,7 +638,7 @@ class FileViewer {
       if (cache.has(offset)) return Promise.resolve();
       if (inflight.has(offset)) return inflight.get(offset);
       const p = (async () => {
-        const res = await fetch(`/api/file/csv?path=${encodeURIComponent(filePath)}&offset=${offset}&limit=${PAGE_SIZE}&sep=${encodeURIComponent(sep)}`);
+        const res = await fetch(`/api/file/csv?path=${encodeURIComponent(filePath)}&offset=${offset}&limit=${PAGE_SIZE}&sep=${encodeURIComponent(sep)}${hq}`);
         const data = await res.json();
         if (data.error) throw new Error(data.error);
         if (!header && data.header) header = data.header;

@@ -688,10 +688,10 @@ export function installSessionLifecycle(App, ctx = {}) {
         this.openFileExplorer(spec.path, { syncId, host: spec.host });
         break;
       case 'openFile':
-        this.openFile(spec.path, spec.name, { syncId });
+        this.openFile(spec.path, spec.name, { syncId, host: spec.host });
         break;
       case 'openEditor':
-        this.openEditor(spec.path, spec.name, { syncId });
+        this.openEditor(spec.path, spec.name, { syncId, host: spec.host });
         break;
       case 'openBrowser':
         this.openBrowser(spec.url, { syncId, proxy: spec.proxy });

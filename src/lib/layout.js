@@ -481,12 +481,12 @@ class LayoutManager {
         const winInfo = this.app.openFileExplorer(ws.explorerPath, { host: ws.explorerHost });
         applyPosition(winInfo, ws);
       } else if (ws.type === 'editor' && ws.filePath) {
-        const edWin = this.app.openEditor(ws.filePath, ws.fileName || ws.filePath.split('/').pop());
+        const edWin = this.app.openEditor(ws.filePath, ws.fileName || ws.filePath.split('/').pop(), { host: ws.openSpec?.host });
         if (edWin) applyPosition(edWin, ws);
       } else if ((ws.type === 'viewer' || ws.type === 'hex-viewer') && ws.filePath) {
         // openFile is async (FileViewer.open), so we need to wait for the window to appear
         const beforeIds = new Set(this.app.wm.windows.keys());
-        const opts = ws.type === 'hex-viewer' ? { hex: true } : {};
+        const opts = { hex: ws.type === 'hex-viewer', host: ws.openSpec?.host };
         this.app.openFile(ws.filePath, ws.fileName || ws.filePath.split('/').pop(), opts);
         // Poll briefly for the new window to appear (FileViewer.open is async)
         const applyPos = ws;
@@ -873,7 +873,7 @@ class LayoutManager {
           matchedWinIds.add(existing.winId);
           applyPosition(existing.win, ws);
         } else {
-          const edWin = this.app.openEditor(ws.filePath, ws.fileName || ws.filePath.split('/').pop());
+          const edWin = this.app.openEditor(ws.filePath, ws.fileName || ws.filePath.split('/').pop(), { host: ws.openSpec?.host });
           if (edWin) {
             matchedWinIds.add(edWin.id);
             applyPosition(edWin, ws);
@@ -887,7 +887,7 @@ class LayoutManager {
           applyPosition(existing.win, ws);
         } else {
           const beforeIds = new Set(this.app.wm.windows.keys());
-          const opts = ws.type === 'hex-viewer' ? { hex: true } : {};
+          const opts = { hex: ws.type === 'hex-viewer', host: ws.openSpec?.host };
           this.app.openFile(ws.filePath, ws.fileName || ws.filePath.split('/').pop(), opts);
           const applyPos = ws;
           let checkAttempts = 0;

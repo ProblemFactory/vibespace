@@ -59,9 +59,9 @@ export function installExplorerOps(FileExplorer) {
       items.push({ label: t('Open'), action: () => this.navigate(fullPath) });
       items.push({ label: t('Open in new window'), action: () => this.app.openFileExplorer(fullPath) });
     } else {
-      items.push({ label: t('Open'), action: () => this.app.openFile(fullPath, dataset.name) });
-      items.push({ label: t('Edit'), action: () => this.app.openEditor(fullPath, dataset.name) });
-      items.push({ label: t('Open as Hex'), action: () => this.app.openFile(fullPath, dataset.name, { hex: true }) });
+      items.push({ label: t('Open'), action: () => this.app.openFile(fullPath, dataset.name, { host: this._host || undefined }) });
+      items.push({ label: t('Edit'), action: () => this.app.openEditor(fullPath, dataset.name, { host: this._host || undefined }) });
+      items.push({ label: t('Open as Hex'), action: () => this.app.openFile(fullPath, dataset.name, { hex: true, host: this._host || undefined }) });
     }
     if (isArchive && !isDir) {
       items.push({ sep: true });
