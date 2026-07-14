@@ -37,9 +37,11 @@ export function installPluginsUI(App) {
           <div class="plugin-desc">${escHtml(t(p.description))}</div>
           ${detail}
           <div class="plugin-actions"></div>
-          <div class="plugin-auth"></div>`;
+          <div class="plugin-auth"></div>
+          <div class="plugin-config"></div>`;
         const actions = card.querySelector('.plugin-actions');
         const authBox = card.querySelector('.plugin-auth');
+        const cfgBox = card.querySelector('.plugin-config');
         const btn = (label, cls, fn, { rerender = true } = {}) => {
           const b = document.createElement('button');
           b.className = 'mounts-btn' + (cls ? ' ' + cls : '');
@@ -97,6 +99,41 @@ export function installPluginsUI(App) {
           cb.onchange = () => api('enabled', { body: JSON.stringify({ enabled: cb.checked }) }).catch((e) => showToast(e.message, { type: 'error' }));
           lbl.append(cb, document.createTextNode(' ' + t('Start automatically with the server')));
           actions.appendChild(lbl);
+
+          // ── Networking mode + extra flags (advanced config) ──
+          if (p.installed) {
+            const modes = [
+              ['auto', t('Auto')],
+              ['kernel', t('Kernel (full tunnel)')],
+              ['userspace', t('Userspace (proxy only)')],
+            ];
+            const modeRow = document.createElement('div');
+            modeRow.className = 'plugin-cfg-row';
+            const modeSel = document.createElement('select');
+            modeSel.className = 'plugin-cfg-select';
+            for (const [v, l] of modes) { const o = document.createElement('option'); o.value = v; o.textContent = l; if (v === (p.modePref || 'auto')) o.selected = true; modeSel.appendChild(o); }
+            modeSel.onchange = async () => {
+              try { await api('mode', { body: JSON.stringify({ mode: modeSel.value }) }); showToast(running ? t('Switching mode — reconnecting…') : t('Mode saved')); setTimeout(render, running ? 2500 : 0); }
+              catch (e) { showToast(e.message, { type: 'error' }); }
+            };
+            modeRow.append(Object.assign(document.createElement('span'), { className: 'plugin-cfg-label', textContent: t('Networking') }), modeSel);
+            if (p.modePref === 'kernel' && !p.tunUsable) modeRow.append(Object.assign(document.createElement('span'), { className: 'plugin-cfg-warn', textContent: t('no usable /dev/net/tun — will fail') }));
+            else if ((p.modePref || 'auto') === 'auto') modeRow.append(Object.assign(document.createElement('span'), { className: 'plugin-cfg-hint', textContent: p.tunUsable ? t('→ kernel (tun available)') : t('→ userspace (no tun)') }));
+            cfgBox.appendChild(modeRow);
+
+            const flagRow = document.createElement('div');
+            flagRow.className = 'plugin-cfg-row';
+            const flagInput = document.createElement('input');
+            flagInput.className = 'plugin-cfg-flags';
+            flagInput.placeholder = '--advertise-routes=10.0.0.0/24 --hostname=my-instance --ssh';
+            flagInput.value = p.upFlags || '';
+            flagInput.title = t('Extra `tailscale up` flags — applied on the next Log in / mode change. Reachability flags we manage (--socket/--tun/--accept-routes/proxy) are ignored.');
+            const flagSave = document.createElement('button');
+            flagSave.className = 'mounts-btn'; flagSave.textContent = t('Save flags');
+            flagSave.onclick = async () => { try { await api('config', { body: JSON.stringify({ upFlags: flagInput.value }) }); showToast(t('Flags saved — re-run Log in to apply')); } catch (e) { showToast(e.message, { type: 'error' }); } };
+            flagRow.append(Object.assign(document.createElement('span'), { className: 'plugin-cfg-label', textContent: t('tailscale up flags') }), flagInput, flagSave);
+            cfgBox.appendChild(flagRow);
+          }
         }
         body.appendChild(card);
       }
