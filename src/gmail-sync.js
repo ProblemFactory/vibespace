@@ -300,7 +300,9 @@ class GmailSync {
       // restart re-scanned). Each page is downloaded then the messages.list
       // pageToken is persisted; a restart continues from state.seedPageToken.
       const n = Number(w.cfg.syncCount);
-      const want = n === 0 ? 200000 : Math.max(1, Math.min(200000, n || 200));
+      // 0 = the WHOLE mailbox, no ceiling (user mailboxes exceed the old 200k cap;
+      // the seed is streaming + checkpointed, so size only costs time, not safety)
+      const want = n === 0 ? Infinity : Math.max(1, n || 200);
       // Capture the historyId ONCE at seed START (incremental later covers mail
       // arriving DURING the seed) AND a real TOTAL for the progress bar — cheap:
       // profile.messagesTotal for the whole mailbox, labels.get.messagesTotal

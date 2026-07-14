@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.137.0 — 2026-07-14
+- **Terminal web fonts are now SELF-HOSTED** (public/fonts/, all SIL-OFL licensed): fonts.googleapis.com is unreachable for users behind national firewalls, so the Google-hosted CSS never arrived and the first terminal rendered with the canvas fallback FOREVER — no amount of client-side font polling could heal it (recurring onboarding reports; the 2.105.x/2.111.12 fixes only covered slow-but-reachable routes). The five families (Fira Code, JetBrains Mono, Source Code Pro, IBM Plex Mono, Inconsolata; latin+latin-ext, 400/500) now ship with the product (~512KB) and load same-origin — the existing registration-polling + loadingdone machinery stays as the residual-race healer.
+- **Gmail sync cap removed**: "Messages to sync" 0 now means the truly whole mailbox (the old hard 200,000 ceiling is gone — real mailboxes exceed it; the seed is streaming + checkpointed so size only costs time), and an explicit N is honored exactly.
+
 ## 2.136.6 — 2026-07-14
 - **Backlog viewer visual pass** (follow-up report — 2.136.5 left the status icon orphaned on its own line): the status circle now leads the top row; the attribution line is QUIET (plain dim text, no pill chips — pills made every row shout); the common self-claim (parker == claimant, since parking auto-claims) collapses into a small `⚑ ×` after the parked-by instead of repeating the same session as two chips; row actions (✎ ✓ ⊘ ×) sit flush right and fade in on hover (always visible on touch).
 

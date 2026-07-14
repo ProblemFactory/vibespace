@@ -743,7 +743,7 @@ class MountManager {
           clientId: cfg.clientId || null,
           clientSecretEnc: cfg.clientSecret ? this._enc(cfg.clientSecret) : null,
           // syncCount 0 = EVERYTHING (engine hard-caps at 200k); blank = 200
-          syncCount: String(cfg.syncCount ?? '').trim() === '' ? 200 : Math.max(0, Math.min(200000, Number(cfg.syncCount) || 0)),
+          syncCount: String(cfg.syncCount ?? '').trim() === '' ? 200 : Math.max(0, Number(cfg.syncCount) || 0),
           groupBy: ['none', 'month', 'day', 'label-month', 'label-day'].includes(cfg.groupBy) ? cfg.groupBy : 'label-month',
           labelIds: String(cfg.labelIds || ''),
           query: String(cfg.query || ''),
@@ -1049,7 +1049,7 @@ class MountManager {
         // arrive. Dropping the state file is safe — the directory is the
         // dedup index, a reseed re-lists and skips every existing file.
         const scopeChanged = ['syncCount', 'labelIds', 'query'].some((k) => patch[k] !== undefined);
-        if (patch.syncCount !== undefined) m.syncCount = String(patch.syncCount).trim() === '' ? 200 : Math.max(0, Math.min(200000, Number(patch.syncCount) || 0));
+        if (patch.syncCount !== undefined) m.syncCount = String(patch.syncCount).trim() === '' ? 200 : Math.max(0, Number(patch.syncCount) || 0);
         if (patch.groupBy !== undefined) m.groupBy = ['none', 'month', 'day', 'label-month', 'label-day'].includes(patch.groupBy) ? patch.groupBy : 'none';
         if (patch.labelIds !== undefined) m.labelIds = String(patch.labelIds || '');
         if (patch.query !== undefined) m.query = String(patch.query || '');

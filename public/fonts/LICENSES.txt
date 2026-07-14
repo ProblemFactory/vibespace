@@ -1,0 +1,8 @@
+Bundled web fonts — all licensed under the SIL Open Font License 1.1 (OFL),
+which permits bundling and redistribution:
+  Fira Code        © The Fira Code Project Authors   https://github.com/tonsky/FiraCode
+  JetBrains Mono   © JetBrains                        https://github.com/JetBrains/JetBrainsMono
+  Source Code Pro  © Adobe                            https://github.com/adobe-fonts/source-code-pro
+  IBM Plex Mono    © IBM                              https://github.com/IBM/plex
+  Inconsolata      © The Inconsolata Project Authors  https://github.com/googlefonts/Inconsolata
+Full OFL text: https://openfontlicense.org
