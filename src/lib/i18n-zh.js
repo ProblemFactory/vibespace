@@ -1821,4 +1821,5 @@ export default {
   "Tailnet connections from this instance will drop. The login persists — starting again reconnects without re-auth.": "此实例的 tailnet 连接会断开。登录状态会保留——再次启动无需重新认证。",
   "Start automatically with the server": "随服务器自动启动",
   "Join your tailnet — reach home/LAN machines (NAS, dev boxes) from this instance. State persists across container rebuilds; no re-login.": "加入你的 tailnet——从此实例访问家里/局域网的机器（NAS、开发机）。状态跨容器重建保留，无需重新登录。",
+  "Waiting for the sign-in page…": "等待登录页面…",
 };

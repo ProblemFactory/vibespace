@@ -168,12 +168,32 @@ export class DesktopManager {
   // ── Desktop Switching ──
 
   async switchTo(desktopId) {
-    if (desktopId === this._activeId || this._restoring) return;
+    if (desktopId === this._activeId) { this._pendingSwitch = null; return; }
+    // Rapid switching: a switch requested mid-flight is QUEUED (latest wins),
+    // not dropped — dropping left the user's actual position out of sync with
+    // _activeId, so a later capture/save could persist the WRONG desktop's
+    // window set over another's (real report: windows vanish on fast switches).
+    if (this._restoring) { this._pendingSwitch = desktopId; return; }
     this._restoring = true;
 
     try {
-      // 1. Capture current desktop state and cache it
+      // 1. Capture current desktop state and cache it. MERGE-PRESERVE: a window
+      // that was in this desktop's PRIOR saved state (an openSpec-backed window
+      // still lazy-replaying — chat re-attach, disk restore) may not be in the
+      // DOM yet, so the fresh capture would drop it. Carry such windows forward
+      // so a fast switch-away never persists a desktop MINUS its slow windows.
       const currentState = this.app.layoutManager.captureState();
+      const prior = this._savedStates.get(this._activeId);
+      if (prior?.windows?.length) {
+        const haveIds = new Set(this.app.wm.windows.keys());
+        const capturedIds = new Set(currentState.windows.map((w) => w.winId || w.id));
+        for (const pw of prior.windows) {
+          const wid = pw.winId || pw.id;
+          if (pw.openSpec && !capturedIds.has(wid) && !haveIds.has(wid)) {
+            currentState.windows.push(pw); // not materialized yet — keep it
+          }
+        }
+      }
       this._savedStates.set(this._activeId, currentState);
 
       // 2. Hide all windows for current desktop
@@ -248,7 +268,14 @@ export class DesktopManager {
       setTimeout(() => this.app.layoutManager.scheduleAutoSave(), 300);
 
     } finally {
-      setTimeout(() => { this._restoring = false; }, 1000);
+      setTimeout(() => {
+        this._restoring = false;
+        // drain a queued switch (latest wins) so rapid clicks all land
+        if (this._pendingSwitch != null && this._pendingSwitch !== this._activeId) {
+          const next = this._pendingSwitch; this._pendingSwitch = null;
+          this.switchTo(next);
+        } else { this._pendingSwitch = null; }
+      }, 1000);
     }
   }
 
