@@ -469,7 +469,7 @@ class MountManager {
     const p = this._get(m.parentId);
     const conn = { ...p, id: m.id, name: m.name, mode: m.mode, kind: undefined, parentId: undefined, customPath: m.customPath, origin: m.origin };
     // child's own path fields override the parent's (that's the whole point)
-    for (const k of ['remotePath', 'bucket', 'prefix', 'driveFolder', 'driveMode', 'teamDriveId', 'rootFolderId', 'sshPath']) {
+    for (const k of ['remotePath', 'bucket', 'prefix', 'driveFolder', 'driveMode', 'teamDriveId', 'rootFolderId', 'clientPreset', 'sshPath']) {
       if (m[k] !== undefined && m[k] !== null) conn[k] = m[k];
     }
     if (m.extraParamsEnc) conn.extraParamsEnc = { ...p.extraParamsEnc, ...m.extraParamsEnc };
@@ -571,9 +571,17 @@ class MountManager {
       case 'sftp':
         Object.assign(out, { sshHost: m.sshHost, sshUser: m.sshUser, sshPort: m.sshPort, sshPath: m.sshPath, keyPath: m.keyPath, pass: dec(m.passEnc) });
         break;
-      case 'rclone':
-        Object.assign(out, { rcloneType: m.rcloneType, remotePath: m.remotePath, params: Object.fromEntries(Object.entries(m.paramsEnc || {}).map(([k, v]) => [k, this._dec(v)])) });
+      case 'rclone': {
+        const pr = Object.fromEntries(Object.entries(m.paramsEnc || {}).map(([k, v]) => [k, this._dec(v)]));
+        Object.assign(out, { rcloneType: m.rcloneType, remotePath: m.remotePath, params: pr });
+        if (m.rcloneType === 'drive') {
+          out.clientPreset = m.clientPreset;
+          out.driveMode = m.driveMode || (pr.team_drive ? 'shared-drive' : pr.shared_with_me === 'true' ? 'shared-with-me' : 'mydrive');
+          out.teamDriveId = m.teamDriveId || pr.team_drive || '';
+          out.rootFolderId = m.rootFolderId || pr.root_folder_id || '';
+        }
         break;
+      }
       case 'cephfs':
         Object.assign(out, { cephMonHosts: m.cephMonHosts, cephFsName: m.cephFsName, cephPath: m.cephPath, cephUser: m.cephUser }); // secret withheld
         break;
@@ -758,8 +766,16 @@ class MountManager {
         m.prefix = String(cfg.prefix || '').replace(/^\/+|\/+$/g, '');
         break;
       case 'rclone':
-        if (!cfg.remotePath) throw new Error('remote path required (e.g. bucket-name or bucket/prefix)');
-        m.remotePath = String(cfg.remotePath).replace(/^\/+/, '');
+        if (p.rcloneType === 'drive') {
+          // rclone-drive submount: remotePath = folder inside the chosen scope
+          m.remotePath = String(cfg.remotePath || '').replace(/^\/+/, '');
+          if (cfg.driveMode !== undefined) m.driveMode = MountManager._driveMode(cfg.driveMode) || 'mydrive';
+          if (cfg.teamDriveId !== undefined) m.teamDriveId = cfg.teamDriveId ? String(cfg.teamDriveId).trim() : null;
+          if (cfg.rootFolderId !== undefined) m.rootFolderId = cfg.rootFolderId ? String(cfg.rootFolderId).trim() : null;
+        } else {
+          if (!cfg.remotePath) throw new Error('remote path required (e.g. bucket-name or bucket/prefix)');
+          m.remotePath = String(cfg.remotePath).replace(/^\/+/, '');
+        }
         break;
       case 'drive':
         m.driveFolder = String(cfg.driveFolder || '').replace(/^\/+|\/+$/g, '');
@@ -895,6 +911,17 @@ class MountManager {
       case 'rclone':
         setIf('rcloneType', (v) => String(v).trim());
         if (patch.remotePath !== undefined) m.remotePath = String(patch.remotePath || '').replace(/^\/+/, '');
+        if ((m.rcloneType === 'drive') || patch.rcloneType === 'drive') {
+          if (patch.clientPreset !== undefined) {
+            m.clientPreset = patch.clientPreset ? String(patch.clientPreset) : null;
+            if (m.clientPreset) { delete m.paramsEnc.client_id; delete m.paramsEnc.client_secret; } // preset wins
+          }
+          if (patch.driveMode !== undefined) m.driveMode = MountManager._driveMode(patch.driveMode) || 'mydrive';
+          if (patch.teamDriveId !== undefined) m.teamDriveId = patch.teamDriveId ? String(patch.teamDriveId).trim() : null;
+          if (patch.rootFolderId !== undefined) m.rootFolderId = patch.rootFolderId ? String(patch.rootFolderId).trim() : null;
+          // retire the legacy scope params so the independent fields are authoritative
+          for (const k of ['shared_with_me', 'team_drive', 'root_folder_id']) delete m.paramsEnc[k];
+        }
         if (patch.params && typeof patch.params === 'object') {
           for (const [k, v] of Object.entries(patch.params)) {
             if (v === '' || v == null) delete m.paramsEnc[k];
@@ -1066,6 +1093,20 @@ class MountManager {
       case 'rclone': {
         env[P('TYPE')] = m.rcloneType;
         for (const [k, blob] of Object.entries(m.paramsEnc || {})) env[P(k.toUpperCase())] = this._dec(blob);
+        // rclone-backed Google Drive is a first-class Drive (2.135.3): the same
+        // preset client + cloud-side scope as a native 'drive' record, stored
+        // in INDEPENDENT fields that OVERRIDE the raw rclone params (which stay
+        // as a fallback for records imported before this).
+        if (m.rcloneType === 'drive') {
+          if (m.clientPreset) {
+            const pc = MountManager._driveClient({ clientPreset: m.clientPreset });
+            if (pc) { env[P('CLIENT_ID')] = pc.clientId; env[P('CLIENT_SECRET')] = pc.clientSecret; }
+          }
+          if (m.rootFolderId) env[P('ROOT_FOLDER_ID')] = m.rootFolderId;
+          else if (m.driveMode === 'shared-with-me') { env[P('SHARED_WITH_ME')] = 'true'; delete env[P('TEAM_DRIVE')]; }
+          if (m.driveMode === 'shared-drive' && m.teamDriveId) { env[P('TEAM_DRIVE')] = m.teamDriveId; delete env[P('SHARED_WITH_ME')]; }
+          if (m.driveMode === 'mydrive') { delete env[P('SHARED_WITH_ME')]; delete env[P('TEAM_DRIVE')]; }
+        }
         remote = `${R}:${m.remotePath || ''}`;
         break;
       }
