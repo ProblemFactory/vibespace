@@ -1,7 +1,7 @@
 // deviceFolderMount (2.150.0) — mount a DEVICE's folder into VibeSpace over the
-// agentd link. The device serves the folder over HTTP on its own loopback
+// agentd link. The device serves the folder over WEBDAV on its own loopback
 // (serve-folder); we tcp-forward that port to OUR loopback via the mux, then
-// rclone-`http`-mount it (read-only). NAT-proof: the bytes ride the device
+// rclone-`webdav`-mount it (read-only). NAT-proof: the bytes ride the device
 // link (ssh-stdio or wss dial-out) — no inbound to the device, no public
 // address. Used by MountManager's 'device' mount type and the acceptance test.
 'use strict';
@@ -22,7 +22,7 @@ const { spawn } = require('child_process');
  * @returns {Promise<{ mountpoint, devicePort, bridgePort, teardown }>}
  */
 async function deviceFolderMount({ device, remotePath, mountpoint, rcloneBin, vfsCacheDir, log = () => {} }) {
-  // 1) ask the device to serve the folder over HTTP on its own loopback
+  // 1) ask the device to serve the folder over WebDAV on its own loopback
   const sf = await device.serveFolder(remotePath);
   if (!sf || !sf.port) throw new Error('device serve-folder failed: ' + (sf && sf.error || 'no port'));
   const devicePort = sf.port;
@@ -64,21 +64,20 @@ async function deviceFolderMount({ device, remotePath, mountpoint, rcloneBin, vf
     bridge.listen(0, '127.0.0.1', () => resolve(bridge.address().port));
   });
 
-  // 3) rclone http mount the bridge (read-only). http backend reads the
-  // directory-listing HTML + ranged GETs the daemon serves.
+  // 3) rclone WEBDAV mount the bridge (read-only). The webdav backend (not the
+  // plain http backend) is deliberate — the http backend requests a fixed 128MB
+  // range per read and then stalls ~6s on the keep-alive connection; webdav
+  // requests sane ranges and reads cleanly (the daemon serves a WebDAV subset).
   fs.mkdirSync(mountpoint, { recursive: true });
   const env = {
     ...process.env,
-    RCLONE_CONFIG_VSDEV_TYPE: 'http',
+    RCLONE_CONFIG_VSDEV_TYPE: 'webdav',
     RCLONE_CONFIG_VSDEV_URL: `http://127.0.0.1:${bridgePort}`,
+    RCLONE_CONFIG_VSDEV_VENDOR: 'other',
   };
   const args = ['mount', 'vsdev:', mountpoint, '--read-only', '--dir-cache-time', '5s',
-    '--vfs-cache-mode', 'full', '--timeout', '30s', '--contimeout', '10s',
-    '--no-modtime', '--attr-timeout', '1s',
-    // rclone's default 128M read chunk asks for a range far past small files;
-    // the clamped 206 response makes its http backend stall. A small starting
-    // chunk keeps ranged reads tight; full cache mode then serves from disk.
-    '--vfs-read-chunk-size', '128k', '--vfs-read-chunk-size-limit', '0'];
+    '--vfs-cache-mode', 'minimal', '--timeout', '30s', '--contimeout', '10s',
+    '--no-modtime', '--attr-timeout', '1s'];
   if (vfsCacheDir) { args.push('--cache-dir', vfsCacheDir); }
   const rc = spawn(rcloneBin, args, { env, detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
   let stderr = '';
@@ -91,7 +90,7 @@ async function deviceFolderMount({ device, remotePath, mountpoint, rcloneBin, vf
     try { process.kill(-rc.pid, 'SIGKILL'); } catch {}
     try { bridge.close(); } catch {}
     try { await device.unserveFolder(devicePort); } catch {}
-    throw new Error('rclone http mount did not come up: ' + (stderr.slice(-300) || 'timeout'));
+    throw new Error('rclone webdav mount did not come up: ' + (stderr.slice(-300) || 'timeout'));
   }
   log(`device folder ${remotePath} mounted at ${mountpoint} (device:${devicePort} ↔ bridge:${bridgePort})`);
 

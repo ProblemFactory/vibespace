@@ -330,10 +330,30 @@ function reverseListen(mux, msg) {
   });
 }
 
-// ── device-folder-mount: a minimal read-only HTTP file server (the rclone
-// `http` backend reads directory-listing HTML + ranged GETs). Bound to
-// 127.0.0.1 on the device; the server reaches it via tcp-connect. ──
+// ── device-folder-mount: a minimal read-only WEBDAV server on the device's
+// 127.0.0.1 that the server rclone-`webdav`-mounts (over tcp-connect). WebDAV
+// (not the plain-`http` backend) is deliberate: rclone's http backend requests
+// a fixed 128MB range on every read and then stalls ~6s waiting on the
+// keep-alive connection after a clamped 206; the webdav backend requests sane
+// ranges and reads cleanly. Verbs: OPTIONS / PROPFIND (Depth 0/1) / HEAD / GET
+// (Range). Zero deps — pure node http + fs + string XML (mirrors src/webdav.js).
 const folderServers = new Map(); // port → { server, root }
+const _xmlEsc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+function _davHref(rel, isDir) {
+  const parts = rel.split('/').filter(Boolean).map(encodeURIComponent);
+  let h = '/' + parts.join('/');
+  if (isDir && !h.endsWith('/')) h += '/';
+  return h || '/';
+}
+function _davEntry(href, name, st) {
+  const isDir = st.isDirectory();
+  return `<D:response><D:href>${_xmlEsc(href)}</D:href><D:propstat><D:prop>`
+    + `<D:displayname>${_xmlEsc(name)}</D:displayname>`
+    + `<D:resourcetype>${isDir ? '<D:collection/>' : ''}</D:resourcetype>`
+    + `${isDir ? '' : `<D:getcontentlength>${st.size}</D:getcontentlength>`}`
+    + `<D:getlastmodified>${new Date(st.mtimeMs).toUTCString()}</D:getlastmodified>`
+    + `</D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>`;
+}
 function serveFolder(mux, msg) {
   const root = String(msg.path || '');
   try { if (!path.isAbsolute(root) || !fs.statSync(root).isDirectory()) throw new Error('not a directory'); }
@@ -341,54 +361,56 @@ function serveFolder(mux, msg) {
   const http = require('http');
   const srv = http.createServer((req, res) => {
     let rel = '/';
-    try { rel = decodeURIComponent(req.url.split('?')[0]); } catch { }
-    const abs = path.join(root, rel);
+    try { rel = decodeURIComponent(req.url.split('?')[0]).replace(/\/+$/, ''); } catch { }
+    const abs = path.join(root, rel || '/');
+    // confine within root (+ symlink-escape guard via nearest existing ancestor)
     if (abs !== root && !abs.startsWith(root + path.sep)) { res.writeHead(403); res.end(); return; }
-    let st; try { st = fs.statSync(abs); } catch { res.writeHead(404); res.end(); return; }
-    if (st.isDirectory()) {
-      let entries = [];
-      try { entries = fs.readdirSync(abs, { withFileTypes: true }); } catch { res.writeHead(500); res.end(); return; }
-      const rows = entries.map((e) => {
-        const slash = e.isDirectory() ? '/' : '';
-        // href must be URL-encoded; text can be raw (rclone reads href)
-        return `<a href="${encodeURIComponent(e.name)}${slash}">${e.name}${slash}</a>`;
-      }).join('\n');
-      const body = `<!DOCTYPE html><html><body>\n${rows}\n</body></html>`;
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': Buffer.byteLength(body) });
-      res.end(req.method === 'HEAD' ? undefined : body);
-      return;
+    const contained = (p) => { let pr = p; for (;;) { try { const r = fs.realpathSync(pr); return r === root || r.startsWith(root + path.sep); } catch { const up = path.dirname(pr); if (up === pr) return false; pr = up; } } };
+    if (!contained(abs)) { res.writeHead(403); res.end(); return; }
+    const relFromRoot = path.relative(root, abs);
+    if (req.method === 'OPTIONS') {
+      res.writeHead(200, { DAV: '1', Allow: 'OPTIONS, PROPFIND, HEAD, GET', 'MS-Author-Via': 'DAV', 'Content-Length': 0 });
+      res.end(); return;
     }
-    const size = st.size;
-    let start = 0, end = size - 1, code = 200;
-    const range = req.headers.range && /bytes=(\d*)-(\d*)/.exec(req.headers.range);
-    if (range) { if (range[1]) start = parseInt(range[1], 10); if (range[2]) end = parseInt(range[2], 10); code = 206; }
-    // Clamp end to EOF — rclone requests a fixed chunk (e.g. bytes=0-262143)
-    // that overshoots small files; NOT clamping made Content-Length promise
-    // more bytes than we sent → truncated response → the FUSE mount got EIO.
-    if (end > size - 1) end = size - 1;
-    if (start > end || start >= size) { res.writeHead(416, { 'Content-Range': `bytes */${size}` }); res.end(); return; }
-    const h = { 'Content-Type': 'application/octet-stream', 'Accept-Ranges': 'bytes', 'Content-Length': end - start + 1, 'Last-Modified': st.mtime.toUTCString() };
-    if (code === 206) h['Content-Range'] = `bytes ${start}-${end}/${size}`;
-    res.writeHead(code, h);
-    if (req.method === 'HEAD') { res.end(); return; }
-    const rs = fs.createReadStream(abs, { start, end });
-    rs.on('error', () => { try { res.destroy(); } catch { } });
-    rs.pipe(res);
+    if (req.method === 'PROPFIND') {
+      let st; try { st = fs.statSync(abs); } catch { res.writeHead(404); res.end(); return; }
+      const depth = req.headers.depth === '0' ? 0 : 1;
+      const out = [_davEntry(_davHref(relFromRoot, st.isDirectory()), path.basename(abs) || '/', st)];
+      if (depth === 1 && st.isDirectory()) {
+        let names = []; try { names = fs.readdirSync(abs); } catch { }
+        for (const name of names) { try { const cst = fs.statSync(path.join(abs, name)); out.push(_davEntry(_davHref(path.join(relFromRoot, name), cst.isDirectory()), name, cst)); } catch { } }
+      }
+      const body = `<?xml version="1.0" encoding="utf-8"?>\n<D:multistatus xmlns:D="DAV:">${out.join('')}</D:multistatus>`;
+      res.writeHead(207, { 'Content-Type': 'application/xml; charset=utf-8', 'Content-Length': Buffer.byteLength(body) });
+      res.end(body); return;
+    }
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      let st; try { st = fs.statSync(abs); } catch { res.writeHead(404); res.end(); return; }
+      if (st.isDirectory()) { res.writeHead(403); res.end(); return; } // clients list via PROPFIND
+      const size = st.size;
+      let start = 0, end = size - 1, code = 200;
+      const range = req.headers.range && /^bytes=(\d*)-(\d*)$/.exec(req.headers.range);
+      if (range && (range[1] || range[2])) {
+        if (range[1]) { start = parseInt(range[1], 10); if (range[2]) end = Math.min(parseInt(range[2], 10), size - 1); }
+        else { start = Math.max(0, size - parseInt(range[2], 10)); } // suffix range
+        if (start > end || start >= size) { res.writeHead(416, { 'Content-Range': `bytes */${size}` }); res.end(); return; }
+        code = 206;
+      }
+      const h = { 'Content-Type': 'application/octet-stream', 'Accept-Ranges': 'bytes', 'Content-Length': end - start + 1, 'Last-Modified': new Date(st.mtimeMs).toUTCString() };
+      if (code === 206) h['Content-Range'] = `bytes ${start}-${end}/${size}`;
+      res.writeHead(code, h);
+      if (req.method === 'HEAD') { res.end(); return; }
+      const rs = fs.createReadStream(abs, { start, end });
+      rs.on('error', () => { try { res.destroy(); } catch { } });
+      rs.pipe(res); return;
+    }
+    res.writeHead(405, { Allow: 'OPTIONS, PROPFIND, HEAD, GET' }); res.end();
   });
   srv.on('error', (e) => { try { mux.control({ op: 'serve-folder-result', id: msg.id, error: e.message }); } catch { } });
-  // Close idle keep-alive connections fast. rclone's `http` backend requests a
-  // huge fixed range (bytes=0-134217727), gets a clamped Content-Length, reads
-  // the bytes, then WAITS for the connection to free before finalizing the read
-  // — on the default ~5s keepAliveTimeout that's ~6s PER read. A short timeout
-  // returns EOF promptly (reads go from seconds to instant). Not Connection:
-  // close per response — that reads as an early close of the 128MB range and
-  // triggers an rclone retry (doubling the latency).
-  srv.keepAliveTimeout = 200;
-  srv.headersTimeout = 2000;
   srv.listen(0, '127.0.0.1', () => {
     const port = srv.address().port;
     folderServers.set(port, { server: srv, root });
-    log(`serve-folder ${root} on 127.0.0.1:${port}`);
+    log(`serve-folder (webdav) ${root} on 127.0.0.1:${port}`);
     mux.control({ op: 'serve-folder-result', id: msg.id, port, root });
   });
 }

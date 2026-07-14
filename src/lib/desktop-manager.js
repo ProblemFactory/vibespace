@@ -389,8 +389,15 @@ export class DesktopManager {
     // Digest guard (audit round-2, high): updateTaskbar funnels EVERY window
     // mousedown/focus/blink here and this rebuilt all previews + listeners
     // each time. Rebuild only when the rendered content would differ.
+    // The digest must cover EVERY field the render below filters on —
+    // _hiddenByDesktop/_hiddenByStage/_onStage were missing, so stage.leave()'s
+    // intermediate render (setGrid fires while the target desktop's windows are
+    // still hidden) cached a BLANK preview and the post-show final render
+    // early-returned on an identical digest (real report: preview stayed white
+    // after leaving the stage until switching desktops).
     const digest = JSON.stringify([this._activeId, !!this.app.stage?.enabled, !!this.app.stage?.isActive, this.app.stage?.enabled ? this.app.stage.slotBounds() : 0, this._desktops.map(d => [d.id, d.name]),
       [...this.app.wm.windows.values()].map(w => [w._desktopId, w.isMinimized,
+        !!w._hiddenByDesktop, !!w._hiddenByStage, !!w._onStage,
         !!w.element?.classList.contains('window-waiting'),
         w.gridBounds ? [w.gridBounds.left, w.gridBounds.top, w.gridBounds.width, w.gridBounds.height] : w.element?.style.left])]);
     if (digest === this._switcherDigest) return;
@@ -467,7 +474,11 @@ export class DesktopManager {
             // preview must draw where it actually lives when it returns
             // (real report: hero activation painted a phantom window at the
             // slot position on the home desktop's preview).
-            const gb = (win._onStage && win._stageHomeBounds?.gridBounds) ? win._stageHomeBounds.gridBounds : win.gridBounds;
+            // _stageHomeBounds IS the flat {left,top,width,height} object
+            // (stage-manager _borrowHero: `= { ...win.gridBounds }`) — the
+            // first fix read `._stageHomeBounds?.gridBounds` and was a NO-OP
+            // (always undefined → slot geometry leaked; second real report).
+            const gb = (win._onStage && win._stageHomeBounds) ? win._stageHomeBounds : win.gridBounds;
             winEntries.push({ id, gridBounds: gb, waiting });
             if (waiting) deskHasWaiting = true;
           }
