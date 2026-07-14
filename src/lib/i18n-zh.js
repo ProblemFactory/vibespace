@@ -1790,4 +1790,12 @@ export default {
   "A Microsoft sign-in page opened. Approve access, then come back here.": "已打开 Microsoft 登录页面。批准访问后回到这里。",
   "OAuth token (re-run Connect OneDrive to replace)": "OAuth token（重跑“连接 OneDrive”可替换）",
   "Downloading · {n} so far…": "下载中 · 已 {n} 封…",
+  "Other cloud (Dropbox / Box / pCloud …)": "其他云盘（Dropbox / Box / pCloud…）",
+  "Provider": "服务商",
+  "click \"Connect\" below — no terminal needed": "点击下方\"连接\"——无需终端",
+  "Custom OAuth client ID (optional — your own app)": "自定义 OAuth 客户端 ID（可选——你自己的应用）",
+  "Most providers work with the built-in client — leave blank.": "大多数服务商用内置客户端即可——留空。",
+  "A {provider} sign-in page opened. Approve access, then come back here.": "已打开 {provider} 登录页面。批准访问后回到这里。",
+  "OAuth token (re-run Connect to replace)": "OAuth 令牌（重新运行\"连接\"以替换）",
+  "Folder (optional)": "文件夹（可选）",
 };

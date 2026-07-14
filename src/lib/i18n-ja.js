@@ -1790,4 +1790,12 @@ export default {
   "A Microsoft sign-in page opened. Approve access, then come back here.": "Microsoft のサインインページが開きました。アクセスを許可してから戻ってください。",
   "OAuth token (re-run Connect OneDrive to replace)": "OAuth token（「OneDrive に接続」を再実行で置換）",
   "Downloading · {n} so far…": "ダウンロード中 · これまで {n} 件…",
+  "Other cloud (Dropbox / Box / pCloud …)": "その他のクラウド（Dropbox / Box / pCloud…）",
+  "Provider": "プロバイダー",
+  "click \"Connect\" below — no terminal needed": "下の「接続」をクリック——ターミナル不要",
+  "Custom OAuth client ID (optional — your own app)": "カスタム OAuth クライアント ID（任意——自分のアプリ）",
+  "Most providers work with the built-in client — leave blank.": "ほとんどのプロバイダーは内蔵クライアントで動作します——空欄で可。",
+  "A {provider} sign-in page opened. Approve access, then come back here.": "{provider} のサインインページが開きました。アクセスを承認してからここに戻ってください。",
+  "OAuth token (re-run Connect to replace)": "OAuth トークン（置き換えるには「接続」を再実行）",
+  "Folder (optional)": "フォルダ（任意）",
 };

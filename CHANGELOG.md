@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.137.1 — 2026-07-14
+- **Generic OAuth cloud drives get the friendly treatment** (B-2bbf): Dropbox, Box, pCloud, Yandex Disk, Jottacloud and HiDrive are now a first-class "Other cloud" connection type — provider picker, guided "Connect" sign-in (the same no-terminal flow as Google Drive/OneDrive, remote paste-back included), folder field, optional custom OAuth client — instead of raw rclone key=value params. Existing rclone-typed records of these providers migrate to the friendly type automatically (fresh migration wave — the old `_cloudUnified` guard predates this and would have skipped them); rclone.conf imports normalize on add; re-auth "Fix" appears on token-expiry errors; config export/import carries the provider.
+
 ## 2.137.0 — 2026-07-14
 - **Terminal web fonts are now SELF-HOSTED** (public/fonts/, all SIL-OFL licensed): fonts.googleapis.com is unreachable for users behind national firewalls, so the Google-hosted CSS never arrived and the first terminal rendered with the canvas fallback FOREVER — no amount of client-side font polling could heal it (recurring onboarding reports; the 2.105.x/2.111.12 fixes only covered slow-but-reachable routes). The five families (Fira Code, JetBrains Mono, Source Code Pro, IBM Plex Mono, Inconsolata; latin+latin-ext, 400/500) now ship with the product (~512KB) and load same-origin — the existing registration-polling + loadingdone machinery stays as the residual-race healer.
 - **Gmail sync cap removed**: "Messages to sync" 0 now means the truly whole mailbox (the old hard 200,000 ceiling is gone — real mailboxes exceed it; the seed is streaming + checkpointed so size only costs time), and an explicit N is honored exactly.
