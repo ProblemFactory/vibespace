@@ -69,6 +69,10 @@ function pty() {
   return _pty;
 }
 
+function pidCmdline(pid) {
+  try { return fs.readFileSync('/proc/' + pid + '/cmdline', 'utf-8').replace(/\0/g, ' '); } catch { return ''; }
+}
+
 // ── log (rotated at 5MB ×2) ──
 function log(msg) {
   const line = `${new Date().toISOString()} ${msg}\n`;
@@ -162,6 +166,118 @@ function beginUpgrade(mux, { version, size }) {
   };
 }
 
+// ── M2 pipe-session registry (keeper semantics inside the daemon) ──
+const SESS_DIR = path.join(STATE, 'sessions');
+const pipeSessions = {
+  _tails: new Map(), // mux → Map(chan → {sid, pos, timer, fd})
+  _paths(sid) {
+    if (!/^[\w-]+$/.test(sid)) throw new Error('bad sid');
+    return {
+      out: path.join(SESS_DIR, sid + '.out'),
+      fifo: path.join(SESS_DIR, sid + '.in'),
+      meta: path.join(SESS_DIR, sid + '.json'),
+      err: path.join(SESS_DIR, sid + '.err'),
+    };
+  },
+  _meta(sid) { try { return JSON.parse(fs.readFileSync(this._paths(sid).meta, 'utf-8')); } catch { return null; } },
+  _childAlive(m) {
+    if (!m || !m.childPid) return false;
+    try { process.kill(m.childPid, 0); } catch { return false; }
+    const c = pidCmdline(m.childPid);
+    const argv0 = path.basename(String((m.cmd && m.cmd[0]) || ''));
+    return c === '' ? true : (argv0 ? c.includes(argv0) : false);
+  },
+  stat(sid) {
+    const m = this._meta(sid);
+    if (!m) throw new Error('no such pipe session: ' + sid);
+    return { pid: m.childPid, exited: m.exited, alive: this._childAlive(m) };
+  },
+  open({ sid, cmd, args, cwd, env }) {
+    fs.mkdirSync(SESS_DIR, { recursive: true, mode: 0o700 });
+    const P2 = this._paths(sid);
+    const m = this._meta(sid);
+    if (m && m.exited === undefined && this._childAlive(m)) return { pid: m.childPid, existing: true };
+    if (m && m.exited !== undefined) return { pid: m.childPid, existing: true }; // drain-only: sentinel in buffer
+    if (m && !this._childAlive(m)) {
+      // crashed without a sentinel — synthesize (never silently respawn: B-0343)
+      try { fs.appendFileSync(P2.out, JSON.stringify({ type: '_remote_exit', code: 143, crashed: true }) + '\n'); } catch { }
+      fs.writeFileSync(P2.meta, JSON.stringify({ ...m, exited: 143, crashed: true }));
+      return { pid: m.childPid, existing: true };
+    }
+    // fresh spawn: setsid-detached, stdout→file fd, stdin←O_RDWR fifo
+    try { fs.unlinkSync(P2.fifo); } catch { }
+    const mk = require('child_process').spawnSync('mkfifo', ['-m', '600', P2.fifo]);
+    if (mk.status !== 0) throw new Error('mkfifo unavailable');
+    const outFd = fs.openSync(P2.out, 'a');
+    const errFd = fs.openSync(P2.err, 'a');
+    const inFd = fs.openSync(P2.fifo, 'r+');
+    const child = require('child_process').spawn(cmd, args || [], {
+      detached: true, stdio: [inFd, outFd, errFd],
+      cwd: cwd || process.env.HOME, env: { ...process.env, ...(env || {}) },
+    });
+    child.unref();
+    fs.writeFileSync(P2.meta, JSON.stringify({ childPid: child.pid, startedAt: Date.now(), cmd: [cmd, ...(args || [])] }));
+    // we CAN wait on our own detached child — write the real exit sentinel
+    child.on('exit', (code) => {
+      try { fs.appendFileSync(P2.out, JSON.stringify({ type: '_remote_exit', code: code ?? 0 }) + '\n'); } catch { }
+      const cur = this._meta(sid) || {};
+      fs.writeFileSync(P2.meta, JSON.stringify({ ...cur, exited: code ?? 0, exitedAt: Date.now() }));
+    });
+    fs.closeSync(outFd); fs.closeSync(errFd); // child holds its own copies
+    log(`pipe-session ${sid} spawned pid=${child.pid}`);
+    return { pid: child.pid, existing: false };
+  },
+  attach(sid, chan, mux, offset) {
+    const P2 = this._paths(sid);
+    let pos = Math.max(0, offset);
+    let fd = null;
+    const pump = () => {
+      if (fd === null) { try { fd = fs.openSync(P2.out, 'r'); } catch { return; } }
+      try {
+        const size = fs.fstatSync(fd).size;
+        if (pos > size) pos = 0;
+        while (pos < size) {
+          const want = Math.min(65536, size - pos);
+          const b = Buffer.alloc(want);
+          const n = fs.readSync(fd, b, 0, want, pos);
+          if (n <= 0) break;
+          pos += n;
+          mux.data(chan, b.subarray(0, n));
+        }
+      } catch { }
+    };
+    const timer = setInterval(pump, 150);
+    pump();
+    let tails = this._tails.get(mux);
+    if (!tails) { tails = new Map(); this._tails.set(mux, tails); }
+    tails.set(chan, { sid, timer, get fd() { return fd; } });
+  },
+  writeStdin(mux, chan, buf) {
+    const t = this._tails.get(mux)?.get(chan);
+    if (!t) return false;
+    try {
+      const inFd = fs.openSync(this._paths(t.sid).fifo, 'r+');
+      fs.writeSync(inFd, buf);
+      fs.closeSync(inFd);
+      return true;
+    } catch { return true; } // attached but stdin gone (exited) — swallow
+  },
+  detachAll(mux) {
+    const tails = this._tails.get(mux);
+    if (!tails) return;
+    for (const t of tails.values()) { clearInterval(t.timer); try { if (t.fd !== null) fs.closeSync(t.fd); } catch { } }
+    this._tails.delete(mux);
+  },
+  kill(sid) {
+    const m = this._meta(sid);
+    if (!m) return;
+    if (this._childAlive(m)) {
+      try { process.kill(m.childPid, 'SIGTERM'); } catch { }
+      setTimeout(() => { try { if (this._childAlive(m)) process.kill(m.childPid, 'SIGKILL'); } catch { } }, 2500);
+    }
+  },
+};
+
 // ── serve ──
 try { fs.unlinkSync(SOCK); } catch { }
 const server = net.createServer((sock) => {
@@ -189,6 +305,28 @@ const server = net.createServer((sock) => {
       // ── M1 session primitive: spawn a pty, relay its bytes on a byte channel
       // (invariant #2: mechanical only — no normalization/discovery here). The
       // spawn spec (cmd/args/env) is assembled SERVER-side and shipped here. ──
+      // ── M2 persistent PIPE session (chat-class; the keeper model natively):
+      // child runs setsid-DETACHED with stdout→buffer file (direct fd) and
+      // stdin←O_RDWR fifo — daemon death/upgrade harms it in no way; any
+      // connection reattaches by byte offset. Registry survives daemon
+      // restarts (state/sessions/<sid>.json). ──
+      if (msg.op === 'open-pipe-session') {
+        try {
+          const r = pipeSessions.open(msg);
+          mux.control({ op: 'pipe-session-open', chan: msg.chan, sid: msg.sid, pid: r.pid, existing: r.existing });
+          pipeSessions.attach(msg.sid, msg.chan, mux, Number(msg.offset) || 0);
+        } catch (e) { mux.control({ op: 'session-error', chan: msg.chan, error: e.message }); }
+        return;
+      }
+      if (msg.op === 'attach-pipe-session') {
+        try {
+          const st = pipeSessions.stat(msg.sid);
+          mux.control({ op: 'pipe-session-open', chan: msg.chan, sid: msg.sid, pid: st.pid, existing: true, exited: st.exited });
+          pipeSessions.attach(msg.sid, msg.chan, mux, Number(msg.offset) || 0);
+        } catch (e) { mux.control({ op: 'session-error', chan: msg.chan, error: e.message }); }
+        return;
+      }
+      if (msg.op === 'kill-pipe-session') { try { pipeSessions.kill(msg.sid); } catch { } return; }
       if (msg.op === 'open-session') {
         try {
           const { chan, cmd, args, cols, rows, cwd, env } = msg;
@@ -226,7 +364,8 @@ const server = net.createServer((sock) => {
       if (!authed) return;
       if (chan === 1 && upgrade) { upgrade.data(buf); return; }
       const sx = sessions.get(chan);
-      if (sx) { try { sx.proc.write(buf.toString('utf-8')); } catch { } mux.credit(chan, buf.length); }
+      if (sx) { try { sx.proc.write(buf.toString('utf-8')); } catch { } mux.credit(chan, buf.length); return; }
+      if (pipeSessions.writeStdin(mux, chan, buf)) { mux.credit(chan, buf.length); }
     },
     onDead() {
       // connection gone: dtach-attach ptys are DETACH points — killing the
@@ -235,6 +374,7 @@ const server = net.createServer((sock) => {
       // underlying dtach session keeps running for the next connect.
       for (const { proc } of sessions.values()) { try { proc.kill(); } catch { } }
       sessions.clear();
+      pipeSessions.detachAll(mux);
     },
   });
 });
