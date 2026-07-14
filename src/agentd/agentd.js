@@ -278,6 +278,41 @@ const pipeSessions = {
   },
 };
 
+// ── M5+: REVERSE TCP FORWARD registry ("互挂云盘" tunnel — the NAT-traversal
+// primitive). The server registers a listener; we bind 127.0.0.1:<port> on
+// THIS device and push every accepted connection back over the mux as a new
+// byte channel (chan ids from 0x40000000 up — never collides with the
+// server-allocated 2..N space). The listener OUTLIVES link drops: on mux
+// death it is disowned (accepts fail fast) and the reconnecting server
+// re-owns it with the SAME port, so a remote rclone mount pointing at the
+// port heals without remounting. Loopback bind only — never a general proxy.
+const reverseListeners = new Map(); // port → { server, owner: mux|null }
+let pushChanSeq = 0x40000000;
+function reverseListen(mux, msg) {
+  const want = Number(msg.port) || 0;
+  const existing = want ? reverseListeners.get(want) : null;
+  if (existing) { existing.owner = mux; mux.control({ op: 'listen-open', id: msg.id, port: want }); return; }
+  const srv = net.createServer((tsock) => {
+    const L = reverseListeners.get(srv._vsPort);
+    const owner = L && L.owner;
+    if (!owner || owner._dead) { tsock.destroy(); return; }
+    const chan = pushChanSeq++;
+    owner._tcpChans.set(chan, tsock);
+    owner.control({ op: 'tcp-accept', port: srv._vsPort, chan }); // MUST precede any data frames
+    tsock.on('data', (d) => { try { if (!owner.data(chan, d)) tsock.pause(); } catch { } });
+    tsock.on('close', () => { owner._tcpChans.delete(chan); try { owner.control({ op: 'tcp-close', chan }); } catch { } });
+    tsock.on('error', () => { });
+  });
+  srv.on('error', (e) => { try { mux.control({ op: 'listen-open', id: msg.id, error: e.message }); } catch { } });
+  srv.listen(want, '127.0.0.1', () => {
+    const port = srv.address().port;
+    srv._vsPort = port;
+    reverseListeners.set(port, { server: srv, owner: mux });
+    log(`reverse-forward listening on 127.0.0.1:${port}`);
+    mux.control({ op: 'listen-open', id: msg.id, port });
+  });
+}
+
 // ── serve ──
 try { fs.unlinkSync(SOCK); } catch { }
 // One connection handler for EVERY transport: local unix socket accepts AND
@@ -514,11 +549,19 @@ function serveConnection(sock) {
           const tsock = net.connect({ host: '127.0.0.1', port });
           const chanT = msg.chan;
           tsock.on('connect', () => mux.control({ op: 'tcp-open', id: msg.id, chan: chanT }));
-          tsock.on('data', (d) => { mux.data(chanT, d); });
+          tsock.on('data', (d) => { try { if (!mux.data(chanT, d)) tsock.pause(); } catch { } });
           tsock.on('close', () => { tcpChans.delete(chanT); mux.control({ op: 'tcp-close', chan: chanT }); });
           tsock.on('error', (e) => { tcpChans.delete(chanT); mux.control({ op: 'tcp-open', id: msg.id, chan: chanT, error: e.message }); });
           tcpChans.set(chanT, tsock);
         } catch (e) { mux.control({ op: 'tcp-open', id: msg.id, chan: msg.chan, error: e.message }); }
+        return;
+      }
+      // ── reverse forward (tunnel): bind 127.0.0.1 here, push accepts back ──
+      if (msg.op === 'tcp-listen') { reverseListen(mux, msg); return; }
+      if (msg.op === 'tcp-unlisten') {
+        const L = reverseListeners.get(Number(msg.port));
+        if (L) { try { L.server.close(); } catch { } reverseListeners.delete(Number(msg.port)); }
+        mux.control({ op: 'listen-open', id: msg.id, port: Number(msg.port), closed: true });
         return;
       }
       if (msg.op === 'open-session') {
@@ -561,8 +604,20 @@ function serveConnection(sock) {
       if (sx) { try { sx.proc.write(buf.toString('utf-8')); } catch { } mux.credit(chan, buf.length); return; }
       if (pipeSessions.writeStdin(mux, chan, buf)) { mux.credit(chan, buf.length); return; }
       const t = tcpChans.get(chan);
-      if (t) { try { t.write(buf); } catch { } mux.credit(chan, buf.length); }
+      if (t) {
+        // credit only after the socket drains — otherwise a fast peer piles a
+        // whole file transfer into node memory (backpressure, both tcp paths)
+        let ok = false; try { ok = t.write(buf); } catch { }
+        if (ok) mux.credit(chan, buf.length);
+        else t.once('drain', () => { try { mux.credit(chan, buf.length); } catch { } });
+      }
     },
+    onClose(chan) {
+      // peer half-closed a byte channel — tear down the matching local socket
+      const t = tcpChans.get(chan);
+      if (t) { tcpChans.delete(chan); try { t.destroy(); } catch { } }
+    },
+    onWritable(chan) { try { tcpChans.get(chan)?.resume?.(); } catch { } },
     onDead() {
       // connection gone: dtach-attach ptys are DETACH points — killing the
       // attach does NOT kill the dtach session (invariant #1: session survives
@@ -572,10 +627,14 @@ function serveConnection(sock) {
       sessions.clear();
       for (const t of tcpChans.values()) { try { t.destroy(); } catch { } }
       tcpChans.clear();
+      // disown (NOT close) reverse listeners: the port stays bound so a
+      // reconnecting server re-owns it and remote mounts heal in place
+      for (const L of reverseListeners.values()) { if (L.owner === mux) L.owner = null; }
       if (this._discoWatch) { for (const w of this._discoWatch) { try { w.close(); } catch { } } this._discoWatch = null; }
       pipeSessions.detachAll(mux);
     },
   });
+  mux._tcpChans = tcpChans; // reverse-forward accepts push sockets into the owner's map
 }
 const server = net.createServer(serveConnection);
 server.listen(SOCK, () => {

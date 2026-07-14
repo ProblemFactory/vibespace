@@ -6,6 +6,15 @@
 // with SCOPED vsmt_ tokens (src/webdav.js). The remote machine mounts that URL
 // as a normal folder so its own processes see VibeSpace's files.
 //
+// TRANSPORT (2.148.0, user directive "不应该通过tailscale/公网"): the PRIMARY
+// path is the agentd TUNNEL — DeviceManager.reverseForward binds a loopback
+// port ON THE REMOTE whose accepted connections ride the device link (ssh
+// stdio or wss dial-out) back to OUR OWN 127.0.0.1:<serverPort>. The remote
+// mounts http://127.0.0.1:<port>/dav — NAT-traversal by construction, zero
+// public-URL / VPN dependency, and the daemon keeps the port bound across
+// link drops (reconnecting server re-owns it → mounts heal in place).
+// agentd.publicUrl is only the FALLBACK for hosts without the device agent.
+//
 // OS matrix (the "consider the remote OS" requirement) — chosen per `uname`:
 //   Linux  : rclone webdav mount (FUSE; /dev/fuse). Fallback: mount.davfs.
 //   macOS  : rclone webdav mount (macFUSE) if present; else NATIVE mount_webdav
@@ -27,12 +36,13 @@ const { execFile } = require('child_process');
 const RCLONE_PIN = 'v1.65.2';
 
 class HostMounts {
-  /** @param deps { hosts, mountTokens, publicUrl:()=>string|null, rcloneLocalBin:()=>string|null } */
-  constructor({ dataDir, hosts, mountTokens, publicUrl, rcloneLocalBin, broadcast }) {
+  /** @param deps { hosts, mountTokens, publicUrl:()=>string|null, localPort:()=>number|null, rcloneLocalBin:()=>string|null } */
+  constructor({ dataDir, hosts, mountTokens, publicUrl, localPort, rcloneLocalBin, broadcast }) {
     this.dataDir = dataDir;
     this.hosts = hosts;
     this.mountTokens = mountTokens;
     this.publicUrl = publicUrl || (() => null);
+    this.localPort = localPort || (() => null);
     this.rcloneLocalBin = rcloneLocalBin || (() => null);
     this.broadcast = broadcast || (() => {});
     this._file = path.join(dataDir, 'host-mounts.json');
@@ -43,7 +53,40 @@ class HostMounts {
     try { const t = this._file + '.tmp'; fs.writeFileSync(t, JSON.stringify(this._state, null, 2), { mode: 0o600 }); fs.renameSync(t, this._file); } catch { }
   }
   _notify() { this.broadcast({ type: 'host-mounts-updated', mounts: this.list() }); }
-  list() { return this._state.mounts.map((m) => ({ id: m.id, hostId: m.hostId, folder: m.folder, mountpoint: m.mountpoint, mode: m.mode, os: m.os, method: m.method, mountedAt: m.mountedAt })); }
+  list() { return this._state.mounts.map((m) => ({ id: m.id, hostId: m.hostId, folder: m.folder, mountpoint: m.mountpoint, mode: m.mode, os: m.os, method: m.method, via: m.tunnelPort ? 'tunnel' : 'public', mountedAt: m.mountedAt })); }
+
+  /** How the remote reaches OUR /dav: agentd tunnel first (NAT-proof — bytes
+   *  ride the device link), agentd.publicUrl second. wantPort pins a previous
+   *  tunnel port (restore/re-mount stability). */
+  async _davBase(hostId, { wantPort = 0, publicUrlFallback = null } = {}) {
+    const lp = this.localPort();
+    if (this.hosts.dataPlaneOn?.() && lp) {
+      try {
+        const dm = await this.hosts.device(hostId);
+        const net = require('net');
+        const { port } = await dm.reverseForward({ port: wantPort || 0, connectLocal: () => net.connect(lp, '127.0.0.1') });
+        return { base: `http://127.0.0.1:${port}`, tunnelPort: port };
+      } catch { /* device unreachable → public fallback below */ }
+    }
+    const pub = this.publicUrl() || publicUrlFallback;
+    if (pub) return { base: String(pub).replace(/\/$/, ''), tunnelPort: null };
+    throw new Error('no path for the remote to reach this instance — turn on agentd.dataPlane (the mount then rides the device tunnel, no public address needed) or set agentd.publicUrl');
+  }
+
+  /** Boot: re-own the device-side tunnel ports for recorded tunnel mounts so
+   *  surviving remote mounts heal after a server restart. Best-effort. */
+  async restore() {
+    const lp = this.localPort();
+    if (!lp || !this.hosts.dataPlaneOn?.()) return;
+    const net = require('net');
+    for (const rec of this._state.mounts) {
+      if (!rec.tunnelPort) continue;
+      try {
+        const dm = await this.hosts.device(rec.hostId);
+        await dm.reverseForward({ port: rec.tunnelPort, connectLocal: () => net.connect(lp, '127.0.0.1') });
+      } catch { }
+    }
+  }
 
   // ── ssh/device helpers (run the SAME argv either way) ──
   async _run(hostId, cmd, args, { input } = {}) {
@@ -114,13 +157,12 @@ class HostMounts {
   }
 
   /** Mount THIS VibeSpace's <folder> on the remote host as <mountpoint>. */
-  async mountOnHost(hostId, { folder, mode = 'ro', mountpoint } = {}) {
-    const base = this.publicUrl();
-    if (!base) throw new Error('VibeSpace public URL not configured (setting agentd.publicUrl) — the remote needs a reachable https/http address to mount this instance');
+  async mountOnHost(hostId, { folder, mode = 'ro', mountpoint, publicUrlFallback } = {}) {
+    const { base, tunnelPort } = await this._davBase(hostId, { publicUrlFallback });
     const abs = path.resolve(String(folder || os.homedir()));
     const share = this.mountTokens.mint({ name: 'host:' + hostId, root: abs, mode: mode === 'rw' ? 'rw' : 'ro' });
     const shareToken = share.raw, shareTokenId = share.rec.id;
-    const davUrl = base.replace(/\/$/, '') + '/dav';
+    const davUrl = base + '/dav';
     const osKind = await this.detectOS(hostId);
     const home = await this._remoteHome(hostId);
     const mp = mountpoint || `${home}/vibespace-remote/${path.basename(abs) || 'root'}`;
@@ -159,10 +201,10 @@ class HostMounts {
         method = 'rclone-webdav';
       }
     }
-    const rec = { id, hostId, folder: abs, mountpoint: mp, mode, os: osKind, method, tokenId: shareTokenId, mountedAt: Date.now() };
+    const rec = { id, hostId, folder: abs, mountpoint: mp, mode, os: osKind, method, tokenId: shareTokenId, tunnelPort, mountedAt: Date.now() };
     this._state.mounts.push(rec);
     this._save(); this._notify();
-    return { id, mountpoint: mp, os: osKind, method };
+    return { id, mountpoint: mp, os: osKind, method, via: tunnelPort ? 'tunnel' : 'public' };
   }
 
   async unmountOnHost(hostId, mountId) {
@@ -174,6 +216,9 @@ class HostMounts {
       await this._run(hostId, 'cmd', ['/c', `net use ${rec.mountpoint} /delete /y`]);
     }
     try { this.mountTokens.revoke?.(rec.tokenId); } catch { }
+    if (rec.tunnelPort) { // release the device-side listener (best-effort)
+      try { const dm = await this.hosts.device(rec.hostId); await dm.reverseUnforward(rec.tunnelPort); } catch { }
+    }
     this._state.mounts = this._state.mounts.filter((m) => m.id !== mountId);
     this._save(); this._notify();
     return { ok: true };

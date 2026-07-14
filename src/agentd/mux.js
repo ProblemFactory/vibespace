@@ -32,14 +32,19 @@ function encodeFrame(type, chan, payload = Buffer.alloc(0)) {
  *                                 mux.credit(chan, n) as it consumes)
  *   onClose(chan)               — peer half-closed a byte channel
  *   onDead(reason)              — heartbeat death or stream close
+ *   onWritable(chan)            — a previously queued channel's send queue
+ *                                 drained (producers that paused on a false
+ *                                 data() return may resume). Local only — no
+ *                                 wire change.
  */
 class Mux {
-  constructor(stream, { onControl, onData, onClose, onDead, heartbeat = true } = {}) {
+  constructor(stream, { onControl, onData, onClose, onDead, onWritable, heartbeat = true } = {}) {
     this.stream = stream;
     this.onControl = onControl || (() => {});
     this.onData = onData || (() => {});
     this.onCloseChan = onClose || (() => {});
     this.onDead = onDead || (() => {});
+    this.onWritable = onWritable || (() => {});
     this._acc = Buffer.alloc(0);
     this._ctlAcc = Buffer.alloc(0);
     this._sendWin = new Map();  // chan → bytes we may still send
@@ -98,7 +103,7 @@ class Mux {
         this._raw(T.DATA, chan, head.subarray(0, win));
       }
     }
-    if (!q.length) this._sendQ.delete(chan);
+    if (!q.length) { this._sendQ.delete(chan); this.onWritable(chan); }
   }
 
   /** grant the peer n consumed bytes back on a byte channel. */

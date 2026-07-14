@@ -43,6 +43,9 @@ class DeviceManager {
     this._backoffIdx = 0;
     this._connecting = false;
     this._stopped = false;
+    // reverse forwards (port → connectLocal fn) survive the connection object:
+    // re-registered on every reconnect so device-side listeners self-heal
+    this._reverseForwards = new Map();
     try { this._tokens = JSON.parse(fs.readFileSync(this._tokFile, 'utf-8')); } catch { this._tokens = {}; }
   }
 
@@ -171,15 +174,25 @@ class DeviceManager {
             const sessions = new Map(); // chan → { onData, onExit }
             const pending = new Map();  // id → resolve (fs/discovery/cmd/tcp acks)
             this._conn = { mux, info: msg, sessions, pending, nextChan: 2, nextId: 1 };
-            // route byte-channel data + session control to the session handlers
-            mux.onData = (chan, buf) => { sessions.get(chan)?.onData?.(buf); mux.credit(chan, buf.length); };
+            // route byte-channel data + session control to the session handlers.
+            // A handler may set manualCredit and credit as it truly consumes
+            // (backpressure for socket-piping consumers).
+            mux.onData = (chan, buf) => {
+              const s = sessions.get(chan);
+              s?.onData?.(buf);
+              if (!s?.manualCredit) mux.credit(chan, buf.length);
+            };
+            mux.onWritable = (chan) => { sessions.get(chan)?.onWritable?.(); };
             const prevControl = mux.onControl;
             mux.onControl = (m) => {
-              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'cmd-result' || m.op === 'tcp-open') {
-                const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m); } 
+              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'cmd-result' || m.op === 'tcp-open' || m.op === 'listen-open') {
+                const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m); }
                 if (m.op === 'tcp-open' && !m.error) return; // channel stays live
                 return;
               }
+              // reverse forward: the daemon accepted a device-local connection
+              // on a listener we registered — pipe it to our local target
+              if (m.op === 'tcp-accept') { this._onTcpAccept(m); return; }
               if (m.op === 'fs-done') { sessions.get(m.chan)?.onDone?.(m); return; }
               if (m.op === 'stream-start') { const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m); } return; }
               if (m.op === 'stream-exit') { const h = sessions.get(m.chan); sessions.delete(m.chan); h?.onExit?.(m.code, m.error); return; }
@@ -192,6 +205,10 @@ class DeviceManager {
             };
             mux.onDead = () => { this._conn = null; this._log('[agentd] connection lost'); };
             resolve(this._conn);
+            // self-heal reverse forwards: re-own each registered device port
+            for (const [port] of this._reverseForwards) {
+              this._request({ op: 'tcp-listen', port }).catch(() => { });
+            }
             return;
           }
           if (msg.op === 'auth-fail') fail(new Error('agentd auth failed — token mismatch'));
@@ -330,6 +347,44 @@ class DeviceManager {
     handle.write = (b) => conn.mux.data(chan, Buffer.isBuffer(b) ? b : Buffer.from(b));
     handle.close = () => { conn.sessions.delete(chan); conn.mux.closeChan(chan); };
     return handle;
+  }
+
+  // ── REVERSE forward (the tunnel primitive, "互挂云盘"): the daemon binds
+  // 127.0.0.1:<port> ON THE DEVICE; every accepted connection is pushed back
+  // here and piped into connectLocal() (usually our own HTTP port). NAT-proof
+  // by construction — the bytes ride whatever link the device already has
+  // (ssh stdio or wss dial-out). Registration survives reconnects. ──
+  async reverseForward({ port = 0, connectLocal }) {
+    const ack = await this._request({ op: 'tcp-listen', port });
+    this._reverseForwards.set(ack.port, connectLocal);
+    return { port: ack.port };
+  }
+  async reverseUnforward(port) {
+    this._reverseForwards.delete(port);
+    try { await this._request({ op: 'tcp-unlisten', port }); } catch { }
+  }
+  _onTcpAccept(m) {
+    const conn = this._conn;
+    if (!conn) return;
+    const mkLocal = this._reverseForwards.get(m.port);
+    const reject = () => { try { conn.mux.closeChan(m.chan); } catch { } };
+    if (!mkLocal) return reject();
+    let sock;
+    try { sock = mkLocal(); } catch { return reject(); }
+    const { mux, sessions } = conn;
+    sessions.set(m.chan, {
+      manualCredit: true, // credit as the local socket truly drains
+      onData: (b) => {
+        let ok = false; try { ok = sock.write(b); } catch { }
+        if (ok) mux.credit(m.chan, b.length);
+        else sock.once('drain', () => { try { mux.credit(m.chan, b.length); } catch { } });
+      },
+      onClose: () => { try { sock.destroy(); } catch { } },
+      onWritable: () => { try { sock.resume(); } catch { } },
+    });
+    sock.on('data', (d) => { try { if (!mux.data(m.chan, d)) sock.pause(); } catch { } });
+    sock.on('close', () => { if (sessions.delete(m.chan)) { try { mux.closeChan(m.chan); } catch { } } });
+    sock.on('error', () => { });
   }
 
   stop() { this._stopped = true; this._conn?.mux?.destroy(); this._conn = null; }
