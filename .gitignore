@@ -34,3 +34,4 @@ data/task-groups.json
 data/tasks.json
 data/uploads-sync.json
 .claude/worktrees/
+data/bin/vibespace-agentd.js
