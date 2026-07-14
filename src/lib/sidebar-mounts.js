@@ -888,11 +888,13 @@ export function installSidebarMounts(Sidebar) {
         { key: 'gmailClientSecret', label: tr('Custom OAuth client secret'), type: 'password', when: (v) => v.type === 'gmail' && v.gmailClientChoice === 'custom' },
         { key: 'gmailToken', label: tr('Gmail access'), type: 'textarea', placeholder: tr('click "Connect Gmail" below — no terminal needed'), when: is('gmail'),
           hint: tr('This is a SYNC, not a live mount: emails download into the folder as .eml files (read-only archive) and keep syncing while connected.') },
-        { key: 'syncCount', label: tr('Messages to sync (newest N)'), placeholder: '200', when: is('gmail') },
+        { key: 'syncCount', label: tr('Messages to sync (newest N; 0 = everything)'), placeholder: '200', when: is('gmail'),
+          hint: tr('0 syncs the ENTIRE mailbox — archived and spam/trash included when no label filter is set. Large mailboxes take a while (quota-paced); the card shows live progress.') },
         { key: 'groupBy', label: tr('Organize into folders'), type: 'select', when: is('gmail'),
-          options: [['month', tr('By month (YYYY-MM)')], ['day', tr('By day (YYYY-MM-DD)')], ['none', tr('No grouping (flat)')]],
-          hint: tr('Keeps the folder browsable — hundreds of thousands of emails in one flat directory hurt every file tool.') },
-        { key: 'labelIds', label: tr('Labels (comma list, blank = whole mailbox)'), placeholder: 'INBOX', when: is('gmail'), advanced: true, hint: tr('Gmail label ids: INBOX, SENT, STARRED, IMPORTANT, or a custom label id.') },
+          options: [['label-month', tr('By label, then month (Inbox/2026-07)')], ['label-day', tr('By label, then day')], ['month', tr('By month (YYYY-MM)')], ['day', tr('By day (YYYY-MM-DD)')], ['none', tr('No grouping (flat)')]],
+          hint: tr('Label layout files each mail under Inbox / Archive / Sent / Spam / Trash / Drafts (Gmail precedence; "archived" = not in the inbox), with a date folder inside.') },
+        { key: 'labelIds', label: tr('Labels filter (blank = whole mailbox)'), placeholder: tr('blank = everything — or e.g. INBOX, SENT, STARRED'), when: is('gmail'), advanced: true,
+          hint: tr('Comma list of Gmail label ids — use “List labels” after connecting to pick from your real labels.') },
         { key: 'query', label: tr('Search filter (Gmail query, optional)'), placeholder: 'from:boss@example.com newer_than:30d', when: is('gmail'), advanced: true },
         // WebDAV / Nextcloud
         { key: 'url', label: tr('WebDAV URL'), placeholder: 'https://cloud.example.com/remote.php/dav/files/me', when: is('webdav'), hint: tr('Nextcloud: Settings → Files shows this address. Use an app password if you have 2FA.') },
@@ -965,6 +967,51 @@ export function installSidebarMounts(Sidebar) {
       this._wireDriveConnect(ctx);
       this._wireSharedDrivePicker(ctx);
       this._wireGmailConnect(ctx);
+      this._wireGmailLabelsPicker(ctx);
+    },
+
+    // "List labels" next to the Gmail labels filter: real labels from the
+    // account (labels.list, 1 quota unit). Clicking a label APPENDS it to the
+    // comma list (click several to build a multi-label filter); by record id
+    // when editing, by the pasted/connected token in the add dialog.
+    _wireGmailLabelsPicker(ctx, recordId) {
+      const inp = ctx.inputs.labelIds;
+      if (!inp) return;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'mounts-btn';
+      btn.textContent = tr('List labels');
+      btn.style.marginTop = '4px';
+      inp.after(btn);
+      const sync = () => { btn.style.display = inp.style.display; };
+      new MutationObserver(sync).observe(inp, { attributes: true, attributeFilter: ['style'] });
+      sync();
+      btn.onclick = async () => {
+        btn.disabled = true;
+        try {
+          const choice = ctx.inputs.gmailClientChoice?.value;
+          const body = recordId ? { id: recordId } : {
+            token: ctx.inputs.gmailToken?.value || '',
+            clientId: (choice === 'custom' && ctx.inputs.gmailClientId?.value) || '',
+            clientSecret: (choice === 'custom' && ctx.inputs.gmailClientSecret?.value) || '',
+            clientPreset: (choice && choice !== 'custom' && choice) || '',
+          };
+          if (!recordId && !String(body.token).trim()) throw new Error(tr('Connect Gmail first (the token field must be filled)'));
+          const r = await api('/api/mounts/gmail-labels', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } });
+          const labels = r.labels || [];
+          if (!labels.length) { showToast(tr('No labels found')); return; }
+          const rect = btn.getBoundingClientRect();
+          showContextMenu(rect.left, rect.bottom + 4, labels.map((l) => ({
+            label: l.name + (l.type === 'user' ? ' •' : ''),
+            action: () => {
+              const cur = inp.value.split(',').map((x) => x.trim()).filter(Boolean);
+              if (!cur.includes(l.id)) cur.push(l.id);
+              inp.value = cur.join(', ');
+            },
+          })));
+        } catch (e) { showToast(e.message || tr('Failed'), { type: 'error' }); }
+        finally { btn.disabled = false; }
+      };
     },
 
     // "Connect Gmail" guided OAuth — same pattern as the Drive flow but over
@@ -1201,7 +1248,7 @@ export function installSidebarMounts(Sidebar) {
     // params) included — fetched decrypted from GET /api/mounts/:id/config, so
     // the user reads and edits every value directly (single-user instance).
 
-    _mountEditFields(cfg) {
+    _mountEditFields(cfg, presets = []) {
       // [key, label, placeholder, currentValue] per type. `cfg` is the DECRYPTED
       // config from /api/mounts/:id/config, so every value below is the real,
       // current setting (prefilled), secrets included.
@@ -1219,7 +1266,7 @@ export function installSidebarMounts(Sidebar) {
         if (type === 'rclone') return [['remotePath', tr('Remote path (bucket[/prefix])'), 'bucket-name/optional/prefix', cfg.remotePath || '']];
         if (type === 'drive') return [
           ['driveFolder', tr('Folder path (optional)'), 'My Folder/sub', cfg.driveFolder || ''],
-          ['driveMode', tr('Cloud-side scope'), '', cfg.driveMode || 'mydrive'],
+          ['driveMode', tr('Cloud-side scope'), '', cfg.driveMode || 'mydrive', { type: 'select', options: [['mydrive', 'My Drive'], ['shared-with-me', tr('Shared with me')], ['shared-drive', tr('Shared drive (team)')]] }],
           ['teamDriveId', tr('Shared drive id'), '0AbC…', cfg.teamDriveId || ''],
           ['rootFolderId', tr('Folder ID (advanced)'), '1AbC…', cfg.rootFolderId || ''],
         ];
@@ -1242,25 +1289,30 @@ export function installSidebarMounts(Sidebar) {
       ];
       if (type === 'drive') return [
         ['driveFolder', tr('Folder path (optional)'), 'My Folder/sub', cfg.driveFolder || ''],
-        ['driveMode', tr('Cloud-side scope'), '', cfg.driveMode || 'mydrive'],
+        ['driveMode', tr('Cloud-side scope'), '', cfg.driveMode || 'mydrive', { type: 'select', options: [['mydrive', 'My Drive'], ['shared-with-me', tr('Shared with me')], ['shared-drive', tr('Shared drive (team)')]] }],
         ['teamDriveId', tr('Shared drive id'), '0AbC…', cfg.teamDriveId || ''],
         ['rootFolderId', tr('Folder ID (advanced)'), '1AbC…', cfg.rootFolderId || ''],
-        ['token', tr('OAuth token'), '{"access_token":…}', cfg.token || ''],
-        ['clientPreset', tr('Preset client key (blank = custom/built-in)'), '39ai', cfg.clientPreset || ''],
-        ['clientId', tr('OAuth client id (optional)'), '', cfg.clientId || ''],
-        ['clientSecret', tr('OAuth client secret'), '', cfg.clientSecret || ''],
+        ['clientPreset', tr('OAuth client'), '', cfg.clientPreset || '', { type: 'select', options: [['', tr('(custom / built-in client)')], ...presets.map((c) => [c.key, tr('Preset: {name}', { name: c.label })])] }],
+        ['token', tr('OAuth token'), '{"access_token":…}', cfg.token || '', { type: 'textarea' }],
+        ['clientId', tr('Custom OAuth client id (when no preset)'), '', cfg.clientId || ''],
+        ['clientSecret', tr('Custom OAuth client secret'), '', cfg.clientSecret || ''],
       ];
       if (type === 'gmail') return [
         ['syncCount', tr('Messages to sync (newest N)'), '200', cfg.syncCount ? String(cfg.syncCount) : ''],
-        ['groupBy', tr('Organize into folders (month / day / none)'), 'month', cfg.groupBy || ''],
+        ['groupBy', tr('Organize into folders'), '', cfg.groupBy || 'none',
+          { type: 'select', options: [['none', tr('No grouping (flat)')], ['month', tr('By month (YYYY-MM)')], ['day', tr('By day (YYYY-MM-DD)')], ['label-month', tr('By label, then month (Inbox/2026-07)')], ['label-day', tr('By label, then day')]] }],
         ['labelIds', tr('Labels (comma list)'), 'INBOX', cfg.labelIds || ''],
         ['query', tr('Search filter (Gmail query)'), '', cfg.query || ''],
-        ['clientPreset', tr('Preset client key'), '39ai', cfg.clientPreset || ''],
-        ['token', tr('OAuth token (JSON — re-run Connect Gmail to replace)'), '', cfg.token || ''],
+        ['clientPreset', tr('OAuth client'), '', cfg.clientPreset || '', { type: 'select', options: [['', tr('(custom / built-in client)')], ...presets.map((c) => [c.key, tr('Preset: {name}', { name: c.label })])] }],
+        ['token', tr('OAuth token (JSON — re-run Connect Gmail to replace)'), '', cfg.token || '', { type: 'textarea' }],
       ];
       if (type === 'webdav' || type === 'vibespace') return [
         ['url', 'URL', 'https://…', cfg.url || ''],
-        ...(type === 'webdav' ? [['user', tr('User'), '', cfg.user || ''], ['pass', tr('Password'), '', cfg.pass || '']] : []),
+        ...(type === 'webdav' ? [
+          ['vendor', tr('Vendor'), '', cfg.vendor || 'other', { type: 'select', options: [['other', tr('Generic WebDAV')], ['nextcloud', 'Nextcloud']] }],
+          ['user', tr('User'), '', cfg.user || ''],
+          ['pass', tr('Password'), '', cfg.pass || ''],
+        ] : []),
         ['bearerToken', tr('Bearer token'), '', cfg.bearerToken || ''],
       ];
       if (type === 'sftp') return [
@@ -1284,13 +1336,25 @@ export function installSidebarMounts(Sidebar) {
       const { body, close } = createModalShell({ id: 'mount-edit-dialog', title: `${tr('Edit')} "${name}"`, bodyClass: 'mounts-dialog-body', escapeToClose: true });
       const form = document.createElement('form');
       form.className = 'mounts-form';
-      const fields = [['name', tr('Name'), '', name], ...this._mountEditFields(cfg)];
+      let editPresets = [];
+      if (['drive', 'gmail'].includes(cfg.type || 's3')) {
+        try { editPresets = (await api('/api/mounts/drive-defaults')).presets || []; } catch {}
+      }
+      const fields = [['name', tr('Name'), '', name], ...this._mountEditFields(cfg, editPresets)];
       // Mount point: empty = default location — m.path shows the current/default
       // spot as a placeholder (prefilling the computed default would freeze it).
       fields.push(['customPath', tr('Mount point'), m.path || '/absolute/path', cfg.customPath || '']);
       const isRclone = (cfg.type || 's3') === 'rclone' && !cfg.parentId && !cfg.envLocked && cfg.origin !== 'my-storage';
-      form.innerHTML = fields.map(([k, label, ph, val]) =>
-        `<label>${escHtml(label)}<input name="${k}" value="${escHtml(val)}" placeholder="${escHtml(ph)}" autocomplete="off"></label>`).join('')
+      form.innerHTML = fields.map(([k, label, ph, val, opts]) => {
+        if (opts?.type === 'select') {
+          return `<label>${escHtml(label)}<select name="${k}">${(opts.options || []).map(([v, l]) =>
+            `<option value="${escHtml(v)}"${v === val ? ' selected' : ''}>${escHtml(l)}</option>`).join('')}</select></label>`;
+        }
+        if (opts?.type === 'textarea') {
+          return `<label>${escHtml(label)}<textarea name="${k}" placeholder="${escHtml(ph)}" style="min-height:60px;font-size:11px">${escHtml(val)}</textarea></label>`;
+        }
+        return `<label>${escHtml(label)}<input name="${k}" value="${escHtml(val)}" placeholder="${escHtml(ph)}" autocomplete="off"></label>`;
+      }).join('')
         + `<div class="mounts-note">${tr('Applied on save — a connected mount reconnects with the new settings.')}</div>`
         + (isRclone ? `<div class="mounts-note">${tr("Clear a parameter's value to remove it.")}</div>` : '')
         + `<div class="cfg-err"></div>
@@ -1302,16 +1366,6 @@ export function installSidebarMounts(Sidebar) {
       // dialog (id-based: the record's stored credentials resolve server-side,
       // children through their parent).
       if ((cfg.type || 's3') === 'drive') {
-        const dmInput = form.querySelector('[name="driveMode"]');
-        if (dmInput) {
-          const sel = document.createElement('select');
-          sel.name = 'driveMode';
-          for (const [v, label] of [['mydrive', 'My Drive'], ['shared-with-me', tr('Shared with me')], ['shared-drive', tr('Shared drive (team)')]]) {
-            const o = document.createElement('option'); o.value = v; o.textContent = label; sel.appendChild(o);
-          }
-          sel.value = ['mydrive', 'shared-with-me', 'shared-drive'].includes(dmInput.value) ? dmInput.value : 'mydrive';
-          dmInput.replaceWith(sel);
-        }
         const tdInput = form.querySelector('[name="teamDriveId"]');
         if (tdInput) {
           const pick = document.createElement('button');
@@ -1337,6 +1391,11 @@ export function installSidebarMounts(Sidebar) {
           };
           tdInput.after(pick);
         }
+      }
+      // Gmail records: labels picker over the record's stored credentials
+      if ((cfg.type || 's3') === 'gmail') {
+        const li = form.querySelector('[name="labelIds"]');
+        if (li) this._wireGmailLabelsPicker({ inputs: { labelIds: li } }, m.id);
       }
       // Drive-backed records get the guided re-auth right in the edit dialog
       // (the error-line button only shows once a mount has FAILED).

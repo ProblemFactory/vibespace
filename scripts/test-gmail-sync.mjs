@@ -34,7 +34,11 @@ const srv = http.createServer((req, res) => {
   }
   if (u.pathname.includes('/messages/')) {
     const id = u.pathname.split('/').pop();
-    return send({ id, internalDate: MSGS[id].internalDate, raw: MSGS[id].raw });
+    const labelIds = id === 'm1aaaa11' ? ['INBOX'] : id === 'm2bbbb22' ? [] : ['SENT'];
+    return send({ id, internalDate: MSGS[id].internalDate, raw: MSGS[id].raw, labelIds });
+  }
+  if (u.pathname.endsWith('/labels')) {
+    return send({ labels: [{ id: 'INBOX', name: 'INBOX', type: 'system' }, { id: 'Label_7', name: 'Receipts', type: 'user' }] });
   }
   if (u.pathname.endsWith('/history')) {
     if (phase === 'expired') return res.writeHead(404).end('{}');
@@ -106,6 +110,25 @@ await gs._syncOnce(w2).catch(() => {});
 check('dedup works across subfolders', subs.flatMap((d) => fs.readdirSync(path.join(dir2, d))).filter((f) => f.endsWith('.eml')).length >= 2);
 gs.stop('mnt-g');
 fs.rmSync(dir2, { recursive: true, force: true });
+
+// label-month layout: Inbox/ + Archive/ subtrees, dedup across them
+const dir3 = fs.mkdtempSync(path.join(os.tmpdir(), 'gmail-l-'));
+phase = 'seed';
+const w3 = gs.start({ ...cfg, id: 'mnt-l', dir: dir3, groupBy: 'label-month', labelIds: '' });
+for (let i = 0; i < 100 && w3.state !== 'idle' && w3.state !== 'error'; i++) await new Promise((r) => setTimeout(r, 50));
+check('label-month sync reaches idle', w3.state === 'idle', w3.error || '');
+const hasInbox = fs.existsSync(path.join(dir3, 'Inbox')) && fs.readdirSync(path.join(dir3, 'Inbox')).some((d) => /^\d{4}-\d{2}$/.test(d));
+const hasArchive = fs.existsSync(path.join(dir3, 'Archive'));
+check('Inbox/<month>/ + Archive/ created by label precedence', hasInbox && hasArchive, fs.readdirSync(dir3).join(','));
+await gs._syncOnce(w3).catch(() => {});
+const countL = (root) => { let n = 0; const walk = (d, depth) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { if (e.isDirectory() && depth < 2) walk(path.join(d, e.name), depth + 1); else if (e.name.endsWith('.eml')) n++; } }; walk(root, 0); return n; };
+// the 2nd pass is INCREMENTAL (historyId persisted) → m3 arrives with SENT
+check('incremental lands under Sent/ + no duplicates', countL(dir3) === 3 && fs.existsSync(path.join(dir3, 'Sent')), String(countL(dir3)));
+// labels list endpoint
+const labs = await gs.listLabels({ token: cfg.token, clientPreset: 't' });
+check('listLabels returns system+user', labs.length === 2 && labs[0].type === 'system' && labs[1].name === 'Receipts');
+gs.stop('mnt-l');
+fs.rmSync(dir3, { recursive: true, force: true });
 
 gs.stop('mnt-test');
 srv.close();

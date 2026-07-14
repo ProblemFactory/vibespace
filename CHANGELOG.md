@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.135.0 — 2026-07-14
+- **Gmail can now sync the WHOLE mailbox** (user report "why only 981?" — the default INBOX label filter was the cap; archived mail carries no INBOX label and spam/trash are API-excluded by default): the labels filter now defaults to EMPTY = everything (archived + spam/trash included), and **Messages to sync = 0 means everything** (hard cap 200k, quota-paced with the live card progress).
+- **Label-folder layouts**: new "By label, then month/day" grouping files each mail under `Inbox/ Archive/ Sent/ Spam/ Trash/ Drafts/` (Gmail's own precedence — "archived" = not in the inbox) with date folders inside. Default for new Gmail mounts.
+- **Labels picker**: "List labels" in the add AND edit dialogs pulls the account's real labels (system + user) — click to build the comma filter, no more guessing label ids.
+- **Edit dialogs de-text-boxed across storage types**: OAuth client preset and Gmail folder-grouping are real dropdowns, big JSON tokens moved to textareas, WebDAV vendor became an editable select (it wasn't even patchable server-side before).
+
 ## 2.134.4 — 2026-07-14
 - **Submounts are now the first-class way to attach Shared Drives / shared-with-me** (user insight — that's where zero-reauth lives: ONE authorized Google credential, N children each pointing at a different cloud-side scope): the "New submount" dialog under a Drive connection gets the **List shared drives** picker (over the parent's stored credentials, no token pasting), scope-conditional fields (the Shared-drive row only shows for that scope), and the single-shared-folder **Folder ID** field.
 

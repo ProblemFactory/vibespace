@@ -2636,6 +2636,11 @@ app.post('/api/mounts/gmail-auth/callback', async (req, res) => {
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.post('/api/mounts/gmail-auth/cancel', (req, res) => { mounts.gmail.cancelAuth(); res.json({ success: true }); });
+// Labels picker (2.135.0): the account's real labels for the sync filter.
+app.post('/api/mounts/gmail-labels', async (req, res) => {
+  try { res.json({ labels: await mounts.listGmailLabels(req.body || {}) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
 // Instance-preset Google clients for the UI picker: keys+labels ONLY, never secrets.
 app.get('/api/mounts/drive-defaults', (req, res) => {
   const presets = require('./src/mounts').MountManager.drivePresets().map((c) => ({ key: c.key, label: c.label }));
