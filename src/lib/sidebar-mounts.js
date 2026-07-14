@@ -1,7 +1,7 @@
 // Sidebar "Mounts" tab — rclone S3 mounts + share minting (collaboration P1).
 // Third tab next to Folders | Groups: my-storage card (env-provisioned),
 // mount list with live status, share-a-folder minting, import-a-link.
-import { createModalShell, showToast, showConfirmDialog, copyText, escHtml } from './utils.js';
+import { createModalShell, showToast, showConfirmDialog, showContextMenu, copyText, escHtml } from './utils.js';
 import { setupDirAutocomplete } from './autocomplete.js';
 import { t as tr } from './i18n.js'; // sidebar cluster convention: local `t` is pervasively a task var
 
@@ -418,6 +418,11 @@ export function installSidebarMounts(Sidebar) {
         { key: 'name', label: tr('Name'), value: `${cred.name}-`, placeholder: 'datasets' },
         { key: pathField.key, label: pathField.label, placeholder: pathField.placeholder },
         ...(type === 's3' ? [{ key: 'prefix', label: tr('Prefix (optional)'), placeholder: 'sub/path' }] : []),
+        ...(type === 'drive' ? [
+          { key: 'driveMode', label: tr('Cloud-side scope'), type: 'select',
+            options: [['mydrive', 'My Drive'], ['shared-with-me', tr('Shared with me')], ['shared-drive', tr('Shared drive (team)')]] },
+          { key: 'teamDriveId', label: tr('Shared drive id (for the Shared drive scope)'), placeholder: '0AbC…' },
+        ] : []),
         { key: 'customPath', label: tr('Mount point (blank = default)'), placeholder: '/absolute/path' },
         { key: 'mode', label: tr('Access'), type: 'select', options: [['rw', 'Read-write'], ['ro', 'Read-only']] },
       ], tr('Create & connect'), async (v, { close }) => {
@@ -828,6 +833,12 @@ export function installSidebarMounts(Sidebar) {
         { key: 'driveFolder', label: tr('Folder (optional, blank = whole Drive)'), placeholder: 'Projects/Data', when: is('drive') },
         { key: 'clientId', label: tr('Custom OAuth client ID (optional)'), placeholder: tr('leave blank to use the built-in client'), when: is('drive'), hint: tr("Advanced: your own Google Cloud OAuth client — avoids rclone's shared quota. Used by Connect too.") },
         { key: 'clientSecret', label: tr('Custom OAuth client secret (optional)'), type: 'password', when: is('drive') },
+        { key: 'driveMode', label: tr('Cloud-side scope'), type: 'select', when: is('drive'),
+          options: [['mydrive', 'My Drive'], ['shared-with-me', tr('Shared with me')], ['shared-drive', tr('Shared drive (team)')]],
+          hint: tr('“Shared with me” and Shared drives are separate spaces in Google Drive — this picks which one the mount shows; the folder path above is inside it.') },
+        { key: 'teamDriveId', label: tr('Shared drive'), placeholder: tr('click “List shared drives” (needs access above) or paste an id'), when: is('drive') },
+        { key: 'rootFolderId', label: tr('Folder ID (advanced — mount ONE shared folder)'), placeholder: '1AbC…', when: is('drive'), advanced: true,
+          hint: tr('From the folder’s Drive URL. Mounts just that folder — the way to mount a single folder someone shared with you (keep scope = My Drive).') },
         // WebDAV / Nextcloud
         { key: 'url', label: tr('WebDAV URL'), placeholder: 'https://cloud.example.com/remote.php/dav/files/me', when: is('webdav'), hint: tr('Nextcloud: Settings → Files shows this address. Use an app password if you have 2FA.') },
         { key: 'vendor', label: tr('Vendor'), type: 'select', options: [['other', tr('Generic WebDAV')], ['nextcloud', 'Nextcloud']], when: is('webdav') },
@@ -885,6 +896,42 @@ export function installSidebarMounts(Sidebar) {
       });
       // Google Drive: guided OAuth — no terminal needed
       this._wireDriveConnect(ctx);
+      this._wireSharedDrivePicker(ctx);
+    },
+
+    // "List shared drives" button next to the teamDriveId input: uses the
+    // token already in the dialog (pasted or from the guided flow) to run
+    // `rclone backend drives` server-side and pick from a menu.
+    _wireSharedDrivePicker(ctx) {
+      const inp = ctx.inputs.teamDriveId;
+      if (!inp) return;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'mounts-btn';
+      btn.textContent = tr('List shared drives');
+      btn.style.marginTop = '4px';
+      inp.after(btn);
+      const sync = () => { btn.style.display = inp.style.display; };
+      new MutationObserver(sync).observe(inp, { attributes: true, attributeFilter: ['style'] });
+      sync();
+      btn.onclick = async () => {
+        btn.disabled = true;
+        try {
+          const body = { token: ctx.inputs.token?.value || '', clientId: ctx.inputs.clientId?.value || '', clientSecret: ctx.inputs.clientSecret?.value || '' };
+          if (!body.token.trim()) throw new Error(tr('Connect Google Drive first (the token field must be filled)'));
+          const r = await api('/api/mounts/shared-drives', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } });
+          const drives = r.drives || [];
+          if (!drives.length) { showToast(tr('No shared drives visible to this account')); return; }
+          const rect = btn.getBoundingClientRect();
+          showContextMenu(rect.left, rect.bottom + 4, drives.map((d) => ({
+            label: d.name, onClick: () => {
+              inp.value = d.id;
+              const dm = ctx.inputs.driveMode; if (dm) dm.value = 'shared-drive';
+            },
+          })));
+        } catch (e) { showToast(e.message || tr('Failed'), { type: 'error' }); }
+        finally { btn.disabled = false; }
+      };
     },
 
     // Inject a "Connect Google Drive" button + guided flow into the add-mount
@@ -1015,7 +1062,12 @@ export function installSidebarMounts(Sidebar) {
           ['prefix', tr('Prefix (optional)'), 'sub/path', cfg.prefix || ''],
         ];
         if (type === 'rclone') return [['remotePath', tr('Remote path (bucket[/prefix])'), 'bucket-name/optional/prefix', cfg.remotePath || '']];
-        if (type === 'drive') return [['driveFolder', tr('Folder path (optional)'), 'My Folder/sub', cfg.driveFolder || '']];
+        if (type === 'drive') return [
+          ['driveFolder', tr('Folder path (optional)'), 'My Folder/sub', cfg.driveFolder || ''],
+          ['driveMode', tr('Cloud-side scope (mydrive / shared-with-me / shared-drive)'), 'mydrive', cfg.driveMode || ''],
+          ['teamDriveId', tr('Shared drive id'), '0AbC…', cfg.teamDriveId || ''],
+          ['rootFolderId', tr('Folder ID (advanced)'), '1AbC…', cfg.rootFolderId || ''],
+        ];
         if (type === 'sftp') return [['sshPath', tr('Remote path'), '/data', cfg.sshPath || '']];
         return [];
       }
@@ -1035,6 +1087,9 @@ export function installSidebarMounts(Sidebar) {
       ];
       if (type === 'drive') return [
         ['driveFolder', tr('Folder path (optional)'), 'My Folder/sub', cfg.driveFolder || ''],
+        ['driveMode', tr('Cloud-side scope (mydrive / shared-with-me / shared-drive)'), 'mydrive', cfg.driveMode || ''],
+        ['teamDriveId', tr('Shared drive id'), '0AbC…', cfg.teamDriveId || ''],
+        ['rootFolderId', tr('Folder ID (advanced)'), '1AbC…', cfg.rootFolderId || ''],
         ['token', tr('OAuth token'), '{"access_token":…}', cfg.token || ''],
         ['clientId', tr('OAuth client id (optional)'), '', cfg.clientId || ''],
         ['clientSecret', tr('OAuth client secret'), '', cfg.clientSecret || ''],
