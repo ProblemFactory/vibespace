@@ -370,6 +370,26 @@ class MountManager {
   // rcloneType:'drive'` record (rclone.conf import / custom-backend) is the
   // same thing wearing raw params. We normalize every such record to the
   // native `drive` type so users + code see a single concept.
+  _normalizeOnedriveRecord(m) {
+    if (m.type !== 'rclone' || m.rcloneType !== 'onedrive') return false;
+    const pr = {};
+    for (const [k, v] of Object.entries(m.paramsEnc || {})) { try { pr[k] = this._dec(v); } catch {} }
+    m.type = 'onedrive';
+    if (pr.token && !m.tokenEnc) m.tokenEnc = this._enc(pr.token);
+    if (pr.client_id && !m.clientId) m.clientId = pr.client_id;
+    if (pr.client_secret && !m.clientSecretEnc) m.clientSecretEnc = this._enc(pr.client_secret);
+    if (pr.drive_id && !m.driveId) m.driveId = pr.drive_id;
+    m.driveType = m.driveType || pr.drive_type || 'personal';
+    if (pr.region && !m.region) m.region = pr.region;
+    m.remotePath = m.remotePath || '';
+    const DK = new Set(['token', 'client_id', 'client_secret', 'drive_id', 'drive_type', 'region']);
+    const extra = {};
+    for (const [k, v] of Object.entries(m.paramsEnc || {})) if (!DK.has(k)) extra[k] = v;
+    m.extraParamsEnc = { ...(m.extraParamsEnc || {}), ...extra };
+    delete m.rcloneType; delete m.paramsEnc;
+    return true;
+  }
+
   _normalizeDriveRecord(m) {
     if (m.type !== 'rclone' || m.rcloneType !== 'drive') return false;
     const pr = {};
@@ -393,10 +413,12 @@ class MountManager {
   }
 
   _maybeMigrateDrive() {
-    if (this._state._driveUnified) return;
+    if (this._state._cloudUnified) return;
     let changed = false;
-    for (const m of this._state.mounts) if (this._normalizeDriveRecord(m)) changed = true;
-    this._state._driveUnified = true;
+    for (const m of this._state.mounts) {
+      if (this._normalizeDriveRecord(m) || this._normalizeOnedriveRecord(m)) changed = true;
+    }
+    this._state._cloudUnified = true;
     if (changed) this._save();
   }
 
@@ -529,6 +551,7 @@ class MountManager {
       case 'rclone': return `${m.rcloneType}:${m.remotePath || ''}`;
       case 'cephfs': return `CephFS ${m.cephPath || '/'} @ ${(m.cephMonHosts || '').split(',')[0] || '?'}`;
       case 'gmail': return 'Gmail' + (m.email ? `: ${m.email}` : '') + (m.query ? ` (${m.query})` : '');
+      case 'onedrive': return 'OneDrive' + (m.driveType && m.driveType !== 'personal' ? ` (${m.driveType})` : '') + (m.remotePath ? `: ${m.remotePath}` : '');
       default: return `${m.bucket}${m.prefix ? '/' + m.prefix : ''} @ ${m.endpoint}`;
     }
   }
@@ -585,7 +608,7 @@ class MountManager {
         ...base, type: p.type || 's3',
         bucket: m.bucket, prefix: m.prefix, remotePath: m.remotePath,
         driveFolder: m.driveFolder, driveMode: m.driveMode, teamDriveId: m.teamDriveId, rootFolderId: m.rootFolderId,
-        sshPath: m.sshPath,
+        driveType: p.driveType, sshPath: m.sshPath,
       };
     }
     const out = { ...base, type: m.type || 's3' };
@@ -603,6 +626,12 @@ class MountManager {
         Object.assign(out, {
           token: dec(m.tokenEnc), clientId: m.clientId, clientSecret: dec(m.clientSecretEnc), clientPreset: m.clientPreset,
           syncCount: m.syncCount, labelIds: m.labelIds, query: m.query, groupBy: m.groupBy, email: m.email,
+        });
+        break;
+      case 'onedrive':
+        Object.assign(out, {
+          token: dec(m.tokenEnc), remotePath: m.remotePath, driveId: m.driveId, driveType: m.driveType || 'personal',
+          region: m.region, clientId: m.clientId, clientSecret: dec(m.clientSecretEnc),
         });
         break;
       case 'webdav': case 'vibespace':
@@ -634,6 +663,18 @@ class MountManager {
 
   add(cfg) {
     // ONE Google Drive: a custom-added rclone-drive normalizes to native drive
+    if ((cfg.type === 'rclone') && (cfg.rcloneType === 'onedrive')) {
+      const pr = cfg.params || {};
+      cfg = { ...cfg, type: 'onedrive',
+        token: cfg.token || pr.token,
+        remotePath: cfg.remotePath || '',
+        driveId: cfg.driveId || pr.drive_id || null,
+        driveType: cfg.driveType || pr.drive_type || 'personal',
+        region: cfg.region || pr.region || null,
+        clientId: cfg.clientId || pr.client_id || null,
+        clientSecret: cfg.clientSecret || pr.client_secret || undefined,
+      };
+    }
     if ((cfg.type === 'rclone') && (cfg.rcloneType === 'drive')) {
       const pr = cfg.params || {};
       cfg = { ...cfg, type: 'drive',
@@ -708,6 +749,22 @@ class MountManager {
           query: String(cfg.query || ''),
           email: cfg.email ? String(cfg.email) : null,
           mode: 'ro', // read-only archive by design
+        });
+        break;
+      }
+      case 'onedrive': {
+        if (!cfg.token) throw new Error('token required — use "Connect OneDrive" (guided sign-in)');
+        let tok = String(cfg.token).trim();
+        const jm = tok.match(/\{[\s\S]*\}/); if (jm) tok = jm[0];
+        try { JSON.parse(tok); } catch { throw new Error('token must be the JSON printed by rclone authorize'); }
+        Object.assign(m, {
+          tokenEnc: this._enc(tok),
+          remotePath: String(cfg.remotePath || cfg.driveFolder || '').replace(/^\/+|\/+$/g, ''),
+          driveId: cfg.driveId ? String(cfg.driveId).trim() : null,
+          driveType: cfg.driveType || 'personal',
+          region: cfg.region || null,
+          clientId: cfg.clientId || null,
+          clientSecretEnc: cfg.clientSecret ? this._enc(cfg.clientSecret) : null,
         });
         break;
       }
@@ -830,6 +887,9 @@ class MountManager {
           m.remotePath = String(cfg.remotePath).replace(/^\/+/, '');
         }
         break;
+      case 'onedrive':
+        m.remotePath = String(cfg.remotePath || cfg.driveFolder || '').replace(/^\/+|\/+$/g, '');
+        break;
       case 'drive':
         m.driveFolder = String(cfg.driveFolder || '').replace(/^\/+|\/+$/g, '');
         if (cfg.driveMode !== undefined) m.driveMode = MountManager._driveMode(cfg.driveMode);
@@ -929,7 +989,7 @@ class MountManager {
     // bucket/keys come from env and a change re-imports) — name, mountpoint
     // and mode are the only editable fields (user directive).
     const envLocked = m.origin === 'my-storage';
-    const connectionKeys = ['endpoint', 'bucket', 'prefix', 'accessKey', 'secretKey', 'sessionToken', 'rcloneType', 'remotePath', 'params', 'driveFolder', 'driveMode', 'teamDriveId', 'rootFolderId', 'token', 'clientId', 'clientPreset', 'clientSecret', 'syncCount', 'labelIds', 'query', 'groupBy', 'url', 'user', 'pass', 'bearerToken', 'sshHost', 'sshUser', 'sshPort', 'sshPath', 'keyPath', 'cephMonHosts', 'cephFsName', 'cephPath', 'cephUser', 'cephSecret'];
+    const connectionKeys = ['endpoint', 'bucket', 'prefix', 'accessKey', 'secretKey', 'sessionToken', 'rcloneType', 'remotePath', 'params', 'driveFolder', 'driveMode', 'teamDriveId', 'rootFolderId', 'token', 'clientId', 'clientPreset', 'clientSecret', 'syncCount', 'labelIds', 'query', 'groupBy', 'driveId', 'driveType', 'region', 'url', 'user', 'pass', 'bearerToken', 'sshHost', 'sshUser', 'sshPort', 'sshPath', 'keyPath', 'cephMonHosts', 'cephFsName', 'cephPath', 'cephUser', 'cephSecret'];
     if (envLocked && connectionKeys.some((k) => patch[k] !== undefined && patch[k] !== '')) {
       throw new Error('This storage is provisioned by your deployment — its connection settings can\'t be edited here (name and mount point can).');
     }
@@ -998,6 +1058,15 @@ class MountManager {
         if (scopeChanged) { try { fs.rmSync(path.join(this.pathOf(m), '.vibespace-gmail-state.json'), { force: true }); } catch { } }
         break;
       }
+      case 'onedrive':
+        if (patch.remotePath !== undefined) m.remotePath = String(patch.remotePath || '').replace(/^\/+|\/+$/g, '');
+        if (patch.driveId !== undefined) m.driveId = patch.driveId ? String(patch.driveId).trim() : null;
+        if (patch.driveType !== undefined) m.driveType = patch.driveType || 'personal';
+        if (patch.region !== undefined) m.region = patch.region || null;
+        setIf('clientId');
+        if (patch.clientSecret) m.clientSecretEnc = this._enc(String(patch.clientSecret));
+        if (patch.token) { let t = String(patch.token).trim(); const jm = t.match(/\{[\s\S]*\}/); if (jm) t = jm[0]; JSON.parse(t); m.tokenEnc = this._enc(t); }
+        break;
       case 'drive':
         if (patch.driveFolder !== undefined) m.driveFolder = String(patch.driveFolder || '').replace(/^\/+|\/+$/g, '');
         if (patch.driveMode !== undefined) m.driveMode = MountManager._driveMode(patch.driveMode);
@@ -1120,6 +1189,16 @@ class MountManager {
         else if (m.driveMode === 'shared-with-me') env[P('SHARED_WITH_ME')] = 'true';
         if (m.driveMode === 'shared-drive' && m.teamDriveId) env[P('TEAM_DRIVE')] = m.teamDriveId;
         remote = `${R}:${m.driveFolder || ''}`;
+        break;
+      }
+      case 'onedrive': {
+        env[P('TYPE')] = 'onedrive';
+        env[P('TOKEN')] = this._dec(m.tokenEnc);
+        if (m.driveId) env[P('DRIVE_ID')] = m.driveId;
+        if (m.driveType) env[P('DRIVE_TYPE')] = m.driveType;
+        if (m.region) env[P('REGION')] = m.region;
+        if (m.clientId) { env[P('CLIENT_ID')] = m.clientId; if (m.clientSecretEnc) env[P('CLIENT_SECRET')] = this._dec(m.clientSecretEnc); }
+        remote = `${R}:${m.remotePath || ''}`;
         break;
       }
       case 'webdav':
@@ -1899,15 +1978,18 @@ class MountManager {
     return true;
   }
 
-  startDriveAuth({ clientId, clientSecret, clientPreset } = {}) {
+  // OAuth cloud backends that authorize through rclone's loopback flow — the
+  // union of "native type" (drive/onedrive) and the generic friendly layer.
+  static OAUTH_BACKENDS = ['drive', 'onedrive', 'dropbox', 'box', 'pcloud', 'yandex', 'premiumizeme', 'sharefile', 'hidrive', 'jottacloud'];
+
+  startDriveAuth({ backend = 'drive', clientId, clientSecret, clientPreset } = {}) {
     this.cancelDriveAuth();
     this._driveAuthPreset = clientPreset || null;
-    // Custom OAuth client (own Google Cloud project) = positional args to
-    // `rclone authorize "drive" <id> <secret>`; no explicit client → the
-    // instance-default injected client (VIBESPACE_GDRIVE_CLIENT_ID/SECRET,
-    // e.g. a company client set via helm) → else rclone's built-in client.
-    const authArgs = ['authorize', 'drive'];
-    if (!clientId) {
+    // `rclone authorize "<backend>" [<id> <secret>]`. For drive, no explicit
+    // client falls back to the instance-preset client (VIBESPACE_GDRIVE_*);
+    // other backends use their own custom client or rclone's built-in.
+    const authArgs = ['authorize', backend];
+    if (!clientId && backend === 'drive') {
       const pc = MountManager._driveClient({ clientPreset: this._driveAuthPreset || null });
       if (pc) { clientId = pc.clientId; clientSecret = pc.clientSecret; }
     }
@@ -1964,12 +2046,16 @@ class MountManager {
         const pc = MountManager._driveClient(m); // record's preset (or single default)
         if (pc) { clientId = pc.clientId; clientSecret = pc.clientSecret; }
       }
+    } else if (m.type === 'onedrive') {
+      clientId = m.clientId || undefined;
+      clientSecret = m.clientSecretEnc ? this._dec(m.clientSecretEnc) : undefined;
+      return this.startDriveAuth({ backend: 'onedrive', clientId, clientSecret });
     } else if (m.type === 'rclone' && m.rcloneType === 'drive') {
       const p = (k) => m.paramsEnc?.[k] ? this._dec(m.paramsEnc[k]) : undefined;
       clientId = p('client_id');
       clientSecret = p('client_secret');
     } else {
-      throw new Error('Not a Google Drive connection');
+      throw new Error('Not an OAuth cloud connection');
     }
     return this.startDriveAuth({ clientId, clientSecret });
   }

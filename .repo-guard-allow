@@ -2,3 +2,5 @@
 # Matches here are NOT flagged (line OR matched snippet).
 # UI placeholder for the SSH-key paste textarea (not a real key):
 placeholder.*BEGIN OPENSSH PRIVATE KEY
+# ceph fs authorize example placeholder in CLAUDE.md (rand token, not a real ceph client name):
+client\.vibespace-share-

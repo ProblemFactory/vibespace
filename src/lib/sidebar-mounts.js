@@ -275,7 +275,7 @@ export function installSidebarMounts(Sidebar) {
       }
       // EVERY top-level storage can act as a credential (user directive):
       // ＋ adds a submount (remote:path) under it, for types with a path notion.
-      if (!m.parentId && ['s3', 'rclone', 'drive', 'sftp'].includes(m.type || 's3')) {
+      if (!m.parentId && ['s3', 'rclone', 'drive', 'onedrive', 'sftp'].includes(m.type || 's3')) {
         actions.append(ibtn(MI.plus, tr('Add a submount (a specific bucket/path of this storage)'), () => { this._showAddChildDialog(m); }, isCred ? 'mounts-icon-accent' : ''));
       }
       actions.append(ibtn(MI.pencil, 'Edit connection (path, credentials, name)', () => { this._showEditMountDialog(m); }));
@@ -291,7 +291,7 @@ export function installSidebarMounts(Sidebar) {
       pathEl.title = isCred ? (m.source || '') : `${m.source || ''} → ${m.path}`;
       const tag = document.createElement('span');
       tag.className = 'mounts-typetag';
-      tag.textContent = { s3: 'S3', drive: 'Drive', gmail: 'Gmail', webdav: 'WebDAV', sftp: 'SFTP', vibespace: 'VibeSpace', cephfs: 'CephFS', rclone: (m.source || 'rclone').split(':')[0] }[m.type || 's3'] || m.type;
+      tag.textContent = { s3: 'S3', drive: 'Drive', onedrive: 'OneDrive', gmail: 'Gmail', webdav: 'WebDAV', sftp: 'SFTP', vibespace: 'VibeSpace', cephfs: 'CephFS', rclone: (m.source || 'rclone').split(':')[0] }[m.type || 's3'] || m.type;
       // The path keeps its rtl left-truncation trick in its OWN span — the
       // chip must stay outside the rtl context or bidi reorders it to the end.
       const pt = document.createElement('span');
@@ -360,7 +360,7 @@ export function installSidebarMounts(Sidebar) {
       return row;
     },
 
-    _isDriveBacked(m) { return m.type === 'drive' || (m.type === 'rclone' && m.rcloneType === 'drive'); },
+    _isDriveBacked(m) { return m.type === 'drive' || m.type === 'onedrive' || (m.type === 'rclone' && m.rcloneType === 'drive'); },
 
     // Re-authorize an EXISTING Drive mount/credential whose token died. Same
     // guided flow as adding one (server runs `rclone authorize drive` with the
@@ -433,6 +433,7 @@ export function installSidebarMounts(Sidebar) {
       const pathField = type === 's3' ? { key: 'bucket', label: tr('Bucket'), placeholder: 'bucket-name' }
         : type === 'rclone' ? { key: 'remotePath', label: tr('Remote path (bucket[/prefix])'), placeholder: 'bucket-name/optional/prefix' }
         : type === 'drive' ? { key: 'driveFolder', label: tr('Folder path'), placeholder: 'My Folder/sub' }
+        : type === 'onedrive' ? { key: 'remotePath', label: tr('Folder path'), placeholder: 'Documents/sub' }
         : type === 'sftp' ? { key: 'sshPath', label: tr('Remote path'), placeholder: '/data' }
         : null;
       if (!pathField) { showToast(tr('This storage type doesn’t support submounts'), { type: 'error' }); return; }
@@ -858,7 +859,7 @@ export function installSidebarMounts(Sidebar) {
       const isDriveCustom = (v) => v.type === 'drive' && v.clientChoice === 'custom';
       this._mountsDialog(tr('Connect storage'), [
         { key: 'type', label: tr('Source type'), type: 'select', options: [
-          ['s3', tr('Cloud storage (S3 / MinIO)')], ['drive', 'Google Drive'], ['gmail', 'Gmail'], ['webdav', 'Nextcloud / WebDAV'],
+          ['s3', tr('Cloud storage (S3 / MinIO)')], ['drive', 'Google Drive'], ['onedrive', 'OneDrive'], ['gmail', 'Gmail'], ['webdav', 'Nextcloud / WebDAV'],
           ['sftp', tr('A server over SSH (SFTP)')], ['vibespace', tr('Another VibeSpace')], ['rclone', tr('Custom / advanced (rclone)')],
         ] },
         { key: 'name', label: tr('Name'), placeholder: 'my-mount' },
@@ -896,6 +897,14 @@ export function installSidebarMounts(Sidebar) {
         { key: 'labelIds', label: tr('Labels filter (blank = whole mailbox)'), placeholder: tr('blank = everything — or e.g. INBOX, SENT, STARRED'), when: is('gmail'), advanced: true,
           hint: tr('Comma list of Gmail label ids — use “List labels” after connecting to pick from your real labels.') },
         { key: 'query', label: tr('Search filter (Gmail query, optional)'), placeholder: 'from:boss@example.com newer_than:30d', when: is('gmail'), advanced: true },
+        // OneDrive (native — guided OAuth, first-class fields)
+        { key: 'onedriveToken', label: tr('OneDrive access'), type: 'textarea', placeholder: tr('click "Connect OneDrive" below — no terminal needed'), when: is('onedrive') },
+        { key: 'driveType', label: tr('Account type'), type: 'select', when: is('onedrive'),
+          options: [['personal', tr('Personal')], ['business', tr('Work / School (OneDrive for Business)')], ['documentLibrary', tr('SharePoint document library')]] },
+        { key: 'remotePath', label: tr('Folder (optional, blank = whole drive)'), placeholder: 'Documents/Projects', when: is('onedrive') },
+        { key: 'driveId', label: tr('Drive ID (advanced — a specific/shared drive)'), placeholder: 'b!… (blank = your main drive)', when: is('onedrive'), advanced: true },
+        { key: 'onedriveClientId', label: tr('Custom OAuth client ID (optional — own Azure app)'), placeholder: tr('leave blank to use the built-in client'), when: is('onedrive'), advanced: true },
+        { key: 'onedriveClientSecret', label: tr('Custom OAuth client secret (optional)'), type: 'password', when: is('onedrive'), advanced: true },
         // WebDAV / Nextcloud
         { key: 'url', label: tr('WebDAV URL'), placeholder: 'https://cloud.example.com/remote.php/dav/files/me', when: is('webdav'), hint: tr('Nextcloud: Settings → Files shows this address. Use an app password if you have 2FA.') },
         { key: 'vendor', label: tr('Vendor'), type: 'select', options: [['other', tr('Generic WebDAV')], ['nextcloud', 'Nextcloud']], when: is('webdav') },
@@ -947,6 +956,12 @@ export function installSidebarMounts(Sidebar) {
           else v.clientPreset = v.gmailClientChoice || null;
         }
         delete v.gmailToken; delete v.gmailClientChoice; delete v.gmailClientId; delete v.gmailClientSecret;
+        if (v.type === 'onedrive') {
+          v.token = v.onedriveToken;
+          v.clientId = v.onedriveClientId || null;
+          v.clientSecret = v.onedriveClientSecret || undefined;
+        }
+        delete v.onedriveToken; delete v.onedriveClientId; delete v.onedriveClientSecret;
         const r = await api('/api/mounts', { method: 'POST', body: JSON.stringify(v), headers: { 'Content-Type': 'application/json' } });
         await fetch(`/api/mounts/${r.id}/mount`, { method: 'POST' });
         close(); showToast(tr('Storage connected')); this._renderMounts();
@@ -968,6 +983,48 @@ export function installSidebarMounts(Sidebar) {
       this._wireSharedDrivePicker(ctx);
       this._wireGmailConnect(ctx);
       this._wireGmailLabelsPicker(ctx);
+      this._wireOAuthConnect(ctx, { tokenKey: 'onedriveToken', backend: 'onedrive', label: tr('Connect OneDrive') });
+    },
+
+    // Generic guided OAuth (rclone authorize <backend>) for a native record —
+    // reused by OneDrive and (via edit) any OAuth rclone backend. Mirrors the
+    // Drive connect flow: same-machine completes hands-free, remote pastes the
+    // 127.0.0.1 redirect back.
+    _wireOAuthConnect(ctx, { tokenKey, backend, label, clientIdKey, clientSecretKey }) {
+      const tokenInput = ctx.inputs[tokenKey];
+      if (!tokenInput) return;
+      const wrap = document.createElement('div');
+      wrap.className = 'mounts-drive-connect';
+      const btn = document.createElement('button');
+      btn.type = 'button'; btn.className = 'mounts-btn mounts-btn-primary'; btn.textContent = label;
+      const status = document.createElement('div'); status.className = 'mounts-field-hint';
+      wrap.append(btn, status);
+      tokenInput.before(wrap);
+      const sync = () => { wrap.style.display = tokenInput.style.display; };
+      new MutationObserver(sync).observe(tokenInput, { attributes: true, attributeFilter: ['style'] });
+      sync();
+      let pasteBox = null, poll = null;
+      const stopPoll = () => { clearInterval(poll); poll = null; };
+      const finish = (token) => { stopPoll(); tokenInput.value = token; status.textContent = tr('✓ Connected — finish with the “Connect” button below.'); btn.textContent = tr('Reconnect'); btn.disabled = false; pasteBox?.remove(); pasteBox = null; };
+      btn.onclick = async () => {
+        btn.disabled = true; status.textContent = tr('Preparing authorization…');
+        try {
+          const body = { backend };
+          if (clientIdKey && ctx.inputs[clientIdKey]?.value) { body.clientId = ctx.inputs[clientIdKey].value; body.clientSecret = ctx.inputs[clientSecretKey]?.value || ''; }
+          const r = await api('/api/mounts/gdrive-auth/start', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } });
+          if (r.error) throw new Error(r.error);
+          window.open(r.url, '_blank');
+          status.textContent = tr('A Microsoft sign-in page opened. Approve access, then come back here.');
+          if (!pasteBox) {
+            pasteBox = document.createElement('div');
+            pasteBox.innerHTML = `<div class="mounts-field-hint">${escHtml(tr("If this VibeSpace runs on ANOTHER machine, the final page won't load (address starts with 127.0.0.1) — copy that address and paste it here:"))}</div>`;
+            const inp = document.createElement('input'); inp.placeholder = 'http://127.0.0.1:53682/?state=…&code=…';
+            inp.onchange = async () => { try { status.textContent = tr('Completing…'); const fr = await api('/api/mounts/gdrive-auth/callback', { method: 'POST', body: JSON.stringify({ url: inp.value }), headers: { 'Content-Type': 'application/json' } }); if (fr.error) throw new Error(fr.error); if (fr.token) finish(fr.token); } catch (e) { status.textContent = e.message || tr('Failed'); } };
+            pasteBox.appendChild(inp); wrap.appendChild(pasteBox);
+          }
+          poll = setInterval(async () => { try { const st = await api('/api/mounts/gdrive-auth/status'); if (st.token) finish(st.token); else if (st.error) { stopPoll(); status.textContent = st.error; btn.disabled = false; } else if (!st.running) { stopPoll(); btn.disabled = false; } } catch {} }, 1500);
+        } catch (e) { status.textContent = e.message || tr('Failed to start authorization'); btn.disabled = false; }
+      };
     },
 
     // "List labels" next to the Gmail labels filter: real labels from the
@@ -1264,6 +1321,7 @@ export function installSidebarMounts(Sidebar) {
           ['prefix', tr('Prefix (optional)'), 'sub/path', cfg.prefix || ''],
         ];
         if (type === 'rclone') return [['remotePath', tr('Remote path (bucket[/prefix])'), 'bucket-name/optional/prefix', cfg.remotePath || '']];
+        if (type === 'onedrive') return [['remotePath', tr('Folder path'), 'Documents/sub', cfg.remotePath || '']];
         if (type === 'drive') return [
           ['driveFolder', tr('Folder path (optional)'), 'My Folder/sub', cfg.driveFolder || ''],
           ['driveMode', tr('Cloud-side scope'), '', cfg.driveMode || 'mydrive', { type: 'select', options: [['mydrive', 'My Drive'], ['shared-with-me', tr('Shared with me')], ['shared-drive', tr('Shared drive (team)')]] }],
@@ -1305,6 +1363,14 @@ export function installSidebarMounts(Sidebar) {
         ['query', tr('Search filter (Gmail query)'), '', cfg.query || ''],
         ['clientPreset', tr('OAuth client'), '', cfg.clientPreset || '', { type: 'select', options: [['', tr('(custom / built-in client)')], ...presets.map((c) => [c.key, tr('Preset: {name}', { name: c.label })])] }],
         ['token', tr('OAuth token (JSON — re-run Connect Gmail to replace)'), '', cfg.token || '', { type: 'textarea' }],
+      ];
+      if (type === 'onedrive') return [
+        ['remotePath', tr('Folder (optional)'), 'Documents/Projects', cfg.remotePath || ''],
+        ['driveType', tr('Account type'), '', cfg.driveType || 'personal', { type: 'select', options: [['personal', tr('Personal')], ['business', tr('Work / School')], ['documentLibrary', tr('SharePoint library')]] }],
+        ['driveId', tr('Drive ID (advanced)'), 'b!…', cfg.driveId || ''],
+        ['clientId', tr('Custom OAuth client id (optional)'), '', cfg.clientId || ''],
+        ['clientSecret', tr('Custom OAuth client secret'), '', cfg.clientSecret || ''],
+        ['token', tr('OAuth token (re-run Connect OneDrive to replace)'), '', cfg.token || '', { type: 'textarea' }],
       ];
       if (type === 'webdav' || type === 'vibespace') return [
         ['url', 'URL', 'https://…', cfg.url || ''],
