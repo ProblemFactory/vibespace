@@ -1748,4 +1748,10 @@ export default {
   "Search filter (Gmail query)": "搜索过滤（Gmail 查询式）",
   "OAuth token (JSON — re-run Connect Gmail to replace)": "OAuth token（JSON——重跑“连接 Gmail”可替换）",
   "Preset client key": "预设客户端 key",
+  "Syncing {done}/{total}…": "同步中 {done}/{total}…",
+  "Checking for new mail…": "正在检查新邮件…",
+  "Synced — {n} emails": "已同步——{n} 封邮件",
+  "Sync paused — emails stay in the folder; connect to resume": "同步已暂停——邮件保留在文件夹中；连接以恢复",
+  "Stop syncing (synced emails stay)": "停止同步（已同步邮件保留）",
+  "This is a SYNC, not a live mount: emails download into the folder as .eml files (read-only archive) and keep syncing while connected.": "这是同步而非实时挂载：邮件以 .eml 文件下载到文件夹（只读归档），连接期间持续同步。",
 };

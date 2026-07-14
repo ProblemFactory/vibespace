@@ -252,7 +252,7 @@ export function installSidebarMounts(Sidebar) {
       if (m.mounted) {
         actions.append(
           ibtn(MI.folder, 'Browse in file explorer', () => { this.app.openFileExplorer(m.path); }),
-          ibtn(MI.eject, 'Disconnect', () => api(`/api/mounts/${m.id}/unmount`, { method: 'POST' })),
+          ibtn(MI.eject, m.type === 'gmail' ? tr('Stop syncing (synced emails stay)') : 'Disconnect', () => api(`/api/mounts/${m.id}/unmount`, { method: 'POST' })),
         );
       } else if (!isCred) {
         // Power icon (⏻) in the same icon-button family — the old glyph read
@@ -299,6 +299,28 @@ export function installSidebarMounts(Sidebar) {
       pt.textContent = isCred ? (m.source || '') : m.path;
       pathEl.append(tag, pt);
       row.append(top, pathEl);
+      // Gmail rows: this is a SYNC, not a filesystem — say so, with a live
+      // progress bar while a pass is fetching (server broadcasts throttled
+      // mounts-updated during the pass, so this re-renders as it moves).
+      if (m.type === 'gmail' && !m.parentId) {
+        const sync = document.createElement('div');
+        sync.className = 'mounts-syncline';
+        const prog = m.gmailProgress;
+        if (m.mounted && prog && prog.total > 0) {
+          const pct = Math.min(100, Math.round((prog.done / prog.total) * 100));
+          sync.innerHTML = `<span class="mounts-sync-label">${escHtml(tr('Syncing {done}/{total}…', { done: prog.done, total: prog.total }))}</span>
+            <span class="mounts-syncbar"><i style="width:${pct}%"></i></span>`;
+        } else if (m.mounted && m.gmailState === 'syncing') {
+          sync.innerHTML = `<span class="mounts-sync-label">${escHtml(tr('Checking for new mail…'))}</span>
+            <span class="mounts-syncbar mounts-syncbar-ind"><i></i></span>`;
+        } else if (m.mounted) {
+          const when = m.lastSyncAt ? new Date(m.lastSyncAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+          sync.textContent = tr('Synced — {n} emails', { n: m.gmailCount ?? 0 }) + (when ? ` · ${when}` : '') + (m.email ? ` · ${m.email}` : '');
+        } else {
+          sync.textContent = tr('Sync paused — emails stay in the folder; connect to resume');
+        }
+        row.appendChild(sync);
+      }
       // Row body = the primary action users try anyway: a disconnected row
       // CONNECTS on click, a mounted row opens its folder. Buttons/expanders
       // inside keep their own handlers.
@@ -855,7 +877,8 @@ export function installSidebarMounts(Sidebar) {
           hint: tr('Gmail has no built-in fallback client — pick a preset or provide your own. The client needs the gmail.readonly scope.') },
         { key: 'gmailClientId', label: tr('Custom OAuth client ID'), placeholder: '….apps.googleusercontent.com', when: (v) => v.type === 'gmail' && v.gmailClientChoice === 'custom' },
         { key: 'gmailClientSecret', label: tr('Custom OAuth client secret'), type: 'password', when: (v) => v.type === 'gmail' && v.gmailClientChoice === 'custom' },
-        { key: 'gmailToken', label: tr('Gmail access'), type: 'textarea', placeholder: tr('click "Connect Gmail" below — no terminal needed'), when: is('gmail') },
+        { key: 'gmailToken', label: tr('Gmail access'), type: 'textarea', placeholder: tr('click "Connect Gmail" below — no terminal needed'), when: is('gmail'),
+          hint: tr('This is a SYNC, not a live mount: emails download into the folder as .eml files (read-only archive) and keep syncing while connected.') },
         { key: 'syncCount', label: tr('Messages to sync (newest N)'), placeholder: '200', when: is('gmail') },
         { key: 'labelIds', label: tr('Labels (comma list, blank = whole mailbox)'), placeholder: 'INBOX', when: is('gmail'), advanced: true, hint: tr('Gmail label ids: INBOX, SENT, STARRED, IMPORTANT, or a custom label id.') },
         { key: 'query', label: tr('Search filter (Gmail query, optional)'), placeholder: 'from:boss@example.com newer_than:30d', when: is('gmail'), advanced: true },

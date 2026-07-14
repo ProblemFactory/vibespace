@@ -2912,3 +2912,11 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .window.stage-placeholder .window-content { display: flex; align-items: center; justify-content: center; }
 .stage-placeholder-hint { max-width: 320px; padding: 20px; text-align: center; font-size: 12px; color: var(--text-dim); }
 .window.stage-placeholder .win-close, .window.stage-placeholder .win-minimize, .window.stage-placeholder .win-maximize { display: none; }
+
+/* ── Gmail storage row: sync status + live progress (2.134.1) ── */
+.mounts-syncline { display: flex; align-items: center; gap: 8px; font-size: 10px; color: var(--text-secondary); padding: 2px 0 0 18px; }
+.mounts-sync-label { flex-shrink: 0; }
+.mounts-syncbar { flex: 1; max-width: 140px; height: 4px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 18%, transparent); overflow: hidden; }
+.mounts-syncbar i { display: block; height: 100%; border-radius: 999px; background: var(--accent); transition: width .3s ease; }
+.mounts-syncbar-ind i { width: 30%; animation: mounts-sync-slide 1.2s ease-in-out infinite; }
+@keyframes mounts-sync-slide { 0% { margin-left: 0; } 50% { margin-left: 70%; } 100% { margin-left: 0; } }

@@ -39,7 +39,7 @@ class MountManager {
   constructor({ dataDir, broadcast, getSetting }) {
     // Gmail-as-a-folder engine (2.134.0) — lazy so plain deployments pay nothing
     const { GmailSync } = require('./gmail-sync');
-    this.gmail = new GmailSync({ presets: () => MountManager.drivePresets() });
+    this.gmail = new GmailSync({ presets: () => MountManager.drivePresets(), onProgress: () => this._notify() });
     this.dataDir = dataDir;
     this.broadcast = broadcast || (() => {});
     this._getSetting = getSetting || (() => undefined);
@@ -503,7 +503,7 @@ class MountManager {
         endpoint: conn.endpoint, bucket: conn.bucket, prefix: conn.prefix,
         rcloneType: conn.rcloneType, remotePath: conn.remotePath, driveFolder: conn.driveFolder,
         driveMode: conn.driveMode || (conn.type === 'drive' ? 'mydrive' : undefined), teamDriveId: conn.teamDriveId, clientPreset: conn.clientPreset,
-        ...(m.type === 'gmail' ? (() => { const st = this.gmail.status(m.id); return { email: m.email || st?.email, syncCount: m.syncCount, labelIds: m.labelIds, query: m.query, gmailState: st?.state || null, gmailCount: st?.count ?? null, gmailError: st?.error || null, lastSyncAt: st?.lastSyncAt || null }; })() : {}),
+        ...(m.type === 'gmail' ? (() => { const st = this.gmail.status(m.id); return { email: m.email || st?.email, syncCount: m.syncCount, labelIds: m.labelIds, query: m.query, gmailState: st?.state || null, gmailCount: st?.count ?? null, gmailError: st?.error || null, lastSyncAt: st?.lastSyncAt || null, gmailProgress: st?.progress || null }; })() : {}),
         // secret VALUES never leave the server; keys let the edit dialog offer
         // per-parameter replacement (blank = keep) for custom rclone records
         paramKeys: (conn.type === 'rclone' && !m.parentId) ? Object.keys(conn.paramsEnc || {}) : undefined,
