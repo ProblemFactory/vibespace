@@ -26,8 +26,10 @@ class FileViewer {
     // replay can re-derive it when the temp file is gone (docs/design-
     // dynamic-desktop.md §4b — the zip-PDF case).
     const openSpec = { action: 'openFile', path: filePath, name: fileName, ...(host ? { host } : {}), ...(opts.via ? { via: opts.via } : {}) };
-    // Remote files show a "<host>: " title prefix so it's clear they're not local.
-    const hostPfx = host ? ((app.sidebar?._hostName?.(host) || host) + ': ') : '';
+    // Remote files show a "<host>: " title prefix so it's clear they're not
+    // local. open() is async — resolve the real host NAME (not the raw id).
+    if (host) { try { await app._ensureHostNames?.(); } catch {} }
+    const hostPfx = host ? ((app.hostName?.(host) || host) + ': ') : '';
 
     // Force hex mode
     if (opts.hex) {

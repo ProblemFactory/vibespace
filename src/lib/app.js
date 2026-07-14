@@ -1709,6 +1709,19 @@ class App {
     return keys;
   }
 
+  // Host id → display name, resolved for remote-file window titles etc. Lazily
+  // loaded from /api/hosts and cached (the sidebar's _hostNames is only present
+  // once the Remote tab has rendered, so titles showed the raw host id).
+  hostName(id) { return (this._hostNames && this._hostNames[id]) || id; }
+  async _ensureHostNames() {
+    if (this._hostNames) return this._hostNames;
+    this._hostNames = {};
+    try { const d = await fetchJson('/api/hosts'); for (const h of d?.hosts || []) this._hostNames[h.id] = h.name; } catch {}
+    // keep it fresh when hosts change
+    if (!this._hostNamesWired) { this._hostNamesWired = true; this.ws.onGlobal((m) => { if (m.type === 'hosts-updated' || m.type === 'user-state-updated') this._hostNames = null; }); }
+    return this._hostNames;
+  }
+
   openFile(filePath, fileName, opts) {
     FileViewer.open(this, filePath, fileName, opts);
   }
@@ -1718,11 +1731,13 @@ class App {
     // Front-truncate the path (like the file explorer) so the taskbar/title-bar
     // CSS end-ellipsis keeps the filename visible instead of cutting it off.
     // Remote files carry a "<host>: " prefix (like the explorer) so it's clear
-    // the file is NOT local.
-    const hostPfx = opts.host ? (this.sidebar?._hostName?.(opts.host) || opts.host) + ': ' : '';
-    const title = opts._tempFile ? t('View: {name}', { name: fileName }) : hostPfx + frontTruncate(filePath);
+    // the file is NOT local. Name may not be cached yet — set it now with the
+    // best value, then re-title once _ensureHostNames resolves.
+    const hostPfx = (h) => opts.host ? (h(opts.host) || opts.host) + ': ' : '';
+    const title = opts._tempFile ? t('View: {name}', { name: fileName }) : hostPfx((id) => this.hostName(id)) + frontTruncate(filePath);
     const openSpec = opts._tempFile ? undefined : { action: 'openEditor', path: filePath, name: fileName, ...(opts.host ? { host: opts.host } : {}) };
     const winInfo = this.wm.createWindow({ title, type: 'editor', syncId: opts.syncId, openSpec });
+    if (opts.host && !opts._tempFile) this._ensureHostNames().then(() => { try { this.wm.setTitle(winInfo.id, this.hostName(opts.host) + ': ' + frontTruncate(filePath)); } catch {} });
     winInfo._filePath = filePath; winInfo._fileName = fileName;
     new CodeEditor(winInfo, filePath, fileName, this, opts);
     winInfo.onClose = () => {
