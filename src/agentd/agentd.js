@@ -280,7 +280,9 @@ const pipeSessions = {
 
 // ── serve ──
 try { fs.unlinkSync(SOCK); } catch { }
-const server = net.createServer((sock) => {
+// One connection handler for EVERY transport: local unix socket accepts AND
+// outbound dial-out websockets (Transport B) — the stream shape is identical.
+function serveConnection(sock) {
   let authed = false;
   let upgrade = null;
   const sessions = new Map(); // chan → { proc, credit accounting is per-mux }
@@ -377,12 +379,44 @@ const server = net.createServer((sock) => {
       pipeSessions.detachAll(mux);
     },
   });
-});
+}
+const server = net.createServer(serveConnection);
 server.listen(SOCK, () => {
   try { fs.chmodSync(SOCK, 0o600); } catch { }
   log('listening on ' + SOCK);
 });
 server.on('error', (e) => { log('server error: ' + e.message); process.exit(1); });
+
+// ── Transport B: dial-out (M4-lite). `--dial <wss-url> --dial-token <t>`
+// persists the dial config; every boot re-dials. The outbound ws is served by
+// the SAME connection handler — the server speaks hello over it like any
+// transport (auth still via the device token in hello; the dial token only
+// gates the server's upgrade endpoint). Reconnect with backoff, forever —
+// a NAT'd device keeps itself reachable. ──
+const DIAL_FILE = path.join(STATE, 'dial.json');
+(function setupDial() {
+  const di = process.argv.indexOf('--dial');
+  if (di >= 0) {
+    const cfg = { url: process.argv[di + 1], token: (process.argv[process.argv.indexOf('--dial-token') + 1] || '') };
+    try { fs.writeFileSync(DIAL_FILE, JSON.stringify(cfg), { mode: 0o600 }); } catch { }
+  }
+  let cfg = null;
+  try { cfg = JSON.parse(fs.readFileSync(DIAL_FILE, 'utf-8')); } catch { }
+  if (!cfg?.url) return;
+  const wsMin = require('./ws-min.js');
+  let attempts = 0;
+  const dial = () => {
+    const ws = wsMin.connect(cfg.url, { headers: { 'x-vibespace-dial-token': cfg.token || '' } });
+    let up = false;
+    ws.on('open', () => { up = true; attempts = 0; log('dial-out connected: ' + cfg.url); serveConnection(ws); });
+    ws.on('close', () => {
+      const delay = [1000, 2000, 5000, 15000, 30000][Math.min(4, attempts++)];
+      log(`dial-out ${up ? 'lost' : 'failed'} — retry in ${delay}ms`);
+      setTimeout(dial, delay);
+    });
+  };
+  dial();
+})();
 
 process.on('SIGTERM', () => { log('SIGTERM — exiting (sessions unaffected by design)'); process.exit(0); });
 } // end !--stdio daemon body
