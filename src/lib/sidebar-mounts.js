@@ -1298,7 +1298,7 @@ export function installSidebarMounts(Sidebar) {
         ['clientSecret', tr('Custom OAuth client secret'), '', cfg.clientSecret || ''],
       ];
       if (type === 'gmail') return [
-        ['syncCount', tr('Messages to sync (newest N)'), '200', cfg.syncCount ? String(cfg.syncCount) : ''],
+        ['syncCount', tr('Messages to sync (newest N; 0 = everything)'), '200', cfg.syncCount != null ? String(cfg.syncCount) : ''],
         ['groupBy', tr('Organize into folders'), '', cfg.groupBy || 'none',
           { type: 'select', options: [['none', tr('No grouping (flat)')], ['month', tr('By month (YYYY-MM)')], ['day', tr('By day (YYYY-MM-DD)')], ['label-month', tr('By label, then month (Inbox/2026-07)')], ['label-day', tr('By label, then day')]] }],
         ['labelIds', tr('Labels (comma list)'), 'INBOX', cfg.labelIds || ''],
