@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.136.5 — 2026-07-14
+- **Backlog rows re-laid-out** (real report — text crammed with actions/attribution): in the Task Group detail window the ✓/⊘ actions now sit in a right-aligned cluster separated from the item text; in the Backlog log viewer each item is now TWO rows — the item text + actions on top, the parked-by / claimed-by / resolved-by attribution chips wrapping on a second line below — instead of one flex row where long session names squeezed the text into a one-character-per-line column.
+
 ## 2.136.4 — 2026-07-14
 - **Gmail sync shows the real total again** ("N / total" with a determinate bar), restored after the streaming-seed rewrite dropped it. The total now comes cheaply from `users.getProfile` (whole-mailbox `messagesTotal`) or the label's `messagesTotal` (label filter) — captured once at seed start and persisted, so it survives restarts and the progress bar stays determinate through the whole seed (only a free-text query, which has no cheap total, stays indeterminate). This also fixes the card looking "stuck at Checking for new mail" — with a total it renders proper progress instead.
 
