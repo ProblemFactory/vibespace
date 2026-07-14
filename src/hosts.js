@@ -384,6 +384,40 @@ class HostManager {
     });
   }
 
+  /** M2 remote install: land the agentd bundle into ~/.vibespace/agentd/<ver>/
+   *  + symlink `current`, and provision the host vsht_ token (0600) so the
+   *  standing remote daemon authenticates the server's ssh-bridge connection.
+   *  Bundle + token ride ONE tar over ssh stdin (never argv). Idempotent. */
+  installAgentd(id, bundlePath, version, hostToken) {
+    const h = this.get(id);
+    const { execFileSync } = require('child_process');
+    if (!fs.existsSync(bundlePath)) throw new Error('agentd bundle missing: ' + bundlePath);
+    // stage a tar with two entries: agentd.js + token
+    const os2 = require('os');
+    const stage = fs.mkdtempSync(path.join(os2.tmpdir(), 'vs-agentd-stage-'));
+    try {
+      fs.copyFileSync(bundlePath, path.join(stage, 'agentd.js'));
+      fs.writeFileSync(path.join(stage, 'token'), String(hostToken), { mode: 0o600 });
+      const tar = execFileSync('tar', ['-c', '-C', stage, 'agentd.js', 'token'], { timeout: 15000, maxBuffer: 32 * 1024 * 1024 });
+      const ver = JSON.stringify(String(version));
+      const remote = 'umask 077; D="$HOME/.vibespace/agentd"; mkdir -p "$D/'+String(version).replace(/[^\w.-]/g,'')+'" "$D/state"; '
+        + 'tar -x -C "$D/state"; ' // extracts agentd.js + token into state/ temporarily
+        + 'mv -f "$D/state/agentd.js" "$D/'+String(version).replace(/[^\w.-]/g,'')+'/agentd.js"; '
+        + 'chmod 600 "$D/state/token"; ln -sfn "$D/'+String(version).replace(/[^\w.-]/g,'')+'" "$D/current"; '
+        + 'echo VS-AGENTD-INSTALLED';
+      return new Promise((resolve, reject) => {
+        const child = execFile('ssh', [...this.sshArgs(h, { multiplex: true }), '--', remote],
+          { timeout: 30000 }, (err, stdout, stderr) => {
+            try { fs.rmSync(stage, { recursive: true, force: true }); } catch {}
+            if (err) return reject(new Error((stderr?.toString() || err.message || '').trim().slice(0, 300)));
+            if (!String(stdout).includes('VS-AGENTD-INSTALLED')) return reject(new Error('unexpected response: ' + String(stdout).slice(0, 120)));
+            resolve({ agentdPath: '$HOME/.vibespace/agentd/current/agentd.js' });
+          });
+        child.stdin.end(tar);
+      });
+    } catch (e) { try { fs.rmSync(stage, { recursive: true, force: true }); } catch {}; throw e; }
+  }
+
   /** Remove the integration: unregister the hook from the remote CLI configs
    *  (needs the register script still present — runs BEFORE the rm), then rm
    *  exactly our tool files. Per-session token files (.tok-*) and account key
