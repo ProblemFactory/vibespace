@@ -1717,7 +1717,10 @@ class App {
     this._hideWelcome();
     // Front-truncate the path (like the file explorer) so the taskbar/title-bar
     // CSS end-ellipsis keeps the filename visible instead of cutting it off.
-    const title = opts._tempFile ? t('View: {name}', { name: fileName }) : frontTruncate(filePath);
+    // Remote files carry a "<host>: " prefix (like the explorer) so it's clear
+    // the file is NOT local.
+    const hostPfx = opts.host ? (this.sidebar?._hostName?.(opts.host) || opts.host) + ': ' : '';
+    const title = opts._tempFile ? t('View: {name}', { name: fileName }) : hostPfx + frontTruncate(filePath);
     const openSpec = opts._tempFile ? undefined : { action: 'openEditor', path: filePath, name: fileName, ...(opts.host ? { host: opts.host } : {}) };
     const winInfo = this.wm.createWindow({ title, type: 'editor', syncId: opts.syncId, openSpec });
     winInfo._filePath = filePath; winInfo._fileName = fileName;

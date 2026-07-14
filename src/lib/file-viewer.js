@@ -26,10 +26,12 @@ class FileViewer {
     // replay can re-derive it when the temp file is gone (docs/design-
     // dynamic-desktop.md §4b — the zip-PDF case).
     const openSpec = { action: 'openFile', path: filePath, name: fileName, ...(host ? { host } : {}), ...(opts.via ? { via: opts.via } : {}) };
+    // Remote files show a "<host>: " title prefix so it's clear they're not local.
+    const hostPfx = host ? ((app.sidebar?._hostName?.(host) || host) + ': ') : '';
 
     // Force hex mode
     if (opts.hex) {
-      const winInfo = app.wm.createWindow({ title: t('Hex: {name}', { name: fileName }), type: 'hex-viewer', syncId: opts.syncId, openSpec });
+      const winInfo = app.wm.createWindow({ title: hostPfx + t('Hex: {name}', { name: fileName }), type: 'hex-viewer', syncId: opts.syncId, openSpec });
       winInfo._filePath = filePath; winInfo._fileName = fileName;
       new HexViewer(winInfo, filePath, fileInfo, host);
       return;
@@ -37,7 +39,7 @@ class FileViewer {
 
     // Binary file without a dedicated viewer → hex viewer
     if (fileInfo.isBinary && !hasDedicatedViewer(ext)) {
-      const winInfo = app.wm.createWindow({ title: t('Hex: {name}', { name: fileName }), type: 'hex-viewer', syncId: opts.syncId, openSpec });
+      const winInfo = app.wm.createWindow({ title: hostPfx + t('Hex: {name}', { name: fileName }), type: 'hex-viewer', syncId: opts.syncId, openSpec });
       winInfo._filePath = filePath; winInfo._fileName = fileName;
       new HexViewer(winInfo, filePath, fileInfo, host);
       return;
@@ -53,13 +55,13 @@ class FileViewer {
 
     // HTML: open in CodeEditor with preview toggle (same as markdown)
     if (viewerType === 'html-editor') {
-      const winInfo = app.wm.createWindow({ title: fileName, type: 'editor', syncId: opts.syncId, openSpec });
+      const winInfo = app.wm.createWindow({ title: hostPfx + fileName, type: 'editor', syncId: opts.syncId, openSpec });
       winInfo._filePath = filePath; winInfo._fileName = fileName;
       new CodeEditor(winInfo, filePath, fileName, app, { host });
       return;
     }
 
-    const winInfo = app.wm.createWindow({ title: fileName, type: 'viewer', syncId: opts.syncId, openSpec });
+    const winInfo = app.wm.createWindow({ title: hostPfx + fileName, type: 'viewer', syncId: opts.syncId, openSpec });
     winInfo._filePath = filePath; winInfo._fileName = fileName;
     const container = document.createElement('div'); container.className = 'file-viewer';
     winInfo.content.appendChild(container);
