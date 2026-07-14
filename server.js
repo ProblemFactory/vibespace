@@ -2451,17 +2451,19 @@ const { HostMounts } = require('./src/host-mounts');
 const hostMounts = new HostMounts({
   dataDir: path.join(__dirname, 'data'), hosts, mountTokens,
   publicUrl: () => { try { return serverSetting('agentd.publicUrl') || null; } catch { return null; } },
+  localPort: () => PORT, // the agentd tunnel's target: our own /dav
   broadcast: (msg) => { const j = JSON.stringify(msg); wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(j); } catch {} } }); },
 });
+setTimeout(() => { hostMounts.restore().catch(() => {}); }, 5000); // re-own tunnel ports for surviving remote mounts
 app.get('/api/host-mounts', (req, res) => res.json({ mounts: hostMounts.list() }));
 app.post('/api/host-mounts/:hostId', async (req, res) => {
   try {
-    // publicUrl fallback: derive from the request if the setting is blank
-    let pub = null; try { pub = serverSetting('agentd.publicUrl'); } catch {}
-    if (!pub && req.body?.publicUrl) { pub = String(req.body.publicUrl); }
+    // PRIMARY transport = the agentd tunnel (inside mountOnHost — no public
+    // address needed). The request-derived URL is only the last-resort
+    // fallback for hosts without the device agent.
+    let pub = req.body?.publicUrl ? String(req.body.publicUrl) : null;
     if (!pub) { const proto = req.headers['x-forwarded-proto'] || 'http'; const host = req.headers['x-forwarded-host'] || req.headers.host; if (host) pub = `${proto}://${host}`; }
-    hostMounts.publicUrl = () => pub;
-    res.json(await hostMounts.mountOnHost(req.params.hostId, { folder: req.body?.folder, mode: req.body?.mode, mountpoint: req.body?.mountpoint }));
+    res.json(await hostMounts.mountOnHost(req.params.hostId, { folder: req.body?.folder, mode: req.body?.mode, mountpoint: req.body?.mountpoint, publicUrlFallback: pub }));
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.delete('/api/host-mounts/:hostId/:mountId', async (req, res) => {
