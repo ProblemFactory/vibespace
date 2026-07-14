@@ -25,6 +25,39 @@ const TOKEN_FILE = path.join(STATE, 'token');
 
 fs.mkdirSync(STATE, { recursive: true, mode: 0o700 });
 
+// ── STDIO BRIDGE (M2): `agentd.js --stdio` reaches the STANDING daemon over
+// ssh — ensure the daemon runs (setsid-detached, so it PERSISTS after this
+// bridge / the ssh pipe dies), then pipe our stdin/stdout ↔ its unix socket.
+// The server dials remote via `ssh host -- node <agentd> --stdio`; an ssh drop
+// kills only this bridge, the daemon + its sessions survive (the keeper's
+// persistence, now in the daemon architecture). ──
+if (process.argv.includes('--stdio')) {
+  const netB = require('net');
+  const cpB = require('child_process');
+  const connect = (tries = 0) => {
+    const c = netB.connect(SOCK);
+    c.on('connect', () => {
+      process.stdin.pipe(c);
+      c.pipe(process.stdout);
+      c.on('close', () => process.exit(0));
+      process.stdin.on('end', () => { try { c.end(); } catch {} });
+    });
+    c.on('error', () => {
+      if (tries === 0) {
+        // daemon not up — spawn it detached from the CURRENT (M2 stdio-bridge)
+        // file, then retry connecting to the socket it will create
+        const child = cpB.spawn(process.execPath, [__filename], {
+          detached: true, stdio: 'ignore', env: process.env,
+        });
+        child.unref();
+      }
+      if (tries > 40) { process.stderr.write('agentd --stdio: daemon unreachable\n'); process.exit(6); }
+      setTimeout(() => connect(tries + 1), 250);
+    });
+  };
+  connect();
+}
+
 // node-pty is loaded LAZILY (only when a session opens) so M0's zero-dep
 // bundle keeps working. On localhost the server passes VIBESPACE_NODE_MODULES
 // = the repo's node_modules; M2 (remote) will package prebuilds in the bundle.
@@ -71,6 +104,7 @@ function acquireSingleton() {
   return false;
 }
 
+if (!process.argv.includes('--stdio')) {
 if (!acquireSingleton()) {
   process.stderr.write('agentd: already running\n');
   process.exit(3);
@@ -211,3 +245,4 @@ server.listen(SOCK, () => {
 server.on('error', (e) => { log('server error: ' + e.message); process.exit(1); });
 
 process.on('SIGTERM', () => { log('SIGTERM — exiting (sessions unaffected by design)'); process.exit(0); });
+} // end !--stdio daemon body

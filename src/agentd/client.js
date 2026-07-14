@@ -24,7 +24,7 @@ class DeviceManager {
    *  version      release version (= daemonVersion expected)
    *  log          logger fn
    */
-  constructor({ dataDir, bundlePath, version, nodeModules, log = console.log } = {}) {
+  constructor({ dataDir, bundlePath, version, nodeModules, transport, log = console.log } = {}) {
     this._tokFile = path.join(dataDir, 'agentd-tokens.json');
     this._bundlePath = bundlePath;
     this._version = version;
@@ -33,6 +33,12 @@ class DeviceManager {
     this._root = process.env.VIBESPACE_AGENTD_ROOT || path.join(os.homedir(), '.vibespace', 'agentd');
     this._state = path.join(this._root, 'state');
     this._sock = path.join(this._state, 'agentd.sock');
+    // Transport (M2): { kind:'local' } = unix socket on this machine; or
+    // { kind:'ssh', host, remoteAgentd, sshArgs } = dial the STANDING remote
+    // daemon over `ssh … -- node <remoteAgentd> --stdio` (the bridge). Default
+    // local keeps M0/M1 unchanged.
+    this._transport = transport || { kind: 'local' };
+    this._tokenId = this._transport.kind === 'ssh' ? ('host:' + (this._transport.host?.id || 'remote')) : 'local';
     this._conn = null;         // {mux, info}
     this._backoffIdx = 0;
     this._connecting = false;
@@ -105,12 +111,12 @@ class DeviceManager {
   }
 
   async _connectLoop() {
-    const token = this._ensureLocalToken();
+    const token = this._transport.kind === 'ssh' ? this._transport.hostToken : this._ensureLocalToken();
     const backoffs = [500, 1000, 2000, 5000];
     for (let attempt = 0; !this._stopped; attempt++) {
       const conn = await this._tryOnce(token).catch(() => null);
       if (conn) { this._backoffIdx = 0; return conn; }
-      if (attempt === 0) this._spawnLocal(); // not running — bring it up
+      if (attempt === 0 && this._transport.kind === 'local') this._spawnLocal(); // local: bring the daemon up (ssh bridge self-spawns the remote one)
       const delay = backoffs[Math.min(attempt, backoffs.length - 1)];
       await new Promise((r) => setTimeout(r, delay));
       if (attempt > 12) throw new Error('agentd: cannot reach the local daemon');
@@ -118,9 +124,30 @@ class DeviceManager {
     throw new Error('stopped');
   }
 
+  _openTransport() {
+    if (this._transport.kind === 'ssh') {
+      const t = this._transport;
+      const remoteCmd = t.remoteCmd || `node ${JSON.stringify(t.remoteAgentd)} --stdio`;
+      const child = spawn(t.sshBin || 'ssh', [...t.sshArgs, '--', remoteCmd], {
+        stdio: ['pipe', 'pipe', 'ignore'],
+      });
+      // present the child as a duplex stream for the Mux (write→stdin, data←stdout)
+      return {
+        write: (d) => { try { return child.stdin.write(d); } catch { return false; } },
+        on: (ev, fn) => {
+          if (ev === 'data') child.stdout.on('data', fn);
+          else if (ev === 'close') { child.on('close', fn); child.stdout.on('close', fn); }
+          else if (ev === 'error') child.on('error', fn);
+        },
+        destroy: () => { try { child.kill(); } catch {} },
+      };
+    }
+    return net.connect(this._sock);
+  }
+
   _tryOnce(token) {
     return new Promise((resolve, reject) => {
-      const sock = net.connect(this._sock);
+      const sock = this._openTransport();
       let settled = false;
       const fail = (e) => { if (!settled) { settled = true; try { sock.destroy(); } catch { } reject(e || new Error('connect failed')); } };
       sock.on('error', fail);
@@ -161,9 +188,9 @@ class DeviceManager {
         },
         onDead: () => fail(new Error('connection died during handshake')),
       });
-      sock.on('connect', () => {
-        mux.control({ op: 'hello', protoVersion: PROTO_VERSION, hostToken: token, serverVersion: this._version });
-      });
+      const sayHello = () => mux.control({ op: 'hello', protoVersion: PROTO_VERSION, hostToken: token, serverVersion: this._version });
+      if (this._transport.kind === 'ssh') sayHello(); // stdio is ready at spawn
+      else sock.on('connect', sayHello);
     });
   }
 

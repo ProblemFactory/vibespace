@@ -71,6 +71,36 @@ class PluginManager {
     });
   }
 
+  setMode(id, mode) {
+    if (id !== 'tailscale') throw new Error('unknown plugin: ' + id);
+    if (!['auto', 'kernel', 'userspace'].includes(mode)) throw new Error('mode must be auto|kernel|userspace');
+    this._rec('tailscale').mode = mode;
+    this._save();
+    // if running, restart into the new mode (login persists in the statedir)
+    if (this._tsOurDaemonPid()) { try { this.stop(id); } catch { } setTimeout(() => { try { this.start(id); } catch { } }, 1500); }
+    this._notify();
+    return { mode };
+  }
+
+  // User-tuned `tailscale up` flags (free text, whitespace-separated). Only
+  // tokens starting with '-' or their following values are kept, and a small
+  // denylist blocks flags we own (--socket/--tun/--socks5-server/up itself).
+  _upFlags() {
+    const raw = this._rec('tailscale').upFlags;
+    if (!raw) return [];
+    const OWNED = /^--(socket|tun|socks5-server|outbound-http-proxy-listen|accept-routes)(=|$)/;
+    return String(raw).split(/\s+/).filter(Boolean).filter((tok) => !OWNED.test(tok));
+  }
+
+  setConfig(id, patch = {}) {
+    if (id !== 'tailscale') throw new Error('unknown plugin: ' + id);
+    const rec = this._rec('tailscale');
+    if (patch.upFlags !== undefined) rec.upFlags = String(patch.upFlags || '').slice(0, 500);
+    this._save();
+    this._notify();
+    return { upFlags: rec.upFlags || '' };
+  }
+
   setEnabled(id, enabled) {
     if (!this.defs()[id]) throw new Error('unknown plugin: ' + id);
     this._rec(id).enabled = !!enabled;
@@ -167,7 +197,12 @@ class PluginManager {
     const stateDir = path.join(this._tsDir(), 'state');
     fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 });
     const logFd = fs.openSync(path.join(this._tsDir(), 'tailscaled.log'), 'a');
-    const kernel = this._tunUsable();
+    // Mode preference (user-settable): 'auto' (default — kernel if a usable tun
+    // exists, else userspace), 'kernel' (force full-tunnel; errors if no tun),
+    // 'userspace' (force proxy-only — never touches the pod's routing table).
+    const pref = this._rec('tailscale').mode || 'auto';
+    if (pref === 'kernel' && !this._tunUsable()) throw new Error('kernel mode needs /dev/net/tun + NET_ADMIN (or sudo) — none available; use auto or userspace');
+    const kernel = pref === 'kernel' || (pref === 'auto' && this._tunUsable());
     const args = [
       `--statedir=${stateDir}`,
       `--socket=${this._tsSock()}`,
@@ -212,8 +247,11 @@ class PluginManager {
     const base = {
       installed,
       tunAvailable: fs.existsSync('/dev/net/tun'),
+      tunUsable: this._tunUsable(),
       sudo: this._sudoAvailable(),
       desiredUp: !!rec.desiredUp,
+      modePref: rec.mode || 'auto',
+      upFlags: rec.upFlags || '',
       socksPort: SOCKS_PORT,
     };
     const cli = this._tsBin('tailscale');
@@ -250,8 +288,11 @@ class PluginManager {
     prev?.proc?.kill?.();
     const cli = this._tsBin('tailscale');
     const rec = this._rec('tailscale');
-    const useSudo = rec.mode === 'kernel' && process.getuid?.() !== 0;
-    const argv = [`--socket=${this._tsSock()}`, 'up', '--accept-routes'];
+    const running = this.status(id).mode; // 'kernel' | 'userspace'
+    const useSudo = running === 'kernel' && process.getuid?.() !== 0;
+    // Base flags + user-tuned `tailscale up` flags (advertise-routes, exit-node,
+    // hostname, ssh, …). Stored per-plugin; validated to look like flags.
+    const argv = [`--socket=${this._tsSock()}`, 'up', '--accept-routes', ...this._upFlags()];
     const proc = spawn(useSudo ? 'sudo' : cli, useSudo ? ['-n', cli, ...argv] : argv, { stdio: ['ignore', 'pipe', 'pipe'] });
     const entry = { proc, authUrl: null };
     this._loginProcs.set(id, entry);

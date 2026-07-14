@@ -154,4 +154,5 @@ gdrive:
 # without it plugins fall back to userspace-networking + SOCKS5 automatically.
 tun:
   enabled: false
-  resource: ""   # device-plugin resource name, default squat.ai/tun
+  mode: hostpath      # hostpath (mount /dev/net/tun directly, no cluster plugin) | device-plugin
+  resource: ""        # device-plugin mode only: resource name, default squat.ai/tun

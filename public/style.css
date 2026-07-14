@@ -2961,3 +2961,13 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .plugin-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .plugin-boot { font-size: 10px; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 4px; margin-left: auto; cursor: pointer; }
 .plugin-auth-url { display: flex; align-items: center; gap: 6px; font-size: 11px; overflow-wrap: anywhere; padding: 6px 8px; background: color-mix(in srgb, var(--accent) 8%, transparent); border-radius: var(--radius-sm); }
+
+/* ── Plugin config rows (2.141.2: tailscale mode + up-flags) ── */
+.plugin-config { display: flex; flex-direction: column; gap: 6px; margin-top: 2px; }
+.plugin-config:empty { display: none; }
+.plugin-cfg-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.plugin-cfg-label { font-size: 10px; color: var(--text-secondary); min-width: 90px; }
+.plugin-cfg-select { font-size: 11px; padding: 2px 6px; border-radius: var(--radius-sm); background: var(--bg-input); border: 1px solid var(--border); color: var(--text); }
+.plugin-cfg-flags { flex: 1; min-width: 160px; font-size: 11px; font-family: var(--font-mono, monospace); padding: 3px 6px; border-radius: var(--radius-sm); background: var(--bg-input); border: 1px solid var(--border); color: var(--text); }
+.plugin-cfg-hint { font-size: 10px; color: var(--text-dim); }
+.plugin-cfg-warn { font-size: 10px; color: var(--yellow, #e5c07b); }

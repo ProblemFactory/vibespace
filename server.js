@@ -2529,6 +2529,12 @@ app.post('/api/plugins/:id/login', async (req, res) => {
 app.post('/api/plugins/:id/enabled', (req, res) => {
   try { plugins.setEnabled(req.params.id, !!req.body?.enabled); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); }
 });
+app.post('/api/plugins/:id/mode', (req, res) => {
+  try { res.json(plugins.setMode(req.params.id, String(req.body?.mode || 'auto'))); } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/plugins/:id/config', (req, res) => {
+  try { res.json(plugins.setConfig(req.params.id, req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); }
+});
 
 const { MountManager } = require('./src/mounts');
 const mounts = new MountManager({
