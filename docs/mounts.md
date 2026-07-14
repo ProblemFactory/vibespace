@@ -57,6 +57,23 @@ Every rclone mount runs with `--vfs-cache-mode full`: reads are cached chunk-wis
 
 A connected mount is **supervised**: if the rclone daemon dies (crash, OOM kill) or the mount starts hanging IO (unreachable backend — it's torn down to protect the server), the health watchdog reconnects it automatically with backoff (1 → 2 → 5 → 10 min cap). The row shows "auto-reconnecting (attempt N)" while it retries. Auth-class failures (revoked share, expired credential) are **not** retried — those need you, and the row keeps the actionable error instead. Only an explicit **Unmount** stops the supervision.
 
+## Mounting YOUR storage on a remote machine (reverse mount)
+
+The opposite direction of everything above: a remote host you registered
+(Remote tab → Machines) mounts a folder from THIS instance. Host row → the
+folder icon ("share a folder onto this machine") → pick a folder + read-only /
+read-write. Active reverse-mounts appear as child rows under the host with an
+unmount button.
+
+Transport: with the device agent set up (`agentd.dataPlane` on), the remote
+reaches this instance **through the device tunnel** — a loopback port on the
+remote whose bytes ride the agent link, so it works through NAT with no public
+address, VPN, or Tailscale, and survives link drops without remounting. The
+`tunnel`/`address` badge on the row shows which path is in use;
+`agentd.publicUrl` is only the fallback for hosts without the agent. OS-aware
+mounting on the remote: Linux rclone/FUSE, macOS rclone or native
+`mount_webdav`, Windows rclone or native `net use`. See docs/device-agent.md.
+
 ## Sharing a folder
 
 The **share** button on an S3 connection row mints a **down-scoped credential** for a subfolder, using that connection's own key:
