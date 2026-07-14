@@ -430,9 +430,7 @@ export function installSidebarMounts(Sidebar) {
     // the parent connection is the part before the colon, this adds the path.
     _showAddChildDialog(cred) {
       const type = cred.type || 's3';
-      const isRcloneDrive = type === 'rclone' && cred.rcloneType === 'drive';
       const pathField = type === 's3' ? { key: 'bucket', label: tr('Bucket'), placeholder: 'bucket-name' }
-        : isRcloneDrive ? { key: 'remotePath', label: tr('Folder path'), placeholder: 'My Folder/sub' }
         : type === 'rclone' ? { key: 'remotePath', label: tr('Remote path (bucket[/prefix])'), placeholder: 'bucket-name/optional/prefix' }
         : type === 'drive' ? { key: 'driveFolder', label: tr('Folder path'), placeholder: 'My Folder/sub' }
         : type === 'sftp' ? { key: 'sshPath', label: tr('Remote path'), placeholder: '/data' }
@@ -442,7 +440,7 @@ export function installSidebarMounts(Sidebar) {
         { key: 'name', label: tr('Name'), value: `${cred.name}-`, placeholder: 'datasets' },
         { key: pathField.key, label: pathField.label, placeholder: pathField.placeholder },
         ...(type === 's3' ? [{ key: 'prefix', label: tr('Prefix (optional)'), placeholder: 'sub/path' }] : []),
-        ...((type === 'drive' || isRcloneDrive) ? [
+        ...(type === 'drive' ? [
           // Submounts are the natural home for cloud-side scopes (user
           // insight): ONE authorized credential, N children each pointing at
           // My Drive / a Shared drive / shared-with-me — no re-auth ever
@@ -463,7 +461,7 @@ export function installSidebarMounts(Sidebar) {
         close(); this._renderMounts();
       });
       // Shared-drive picker over the PARENT's stored credentials (id-based)
-      if (type === 'drive' || isRcloneDrive) this._wireSharedDrivePicker(this._lastMountsDialog, cred.id);
+      if (type === 'drive') this._wireSharedDrivePicker(this._lastMountsDialog, cred.id);
     },
 
     // Auto-probe connectivity so the dots are meaningful without clicking:
@@ -1265,12 +1263,6 @@ export function installSidebarMounts(Sidebar) {
           ['bucket', tr('Bucket'), 'bucket-name', cfg.bucket || ''],
           ['prefix', tr('Prefix (optional)'), 'sub/path', cfg.prefix || ''],
         ];
-        if (type === 'rclone' && cfg.rcloneType === 'drive') return [
-          ['remotePath', tr('Folder path (optional)'), 'My Folder/sub', cfg.remotePath || ''],
-          ['driveMode', tr('Cloud-side scope'), '', cfg.driveMode || 'mydrive', { type: 'select', options: [['mydrive', 'My Drive'], ['shared-with-me', tr('Shared with me')], ['shared-drive', tr('Shared drive (team)')]] }],
-          ['teamDriveId', tr('Shared drive id'), '0AbC…', cfg.teamDriveId || ''],
-          ['rootFolderId', tr('Folder ID (advanced)'), '1AbC…', cfg.rootFolderId || ''],
-        ];
         if (type === 'rclone') return [['remotePath', tr('Remote path (bucket[/prefix])'), 'bucket-name/optional/prefix', cfg.remotePath || '']];
         if (type === 'drive') return [
           ['driveFolder', tr('Folder path (optional)'), 'My Folder/sub', cfg.driveFolder || ''],
@@ -1287,15 +1279,6 @@ export function installSidebarMounts(Sidebar) {
         ['prefix', tr('Prefix (optional)'), 'sub/path', cfg.prefix || ''],
         ['accessKey', tr('Access key'), '', cfg.accessKey || ''],
         ['secretKey', tr('Secret key'), '', cfg.secretKey || ''],
-      ];
-      if (type === 'rclone' && cfg.rcloneType === 'drive') return [
-        // rclone-backed Google Drive = a first-class Drive (2.135.3): same
-        // scope + OAuth client controls as a native drive record.
-        ['remotePath', tr('Folder path (optional)'), 'My Folder/sub', cfg.remotePath || ''],
-        ['driveMode', tr('Cloud-side scope'), '', cfg.driveMode || 'mydrive', { type: 'select', options: [['mydrive', 'My Drive'], ['shared-with-me', tr('Shared with me')], ['shared-drive', tr('Shared drive (team)')]] }],
-        ['teamDriveId', tr('Shared drive id'), '0AbC…', cfg.teamDriveId || ''],
-        ['rootFolderId', tr('Folder ID (advanced)'), '1AbC…', cfg.rootFolderId || ''],
-        ['clientPreset', tr('OAuth client'), '', cfg.clientPreset || '', { type: 'select', options: [['', tr('(custom / built-in client)')], ...presets.map((c) => [c.key, tr('Preset: {name}', { name: c.label })])] }],
       ];
       if (type === 'rclone') return [
         ['remotePath', tr('Remote path (bucket[/prefix])'), 'bucket-name/optional/prefix', cfg.remotePath || ''],
@@ -1382,7 +1365,7 @@ export function installSidebarMounts(Sidebar) {
       // teamDriveId gets the same "List shared drives" picker as the add
       // dialog (id-based: the record's stored credentials resolve server-side,
       // children through their parent).
-      if ((cfg.type || 's3') === 'drive' || ((cfg.type || 's3') === 'rclone' && cfg.rcloneType === 'drive')) {
+      if ((cfg.type || 's3') === 'drive') {
         const tdInput = form.querySelector('[name="teamDriveId"]');
         if (tdInput) {
           const pick = document.createElement('button');
