@@ -113,6 +113,7 @@ Overrides persist in the layout auto-save.
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `chat.compactMode` | boolean | `true` | Dense document-style layout instead of chat bubbles |
+| `chat.uploadDir` | string | *(empty)* | Where chat drag-drop/attached files land: empty = session working directory; absolute path (`~/Downloads`, `/data/uploads`) collects all uploads in one place; a bare name (`uploads`) = subfolder under the working directory. Remote sessions resolve it on the remote machine |
 | `chat.roleIndicator` | enum | `border` | How to distinguish user vs assistant messages: color border, background tint, icon, or text label |
 
 ### Session
