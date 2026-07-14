@@ -1065,9 +1065,10 @@ export function installSidebarMounts(Sidebar) {
           if (!drives.length) { showToast(tr('No shared drives visible to this account')); return; }
           const rect = btn.getBoundingClientRect();
           showContextMenu(rect.left, rect.bottom + 4, drives.map((d) => ({
-            label: d.name, onClick: () => {
+            label: d.name, action: () => {
               inp.value = d.id;
               const dm = ctx.inputs.driveMode; if (dm) dm.value = 'shared-drive';
+              dm?.dispatchEvent(new Event('change', { bubbles: true })); // conditional rows re-evaluate
             },
           })));
         } catch (e) { showToast(e.message || tr('Failed'), { type: 'error' }); }
@@ -1209,7 +1210,7 @@ export function installSidebarMounts(Sidebar) {
         if (type === 'rclone') return [['remotePath', tr('Remote path (bucket[/prefix])'), 'bucket-name/optional/prefix', cfg.remotePath || '']];
         if (type === 'drive') return [
           ['driveFolder', tr('Folder path (optional)'), 'My Folder/sub', cfg.driveFolder || ''],
-          ['driveMode', tr('Cloud-side scope (mydrive / shared-with-me / shared-drive)'), 'mydrive', cfg.driveMode || ''],
+          ['driveMode', tr('Cloud-side scope'), '', cfg.driveMode || 'mydrive'],
           ['teamDriveId', tr('Shared drive id'), '0AbC…', cfg.teamDriveId || ''],
           ['rootFolderId', tr('Folder ID (advanced)'), '1AbC…', cfg.rootFolderId || ''],
         ];
@@ -1232,7 +1233,7 @@ export function installSidebarMounts(Sidebar) {
       ];
       if (type === 'drive') return [
         ['driveFolder', tr('Folder path (optional)'), 'My Folder/sub', cfg.driveFolder || ''],
-        ['driveMode', tr('Cloud-side scope (mydrive / shared-with-me / shared-drive)'), 'mydrive', cfg.driveMode || ''],
+        ['driveMode', tr('Cloud-side scope'), '', cfg.driveMode || 'mydrive'],
         ['teamDriveId', tr('Shared drive id'), '0AbC…', cfg.teamDriveId || ''],
         ['rootFolderId', tr('Folder ID (advanced)'), '1AbC…', cfg.rootFolderId || ''],
         ['token', tr('OAuth token'), '{"access_token":…}', cfg.token || ''],
@@ -1286,6 +1287,48 @@ export function installSidebarMounts(Sidebar) {
         + `<div class="cfg-err"></div>
            <div class="dialog-actions"><button type="submit" class="btn-create">${tr('Save')}</button></div>`;
       body.appendChild(form);
+      // Drive records: driveMode is a real SELECT (the raw text input demanded
+      // magic strings — user report "can't change shared drive params"), and
+      // teamDriveId gets the same "List shared drives" picker as the add
+      // dialog (id-based: the record's stored credentials resolve server-side,
+      // children through their parent).
+      if ((cfg.type || 's3') === 'drive') {
+        const dmInput = form.querySelector('[name="driveMode"]');
+        if (dmInput) {
+          const sel = document.createElement('select');
+          sel.name = 'driveMode';
+          for (const [v, label] of [['mydrive', 'My Drive'], ['shared-with-me', tr('Shared with me')], ['shared-drive', tr('Shared drive (team)')]]) {
+            const o = document.createElement('option'); o.value = v; o.textContent = label; sel.appendChild(o);
+          }
+          sel.value = ['mydrive', 'shared-with-me', 'shared-drive'].includes(dmInput.value) ? dmInput.value : 'mydrive';
+          dmInput.replaceWith(sel);
+        }
+        const tdInput = form.querySelector('[name="teamDriveId"]');
+        if (tdInput) {
+          const pick = document.createElement('button');
+          pick.type = 'button';
+          pick.className = 'mounts-btn';
+          pick.textContent = tr('List shared drives');
+          pick.style.margin = '4px 0';
+          pick.onclick = async () => {
+            pick.disabled = true;
+            try {
+              const r = await api('/api/mounts/shared-drives', { method: 'POST', body: JSON.stringify({ id: m.id }), headers: { 'Content-Type': 'application/json' } });
+              const drives = r.drives || [];
+              if (!drives.length) { showToast(tr('No shared drives visible to this account')); return; }
+              const rect = pick.getBoundingClientRect();
+              showContextMenu(rect.left, rect.bottom + 4, drives.map((d) => ({
+                label: d.name, action: () => {
+                  tdInput.value = d.id;
+                  const sel2 = form.querySelector('select[name="driveMode"]'); if (sel2) sel2.value = 'shared-drive';
+                },
+              })));
+            } catch (e2) { showToast(e2.message || tr('Failed'), { type: 'error' }); }
+            finally { pick.disabled = false; }
+          };
+          tdInput.after(pick);
+        }
+      }
       // Drive-backed records get the guided re-auth right in the edit dialog
       // (the error-line button only shows once a mount has FAILED).
       if (this._isDriveBacked(cfg) && !cfg.envLocked && cfg.origin !== 'my-storage' && !cfg.parentId) {

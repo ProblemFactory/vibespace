@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.134.3 — 2026-07-14
+- **Shared-drive picker items now actually apply on click** (real report: "clicking a listed drive does nothing") — the menu items used the wrong callback key for showContextMenu (`onClick` instead of `action`), so selecting a drive threw silently.
+- **Editing an EXISTING Google Drive mount can now really change the cloud-side scope** (real report): the edit dialog's scope field was a raw text input demanding magic strings — it's a proper My Drive / Shared with me / Shared drive dropdown now, and the edit dialog gained the same **List shared drives** picker as the add dialog (works for submounts too, resolving credentials through the parent). Saving still auto-reconnects the mount with the new settings.
+
 ## 2.134.2 — 2026-07-14
 - **Fixed "undefined" painted over every .eml filename** in the file explorer (real report): the .eml registration referenced a FILE_ICONS key that doesn't exist, so the literal string "undefined" rendered into the icon slot. Emails now get a proper envelope icon.
 - **Gmail sync progress count no longer truncates** ("53/979…" — the label now never ellipsizes; the bar shrinks instead).
