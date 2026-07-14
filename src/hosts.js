@@ -502,6 +502,12 @@ class HostManager {
         kill -0 "$pid" 2>/dev/null && { echo "LOCK $(cat "$f")"; }
       done
       find "$HOME"/.claude/projects -maxdepth 2 -name '*.jsonl' ! -name 'agent-*' -printf 'J %T@ %s %p\\n' 2>/dev/null | sort -rn -k2 | head -200
+      # K = keeper session metas (~/.vibespace/run) — lets discovery classify a
+      # keeper-managed claude as reattachable instead of generic 'external'
+      # (B-4058: pod rebuild loses local state; the keeper+claude survive)
+      find "$HOME"/.vibespace/run -maxdepth 1 -name '*.json' 2>/dev/null | while read -r kf; do
+        printf 'K %s\\t' "$(basename "$kf" .json)"; head -c 4000 "$kf" | tr -d '\\n'; echo
+      done
       # cwd from the head of each JSONL (projDir decode is ambiguous; the first
       # record may be a summary without cwd, so grep the first cwd field instead)
       find "$HOME"/.claude/projects -maxdepth 2 -name '*.jsonl' ! -name 'agent-*' -printf '%T@ %p\\n' 2>/dev/null | sort -rn | head -60 | while read -r _ f; do
@@ -530,10 +536,24 @@ class HostManager {
       throw e;
     }
     const locks = [];
+    const keeperBySession = new Map(); // claudeSessionId → {sid} (live keeper sessions)
     const jsonls = [];
     const heads = new Map(); // jsonl path -> first record (cwd source)
     const tailIds = new Map(); // jsonl path -> [sessionIds in tail, last = current writer]
     for (const line of out.split('\n')) {
+      if (line.startsWith('K ')) {
+        // keeper meta: '<sid>\t<json>' — index by claude session id when known
+        try {
+          const ti = line.indexOf('\t');
+          const ksid = line.slice(2, ti).trim();
+          const km = JSON.parse(line.slice(ti + 1));
+          if (ksid && km && km.exited === undefined) {
+            const key = km.claudeSessionId || km.resumeId;
+            if (key) keeperBySession.set(key, { sid: ksid, childPid: km.childPid });
+          }
+        } catch { }
+        continue;
+      }
       if (line.startsWith('LOCK ')) { try { locks.push(JSON.parse(line.slice(5))); } catch {} }
       else if (line.startsWith('J ')) {
         const m = line.match(/^J ([\d.]+) (\d+) (.+)$/);
@@ -600,7 +620,7 @@ class HostManager {
         claimed.add(jm.path);
         runningIds.add(jid);
         matchedLocks.add(w.lock);
-        sessions.push({ sessionId: jid, cwd: w.lock.cwd, status: 'remote-running', host: h.id, hostName: h.name, mtime: jm.mtime });
+        sessions.push({ sessionId: jid, cwd: w.lock.cwd, status: 'remote-running', host: h.id, hostName: h.name, mtime: jm.mtime, keeperSid: (keeperBySession.get(jid) || keeperBySession.get(w.lock.sessionId))?.sid });
       }
       // Locks with no JSONL yet (brand-new session, nothing flushed): list by
       // the lock's own sessionId instead of dropping them (or, before this fix,
@@ -608,7 +628,7 @@ class HostManager {
       for (const l of g.locks) {
         if (matchedLocks.has(l) || !l.sessionId || runningIds.has(l.sessionId)) continue;
         runningIds.add(l.sessionId);
-        sessions.push({ sessionId: l.sessionId, cwd: l.cwd || null, status: 'remote-running', host: h.id, hostName: h.name, mtime: l.startedAt || Date.now() });
+        sessions.push({ sessionId: l.sessionId, cwd: l.cwd || null, status: 'remote-running', host: h.id, hostName: h.name, mtime: l.startedAt || Date.now(), keeperSid: keeperBySession.get(l.sessionId)?.sid });
       }
     }
     for (const j of jsonls) {

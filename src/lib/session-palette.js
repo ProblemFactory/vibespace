@@ -84,7 +84,7 @@ export function installSessionPalette(app) {
       const rmap = app.sidebar?._wbRemoteHosts;
       if (rmap) for (const [hostId, st] of rmap) for (const s of (st?.sessions || [])) {
         if (liveIds.has(s.sessionId)) continue;
-        remote.push({ ...s, host: s.host || hostId, backendSessionId: s.sessionId, status: s.status === 'remote-running' ? 'external' : 'stopped' });
+        remote.push({ ...s, host: s.host || hostId, backendSessionId: s.sessionId, status: s.keeperSid ? 'stopped' : (s.status === 'remote-running' ? 'external' : 'stopped') });
       }
       const all = remote.length ? local.concat(remote) : local;
       const scored = [];

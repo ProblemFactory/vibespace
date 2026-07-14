@@ -24,6 +24,15 @@ const check = (name, cond, extra) => {
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+function attachSid(sidX, offset) {
+  const p = spawn(process.execPath, [KEEPER, 'run', sidX, String(offset)], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+  p.out = Buffer.alloc(0);
+  p.stdout.on('data', (d) => { p.out = Buffer.concat([p.out, d]); });
+  p.errText = '';
+  p.stderr.on('data', (d) => { p.errText += d; });
+  return p;
+}
+
 function attach(offset) {
   const p = spawn(process.execPath, [KEEPER, 'run', SID, String(offset), '--', process.execPath, '-e', STUB], { env, stdio: ['pipe', 'pipe', 'pipe'] });
   p.out = Buffer.alloc(0);
@@ -87,6 +96,64 @@ let stopped = true;
 try { process.kill(mb.childPid, 0); stopped = false; } catch { }
 check('stop kills the child', stopped, '');
 b1.kill('SIGKILL');
+
+console.log('— 2.138.0: daemon SIGKILL → claude survives (fifo mode) → takeover —');
+const SID3 = 'testsess-3';
+const c1 = spawn(process.execPath, [KEEPER, 'run', SID3, '0', '--', process.execPath, '-e', STUB], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+c1.out = Buffer.alloc(0); c1.stdout.on('data', (d) => { c1.out = Buffer.concat([c1.out, d]); });
+await sleep(2500);
+c1.stdin.write('one\n');
+await sleep(800);
+const mc = JSON.parse(fs.readFileSync(path.join(tmp, SID3 + '.json'), 'utf8'));
+check('fifo mode active', mc.mode === 'fifo', JSON.stringify(mc));
+check('meta records FULL argv', Array.isArray(mc.cmd) && mc.cmd.length >= 3, JSON.stringify(mc.cmd));
+process.kill(mc.keeperPid, 'SIGKILL'); // the B-0343 scenario
+c1.kill('SIGKILL');
+await sleep(600);
+let stubAlive3 = true; try { process.kill(mc.childPid, 0); } catch { stubAlive3 = false; }
+check('claude SURVIVES daemon SIGKILL (setsid + direct fds)', stubAlive3, '');
+const c2 = attachSid(SID3, Buffer.byteLength('echo:one\n'));
+await sleep(3000); // takeover daemon start
+c2.stdin.write('two\n');
+await sleep(1000);
+check('takeover: input flows to the adopted claude', c2.out.toString().includes('echo:two'), JSON.stringify(c2.out.toString()));
+const mc2 = JSON.parse(fs.readFileSync(path.join(tmp, SID3 + '.json'), 'utf8'));
+check('takeover meta: new keeperPid + takenOverAt', mc2.keeperPid !== mc.keeperPid && mc2.takenOverAt > 0, JSON.stringify(mc2));
+c2.stdin.write('quit\n');
+await sleep(2200);
+check('adopted claude exit → sentinel via liveness poll', c2.out.toString().includes('"_remote_exit"'), JSON.stringify(c2.out.toString().slice(-160)));
+c2.kill('SIGKILL');
+
+console.log('— 2.138.0: both dead + no sentinel → synthetic crash (never a blank restart) —');
+const SID4 = 'testsess-4';
+const d1 = spawn(process.execPath, [KEEPER, 'run', SID4, '0', '--', process.execPath, '-e', STUB], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+await sleep(2500);
+const md = JSON.parse(fs.readFileSync(path.join(tmp, SID4 + '.json'), 'utf8'));
+process.kill(md.keeperPid, 'SIGKILL');
+process.kill(md.childPid, 'SIGKILL');
+d1.kill('SIGKILL');
+await sleep(500);
+const d2 = spawn(process.execPath, [KEEPER, 'run', SID4, '0', '--', process.execPath, '-e', STUB], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+d2.out = Buffer.alloc(0); d2.stdout.on('data', (x) => { d2.out = Buffer.concat([d2.out, x]); });
+await sleep(1500);
+check('synthetic crash sentinel drained (code 143 crashed)', d2.out.toString().includes('"crashed":true'), JSON.stringify(d2.out.toString()));
+const md2 = JSON.parse(fs.readFileSync(path.join(tmp, SID4 + '.json'), 'utf8'));
+check('meta exited=143 — NO fresh claude spawned', md2.exited === 143 && md2.childPid === md.childPid, JSON.stringify(md2));
+
+console.log('— 2.138.0: attach-only with nothing → stdout sentinel, no retry loop —');
+const e1 = spawn(process.execPath, [KEEPER, 'run', 'testsess-none', '0'], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+e1.out = Buffer.alloc(0); e1.stdout.on('data', (x) => { e1.out = Buffer.concat([e1.out, x]); });
+await new Promise((r) => e1.on('exit', r));
+check('missing session → synthetic sentinel on stdout', e1.out.toString().includes('"missing":true'), JSON.stringify(e1.out.toString()));
+
+console.log('— 2.138.0: pid reuse defense —');
+const SID5 = 'testsess-5';
+fs.writeFileSync(path.join(tmp, SID5 + '.json'), JSON.stringify({ keeperPid: process.pid, childPid: process.pid, startedAt: Date.now(), cmd: ['definitely-not-this-test'] }));
+fs.writeFileSync(path.join(tmp, SID5 + '.sock'), ''); // fake leftover
+const f1 = spawn(process.execPath, [KEEPER, 'run', SID5, '0'], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+f1.out = Buffer.alloc(0); f1.stdout.on('data', (x) => { f1.out = Buffer.concat([f1.out, x]); });
+await new Promise((r) => f1.on('exit', r));
+check('recycled pids not trusted (cmdline mismatch → not alive, not our child)', !f1.out.toString().includes('echo:'), JSON.stringify(f1.out.toString().slice(0, 120)));
 
 fs.rmSync(tmp, { recursive: true, force: true });
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }

@@ -18,7 +18,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     });
   },
 
-  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, fork, hostId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, accountId, ephemeral = false, winBounds }) {
+  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, accountId, ephemeral = false, winBounds }) {
     try { track('event', `session-create:${backend || 'claude'}:${mode || 'default'}`); } catch {}
     this._hideWelcome();
     const defaults = this._getBackendSessionDefaults(backend);
@@ -47,7 +47,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     const _createT0 = performance.now();
 
     this.ws.send({
-      type:'create', backend, hostId: hostId||undefined, mode: sessionMode, cwd: cwd||undefined, sessionName: name||undefined, model: sessionModel||undefined,
+      type:'create', backend, hostId: hostId||undefined, keeperSid: keeperSid||undefined, mode: sessionMode, cwd: cwd||undefined, sessionName: name||undefined, model: sessionModel||undefined,
       permissionMode: sessionPermission||undefined, effort: sessionEffort||undefined, extraArgs: sessionExtraArgs||undefined,
       tuiRenderer: (backend === 'claude' && sessionMode === 'terminal' ? this.settings.get('claude.tuiRenderer') : '') || undefined,
       agentKind: agentKind || undefined, agentRole: agentRole || undefined, agentNickname: agentNickname || undefined,
@@ -332,7 +332,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     this.ws.onGlobal(handler);
   },
 
-  resumeSession(sessionId, cwd, sessionName, { mode, model, effort, permission, accountId, syncId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, hostId, winBounds } = {}) {
+  resumeSession(sessionId, cwd, sessionName, { mode, model, effort, permission, accountId, syncId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, hostId, keeperSid, winBounds } = {}) {
     this._closeSidebarOnMobile();
     const targetBackendId = backendSessionId || sessionId;
     // If this session is already open in a LIVE window, focus it
@@ -377,6 +377,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       accountId: accountId !== undefined ? accountId : savedCfg.account,
       syncId,
       backend,
+      keeperSid,
       backendSessionId: backendSessionId || sessionId,
       hostId, // remote session resumes ON its host
       agentKind,

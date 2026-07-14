@@ -1208,11 +1208,16 @@ function restoreSessions() {
     let sessionMode = meta.mode || 'terminal';
     let wrapperStreaming = false;
     let wrapperGoal = null, wrapperGoalStatus = null, wrapperGoalElapsed = 0, wrapperGoalTokens = 0;
+    let bareRemote = false;
     try {
       const wrapperMeta = JSON.parse(fs.readFileSync(path.join(BUFFERS_DIR, id + '.json'), 'utf-8'));
       if (wrapperMeta.mode === 'chat') sessionMode = 'chat';
       if (wrapperMeta.streaming != null) wrapperStreaming = !!wrapperMeta.streaming;
       if (wrapperMeta.goal) { wrapperGoal = wrapperMeta.goal; wrapperGoalStatus = wrapperMeta.goalStatus || null; wrapperGoalElapsed = wrapperMeta.goalElapsed || 0; wrapperGoalTokens = wrapperMeta.goalTokensUsed || 0; }
+      // B-0845: a REMOTE chat session restored WITHOUT the wrapper's remote
+      // field predates the keeper (2.124.0) — claude hangs bare off the ssh
+      // pipe and one network wobble kills the conversation. Surface it.
+      if (meta.host && sessionMode === 'chat' && !wrapperMeta.remote) bareRemote = true;
     } catch {}
 
     let savedBuffer = '';
@@ -1223,6 +1228,8 @@ function restoreSessions() {
       pty: null, clients: new Map(),
       cwd: meta.cwd || os.homedir(),
       host: meta.host || null,
+      _bareRemote: bareRemote,
+      keeperSid: meta.keeperSid || null,
       hostName: meta.hostName || null,
       name: meta.name || sockFile,
       createdAt: meta.createdAt || Date.now(),

@@ -1,13 +1,33 @@
 #!/usr/bin/env node
 // vibespace-remote-keeper — REMOTE-side persistence for VibeSpace remote CHAT
-// sessions (2.124.0). Distributed to ~/.vibespace/bin like the other tools.
+// sessions (2.124.0; hardened 2.138.0 = B-0343). Distributed to
+// ~/.vibespace/bin like the other tools.
 //
 // Problem it solves: remote chat runs claude over a bare `ssh -T` pipe
 // (stream-json must not cross a pty) — an ssh drop used to SIGHUP claude and
-// kill the conversation. Now claude runs under a detached (setsid) keeper
-// daemon on the host: stdout is appended to a buffer FILE, stdin arrives via
-// a unix SOCKET — both survive any number of ssh drops. The local
-// chat-wrapper (re)attaches with a byte offset and loses nothing.
+// kill the conversation. claude runs under a detached keeper daemon on the
+// host: stdout goes to a buffer FILE, stdin arrives via a unix SOCKET — both
+// survive any number of ssh drops. The local chat-wrapper (re)attaches with a
+// byte offset and loses nothing.
+//
+// 2.138.0 hardening (B-0343 — the daemon-SIGKILL class):
+//   • claude is spawned SETSID-DETACHED with stdout/stderr as DIRECT fds to
+//     the buffer/err files and stdin from a FIFO opened O_RDWR — a daemon
+//     SIGKILL now harms claude in NO way (no pipe to break, no EOF on stdin;
+//     the old pipe relay lost buffered bytes and EOF'd claude's stdin).
+//   • run's decision tree gained the orphan branches: daemon dead + claude
+//     alive → a TAKEOVER daemon re-serves the socket over the same fifo/file
+//     (fifo mode); daemon dead + claude dead + no sentinel → a SYNTHETIC
+//     {"type":"_remote_exit","code":143,"crashed":true} sentinel is appended
+//     so the wrapper finalizes honestly — the old code silently restarted the
+//     ORIGINAL argv, minting a brand-new BLANK claude under a session that
+//     showed the old history (real incident).
+//   • every pid check verifies /proc/<pid>/cmdline (pid reuse: a recycled pid
+//     made alive() true → attach connect-looped forever; stop's blind kill
+//     could hit an innocent same-uid process).
+//   • the daemon sniffs claude's session_id from the buffer head into meta
+//     (orphan/lock matching for the resume-cleanup path needs it), and meta
+//     records the FULL argv (the old 4-element slice cut --resume off).
 //
 // Modes (sid = the VibeSpace session id, shell-safe [A-Za-z0-9_-]):
 //   run <sid> <offset> -- <cmd...>   ensure the daemon runs (start it on
@@ -16,7 +36,14 @@
 //                                    socket. stdout carries ONLY raw buffer
 //                                    bytes (the wrapper counts them for the
 //                                    next offset); diagnostics go to stderr.
+//   run <sid> <offset>               attach-only (no command): reattach to a
+//                                    live/orphaned session (B-4058 pod-rebuild
+//                                    recovery); nothing there → a synthetic
+//                                    exit sentinel on stdout so the wrapper
+//                                    finalizes instead of retry-looping.
 //   daemon <sid> -- <cmd...>         internal (spawned by run, detached)
+//   daemon <sid> --takeover          internal: adopt a surviving fifo-mode
+//                                    claude whose daemon died
 //   stop <sid>                       kill the child + daemon (UI kill path)
 //
 // Lifecycle: the daemon exits when claude exits, appending a final
@@ -24,11 +51,13 @@
 //   wrapper sees it through any attach and finalizes the session (run never
 //   restarts an exited session: meta.exited guards it). Files under
 //   ~/.vibespace/run/ ; a best-effort sweep removes leftovers older than 7d.
+// COMPATIBILITY: the buffer-offset attach contract is the stable surface —
+// never change the sentinel shape or the raw-bytes-only stdout rule.
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const net = require('net');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 
 const RUN_DIR = process.env.VIBESPACE_KEEPER_DIR || path.join(os.homedir(), '.vibespace', 'run');
 const [mode, sid] = [process.argv[2], process.argv[3]];
@@ -36,12 +65,35 @@ if (!mode || !sid || !/^[\w-]+$/.test(sid)) { console.error('keeper: usage run|d
 const P = {
   sock: path.join(RUN_DIR, sid + '.sock'),
   out: path.join(RUN_DIR, sid + '.out'),
+  in: path.join(RUN_DIR, sid + '.in'), // fifo (2.138.0 fifo mode)
   meta: path.join(RUN_DIR, sid + '.json'),
   err: path.join(RUN_DIR, sid + '.err'),
 };
 const readMeta = () => { try { return JSON.parse(fs.readFileSync(P.meta, 'utf-8')); } catch { return null; } };
 const writeMeta = (m) => { try { fs.writeFileSync(P.meta, JSON.stringify(m)); } catch { } };
 const log = (m) => { try { process.stderr.write('[keeper] ' + m + '\n'); } catch { } };
+
+// /proc cmdline identity check — a bare kill(pid, 0) is pid-reuse-blind.
+// Returns '' where /proc is unavailable (non-Linux): callers treat '' as
+// "cannot verify" and fall back to the bare liveness bit.
+function pidCmdline(pid) {
+  try { return fs.readFileSync('/proc/' + pid + '/cmdline', 'utf-8').replace(/\0/g, ' '); } catch { return ''; }
+}
+function pidAlive(pid) { try { process.kill(pid, 0); return true; } catch { return false; } }
+function isKeeperPid(pid) {
+  if (!pid || !pidAlive(pid)) return false;
+  const c = pidCmdline(pid);
+  // match by OUR OWN script path (daemons are spawned via __filename) — a
+  // hardcoded filename broke under any other install/test path (AIDev catch)
+  return c === '' ? true : (c.includes(__filename) && c.includes(sid));
+}
+function isOurChildPid(pid, m) {
+  if (!pid || !pidAlive(pid)) return false;
+  const c = pidCmdline(pid);
+  if (c === '') return true; // cannot verify — assume (non-Linux)
+  const argv0 = path.basename(String((m && m.cmd && m.cmd[0]) || ''));
+  return argv0 ? c.includes(argv0) : false;
+}
 
 function sweepOld() { // best-effort hygiene: dead sessions' files, 7d+
   try {
@@ -53,11 +105,22 @@ function sweepOld() { // best-effort hygiene: dead sessions' files, 7d+
   } catch { }
 }
 
-function alive() { // daemon liveness = socket exists + keeper pid runs
+function alive() { // daemon liveness = socket exists + VERIFIED keeper pid
   const m = readMeta();
   if (!m || !m.keeperPid || m.exited !== undefined) return false;
-  try { process.kill(m.keeperPid, 0); } catch { return false; }
+  if (!isKeeperPid(m.keeperPid)) return false;
   return fs.existsSync(P.sock);
+}
+
+// Append the synthetic crash sentinel + mark meta exited — the honest ending
+// for a sentinel-less death (daemon SIGKILL etc.). The wrapper finalizes and
+// the user resumes into a REAL `--resume` respawn; we never silently rerun
+// the original argv (that minted a blank claude — the B-0343 incident).
+function synthesizeCrash(m) {
+  try { fs.appendFileSync(P.out, JSON.stringify({ type: '_remote_exit', code: 143, crashed: true }) + '\n'); } catch { }
+  writeMeta({ ...(m || {}), exited: 143, exitedAt: Date.now(), crashed: true });
+  try { fs.unlinkSync(P.sock); } catch { }
+  log('no sentinel and nothing alive — synthesized crash exit (resume will recover the conversation)');
 }
 
 // ── attach: raw buffer bytes from <offset> → stdout; stdin → socket ──
@@ -98,6 +161,35 @@ function attach(offset) {
   process.stdin.resume();
 }
 
+// Sniff claude's session_id from the buffer head into meta (idempotent) —
+// the resume-cleanup path matches orphans to locks by it (B-4058).
+function sniffSessionId() {
+  try {
+    const m = readMeta();
+    if (!m || m.claudeSessionId) return;
+    const fd = fs.openSync(P.out, 'r');
+    const buf = Buffer.alloc(65536);
+    const n = fs.readSync(fd, buf, 0, buf.length, 0);
+    fs.closeSync(fd);
+    const mt = buf.subarray(0, n).toString('utf-8').match(/"session_id"\s*:\s*"([0-9a-f][0-9a-f-]{10,})"/);
+    if (mt) writeMeta({ ...readMeta(), claudeSessionId: mt[1] });
+  } catch { }
+}
+
+function startDaemon(extraArgs, onReady, onFail) {
+  const errFd = fs.openSync(P.err, 'a');
+  const child = spawn(process.execPath, [__filename, 'daemon', sid, ...extraArgs], {
+    detached: true, stdio: ['ignore', errFd, errFd], cwd: process.cwd(), env: process.env,
+  });
+  child.unref();
+  log('daemon starting pid=' + child.pid);
+  const t0 = Date.now();
+  const wait = setInterval(() => {
+    if (fs.existsSync(P.sock)) { clearInterval(wait); onReady(); }
+    else if (Date.now() - t0 > 15000) { clearInterval(wait); onFail(); }
+  }, 200);
+}
+
 if (mode === 'run') {
   const offset = process.argv[4];
   const sep = process.argv.indexOf('--');
@@ -105,45 +197,117 @@ if (mode === 'run') {
   try { fs.mkdirSync(RUN_DIR, { recursive: true, mode: 0o700 }); } catch { }
   sweepOld();
   const m = readMeta();
+  const bufExists = fs.existsSync(P.out);
   if (m && m.exited !== undefined) {
     log('session already exited (code ' + m.exited + ') — draining buffer');
     attach(offset); // sentinel is in the buffer; NEVER restart an exited session
   } else if (alive()) {
     attach(offset);
+  } else if (m && isOurChildPid(m.childPid, m)) {
+    // daemon dead, claude ALIVE (verified) — the daemon-SIGKILL survivor.
+    if (m.mode === 'fifo') {
+      // fifo-mode claude is fully self-sufficient (own fds) — TAKE OVER.
+      log('daemon dead but claude alive (pid ' + m.childPid + ') — starting takeover daemon');
+      startDaemon(['--takeover'], () => attach(offset), () => { log('takeover failed (see ' + P.err + ')'); process.exit(6); });
+    } else {
+      // pipe-mode orphan: its stdout pipe is already broken — it cannot be
+      // saved. End it cleanly and synthesize the crash exit; the wrapper
+      // finalizes and a resume recovers the conversation from the transcript.
+      log('pipe-mode orphan claude (pid ' + m.childPid + ') — terminating + synthesizing exit');
+      try { process.kill(m.childPid, 'SIGTERM'); } catch { }
+      setTimeout(() => {
+        if (pidAlive(m.childPid)) { try { process.kill(m.childPid, 'SIGKILL'); } catch { } }
+        synthesizeCrash(readMeta());
+        attach(offset);
+      }, 3000);
+    }
+  } else if (m && bufExists) {
+    // daemon dead + claude dead + NO sentinel: a crash. Never rerun the
+    // original argv (that silently minted a BLANK new claude — B-0343).
+    synthesizeCrash(m);
+    attach(offset);
   } else if (!cmd.length) {
-    log('no daemon and no command'); process.exit(2);
+    // attach-only (B-4058 reattach path) with nothing to attach to: emit a
+    // synthetic sentinel on STDOUT so the wrapper finalizes instead of
+    // retry-looping on exit code 2 forever.
+    try { process.stdout.write(JSON.stringify({ type: '_remote_exit', code: 127, missing: true }) + '\n'); } catch { }
+    log('no daemon and no command');
+    setTimeout(() => process.exit(2), 200);
   } else {
-    // first contact — start the detached daemon, wait for its socket
+    // genuinely new session — start the detached daemon, wait for its socket
     try { fs.unlinkSync(P.sock); } catch { }
     try { fs.unlinkSync(P.meta); } catch { }
-    const errFd = fs.openSync(P.err, 'a');
-    const child = spawn(process.execPath, [__filename, 'daemon', sid, '--', ...cmd], {
-      detached: true, stdio: ['ignore', errFd, errFd], cwd: process.cwd(), env: process.env,
-    });
-    child.unref();
-    log('daemon starting pid=' + child.pid);
-    const t0 = Date.now();
-    const wait = setInterval(() => {
-      if (fs.existsSync(P.sock)) { clearInterval(wait); attach(offset); }
-      else if (Date.now() - t0 > 15000) { clearInterval(wait); log('daemon failed to start (see ' + P.err + ')'); process.exit(6); }
-    }, 200);
+    startDaemon(['--', ...cmd], () => attach(offset), () => { log('daemon failed to start (see ' + P.err + ')'); process.exit(6); });
   }
 } else if (mode === 'daemon') {
+  try { fs.mkdirSync(RUN_DIR, { recursive: true, mode: 0o700 }); } catch { }
+  const takeover = process.argv.includes('--takeover');
   const sep = process.argv.indexOf('--');
   const cmd = sep >= 0 ? process.argv.slice(sep + 1) : [];
-  if (!cmd.length) process.exit(2);
-  try { fs.mkdirSync(RUN_DIR, { recursive: true, mode: 0o700 }); } catch { }
+  if (!takeover && !cmd.length) process.exit(2);
+
   const outFd = fs.openSync(P.out, 'a');
-  const child = spawn(cmd[0], cmd.slice(1), { stdio: ['pipe', 'pipe', 'pipe'], env: process.env, cwd: process.cwd() });
-  writeMeta({ keeperPid: process.pid, childPid: child.pid, startedAt: Date.now(), cmd: cmd.slice(0, 4) });
-  child.stdout.on('data', (d) => { try { fs.writeSync(outFd, d); } catch { } });
-  child.stderr.on('data', (d) => { try { fs.appendFileSync(P.err, d); } catch { } });
+  let childPid = null;
+  let inFd = null; // daemon's write handle into the fifo (fifo mode)
+  let fifoMode = false;
+
+  if (takeover) {
+    const m = readMeta();
+    if (!m || m.mode !== 'fifo' || !isOurChildPid(m.childPid, m)) { log('takeover: nothing to adopt'); process.exit(2); }
+    childPid = m.childPid;
+    fifoMode = true;
+    try { inFd = fs.openSync(P.in, 'r+'); } catch (e) { log('takeover: fifo gone: ' + e.message); process.exit(2); }
+    writeMeta({ ...m, keeperPid: process.pid, takenOverAt: Date.now() });
+    log('takeover: adopted claude pid ' + childPid);
+  } else {
+    // 2.138.0: claude gets DIRECT fds (stdout→buffer file, stdin←fifo O_RDWR,
+    // stderr→err file) + setsid detach — a daemon death touches none of them.
+    // The child's own O_RDWR fifo fd counts as a writer, so it never sees EOF.
+    try {
+      try { fs.unlinkSync(P.in); } catch { }
+      const mk = spawnSync('mkfifo', ['-m', '600', P.in]);
+      if (mk.status !== 0) throw new Error('mkfifo unavailable');
+      inFd = fs.openSync(P.in, 'r+');
+      fifoMode = true;
+    } catch (e) {
+      log('fifo unavailable (' + e.message + ') — pipe mode (legacy semantics)');
+    }
+    const stdio = fifoMode
+      ? [fs.openSync(P.in, 'r+'), outFd, fs.openSync(P.err, 'a')]
+      : ['pipe', 'pipe', 'pipe'];
+    const child = spawn(cmd[0], cmd.slice(1), { stdio, env: process.env, cwd: process.cwd(), detached: fifoMode });
+    childPid = child.pid;
+    writeMeta({
+      keeperPid: process.pid, childPid, startedAt: Date.now(), cmd,
+      mode: fifoMode ? 'fifo' : 'pipe',
+      resumeId: (() => { const i = cmd.indexOf('--resume'); return i >= 0 ? cmd[i + 1] : undefined; })(),
+    });
+    if (!fifoMode) {
+      child.stdout.on('data', (d) => { try { fs.writeSync(outFd, d); } catch { } });
+      child.stderr.on('data', (d) => { try { fs.appendFileSync(P.err, d); } catch { } });
+    }
+    child.on('exit', (code) => finalize(code));
+    child.on('error', () => finalize(1));
+    if (!fifoMode) {
+      var pipeStdin = child.stdin; // socket data sink in pipe mode
+    }
+    setTimeout(sniffSessionId, 4000);
+    setTimeout(sniffSessionId, 20000);
+    var directChild = child;
+  }
+
   const server = net.createServer((sock) => {
-    sock.on('data', (d) => { try { if (child.stdin.writable) child.stdin.write(d); } catch { } });
+    sock.on('data', (d) => {
+      try {
+        if (fifoMode) fs.writeSync(inFd, d);
+        else if (typeof pipeStdin !== 'undefined' && pipeStdin.writable) pipeStdin.write(d);
+      } catch { }
+    });
     sock.on('error', () => { });
   });
   try { fs.unlinkSync(P.sock); } catch { }
   server.listen(P.sock, () => { try { fs.chmodSync(P.sock, 0o600); } catch { } });
+
   let done = false;
   const finalize = (code) => {
     if (done) return; done = true;
@@ -152,22 +316,40 @@ if (mode === 'run') {
     writeMeta({ ...m, exited: code ?? 0, exitedAt: Date.now() });
     try { server.close(); } catch { }
     try { fs.unlinkSync(P.sock); } catch { }
+    try { fs.unlinkSync(P.in); } catch { }
     setTimeout(() => process.exit(0), 300); // let attachers drain the sentinel
   };
-  child.on('exit', (code) => finalize(code));
-  child.on('error', () => finalize(1));
-  process.on('SIGTERM', () => { try { child.kill('SIGTERM'); } catch { } setTimeout(() => finalize(143), 3000); });
+  if (takeover) {
+    // adopted child isn't ours to wait() on — poll liveness; exit code unknowable
+    const poll = setInterval(() => {
+      if (!pidAlive(childPid)) { clearInterval(poll); finalize(143); }
+    }, 1500);
+  }
+  process.on('SIGTERM', () => {
+    try { process.kill(childPid, 'SIGTERM'); } catch { }
+    setTimeout(() => finalize(143), 3000);
+  });
 } else if (mode === 'stop') {
   const m = readMeta();
   if (m) {
-    for (const pid of [m.childPid, m.keeperPid]) {
-      if (pid) { try { process.kill(pid, 'SIGTERM'); } catch { } }
-    }
+    // identity-verified kills only — a recycled pid must never take a hit
+    const targets = [];
+    if (isOurChildPid(m.childPid, m)) targets.push(m.childPid);
+    if (isKeeperPid(m.keeperPid)) targets.push(m.keeperPid);
+    for (const pid of targets) { try { process.kill(pid, 'SIGTERM'); } catch { } }
     setTimeout(() => {
-      for (const pid of [m.childPid, m.keeperPid]) {
-        if (pid) { try { process.kill(pid, 'SIGKILL'); } catch { } }
+      for (const pid of targets) {
+        if (pidAlive(pid)) { try { process.kill(pid, 'SIGKILL'); } catch { } }
       }
       try { fs.unlinkSync(P.sock); } catch { }
+      try { fs.unlinkSync(P.in); } catch { }
+      if (m.exited === undefined) {
+        // the daemon (if alive) writes the sentinel itself on SIGTERM; when we
+        // killed a daemon-less orphan the buffer would stay sentinel-less and a
+        // later attach could never finalize — append it here
+        try { fs.appendFileSync(P.out, JSON.stringify({ type: '_remote_exit', code: 130 }) + '\n'); } catch { }
+        writeMeta({ ...readMeta(), exited: 130, exitedAt: Date.now(), stopped: true });
+      }
       console.log('stopped');
       process.exit(0);
     }, 2500);
