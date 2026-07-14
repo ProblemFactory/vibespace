@@ -140,11 +140,19 @@ class PluginManager {
     return null;
   }
   _systemTailscaled() {
-    // a root/system tailscaled on the default socket — report, never manage
+    // a root/system tailscaled on the DEFAULT socket — report, never manage.
+    // OURS is identified by its cmdline referencing our socket/dir (in kernel
+    // mode tailscaled runs under a `sudo` wrapper AND forks a child, so pgrep
+    // returns pids that differ from the pidfile — comparing pids alone
+    // false-flagged our own child as 'system', graying out the card).
     try {
       const out = execFileSync('pgrep', ['-x', 'tailscaled'], { encoding: 'utf-8' }).trim();
+      const ours = this._tsSock();
+      const ourDir = this._tsDir();
       for (const pid of out.split('\n').filter(Boolean)) {
-        if (Number(pid) !== this._tsOurDaemonPid()) return Number(pid);
+        const cmd = pidCmdline(Number(pid));
+        if (cmd.includes(ours) || cmd.includes(ourDir)) continue; // our parent/child
+        return Number(pid); // genuinely foreign (default socket, dev machine)
       }
     } catch { }
     return null;
