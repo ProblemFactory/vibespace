@@ -47,6 +47,7 @@ const srv = http.createServer((req, res) => {
   }
   if (u.pathname.includes('/messages/')) {
     const id = u.pathname.split('/').pop();
+    if (!MSGS[id]) return res.writeHead(404).end('{}'); // deleted since history listed it
     const labelIds = id === 'm1aaaa11' ? ['INBOX'] : id === 'm2bbbb22' ? [] : ['SENT'];
     return send({ id, internalDate: MSGS[id].internalDate, raw: MSGS[id].raw, labelIds });
   }
@@ -55,6 +56,7 @@ const srv = http.createServer((req, res) => {
   }
   if (u.pathname.endsWith('/history')) {
     if (phase === 'expired') return res.writeHead(404).end('{}');
+    if (phase === 'gone') return send({ historyId: '3000', history: [{ messagesAdded: [{ message: { id: 'm4dead444' } }] }] });
     return send({ historyId: '2000', history: [{ messagesAdded: [{ message: { id: 'm3cccc33' } }] }] });
   }
   res.writeHead(404).end('{}');
@@ -102,6 +104,17 @@ check('incremental adds the new message', files.some((f) => f.includes('m3cccc33
 check('no duplicates on re-sync', files.length === 3);
 const state2 = JSON.parse(fs.readFileSync(path.join(dir, '.vibespace-gmail-state.json'), 'utf-8'));
 check('historyId advanced', state2.historyId === '2000');
+
+// GONE message: history lists an id deleted before fetch (spam auto-purge) —
+// the pass must SKIP it and still advance the cursor. Regression for the
+// fatal-404 freeze: the cursor never advanced, so every 120s retry re-listed
+// and re-404'd the same dead id forever (sync frozen at done=0, real report).
+phase = 'gone';
+await gs._syncOnce(w).catch((e) => check('gone-message pass throws nothing', false, e.message));
+files = fs.readdirSync(dir).filter((f) => f.endsWith('.eml'));
+check('gone message not written, others intact', files.length === 3 && !files.some((f) => f.includes('m4dead444')), files.join(','));
+const stateGone = JSON.parse(fs.readFileSync(path.join(dir, '.vibespace-gmail-state.json'), 'utf-8'));
+check('cursor advanced PAST the dead id', stateGone.historyId === '3000', JSON.stringify(stateGone.historyId));
 
 // expired history → reseed without duplicates
 phase = 'expired';

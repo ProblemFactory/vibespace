@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // device-folder-mount CHAIN acceptance (2.150.0): the daemon serves a folder
-// over HTTP on 127.0.0.1 (serve-folder), the server reaches it through the mux
-// via tcp-forward, and an HTTP client reads the directory listing + a ranged
-// file GET — the exact path an rclone `http` mount takes. Proves the
+// over WEBDAV on 127.0.0.1 (serve-folder), the server reaches it through the
+// mux via tcp-forward, and a DAV client does PROPFIND listings + ranged file
+// GETs — the exact path an rclone `webdav` mount takes. Proves the
 // device-side serve + the tunnel together (the rclone mount is the last mile).
 // Run: node scripts/test-agentd-devicemount.mjs
 import { createRequire } from 'node:module';
@@ -46,8 +46,8 @@ daemon.unref();
 await sleep(700);
 await dm.connect();
 
-// helper: HTTP GET through a tcp-forward bridge to the device's folder server
-async function httpThroughTunnel(devicePort, reqPath, headers = {}) {
+// helper: HTTP request through a tcp-forward bridge to the device's folder server
+async function httpThroughTunnel(devicePort, reqPath, headers = {}, method = 'GET') {
   // local bridge: a net.Server that pipes each connection to a fresh tcpForward
   const bridge = net.createServer(async (sock) => {
     sock.on('error', () => { });
@@ -62,7 +62,7 @@ async function httpThroughTunnel(devicePort, reqPath, headers = {}) {
   await new Promise((r) => bridge.listen(0, '127.0.0.1', r));
   const lp = bridge.address().port;
   const out = await new Promise((resolve, reject) => {
-    const req = http.request({ host: '127.0.0.1', port: lp, path: reqPath, method: 'GET', headers }, (res) => {
+    const req = http.request({ host: '127.0.0.1', port: lp, path: reqPath, method, headers }, (res) => {
       const chunks = []; res.on('data', (d) => chunks.push(d)); res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }));
     });
     req.on('error', reject); req.end();
@@ -75,13 +75,19 @@ console.log('— serve-folder binds a device-side HTTP server —');
 const sf = await dm.serveFolder(share);
 check('serve-folder returned a port', sf.port > 0, JSON.stringify(sf));
 
-console.log('— directory listing through the tunnel (rclone http backend shape) —');
+console.log('— PROPFIND listings through the tunnel (rclone webdav backend shape) —');
 {
-  const r = await httpThroughTunnel(sf.port, '/');
-  const html = r.body.toString('utf8');
-  check('root listing served (200 + href links)', r.status === 200 && /href="hello.txt"/.test(html) && /href="sub\//.test(html), JSON.stringify(html.slice(0, 200)));
-  const rs = await httpThroughTunnel(sf.port, '/sub/');
-  check('subdirectory listing served', rs.status === 200 && /href="nested.txt"/.test(rs.body.toString()), JSON.stringify(rs.body.toString().slice(0, 120)));
+  const r = await httpThroughTunnel(sf.port, '/', { Depth: '1' }, 'PROPFIND');
+  const xml = r.body.toString('utf8');
+  check('root PROPFIND served (207 + entries)', r.status === 207
+    && /<D:displayname>hello.txt<\/D:displayname>/.test(xml)
+    && /<D:href>\/sub\/<\/D:href>/.test(xml) && /<D:collection\/>/.test(xml), JSON.stringify(xml.slice(0, 240)));
+  const rs = await httpThroughTunnel(sf.port, '/sub/', { Depth: '1' }, 'PROPFIND');
+  check('subdirectory PROPFIND served', rs.status === 207 && /<D:displayname>nested.txt<\/D:displayname>/.test(rs.body.toString()), JSON.stringify(rs.body.toString().slice(0, 160)));
+  const opt = await httpThroughTunnel(sf.port, '/', {}, 'OPTIONS');
+  check('OPTIONS advertises DAV', opt.status === 200 && String(opt.headers.dav || '').includes('1'), JSON.stringify(opt.headers.dav));
+  const dirGet = await httpThroughTunnel(sf.port, '/sub/');
+  check('GET on a directory refused (list via PROPFIND)', dirGet.status === 403, String(dirGet.status));
 }
 
 console.log('— full file GET byte-exact (incl multibyte) —');

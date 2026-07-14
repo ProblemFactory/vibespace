@@ -98,7 +98,7 @@ class GmailSync {
       code, client_id: st.client.clientId, client_secret: st.client.clientSecret,
       redirect_uri: `http://127.0.0.1:${st.port}`, grant_type: 'authorization_code',
     });
-    const r = await fetch(TOKEN_URL, { method: 'POST', body });
+    const r = await fetch(TOKEN_URL, { method: 'POST', body, signal: AbortSignal.timeout(30000) });
     const d = await r.json();
     if (!r.ok) { st.error = d.error_description || d.error || 'token exchange failed'; return; }
     if (!d.refresh_token) { st.error = 'no refresh_token returned — remove the app from myaccount.google.com/permissions and retry'; return; }
@@ -200,7 +200,7 @@ class GmailSync {
       refresh_token: w.tok.refresh_token, client_id: client.clientId,
       client_secret: client.clientSecret, grant_type: 'refresh_token',
     });
-    const r = await fetch(TOKEN_URL, { method: 'POST', body });
+    const r = await fetch(TOKEN_URL, { method: 'POST', body, signal: AbortSignal.timeout(30000) });
     const d = await r.json();
     if (!r.ok) throw new Error('token refresh failed: ' + (d.error_description || d.error || r.status) + (d.error === 'invalid_grant' ? ' — re-authorize this Gmail mount' : ''));
     w.tok.access_token = d.access_token;
@@ -210,7 +210,10 @@ class GmailSync {
 
   async _api(w, pathq) {
     const tok = await this._accessToken(w);
-    const r = await fetch(API + pathq, { headers: { Authorization: 'Bearer ' + tok } });
+    // Bounded: a wedged connection must error (→ the loop's 120s backoff heals
+    // it), never hang the worker — undici's 5min defaults left the mount
+    // looking frozen for whole passes.
+    const r = await fetch(API + pathq, { headers: { Authorization: 'Bearer ' + tok }, signal: AbortSignal.timeout(60000) });
     if (r.status === 404) { const e = new Error('404'); e.code = 404; throw e; }
     if (!r.ok) throw new Error(`gmail api ${r.status}: ${(await r.text()).slice(0, 200)}`);
     return r.json();
@@ -344,7 +347,7 @@ class GmailSync {
         const msgs = l.messages || [];
         for (const m of msgs) {
           if (w.stopped) return;
-          if (!seen.has(m.id)) { const md = await this._writeMessage(w, m.id, seen); if (md) oldestMs = Math.min(oldestMs, md); }
+          if (!seen.has(m.id)) { const md = await this._writeGone404(w, m.id, seen); if (md) oldestMs = Math.min(oldestMs, md); }
           this._progress(w, state.seedTotal || null, w.count); // determinate when total known
         }
         fetched += msgs.length;
@@ -370,7 +373,7 @@ class GmailSync {
     let done = 0;
     for (const id of todo) {
       if (w.stopped) return;
-      await this._writeMessage(w, id, seen);
+      await this._writeGone404(w, id, seen);
       this._progress(w, todo.length, ++done);
     }
     this._progress(w, null);
@@ -384,6 +387,17 @@ class GmailSync {
     const fp = this._statePath(w);
     fs.writeFileSync(fp + '.tmp', JSON.stringify(state));
     fs.renameSync(fp + '.tmp', fp);
+  }
+
+  // _writeMessage, but a GONE message (404) is skipped instead of failing the
+  // whole pass. history.list reports messages ADDED since the cursor — some are
+  // already deleted by fetch time (spam auto-purge, discarded drafts; guaranteed
+  // on an unfiltered mailbox with includeSpamTrash). The cursor only advances
+  // after a COMPLETE pass, so one dead id used to re-list + re-404 every retry —
+  // the sync froze at done=0 forever (real report: 增量卡住3小时).
+  async _writeGone404(w, id, seen) {
+    try { return await this._writeMessage(w, id, seen); }
+    catch (e) { if (e.code === 404) { seen.add(id); return null; } throw e; }
   }
 
   // Download ONE message as a .eml into the (possibly grouped) folder + mark seen.

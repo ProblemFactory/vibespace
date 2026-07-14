@@ -355,6 +355,12 @@ export class StageManager {
     }
     dm._renderSwitcher();
     this.app.updateTaskbar();
+    // Mirror switchTo's delayed digest-invalidating refreshes: replayed
+    // windows get _desktopId/gridBounds in the 500ms timeout above — without
+    // these the target desktop's preview misses them until an unrelated
+    // interaction (same class as the switchTo white-preview fix).
+    setTimeout(() => dm.refreshSwitcher(), 400);
+    setTimeout(() => dm.refreshSwitcher(), 1300);
     setTimeout(() => this.app.layoutManager.scheduleAutoSave(), 300);
   }
 

@@ -1,7 +1,9 @@
 #!/usr/bin/env node
-// device-folder-mount LAST MILE (2.150.0): a REAL rclone `http` mount over the
-// device chain (serve-folder → tcp-forward → rclone mount), verifying the
+// device-folder-mount LAST MILE (2.150.0): a REAL rclone `webdav` mount over
+// the device chain (serve-folder → tcp-forward → rclone mount), verifying the
 // device's folder is READABLE at a local mountpoint. Requires rclone + /dev/fuse.
+// NOTE: never run two copies concurrently — earlier debug runs stomped each
+// other's daemons via overlapping pkill patterns and read as a phantom stall.
 // Run: node scripts/test-device-mount-rclone.mjs
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
@@ -48,24 +50,39 @@ await dm.connect();
 const mountpoint = path.join(tmp, 'mnt');
 let handle = null;
 try {
-  console.log('— rclone http mount over the device chain —');
+  console.log('— rclone webdav mount over the device chain —');
   handle = await deviceFolderMount({ device: dm, remotePath: share, mountpoint, rcloneBin: RCLONE, log: () => {} });
   check('mount came up', !!handle.mountpoint, JSON.stringify(handle));
   await sleep(800);
 
   console.log('— the device folder is readable at the mountpoint —');
-  const ls = execSync(`ls ${JSON.stringify(mountpoint)}`, { encoding: 'utf8' });
+  // ALL mount IO below runs in ASYNC child processes — the tunnel BRIDGE lives
+  // in THIS process, so any sync fs/exec on the mountpoint blocks the event
+  // loop, the bridge stops pumping, and the FUSE read never completes: the
+  // test deadlocks ITSELF (readFileSync here hung the whole run; same class as
+  // the 2.147.0 sync-exec-with-in-process-/dav deadlock). Production is safe —
+  // the bridge lives in the server while reads come from other processes.
+  const run = (cmd, args) => new Promise((resolve, reject) => {
+    const c = spawn(cmd, args);
+    const out = []; c.stdout.on('data', (d) => out.push(d));
+    const t = setTimeout(() => { try { c.kill('SIGKILL'); } catch {} reject(new Error(cmd + ' timed out (10s) — mount read stalled')); }, 10000);
+    c.on('exit', () => { clearTimeout(t); resolve(Buffer.concat(out)); });
+    c.on('error', (e) => { clearTimeout(t); reject(e); });
+  });
+  const ls = (await run('ls', [mountpoint])).toString('utf8');
   check('root lists the device files', ls.includes('hello.txt') && ls.includes('sub'), JSON.stringify(ls));
-  const cat = fs.readFileSync(path.join(mountpoint, 'hello.txt'), 'utf8');
+  const t0 = Date.now();
+  const cat = (await run('cat', [path.join(mountpoint, 'hello.txt')])).toString('utf8');
+  const readMs = Date.now() - t0;
   check('file content byte-exact through the mount', cat === CONTENT, `len ${cat.length} vs ${CONTENT.length}`);
-  const nested = fs.readFileSync(path.join(mountpoint, 'sub', 'nested.txt'), 'utf8');
+  check(`read is FAST (${readMs}ms) — the http-backend ~6s stall is gone`, readMs < 3000, `${readMs}ms`);
+  const nested = (await run('cat', [path.join(mountpoint, 'sub', 'nested.txt')])).toString('utf8');
   check('nested subdirectory file readable', nested === 'nested-content-ok', JSON.stringify(nested));
-  const mb = execSync(`ls ${JSON.stringify(mountpoint)}`, { encoding: 'utf8' });
+  const mb = (await run('ls', [mountpoint])).toString('utf8');
   check('multibyte filename listed', mb.includes('多字节.md'), JSON.stringify(mb));
   // partial read (VFS seeks mid-file)
-  const fd = fs.openSync(path.join(mountpoint, 'hello.txt'), 'r');
-  const buf = Buffer.alloc(10); fs.readSync(fd, buf, 0, 10, 100); fs.closeSync(fd);
-  check('mid-file seek read correct', buf.toString() === CONTENT.slice(100, 110), JSON.stringify(buf.toString()));
+  const seek = (await run('dd', [`if=${path.join(mountpoint, 'hello.txt')}`, 'bs=1', 'skip=100', 'count=10', 'status=none'])).toString('utf8');
+  check('mid-file seek read correct', seek === CONTENT.slice(100, 110), JSON.stringify(seek));
 } catch (e) {
   failed++; console.error('  ✗ device mount threw:', e.message);
 } finally {
