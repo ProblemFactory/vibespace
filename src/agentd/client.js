@@ -185,7 +185,7 @@ class DeviceManager {
             mux.onWritable = (chan) => { sessions.get(chan)?.onWritable?.(); };
             const prevControl = mux.onControl;
             mux.onControl = (m) => {
-              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'cmd-result' || m.op === 'tcp-open' || m.op === 'listen-open') {
+              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'cmd-result' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result') {
                 const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m); }
                 if (m.op === 'tcp-open' && !m.error) return; // channel stays live
                 return;
@@ -373,6 +373,12 @@ class DeviceManager {
     this._reverseForwards.delete(port);
     try { await this._request({ op: 'tcp-unlisten', port }); } catch { }
   }
+
+  // ── device-folder-mount: serve a device folder over HTTP (the daemon binds
+  // 127.0.0.1:<port>), returns {port}. The server tcp-forwards that port and
+  // rclone-http-mounts it. unserveFolder tears the server down. ──
+  serveFolder(path) { return this._request({ op: 'serve-folder', path }); }
+  unserveFolder(port) { return this._request({ op: 'unserve-folder', port }); }
   _onTcpAccept(m) {
     const conn = this._conn;
     if (!conn) return;

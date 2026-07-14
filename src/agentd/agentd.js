@@ -330,6 +330,56 @@ function reverseListen(mux, msg) {
   });
 }
 
+// ── device-folder-mount: a minimal read-only HTTP file server (the rclone
+// `http` backend reads directory-listing HTML + ranged GETs). Bound to
+// 127.0.0.1 on the device; the server reaches it via tcp-connect. ──
+const folderServers = new Map(); // port → { server, root }
+function serveFolder(mux, msg) {
+  const root = String(msg.path || '');
+  try { if (!path.isAbsolute(root) || !fs.statSync(root).isDirectory()) throw new Error('not a directory'); }
+  catch (e) { mux.control({ op: 'serve-folder-result', id: msg.id, error: e.message }); return; }
+  const http = require('http');
+  const srv = http.createServer((req, res) => {
+    let rel = '/';
+    try { rel = decodeURIComponent(req.url.split('?')[0]); } catch { }
+    const abs = path.join(root, rel);
+    if (abs !== root && !abs.startsWith(root + path.sep)) { res.writeHead(403); res.end(); return; }
+    let st; try { st = fs.statSync(abs); } catch { res.writeHead(404); res.end(); return; }
+    if (st.isDirectory()) {
+      let entries = [];
+      try { entries = fs.readdirSync(abs, { withFileTypes: true }); } catch { res.writeHead(500); res.end(); return; }
+      const rows = entries.map((e) => {
+        const slash = e.isDirectory() ? '/' : '';
+        // href must be URL-encoded; text can be raw (rclone reads href)
+        return `<a href="${encodeURIComponent(e.name)}${slash}">${e.name}${slash}</a>`;
+      }).join('\n');
+      const body = `<!DOCTYPE html><html><body>\n${rows}\n</body></html>`;
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': Buffer.byteLength(body) });
+      res.end(req.method === 'HEAD' ? undefined : body);
+      return;
+    }
+    const size = st.size;
+    let start = 0, end = size - 1, code = 200;
+    const range = req.headers.range && /bytes=(\d*)-(\d*)/.exec(req.headers.range);
+    if (range) { if (range[1]) start = parseInt(range[1], 10); if (range[2]) end = parseInt(range[2], 10); code = 206; }
+    if (start > end || start >= size) { res.writeHead(416, { 'Content-Range': `bytes */${size}` }); res.end(); return; }
+    const h = { 'Content-Type': 'application/octet-stream', 'Accept-Ranges': 'bytes', 'Content-Length': end - start + 1, 'Last-Modified': st.mtime.toUTCString() };
+    if (code === 206) h['Content-Range'] = `bytes ${start}-${end}/${size}`;
+    res.writeHead(code, h);
+    if (req.method === 'HEAD') { res.end(); return; }
+    const rs = fs.createReadStream(abs, { start, end });
+    rs.on('error', () => { try { res.destroy(); } catch { } });
+    rs.pipe(res);
+  });
+  srv.on('error', (e) => { try { mux.control({ op: 'serve-folder-result', id: msg.id, error: e.message }); } catch { } });
+  srv.listen(0, '127.0.0.1', () => {
+    const port = srv.address().port;
+    folderServers.set(port, { server: srv, root });
+    log(`serve-folder ${root} on 127.0.0.1:${port}`);
+    mux.control({ op: 'serve-folder-result', id: msg.id, port, root });
+  });
+}
+
 // ── serve ──
 try { fs.unlinkSync(SOCK); } catch { }
 // One connection handler for EVERY transport: local unix socket accepts AND
@@ -579,6 +629,17 @@ function serveConnection(sock) {
         const L = reverseListeners.get(Number(msg.port));
         if (L) { try { L.server.close(); } catch { } reverseListeners.delete(Number(msg.port)); }
         mux.control({ op: 'listen-open', id: msg.id, port: Number(msg.port), closed: true });
+        return;
+      }
+      // ── device-folder-mount: serve a folder over minimal HTTP so the server
+      // can rclone-`http`-mount it (read-only). Loopback only; the server
+      // reaches this port via tcp-connect over the mux. Range GET + directory
+      // listings (rclone http backend parses <a href> links). ──
+      if (msg.op === 'serve-folder') { serveFolder(mux, msg); return; }
+      if (msg.op === 'unserve-folder') {
+        const s = folderServers.get(Number(msg.port));
+        if (s) { try { s.server.close(); } catch { } folderServers.delete(Number(msg.port)); }
+        mux.control({ op: 'serve-folder-result', id: msg.id, port: Number(msg.port), closed: true });
         return;
       }
       if (msg.op === 'open-session') {
