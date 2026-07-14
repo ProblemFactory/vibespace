@@ -211,6 +211,8 @@ class MountManager {
 
   /** Add a mount from one parsed rclone.conf remote (custom 'rclone' type). */
   addFromRcloneRemote(remote, { mode = 'rw', name } = {}) {
+    // Google Drive remotes import as the native `drive` type (unified); add()
+    // does the param→field normalization.
     return this.add({
       type: 'rclone', origin: 'rclone-conf',
       name: name || remote.name,
@@ -351,6 +353,7 @@ class MountManager {
     try { this._state = JSON.parse(fs.readFileSync(this._file, 'utf-8')); } catch { /* fresh */ }
     if (!Array.isArray(this._state.mounts)) this._state.mounts = [];
     if (!Array.isArray(this._state.shares)) this._state.shares = [];
+    this._maybeMigrateDrive();
   }
 
   _save() {
@@ -360,6 +363,43 @@ class MountManager {
   }
 
   _notify() { this.broadcast({ type: 'mounts-updated', mounts: this.list() }); }
+
+  // ── Google Drive UNIFICATION (2.135.4) ──────────────────────────────────
+  // There is ONE Google Drive. The native `drive` type IS rclone's drive
+  // backend with first-class fields + guided OAuth; a `type:'rclone',
+  // rcloneType:'drive'` record (rclone.conf import / custom-backend) is the
+  // same thing wearing raw params. We normalize every such record to the
+  // native `drive` type so users + code see a single concept.
+  _normalizeDriveRecord(m) {
+    if (m.type !== 'rclone' || m.rcloneType !== 'drive') return false;
+    const pr = {};
+    for (const [k, v] of Object.entries(m.paramsEnc || {})) { try { pr[k] = this._dec(v); } catch {} }
+    m.type = 'drive';
+    if (pr.client_id && !m.clientId) m.clientId = pr.client_id;
+    if (pr.client_secret && !m.clientSecretEnc) m.clientSecretEnc = this._enc(pr.client_secret);
+    if (pr.token && !m.tokenEnc) m.tokenEnc = this._enc(pr.token);
+    m.driveMode = m.driveMode || (pr.team_drive ? 'shared-drive' : pr.shared_with_me === 'true' ? 'shared-with-me' : 'mydrive');
+    if (pr.team_drive && !m.teamDriveId) m.teamDriveId = pr.team_drive;
+    if (pr.root_folder_id && !m.rootFolderId) m.rootFolderId = pr.root_folder_id;
+    if (!m.parentId) m.driveFolder = m.driveFolder || m.remotePath || '';
+    else m.driveFolder = m.driveFolder || m.remotePath || ''; // child too
+    // preserve any NON-drive params (rare custom tuning) as extra options
+    const DRIVE_KEYS = new Set(['client_id', 'client_secret', 'token', 'scope', 'team_drive', 'shared_with_me', 'root_folder_id']);
+    const extra = {};
+    for (const [k, v] of Object.entries(m.paramsEnc || {})) if (!DRIVE_KEYS.has(k)) extra[k] = v;
+    m.extraParamsEnc = { ...(m.extraParamsEnc || {}), ...extra };
+    delete m.rcloneType; delete m.paramsEnc; delete m.remotePath;
+    return true;
+  }
+
+  _maybeMigrateDrive() {
+    if (this._state._driveUnified) return;
+    let changed = false;
+    for (const m of this._state.mounts) if (this._normalizeDriveRecord(m)) changed = true;
+    this._state._driveUnified = true;
+    if (changed) this._save();
+  }
+
 
   // ── Config transfer ──
   // Secrets are stored encrypted under an INSTANCE-local key (data/.mounts-key),
@@ -593,6 +633,19 @@ class MountManager {
   // ── CRUD ──
 
   add(cfg) {
+    // ONE Google Drive: a custom-added rclone-drive normalizes to native drive
+    if ((cfg.type === 'rclone') && (cfg.rcloneType === 'drive')) {
+      const pr = cfg.params || {};
+      cfg = { ...cfg, type: 'drive',
+        clientId: cfg.clientId || pr.client_id || null,
+        clientSecret: cfg.clientSecret || pr.client_secret || undefined,
+        token: cfg.token || pr.token,
+        driveFolder: cfg.driveFolder || cfg.remotePath || '',
+        driveMode: cfg.driveMode || (pr.team_drive ? 'shared-drive' : pr.shared_with_me === 'true' ? 'shared-with-me' : 'mydrive'),
+        teamDriveId: cfg.teamDriveId || pr.team_drive,
+        rootFolderId: cfg.rootFolderId || pr.root_folder_id,
+      };
+    }
     const type = cfg.type || 's3';
     if (!cfg.name) throw new Error('name required');
     if (this._state.mounts.some(m => m.name === cfg.name)) throw new Error('A mount with that name exists');

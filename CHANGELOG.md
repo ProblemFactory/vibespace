@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.135.4 — 2026-07-14
+- **One Google Drive, no more "rclone version vs native version"** (user request): every `rclone`-backend-`drive` mount (rclone.conf import / custom-added) is now MIGRATED to the native `drive` type on load — its client/token/scope/folder carried over from the raw params into the first-class fields, any non-drive tuning params preserved as extra options. rclone.conf import and custom-add both normalize a `drive` backend to the native type up front. The rclone-drive-specific edit/submount UI branches are retired — there is a single Drive concept and code path. Migration is idempotent and lossless (guarded by a one-time marker).
+
 ## 2.135.3 — 2026-07-14
 - **rclone-backed Google Drive mounts are now first-class Drives** (real report: an imported/custom `drive` rclone remote had an incomplete edit dialog — no OAuth client picker, and its submounts had no cloud-side source): a mount whose rclone backend is `drive` now gets the SAME controls as a native Drive record — OAuth client preset picker, cloud-side scope (My Drive / Shared with me / Shared drive), the **List shared drives** picker, and single-folder `root_folder_id` — in both the edit dialog and the "New submount" dialog. Existing records migrate transparently (the scope is inferred from the stored rclone params, then edited via the friendly fields which take over). Preset selection resolves to the instance's env clients, so the secret never lands in the record.
 
