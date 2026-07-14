@@ -305,6 +305,7 @@ class ChatView {
       },
       onInterrupt: () => this.ws.send({ type: 'interrupt', sessionId: this.sessionId }),
       getCwd: () => this._getSessionIds().cwd,
+      getHost: () => this._getSessionIds().host || null,
       getUploadDir: () => (this.app?.settings?.get('chat.uploadDir') || '').trim(),
     });
     this._chatInput.popupContainer = container;

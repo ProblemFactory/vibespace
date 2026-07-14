@@ -217,7 +217,7 @@ export async function collectDroppedFiles(dt) {
   return out;
 }
 
-export async function uploadFilesBatched(files, { destDir, preservePaths, onProgress } = {}) {
+export async function uploadFilesBatched(files, { destDir, preservePaths, onProgress, host } = {}) {
   const list = (files || []).filter(Boolean);
   const CHUNK_FILES = 40, CHUNK_BYTES = 64 * 1024 * 1024;
   const chunks = [];
@@ -235,7 +235,11 @@ export async function uploadFilesBatched(files, { destDir, preservePaths, onProg
     fd.append('destDir', destDir);
     fd.append('fileNames', JSON.stringify(names));
     if (preservePaths || names.some((n) => n.includes('/'))) fd.append('preservePaths', '1');
-    const res = await fetch('/api/upload', { method: 'POST', body: fd });
+    // Remote sessions: route the upload to the host so destDir resolves on the
+    // remote (and its ~ is the remote home) — without ?host= a remote-session
+    // upload silently landed on the LOCAL server (review finding).
+    const url = host ? `/api/upload?host=${encodeURIComponent(host)}` : '/api/upload';
+    const res = await fetch(url, { method: 'POST', body: fd });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.success === false) throw new Error(data.error || `HTTP ${res.status}`);
     return data.files || [];

@@ -85,6 +85,17 @@ export function installSidebarMounts(Sidebar) {
         root.appendChild(hlist);
         this._autoTestHosts(hd.hosts, hlist);
       }
+      // Orphan reverse-mounts: mounts whose host was removed (or none listed).
+      // Without this they'd be invisible AND unmanageable (review finding).
+      const liveHostIds = new Set(hd.hosts.map((h) => h.id));
+      const orphans = this._hostMountsData.filter((m) => !liveHostIds.has(m.hostId));
+      if (orphans.length) {
+        const olist = document.createElement('div');
+        olist.className = 'mounts-list';
+        olist.appendChild(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline', textContent: tr('Mounts on removed machines — unmount to clean up') }));
+        for (const hmr of orphans) olist.appendChild(this._buildHostMountRow({ id: hmr.hostId, name: tr('(removed machine)') }, hmr));
+        root.appendChild(olist);
+      }
       const addHost = document.createElement('button');
       addHost.className = 'mounts-action';
       addHost.innerHTML = `<span class="mounts-action-icon">${MI.server}</span><span>${escHtml(tr('Add machine'))}</span>`;
