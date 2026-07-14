@@ -30,7 +30,7 @@ const REGISTRY = {
   wma:  { category: 'audio', icon: I.audio, viewer: 'audio', bypassBinary: true },
   // PDF
   pdf:  { category: 'document', icon: I.pdf, viewer: 'pdf', bypassBinary: true },
-  eml:  { category: 'document', icon: I.file, viewer: 'eml', bypassBinary: true },
+  eml:  { category: 'document', icon: I.mail, viewer: 'eml', bypassBinary: true },
   // Office
   docx: { category: 'office', icon: I.word, viewer: 'docx', bypassBinary: true },
   doc:  { category: 'office', icon: I.word, viewer: 'docx', bypassBinary: true },

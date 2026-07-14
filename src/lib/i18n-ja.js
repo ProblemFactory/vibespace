@@ -1754,4 +1754,10 @@ export default {
   "Sync paused — emails stay in the folder; connect to resume": "同期は一時停止中——メールはフォルダに残ります。接続で再開します",
   "Stop syncing (synced emails stay)": "同期を停止（同期済みメールは残ります）",
   "This is a SYNC, not a live mount: emails download into the folder as .eml files (read-only archive) and keep syncing while connected.": "これはライブマウントではなく同期です：メールは .eml ファイルとしてフォルダにダウンロードされ（読み取り専用アーカイブ）、接続中は同期し続けます。",
+  "Organize into folders": "日付でサブフォルダに整理",
+  "By month (YYYY-MM)": "月ごと（YYYY-MM）",
+  "By day (YYYY-MM-DD)": "日ごと（YYYY-MM-DD）",
+  "No grouping (flat)": "グループ化なし（フラット）",
+  "Keeps the folder browsable — hundreds of thousands of emails in one flat directory hurt every file tool.": "フォルダを閲覧可能に保ちます——1 つのフラットなディレクトリに数十万件のメールがあるとあらゆるファイルツールが苦しみます。",
+  "Organize into folders (month / day / none)": "日付でサブフォルダに整理（month / day / none）",
 };

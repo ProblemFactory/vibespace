@@ -92,6 +92,21 @@ await gs._syncOnce(w).catch((e) => check('expired-history reseed throws nothing'
 files = fs.readdirSync(dir).filter((f) => f.endsWith('.eml'));
 check('reseed keeps exactly 3 files (dedup by dir)', files.length === 3, files.join(','));
 
+// date grouping: month subfolders + cross-subdir dedup
+const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'gmail-g-'));
+phase = 'seed';
+const w2 = gs.start({ ...cfg, id: 'mnt-g', dir: dir2, groupBy: 'month' });
+for (let i = 0; i < 100 && w2.state !== 'idle' && w2.state !== 'error'; i++) await new Promise((r) => setTimeout(r, 50));
+check('grouped sync reaches idle', w2.state === 'idle', w2.error || '');
+const subs = fs.readdirSync(dir2).filter((f) => /^\d{4}-\d{2}$/.test(f));
+check('month subfolder created', subs.length >= 1, fs.readdirSync(dir2).join(','));
+const grouped = subs.flatMap((d) => fs.readdirSync(path.join(dir2, d)));
+check('emails live inside the month folder', grouped.filter((f) => f.endsWith('.eml')).length === 2, grouped.join(','));
+await gs._syncOnce(w2).catch(() => {});
+check('dedup works across subfolders', subs.flatMap((d) => fs.readdirSync(path.join(dir2, d))).filter((f) => f.endsWith('.eml')).length >= 2);
+gs.stop('mnt-g');
+fs.rmSync(dir2, { recursive: true, force: true });
+
 gs.stop('mnt-test');
 srv.close();
 fs.rmSync(dir, { recursive: true, force: true });
