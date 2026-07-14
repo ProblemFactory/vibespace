@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.134.4 — 2026-07-14
+- **Submounts are now the first-class way to attach Shared Drives / shared-with-me** (user insight — that's where zero-reauth lives: ONE authorized Google credential, N children each pointing at a different cloud-side scope): the "New submount" dialog under a Drive connection gets the **List shared drives** picker (over the parent's stored credentials, no token pasting), scope-conditional fields (the Shared-drive row only shows for that scope), and the single-shared-folder **Folder ID** field.
+
 ## 2.134.3 — 2026-07-14
 - **Shared-drive picker items now actually apply on click** (real report: "clicking a listed drive does nothing") — the menu items used the wrong callback key for showContextMenu (`onClick` instead of `action`), so selecting a drive threw silently.
 - **Editing an EXISTING Google Drive mount can now really change the cloud-side scope** (real report): the edit dialog's scope field was a raw text input demanding magic strings — it's a proper My Drive / Shared with me / Shared drive dropdown now, and the edit dialog gained the same **List shared drives** picker as the add dialog (works for submounts too, resolving credentials through the parent). Saving still auto-reconnects the mount with the new settings.

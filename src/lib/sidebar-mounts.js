@@ -441,9 +441,16 @@ export function installSidebarMounts(Sidebar) {
         { key: pathField.key, label: pathField.label, placeholder: pathField.placeholder },
         ...(type === 's3' ? [{ key: 'prefix', label: tr('Prefix (optional)'), placeholder: 'sub/path' }] : []),
         ...(type === 'drive' ? [
+          // Submounts are the natural home for cloud-side scopes (user
+          // insight): ONE authorized credential, N children each pointing at
+          // My Drive / a Shared drive / shared-with-me — no re-auth ever
+          // (each child runs its own rclone daemon+env over the parent creds).
           { key: 'driveMode', label: tr('Cloud-side scope'), type: 'select',
             options: [['mydrive', 'My Drive'], ['shared-with-me', tr('Shared with me')], ['shared-drive', tr('Shared drive (team)')]] },
-          { key: 'teamDriveId', label: tr('Shared drive id (for the Shared drive scope)'), placeholder: '0AbC…' },
+          { key: 'teamDriveId', label: tr('Shared drive'), placeholder: tr('click “List shared drives” or paste an id'), when: (v) => v.driveMode === 'shared-drive' },
+          { key: 'rootFolderId', label: tr('Folder ID (advanced — mount ONE shared folder)'), placeholder: '1AbC…',
+            hint: tr('From the folder’s Drive URL. Mounts just that folder — the way to mount a single folder someone shared with you (keep scope = My Drive).'),
+            when: (v) => v.driveMode !== 'shared-drive' },
         ] : []),
         { key: 'customPath', label: tr('Mount point (blank = default)'), placeholder: '/absolute/path' },
         { key: 'mode', label: tr('Access'), type: 'select', options: [['rw', 'Read-write'], ['ro', 'Read-only']] },
@@ -453,6 +460,8 @@ export function installSidebarMounts(Sidebar) {
         catch (e) { showToast(e.message || tr('Created, but connecting failed — check the path'), { type: 'error' }); }
         close(); this._renderMounts();
       });
+      // Shared-drive picker over the PARENT's stored credentials (id-based)
+      if (type === 'drive') this._wireSharedDrivePicker(this._lastMountsDialog, cred.id);
     },
 
     // Auto-probe connectivity so the dots are meaningful without clicking:
@@ -1039,7 +1048,7 @@ export function installSidebarMounts(Sidebar) {
     // "List shared drives" button next to the teamDriveId input: uses the
     // token already in the dialog (pasted or from the guided flow) to run
     // `rclone backend drives` server-side and pick from a menu.
-    _wireSharedDrivePicker(ctx) {
+    _wireSharedDrivePicker(ctx, credId) {
       const inp = ctx.inputs.teamDriveId;
       if (!inp) return;
       const btn = document.createElement('button');
@@ -1055,11 +1064,11 @@ export function installSidebarMounts(Sidebar) {
         btn.disabled = true;
         try {
           const choice = ctx.inputs.clientChoice?.value;
-          const body = { token: ctx.inputs.token?.value || '',
+          const body = credId ? { id: credId } : { token: ctx.inputs.token?.value || '',
             clientId: (choice === 'custom' && ctx.inputs.clientId?.value) || '',
             clientSecret: (choice === 'custom' && ctx.inputs.clientSecret?.value) || '',
             clientPreset: (choice && choice !== 'custom' && choice) || '' };
-          if (!body.token.trim()) throw new Error(tr('Connect Google Drive first (the token field must be filled)'));
+          if (!credId && !body.token.trim()) throw new Error(tr('Connect Google Drive first (the token field must be filled)'));
           const r = await api('/api/mounts/shared-drives', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } });
           const drives = r.drives || [];
           if (!drives.length) { showToast(tr('No shared drives visible to this account')); return; }
