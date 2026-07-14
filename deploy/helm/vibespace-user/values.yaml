@@ -136,3 +136,12 @@ opslog:
   secretName: ""
   dir: /var/opslog
   keepDays: 30
+
+# Instance-default Google OAuth client (optional): used by Google Drive mounts
+# (and future Gmail) when the user doesn't supply their own client — e.g. a
+# company "Internal" consent-screen client so org users authorize without any
+# verification and with long-lived tokens. Injected as env, never stored in
+# the instance's data.
+gdrive:
+  clientId: ""
+  clientSecret: ""

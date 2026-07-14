@@ -26,6 +26,9 @@ stringData:
   {{- if and .Values.cephfs .Values.cephfs.secret }}
   cephfsSecret: {{ .Values.cephfs.secret | quote }}
   {{- end }}
+  {{- if and .Values.gdrive .Values.gdrive.clientId }}
+  gdriveClientSecret: {{ .Values.gdrive.clientSecret | quote }}
+  {{- end }}
 {{- if not .Values.storage.existingClaim }}
 ---
 apiVersion: v1
@@ -138,6 +141,14 @@ spec:
             {{- with .Values.telemetry.forwardUrl }}
             - name: VIBESPACE_TELEMETRY_FORWARD_URL
               value: {{ . | quote }}
+            {{- end }}
+            {{- if and .Values.gdrive .Values.gdrive.clientId }}
+            # Instance-default Google OAuth client (Drive mounts / future Gmail):
+            # used when a mount has no client of its own; never persisted app-side.
+            - name: VIBESPACE_GDRIVE_CLIENT_ID
+              value: {{ .Values.gdrive.clientId | quote }}
+            - name: VIBESPACE_GDRIVE_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: {{ $name }}, key: gdriveClientSecret } }
             {{- end }}
             - name: VIBESPACE_INSTANCE_NAME
               value: {{ .Values.user | quote }}
