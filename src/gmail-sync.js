@@ -288,66 +288,101 @@ class GmailSync {
       }
     }
     if (!state.historyId) {
-      // Seed/reseed: newest N matching messages; syncCount 0 = EVERYTHING
-      // (hard runaway cap 200k — ~11h of quota-paced fetching at worst)
+      // SEED (first full sync; syncCount 0 = EVERYTHING, hard cap 200k) — now
+      // STREAMING + CHECKPOINTED so a restart mid-seed RESUMES from the last
+      // page instead of re-listing the whole mailbox (real report: every
+      // restart re-scanned). Each page is downloaded then the messages.list
+      // pageToken is persisted; a restart continues from state.seedPageToken.
       const n = Number(w.cfg.syncCount);
       const want = n === 0 ? 200000 : Math.max(1, Math.min(200000, n || 200));
-      let pageToken = null;
-      while (ids.length < want) {
+      // Capture the historyId ONCE at seed START — incremental later covers any
+      // mail that arrives DURING the (possibly hours-long) seed. Persisted so a
+      // restart keeps the same anchor.
+      if (!state.seedHistoryId) {
+        const prof = await this._api(w, '/profile');
+        state.seedHistoryId = prof.historyId;
+        this._saveState(w, state);
+      }
+      let pageToken = state.seedPageToken || null;
+      let fetched = state.seedFetched || 0;
+      do {
+        if (w.stopped) return;
         const p = qs();
-        p.set('maxResults', String(Math.min(500, want - ids.length)));
+        p.set('maxResults', String(Math.min(500, want - fetched)));
         if (pageToken) p.set('pageToken', pageToken);
         const l = await this._api(w, '/messages?' + p);
-        ids.push(...(l.messages || []).map((m) => m.id));
-        pageToken = l.nextPageToken;
-        if (!pageToken || !(l.messages || []).length) break;
-      }
-      const prof = await this._api(w, '/profile');
-      newHistoryId = prof.historyId;
+        const msgs = l.messages || [];
+        for (const m of msgs) {
+          if (w.stopped) return;
+          if (!seen.has(m.id)) await this._writeMessage(w, m.id, seen);
+          this._progress(w, null); // total unknown while listing — count shows on the card
+        }
+        fetched += msgs.length;
+        pageToken = l.nextPageToken || null;
+        state.seedPageToken = pageToken;   // CHECKPOINT after each page
+        state.seedFetched = fetched;
+        state.lastSyncAt = Date.now();
+        this._saveState(w, state);
+        if (!msgs.length) break;
+      } while (pageToken && fetched < want);
+      // seed complete → switch to incremental from the seed-start historyId
+      state.historyId = state.seedHistoryId;
+      delete state.seedPageToken; delete state.seedFetched; delete state.seedHistoryId;
+      state.lastSyncAt = Date.now();
+      this._saveState(w, state);
+      this._progress(w, null);
+      return;
     }
 
+    // Incremental: ids gathered from history.list above → download them.
     const todo = ids.filter((id) => !seen.has(id));
     if (todo.length) this._progress(w, todo.length, 0);
     let done = 0;
     for (const id of todo) {
       if (w.stopped) return;
-      const msg = await this._api(w, `/messages/${id}?format=raw`);
-      const raw = Buffer.from(String(msg.raw || ''), 'base64url');
-      // filename: sortable date + subject slug + id (id = the dedup key)
-      const head = raw.subarray(0, 8192).toString('binary').replace(/\r?\n[ \t]/g, ' ');
-      const subj = decodeHeaderWord((/^Subject:\s*(.*)$/im.exec(head) || [])[1] || '').trim();
-      const slug = subj.replace(/[^\p{L}\p{N} _.-]/gu, '').trim().replace(/\s+/g, '-').slice(0, 60) || 'no-subject';
-      const d = new Date(Number(msg.internalDate) || Date.now());
-      const stamp = d.toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-');
-      // grouping (user option — one flat dir hits fs limits and explorer
-      // pain at 10^5+ mails): none | month | day | label-month | label-day.
-      // Label layouts put each mail under ONE folder by Gmail's own
-      // precedence (a message carries many labels; "archived" = no INBOX).
-      const iso = d.toISOString();
-      const ls = msg.labelIds || [];
-      const labelDir = ls.includes('SPAM') ? 'Spam' : ls.includes('TRASH') ? 'Trash'
-        : ls.includes('DRAFT') ? 'Drafts' : ls.includes('INBOX') ? 'Inbox'
-        : ls.includes('SENT') ? 'Sent' : 'Archive';
-      const g = w.cfg.groupBy;
-      const sub = g === 'month' ? iso.slice(0, 7)
-        : g === 'day' ? iso.slice(0, 10)
-        : g === 'label-month' ? path.join(labelDir, iso.slice(0, 7))
-        : g === 'label-day' ? path.join(labelDir, iso.slice(0, 10))
-        : '';
-      const destDir = sub ? path.join(w.cfg.dir, sub) : w.cfg.dir;
-      fs.mkdirSync(destDir, { recursive: true });
-      const tmp = path.join(destDir, `.tmp-${id}`);
-      fs.writeFileSync(tmp, raw);
-      fs.renameSync(tmp, path.join(destDir, `${stamp}_${slug}_${id}.eml`));
-      seen.add(id);
-      w.count = seen.size;
+      await this._writeMessage(w, id, seen);
       this._progress(w, todo.length, ++done);
     }
     this._progress(w, null);
 
     state.historyId = newHistoryId;
     state.lastSyncAt = Date.now();
-    fs.writeFileSync(this._statePath(w), JSON.stringify(state));
+    this._saveState(w, state);
+  }
+
+  _saveState(w, state) {
+    const fp = this._statePath(w);
+    fs.writeFileSync(fp + '.tmp', JSON.stringify(state));
+    fs.renameSync(fp + '.tmp', fp);
+  }
+
+  // Download ONE message as a .eml into the (possibly grouped) folder + mark seen.
+  async _writeMessage(w, id, seen) {
+    const msg = await this._api(w, `/messages/${id}?format=raw`);
+    const raw = Buffer.from(String(msg.raw || ''), 'base64url');
+    const head = raw.subarray(0, 8192).toString('binary').replace(/\r?\n[ \t]/g, ' ');
+    const subj = decodeHeaderWord((/^Subject:\s*(.*)$/im.exec(head) || [])[1] || '').trim();
+    const slug = subj.replace(/[^\p{L}\p{N} _.-]/gu, '').trim().replace(/\s+/g, '-').slice(0, 60) || 'no-subject';
+    const d = new Date(Number(msg.internalDate) || Date.now());
+    const stamp = d.toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-');
+    const iso = d.toISOString();
+    const ls = msg.labelIds || [];
+    const labelDir = ls.includes('SPAM') ? 'Spam' : ls.includes('TRASH') ? 'Trash'
+      : ls.includes('DRAFT') ? 'Drafts' : ls.includes('INBOX') ? 'Inbox'
+      : ls.includes('SENT') ? 'Sent' : 'Archive';
+    const g = w.cfg.groupBy;
+    const sub = g === 'month' ? iso.slice(0, 7)
+      : g === 'day' ? iso.slice(0, 10)
+      : g === 'label-month' ? path.join(labelDir, iso.slice(0, 7))
+      : g === 'label-day' ? path.join(labelDir, iso.slice(0, 10))
+      : '';
+    const destDir = sub ? path.join(w.cfg.dir, sub) : w.cfg.dir;
+    fs.mkdirSync(destDir, { recursive: true });
+    const tmp = path.join(destDir, `.tmp-${id}`);
+    fs.writeFileSync(tmp, raw);
+    fs.renameSync(tmp, path.join(destDir, `${stamp}_${slug}_${id}.eml`));
+    seen.add(id);
+    w.count = seen.size;
   }
 }
 

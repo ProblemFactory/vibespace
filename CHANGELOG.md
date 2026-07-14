@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.136.1 — 2026-07-14
+- **Gmail sync now resumes a mid-seed restart from a checkpoint** (real report: every server restart re-scanned the whole mailbox). The first full sync used to persist its cursor only AFTER downloading everything, so a restart during a large seed (especially "sync everything") re-listed the entire mailbox from scratch. The seed is now streamed page-by-page: each page is downloaded and its `messages.list` pageToken persisted, so a restart continues from the last page instead of re-listing. The incremental-anchor historyId is captured at seed START (persisted) so mail arriving during a long seed is still caught. (Incremental syncs already resumed from historyId — this fixes the seed phase.)
+
 ## 2.136.0 — 2026-07-14
 - **Native OneDrive** (new mount type, alongside native Google Drive): connect a Microsoft OneDrive with guided sign-in (no terminal — same loopback flow as Drive, remote paste-back supported), pick Personal / Work-School / SharePoint account type, an optional folder and Drive ID (for a specific or shared drive), optional own Azure OAuth app. rclone.conf import maps a `onedrive` remote to the native type; existing rclone-onedrive records migrate on load (lossless, guarded). First-class fields, edit dialog, submounts (per-folder), and guided re-authorize — no more raw rclone params for OneDrive.
 - Groundwork for the generic OAuth-cloud friendly layer: `rclone authorize` is generalized to any backend (drive/onedrive/dropbox/box/pcloud/…), so the guided sign-in button is reusable. (Full friendly-field editing for the other backends is a follow-on.)
