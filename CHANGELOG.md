@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.136.2 — 2026-07-14
+- **Gmail seed resume is now robust against new mail arriving between restarts** (user insight): the mid-seed checkpoint switched from a `messages.list` pageToken to a **date cursor** — Gmail's pageToken is only stable within one run (new mail arriving between runs can shift or expire it, silently skipping OLD mail the incremental pass never back-fills). A restart now resumes from the oldest already-downloaded message's date (`before:<sec>`) and pulls strictly-older mail; new mail (newer date) is left to the seed-start historyId incremental; the same-second boundary re-lists a few already-seen ids that dedup skips. pageToken remains a within-run optimization only.
+- **Gmail "checking for new mail" progress bar no longer stutters** (real report — it jittered in the first third): indeterminate progress broadcast every download, rebuilding the card and restarting the bar's one-way slide animation every ~400ms so it never got past a third. Indeterminate broadcasts are now throttled to 2.5s and the bar is a symmetric pulse (a mid-animation rebuild is invisible).
+
 ## 2.136.1 — 2026-07-14
 - **Gmail sync now resumes a mid-seed restart from a checkpoint** (real report: every server restart re-scanned the whole mailbox). The first full sync used to persist its cursor only AFTER downloading everything, so a restart during a large seed (especially "sync everything") re-listed the entire mailbox from scratch. The seed is now streamed page-by-page: each page is downloaded and its `messages.list` pageToken persisted, so a restart continues from the last page instead of re-listing. The incremental-anchor historyId is captured at seed START (persisted) so mail arriving during a long seed is still caught. (Incremental syncs already resumed from historyId — this fixes the seed phase.)
 

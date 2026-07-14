@@ -2919,5 +2919,9 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .mounts-syncline { overflow: visible; }
 .mounts-syncbar { flex: 1 1 24px; min-width: 24px; max-width: 140px; height: 4px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 18%, transparent); overflow: hidden; }
 .mounts-syncbar i { display: block; height: 100%; border-radius: 999px; background: var(--accent); transition: width .3s ease; }
-.mounts-syncbar-ind i { width: 30%; animation: mounts-sync-slide 1.2s ease-in-out infinite; }
-@keyframes mounts-sync-slide { 0% { margin-left: 0; } 50% { margin-left: 70%; } 100% { margin-left: 0; } }
+.mounts-syncbar-ind { position: relative; overflow: hidden; }
+.mounts-syncbar-ind i { width: 100%; transform-origin: left; animation: mounts-sync-pulse 1.4s ease-in-out infinite; }
+/* Symmetric opacity+scale pulse — a card rebuild mid-animation is invisible
+   (the one-way slide restarted from the left on every rebuild → "stutter in
+   the first third", real report). */
+@keyframes mounts-sync-pulse { 0%, 100% { opacity: 0.35; transform: scaleX(0.4); } 50% { opacity: 1; transform: scaleX(1); } }
