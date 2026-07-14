@@ -37,6 +37,9 @@ const CEPHMOUNT_PREFIX = 'vibespace-cephmount:v1:';
 
 class MountManager {
   constructor({ dataDir, broadcast, getSetting }) {
+    // Gmail-as-a-folder engine (2.134.0) — lazy so plain deployments pay nothing
+    const { GmailSync } = require('./gmail-sync');
+    this.gmail = new GmailSync({ presets: () => MountManager.drivePresets() });
     this.dataDir = dataDir;
     this.broadcast = broadcast || (() => {});
     this._getSetting = getSetting || (() => undefined);
@@ -379,6 +382,7 @@ class MountManager {
       token: m.tokenEnc ? this._dec(m.tokenEnc) : undefined,
       driveFolder: m.driveFolder, clientId: m.clientId,
       driveMode: m.driveMode, teamDriveId: m.teamDriveId, rootFolderId: m.rootFolderId, clientPreset: m.clientPreset,
+      syncCount: m.syncCount, labelIds: m.labelIds, query: m.query, email: m.email,
       clientSecret: m.clientSecretEnc ? this._dec(m.clientSecretEnc) : undefined,
       // webdav / vibespace
       url: m.url, vendor: m.vendor, user: m.user,
@@ -432,6 +436,8 @@ class MountManager {
   }
 
   isMounted(m) {
+    // gmail "mounts" are sync workers, not filesystems
+    if (m.type === 'gmail') return !!this.gmail.status(m.id);
     // /proc/mounts escapes spaces as \040
     const p = this.pathOf(m).replace(/ /g, '\\040');
     // cephfs = native KERNEL mount (fstype 'ceph'), not fuse.rclone
@@ -482,6 +488,7 @@ class MountManager {
       case 'sftp': return `${m.sshUser}@${m.sshHost}:${m.sshPath || '~'}`;
       case 'rclone': return `${m.rcloneType}:${m.remotePath || ''}`;
       case 'cephfs': return `CephFS ${m.cephPath || '/'} @ ${(m.cephMonHosts || '').split(',')[0] || '?'}`;
+      case 'gmail': return 'Gmail' + (m.email ? `: ${m.email}` : '') + (m.query ? ` (${m.query})` : '');
       default: return `${m.bucket}${m.prefix ? '/' + m.prefix : ''} @ ${m.endpoint}`;
     }
   }
@@ -496,6 +503,7 @@ class MountManager {
         endpoint: conn.endpoint, bucket: conn.bucket, prefix: conn.prefix,
         rcloneType: conn.rcloneType, remotePath: conn.remotePath, driveFolder: conn.driveFolder,
         driveMode: conn.driveMode || (conn.type === 'drive' ? 'mydrive' : undefined), teamDriveId: conn.teamDriveId, clientPreset: conn.clientPreset,
+        ...(m.type === 'gmail' ? (() => { const st = this.gmail.status(m.id); return { email: m.email || st?.email, syncCount: m.syncCount, labelIds: m.labelIds, query: m.query, gmailState: st?.state || null, gmailCount: st?.count ?? null, gmailError: st?.error || null, lastSyncAt: st?.lastSyncAt || null }; })() : {}),
         // secret VALUES never leave the server; keys let the edit dialog offer
         // per-parameter replacement (blank = keep) for custom rclone records
         paramKeys: (conn.type === 'rclone' && !m.parentId) ? Object.keys(conn.paramsEnc || {}) : undefined,
@@ -610,6 +618,23 @@ class MountManager {
           clientId: cfg.clientId || null,
           clientPreset: cfg.clientPreset ? String(cfg.clientPreset) : null,
           clientSecretEnc: cfg.clientSecret ? this._enc(cfg.clientSecret) : null,
+        });
+        break;
+      }
+      case 'gmail': {
+        if (!cfg.token) throw new Error('token required — use "Connect Gmail" (guided sign-in)');
+        let tok = String(cfg.token).trim();
+        try { JSON.parse(tok); } catch { throw new Error('gmail token must be the JSON from the guided flow'); }
+        Object.assign(m, {
+          tokenEnc: this._enc(tok),
+          clientPreset: cfg.clientPreset ? String(cfg.clientPreset) : null,
+          clientId: cfg.clientId || null,
+          clientSecretEnc: cfg.clientSecret ? this._enc(cfg.clientSecret) : null,
+          syncCount: Math.max(1, Math.min(2000, Number(cfg.syncCount) || 200)),
+          labelIds: String(cfg.labelIds || 'INBOX'),
+          query: String(cfg.query || ''),
+          email: cfg.email ? String(cfg.email) : null,
+          mode: 'ro', // read-only archive by design
         });
         break;
       }
@@ -823,7 +848,7 @@ class MountManager {
     // bucket/keys come from env and a change re-imports) — name, mountpoint
     // and mode are the only editable fields (user directive).
     const envLocked = m.origin === 'my-storage';
-    const connectionKeys = ['endpoint', 'bucket', 'prefix', 'accessKey', 'secretKey', 'sessionToken', 'rcloneType', 'remotePath', 'params', 'driveFolder', 'driveMode', 'teamDriveId', 'rootFolderId', 'token', 'clientId', 'clientPreset', 'clientSecret', 'url', 'user', 'pass', 'bearerToken', 'sshHost', 'sshUser', 'sshPort', 'sshPath', 'keyPath', 'cephMonHosts', 'cephFsName', 'cephPath', 'cephUser', 'cephSecret'];
+    const connectionKeys = ['endpoint', 'bucket', 'prefix', 'accessKey', 'secretKey', 'sessionToken', 'rcloneType', 'remotePath', 'params', 'driveFolder', 'driveMode', 'teamDriveId', 'rootFolderId', 'token', 'clientId', 'clientPreset', 'clientSecret', 'syncCount', 'labelIds', 'query', 'url', 'user', 'pass', 'bearerToken', 'sshHost', 'sshUser', 'sshPort', 'sshPath', 'keyPath', 'cephMonHosts', 'cephFsName', 'cephPath', 'cephUser', 'cephSecret'];
     if (envLocked && connectionKeys.some((k) => patch[k] !== undefined && patch[k] !== '')) {
       throw new Error('This storage is provisioned by your deployment — its connection settings can\'t be edited here (name and mount point can).');
     }
@@ -864,6 +889,13 @@ class MountManager {
             else m.paramsEnc[k] = this._enc(String(v));
           }
         }
+        break;
+      case 'gmail':
+        if (patch.syncCount !== undefined) m.syncCount = Math.max(1, Math.min(2000, Number(patch.syncCount) || 200));
+        if (patch.labelIds !== undefined) m.labelIds = String(patch.labelIds || '');
+        if (patch.query !== undefined) m.query = String(patch.query || '');
+        if (patch.clientPreset !== undefined) m.clientPreset = patch.clientPreset ? String(patch.clientPreset) : null;
+        if (patch.token) { JSON.parse(String(patch.token).trim()); m.tokenEnc = this._enc(String(patch.token).trim()); }
         break;
       case 'drive':
         if (patch.driveFolder !== undefined) m.driveFolder = String(patch.driveFolder || '').replace(/^\/+|\/+$/g, '');
@@ -1060,6 +1092,8 @@ class MountManager {
   async _mountInner(id) {
     const m = this._get(id);
     if (this.isMounted(m)) { m.desired = 'mounted'; this._save(); this._notify(); return; }
+    // Gmail = a sync WORKER writing .eml files, not a filesystem.
+    if (m.type === 'gmail') return this._mountGmail(id);
     // CephFS = native kernel mount (not rclone) — its own path.
     if (m.type === 'cephfs') return this._mountCephfs(id);
     // Self-mount guard for EXISTING records too (imported before the add()
@@ -1349,6 +1383,12 @@ class MountManager {
     try {
       for (const m of [...this._state.mounts]) {
         if (this._kindOf(m) === 'credential') continue;
+        if (m.type === 'gmail') {
+          // sync worker, not a filesystem — restart it if it died, skip all
+          // fuse/mountpoint probing (a plain dir can't hang the pool)
+          if (!this.isMounted(m) && m.desired === 'mounted') await this._maybeAutoRemount(m);
+          continue;
+        }
         if (!this.isMounted(m)) {
           // Self-heal: desired-but-dead (daemon crashed/OOM-killed, kernel
           // mount evicted, or a prior hang teardown) — auto-remount with
@@ -1528,6 +1568,10 @@ class MountManager {
       this._notify();
       return ok;
     };
+    if (m.type === 'gmail') {
+      this.gmail.stop(id);
+      return Promise.resolve(finish(true)); // synced .eml files stay — they're the archive
+    }
     if (m.type === 'cephfs') {
       return new Promise((resolve) => {
         execFile('sudo', ['-n', 'umount', '-l', mp], () => resolve(finish(!this.isMounted(m))));
@@ -1696,6 +1740,30 @@ class MountManager {
         } catch { reject(new Error('unexpected rclone output')); }
       });
     });
+  }
+
+  _mountGmail(id) {
+    const m = this._get(id);
+    const dir = this.pathOf(m);
+    fs.mkdirSync(dir, { recursive: true });
+    this.gmail.start({
+      id, dir,
+      token: this._dec(m.tokenEnc),
+      clientPreset: m.clientPreset || null,
+      clientId: m.clientId || null,
+      clientSecret: m.clientSecretEnc ? this._dec(m.clientSecretEnc) : null,
+      syncCount: m.syncCount, labelIds: m.labelIds, query: m.query,
+    });
+    m.desired = 'mounted';
+    this._errors.delete(id);
+    this._save();
+    this._notify();
+    // learn the account email on first sync (worker fills it async)
+    setTimeout(() => {
+      const st = this.gmail.status(id);
+      if (st?.email && !m.email) { m.email = st.email; this._save(); this._notify(); }
+    }, 15000).unref?.();
+    return true;
   }
 
   startDriveAuth({ clientId, clientSecret, clientPreset } = {}) {

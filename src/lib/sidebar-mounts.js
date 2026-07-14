@@ -291,7 +291,7 @@ export function installSidebarMounts(Sidebar) {
       pathEl.title = isCred ? (m.source || '') : `${m.source || ''} → ${m.path}`;
       const tag = document.createElement('span');
       tag.className = 'mounts-typetag';
-      tag.textContent = { s3: 'S3', drive: 'Drive', webdav: 'WebDAV', sftp: 'SFTP', vibespace: 'VibeSpace', cephfs: 'CephFS', rclone: (m.source || 'rclone').split(':')[0] }[m.type || 's3'] || m.type;
+      tag.textContent = { s3: 'S3', drive: 'Drive', gmail: 'Gmail', webdav: 'WebDAV', sftp: 'SFTP', vibespace: 'VibeSpace', cephfs: 'CephFS', rclone: (m.source || 'rclone').split(':')[0] }[m.type || 's3'] || m.type;
       // The path keeps its rtl left-truncation trick in its OWN span — the
       // chip must stay outside the rtl context or bidi reorders it to the end.
       const pt = document.createElement('span');
@@ -827,7 +827,7 @@ export function installSidebarMounts(Sidebar) {
       const isDriveCustom = (v) => v.type === 'drive' && v.clientChoice === 'custom';
       this._mountsDialog(tr('Connect storage'), [
         { key: 'type', label: tr('Source type'), type: 'select', options: [
-          ['s3', tr('Cloud storage (S3 / MinIO)')], ['drive', 'Google Drive'], ['webdav', 'Nextcloud / WebDAV'],
+          ['s3', tr('Cloud storage (S3 / MinIO)')], ['drive', 'Google Drive'], ['gmail', 'Gmail'], ['webdav', 'Nextcloud / WebDAV'],
           ['sftp', tr('A server over SSH (SFTP)')], ['vibespace', tr('Another VibeSpace')], ['rclone', tr('Custom / advanced (rclone)')],
         ] },
         { key: 'name', label: tr('Name'), placeholder: 'my-mount' },
@@ -850,6 +850,15 @@ export function installSidebarMounts(Sidebar) {
         { key: 'teamDriveId', label: tr('Shared drive'), placeholder: tr('click “List shared drives” (needs access above) or paste an id'), when: is('drive') },
         { key: 'rootFolderId', label: tr('Folder ID (advanced — mount ONE shared folder)'), placeholder: '1AbC…', when: is('drive'), advanced: true,
           hint: tr('From the folder’s Drive URL. Mounts just that folder — the way to mount a single folder someone shared with you (keep scope = My Drive).') },
+        // Gmail (emails sync into the mount folder as .eml files, read-only)
+        { key: 'gmailClientChoice', label: tr('OAuth client'), type: 'select', options: clientOpts.filter(([v]) => v !== ''), value: presets[0]?.key || 'custom', when: is('gmail'),
+          hint: tr('Gmail has no built-in fallback client — pick a preset or provide your own. The client needs the gmail.readonly scope.') },
+        { key: 'gmailClientId', label: tr('Custom OAuth client ID'), placeholder: '….apps.googleusercontent.com', when: (v) => v.type === 'gmail' && v.gmailClientChoice === 'custom' },
+        { key: 'gmailClientSecret', label: tr('Custom OAuth client secret'), type: 'password', when: (v) => v.type === 'gmail' && v.gmailClientChoice === 'custom' },
+        { key: 'gmailToken', label: tr('Gmail access'), type: 'textarea', placeholder: tr('click "Connect Gmail" below — no terminal needed'), when: is('gmail') },
+        { key: 'syncCount', label: tr('Messages to sync (newest N)'), placeholder: '200', when: is('gmail') },
+        { key: 'labelIds', label: tr('Labels (comma list, blank = whole mailbox)'), placeholder: 'INBOX', when: is('gmail'), advanced: true, hint: tr('Gmail label ids: INBOX, SENT, STARRED, IMPORTANT, or a custom label id.') },
+        { key: 'query', label: tr('Search filter (Gmail query, optional)'), placeholder: 'from:boss@example.com newer_than:30d', when: is('gmail'), advanced: true },
         // WebDAV / Nextcloud
         { key: 'url', label: tr('WebDAV URL'), placeholder: 'https://cloud.example.com/remote.php/dav/files/me', when: is('webdav'), hint: tr('Nextcloud: Settings → Files shows this address. Use an app password if you have 2FA.') },
         { key: 'vendor', label: tr('Vendor'), type: 'select', options: [['other', tr('Generic WebDAV')], ['nextcloud', 'Nextcloud']], when: is('webdav') },
@@ -894,6 +903,13 @@ export function installSidebarMounts(Sidebar) {
           else { v.clientPreset = v.clientChoice || null; v.clientId = ''; v.clientSecret = ''; }
         }
         delete v.clientChoice;
+        if (v.type === 'gmail') {
+          v.token = v.gmailToken;
+          v.mode = 'ro';
+          if (v.gmailClientChoice === 'custom') { v.clientId = v.gmailClientId; v.clientSecret = v.gmailClientSecret; v.clientPreset = null; }
+          else v.clientPreset = v.gmailClientChoice || null;
+        }
+        delete v.gmailToken; delete v.gmailClientChoice; delete v.gmailClientId; delete v.gmailClientSecret;
         const r = await api('/api/mounts', { method: 'POST', body: JSON.stringify(v), headers: { 'Content-Type': 'application/json' } });
         await fetch(`/api/mounts/${r.id}/mount`, { method: 'POST' });
         close(); showToast(tr('Storage connected')); this._renderMounts();
@@ -913,6 +929,85 @@ export function installSidebarMounts(Sidebar) {
       // Google Drive: guided OAuth — no terminal needed
       this._wireDriveConnect(ctx);
       this._wireSharedDrivePicker(ctx);
+      this._wireGmailConnect(ctx);
+    },
+
+    // "Connect Gmail" guided OAuth — same pattern as the Drive flow but over
+    // the gmail-auth endpoints (our own loopback exchange; rclone authorize
+    // is drive-only). Same-machine completes hands-free; remote pastes the
+    // 127.0.0.1 redirect back.
+    _wireGmailConnect(ctx) {
+      const tokenInput = ctx.inputs.gmailToken;
+      if (!tokenInput) return;
+      const wrap = document.createElement('div');
+      wrap.className = 'mounts-drive-connect';
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'mounts-btn mounts-btn-primary';
+      btn.textContent = tr('Connect Gmail');
+      const status = document.createElement('div');
+      status.className = 'mounts-field-hint';
+      wrap.append(btn, status);
+      tokenInput.before(wrap);
+      const sync = () => { wrap.style.display = tokenInput.style.display; };
+      new MutationObserver(sync).observe(tokenInput, { attributes: true, attributeFilter: ['style'] });
+      sync();
+      let pasteBox = null, poll = null;
+      const stopPoll = () => { clearInterval(poll); poll = null; };
+      const finish = (token) => {
+        stopPoll();
+        tokenInput.value = token;
+        status.textContent = tr('✓ Connected — finish with the “Connect” button below.');
+        btn.textContent = tr('Reconnect');
+        btn.disabled = false;
+        pasteBox?.remove(); pasteBox = null;
+      };
+      btn.onclick = async () => {
+        btn.disabled = true;
+        status.textContent = tr('Preparing authorization…');
+        try {
+          const choice = ctx.inputs.gmailClientChoice?.value;
+          const r = await api('/api/mounts/gmail-auth/start', {
+            method: 'POST',
+            body: JSON.stringify({
+              clientId: (choice === 'custom' && ctx.inputs.gmailClientId?.value) || undefined,
+              clientSecret: (choice === 'custom' && ctx.inputs.gmailClientSecret?.value) || undefined,
+              clientPreset: (choice && choice !== 'custom' && choice) || undefined,
+            }),
+            headers: { 'Content-Type': 'application/json' },
+          });
+          if (r.error) throw new Error(r.error);
+          window.open(r.url, '_blank');
+          status.textContent = tr('A Google sign-in page opened. Approve access, then come back here.');
+          if (!pasteBox) {
+            pasteBox = document.createElement('div');
+            pasteBox.innerHTML = `<div class="mounts-field-hint">${escHtml(tr("If this VibeSpace runs on ANOTHER machine, the final page won't load (address starts with 127.0.0.1) — copy that address and paste it here:"))}</div>`;
+            const inp = document.createElement('input');
+            inp.placeholder = 'http://127.0.0.1:…/?state=…&code=…';
+            inp.onchange = async () => {
+              try {
+                status.textContent = tr('Completing…');
+                const fr = await api('/api/mounts/gmail-auth/callback', { method: 'POST', body: JSON.stringify({ url: inp.value }), headers: { 'Content-Type': 'application/json' } });
+                if (fr.error) throw new Error(fr.error);
+                if (fr.token) finish(fr.token);
+              } catch (e) { status.textContent = e.message || tr('Failed'); }
+            };
+            pasteBox.appendChild(inp);
+            wrap.appendChild(pasteBox);
+          }
+          poll = setInterval(async () => {
+            try {
+              const st = await api('/api/mounts/gmail-auth/status');
+              if (st.token) finish(st.token);
+              else if (st.error) { stopPoll(); status.textContent = st.error; btn.disabled = false; }
+              else if (!st.running) { stopPoll(); btn.disabled = false; }
+            } catch { }
+          }, 1500);
+        } catch (e) {
+          status.textContent = e.message || tr('Failed to start authorization');
+          btn.disabled = false;
+        }
+      };
     },
 
     // "List shared drives" button next to the teamDriveId input: uses the
@@ -1118,6 +1213,13 @@ export function installSidebarMounts(Sidebar) {
         ['clientPreset', tr('Preset client key (blank = custom/built-in)'), '39ai', cfg.clientPreset || ''],
         ['clientId', tr('OAuth client id (optional)'), '', cfg.clientId || ''],
         ['clientSecret', tr('OAuth client secret'), '', cfg.clientSecret || ''],
+      ];
+      if (type === 'gmail') return [
+        ['syncCount', tr('Messages to sync (newest N)'), '200', cfg.syncCount ? String(cfg.syncCount) : ''],
+        ['labelIds', tr('Labels (comma list)'), 'INBOX', cfg.labelIds || ''],
+        ['query', tr('Search filter (Gmail query)'), '', cfg.query || ''],
+        ['clientPreset', tr('Preset client key'), '39ai', cfg.clientPreset || ''],
+        ['token', tr('OAuth token (JSON — re-run Connect Gmail to replace)'), '', cfg.token || ''],
       ];
       if (type === 'webdav' || type === 'vibespace') return [
         ['url', 'URL', 'https://…', cfg.url || ''],

@@ -2623,6 +2623,19 @@ app.post('/api/mounts/shared-drives', async (req, res) => {
   try { res.json({ drives: await mounts.listSharedDrives(req.body || {}) }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
+// Gmail guided OAuth (2.134.0) — mirrors the gdrive-auth UX: start returns the
+// consent URL; same-machine completes hands-free via the local listener;
+// remote users paste the 127.0.0.1 redirect back to /callback.
+app.post('/api/mounts/gmail-auth/start', async (req, res) => {
+  try { res.json(await mounts.gmail.startAuth(req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.get('/api/mounts/gmail-auth/status', (req, res) => res.json(mounts.gmail.authStatus()));
+app.post('/api/mounts/gmail-auth/callback', async (req, res) => {
+  try { res.json(await mounts.gmail.forwardCallback(req.body?.url)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/mounts/gmail-auth/cancel', (req, res) => { mounts.gmail.cancelAuth(); res.json({ success: true }); });
 // Instance-preset Google clients for the UI picker: keys+labels ONLY, never secrets.
 app.get('/api/mounts/drive-defaults', (req, res) => {
   const presets = require('./src/mounts').MountManager.drivePresets().map((c) => ({ key: c.key, label: c.label }));
