@@ -199,13 +199,13 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
       cb.checked = !!(sidebar.getSessionConfig?.(s) || {}).groupManager;
       cb.onchange = () => sidebar.setSessionConfig?.(s, { ...(sidebar.getSessionConfig?.(s) || {}), groupManager: cb.checked || undefined });
       const txt = document.createElement('span');
-      txt.textContent = t('Group manager — may create/configure Task Groups from its CLI');
+      txt.textContent = t('Group manager — may organize ALL Task Groups from its CLI (not just its own)');
       lbl.append(cb, txt);
       mgrSec.appendChild(lbl);
       const hint = document.createElement('div');
       hint.className = 'empty-hint';
       hint.textContent = app.settings?.get('agents.allowGroupManagement')
-        ? t('Globally enabled — a designated session can run group-create / group-update / group-bind (audited in each group\'s activity log).')
+        ? t('Globally enabled — a designated session can list/create/configure/bind EVERY group and act on any of them with --group (audited in each group\'s activity log). The agent is told about these powers on its next turn.')
         : t('Also requires Settings → Session → "Allow agents to manage Task Groups" (currently off).');
       mgrSec.appendChild(hint);
     }

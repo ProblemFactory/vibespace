@@ -103,17 +103,66 @@ function resolveAgentGroup(hit, req, res) {
   const [s, id] = hit;
   const key = sessionStatusKey(s, id);
   const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId });
-  if (!groups.length) { res.status(403).json({ error: 'this session is not in any Task Group' }); return null; }
   const want = String(req.query?.group || req.body?.group || '').trim();
   if (want) {
     const g = groups.find((x) => x.id === want);
-    if (!g) { res.status(403).json({ error: `this session does not belong to Task Group ${want}` }); return null; }
-    return g.id;
+    if (g) return g.id;
+    // A designated Group MANAGER may target ANY group by explicit --group
+    // (2.152.0, user directive: manager scope = ALL groups, not belonging) —
+    // so a manager can log progress / park backlog / read `show` anywhere.
+    if (isManagerSession(key)) {
+      try { tasks.get(want); return want; }
+      catch { res.status(404).json({ error: `no Task Group ${want} (run \`vibespace-task group-list\`)` }); return null; }
+    }
+    res.status(403).json({ error: `this session does not belong to Task Group ${want}` });
+    return null;
+  }
+  if (!groups.length) {
+    res.status(403).json({ error: 'this session is not in any Task Group' + (isManagerSession(key) ? ' — as a Group manager, target one explicitly: --group <id> (see `vibespace-task group-list`)' : '') });
+    return null;
   }
   if (groups.length === 1) return groups[0].id;
   res.status(400).json({ error: `this session belongs to ${groups.length} Task Groups — pass --group <id> (one of: ${groups.map((g) => g.id).join(', ')})` });
   return null;
 }
+// A designated GROUP MANAGER (2.132.0 double gate: global setting + the
+// per-session Session-Properties toggle stored in user-state). Shared by the
+// group-admin route, resolveAgentGroup's explicit-group bypass, and context
+// injection (which teaches the manager its powers). Both reads are cached
+// (serverSetting / persistence readUserState), so per-prompt calls are cheap.
+// A webui:<id> key (backend id not yet adopted) is never a manager — the
+// toggle is stored under the backend:backendSessionId form.
+function isManagerSession(key) {
+  if (!serverSetting('agents.allowGroupManagement')) return false;
+  if (!key || key.startsWith('webui:')) return false;
+  const us = (readUserState && readUserState()) || {};
+  return ((us.sessionConfigs || {})[key] || {}).groupManager === true;
+}
+// Taught ONCE to a designated manager session (2.152.0, user directive: the
+// manager must LEARN its powers in context — before this, nothing ever told
+// the agent it was a manager). Discovery-layer style: trigger + copy-ready
+// invocation per verb; details live in the CLI's own no-args usage.
+const MANAGER_INTRO = [
+  '<vibespace-group-manager>',
+  'The user designated THIS session a Task Group MANAGER: you may organize ALL Task Groups on this VibeSpace — not just the ones this session belongs to. Every admin op is audited into that group\'s activity log under your session key.',
+  'See every group (id, title, archived, session count) — always check before creating, to avoid duplicates:',
+  '```',
+  'vibespace-task group-list',
+  '```',
+  'Create or reconfigure a group:',
+  '```',
+  'vibespace-task group-create --title "..." [--objective "..."] [--context-dir ~/path] [--folder ~/path]',
+  'vibespace-task group-update <id> [--title "..."] [--objective "..."] [--context-dir ~/path] [--archived true|false]',
+  '```',
+  'Bind / unbind a session (omitting --session means THIS session):',
+  '```',
+  'vibespace-task group-bind <id> [--session <backend:sessionId>]',
+  'vibespace-task group-unbind <id> [--session <backend:sessionId>]',
+  '```',
+  'The regular verbs (show / progress / backlog-* …) also accept ANY group via `--group <id>` for you — belonging is not required.',
+  'Limits: contextDir/folders must live under the user-allowlisted roots (setting agents.groupManagementRoots); there is NO group delete — destructive ops stay with the user.',
+  '</vibespace-group-manager>',
+].join('\n');
 
 // Baseline tools intro for ANY VibeSpace-managed session (even without a task):
 // teaches the agent to report its own status. Task-bound sessions get the full
@@ -208,6 +257,12 @@ app.get('/api/agent/task-context', (req, res) => {
       // codex ignores SessionStart output, so it gets this via prompt-context.
       context = SESSION_TOOLS_INTRO;
       s._toolsIntroSeen = true;
+    }
+    // Designated Group MANAGER: teach the admin verbs ONCE — whichever route
+    // delivers first wins (s._mgrIntroSeen shared with prompt-context).
+    if (s.backend !== 'codex' && !s._mgrIntroSeen && isManagerSession(key)) {
+      context = context ? context + '\n\n' + MANAGER_INTRO : MANAGER_INTRO;
+      s._mgrIntroSeen = true;
     }
     if (s.backend !== 'codex') { // codex ignores SessionStart output — don't burn the seen-gate
       const withPre = withPreamble(s, context ? [context] : []);
@@ -353,6 +408,12 @@ app.get('/api/agent/prompt-context', (req, res) => {
       parts.push(SESSION_TOOLS_INTRO);
       s._toolsIntroSeen = true;
     }
+    // Designated Group MANAGER: teach the admin verbs once (this route is
+    // codex's ONLY delivery path; claude usually gets it via task-context).
+    if (!s._mgrIntroSeen && isManagerSession(key)) {
+      parts.push(MANAGER_INTRO);
+      s._mgrIntroSeen = true;
+    }
     // Oversize belt (2.113.0): full contexts + the mixed-delivery manifest
     // embed the persisted-output rescue line, lone diff blocks don't (each is
     // small) — but several parts can still cross Claude's ~10KB hook persist
@@ -382,8 +443,9 @@ app.get('/api/agent/prompt-context', (req, res) => {
     if (outParts.length && extra) outParts.unshift(`<vibespace-reminder>${extra}</vibespace-reminder>`);
     if (!outParts.length) {
       const multi = injectGroups.length > 1;
+      const mgrClause = isManagerSession(key) ? ' · you are a Group MANAGER: `vibespace-task group-list` + group-create/-update/-bind organize ALL groups (any verb takes --group <id>)' : '';
       const std = perTurnReminderEnabled()
-        ? `Tools on PATH: vibespace-status <state> — keep your board state honest · vibespace-ask "q" — MIRROR every chat question onto their inbox (the FULL content still goes in your chat reply — the inbox is only the notification), and resolve <id|text> the moment they answer · vibespace-task ${multi ? '--group <id> ' : ''}progress "summary" — log finished work. Run any with no args for usage.`
+        ? `Tools on PATH: vibespace-status <state> — keep your board state honest · vibespace-ask "q" — MIRROR every chat question onto their inbox (the FULL content still goes in your chat reply — the inbox is only the notification), and resolve <id|text> the moment they answer · vibespace-task ${multi ? '--group <id> ' : ''}progress "summary" — log finished work${mgrClause}. Run any with no args for usage.`
         : '';
       // User extra rides at the TOP of the reminder block (per-hook custom,
       // 2.88.0); it delivers even with the standard reminder toggled off.
@@ -594,9 +656,7 @@ app.post('/api/agent/group-admin', (req, res) => {
     if (!serverSetting('agents.allowGroupManagement')) {
       return res.status(403).json({ error: 'agent group management is disabled — the user can enable it (Settings → Session → "Allow agents to manage Task Groups"), then designate this session as a Group manager in its Session Properties' });
     }
-    const us = (readUserState && readUserState()) || {};
-    const mgr = !key.startsWith('webui:') && ((us.sessionConfigs || {})[key] || {}).groupManager === true;
-    if (!mgr) {
+    if (!isManagerSession(key)) {
       return res.status(403).json({ error: 'this session is not a designated Group manager — ask the user to enable the "Group manager" toggle in this session\'s Properties (session key: ' + key + ')' });
     }
     // Path allowlist: contextDir/folders must resolve under a configured root
