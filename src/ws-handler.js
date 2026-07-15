@@ -325,6 +325,41 @@ function registerWsHandler(wss, ctx) {
             const envPairs = [`VIBESPACE_API=http://127.0.0.1:${rport}`];
             return { prelude, envPairs, tokenAssign, reverse: `${rport}:127.0.0.1:${PORT}` };
           };
+          // B.3: the same agent prelude for a DIAL device, over the device
+          // link (no ssh). Tools + the 0600 token ride fsWrite; VIBESPACE_API
+          // is a REVERSE-FORWARD (device binds a loopback port whose bytes
+          // tunnel back to our server port — the same NAT-proof primitive
+          // host-mounts uses); the hook is registered with runCmd. Returns the
+          // same shape as remoteAgentSetup ({envPairs, tokenAssign}) minus the
+          // ssh-only prelude/reverse fields. Degrades to bare env on any error
+          // (the session still runs; tools just aren't present).
+          const deviceAgentSetup = async (h, sid) => {
+            const dm = await hosts.device(h.id); // dial → deviceForDial
+            const home = String((await dm.runCmd('sh', ['-c', 'printf %s "$HOME"'], { timeoutMs: 8000 }))?.stdout || '').trim() || '/root';
+            const bin = `${home}/.vibespace/bin`;
+            await dm.fsMkdir(bin);
+            const toolDir = path.dirname(EDITOR_CMD);
+            const names = require('./hosts').HostManager.AGENT_TOOLS;
+            for (const n of names) {
+              try { const buf = fs.readFileSync(path.join(toolDir, n)); await dm.fsWrite(`${bin}/${n}`, buf); } catch { }
+            }
+            const tokName = `.tok-${sid}`;
+            await dm.fsWrite(`${bin}/${tokName}`, Buffer.from(session.agentToken));
+            // chmod: tools executable, token 0600, then register the hook in
+            // the device's OWN claude/codex configs (its local CLI fires it)
+            await dm.runCmd('sh', ['-c',
+              `chmod +x "${bin}"/vibespace-* 2>/dev/null; chmod 600 "${bin}/${tokName}"; `
+              + `node "${bin}/vibespace-hook-register.mjs" 2>/dev/null || true`], { timeoutMs: 12000 }).catch(() => {});
+            // VIBESPACE_API back-tunnel: a loopback port ON THE DEVICE whose
+            // accepts ride the dial link back into our own server port.
+            const net = require('net');
+            const rf = await dm.reverseForward({ port: 0, connectLocal: () => net.connect(PORT, '127.0.0.1') });
+            session._dialReversePort = rf.port;
+            return {
+              envPairs: [`VIBESPACE_API=http://127.0.0.1:${rf.port}`],
+              tokenAssign: `VIBESPACE_SESSION_TOKEN="$(cat "${bin}/${tokName}")" `,
+            };
+          };
           // Remote account key distribution: the env-pair channel is OUT for
           // secrets (the inner command is argv on BOTH sides — local ssh proc +
           // remote sh -lc — and /proc/cmdline is world-readable). Instead ship
@@ -438,18 +473,20 @@ function registerWsHandler(wss, ctx) {
               }
             }
             if (h.transport === 'dial') {
-              // Graduation B.2: the session runs as a persistent PIPE SESSION
-              // in the DIALED-IN device's daemon; the attach child reaches it
-              // through the server's loopback mux proxy (DialSessionBridge) —
-              // the dial link lives inside this process, unreachable to a
-              // child directly. First cut = minimal env: no account shipping /
-              // tools tar (those preludes are ssh-coupled; B.3 ports them via
-              // device fs ops) — the device's OWN claude login is used.
+              // Graduation B.2/B.3: the session runs as a persistent PIPE
+              // SESSION in the DIALED-IN device's daemon; the attach child
+              // reaches it through the server's loopback mux proxy
+              // (DialSessionBridge) — the dial link lives inside this process,
+              // unreachable to a child directly. B.3 ports the ssh-coupled
+              // agent prelude to DEVICE FS OPS: tools + token via fsWrite, the
+              // VIBESPACE_API back-tunnel via reverseForward, hook registration
+              // via runCmd — so vibespace-status/task/ask work on the device.
               if (!dialBridge || !agentdRemote) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'dial sessions not wired on this server' })); return; }
               try {
                 const bridgePort = await dialBridge.ensure({ sid: id, deviceId: h.deviceId });
-                const shellCmd = `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; exec env `
-                  + spawnEnvPairs.map(shq).join(' ')
+                const da = await deviceAgentSetup(h, id).catch((e) => { console.warn('[dial] agent setup degraded:', e.message); return { envPairs: [], tokenAssign: '' }; });
+                const shellCmd = `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:$HOME/.vibespace/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ${da.tokenAssign}exec env `
+                  + [...da.envPairs.map(shq), ...spawnEnvPairs.map(shq)].join(' ')
                   + ' ' + [rcmd, ...rargs.map(shq)].join(' ');
                 const cfg = {
                   tcp: { port: bridgePort },
@@ -1285,7 +1322,7 @@ done`;
         }
 
         case 'kill': {
-          { const ks = activeSessions.get(data.sessionId); if (ks && ks._bridgePort) { try { dialBridge?.close(data.sessionId); } catch { } } }
+          { const ks = activeSessions.get(data.sessionId); if (ks && ks._bridgePort) { try { dialBridge?.close(data.sessionId); } catch { } if (ks._dialDeviceId && ks._dialReversePort) { hosts.device(ks.host).then((dm) => dm.reverseUnforward(ks._dialReversePort)).catch(() => {}); } } }
           const session = activeSessions.get(data.sessionId);
           if (session) {
             // Cancel any pending delayed-SIGINT from a recent interrupt — after
