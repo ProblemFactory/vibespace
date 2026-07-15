@@ -186,14 +186,34 @@ class MachineMounts {
     const rcArch = { x86_64: 'amd64', aarch64: 'arm64', arm64: 'arm64' }[arch] || 'amd64';
     const rcOs = osKind === 'macos' ? 'osx' : 'linux';
     const url = `https://downloads.rclone.org/${RCLONE_PIN}/rclone-${RCLONE_PIN}-${rcOs}-${rcArch}.zip`;
-    const fetch = await this._run(hostId, 'sh', ['-c',
-      `set -e; mkdir -p "${home}/.vibespace/bin"; cd "$(mktemp -d)"; curl -fsSL -o r.zip '${url}'; `
+    const script = `set -e; mkdir -p "${home}/.vibespace/bin"; cd "$(mktemp -d)"; curl -fsSL -o r.zip '${url}'; `
       + `if command -v unzip >/dev/null 2>&1; then unzip -oj r.zip 'rclone-*/rclone' -d "${home}/.vibespace/bin"; `
       + `elif command -v busybox >/dev/null 2>&1 && busybox unzip -h >/dev/null 2>&1; then busybox unzip -o r.zip && cp rclone-*/rclone "${home}/.vibespace/bin/"; `
       + `elif command -v python3 >/dev/null 2>&1; then python3 -c "import zipfile,glob,shutil,os,stat; z=zipfile.ZipFile('r.zip'); z.extractall(); src=glob.glob('rclone-*/rclone')[0]; dst=os.path.expanduser('${home}/.vibespace/bin/rclone'); shutil.copy(src,dst); os.chmod(dst,0o755)"; `
       + `else echo 'need unzip (or busybox/python3) on this machine — e.g. apt install unzip' >&2; exit 9; fi; `
-      + `chmod 755 "${remoteBin}"; "${remoteBin}" version >/dev/null 2>&1 && echo OK`]);
-    if (!(fetch.stdout || '').includes('OK')) throw new Error('rclone install on host failed: ' + (fetch.stderr || fetch.stdout || '').slice(0, 200));
+      + `chmod 755 "${remoteBin}"; "${remoteBin}" version >/dev/null 2>&1 && echo OK`;
+    // The ~20MB download exceeds the daemon's 30s run-cmd clamp on slow
+    // uplinks (B-ee6d, review finding) — the device path streams it via
+    // runStream (unbounded); ssh keeps the plain _run (no daemon clamp there).
+    let out = '';
+    const h = this.hosts.get(hostId);
+    if (h.transport === 'dial' || this.hosts.dataPlaneOn?.()) {
+      try {
+        const dm = await this.hosts.device(hostId);
+        const chunks = [];
+        const r = await dm.runStream('sh', ['-c', script], { onData: (b) => chunks.push(b) });
+        out = Buffer.concat(chunks).toString('utf8');
+        if (r.code !== 0 && !out.includes('OK')) throw new Error('exit ' + r.code + ': ' + out.slice(-200));
+      } catch (e) {
+        if (h.transport === 'dial') throw new Error('rclone install on the device failed: ' + String(e.message || e).slice(0, 200));
+        out = ''; // ssh fallback below
+      }
+    }
+    if (!out.includes('OK')) {
+      const fetch = await this._run(hostId, 'sh', ['-c', script]);
+      out = (fetch.stdout || '') + (fetch.stderr || '');
+    }
+    if (!out.includes('OK')) throw new Error('rclone install on host failed: ' + out.slice(0, 200));
     return remoteBin;
   }
 

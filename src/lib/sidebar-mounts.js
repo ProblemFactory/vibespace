@@ -680,8 +680,15 @@ export function installSidebarMounts(Sidebar) {
         const viaTip = m.via === 'tunnel'
           ? tr('Rides the device agent link — no public address or VPN needed')
           : tr('Reached over agentd.publicUrl (no device agent on this host)');
+        // the push dot was hardcoded 'ok' and kept glowing green while the
+        // machine was OFFLINE (real report: 薛定谔的连接) — for dial machines
+        // the tunnel dies with the link, so the dot follows h.online
+        const pushDown = h.transport === 'dial' && !h.online;
+        const pushDotTip = pushDown
+          ? tr('Machine is offline — the tunnel is down; the mount heals when its daemon reconnects')
+          : (m.mode === 'rw' ? tr('Read-write') : tr('Read-only'));
         top.innerHTML = `
-          <span class="mounts-dot mounts-dot-ok" title="${escHtml(m.mode === 'rw' ? tr('Read-write') : tr('Read-only'))}"></span>
+          <span class="mounts-dot mounts-dot-${pushDown ? 'err' : 'ok'}" title="${escHtml(pushDotTip)}"></span>
           <b class="mounts-name" title="${escHtml(m.folder)}">${escHtml(m.folder.split('/').pop() || m.folder)}</b>
           <span class="mounts-badge" title="${escHtml(viaTip)}">${escHtml(tr('on machine'))} · ${escHtml(viaLabel)}</span>`;
       }
