@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.165.0 — 2026-07-15
+- **Port forwarding — open a machine's dev servers here** (B-0b60, tunnel path): the Remote tab's machine rows gained a 🔌 action that scans the machine's listening TCP ports (over the agentd data plane — `ss`/`lsof`, works for dial AND ssh machines) and forwards any of them. A forward binds a local port on the server and pipes it through the existing agentd tunnel to the machine's `127.0.0.1:<port>` (the same primitive VNC/device-mounts use — NAT-proof, no public exposure), then opens it through the embedded browser's proxy so it's reachable from your browser. Detected ports + a manual box; active forwards persist and re-establish when the machine relinks / on boot; unpairing a machine drops its forwards. Verified end-to-end (`scripts/test-port-forward.mjs` unit + `scripts/dbg-dial-session-e2e.mjs` against a real dialed daemon: detect → forward → byte round-trip → list → unforward). This is the private/tunnel half of B-0b60; frps-style PUBLIC exposure remains a separate future path that needs the reverse-proxy server infra.
+
 ## 2.164.1 — 2026-07-15
 - **Dial-session review fixes** (9-finding adversarial pass on the 2.163/2.164 diff, all confirmed):
   - **Terminal-on-dial leaked a live claude on the device** (HIGH): the DialSessionBridge never killed the device pty on attach-transport death or on terminate — pty-wrapper respawns the attach on every link flap, so each reconnect orphaned another claude. The bridge now tracks the pty handle and kills it in `onDead` (attach died) and `close(sid)` (terminate); pipe/chat sessions stay untouched (keeper model).

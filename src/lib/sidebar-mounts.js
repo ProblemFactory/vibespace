@@ -614,6 +614,7 @@ export function installSidebarMounts(Sidebar) {
       actions.append(
         ibtn(MI.folderPush, tr('Mount a folder from this VibeSpace onto "{name}"', { name: h.name }), () => { this._showHostMountDialog(h); }),
         ibtn(MI.folderPull, tr('Mount a folder from "{name}" into this VibeSpace', { name: h.name }), () => { this._showMachinePullDialog(h); }),
+        ibtn(MI.plug, tr('Forward a port from "{name}" (open its dev servers here)', { name: h.name }), () => { this._showPortsDialog(h); }),
         ibtn(MI.termNew, isDial ? tr('New session on this device') : 'New session on this host', () => { this.app.showNewSessionDialog?.({ hostId: h.id, hostName: h.name }); }),
         ibtn(MI.cross, isDial ? tr('Unpair (the device can no longer dial in)') : 'Remove host', async () => {
           const ok = await showConfirmDialog(isDial
@@ -783,6 +784,74 @@ export function installSidebarMounts(Sidebar) {
         showToast(tr('Mounted at {mp} (read-only, over the device link)', { mp: r.mountpoint }));
         this._renderMounts();
       });
+    },
+
+    // Port forwarding (B-0b60 tunnel path): expose a machine's loopback dev
+    // server here over the agentd link. Detected ports + a manual box; each
+    // becomes http://127.0.0.1:<localPort> opened in the embedded browser.
+    async _showPortsDialog(h) {
+      const { body, close } = createModalShell({ id: 'ports-dialog', title: tr('Forward a port from "{name}"', { name: h.name }), bodyClass: 'mounts-dialog-body', escapeToClose: true });
+      // The forward binds on THIS SERVER's loopback (the browser can't reach
+      // it directly), so "Open" routes through the embedded browser's proxy
+      // (node-unblocker on the server → the server's loopback → the tunnel).
+      const openForward = (url) => { if (url) { this.app.openBrowser?.(url, { proxy: true }); close(); } };
+      const render = async () => {
+        body.innerHTML = `<p class="empty-hint" style="margin:0 0 8px">${escHtml(tr('A service listening on this machine’s 127.0.0.1 becomes reachable here (opened through the app’s proxy). Runs over the device link — no public exposure.'))}</p>`;
+        // active forwards for this machine
+        let active = [];
+        try { active = ((await api('/api/port-forwards')).forwards || []).filter((f) => f.hostId === h.id); } catch {}
+        if (active.length) {
+          const sec = document.createElement('div'); sec.style.marginBottom = '10px';
+          sec.innerHTML = `<div class="usage-section-title">${escHtml(tr('Active'))}</div>`;
+          for (const f of active) {
+            const r = document.createElement('div'); r.className = 'mounts-row'; r.style.padding = '4px 0';
+            const info = document.createElement('span'); info.style.flex = '1';
+            info.innerHTML = `<b>:${f.remotePort}</b> → <span class="mounts-name" style="color:var(--accent)">127.0.0.1:${f.localPort || '?'}</span>${f.error ? ` <span style="color:var(--red,#e55)">(${escHtml(f.error)})</span>` : ''}`;
+            const open = document.createElement('button'); open.className = 'btn-create'; open.textContent = tr('Open'); open.disabled = !f.url;
+            open.onclick = () => openForward(f.url);
+            const stop = document.createElement('button'); stop.className = 'mounts-btn'; stop.textContent = tr('Stop');
+            stop.onclick = async () => { try { await api(`/api/port-forward/${encodeURIComponent(f.id)}`, { method: 'DELETE' }); render(); } catch (e) { showToast(e.message, { type: 'error' }); } };
+            const acts = document.createElement('span'); acts.style.display = 'flex'; acts.style.gap = '6px'; acts.append(open, stop);
+            r.append(info, acts); sec.append(r);
+          }
+          body.append(sec);
+        }
+        // detect + manual
+        const manual = document.createElement('div'); manual.style.display = 'flex'; manual.style.gap = '6px'; manual.style.margin = '4px 0 10px';
+        const inp = document.createElement('input'); inp.type = 'number'; inp.placeholder = tr('port, e.g. 5173'); inp.className = 'settings-input-text'; inp.style.flex = '1';
+        const fwd = document.createElement('button'); fwd.className = 'btn-create'; fwd.textContent = tr('Forward');
+        const doForward = async (port) => {
+          if (!port) return;
+          fwd.disabled = true;
+          try { const r = await api(`/api/hosts/${h.id}/port-forward`, { method: 'POST', body: JSON.stringify({ port: Number(port) }) });
+            if (r.url) { showToast(tr('Forwarded :{p} → {u}', { p: port, u: r.url })); openForward(r.url); } else render();
+          } catch (e) { showToast(e.message, { type: 'error' }); fwd.disabled = false; }
+        };
+        fwd.onclick = () => doForward(inp.value);
+        inp.onkeydown = (e) => { if (e.key === 'Enter') doForward(inp.value); };
+        manual.append(inp, fwd); body.append(manual);
+
+        const listWrap = document.createElement('div');
+        listWrap.innerHTML = `<div class="usage-section-title">${escHtml(tr('Detected listening ports'))}</div><div class="empty-hint">${escHtml(tr('scanning…'))}</div>`;
+        body.append(listWrap);
+        try {
+          const ports = (await api(`/api/hosts/${h.id}/ports`)).ports || [];
+          const forwarded = new Set(active.map((f) => f.remotePort));
+          listWrap.innerHTML = `<div class="usage-section-title">${escHtml(tr('Detected listening ports'))}</div>`;
+          if (!ports.length) { listWrap.innerHTML += `<div class="empty-hint">${escHtml(tr('no listening TCP ports found'))}</div>`; }
+          for (const p of ports) {
+            const r = document.createElement('div'); r.className = 'mounts-row'; r.style.padding = '3px 0';
+            const lbl = document.createElement('span'); lbl.style.flex = '1'; lbl.innerHTML = `<b>:${p.port}</b>${p.proc ? ` <span class="empty-hint">${escHtml(p.proc)}</span>` : ''}`;
+            const b = document.createElement('button'); b.className = 'mounts-btn';
+            b.textContent = forwarded.has(p.port) ? tr('forwarded') : tr('Forward'); b.disabled = forwarded.has(p.port);
+            b.onclick = () => doForward(p.port);
+            r.append(lbl, b); listWrap.append(r);
+          }
+        } catch (e) {
+          listWrap.innerHTML = `<div class="usage-section-title">${escHtml(tr('Detected listening ports'))}</div><div class="empty-hint" style="color:var(--red,#e55)">${escHtml(e.message)}</div>`;
+        }
+      };
+      render();
     },
 
     _showAddHostDialog(hd) {
