@@ -22,7 +22,10 @@ class RemoteFs {
   // flag is off / device unreachable — callers fall back to their ssh body.
   // Shapes returned here MIRROR the legacy methods exactly. ──
   async _dev(id) {
-    if (!this.hosts.dataPlaneOn?.()) return null;
+    // dial hosts have NO ssh fallback — always take the device path for them
+    let dial = false;
+    try { dial = this.hosts.get(id)?.transport === 'dial'; } catch { }
+    if (!dial && !this.hosts.dataPlaneOn?.()) return null;
     try { return await this.hosts.device(id); } catch { return null; }
   }
   async _devHome(id, dm) {

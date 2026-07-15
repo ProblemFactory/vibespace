@@ -121,6 +121,18 @@ try {
   await evalJs(`([...document.querySelectorAll('#device-pair-dialog button')].find((b) => b.textContent === 'Windows').click(), true)`);
   const winCmd = await evalJs(`document.querySelector('#device-pair-dialog textarea')?.value || ''`);
   check('Windows chip flips to the PowerShell installer', /vibespace-device-install\.ps1/.test(winCmd) && /-DialToken vsdt_/.test(winCmd) && /-HostToken vsht_/.test(winCmd), winCmd.slice(0, 120));
+  // ── slice B: the pairing IS a machine (hosts model) ──
+  const hostsList = (await (await fetch(`http://127.0.0.1:${PORT}/api/hosts`)).json()).hosts || [];
+  const dialHost = hostsList.find((h) => h.transport === 'dial' && h.deviceId === 'smoke-mac');
+  check('pairing created a dial HOST record', !!dialHost, JSON.stringify(hostsList.map((h) => h.id)));
+  if (dialHost) {
+    // files on the device through the ?host= dispatch (RemoteFs → device fs ops)
+    const fl = await (await fetch(`http://127.0.0.1:${PORT}/api/files?path=${encodeURIComponent(share)}&host=${encodeURIComponent(dialHost.id)}`)).json();
+    check('device files listable via ?host= (device fs path)', Array.isArray(fl.items) && fl.items.some((f) => f.name === 'hello.txt'), JSON.stringify(fl).slice(0, 200));
+    // discovery answers (empty session list is fine — the path must not throw)
+    const ds = await (await fetch(`http://127.0.0.1:${PORT}/api/hosts/${encodeURIComponent(dialHost.id)}/sessions?fresh=1`)).json();
+    check('device discovery answers via the dial link', Array.isArray(ds.sessions), JSON.stringify(ds).slice(0, 200));
+  }
   // unmount + unpair cleanup path
   const um = await fetch(`http://127.0.0.1:${PORT}/api/device-mounts/${mres.id}`, { method: 'DELETE' });
   check('device mount unmounts', um.ok);
@@ -128,6 +140,8 @@ try {
   check('unpair succeeds', del.ok);
   devs = (await (await fetch(`http://127.0.0.1:${PORT}/api/agentd/devices`)).json()).devices;
   check('unpaired device gone from the list', !devs.some((d) => d.id === 'smoke-mac'), JSON.stringify(devs));
+  const hostsAfter = (await (await fetch(`http://127.0.0.1:${PORT}/api/hosts`)).json()).hosts || [];
+  check('unpair removed the dial host record', !hostsAfter.some((h) => h.deviceId === 'smoke-mac'), JSON.stringify(hostsAfter.map((h) => h.id)));
   killDaemon();
   fs.rmSync(droot, { recursive: true, force: true });
 } catch (e) {

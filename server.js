@@ -2600,7 +2600,7 @@ setTimeout(() => { try { plugins.bootReplay(); } catch (e) { console.warn('[plug
 setTimeout(() => {
   try {
     hosts.agentdDeps = {
-      ensureAgentdOnHost, agentdHostToken,
+      ensureAgentdOnHost, agentdHostToken, deviceForDial,
       bundlePath: path.join(__dirname, 'data', 'bin', 'vibespace-agentd.js'),
       version: require('./package.json').version,
     };
@@ -2613,6 +2613,9 @@ app.post('/api/agentd/dial-pair', (req, res) => {
   try {
     const deviceId = String(req.body?.deviceId || ('dev-' + require('crypto').randomBytes(4).toString('hex'))).replace(/[^\w-]/g, '').slice(0, 32);
     const pair = agentdMintDialPair(deviceId);
+    // Graduation slice B: a paired device IS a machine — register the dial
+    // host record so discovery/sessions/files surfaces list it everywhere.
+    try { hosts.add({ name: deviceId, transport: 'dial', deviceId }); } catch { }
     const base = String(req.body?.serverUrl || '').replace(/\/$/, '') || null;
     res.json({
       ...pair,
@@ -2652,6 +2655,7 @@ app.delete('/api/agentd/devices/:id', async (req, res) => {
     delete all[id];
     fs.writeFileSync(path.join(AGENTD_DIR, 'dial-tokens.json'), JSON.stringify(all, null, 2), { mode: 0o600 });
     try { fs.unlinkSync(path.join(AGENTD_DIR, `host-dial-${id}.token`)); } catch { }
+    try { hosts.remove('host-dial-' + id.replace(/[^\w-]/g, '')); } catch { }
     const live = agentdDials.get(id);
     if (live) { try { live.destroy(); } catch { } agentdDials.delete(id); }
     agentdDialDevices.delete(id);
@@ -2670,6 +2674,12 @@ const deviceMounts = new DeviceMounts({
   log: (m) => console.log('[device-mounts]', m),
 });
 setTimeout(() => { try { deviceMounts.restore(); } catch (e) { console.warn('[device-mounts] restore:', e.message); } }, 4000);
+// Backfill: pairings made before slice B (2.154.2) have no dial-host record —
+// promote every known pairing so existing devices join the machines model too.
+setTimeout(() => {
+  try { for (const id of Object.keys(agentdDialTokens())) { try { hosts.add({ name: id, transport: 'dial', deviceId: id }); } catch { } } }
+  catch (e) { console.warn('[agentd] dial-host backfill:', e.message); }
+}, 3000);
 app.get('/api/device-mounts', (req, res) => {
   try { res.json({ mounts: deviceMounts.list() }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
