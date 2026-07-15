@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.162.1 — 2026-07-15
+- **Reverse-mount tokens stop piling up as garbage** (real report: 7 indistinguishable 反挂载令牌 rows, 6 of them duplicates from one bad afternoon): a FAILED push-mount now revokes the token it minted (every failed attempt — offline device, rclone error — used to leak one), unmounting already revoked, and a boot GC revokes any `host:*` token that no mount record references (clears the pre-existing pile on the next restart). Migration guard grew the assertion.
+
 ## 2.162.0 — 2026-07-15
 - **Device daemons are PERSISTENT now** (user question after the dead-Mac incident: 那mac上是不是应该自动做持久化? — yes): the installer registers a supervisor instead of a one-shot detached process — **macOS: launchd LaunchAgent** (RunAtLoad + KeepAlive: starts on boot, auto-restarts on crash/upgrade hiccup), **Linux: systemd user unit** (Restart=always + best-effort linger), fallback to the old detached start where neither exists. The dial config is persisted to `state/dial.json` by the installer, so the supervised daemon starts ARGLESS — no tokens in any unit file or process list. Verified on Linux: kill -9 the daemon → systemd brings it back in 5s. Re-running the pairing command migrates an existing install to the supervised form.
 - Pairing dialog note updated accordingly (no more "rerun the command after a reboot").
