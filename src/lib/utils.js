@@ -380,14 +380,10 @@ export function showContextMenu(x, y, items, className = 'context-menu') {
         sub.appendChild(ce);
       }
       el.appendChild(sub);
-      el.addEventListener('mouseenter', () => { sub.style.display = ''; });
-      el.addEventListener('mouseleave', () => { sub.style.display = 'none'; });
-      // Touch: no hover exists — tap the parent row to open the submenu.
-      // Only opens (never toggles closed): emulated mouseenter on tap may have
-      // already shown it, and a toggle would immediately re-hide it.
-      el.addEventListener('click', (e) => {
-        if (e.target !== el) return; // child item clicks handle themselves
-        e.stopPropagation();
+      // Clamp the submenu into the viewport on EVERY open — the hover path
+      // used to skip it, so bottom-of-screen submenus ran off-screen (real
+      // report: 右键菜单不会考虑超出屏幕)
+      const showSub = () => {
         sub.style.display = '';
         requestAnimationFrame(() => {
           const r = sub.getBoundingClientRect();
@@ -395,6 +391,16 @@ export function showContextMenu(x, y, items, className = 'context-menu') {
           const overflowY = r.bottom - window.innerHeight;
           if (overflowY > 0) sub.style.top = `${-4 - overflowY - 4}px`; // top is relative to the parent row (initial -4px)
         });
+      };
+      el.addEventListener('mouseenter', showSub);
+      el.addEventListener('mouseleave', () => { sub.style.display = 'none'; });
+      // Touch: no hover exists — tap the parent row to open the submenu.
+      // Only opens (never toggles closed): emulated mouseenter on tap may have
+      // already shown it, and a toggle would immediately re-hide it.
+      el.addEventListener('click', (e) => {
+        if (e.target !== el) return; // child item clicks handle themselves
+        e.stopPropagation();
+        showSub();
       });
     } else {
       el.textContent = item.label;
@@ -403,9 +409,15 @@ export function showContextMenu(x, y, items, className = 'context-menu') {
     }
     pop.appendChild(el);
   }
-  // Keep menu on screen
-  const mr = pop.getBoundingClientRect();
+  // Keep menu on screen. A menu TALLER than the viewport additionally gets
+  // capped + scrollable — clamping alone left its tail unreachable.
+  let mr = pop.getBoundingClientRect();
   const vw = window.innerWidth, vh = window.innerHeight;
+  if (mr.height > vh - 8) {
+    pop.style.maxHeight = (vh - 8) + 'px';
+    pop.style.overflowY = 'auto';
+    mr = pop.getBoundingClientRect();
+  }
   if (mr.right > vw) pop.style.left = Math.max(0, vw - mr.width - 4) + 'px';
   if (mr.bottom > vh) pop.style.top = Math.max(0, vh - mr.height - 4) + 'px';
   if (mr.left < 0) pop.style.left = '4px';

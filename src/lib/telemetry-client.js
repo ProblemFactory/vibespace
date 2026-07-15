@@ -1,3 +1,7 @@
+// events carry the CLIENT bundle's baked version — the server otherwise
+// stamps ITS OWN, which hid the stale-tab fleet incident (old bundle looked
+// current in every telemetry event)
+import { BUILD_VERSION } from './build-version.js';
 // Client-side telemetry: catches what today's audits kept finding the hard
 // way — silent boot crashes, runtime exceptions in long-running tabs — plus a
 // few coarse feature events so rollout iteration has usage signal.
@@ -31,7 +35,7 @@ let metricSeq = 0;
 export function metric(name, value) {
   if (!Number.isFinite(value) || metricSeq >= 500) return;
   metricSeq++;
-  QUEUE.push({ kind: 'metric', name, value: Math.round(value * 10) / 10 });
+  QUEUE.push({ kind: 'metric', name, value: Math.round(value * 10) / 10, version: BUILD_VERSION });
   if (QUEUE.length >= 10) flush();
   else if (!flushTimer) flushTimer = setTimeout(flush, 15000);
 }
@@ -46,7 +50,7 @@ export function track(kind, name, detail, stack) {
     (track._sent = track._sent || {})[name] = same + 1;
   }
   seq++;
-  QUEUE.push({ kind, name, detail, stack, ua: navigator.userAgent });
+  QUEUE.push({ kind, name, detail, stack, ua: navigator.userAgent, version: BUILD_VERSION });
   if (QUEUE.length >= 10) flush();
   else if (!flushTimer) flushTimer = setTimeout(flush, 15000);
 }

@@ -1936,4 +1936,9 @@ export default {
   "Read-write (SFTP over ssh)": "读写（SFTP，经 ssh）",
   "device": "设备",
   "VibeSpace was updated — reloading this tab…": "VibeSpace 已更新——正在刷新此标签页…",
+  "Mount a folder from this VibeSpace onto \"{name}\"": "把本 VibeSpace 的文件夹挂载到“{name}”",
+  "Terminated": "已终止",
+  "Terminate failed": "终止失败",
+  "Attaching \"{name}\" is taking unusually long — check the connection or reload the tab": "连接“{name}”的会话耗时异常——检查网络或刷新此标签页",
+  "Creating the session is taking unusually long — check the connection or reload the tab": "创建会话耗时异常——检查网络或刷新此标签页",
 };

@@ -376,6 +376,27 @@ class HostManager {
     return { ok: true, latencyMs: Date.now() - t0, tools, uname: (out.trim().split('\n').pop() || '').trim() };
   }
 
+  /** Kill an EXTERNAL/tmux agent process ON the host (sidebar Terminate for
+   *  remote-discovered sessions — the pid is remote). Validates the pid is a
+   *  claude/codex process there before SIGTERM; device link first, ssh
+   *  fallback (dial machines have no ssh). */
+  async killRemotePid(id, pid) {
+    const h = this.get(id);
+    const p = parseInt(pid, 10);
+    if (!Number.isFinite(p) || p <= 1) throw new Error('bad pid');
+    const cmd = `C=$(ps -p ${p} -o args= 2>/dev/null); case "$C" in *claude*|*codex*) kill -TERM ${p} && echo VS_OK;; "") echo VS_GONE;; *) echo VS_NOTAGENT;; esac`;
+    let out = '';
+    if (h.transport === 'dial' || this.dataPlaneOn?.()) {
+      try { const dm = await this.device(id); out = String((await dm.runCmd('sh', ['-c', cmd], { timeoutMs: 10000 })).stdout || ''); }
+      catch (e) { if (h.transport === 'dial') throw new Error('device unreachable: ' + e.message); }
+    }
+    if (!out) out = String(await this._ssh(h, cmd));
+    if (out.includes('VS_NOTAGENT')) throw new Error('that PID is not a claude/codex process on the host');
+    if (!out.includes('VS_OK') && !out.includes('VS_GONE')) throw new Error('kill failed: ' + out.trim().slice(0, 120));
+    this._discoveryCache.delete(id); // the card should flip on the next poll
+    return { success: true, gone: out.includes('VS_GONE') };
+  }
+
   /** Remote directory autocomplete — parent-dir listing, prefix-filter.
    *  Device link first (the ONLY path for dial machines — real report: the
    *  pull dialog completed LOCAL folders; ssh fallback below unchanged). */

@@ -437,10 +437,18 @@ function setup(ctx) {
     return res.status(404).json({ error: 'workflow not found (no run directory or snapshot for this id)' });
   });
 
-  router.post('/api/kill-pid', (req, res) => {
-    const { pid } = req.body;
+  router.post('/api/kill-pid', async (req, res) => {
+    const { pid, host } = req.body;
     if (!pid || typeof pid !== 'number') return res.status(400).json({ error: 'pid required' });
     try {
+      if (host) {
+        // remote EXTERNAL/tmux session: the pid lives ON the host — validate
+        // and kill THERE. The local-only path failed silently forever, and a
+        // colliding LOCAL pid could even pass the claude check and kill the
+        // wrong process (real report: terminate一直不成功).
+        await hosts.killRemotePid(String(host), pid);
+        return res.json({ success: true });
+      }
       if (!isProcessClaude(pid)) return res.status(400).json({ error: 'PID is not a claude process' });
       process.kill(pid, 'SIGTERM');
       res.json({ success: true });

@@ -57,14 +57,22 @@ export function installSessionLifecycle(App, ctx = {}) {
       accountId: accountId || undefined, // billing identity: undefined=server default, 'subscription', or acct-… key id
     });
 
+    // Reply watchdog (fleet-incident retrospective): a create swallowed by a
+    // zombie ws left a blank window with ZERO trace anywhere. Surface + record.
+    const createWd = setTimeout(() => {
+      try { track('event', 'ws-reply-timeout:create', backend + ':' + sessionMode); } catch { }
+      showToast(t('Creating the session is taking unusually long — check the connection or reload the tab'), { type: 'error' });
+    }, 15000);
+
     const handler = (msg) => {
       // Window closed before the server answered — clean up the handler so it
       // doesn't hold winInfo forever (and can't bind a session to a dead window)
-      if (!this.wm.windows.has(winInfo.id)) { this.ws.offGlobal(handler); return; }
+      if (!this.wm.windows.has(winInfo.id)) { clearTimeout(createWd); this.ws.offGlobal(handler); return; }
       // Server refused the create (e.g. remote subscription-shipping policy):
       // surface it — without this the window stayed BLANK forever with no
       // feedback and no openSpec (found reproducing the remote-blank report).
       if (msg.type === 'error' && msg.reqId === reqId) {
+        clearTimeout(createWd);
         this.ws.offGlobal(handler);
         const text = msg.message || t('Session create failed');
         showToast(text, { type: 'error' });
@@ -77,6 +85,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         return;
       }
       if (msg.type === 'created' && msg.reqId === reqId) {
+        clearTimeout(createWd);
         metric('session-create-roundtrip-ms', performance.now() - _createT0);
         // Set openSpec now that we have the server session ID (for cross-client sync)
         winInfo._openSpec = {
@@ -199,8 +208,16 @@ export function installSessionLifecycle(App, ctx = {}) {
     this.ws.send({ type: 'kill', sessionId: webuiId });
   },
 
-  async killPid(pid) {
-    await fetch('/api/kill-pid', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid }) });
+  async killPid(pid, host) {
+    // host: an EXTERNAL/tmux session discovered on a REMOTE machine — its pid
+    // lives there; the local-only route 400'd silently forever (real report:
+    // terminate一直不成功). Failures now surface as a toast either way.
+    try {
+      const r = await fetch('/api/kill-pid', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid, host: host || undefined }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || j.error) showToast(j.error || t('Terminate failed'), { type: 'error' });
+      else showToast(t('Terminated'));
+    } catch { showToast(t('Terminate failed'), { type: 'error' }); }
   },
 
   // Find existing window for a server session ID and focus it
@@ -253,13 +270,22 @@ export function installSessionLifecycle(App, ctx = {}) {
 
     this.ws.send({ type: 'attach', sessionId: serverId });
 
+    // Reply watchdog (fleet-incident retrospective): a lost attach — zombie
+    // ws, stale tab, dropped reply — used to leave the window silently blank
+    // forever with zero telemetry. Surface it + record it.
+    const wd = setTimeout(() => {
+      try { track('event', 'ws-reply-timeout:attach', serverId); } catch { }
+      showToast(t('Attaching "{name}" is taking unusually long — check the connection or reload the tab', { name: name || serverId }), { type: 'error' });
+    }, 12000);
+
     const handler = (msg) => {
       // Window closed before the server answered (esp. slow huge-JSONL attaches):
       // drop the handler so it can't build a ChatView into a dead winInfo and
       // leave a phantom sessions entry that makes the session un-reopenable.
-      if (!this.wm.windows.has(winInfo.id)) { this.ws.offGlobal(handler); return; }
-      if ((msg.type === 'error') && msg.sessionId === serverId) { this.ws.offGlobal(handler); return; }
+      if (!this.wm.windows.has(winInfo.id)) { clearTimeout(wd); this.ws.offGlobal(handler); return; }
+      if ((msg.type === 'error') && msg.sessionId === serverId) { clearTimeout(wd); this.ws.offGlobal(handler); return; }
       if (msg.type === 'attached' && msg.sessionId === serverId) {
+        clearTimeout(wd);
         if (msg.mode === 'chat' || isChat) {
           const chatView = new ChatView(winInfo, this.ws, serverId, this);
           this.sessions.set(winInfo.id, chatView);

@@ -197,7 +197,11 @@ class Auth {
       // Standalone device install: the agentd bundle + installer are public
       // (the bundle is not secret; the /api/agentd-dial upgrade is gated by the
       // per-device dial token). A NAT device fetches these before any cookie.
-      if (p === '/agentd.js' || p === '/agentd-install.sh') return next();
+      // BOTH name generations must be exempt — the 2.154.x vibespace-device
+      // rename added the canonical routes but not these exemptions, so every
+      // auth-enabled instance 401'd the NEW pairing command (real Mac report).
+      if (p === '/agentd.js' || p === '/agentd-install.sh' || p === '/agentd-install.ps1'
+        || p === '/vibespace-device.js' || p === '/vibespace-device-install.sh' || p === '/vibespace-device-install.ps1') return next();
       if (p === '/api/agentd-dial') return next();
       // Telemetry collector ingest: remote VibeSpace instances authenticate
       // with the shared Bearer token — the ROUTE enforces it (404 when the

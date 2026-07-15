@@ -1,5 +1,6 @@
 import { ThemeManager, THEMES, BUILTIN_THEMES } from './themes.js';
 import { BUILD_VERSION } from './build-version.js';
+import { track } from './telemetry-client.js';
 import { initPosthog } from './posthog-loader.js';
 import { ThemeEditor } from './theme-editor.js';
 import { WsManager } from './ws.js';
@@ -1669,6 +1670,7 @@ class App {
       const key = 'vibespace.reloaded-for.' + srv;
       if (localStorage.getItem(key)) return;
       localStorage.setItem(key, String(Date.now()));
+      try { track('event', 'stale-bundle-reload', BUILD_VERSION + ' -> ' + srv); } catch { }
       showToast(t('VibeSpace was updated — reloading this tab…'));
       setTimeout(() => location.reload(), 800);
     } catch { }

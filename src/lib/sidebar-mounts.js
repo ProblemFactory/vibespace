@@ -612,8 +612,8 @@ export function installSidebarMounts(Sidebar) {
       );
       if (!isDial) actions.append(ibtn(MI.wrench, 'Set up (install the tools needed to run agents)', () => { this._showBootstrapDialog(h); }));
       actions.append(
-        ibtn(MI.folderPush, tr('Share a folder from this instance onto this machine'), () => { this._showHostMountDialog(h); }),
-        ibtn(MI.folderPull, tr('Mount a folder from this machine into this workspace'), () => { this._showMachinePullDialog(h); }),
+        ibtn(MI.folderPush, tr('Mount a folder from this VibeSpace onto "{name}"', { name: h.name }), () => { this._showHostMountDialog(h); }),
+        ibtn(MI.folderPull, tr('Mount a folder from "{name}" into this workspace', { name: h.name }), () => { this._showMachinePullDialog(h); }),
         ibtn(MI.termNew, isDial ? tr('New session on this device') : 'New session on this host', () => { this.app.showNewSessionDialog?.({ hostId: h.id, hostName: h.name }); }),
         ibtn(MI.cross, isDial ? tr('Unpair (the device can no longer dial in)') : 'Remove host', async () => {
           const ok = await showConfirmDialog(isDial
