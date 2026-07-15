@@ -210,7 +210,10 @@ spec:
             {{- end }}
           volumeMounts:
             - name: home
-              mountPath: /home/vibe
+              # the instance's real home — image ≥3.5.0 renames the container
+              # user to .Values.user at boot (guarded on this mountPath) and
+              # symlinks /home/vibe → here for recorded absolute paths
+              mountPath: /home/{{ .Values.user }}
             {{- if and .Values.tun .Values.tun.enabled (eq (.Values.tun.mode | default "hostpath") "hostpath") }}
             # hostPath tun (Plugins kernel-mode Tailscale, 2.141.2): mount the
             # host's /dev/net/tun directly — no cluster device-plugin needed,

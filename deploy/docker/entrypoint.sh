@@ -27,6 +27,15 @@ mkdir -p "$APP/data"
 rm -f "$HOME/.config/chromium/Singleton"* 2>/dev/null || true
 
 
+# XFCE: seed the curated defaults into the user config ONCE (PVC-persisted).
+# The /etc/xdg copies alone left panel launchers broken on fresh pods (the
+# four-gears report — the documented live repair wrote ~/.config by hand);
+# combined with the image's icon theme this makes a fresh desktop right.
+if [ ! -d "$HOME/.config/xfce4" ]; then
+  mkdir -p "$HOME/.config"
+  cp -a /etc/xdg/xfce4 "$HOME/.config/xfce4" 2>/dev/null || true
+fi
+
 # 2. User boot hook — persistent customization (apt installs, env, dotfiles) that
 #    the ephemeral rootfs can't keep across pod rebuilds. Runs every boot.
 if [ -f "$HOME/.vibespace-init.sh" ]; then
