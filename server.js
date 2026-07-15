@@ -463,6 +463,7 @@ function agentdMintDialPair(deviceId) {
  *  hash dies with the host record itself. */
 async function unpairDialDevice(deviceId) {
   try { await machineMounts.onMachineUnpaired(hosts.findByDeviceId(deviceId)?.id); } catch { }
+  try { portForwards.onMachineUnpaired(hosts.findByDeviceId(deviceId)?.id); } catch { }
   try { fs.unlinkSync(path.join(AGENTD_DIR, `host-dial-${deviceId}.token`)); } catch { }
   const live = agentdDials.get(deviceId);
   if (live) { try { live.destroy(); } catch { } agentdDials.delete(deviceId); }
@@ -2553,6 +2554,27 @@ app.delete('/api/machine-mounts/:id', async (req, res) => {
 app.post('/api/machine-mounts/:id/remount', async (req, res) => {
   try { res.json(await machineMounts.remount(String(req.params.id))); } catch (e) { res.status(400).json({ error: e.message }); }
 });
+
+// ── Port forwarding (B-0b60, tunnel path): expose a machine's loopback
+// service at http://127.0.0.1:<localPort> on this instance, over the agentd
+// data plane (no frps / public exposure). ──
+const { PortForwardManager } = require('./src/port-forward');
+const portForwards = new PortForwardManager({
+  dataDir: path.join(__dirname, 'data'), hosts, broadcast: bcastAll,
+  log: (m) => console.log('[port-forward]', m),
+});
+setTimeout(() => { portForwards.restore().catch(() => {}); }, 5500);
+app.get('/api/port-forwards', (req, res) => res.json({ forwards: portForwards.list() }));
+app.get('/api/hosts/:id/ports', async (req, res) => {
+  try { res.json({ ports: await portForwards.detect(req.params.id) }); } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/hosts/:id/port-forward', async (req, res) => {
+  try { res.json(await portForwards.forward(req.params.id, (req.body || {}).port, { label: (req.body || {}).label || '' })); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.delete('/api/port-forward/:id', async (req, res) => {
+  try { await portForwards.unforward(String(req.params.id)); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); }
+});
 setTimeout(() => { try { hosts.sweepJsonlCache(); } catch {} }, 60000); // orphaned/stale remote-transcript cache
 const { RemoteFs } = require('./src/remote-fs');
 const remoteFs = new RemoteFs(hosts);
@@ -3274,6 +3296,7 @@ server.on('upgrade', (req, socket, head) => {
       waiters.forEach((r) => r(stream));
       // heal recorded pull mounts + re-own push tunnel ports + flip the UI dot
       try { machineMounts.onMachineLinked(hosts.findByDeviceId(deviceId)?.id); } catch { }
+      try { portForwards.onMachineLinked(hosts.findByDeviceId(deviceId)?.id); } catch { }
       try { bcastAll({ type: 'hosts-updated' }); } catch { }
       ws.on('close', () => {
         if (agentdDials.get(deviceId) === stream) agentdDials.delete(deviceId);

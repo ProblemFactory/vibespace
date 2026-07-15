@@ -6,6 +6,7 @@
 // no real CLI/login is needed. Covers: daemon-crash-on-bad-cwd fix, OFFSET_MODE
 // relay, device-home cwd default, /api/file/info?host= (dial), device home API.
 import { spawn } from 'node:child_process';
+import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -215,6 +216,30 @@ try {
     check('terminal resize propagates to the device pty (SIGWINCH)', resized, termBuf.slice(-200));
     check('daemon still alive after terminal session', daemon.exitCode === null);
   }
+
+  // ── PORT FORWARDING (B-0b60 tunnel path): detect a device loopback service
+  //    + forward it + round-trip. The "device" daemon is local, so an echo
+  //    server on 127.0.0.1 IS reachable via tcpForward. ──
+  const echoPort = await new Promise((res) => {
+    const s = net.createServer((c) => c.on('data', (d) => c.write(Buffer.concat([Buffer.from('svc:'), d]))));
+    s.listen(0, '127.0.0.1', () => res(s.address().port));
+  });
+  const detected = await J(`/api/hosts/${hostId}/ports`).catch(() => ({}));
+  check('detect lists the device listening port', Array.isArray(detected.ports) && detected.ports.some((p) => p.port === echoPort), JSON.stringify((detected.ports || []).slice(0, 5)));
+  const fwd = await POST(`/api/hosts/${hostId}/port-forward`, { port: echoPort, label: 'svc' });
+  check('port-forward binds a local port with a URL', fwd.active && fwd.localPort > 0 && fwd.url?.includes(String(fwd.localPort)), JSON.stringify(fwd));
+  if (fwd.localPort) {
+    const rt = await new Promise((res, rej) => {
+      const c = net.connect(fwd.localPort, '127.0.0.1', () => c.write('hey'));
+      let b = ''; c.on('data', (d) => { b += d; if (b.includes('svc:hey')) { c.end(); res(b); } });
+      c.on('error', rej); setTimeout(() => rej(new Error('timeout ' + b)), 3000);
+    }).catch((e) => e.message);
+    check('bytes round-trip through the forward to the device service', rt === 'svc:hey', String(rt));
+  }
+  const pfList = await J('/api/port-forwards').catch(() => ({}));
+  check('/api/port-forwards lists the active forward', (pfList.forwards || []).some((r) => r.id === fwd.id && r.active), JSON.stringify(pfList));
+  const del = await fetch(`http://127.0.0.1:${PORT}/api/port-forward/${encodeURIComponent(fwd.id)}`, { method: 'DELETE' });
+  check('unforward removes it', del.ok && !((await J('/api/port-forwards')).forwards || []).some((r) => r.id === fwd.id));
 
   ws.close();
 } catch (e) {
