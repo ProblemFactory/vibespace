@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.155.1 — 2026-07-15
+- **Slice B.2 groundwork (inert until wired): sessions on dial devices.** `vibespace-agentd-attach` gains a loopback-TCP transport (`cfg.tcp.port` — everything else identical to the ssh mode), and a new `DialSessionBridge` (src/dial-session-bridge.js) lets the server proxy the attach protocol onto a dialed-in device's single mux link (hello/open/attach-pipe-session/data/credit; per-session 127.0.0.1 port, token-gated, port pinned for restore). Not yet reachable from the create path — ws-handler wiring + e2e land next; the dial-host create error message stands until then. M1/M2 session suites re-verified green.
+
 ## 2.155.0 — 2026-07-15
 - **Graduation slice B (first half): a paired device IS a machine in the hosts model.** Pairing now creates a real host record (`transport: 'dial'`, no ssh fields; unpair removes it; existing pairings are backfilled at boot) — so dial devices appear everywhere machines are listed. **Files on the device work through the standard `?host=` dispatch** (RemoteFs is FORCED onto the device fs path for dial hosts — they have no ssh fallback), and **session discovery answers over the dial link** (the device raw-facts snapshot, same forced gate). `hosts.sshArgs` throws an honest error for dial hosts, so every legacy ssh path fails loud instead of weird. Running SESSIONS on a dial device is the second half (needs a server-side attach bridge — the dialed link lives inside the server process); the create dialog says so cleanly instead of erroring cryptically. E2E grew to 21 assertions (host record on pair, device-path file listing, discovery answer, record removal on unpair).
 
