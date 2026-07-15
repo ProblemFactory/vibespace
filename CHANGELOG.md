@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.156.2 — 2026-07-15
+- **Remote sessions can no longer steal a LOCAL session's id** (found by the full id-adoption trace after the lengyue incident): the local lock-file capture wasn't gated on locality — a remote session with the same cwd as a local one could false-match the local lock and adopt the WRONG claude session id. Lock capture is local-only now; remote sessions get their id from the stream parser's unconditional first-capture (2.156.1), which every stream-json line feeds — existing null-id sessions self-heal on their next activity, no belt needed.
+
 ## 2.156.1 — 2026-07-15
 - **Root cause of the "remote session goes permanently blank" incident (lengyue, tonight): session-id FIRST-capture was impossible.** The stream parser's only `session_id` adoption was gated behind the fork flag (`_forkRequested`, the 2.x fork-adoption guard) — so a session created with `claudeSessionId: null` could NEVER learn its own id from the stream. Local sessions were silently rescued by lock-first discovery (local lock files visible), which masked the hole; REMOTE keeper sessions had no rescuer — meta kept `null` forever, and any later re-attach died prefetching the transcript with a bare path error → the window stayed blank while the remote claude kept running fine. Fix: **first capture (no tracked id yet) is unconditional** — hijack-safety is intact because with no tracked id there is nothing to hijack, and a CHANGED id still requires the fork flag. (Also removed a duplicated `effort:` line in the same meta write.) The incident pod was healed by hand (meta patch from the keeper's own record + in-place respawn, zero data loss — recipe in the fleet ops notes).
 

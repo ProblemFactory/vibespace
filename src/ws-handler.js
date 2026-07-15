@@ -721,8 +721,13 @@ done`;
             mode: sessionMode,
           });
 
-          // Capture claudeSessionId from lock file for new (non-resume) Claude sessions
-          if (backend === 'claude' && !session.claudeSessionId) {
+          // Capture claudeSessionId from lock file for new (non-resume) Claude sessions.
+          // LOCAL sessions only (2.156.2, trace finding): a REMOTE session's
+          // claude runs on the host — scanning the LOCAL lock dir here could
+          // FALSE-MATCH a same-cwd local session and adopt the WRONG id.
+          // Remote sessions get their id from the stream parser's first-capture
+          // (2.156.1), which every stream-json line feeds.
+          if (backend === 'claude' && !session.claudeSessionId && !session.host) {
             const { SESSIONS_DIR } = require('./session-store');
             const tryCapture = (attempts) => {
               if (attempts <= 0 || !activeSessions.has(id)) return;
