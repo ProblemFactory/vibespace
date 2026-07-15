@@ -729,7 +729,7 @@ done`;
                 session._agentdSession = true;
                 session._agentdCfgFile = cfgFile;
               } catch (e) {
-                console.warn('[agentd] remote provisioning failed — keeper fallback:', e.message);
+                console.warn('[device] remote provisioning failed — keeper fallback:', e.message);
                 agentdMode = false;
               }
             }

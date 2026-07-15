@@ -301,13 +301,13 @@ const SETTINGS_SCHEMA = {
   'agentd.sessions': {
     type: 'boolean', default: true,
     label: t('Route local sessions through the device agent'),
-    description: t('CS-refactor M1 (opt-in, default off): run local terminal sessions inside the standing vibespace-agentd daemon instead of the server process, over the device mux protocol. The daemon owns the pty and survives server restarts; sessions are unaffected. Experimental — leave off unless you are testing the new architecture. Requires a restart to take effect.'),
+    description: t('CS-refactor M1 (default on): run local terminal sessions inside the standing vibespace-device daemon instead of the server process, over the device mux protocol. The daemon owns the pty and survives server restarts; sessions are unaffected. Turn off only to fall back to the legacy path. Requires a restart to take effect.'),
     category: t('Session'), liveApply: false,
   },
   'agentd.remoteSessions': {
     type: 'boolean', default: true,
     label: t('Route remote sessions through the device agent'),
-    description: t('CS-refactor M2 (opt-in, default off; needs the local device-agent setting too): remote chat sessions run as persistent sessions inside a standing agent daemon on the host — an ssh drop kills only the bridge, the daemon and session survive, and reconnects resume by byte offset. Replaces the per-session keeper. Experimental; leave off unless testing.'),
+    description: t('CS-refactor M2 (default on; needs the local device-agent setting too): remote chat sessions run as persistent sessions inside a standing agent daemon on the host — an ssh drop kills only the bridge, the daemon and session survive, and reconnects resume by byte offset. Replaces the per-session keeper; turn off only to fall back to it.'),
     category: t('Session'), liveApply: false,
   },
   'agentd.publicUrl': {
@@ -319,7 +319,7 @@ const SETTINGS_SCHEMA = {
   'agentd.dataPlane': {
     type: 'boolean', default: true,
     label: t('Route remote data reads through the device agent'),
-    description: t('CS-refactor M3 (opt-in, default off): remote file browsing, session discovery, transcript sync and usage harvest use the standing device agent — incremental byte-range transcript sync (no more whole-file pulls), push-based discovery, one persistent connection instead of ssh per operation. Falls back to the classic ssh path automatically on any failure. Experimental; leave off unless testing.'),
+    description: t('CS-refactor M3 (default on): remote file browsing, session discovery, transcript sync and usage harvest use the standing device agent — incremental byte-range transcript sync (no more whole-file pulls), push-based discovery, one persistent connection instead of ssh per operation. Falls back to the classic ssh path automatically on any failure; turn off only to force the legacy path.'),
     category: t('Session'), liveApply: true,
   },
   'agents.injectPreamble': {

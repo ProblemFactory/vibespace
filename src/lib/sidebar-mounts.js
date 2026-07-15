@@ -680,7 +680,7 @@ export function installSidebarMounts(Sidebar) {
         const viaLabel = m.via === 'tunnel' ? tr('via tunnel') : tr('via address');
         const viaTip = m.via === 'tunnel'
           ? tr('Rides the device agent link — no public address or VPN needed')
-          : tr('Reached over agentd.publicUrl (no device agent on this host)');
+          : tr('Reached over the instance public address (no device agent on this host)');
         // the push dot was hardcoded 'ok' and kept glowing green while the
         // machine was OFFLINE (real report: 薛定谔的连接) — for dial machines
         // the tunnel dies with the link, so the dot follows h.online
@@ -714,8 +714,8 @@ export function installSidebarMounts(Sidebar) {
     },
 
     // Mount one of THIS instance's folders onto a remote host (reverse mount).
-    // Primary transport = the agentd tunnel (NAT-proof, no public address);
-    // falls back to agentd.publicUrl only for hosts without the device agent.
+    // Primary transport = the device tunnel (NAT-proof, no public address);
+    // falls back to the instance public address only for hosts without the device agent.
     // Pick a machine to mount a folder onto (from the folder right-click, where
     // no host is chosen yet). One machine → straight to the mount dialog.
     async _showHostMountPicker(folder) {
@@ -787,7 +787,7 @@ export function installSidebarMounts(Sidebar) {
     },
 
     // Port forwarding (B-0b60 tunnel path): expose a machine's loopback dev
-    // server here over the agentd link. Detected ports + a manual box; each
+    // server here over the device link. Detected ports + a manual box; each
     // becomes http://127.0.0.1:<localPort> opened in the embedded browser.
     async _showPortsDialog(h) {
       const { body, close } = createModalShell({ id: 'ports-dialog', title: tr('Forward a port from "{name}"', { name: h.name }), bodyClass: 'mounts-dialog-body', escapeToClose: true });
@@ -955,7 +955,7 @@ export function installSidebarMounts(Sidebar) {
     },
 
     // Pair a NAT'd machine as a dial-out DEVICE (B-e5e7, docs/device-agent.md):
-    // mint a device id + dial token (POST /api/agentd/dial-pair) and hand the
+    // mint a device id + dial token (POST /api/device/dial-pair) and hand the
     // user the exact one-line installer command. Machines you can ssh into
     // never need this — Add machine installs the agent over ssh at first use.
     _showDevicePairDialog() {
@@ -980,9 +980,9 @@ export function installSidebarMounts(Sidebar) {
         const name = (inp.value || '').trim().replace(/[^\w-]/g, '') || undefined;
         go.disabled = true; go.textContent = tr('Pairing…');
         try {
-          const r = await api('/api/agentd/dial-pair', { method: 'POST', body: JSON.stringify({ deviceId: name, serverUrl: location.origin }) });
+          const r = await api('/api/device/dial-pair', { method: 'POST', body: JSON.stringify({ deviceId: name, serverUrl: location.origin }) });
           const wsBase = location.origin.replace(/^http/, 'ws');
-          const dialUrl = `${wsBase}/api/agentd-dial?device=${r.deviceId}`;
+          const dialUrl = `${wsBase}/api/device-dial?device=${r.deviceId}`;
           // The full installer line: bundle + dial URL + BOTH tokens — the
           // hostToken is what the daemon verifies OUR mux hello against; an
           // install without it can dial in but rejects every server command.

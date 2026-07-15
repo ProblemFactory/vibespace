@@ -16,7 +16,10 @@ const net = require('net');
 const { Mux, PROTO_VERSION } = require('./mux.js');
 
 const VERSION = process.env.VIBESPACE_AGENTD_VERSION || require('./version.js').VERSION;
-const ROOT = process.env.VIBESPACE_AGENTD_ROOT || path.join(os.homedir(), '.vibespace', 'agentd');
+// VIBESPACE_DEVICE_ROOT is the current name; VIBESPACE_AGENTD_ROOT stays
+// honored forever — in-field daemons were installed with it (launchd plists /
+// systemd units on user devices reference it)
+const ROOT = process.env.VIBESPACE_DEVICE_ROOT || process.env.VIBESPACE_AGENTD_ROOT || path.join(os.homedir(), '.vibespace', 'agentd');
 
 // SPAWN ENV (real xingweil report: Mac dial chat blank — the daemon runs on
 // node fine but its subprocess `sh -c` couldn't find node/claude). launchd

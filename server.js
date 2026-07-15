@@ -507,7 +507,7 @@ async function deviceForDial(deviceId) {
       bundlePath: path.join(__dirname, 'data', 'bin', 'vibespace-agentd.js'),
       version: require('./package.json').version,
       transport: { kind: 'stream', hostToken: agentdHostToken('dial-' + deviceId), getStream: () => agentdDials.get(deviceId) || null },
-      log: (...a) => console.log('[agentd-dial]', ...a),
+      log: (...a) => console.log('[device-dial]', ...a),
     });
     agentdDialDevices.set(deviceId, dm);
   }
@@ -1316,7 +1316,7 @@ function attachToDtach(id, socketPath, session) {
   if (deviceMgr && !session.host) {
     deviceMgr.openSession({ cmd: DTACH_CMD, args: ['-a', socketPath, '-E', '-r', 'winch'], cols: 120, rows: 30 })
       .then((h) => { setupSessionPty(session, id, daemonPtyShim(h)); })
-      .catch((e) => { console.warn('[agentd] session attach failed — local pty fallback:', e.message); localAttach(); });
+      .catch((e) => { console.warn('[device] session attach failed — local pty fallback:', e.message); localAttach(); });
     return;
   }
   localAttach();
@@ -2727,12 +2727,12 @@ try {
     version: require('./package.json').version,
   };
   hosts.dataPlaneOn = () => { try { return !!serverSetting('agentd.dataPlane'); } catch { return false; } };
-} catch (e) { console.warn('[agentd] data-plane deps wiring failed:', e.message); }
+} catch (e) { console.warn('[device] data-plane deps wiring failed:', e.message); }
 // Transport B pairing: mint a device id + dial token + the one-liner the user
 // runs on the NAT'd device (no ssh needed). Cookie-authed (user action).
 // The pairing IS the machine registration — the dial host record carries the
 // token hash (B-f3e8); re-pairing an existing name rotates its token in place.
-app.post('/api/agentd/dial-pair', (req, res) => {
+app.post(['/api/device/dial-pair', '/api/agentd/dial-pair'], (req, res) => {
   try {
     const deviceId = String(req.body?.deviceId || ('dev-' + require('crypto').randomBytes(4).toString('hex'))).replace(/[^\w-]/g, '').slice(0, 32);
     const pair = agentdMintDialPair(deviceId);
@@ -2741,9 +2741,9 @@ app.post('/api/agentd/dial-pair', (req, res) => {
     res.json({
       ...pair,
       command: base
-        ? `node vibespace-device.js --dial ${base.replace(/^http/, 'ws')}/api/agentd-dial?device=${deviceId} --dial-token ${pair.dialToken}`
+        ? `node vibespace-device.js --dial ${base.replace(/^http/, 'ws')}/api/device-dial?device=${deviceId} --dial-token ${pair.dialToken}`
         : null,
-      note: 'install the agentd bundle on the device, write the hostToken to <root>/state/token (0600), then run with --dial',
+      note: 'install the device daemon bundle on the device, write the hostToken to <root>/state/token (0600), then run with --dial',
     });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -3283,7 +3283,9 @@ server.on('upgrade', (req, socket, head) => {
   } else if (pathname === '/api/vnc') {
     if (!auth.requestAuthed(req)) return deny();
     vncWss.handleUpgrade(req, socket, head, (ws) => bridgeVncSocket(ws));
-  } else if (pathname === '/api/agentd-dial') {
+  } else if (pathname === '/api/device-dial' || pathname === '/api/agentd-dial') {
+    // /api/device-dial is the name new pairing commands render;
+    // /api/agentd-dial stays FOREVER — in-field daemons hold it in dial.json
     // Transport B: a remote device's daemon dialing IN. Gated by the per-device
     // dial token (never cookie auth — daemons have no cookies); real protocol
     // auth (vsht_ hello) happens inside the mux on this stream.
@@ -3295,7 +3297,7 @@ server.on('upgrade', (req, socket, head) => {
     if (!deviceId || !want || got !== want) {
       // observability: a silently deny()'d redial is indistinguishable from
       // "no attempts" in the logs (bit us diagnosing the dead-Mac incident)
-      console.log(`[agentd] dial REJECTED for '${deviceId || '?'}' — ${!deviceId ? 'no device id' : !want ? 'no pairing on record' : 'token mismatch'}`);
+      console.log(`[device] dial REJECTED for '${deviceId || '?'}' — ${!deviceId ? 'no device id' : !want ? 'no pairing on record' : 'token mismatch'}`);
       return deny();
     }
     agentdDialWss.handleUpgrade(req, socket, head, (ws) => {
@@ -3315,7 +3317,7 @@ server.on('upgrade', (req, socket, head) => {
       // rebuilds over this one (stale-stream blank-session fix)
       try { const old = agentdDialDevices.get(deviceId); if (old && old._dialStream !== stream) { old.stop?.(); agentdDialDevices.delete(deviceId); } } catch { }
       try { hosts.invalidateDevice?.('host-dial-' + String(deviceId).replace(/[^\w-]/g, '')); } catch { }
-      console.log(`[agentd] device '${deviceId}' dialed in`);
+      console.log(`[device] device '${deviceId}' dialed in`);
       const waiters = agentdDialWaiters.get(deviceId) || [];
       agentdDialWaiters.delete(deviceId);
       waiters.forEach((r) => r(stream));
@@ -3492,11 +3494,11 @@ server.listen(PORT, HOST, () => {
         nodeModules: path.join(__dirname, 'node_modules'),
         log: console.log,
       });
-      deviceMgr.connect().then(() => console.log('  agentd: device session routing ENABLED')).catch((e) => {
-        console.warn('  agentd: could not reach the daemon — local pty fallback:', e.message);
+      deviceMgr.connect().then(() => console.log('  device-daemon: device session routing ENABLED')).catch((e) => {
+        console.warn('  device-daemon: could not reach the daemon — local pty fallback:', e.message);
         deviceMgr = null; // fall back cleanly
       });
-    } catch (e) { console.warn('  agentd: init failed — local pty fallback:', e.message); deviceMgr = null; }
+    } catch (e) { console.warn('  device-daemon: init failed — local pty fallback:', e.message); deviceMgr = null; }
   }
 
   // Restore existing dtach sessions from before restart

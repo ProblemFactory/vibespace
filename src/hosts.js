@@ -565,7 +565,7 @@ class HostManager {
   installAgentd(id, bundlePath, version, hostToken) {
     const h = this.get(id);
     const { execFileSync } = require('child_process');
-    if (!fs.existsSync(bundlePath)) throw new Error('agentd bundle missing: ' + bundlePath);
+    if (!fs.existsSync(bundlePath)) throw new Error('device daemon bundle missing: ' + bundlePath);
     // stage a tar with two entries: agentd.js + token
     const os2 = require('os');
     const stage = fs.mkdtempSync(path.join(os2.tmpdir(), 'vs-agentd-stage-'));

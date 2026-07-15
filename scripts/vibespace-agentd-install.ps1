@@ -38,7 +38,7 @@ Write-Host "-> starting daemon with dial-out to $Dial"
 $out = Join-Path $root 'state\agentd.out'
 # child inherits process env (Start-Process -Environment needs PS 7.3+; this
 # way works on the Windows-default 5.1 too)
-$env:VIBESPACE_AGENTD_ROOT = $root
+$env:VIBESPACE_DEVICE_ROOT = $root; $env:VIBESPACE_AGENTD_ROOT = $root
 $p = Start-Process -PassThru -WindowStyle Hidden node -ArgumentList @("$current\vibespace-device.js", '--dial', $Dial, '--dial-token', $DialToken) `
   -RedirectStandardOutput $out -RedirectStandardError (Join-Path $root 'state\agentd.err')
 Start-Sleep -Seconds 2

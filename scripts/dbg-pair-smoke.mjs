@@ -56,7 +56,7 @@ try {
   const cmd = await evalJs(`document.querySelector('#device-pair-dialog textarea')?.value || ''`);
   check('command rendered after pairing', cmd.length > 100, cmd.slice(0, 120));
   check('command carries the install script + bundle', /vibespace-device-install\.sh/.test(cmd) && /--bundle-url/.test(cmd));
-  check('command carries dial URL with the device id', cmd.includes('/api/agentd-dial?device=smoke-mac'));
+  check('command carries dial URL with the device id', cmd.includes('/api/device-dial?device=smoke-mac'));
   check('command carries BOTH tokens', /--dial-token vsdt_/.test(cmd) && /--host-token vsht_/.test(cmd), cmd);
   // server actually recorded the pairing — the credential lives ON the dial
   // host record since B-f3e8 (dial-tokens.json is gone)
