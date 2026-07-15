@@ -7,6 +7,19 @@ import { createAgentKindIcon, createBackendIcon, createModeBackendIcon, getAgent
 class WindowManager {
   constructor(workspace) {
     this.workspace = workspace;
+    // The workspace is a LAYOUT container, never a scroller — but an
+    // overflow:hidden element is still PROGRAMMATICALLY scrollable, and the
+    // browser's focus-scrolling scrolls it whenever focus lands inside a
+    // window that extends past the workspace bottom (freeform windows may).
+    // There is no scrollbar to undo it, so the whole workspace appeared
+    // permanently shifted (tracer-diagnosed real report: scrollTop stuck at
+    // 239, every window "pushed" by exactly that amount, correlated with
+    // bottom-edge right-clicks). CSS overflow:clip forbids it; this listener
+    // is the belt for engines/paths that scroll anyway.
+    workspace.addEventListener('scroll', () => {
+      if (workspace.scrollTop !== 0) workspace.scrollTop = 0;
+      if (workspace.scrollLeft !== 0) workspace.scrollLeft = 0;
+    }, { passive: true });
     this.windows = new Map(); this.zIndex = 100; this.activeWindowId = null;
     // Window z-indexes grow on every focus AND persist across reloads — left
     // unchecked they eventually pass the fixed chrome layers (snap indicator
