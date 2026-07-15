@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.154.0 — 2026-07-15
+- **Both mount directions on every machine row** (user request): next to "share a folder onto this machine" (push icon), hosts now have "mount a folder from this machine into this workspace" (pull icon) — a one-field shortcut that creates and connects an SFTP mount prefilled with the host's address/user/port/key.
+- **Bridge tokens say what they're for** (user report: `host:host-2c4517af` 语义不明): a reverse-mount's token now reads "Reverse-mount token — \"frps-server\" accesses /home" with "Read-write · revoking breaks that machine's mount"; tokens of removed machines are labeled as such; hand-minted share tokens keep their given names.
+
 ## 2.153.4 — 2026-07-15
 - **Remote rclone install works on bare Debian** (real report on frps-server: `sh: 1: unzip: not found`): the reverse-mount's remote installer falls back unzip → busybox unzip → python3 zipfile, and only then fails with an actionable "apt install unzip" hint.
 - **Reverse-mount folder field accepts `~`** and gives a real error: a literal `~` used to resolve against cwd and die with a bare "root does not exist"; now tilde-expands and reports "folder does not exist on this instance: <abs>".

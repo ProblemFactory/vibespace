@@ -1910,4 +1910,11 @@ export default {
   "using VibeSpace key": "VibeSpace の鍵を使用",
   "using system ssh keys": "システムの ssh 鍵を使用",
   "using stored key": "保存済みの鍵を使用",
+  "Mount a folder from this machine into this workspace": "このマシンのフォルダをこのワークスペースにマウント",
+  "Mount a folder from \"{name}\" into this workspace": "「{name}」のフォルダをこのワークスペースにマウント",
+  "Folder on the machine (absolute path or ~)": "マシン上のフォルダ（絶対パスまたは ~）",
+  "Enter the folder path on the machine": "マシン上のフォルダパスを入力してください",
+  "Reverse-mount token — \"{name}\" accesses {root}": "逆マウントトークン — 「{name}」が {root} にアクセス",
+  "Reverse-mount token (machine removed) — {root}": "逆マウントトークン（マシン削除済み）— {root}",
+  "{mode} · revoking breaks that machine’s mount": "{mode} · 失効するとそのマシンのマウントが切れます",
 };

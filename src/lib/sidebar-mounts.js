@@ -231,7 +231,16 @@ export function installSidebarMounts(Sidebar) {
         for (const t of d.mountTokens) {
           const row = document.createElement('div');
           row.className = 'mounts-share-row';
-          row.innerHTML = `<span class="mounts-share-text"><b>${escHtml(t.name)}</b><span>${escHtml(t.root)} · ${t.mode === 'ro' ? 'Read-only' : 'Read-write'}</span></span>`;
+          // 'host:<id>' tokens are minted BY reverse-mounts — say so in human
+          // terms instead of the raw internal name (real report: 语义不明)
+          const hostRec = /^host:(.+)$/.exec(t.name || '') && (hd.hosts || []).find((x) => x.id === t.name.slice(5));
+          const title = hostRec ? tr('Reverse-mount token — "{name}" accesses {root}', { name: hostRec.name, root: t.root })
+            : /^host:/.test(t.name || '') ? tr('Reverse-mount token (machine removed) — {root}', { root: t.root })
+            : t.name;
+          const subNote = hostRec || /^host:/.test(t.name || '')
+            ? tr('{mode} · revoking breaks that machine’s mount', { mode: t.mode === 'ro' ? tr('Read-only') : tr('Read-write') })
+            : `${t.root} · ${t.mode === 'ro' ? tr('Read-only') : tr('Read-write')}`;
+          row.innerHTML = `<span class="mounts-share-text"><b>${escHtml(title)}</b><span>${escHtml(subNote)}</span></span>`;
           const rm = document.createElement('button');
           rm.className = 'mounts-btn mounts-btn-danger';
           rm.textContent = tr('Revoke');
@@ -568,6 +577,7 @@ export function installSidebarMounts(Sidebar) {
         }),
         ibtn(MI.wrench, 'Set up (install the tools needed to run agents)', () => { this._showBootstrapDialog(h); }),
         ibtn(MI.folderPush, tr('Share a folder from this instance onto this machine'), () => { this._showHostMountDialog(h); }),
+        ibtn(MI.folderPull, tr('Mount a folder from this machine into this workspace'), () => { this._showHostPullDialog(h); }),
         ibtn(MI.termNew, 'New session on this host', () => { this.app.showNewSessionDialog?.({ hostId: h.id, hostName: h.name }); }),
         ibtn(MI.cross, 'Remove host', async () => {
           const ok = await showConfirmDialog({ title: `Remove "${h.name}"?`, message: 'Only the registry entry goes away — nothing on the remote machine is touched.', confirmText: 'Remove', danger: true });
@@ -661,6 +671,25 @@ export function installSidebarMounts(Sidebar) {
         const via = r.via === 'tunnel' ? tr('over the device tunnel') : tr('over the public address');
         showToast(tr('Mounted at {mp} on {name} ({via})', { mp: r.mountpoint, name: h.name, via }));
         this._renderMounts();
+      });
+    },
+
+    // The PULL direction on a host row (user request: both directions on every
+    // machine): a one-field shortcut over the existing SFTP mount type — the
+    // host's connection details (address/user/port/key) prefill from its record.
+    _showHostPullDialog(h) {
+      this._mountsDialog(tr('Mount a folder from "{name}" into this workspace', { name: h.name }), [
+        { key: 'sshPath', label: tr('Folder on the machine (absolute path or ~)'), placeholder: `/home/${h.user}` },
+      ], tr('Mount'), async (v, { close }) => {
+        if (!v.sshPath) throw new Error(tr('Enter the folder path on the machine'));
+        const base = v.sshPath.split('/').filter(Boolean).pop() || 'files';
+        const r = await api('/api/mounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+          type: 'sftp', name: `${h.name}: ${base}`,
+          sshHost: h.host, sshUser: h.user, sshPort: h.port || 22,
+          keyPath: h.keyPath || undefined, sshPath: v.sshPath,
+        }) });
+        await fetch(`/api/mounts/${r.id}/mount`, { method: 'POST' });
+        close(); showToast(tr('Storage connected')); this._renderMounts();
       });
     },
 
