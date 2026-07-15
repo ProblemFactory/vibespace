@@ -457,13 +457,47 @@ function registerWsHandler(wss, ctx) {
             let h;
             try { h = hosts.get(data.hostId); }
             catch { ws.send(JSON.stringify({ type: 'error', message: 'Unknown host: ' + data.hostId })); return; }
-            // TERMINAL mode is not wired for dial devices yet (only chat rides
-            // the DialSessionBridge). Surface it CLEARLY — the reqId is what
-            // makes the client show the error instead of a blank window (real
-            // report: Mac terminal 空白; the old message had no reqId so the
-            // create handler never matched it).
-            if (h.transport === 'dial') { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, sessionId: id, message: `Terminal sessions on a paired device aren't supported yet — use CHAT mode on "${h.name}" instead (files, mounts and chat all work). Terminal-over-device is coming.` })); return; }
             const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+            // TERMINAL-on-dial (B-0d70): the device runs claude/codex in a
+            // node-pty via the daemon's open-session, proxied through the
+            // DialSessionBridge (pty mode). Locally it's dtach → pty-wrapper →
+            // vibespace-agentd-attach (pty/raw mode) — the exact `ssh -t`
+            // shape, but over the dialed link. Live pty (no offset/replay);
+            // pty-wrapper's REMOTE_RETRY respawns the attach on a link drop.
+            if (h.transport === 'dial') {
+              if (!dialBridge || !agentdRemote) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, sessionId: id, message: 'dial sessions not wired on this server' })); return; }
+              const rcmd0 = spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd;
+              try {
+                const bridgePort = await dialBridge.ensure({ sid: id, deviceId: h.deviceId });
+                const da = await deviceAgentSetup(h, id).catch((e) => { console.warn('[dial] agent setup degraded:', e.message); return { envPairs: [], tokenAssign: '' }; });
+                const shellCmd = `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:$HOME/.vibespace/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ${da.tokenAssign}exec env `
+                  + [...da.envPairs.map(shq), ...spawnEnvPairs.map(shq)].join(' ')
+                  + ' ' + [rcmd0, ...spawnArgs.map(shq)].join(' ');
+                const cfg = {
+                  tcp: { port: bridgePort },
+                  hostToken: agentdRemote.agentdHostToken('dial-' + h.deviceId),
+                  sid: id,
+                  version: require('../package.json').version,
+                  pty: { cmd: 'sh', args: ['-lc', shellCmd], cwd, env: { TERM: 'xterm-256color', COLORTERM: 'truecolor' }, cols: 120, rows: 30 },
+                };
+                ensureDir(agentdRemote.agentdDir);
+                const cfgFile = path.join(agentdRemote.agentdDir, 'session-' + id + '.json');
+                fs.writeFileSync(cfgFile, JSON.stringify(cfg), { mode: 0o600 });
+                spawnCmd = NODE_CMD;
+                spawnArgs = [agentdRemote.attachBundle, '--config', cfgFile];
+                spawnEnvPairs = [];
+                spawnCwd = os.homedir();
+                session.host = h.id;
+                session.hostName = h.name;
+                session._agentdSession = true;
+                session._dialDeviceId = h.deviceId;
+                session._bridgePort = bridgePort;
+                session._agentdCfgFile = cfgFile;
+              } catch (e) {
+                ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, sessionId: id, message: `dial terminal failed: ${e.message} (is the device online?)` })); return;
+              }
+              // fall through to the shared pty-wrapper/dtach spawn tail
+            } else {
             // locally-resolved binary paths mean nothing on the remote
             const rcmd = spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd;
             const ra = remoteAgentSetup();
@@ -481,6 +515,7 @@ function registerWsHandler(wss, ctx) {
             spawnCwd = os.homedir(); // remote cwd rides inside the ssh command
             session.host = h.id;
             session.hostName = h.name;
+            }
           } else if (data.hostId && hosts && sessionMode === 'chat') {
             // 2.139.0 (B-0588): codex remote chat rides the SAME keeper —
             // it's a content-agnostic byte pipe, so app-server JSON-RPC
@@ -514,6 +549,12 @@ function registerWsHandler(wss, ctx) {
               // VIBESPACE_API back-tunnel via reverseForward, hook registration
               // via runCmd — so vibespace-status/task/ask work on the device.
               if (!dialBridge || !agentdRemote) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'dial sessions not wired on this server' })); return; }
+              // Codex CHAT over a byte pipe is not wired (B-0588, same as the
+              // ssh path): the codex-chat-wrapper speaks JSON-RPC to a local
+              // codex app-server, not to the pipe-relayed device one. Fail
+              // LOUD rather than blank. Codex TERMINAL on dial works (TUI over
+              // the pty path); claude chat works.
+              if (backend === 'codex') { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, sessionId: id, message: `Codex CHAT on a paired device isn't wired yet — use TERMINAL mode for codex on "${h.name}", or codex chat on an ssh host. Claude chat works on devices.` })); return; }
               // A selected SUBSCRIPTION account can't be honored on a device
               // (OAuth shipping is off by default — §ban-safety) — fail loudly
               // rather than silently billing the device's own login (the ssh

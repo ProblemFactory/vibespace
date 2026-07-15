@@ -52,6 +52,20 @@ else
 fi
 ln -sfn "$ROOT/$VER" "$ROOT/current"
 
+# node-pty for TERMINAL sessions (B-0d70): the daemon bundle is zero-dep, but a
+# terminal-on-dial session opens a real device-side pty via node-pty. Best-
+# effort install into the agentd root (node-pty ships prebuilds for mac/linux/
+# win — usually just a download, no compiler). CHAT/files/mounts never need it,
+# so a failure here is non-fatal (terminal shows a clear message if it's
+# missing). Skip if already present.
+if ! node -e "require('$ROOT/node_modules/node-pty')" >/dev/null 2>&1; then
+  echo "→ installing node-pty for terminal sessions (best-effort)…"
+  ( cd "$ROOT" && [ -f package.json ] || echo '{"name":"vibespace-agentd-deps","private":true}' > package.json
+    npm install --no-audit --no-fund --loglevel=error node-pty >/dev/null 2>&1 ) \
+    && echo "  ✓ node-pty ready" \
+    || echo "  ⚠ node-pty install failed — chat/files/mounts still work; terminal will report it"
+fi
+
 # host token: provided (from pairing) or minted locally
 if [ -n "$HOST_TOKEN" ]; then printf '%s' "$HOST_TOKEN" > "$ROOT/state/token"
 elif [ ! -f "$ROOT/state/token" ]; then
