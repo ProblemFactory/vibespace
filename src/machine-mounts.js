@@ -252,7 +252,10 @@ class MachineMounts {
         // trap, 2.152.1): prefix it only where it exists; rclone --daemon
         // self-detaches either way.
         const logf = `${home}/.vibespace/host-mount-${id}.log`;
-        const cmd = `${env} $(command -v setsid >/dev/null 2>&1 && echo setsid) "${rclone}" mount vsdav: '${mp}' --daemon --vfs-cache-mode ${mode === 'rw' ? 'writes' : 'off'} ${roFlag} --dir-cache-time 10s --timeout 30s --contimeout 10s </dev/null >/dev/null 2>>'${logf}'`;
+        // Finder shows the VOLUME name, which defaults to an opaque
+        // 'vsdav{hash}' (real report: 名字不太对) — name it after the folder.
+        const volname = osKind === 'macos' ? `--volname 'VibeSpace ${path.basename(abs).replace(/[^\w .-]/g, '')}'` : '';
+        const cmd = `${env} $(command -v setsid >/dev/null 2>&1 && echo setsid) "${rclone}" mount vsdav: '${mp}' --daemon ${volname} --vfs-cache-mode ${mode === 'rw' ? 'writes' : 'off'} ${roFlag} --dir-cache-time 10s --timeout 30s --contimeout 10s </dev/null >/dev/null 2>>'${logf}'`;
         const r = await this._run(hostId, 'sh', ['-c', cmd]);
         if (r.code !== 0) {
           // stderr went to the remote log (the fd redirect above) — pull its

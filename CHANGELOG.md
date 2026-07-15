@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.160.1 — 2026-07-15
+- **Stale-tab auto-reload (root fix for tonight's "更新后所有session都挂了" fleet incident).** A browser tab left open across a server update keeps its OLD bundle and silently misbehaves against the new server — attach/create sends vanish without a trace while the sidebar's HTTP polls keep working, so every window looks blank and "all sessions died" (they never did: every claude/codex/keeper process was alive the whole time; verified live on the affected instance — server attach returned full history, a fresh page rendered everything). The tab that RUNS the update reloads itself; other tabs never did. Now the bundle bakes its own version at build (`src/lib/build-version.js`, generated+gitignored) and compares it with `/api/version` on every ws (re)connect — mismatch → toast + one reload per server version (loop-guarded for dev rebuilds without a bump).
+- macOS Finder shows a push-mount as an opaque `vsdav{hash}` volume (real report: 名字不太对) — rclone mounts now carry `--volname "VibeSpace <folder>"` on macOS.
+
 ## 2.160.0 — 2026-07-15
 - **B-f3e8: ONE machine model — dial devices and ssh hosts are no longer two systems** (user architecture insight: the row-by-row feature inconsistencies were symptoms of an unfinished merge). A machine is a host record with `transport ∈ {ssh, dial}`; everything keys off `hostId`:
   - **Identity**: the pairing credential lives ON the dial host record (`dialTokenHash`) — `dial-tokens.json` is migrated losslessly at boot (`hosts.migrateDialTokenFile`, renamed `.migrated` only after every hash landed; devices in the field keep dialing in). Unpairing = `DELETE /api/hosts/:id` (full teardown: mounts, token file, live stream). Pairing survives config export/import with the host records.

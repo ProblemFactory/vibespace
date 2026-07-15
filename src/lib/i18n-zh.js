@@ -1935,4 +1935,5 @@ export default {
   "Read-only (device link)": "只读（设备链路）",
   "Read-write (SFTP over ssh)": "读写（SFTP，经 ssh）",
   "device": "设备",
+  "VibeSpace was updated — reloading this tab…": "VibeSpace 已更新——正在刷新此标签页…",
 };
