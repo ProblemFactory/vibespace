@@ -1935,4 +1935,5 @@ export default {
   "Read-only (device link)": "読み取り専用（デバイスリンク）",
   "Read-write (SFTP over ssh)": "読み書き（SFTP・ssh 経由）",
   "device": "デバイス",
+  "VibeSpace was updated — reloading this tab…": "VibeSpace が更新されました — このタブを再読み込みします…",
 };

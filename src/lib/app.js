@@ -1,4 +1,5 @@
 import { ThemeManager, THEMES, BUILTIN_THEMES } from './themes.js';
+import { BUILD_VERSION } from './build-version.js';
 import { initPosthog } from './posthog-loader.js';
 import { ThemeEditor } from './theme-editor.js';
 import { WsManager } from './ws.js';
@@ -285,6 +286,7 @@ class App {
     // Re-attach all terminal sessions on reconnect (chat sessions handle their own)
     this.ws.onStateChange((connected) => {
       if (!connected) return;
+      this._checkBundleFreshness(); // stale-bundle tab after a server update → one-shot reload
       if (!this._vncAvailable) this._probeVncAvailability(); // may have failed during a restart-window page load
       for (const [winId, session] of this.sessions) {
         if (session instanceof TerminalSession && session.sessionId) {
@@ -1647,6 +1649,29 @@ class App {
     winInfo._explorer = explorer;
     winInfo.onClose = () => { explorer.dispose(); this._checkWelcome(); };
     return winInfo;
+  }
+
+  /** Stale-bundle guard (2.160.1, real fleet incident): a tab left open
+   *  across a server update keeps its OLD bundle and silently misbehaves
+   *  against the new server — every window blank, creates lost without a
+   *  trace, while the sidebar's HTTP polls keep working ("all sessions
+   *  died"). The tab that RUNS the update reloads itself; every other tab
+   *  never did. On each ws (re)connect, compare the bundle's baked version
+   *  with the server's; mismatch → reload ONCE per server version (the
+   *  guard keeps dev instances that rebuild without a version bump from
+   *  reload-looping). */
+  async _checkBundleFreshness() {
+    try {
+      if (!BUILD_VERSION) return;
+      const r = await fetchJson('/api/version');
+      const srv = r?.version;
+      if (!srv || srv === BUILD_VERSION) return;
+      const key = 'vibespace.reloaded-for.' + srv;
+      if (localStorage.getItem(key)) return;
+      localStorage.setItem(key, String(Date.now()));
+      showToast(t('VibeSpace was updated — reloading this tab…'));
+      setTimeout(() => location.reload(), 800);
+    } catch { }
   }
 
   _probeVncAvailability(attempt = 0) {
