@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.162.7 — 2026-07-15
+- **Personalized-user pods could not be UPDATED — git "dubious ownership"** (real regression from the 3.5.0 personalized-username image): the container now starts as root and drops to the instance user via runuser, so the admin's `kubectl exec` update/restart path runs git as ROOT against the uid-1000-owned PVC repo, which git refuses ("detected dubious ownership"). update.sh now trusts its own repo (`safe.directory`) up front, and boot-root.sh sets `safe.directory '*'` system-wide each boot. Already-broken pods were healed live with the same git config.
+
 ## 2.162.6 — 2026-07-15
 - **Dial-device CHAT went blank because the `__VS_OFFSET__` placeholder was never substituted** (real xingweil report; smoking-gun: the agentd-attach child ran with a LITERAL `--offset __VS_OFFSET__`). The chat-wrapper only substituted the placeholder + tracked the byte offset when `VIBESPACE_REMOTE_SID` was set (the keeper path); dial sessions use the agentd-attach bridge which honors the SAME contract but didn't reliably carry that env, so the attach child got offset=NaN and relayed zero bytes → blank. New `OFFSET_MODE` (REMOTE_SID OR any arg containing `__VS_OFFSET__`) drives the substitution, offset tracking, input queue and reconnect — a strict superset that can't affect the keeper path. NOT yet end-to-end confirmed on the Mac (there are further dial-session issues — see backlog B-dial).
 
