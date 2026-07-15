@@ -50,8 +50,8 @@ export function installSidebarMounts(Sidebar) {
         this.listEl.innerHTML = '<div class="mounts-loading">Loading…</div>';
       }
       let d, hd;
-      let mt, hm;
-      try { [d, hd, mt, hm] = await Promise.all([api('/api/mounts'), api('/api/hosts'), api('/api/mount-tokens').catch(() => ({ tokens: [] })), api('/api/host-mounts').catch(() => ({ mounts: [] }))]); }
+      let mt, hm, dv;
+      try { [d, hd, mt, hm, dv] = await Promise.all([api('/api/mounts'), api('/api/hosts'), api('/api/mount-tokens').catch(() => ({ tokens: [] })), api('/api/host-mounts').catch(() => ({ mounts: [] })), api('/api/agentd/devices').catch(() => ({ devices: [] }))]); }
       catch { this.listEl.innerHTML = '<div class="mounts-loading">Failed to load</div>'; return; }
       if (this._activeTab !== 'mounts') return; // user switched away mid-fetch
       d.mountTokens = mt?.tokens || [];
@@ -101,6 +101,41 @@ export function installSidebarMounts(Sidebar) {
       addHost.innerHTML = `<span class="mounts-action-icon">${MI.server}</span><span>${escHtml(tr('Add machine'))}</span>`;
       addHost.onclick = () => this._showAddHostDialog(hd);
       root.appendChild(addHost);
+      // Paired dial-out DEVICES (2.152.1): a paired device previously had NO
+      // UI presence at all — the user installed on a Mac and nothing appeared
+      // anywhere (real report). Green dot = its daemon is dialed in right now.
+      const devices = dv?.devices || [];
+      if (devices.length) {
+        const dlist = document.createElement('div');
+        dlist.className = 'mounts-list';
+        dlist.appendChild(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline', textContent: tr('Paired devices (dial-out)') }));
+        for (const dev of devices) {
+          const row = document.createElement('div');
+          row.className = 'mounts-row';
+          row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 8px;';
+          const dot = document.createElement('span');
+          dot.style.cssText = `width:6px;height:6px;border-radius:999px;flex:none;background:${dev.online ? 'var(--green,#3fb950)' : 'var(--text-dim)'}`;
+          dot.setAttribute('data-tip', dev.online ? tr('Dialed in — reachable now') : tr('Offline — the device’s daemon is not dialed in (start it with the install command)'));
+          const name = document.createElement('span');
+          name.textContent = dev.id;
+          name.style.cssText = 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;';
+          const status = document.createElement('span');
+          status.className = 'mounts-sec-sub';
+          status.textContent = dev.online ? tr('online') : tr('offline');
+          const rm = document.createElement('button');
+          rm.className = 'mounts-btn';
+          rm.textContent = '×';
+          rm.title = tr('Unpair (the device can no longer dial in)');
+          rm.onclick = async () => {
+            if (!(await showConfirmDialog({ title: tr('Unpair "{id}"?', { id: dev.id }), message: tr('Its dial token is revoked; re-pairing mints a new one.'), confirmText: tr('Unpair'), danger: true }))) return;
+            try { await api(`/api/agentd/devices/${encodeURIComponent(dev.id)}`, { method: 'DELETE' }); showToast(tr('Unpaired')); } catch (e) { showToast(e.message, { type: 'error' }); }
+            this._renderMounts();
+          };
+          row.append(dot, name, status, rm);
+          dlist.appendChild(row);
+        }
+        root.appendChild(dlist);
+      }
       // Dial-out DEVICE pairing (B-e5e7): the no-ssh path — laptops/Macs
       // behind NAT dial OUT to this instance (docs/device-agent.md).
       const pairDev = document.createElement('button');
@@ -751,7 +786,7 @@ export function installSidebarMounts(Sidebar) {
           body.innerHTML = '';
           const done = document.createElement('p');
           done.className = 'agents-note';
-          done.textContent = tr('Paired as "{id}". Run this on the device (Node 18+); it starts the agent and dials in — the device then appears wherever machines are offered:', { id: r.deviceId });
+          done.textContent = tr('Paired as "{id}". Run this on the device (Node 18+); it starts the agent and dials in — it then shows under "Paired devices" here (green dot = connected):', { id: r.deviceId });
           const ta = document.createElement('textarea');
           ta.readOnly = true; ta.value = cmd; ta.style.minHeight = '110px'; ta.style.fontSize = '11px'; ta.spellcheck = false;
           const tail = document.createElement('p');
