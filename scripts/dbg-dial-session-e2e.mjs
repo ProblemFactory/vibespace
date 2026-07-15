@@ -30,17 +30,29 @@ fs.mkdirSync(path.join(DEVHOME, '.local', 'bin'), { recursive: true });
 // on its first stdin line it prints an assistant text message + a result.
 const FAKE_CLAUDE = path.join(DEVHOME, '.local', 'bin', 'claude');
 fs.writeFileSync(FAKE_CLAUDE, `#!/usr/bin/env node
-process.stdout.write(JSON.stringify({type:'system',subtype:'init',session_id:'fake-sess-1',model:'claude-fake',cwd:process.cwd()})+'\\n');
-let buf='';
-process.stdin.on('data',(d)=>{ buf+=d; let i;
-  while((i=buf.indexOf('\\n'))>=0){ const line=buf.slice(0,i); buf=buf.slice(i+1);
-    if(!line.trim())continue;
-    process.stdout.write(JSON.stringify({type:'assistant',message:{id:'msg_fake',role:'assistant',model:'claude-fake',content:[{type:'text',text:'PONG from the device @ '+process.cwd()}],usage:{input_tokens:5,output_tokens:5}}})+'\\n');
-    process.stdout.write(JSON.stringify({type:'result',subtype:'success',session_id:'fake-sess-1',is_error:false,result:'PONG',usage:{input_tokens:5,output_tokens:5}})+'\\n');
-  }
-});
-process.stdin.resume();
-setInterval(()=>{},1<<30);
+const streamMode = process.argv.includes('--output-format');
+if (!streamMode) {
+  // TERMINAL (TUI) mode: a real pty means stdout.isTTY. Print a marker with
+  // the tty size + cwd, echo stdin, and report SIGWINCH resizes.
+  process.stdout.write('TERM-READY tty=' + (!!process.stdout.isTTY) + ' size=' + (process.stdout.columns||0) + 'x' + (process.stdout.rows||0) + ' cwd=' + process.cwd() + '\\r\\n');
+  process.on('SIGWINCH', () => process.stdout.write('RESIZED ' + (process.stdout.columns||0) + 'x' + (process.stdout.rows||0) + '\\r\\n'));
+  try { process.stdin.setRawMode && process.stdin.setRawMode(true); } catch {}
+  process.stdin.on('data', (d) => process.stdout.write('ECHO:' + d.toString()));
+  process.stdin.resume();
+  setInterval(()=>{},1<<30);
+} else {
+  process.stdout.write(JSON.stringify({type:'system',subtype:'init',session_id:'fake-sess-1',model:'claude-fake',cwd:process.cwd()})+'\\n');
+  let buf='';
+  process.stdin.on('data',(d)=>{ buf+=d; let i;
+    while((i=buf.indexOf('\\n'))>=0){ const line=buf.slice(0,i); buf=buf.slice(i+1);
+      if(!line.trim())continue;
+      process.stdout.write(JSON.stringify({type:'assistant',message:{id:'msg_fake',role:'assistant',model:'claude-fake',content:[{type:'text',text:'PONG from the device @ '+process.cwd()}],usage:{input_tokens:5,output_tokens:5}}})+'\\n');
+      process.stdout.write(JSON.stringify({type:'result',subtype:'success',session_id:'fake-sess-1',is_error:false,result:'PONG',usage:{input_tokens:5,output_tokens:5}})+'\\n');
+    }
+  });
+  process.stdin.resume();
+  setInterval(()=>{},1<<30);
+}
 `, { mode: 0o755 });
 
 const srvLog = fs.openSync('/tmp/vs-dial-e2e-server.log', 'w');
@@ -157,6 +169,51 @@ try {
     }
     check('empty-cwd session ran in the DEVICE home', inHome,
       'wanted PONG @ ' + DEVHOME);
+  }
+
+  // ── TERMINAL-on-dial (B-0d70): device runs the fake claude in a node-pty
+  //    via open-session; bytes reach the pty-wrapper buffer file. ──
+  const reqId3 = 'e2et-' + Date.now();
+  let sid3 = null, termErr = null;
+  ws.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'terminal', hostId, cwd: DEVHOME, reqId: reqId3 }));
+  for (let i = 0; i < 40 && !sid3 && !termErr; i++) {
+    const c = msgs.find((m) => m.type === 'created' && m.reqId === reqId3);
+    const e = msgs.find((m) => m.type === 'error' && m.reqId === reqId3);
+    if (e) termErr = e.message;
+    if (c) sid3 = c.sessionId;
+    await sleep(300);
+  }
+  check('TERMINAL on dial is NOT rejected (was "not supported")', !!sid3 && !termErr, termErr || '');
+  if (sid3) {
+    ws.send(JSON.stringify({ type: 'attach', sessionId: sid3 }));
+    await sleep(1500);
+    // the pty-wrapper buffer for this session must carry the TUI marker
+    let termBuf = '';
+    for (let i = 0; i < 25; i++) {
+      try { termBuf = fs.readFileSync(path.join(WT, 'data', 'session-buffers', sid3 + '.buf'), 'utf-8'); } catch {}
+      if (termBuf.includes('TERM-READY')) break;
+      await sleep(300);
+    }
+    check('device TUI got a REAL pty (tty=true) and ran in the device cwd', /TERM-READY tty=true/.test(termBuf) && termBuf.includes('cwd=' + DEVHOME), termBuf.slice(0, 200));
+    // keystroke echo proves the input path (xterm→dtach→pty-wrapper→attach→device pty)
+    ws.send(JSON.stringify({ type: 'input', sessionId: sid3, data: 'hi\r' }));
+    let echoed = false;
+    for (let i = 0; i < 20; i++) {
+      try { termBuf = fs.readFileSync(path.join(WT, 'data', 'session-buffers', sid3 + '.buf'), 'utf-8'); } catch {}
+      if (termBuf.includes('ECHO:hi')) { echoed = true; break; }
+      await sleep(300);
+    }
+    check('terminal input relayed device-side (keystroke echo)', echoed, termBuf.slice(-200));
+    // resize propagates to the device pty
+    ws.send(JSON.stringify({ type: 'resize', sessionId: sid3, cols: 100, rows: 40 }));
+    let resized = false;
+    for (let i = 0; i < 20; i++) {
+      try { termBuf = fs.readFileSync(path.join(WT, 'data', 'session-buffers', sid3 + '.buf'), 'utf-8'); } catch {}
+      if (/RESIZED 100x40/.test(termBuf)) { resized = true; break; }
+      await sleep(300);
+    }
+    check('terminal resize propagates to the device pty (SIGWINCH)', resized, termBuf.slice(-200));
+    check('daemon still alive after terminal session', daemon.exitCode === null);
   }
 
   ws.close();

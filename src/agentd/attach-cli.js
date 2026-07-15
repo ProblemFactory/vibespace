@@ -74,43 +74,83 @@ const CHAN = 2;
 let opened = false;
 let exiting = false;
 let tail = Buffer.alloc(0); // sentinel scan window
-const mux = new Mux(stream, {
-  onControl(msg) {
-    if (msg.op === 'hello-ack') {
-      const spawnSpec = cfg.spawn || null;
-      mux.control(spawnSpec
-        ? { op: 'open-pipe-session', chan: CHAN, sid: cfg.sid, cmd: spawnSpec.cmd, args: spawnSpec.args, cwd: spawnSpec.cwd, env: spawnSpec.env, offset }
-        : { op: 'attach-pipe-session', chan: CHAN, sid: cfg.sid, offset });
-      return;
-    }
-    if (msg.op === 'pipe-session-open') { opened = true; log(`attached sid=${cfg.sid} pid=${msg.pid} existing=${!!msg.existing} offset=${offset}`); return; }
-    if (msg.op === 'auth-fail') { log('auth failed — host token mismatch'); process.exit(4); }
-    if (msg.op === 'proto-mismatch') { log('protocol mismatch'); process.exit(4); }
-    if (msg.op === 'session-error') { log('session error: ' + msg.error); process.exit(6); }
-  },
-  onData(chan, buf) {
-    if (chan !== CHAN) return;
-    process.stdout.write(buf); // RAW bytes only — the wrapper's offset contract
-    mux.credit(chan, buf.length);
-    // keeper exit semantics: after forwarding the _remote_exit sentinel, exit 3
-    // (drain done) — the wrapper finalizes on child-exit + remoteExited set.
-    // Rolling tail scan only; the passthrough above is untouched.
-    tail = Buffer.concat([tail, buf]).subarray(-4096);
-    if (!exiting && tail.includes('"_remote_exit"')) {
-      exiting = true;
-      log('exit sentinel seen — draining');
-      setTimeout(() => process.exit(3), 300);
-    }
-  },
-  onDead(reason) {
-    log('transport dead: ' + reason);
-    process.exit(opened ? 3 : 5); // wrapper reconnects with a fresh offset
-  },
-});
-onTransportReady(() => {
-  mux.control({ op: 'hello', protoVersion: PROTO_VERSION, hostToken: cfg.hostToken, serverVersion: cfg.version || '0' });
-});
 
-process.stdin.on('data', (d) => { try { mux.data(CHAN, d); } catch { } });
-process.stdin.on('end', () => { /* dtach/pipe closed — keep relaying until killed */ });
-process.stdin.resume();
+// ── PTY / TERMINAL mode (B-0d70 terminal-on-dial): cfg.pty = {cmd, args, cwd,
+// env, cols, rows} opens a device-side node-pty via `open-session` instead of
+// a buffered pipe session. This runs UNDER pty-wrapper (dtach → pty-wrapper →
+// this) — mirroring `ssh -t`: we make OUR controlling tty raw (so claude's TUI
+// bytes pass through unmangled, both directions) and forward SIGWINCH resize.
+// A pty stream is LIVE (no byte offset / replay) — pty-wrapper's REMOTE_RETRY
+// respawns us on transport death (fresh session). ──
+if (cfg.pty) {
+  // full-raw the controlling tty (OPOST off too — setRawMode is input-only).
+  try { require('child_process').execFileSync('stty', ['raw', '-echo'], { stdio: ['inherit', 'inherit', 'ignore'] }); } catch { }
+  try { if (process.stdin.isTTY) process.stdin.setRawMode(true); } catch { }
+  const size = () => ({ cols: process.stdout.columns || cfg.pty.cols || 120, rows: process.stdout.rows || cfg.pty.rows || 30 });
+  const mux = new Mux(stream, {
+    onControl(msg) {
+      if (msg.op === 'hello-ack') {
+        const s = size();
+        mux.control({ op: 'open-session', chan: CHAN, cmd: cfg.pty.cmd, args: cfg.pty.args, cwd: cfg.pty.cwd, env: cfg.pty.env, cols: s.cols, rows: s.rows });
+        return;
+      }
+      if (msg.op === 'session-open') { opened = true; log(`pty session open pid=${msg.pid}`); return; }
+      if (msg.op === 'session-exit') { log('pty session exit code=' + msg.code); process.exit(typeof msg.code === 'number' ? msg.code : 0); }
+      if (msg.op === 'auth-fail') { log('auth failed — host token mismatch'); process.exit(4); }
+      if (msg.op === 'proto-mismatch') { log('protocol mismatch'); process.exit(4); }
+      if (msg.op === 'session-error') { process.stdout.write('\r\n[vibespace] ' + (msg.error || 'session error') + '\r\n'); log('session error: ' + msg.error); process.exit(6); }
+    },
+    onData(chan, buf) { if (chan !== CHAN) return; process.stdout.write(buf); mux.credit(chan, buf.length); },
+    onDead(reason) { log('transport dead: ' + reason); process.exit(opened ? 1 : 5); },
+  });
+  onTransportReady(() => mux.control({ op: 'hello', protoVersion: PROTO_VERSION, hostToken: cfg.hostToken, serverVersion: cfg.version || '0' }));
+  process.stdin.on('data', (d) => { try { mux.data(CHAN, d); } catch { } });
+  process.stdin.resume();
+  // DEFER the size read: on SIGWINCH, Node's OWN listener refreshes
+  // process.stdout.columns/rows — reading them synchronously in our handler
+  // races that refresh and forwards the STALE size (verified: pty-wrapper
+  // resized to 100×40 but a sync read still saw 120×30). setImmediate runs
+  // after Node's refresh, so we forward the true new size to the device pty.
+  process.on('SIGWINCH', () => setImmediate(() => { const s = size(); try { mux.control({ op: 'resize-session', chan: CHAN, cols: s.cols, rows: s.rows }); } catch { } }));
+} else {
+  const mux = new Mux(stream, {
+    onControl(msg) {
+      if (msg.op === 'hello-ack') {
+        const spawnSpec = cfg.spawn || null;
+        mux.control(spawnSpec
+          ? { op: 'open-pipe-session', chan: CHAN, sid: cfg.sid, cmd: spawnSpec.cmd, args: spawnSpec.args, cwd: spawnSpec.cwd, env: spawnSpec.env, offset }
+          : { op: 'attach-pipe-session', chan: CHAN, sid: cfg.sid, offset });
+        return;
+      }
+      if (msg.op === 'pipe-session-open') { opened = true; log(`attached sid=${cfg.sid} pid=${msg.pid} existing=${!!msg.existing} offset=${offset}`); return; }
+      if (msg.op === 'auth-fail') { log('auth failed — host token mismatch'); process.exit(4); }
+      if (msg.op === 'proto-mismatch') { log('protocol mismatch'); process.exit(4); }
+      if (msg.op === 'session-error') { log('session error: ' + msg.error); process.exit(6); }
+    },
+    onData(chan, buf) {
+      if (chan !== CHAN) return;
+      process.stdout.write(buf); // RAW bytes only — the wrapper's offset contract
+      mux.credit(chan, buf.length);
+      // keeper exit semantics: after forwarding the _remote_exit sentinel, exit 3
+      // (drain done) — the wrapper finalizes on child-exit + remoteExited set.
+      // Rolling tail scan only; the passthrough above is untouched.
+      tail = Buffer.concat([tail, buf]).subarray(-4096);
+      if (!exiting && tail.includes('"_remote_exit"')) {
+        exiting = true;
+        log('exit sentinel seen — draining');
+        setTimeout(() => process.exit(3), 300);
+      }
+    },
+    onDead(reason) {
+      log('transport dead: ' + reason);
+      process.exit(opened ? 3 : 5); // wrapper reconnects with a fresh offset
+    },
+  });
+  onTransportReady(() => {
+    mux.control({ op: 'hello', protoVersion: PROTO_VERSION, hostToken: cfg.hostToken, serverVersion: cfg.version || '0' });
+  });
+
+  process.stdin.on('data', (d) => { try { mux.data(CHAN, d); } catch { } });
+  process.stdin.on('end', () => { /* dtach/pipe closed — keep relaying until killed */ });
+  process.stdin.resume();
+}

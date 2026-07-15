@@ -93,9 +93,18 @@ if (process.argv.includes('--stdio')) {
 let _pty = null;
 function pty() {
   if (_pty) return _pty;
-  const nm = process.env.VIBESPACE_NODE_MODULES;
-  _pty = require(nm ? require('path').join(nm, 'node-pty') : 'node-pty');
-  return _pty;
+  // Resolution order: server-passed node_modules (localhost) → the agentd
+  // ROOT's own node_modules (installer's best-effort `npm i node-pty` for
+  // terminal-on-dial, B-0d70) → bare require (a globally-installed node-pty).
+  const p = require('path');
+  const candidates = [
+    process.env.VIBESPACE_NODE_MODULES && p.join(process.env.VIBESPACE_NODE_MODULES, 'node-pty'),
+    p.join(ROOT, 'node_modules', 'node-pty'),
+    'node-pty',
+  ].filter(Boolean);
+  let lastErr;
+  for (const c of candidates) { try { _pty = require(c); return _pty; } catch (e) { lastErr = e; } }
+  throw new Error('node-pty not available on this device — terminal sessions need it (chat/files/mounts do not). Re-run the pairing installer to add it. (' + (lastErr && lastErr.message) + ')');
 }
 
 function pidCmdline(pid) {

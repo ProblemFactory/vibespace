@@ -64,6 +64,25 @@ class DialSessionBridge {
           return;
         }
         if (!authed) { sock.end(); return; }
+        // PTY / terminal-on-dial (B-0d70): proxy a device node-pty session
+        // (open-session / resize / kill + live bytes). No offset/replay — a
+        // pty is live; pty-wrapper respawns the attach on transport death.
+        if (msg.op === 'open-session') {
+          const chan = msg.chan;
+          try {
+            const dm = await this.deviceForDial(deviceId);
+            handle = await dm.openSession({ cmd: msg.cmd, args: msg.args, cols: msg.cols, rows: msg.rows, cwd: msg.cwd, env: msg.env });
+            const ready = await handle.ready;
+            handle.onData = (buf) => { try { mux.data(chan, buf); } catch { } };
+            handle.onExit = (code) => { try { mux.control({ op: 'session-exit', chan, code }); } catch { } };
+            mux.control({ op: 'session-open', chan, pid: ready.pid });
+          } catch (e) {
+            mux.control({ op: 'session-error', chan, error: e.message });
+          }
+          return;
+        }
+        if (msg.op === 'resize-session' && handle) { try { handle.resize(msg.cols, msg.rows); } catch { } return; }
+        if (msg.op === 'kill-session' && handle) { try { handle.kill(); } catch { } return; }
         if (msg.op === 'open-pipe-session' || msg.op === 'attach-pipe-session') {
           const chan = msg.chan;
           try {
