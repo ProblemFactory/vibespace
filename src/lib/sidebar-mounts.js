@@ -912,9 +912,9 @@ export function installSidebarMounts(Sidebar) {
           // Per-OS commands (user request): macOS/Linux share the bash
           // installer; Windows gets the PowerShell one (EXPERIMENTAL).
           const CMDS = {
-            mac: `curl -fsSL ${location.origin}/agentd-install.sh | bash -s -- \\\n  --bundle-url ${location.origin}/agentd.js \\\n  --dial '${dialUrl}' \\\n  --dial-token ${r.dialToken} \\\n  --host-token ${r.hostToken}`,
-            linux: `curl -fsSL ${location.origin}/agentd-install.sh | bash -s -- \\\n  --bundle-url ${location.origin}/agentd.js \\\n  --dial '${dialUrl}' \\\n  --dial-token ${r.dialToken} \\\n  --host-token ${r.hostToken}`,
-            win: `& ([scriptblock]::Create((iwr -UseBasicParsing ${location.origin}/agentd-install.ps1).Content)) \`\n  -BundleUrl ${location.origin}/agentd.js \`\n  -Dial '${dialUrl}' \`\n  -DialToken ${r.dialToken} -HostToken ${r.hostToken}`,
+            mac: `curl -fsSL ${location.origin}/vibespace-device-install.sh | bash -s -- \\\n  --bundle-url ${location.origin}/vibespace-device.js \\\n  --dial '${dialUrl}' \\\n  --dial-token ${r.dialToken} \\\n  --host-token ${r.hostToken}`,
+            linux: `curl -fsSL ${location.origin}/vibespace-device-install.sh | bash -s -- \\\n  --bundle-url ${location.origin}/vibespace-device.js \\\n  --dial '${dialUrl}' \\\n  --dial-token ${r.dialToken} \\\n  --host-token ${r.hostToken}`,
+            win: `& ([scriptblock]::Create((iwr -UseBasicParsing ${location.origin}/vibespace-device-install.ps1).Content)) \`\n  -BundleUrl ${location.origin}/vibespace-device.js \`\n  -Dial '${dialUrl}' \`\n  -DialToken ${r.dialToken} -HostToken ${r.hostToken}`,
           };
           const NOTES = {
             mac: tr('macOS: needs Node 18+ (brew install node). No ssh, no FUSE required.'),

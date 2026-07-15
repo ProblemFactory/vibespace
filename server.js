@@ -2687,15 +2687,18 @@ app.post('/api/device-mounts/:id/remount', async (req, res) => {
 });
 // Standalone device install: serve the agentd bundle + installer (public — the
 // bundle is not secret; auth is the per-device dial/host token at connect).
-app.get('/agentd.js', (req, res) => {
+// Canonical names since the vibespace-device rename (2.154.x): /agentd.js and
+// /agentd-install.* stay as PERMANENT aliases — commands in old docs/pairings
+// must keep working.
+app.get(['/vibespace-device.js', '/agentd.js'], (req, res) => {
   try { res.type('application/javascript').send(fs.readFileSync(path.join(__dirname, 'data', 'bin', 'vibespace-agentd.js'))); }
   catch { res.status(404).end(); }
 });
-app.get('/agentd-install.ps1', (req, res) => {
+app.get(['/vibespace-device-install.ps1', '/agentd-install.ps1'], (req, res) => {
   try { res.type('text/plain').send(fs.readFileSync(path.join(__dirname, 'scripts', 'vibespace-agentd-install.ps1'), 'utf-8')); }
   catch { res.status(404).end(); }
 });
-app.get('/agentd-install.sh', (req, res) => {
+app.get(['/vibespace-device-install.sh', '/agentd-install.sh'], (req, res) => {
   try { res.type('text/x-shellscript').send(fs.readFileSync(path.join(__dirname, 'scripts', 'vibespace-agentd-install.sh'), 'utf-8')); }
   catch { res.status(404).end(); }
 });

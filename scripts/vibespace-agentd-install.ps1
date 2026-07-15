@@ -20,12 +20,12 @@ if ($major -lt 18) { Write-Error "node 18+ required (have $(node -v))"; exit 1 }
 # per-instance root: one machine can pair to SEVERAL VibeSpace instances —
 # keyed by the dial host so daemons/tokens never collide.
 $dialHost = ([uri]($Dial -replace '^ws','http')).Host -replace '[^\w.-]',''
-$root = Join-Path $env:USERPROFILE ".vibespace\agentd@$dialHost"
+$root = Join-Path $env:USERPROFILE ".vibespace\device@$dialHost"
 $ver = 'standalone'
 New-Item -ItemType Directory -Force -Path (Join-Path $root $ver), (Join-Path $root 'state') | Out-Null
 
 Write-Host "-> fetching agentd bundle from $BundleUrl"
-Invoke-WebRequest -UseBasicParsing -Uri $BundleUrl -OutFile (Join-Path $root "$ver\agentd.js")
+Invoke-WebRequest -UseBasicParsing -Uri $BundleUrl -OutFile (Join-Path $root "$ver\vibespace-device.js")
 # 'current' as a junction (no admin needed, unlike symlinks)
 $current = Join-Path $root 'current'
 if (Test-Path $current) { Remove-Item $current -Force -Recurse -ErrorAction SilentlyContinue }
@@ -39,7 +39,7 @@ $out = Join-Path $root 'state\agentd.out'
 # child inherits process env (Start-Process -Environment needs PS 7.3+; this
 # way works on the Windows-default 5.1 too)
 $env:VIBESPACE_AGENTD_ROOT = $root
-$p = Start-Process -PassThru -WindowStyle Hidden node -ArgumentList @("$current\agentd.js", '--dial', $Dial, '--dial-token', $DialToken) `
+$p = Start-Process -PassThru -WindowStyle Hidden node -ArgumentList @("$current\vibespace-device.js", '--dial', $Dial, '--dial-token', $DialToken) `
   -RedirectStandardOutput $out -RedirectStandardError (Join-Path $root 'state\agentd.err')
 Start-Sleep -Seconds 2
 if ($p.HasExited) {

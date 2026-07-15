@@ -55,7 +55,7 @@ try {
   await sleep(1200);
   const cmd = await evalJs(`document.querySelector('#device-pair-dialog textarea')?.value || ''`);
   check('command rendered after pairing', cmd.length > 100, cmd.slice(0, 120));
-  check('command carries the install script + bundle', /agentd-install\.sh/.test(cmd) && /--bundle-url/.test(cmd));
+  check('command carries the install script + bundle', /vibespace-device-install\.sh/.test(cmd) && /--bundle-url/.test(cmd));
   check('command carries dial URL with the device id', cmd.includes('/api/agentd-dial?device=smoke-mac'));
   check('command carries BOTH tokens', /--dial-token vsdt_/.test(cmd) && /--host-token vsht_/.test(cmd), cmd);
   // server actually recorded the pairing
@@ -120,7 +120,7 @@ try {
   await sleep(900);
   await evalJs(`([...document.querySelectorAll('#device-pair-dialog button')].find((b) => b.textContent === 'Windows').click(), true)`);
   const winCmd = await evalJs(`document.querySelector('#device-pair-dialog textarea')?.value || ''`);
-  check('Windows chip flips to the PowerShell installer', /agentd-install\.ps1/.test(winCmd) && /-DialToken vsdt_/.test(winCmd) && /-HostToken vsht_/.test(winCmd), winCmd.slice(0, 120));
+  check('Windows chip flips to the PowerShell installer', /vibespace-device-install\.ps1/.test(winCmd) && /-DialToken vsdt_/.test(winCmd) && /-HostToken vsht_/.test(winCmd), winCmd.slice(0, 120));
   // unmount + unpair cleanup path
   const um = await fetch(`http://127.0.0.1:${PORT}/api/device-mounts/${mres.id}`, { method: 'DELETE' });
   check('device mount unmounts', um.ok);
