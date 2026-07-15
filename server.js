@@ -2623,6 +2623,28 @@ app.post('/api/agentd/dial-pair', (req, res) => {
     });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
+// Paired dial-out devices: the Remote tab's "Paired devices" section (2.152.1 —
+// a paired device previously had ZERO UI presence; real report: installed on a
+// Mac, "没有出现"). online = a live dialed-in ws right now.
+app.get('/api/agentd/devices', (req, res) => {
+  try {
+    const toks = agentdDialTokens();
+    res.json({ devices: Object.keys(toks).map((id) => ({ id, online: agentdDials.has(id) })) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete('/api/agentd/devices/:id', (req, res) => {
+  try {
+    const id = String(req.params.id);
+    const all = agentdDialTokens();
+    if (!(id in all)) return res.status(404).json({ error: 'unknown device' });
+    delete all[id];
+    fs.writeFileSync(path.join(AGENTD_DIR, 'dial-tokens.json'), JSON.stringify(all, null, 2), { mode: 0o600 });
+    try { fs.unlinkSync(path.join(AGENTD_DIR, `host-dial-${id}.token`)); } catch { }
+    const live = agentdDials.get(id);
+    if (live) { try { live.destroy(); } catch { } agentdDials.delete(id); }
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // Standalone device install: serve the agentd bundle + installer (public — the
 // bundle is not secret; auth is the per-device dial/host token at connect).
 app.get('/agentd.js', (req, res) => {

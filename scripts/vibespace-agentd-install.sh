@@ -50,14 +50,30 @@ fi
 chmod 600 "$ROOT/state/token"
 echo "→ host token at $ROOT/state/token"
 
-# run: dial-out (NAT machine) or just the standing daemon (reachable machine)
+# run: dial-out (NAT machine) or just the standing daemon (reachable machine).
+# macOS has NO setsid(1) — the old unconditional `setsid node …` silently
+# started NOTHING on a Mac (the "command not found" went into agentd.out and
+# the ✓ printed anyway; real report). nohup+& detaches well enough for a login
+# shell; and ALWAYS verify the process actually survived before claiming ✓.
+START=(node "$ROOT/current/agentd.js")
 if [ -n "$DIAL_URL" ]; then
   echo "→ starting daemon with dial-out to $DIAL_URL"
-  setsid node "$ROOT/current/agentd.js" --dial "$DIAL_URL" --dial-token "$DIAL_TOKEN" </dev/null >>"$ROOT/state/agentd.out" 2>&1 &
+  START+=(--dial "$DIAL_URL" --dial-token "$DIAL_TOKEN")
 else
   echo "→ starting standing daemon (unix socket at $ROOT/state/agentd.sock)"
-  setsid node "$ROOT/current/agentd.js" </dev/null >>"$ROOT/state/agentd.out" 2>&1 &
 fi
-sleep 1
-echo "✓ vibespace-agentd running. Log: $ROOT/state/agentd.log"
-echo "  Stop: pkill -f '$ROOT/current/agentd.js'"
+if command -v setsid >/dev/null 2>&1; then
+  setsid "${START[@]}" </dev/null >>"$ROOT/state/agentd.out" 2>&1 &
+else
+  nohup "${START[@]}" </dev/null >>"$ROOT/state/agentd.out" 2>&1 &
+fi
+PID=$!
+sleep 2
+if kill -0 "$PID" 2>/dev/null || pgrep -f "$ROOT/current/agentd.js" >/dev/null 2>&1; then
+  echo "✓ vibespace-agentd running (pid $PID). Log: $ROOT/state/agentd.log  Output: $ROOT/state/agentd.out"
+  echo "  Stop: pkill -f '$ROOT/current/agentd.js'"
+else
+  echo "✗ the daemon exited immediately — last output:"
+  tail -5 "$ROOT/state/agentd.out" 2>/dev/null
+  exit 1
+fi

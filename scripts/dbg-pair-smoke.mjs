@@ -61,6 +61,30 @@ try {
   // server actually recorded the pairing
   const tokens = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'agentd', 'dial-tokens.json'), 'utf-8'));
   check('server persisted the dial token (sha256)', typeof tokens['smoke-mac'] === 'string' && tokens['smoke-mac'].length === 64);
+
+  // ── the Paired-devices list (2.152.1) ──
+  let devs = (await (await fetch(`http://127.0.0.1:${PORT}/api/agentd/devices`)).json()).devices;
+  check('devices list shows the pairing (offline)', devs.some((d) => d.id === 'smoke-mac' && d.online === false), JSON.stringify(devs));
+  // a REAL dial with the minted token flips it online
+  const dialTok = /--dial-token (vsdt_\w+)/.exec(cmd)[1];
+  const { connect } = require(path.join(wt, 'src/agentd/ws-min.js'));
+  const dialWs = connect(`ws://127.0.0.1:${PORT}/api/agentd-dial?device=smoke-mac`, { headers: { 'x-vibespace-dial-token': dialTok } });
+  dialWs.on('error', () => {});
+  await sleep(900);
+  devs = (await (await fetch(`http://127.0.0.1:${PORT}/api/agentd/devices`)).json()).devices;
+  check('live dial flips the device ONLINE', devs.some((d) => d.id === 'smoke-mac' && d.online === true), JSON.stringify(devs));
+  // the Remote tab renders the section with the green-dot row
+  await evalJs(`(app.sidebar._activeTab = 'mounts', app.sidebar._renderMounts(), true)`);
+  await sleep(900);
+  check('Remote tab renders the Paired devices row', await evalJs(`(() => {
+    const p = document.querySelector('.mounts-panel');
+    return !!p && p.textContent.includes('smoke-mac') && p.textContent.includes('online'); })()`));
+  // unpair via the endpoint
+  const del = await fetch(`http://127.0.0.1:${PORT}/api/agentd/devices/smoke-mac`, { method: 'DELETE' });
+  check('unpair succeeds', del.ok);
+  devs = (await (await fetch(`http://127.0.0.1:${PORT}/api/agentd/devices`)).json()).devices;
+  check('unpaired device gone from the list', !devs.some((d) => d.id === 'smoke-mac'), JSON.stringify(devs));
+  try { dialWs.destroy(); } catch {}
 } catch (e) {
   failed++; console.error('  ✗ harness threw:', e.message);
 } finally { try { ws.close(); } catch {} }
