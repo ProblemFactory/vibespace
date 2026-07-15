@@ -1910,4 +1910,11 @@ export default {
   "using VibeSpace key": "使用 VibeSpace 密钥",
   "using system ssh keys": "使用系统 ssh 密钥",
   "using stored key": "使用已存密钥",
+  "Mount a folder from this machine into this workspace": "把这台机器上的文件夹挂载进本工作区",
+  "Mount a folder from \"{name}\" into this workspace": "挂载“{name}”上的文件夹进本工作区",
+  "Folder on the machine (absolute path or ~)": "机器上的文件夹（绝对路径或 ~）",
+  "Enter the folder path on the machine": "请输入机器上的文件夹路径",
+  "Reverse-mount token — \"{name}\" accesses {root}": "反挂载令牌 — “{name}”访问 {root}",
+  "Reverse-mount token (machine removed) — {root}": "反挂载令牌（机器已移除）— {root}",
+  "{mode} · revoking breaks that machine’s mount": "{mode} · 撤销会断开那台机器上的挂载",
 };
