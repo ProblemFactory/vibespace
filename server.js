@@ -480,8 +480,19 @@ async function deviceForDial(deviceId) {
   // an offline device (session create, mount, test) HUNG instead of erroring
   // (real report: create卡住/terminal空白/mount打不开 — Mac daemon died after
   // a self-upgrade re-exec and nothing surfaced it).
-  if (!agentdDials.has(deviceId)) throw new Error(`device "${deviceId}" is offline — its daemon is not dialed in (rerun the install command on it)`);
+  const curStream = agentdDials.get(deviceId);
+  if (!curStream) throw new Error(`device "${deviceId}" is offline — its daemon is not dialed in (rerun the install command on it)`);
   let dm = agentdDialDevices.get(deviceId);
+  // STALE-STREAM GUARD (real report: online=true but every fs op/session
+  // blank): the device re-dialed after a self-upgrade re-exec, so agentdDials
+  // holds a FRESH stream — but the cached DeviceManager's mux is still bound
+  // to the DEAD old stream, and its status().connected can lag true. Rebuild
+  // whenever the live stream differs from the one this dm connected over.
+  if (dm && dm._dialStream && dm._dialStream !== curStream) {
+    try { dm.stop?.(); } catch { }
+    dm = null;
+    agentdDialDevices.delete(deviceId);
+  }
   if (dm && dm.status().connected) return dm;
   if (!dm) {
     const { DeviceManager } = require('./src/agentd/client.js');
@@ -494,6 +505,7 @@ async function deviceForDial(deviceId) {
     });
     agentdDialDevices.set(deviceId, dm);
   }
+  dm._dialStream = curStream; // remember which stream we bind the mux to
   await dm.connect();
   return dm;
 }
@@ -2656,18 +2668,19 @@ const plugins = new PluginManager({
   },
 });
 setTimeout(() => { try { plugins.bootReplay(); } catch (e) { console.warn('[plugins] boot replay:', e.message); } }, 5000);
-// CS data-plane deps for hosts.device(id) (2.146.0) — wired here (hosts is
-// declared below; function-scope late binding, used only at call time)
-setTimeout(() => {
-  try {
-    hosts.agentdDeps = {
-      ensureAgentdOnHost, agentdHostToken, deviceForDial,
-      bundlePath: path.join(__dirname, 'data', 'bin', 'vibespace-agentd.js'),
-      version: require('./package.json').version,
-    };
-    hosts.dataPlaneOn = () => { try { return !!serverSetting('agentd.dataPlane'); } catch { return false; } };
-  } catch (e) { console.warn('[agentd] data-plane deps wiring failed:', e.message); }
-}, 1000);
+// CS data-plane deps for hosts.device(id) (2.146.0) — wired SYNCHRONOUSLY.
+// (Was a setTimeout(1000); a device dialing in during that window ran mount
+// heal / hosts.device() before deps existed → "agentd deps not wired" and a
+// failed heal — real xingweil log. The referenced functions are hoisted
+// declarations and `hosts` already exists here, so no defer is needed.)
+try {
+  hosts.agentdDeps = {
+    ensureAgentdOnHost, agentdHostToken, deviceForDial,
+    bundlePath: path.join(__dirname, 'data', 'bin', 'vibespace-agentd.js'),
+    version: require('./package.json').version,
+  };
+  hosts.dataPlaneOn = () => { try { return !!serverSetting('agentd.dataPlane'); } catch { return false; } };
+} catch (e) { console.warn('[agentd] data-plane deps wiring failed:', e.message); }
 // Transport B pairing: mint a device id + dial token + the one-liner the user
 // runs on the NAT'd device (no ssh needed). Cookie-authed (user action).
 // The pairing IS the machine registration — the dial host record carries the
@@ -3250,6 +3263,11 @@ server.on('upgrade', (req, socket, head) => {
         destroy: () => { try { ws.close(); } catch { } },
       };
       agentdDials.set(deviceId, stream);
+      // the device re-dialed with a FRESH stream — drop any cached
+      // DeviceManager bound to the previous (dead) stream so the next op
+      // rebuilds over this one (stale-stream blank-session fix)
+      try { const old = agentdDialDevices.get(deviceId); if (old && old._dialStream !== stream) { old.stop?.(); agentdDialDevices.delete(deviceId); } } catch { }
+      try { hosts.invalidateDevice?.('host-dial-' + String(deviceId).replace(/[^\w-]/g, '')); } catch { }
       console.log(`[agentd] device '${deviceId}' dialed in`);
       const waiters = agentdDialWaiters.get(deviceId) || [];
       agentdDialWaiters.delete(deviceId);
