@@ -675,7 +675,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       const ok = await showConfirmDialog({ title: tr('Terminate Session'), message: tr('Terminate session "{name}"? The running agent process will be killed.', { name: displayName }), confirmText: tr('Terminate'), danger: true });
       if (!ok) return;
       if (s.webuiId) app.killSession(s.webuiId);
-      else if (s.pid) app.killPid(s.pid);
+      else if (s.pid) app.killPid(s.pid, s.host);
     };
     actionsDiv.appendChild(terminateBtn);
   }
@@ -743,7 +743,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
           const ok = await showConfirmDialog({ title: tr('Terminate Session'), message: tr('Terminate session "{name}"? The running agent process will be killed.', { name: displayName }), confirmText: tr('Terminate'), danger: true });
           if (!ok) return;
           if (s.webuiId) app.killSession(s.webuiId);
-          else if (s.pid) app.killPid(s.pid);
+          else if (s.pid) app.killPid(s.pid, s.host);
         },
       });
     }

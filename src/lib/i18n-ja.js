@@ -1936,4 +1936,9 @@ export default {
   "Read-write (SFTP over ssh)": "読み書き（SFTP・ssh 経由）",
   "device": "デバイス",
   "VibeSpace was updated — reloading this tab…": "VibeSpace が更新されました — このタブを再読み込みします…",
+  "Mount a folder from this VibeSpace onto \"{name}\"": "この VibeSpace のフォルダを「{name}」にマウント",
+  "Terminated": "終了しました",
+  "Terminate failed": "終了に失敗しました",
+  "Attaching \"{name}\" is taking unusually long — check the connection or reload the tab": "「{name}」への接続に時間がかかっています — 接続を確認するかタブを再読み込みしてください",
+  "Creating the session is taking unusually long — check the connection or reload the tab": "セッションの作成に時間がかかっています — 接続を確認するかタブを再読み込みしてください",
 };
