@@ -6,6 +6,12 @@
 # (⚙ → "Update VibeSpace…" runs exactly this script in a shell terminal.)
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# Personalized-user images (3.5.0+) run the container as root and drop to the
+# instance user via runuser; the admin's `kubectl exec` update path therefore
+# runs git as ROOT against a uid-1000-owned repo → "dubious ownership" aborts
+# every update (real regression report). Trust this repo regardless of who runs
+# the update — single-user container, and the exec is already privileged.
+git config --global --add safe.directory "$(pwd)" 2>/dev/null || true
 echo "== VibeSpace update: $(git rev-parse --short HEAD) @ $(git rev-parse --abbrev-ref HEAD)"
 # Derived/generated tracked files dirty the working tree and block the ff-only
 # pull. package-lock.json: an in-container npm (different version) rewrites it.

@@ -38,6 +38,11 @@ fi
 
 export HOME="/home/$USER_NAME"
 export PATH="/home/$USER_NAME/.local/bin:$PATH"
+# The admin's `kubectl exec` update/restart path runs git as ROOT (the
+# container USER is root now) against the uid-1000-owned PVC repo → git
+# "dubious ownership" aborted every admin-triggered update (real regression).
+# Trust all repos system-wide — single-user container, exec already privileged.
+git config --system --add safe.directory '*' 2>/dev/null || true
 cd "$HOME"
 # runuser -u keeps the environment (PORT, VIBESPACE_*) and sets HOME/USER/
 # LOGNAME from passwd — which now points at the personalized home.
