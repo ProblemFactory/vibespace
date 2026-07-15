@@ -115,6 +115,10 @@ class HostManager {
       user: String(user), host: String(host),
       port: Number(port) || 22,
       keyPath: keyPath ? String(keyPath) : null,
+      // honest key provenance for the UI (real report: an IMPORTED private key
+      // was labeled 'using VibeSpace key'): imported = user pasted/uploaded it;
+      // app = the VibeSpace-generated key; default = the system's ssh keys.
+      keySource: (privateKey && String(privateKey).trim()) ? 'imported' : (keyPath ? 'app' : 'default'),
       createdAt: Date.now(),
     };
     if (this._state.hosts.some(h => h.name === rec.name)) throw new Error('A host with that name exists');

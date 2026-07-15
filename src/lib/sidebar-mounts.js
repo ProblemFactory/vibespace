@@ -578,7 +578,11 @@ export function installSidebarMounts(Sidebar) {
       const sub = document.createElement('div');
       sub.className = 'mounts-path';
       sub.style.direction = 'ltr';
-      sub.textContent = `${h.user}@${h.host}${h.port !== 22 ? ':' + h.port : ''}${h.keyPath ? ' · using VibeSpace key' : ''}`;
+      const keyLabel = h.keySource === 'imported' ? tr('using imported key')
+        : h.keySource === 'app' ? tr('using VibeSpace key')
+        : h.keySource === 'default' ? tr('using system ssh keys')
+        : (h.keyPath ? tr('using stored key') : ''); // pre-2.153.4 records: provenance unknown
+      sub.textContent = `${h.user}@${h.host}${h.port !== 22 ? ':' + h.port : ''}${keyLabel ? ' · ' + keyLabel : ''}`;
       row.append(top, sub);
       return row;
     },

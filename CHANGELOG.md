@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.153.4 — 2026-07-15
+- **Remote rclone install works on bare Debian** (real report on frps-server: `sh: 1: unzip: not found`): the reverse-mount's remote installer falls back unzip → busybox unzip → python3 zipfile, and only then fails with an actionable "apt install unzip" hint.
+- **Reverse-mount folder field accepts `~`** and gives a real error: a literal `~` used to resolve against cwd and die with a bare "root does not exist"; now tilde-expands and reports "folder does not exist on this instance: <abs>".
+- **Honest ssh key provenance** (real report: an imported private key was labeled "using VibeSpace key"): host records carry `keySource` (imported / app / default); the row sub-line now says "using imported key" / "using VibeSpace key" / "using system ssh keys" accordingly (older records show a neutral "using stored key").
+
 ## 2.153.3 — 2026-07-15
 - **Three folder icons, three meanings — now visually distinct** (user feedback): push-to-machine (folder + outgoing arrow, host rows' "share onto this machine"), pull-from-device (folder + incoming arrow, device rows' "mount into this workspace"), plain folder (open in Files).
 - **Stale device mounts self-heal AND have a hand-back.** rclone is spawned detached, so it survives a server restart while its tunnel bridge dies — the mountpoint stayed claimed by a dead orphan and the dial-in heal's fresh mount failed forever (real report: device online, mount row stuck gray with no reconnect option). `deviceFolderMount` now PRE-CLEANS (lazy-unmount + kill the exact orphan rclone by /proc cmdline) before mounting, and non-live mount rows show a ↻ **Remount** button (`POST /api/device-mounts/:id/remount`).
