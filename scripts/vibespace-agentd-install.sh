@@ -60,30 +60,95 @@ fi
 chmod 600 "$ROOT/state/token"
 echo "→ host token at $ROOT/state/token"
 
-# run: dial-out (NAT machine) or just the standing daemon (reachable machine).
-# macOS has NO setsid(1) — the old unconditional `setsid node …` silently
-# started NOTHING on a Mac (the "command not found" went into agentd.out and
-# the ✓ printed anyway; real report). nohup+& detaches well enough for a login
-# shell; and ALWAYS verify the process actually survived before claiming ✓.
-# the daemon derives its root from this env (default would be the shared root)
+# Persist the dial config so the daemon can start ARGLESS forever after (it
+# re-dials from state/dial.json; no tokens in any unit file or argv).
 export VIBESPACE_AGENTD_ROOT="$ROOT"
-START=(node "$ROOT/current/vibespace-device.js")
 if [ -n "$DIAL_URL" ]; then
-  echo "→ starting daemon with dial-out to $DIAL_URL"
-  START+=(--dial "$DIAL_URL" --dial-token "$DIAL_TOKEN")
-else
-  echo "→ starting standing daemon (unix socket at $ROOT/state/agentd.sock)"
+  node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({url:process.argv[2],token:process.argv[3]}), {mode:0o600})' \
+    "$ROOT/state/dial.json" "$DIAL_URL" "$DIAL_TOKEN"
+  echo "→ dial config persisted ($ROOT/state/dial.json)"
 fi
-if command -v setsid >/dev/null 2>&1; then
-  setsid "${START[@]}" </dev/null >>"$ROOT/state/agentd.out" 2>&1 &
-else
-  nohup "${START[@]}" </dev/null >>"$ROOT/state/agentd.out" 2>&1 &
+
+# PERSISTENCE (the dead-Mac lesson: a daemon killed by a crash/reboot/upgrade
+# hiccup stayed dead forever — nothing restarted it). Register a supervisor:
+#   macOS  : launchd LaunchAgent (RunAtLoad + KeepAlive = restart on crash)
+#   Linux  : systemd user unit (Restart=always; best-effort linger for logout)
+#   neither: fall back to the old detached start (no persistence).
+# Keyed by the root's basename so multi-instance pairings coexist.
+KEY=$(basename "$ROOT" | tr -c 'A-Za-z0-9.-' '-' | sed 's/-*$//')
+NODE_BIN=$(command -v node)
+# stop any previously-started daemon for this root (flock singleton would
+# otherwise block the supervised one from starting)
+pkill -f "$ROOT/current/vibespace-device.js" 2>/dev/null || true
+sleep 0.5
+
+started=""
+if [ "$(uname -s)" = "Darwin" ]; then
+  LABEL="cc.vibespace.device.$KEY"
+  PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+  mkdir -p "$HOME/Library/LaunchAgents"
+  cat > "$PLIST" <<PLIST_EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>$LABEL</string>
+  <key>ProgramArguments</key><array>
+    <string>$NODE_BIN</string>
+    <string>$ROOT/current/vibespace-device.js</string>
+  </array>
+  <key>EnvironmentVariables</key><dict>
+    <key>VIBESPACE_AGENTD_ROOT</key><string>$ROOT</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>$ROOT/state/agentd.out</string>
+  <key>StandardErrorPath</key><string>$ROOT/state/agentd.out</string>
+</dict></plist>
+PLIST_EOF
+  launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+  if launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null || launchctl load -w "$PLIST" 2>/dev/null; then
+    started="launchd ($LABEL — survives reboots, auto-restarts on crash)"
+  fi
+elif command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
+  UNIT="vibespace-device-$KEY.service"
+  mkdir -p "$HOME/.config/systemd/user"
+  cat > "$HOME/.config/systemd/user/$UNIT" <<UNIT_EOF
+[Unit]
+Description=VibeSpace device agent ($KEY)
+[Service]
+Environment=VIBESPACE_AGENTD_ROOT=$ROOT
+ExecStart=$NODE_BIN $ROOT/current/vibespace-device.js
+Restart=always
+RestartSec=5
+StandardOutput=append:$ROOT/state/agentd.out
+StandardError=append:$ROOT/state/agentd.out
+[Install]
+WantedBy=default.target
+UNIT_EOF
+  systemctl --user daemon-reload
+  if systemctl --user enable --now "$UNIT" >/dev/null 2>&1; then
+    started="systemd user unit ($UNIT — auto-restarts; survives reboots"
+    if loginctl enable-linger "$USER" 2>/dev/null; then started="$started, linger on)"; else started="$started; run 'sudo loginctl enable-linger $USER' so it survives logout)"; fi
+  fi
 fi
-PID=$!
+
+if [ -z "$started" ]; then
+  # fallback: detached one-shot (no persistence — the pre-2.162 behavior).
+  # macOS has NO setsid(1) (real report: silent non-start) — nohup there.
+  START=(node "$ROOT/current/vibespace-device.js")
+  if command -v setsid >/dev/null 2>&1; then
+    setsid "${START[@]}" </dev/null >>"$ROOT/state/agentd.out" 2>&1 &
+  else
+    nohup "${START[@]}" </dev/null >>"$ROOT/state/agentd.out" 2>&1 &
+  fi
+  started="detached process (NO persistence — rerun after a reboot)"
+fi
+
 sleep 2
-if kill -0 "$PID" 2>/dev/null || pgrep -f "$ROOT/current/vibespace-device.js" >/dev/null 2>&1; then
-  echo "✓ vibespace-agentd running (pid $PID). Log: $ROOT/state/agentd.log  Output: $ROOT/state/agentd.out"
-  echo "  Stop: pkill -f '$ROOT/current/vibespace-device.js'"
+if pgrep -f "$ROOT/current/vibespace-device.js" >/dev/null 2>&1; then
+  echo "✓ vibespace device agent running via $started"
+  echo "  Output: $ROOT/state/agentd.out"
 else
   echo "✗ the daemon exited immediately — last output:"
   tail -5 "$ROOT/state/agentd.out" 2>/dev/null

@@ -1943,4 +1943,5 @@ export default {
   "Creating the session is taking unusually long — check the connection or reload the tab": "セッションの作成に時間がかかっています — 接続を確認するかタブを再読み込みしてください",
   "Mount a folder from \"{name}\" into this VibeSpace": "「{name}」のフォルダをこの VibeSpace にマウント",
   "Machine is offline — the tunnel is down; the mount heals when its daemon reconnects": "マシンはオフライン — トンネルは切断中; デーモンが再接続するとマウントは自動回復します",
+  "The installer registers the daemon with launchd (macOS) / systemd (Linux): it starts on boot and auto-restarts if it crashes. One machine can pair to several VibeSpace instances — each install keeps its own state, keyed by this instance’s address. Pairing the same name again replaces its token.": "インストーラはデーモンを launchd（macOS）/ systemd（Linux）に登録します: 起動時に自動開始し、クラッシュ時は自動再起動します。1 台のマシンを複数の VibeSpace インスタンスにペアリングできます。同名で再ペアリングするとトークンが置き換わります。",
 };
