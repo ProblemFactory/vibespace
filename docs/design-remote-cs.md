@@ -282,3 +282,34 @@ usage harvest, clipboard/X, VNC bridge, mounts) at these primitives behind flags
 then the legacy ssh-per-op paths retire per capability (invariant #7: ssh stays
 as rescue). The PROTOCOL and DEVICE side of every milestone is implemented and
 acceptance-tested; switchovers are mechanical consumer swaps.
+
+## Graduation directives (2026-07-15, user-ordered — the closing milestone)
+
+Three direct orders after the 2.153.x device-utility batch:
+
+1. **Merge dial devices into the hosts model, now.** A paired device must be a
+   COMPLETE host: it appears in New Session's machine picker, session discovery
+   (the user's Mac must show in the Folders list), Files' host select, usage —
+   everything an ssh host can do. Implementation: hosts records grow
+   `transport: 'dial' | 'ssh'` (dial records carry `deviceId`, no ssh fields);
+   `hosts.device(id)` resolves dial hosts via `deviceForDial`; every device-
+   backed path (M2 pipe sessions, M3 fs/discovery/transcript/usage) is FORCED
+   for dial hosts regardless of the agentd.* flags (there is no ssh fallback);
+   ssh-only paths (rsync ctx sync, keeper distribution, accountsStatus probes)
+   need device equivalents or graceful degradation with honest errors.
+2. **The local machine runs the SAME daemon as device #0, for real.** Local
+   sessions/fs go through the daemon by default (agentd.sessions + dataPlane
+   graduate ON locally) — "这样可以逼迫我们保证整个架构是正确工作的". Soak on
+   the dev instance first, fleet after.
+3. **Rename the daemon: `vibespace-device`** (user: "不要叫agentd, 进程列表分不清").
+   Bundle → `data/bin/vibespace-device.js`, `process.title = 'vibespace-device'`
+   at daemon startup, install roots → `~/.vibespace/device[@<host>]`, installers/
+   docs/serve routes renamed; existing `~/.vibespace/agentd*` installs migrate
+   (or keep working via a compat path check) — never strand a paired device.
+
+Suggested slices: A rename (mechanical, global) → B hosts `transport:'dial'`
+(+ discovery via device raw-facts, spawn via pipe-sessions) → C local flags
+default-on + soak → D legacy ssh layer retirement. Delivered so far (2.150.0 →
+2.153.1): device-folder-mount root-cured (WebDAV, 7ms), pairing UI + per-OS
+commands + multi-instance roots, device machine-rows with test/mount/unpair,
+DeviceMounts auto-heal, 17-assert e2e with a real daemon dialing.
