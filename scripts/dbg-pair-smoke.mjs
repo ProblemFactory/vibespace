@@ -109,9 +109,9 @@ try {
   check('Remote tab renders device as a machine row (mounts-row + name)', await evalJs(`(() => {
     const rows = [...document.querySelectorAll('.mounts-panel .mounts-row')];
     return rows.some((r) => r.textContent.includes('smoke-mac') && r.querySelector('.mounts-dot')); })()`));
-  check('mount child row rendered', await evalJs(`(() => {
-    const p = document.querySelector('.mounts-panel');
-    return !!p && p.textContent.includes(${JSON.stringify(path.join('/tmp', 'vs-pair-smoke-dev', 'mnt'))}); })()`));
+  check('mount child row rendered (indented child + folder basename)', await evalJs(`(() => {
+    const rows = [...document.querySelectorAll('.mounts-panel .mounts-row-child')];
+    return rows.some((r) => r.textContent.includes('share') && (r.querySelector('.mounts-name')?.title || '').includes('/mnt')); })()`));
   // OS chips: Windows flips the command to PowerShell (re-open the dialog)
   await evalJs('(app.sidebar._showDevicePairDialog(), true)');
   await sleep(200);

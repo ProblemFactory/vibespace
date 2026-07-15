@@ -772,15 +772,19 @@ export function installSidebarMounts(Sidebar) {
     },
 
     // Child row: a device folder mounted INTO this workspace (read-only).
+    // Same child-row language as host reverse-mounts (indent + accent border);
+    // the first cut invented a nonexistent class and rendered as a full-width
+    // sibling that read as another machine (real report: 布局显然有问题).
     _buildDeviceMountRow(dev, dm) {
       const row = document.createElement('div');
-      row.className = 'mounts-row mounts-subrow';
+      row.className = 'mounts-row mounts-row-child';
       const top = document.createElement('div');
       top.className = 'mounts-row-top';
       const state = dm.live ? 'ok' : (dm.online ? 'off' : 'err');
       top.innerHTML = `
         <span class="mounts-dot mounts-dot-${state}" title="${dm.live ? escHtml(tr('Mounted')) : escHtml(tr('Pending — remounts when the device dials in'))}"></span>
-        <span class="mounts-name" title="${escHtml(dev.id)}:${escHtml(dm.remotePath)}">${escHtml(dm.remotePath)} → ${escHtml(dm.mountpoint)}</span>`;
+        <b class="mounts-name" title="${escHtml(dev.id)}:${escHtml(dm.remotePath)} → ${escHtml(dm.mountpoint)}">${escHtml(dm.remotePath.split('/').pop() || dm.remotePath)}</b>
+        <span class="mounts-badge" title="${escHtml(tr('Mounted at {mp} (read-only, over the dial link)', { mp: dm.mountpoint }))}">${escHtml(tr('from device'))}</span>`;
       const actions = document.createElement('span');
       actions.className = 'mounts-row-actions';
       const open = document.createElement('button');
