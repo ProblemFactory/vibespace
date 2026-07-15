@@ -33,20 +33,42 @@ let cfg;
 try { cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch (e) { process.stderr.write('agentd-attach: bad config: ' + e.message + '\n'); process.exit(2); }
 const log = (m) => { try { process.stderr.write('[agentd-attach] ' + m + '\n'); } catch { } };
 
-// ── transport: ssh stdio bridge to the standing remote daemon ──
-const child = spawn(cfg.sshBin || 'ssh', [...(cfg.sshArgs || []), '--', cfg.remoteCmd], {
-  stdio: ['pipe', 'pipe', 'inherit'], // ssh stderr → our stderr (diagnostics only)
-});
-child.on('error', (e) => { log('transport spawn failed: ' + e.message); process.exit(5); });
-const stream = {
-  write: (d) => { try { return child.stdin.write(d); } catch { return false; } },
-  on: (ev, fn) => {
-    if (ev === 'data') child.stdout.on('data', fn);
-    else if (ev === 'close') { child.on('close', fn); child.stdout.on('close', fn); }
-    else if (ev === 'error') child.on('error', fn);
-  },
-  destroy: () => { try { child.kill(); } catch { } },
-};
+// ── transport: ssh stdio bridge to the standing remote daemon, OR a loopback
+// TCP bridge for DIAL devices (graduation B.2: the dialed-in ws link lives
+// inside the SERVER process — this disposable attach can't reach it directly,
+// so the server exposes a per-device mux PROXY on 127.0.0.1 and we speak the
+// exact same protocol to it). cfg.tcp = { port } selects this mode. ──
+let stream, onTransportReady;
+if (cfg.tcp && cfg.tcp.port) {
+  const net = require('net');
+  const sock = net.connect(Number(cfg.tcp.port), '127.0.0.1');
+  sock.on('error', (e) => { log('bridge connect failed: ' + e.message); process.exit(5); });
+  stream = {
+    write: (d) => { try { return sock.write(d); } catch { return false; } },
+    on: (ev, fn) => {
+      if (ev === 'data') sock.on('data', fn);
+      else if (ev === 'close') sock.on('close', fn);
+      else if (ev === 'error') sock.on('error', fn);
+    },
+    destroy: () => { try { sock.destroy(); } catch { } },
+  };
+  onTransportReady = (fn) => sock.on('connect', fn);
+} else {
+  const child = spawn(cfg.sshBin || 'ssh', [...(cfg.sshArgs || []), '--', cfg.remoteCmd], {
+    stdio: ['pipe', 'pipe', 'inherit'], // ssh stderr → our stderr (diagnostics only)
+  });
+  child.on('error', (e) => { log('transport spawn failed: ' + e.message); process.exit(5); });
+  stream = {
+    write: (d) => { try { return child.stdin.write(d); } catch { return false; } },
+    on: (ev, fn) => {
+      if (ev === 'data') child.stdout.on('data', fn);
+      else if (ev === 'close') { child.on('close', fn); child.stdout.on('close', fn); }
+      else if (ev === 'error') child.on('error', fn);
+    },
+    destroy: () => { try { child.kill(); } catch { } },
+  };
+  onTransportReady = (fn) => child.on('spawn', fn);
+}
 
 const CHAN = 2;
 let opened = false;
@@ -85,7 +107,7 @@ const mux = new Mux(stream, {
     process.exit(opened ? 3 : 5); // wrapper reconnects with a fresh offset
   },
 });
-child.on('spawn', () => {
+onTransportReady(() => {
   mux.control({ op: 'hello', protoVersion: PROTO_VERSION, hostToken: cfg.hostToken, serverVersion: cfg.version || '0' });
 });
 
