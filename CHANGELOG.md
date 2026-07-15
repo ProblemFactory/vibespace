@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.162.0 — 2026-07-15
+- **Device daemons are PERSISTENT now** (user question after the dead-Mac incident: 那mac上是不是应该自动做持久化? — yes): the installer registers a supervisor instead of a one-shot detached process — **macOS: launchd LaunchAgent** (RunAtLoad + KeepAlive: starts on boot, auto-restarts on crash/upgrade hiccup), **Linux: systemd user unit** (Restart=always + best-effort linger), fallback to the old detached start where neither exists. The dial config is persisted to `state/dial.json` by the installer, so the supervised daemon starts ARGLESS — no tokens in any unit file or process list. Verified on Linux: kill -9 the daemon → systemd brings it back in 5s. Re-running the pairing command migrates an existing install to the supervised form.
+- Pairing dialog note updated accordingly (no more "rerun the command after a reboot").
+
 ## 2.161.3 — 2026-07-15
 - **Operations against an OFFLINE dial machine fail fast with a clear error** (real report: create卡住/terminal空白/mount打不开 — the Mac's daemon had died after a self-upgrade re-exec and every operation HUNG): `deviceForDial` errors immediately when the device isn't dialed in instead of retrying forever; session create / mounts / test all surface "device offline — rerun the install command" within a second. The pairing e2e now asserts the fast-fail.
 - **Push-mount rows stop lying about a dead machine** (the 薛定谔的连接 report): the dot was hardcoded green — reads "worked" off rclone's dir-cache while writes silently died. For dial machines it now follows the live link state, with an honest tooltip (tunnel down, heals on reconnect).

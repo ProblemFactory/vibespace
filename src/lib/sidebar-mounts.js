@@ -926,7 +926,7 @@ export function installSidebarMounts(Sidebar) {
           }
           const tail = document.createElement('p');
           tail.className = 'agents-note';
-          tail.textContent = tr('The daemon auto-reconnects and survives reboots (rerun the same command after a reboot). One machine can pair to several VibeSpace instances — each install keeps its own state, keyed by this instance’s address. Pairing the same name again replaces its token.');
+          tail.textContent = tr('The installer registers the daemon with launchd (macOS) / systemd (Linux): it starts on boot and auto-restarts if it crashes. One machine can pair to several VibeSpace instances — each install keeps its own state, keyed by this instance’s address. Pairing the same name again replaces its token.');
           const act2 = document.createElement('div');
           act2.className = 'dialog-actions';
           const copy = document.createElement('button');

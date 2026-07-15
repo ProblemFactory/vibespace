@@ -1943,4 +1943,5 @@ export default {
   "Creating the session is taking unusually long — check the connection or reload the tab": "创建会话耗时异常——检查网络或刷新此标签页",
   "Mount a folder from \"{name}\" into this VibeSpace": "把“{name}”的文件夹挂载进本 VibeSpace",
   "Machine is offline — the tunnel is down; the mount heals when its daemon reconnects": "机器离线——隧道已断; 设备重连后挂载自动恢复",
+  "The installer registers the daemon with launchd (macOS) / systemd (Linux): it starts on boot and auto-restarts if it crashes. One machine can pair to several VibeSpace instances — each install keeps its own state, keyed by this instance’s address. Pairing the same name again replaces its token.": "安装器会把 daemon 注册到 launchd（macOS）/ systemd（Linux）：开机自启、崩溃自动重启。一台机器可配对多个 VibeSpace 实例——每个安装以实例地址为键保留自己的状态。用同名再次配对会替换其令牌。",
 };
