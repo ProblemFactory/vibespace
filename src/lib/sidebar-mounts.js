@@ -38,7 +38,7 @@ export function installSidebarMounts(Sidebar) {
       if (this._mountsSyncInit) return;
       this._mountsSyncInit = true;
       this.app.ws.onGlobal((msg) => {
-        if ((msg.type === 'mounts-updated' || msg.type === 'host-mounts-updated') && this._activeTab === 'mounts') this._renderMounts();
+        if ((msg.type === 'mounts-updated' || msg.type === 'host-mounts-updated' || msg.type === 'device-mounts-updated') && this._activeTab === 'mounts') this._renderMounts();
       });
     },
 
@@ -50,12 +50,14 @@ export function installSidebarMounts(Sidebar) {
         this.listEl.innerHTML = '<div class="mounts-loading">Loading…</div>';
       }
       let d, hd;
-      let mt, hm, dv;
-      try { [d, hd, mt, hm, dv] = await Promise.all([api('/api/mounts'), api('/api/hosts'), api('/api/mount-tokens').catch(() => ({ tokens: [] })), api('/api/host-mounts').catch(() => ({ mounts: [] })), api('/api/agentd/devices').catch(() => ({ devices: [] }))]); }
+      let mt, hm, dv, dvm;
+      try { [d, hd, mt, hm, dv, dvm] = await Promise.all([api('/api/mounts'), api('/api/hosts'), api('/api/mount-tokens').catch(() => ({ tokens: [] })), api('/api/host-mounts').catch(() => ({ mounts: [] })), api('/api/agentd/devices').catch(() => ({ devices: [] })), api('/api/device-mounts').catch(() => ({ mounts: [] }))]); }
       catch { this.listEl.innerHTML = '<div class="mounts-loading">Failed to load</div>'; return; }
       if (this._activeTab !== 'mounts') return; // user switched away mid-fetch
       d.mountTokens = mt?.tokens || [];
       this._hostMountsData = hm?.mounts || []; // reverse mounts (this instance → a host)
+      this._devicesData = dv?.devices || [];   // paired dial-out devices
+      this._deviceMountsData = dvm?.mounts || []; // device folders mounted here
       this._mountsData = d;
       this._hostsData = hd;
       this.listEl.innerHTML = '';
@@ -67,7 +69,7 @@ export function installSidebarMounts(Sidebar) {
       hHead.className = 'mounts-sec-head';
       hHead.innerHTML = `${escHtml(tr('Remote hosts'))}<span class="mounts-sec-sub">${escHtml(tr('Run agent sessions on other computers'))}</span>`;
       root.appendChild(hHead);
-      if (!hd.hosts.length) {
+      if (!hd.hosts.length && !this._devicesData.length) {
         const empty = document.createElement('div');
         empty.className = 'mounts-empty';
         empty.textContent = tr('No remote hosts added yet. Add one to run agent sessions on another computer.');
@@ -80,6 +82,14 @@ export function installSidebarMounts(Sidebar) {
           // active reverse-mounts (this instance's folders mounted ON this host)
           for (const hmr of this._hostMountsData.filter((m) => m.hostId === h.id)) {
             hlist.appendChild(this._buildHostMountRow(h, hmr));
+          }
+        }
+        // Paired dial-out devices are MACHINES too — same section, same row
+        // language (user feedback: a separate centered blob read as alien).
+        for (const dev of this._devicesData) {
+          hlist.appendChild(this._buildDeviceRow(dev));
+          for (const dm of this._deviceMountsData.filter((m) => m.deviceId === dev.id)) {
+            hlist.appendChild(this._buildDeviceMountRow(dev, dm));
           }
         }
         root.appendChild(hlist);
@@ -101,41 +111,6 @@ export function installSidebarMounts(Sidebar) {
       addHost.innerHTML = `<span class="mounts-action-icon">${MI.server}</span><span>${escHtml(tr('Add machine'))}</span>`;
       addHost.onclick = () => this._showAddHostDialog(hd);
       root.appendChild(addHost);
-      // Paired dial-out DEVICES (2.152.1): a paired device previously had NO
-      // UI presence at all — the user installed on a Mac and nothing appeared
-      // anywhere (real report). Green dot = its daemon is dialed in right now.
-      const devices = dv?.devices || [];
-      if (devices.length) {
-        const dlist = document.createElement('div');
-        dlist.className = 'mounts-list';
-        dlist.appendChild(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline', textContent: tr('Paired devices (dial-out)') }));
-        for (const dev of devices) {
-          const row = document.createElement('div');
-          row.className = 'mounts-row';
-          row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 8px;';
-          const dot = document.createElement('span');
-          dot.style.cssText = `width:6px;height:6px;border-radius:999px;flex:none;background:${dev.online ? 'var(--green,#3fb950)' : 'var(--text-dim)'}`;
-          dot.setAttribute('data-tip', dev.online ? tr('Dialed in — reachable now') : tr('Offline — the device’s daemon is not dialed in (start it with the install command)'));
-          const name = document.createElement('span');
-          name.textContent = dev.id;
-          name.style.cssText = 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;';
-          const status = document.createElement('span');
-          status.className = 'mounts-sec-sub';
-          status.textContent = dev.online ? tr('online') : tr('offline');
-          const rm = document.createElement('button');
-          rm.className = 'mounts-btn';
-          rm.textContent = '×';
-          rm.title = tr('Unpair (the device can no longer dial in)');
-          rm.onclick = async () => {
-            if (!(await showConfirmDialog({ title: tr('Unpair "{id}"?', { id: dev.id }), message: tr('Its dial token is revoked; re-pairing mints a new one.'), confirmText: tr('Unpair'), danger: true }))) return;
-            try { await api(`/api/agentd/devices/${encodeURIComponent(dev.id)}`, { method: 'DELETE' }); showToast(tr('Unpaired')); } catch (e) { showToast(e.message, { type: 'error' }); }
-            this._renderMounts();
-          };
-          row.append(dot, name, status, rm);
-          dlist.appendChild(row);
-        }
-        root.appendChild(dlist);
-      }
       // Dial-out DEVICE pairing (B-e5e7): the no-ssh path — laptops/Macs
       // behind NAT dial OUT to this instance (docs/device-agent.md).
       const pairDev = document.createElement('button');
@@ -751,6 +726,93 @@ export function installSidebarMounts(Sidebar) {
       });
     },
 
+    // A paired dial-out device rendered as a first-class MACHINE row (same
+    // visual language as _buildHostRow — user feedback: the first version was
+    // a centered blob with no actions). Actions today: test / mount a folder
+    // FROM the device / unpair; sessions-on-device is the next CS milestone.
+    _buildDeviceRow(dev) {
+      const row = document.createElement('div');
+      row.className = 'mounts-row';
+      const top = document.createElement('div');
+      top.className = 'mounts-row-top';
+      top.innerHTML = `
+        <span class="mounts-dot mounts-dot-${dev.online ? 'ok' : 'off'}" title="${dev.online ? escHtml(tr('Dialed in — reachable now')) : escHtml(tr('Offline — the device’s daemon is not dialed in (start it with the install command)'))}"></span>
+        <b class="mounts-name">${escHtml(dev.id)}</b>
+        <span class="mounts-badge${dev.online ? '' : ' mounts-badge-red'}" title="${escHtml(tr('Dial-out device — it connects TO this instance over a websocket (no ssh)'))}">${dev.online ? escHtml(tr('DEVICE')) : escHtml(tr('OFFLINE'))}</span>`;
+      const actions = document.createElement('span');
+      actions.className = 'mounts-row-actions';
+      const ibtn = (svg, title, fn) => {
+        const b = document.createElement('button');
+        b.className = 'mounts-icon-btn';
+        b.innerHTML = svg; b.title = title;
+        b.onclick = async (e) => {
+          e.stopPropagation(); b.disabled = true;
+          try { await fn(); } catch (err) { showToast(err.message || 'Failed', { type: 'error' }); }
+          this._renderMounts();
+        };
+        return b;
+      };
+      actions.append(
+        ibtn(MI.bolt, tr('Test connection'), async () => {
+          const r = await api(`/api/agentd/devices/${encodeURIComponent(dev.id)}/test`, { method: 'POST' });
+          if (!r.ok) throw new Error(r.error || 'unreachable');
+          const i = r.info || {};
+          showToast(tr('{id} reachable — agent {v} on {plat}', { id: dev.id, v: i.daemonVersion || '?', plat: [i.platform, i.arch].filter(Boolean).join('/') || '?' }));
+        }),
+        ibtn(MI.folder, tr('Mount a folder FROM this device into this workspace'), () => { this._showDeviceMountDialog(dev); }),
+        ibtn(MI.cross, tr('Unpair (the device can no longer dial in)'), async () => {
+          const ok = await showConfirmDialog({ title: tr('Unpair "{id}"?', { id: dev.id }), message: tr('Its dial token is revoked; re-pairing mints a new one. Its mounted folders here are unmounted.'), confirmText: tr('Unpair'), danger: true });
+          if (!ok) return;
+          await api(`/api/agentd/devices/${encodeURIComponent(dev.id)}`, { method: 'DELETE' });
+          showToast(tr('Unpaired'));
+        }),
+      );
+      row.append(top, actions);
+      return row;
+    },
+
+    // Child row: a device folder mounted INTO this workspace (read-only).
+    _buildDeviceMountRow(dev, dm) {
+      const row = document.createElement('div');
+      row.className = 'mounts-row mounts-subrow';
+      const top = document.createElement('div');
+      top.className = 'mounts-row-top';
+      const state = dm.live ? 'ok' : (dm.online ? 'off' : 'err');
+      top.innerHTML = `
+        <span class="mounts-dot mounts-dot-${state}" title="${dm.live ? escHtml(tr('Mounted')) : escHtml(tr('Pending — remounts when the device dials in'))}"></span>
+        <span class="mounts-name" title="${escHtml(dev.id)}:${escHtml(dm.remotePath)}">${escHtml(dm.remotePath)} → ${escHtml(dm.mountpoint)}</span>`;
+      const actions = document.createElement('span');
+      actions.className = 'mounts-row-actions';
+      const open = document.createElement('button');
+      open.className = 'mounts-icon-btn';
+      open.innerHTML = MI.folder; open.title = tr('Open in Files');
+      open.onclick = () => this.app.openFileExplorer?.(dm.mountpoint);
+      const un = document.createElement('button');
+      un.className = 'mounts-icon-btn';
+      un.innerHTML = MI.cross; un.title = tr('Unmount');
+      un.onclick = async () => {
+        try { await api(`/api/device-mounts/${encodeURIComponent(dm.id)}`, { method: 'DELETE' }); showToast(tr('Unmounted')); }
+        catch (e) { showToast(e.message, { type: 'error' }); }
+        this._renderMounts();
+      };
+      actions.append(open, un);
+      row.append(top, actions);
+      return row;
+    },
+
+    _showDeviceMountDialog(dev) {
+      this._mountsDialog(tr('Mount a folder from "{id}"', { id: dev.id }), [
+        { key: 'remotePath', label: tr('Folder ON the device (absolute path)'), placeholder: '/Users/me/Documents' },
+        { key: 'mountpoint', label: tr('Mount point here (optional)'), placeholder: tr('default: ~/vibespace-devices/<device>-<folder>') },
+      ], tr('Mount'), async (v, { close }) => {
+        if (!v.remotePath) throw new Error(tr('Enter the folder path on the device'));
+        const r = await api(`/api/device-mounts/${encodeURIComponent(dev.id)}`, { method: 'POST', body: JSON.stringify({ remotePath: v.remotePath, mountpoint: v.mountpoint || undefined }) });
+        close();
+        showToast(tr('Mounted at {mp} (read-only, over the dial link)', { mp: r.mountpoint }));
+        this._renderMounts();
+      });
+    },
+
     // Pair a NAT'd machine as a dial-out DEVICE (B-e5e7, docs/device-agent.md):
     // mint a device id + dial token (POST /api/agentd/dial-pair) and hand the
     // user the exact one-line installer command. Machines you can ssh into
@@ -779,28 +841,57 @@ export function installSidebarMounts(Sidebar) {
         try {
           const r = await api('/api/agentd/dial-pair', { method: 'POST', body: JSON.stringify({ deviceId: name, serverUrl: location.origin }) });
           const wsBase = location.origin.replace(/^http/, 'ws');
+          const dialUrl = `${wsBase}/api/agentd-dial?device=${r.deviceId}`;
           // The full installer line: bundle + dial URL + BOTH tokens — the
           // hostToken is what the daemon verifies OUR mux hello against; an
           // install without it can dial in but rejects every server command.
-          const cmd = `curl -fsSL ${location.origin}/agentd-install.sh | bash -s -- \\\n  --bundle-url ${location.origin}/agentd.js \\\n  --dial '${wsBase}/api/agentd-dial?device=${r.deviceId}' \\\n  --dial-token ${r.dialToken} \\\n  --host-token ${r.hostToken}`;
+          // Per-OS commands (user request): macOS/Linux share the bash
+          // installer; Windows gets the PowerShell one (EXPERIMENTAL).
+          const CMDS = {
+            mac: `curl -fsSL ${location.origin}/agentd-install.sh | bash -s -- \\\n  --bundle-url ${location.origin}/agentd.js \\\n  --dial '${dialUrl}' \\\n  --dial-token ${r.dialToken} \\\n  --host-token ${r.hostToken}`,
+            linux: `curl -fsSL ${location.origin}/agentd-install.sh | bash -s -- \\\n  --bundle-url ${location.origin}/agentd.js \\\n  --dial '${dialUrl}' \\\n  --dial-token ${r.dialToken} \\\n  --host-token ${r.hostToken}`,
+            win: `& ([scriptblock]::Create((iwr -UseBasicParsing ${location.origin}/agentd-install.ps1).Content)) \`\n  -BundleUrl ${location.origin}/agentd.js \`\n  -Dial '${dialUrl}' \`\n  -DialToken ${r.dialToken} -HostToken ${r.hostToken}`,
+          };
+          const NOTES = {
+            mac: tr('macOS: needs Node 18+ (brew install node). No ssh, no FUSE required.'),
+            linux: tr('Linux: needs Node 18+ and curl.'),
+            win: tr('Windows (EXPERIMENTAL, PowerShell): needs Node 18+ (winget install OpenJS.NodeJS.LTS).'),
+          };
           body.innerHTML = '';
           const done = document.createElement('p');
           done.className = 'agents-note';
-          done.textContent = tr('Paired as "{id}". Run this on the device (Node 18+); it starts the agent and dials in — it then shows under "Paired devices" here (green dot = connected):', { id: r.deviceId });
+          done.textContent = tr('Paired as "{id}". Pick the device’s OS and run the command on it — it starts the agent and dials in; the device then appears as a machine row above (green dot = connected):', { id: r.deviceId });
+          const seg = document.createElement('div');
+          seg.style.cssText = 'display:flex;gap:6px;margin:6px 0;';
           const ta = document.createElement('textarea');
-          ta.readOnly = true; ta.value = cmd; ta.style.minHeight = '110px'; ta.style.fontSize = '11px'; ta.spellcheck = false;
+          ta.readOnly = true; ta.style.minHeight = '110px'; ta.style.fontSize = '11px'; ta.spellcheck = false;
+          const note = document.createElement('p');
+          note.className = 'agents-note';
+          const guessOs = /Mac/i.test(navigator.platform || '') ? 'mac' : /Win/i.test(navigator.platform || '') ? 'win' : 'linux';
+          let osSel = guessOs;
+          const chips = {};
+          const setOs = (k) => {
+            osSel = k; ta.value = CMDS[k]; note.textContent = NOTES[k];
+            for (const [ck, el] of Object.entries(chips)) el.className = ck === k ? 'btn-create' : 'btn-cancel';
+          };
+          for (const [k, label] of [['mac', 'macOS'], ['linux', 'Linux'], ['win', 'Windows']]) {
+            const b = document.createElement('button');
+            b.textContent = label; b.onclick = () => setOs(k);
+            chips[k] = b; seg.appendChild(b);
+          }
           const tail = document.createElement('p');
           tail.className = 'agents-note';
-          tail.textContent = tr('The daemon auto-reconnects and survives reboots (rerun the same command after a reboot — state lives in ~/.vibespace/agentd). Pairing the same name again replaces its token.');
+          tail.textContent = tr('The daemon auto-reconnects and survives reboots (rerun the same command after a reboot). One machine can pair to several VibeSpace instances — each install keeps its own state, keyed by this instance’s address. Pairing the same name again replaces its token.');
           const act2 = document.createElement('div');
           act2.className = 'dialog-actions';
           const copy = document.createElement('button');
           copy.className = 'btn-create'; copy.textContent = tr('Copy command');
-          copy.onclick = () => { copyText(cmd); showToast(tr('Command copied')); };
+          copy.onclick = () => { copyText(ta.value); showToast(tr('Command copied')); };
           const closeBtn = document.createElement('button');
           closeBtn.className = 'btn-cancel'; closeBtn.textContent = tr('Close'); closeBtn.onclick = () => close();
           act2.append(closeBtn, copy);
-          body.append(done, ta, tail, act2);
+          body.append(done, seg, ta, note, tail, act2);
+          setOs(guessOs);
           ta.onclick = () => ta.select();
         } catch (e) {
           go.disabled = false; go.textContent = tr('Create pairing');

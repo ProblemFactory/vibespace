@@ -15,7 +15,6 @@
 # Requires: node ≥18 (brew install node / apt install nodejs), curl, unzip.
 set -euo pipefail
 
-ROOT="${VIBESPACE_AGENTD_ROOT:-$HOME/.vibespace/agentd}"
 BUNDLE_URL="${VIBESPACE_AGENTD_URL:-}"   # where to fetch agentd.js (a VibeSpace serves it at /agentd.js)
 DIAL_URL=""; DIAL_TOKEN=""; HOST_TOKEN=""
 while [ $# -gt 0 ]; do case "$1" in
@@ -25,6 +24,17 @@ while [ $# -gt 0 ]; do case "$1" in
   --bundle-url) BUNDLE_URL="$2"; shift 2;;
   *) echo "unknown arg: $1"; exit 2;;
 esac; done
+
+# ROOT: one machine can pair to SEVERAL VibeSpace instances — a dial-out
+# install keys its root (daemon + tokens + bundle, each self-upgrading from
+# its own server) by the dial host, so instances never clobber each other.
+# The standing daemon (ssh-reachable machine) keeps the classic shared root.
+if [ -z "${VIBESPACE_AGENTD_ROOT:-}" ] && [ -n "$DIAL_URL" ]; then
+  DIAL_HOST=$(printf '%s' "$DIAL_URL" | sed -E 's|^[a-z]+://([^/:?]+).*|\1|' | tr -cd 'A-Za-z0-9.-')
+  ROOT="$HOME/.vibespace/agentd@${DIAL_HOST:-dial}"
+else
+  ROOT="${VIBESPACE_AGENTD_ROOT:-$HOME/.vibespace/agentd}"
+fi
 
 command -v node >/dev/null || { echo "node ≥18 required (brew install node / apt install nodejs)"; exit 1; }
 NODEV=$(node -e 'console.log(process.versions.node.split(".")[0])')
@@ -55,6 +65,8 @@ echo "→ host token at $ROOT/state/token"
 # started NOTHING on a Mac (the "command not found" went into agentd.out and
 # the ✓ printed anyway; real report). nohup+& detaches well enough for a login
 # shell; and ALWAYS verify the process actually survived before claiming ✓.
+# the daemon derives its root from this env (default would be the shared root)
+export VIBESPACE_AGENTD_ROOT="$ROOT"
 START=(node "$ROOT/current/agentd.js")
 if [ -n "$DIAL_URL" ]; then
   echo "→ starting daemon with dial-out to $DIAL_URL"

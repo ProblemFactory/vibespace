@@ -18,7 +18,11 @@ const { Mux, PROTO_VERSION } = require('./mux.js');
 const VERSION = process.env.VIBESPACE_AGENTD_VERSION || require('./version.js').VERSION;
 const ROOT = process.env.VIBESPACE_AGENTD_ROOT || path.join(os.homedir(), '.vibespace', 'agentd');
 const STATE = path.join(ROOT, 'state');
-const SOCK = path.join(STATE, 'agentd.sock');
+// Windows has no unix sockets for node's net.listen — use a named pipe keyed
+// by the root path so several per-instance daemons coexist (EXPERIMENTAL).
+const SOCK = process.platform === 'win32'
+  ? '\\\\.\\pipe\\vibespace-agentd-' + require('crypto').createHash('sha1').update(ROOT).digest('hex').slice(0, 12)
+  : path.join(STATE, 'agentd.sock');
 const LOCK = path.join(STATE, 'agentd.lock');
 const LOG = path.join(STATE, 'agentd.log');
 const TOKEN_FILE = path.join(STATE, 'token');
