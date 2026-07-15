@@ -21,11 +21,17 @@ export function installPluginsUI(App) {
         const card = document.createElement('div');
         card.className = 'plugin-card';
         const running = !!p.running;
-        const stateTxt = p.mode === 'system' ? t('managed by the system (outside VibeSpace)')
-          : running ? (p.backendState === 'Running' ? t('connected') : (p.backendState || t('starting…')))
-            : p.installed ? t('stopped') : t('not installed');
-        const dot = `<span class="plugin-dot ${running && p.backendState === 'Running' ? 'ok' : running ? 'warn' : ''}"></span>`;
+        const isFrp = p.id === 'frp';
+        const stateTxt = isFrp
+          ? (p.configured === false ? t('relay not configured on this instance')
+            : running ? t('connected') : p.installed ? t('stopped') : t('not installed'))
+          : p.mode === 'system' ? t('managed by the system (outside VibeSpace)')
+            : running ? (p.backendState === 'Running' ? t('connected') : (p.backendState || t('starting…')))
+              : p.installed ? t('stopped') : t('not installed');
+        const dot = `<span class="plugin-dot ${isFrp ? (running ? 'ok' : '') : (running && p.backendState === 'Running' ? 'ok' : running ? 'warn' : '')}"></span>`;
         let detail = '';
+        if (isFrp && p.configured) detail += `<div class="plugin-detail">${escHtml(t('Relay'))}: <code>${escHtml(p.server || '')}</code> · ${escHtml(t('publishes forwarded ports to {host}', { host: p.publicHost }))}</div>`;
+        if (isFrp && p.configured === false) detail += `<div class="plugin-detail plugin-cfg-warn">${escHtml(t('Set VIBESPACE_FRPS_ADDR / _PORT / _TOKEN (the shared relay) to enable public URLs.'))}</div>`;
         if (p.self?.ips?.length) detail += `<div class="plugin-detail">${escHtml(t('Tailnet address'))}: <code>${escHtml(p.self.ips[0])}</code>${p.self.dnsName ? ` · ${escHtml(p.self.dnsName.replace(/\.$/, ''))}` : ''}${p.peers ? ` · ${escHtml(t('{n} peers', { n: p.peers }))}` : ''}</div>`;
         if (running && p.mode === 'userspace') detail += `<div class="plugin-detail">${escHtml(t('Userspace mode — reach tailnet hosts through SOCKS5 localhost:{port} (no tun device in this container)', { port: p.socksPort }))}</div>`;
         if (running && p.mode === 'kernel') detail += `<div class="plugin-detail">${escHtml(t('Kernel mode — full tunnel, tailnet hosts reachable directly'))}</div>`;
@@ -58,17 +64,20 @@ export function installPluginsUI(App) {
         const api = (pathTail, opts) => fetchJson(`/api/plugins/${p.id}/${pathTail}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, ...opts })
           .then((x) => { if (x?.error) throw new Error(x.error); return x; });
 
+        // frp: no login/mode/flags — just install / start / stop / boot-toggle,
+        // and only when the relay is configured on this instance.
+        if (isFrp && p.configured === false) { body.appendChild(card); continue; }
         if (p.mode !== 'system') {
           if (!p.installed) {
             btn(t('Install'), 'mounts-btn-primary', async () => {
-              showToast(t('Downloading Tailscale…'));
+              showToast(t('Downloading {name}…', { name: p.label }));
               await api('install');
               showToast(t('Installed'));
             });
           } else if (!running) {
             btn(t('Start'), 'mounts-btn-primary', () => api('start'));
           } else {
-            if (p.backendState !== 'Running') {
+            if (!isFrp && p.backendState !== 'Running') {
               const loginBtn = btn(t('Log in…'), 'mounts-btn-primary', async () => {
                 const res = await api('login');
                 if (res.done) { showToast(t('Already connected')); render(); return; }
@@ -87,7 +96,9 @@ export function installPluginsUI(App) {
               }, { rerender: false });
             }
             btn(t('Stop'), '', async () => {
-              const ok = await showConfirmDialog(t('Stop {name}?', { name: p.label }), t('Tailnet connections from this instance will drop. The login persists — starting again reconnects without re-auth.'));
+              const ok = await showConfirmDialog(t('Stop {name}?', { name: p.label }), isFrp
+                ? t('Public URLs from this instance will stop working until you start it again.')
+                : t('Tailnet connections from this instance will drop. The login persists — starting again reconnects without re-auth.'));
               if (ok) await api('stop');
             });
           }
@@ -100,8 +111,8 @@ export function installPluginsUI(App) {
           lbl.append(cb, document.createTextNode(' ' + t('Start automatically with the server')));
           actions.appendChild(lbl);
 
-          // ── Networking mode + extra flags (advanced config) ──
-          if (p.installed) {
+          // ── Networking mode + extra flags (advanced config) — tailscale only ──
+          if (!isFrp && p.installed) {
             const modes = [
               ['auto', t('Auto')],
               ['kernel', t('Kernel (full tunnel)')],
