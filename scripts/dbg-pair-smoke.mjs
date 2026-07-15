@@ -109,7 +109,11 @@ try {
   fs.writeFileSync(path.join(share, 'hello.txt'), 'FROM-THE-DEVICE');
   const mres = await (await fetch(`http://127.0.0.1:${PORT}/api/machine-mounts/host-dial-smoke-mac`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ dir: 'pull', remotePath: share, mountpoint: path.join(droot, 'mnt') }) })).json();
+    // TRAILING SLASH on purpose (walter regression): the serve-folder confines
+    // subpaths with `root + path.sep`, so a trailing-slash root double-slashed
+    // the prefix → every FILE 403'd ("couldn't list files: 403"). The
+    // hello.txt read below is the guard — it 403s without the normalization fix.
+    body: JSON.stringify({ dir: 'pull', remotePath: share + '/', mountpoint: path.join(droot, 'mnt') }) })).json();
   check('machine pull-mount API succeeds', !mres.error && mres.mountpoint, JSON.stringify(mres));
   if (mres.mountpoint) {
     let content = '';

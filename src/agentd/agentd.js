@@ -417,7 +417,10 @@ function _davEntry(href, name, st) {
     + `</D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>`;
 }
 function serveFolder(mux, msg) {
-  const root = String(msg.path || '');
+  // strip a trailing slash — the confinement below uses `root + path.sep`, so a
+  // root ending in '/' becomes a DOUBLE-slash prefix that no real subpath
+  // matches → every file 403s (real walter Mac→VibeSpace pull bug)
+  const root = (String(msg.path || '').replace(/\/+$/, '')) || '/';
   try { if (!path.isAbsolute(root) || !fs.statSync(root).isDirectory()) throw new Error('not a directory'); }
   catch (e) { mux.control({ op: 'serve-folder-result', id: msg.id, error: e.message }); return; }
   const http = require('http');
