@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.157.0 — 2026-07-15
+- **Agent tools work on dial-device sessions (slice B.3).** A chat session created on a paired device now gets the full agent prelude, ported from the ssh path to the DEVICE LINK: `vibespace-status`/`vibespace-task`/`vibespace-ask` + the per-session token ride `fsWrite` into `~/.vibespace/bin` (token 0600), the hook is registered with `runCmd`, and **`VIBESPACE_API` is a reverse-forward** — a loopback port bound ON the device whose bytes tunnel back to the server (the same NAT-proof primitive host-mounts uses), so the tools reach the server with no inbound access. Reverse tunnel is torn down on kill. Degrades to a bare-env session on any setup error (the session still runs). New `scripts/test-device-agent-setup.mjs` proves every primitive over a real dialed daemon incl. the VIBESPACE_API round-trip. Account-key shipping over the device link is the remaining B.3 tail (the device's own claude login is used until then).
+
 ## 2.156.2 — 2026-07-15
 - **Remote sessions can no longer steal a LOCAL session's id** (found by the full id-adoption trace after the lengyue incident): the local lock-file capture wasn't gated on locality — a remote session with the same cwd as a local one could false-match the local lock and adopt the WRONG claude session id. Lock capture is local-only now; remote sessions get their id from the stream parser's unconditional first-capture (2.156.1), which every stream-json line feeds — existing null-id sessions self-heal on their next activity, no belt needed.
 
