@@ -7,7 +7,7 @@
 // passes, reverse-mount is genuinely NAT-traversing, not address-dependent.
 //
 // Steps: install+connect agentd on the host (dataPlane ON) → stand up /dav on
-// 127.0.0.1 → HostMounts.mountOnHost (must pick via='tunnel') → independent
+// 127.0.0.1 → MachineMounts.mountPush (must pick via='tunnel') → independent
 // ssh verifies our files appear + read through the mount → unmount + cleanup.
 // Usage: node scripts/test-host-mounts-tunnel.mjs <hostId>
 import { createRequire } from 'node:module';
@@ -32,7 +32,7 @@ const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const { MountTokens, registerWebdav } = require('../src/webdav.js');
-const { HostMounts } = require('../src/host-mounts.js');
+const { MachineMounts } = require('../src/machine-mounts.js');
 const { HostManager } = require('../src/hosts.js');
 
 // ensure a fresh agentd bundle exists
@@ -72,7 +72,7 @@ const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () =
 const PORT = srv.address().port;
 console.log(`/dav bound to 127.0.0.1:${PORT} ONLY (no external address) — sharing ${shareDir}`);
 
-const hm = new HostMounts({
+const hm = new MachineMounts({
   dataDir: tmp, hosts, mountTokens: tokens,
   publicUrl: () => null,       // NO public URL — tunnel is the only path
   localPort: () => PORT,       // the tunnel target = our loopback /dav
@@ -86,7 +86,7 @@ try {
   check('agentd connected on the host', !!dm.status().info, JSON.stringify(dm.status().info?.daemonVersion));
 
   console.log('— reverse mount THROUGH THE TUNNEL (no public address) —');
-  const r = await hm.mountOnHost(hostId, { folder: shareDir, mode: 'ro' });
+  const r = await hm.mountPush(hostId, { folder: shareDir, mode: 'ro' });
   mountId = r.id;
   check('mount succeeded', !!r.mountpoint, JSON.stringify(r));
   check('transport is the TUNNEL (not a public address)', r.via === 'tunnel', JSON.stringify(r.via));
@@ -103,7 +103,7 @@ try {
   check('multibyte filename + content over the tunnel', cat2.includes('隧道挂载'), JSON.stringify(cat2.slice(0, 120)));
 
   console.log('— unmount cleans up + releases the device port —');
-  await hm.unmountOnHost(hostId, mountId);
+  await hm.unmount(mountId);
   mountId = null;
   await sleep(1500);
   const gone = await sshRun([...sshBase, '--', `ls ${JSON.stringify(r.mountpoint)} 2>&1; echo ---; mount 2>/dev/null | grep -c ${JSON.stringify(r.mountpoint)} || true`]);
@@ -114,7 +114,7 @@ try {
   failed++;
   console.error('  ✗ tunnel reverse mount threw:', e.message, e.stack?.split('\n')[1] || '');
 } finally {
-  if (mountId) { try { await hm.unmountOnHost(hostId, mountId); } catch { } }
+  if (mountId) { try { await hm.unmount(mountId); } catch { } }
   srv.close();
   fs.rmSync(tmp, { recursive: true, force: true });
 }

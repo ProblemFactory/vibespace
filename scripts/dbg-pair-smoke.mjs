@@ -58,13 +58,21 @@ try {
   check('command carries the install script + bundle', /vibespace-device-install\.sh/.test(cmd) && /--bundle-url/.test(cmd));
   check('command carries dial URL with the device id', cmd.includes('/api/agentd-dial?device=smoke-mac'));
   check('command carries BOTH tokens', /--dial-token vsdt_/.test(cmd) && /--host-token vsht_/.test(cmd), cmd);
-  // server actually recorded the pairing
-  const tokens = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'agentd', 'dial-tokens.json'), 'utf-8'));
-  check('server persisted the dial token (sha256)', typeof tokens['smoke-mac'] === 'string' && tokens['smoke-mac'].length === 64);
+  // server actually recorded the pairing — the credential lives ON the dial
+  // host record since B-f3e8 (dial-tokens.json is gone)
+  const hostsJson = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'hosts.json'), 'utf-8'));
+  const dialRec = (hostsJson.hosts || []).find((h) => h.transport === 'dial' && h.deviceId === 'smoke-mac');
+  check('server persisted the dial token hash ON the host record', !!dialRec && typeof dialRec.dialTokenHash === 'string' && dialRec.dialTokenHash.length === 64, JSON.stringify(dialRec));
+  check('the hash is NOT exposed over /api/hosts', await (async () => {
+    const hl = (await (await fetch(`http://127.0.0.1:${PORT}/api/hosts`)).json()).hosts || [];
+    const h = hl.find((x) => x.deviceId === 'smoke-mac');
+    return h && !('dialTokenHash' in h) && h.online === false;
+  })());
 
-  // ── the Paired-devices machine rows (2.153.0) — REAL daemon dial ──
-  let devs = (await (await fetch(`http://127.0.0.1:${PORT}/api/agentd/devices`)).json()).devices;
-  check('devices list shows the pairing (offline)', devs.some((d) => d.id === 'smoke-mac' && d.online === false), JSON.stringify(devs));
+  // ── the machine rows (B-f3e8: ONE list — /api/hosts) — REAL daemon dial ──
+  const dialHosts = async () => ((await (await fetch(`http://127.0.0.1:${PORT}/api/hosts`)).json()).hosts || []).filter((h) => h.transport === 'dial');
+  let devs = await dialHosts();
+  check('machine list shows the pairing (offline)', devs.some((d) => d.deviceId === 'smoke-mac' && d.online === false), JSON.stringify(devs));
   // start a REAL agentd with --dial (the actual daemon, not a fake ws client)
   const dialTok = /--dial-token (vsdt_\w+)/.exec(cmd)[1];
   const hostTok = /--host-token (vsht_\w+)/.exec(cmd)[1];
@@ -81,21 +89,21 @@ try {
   const killDaemon = () => { try { daemon.kill('SIGKILL'); } catch {} };
   process.on('exit', killDaemon);
   for (let i = 0; i < 30; i++) {
-    devs = (await (await fetch(`http://127.0.0.1:${PORT}/api/agentd/devices`)).json()).devices;
-    if (devs.some((d) => d.id === 'smoke-mac' && d.online)) break;
+    devs = await dialHosts();
+    if (devs.some((d) => d.deviceId === 'smoke-mac' && d.online)) break;
     await sleep(400);
   }
-  check('REAL daemon dial flips the device ONLINE', devs.some((d) => d.id === 'smoke-mac' && d.online === true), JSON.stringify(devs));
-  // ⚡ test action
-  const t = await (await fetch(`http://127.0.0.1:${PORT}/api/agentd/devices/smoke-mac/test`, { method: 'POST' })).json();
-  check('device test returns daemon identity', t.ok === true && !!t.info, JSON.stringify(t));
+  check('REAL daemon dial flips the machine ONLINE', devs.some((d) => d.deviceId === 'smoke-mac' && d.online === true), JSON.stringify(devs));
+  // ⚡ test action — the UNIFIED endpoint (dial branch of hosts.test)
+  const t = await (await fetch(`http://127.0.0.1:${PORT}/api/hosts/host-dial-smoke-mac/test`, { method: 'POST' })).json();
+  check('machine test returns daemon identity over the dial link', t.ok === true && t.dial === true && !!t.info, JSON.stringify(t));
   // 📁 mount a folder FROM the device (full chain: serve-folder → tunnel → rclone)
   const share = path.join(droot, 'share'); fs.mkdirSync(share, { recursive: true });
   fs.writeFileSync(path.join(share, 'hello.txt'), 'FROM-THE-DEVICE');
-  const mres = await (await fetch(`http://127.0.0.1:${PORT}/api/device-mounts/smoke-mac`, {
+  const mres = await (await fetch(`http://127.0.0.1:${PORT}/api/machine-mounts/host-dial-smoke-mac`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ remotePath: share, mountpoint: path.join(droot, 'mnt') }) })).json();
-  check('device mount API succeeds', !mres.error && mres.mountpoint, JSON.stringify(mres));
+    body: JSON.stringify({ dir: 'pull', remotePath: share, mountpoint: path.join(droot, 'mnt') }) })).json();
+  check('machine pull-mount API succeeds', !mres.error && mres.mountpoint, JSON.stringify(mres));
   if (mres.mountpoint) {
     let content = '';
     for (let i = 0; i < 20; i++) {
@@ -134,12 +142,12 @@ try {
     check('device discovery answers via the dial link', Array.isArray(ds.sessions), JSON.stringify(ds).slice(0, 200));
   }
   // unmount + unpair cleanup path
-  const um = await fetch(`http://127.0.0.1:${PORT}/api/device-mounts/${mres.id}`, { method: 'DELETE' });
-  check('device mount unmounts', um.ok);
-  const del = await fetch(`http://127.0.0.1:${PORT}/api/agentd/devices/smoke-mac`, { method: 'DELETE' });
-  check('unpair succeeds', del.ok);
-  devs = (await (await fetch(`http://127.0.0.1:${PORT}/api/agentd/devices`)).json()).devices;
-  check('unpaired device gone from the list', !devs.some((d) => d.id === 'smoke-mac'), JSON.stringify(devs));
+  const um = await fetch(`http://127.0.0.1:${PORT}/api/machine-mounts/${mres.id}`, { method: 'DELETE' });
+  check('machine mount unmounts', um.ok);
+  const del = await fetch(`http://127.0.0.1:${PORT}/api/hosts/host-dial-smoke-mac`, { method: 'DELETE' });
+  check('unpair (DELETE /api/hosts/:id) succeeds', del.ok);
+  devs = await dialHosts();
+  check('unpaired machine gone from the list', !devs.some((d) => d.deviceId === 'smoke-mac'), JSON.stringify(devs));
   const hostsAfter = (await (await fetch(`http://127.0.0.1:${PORT}/api/hosts`)).json()).hosts || [];
   check('unpair removed the dial host record', !hostsAfter.some((h) => h.deviceId === 'smoke-mac'), JSON.stringify(hostsAfter.map((h) => h.id)));
   killDaemon();

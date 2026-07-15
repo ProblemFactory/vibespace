@@ -45,7 +45,7 @@ export function installSidebarMounts(Sidebar) {
       if (this._mountsSyncInit) return;
       this._mountsSyncInit = true;
       this.app.ws.onGlobal((msg) => {
-        if ((msg.type === 'mounts-updated' || msg.type === 'host-mounts-updated' || msg.type === 'device-mounts-updated') && this._activeTab === 'mounts') this._renderMounts();
+        if ((msg.type === 'mounts-updated' || msg.type === 'machine-mounts-updated' || msg.type === 'hosts-updated') && this._activeTab === 'mounts') this._renderMounts();
       });
     },
 
@@ -57,72 +57,48 @@ export function installSidebarMounts(Sidebar) {
         this.listEl.innerHTML = '<div class="mounts-loading">Loading…</div>';
       }
       let d, hd;
-      let mt, hm, dv, dvm;
-      try { [d, hd, mt, hm, dv, dvm] = await Promise.all([api('/api/mounts'), api('/api/hosts'), api('/api/mount-tokens').catch(() => ({ tokens: [] })), api('/api/host-mounts').catch(() => ({ mounts: [] })), api('/api/agentd/devices').catch(() => ({ devices: [] })), api('/api/device-mounts').catch(() => ({ mounts: [] }))]); }
+      let mt, mm;
+      try { [d, hd, mt, mm] = await Promise.all([api('/api/mounts'), api('/api/hosts'), api('/api/mount-tokens').catch(() => ({ tokens: [] })), api('/api/machine-mounts').catch(() => ({ mounts: [] }))]); }
       catch { this.listEl.innerHTML = '<div class="mounts-loading">Failed to load</div>'; return; }
       if (this._activeTab !== 'mounts') return; // user switched away mid-fetch
       d.mountTokens = mt?.tokens || [];
-      this._hostMountsData = hm?.mounts || []; // reverse mounts (this instance → a host)
-      this._devicesData = dv?.devices || [];   // paired dial-out devices
-      this._deviceMountsData = dvm?.mounts || []; // device folders mounted here
+      this._machineMountsData = mm?.mounts || []; // push AND pull mounts, keyed by hostId (B-f3e8)
       this._mountsData = d;
       this._hostsData = hd;
       this.listEl.innerHTML = '';
       const root = document.createElement('div');
       root.className = 'mounts-panel';
 
-      // ── Hosts section (remote machines over ssh) ──
+      // ── Machines section (B-f3e8 one machine model: local + ssh + dial) ──
       const hHead = document.createElement('div');
       hHead.className = 'mounts-sec-head';
-      hHead.innerHTML = `${escHtml(tr('Remote hosts'))}<span class="mounts-sec-sub">${escHtml(tr('Run agent sessions on other computers'))}</span>`;
+      hHead.innerHTML = `${escHtml(tr('Machines'))}<span class="mounts-sec-sub">${escHtml(tr('Run agent sessions on this or other computers'))}</span>`;
       root.appendChild(hHead);
-      if (!hd.hosts.length && !this._devicesData.length) {
-        const empty = document.createElement('div');
-        empty.className = 'mounts-empty';
-        empty.textContent = tr('No remote hosts added yet. Add one to run agent sessions on another computer.');
-        root.appendChild(empty);
-      } else {
+      {
         const hlist = document.createElement('div');
         hlist.className = 'mounts-list';
-        const onlineById = new Map(this._devicesData.map((d) => [d.id, d.online]));
-        const dialDeviceIds = new Set();
+        hlist.appendChild(this._buildLocalMachineRow());
+        // ONE machine model (B-f3e8): every machine — ssh host or dial-out
+        // device — is a host record rendered by the SAME builder; its mounts
+        // (both directions) are children keyed by hostId.
         for (const h of hd.hosts) {
-          if (h.transport === 'dial') {
-            // dial host (slice B): a paired device promoted to a machine —
-            // render the device row (⚡ test / 📁 pull / × unpair), never ssh
-            dialDeviceIds.add(h.deviceId);
-            const dev = { id: h.deviceId, online: !!onlineById.get(h.deviceId) };
-            hlist.appendChild(this._buildDeviceRow(dev, h));
-            for (const dm of this._deviceMountsData.filter((m) => m.deviceId === h.deviceId)) {
-              hlist.appendChild(this._buildDeviceMountRow(dev, dm));
-            }
-            continue;
-          }
           hlist.appendChild(this._buildHostRow(h));
-          // active reverse-mounts (this instance's folders mounted ON this host)
-          for (const hmr of this._hostMountsData.filter((m) => m.hostId === h.id)) {
-            hlist.appendChild(this._buildHostMountRow(h, hmr));
-          }
-        }
-        // pairings not yet promoted to a host record (pre-2.154.2 server)
-        for (const dev of this._devicesData.filter((d) => !dialDeviceIds.has(d.id))) {
-          hlist.appendChild(this._buildDeviceRow(dev));
-          for (const dm of this._deviceMountsData.filter((m) => m.deviceId === dev.id)) {
-            hlist.appendChild(this._buildDeviceMountRow(dev, dm));
+          for (const m of this._machineMountsData.filter((m) => m.hostId === h.id)) {
+            hlist.appendChild(this._buildMachineMountRow(h, m));
           }
         }
         root.appendChild(hlist);
         this._autoTestHosts(hd.hosts.filter((h) => h.transport !== 'dial'), hlist);
       }
-      // Orphan reverse-mounts: mounts whose host was removed (or none listed).
+      // Orphan mounts: mounts whose machine was removed (or none listed).
       // Without this they'd be invisible AND unmanageable (review finding).
       const liveHostIds = new Set(hd.hosts.map((h) => h.id));
-      const orphans = this._hostMountsData.filter((m) => !liveHostIds.has(m.hostId));
+      const orphans = this._machineMountsData.filter((m) => !liveHostIds.has(m.hostId));
       if (orphans.length) {
         const olist = document.createElement('div');
         olist.className = 'mounts-list';
         olist.appendChild(Object.assign(document.createElement('div'), { className: 'empty-hint empty-hint-inline', textContent: tr('Mounts on removed machines — unmount to clean up') }));
-        for (const hmr of orphans) olist.appendChild(this._buildHostMountRow({ id: hmr.hostId, name: tr('(removed machine)') }, hmr));
+        for (const m of orphans) olist.appendChild(this._buildMachineMountRow({ id: m.hostId, name: tr('(removed machine)') }, m));
         root.appendChild(olist);
       }
       const addHost = document.createElement('button');
@@ -551,18 +527,59 @@ export function installSidebarMounts(Sidebar) {
       }
     },
 
+    // This machine as machine #0 (B-f3e8 ⑤): the local device is the same
+    // architecture as every other machine (its sessions run in the local
+    // daemon since the CS graduation) — the list says so. Presentation-level;
+    // sessions/files paths keep their local fast paths.
+    _buildLocalMachineRow() {
+      const row = document.createElement('div');
+      row.className = 'mounts-row';
+      const top = document.createElement('div');
+      top.className = 'mounts-row-top';
+      top.innerHTML = `
+        <span class="mounts-dot mounts-dot-ok" title="${escHtml(tr('This VibeSpace instance'))}"></span>
+        <b class="mounts-name">${escHtml(tr('This machine'))}</b>
+        <span class="mounts-badge" title="${escHtml(tr('The machine VibeSpace itself runs on — sessions and files here need no transport'))}">${escHtml(tr('LOCAL'))}</span>`;
+      const actions = document.createElement('span');
+      actions.className = 'mounts-row-actions';
+      const nb = document.createElement('button');
+      nb.className = 'mounts-icon-btn';
+      nb.innerHTML = MI.termNew; nb.title = tr('New session on this machine');
+      nb.onclick = (e) => { e.stopPropagation(); this.app.showNewSessionDialog?.({}); };
+      actions.append(nb);
+      top.appendChild(actions);
+      const sub = document.createElement('div');
+      sub.className = 'mounts-path';
+      sub.style.direction = 'ltr';
+      sub.textContent = tr('local · runs this VibeSpace');
+      row.append(top, sub);
+      return row;
+    },
+
+    // ONE row builder for every machine (B-f3e8): transport ssh (default) or
+    // dial. Status source differs (ssh = probe result, dial = live dialed-in
+    // link), actions differ only where a capability genuinely differs (dial
+    // has no Set-up — the pair command installs everything).
     _buildHostRow(h) {
+      const isDial = h.transport === 'dial';
       const row = document.createElement('div');
       row.className = 'mounts-row';
       row._hostId = h.id; // in-place replacement key (_autoTestHosts)
       const st = this._hostStatus?.[h.id]; // {ok, latencyMs, tools} | {error} | undefined
-      const dot = st ? (st.ok ? 'ok' : 'err') : 'off';
+      const dot = isDial ? (h.online ? 'ok' : 'off') : (st ? (st.ok ? 'ok' : 'err') : 'off');
+      const dotTip = isDial
+        ? (h.online ? tr('Dialed in — reachable now') : tr('Offline — the device’s daemon is not dialed in (start it with the install command)'))
+        : (st ? (st.ok ? `${st.latencyMs}ms` : (st.error || 'unreachable')) : 'Not tested yet');
+      const nameTip = isDial ? tr('Dial-out device — it connects TO this instance over a websocket (no ssh)') : `${h.user}@${h.host}:${h.port}`;
+      const badge = isDial
+        ? `<span class="mounts-badge${h.online ? '' : ' mounts-badge-red'}" title="${escHtml(tr('Dial-out device — it connects TO this instance over a websocket (no ssh)'))}">${h.online ? escHtml(tr('DEVICE')) : escHtml(tr('OFFLINE'))}</span>`
+        : (st?.ok && st.tools ? `<span class="mounts-badge${st.tools.claude && st.tools.dtach ? '' : ' mounts-badge-red'}" title="Ready to run sessions — dtach ${st.tools.dtach ? '✓' : '✗ (missing)'}, Node ${st.tools.node ? '✓' : '✗ (missing)'}, Claude ${st.tools.claude ? '✓' : '✗ (missing)'}. Click Set up to install what’s missing.">${st.tools.claude && st.tools.dtach ? 'READY' : 'NEEDS SETUP'}</span>` : '');
       const top = document.createElement('div');
       top.className = 'mounts-row-top';
       top.innerHTML = `
-        <span class="mounts-dot mounts-dot-${dot}" title="${st ? (st.ok ? `${st.latencyMs}ms` : escHtml(st.error || 'unreachable')) : 'Not tested yet'}"></span>
-        <b class="mounts-name" title="${escHtml(h.user)}@${escHtml(h.host)}:${h.port}">${escHtml(h.name)}</b>
-        ${st?.ok && st.tools ? `<span class="mounts-badge${st.tools.claude && st.tools.dtach ? '' : ' mounts-badge-red'}" title="Ready to run sessions — dtach ${st.tools.dtach ? '✓' : '✗ (missing)'}, Node ${st.tools.node ? '✓' : '✗ (missing)'}, Claude ${st.tools.claude ? '✓' : '✗ (missing)'}. Click Set up to install what’s missing.">${st.tools.claude && st.tools.dtach ? 'READY' : 'NEEDS SETUP'}</span>` : ''}`;
+        <span class="mounts-dot mounts-dot-${dot}" title="${escHtml(dotTip)}"></span>
+        <b class="mounts-name" title="${escHtml(nameTip)}">${escHtml(h.name)}</b>
+        ${badge}`;
       const actions = document.createElement('span');
       actions.className = 'mounts-row-actions';
       const ibtn = (svg, title, fn, cls = '') => {
@@ -582,66 +599,108 @@ export function installSidebarMounts(Sidebar) {
           try {
             const r = await api(`/api/hosts/${h.id}/test`, { method: 'POST' });
             this._hostStatus[h.id] = r;
-            const t = r.tools || {};
-            const tools = ['dtach', 'node', 'claude', 'codex'].filter(k => t[k]);
-            showToast(`${h.name} reachable · ${r.latencyMs}ms · ${tools.length ? tools.join(', ') : 'not set up yet — click Set up'}`);
+            if (r.dial) {
+              const i = r.info || {};
+              showToast(tr('{id} reachable — agent {v} on {plat}', { id: h.name, v: i.daemonVersion || '?', plat: [i.platform, i.arch].filter(Boolean).join('/') || '?' }));
+            } else {
+              const t = r.tools || {};
+              const tools = ['dtach', 'node', 'claude', 'codex'].filter(k => t[k]);
+              showToast(`${h.name} reachable · ${r.latencyMs}ms · ${tools.length ? tools.join(', ') : 'not set up yet — click Set up'}`);
+            }
           } catch (e) { this._hostStatus[h.id] = { ok: false, error: e.message }; throw e; }
         }),
-        ibtn(MI.wrench, 'Set up (install the tools needed to run agents)', () => { this._showBootstrapDialog(h); }),
+      );
+      if (!isDial) actions.append(ibtn(MI.wrench, 'Set up (install the tools needed to run agents)', () => { this._showBootstrapDialog(h); }));
+      actions.append(
         ibtn(MI.folderPush, tr('Share a folder from this instance onto this machine'), () => { this._showHostMountDialog(h); }),
-        ibtn(MI.folderPull, tr('Mount a folder from this machine into this workspace'), () => { this._showHostPullDialog(h); }),
-        ibtn(MI.termNew, 'New session on this host', () => { this.app.showNewSessionDialog?.({ hostId: h.id, hostName: h.name }); }),
-        ibtn(MI.cross, 'Remove host', async () => {
-          const ok = await showConfirmDialog({ title: `Remove "${h.name}"?`, message: 'Only the registry entry goes away — nothing on the remote machine is touched.', confirmText: 'Remove', danger: true });
-          if (ok) await api(`/api/hosts/${h.id}`, { method: 'DELETE' });
+        ibtn(MI.folderPull, tr('Mount a folder from this machine into this workspace'), () => { this._showMachinePullDialog(h); }),
+        ibtn(MI.termNew, isDial ? tr('New session on this device') : 'New session on this host', () => { this.app.showNewSessionDialog?.({ hostId: h.id, hostName: h.name }); }),
+        ibtn(MI.cross, isDial ? tr('Unpair (the device can no longer dial in)') : 'Remove host', async () => {
+          const ok = await showConfirmDialog(isDial
+            ? { title: tr('Unpair "{id}"?', { id: h.name }), message: tr('Its dial token is revoked; re-pairing mints a new one. Its mounted folders here are unmounted.'), confirmText: tr('Unpair'), danger: true }
+            : { title: `Remove "${h.name}"?`, message: 'Only the registry entry goes away — nothing on the remote machine is touched.', confirmText: 'Remove', danger: true });
+          if (ok) { await api(`/api/hosts/${h.id}`, { method: 'DELETE' }); if (isDial) showToast(tr('Unpaired')); }
         }, 'mounts-icon-danger'),
       );
       top.appendChild(actions);
       const sub = document.createElement('div');
       sub.className = 'mounts-path';
       sub.style.direction = 'ltr';
-      const keyLabel = h.keySource === 'imported' ? tr('using imported key')
-        : h.keySource === 'app' ? tr('using VibeSpace key')
-        : h.keySource === 'default' ? tr('using system ssh keys')
-        : (h.keyPath ? tr('using stored key') : ''); // pre-2.153.4 records: provenance unknown
-      sub.textContent = `${h.user}@${h.host}${h.port !== 22 ? ':' + h.port : ''}${keyLabel ? ' · ' + keyLabel : ''}`;
+      if (isDial) {
+        sub.textContent = h.online ? tr('dial-out device · connected') : tr('dial-out device · offline — run the install command on it');
+      } else {
+        const keyLabel = h.keySource === 'imported' ? tr('using imported key')
+          : h.keySource === 'app' ? tr('using VibeSpace key')
+          : h.keySource === 'default' ? tr('using system ssh keys')
+          : (h.keyPath ? tr('using stored key') : ''); // pre-2.153.4 records: provenance unknown
+        sub.textContent = `${h.user}@${h.host}${h.port !== 22 ? ':' + h.port : ''}${keyLabel ? ' · ' + keyLabel : ''}`;
+      }
       row.append(top, sub);
       return row;
     },
 
-    // A reverse-mount row: one of THIS instance's folders mounted on the host.
-    // Indented under its host row; shows folder → mountpoint, transport, and an
-    // unmount action.
-    _buildHostMountRow(h, hmr) {
+    // A machine-mount child row (B-f3e8 — BOTH directions, one builder):
+    //   push (dir:'push'): one of THIS instance's folders mounted on the
+    //     machine — badge shows the transport (tunnel/address), eject unmounts.
+    //   pull (dir:'pull'): the machine's folder mounted into THIS workspace —
+    //     3-state dot (live / machine-online / offline), remount ↻ when down,
+    //     open-in-Files, unmount.
+    _buildMachineMountRow(h, m) {
       const row = document.createElement('div');
       row.className = 'mounts-row mounts-row-child';
       const top = document.createElement('div');
       top.className = 'mounts-row-top';
-      const viaLabel = hmr.via === 'tunnel' ? tr('via tunnel') : tr('via address');
-      const viaTip = hmr.via === 'tunnel'
-        ? tr('Rides the device agent link — no public address or VPN needed')
-        : tr('Reached over agentd.publicUrl (no device agent on this host)');
-      top.innerHTML = `
-        <span class="mounts-dot mounts-dot-ok" title="${escHtml(hmr.mode === 'rw' ? tr('Read-write') : tr('Read-only'))}"></span>
-        <b class="mounts-name" title="${escHtml(hmr.folder)}">${escHtml(hmr.folder.split('/').pop() || hmr.folder)}</b>
-        <span class="mounts-badge" title="${escHtml(viaTip)}">${escHtml(viaLabel)}</span>`;
       const actions = document.createElement('span');
       actions.className = 'mounts-row-actions';
-      const unmount = document.createElement('button');
-      unmount.className = 'mounts-icon-btn mounts-icon-danger';
-      unmount.innerHTML = MI.eject; unmount.title = tr('Unmount from this machine');
-      unmount.onclick = async (e) => {
-        e.stopPropagation(); unmount.disabled = true;
-        try { await api(`/api/host-mounts/${h.id}/${hmr.id}`, { method: 'DELETE' }); showToast(tr('Unmounted')); }
+      if (m.dir === 'pull') {
+        const state = m.live ? 'ok' : (m.online ? 'off' : 'err');
+        top.innerHTML = `
+          <span class="mounts-dot mounts-dot-${state}" title="${m.live ? escHtml(tr('Mounted')) : escHtml(tr('Pending — remounts when the machine is reachable'))}"></span>
+          <b class="mounts-name" title="${escHtml(h.name || m.hostId)}:${escHtml(m.remotePath)} → ${escHtml(m.mountpoint)}">${escHtml(m.remotePath.split('/').pop() || m.remotePath)}</b>
+          <span class="mounts-badge" title="${escHtml(tr('Mounted at {mp} (read-only, over the device link)', { mp: m.mountpoint }))}">${escHtml(tr('from machine'))}</span>`;
+        if (!m.live) {
+          const re = document.createElement('button');
+          re.className = 'mounts-icon-btn';
+          re.innerHTML = MI.retry; re.title = m.online ? tr('Remount now') : tr('Remount (machine is offline — start its daemon first)');
+          re.onclick = async (e) => {
+            e.stopPropagation(); re.disabled = true;
+            try { await api(`/api/machine-mounts/${encodeURIComponent(m.id)}/remount`, { method: 'POST' }); showToast(tr('Mounted')); }
+            catch (err) { showToast(err.message, { type: 'error' }); }
+            this._renderMounts();
+          };
+          actions.append(re);
+        }
+        const open = document.createElement('button');
+        open.className = 'mounts-icon-btn';
+        open.innerHTML = MI.folder; open.title = tr('Open in Files');
+        open.onclick = () => this.app.openFileExplorer?.(m.mountpoint);
+        actions.append(open);
+      } else {
+        const viaLabel = m.via === 'tunnel' ? tr('via tunnel') : tr('via address');
+        const viaTip = m.via === 'tunnel'
+          ? tr('Rides the device agent link — no public address or VPN needed')
+          : tr('Reached over agentd.publicUrl (no device agent on this host)');
+        top.innerHTML = `
+          <span class="mounts-dot mounts-dot-ok" title="${escHtml(m.mode === 'rw' ? tr('Read-write') : tr('Read-only'))}"></span>
+          <b class="mounts-name" title="${escHtml(m.folder)}">${escHtml(m.folder.split('/').pop() || m.folder)}</b>
+          <span class="mounts-badge" title="${escHtml(viaTip)}">${escHtml(tr('on machine'))} · ${escHtml(viaLabel)}</span>`;
+      }
+      const un = document.createElement('button');
+      un.className = 'mounts-icon-btn mounts-icon-danger';
+      un.innerHTML = m.dir === 'pull' ? MI.cross : MI.eject;
+      un.title = m.dir === 'pull' ? tr('Unmount') : tr('Unmount from this machine');
+      un.onclick = async (e) => {
+        e.stopPropagation(); un.disabled = true;
+        try { await api(`/api/machine-mounts/${encodeURIComponent(m.id)}`, { method: 'DELETE' }); showToast(tr('Unmounted')); }
         catch (err) { showToast(err.message || 'Failed', { type: 'error' }); }
         this._renderMounts();
       };
-      actions.append(unmount);
+      actions.append(un);
       top.appendChild(actions);
       const sub = document.createElement('div');
       sub.className = 'mounts-path';
       sub.style.direction = 'ltr';
-      sub.textContent = `→ ${hmr.mountpoint}`;
+      sub.textContent = `→ ${m.mountpoint}`;
       row.append(top, sub);
       return row;
     },
@@ -663,7 +722,7 @@ export function installSidebarMounts(Sidebar) {
       ], tr('Mount'), async (v, { close }) => {
         if (!v.folder) throw new Error(tr('Choose a folder to share'));
         const h = hosts.find((x) => x.id === v.hostId) || { id: v.hostId, name: v.hostId };
-        const r = await api(`/api/host-mounts/${v.hostId}`, { method: 'POST', body: JSON.stringify({ folder: v.folder, mode: v.mode }) });
+        const r = await api(`/api/machine-mounts/${v.hostId}`, { method: 'POST', body: JSON.stringify({ dir: 'push', folder: v.folder, mode: v.mode }) });
         close();
         const via = r.via === 'tunnel' ? tr('over the device tunnel') : tr('over the public address');
         showToast(tr('Mounted at {mp} on {name} ({via})', { mp: r.mountpoint, name: h.name, via }));
@@ -678,7 +737,7 @@ export function installSidebarMounts(Sidebar) {
         { key: 'mountpoint', label: tr('Mount point on the machine (optional)'), placeholder: tr('default: ~/vibespace-remote/<folder>') },
       ], tr('Mount'), async (v, { close }) => {
         if (!v.folder) throw new Error(tr('Choose a folder to share'));
-        const r = await api(`/api/host-mounts/${h.id}`, { method: 'POST', body: JSON.stringify({ folder: v.folder, mode: v.mode, mountpoint: v.mountpoint || undefined }) });
+        const r = await api(`/api/machine-mounts/${h.id}`, { method: 'POST', body: JSON.stringify({ dir: 'push', folder: v.folder, mode: v.mode, mountpoint: v.mountpoint || undefined }) });
         close();
         const via = r.via === 'tunnel' ? tr('over the device tunnel') : tr('over the public address');
         showToast(tr('Mounted at {mp} on {name} ({via})', { mp: r.mountpoint, name: h.name, via }));
@@ -686,22 +745,36 @@ export function installSidebarMounts(Sidebar) {
       });
     },
 
-    // The PULL direction on a host row (user request: both directions on every
-    // machine): a one-field shortcut over the existing SFTP mount type — the
-    // host's connection details (address/user/port/key) prefill from its record.
-    _showHostPullDialog(h) {
-      this._mountsDialog(tr('Mount a folder from "{name}" into this workspace', { name: h.name }), [
-        { key: 'sshPath', label: tr('Folder on the machine (absolute path or ~)'), placeholder: `/home/${h.user}` },
-      ], tr('Mount'), async (v, { close }) => {
-        if (!v.sshPath) throw new Error(tr('Enter the folder path on the machine'));
-        const base = v.sshPath.split('/').filter(Boolean).pop() || 'files';
-        const r = await api('/api/mounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
-          type: 'sftp', name: `${h.name}: ${base}`,
-          sshHost: h.host, sshUser: h.user, sshPort: h.port || 22,
-          keyPath: h.keyPath || undefined, sshPath: v.sshPath,
-        }) });
-        await fetch(`/api/mounts/${r.id}/mount`, { method: 'POST' });
-        close(); showToast(tr('Storage connected')); this._renderMounts();
+    // The PULL direction on any machine row (B-f3e8 — ONE dialog for ssh and
+    // dial): the machine's folder mounted into this workspace over the device
+    // link (read-only). Path autocompletes against the MACHINE's own
+    // filesystem (real report: it completed LOCAL folders). ssh machines keep
+    // a read-write escape hatch — an SFTP storage mount (dial has no ssh).
+    _showMachinePullDialog(h) {
+      const isDial = h.transport === 'dial';
+      const fields = [
+        { key: 'remotePath', label: tr('Folder on the machine (absolute path)'), placeholder: isDial ? '/Users/me/Documents' : `/home/${h.user || 'me'}`, autocomplete: () => `/api/hosts/${h.id}/dir-complete` },
+        { key: 'mountpoint', label: tr('Mount point here (optional)'), placeholder: tr('default: ~/vibespace-machines/<machine>-<folder>') },
+      ];
+      if (!isDial) fields.push({ key: 'access', label: tr('Access'), type: 'select', options: [['ro', tr('Read-only (device link)')], ['rw', tr('Read-write (SFTP over ssh)')]] });
+      this._mountsDialog(tr('Mount a folder from "{name}" into this workspace', { name: h.name }), fields, tr('Mount'), async (v, { close }) => {
+        if (!v.remotePath) throw new Error(tr('Enter the folder path on the machine'));
+        if (!isDial && v.access === 'rw') {
+          // read-write wanted → the SFTP storage-mount path (ssh only)
+          const base = v.remotePath.split('/').filter(Boolean).pop() || 'files';
+          const r = await api('/api/mounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+            type: 'sftp', name: `${h.name}: ${base}`,
+            sshHost: h.host, sshUser: h.user, sshPort: h.port || 22,
+            keyPath: h.keyPath || undefined, sshPath: v.remotePath,
+          }) });
+          await fetch(`/api/mounts/${r.id}/mount`, { method: 'POST' });
+          close(); showToast(tr('Storage connected')); this._renderMounts();
+          return;
+        }
+        const r = await api(`/api/machine-mounts/${h.id}`, { method: 'POST', body: JSON.stringify({ dir: 'pull', remotePath: v.remotePath, mountpoint: v.mountpoint || undefined }) });
+        close();
+        showToast(tr('Mounted at {mp} (read-only, over the device link)', { mp: r.mountpoint }));
+        this._renderMounts();
       });
     },
 
@@ -774,123 +847,6 @@ export function installSidebarMounts(Sidebar) {
         this._hostStatus = this._hostStatus || {};
         try { this._hostStatus[r.id] = await api(`/api/hosts/${r.id}/test`, { method: 'POST' }); showToast('Host reachable'); }
         catch (e) { this._hostStatus[r.id] = { ok: false, error: e.message }; showToast('Added, but unreachable: ' + e.message, { type: 'error' }); }
-        this._renderMounts();
-      });
-    },
-
-    // A paired dial-out device rendered as a first-class MACHINE row (same
-    // visual language as _buildHostRow — user feedback: the first version was
-    // a centered blob with no actions). Actions today: test / mount a folder
-    // FROM the device / unpair; sessions-on-device is the next CS milestone.
-    _buildDeviceRow(dev, hostRec) {
-      const row = document.createElement('div');
-      row.className = 'mounts-row';
-      const top = document.createElement('div');
-      top.className = 'mounts-row-top';
-      top.innerHTML = `
-        <span class="mounts-dot mounts-dot-${dev.online ? 'ok' : 'off'}" title="${dev.online ? escHtml(tr('Dialed in — reachable now')) : escHtml(tr('Offline — the device’s daemon is not dialed in (start it with the install command)'))}"></span>
-        <b class="mounts-name">${escHtml((hostRec && hostRec.name) || dev.id)}</b>
-        <span class="mounts-badge${dev.online ? '' : ' mounts-badge-red'}" title="${escHtml(tr('Dial-out device — it connects TO this instance over a websocket (no ssh)'))}">${dev.online ? escHtml(tr('DEVICE')) : escHtml(tr('OFFLINE'))}</span>`;
-      const actions = document.createElement('span');
-      actions.className = 'mounts-row-actions';
-      const ibtn = (svg, title, fn) => {
-        const b = document.createElement('button');
-        b.className = 'mounts-icon-btn';
-        b.innerHTML = svg; b.title = title;
-        b.onclick = async (e) => {
-          e.stopPropagation(); b.disabled = true;
-          try { await fn(); } catch (err) { showToast(err.message || 'Failed', { type: 'error' }); }
-          this._renderMounts();
-        };
-        return b;
-      };
-      actions.append(
-        ibtn(MI.bolt, tr('Test connection'), async () => {
-          const r = await api(`/api/agentd/devices/${encodeURIComponent(dev.id)}/test`, { method: 'POST' });
-          if (!r.ok) throw new Error(r.error || 'unreachable');
-          const i = r.info || {};
-          showToast(tr('{id} reachable — agent {v} on {plat}', { id: dev.id, v: i.daemonVersion || '?', plat: [i.platform, i.arch].filter(Boolean).join('/') || '?' }));
-        }),
-        ibtn(MI.folderPull, tr('Mount a folder FROM this device into this workspace'), () => { this._showDeviceMountDialog(dev); }),
-        // Parity with ssh host rows (user request): both mount directions +
-        // open a session on the device. hostRec is the dial host record
-        // (host-dial-<id>); the mount/session paths route through the device
-        // link (HostMounts + the ws-handler dial branch).
-        ibtn(MI.folderPush, tr('Share a folder from this instance onto this machine'), () => { if (hostRec) this._showHostMountDialog(hostRec); }),
-        ibtn(MI.termNew, tr('New session on this device'), () => { if (hostRec) this.app.showNewSessionDialog?.({ hostId: hostRec.id, hostName: hostRec.name || dev.id }); }),
-        ibtn(MI.cross, tr('Unpair (the device can no longer dial in)'), async () => {
-          const ok = await showConfirmDialog({ title: tr('Unpair "{id}"?', { id: dev.id }), message: tr('Its dial token is revoked; re-pairing mints a new one. Its mounted folders here are unmounted.'), confirmText: tr('Unpair'), danger: true });
-          if (!ok) return;
-          await api(`/api/agentd/devices/${encodeURIComponent(dev.id)}`, { method: 'DELETE' });
-          showToast(tr('Unpaired'));
-        }),
-      );
-      top.appendChild(actions);
-      const sub = document.createElement('div');
-      sub.className = 'mounts-path';
-      sub.style.direction = 'ltr';
-      sub.textContent = dev.online ? tr('dial-out device · connected') : tr('dial-out device · offline — run the install command on it');
-      row.append(top, sub);
-      return row;
-    },
-
-    // Child row: a device folder mounted INTO this workspace (read-only).
-    // Same child-row language as host reverse-mounts (indent + accent border);
-    // the first cut invented a nonexistent class and rendered as a full-width
-    // sibling that read as another machine (real report: 布局显然有问题).
-    _buildDeviceMountRow(dev, dm) {
-      const row = document.createElement('div');
-      row.className = 'mounts-row mounts-row-child';
-      const top = document.createElement('div');
-      top.className = 'mounts-row-top';
-      const state = dm.live ? 'ok' : (dm.online ? 'off' : 'err');
-      top.innerHTML = `
-        <span class="mounts-dot mounts-dot-${state}" title="${dm.live ? escHtml(tr('Mounted')) : escHtml(tr('Pending — remounts when the device dials in'))}"></span>
-        <b class="mounts-name" title="${escHtml(dev.id)}:${escHtml(dm.remotePath)} → ${escHtml(dm.mountpoint)}">${escHtml(dm.remotePath.split('/').pop() || dm.remotePath)}</b>
-        <span class="mounts-badge" title="${escHtml(tr('Mounted at {mp} (read-only, over the dial link)', { mp: dm.mountpoint }))}">${escHtml(tr('from device'))}</span>`;
-      const actions = document.createElement('span');
-      actions.className = 'mounts-row-actions';
-      if (!dm.live) {
-        // stale after a server restart / failed heal — give the user a hand
-        // back (real report: gray dot, no reconnect option)
-        const re = document.createElement('button');
-        re.className = 'mounts-icon-btn';
-        re.innerHTML = MI.retry; re.title = dm.online ? tr('Remount now') : tr('Remount (device is offline — start its daemon first)');
-        re.onclick = async () => {
-          re.disabled = true;
-          try { await api(`/api/device-mounts/${encodeURIComponent(dm.id)}/remount`, { method: 'POST' }); showToast(tr('Mounted')); }
-          catch (e) { showToast(e.message, { type: 'error' }); }
-          this._renderMounts();
-        };
-        actions.append(re);
-      }
-      const open = document.createElement('button');
-      open.className = 'mounts-icon-btn';
-      open.innerHTML = MI.folder; open.title = tr('Open in Files');
-      open.onclick = () => this.app.openFileExplorer?.(dm.mountpoint);
-      const un = document.createElement('button');
-      un.className = 'mounts-icon-btn';
-      un.innerHTML = MI.cross; un.title = tr('Unmount');
-      un.onclick = async () => {
-        try { await api(`/api/device-mounts/${encodeURIComponent(dm.id)}`, { method: 'DELETE' }); showToast(tr('Unmounted')); }
-        catch (e) { showToast(e.message, { type: 'error' }); }
-        this._renderMounts();
-      };
-      actions.append(open, un);
-      top.appendChild(actions);
-      row.append(top);
-      return row;
-    },
-
-    _showDeviceMountDialog(dev) {
-      this._mountsDialog(tr('Mount a folder from "{id}"', { id: dev.id }), [
-        { key: 'remotePath', label: tr('Folder ON the device (absolute path)'), placeholder: '/Users/me/Documents' },
-        { key: 'mountpoint', label: tr('Mount point here (optional)'), placeholder: tr('default: ~/vibespace-devices/<device>-<folder>') },
-      ], tr('Mount'), async (v, { close }) => {
-        if (!v.remotePath) throw new Error(tr('Enter the folder path on the device'));
-        const r = await api(`/api/device-mounts/${encodeURIComponent(dev.id)}`, { method: 'POST', body: JSON.stringify({ remotePath: v.remotePath, mountpoint: v.mountpoint || undefined }) });
-        close();
-        showToast(tr('Mounted at {mp} (read-only, over the dial link)', { mp: r.mountpoint }));
         this._renderMounts();
       });
     },

@@ -421,7 +421,7 @@ export function installManageAgents(App, ctx = {}) {
       try {
         const hd = await fetchJson('/api/hosts');
         for (const h of hd?.hosts || []) {
-          const o = document.createElement('option'); o.value = h.id; o.textContent = `${h.name} (${h.user}@${h.host})`;
+          const o = document.createElement('option'); o.value = h.id; o.textContent = h.transport === 'dial' ? `${h.name} (${t('device')})` : `${h.name} (${h.user}@${h.host})`;
           hostSel.appendChild(o);
         }
       } catch {}

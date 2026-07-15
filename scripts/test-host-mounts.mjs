@@ -2,7 +2,7 @@
 // REVERSE MOUNT e2e (2.147.0, "互挂云盘" direction B): a real remote host
 // (AIDev) mounts THIS VibeSpace's storage over the WebDAV bridge, OS-aware.
 // Stands up a throwaway /dav server on a tailnet-reachable address, mints a
-// scoped token, drives HostMounts.mountOnHost against the real host over ssh,
+// scoped token, drives MachineMounts.mountPush against the real host over ssh,
 // then verifies (independent ssh) that this instance's files APPEAR in the
 // mountpoint on the remote and are readable — then unmounts + cleans up.
 // Usage: node scripts/test-host-mounts.mjs <hostId> [publicHost]
@@ -31,7 +31,7 @@ const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const { MountTokens, registerWebdav } = require('../src/webdav.js');
-const { HostMounts } = require('../src/host-mounts.js');
+const { MachineMounts } = require('../src/machine-mounts.js');
 const { HostManager } = require('../src/hosts.js');
 
 // fixture: a folder with a known file that should appear on the remote
@@ -52,7 +52,7 @@ console.log(`/dav test server on ${publicHost}:${PORT}, sharing ${shareDir}`);
 
 const hosts = new HostManager({ dataDir: path.join(repo, 'data') });
 hosts.dataPlaneOn = () => false; // use plain ssh for this test (data-plane path is covered by test-agentd-switchover)
-const hm = new HostMounts({
+const hm = new MachineMounts({
   dataDir: tmp, hosts, mountTokens: tokens,
   publicUrl: () => `http://${publicHost}:${PORT}`,
   broadcast: () => {},
@@ -61,7 +61,7 @@ const hm = new HostMounts({
 let mountId = null;
 try {
   console.log('— reverse mount this instance onto the remote host —');
-  const r = await hm.mountOnHost(hostId, { folder: shareDir, mode: 'ro' });
+  const r = await hm.mountPush(hostId, { folder: shareDir, mode: 'ro' });
   mountId = r.id;
   check('mount reported success', !!r.mountpoint, JSON.stringify(r));
   console.log(`    os=${r.os} method=${r.method} mp=${r.mountpoint}`);
@@ -80,7 +80,7 @@ try {
   check('multibyte filename + content readable', cat2.includes('互挂云盘'), JSON.stringify(cat2.slice(0, 120)));
 
   console.log('— unmount cleans up on the remote —');
-  await hm.unmountOnHost(hostId, mountId);
+  await hm.unmount(mountId);
   mountId = null;
   await sleep(1500);
   const gone = await sshRun([...sshBase, '--', `ls ${JSON.stringify(r.mountpoint)} 2>&1; echo "---"; mount 2>/dev/null | grep -c ${JSON.stringify(r.mountpoint)} || true`]);
@@ -89,7 +89,7 @@ try {
   failed++;
   console.error('  ✗ reverse mount threw:', e.message);
 } finally {
-  if (mountId) { try { await hm.unmountOnHost(hostId, mountId); } catch { } }
+  if (mountId) { try { await hm.unmount(mountId); } catch { } }
   srv.close();
   fs.rmSync(tmp, { recursive: true, force: true });
 }
