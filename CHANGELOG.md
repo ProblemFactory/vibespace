@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.153.2 — 2026-07-15
+- Device machine rows match ssh host rows exactly: action icons sit on the TOP line's right side (they were stacking on a second line — actions belong INSIDE `.mounts-row-top`), plus the same style sub-line ("dial-out device · connected/offline"). Daemon processes now show as `vibespace-device` in process listings (`process.title`; the full rename is graduation slice A).
+
 ## 2.153.1 — 2026-07-15
 - Device mount child rows use the real child-row language (`mounts-row-child` indent + accent border, folder basename + "from device" badge, full paths in the tooltip) — the first cut used a nonexistent class and rendered as a full-width sibling that read as another machine (real report).
 
