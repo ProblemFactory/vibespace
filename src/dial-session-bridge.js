@@ -45,6 +45,11 @@ class DialSessionBridge {
   close(sid) {
     const b = this._bridges.get(sid);
     if (!b) return;
+    // A PTY (terminal) device session is LIVE, not persistent — kill it on
+    // teardown so claude doesn't orphan on the device (review: the kill path
+    // otherwise never reached the device handle). PIPE (chat) sessions are the
+    // keeper model — leave them running for reattach.
+    if (b.ptyHandle) { try { b.ptyHandle.kill(); } catch { } b.ptyHandle = null; }
     try { b.server.close(); } catch { }
     this._bridges.delete(sid);
   }
@@ -53,6 +58,9 @@ class DialSessionBridge {
     sock.on('error', () => { });
     let authed = false;
     let handle = null; // device pipe-session handle
+    let isPty = false;
+    let pendingResize = null; // a resize that raced the open-session await
+    const bridge = this._bridges.get(sid);
     const mux = new Mux(sock, {
       onControl: async (msg) => {
         if (msg.op === 'hello') {
@@ -69,19 +77,25 @@ class DialSessionBridge {
         // pty is live; pty-wrapper respawns the attach on transport death.
         if (msg.op === 'open-session') {
           const chan = msg.chan;
+          isPty = true;
           try {
             const dm = await this.deviceForDial(deviceId);
             handle = await dm.openSession({ cmd: msg.cmd, args: msg.args, cols: msg.cols, rows: msg.rows, cwd: msg.cwd, env: msg.env });
+            if (bridge) bridge.ptyHandle = handle; // so close(sid) can kill it
             const ready = await handle.ready;
             handle.onData = (buf) => { try { mux.data(chan, buf); } catch { } };
             handle.onExit = (code) => { try { mux.control({ op: 'session-exit', chan, code }); } catch { } };
             mux.control({ op: 'session-open', chan, pid: ready.pid });
+            // apply a resize that arrived while we were still opening (the mux
+            // fires onControl un-serialized, so a startup SIGWINCH can beat the
+            // open — review finding)
+            if (pendingResize) { try { handle.resize(pendingResize.cols, pendingResize.rows); } catch { } pendingResize = null; }
           } catch (e) {
             mux.control({ op: 'session-error', chan, error: e.message });
           }
           return;
         }
-        if (msg.op === 'resize-session' && handle) { try { handle.resize(msg.cols, msg.rows); } catch { } return; }
+        if (msg.op === 'resize-session') { if (handle) { try { handle.resize(msg.cols, msg.rows); } catch { } } else { pendingResize = { cols: msg.cols, rows: msg.rows }; } return; }
         if (msg.op === 'kill-session' && handle) { try { handle.kill(); } catch { } return; }
         if (msg.op === 'open-pipe-session' || msg.op === 'attach-pipe-session') {
           const chan = msg.chan;
@@ -109,7 +123,16 @@ class DialSessionBridge {
         if (handle) { try { handle.write(buf.toString('utf-8')); } catch { } }
         try { mux.credit(chan, buf.length); } catch { }
       },
-      onDead: () => { /* attach process died — the device session lives on */ },
+      onDead: () => {
+        // A PIPE (chat) session is the keeper model — the daemon-owned child
+        // lives on and reattaches by offset, so leave it. A PTY (terminal)
+        // session is LIVE and only reachable through this attach; on attach
+        // death kill the device pty so claude doesn't orphan on the device
+        // (review HIGH: pty-wrapper's REMOTE_RETRY respawns attach → a fresh
+        // pty each flap, leaking the old claude forever otherwise).
+        if (isPty && handle) { try { handle.kill(); } catch { } }
+        if (isPty && bridge && bridge.ptyHandle === handle) bridge.ptyHandle = null;
+      },
     });
   }
 }

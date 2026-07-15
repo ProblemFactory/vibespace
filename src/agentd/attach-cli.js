@@ -95,10 +95,20 @@ if (cfg.pty) {
         return;
       }
       if (msg.op === 'session-open') { opened = true; log(`pty session open pid=${msg.pid}`); return; }
-      if (msg.op === 'session-exit') { log('pty session exit code=' + msg.code); process.exit(typeof msg.code === 'number' ? msg.code : 0); }
-      if (msg.op === 'auth-fail') { log('auth failed — host token mismatch'); process.exit(4); }
-      if (msg.op === 'proto-mismatch') { log('protocol mismatch'); process.exit(4); }
-      if (msg.op === 'session-error') { process.stdout.write('\r\n[vibespace] ' + (msg.error || 'session error') + '\r\n'); log('session error: ' + msg.error); process.exit(6); }
+      // A device-session END (clean OR crash) means the terminal is OVER —
+      // exit 0 so pty-wrapper FINALIZES instead of respawning. pty-wrapper's
+      // REMOTE_RETRY respawns on ANY nonzero exit, which turned a claude that
+      // exited (missing binary → sh 127, user `exit 1`, crash) into a 120×
+      // reconnect loop that never showed the real cause (review finding).
+      // Only a TRANSPORT death (onDead) exits nonzero → a real reconnect.
+      if (msg.op === 'session-exit') { log('pty session exit code=' + msg.code); process.exit(0); }
+      // Permanent failures likewise must NOT loop — print once, exit 0. The
+      // message must FLUSH before exit (a pipe write + immediate exit can
+      // truncate), so print then exit on the write callback.
+      const bail = (text, logMsg) => { log(logMsg); try { process.stdout.write('\r\n[vibespace] ' + text + '\r\n', () => process.exit(0)); } catch { process.exit(0); } setTimeout(() => process.exit(0), 200); };
+      if (msg.op === 'auth-fail') { return bail('device auth failed (re-pair the device).', 'auth failed — host token mismatch'); }
+      if (msg.op === 'proto-mismatch') { return bail('device/server version mismatch — update the device daemon.', 'protocol mismatch'); }
+      if (msg.op === 'session-error') { return bail(msg.error || 'session error', 'session error: ' + msg.error); }
     },
     onData(chan, buf) { if (chan !== CHAN) return; process.stdout.write(buf); mux.credit(chan, buf.length); },
     onDead(reason) { log('transport dead: ' + reason); process.exit(opened ? 1 : 5); },

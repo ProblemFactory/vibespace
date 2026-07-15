@@ -1464,20 +1464,27 @@ class App {
       const pinned = new Set(taskChips.map((s) => s.path));
       for (const cwd of cwds.filter((c) => !pinned.has(c)).slice(0, 8)) mkChip(cwd);
     };
+    const stillThisHost = () => (document.getElementById('input-host')?.value || '') === (hostId || '');
     if (hostId) {
       recentEl.innerHTML = `<span class="cwd-recent-loading">${t('loading host paths…')}</span>`;
       // Show the DEVICE/remote home as the empty-cwd hint (B-0d70: the
       // placeholder used to stay the LOCAL home, so a paired Mac showed
-      // /home/xingweil which doesn't exist there). Server also defaults an
-      // empty cwd to this same home now.
+      // /home/xingweil which doesn't exist there). Reset to a NEUTRAL hint
+      // BEFORE the async fetch so an offline/paired device whose /api/home
+      // 400s never leaves the stale local home showing (review).
       const cwdInput = document.getElementById('input-cwd');
+      if (cwdInput) cwdInput.placeholder = t('directory on this machine…');
       if (cwdInput) fetchJson(`/api/home?host=${encodeURIComponent(hostId)}`).then(d => {
-        if (d?.home && document.getElementById('input-host')?.value === hostId) cwdInput.placeholder = d.home;
+        if (d?.home && stillThisHost()) cwdInput.placeholder = d.home;
       }).catch(() => {});
       fetchJson(`/api/hosts/${hostId}/recent-cwds`).then(d => {
+        // GUARD: if the user switched hosts while this was in flight, don't
+        // paint another host's REMOTE paths over the current selection
+        // (review: a clicked chip would set a cross-host cwd).
+        if (!stillThisHost()) return;
         // strip the "host: " display prefix discovery may add
         paint((d?.cwds || []).map(c => c.includes(': ') ? c.split(': ').pop() : c));
-      }).catch(() => { recentEl.innerHTML = ''; });
+      }).catch(() => { if (stillThisHost()) recentEl.innerHTML = ''; });
     } else {
       const cwdInput = document.getElementById('input-cwd');
       if (cwdInput && this._localHome) cwdInput.placeholder = this._localHome;
