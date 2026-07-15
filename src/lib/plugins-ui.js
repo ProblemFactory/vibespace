@@ -64,11 +64,13 @@ export function installPluginsUI(App) {
         const api = (pathTail, opts) => fetchJson(`/api/plugins/${p.id}/${pathTail}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, ...opts })
           .then((x) => { if (x?.error) throw new Error(x.error); return x; });
 
-        // frp: no login/mode/flags — just install / start / stop / boot-toggle,
-        // and only when the relay is configured on this instance.
-        if (isFrp && p.configured === false) { body.appendChild(card); continue; }
+        // frp: no login/mode/flags. The relay config fields (below) always
+        // show so the user can enter/override the relay; install/start appear
+        // only once a relay is configured (env default or user-entered).
         if (p.mode !== 'system') {
-          if (!p.installed) {
+          if (isFrp && !p.configured) {
+            // no relay yet — show only the config fields (added after actions)
+          } else if (!p.installed) {
             btn(t('Install'), 'mounts-btn-primary', async () => {
               showToast(t('Downloading {name}…', { name: p.label }));
               await api('install');
@@ -110,6 +112,33 @@ export function installPluginsUI(App) {
           cb.onchange = () => api('enabled', { body: JSON.stringify({ enabled: cb.checked }) }).catch((e) => showToast(e.message, { type: 'error' }));
           lbl.append(cb, document.createTextNode(' ' + t('Start automatically with the server')));
           actions.appendChild(lbl);
+
+          // ── frp relay config (editable — the cluster injects defaults, the
+          //    user can override any of it) ──
+          if (isFrp) {
+            const cfg = p.config || {};
+            const row = (label, key, val, ph, isPw) => {
+              const r = document.createElement('div'); r.className = 'plugin-cfg-row';
+              const inp = document.createElement('input'); inp.className = 'plugin-cfg-flags'; inp.type = isPw ? 'password' : 'text';
+              inp.value = val || ''; inp.placeholder = ph || ''; inp.dataset.key = key;
+              r.append(Object.assign(document.createElement('span'), { className: 'plugin-cfg-label', textContent: label }), inp);
+              cfgBox.appendChild(r); return inp;
+            };
+            const iAddr = row(t('Relay address'), 'serverAddr', cfg.serverAddr, t('relay host'));
+            const iPort = row(t('Relay port'), 'serverPort', cfg.serverPort, '7000');
+            const iTok = row(t('Relay token'), 'token', cfg.hasToken ? '••••••••' : '', t('shared secret'), true);
+            const iSub = row(t('Subdomain host (optional)'), 'subDomainHost', cfg.subDomainHost, t('example.com → https://<random>.example.com'));
+            const saveRow = document.createElement('div'); saveRow.className = 'plugin-cfg-row';
+            const save = document.createElement('button'); save.className = 'mounts-btn'; save.textContent = t('Save config');
+            save.onclick = async () => {
+              const body = { serverAddr: iAddr.value, serverPort: iPort.value, subDomainHost: iSub.value };
+              if (iTok.value && iTok.value !== '••••••••') body.token = iTok.value; // don't clobber with the mask
+              try { await api('config', { body: JSON.stringify(body) }); showToast(t('Saved')); render(); } catch (e) { showToast(e.message, { type: 'error' }); }
+            };
+            saveRow.appendChild(save);
+            if (p.fromEnv) saveRow.append(Object.assign(document.createElement('span'), { className: 'plugin-cfg-hint', textContent: t('defaults come from the cluster — edit to override') }));
+            cfgBox.appendChild(saveRow);
+          }
 
           // ── Networking mode + extra flags (advanced config) — tailscale only ──
           if (!isFrp && p.installed) {

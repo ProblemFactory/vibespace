@@ -37,6 +37,21 @@ let echoSrv, published;
 try {
   const st0 = pm.status('frp');
   check('plugin reports configured (relay env present)', st0.configured === true && st0.publicHost === process.env.VIBESPACE_FRPS_ADDR, JSON.stringify(st0));
+  check('default-enabled when the cluster injects the relay env', st0.enabled === true && st0.fromEnv === true);
+
+  // ── config model: user override wins over env, clearing falls back ──
+  pm.setConfig('frp', { serverAddr: 'relay.example.com', serverPort: 7001 });
+  let sc = pm.status('frp');
+  check('user config overrides the env relay', sc.config.serverAddr === 'relay.example.com' && sc.config.serverPort === 7001);
+  pm.setConfig('frp', { subDomainHost: 'preview.example.com' });
+  check('subdomain host stored (switches publish to SNI mode)', pm.status('frp').subDomainHost === 'preview.example.com');
+  pm.setEnabled('frp', false);
+  check('user can disable the default-on plugin', pm.status('frp').enabled === false);
+  pm.setEnabled('frp', true);
+  // clear all overrides → back to the env defaults for the real publish below
+  pm.setConfig('frp', { serverAddr: '', serverPort: '', subDomainHost: '' });
+  sc = pm.status('frp');
+  check('clearing overrides falls back to the env relay + TCP mode', sc.config.serverAddr === process.env.VIBESPACE_FRPS_ADDR && !sc.subDomainHost);
 
   await pm.install('frp');
   check('frpc installs', pm.status('frp').installed === true);

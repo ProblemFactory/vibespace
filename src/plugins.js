@@ -110,6 +110,21 @@ class PluginManager {
   }
 
   setConfig(id, patch = {}) {
+    if (id === 'frp') {
+      // user override of the cluster-injected relay defaults (empty string ⇒
+      // clear the override → fall back to env). Restart if running to apply.
+      const rec = this._rec('frp');
+      const c = rec.config = rec.config || {};
+      const set = (k, v, max = 200) => { if (v === undefined) return; const s = String(v).trim().slice(0, max); if (s) c[k] = s; else delete c[k]; };
+      set('serverAddr', patch.serverAddr);
+      if (patch.serverPort !== undefined) { const n = Number(patch.serverPort); if (n > 0 && n < 65536) c.serverPort = n; else delete c.serverPort; }
+      set('token', patch.token, 200);
+      set('subDomainHost', patch.subDomainHost);
+      this._save();
+      if (this._frpDaemonPid()) { try { this._frpStop(); } catch { } setTimeout(() => { try { this._frpStart(); } catch { } }, 800); }
+      this._notify();
+      return this._frpStatus().config;
+    }
     if (id !== 'tailscale') throw new Error('unknown plugin: ' + id);
     const rec = this._rec('tailscale');
     if (patch.upFlags !== undefined) rec.upFlags = String(patch.upFlags || '').slice(0, 500);
@@ -126,10 +141,23 @@ class PluginManager {
   }
 
   // Boot replay: rootfs is volatile — restart enabled plugins that were up.
+  // frp is special: the cluster injects the relay env + wants it default-ON, so
+  // it replays whenever effective-enabled + configured (no prior desiredUp
+  // needed — a fresh pod has no state yet). It auto-installs frpc if missing.
   bootReplay() {
     for (const id of Object.keys(this.defs())) {
-      const rec = this._state.plugins[id];
-      if (!rec?.enabled || !rec?.desiredUp) continue;
+      const rec = this._state.plugins[id] || {};
+      if (id === 'frp') {
+        if (!this._frpEffectiveEnabled() || !this._frpConfigured()) continue;
+        (async () => {
+          try {
+            if (!this._frpBin()) { console.log('[plugins] boot: installing frpc (relay default-on)'); await this._frpInstall(); }
+            if (!this._frpDaemonPid()) { console.log('[plugins] boot replay: starting frp'); this._frpStart(); }
+          } catch (e) { console.warn('[plugins] boot replay frp failed:', e.message); }
+        })();
+        continue;
+      }
+      if (!rec.enabled || !rec.desiredUp) continue;
       try {
         const st = this.status(id);
         if (!st.running && st.installed && st.mode !== 'system') {
@@ -363,7 +391,31 @@ class PluginManager {
     fs.writeFileSync(f, pw, { mode: 0o600 });
     return pw;
   }
-  _frpConfigured() { return !!(FRPS_ADDR && FRPS_TOKEN); }
+  // Effective relay config: USER override (data/plugins.json config) wins over
+  // the cluster-injected ENV defaults (user directive: the fleet auto-injects
+  // VIBESPACE_FRPS_* as defaults + enables the plugin; the user can change any
+  // of it in the plugin UI).
+  _frpCfg() {
+    const c = (this._state.plugins.frp || {}).config || {};
+    return {
+      serverAddr: c.serverAddr || FRPS_ADDR,
+      serverPort: Number(c.serverPort || FRPS_PORT),
+      token: c.token || FRPS_TOKEN,
+      subDomainHost: c.subDomainHost || process.env.VIBESPACE_FRPS_SUBDOMAIN_HOST || '',
+      portMin: Number(c.portMin || FRP_PORT_MIN),
+      portMax: Number(c.portMax || FRP_PORT_MAX),
+      fromEnv: !!(FRPS_ADDR && FRPS_TOKEN),   // was the RELAY provided by the cluster?
+    };
+  }
+  _frpConfigured() { const c = this._frpCfg(); return !!(c.serverAddr && c.token); }
+  // Default-enabled when the cluster injects the relay env AND the user hasn't
+  // explicitly turned it off (rec.enabled === false). Undefined = follow env.
+  _frpEffectiveEnabled() {
+    const rec = this._state.plugins.frp || {};
+    if (rec.enabled === false) return false;
+    if (rec.enabled === true) return true;
+    return this._frpCfg().fromEnv; // cluster default-on
+  }
   _frpDaemonPid() {
     try {
       const pid = Number(fs.readFileSync(this._frpPidFile(), 'utf-8').trim());
@@ -373,12 +425,13 @@ class PluginManager {
   }
   _frpWriteConf() {
     const pw = this._frpAdminPw();
+    const cfg = this._frpCfg();
     fs.mkdirSync(this._frpProxiesDir(), { recursive: true, mode: 0o700 });
     const toml = [
-      `serverAddr = "${FRPS_ADDR}"`,
-      `serverPort = ${FRPS_PORT}`,
+      `serverAddr = "${cfg.serverAddr}"`,
+      `serverPort = ${cfg.serverPort}`,
       `auth.method = "token"`,
-      `auth.token = "${FRPS_TOKEN}"`,
+      `auth.token = "${cfg.token}"`,
       `webServer.addr = "127.0.0.1"`,
       `webServer.port = ${FRP_ADMIN_PORT}`,
       `webServer.user = "vibespace"`,
@@ -444,15 +497,21 @@ class PluginManager {
 
   _frpStatus() {
     const rec = this._state.plugins.frp || {};
+    const c = this._frpCfg();
     return {
       installed: !!this._frpBin(),
       configured: this._frpConfigured(),
-      server: this._frpConfigured() ? `${FRPS_ADDR}:${FRPS_PORT}` : null,
-      publicHost: FRPS_ADDR || null,
+      server: this._frpConfigured() ? `${c.serverAddr}:${c.serverPort}` : null,
+      publicHost: c.serverAddr || null,
+      subDomainHost: c.subDomainHost || null,     // subdomain mode when set
+      fromEnv: c.fromEnv,                          // relay came from the cluster env
       running: !!this._frpDaemonPid(),
       pid: this._frpDaemonPid() || undefined,
+      enabled: this._frpEffectiveEnabled(),        // default-on when cluster-injected
       desiredUp: !!rec.desiredUp,
-      portRange: [FRP_PORT_MIN, FRP_PORT_MAX],
+      portRange: [c.portMin, c.portMax],
+      // echo the CURRENT effective config so the UI can prefill editable fields
+      config: { serverAddr: c.serverAddr, serverPort: c.serverPort, hasToken: !!c.token, subDomainHost: c.subDomainHost },
     };
   }
 
@@ -467,27 +526,46 @@ class PluginManager {
     try { return JSON.parse(t); } catch { return t; }
   }
   async _frpReload() { return this._frpAdmin('/api/reload', 'GET'); }
-  async _frpProxyStatus() {
+  async _frpProxyStatus(kind = 'tcp') {
     const s = await this._frpAdmin('/api/status', 'GET');
-    return (s && s.tcp) || [];
+    return (s && s[kind]) || [];
   }
 
-  /** Publish a LOCAL port to the public internet via the relay. Picks a public
-   *  TCP port (retry on collision — the relay is fleet-shared), returns the URL.
-   *  name = a stable proxy name (e.g. the port-forward id). */
+  /** Publish a LOCAL port to the public internet via the relay. If a
+   *  subDomainHost is configured → a random `https://<sub>.<host>` subdomain
+   *  (the SNI broker); else a TCP port map `http://<relay>:<port>/` (retrying
+   *  on collision — the relay is fleet-shared). name = a stable proxy name. */
   async frpPublish(name, localPort, { preferPort = 0 } = {}) {
     if (!this._frpConfigured()) throw new Error('public URLs are not available — the frp relay is not configured on this instance');
     if (!this._frpDaemonPid()) { this._frpStart(); await new Promise((r) => setTimeout(r, 1500)); }
+    const cfg = this._frpCfg();
     const safe = String(name).replace(/[^\w-]/g, '_').slice(0, 60);
-    // deterministic-ish port from a hash so re-publishing the same forward
-    // tends to reuse its URL, with random fallbacks on collision.
-    const cand = [];
-    if (preferPort >= FRP_PORT_MIN && preferPort <= FRP_PORT_MAX) cand.push(preferPort);
-    const span = FRP_PORT_MAX - FRP_PORT_MIN + 1;
-    let seed = 0; for (const c of safe) seed = (seed * 31 + c.charCodeAt(0)) >>> 0;
-    cand.push(FRP_PORT_MIN + (seed % span));
-    for (let i = 0; i < 8; i++) cand.push(FRP_PORT_MIN + Math.floor(((seed = (seed * 1103515245 + 12345) >>> 0) / 0xffffffff) * span));
     const file = path.join(this._frpProxiesDir(), safe + '.toml');
+
+    // ── subdomain (SNI) mode — a random hostname per publish ──
+    if (cfg.subDomainHost) {
+      const sub = 'vs' + require('crypto').randomBytes(5).toString('hex'); // e.g. vs3f9a1c2b4d
+      const toml = `[[proxies]]\nname = "${safe}"\ntype = "https"\nsubdomain = "${sub}"\n[proxies.plugin]\ntype = "https2http"\nlocalAddr = "127.0.0.1:${localPort}"\ncrtPath = ""\nkeyPath = ""\nhostHeaderRewrite = "127.0.0.1"\n`;
+      fs.writeFileSync(file, toml, { mode: 0o600 });
+      try { await this._frpReload(); } catch (e) { throw new Error('frpc reload failed: ' + e.message); }
+      for (let t = 0; t < 12; t++) {
+        await new Promise((r) => setTimeout(r, 400));
+        let st = []; try { st = await this._frpProxyStatus('https'); } catch { }
+        const p = st.find((x) => x.name === safe);
+        if (p && p.status === 'running') { this._notify(); return { name: safe, subdomain: sub, url: `https://${sub}.${cfg.subDomainHost}/`, publicHost: `${sub}.${cfg.subDomainHost}` }; }
+        if (p && (p.status === 'error' || p.status === 'closed')) break;
+      }
+      try { fs.unlinkSync(file); await this._frpReload(); } catch { }
+      throw new Error('could not publish the subdomain on the relay (is the domain / DNS set up?)');
+    }
+
+    // ── TCP port mode (works with just the relay IP) ──
+    const cand = [];
+    if (preferPort >= cfg.portMin && preferPort <= cfg.portMax) cand.push(preferPort);
+    const span = cfg.portMax - cfg.portMin + 1;
+    let seed = 0; for (const c of safe) seed = (seed * 31 + c.charCodeAt(0)) >>> 0;
+    cand.push(cfg.portMin + (seed % span));
+    for (let i = 0; i < 8; i++) cand.push(cfg.portMin + Math.floor(((seed = (seed * 1103515245 + 12345) >>> 0) / 0xffffffff) * span));
     let lastErr = '';
     for (const remotePort of cand) {
       const toml = `[[proxies]]\nname = "${safe}"\ntype = "tcp"\nlocalIP = "127.0.0.1"\nlocalPort = ${localPort}\nremotePort = ${remotePort}\n`;
@@ -498,7 +576,7 @@ class PluginManager {
         await new Promise((r) => setTimeout(r, 400));
         let st = []; try { st = await this._frpProxyStatus(); } catch { }
         const p = st.find((x) => x.name === safe);
-        if (p && p.status === 'running') { this._notify(); return { name: safe, remotePort, url: `http://${FRPS_ADDR}:${remotePort}/`, publicHost: FRPS_ADDR }; }
+        if (p && p.status === 'running') { this._notify(); return { name: safe, remotePort, url: `http://${cfg.serverAddr}:${remotePort}/`, publicHost: cfg.serverAddr }; }
         if (p && (p.status === 'error' || p.status === 'closed')) { lastErr = p.err || 'port unavailable'; break; }
       }
     }

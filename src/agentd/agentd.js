@@ -80,7 +80,7 @@ if (process.argv.includes('--stdio')) {
         });
         child.unref();
       }
-      if (tries > 40) { process.stderr.write('agentd --stdio: daemon unreachable\n'); process.exit(6); }
+      if (tries > 40) { process.stderr.write('vibespace-device --stdio: daemon unreachable\n'); process.exit(6); }
       setTimeout(() => connect(tries + 1), 250);
     });
   };
@@ -138,7 +138,10 @@ function acquireSingleton() {
         try { cmd = fs.readFileSync('/proc/' + pid + '/cmdline', 'utf-8').replace(/\0/g, ' '); } catch { }
         let alive = false;
         try { process.kill(pid, 0); alive = true; } catch { }
-        if (alive && (cmd === '' || cmd.includes('agentd'))) return false; // genuine second instance
+        // recognize our own daemon by EITHER the bundle name or the process
+        // title (process.title='vibespace-device' overwrites /proc/cmdline on
+        // Linux, so the old 'agentd'-only check could miss a live sibling)
+        if (alive && (cmd === '' || cmd.includes('agentd') || cmd.includes('vibespace-device'))) return false; // genuine second instance
         fs.unlinkSync(LOCK); // stale (dead or recycled pid) — retry
       } catch { return false; }
     }
@@ -148,7 +151,7 @@ function acquireSingleton() {
 
 if (!process.argv.includes('--stdio')) {
 if (!acquireSingleton()) {
-  process.stderr.write('agentd: already running\n');
+  process.stderr.write('vibespace-device: already running\n');
   process.exit(3);
 }
 
@@ -159,7 +162,7 @@ const tokenSha = (() => {
   } catch { return null; }
 })();
 
-log(`agentd ${VERSION} starting (proto ${PROTO_VERSION}, pid ${process.pid})`);
+log(`vibespace-device ${VERSION} starting (proto ${PROTO_VERSION}, pid ${process.pid})`);
 fs.writeFileSync(path.join(STATE, 'agentd.pid'), String(process.pid));
 
 // ── upgrade: receive a new bundle on chan 1, land it versioned, re-exec ──
