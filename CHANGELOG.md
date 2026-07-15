@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.154.1 — 2026-07-15
+- **Rename slice A (graduation): everything user-facing says `vibespace-device`.** Fresh installs save and run `vibespace-device.js` (dial-out roots at `~/.vibespace/device@<instance>`), the served endpoints are `/vibespace-device.js` + `/vibespace-device-install.sh|.ps1` (the old `/agentd*` URLs stay as PERMANENT aliases so existing docs/pairings keep working), the pairing dialog emits the new commands, and the daemon's self-upgrade now re-lands under **its own current filename** (a hardcoded `agentd.js` would have silently renamed fresh installs back on their first upgrade). Existing installs keep running untouched — they'll show as `vibespace-device` in process listings after their next self-upgrade (process.title), and adopt the new filename whenever re-paired. Internal source/flags rename (src/agentd/, agentd.* settings) lands with the hosts-model merge (slice B).
+
 ## 2.154.0 — 2026-07-15
 - **Both mount directions on every machine row** (user request): next to "share a folder onto this machine" (push icon), hosts now have "mount a folder from this machine into this workspace" (pull icon) — a one-field shortcut that creates and connects an SFTP mount prefilled with the host's address/user/port/key.
 - **Bridge tokens say what they're for** (user report: `host:host-2c4517af` 语义不明): a reverse-mount's token now reads "Reverse-mount token — \"frps-server\" accesses /home" with "Read-write · revoking breaks that machine's mount"; tokens of removed machines are labeled as such; hand-minted share tokens keep their given names.

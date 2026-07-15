@@ -147,7 +147,11 @@ function beginUpgrade(mux, { version, size }) {
       if (got >= size) {
         fs.fsyncSync(fd);
         fs.closeSync(fd);
-        fs.renameSync(tmp, path.join(dir, 'agentd.js'));
+        // keep whatever filename THIS install runs under (fresh installs are
+        // vibespace-device.js, legacy ones agentd.js) — a hardcoded name here
+        // would silently rename the daemon back on its first self-upgrade
+        const selfName = path.basename(process.argv[1] || 'agentd.js');
+        fs.renameSync(tmp, path.join(dir, selfName));
         // atomic current repoint: symlink swap via rename
         const curTmp = path.join(ROOT, '.current.tmp');
         try { fs.unlinkSync(curTmp); } catch { }
@@ -161,7 +165,7 @@ function beginUpgrade(mux, { version, size }) {
           const { spawn } = require('child_process');
           try { fs.unlinkSync(LOCK); } catch { }
           try { fs.unlinkSync(SOCK); } catch { }
-          const child = spawn(process.execPath, [path.join(dir, 'agentd.js')], {
+          const child = spawn(process.execPath, [path.join(dir, path.basename(process.argv[1] || 'agentd.js'))], {
             detached: true, stdio: 'ignore',
             env: { ...process.env, VIBESPACE_AGENTD_VERSION: version },
           });

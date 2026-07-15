@@ -31,7 +31,7 @@ esac; done
 # The standing daemon (ssh-reachable machine) keeps the classic shared root.
 if [ -z "${VIBESPACE_AGENTD_ROOT:-}" ] && [ -n "$DIAL_URL" ]; then
   DIAL_HOST=$(printf '%s' "$DIAL_URL" | sed -E 's|^[a-z]+://([^/:?]+).*|\1|' | tr -cd 'A-Za-z0-9.-')
-  ROOT="$HOME/.vibespace/agentd@${DIAL_HOST:-dial}"
+  ROOT="$HOME/.vibespace/device@${DIAL_HOST:-dial}"
 else
   ROOT="${VIBESPACE_AGENTD_ROOT:-$HOME/.vibespace/agentd}"
 fi
@@ -44,9 +44,9 @@ VER="${VIBESPACE_AGENTD_VERSION:-standalone}"
 mkdir -p "$ROOT/$VER" "$ROOT/state"; chmod 700 "$ROOT" "$ROOT/state"
 if [ -n "$BUNDLE_URL" ]; then
   echo "→ fetching agentd bundle from $BUNDLE_URL"
-  curl -fsSL -o "$ROOT/$VER/agentd.js" "$BUNDLE_URL"
+  curl -fsSL -o "$ROOT/$VER/vibespace-device.js" "$BUNDLE_URL"
 elif [ -f "./data/bin/vibespace-agentd.js" ]; then
-  cp ./data/bin/vibespace-agentd.js "$ROOT/$VER/agentd.js"
+  cp ./data/bin/vibespace-agentd.js "$ROOT/$VER/vibespace-device.js"
 else
   echo "no --bundle-url and no local bundle; pass --bundle-url <vibespace>/agentd.js"; exit 1
 fi
@@ -67,7 +67,7 @@ echo "→ host token at $ROOT/state/token"
 # shell; and ALWAYS verify the process actually survived before claiming ✓.
 # the daemon derives its root from this env (default would be the shared root)
 export VIBESPACE_AGENTD_ROOT="$ROOT"
-START=(node "$ROOT/current/agentd.js")
+START=(node "$ROOT/current/vibespace-device.js")
 if [ -n "$DIAL_URL" ]; then
   echo "→ starting daemon with dial-out to $DIAL_URL"
   START+=(--dial "$DIAL_URL" --dial-token "$DIAL_TOKEN")
@@ -81,9 +81,9 @@ else
 fi
 PID=$!
 sleep 2
-if kill -0 "$PID" 2>/dev/null || pgrep -f "$ROOT/current/agentd.js" >/dev/null 2>&1; then
+if kill -0 "$PID" 2>/dev/null || pgrep -f "$ROOT/current/vibespace-device.js" >/dev/null 2>&1; then
   echo "✓ vibespace-agentd running (pid $PID). Log: $ROOT/state/agentd.log  Output: $ROOT/state/agentd.out"
-  echo "  Stop: pkill -f '$ROOT/current/agentd.js'"
+  echo "  Stop: pkill -f '$ROOT/current/vibespace-device.js'"
 else
   echo "✗ the daemon exited immediately — last output:"
   tail -5 "$ROOT/state/agentd.out" 2>/dev/null
