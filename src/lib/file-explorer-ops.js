@@ -158,6 +158,8 @@ export function installExplorerOps(FileExplorer) {
     _buildMenu(x, y, items) {
     document.querySelectorAll('.context-menu').forEach(m => m.remove());
     const menu = document.createElement('div'); menu.className = 'context-menu';
+    menu.dataset.popover = '1'; // global Escape protocol
+    menu.style.visibility = 'hidden'; // clamped below before first paint
     menu.style.left = x + 'px'; menu.style.top = y + 'px';
     for (const item of items) {
       if (item.sep) { const d = document.createElement('div'); d.className = 'context-menu-sep'; menu.appendChild(d); continue; }
@@ -175,6 +177,14 @@ export function installExplorerOps(FileExplorer) {
             sub.appendChild(se);
           }
           menu.appendChild(sub);
+          // clamp the submenu into the viewport (same protocol as the menu
+          // itself — bottom/right-edge submenus ran off-screen)
+          requestAnimationFrame(() => {
+            const r = sub.getBoundingClientRect();
+            if (r.right > window.innerWidth) sub.style.left = (-sub.offsetWidth) + 'px';
+            const overflowY = r.bottom - window.innerHeight;
+            if (overflowY > 0) sub.style.top = Math.max(0, (el.offsetTop - menu.scrollTop) - overflowY - 4) + 'px';
+          });
         };
       } else {
         // hovering a plain item must dismiss a sibling's open submenu —
@@ -185,6 +195,21 @@ export function installExplorerOps(FileExplorer) {
       menu.appendChild(el);
     }
     document.body.appendChild(menu);
+    // Keep the menu on screen (this builder predates utils.showContextMenu and
+    // had NO clamping — real report: bottom-of-screen item menus ran off the
+    // viewport). Over-tall menus cap + scroll so the tail stays reachable.
+    let mr = menu.getBoundingClientRect();
+    const vw = window.innerWidth, vh = window.innerHeight;
+    if (mr.height > vh - 8) {
+      menu.style.maxHeight = (vh - 8) + 'px';
+      menu.style.overflowY = 'auto';
+      mr = menu.getBoundingClientRect();
+    }
+    if (mr.right > vw) menu.style.left = Math.max(0, vw - mr.width - 4) + 'px';
+    if (mr.bottom > vh) menu.style.top = Math.max(0, vh - mr.height - 4) + 'px';
+    if (mr.left < 0) menu.style.left = '4px';
+    if (mr.top < 0) menu.style.top = '4px';
+    menu.style.visibility = '';
     attachPopoverClose(menu);
   },
 

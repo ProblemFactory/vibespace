@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.161.1 — 2026-07-15
+- **The file explorer's context menu is the one that ran off-screen** (follow-up to 2.161.0 — that fixed `showContextMenu`, but the explorer has its OWN menu builder that predates it and had NO clamping at all): item/background menus now clamp into the viewport, over-tall menus cap + scroll, submenus flip/shift at the edges, and Escape closes them like every other popover.
+- **双向挂载用语统一为「本 VibeSpace」** (user feedback: 一会 VibeSpace 一会工作区): push = 把本 VibeSpace 的文件夹挂载到"{机器}", pull = 把"{机器}"的文件夹挂载进本 VibeSpace — tooltips, dialog titles and field labels all agree now.
+
 ## 2.161.0 — 2026-07-15
 - **Pairing installer 401 fixed** (real Mac report): the 2.154.x rename added the `/vibespace-device-install.sh|.ps1|/vibespace-device.js` routes but not their auth exemptions — every auth-enabled instance rejected the NEW pairing command with 401 (only the legacy `/agentd-install.sh` names worked). All six path generations are now cookie-exempt (the bundle is not secret; dial-in is gated by the per-device token).
 - **Remote Terminate actually terminates** (real report: terminate一直不成功): the sidebar's Terminate for an EXTERNAL/tmux session on a REMOTE host sent the pid to the LOCAL kill route, which silently failed forever (and a colliding local pid could even have passed the claude check). `/api/kill-pid` is host-aware now — `hosts.killRemotePid` validates the pid is a claude/codex process ON the machine (device link first, ssh fallback) before SIGTERM, invalidates that host's discovery cache, and the client shows a success/failure toast instead of nothing.

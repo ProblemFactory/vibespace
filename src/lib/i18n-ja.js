@@ -1840,7 +1840,7 @@ export default {
   "Unmount from this machine": "このマシンからアンマウント",
   "Unmounted": "アンマウントしました",
   "Share a folder onto \"{name}\"": "フォルダを「{name}」にマウント",
-  "Folder on THIS instance to mount on the machine": "このインスタンス上でマシンにマウントするフォルダ",
+  "Folder on THIS instance to mount on the machine": "この VibeSpace 上の、マシンにマウントするフォルダ",
   "Mount point on the machine (optional)": "マシン上のマウントポイント（任意）",
   "default: ~/vibespace-remote/<folder>": "デフォルト：~/vibespace-remote/<folder>",
   "Mount": "マウント",
@@ -1859,7 +1859,7 @@ export default {
   "Mount to a remote machine…": "リモートマシンにマウント…",
   "Mount this folder onto a machine": "このフォルダをマシンにマウント",
   "Machine": "マシン",
-  "Folder on THIS instance to mount": "このインスタンス上でマウントするフォルダ",
+  "Folder on THIS instance to mount": "この VibeSpace 上のマウントするフォルダ",
   "No remote machines yet — add one in the Remote tab": "リモートマシンがまだありません — 「リモート」タブで追加してください",
   "Pair a device (no ssh — it dials out)": "デバイスをペアリング（ssh 不要 — デバイス側から発信）",
   "Pair a device": "デバイスをペアリング",
@@ -1941,4 +1941,5 @@ export default {
   "Terminate failed": "終了に失敗しました",
   "Attaching \"{name}\" is taking unusually long — check the connection or reload the tab": "「{name}」への接続に時間がかかっています — 接続を確認するかタブを再読み込みしてください",
   "Creating the session is taking unusually long — check the connection or reload the tab": "セッションの作成に時間がかかっています — 接続を確認するかタブを再読み込みしてください",
+  "Mount a folder from \"{name}\" into this VibeSpace": "「{name}」のフォルダをこの VibeSpace にマウント",
 };

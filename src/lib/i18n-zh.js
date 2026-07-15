@@ -1840,7 +1840,7 @@ export default {
   "Unmount from this machine": "从这台机器卸载",
   "Unmounted": "已卸载",
   "Share a folder onto \"{name}\"": "把文件夹挂载到 “{name}”",
-  "Folder on THIS instance to mount on the machine": "本实例上要挂载到该机器的文件夹",
+  "Folder on THIS instance to mount on the machine": "本 VibeSpace 上要挂载到该机器的文件夹",
   "Mount point on the machine (optional)": "该机器上的挂载点（可选）",
   "default: ~/vibespace-remote/<folder>": "默认：~/vibespace-remote/<folder>",
   "Mount": "挂载",
@@ -1859,7 +1859,7 @@ export default {
   "Mount to a remote machine…": "挂载到远程机器…",
   "Mount this folder onto a machine": "把此文件夹挂载到某台机器",
   "Machine": "机器",
-  "Folder on THIS instance to mount": "本实例上要挂载的文件夹",
+  "Folder on THIS instance to mount": "本 VibeSpace 上要挂载的文件夹",
   "No remote machines yet — add one in the Remote tab": "还没有远程机器 — 在“远程”标签页添加",
   "Pair a device (no ssh — it dials out)": "配对设备（无需 ssh — 它主动拨出）",
   "Pair a device": "配对设备",
@@ -1941,4 +1941,5 @@ export default {
   "Terminate failed": "终止失败",
   "Attaching \"{name}\" is taking unusually long — check the connection or reload the tab": "连接“{name}”的会话耗时异常——检查网络或刷新此标签页",
   "Creating the session is taking unusually long — check the connection or reload the tab": "创建会话耗时异常——检查网络或刷新此标签页",
+  "Mount a folder from \"{name}\" into this VibeSpace": "把“{name}”的文件夹挂载进本 VibeSpace",
 };
