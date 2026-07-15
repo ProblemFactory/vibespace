@@ -84,23 +84,35 @@ export function installSidebarMounts(Sidebar) {
       } else {
         const hlist = document.createElement('div');
         hlist.className = 'mounts-list';
+        const onlineById = new Map(this._devicesData.map((d) => [d.id, d.online]));
+        const dialDeviceIds = new Set();
         for (const h of hd.hosts) {
+          if (h.transport === 'dial') {
+            // dial host (slice B): a paired device promoted to a machine —
+            // render the device row (⚡ test / 📁 pull / × unpair), never ssh
+            dialDeviceIds.add(h.deviceId);
+            const dev = { id: h.deviceId, online: !!onlineById.get(h.deviceId) };
+            hlist.appendChild(this._buildDeviceRow(dev, h));
+            for (const dm of this._deviceMountsData.filter((m) => m.deviceId === h.deviceId)) {
+              hlist.appendChild(this._buildDeviceMountRow(dev, dm));
+            }
+            continue;
+          }
           hlist.appendChild(this._buildHostRow(h));
           // active reverse-mounts (this instance's folders mounted ON this host)
           for (const hmr of this._hostMountsData.filter((m) => m.hostId === h.id)) {
             hlist.appendChild(this._buildHostMountRow(h, hmr));
           }
         }
-        // Paired dial-out devices are MACHINES too — same section, same row
-        // language (user feedback: a separate centered blob read as alien).
-        for (const dev of this._devicesData) {
+        // pairings not yet promoted to a host record (pre-2.154.2 server)
+        for (const dev of this._devicesData.filter((d) => !dialDeviceIds.has(d.id))) {
           hlist.appendChild(this._buildDeviceRow(dev));
           for (const dm of this._deviceMountsData.filter((m) => m.deviceId === dev.id)) {
             hlist.appendChild(this._buildDeviceMountRow(dev, dm));
           }
         }
         root.appendChild(hlist);
-        this._autoTestHosts(hd.hosts, hlist);
+        this._autoTestHosts(hd.hosts.filter((h) => h.transport !== 'dial'), hlist);
       }
       // Orphan reverse-mounts: mounts whose host was removed (or none listed).
       // Without this they'd be invisible AND unmanageable (review finding).
@@ -770,14 +782,14 @@ export function installSidebarMounts(Sidebar) {
     // visual language as _buildHostRow — user feedback: the first version was
     // a centered blob with no actions). Actions today: test / mount a folder
     // FROM the device / unpair; sessions-on-device is the next CS milestone.
-    _buildDeviceRow(dev) {
+    _buildDeviceRow(dev, hostRec) {
       const row = document.createElement('div');
       row.className = 'mounts-row';
       const top = document.createElement('div');
       top.className = 'mounts-row-top';
       top.innerHTML = `
         <span class="mounts-dot mounts-dot-${dev.online ? 'ok' : 'off'}" title="${dev.online ? escHtml(tr('Dialed in — reachable now')) : escHtml(tr('Offline — the device’s daemon is not dialed in (start it with the install command)'))}"></span>
-        <b class="mounts-name">${escHtml(dev.id)}</b>
+        <b class="mounts-name">${escHtml((hostRec && hostRec.name) || dev.id)}</b>
         <span class="mounts-badge${dev.online ? '' : ' mounts-badge-red'}" title="${escHtml(tr('Dial-out device — it connects TO this instance over a websocket (no ssh)'))}">${dev.online ? escHtml(tr('DEVICE')) : escHtml(tr('OFFLINE'))}</span>`;
       const actions = document.createElement('span');
       actions.className = 'mounts-row-actions';

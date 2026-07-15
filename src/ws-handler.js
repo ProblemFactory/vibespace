@@ -395,6 +395,7 @@ function registerWsHandler(wss, ctx) {
             let h;
             try { h = hosts.get(data.hostId); }
             catch { ws.send(JSON.stringify({ type: 'error', message: 'Unknown host: ' + data.hostId })); return; }
+            if (h.transport === 'dial') { ws.send(JSON.stringify({ type: 'error', message: `"${h.name}" is a dial-out device — running sessions on it lands in the next update (files, discovery and mounts already work)` })); return; }
             const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
             // locally-resolved binary paths mean nothing on the remote
             const rcmd = spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd;
@@ -428,6 +429,7 @@ function registerWsHandler(wss, ctx) {
             let h;
             try { h = hosts.get(data.hostId); }
             catch { ws.send(JSON.stringify({ type: 'error', message: 'Unknown host: ' + data.hostId })); return; }
+            if (h.transport === 'dial') { ws.send(JSON.stringify({ type: 'error', message: `"${h.name}" is a dial-out device — running sessions on it lands in the next update (files, discovery and mounts already work)` })); return; }
             const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
             const rcmd = spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd;
             const rargs = [...spawnArgs];

@@ -94,7 +94,18 @@ class HostManager {
     return h;
   }
 
-  add({ name, user, host, port, keyPath, privateKey }) {
+  add({ name, user, host, port, keyPath, privateKey, transport, deviceId }) {
+    // DIAL host (graduation slice B): a paired dial-out device promoted to a
+    // full machine — no ssh fields; every data path rides deviceForDial.
+    if (transport === 'dial') {
+      if (!deviceId) throw new Error('deviceId required for a dial host');
+      const id = 'host-dial-' + String(deviceId).replace(/[^\w-]/g, '');
+      if (this._state.hosts.some(h => h.id === id)) return id; // idempotent
+      const rec = { id, name: String(name || deviceId).slice(0, 60), transport: 'dial', deviceId: String(deviceId), createdAt: Date.now() };
+      this._state.hosts.push(rec);
+      this._save();
+      return id;
+    }
     if (!host) throw new Error('host required');
     if (!user) throw new Error('user required');
     const id = 'host-' + crypto.randomBytes(4).toString('hex');
@@ -204,6 +215,7 @@ class HostManager {
    *  its death would kill every multiplexed connection with it (coupling
    *  unrelated sessions), and long-lived pipes pin the master forever. */
   sshArgs(h, { tty = false, reverse = null, multiplex = false } = {}) {
+    if (h && h.transport === 'dial') throw new Error(`"${h.name}" is a dial-out device — it has no ssh; this operation must ride the device link`);
     const args = [...SSH_BASE_OPTS, '-p', String(h.port || 22)];
     if (h.keyPath) args.push('-i', h.keyPath, '-o', 'IdentitiesOnly=yes');
     if (multiplex) {
@@ -400,6 +412,14 @@ class HostManager {
     if (cached?.status().connected) return cached;
     if (!this.agentdDeps) throw new Error('agentd deps not wired');
     const h = this.get(id);
+    // dial hosts have no ssh — the daemon is already dialed IN; drive it
+    // over that live stream (deviceForDial caches per device id)
+    if (h.transport === 'dial') {
+      if (!this.agentdDeps.deviceForDial) throw new Error('dial transport not wired');
+      const dm = await this.agentdDeps.deviceForDial(h.deviceId);
+      this._devices.set(id, dm);
+      return dm;
+    }
     await this.agentdDeps.ensureAgentdOnHost(id);
     const remoteCmd = `export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; exec node "$HOME/.vibespace/agentd/current/agentd.js" --stdio`;
     const { DeviceManager } = require('./agentd/client.js');
@@ -503,7 +523,7 @@ class HostManager {
     // when the cache already holds a prefix we fetch ONLY [cachedSize, size)
     // via read-range instead of re-pulling the whole file (the remote-jsonl
     // whole-file cache's biggest cost). Any failure → legacy ssh path below.
-    if (this.dataPlaneOn?.()) {
+    if (this.dataPlaneOn?.() || h.transport === 'dial') {
       try {
         const dm = await this.device(id);
         // locate via the discovery snapshot (cached-ish) or a targeted find
@@ -566,7 +586,7 @@ class HostManager {
     const script = fs.readFileSync(scannerPath, 'utf-8');
     // CS data-plane: ship+run the scanner through the daemon (streaming exec —
     // NDJSON output can be huge). Same cursor semantics; legacy ssh fallback.
-    if (this.dataPlaneOn?.()) {
+    if (this.dataPlaneOn?.() || h.transport === 'dial') {
       try {
         const dm = await this.device(id);
         const home = (await dm.runCmd('sh', ['-c', 'echo "$HOME"'])).stdout.trim();
@@ -644,7 +664,7 @@ class HostManager {
       // emits — the parser below runs UNCHANGED (zero interpretation drift).
       // Any failure falls through to the classic ssh script.
       out = null;
-      if (this.dataPlaneOn?.()) {
+      if (this.dataPlaneOn?.() || h.transport === 'dial') {
         try {
           const dm = await this.device(id);
           const snap = await dm.discoverySnapshot();
