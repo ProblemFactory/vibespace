@@ -132,7 +132,11 @@ export function installPluginsUI(App) {
             const save = document.createElement('button'); save.className = 'mounts-btn'; save.textContent = t('Save config');
             save.onclick = async () => {
               const body = { serverAddr: iAddr.value, serverPort: iPort.value, subDomainHost: iSub.value };
-              if (iTok.value && iTok.value !== '••••••••') body.token = iTok.value; // don't clobber with the mask
+              // untouched mask = keep the stored override; anything else —
+              // including an EMPTIED field — is sent verbatim ('' clears the
+              // override back to the cluster env default, same as the other
+              // fields; the mask-only guard made the token unclearable)
+              if (iTok.value !== '••••••••') body.token = iTok.value;
               try { await api('config', { body: JSON.stringify(body) }); showToast(t('Saved')); render(); } catch (e) { showToast(e.message, { type: 'error' }); }
             };
             saveRow.appendChild(save);

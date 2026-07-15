@@ -108,14 +108,24 @@ class PortForwardManager {
   async _start(rec) {
     if (this._live.has(rec.id)) return this._live.get(rec.id).rec;
     // reachable machine first — fail loud so the UI can say "device offline"
-    const dm = await this.hosts.device(rec.hostId); // throws if offline
+    await this.hosts.device(rec.hostId); // throws if offline
     const sockets = new Set();
     const server = net.createServer({ allowHalfOpen: true }, async (sock) => {
       sockets.add(sock);
       sock.on('close', () => sockets.delete(sock));
       sock.on('error', () => { try { sock.destroy(); } catch {} });
       let h;
-      try { h = await dm.tcpForward(rec.remotePort); } catch { try { sock.destroy(); } catch {} return; }
+      try {
+        // resolve the device PER CONNECTION, never capture it: a dial device's
+        // re-dial stop()s the old DeviceManager, so a captured one turns every
+        // later connection into an instant failure while onMachineLinked skips
+        // the "already live" forward — the forward looked up but was dead
+        // (review finding, high). hosts.device() returns the cached live dm in
+        // the steady state, so this costs nothing.
+        const dm = await this.hosts.device(rec.hostId);
+        h = await dm.tcpForward(rec.remotePort);
+      } catch { try { sock.destroy(); } catch {} return; }
+      if (sock.destroyed) { try { h.close(); } catch {} return; } // browser aborted while the tunnel opened
       h.onData = (b) => { try { sock.write(b); } catch {} };
       h.onClose = () => { try { sock.end(); } catch {} };
       sock.on('data', (b) => { try { h.write(b); } catch {} });
@@ -155,8 +165,8 @@ class PortForwardManager {
     if (!l?.rec?.localPort) await this._start(rec); // ensure a local port exists
     const localPort = this._live.get(id)?.rec?.localPort;
     if (!localPort) throw new Error('the forward is not active (is the machine online?)');
-    const r = await this.plugins.frpPublish(id, localPort);
-    rec.publicUrl = r.url; rec.publicName = r.name; rec.publicPort = r.remotePort;
+    const r = await this.plugins.frpPublish(id, localPort, { preferPort: rec.publicPort || 0, preferSub: rec.publicSub || '' });
+    rec.publicUrl = r.url; rec.publicName = r.name; rec.publicPort = r.remotePort; rec.publicSub = r.subdomain || null;
     this._persist(); this._emit();
     return { publicUrl: r.url };
   }
@@ -174,7 +184,10 @@ class PortForwardManager {
   async restore() {
     for (const rec of this._state.forwards) {
       if (this._live.has(rec.id)) continue;
-      try { await this._start(rec); if (rec.publicUrl && this.plugins) { try { const r = await this.plugins.frpPublish(rec.id, this._live.get(rec.id).rec.localPort); rec.publicUrl = r.url; rec.publicName = r.name; rec.publicPort = r.remotePort; } catch (e) { this.log('re-publish ' + rec.id + ': ' + e.message); } } } catch (e) { rec.error = e.message; }
+      // re-publish REUSES the persisted subdomain/port (preferSub/preferPort) —
+      // regenerating them on every server restart silently broke previously
+      // shared public URLs (review finding)
+      try { await this._start(rec); if (rec.publicUrl && this.plugins) { try { const r = await this.plugins.frpPublish(rec.id, this._live.get(rec.id).rec.localPort, { preferPort: rec.publicPort || 0, preferSub: rec.publicSub || '' }); rec.publicUrl = r.url; rec.publicName = r.name; rec.publicPort = r.remotePort; rec.publicSub = r.subdomain || null; } catch (e) { this.log('re-publish ' + rec.id + ': ' + e.message); } } } catch (e) { rec.error = e.message; }
     }
     this._persist();
     this._emit();
@@ -192,6 +205,10 @@ class PortForwardManager {
   /** A machine was unpaired/removed — drop its forwards. */
   onMachineUnpaired(hostId) {
     for (const rec of this._state.forwards.filter((r) => r.hostId === hostId)) {
+      // unpublish FIRST — dropping the record without frpUnpublish left the
+      // public relay proxy live (pointing at a freed loopback port) with no
+      // UI handle left to ever remove it (review finding, high)
+      if (rec.publicUrl && this.plugins) { this.plugins.frpUnpublish(rec.publicName || rec.id).catch(() => {}); }
       const l = this._live.get(rec.id);
       if (l) { for (const s of l.sockets) { try { s.destroy(); } catch {} } try { l.server.close(); } catch {} this._live.delete(rec.id); }
     }

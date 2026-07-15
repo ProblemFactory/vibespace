@@ -436,6 +436,10 @@ class PluginManager {
       `webServer.port = ${FRP_ADMIN_PORT}`,
       `webServer.user = "vibespace"`,
       `webServer.password = "${pw}"`,
+      // keep retrying instead of exiting when the relay is unreachable at
+      // start — frp's default (exit on first failed login) left the
+      // default-ON plugin permanently down after a boot-time relay blip
+      `loginFailExit = false`,
       `log.to = "${path.join(this._frpDir(), 'frpc.log')}"`,
       `log.level = "info"`,
       `log.maxDays = 3`,
@@ -535,16 +539,19 @@ class PluginManager {
    *  subDomainHost is configured → a random `https://<sub>.<host>` subdomain
    *  (the SNI broker); else a TCP port map `http://<relay>:<port>/` (retrying
    *  on collision — the relay is fleet-shared). name = a stable proxy name. */
-  async frpPublish(name, localPort, { preferPort = 0 } = {}) {
+  async frpPublish(name, localPort, { preferPort = 0, preferSub = '' } = {}) {
     if (!this._frpConfigured()) throw new Error('public URLs are not available — the frp relay is not configured on this instance');
     if (!this._frpDaemonPid()) { this._frpStart(); await new Promise((r) => setTimeout(r, 1500)); }
     const cfg = this._frpCfg();
     const safe = String(name).replace(/[^\w-]/g, '_').slice(0, 60);
     const file = path.join(this._frpProxiesDir(), safe + '.toml');
 
-    // ── subdomain (SNI) mode — a random hostname per publish ──
+    // ── subdomain (SNI) mode — a random hostname per publish; a re-publish
+    // (server restart / machine relink) passes preferSub to KEEP the hostname
+    // users already shared ──
     if (cfg.subDomainHost) {
-      const sub = 'vs' + require('crypto').randomBytes(5).toString('hex'); // e.g. vs3f9a1c2b4d
+      const sub = /^[a-z0-9][a-z0-9-]{1,62}$/.test(preferSub) ? preferSub
+        : 'vs' + require('crypto').randomBytes(5).toString('hex'); // e.g. vs3f9a1c2b4d
       const toml = `[[proxies]]\nname = "${safe}"\ntype = "https"\nsubdomain = "${sub}"\n[proxies.plugin]\ntype = "https2http"\nlocalAddr = "127.0.0.1:${localPort}"\ncrtPath = ""\nkeyPath = ""\nhostHeaderRewrite = "127.0.0.1"\n`;
       fs.writeFileSync(file, toml, { mode: 0o600 });
       try { await this._frpReload(); } catch (e) { throw new Error('frpc reload failed: ' + e.message); }

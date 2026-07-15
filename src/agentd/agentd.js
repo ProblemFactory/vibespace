@@ -428,9 +428,12 @@ function serveFolder(mux, msg) {
     let rel = '/';
     try { rel = decodeURIComponent(req.url.split('?')[0]).replace(/\/+$/, ''); } catch { }
     const abs = path.join(root, rel || '/');
-    // confine within root (+ symlink-escape guard via nearest existing ancestor)
-    if (abs !== root && !abs.startsWith(root + path.sep)) { res.writeHead(403); res.end(); return; }
-    const contained = (p) => { let pr = p; for (;;) { try { const r = fs.realpathSync(pr); return r === root || r.startsWith(root + path.sep); } catch { const up = path.dirname(pr); if (up === pr) return false; pr = up; } } };
+    // confine within root (+ symlink-escape guard via nearest existing
+    // ancestor). root='/' needs its own prefix — '/'+sep is '//' which no
+    // real subpath starts with (every file of a '/' share 403'd)
+    const rootPfx = root === path.sep ? path.sep : root + path.sep;
+    if (abs !== root && !abs.startsWith(rootPfx)) { res.writeHead(403); res.end(); return; }
+    const contained = (p) => { let pr = p; for (;;) { try { const r = fs.realpathSync(pr); return r === root || r.startsWith(rootPfx); } catch { const up = path.dirname(pr); if (up === pr) return false; pr = up; } } };
     if (!contained(abs)) { res.writeHead(403); res.end(); return; }
     const relFromRoot = path.relative(root, abs);
     if (req.method === 'OPTIONS') {
@@ -746,9 +749,13 @@ function serveConnection(sock) {
         try {
           const { chan, cmd, args, cols, rows, cwd, env } = msg;
           if (!chan || chan < 1) throw new Error('bad session channel');
+          // same cwd-exists fallback as pipe-sessions — a stale/deleted cwd
+          // otherwise dies at chdir instead of opening in $HOME
+          let useCwd = process.env.HOME || '/';
+          try { if (cwd && fs.statSync(cwd).isDirectory()) useCwd = cwd; } catch { }
           const proc = pty().spawn(cmd, args || [], {
             name: 'xterm-256color', cols: cols || 120, rows: rows || 30,
-            cwd: cwd || process.env.HOME,
+            cwd: useCwd,
             env: spawnEnv({ ...(env || {}), TERM: 'xterm-256color', COLORTERM: 'truecolor' }),
           });
           sessions.set(chan, { proc });
