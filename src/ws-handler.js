@@ -466,10 +466,28 @@ function registerWsHandler(wss, ctx) {
             // pty-wrapper's REMOTE_RETRY respawns the attach on a link drop.
             if (h.transport === 'dial') {
               if (!dialBridge || !agentdRemote) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, sessionId: id, message: 'dial sessions not wired on this server' })); return; }
+              // Account billing on a device: API keys ship (below); a
+              // SUBSCRIPTION account can't be honored on a device (OAuth ship
+              // is off by default, §ban-safety) — fail LOUD, don't silently
+              // bill the device's own login (mirror the chat-dial guard;
+              // review: this branch used to ignore an explicit subscription).
+              if (spawnAccount && !spawnAccount.secret) {
+                let allowSub = false; try { allowSub = !!serverSetting('accounts.shipSubscriptionToRemote'); } catch {}
+                ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, sessionId: id, message: allowSub
+                  ? 'subscription creds shipping to dial devices is not implemented — use an API-key account, or log in on the device'
+                  : 'the selected account is a subscription login — shipping it to a device is disabled (§ban-safety). Use an API-key account, or log in on the device itself.' }));
+                return;
+              }
               const rcmd0 = spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd;
               try {
                 const bridgePort = await dialBridge.ensure({ sid: id, deviceId: h.deviceId });
-                const da = await deviceAgentSetup(h, id).catch((e) => { console.warn('[dial] agent setup degraded:', e.message); return { envPairs: [], tokenAssign: '' }; });
+                // A tool/tunnel setup error degrades to bare env, EXCEPT when
+                // an API key must be placed — a swallowed failure would run the
+                // session on the device's own login = wrong billing (review).
+                const da = await deviceAgentSetup(h, id).catch((e) => {
+                  if (spawnAccount?.secret) throw e;
+                  console.warn('[dial] agent setup degraded:', e.message); return { envPairs: [], tokenAssign: '' };
+                });
                 const shellCmd = `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:$HOME/.vibespace/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ${da.tokenAssign}exec env `
                   + [...da.envPairs.map(shq), ...spawnEnvPairs.map(shq)].join(' ')
                   + ' ' + [rcmd0, ...spawnArgs.map(shq)].join(' ');

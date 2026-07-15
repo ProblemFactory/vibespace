@@ -227,6 +227,23 @@ class RemoteFs {
   }
 
   async stat(id, target, withDu = false) {
+    // dial device fast path (B-0d70 review): `stat -c` / `du -sb` are GNU-only
+    // and error on a macOS/BSD device. fsStat gives the portable core; mode is
+    // the raw st_mode (rendered client-side), uid/gid/kind aren't in the
+    // fs-op — acceptable for Properties on a device.
+    const dm = await this._dev(id);
+    if (dm) {
+      try {
+        const abs = await this._devAbs(id, dm, target);
+        const st = await dm.fsStat(abs);
+        let du;
+        if (withDu && st.stat.isDir) {
+          // portable recursive size: `du -sk` (POSIX) → KiB; -b is GNU-only
+          try { const r = await dm.runCmd('sh', ['-c', `du -sk ${shq(abs)} 2>/dev/null | cut -f1`], { timeoutMs: 30000 }); du = (parseInt(String(r.stdout).trim()) || 0) * 1024 || null; } catch { du = null; }
+        }
+        return { path: target, size: st.stat.size || 0, modified: st.stat.mtimeMs || 0, mode: st.stat.mode, uid: undefined, gid: undefined, kind: st.stat.isDir ? 'directory' : 'regular file', du: withDu ? (du ?? null) : undefined };
+      } catch (e) { if (this._host(id)?.transport === 'dial') throw e; /* ssh: legacy below */ }
+    }
     const cmd = `f=${shq(target)}; stat -c '%s|%Y|%A|%U|%G|%F' "$f"; ${withDu ? '[ -d "$f" ] && du -sb "$f" 2>/dev/null | cut -f1 || echo' : 'echo'}`;
     const out = (await this._run(id, cmd, { timeoutMs: 30000 })).toString().trim().split('\n');
     const [size, mtime, mode, uid, gid, kind] = (out[0] || '').split('|');
