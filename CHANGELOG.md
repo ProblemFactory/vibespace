@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.159.0 — 2026-07-15
+- **Dial-device rows reach parity with ssh host rows** (user request): a paired device now has BOTH mount directions — pull (📥 mount a folder FROM the device into this workspace) AND push (📤 share a folder from this instance onto the device, over the device tunnel via HostMounts) — plus a **New session on this device** button. The New Session dialog's host dropdown labels a dial device as "(device)" instead of "undefined@undefined". Sessions and reverse-mounts on a dial device route through the device link (the ws-handler dial branch + HostMounts' device data-plane) — no ssh needed.
+
 ## 2.158.1 — 2026-07-15
 - **Device mounts self-heal after the device's daemon re-execs** (real Mac report: the Downloads mount opened, then every listing hung after the Mac daemon auto-upgraded 2.153.3→2.157.0). A re-exec kills the serve-folder the mount was pointed at, but the record still thought it was live — so the tunnel pointed at a dead port. Two fixes: (a) `onDeviceDialedIn` now TEARS DOWN the stale live handle before remounting (the old code's `_up` no-op'd because it still saw a live handle); (b) a 90s health sweep child-process-`ls` probes every live device mount and re-mounts any whose listing hangs — so an already-settled stale mount heals on its own too (a hung fuse mount is never probed with node fs — §2.108.3 threadpool lesson). Immediate recovery without updating: unmount (×) and re-mount the folder.
 

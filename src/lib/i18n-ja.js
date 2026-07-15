@@ -1917,4 +1917,5 @@ export default {
   "Reverse-mount token — \"{name}\" accesses {root}": "逆マウントトークン — 「{name}」が {root} にアクセス",
   "Reverse-mount token (machine removed) — {root}": "逆マウントトークン（マシン削除済み）— {root}",
   "{mode} · revoking breaks that machine’s mount": "{mode} · 失効するとそのマシンのマウントが切れます",
+  "New session on this device": "このデバイスで新規セッション",
 };

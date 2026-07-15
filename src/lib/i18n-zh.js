@@ -1917,4 +1917,5 @@ export default {
   "Reverse-mount token — \"{name}\" accesses {root}": "反挂载令牌 — “{name}”访问 {root}",
   "Reverse-mount token (machine removed) — {root}": "反挂载令牌（机器已移除）— {root}",
   "{mode} · revoking breaks that machine’s mount": "{mode} · 撤销会断开那台机器上的挂载",
+  "New session on this device": "在此设备上开新会话",
 };
