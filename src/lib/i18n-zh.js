@@ -1904,4 +1904,6 @@ export default {
   "from device": "来自设备",
   "dial-out device · connected": "拨出式设备 · 已连接",
   "dial-out device · offline — run the install command on it": "拨出式设备 · 离线 — 在设备上运行安装命令",
+  "Remount now": "立即重挂",
+  "Remount (device is offline — start its daemon first)": "重挂（设备离线 — 先在设备上启动 daemon）",
 };

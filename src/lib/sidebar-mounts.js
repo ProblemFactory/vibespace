@@ -7,6 +7,13 @@ import { t as tr } from './i18n.js'; // sidebar cluster convention: local `t` is
 
 // 16x16 stroke icons (project convention — no emoji in chrome)
 const MI = {
+  // Directional folder icons (user feedback: one 📁 carried THREE meanings).
+  // folderPush = send OUR folder TO the machine (arrow leaving the folder up),
+  // folderPull = bring the DEVICE's folder HERE (arrow coming down into it),
+  // folderOpen = just open it in Files.
+  folderPush: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h4l2 2h6v3M2 3v10h5"/><path d="M11.5 14v-4M9.5 12l2-2 2 2"/></svg>',
+  folderPull: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h4l2 2h6v3M2 3v10h5"/><path d="M11.5 8v4M9.5 10l2 2 2-2"/></svg>',
+  retry: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.5-3.5"/><path d="M13 2v3h-3"/></svg>',
   folder: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h4l2 2h6v8H2V3z"/></svg>',
   eject: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l5-5 5 5H3z"/><path d="M3 12h10"/></svg>',
   plug: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v6"/><path d="M4.7 4.6a4.9 4.9 0 1 0 6.6 0"/></svg>',
@@ -560,7 +567,7 @@ export function installSidebarMounts(Sidebar) {
           } catch (e) { this._hostStatus[h.id] = { ok: false, error: e.message }; throw e; }
         }),
         ibtn(MI.wrench, 'Set up (install the tools needed to run agents)', () => { this._showBootstrapDialog(h); }),
-        ibtn(MI.folder, tr('Share a folder from this instance onto this machine'), () => { this._showHostMountDialog(h); }),
+        ibtn(MI.folderPush, tr('Share a folder from this instance onto this machine'), () => { this._showHostMountDialog(h); }),
         ibtn(MI.termNew, 'New session on this host', () => { this.app.showNewSessionDialog?.({ hostId: h.id, hostName: h.name }); }),
         ibtn(MI.cross, 'Remove host', async () => {
           const ok = await showConfirmDialog({ title: `Remove "${h.name}"?`, message: 'Only the registry entry goes away — nothing on the remote machine is touched.', confirmText: 'Remove', danger: true });
@@ -759,7 +766,7 @@ export function installSidebarMounts(Sidebar) {
           const i = r.info || {};
           showToast(tr('{id} reachable — agent {v} on {plat}', { id: dev.id, v: i.daemonVersion || '?', plat: [i.platform, i.arch].filter(Boolean).join('/') || '?' }));
         }),
-        ibtn(MI.folder, tr('Mount a folder FROM this device into this workspace'), () => { this._showDeviceMountDialog(dev); }),
+        ibtn(MI.folderPull, tr('Mount a folder FROM this device into this workspace'), () => { this._showDeviceMountDialog(dev); }),
         ibtn(MI.cross, tr('Unpair (the device can no longer dial in)'), async () => {
           const ok = await showConfirmDialog({ title: tr('Unpair "{id}"?', { id: dev.id }), message: tr('Its dial token is revoked; re-pairing mints a new one. Its mounted folders here are unmounted.'), confirmText: tr('Unpair'), danger: true });
           if (!ok) return;
@@ -792,6 +799,20 @@ export function installSidebarMounts(Sidebar) {
         <span class="mounts-badge" title="${escHtml(tr('Mounted at {mp} (read-only, over the dial link)', { mp: dm.mountpoint }))}">${escHtml(tr('from device'))}</span>`;
       const actions = document.createElement('span');
       actions.className = 'mounts-row-actions';
+      if (!dm.live) {
+        // stale after a server restart / failed heal — give the user a hand
+        // back (real report: gray dot, no reconnect option)
+        const re = document.createElement('button');
+        re.className = 'mounts-icon-btn';
+        re.innerHTML = MI.retry; re.title = dm.online ? tr('Remount now') : tr('Remount (device is offline — start its daemon first)');
+        re.onclick = async () => {
+          re.disabled = true;
+          try { await api(`/api/device-mounts/${encodeURIComponent(dm.id)}/remount`, { method: 'POST' }); showToast(tr('Mounted')); }
+          catch (e) { showToast(e.message, { type: 'error' }); }
+          this._renderMounts();
+        };
+        actions.append(re);
+      }
       const open = document.createElement('button');
       open.className = 'mounts-icon-btn';
       open.innerHTML = MI.folder; open.title = tr('Open in Files');

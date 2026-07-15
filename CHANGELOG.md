@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.153.3 — 2026-07-15
+- **Three folder icons, three meanings — now visually distinct** (user feedback): push-to-machine (folder + outgoing arrow, host rows' "share onto this machine"), pull-from-device (folder + incoming arrow, device rows' "mount into this workspace"), plain folder (open in Files).
+- **Stale device mounts self-heal AND have a hand-back.** rclone is spawned detached, so it survives a server restart while its tunnel bridge dies — the mountpoint stayed claimed by a dead orphan and the dial-in heal's fresh mount failed forever (real report: device online, mount row stuck gray with no reconnect option). `deviceFolderMount` now PRE-CLEANS (lazy-unmount + kill the exact orphan rclone by /proc cmdline) before mounting, and non-live mount rows show a ↻ **Remount** button (`POST /api/device-mounts/:id/remount`).
+
 ## 2.153.2 — 2026-07-15
 - Device machine rows match ssh host rows exactly: action icons sit on the TOP line's right side (they were stacking on a second line — actions belong INSIDE `.mounts-row-top`), plus the same style sub-line ("dial-out device · connected/offline"). Daemon processes now show as `vibespace-device` in process listings (`process.title`; the full rename is graduation slice A).
 
