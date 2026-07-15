@@ -313,3 +313,15 @@ default-on + soak → D legacy ssh layer retirement. Delivered so far (2.150.0 �
 2.153.1): device-folder-mount root-cured (WebDAV, 7ms), pairing UI + per-OS
 commands + multi-instance roots, device machine-rows with test/mount/unpair,
 DeviceMounts auto-heal, 17-assert e2e with a real daemon dialing.
+
+### Transport clarification (2026-07-15, user Q: "退役ssh后 VibeSpace 在 NAT 后怎么办?")
+
+"Retire the legacy ssh layer" (slice D) retires the NON-daemon scaffolding —
+per-op ssh execs, keeper, rsync ctx sync — NOT ssh as a TRANSPORT. The unified
+model is "one mux over any duplex": unix socket (local device #0), **ssh
+--stdio (VibeSpace dials OUT — this is exactly the VibeSpace-behind-NAT
+topology and it stays first-class)**, and wss dial-out (device dials out —
+device-behind-NAT). Both-behind-NAT needs a rendezvous: the frps relay plugin
+(B-0b60) exposes the instance's wss endpoint on a public relay so devices can
+still dial in. B-4ccd's "unify on ws" reads as: ws is the DEFAULT transport,
+ssh-stdio remains the reserved transport for NAT'd instances.
