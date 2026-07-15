@@ -151,7 +151,15 @@ class HostMounts {
     const rcOs = osKind === 'macos' ? 'osx' : 'linux';
     const url = `https://downloads.rclone.org/${RCLONE_PIN}/rclone-${RCLONE_PIN}-${rcOs}-${rcArch}.zip`;
     const fetch = await this._run(hostId, 'sh', ['-c',
-      `set -e; mkdir -p "${home}/.vibespace/bin"; cd "$(mktemp -d)"; curl -fsSL -o r.zip '${url}'; unzip -oj r.zip 'rclone-*/rclone' -d "${home}/.vibespace/bin"; chmod 755 "${remoteBin}"; "${remoteBin}" version >/dev/null 2>&1 && echo OK`]);
+      // unzip is ABSENT on bare Debian (real report: frps-server 'sh: 1:
+      // unzip: not found') — fall back to busybox, then python3's zipfile
+      // (near-universal), and only then fail with an actionable hint.
+      `set -e; mkdir -p "${home}/.vibespace/bin"; cd "$(mktemp -d)"; curl -fsSL -o r.zip '${url}'; `
+      + `if command -v unzip >/dev/null 2>&1; then unzip -oj r.zip 'rclone-*/rclone' -d "${home}/.vibespace/bin"; `
+      + `elif command -v busybox >/dev/null 2>&1 && busybox unzip -h >/dev/null 2>&1; then busybox unzip -o r.zip && cp rclone-*/rclone "${home}/.vibespace/bin/"; `
+      + `elif command -v python3 >/dev/null 2>&1; then python3 -c "import zipfile,glob,shutil,os,stat; z=zipfile.ZipFile('r.zip'); z.extractall(); src=glob.glob('rclone-*/rclone')[0]; dst=os.path.expanduser('${home}/.vibespace/bin/rclone'); shutil.copy(src,dst); os.chmod(dst,0o755)"; `
+      + `else echo 'need unzip (or busybox/python3) on this machine — e.g. apt install unzip' >&2; exit 9; fi; `
+      + `chmod 755 "${remoteBin}"; "${remoteBin}" version >/dev/null 2>&1 && echo OK`]);
     if (!(fetch.stdout || '').includes('OK')) throw new Error('rclone install on host failed: ' + (fetch.stderr || fetch.stdout || '').slice(0, 200));
     return remoteBin;
   }
@@ -159,7 +167,11 @@ class HostMounts {
   /** Mount THIS VibeSpace's <folder> on the remote host as <mountpoint>. */
   async mountOnHost(hostId, { folder, mode = 'ro', mountpoint, publicUrlFallback } = {}) {
     const { base, tunnelPort } = await this._davBase(hostId, { publicUrlFallback });
-    const abs = path.resolve(String(folder || os.homedir()));
+    // expand ~ BEFORE resolving — a literal '~' resolved against cwd made the
+    // token mint fail with a bare 'root does not exist' (real report)
+    const expanded = String(folder || os.homedir()).replace(/^~(?=$|\/)/, os.homedir());
+    const abs = path.resolve(expanded);
+    if (!fs.existsSync(abs)) throw new Error(`folder does not exist on this instance: ${abs}`);
     const share = this.mountTokens.mint({ name: 'host:' + hostId, root: abs, mode: mode === 'rw' ? 'rw' : 'ro' });
     const shareToken = share.raw, shareTokenId = share.rec.id;
     const davUrl = base + '/dav';

@@ -1906,4 +1906,8 @@ export default {
   "dial-out device · offline — run the install command on it": "拨出式设备 · 离线 — 在设备上运行安装命令",
   "Remount now": "立即重挂",
   "Remount (device is offline — start its daemon first)": "重挂（设备离线 — 先在设备上启动 daemon）",
+  "using imported key": "使用导入的私钥",
+  "using VibeSpace key": "使用 VibeSpace 密钥",
+  "using system ssh keys": "使用系统 ssh 密钥",
+  "using stored key": "使用已存密钥",
 };

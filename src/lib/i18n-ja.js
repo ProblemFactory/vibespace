@@ -1906,4 +1906,8 @@ export default {
   "dial-out device · offline — run the install command on it": "発信式デバイス · オフライン — デバイスでインストールコマンドを実行",
   "Remount now": "今すぐ再マウント",
   "Remount (device is offline — start its daemon first)": "再マウント（デバイスはオフライン — 先にデーモンを起動）",
+  "using imported key": "インポートした鍵を使用",
+  "using VibeSpace key": "VibeSpace の鍵を使用",
+  "using system ssh keys": "システムの ssh 鍵を使用",
+  "using stored key": "保存済みの鍵を使用",
 };
