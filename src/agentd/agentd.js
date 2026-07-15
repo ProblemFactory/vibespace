@@ -17,6 +17,28 @@ const { Mux, PROTO_VERSION } = require('./mux.js');
 
 const VERSION = process.env.VIBESPACE_AGENTD_VERSION || require('./version.js').VERSION;
 const ROOT = process.env.VIBESPACE_AGENTD_ROOT || path.join(os.homedir(), '.vibespace', 'agentd');
+
+// SPAWN ENV (real xingweil report: Mac dial chat blank — the daemon runs on
+// node fine but its subprocess `sh -c` couldn't find node/claude). launchd
+// (macOS) / systemd (Linux) start the daemon with a MINIMAL PATH, so every
+// child spawn inherited a PATH without the node/CLI dirs — claude never ran.
+// Prepend the daemon's OWN node dir (guaranteed) + the standard user/tool bins
+// (nvm current, homebrew, ~/.local/bin, /usr/local/bin) to PATH for children.
+// Same class as the systemd 'baked PATH' incident (CLAUDE.md §How to Run).
+function spawnEnv(extra) {
+  const home = os.homedir();
+  const nodeDir = path.dirname(process.execPath);
+  const extras = [
+    nodeDir, path.join(home, '.local', 'bin'),
+    '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin',
+  ];
+  const merged = { ...process.env, ...(extra || {}) };
+  const cur = String(merged.PATH || process.env.PATH || '');
+  const parts = cur.split(':').filter(Boolean);
+  for (let i = extras.length - 1; i >= 0; i--) if (!parts.includes(extras[i])) parts.unshift(extras[i]);
+  merged.PATH = parts.join(':');
+  return merged;
+}
 const STATE = path.join(ROOT, 'state');
 // Windows has no unix sockets for node's net.listen — use a named pipe keyed
 // by the root path so several per-instance daemons coexist (EXPERIMENTAL).
@@ -224,7 +246,7 @@ const pipeSessions = {
     const inFd = fs.openSync(P2.fifo, 'r+');
     const child = require('child_process').spawn(cmd, args || [], {
       detached: true, stdio: [inFd, outFd, errFd],
-      cwd: cwd || process.env.HOME, env: { ...process.env, ...(env || {}) },
+      cwd: cwd || process.env.HOME, env: spawnEnv(env),
     });
     child.unref();
     fs.writeFileSync(P2.meta, JSON.stringify({ childPid: child.pid, startedAt: Date.now(), cmd: [cmd, ...(args || [])] }));
@@ -627,7 +649,7 @@ function serveConnection(sock) {
           const { execFile } = require('child_process');
           const child = execFile(String(msg.cmd), (msg.args || []).map(String), {
             timeout: Math.min(Number(msg.timeoutMs) || 10000, 30000), maxBuffer: 2 * 1024 * 1024,
-            env: { ...process.env, ...(msg.env || {}) },
+            env: spawnEnv(msg.env),
           }, (err, stdout, stderr) => {
             mux.control({ op: 'cmd-result', id: msg.id, code: err ? (err.code ?? 1) : 0, stdout: String(stdout).slice(0, 1024 * 1024), stderr: String(stderr).slice(0, 65536) });
           });
@@ -641,7 +663,7 @@ function serveConnection(sock) {
         try {
           const { spawn: sp } = require('child_process');
           const child = sp(String(msg.cmd), (msg.args || []).map(String), {
-            env: { ...process.env, ...(msg.env || {}) }, cwd: msg.cwd || process.env.HOME,
+            env: spawnEnv(msg.env), cwd: msg.cwd || process.env.HOME,
           });
           const chanS = msg.chan;
           child.stdout.on('data', (d) => { try { mux.data(chanS, d); } catch { } });
@@ -695,7 +717,7 @@ function serveConnection(sock) {
           const proc = pty().spawn(cmd, args || [], {
             name: 'xterm-256color', cols: cols || 120, rows: rows || 30,
             cwd: cwd || process.env.HOME,
-            env: { ...process.env, ...(env || {}), TERM: 'xterm-256color', COLORTERM: 'truecolor' },
+            env: spawnEnv({ ...(env || {}), TERM: 'xterm-256color', COLORTERM: 'truecolor' }),
           });
           sessions.set(chan, { proc });
           proc.onData((d) => { try { mux.data(chan, Buffer.from(d, 'utf-8')); } catch { } });
