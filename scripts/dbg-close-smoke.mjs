@@ -26,7 +26,7 @@ const cleanup = () => {
     for (const s of fs.readdirSync(path.join(wt, 'data', 'sockets'))) { try { execSync(`pkill -f ${JSON.stringify(path.join(wt, 'data', 'sockets', s))}`); } catch {} }
   } catch {}
   try { fs.rmSync('/tmp/vs-close-smoke-chrome', { recursive: true, force: true }); } catch {}
-  try { fs.rmSync(path.join(wt, 'data'), { recursive: true, force: true }); } catch {}
+  try { for (const d of ['sockets','session-meta','session-buffers','layouts.json']) fs.rmSync(path.join(wt, 'data', d), { recursive: true, force: true }); } catch {} // keep data/bin — the NEXT smoke needs the built agentd bundle
 };
 process.on('exit', cleanup);
 
