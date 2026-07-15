@@ -16,6 +16,9 @@ stringData:
   {{- with .Values.telemetry.ingestToken }}
   telemetryIngestToken: {{ . | quote }}
   {{- end }}
+  {{- if and .Values.frp .Values.frp.token }}
+  frpsToken: {{ .Values.frp.token | quote }}
+  {{- end }}
   {{- if and .Values.cephMint .Values.cephMint.token }}
   cephMintToken: {{ .Values.cephMint.token | quote }}
   {{- end }}
@@ -162,6 +165,21 @@ spec:
               value: {{ .Values.gdrive.clientId | quote }}
             - name: VIBESPACE_GDRIVE_CLIENT_SECRET
               valueFrom: { secretKeyRef: { name: {{ $name }}, key: gdriveClientSecret } }
+            {{- end }}
+            {{- if and .Values.frp .Values.frp.addr }}
+            # frp relay defaults (B-0b60 public URLs) — the plugin reads these
+            # as DEFAULTS; a user can override any of them in ⚙ → Plugins. When
+            # present the plugin is default-enabled (auto-connects on boot).
+            - name: VIBESPACE_FRPS_ADDR
+              value: {{ .Values.frp.addr | quote }}
+            - name: VIBESPACE_FRPS_PORT
+              value: {{ .Values.frp.port | default 7000 | quote }}
+            - name: VIBESPACE_FRPS_TOKEN
+              valueFrom: { secretKeyRef: { name: {{ $name }}, key: frpsToken } }
+            {{- with .Values.frp.subdomainHost }}
+            - name: VIBESPACE_FRPS_SUBDOMAIN_HOST
+              value: {{ . | quote }}
+            {{- end }}
             {{- end }}
             - name: VIBESPACE_INSTANCE_NAME
               value: {{ .Values.user | quote }}

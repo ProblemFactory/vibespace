@@ -97,6 +97,16 @@ telemetry:
   forwardToken: ""
   ingestToken: ""
 
+# frp relay for PUBLIC URLs (B-0b60). Set addr+token to inject the relay as the
+# plugin's default (⚙ → Plugins → Public URLs) — the plugin then default-enables
+# and connects on boot. Users can override any of it in the UI. subdomainHost
+# (optional) turns publishes into https://<random>.<host> (needs wildcard DNS).
+frp:
+  addr: ""            # relay host, e.g. relay.example.com or an IP
+  port: 7000
+  token: ""           # shared secret (stored in the release Secret)
+  subdomainHost: ""   # e.g. preview.example.com → https://<random>.preview.example.com
+
 # Agent-container egress lockdown (needs a NetworkPolicy-enforcing CNI). OFF by
 # default — enable once you've set the allow-lists for YOUR network.
 networkPolicy:
