@@ -92,6 +92,46 @@ check('every op audited', (tasks.get(gid).progress || []).filter((p) => p.note.s
 r = call({ delete: { id: gid } });
 check('unknown verb → 400', r.code === 400);
 
+// ── 2.152.0: manager scope = ALL groups (user directive) ──────────────────
+// A manager may target ANY group with explicit --group on REGULAR verbs, even
+// one it does not belong to; non-managers keep the belonging enforcement.
+function callRoute(route, { query = {}, body = {} } = {}) {
+  let out, code = 200;
+  const req = { headers: { authorization: 'Bearer vsst_test' }, query, body };
+  const res = { json: (o) => { out = o; return res; }, status: (c) => { code = c; return res; } };
+  routes[route](req, res);
+  return { code, out };
+}
+// the manager session is NOT in this group (bound to nobody, folders elsewhere)
+r = call({ create: { title: 'Foreign group' } });
+const foreignId = r.out.group.id;
+call({ unbind: { id: foreignId } }); // ensure self not bound (create doesn't bind, but be explicit)
+r = callRoute('POST /api/agent/task-progress', { body: { group: foreignId, note: 'manager cross-group note' } });
+check('manager: progress into a NON-belonged group via --group', r.code === 200,
+  JSON.stringify(r.out));
+check('cross-group note attributed + stored', (tasks.get(foreignId).progress || []).some((p) => p.note === 'manager cross-group note' && p.session === 'claude:abc-123'));
+r = callRoute('POST /api/agent/task-progress', { body: { group: 'T-nonexistent', note: 'x' } });
+check('manager: unknown group id → 404 with group-list pointer', r.code === 404 && /group-list/.test(r.out.error), JSON.stringify(r.out));
+userState = {}; // de-designate → belonging enforcement returns
+r = callRoute('POST /api/agent/task-progress', { body: { group: foreignId, note: 'nope' } });
+check('non-manager: explicit non-belonged group still 403', r.code === 403, JSON.stringify(r.out));
+userState = { sessionConfigs: { 'claude:abc-123': { groupManager: true } } };
+
+// ── 2.152.0: the manager LEARNS its powers in injected context ────────────
+r = callRoute('GET /api/agent/prompt-context', {});
+check('prompt-context teaches the manager block once', r.code === 200 && /vibespace-group-manager/.test(r.out.context) && /group-list/.test(r.out.context), (r.out.context || '').slice(0, 120));
+r = callRoute('GET /api/agent/prompt-context', {});
+check('manager block is one-shot (not re-sent)', r.code === 200 && !/vibespace-group-manager/.test(r.out.context || ''));
+// per-turn reminder carries a manager clause
+settings['agents.perTurnToolReminder'] = true;
+r = callRoute('GET /api/agent/prompt-context', {});
+check('per-turn reminder names the manager powers', /Group MANAGER/.test(r.out.context || ''), (r.out.context || '').slice(0, 200));
+// a NON-manager session gets neither
+delete session._mgrIntroSeen; delete session._toolsIntroSeen;
+userState = {};
+r = callRoute('GET /api/agent/prompt-context', {});
+check('non-manager gets no manager teaching', !/vibespace-group-manager|Group MANAGER/.test(r.out.context || ''), (r.out.context || '').slice(0, 200));
+
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(failed ? `\n${failed} FAILED` : '\nall green');
 process.exit(failed ? 1 : 0);

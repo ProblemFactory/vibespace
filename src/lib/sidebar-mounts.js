@@ -101,6 +101,13 @@ export function installSidebarMounts(Sidebar) {
       addHost.innerHTML = `<span class="mounts-action-icon">${MI.server}</span><span>${escHtml(tr('Add machine'))}</span>`;
       addHost.onclick = () => this._showAddHostDialog(hd);
       root.appendChild(addHost);
+      // Dial-out DEVICE pairing (B-e5e7): the no-ssh path — laptops/Macs
+      // behind NAT dial OUT to this instance (docs/device-agent.md).
+      const pairDev = document.createElement('button');
+      pairDev.className = 'mounts-action';
+      pairDev.innerHTML = `<span class="mounts-action-icon">${MI.plus}</span><span>${escHtml(tr('Pair a device (no ssh — it dials out)'))}</span>`;
+      pairDev.onclick = () => this._showDevicePairDialog();
+      root.appendChild(pairDev);
 
       const sHead = document.createElement('div');
       sHead.className = 'mounts-sec-head';
@@ -707,6 +714,66 @@ export function installSidebarMounts(Sidebar) {
         catch (e) { this._hostStatus[r.id] = { ok: false, error: e.message }; showToast('Added, but unreachable: ' + e.message, { type: 'error' }); }
         this._renderMounts();
       });
+    },
+
+    // Pair a NAT'd machine as a dial-out DEVICE (B-e5e7, docs/device-agent.md):
+    // mint a device id + dial token (POST /api/agentd/dial-pair) and hand the
+    // user the exact one-line installer command. Machines you can ssh into
+    // never need this — Add machine installs the agent over ssh at first use.
+    _showDevicePairDialog() {
+      const { body, close } = createModalShell({ id: 'device-pair-dialog', title: tr('Pair a device'), escapeToClose: true });
+      const note = document.createElement('p');
+      note.className = 'agents-note';
+      note.textContent = tr('For machines you can’t ssh into (a laptop, a Mac at home): the device dials OUT to this instance over a websocket, so it works behind NAT with nothing to expose. Needs Node 18+ on the device.');
+      const label = document.createElement('label');
+      label.textContent = tr('Device name');
+      const inp = document.createElement('input');
+      inp.type = 'text'; inp.placeholder = 'my-mac'; inp.maxLength = 32;
+      const actions = document.createElement('div');
+      actions.className = 'dialog-actions';
+      const cancel = document.createElement('button');
+      cancel.className = 'btn-cancel'; cancel.textContent = tr('Cancel'); cancel.onclick = () => close();
+      const go = document.createElement('button');
+      go.className = 'btn-create'; go.textContent = tr('Create pairing');
+      actions.append(cancel, go);
+      body.append(note, label, inp, actions);
+      setTimeout(() => inp.focus(), 50);
+      const pair = async () => {
+        const name = (inp.value || '').trim().replace(/[^\w-]/g, '') || undefined;
+        go.disabled = true; go.textContent = tr('Pairing…');
+        try {
+          const r = await api('/api/agentd/dial-pair', { method: 'POST', body: JSON.stringify({ deviceId: name, serverUrl: location.origin }) });
+          const wsBase = location.origin.replace(/^http/, 'ws');
+          // The full installer line: bundle + dial URL + BOTH tokens — the
+          // hostToken is what the daemon verifies OUR mux hello against; an
+          // install without it can dial in but rejects every server command.
+          const cmd = `curl -fsSL ${location.origin}/agentd-install.sh | bash -s -- \\\n  --bundle-url ${location.origin}/agentd.js \\\n  --dial '${wsBase}/api/agentd-dial?device=${r.deviceId}' \\\n  --dial-token ${r.dialToken} \\\n  --host-token ${r.hostToken}`;
+          body.innerHTML = '';
+          const done = document.createElement('p');
+          done.className = 'agents-note';
+          done.textContent = tr('Paired as "{id}". Run this on the device (Node 18+); it starts the agent and dials in — the device then appears wherever machines are offered:', { id: r.deviceId });
+          const ta = document.createElement('textarea');
+          ta.readOnly = true; ta.value = cmd; ta.style.minHeight = '110px'; ta.style.fontSize = '11px'; ta.spellcheck = false;
+          const tail = document.createElement('p');
+          tail.className = 'agents-note';
+          tail.textContent = tr('The daemon auto-reconnects and survives reboots (rerun the same command after a reboot — state lives in ~/.vibespace/agentd). Pairing the same name again replaces its token.');
+          const act2 = document.createElement('div');
+          act2.className = 'dialog-actions';
+          const copy = document.createElement('button');
+          copy.className = 'btn-create'; copy.textContent = tr('Copy command');
+          copy.onclick = () => { copyText(cmd); showToast(tr('Command copied')); };
+          const closeBtn = document.createElement('button');
+          closeBtn.className = 'btn-cancel'; closeBtn.textContent = tr('Close'); closeBtn.onclick = () => close();
+          act2.append(closeBtn, copy);
+          body.append(done, ta, tail, act2);
+          ta.onclick = () => ta.select();
+        } catch (e) {
+          go.disabled = false; go.textContent = tr('Create pairing');
+          showToast((e && e.message) || 'pairing failed', { type: 'error' });
+        }
+      };
+      go.onclick = pair;
+      inp.onkeydown = (e) => { if (e.key === 'Enter') pair(); };
     },
 
     // Bootstrap: dedicated step-progress UI with an expandable live log

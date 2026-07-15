@@ -167,6 +167,22 @@ export class DesktopManager {
 
   // ── Desktop Switching ──
 
+  // Drop a CLOSED window from every cached desktop record. Called from
+  // wm.closeWindow for every close path (detach and terminate alike): the
+  // switchTo merge-preserve keeps openSpec-backed records that aren't in
+  // wm.windows ("still lazy-replaying"), which is indistinguishable from
+  // "user closed it" — without this purge, every desktop round-trip
+  // resurrected every closed window as a lazy replay (real report 2.151.1).
+  purgeClosedWindow(winId) {
+    if (!winId) return;
+    for (const [, st] of this._savedStates) {
+      if (st?.windows?.length) {
+        const kept = st.windows.filter((w) => (w.winId || w.id) !== winId);
+        if (kept.length !== st.windows.length) st.windows = kept;
+      }
+    }
+  }
+
   async switchTo(desktopId) {
     if (desktopId === this._activeId) { this._pendingSwitch = null; return; }
     // Rapid switching: a switch requested mid-flight is QUEUED (latest wins),

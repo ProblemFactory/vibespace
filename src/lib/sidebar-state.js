@@ -398,9 +398,11 @@ export function installSidebarState(SidebarClass) {
     if (!stateKey) return;
     const clean = {};
     // NOTE: this whitelist silently dropped 'account' when it was added in
-    // 2.43.0 (the gear's Account pick never saved) — keep it in sync with the
-    // gear popover's rows.
-    for (const k of ['model', 'effort', 'permission', 'account']) {
+    // 2.43.0 (the gear's Account pick never saved) AND 'groupManager' when it
+    // was added in 2.132.0 (the Session Properties toggle never saved — third
+    // strike of the same bug) — keep it in sync with EVERY per-session config
+    // writer (gear popover rows + Session Properties toggles).
+    for (const k of ['model', 'effort', 'permission', 'account', 'groupManager']) {
       if (config?.[k]) clean[k] = config[k];
     }
     if (Object.keys(clean).length) this._sessionConfigs[stateKey] = clean;

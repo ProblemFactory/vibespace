@@ -963,6 +963,12 @@ class WindowManager {
 
   closeWindow(id) {
     this._app?.stage?.onWindowClosed(id);
+    // A user-closed window must die in every cached desktop record too —
+    // switchTo's merge-preserve (2.141.1) cannot tell "closed" from "not yet
+    // materialized" (both openSpec-backed + absent from wm.windows), so stale
+    // records resurrected every closed window on the next desktop round-trip
+    // (2.151.1 real report: 关闭→切桌面→切回来→窗口复活成history状态).
+    this._app?.desktopManager?.purgeClosedWindow(id);
     const win = this.windows.get(id); if (!win) return;
     win._listenerCtl?.abort(); // release document-level drag/icon listeners
     if (win._tabChain) {
