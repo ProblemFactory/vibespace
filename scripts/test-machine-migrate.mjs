@@ -79,14 +79,15 @@ const fakeTokens = {
   mint: () => ({ raw: 'x', rec: { id: 'x' } }),
   revoke: (id) => revoked.push(id),
   list: () => [
-    { id: 'tk1', name: 'host:host-11223344' },      // referenced by the migrated push record
-    { id: 'tk-orphan', name: 'host:host-dial-mac1' }, // leaked by a failed push
-    { id: 'tk-share', name: 'share:something' },      // not ours — untouched
+    { id: 'tk1', kind: 'reverse-mount', owner: 'host-11223344' }, // referenced by the migrated push record
+    { id: 'tk-orphan', kind: 'reverse-mount', owner: 'host-dial-mac1' }, // leaked by a failed push
+    { id: 'tk-manual', kind: 'share', name: 'team-dataset' },   // a user's manual share — MUST survive
+    { id: 'tk-legacy', kind: 'reverse-mount', owner: 'host-gone' }, // orphan from an old push (back-filled kind)
   ],
 };
 const mm3 = new MachineMounts({ dataDir, hosts: hosts2, mountTokens: fakeTokens });
 mm3.gcOrphanTokens();
-check('orphan host:* token revoked, referenced + foreign kept', JSON.stringify(revoked) === '["tk-orphan"]', JSON.stringify(revoked));
+check('GC revokes reverse-mount tokens with no push record (by kind), leaves share tokens', JSON.stringify(revoked.sort()) === '["tk-legacy","tk-orphan"]', JSON.stringify(revoked));
 
 // unpair semantics: removing the dial host kills the credential with it
 hosts2.remove('host-dial-frps-server');
