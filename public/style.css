@@ -732,7 +732,12 @@ html, body {
 
 /* ── Workspace ── */
 #workspace {
-  position: relative; flex: 1; background: var(--bg-workspace); overflow: hidden;
+  position: relative; flex: 1; background: var(--bg-workspace);
+  /* clip, not hidden: hidden containers are still PROGRAMMATICALLY scrollable
+     — browser focus-scrolling scrolled the whole workspace when focus landed
+     in a window extending past the bottom, with no scrollbar to undo it
+     (the "整个工作区被往下推" report; window.js has the JS belt) */
+  overflow: hidden; overflow: clip;
 }
 #snap-indicator {
   display: none; position: absolute; background: var(--accent-dim);

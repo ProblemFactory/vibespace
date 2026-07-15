@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.161.2 — 2026-07-15
+- **The "workspace pushed down" root cause — the workspace itself was being SCROLLED** (live-tracer diagnosis on the reporter's machine, three instrument iterations): `#workspace` is `overflow: hidden`, and hidden containers are still *programmatically* scrollable — when focus lands inside a window that extends past the workspace bottom (freeform windows legally can), the browser's focus-scrolling scrolls the whole workspace (captured live: scrollTop stuck at 239, every window shifted by exactly that amount, no scrollbar to undo it). Correlated with bottom-edge right-clicks, which is why it looked like the context menu did it. Fix: `overflow: clip` (unscrollable by spec) + a scroll-snapback listener as the belt. A stuck workspace heals on reload even without the fix.
+
 ## 2.161.1 — 2026-07-15
 - **The file explorer's context menu is the one that ran off-screen** (follow-up to 2.161.0 — that fixed `showContextMenu`, but the explorer has its OWN menu builder that predates it and had NO clamping at all): item/background menus now clamp into the viewport, over-tall menus cap + scroll, submenus flip/shift at the edges, and Escape closes them like every other popover.
 - **双向挂载用语统一为「本 VibeSpace」** (user feedback: 一会 VibeSpace 一会工作区): push = 把本 VibeSpace 的文件夹挂载到"{机器}", pull = 把"{机器}"的文件夹挂载进本 VibeSpace — tooltips, dialog titles and field labels all agree now.
