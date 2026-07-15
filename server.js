@@ -2725,7 +2725,7 @@ app.post('/api/agentd/dial-pair', (req, res) => {
     res.json({
       ...pair,
       command: base
-        ? `node vibespace-agentd.js --dial ${base.replace(/^http/, 'ws')}/api/agentd-dial?device=${deviceId} --dial-token ${pair.dialToken}`
+        ? `node vibespace-device.js --dial ${base.replace(/^http/, 'ws')}/api/agentd-dial?device=${deviceId} --dial-token ${pair.dialToken}`
         : null,
       note: 'install the agentd bundle on the device, write the hostToken to <root>/state/token (0600), then run with --dial',
     });

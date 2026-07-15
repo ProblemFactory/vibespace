@@ -1968,4 +1968,13 @@ export default {
   "publishes forwarded ports to {host}": "転送されたポートを {host} に公開します",
   "Public URLs from this instance will stop working until you start it again.": "このインスタンスの公開 URL は、再度開始するまで機能しなくなります。",
   "Downloading {name}…": "{name} をダウンロード中…",
+  "Relay address": "リレーアドレス",
+  "Relay port": "リレーポート",
+  "Relay token": "リレートークン",
+  "Subdomain host (optional)": "サブドメインホスト（任意）",
+  "relay host": "リレーホスト",
+  "shared secret": "共有シークレット",
+  "example.com → https://<random>.example.com": "example.com → https://<ランダム>.example.com",
+  "Save config": "設定を保存",
+  "defaults come from the cluster — edit to override": "既定値はクラスタ由来 — 編集で上書き",
 };

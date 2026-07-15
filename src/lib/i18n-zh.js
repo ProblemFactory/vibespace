@@ -1968,4 +1968,13 @@ export default {
   "publishes forwarded ports to {host}": "把转发的端口发布到 {host}",
   "Public URLs from this instance will stop working until you start it again.": "本实例的公网 URL 会停止工作，直到再次启动。",
   "Downloading {name}…": "正在下载 {name}…",
+  "Relay address": "中继地址",
+  "Relay port": "中继端口",
+  "Relay token": "中继令牌",
+  "Subdomain host (optional)": "子域主机（可选）",
+  "relay host": "中继主机",
+  "shared secret": "共享密钥",
+  "example.com → https://<random>.example.com": "example.com → https://<随机>.example.com",
+  "Save config": "保存配置",
+  "defaults come from the cluster — edit to override": "默认值来自集群——修改可覆盖",
 };
