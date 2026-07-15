@@ -227,6 +227,7 @@ class MachineMounts {
     if (!fs.existsSync(abs)) throw new Error(`folder does not exist on this instance: ${abs}`);
     const share = this.mountTokens.mint({ name: 'host:' + hostId, root: abs, mode: mode === 'rw' ? 'rw' : 'ro' });
     const shareToken = share.raw, shareTokenId = share.rec.id;
+    try {
     const davUrl = base + '/dav';
     const osKind = await this.detectOS(hostId);
     const home = await this._remoteHome(hostId);
@@ -291,6 +292,13 @@ class MachineMounts {
     this._state.mounts.push(rec);
     this._save(); this._notify();
     return { id, mountpoint: mp, os: osKind, method, via: tunnelPort ? 'tunnel' : 'public' };
+    } catch (e) {
+      // a FAILED push must not leak its freshly-minted credential — every
+      // failed attempt used to leave an indistinguishable orphan token row
+      // (real report: 6 stacked duplicates after the Mac's bad day)
+      try { this.mountTokens.revoke?.(shareTokenId); } catch { }
+      throw e;
+    }
   }
 
   async _unmountPush(rec) {
@@ -410,8 +418,27 @@ class MachineMounts {
     }
   }
 
+  /** Orphan-token GC: 'host:*' tokens whose id no PUSH RECORD references are
+   *  unmanageable garbage (leaked by pre-2.162.1 failed pushes) — revoke them.
+   *  Records are the source of truth; a token without one can't be re-owned,
+   *  displayed meaningfully, or torn down through the app. */
+  gcOrphanTokens() {
+    let n = 0;
+    try {
+      const referenced = new Set(this._state.mounts.filter((m) => m.dir === 'push').map((m) => m.tokenId));
+      for (const t of this.mountTokens.list?.() || []) {
+        if (String(t.name || '').startsWith('host:') && !referenced.has(t.id)) {
+          try { this.mountTokens.revoke?.(t.id); n++; } catch { }
+        }
+      }
+      if (n) this.log(`revoked ${n} orphan reverse-mount token(s) (no matching mount record)`);
+    } catch { }
+    return n;
+  }
+
   /** Boot: heal every recorded mount whose machine is reachable. */
   async restore() {
+    this.gcOrphanTokens();
     const byHost = new Set(this._state.mounts.map((m) => m.hostId));
     for (const hostId of byHost) {
       if (this._online(hostId)) { try { this.onMachineLinked(hostId); } catch { } }

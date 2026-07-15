@@ -72,6 +72,22 @@ const mm2 = new MachineMounts({ dataDir, hosts: hosts2, mountTokens: { mint: () 
 check('second boot: hashes survive, no dupes', hosts2.dialTokenHash('mac1') === HASH_A && hosts2.list().filter((h) => h.deviceId === 'mac1').length === 1);
 check('second boot: mount records stable', mm2.list().length === 2);
 
+// token hygiene (2.162.1): gcOrphanTokens revokes host:* tokens no push
+// record references; referenced + non-host tokens untouched
+const revoked = [];
+const fakeTokens = {
+  mint: () => ({ raw: 'x', rec: { id: 'x' } }),
+  revoke: (id) => revoked.push(id),
+  list: () => [
+    { id: 'tk1', name: 'host:host-11223344' },      // referenced by the migrated push record
+    { id: 'tk-orphan', name: 'host:host-dial-mac1' }, // leaked by a failed push
+    { id: 'tk-share', name: 'share:something' },      // not ours — untouched
+  ],
+};
+const mm3 = new MachineMounts({ dataDir, hosts: hosts2, mountTokens: fakeTokens });
+mm3.gcOrphanTokens();
+check('orphan host:* token revoked, referenced + foreign kept', JSON.stringify(revoked) === '["tk-orphan"]', JSON.stringify(revoked));
+
 // unpair semantics: removing the dial host kills the credential with it
 hosts2.remove('host-dial-frps-server');
 check('unpair (record removal) revokes the pairing', hosts2.dialTokenHash('frps-server') === null);
