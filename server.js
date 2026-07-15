@@ -475,6 +475,12 @@ async function unpairDialDevice(deviceId) {
 // up the fresh stream). Enables 'device' mounts + remote fs for NAT'd devices.
 const agentdDialDevices = new Map(); // deviceId → DeviceManager
 async function deviceForDial(deviceId) {
+  // FAIL FAST when the device isn't dialed in: the stream transport's connect
+  // loop otherwise backs off and retries FOREVER, so every operation against
+  // an offline device (session create, mount, test) HUNG instead of erroring
+  // (real report: create卡住/terminal空白/mount打不开 — Mac daemon died after
+  // a self-upgrade re-exec and nothing surfaced it).
+  if (!agentdDials.has(deviceId)) throw new Error(`device "${deviceId}" is offline — its daemon is not dialed in (rerun the install command on it)`);
   let dm = agentdDialDevices.get(deviceId);
   if (dm && dm.status().connected) return dm;
   if (!dm) {
@@ -3226,7 +3232,12 @@ server.on('upgrade', (req, socket, head) => {
     const tok = String(req.headers['x-vibespace-dial-token'] || '');
     const want = hosts.dialTokenHash(deviceId); // pairing credential lives on the host record (B-f3e8)
     const got = tok ? require('crypto').createHash('sha256').update(tok).digest('hex') : null;
-    if (!deviceId || !want || got !== want) return deny();
+    if (!deviceId || !want || got !== want) {
+      // observability: a silently deny()'d redial is indistinguishable from
+      // "no attempts" in the logs (bit us diagnosing the dead-Mac incident)
+      console.log(`[agentd] dial REJECTED for '${deviceId || '?'}' — ${!deviceId ? 'no device id' : !want ? 'no pairing on record' : 'token mismatch'}`);
+      return deny();
+    }
     agentdDialWss.handleUpgrade(req, socket, head, (ws) => {
       // adapt the ws to the duplex shape Mux consumes
       const listeners = { data: [], close: [], error: [] };

@@ -1942,4 +1942,5 @@ export default {
   "Attaching \"{name}\" is taking unusually long — check the connection or reload the tab": "连接“{name}”的会话耗时异常——检查网络或刷新此标签页",
   "Creating the session is taking unusually long — check the connection or reload the tab": "创建会话耗时异常——检查网络或刷新此标签页",
   "Mount a folder from \"{name}\" into this VibeSpace": "把“{name}”的文件夹挂载进本 VibeSpace",
+  "Machine is offline — the tunnel is down; the mount heals when its daemon reconnects": "机器离线——隧道已断; 设备重连后挂载自动恢复",
 };

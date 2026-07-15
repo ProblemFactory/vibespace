@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.161.3 — 2026-07-15
+- **Operations against an OFFLINE dial machine fail fast with a clear error** (real report: create卡住/terminal空白/mount打不开 — the Mac's daemon had died after a self-upgrade re-exec and every operation HUNG): `deviceForDial` errors immediately when the device isn't dialed in instead of retrying forever; session create / mounts / test all surface "device offline — rerun the install command" within a second. The pairing e2e now asserts the fast-fail.
+- **Push-mount rows stop lying about a dead machine** (the 薛定谔的连接 report): the dot was hardcoded green — reads "worked" off rclone's dir-cache while writes silently died. For dial machines it now follows the live link state, with an honest tooltip (tunnel down, heals on reconnect).
+- **Rejected dial-in attempts are logged** (accepted ones already were) — a silently-401'd redial was indistinguishable from "no attempts" while diagnosing the dead Mac.
+- **B-ee6d: rclone install on a dial machine rides `runStream`** (unbounded) instead of the daemon's 30s `run-cmd` clamp — the ~20MB download on a slow uplink was killed mid-fetch and could never converge; ssh machines keep the plain path.
+
 ## 2.161.2 — 2026-07-15
 - **The "workspace pushed down" root cause — the workspace itself was being SCROLLED** (live-tracer diagnosis on the reporter's machine, three instrument iterations): `#workspace` is `overflow: hidden`, and hidden containers are still *programmatically* scrollable — when focus lands inside a window that extends past the workspace bottom (freeform windows legally can), the browser's focus-scrolling scrolls the whole workspace (captured live: scrollTop stuck at 239, every window shifted by exactly that amount, no scrollbar to undo it). Correlated with bottom-edge right-clicks, which is why it looked like the context menu did it. Fix: `overflow: clip` (unscrollable by spec) + a scroll-snapback listener as the belt. A stuck workspace heals on reload even without the fix.
 

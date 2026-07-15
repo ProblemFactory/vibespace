@@ -73,6 +73,13 @@ try {
   const dialHosts = async () => ((await (await fetch(`http://127.0.0.1:${PORT}/api/hosts`)).json()).hosts || []).filter((h) => h.transport === 'dial');
   let devs = await dialHosts();
   check('machine list shows the pairing (offline)', devs.some((d) => d.deviceId === 'smoke-mac' && d.online === false), JSON.stringify(devs));
+  // offline-device operations FAIL FAST (2.161.3): deviceForDial used to
+  // back off and retry forever, hanging create/mount/test on a dead device
+  const tOff = Date.now();
+  const off = await (await fetch(`http://127.0.0.1:${PORT}/api/machine-mounts/host-dial-smoke-mac`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dir: 'pull', remotePath: '/tmp' }) })).json();
+  check('offline pull-mount fails FAST with a clear error', (Date.now() - tOff) < 5000 && /offline|not dialed/i.test(off.error || ''), JSON.stringify(off).slice(0, 150));
   // start a REAL agentd with --dial (the actual daemon, not a fake ws client)
   const dialTok = /--dial-token (vsdt_\w+)/.exec(cmd)[1];
   const hostTok = /--host-token (vsht_\w+)/.exec(cmd)[1];

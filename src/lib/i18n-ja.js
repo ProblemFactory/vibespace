@@ -1942,4 +1942,5 @@ export default {
   "Attaching \"{name}\" is taking unusually long — check the connection or reload the tab": "「{name}」への接続に時間がかかっています — 接続を確認するかタブを再読み込みしてください",
   "Creating the session is taking unusually long — check the connection or reload the tab": "セッションの作成に時間がかかっています — 接続を確認するかタブを再読み込みしてください",
   "Mount a folder from \"{name}\" into this VibeSpace": "「{name}」のフォルダをこの VibeSpace にマウント",
+  "Machine is offline — the tunnel is down; the mount heals when its daemon reconnects": "マシンはオフライン — トンネルは切断中; デーモンが再接続するとマウントは自動回復します",
 };
