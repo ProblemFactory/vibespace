@@ -24,6 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       tigervnc-standalone-server dbus-x11 xfce4-session xfwm4 xfce4-panel \
       xfdesktop4 xfce4-terminal thunar chromium \
       fonts-noto-cjk fonts-noto-color-emoji xdg-utils \
+      adwaita-icon-theme \
     && rm -rf /var/lib/apt/lists/*
 # Chromium in an unprivileged container: the setuid/user-namespace sandbox is
 # unavailable (couldn't launch at all) and /dev/shm is tiny. Acceptable for a
@@ -95,9 +96,13 @@ RUN git clone https://github.com/ProblemFactory/vibespace /opt/vibespace-dist \
 # data/ contains only those (runtime state is gitignored), so keep it.
 
 COPY deploy/docker/entrypoint.sh /usr/local/bin/vibespace-entrypoint
-RUN chmod +x /usr/local/bin/vibespace-entrypoint
+COPY deploy/docker/boot-root.sh /usr/local/bin/vibespace-boot
+RUN chmod +x /usr/local/bin/vibespace-entrypoint /usr/local/bin/vibespace-boot
 
-USER vibe
+# Container starts as ROOT for one purpose: the boot wrapper renames `vibe`
+# to the instance name (guarded — only when the PVC is mounted at the new
+# home) then drops to that user via runuser. The app never runs as root.
+USER root
 # ~/.local/bin on PATH: claude's native installer (the onboarding Install
 # button) lands there — on the PVC, so a user-installed CLI survives image
 # rebuilds. The dir may not exist yet; PATH entries may dangle harmlessly.
@@ -109,4 +114,4 @@ ENV HOME=/home/vibe \
     HOST=0.0.0.0
 WORKDIR /home/vibe
 EXPOSE 3456
-ENTRYPOINT ["/usr/local/bin/vibespace-entrypoint"]
+ENTRYPOINT ["/usr/local/bin/vibespace-boot"]
