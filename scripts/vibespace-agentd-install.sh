@@ -29,11 +29,11 @@ esac; done
 # install keys its root (daemon + tokens + bundle, each self-upgrading from
 # its own server) by the dial host, so instances never clobber each other.
 # The standing daemon (ssh-reachable machine) keeps the classic shared root.
-if [ -z "${VIBESPACE_AGENTD_ROOT:-}" ] && [ -n "$DIAL_URL" ]; then
+if [ -z "${VIBESPACE_DEVICE_ROOT:-}${VIBESPACE_AGENTD_ROOT:-}" ] && [ -n "$DIAL_URL" ]; then
   DIAL_HOST=$(printf '%s' "$DIAL_URL" | sed -E 's|^[a-z]+://([^/:?]+).*|\1|' | tr -cd 'A-Za-z0-9.-')
   ROOT="$HOME/.vibespace/device@${DIAL_HOST:-dial}"
 else
-  ROOT="${VIBESPACE_AGENTD_ROOT:-$HOME/.vibespace/agentd}"
+  ROOT="${VIBESPACE_DEVICE_ROOT:-${VIBESPACE_AGENTD_ROOT:-$HOME/.vibespace/agentd}}"
 fi
 
 command -v node >/dev/null || { echo "node ≥18 required (brew install node / apt install nodejs)"; exit 1; }
@@ -76,7 +76,8 @@ echo "→ host token at $ROOT/state/token"
 
 # Persist the dial config so the daemon can start ARGLESS forever after (it
 # re-dials from state/dial.json; no tokens in any unit file or argv).
-export VIBESPACE_AGENTD_ROOT="$ROOT"
+export VIBESPACE_DEVICE_ROOT="$ROOT"
+export VIBESPACE_AGENTD_ROOT="$ROOT" # legacy bundle compat
 if [ -n "$DIAL_URL" ]; then
   node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({url:process.argv[2],token:process.argv[3]}), {mode:0o600})' \
     "$ROOT/state/dial.json" "$DIAL_URL" "$DIAL_TOKEN"
@@ -111,6 +112,7 @@ if [ "$(uname -s)" = "Darwin" ]; then
     <string>$ROOT/current/vibespace-device.js</string>
   </array>
   <key>EnvironmentVariables</key><dict>
+    <key>VIBESPACE_DEVICE_ROOT</key><string>$ROOT</string>
     <key>VIBESPACE_AGENTD_ROOT</key><string>$ROOT</string>
   </dict>
   <key>RunAtLoad</key><true/>
@@ -131,6 +133,7 @@ elif command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >
 [Unit]
 Description=VibeSpace device agent ($KEY)
 [Service]
+Environment=VIBESPACE_DEVICE_ROOT=$ROOT
 Environment=VIBESPACE_AGENTD_ROOT=$ROOT
 ExecStart=$NODE_BIN $ROOT/current/vibespace-device.js
 Restart=always

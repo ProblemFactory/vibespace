@@ -1836,7 +1836,7 @@ export default {
   "via tunnel": "トンネル経由",
   "via address": "アドレス経由",
   "Rides the device agent link — no public address or VPN needed": "デバイスエージェントのリンクを経由——公開アドレスや VPN は不要",
-  "Reached over agentd.publicUrl (no device agent on this host)": "agentd.publicUrl 経由（このホストにデバイスエージェントなし）",
+  "Reached over the instance public address (no device agent on this host)": "インスタンス公開アドレス経由（このホストにデバイスエージェントなし）",
   "Unmount from this machine": "このマシンからアンマウント",
   "Unmounted": "アンマウントしました",
   "Share a folder onto \"{name}\"": "フォルダを「{name}」にマウント",

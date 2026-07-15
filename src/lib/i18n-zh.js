@@ -1836,7 +1836,7 @@ export default {
   "via tunnel": "经隧道",
   "via address": "经地址",
   "Rides the device agent link — no public address or VPN needed": "走设备代理链路——无需公网地址或 VPN",
-  "Reached over agentd.publicUrl (no device agent on this host)": "经 agentd.publicUrl 访问（此主机无设备代理）",
+  "Reached over the instance public address (no device agent on this host)": "经实例公网地址访问（此主机无设备代理）",
   "Unmount from this machine": "从这台机器卸载",
   "Unmounted": "已卸载",
   "Share a folder onto \"{name}\"": "把文件夹挂载到 “{name}”",
