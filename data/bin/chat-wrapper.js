@@ -38,6 +38,13 @@ const cmd = process.argv[4];
 const args = process.argv.slice(5);
 
 const REMOTE_SID = process.env.VIBESPACE_REMOTE_SID || '';
+// The DIAL/agentd-attach bridge honors the SAME contract as the keeper (raw
+// bytes + __VS_OFFSET__ + _remote_exit sentinel), but its sessions don't
+// always carry VIBESPACE_REMOTE_SID. A LITERAL __VS_OFFSET__ reaching the
+// attach child is ALWAYS a bug (offset=NaN → zero data relayed → blank chat,
+// real xingweil report). Enable the offset machinery whenever the placeholder
+// is present, not only for REMOTE_SID.
+const OFFSET_MODE = !!REMOTE_SID || process.argv.slice(5).some(a => a.includes('__VS_OFFSET__'));
 let remoteOffset = 0;        // bytes of the REMOTE buffer consumed (byte-exact)
 let remoteExited = null;     // set when the keeper's _remote_exit sentinel arrives
 let reconnectAttempts = 0;
@@ -106,7 +113,7 @@ function sendChild(line) { // line WITHOUT trailing \n
   if (child && !childDead && child.stdin && child.stdin.writable) {
     try { child.stdin.write(line + '\n'); return; } catch {}
   }
-  if (REMOTE_SID) { // queue while the pipe is down — flushed after reconnect
+  if (OFFSET_MODE) { // queue while the pipe is down — flushed after reconnect
     inputQueue.push(line);
     if (inputQueue.length > 200) inputQueue.shift();
     log(`queued input while disconnected (${inputQueue.length} pending)`);
@@ -209,7 +216,7 @@ function startChild() {
   // Remote reconnect: substitute the consumed-bytes offset so the keeper
   // replays exactly what we missed (__VS_OFFSET__ rides inside the ssh
   // inner-command string).
-  const spawnArgs = REMOTE_SID ? args.map(a => a.split('__VS_OFFSET__').join(String(remoteOffset))) : args;
+  const spawnArgs = OFFSET_MODE ? args.map(a => a.split('__VS_OFFSET__').join(String(remoteOffset))) : args;
   try {
     child = spawn(cmd, spawnArgs, {
       cwd: process.cwd(),
@@ -218,7 +225,7 @@ function startChild() {
     });
   } catch (err) {
     log(`Failed to spawn: ${err.message}\ncmd=${cmd}\nargs=${JSON.stringify(spawnArgs)}`);
-    if (REMOTE_SID) { scheduleReconnect(); return; }
+    if (OFFSET_MODE) { scheduleReconnect(); return; }
     process.exit(1);
   }
   childDead = false;
@@ -230,7 +237,7 @@ function startChild() {
   // Buffer-based splitting: offsets must be BYTE-exact across reconnects, and
   // a chunk boundary may split a multibyte char — only complete lines decode.
   child.stdout.on('data', (chunk) => {
-    if (REMOTE_SID) {
+    if (OFFSET_MODE) {
       remoteOffset += chunk.length;
       if (meta.remote?.state !== 'connected') {
         reconnectAttempts = 0;
@@ -267,7 +274,7 @@ function startChild() {
     log(`Child exited with code ${exitCode}`);
     // Remote + the session did NOT end on the host + we weren't told to die:
     // this was a transport (ssh) death — reconnect, never finalize.
-    if (REMOTE_SID && remoteExited === null && !shuttingDown) {
+    if (OFFSET_MODE && remoteExited === null && !shuttingDown) {
       meta.remote = { state: 'reconnecting', attempts: reconnectAttempts + 1, at: Date.now() };
       meta.streaming = meta.streaming || false; // keep whatever the stream last said
       scheduleMeta();
@@ -280,7 +287,7 @@ function startChild() {
   child.on('error', (err) => {
     childDead = true;
     log(`Child error: ${err.message}`);
-    if (REMOTE_SID && remoteExited === null && !shuttingDown) { scheduleReconnect(); return; }
+    if (OFFSET_MODE && remoteExited === null && !shuttingDown) { scheduleReconnect(); return; }
     process.exit(1);
   });
 
