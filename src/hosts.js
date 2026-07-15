@@ -76,7 +76,13 @@ class HostManager {
   invalidateDiscovery(id) { this._discoveryCache.delete(id); }
 
   _load() {
-    try { this._state = JSON.parse(fs.readFileSync(this._file, 'utf-8')); } catch { /* fresh */ }
+    try { this._state = JSON.parse(fs.readFileSync(this._file, 'utf-8')); }
+    catch {
+      // hosts.json is the SOLE holder of every dialTokenHash since B-f3e8 —
+      // an unparseable file is backed up before we proceed empty, never
+      // silently overwritten by the next _save (review hardening)
+      try { if (fs.existsSync(this._file)) fs.copyFileSync(this._file, this._file + '.corrupt-' + Date.now()); } catch { }
+    }
     if (!Array.isArray(this._state.hosts)) this._state.hosts = [];
   }
 
@@ -86,7 +92,14 @@ class HostManager {
     fs.renameSync(tmp, this._file);
   }
 
-  list() { return this._state.hosts.map(h => ({ ...h })); }
+  list() {
+    // dial hosts carry a live `online` field (server wires dialOnline to the
+    // dialed-in stream registry) — the ONE machine list is the whole roster,
+    // there is no separate device API anymore (B-f3e8).
+    return this._state.hosts.map(h => (h.transport === 'dial'
+      ? { ...h, dialTokenHash: undefined, online: !!this.dialOnline?.(h.deviceId) }
+      : { ...h }));
+  }
 
   get(id) {
     const h = this._state.hosts.find(x => x.id === id);
@@ -94,7 +107,44 @@ class HostManager {
     return h;
   }
 
-  add({ name, user, host, port, keyPath, privateKey, transport, deviceId }) {
+  /** The host record a dialed-in device belongs to (deviceId = wire identity). */
+  findByDeviceId(deviceId) {
+    return this._state.hosts.find(h => h.transport === 'dial' && h.deviceId === String(deviceId)) || null;
+  }
+
+  /** Pairing credential lives ON the host record (B-f3e8 — dial-tokens.json
+   *  folded in). setDialToken find-or-creates so re-pairing an existing name
+   *  rotates the token in place. */
+  setDialToken(deviceId, sha256Hash, { name } = {}) {
+    let h = this.findByDeviceId(deviceId);
+    if (!h) { this.add({ name: name || deviceId, transport: 'dial', deviceId }); h = this.findByDeviceId(deviceId); }
+    // add() keys by the SANITIZED id — a different raw deviceId that sanitizes
+    // to the same id collides and findByDeviceId (raw match) stays null
+    if (!h) throw new Error(`device name "${deviceId}" collides with an existing pairing after sanitization — pick another name`);
+    h.dialTokenHash = String(sha256Hash);
+    this._save();
+    return h.id;
+  }
+  dialTokenHash(deviceId) { return this.findByDeviceId(deviceId)?.dialTokenHash || null; }
+
+  /** B-f3e8 one-time migration: the legacy dial-tokens.json (deviceId →
+   *  sha256) folds into the dial host records. MUST be lossless — devices in
+   *  the field hold the raw tokens; a lost hash locks every daemon out
+   *  permanently. The legacy file is renamed only AFTER every entry landed
+   *  in hosts.json (a crash mid-way just re-runs it). */
+  migrateDialTokenFile(file) {
+    if (!fs.existsSync(file)) return false;
+    const all = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    for (const [devId, hash] of Object.entries(all)) {
+      if (hash && !this.dialTokenHash(devId)) this.setDialToken(devId, hash);
+    }
+    const ok = Object.entries(all).every(([devId, hash]) => !hash || this.dialTokenHash(devId));
+    if (ok) fs.renameSync(file, file + '.migrated');
+    else console.warn('[hosts] dial-token migration incomplete — legacy file kept');
+    return ok;
+  }
+
+  add({ name, user, host, port, keyPath, privateKey, transport, deviceId, dialTokenHash }) {
     // DIAL host (graduation slice B): a paired dial-out device promoted to a
     // full machine — no ssh fields; every data path rides deviceForDial.
     if (transport === 'dial') {
@@ -102,6 +152,7 @@ class HostManager {
       const id = 'host-dial-' + String(deviceId).replace(/[^\w-]/g, '');
       if (this._state.hosts.some(h => h.id === id)) return id; // idempotent
       const rec = { id, name: String(name || deviceId).slice(0, 60), transport: 'dial', deviceId: String(deviceId), createdAt: Date.now() };
+      if (dialTokenHash) rec.dialTokenHash = String(dialTokenHash);
       this._state.hosts.push(rec);
       this._save();
       return id;
@@ -192,6 +243,13 @@ class HostManager {
     const hosts = [];
     for (const h of bundle.hosts) {
       const rec = { ...h };
+      // A bundle from a pre-2.160.0 instance carries dial records WITHOUT the
+      // token hash (it lived in dial-tokens.json, never exported) — a wholesale
+      // replace would lock every paired device out. Keep the hash we have.
+      if (rec.transport === 'dial' && !rec.dialTokenHash) {
+        const cur = this.findByDeviceId(rec.deviceId);
+        if (cur?.dialTokenHash) rec.dialTokenHash = cur.dialTokenHash;
+      }
       const keyText = bundle.keys?.[h.id];
       if (keyText && h.keyPath && h.keyPath.startsWith(this._sshDir)) {
         // rebase the key under THIS instance's ssh dir
@@ -294,6 +352,21 @@ class HostManager {
   /** Connectivity + remote tool inventory in ONE round trip. */
   async test(id) {
     const h = this.get(id);
+    // dial machine: no ssh — a real round trip over the dialed-in link (runCmd
+    // exercises the whole mux path) + the daemon's self-reported identity.
+    if (h.transport === 'dial') {
+      if (!this.dialOnline?.(h.deviceId)) throw new Error('not dialed in — start the daemon on the device (rerun the install command)');
+      const t0 = Date.now();
+      const dm = await this.device(id);
+      const st = dm.status();
+      let tools;
+      try {
+        const r = await dm.runCmd('sh', ['-c', 'for c in dtach node claude codex; do command -v $c >/dev/null 2>&1 && printf "%s=yes " $c || printf "%s=no " $c; done'], { timeoutMs: 8000 });
+        tools = {};
+        for (const m of String(r.stdout || '').matchAll(/(\w+)=(yes|no)/g)) tools[m[1]] = m[2] === 'yes';
+      } catch { tools = null; } // Windows daemon: no sh — identity still proves the link
+      return { ok: true, latencyMs: Date.now() - t0, dial: true, tools, info: st.info || null };
+    }
     const probe = 'export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; echo VS-OK; for c in dtach node claude codex; do command -v $c >/dev/null 2>&1 && printf "%s=yes " $c || printf "%s=no " $c; done; echo; uname -sm';
     const t0 = Date.now();
     const out = await this._ssh(h, probe, { timeoutMs: 10000 });
@@ -303,13 +376,29 @@ class HostManager {
     return { ok: true, latencyMs: Date.now() - t0, tools, uname: (out.trim().split('\n').pop() || '').trim() };
   }
 
-  /** Remote directory autocomplete — ls the parent dir over ssh, prefix-filter. */
+  /** Remote directory autocomplete — parent-dir listing, prefix-filter.
+   *  Device link first (the ONLY path for dial machines — real report: the
+   *  pull dialog completed LOCAL folders; ssh fallback below unchanged). */
   async dirComplete(id, input) {
     const h = this.get(id);
     const raw = String(input || '');
     const slash = raw.lastIndexOf('/');
     const parent = slash >= 0 ? raw.slice(0, slash) || '/' : '';
     const prefix = slash >= 0 ? raw.slice(slash + 1) : raw;
+    if (h.transport === 'dial' || this.dataPlaneOn?.()) {
+      try {
+        const dm = await this.device(id);
+        let base = parent;
+        if (base === '' || base === '~') base = String((await dm.runCmd('sh', ['-c', 'echo "$HOME"'], { timeoutMs: 5000 })).stdout || '').trim() || '/';
+        else if (base.startsWith('~/')) base = String((await dm.runCmd('sh', ['-c', 'echo "$HOME"'], { timeoutMs: 5000 })).stdout || '').trim() + base.slice(1);
+        const r = await dm.fsList(base);
+        const shown = (parent === '' || parent === '~') ? '~' : parent;
+        return r.entries
+          .filter(e => e.isDir && e.name.toLowerCase().startsWith(prefix.toLowerCase()))
+          .slice(0, 20)
+          .map(e => (shown === '/' ? '/' : shown + '/') + e.name);
+      } catch { if (h.transport === 'dial') return []; /* ssh hosts fall through */ }
+    }
     const base = (parent === '' || parent === '~') ? '"$HOME"' : `'${parent.replace(/'/g, `'\\''`)}'`;
     const out = await this._ssh(h, `cd ${base} 2>/dev/null && ls -1ap 2>/dev/null | grep '/$' | head -60`, { timeoutMs: 6000 }).catch(() => '');
     const shownParent = (parent === '' || parent === '~') ? '~' : parent;

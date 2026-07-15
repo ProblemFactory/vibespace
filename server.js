@@ -448,17 +448,25 @@ const _agentdInstalled = new Map(); // hostId → version
 // device's transport waits on. ──
 const agentdDials = new Map();      // deviceId → ws stream adapter (live dial)
 const agentdDialWaiters = new Map(); // deviceId → [resolve]
-function agentdDialTokens() {
-  try { return JSON.parse(fs.readFileSync(path.join(AGENTD_DIR, 'dial-tokens.json'), 'utf-8')); } catch { return {}; }
-}
+// B-f3e8: the pairing credential lives ON the dial host record (hosts.json
+// dialTokenHash) — dial-tokens.json is migrated once at boot (below, after
+// HostManager construction) and there is no separate device registry anymore.
 function agentdMintDialPair(deviceId) {
   ensureDir(AGENTD_DIR);
   const tok = 'vsdt_' + require('crypto').randomBytes(18).toString('hex');
-  const all = agentdDialTokens();
-  all[deviceId] = require('crypto').createHash('sha256').update(tok).digest('hex');
-  fs.writeFileSync(path.join(AGENTD_DIR, 'dial-tokens.json'), JSON.stringify(all, null, 2), { mode: 0o600 });
+  hosts.setDialToken(deviceId, require('crypto').createHash('sha256').update(tok).digest('hex'));
   // the device token (vsht_) for in-mux auth ships in the install payload
   return { deviceId, dialToken: tok, hostToken: agentdHostToken('dial-' + deviceId) };
+}
+/** Full unpair of a dial machine (DELETE /api/hosts/:id on a dial record):
+ *  mounts torn down, vsht_ token file gone, live stream destroyed. The token
+ *  hash dies with the host record itself. */
+async function unpairDialDevice(deviceId) {
+  try { await machineMounts.onMachineUnpaired(hosts.findByDeviceId(deviceId)?.id); } catch { }
+  try { fs.unlinkSync(path.join(AGENTD_DIR, `host-dial-${deviceId}.token`)); } catch { }
+  const live = agentdDials.get(deviceId);
+  if (live) { try { live.destroy(); } catch { } agentdDials.delete(deviceId); }
+  agentdDialDevices.delete(deviceId);
 }
 // A DeviceManager over a DIALED-IN device (Transport B consumption): the
 // device's daemon holds the mux-server end; we drive it (fs/serve-folder/
@@ -2486,30 +2494,46 @@ app.post('/api/agent-hooks/uninstall', (req, res) => {
   res.json({ success: true, status: agentHooksStatus() });
 });
 
-// ── Hosts (ssh host registry for remote sessions — collaboration P2) ──
+// ── Hosts (the MACHINE registry — ssh hosts AND dial-out devices, B-f3e8) ──
 const { HostManager } = require('./src/hosts');
 const hosts = new HostManager({ dataDir: path.join(__dirname, 'data') });
-const { HostMounts } = require('./src/host-mounts');
-const hostMounts = new HostMounts({
+const bcastAll = (msg) => { const j = JSON.stringify(msg); wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(j); } catch {} } }); };
+// B-f3e8 one-time migration: dial-tokens.json (deviceId → sha256) folds into
+// the dial host records (dialTokenHash) — see hosts.migrateDialTokenFile.
+try { hosts.migrateDialTokenFile(path.join(AGENTD_DIR, 'dial-tokens.json')); }
+catch (e) { console.warn('[hosts] dial-token migration failed:', e.message); }
+hosts.dialOnline = (deviceId) => agentdDials.has(deviceId);
+const { MachineMounts } = require('./src/machine-mounts');
+const machineMounts = new MachineMounts({
   dataDir: path.join(__dirname, 'data'), hosts, mountTokens,
   publicUrl: () => { try { return serverSetting('agentd.publicUrl') || null; } catch { return null; } },
   localPort: () => PORT, // the agentd tunnel's target: our own /dav
-  broadcast: (msg) => { const j = JSON.stringify(msg); wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(j); } catch {} } }); },
+  rcloneBin: () => mounts.rcloneBin(),
+  broadcast: bcastAll,
+  log: (m) => console.log('[machine-mounts]', m),
 });
-setTimeout(() => { hostMounts.restore().catch(() => {}); }, 5000); // re-own tunnel ports for surviving remote mounts
-app.get('/api/host-mounts', (req, res) => res.json({ mounts: hostMounts.list() }));
-app.post('/api/host-mounts/:hostId', async (req, res) => {
+setTimeout(() => { machineMounts.restore().catch(() => {}); }, 5000); // heal pull mounts + re-own push tunnel ports
+app.get('/api/machine-mounts', (req, res) => res.json({ mounts: machineMounts.list() }));
+app.post('/api/machine-mounts/:hostId', async (req, res) => {
   try {
-    // PRIMARY transport = the agentd tunnel (inside mountOnHost — no public
-    // address needed). The request-derived URL is only the last-resort
-    // fallback for hosts without the device agent.
-    let pub = req.body?.publicUrl ? String(req.body.publicUrl) : null;
-    if (!pub) { const proto = req.headers['x-forwarded-proto'] || 'http'; const host = req.headers['x-forwarded-host'] || req.headers.host; if (host) pub = `${proto}://${host}`; }
-    res.json(await hostMounts.mountOnHost(req.params.hostId, { folder: req.body?.folder, mode: req.body?.mode, mountpoint: req.body?.mountpoint, publicUrlFallback: pub }));
+    const b = req.body || {};
+    if (b.dir === 'pull') {
+      res.json(await machineMounts.mountPull(req.params.hostId, { remotePath: b.remotePath, mountpoint: b.mountpoint }));
+    } else {
+      // PRIMARY transport = the agentd tunnel (inside mountPush — no public
+      // address needed). The request-derived URL is only the last-resort
+      // fallback for hosts without the device agent.
+      let pub = b.publicUrl ? String(b.publicUrl) : null;
+      if (!pub) { const proto = req.headers['x-forwarded-proto'] || 'http'; const host = req.headers['x-forwarded-host'] || req.headers.host; if (host) pub = `${proto}://${host}`; }
+      res.json(await machineMounts.mountPush(req.params.hostId, { folder: b.folder, mode: b.mode, mountpoint: b.mountpoint, publicUrlFallback: pub }));
+    }
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
-app.delete('/api/host-mounts/:hostId/:mountId', async (req, res) => {
-  try { res.json(await hostMounts.unmountOnHost(req.params.hostId, req.params.mountId)); } catch (e) { res.status(400).json({ error: e.message }); }
+app.delete('/api/machine-mounts/:id', async (req, res) => {
+  try { res.json(await machineMounts.unmount(String(req.params.id))); } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/machine-mounts/:id/remount', async (req, res) => {
+  try { res.json(await machineMounts.remount(String(req.params.id))); } catch (e) { res.status(400).json({ error: e.message }); }
 });
 setTimeout(() => { try { hosts.sweepJsonlCache(); } catch {} }, 60000); // orphaned/stale remote-transcript cache
 const { RemoteFs } = require('./src/remote-fs');
@@ -2519,7 +2543,7 @@ app.get('/api/hosts', (req, res) => {
   res.json({ hosts: hosts.list(), key: { exists: k.exists, path: k.path, publicKey: k.publicKey } });
 });
 app.post('/api/hosts', (req, res) => {
-  try { res.json({ success: true, id: hosts.add(req.body || {}) }); }
+  try { const id = hosts.add(req.body || {}); bcastAll({ type: 'hosts-updated' }); res.json({ success: true, id }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.post('/api/hosts/key', async (req, res) => {
@@ -2534,8 +2558,20 @@ app.get('/api/hosts/:id/sessions', async (req, res) => {
   try { res.json({ sessions: await hosts.discoverSessions(req.params.id, req.query.fresh ? { ttlMs: 0 } : {}) }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
-app.delete('/api/hosts/:id', (req, res) => {
-  try { hosts.remove(req.params.id); res.json({ success: true }); }
+app.delete('/api/hosts/:id', async (req, res) => {
+  try {
+    const h = hosts.get(req.params.id);
+    // dial machine: removing the record IS the unpair (token hash lives on
+    // it) — tear down mounts / token file / live stream first (B-f3e8).
+    // ssh machines keep the OLD preserve-as-orphan semantics (review finding:
+    // remove+re-add is the only way to edit a host's address/key, and the
+    // confirm dialog promises nothing on the remote is touched — the orphan
+    // rows remain manageable/unmountable).
+    if (h.transport === 'dial') await unpairDialDevice(h.deviceId);
+    hosts.remove(req.params.id);
+    bcastAll({ type: 'hosts-updated' });
+    res.json({ success: true });
+  }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 // Bootstrap: progress streams to ALL clients over WS (host-bootstrap events);
@@ -2628,13 +2664,13 @@ setTimeout(() => {
 }, 1000);
 // Transport B pairing: mint a device id + dial token + the one-liner the user
 // runs on the NAT'd device (no ssh needed). Cookie-authed (user action).
+// The pairing IS the machine registration — the dial host record carries the
+// token hash (B-f3e8); re-pairing an existing name rotates its token in place.
 app.post('/api/agentd/dial-pair', (req, res) => {
   try {
     const deviceId = String(req.body?.deviceId || ('dev-' + require('crypto').randomBytes(4).toString('hex'))).replace(/[^\w-]/g, '').slice(0, 32);
     const pair = agentdMintDialPair(deviceId);
-    // Graduation slice B: a paired device IS a machine — register the dial
-    // host record so discovery/sessions/files surfaces list it everywhere.
-    try { hosts.add({ name: deviceId, transport: 'dial', deviceId }); } catch { }
+    bcastAll({ type: 'hosts-updated' });
     const base = String(req.body?.serverUrl || '').replace(/\/$/, '') || null;
     res.json({
       ...pair,
@@ -2645,80 +2681,14 @@ app.post('/api/agentd/dial-pair', (req, res) => {
     });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
-// Paired dial-out devices: the Remote tab's "Paired devices" rows (2.152.1 —
-// a paired device previously had ZERO UI presence; real report: installed on a
-// Mac, "没有出现"). online = a live dialed-in ws right now.
-app.get('/api/agentd/devices', (req, res) => {
-  try {
-    const toks = agentdDialTokens();
-    res.json({ devices: Object.keys(toks).map((id) => ({ id, online: agentdDials.has(id) })) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-// Reachability test (the device-row ⚡): a mux hello over the dialed link +
-// the daemon's self-reported identity.
-app.post('/api/agentd/devices/:id/test', async (req, res) => {
-  try {
-    const id = String(req.params.id);
-    if (!agentdDials.has(id)) return res.json({ ok: false, error: 'not dialed in — start the daemon on the device (rerun the install command)' });
-    const dm = await deviceForDial(id);
-    const st = dm.status();
-    res.json({ ok: true, info: st.info || null });
-  } catch (e) { res.json({ ok: false, error: e.message }); }
-});
-app.delete('/api/agentd/devices/:id', async (req, res) => {
-  try {
-    const id = String(req.params.id);
-    const all = agentdDialTokens();
-    if (!(id in all)) return res.status(404).json({ error: 'unknown device' });
-    try { await deviceMounts.onDeviceUnpaired(id); } catch { }
-    delete all[id];
-    fs.writeFileSync(path.join(AGENTD_DIR, 'dial-tokens.json'), JSON.stringify(all, null, 2), { mode: 0o600 });
-    try { fs.unlinkSync(path.join(AGENTD_DIR, `host-dial-${id}.token`)); } catch { }
-    try { hosts.remove('host-dial-' + id.replace(/[^\w-]/g, '')); } catch { }
-    const live = agentdDials.get(id);
-    if (live) { try { live.destroy(); } catch { } agentdDials.delete(id); }
-    agentdDialDevices.delete(id);
-    res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-// Device folder mounts (2.153.0): a paired device's folder mounted INTO this
-// VibeSpace over the dial link (read-only; src/device-mounts.js).
+// (the /api/agentd/devices roster/test/unpair routes retired in B-f3e8 —
+// machines are listed by /api/hosts, tested by /api/hosts/:id/test, unpaired
+// by DELETE /api/hosts/:id)
 const { DialSessionBridge } = require('./src/dial-session-bridge');
 const dialBridge = new DialSessionBridge({
   deviceForDial,
   hostTokenFor: (deviceId) => agentdHostToken('dial-' + deviceId),
   log: (m) => console.log('[dial-bridge]', m),
-});
-const { DeviceMounts } = require('./src/device-mounts');
-const deviceMounts = new DeviceMounts({
-  dataDir: path.join(__dirname, 'data'),
-  deviceForDial,
-  isOnline: (id) => agentdDials.has(id),
-  rcloneBin: () => mounts.rcloneBin(),
-  broadcast: (msg) => { const json = JSON.stringify(msg); wss.clients.forEach((c) => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch { } } }); },
-  log: (m) => console.log('[device-mounts]', m),
-});
-setTimeout(() => { try { deviceMounts.restore(); } catch (e) { console.warn('[device-mounts] restore:', e.message); } }, 4000);
-// Backfill: pairings made before slice B (2.154.2) have no dial-host record —
-// promote every known pairing so existing devices join the machines model too.
-setTimeout(() => {
-  try { for (const id of Object.keys(agentdDialTokens())) { try { hosts.add({ name: id, transport: 'dial', deviceId: id }); } catch { } } }
-  catch (e) { console.warn('[agentd] dial-host backfill:', e.message); }
-}, 3000);
-app.get('/api/device-mounts', (req, res) => {
-  try { res.json({ mounts: deviceMounts.list() }); } catch (e) { res.status(500).json({ error: e.message }); }
-});
-app.post('/api/device-mounts/:deviceId', async (req, res) => {
-  try { res.json(await deviceMounts.mount(String(req.params.deviceId), req.body || {})); }
-  catch (e) { res.status(400).json({ error: e.message }); }
-});
-app.delete('/api/device-mounts/:id', async (req, res) => {
-  try { await deviceMounts.unmount(String(req.params.id)); res.json({ success: true }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
-});
-app.post('/api/device-mounts/:id/remount', async (req, res) => {
-  try { res.json(await deviceMounts.remount(String(req.params.id))); }
-  catch (e) { res.status(400).json({ error: e.message }); }
 });
 // Standalone device install: serve the agentd bundle + installer (public — the
 // bundle is not secret; auth is the per-device dial/host token at connect).
@@ -3254,7 +3224,7 @@ server.on('upgrade', (req, socket, head) => {
     const q = new URL(req.url, 'http://x').searchParams;
     const deviceId = String(q.get('device') || '').slice(0, 64);
     const tok = String(req.headers['x-vibespace-dial-token'] || '');
-    const want = agentdDialTokens()[deviceId];
+    const want = hosts.dialTokenHash(deviceId); // pairing credential lives on the host record (B-f3e8)
     const got = tok ? require('crypto').createHash('sha256').update(tok).digest('hex') : null;
     if (!deviceId || !want || got !== want) return deny();
     agentdDialWss.handleUpgrade(req, socket, head, (ws) => {
@@ -3273,12 +3243,12 @@ server.on('upgrade', (req, socket, head) => {
       const waiters = agentdDialWaiters.get(deviceId) || [];
       agentdDialWaiters.delete(deviceId);
       waiters.forEach((r) => r(stream));
-      // heal recorded device mounts + flip the UI dot live
-      try { deviceMounts.onDeviceDialedIn(deviceId); } catch { }
-      try { const j = JSON.stringify({ type: 'device-mounts-updated' }); wss.clients.forEach((c) => { if (c.readyState === WS_OPEN) c.send(j); }); } catch { }
+      // heal recorded pull mounts + re-own push tunnel ports + flip the UI dot
+      try { machineMounts.onMachineLinked(hosts.findByDeviceId(deviceId)?.id); } catch { }
+      try { bcastAll({ type: 'hosts-updated' }); } catch { }
       ws.on('close', () => {
         if (agentdDials.get(deviceId) === stream) agentdDials.delete(deviceId);
-        try { const j = JSON.stringify({ type: 'device-mounts-updated' }); wss.clients.forEach((c) => { if (c.readyState === WS_OPEN) c.send(j); }); } catch { }
+        try { bcastAll({ type: 'hosts-updated' }); } catch { }
       });
     });
   } else {
