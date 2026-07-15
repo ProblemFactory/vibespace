@@ -812,6 +812,12 @@ export function installSidebarMounts(Sidebar) {
           showToast(tr('{id} reachable — agent {v} on {plat}', { id: dev.id, v: i.daemonVersion || '?', plat: [i.platform, i.arch].filter(Boolean).join('/') || '?' }));
         }),
         ibtn(MI.folderPull, tr('Mount a folder FROM this device into this workspace'), () => { this._showDeviceMountDialog(dev); }),
+        // Parity with ssh host rows (user request): both mount directions +
+        // open a session on the device. hostRec is the dial host record
+        // (host-dial-<id>); the mount/session paths route through the device
+        // link (HostMounts + the ws-handler dial branch).
+        ibtn(MI.folderPush, tr('Share a folder from this instance onto this machine'), () => { if (hostRec) this._showHostMountDialog(hostRec); }),
+        ibtn(MI.termNew, tr('New session on this device'), () => { if (hostRec) this.app.showNewSessionDialog?.({ hostId: hostRec.id, hostName: hostRec.name || dev.id }); }),
         ibtn(MI.cross, tr('Unpair (the device can no longer dial in)'), async () => {
           const ok = await showConfirmDialog({ title: tr('Unpair "{id}"?', { id: dev.id }), message: tr('Its dial token is revoked; re-pairing mints a new one. Its mounted folders here are unmounted.'), confirmText: tr('Unpair'), danger: true });
           if (!ok) return;

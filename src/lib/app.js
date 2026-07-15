@@ -1570,7 +1570,8 @@ class App {
         hostSel.innerHTML = `<option value="">${t('Local')}</option>`;
         for (const h of d?.hosts || []) {
           const o = document.createElement('option');
-          o.value = h.id; o.textContent = `${h.name} (${h.user}@${h.host})`;
+          // dial devices have no user@host — show them as a device
+          o.value = h.id; o.textContent = h.transport === 'dial' ? `${h.name} (${t('device')})` : `${h.name} (${h.user}@${h.host})`;
           hostSel.appendChild(o);
         }
         hostSel.value = hostId || '';
