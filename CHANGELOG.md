@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.153.1 — 2026-07-15
+- Device mount child rows use the real child-row language (`mounts-row-child` indent + accent border, folder basename + "from device" badge, full paths in the tooltip) — the first cut used a nonexistent class and rendered as a full-width sibling that read as another machine (real report).
+
 ## 2.153.0 — 2026-07-15
 - **Paired devices are MACHINES now** (user feedback ×4 on the 2.152.1 first cut: ugly centered blob, no actions, "也不被算作远程机器，那配对的意义是？"). Devices render inside the Remote tab's machines list with the same row language as ssh hosts (status dot + name + DEVICE badge) and REAL actions: **⚡ test** (mux hello + daemon identity), **📁 mount a folder FROM the device** into this workspace (the full device-folder-mount chain: serve-folder WebDAV → dial tunnel → rclone, read-only — your NAT'd Mac's folder appears as a local dir with zero ssh/public address), **× unpair**. Mounts persist (`data/device-mounts.json` + `src/device-mounts.js`), auto-heal when the device re-dials, child rows with open-in-Files/unmount. Sessions-on-device is the next CS milestone (dial devices joining the hosts model fully).
 - **Pairing dialog got per-OS commands** (user request): macOS / Linux (bash installer) / **Windows (EXPERIMENTAL)** — a new PowerShell installer (`/agentd-install.ps1`, PS 5.1-compatible) plus a win32 named-pipe control socket in the daemon.
