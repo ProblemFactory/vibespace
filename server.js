@@ -960,8 +960,16 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
             // from a plain resume. One-shot _forkRequested guard (set only when
             // data.fork) so a normal resume, whose id the parser also sees on
             // every line, can never be hijacked.
-            if (session._forkRequested && typeof msg.session_id === 'string' && msg.session_id
-                && session.backendSessionId !== msg.session_id) {
+            // FIRST-capture is UNCONDITIONAL (2.156.1, lengyue real incident):
+            // a session created with claudeSessionId=null could NEVER adopt its
+            // id here — the fork guard vetoed the only parser-side capture.
+            // Local sessions were silently rescued by lock-first discovery
+            // (local locks visible); REMOTE keeper sessions had no rescuer, so
+            // meta kept null forever and attach's transcript prefetch died on
+            // it. Hijack-safety is preserved: with NO tracked id there is
+            // nothing to hijack, and a CHANGED id still requires _forkRequested.
+            if (typeof msg.session_id === 'string' && msg.session_id
+                && (!session.backendSessionId || (session._forkRequested && session.backendSessionId !== msg.session_id))) {
               if (session.backendSessionId) {
                 const prev = session.forkedFrom || [];
                 if (!prev.includes(session.backendSessionId)) prev.push(session.backendSessionId);
@@ -986,7 +994,6 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
                   forkedFrom: session.forkedFrom || null,
                   permissionMode: session._permissionMode || null,
                   effort: session._effort || null,
-                effort: session._effort || null,
                   createdAt: session.createdAt,
                   webuiSessionId: id,
                   mode: session.mode,
