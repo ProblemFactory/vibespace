@@ -27,6 +27,9 @@ const LOCK = path.join(STATE, 'agentd.lock');
 const LOG = path.join(STATE, 'agentd.log');
 const TOKEN_FILE = path.join(STATE, 'token');
 
+// Recognizable in process listings (user directive: "看进程列表分不清是干啥的").
+// Full rename to vibespace-device (bundle/roots/routes) = graduation slice A.
+try { process.title = 'vibespace-device'; } catch { }
 fs.mkdirSync(STATE, { recursive: true, mode: 0o700 });
 
 // ── STDIO BRIDGE (M2): `agentd.js --stdio` reaches the STANDING daemon over
