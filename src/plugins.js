@@ -27,6 +27,18 @@ const { spawn, execFile, execFileSync } = require('child_process');
 const PLUGIN_ROOT = path.join(os.homedir(), '.vibespace', 'plugins');
 const SOCKS_PORT = Number(process.env.VIBESPACE_TAILSCALE_SOCKS_PORT || 1055);
 
+// frp (B-0b60 public port exposure): the frps RELAY server is shared fleet
+// infra — its address/port/token are INJECTED via env (helm/deploy), never in
+// the repo. Absent → the plugin reports configured:false and does nothing.
+const FRPS_ADDR = process.env.VIBESPACE_FRPS_ADDR || '';
+const FRPS_PORT = Number(process.env.VIBESPACE_FRPS_PORT || 7000);
+const FRPS_TOKEN = process.env.VIBESPACE_FRPS_TOKEN || '';
+const FRP_ADMIN_PORT = Number(process.env.VIBESPACE_FRP_ADMIN_PORT || 7400);
+const FRP_VERSION = process.env.VIBESPACE_FRP_VERSION || '0.70.0';
+// public TCP ports frps allows a client to request (must match frps allowPorts)
+const FRP_PORT_MIN = Number(process.env.VIBESPACE_FRP_PORT_MIN || 20000);
+const FRP_PORT_MAX = Number(process.env.VIBESPACE_FRP_PORT_MAX || 25000);
+
 function pidCmdline(pid) {
   try { return fs.readFileSync('/proc/' + pid + '/cmdline', 'utf-8').replace(/\0/g, ' '); } catch { return ''; }
 }
@@ -58,6 +70,11 @@ class PluginManager {
         id: 'tailscale',
         label: 'Tailscale',
         description: 'Join your tailnet — reach home/LAN machines (NAS, dev boxes) from this instance. State persists across container rebuilds; no re-login.',
+      },
+      frp: {
+        id: 'frp',
+        label: 'Public URLs (frp)',
+        description: 'Expose a machine’s dev server on the public internet via the frp relay — share a preview link. Off by default; needs the relay configured.',
       },
     };
   }
@@ -167,6 +184,7 @@ class PluginManager {
   }
 
   async install(id) {
+    if (id === 'frp') return this._frpInstall();
     if (id !== 'tailscale') throw new Error('unknown plugin: ' + id);
     const arch = { x64: 'amd64', arm64: 'arm64' }[process.arch];
     if (!arch) throw new Error('unsupported arch: ' + process.arch);
@@ -197,6 +215,7 @@ class PluginManager {
   }
 
   start(id) {
+    if (id === 'frp') return this._frpStart();
     if (id !== 'tailscale') throw new Error('unknown plugin: ' + id);
     if (this._systemTailscaled()) throw new Error('a system tailscaled is already running — this machine is managed outside VibeSpace');
     if (this._tsOurDaemonPid()) return { running: true };
@@ -232,6 +251,7 @@ class PluginManager {
   }
 
   stop(id) {
+    if (id === 'frp') return this._frpStop();
     if (id !== 'tailscale') throw new Error('unknown plugin: ' + id);
     const pid = this._tsOurDaemonPid();
     if (pid) {
@@ -248,6 +268,7 @@ class PluginManager {
   }
 
   status(id) {
+    if (id === 'frp') return this._frpStatus();
     if (id !== 'tailscale') throw new Error('unknown plugin: ' + id);
     const rec = this._state.plugins.tailscale || {};
     const installed = !!this._tsBin('tailscaled');
@@ -322,6 +343,175 @@ class PluginManager {
       });
       setTimeout(() => { if (!entry.authUrl && proc.exitCode === null) resolve({ pending: true }); }, 15000);
     });
+  }
+
+  // ── frp (public port exposure via the shared frps relay) ──────────────────
+  _frpDir() { return path.join(PLUGIN_ROOT, 'frp'); }
+  _frpBin() {
+    const local = path.join(this._frpDir(), 'bin', 'frpc');
+    if (fs.existsSync(local)) return local;
+    try { return execFileSync('which', ['frpc'], { encoding: 'utf-8' }).trim() || null; } catch { return null; }
+  }
+  _frpProxiesDir() { return path.join(this._frpDir(), 'proxies'); }
+  _frpConf() { return path.join(this._frpDir(), 'frpc.toml'); }
+  _frpPidFile() { return path.join(this._frpDir(), 'frpc.pid'); }
+  _frpAdminPw() {
+    const f = path.join(this._frpDir(), 'admin.pw');
+    try { return fs.readFileSync(f, 'utf-8').trim(); } catch { }
+    const pw = require('crypto').randomBytes(12).toString('hex');
+    fs.mkdirSync(this._frpDir(), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(f, pw, { mode: 0o600 });
+    return pw;
+  }
+  _frpConfigured() { return !!(FRPS_ADDR && FRPS_TOKEN); }
+  _frpDaemonPid() {
+    try {
+      const pid = Number(fs.readFileSync(this._frpPidFile(), 'utf-8').trim());
+      if (pid && pidAlive(pid) && pidCmdline(pid).includes('frpc')) return pid;
+    } catch { }
+    return null;
+  }
+  _frpWriteConf() {
+    const pw = this._frpAdminPw();
+    fs.mkdirSync(this._frpProxiesDir(), { recursive: true, mode: 0o700 });
+    const toml = [
+      `serverAddr = "${FRPS_ADDR}"`,
+      `serverPort = ${FRPS_PORT}`,
+      `auth.method = "token"`,
+      `auth.token = "${FRPS_TOKEN}"`,
+      `webServer.addr = "127.0.0.1"`,
+      `webServer.port = ${FRP_ADMIN_PORT}`,
+      `webServer.user = "vibespace"`,
+      `webServer.password = "${pw}"`,
+      `log.to = "${path.join(this._frpDir(), 'frpc.log')}"`,
+      `log.level = "info"`,
+      `log.maxDays = 3`,
+      // proxy files (one per published port) are hot-added via `frpc reload`
+      `includes = ["${this._frpProxiesDir()}/*.toml"]`,
+    ].join('\n') + '\n';
+    fs.writeFileSync(this._frpConf(), toml, { mode: 0o600 });
+  }
+
+  async _frpInstall() {
+    const arch = { x64: 'amd64', arm64: 'arm64' }[process.arch];
+    if (!arch) throw new Error('unsupported arch: ' + process.arch);
+    const binDir = path.join(this._frpDir(), 'bin');
+    fs.mkdirSync(binDir, { recursive: true, mode: 0o700 });
+    const name = `frp_${FRP_VERSION}_linux_${arch}`;
+    const url = `https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/${name}.tar.gz`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('download failed: HTTP ' + res.status);
+    const tgz = path.join(this._frpDir(), 'frp.tgz');
+    fs.writeFileSync(tgz, Buffer.from(await res.arrayBuffer()));
+    execFileSync('tar', ['-xzf', tgz, '-C', this._frpDir()]);
+    fs.copyFileSync(path.join(this._frpDir(), name, 'frpc'), path.join(binDir, 'frpc'));
+    fs.chmodSync(path.join(binDir, 'frpc'), 0o755);
+    fs.rmSync(path.join(this._frpDir(), name), { recursive: true, force: true });
+    fs.rmSync(tgz, { force: true });
+    this._rec('frp').installedAt = Date.now();
+    this._save();
+    this._notify();
+    return { installed: true, version: FRP_VERSION };
+  }
+
+  _frpStart() {
+    if (!this._frpConfigured()) throw new Error('the frp relay is not configured on this instance (set VIBESPACE_FRPS_ADDR/TOKEN)');
+    const bin = this._frpBin();
+    if (!bin) throw new Error('frpc not installed — run install first');
+    if (this._frpDaemonPid()) return { running: true };
+    this._frpWriteConf();
+    const logFd = fs.openSync(path.join(this._frpDir(), 'frpc.out'), 'a');
+    const child = spawn(bin, ['-c', this._frpConf()], { detached: true, stdio: ['ignore', logFd, logFd] });
+    child.unref();
+    fs.writeFileSync(this._frpPidFile(), String(child.pid));
+    const rec = this._rec('frp');
+    rec.desiredUp = true;
+    this._save();
+    setTimeout(() => this._notify(), 1200);
+    return { starting: true };
+  }
+
+  _frpStop() {
+    const pid = this._frpDaemonPid();
+    if (pid) { try { process.kill(pid, 'SIGTERM'); } catch { } }
+    try { fs.unlinkSync(this._frpPidFile()); } catch { }
+    const rec = this._rec('frp');
+    rec.desiredUp = false;
+    this._save();
+    this._notify();
+    return { stopped: true };
+  }
+
+  _frpStatus() {
+    const rec = this._state.plugins.frp || {};
+    return {
+      installed: !!this._frpBin(),
+      configured: this._frpConfigured(),
+      server: this._frpConfigured() ? `${FRPS_ADDR}:${FRPS_PORT}` : null,
+      publicHost: FRPS_ADDR || null,
+      running: !!this._frpDaemonPid(),
+      pid: this._frpDaemonPid() || undefined,
+      desiredUp: !!rec.desiredUp,
+      portRange: [FRP_PORT_MIN, FRP_PORT_MAX],
+    };
+  }
+
+  // frpc admin API (localhost only) — reload picks up new proxy files, status
+  // reports each proxy's run state (so we can detect a taken remotePort).
+  async _frpAdmin(pathname, method = 'GET') {
+    const pw = this._frpAdminPw();
+    const auth = 'Basic ' + Buffer.from('vibespace:' + pw).toString('base64');
+    const res = await fetch(`http://127.0.0.1:${FRP_ADMIN_PORT}${pathname}`, { method, headers: { Authorization: auth }, signal: AbortSignal.timeout(6000) });
+    if (!res.ok) throw new Error('frpc admin ' + res.status);
+    const t = await res.text();
+    try { return JSON.parse(t); } catch { return t; }
+  }
+  async _frpReload() { return this._frpAdmin('/api/reload', 'GET'); }
+  async _frpProxyStatus() {
+    const s = await this._frpAdmin('/api/status', 'GET');
+    return (s && s.tcp) || [];
+  }
+
+  /** Publish a LOCAL port to the public internet via the relay. Picks a public
+   *  TCP port (retry on collision — the relay is fleet-shared), returns the URL.
+   *  name = a stable proxy name (e.g. the port-forward id). */
+  async frpPublish(name, localPort, { preferPort = 0 } = {}) {
+    if (!this._frpConfigured()) throw new Error('public URLs are not available — the frp relay is not configured on this instance');
+    if (!this._frpDaemonPid()) { this._frpStart(); await new Promise((r) => setTimeout(r, 1500)); }
+    const safe = String(name).replace(/[^\w-]/g, '_').slice(0, 60);
+    // deterministic-ish port from a hash so re-publishing the same forward
+    // tends to reuse its URL, with random fallbacks on collision.
+    const cand = [];
+    if (preferPort >= FRP_PORT_MIN && preferPort <= FRP_PORT_MAX) cand.push(preferPort);
+    const span = FRP_PORT_MAX - FRP_PORT_MIN + 1;
+    let seed = 0; for (const c of safe) seed = (seed * 31 + c.charCodeAt(0)) >>> 0;
+    cand.push(FRP_PORT_MIN + (seed % span));
+    for (let i = 0; i < 8; i++) cand.push(FRP_PORT_MIN + Math.floor(((seed = (seed * 1103515245 + 12345) >>> 0) / 0xffffffff) * span));
+    const file = path.join(this._frpProxiesDir(), safe + '.toml');
+    let lastErr = '';
+    for (const remotePort of cand) {
+      const toml = `[[proxies]]\nname = "${safe}"\ntype = "tcp"\nlocalIP = "127.0.0.1"\nlocalPort = ${localPort}\nremotePort = ${remotePort}\n`;
+      fs.writeFileSync(file, toml, { mode: 0o600 });
+      try { await this._frpReload(); } catch (e) { lastErr = e.message; continue; }
+      // poll the proxy's run state — 'running' = the relay accepted the port
+      for (let t = 0; t < 12; t++) {
+        await new Promise((r) => setTimeout(r, 400));
+        let st = []; try { st = await this._frpProxyStatus(); } catch { }
+        const p = st.find((x) => x.name === safe);
+        if (p && p.status === 'running') { this._notify(); return { name: safe, remotePort, url: `http://${FRPS_ADDR}:${remotePort}/`, publicHost: FRPS_ADDR }; }
+        if (p && (p.status === 'error' || p.status === 'closed')) { lastErr = p.err || 'port unavailable'; break; }
+      }
+    }
+    try { fs.unlinkSync(file); await this._frpReload(); } catch { }
+    throw new Error('could not allocate a public port on the relay' + (lastErr ? ' (' + lastErr + ')' : ''));
+  }
+
+  async frpUnpublish(name) {
+    const safe = String(name).replace(/[^\w-]/g, '_').slice(0, 60);
+    try { fs.unlinkSync(path.join(this._frpProxiesDir(), safe + '.toml')); } catch { }
+    if (this._frpDaemonPid()) { try { await this._frpReload(); } catch { } }
+    this._notify();
+    return { ok: true };
   }
 }
 

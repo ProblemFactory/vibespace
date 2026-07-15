@@ -2575,6 +2575,13 @@ app.post('/api/hosts/:id/port-forward', async (req, res) => {
 app.delete('/api/port-forward/:id', async (req, res) => {
   try { await portForwards.unforward(String(req.params.id)); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); }
 });
+// public exposure (frp relay) — publish/unpublish a forward
+app.post('/api/port-forward/:id/publish', async (req, res) => {
+  try { res.json(await portForwards.publish(String(req.params.id))); } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.delete('/api/port-forward/:id/publish', async (req, res) => {
+  try { await portForwards.unpublish(String(req.params.id)); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); }
+});
 setTimeout(() => { try { hosts.sweepJsonlCache(); } catch {} }, 60000); // orphaned/stale remote-transcript cache
 const { RemoteFs } = require('./src/remote-fs');
 const remoteFs = new RemoteFs(hosts);
@@ -2689,6 +2696,8 @@ const plugins = new PluginManager({
     wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
   },
 });
+// port-forward can publish a forward publicly via the frp plugin (B-0b60)
+portForwards.plugins = plugins;
 setTimeout(() => { try { plugins.bootReplay(); } catch (e) { console.warn('[plugins] boot replay:', e.message); } }, 5000);
 // CS data-plane deps for hosts.device(id) (2.146.0) — wired SYNCHRONOUSLY.
 // (Was a setTimeout(1000); a device dialing in during that window ran mount

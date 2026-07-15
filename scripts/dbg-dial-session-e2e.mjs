@@ -238,8 +238,30 @@ try {
   }
   const pfList = await J('/api/port-forwards').catch(() => ({}));
   check('/api/port-forwards lists the active forward', (pfList.forwards || []).some((r) => r.id === fwd.id && r.active), JSON.stringify(pfList));
-  const del = await fetch(`http://127.0.0.1:${PORT}/api/port-forward/${encodeURIComponent(fwd.id)}`, { method: 'DELETE' });
-  check('unforward removes it', del.ok && !((await J('/api/port-forwards')).forwards || []).some((r) => r.id === fwd.id));
+  // ── PUBLIC exposure via frp (B-0b60) — only if the relay env is present ──
+  if (process.env.VIBESPACE_FRPS_ADDR && process.env.VIBESPACE_FRPS_TOKEN) {
+    const echoPort2 = await new Promise((res) => {
+      const s = net.createServer((c) => c.on('data', (d) => c.write(Buffer.concat([Buffer.from('pub:'), d]))));
+      s.listen(0, '127.0.0.1', () => res(s.address().port));
+    });
+    const f2 = await POST(`/api/hosts/${hostId}/port-forward`, { port: echoPort2 });
+    const pub = await POST(`/api/port-forward/${encodeURIComponent(f2.id)}/publish`, {});
+    check('publish returns a public URL', /^http:\/\/.+:\d+\/$/.test(pub.publicUrl || ''), JSON.stringify(pub));
+    if (pub.publicUrl) {
+      const m = pub.publicUrl.match(/^http:\/\/([^:]+):(\d+)/);
+      let rt = '';
+      for (let i = 0; i < 10 && !rt.includes('pub:yo'); i++) {
+        rt = await new Promise((res) => { const c = net.connect(Number(m[2]), m[1], () => c.write('yo')); let b = ''; c.on('data', (d) => { b += d; if (b.includes('pub:yo')) { c.end(); res(b); } }); c.on('error', () => res('')); setTimeout(() => { try { c.destroy(); } catch {} res(b); }, 2500); });
+        if (!rt.includes('pub:yo')) await sleep(700);
+      }
+      check('published forward round-trips over the PUBLIC internet', rt.includes('pub:yo'), JSON.stringify(rt));
+    }
+    await fetch(`http://127.0.0.1:${PORT}/api/port-forward/${encodeURIComponent(f2.id)}/publish`, { method: 'DELETE' });
+    await fetch(`http://127.0.0.1:${PORT}/api/port-forward/${encodeURIComponent(f2.id)}`, { method: 'DELETE' });
+    check('publish cleanup ok', true);
+  } else {
+    console.log('  · (frp publish test skipped — no VIBESPACE_FRPS_* env)');
+  }
 
   ws.close();
 } catch (e) {

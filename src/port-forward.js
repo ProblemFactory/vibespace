@@ -27,9 +27,10 @@ function writeJsonAtomic(file, obj) {
 }
 
 class PortForwardManager {
-  /** @param deps { hosts, dataDir, broadcast, log } */
-  constructor({ hosts, dataDir, broadcast, log }) {
+  /** @param deps { hosts, dataDir, broadcast, log, plugins } */
+  constructor({ hosts, dataDir, broadcast, log, plugins }) {
     this.hosts = hosts;
+    this.plugins = plugins || null; // PluginManager — for frp public exposure
     this.file = path.join(dataDir, 'port-forwards.json');
     this.broadcast = broadcast || (() => {});
     this.log = log || (() => {});
@@ -50,6 +51,8 @@ class PortForwardManager {
       localPort: this._live.get(r.id)?.rec?.localPort || null,
       url: this._live.get(r.id)?.rec?.localPort ? `http://127.0.0.1:${this._live.get(r.id).rec.localPort}/` : null,
       active: this._live.has(r.id), error: r.error || null,
+      // public (frp relay) exposure, if published
+      publicUrl: r.publicUrl || null, published: !!r.publicUrl,
     }));
   }
 
@@ -130,6 +133,8 @@ class PortForwardManager {
 
   /** Tear down a forward and forget it. */
   async unforward(id) {
+    const rec = this._state.forwards.find((r) => r.id === id);
+    if (rec?.publicUrl && this.plugins) { try { await this.plugins.frpUnpublish(rec.publicName || id); } catch {} }
     const l = this._live.get(id);
     if (l) {
       for (const s of l.sockets) { try { s.destroy(); } catch {} }
@@ -141,13 +146,37 @@ class PortForwardManager {
     this._emit();
   }
 
+  /** Publish an ACTIVE forward to the public internet via the frp relay. */
+  async publish(id) {
+    if (!this.plugins) throw new Error('public URLs are not available on this instance');
+    const rec = this._state.forwards.find((r) => r.id === id);
+    if (!rec) throw new Error('no such forward');
+    const l = this._live.get(id);
+    if (!l?.rec?.localPort) await this._start(rec); // ensure a local port exists
+    const localPort = this._live.get(id)?.rec?.localPort;
+    if (!localPort) throw new Error('the forward is not active (is the machine online?)');
+    const r = await this.plugins.frpPublish(id, localPort);
+    rec.publicUrl = r.url; rec.publicName = r.name; rec.publicPort = r.remotePort;
+    this._persist(); this._emit();
+    return { publicUrl: r.url };
+  }
+
+  async unpublish(id) {
+    const rec = this._state.forwards.find((r) => r.id === id);
+    if (!rec) return;
+    try { if (this.plugins) await this.plugins.frpUnpublish(rec.publicName || id); } catch { }
+    rec.publicUrl = null; rec.publicName = null; rec.publicPort = null;
+    this._persist(); this._emit();
+  }
+
   /** Re-establish persisted forwards (boot / machine relink). Best-effort;
    *  an offline machine's forward stays recorded and retries on next link. */
   async restore() {
     for (const rec of this._state.forwards) {
       if (this._live.has(rec.id)) continue;
-      try { await this._start(rec); } catch (e) { rec.error = e.message; }
+      try { await this._start(rec); if (rec.publicUrl && this.plugins) { try { const r = await this.plugins.frpPublish(rec.id, this._live.get(rec.id).rec.localPort); rec.publicUrl = r.url; rec.publicName = r.name; rec.publicPort = r.remotePort; } catch (e) { this.log('re-publish ' + rec.id + ': ' + e.message); } } } catch (e) { rec.error = e.message; }
     }
+    this._persist();
     this._emit();
   }
 

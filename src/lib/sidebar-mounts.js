@@ -795,6 +795,9 @@ export function installSidebarMounts(Sidebar) {
       // it directly), so "Open" routes through the embedded browser's proxy
       // (node-unblocker on the server → the server's loopback → the tunnel).
       const openForward = (url) => { if (url) { this.app.openBrowser?.(url, { proxy: true }); close(); } };
+      // is the frp relay (public URLs) available on this instance?
+      let frpOk = false;
+      try { frpOk = ((await api('/api/plugins')).plugins || []).some((p) => p.id === 'frp' && p.configured); } catch {}
       const render = async () => {
         body.innerHTML = `<p class="empty-hint" style="margin:0 0 8px">${escHtml(tr('A service listening on this machine’s 127.0.0.1 becomes reachable here (opened through the app’s proxy). Runs over the device link — no public exposure.'))}</p>`;
         // active forwards for this machine
@@ -804,15 +807,39 @@ export function installSidebarMounts(Sidebar) {
           const sec = document.createElement('div'); sec.style.marginBottom = '10px';
           sec.innerHTML = `<div class="usage-section-title">${escHtml(tr('Active'))}</div>`;
           for (const f of active) {
-            const r = document.createElement('div'); r.className = 'mounts-row'; r.style.padding = '4px 0';
-            const info = document.createElement('span'); info.style.flex = '1';
+            const r = document.createElement('div'); r.className = 'mounts-row'; r.style.padding = '4px 0'; r.style.flexWrap = 'wrap';
+            const info = document.createElement('span'); info.style.flex = '1'; info.style.minWidth = '160px';
             info.innerHTML = `<b>:${f.remotePort}</b> → <span class="mounts-name" style="color:var(--accent)">127.0.0.1:${f.localPort || '?'}</span>${f.error ? ` <span style="color:var(--red,#e55)">(${escHtml(f.error)})</span>` : ''}`;
             const open = document.createElement('button'); open.className = 'btn-create'; open.textContent = tr('Open'); open.disabled = !f.url;
             open.onclick = () => openForward(f.url);
             const stop = document.createElement('button'); stop.className = 'mounts-btn'; stop.textContent = tr('Stop');
             stop.onclick = async () => { try { await api(`/api/port-forward/${encodeURIComponent(f.id)}`, { method: 'DELETE' }); render(); } catch (e) { showToast(e.message, { type: 'error' }); } };
             const acts = document.createElement('span'); acts.style.display = 'flex'; acts.style.gap = '6px'; acts.append(open, stop);
-            r.append(info, acts); sec.append(r);
+            // public exposure (frp relay) — a shareable internet URL
+            if (frpOk) {
+              const pub = document.createElement('button'); pub.className = 'mounts-btn';
+              pub.textContent = f.published ? tr('Stop public') : tr('Publish public');
+              pub.title = f.published ? tr('Stop sharing publicly') : tr('Make a public internet URL via the relay (shareable preview link)');
+              pub.onclick = async () => {
+                pub.disabled = true;
+                try {
+                  if (f.published) { await api(`/api/port-forward/${encodeURIComponent(f.id)}/publish`, { method: 'DELETE' }); showToast(tr('Public URL removed')); }
+                  else { const r2 = await api(`/api/port-forward/${encodeURIComponent(f.id)}/publish`, { method: 'POST' }); showToast(tr('Public URL: {u}', { u: r2.publicUrl })); }
+                  render();
+                } catch (e) { showToast(e.message, { type: 'error' }); pub.disabled = false; }
+              };
+              acts.append(pub);
+            }
+            r.append(info, acts);
+            if (f.publicUrl) {
+              const pubRow = document.createElement('div'); pubRow.style.cssText = 'flex-basis:100%;display:flex;gap:6px;align-items:center;padding:2px 0 0';
+              const link = document.createElement('a'); link.href = '#'; link.textContent = '🌐 ' + f.publicUrl; link.style.cssText = 'color:var(--accent);font-size:11px;text-decoration:none;word-break:break-all';
+              link.onclick = (e) => { e.preventDefault(); this.app.openBrowser?.(f.publicUrl); close(); };
+              const copy = document.createElement('button'); copy.className = 'mounts-btn'; copy.textContent = tr('Copy'); copy.style.padding = '0 6px';
+              copy.onclick = () => { copyText(f.publicUrl); showToast(tr('Copied')); };
+              pubRow.append(link, copy); r.append(pubRow);
+            }
+            sec.append(r);
           }
           body.append(sec);
         }
