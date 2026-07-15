@@ -44,9 +44,21 @@ class RemoteFs {
 
   _host(id) { return this.hosts.get(id); }
 
-  // Run a remote command, resolve stdout (string). Rejects on non-zero exit.
-  _run(id, cmd, { timeoutMs = 15000, maxBuffer = 16 * 1024 * 1024 } = {}) {
+  // Run a remote command, resolve stdout (Buffer). Rejects on non-zero exit.
+  // DIAL hosts have no ssh — route the SAME shell command over the device link
+  // (B-0d70: stat/rename/copy/move/archive were all ssh-only and 400'd for
+  // dial machines). runCmd caps stdout at 1MB / timeout ≤30s — plenty for the
+  // metadata-class commands _run carries; streamed downloads use _spawn, which
+  // stays ssh-only (dial downloads ride the device fs read-range elsewhere).
+  async _run(id, cmd, { timeoutMs = 15000, maxBuffer = 16 * 1024 * 1024 } = {}) {
     const h = this._host(id);
+    if (h?.transport === 'dial') {
+      const dm = await this._dev(id);
+      if (!dm) throw new Error(`device "${h.name}" is offline`);
+      const r = await dm.runCmd('sh', ['-c', cmd], { timeoutMs: Math.min(timeoutMs, 30000) });
+      if (r.code !== 0) throw new Error((r.stderr || `command failed (${r.code})`).trim().slice(0, 400));
+      return Buffer.from(r.stdout || '', 'utf-8');
+    }
     return new Promise((resolve, reject) => {
       execFile('ssh', [...this.hosts.sshArgs(h, { multiplex: true }), '--', cmd], { timeout: timeoutMs, maxBuffer, encoding: 'buffer' },
         (err, stdout, stderr) => {
@@ -63,6 +75,11 @@ class RemoteFs {
   }
 
   async home(id) {
+    // dial devices have no ssh — the device link is the only path (B-0d70:
+    // /api/home?host=<dial> used to 400 'has no ssh', so New Session could
+    // never learn the device home and defaulted cwd to the LOCAL home).
+    const dm = await this._dev(id);
+    if (dm) { try { const h = await this._devHome(id, dm); if (h) return h; } catch { /* legacy */ } }
     const out = await this._run(id, 'printf %s "$HOME"');
     return out.toString().trim() || '/';
   }
@@ -110,6 +127,30 @@ class RemoteFs {
   }
 
   async info(id, filePath) {
+    // dial device fast path (B-0d70): /api/file/info?host=<dial> was ssh-only
+    // → always 400 'has no ssh' → the New Session preflight (_ensureCwdExists)
+    // reported EVERY existing device dir as nonexistent (the '/Users/xingweil
+    // 不存在' report). fsStat gives size/mtime/isDir; a small read-range sniffs
+    // binary (NUL byte in the head).
+    const dm = await this._dev(id);
+    if (dm) {
+      try {
+        const abs = await this._devAbs(id, dm, filePath);
+        const st = await dm.fsStat(abs);
+        const isDirectory = !!st.stat.isDir;
+        let isBinary = false;
+        if (!isDirectory && st.stat.size > 0) {
+          try { const rr = await dm.fsReadRange(abs, 0, Math.min(8192, st.stat.size)); isBinary = rr.data.includes(0); } catch { }
+        }
+        return { path: filePath, size: st.stat.size || 0, modified: st.stat.mtimeMs || 0, isBinary, isDirectory };
+      } catch (e) {
+        // a REAL 'not found' from the device must surface as an error (so the
+        // preflight offers to mkdir) — don't fall through to the ssh body that
+        // would throw the misleading 'has no ssh' for a dial host.
+        if (this._host(id)?.transport === 'dial') throw e;
+        /* ssh host: fall through to legacy */
+      }
+    }
     // size + mtime + type, and a binary sniff via `tr -d '\\0'` (portable
     // across sh/dash/bash — NUL count drops ⇒ binary; $'\\x00' needs bash)
     const cmd = `f=${shq(filePath)}; if [ -d "$f" ]; then echo "dir"; stat -c '%s %Y' "$f"; else echo "file"; stat -c '%s %Y' "$f"; n=$(head -c 8192 "$f" | wc -c); z=$(head -c 8192 "$f" | tr -d '\\000' | wc -c); [ "$n" = "$z" ] && echo TXT || echo BIN; fi`;
