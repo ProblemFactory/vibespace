@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.156.0 — 2026-07-15
+- **Sessions on dial-out devices (slice B.2, first cut — chat).** Creating a chat session on a paired device now works: the session runs as a persistent pipe session in the device's own daemon; the local chat-wrapper's attach child reaches it through the server's loopback mux proxy (DialSessionBridge; per-session port, token-gated, persisted in session meta and re-owned on server restart so surviving wrappers reconnect; bridge closed on kill). First cut is minimal-env: the device's OWN claude login is used — account shipping / vibespace-tools distribution / pre-resume orphan sweep are ssh-coupled preludes that port to device fs ops next (B.3). Terminal mode on dial devices stays gated. The ssh path is structurally untouched (wrapped, byte-identical).
+
 ## 2.155.1 — 2026-07-15
 - **Slice B.2 groundwork (inert until wired): sessions on dial devices.** `vibespace-agentd-attach` gains a loopback-TCP transport (`cfg.tcp.port` — everything else identical to the ssh mode), and a new `DialSessionBridge` (src/dial-session-bridge.js) lets the server proxy the attach protocol onto a dialed-in device's single mux link (hello/open/attach-pipe-session/data/credit; per-session 127.0.0.1 port, token-gated, port pinned for restore). Not yet reachable from the create path — ws-handler wiring + e2e land next; the dial-host create error message stands until then. M1/M2 session suites re-verified green.
 
