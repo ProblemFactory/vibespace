@@ -2623,7 +2623,7 @@ app.post('/api/agentd/dial-pair', (req, res) => {
     });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
-// Paired dial-out devices: the Remote tab's "Paired devices" section (2.152.1 —
+// Paired dial-out devices: the Remote tab's "Paired devices" rows (2.152.1 —
 // a paired device previously had ZERO UI presence; real report: installed on a
 // Mac, "没有出现"). online = a live dialed-in ws right now.
 app.get('/api/agentd/devices', (req, res) => {
@@ -2632,23 +2632,63 @@ app.get('/api/agentd/devices', (req, res) => {
     res.json({ devices: Object.keys(toks).map((id) => ({ id, online: agentdDials.has(id) })) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.delete('/api/agentd/devices/:id', (req, res) => {
+// Reachability test (the device-row ⚡): a mux hello over the dialed link +
+// the daemon's self-reported identity.
+app.post('/api/agentd/devices/:id/test', async (req, res) => {
+  try {
+    const id = String(req.params.id);
+    if (!agentdDials.has(id)) return res.json({ ok: false, error: 'not dialed in — start the daemon on the device (rerun the install command)' });
+    const dm = await deviceForDial(id);
+    const st = dm.status();
+    res.json({ ok: true, info: st.info || null });
+  } catch (e) { res.json({ ok: false, error: e.message }); }
+});
+app.delete('/api/agentd/devices/:id', async (req, res) => {
   try {
     const id = String(req.params.id);
     const all = agentdDialTokens();
     if (!(id in all)) return res.status(404).json({ error: 'unknown device' });
+    try { await deviceMounts.onDeviceUnpaired(id); } catch { }
     delete all[id];
     fs.writeFileSync(path.join(AGENTD_DIR, 'dial-tokens.json'), JSON.stringify(all, null, 2), { mode: 0o600 });
     try { fs.unlinkSync(path.join(AGENTD_DIR, `host-dial-${id}.token`)); } catch { }
     const live = agentdDials.get(id);
     if (live) { try { live.destroy(); } catch { } agentdDials.delete(id); }
+    agentdDialDevices.delete(id);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Device folder mounts (2.153.0): a paired device's folder mounted INTO this
+// VibeSpace over the dial link (read-only; src/device-mounts.js).
+const { DeviceMounts } = require('./src/device-mounts');
+const deviceMounts = new DeviceMounts({
+  dataDir: path.join(__dirname, 'data'),
+  deviceForDial,
+  isOnline: (id) => agentdDials.has(id),
+  rcloneBin: () => mounts.rcloneBin(),
+  broadcast: (msg) => { const json = JSON.stringify(msg); wss.clients.forEach((c) => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch { } } }); },
+  log: (m) => console.log('[device-mounts]', m),
+});
+setTimeout(() => { try { deviceMounts.restore(); } catch (e) { console.warn('[device-mounts] restore:', e.message); } }, 4000);
+app.get('/api/device-mounts', (req, res) => {
+  try { res.json({ mounts: deviceMounts.list() }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/device-mounts/:deviceId', async (req, res) => {
+  try { res.json(await deviceMounts.mount(String(req.params.deviceId), req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.delete('/api/device-mounts/:id', async (req, res) => {
+  try { await deviceMounts.unmount(String(req.params.id)); res.json({ success: true }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
 });
 // Standalone device install: serve the agentd bundle + installer (public — the
 // bundle is not secret; auth is the per-device dial/host token at connect).
 app.get('/agentd.js', (req, res) => {
   try { res.type('application/javascript').send(fs.readFileSync(path.join(__dirname, 'data', 'bin', 'vibespace-agentd.js'))); }
+  catch { res.status(404).end(); }
+});
+app.get('/agentd-install.ps1', (req, res) => {
+  try { res.type('text/plain').send(fs.readFileSync(path.join(__dirname, 'scripts', 'vibespace-agentd-install.ps1'), 'utf-8')); }
   catch { res.status(404).end(); }
 });
 app.get('/agentd-install.sh', (req, res) => {
@@ -3190,7 +3230,13 @@ server.on('upgrade', (req, socket, head) => {
       const waiters = agentdDialWaiters.get(deviceId) || [];
       agentdDialWaiters.delete(deviceId);
       waiters.forEach((r) => r(stream));
-      ws.on('close', () => { if (agentdDials.get(deviceId) === stream) agentdDials.delete(deviceId); });
+      // heal recorded device mounts + flip the UI dot live
+      try { deviceMounts.onDeviceDialedIn(deviceId); } catch { }
+      try { const j = JSON.stringify({ type: 'device-mounts-updated' }); wss.clients.forEach((c) => { if (c.readyState === WS_OPEN) c.send(j); }); } catch { }
+      ws.on('close', () => {
+        if (agentdDials.get(deviceId) === stream) agentdDials.delete(deviceId);
+        try { const j = JSON.stringify({ type: 'device-mounts-updated' }); wss.clients.forEach((c) => { if (c.readyState === WS_OPEN) c.send(j); }); } catch { }
+      });
     });
   } else {
     socket.destroy();
