@@ -244,12 +244,29 @@ const pipeSessions = {
     const outFd = fs.openSync(P2.out, 'a');
     const errFd = fs.openSync(P2.err, 'a');
     const inFd = fs.openSync(P2.fifo, 'r+');
+    // CWD FALLBACK (B-0d70, real xingweil report — the #1 dial-chat-blank
+    // cause): the server ships a cwd defaulted to ITS OWN os.homedir()
+    // (/home/xingweil on the pod), which does not exist on the device (Mac =
+    // /Users/xingweil). child_process.spawn with a nonexistent cwd emits an
+    // ASYNC 'error' event, and with no listener that used to CRASH THE WHOLE
+    // DAEMON → every session went blank. Resolve to a real dir here and never
+    // let a bad cmd/cwd take the daemon down.
+    let useCwd = process.env.HOME;
+    try { if (cwd && fs.statSync(cwd).isDirectory()) useCwd = cwd; } catch { }
     const child = require('child_process').spawn(cmd, args || [], {
       detached: true, stdio: [inFd, outFd, errFd],
-      cwd: cwd || process.env.HOME, env: spawnEnv(env),
+      cwd: useCwd, env: spawnEnv(env),
     });
     child.unref();
     fs.writeFileSync(P2.meta, JSON.stringify({ childPid: child.pid, startedAt: Date.now(), cmd: [cmd, ...(args || [])] }));
+    // a spawn failure (ENOENT cmd, EACCES, etc.) arrives async — WITHOUT this
+    // listener it is an uncaught 'error' that kills the daemon. Turn it into
+    // the normal exit sentinel so the wrapper finalizes instead of hanging.
+    child.on('error', (e) => {
+      try { fs.appendFileSync(P2.out, JSON.stringify({ type: '_remote_exit', code: 127, spawnError: String(e && e.message || e) }) + '\n'); } catch { }
+      try { const cur = this._meta(sid) || {}; fs.writeFileSync(P2.meta, JSON.stringify({ ...cur, exited: 127, exitedAt: Date.now() })); } catch { }
+      log(`pipe-session ${sid} spawn error: ${e && e.message}`);
+    });
     // we CAN wait on our own detached child — write the real exit sentinel
     child.on('exit', (code) => {
       try { fs.appendFileSync(P2.out, JSON.stringify({ type: '_remote_exit', code: code ?? 0 }) + '\n'); } catch { }

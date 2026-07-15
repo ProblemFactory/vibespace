@@ -142,7 +142,17 @@ function registerWsHandler(wss, ctx) {
             break;
           }
           const id = 'sess-' + (++sessionCounterRef.value) + '-' + Date.now();
-          const cwd = data.cwd || os.homedir();
+          // cwd default: a REMOTE/DIAL session with no explicit cwd must land
+          // in the DEVICE's home, NOT this server's (B-0d70: the pod's
+          // /home/xingweil doesn't exist on a Mac → `cd` failed and, on the
+          // pipe-session path, a nonexistent spawn cwd crashed the daemon).
+          let cwd = data.cwd || '';
+          if (!cwd) {
+            if (data.hostId && hosts) {
+              try { const hh = hosts.get(data.hostId); cwd = (hh && await hosts.homeDir(hh)) || ''; } catch { }
+            }
+            if (!cwd) cwd = os.homedir();
+          }
           const sockName = 'cw-' + sessionCounterRef.value + '-' + Date.now();
           const socketPath = path.join(SOCKETS_DIR, sockName);
           const sessionMode = data.mode === 'chat' ? 'chat' : 'terminal';
@@ -532,7 +542,10 @@ function registerWsHandler(wss, ctx) {
                   hostToken: agentdRemote.agentdHostToken('dial-' + h.deviceId),
                   sid: id,
                   version: require('../package.json').version,
-                  spawn: { cmd: 'sh', args: ['-lc', shellCmd], cwd: os.homedir() },
+                  // cwd runs ON THE DEVICE — send the resolved device cwd, not
+                  // this server's homedir (a path absent on the device). The
+                  // daemon also falls back to HOME if it still doesn't exist.
+                  spawn: { cmd: 'sh', args: ['-lc', shellCmd], cwd },
                 };
                 ensureDir(agentdRemote.agentdDir);
                 const cfgFile = path.join(agentdRemote.agentdDir, 'session-' + id + '.json');

@@ -338,7 +338,16 @@ class HostManager {
     if (!this._homes) this._homes = new Map();
     if (this._homes.has(h.id)) return this._homes.get(h.id);
     try {
-      const out = String(await this._ssh(h, 'echo "$HOME"')).trim().split('\n').pop().trim();
+      // dial machines have no ssh — resolve the home over the device link
+      // (B-0d70: a null home here made New Session default the device cwd to
+      // the LOCAL home, which doesn't exist on the device → spawn/cd failure).
+      let out;
+      if (h.transport === 'dial') {
+        const dm = await this.device(h.id);
+        out = String((await dm.runCmd('sh', ['-c', 'echo "$HOME"'])).stdout || '').trim().split('\n').pop().trim();
+      } else {
+        out = String(await this._ssh(h, 'echo "$HOME"')).trim().split('\n').pop().trim();
+      }
       if (out && out.startsWith('/')) { this._homes.set(h.id, out); return out; }
     } catch { }
     return null;

@@ -266,6 +266,7 @@ class App {
       return r.json();
     }).then(d => {
       document.getElementById('input-cwd').placeholder = d.home;
+      this._localHome = d.home; // restored as the cwd hint when host → Local (B-0d70)
       this._authEnabled = !!d.authEnabled;
       this._ssoEnabled = !!d.ssoEnabled; // Clerk SSO on → password step/import ignored
       this._repoDir = d.repoDir || null; // server install dir (⚙ self-update)
@@ -1465,11 +1466,21 @@ class App {
     };
     if (hostId) {
       recentEl.innerHTML = `<span class="cwd-recent-loading">${t('loading host paths…')}</span>`;
+      // Show the DEVICE/remote home as the empty-cwd hint (B-0d70: the
+      // placeholder used to stay the LOCAL home, so a paired Mac showed
+      // /home/xingweil which doesn't exist there). Server also defaults an
+      // empty cwd to this same home now.
+      const cwdInput = document.getElementById('input-cwd');
+      if (cwdInput) fetchJson(`/api/home?host=${encodeURIComponent(hostId)}`).then(d => {
+        if (d?.home && document.getElementById('input-host')?.value === hostId) cwdInput.placeholder = d.home;
+      }).catch(() => {});
       fetchJson(`/api/hosts/${hostId}/recent-cwds`).then(d => {
         // strip the "host: " display prefix discovery may add
         paint((d?.cwds || []).map(c => c.includes(': ') ? c.split(': ').pop() : c));
       }).catch(() => { recentEl.innerHTML = ''; });
     } else {
+      const cwdInput = document.getElementById('input-cwd');
+      if (cwdInput && this._localHome) cwdInput.placeholder = this._localHome;
       const seen = new Set();
       const local = [];
       for (const s of [...(this.sidebar?._allSessions || [])].sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))) {
