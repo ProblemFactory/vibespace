@@ -447,7 +447,12 @@ function registerWsHandler(wss, ctx) {
             let h;
             try { h = hosts.get(data.hostId); }
             catch { ws.send(JSON.stringify({ type: 'error', message: 'Unknown host: ' + data.hostId })); return; }
-            if (h.transport === 'dial') { ws.send(JSON.stringify({ type: 'error', message: `"${h.name}" is a dial-out device — running sessions on it lands in the next update (files, discovery and mounts already work)` })); return; }
+            // TERMINAL mode is not wired for dial devices yet (only chat rides
+            // the DialSessionBridge). Surface it CLEARLY — the reqId is what
+            // makes the client show the error instead of a blank window (real
+            // report: Mac terminal 空白; the old message had no reqId so the
+            // create handler never matched it).
+            if (h.transport === 'dial') { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, sessionId: id, message: `Terminal sessions on a paired device aren't supported yet — use CHAT mode on "${h.name}" instead (files, mounts and chat all work). Terminal-over-device is coming.` })); return; }
             const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
             // locally-resolved binary paths mean nothing on the remote
             const rcmd = spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd;

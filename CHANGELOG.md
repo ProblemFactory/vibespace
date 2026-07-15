@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.162.5 — 2026-07-15
+- **Opening a TERMINAL on a paired device no longer shows a blank window** — terminal mode isn't wired for dial devices yet (only chat rides the DialSessionBridge), and the rejection was sent WITHOUT a reqId so the client never matched it to the pending window (real report: Mac terminal 空白). It now carries reqId + a clear message pointing to chat mode.
+
 ## 2.162.4 — 2026-07-15
 - **Paired-device sessions were blank because the daemon's child PATH had no node/claude** (the real xingweil root cause, on top of 2.162.3's stale-stream fix): launchd (macOS) / systemd (Linux) start the device daemon with a MINIMAL PATH; the daemon runs on node fine (full path) but every subprocess it spawned — the chat pipe-session running `claude`, the terminal pty, run-cmd, run-stream — inherited that minimal PATH and could not find node or claude, so `claude` never started and the session stayed blank (the tools probe on the Mac reported node:false/claude:false despite the daemon running on node v25). New `spawnEnv()` prepends the daemon's own node dir + ~/.local/bin + /opt/homebrew/bin + /usr/local/bin to PATH for all four spawn sites. Same class as the systemd baked-PATH incident. Rebuild the daemon (it self-upgrades) for the fix.
 
