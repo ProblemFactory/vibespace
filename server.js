@@ -1284,6 +1284,18 @@ function restoreSessions() {
   if (!sockets.length) return;
 
   console.log(`  Found ${sockets.length} existing session(s), reconnecting...`);
+  // Dial-session bridges live in THIS process — recreate them on the SAME
+  // recorded port so the surviving wrapper's attach reconnect lands (the
+  // host-mounts tunnel re-own pattern). Must happen before wrappers retry.
+  for (const sockFile of sockets) {
+    try {
+      const m = readSessionMeta(sockFile.replace(/^cw-/, '').replace(/\.sock$/, '')) || {};
+      if (m.dialDeviceId && m.bridgePort) {
+        dialBridge.ensure({ sid: sockFile.replace(/^cw-/, ''), deviceId: m.dialDeviceId, port: m.bridgePort })
+          .catch((e) => console.warn('[dial-bridge] restore failed:', e.message));
+      }
+    } catch { }
+  }
   for (const sockFile of sockets) {
     const socketPath = path.join(SOCKETS_DIR, sockFile);
     try { fs.statSync(socketPath); } catch { continue; }
@@ -2664,6 +2676,12 @@ app.delete('/api/agentd/devices/:id', async (req, res) => {
 });
 // Device folder mounts (2.153.0): a paired device's folder mounted INTO this
 // VibeSpace over the dial link (read-only; src/device-mounts.js).
+const { DialSessionBridge } = require('./src/dial-session-bridge');
+const dialBridge = new DialSessionBridge({
+  deviceForDial,
+  hostTokenFor: (deviceId) => agentdHostToken('dial-' + deviceId),
+  log: (m) => console.log('[dial-bridge]', m),
+});
 const { DeviceMounts } = require('./src/device-mounts');
 const deviceMounts = new DeviceMounts({
   dataDir: path.join(__dirname, 'data'),
@@ -3069,6 +3087,7 @@ app.get('/api/session-options', (req, res) => {
 const { registerWsHandler } = require('./src/ws-handler');
 registerWsHandler(wss, {
   agentdRemote: { ensureAgentdOnHost, agentdHostToken, agentdDir: AGENTD_DIR, attachBundle: path.join(__dirname, 'data', 'bin', 'vibespace-agentd-attach.js') },
+  dialBridge,
   activeSessions, WS_OPEN, broadcastActiveSessions, broadcastToSession, resizeSessionToMin,
   setupSessionPty, refreshWebuiPids, deleteSessionMeta, writeSessionMeta, readSessionMeta,
   readLayouts, writeLayouts, getSyncStore, serverSetting,

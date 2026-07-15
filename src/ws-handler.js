@@ -77,7 +77,7 @@ function registerWsHandler(wss, ctx) {
   const {
     activeSessions, WS_OPEN, broadcastActiveSessions, broadcastToSession, resizeSessionToMin,
     setupSessionPty, refreshWebuiPids, deleteSessionMeta, writeSessionMeta, readSessionMeta,
-    readLayouts, writeLayouts, getSyncStore, serverSetting, agentdRemote,
+    readLayouts, writeLayouts, getSyncStore, serverSetting, agentdRemote, dialBridge,
     sessionCounterRef, createSessionMessages, PERMISSION_MODES,
     SOCKETS_DIR, BUFFERS_DIR, META_DIR, PTY_WRAPPER, CHAT_WRAPPER,
     NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, PORT, X_ENV,
@@ -429,7 +429,6 @@ function registerWsHandler(wss, ctx) {
             let h;
             try { h = hosts.get(data.hostId); }
             catch { ws.send(JSON.stringify({ type: 'error', message: 'Unknown host: ' + data.hostId })); return; }
-            if (h.transport === 'dial') { ws.send(JSON.stringify({ type: 'error', message: `"${h.name}" is a dial-out device — running sessions on it lands in the next update (files, discovery and mounts already work)` })); return; }
             const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
             const rcmd = spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd;
             const rargs = [...spawnArgs];
@@ -438,6 +437,44 @@ function registerWsHandler(wss, ctx) {
                 if (!rargs.includes(fl[0])) rargs.push(...fl);
               }
             }
+            if (h.transport === 'dial') {
+              // Graduation B.2: the session runs as a persistent PIPE SESSION
+              // in the DIALED-IN device's daemon; the attach child reaches it
+              // through the server's loopback mux proxy (DialSessionBridge) —
+              // the dial link lives inside this process, unreachable to a
+              // child directly. First cut = minimal env: no account shipping /
+              // tools tar (those preludes are ssh-coupled; B.3 ports them via
+              // device fs ops) — the device's OWN claude login is used.
+              if (!dialBridge || !agentdRemote) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'dial sessions not wired on this server' })); return; }
+              try {
+                const bridgePort = await dialBridge.ensure({ sid: id, deviceId: h.deviceId });
+                const shellCmd = `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; exec env `
+                  + spawnEnvPairs.map(shq).join(' ')
+                  + ' ' + [rcmd, ...rargs.map(shq)].join(' ');
+                const cfg = {
+                  tcp: { port: bridgePort },
+                  hostToken: agentdRemote.agentdHostToken('dial-' + h.deviceId),
+                  sid: id,
+                  version: require('../package.json').version,
+                  spawn: { cmd: 'sh', args: ['-lc', shellCmd], cwd: os.homedir() },
+                };
+                ensureDir(agentdRemote.agentdDir);
+                const cfgFile = path.join(agentdRemote.agentdDir, 'session-' + id + '.json');
+                fs.writeFileSync(cfgFile, JSON.stringify(cfg), { mode: 0o600 });
+                spawnCmd = NODE_CMD;
+                spawnArgs = [agentdRemote.attachBundle, '--config', cfgFile, '--offset', '__VS_OFFSET__'];
+                spawnEnvPairs = [];
+                spawnCwd = os.homedir();
+                session.host = h.id;
+                session.hostName = h.name;
+                session._agentdSession = true;
+                session._dialDeviceId = h.deviceId;
+                session._bridgePort = bridgePort;
+                session._agentdCfgFile = cfgFile;
+              } catch (e) {
+                ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: `dial session failed: ${e.message} (is the device online?)` })); return;
+              }
+            } else {
             const ra = remoteAgentSetup();
             let acctEnv = '';
             try { acctEnv = remoteAccountEnv(h); }
@@ -559,6 +596,7 @@ done`;
               session.host = h.id;
               session.hostName = h.name;
             }
+            } // ← end of the non-dial (ssh) path
           }
           // PASSIVE usage capture (§ban-safety): for LOCAL CLAUDE TERMINAL
           // sessions (a statusLine only renders in the TUI — chat/stream-json
@@ -662,6 +700,8 @@ done`;
             host: session.host || null,
             hostName: session.hostName || null,
             keeperSid: session.keeperSid || null,
+            dialDeviceId: session._dialDeviceId || null,
+            bridgePort: session._bridgePort || null,
             backend: session.backend,
             backendSessionId: session.backendSessionId,
             claudeSessionId: session.claudeSessionId,
@@ -1240,6 +1280,7 @@ done`;
         }
 
         case 'kill': {
+          { const ks = activeSessions.get(data.sessionId); if (ks && ks._bridgePort) { try { dialBridge?.close(data.sessionId); } catch { } } }
           const session = activeSessions.get(data.sessionId);
           if (session) {
             // Cancel any pending delayed-SIGINT from a recent interrupt — after
