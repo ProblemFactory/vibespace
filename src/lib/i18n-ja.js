@@ -1902,4 +1902,6 @@ export default {
   "Windows (EXPERIMENTAL, PowerShell): needs Node 18+ (winget install OpenJS.NodeJS.LTS).": "Windows（実験的・PowerShell）：Node 18+ が必要（winget install OpenJS.NodeJS.LTS）。",
   "The daemon auto-reconnects and survives reboots (rerun the same command after a reboot). One machine can pair to several VibeSpace instances — each install keeps its own state, keyed by this instance’s address. Pairing the same name again replaces its token.": "デーモンは自動再接続し、再起動後は同じコマンドを再実行するだけです。1 台のマシンを複数の VibeSpace インスタンスにペアリングできます — インスタンスのアドレスごとに状態を分離保存。同名で再ペアリングするとトークンが置き換わります。",
   "from device": "デバイスから",
+  "dial-out device · connected": "発信式デバイス · 接続中",
+  "dial-out device · offline — run the install command on it": "発信式デバイス · オフライン — デバイスでインストールコマンドを実行",
 };

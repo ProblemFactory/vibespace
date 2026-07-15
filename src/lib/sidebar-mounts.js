@@ -767,7 +767,12 @@ export function installSidebarMounts(Sidebar) {
           showToast(tr('Unpaired'));
         }),
       );
-      row.append(top, actions);
+      top.appendChild(actions);
+      const sub = document.createElement('div');
+      sub.className = 'mounts-path';
+      sub.style.direction = 'ltr';
+      sub.textContent = dev.online ? tr('dial-out device · connected') : tr('dial-out device · offline — run the install command on it');
+      row.append(top, sub);
       return row;
     },
 
@@ -800,7 +805,8 @@ export function installSidebarMounts(Sidebar) {
         this._renderMounts();
       };
       actions.append(open, un);
-      row.append(top, actions);
+      top.appendChild(actions);
+      row.append(top);
       return row;
     },
 
