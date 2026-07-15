@@ -489,7 +489,12 @@ async function deviceForDial(deviceId) {
   // holds a FRESH stream — but the cached DeviceManager's mux is still bound
   // to the DEAD old stream, and its status().connected can lag true. Rebuild
   // whenever the live stream differs from the one this dm connected over.
-  if (dm && dm._dialStream && dm._dialStream !== curStream) {
+  // A STOPPED dm must be treated exactly like a stale stream: stop() is
+  // terminal (_connectLoop throws 'stopped' forever), so reusing one wedges
+  // EVERY op against an otherwise-healthy device until the stream changes
+  // (real walter outage: hours of "offline"/'stopped' while the Mac was
+  // dialed-in and fine — a re-dial/unpair race stopped the cached dm).
+  if (dm && (dm._stopped || (dm._dialStream && dm._dialStream !== curStream))) {
     try { dm.stop?.(); } catch { }
     dm = null;
     agentdDialDevices.delete(deviceId);
@@ -507,7 +512,14 @@ async function deviceForDial(deviceId) {
     agentdDialDevices.set(deviceId, dm);
   }
   dm._dialStream = curStream; // remember which stream we bind the mux to
-  await dm.connect();
+  try {
+    await dm.connect();
+  } catch (e) {
+    // never leave a failed dm in the cache — the next op must rebuild clean
+    try { dm.stop?.(); } catch { }
+    if (agentdDialDevices.get(deviceId) === dm) agentdDialDevices.delete(deviceId);
+    throw e;
+  }
   return dm;
 }
 async function ensureAgentdOnHost(hostId) {
@@ -2615,6 +2627,10 @@ app.delete('/api/hosts/:id', async (req, res) => {
     // confirm dialog promises nothing on the remote is touched — the orphan
     // rows remain manageable/unmountable).
     if (h.transport === 'dial') await unpairDialDevice(h.deviceId);
+    // port-forwards are pure local plumbing (unlike mounts, which keep their
+    // preserve-as-orphan semantics for ssh) — with the host record gone their
+    // records become invisible, undeletable orphans (review finding)
+    else { try { portForwards.onMachineUnpaired(h.id); } catch { } }
     hosts.remove(req.params.id);
     bcastAll({ type: 'hosts-updated' });
     res.json({ success: true });

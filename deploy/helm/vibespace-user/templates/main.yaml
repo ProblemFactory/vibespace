@@ -166,10 +166,12 @@ spec:
             - name: VIBESPACE_GDRIVE_CLIENT_SECRET
               valueFrom: { secretKeyRef: { name: {{ $name }}, key: gdriveClientSecret } }
             {{- end }}
-            {{- if and .Values.frp .Values.frp.addr }}
+            {{- if and .Values.frp .Values.frp.addr .Values.frp.token }}
             # frp relay defaults (B-0b60 public URLs) — the plugin reads these
             # as DEFAULTS; a user can override any of them in ⚙ → Plugins. When
             # present the plugin is default-enabled (auto-connects on boot).
+            # Gated on addr AND token: the Secret's frpsToken key only renders
+            # with a token, and a dangling secretKeyRef fails the whole pod.
             - name: VIBESPACE_FRPS_ADDR
               value: {{ .Values.frp.addr | quote }}
             - name: VIBESPACE_FRPS_PORT

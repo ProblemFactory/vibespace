@@ -1486,7 +1486,23 @@ done`;
             if (session.host && hosts) {
               try {
                 const h = hosts.get(session.host);
-                if (session.mode === 'chat') {
+                if (h.transport === 'dial') {
+                  // Dial device: the ssh teardown below throws for dial (no ssh
+                  // fields) and used to be SWALLOWED — the device-side claude
+                  // survived every terminate and a later resume raced it
+                  // (double JSONL writers, the B-4058 class). Kill the daemon
+                  // pipe session + drop the agent token over the device link.
+                  if (session.mode === 'chat') {
+                    const sidSafe = String(data.sessionId).replace(/[^\w-]/g, '');
+                    hosts.device(session.host).then(async (dm) => {
+                      try { await dm.killPipeSession(sidSafe); } catch {}
+                      try { await dm.runCmd('sh', ['-c', `rm -f "$HOME/.vibespace/bin/.tok-${sidSafe}"`], { timeoutMs: 10000 }); } catch {}
+                      try { hosts.invalidateDiscovery(session.host); } catch {}
+                    }).catch(() => {});
+                  } else {
+                    setTimeout(() => { try { hosts.invalidateDiscovery(session.host); } catch {} }, 2000);
+                  }
+                } else if (session.mode === 'chat') {
                   execFile('ssh', [...hosts.sshArgs(h), '--', `${session._agentdSession
                     ? `M="$HOME/.vibespace/agentd/state/sessions/${data.sessionId}.json"; P=$(grep -o '"childPid":[0-9]*' "$M" 2>/dev/null | cut -d: -f2); [ -n "$P" ] && kill $P 2>/dev/null; sleep 2; [ -n "$P" ] && kill -9 $P 2>/dev/null`
                     : `node "$HOME/.vibespace/bin/vibespace-remote-keeper" stop ${session.keeperSid || data.sessionId}`} 2>/dev/null || true; rm -f "$HOME/.vibespace/bin/.tok-${data.sessionId}"`],

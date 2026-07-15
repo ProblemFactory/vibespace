@@ -322,6 +322,13 @@ class DeviceManager {
     });
   }
 
+  /** Kill a daemon pipe session by sid without attaching (the dial-chat
+   *  terminate path — SIGTERM→SIGKILL escalation happens daemon-side). */
+  async killPipeSession(sid) {
+    const conn = await this.connect();
+    conn.mux.control({ op: 'kill-pipe-session', sid });
+  }
+
   // ── M3 ──
   fsStat(p) { return this._request({ op: 'fs-op', action: 'stat', path: p }); }
   fsList(p) { return this._request({ op: 'fs-op', action: 'list', path: p }); }

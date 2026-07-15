@@ -256,8 +256,15 @@ class RemoteFs {
 
   // Stream a remote file to an HTTP response (download / raw viewer)
   downloadTo(id, filePath, res, { attachment = false } = {}) {
-    const child = this._spawn(id, `cat ${shq(filePath)}`);
     if (attachment) res.setHeader('Content-Disposition', `attachment; filename="${path.basename(filePath).replace(/"/g, '')}"`);
+    // dial devices have no ssh — _spawn threw SYNC inside the async route and
+    // the request was never answered (viewer/download hung forever, review
+    // finding). Stream over the device link instead.
+    if (this._host(id)?.transport === 'dial') {
+      this._devStreamTo(id, 'cat', [filePath], res, { notFoundOnFail: true });
+      return;
+    }
+    const child = this._spawn(id, `cat ${shq(filePath)}`);
     child.stdout.pipe(res);
     child.stderr.on('data', () => {});
     child.on('close', (code) => { if (code !== 0 && !res.headersSent) res.status(404).end(); });
@@ -268,9 +275,28 @@ class RemoteFs {
     const parent = path.posix.dirname(dirPath), base = path.posix.basename(dirPath);
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="${base.replace(/"/g, '')}.zip"`);
+    if (this._host(id)?.transport === 'dial') {
+      this._devStreamTo(id, 'sh', ['-c', `cd ${shq(parent)} && zip -r - ${shq(base)}`], res, {});
+      return;
+    }
     const child = this._spawn(id, `cd ${shq(parent)} && zip -r - ${shq(base)}`);
     child.stdout.pipe(res);
     child.stderr.on('data', () => {});
+  }
+
+  // Stream a device command's stdout into an HTTP response (dial downloads).
+  async _devStreamTo(id, cmd, args, res, { notFoundOnFail = false } = {}) {
+    try {
+      const dm = await this._dev(id);
+      if (!dm) throw new Error('device offline');
+      let wrote = false;
+      const r = await dm.runStream(cmd, args, { onData: (b) => { wrote = true; try { res.write(b); } catch {} } });
+      if (r.code !== 0 && !wrote && notFoundOnFail && !res.headersSent) return res.status(404).end();
+      res.end();
+    } catch (e) {
+      if (!res.headersSent) res.status(502).json({ error: e.message });
+      else try { res.end(); } catch {}
+    }
   }
 
   // Upload a local buffer/stream to a remote path (write covers buffers)

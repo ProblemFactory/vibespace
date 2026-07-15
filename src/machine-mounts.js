@@ -48,6 +48,18 @@ class MachineMounts {
       this._state = { mounts: [] };
       this._migrateLegacy();
     }
+    // one-time hygiene: strip trailing slashes off legacy pull remotePaths —
+    // slashed records predate the 2.168.0 intake normalization, never
+    // dedup-match a re-added clean path (duplicate records on one mountpoint
+    // cross-teardown each other), and fed the serve-folder double-slash 403
+    let normed = false;
+    for (const m of this._state.mounts || []) {
+      if (m.dir === 'pull' && typeof m.remotePath === 'string' && /\/+$/.test(m.remotePath) && m.remotePath !== '/') {
+        m.remotePath = m.remotePath.replace(/\/+$/, '') || '/';
+        normed = true;
+      }
+    }
+    if (normed) this._save();
     this._live = new Map(); // pull rec.id → { teardown, mountpoint }
     this._mounting = new Set(); // pull rec.id (single-flight)
     // Pull health sweep: a live pull whose LISTING hangs (its machine-side
