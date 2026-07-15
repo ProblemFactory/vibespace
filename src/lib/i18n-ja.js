@@ -1904,4 +1904,6 @@ export default {
   "from device": "デバイスから",
   "dial-out device · connected": "発信式デバイス · 接続中",
   "dial-out device · offline — run the install command on it": "発信式デバイス · オフライン — デバイスでインストールコマンドを実行",
+  "Remount now": "今すぐ再マウント",
+  "Remount (device is offline — start its daemon first)": "再マウント（デバイスはオフライン — 先にデーモンを起動）",
 };

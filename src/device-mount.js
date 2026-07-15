@@ -68,6 +68,21 @@ async function deviceFolderMount({ device, remotePath, mountpoint, rcloneBin, vf
   // plain http backend) is deliberate — the http backend requests a fixed 128MB
   // range per read and then stalls ~6s on the keep-alive connection; webdav
   // requests sane ranges and reads cleanly (the daemon serves a WebDAV subset).
+  // PRE-CLEAN stale occupation: rclone is spawned detached, so it SURVIVES a
+  // server restart while its bridge dies with us — the mountpoint stays
+  // claimed by an orphan whose every IO fails, and the dial-in heal's fresh
+  // mount then fails forever (real report: device online, mount row stuck
+  // offline with no way back). Lazy-unmount + kill the exact orphan by
+  // /proc cmdline (the mounts.js _killMountDaemon lesson).
+  await new Promise((r) => { const c = spawn('fusermount', ['-uz', mountpoint], { stdio: 'ignore' }); c.on('exit', r); c.on('error', r); });
+  try {
+    for (const pidS of fs.readdirSync('/proc').filter((n) => /^\d+$/.test(n))) {
+      try {
+        const cmd = fs.readFileSync(`/proc/${pidS}/cmdline`, 'utf8').replace(/\0/g, ' ');
+        if (cmd.includes('rclone') && cmd.includes(' mount ') && cmd.includes(mountpoint)) process.kill(Number(pidS), 'SIGKILL');
+      } catch { }
+    }
+  } catch { } // non-Linux: the fusermount pass alone
   fs.mkdirSync(mountpoint, { recursive: true });
   const env = {
     ...process.env,

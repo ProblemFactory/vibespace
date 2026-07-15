@@ -72,6 +72,18 @@ class DeviceMounts {
     } finally { this._mounting.delete(rec.id); }
   }
 
+  /** Manual remount (the row's ↻ — e.g. after a failed heal). */
+  async remount(id) {
+    const rec = this._state.mounts.find((m) => m.id === id);
+    if (!rec) throw new Error('unknown device mount');
+    if (!this.isOnline(rec.deviceId)) throw new Error('device is offline — start its daemon first');
+    const live = this._live.get(id);
+    if (live) { try { await live.teardown(); } catch { } this._live.delete(id); }
+    await this._up(rec);
+    this.broadcast({ type: 'device-mounts-updated' });
+    return { ...rec, live: this._live.has(id) };
+  }
+
   async unmount(id) {
     const i = this._state.mounts.findIndex((m) => m.id === id);
     if (i < 0) throw new Error('unknown device mount');

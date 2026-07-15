@@ -2681,6 +2681,10 @@ app.delete('/api/device-mounts/:id', async (req, res) => {
   try { await deviceMounts.unmount(String(req.params.id)); res.json({ success: true }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
+app.post('/api/device-mounts/:id/remount', async (req, res) => {
+  try { res.json(await deviceMounts.remount(String(req.params.id))); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
 // Standalone device install: serve the agentd bundle + installer (public — the
 // bundle is not secret; auth is the per-device dial/host token at connect).
 app.get('/agentd.js', (req, res) => {
