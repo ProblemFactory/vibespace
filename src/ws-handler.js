@@ -355,9 +355,26 @@ function registerWsHandler(wss, ctx) {
             const net = require('net');
             const rf = await dm.reverseForward({ port: 0, connectLocal: () => net.connect(PORT, '127.0.0.1') });
             session._dialReversePort = rf.port;
+            // Account billing over the device link (B.3 tail, user directive
+            // 2026-07-15: "oauth默认禁止搬运，api key可以"). Mirrors
+            // remoteAccountEnv: an API KEY value ships via fsWrite into a 0600
+            // file on the device, referenced by $(cat …) so the value never
+            // enters any argv; a SUBSCRIPTION's OAuth creds are NEVER shipped
+            // by default (§ban-safety — a sub token live from a device IP is an
+            // impossible-travel/abuse signal), gated behind the SAME setting.
+            // API key only (subscriptions are rejected upstream at the dial
+            // branch). The value rides fsWrite into a 0600 file; $(cat …) keeps
+            // it out of every argv.
+            let acctAssign = '';
+            if (spawnAccount && spawnAccount.secret) {
+              const kf = `${home}/.vibespace/${spawnAccount.id}.key`;
+              await dm.fsWrite(kf, Buffer.from(spawnAccount.secret.value));
+              await dm.runCmd('sh', ['-c', `chmod 600 "${kf}"`], { timeoutMs: 6000 }).catch(() => {});
+              acctAssign = `${spawnAccount.secret.var}="$(cat "${kf}")" `;
+            }
             return {
               envPairs: [`VIBESPACE_API=http://127.0.0.1:${rf.port}`],
-              tokenAssign: `VIBESPACE_SESSION_TOKEN="$(cat "${bin}/${tokName}")" `,
+              tokenAssign: acctAssign + `VIBESPACE_SESSION_TOKEN="$(cat "${bin}/${tokName}")" `,
             };
           };
           // Remote account key distribution: the env-pair channel is OUT for
@@ -482,9 +499,26 @@ function registerWsHandler(wss, ctx) {
               // VIBESPACE_API back-tunnel via reverseForward, hook registration
               // via runCmd — so vibespace-status/task/ask work on the device.
               if (!dialBridge || !agentdRemote) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'dial sessions not wired on this server' })); return; }
+              // A selected SUBSCRIPTION account can't be honored on a device
+              // (OAuth shipping is off by default — §ban-safety) — fail loudly
+              // rather than silently billing the device's own login (the ssh
+              // path fails the same way). API keys are shippable (below).
+              if (spawnAccount && !spawnAccount.secret) {
+                let allowSub = false; try { allowSub = !!serverSetting('accounts.shipSubscriptionToRemote'); } catch {}
+                ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: allowSub
+                  ? 'subscription creds shipping to dial devices is not implemented — use an API-key account, or log in on the device'
+                  : 'the selected account is a subscription login — shipping it to a device is disabled (§ban-safety). Use an API-key account, or log in on the device itself.' }));
+                return;
+              }
               try {
                 const bridgePort = await dialBridge.ensure({ sid: id, deviceId: h.deviceId });
-                const da = await deviceAgentSetup(h, id).catch((e) => { console.warn('[dial] agent setup degraded:', e.message); return { envPairs: [], tokenAssign: '' }; });
+                // Tool/token/tunnel setup degrades to bare env on error (session
+                // still runs); the API-key ship inside is NOT degradable — a
+                // write failure throws out of the try and fails the create.
+                const da = await deviceAgentSetup(h, id).catch((e) => {
+                  if (spawnAccount?.secret) throw e; // wrong billing must fail, not silently degrade
+                  console.warn('[dial] agent setup degraded:', e.message); return { envPairs: [], tokenAssign: '' };
+                });
                 const shellCmd = `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:$HOME/.vibespace/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ${da.tokenAssign}exec env `
                   + [...da.envPairs.map(shq), ...spawnEnvPairs.map(shq)].join(' ')
                   + ' ' + [rcmd, ...rargs.map(shq)].join(' ');
