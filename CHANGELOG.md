@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.162.3 — 2026-07-15
+- **Paired-device sessions/fs go blank while the device shows ONLINE — root cause** (real xingweil report, chat AND terminal on the Mac blank): after the device's daemon self-upgrades and re-execs it re-dials with a FRESH ws stream, but the server's cached DeviceManager stayed bound to the DEAD old stream (its `status().connected` lagged true), so every fs op, mount heal and session bridge silently talked to a closed socket — the fs path even fell through to the ssh branch and threw "it has no ssh". Fixes: `deviceForDial` tracks the stream its mux bound to and REBUILDS when the live stream differs; a re-dial proactively drops the stale cached DeviceManager (both the dial cache and `hosts._devices`) so the next op reconnects over the new stream.
+- **`agentd deps not wired` boot race fixed**: the data-plane deps were wired 1s after boot via setTimeout; a device dialing in during that window failed its mount heal. Wired synchronously now (the functions are hoisted, `hosts` already exists).
+
 ## 2.162.2 — 2026-07-15
 - **Mount tokens carry a structured `kind` + `owner`, not a name-prefix hack** (user directive: 用名字来匹配是不是太抽象了, 为啥不直接弄个类型或者来源字段): a reverse-mount token is minted with `kind:'reverse-mount', owner:<hostId>`; a user's share link is `kind:'share'`. Orphan GC and the UI classification both key off `kind` now — pre-2.162.2 records back-fill their kind from the old `host:<id>` name on read (no data rewrite). A user share named anything (even literally `host:…`) can never be mistaken for a reverse-mount token.
 

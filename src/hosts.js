@@ -75,6 +75,10 @@ class HostManager {
    *  doesn't stay wrong for the cache TTL (state-sync pass, 2.124.0). */
   invalidateDiscovery(id) { this._discoveryCache.delete(id); }
 
+  /** Drop the cached DeviceManager for a host (called when a dial device
+   *  re-dials with a fresh stream) so hosts.device() rebuilds it. */
+  invalidateDevice(id) { try { this._devices?.get(id)?.stop?.(); } catch { } this._devices?.delete(id); }
+
   _load() {
     try { this._state = JSON.parse(fs.readFileSync(this._file, 'utf-8')); }
     catch {
