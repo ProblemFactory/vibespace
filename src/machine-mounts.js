@@ -225,7 +225,7 @@ class MachineMounts {
     const expanded = String(folder || os.homedir()).replace(/^~(?=$|\/)/, os.homedir());
     const abs = path.resolve(expanded);
     if (!fs.existsSync(abs)) throw new Error(`folder does not exist on this instance: ${abs}`);
-    const share = this.mountTokens.mint({ name: 'host:' + hostId, root: abs, mode: mode === 'rw' ? 'rw' : 'ro' });
+    const share = this.mountTokens.mint({ name: 'host:' + hostId, kind: 'reverse-mount', owner: hostId, root: abs, mode: mode === 'rw' ? 'rw' : 'ro' });
     const shareToken = share.raw, shareTokenId = share.rec.id;
     try {
     const davUrl = base + '/dav';
@@ -427,7 +427,10 @@ class MachineMounts {
     try {
       const referenced = new Set(this._state.mounts.filter((m) => m.dir === 'push').map((m) => m.tokenId));
       for (const t of this.mountTokens.list?.() || []) {
-        if (String(t.name || '').startsWith('host:') && !referenced.has(t.id)) {
+        // structured kind (not a name-prefix hack): only reverse-mount tokens
+        // with no backing push record are orphans; user 'share' tokens are
+        // never touched
+        if (t.kind === 'reverse-mount' && !referenced.has(t.id)) {
           try { this.mountTokens.revoke?.(t.id); n++; } catch { }
         }
       }

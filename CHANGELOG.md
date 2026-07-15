@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.162.2 — 2026-07-15
+- **Mount tokens carry a structured `kind` + `owner`, not a name-prefix hack** (user directive: 用名字来匹配是不是太抽象了, 为啥不直接弄个类型或者来源字段): a reverse-mount token is minted with `kind:'reverse-mount', owner:<hostId>`; a user's share link is `kind:'share'`. Orphan GC and the UI classification both key off `kind` now — pre-2.162.2 records back-fill their kind from the old `host:<id>` name on read (no data rewrite). A user share named anything (even literally `host:…`) can never be mistaken for a reverse-mount token.
+
 ## 2.162.1 — 2026-07-15
 - **Reverse-mount tokens stop piling up as garbage** (real report: 7 indistinguishable 反挂载令牌 rows, 6 of them duplicates from one bad afternoon): a FAILED push-mount now revokes the token it minted (every failed attempt — offline device, rclone error — used to leak one), unmounting already revoked, and a boot GC revokes any `host:*` token that no mount record references (clears the pre-existing pile on the next restart). Migration guard grew the assertion.
 

@@ -44,8 +44,12 @@ class MountTokens {
 
   static _hash(raw) { return crypto.createHash('sha256').update(raw).digest('hex'); }
 
-  /** Mint a scoped token. Returns the RAW token — shown once, stored hashed. */
-  mint({ name, root, mode }) {
+  /** Mint a scoped token. Returns the RAW token — shown once, stored hashed.
+   *  kind: 'share' (a user-created share link, default) | 'reverse-mount'
+   *  (minted by a machine push-mount). owner: for reverse-mount, the hostId
+   *  it belongs to — so orphan GC + UI classification key off STRUCTURED
+   *  fields, never a name-prefix hack (user directive). */
+  mint({ name, root, mode, kind, owner }) {
     if (!root || !path.isAbsolute(root)) throw new Error('root must be an absolute path');
     let real;
     try { real = fs.realpathSync(root); } catch { throw new Error('root does not exist'); }
@@ -54,6 +58,8 @@ class MountTokens {
     const rec = {
       id: 'mtk-' + crypto.randomBytes(4).toString('hex'),
       name: String(name || 'unnamed').slice(0, 60),
+      kind: kind === 'reverse-mount' ? 'reverse-mount' : 'share',
+      owner: owner ? String(owner) : null,
       tokenHash: MountTokens._hash(raw),
       root: real,
       mode: mode === 'rw' ? 'rw' : 'ro',
@@ -74,9 +80,22 @@ class MountTokens {
 
   list() {
     return this._state.tokens.map(t => ({
-      id: t.id, name: t.name, root: t.root, mode: t.mode,
-      createdAt: t.createdAt, lastUsedAt: t.lastUsedAt,
+      id: t.id, name: t.name, kind: this._kindOf(t), owner: t.owner || this._ownerOf(t),
+      root: t.root, mode: t.mode, createdAt: t.createdAt, lastUsedAt: t.lastUsedAt,
     }));
+  }
+
+  /** Structured kind, back-filling pre-2.162.2 records from the old
+   *  'host:<hostId>' name convention (one migration, no data rewrite needed —
+   *  derived on read). */
+  _kindOf(t) {
+    if (t.kind) return t.kind;
+    return /^host:/.test(String(t.name || '')) ? 'reverse-mount' : 'share';
+  }
+  _ownerOf(t) {
+    if (t.owner) return t.owner;
+    const m = /^host:(.+)$/.exec(String(t.name || ''));
+    return m ? m[1] : null;
   }
 
   /** True when this raw token was minted BY this instance (no lastUsedAt

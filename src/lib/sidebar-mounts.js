@@ -219,13 +219,13 @@ export function installSidebarMounts(Sidebar) {
         for (const t of d.mountTokens) {
           const row = document.createElement('div');
           row.className = 'mounts-share-row';
-          // 'host:<id>' tokens are minted BY reverse-mounts — say so in human
-          // terms instead of the raw internal name (real report: 语义不明)
-          const hostRec = /^host:(.+)$/.exec(t.name || '') && (hd.hosts || []).find((x) => x.id === t.name.slice(5));
+          // classify by the STRUCTURED kind/owner (2.162.2), not a name hack
+          const isReverse = t.kind === 'reverse-mount';
+          const hostRec = isReverse && t.owner && (hd.hosts || []).find((x) => x.id === t.owner);
           const title = hostRec ? tr('Reverse-mount token — "{name}" accesses {root}', { name: hostRec.name, root: t.root })
-            : /^host:/.test(t.name || '') ? tr('Reverse-mount token (machine removed) — {root}', { root: t.root })
+            : isReverse ? tr('Reverse-mount token (machine removed) — {root}', { root: t.root })
             : t.name;
-          const subNote = hostRec || /^host:/.test(t.name || '')
+          const subNote = isReverse
             ? tr('{mode} · revoking breaks that machine’s mount', { mode: t.mode === 'ro' ? tr('Read-only') : tr('Read-write') })
             : `${t.root} · ${t.mode === 'ro' ? tr('Read-only') : tr('Read-write')}`;
           row.innerHTML = `<span class="mounts-share-text"><b>${escHtml(title)}</b><span>${escHtml(subNote)}</span></span>`;
