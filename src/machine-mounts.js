@@ -333,6 +333,12 @@ class MachineMounts {
       remotePath = rp;
     }
     if (!remotePath || !String(remotePath).startsWith('/')) throw new Error('remotePath must be absolute (a folder ON the machine)');
+    // Strip a trailing slash (real walter bug): the daemon's serve-folder
+    // confines requests with `root + path.sep`, so a root ending in '/' makes
+    // the prefix a DOUBLE slash that no real subpath matches → every file 403s
+    // ("couldn't list files: 403"). mountPush avoids this via path.resolve;
+    // do the same here so the served + stored path is clean.
+    remotePath = String(remotePath).replace(/\/+$/, '') || '/';
     const slug = String(h.name || hostId).replace(/[^\w-]/g, '-').slice(0, 40);
     const mp = mountpoint || path.join(os.homedir(), 'vibespace-machines', `${slug}-${path.basename(remotePath) || 'root'}`);
     let rec = this._state.mounts.find((m) => m.dir === 'pull' && m.hostId === hostId && m.remotePath === remotePath && m.mountpoint === mp);
@@ -351,8 +357,12 @@ class MachineMounts {
     this._mounting.add(rec.id);
     try {
       const device = await this.hosts.device(rec.hostId); // ssh: daemon over --stdio; dial: the dialed-in link
+      // normalize a stored trailing slash so an EXISTING record (minted before
+      // the mountPull fix) works without a daemon update (the serve-folder
+      // confinement double-slash 403 — walter's real bug)
+      const remotePath = String(rec.remotePath || '').replace(/\/+$/, '') || '/';
       const h = await deviceFolderMount({
-        device, remotePath: rec.remotePath, mountpoint: rec.mountpoint,
+        device, remotePath, mountpoint: rec.mountpoint,
         rcloneBin: this.rcloneBin(), log: this.log,
       });
       this._live.set(rec.id, { teardown: h.teardown, mountpoint: rec.mountpoint });
