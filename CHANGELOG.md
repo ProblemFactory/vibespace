@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.175.1 — 2026-07-16
+- **Ghost terminal windows are gone**: when a reconnect re-attach answers "unknown session" (the session died WITH the server — pod recreation / hard restart kills dtach), the terminal window now flips to the same honest exited state as a live exit ("Session ended while disconnected — resume it from the sidebar") instead of keeping its frozen content and looking alive while the sidebar truthfully showed 0 running (real report: 左右不匹配).
+
 ## 2.175.0 — 2026-07-16
 - **CS-refactor flags GRADUATED — the toggles are gone.** `agentd.sessions`, `agentd.remoteSessions` and `agentd.dataPlane` are removed from Settings; the device-daemon paths are unconditional (local sessions through the daemon, remote chat as daemon pipe sessions, data plane over the device link). The legacy paths that the flags selected are deleted; what remains are FAILURE fallbacks only (local pty on daemon error, per-op ssh on device error, keeper for pre-existing keeper sessions).
 - **`agentd.publicUrl` is cluster-injectable**: helm now injects `VIBESPACE_PUBLIC_URL=https://<instance-host>` as the default; a user-set value in Settings still overrides, and the Settings field shows the injected address as its placeholder ("cluster default: …").

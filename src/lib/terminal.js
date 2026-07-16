@@ -323,6 +323,14 @@ class TerminalSession {
       } else if (msg.type === 'exited') {
         this.terminal.write('\r\n\x1b[90m[Process exited]\x1b[0m\r\n');
         winInfo.exited = true; if (winInfo._notifyChanged) winInfo._notifyChanged();
+      } else if (msg.type === 'error' && !winInfo.exited) {
+        // A reconnect re-attach answered "unknown session": the session died
+        // WITH the server (pod recreation / hard restart killed dtach) — the
+        // window otherwise kept its frozen content and looked alive while the
+        // sidebar truthfully said 0 running (real report: 左右不匹配). Flip it
+        // to the same honest exited state as a live exit.
+        this.terminal.write('\r\n\x1b[90m[Session ended while disconnected — resume it from the sidebar]\x1b[0m\r\n');
+        winInfo.exited = true; if (winInfo._notifyChanged) winInfo._notifyChanged();
       } else if (msg.type === 'effective-size') {
         // Multi-device: PTY is sized to min of all clients — unless one client
         // took over via size-override, in which case the PTY is ITS size.
