@@ -3099,3 +3099,6 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
    textareas carried a fixed 200px width — the last overflow source at 260px) */
 .rail-panel .agents-adv-body, .rail-panel .agents-field { min-width: 0; max-width: 100%; }
 .rail-panel .agents-adv .settings-json, .rail-panel .agents-adv textarea { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }
+
+/* orphaned listener tag (deleted-cwd dev server, B-16d9) */
+.ports-orphan { display: inline-block; font-size: 9px; font-weight: 700; padding: 0 5px; border-radius: 999px; color: var(--red, #e55); background: color-mix(in srgb, var(--red, #e55) 14%, transparent); vertical-align: 1px; }

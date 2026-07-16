@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.180.0 — 2026-07-16
+- **Orphaned dev-server detection (B-16d9)**: a listener whose working directory was DELETED is a zombie — a session started `next dev`/`vite` in a throwaway worktree and removed the directory without killing the process (real case: two forgotten next-servers eating 12GB for a day). Local port scans now flag them (`/proc/<pid>/cwd` ends " (deleted)"), the port watch announces each one once (error-toast, even on the baseline sweep — garbage is garbage whenever it appeared), and both ports UIs show an `orphan` tag with a **Kill** button. The kill endpoint re-verifies the deleted-cwd condition at kill time, so it can never be pointed at a healthy process.
+- Port scans now carry the listener's pid (ss `-p`, lsof column 2, and the /proc fallback's inode scan).
+- E2E-tested with a real listener spawned in a deleted directory (detection, healthy-process refusal, kill).
+
 ## 2.179.1 — 2026-07-16
 - **Agents panel: rail-native redesign, width-verified** (real report ×2 — the 2.178.0 panel overflowed horizontally). Root causes closed: the modal's `min-width: 380px` leaked into the panel via a descendant selector that should have been a compound one; and the panel's flat-section rule put `flex-wrap` on the COLUMN rosters, where `align-items: stretch` then fills the flex line (widest content) instead of the container — every child pinned wider than the panel. In the sidebar the panel is now FLAT (vscode-style hairline sections, quiet uppercase titles); the modal keeps its card layout.
 - **Width-adaptive usage readout**: ≥340px shows the donut cluster; below, a container query swaps in ONE pill showing the TIGHTEST quota bucket (e.g. `7d 55%`, full breakdown in the tooltip) so account rows stay single-line at any sidebar width. Name/email and the roster header shrink with ellipsis instead of forcing intrinsic width; the Agent-instructions textareas are fluid.

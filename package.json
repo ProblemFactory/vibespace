@@ -1,6 +1,6 @@
 {
   "name": "vibespace",
-  "version": "2.179.1",
+  "version": "2.180.0",
   "description": "VibeSpace — a backend-agnostic web workspace for coding agents (Claude Code, Codex, …) with a multi-session tiling window manager",
   "main": "server.js",
   "scripts": {

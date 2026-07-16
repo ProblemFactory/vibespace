@@ -54,6 +54,13 @@ export function installSidebarMounts(Sidebar) {
           showToast(tr('New port on "{name}": {ports} — 🔌 on its machine row forwards it', { name: msg.hostId === '__local__' ? tr('This machine') : (msg.hostName || msg.hostId), ports: head + extra }));
           this._portsDialogRefresh?.(msg.hostId);
         }
+        // B-16d9: a listener running from a DELETED working directory — a
+        // removed worktree left its dev server behind, silently eating memory
+        if (msg.type === 'machine-ports-orphan' && Array.isArray(msg.ports) && msg.ports.length) {
+          const head = msg.ports.slice(0, 3).map((p) => `${p.port}${p.proc ? ' (' + p.proc + ')' : ''}`).join(', ');
+          showToast(tr('Orphaned dev server: {ports} — its working directory was deleted; the Ports panel can kill it', { ports: head }), { type: 'error', duration: 8000 });
+          this._portsDialogRefresh?.(msg.hostId);
+        }
       });
     },
 
@@ -919,7 +926,20 @@ export function installSidebarMounts(Sidebar) {
           const portRow = (p) => {
             const r = document.createElement('div'); r.className = 'mounts-row'; r.style.padding = '3px 0';
             if (p.hidden) r.style.opacity = '0.55';
-            const lbl = document.createElement('span'); lbl.style.flex = '1'; lbl.innerHTML = `<b>:${p.port}</b>${p.proc ? ` <span class="empty-hint">${escHtml(p.proc)}</span>` : ''}`;
+            const lbl = document.createElement('span'); lbl.style.flex = '1'; lbl.innerHTML = `<b>:${p.port}</b>${p.proc ? ` <span class="empty-hint">${escHtml(p.proc)}</span>` : ''}${p.orphan ? ` <span class="ports-orphan" title="${escHtml(tr('This process is listening from a DELETED working directory — a removed worktree left its dev server running'))}">${escHtml(tr('orphan'))}</span>` : ''}`;
+            // orphan (deleted cwd) + local: offer Kill instead of Forward
+            if (p.orphan && p.pid && h.id === '__local__') {
+              const kb = document.createElement('button'); kb.className = 'mounts-btn'; kb.textContent = tr('Kill');
+              kb.title = tr('Kill this orphaned process');
+              kb.onclick = async () => {
+                try {
+                  const kr = await api('/api/ports/kill-orphan', { method: 'POST', body: JSON.stringify({ pid: p.pid }) });
+                  if (kr?.error) throw new Error(kr.error);
+                  showToast(tr('Orphaned process killed')); render();
+                } catch (e) { showToast(e.message, { type: 'error' }); }
+              };
+              r.append(lbl, kb); return r;
+            }
             const b = document.createElement('button'); b.className = 'mounts-btn';
             b.textContent = forwarded.has(p.port) ? tr('forwarded') : tr('Forward'); b.disabled = forwarded.has(p.port);
             b.onclick = () => doForward(p.port);
