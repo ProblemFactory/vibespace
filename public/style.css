@@ -2976,3 +2976,29 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .plugin-cfg-flags { flex: 1; min-width: 160px; font-size: 11px; font-family: var(--font-mono, monospace); padding: 3px 6px; border-radius: var(--radius-sm); background: var(--bg-input); border: 1px solid var(--border); color: var(--text); }
 .plugin-cfg-hint { font-size: 10px; color: var(--text-dim); }
 .plugin-cfg-warn { font-size: 10px; color: var(--yellow, #e5c07b); }
+
+
+/* ── Sidebar activity rail (vscode-style, sidebar.activityRail) ── */
+#sidebar.rail-on { display: flex; flex-direction: row; }
+#sidebar-rail { width: 44px; flex: 0 0 44px; display: flex; flex-direction: column; align-items: center; padding: 6px 0; gap: 2px; border-right: 1px solid var(--border); background: var(--bg-secondary); }
+.sidebar-main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+.rail-item { position: relative; width: 40px; height: 38px; display: flex; align-items: center; justify-content: center; background: none; border: none; color: var(--text-dim); cursor: pointer; border-radius: var(--radius-sm); transition: var(--transition); }
+.rail-item:hover { color: var(--text); background: var(--hover-overlay); }
+.rail-item.active { color: var(--text); }
+.rail-item.active::before { content: ''; position: absolute; left: -2px; top: 7px; bottom: 7px; width: 2.5px; border-radius: 2px; background: var(--accent); }
+.rail-spacer { flex: 1; }
+.rail-panel { padding: 8px; overflow-y: auto; }
+.ports-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 4px 6px; border-radius: var(--radius-sm); font-size: 12px; }
+.ports-row:hover { background: var(--hover-overlay); }
+.ports-row-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ports-row-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.ports-proc { color: var(--text-dim); font-size: 10px; }
+.ports-machine { margin-top: 10px; }
+.ports-machine-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.ports-pub { font-size: 10px; }
+
+.rail-badge { position: absolute; top: 2px; right: 2px; min-width: 13px; height: 13px; padding: 0 3px; border-radius: 999px; background: var(--accent); color: var(--accent-fg); font-size: 9px; font-weight: 700; line-height: 13px; text-align: center; pointer-events: none; }
+.rail-item[data-rail="tasks"] .rail-badge, .rail-item[data-rail="mounts"] .rail-badge { background: var(--yellow, #e5c07b); color: #1a1a1a; }
+.rail-item[data-rail="diagnostics"] .rail-badge { background: var(--red, #e55); color: #fff; }
+body.sidebar-right #sidebar-rail { order: 2; border-right: none; border-left: 1px solid var(--border); }
+body.sidebar-right .rail-item.active::before { left: auto; right: -2px; }

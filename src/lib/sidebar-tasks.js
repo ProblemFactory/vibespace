@@ -404,6 +404,7 @@ export function installSidebarTasks(SidebarClass) {
         tab.appendChild(badge);
       } else if (!has && badge) badge.remove();
     }
+    this._railSetBadge?.('tasks', this.anyTaskAttention() ? '\u26a0' : '');
     if (this._activeTab === 'tasks') this._render();
   };
 

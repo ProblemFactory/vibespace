@@ -6,6 +6,7 @@ import { installSidebarState } from './sidebar-state.js';
 import { installSidebarRender } from './sidebar-render.js';
 import { installSidebarRenderMobile } from './sidebar-render-mobile.js';
 import { installSidebarMounts } from './sidebar-mounts.js';
+import { installSidebarRail } from './sidebar-rail.js';
 import { installSidebarWorkbench } from './sidebar-workbench.js';
 import { installSidebarTasks } from './sidebar-tasks.js';
 
@@ -76,6 +77,8 @@ class Sidebar {
     // live from PAGE LOAD — gated behind the Remote tab's first render, a user
     // who never opened that tab NEVER saw a new-port notification (real report)
     setTimeout(() => { try { this._initMountsSync?.(); } catch {} }, 0);
+    // vscode-style activity rail (sidebar.activityRail, default ON)
+    setTimeout(() => { try { this._railInit?.(); } catch {} }, 0);
 
     // Listen for user-state-updated WebSocket messages from other clients
     app.ws.onGlobal((msg) => {
@@ -230,7 +233,7 @@ class Sidebar {
     // Per-tab chrome: ONE filter/sort story per tab. Folders keeps the full
     // global set; Task Groups keeps just the text filter + manage mode (its
     // views carry their own sort/filter toolbar); Remote needs none of it.
-    const t = this._activeTab;
+    const t = ['ports', 'agents', 'plugins'].includes(this._activeTab) ? 'mounts' : this._activeTab;
     const show = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
     show('session-filter', t !== 'mounts');
     // The unified filter menu (status/backend/machine/kind) applies on BOTH
@@ -874,6 +877,7 @@ class Sidebar {
     // early-return: with ZERO sessions (fresh managed instance) that return
     // fired first and the Remote tab showed the Folders empty state instead
     // of the mounts panel (real report: "remote 功能直接坏了").
+    if (this._activeTab === 'ports' || this._activeTab === 'agents' || this._activeTab === 'plugins') { this._renderRailPanel?.(); return; }
     if (this._activeTab === 'mounts') { this._renderMounts(); return; }
 
     // "New Session" card at the top — NOT on the Tasks tab (it has its own
@@ -946,6 +950,7 @@ installSidebarState(Sidebar);
 installSidebarRender(Sidebar);
 installSidebarRenderMobile(Sidebar);
 installSidebarMounts(Sidebar);
+installSidebarRail(Sidebar);
 installSidebarWorkbench(Sidebar);
 installSidebarTasks(Sidebar);
 export { Sidebar };

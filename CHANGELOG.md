@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.176.0 — 2026-07-16
+- **Sidebar activity rail (vscode-style), default ON** (`sidebar.activityRail`; docs/design-sidebar-rail.md): a ~44px vertical icon strip replaces the 3-tab bar — content panels (Folders / Task Groups / Remote / **Ports**) + management panels (Agents / Plugins, same renderers as the modals via a `{container}` mode) + pinned launchers (Diagnostics / Settings). Re-click the active item to collapse the sidebar (vscode behavior); ⚙-menu Agents/Plugins entries focus the rail panel instead of opening a modal while the rail is on. Badges: Task Groups ⚠ attention, Remote = offline dial machines, Ports = active forwards, Diagnostics = last-day error count. Turning the setting off live-restores the classic tab bar + modal dialogs; mobile keeps its own nav (rail never renders there). Mirrors with `sidebar.position`.
+- **New PORTS panel** — the vscode PORTS view analogue and the new-port toast's landing place: active forwards across all machines + this instance (open through the app proxy / publish–unpublish on the frp relay / stop), plus per-machine on-demand port scans with one-click "forward here". Live-refreshes on forward changes and new-port announcements.
+- **Settings echo-revert race fixed**: the server broadcasts `settings-updated` to ALL clients including the sender — toggling a setting off→on within the 500ms save debounce got permanently reverted by the stale echo of the first save (the rail smoke caught it live). `applyRemote` now skips the echo while a local edit is pending save.
+- CDP smoke: `scripts/test-sidebar-rail.mjs` (throwaway worktree server + headless chrome, 14 assertions through the real build/panel/toggle paths).
+
 ## 2.175.1 — 2026-07-16
 - **Ghost terminal windows are gone**: when a reconnect re-attach answers "unknown session" (the session died WITH the server — pod recreation / hard restart kills dtach), the terminal window now flips to the same honest exited state as a live exit ("Session ended while disconnected — resume it from the sidebar") instead of keeping its frozen content and looking alive while the sidebar truthfully showed 0 running (real report: 左右不匹配).
 

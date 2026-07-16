@@ -111,6 +111,13 @@ class SettingsManager {
 
   /** Apply state from server (WebSocket broadcast). */
   applyRemote(data) {
+    // Echo-revert guard: the server broadcasts settings-updated to ALL clients
+    // including the SENDER (HTTP POST — no ws to exclude). With a local edit
+    // still pending save, applying the incoming (stale) snapshot reverts it —
+    // real repro: set(false) then set(true) within the 500ms debounce came back
+    // as false forever (rail smoke caught it). Our pending _save() will push
+    // the authoritative state; skip the echo while dirty.
+    if (this._saveTimer) return;
     const old = { ...this._values };
     this._values = data;
     // localStorage backup

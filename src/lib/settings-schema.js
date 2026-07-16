@@ -34,6 +34,11 @@ const SETTINGS_SCHEMA = {
     description: t('Show the file explorer button in the toolbar'),
     category: t('Toolbar & Layout'), liveApply: true,
   },
+  'sidebar.activityRail': {
+    type: 'boolean', default: true, label: t('Activity rail (vscode-style)'),
+    description: t('A vertical icon rail on the sidebar edge hosting the session panels (Folders / Task Groups / Remote / Ports) plus Agents, Plugins and quick launchers. Turn off to restore the classic tab bar and keep Agents/Plugins as dialogs.'),
+    category: t('Sidebar'), liveApply: true,
+  },
   'sidebar.position': {
     type: 'enum', default: 'left', options: [
       { value: 'left', label: t('Left') },
