@@ -11,6 +11,8 @@ export function installPluginsUI(App) {
     // rail mode: render into the sidebar panel instead of a modal (one source)
     if (!container && !this.isMobile && this.sidebar?._railEl) { this.sidebar.toggle?.(true); this.sidebar._railGo?.('plugins'); return; }
     const shell = container ? { body: container, close: () => {} } : createModalShell({ id: 'plugins-dialog', title: t('Plugins'), bodyClass: 'mounts-dialog-body', escapeToClose: true });
+    // rail panel: same body class as the modal so one stylesheet serves both
+    if (container) container.classList.add('mounts-dialog-body');
     const { body, close } = shell;
     body.innerHTML = `<div class="empty-hint">${escHtml(t('Loading…'))}</div>`;
     let pollTimer = null;

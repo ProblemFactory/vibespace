@@ -1973,6 +1973,8 @@ export default {
   "Relay address": "リレーアドレス",
   "Relay port": "リレーポート",
   "Relay token": "リレートークン",
+  "More actions": "その他の操作",
+  "Add account…": "アカウントを追加…",
   "Keep the rail when the sidebar is collapsed": "サイドバー折りたたみ時もレールを維持",
   "vscode behavior: collapsing the sidebar leaves the 44px icon rail on screen — click any icon to expand back. Off = collapsing hides everything.": "vscode方式：折りたたみ後も44pxのアイコンレールが残り、クリックで再展開。オフなら全て隠れます。",
   "Public URLs need the frp relay — not configured on this instance": "公開URLにはfrpリレーが必要——このインスタンスでは未設定",

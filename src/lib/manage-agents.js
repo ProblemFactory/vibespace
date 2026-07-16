@@ -1,6 +1,6 @@
 // Manage-Agents dialog + Anthropic/ChatGPT account rosters (mixin split from app.js, 2.82.0 audit seam). Methods run with the App instance as `this`.
 import { t } from './i18n.js';
-import { createModalShell, escHtml, fetchJson, showConfirmDialog, showInputDialog, showToast } from './utils.js';
+import { createModalShell, escHtml, fetchJson, showConfirmDialog, showContextMenu, showInputDialog, showToast } from './utils.js';
 
 export function installManageAgents(App, ctx = {}) {
   Object.assign(App.prototype, {
@@ -146,7 +146,7 @@ export function installManageAgents(App, ctx = {}) {
     const STAR_F = svg('<path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 11.6 4.1 13.6l.8-4.3-3.1-3 4.3-.6z" fill="currentColor"/>');
     const STAR_O = svg('<path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 11.6 4.1 13.6l.8-4.3-3.1-3 4.3-.6z"/>');
     const PENCIL = svg('<path d="M11 2.5 13.5 5 5.5 13H3v-2.5z"/>');
-    const row = document.createElement('div'); row.className = 'ob-backend acct-section';
+    const row = document.createElement('div'); row.className = 'ob-backend acct-section acct-roster';
     const left = document.createElement('div'); left.style.flex = '1';
     const gDef = !accts.defaultCodexAccountId;
     const usageHtml = (u) => this._acctUsageHtml(u);
@@ -178,41 +178,30 @@ export function installManageAgents(App, ctx = {}) {
       let ident = a.loggedIn
         ? escHtml((a.email || '') + (a.subscriptionType ? (a.email ? ' · ' : '') + a.subscriptionType : '')) || t('logged in')
         : `<span class="ob-warn">${t('not logged in')}</span>`;
-      // API-key-mode codex logins have no id_token → no email; let the user
-      // declare it (enables the same-account link vs the machine login).
-      if (a.loggedIn && (!a.email || a.emailDeclared)) {
-        ident += ` <button class="acct-set-email" title="${escHtml(t('Declare which ChatGPT account this is — the email links it to the machine login for merged usage'))}">${a.email ? t('edit email') : t('set email…')}</button>`;
-      }
       const hint = blocked ? ` <span class="acct-blocked-hint" title="${t('Runs on this machine only. For {host}, log in on the host — or enable Settings → “Ship subscription logins to remote hosts.”', { host: escHtml(hostLabel) })}">${t('· this machine only')}</span>` : '';
-      const testTitle = blocked
-        ? t('Subscriptions can’t run on {host} by default — log in on the host, or enable the setting', { host: escHtml(hostLabel) })
-        : selectedHost
-          ? t('Open a terminal session ON {host} billing through this account', { host: escHtml(hostLabel) })
-          : t('Open a terminal session on this account');
+      // Redesign (2.178.0): star + ⋯ menu, same as the Anthropic roster
       return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}"${blocked ? ' data-blocked="1"' : ''}>
         <span class="acct-type-icon" title="${t('ChatGPT account — runs on this machine (or a host you log into)')}">${CROWN}</span>
         <span class="acct-key-main"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span></span>
         <span class="acct-usage-cell">${a.loggedIn ? usageHtml(this._codexAccountUsage?.[a.id]) : ''}</span>
         <span class="acct-key-actions">
           <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
-          <button class="acct-icon acct-rename" title="${t('Rename')}">${PENCIL}</button>
-          <button class="agent-btn acct-test${blocked ? ' acct-test-blocked' : ''}" title="${testTitle}">${t('Test')}</button>
-          <button class="acct-icon acct-del" title="${t('Remove this account from VibeSpace (deletes its stored login)')}">${svg('<path d="M4 4l8 8M12 4l-8 8"/>', 1.6)}</button>
+          <button class="acct-icon acct-menu" title="${t('More actions')}">${svg('<circle cx="3" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="13" cy="8" r="1.3" fill="currentColor" stroke="none"/>')}</button>
         </span></div>`;
     }).join('');
     const note = selectedHost
       ? t("The “CLI login” row is {host}'s own login (lives on that machine). Named accounts run on THIS machine only — for {host}, use “Log in on host…”, or enable Settings → “Ship subscription logins to remote hosts.”", { host: escHtml(hostLabel) })
       : t('Each Codex session can pick its ChatGPT login (New Session dialog / card ⚙). Held in isolated logins, switchable per session; threads stay shared.');
-    left.innerHTML = `<b>${t('ChatGPT / OpenAI accounts')}</b>
-      <div class="acct-list">${globalRow}${keyLines}</div>
+    left.innerHTML = `<div class="acct-list">${globalRow}${keyLines}</div>
       <div class="agents-note">${note}</div>`;
-    const actions = document.createElement('div'); actions.className = 'agent-actions';
-    const addBtn = document.createElement('button'); addBtn.className = 'agent-btn' + (codexAccts.length ? '' : ' primary'); addBtn.textContent = t('Add ChatGPT account…');
+    const head = document.createElement('div'); head.className = 'acct-roster-head';
+    const title = document.createElement('b'); title.textContent = t('ChatGPT / OpenAI accounts');
+    const addBtn = document.createElement('button'); addBtn.className = 'agent-btn acct-add' + (codexAccts.length ? '' : ' primary'); addBtn.textContent = '+ ' + t('Add ChatGPT account…');
     addBtn.title = t('Sign in another ChatGPT account — stored in VibeSpace (not on any one machine), switchable per session');
     addBtn.onclick = () => { done(); this._addCodexSubscription(); };
-    actions.appendChild(addBtn);
+    head.append(title, addBtn);
     if (ctx.stale?.()) return; // a newer refresh took over mid-await
-    row.append(left, actions);
+    row.append(head, left);
     body.appendChild(row);
     left.onclick = async (e) => {
       const keyRow = e.target.closest?.('.acct-key-row');
@@ -231,7 +220,7 @@ export function installManageAgents(App, ctx = {}) {
         return;
       }
       const a = codexAccts.find(x => x.id === id);
-      if (e.target.closest('.acct-set-email')) {
+      const doEmail = async () => {
         const email = await showInputDialog({
           title: t('Account email'),
           label: t('Email of this ChatGPT account. Used to recognize when it is the same account as a machine login (their usage then shows merged).'),
@@ -241,7 +230,8 @@ export function installManageAgents(App, ctx = {}) {
           try { await fetchJson(`/api/accounts/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: email.trim() }) }); } catch {}
           refresh();
         }
-      } else if (e.target.closest('.acct-test')) {
+      };
+      const doTest = () => {
         if (!a?.loggedIn) { showToast(t('This account isn’t signed in yet — use “Add ChatGPT account…” to finish the login first.'), { type: 'error' }); return; }
         if (keyRow.dataset.blocked) {
           showToast(t('“{name}” runs on this machine only. For {host}, use “Log in on host…” on the CLI-login row, or turn on Settings → “Ship subscription logins to remote hosts.”', { name: a?.name, host: escHtml(hostLabel) }), { type: 'error', duration: 6000 });
@@ -251,20 +241,32 @@ export function installManageAgents(App, ctx = {}) {
         // With a remote host selected the test runs ON that host (auth.json
         // ships to it) — proving the full remote path.
         this.createSession({ backend: 'codex', mode: 'terminal', cwd: '', accountId: id, ephemeral: true, hostId: selectedHost || undefined });
-      } else if (e.target.closest('.acct-def')) {
-        const isDef = accts.defaultCodexAccountId === id;
-        try { await fetchJson('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: isDef ? null : id, backend: 'codex' }) }); } catch {}
-        refresh();
-      } else if (e.target.closest('.acct-rename')) {
+      };
+      const doRename = async () => {
         const name = await showInputDialog({ title: t('Rename account'), label: t('Account name'), value: a?.name || '', confirmText: t('Save') });
         if (name && name.trim() && name.trim() !== a?.name) {
           try { await fetchJson(`/api/accounts/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) }); } catch {}
           refresh();
         }
-      } else if (e.target.closest('.acct-del')) {
+      };
+      const doDelete = async () => {
         if (!(await showConfirmDialog({ title: t('Remove account'), message: t('Remove "{name}" from VibeSpace? Sessions already running keep working.', { name: a?.name }) }))) return;
         try { await fetchJson(`/api/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }); } catch {}
         refresh();
+      };
+      if (e.target.closest('.acct-def')) {
+        const isDef = accts.defaultCodexAccountId === id;
+        try { await fetchJson('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: isDef ? null : id, backend: 'codex' }) }); } catch {}
+        refresh();
+      } else if (e.target.closest('.acct-menu')) {
+        const r = e.target.closest('.acct-menu').getBoundingClientRect();
+        const items = [
+          { label: t('Test'), action: doTest },
+          { label: t('Rename account'), action: doRename },
+        ];
+        if (a?.loggedIn && (!a.email || a.emailDeclared)) items.push({ label: a.email ? t('edit email') : t('set email…'), action: doEmail });
+        items.push({ separator: true }, { label: t('Remove account'), action: doDelete });
+        showContextMenu(r.left, r.bottom + 4, items);
       }
     };
   },
@@ -377,6 +379,10 @@ export function installManageAgents(App, ctx = {}) {
       id: 'agents-dialog-overlay', title: t('Agents'), dialogClass: 'agents-dialog',
       bodyClass: 'agents-dialog-body', escapeToClose: true,
     });
+    // rail panel: carry the SAME body class so one stylesheet (incl. the
+    // container queries) serves modal and panel — the panel's narrow-width
+    // crush came from modal-scoped rules never applying there
+    if (container) container.classList.add('agents-dialog-body');
     const { body, close: done } = shell;
     body.innerHTML = `<div class="ob-loading">${t('Checking\u2026')}</div>`;
 
@@ -441,11 +447,15 @@ export function installManageAgents(App, ctx = {}) {
         const info = st[b.key] || {};
         const row = document.createElement('div'); row.className = 'ob-backend';
         const left = document.createElement('div');
-        left.innerHTML = `<b>${b.label}</b> ${info.version ? `<span class="ob-ver">${escHtml(info.version)}</span>` : ''}<div>${
+        // one line: name \u00b7 version chip \u00b7 status \u2014 the version's own "(Claude
+        // Code)" suffix just repeats the label and wrapped badly when narrow
+        const ver = info.version ? String(info.version).replace(/\s*\((?:claude code|codex(?:-cli)?)\)\s*$/i, '') : '';
+        left.className = 'ob-backend-id';
+        left.innerHTML = `<b>${b.label}</b>${ver ? ` <span class="ob-ver">${escHtml(ver)}</span>` : ''} ${
           !info.installed ? `<span class="ob-bad">${t('not installed')}</span>`
           : info.loggedIn ? `<span class="ob-ok">\u2713 ${t('logged in')}</span>`
           : `<span class="ob-warn">${t('not logged in')}</span>`
-        }</div>`;
+        }`;
         const actions = document.createElement('div'); actions.className = 'agent-actions';
         if (!info.installed && b.installCmd) {
           const instBtn = document.createElement('button'); instBtn.className = 'agent-btn primary'; instBtn.textContent = t('Install');
@@ -731,7 +741,9 @@ export function installManageAgents(App, ctx = {}) {
     // rows render disabled with guidance; API keys are unaffected.
     const allowSubRemote = !!this.settings?.get?.('accounts.shipSubscriptionToRemote');
     const subBlocked = !!selectedHost && !allowSubRemote;
-    const row = document.createElement('div'); row.className = 'ob-backend acct-section';
+    // Roster card: header row (title + one Add menu) over the list — stacked,
+    // never a side column (the side column is what crushed narrow widths)
+    const row = document.createElement('div'); row.className = 'ob-backend acct-section acct-roster';
     const left = document.createElement('div');
     left.style.flex = '1';
     const sub = acct.subscription || {};
@@ -792,68 +804,29 @@ export function installManageAgents(App, ctx = {}) {
       // Some login flows leave the creds dir without an identity file — the
       // email is then unknowable from disk, which breaks same-account detection
       // vs the machine login (merged usage). Let the user declare/fix it.
-      if (isSub && a.loggedIn && (!a.email || a.emailDeclared)) {
-        ident += ` <button class="acct-set-email" title="${escHtml(t('Declare which Anthropic account this is — the email links it to the machine login for merged usage'))}">${a.email ? t('edit email') : t('set email…')}</button>`;
-      }
       const hint = blocked ? ` <span class="acct-blocked-hint" title="${t('Runs on this machine only. For {host}, log in on the host — or enable Settings → “Ship subscription logins to remote hosts.”', { host: escHtml(hostLabel) })}">${t('· this machine only')}</span>` : '';
-      const testTitle = blocked
-        ? t('Subscriptions can’t run on {host} by default — log in on the host, or enable the setting', { host: escHtml(hostLabel) })
-        : selectedHost
-          ? t('Open a terminal session ON {host} billing through this account', { host: escHtml(hostLabel) })
-          : (isSub ? t('Open a terminal session on this subscription') : t("Open a terminal session using this key (approve the CLI's one-time trust prompt here if it appears)"));
       const iconTitle = isSub ? t('Subscription (Pro/Max) — runs on this machine (or a host you log into)') : t('API key — stored in VibeSpace, runs on any machine');
-      // Every row carries the SAME controls (peers) — the default is just a
-      // star toggle whose fill differs; no row is privileged in layout.
+      // Redesign (2.178.0): rows carry ONLY the star + a ⋯ menu — Test/Rename/
+      // email/Remove live in the menu (four inline buttons crushed every row,
+      // modal AND panel; real screenshot report). Star stays direct: most-used.
       return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}" data-sub="${isSub ? '1' : ''}"${blocked ? ' data-blocked="1"' : ''}>
         <span class="acct-type-icon" title="${iconTitle}">${isSub ? CROWN : KEY}</span>
         <span class="acct-key-main"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span></span>
         <span class="acct-usage-cell">${isSub && a.loggedIn ? usageHtml(this._accountUsage?.[a.id]) : ''}</span>
         <span class="acct-key-actions">
           <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
-          <button class="acct-icon acct-rename" title="${t('Rename')}">${PENCIL}</button>
-          <button class="agent-btn acct-test${blocked ? ' acct-test-blocked' : ''}" title="${testTitle}">${t('Test')}</button>
-          <button class="acct-icon acct-del" title="${isSub ? t('Remove this subscription from VibeSpace (deletes its stored login)') : t('Remove from VibeSpace (the key itself stays valid)')}">${svg('<path d="M4 4l8 8M12 4l-8 8"/>', 1.6)}</button>
+          <button class="acct-icon acct-menu" title="${t('More actions')}">${svg('<circle cx="3" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="13" cy="8" r="1.3" fill="currentColor" stroke="none"/>')}</button>
         </span></div>`;
     }).join('');
     const note = selectedHost
       ? t("The “CLI login” row is {host}'s own login (lives on that machine). API-key accounts below ship to {host} per session; subscription accounts run on THIS machine only — for {host}, use “Log in on host…”, or enable Settings → “Ship subscription logins to remote hosts.”", { host: escHtml(hostLabel) })
       : t('Each session can pick its account (New Session dialog / card ⚙). Subscriptions bill your Pro/Max plan; API keys bill pay-per-use. The starred account is the default when a session doesn’t pick one.');
-    left.innerHTML = `<b>${t('Anthropic accounts')}</b>
-      <div class="acct-list">${globalRow}${keyLines}</div>
+    left.innerHTML = `<div class="acct-list">${globalRow}${keyLines}</div>
       <div class="agents-note">${note}</div>`;
-    const actions = document.createElement('div'); actions.className = 'agent-actions';
-    if (!selectedHost) {
-      const needsSetup = !sub.loggedIn || !claudeAccts.length;
-      const wizardBtn = document.createElement('button');
-      wizardBtn.className = 'agent-btn' + (needsSetup ? ' primary' : '');
-      wizardBtn.textContent = t('Set up both…');
-      wizardBtn.onclick = () => { done(); this._showAccountsWizard(); };
-      actions.appendChild(wizardBtn);
-      if (acct.cliKey?.present && !acct.cliKey.imported) {
-        const impBtn = document.createElement('button'); impBtn.className = 'agent-btn primary';
-        impBtn.textContent = t('Import CLI key');
-        impBtn.title = t('Save the key your Console login minted ({org} …{tail}) into VibeSpace', { org: escHtml(acct.cliKey.org || ''), tail: escHtml(acct.cliKey.tail || '') });
-        impBtn.onclick = async () => {
-          try { const r = await fetchJson('/api/accounts/import-cli', { method: 'POST' }); showToast(t('Imported: {name}', { name: r.account.name })); } catch (e) { showToast(t('Import failed'), { type: 'error' }); }
-          refresh();
-        };
-        actions.appendChild(impBtn);
-      }
-    }
-    // The Add… buttons ALWAYS add to VibeSpace's store (machine-independent) —
-    // available with a remote host selected too; the login terminal runs
-    // locally and the resulting account works everywhere.
-    const addSubBtn = document.createElement('button'); addSubBtn.className = 'agent-btn primary'; addSubBtn.textContent = t('Add subscription…');
-    addSubBtn.title = t('Sign in another Claude Pro/Max account — stored in VibeSpace (not on any one machine), switchable per session');
-    addSubBtn.onclick = () => { done(); this._addSubscription(); };
-    actions.appendChild(addSubBtn);
-    const addConBtn = document.createElement('button'); addConBtn.className = 'agent-btn'; addConBtn.textContent = t('Add Console account…');
-    addConBtn.title = t('Sign in to an Anthropic Console account — its API key is captured in an isolated login, so your subscription stays intact');
-    addConBtn.onclick = () => { done(); this._addConsoleAccount(); };
-    actions.appendChild(addConBtn);
-    const addBtn = document.createElement('button'); addBtn.className = 'agent-btn'; addBtn.textContent = t('Add API key…');
-    addBtn.title = t('Paste a raw Anthropic API key (sk-ant-…) — bills pay-per-use, separate from the console-login import');
-    addBtn.onclick = async () => {
+    // Redesign (2.178.0): the four Add… buttons collapse into ONE menu on the
+    // roster header — they wrapped into a vertical CJK pile when narrow and
+    // dominated the card even in the modal.
+    const addApiKey = async () => {
       const key = await showInputDialog({ title: t('Add API key'), label: t('Anthropic API key (from console.anthropic.com)'), placeholder: 'sk-ant-…', confirmText: t('Save') });
       if (!key || !key.trim()) return;
       const name = await showInputDialog({ title: t('Name this account'), label: t('Shown in account pickers'), placeholder: t('e.g. Company API'), confirmText: t('Save') });
@@ -864,9 +837,39 @@ export function installManageAgents(App, ctx = {}) {
       } catch { showToast(t('Save failed'), { type: 'error' }); }
       refresh();
     };
-    actions.appendChild(addBtn);
+    const head = document.createElement('div'); head.className = 'acct-roster-head';
+    const title = document.createElement('b'); title.textContent = t('Anthropic accounts');
+    const needsSetup = !selectedHost && (!sub.loggedIn || !claudeAccts.length);
+    const importable = !selectedHost && acct.cliKey?.present && !acct.cliKey.imported;
+    const addAcctBtn = document.createElement('button');
+    addAcctBtn.className = 'agent-btn acct-add' + ((needsSetup || importable) ? ' primary' : '');
+    addAcctBtn.textContent = '+ ' + t('Add account…');
+    addAcctBtn.onclick = () => {
+      const r = addAcctBtn.getBoundingClientRect();
+      const items = [];
+      if (!selectedHost) {
+        items.push({ label: t('Set up both…'), action: () => { done(); this._showAccountsWizard(); } });
+        if (importable) items.push({
+          label: t('Import CLI key') + ` (…${acct.cliKey.tail || ''})`,
+          action: async () => {
+            try { const r2 = await fetchJson('/api/accounts/import-cli', { method: 'POST' }); showToast(t('Imported: {name}', { name: r2.account.name })); } catch { showToast(t('Import failed'), { type: 'error' }); }
+            refresh();
+          },
+        });
+        items.push({ separator: true });
+      }
+      // These add to VibeSpace's store (machine-independent) — available with
+      // a remote host selected too; the login terminal runs locally.
+      items.push(
+        { label: t('Add subscription…'), action: () => { done(); this._addSubscription(); } },
+        { label: t('Add Console account…'), action: () => { done(); this._addConsoleAccount(); } },
+        { label: t('Add API key…'), action: addApiKey },
+      );
+      showContextMenu(r.left, r.bottom + 4, items);
+    };
+    head.append(title, addAcctBtn);
     if (ctx.stale?.()) return; // a newer refresh took over mid-await
-    row.append(left, actions);
+    row.append(head, left);
     body.appendChild(row);
     // Per-key row actions (event delegation on the section)
     left.onclick = async (e) => {
@@ -892,11 +895,11 @@ export function installManageAgents(App, ctx = {}) {
         return;
       }
       const a = claudeAccts.find(x => x.id === id);
-      // closest() — the click can land on an <svg>/<path> inside the button.
-      if (e.target.closest('.acct-test')) {
+      const isSub = a?.type === 'subscription';
+      const doTest = () => {
         // A not-logged-in subscription can't spawn — the server would
         // reject the create and leave a blank window. Guard it here.
-        if (a?.type === 'subscription' && !a.loggedIn) {
+        if (isSub && !a.loggedIn) {
           showToast(t('This subscription isn’t signed in yet — use “Add subscription…” to finish the login first.'), { type: 'error' });
           return;
         }
@@ -907,16 +910,11 @@ export function installManageAgents(App, ctx = {}) {
           return;
         }
         done();
-        // Diagnostic session — closing its window always terminates it
-        // (ephemeral), never leaves a detached test session lingering.
-        // With a remote host selected the test runs ON that host (the
-        // account's creds ship to it), proving the full remote path.
+        // Diagnostic session — ephemeral (closing its window terminates it).
+        // With a remote host selected it runs ON that host (creds ship to it).
         this.createSession({ backend: 'claude', mode: 'terminal', cwd: '', accountId: id, ephemeral: true, hostId: selectedHost || undefined });
-      } else if (e.target.closest('.acct-def')) {
-        const isDef = accts.defaultAccountId === id;
-        try { await fetchJson('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: isDef ? null : id }) }); } catch {}
-        refresh();
-      } else if (e.target.closest('.acct-set-email')) {
+      };
+      const doEmail = async () => {
         const email = await showInputDialog({
           title: t('Account email'),
           label: t('Email of this Anthropic account. Used to recognize when it is the same account as a machine login (their usage then shows merged).'),
@@ -926,16 +924,33 @@ export function installManageAgents(App, ctx = {}) {
           try { await fetchJson(`/api/accounts/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: email.trim() }) }); } catch {}
           refresh();
         }
-      } else if (e.target.closest('.acct-rename')) {
+      };
+      const doRename = async () => {
         const name = await showInputDialog({ title: t('Rename account'), label: t('Account name'), value: a?.name || '', confirmText: t('Save') });
         if (name && name.trim() && name.trim() !== a?.name) {
           try { await fetchJson(`/api/accounts/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) }); } catch {}
           refresh();
         }
-      } else if (e.target.closest('.acct-del')) {
+      };
+      const doDelete = async () => {
         if (!(await showConfirmDialog({ title: t('Remove account'), message: t('Remove "{name}" from VibeSpace? Sessions already running keep working; the key itself stays valid.', { name: a?.name }) }))) return;
         try { await fetchJson(`/api/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }); } catch {}
         refresh();
+      };
+      if (e.target.closest('.acct-def')) {
+        const isDef = accts.defaultAccountId === id;
+        try { await fetchJson('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: isDef ? null : id }) }); } catch {}
+        refresh();
+      } else if (e.target.closest('.acct-menu')) {
+        // Redesign (2.178.0): Test/Rename/email/Remove live behind ⋯
+        const r = e.target.closest('.acct-menu').getBoundingClientRect();
+        const items = [
+          { label: t('Test'), action: doTest },
+          { label: t('Rename account'), action: doRename },
+        ];
+        if (isSub && a.loggedIn && (!a.email || a.emailDeclared)) items.push({ label: a.email ? t('edit email') : t('set email…'), action: doEmail });
+        items.push({ separator: true }, { label: t('Remove account'), action: doDelete });
+        showContextMenu(r.left, r.bottom + 4, items);
       }
     };
   },
