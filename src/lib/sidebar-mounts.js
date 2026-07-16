@@ -611,6 +611,14 @@ export function installSidebarMounts(Sidebar) {
         }),
       );
       if (!isDial) actions.append(ibtn(MI.wrench, 'Set up (install the tools needed to run agents)', () => { this._showBootstrapDialog(h); }));
+      if (isDial) actions.append(ibtn(MI.retry, tr('Re-pair (fresh command — keeps the row, no unpair needed)'), async () => {
+        const { body, close } = createModalShell({ id: 'device-repair-dialog', title: tr('Re-pair "{name}"', { name: h.name }), bodyClass: 'mounts-dialog-body', escapeToClose: true });
+        body.textContent = tr('Rotating the pairing credentials…');
+        try {
+          const r = await api('/api/device/dial-pair', { method: 'POST', body: JSON.stringify({ deviceId: h.deviceId, serverUrl: location.origin }) });
+          this._fillPairCommandBody(body, close, r);
+        } catch (e) { close(); throw e; }
+      }));
       actions.append(
         ibtn(MI.folderPush, tr('Mount a folder from this VibeSpace onto "{name}"', { name: h.name }), () => { this._showHostMountDialog(h); }),
         ibtn(MI.folderPull, tr('Mount a folder from "{name}" into this VibeSpace', { name: h.name }), () => { this._showMachinePullDialog(h); }),
@@ -954,6 +962,69 @@ export function installSidebarMounts(Sidebar) {
       });
     },
 
+
+    // Shared by "Pair a device" and the machine row's Re-pair action: fill a
+    // modal body with the per-OS installer command for a mint/rotate result.
+    _fillPairCommandBody(body, close, r) {
+      const wsBase = location.origin.replace(/^http/, 'ws');
+      const dialUrl = `${wsBase}/api/device-dial?device=${r.deviceId}`;
+      // The full installer line: bundle + dial URL + BOTH tokens — the
+      // hostToken is what the daemon verifies OUR mux hello against; an
+      // install without it can dial in but rejects every server command.
+      // Per-OS commands (user request): macOS/Linux share the bash
+      // installer; Windows gets the PowerShell one (EXPERIMENTAL).
+      const CMDS = {
+        mac: `curl -fsSL ${location.origin}/vibespace-device-install.sh | bash -s -- \\\n  --bundle-url ${location.origin}/vibespace-device.js \\\n  --dial '${dialUrl}' \\\n  --dial-token ${r.dialToken} \\\n  --host-token ${r.hostToken}`,
+        linux: `curl -fsSL ${location.origin}/vibespace-device-install.sh | bash -s -- \\\n  --bundle-url ${location.origin}/vibespace-device.js \\\n  --dial '${dialUrl}' \\\n  --dial-token ${r.dialToken} \\\n  --host-token ${r.hostToken}`,
+        win: `& ([scriptblock]::Create((iwr -UseBasicParsing ${location.origin}/vibespace-device-install.ps1).Content)) \`\n  -BundleUrl ${location.origin}/vibespace-device.js \`\n  -Dial '${dialUrl}' \`\n  -DialToken ${r.dialToken} -HostToken ${r.hostToken}`,
+      };
+      const NOTES = {
+        mac: tr('macOS: needs Node 18+ (brew install node). No ssh, no FUSE required.'),
+        linux: tr('Linux: needs Node 18+ and curl.'),
+        win: tr('Windows (EXPERIMENTAL, PowerShell): needs Node 18+ (winget install OpenJS.NodeJS.LTS).'),
+      };
+      body.innerHTML = '';
+      const done = document.createElement('p');
+      done.className = 'agents-note';
+      done.textContent = r.repair
+        ? (r.updatedInPlace
+          ? tr('Re-paired "{id}" — the connected device was updated in place; the new pairing takes effect within ~30s. Run the command below only if the dot doesn’t come back:', { id: r.deviceId })
+          : tr('Re-paired "{id}" (machine row, mounts and forwards kept — credentials rotated). Run this on the device to apply the new pairing:', { id: r.deviceId }))
+        : tr('Paired as "{id}". Pick the device’s OS and run the command on it — it starts the agent and dials in; the device then appears as a machine row above (green dot = connected):', { id: r.deviceId });
+      const seg = document.createElement('div');
+      seg.style.cssText = 'display:flex;gap:6px;margin:6px 0;';
+      const ta = document.createElement('textarea');
+      ta.readOnly = true; ta.style.minHeight = '110px'; ta.style.fontSize = '11px'; ta.spellcheck = false;
+      const note = document.createElement('p');
+      note.className = 'agents-note';
+      const guessOs = /Mac/i.test(navigator.platform || '') ? 'mac' : /Win/i.test(navigator.platform || '') ? 'win' : 'linux';
+      let osSel = guessOs;
+      const chips = {};
+      const setOs = (k) => {
+        osSel = k; ta.value = CMDS[k]; note.textContent = NOTES[k];
+        for (const [ck, el] of Object.entries(chips)) el.className = ck === k ? 'btn-create' : 'btn-cancel';
+      };
+      for (const [k, label] of [['mac', 'macOS'], ['linux', 'Linux'], ['win', 'Windows']]) {
+        const b = document.createElement('button');
+        b.textContent = label; b.onclick = () => setOs(k);
+        chips[k] = b; seg.appendChild(b);
+      }
+      const tail = document.createElement('p');
+      tail.className = 'agents-note';
+      tail.textContent = tr('The installer registers the daemon with launchd (macOS) / systemd (Linux): it starts on boot and auto-restarts if it crashes. One machine can pair to several VibeSpace instances — each install keeps its own state, keyed by this instance’s address. Pairing the same name again replaces its token.');
+      const act2 = document.createElement('div');
+      act2.className = 'dialog-actions';
+      const copy = document.createElement('button');
+      copy.className = 'btn-create'; copy.textContent = tr('Copy command');
+      copy.onclick = () => { copyText(ta.value); showToast(tr('Command copied')); };
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'btn-cancel'; closeBtn.textContent = tr('Close'); closeBtn.onclick = () => close();
+      act2.append(closeBtn, copy);
+      body.append(done, seg, ta, note, tail, act2);
+      setOs(guessOs);
+      ta.onclick = () => ta.select();
+    },
+
     // Pair a NAT'd machine as a dial-out DEVICE (B-e5e7, docs/device-agent.md):
     // mint a device id + dial token (POST /api/device/dial-pair) and hand the
     // user the exact one-line installer command. Machines you can ssh into
@@ -984,59 +1055,7 @@ export function installSidebarMounts(Sidebar) {
         go.disabled = true; go.textContent = tr('Pairing…');
         try {
           const r = await api('/api/device/dial-pair', { method: 'POST', body: JSON.stringify({ deviceId: name, serverUrl: location.origin }) });
-          const wsBase = location.origin.replace(/^http/, 'ws');
-          const dialUrl = `${wsBase}/api/device-dial?device=${r.deviceId}`;
-          // The full installer line: bundle + dial URL + BOTH tokens — the
-          // hostToken is what the daemon verifies OUR mux hello against; an
-          // install without it can dial in but rejects every server command.
-          // Per-OS commands (user request): macOS/Linux share the bash
-          // installer; Windows gets the PowerShell one (EXPERIMENTAL).
-          const CMDS = {
-            mac: `curl -fsSL ${location.origin}/vibespace-device-install.sh | bash -s -- \\\n  --bundle-url ${location.origin}/vibespace-device.js \\\n  --dial '${dialUrl}' \\\n  --dial-token ${r.dialToken} \\\n  --host-token ${r.hostToken}`,
-            linux: `curl -fsSL ${location.origin}/vibespace-device-install.sh | bash -s -- \\\n  --bundle-url ${location.origin}/vibespace-device.js \\\n  --dial '${dialUrl}' \\\n  --dial-token ${r.dialToken} \\\n  --host-token ${r.hostToken}`,
-            win: `& ([scriptblock]::Create((iwr -UseBasicParsing ${location.origin}/vibespace-device-install.ps1).Content)) \`\n  -BundleUrl ${location.origin}/vibespace-device.js \`\n  -Dial '${dialUrl}' \`\n  -DialToken ${r.dialToken} -HostToken ${r.hostToken}`,
-          };
-          const NOTES = {
-            mac: tr('macOS: needs Node 18+ (brew install node). No ssh, no FUSE required.'),
-            linux: tr('Linux: needs Node 18+ and curl.'),
-            win: tr('Windows (EXPERIMENTAL, PowerShell): needs Node 18+ (winget install OpenJS.NodeJS.LTS).'),
-          };
-          body.innerHTML = '';
-          const done = document.createElement('p');
-          done.className = 'agents-note';
-          done.textContent = tr('Paired as "{id}". Pick the device’s OS and run the command on it — it starts the agent and dials in; the device then appears as a machine row above (green dot = connected):', { id: r.deviceId });
-          const seg = document.createElement('div');
-          seg.style.cssText = 'display:flex;gap:6px;margin:6px 0;';
-          const ta = document.createElement('textarea');
-          ta.readOnly = true; ta.style.minHeight = '110px'; ta.style.fontSize = '11px'; ta.spellcheck = false;
-          const note = document.createElement('p');
-          note.className = 'agents-note';
-          const guessOs = /Mac/i.test(navigator.platform || '') ? 'mac' : /Win/i.test(navigator.platform || '') ? 'win' : 'linux';
-          let osSel = guessOs;
-          const chips = {};
-          const setOs = (k) => {
-            osSel = k; ta.value = CMDS[k]; note.textContent = NOTES[k];
-            for (const [ck, el] of Object.entries(chips)) el.className = ck === k ? 'btn-create' : 'btn-cancel';
-          };
-          for (const [k, label] of [['mac', 'macOS'], ['linux', 'Linux'], ['win', 'Windows']]) {
-            const b = document.createElement('button');
-            b.textContent = label; b.onclick = () => setOs(k);
-            chips[k] = b; seg.appendChild(b);
-          }
-          const tail = document.createElement('p');
-          tail.className = 'agents-note';
-          tail.textContent = tr('The installer registers the daemon with launchd (macOS) / systemd (Linux): it starts on boot and auto-restarts if it crashes. One machine can pair to several VibeSpace instances — each install keeps its own state, keyed by this instance’s address. Pairing the same name again replaces its token.');
-          const act2 = document.createElement('div');
-          act2.className = 'dialog-actions';
-          const copy = document.createElement('button');
-          copy.className = 'btn-create'; copy.textContent = tr('Copy command');
-          copy.onclick = () => { copyText(ta.value); showToast(tr('Command copied')); };
-          const closeBtn = document.createElement('button');
-          closeBtn.className = 'btn-cancel'; closeBtn.textContent = tr('Close'); closeBtn.onclick = () => close();
-          act2.append(closeBtn, copy);
-          body.append(done, seg, ta, note, tail, act2);
-          setOs(guessOs);
-          ta.onclick = () => ta.select();
+          this._fillPairCommandBody(body, close, r);
         } catch (e) {
           go.disabled = false; go.textContent = tr('Create pairing');
           showToast((e && e.message) || 'pairing failed', { type: 'error' });

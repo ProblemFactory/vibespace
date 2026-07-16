@@ -152,6 +152,19 @@ try {
     const ds = await (await fetch(`http://127.0.0.1:${PORT}/api/hosts/${encodeURIComponent(dialHost.id)}/sessions?fresh=1`)).json();
     check('device discovery answers via the dial link', Array.isArray(ds.sessions), JSON.stringify(ds).slice(0, 200));
   }
+  // RE-PAIR (no unpair): minting for the existing deviceId rotates in place —
+  // record kept, and the CONNECTED device gets the new dial.json pushed over
+  // the live link (2.170.x; the walter-incident UX)
+  {
+    const rp = await (await fetch(`http://127.0.0.1:${PORT}/api/device/dial-pair`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceId: 'smoke-mac', serverUrl: `http://127.0.0.1:${PORT}` }),
+    })).json();
+    check('re-pair of an existing device reports repair:true', rp.repair === true, JSON.stringify(rp).slice(0, 160));
+    check('re-pair pushed the rotated dial.json to the CONNECTED device in place', rp.updatedInPlace === true, JSON.stringify(rp).slice(0, 160));
+    const stillThere = (await dialHosts()).some((d) => d.deviceId === 'smoke-mac');
+    check('re-pair kept the machine row (no unpair)', stillThere);
+  }
   // unmount + unpair cleanup path
   const um = await fetch(`http://127.0.0.1:${PORT}/api/machine-mounts/${mres.id}`, { method: 'DELETE' });
   check('machine mount unmounts', um.ok);

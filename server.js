@@ -2732,16 +2732,40 @@ try {
 // runs on the NAT'd device (no ssh needed). Cookie-authed (user action).
 // The pairing IS the machine registration — the dial host record carries the
 // token hash (B-f3e8); re-pairing an existing name rotates its token in place.
-app.post(['/api/device/dial-pair', '/api/agentd/dial-pair'], (req, res) => {
+app.post(['/api/device/dial-pair', '/api/agentd/dial-pair'], async (req, res) => {
   try {
     const deviceId = String(req.body?.deviceId || ('dev-' + require('crypto').randomBytes(4).toString('hex'))).replace(/[^\w-]/g, '').slice(0, 32);
+    // minting for an EXISTING deviceId is a RE-PAIR: setDialToken rotates the
+    // hash on the existing record (mounts/forwards/history kept, host token
+    // file untouched) — no unpair needed (walter lesson: unpair-first deleted
+    // the record and orphaned the still-running device daemon)
+    const existed = !!hosts.findByDeviceId(deviceId);
     const pair = agentdMintDialPair(deviceId);
     bcastAll({ type: 'hosts-updated' });
     const base = String(req.body?.serverUrl || '').replace(/\/$/, '') || null;
+    const dialUrl = base ? `${base.replace(/^http/, 'ws')}/api/device-dial?device=${deviceId}` : null;
+    // RE-PAIR of a device that is dialed-in RIGHT NOW: push the rotated dial
+    // config over the live link — the daemon re-reads dial.json per attempt
+    // (2.170.0), so nothing needs to run on the device. Best-effort; the
+    // command below is the universal fallback.
+    let updatedInPlace = false;
+    if (existed && dialUrl && agentdDials.get(deviceId)) {
+      try {
+        const dm = await deviceForDial(deviceId);
+        const root = String((await dm.runCmd('sh', ['-c', 'printf %s "${VIBESPACE_DEVICE_ROOT:-$VIBESPACE_AGENTD_ROOT}"'], { timeoutMs: 8000 })).stdout || '').trim();
+        if (root && path.isAbsolute(root)) {
+          await dm.fsWrite(root + '/state/dial.json', Buffer.from(JSON.stringify({ url: dialUrl, token: pair.dialToken })));
+          await dm.runCmd('chmod', ['600', root + '/state/dial.json'], { timeoutMs: 5000 }).catch(() => {});
+          updatedInPlace = true;
+        }
+      } catch { /* offline mid-flight / old bundle — the command covers it */ }
+    }
     res.json({
       ...pair,
+      repair: existed,
+      updatedInPlace,
       command: base
-        ? `node vibespace-device.js --dial ${base.replace(/^http/, 'ws')}/api/device-dial?device=${deviceId} --dial-token ${pair.dialToken}`
+        ? `node vibespace-device.js --dial ${dialUrl} --dial-token ${pair.dialToken}`
         : null,
       note: 'install the device daemon bundle on the device, write the hostToken to <root>/state/token (0600), then run with --dial',
     });
