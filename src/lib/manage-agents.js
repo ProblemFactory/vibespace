@@ -370,11 +370,14 @@ export function installManageAgents(App, ctx = {}) {
     render();
   },
 
-  _showAgentsDialog() {
-    const { body, close: done } = createModalShell({
+  _showAgentsDialog({ container } = {}) {
+    // rail mode: render into the sidebar panel instead of a modal (one source)
+    if (!container && !this.isMobile && this.sidebar?._railEl) { this.sidebar.toggle?.(true); this.sidebar._railGo?.('agents'); return; }
+    const shell = container ? { body: container, close: () => {} } : createModalShell({
       id: 'agents-dialog-overlay', title: t('Agents'), dialogClass: 'agents-dialog',
       bodyClass: 'agents-dialog-body', escapeToClose: true,
     });
+    const { body, close: done } = shell;
     body.innerHTML = `<div class="ob-loading">${t('Checking\u2026')}</div>`;
 
     const BACKENDS = [

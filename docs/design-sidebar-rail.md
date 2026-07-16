@@ -64,10 +64,13 @@ LAUNCH from panels.
 
 ## Progress
 
-- [ ] rail shell + 3 existing tabs as rail items + setting + live toggle
-- [ ] Ports panel (+ machine-ports-new integration)
-- [ ] Plugins panel extraction
-- [ ] Agents panel extraction
-- [ ] Diagnostics launcher + badge; Settings launcher
-- [ ] badges (tasks/remote/ports)
-- [ ] i18n zh/ja; CDP smoke (rail toggle + each panel renders)
+- [x] rail shell + 3 existing tabs as rail items + setting + live toggle
+- [x] Ports panel (+ machine-ports-new integration)
+- [x] Plugins panel extraction
+- [x] Agents panel extraction
+- [x] Diagnostics launcher + badge; Settings launcher
+- [x] badges (tasks/remote/ports)
+- [x] i18n zh/ja; CDP smoke (rail toggle + each panel renders)
+
+Shipped 2.176.0 — smoke scripts/test-sidebar-rail.mjs (14 asserts). The
+settings echo-revert race it exposed is fixed in settings.js applyRemote.

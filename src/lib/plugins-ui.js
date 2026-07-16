@@ -7,8 +7,11 @@ import { t } from './i18n.js';
 
 export function installPluginsUI(App) {
   Object.assign(App.prototype, {
-  async openPluginsDialog() {
-    const { body, close } = createModalShell({ id: 'plugins-dialog', title: t('Plugins'), bodyClass: 'mounts-dialog-body', escapeToClose: true });
+  async openPluginsDialog({ container } = {}) {
+    // rail mode: render into the sidebar panel instead of a modal (one source)
+    if (!container && !this.isMobile && this.sidebar?._railEl) { this.sidebar.toggle?.(true); this.sidebar._railGo?.('plugins'); return; }
+    const shell = container ? { body: container, close: () => {} } : createModalShell({ id: 'plugins-dialog', title: t('Plugins'), bodyClass: 'mounts-dialog-body', escapeToClose: true });
+    const { body, close } = shell;
     body.innerHTML = `<div class="empty-hint">${escHtml(t('Loading…'))}</div>`;
     let pollTimer = null;
     const cleanup = () => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } };
