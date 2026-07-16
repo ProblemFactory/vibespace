@@ -475,7 +475,7 @@ async function unpairDialDevice(deviceId) {
 // per device; reconnects follow the device's --dial retries (getStream picks
 // up the fresh stream). Enables 'device' mounts + remote fs for NAT'd devices.
 const agentdDialDevices = new Map(); // deviceId → DeviceManager
-async function deviceForDial(deviceId) {
+async function deviceForDial(deviceId, _retried = false) {
   // FAIL FAST when the device isn't dialed in: the stream transport's connect
   // loop otherwise backs off and retries FOREVER, so every operation against
   // an offline device (session create, mount, test) HUNG instead of erroring
@@ -518,6 +518,13 @@ async function deviceForDial(deviceId) {
     // never leave a failed dm in the cache — the next op must rebuild clean
     try { dm.stop?.(); } catch { }
     if (agentdDialDevices.get(deviceId) === dm) agentdDialDevices.delete(deviceId);
+    // a dm stopped MID-CONNECT by a concurrent re-dial cleanup surfaces one
+    // transient 'stopped' — while the stream is live, rebuild once instead of
+    // failing the caller's FIRST op after a re-dial (seen live on the walter
+    // verification: test probe errored once, next op self-healed)
+    if (!_retried && String(e && e.message) === 'stopped' && agentdDials.get(deviceId)) {
+      return deviceForDial(deviceId, true);
+    }
     throw e;
   }
   return dm;

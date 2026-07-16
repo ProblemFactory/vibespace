@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.171.1 — 2026-07-16
+- deviceForDial retries ONCE internally when a connect dies to a transient `stopped` (a manager stopped mid-connect by a concurrent re-dial cleanup) — the FIRST op right after a device re-dial no longer surfaces an error before self-healing (seen live during the walter verification: one failed test probe, everything green after).
+
 ## 2.171.0 — 2026-07-16
 - **Re-pair is now a first-class action — no unpair needed.** Every paired device row has a ↻ Re-pair button: it rotates the pairing credentials on the SAME record (machine row, mounts, port forwards, session history all kept) and shows a fresh installer command. If the device is dialed-in at that moment, the rotated config is **pushed to it in place over the live link** — nothing to run on the device at all (the daemon adopts it within ~30s; 2.170.0). The "Pair a device" dialog with an existing name does the same rotation (it always did server-side — now the UI says so instead of leaving unpair-first as the apparent path, which is exactly the sequence that orphaned walter's daemon). `dbg-pair-smoke` asserts the rotate + in-place push against a real dialed daemon.
 
