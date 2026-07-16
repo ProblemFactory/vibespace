@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.179.0 — 2026-07-16
+- **Resume guard — the duplicate-session double-writer is closed** (walter's real incident: TWO live claude processes both `--resume` of the SAME conversation id, same cwd — two identical sidebar cards, one JSONL with two writers). A plain claude resume REUSES the conversation id, so the server now refuses to spawn a resume whose id is already LIVE on the same machine and hands the existing session back; the client attaches it instead of opening a second copy (forks are exempt — they mint a new id; codex resume forks a thread id by design).
+- **Kill resolves by conversation id when the webui id went stale** (the suspected chain behind walter's duplicate: the billing switcher's kill silently no-op'd on a stale server id, then its respawn double-resumed). The billing switcher passes `backendSessionId` with its kill and the server falls back to it.
+
 ## 2.178.0 — 2026-07-16
 - **A published forward now shows its address** (real report: 发布到公网后没有地址可以复制): the Ports panel renders the public URL under the forward as a clickable link with a Copy button (the old tooltip-only 🌐 left nothing to copy). The machine 🔌 dialog already had this.
 - **Manage Agents redesigned** (real report: 界面严重需要重新设计). One stylesheet + a container query now serve the modal AND the sidebar rail panel — the account rows no longer crush at narrow widths. Each account row is `icon · name/email · usage donuts · ★ · ⋯`; Test / Rename / set-email / Remove moved into the ⋯ overflow menu (four inline buttons were what overflowed, modal and panel alike), and the four Add… buttons collapsed into one "+ Add account…" menu on the roster header. Backend status is a single line (the redundant "(Claude Code)" version suffix is stripped). CJK button labels no longer wrap into a vertical pile.
