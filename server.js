@@ -1247,7 +1247,9 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
         setTimeout(() => {
           if (session.pty || !activeSessions.has(id)) return;
           if (!session.socketPath || !fs.existsSync(session.socketPath)) return;
-          try { attachToDtach(id, session.socketPath, session); } catch {}
+          // repaint: this is a RE-attach — replay the buffer so clients aren't
+          // left blank (dtach replays nothing; shells never repaint)
+          try { attachToDtach(id, session.socketPath, session, { repaint: true }); } catch {}
         }, 1000 * session._reattachAttempts);
       }
       return;
@@ -1308,21 +1310,36 @@ function deleteSessionMeta(sockName) {
   try { fs.unlinkSync(path.join(META_DIR, sockName + '.json')); } catch {}
 }
 
-// Attach a PTY to an existing dtach socket for I/O
-function attachToDtach(id, socketPath, session) {
+// Attach a PTY to an existing dtach socket for I/O.
+// opts.repaint (the RE-attach path): dtach replays nothing on attach and a
+// plain shell never repaints, so after healing the bridge we push the buffer
+// FILE tail (clear + replay) to attached clients — a daemon self-upgrade
+// re-exec otherwise left visually-blank terminals until a page reload.
+function attachToDtach(id, socketPath, session, { repaint = false } = {}) {
+  const repaintClients = () => {
+    if (!repaint || session.mode === 'chat') return;
+    try {
+      const buf = fs.readFileSync(path.join(BUFFERS_DIR, id + '.buf'));
+      const tail = buf.length > 200000 ? buf.subarray(buf.length - 200000) : buf;
+      const data = '\x1b[2J\x1b[3J\x1b[H' + tail.toString('utf-8');
+      session.buffer = tail.toString('utf-8').slice(-50000);
+      broadcastToSession(session, id, { type: 'output', sessionId: id, data });
+    } catch { /* no buffer file — nothing to repaint */ }
+  };
   const localAttach = () => {
     const attachPty = pty.spawn(DTACH_CMD, ['-a', socketPath, '-E', '-r', 'winch'], {
       name: 'xterm-256color', cols: 120, rows: 30,
       env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' },
     });
     setupSessionPty(session, id, attachPty);
+    repaintClients();
   };
   // M1: daemon owns the pty when enabled — the dtach attach runs INSIDE agentd
   // and relays over the mux. On ANY failure fall back to the local pty so a
   // daemon hiccup never loses a session.
   if (deviceMgr && !session.host) {
     deviceMgr.openSession({ cmd: DTACH_CMD, args: ['-a', socketPath, '-E', '-r', 'winch'], cols: 120, rows: 30 })
-      .then((h) => { setupSessionPty(session, id, daemonPtyShim(h)); })
+      .then((h) => { setupSessionPty(session, id, daemonPtyShim(h)); repaintClients(); })
       .catch((e) => { console.warn('[device] session attach failed — local pty fallback:', e.message); localAttach(); });
     return;
   }

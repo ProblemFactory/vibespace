@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.174.0 — 2026-07-16
+- **Local terminals survive a device-daemon self-upgrade (the blank-terminal fix).** Two root causes closed (real report, three times in one evening — every release makes the local daemon self-upgrade + re-exec): (1) when the daemon link died, the server's pty handles never learned it — the mux teardown fired `onClose` but session handles wire `onExit`, so the auto-reattach path never ran and terminals froze; (2) even a successful reattach showed NOTHING — dtach replays no history and a plain shell never repaints. Now a dead link fires `onExit` on every open session handle (bounded auto-reattach kicks in within seconds), and the RE-attach pushes a clear + buffer-file replay to attached clients — the upgrade becomes visually seamless. Regression-guarded: the M1 suite kills the daemon under a live session and asserts the handle exits.
+
 ## 2.173.3 — 2026-07-16
 - **Bidirectional machine mounts are visually unambiguous** (real report: two sibling rows both said "→ path" with no hint which side the path was on). Every mount row now shows the full journey with each side labeled — `Mac:/Users/me/Downloads → here:/home/me/vibespace-machines/Mac-Downloads` (pull) vs `here:/home/me/project → Mac:/Users/me/vibespace-remote/project` (push) — and the badges carry direction arrows (⬇ from machine / ⬆ on machine).
 - Pairing installer: the post-start verification checks the daemon by its LOCK pid + ps command instead of `pgrep -f <path>` — the daemon rewrites its process title, so the path pgrep never matched a HEALTHY daemon and every successful install reported "exited immediately" followed by hours-old log lines (real report, twice). A real failure now shows only THIS run's output.

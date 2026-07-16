@@ -108,6 +108,23 @@ console.log('— M1: dtach session SURVIVES a dropped connection (invariant #1) 
   }
 }
 
+console.log('— daemon death fires onExit on open session handles (attach self-heal) —');
+{
+  const dm3 = new DeviceManager({ dataDir, bundlePath: bundle, version, log: () => {} });
+  const h3 = await dm3.openSession({ cmd: 'sh', args: ['-c', 'sleep 60'], cols: 80, rows: 24 });
+  await h3.ready;
+  let exited = false;
+  h3.onExit = () => { exited = true; };
+  // kill the daemon out from under the live session channel (= a self-upgrade
+  // re-exec severing attaches — real report: frozen/blank local terminals)
+  const dpid = Number(fs.readFileSync(path.join(process.env.VIBESPACE_AGENTD_ROOT, 'state', 'agentd.pid'), 'utf8'));
+  process.kill(dpid, 'SIGKILL');
+  const t0 = Date.now();
+  while (!exited && Date.now() - t0 < 5000) await sleep(100);
+  check('mux death fired onExit on the pty handle (reattach path can heal)', exited, '');
+  dm3.stop();
+}
+
 // restore version stamp + cleanup
 execFileSync('node', ['-e', `require('fs').writeFileSync('src/agentd/version.js', 'module.exports = { VERSION: ' + JSON.stringify(require('./package.json').version) + ' };\\n')`], { cwd: repo });
 try { const pid = Number(fs.readFileSync(path.join(process.env.VIBESPACE_AGENTD_ROOT, 'state', 'agentd.pid'), 'utf8')); process.kill(pid, 'SIGTERM'); } catch {}
