@@ -1973,6 +1973,7 @@ export default {
   "Relay address": "中继地址",
   "Relay port": "中继端口",
   "Relay token": "中继令牌",
+  "retried — replaced by a newer attempt": "已重试——被新尝试替代",
   "Sort": "排序",
   "Default (by dimension)": "默认（按维度）",
   "Axis / name order": "轴 / 名称顺序",

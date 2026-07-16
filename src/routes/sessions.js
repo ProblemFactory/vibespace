@@ -391,17 +391,32 @@ function setup(ctx) {
     return null;
   }
 
-  function readLiveWorkflow(runDir, runId) {
+  // Journal retry chains (2.181.1, real confusion report): the harness
+  // re-spawns an agent whose API stream aborted — SAME journal `key`, NEW
+  // agentId. Every non-newest attempt of a key without its own result is a
+  // DEAD superseded attempt (its transcript dead-ends in "[Request
+  // interrupted by user]") — label it instead of showing a bare interrupt.
+  function journalAttempts(runDir) {
     const started = new Set(), done = new Set();
+    const keyOf = new Map(), lastAttempt = new Map();
     try {
       for (const line of fs.readFileSync(path.join(runDir, 'journal.jsonl'), 'utf-8').split('\n')) {
         const t = line.trim(); if (!t) continue;
         let o; try { o = JSON.parse(t); } catch { continue; }
         if (!o.agentId) continue;
-        if (o.type === 'started') started.add(o.agentId);
-        else if (o.type === 'result') done.add(o.agentId);
+        if (o.type === 'started') {
+          started.add(o.agentId);
+          if (o.key) { keyOf.set(o.agentId, o.key); lastAttempt.set(o.key, o.agentId); }
+        } else if (o.type === 'result') done.add(o.agentId);
       }
     } catch {}
+    const superseded = new Set();
+    for (const [id, k] of keyOf) { if (!done.has(id) && lastAttempt.get(k) !== id) superseded.add(id); }
+    return { started, done, superseded };
+  }
+
+  function readLiveWorkflow(runDir, runId) {
+    const { started, done, superseded } = journalAttempts(runDir);
     // A transcript file can exist before its journal 'started' line lands.
     try { for (const f of fs.readdirSync(runDir)) { const m = f.match(/^agent-([0-9a-f]+)\.jsonl$/); if (m) started.add(m[1]); } } catch {}
     // Best-effort workflow name from the persisted script filename (<name>-<runId>.js).
@@ -410,7 +425,7 @@ function setup(ctx) {
       const scriptsDir = path.join(path.resolve(runDir, '..', '..', '..'), 'workflows', 'scripts');
       for (const f of fs.readdirSync(scriptsDir)) { if (f.endsWith(`-${runId}.js`)) { name = f.slice(0, -(`-${runId}.js`.length)); break; } }
     } catch {}
-    const agents = [...started].map((id) => ({ index: 0, label: '', model: '', state: done.has(id) ? 'done' : 'progress', agentId: id }));
+    const agents = [...started].map((id) => ({ index: 0, label: '', model: '', state: done.has(id) ? 'done' : (superseded.has(id) ? 'superseded' : 'progress'), agentId: id }));
     agents.sort((a, b) => a.agentId.localeCompare(b.agentId));
     return {
       runId, workflowName: name, summary: '', status: 'running', live: true,
@@ -428,7 +443,21 @@ function setup(ctx) {
     // still exists (snapshot is written at completion, dir lingers).
     const fp = findWorkflowSnapshot(runId, claudeSessionId || '', cwd || '');
     if (fp) {
-      try { return res.json(normalizeWorkflowSnapshot(JSON.parse(fs.readFileSync(fp, 'utf-8')), runId)); }
+      try {
+        const out = normalizeWorkflowSnapshot(JSON.parse(fs.readFileSync(fp, 'utf-8')), runId);
+        // Retry attempts stay tagged in the FINISHED view too (the run dir
+        // lingers next to the snapshot; harmless if it's already gone)
+        try {
+          const rd = findWorkflowRunDir(runId, claudeSessionId || '', cwd || '');
+          if (rd) {
+            const { superseded } = journalAttempts(rd);
+            for (const ph of out.phases || []) for (const ag of ph.agents || []) {
+              if (superseded.has(ag.agentId) && ag.state !== 'done') ag.state = 'superseded';
+            }
+          }
+        } catch {}
+        return res.json(out);
+      }
       catch (err) { return res.status(500).json({ error: 'failed to parse workflow snapshot: ' + err.message }); }
     }
     // No snapshot yet — surface a LIVE view if the run is still going.

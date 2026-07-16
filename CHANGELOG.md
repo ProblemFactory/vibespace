@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.181.1 — 2026-07-16
+- **Workflow viewer labels retried agent attempts** (real confusion report: several agents read "interrupted by user" with nobody interrupting). The harness re-spawns an agent whose API stream aborted — same journal key, new agentId — and the dead attempt's log dead-ends in the CLI's canned "[Request interrupted by user]". The viewer now derives retry chains from the journal (a key's non-newest attempts without results) and shows those attempts as **"retried — replaced by a newer attempt"** instead of a bare interrupt, in the live view AND the finished snapshot. Verified against a real in-flight run (5 dead attempts tagged, all matching the interrupted transcripts).
+
 ## 2.181.0 — 2026-07-16
 - **Per-panel sort option** (user request): the dashboard panel editor gained a Sort select — Default (axis order for sequential dims, value ↓ for categorical), Axis/name order, Value high→low, Value low→high. Applies to plain panels AND split-series charts; Top-N still cuts by value (it's a ranking), the survivors then display in the chosen order.
 - **Usage ⟳ works when the account's own token is momentarily stale** (real report: "Personal Max" errored while a session was actively running on it). A named subscription's dir token only refreshes while a session runs on that dir and can lapse between refreshes — when the machine's global CLI login is the SAME Anthropic account (email link), its token is used as a fallback (and vice versa for the global chip). Still read-only + user-initiated (§ban-safety unchanged).

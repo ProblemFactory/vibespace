@@ -24,6 +24,9 @@ const STATE_META = {
   queued:   { label: t('queued'),   color: 'var(--text-dim)' },
   error:    { label: t('error'),    color: 'var(--red, #e55)' },
   skipped:  { label: t('skipped'),  color: 'var(--text-dim)' },
+  // a retry replaced this attempt (its log ends in an aborted request) —
+  // without the label these read as mysterious user interrupts (real report)
+  superseded: { label: t('retried — replaced by a newer attempt'), color: 'var(--text-dim)' },
 };
 
 const RUN_STATUS_META = {
