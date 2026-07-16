@@ -2580,6 +2580,7 @@ app.post('/api/machine-mounts/:id/remount', async (req, res) => {
 const { PortForwardManager } = require('./src/port-forward');
 const portForwards = new PortForwardManager({
   dataDir: path.join(__dirname, 'data'), hosts, broadcast: bcastAll,
+  serverSetting,
   log: (m) => console.log('[port-forward]', m),
 });
 setTimeout(() => { portForwards.restore().catch(() => {}); }, 5500);

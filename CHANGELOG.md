@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.172.0 — 2026-07-16
+- **VS Code-style port auto-discovery.** Linked machines (paired devices / connected ssh hosts) are swept every ~30s; when a service STARTS listening (dev server, database, …) a toast announces it — "New port on <machine>: 3000 (node)" — and the machine's 🔌 dialog (which live-refreshes while open) forwards or publishes it. The first sweep per machine is a silent baseline; ephemeral ports (>32767) and already-forwarded ports are ignored; nothing is ever connected JUST to watch (dial machines only while dialed-in, ssh only over an existing device link). Setting `ports.watchNew` (default on) turns it off. Covered in `test-port-forward.mjs` (baseline-silent / diff-notify / ephemeral+forwarded exclusion / no re-announce).
+
 ## 2.171.1 — 2026-07-16
 - deviceForDial retries ONCE internally when a connect dies to a transient `stopped` (a manager stopped mid-connect by a concurrent re-dial cleanup) — the FIRST op right after a device re-dial no longer surfaces an error before self-healing (seen live during the walter verification: one failed test probe, everything green after).
 

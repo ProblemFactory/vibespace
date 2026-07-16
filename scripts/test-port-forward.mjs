@@ -46,12 +46,36 @@ const mockDm = {
   },
 };
 let deviceThrows = false;
-const hosts = { async device() { if (deviceThrows) throw new Error('device "x" is offline'); return mockDm; } };
+const hosts = { async device() { if (deviceThrows) throw new Error('device "x" is offline'); return mockDm; }, list: () => [{ id: 'h1', name: 'mock-mac', transport: 'dial' }] };
 
 const events = [];
 const pf = new PortForwardManager({ hosts, dataDir, broadcast: (m) => events.push(m), log: () => {} });
 
 try {
+  // ── vscode-style NEW-port watch: baseline silent, diff notifies ──
+  const runCmd0 = mockDm.runCmd; // restore after the watch scenario (detect tests below flip ssMode)
+  ssMode = 'ss';
+  events.length = 0;
+  await pf._watchSweep();
+  check('watch baseline sweep is silent', !events.some((e) => e.type === 'machine-ports-new'), JSON.stringify(events));
+  ssMode = 'ss2'; // adds a port
+  mockDm.runCmd = async () => ({ code: 0, stdout:
+    'LISTEN 0 511 127.0.0.1:5173 0.0.0.0:* users:(("node",pid=42,fd=20))\n'
+    + 'LISTEN 0 128 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=1,fd=3))\n'
+    + 'LISTEN 0 4096 [::1]:8080 [::]:* users:(("python3",pid=99,fd=5))\n'
+    + 'LISTEN 0 511 127.0.0.1:3000 0.0.0.0:* users:(("node",pid=77,fd=21))\n'
+    + 'LISTEN 0 511 127.0.0.1:49999 0.0.0.0:* users:(("chrome",pid=88,fd=9))\n', stderr: '' });
+  await pf._watchSweep();
+  const evNew = events.find((e) => e.type === 'machine-ports-new');
+  check('watch notifies the NEW port with host name + proc', !!evNew && evNew.hostName === 'mock-mac' && evNew.ports.some((p) => p.port === 3000 && p.proc === 'node'), JSON.stringify(evNew));
+  check('watch ignores ephemeral ports (>32767)', !evNew.ports.some((p) => p.port === 49999), JSON.stringify(evNew));
+  check('watch does not re-announce baseline ports', !evNew.ports.some((p) => p.port === 5173 || p.port === 22 || p.port === 8080), JSON.stringify(evNew));
+  events.length = 0;
+  await pf._watchSweep();
+  check('unchanged sweep stays silent', !events.some((e) => e.type === 'machine-ports-new'), JSON.stringify(events));
+  mockDm.runCmd = runCmd0; // the detect tests below drive ssMode themselves
+  ssMode = 'ss';
+
   // ── detect() parses both ss and lsof ──
   ssMode = 'ss';
   let ports = await pf.detect('h1');
