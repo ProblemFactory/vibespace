@@ -298,18 +298,6 @@ const SETTINGS_SCHEMA = {
     description: t('When an agent finishes a turn while its board state is stale (no status update in 10 minutes), it gets one short follow-up asking it to set vibespace-status, mirror open questions with vibespace-ask, and log finished work — then it stops. At most once per 30 minutes per session. Claude enforces this via a blocking Stop hook; Codex via its wrapper at turn end.'),
     category: t('Session'), liveApply: true,
   },
-  'agentd.sessions': {
-    type: 'boolean', default: true,
-    label: t('Route local sessions through the device agent'),
-    description: t('CS-refactor M1 (default on): run local terminal sessions inside the standing vibespace-device daemon instead of the server process, over the device mux protocol. The daemon owns the pty and survives server restarts; sessions are unaffected. Turn off only to fall back to the legacy path. Requires a restart to take effect.'),
-    category: t('Session'), liveApply: false,
-  },
-  'agentd.remoteSessions': {
-    type: 'boolean', default: true,
-    label: t('Route remote sessions through the device agent'),
-    description: t('CS-refactor M2 (default on; needs the local device-agent setting too): remote chat sessions run as persistent sessions inside a standing agent daemon on the host — an ssh drop kills only the bridge, the daemon and session survive, and reconnects resume by byte offset. Replaces the per-session keeper; turn off only to fall back to it.'),
-    category: t('Session'), liveApply: false,
-  },
   'ports.watchNew': {
     type: 'boolean', default: true,
     label: t('Notify when a machine opens a new port'),
@@ -319,13 +307,7 @@ const SETTINGS_SCHEMA = {
   'agentd.publicUrl': {
     type: 'string', default: '',
     label: t('This instance\'s public address (for reverse mounts)'),
-    description: t('The https/http URL a remote machine uses to reach THIS VibeSpace — needed to mount this instance\'s storage on a remote host ("互挂云盘" reverse direction). Example: https://vibe.example.com or http://100.x.x.x:3456 (Tailscale). Leave blank to auto-detect from the request when you trigger a mount.'),
-    category: t('Session'), liveApply: true,
-  },
-  'agentd.dataPlane': {
-    type: 'boolean', default: true,
-    label: t('Route remote data reads through the device agent'),
-    description: t('CS-refactor M3 (default on): remote file browsing, session discovery, transcript sync and usage harvest use the standing device agent — incremental byte-range transcript sync (no more whole-file pulls), push-based discovery, one persistent connection instead of ssh per operation. Falls back to the classic ssh path automatically on any failure; turn off only to force the legacy path.'),
+    description: t('The https/http URL a remote machine uses to reach THIS VibeSpace — needed to mount this instance\'s storage on a remote host ("互挂云盘" reverse direction). Example: https://vibe.example.com or http://100.x.x.x:3456 (Tailscale). Leave blank to use the cluster-injected address (shown as the placeholder when present) or auto-detect from the request.'),
     category: t('Session'), liveApply: true,
   },
   'agents.injectPreamble': {
@@ -392,18 +374,6 @@ const SETTINGS_SCHEMA = {
     label: t('Local diagnostics (errors + feature usage)'),
     description: t('Records page errors, boot crashes and coarse feature events (window opened, session created — names only, never content) into data/telemetry/ on THIS server. Nothing leaves your instance unless a forward URL is set below. Powers the ⚙ → Diagnostics report.'),
     category: t('Session'), liveApply: true,
-  },
-  'posthog.host': {
-    type: 'text', default: '',
-    label: t('Product analytics: PostHog host'),
-    description: t('Base URL of a self-hosted PostHog (or compatible) instance, e.g. https://posthog.example.com. Together with the project key below, enables autocapture analytics and FULLY MASKED session recording (all inputs and text hidden). Empty = off. Requires local diagnostics to be enabled.'),
-    category: t('Session'), liveApply: false,
-  },
-  'posthog.key': {
-    type: 'text', default: '',
-    label: t('Product analytics: PostHog project key'),
-    description: t('The PostHog project API key (phc_…). Only used together with the host above.'),
-    category: t('Session'), liveApply: false,
   },
   'telemetry.forwardUrl': {
     type: 'text', default: '',

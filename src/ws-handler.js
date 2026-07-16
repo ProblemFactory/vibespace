@@ -699,15 +699,15 @@ done`;
             const runTail = keeperSid
               ? ` node "$HOME/.vibespace/bin/vibespace-remote-keeper" run ${shq(keeperSid)} __VS_OFFSET__`
               : ` node "$HOME/.vibespace/bin/vibespace-remote-keeper" run ${shq(id)} __VS_OFFSET__ -- ` + [rcmd, ...rargs.map(shq)].join(' ');
-            // ── M2 (flag agentd.remoteSessions, default OFF): the session runs
-            // as a persistent PIPE SESSION inside the standing remote agentd;
-            // the local chat-wrapper spawns the agentd-attach bridge (SAME
-            // contract as `keeper run`: raw bytes + __VS_OFFSET__ + sentinel),
-            // so the wrapper machinery is untouched. Keeper stays the default
-            // until this graduates. ──
-            let agentdMode = false;
-            try { agentdMode = !!serverSetting('agentd.sessions') && !!serverSetting('agentd.remoteSessions'); } catch { }
-            if (agentdMode && agentdRemote && !keeperSid) {
+            // ── The session runs as a persistent PIPE SESSION inside the
+            // standing remote device daemon; the local chat-wrapper spawns the
+            // agentd-attach bridge (SAME contract as `keeper run`: raw bytes +
+            // __VS_OFFSET__ + sentinel), so the wrapper machinery is
+            // untouched. GRADUATED (flags removed): keeper survives only as
+            // the provisioning-failure fallback + for pre-existing keeper
+            // sessions (keeperSid resumes). ──
+            let agentdMode = !!agentdRemote;
+            if (agentdMode && !keeperSid) {
               try {
                 await agentdRemote.ensureAgentdOnHost(h.id);
                 // the child claude runs under `sh -lc` on the host so the

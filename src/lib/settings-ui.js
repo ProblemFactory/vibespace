@@ -340,6 +340,8 @@ class SettingsUI {
     input.type = 'text';
     input.className = 'settings-input-text';
     input.value = String(value);
+    // cluster-injected default is the effective value when the field is empty
+    if (path === 'agentd.publicUrl' && this.app?._publicUrlDefault) input.placeholder = t('cluster default: {url}', { url: this.app._publicUrlDefault });
     input.onchange = () => { this.settings.set(path, input.value); row.classList.toggle('modified', this.settings.isModified(path)); };
     return input;
   }

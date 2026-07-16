@@ -420,7 +420,7 @@ const PTY_WRAPPER = path.join(__dirname, 'data', 'bin', 'pty-wrapper.js');
 
 // ── CS refactor M1 (opt-in, default OFF): route LOCAL terminal sessions
 // through the standing vibespace-agentd daemon. deviceMgr stays null unless
-// serverSetting('agentd.sessions') is on — a default instance never
+// the local device daemon is ALWAYS on since the 2.175.0 graduation —
 // instantiates it, never spawns a daemon, and attachToDtach is byte-identical
 // to today. daemonPtyShim presents the node-pty interface over a device
 // session handle so setupSessionPty is unchanged.
@@ -1976,20 +1976,6 @@ app.use(unblocker);
 // password auth silently broke Ctrl+G: the script's POST got 401 and claude
 // sat on "Save and close editor to continue…" forever.
 app.post('/api/editor/open', (req, res) => {
-  // Optional product analytics (self-hosted PostHog or compatible) — active
-  // ONLY when a host+key are configured (settings posthog.host/posthog.key,
-  // env fallback VIBESPACE_POSTHOG_HOST/_KEY) and telemetry.enabled is on.
-  // The client initializes session recording FULLY MASKED (names-only
-  // philosophy: interaction shapes, never content).
-  app.locals.posthogCfg = () => {
-    try {
-      if (serverSetting('telemetry.enabled') === false) return null;
-      const host = String(serverSetting('posthog.host') || process.env.VIBESPACE_POSTHOG_HOST || '').trim().replace(/\/$/, '');
-      const key = String(serverSetting('posthog.key') || process.env.VIBESPACE_POSTHOG_KEY || '').trim();
-      if (!/^https?:\/\//.test(host) || !key) return null;
-      return { host, key, name: String(process.env.VIBESPACE_INSTANCE_NAME || os.hostname() || '').slice(0, 60) };
-    } catch { return null; }
-  };
   if (app.locals.authEnabled) {
     const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
     let ok = false;
@@ -2578,7 +2564,7 @@ hosts.dialOnline = (deviceId) => agentdDials.has(deviceId);
 const { MachineMounts } = require('./src/machine-mounts');
 const machineMounts = new MachineMounts({
   dataDir: path.join(__dirname, 'data'), hosts, mountTokens,
-  publicUrl: () => { try { return serverSetting('agentd.publicUrl') || null; } catch { return null; } },
+  publicUrl: () => { try { return serverSetting('agentd.publicUrl') || process.env.VIBESPACE_PUBLIC_URL || null; } catch { return process.env.VIBESPACE_PUBLIC_URL || null; } },
   localPort: () => PORT, // the agentd tunnel's target: our own /dav
   rcloneBin: () => mounts.rcloneBin(),
   broadcast: bcastAll,
@@ -2768,7 +2754,7 @@ try {
     bundlePath: path.join(__dirname, 'data', 'bin', 'vibespace-agentd.js'),
     version: require('./package.json').version,
   };
-  hosts.dataPlaneOn = () => { try { return !!serverSetting('agentd.dataPlane'); } catch { return false; } };
+  hosts.dataPlaneOn = () => true; // GRADUATED (agentd.dataPlane flag removed) — ssh per-op remains the per-path failure fallback
 } catch (e) { console.warn('[device] data-plane deps wiring failed:', e.message); }
 // Transport B pairing: mint a device id + dial token + the one-liner the user
 // runs on the NAT'd device (no ssh needed). Cookie-authed (user action).
@@ -3547,10 +3533,10 @@ server.listen(PORT, HOST, () => {
   console.log(`  dtach: ${DTACH_CMD}, node: ${NODE_CMD}, env: ${ENV_CMD}, claude: ${CLAUDE_CMD}, codex: ${CODEX_CMD}`);
   if (process.platform === 'linux') console.log(`  X display: ${X_ENV.DISPLAY || '(none)'}${X_ENV.XAUTHORITY ? ' (xauth: ' + X_ENV.XAUTHORITY + ')' : ''} — clipboard image paste ${X_ENV.probed ? 'ready' : 'UNAVAILABLE (no working X display found)'}`);
 
-  // M1 (opt-in): bring up the device agent BEFORE restore so re-adopted
-  // sessions attach through it too. Gated hard — off by default, so a normal
-  // instance never spawns a daemon (see attachToDtach).
-  if (serverSetting('agentd.sessions')) {
+  // Local sessions run through the device daemon (machine #0) — GRADUATED,
+  // no flag: bring it up BEFORE restore so re-adopted sessions attach through
+  // it too. attachToDtach still falls back to a local pty on ANY failure.
+  {
     try {
       const { DeviceManager } = require('./src/agentd/client.js');
       deviceMgr = new DeviceManager({

@@ -525,7 +525,7 @@ class HostManager {
 
   /** ── CS data-plane (2.146.0): per-host DeviceManager over the ssh stdio
    *  bridge — the shared engine for the fs/discovery/transcript/usage
-   *  switchovers. Gated by the CALLER (serverSetting agentd.dataPlane);
+   *  switchovers. ALWAYS ON since the 2.175.0 graduation;
    *  connection failures surface so callers fall back to the legacy ssh path.
    *  deps.agentd = { ensureAgentdOnHost, agentdHostToken, bundlePath, version }
    *  injected by server.js after boot. ── */
