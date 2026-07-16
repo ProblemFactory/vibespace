@@ -112,7 +112,7 @@ src/
     sessions.js        — Session API routes (discovery, messages, subagents, kill)
   lib/
     app.js             — App controller / mediator (~2000 lines; 2.82.0 split three prototype-mixin clusters out — installed at module tail, BEFORE client.js instantiates App)
-    manage-agents.js   — installManageAgents(App): Manage-Agents dialog + Anthropic/ChatGPT account rosters/wizard (~790 lines, split from app.js)
+    manage-agents.js   — installManageAgents(App): Manage-Agents dialog + Anthropic/ChatGPT account rosters/wizard (~790 lines, split from app.js). NOTE (2.178.0 redesign): account rows are FLEX (icon·name/email·usage·★·⋯), NOT the old shared subgrid — the roster renders into the ~260px rail panel too and the fixed grid tracks crushed the name column there. Test/Rename/email/Remove live in the ⋯ menu (showContextMenu — item property is `action`, NOT onClick, bit once); the four Add… buttons collapse into one '+ Add account…' menu on the roster header. Modal + rail panel share ONE stylesheet: _showAgentsDialog/openPluginsDialog add the modal body class to the {container}, and .acct-list is a container-type:inline-size context so `@container (max-width:300px)` wraps the usage donuts under the name. Backend header is single-line (strips the redundant '(Claude Code)' version suffix).
     usage-meter.js     — installUsageMeter(App): taskbar quota pies + usage popup + on-demand refresh (~370 lines, split from app.js)
     session-lifecycle.js — installSessionLifecycle(App): create/attach/resume/fork/view/kill + billing switcher + replayOpenSpec (~680 lines, split from app.js)
     themes.js          — THEMES constant + ThemeManager class

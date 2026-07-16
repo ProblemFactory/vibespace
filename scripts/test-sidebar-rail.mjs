@@ -91,6 +91,20 @@ try {
   check('ports panel renders', await openPanel('ports'));
   check('ports panel shows local machine scan', await evalJs(`document.querySelector('.rail-panel-ports .ports-machine') !== null`));
   check('agents panel renders', await openPanel('agents'));
+  // redesign: roster header has the Add-account menu button, rows carry a ⋯ menu
+  check('agents roster uses redesigned header', await evalJs(`!!document.querySelector('.rail-panel-agents .acct-roster-head .acct-add')`));
+  // a fresh instance has only the CLI-login row (no ⋯); IF a named account
+  // exists it must carry the ⋯ menu, and NO row may carry the old Test button
+  check('named account rows (if any) have overflow menu, none have inline Test', await evalJs(`
+    (() => { const rows = [...document.querySelectorAll('.rail-panel-agents .acct-key-row:not([data-id="__global__"]):not([data-id="__codex_global__"])')];
+      const noTest = !document.querySelector('.rail-panel-agents .acct-test');
+      const allMenu = rows.every(r => r.querySelector('.acct-menu'));
+      return noTest && allMenu; })()`));
+  // add-account menu opens a context menu
+  await evalJs(`document.querySelector('.rail-panel-agents .acct-add').click()`);
+  await sleep(200);
+  check('add-account opens a menu', await evalJs(`!!document.querySelector('.context-menu')`));
+  await evalJs(`document.querySelector('.context-menu')?.remove()`);
   check('plugins panel renders', await openPanel('plugins'));
 
   // gs-menu style entry redirects to the rail panel (no modal)

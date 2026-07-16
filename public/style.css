@@ -276,17 +276,28 @@ html, body {
 .acct-icon:hover { background: var(--bg-hover); color: var(--text); }
 .acct-icon.acct-def.on { color: var(--accent); }
 .acct-icon.acct-del:hover { color: var(--red, #e55); }
-/* ONE shared grid over the whole list so every row's columns (icon | name+ident
-   | usage | actions) line up — the CLI-login row has fewer action buttons than
-   the others, so per-row grids would NOT align (grid tracks are per-container).
-   Rows are subgrid items spanning all 4 tracks: columns inherit the parent's
-   sizing (aligned across rows) while the row element still exists for the
-   .is-default background + click delegation. */
-.acct-list { display: grid; grid-template-columns: auto minmax(90px, 1fr) auto auto; align-items: center; column-gap: 10px; row-gap: 1px; margin: 4px 0; padding: 0 6px; }
-/* vertical padding only — horizontal padding on a subgrid item would shift its
-   tracks and break the cross-row column alignment. The list's padding provides
-   the left/right inset; the .is-default background spans the grid content box. */
-.acct-key-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; padding: 3px 0; font-size: 11px; }
+/* Redesign (2.178.0): flex rows, not a shared grid — the roster now lives in a
+   ~260px sidebar panel too, and the fixed grid tracks (usage + N action
+   buttons) crushed the name column to nothing there (real report). Each row is
+   [icon] [name/ident, grows] [usage] [star ⋯]. The roster is a container so
+   rows can re-flow the usage donuts below the name when very narrow. */
+.acct-roster { flex-direction: column; align-items: stretch; }
+.acct-roster-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.acct-roster-head .acct-add { flex: none; }
+.acct-list { display: flex; flex-direction: column; margin: 4px 0; container-type: inline-size; }
+.acct-key-row { display: flex; align-items: center; gap: 8px; padding: 4px 6px; font-size: 11px; border-radius: var(--radius-sm); }
+.acct-key-row:hover { background: color-mix(in srgb, var(--text) 5%, transparent); }
+.acct-usage-cell { margin-left: auto; }
+.acct-key-actions { flex: none; }
+/* very narrow (rail panel): usage donuts wrap under the name so the name keeps
+   its width and the star/⋯ stay reachable */
+@container (max-width: 300px) {
+  .acct-key-row { flex-wrap: wrap; }
+  .acct-key-main { flex: 1 1 60%; }
+  .acct-usage-cell { order: 9; flex-basis: 100%; margin-left: 22px; justify-content: flex-start; }
+  .acct-usage-cell:empty { display: none; }
+  .acct-key-actions { margin-left: auto; }
+}
 /* Subscription on a remote host with the opt-in off: dim the identity + the
    Test button so it reads as "not available here" (still renamable/removable). */
 .acct-key-row.acct-row-blocked .acct-type-icon,
@@ -3017,13 +3028,20 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .ports-sys-expander { display: block; background: none; border: none; color: var(--text-dim); font-size: 10px; cursor: pointer; padding: 3px 6px; }
 .ports-sys-expander:hover { color: var(--text-secondary); }
 
-/* management panels squeezed into the ~260px sidebar (their content is
-   modal-width): kill the modal min-width and let account rows wrap — donuts
-   drop to a second line under the name instead of crushing it. */
-.rail-panel .agents-dialog-body { min-width: 0; }
-.rail-panel .acct-list { display: flex; flex-direction: column; }
-.rail-panel .acct-key-row { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; }
-.rail-panel .acct-key-main { flex: 1 1 0; min-width: 0; }
-.rail-panel .acct-key-actions { margin-left: auto; flex: none; }
-.rail-panel .acct-usage-cell { flex: 1 1 100%; order: 9; padding-left: 24px; }
-.rail-panel .acct-usage-cell:empty { display: none; }
+/* management panels in the ~260px sidebar reuse the SAME body classes as the
+   modals (agents-dialog-body / mounts-dialog-body) — set on the container in
+   _showAgentsDialog/openPluginsDialog — so one stylesheet + the .acct-list
+   container query serve both. Only the modal min-width must relax in-panel. */
+.rail-panel .agents-dialog-body, .rail-panel .mounts-dialog-body { min-width: 0; }
+.rail-panel .ob-backend { flex-wrap: wrap; }
+
+/* ports published-URL row (the address to copy — a tooltip-only globe left
+   nothing to copy; real report) */
+.ports-url-row { display: flex; align-items: center; gap: 4px; padding: 1px 6px 4px 6px; }
+.ports-url-row a { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); font-size: 11px; text-decoration: none; }
+.ports-url-row a:hover { text-decoration: underline; }
+
+/* Manage Agents redesign (2.178.0): single-line backend header + add-menu btn */
+.ob-backend-id { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.ob-backend-id b { flex: none; }
+.acct-add { white-space: nowrap; }

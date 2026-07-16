@@ -1973,6 +1973,8 @@ export default {
   "Relay address": "中继地址",
   "Relay port": "中继端口",
   "Relay token": "中继令牌",
+  "More actions": "更多操作",
+  "Add account…": "添加账号…",
   "Keep the rail when the sidebar is collapsed": "侧栏收起时保留活动栏",
   "vscode behavior: collapsing the sidebar leaves the 44px icon rail on screen — click any icon to expand back. Off = collapsing hides everything.": "vscode 行为：收起侧栏后 44px 图标栏仍留在屏幕上，点任意图标即可展开。关闭则收起时全部隐藏。",
   "Public URLs need the frp relay — not configured on this instance": "公网 URL 需要 frp 中继——本实例未配置",

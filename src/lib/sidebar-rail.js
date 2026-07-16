@@ -7,7 +7,7 @@
 // Setting `sidebar.activityRail` (default ON) restores the classic tab bar +
 // modal dialogs when off. Mobile keeps its own nav — the rail never renders.
 import { t as tr } from './i18n.js';
-import { escHtml, showToast, fetchJson } from './utils.js';
+import { copyText, escHtml, showToast, fetchJson } from './utils.js';
 
 // Self-contained 18px icons (UI_ICONS lacks several shapes; MI is module-local
 // to sidebar-mounts) — consistent stroke style, currentColor.
@@ -32,6 +32,7 @@ const PORT_ICONS = {
   globeOff: A('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/><path d="M4 4l16 16" stroke-width="2.6"/>'),
   x: A('<path d="M6 6l12 12M18 6L6 18"/>'),
   fwd: A('<path d="M4 12h14M12 6l6 6-6 6"/>'),
+  copy: A('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>'),
 };
 
 const PANEL_TABS = ['ports', 'agents', 'plugins'];
@@ -267,6 +268,21 @@ export function installSidebarRail(Sidebar) {
           }));
           row.appendChild(acts);
           sec.appendChild(row);
+          // published forwards show the ADDRESS itself — a tooltip-only 🌐 left
+          // nothing to copy (real report); click opens, the button copies
+          if (f.publicUrl) {
+            const ur = document.createElement('div');
+            ur.className = 'ports-url-row';
+            const a = document.createElement('a');
+            a.href = '#'; a.textContent = f.publicUrl;
+            a.onclick = (ev) => { ev.preventDefault(); this.app.openBrowser?.(f.publicUrl); };
+            const cp = document.createElement('button');
+            cp.className = 'mounts-icon-btn'; cp.dataset.tip = tr('Copy URL');
+            cp.innerHTML = PORT_ICONS.copy;
+            cp.onclick = () => { copyText(f.publicUrl); showToast(tr('Copied')); };
+            ur.append(a, cp);
+            sec.appendChild(ur);
+          }
         }
         c.appendChild(sec);
         // per-machine scan sections
