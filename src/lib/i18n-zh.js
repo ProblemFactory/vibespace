@@ -1864,6 +1864,7 @@ export default {
   "Pair a device (no ssh — it dials out)": "配对设备（无需 ssh — 它主动拨出）",
   "Pair a device": "配对设备",
   "For machines you can’t ssh into (a laptop, a Mac at home): the device dials OUT to this instance over a websocket, so it works behind NAT with nothing to expose. Needs Node 18+ on the device.": "适用于无法 ssh 进入的机器（笔记本、家里的 Mac）：设备通过 websocket 主动拨出连到本实例，NAT 后也能用，无需暴露任何端口。设备上需要 Node 18+。",
+  "Re-running the command on the device REPLACES its pairing with this instance. Pairing the same device with several VibeSpace instances is fine — each instance gets its own daemon on the device.": "在设备上重新运行该命令会【替换】它与本实例的配对。同一台设备与多个 VibeSpace 实例配对没有问题——每个实例在设备上有自己独立的 daemon。",
   "Device name": "设备名称",
   "Create pairing": "创建配对",
   "Pairing…": "配对中…",

@@ -963,6 +963,9 @@ export function installSidebarMounts(Sidebar) {
       const note = document.createElement('p');
       note.className = 'agents-note';
       note.textContent = tr('For machines you can’t ssh into (a laptop, a Mac at home): the device dials OUT to this instance over a websocket, so it works behind NAT with nothing to expose. Needs Node 18+ on the device.');
+      const note2 = document.createElement('p');
+      note2.className = 'agents-note';
+      note2.textContent = tr('Re-running the command on the device REPLACES its pairing with this instance. Pairing the same device with several VibeSpace instances is fine — each instance gets its own daemon on the device.');
       const label = document.createElement('label');
       label.textContent = tr('Device name');
       const inp = document.createElement('input');
@@ -974,7 +977,7 @@ export function installSidebarMounts(Sidebar) {
       const go = document.createElement('button');
       go.className = 'btn-create'; go.textContent = tr('Create pairing');
       actions.append(cancel, go);
-      body.append(note, label, inp, actions);
+      body.append(note, note2, label, inp, actions);
       setTimeout(() => inp.focus(), 50);
       const pair = async () => {
         const name = (inp.value || '').trim().replace(/[^\w-]/g, '') || undefined;

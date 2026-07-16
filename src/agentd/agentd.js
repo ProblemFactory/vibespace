@@ -125,7 +125,8 @@ function log(msg) {
 
 // ── flock singleton: O_EXCL pidfile with liveness+identity verification ──
 // (no node flock without deps; an exclusive lock file whose pid is verified
-// via /proc cmdline is equivalent for our single-user scope)
+// via /proc cmdline (linux) or ps (macOS) is equivalent for our scope)
+let blockingPid = null; // set when a live sibling daemon holds the lock
 function acquireSingleton() {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -139,12 +140,18 @@ function acquireSingleton() {
         const pid = Number(fs.readFileSync(LOCK, 'utf-8').trim());
         let cmd = '';
         try { cmd = fs.readFileSync('/proc/' + pid + '/cmdline', 'utf-8').replace(/\0/g, ' '); } catch { }
+        // no /proc (macOS/BSD): verify via ps — without this, a RECYCLED pid
+        // in a stale lock read as "genuine second instance" forever (any live
+        // pid counted as ours), permanently wedging daemon startup
+        if (cmd === '') {
+          try { cmd = require('child_process').execFileSync('ps', ['-p', String(pid), '-o', 'command='], { timeout: 3000 }).toString().trim(); } catch { }
+        }
         let alive = false;
         try { process.kill(pid, 0); alive = true; } catch { }
         // recognize our own daemon by EITHER the bundle name or the process
         // title (process.title='vibespace-device' overwrites /proc/cmdline on
         // Linux, so the old 'agentd'-only check could miss a live sibling)
-        if (alive && (cmd === '' || cmd.includes('agentd') || cmd.includes('vibespace-device'))) return false; // genuine second instance
+        if (alive && (cmd === '' || cmd.includes('agentd') || cmd.includes('vibespace-device'))) { blockingPid = pid; return false; } // genuine second instance
         fs.unlinkSync(LOCK); // stale (dead or recycled pid) — retry
       } catch { return false; }
     }
@@ -154,16 +161,20 @@ function acquireSingleton() {
 
 if (!process.argv.includes('--stdio')) {
 if (!acquireSingleton()) {
-  process.stderr.write('vibespace-device: already running\n');
+  process.stderr.write(`vibespace-device: already running (pid ${blockingPid || '?'}, root ${ROOT})` +
+    ' — a running daemon adopts a re-pair by itself within ~30s; to force-replace it: kill the pid and the installer/launchd restarts it\n');
   process.exit(3);
 }
 
-const tokenSha = (() => {
+// read FRESH on every hello (was a startup const): a re-pair rotates the host
+// token on disk while the daemon keeps running — a cached hash rejected every
+// server hello after an identity rotation until the daemon restarted
+const tokenSha = () => {
   try {
     const raw = fs.readFileSync(TOKEN_FILE, 'utf-8').trim();
     return require('crypto').createHash('sha256').update(raw).digest('hex');
   } catch { return null; }
-})();
+};
 
 log(`vibespace-device ${VERSION} starting (proto ${PROTO_VERSION}, pid ${process.pid})`);
 fs.writeFileSync(path.join(STATE, 'agentd.pid'), String(process.pid));
@@ -500,7 +511,8 @@ function serveConnection(sock) {
       if (msg.op === 'hello') {
         if (msg.protoVersion !== PROTO_VERSION) { mux.control({ op: 'proto-mismatch', protoVersion: PROTO_VERSION }); sock.end(); return; }
         const sha = msg.hostToken ? require('crypto').createHash('sha256').update(String(msg.hostToken)).digest('hex') : null;
-        if (!tokenSha || sha !== tokenSha) { mux.control({ op: 'auth-fail' }); log('auth-fail from a connection'); sock.end(); return; }
+        const want = tokenSha();
+        if (!want || sha !== want) { mux.control({ op: 'auth-fail' }); log('auth-fail from a connection'); sock.end(); return; }
         authed = true;
         mux.control({
           op: 'hello-ack', protoVersion: PROTO_VERSION, daemonVersion: VERSION,
@@ -845,12 +857,24 @@ const DIAL_FILE = path.join(STATE, 'dial.json');
     const cfg = { url: process.argv[di + 1], token: (process.argv[process.argv.indexOf('--dial-token') + 1] || '') };
     try { fs.writeFileSync(DIAL_FILE, JSON.stringify(cfg), { mode: 0o600 }); } catch { }
   }
-  let cfg = null;
-  try { cfg = JSON.parse(fs.readFileSync(DIAL_FILE, 'utf-8')); } catch { }
+  const readCfg = () => { try { return JSON.parse(fs.readFileSync(DIAL_FILE, 'utf-8')); } catch { return null; } };
+  let cfg = readCfg();
   if (!cfg?.url) return;
   const wsMin = require('./ws-min.js');
   let attempts = 0;
+  let cfgKey = cfg.url + '|' + (cfg.token || '');
   const dial = () => {
+    // re-read the dial config EVERY attempt: a re-pair (identity rotation)
+    // rewrites dial.json on disk while this daemon keeps running — the old
+    // in-memory identity was rejected forever and the singleton blocked a
+    // replacement daemon (real walter incident: 'already running' + REJECTED
+    // loop + launchd respawn spam). Parse failure keeps the last good cfg.
+    const fresh = readCfg();
+    if (fresh?.url) {
+      const k = fresh.url + '|' + (fresh.token || '');
+      if (k !== cfgKey) { log('dial config changed on disk — adopting the new pairing'); attempts = 0; }
+      cfgKey = k; cfg = fresh;
+    }
     const ws = wsMin.connect(cfg.url, { headers: { 'x-vibespace-dial-token': cfg.token || '' } });
     let up = false;
     ws.on('open', () => { up = true; attempts = 0; log('dial-out connected: ' + cfg.url); serveConnection(ws); });

@@ -1864,6 +1864,7 @@ export default {
   "Pair a device (no ssh — it dials out)": "デバイスをペアリング（ssh 不要 — デバイス側から発信）",
   "Pair a device": "デバイスをペアリング",
   "For machines you can’t ssh into (a laptop, a Mac at home): the device dials OUT to this instance over a websocket, so it works behind NAT with nothing to expose. Needs Node 18+ on the device.": "ssh で入れないマシン（ノート PC、自宅の Mac）向け：デバイスが websocket でこのインスタンスへ発信接続するため、NAT 内でも何も公開せずに使えます。デバイスに Node 18+ が必要です。",
+  "Re-running the command on the device REPLACES its pairing with this instance. Pairing the same device with several VibeSpace instances is fine — each instance gets its own daemon on the device.": "デバイスでコマンドを再実行すると、このインスタンスとのペアリングが【置き換え】られます。同じデバイスを複数の VibeSpace インスタンスとペアリングしても問題ありません——インスタンスごとに独立したデーモンが動きます。",
   "Device name": "デバイス名",
   "Create pairing": "ペアリングを作成",
   "Pairing…": "ペアリング中…",

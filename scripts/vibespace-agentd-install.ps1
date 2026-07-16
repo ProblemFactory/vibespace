@@ -34,6 +34,23 @@ cmd /c mklink /J "$current" (Join-Path $root $ver) | Out-Null
 Set-Content -NoNewline -Path (Join-Path $root 'state\token') -Value $HostToken
 Write-Host "-> host token at $root\state\token"
 
+# take over from a daemon already running for this root (re-pair rotates the
+# identity; the old daemon must be replaced or it keeps dialing with the old
+# token). Verify it's a node process before stopping — never a recycled pid.
+$lock = Join-Path $root 'state\agentd.lock'
+if (Test-Path $lock) {
+  $oldPid = (Get-Content $lock -ErrorAction SilentlyContinue) -as [int]
+  if ($oldPid) {
+    $proc = Get-Process -Id $oldPid -ErrorAction SilentlyContinue
+    if ($proc -and $proc.ProcessName -like '*node*') {
+      Write-Host "-> replacing the running daemon for this root (pid $oldPid)"
+      Stop-Process -Id $oldPid -Force -ErrorAction SilentlyContinue
+      Start-Sleep -Seconds 1
+    }
+    Remove-Item $lock -Force -ErrorAction SilentlyContinue
+  }
+}
+
 Write-Host "-> starting daemon with dial-out to $Dial"
 $out = Join-Path $root 'state\agentd.out'
 # child inherits process env (Start-Process -Environment needs PS 7.3+; this
