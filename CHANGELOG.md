@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.173.2 — 2026-07-16
+- **Shell terminals on a paired device run the DEVICE user's login shell** (zsh on a stock Mac) — they used to exec the basename of the POD's shell (bash), greeting Mac users with Apple's "default shell is now zsh" nag (real report). Resolution order: `$SHELL` → macOS `dscl UserShell` → linux `getent passwd` → zsh/bash fallback; started as a login shell. Server-side only — the device daemon is untouched (deliberately no daemon version bump: three self-upgrades in one evening were severing live local-terminal attaches).
+- Known issue filed: a daemon self-upgrade re-exec can blank ATTACHED local terminals until the page reloads (the buffer survives on disk) — root fix (reattach-with-replay after re-exec) is queued.
+
 ## 2.173.1 — 2026-07-16
 - Machine mount dialogs: the machine-side mount point (push) autocompletes against the MACHINE's filesystem over the device link, and the local mount point (pull) autocompletes locally (real report: the field was blind).
 - Pairing installer: the node-pty check now SPAWNS a real pty instead of just require()ing the module — a broken spawn-helper loads fine and then fails every terminal with `posix_spawnp failed` (real Mac report, node 25 + node-pty stable); on failure it auto-falls back to `node-pty@beta` (the line VS Code ships, with the macOS spawn fixes) and verifies again.
