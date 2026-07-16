@@ -310,6 +310,12 @@ const SETTINGS_SCHEMA = {
     description: t('CS-refactor M2 (default on; needs the local device-agent setting too): remote chat sessions run as persistent sessions inside a standing agent daemon on the host — an ssh drop kills only the bridge, the daemon and session survive, and reconnects resume by byte offset. Replaces the per-session keeper; turn off only to fall back to it.'),
     category: t('Session'), liveApply: false,
   },
+  'ports.watchNew': {
+    type: 'boolean', default: true,
+    label: t('Notify when a machine opens a new port'),
+    description: t('VS Code-style port discovery: linked machines (paired devices / connected hosts) are checked every ~30s, and a service that STARTS listening (a dev server, a database) shows a toast offering to forward it. Ports above 32767 and ports already forwarded are ignored. Turn off to stop the background checks.'),
+    category: t('Session'), liveApply: true,
+  },
   'agentd.publicUrl': {
     type: 'string', default: '',
     label: t('This instance\'s public address (for reverse mounts)'),

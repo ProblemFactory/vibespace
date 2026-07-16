@@ -1977,6 +1977,7 @@ export default {
   "Relay address": "リレーアドレス",
   "Relay port": "リレーポート",
   "Relay token": "リレートークン",
+  "New port on \"{name}\": {ports} — 🔌 on its machine row forwards it": "\"{name}\" に新しいポート: {ports} —— マシン行の 🔌 で転送できます",
   "Set VIBESPACE_FRPS_ADDR / _PORT / _TOKEN (the shared relay) to enable public URLs.": "VIBESPACE_FRPS_ADDR / _PORT / _TOKEN（共有リレー）を設定すると公開URLが有効になります。",
   "Subdomain host (optional)": "サブドメインホスト（任意）",
   "relay host": "リレーホスト",

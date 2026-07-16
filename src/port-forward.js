@@ -27,16 +27,56 @@ function writeJsonAtomic(file, obj) {
 }
 
 class PortForwardManager {
-  /** @param deps { hosts, dataDir, broadcast, log, plugins } */
-  constructor({ hosts, dataDir, broadcast, log, plugins }) {
+  /** @param deps { hosts, dataDir, broadcast, log, plugins, serverSetting } */
+  constructor({ hosts, dataDir, broadcast, log, plugins, serverSetting }) {
     this.hosts = hosts;
     this.plugins = plugins || null; // PluginManager — for frp public exposure
+    this.serverSetting = serverSetting || (() => undefined);
     this.file = path.join(dataDir, 'port-forwards.json');
     this.broadcast = broadcast || (() => {});
     this.log = log || (() => {});
     this._live = new Map(); // id → { server, sockets:Set, rec }
     try { this._state = JSON.parse(fs.readFileSync(this.file, 'utf-8')); } catch { this._state = { forwards: [] }; }
     if (!Array.isArray(this._state.forwards)) this._state.forwards = [];
+    // vscode-style NEW-port watch: sweep machines with a LIVE device link and
+    // announce listeners that appeared since the last sweep (the machine's
+    // first sweep is a silent baseline). Never opens a connection just to
+    // watch: dial machines are checked only while dialed-in (device() fails
+    // fast offline), ssh machines only while a device link already exists.
+    this._seenPorts = new Map(); // hostId → Set(port)
+    this._watch = setInterval(() => this._watchSweep().catch(() => {}), 30000);
+    if (this._watch.unref) this._watch.unref();
+  }
+
+  /** One watch pass over linked machines; new listeners broadcast as
+   *  machine-ports-new. Ephemeral ports (>32767) and ports already forwarded
+   *  are ignored. Gated by setting ports.watchNew (default on). */
+  async _watchSweep() {
+    try { const v = this.serverSetting('ports.watchNew'); if (v !== undefined && !v) return; } catch { }
+    let all = [];
+    try { all = (this.hosts.list?.() || []); } catch { return; }
+    for (const h of all) {
+      if (!h || !h.id) continue;
+      if (h.transport !== 'dial') {
+        // ssh: watch only over an ALREADY-connected device link
+        let linked = false;
+        try { linked = !!this.hosts._devices?.get(h.id)?.status().connected; } catch { }
+        if (!linked) continue;
+      }
+      let ports;
+      try { ports = await this.detect(h.id); } catch { continue; } // offline / no link — keep the old baseline
+      const interesting = ports.filter((p) => p.port > 0 && p.port <= 32767);
+      const cur = new Set(interesting.map((p) => p.port));
+      const prev = this._seenPorts.get(h.id);
+      this._seenPorts.set(h.id, cur);
+      if (!prev) continue; // baseline sweep — silent
+      const fwd = new Set(this._state.forwards.filter((r) => r.hostId === h.id).map((r) => r.remotePort));
+      const fresh = interesting.filter((p) => !prev.has(p.port) && !fwd.has(p.port));
+      if (fresh.length) {
+        this.log(`new port(s) on ${h.name || h.id}: ${fresh.map((p) => p.port + (p.proc ? '(' + p.proc + ')' : '')).join(', ')}`);
+        this.broadcast?.({ type: 'machine-ports-new', hostId: h.id, hostName: h.name || h.id, ports: fresh });
+      }
+    }
   }
 
   _persist() { try { writeJsonAtomic(this.file, this._state); } catch (e) { this.log('port-forward persist: ' + e.message); } }

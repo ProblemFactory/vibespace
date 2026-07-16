@@ -1977,6 +1977,7 @@ export default {
   "Relay address": "中继地址",
   "Relay port": "中继端口",
   "Relay token": "中继令牌",
+  "New port on \"{name}\": {ports} — 🔌 on its machine row forwards it": "\"{name}\" 上有新端口: {ports} —— 点它机器行上的 🔌 即可转发",
   "Set VIBESPACE_FRPS_ADDR / _PORT / _TOKEN (the shared relay) to enable public URLs.": "设置 VIBESPACE_FRPS_ADDR / _PORT / _TOKEN（共享中继）以启用公网 URL。",
   "Subdomain host (optional)": "子域主机（可选）",
   "relay host": "中继主机",

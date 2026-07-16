@@ -46,6 +46,14 @@ export function installSidebarMounts(Sidebar) {
       this._mountsSyncInit = true;
       this.app.ws.onGlobal((msg) => {
         if ((msg.type === 'mounts-updated' || msg.type === 'machine-mounts-updated' || msg.type === 'hosts-updated') && this._activeTab === 'mounts') this._renderMounts();
+        // vscode-style port discovery: a machine started listening on a new
+        // port — offer it (the 🔌 dialog on its row forwards/publishes it)
+        if (msg.type === 'machine-ports-new' && Array.isArray(msg.ports) && msg.ports.length) {
+          const head = msg.ports.slice(0, 3).map((p) => `${p.port}${p.proc ? ' (' + p.proc + ')' : ''}`).join(', ');
+          const extra = msg.ports.length > 3 ? ` +${msg.ports.length - 3}` : '';
+          showToast(tr('New port on "{name}": {ports} — 🔌 on its machine row forwards it', { name: msg.hostName || msg.hostId, ports: head + extra }));
+          this._portsDialogRefresh?.(msg.hostId);
+        }
       });
     },
 
@@ -807,6 +815,12 @@ export function installSidebarMounts(Sidebar) {
       let frpOk = false;
       try { frpOk = ((await api('/api/plugins')).plugins || []).some((p) => p.id === 'frp' && p.configured); } catch {}
       const render = async () => {
+        // live refresh hook: the machine-ports-new broadcast re-renders an
+        // OPEN dialog for this machine; self-clears once the dialog is gone
+        this._portsDialogRefresh = (hid) => {
+          if (!body.isConnected) { this._portsDialogRefresh = null; return; }
+          if (hid === h.id) render().catch(() => {});
+        };
         body.innerHTML = `<p class="empty-hint" style="margin:0 0 8px">${escHtml(tr('A service listening on this machine’s 127.0.0.1 becomes reachable here (opened through the app’s proxy). Runs over the device link — no public exposure.'))}</p>`;
         // active forwards for this machine
         let active = [];
