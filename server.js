@@ -1218,9 +1218,26 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
       });
     }
   } else {
-    // Terminal mode: raw PTY output
+    // Terminal mode: raw PTY output.
+    // dtach sends the attaching client a clear-screen preamble (\e[H\e[J) as
+    // its redraw kickoff. A TUI then repaints fully (SIGWINCH), but a plain
+    // SHELL repaints NOTHING — the preamble wiped attached clients live AND
+    // poisoned session.buffer's tail, so every later attach rendered BLANK
+    // (real report: shell terminals blanked on every server restart / daemon
+    // re-exec; probe showed the buffer ending in \e[H\e[J). Strip a LEADING
+    // clear burst within 2s of attach — later clears are real program output.
+    let attachPreambleUntil = Date.now() + 2000;
     ptyProcess.onData((output) => {
       if (session._reattachAttempts) session._reattachAttempts = 0;
+      if (attachPreambleUntil) {
+        const inWindow = Date.now() < attachPreambleUntil;
+        attachPreambleUntil = 0; // only the FIRST chunk is ever a candidate
+        if (inWindow) {
+          const stripped = output.replace(/^(?:\x1b\[H|\x1b\[[0-3]?J)+/, '');
+          if (!stripped) return; // pure clear preamble — swallow entirely
+          output = stripped;
+        }
+      }
       session.buffer += output;
       if (session.buffer.length > 75000) session.buffer = session.buffer.slice(-50000);
       broadcastToSession(session, id, { type: 'output', sessionId: id, data: output });

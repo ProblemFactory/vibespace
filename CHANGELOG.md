@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.174.2 — 2026-07-16
+- **The REAL blank-shell-terminal root cause, probe-confirmed and closed:** dtach greets every attaching client with a clear-screen preamble (`\e[H\e[J`) as its redraw kickoff — a TUI repaints right after (SIGWINCH), but a plain SHELL repaints nothing, so every server restart / daemon re-exec wiped attached shell terminals live AND left the clear as the session buffer's LAST bytes (a pod-internal attach probe showed the buffer ending in `\e[H\e[J` — so every later attach ALSO rendered blank with the cursor home). The first output chunk within 2s of an attach now has a leading clear burst stripped (a pure-clear chunk is swallowed); later clears are real program output and untouched.
+- Toolbar-hosted desktop previews obey `taskbar.desktopPreviewRatio` (they were hardcoded to 34×20 — the setting had no effect once previews were moved out of the taskbar; real report). Derived from the toolbar's fixed height, label never below 6px.
+
 ## 2.174.1 — 2026-07-16
 - **The new-port notification actually fires now** — two independent holes (real report, twice): the client toast handler was only registered after the Remote tab's first render (never opened the tab → never any toast; now registered at page load), and fleet container images ship NEITHER `ss` NOR `lsof`, so local detection was silently blind on every pod — `detectLocal` now falls back to parsing `/proc/net/tcp(6)` directly (ports without process names; kernel-level, always present on Linux).
 

@@ -680,6 +680,14 @@ export class DesktopManager {
     root.style.setProperty('--desktop-preview-h', previewH + 'px');
     root.style.setProperty('--desktop-preview-w', Math.round(previewH * 1.5) + 'px');
     root.style.setProperty('--desktop-label-size', labelSize + 'px');
+    // Toolbar-hosted previews (customize-mode arrangement) obey the SAME ratio
+    // derived from the fixed 40px toolbar — they were clamped to hardcoded
+    // 34×20 and ignored taskbar.desktopPreviewRatio entirely (real report).
+    const tbH = 40;
+    const tpH = Math.max(12, Math.min(28, Math.round((tbH - 6) * ratio)));
+    root.style.setProperty('--toolbar-preview-h', tpH + 'px');
+    root.style.setProperty('--toolbar-preview-w', Math.round(tpH * 1.6) + 'px');
+    root.style.setProperty('--toolbar-preview-label', Math.max(6, Math.round((tbH - tpH - 8) * 0.55)) + 'px');
     // All elements proportional to taskbar height — no upper caps
     const iconSize = Math.max(14, Math.round(h * 0.4));
     root.style.setProperty('--taskbar-icon-size', iconSize + 'px');

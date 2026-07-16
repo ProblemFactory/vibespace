@@ -2053,9 +2053,9 @@ body.taskbar-top .cz-panel { bottom: 32px; }
 
 /* Taskbar natives hosted in the 40px toolbar: clamp taskbar-derived sizes */
 #toolbar #desktop-previews { align-items: center; height: 100%; }
-#toolbar .desktop-preview { width: 34px; height: 20px; }
-#toolbar .desktop-preview-add { width: 14px; height: 20px; font-size: 10px; }
-#toolbar .desktop-preview-label { font-size: 8px; line-height: 1; }
+#toolbar .desktop-preview { width: var(--toolbar-preview-w, 34px); height: var(--toolbar-preview-h, 20px); }
+#toolbar .desktop-preview-add { width: 14px; height: var(--toolbar-preview-h, 20px); font-size: 10px; }
+#toolbar .desktop-preview-label { font-size: var(--toolbar-preview-label, 8px); line-height: 1; }
 #toolbar .taskbar-usage { --usage-pie-size: 15px; }
 #toolbar #taskbar-status { font-size: 10px; }
 /* Toolbar-hosted layout presets / buttons dropped into the taskbar just work
