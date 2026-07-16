@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.173.1 — 2026-07-16
+- Machine mount dialogs: the machine-side mount point (push) autocompletes against the MACHINE's filesystem over the device link, and the local mount point (pull) autocompletes locally (real report: the field was blind).
+- Pairing installer: the node-pty check now SPAWNS a real pty instead of just require()ing the module — a broken spawn-helper loads fine and then fails every terminal with `posix_spawnp failed` (real Mac report, node 25 + node-pty stable); on failure it auto-falls back to `node-pty@beta` (the line VS Code ships, with the macOS spawn fixes) and verifies again.
+
 ## 2.173.0 — 2026-07-16
 - **Port auto-discovery covers THIS instance (machine #0).** A dev server started in a local terminal (`python3 -m http.server 8032`, `npm run dev`, …) now toasts within ~30s — the 2.172.0 watch only covered external machines, and the instance itself is the primary workspace (real report: a local http.server got no notification). The "This machine" row gains a 🔌 ports dialog: local services open directly through the app's proxy (no tunnel needed) and publish to the internet via the frp relay. Infra listeners (frpc/tailscaled/VNC/…) are excluded from notifications.
 - **Push mounts are honest about being unmounted on the machine** (real report: the user `umount`ed a pushed folder ON their Mac — the row stayed green with no way back). The health sweep now asks the machine's own mount table; a vanished mount flips the row to amber "gone on machine" with a ↻ that re-creates it (same folder/mountpoint/mode; the old record+token are replaced — raw tokens are unrecoverable by design). `remount` now works for push mounts too.

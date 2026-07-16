@@ -780,7 +780,7 @@ export function installSidebarMounts(Sidebar) {
       this._mountsDialog(tr('Share a folder onto "{name}"', { name: h.name }), [
         { key: 'folder', label: tr('Folder on THIS instance to mount on the machine'), placeholder: '/home/me/project', autocomplete: 'local', value: prefillFolder || '' },
         { key: 'mode', label: tr('Access'), type: 'select', options: [['ro', tr('Read-only')], ['rw', tr('Read-write')]] },
-        { key: 'mountpoint', label: tr('Mount point on the machine (optional)'), placeholder: tr('default: ~/vibespace-remote/<folder>') },
+        { key: 'mountpoint', label: tr('Mount point on the machine (optional)'), placeholder: tr('default: ~/vibespace-remote/<folder>'), autocomplete: () => `/api/hosts/${h.id}/dir-complete` },
       ], tr('Mount'), async (v, { close }) => {
         if (!v.folder) throw new Error(tr('Choose a folder to share'));
         const r = await api(`/api/machine-mounts/${h.id}`, { method: 'POST', body: JSON.stringify({ dir: 'push', folder: v.folder, mode: v.mode, mountpoint: v.mountpoint || undefined }) });
@@ -800,7 +800,7 @@ export function installSidebarMounts(Sidebar) {
       const isDial = h.transport === 'dial';
       const fields = [
         { key: 'remotePath', label: tr('Folder on the machine (absolute path)'), placeholder: isDial ? '/Users/me/Documents' : `/home/${h.user || 'me'}`, autocomplete: () => `/api/hosts/${h.id}/dir-complete` },
-        { key: 'mountpoint', label: tr('Mount point here (optional)'), placeholder: tr('default: ~/vibespace-machines/<machine>-<folder>') },
+        { key: 'mountpoint', label: tr('Mount point here (optional)'), placeholder: tr('default: ~/vibespace-machines/<machine>-<folder>'), autocomplete: 'local' },
       ];
       if (!isDial) fields.push({ key: 'access', label: tr('Access'), type: 'select', options: [['ro', tr('Read-only (device link)')], ['rw', tr('Read-write (SFTP over ssh)')]] });
       this._mountsDialog(tr('Mount a folder from "{name}" into this VibeSpace', { name: h.name }), fields, tr('Mount'), async (v, { close }) => {

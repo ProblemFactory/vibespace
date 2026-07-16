@@ -58,12 +58,25 @@ ln -sfn "$ROOT/$VER" "$ROOT/current"
 # win — usually just a download, no compiler). CHAT/files/mounts never need it,
 # so a failure here is non-fatal (terminal shows a clear message if it's
 # missing). Skip if already present.
-if ! node -e "require('$ROOT/node_modules/node-pty')" >/dev/null 2>&1; then
+# the check must SPAWN a real pty, not just require() the module — a broken
+# spawn-helper loads fine and then fails every terminal with 'posix_spawnp
+# failed' (real Mac report on node 25 + node-pty stable); the beta line is
+# what VS Code ships and carries the macOS spawn fixes.
+pty_ok() {
+  node -e "const pty=require('$ROOT/node_modules/node-pty');const p=pty.spawn('sh',['-c','exit 0'],{name:'xterm',cols:8,rows:4,cwd:process.env.HOME});p.onExit(()=>process.exit(0));setTimeout(()=>process.exit(1),4000);" >/dev/null 2>&1
+}
+if ! pty_ok; then
   echo "→ installing node-pty for terminal sessions (best-effort)…"
-  ( cd "$ROOT" && [ -f package.json ] || echo '{"name":"vibespace-agentd-deps","private":true}' > package.json
-    npm install --no-audit --no-fund --loglevel=error node-pty >/dev/null 2>&1 ) \
-    && echo "  ✓ node-pty ready" \
-    || echo "  ⚠ node-pty install failed — chat/files/mounts still work; terminal will report it"
+  ( cd "$ROOT" && { [ -f package.json ] || echo '{"name":"vibespace-agentd-deps","private":true}' > package.json; }
+    npm install --no-audit --no-fund --loglevel=error node-pty >/dev/null 2>&1 ) || true
+  if pty_ok; then
+    echo "  ✓ node-pty ready (pty spawn verified)"
+  else
+    echo "  ⚠ stable node-pty can't spawn a pty on this node — trying node-pty@beta…"
+    ( cd "$ROOT" && npm install --no-audit --no-fund --loglevel=error node-pty@beta >/dev/null 2>&1 ) || true
+    if pty_ok; then echo "  ✓ node-pty (beta) ready (pty spawn verified)"
+    else echo "  ⚠ terminal sessions unavailable on this device — chat/files/mounts still work"; fi
+  fi
 fi
 
 # host token: provided (from pairing) or minted locally
