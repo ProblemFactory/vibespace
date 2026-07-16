@@ -84,6 +84,38 @@ if [ -n "$DIAL_URL" ]; then
   echo "→ dial config persisted ($ROOT/state/dial.json)"
 fi
 
+# TAKE OVER from a daemon already running for THIS root (re-pair / identity
+# rotation): an OLD daemon keeps its old in-memory identity and holds the
+# singleton, so the new pairing never took effect ("already running" forever —
+# real incident). New daemons adopt a rewritten dial.json by themselves, but
+# an old bundle predating that must be replaced here. Verify the lock pid's
+# command line before killing (a recycled pid must not hit an innocent process).
+if [ -f "$ROOT/state/agentd.lock" ]; then
+  OLDPID=$(cat "$ROOT/state/agentd.lock" 2>/dev/null || true)
+  if [ -n "$OLDPID" ] && kill -0 "$OLDPID" 2>/dev/null; then
+    OLDCMD=$(ps -p "$OLDPID" -o command= 2>/dev/null || true)
+    case "$OLDCMD" in
+      *vibespace-device*|*agentd*)
+        echo "→ replacing the running daemon for this root (pid $OLDPID)"
+        kill "$OLDPID" 2>/dev/null || true
+        i=0; while [ $i -lt 5 ] && kill -0 "$OLDPID" 2>/dev/null; do sleep 1; i=$((i+1)); done
+        kill -9 "$OLDPID" 2>/dev/null || true
+        rm -f "$ROOT/state/agentd.lock"
+        ;;
+      "")
+        # can't verify — leave it alone (the new daemon's ps check handles a
+        # stale/recycled pid by itself)
+        ;;
+      *)
+        echo "→ stale lock (pid $OLDPID is not our daemon) — clearing"
+        rm -f "$ROOT/state/agentd.lock"
+        ;;
+    esac
+  else
+    rm -f "$ROOT/state/agentd.lock"
+  fi
+fi
+
 # PERSISTENCE (the dead-Mac lesson: a daemon killed by a crash/reboot/upgrade
 # hiccup stayed dead forever — nothing restarted it). Register a supervisor:
 #   macOS  : launchd LaunchAgent (RunAtLoad + KeepAlive = restart on crash)
