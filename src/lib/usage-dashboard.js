@@ -162,6 +162,24 @@ function panelRows(data, panel) {
   if (!dim.seq) {
     rows.sort((a, b) => b.value - a.value);
     rows = rows.slice(0, panel.topN || 8);
+  } else {
+    // Sequential dims sort by AXIS position, never by value — an old server
+    // returns groups cost-sorted (real report: the hour axis read 18,21,2,…).
+    rows.sort((a, b) => {
+      const na = Number(a.key), nb = Number(b.key);
+      return (Number.isFinite(na) && Number.isFinite(nb)) ? na - nb : (a.key < b.key ? -1 : 1);
+    });
+    // hour/weekday are CLOSED scales — fill the missing buckets with zeros so
+    // the axis stays continuous (a gap reads as a mislabeled bar, not "no data")
+    if (panel.dim === 'hour' || panel.dim === 'weekday') {
+      const n = panel.dim === 'hour' ? 24 : 7;
+      const byIdx = new Map(rows.map((r) => [Number(r.raw.key), r]));
+      rows = Array.from({ length: n }, (_, i) => byIdx.get(i) || ({ key: String(i), raw: { key: String(i) }, value: 0, values: mkeys.map(() => 0) }));
+    }
+    if (panel.dim === 'weekday') {
+      const WD = [t('Sun'), t('Mon'), t('Tue'), t('Wed'), t('Thu'), t('Fri'), t('Sat')];
+      rows.forEach((r) => { r.key = WD[Number(r.raw.key)] ?? r.key; });
+    }
   }
   return rows;
 }
