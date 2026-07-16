@@ -1977,6 +1977,7 @@ export default {
   "Relay address": "中继地址",
   "Relay port": "中继端口",
   "Relay token": "中继令牌",
+  "here": "本机",
   "Ports on this instance (open via the app, publish to the internet)": "本实例上的端口（经应用打开，或发布到公网）",
   "Not mounted on the machine anymore (unmounted there?) — ↻ re-mounts it": "机器上已不再挂载（在那边手动卸载了？）—— ↻ 可重新挂载",
   "gone on machine": "机器上已卸载",

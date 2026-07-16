@@ -1977,6 +1977,7 @@ export default {
   "Relay address": "リレーアドレス",
   "Relay port": "リレーポート",
   "Relay token": "リレートークン",
+  "here": "ここ",
   "Ports on this instance (open via the app, publish to the internet)": "このインスタンスのポート（アプリ経由で開く／公開する）",
   "Not mounted on the machine anymore (unmounted there?) — ↻ re-mounts it": "マシン上でマウント解除されています —— ↻ で再マウント",
   "gone on machine": "マシン側で解除済み",
