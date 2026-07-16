@@ -141,6 +141,31 @@ function registerWsHandler(wss, ctx) {
             ws.send(JSON.stringify({ type: 'error', message: `Unknown backend "${backend}".` }));
             break;
           }
+          // Resume guard (2.179.0, walter's duplicate-session incident): a
+          // plain claude --resume REUSES the conversation id — spawning it
+          // while the original session is still LIVE puts TWO claude
+          // processes on ONE JSONL (transcript double-writer class) and
+          // duplicates the sidebar card. Refuse and hand the LIVE session
+          // back; the client attaches it instead. Forks mint a new id (skip);
+          // codex resume forks a new thread id by design (not affected).
+          if (backend === 'claude' && data.resume && data.resumeId && !data.fork) {
+            let existing = null;
+            for (const [eid, es] of activeSessions) {
+              if ((es.backend || 'claude') !== 'claude') continue;
+              if ((es.claudeSessionId || es.backendSessionId) !== data.resumeId) continue;
+              if ((es.host || null) !== (data.hostId || null)) continue;
+              existing = [eid, es]; break;
+            }
+            if (existing) {
+              ws.send(JSON.stringify({
+                type: 'error', code: 'resume-already-live', reqId: data.reqId,
+                existingId: existing[0], existingName: existing[1].name || '',
+                existingCwd: existing[1].cwd || '', existingMode: existing[1].mode || 'chat',
+                message: 'This conversation is already running in a live session — opening that instead of starting a second copy.',
+              }));
+              break;
+            }
+          }
           const id = 'sess-' + (++sessionCounterRef.value) + '-' + Date.now();
           // cwd default: a REMOTE/DIAL session with no explicit cwd must land
           // in the DEVICE's home, NOT this server's (B-0d70: the pod's
@@ -1442,6 +1467,16 @@ done`;
         }
 
         case 'kill': {
+          // Stale-serverId robustness (2.179.0): after a server restart the
+          // client can hold an OLD webui id — a kill that silently no-ops
+          // leaves the session alive, and the follow-up resume (billing
+          // switch) then double-writes the same claude id (walter's duplicate
+          // incident). Fall back to resolving by the conversation id.
+          if (!activeSessions.has(data.sessionId) && data.backendSessionId) {
+            for (const [eid, es] of activeSessions) {
+              if ((es.claudeSessionId || es.backendSessionId) === data.backendSessionId) { data.sessionId = eid; break; }
+            }
+          }
           { const ks = activeSessions.get(data.sessionId); if (ks && ks._bridgePort) { try { dialBridge?.close(data.sessionId); } catch { } if (ks._dialDeviceId && ks._dialReversePort) { hosts.device(ks.host).then((dm) => dm.reverseUnforward(ks._dialReversePort)).catch(() => {}); } } }
           const session = activeSessions.get(data.sessionId);
           if (session) {

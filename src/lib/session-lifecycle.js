@@ -74,6 +74,18 @@ export function installSessionLifecycle(App, ctx = {}) {
       if (msg.type === 'error' && msg.reqId === reqId) {
         clearTimeout(createWd);
         this.ws.offGlobal(handler);
+        // Resume guard (2.179.0): the conversation is ALREADY live — attach
+        // that session instead of leaving a dead "create failed" window (a
+        // second --resume would double-write the same claude id).
+        if (msg.code === 'resume-already-live' && msg.existingId) {
+          showToast(t('Already running — opened the live session instead'));
+          try { this.wm.closeWindow(winInfo.id); } catch { }
+          this.attachSession(msg.existingId, msg.existingName || sessionName, msg.existingCwd || cwd, {
+            mode: msg.existingMode || sessionMode, backend,
+            backendSessionId: resumeId || undefined, hostId: hostId || undefined,
+          });
+          return;
+        }
         const text = msg.message || t('Session create failed');
         showToast(text, { type: 'error' });
         const err = document.createElement('div');
@@ -477,7 +489,10 @@ export function installSessionLifecycle(App, ctx = {}) {
       const winBounds = win ? this._snapshotWinBounds(this.wm.windows.get(winId)) : undefined;
       const finish = () => this.resumeSession(backendSessionId, cwd, name, { mode, backend, backendSessionId, accountId: acctVal, hostId, winBounds });
       if (live?.webuiId) {
-        this.ws.send({ type: 'kill', sessionId: live.webuiId });
+        // backendSessionId lets the server resolve the session even when the
+        // webui id went stale across a restart (2.179.0 — a no-op'd kill here
+        // followed by the resume double-wrote the same claude id)
+        this.ws.send({ type: 'kill', sessionId: live.webuiId, backendSessionId });
         setTimeout(finish, 900); // let the CLI flush its transcript before --resume
       } else finish();
     };
