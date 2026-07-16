@@ -478,7 +478,16 @@ function registerWsHandler(wss, ctx) {
                   : 'the selected account is a subscription login — shipping it to a device is disabled (§ban-safety). Use an API-key account, or log in on the device itself.' }));
                 return;
               }
-              const rcmd0 = spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd;
+              // shell terminal: run the DEVICE user's own login shell, not the
+              // basename of OUR spawn command (the pod's $SHELL is bash — a Mac
+              // zsh user got bash + Apple's chsh nag, real report). $SHELL may
+              // be absent under launchd → fall back to the account's UserShell
+              // (macOS dscl) → zsh → bash. S0 is resolved in the shellCmd
+              // preamble; rcmd0 just execs it.
+              const rcmd0 = backend === 'shell' ? '"$S0"' : (spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd);
+              const shellResolve = backend === 'shell'
+                ? `S0="\${SHELL:-}"; [ -n "$S0" ] || S0="$(dscl . -read ~/ UserShell 2>/dev/null | awk '{print \$2}')"; [ -n "$S0" ] || S0="$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f7)"; [ -x "$S0" ] || S0="$(command -v zsh || command -v bash || echo sh)"; `
+                : '';
               try {
                 const bridgePort = await dialBridge.ensure({ sid: id, deviceId: h.deviceId });
                 // A tool/tunnel setup error degrades to bare env, EXCEPT when
@@ -488,9 +497,9 @@ function registerWsHandler(wss, ctx) {
                   if (spawnAccount?.secret) throw e;
                   console.warn('[dial] agent setup degraded:', e.message); return { envPairs: [], tokenAssign: '' };
                 });
-                const shellCmd = `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:$HOME/.vibespace/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ${da.tokenAssign}exec env `
+                const shellCmd = `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:$HOME/.vibespace/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ${shellResolve}${da.tokenAssign}exec env `
                   + [...da.envPairs.map(shq), ...spawnEnvPairs.map(shq)].join(' ')
-                  + ' ' + [rcmd0, ...spawnArgs.map(shq)].join(' ');
+                  + ' ' + [rcmd0, ...(backend === 'shell' ? ['-l'] : spawnArgs.map(shq))].join(' ');
                 const cfg = {
                   tcp: { port: bridgePort },
                   hostToken: agentdRemote.agentdHostToken('dial-' + h.deviceId),
