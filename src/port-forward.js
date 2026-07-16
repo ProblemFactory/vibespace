@@ -126,7 +126,27 @@ class PortForwardManager {
     const out = await new Promise((resolve) => {
       execFile('sh', ['-c', PORT_SCAN], { timeout: 8000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => resolve(String(stdout || '')));
     });
-    return this._parsePorts(out);
+    const parsed = this._parsePorts(out);
+    if (parsed.length) return parsed;
+    // slim container images ship NEITHER ss NOR lsof (real fleet pods — the
+    // whole local watch was silently blind); /proc/net is always there.
+    // st column '0A' = LISTEN; local_address is HEXIP:HEXPORT. proc names
+    // would need a /proc/*/fd inode scan — ports alone are enough to notify.
+    const found = new Map();
+    for (const f of ['/proc/net/tcp', '/proc/net/tcp6']) {
+      let txt = '';
+      try { txt = fs.readFileSync(f, 'utf-8'); } catch { continue; }
+      for (const line of txt.split('\n').slice(1)) {
+        const cols = line.trim().split(/\s+/);
+        if (cols.length < 4 || cols[3] !== '0A') continue;
+        const port = parseInt(String(cols[1]).split(':').pop(), 16);
+        if (port && !found.has(port)) found.set(port, '');
+      }
+    }
+    return [...found.entries()]
+      .map(([port, proc]) => ({ port, proc }))
+      .filter((p) => p.port > 0 && p.port < 65536)
+      .sort((a, b) => a.port - b.port);
   }
 
   _parsePorts(out) {

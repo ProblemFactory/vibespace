@@ -72,6 +72,11 @@ class Sidebar {
       app.settings?.on(k, () => this._render());
     }
 
+    // Mounts/machines WS handlers (incl. the machine-ports-new toast) must be
+    // live from PAGE LOAD — gated behind the Remote tab's first render, a user
+    // who never opened that tab NEVER saw a new-port notification (real report)
+    setTimeout(() => { try { this._initMountsSync?.(); } catch {} }, 0);
+
     // Listen for user-state-updated WebSocket messages from other clients
     app.ws.onGlobal((msg) => {
       if (msg.type === 'user-state-updated' && msg.state) {

@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.174.1 — 2026-07-16
+- **The new-port notification actually fires now** — two independent holes (real report, twice): the client toast handler was only registered after the Remote tab's first render (never opened the tab → never any toast; now registered at page load), and fleet container images ship NEITHER `ss` NOR `lsof`, so local detection was silently blind on every pod — `detectLocal` now falls back to parsing `/proc/net/tcp(6)` directly (ports without process names; kernel-level, always present on Linux).
+
 ## 2.174.0 — 2026-07-16
 - **Local terminals survive a device-daemon self-upgrade (the blank-terminal fix).** Two root causes closed (real report, three times in one evening — every release makes the local daemon self-upgrade + re-exec): (1) when the daemon link died, the server's pty handles never learned it — the mux teardown fired `onClose` but session handles wire `onExit`, so the auto-reattach path never ran and terminals froze; (2) even a successful reattach showed NOTHING — dtach replays no history and a plain shell never repaints. Now a dead link fires `onExit` on every open session handle (bounded auto-reattach kicks in within seconds), and the RE-attach pushes a clear + buffer-file replay to attached clients — the upgrade becomes visually seamless. Regression-guarded: the M1 suite kills the daemon under a live session and asserts the handle exits.
 
