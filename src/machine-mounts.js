@@ -124,7 +124,7 @@ class MachineMounts {
   list() {
     return this._state.mounts.map((m) => m.dir === 'pull'
       ? { id: m.id, dir: 'pull', hostId: m.hostId, remotePath: m.remotePath, mountpoint: m.mountpoint, live: this._live.has(m.id), online: this._online(m.hostId), createdAt: m.createdAt }
-      : { id: m.id, dir: 'push', hostId: m.hostId, folder: m.folder, mountpoint: m.mountpoint, mode: m.mode, os: m.os, method: m.method, via: m.tunnelPort ? 'tunnel' : 'public', mountedAt: m.mountedAt });
+      : { id: m.id, dir: 'push', hostId: m.hostId, folder: m.folder, mountpoint: m.mountpoint, mode: m.mode, os: m.os, method: m.method, via: m.tunnelPort ? 'tunnel' : 'public', mountedAt: m.mountedAt, remoteMounted: !this._pushDown?.has(m.id) });
   }
 
   // ═══ PUSH direction (this instance's folder → the machine) ═══
@@ -386,8 +386,16 @@ class MachineMounts {
   async remount(id) {
     const rec = this._state.mounts.find((m) => m.id === id);
     if (!rec) throw new Error('unknown machine mount');
-    if (rec.dir !== 'pull') throw new Error('only pull mounts remount — remove and re-share a push mount');
     if (!this._online(rec.hostId)) throw new Error('machine is offline — start its daemon first');
+    if (rec.dir === 'push') {
+      // a push mount manually umounted ON the machine (or torn by a reboot):
+      // the raw token is unrecoverable (hashed at rest), so re-creating with
+      // the SAME params is the remount — old record/token dropped first
+      const { hostId, folder, mode, mountpoint } = rec;
+      try { await this.unmount(id); } catch { }
+      this._pushDown?.delete(id);
+      return this.mountPush(hostId, { folder, mode, mountpoint });
+    }
     const live = this._live.get(id);
     if (live) { try { await live.teardown(); } catch { } this._live.delete(id); }
     await this._up(rec);
@@ -492,6 +500,28 @@ class MachineMounts {
       if (Date.now() < at) continue;
       this._pullRetryAt.set(rec.id, Date.now() + 5 * 60000);
       this._up(rec).then(() => { this._pullRetryAt.delete(rec.id); this._notify(); }).catch(() => {});
+    }
+    // PUSH honesty (real report: user umounted on the Mac, the row stayed
+    // green "on machine" and offered no way back): while the machine is
+    // linked, ask it whether the mountpoint is still in its mount table —
+    // a vanished mount flips the row to "not mounted there" + a remount ↻.
+    this._pushDown = this._pushDown || new Set();
+    for (const rec of this._state.mounts.filter((m) => m.dir === 'push')) {
+      if (!this._online(rec.hostId)) continue;
+      let dm = null;
+      try { dm = await this.hosts.device(rec.hostId); } catch { continue; }
+      let mounted = null;
+      try {
+        // `mount` prints "… on <mountpoint> (type…" (mac) / "… on <mountpoint> type …"
+        // (linux) — a fixed-string match on ' on <mp> ' covers both
+        const mp = String(rec.mountpoint).replace(/'/g, `'\\''`);
+        const r = await dm.runCmd('sh', ['-c', `mount | grep -qF ' on ${mp} '`], { timeoutMs: 8000 });
+        mounted = r.code === 0;
+      } catch { mounted = null; }
+      if (mounted === null) continue; // probe itself failed — no verdict
+      const was = this._pushDown.has(rec.id);
+      if (!mounted && !was) { this._pushDown.add(rec.id); this.log(`push mount ${rec.mountpoint} is GONE on the machine (umounted there?)`); this._notify(); }
+      else if (mounted && was) { this._pushDown.delete(rec.id); this._notify(); }
     }
     for (const [id, h] of [...this._live]) {
       const rec = this._state.mounts.find((m) => m.id === id);

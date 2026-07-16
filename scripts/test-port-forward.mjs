@@ -52,6 +52,16 @@ const events = [];
 const pf = new PortForwardManager({ hosts, dataDir, broadcast: (m) => events.push(m), log: () => {} });
 
 try {
+  // ── machine #0 (this instance): detect + record-only forward ──
+  {
+    const lp = await pf.detect('__local__');
+    check('detectLocal sees the real test listener', lp.some((p) => p.port === SERVICE_PORT), JSON.stringify(lp.slice(0, 6)));
+    const lf = await pf.forward('__local__', SERVICE_PORT, { label: 'local test' });
+    check('local forward is active with a direct URL (no tunnel)', lf.active && lf.localPort === SERVICE_PORT && lf.url === `http://127.0.0.1:${SERVICE_PORT}/`, JSON.stringify(lf));
+    await pf.unforward(lf.id);
+    check('local forward removed', !pf.list().some((r) => r.hostId === '__local__'), '');
+  }
+
   // ── vscode-style NEW-port watch: baseline silent, diff notifies ──
   const runCmd0 = mockDm.runCmd; // restore after the watch scenario (detect tests below flip ssMode)
   ssMode = 'ss';

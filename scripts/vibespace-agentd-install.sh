@@ -97,9 +97,24 @@ if [ -f "$ROOT/state/agentd.lock" ]; then
     case "$OLDCMD" in
       *vibespace-device*|*agentd*)
         echo "→ replacing the running daemon for this root (pid $OLDPID)"
+        # silence the supervisor FIRST — killing a KeepAlive/Restart-managed
+        # daemon otherwise just respawns it into a fight with our new one
+        KEY0=$(basename "$ROOT" | tr -c 'A-Za-z0-9.-' '-' | sed 's/-*$//')
+        launchctl bootout "gui/$(id -u)/cc.vibespace.device.$KEY0" 2>/dev/null || true
+        command -v systemctl >/dev/null 2>&1 && systemctl --user stop "vibespace-device-$KEY0.service" 2>/dev/null || true
         kill "$OLDPID" 2>/dev/null || true
         i=0; while [ $i -lt 5 ] && kill -0 "$OLDPID" 2>/dev/null; do sleep 1; i=$((i+1)); done
         kill -9 "$OLDPID" 2>/dev/null || true
+        sleep 1
+        if kill -0 "$OLDPID" 2>/dev/null; then
+          # unkillable (usually wedged in an uninterruptible syscall — a dead
+          # network mount). Not fatal: the new pairing is already ON DISK and a
+          # 2.170+ daemon re-reads it every dial attempt — it adopts by itself.
+          echo "→ pid $OLDPID won't die (often: stuck on a dead network mount) — that's OK:"
+          echo "  the new pairing is saved and the running daemon adopts it within ~30s."
+          echo "  If the machine stays offline, clear the stuck mount (or reboot) and re-run this command."
+          exit 0
+        fi
         rm -f "$ROOT/state/agentd.lock"
         ;;
       "")

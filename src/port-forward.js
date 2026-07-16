@@ -20,6 +20,11 @@ const net = require('net');
 const fs = require('fs');
 const path = require('path');
 
+const LOCAL_ID = '__local__'; // machine #0 — this instance itself
+const PORT_SCAN = `command -v ss >/dev/null 2>&1 && ss -tlnH 2>/dev/null || lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null`;
+// local-watch noise: our own infrastructure listeners must not toast
+const LOCAL_IGNORE_PROCS = new Set(['frpc', 'frps', 'tailscaled', 'sshd', 'rclone', 'Xtigervnc', 'Xvfb']);
+
 function writeJsonAtomic(file, obj) {
   const tmp = file + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(obj, null, 2));
@@ -55,9 +60,12 @@ class PortForwardManager {
     try { const v = this.serverSetting('ports.watchNew'); if (v !== undefined && !v) return; } catch { }
     let all = [];
     try { all = (this.hosts.list?.() || []); } catch { return; }
-    for (const h of all) {
+    // machine #0 first — the instance itself is the PRIMARY workspace (a dev
+    // server started in a local terminal is the flagship vscode case)
+    const targets = [{ id: LOCAL_ID, name: 'This machine', transport: 'local' }, ...all];
+    for (const h of targets) {
       if (!h || !h.id) continue;
-      if (h.transport !== 'dial') {
+      if (h.transport !== 'dial' && h.transport !== 'local') {
         // ssh: watch only over an ALREADY-connected device link
         let linked = false;
         try { linked = !!this.hosts._devices?.get(h.id)?.status().connected; } catch { }
@@ -71,7 +79,10 @@ class PortForwardManager {
       this._seenPorts.set(h.id, cur);
       if (!prev) continue; // baseline sweep — silent
       const fwd = new Set(this._state.forwards.filter((r) => r.hostId === h.id).map((r) => r.remotePort));
-      const fresh = interesting.filter((p) => !prev.has(p.port) && !fwd.has(p.port));
+      let fresh = interesting.filter((p) => !prev.has(p.port) && !fwd.has(p.port));
+      // local: our own infrastructure (frpc admin, tailscale, VNC, …) must
+      // not toast when a plugin starts after the baseline
+      if (h.id === LOCAL_ID) fresh = fresh.filter((p) => !LOCAL_IGNORE_PROCS.has(p.proc) && p.port !== 7400);
       if (fresh.length) {
         this.log(`new port(s) on ${h.name || h.id}: ${fresh.map((p) => p.port + (p.proc ? '(' + p.proc + ')' : '')).join(', ')}`);
         this.broadcast?.({ type: 'machine-ports-new', hostId: h.id, hostName: h.name || h.id, ports: fresh });
@@ -99,13 +110,26 @@ class PortForwardManager {
   /** Detect listening TCP ports on a machine (dial or ssh) over the device
    *  link. Loopback + all-interface listeners only; returns [{port, proc}]. */
   async detect(hostId) {
+    if (hostId === LOCAL_ID) return this.detectLocal();
     const dm = await this.hosts.device(hostId);
     // Linux: `ss -tlnH`; macOS/BSD: `lsof`. Try ss first, fall back to lsof.
     // -H (no header) is GNU-ss only, so parse defensively either way.
-    const script = `command -v ss >/dev/null 2>&1 && ss -tlnH 2>/dev/null || `
-      + `lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null`;
     let out = '';
-    try { out = String((await dm.runCmd('sh', ['-c', script], { timeoutMs: 8000 })).stdout || ''); } catch (e) { throw new Error('port scan failed: ' + e.message); }
+    try { out = String((await dm.runCmd('sh', ['-c', PORT_SCAN], { timeoutMs: 8000 })).stdout || ''); } catch (e) { throw new Error('port scan failed: ' + e.message); }
+    return this._parsePorts(out);
+  }
+
+  /** Listening ports on THIS instance (machine #0) — no device link needed;
+   *  the pod/host VibeSpace itself runs on is the primary workspace. */
+  async detectLocal() {
+    const { execFile } = require('child_process');
+    const out = await new Promise((resolve) => {
+      execFile('sh', ['-c', PORT_SCAN], { timeout: 8000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => resolve(String(stdout || '')));
+    });
+    return this._parsePorts(out);
+  }
+
+  _parsePorts(out) {
     const found = new Map(); // port → proc
     for (const line of out.split('\n')) {
       if (!line.trim()) continue;
@@ -147,6 +171,14 @@ class PortForwardManager {
 
   async _start(rec) {
     if (this._live.has(rec.id)) return this._live.get(rec.id).rec;
+    if (rec.hostId === LOCAL_ID) {
+      // machine #0: the service ALREADY listens on this instance's loopback —
+      // no tunnel or local server needed; the record is the handle that lets
+      // the dialog Open it (browser proxy) and Publish it (frp)
+      rec.error = null;
+      this._live.set(rec.id, { server: null, sockets: new Set(), rec: { ...rec, localPort: rec.remotePort } });
+      return { ...rec, localPort: rec.remotePort };
+    }
     // reachable machine first — fail loud so the UI can say "device offline"
     await this.hosts.device(rec.hostId); // throws if offline
     const sockets = new Set();
