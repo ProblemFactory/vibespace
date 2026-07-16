@@ -312,7 +312,19 @@ export function installSidebarRail(Sidebar) {
               const portRow = (p) => {
                 const pr = document.createElement('div');
                 pr.className = 'ports-row' + (p.hidden ? ' ports-row-sys' : '');
-                pr.innerHTML = `<span class="ports-row-label">${p.port}${p.proc ? ' <span class="ports-proc">' + escHtml(p.proc) + '</span>' : ''}</span>`;
+                pr.innerHTML = `<span class="ports-row-label">${p.port}${p.proc ? ' <span class="ports-proc">' + escHtml(p.proc) + '</span>' : ''}${p.orphan ? ` <span class="ports-orphan" title="${escHtml(tr('This process is listening from a DELETED working directory — a removed worktree left its dev server running'))}">${escHtml(tr('orphan'))}</span>` : ''}</span>`;
+                // orphaned (deleted-cwd) listeners get a Kill instead of Forward
+                if (p.orphan && p.pid && m.id === '__local__') {
+                  const kb = document.createElement('button');
+                  kb.className = 'mounts-icon-btn'; kb.innerHTML = PORT_ICONS.x; kb.dataset.tip = tr('Kill this orphaned process');
+                  kb.onclick = async () => {
+                    const kr = await api('/api/ports/kill-orphan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid: p.pid }) });
+                    if (kr?.error) showToast(kr.error, { type: 'error' });
+                    else { showToast(tr('Orphaned process killed')); scan.onclick(); }
+                  };
+                  pr.appendChild(kb);
+                  return pr;
+                }
                 const fb = document.createElement('button');
                 fb.className = 'mounts-icon-btn'; fb.innerHTML = PORT_ICONS.fwd; fb.dataset.tip = tr('Forward this port here');
                 fb.onclick = async () => {

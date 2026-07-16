@@ -137,6 +137,35 @@ try {
   // ── unforward removes + frees ──
   await pf.unforward('pf-h2-9999');
   check('unforward removes the record', !pf._state.forwards.some((r) => r.id === 'pf-h2-9999'));
+
+  // ── orphan detection (B-16d9): REAL listener in a DELETED cwd ──
+  if (process.platform === 'linux') {
+    const { spawn } = await import('node:child_process');
+    const os = await import('node:os');
+    const tmp = fs.mkdtempSync(os.tmpdir() + '/pf-orphan-');
+    // child prints its port, keeps listening; its cwd is the temp dir
+    const proc = spawn('node', ['-e', `require('http').createServer(() => {}).listen(0, '127.0.0.1', function () { console.log(this.address().port); });`], { cwd: tmp, stdio: ['ignore', 'pipe', 'ignore'] });
+    const port = await new Promise((resolve, reject) => {
+      const to = setTimeout(() => reject(new Error('listener never reported')), 8000);
+      proc.stdout.on('data', (d) => { clearTimeout(to); resolve(Number(String(d).trim())); });
+    });
+    fs.rmSync(tmp, { recursive: true, force: true }); // the worktree "cleanup" that forgets the process
+    await new Promise((r) => setTimeout(r, 300));
+    const ports = await pf.detectLocal();
+    const mine = ports.find((p) => p.port === port);
+    check('deleted-cwd listener detected', !!mine, JSON.stringify(ports.slice(0, 5)));
+    check('flagged orphan with its pid', !!(mine?.orphan && mine?.pid === proc.pid), JSON.stringify(mine));
+    // guard: killOrphan refuses a HEALTHY process (our own test runner)
+    let refused = '';
+    try { pf.killOrphan(process.pid); } catch (e) { refused = e.message; }
+    check('killOrphan refuses a healthy process', /refusing/.test(refused), refused);
+    // and kills the real orphan
+    const kr = pf.killOrphan(proc.pid);
+    const gone = await new Promise((r) => { proc.on('exit', () => r(true)); setTimeout(() => r(false), 5000); });
+    check('killOrphan terminates the orphan', !!kr.ok && gone);
+  } else {
+    console.log('  (skipping orphan e2e — /proc is linux-only)');
+  }
 } catch (e) {
   failed++; console.error('  ✗ harness threw:', e.stack || e.message);
 } finally {

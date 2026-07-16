@@ -101,6 +101,18 @@ class PortForwardManager {
         this.log(`new port(s) on ${h.name || h.id}: ${fresh.map((p) => p.port + (p.proc ? '(' + p.proc + ')' : '')).join(', ')}`);
         this.broadcast?.({ type: 'machine-ports-new', hostId: h.id, hostName: h.name || h.id, ports: fresh });
       }
+      // Orphaned listeners (B-16d9): a dev server whose cwd was DELETED is
+      // garbage regardless of when it appeared — announce on the baseline
+      // sweep too (unlike new-port noise), but each pid only once.
+      if (h.id === LOCAL_ID) {
+        const seenO = this._seenOrphans || (this._seenOrphans = new Set());
+        const freshO = interesting.filter((p) => p.orphan && p.pid && !seenO.has(p.pid));
+        freshO.forEach((p) => seenO.add(p.pid));
+        if (freshO.length) {
+          this.log(`orphaned listener(s): ${freshO.map((p) => `${p.port}(${p.proc || '?'} pid ${p.pid}, cwd deleted)`).join(', ')}`);
+          this.broadcast?.({ type: 'machine-ports-orphan', hostId: h.id, hostName: h.name || h.id, ports: freshO });
+        }
+      }
     }
   }
 
@@ -148,7 +160,7 @@ class PortForwardManager {
       execFile('sh', ['-c', PORT_SCAN], { timeout: 8000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => resolve(String(stdout || '')));
     });
     const parsed = this._parsePorts(out);
-    if (parsed.length) return parsed.map((p) => this._classify(p));
+    if (parsed.length) return parsed.map((p) => this._classifyOrphan(this._classify(p)));
     // slim container images ship NEITHER ss NOR lsof (real fleet pods — the
     // whole local watch was silently blind); /proc/net is always there.
     // st column '0A' = LISTEN; local_address is HEXIP:HEXPORT; the inode column
@@ -167,7 +179,7 @@ class PortForwardManager {
     }
     const byInode = this._resolveInodeProcs(new Set([...found.values()]));
     return [...found.entries()]
-      .map(([port, inode]) => this._classify({ port, proc: byInode.get(inode) || '' }))
+      .map(([port, inode]) => { const hit = byInode.get(inode); return this._classifyOrphan(this._classify({ port, proc: hit?.comm || '', ...(hit?.pid ? { pid: hit.pid } : {}) })); })
       .filter((p) => p.port > 0 && p.port < 65536)
       .sort((a, b) => a.port - b.port);
   }
@@ -191,23 +203,23 @@ class PortForwardManager {
         if (!m || !inodes.has(m[1]) || map.has(m[1])) continue;
         let comm = '';
         try { comm = fs.readFileSync(`/proc/${pid}/comm`, 'utf-8').trim(); } catch { }
-        if (comm) map.set(m[1], comm);
+        if (comm) map.set(m[1], { pid: Number(pid), comm });
       }
     }
     return map;
   }
 
   _parsePorts(out) {
-    const found = new Map(); // port → proc
+    const found = new Map(); // port → {proc, pid}
     for (const line of out.split('\n')) {
       if (!line.trim()) continue;
       // lsof line (match FIRST — its distinctive `(LISTEN)` suffix; an ss-style
       // IP:port pattern also matches inside an lsof line, so order matters):
       //   node  1234 user  22u  IPv4 ...  TCP 127.0.0.1:5173 (LISTEN)
-      const lsof = line.match(/^(\S+)\s.*:(\d+)\s+\(LISTEN\)\s*$/);
+      const lsof = line.match(/^(\S+)\s+(\d+)\s.*:(\d+)\s+\(LISTEN\)\s*$/);
       if (lsof) {
-        const port = Number(lsof[2]);
-        if (port && !found.has(port)) found.set(port, lsof[1]);
+        const port = Number(lsof[3]);
+        if (port && !found.has(port)) found.set(port, { proc: lsof[1], pid: Number(lsof[2]) || 0 });
         continue;
       }
       // ss line:  LISTEN 0 511 127.0.0.1:5173 0.0.0.0:*   users:(("node",pid=...))
@@ -215,13 +227,39 @@ class PortForwardManager {
       if (ss) {
         const port = Number(ss[1]);
         const proc = (line.match(/"([^"]+)"/) || [])[1] || '';
-        if (port && !found.has(port)) found.set(port, proc);
+        const pid = Number((line.match(/pid=(\d+)/) || [])[1]) || 0;
+        if (port && !found.has(port)) found.set(port, { proc, pid });
       }
     }
     return [...found.entries()]
-      .map(([port, proc]) => ({ port, proc }))
+      .map(([port, { proc, pid }]) => ({ port, proc, ...(pid ? { pid } : {}) }))
       .filter((p) => p.port > 0 && p.port < 65536)
       .sort((a, b) => a.port - b.port);
+  }
+
+  /** Orphan flag (B-16d9, LOCAL only): a listener whose cwd was DELETED is a
+   *  zombie dev server — a session started it in a throwaway worktree and
+   *  removed the directory without killing it (real case: two next-servers
+   *  eating 12GB for a day). /proc/<pid>/cwd readlink ends " (deleted)". */
+  _classifyOrphan(p) {
+    if (!p.pid) return p;
+    try {
+      if (fs.readlinkSync(`/proc/${p.pid}/cwd`).endsWith(' (deleted)')) p.orphan = true;
+    } catch { }
+    return p;
+  }
+
+  /** Kill a LOCAL orphaned listener — re-verifies the deleted-cwd condition at
+   *  kill time so the route can never be pointed at an arbitrary process. */
+  killOrphan(pid) {
+    pid = Number(pid);
+    if (!Number.isInteger(pid) || pid <= 1) throw new Error('bad pid');
+    let cwd = '';
+    try { cwd = fs.readlinkSync(`/proc/${pid}/cwd`); } catch { throw new Error('process is gone already'); }
+    if (!cwd.endsWith(' (deleted)')) throw new Error('refusing: the process cwd still exists (not an orphan)');
+    process.kill(pid, 'SIGTERM');
+    this.log(`killed orphaned listener pid ${pid} (cwd ${cwd})`);
+    return { ok: true };
   }
 
   /** Start a forward (idempotent by hostId+remotePort). Binds a local port and

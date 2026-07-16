@@ -2622,6 +2622,11 @@ app.post('/api/port-forward/:id/publish', async (req, res) => {
 app.delete('/api/port-forward/:id/publish', async (req, res) => {
   try { await portForwards.unpublish(String(req.params.id)); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); }
 });
+// Kill a LOCAL orphaned listener (B-16d9): killOrphan re-verifies the
+// deleted-cwd condition at kill time, so this can't target a healthy process.
+app.post('/api/ports/kill-orphan', (req, res) => {
+  try { res.json(portForwards.killOrphan((req.body || {}).pid)); } catch (e) { res.status(400).json({ error: e.message }); }
+});
 setTimeout(() => { try { hosts.sweepJsonlCache(); } catch {} }, 60000); // orphaned/stale remote-transcript cache
 const { RemoteFs } = require('./src/remote-fs');
 const remoteFs = new RemoteFs(hosts);
