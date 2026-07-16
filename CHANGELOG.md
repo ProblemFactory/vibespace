@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.179.1 — 2026-07-16
+- **Agents panel: rail-native redesign, width-verified** (real report ×2 — the 2.178.0 panel overflowed horizontally). Root causes closed: the modal's `min-width: 380px` leaked into the panel via a descendant selector that should have been a compound one; and the panel's flat-section rule put `flex-wrap` on the COLUMN rosters, where `align-items: stretch` then fills the flex line (widest content) instead of the container — every child pinned wider than the panel. In the sidebar the panel is now FLAT (vscode-style hairline sections, quiet uppercase titles); the modal keeps its card layout.
+- **Width-adaptive usage readout**: ≥340px shows the donut cluster; below, a container query swaps in ONE pill showing the TIGHTEST quota bucket (e.g. `7d 55%`, full breakdown in the tooltip) so account rows stay single-line at any sidebar width. Name/email and the roster header shrink with ellipsis instead of forcing intrinsic width; the Agent-instructions textareas are fluid.
+- Verified with headless-chrome screenshots + numeric overflow audits at 260/340/460px (0 overflowing elements at all three; donut↔pill swap confirmed).
+
 ## 2.179.0 — 2026-07-16
 - **Resume guard — the duplicate-session double-writer is closed** (walter's real incident: TWO live claude processes both `--resume` of the SAME conversation id, same cwd — two identical sidebar cards, one JSONL with two writers). A plain claude resume REUSES the conversation id, so the server now refuses to spawn a resume whose id is already LIVE on the same machine and hands the existing session back; the client attaches it instead of opening a second copy (forks are exempt — they mint a new id; codex resume forks a thread id by design).
 - **Kill resolves by conversation id when the webui id went stale** (the suspected chain behind walter's duplicate: the billing switcher's kill silently no-op'd on a stale server id, then its respawn double-resumed). The billing switcher passes `backendSessionId` with its kill and the server falls back to it.

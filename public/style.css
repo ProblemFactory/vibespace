@@ -289,15 +289,7 @@ html, body {
 .acct-key-row:hover { background: color-mix(in srgb, var(--text) 5%, transparent); }
 .acct-usage-cell { margin-left: auto; }
 .acct-key-actions { flex: none; }
-/* very narrow (rail panel): usage donuts wrap under the name so the name keeps
-   its width and the star/⋯ stay reachable */
-@container (max-width: 300px) {
-  .acct-key-row { flex-wrap: wrap; }
-  .acct-key-main { flex: 1 1 60%; }
-  .acct-usage-cell { order: 9; flex-basis: 100%; margin-left: 22px; justify-content: flex-start; }
-  .acct-usage-cell:empty { display: none; }
-  .acct-key-actions { margin-left: auto; }
-}
+
 /* Subscription on a remote host with the opt-in off: dim the identity + the
    Test button so it reads as "not available here" (still renamable/removable). */
 .acct-key-row.acct-row-blocked .acct-type-icon,
@@ -1969,7 +1961,11 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .gs-menu-item.danger .gs-menu-icon { color: var(--red); }
 
 /* ── Manage Agents dialog ── */
-.agents-dialog-body { display: flex; flex-direction: column; gap: 10px; min-width: 380px; }
+.agents-dialog-body { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+/* only the MODAL gets the wide floor — in the rail panel the SAME class sits
+   on the ~300px panel div (.rail-panel.agents-dialog-body, compound not
+   descendant — the 380px floor leaking in was the 2.178.0 overflow bug) */
+.dialog.agents-dialog .agents-dialog-body { min-width: 380px; }
 .agents-dialog-body .ob-backend { margin: 0; }
 .agent-actions { display: flex; gap: 6px; align-items: center; }
 .agent-btn {
@@ -3032,7 +3028,7 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
    modals (agents-dialog-body / mounts-dialog-body) — set on the container in
    _showAgentsDialog/openPluginsDialog — so one stylesheet + the .acct-list
    container query serve both. Only the modal min-width must relax in-panel. */
-.rail-panel .agents-dialog-body, .rail-panel .mounts-dialog-body { min-width: 0; }
+.rail-panel.agents-dialog-body, .rail-panel.mounts-dialog-body { min-width: 0; }
 .rail-panel .ob-backend { flex-wrap: wrap; }
 
 /* ports published-URL row (the address to copy — a tooltip-only globe left
@@ -3045,3 +3041,61 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .ob-backend-id { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; min-width: 0; }
 .ob-backend-id b { flex: none; }
 .acct-add { white-space: nowrap; }
+
+/* rail agents/plugins panel: everything shrinks inside the narrow panel */
+.rail-panel.agents-dialog-body { overflow-x: hidden; }
+.rail-panel .agents-host-row { flex-wrap: wrap; }
+.rail-panel .agents-host-select { flex: 1 1 120px; min-width: 0; max-width: 100%; }
+.rail-panel .ob-backend { min-width: 0; }
+.rail-panel .ob-backend > div { min-width: 0; }
+
+/* ── Agents panel, rail-native layout (2.179.1 redesign) ──
+   In the sidebar the modal's floating card-in-card look reads cramped and
+   fights narrow widths; the panel goes FLAT (vscode style): full-bleed
+   sections split by hairlines, quiet section titles, smaller type. The modal
+   keeps its card layout untouched. */
+.rail-panel.agents-dialog-body { gap: 0; }
+.rail-panel .ob-backend {
+  display: flex; background: none; border: none; border-radius: 0;
+  padding: 10px 2px; margin: 0; border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  font-size: 12px;
+}
+/* wrap ONLY the plain status rows — on the COLUMN rosters flex-wrap makes
+   align-items:stretch fill the flex LINE (widest content) instead of the
+   container, which un-shrinkably overflowed every narrower panel (probe: all
+   children pinned at 221px inside a 188px panel) */
+.rail-panel .ob-backend:not(.acct-roster) { flex-wrap: wrap; }
+.acct-roster > * { min-width: 0; max-width: 100%; }
+.acct-roster-head .acct-add { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct-list > .acct-key-row { min-width: 0; }
+.rail-panel .agents-host-row + .ob-backend, .rail-panel .ob-backend:first-child { border-top: none; }
+.rail-panel .acct-roster-head b { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail-panel .acct-roster-head .acct-add { padding: 1px 7px; font-size: 10px; }
+.rail-panel .agents-note { font-size: 10px; }
+.rail-panel .agent-actions { margin-left: auto; }
+.rail-panel .agents-adv { border: none; border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); border-radius: 0; }
+
+/* Width-adaptive usage (the donut cluster is ~100px and cannot shrink):
+   ≥340px container = donuts + age; below = ONE pill showing the TIGHTEST
+   bucket, full breakdown in its tooltip. Both are in the markup; the
+   container query flips them. */
+.acct-usage-mini { display: none; font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 999px; background: color-mix(in srgb, currentColor 14%, transparent); white-space: nowrap; }
+@container (max-width: 340px) {
+  .acct-key-row .acct-usage { display: none; }
+  .acct-key-row .acct-usage-mini { display: inline-flex; }
+}
+
+/* intrinsic-width breakers (2.179.1 screenshot audit): nowrap name/email and
+   the roster title set the row's min-content ~312px and clipped every narrower
+   panel — flex-basis 0 + min-width 0 makes them SHRINK, inner ellipsis takes
+   over. Applies everywhere the rows render (modal included — harmless there). */
+.acct-key-row .acct-key-main { flex: 1 1 0; min-width: 0; }
+.acct-key-main .acct-key-tail { min-width: 0; max-width: 100%; }
+.acct-roster-head b { flex: 1 1 auto; min-width: 0; }
+.rail-panel .acct-roster-head { min-width: 0; }
+.rail-panel .agents-note { overflow-wrap: anywhere; }
+
+/* the collapsed Agent-instructions editor: fluid fields in the panel (its
+   textareas carried a fixed 200px width — the last overflow source at 260px) */
+.rail-panel .agents-adv-body, .rail-panel .agents-field { min-width: 0; max-width: 100%; }
+.rail-panel .agents-adv .settings-json, .rail-panel .agents-adv textarea { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }

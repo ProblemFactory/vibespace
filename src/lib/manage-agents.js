@@ -129,7 +129,19 @@ export function installManageAgents(App, ctx = {}) {
     // conditional rendering shifted the right-aligned donut group per row and
     // broke the column alignment across the roster (measured: 28px jump).
     const ageLabel = age != null && age > 5 ? (age < 100 ? t('{n}m', { n: age }) : t('{n}h', { n: Math.round(age / 60) })) : '';
-    return `<span class="acct-usage">${parts.join('')}<span class="acct-usage-age" title="${age != null ? t('Last refreshed {n} min ago', { n: age }) : ''}">${ageLabel}</span></span>`;
+    // Narrow-width companion (rail panel, 2.179.1): the donut cluster is
+    // ~100px and doesn't shrink — below ~340px a container query swaps it for
+    // ONE pill showing the TIGHTEST bucket (full detail in the tooltip).
+    const buckets = [['5h', u.fiveHour], ['7d', u.sevenDay], ...(u.scopedWeekly || []).map((sc) => [String(sc.name || '?').slice(0, 2), sc])]
+      .map(([label, x]) => [label, pct(x)]).filter(([, p]) => Number.isFinite(p));
+    let mini = '';
+    if (buckets.length) {
+      const [wl, wp] = buckets.reduce((a, b) => (b[1] > a[1] ? b : a));
+      const wc = wp > 95 ? 'var(--red,#e55)' : wp > 80 ? 'var(--yellow,#e5c07b)' : 'var(--green,#3fb950)';
+      const tip = buckets.map(([l, p]) => `${l} ${p}%`).join(' · ');
+      mini = `<span class="acct-usage-mini" style="color:${wc}" title="${escHtml(tip)}">${escHtml(wl)} ${wp}%</span>`;
+    }
+    return `<span class="acct-usage">${parts.join('')}<span class="acct-usage-age" title="${age != null ? t('Last refreshed {n} min ago', { n: age }) : ''}">${ageLabel}</span></span>${mini}`;
   },
 
   async _renderCodexAccounts(ctx) {
