@@ -146,6 +146,7 @@ Overrides persist in the layout auto-save.
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `sidebar.activityRail` | boolean | `true` | vscode-style vertical icon rail (Folders/Task Groups/Remote/Ports panels + Agents/Plugins + launchers); off = classic tab bar + modal dialogs |
+| `sidebar.railPersistent` | boolean | `true` | Collapsing the sidebar keeps the 44px rail strip on screen (vscode-style); click any icon to expand back |
 | `sidebar.defaultStatusFilter` | multiSelect | live, tmux, external, stopped | Which statuses to show by default (excludes archived) |
 | `sidebar.enableStatusQuickTabs` | boolean | `false` | Show ALL/LIVE/TMUX/EXT/STOP/ARCH quick-filter tabs |
 | `sidebar.defaultTab` | enum | `folders` | Which sidebar tab opens on page load (folders / tasks / mounts) |

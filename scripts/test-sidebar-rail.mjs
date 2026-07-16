@@ -100,11 +100,34 @@ try {
   await sleep(500);
   check('openPluginsDialog redirects to rail panel', await evalJs(`!!document.querySelector('.rail-panel-plugins') && !document.getElementById('plugins-dialog')`));
 
-  // re-click active item collapses the sidebar
+  // re-click active item collapses the sidebar — but the rail STRIP persists
+  // (sidebar.railPersistent, default ON) and a rail click expands back
   await evalJs(`app.sidebar._railGo('plugins')`);
   await sleep(200);
   check('re-click collapses sidebar', await evalJs(`!app.sidebar.isOpen`));
+  check('collapsed keeps the rail strip', await evalJs(`document.getElementById('sidebar').classList.contains('rail-collapsed')`));
+  check('collapsed strip is 44px', await evalJs(`Math.round(document.getElementById('sidebar').getBoundingClientRect().width) === 44`));
+  check('panel area hidden while collapsed', await evalJs(`getComputedStyle(document.querySelector('.sidebar-main')).display === 'none'`));
+  await evalJs(`app.sidebar._railGo('folders')`);
+  await sleep(200);
+  check('rail click expands back', await evalJs(`app.sidebar.isOpen && !document.getElementById('sidebar').classList.contains('rail-collapsed')`));
+  // railPersistent OFF → collapsing hides everything (classic)
+  await evalJs(`app.settings.set('sidebar.railPersistent', false)`);
+  await sleep(1200); // let the save echo land (applyRemote guard covers the debounce)
+  await evalJs(`app.sidebar.toggle(false)`);
+  await sleep(200);
+  check('persistent off: collapse hides fully', await evalJs(`!document.getElementById('sidebar').classList.contains('rail-collapsed')`));
+  await evalJs(`app.settings.set('sidebar.railPersistent', true)`);
+  await sleep(200);
+  check('persistent back on applies live to a collapsed sidebar', await evalJs(`document.getElementById('sidebar').classList.contains('rail-collapsed')`));
   await evalJs(`app.sidebar.toggle(true)`);
+  // header title tracks the active panel
+  await evalJs(`app.sidebar._railGo('ports')`);
+  await sleep(300);
+  check('header title tracks panel', await evalJs(`document.querySelector('#sidebar .sidebar-title').textContent.length > 0 && document.querySelector('#sidebar .sidebar-title').textContent !== 'Sessions'`));
+  await evalJs(`app.sidebar._railGo('folders')`);
+  await sleep(200);
+  check('header title restores for sessions', await evalJs(`document.querySelector('#sidebar .sidebar-title').textContent === 'Sessions'`));
 
   // setting OFF live-restores the classic tab bar + falls back to a session tab
   await evalJs(`app.settings.set('sidebar.activityRail', false)`);

@@ -3002,3 +3002,28 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .rail-item[data-rail="diagnostics"] .rail-badge { background: var(--red, #e55); color: #fff; }
 body.sidebar-right #sidebar-rail { order: 2; border-right: none; border-left: 1px solid var(--border); }
 body.sidebar-right .rail-item.active::before { left: auto; right: -2px; }
+
+/* rail persists through a sidebar collapse (sidebar.railPersistent): the strip
+   stays on screen, only the panel area hides. !important beats the resizer's
+   inline width. */
+.sidebar.rail-collapsed { transform: translateX(0); width: 44px !important; min-width: 0 !important; }
+body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
+.sidebar.rail-collapsed .sidebar-main { display: none; }
+
+/* ports rows: mono stroke icon buttons + folded system listeners */
+.rail-panel .mounts-icon-btn svg, .ports-pub svg { vertical-align: -2px; }
+.ports-btn-off { opacity: 0.45; }
+.ports-row-sys { opacity: 0.55; }
+.ports-sys-expander { display: block; background: none; border: none; color: var(--text-dim); font-size: 10px; cursor: pointer; padding: 3px 6px; }
+.ports-sys-expander:hover { color: var(--text-secondary); }
+
+/* management panels squeezed into the ~260px sidebar (their content is
+   modal-width): kill the modal min-width and let account rows wrap — donuts
+   drop to a second line under the name instead of crushing it. */
+.rail-panel .agents-dialog-body { min-width: 0; }
+.rail-panel .acct-list { display: flex; flex-direction: column; }
+.rail-panel .acct-key-row { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; }
+.rail-panel .acct-key-main { flex: 1 1 0; min-width: 0; }
+.rail-panel .acct-key-actions { margin-left: auto; flex: none; }
+.rail-panel .acct-usage-cell { flex: 1 1 100%; order: 9; padding-left: 24px; }
+.rail-panel .acct-usage-cell:empty { display: none; }

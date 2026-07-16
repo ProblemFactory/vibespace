@@ -23,7 +23,25 @@ const RAIL_ICONS = {
   settings: R('<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1L7 17M17 7l2.1-2.1"/>'),
 };
 
+// 13px action icons for the ports rows (emoji glyphs clash with the mono
+// stroke style of the rest of the chrome — real user report on the 🌐)
+const A = (d) => `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+const PORT_ICONS = {
+  open: A('<path d="M7 17L17 7M9 7h8v8"/>'),
+  globe: A('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>'),
+  globeOff: A('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/><path d="M4 4l16 16" stroke-width="2.6"/>'),
+  x: A('<path d="M6 6l12 12M18 6L6 18"/>'),
+  fwd: A('<path d="M4 12h14M12 6l6 6-6 6"/>'),
+};
+
 const PANEL_TABS = ['ports', 'agents', 'plugins'];
+
+// Sidebar header title per rail item (the tab bar is hidden, so the header is
+// the only label saying which panel is showing).
+const RAIL_TITLES = {
+  folders: 'Sessions', tasks: 'Task Groups', mounts: 'Remote',
+  ports: 'Ports', agents: 'Agents', plugins: 'Plugins',
+};
 
 export function installSidebarRail(Sidebar) {
   Object.assign(Sidebar.prototype, {
@@ -35,6 +53,7 @@ export function installSidebarRail(Sidebar) {
         if (on === false) this._removeRail(); else this._buildRail();
       };
       this.app.settings?.on?.('sidebar.activityRail', apply);
+      this.app.settings?.on?.('sidebar.railPersistent', () => { this._railApplyCollapsed(); this._applySidebarLayoutWidth(); });
       apply();
     },
 
@@ -89,6 +108,21 @@ export function installSidebarRail(Sidebar) {
       }
       this._railSync();
       this._railWireBadges();
+      this._railApplyTitle();
+      this._railApplyCollapsed();
+      this._applySidebarLayoutWidth();
+    },
+
+    /** vscode behavior (sidebar.railPersistent, default ON): a collapsed
+     *  sidebar keeps the rail as a 44px strip instead of hiding entirely. */
+    _railApplyCollapsed() {
+      const on = !!this._railEl && !this.isOpen && this.app.settings?.get('sidebar.railPersistent') !== false;
+      this.el.classList.toggle('rail-collapsed', on);
+    },
+
+    _railApplyTitle() {
+      const t = this.el.querySelector('.sidebar-title');
+      if (t) t.textContent = tr(RAIL_TITLES[this._activeTab] || 'Sessions');
     },
 
     /** Small count/⚠ badge on a rail icon. val = number | string | falsy(clear). */
@@ -134,7 +168,10 @@ export function installSidebarRail(Sidebar) {
       if (!this._railEl) return;
       this._panelDispose?.(); this._panelDispose = null;
       this._railEl.remove(); this._railEl = null;
-      this.el.classList.remove('rail-on');
+      this.el.classList.remove('rail-on', 'rail-collapsed');
+      const title = this.el.querySelector('.sidebar-title');
+      if (title) title.textContent = tr('Sessions');
+      this._applySidebarLayoutWidth();
       const tabs = this.el.querySelector('.sidebar-tabs');
       if (tabs) tabs.style.display = '';
       if (PANEL_TABS.includes(this._activeTab)) { this._activeTab = 'folders'; this._updateTabs(); this._render(); }
@@ -143,11 +180,15 @@ export function installSidebarRail(Sidebar) {
     _railGo(id) {
       this._tabTouched = true;
       try { localStorage.setItem('vibespace.railItem', id); } catch { }
-      if (this._activeTab === id) { this.toggle(); return; } // vscode: re-click = collapse
+      if (!this.isOpen) { // collapsed strip: any click expands (never re-collapses)
+        this.toggle(true);
+        if (this._activeTab === id) { this._railSync(); return; }
+      } else if (this._activeTab === id) { this.toggle(false); return; } // vscode: re-click = collapse
       this._panelDispose?.(); this._panelDispose = null;
       this._activeTab = id;
       this._updateTabs();
       this._railSync();
+      this._railApplyTitle();
       this._render();
     },
 
@@ -182,6 +223,10 @@ export function installSidebarRail(Sidebar) {
       const api = (u, opts) => fetchJson(u, opts);
       let hosts = [];
       try { hosts = ((await api('/api/hosts')) || {}).hosts || []; } catch { }
+      // publish needs the frp relay — without it the button must SAY so, not no-op
+      let frpOk = false;
+      try { frpOk = (((await api('/api/plugins')) || {}).plugins || []).some((p) => p.id === 'frp' && p.configured); } catch { }
+      const FRP_MSG = tr('Public URLs need the frp relay — not configured on this instance');
       const machines = [{ id: '__local__', name: tr('This machine'), online: true }, ...hosts.map((h) => ({ id: h.id, name: h.name || h.id, online: h.transport === 'dial' ? !!h.online : true }))];
       const nameOf = (hid) => (machines.find((m) => m.id === hid) || {}).name || hid;
 
@@ -198,19 +243,28 @@ export function installSidebarRail(Sidebar) {
           const row = document.createElement('div');
           row.className = 'ports-row';
           const label = `${escHtml(nameOf(f.hostId))}:${f.remotePort}`;
-          row.innerHTML = `<span class="ports-row-label" title="${label}">${label}${f.publicUrl ? ` <span class="ports-pub" title="${escHtml(f.publicUrl)}">🌐</span>` : ''}</span>`;
+          row.innerHTML = `<span class="ports-row-label" title="${label}">${label}${f.publicUrl ? ` <span class="ports-pub" title="${escHtml(f.publicUrl)}">${PORT_ICONS.globe}</span>` : ''}</span>`;
           const acts = document.createElement('span');
           acts.className = 'ports-row-actions';
-          const btn = (txt, tip, fn) => { const b = document.createElement('button'); b.className = 'mounts-icon-btn'; b.textContent = txt; b.dataset.tip = tip; b.onclick = fn; return b; };
-          if (f.url) acts.append(btn('↗', tr('Open (through the app proxy)'), () => this.app.openBrowser?.(f.publicUrl || f.url, { proxy: !f.publicUrl })));
-          acts.append(btn(f.publicUrl ? '🔒' : '🌐', f.publicUrl ? tr('Unpublish from the internet') : tr('Publish to the internet (frp relay)'), async () => {
-            try {
-              if (f.publicUrl) await api(`/api/port-forward/${encodeURIComponent(f.id)}/publish`, { method: 'DELETE' });
-              else { const r = await api(`/api/port-forward/${encodeURIComponent(f.id)}/publish`, { method: 'POST' }); if (r?.publicUrl) showToast(tr('Published: {url}', { url: r.publicUrl })); }
-            } catch (e) { showToast(e.message || 'failed', { type: 'error' }); }
+          const btn = (icon, tip, fn) => { const b = document.createElement('button'); b.className = 'mounts-icon-btn'; b.innerHTML = icon; b.dataset.tip = tip; b.onclick = fn; return b; };
+          if (f.url) acts.append(btn(PORT_ICONS.open, tr('Open (through the app proxy)'), () => this.app.openBrowser?.(f.publicUrl || f.url, { proxy: !f.publicUrl })));
+          const pubBtn = btn(f.publicUrl ? PORT_ICONS.globeOff : PORT_ICONS.globe,
+            !frpOk && !f.publicUrl ? FRP_MSG : (f.publicUrl ? tr('Unpublish from the internet') : tr('Publish to the internet (frp relay)')),
+            async () => {
+              if (!frpOk && !f.publicUrl) { showToast(FRP_MSG, { type: 'error' }); return; }
+              // fetchJson never throws — a 4xx comes back as {error}; surface it
+              const r = await api(`/api/port-forward/${encodeURIComponent(f.id)}/publish`, { method: f.publicUrl ? 'DELETE' : 'POST' });
+              if (r?.error) showToast(r.error, { type: 'error' });
+              else if (r?.publicUrl) showToast(tr('Published: {url}', { url: r.publicUrl }));
+              render();
+            });
+          if (!frpOk && !f.publicUrl) pubBtn.classList.add('ports-btn-off');
+          acts.append(pubBtn);
+          acts.append(btn(PORT_ICONS.x, tr('Stop forwarding'), async () => {
+            const r = await api(`/api/port-forward/${encodeURIComponent(f.id)}`, { method: 'DELETE' });
+            if (r?.error) showToast(r.error, { type: 'error' });
             render();
           }));
-          acts.append(btn('✕', tr('Stop forwarding'), async () => { try { await api(`/api/port-forward/${encodeURIComponent(f.id)}`, { method: 'DELETE' }); } catch { } render(); }));
           row.appendChild(acts);
           sec.appendChild(row);
         }
@@ -232,18 +286,36 @@ export function installSidebarRail(Sidebar) {
             scan.disabled = true; scan.textContent = tr('Scanning…');
             try {
               const r = await api(`/api/hosts/${encodeURIComponent(m.id)}/ports`);
+              if (r?.error) throw new Error(r.error);
               list.innerHTML = '';
-              for (const p of (r?.ports || []).slice(0, 40)) {
+              const all = r?.ports || [];
+              // vscode-style: known non-web system listeners (sshd, dns, cups…)
+              // fold behind an expander instead of burying the dev servers
+              const vis = all.filter((p) => !p.hidden).slice(0, 40);
+              const hid = all.filter((p) => p.hidden);
+              const portRow = (p) => {
                 const pr = document.createElement('div');
-                pr.className = 'ports-row';
+                pr.className = 'ports-row' + (p.hidden ? ' ports-row-sys' : '');
                 pr.innerHTML = `<span class="ports-row-label">${p.port}${p.proc ? ' <span class="ports-proc">' + escHtml(p.proc) + '</span>' : ''}</span>`;
                 const fb = document.createElement('button');
-                fb.className = 'mounts-icon-btn'; fb.textContent = '→'; fb.dataset.tip = tr('Forward this port here');
-                fb.onclick = async () => { try { await api(`/api/hosts/${encodeURIComponent(m.id)}/port-forward`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ port: p.port }) }); render(); } catch (e) { showToast(e.message || 'failed', { type: 'error' }); } };
+                fb.className = 'mounts-icon-btn'; fb.innerHTML = PORT_ICONS.fwd; fb.dataset.tip = tr('Forward this port here');
+                fb.onclick = async () => {
+                  const fr = await api(`/api/hosts/${encodeURIComponent(m.id)}/port-forward`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ port: p.port }) });
+                  if (fr?.error) showToast(fr.error, { type: 'error' });
+                  render();
+                };
                 pr.appendChild(fb);
-                list.appendChild(pr);
+                return pr;
+              };
+              for (const p of vis) list.appendChild(portRow(p));
+              if (hid.length) {
+                const ex = document.createElement('button');
+                ex.className = 'ports-sys-expander';
+                ex.textContent = tr('+ {n} system listeners', { n: hid.length });
+                ex.onclick = () => { ex.replaceWith(...hid.map(portRow)); };
+                list.appendChild(ex);
               }
-              if (!(r?.ports || []).length) list.innerHTML = `<div class="empty-hint empty-hint-inline">${escHtml(tr('No listening ports found'))}</div>`;
+              if (!all.length) list.innerHTML = `<div class="empty-hint empty-hint-inline">${escHtml(tr('No listening ports found'))}</div>`;
             } catch (e) { list.innerHTML = `<div class="empty-hint empty-hint-inline">${escHtml(e.message || 'scan failed')}</div>`; }
             scan.disabled = false; scan.textContent = tr('Scan ports');
           };
