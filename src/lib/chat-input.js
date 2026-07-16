@@ -274,8 +274,6 @@ export class ChatInput {
   /** The .chat-input-area wrapper element */
   get element() { return this._element; }
 
-  /** The streaming status element (for readOnly mode, shared reference) */
-  get statusElement() { return this._streamStatus; }
 
   // ── Upload files/folders to the session cwd, then insert their path(s) ──
   // Called by the upload button, the folder picker, and ChatView's drag-drop.
@@ -361,8 +359,6 @@ export class ChatInput {
     if (isError || !/…$/.test(msg)) this._uploadToastTimer = setTimeout(() => el.classList.add('hidden'), 3000);
   }
 
-  /** The todo display element */
-  get todoElement() { return this._todoDisplay; }
 
   /** Whether currently streaming */
   get isStreaming() { return this._isStreaming; }

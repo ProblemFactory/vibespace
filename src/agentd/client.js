@@ -38,9 +38,7 @@ class DeviceManager {
     // daemon over `ssh … -- node <remoteAgentd> --stdio` (the bridge). Default
     // local keeps M0/M1 unchanged.
     this._transport = transport || { kind: 'local' };
-    this._tokenId = this._transport.kind === 'ssh' ? ('host:' + (this._transport.host?.id || 'remote')) : 'local';
     this._conn = null;         // {mux, info}
-    this._backoffIdx = 0;
     this._connecting = false;
     this._stopped = false;
     // reverse forwards (port → connectLocal fn) survive the connection object:
@@ -118,7 +116,7 @@ class DeviceManager {
     const backoffs = [500, 1000, 2000, 5000];
     for (let attempt = 0; !this._stopped; attempt++) {
       const conn = await this._tryOnce(token).catch(() => null);
-      if (conn) { this._backoffIdx = 0; return conn; }
+      if (conn) return conn;
       if (attempt === 0 && this._transport.kind === 'local') this._spawnLocal(); // local: bring the daemon up (ssh bridge self-spawns the remote one)
       const delay = backoffs[Math.min(attempt, backoffs.length - 1)];
       await new Promise((r) => setTimeout(r, delay));

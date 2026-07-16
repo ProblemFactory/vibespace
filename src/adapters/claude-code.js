@@ -27,7 +27,6 @@ class ClaudeCodeAdapter extends BackendAdapter {
     this.config = config;
   }
 
-  get name() { return 'claude-code'; }
 
   /**
    * Create a Claude Code session.

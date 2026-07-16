@@ -89,8 +89,6 @@ class ThemeManager {
 
   getThemeNames() { return Object.keys(THEMES); }
 
-  isBuiltIn(name) { return BUILTIN_THEMES.has(name); }
-
   registerCustomTheme(name, cssVars, terminalColors) {
     const key = 'custom-' + name;
     THEMES[key] = { terminal: terminalColors || THEMES.dark.terminal };

@@ -157,7 +157,6 @@ export function installManageAgents(App, ctx = {}) {
     const GLOBE = svg('<circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c-2 2-2 10 0 12M8 2c2 2 2 10 0 12"/>');
     const STAR_F = svg('<path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 11.6 4.1 13.6l.8-4.3-3.1-3 4.3-.6z" fill="currentColor"/>');
     const STAR_O = svg('<path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 11.6 4.1 13.6l.8-4.3-3.1-3 4.3-.6z"/>');
-    const PENCIL = svg('<path d="M11 2.5 13.5 5 5.5 13H3v-2.5z"/>');
     const row = document.createElement('div'); row.className = 'ob-backend acct-section acct-roster';
     const left = document.createElement('div'); left.style.flex = '1';
     const gDef = !accts.defaultCodexAccountId;
@@ -767,7 +766,6 @@ export function installManageAgents(App, ctx = {}) {
     const KEY = svg('<circle cx="5" cy="9" r="2.6"/><path d="M7.4 8.2 14 3M11.5 5.2l1.6 1.6M13 3.7l1.6 1.6"/>', 1.5);
     const STAR_F = svg('<path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 11.6 4.1 13.6l.8-4.3-3.1-3 4.3-.6z" fill="currentColor"/>');
     const STAR_O = svg('<path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 11.6 4.1 13.6l.8-4.3-3.1-3 4.3-.6z"/>');
-    const PENCIL = svg('<path d="M11 2.5 13.5 5 5.5 13H3v-2.5z"/>');
     // Compact per-account usage readout — shared with the Codex roster.
     const usageHtml = (u) => this._acctUsageHtml(u);
     // Peer row: the SELECTED MACHINE's own global login. It's the default

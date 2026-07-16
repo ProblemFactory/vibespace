@@ -65,8 +65,6 @@
 .chat-status-tasks { font-size: 10px; color: var(--yellow); padding: 0 4px; }
 .chat-task-detail { padding: 6px 12px; }
 .chat-task-title { font-weight: 500; margin-bottom: 2px; }
-.chat-task-cmd { font-size: 10px; color: var(--text-dim); margin: 2px 0; }
-.chat-task-cmd code { background: var(--bg-root); padding: 1px 4px; border-radius: 2px; }
 .chat-status-bar { flex-wrap: wrap; }
 
 /* TODO display */
@@ -200,24 +198,6 @@
 }
 
 /* Tool results */
-.chat-tool-result {
-  margin: 6px 0; padding: 8px 12px; border-radius: var(--radius); font-size: 12px;
-}
-.chat-tool-result pre {
-  white-space: pre-wrap; font-size: 11px; max-height: 200px; overflow-y: auto; margin-top: 6px;
-}
-.chat-tool-result-details { font-size: 12px; border-radius: var(--radius-sm); }
-.chat-tool-result-details summary {
-  cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  padding: 3px 8px; font-size: 11px; color: var(--text-secondary); list-style: none;
-  max-width: 100%;
-}
-.chat-tool-result-details pre {
-  overflow-x: auto; word-break: break-all; margin: 4px 8px 6px;
-}
-.chat-tool-result-details summary::-webkit-details-marker { display: none; }
-.chat-tool-result-details summary::before { content: '\25B8  '; color: var(--text-dim); }
-.chat-tool-result-details[open] summary::before { content: '\25BE  '; }
 
 /* Diff view for Edit tool */
 /* Pending tool use (waiting for result) */
@@ -239,23 +219,6 @@
    huge sessions (no visible "truncated" notice — one continuous virtual scroll) */
 .chat-gap-sentinel { height: 1px; margin: 0; padding: 0; pointer-events: none; }
 /* Truncated-history seam: interactive "load earlier" card for huge sessions */
-.chat-history-gap { padding: 6px 0; }
-.chat-history-gap-inner {
-  display: flex; flex-direction: column; gap: 8px; align-items: center;
-  padding: 12px; margin: 4px 0; text-align: center;
-  border: 1px dashed var(--border); border-radius: var(--radius);
-  background: color-mix(in srgb, var(--accent) 5%, transparent);
-}
-.chat-history-gap-text { font-size: 11px; color: var(--text-dim); line-height: 1.5; max-width: 540px; }
-.chat-history-gap-hint { font-size: 10px; color: var(--text-dim); opacity: 0.7; }
-.chat-load-earlier-btn {
-  padding: 7px 16px; font-size: 12px; font-weight: 600; cursor: pointer;
-  border: 1px solid var(--accent); border-radius: var(--radius-sm);
-  background: var(--accent); color: var(--accent-fg);
-}
-.chat-load-earlier-btn:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
-.chat-load-earlier-btn:disabled { opacity: 0.5; cursor: default; }
-.chat-history-gap-done { font-size: 10px; color: var(--text-dim); font-style: italic; }
 
 .chat-system-notification { opacity: 0.7; font-size: 11px; color: var(--text-dim); padding: 2px 0; }
 .chat-system-notification > summary { cursor: pointer; list-style: none; }
@@ -309,16 +272,6 @@
 .chat-ask-submit { margin-left: auto; }
 .chat-ask-submit:disabled { opacity: 0.4; cursor: default; }
 .chat-permission-question .chat-status-dim { margin-left: 0; }
-.chat-perm-answer {
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-hover);
-  font-size: 12px;
-  line-height: 1.4;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
 .chat-perm-btn {
   padding: 3px 12px; border-radius: var(--radius-sm); font-size: 11px; font-weight: 600;
   cursor: pointer; border: 1px solid var(--border); transition: all var(--transition);

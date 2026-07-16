@@ -1081,33 +1081,6 @@ class ChatView {
     }
   }
 
-  _deriveTypingLabel() {
-    for (let i = this._messages.length - 1; i >= 0; i--) {
-      const msg = this._messages[i];
-      if (!msg) continue;
-      // Stop at user messages — streaming never crosses turn boundaries.
-      // This prevents stale streaming messages from earlier turns from
-      // showing a permanent 'responding...' indicator.
-      if (msg.role === 'user') return '';
-      if (msg.role === 'tool' && msg.status === 'pending') {
-        return t('running {tool}...', { tool: msg.toolName || t('tool') });
-      }
-      if (msg.status !== 'streaming') continue;
-      const block = msg.content?.[0];
-      if (msg.role === 'tool') return t('running {tool}...', { tool: msg.toolName || block?.toolName || t('tool') });
-      if (block?.type === 'thinking') return t('thinking...');
-      if (block?.type === 'text') return t('responding...');
-      return t('thinking...');
-    }
-    return '';
-  }
-
-  _syncTypingIndicator(fallbackLabel = '') {
-    const label = this._deriveTypingLabel() || fallbackLabel || '';
-    if (label) this._showTyping(label);
-    else this._hideTyping();
-  }
-
   // Create a new normalized message → render and append to DOM
   _onCreateMessage(msg) {
     if (this._renderedMsgIds.has(msg.id)) return;

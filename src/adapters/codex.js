@@ -11,7 +11,6 @@ const fs = require('fs');
 const os = require('os');
 
 const CODEX_SESSIONS_DIR = path.join(os.homedir(), '.codex', 'sessions');
-const CODEX_PERMISSION_MODES = ['default', 'read-only', 'safe-yolo', 'yolo'];
 
 function pushCodexConfigOverride(args, key, value) {
   if (!Array.isArray(args) || !key || value === undefined || value === null || value === '') return;
@@ -754,7 +753,6 @@ class CodexAdapter extends BackendAdapter {
     this.config = config;
   }
 
-  get name() { return 'codex'; }
 
   /**
    * Build session args for Codex terminal/chat modes.
@@ -890,7 +888,6 @@ class CodexAdapter extends BackendAdapter {
 }
 
 module.exports = {
-  CODEX_PERMISSION_MODES,
   CODEX_SESSIONS_DIR,
   CodexAdapter,
   findCodexSessionJsonlPath,
@@ -898,11 +895,9 @@ module.exports = {
   parseCodexSessionJsonl,
   extractCodexThreadMeta,
   readJsonlBounded,
-  getJsonlLineIndex,
   jsonlGapInfo,
   readJsonlLineRange,
   scanJsonlUserTurns,
   searchJsonlFull,
   searchJsonlFullStream,
-  resolveCodexPermissionMode,
 };

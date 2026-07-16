@@ -172,12 +172,6 @@ class MountManager {
     this._notify();
   }
 
-  clearMyStorageConfig() {
-    delete this._state.myStorage;
-    this._save();
-    this._notify();
-  }
-
   // ── Import an rclone config file (rclone.conf) ──
   // Users who already configured remotes elsewhere (`rclone config`) can paste
   // the whole file. It's INI: [remote-name] then key = value lines. We turn
@@ -1178,35 +1172,6 @@ class MountManager {
     return m.id;
   }
 
-  /**
-   * Derive a NEW mount from an existing one's connection (same credentials,
-   * different bucket/path/prefix) — one imported R2/S3 credential can back
-   * any number of mounts (user request). Encrypted fields copy verbatim
-   * (same instance key).
-   */
-  async duplicate(id, { name, ...overrides } = {}) {
-    const src = this._get(id);
-    if (!name) throw new Error('name required');
-    if (this._state.mounts.some(x => x.name === name)) throw new Error('A mount with that name exists');
-    const copy = JSON.parse(JSON.stringify(src));
-    copy.id = 'mnt-' + crypto.randomBytes(5).toString('hex');
-    copy.name = String(name).slice(0, 60);
-    copy.origin = 'manual';
-    copy.createdAt = Date.now();
-    copy.desired = 'unmounted';
-    copy.customPath = null;
-    this._state.mounts.push(copy);
-    this._save();
-    try {
-      await this.update(copy.id, overrides); // reuse the per-type field logic
-    } catch (e) {
-      this._state.mounts = this._state.mounts.filter(x => x.id !== copy.id);
-      this._save(); this._notify();
-      throw e;
-    }
-    return copy.id;
-  }
-
   _get(id) {
     const m = this._state.mounts.find(x => x.id === id);
     if (!m) throw new Error('mount not found');
@@ -1898,13 +1863,6 @@ class MountManager {
     const c = this.getMyStorageConfig({ redact: false });
     if (!c) return null;
     return { endpoint: c.endpoint, bucket: c.bucket, prefix: c.prefix, accessKey: c.accessKey, secretKey: c.secretKey, configured: c.configured };
-  }
-
-  addMyStorage() {
-    const env = this.envStorage();
-    if (!env) throw new Error('VIBESPACE_S3_* not configured');
-    if (env.configured) throw new Error('My storage is already added');
-    return this.add({ name: 'my-storage', origin: 'my-storage', mode: 'rw', ...env });
   }
 
   // ── Share links ──

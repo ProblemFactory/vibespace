@@ -14,7 +14,6 @@ const { execFileSync, spawn } = require('child_process');
 const compression = require('compression');
 const { MessageManager } = require('./src/message-manager');
 const { createMessageManager } = require('./src/normalizers');
-const { MessageManager: _MM } = require('./src/message-manager');
 const { Telemetry } = require('./src/telemetry');
 const { SyncStore } = require('./src/sync-store');
 const { cwdToProjectDir, SessionMessages, findSessionJsonlPath } = require('./src/session-store');
@@ -447,7 +446,6 @@ const _agentdInstalled = new Map(); // hostId → version
 // the mux like every transport. Incoming dials land in a registry the
 // device's transport waits on. ──
 const agentdDials = new Map();      // deviceId → ws stream adapter (live dial)
-const agentdDialWaiters = new Map(); // deviceId → [resolve]
 // B-f3e8: the pairing credential lives ON the dial host record (hosts.json
 // dialTokenHash) — dial-tokens.json is migrated once at boot (below, after
 // HostManager construction) and there is no separate device registry anymore.
@@ -2944,18 +2942,6 @@ app.post('/api/mounts/:id/ceph-share', async (req, res) => {
   try { res.json(await mounts.mintCephShare(req.params.id, req.body || {})); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
-// My storage config — in-app, canonical (env imported once at first boot)
-app.get('/api/mounts/my-storage-config', (req, res) => {
-  res.json({ config: mounts.getMyStorageConfig() });
-});
-app.put('/api/mounts/my-storage-config', (req, res) => {
-  try { mounts.setMyStorageConfig(req.body || {}); res.json({ success: true, config: mounts.getMyStorageConfig() }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
-});
-app.delete('/api/mounts/my-storage-config', (req, res) => {
-  try { mounts.clearMyStorageConfig(); res.json({ success: true }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
-});
 
 // Mount tokens (WebDAV bridge): mint returns the link ONCE; stored hashed
 app.get('/api/mount-tokens', (req, res) => res.json({ tokens: mountTokens.list() }));
@@ -3057,28 +3043,10 @@ app.get('/api/mounts/drive-defaults', (req, res) => {
   res.json({ presets, hasDefaultClient: presets.length > 0 });
 });
 
-app.post('/api/mounts/my-storage', (req, res) => {
-  try { res.json({ success: true, id: mounts.addMyStorage() }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
-});
 app.post('/api/mounts/:id/share', async (req, res) => {
   try {
     const { folder, mode, name, expiryDays } = req.body || {};
     const out = await mounts.mintShareFromMount(req.params.id, { folder, mode, name, expiryDays });
-    res.json({ success: true, ...out });
-  } catch (e) { res.status(400).json({ error: e.message }); }
-});
-app.post('/api/mounts/share', async (req, res) => {
-  try {
-    const env = mounts.envStorage();
-    if (!env) return res.status(400).json({ error: 'My storage (VIBESPACE_S3_*) is not configured — shares are minted with your own key' });
-    const { folder, mode, name, expiryDays } = req.body || {};
-    const prefix = [env.prefix, folder].filter(Boolean).join('/').replace(/\/+/g, '/');
-    const out = await mounts.mintShare({
-      name, endpoint: env.endpoint, bucket: env.bucket, prefix,
-      mode: mode === 'rw' ? 'rw' : 'ro',
-      ownerAccessKey: env.accessKey, ownerSecretKey: env.secretKey, expiryDays,
-    });
     res.json({ success: true, ...out });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -3104,10 +3072,6 @@ app.get('/api/mounts/:id/config', (req, res) => {
 });
 app.patch('/api/mounts/:id', async (req, res) => {
   try { await mounts.update(req.params.id, req.body || {}); res.json({ success: true, mounts: mounts.list() }); }
-  catch (e) { res.status(400).json({ error: e.message, mounts: mounts.list() }); }
-});
-app.post('/api/mounts/:id/duplicate', async (req, res) => {
-  try { const id = await mounts.duplicate(req.params.id, req.body || {}); res.json({ success: true, id, mounts: mounts.list() }); }
   catch (e) { res.status(400).json({ error: e.message, mounts: mounts.list() }); }
 });
 // Credentials (2.108.0): mount points under a credential + manual convert
@@ -3173,7 +3137,7 @@ app.use(sessionsRouter);
 const { setupUsage } = require('./src/usage-routes');
 const usage = setupUsage({ app, accounts, hosts, usageHistory, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR });
 // Normalizer-level settings reads (chat.hideEmptyHooks) go through the REAL store
-_MM.getSetting = (k) => { try { return serverSetting(k); } catch { return undefined; } };
+MessageManager.getSetting = (k) => { try { return serverSetting(k); } catch { return undefined; } };
 const { getOAuthToken, usagePollingEnabled, summarizeCodexRateLimit, summarizeCodexRateLimits } = usage;
 app.get('/api/available-models', (req, res) => {
   refreshCodexModels(); // mtime-guarded local read — stays current despite old-CLI cache rewrites
@@ -3191,11 +3155,11 @@ registerWsHandler(wss, {
   activeSessions, WS_OPEN, broadcastActiveSessions, broadcastToSession, resizeSessionToMin,
   setupSessionPty, refreshWebuiPids, deleteSessionMeta, writeSessionMeta, readSessionMeta,
   readLayouts, writeLayouts, getSyncStore, serverSetting,
-  sessionCounterRef, createSessionMessages, PERMISSION_MODES,
-  SOCKETS_DIR, BUFFERS_DIR, META_DIR, PTY_WRAPPER, CHAT_WRAPPER,
-  NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, CODEX_CMD, EDITOR_CMD, PORT, X_ENV,
+  sessionCounterRef, createSessionMessages,
+  SOCKETS_DIR, BUFFERS_DIR, PTY_WRAPPER, CHAT_WRAPPER,
+  NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, PORT, X_ENV,
   adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
-  sessionStatus, sessionStatusKey, getTasks: () => tasks, accounts, scheduleCtxSync, activeSessionsPayload,
+  accounts, scheduleCtxSync, activeSessionsPayload,
   USAGE_STATUSLINE_CMD, userStatuslineCmd,
 });
 
@@ -3375,9 +3339,6 @@ server.on('upgrade', (req, socket, head) => {
       try { const old = agentdDialDevices.get(deviceId); if (old && old._dialStream !== stream) { old.stop?.(); agentdDialDevices.delete(deviceId); } } catch { }
       try { hosts.invalidateDevice?.('host-dial-' + String(deviceId).replace(/[^\w-]/g, '')); } catch { }
       console.log(`[device] device '${deviceId}' dialed in`);
-      const waiters = agentdDialWaiters.get(deviceId) || [];
-      agentdDialWaiters.delete(deviceId);
-      waiters.forEach((r) => r(stream));
       // heal recorded pull mounts + re-own push tunnel ports + flip the UI dot
       try { machineMounts.onMachineLinked(hosts.findByDeviceId(deviceId)?.id); } catch { }
       try { portForwards.onMachineLinked(hosts.findByDeviceId(deviceId)?.id); } catch { }

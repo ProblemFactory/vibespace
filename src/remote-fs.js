@@ -299,9 +299,6 @@ class RemoteFs {
     }
   }
 
-  // Upload a local buffer/stream to a remote path (write covers buffers)
-  async uploadBuffer(id, destPath, buffer) { return this.write(id, destPath, buffer); }
-
   // Archives
   async archiveList(id, archivePath) {
     const ap = shq(archivePath);
