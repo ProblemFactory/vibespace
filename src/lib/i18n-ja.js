@@ -1973,6 +1973,7 @@ export default {
   "Relay address": "リレーアドレス",
   "Relay port": "リレーポート",
   "Relay token": "リレートークン",
+  "retried — replaced by a newer attempt": "リトライ済み——新しい試行に置換",
   "Sort": "並べ替え",
   "Default (by dimension)": "デフォルト（次元による）",
   "Axis / name order": "軸・名前順",
