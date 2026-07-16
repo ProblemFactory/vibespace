@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.175.0 — 2026-07-16
+- **CS-refactor flags GRADUATED — the toggles are gone.** `agentd.sessions`, `agentd.remoteSessions` and `agentd.dataPlane` are removed from Settings; the device-daemon paths are unconditional (local sessions through the daemon, remote chat as daemon pipe sessions, data plane over the device link). The legacy paths that the flags selected are deleted; what remains are FAILURE fallbacks only (local pty on daemon error, per-op ssh on device error, keeper for pre-existing keeper sessions).
+- **`agentd.publicUrl` is cluster-injectable**: helm now injects `VIBESPACE_PUBLIC_URL=https://<instance-host>` as the default; a user-set value in Settings still overrides, and the Settings field shows the injected address as its placeholder ("cluster default: …").
+- **PostHog integration removed entirely** (code, settings, helm) — per product decision; local diagnostics/telemetry are unaffected.
+
 ## 2.174.2 — 2026-07-16
 - **The REAL blank-shell-terminal root cause, probe-confirmed and closed:** dtach greets every attaching client with a clear-screen preamble (`\e[H\e[J`) as its redraw kickoff — a TUI repaints right after (SIGWINCH), but a plain SHELL repaints nothing, so every server restart / daemon re-exec wiped attached shell terminals live AND left the clear as the session buffer's LAST bytes (a pod-internal attach probe showed the buffer ending in `\e[H\e[J` — so every later attach ALSO rendered blank with the cursor home). The first output chunk within 2s of an attach now has a leading clear burst stripped (a pure-clear chunk is swallowed); later clears are real program output and untouched.
 - Toolbar-hosted desktop previews obey `taskbar.desktopPreviewRatio` (they were hardcoded to 34×20 — the setting had no effect once previews were moved out of the taskbar; real report). Derived from the toolbar's fixed height, label never below 6px.

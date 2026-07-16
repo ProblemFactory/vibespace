@@ -145,7 +145,7 @@ class MachineMounts {
     }
     const pub = this.publicUrl() || publicUrlFallback;
     if (pub) return { base: String(pub).replace(/\/$/, ''), tunnelPort: null };
-    throw new Error('no path for the remote to reach this instance — turn on agentd.dataPlane (the mount then rides the device tunnel, no public address needed) or set agentd.publicUrl');
+    throw new Error('no path for the remote to reach this instance — the device tunnel needs the machine daemon link; otherwise set agentd.publicUrl (Settings) or deploy with VIBESPACE_PUBLIC_URL');
   }
 
   // ── run-on-machine helpers (device link first; ssh fallback for ssh hosts) ──
