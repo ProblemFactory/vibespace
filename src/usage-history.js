@@ -620,10 +620,19 @@ class UsageHistory {
       }
     }
     const groupOut = {};
+    // Sequential dims keep AXIS order (day = lexicographic/chronological,
+    // hour/weekday = numeric) — cost-sorting them scrambled the hour axis in
+    // the dashboard (real report: bars ordered 18,21,2,16,… instead of 0→23).
+    // Categorical dims stay cost-sorted (the client top-Ns them).
+    const SEQ_SORT = {
+      day: (a, b) => (a.key < b.key ? -1 : 1),
+      hour: (a, b) => Number(a.key) - Number(b.key),
+      weekday: (a, b) => Number(a.key) - Number(b.key),
+    };
     for (const dim of Object.keys(dims)) {
       groupOut[dim] = Object.entries(dims[dim])
         .map(([key, b]) => ({ key, ...(dimMeta[dim]?.[key] || {}), ...this._finalize(b) }))
-        .sort((a, b) => b.cost - a.cost || b.totalTokens - a.totalTokens);
+        .sort(SEQ_SORT[dim] || ((a, b) => b.cost - a.cost || b.totalTokens - a.totalTokens));
     }
     const series = groupOut.day.slice().sort((a, b) => a.key < b.key ? -1 : 1);
     const pivotOut = {};

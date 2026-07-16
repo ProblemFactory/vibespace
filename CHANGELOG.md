@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.180.2 — 2026-07-16
+- **Usage dashboard: the hour/weekday axes are in axis order again** (real screenshot report — the 按小时 panel's bars ran 18, 21, 2, 16, …). The server sorted EVERY dimension's groups by cost, and the dashboard deliberately keeps sequential dims in server order — so the hour axis came out cost-sorted. Sequential dims (day/hour/weekday) now sort by key server-side; the client also sorts them itself (belt for old servers), **gap-fills the closed scales** (24 hours / 7 weekdays — a missing bucket read as a mislabeled bar, not "no data"), and the weekday panel shows Sun–Sat names instead of raw 0–6.
+
 ## 2.180.1 — 2026-07-16
 - **Steps/TODO no longer shows long-completed tasks as in-progress** (real report, reproduced on a 589MB transcript). Two cooperating causes: the huge-session tail-only window can miss a task's completing update entirely, and **compaction re-appends the retained records — with their ORIGINAL timestamps and uuids — after the whole history**, so a task's create/in_progress got replayed while its completed update (summarized away) did not; even a full file-order scan would end on the stale replay. The task-tool scan (`scanTaskEventsFull`) now streams the WHOLE file (substring pre-filter, byte-safe line splitting, incremental byte cursor — 1.6s cold / <100ms warm on 589MB), dedups replay copies by uuid, and applies events in TIMESTAMP order. This also retires the old "stub entry with empty subject" tail-window caveat.
 - Family preference is by LATEST USE: an ancient TodoWrite snapshot no longer shadows the newer TaskCreate/TaskUpdate list over full history (caught on the first real transcript — the "prefer TodoWrite when present" rule meant "ever used" once the scan went full-file).
