@@ -378,6 +378,71 @@ function getSubagentMetas(claudeSessionId, cwd) {
   return [];
 }
 
+// ── Full-file task-tool event scan (2.180.1, real report: a long-completed
+// task showed as in_progress in Steps forever) ──
+// Two cooperating failure modes: (a) the tail-only display window can MISS a
+// task's completing TaskUpdate entirely; (b) COMPACTION re-appends the
+// retained records (with their ORIGINAL timestamps and uuids) after the whole
+// history — so a task's create/in_progress get replayed while its completed
+// update (summarized away) does not, and even a full FILE-ORDER apply ends on
+// the stale replay. Fix: stream the WHOLE file once (substring pre-filter,
+// byte-safe line splitting, incremental byte cursor so a live session only
+// scans appended bytes) with uuid dedup (kills replay copies), and let the
+// caller apply events in TIMESTAMP order.
+const _taskEventCache = new Map(); // fp → {offset, carry, seq, pending, events, uuids}
+function scanTaskEventsFull(fp) {
+  let st;
+  try { st = fs.statSync(fp); } catch { return null; }
+  let c = _taskEventCache.get(fp);
+  if (!c || st.size < c.offset) c = { offset: 0, carry: Buffer.alloc(0), seq: 0, pending: new Map(), events: [], uuids: new Set() };
+  _taskEventCache.set(fp, c);
+  if (st.size === c.offset) return c.events;
+  let fd;
+  try { fd = fs.openSync(fp, 'r'); } catch { return c.events; }
+  try {
+    const CH = 16 * 1024 * 1024;
+    const buf = Buffer.allocUnsafe(CH);
+    while (c.offset < st.size) {
+      const n = fs.readSync(fd, buf, 0, Math.min(CH, st.size - c.offset), c.offset);
+      if (n <= 0) break;
+      c.offset += n;
+      // byte-safe line assembly: never toString across an arbitrary slab edge
+      // (a split multi-byte char corrupts the boundary line — the CJK/byte-
+      // offset lesson from usage-history)
+      const data = c.carry.length ? Buffer.concat([c.carry, buf.subarray(0, n)]) : Buffer.from(buf.subarray(0, n));
+      const cut = data.lastIndexOf(0x0a);
+      if (cut === -1) { c.carry = Buffer.from(data); continue; }
+      c.carry = Buffer.from(data.subarray(cut + 1));
+      for (const line of data.toString('utf-8', 0, cut).split('\n')) {
+        if (!line.includes('"TaskCreate"') && !line.includes('"TaskUpdate"') && !line.includes('"TodoWrite"') && !line.includes('Task #')) continue;
+        let rec; try { rec = JSON.parse(line); } catch { continue; }
+        if (rec.uuid) {
+          if (c.uuids.has(rec.uuid)) continue; // compaction replay copy
+          c.uuids.add(rec.uuid);
+        }
+        const content = rec.message?.content;
+        if (!Array.isArray(content)) continue;
+        const ts = Date.parse(rec.timestamp || '') || 0;
+        for (const b of content) {
+          if (!b || typeof b !== 'object') continue;
+          if (rec.type === 'assistant' && b.type === 'tool_use') {
+            if (b.name === 'TodoWrite' && b.input?.todos) c.events.push({ kind: 'todos', todos: b.input.todos, ts, seq: c.seq++ });
+            else if (b.name === 'TaskCreate') c.pending.set(b.id, b.input || {});
+            else if (b.name === 'TaskUpdate' && b.input?.taskId) c.events.push({ kind: 'update', input: b.input, ts, seq: c.seq++ });
+          } else if (rec.type === 'user' && b.type === 'tool_result' && c.pending.has(b.tool_use_id)) {
+            const inp = c.pending.get(b.tool_use_id);
+            c.pending.delete(b.tool_use_id);
+            const txt = typeof b.content === 'string' ? b.content : (Array.isArray(b.content) ? b.content.map((x) => x?.text || '').join(' ') : '');
+            const m = /Task #(\d+) created/.exec(txt);
+            if (m) c.events.push({ kind: 'create', id: m[1], subject: inp.subject || '', activeForm: inp.activeForm, ts, seq: c.seq++ });
+          }
+        }
+      }
+    }
+  } finally { try { fs.closeSync(fd); } catch { } }
+  return c.events;
+}
+
 function getHistorySessionId(session) {
   return session?.backendSessionId || session?.claudeSessionId || null;
 }
@@ -612,6 +677,41 @@ class SessionMessages {
     // ("Task #N created successfully: …").
     const pendingCreates = new Map(); // tool_use_id → input
     const taskList = new Map(); // taskId → {content, activeForm, status}
+    // Prefer the FULL-FILE event scan applied in TIMESTAMP order — the tail
+    // window misses old completions, and compaction replays stale records
+    // AFTER them (see scanTaskEventsFull). Falls back to the in-window walk
+    // when the transcript path can't be resolved.
+    let fullApplied = false;
+    try {
+      const hid = getHistorySessionId(this._session);
+      const fp = hid ? findSessionJsonlPath(hid, this._session?.cwd) : null;
+      const events = fp ? scanTaskEventsFull(fp) : null;
+      if (events) {
+        fullApplied = true;
+        let lastTodoTs = -1, lastTaskTs = -1;
+        for (const ev of [...events].sort((a, b) => (a.ts - b.ts) || (a.seq - b.seq))) {
+          if (ev.kind === 'todos') { todos.length = 0; todos.push(...ev.todos); lastTodoTs = ev.ts; }
+          else if (ev.kind === 'create') { if (!taskList.has(ev.id)) taskList.set(ev.id, { content: ev.subject, activeForm: ev.activeForm, status: 'pending' }); lastTaskTs = ev.ts; }
+          else if (ev.kind === 'update') {
+            lastTaskTs = ev.ts;
+            const key = String(ev.input.taskId);
+            if (ev.input.status === 'deleted') taskList.delete(key);
+            else {
+              const cur = taskList.get(key) || { content: '', status: 'pending' };
+              if (ev.input.subject) cur.content = ev.input.subject;
+              if (ev.input.activeForm) cur.activeForm = ev.input.activeForm;
+              if (ev.input.status) cur.status = ev.input.status;
+              taskList.set(key, cur);
+            }
+          }
+        }
+        // The LATEST-used family wins. The old tail-window scan expressed this
+        // as "TodoWrite present in the window"; over the FULL history that
+        // reads as "TodoWrite EVER used" and an ancient TodoWrite snapshot
+        // shadowed the current task list (caught on the first real transcript).
+        if (taskList.size && lastTaskTs >= lastTodoTs) todos.length = 0;
+      }
+    } catch { /* fall through to the in-window walk */ }
     for (const msg of this._all) {
       if (msg.type === 'system' && msg.tool_use_id) {
         if (msg.subtype === 'task_started') {
@@ -623,7 +723,7 @@ class SessionMessages {
           tasks[msg.tool_use_id].status = 'completed';
         }
       }
-      if (msg.type === 'assistant' && msg.message?.content) {
+      if (!fullApplied && msg.type === 'assistant' && msg.message?.content) {
         const blocks = Array.isArray(msg.message.content) ? msg.message.content : [];
         for (const b of blocks) {
           if (b.type !== 'tool_use') continue;
@@ -645,7 +745,7 @@ class SessionMessages {
           }
         }
       }
-      if (msg.type === 'user' && Array.isArray(msg.message?.content) && pendingCreates.size) {
+      if (!fullApplied && msg.type === 'user' && Array.isArray(msg.message?.content) && pendingCreates.size) {
         for (const b of msg.message.content) {
           if (b?.type !== 'tool_result' || !pendingCreates.has(b.tool_use_id)) continue;
           const inp = pendingCreates.get(b.tool_use_id);

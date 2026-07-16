@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.180.1 — 2026-07-16
+- **Steps/TODO no longer shows long-completed tasks as in-progress** (real report, reproduced on a 589MB transcript). Two cooperating causes: the huge-session tail-only window can miss a task's completing update entirely, and **compaction re-appends the retained records — with their ORIGINAL timestamps and uuids — after the whole history**, so a task's create/in_progress got replayed while its completed update (summarized away) did not; even a full file-order scan would end on the stale replay. The task-tool scan (`scanTaskEventsFull`) now streams the WHOLE file (substring pre-filter, byte-safe line splitting, incremental byte cursor — 1.6s cold / <100ms warm on 589MB), dedups replay copies by uuid, and applies events in TIMESTAMP order. This also retires the old "stub entry with empty subject" tail-window caveat.
+- Family preference is by LATEST USE: an ancient TodoWrite snapshot no longer shadows the newer TaskCreate/TaskUpdate list over full history (caught on the first real transcript — the "prefer TodoWrite when present" rule meant "ever used" once the scan went full-file).
+- Regression test: scripts/test-task-scan.mjs (synthetic compaction replay + uuid-less stale replay + family preference + incremental append, fake-HOME isolated).
+
 ## 2.180.0 — 2026-07-16
 - **Orphaned dev-server detection (B-16d9)**: a listener whose working directory was DELETED is a zombie — a session started `next dev`/`vite` in a throwaway worktree and removed the directory without killing the process (real case: two forgotten next-servers eating 12GB for a day). Local port scans now flag them (`/proc/<pid>/cwd` ends " (deleted)"), the port watch announces each one once (error-toast, even on the baseline sweep — garbage is garbage whenever it appeared), and both ports UIs show an `orphan` tag with a **Kill** button. The kill endpoint re-verifies the deleted-cwd condition at kill time, so it can never be pointed at a healthy process.
 - Port scans now carry the listener's pid (ss `-p`, lsof column 2, and the /proc fallback's inode scan).
