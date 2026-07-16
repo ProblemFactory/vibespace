@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.173.3 — 2026-07-16
+- **Bidirectional machine mounts are visually unambiguous** (real report: two sibling rows both said "→ path" with no hint which side the path was on). Every mount row now shows the full journey with each side labeled — `Mac:/Users/me/Downloads → here:/home/me/vibespace-machines/Mac-Downloads` (pull) vs `here:/home/me/project → Mac:/Users/me/vibespace-remote/project` (push) — and the badges carry direction arrows (⬇ from machine / ⬆ on machine).
+- Pairing installer: the post-start verification checks the daemon by its LOCK pid + ps command instead of `pgrep -f <path>` — the daemon rewrites its process title, so the path pgrep never matched a HEALTHY daemon and every successful install reported "exited immediately" followed by hours-old log lines (real report, twice). A real failure now shows only THIS run's output.
+
 ## 2.173.2 — 2026-07-16
 - **Shell terminals on a paired device run the DEVICE user's login shell** (zsh on a stock Mac) — they used to exec the basename of the POD's shell (bash), greeting Mac users with Apple's "default shell is now zsh" nag (real report). Resolution order: `$SHELL` → macOS `dscl UserShell` → linux `getent passwd` → zsh/bash fallback; started as a login shell. Server-side only — the device daemon is untouched (deliberately no daemon version bump: three self-upgrades in one evening were severing live local-terminal attaches).
 - Known issue filed: a daemon self-upgrade re-exec can blank ATTACHED local terminals until the page reloads (the buffer survives on disk) — root fix (reattach-with-replay after re-exec) is queued.

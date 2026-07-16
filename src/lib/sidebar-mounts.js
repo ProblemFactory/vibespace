@@ -678,7 +678,7 @@ export function installSidebarMounts(Sidebar) {
         top.innerHTML = `
           <span class="mounts-dot mounts-dot-${state}" title="${m.live ? escHtml(tr('Mounted')) : escHtml(tr('Pending — remounts when the machine is reachable'))}"></span>
           <b class="mounts-name" title="${escHtml(h.name || m.hostId)}:${escHtml(m.remotePath)} → ${escHtml(m.mountpoint)}">${escHtml(m.remotePath.split('/').pop() || m.remotePath)}</b>
-          <span class="mounts-badge" title="${escHtml(tr('Mounted at {mp} (read-only, over the device link)', { mp: m.mountpoint }))}">${escHtml(tr('from machine'))}</span>`;
+          <span class="mounts-badge" title="${escHtml(tr('Mounted at {mp} (read-only, over the device link)', { mp: m.mountpoint }))}">⬇ ${escHtml(tr('from machine'))}</span>`;
         if (!m.live) {
           const re = document.createElement('button');
           re.className = 'mounts-icon-btn';
@@ -717,7 +717,7 @@ export function installSidebarMounts(Sidebar) {
         top.innerHTML = `
           <span class="mounts-dot mounts-dot-${pushDown ? 'err' : pushGone ? 'off' : 'ok'}" title="${escHtml(pushDotTip)}"></span>
           <b class="mounts-name" title="${escHtml(m.folder)}">${escHtml(m.folder.split('/').pop() || m.folder)}</b>
-          <span class="mounts-badge" title="${escHtml(viaTip)}">${escHtml(pushGone ? tr('gone on machine') : tr('on machine'))} · ${escHtml(viaLabel)}</span>`;
+          <span class="mounts-badge" title="${escHtml(viaTip)}">⬆ ${escHtml(pushGone ? tr('gone on machine') : tr('on machine'))} · ${escHtml(viaLabel)}</span>`;
         if (pushGone) {
           const re = document.createElement('button');
           re.className = 'mounts-icon-btn';
@@ -746,7 +746,11 @@ export function installSidebarMounts(Sidebar) {
       const sub = document.createElement('div');
       sub.className = 'mounts-path';
       sub.style.direction = 'ltr';
-      sub.textContent = `→ ${m.mountpoint}`;
+      // full journey, each side labeled — two sibling rows with bare '→ path'
+      // were indistinguishable in a bidirectional pair (real report)
+      sub.textContent = m.dir === 'pull'
+        ? `${h.name}:${m.remotePath} → ${tr('here')}:${m.mountpoint}`
+        : `${tr('here')}:${m.folder} → ${h.name}:${m.mountpoint}`;
       row.append(top, sub);
       return row;
     },
