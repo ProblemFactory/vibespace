@@ -210,6 +210,11 @@ UNIT_EOF
   fi
 fi
 
+# remember where the (append-only) log ends — a failure report must show THIS
+# run's output, not hours-old history (real report: stale 'already running'
+# lines from dead pids read as a fresh failure)
+LOG_OFF=$(wc -c < "$ROOT/state/agentd.out" 2>/dev/null || echo 0)
+
 if [ -z "$started" ]; then
   # fallback: detached one-shot (no persistence — the pre-2.162 behavior).
   # macOS has NO setsid(1) (real report: silent non-start) — nohup there.
@@ -222,12 +227,21 @@ if [ -z "$started" ]; then
   started="detached process (NO persistence — rerun after a reboot)"
 fi
 
-sleep 2
-if pgrep -f "$ROOT/current/vibespace-device.js" >/dev/null 2>&1; then
-  echo "✓ vibespace device agent running via $started"
+# verify by the LOCK pid, not pgrep-by-path: the daemon rewrites its process
+# title to 'vibespace-device' (no path in ps), so a path pgrep never matches a
+# HEALTHY daemon and reported success as 'exited immediately' (real report)
+daemon_up() {
+  P=$(cat "$ROOT/state/agentd.lock" 2>/dev/null)
+  [ -n "$P" ] || return 1
+  kill -0 "$P" 2>/dev/null || return 1
+  case "$(ps -p "$P" -o command= 2>/dev/null)" in *vibespace-device*|*agentd*|"") return 0;; *) return 1;; esac
+}
+i=0; while [ $i -lt 8 ] && ! daemon_up; do sleep 1; i=$((i+1)); done
+if daemon_up; then
+  echo "✓ vibespace device agent running via $started (pid $(cat "$ROOT/state/agentd.lock" 2>/dev/null))"
   echo "  Output: $ROOT/state/agentd.out"
 else
-  echo "✗ the daemon exited immediately — last output:"
-  tail -5 "$ROOT/state/agentd.out" 2>/dev/null
+  echo "✗ the daemon did not stay up — output from THIS run:"
+  tail -c +"$((LOG_OFF + 1))" "$ROOT/state/agentd.out" 2>/dev/null | tail -20
   exit 1
 fi
