@@ -219,7 +219,12 @@ class DeviceManager {
               // /dav connection's socket + its listeners leak on every link
               // drop — the reconnect self-heal re-listens but never reconciles
               // the stale sockets (review finding, client.js:206).
-              for (const s of sessions.values()) { try { s.onClose?.(); } catch { } }
+              // ALSO fire onExit: pty/pipe session handles wire onExit, not
+              // onClose — a daemon re-exec (self-upgrade) otherwise left the
+              // server holding a silently-dead pty shim, so the detach-path
+              // auto-reattach never ran and local terminals froze/blanked
+              // until a page reload (real report, 3× in one evening).
+              for (const s of sessions.values()) { try { s.onClose?.(); } catch { } try { s.onExit?.(-1); } catch { } }
               sessions.clear();
               this._conn = null;
               this._log('[agentd] connection lost');
