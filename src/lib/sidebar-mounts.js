@@ -51,7 +51,7 @@ export function installSidebarMounts(Sidebar) {
         if (msg.type === 'machine-ports-new' && Array.isArray(msg.ports) && msg.ports.length) {
           const head = msg.ports.slice(0, 3).map((p) => `${p.port}${p.proc ? ' (' + p.proc + ')' : ''}`).join(', ');
           const extra = msg.ports.length > 3 ? ` +${msg.ports.length - 3}` : '';
-          showToast(tr('New port on "{name}": {ports} — 🔌 on its machine row forwards it', { name: msg.hostName || msg.hostId, ports: head + extra }));
+          showToast(tr('New port on "{name}": {ports} — 🔌 on its machine row forwards it', { name: msg.hostId === '__local__' ? tr('This machine') : (msg.hostName || msg.hostId), ports: head + extra }));
           this._portsDialogRefresh?.(msg.hostId);
         }
       });
@@ -550,11 +550,15 @@ export function installSidebarMounts(Sidebar) {
         <span class="mounts-badge" title="${escHtml(tr('The machine VibeSpace itself runs on — sessions and files here need no transport'))}">${escHtml(tr('LOCAL'))}</span>`;
       const actions = document.createElement('span');
       actions.className = 'mounts-row-actions';
+      const pb = document.createElement('button');
+      pb.className = 'mounts-icon-btn';
+      pb.innerHTML = MI.plug; pb.title = tr('Ports on this instance (open via the app, publish to the internet)');
+      pb.onclick = (e) => { e.stopPropagation(); this._showPortsDialog({ id: '__local__', name: tr('This machine'), transport: 'local' }); };
       const nb = document.createElement('button');
       nb.className = 'mounts-icon-btn';
       nb.innerHTML = MI.termNew; nb.title = tr('New session on this machine');
       nb.onclick = (e) => { e.stopPropagation(); this.app.showNewSessionDialog?.({}); };
-      actions.append(nb);
+      actions.append(pb, nb);
       top.appendChild(actions);
       const sub = document.createElement('div');
       sub.className = 'mounts-path';
@@ -701,13 +705,31 @@ export function installSidebarMounts(Sidebar) {
         // machine was OFFLINE (real report: 薛定谔的连接) — for dial machines
         // the tunnel dies with the link, so the dot follows h.online
         const pushDown = h.transport === 'dial' && !h.online;
+        // the machine's own mount table says the mount is GONE (real report:
+        // the user umounted it ON the Mac; the row stayed green with no way
+        // to re-mount) — amber + a ↻
+        const pushGone = !pushDown && m.remoteMounted === false;
         const pushDotTip = pushDown
           ? tr('Machine is offline — the tunnel is down; the mount heals when its daemon reconnects')
-          : (m.mode === 'rw' ? tr('Read-write') : tr('Read-only'));
+          : pushGone
+            ? tr('Not mounted on the machine anymore (unmounted there?) — ↻ re-mounts it')
+            : (m.mode === 'rw' ? tr('Read-write') : tr('Read-only'));
         top.innerHTML = `
-          <span class="mounts-dot mounts-dot-${pushDown ? 'err' : 'ok'}" title="${escHtml(pushDotTip)}"></span>
+          <span class="mounts-dot mounts-dot-${pushDown ? 'err' : pushGone ? 'off' : 'ok'}" title="${escHtml(pushDotTip)}"></span>
           <b class="mounts-name" title="${escHtml(m.folder)}">${escHtml(m.folder.split('/').pop() || m.folder)}</b>
-          <span class="mounts-badge" title="${escHtml(viaTip)}">${escHtml(tr('on machine'))} · ${escHtml(viaLabel)}</span>`;
+          <span class="mounts-badge" title="${escHtml(viaTip)}">${escHtml(pushGone ? tr('gone on machine') : tr('on machine'))} · ${escHtml(viaLabel)}</span>`;
+        if (pushGone) {
+          const re = document.createElement('button');
+          re.className = 'mounts-icon-btn';
+          re.innerHTML = MI.retry; re.title = tr('Re-mount on the machine');
+          re.onclick = async (e) => {
+            e.stopPropagation(); re.disabled = true;
+            try { await api(`/api/machine-mounts/${encodeURIComponent(m.id)}/remount`, { method: 'POST' }); showToast(tr('Mounted')); }
+            catch (err) { showToast(err.message, { type: 'error' }); }
+            this._renderMounts();
+          };
+          actions.append(re);
+        }
       }
       const un = document.createElement('button');
       un.className = 'mounts-icon-btn mounts-icon-danger';
