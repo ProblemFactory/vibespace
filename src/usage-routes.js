@@ -433,8 +433,25 @@ app.post('/api/usage/refresh', (req, res) => {
     acctMeta = (accounts.list().accounts || []).find((x) => x.id === key && x.type === 'subscription');
     if (!acctMeta) return res.status(404).json({ error: 'unknown subscription account' });
   }
-  const token = isGlobal ? getOAuthToken() : accounts.usageToken(key);
-  if (!token) return res.json({ error: 'no currently-valid token for this account — run a session on it (the CLI refreshes its own login), then retry' });
+  let token = isGlobal ? getOAuthToken() : accounts.usageToken(key);
+  // Same-account fallback (2.181.0, real report): a named subscription's dir
+  // token is only refreshed while a session RUNS on that dir — but when the
+  // machine's global CLI login IS the same Anthropic account (email link),
+  // its token is just as authoritative for the shared quota (and vice versa).
+  // Still read-only + user-initiated — same §ban-safety class.
+  if (!token) {
+    try {
+      const gl = accounts.subscriptionStatus();
+      if (!isGlobal) {
+        const email = String(acctMeta.email || '').toLowerCase();
+        if (email && gl?.loggedIn && String(gl.email || '').toLowerCase() === email) token = getOAuthToken();
+      } else if (gl?.email) {
+        const linked = (accounts.list().accounts || []).find((x) => x.type === 'subscription' && String(x.email || '').toLowerCase() === String(gl.email).toLowerCase());
+        if (linked) token = accounts.usageToken(linked.id);
+      }
+    } catch { }
+  }
+  if (!token) return res.json({ error: 'no currently-valid token for this account (nor its linked machine login) — run a session on it (the CLI refreshes its own login), then retry' });
   _onDemandUsageAt[key] = Date.now();
   _fetchOAuthUsage(token, (u) => {
     if (!u) return res.json({ error: 'refresh failed (rate-limited or offline) — kept last-known' });

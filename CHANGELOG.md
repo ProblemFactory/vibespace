@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.181.0 — 2026-07-16
+- **Per-panel sort option** (user request): the dashboard panel editor gained a Sort select — Default (axis order for sequential dims, value ↓ for categorical), Axis/name order, Value high→low, Value low→high. Applies to plain panels AND split-series charts; Top-N still cuts by value (it's a ranking), the survivors then display in the chosen order.
+- **Usage ⟳ works when the account's own token is momentarily stale** (real report: "Personal Max" errored while a session was actively running on it). A named subscription's dir token only refreshes while a session runs on that dir and can lapse between refreshes — when the machine's global CLI login is the SAME Anthropic account (email link), its token is used as a fallback (and vice versa for the global chip). Still read-only + user-initiated (§ban-safety unchanged).
+
 ## 2.180.2 — 2026-07-16
 - **Usage dashboard: the hour/weekday axes are in axis order again** (real screenshot report — the 按小时 panel's bars ran 18, 21, 2, 16, …). The server sorted EVERY dimension's groups by cost, and the dashboard deliberately keeps sequential dims in server order — so the hour axis came out cost-sorted. Sequential dims (day/hour/weekday) now sort by key server-side; the client also sorts them itself (belt for old servers), **gap-fills the closed scales** (24 hours / 7 weekdays — a missing bucket read as a mislabeled bar, not "no data"), and the weekday panel shows Sun–Sat names instead of raw 0–6.
 

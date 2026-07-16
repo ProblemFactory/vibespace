@@ -159,19 +159,19 @@ function panelRows(data, panel) {
   let rows = (data.groups?.[panel.dim] || []).map((r) => ({
     key: r.name || r.key, raw: r, value: valueOf(r, first), values: mkeys.map((k) => valueOf(r, k)),
   }));
+  const mode = effectiveSort(panel, dim);
   if (!dim.seq) {
+    // Top-N is a RANKING concept — always cut by value, then order the
+    // survivors per the panel's sort (name order alphabetizes the top N).
     rows.sort((a, b) => b.value - a.value);
     rows = rows.slice(0, panel.topN || 8);
+    sortRowsBy(rows, mode, (r) => r.value);
   } else {
-    // Sequential dims sort by AXIS position, never by value — an old server
-    // returns groups cost-sorted (real report: the hour axis read 18,21,2,…).
-    rows.sort((a, b) => {
-      const na = Number(a.key), nb = Number(b.key);
-      return (Number.isFinite(na) && Number.isFinite(nb)) ? na - nb : (a.key < b.key ? -1 : 1);
-    });
-    // hour/weekday are CLOSED scales — fill the missing buckets with zeros so
-    // the axis stays continuous (a gap reads as a mislabeled bar, not "no data")
-    if (panel.dim === 'hour' || panel.dim === 'weekday') {
+    sortRowsBy(rows, mode, (r) => r.value);
+    // hour/weekday are CLOSED scales — in axis order, fill the missing buckets
+    // with zeros so the axis stays continuous (a gap reads as a mislabeled
+    // bar, not "no data"); value-sorted views skip the zero clutter
+    if (mode === 'axis' && (panel.dim === 'hour' || panel.dim === 'weekday')) {
       const n = panel.dim === 'hour' ? 24 : 7;
       const byIdx = new Map(rows.map((r) => [Number(r.raw.key), r]));
       rows = Array.from({ length: n }, (_, i) => byIdx.get(i) || ({ key: String(i), raw: { key: String(i) }, value: 0, values: mkeys.map(() => 0) }));
@@ -182,6 +182,21 @@ function panelRows(data, panel) {
     }
   }
   return rows;
+}
+
+// Panel sort (2.180.3, user request): '' = dimension default (axis order for
+// sequential dims, value desc for categorical); 'axis' | 'desc' | 'asc'.
+function effectiveSort(panel, dim) {
+  return panel.sort || (dim?.seq ? 'axis' : 'desc');
+}
+function sortRowsBy(rows, mode, val) {
+  if (mode === 'axis') {
+    rows.sort((a, b) => {
+      const na = Number(a.key), nb = Number(b.key);
+      return (Number.isFinite(na) && Number.isFinite(nb)) ? na - nb : String(a.key).localeCompare(String(b.key));
+    });
+  } else if (mode === 'asc') rows.sort((a, b) => val(a) - val(b));
+  else rows.sort((a, b) => val(b) - val(a));
 }
 
 function valueOf(r, metric) {
@@ -383,8 +398,9 @@ function chartSplit(body, data, panel, mlist) {
     key: r.key, cells: r.cells,
     total: Object.values(r.cells).reduce((s2, c) => s2 + valueOf(c, m.key), 0),
   }));
-  if (dimMeta?.seq) rows.sort((a, b) => (numericKeys ? Number(a.key) - Number(b.key) : (a.key < b.key ? -1 : 1)));
-  else { rows.sort((a, b) => b.total - a.total); rows = rows.slice(0, panel.topN || 8); }
+  const smode = effectiveSort(panel, dimMeta);
+  if (smode === 'axis') rows.sort((a, b) => (numericKeys ? Number(a.key) - Number(b.key) : String(a.key).localeCompare(String(b.key))));
+  else { rows.sort((a, b) => (smode === 'asc' ? a.total - b.total : b.total - a.total)); if (!dimMeta?.seq) rows = rows.slice(0, panel.topN || 8); }
   // Series = top split keys by grand total; the tail folds into "Other" so a
   // session/project split stays readable.
   const totalsByS = {};
@@ -565,6 +581,14 @@ function openPanelEditor(e, existing, commit) {
   sel(t('Split series by'), [{ key: '', label: t('None') }, ...DIMENSIONS().filter((d) => d.key !== 'total')],
     panel.splitBy || '', (v) => { if (v) panel.splitBy = v; else delete panel.splitBy; });
   sel(t('Chart'), CHARTS(), panel.chart, (v) => { panel.chart = v; });
+  // Sort (2.181.0, user request): '' = dimension default (axis for sequential,
+  // value desc for categorical)
+  sel(t('Sort'), [
+    { key: '', label: t('Default (by dimension)') },
+    { key: 'axis', label: t('Axis / name order') },
+    { key: 'desc', label: t('Value (high → low)') },
+    { key: 'asc', label: t('Value (low → high)') },
+  ], panel.sort || '', (v) => { if (v) panel.sort = v; else delete panel.sort; });
   sel(t('Top N'), [5, 8, 10, 15, 25].map((n) => ({ key: String(n), label: String(n) })), String(panel.topN || 8), (v) => { panel.topN = Number(v); });
   sel(t('Width'), [{ key: '1', label: t('Half') }, { key: '2', label: t('Full') }], String(panel.span || 1), (v) => { panel.span = Number(v); });
   const actions = document.createElement('div');
