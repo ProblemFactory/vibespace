@@ -13,8 +13,6 @@
  */
 
 class BackendAdapter {
-  /** Human-readable backend name */
-  get name() { return 'base'; }
 }
 
 /**

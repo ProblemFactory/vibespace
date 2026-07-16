@@ -173,7 +173,6 @@ export function installSidebarState(SidebarClass) {
   };
 
   proto._applyServerState = function(state) {
-    if (state.stateVersion) this._userStateVersion = state.stateVersion;
     if (state.starredSessions) this._starredIds = new Set(state.starredSessions);
     if (state.archivedSessions) this._archivedIds = new Set(state.archivedSessions);
     if (state.archivedFolders) this._archivedFolders = new Set(state.archivedFolders);

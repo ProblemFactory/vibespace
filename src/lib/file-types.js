@@ -80,11 +80,6 @@ const REGISTRY = {
 
 const DEFAULT_ENTRY = { category: 'unknown', icon: I.unknown };
 
-/** Get file type info for an extension (without dot). Returns { category, icon, viewer?, bypassBinary? } */
-export function getFileType(ext) {
-  return REGISTRY[ext?.toLowerCase()] || DEFAULT_ENTRY;
-}
-
 /** Get the icon emoji for a filename */
 export function getFileIcon(fileName) {
   const ext = fileName?.split('.').pop()?.toLowerCase() || '';

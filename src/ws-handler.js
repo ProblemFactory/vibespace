@@ -24,10 +24,6 @@ function getSessionKey(session = {}) {
 // answers — keep in sync with TERM_QUERY_RESP_RE in src/lib/terminal.js.
 const TERM_QUERY_RESP_RE = /\x1b\[\??\d+(?:;\d+){0,2}R|\x1b\[[?>][\d;]*c|\x1b\[0n|\x1b\[\?\d+;\d+\$y|\x1b\](?:4|1[0-2]);[^\x07\x1b]*(?:\x07|\x1b\\)|\x1bP[^\x1b]*\x1b\\/g;
 
-function safeJsonParse(text, fallback = null) {
-  try { return JSON.parse(text); } catch { return fallback; }
-}
-
 function normalizeComparablePath(pathLib, value) {
   const raw = String(value || '').trim();
   if (!raw) return '';
@@ -78,11 +74,11 @@ function registerWsHandler(wss, ctx) {
     activeSessions, WS_OPEN, broadcastActiveSessions, broadcastToSession, resizeSessionToMin,
     setupSessionPty, refreshWebuiPids, deleteSessionMeta, writeSessionMeta, readSessionMeta,
     readLayouts, writeLayouts, getSyncStore, serverSetting, agentdRemote, dialBridge,
-    sessionCounterRef, createSessionMessages, PERMISSION_MODES,
-    SOCKETS_DIR, BUFFERS_DIR, META_DIR, PTY_WRAPPER, CHAT_WRAPPER,
+    sessionCounterRef, createSessionMessages,
+    SOCKETS_DIR, BUFFERS_DIR, PTY_WRAPPER, CHAT_WRAPPER,
     NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, PORT, X_ENV,
     adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
-    sessionStatus, sessionStatusKey, accounts, scheduleCtxSync, activeSessionsPayload,
+    accounts, scheduleCtxSync, activeSessionsPayload,
     USAGE_STATUSLINE_CMD, userStatuslineCmd,
   } = ctx;
 
@@ -985,9 +981,7 @@ done`;
                   parentThreadId: session.parentThreadId,
                   forkedFrom: session.forkedFrom || null,
                   permissionMode: session._permissionMode || null,
-              effort: session._effort || null,
                   effort: session._effort || null,
-            effort: session._effort || null,
                   createdAt: session.createdAt,
                   webuiSessionId: id,
                   mode: sessionMode,
@@ -1246,7 +1240,6 @@ done`;
               parentThreadId: session.parentThreadId || null,
               permissionMode: session._permissionMode || null,
               effort: session._effort || null,
-            effort: session._effort || null,
               createdAt: session.createdAt,
               webuiSessionId: targetId,
               mode: session.mode || 'terminal',

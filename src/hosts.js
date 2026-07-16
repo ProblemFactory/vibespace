@@ -1033,4 +1033,4 @@ HostManager.prototype.bootstrap = function (id, onEvent) {
   });
 };
 
-module.exports = { HostManager, SSH_BASE_OPTS };
+module.exports = { HostManager };

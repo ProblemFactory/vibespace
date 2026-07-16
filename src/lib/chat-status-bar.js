@@ -66,17 +66,11 @@ export class ChatStatusBar {
 
   get element() { return this._element; }
 
-  /** Current model name */
-  get statusModel() { return this._statusModel; }
 
-  /** Current permission mode */
-  get statusPermMode() { return this._statusPermMode; }
 
   /** Available permission modes */
   get permissionModes() { return this._permissionModes; }
 
-  /** Active background tasks Map */
-  get activeTasks() { return this._activeTasks; }
 
   /** Set the container for popup positioning (the .chat-view element) */
   set popupContainer(el) { this._popupContainer = el; }

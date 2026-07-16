@@ -19,7 +19,6 @@ class ShellAdapter extends BackendAdapter {
     this.config = config;
   }
 
-  get name() { return 'shell'; }
 
   buildSessionArgs(options = {}) {
     const { cwd, extraArgs = [], initialCommand } = options;

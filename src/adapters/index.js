@@ -24,13 +24,6 @@ function createAdapterRegistry(config = {}) {
   }));
 
   return {
-    adapters,
-    list() {
-      return [...adapters.keys()];
-    },
-    has(name) {
-      return adapters.has(name);
-    },
     get(name) {
       return adapters.get(name) || null;
     },

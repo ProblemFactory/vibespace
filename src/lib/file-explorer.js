@@ -368,16 +368,6 @@ class FileExplorer {
     this._bookmarkList.appendChild(dropZone);
   }
 
-  _bookmarkCurrent() {
-    if (!this.currentPath) return;
-    const h = this._host || '';
-    if (this._bookmarks.some(b => b.path === this.currentPath && (b.host || '') === h)) return;
-    const label = this.currentPath.split('/').pop() || this.currentPath;
-    this._bookmarks.push({ label, path: this.currentPath, ...(h ? { host: h } : {}) });
-    this._saveBookmarks();
-    this._renderBookmarks();
-  }
-
   // ── View menu (replaces old settings, view mode, group by buttons) ──
   _showViewMenu(anchor) {
     const pop = createPopover(anchor, 'file-view-menu');
