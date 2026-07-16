@@ -871,8 +871,10 @@ export function installSidebarMounts(Sidebar) {
               pub.onclick = async () => {
                 pub.disabled = true;
                 try {
-                  if (f.published) { await api(`/api/port-forward/${encodeURIComponent(f.id)}/publish`, { method: 'DELETE' }); showToast(tr('Public URL removed')); }
-                  else { const r2 = await api(`/api/port-forward/${encodeURIComponent(f.id)}/publish`, { method: 'POST' }); showToast(tr('Public URL: {u}', { u: r2.publicUrl })); }
+                  // fetchJson never throws — a 4xx comes back as {error}
+                  const r2 = await api(`/api/port-forward/${encodeURIComponent(f.id)}/publish`, { method: f.published ? 'DELETE' : 'POST' });
+                  if (r2?.error) throw new Error(r2.error);
+                  showToast(f.published ? tr('Public URL removed') : tr('Public URL: {u}', { u: r2?.publicUrl || '?' }));
                   render();
                 } catch (e) { showToast(e.message, { type: 'error' }); pub.disabled = false; }
               };
@@ -914,13 +916,23 @@ export function installSidebarMounts(Sidebar) {
           const forwarded = new Set(active.map((f) => f.remotePort));
           listWrap.innerHTML = `<div class="usage-section-title">${escHtml(tr('Detected listening ports'))}</div>`;
           if (!ports.length) { listWrap.innerHTML += `<div class="empty-hint">${escHtml(tr('no listening TCP ports found'))}</div>`; }
-          for (const p of ports) {
+          const portRow = (p) => {
             const r = document.createElement('div'); r.className = 'mounts-row'; r.style.padding = '3px 0';
+            if (p.hidden) r.style.opacity = '0.55';
             const lbl = document.createElement('span'); lbl.style.flex = '1'; lbl.innerHTML = `<b>:${p.port}</b>${p.proc ? ` <span class="empty-hint">${escHtml(p.proc)}</span>` : ''}`;
             const b = document.createElement('button'); b.className = 'mounts-btn';
             b.textContent = forwarded.has(p.port) ? tr('forwarded') : tr('Forward'); b.disabled = forwarded.has(p.port);
             b.onclick = () => doForward(p.port);
-            r.append(lbl, b); listWrap.append(r);
+            r.append(lbl, b); return r;
+          };
+          // vscode-style: known non-web system listeners fold behind an expander
+          const hid = ports.filter((p) => p.hidden);
+          for (const p of ports.filter((p) => !p.hidden)) listWrap.append(portRow(p));
+          if (hid.length) {
+            const ex = document.createElement('button'); ex.className = 'ports-sys-expander';
+            ex.textContent = tr('+ {n} system listeners', { n: hid.length });
+            ex.onclick = () => { ex.replaceWith(...hid.map(portRow)); };
+            listWrap.append(ex);
           }
         } catch (e) {
           listWrap.innerHTML = `<div class="usage-section-title">${escHtml(tr('Detected listening ports'))}</div><div class="empty-hint" style="color:var(--red,#e55)">${escHtml(e.message)}</div>`;

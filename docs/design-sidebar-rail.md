@@ -74,3 +74,8 @@ LAUNCH from panels.
 
 Shipped 2.176.0 — smoke scripts/test-sidebar-rail.mjs (14 asserts). The
 settings echo-revert race it exposed is fixed in settings.js applyRemote.
+
+2.177.0 follow-ups (user-driven): railPersistent collapse-to-strip (default ON),
+per-panel header titles, .rail-panel compact CSS for the agents panel, ports
+error surfacing + frp-unconfigured affordance, proc-identified scans with
+non-web folding, mono SVG action icons.

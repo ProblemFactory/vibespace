@@ -21,9 +21,23 @@ const fs = require('fs');
 const path = require('path');
 
 const LOCAL_ID = '__local__'; // machine #0 — this instance itself
-const PORT_SCAN = `command -v ss >/dev/null 2>&1 && ss -tlnH 2>/dev/null || lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null`;
+// -p adds process names (own-user processes always visible; drop it if the ss
+// build errors). macOS/BSD: lsof (its first column IS the command name).
+const PORT_SCAN = `command -v ss >/dev/null 2>&1 && { ss -tlnpH 2>/dev/null || ss -tlnH 2>/dev/null; } || lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null`;
 // local-watch noise: our own infrastructure listeners must not toast
 const LOCAL_IGNORE_PROCS = new Set(['frpc', 'frps', 'tailscaled', 'sshd', 'rclone', 'Xtigervnc', 'Xvfb']);
+// Known NON-web system listeners (vscode-style): still returned by detect(),
+// but flagged `hidden` — the ports UIs fold them behind a "system listeners"
+// expander and the new-port watch never notifies about them. DB servers
+// (postgres/mysql/redis) are deliberately NOT here — forwarding one is a real
+// use case. lsof truncates macOS names (ControlCe = ControlCenter/AirPlay).
+const NONWEB_PROCS = new Set([
+  'sshd', 'systemd', 'systemd-resolve', 'systemd-resolved', 'systemd-networkd', 'init', 'launchd',
+  'dnsmasq', 'cupsd', 'cups-browsed', 'rpcbind', 'rpc.statd', 'chronyd', 'ntpd', 'master', 'exim4',
+  'sendmail', 'smbd', 'nmbd', 'avahi-daemon', 'dtach', 'frpc', 'frps', 'tailscaled', 'vibespace-device',
+  'Xtigervnc', 'Xvfb', 'x11vnc', 'dockerd', 'containerd', 'kubelet', 'rapportd', 'ControlCe', 'identityse', 'remoted',
+]);
+const NONWEB_PORTS = new Set([22, 25, 53, 111, 631]);
 
 function writeJsonAtomic(file, obj) {
   const tmp = file + '.tmp';
@@ -79,7 +93,7 @@ class PortForwardManager {
       this._seenPorts.set(h.id, cur);
       if (!prev) continue; // baseline sweep — silent
       const fwd = new Set(this._state.forwards.filter((r) => r.hostId === h.id).map((r) => r.remotePort));
-      let fresh = interesting.filter((p) => !prev.has(p.port) && !fwd.has(p.port));
+      let fresh = interesting.filter((p) => !prev.has(p.port) && !fwd.has(p.port) && !p.hidden);
       // local: our own infrastructure (frpc admin, tailscale, VNC, …) must
       // not toast when a plugin starts after the baseline
       if (h.id === LOCAL_ID) fresh = fresh.filter((p) => !LOCAL_IGNORE_PROCS.has(p.proc) && p.port !== 7400);
@@ -116,7 +130,14 @@ class PortForwardManager {
     // -H (no header) is GNU-ss only, so parse defensively either way.
     let out = '';
     try { out = String((await dm.runCmd('sh', ['-c', PORT_SCAN], { timeoutMs: 8000 })).stdout || ''); } catch (e) { throw new Error('port scan failed: ' + e.message); }
-    return this._parsePorts(out);
+    return this._parsePorts(out).map((p) => this._classify(p));
+  }
+
+  /** Flag known non-web system listeners (UI folds them; watch skips them). */
+  _classify(p) {
+    const proc = String(p.proc || '').replace(/^.*\//, '');
+    if (NONWEB_PROCS.has(proc) || NONWEB_PORTS.has(p.port) || p.port === (Number(process.env.PORT) || 3456)) p.hidden = true;
+    return p;
   }
 
   /** Listening ports on THIS instance (machine #0) — no device link needed;
@@ -127,26 +148,53 @@ class PortForwardManager {
       execFile('sh', ['-c', PORT_SCAN], { timeout: 8000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => resolve(String(stdout || '')));
     });
     const parsed = this._parsePorts(out);
-    if (parsed.length) return parsed;
+    if (parsed.length) return parsed.map((p) => this._classify(p));
     // slim container images ship NEITHER ss NOR lsof (real fleet pods — the
     // whole local watch was silently blind); /proc/net is always there.
-    // st column '0A' = LISTEN; local_address is HEXIP:HEXPORT. proc names
-    // would need a /proc/*/fd inode scan — ports alone are enough to notify.
-    const found = new Map();
+    // st column '0A' = LISTEN; local_address is HEXIP:HEXPORT; the inode column
+    // lets a bounded /proc/*/fd scan recover the owning process name (same-user
+    // processes only — exactly what a single-user container is).
+    const found = new Map(); // port → inode
     for (const f of ['/proc/net/tcp', '/proc/net/tcp6']) {
       let txt = '';
       try { txt = fs.readFileSync(f, 'utf-8'); } catch { continue; }
       for (const line of txt.split('\n').slice(1)) {
         const cols = line.trim().split(/\s+/);
-        if (cols.length < 4 || cols[3] !== '0A') continue;
+        if (cols.length < 10 || cols[3] !== '0A') continue;
         const port = parseInt(String(cols[1]).split(':').pop(), 16);
-        if (port && !found.has(port)) found.set(port, '');
+        if (port && !found.has(port)) found.set(port, cols[9]);
       }
     }
+    const byInode = this._resolveInodeProcs(new Set([...found.values()]));
     return [...found.entries()]
-      .map(([port, proc]) => ({ port, proc }))
+      .map(([port, inode]) => this._classify({ port, proc: byInode.get(inode) || '' }))
       .filter((p) => p.port > 0 && p.port < 65536)
       .sort((a, b) => a.port - b.port);
+  }
+
+  /** socket inode → process name via /proc/<pid>/fd (best-effort, bounded). */
+  _resolveInodeProcs(inodes) {
+    const map = new Map();
+    if (!inodes.size) return map;
+    let budget = 6000; // total readlinks — keeps a busy host bounded
+    let pids = [];
+    try { pids = fs.readdirSync('/proc').filter((d) => /^\d+$/.test(d)); } catch { return map; }
+    for (const pid of pids) {
+      if (map.size >= inodes.size || budget <= 0) break;
+      let fds = [];
+      try { fds = fs.readdirSync(`/proc/${pid}/fd`); } catch { continue; } // not ours — skip
+      for (const fd of fds) {
+        if (--budget <= 0) break;
+        let ln = '';
+        try { ln = fs.readlinkSync(`/proc/${pid}/fd/${fd}`); } catch { continue; }
+        const m = ln.match(/^socket:\[(\d+)\]$/);
+        if (!m || !inodes.has(m[1]) || map.has(m[1])) continue;
+        let comm = '';
+        try { comm = fs.readFileSync(`/proc/${pid}/comm`, 'utf-8').trim(); } catch { }
+        if (comm) map.set(m[1], comm);
+      }
+    }
+    return map;
   }
 
   _parsePorts(out) {

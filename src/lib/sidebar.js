@@ -591,7 +591,8 @@ class Sidebar {
 
   _applySidebarLayoutWidth(width = this.el.offsetWidth) {
     const right = this.app.settings?.get('sidebar.position') === 'right';
-    const w = this.isOpen ? `${width}px` : '0';
+    // collapsed-with-rail keeps a 44px strip on screen (sidebar.railPersistent)
+    const w = this.isOpen ? `${width}px` : (this.el.classList.contains('rail-collapsed') ? '44px' : '0');
     const mw = document.getElementById('main-wrapper');
     mw.style.marginLeft = right ? '0' : w;
     mw.style.marginRight = right ? w : '0';
@@ -642,6 +643,7 @@ class Sidebar {
     this.el.classList.toggle('open', this.isOpen);
     const wrapper = document.getElementById('main-wrapper');
     wrapper.classList.toggle('sidebar-open', this.isOpen);
+    this._railApplyCollapsed?.(); // rail strip may persist through a collapse
     this._applySidebarLayoutWidth(this.el.offsetWidth);
     setTimeout(() => this._fitVisibleSessions(), 250);
   }

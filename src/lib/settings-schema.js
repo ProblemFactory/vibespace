@@ -39,6 +39,11 @@ const SETTINGS_SCHEMA = {
     description: t('A vertical icon rail on the sidebar edge hosting the session panels (Folders / Task Groups / Remote / Ports) plus Agents, Plugins and quick launchers. Turn off to restore the classic tab bar and keep Agents/Plugins as dialogs.'),
     category: t('Sidebar'), liveApply: true,
   },
+  'sidebar.railPersistent': {
+    type: 'boolean', default: true, label: t('Keep the rail when the sidebar is collapsed'),
+    description: t('vscode behavior: collapsing the sidebar leaves the 44px icon rail on screen — click any icon to expand back. Off = collapsing hides everything.'),
+    category: t('Sidebar'), liveApply: true,
+  },
   'sidebar.position': {
     type: 'enum', default: 'left', options: [
       { value: 'left', label: t('Left') },
