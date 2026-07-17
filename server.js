@@ -16,7 +16,7 @@ const { MessageManager } = require('./src/message-manager');
 const { createMessageManager } = require('./src/normalizers');
 const { Telemetry } = require('./src/telemetry');
 const { SyncStore } = require('./src/sync-store');
-const { cwdToProjectDir, SessionMessages, findSessionJsonlPath } = require('./src/session-store');
+const { cwdToProjectDir, SessionMessages, findSessionJsonlPath, dedupWebuiSockets } = require('./src/session-store');
 const { CodexSessionMessages } = require('./src/codex-session-store');
 const { normalizeCodexSource, CODEX_SESSIONS_DIR } = require('./src/adapters/codex');
 const { createAdapterRegistry } = require('./src/adapters');
@@ -1381,6 +1381,33 @@ function restoreSessions() {
       }
     } catch { }
   }
+  // Dedup by conversation BEFORE adoption: a plain `claude --resume` reuses the
+  // conversation id, so a resume of a session whose claude had already died
+  // minted a SECOND dtach session for the SAME claudeSessionId → two sidebar
+  // cards (real xingweil report; walter's local double-writer class). Keep one
+  // socket per conversation (alive-claude > dead, then newest), retire the rest.
+  const dedupMetas = [];
+  for (const sockFile of sockets) {
+    let m; try { m = readSessionMeta(sockFile); } catch { continue; }
+    if (m && m.claudeSessionId) dedupMetas.push({ sockFile, m });
+  }
+  // ONE /proc pass: which conversations have a live claude holding their JSONL?
+  // (a lingering dtach husk whose claude crashed has a DEAD conversation and
+  // must lose to a live one). Cheap alternation grep over all readlinks.
+  let liveConvos = new Set();
+  if (dedupMetas.length) {
+    try {
+      const pat = dedupMetas.map(({ m }) => m.claudeSessionId).join('\\|');
+      const out = execFileSync('sh', ['-c', `for p in /proc/[0-9]*/fd/*; do readlink "$p" 2>/dev/null; done | grep -o '[0-9a-f-]*\\.jsonl' | grep -o '${pat}'`], { encoding: 'utf-8', timeout: 6000 });
+      liveConvos = new Set(out.split('\n').map((s) => s.trim()).filter(Boolean));
+    } catch {} // grep exits 1 when nothing matched — leaves the set empty
+  }
+  const { retire: retireSockets } = dedupWebuiSockets(dedupMetas.map(({ sockFile, m }) => ({
+    sockFile, backend: m.backend || 'claude', host: m.host || 'local',
+    claudeSessionId: m.claudeSessionId, createdAt: m.createdAt || 0,
+    claudeAlive: liveConvos.has(m.claudeSessionId),
+  })));
+
   for (const sockFile of sockets) {
     const socketPath = path.join(SOCKETS_DIR, sockFile);
     try { fs.statSync(socketPath); } catch { continue; }
@@ -1407,6 +1434,25 @@ function restoreSessions() {
 
     const meta = readSessionMeta(sockFile);
     const id = meta.webuiSessionId || ('sess-' + (++sessionCounterRef.value) + '-' + Date.now());
+
+    // stale duplicate of a conversation another socket owns — do NOT adopt (two
+    // cards); retire the husk so it can't double-write the JSONL. SIGTERM the
+    // socket's dtach session (claude, if any, is the older/losing writer) then
+    // clean socket + buffer + meta.
+    if (retireSockets.has(sockFile)) {
+      console.log(`  ⤫ Duplicate of ${meta.claudeSessionId} — retiring stale ${sockFile}`);
+      try {
+        for (const p of execFileSync('pgrep', ['-f', socketPath], { encoding: 'utf-8', timeout: 2000 }).split('\n')) {
+          const pid = Number(p.trim());
+          if (pid > 1 && pid !== process.pid) { try { process.kill(pid, 'SIGTERM'); } catch {} }
+        }
+      } catch {}
+      try { fs.unlinkSync(socketPath); } catch {}
+      try { fs.unlinkSync(path.join(BUFFERS_DIR, id + '.buf')); } catch {}
+      try { fs.unlinkSync(path.join(BUFFERS_DIR, id + '.json')); } catch {}
+      deleteSessionMeta(sockFile);
+      continue;
+    }
 
     // Detect mode and streaming state from wrapper metadata
     let sessionMode = meta.mode || 'terminal';
