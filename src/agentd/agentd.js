@@ -114,6 +114,28 @@ function pidCmdline(pid) {
   try { return fs.readFileSync('/proc/' + pid + '/cmdline', 'utf-8').replace(/\0/g, ' '); } catch { return ''; }
 }
 
+// Exec-PROOF process identity: the start time survives execve while cmdline
+// does NOT — a pipe child spawned as `sh -lc '… exec env … claude …'` rewrites
+// its cmdline twice, so matching cmdline against the recorded argv0 misjudges
+// every LIVE claude as a recycled pid once a daemon upgrade re-exec forces
+// re-adoption (real lengyue outage: every server update synthesized a crash
+// sentinel for the running remote chat sessions and orphaned their claudes).
+// Linux: /proc/<pid>/stat field 22 (ticks since boot, unique per boot);
+// macOS/BSD: `ps -o lstart=` (second granularity — plenty for pid reuse).
+function pidStartTime(pid) {
+  try {
+    const st = fs.readFileSync('/proc/' + pid + '/stat', 'utf-8');
+    const rest = st.slice(st.lastIndexOf(')') + 2).split(' ');
+    if (rest[19]) return 'l' + rest[19];
+  } catch { }
+  try {
+    const r = require('child_process').spawnSync('ps', ['-p', String(pid), '-o', 'lstart='], { encoding: 'utf-8' });
+    const s = String(r.stdout || '').trim();
+    if (s) return 'p' + s;
+  } catch { }
+  return '';
+}
+
 // ── log (rotated at 5MB ×2) ──
 function log(msg) {
   const line = `${new Date().toISOString()} ${msg}\n`;
@@ -239,12 +261,49 @@ const pipeSessions = {
     };
   },
   _meta(sid) { try { return JSON.parse(fs.readFileSync(this._paths(sid).meta, 'utf-8')); } catch { return null; } },
+  _own: new Set(), // pids WE spawned this incarnation (have a real exit waiter)
+  _adoptWatch: new Map(), // sid → liveness poll timer for adopted children
   _childAlive(m) {
     if (!m || !m.childPid) return false;
     try { process.kill(m.childPid, 0); } catch { return false; }
+    // identity check (pid reuse): prefer the exec-proof start time recorded at
+    // spawn — see pidStartTime. The old argv0-vs-cmdline substring check is
+    // kept only for legacy metas, widened to the known agent CLIs a shell
+    // wrapper exec's into (`sh -lc '… exec env … claude'` leaves no 'sh').
+    if (m.startTime) {
+      const cur = pidStartTime(m.childPid);
+      if (cur) return cur === m.startTime;
+    }
     const c = pidCmdline(m.childPid);
+    if (c === '') return true; // cannot verify (no /proc, ps failed) — assume
     const argv0 = path.basename(String((m.cmd && m.cmd[0]) || ''));
-    return c === '' ? true : (argv0 ? c.includes(argv0) : false);
+    if (argv0 && c.includes(argv0)) return true;
+    return /(^|[/\s])(claude|codex)(\s|$)/.test(c);
+  },
+  // Adopted child (spawned by a PREVIOUS daemon incarnation — upgrade re-exec,
+  // crash): stamp the exec-proof identity onto a legacy meta, and poll
+  // liveness — we cannot wait() a process that isn't our child, so without
+  // this no exit sentinel is ever written and the wrapper streams a dead
+  // session forever (keeper parity: vibespace-remote-keeper does the same).
+  _adopt(sid, m) {
+    try {
+      if (!m.startTime) {
+        const st = pidStartTime(m.childPid);
+        if (st) { m.startTime = st; fs.writeFileSync(this._paths(sid).meta, JSON.stringify(m)); }
+      }
+    } catch { }
+    if (this._own.has(m.childPid) || this._adoptWatch.has(sid)) return;
+    const t = setInterval(() => {
+      const cur = this._meta(sid);
+      if (!cur || cur.exited !== undefined) { clearInterval(t); this._adoptWatch.delete(sid); return; }
+      if (this._childAlive(cur)) return;
+      // the exit code of a non-child is unknowable — report a plain end
+      try { fs.appendFileSync(this._paths(sid).out, JSON.stringify({ type: '_remote_exit', code: 0, adopted: true }) + '\n'); } catch { }
+      try { fs.writeFileSync(this._paths(sid).meta, JSON.stringify({ ...cur, exited: 0, exitedAt: Date.now(), adopted: true })); } catch { }
+      clearInterval(t); this._adoptWatch.delete(sid);
+    }, 4000);
+    if (t.unref) t.unref();
+    this._adoptWatch.set(sid, t);
   },
   stat(sid) {
     const m = this._meta(sid);
@@ -255,7 +314,7 @@ const pipeSessions = {
     fs.mkdirSync(SESS_DIR, { recursive: true, mode: 0o700 });
     const P2 = this._paths(sid);
     const m = this._meta(sid);
-    if (m && m.exited === undefined && this._childAlive(m)) return { pid: m.childPid, existing: true };
+    if (m && m.exited === undefined && this._childAlive(m)) { this._adopt(sid, m); return { pid: m.childPid, existing: true }; }
     if (m && m.exited !== undefined) return { pid: m.childPid, existing: true }; // drain-only: sentinel in buffer
     if (m && !this._childAlive(m)) {
       // crashed without a sentinel — synthesize (never silently respawn: B-0343)
@@ -284,7 +343,8 @@ const pipeSessions = {
       cwd: useCwd, env: spawnEnv(env),
     });
     child.unref();
-    fs.writeFileSync(P2.meta, JSON.stringify({ childPid: child.pid, startedAt: Date.now(), cmd: [cmd, ...(args || [])] }));
+    this._own.add(child.pid);
+    fs.writeFileSync(P2.meta, JSON.stringify({ childPid: child.pid, startedAt: Date.now(), cmd: [cmd, ...(args || [])], startTime: pidStartTime(child.pid) }));
     // a spawn failure (ENOENT cmd, EACCES, etc.) arrives async — WITHOUT this
     // listener it is an uncaught 'error' that kills the daemon. Turn it into
     // the normal exit sentinel so the wrapper finalizes instead of hanging.
@@ -295,6 +355,7 @@ const pipeSessions = {
     });
     // we CAN wait on our own detached child — write the real exit sentinel
     child.on('exit', (code) => {
+      this._own.delete(child.pid);
       try { fs.appendFileSync(P2.out, JSON.stringify({ type: '_remote_exit', code: code ?? 0 }) + '\n'); } catch { }
       const cur = this._meta(sid) || {};
       fs.writeFileSync(P2.meta, JSON.stringify({ ...cur, exited: code ?? 0, exitedAt: Date.now() }));
