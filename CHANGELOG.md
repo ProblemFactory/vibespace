@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.186.1 — 2026-07-17
+- **Dragging a window onto a desktop preview no longer lands it one desktop to the right** (real report). The drop resolved the target desktop by DOM index into `querySelectorAll('.desktop-preview')` — but the Stage preview also carries `.desktop-preview` and sits before the real ones, so the index was off by one whenever the Stage was active. Each real preview now carries `dataset.desktopId` and the drop resolves by that id, never by index. Smoke: `scripts/test-desktop-drop.mjs` (reproduces the off-by-one, proves the id fix).
+
 ## 2.186.0 — 2026-07-17
 - **On-demand egress: an agent can borrow a paired machine's network for a single command** (new). When a request needs a specific machine's network position (a region, an internal/VPN network, a fixed source IP), the agent reaches for it deliberately — it does NOT route the whole session. Two tiers via the new `vibespace-exit` CLI (on every session's PATH, distributed to remote hosts like the other agent tools):
   - `vibespace-exit use <machine>` / `url <machine>` — the machine's daemon serves a zero-dep in-daemon **SOCKS5** proxy on its loopback; the server reaches it over the existing agentd tunnel (`tcpForward`) and binds a local `socks5h://127.0.0.1:<port>`. The tool runs locally, only its egress is the remote machine (proxy-aware TCP: curl/git/http libs). The loopback-only tunnel boundary is preserved — the SOCKS server is the one sanctioned egress point, inside the machine owner's own network.
