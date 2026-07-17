@@ -2604,7 +2604,8 @@ const portForwards = new PortForwardManager({
 setTimeout(() => { portForwards.restore().catch(() => {}); }, 5500);
 app.get('/api/port-forwards', (req, res) => res.json({ forwards: portForwards.list() }));
 app.get('/api/hosts/:id/ports', async (req, res) => {
-  try { res.json({ ports: await portForwards.detect(req.params.id) }); } catch (e) { res.status(400).json({ error: e.message }); }
+  // the UI path probes protocols (http/https/tcp chip); the watch sweep doesn't
+  try { res.json({ ports: await portForwards.detect(req.params.id, { probe: true }) }); } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.post('/api/hosts/:id/port-forward', async (req, res) => {
   try { res.json(await portForwards.forward(req.params.id, (req.body || {}).port, { label: (req.body || {}).label || '' })); }
@@ -2619,6 +2620,12 @@ app.post('/api/port-forward/:id/publish', async (req, res) => {
 });
 app.delete('/api/port-forward/:id/publish', async (req, res) => {
   try { await portForwards.unpublish(String(req.params.id)); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); }
+});
+// protocol override: {proto: 'http'|'https'|'tcp'|null} (null = back to auto);
+// a published forward is transparently re-published in the new mode
+app.post('/api/port-forward/:id/proto', async (req, res) => {
+  try { res.json(await portForwards.setProtoOverride(String(req.params.id), (req.body || {}).proto ?? null)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
 });
 // Kill a LOCAL orphaned listener (B-16d9): killOrphan re-verifies the
 // deleted-cwd condition at kill time, so this can't target a healthy process.

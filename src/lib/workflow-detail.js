@@ -121,6 +121,7 @@ export function openWorkflowDetail(app, runId, opts = {}) {
     let bits;
     if (wf.live) {
       bits = [t('{n} agents', { n: wf.agentCount || 0 }), t('{n} done', { n: wf.doneCount || 0 }), t('running…')];
+      if (wf.resumed) bits.push(t('resumed after an interruption'));
     } else {
       bits = [t('{n} agents', { n: wf.agentCount || 0 }), t('{n} tokens', { n: fmtTokens(wf.totalTokens) }), t('{n} tool calls', { n: wf.totalToolCalls || 0 })];
       if (wf.durationMs) bits.push(fmtDuration(wf.durationMs));
@@ -185,6 +186,7 @@ export function openWorkflowDetail(app, runId, opts = {}) {
   // While the run is in progress the endpoint returns a live skeleton (status
   // 'running'); poll until a terminal snapshot replaces it, then stop.
   let pollTimer = null;
+  let pollSlow = false; // 15s re-check of a killed/failed run (resume watch)
   const stopPoll = () => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } };
   const load = async () => {
     const q = new URLSearchParams({ runId });
@@ -202,9 +204,15 @@ export function openWorkflowDetail(app, runId, opts = {}) {
       render(wf);
       if (wf.live || wf.status === 'running') {
         // hidden-tab backoff: 2.5s polling of a background tab is waste
-        if (!pollTimer) pollTimer = setInterval(() => { if (!document.hidden) load(); }, 2500);
+        if (!pollTimer || pollSlow) { stopPoll(); pollSlow = false; pollTimer = setInterval(() => { if (!document.hidden) load(); }, 2500); }
+      } else if (wf.status === 'killed' || wf.status === 'failed') {
+        // a killed/failed run can be RESUMED under the SAME runId (verified:
+        // resumeFromRunId reuses it) — keep a slow re-check so an open viewer
+        // notices the resume / the healed final snapshot instead of freezing
+        // on the stale terminal state forever (real report)
+        if (!pollTimer || !pollSlow) { stopPoll(); pollSlow = true; pollTimer = setInterval(() => { if (!document.hidden) load(); }, 15000); }
       } else {
-        stopPoll();
+        stopPoll(); // completed — genuinely final
       }
     } catch (e) {
       // transient (server restart mid-run) — keep polling if we already are

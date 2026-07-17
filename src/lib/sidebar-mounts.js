@@ -3,6 +3,7 @@
 // mount list with live status, share-a-folder minting, import-a-link.
 import { createModalShell, showToast, showConfirmDialog, showContextMenu, copyText, escHtml } from './utils.js';
 import { setupDirAutocomplete } from './autocomplete.js';
+import { protoChip } from './sidebar-rail.js'; // http/https/tcp chip (override menu = this._portProtoMenu, same prototype)
 import { t as tr } from './i18n.js'; // sidebar cluster convention: local `t` is pervasively a task var
 
 // 16x16 stroke icons (project convention — no emoji in chrome)
@@ -863,7 +864,9 @@ export function installSidebarMounts(Sidebar) {
           for (const f of active) {
             const r = document.createElement('div'); r.className = 'mounts-row'; r.style.padding = '4px 0'; r.style.flexWrap = 'wrap';
             const info = document.createElement('span'); info.style.flex = '1'; info.style.minWidth = '160px';
-            info.innerHTML = `<b>:${f.remotePort}</b> → <span class="mounts-name" style="color:var(--accent)">127.0.0.1:${f.localPort || '?'}</span>${f.error ? ` <span style="color:var(--red,#e55)">(${escHtml(f.error)})</span>` : ''}`;
+            info.innerHTML = `<b>:${f.remotePort}</b> → <span class="mounts-name" style="color:var(--accent)">127.0.0.1:${f.localPort || '?'}</span> ${protoChip(f.proto, { over: !!f.protoOverride })}${f.error ? ` <span style="color:var(--red,#e55)">(${escHtml(f.error)})</span>` : ''}`;
+            const chip = info.querySelector('.ports-proto');
+            if (chip) chip.onclick = (ev) => this._portProtoMenu(ev, f, render);
             const open = document.createElement('button'); open.className = 'btn-create'; open.textContent = tr('Open'); open.disabled = !f.url;
             open.onclick = () => openForward(f.url);
             const stop = document.createElement('button'); stop.className = 'mounts-btn'; stop.textContent = tr('Stop');
@@ -873,7 +876,11 @@ export function installSidebarMounts(Sidebar) {
             if (frpOk) {
               const pub = document.createElement('button'); pub.className = 'mounts-btn';
               pub.textContent = f.published ? tr('Stop public') : tr('Publish public');
-              pub.title = f.published ? tr('Stop sharing publicly') : tr('Make a public internet URL via the relay (shareable preview link)');
+              pub.title = f.published ? tr('Stop sharing publicly')
+                : f.proto === 'tcp' ? tr('Publish (raw TCP → tcp://host:port)')
+                : f.proto === 'https' ? tr('Publish (HTTPS backend → https://host:port passthrough)')
+                : f.proto === 'http' ? tr('Publish (HTTP → trusted https:// link)')
+                : tr('Make a public internet URL via the relay (shareable preview link)');
               pub.onclick = async () => {
                 pub.disabled = true;
                 try {
@@ -925,7 +932,7 @@ export function installSidebarMounts(Sidebar) {
           const portRow = (p) => {
             const r = document.createElement('div'); r.className = 'mounts-row'; r.style.padding = '3px 0';
             if (p.hidden) r.style.opacity = '0.55';
-            const lbl = document.createElement('span'); lbl.style.flex = '1'; lbl.innerHTML = `<b>:${p.port}</b>${p.proc ? ` <span class="empty-hint">${escHtml(p.proc)}</span>` : ''}${p.orphan ? ` <span class="ports-orphan" title="${escHtml(tr('This process is listening from a DELETED working directory — a removed worktree left its dev server running'))}">${escHtml(tr('orphan'))}</span>` : ''}`;
+            const lbl = document.createElement('span'); lbl.style.flex = '1'; lbl.innerHTML = `<b>:${p.port}</b>${p.proc ? ` <span class="empty-hint">${escHtml(p.proc)}</span>` : ''} ${protoChip(p.proto)}${p.orphan ? ` <span class="ports-orphan" title="${escHtml(tr('This process is listening from a DELETED working directory — a removed worktree left its dev server running'))}">${escHtml(tr('orphan'))}</span>` : ''}`;
             // orphan (deleted cwd) + local: offer Kill instead of Forward
             if (p.orphan && p.pid && h.id === '__local__') {
               const kb = document.createElement('button'); kb.className = 'mounts-btn'; kb.textContent = tr('Kill');

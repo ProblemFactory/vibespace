@@ -19,6 +19,7 @@
 const net = require('net');
 const fs = require('fs');
 const path = require('path');
+const { probeProto } = require('./plugins');
 
 const LOCAL_ID = '__local__'; // machine #0 — this instance itself
 // -p adds process names (own-user processes always visible; drop it if the ss
@@ -63,8 +64,42 @@ class PortForwardManager {
     // watch: dial machines are checked only while dialed-in (device() fails
     // fast offline), ssh machines only while a device link already exists.
     this._seenPorts = new Map(); // hostId → Set(port)
+    this._protoCache = new Map(); // `${hostId}:${port}` → { proto, ts }
     this._watch = setInterval(() => this._watchSweep().catch(() => {}), 30000);
     if (this._watch.unref) this._watch.unref();
+  }
+
+  /** Probe what a machine's port speaks (http / https / tcp) — local ports
+   *  directly, remote ports through a fresh device-tunnel stream per pass.
+   *  Cached 5 min per host:port (the panel re-renders often). */
+  async probeHostPort(hostId, port, { fresh = false } = {}) {
+    const key = `${hostId}:${port}`;
+    const hit = this._protoCache.get(key);
+    if (!fresh && hit && Date.now() - hit.ts < 5 * 60 * 1000) return hit.proto;
+    let proto;
+    try {
+      proto = hostId === LOCAL_ID
+        ? await probeProto(port, { timeoutMs: 1800 })
+        : await probeProto({ connect: () => this._remoteSocket(hostId, port) }, { timeoutMs: 2500 });
+    } catch { return hit?.proto || null; } // unreachable — keep last knowledge
+    this._protoCache.set(key, { proto, ts: Date.now() });
+    return proto;
+  }
+
+  /** One fresh duplex stream to <hostId>'s 127.0.0.1:<port> over the device
+   *  link — the same tcpForward primitive the forwards themselves pipe over. */
+  async _remoteSocket(hostId, port) {
+    const dm = await this.hosts.device(hostId);
+    const h = await dm.tcpForward(port);
+    const { Duplex } = require('stream');
+    const d = new Duplex({
+      read() {},
+      write(chunk, enc, cb) { try { h.write(chunk); cb(); } catch (e) { cb(e); } },
+      destroy(err, cb) { try { h.close(); } catch { } cb(err); },
+    });
+    h.onData = (b) => { try { d.push(b); } catch { } };
+    h.onClose = () => { try { d.push(null); } catch { } };
+    return d;
   }
 
   /** One watch pass over linked machines; new listeners broadcast as
@@ -128,21 +163,65 @@ class PortForwardManager {
       localPort: this._live.get(r.id)?.rec?.localPort || null,
       url: this._live.get(r.id)?.rec?.localPort ? `http://127.0.0.1:${this._live.get(r.id).rec.localPort}/` : null,
       active: this._live.has(r.id), error: r.error || null,
+      // protocol: what the backend was DETECTED to speak + the user's override
+      // (effective = override || detected) — drives the publish mode + UI chip
+      proto: r.protoOverride || r.proto || null,
+      protoDetected: r.proto || null, protoOverride: r.protoOverride || null,
       // public (frp relay) exposure, if published
       publicUrl: r.publicUrl || null, publicProto: r.publicProto || null, published: !!r.publicUrl,
     }));
   }
 
+  /** User override of the detected protocol ('http'|'https'|'tcp'|null=auto).
+   *  A published forward is transparently re-published in the new mode. */
+  async setProtoOverride(id, proto) {
+    const rec = this._state.forwards.find((r) => r.id === id);
+    if (!rec) throw new Error('no such forward');
+    if (proto !== null && !['http', 'https', 'tcp'].includes(proto)) throw new Error('proto must be http, https, tcp or null (auto)');
+    if (proto) rec.protoOverride = proto; else delete rec.protoOverride;
+    this._persist();
+    if (rec.publicUrl && this.plugins) {
+      // re-publish in the new mode — the URL SHAPE changes (subdomain vs
+      // ip:port), so the old proxy must go first; keep the stored subdomain
+      // so flipping back to http restores the same public URL
+      try { await this.plugins.frpUnpublish(rec.publicName || rec.id); } catch { }
+      rec.publicUrl = null;
+      try { await this.publish(id); } catch (e) { rec.error = 'republish: ' + e.message; this._persist(); }
+    }
+    this._emit();
+    return this.list().find((r) => r.id === id);
+  }
+
   /** Detect listening TCP ports on a machine (dial or ssh) over the device
-   *  link. Loopback + all-interface listeners only; returns [{port, proc}]. */
-  async detect(hostId) {
-    if (hostId === LOCAL_ID) return this.detectLocal();
-    const dm = await this.hosts.device(hostId);
-    // Linux: `ss -tlnH`; macOS/BSD: `lsof`. Try ss first, fall back to lsof.
-    // -H (no header) is GNU-ss only, so parse defensively either way.
-    let out = '';
-    try { out = String((await dm.runCmd('sh', ['-c', PORT_SCAN], { timeoutMs: 8000 })).stdout || ''); } catch (e) { throw new Error('port scan failed: ' + e.message); }
-    return this._parsePorts(out).map((p) => this._classify(p));
+   *  link. Loopback + all-interface listeners only; returns [{port, proc}].
+   *  With {probe:true} (the UI path — NOT the 30s watch sweep) each visible
+   *  port also gets `proto` (http/https/tcp) from probeHostPort, bounded by a
+   *  3.5s overall budget — late probes still land in the cache for the next
+   *  render. */
+  async detect(hostId, { probe = false } = {}) {
+    let ports;
+    if (hostId === LOCAL_ID) ports = await this.detectLocal();
+    else {
+      const dm = await this.hosts.device(hostId);
+      // Linux: `ss -tlnH`; macOS/BSD: `lsof`. Try ss first, fall back to lsof.
+      // -H (no header) is GNU-ss only, so parse defensively either way.
+      let out = '';
+      try { out = String((await dm.runCmd('sh', ['-c', PORT_SCAN], { timeoutMs: 8000 })).stdout || ''); } catch (e) { throw new Error('port scan failed: ' + e.message); }
+      ports = this._parsePorts(out).map((p) => this._classify(p));
+    }
+    if (probe) {
+      // cache serves every row; the probe budget goes to UNCACHED ports only,
+      // so repeat scans progressively cover hosts with many listeners
+      const vis = ports.filter((p) => !p.hidden);
+      for (const p of vis) {
+        const hit = this._protoCache.get(`${hostId}:${p.port}`);
+        if (hit && Date.now() - hit.ts < 5 * 60 * 1000) p.proto = hit.proto;
+      }
+      const cand = vis.filter((p) => !p.proto).slice(0, 12);
+      const jobs = cand.map((p) => this.probeHostPort(hostId, p.port).then((proto) => { if (proto) p.proto = proto; }).catch(() => {}));
+      await Promise.race([Promise.allSettled(jobs), new Promise((r) => setTimeout(r, 3500))]);
+    }
+    return ports;
   }
 
   /** Flag known non-web system listeners (UI folds them; watch skips them). */
@@ -271,8 +350,17 @@ class PortForwardManager {
     if (!rec) { rec = { id: 'pf-' + hostId + '-' + remotePort, hostId, remotePort, label }; this._state.forwards.push(rec); this._persist(); }
     else if (label) { rec.label = label; this._persist(); }
     await this._start(rec);
+    this._probeForward(rec);
     this._emit();
     return this.list().find((r) => r.id === rec.id);
+  }
+
+  /** Refresh a forward's detected protocol in the background (never blocks
+   *  forward/restore); re-broadcasts when the answer changes the record. */
+  _probeForward(rec) {
+    this.probeHostPort(rec.hostId, rec.remotePort)
+      .then((proto) => { if (proto && rec.proto !== proto) { rec.proto = proto; this._persist(); this._emit(); } })
+      .catch(() => {});
   }
 
   async _start(rec) {
@@ -343,8 +431,11 @@ class PortForwardManager {
     if (!l?.rec?.localPort) await this._start(rec); // ensure a local port exists
     const localPort = this._live.get(id)?.rec?.localPort;
     if (!localPort) throw new Error('the forward is not active (is the machine online?)');
-    const r = await this.plugins.frpPublish(id, localPort, { preferPort: rec.publicPort || 0, preferSub: rec.publicSub || '' });
+    // effective proto: the user's override wins; otherwise frpPublish probes
+    // the backend itself (authoritative at publish time)
+    const r = await this.plugins.frpPublish(id, localPort, { preferPort: rec.publicPort || 0, preferSub: rec.publicSub || '', proto: rec.protoOverride || '' });
     rec.publicUrl = r.url; rec.publicName = r.name; rec.publicPort = r.remotePort; rec.publicSub = r.subdomain || null; rec.publicProto = r.proto || null;
+    if (!rec.protoOverride && r.proto) rec.proto = r.proto; // publish probe refreshes detection
     this._persist(); this._emit();
     return { publicUrl: r.url };
   }
@@ -365,7 +456,7 @@ class PortForwardManager {
       // re-publish REUSES the persisted subdomain/port (preferSub/preferPort) —
       // regenerating them on every server restart silently broke previously
       // shared public URLs (review finding)
-      try { await this._start(rec); if (rec.publicUrl && this.plugins) { try { const r = await this.plugins.frpPublish(rec.id, this._live.get(rec.id).rec.localPort, { preferPort: rec.publicPort || 0, preferSub: rec.publicSub || '' }); rec.publicUrl = r.url; rec.publicName = r.name; rec.publicPort = r.remotePort; rec.publicSub = r.subdomain || null; rec.publicProto = r.proto || null; } catch (e) { this.log('re-publish ' + rec.id + ': ' + e.message); } } } catch (e) { rec.error = e.message; }
+      try { await this._start(rec); this._probeForward(rec); if (rec.publicUrl && this.plugins) { try { const r = await this.plugins.frpPublish(rec.id, this._live.get(rec.id).rec.localPort, { preferPort: rec.publicPort || 0, preferSub: rec.publicSub || '', proto: rec.protoOverride || rec.publicProto || '' }); rec.publicUrl = r.url; rec.publicName = r.name; rec.publicPort = r.remotePort; rec.publicSub = r.subdomain || null; rec.publicProto = r.proto || null; } catch (e) { this.log('re-publish ' + rec.id + ': ' + e.message); } } } catch (e) { rec.error = e.message; }
     }
     this._persist();
     this._emit();
@@ -375,7 +466,7 @@ class PortForwardManager {
   async onMachineLinked(hostId) {
     for (const rec of this._state.forwards) {
       if (rec.hostId !== hostId || this._live.has(rec.id)) continue;
-      try { await this._start(rec); rec.error = null; } catch (e) { rec.error = e.message; }
+      try { await this._start(rec); rec.error = null; this._probeForward(rec); } catch (e) { rec.error = e.message; }
     }
     this._emit();
   }
