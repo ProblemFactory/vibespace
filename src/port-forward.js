@@ -129,7 +129,7 @@ class PortForwardManager {
       url: this._live.get(r.id)?.rec?.localPort ? `http://127.0.0.1:${this._live.get(r.id).rec.localPort}/` : null,
       active: this._live.has(r.id), error: r.error || null,
       // public (frp relay) exposure, if published
-      publicUrl: r.publicUrl || null, published: !!r.publicUrl,
+      publicUrl: r.publicUrl || null, publicProto: r.publicProto || null, published: !!r.publicUrl,
     }));
   }
 
@@ -344,7 +344,7 @@ class PortForwardManager {
     const localPort = this._live.get(id)?.rec?.localPort;
     if (!localPort) throw new Error('the forward is not active (is the machine online?)');
     const r = await this.plugins.frpPublish(id, localPort, { preferPort: rec.publicPort || 0, preferSub: rec.publicSub || '' });
-    rec.publicUrl = r.url; rec.publicName = r.name; rec.publicPort = r.remotePort; rec.publicSub = r.subdomain || null;
+    rec.publicUrl = r.url; rec.publicName = r.name; rec.publicPort = r.remotePort; rec.publicSub = r.subdomain || null; rec.publicProto = r.proto || null;
     this._persist(); this._emit();
     return { publicUrl: r.url };
   }
@@ -365,7 +365,7 @@ class PortForwardManager {
       // re-publish REUSES the persisted subdomain/port (preferSub/preferPort) —
       // regenerating them on every server restart silently broke previously
       // shared public URLs (review finding)
-      try { await this._start(rec); if (rec.publicUrl && this.plugins) { try { const r = await this.plugins.frpPublish(rec.id, this._live.get(rec.id).rec.localPort, { preferPort: rec.publicPort || 0, preferSub: rec.publicSub || '' }); rec.publicUrl = r.url; rec.publicName = r.name; rec.publicPort = r.remotePort; rec.publicSub = r.subdomain || null; } catch (e) { this.log('re-publish ' + rec.id + ': ' + e.message); } } } catch (e) { rec.error = e.message; }
+      try { await this._start(rec); if (rec.publicUrl && this.plugins) { try { const r = await this.plugins.frpPublish(rec.id, this._live.get(rec.id).rec.localPort, { preferPort: rec.publicPort || 0, preferSub: rec.publicSub || '' }); rec.publicUrl = r.url; rec.publicName = r.name; rec.publicPort = r.remotePort; rec.publicSub = r.subdomain || null; rec.publicProto = r.proto || null; } catch (e) { this.log('re-publish ' + rec.id + ': ' + e.message); } } } catch (e) { rec.error = e.message; }
     }
     this._persist();
     this._emit();

@@ -31,8 +31,7 @@ allowPorts = [
 # TLS is passthrough by default (the client serves its own cert — fine for
 # tools; browsers warn on the self-signed cert). For a trusted cert, obtain a
 # wildcard *.<DOMAIN> cert (e.g. Let's Encrypt DNS-01) and add transport.tls.
-# vhostHTTPPort = 80
-# vhostHTTPSPort = 443
+# vhostHTTPPort = 8080          # internal — a TLS terminator (see README) fronts it on 443
 # subDomainHost = "<DOMAIN>"
 
 # Optional admin dashboard (bind to localhost or firewall it — it exposes proxy
