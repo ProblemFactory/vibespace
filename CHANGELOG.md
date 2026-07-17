@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.185.2 — 2026-07-17
+- **Dial-device link no longer wedges after a daemon self-upgrade** (real xingweil↔Mac outage). The device daemon's upgrade re-exec spawned the new bundle with **no arguments**, but the dial transport reads `--dial <url> --dial-token <t>` from argv — so a re-exec'd DIAL device came up in default LISTEN mode: it stopped dialing the instance AND held the singleton lock so launchd couldn't relaunch the real `--dial` daemon. Usually the launchd relaunch won the race (so it recovered), but rapid successive server upgrades lost the race and the link stayed down. The re-exec now preserves the full original argv (`src/agentd/reexec.js`, `reExecArgv`); regression test `scripts/test-agentd-reexec-argv.mjs`. This is the root cause behind the walter-class "dial device silently goes offline after updates."
+
 ## 2.185.1 — 2026-07-17
 - **Port-forwarding button icon fixed** (real report: "这个电源开关是端口转发…图标太奇怪了"). The 🔌 button on machine rows used the IEC **power on/off symbol** (a vertical line through an open arc), so users read it as a power switch and couldn't find port forwarding. It now uses a plug/connector icon (prongs + body + cord) matching the Ports panel — the "Connect a storage mount" action keeps the power symbol, where on/off actually fits. Verified the whole flow works on a phone viewport (`scripts/dbg-mobile-ports.mjs`: mobile mode → Remote tab → ports dialog fits the screen and sits above the sidebar overlay → forward → open through the proxy).
 

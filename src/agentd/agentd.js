@@ -114,6 +114,12 @@ function pidCmdline(pid) {
   try { return fs.readFileSync('/proc/' + pid + '/cmdline', 'utf-8').replace(/\0/g, ' '); } catch { return ''; }
 }
 
+// Argv the self-upgrade re-exec must launch with: the NEW bundle path plus
+// EVERY original flag (--dial/--dial-token/--host-token/…). Extracted to a
+// side-effect-free module so the regression test can import it without
+// executing the daemon.
+const { reExecArgv } = require('./reexec');
+
 // Exec-PROOF process identity: the start time survives execve while cmdline
 // does NOT — a pipe child spawned as `sh -lc '… exec env … claude …'` rewrites
 // its cmdline twice, so matching cmdline against the recorded argv0 misjudges
@@ -230,12 +236,19 @@ function beginUpgrade(mux, { version, size }) {
         mux.control({ op: 'upgrade-done', version });
         log(`upgrade to ${version} landed — re-exec`);
         // re-exec from the new dir; the singleton lock is released on exit and
-        // NOTHING outside our install dir is touched (invariant #1/#7)
+        // NOTHING outside our install dir is touched (invariant #1/#7).
+        // PRESERVE THE ORIGINAL ARGV (2.185.2, real xingweil↔Mac outage): the
+        // dial transport reads `--dial <url> --dial-token <t>` from process.argv
+        // (see Transport B below); dropping them here re-exec'd a DIAL device
+        // into default LISTEN mode → it stopped dialing the instance AND held
+        // the singleton so launchd couldn't relaunch the real --dial daemon
+        // (walter-class wedge, masked most of the time by the launchd relaunch
+        // winning the race — lost under rapid upgrade churn).
         setTimeout(() => {
           const { spawn } = require('child_process');
           try { fs.unlinkSync(LOCK); } catch { }
           try { fs.unlinkSync(SOCK); } catch { }
-          const child = spawn(process.execPath, [path.join(dir, path.basename(process.argv[1] || 'agentd.js'))], {
+          const child = spawn(process.execPath, reExecArgv(path.join(dir, path.basename(process.argv[1] || 'agentd.js'))), {
             detached: true, stdio: 'ignore',
             env: { ...process.env, VIBESPACE_AGENTD_VERSION: version },
           });
