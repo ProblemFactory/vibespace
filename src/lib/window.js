@@ -483,10 +483,14 @@ class WindowManager {
 
       // Desktop preview drop: if we have a mini window inside a preview, commit the move
       if (deskPreviewTarget && deskMiniWin) {
-        const previews = [...document.querySelectorAll('.desktop-preview')];
-        const idx = previews.indexOf(deskPreviewTarget);
         const dm = this._app?.desktopManager;
-        const isOtherDesktop = dm && idx >= 0 && idx < dm.desktops.length && dm.desktops[idx].id !== dm.activeDesktopId;
+        // Resolve the target by the preview's OWN desktop id — never by DOM
+        // index: the Stage preview also matches `.desktop-preview` and sits
+        // before the real ones, so an index map lands the window one desktop
+        // to the right (real report). No id (Stage preview / unknown) ⇒ not a
+        // desktop-move drop.
+        const targetDeskId = deskPreviewTarget.dataset?.desktopId || null;
+        const isOtherDesktop = dm && targetDeskId && dm.desktops.some((d) => d.id === targetDeskId) && targetDeskId !== dm.activeDesktopId;
 
         if (isOtherDesktop) {
           this._clearGridHighlight(); this.gridOverlay.classList.remove('dragging');
@@ -498,7 +502,7 @@ class WindowManager {
           deskMiniWin.remove(); deskMiniWin = null; deskPreviewTarget = null;
           element.style.visibility = ''; element.style.pointerEvents = '';
           if (deskSavedBounds) deskSavedBounds = null;
-          dm.moveWindowToDesktop(win.id, dm.desktops[idx].id);
+          dm.moveWindowToDesktop(win.id, targetDeskId);
           tabMergeTarget = null; savedBounds = null;
           return;
         }

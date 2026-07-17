@@ -466,6 +466,11 @@ export class DesktopManager {
     for (const desk of this._desktops) {
       const preview = document.createElement('div');
       preview.className = 'desktop-preview' + (desk.id === this._activeId ? ' active' : '');
+      // the drop target resolves the desktop by THIS id, never by DOM index —
+      // the Stage preview also carries `.desktop-preview` (+ `stage-preview`)
+      // and sits BEFORE these, so an index map lands the window one desktop to
+      // the right when the Stage is active (real report)
+      preview.dataset.desktopId = desk.id;
       preview.title = desk.name;
 
       // Collect windows for this desktop and draw miniature rectangles
