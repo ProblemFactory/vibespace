@@ -7,7 +7,16 @@
 // Setting `sidebar.activityRail` (default ON) restores the classic tab bar +
 // modal dialogs when off. Mobile keeps its own nav — the rail never renders.
 import { t as tr } from './i18n.js';
-import { copyText, escHtml, showToast, fetchJson } from './utils.js';
+import { copyText, escHtml, showToast, fetchJson, showContextMenu } from './utils.js';
+
+// Protocol chip: what a port speaks (http/https/tcp) → how it can be shared.
+// `over` = user override active (shown filled/accented). Clicking opens the
+// override menu (Auto / HTTP / HTTPS / TCP).
+export const PROTO_LABEL = { http: 'HTTP', https: 'HTTPS', tcp: 'TCP' };
+export function protoChip(proto, { over = false } = {}) {
+  if (!proto) return '';
+  return `<span class="ports-proto ports-proto-${proto}${over ? ' ports-proto-over' : ''}" data-tip="${over ? escHtml(tr('Protocol forced to {p} (click to change)', { p: PROTO_LABEL[proto] })) : escHtml(tr('Detected {p} (click to override)', { p: PROTO_LABEL[proto] }))}">${PROTO_LABEL[proto]}${over ? '*' : ''}</span>`;
+}
 
 // Self-contained 18px icons (UI_ICONS lacks several shapes; MI is module-local
 // to sidebar-mounts) — consistent stroke style, currentColor.
@@ -244,13 +253,23 @@ export function installSidebarRail(Sidebar) {
           const row = document.createElement('div');
           row.className = 'ports-row';
           const label = `${escHtml(nameOf(f.hostId))}:${f.remotePort}`;
-          row.innerHTML = `<span class="ports-row-label" title="${label}">${label}${f.publicUrl ? ` <span class="ports-pub" title="${escHtml(f.publicUrl)}">${PORT_ICONS.globe}</span>` : ''}</span>`;
+          row.innerHTML = `<span class="ports-row-label" title="${label}">${label} ${protoChip(f.proto, { over: !!f.protoOverride })}${f.publicUrl ? ` <span class="ports-pub" title="${escHtml(f.publicUrl)}">${PORT_ICONS.globe}</span>` : ''}</span>`;
+          // the proto chip is the override handle
+          const chip = row.querySelector('.ports-proto');
+          if (chip) chip.onclick = (ev) => this._portProtoMenu(ev, f, render);
           const acts = document.createElement('span');
           acts.className = 'ports-row-actions';
           const btn = (icon, tip, fn) => { const b = document.createElement('button'); b.className = 'mounts-icon-btn'; b.innerHTML = icon; b.dataset.tip = tip; b.onclick = fn; return b; };
           if (f.url) acts.append(btn(PORT_ICONS.open, tr('Open (through the app proxy)'), () => this.app.openBrowser?.(f.publicUrl || f.url, { proxy: !f.publicUrl })));
+          // publish tooltip states the OUTCOME per effective proto (a raw-TCP
+          // service becomes tcp://ip:port, an http one a trusted https URL)
+          const pubHint = f.publicUrl ? tr('Unpublish from the internet')
+            : f.proto === 'tcp' ? tr('Publish (raw TCP → tcp://host:port)')
+            : f.proto === 'https' ? tr('Publish (HTTPS backend → https://host:port passthrough)')
+            : f.proto === 'http' ? tr('Publish (HTTP → trusted https:// link)')
+            : tr('Publish to the internet (frp relay)');
           const pubBtn = btn(f.publicUrl ? PORT_ICONS.globeOff : PORT_ICONS.globe,
-            !frpOk && !f.publicUrl ? FRP_MSG : (f.publicUrl ? tr('Unpublish from the internet') : tr('Publish to the internet (frp relay)')),
+            !frpOk && !f.publicUrl ? FRP_MSG : pubHint,
             async () => {
               if (!frpOk && !f.publicUrl) { showToast(FRP_MSG, { type: 'error' }); return; }
               // fetchJson never throws — a 4xx comes back as {error}; surface it
@@ -312,7 +331,7 @@ export function installSidebarRail(Sidebar) {
               const portRow = (p) => {
                 const pr = document.createElement('div');
                 pr.className = 'ports-row' + (p.hidden ? ' ports-row-sys' : '');
-                pr.innerHTML = `<span class="ports-row-label">${p.port}${p.proc ? ' <span class="ports-proc">' + escHtml(p.proc) + '</span>' : ''}${p.orphan ? ` <span class="ports-orphan" title="${escHtml(tr('This process is listening from a DELETED working directory — a removed worktree left its dev server running'))}">${escHtml(tr('orphan'))}</span>` : ''}</span>`;
+                pr.innerHTML = `<span class="ports-row-label">${p.port}${p.proc ? ' <span class="ports-proc">' + escHtml(p.proc) + '</span>' : ''} ${protoChip(p.proto)}${p.orphan ? ` <span class="ports-orphan" title="${escHtml(tr('This process is listening from a DELETED working directory — a removed worktree left its dev server running'))}">${escHtml(tr('orphan'))}</span>` : ''}</span>`;
                 // orphaned (deleted-cwd) listeners get a Kill instead of Forward
                 if (p.orphan && p.pid && m.id === '__local__') {
                   const kb = document.createElement('button');
@@ -359,6 +378,28 @@ export function installSidebarRail(Sidebar) {
         if (!c.isConnected) return;
         if (msg.type === 'port-forwards-updated' || msg.type === 'machine-ports-new') render();
       });
+    },
+
+    // Override the detected protocol of a forward. Auto = clear the override
+    // (fall back to detection). A published forward re-publishes in the new
+    // mode server-side, so the public URL SHAPE updates too.
+    _portProtoMenu(ev, f, refresh) {
+      ev.stopPropagation();
+      const cur = f.protoOverride || null;
+      const mark = (v) => (v === cur ? '✓ ' : (v === null && !cur ? '✓ ' : '   '));
+      const set = async (proto) => {
+        const r = await fetchJson(`/api/port-forward/${encodeURIComponent(f.id)}/proto`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ proto }),
+        });
+        if (r?.error) showToast(r.error, { type: 'error' });
+        refresh?.();
+      };
+      showContextMenu(ev.clientX, ev.clientY, [
+        { label: `${mark(null)}${tr('Auto')}${f.protoDetected ? ` (${PROTO_LABEL[f.protoDetected] || f.protoDetected})` : ''}`, action: () => set(null) },
+        { label: `${mark('http')}${tr('Force HTTP')}`, action: () => set('http') },
+        { label: `${mark('https')}${tr('Force HTTPS')}`, action: () => set('https') },
+        { label: `${mark('tcp')}${tr('Force TCP')}`, action: () => set('tcp') },
+      ]);
     },
   });
 }

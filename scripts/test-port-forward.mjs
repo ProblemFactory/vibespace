@@ -138,6 +138,35 @@ try {
   await pf.unforward('pf-h2-9999');
   check('unforward removes the record', !pf._state.forwards.some((r) => r.id === 'pf-h2-9999'));
 
+  // ── protocol detection + user override (2.185.0) ──
+  {
+    const httpSrv = (await import('node:http')).createServer((q, s) => s.end('ok'));
+    const HTTP_PORT = await new Promise((r) => httpSrv.listen(0, '127.0.0.1', function () { r(this.address().port); }));
+    check('probeHostPort: local plaintext HTTP → http', (await pf.probeHostPort('__local__', HTTP_PORT)) === 'http');
+    check('probeHostPort: local raw echo → tcp', (await pf.probeHostPort('__local__', SERVICE_PORT)) === 'tcp');
+    // remote probing rides the device tunnel (mock tcpForward → the echo)
+    check('probeHostPort: remote via device tunnel → tcp', (await pf.probeHostPort('h1', SERVICE_PORT)) === 'tcp');
+    const lp = await pf.detect('__local__', { probe: true });
+    const hit = lp.find((p) => p.port === HTTP_PORT);
+    check('detect({probe}) tags listeners with proto', hit?.proto === 'http', JSON.stringify(hit));
+    const f = await pf.forward('__local__', HTTP_PORT);
+    await sleep(700); // _probeForward is fire-and-forget
+    let rec = pf.list().find((r) => r.id === f.id);
+    check('forward record carries the detected proto', rec?.protoDetected === 'http' && rec?.proto === 'http', JSON.stringify(rec));
+    await pf.setProtoOverride(f.id, 'tcp');
+    rec = pf.list().find((r) => r.id === f.id);
+    check('override wins over detection (effective proto)', rec.proto === 'tcp' && rec.protoOverride === 'tcp' && rec.protoDetected === 'http', JSON.stringify(rec));
+    const disk = JSON.parse(fs.readFileSync(path.join(dataDir, 'port-forwards.json'), 'utf-8'));
+    check('override persists to disk', disk.forwards.find((r) => r.id === f.id)?.protoOverride === 'tcp');
+    await pf.setProtoOverride(f.id, null);
+    rec = pf.list().find((r) => r.id === f.id);
+    check('Auto clears the override (back to detected)', rec.protoOverride === null && rec.proto === 'http', JSON.stringify(rec));
+    let bad = ''; try { await pf.setProtoOverride(f.id, 'ftp'); } catch (e) { bad = e.message; }
+    check('invalid proto rejected with guidance', /http, https, tcp/.test(bad), bad);
+    await pf.unforward(f.id);
+    httpSrv.close();
+  }
+
   // ── orphan detection (B-16d9): REAL listener in a DELETED cwd ──
   if (process.platform === 'linux') {
     const { spawn } = await import('node:child_process');

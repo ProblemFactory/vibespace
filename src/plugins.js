@@ -540,28 +540,9 @@ class PluginManager {
    *  subDomainHost is configured → a random `https://<sub>.<host>` subdomain
    *  (the SNI broker); else a TCP port map `http://<relay>:<port>/` (retrying
    *  on collision — the relay is fleet-shared). name = a stable proxy name. */
-  /** Sniff what a local service speaks so we pick the right relay proxy type.
-   *  'https' (TLS backend) / 'http' (plaintext HTTP) / 'tcp' (anything else —
-   *  a DB, VNC, SSH: NO Host/SNI to route, so it can only be an IP:port). */
-  async _probeProto(port, { timeoutMs = 2500 } = {}) {
-    const net = require('net'), tls = require('tls');
-    // TLS? a completed handshake = the backend serves TLS (its own https)
-    const isTls = await new Promise((res) => {
-      let done = false; const fin = (v) => { if (!done) { done = true; res(v); } };
-      const s = tls.connect({ host: '127.0.0.1', port, rejectUnauthorized: false, timeout: timeoutMs }, () => { fin(true); s.destroy(); });
-      s.on('error', () => fin(false)); s.on('timeout', () => { fin(false); s.destroy(); });
-    });
-    if (isTls) return 'https';
-    // HTTP? send a minimal request and look for an HTTP status line
-    const isHttp = await new Promise((res) => {
-      let done = false, buf = ''; const fin = (v) => { if (!done) { done = true; res(v); } };
-      const s = net.connect({ host: '127.0.0.1', port, timeout: timeoutMs }, () => s.write('GET / HTTP/1.0\r\nHost: localhost\r\n\r\n'));
-      s.on('data', (d) => { buf += d.toString('latin1'); if (buf.length >= 5) { fin(/^HTTP\//.test(buf)); s.destroy(); } });
-      s.on('error', () => fin(false)); s.on('timeout', () => { fin(false); s.destroy(); });
-      s.on('close', () => fin(/^HTTP\//.test(buf)));
-    });
-    return isHttp ? 'http' : 'tcp';
-  }
+  /** Sniff what a local service speaks so we pick the right relay proxy type
+   *  (see module-level probeProto). */
+  async _probeProto(port, opts) { return probeProto(port, opts); }
 
   async frpPublish(name, localPort, { preferPort = 0, preferSub = '', proto: protoHint = '' } = {}) {
     if (!this._frpConfigured()) throw new Error('public URLs are not available — the frp relay is not configured on this instance');
@@ -650,4 +631,44 @@ class PluginManager {
   }
 }
 
-module.exports = { PluginManager };
+/** Sniff what a service speaks so publish/UI pick the right exposure mode.
+ *  'https' (TLS backend — passthrough, keeps its own cert) / 'http' (plaintext
+ *  HTTP — can ride a routed subdomain with server-side TLS termination) /
+ *  'tcp' (anything else — a DB, VNC, SSH: NO Host/SNI to route on, so it can
+ *  only be an IP:port). `target` = a local port number, or `{ connect }` — an
+ *  async factory returning a duplex stream (how remote ports are probed
+ *  through the device tunnel; each probe pass gets its OWN fresh stream). */
+async function probeProto(target, { timeoutMs = 2500 } = {}) {
+  const net = require('net'), tls = require('tls');
+  const mk = typeof target === 'object' && target && target.connect
+    ? target.connect
+    : () => new Promise((res, rej) => {
+      const s = net.connect({ host: '127.0.0.1', port: target, timeout: timeoutMs }, () => res(s));
+      s.on('error', rej); s.on('timeout', () => { s.destroy(); rej(new Error('timeout')); });
+    });
+  // TLS? a completed handshake = the backend serves TLS (its own https)
+  const isTls = await new Promise(async (res) => {
+    let done = false; const fin = (v) => { if (!done) { done = true; res(v); } };
+    const guard = setTimeout(() => fin(false), timeoutMs + 500);
+    let sock; try { sock = await mk(); } catch { clearTimeout(guard); return fin(false); }
+    const s = tls.connect({ socket: sock, rejectUnauthorized: false }, () => { clearTimeout(guard); fin(true); s.destroy(); });
+    s.setTimeout(timeoutMs, () => { fin(false); s.destroy(); });
+    s.on('error', () => { clearTimeout(guard); fin(false); try { s.destroy(); } catch { } });
+  });
+  if (isTls) return 'https';
+  // HTTP? send a minimal request and look for an HTTP status line
+  const isHttp = await new Promise(async (res) => {
+    let done = false, buf = ''; const fin = (v) => { if (!done) { done = true; res(v); } };
+    const guard = setTimeout(() => { fin(/^HTTP\//.test(buf)); }, timeoutMs + 500);
+    let s; try { s = await mk(); } catch { clearTimeout(guard); return fin(false); }
+    const end = (v) => { clearTimeout(guard); fin(v); try { s.destroy?.() ?? s.end?.(); } catch { } };
+    try { s.write('GET / HTTP/1.0\r\nHost: localhost\r\n\r\n'); } catch { return end(false); }
+    s.on('data', (d) => { buf += d.toString('latin1'); if (buf.length >= 5) end(/^HTTP\//.test(buf)); });
+    s.on('error', () => end(/^HTTP\//.test(buf)));
+    s.on('close', () => end(/^HTTP\//.test(buf)));
+    if (s.setTimeout) s.setTimeout(timeoutMs, () => end(/^HTTP\//.test(buf)));
+  });
+  return isHttp ? 'http' : 'tcp';
+}
+
+module.exports = { PluginManager, probeProto };

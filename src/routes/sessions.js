@@ -439,18 +439,39 @@ function setup(ctx) {
   router.get('/api/workflow', (req, res) => {
     const { claudeSessionId, cwd, runId } = req.query;
     if (!runId || !/^wf_[\w-]{1,64}$/.test(runId)) return res.status(400).json({ error: 'valid runId required' });
-    // Terminal snapshot wins (it's complete). Prefer it even if the run dir also
-    // still exists (snapshot is written at completion, dir lingers).
+    // Terminal snapshot wins (it's complete). Prefer it even if the run dir
+    // also still exists (snapshot is written at completion, dir lingers) —
+    // EXCEPT when the run was RESUMED: resumeFromRunId REUSES the runId
+    // (verified from real transcripts), so a killed run's terminal snapshot
+    // lingers while the resumed run appends to the same journal — the viewer
+    // showed the frozen 'killed' state for the whole resumed execution (real
+    // report). Journal/agent activity meaningfully AFTER the snapshot ⇒ the
+    // run is going again ⇒ serve the live skeleton until the new terminal
+    // snapshot overwrites it. Margin: completed runs write the snapshot ≤0.1s
+    // after the last journal line; a resume trails it by minutes.
     const fp = findWorkflowSnapshot(runId, claudeSessionId || '', cwd || '');
+    const runDir = findWorkflowRunDir(runId, claudeSessionId || '', cwd || '');
     if (fp) {
+      try {
+        if (runDir) {
+          const snapMs = fs.statSync(fp).mtimeMs;
+          let liveMs = 0;
+          try { liveMs = fs.statSync(path.join(runDir, 'journal.jsonl')).mtimeMs; } catch {}
+          try {
+            for (const f of fs.readdirSync(runDir)) {
+              if (/^agent-[\w-]+\.jsonl$/.test(f)) liveMs = Math.max(liveMs, fs.statSync(path.join(runDir, f)).mtimeMs);
+            }
+          } catch {}
+          if (liveMs > snapMs + 15000) return res.json({ ...readLiveWorkflow(runDir, runId), resumed: true });
+        }
+      } catch {}
       try {
         const out = normalizeWorkflowSnapshot(JSON.parse(fs.readFileSync(fp, 'utf-8')), runId);
         // Retry attempts stay tagged in the FINISHED view too (the run dir
         // lingers next to the snapshot; harmless if it's already gone)
         try {
-          const rd = findWorkflowRunDir(runId, claudeSessionId || '', cwd || '');
-          if (rd) {
-            const { superseded } = journalAttempts(rd);
+          if (runDir) {
+            const { superseded } = journalAttempts(runDir);
             for (const ph of out.phases || []) for (const ag of ph.agents || []) {
               if (superseded.has(ag.agentId) && ag.state !== 'done') ag.state = 'superseded';
             }
@@ -461,7 +482,6 @@ function setup(ctx) {
       catch (err) { return res.status(500).json({ error: 'failed to parse workflow snapshot: ' + err.message }); }
     }
     // No snapshot yet — surface a LIVE view if the run is still going.
-    const runDir = findWorkflowRunDir(runId, claudeSessionId || '', cwd || '');
     if (runDir) return res.json(readLiveWorkflow(runDir, runId));
     return res.status(404).json({ error: 'workflow not found (no run directory or snapshot for this id)' });
   });
