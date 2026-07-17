@@ -29,12 +29,25 @@ runs the official `frpc` client on the instance.
    and `20000-25000` (TCP proxy range). Add `80` + `443` if you enable the
    subdomain broker.
 
-### Optional: pretty `https://<random>.<domain>/` URLs
+### Optional: trusted `https://<random>.<domain>/` URLs
 
-Point wildcard DNS `*.<DOMAIN>` at the server, uncomment the vhost +
-`subDomainHost` lines in `frps.toml`, restart frps. TLS is passthrough by
-default (self-signed → browsers warn; fine for tools). For a trusted cert, get
-a wildcard `*.<DOMAIN>` cert (Let's Encrypt DNS-01) and add `transport.tls`.
+For browser-trusted public links, terminate TLS **on the relay** (standard SNI
+reverse proxy — no cert on any VibeSpace instance):
+1. Point wildcard DNS `*.<DOMAIN>` at the server; set `subDomainHost = "<DOMAIN>"`
+   and `vhostHTTPPort = 8080` in `frps.toml` (leave 443 for the terminator).
+2. Get a wildcard `*.<DOMAIN>` cert (e.g. `acme.sh --dns <your-provider>` — no
+   inbound port needed for DNS-01).
+3. Run a TLS terminator on :443 that reverse-proxies to `127.0.0.1:8080`
+   (frps's vhost HTTP), passing WebSocket upgrades. A minimal Caddyfile:
+
+       *.<DOMAIN> {
+           tls /path/fullchain.pem /path/key.pem
+           reverse_proxy 127.0.0.1:8080
+       }
+
+VibeSpace's frp plugin auto-detects the backend protocol: a plaintext HTTP
+service gets the trusted subdomain; an HTTPS-native or raw-TCP service is
+exposed as `https://<ip>:<port>` / `tcp://<ip>:<port>` instead.
 
 ## Point VibeSpace at your relay
 

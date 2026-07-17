@@ -540,27 +540,59 @@ class PluginManager {
    *  subDomainHost is configured → a random `https://<sub>.<host>` subdomain
    *  (the SNI broker); else a TCP port map `http://<relay>:<port>/` (retrying
    *  on collision — the relay is fleet-shared). name = a stable proxy name. */
-  async frpPublish(name, localPort, { preferPort = 0, preferSub = '' } = {}) {
+  /** Sniff what a local service speaks so we pick the right relay proxy type.
+   *  'https' (TLS backend) / 'http' (plaintext HTTP) / 'tcp' (anything else —
+   *  a DB, VNC, SSH: NO Host/SNI to route, so it can only be an IP:port). */
+  async _probeProto(port, { timeoutMs = 2500 } = {}) {
+    const net = require('net'), tls = require('tls');
+    // TLS? a completed handshake = the backend serves TLS (its own https)
+    const isTls = await new Promise((res) => {
+      let done = false; const fin = (v) => { if (!done) { done = true; res(v); } };
+      const s = tls.connect({ host: '127.0.0.1', port, rejectUnauthorized: false, timeout: timeoutMs }, () => { fin(true); s.destroy(); });
+      s.on('error', () => fin(false)); s.on('timeout', () => { fin(false); s.destroy(); });
+    });
+    if (isTls) return 'https';
+    // HTTP? send a minimal request and look for an HTTP status line
+    const isHttp = await new Promise((res) => {
+      let done = false, buf = ''; const fin = (v) => { if (!done) { done = true; res(v); } };
+      const s = net.connect({ host: '127.0.0.1', port, timeout: timeoutMs }, () => s.write('GET / HTTP/1.0\r\nHost: localhost\r\n\r\n'));
+      s.on('data', (d) => { buf += d.toString('latin1'); if (buf.length >= 5) { fin(/^HTTP\//.test(buf)); s.destroy(); } });
+      s.on('error', () => fin(false)); s.on('timeout', () => { fin(false); s.destroy(); });
+      s.on('close', () => fin(/^HTTP\//.test(buf)));
+    });
+    return isHttp ? 'http' : 'tcp';
+  }
+
+  async frpPublish(name, localPort, { preferPort = 0, preferSub = '', proto: protoHint = '' } = {}) {
     if (!this._frpConfigured()) throw new Error('public URLs are not available — the frp relay is not configured on this instance');
     if (!this._frpDaemonPid()) { this._frpStart(); await new Promise((r) => setTimeout(r, 1500)); }
     const cfg = this._frpCfg();
     const safe = String(name).replace(/[^\w-]/g, '_').slice(0, 60);
     const file = path.join(this._frpProxiesDir(), safe + '.toml');
 
-    // ── subdomain (SNI) mode — a random hostname per publish; a re-publish
-    // (server restart / machine relink) passes preferSub to KEEP the hostname
-    // users already shared ──
-    if (cfg.subDomainHost) {
+    // Detect the backend protocol: HTTP/HTTPS can ride a routed subdomain; a
+    // raw-TCP service (DB/VNC/SSH — no Host/SNI) can ONLY be an IP:port, so it
+    // falls through to TCP mode even when a subdomain host is configured.
+    const proto = ['http', 'https', 'tcp'].includes(protoHint) ? protoHint
+      : await this._probeProto(localPort).catch(() => 'http');
+
+    // ── subdomain (vhost) mode — PLAINTEXT-HTTP backends ──
+    // TLS is terminated SERVER-SIDE at the relay (it holds the wildcard cert
+    // and forwards to frps's plaintext HTTP vhost) — no cert on any instance.
+    // The proxy is a plain `type=http`; the relay makes it a trusted https URL.
+    // An HTTPS-native backend already serves its own cert and a raw-TCP service
+    // has no Host to route on — both fall through to IP:port mode below.
+    if (cfg.subDomainHost && proto === 'http') {
       const sub = /^[a-z0-9][a-z0-9-]{1,62}$/.test(preferSub) ? preferSub
         : 'vs' + require('crypto').randomBytes(5).toString('hex'); // e.g. vs3f9a1c2b4d
-      const toml = `[[proxies]]\nname = "${safe}"\ntype = "https"\nsubdomain = "${sub}"\n[proxies.plugin]\ntype = "https2http"\nlocalAddr = "127.0.0.1:${localPort}"\ncrtPath = ""\nkeyPath = ""\nhostHeaderRewrite = "127.0.0.1"\n`;
+      const toml = `[[proxies]]\nname = "${safe}"\ntype = "http"\nsubdomain = "${sub}"\nlocalIP = "127.0.0.1"\nlocalPort = ${localPort}\nhostHeaderRewrite = "127.0.0.1"\n`;
       fs.writeFileSync(file, toml, { mode: 0o600 });
       try { await this._frpReload(); } catch (e) { throw new Error('frpc reload failed: ' + e.message); }
       for (let t = 0; t < 12; t++) {
         await new Promise((r) => setTimeout(r, 400));
-        let st = []; try { st = await this._frpProxyStatus('https'); } catch { }
+        let st = []; try { st = await this._frpProxyStatus('http'); } catch { }
         const p = st.find((x) => x.name === safe);
-        if (p && p.status === 'running') { this._notify(); return { name: safe, subdomain: sub, url: `https://${sub}.${cfg.subDomainHost}/`, publicHost: `${sub}.${cfg.subDomainHost}` }; }
+        if (p && p.status === 'running') { this._notify(); return { name: safe, subdomain: sub, proto, url: `https://${sub}.${cfg.subDomainHost}/`, publicHost: `${sub}.${cfg.subDomainHost}` }; }
         if (p && (p.status === 'error' || p.status === 'closed')) break;
       }
       try { fs.unlinkSync(file); await this._frpReload(); } catch { }
@@ -584,7 +616,15 @@ class PluginManager {
         await new Promise((r) => setTimeout(r, 400));
         let st = []; try { st = await this._frpProxyStatus(); } catch { }
         const p = st.find((x) => x.name === safe);
-        if (p && p.status === 'running') { this._notify(); return { name: safe, remotePort, url: `http://${cfg.serverAddr}:${remotePort}/`, publicHost: cfg.serverAddr }; }
+        if (p && p.status === 'running') {
+          this._notify();
+          // scheme reflects what the backend speaks: https:// keeps its own
+          // cert (passthrough), http:// for plaintext web, tcp:// for a raw
+          // service (DB/VNC/SSH — not a browser link)
+          const scheme = proto === 'https' ? 'https' : proto === 'tcp' ? 'tcp' : 'http';
+          const url = proto === 'tcp' ? `tcp://${cfg.serverAddr}:${remotePort}` : `${scheme}://${cfg.serverAddr}:${remotePort}/`;
+          return { name: safe, remotePort, proto, url, publicHost: cfg.serverAddr };
+        }
         if (p && (p.status === 'error' || p.status === 'closed')) { lastErr = p.err || 'port unavailable'; break; }
       }
     }

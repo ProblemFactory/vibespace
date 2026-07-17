@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.184.0 — 2026-07-16
+- **Public-URL publishing now detects the backend protocol and terminates TLS server-side** (real design review). A published port is probed first: a plaintext **HTTP** dev server becomes a browser-**trusted** `https://<random>.<domain>/` (the relay terminates TLS with a real wildcard cert and forwards plaintext over the tunnel — **no cert on any instance**); an **HTTPS**-native backend keeps its own cert served at `https://<ip>:<port>` (passthrough); a **raw-TCP** service (Postgres/Redis/VNC/SSH — no Host/SNI to route on) is exposed as `tcp://<ip>:<port>` instead of being wrongly wrapped as HTTP. Before this, everything was blindly published as `https2http`, which broke non-HTTP and served a self-signed cert.
+- The device dial for double-NAT pairing now rides the trusted cert too (default TLS verification passes), so a paired device connects cleanly through the relay subdomain.
+- `frpPublish` returns the detected `proto`; the forward record + `/api/port-forwards` carry `publicProto` for the UI. Probe covered by `scripts/test-frp-plugin.mjs` (http/https/tcp on real servers).
+
 ## 2.183.0 — 2026-07-16
 - **frps subdomain broker is LIVE + double-NAT device pairing** (B-0b60/B-5c1e). The relay now serves per-publish `https://<random>.<domain>` subdomain URLs (SNI/vhost), so a forwarded port publishes to a clean shareable link instead of `IP:port`. And the big one: **both sides can now be behind NAT** — the Pair-a-device dialog gained a "This instance is behind NAT — reach it through the public relay" option (shown when the frp plugin is configured). Checking it publishes the instance's own port to the relay and hands the device a public subdomain to dial; the relay bridges both NATs, so a home/laptop VibeSpace can pair a device that's also behind its own NAT. The bundle download AND the dial websocket both route through the public subdomain. Verified end-to-end from outside the cluster (instance UI 200 + device-dial WS reaches the server through the relay). The self-publish subdomain is persisted so re-pairs/reconnects keep the URL stable.
 

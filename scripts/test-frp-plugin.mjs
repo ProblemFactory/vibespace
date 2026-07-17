@@ -67,7 +67,10 @@ try {
   });
 
   published = await pm.frpPublish('vstest-fwd', echoPort);
-  check('frpPublish returns a public URL', /^http:\/\/.+:\d+\/$/.test(published.url || ''), JSON.stringify(published));
+  // a raw-TCP echo backend is detected as tcp → IP:port mode (tcp:// scheme),
+  // even with subDomainHost set (only HTTP backends get a routed subdomain)
+  check('frpPublish returns a public URL', /^(?:tcp|https?):\/\/.+:\d+/.test(published.url || ''), JSON.stringify(published));
+  check('raw-tcp echo published in IP:port mode', published.proto === 'tcp' && !!published.remotePort);
 
   // the public URL must round-trip through the relay back to our echo server
   const host = published.publicHost, port = published.remotePort;
@@ -98,5 +101,22 @@ try {
   try { await pm.frpUnpublish('vstest-fwd'); } catch {}
   try { pm.stop('frp'); } catch {}
 }
+// ── protocol detection (http / https / tcp) — decides subdomain vs IP:port ──
+try {
+  const net = await import('node:net'); const tls = await import('node:tls');
+  const { execSync } = await import('node:child_process'); const fsx = await import('node:fs');
+  const httpS = (await import('node:http')).createServer((q, s) => s.end('ok'));
+  await new Promise((r) => httpS.listen(0, '127.0.0.1', r));
+  const tmp = fsx.mkdtempSync('/tmp/frp-probe-');
+  execSync(`openssl req -x509 -newkey rsa:2048 -keyout ${tmp}/k.pem -out ${tmp}/c.pem -days 1 -nodes -subj /CN=localhost 2>/dev/null`);
+  const httpsS = (await import('node:https')).createServer({ key: fsx.readFileSync(`${tmp}/k.pem`), cert: fsx.readFileSync(`${tmp}/c.pem`) }, (q, s) => s.end('ok'));
+  await new Promise((r) => httpsS.listen(0, '127.0.0.1', r));
+  const rawS = net.createServer((s) => s.on('data', () => s.write('PONG'))); await new Promise((r) => rawS.listen(0, '127.0.0.1', r));
+  check('http backend detected', (await pm._probeProto(httpS.address().port)) === 'http');
+  check('https backend detected', (await pm._probeProto(httpsS.address().port)) === 'https');
+  check('raw-tcp backend detected', (await pm._probeProto(rawS.address().port)) === 'tcp');
+  httpS.close(); httpsS.close(); rawS.close(); fsx.rmSync(tmp, { recursive: true, force: true });
+} catch (e) { failed++; console.error('  ✗ proto probe threw:', e.message); }
+
 console.log(failed ? `\n${failed} FAILED` : '\nfrp plugin test passed');
 process.exit(failed ? 1 : 0);
