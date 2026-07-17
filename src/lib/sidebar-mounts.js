@@ -1037,7 +1037,11 @@ export function installSidebarMounts(Sidebar) {
     // Shared by "Pair a device" and the machine row's Re-pair action: fill a
     // modal body with the per-OS installer command for a mint/rotate result.
     _fillPairCommandBody(body, close, r) {
-      const wsBase = location.origin.replace(/^http/, 'ws');
+      // Double-NAT (B-5c1e): when the server published itself to the relay, the
+      // device must fetch the bundle AND dial through the PUBLIC relay URL —
+      // location.origin is unreachable from its network.
+      const httpBase = (r.relayUrl || location.origin).replace(/\/$/, '');
+      const wsBase = httpBase.replace(/^http/, 'ws');
       const dialUrl = `${wsBase}/api/device-dial?device=${r.deviceId}`;
       // The full installer line: bundle + dial URL + BOTH tokens — the
       // hostToken is what the daemon verifies OUR mux hello against; an
@@ -1112,6 +1116,21 @@ export function installSidebarMounts(Sidebar) {
       label.textContent = tr('Device name');
       const inp = document.createElement('input');
       inp.type = 'text'; inp.placeholder = 'my-mac'; inp.maxLength = 32;
+      // Double-NAT option (B-5c1e): if THIS instance isn't publicly reachable
+      // (a laptop/home machine behind NAT), the device can't dial location.origin.
+      // Publishing the instance through the frp relay gives the device a public
+      // subdomain to dial — the relay bridges both NATs. Shown only when the frp
+      // plugin is configured.
+      const relayWrap = document.createElement('label');
+      relayWrap.className = 'device-pair-relay'; relayWrap.style.cssText = 'display:none;align-items:flex-start;gap:6px;font-size:12px;margin-top:6px';
+      const relayCb = document.createElement('input'); relayCb.type = 'checkbox';
+      const relayTxt = document.createElement('span');
+      relayTxt.innerHTML = escHtml(tr('This instance is behind NAT — reach it through the public relay')) + `<br><span class="agents-note" style="margin:2px 0 0">${escHtml(tr('Publishes this instance to the frp relay so the device can dial in from anywhere. Both sides can be behind NAT.'))}</span>`;
+      relayWrap.append(relayCb, relayTxt);
+      api('/api/plugins').then((pl) => {
+        const frp = (pl?.plugins || []).find((p) => p.id === 'frp');
+        if (frp?.configured && frp?.subDomainHost) relayWrap.style.display = 'flex';
+      }).catch(() => {});
       const actions = document.createElement('div');
       actions.className = 'dialog-actions';
       const cancel = document.createElement('button');
@@ -1119,13 +1138,14 @@ export function installSidebarMounts(Sidebar) {
       const go = document.createElement('button');
       go.className = 'btn-create'; go.textContent = tr('Create pairing');
       actions.append(cancel, go);
-      body.append(note, note2, label, inp, actions);
+      body.append(note, note2, label, inp, relayWrap, actions);
       setTimeout(() => inp.focus(), 50);
       const pair = async () => {
         const name = (inp.value || '').trim().replace(/[^\w-]/g, '') || undefined;
-        go.disabled = true; go.textContent = tr('Pairing…');
+        go.disabled = true; go.textContent = relayCb.checked ? tr('Publishing to relay…') : tr('Pairing…');
         try {
-          const r = await api('/api/device/dial-pair', { method: 'POST', body: JSON.stringify({ deviceId: name, serverUrl: location.origin }) });
+          const r = await api('/api/device/dial-pair', { method: 'POST', body: JSON.stringify({ deviceId: name, serverUrl: location.origin, viaRelay: relayCb.checked }) });
+          if (r?.error) throw new Error(r.error);
           this._fillPairCommandBody(body, close, r);
         } catch (e) {
           go.disabled = false; go.textContent = tr('Create pairing');
