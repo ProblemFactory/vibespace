@@ -1,0 +1,19 @@
+# systemd unit for the frps relay. Install `frps` to /usr/local/bin first
+# (download the official release for your arch from
+# https://github.com/fatedier/frp/releases), place the config at
+# /etc/frp/frps.toml (chmod 600 — it holds the token), then:
+#   sudo cp deploy/frp/frps.service /etc/systemd/system/frps.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now frps
+[Unit]
+Description=frp reverse-proxy server (VibeSpace public URLs)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/frps -c /etc/frp/frps.toml
+Restart=always
+RestartSec=5
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target

@@ -71,3 +71,12 @@ anonymous instance ids and error names/stacks/metrics only, never content.
 
 Deployment-specific values (your domain, registry, storage class, issuer,
 allow-listed CIDRs) belong in a private values file, not in this repo.
+
+## Public URLs / NAT relay (optional)
+
+To expose a machine's port as a shareable public link — or pair two machines
+that are both behind NAT — run a small [frp](https://github.com/fatedier/frp)
+relay (third-party, Apache-2.0). Setup guide + config template:
+[`deploy/frp/`](frp/README.md). Point instances at it via the `frp.*` Helm
+values (or `VIBESPACE_FRPS_*` env for a self-run instance). Entirely optional —
+without it, device-to-device port forwarding still works over the data plane.

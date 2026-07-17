@@ -1,0 +1,47 @@
+# ── frps relay config TEMPLATE for VibeSpace public-URL exposure (B-0b60) ──
+# frp is a THIRD-PARTY reverse proxy by fatedier — https://github.com/fatedier/frp
+# (Apache-2.0). VibeSpace does NOT vendor it; you run the official `frps` binary.
+# This is only a config template + setup guide. Replace every <PLACEHOLDER>.
+#
+# What this gives you: a small always-on server (any cheap VPS with a public IP)
+# that VibeSpace instances + paired devices dial into, so a port on a machine
+# behind NAT becomes reachable — either as http://<IP>:<port> (TCP mode, works
+# with just an IP) or, once you add a domain, https://<random>.<DOMAIN>/.
+
+# frpc clients (VibeSpace's frp plugin) dial here.
+bindPort = 7000
+
+# Shared secret every client must present. Generate a long random string and
+# put the SAME value in each instance's VIBESPACE_FRPS_TOKEN env.
+auth.method = "token"
+auth.token = "<FRPS_TOKEN — long random string>"
+
+# TCP proxy port range clients may request (public IP:port mode — the baseline,
+# needs no domain). Open these ports on any firewall in front of the server.
+allowPorts = [
+  { start = 20000, end = 25000 }
+]
+
+# ── vhost / subdomain routing (optional — enables clean https:// URLs) ──
+# Leave these + subDomainHost commented for IP:port-only mode. To turn on
+# per-publish https://<random>.<DOMAIN>/ URLs:
+#   1. Point wildcard DNS  *.<DOMAIN>  →  this server's public IP (A record).
+#   2. Uncomment the three lines below (set <DOMAIN>), restart frps.
+#   3. Set VIBESPACE_FRPS_SUBDOMAIN_HOST=<DOMAIN> in each instance's env.
+# TLS is passthrough by default (the client serves its own cert — fine for
+# tools; browsers warn on the self-signed cert). For a trusted cert, obtain a
+# wildcard *.<DOMAIN> cert (e.g. Let's Encrypt DNS-01) and add transport.tls.
+# vhostHTTPPort = 80
+# vhostHTTPSPort = 443
+# subDomainHost = "<DOMAIN>"
+
+# Optional admin dashboard (bind to localhost or firewall it — it exposes proxy
+# state). Reach it at http://<server>:7500 with the credentials below.
+webServer.addr = "127.0.0.1"
+webServer.port = 7500
+webServer.user = "admin"
+webServer.password = "<DASHBOARD_PASSWORD — random>"
+
+log.to = "/var/log/frps.log"
+log.level = "info"
+log.maxDays = 7
