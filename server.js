@@ -2773,7 +2773,21 @@ app.post(['/api/device/dial-pair', '/api/agentd/dial-pair'], async (req, res) =>
     const existed = !!hosts.findByDeviceId(deviceId);
     const pair = agentdMintDialPair(deviceId);
     bcastAll({ type: 'hosts-updated' });
-    const base = String(req.body?.serverUrl || '').replace(/\/$/, '') || null;
+    // Double-NAT pairing (B-5c1e): when THIS instance is itself behind NAT
+    // (a local/home VibeSpace), the browser's origin is unreachable from the
+    // device's network. viaRelay publishes the instance's OWN http port
+    // through the frp relay and hands the device a public subdomain to dial —
+    // the relay bridges both NATs. Persisted (stable sub) so reconnects hold.
+    let base = String(req.body?.serverUrl || '').replace(/\/$/, '') || null;
+    let relayUrl = null;
+    if (req.body?.viaRelay) {
+      try {
+        const st = plugins.status('frp');
+        const preferSub = st?.selfDialSub || '';
+        const r = await plugins.frpPublish('vibespace-instance', Number(PORT), { preferSub });
+        if (r?.url) { relayUrl = r.url.replace(/\/$/, ''); base = relayUrl; try { plugins.setSelfDialSub?.(r.subdomain || ''); } catch { } }
+      } catch (e) { return res.status(400).json({ error: 'could not publish this instance to the relay: ' + e.message + ' — is the frp plugin installed + started (⚙ → Plugins → Public URLs)?' }); }
+    }
     const dialUrl = base ? `${base.replace(/^http/, 'ws')}/api/device-dial?device=${deviceId}` : null;
     // RE-PAIR of a device that is dialed-in RIGHT NOW: push the rotated dial
     // config over the live link — the daemon re-reads dial.json per attempt
@@ -2795,6 +2809,7 @@ app.post(['/api/device/dial-pair', '/api/agentd/dial-pair'], async (req, res) =>
       ...pair,
       repair: existed,
       updatedInPlace,
+      relayUrl, // the public subdomain the device dials (double-NAT mode)
       command: base
         ? `node vibespace-device.js --dial ${dialUrl} --dial-token ${pair.dialToken}`
         : null,

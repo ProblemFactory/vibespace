@@ -513,6 +513,7 @@ class PluginManager {
       pid: this._frpDaemonPid() || undefined,
       enabled: this._frpEffectiveEnabled(),        // default-on when cluster-injected
       desiredUp: !!rec.desiredUp,
+      selfDialSub: rec.selfDialSub || '',          // stable subdomain for double-NAT self-publish (B-5c1e)
       portRange: [c.portMin, c.portMax],
       // echo the CURRENT effective config so the UI can prefill editable fields
       config: { serverAddr: c.serverAddr, serverPort: c.serverPort, hasToken: !!c.token, subDomainHost: c.subDomainHost },
@@ -589,6 +590,15 @@ class PluginManager {
     }
     try { fs.unlinkSync(file); await this._frpReload(); } catch { }
     throw new Error('could not allocate a public port on the relay' + (lastErr ? ' (' + lastErr + ')' : ''));
+  }
+
+  /** Persist the stable subdomain used to self-publish this instance for
+   *  double-NAT device pairing (B-5c1e) so re-pairs/reconnects keep the URL. */
+  setSelfDialSub(sub) {
+    const rec = this._rec('frp');
+    const s = String(sub || '').trim();
+    if (s) rec.selfDialSub = s; else delete rec.selfDialSub;
+    this._save();
   }
 
   async frpUnpublish(name) {
