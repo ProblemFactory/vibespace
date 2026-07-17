@@ -571,6 +571,68 @@ function serveFolder(mux, msg) {
   });
 }
 
+// ── on-demand EGRESS: a minimal SOCKS5 server on the device's 127.0.0.1 that
+// the server reaches via tcpForward (the port-forward shape). This is the ONE
+// place the daemon connects to ARBITRARY hosts (tcp-connect stays loopback-
+// only) — it's the agent's "use this machine's network for THIS request" exit.
+// The server only asks for it when the machine is flagged as an exit (opt-in,
+// server-side policy); the daemon trusts its hostToken-authed paired server.
+// CONNECT only, no-auth; domain names resolve HERE (socks5h = DNS on the exit).
+const socksServers = new Map(); // port → { server, owner: mux }
+function serveSocks(mux, msg) {
+  const net = require('net');
+  const REPLY = (code) => Buffer.from([0x05, code, 0x00, 0x01, 0, 0, 0, 0, 0, 0]);
+  const srv = net.createServer((c) => {
+    c.on('error', () => { try { c.destroy(); } catch { } });
+    let stage = 0; let buf = Buffer.alloc(0); let up = null;
+    const onData = (chunk) => {
+      buf = Buffer.concat([buf, chunk]);
+      // ── greeting: 05 NMETHODS METHODS… → reply no-auth ──
+      if (stage === 0) {
+        if (buf.length < 2) return;
+        if (buf[0] !== 0x05) { try { c.destroy(); } catch { } return; }
+        const n = buf[1];
+        if (buf.length < 2 + n) return;
+        try { c.write(Buffer.from([0x05, 0x00])); } catch { return; }
+        buf = buf.subarray(2 + n); stage = 1;
+      }
+      // ── request: 05 CMD 00 ATYP ADDR PORT ──
+      if (stage === 1) {
+        if (buf.length < 4) return;
+        const cmd = buf[1], atyp = buf[3];
+        let host, portOff;
+        if (atyp === 0x01) { if (buf.length < 10) return; host = `${buf[4]}.${buf[5]}.${buf[6]}.${buf[7]}`; portOff = 8; }
+        else if (atyp === 0x03) { const l = buf[4]; if (buf.length < 7 + l) return; host = buf.subarray(5, 5 + l).toString('utf8'); portOff = 5 + l; }
+        else if (atyp === 0x04) { if (buf.length < 22) return; const p = []; for (let i = 0; i < 16; i += 2) p.push(buf.readUInt16BE(4 + i).toString(16)); host = p.join(':'); portOff = 20; }
+        else { try { c.write(REPLY(0x08)); c.destroy(); } catch { } return; } // atyp not supported
+        const port = buf.readUInt16BE(portOff);
+        buf = buf.subarray(portOff + 2);
+        if (cmd !== 0x01) { try { c.write(REPLY(0x07)); c.destroy(); } catch { } return; } // only CONNECT
+        stage = 2;
+        c.removeListener('data', onData);
+        // connect to host:port ON THIS DEVICE — the egress. A domain resolves
+        // via the device's own resolver (socks5h semantics).
+        up = net.connect({ host, port });
+        up.on('connect', () => {
+          try { c.write(REPLY(0x00)); } catch { }
+          if (buf.length) { try { up.write(buf); } catch { } buf = Buffer.alloc(0); }
+          c.pipe(up); up.pipe(c);
+        });
+        up.on('error', () => { try { c.write(REPLY(0x05)); } catch { } try { c.destroy(); } catch { } }); // connection refused
+        c.on('close', () => { try { up.destroy(); } catch { } });
+      }
+    };
+    c.on('data', onData);
+  });
+  srv.on('error', (e) => { try { mux.control({ op: 'serve-socks-result', id: msg.id, error: e.message }); } catch { } });
+  srv.listen(0, '127.0.0.1', () => {
+    const port = srv.address().port;
+    socksServers.set(port, { server: srv, owner: mux });
+    log(`serve-socks (SOCKS5 egress) on 127.0.0.1:${port}`);
+    mux.control({ op: 'serve-socks-result', id: msg.id, port });
+  });
+}
+
 // ── serve ──
 try { fs.unlinkSync(SOCK); } catch { }
 // One connection handler for EVERY transport: local unix socket accepts AND
@@ -827,6 +889,13 @@ function serveConnection(sock) {
       // can rclone-`http`-mount it (read-only). Loopback only; the server
       // reaches this port via tcp-connect over the mux. Range GET + directory
       // listings (rclone http backend parses <a href> links). ──
+      if (msg.op === 'serve-socks') { serveSocks(mux, msg); return; }
+      if (msg.op === 'unserve-socks') {
+        const s = socksServers.get(Number(msg.port));
+        if (s) { try { s.server.close(); } catch { } socksServers.delete(Number(msg.port)); }
+        mux.control({ op: 'serve-socks-result', id: msg.id, port: Number(msg.port), closed: true });
+        return;
+      }
       if (msg.op === 'serve-folder') { serveFolder(mux, msg); return; }
       if (msg.op === 'unserve-folder') {
         const s = folderServers.get(Number(msg.port));
@@ -905,6 +974,9 @@ function serveConnection(sock) {
       // reconnecting server re-owns it and remote mounts heal in place. Stamp
       // disownedAt so the reaper can reclaim it if it's never re-owned.
       for (const L of reverseListeners.values()) { if (L.owner === mux) { L.owner = null; L.disownedAt = Date.now(); } }
+      // close THIS connection's SOCKS egress servers — an open egress must not
+      // outlive the server that asked for it (ExitManager re-creates on reconnect)
+      for (const [port, s] of socksServers) { if (s.owner === mux) { try { s.server.close(); } catch { } socksServers.delete(port); } }
       if (this._discoWatch) { for (const w of this._discoWatch) { try { w.close(); } catch { } } this._discoWatch = null; }
       pipeSessions.detachAll(mux);
     },

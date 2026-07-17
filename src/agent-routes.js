@@ -212,6 +212,11 @@ const SESSION_TOOLS_INTRO = [
   'The MOMENT the user answers (in chat or anywhere), resolve the item YOURSELF with `vibespace-ask resolve` — never leave answered items for them to tick. Not for your own working steps — those belong in your normal todo list.',
   'The inbox item is a NOTIFICATION MIRROR, not the message itself: everything you file (the question, options, your recommendation) must ALSO appear IN FULL in your chat reply — never say something only in the inbox (the user reads and copies from chat; inbox rows are hard to read at length).',
   'When your reply references files you created or discuss (audio, images, reports, code, HTML…), write their ABSOLUTE paths — the chat UI turns absolute paths into clickable links that open in the right viewer (audio plays, images preview, HTML renders). Bare filenames or project-relative paths may not resolve.',
+  'If a request needs a DIFFERENT machine\'s network position (a region, an internal/VPN network, a fixed source IP), you can borrow a paired machine\'s network for that ONE command with `vibespace-exit` (default: go direct — only reach for an exit deliberately):',
+  '  vibespace-exit list                     machines the user enabled as exits',
+  '  eval "$(vibespace-exit use <machine>)"; curl https://ifconfig.me   (borrow its egress via SOCKS for proxy-aware TCP tools)',
+  '  vibespace-exit run <machine> -- <cmd>   run the command ON that machine (universal: ICMP/UDP/proxy-unaware tools/its own DNS)',
+  '  (SOCKS can\'t carry ping/UDP and needs a proxy-aware tool — when `use` won\'t work, `run` will. Nothing is available until the user enables a machine as an exit.)',
   '(If this session is later linked to a VibeSpace task, you will also get `vibespace-task` for task-level progress/plan/status — you have no task right now, so it is not active yet.)',
   '</vibespace-session-tools>',
 ].join('\n');

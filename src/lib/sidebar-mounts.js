@@ -29,6 +29,8 @@ const MI = {
   pencil: '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 1.5l3 3L5 14H2v-3z"/></svg>',
   server: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2.5" width="12" height="4.5" rx="1"/><rect x="2" y="9" width="12" height="4.5" rx="1"/><path d="M4.5 4.75h.01M4.5 11.25h.01"/></svg>',
   bolt: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 1.5L3.5 9h3l-1 5.5L10.5 7h-3l1-5.5z"/></svg>',
+  // on-demand exit / egress: a box (the agent) with an arrow leaving it
+  exit: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2H3v12h6"/><path d="M7 8h7M11 5l3 3-3 3"/></svg>',
   wrench: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2.5a3.5 3.5 0 00-3.3 4.6L2.5 10.8a1.4 1.4 0 002 2l3.7-3.7a3.5 3.5 0 004.5-4.4L10.5 7 9 5.5l2.3-2.2a3.5 3.5 0 00-1.8-.8z"/></svg>',
   termNew: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M4 6l2.5 2L4 10M8.5 10.5h3.5"/></svg>',
   key: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="8" r="3"/><path d="M8 8h6M11.5 8v2.5M14 8v2"/></svg>',
@@ -646,6 +648,14 @@ export function installSidebarMounts(Sidebar) {
         ibtn(MI.folderPush, tr('Mount a folder from this VibeSpace onto "{name}"', { name: h.name }), () => { this._showHostMountDialog(h); }),
         ibtn(MI.folderPull, tr('Mount a folder from "{name}" into this VibeSpace', { name: h.name }), () => { this._showMachinePullDialog(h); }),
         ibtn(MI.ports, tr('Forward a port from "{name}" (open its dev servers here)', { name: h.name }), () => { this._showPortsDialog(h); }),
+        ibtn(MI.exit, h.allowExit
+          ? tr('Exit node: ON — agents may borrow "{name}"\'s network for a command (click to disable)', { name: h.name })
+          : tr('Exit node: OFF — let agents borrow "{name}"\'s network on demand (click to enable)', { name: h.name }),
+          async () => {
+            const r = await api(`/api/hosts/${h.id}/allow-exit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ on: !h.allowExit }) });
+            if (r?.error) showToast(r.error, { type: 'error' });
+            else showToast(h.allowExit ? tr('Exit node disabled for "{name}"', { name: h.name }) : tr('Exit node enabled — agents can use "{name}" via vibespace-exit', { name: h.name }));
+          }, h.allowExit ? 'mounts-icon-accent' : ''),
         ibtn(MI.termNew, isDial ? tr('New session on this device') : 'New session on this host', () => { this.app.showNewSessionDialog?.({ hostId: h.id, hostName: h.name }); }),
         ibtn(MI.cross, isDial ? tr('Unpair (the device can no longer dial in)') : 'Remove host', async () => {
           const ok = await showConfirmDialog(isDial

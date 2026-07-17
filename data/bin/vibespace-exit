@@ -1,0 +1,94 @@
+#!/usr/bin/env node
+// vibespace-exit — ON-DEMAND egress through a paired remote machine. Use this
+// ONLY when a specific request needs THAT machine's network position (a
+// region, an internal/VPN network, a fixed source IP) — NOT for your whole
+// session. By default you go direct (this instance's own network); reach for
+// an exit deliberately, for the one command that needs it.
+//
+// Two ways to use a machine's network:
+//   • BORROW its egress (a SOCKS proxy) — the tool runs HERE, only its network
+//     path is the remote machine. Works for proxy-aware TCP tools:
+//         eval "$(vibespace-exit use <machine>)"     # sets ALL_PROXY/HTTPS_PROXY for THIS shell line
+//         # or grab the URL and point one command at it:
+//         curl --proxy "$(vibespace-exit url <machine>)" https://ifconfig.me
+//   • RUN the command ON the machine — the universal fallback. Use it when the
+//     tool ignores proxies, or you need ICMP / UDP / that machine's own DNS:
+//         vibespace-exit run <machine> -- ping -c1 10.0.0.5
+//         vibespace-exit run <machine> -- curl -s https://internal.corp/health
+//
+// SOCKS5 is NOT universal: it can't carry ICMP (ping/traceroute), UDP is
+// spotty, and a tool has to honor the proxy. When `use` won't do, `run` will.
+// Machines must be enabled as exits by the user first (Remote tab → a machine's
+// ⋯ → "Allow as exit"); `vibespace-exit list` shows which are available.
+const api = process.env.VIBESPACE_API;
+const token = process.env.VIBESPACE_SESSION_TOKEN;
+if (!api || !token) { console.error('vibespace-exit: not running inside a VibeSpace session (missing env)'); process.exit(2); }
+
+const args = process.argv.slice(2);
+const USAGE = [
+  'usage — borrow a paired machine\'s network for a SINGLE command (not your whole session):',
+  '  vibespace-exit list                     machines the user enabled as exits',
+  '  vibespace-exit use <machine>            print shell exports (ALL_PROXY/HTTPS_PROXY) for a proxy-aware command:',
+  '                                            eval "$(vibespace-exit use mac)"; curl https://ifconfig.me',
+  '  vibespace-exit url <machine>            print just the socks5h://127.0.0.1:PORT url (for --proxy)',
+  '  vibespace-exit run <machine> -- <cmd>   run <cmd> ON the machine (universal: ICMP/UDP/proxy-unaware/its DNS)',
+  '',
+  '  <machine> = id / name / unique name substring (omit if only one exit exists).',
+  '  Use an exit ONLY when a request needs that machine\'s network position; otherwise go direct.',
+].join('\n');
+
+async function get(path) {
+  const res = await fetch(api + path, { headers: { Authorization: 'Bearer ' + token } });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { console.error('vibespace-exit:', data.error || res.status); process.exit(1); }
+  return data;
+}
+async function post(path, body) {
+  const res = await fetch(api + path, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { console.error('vibespace-exit:', data.error || res.status); process.exit(1); }
+  return data;
+}
+
+async function main() {
+  const [cmd, ...rest] = args;
+  if (!cmd || cmd === 'help' || cmd === '-h' || cmd === '--help') { console.log(USAGE); return; }
+
+  if (cmd === 'list') {
+    const { exits } = await get('/api/agent/exit');
+    if (!exits.length) { console.log('  (no exit machines — ask the user to enable one: Remote tab → machine ⋯ → "Allow as exit")'); return; }
+    for (const e of exits) console.log(`  ${e.name}${e.online ? '' : ' (offline)'}${e.active ? '  [active: socks5h://127.0.0.1:' + e.localPort + ']' : ''}   id=${e.id}`);
+    return;
+  }
+
+  if (cmd === 'use' || cmd === 'url') {
+    const machine = rest[0];
+    const r = await post('/api/agent/exit/use', { machine });
+    if (cmd === 'url') { console.log(r.url); return; }
+    // shell exports honored by curl/git/most CLIs; covers proxy-aware TCP
+    console.log(`export ALL_PROXY=${r.url}`);
+    console.log(`export HTTPS_PROXY=${r.url}`);
+    console.log(`export HTTP_PROXY=${r.url}`);
+    console.error(`# egress via "${r.machine}" (socks5h). NOT universal — for ICMP/UDP/proxy-unaware tools use: vibespace-exit run ${machine || r.machine} -- <cmd>`);
+    return;
+  }
+
+  if (cmd === 'run') {
+    // vibespace-exit run <machine> -- <cmd...>
+    const dashdash = rest.indexOf('--');
+    let machine, cmdParts;
+    if (dashdash >= 0) { machine = rest.slice(0, dashdash).join(' ').trim() || undefined; cmdParts = rest.slice(dashdash + 1); }
+    else { machine = rest[0]; cmdParts = rest.slice(1); } // tolerate a missing --
+    const command = cmdParts.join(' ').trim();
+    if (!command) { console.error('vibespace-exit run: need a command after `--`, e.g. vibespace-exit run mac -- curl -s https://ifconfig.me'); process.exit(2); }
+    const r = await post('/api/agent/exit/run', { machine, cmd: command });
+    if (r.stdout) process.stdout.write(r.stdout.endsWith('\n') ? r.stdout : r.stdout + '\n');
+    if (r.stderr) process.stderr.write(r.stderr.endsWith('\n') ? r.stderr : r.stderr + '\n');
+    process.exit(r.code || 0);
+  }
+
+  console.error(`vibespace-exit: unknown command "${cmd}"\n`);
+  console.log(USAGE);
+  process.exit(2);
+}
+main().catch((e) => { console.error('vibespace-exit:', e.message); process.exit(1); });
