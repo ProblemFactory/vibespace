@@ -18,6 +18,10 @@ const MI = {
   folder: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h4l2 2h6v8H2V3z"/></svg>',
   eject: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l5-5 5 5H3z"/><path d="M3 12h10"/></svg>',
   plug: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v6"/><path d="M4.7 4.6a4.9 4.9 0 1 0 6.6 0"/></svg>',
+  // port forwarding: a plug/connector (two prongs + body + cord) — NOT the
+  // power symbol (real report: the old MI.plug read as an on/off switch).
+  // Matches the rail Ports-panel connector shape for cross-surface consistency.
+  ports: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 5V2M10 5V2"/><rect x="4" y="5" width="8" height="5" rx="1.5"/><path d="M8 10v4"/></svg>',
   cross: '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>',
   importL: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8M5 7l3 3 3-3M3 10v3h10v-3"/></svg>',
   link: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 9.5l3-3M5 8L3.5 9.5a2.5 2.5 0 003.5 3.5L8.5 11.5M8 5l1.5-1.5a2.5 2.5 0 013.5 3.5L11.5 8.5"/></svg>',
@@ -559,7 +563,7 @@ export function installSidebarMounts(Sidebar) {
       actions.className = 'mounts-row-actions';
       const pb = document.createElement('button');
       pb.className = 'mounts-icon-btn';
-      pb.innerHTML = MI.plug; pb.title = tr('Ports on this instance (open via the app, publish to the internet)');
+      pb.innerHTML = MI.ports; pb.title = tr('Ports on this instance (open via the app, publish to the internet)');
       pb.onclick = (e) => { e.stopPropagation(); this._showPortsDialog({ id: '__local__', name: tr('This machine'), transport: 'local' }); };
       const nb = document.createElement('button');
       nb.className = 'mounts-icon-btn';
@@ -641,7 +645,7 @@ export function installSidebarMounts(Sidebar) {
       actions.append(
         ibtn(MI.folderPush, tr('Mount a folder from this VibeSpace onto "{name}"', { name: h.name }), () => { this._showHostMountDialog(h); }),
         ibtn(MI.folderPull, tr('Mount a folder from "{name}" into this VibeSpace', { name: h.name }), () => { this._showMachinePullDialog(h); }),
-        ibtn(MI.plug, tr('Forward a port from "{name}" (open its dev servers here)', { name: h.name }), () => { this._showPortsDialog(h); }),
+        ibtn(MI.ports, tr('Forward a port from "{name}" (open its dev servers here)', { name: h.name }), () => { this._showPortsDialog(h); }),
         ibtn(MI.termNew, isDial ? tr('New session on this device') : 'New session on this host', () => { this.app.showNewSessionDialog?.({ hostId: h.id, hostName: h.name }); }),
         ibtn(MI.cross, isDial ? tr('Unpair (the device can no longer dial in)') : 'Remove host', async () => {
           const ok = await showConfirmDialog(isDial
