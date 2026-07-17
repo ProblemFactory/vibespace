@@ -764,8 +764,42 @@ class SessionMessages {
   }
 }
 
+// Dedup surviving webui dtach sockets by conversation (walter's local
+// double-writer class, real xingweil report). A plain `claude --resume`
+// REUSES the conversation id, so resuming a session whose claude had already
+// died (the live-guard sees no live session to block) mints a SECOND dtach
+// session for the SAME claudeSessionId. Two surviving sockets → two sidebar
+// cards and — if both claude are alive — two writers on ONE JSONL. On restore
+// keep ONE socket per conversation and retire the rest. Winner precedence:
+// alive-claude beats dead, then newest createdAt (that's the current writer).
+//   entries: [{ sockFile, backend, host, claudeSessionId, createdAt, claudeAlive }]
+//   → { winners: Map(key -> sockFile), retire: Set(sockFile) }
+// Sessions with no claudeSessionId yet are never duplicates (each is distinct).
+function dedupWebuiSockets(entries) {
+  const best = new Map(); // key -> entry
+  for (const e of entries || []) {
+    if (!e || !e.claudeSessionId) continue;
+    const key = `${e.backend || 'claude'}:${e.host || 'local'}:${e.claudeSessionId}`;
+    const cur = best.get(key);
+    if (!cur) { best.set(key, e); continue; }
+    const better = (!!e.claudeAlive && !cur.claudeAlive)
+      || (!!e.claudeAlive === !!cur.claudeAlive && (e.createdAt || 0) > (cur.createdAt || 0));
+    if (better) best.set(key, e);
+  }
+  const winners = new Map();
+  for (const [key, e] of best) winners.set(key, e.sockFile);
+  const retire = new Set();
+  for (const e of entries || []) {
+    if (!e || !e.claudeSessionId) continue;
+    const key = `${e.backend || 'claude'}:${e.host || 'local'}:${e.claudeSessionId}`;
+    if (winners.get(key) !== e.sockFile) retire.add(e.sockFile);
+  }
+  return { winners, retire };
+}
+
 module.exports = {
   SESSIONS_DIR,
+  dedupWebuiSockets,
   isPidAlive,
   cwdToProjectDir,
   recoverCwdFromProjDir,
