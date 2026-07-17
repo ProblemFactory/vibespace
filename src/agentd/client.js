@@ -193,7 +193,7 @@ class DeviceManager {
             mux.onWritable = (chan) => { sessions.get(chan)?.onWritable?.(); };
             const prevControl = mux.onControl;
             mux.onControl = (m) => {
-              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'cmd-result' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result') {
+              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'cmd-result' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
                 const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m); }
                 if (m.op === 'tcp-open' && !m.error) return; // channel stays live
                 return;
@@ -401,6 +401,11 @@ class DeviceManager {
   // rclone-http-mounts it. unserveFolder tears the server down. ──
   serveFolder(path) { return this._request({ op: 'serve-folder', path }); }
   unserveFolder(port) { return this._request({ op: 'unserve-folder', port }); }
+
+  // on-demand egress: the device serves a SOCKS5 proxy on its loopback, the
+  // server reaches it via tcpForward (the exit-proxy shape). CONNECT only.
+  serveSocks() { return this._request({ op: 'serve-socks' }); }
+  unserveSocks(port) { return this._request({ op: 'unserve-socks', port }); }
   _onTcpAccept(m) {
     const conn = this._conn;
     if (!conn) return;

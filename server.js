@@ -462,6 +462,7 @@ function agentdMintDialPair(deviceId) {
 async function unpairDialDevice(deviceId) {
   try { await machineMounts.onMachineUnpaired(hosts.findByDeviceId(deviceId)?.id); } catch { }
   try { portForwards.onMachineUnpaired(hosts.findByDeviceId(deviceId)?.id); } catch { }
+  try { exitProxy.onMachineUnpaired(hosts.findByDeviceId(deviceId)?.id); } catch { }
   try { fs.unlinkSync(path.join(AGENTD_DIR, `host-dial-${deviceId}.token`)); } catch { }
   const live = agentdDials.get(deviceId);
   if (live) { try { live.destroy(); } catch { } agentdDials.delete(deviceId); }
@@ -2678,6 +2679,50 @@ app.post('/api/port-forward/:id/proto', async (req, res) => {
 app.post('/api/ports/kill-orphan', (req, res) => {
   try { res.json(portForwards.killOrphan((req.body || {}).pid)); } catch (e) { res.status(400).json({ error: e.message }); }
 });
+// On-demand EXIT (task #164): let an agent borrow a machine's network for a
+// single command. Per-machine opt-in (hosts.allowExit, default off).
+const { ExitProxyManager } = require('./src/exit-proxy');
+const exitProxy = new ExitProxyManager({ hosts, broadcast: bcastAll, log: (m) => console.log('[exit]', m) });
+app.get('/api/exits', (req, res) => res.json({ exits: exitProxy.list() }));
+app.post('/api/hosts/:id/allow-exit', (req, res) => {
+  try {
+    const on = !!(req.body || {}).on;
+    hosts.setAllowExit(req.params.id, on);
+    if (!on) exitProxy.onMachineUnpaired(req.params.id); // tearing down the egress when disabled
+    bcastAll({ type: 'hosts-updated' }); bcastAll({ type: 'exits-updated', exits: exitProxy.list() });
+    res.json({ success: true, allowExit: on });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+// ── AGENT-facing exit routes (vsst_ token; exempt from cookie auth in
+// auth.middleware). The agent's `vibespace-exit` CLI hits these. ──
+function exitAgentSession(req) {
+  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || req.body?.token;
+  if (!token || !token.startsWith('vsst_')) return null;
+  for (const [, s] of activeSessions) if (s.agentToken === token) return s;
+  return null;
+}
+app.get('/api/agent/exit', (req, res) => {
+  if (!exitAgentSession(req)) return res.status(401).json({ error: 'missing or unknown session token' });
+  res.json({ exits: exitProxy.list() });
+});
+app.post('/api/agent/exit/use', async (req, res) => {
+  if (!exitAgentSession(req)) return res.status(401).json({ error: 'missing or unknown session token' });
+  try { res.json(await exitProxy.use((req.body || {}).machine)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+// RUN a command natively ON the exit machine (the universal fallback for
+// ICMP/UDP/proxy-unaware tools + that machine's own DNS). Bounded.
+app.post('/api/agent/exit/run', async (req, res) => {
+  if (!exitAgentSession(req)) return res.status(401).json({ error: 'missing or unknown session token' });
+  const { machine, cmd } = req.body || {};
+  if (!cmd || typeof cmd !== 'string') return res.status(400).json({ error: 'cmd (a shell command string) is required' });
+  try {
+    const h = exitProxy.resolve(machine); // enforces allowExit + resolves the ref
+    const dm = await hosts.device(h.id);
+    const r = await dm.runCmd('sh', ['-lc', cmd], { timeoutMs: 120000 });
+    res.json({ machine: h.name || h.id, code: r.code ?? 0, stdout: String(r.stdout || ''), stderr: String(r.stderr || '') });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
 setTimeout(() => { try { hosts.sweepJsonlCache(); } catch {} }, 60000); // orphaned/stale remote-transcript cache
 const { RemoteFs } = require('./src/remote-fs');
 const remoteFs = new RemoteFs(hosts);
@@ -2715,6 +2760,7 @@ app.delete('/api/hosts/:id', async (req, res) => {
     // preserve-as-orphan semantics for ssh) — with the host record gone their
     // records become invisible, undeletable orphans (review finding)
     else { try { portForwards.onMachineUnpaired(h.id); } catch { } }
+    try { exitProxy.onMachineUnpaired(h.id); } catch { }
     hosts.remove(req.params.id);
     bcastAll({ type: 'hosts-updated' });
     res.json({ success: true });

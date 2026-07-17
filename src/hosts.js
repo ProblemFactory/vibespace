@@ -131,6 +131,16 @@ class HostManager {
   }
   dialTokenHash(deviceId) { return this.findByDeviceId(deviceId)?.dialTokenHash || null; }
 
+  /** Opt-in flag: may an agent use this machine as an on-demand egress (exit
+   *  node)? Default off — turning a paired machine into an egress is a real
+   *  capability (SSRF into its LAN, abuse), so it's per-machine + explicit. */
+  setAllowExit(id, on) {
+    const h = this.get(id);
+    if (on) h.allowExit = true; else delete h.allowExit;
+    this._save();
+    return h;
+  }
+
   /** B-f3e8 one-time migration: the legacy dial-tokens.json (deviceId →
    *  sha256) folds into the dial host records. MUST be lossless — devices in
    *  the field hold the raw tokens; a lost hash locks every daemon out
@@ -472,7 +482,7 @@ class HostManager {
 
   /** The agent-tool set shipped to remotes (same list the per-spawn
    *  distribution in ws-handler uses — keep in sync). */
-  static AGENT_TOOLS = ['vibespace-status', 'vibespace-task', 'vibespace-ask', 'vibespace-hook.mjs', 'vibespace-hook-register.mjs', 'vibespace-remote-keeper'];
+  static AGENT_TOOLS = ['vibespace-status', 'vibespace-task', 'vibespace-ask', 'vibespace-exit', 'vibespace-hook.mjs', 'vibespace-hook-register.mjs', 'vibespace-remote-keeper'];
 
   /** Integration state ON THE HOST in one ssh round trip: per-tool presence +
    *  sha256 (content compare beats mtime — the local hook/status tools are
