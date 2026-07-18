@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.186.7 — 2026-07-18
+- **API-key-authed Claude logins are now recognized** (real report: a remote machine ran claude fine via an `apiKeyHelper` in `~/.claude/settings.json`, but Manage Agents said "not logged in" — the detection only checked for the OAuth `.credentials.json`). Both the local `/api/backend-status` and the remote host probe now recognize all four auth shapes: OAuth creds (token grep, not mere file existence — a console-wiped `{}` no longer counts), a console-managed `primaryApiKey` in `~/.claude.json`, an `apiKeyHelper` in settings.json, and (remote) a macOS Keychain entry. The Manage-Agents row shows the method for API-key styles ("logged in · API key" / "apiKeyHelper"), mirroring the CLI's own "API Usage Billing" statusline. Verified against the reporting host: probe returns `key-helper`.
+
 ## 2.186.6 — 2026-07-18
 - **An unreachable ssh machine now shows WHY under its row** (real report: a user added a server with a typo in the address and got only a red dot — the probe error, e.g. "ssh: connect to host …: Connection timed out", lived only in the status dot's hover tooltip, invisible on touch and undiscoverable on a 6px target). Machine rows reuse the storage rows' red error line (`.mounts-errline`): a failed connectivity probe renders "Couldn't connect: <error>" under the row (full text in title), so a bad address/port/key is self-explanatory. Dial devices already say "offline — run the install command" and are unchanged.
 
