@@ -113,6 +113,28 @@ try {
   const un = await dm.unserveSocks(devSocksPort);
   check('unserve-socks closes the device SOCKS server', un && un.closed === true, JSON.stringify(un));
 
+  // 6) tcp-connect HONORS an explicit target host (2.186.3 LAN-forward / jump
+  //    host): the daemon must connect to targetHost:port on ITS network, not a
+  //    hardcoded 127.0.0.1. Bind an echo on 127.0.0.2 ONLY — a forward with
+  //    host='127.0.0.2' reaches it; the default (loopback) does NOT.
+  const lanEcho = net.createServer((c) => c.on('data', (d) => c.write(Buffer.concat([Buffer.from('LANDEV:'), d]))));
+  const LAN_PORT = await new Promise((res, rej) => { lanEcho.once('error', rej); lanEcho.listen(0, '127.0.0.2', () => res(lanEcho.address().port)); }).catch(() => null);
+  if (LAN_PORT == null) { console.log('  · cannot bind 127.0.0.2 — skipping the target-host check'); }
+  else {
+    const roundtrip = async (host) => {
+      let h; try { h = await dm.tcpForward(LAN_PORT, host); } catch { return ''; } // refused (loopback, 127.0.0.2-only echo) = did not reach
+      return await new Promise((resolve) => {
+        let got = ''; h.onData = (b) => { got += b.toString(); if (got.includes('LANDEV:hi')) resolve(got); };
+        h.onClose = () => resolve(got);
+        try { h.write('hi'); } catch {}
+        setTimeout(() => { try { h.close(); } catch {} resolve(got); }, 1500);
+      });
+    };
+    check('tcp-connect with host=127.0.0.2 reaches the LAN target', (await roundtrip('127.0.0.2')).includes('LANDEV:hi'));
+    check('tcp-connect with NO host stays on loopback (does NOT reach 127.0.0.2-only)', !(await roundtrip(undefined)).includes('LANDEV:hi'));
+  }
+  try { lanEcho.close(); } catch {}
+
   for (const s of sockets) { try { s.destroy(); } catch {} }
   relay.close();
 } catch (e) {
