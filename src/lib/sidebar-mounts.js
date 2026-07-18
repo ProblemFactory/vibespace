@@ -1205,7 +1205,7 @@ export function installSidebarMounts(Sidebar) {
     async _showBootstrapDialog(h) {
       let off = null; // assigned after the handler registers — close() can run first (TDZ trap)
       // No backdrop close: a stray click mid-bootstrap must not dismiss the progress view.
-      const { overlay, body } = createModalShell({
+      const { overlay, body, close } = createModalShell({
         id: 'mounts-dialog-overlay', title: `Set up ${h.name}`, minWidth: '400px',
         closeOnBackdrop: false, onClose: () => off?.(),
       });
@@ -1247,11 +1247,16 @@ export function installSidebarMounts(Sidebar) {
         try {
           const r = await api(`/api/hosts/${h.id}/bootstrap`, { method: 'POST' });
           Object.assign(state, r.steps); paint();
-          startBtn.textContent = r.success ? 'All done' : 'Finished with failures';
+          // the button was disabled for the run — a terminal label on a still-
+          // disabled button read as a dead "All done" (real report: clicking
+          // did nothing). Completion turns it into a real close button.
+          startBtn.textContent = r.success ? 'All done' : 'Finished with failures — close';
+          startBtn.disabled = false;
+          startBtn.onclick = () => close();
           this._hostStatus = this._hostStatus || {};
           try { this._hostStatus[h.id] = await api(`/api/hosts/${h.id}/test`, { method: 'POST' }); } catch {}
           this._renderMounts();
-        } catch (e) { startBtn.textContent = 'Failed'; showToast(e.message, { type: 'error' }); }
+        } catch (e) { startBtn.textContent = 'Retry'; startBtn.disabled = false; showToast(e.message, { type: 'error' }); }
       };
     },
 
