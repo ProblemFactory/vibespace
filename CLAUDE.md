@@ -952,7 +952,7 @@ Server → Client: `created`, `output`, `msg` (normalized: op=create/edit/meta),
 - Resizable sidebar (drag right edge)
 - Usage pies in taskbar (two circular pie charts: 5h session + 7d weekly rate limits from Anthropic API, hover for %, click for details)
 - Embedded browser window (🌐 in toolbar): iframe with URL bar, proxy mode toggle, layout persistence. `navigate()` accepts `blob:`/`data:`/`about:` URLs verbatim (2.84.0 — the http:// auto-prefix blanked every blob page, incl. the chat html Preview button and the Diagnostics report)
-- Browser proxy mode: node-unblocker full URL rewriting (HTML/CSS/JS), strips X-Frame-Options/CSP. Works for noVNC, docs, internal services. Google/Cloudflare sites may trigger reCAPTCHA due to anti-bot detection.
+- Browser proxy mode: node-unblocker full URL rewriting (HTML/CSS/JS), strips X-Frame-Options/CSP. Works for noVNC, docs, internal services. Google/Cloudflare sites may trigger reCAPTCHA due to anti-bot detection. **`navigate()` normalizes a bare origin to a trailing slash (2.186.5, real report):** node-unblocker leaves in-page links RELATIVE and relies on the document base, so a pathless origin (`http://host:port`) gave the iframe a base with no `/` and a relative dir-listing link resolved UP A LEVEL, escaped the proxy, and fell to the X-Frame-Options overlay. Running http(s) URLs through `new URL().toString()` adds the `/` (no-op otherwise) so relative links stay inside `/proxy/`.
 - Frontend optimization: esbuild minification (2.5MB → 1.4MB) + gzip compression middleware (~420KB over wire, 83% reduction)
 - Static file caching: `maxAge=0` with etag validation for cache revalidation
 - "N windows" click in taskbar → window list popup (scoped to active desktop)
