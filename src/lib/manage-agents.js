@@ -163,8 +163,13 @@ export function installManageAgents(App, ctx = {}) {
     const usageHtml = (u) => this._acctUsageHtml(u);
     const cgl = !selectedHost ? (this._usageCodexGlobal || {}) : {};
     const gName = selectedHost ? t('CLI login on {host}', { host: escHtml(hostLabel) }) : t('CLI login');
+    // Host codex identity from its auth.json JWT (probed once in refresh —
+    // the JWT email can't go stale relative to the token itself, 2.188.0)
+    const rcx = selectedHost ? ctx.racct?.codex : null;
     let gIdent = gLoggedIn
-      ? (selectedHost ? `<span class="ob-ok">${t('logged in')}</span>` : (escHtml(cgl.email || '') || t('logged in')))
+      ? (selectedHost
+          ? `${rcx?.email ? escHtml(rcx.email + (rcx.plan ? ' · ' + rcx.plan : '')) + ' · ' : ''}<span class="ob-ok">${t('logged in')}</span>`
+          : (escHtml(cgl.email || '') || t('logged in')))
       : `<span class="ob-warn">${t('not logged in')}</span>`;
     // The machine's codex login may BE one of the named ChatGPT accounts (same
     // email) — say so; their quota buckets are then merged newest-wins.
@@ -267,6 +272,12 @@ export function installManageAgents(App, ctx = {}) {
       };
       if (e.target.closest('.acct-def')) {
         const isDef = accts.defaultCodexAccountId === id;
+        // Default is GLOBAL — starring a "this machine only" row while a host
+        // is selected read as "I switched the remote's account" (2.188.0)
+        if (keyRow.dataset.blocked && !isDef) {
+          showToast(t('The default is global, and “{name}” can’t run on {host} — new sessions there keep using its own login.', { name: a?.name, host: escHtml(hostLabel) }), { type: 'error', duration: 6000 });
+          return;
+        }
         try { await fetchJson('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: isDef ? null : id, backend: 'codex' }) }); } catch {}
         refresh();
       } else if (e.target.closest('.acct-menu')) {
@@ -438,12 +449,14 @@ export function installManageAgents(App, ctx = {}) {
       const hostLabel = document.createElement('span'); hostLabel.textContent = t('Machine:');
       const hostSel = document.createElement('select'); hostSel.className = 'agents-host-select';
       hostSel.innerHTML = `<option value="">${t('This machine (local)')}</option>`;
+      let hostTransport = null; // 'dial' for a paired device (shapes the install actions)
       try {
         const hd = await fetchJson('/api/hosts');
         for (const h of hd?.hosts || []) {
           const o = document.createElement('option'); o.value = h.id; o.textContent = h.transport === 'dial' ? `${h.name} (${t('device')})` : `${h.name} (${h.user}@${h.host})`;
           hostSel.appendChild(o);
         }
+        hostTransport = (hd?.hosts || []).find(h => h.id === selectedHost)?.transport || null;
       } catch {}
       if (stale()) return;
       hostSel.value = selectedHost;
@@ -453,7 +466,12 @@ export function installManageAgents(App, ctx = {}) {
       // Accounts render UNDER their CLI: Anthropic accounts below Claude Code,
       // OpenAI/Codex accounts below Codex. Shared context for the extracted
       // renderers (they capture the same closures the dialog builds).
-      const actx = { body, selectedHost, hostSel, done, run, refresh, st, stale };
+      // Host login identity probed ONCE for both rosters (claude email/key
+      // shapes + codex JWT email — 2.188.0).
+      let racct = null;
+      if (selectedHost) { try { racct = await fetchJson(`/api/hosts/${encodeURIComponent(selectedHost)}/accounts-status`); } catch {} }
+      if (stale()) return;
+      const actx = { body, selectedHost, hostSel, done, run, refresh, st, stale, racct };
       for (const b of BACKENDS) {
         const info = st[b.key] || {};
         const row = document.createElement('div'); row.className = 'ob-backend';
@@ -581,6 +599,17 @@ export function installManageAgents(App, ctx = {}) {
             + `<div class="agents-note">${t('Reporting tools, the Task Group context hook, and the session keeper live under ~/.vibespace on the host. Creating a remote session re-installs them automatically.')}</div>`;
           const actions = document.createElement('div'); actions.className = 'agent-actions';
           const allGood = presentN === names.length && !outdatedN;
+          // Dial devices: install/uninstall ride the SESSION SPAWN channel
+          // (deviceAgentSetup ships the tools per spawn) — the tar-over-ssh
+          // buttons here are ssh-only, so on a device they'd just error.
+          // The status above still works (probes run via the device link).
+          if (hostTransport === 'dial') {
+            const note = document.createElement('span'); note.className = 'ob-ver';
+            note.textContent = t('managed automatically — each session spawn refreshes the tools');
+            actions.appendChild(note);
+            row.append(left, actions);
+            body.appendChild(row);
+          } else {
           const installBtn = document.createElement('button');
           installBtn.className = 'agent-btn' + (allGood ? '' : ' primary');
           installBtn.textContent = presentN ? t('Reinstall') : t('Install');
@@ -616,6 +645,7 @@ export function installManageAgents(App, ctx = {}) {
           }
           row.append(left, actions);
           body.appendChild(row);
+          } // end non-dial actions
         }
       }
       // ── Agent instructions — ADVANCED, collapsed by default (user request:
@@ -731,6 +761,7 @@ export function installManageAgents(App, ctx = {}) {
   // CLI. ctx carries the dialog closures the block already used.
   async _renderClaudeAccounts(ctx) {
     const { body, selectedHost, hostSel, done, run, refresh } = ctx;
+    const ctxRacct = ctx.racct;
     // ── Anthropic accounts (billing identity) — ONE unified roster whose
     // meaning is machine-scoped ONLY on the first row: the peer "CLI login"
     // row is the SELECTED machine's own global login (pick a remote host →
@@ -744,11 +775,11 @@ export function installManageAgents(App, ctx = {}) {
     if (!acct) return;
     // Prime per-account usage so the rows show current quota on open (the
     // 30s poll also keeps it fresh). Best-effort — rows render regardless.
-    try { const u = await fetchJson('/api/usage'); if (u) { this._accountUsage = u.accounts || {}; if (u.rateLimit) this._rateLimit = u.rateLimit; } } catch {}
-    // Remote host selected → probe ITS login state for the peer row.
-    let racct = null;
+    try { const u = await fetchJson('/api/usage'); if (u) { this._accountUsage = u.accounts || {}; this._hostOwnUsage = u.hosts || {}; this._usageGlobalIdent = u.globalLogin || null; if (u.rateLimit) this._rateLimit = u.rateLimit; } } catch {}
+    // Remote host selected → its login state was probed once in refresh()
+    // (shared with the codex roster — 2.188.0).
+    const racct = ctxRacct;
     const hostLabel = selectedHost ? (hostSel.options[hostSel.selectedIndex]?.textContent?.split(' (')[0] || t('remote host')) : null;
-    if (selectedHost) { try { racct = await fetchJson(`/api/hosts/${encodeURIComponent(selectedHost)}/accounts-status`); } catch {} }
     const accts = await this.refreshAccounts(); // keep app cache in sync
     const claudeAccts = (accts.accounts || []).filter(x => (x.backend || 'claude') === 'claude');
     // §ban-safety: on a REMOTE host a subscription can't run unless the opt-in
@@ -780,30 +811,50 @@ export function installManageAgents(App, ctx = {}) {
     let gName, gIdent, gExtraActions = '';
     if (selectedHost) {
       gName = t('CLI login on {host}', { host: escHtml(hostLabel) });
+      // Every working auth shape reads as LOGGED IN (2.188.0 — an
+      // apiKeyHelper host said "logged in (apiKeyHelper)" in the backend row
+      // above and "not logged in" here, in the same dialog; a console key got
+      // a warning tone for what is a working API-key auth). Email shown when
+      // the host's config reports one.
+      // identity preference: roles-derived orgEmail baked by the host quota ⟳
+      // (live, tied to the actual token) beats the host's config-file email
+      // (goes stale after a /login switch — the 2.114.1 mixup class)
+      const hEmailV = this._hostOwnUsage?.[selectedHost]?.orgEmail || racct?.subscription?.email;
+      const hEmail = hEmailV ? escHtml(hEmailV) + ' · ' : '';
       gIdent = racct && !racct.error
         ? (racct.subscription?.loggedIn
-            ? `<span class="ob-ok">${t('logged in')}</span>`
-            : `<span class="ob-warn">${racct.cliKey?.present ? t('not logged in (a Console login replaced it)') : t('not logged in')}</span>`)
+            ? `${hEmail}<span class="ob-ok">${t('logged in')}</span>`
+            : racct.cliKey?.present
+            ? `<span class="ob-ok">${t('logged in')}</span> <span class="ob-ver">${t('API key')} …${escHtml(racct.cliKey.tail || '')}</span>`
+            : racct.keyHelper
+            ? `<span class="ob-ok">${t('logged in')}</span> <span class="ob-ver">apiKeyHelper</span>`
+            : `<span class="ob-warn">${t('not logged in')}</span>`)
         : `<span class="ob-warn">${t('unreachable')}</span>`;
       gExtraActions = `<button class="agent-btn acct-host-login" title="${t('Opens a terminal ON {host} — this login lands on that machine, not in VibeSpace', { host: escHtml(hostLabel) })}">${t('Log in on {host}…', { host: escHtml(hostLabel) })}</button>`
         + (racct?.cliKey?.present && !importedTails.has(racct.cliKey.tail)
             ? `<button class="agent-btn acct-host-import" title="${t('Copy the Console key found on {host} (…{tail}) into VibeSpace so any machine can use it', { host: escHtml(hostLabel), tail: escHtml(racct.cliKey.tail) })}">${t('Import its key')}</button>` : '');
     } else {
       gName = t('CLI login');
+      // Prefer the token-derived identity (actualEmail, baked by the quota ⟳
+      // roles fetch) over the config-file email — the config goes STALE after
+      // a /login switch (the 2.114.1 mixup; the usage popup already prefers
+      // it, this dialog didn't — 2.188.0).
+      const gEmail = this._usageGlobalIdent?.actualEmail || sub.email;
       gIdent = sub.loggedIn
-        ? escHtml((sub.email || '') + (sub.plan ? (sub.email ? ' · ' : '') + sub.plan : '')) || t('logged in')
+        ? escHtml((gEmail || '') + (sub.plan ? (gEmail ? ' · ' : '') + sub.plan : '')) || t('logged in')
         : `<span class="ob-warn">${acct.cliKey?.present ? t('not logged in (a Console login replaced it)') : t('not logged in')}</span>`;
       // The machine's login may BE one of the named accounts (same email) —
       // say so, since their rows then show the same (merged) usage.
-      const linkedSub = sub.loggedIn && sub.email
-        ? claudeAccts.find(a => a.type === 'subscription' && a.email && a.email.toLowerCase() === String(sub.email).toLowerCase())
+      const linkedSub = sub.loggedIn && gEmail
+        ? claudeAccts.find(a => a.type === 'subscription' && a.email && a.email.toLowerCase() === String(gEmail).toLowerCase())
         : null;
       if (linkedSub) gIdent += ` <span class="acct-linked-hint" title="${escHtml(t('The machine login and this VibeSpace account are the same Anthropic account — usage is shown merged'))}">${t('= “{name}”', { name: escHtml(linkedSub.name) })}</span>`;
     }
     const globalRow = `<div class="acct-key-row${gDef ? ' is-default' : ''}" data-id="__global__">
       <span class="acct-type-icon" title="${selectedHost ? t("This machine's own login — lives on {host}, not in VibeSpace", { host: escHtml(hostLabel) }) : t('The CLI’s own global login on this machine')}">${GLOBE}</span>
       <span class="acct-key-main"><span class="acct-key-name">${gName}</span><span class="acct-key-tail">${gIdent}</span></span>
-      <span class="acct-usage-cell">${!selectedHost && sub.loggedIn ? usageHtml(this._rateLimit) : ''}</span>
+      <span class="acct-usage-cell">${!selectedHost && sub.loggedIn ? usageHtml(this._rateLimit)
+        : (selectedHost && this._hostOwnUsage?.[selectedHost]?.fiveHour ? usageHtml(this._hostOwnUsage[selectedHost]) : '')}</span>
       <span class="acct-key-actions">
         <button class="acct-icon acct-def ${gDef ? 'on' : ''}" title="${gDef ? t('Default for new sessions — pick another to change') : t('Set as default for new sessions')}">${gDef ? STAR_F : STAR_O}</button>${gExtraActions}
       </span></div>`;
@@ -811,8 +862,11 @@ export function installManageAgents(App, ctx = {}) {
       const isDef = accts.defaultAccountId === a.id;
       const isSub = a.type === 'subscription';
       const blocked = isSub && subBlocked; // subscription on a remote host, opt-in off
+      // token-derived orgEmail (per-account ⟳ roles bake) beats the creds
+      // dir's config email — same staleness class as the global row (2.188.0)
+      const aEmail = this._accountUsage?.[a.id]?.orgEmail || a.email;
       let ident = isSub
-        ? (a.loggedIn ? escHtml((a.email || '') + (a.subscriptionType ? (a.email ? ' · ' : '') + a.subscriptionType : '')) || t('logged in')
+        ? (a.loggedIn ? escHtml((aEmail || '') + (a.subscriptionType ? (aEmail ? ' · ' : '') + a.subscriptionType : '')) || t('logged in')
                       : `<span class="ob-warn">${t('not logged in')}</span>`)
         : `API …${escHtml(a.tail || '')}`;
       // Some login flows leave the creds dir without an identity file — the
@@ -953,6 +1007,13 @@ export function installManageAgents(App, ctx = {}) {
       };
       if (e.target.closest('.acct-def')) {
         const isDef = accts.defaultAccountId === id;
+        // Default is GLOBAL — starring a "this machine only" subscription
+        // while a host is selected read as "I switched the remote's account"
+        // when it actually set a default that host can never use (2.188.0)
+        if (keyRow.dataset.blocked && !isDef) {
+          showToast(t('The default is global, and “{name}” can’t run on {host} — new sessions there keep using its own login.', { name: a?.name, host: escHtml(hostLabel) }), { type: 'error', duration: 6000 });
+          return;
+        }
         try { await fetchJson('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: isDef ? null : id }) }); } catch {}
         refresh();
       } else if (e.target.closest('.acct-menu')) {

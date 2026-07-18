@@ -315,28 +315,65 @@ class HostManager {
 
   dest(h) { return `${h.user}@${h.host}`; }
 
+  /** Run a read-only shell probe on ANY machine — ssh hosts via _ssh, dial
+   *  devices via the device daemon's run-cmd (2.188.0: the Manage-Agents
+   *  status probes were ssh-only, so a selected dial device showed everything
+   *  as not-installed/unreachable while the same probes worked over ssh). */
+  async _hostShell(h, script, { timeoutMs = 15000 } = {}) {
+    if (h.transport === 'dial') {
+      const dm = await this.device(h.id);
+      const r = await dm.runCmd('sh', ['-c', script], { timeoutMs });
+      return String(r.stdout || '');
+    }
+    return String(await this._ssh(h, script, { timeoutMs }));
+  }
+
   /** Anthropic login state ON THE HOST (read-only probe, one round trip):
    *  subscription = remote credentials.json holds an OAuth token; cliKey = the
    *  remote's console-login-minted primaryApiKey (importable into the central
-   *  store). Mirrors AccountManager's local probes. */
+   *  store). Mirrors AccountManager's local probes — INCLUDING the API-key
+   *  auth shapes (2.188.0: backendStatus learned apiKeyHelper in 2.186.7 but
+   *  this probe didn't, so one dialog said "logged in (apiKeyHelper)" on top
+   *  and "not logged in" in the accounts roster for the same host). Also
+   *  returns the host login's IDENTITY: claude email from ~/.claude.json
+   *  oauthAccount (config-reported, can lag a /login switch) and the codex
+   *  auth.json id_token payload segment (decoded server-side — the JWT email
+   *  can never go stale relative to the token itself). */
   async accountsStatus(id) {
     const h = this.get(id);
-    const out = String(await this._ssh(h,
-      `S=$(grep -c accessToken "$HOME/.claude/.credentials.json" 2>/dev/null); echo "SUB:$S"; K=$(grep -o "primaryApiKey\\":\\"sk-ant-[^\\"]*" "$HOME/.claude.json" 2>/dev/null | head -1); echo "KEY:$K"`));
+    const out = await this._hostShell(h,
+      `S=$(grep -c accessToken "$HOME/.claude/.credentials.json" 2>/dev/null); echo "SUB:$S"; `
+      + `K=$(grep -o "primaryApiKey\\":\\"sk-ant-[^\\"]*" "$HOME/.claude.json" 2>/dev/null | head -1); echo "KEY:$K"; `
+      + `grep -q "\\"apiKeyHelper\\"" "$HOME/.claude/settings.json" 2>/dev/null && echo "HELPER:yes" || echo "HELPER:no"; `
+      + `E=$(grep -o "emailAddress\\":\\"[^\\"]*" "$HOME/.claude.json" 2>/dev/null | head -1); echo "EMAIL:$E"; `
+      + `J=$(grep -o "id_token\\":\\"[^\\"]*" "$HOME/.codex/auth.json" 2>/dev/null | head -1 | cut -d. -f2); echo "CXJWT:$J"`);
     const sub = /SUB:(\d+)/.exec(out);
     const key = /KEY:primaryApiKey":"(sk-ant-[^\s"]+)/.exec(out);
+    const helper = /HELPER:yes/.test(out);
+    const email = /EMAIL:emailAddress":"([^"\s]+)/.exec(out);
+    const cxSeg = /CXJWT:([A-Za-z0-9_-]{8,})/.exec(out);
+    let codexEmail = null, codexPlan = null;
+    if (cxSeg) {
+      try {
+        const payload = JSON.parse(Buffer.from(cxSeg[1], 'base64url').toString('utf-8'));
+        codexEmail = payload.email || null;
+        codexPlan = payload['https://api.openai.com/auth']?.chatgpt_plan_type || null;
+      } catch { }
+    }
     return {
-      subscription: { loggedIn: !!(sub && parseInt(sub[1]) > 0) },
+      subscription: { loggedIn: !!(sub && parseInt(sub[1]) > 0), email: email ? email[1] : null },
       cliKey: key ? { present: true, tail: key[1].slice(-8) } : { present: false },
+      keyHelper: helper,
+      codex: { email: codexEmail, plan: codexPlan },
     };
   }
 
   /** Full remote primaryApiKey + org name (for one-click import into the
-   *  central store — travels over the ssh channel, never argv). */
+   *  central store — travels over the ssh/device channel, never argv). */
   async cliPrimaryKey(id) {
     const h = this.get(id);
-    const out = String(await this._ssh(h,
-      `grep -o "primaryApiKey\\":\\"sk-ant-[^\\"]*" "$HOME/.claude.json" 2>/dev/null | head -1; grep -o "organizationName\\":\\"[^\\"]*" "$HOME/.claude.json" 2>/dev/null | head -1`));
+    const out = await this._hostShell(h,
+      `grep -o "primaryApiKey\\":\\"sk-ant-[^\\"]*" "$HOME/.claude.json" 2>/dev/null | head -1; grep -o "organizationName\\":\\"[^\\"]*" "$HOME/.claude.json" 2>/dev/null | head -1`);
     const key = /primaryApiKey":"(sk-ant-[^\s"]+)/.exec(out);
     const org = /organizationName":"([^"]+)/.exec(out);
     return { key: key ? key[1] : null, org: org ? org[1] : null };
@@ -392,7 +429,7 @@ class HostManager {
     }
     const probe = 'export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; echo VS-OK; for c in dtach node claude codex; do command -v $c >/dev/null 2>&1 && printf "%s=yes " $c || printf "%s=no " $c; done; echo; uname -sm';
     const t0 = Date.now();
-    const out = await this._ssh(h, probe, { timeoutMs: 10000 });
+    const out = await this._hostShell(h, probe, { timeoutMs: 10000 });
     if (!out.includes('VS-OK')) throw new Error('unexpected response');
     const tools = {};
     for (const m of out.matchAll(/(\w+)=(yes|no)/g)) tools[m[1]] = m[2] === 'yes';
@@ -470,7 +507,7 @@ class HostManager {
       + 'elif command -v security >/dev/null 2>&1 && security find-generic-password -s "Claude Code-credentials" >/dev/null 2>&1; then echo "claude-login|yes|keychain"; '
       + 'else echo "claude-login|no"; fi; '
       + '[ -f "$HOME/.codex/auth.json" ] && echo "codex-login|yes" || echo "codex-login|no"';
-    const out = await this._ssh(h, probe, { timeoutMs: 10000 });
+    const out = await this._hostShell(h, probe, { timeoutMs: 10000 });
     const st = { claude: {}, codex: {} };
     for (const line of out.split('\n')) {
       const [k, v, ver] = line.split('|');
@@ -506,7 +543,7 @@ class HostManager {
       + 'grep -q vibespace-hook.mjs "$HOME/.claude/settings.json" 2>/dev/null && echo "HOOK|claude|yes" || echo "HOOK|claude|no"; '
       + 'grep -q vibespace-hook.mjs "$HOME/.codex/hooks.json" 2>/dev/null && echo "HOOK|codex|yes" || echo "HOOK|codex|no"; '
       + 'echo "KEEP|$(ls "$HOME/.vibespace/run" 2>/dev/null | grep -c "\\.sock$")"';
-    const out = String(await this._ssh(h, probe, { timeoutMs: 12000 }));
+    const out = await this._hostShell(h, probe, { timeoutMs: 12000 });
     const st = { tools: {}, node: false, hooks: {}, keeperSessions: 0 };
     for (const line of out.split('\n')) {
       const p = line.trim().split('|');
@@ -766,7 +803,9 @@ class HostManager {
   async readRemoteOAuth(id) {
     const h = this.get(id);
     let raw;
-    try { raw = String(await this._ssh(h, 'cat "$HOME/.claude/.credentials.json" 2>/dev/null || true', { timeoutMs: 10000 })); } catch { return null; }
+    // _hostShell: dial devices peek via the device link (2.188.0 — the ⟳ in
+    // the quota popup threw for paired devices; the peek was ssh-only)
+    try { raw = await this._hostShell(h, 'cat "$HOME/.claude/.credentials.json" 2>/dev/null || true', { timeoutMs: 10000 }); } catch { return null; }
     try {
       const o = JSON.parse(raw).claudeAiOauth;
       if (o?.accessToken && (!o.expiresAt || o.expiresAt > Date.now() + 60000)) return o.accessToken;

@@ -138,7 +138,9 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
       : a.source === 'api-console' ? t('API — Console login · pay per use{est}', { est: a.guessed ? t(' (estimated)') : '' })
       : a.source === 'api-other' ? t('API — {detail} · pay per use', { detail: a.detail || t('other key source') })
       : t('Unknown (started before tracking)');
-    row(bilSec, t('This run'), (a && a.source?.startsWith('api')) ? `<span style="color:var(--yellow,#e5c07b)">${escHtml(authLabel)}</span>` : escHtml(authLabel));
+    // remote session: the login is the HOST's — name the machine (2.188.0)
+    const authLabelHost = a?.hostName ? authLabel + ' · @ ' + a.hostName : authLabel;
+    row(bilSec, t('This run'), (a && a.source?.startsWith('api')) ? `<span style="color:var(--yellow,#e5c07b)">${escHtml(authLabelHost)}</span>` : escHtml(authLabelHost));
     // Account override for the NEXT resume
     const acctRow = document.createElement('div');
     acctRow.className = 'session-detail-row';
@@ -150,8 +152,15 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
     const sbe = s.backend || 'claude';
     const accts = (app._accounts?.accounts || []).filter(x => (x.backend || 'claude') === sbe);
     const globalLabel = sbe === 'codex' ? t('ChatGPT login') : t('Subscription');
-    for (const [v, label] of [['', t('Default')], ['subscription', globalLabel], ...accts.map(x => [x.id, x.type === 'subscription' ? `${x.name} (${t('subscription')})` : `${x.name} — API …${x.tail}`])]) {
-      const o = document.createElement('option'); o.value = v; o.textContent = label;
+    // Remote session: subscription accounts can't spawn there (dial: never;
+    // ssh: only with the ship opt-in) — offering them was fail-late (2.188.0)
+    const rHost = s.host || null;
+    const rTransport = rHost ? (sidebar._hostsData?.hosts?.find(h => h.id === rHost)?.transport || 'ssh') : null;
+    const shipSubs = !!app.settings?.get?.('accounts.shipSubscriptionToRemote');
+    const subBlocked = (x) => rHost && (sbe === 'codex' || x.type === 'subscription') && (rTransport === 'dial' || !shipSubs);
+    for (const [v, label, blocked] of [['', t('Default')], ['subscription', globalLabel], ...accts.map(x => [x.id, x.type === 'subscription' ? `${x.name} (${t('subscription')})` : `${x.name} — API …${x.tail}`, subBlocked(x)])]) {
+      const o = document.createElement('option'); o.value = v; o.textContent = blocked ? label + ' · ' + t('blocked on this host') : label;
+      if (blocked) { o.disabled = true; o.title = t('Subscription logins don’t ship to this machine — log in there, or use an API-key account'); }
       acctSel.appendChild(o);
     }
     acctSel.value = [...acctSel.options].some(o => o.value === (savedCfg.account || '')) ? (savedCfg.account || '') : '';
