@@ -642,6 +642,13 @@ function serveConnection(sock) {
   let upgrade = null;
   const sessions = new Map(); // chan → { proc, credit accounting is per-mux }
   const tcpChans = new Map(); // chan → net.Socket (M4 tcp-forward)
+  const streamChans = new Map(); // chan → run-stream child (stdout paused under window pressure)
+  const writableWaiters = new Map(); // chan → [resolve] (read-range window pacing)
+  const waitWritable = (chan) => new Promise((res) => {
+    const list = writableWaiters.get(chan) || [];
+    list.push(res); writableWaiters.set(chan, list);
+    setTimeout(res, 60000); // dead-link belt: never wedge the handler forever
+  });
   const mux = new Mux(sock, {
     onControl(msg) {
       if (msg.op === 'hello') {
@@ -709,25 +716,31 @@ function serveConnection(sock) {
               }
               case 'read-range': {
                 // stream [start, start+len) on the given byte channel — the
-                // transcript-slab primitive (server keeps its line-index math)
+                // transcript-slab primitive (server keeps its line-index math).
+                // fs-done carries `sent` (the count the client gates on — the
+                // control channel is credit-exempt so fs-done OVERTAKES queued
+                // data; resolving on it alone truncated big reads to the 256KB
+                // window), and window pressure pauses the loop instead of
+                // queueing a whole 45MB transcript in daemon memory.
                 const fd = fs.openSync(p, 'r');
                 try {
                   const size = fs.fstatSync(fd).size;
                   const start = Math.max(0, Number(msg.start) || 0);
-                  const want = Math.min(Number(msg.len) || 0, size - start);
-                  mux.control({ op: 'fs-result', id: rid, size, sending: Math.max(0, want) });
-                  let pos = start;
+                  const want = Math.max(0, Math.min(Number(msg.len) || 0, size - start));
+                  mux.control({ op: 'fs-result', id: rid, size, sending: want });
+                  let pos = start, sent = 0;
                   const CHUNK = 65536;
                   while (pos < start + want) {
                     const n = Math.min(CHUNK, start + want - pos);
                     const b = Buffer.alloc(n);
                     const got = fs.readSync(fd, b, 0, n, pos);
                     if (got <= 0) break;
-                    mux.data(msg.chan, b.subarray(0, got));
-                    pos += got;
-                    await new Promise((r) => setImmediate(r)); // yield: credit frames must interleave
+                    const ok = mux.data(msg.chan, b.subarray(0, got));
+                    pos += got; sent += got;
+                    if (!ok) await waitWritable(msg.chan);
+                    else await new Promise((r) => setImmediate(r)); // yield: credit frames must interleave
                   }
-                  mux.control({ op: 'fs-done', id: rid, chan: msg.chan });
+                  mux.control({ op: 'fs-done', id: rid, chan: msg.chan, sent });
                 } finally { fs.closeSync(fd); }
                 break;
               }
@@ -852,10 +865,27 @@ function serveConnection(sock) {
             env: spawnEnv(msg.env), cwd: msg.cwd || process.env.HOME,
           });
           const chanS = msg.chan;
-          child.stdout.on('data', (d) => { try { mux.data(chanS, d); } catch { } });
+          // count stdout bytes → stream-exit carries `sent` so the client can
+          // hold its resolve until the credit-gated tail actually landed (a
+          // fast-exiting producer, e.g. the usage scanner, used to have its
+          // queued tail overtaken by the control-channel exit = silent
+          // truncation); pause on window pressure, resume via onWritable.
+          let sentS = 0, exitedS = false;
+          const sendExit = (code, error) => {
+            if (exitedS) return; exitedS = true;
+            streamChans.delete(chanS);
+            mux.control({ op: 'stream-exit', chan: chanS, code, error, sent: sentS });
+          };
+          child.stdout.on('data', (d) => {
+            sentS += d.length;
+            let ok = true; try { ok = mux.data(chanS, d); } catch { }
+            if (!ok) { try { child.stdout.pause(); } catch { } }
+          });
+          streamChans.set(chanS, child);
           child.stderr.on('data', () => { });
-          child.on('exit', (code) => mux.control({ op: 'stream-exit', chan: chanS, code: code ?? 0 }));
-          child.on('error', (e) => mux.control({ op: 'stream-exit', chan: chanS, code: 127, error: e.message }));
+          // 'close' (stdio fully drained), NOT 'exit' — the count must be final
+          child.on('close', (code) => sendExit(code ?? 0, undefined));
+          child.on('error', (e) => sendExit(127, e.message));
           if (msg.stdin64) { try { child.stdin.end(Buffer.from(msg.stdin64, 'base64')); } catch { } } else { try { child.stdin.end(); } catch { } }
           mux.control({ op: 'stream-start', id: msg.id, chan: chanS, pid: child.pid });
         } catch (e) { mux.control({ op: 'stream-start', id: msg.id, chan: msg.chan, error: e.message }); }
@@ -966,7 +996,12 @@ function serveConnection(sock) {
       const t = tcpChans.get(chan);
       if (t) { tcpChans.delete(chan); try { t.destroy(); } catch { } }
     },
-    onWritable(chan) { try { tcpChans.get(chan)?.resume?.(); } catch { } },
+    onWritable(chan) {
+      try { tcpChans.get(chan)?.resume?.(); } catch { }
+      try { streamChans.get(chan)?.stdout?.resume?.(); } catch { }
+      const w = writableWaiters.get(chan);
+      if (w) { writableWaiters.delete(chan); for (const f of w) { try { f(); } catch { } } }
+    },
     onDead() {
       // connection gone: dtach-attach ptys are DETACH points — killing the
       // attach does NOT kill the dtach session (invariant #1: session survives

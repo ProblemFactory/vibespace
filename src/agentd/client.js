@@ -203,7 +203,15 @@ class DeviceManager {
               if (m.op === 'tcp-accept') { this._onTcpAccept(m); return; }
               if (m.op === 'fs-done') { sessions.get(m.chan)?.onDone?.(m); return; }
               if (m.op === 'stream-start') { const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m); } return; }
-              if (m.op === 'stream-exit') { const h = sessions.get(m.chan); sessions.delete(m.chan); h?.onExit?.(m.code, m.error); return; }
+              // stream-exit rides the control channel and can OVERTAKE queued
+              // stdout (same class as the fs-done truncation) — a handler that
+              // sets onExitMsg keeps its registration and settles itself once
+              // the counted bytes landed; legacy handlers keep the old delete.
+              if (m.op === 'stream-exit') {
+                const h = sessions.get(m.chan);
+                if (h?.onExitMsg) { h.onExitMsg(m); return; }
+                sessions.delete(m.chan); h?.onExit?.(m.code, m.error); return;
+              }
               if (m.op === 'tcp-close') { const h = sessions.get(m.chan); sessions.delete(m.chan); h?.onClose?.(); return; }
               if (m.op === 'discovery-dirty') { this._onDiscoveryDirty?.(); return; }
               if (m.op === 'session-open' || m.op === 'pipe-session-open') { sessions.get(m.chan)?.onOpen?.(m); return; }
@@ -338,15 +346,44 @@ class DeviceManager {
   fsWrite(p, buf) { return this._request({ op: 'fs-op', action: 'write', path: p, data64: Buffer.from(buf).toString('base64') }); }
   fsMkdir(p) { return this._request({ op: 'fs-op', action: 'mkdir', path: p }); }
   fsRm(p, recursive = false) { return this._request({ op: 'fs-op', action: 'rm', path: p, recursive }); }
-  /** read [start, start+len) — resolves a Buffer (the transcript-slab primitive). */
+  /** read [start, start+len) — resolves a Buffer (the transcript-slab primitive).
+   *  COUNT-GATED: fs-done rides the credit-EXEMPT control channel, so it can
+   *  OVERTAKE data still queued daemon-side behind the 256KB credit window —
+   *  resolving on fs-done alone truncated every read past the in-flight window
+   *  to exactly INITIAL_WINDOW bytes (real incident: a 45MB remote transcript
+   *  cached as a 256KB prefix and stamped complete = permanently ancient chat
+   *  history). Resolve only once the expected byte count (ack.sending,
+   *  adjusted down by fs-done's `sent` if the file shrank mid-read) has
+   *  actually arrived; a 30s data stall rejects so callers can fall back. */
   async fsReadRange(p, start, len) {
     const conn = await this.connect();
     const chan = conn.nextChan++;
     const chunks = [];
-    let done;
-    const donePromise = new Promise((r) => { done = r; });
-    conn.sessions.set(chan, { onData: (b) => chunks.push(b), onDone: () => { conn.sessions.delete(chan); done(); } });
+    // NOTE: mux frames dispatch SYNCHRONOUSLY in one socket-read burst, so for
+    // a big read the burst is [ack, ~window of data, fs-done] and the awaited
+    // ack's continuation (a microtask) runs only AFTER fs-done was handled —
+    // never derive the target from "bytes seen at done time".
+    let received = 0, sending = null, sentDone = null, doneSeen = false, legacy = false, stall = null;
+    let resolveP, rejectP;
+    const donePromise = new Promise((res, rej) => { resolveP = res; rejectP = rej; });
+    donePromise.catch(() => {}); // a stall while still awaiting the ack must not be an unhandled rejection
+    const cleanup = () => { clearTimeout(stall); conn.sessions.delete(chan); };
+    const bumpStall = () => { clearTimeout(stall); stall = setTimeout(() => { cleanup(); rejectP(new Error('read-range stalled')); }, 30000); };
+    const maybeFinish = () => {
+      if (!doneSeen) return;
+      const t = sentDone != null ? (sending != null ? Math.min(sentDone, sending) : sentDone) : sending;
+      if (t != null ? received >= t : legacy) { cleanup(); resolveP(); }
+    };
+    conn.sessions.set(chan, {
+      onData: (b) => { chunks.push(b); received += b.length; bumpStall(); maybeFinish(); },
+      onDone: (m) => { doneSeen = true; if (typeof m?.sent === 'number') sentDone = m.sent; maybeFinish(); },
+    });
+    bumpStall();
     const ack = await this._request({ op: 'fs-op', action: 'read-range', path: p, start, len, chan });
+    if (ack?.error) { cleanup(); throw new Error(ack.error); }
+    if (typeof ack?.sending === 'number') sending = ack.sending;
+    else legacy = true; // ancient daemon without counts: resolve on fs-done like before
+    maybeFinish();
     await donePromise;
     return { size: ack.size, data: Buffer.concat(chunks) };
   }
@@ -357,15 +394,34 @@ class DeviceManager {
     return this._request({ op: 'run-cmd', cmd, args, env, timeoutMs, stdin64: stdin ? Buffer.from(stdin).toString('base64') : undefined });
   }
   /** streaming argv exec: stdout arrives via onData (byte channel); resolves
-   *  {code} at exit. For outputs too large for runCmd (usage-scan NDJSON). */
+   *  {code} at exit. For outputs too large for runCmd (usage-scan NDJSON).
+   *  COUNT-GATED like fsReadRange: a NEW daemon's stream-exit carries `sent`
+   *  (total stdout bytes) — the resolve holds until that many arrived, so the
+   *  credit-gated tail can't be overtaken and silently dropped (truncated
+   *  usage harvests / streamed downloads). Old daemons omit it → resolve at
+   *  exit as before. A 15s post-exit stall resolves {truncated:true}. */
   async runStream(cmd, args = [], { env, cwd, stdin, onData } = {}) {
     const conn = await this.connect();
     const chan = conn.nextChan++;
-    let exit;
-    const done = new Promise((r) => { exit = r; });
-    conn.sessions.set(chan, { onData: (b) => onData?.(b), onExit: (code, error) => exit({ code, error }) });
+    let exitR;
+    const done = new Promise((r) => { exitR = r; });
+    let received = 0, exitMsg = null, stall = null, settled = false;
+    const settle = (extra) => {
+      if (settled) return; settled = true;
+      clearTimeout(stall); conn.sessions.delete(chan);
+      exitR({ code: exitMsg?.code, error: exitMsg?.error, ...(extra || {}) });
+    };
+    const check = () => {
+      if (!exitMsg) return;
+      if (typeof exitMsg.sent !== 'number' || received >= exitMsg.sent) return settle();
+      clearTimeout(stall); stall = setTimeout(() => settle({ truncated: true }), 15000);
+    };
+    conn.sessions.set(chan, {
+      onData: (b) => { received += b.length; onData?.(b); check(); },
+      onExitMsg: (m) => { exitMsg = m; check(); },
+    });
     const ack = await this._request({ op: 'run-stream', cmd, args, env, cwd, chan, stdin64: stdin ? Buffer.from(stdin).toString('base64') : undefined });
-    if (ack.error) { conn.sessions.delete(chan); throw new Error(ack.error); }
+    if (ack.error) { conn.sessions.delete(chan); clearTimeout(stall); throw new Error(ack.error); }
     return done;
   }
 

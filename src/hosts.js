@@ -674,19 +674,28 @@ class HostManager {
         const st = await dm.fsStat(remotePath);
         const size = st.stat.size, mtime = Math.floor(st.stat.mtimeMs / 1000);
         if (meta && meta.size === size && meta.mtime === mtime && fs.existsSync(cachePath)) return cachePath;
-        if (size > maxBytes) throw new Error(`remote transcript too large (${(size / 1048576) | 0}MB)`);
         fs.mkdirSync(dir, { recursive: true });
         let localSize = 0;
         try { localSize = fs.statSync(cachePath).size; } catch { }
+        // the cap guards what we FETCH — with a warm prefix that's just the
+        // delta, so a transcript growing past maxBytes keeps incrementing
+        // instead of suddenly erroring (a 45MB real session was on track)
+        const fetchBytes = (localSize > 0 && localSize <= size && meta) ? size - localSize : size;
+        if (fetchBytes > maxBytes) throw new Error(`remote transcript too large (${(fetchBytes / 1048576) | 0}MB)`);
         if (localSize > 0 && localSize <= size && meta) {
           // append-only delta — the slab win
           if (size > localSize) {
             const delta = await dm.fsReadRange(remotePath, localSize, size - localSize);
+            // NEVER stamp meta for bytes we didn't get (a truncated read once
+            // cached a 256KB prefix as a "complete" 45MB transcript — the
+            // permanently-ancient-history incident); mismatch → legacy ssh
+            if (delta.data.length !== size - localSize) throw new Error(`short read-range: ${delta.data.length} of ${size - localSize}`);
             fs.appendFileSync(cachePath, delta.data);
           }
         } else {
           // no/invalid prefix (or remote rotated smaller) — full streamed fetch
           const whole = await dm.fsReadRange(remotePath, 0, size);
+          if (whole.data.length !== size) throw new Error(`short read-range: ${whole.data.length} of ${size}`);
           const tmp2 = cachePath + '.tmp';
           fs.writeFileSync(tmp2, whole.data);
           fs.renameSync(tmp2, cachePath);
