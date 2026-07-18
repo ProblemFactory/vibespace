@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.186.8 — 2026-07-18
+- **A fresh instance with zero local sessions can now reach its remote machines' sessions** (real report: the sidebar showed only "No sessions" — no host switcher anywhere — while the configured remote machine held hundreds of sessions). The "No sessions" early-return fired before the workbench (whose Recent/History host switchers are the only path to remote sessions) ever rendered; same class as the 2.125.1 remote-search fix. With any remote host configured the workbench now renders its zones (empty hints + switchers) instead; a truly host-less fresh instance keeps the clean "No sessions" state. Committed smoke: `scripts/test-sidebar-empty-remote.mjs` (worktree server + empty fake HOME + fake host, 5 asserts incl. the /api/hosts-in-flight self-heal).
+
 ## 2.186.7 — 2026-07-18
 - **API-key-authed Claude logins are now recognized** (real report: a remote machine ran claude fine via an `apiKeyHelper` in `~/.claude/settings.json`, but Manage Agents said "not logged in" — the detection only checked for the OAuth `.credentials.json`). Both the local `/api/backend-status` and the remote host probe now recognize all four auth shapes: OAuth creds (token grep, not mere file existence — a console-wiped `{}` no longer counts), a console-managed `primaryApiKey` in `~/.claude.json`, an `apiKeyHelper` in settings.json, and (remote) a macOS Keychain entry. The Manage-Agents row shows the method for API-key styles ("logged in · API key" / "apiKeyHelper"), mirroring the CLI's own "API Usage Billing" statusline. Verified against the reporting host: probe returns `key-helper`.
 

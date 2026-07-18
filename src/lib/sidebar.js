@@ -896,8 +896,15 @@ class Sidebar {
     // real report: searching a remote session's id showed "No sessions" — this
     // early-return fired before the workbench's cross-host Remote-matches
     // section ever rendered; the 2.124.0 cutoff fix was unreachable).
+    // Same class with REMOTE HOSTS configured (2.186.8, real report: fresh
+    // instance + a remote machine full of sessions = "No sessions" and NO host
+    // switcher anywhere — the workbench's Recent/History switchers are the
+    // only path to them). _ensureHostsData re-renders once /api/hosts loads,
+    // so the very first paint may still early-return and then self-heal.
     const searchActive = !!(document.getElementById('session-filter')?.value || '').trim();
-    if (!sessions.length && this._activeTab !== 'tasks' && !searchActive) { this.listEl.insertAdjacentHTML('beforeend', `<div class="empty-hint">${tr('No sessions')}</div>`); return; }
+    this._ensureHostsData?.();
+    const hasHosts = !!this._hostsData?.hosts?.length;
+    if (!sessions.length && this._activeTab !== 'tasks' && !searchActive && !hasHosts) { this.listEl.insertAdjacentHTML('beforeend', `<div class="empty-hint">${tr('No sessions')}</div>`); return; }
 
     if (this._mobileMode) {
       // Restore drill-down state if we were inside a folder/group
