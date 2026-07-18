@@ -3231,13 +3231,23 @@ app.get('/api/backend-status', (req, res) => {
   try {
     if (process.platform === 'darwin') {
       execFileSync('security', ['find-generic-password', '-s', 'Claude Code-credentials'], { timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'] });
-      out.claude.loggedIn = true;
+      out.claude.loggedIn = true; out.claude.loginMethod = 'keychain';
     } else {
       const creds = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', '.credentials.json'), 'utf-8'));
       out.claude.loggedIn = !!(creds?.claudeAiOauth?.accessToken || creds?.accessToken);
+      if (out.claude.loggedIn) out.claude.loginMethod = 'oauth';
     }
   } catch {}
-  if (!out.claude.loggedIn && process.env.ANTHROPIC_API_KEY) out.claude.loggedIn = true;
+  if (!out.claude.loggedIn && process.env.ANTHROPIC_API_KEY) { out.claude.loggedIn = true; out.claude.loginMethod = 'env-key'; }
+  // A console /login (managed primaryApiKey) and an apiKeyHelper both
+  // authenticate claude with NO OAuth creds file — recognize them (real
+  // report: an apiKeyHelper machine ran claude fine, showed "not logged in").
+  if (!out.claude.loggedIn) {
+    try { if (JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude.json'), 'utf-8'))?.primaryApiKey) { out.claude.loggedIn = true; out.claude.loginMethod = 'console-key'; } } catch {}
+  }
+  if (!out.claude.loggedIn) {
+    try { if (JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', 'settings.json'), 'utf-8'))?.apiKeyHelper) { out.claude.loggedIn = true; out.claude.loginMethod = 'key-helper'; } } catch {}
+  }
   out.codex = probe(CODEX_CMD);
   out.codex.loggedIn = false;
   try { out.codex.loggedIn = fs.existsSync(path.join(os.homedir(), '.codex', 'auth.json')); } catch {}

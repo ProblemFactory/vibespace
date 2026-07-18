@@ -459,15 +459,23 @@ class HostManager {
     const probe = 'export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; '
       + 'for c in claude codex; do '
       + 'if command -v $c >/dev/null 2>&1; then v=$($c --version 2>/dev/null | head -1); echo "$c|yes|$v"; else echo "$c|no|"; fi; done; '
-      // login state: creds file existence, same heuristic as local
-      + '[ -f "$HOME/.claude/.credentials.json" ] && echo "claude-login|yes" || echo "claude-login|no"; '
+      // login state: OAuth token OR console-managed key OR an apiKeyHelper —
+      // .credentials.json existence alone missed every API-key-authed machine
+      // (real report: an apiKeyHelper host ran claude fine, showed "not
+      // logged in"). Quoted grep patterns so a prompt-history mention (stored
+      // JSON-escaped as \"…\") can't false-positive.
+      + 'if grep -q accessToken "$HOME/.claude/.credentials.json" 2>/dev/null; then echo "claude-login|yes|oauth"; '
+      + 'elif grep -q "\\"primaryApiKey\\"" "$HOME/.claude.json" 2>/dev/null; then echo "claude-login|yes|console-key"; '
+      + 'elif grep -q "\\"apiKeyHelper\\"" "$HOME/.claude/settings.json" 2>/dev/null; then echo "claude-login|yes|key-helper"; '
+      + 'elif command -v security >/dev/null 2>&1 && security find-generic-password -s "Claude Code-credentials" >/dev/null 2>&1; then echo "claude-login|yes|keychain"; '
+      + 'else echo "claude-login|no"; fi; '
       + '[ -f "$HOME/.codex/auth.json" ] && echo "codex-login|yes" || echo "codex-login|no"';
     const out = await this._ssh(h, probe, { timeoutMs: 10000 });
     const st = { claude: {}, codex: {} };
     for (const line of out.split('\n')) {
       const [k, v, ver] = line.split('|');
       if (k === 'claude' || k === 'codex') { st[k].installed = v === 'yes'; if (ver) st[k].version = ver.trim(); }
-      else if (k === 'claude-login') st.claude.loggedIn = v === 'yes';
+      else if (k === 'claude-login') { st.claude.loggedIn = v === 'yes'; if (ver) st.claude.loginMethod = ver.trim(); }
       else if (k === 'codex-login') st.codex.loggedIn = v === 'yes';
     }
     return st;

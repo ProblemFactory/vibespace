@@ -462,9 +462,13 @@ export function installManageAgents(App, ctx = {}) {
         // Code)" suffix just repeats the label and wrapped badly when narrow
         const ver = info.version ? String(info.version).replace(/\s*\((?:claude code|codex(?:-cli)?)\)\s*$/i, '') : '';
         left.className = 'ob-backend-id';
+        // API-key-style logins (console-managed key / env var / apiKeyHelper)
+        // say so \u2014 mirrors the CLI's own "API Usage Billing" statusline
+        const lm = info.loginMethod;
+        const lmLabel = (lm === 'console-key' || lm === 'env-key') ? t('API key') : lm === 'key-helper' ? 'apiKeyHelper' : '';
         left.innerHTML = `<b>${b.label}</b>${ver ? ` <span class="ob-ver">${escHtml(ver)}</span>` : ''} ${
           !info.installed ? `<span class="ob-bad">${t('not installed')}</span>`
-          : info.loggedIn ? `<span class="ob-ok">\u2713 ${t('logged in')}</span>`
+          : info.loggedIn ? `<span class="ob-ok">\u2713 ${t('logged in')}</span>${lmLabel ? ` <span class="ob-ver">${escHtml(lmLabel)}</span>` : ''}`
           : `<span class="ob-warn">${t('not logged in')}</span>`
         }`;
         const actions = document.createElement('div'); actions.className = 'agent-actions';
