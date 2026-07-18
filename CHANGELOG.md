@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.186.5 — 2026-07-18
+- **Clicking a link in a proxy-mode embedded browser no longer escapes the proxy** (real report: the page loaded, but any link → "This site blocked iframe embedding (X-Frame-Options)"). The proxy (node-unblocker) leaves in-page links RELATIVE and relies on the document base, so when you navigate to a bare origin (`http://host:port`, no trailing slash) the iframe's base has no `/` and a relative link resolves UP A LEVEL — dropping the host, landing off-proxy → the X-Frame overlay. `navigate()` now normalizes a pathless origin to a trailing slash (`http://host:port/`), so relative links resolve to `/proxy/http://host:port/subpath` and stay inside the proxy. Verified against a real proxied directory listing.
+
 ## 2.186.4 — 2026-07-18
 - **A "This machine" forward to a LAN/Tailscale IP now actually works** (real report: `本机 → 100.87.42.107:9983` gave a blank browser, was misdetected as TCP, and published an empty port). The `__local__` path short-circuited assuming the target was on the instance's own loopback — so an `ip:port` target that the instance reaches over its network (e.g. Tailscale) was never proxied. It now binds a real local proxy that `net.connect`s to `targetHost:remotePort` directly; the proto probe and frp publish follow the real proxy port. (Bare-port local forwards — a service on the instance's own loopback — are unchanged.) Test: `scripts/test-port-forward.mjs` (local LAN target binds a real proxy + pipes bytes to targetHost:port).
 

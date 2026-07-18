@@ -60,6 +60,13 @@ export function openBrowser(app, url, { syncId, proxy = false } = {}) {
     // blob:/data:/about: are complete URLs (chat html Preview, diagnostics
     // report) — prefixing them with http:// produced a blank iframe.
     if (!u.match(/^(https?|blob|data|about):/)) u = 'http://' + u;
+    // Normalize a bare origin to a trailing slash. Proxy mode (node-unblocker)
+    // leaves in-page links RELATIVE and relies on the document base, so the
+    // iframe's base path MUST end in `/` — otherwise a relative link resolves
+    // UP A LEVEL and escapes the proxy origin (real report: clicking a
+    // directory-listing link → /proxy/http:/… 500 → the X-Frame-Options
+    // overlay). new URL() adds the `/` for a pathless origin, no-ops otherwise.
+    if (/^https?:/.test(u)) { try { u = new URL(u).toString(); } catch {} }
     urlInput.value = u;
     errorMsg.style.display = 'none';
     iframe.style.display = '';
