@@ -158,6 +158,24 @@ try {
     await pf.unforward(lf.id); await pf.unforward(plain.id);
   }
 
+  // ── LOCAL (This machine) forward to a LAN target must PROXY, not loopback-
+  // short-circuit (real report: 本机→Tailscale-IP gave a blank browser). Here
+  // the "LAN target" is another loopback echo the instance can reach. ──
+  {
+    const LAN_PORT = await new Promise((res) => { const s = net.createServer((c) => c.on('data', (d) => c.write(Buffer.concat([Buffer.from('LAN:'), d])))); s.listen(0, '0.0.0.0', () => res(s.address().port)); }); // all-ifaces so 127.0.0.2 reaches it
+    const lf = await pf.forward('__local__', LAN_PORT, { targetHost: '127.0.0.2' }); // 127.0.0.2 = a non-loopback-127.0.0.1 target
+    check('local LAN forward binds a REAL proxy port (not the remotePort short-circuit)', lf.localPort && lf.localPort !== LAN_PORT, JSON.stringify({ localPort: lf.localPort, remotePort: LAN_PORT }));
+    // NOTE: 127.0.0.2 reaches the same loopback echo on Linux — proves the
+    // proxy dials targetHost:port rather than assuming the service is local.
+    const reply = await new Promise((resolve) => {
+      const c = net.connect(lf.localPort, '127.0.0.1', () => c.write('hey'));
+      let b = ''; c.on('data', (d) => { b += d; if (b.includes('LAN:hey')) { c.end(); resolve(b); } });
+      c.on('error', () => resolve('')); setTimeout(() => { try { c.destroy(); } catch {} resolve(b); }, 3000);
+    });
+    check('local LAN forward proxies bytes to targetHost:port', reply.includes('LAN:hey'), JSON.stringify(reply));
+    await pf.unforward(lf.id);
+  }
+
   // ── protocol detection + user override (2.185.0) ──
   {
     const httpSrv = (await import('node:http')).createServer((q, s) => s.end('ok'));

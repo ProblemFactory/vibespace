@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.186.4 — 2026-07-18
+- **A "This machine" forward to a LAN/Tailscale IP now actually works** (real report: `本机 → 100.87.42.107:9983` gave a blank browser, was misdetected as TCP, and published an empty port). The `__local__` path short-circuited assuming the target was on the instance's own loopback — so an `ip:port` target that the instance reaches over its network (e.g. Tailscale) was never proxied. It now binds a real local proxy that `net.connect`s to `targetHost:remotePort` directly; the proto probe and frp publish follow the real proxy port. (Bare-port local forwards — a service on the instance's own loopback — are unchanged.) Test: `scripts/test-port-forward.mjs` (local LAN target binds a real proxy + pipes bytes to targetHost:port).
+
 ## 2.186.3 — 2026-07-18
 - **Port forwarding can now target another machine on the device's LAN** (user request). The ports UI's manual box accepts `ip:port` / `host:port` (not just a bare port), so a paired machine becomes a jump host into its internal network — e.g. forward `10.0.0.5:8080` reachable from the device but not from here. The daemon's `tcp-connect` gained an optional target host (defaults to loopback — the mount/VNC/port-forward shape is unchanged); a bare-port and a LAN-target forward for the same port are distinct records; the proto probe follows the LAN target too. Added to the rail Ports panel (per-machine manual box) and the ports dialog; active forwards show the `host:port` they target. Test: `scripts/test-port-forward.mjs` (LAN-target record, pipe-through, distinct-from-bare, host validation).
 

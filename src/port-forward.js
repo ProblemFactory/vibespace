@@ -76,14 +76,29 @@ class PortForwardManager {
     const key = `${hostId}:${targetHost || ''}:${port}`;
     const hit = this._protoCache.get(key);
     if (!fresh && hit && Date.now() - hit.ts < 5 * 60 * 1000) return hit.proto;
+    const lan = targetHost && targetHost !== '127.0.0.1' && targetHost !== 'localhost' ? targetHost : null;
     let proto;
     try {
       proto = hostId === LOCAL_ID
-        ? await probeProto(port, { timeoutMs: 1800 })
+        // LAN target from THIS instance → probe targetHost:port directly (the
+        // service is NOT on loopback; probing loopback mislabeled it TCP)
+        ? (lan ? await probeProto({ connect: () => this._localSocket(lan, port) }, { timeoutMs: 1800 })
+               : await probeProto(port, { timeoutMs: 1800 }))
         : await probeProto({ connect: () => this._remoteSocket(hostId, port, targetHost) }, { timeoutMs: 2500 });
     } catch { return hit?.proto || null; } // unreachable — keep last knowledge
     this._protoCache.set(key, { proto, ts: Date.now() });
     return proto;
+  }
+
+  /** A fresh direct TCP socket to <host>:<port> from THIS instance (used to
+   *  probe a LAN/Tailscale target of a local forward). */
+  _localSocket(host, port) {
+    return new Promise((resolve, reject) => {
+      const s = net.connect({ host, port });
+      s.once('connect', () => resolve(s));
+      s.once('error', reject);
+      s.setTimeout(2500, () => { s.destroy(); reject(new Error('timeout')); });
+    });
   }
 
   /** One fresh duplex stream to <hostId>'s <targetHost||loopback>:<port> over
@@ -373,33 +388,47 @@ class PortForwardManager {
 
   async _start(rec) {
     if (this._live.has(rec.id)) return this._live.get(rec.id).rec;
-    if (rec.hostId === LOCAL_ID) {
-      // machine #0: the service ALREADY listens on this instance's loopback —
-      // no tunnel or local server needed; the record is the handle that lets
-      // the dialog Open it (browser proxy) and Publish it (frp)
+    const lanTarget = (rec.targetHost && rec.targetHost !== '127.0.0.1' && rec.targetHost !== 'localhost') ? rec.targetHost : null;
+    if (rec.hostId === LOCAL_ID && !lanTarget) {
+      // machine #0, no LAN target: the service ALREADY listens on THIS
+      // instance's own loopback — no proxy needed; the record is just the
+      // handle that lets the dialog Open it (browser proxy) and Publish it (frp)
       rec.error = null;
       this._live.set(rec.id, { server: null, sockets: new Set(), rec: { ...rec, localPort: rec.remotePort } });
       return { ...rec, localPort: rec.remotePort };
     }
-    // reachable machine first — fail loud so the UI can say "device offline"
-    await this.hosts.device(rec.hostId); // throws if offline
+    // Per-connection upstream:
+    //  - LOCAL_ID + LAN target: net.connect(targetHost:remotePort) DIRECTLY —
+    //    the instance reaches it over its own network (e.g. Tailscale), which
+    //    is NOT its loopback, so a real proxy IS needed (the short-circuit above
+    //    served a bare 127.0.0.1:<port> that had nothing on it — blank browser,
+    //    TCP misdetection, frp-published an empty port; real report).
+    //  - remote machine: dm.tcpForward(remotePort, targetHost) over the link.
+    let openUpstream;
+    if (rec.hostId === LOCAL_ID) {
+      openUpstream = () => new Promise((resolve, reject) => {
+        const up = net.connect({ host: lanTarget, port: rec.remotePort });
+        const handle = { onData: null, onClose: null, write: (b) => { try { up.write(b); } catch {} }, close: () => { try { up.destroy(); } catch {} } };
+        up.once('connect', () => resolve(handle));
+        up.on('data', (b) => handle.onData?.(b));
+        up.on('close', () => handle.onClose?.());
+        up.on('error', (e) => { handle.onClose?.(); reject(e); });
+      });
+    } else {
+      await this.hosts.device(rec.hostId); // remote: fail loud so the UI can say "device offline"
+      // resolve the device PER CONNECTION, never capture it: a dial re-dial
+      // stop()s the old DeviceManager (review finding, high). Steady-state
+      // hosts.device() returns the cached live dm, so this costs nothing.
+      openUpstream = async () => { const dm = await this.hosts.device(rec.hostId); return dm.tcpForward(rec.remotePort, rec.targetHost || undefined); };
+    }
     const sockets = new Set();
     const server = net.createServer({ allowHalfOpen: true }, async (sock) => {
       sockets.add(sock);
       sock.on('close', () => sockets.delete(sock));
       sock.on('error', () => { try { sock.destroy(); } catch {} });
       let h;
-      try {
-        // resolve the device PER CONNECTION, never capture it: a dial device's
-        // re-dial stop()s the old DeviceManager, so a captured one turns every
-        // later connection into an instant failure while onMachineLinked skips
-        // the "already live" forward — the forward looked up but was dead
-        // (review finding, high). hosts.device() returns the cached live dm in
-        // the steady state, so this costs nothing.
-        const dm = await this.hosts.device(rec.hostId);
-        h = await dm.tcpForward(rec.remotePort, rec.targetHost || undefined);
-      } catch { try { sock.destroy(); } catch {} return; }
-      if (sock.destroyed) { try { h.close(); } catch {} return; } // browser aborted while the tunnel opened
+      try { h = await openUpstream(); } catch { try { sock.destroy(); } catch {} return; }
+      if (sock.destroyed) { try { h.close(); } catch {} return; } // browser aborted while the upstream opened
       h.onData = (b) => { try { sock.write(b); } catch {} };
       h.onClose = () => { try { sock.end(); } catch {} };
       sock.on('data', (b) => { try { h.write(b); } catch {} });
@@ -411,7 +440,7 @@ class PortForwardManager {
     });
     rec.error = null;
     this._live.set(rec.id, { server, sockets, rec: { ...rec, localPort } });
-    this.log(`port-forward ${rec.id}: 127.0.0.1:${localPort} → ${rec.hostId}:${rec.remotePort}`);
+    this.log(`port-forward ${rec.id}: 127.0.0.1:${localPort} → ${lanTarget || rec.hostId}:${rec.remotePort}`);
     return { ...rec, localPort };
   }
 
