@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.186.6 — 2026-07-18
+- **An unreachable ssh machine now shows WHY under its row** (real report: a user added a server with a typo in the address and got only a red dot — the probe error, e.g. "ssh: connect to host …: Connection timed out", lived only in the status dot's hover tooltip, invisible on touch and undiscoverable on a 6px target). Machine rows reuse the storage rows' red error line (`.mounts-errline`): a failed connectivity probe renders "Couldn't connect: <error>" under the row (full text in title), so a bad address/port/key is self-explanatory. Dial devices already say "offline — run the install command" and are unchanged.
+
 ## 2.186.5 — 2026-07-18
 - **Clicking a link in a proxy-mode embedded browser no longer escapes the proxy** (real report: the page loaded, but any link → "This site blocked iframe embedding (X-Frame-Options)"). The proxy (node-unblocker) leaves in-page links RELATIVE and relies on the document base, so when you navigate to a bare origin (`http://host:port`, no trailing slash) the iframe's base has no `/` and a relative link resolves UP A LEVEL — dropping the host, landing off-proxy → the X-Frame overlay. `navigate()` now normalizes a pathless origin to a trailing slash (`http://host:port/`), so relative links resolve to `/proxy/http://host:port/subpath` and stay inside the proxy. Verified against a real proxied directory listing.
 
