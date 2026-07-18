@@ -36,7 +36,8 @@ const mockDm = {
         + 'Python 99 me  5u  IPv6 456 0t0 TCP [::1]:8080 (LISTEN)\n';
     return { code: 0, stdout: out, stderr: '' };
   },
-  async tcpForward(port) {
+  async tcpForward(port, host) {
+    (mockDm._calls = mockDm._calls || []).push({ port, host: host || null }); // all calls (background probes clobber a single-slot capture)
     const sock = net.connect(port, '127.0.0.1');
     const handle = { onData: null, onClose: null, write: (b) => sock.write(b), close: () => sock.destroy() };
     sock.on('data', (b) => handle.onData?.(b));
@@ -137,6 +138,25 @@ try {
   // ── unforward removes + frees ──
   await pf.unforward('pf-h2-9999');
   check('unforward removes the record', !pf._state.forwards.some((r) => r.id === 'pf-h2-9999'));
+
+  // ── manual LAN-target forward (jump host into the device's network) ──
+  {
+    const lf = await pf.forward('h1', 8080, { targetHost: '10.0.0.5' });
+    check('LAN forward records targetHost', lf.targetHost === '10.0.0.5' && lf.active, JSON.stringify(lf));
+    check('LAN forward id encodes host:port', /10\.0\.0\.5.*8080/.test(lf.id), lf.id);
+    // tcpForward is per-connection — open one to trigger it, then assert one
+    // call reached the device with the LAN target (background probes also call
+    // tcpForward, so check the full list, not a single-slot capture)
+    mockDm._calls = [];
+    await new Promise((res) => { const c = net.connect(lf.localPort, '127.0.0.1', () => { setTimeout(() => { c.destroy(); res(); }, 200); }); c.on('error', res); });
+    check('_start pipes to the LAN target host:port on the device', mockDm._calls.some((c) => c.port === 8080 && c.host === '10.0.0.5'), JSON.stringify(mockDm._calls));
+    // a plain port forward and a LAN forward for the SAME remotePort coexist
+    const plain = await pf.forward('h1', 8080);
+    check('bare-port and LAN forward to the same port are DISTINCT records', plain.id !== lf.id && !plain.targetHost, JSON.stringify(plain));
+    let bad = ''; try { await pf.forward('h1', 22, { targetHost: 'bad host!' }); } catch (e) { bad = e.message; }
+    check('invalid target host rejected', /invalid target host/.test(bad), bad);
+    await pf.unforward(lf.id); await pf.unforward(plain.id);
+  }
 
   // ── protocol detection + user override (2.185.0) ──
   {

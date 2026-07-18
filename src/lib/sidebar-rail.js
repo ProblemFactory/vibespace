@@ -252,7 +252,7 @@ export function installSidebarRail(Sidebar) {
         for (const f of fwds) {
           const row = document.createElement('div');
           row.className = 'ports-row';
-          const label = `${escHtml(nameOf(f.hostId))}:${f.remotePort}`;
+          const label = `${escHtml(nameOf(f.hostId))}${f.targetHost ? '→' + escHtml(f.targetHost) : ''}:${f.remotePort}`;
           row.innerHTML = `<span class="ports-row-label" title="${label}">${label} ${protoChip(f.proto, { over: !!f.protoOverride })}${f.publicUrl ? ` <span class="ports-pub" title="${escHtml(f.publicUrl)}">${PORT_ICONS.globe}</span>` : ''}</span>`;
           // the proto chip is the override handle
           const chip = row.querySelector('.ports-proto');
@@ -367,7 +367,28 @@ export function installSidebarRail(Sidebar) {
             scan.disabled = false; scan.textContent = tr('Scan ports');
           };
           head.appendChild(scan);
-          ms.append(head, list);
+          // manual forward: a bare port (a service on this machine) OR ip:port
+          // to reach ANOTHER machine on this machine's LAN (jump host)
+          const man = document.createElement('div');
+          man.className = 'ports-manual';
+          const mi = document.createElement('input');
+          mi.type = 'text'; mi.className = 'ports-manual-input';
+          mi.placeholder = tr('port or ip:port…');
+          mi.title = tr('e.g. 5173, or 10.0.0.5:8080 to forward a machine on its LAN');
+          const mb = document.createElement('button');
+          mb.className = 'mounts-icon-btn'; mb.innerHTML = PORT_ICONS.fwd; mb.dataset.tip = tr('Forward');
+          const doManual = async () => {
+            const v = mi.value.trim();
+            const pm = v.match(/^(?:(\[[0-9a-fA-F:]+\]|[A-Za-z0-9._-]+):)?(\d{1,5})$/);
+            if (!pm || +pm[2] < 1 || +pm[2] > 65535) { showToast(tr('Enter a port (5173) or ip:port (10.0.0.5:8080)'), { type: 'error' }); return; }
+            const body = { port: +pm[2], targetHost: (pm[1] || '').replace(/^\[|\]$/g, '') };
+            const r = await api(`/api/hosts/${encodeURIComponent(m.id)}/port-forward`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+            if (r?.error) showToast(r.error, { type: 'error' }); else { mi.value = ''; render(); }
+          };
+          mb.onclick = doManual;
+          mi.onkeydown = (e) => { if (e.key === 'Enter') doManual(); };
+          man.append(mi, mb);
+          ms.append(head, list, man);
           c.appendChild(ms);
         }
       };

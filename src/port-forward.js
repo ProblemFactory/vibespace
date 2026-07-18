@@ -72,25 +72,25 @@ class PortForwardManager {
   /** Probe what a machine's port speaks (http / https / tcp) — local ports
    *  directly, remote ports through a fresh device-tunnel stream per pass.
    *  Cached 5 min per host:port (the panel re-renders often). */
-  async probeHostPort(hostId, port, { fresh = false } = {}) {
-    const key = `${hostId}:${port}`;
+  async probeHostPort(hostId, port, { fresh = false, targetHost = '' } = {}) {
+    const key = `${hostId}:${targetHost || ''}:${port}`;
     const hit = this._protoCache.get(key);
     if (!fresh && hit && Date.now() - hit.ts < 5 * 60 * 1000) return hit.proto;
     let proto;
     try {
       proto = hostId === LOCAL_ID
         ? await probeProto(port, { timeoutMs: 1800 })
-        : await probeProto({ connect: () => this._remoteSocket(hostId, port) }, { timeoutMs: 2500 });
+        : await probeProto({ connect: () => this._remoteSocket(hostId, port, targetHost) }, { timeoutMs: 2500 });
     } catch { return hit?.proto || null; } // unreachable — keep last knowledge
     this._protoCache.set(key, { proto, ts: Date.now() });
     return proto;
   }
 
-  /** One fresh duplex stream to <hostId>'s 127.0.0.1:<port> over the device
-   *  link — the same tcpForward primitive the forwards themselves pipe over. */
-  async _remoteSocket(hostId, port) {
+  /** One fresh duplex stream to <hostId>'s <targetHost||loopback>:<port> over
+   *  the device link — the same tcpForward primitive the forwards pipe over. */
+  async _remoteSocket(hostId, port, targetHost) {
     const dm = await this.hosts.device(hostId);
-    const h = await dm.tcpForward(port);
+    const h = await dm.tcpForward(port, targetHost || undefined);
     const { Duplex } = require('stream');
     const d = new Duplex({
       read() {},
@@ -160,6 +160,7 @@ class PortForwardManager {
   list() {
     return this._state.forwards.map((r) => ({
       id: r.id, hostId: r.hostId, remotePort: r.remotePort, label: r.label || '',
+      targetHost: r.targetHost || null, // set = a LAN machine reached via this device (jump host)
       localPort: this._live.get(r.id)?.rec?.localPort || null,
       url: this._live.get(r.id)?.rec?.localPort ? `http://127.0.0.1:${this._live.get(r.id).rec.localPort}/` : null,
       active: this._live.has(r.id), error: r.error || null,
@@ -214,7 +215,8 @@ class PortForwardManager {
       // so repeat scans progressively cover hosts with many listeners
       const vis = ports.filter((p) => !p.hidden);
       for (const p of vis) {
-        const hit = this._protoCache.get(`${hostId}:${p.port}`);
+        // scanned ports have no LAN target — same key shape probeHostPort writes
+        const hit = this._protoCache.get(`${hostId}::${p.port}`);
         if (hit && Date.now() - hit.ts < 5 * 60 * 1000) p.proto = hit.proto;
       }
       const cand = vis.filter((p) => !p.proto).slice(0, 12);
@@ -343,11 +345,17 @@ class PortForwardManager {
 
   /** Start a forward (idempotent by hostId+remotePort). Binds a local port and
    *  pipes each connection into device.tcpForward(remotePort). */
-  async forward(hostId, remotePort, { label = '' } = {}) {
+  async forward(hostId, remotePort, { label = '', targetHost = '' } = {}) {
     remotePort = Number(remotePort);
     if (!Number.isInteger(remotePort) || remotePort < 1 || remotePort > 65535) throw new Error('invalid remote port');
-    let rec = this._state.forwards.find((r) => r.hostId === hostId && r.remotePort === remotePort);
-    if (!rec) { rec = { id: 'pf-' + hostId + '-' + remotePort, hostId, remotePort, label }; this._state.forwards.push(rec); this._persist(); }
+    // targetHost = another machine on the device's LAN (jump-host forward);
+    // empty/loopback ⇒ the device's own service (the common case).
+    targetHost = String(targetHost || '').trim();
+    if (targetHost && !/^[A-Za-z0-9._-]{1,255}$/.test(targetHost)) throw new Error('invalid target host (ip or hostname)');
+    const isLan = targetHost && targetHost !== '127.0.0.1' && targetHost !== 'localhost';
+    const key = isLan ? `${targetHost}:${remotePort}` : String(remotePort);
+    let rec = this._state.forwards.find((r) => r.hostId === hostId && r.remotePort === remotePort && (r.targetHost || '') === (isLan ? targetHost : ''));
+    if (!rec) { rec = { id: 'pf-' + hostId + '-' + key.replace(/[^\w.-]/g, '_'), hostId, remotePort, label, ...(isLan ? { targetHost } : {}) }; this._state.forwards.push(rec); this._persist(); }
     else if (label) { rec.label = label; this._persist(); }
     await this._start(rec);
     this._probeForward(rec);
@@ -358,7 +366,7 @@ class PortForwardManager {
   /** Refresh a forward's detected protocol in the background (never blocks
    *  forward/restore); re-broadcasts when the answer changes the record. */
   _probeForward(rec) {
-    this.probeHostPort(rec.hostId, rec.remotePort)
+    this.probeHostPort(rec.hostId, rec.remotePort, { targetHost: rec.targetHost || '' })
       .then((proto) => { if (proto && rec.proto !== proto) { rec.proto = proto; this._persist(); this._emit(); } })
       .catch(() => {});
   }
@@ -389,7 +397,7 @@ class PortForwardManager {
         // (review finding, high). hosts.device() returns the cached live dm in
         // the steady state, so this costs nothing.
         const dm = await this.hosts.device(rec.hostId);
-        h = await dm.tcpForward(rec.remotePort);
+        h = await dm.tcpForward(rec.remotePort, rec.targetHost || undefined);
       } catch { try { sock.destroy(); } catch {} return; }
       if (sock.destroyed) { try { h.close(); } catch {} return; } // browser aborted while the tunnel opened
       h.onData = (b) => { try { sock.write(b); } catch {} };

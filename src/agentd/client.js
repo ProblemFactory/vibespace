@@ -370,12 +370,14 @@ class DeviceManager {
   }
 
   /** loopback TCP forward on the device: returns {write, close, onData, onClose}. */
-  async tcpForward(port) {
+  async tcpForward(port, host) {
     const conn = await this.connect();
     const chan = conn.nextChan++;
     const handle = { chan, onData: null, onClose: null };
     conn.sessions.set(chan, { onData: (b) => handle.onData?.(b), onClose: () => handle.onClose?.() });
-    await this._request({ op: 'tcp-connect', port, chan });
+    // host defaults to loopback on the device; an explicit host reaches the
+    // device's LAN (a user-driven forward to another internal machine)
+    await this._request({ op: 'tcp-connect', port, chan, ...(host && host !== '127.0.0.1' ? { host } : {}) });
     handle.write = (b) => conn.mux.data(chan, Buffer.isBuffer(b) ? b : Buffer.from(b));
     handle.close = () => { conn.sessions.delete(chan); conn.mux.closeChan(chan); };
     return handle;

@@ -867,7 +867,13 @@ function serveConnection(sock) {
         try {
           const port = Number(msg.port);
           if (!port || port < 1 || port > 65535) throw new Error('bad port');
-          const tsock = net.connect({ host: '127.0.0.1', port });
+          // Default loopback (the mount/VNC/port-forward shape). An explicit
+          // host lets a USER-DRIVEN port forward reach another machine on THIS
+          // device's LAN (jump-host into the internal network) — the device
+          // already reaches arbitrary hosts for the exit SOCKS, and this target
+          // is chosen per-forward by the machine's owner, not a general proxy.
+          const host = (msg.host && /^[A-Za-z0-9._:-]{1,255}$/.test(String(msg.host))) ? String(msg.host) : '127.0.0.1';
+          const tsock = net.connect({ host, port });
           const chanT = msg.chan;
           tsock.on('connect', () => mux.control({ op: 'tcp-open', id: msg.id, chan: chanT }));
           tsock.on('data', (d) => { try { if (!mux.data(chanT, d)) tsock.pause(); } catch { } });
