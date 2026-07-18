@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.186.2 — 2026-07-17
+- **File links in a REMOTE session's chat now open the file (right-click → Open / Ctrl+click)** (real report: they did nothing). The link handlers resolve + open against the SESSION's host, but the actual `openFile`/`openFileExplorer` calls dropped the host — so a remote file opened a nonexistent LOCAL path. The relative-path handler probed with `&host=` correctly but opened without it; the absolute/markdown-path handler wasn't host-aware at all. Both now thread the session host through the probe AND the open (viewer/explorer get `?host=`), so remote-chat file links open the remote file.
+
 ## 2.186.1 — 2026-07-17
 - **Dragging a window onto a desktop preview no longer lands it one desktop to the right** (real report). The drop resolved the target desktop by DOM index into `querySelectorAll('.desktop-preview')` — but the Stage preview also carries `.desktop-preview` and sits before the real ones, so the index was off by one whenever the Stage was active. Each real preview now carries `dataset.desktopId` and the drop resolves by that id, never by index. Smoke: `scripts/test-desktop-drop.mjs` (reproduces the off-by-one, proves the id fix).
 

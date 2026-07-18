@@ -917,8 +917,11 @@ class ChatRenderers {
         const r = await fetch(`/api/file/info?path=${encodeURIComponent(c)}${host ? '&host=' + encodeURIComponent(host) : ''}`);
         const info = await r.json();
         if (info && !info.error) {
-          if (info.isDirectory) this.app.openFileExplorer(c);
-          else this.app.openFile(c, c.split('/').pop());
+          // open on the SESSION's host — a remote session's files live on the
+          // remote machine; opening the bare path opened a nonexistent LOCAL
+          // path (real report: remote-chat file links did nothing)
+          if (info.isDirectory) this.app.openFileExplorer(c, { host });
+          else this.app.openFile(c, c.split('/').pop(), { host });
           return;
         }
       } catch {}
@@ -935,7 +938,7 @@ class ChatRenderers {
         const { hits = [] } = await r.json();
         const exact = hits.filter(h => h.endsWith('/' + norm));
         const use = exact.length ? exact : hits;
-        const openHit = (h) => type === 'd' ? this.app.openFileExplorer(h) : this.app.openFile(h, h.split('/').pop());
+        const openHit = (h) => type === 'd' ? this.app.openFileExplorer(h, { host }) : this.app.openFile(h, h.split('/').pop(), { host });
         if (use.length === 1) { openHit(use[0]); return; }
         if (use.length > 1) {
           const rect = link.getBoundingClientRect();
@@ -962,15 +965,20 @@ class ChatRenderers {
       const lineMatch = fp.match(/^(.+?):(\d+)(?:[:\-]\d+)?$/);
       const cleanPath = lineMatch ? lineMatch[1] : fp;
       const lineNum = lineMatch ? parseInt(lineMatch[2], 10) : undefined;
-      fetch(`/api/file/info?path=${encodeURIComponent(cleanPath)}`)
+      // Host-aware: a remote session's absolute-path links (and markdown links
+      // to local files) must resolve + open on the SESSION's host, not this
+      // instance (real report: right-click → Open did nothing in remote chats).
+      const sess = (this.app?.sidebar?._allSessions || []).find(s => s.webuiId === this.sessionId);
+      const host = sess?.host || null;
+      fetch(`/api/file/info?path=${encodeURIComponent(cleanPath)}${host ? '&host=' + encodeURIComponent(host) : ''}`)
         .then(r => r.json())
         .then(info => {
           if (info.error) {
             this.flashLink(link, t('Not found'));
           } else if (info.isDirectory) {
-            this.app.openFileExplorer(cleanPath);
+            this.app.openFileExplorer(cleanPath, { host });
           } else {
-            this.app.openFile(cleanPath, cleanPath.split('/').pop(), { line: lineNum });
+            this.app.openFile(cleanPath, cleanPath.split('/').pop(), { line: lineNum, host });
           }
         })
         .catch(() => this.flashLink(link, t('Error')));
