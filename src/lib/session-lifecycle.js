@@ -496,13 +496,34 @@ export function installSessionLifecycle(App, ctx = {}) {
         setTimeout(finish, 900); // let the CLI flush its transcript before --resume
       } else finish();
     };
+    // Remote sessions can't take every account: subscriptions never ship to
+    // dial devices, and to ssh hosts only with the opt-in setting. The server
+    // enforces this at spawn — but offering the pick here was FAIL-LATE (the
+    // user confirmed, the session restarted into an error, and the doomed
+    // account was already persisted as the on-resume config; 2.188.0 audit).
+    const rHostId = live?.host || spec.host || null;
+    const rHostName = live?.hostName || rHostId;
+    const rTransport = rHostId ? (this.sidebar?._hostsData?.hosts?.find(h => h.id === rHostId)?.transport || 'ssh') : null;
+    const shipSubs = !!this.settings.get('accounts.shipSubscriptionToRemote');
+    const subBlock = (a) => {
+      if (!rHostId) return null;
+      const isSub = isCodex || (a.type || 'api') === 'subscription';
+      if (!isSub) return null; // API keys always ship
+      if (rTransport === 'dial') return t('Subscription logins can’t ship to a paired device — log in on the device, or use an API-key account');
+      if (!shipSubs) return t('Blocked for remote hosts — log in on the host, or enable Settings → “Ship subscription logins to remote hosts”');
+      return null;
+    };
     const items = [];
     // 'subscription' = accounts.resolveForSpawn's force-the-CLI's-own-login
-    // sentinel (a bare '' would fall through to the default account).
-    items.push({ label: (currentId === null ? '✓ ' : '') + t('CLI login'), action: () => { if (currentId !== null) doSwitch('subscription', t('CLI login')); } });
+    // sentinel (a bare '' would fall through to the default account). For a
+    // remote session that login lives on the HOST — say so.
+    const cliLabel = rHostId ? t('CLI login') + ' @ ' + rHostName : t('CLI login');
+    items.push({ label: (currentId === null ? '✓ ' : '') + cliLabel, action: () => { if (currentId !== null) doSwitch('subscription', cliLabel); } });
     for (const a of accts) {
       const cur = currentId === a.id;
       const suffix = (!isCodex && (a.type || 'api') !== 'subscription') ? ' · API' : '';
+      const block = subBlock(a);
+      if (block && !cur) { items.push({ label: a.name + suffix, disabled: true, title: block }); continue; }
       items.push({ label: (cur ? '✓ ' : '') + a.name + suffix, action: () => { if (!cur) doSwitch(a.id, a.name); } });
     }
     if (anchor && typeof anchor.getBoundingClientRect === 'function') {

@@ -2032,4 +2032,12 @@ export default {
   "example.com → https://<random>.example.com": "example.com → https://<ランダム>.example.com",
   "Save config": "設定を保存",
   "defaults come from the cluster — edit to override": "既定値はクラスタ由来 — 編集で上書き",
+  "\"{name}\"’s own CLI login": "\"{name}\" 自身の CLI ログイン",
+  "on \"{name}\"": "\"{name}\" 上",
+  "Subscription logins can’t ship to a paired device — log in on the device, or use an API-key account": "サブスクリプションのログインはペアリング済みデバイスへ配布できません——デバイス上でログインするか、API キーアカウントを使ってください",
+  "Blocked for remote hosts — log in on the host, or enable Settings → “Ship subscription logins to remote hosts”": "リモートホストではブロックされています——ホスト上でログインするか、設定 → 「サブスクリプションのログインをリモートホストへ配布」を有効にしてください",
+  "Subscription logins don’t ship to this machine — log in there, or use an API-key account": "サブスクリプションのログインはこのマシンへ配布されません——そのマシン上でログインするか、API キーアカウントを使ってください",
+  "blocked on this host": "このホストでは使用不可",
+  "The default is global, and “{name}” can’t run on {host} — new sessions there keep using its own login.": "デフォルトはグローバル設定ですが、“{name}” は {host} では動作しません——そのマシン上の新規セッションは引き続き自身のログインを使います。",
+  "managed automatically — each session spawn refreshes the tools": "自動管理——セッション作成のたびにツールが更新されます",
 };

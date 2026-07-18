@@ -310,9 +310,12 @@ export class ChatStatusBar {
     if (this._billing) {
       const a = this._billing;
       const isApi = a.source === 'api-key' || a.source === 'api-console' || a.source === 'api-other';
+      // remote session: its CLI login is the HOST's — name the machine
       const label = a.source === 'unknown' ? '?'
-        : (a.name || (isApi ? (a.source === 'api-console' ? 'Console' : 'API') : t('CLI login')));
-      const tip = (isApi ? t('API billing (pay per use)') : t('Subscription account'))
+        : (a.name || (isApi ? (a.source === 'api-console' ? 'Console' : 'API')
+          : (a.hostName ? t('CLI login') + ' @ ' + a.hostName : t('CLI login'))));
+      const tip = (isApi ? t('API billing (pay per use)') : (a.hostName && !a.name ? t('"{name}"’s own CLI login', { name: a.hostName }) : t('Subscription account')))
+        + (a.hostName && (a.name || isApi) ? ' · ' + t('on "{name}"', { name: a.hostName }) : '')
         + (a.guessed ? ' · ' + t('estimated from the login state at spawn') : '')
         + ' · ' + t('Click to switch billing');
       parts.push(`<span class="chat-status-billing chat-status-clickable${isApi ? ' api' : ''}" title="${escHtml(tip)}">${escHtml(label)}</span>`);

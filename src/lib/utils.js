@@ -404,6 +404,7 @@ export function showContextMenu(x, y, items, className = 'context-menu') {
       });
     } else {
       el.textContent = item.label;
+      if (item.title) el.title = item.title; // esp. WHY a disabled item is disabled
       if (item.disabled) { el.style.opacity = '0.4'; el.style.cursor = 'default'; }
       else el.onclick = () => { pop.remove(); item.action(); };
     }

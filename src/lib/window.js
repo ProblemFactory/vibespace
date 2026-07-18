@@ -1030,7 +1030,7 @@ class WindowManager {
   // (the CLI's init record) or change across a resume.
   setAuthBadge(id, auth) {
     const win = this.windows.get(id); if (!win) return;
-    const key = auth ? `${auth.source}:${auth.name || ''}:${auth.guessed ? 1 : 0}` : '';
+    const key = auth ? `${auth.source}:${auth.name || ''}:${auth.hostName || ''}:${auth.guessed ? 1 : 0}` : '';
     win._authBadge = auth; // kept for re-apply after tab-bar rebuilds
     // No-op guard, but SELF-HEALING: tab-bar re-renders (switch/merge/detach/
     // drag) rebuild the tab DOM and destroy the badge span — with a pure key
@@ -1065,18 +1065,25 @@ class WindowManager {
       const isUnknown = auth.source === 'unknown';
       el.classList.toggle('unknown', isUnknown);
       el.classList.toggle('sub', !isApi && !isUnknown);
+      // A remote session's CLI login is the HOST's, not this machine's — name
+      // the machine on the chip and in the tooltip (2.188.0: a remote host-
+      // login window was indistinguishable from a local one, and the tooltip's
+      // "machine's own" pointed at the wrong box).
+      const hn = auth.hostName;
+      const machineTip = hn ? t('"{name}"’s own CLI login', { name: hn }) : t("The machine's own CLI login");
       let tip;
       if (isApi) {
         el.innerHTML = KEY_SVG + `<span class="wab-name">${escHtml(auth.name || (auth.source === 'api-console' ? 'Console' : 'API'))}</span>`;
-        tip = t('API billing (pay per use)') + ` — ${auth.source === 'api-console' ? t('Console login') : (auth.name ? auth.name + (auth.tail ? ' (…' + auth.tail + ')' : '') : (auth.detail || t('API key')))}${auth.guessed ? ' · ' + t('estimated from the login state at spawn') : ''}`;
+        tip = t('API billing (pay per use)') + ` — ${auth.source === 'api-console' ? t('Console login') : (auth.name ? auth.name + (auth.tail ? ' (…' + auth.tail + ')' : '') : (auth.detail || t('API key')))}${hn ? ' · ' + t('on "{name}"', { name: hn }) : ''}${auth.guessed ? ' · ' + t('estimated from the login state at spawn') : ''}`;
       } else if (isUnknown) {
         el.innerHTML = KEY_SVG + '?';
         tip = t('Billing identity unknown (started before tracking)');
       } else {
-        el.innerHTML = `<span class="wab-name">${escHtml(auth.name || t('CLI login'))}</span>`;
-        tip = (auth.source === 'codex-subscription' ? t('ChatGPT account')
-          : auth.source === 'codex-cli' ? t("The machine's own CLI login")
-          : auth.name ? t('Subscription account') : t("The machine's own CLI login"))
+        const label = auth.name || (hn ? t('CLI login') + ' @ ' + hn : t('CLI login'));
+        el.innerHTML = `<span class="wab-name">${escHtml(label)}</span>`;
+        tip = (auth.source === 'codex-subscription' ? t('ChatGPT account') + (hn ? ' · ' + t('on "{name}"', { name: hn }) : '')
+          : auth.source === 'codex-cli' ? machineTip
+          : auth.name ? t('Subscription account') + (hn ? ' · ' + t('on "{name}"', { name: hn }) : '') : machineTip)
           + (auth.guessed ? ' · ' + t('estimated from the login state at spawn') : '');
       }
       el.dataset.tip = tip + ' · ' + t('Click to switch billing');

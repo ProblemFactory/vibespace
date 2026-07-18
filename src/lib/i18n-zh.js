@@ -2032,4 +2032,12 @@ export default {
   "example.com → https://<random>.example.com": "example.com → https://<随机>.example.com",
   "Save config": "保存配置",
   "defaults come from the cluster — edit to override": "默认值来自集群——修改可覆盖",
+  "\"{name}\"’s own CLI login": "\"{name}\" 这台机器自己的 CLI 登录",
+  "on \"{name}\"": "在 \"{name}\" 上",
+  "Subscription logins can’t ship to a paired device — log in on the device, or use an API-key account": "订阅登录无法下发到配对设备——请在设备上登录，或改用 API 密钥账号",
+  "Blocked for remote hosts — log in on the host, or enable Settings → “Ship subscription logins to remote hosts”": "远程主机上被阻止——请在主机上登录，或开启 设置 → “将订阅登录下发到远程主机”",
+  "Subscription logins don’t ship to this machine — log in there, or use an API-key account": "订阅登录不会下发到这台机器——请在那台机器上登录，或改用 API 密钥账号",
+  "blocked on this host": "此主机上不可用",
+  "The default is global, and “{name}” can’t run on {host} — new sessions there keep using its own login.": "默认账号是全局的，而 “{name}” 无法在 {host} 上运行——那台机器上的新会话仍会使用它自己的登录。",
+  "managed automatically — each session spawn refreshes the tools": "自动管理——每次创建会话都会刷新这些工具",
 };

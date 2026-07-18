@@ -3297,33 +3297,44 @@ registerWsHandler(wss, {
 // subscription: env-key/console sessions keep their auth for their lifetime.
 function sessionAuth(s) {
   const be = s.backend || 'claude';
+  // A remote session's billing identity lives ON ITS MACHINE — qualify every
+  // auth object with the host name so a "CLI login" badge names WHICH
+  // machine's login it is (2.188.0: a remote host-login session rendered
+  // byte-identical to a local one, and the tooltip pointed at the wrong box).
+  const hostName = s.host ? (() => { try { return hosts.get(s.host)?.name || s.host; } catch { return s.host; } })() : null;
+  const withHost = (o) => (o && hostName ? { ...o, hostName } : o);
   if (be === 'codex') {
     // Codex billing identity: named ChatGPT account (isolated CODEX_HOME) or
     // the machine's own ~/.codex login. Feeds the title-bar billing badge.
     if (s._accountId) {
       const a = accounts.get(s._accountId);
-      return { source: 'codex-subscription', name: a?.name || 'ChatGPT' };
+      return withHost({ source: 'codex-subscription', name: a?.name || 'ChatGPT' });
     }
-    return { source: 'codex-cli' };
+    return withHost({ source: 'codex-cli' });
   }
   if (be !== 'claude') return null; // shell terminals — nothing billed
   if (s._accountId) {
     const a = accounts.get(s._accountId);
     // A named SUBSCRIPTION account bills the subscription (not API) — show its
     // name, no amber key warning.
-    if (a && (a.type || 'api') === 'subscription') return { source: 'subscription', name: a.name };
-    return { source: 'api-key', name: a?.name || 'API key', tail: a?.tail || null };
+    if (a && (a.type || 'api') === 'subscription') return withHost({ source: 'subscription', name: a.name });
+    return withHost({ source: 'api-key', name: a?.name || 'API key', tail: a?.tail || null });
   }
   const src = s._apiKeySource;
-  if (src === 'none') return { source: 'subscription' };
-  if (src === '/login managed key') return { source: 'api-console' };
-  if (src === 'ANTHROPIC_API_KEY') return { source: 'api-key', name: 'env key' };
-  if (typeof src === 'string' && src) return { source: 'api-other', detail: src };
+  if (src === 'none') return withHost({ source: 'subscription' });
+  if (src === '/login managed key') return withHost({ source: 'api-console' });
+  if (src === 'ANTHROPIC_API_KEY') return withHost({ source: 'api-key', name: 'env key' });
+  if (typeof src === 'string' && src) return withHost({ source: 'api-other', detail: src });
   const at = s._authAtSpawn;
-  if (at === 'subscription') return { source: 'subscription', guessed: true };
-  if (at === 'console') return { source: 'api-console', guessed: true };
-  if (at === 'env-key') return { source: 'api-key', guessed: true };
-  return { source: 'unknown' };
+  if (at === 'subscription') return withHost({ source: 'subscription', guessed: true });
+  if (at === 'console') return withHost({ source: 'api-console', guessed: true });
+  if (at === 'env-key') return withHost({ source: 'api-key', guessed: true });
+  // remote session with no explicit account: billed by the HOST's own CLI
+  // login — a real subscription-or-key on that machine, never "unknown"
+  // (2.188.0: remote TERMINAL sessions showed "KEY?" forever — apiKeySource
+  // is chat-stream-only and the /proc backfill probes the LOCAL ssh wrapper).
+  if (at === 'remote-global') return withHost({ source: 'subscription', guessed: true });
+  return withHost({ source: 'unknown' });
 }
 
 // THE single active-sessions payload builder — used by every broadcast AND the
