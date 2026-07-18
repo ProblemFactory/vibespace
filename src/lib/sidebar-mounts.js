@@ -878,7 +878,7 @@ export function installSidebarMounts(Sidebar) {
           for (const f of active) {
             const r = document.createElement('div'); r.className = 'mounts-row'; r.style.padding = '4px 0'; r.style.flexWrap = 'wrap';
             const info = document.createElement('span'); info.style.flex = '1'; info.style.minWidth = '160px';
-            info.innerHTML = `<b>:${f.remotePort}</b> → <span class="mounts-name" style="color:var(--accent)">127.0.0.1:${f.localPort || '?'}</span> ${protoChip(f.proto, { over: !!f.protoOverride })}${f.error ? ` <span style="color:var(--red,#e55)">(${escHtml(f.error)})</span>` : ''}`;
+            info.innerHTML = `<b>${f.targetHost ? escHtml(f.targetHost) + ':' : ':'}${f.remotePort}</b> → <span class="mounts-name" style="color:var(--accent)">127.0.0.1:${f.localPort || '?'}</span> ${protoChip(f.proto, { over: !!f.protoOverride })}${f.error ? ` <span style="color:var(--red,#e55)">(${escHtml(f.error)})</span>` : ''}`;
             const chip = info.querySelector('.ports-proto');
             if (chip) chip.onclick = (ev) => this._portProtoMenu(ev, f, render);
             const open = document.createElement('button'); open.className = 'btn-create'; open.textContent = tr('Open'); open.disabled = !f.url;
@@ -920,15 +920,27 @@ export function installSidebarMounts(Sidebar) {
           }
           body.append(sec);
         }
-        // detect + manual
+        // detect + manual. Accepts a bare port (a service on THIS machine) OR
+        // ip:port / host:port to reach ANOTHER machine on this machine's LAN —
+        // the machine becomes a jump host into its internal network.
         const manual = document.createElement('div'); manual.style.display = 'flex'; manual.style.gap = '6px'; manual.style.margin = '4px 0 10px';
-        const inp = document.createElement('input'); inp.type = 'number'; inp.placeholder = tr('port, e.g. 5173'); inp.className = 'settings-input-text'; inp.style.flex = '1';
+        const inp = document.createElement('input'); inp.type = 'text'; inp.placeholder = tr('port or ip:port (e.g. 5173, or 10.0.0.5:8080 for a LAN machine)'); inp.className = 'settings-input-text'; inp.style.flex = '1';
         const fwd = document.createElement('button'); fwd.className = 'btn-create'; fwd.textContent = tr('Forward');
-        const doForward = async (port) => {
-          if (!port) return;
+        const parseTarget = (v) => {
+          v = String(v || '').trim();
+          const m = v.match(/^(?:(\[[0-9a-fA-F:]+\]|[A-Za-z0-9._-]+):)?(\d{1,5})$/); // [host:]port
+          if (!m) return null;
+          const port = Number(m[2]); if (port < 1 || port > 65535) return null;
+          return { port, targetHost: (m[1] || '').replace(/^\[|\]$/g, '') };
+        };
+        const doForward = async (raw) => {
+          const t = parseTarget(raw);
+          if (!t) { showToast(tr('Enter a port (5173) or ip:port (10.0.0.5:8080)'), { type: 'error' }); return; }
           fwd.disabled = true;
-          try { const r = await api(`/api/hosts/${h.id}/port-forward`, { method: 'POST', body: JSON.stringify({ port: Number(port) }) });
-            if (r.url) { showToast(tr('Forwarded :{p} → {u}', { p: port, u: r.url })); openForward(r.url); } else render();
+          try { const r = await api(`/api/hosts/${h.id}/port-forward`, { method: 'POST', body: JSON.stringify({ port: t.port, targetHost: t.targetHost }) });
+            if (r?.error) throw new Error(r.error);
+            const label = t.targetHost ? `${t.targetHost}:${t.port}` : `:${t.port}`;
+            if (r.url) { showToast(tr('Forwarded {p} → {u}', { p: label, u: r.url })); openForward(r.url); } else render();
           } catch (e) { showToast(e.message, { type: 'error' }); fwd.disabled = false; }
         };
         fwd.onclick = () => doForward(inp.value);

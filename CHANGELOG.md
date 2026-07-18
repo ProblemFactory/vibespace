@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.186.3 — 2026-07-18
+- **Port forwarding can now target another machine on the device's LAN** (user request). The ports UI's manual box accepts `ip:port` / `host:port` (not just a bare port), so a paired machine becomes a jump host into its internal network — e.g. forward `10.0.0.5:8080` reachable from the device but not from here. The daemon's `tcp-connect` gained an optional target host (defaults to loopback — the mount/VNC/port-forward shape is unchanged); a bare-port and a LAN-target forward for the same port are distinct records; the proto probe follows the LAN target too. Added to the rail Ports panel (per-machine manual box) and the ports dialog; active forwards show the `host:port` they target. Test: `scripts/test-port-forward.mjs` (LAN-target record, pipe-through, distinct-from-bare, host validation).
+
 ## 2.186.2 — 2026-07-17
 - **File links in a REMOTE session's chat now open the file (right-click → Open / Ctrl+click)** (real report: they did nothing). The link handlers resolve + open against the SESSION's host, but the actual `openFile`/`openFileExplorer` calls dropped the host — so a remote file opened a nonexistent LOCAL path. The relative-path handler probed with `&host=` correctly but opened without it; the absolute/markdown-path handler wasn't host-aware at all. Both now thread the session host through the probe AND the open (viewer/explorer get `?host=`), so remote-chat file links open the remote file.
 

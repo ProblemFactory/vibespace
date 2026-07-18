@@ -2655,8 +2655,10 @@ app.get('/api/hosts/:id/ports', async (req, res) => {
   try { res.json({ ports: await portForwards.detect(req.params.id, { probe: true }) }); } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.post('/api/hosts/:id/port-forward', async (req, res) => {
-  try { res.json(await portForwards.forward(req.params.id, (req.body || {}).port, { label: (req.body || {}).label || '' })); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  try {
+    const b = req.body || {};
+    res.json(await portForwards.forward(req.params.id, b.port, { label: b.label || '', targetHost: b.targetHost || '' }));
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.delete('/api/port-forward/:id', async (req, res) => {
   try { await portForwards.unforward(String(req.params.id)); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); }
