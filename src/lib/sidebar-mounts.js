@@ -678,6 +678,17 @@ export function installSidebarMounts(Sidebar) {
         sub.textContent = `${h.user}@${h.host}${h.port !== 22 ? ':' + h.port : ''}${keyLabel ? ' · ' + keyLabel : ''}`;
       }
       row.append(top, sub);
+      // Surface a FAILED probe in the row itself (real report: red dot with
+      // no visible reason — the error lived only in the dot's hover tooltip,
+      // invisible on touch and undiscoverable on a 6px target). Same errline
+      // pattern as storage rows; full text in title.
+      if (!isDial && st && !st.ok) {
+        const err = document.createElement('div');
+        err.className = 'mounts-errline';
+        err.textContent = tr('Couldn’t connect:') + ' ' + String(st.error || 'unreachable').slice(0, 300);
+        err.title = String(st.error || '');
+        row.appendChild(err);
+      }
       return row;
     },
 
