@@ -11,7 +11,7 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 
-function setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, scheduleCtxSync, remoteCtxBaseFor, readUserState }) {
+function setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, integrationEnabled, scheduleCtxSync, remoteCtxBaseFor, readUserState }) {
 app.post('/api/agent/user-todo', (req, res) => {
   const hit = agentSession(req, res);
   if (!hit) return;
@@ -229,6 +229,9 @@ const SESSION_TOOLS_INTRO = [
 app.get('/api/agent/task-context', (req, res) => {
   const hit = agentSession(req, res);
   if (!hit) return;
+  // Integration master switch: empty delivery — covers sessions spawned BEFORE
+  // the switch flipped off (their hook is still armed and keeps calling).
+  if (!integrationOnMaster()) return res.json({ success: true, context: '' });
   try {
     const [s, id] = hit;
     const key = sessionStatusKey(s, id);
@@ -289,6 +292,18 @@ app.get('/api/agent/task-context', (req, res) => {
 app.get('/api/agent/prompt-context', (req, res) => {
   const hit = agentSession(req, res);
   if (!hit) return;
+  // Integration master switch (see task-context): no reminders, no group
+  // context, no override notices — the turn reaches the CLI untouched.
+  // Pending status-override notices are consumed AND DROPPED here: deferring
+  // them would inject a stale days-old "your status was overridden" reminder
+  // whenever the switch is re-enabled.
+  if (!integrationOnMaster()) {
+    try {
+      const [s0, id0] = hit;
+      for (const k of [sessionStatusKey(s0, id0), `webui:${id0}`]) sessionStatus.consumeNotice(k);
+    } catch {}
+    return res.json({ success: true, context: '' });
+  }
   try {
     const [s, id] = hit;
     const key = sessionStatusKey(s, id);
@@ -486,7 +501,7 @@ app.get('/api/agent/stop-check', (req, res) => {
   const hit = agentSession(req, res);
   if (!hit) return;
   try {
-    if (!stopNudgeEnabled()) return res.json({ block: false });
+    if (!integrationOnMaster() || !stopNudgeEnabled()) return res.json({ block: false });
     const [s, id] = hit;
     const now = Date.now();
     // Both thresholds user-configurable (2.89.0) — clamped to sane bounds so a
@@ -507,6 +522,21 @@ app.get('/api/agent/stop-check', (req, res) => {
     });
   } catch { res.json({ block: false }); }
 });
+// Integration master switch (agents.vibespaceIntegration, 2.190.0): OFF gates
+// every model-visible CONTENT response — the three deliveries (task-context /
+// prompt-context / stop-check) AND the GET /api/agent/task read (it returns
+// the same steering substance: objective/backlog/activity) — so even sessions
+// spawned while it was ON go pristine mid-flight. WRITE endpoints
+// (status/ask/progress/backlog) stay live: an old session's reports keep
+// landing on the board, they just stop being taught/injected/read back.
+// The canonical predicate lives in server.js (threaded via deps); the inline
+// fallback only serves harnesses that construct these routes without it.
+function integrationOnMaster() {
+  try {
+    if (integrationEnabled) return !!integrationEnabled();
+    return serverSetting('agents.vibespaceIntegration') !== false;
+  } catch { return true; }
+}
 function stopNudgeEnabled() {
   try { return serverSetting('agents.stopBookkeepingNudge') !== false; } catch { return true; }
 }
@@ -523,6 +553,10 @@ function injectDiffsEnabled() {
 app.get('/api/agent/task', (req, res) => {
   const hit = agentSession(req, res);
   if (!hit) return;
+  // Master switch: this READ returns the same steering substance the delivery
+  // endpoints inject (objective/backlog/activity) — `vibespace-task show` from
+  // a pre-toggle session must not bypass the pristine state through it.
+  if (!integrationOnMaster()) return res.status(403).json({ error: 'VibeSpace integration is disabled (master switch)' });
   const gid = resolveAgentGroup(hit, req, res);
   if (!gid) return;
   try {
@@ -659,7 +693,7 @@ app.post('/api/agent/group-admin', (req, res) => {
   const key = sessionStatusKey(s, id);
   try {
     if (!serverSetting('agents.allowGroupManagement')) {
-      return res.status(403).json({ error: 'agent group management is disabled — the user can enable it (Settings → Session → "Allow agents to manage Task Groups"), then designate this session as a Group manager in its Session Properties' });
+      return res.status(403).json({ error: 'agent group management is disabled — the user can enable it (Settings → Integration → "Allow agents to manage Task Groups"), then designate this session as a Group manager in its Session Properties' });
     }
     if (!isManagerSession(key)) {
       return res.status(403).json({ error: 'this session is not a designated Group manager — ask the user to enable the "Group manager" toggle in this session\'s Properties (session key: ' + key + ')' });

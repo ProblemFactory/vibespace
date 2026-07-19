@@ -1890,6 +1890,12 @@ function _patchHookFile(file, createIfMissing, mutate) {
     if (!root) {
       if (text != null) throw new Error(`${file} exists but is not valid JSON — not touching it`);
       if (!createIfMissing) throw new Error(`${file} not found (start the CLI once to create it)`);
+      // createIfMissing only creates the FILE — never the CLI's config DIR.
+      // A missing ~/.codex means codex isn't installed; manufacturing the dir
+      // (with our umask, holding only our hook) would be VibeSpace writing
+      // config for a CLI that was never present — the tmp-write below ENOENTs
+      // and registration reports "skipped", which is the correct outcome.
+      if (!fs.existsSync(path.dirname(file))) throw new Error(`${path.dirname(file)} not found (install the CLI first)`);
       root = {};
     }
     if (!root.hooks || typeof root.hooks !== 'object') root.hooks = {};
@@ -1954,9 +1960,11 @@ function ensureAgentHooks({ auto = false } = {}) {
   }
   return results;
 }
-function removeAgentHooks() {
-  // Durable: record the opt-out so startup won't re-register (finding #3).
-  try { fs.writeFileSync(HOOK_OPTOUT_FILE, new Date().toISOString() + '\n'); } catch {}
+// Strip ONLY our entries from both CLI configs — no opt-out marker. Used by
+// the Integration master switch (agents.vibespaceIntegration OFF), which is a
+// SETTING-driven state: boot re-checks the setting, so no marker is needed
+// (and writing one would make a later re-enable silently not re-register).
+function stripAgentHookEntries() {
   for (const def of Object.values(HOOK_FILES)) {
     try {
       _patchHookFile(def.file(), false, (root) => {
@@ -1976,7 +1984,14 @@ function removeAgentHooks() {
     } catch { }
   }
 }
-ensureAgentHooks({ auto: true });
+function removeAgentHooks() {
+  // Durable: record the opt-out so startup won't re-register (finding #3).
+  try { fs.writeFileSync(HOOK_OPTOUT_FILE, new Date().toISOString() + '\n'); } catch {}
+  stripAgentHookEntries();
+}
+// Boot-time hook registration is DEFERRED until settings are readable (after
+// setupPersistence below) — the Integration master switch decides whether we
+// register or actively strip. See "Agent-hook boot registration".
 
 // ── File System API (extracted to src/routes/files.js) ──
 app.locals.xEnv = X_ENV;
@@ -2064,6 +2079,23 @@ function getSyncStore(name) { return syncStores[name]; }
 function serverSetting(key) {
   try { return persistenceRouter.readSettings ? persistenceRouter.readSettings()[key] : undefined; } catch { return undefined; }
 }
+// Integration master switch (agents.vibespaceIntegration, default ON): OFF =
+// pristine CLI — no hook registration, no VIBESPACE_API/agent-tools env in new
+// spawns, no context/nudge delivery even to already-running sessions. THE one
+// definition — threaded into ws-handler and agent-routes via their deps.
+function integrationEnabled() {
+  try { return serverSetting('agents.vibespaceIntegration') !== false; } catch { return true; }
+}
+// ONE convergence rule for boot AND the live toggle: hook registration follows
+// the master switch. ensureAgentHooks({auto:true}) still honors the manual
+// data/.agent-hooks-optout marker (Manage-Agents Remove) — the switch never
+// overrides that narrower explicit choice; Install there clears it.
+function syncHookRegistration() {
+  try {
+    if (integrationEnabled()) ensureAgentHooks({ auto: true });
+    else stripAgentHookEntries();
+  } catch (e) { console.warn('[integration] hook registration sync failed:', e.message); }
+}
 
 syncStores.drafts = new SyncStore('drafts', path.join(__dirname, 'data', 'drafts.json'), wss);
 syncStores.settings = new SyncStore('settings', path.join(__dirname, 'data', 'settings-sync.json'), wss);
@@ -2072,8 +2104,20 @@ syncStores.stage = new SyncStore('stage', path.join(__dirname, 'data', 'stage-sy
 
 setupPersistence({ dataDir: path.join(__dirname, 'data'), wss, WS_OPEN, getSyncStore, activeSessions, auth,
   getHosts: () => hosts, getMounts: () => mounts, getTasks: () => tasks,
-  getAccounts: () => accounts, getUsageHistory: () => usageHistory });
+  getAccounts: () => accounts, getUsageHistory: () => usageHistory,
+  // React server-side to the Integration master switch: register/strip the
+  // CLI-config hook entries the moment the setting flips (the only settings
+  // key with a server-side side effect — everything else reads lazily).
+  onSettingsWrite: (next, prev) => {
+    const was = (prev || {})['agents.vibespaceIntegration'] !== false;
+    const now = (next || {})['agents.vibespaceIntegration'] !== false;
+    if (was !== now) syncHookRegistration();
+  } });
 app.use(persistenceRouter);
+// ── Agent-hook boot registration (deferred from the hook-machinery block so
+// the Integration master switch is readable) — a toggle flipped just before a
+// restart, or an imported config bundle carrying it, converges here.
+syncHookRegistration();
 
 // ── Task Groups (岗位; task system — docs/design-task-system.md + refactor) ──
 // data/task-groups.json is AUTHORITATIVE for everything the board renders (the
@@ -2170,6 +2214,7 @@ function scheduleCtxSync(session, id) {
 }
 setInterval(() => {
   try {
+    if (!integrationEnabled()) return; // master switch off ⇒ no ctx-folder pushes either
     const seen = new Set();
     for (const [id, s] of activeSessions) {
       if (!s.host) continue;
@@ -2586,8 +2631,11 @@ app.post('/api/user-todos/:id', (req, res) => {
 // ── Agent-facing routes ── (extracted to src/agent-routes.js in the 2.92.0 split)
 const { setupAgentRoutes } = require('./src/agent-routes');
 setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, scheduleCtxSync, remoteCtxBaseFor, readUserState: () => persistenceRouter.readUserState() });
-app.get('/api/agent-hooks', (req, res) => res.json(agentHooksStatus()));
+app.get('/api/agent-hooks', (req, res) => res.json({ ...agentHooksStatus(), integrationOff: !integrationEnabled() }));
 app.post('/api/agent-hooks/install', (req, res) => {
+  // The master switch outranks the button: boot/toggle would strip the entries
+  // right back — refuse with guidance instead of silently contradicting.
+  if (!integrationEnabled()) return res.status(400).json({ error: 'VibeSpace integration is disabled (Settings → Integration → master switch). Enable it first.' });
   createHookHelper(); // regenerate the script too (repair path)
   const results = ensureAgentHooks({ auto: false }); // explicit → clears any opt-out
   res.json({ success: true, results, status: agentHooksStatus() });
@@ -2818,6 +2866,9 @@ app.get('/api/hosts/:id/agent-tools', async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.post('/api/hosts/:id/agent-tools/install', async (req, res) => {
+  // Same master-switch guard as the local /api/agent-hooks/install — the
+  // remote twin must not silently contradict a pristine-CLI state either.
+  if (!integrationEnabled()) return res.status(400).json({ error: 'VibeSpace integration is disabled (Settings → Integration → master switch). Enable it first.' });
   try { res.json({ success: true, ...(await hosts.installAgentTools(req.params.id, path.dirname(EDITOR_CMD))) }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -3280,7 +3331,7 @@ registerWsHandler(wss, {
   dialBridge,
   activeSessions, WS_OPEN, broadcastActiveSessions, broadcastToSession, resizeSessionToMin,
   setupSessionPty, refreshWebuiPids, deleteSessionMeta, writeSessionMeta, readSessionMeta,
-  readLayouts, writeLayouts, getSyncStore, serverSetting,
+  readLayouts, writeLayouts, getSyncStore, serverSetting, integrationEnabled,
   sessionCounterRef, createSessionMessages,
   SOCKETS_DIR, BUFFERS_DIR, PTY_WRAPPER, CHAT_WRAPPER,
   NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, PORT, X_ENV,

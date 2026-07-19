@@ -536,35 +536,44 @@ export function installManageAgents(App, ctx = {}) {
             return `<span class="ob-warn">${t('{label}: not installed', { label })}</span>`;
           };
           const allGood = hs.claude?.installed && hs.codex?.installed;
-          left.innerHTML = `<b>${t('VibeSpace integration')}</b><div>${stateOf('claude', 'Claude')} &nbsp; ${stateOf('codex', 'Codex')}</div>`
-            + `<div class="agents-note">${t("Lets sessions in a Task Group automatically receive the group's context (objective, shared files).")}</div>`;
-          const actions = document.createElement('div'); actions.className = 'agent-actions';
-          const installBtn = document.createElement('button');
-          installBtn.className = 'agent-btn' + (allGood ? '' : ' primary');
-          installBtn.textContent = allGood ? t('Reinstall') : t('Install');
-          installBtn.onclick = async () => {
-            installBtn.disabled = true;
-            try {
-              const r = await fetchJson('/api/agent-hooks/install', { method: 'POST' });
-              const errs = Object.entries(r?.results || {}).filter(([, v]) => !v.ok);
-              if (errs.length) showToast(errs.map(([k, v]) => `${k}: ${v.error}`).join('; '), { type: 'error' });
-              else showToast(t('Task Group context hook installed'));
-            } catch { showToast(t('Install failed'), { type: 'error' }); }
-            refresh();
-          };
-          actions.appendChild(installBtn);
-          if (hs.claude?.installed || hs.codex?.installed || hs.claude?.stale || hs.codex?.stale) {
-            const rmBtn = document.createElement('button'); rmBtn.className = 'agent-btn'; rmBtn.textContent = t('Remove');
-            rmBtn.title = t('Unregister the hook from both CLIs (sessions stop receiving Task Group context)');
-            rmBtn.onclick = async () => {
-              rmBtn.disabled = true;
-              try { await fetchJson('/api/agent-hooks/uninstall', { method: 'POST' }); showToast(t('Hook removed')); } catch {}
+          if (hs.integrationOff) {
+            // Master switch (Settings → Integration) outranks this row — the
+            // install route refuses and boot strips, so offer no buttons.
+            left.innerHTML = `<b>${t('VibeSpace integration')}</b><div><span class="ob-warn">${t('Disabled — master switch is off (Settings → Integration)')}</span></div>`
+              + `<div class="agents-note">${t('Sessions run the pristine CLI: no hooks, no injected context, no agent tools. Re-enable it in Settings to restore Task Group context.')}</div>`;
+            row.append(left);
+            body.appendChild(row);
+          } else {
+            left.innerHTML = `<b>${t('VibeSpace integration')}</b><div>${stateOf('claude', 'Claude')} &nbsp; ${stateOf('codex', 'Codex')}</div>`
+              + `<div class="agents-note">${t("Lets sessions in a Task Group automatically receive the group's context (objective, shared files).")}</div>`;
+            const actions = document.createElement('div'); actions.className = 'agent-actions';
+            const installBtn = document.createElement('button');
+            installBtn.className = 'agent-btn' + (allGood ? '' : ' primary');
+            installBtn.textContent = allGood ? t('Reinstall') : t('Install');
+            installBtn.onclick = async () => {
+              installBtn.disabled = true;
+              try {
+                const r = await fetchJson('/api/agent-hooks/install', { method: 'POST' });
+                const errs = Object.entries(r?.results || {}).filter(([, v]) => !v.ok);
+                if (errs.length) showToast(errs.map(([k, v]) => `${k}: ${v.error}`).join('; '), { type: 'error' });
+                else showToast(t('Task Group context hook installed'));
+              } catch { showToast(t('Install failed'), { type: 'error' }); }
               refresh();
             };
-            actions.appendChild(rmBtn);
+            actions.appendChild(installBtn);
+            if (hs.claude?.installed || hs.codex?.installed || hs.claude?.stale || hs.codex?.stale) {
+              const rmBtn = document.createElement('button'); rmBtn.className = 'agent-btn'; rmBtn.textContent = t('Remove');
+              rmBtn.title = t('Unregister the hook from both CLIs (sessions stop receiving Task Group context)');
+              rmBtn.onclick = async () => {
+                rmBtn.disabled = true;
+                try { await fetchJson('/api/agent-hooks/uninstall', { method: 'POST' }); showToast(t('Hook removed')); } catch {}
+                refresh();
+              };
+              actions.appendChild(rmBtn);
+            }
+            row.append(left, actions);
+            body.appendChild(row);
           }
-          row.append(left, actions);
-          body.appendChild(row);
         }
       } else {
         // ── VibeSpace integration ON THE HOST (2.129.0, backlog B-34bb):
@@ -594,9 +603,19 @@ export function installManageAgents(App, ctx = {}) {
           const extras = [];
           if (!rs.node) extras.push(`<span class="ob-bad">${t('node missing on the host — agent tools cannot run')}</span>`);
           if (rs.keeperSessions) extras.push(`<span>${t('{n} keeper session file(s)', { n: rs.keeperSessions })}</span>`);
+          // Master switch awareness (live-synced settings store, same pattern
+          // as the shipSubscriptionToRemote gate): the STATUS still renders —
+          // seeing residue from earlier ON spawns is exactly what a pristine
+          // verification needs — but the note tells the truth and Install is
+          // withheld (the route refuses anyway); Remove stays as the cleanup.
+          const masterOff = this.settings?.get?.('agents.vibespaceIntegration') === false;
+          const noteHtml = masterOff
+            ? `<div><span class="ob-warn">${t('Disabled — master switch is off (Settings → Integration)')}</span></div>`
+              + `<div class="agents-note">${t('New remote sessions ship no tools and register no hook. Anything shown above is residue from earlier sessions — inert without the session env; Remove deletes it from the host.')}</div>`
+            : `<div class="agents-note">${t('Reporting tools, the Task Group context hook, and the session keeper live under ~/.vibespace on the host. Creating a remote session re-installs them automatically.')}</div>`;
           left.innerHTML = `<b>${t('VibeSpace integration on {host}', { host: escHtml(hostName) })}</b>`
             + `<div title="${escHtml(perTool)}">${toolsHtml} &nbsp; ${hookHtml}${extras.length ? ' &nbsp; ' + extras.join(' &nbsp; ') : ''}</div>`
-            + `<div class="agents-note">${t('Reporting tools, the Task Group context hook, and the session keeper live under ~/.vibespace on the host. Creating a remote session re-installs them automatically.')}</div>`;
+            + noteHtml;
           const actions = document.createElement('div'); actions.className = 'agent-actions';
           const allGood = presentN === names.length && !outdatedN;
           // Dial devices: install/uninstall ride the SESSION SPAWN channel
@@ -610,19 +629,21 @@ export function installManageAgents(App, ctx = {}) {
             row.append(left, actions);
             body.appendChild(row);
           } else {
-          const installBtn = document.createElement('button');
-          installBtn.className = 'agent-btn' + (allGood ? '' : ' primary');
-          installBtn.textContent = presentN ? t('Reinstall') : t('Install');
-          installBtn.onclick = async () => {
-            installBtn.disabled = true;
-            try {
-              const r = await fetchJson(`/api/hosts/${encodeURIComponent(selectedHost)}/agent-tools/install`, { method: 'POST' });
-              if (r?.success) showToast(t('Integration installed on {host}', { host: hostName }));
-              else showToast(r?.error || t('Install failed'), { type: 'error' });
-            } catch { showToast(t('Install failed'), { type: 'error' }); }
-            refresh();
-          };
-          actions.appendChild(installBtn);
+          if (!masterOff) {
+            const installBtn = document.createElement('button');
+            installBtn.className = 'agent-btn' + (allGood ? '' : ' primary');
+            installBtn.textContent = presentN ? t('Reinstall') : t('Install');
+            installBtn.onclick = async () => {
+              installBtn.disabled = true;
+              try {
+                const r = await fetchJson(`/api/hosts/${encodeURIComponent(selectedHost)}/agent-tools/install`, { method: 'POST' });
+                if (r?.success) showToast(t('Integration installed on {host}', { host: hostName }));
+                else showToast(r?.error || t('Install failed'), { type: 'error' });
+              } catch { showToast(t('Install failed'), { type: 'error' }); }
+              refresh();
+            };
+            actions.appendChild(installBtn);
+          }
           if (presentN) {
             const rmBtn = document.createElement('button'); rmBtn.className = 'agent-btn'; rmBtn.textContent = t('Remove');
             rmBtn.title = t('Unregisters the hook from the host\'s CLIs and deletes the tools. A future remote session on this host re-installs them.');

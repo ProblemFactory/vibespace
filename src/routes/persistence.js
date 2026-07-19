@@ -27,7 +27,7 @@ function writeJsonAtomic(file, data) {
 }
 
 /** Setup persistence routes. Requires { dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth } context. */
-function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getHosts, getMounts, getTasks, getAccounts, getUsageHistory }) {
+function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getHosts, getMounts, getTasks, getAccounts, getUsageHistory, onSettingsWrite }) {
   const broadcast = (msg) => {
     const json = JSON.stringify(msg);
     wss.clients.forEach(client => {
@@ -369,9 +369,14 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
 
   function writeSettings(data) {
     ensureDir(dataDir);
+    const prev = readSettings(); // capture BEFORE the cache swap (for the change callback)
     _settingsCache = data;
     writeJsonAtomic(SETTINGS_FILE, data);
     broadcast({ type: 'settings-updated', settings: data });
+    // Server-side change hook (2.190.0): the ONLY settings key with a server
+    // side effect is the Integration master switch — everything else is read
+    // lazily via readSettings. Never let a callback failure break the write.
+    try { onSettingsWrite?.(data, prev); } catch (e) { console.warn('[settings] change callback failed:', e.message); }
   }
 
   // Server-side settings accessor: /api/settings persists HERE
