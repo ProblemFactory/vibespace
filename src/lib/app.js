@@ -445,9 +445,10 @@ class App {
   // survives restarts and auto-expires; the strip is a normal flex child of
   // #main-wrapper, so the workspace reflows proportionally under it.
   _initMaintenanceBanner() {
+    const fmtT = (ts) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const render = (m) => {
       let el = document.getElementById('maintenance-banner');
-      if (!m?.active) { el?.remove(); clearTimeout(this._maintTimer); return; }
+      if (!m?.active) { el?.remove(); document.getElementById('mb-timeline')?.remove(); clearTimeout(this._maintTimer); return; }
       if (!el) {
         el = document.createElement('div');
         el.id = 'maintenance-banner';
@@ -455,10 +456,34 @@ class App {
         if (!wrap) return;
         wrap.insertBefore(el, wrap.firstChild);
       }
-      const since = m.since ? new Date(m.since).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+      const since = m.since ? fmtT(m.since) : '';
+      const ups = m.updates || [];
+      const latest = ups[ups.length - 1] || null;
       el.innerHTML = `<span class="mb-ic">🛠</span><span class="mb-text">${escHtml(t('Maintenance: a support agent is connected to this instance for troubleshooting'))}`
         + `${m.message ? ' — ' + escHtml(m.message) : ''}`
-        + `${since ? ` <span class="mb-since">(${escHtml(t('since {time}', { time: since }))})</span>` : ''}</span>`;
+        + `${since ? ` <span class="mb-since">(${escHtml(t('since {time}', { time: since }))})</span>` : ''}</span>`
+        // live progress: the latest update line pulses in as it changes, so the
+        // user SEES the troubleshooting move instead of a frozen banner
+        + (latest ? `<span class="mb-update" data-ts="${latest.ts}">▸ ${escHtml(latest.text)} <span class="mb-since">${fmtT(latest.ts)}</span></span>` : '')
+        + (ups.length > 1 ? `<button class="mb-log-btn" title="${escHtml(t('Show the full troubleshooting timeline'))}">${escHtml(t('{n} updates', { n: ups.length }))} ▾</button>` : '');
+      // pulse only when the latest update actually CHANGED (rebuilds happen on
+      // every broadcast — a steady pulse would be noise)
+      const upEl = el.querySelector('.mb-update');
+      if (upEl && latest && this._maintLastUpdTs !== latest.ts) {
+        this._maintLastUpdTs = latest.ts;
+        upEl.classList.add('mb-pulse');
+        setTimeout(() => upEl.classList.remove('mb-pulse'), 1600);
+      }
+      el.querySelector('.mb-log-btn')?.addEventListener('click', () => {
+        const old = document.getElementById('mb-timeline');
+        if (old) { old.remove(); return; }
+        const panel = document.createElement('div');
+        panel.id = 'mb-timeline';
+        panel.dataset.popover = '1'; // global Escape closes it
+        panel.innerHTML = [...ups].reverse().map(u =>
+          `<div class="mb-tl-row"><span class="mb-tl-time">${fmtT(u.ts)}</span><span>${escHtml(u.text)}</span></div>`).join('');
+        el.appendChild(panel);
+      });
       clearTimeout(this._maintTimer);
       if (m.until) this._maintTimer = setTimeout(() => render({ active: false }), Math.max(1000, m.until - Date.now()));
     };

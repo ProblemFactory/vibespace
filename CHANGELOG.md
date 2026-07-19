@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.189.1 — 2026-07-19
+- **Maintenance mode shows LIVE troubleshooting progress** (user request — a frozen banner still leaves the user anxious about what's happening). `POST /api/maintenance {update:"…"}` appends a progress line: the banner shows the latest one (pulsing in as it changes, so the work visibly moves), a "N updates ▾" button expands the full timestamped timeline, and each update EXTENDS the auto-expiry (≥1h from the update, hard cap 24h from start — active troubleshooting can't expire mid-work). Timeline caps at the newest 50.
+
 ## 2.189.0 — 2026-07-19
 - **Maintenance mode** (user request): when an operator/support agent is actively connected to an instance troubleshooting it, a persistent amber strip across the top says so — transparency for onsite debugging. `GET/POST /api/maintenance` (cookie-authed): `{on:true, message?, by?, hours?}` sets it (default 2h, max 24h, **auto-expires** so a forgotten toggle can't linger), `{on:false}` clears; state persists in `data/maintenance.json` (survives the server restarts troubleshooting tends to involve) and broadcasts live (`maintenance-updated`). The strip is a normal flex child of `#main-wrapper`, so the workspace reflows under it. Verified e2e on a throwaway server (enable → banner with message + since-time on a fresh page load; disable → gone).
 
