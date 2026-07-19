@@ -2044,4 +2044,6 @@ export default {
   "Remote host (its own login)": "远程主机（其自身登录）",
   "Maintenance: a support agent is connected to this instance for troubleshooting": "维护模式：支持人员/agent 正连接到此实例进行排障",
   "since {time}": "始于 {time}",
+  "{n} updates": "{n} 条进展",
+  "Show the full troubleshooting timeline": "展开完整排障时间线",
 };

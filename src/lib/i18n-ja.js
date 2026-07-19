@@ -2044,4 +2044,6 @@ export default {
   "Remote host (its own login)": "リモートホスト（ホスト自身のログイン）",
   "Maintenance: a support agent is connected to this instance for troubleshooting": "メンテナンス：サポート担当/エージェントがこのインスタンスに接続してトラブルシューティング中です",
   "since {time}": "{time} から",
+  "{n} updates": "{n} 件の更新",
+  "Show the full troubleshooting timeline": "トラブルシューティングの全タイムラインを表示",
 };

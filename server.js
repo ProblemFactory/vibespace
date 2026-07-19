@@ -3549,7 +3549,15 @@ function maintState() {
 app.get('/api/maintenance', (req, res) => res.json(maintState()));
 app.post('/api/maintenance', (req, res) => {
   const b = req.body || {};
-  if (b.on) {
+  if (b.update != null && _maintenance?.active) {
+    // live progress line ("checking the transcript cache…") — the banner shows
+    // the latest one and keeps a timeline; each update EXTENDS the expiry
+    // (active troubleshooting must not expire mid-work; hard cap 24h from start)
+    const upd = { ts: Date.now(), text: String(b.update).slice(0, 300) };
+    _maintenance.updates = [...(_maintenance.updates || []), upd].slice(-50);
+    _maintenance.until = Math.min((_maintenance.since || Date.now()) + 24 * 3600e3,
+      Math.max(_maintenance.until || 0, Date.now() + 3600e3));
+  } else if (b.on) {
     const hours = Math.min(24, Math.max(0.25, Number(b.hours) || 2));
     _maintenance = {
       active: true,
@@ -3557,6 +3565,7 @@ app.post('/api/maintenance', (req, res) => {
       by: String(b.by || '').slice(0, 80),
       since: Date.now(),
       until: Date.now() + hours * 3600e3,
+      updates: [],
     };
   } else {
     _maintenance = { active: false };
