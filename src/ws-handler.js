@@ -309,11 +309,12 @@ function registerWsHandler(wss, ctx) {
           let spawnEnvPairs = Object.entries(sessionSpec.env || {}).map(([k, v]) => `${k}=${v == null ? '' : String(v)}`);
           let spawnCwd = cwd;
           // Integration master switch (agents.vibespaceIntegration, 2.190.0):
-          // OFF ⇒ this spawn is PRISTINE — no VIBESPACE_API, no agent tools on
-          // PATH, no statusline injection, no remote tools/hook-register/
-          // reverse-tunnel. VIBESPACE_SESSION_TOKEN alone is KEPT (Ctrl+G
-          // editor auth; inert without the api var — every consumer guards on
-          // both). Read per spawn = live.
+          // OFF ⇒ this spawn carries nothing AGENT-VISIBLE — no VIBESPACE_API,
+          // no agent tools on PATH, no remote tools/hook-register/reverse-
+          // tunnel. Model-invisible plumbing is EXEMPT by design (2.190.1,
+          // user decision): the usage statusline, billing env, and
+          // VIBESPACE_SESSION_TOKEN (Ctrl+G editor auth; inert without the
+          // api var — every consumer guards on both). Read per spawn = live.
           let integrationOn = integrationEnabled ? integrationEnabled() : true;
           // Remote agent enablement (P3): a remote session can't reach the local
           // API at 127.0.0.1:<PORT>, and the vibespace-status/-task tools don't
@@ -825,8 +826,13 @@ done`;
           // CLI understands --settings — appending it to `zsh -l` (shell
           // terminals, incl. the Manage-Agents update/login helpers) or codex
           // made them exit instantly ("terminated").
+          // Deliberately NOT gated by the Integration master switch (2.190.1,
+          // user decision): the statusline is never model-visible — it renders
+          // in the TUI and writes usage-cache locally. The switch scopes to
+          // AGENT-VISIBLE integration only (hooks/context/tools); billing env
+          // is likewise exempt.
           const usageEnvPairs = [];
-          if (integrationOn && backend === 'claude' && sessionMode === 'terminal' && !data.hostId && USAGE_STATUSLINE_CMD) {
+          if (backend === 'claude' && sessionMode === 'terminal' && !data.hostId && USAGE_STATUSLINE_CMD) {
             try {
               let settingsObj = {};
               const si = spawnArgs.indexOf('--settings');
