@@ -104,6 +104,11 @@ class ClaudeCodeAdapter extends BackendAdapter {
     // versions SIGINT exits the whole process (killing the session), so we
     // avoid it unless the protocol-level interrupt actually failed.
     // Historical context: bugs #17466, #3455 — may be fixed now.
+    // REMOTE sessions: _childPid is the LOCAL transport (ssh keeper pipe /
+    // agentd-attach bridge), NOT claude — SIGINT would kill the pipe and
+    // read as a session drop while remote claude keeps running (audit
+    // 2.192.0). The protocol interrupt still reaches claude via stdin.
+    if (session.host) return;
     if (!session._childPid) return;
     if (session._interruptTimer) clearTimeout(session._interruptTimer);
     session._interruptTimer = setTimeout(() => {

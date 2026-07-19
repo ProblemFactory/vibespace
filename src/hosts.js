@@ -915,7 +915,18 @@ class HostManager {
         pid=$(basename "$f" .json)
         kill -0 "$pid" 2>/dev/null && { echo "LOCK $(cat "$f")"; }
       done
-      find "$HOME"/.claude/projects -maxdepth 2 -name '*.jsonl' ! -name 'agent-*' -printf 'J %T@ %s %p\\n' 2>/dev/null | sort -rn -k2 | head -200
+      # -printf is GNU-only — on macOS/BSD ssh hosts it errored into the
+      # 2>/dev/null and the WHOLE remote history silently vanished (audit
+      # 2.192.0). Probe once; BSD falls back to a stat -f loop (slower but
+      # correct; Linux keeps the single-command fast path).
+      if find "$HOME"/.claude -maxdepth 0 -printf '' 2>/dev/null; then GNUFIND=1; else GNUFIND=; fi
+      if [ -n "$GNUFIND" ]; then
+        find "$HOME"/.claude/projects -maxdepth 2 -name '*.jsonl' ! -name 'agent-*' -printf 'J %T@ %s %p\\n' 2>/dev/null | sort -rn -k2 | head -200
+      else
+        find "$HOME"/.claude/projects -maxdepth 2 -name '*.jsonl' ! -name 'agent-*' 2>/dev/null | while read -r f; do
+          set -- $(stat -f '%m %z' "$f" 2>/dev/null); [ -n "$1" ] && echo "J $1 $2 $f"
+        done | sort -rn -k2 | head -200
+      fi
       # K = keeper session metas (~/.vibespace/run) — lets discovery classify a
       # keeper-managed claude as reattachable instead of generic 'external'
       # (B-4058: pod rebuild loses local state; the keeper+claude survive)
@@ -924,7 +935,13 @@ class HostManager {
       done
       # cwd from the head of each JSONL (projDir decode is ambiguous; the first
       # record may be a summary without cwd, so grep the first cwd field instead)
-      find "$HOME"/.claude/projects -maxdepth 2 -name '*.jsonl' ! -name 'agent-*' -printf '%T@ %p\\n' 2>/dev/null | sort -rn | head -60 | while read -r _ f; do
+      { if [ -n "$GNUFIND" ]; then
+          find "$HOME"/.claude/projects -maxdepth 2 -name '*.jsonl' ! -name 'agent-*' -printf '%T@ %p\\n' 2>/dev/null
+        else
+          find "$HOME"/.claude/projects -maxdepth 2 -name '*.jsonl' ! -name 'agent-*' 2>/dev/null | while read -r f; do
+            m=$(stat -f '%m' "$f" 2>/dev/null); [ -n "$m" ] && echo "$m $f"
+          done
+        fi; } | sort -rn | head -60 | while read -r _ f; do
         printf 'H %s\\t' "$f"; head -c 16000 "$f" | grep -o '"cwd":"[^"]*"' | head -n 1; echo
         # up to 6 early user records (NOT just the first) — the first user turn is
         # often an injected <vibespace-task-context>/<system-reminder>; the JS side
@@ -1110,7 +1127,10 @@ if command -v dtach >/dev/null 2>&1; then
   step dtach ok
 else
   echo "dtach missing — trying package managers (needs passwordless sudo) then source build"
-  if sudo -n apt-get install -y dtach >/dev/null 2>&1 || sudo -n yum install -y dtach >/dev/null 2>&1 || sudo -n dnf install -y dtach >/dev/null 2>&1; then
+  if command -v brew >/dev/null 2>&1 && brew install dtach >/dev/null 2>&1; then
+    echo "installed via Homebrew"
+    step dtach ok
+  elif sudo -n apt-get install -y dtach >/dev/null 2>&1 || sudo -n yum install -y dtach >/dev/null 2>&1 || sudo -n dnf install -y dtach >/dev/null 2>&1; then
     echo "installed via package manager"
     step dtach ok
   elif command -v gcc >/dev/null 2>&1 || command -v cc >/dev/null 2>&1; then

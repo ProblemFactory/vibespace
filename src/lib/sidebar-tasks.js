@@ -783,6 +783,7 @@ export function installSidebarTasks(SidebarClass) {
             agentKind: s.agentKind || 'primary', agentRole: s.agentRole || '',
             agentNickname: s.agentNickname || '', sourceKind: s.sourceKind || '',
             parentThreadId: s.parentThreadId || null,
+            hostId: s.host || undefined, keeperSid: s.keeperSid || undefined, // remote members resume ON their host
           };
           if (s.status === 'stopped') {
             this.app.resumeSession(s.sessionId, s.cwd, this.getCustomName(s) || s.name, agentOpts);

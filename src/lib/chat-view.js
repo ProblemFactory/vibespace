@@ -125,6 +125,7 @@ class ChatView {
 
     // Renderers (extracted rendering methods)
     this._renderers = new ChatRenderers({
+      getSessionCtx: () => this._getSessionIds(), // view-only/terminated windows keep host+cwd via openSpec
       ws: wsManager,
       sessionId,
       app,
@@ -559,13 +560,14 @@ class ChatView {
   // Resolves this view's session, then hands off to app.forkFromMessage which
   // adds --resume-session-at <uuid> so the branch is truncated at this point.
   _forkFromMessage(uuid, msg) {
-    const { backend, backendSessionId, cwd } = this._getSessionIds();
+    const { backend, backendSessionId, cwd, host } = this._getSessionIds();
     if (backend !== 'claude' || !backendSessionId || !uuid) return;
     const allSess = this.app.sidebar?._allSessions || [];
     const match = allSess.find(s => s.webuiId === this.sessionId)
       || allSess.find(s => (s.backendSessionId || s.sessionId) === backendSessionId);
     const webuiName = match?.webuiName || match?.name || this.winInfo?._openSpec?.name || 'Session';
-    this.app.forkFromMessage({ backend, backendSessionId, cwd, webuiName, webuiMode: 'chat' }, uuid);
+    // host rides along — a remote session's fork must spawn ON its host
+    this.app.forkFromMessage({ backend, backendSessionId, cwd, host, webuiName, webuiMode: 'chat' }, uuid);
   }
 
   // Get session identifiers for API calls
@@ -1908,6 +1910,9 @@ class ChatView {
       mode: 'chat',
       backend,
       backendSessionId,
+      // remote sessions resume ON their host — omitting this spawned a LOCAL
+      // `claude --resume <remote-id>` (wrong machine, double-writer class)
+      hostId: ids.host || undefined,
       agentKind: this.winInfo?.titleMeta?.agentKind,
       agentRole: this.winInfo?.titleMeta?.agentRole,
       agentNickname: this.winInfo?.titleMeta?.agentNickname,

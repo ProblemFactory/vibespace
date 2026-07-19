@@ -645,6 +645,18 @@ function resizeSessionToMin(session, sessionId) {
 // the newest goal_status and sync session state from it.
 function checkClaudeGoalStatus(session, id) {
   if (!session.claudeSessionId) return;
+  // Remote session: goal_status attachments land in the transcript ON THE
+  // HOST — the local data/remote-jsonl cache only refreshes at attach/history
+  // fetches, so met-detection could lag arbitrarily (audit 2.192.0). Kick a
+  // throttled background refresh; this pass tail-reads whatever is cached and
+  // the next result-triggered check sees the refreshed file.
+  if (session.host && hosts) {
+    const now = Date.now();
+    if (!session._goalJsonlFetchAt || now - session._goalJsonlFetchAt > 30000) {
+      session._goalJsonlFetchAt = now;
+      hosts.fetchSessionJsonl(session.host, session.claudeSessionId).catch(() => {});
+    }
+  }
   try {
     const fp = findSessionJsonlPath(session.claudeSessionId, session.cwd || '');
     if (!fp) return;

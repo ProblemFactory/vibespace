@@ -14,6 +14,16 @@ const { spawn, execFile } = require('child_process');
 const path = require('path');
 
 const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+// shq for PATHS: a quoted `~` never expands ('~/Downloads/x' landed in a
+// literal ./~ directory on the remote — audit 2.192.0), so emit the tilde
+// prefix as an unquoted "$HOME" and quote only the rest. The dial fast path
+// (_devAbs) already expands ~ — this covers the ssh-legacy branches.
+const shqp = (s) => {
+  const str = String(s);
+  if (str === '~') return '"$HOME"';
+  if (str.startsWith('~/')) return `"$HOME"/${shq(str.slice(2))}`;
+  return shq(str);
+};
 
 class RemoteFs {
   constructor(hostManager) { this.hosts = hostManager; }
@@ -101,7 +111,16 @@ class RemoteFs {
       } catch { /* legacy ssh below */ }
     }
     const d = dir && dir !== '~' ? dir : await this.home(id);
-    const cmd = `cd ${shq(d)} 2>/dev/null && pwd && find . -maxdepth 1 -mindepth 1 -printf '%y\\t%s\\t%T@\\t%f\\n' 2>/dev/null | LC_ALL=C sort`;
+    // find -printf is GNU-only — on a macOS/BSD ssh host it errored into
+    // 2>/dev/null and every folder rendered EMPTY (audit 2.192.0). Probe once
+    // per listing; BSD path maps stat -f %HT to the %y type char.
+    const cmd = `cd ${shqp(d)} 2>/dev/null && pwd && { if find . -maxdepth 0 -printf '' 2>/dev/null; then `
+      + `find . -maxdepth 1 -mindepth 1 -printf '%y\\t%s\\t%T@\\t%f\\n' 2>/dev/null; else `
+      + `find . -mindepth 1 -maxdepth 1 2>/dev/null | while IFS= read -r f; do `
+      + `st=$(stat -f '%HT|%z|%m' "$f" 2>/dev/null) || continue; `
+      + `ft=\${st%%|*}; rest=\${st#*|}; fs=\${rest%%|*}; fm=\${rest#*|}; `
+      + `case "$ft" in Directory) y=d;; Symbolic*) y=l;; *) y=f;; esac; `
+      + `[ -n "$fs" ] && printf '%s\\t%s\\t%s\\t%s\\n' "$y" "$fs" "$fm" "$(basename "$f")"; done; fi; } | LC_ALL=C sort`;
     const out = (await this._run(id, cmd)).toString();
     const lines = out.split('\n');
     const realPath = lines.shift() || d;
@@ -153,7 +172,7 @@ class RemoteFs {
     }
     // size + mtime + type, and a binary sniff via `tr -d '\\0'` (portable
     // across sh/dash/bash — NUL count drops ⇒ binary; $'\\x00' needs bash)
-    const cmd = `f=${shq(filePath)}; if [ -d "$f" ]; then echo "dir"; stat -c '%s %Y' "$f"; else echo "file"; stat -c '%s %Y' "$f"; n=$(head -c 8192 "$f" | wc -c); z=$(head -c 8192 "$f" | tr -d '\\000' | wc -c); [ "$n" = "$z" ] && echo TXT || echo BIN; fi`;
+    const cmd = `f=${shqp(filePath)}; if [ -d "$f" ]; then echo "dir"; stat -c '%s %Y' "$f" 2>/dev/null || stat -f '%z %m' "$f"; else echo "file"; stat -c '%s %Y' "$f" 2>/dev/null || stat -f '%z %m' "$f"; n=$(head -c 8192 "$f" | wc -c); z=$(head -c 8192 "$f" | tr -d '\\000' | wc -c); [ "$n" = "$z" ] && echo TXT || echo BIN; fi`;
     const out = (await this._run(id, cmd)).toString().trim().split('\n');
     const isDirectory = out[0] === 'dir';
     const [size, mtime] = (out[1] || '0 0').split(' ');
@@ -203,7 +222,7 @@ class RemoteFs {
     }
     const h = this._host(id);
     await new Promise((resolve, reject) => {
-      const child = spawn('ssh', [...this.hosts.sshArgs(h, { multiplex: true }), '--', `mkdir -p "$(dirname ${shq(filePath)})" && cat > ${shq(filePath)}`]);
+      const child = spawn('ssh', [...this.hosts.sshArgs(h, { multiplex: true }), '--', `mkdir -p "$(dirname ${shqp(filePath)})" && cat > ${shqp(filePath)}`]);
       let err = '';
       child.stderr.on('data', d => { err += d; });
       child.on('close', (code) => code === 0 ? resolve() : reject(new Error(err.trim() || `write failed (${code})`)));
@@ -215,10 +234,10 @@ class RemoteFs {
   async mkdir(id, dirPath) {
     const dm = await this._dev(id);
     if (dm) { try { await dm.fsMkdir(await this._devAbs(id, dm, dirPath)); return { success: true }; } catch { } }
-    await this._run(id, `mkdir -p ${shq(dirPath)}`); return { success: true };
+    await this._run(id, `mkdir -p ${shqp(dirPath)}`); return { success: true };
   }
 
-  async rename(id, from, to) { await this._run(id, `mv -n ${shq(from)} ${shq(to)}`); return { success: true }; }
+  async rename(id, from, to) { await this._run(id, `mv -n ${shqp(from)} ${shqp(to)}`); return { success: true }; }
 
   async remove(id, target) {
     const dm = await this._dev(id);
@@ -244,15 +263,17 @@ class RemoteFs {
         return { path: target, size: st.stat.size || 0, modified: st.stat.mtimeMs || 0, mode: st.stat.mode, uid: undefined, gid: undefined, kind: st.stat.isDir ? 'directory' : 'regular file', du: withDu ? (du ?? null) : undefined };
       } catch (e) { if (this._host(id)?.transport === 'dial') throw e; /* ssh: legacy below */ }
     }
-    const cmd = `f=${shq(target)}; stat -c '%s|%Y|%A|%U|%G|%F' "$f"; ${withDu ? '[ -d "$f" ] && du -sb "$f" 2>/dev/null | cut -f1 || echo' : 'echo'}`;
+    // GNU stat/du first, BSD (macOS ssh host) fallback; du -sk×1024 is the
+    // POSIX-portable recursive size (the dial fast path above does the same)
+    const cmd = `f=${shqp(target)}; stat -c '%s|%Y|%A|%U|%G|%F' "$f" 2>/dev/null || stat -f '%z|%m|%Sp|%Su|%Sg|%HT' "$f"; ${withDu ? '{ [ -d "$f" ] && { du -sb "$f" 2>/dev/null | cut -f1 || du -sk "$f" 2>/dev/null | cut -f1 | awk \'{print $1*1024}\'; } || echo; }' : 'echo'}`;
     const out = (await this._run(id, cmd, { timeoutMs: 30000 })).toString().trim().split('\n');
     const [size, mtime, mode, uid, gid, kind] = (out[0] || '').split('|');
     return { path: target, size: parseInt(size) || 0, modified: (parseInt(mtime) || 0) * 1000, mode, uid, gid, kind, du: withDu ? (parseInt(out[1]) || null) : undefined };
   }
 
   // copy/move WITHIN the same host (cross-host relay handled in files.js)
-  async copy(id, from, to) { await this._run(id, `cp -rn ${shq(from)} ${shq(to)}`, { timeoutMs: 120000 }); return { success: true }; }
-  async move(id, from, to) { await this._run(id, `mv -n ${shq(from)} ${shq(to)}`, { timeoutMs: 120000 }); return { success: true }; }
+  async copy(id, from, to) { await this._run(id, `cp -rn ${shqp(from)} ${shqp(to)}`, { timeoutMs: 120000 }); return { success: true }; }
+  async move(id, from, to) { await this._run(id, `mv -n ${shqp(from)} ${shqp(to)}`, { timeoutMs: 120000 }); return { success: true }; }
 
   // Stream a remote file to an HTTP response (download / raw viewer)
   downloadTo(id, filePath, res, { attachment = false } = {}) {

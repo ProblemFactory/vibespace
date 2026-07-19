@@ -101,7 +101,7 @@ class ChatRenderers {
    * @param {HTMLElement} opts.messageList - Message list DOM element
    * @param {Function} [opts.onPermissionResolve] - Called when a permission is resolved (allow/deny)
    */
-  constructor({ ws, sessionId, app, backend = 'claude', compact, messageList, onPermissionResolve, onFork }) {
+  constructor({ ws, sessionId, app, backend = 'claude', compact, messageList, onPermissionResolve, onFork, getSessionCtx }) {
     this.ws = ws;
     this.sessionId = sessionId;
     this.app = app;
@@ -110,7 +110,22 @@ class ChatRenderers {
     this._messageList = messageList;
     this._onPermissionResolve = onPermissionResolve || (() => {});
     this._onFork = onFork || null;
+    this._getSessionCtx = getSessionCtx || null;
     this.setupLinkHandler();
+  }
+
+  // Session identity (cwd + host) for link resolution. The live-list lookup
+  // only matches LIVE webui sessions — a view-only window's sessionId is
+  // `view-…` and a terminated window's webuiId is gone, so links there lost
+  // their host/cwd and probed the LOCAL machine (audit 2.192.0). ChatView's
+  // _getSessionIds already solves this (openSpec fallback) — prefer it.
+  _sessionCtx() {
+    try {
+      const ids = this._getSessionCtx?.();
+      if (ids && (ids.cwd || ids.host)) return { cwd: ids.cwd || '', host: ids.host || null };
+    } catch {}
+    const sess = (this.app?.sidebar?._allSessions || []).find(s => s.webuiId === this.sessionId);
+    return { cwd: sess?.cwd || '', host: sess?.host || null };
   }
 
   // ── Message renderers ──
@@ -897,9 +912,7 @@ class ChatRenderers {
    * segment) → cwd-parent/rel; first existing wins. Host-aware for remote
    * sessions. Probing happens only on an explicit open click. */
   async _openRelTarget(link, rel) {
-    const sess = (this.app?.sidebar?._allSessions || []).find(s => s.webuiId === this.sessionId);
-    const cwd = sess?.cwd || '';
-    const host = sess?.host || null;
+    const { cwd, host } = this._sessionCtx();
     const norm = rel.replace(/\/+$/, '');
     const cands = [];
     if (rel.startsWith('~/')) cands.push(rel);
@@ -969,8 +982,7 @@ class ChatRenderers {
       // Host-aware: a remote session's absolute-path links (and markdown links
       // to local files) must resolve + open on the SESSION's host, not this
       // instance (real report: right-click → Open did nothing in remote chats).
-      const sess = (this.app?.sidebar?._allSessions || []).find(s => s.webuiId === this.sessionId);
-      const host = sess?.host || null;
+      const { host } = this._sessionCtx();
       fetch(`/api/file/info?path=${encodeURIComponent(cleanPath)}${host ? '&host=' + encodeURIComponent(host) : ''}`)
         .then(r => r.json())
         .then(info => {

@@ -226,7 +226,7 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
     stepList.innerHTML = `<div class="empty-hint" style="padding:2px 0">${escHtml(t('Loading…'))}</div>`;
     stepSec.appendChild(stepList);
     const rid = s.backendSessionId || s.sessionId;
-    fetch(`/api/session-todos?backend=${encodeURIComponent(s.backend || 'claude')}&backendSessionId=${encodeURIComponent(rid)}&cwd=${encodeURIComponent(s.cwd || '')}`)
+    fetch(`/api/session-todos?backend=${encodeURIComponent(s.backend || 'claude')}&backendSessionId=${encodeURIComponent(rid)}&cwd=${encodeURIComponent(s.cwd || '')}${s.host ? `&host=${encodeURIComponent(s.host)}` : ''}`)
       .then(r => r.json()).then(d => {
         if (!stepList.isConnected) return;
         const todos = (d?.todos || []).filter(t => (t.content || t.step || '').trim());

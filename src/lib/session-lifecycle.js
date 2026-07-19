@@ -629,6 +629,10 @@ export function installSessionLifecycle(App, ctx = {}) {
       backend,
       backendSessionId: resumeId,
       fork: true,
+      // remote sessions fork ON their host — omitting this spawned a LOCAL
+      // `claude --resume <remote-id> --fork-session` against a transcript
+      // that doesn't exist here (audit 2.192.0)
+      hostId: sessionInfo.host || sessionInfo.hostId || undefined,
       extraArgs: forkArgs,
       initialMessage,
       forkAtUuid: resumeAt || undefined,

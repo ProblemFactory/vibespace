@@ -27,7 +27,7 @@ export function installSessionPalette(app) {
     } else if (s.status === 'stopped' || s.status === 'external' || s.status === 'tmux') {
       // hostId is REQUIRED for remote sessions or resume runs locally against a
       // non-existent id (remote sessions reach the palette via _wbRemoteHosts now)
-      app.resumeSession(s.sessionId, s.cwd, name, { backend: s.backend || 'claude', backendSessionId: s.backendSessionId || s.sessionId, hostId: s.host || undefined });
+      app.resumeSession(s.sessionId, s.cwd, name, { backend: s.backend || 'claude', backendSessionId: s.backendSessionId || s.sessionId, hostId: s.host || undefined, keeperSid: s.keeperSid || undefined });
     }
   };
 

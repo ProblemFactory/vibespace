@@ -727,12 +727,18 @@ function setup(ctx) {
   // Full TODO list (the agent's own TodoWrite / codex plan) for the expanded
   // card — reads taskState() from the transcript, so it works for stopped and
   // restored sessions too (the live pill rides active-sessions instead).
-  router.get('/api/session-todos', (req, res) => {
+  router.get('/api/session-todos', async (req, res) => {
     try {
-      const { backend, backendSessionId, claudeSessionId, cwd } = req.query;
+      const { backend, backendSessionId, claudeSessionId, cwd, host } = req.query;
       const b = backend || 'claude';
       const rid = backendSessionId || claudeSessionId;
       if (!rid) return res.json({ todos: [] });
+      // Remote session: pull the transcript into the data/remote-jsonl cache
+      // first (same pattern as /api/session-messages) — without it the Steps
+      // list only worked if a chat attach had already warmed the cache.
+      if (host && hosts && b === 'claude') {
+        try { await hosts.fetchSessionJsonl(String(host), rid); } catch {}
+      }
       let session = null;
       for (const [, s] of activeSessions) {
         if ((s.backend || 'claude') === b && (s.backendSessionId === rid || s.claudeSessionId === rid)) { session = s; break; }
