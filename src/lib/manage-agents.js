@@ -484,9 +484,14 @@ export function installManageAgents(App, ctx = {}) {
         // say so \u2014 mirrors the CLI's own "API Usage Billing" statusline
         const lm = info.loginMethod;
         const lmLabel = (lm === 'console-key' || lm === 'env-key') ? t('API key') : lm === 'key-helper' ? 'apiKeyHelper' : '';
+        // apiKeyHelper OUTRANKS OAuth in the CLI (2.191.0, CW-H200 incident:
+        // fresh OAuth login + a leftover helper = every session bills the
+        // helper key while this row said just "logged in") \u2014 warn loudly.
+        const helperWarn = (info.keyHelper && lm !== 'key-helper')
+          ? ` <span class="ob-warn" title="${escHtml(t('The CLI prefers a configured apiKeyHelper over the OAuth login \u2014 sessions on this machine bill via the helper key. Remove apiKeyHelper from ~/.claude/settings.json to bill the subscription.'))}">\u26a0 ${t('apiKeyHelper overrides this login')}</span>` : '';
         left.innerHTML = `<b>${b.label}</b>${ver ? ` <span class="ob-ver">${escHtml(ver)}</span>` : ''} ${
           !info.installed ? `<span class="ob-bad">${t('not installed')}</span>`
-          : info.loggedIn ? `<span class="ob-ok">\u2713 ${t('logged in')}</span>${lmLabel ? ` <span class="ob-ver">${escHtml(lmLabel)}</span>` : ''}`
+          : info.loggedIn ? `<span class="ob-ok">\u2713 ${t('logged in')}</span>${lmLabel ? ` <span class="ob-ver">${escHtml(lmLabel)}</span>` : ''}${helperWarn}`
           : `<span class="ob-warn">${t('not logged in')}</span>`
         }`;
         const actions = document.createElement('div'); actions.className = 'agent-actions';
@@ -842,9 +847,15 @@ export function installManageAgents(App, ctx = {}) {
       // (goes stale after a /login switch — the 2.114.1 mixup class)
       const hEmailV = this._hostOwnUsage?.[selectedHost]?.orgEmail || racct?.subscription?.email;
       const hEmail = hEmailV ? escHtml(hEmailV) + ' · ' : '';
+      // NOT a preference ladder for the helper (2.191.0): the CLI prefers a
+      // configured apiKeyHelper OVER OAuth, so when both exist the row must
+      // show the helper as the effective billing, not hide it behind
+      // "logged in" (CW-H200: fresh OAuth + leftover helper = API billing).
+      const helperNote = racct?.keyHelper && racct?.subscription?.loggedIn
+        ? ` <span class="ob-warn" title="${escHtml(t('The CLI prefers a configured apiKeyHelper over the OAuth login — sessions on this machine bill via the helper key. Remove apiKeyHelper from ~/.claude/settings.json to bill the subscription.'))}">⚠ ${t('apiKeyHelper overrides this login')}</span>` : '';
       gIdent = racct && !racct.error
         ? (racct.subscription?.loggedIn
-            ? `${hEmail}<span class="ob-ok">${t('logged in')}</span>`
+            ? `${hEmail}<span class="ob-ok">${t('logged in')}</span>${helperNote}`
             : racct.cliKey?.present
             ? `<span class="ob-ok">${t('logged in')}</span> <span class="ob-ver">${t('API key')} …${escHtml(racct.cliKey.tail || '')}</span>`
             : racct.keyHelper

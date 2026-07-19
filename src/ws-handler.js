@@ -1362,6 +1362,16 @@ done`;
               // (subagents/workflows/wf_*/agent-<id>.jsonl) so a workflow phase's
               // agent opens in this same viewer.
               const fileCandidates = [];
+              // REMOTE parent (2.191.0, remote workflow viewer's View Log):
+              // pull the agent transcript into the local cache first — the
+              // local scan below then finds it like any other candidate.
+              const subHost = data.hostId || parentSession?.host || null;
+              if (subHost && hosts && /^[\w-]+$/.test(agentId)) {
+                try {
+                  const p = await hosts.fetchAgentJsonl(String(subHost), agentId, { claudeSessionId: claudeId });
+                  if (p) fileCandidates.push(p);
+                } catch (e) { console.error('remote agent jsonl fetch failed:', e.message); }
+              }
               for (const subDir of subDirs) {
                 fileCandidates.push(path.join(subDir, `agent-${agentId}.jsonl`));
                 let wfRuns = []; try { wfRuns = fs.readdirSync(path.join(subDir, 'workflows')); } catch {}

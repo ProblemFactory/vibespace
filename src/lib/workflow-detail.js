@@ -52,12 +52,13 @@ function fmtTokens(n) {
 }
 
 export function openWorkflowDetail(app, runId, opts = {}) {
-  const { claudeSessionId = '', cwd = '', name = '', syncId } = opts;
+  const { claudeSessionId = '', cwd = '', name = '', host = '', syncId } = opts;
 
   const existing = [...app.wm.windows.values()].find(w => w._workflowRunId === runId);
   if (existing) { app.wm.focusWindow(existing.id); return existing; }
 
-  const openSpec = { action: 'openWorkflowDetail', runId, claudeSessionId, cwd, name };
+  // host = the machine holding the run's artifacts (remote session, 2.191.0)
+  const openSpec = { action: 'openWorkflowDetail', runId, claudeSessionId, cwd, name, ...(host ? { host } : {}) };
   const winInfo = app.wm.createWindow({
     title: name || 'Workflow', type: 'workflow', syncId, openSpec, width: 480, height: 560,
   });
@@ -87,6 +88,7 @@ export function openWorkflowDetail(app, runId, opts = {}) {
       backendSessionId: claudeSessionId,
       claudeSessionId,
       cwd,
+      ...(host ? { hostId: host } : {}), // remote run → transcript fetched from the host
       agentKind: 'subagent',
       sourceKind: 'workflow',
       description: label || 'Workflow agent',
@@ -192,6 +194,7 @@ export function openWorkflowDetail(app, runId, opts = {}) {
     const q = new URLSearchParams({ runId });
     if (claudeSessionId) q.set('claudeSessionId', claudeSessionId);
     if (cwd) q.set('cwd', cwd);
+    if (host) q.set('host', host);
     try {
       const res = await fetch(`/api/workflow?${q}`);
       if (!res.ok) {

@@ -80,9 +80,9 @@ class ChatView {
       // Running-workflow chips: click → live detail window; poll needs ids
       onOpenWorkflow: (runId, name) => {
         const ids = this._getSessionIds();
-        this.app.openWorkflowDetail(runId, { claudeSessionId: ids.claudeId, cwd: ids.cwd, name });
+        this.app.openWorkflowDetail(runId, { claudeSessionId: ids.claudeId, cwd: ids.cwd, host: ids.host, name });
       },
-      getWorkflowIds: () => { const ids = this._getSessionIds(); return { claudeId: ids.claudeId, cwd: ids.cwd }; },
+      getWorkflowIds: () => { const ids = this._getSessionIds(); return { claudeId: ids.claudeId, cwd: ids.cwd, host: ids.host }; },
     });
     // Initial render: a brand-new session has no chatStatus yet — show the
     // honest unknown badges (model: ? / effort: ?) instead of an empty bar.
@@ -370,11 +370,12 @@ class ChatView {
       // View Workflow button (dynamic-workflow post-hoc detail)
       if (e.target.classList.contains('chat-workflow-view-btn')) {
         e.stopPropagation();
-        const { claudeId, cwd } = this._getSessionIds();
+        const { claudeId, cwd, host } = this._getSessionIds();
         this.app.openWorkflowDetail(e.target.dataset.wfRun, {
           name: e.target.dataset.wfName,
           claudeSessionId: claudeId,
           cwd,
+          host, // remote session ⇒ the run's artifacts live on the host (2.191.0)
         });
       }
     });
@@ -1440,7 +1441,7 @@ class ChatView {
 
   // Unified subagent viewer: works for both live (parentToolUseId) and completed (agentId)
   _openSubagentViewer({ parentToolUseId, threadId, agentId, description, agentRole = '', agentNickname = '' }) {
-    const { backend, backendSessionId, claudeId, cwd } = this._getSessionIds();
+    const { backend, backendSessionId, claudeId, cwd, host } = this._getSessionIds();
     if (backend === 'codex' && threadId) {
       const viewId = `view-${backend}-${threadId}`;
       if (!this._subagentViewers) this._subagentViewers = new Map();
@@ -1494,6 +1495,7 @@ class ChatView {
       sourceKind: 'subagent',
       parentThreadId: backendSessionId || null,
       cwd,
+      ...(host ? { hostId: host } : {}), // remote parent → agent transcript on the host
       description,
     };
     const winInfo = this.app.wm.createWindow({
@@ -1514,6 +1516,7 @@ class ChatView {
       backendSessionId,
       claudeSessionId: claudeId,
       cwd,
+      hostId: host || undefined,
     });
 
     // One-time handler for attach response — MUST self-guard (documented
