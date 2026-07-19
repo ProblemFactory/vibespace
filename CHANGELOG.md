@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.188.1 — 2026-07-19
+- **A truncation-poisoned remote-transcript cache for a STOPPED session now heals too.** The 2.187.0 self-heal relied on the remote file CHANGING (size/mtime mismatch → refetch); a pre-2.187.0 256KB stump stamped with full-size meta over a transcript that never grows again passed the size/mtime check forever and kept serving ancient history. The cache-valid short-circuit (slab + legacy ssh paths) now also requires the cached FILE to actually hold `meta.size` bytes — a stump fails the check and refetches completely. (Field verification on the reporting instance: both big transcripts' caches are byte-complete and the display API serves same-day messages.)
+
 ## 2.188.0 — 2026-07-18
 Remote multi-account coherence batch (all six gaps from the 4-way audit) + live email identity:
 - **Remote session windows now say WHOSE login they bill.** `sessionAuth` carries the session's machine (`hostName`): a remote host-login session's badge reads "CLI login @ \<host\>" (tooltip names the machine) instead of being byte-identical to a local one; remote TERMINAL sessions no longer show "KEY?" forever (the `remote-global` spawn state maps to the host's own login — `apiKeySource` is chat-stream-only and the /proc backfill probes the local ssh wrapper, so terminal sessions could never resolve). Session Properties' Billing line and the mobile chip get the same qualifier.

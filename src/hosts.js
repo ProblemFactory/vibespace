@@ -710,7 +710,12 @@ class HostManager {
         if (!remotePath) return fs.existsSync(cachePath) ? cachePath : null;
         const st = await dm.fsStat(remotePath);
         const size = st.stat.size, mtime = Math.floor(st.stat.mtimeMs / 1000);
-        if (meta && meta.size === size && meta.mtime === mtime && fs.existsSync(cachePath)) return cachePath;
+        // cache "valid" requires the FILE to actually hold meta.size bytes — a
+        // pre-2.187.0 truncated fetch stamped full-size meta over a 256KB stump,
+        // and for a transcript that never grows again (stopped session) the
+        // size/mtime match would serve the stump FOREVER (the self-heal only
+        // triggers when the remote file changes)
+        if (meta && meta.size === size && meta.mtime === mtime && (() => { try { return fs.statSync(cachePath).size === size; } catch { return false; } })()) return cachePath;
         fs.mkdirSync(dir, { recursive: true });
         let localSize = 0;
         try { localSize = fs.statSync(cachePath).size; } catch { }
@@ -746,7 +751,8 @@ class HostManager {
     if (!out) return fs.existsSync(cachePath) ? cachePath : null; // gone remotely — keep stale cache if any
     const [sizeMtime, remotePath] = [out.split('\n')[0], out.split('\n')[1]];
     const [size, mtime] = sizeMtime.split(' ').map(Number);
-    if (meta && meta.size === size && meta.mtime === mtime && fs.existsSync(cachePath)) return cachePath;
+    // same stump-integrity check as the slab path above
+    if (meta && meta.size === size && meta.mtime === mtime && (() => { try { return fs.statSync(cachePath).size === size; } catch { return false; } })()) return cachePath;
     if (size > maxBytes) throw new Error(`remote transcript too large (${(size / 1048576) | 0}MB)`);
     const buf = await this._ssh(h, `cat ${JSON.stringify(remotePath)}`, { timeoutMs: 120000, maxBuffer: maxBytes + 1024, encoding: 'buffer' });
     fs.mkdirSync(dir, { recursive: true });
