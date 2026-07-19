@@ -73,7 +73,7 @@ function registerWsHandler(wss, ctx) {
   const {
     activeSessions, WS_OPEN, broadcastActiveSessions, broadcastToSession, resizeSessionToMin,
     setupSessionPty, refreshWebuiPids, deleteSessionMeta, writeSessionMeta, readSessionMeta,
-    readLayouts, writeLayouts, getSyncStore, serverSetting, agentdRemote, dialBridge,
+    readLayouts, writeLayouts, getSyncStore, serverSetting, integrationEnabled, agentdRemote, dialBridge,
     sessionCounterRef, createSessionMessages,
     SOCKETS_DIR, BUFFERS_DIR, PTY_WRAPPER, CHAT_WRAPPER,
     NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, PORT, X_ENV,
@@ -308,6 +308,13 @@ function registerWsHandler(wss, ctx) {
           let spawnArgs = sessionSpec.args || [];
           let spawnEnvPairs = Object.entries(sessionSpec.env || {}).map(([k, v]) => `${k}=${v == null ? '' : String(v)}`);
           let spawnCwd = cwd;
+          // Integration master switch (agents.vibespaceIntegration, 2.190.0):
+          // OFF ⇒ this spawn is PRISTINE — no VIBESPACE_API, no agent tools on
+          // PATH, no statusline injection, no remote tools/hook-register/
+          // reverse-tunnel. VIBESPACE_SESSION_TOKEN alone is KEPT (Ctrl+G
+          // editor auth; inert without the api var — every consumer guards on
+          // both). Read per spawn = live.
+          let integrationOn = integrationEnabled ? integrationEnabled() : true;
           // Remote agent enablement (P3): a remote session can't reach the local
           // API at 127.0.0.1:<PORT>, and the vibespace-status/-task tools don't
           // exist on the remote box. So for any remote session we (1) open an
@@ -316,45 +323,63 @@ function registerWsHandler(wss, ctx) {
           // PATH. Returns pieces spliced into the ssh inner command. Node's
           // base64 is unwrapped (no newlines) so the blob is a single safe word.
           const remoteAgentSetup = () => {
+            // Base PATH/nvm exports — the terminal branch relies on the prelude
+            // alone to find node/claude on the host (chat branches re-export
+            // inside their inner command), so this part is UNCONDITIONAL even
+            // when tool shipping fails below.
+            let prelude = `export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; `;
+            let tokenAssign = '';
+            // ONE ship list, parameterized by the Integration master switch:
+            // ON  → all agent tools + hook + keeper + the per-session vsst_
+            //       token (over ssh STDIN — 2.126.0, argv is world-readable
+            //       via /proc/cmdline on the remote; secrets ride stdin into
+            //       0600 files, the inner command references the token via a
+            //       `VAR="$(cat …)"` shell prefix so the value never enters
+            //       any argv), then hook-register + tools PATH in the prelude.
+            // OFF → pristine spawn: ship ONLY the transport keeper, and only
+            //       for CHAT (remote chat persistence rides it, invoked by
+            //       absolute path — terminal uses remote dtach and needs
+            //       nothing); no hook-register, no token, no tools PATH, no
+            //       VIBESPACE_API reverse tunnel. A hook a PREVIOUS spawn
+            //       registered on the host stays inert (it guards on env we
+            //       no longer pass) — Manage Agents → host → Remove strips it.
+            const names = integrationOn
+              ? require('./hosts').HostManager.AGENT_TOOLS
+              : (sessionMode === 'chat' ? ['vibespace-remote-keeper'] : []);
+            const toolDir = path.dirname(EDITOR_CMD);
+            const present = names.filter((n) => { try { return fs.statSync(path.join(toolDir, n)).isFile(); } catch { return false; } });
+            if (present.length) {
+              try {
+                const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-tok-'));
+                try {
+                  const tokName = `.tok-${id}`; // id is [\w-] — shell-safe
+                  const tokArgs = [];
+                  if (integrationOn) {
+                    fs.writeFileSync(path.join(tmpDir, tokName), session.agentToken, { mode: 0o600 });
+                    tokArgs.push('-C', tmpDir, tokName);
+                  }
+                  const tar = execFileSync('tar', ['-c', '-C', toolDir, ...present, ...tokArgs], { timeout: 15000, maxBuffer: 8 * 1024 * 1024 });
+                  const h2 = hosts.get(data.hostId);
+                  execFileSync('ssh', [...hosts.sshArgs(h2, { multiplex: true }), '--', 'umask 077; mkdir -p "$HOME/.vibespace/bin"; tar -x -C "$HOME/.vibespace/bin"; chmod +x "$HOME/.vibespace/bin"/vibespace-* 2>/dev/null || true'],
+                    { input: tar, timeout: 20000 });
+                  if (integrationOn) {
+                    prelude += `export PATH="$HOME/.vibespace/bin:$PATH"; node "$HOME/.vibespace/bin/vibespace-hook-register.mjs" 2>/dev/null || true; `;
+                    tokenAssign = `VIBESPACE_SESSION_TOKEN="$(cat "$HOME/.vibespace/bin/${tokName}")" `;
+                  }
+                } finally { try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {} }
+              } catch (e) {
+                // tool shipping failed (an unreachable host fails the create
+                // later anyway) — session still runs, agent tools just degrade
+                console.error('[remote] tool distribution failed:', e.message);
+              }
+            }
+            if (!integrationOn) return { prelude, envPairs: [], tokenAssign: '', reverse: null };
             // Wide range → per-host collision (two sessions picking the same
             // port) is negligible; a collision only degrades the loser's tools
             // (ssh -R bind warns, session still runs), never breaks the session.
-            const rport = session._remotePort = 20000 + Math.floor(Math.random() * 40000);
-            const toolDir = path.dirname(EDITOR_CMD);
-            // Distribute the agent tools + hook + keeper AND the per-session
-            // vsst_ token over ssh STDIN (2.126.0, real user shock report: the
-            // old prelude inlined ~300KB of base64 blobs AND the session token
-            // in the command line — argv is world-readable via /proc/cmdline
-            // on the remote, so any local user could read the token and
-            // impersonate the agent through the reverse tunnel. Same lesson
-            // the account-key path already learned: secrets ride stdin into
-            // 0600 files, NEVER argv). One tar stream ships everything; the
-            // inner command references the token via a shell prefix
-            // assignment `VAR="$(cat …)"` — the value never enters any argv.
-            const names = require('./hosts').HostManager.AGENT_TOOLS;
-            const present = names.filter((n) => { try { return fs.statSync(path.join(toolDir, n)).isFile(); } catch { return false; } });
-            let prelude = '';
-            let tokenAssign = '';
-            try {
-              const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-tok-'));
-              try {
-                const tokName = `.tok-${id}`; // id is [\w-] — shell-safe
-                fs.writeFileSync(path.join(tmpDir, tokName), session.agentToken, { mode: 0o600 });
-                const tar = execFileSync('tar', ['-c', '-C', toolDir, ...present, '-C', tmpDir, tokName], { timeout: 15000, maxBuffer: 8 * 1024 * 1024 });
-                const h2 = hosts.get(data.hostId);
-                execFileSync('ssh', [...hosts.sshArgs(h2, { multiplex: true }), '--', 'umask 077; mkdir -p "$HOME/.vibespace/bin"; tar -x -C "$HOME/.vibespace/bin"; chmod +x "$HOME/.vibespace/bin"/vibespace-* 2>/dev/null || true'],
-                  { input: tar, timeout: 20000 });
-                prelude = `export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; export PATH="$HOME/.vibespace/bin:$PATH"; node "$HOME/.vibespace/bin/vibespace-hook-register.mjs" 2>/dev/null || true; `;
-                tokenAssign = `VIBESPACE_SESSION_TOKEN="$(cat "$HOME/.vibespace/bin/${tokName}")" `;
-              } finally { try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {} }
-            } catch (e) {
-              // tool shipping failed (an unreachable host fails the create
-              // later anyway) — session still runs, agent tools just degrade
-              console.error('[remote] tool distribution failed:', e.message);
-            }
             // VIBESPACE_API is not a secret; the token rides tokenAssign only.
-            const envPairs = [`VIBESPACE_API=http://127.0.0.1:${rport}`];
-            return { prelude, envPairs, tokenAssign, reverse: `${rport}:127.0.0.1:${PORT}` };
+            const rport = session._remotePort = 20000 + Math.floor(Math.random() * 40000);
+            return { prelude, envPairs: [`VIBESPACE_API=http://127.0.0.1:${rport}`], tokenAssign, reverse: `${rport}:127.0.0.1:${PORT}` };
           };
           // B.3: the same agent prelude for a DIAL device, over the device
           // link (no ssh). Tools + the 0600 token ride fsWrite; VIBESPACE_API
@@ -365,27 +390,36 @@ function registerWsHandler(wss, ctx) {
           // ssh-only prelude/reverse fields. Degrades to bare env on any error
           // (the session still runs; tools just aren't present).
           const deviceAgentSetup = async (h, sid) => {
+            // Integration OFF ⇒ tools/token/hook-register/back-tunnel are all
+            // skipped — the device pipe/pty session itself is transport (the
+            // daemon IS the persistence layer). Only BILLING (an API-key file)
+            // still needs device round trips; with no key either, there is
+            // nothing to place at all.
+            if (!integrationOn && !spawnAccount?.secret) return { envPairs: [], tokenAssign: '' };
             const dm = await hosts.device(h.id); // dial → deviceForDial
             const home = String((await dm.runCmd('sh', ['-c', 'printf %s "$HOME"'], { timeoutMs: 8000 }))?.stdout || '').trim() || '/root';
             const bin = `${home}/.vibespace/bin`;
-            await dm.fsMkdir(bin);
-            const toolDir = path.dirname(EDITOR_CMD);
-            const names = require('./hosts').HostManager.AGENT_TOOLS;
-            for (const n of names) {
-              try { const buf = fs.readFileSync(path.join(toolDir, n)); await dm.fsWrite(`${bin}/${n}`, buf); } catch { }
-            }
             const tokName = `.tok-${sid}`;
-            await dm.fsWrite(`${bin}/${tokName}`, Buffer.from(session.agentToken));
-            // chmod: tools executable, token 0600, then register the hook in
-            // the device's OWN claude/codex configs (its local CLI fires it)
-            await dm.runCmd('sh', ['-c',
-              `chmod +x "${bin}"/vibespace-* 2>/dev/null; chmod 600 "${bin}/${tokName}"; `
-              + `node "${bin}/vibespace-hook-register.mjs" 2>/dev/null || true`], { timeoutMs: 12000 }).catch(() => {});
-            // VIBESPACE_API back-tunnel: a loopback port ON THE DEVICE whose
-            // accepts ride the dial link back into our own server port.
-            const net = require('net');
-            const rf = await dm.reverseForward({ port: 0, connectLocal: () => net.connect(PORT, '127.0.0.1') });
-            session._dialReversePort = rf.port;
+            let rf = null;
+            if (integrationOn) {
+              await dm.fsMkdir(bin);
+              const toolDir = path.dirname(EDITOR_CMD);
+              const names = require('./hosts').HostManager.AGENT_TOOLS;
+              for (const n of names) {
+                try { const buf = fs.readFileSync(path.join(toolDir, n)); await dm.fsWrite(`${bin}/${n}`, buf); } catch { }
+              }
+              await dm.fsWrite(`${bin}/${tokName}`, Buffer.from(session.agentToken));
+              // chmod: tools executable, token 0600, then register the hook in
+              // the device's OWN claude/codex configs (its local CLI fires it)
+              await dm.runCmd('sh', ['-c',
+                `chmod +x "${bin}"/vibespace-* 2>/dev/null; chmod 600 "${bin}/${tokName}"; `
+                + `node "${bin}/vibespace-hook-register.mjs" 2>/dev/null || true`], { timeoutMs: 12000 }).catch(() => {});
+              // VIBESPACE_API back-tunnel: a loopback port ON THE DEVICE whose
+              // accepts ride the dial link back into our own server port.
+              const net = require('net');
+              rf = await dm.reverseForward({ port: 0, connectLocal: () => net.connect(PORT, '127.0.0.1') });
+              session._dialReversePort = rf.port;
+            }
             // Account billing over the device link (B.3 tail, user directive
             // 2026-07-15: "oauth默认禁止搬运，api key可以"). Mirrors
             // remoteAccountEnv: an API KEY value ships via fsWrite into a 0600
@@ -398,11 +432,13 @@ function registerWsHandler(wss, ctx) {
             // it out of every argv.
             let acctAssign = '';
             if (spawnAccount && spawnAccount.secret) {
+              await dm.fsMkdir(`${home}/.vibespace`); // integration-OFF path skipped the bin mkdir
               const kf = `${home}/.vibespace/${spawnAccount.id}.key`;
               await dm.fsWrite(kf, Buffer.from(spawnAccount.secret.value));
               await dm.runCmd('sh', ['-c', `chmod 600 "${kf}"`], { timeoutMs: 6000 }).catch(() => {});
               acctAssign = `${spawnAccount.secret.var}="$(cat "${kf}")" `;
             }
+            if (!integrationOn) return { envPairs: [], tokenAssign: acctAssign };
             return {
               envPairs: [`VIBESPACE_API=http://127.0.0.1:${rf.port}`],
               tokenAssign: acctAssign + `VIBESPACE_SESSION_TOKEN="$(cat "${bin}/${tokName}")" `,
@@ -518,7 +554,9 @@ function registerWsHandler(wss, ctx) {
                   if (spawnAccount?.secret) throw e;
                   console.warn('[dial] agent setup degraded:', e.message); return { envPairs: [], tokenAssign: '' };
                 });
-                const shellCmd = `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:$HOME/.vibespace/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ${shellResolve}${da.tokenAssign}exec env `
+                // tools PATH only while integrated — leftover tools from an
+                // earlier ON spawn must not be name-resolvable in a pristine one
+                const shellCmd = `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:${integrationOn ? '$HOME/.vibespace/bin:' : ''}$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ${shellResolve}${da.tokenAssign}exec env `
                   + [...da.envPairs.map(shq), ...spawnEnvPairs.map(shq)].join(' ')
                   + ' ' + [rcmd0, ...(backend === 'shell' ? ['-l'] : spawnArgs.map(shq))].join(' ');
                 const cfg = {
@@ -623,7 +661,8 @@ function registerWsHandler(wss, ctx) {
                   if (spawnAccount?.secret) throw e; // wrong billing must fail, not silently degrade
                   console.warn('[dial] agent setup degraded:', e.message); return { envPairs: [], tokenAssign: '' };
                 });
-                const shellCmd = `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:$HOME/.vibespace/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ${da.tokenAssign}exec env `
+                // tools PATH only while integrated (see the pty branch note)
+                const shellCmd = `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:${integrationOn ? '$HOME/.vibespace/bin:' : ''}$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ${da.tokenAssign}exec env `
                   + [...da.envPairs.map(shq), ...spawnEnvPairs.map(shq)].join(' ')
                   + ' ' + [rcmd, ...rargs.map(shq)].join(' ');
                 const cfg = {
@@ -787,7 +826,7 @@ done`;
           // terminals, incl. the Manage-Agents update/login helpers) or codex
           // made them exit instantly ("terminated").
           const usageEnvPairs = [];
-          if (backend === 'claude' && sessionMode === 'terminal' && !data.hostId && USAGE_STATUSLINE_CMD) {
+          if (integrationOn && backend === 'claude' && sessionMode === 'terminal' && !data.hostId && USAGE_STATUSLINE_CMD) {
             try {
               let settingsObj = {};
               const si = spawnArgs.indexOf('--settings');
@@ -811,9 +850,16 @@ done`;
               // Agent-facing env: the vibespace tools (data/bin on PATH)
               // authenticate with the per-session token; Task Group belonging is
               // resolved server-side from that token (no task id in the env).
-              `VIBESPACE_API=http://127.0.0.1:${PORT}`,
+              // Integration OFF strips VIBESPACE_API + the data/bin PATH prefix
+              // (the sane-PATH fallback itself stays — the systemd-minimal-env
+              // incident class); the TOKEN stays deliberately: data/bin/code
+              // (Ctrl+G, invoked via the absolute EDITOR path) authenticates
+              // with it, it's never model-visible, and every consumer (hook,
+              // tools, codex wrapper) guards on api AND token so token-alone is
+              // inert. The CLI itself never reads either var.
+              ...(integrationOn ? [`VIBESPACE_API=http://127.0.0.1:${PORT}`] : []),
+              `PATH=${integrationOn ? path.dirname(EDITOR_CMD) + ':' : ''}${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
               `VIBESPACE_SESSION_TOKEN=${session.agentToken}`,
-              `PATH=${path.dirname(EDITOR_CMD)}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
               // Probed working X display (see server.js detectXDisplay) — the CLI
               // reads the clipboard itself on Ctrl+V, so it needs BOTH vars
               `DISPLAY=${X_ENV?.DISPLAY || process.env.DISPLAY || ''}`,
@@ -831,7 +877,9 @@ done`;
                   // context via thread/inject_items by calling /api/agent/*. The
                   // spawned CLI gets these separately via the `env VAR=val` argv
                   // prefix; the wrapper doesn't, hence this. Always the LOCAL port.
-                  VIBESPACE_API: `http://127.0.0.1:${PORT}`,
+                  // Integration OFF drops VIBESPACE_API (token kept — see the
+                  // argv-prefix note above; wrapper guards require api AND token).
+                  ...(integrationOn ? { VIBESPACE_API: `http://127.0.0.1:${PORT}` } : {}),
                   VIBESPACE_SESSION_TOKEN: session.agentToken,
                   ...Object.fromEntries(Object.entries(sessionSpec.env || {}).map(([k, v]) => [k, v == null ? '' : String(v)])),
                   // Remote resilience (2.124.0): tell the wrapper HOW to
@@ -868,7 +916,7 @@ done`;
           // bust the host's discovery cache so the sidebar's remote zone sees
           // the new session on the next poll instead of after the TTL.
           if (session.host) {
-            scheduleCtxSync?.(session, id);
+            if (integrationOn) scheduleCtxSync?.(session, id); // ctx-folder sync is task-context machinery
             setTimeout(() => { try { hosts?.invalidateDiscovery?.(session.host); } catch {} }, 3000);
           }
 

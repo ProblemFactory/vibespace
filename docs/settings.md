@@ -122,6 +122,24 @@ Overrides persist in the layout auto-save.
 |---------|------|---------|-------------|
 | `session.defaultMode` | enum | `chat` | Default mode for new sessions and single-click resume: Terminal or Chat |
 
+### Integration
+
+Everything VibeSpace adds *into* your agent sessions lives here — and all of it can be turned off.
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `agents.vibespaceIntegration` | boolean | `true` | **Master switch.** OFF = pristine claude/codex: hook registration removed from `~/.claude/settings.json` + `~/.codex/hooks.json` immediately (restored on re-enable unless you removed the hook manually in Manage Agents), new sessions spawn with no VibeSpace env/tools/statusline, and already-running sessions stop receiving injected context, nudges and task reads. Terminal sessions started before the flip keep their spawn-time statusline until restarted. Ctrl+G editor, session persistence and remote transport are unaffected. Every option below applies only while this is ON. |
+| `agents.stopBookkeepingNudge` | boolean | `true` | Stop-time bookkeeping nudge (one short follow-up when a session ends a turn with stale board state) |
+| `agents.stopNudgeStaleMinutes` | number | `10` | Nudge only when the session hasn't updated its status for this long (1-240) |
+| `agents.stopNudgeCooldownMinutes` | number | `30` | Minimum gap between nudges per session (2-720) |
+| `agents.perTurnToolReminder` | boolean | `true` | One-line vibespace-tools reminder injected with every prompt |
+| `agents.contextUpdateDiffs` | boolean | `true` | Mid-session Task Group changes delivered as diffs instead of full re-injection |
+| `agents.injectPreamble` | text | `''` | Custom standing instructions injected once per session (≤4000 chars) |
+| `agents.perTurnExtra` | text | `''` | Custom text injected with EVERY prompt (≤500 chars) |
+| `agents.stopNudgeExtra` | text | `''` | Custom text prepended to the stop nudge (≤500 chars) |
+| `agents.allowGroupManagement` | boolean | `false` | Let designated "Group manager" sessions create/configure Task Groups via CLI |
+| `agents.groupManagementRoots` | string | `~` | Comma-separated path prefixes manager agents may use for group folders |
+
 ### Claude
 
 | Setting | Type | Default | Description |
