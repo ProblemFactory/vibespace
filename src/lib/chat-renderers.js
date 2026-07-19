@@ -183,7 +183,8 @@ class ChatRenderers {
       label = `/${cmdMatch[1]}`;
       if (argsMatch) detail = argsMatch[1].trim();
     } else if (stdoutMatch) {
-      const so = stdoutMatch[1].trim();
+      // TUI echoes carry raw ANSI (e.g. "Set model to [1mopus[22m") — strip
+      const so = stripAnsi(stdoutMatch[1]).trim();
       label = so.substring(0, 80);
       if (so.length > 80) { label += '…'; detail = so; }
     } else if (hookMatch) {

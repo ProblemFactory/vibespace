@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.188.3 — 2026-07-19
+Residual-observations sweep (real reports from the day's sessions):
+- **A remote session card's machine prefix can no longer vanish from its path line** (real report: one CW-H200 card showed "CW-H200: /path" and its sibling just "…/naturalhg/mega-fish" — was it local?). The Active-zone card path ran `abbrevPath` over the host-prefixed cwd string, eating the "CW-H200: " prefix on deeper paths; and its baked "…/" never un-truncated when the sidebar was widened. The host now renders as its own never-truncating span and the path left-truncates via pure CSS (rtl, same trick as `.session-card-cwd`), so width changes re-evaluate naturally.
+- **A chat window whose session silently vanished across a server restart flips to read-only + Resume bar** instead of sitting with a live-looking input that answers nothing: if a reconnect re-attach gets neither `attached` nor `error` within 20s (the create-in-flight-during-restart case holds an id the new server never answers for), the window resolves itself.
+- **Local-command echoes strip ANSI** ("Set model to `[1m`opus`[22m`" rendered the raw escape codes as text).
+- **Usage window "By billing type" knows `remote-host`** (rendered as a raw key with default styling since 2.128.0).
+
 ## 2.188.2 — 2026-07-19
 - **Scrolling back DOWN through chat history no longer stalls at the rendered window's edge** (real report: content wouldn't advance downward — only jiggling up/down loaded "a little more" each time, until scrolling far enough up and clicking the pin-to-bottom button). Once parked at max scrollTop, `scroll` events stop firing while `wheel` events keep coming — the exact mirror of the long-fixed top-edge (`scrollTop=0`) case. The wheel handler's bottom-edge branch only covered teleport mode; the normal window-mode `_extendBottom` is now triggered there too, so downward pagination chains smoothly.
 

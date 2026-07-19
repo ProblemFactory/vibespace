@@ -455,6 +455,7 @@ const BILLING_META = {
   'cli-global-login': { label: () => t('Claude CLI login (unattributed)'), cls: 'global' },
   'codex-cli-login': { label: () => t('Codex CLI login (unattributed)'), cls: 'global' },
   'unknown-account': { label: () => t('Unknown account'), cls: 'global' },
+  'remote-host': { label: () => t('Remote host (its own login)'), cls: 'sub' },
 };
 function renderBilling(d) {
   const sec = section(t('By billing type'));

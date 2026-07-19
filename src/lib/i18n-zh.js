@@ -2040,4 +2040,6 @@ export default {
   "blocked on this host": "此主机上不可用",
   "The default is global, and “{name}” can’t run on {host} — new sessions there keep using its own login.": "默认账号是全局的，而 “{name}” 无法在 {host} 上运行——那台机器上的新会话仍会使用它自己的登录。",
   "managed automatically — each session spawn refreshes the tools": "自动管理——每次创建会话都会刷新这些工具",
+  "The session no longer exists on the server (likely a restart) — resume to continue.": "该会话在服务器上已不存在（可能经历了重启）——点击 Resume 继续。",
+  "Remote host (its own login)": "远程主机（其自身登录）",
 };

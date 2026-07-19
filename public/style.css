@@ -2330,8 +2330,15 @@ label.cfg-row {
 .wb-active-card { border-left: 3px solid var(--wb-strip, var(--border)) !important; }
 .wb-card-path {
   font-size: 10px; color: var(--text-dim); padding: 1px 2px 0 2px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  display: flex; align-items: baseline; gap: 4px; min-width: 0;
+  overflow: hidden; white-space: nowrap;
 }
+/* host prefix NEVER truncates; the path left-truncates via CSS so widening
+   the sidebar restores it (the old baked "…/" abbreviation never did) —
+   same rtl trick as .session-card-cwd / .mounts-path-text */
+.wb-card-path-host { flex-shrink: 0; color: var(--text-secondary); }
+.wb-card-path-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
+.wb-card-path-text::before { content: '\200e'; }
 .wb-proj-dot {
   width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
   background: var(--wb-proj-color, var(--text-dim));
