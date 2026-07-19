@@ -215,7 +215,7 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
       hint.className = 'empty-hint';
       hint.textContent = app.settings?.get('agents.allowGroupManagement')
         ? t('Globally enabled — a designated session can list/create/configure/bind EVERY group and act on any of them with --group (audited in each group\'s activity log). The agent is told about these powers on its next turn.')
-        : t('Also requires Settings → Session → "Allow agents to manage Task Groups" (currently off).');
+        : t('Also requires Settings → Integration → "Allow agents to manage Task Groups" (currently off).');
       mgrSec.appendChild(hint);
     }
 
