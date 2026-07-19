@@ -249,6 +249,7 @@ class App {
     this._setupLayoutManager();
     this._setupUsage();
     installUserTodos(this); // global "For you" inbox (agent-filed user TODOs)
+    this._initMaintenanceBanner(); // operator-onsite transparency strip
     this._commandMode = new CommandMode(this, this.settings);
 
     // Listen for editor open/close requests (from editor-helper.sh via server HTTP→WebSocket)
@@ -438,6 +439,33 @@ class App {
   // In-place chrome customization (the pattern desktops/browsers use: right-
   // click the bar itself). These write the SAME settings as the Settings
   // dialog — the menu is just a discoverable shortcut.
+  // ── Maintenance banner (2.189.0): when an operator/support agent is
+  // actively connected to this instance troubleshooting it, a persistent
+  // amber strip says so (transparency for onsite debugging). Server state
+  // survives restarts and auto-expires; the strip is a normal flex child of
+  // #main-wrapper, so the workspace reflows proportionally under it.
+  _initMaintenanceBanner() {
+    const render = (m) => {
+      let el = document.getElementById('maintenance-banner');
+      if (!m?.active) { el?.remove(); clearTimeout(this._maintTimer); return; }
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'maintenance-banner';
+        const wrap = document.getElementById('main-wrapper');
+        if (!wrap) return;
+        wrap.insertBefore(el, wrap.firstChild);
+      }
+      const since = m.since ? new Date(m.since).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+      el.innerHTML = `<span class="mb-ic">🛠</span><span class="mb-text">${escHtml(t('Maintenance: a support agent is connected to this instance for troubleshooting'))}`
+        + `${m.message ? ' — ' + escHtml(m.message) : ''}`
+        + `${since ? ` <span class="mb-since">(${escHtml(t('since {time}', { time: since }))})</span>` : ''}</span>`;
+      clearTimeout(this._maintTimer);
+      if (m.until) this._maintTimer = setTimeout(() => render({ active: false }), Math.max(1000, m.until - Date.now()));
+    };
+    fetchJson('/api/maintenance').then((m) => { if (m) render(m); }).catch(() => {});
+    this.ws.onGlobal((msg) => { if (msg.type === 'maintenance-updated') render(msg.maintenance); });
+  }
+
   _setupChromeContextMenus() {
     const s = this.settings;
     const check = (label, on) => (on ? '\u2713 ' : '\u2003 ') + label;

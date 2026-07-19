@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.189.0 — 2026-07-19
+- **Maintenance mode** (user request): when an operator/support agent is actively connected to an instance troubleshooting it, a persistent amber strip across the top says so — transparency for onsite debugging. `GET/POST /api/maintenance` (cookie-authed): `{on:true, message?, by?, hours?}` sets it (default 2h, max 24h, **auto-expires** so a forgotten toggle can't linger), `{on:false}` clears; state persists in `data/maintenance.json` (survives the server restarts troubleshooting tends to involve) and broadcasts live (`maintenance-updated`). The strip is a normal flex child of `#main-wrapper`, so the workspace reflows under it. Verified e2e on a throwaway server (enable → banner with message + since-time on a fresh page load; disable → gone).
+
 ## 2.188.3 — 2026-07-19
 Residual-observations sweep (real reports from the day's sessions):
 - **A remote session card's machine prefix can no longer vanish from its path line** (real report: one CW-H200 card showed "CW-H200: /path" and its sibling just "…/naturalhg/mega-fish" — was it local?). The Active-zone card path ran `abbrevPath` over the host-prefixed cwd string, eating the "CW-H200: " prefix on deeper paths; and its baked "…/" never un-truncated when the sidebar was widened. The host now renders as its own never-truncating span and the path left-truncates via pure CSS (rtl, same trick as `.session-card-cwd`), so width changes re-evaluate naturally.

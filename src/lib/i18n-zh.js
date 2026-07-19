@@ -2042,4 +2042,6 @@ export default {
   "managed automatically — each session spawn refreshes the tools": "自动管理——每次创建会话都会刷新这些工具",
   "The session no longer exists on the server (likely a restart) — resume to continue.": "该会话在服务器上已不存在（可能经历了重启）——点击 Resume 继续。",
   "Remote host (its own login)": "远程主机（其自身登录）",
+  "Maintenance: a support agent is connected to this instance for troubleshooting": "维护模式：支持人员/agent 正连接到此实例进行排障",
+  "since {time}": "始于 {time}",
 };

@@ -3534,6 +3534,39 @@ app.get('/api/self-update/status', (req, res) => {
   res.json({ running, log });
 });
 
+// ── Maintenance mode (2.189.0): operator-onsite transparency ──
+// When someone (an admin / a support agent) is actively connected to this
+// instance troubleshooting it, a persistent banner tells the user so. State
+// survives server restarts (troubleshooting often restarts the server) and
+// AUTO-EXPIRES (default 2h, max 24h) so a forgotten toggle can't linger.
+const MAINT_FILE = path.join(__dirname, 'data', 'maintenance.json');
+let _maintenance = null;
+try { _maintenance = JSON.parse(fs.readFileSync(MAINT_FILE, 'utf-8')); } catch {}
+function maintState() {
+  if (_maintenance?.active && _maintenance.until && Date.now() > _maintenance.until) _maintenance = { active: false };
+  return _maintenance?.active ? _maintenance : { active: false };
+}
+app.get('/api/maintenance', (req, res) => res.json(maintState()));
+app.post('/api/maintenance', (req, res) => {
+  const b = req.body || {};
+  if (b.on) {
+    const hours = Math.min(24, Math.max(0.25, Number(b.hours) || 2));
+    _maintenance = {
+      active: true,
+      message: String(b.message || '').slice(0, 300),
+      by: String(b.by || '').slice(0, 80),
+      since: Date.now(),
+      until: Date.now() + hours * 3600e3,
+    };
+  } else {
+    _maintenance = { active: false };
+  }
+  try { fs.writeFileSync(MAINT_FILE, JSON.stringify(_maintenance)); } catch {}
+  const json = JSON.stringify({ type: 'maintenance-updated', maintenance: maintState() });
+  wss.clients.forEach((c) => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
+  res.json({ success: true, maintenance: maintState() });
+});
+
 app.get('/api/version', async (req, res) => {
   if (versionInfo.commit === null) {
     try { versionInfo.commit = execFileSync('git', ['-C', __dirname, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf-8', timeout: 3000 }).trim(); }

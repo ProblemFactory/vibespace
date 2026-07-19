@@ -667,6 +667,16 @@ html, body {
   display: flex; flex-direction: column; height: 100vh; height: 100dvh;
   transition: margin-left 0.2s ease;
 }
+/* Maintenance-mode strip (operator-onsite transparency) — first flex child
+   of #main-wrapper; the workspace reflows under it */
+#maintenance-banner {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 5px 12px; font-size: 12px; flex-shrink: 0; text-align: center;
+  background: color-mix(in srgb, var(--yellow, #e5c07b) 16%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--yellow, #e5c07b) 40%, transparent);
+  color: var(--text);
+}
+#maintenance-banner .mb-since { color: var(--text-secondary); }
 #main-wrapper.sidebar-resizing { transition: none; }
 .sidebar-resize-preview {
   position: fixed;

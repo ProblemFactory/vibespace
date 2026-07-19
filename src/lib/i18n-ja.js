@@ -2042,4 +2042,6 @@ export default {
   "managed automatically — each session spawn refreshes the tools": "自動管理——セッション作成のたびにツールが更新されます",
   "The session no longer exists on the server (likely a restart) — resume to continue.": "このセッションはサーバー上に存在しません（再起動の可能性）——Resume で続行してください。",
   "Remote host (its own login)": "リモートホスト（ホスト自身のログイン）",
+  "Maintenance: a support agent is connected to this instance for troubleshooting": "メンテナンス：サポート担当/エージェントがこのインスタンスに接続してトラブルシューティング中です",
+  "since {time}": "{time} から",
 };
