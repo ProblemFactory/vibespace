@@ -196,9 +196,15 @@ class ChatView {
         if (this._teleported) this._maybeSeekEarlier();        // teleported: seek older by line
         else if (this._windowStart > 0) this._extendTop();
         else this._maybeSeekEarlier();                         // registered tail exhausted → seek gap
-      } else if (e.deltaY > 0 && this._teleported
-          && list.scrollHeight - list.scrollTop - list.clientHeight < 10) {
-        this._maybeSeekLater();                                // teleported: seek newer by line
+      } else if (e.deltaY > 0 && list.scrollHeight - list.scrollTop - list.clientHeight < 10) {
+        // BOTTOM edge mirror of the top-edge fix above: parked at max
+        // scrollTop, wheel events keep coming but scroll events DON'T — the
+        // window-mode branch was missing here, so scrolling back down through
+        // history stalled at the rendered window's end and only a jiggle
+        // (up+down = one scroll event) advanced it a page at a time (real
+        // report: "得不断上翻下翻才会触发往下一点点").
+        if (this._teleported) this._maybeSeekLater();          // teleported: seek newer by line
+        else if (this._windowEnd < this._total) this._extendBottom();
       }
     }, { passive: true });
 

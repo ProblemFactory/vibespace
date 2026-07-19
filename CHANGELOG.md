@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.188.2 — 2026-07-19
+- **Scrolling back DOWN through chat history no longer stalls at the rendered window's edge** (real report: content wouldn't advance downward — only jiggling up/down loaded "a little more" each time, until scrolling far enough up and clicking the pin-to-bottom button). Once parked at max scrollTop, `scroll` events stop firing while `wheel` events keep coming — the exact mirror of the long-fixed top-edge (`scrollTop=0`) case. The wheel handler's bottom-edge branch only covered teleport mode; the normal window-mode `_extendBottom` is now triggered there too, so downward pagination chains smoothly.
+
 ## 2.188.1 — 2026-07-19
 - **A truncation-poisoned remote-transcript cache for a STOPPED session now heals too.** The 2.187.0 self-heal relied on the remote file CHANGING (size/mtime mismatch → refetch); a pre-2.187.0 256KB stump stamped with full-size meta over a transcript that never grows again passed the size/mtime check forever and kept serving ancient history. The cache-valid short-circuit (slab + legacy ssh paths) now also requires the cached FILE to actually hold `meta.size` bytes — a stump fails the check and refetches completely. (Field verification on the reporting instance: both big transcripts' caches are byte-complete and the display API serves same-day messages.)
 
