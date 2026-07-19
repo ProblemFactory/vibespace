@@ -228,7 +228,13 @@ export function installSessionLifecycle(App, ctx = {}) {
       const r = await fetch('/api/kill-pid', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid, host: host || undefined }) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok || j.error) showToast(j.error || t('Terminate failed'), { type: 'error' });
-      else showToast(t('Terminated'));
+      else {
+        showToast(t('Terminated'));
+        // The server invalidated the host's discovery cache; the sidebar's
+        // remote-zone cache has no TTL — force one fresh load so the card
+        // flips to STOPPED without a manual ⟳.
+        if (host) this.sidebar?._loadRemoteHost?.(host, { fresh: true });
+      }
     } catch { showToast(t('Terminate failed'), { type: 'error' }); }
   },
 
@@ -518,7 +524,20 @@ export function installSessionLifecycle(App, ctx = {}) {
     // sentinel (a bare '' would fall through to the default account). For a
     // remote session that login lives on the HOST — say so.
     const cliLabel = rHostId ? t('CLI login') + ' @ ' + rHostName : t('CLI login');
-    items.push({ label: (currentId === null ? '✓ ' : '') + cliLabel, action: () => { if (currentId !== null) doSwitch('subscription', cliLabel); } });
+    // apiKeyHelper honesty (2.191.0, CW-H200): when the CLI itself reported
+    // apiKeySource=apiKeyHelper, "CLI login" IS the helper's API key — the
+    // machine's OAuth login is overridden by the CLI's own precedence, and no
+    // switcher pick can change that. Say so instead of leaving a menu that
+    // looks like it should work but "does nothing".
+    const helperActive = live?.auth?.source === 'api-other' && live?.auth?.detail === 'apiKeyHelper';
+    items.push({
+      label: (currentId === null ? '✓ ' : '') + cliLabel + (helperActive ? ' · apiKeyHelper (API)' : ''),
+      action: () => { if (currentId !== null) doSwitch('subscription', cliLabel); },
+    });
+    if (helperActive) {
+      items.push({ label: t('Why API billing? apiKeyHelper is set on the machine'), disabled: true,
+        title: t('The CLI prefers a configured apiKeyHelper over the OAuth login — sessions on this machine bill via the helper key. Remove apiKeyHelper from ~/.claude/settings.json to bill the subscription.') });
+    }
     for (const a of accts) {
       const cur = currentId === a.id;
       const suffix = (!isCodex && (a.type || 'api') !== 'subscription') ? ' · API' : '';
@@ -777,7 +796,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         this.openSessionProps(spec.sessionKey, { syncId });
         break;
       case 'openWorkflowDetail':
-        this.openWorkflowDetail(spec.runId, { syncId, claudeSessionId: spec.claudeSessionId, cwd: spec.cwd, name: spec.name });
+        this.openWorkflowDetail(spec.runId, { syncId, claudeSessionId: spec.claudeSessionId, cwd: spec.cwd, name: spec.name, host: spec.host });
         break;
       case 'attachTmuxSession':
         this.attachTmuxSession(spec.tmuxTarget, spec.name, spec.cwd);
@@ -821,6 +840,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           backendSessionId: spec.backendSessionId || spec.claudeSessionId,
           claudeSessionId: spec.claudeSessionId,
           cwd: spec.cwd,
+          hostId: spec.hostId, // remote workflow agent → transcript on the host (2.191.0)
         });
         const handler = (msg) => {
           if (!this.wm.windows.has(winInfo.id)) { this.ws.offGlobal(handler); return; }

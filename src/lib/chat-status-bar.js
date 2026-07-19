@@ -163,7 +163,7 @@ export class ChatStatusBar {
       const ids = this._getWorkflowIds() || {};
       for (const [runId, wf] of [...this._workflows]) {
         try {
-          const r = await fetch(`/api/workflow?runId=${encodeURIComponent(runId)}&claudeSessionId=${encodeURIComponent(ids.claudeId || '')}&cwd=${encodeURIComponent(ids.cwd || '')}`);
+          const r = await fetch(`/api/workflow?runId=${encodeURIComponent(runId)}&claudeSessionId=${encodeURIComponent(ids.claudeId || '')}&cwd=${encodeURIComponent(ids.cwd || '')}${ids.host ? `&host=${encodeURIComponent(ids.host)}` : ''}`);
           if (r.status === 404) { this._workflows.delete(runId); continue; }
           const d = await r.json().catch(() => null);
           if (!d || (d.status && d.status !== 'running')) { this._workflows.delete(runId); continue; }

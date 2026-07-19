@@ -3299,6 +3299,10 @@ app.get('/api/backend-status', (req, res) => {
   if (!out.claude.loggedIn) {
     try { if (JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', 'settings.json'), 'utf-8'))?.apiKeyHelper) { out.claude.loggedIn = true; out.claude.loginMethod = 'key-helper'; } } catch {}
   }
+  // apiKeyHelper as an INDEPENDENT flag (2.191.0): the CLI's precedence puts
+  // a configured helper ABOVE OAuth, so "loggedIn (oauth)" alone can mislead
+  // — the dialog needs to warn when both are present (CW-H200 incident).
+  try { if (JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', 'settings.json'), 'utf-8'))?.apiKeyHelper) out.claude.keyHelper = true; } catch {}
   out.codex = probe(CODEX_CMD);
   out.codex.loggedIn = false;
   try { out.codex.loggedIn = fs.existsSync(path.join(os.homedir(), '.codex', 'auth.json')); } catch {}

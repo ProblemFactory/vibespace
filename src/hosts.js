@@ -17,7 +17,7 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
-const { claimJsonls } = require('./session-store');
+const { claimJsonls, cwdToProjectDir } = require('./session-store');
 
 const SSH_BASE_OPTS = [
   '-o', 'BatchMode=yes',
@@ -506,6 +506,13 @@ class HostManager {
       + 'elif grep -q "\\"apiKeyHelper\\"" "$HOME/.claude/settings.json" 2>/dev/null; then echo "claude-login|yes|key-helper"; '
       + 'elif command -v security >/dev/null 2>&1 && security find-generic-password -s "Claude Code-credentials" >/dev/null 2>&1; then echo "claude-login|yes|keychain"; '
       + 'else echo "claude-login|no"; fi; '
+      // apiKeyHelper as an INDEPENDENT flag (2.191.0, real CW-H200 mixup): the
+      // CLI's real precedence puts a configured helper ABOVE OAuth (verified
+      // in the 2.1.211 binary — HS() disables claude.ai auth whenever the
+      // merged settings carry apiKeyHelper, valid creds or not). The elif
+      // ladder above hides the helper the moment OAuth creds exist, so the
+      // dialog said "logged in" while every session billed via the helper.
+      + 'grep -q "\\"apiKeyHelper\\"" "$HOME/.claude/settings.json" 2>/dev/null && echo "claude-helper|yes"; '
       + '[ -f "$HOME/.codex/auth.json" ] && echo "codex-login|yes" || echo "codex-login|no"';
     const out = await this._hostShell(h, probe, { timeoutMs: 10000 });
     const st = { claude: {}, codex: {} };
@@ -513,6 +520,7 @@ class HostManager {
       const [k, v, ver] = line.split('|');
       if (k === 'claude' || k === 'codex') { st[k].installed = v === 'yes'; if (ver) st[k].version = ver.trim(); }
       else if (k === 'claude-login') { st.claude.loggedIn = v === 'yes'; if (ver) st.claude.loginMethod = ver.trim(); }
+      else if (k === 'claude-helper') st.claude.keyHelper = v === 'yes';
       else if (k === 'codex-login') st.codex.loggedIn = v === 'yes';
     }
     return st;
@@ -691,9 +699,29 @@ class HostManager {
   // when fresh; stat+cat when stale). Session ids are UUIDs — no collisions.
   async fetchSessionJsonl(id, sessionId, { maxBytes = 64 * 1024 * 1024 } = {}) {
     if (!/^[\w-]+$/.test(sessionId)) throw new Error('bad session id');
+    return this._fetchRemoteByFind(id, `-maxdepth 2 -name ${JSON.stringify(sessionId + '.jsonl')}`,
+      path.join(id, sessionId + '.jsonl'), { maxBytes });
+  }
+  // Remote SUBAGENT transcript (2.191.0, remote workflow viewer's View Log):
+  // agent-<id>.jsonl lives under <projDir>/<sid>/subagents/ (plain agents) or
+  // <sid>/subagents/workflows/wf_*/ (dynamic-workflow agents) — same
+  // cache/invalidation model as the session transcript.
+  async fetchAgentJsonl(id, agentId, { claudeSessionId = '', maxBytes = 32 * 1024 * 1024 } = {}) {
+    if (!/^[\w-]+$/.test(agentId)) throw new Error('bad agent id');
+    const sidPath = claudeSessionId && /^[\w-]+$/.test(claudeSessionId)
+      ? `-path ${JSON.stringify('*/' + claudeSessionId + '/subagents/*')}` : `-path '*/subagents/*'`;
+    return this._fetchRemoteByFind(id, `-maxdepth 6 -name ${JSON.stringify('agent-' + agentId + '.jsonl')} ${sidPath}`,
+      path.join(id, 'agents', 'agent-' + agentId + '.jsonl'), { maxBytes });
+  }
+  // Shared fetch-and-cache core (generalized from fetchSessionJsonl 2.191.0 —
+  // findExpr = the find(1) predicate under "$HOME"/.claude/projects; cacheRel
+  // = path under data/remote-jsonl/). All the 2.187.0/2.188.1 integrity
+  // invariants live HERE: count-gated reads, never stamp meta for bytes not
+  // received, cache-valid requires the FILE to hold meta.size bytes.
+  async _fetchRemoteByFind(id, findExpr, cacheRel, { maxBytes = 64 * 1024 * 1024 } = {}) {
     const h = this.get(id);
-    const dir = path.join(this.dataDir, 'remote-jsonl', id);
-    const cachePath = path.join(dir, sessionId + '.jsonl');
+    const cachePath = path.join(this.dataDir, 'remote-jsonl', cacheRel);
+    const dir = path.dirname(cachePath);
     const metaPath = cachePath + '.meta';
     let meta = null;
     try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8')); } catch {}
@@ -705,7 +733,7 @@ class HostManager {
       try {
         const dm = await this.device(id);
         // locate via the discovery snapshot (cached-ish) or a targeted find
-        const find = await dm.runCmd('sh', ['-c', `find "$HOME"/.claude/projects -maxdepth 2 -name ${JSON.stringify(sessionId + '.jsonl')} 2>/dev/null | head -1`]);
+        const find = await dm.runCmd('sh', ['-c', `find "$HOME"/.claude/projects ${findExpr} 2>/dev/null | head -1`]);
         const remotePath = find.stdout.trim();
         if (!remotePath) return fs.existsSync(cachePath) ? cachePath : null;
         const st = await dm.fsStat(remotePath);
@@ -746,7 +774,7 @@ class HostManager {
         return cachePath;
       } catch (e2) { /* legacy fallback below */ }
     }
-    const probe = `f=$(find "$HOME"/.claude/projects -maxdepth 2 -name ${JSON.stringify(sessionId + '.jsonl')} 2>/dev/null | head -1); [ -n "$f" ] && stat -c '%s %Y' "$f" && echo "$f"`;
+    const probe = `f=$(find "$HOME"/.claude/projects ${findExpr} 2>/dev/null | head -1); [ -n "$f" ] && { stat -c '%s %Y' "$f" 2>/dev/null || stat -f '%z %m' "$f"; } && echo "$f"`;
     const out = (await this._ssh(h, probe, { timeoutMs: 15000 })).toString().trim();
     if (!out) return fs.existsSync(cachePath) ? cachePath : null; // gone remotely — keep stale cache if any
     const [sizeMtime, remotePath] = [out.split('\n')[0], out.split('\n')[1]];
@@ -761,6 +789,62 @@ class HostManager {
     fs.renameSync(tmp, cachePath);
     fs.writeFileSync(metaPath, JSON.stringify({ size, mtime, fetchedAt: Date.now() }));
     return cachePath;
+  }
+
+  // Remote WORKFLOW state (2.191.0, remote View Workflow): one read-only
+  // compound probe (ssh multiplexed ~50ms warm, or dial runCmd) returning the
+  // terminal snapshot + live journal + agent-file inventory for a run. TTL
+  // cache 2s — below the viewer's 2.5s live poll, so N clients ≈ 1 round trip
+  // per 2s. Payload sections are nonce-delimited (snapshot/journal content is
+  // arbitrary text — fixed markers could collide). stat is GNU-else-BSD so
+  // macOS dial devices work.
+  async fetchWorkflowState(id, runId, claudeSessionId = '', cwd = '') {
+    if (!/^wf_[\w-]{1,64}$/.test(runId)) throw new Error('bad run id');
+    const h = this.get(id);
+    if (!this._wfStateCache) this._wfStateCache = new Map();
+    const key = id + ':' + runId;
+    const hit = this._wfStateCache.get(key);
+    if (hit && Date.now() - hit.at < 2000) return hit.val;
+    const nonce = crypto.randomBytes(8).toString('hex');
+    const M = (s) => `__VSWF_${nonce}_${s}__`;
+    const sidOk = claudeSessionId && /^[\w-]+$/.test(claudeSessionId);
+    const projDir = sidOk && cwd ? cwdToProjectDir(String(cwd)) : '';
+    const targeted = projDir
+      ? `S="$P"/${JSON.stringify(projDir)}/${JSON.stringify(claudeSessionId)}/workflows/${JSON.stringify(runId + '.json')}; [ -f "$S" ] || S=""; D="$P"/${JSON.stringify(projDir)}/${JSON.stringify(claudeSessionId)}/subagents/workflows/${JSON.stringify(runId)}; [ -d "$D" ] || D=""; `
+      : '';
+    const script = `P="$HOME/.claude/projects"; S=""; D=""; ${targeted}`
+      + `[ -n "$S" ] || S=$(find "$P" -maxdepth 4 -name ${JSON.stringify(runId + '.json')} -path '*/workflows/*' 2>/dev/null | head -1); `
+      + `[ -n "$D" ] || D=$(find "$P" -maxdepth 5 -name ${JSON.stringify(runId)} -type d -path '*/subagents/workflows/*' 2>/dev/null | head -1); `
+      + `mt(){ stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null; }; `
+      + `echo "SNAPMT:$( [ -n "$S" ] && mt "$S" )"; `
+      + `echo "JMT:$( [ -n "$D" ] && mt "$D/journal.jsonl" )"; `
+      + `echo "AMT:$( [ -n "$D" ] && for f in "$D"/agent-*.jsonl; do [ -f "$f" ] && mt "$f"; done | sort -n | tail -1 )"; `
+      + `[ -n "$D" ] && ls -1 "$D" 2>/dev/null | sed 's/^/AG:/'; `
+      + `echo "NM:$( [ -n "$D" ] && ls -1 "$(dirname "$(dirname "$(dirname "$D")")")/workflows/scripts" 2>/dev/null | grep -F -- ${JSON.stringify('-' + runId + '.js')} | head -1 )"; `
+      // dial run-cmd slices stdout at 1MB — keep the whole payload under it
+      // (snapshot 700K + journal 250K + headers; a truncated journal only
+      // degrades attempt labels, a truncated snapshot 500s with a clear error)
+      + `echo ${JSON.stringify(M('SNAP'))}; [ -n "$S" ] && head -c 700000 "$S"; `
+      + `echo; echo ${JSON.stringify(M('JOURNAL'))}; [ -n "$D" ] && head -c 250000 "$D/journal.jsonl"; echo`;
+    const out = await this._hostShell(h, script, { timeoutMs: 20000 });
+    const [head, rest] = out.split(M('SNAP') + '\n');
+    if (rest === undefined) throw new Error('workflow probe returned no payload');
+    const [snapRaw, journalRaw] = rest.split('\n' + M('JOURNAL') + '\n');
+    const headLines = head.split('\n');
+    const grab = (p) => { const l = headLines.find((x) => x.startsWith(p)); return l ? l.slice(p.length).trim() : ''; };
+    const val = {
+      snapMtime: Number(grab('SNAPMT:')) || 0,
+      journalMtime: Number(grab('JMT:')) || 0,
+      agentMtime: Number(grab('AMT:')) || 0,
+      agentFiles: headLines.filter((x) => x.startsWith('AG:')).map((x) => x.slice(3).trim()).filter(Boolean),
+      scriptName: grab('NM:'),
+      snapText: (snapRaw || '').trim() || null,
+      journalText: (journalRaw === undefined ? '' : journalRaw),
+      hasRunDir: false,
+    };
+    val.hasRunDir = !!(val.journalMtime || val.agentMtime || val.agentFiles.length);
+    this._wfStateCache.set(key, { at: Date.now(), val });
+    return val;
   }
 
   // ── Remote usage (2.127.0) ──
@@ -972,7 +1056,9 @@ class HostManager {
         claimed.add(jm.path);
         runningIds.add(jid);
         matchedLocks.add(w.lock);
-        sessions.push({ sessionId: jid, cwd: w.lock.cwd, status: 'remote-running', host: h.id, hostName: h.name, mtime: jm.mtime, keeperSid: (keeperBySession.get(jid) || keeperBySession.get(w.lock.sessionId))?.sid });
+        // pid rides to the card so Terminate can reach killRemotePid (2.191.0
+        // — without it the EXTERNAL card's confirm ended in a silent no-op)
+        sessions.push({ sessionId: jid, cwd: w.lock.cwd, status: 'remote-running', host: h.id, hostName: h.name, mtime: jm.mtime, pid: Number(w.lock.pid) || undefined, keeperSid: (keeperBySession.get(jid) || keeperBySession.get(w.lock.sessionId))?.sid });
       }
       // Locks with no JSONL yet (brand-new session, nothing flushed): list by
       // the lock's own sessionId instead of dropping them (or, before this fix,
@@ -980,7 +1066,7 @@ class HostManager {
       for (const l of g.locks) {
         if (matchedLocks.has(l) || !l.sessionId || runningIds.has(l.sessionId)) continue;
         runningIds.add(l.sessionId);
-        sessions.push({ sessionId: l.sessionId, cwd: l.cwd || null, status: 'remote-running', host: h.id, hostName: h.name, mtime: l.startedAt || Date.now(), keeperSid: keeperBySession.get(l.sessionId)?.sid });
+        sessions.push({ sessionId: l.sessionId, cwd: l.cwd || null, status: 'remote-running', host: h.id, hostName: h.name, mtime: l.startedAt || Date.now(), pid: Number(l.pid) || undefined, keeperSid: keeperBySession.get(l.sessionId)?.sid });
       }
     }
     for (const j of jsonls) {

@@ -797,7 +797,7 @@ export class StageManager {
       // Workflow snapshots/journals can be gone (project dir cleaned) — probe.
       if (spec.action === 'openWorkflowDetail' && spec.runId) {
         try {
-          const r = await fetch(`/api/workflow?runId=${encodeURIComponent(spec.runId)}&claudeSessionId=${encodeURIComponent(spec.claudeSessionId || '')}&cwd=${encodeURIComponent(spec.cwd || '')}`);
+          const r = await fetch(`/api/workflow?runId=${encodeURIComponent(spec.runId)}&claudeSessionId=${encodeURIComponent(spec.claudeSessionId || '')}&cwd=${encodeURIComponent(spec.cwd || '')}${spec.host ? `&host=${encodeURIComponent(spec.host)}` : ''}`);
           if (r.status === 404) { skipped++; continue; }
         } catch {}
       }

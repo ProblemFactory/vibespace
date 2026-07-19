@@ -269,6 +269,10 @@ export function installSidebarWorkbench(Sidebar) {
         // ADOPTS the live process via keeper-attach instead of respawning.
         status: s.keeperSid ? 'stopped' : (s.status === 'remote-running' ? 'external' : 'stopped'),
         keeperSid: s.keeperSid || undefined,
+        // pid travels from the host's lock file → Terminate on an EXTERNAL
+        // remote card can reach killRemotePid (without it the card's confirm
+        // dialog ended in a silent no-op — real report, 2.191.0)
+        pid: s.pid || undefined,
         startedAt: s.mtime,
       };
     },

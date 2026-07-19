@@ -396,35 +396,36 @@ function setup(ctx) {
   // agentId. Every non-newest attempt of a key without its own result is a
   // DEAD superseded attempt (its transcript dead-ends in "[Request
   // interrupted by user]") — label it instead of showing a bare interrupt.
-  function journalAttempts(runDir) {
+  function journalAttemptsFromText(text) {
     const started = new Set(), done = new Set();
     const keyOf = new Map(), lastAttempt = new Map();
-    try {
-      for (const line of fs.readFileSync(path.join(runDir, 'journal.jsonl'), 'utf-8').split('\n')) {
-        const t = line.trim(); if (!t) continue;
-        let o; try { o = JSON.parse(t); } catch { continue; }
-        if (!o.agentId) continue;
-        if (o.type === 'started') {
-          started.add(o.agentId);
-          if (o.key) { keyOf.set(o.agentId, o.key); lastAttempt.set(o.key, o.agentId); }
-        } else if (o.type === 'result') done.add(o.agentId);
-      }
-    } catch {}
+    for (const line of String(text || '').split('\n')) {
+      const t = line.trim(); if (!t) continue;
+      let o; try { o = JSON.parse(t); } catch { continue; }
+      if (!o.agentId) continue;
+      if (o.type === 'started') {
+        started.add(o.agentId);
+        if (o.key) { keyOf.set(o.agentId, o.key); lastAttempt.set(o.key, o.agentId); }
+      } else if (o.type === 'result') done.add(o.agentId);
+    }
     const superseded = new Set();
     for (const [id, k] of keyOf) { if (!done.has(id) && lastAttempt.get(k) !== id) superseded.add(id); }
     return { started, done, superseded };
   }
+  function journalAttempts(runDir) {
+    let text = '';
+    try { text = fs.readFileSync(path.join(runDir, 'journal.jsonl'), 'utf-8'); } catch {}
+    return journalAttemptsFromText(text);
+  }
 
-  function readLiveWorkflow(runDir, runId) {
-    const { started, done, superseded } = journalAttempts(runDir);
+  // Pure core shared by the local reader and the remote (?host=) branch
+  // (2.191.0): the live skeleton built from a journal-attempts object, the
+  // run dir's file inventory, and the persisted script filename.
+  function liveWorkflowFromParts({ runId, attempts, agentFiles = [], scriptName = '' }) {
+    const { started, done, superseded } = attempts;
     // A transcript file can exist before its journal 'started' line lands.
-    try { for (const f of fs.readdirSync(runDir)) { const m = f.match(/^agent-([0-9a-f]+)\.jsonl$/); if (m) started.add(m[1]); } } catch {}
-    // Best-effort workflow name from the persisted script filename (<name>-<runId>.js).
-    let name = 'Workflow';
-    try {
-      const scriptsDir = path.join(path.resolve(runDir, '..', '..', '..'), 'workflows', 'scripts');
-      for (const f of fs.readdirSync(scriptsDir)) { if (f.endsWith(`-${runId}.js`)) { name = f.slice(0, -(`-${runId}.js`.length)); break; } }
-    } catch {}
+    for (const f of agentFiles) { const m = String(f).match(/^agent-([0-9a-f]+)\.jsonl$/); if (m) started.add(m[1]); }
+    const name = scriptName && scriptName.endsWith(`-${runId}.js`) ? scriptName.slice(0, -(`-${runId}.js`.length)) : 'Workflow';
     const agents = [...started].map((id) => ({ index: 0, label: '', model: '', state: done.has(id) ? 'done' : (superseded.has(id) ? 'superseded' : 'progress'), agentId: id }));
     agents.sort((a, b) => a.agentId.localeCompare(b.agentId));
     return {
@@ -435,10 +436,45 @@ function setup(ctx) {
       phases: [{ index: 0, title: 'Agents (live — phase names, labels & tokens appear when the run finishes)', agents }],
     };
   }
+  function readLiveWorkflow(runDir, runId) {
+    const attempts = journalAttempts(runDir);
+    let agentFiles = []; try { agentFiles = fs.readdirSync(runDir); } catch {}
+    // Best-effort workflow name from the persisted script filename (<name>-<runId>.js).
+    let scriptName = '';
+    try {
+      const scriptsDir = path.join(path.resolve(runDir, '..', '..', '..'), 'workflows', 'scripts');
+      for (const f of fs.readdirSync(scriptsDir)) { if (f.endsWith(`-${runId}.js`)) { scriptName = f; break; } }
+    } catch {}
+    return liveWorkflowFromParts({ runId, attempts, agentFiles, scriptName });
+  }
 
-  router.get('/api/workflow', (req, res) => {
-    const { claudeSessionId, cwd, runId } = req.query;
+  router.get('/api/workflow', async (req, res) => {
+    const { claudeSessionId, cwd, runId, host } = req.query;
     if (!runId || !/^wf_[\w-]{1,64}$/.test(runId)) return res.status(400).json({ error: 'valid runId required' });
+    // REMOTE session's workflow (2.191.0, real report "workflow not found"):
+    // the snapshot + run dir live on the HOST — one read-only compound probe
+    // (hosts.fetchWorkflowState, 2s TTL) feeds the same decision tree as the
+    // local path below via the shared pure cores.
+    if (host) {
+      try {
+        const st = await hosts.fetchWorkflowState(String(host), runId, String(claudeSessionId || ''), String(cwd || ''));
+        if (!st.snapText && !st.hasRunDir) return res.status(404).json({ error: 'workflow not found (no run directory or snapshot for this id)' });
+        const attempts = journalAttemptsFromText(st.journalText);
+        const liveParts = { runId, attempts, agentFiles: st.agentFiles, scriptName: st.scriptName };
+        if (st.snapText) {
+          const liveS = Math.max(st.journalMtime || 0, st.agentMtime || 0);
+          if (st.snapMtime && liveS > st.snapMtime + 15) return res.json({ ...liveWorkflowFromParts(liveParts), resumed: true });
+          try {
+            const out = normalizeWorkflowSnapshot(JSON.parse(st.snapText), runId);
+            for (const ph of out.phases || []) for (const ag of ph.agents || []) {
+              if (attempts.superseded.has(ag.agentId) && ag.state !== 'done') ag.state = 'superseded';
+            }
+            return res.json(out);
+          } catch (err) { return res.status(500).json({ error: 'failed to parse workflow snapshot: ' + err.message }); }
+        }
+        return res.json(liveWorkflowFromParts(liveParts));
+      } catch (err) { return res.status(502).json({ error: 'remote workflow fetch failed: ' + err.message }); }
+    }
     // Terminal snapshot wins (it's complete). Prefer it even if the run dir
     // also still exists (snapshot is written at completion, dir lingers) —
     // EXCEPT when the run was RESUMED: resumeFromRunId REUSES the runId
