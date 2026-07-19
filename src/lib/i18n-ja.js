@@ -1228,6 +1228,8 @@ export default {
   "After nudging a session once, wait at least this long before nudging it again.": "一度ナッジした後、再度ナッジするまで最低この時間待ちます。",
   "Integration": "連携",
   "apiKeyHelper overrides this login": "apiKeyHelper がこのログインを上書きしています",
+  "That file lives on {host} — this terminal runs on {mine}; path not typed": "そのファイルは {host} 上にあります — このターミナルは {mine} で動作中のためパスは入力されませんでした",
+  "this machine": "このマシン",
   "The CLI prefers a configured apiKeyHelper over the OAuth login — sessions on this machine bill via the helper key. Remove apiKeyHelper from ~/.claude/settings.json to bill the subscription.": "CLI は OAuth ログインより設定済みの apiKeyHelper を優先します — このマシンのセッションは helper のキーで課金されます。サブスクリプションで課金するには ~/.claude/settings.json から apiKeyHelper を削除してください。",
   "Why API billing? apiKeyHelper is set on the machine": "なぜ API 課金？マシンに apiKeyHelper が設定されています",
   "VibeSpace agent integration (master switch)": "VibeSpace エージェント連携（マスタースイッチ）",

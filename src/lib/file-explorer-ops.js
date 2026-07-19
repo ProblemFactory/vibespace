@@ -91,8 +91,9 @@ export function installExplorerOps(FileExplorer) {
       if (!this._host) items.push({ label: t('Share this folder…'), submenu: () => this._shareFolderSubmenu(fullPath) });
       items.push({ label: t('Sessions'), submenu: () => {
         const sub = [];
-        sub.push({ label: t('+ New session'), action: () => this.app.showNewSessionDialog({ cwd: fullPath }) });
-        const sessionsHere = (this.app.sidebar?._allSessions || []).filter(s => s.cwd === fullPath);
+        sub.push({ label: t('+ New session'), action: () => this.app.showNewSessionDialog({ cwd: fullPath, hostId: this._host || undefined }) });
+        // Same path on a DIFFERENT machine is a different folder — match host too
+        const sessionsHere = (this.app.sidebar?._allSessions || []).filter(s => s.cwd === fullPath && (s.host || null) === (this._host || null));
         for (const s of sessionsHere) {
           const customName = this.app.sidebar?.getCustomName(s);
           const dispName = customName || s.name || s.sessionId.substring(0, 12) + '...';
@@ -105,6 +106,7 @@ export function installExplorerOps(FileExplorer) {
             agentNickname: s.agentNickname || '',
             sourceKind: s.sourceKind || '',
             parentThreadId: s.parentThreadId || null,
+            hostId: s.host || undefined, keeperSid: s.keeperSid || undefined, // remote sessions resume ON their host
           };
           sub.push({ label: `${badge}${dispName}`, action: () => {
             if (s.status === 'stopped') this.app.resumeSession(s.sessionId, s.cwd, customName || s.name, agentOpts);

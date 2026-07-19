@@ -445,6 +445,16 @@ class LayoutManager {
               backend, backendSessionId, hostId: ws.openSpec?.hostId || undefined,
             });
             if (viewWin) applyPosition(viewWin, ws);
+          } else if (ws.openSpec?.hostId) {
+            // REMOTE session: /api/sessions is LOCAL discovery only, so a
+            // remote session can never stoppedMatch — restore it view-only
+            // from the openSpec identity (viewSession is host-capable and
+            // prefetches the transcript); dropping it silently lost the
+            // window on every restore (audit 2.192.0)
+            const viewWin = this.app.viewSession(backendSessionId, cwd, customName || ws.title || 'Session', {
+              backend, backendSessionId, hostId: ws.openSpec.hostId,
+            });
+            if (viewWin) applyPosition(viewWin, ws);
           }
         }
       } else if (ws.type === 'chat') {
@@ -473,6 +483,16 @@ class LayoutManager {
           if (stoppedMatch) {
             const viewWin = this.app.viewSession(stoppedMatch.sessionId, stoppedMatch.cwd, customName || stoppedMatch.name || ws.title || 'Session', {
               backend, backendSessionId, hostId: ws.openSpec?.hostId || undefined,
+            });
+            if (viewWin) applyPosition(viewWin, ws);
+          } else if (ws.openSpec?.hostId) {
+            // REMOTE session: /api/sessions is LOCAL discovery only, so a
+            // remote session can never stoppedMatch — restore it view-only
+            // from the openSpec identity (viewSession is host-capable and
+            // prefetches the transcript); dropping it silently lost the
+            // window on every restore (audit 2.192.0)
+            const viewWin = this.app.viewSession(backendSessionId, cwd, customName || ws.title || 'Session', {
+              backend, backendSessionId, hostId: ws.openSpec.hostId,
             });
             if (viewWin) applyPosition(viewWin, ws);
           }
@@ -809,6 +829,7 @@ class LayoutManager {
               this.app.resumeSession(stoppedMatch.sessionId, stoppedMatch.cwd, customName || stoppedMatch.name, {
                 backend,
                 backendSessionId,
+                hostId: ws.openSpec?.hostId || undefined, // remote sessions resume ON their host
               });
               // resumeSession creates window asynchronously; find it after a delay
               const capturedWs = ws;

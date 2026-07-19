@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.192.0 — 2026-07-19
+**Local-vs-remote parity sweep** (user-requested audit of the 2.191.0 bug class: 5 parallel auditors, 29 findings → 15 fixed here, 4 parked). The fixed gaps, worst first:
+- **Resume/Fork of a remote session no longer runs on the WRONG machine**: the terminated-window Resume bar, Fork (incl. fork-from-message), the Ctrl+K palette (keeperSid), Task-board Resume-all, the explorer folder menu's session submenu, and layout-restore's dead-session fallback all dropped `hostId` — each spawned a local `claude --resume <remote-id>` (double-writer class) or silently lost the window. All thread host/keeperSid now.
+- **Chat Stop button can no longer kill a remote session's transport**: the 2s SIGINT fallback fired at `_childPid`, which for remote sessions is the LOCAL ssh-keeper pipe / agentd bridge — not claude. Remote sessions now rely on the protocol interrupt alone.
+- **macOS/BSD ssh hosts work**: remote discovery + the file explorer listing used GNU-only `find -printf` (errors swallowed by `2>/dev/null` → empty history / every folder "empty"); RemoteFs info/stat used GNU `stat -c`/`du -sb` (size 0, binary files as mojibake); the B-4058 pre-resume orphan sweep was /proc-only (silently swept nothing). All now probe GNU once and fall back to `stat -f`/`lsof`+`ps` (verified with a BSD find/stat shim + real-ssh GNU regression).
+- **Explorer upload retry keeps the host** (the resilient per-file retry after a failed multipart posted to the LOCAL server at the remote path — silent wrong-machine landing).
+- **File links in view-only/terminated remote chat windows resolve on the right machine** (the renderers' live-list lookup lost host+cwd for `view-…` windows; they now use ChatView's openSpec-backed identity).
+- **Session Properties "Agent steps" works for remote sessions** (/api/session-todos gained ?host= transcript prefetch).
+- **/goal met-detection for remote chats** kicks a throttled (30s) transcript refresh so goal_status attachments are seen.
+- **`~/…` upload dirs land correctly on ssh hosts** (a single-quoted `~` never expands — files went to a literal `~` directory; path quoting is now tilde-aware across write/mkdir/rename/copy/info/stat).
+- **Explorer→terminal drag refuses cross-machine paths with a toast** (typing a remote-A path into a local terminal handed the agent a plausible nonexistent — or wrong same-named — file).
+- Host bootstrap tries Homebrew for dtach on Macs before the Linux package managers.
+Parked (backlog): remote-terminal image paste (upload+type-path design), remote Ctrl+G editor, codex remote-session discovery, restart-dedup's remote liveness signal.
+
 ## 2.191.0 — 2026-07-19
 Three remote-session gaps from one field report (CW-H200):
 - **"Logged in with OAuth but the session says API billing — apiKeyHelper" is now explained everywhere it appears** (root cause verified by disassembling the CLI 2.1.211 binary: a configured `apiKeyHelper` in the merged settings UNCONDITIONALLY disables claude.ai OAuth auth — fresh valid creds or not — so the badge was truthful and the Manage-Agents "logged in" was the misleading surface). `backendStatus`/local `/api/backend-status` now report helper presence as an INDEPENDENT flag instead of the last rung of an elif ladder; Manage Agents (backend row + host roster row) shows an amber "⚠ apiKeyHelper overrides this login" with the unset-guidance whenever both are present; the billing switcher labels the CLI-login entry "· apiKeyHelper (API)" and adds a why-row explaining that no switcher pick can override the CLI's own precedence. Remedy on such a host: remove `apiKeyHelper` from `~/.claude/settings.json`, then resume the session.

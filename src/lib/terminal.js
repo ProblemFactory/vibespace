@@ -4,7 +4,8 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { THEMES } from './themes.js';
-import { attachPopoverClose } from './utils.js';
+import { attachPopoverClose, showToast } from './utils.js';
+import { t } from './i18n.js';
 
 // Web fonts loaded via Google Fonts (always available)
 const WEB_FONTS = [
@@ -391,6 +392,19 @@ class TerminalSession {
       e.preventDefault(); container.classList.remove('drop-target');
       const filePath = e.dataTransfer.getData('application/x-file-path') || e.dataTransfer.getData('text/plain');
       if (filePath && filePath.startsWith('/')) {
+        // Cross-machine guard (audit 2.192.0): the explorer stamps the file's
+        // host; typing a remote-A path into a local (or other-host) terminal
+        // hands the agent a plausible-looking path that doesn't exist there —
+        // or a same-named DIFFERENT file on fleet machines with mirrored
+        // layouts. Compare against this session's host and refuse loudly.
+        const srcHost = e.dataTransfer.getData('application/x-file-host') || '';
+        const myHost = this.winInfo?._openSpec?.hostId || '';
+        if ((srcHost || '') !== (myHost || '')) {
+          showToast(t('That file lives on {host} — this terminal runs on {mine}; path not typed', {
+            host: srcHost || t('this machine'), mine: myHost || t('this machine'),
+          }), { type: 'error' });
+          return;
+        }
         // Shell-escape spaces and special chars, then type into terminal
         const escaped = filePath.replace(/([ '"\\$`!&(){}|;<>?*#~])/g, '\\$1');
         this.ws.send({ type: 'input', sessionId, data: escaped });

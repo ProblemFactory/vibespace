@@ -730,16 +730,29 @@ function registerWsHandler(wss, ctx) {
                 // reached. The keeper stop still runs to clean the keeper's own
                 // run-file bookkeeping.
                 const cleanScript = `RID=${shq(data.resumeId)}
-for pdir in /proc/[0-9]*; do
-  ls -l "$pdir/fd" 2>/dev/null | grep -q "/$RID.jsonl" || continue
-  pid=$(basename "$pdir")
-  case "$(tr '\\0' ' ' < "$pdir/cmdline" 2>/dev/null)" in *claude*) kill -TERM "$pid" 2>/dev/null;; esac
-done
+# writer sweep, portable: /proc fd scan on Linux; lsof on macOS/BSD ssh hosts
+# (no /proc there — the old script silently swept NOTHING, audit 2.192.0).
+# cmdline checks use POSIX \`ps -o args=\` (same idiom as killRemotePid).
+if [ -d /proc/1 ] || [ -d /proc/self ]; then
+  for pdir in /proc/[0-9]*; do
+    [ -e "$pdir" ] || continue
+    ls -l "$pdir/fd" 2>/dev/null | grep -q "/$RID.jsonl" || continue
+    pid=$(basename "$pdir")
+    case "$(ps -p "$pid" -o args= 2>/dev/null)" in *claude*) kill -TERM "$pid" 2>/dev/null;; esac
+  done
+elif command -v lsof >/dev/null 2>&1; then
+  J=$(find "$HOME/.claude/projects" -maxdepth 2 -name "$RID.jsonl" 2>/dev/null | head -1)
+  if [ -n "$J" ]; then
+    for pid in $(lsof -t -- "$J" 2>/dev/null); do
+      case "$(ps -p "$pid" -o args= 2>/dev/null)" in *claude*) kill -TERM "$pid" 2>/dev/null;; esac
+    done
+  fi
+fi
 find "$HOME/.claude/sessions" -maxdepth 1 -name '*.json' 2>/dev/null | while read -r f; do
   pid=$(basename "$f" .json)
   grep -q "\"sessionId\":\"$RID\"" "$f" 2>/dev/null || continue
   kill -0 "$pid" 2>/dev/null || continue
-  case "$(tr '\\0' ' ' < /proc/$pid/cmdline 2>/dev/null)" in *claude*) kill -TERM "$pid" 2>/dev/null;; esac
+  case "$(ps -p "$pid" -o args= 2>/dev/null)" in *claude*) kill -TERM "$pid" 2>/dev/null;; esac
 done
 find "$HOME/.vibespace/run" -maxdepth 1 -name '*.json' 2>/dev/null | while read -r kf; do
   grep -q "$RID" "$kf" 2>/dev/null || continue

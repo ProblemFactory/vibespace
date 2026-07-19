@@ -209,7 +209,9 @@ export function installExplorerUploads(FileExplorer) {
       // unreadable ones are reported as failed.
       for (const ref of upload.domRefs.values()) ref.pctLabel.textContent = t('Retrying…');
       const { uploaded, failed } = await uploadFilesBatched(files, {
-        destDir, preservePaths: isFolder,
+        // host MUST survive the retry — dropping it sent the salvaged files to
+        // the LOCAL server at the remote path (silent wrong-machine landing)
+        destDir, preservePaths: isFolder, host: this._host || undefined,
         onProgress: (d, total) => {
           const p = Math.round(d / total * 100);
           for (const ref of upload.domRefs.values()) { ref.fill.style.width = p + '%'; ref.pctLabel.textContent = p + '%'; }

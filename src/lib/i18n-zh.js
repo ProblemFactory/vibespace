@@ -1228,6 +1228,8 @@ export default {
   "After nudging a session once, wait at least this long before nudging it again.": "提醒过一次后，至少间隔这么久才会再次提醒同一会话。",
   "Integration": "集成",
   "apiKeyHelper overrides this login": "apiKeyHelper 覆盖了此登录",
+  "That file lives on {host} — this terminal runs on {mine}; path not typed": "该文件在 {host} 上——这个终端跑在 {mine}；路径未输入",
+  "this machine": "本机",
   "The CLI prefers a configured apiKeyHelper over the OAuth login — sessions on this machine bill via the helper key. Remove apiKeyHelper from ~/.claude/settings.json to bill the subscription.": "CLI 优先使用配置的 apiKeyHelper 而不是 OAuth 登录——这台机器上的会话都通过 helper 的 key 计费。从 ~/.claude/settings.json 里删掉 apiKeyHelper 才会走订阅计费。",
   "Why API billing? apiKeyHelper is set on the machine": "为什么是 API 计费？机器上配置了 apiKeyHelper",
   "VibeSpace agent integration (master switch)": "VibeSpace agent 集成（总开关）",
