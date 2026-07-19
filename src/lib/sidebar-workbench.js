@@ -417,12 +417,30 @@ export function installSidebarWorkbench(Sidebar) {
         // project at a glance (the Recent header's colored dot names it).
         card.style.setProperty('--wb-strip', `hsl(${projectHue(s.cwd)} 55% 52%)`);
         applyHostStrip(card, s.host); // inner strip: which MACHINE (mixed zone)
-        // second line: dim abbreviated path — the context that keeps
-        // similarly-named sessions distinguishable (user-raised concern)
+        // second line: dim path — the context that keeps similarly-named
+        // sessions distinguishable. The HOST prefix renders as its OWN
+        // non-truncating span and the path CSS-left-truncates (real report:
+        // abbrevPath over the host-prefixed cwd string ATE the "CW-H200: "
+        // prefix on deeper paths — the card looked local — and its baked "…/"
+        // never restored when the sidebar was widened again; pure CSS
+        // truncation re-evaluates with width).
         const pathEl = document.createElement('div');
         pathEl.className = 'wb-card-path';
-        pathEl.title = s.cwd || '';
-        pathEl.textContent = abbrevPath(s.cwd);
+        pathEl.title = (s.hostName ? s.hostName + ': ' : '') + (s.cwd || '');
+        // normalize BOTH data shapes: matched sessions carry a raw cwd,
+        // unmatched webui ones a "Host: /path"-composed one (folder grouping)
+        let rawPath = s.cwd || '';
+        if (s.hostName && rawPath.startsWith(s.hostName + ': ')) rawPath = rawPath.slice(s.hostName.length + 2);
+        if (s.hostName) {
+          const hostSpan = document.createElement('span');
+          hostSpan.className = 'wb-card-path-host';
+          hostSpan.textContent = s.hostName + ':';
+          pathEl.appendChild(hostSpan);
+        }
+        const textSpan = document.createElement('span');
+        textSpan.className = 'wb-card-path-text';
+        textSpan.textContent = rawPath.replace(/^\/home\/[^/]+/, '~');
+        pathEl.appendChild(textSpan);
         const row = card.querySelector('.session-card-row');
         row?.after(pathEl);
         this.listEl.appendChild(card);

@@ -409,6 +409,7 @@ class ChatView {
         // Track the server normalizer epoch from EVERY attach path (create,
         // attach, reattach) — _reattach compares against it to detect a
         // server restart (ID-space reset).
+        this._lastAttachedAt = Date.now(); // clears the _reattach no-reply fallback
         if (msg.normEpoch) this._normEpoch = msg.normEpoch;
         if (msg.remoteState) this._statusBar?.setRemoteState(msg.remoteState);
       } else if (msg.type === 'error' && msg.sessionId === sessionId) {
@@ -1696,6 +1697,21 @@ class ChatView {
 
     // Re-attach so server adds this WS to session.clients again
     this.ws.send({ type: 'attach', sessionId: this.sessionId });
+    // NO-REPLY fallback: the explicit error path (server replies error with
+    // our sessionId → read-only) covers the common restart case, but a window
+    // whose create was still in flight when the server died can hold an id
+    // the new server never answers for AT ALL — it then looked alive forever
+    // (input box, no responses; real report). If neither 'attached' nor
+    // 'error' lands within 20s of a reconnect re-attach, flip to read-only
+    // with the Resume bar. 20s clears even a huge-transcript attach.
+    const reattachAt = Date.now();
+    setTimeout(() => {
+      if (this._readOnly || this._disconnected) return; // resolved / still offline (next reconnect retries)
+      if ((this._lastAttachedAt || 0) >= reattachAt) return;
+      this._hideTyping();
+      this._renderers.appendSystem(t('The session no longer exists on the server (likely a restart) — resume to continue.'));
+      this._setReadOnly();
+    }, 20000);
 
     // Wait for attached response before re-enabling input
     const handler = (msg) => {
