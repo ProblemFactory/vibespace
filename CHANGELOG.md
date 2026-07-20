@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.207.1 — 2026-07-20
+- **Unresumable-conversation circuit breaker** — the 2.207.0 tooling caught its first live bootloop within minutes of shipping (tombstones nailed the cause in one read: `No conversation found with session ID` — a remote session killed 9 seconds after creation never flushed a transcript, so every resume died in ~2s and an automated recreation fed the loop 5× in 2 minutes). Teardown now stamps a conversation whose buffer carries that canned error; further resumes are refused for 10 minutes with the honest explanation ("no saved transcript on its machine — nothing to resume; close this window/card") instead of another guaranteed death. `resume-refused-no-transcript` telemetry event + opslog warn.
+
 ## 2.207.0 — 2026-07-20
 **Debuggability telemetry batch** (user ask, scoped to exactly what blinded tonight's three investigations; all names/enums only — never content — flowing into ⚙ Diagnostics + fleet forwarding):
 - `session-created/exited/killed` events (mode/backend/remote/resume; exited carries the CHILD's exit code — both wrappers now keep their final meta WITH `childExitCode` instead of unlinking it, and the server reads it at teardown into the lifecycle log + event).
