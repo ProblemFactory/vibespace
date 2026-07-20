@@ -20,7 +20,10 @@ import { indentWithTab } from '@codemirror/commands';
  * @param {string} signalPath - Signal file for editor completion
  * @param {string} sessionId - WebUI session ID that triggered the editor
  */
-export function openExternalEditor(app, filePath, signalPath, sessionId) {
+export function openExternalEditor(app, filePath, signalPath, sessionId, host) {
+  // host = the machine the CLI (and therefore the tmpfile + signal file) runs
+  // on — remote Ctrl+G (B-2de8): every read/write/signal must target it.
+  const hq = host ? `&host=${encodeURIComponent(host)}` : '';
   // Find the terminal window that triggered this — match by webui session ID
   let targetWinInfo = null;
   if (sessionId) {
@@ -44,8 +47,9 @@ export function openExternalEditor(app, filePath, signalPath, sessionId) {
     app._hideWelcome();
     const winInfo = app.wm.createWindow({ title: `Editor: ${filePath.split('/').pop()}`, type: 'editor' });
     new CodeEditor(winInfo, filePath, filePath.split('/').pop(), app, {
+      host: host || undefined,
       onSaveAndClose: async () => {
-        try { await fetch('/api/editor/signal', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ signalPath, filePath }) }); } catch {}
+        try { await fetch('/api/editor/signal', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ signalPath, filePath, host: host || undefined }) }); } catch {}
       },
     });
     return;
@@ -160,7 +164,7 @@ export function openExternalEditor(app, filePath, signalPath, sessionId) {
   if (termSession) setTimeout(() => { termSession.fit(); termSession.terminal.scrollToBottom(); }, 100);
 
   // Load file and create CodeMirror editor
-  fetch(`/api/file/content?path=${encodeURIComponent(filePath)}`)
+  fetch(`/api/file/content?path=${encodeURIComponent(filePath)}${hq}`)
     .then(r => r.json())
     .then(data => {
       const content = data.content || '';
@@ -222,10 +226,10 @@ export function openExternalEditor(app, filePath, signalPath, sessionId) {
       const doSave = async () => {
         const newContent = editorView.state.doc.toString();
         try {
-          const res = await fetch('/api/file/write', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ path: filePath, content: newContent }) });
+          const res = await fetch('/api/file/write', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ path: filePath, content: newContent, host: host || undefined }) });
           const data = await res.json().catch(() => ({}));
           if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
-          await fetch('/api/editor/signal', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ signalPath, filePath }) });
+          await fetch('/api/editor/signal', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ signalPath, filePath, host: host || undefined }) });
         } catch (err) {
           // Write failed — keep the editor open with the user's edits instead
           // of tearing down and unblocking Claude with a stale file
@@ -266,7 +270,7 @@ export function openExternalEditor(app, filePath, signalPath, sessionId) {
       pathSpan.style.color = 'var(--red)';
       saveBtn.textContent = 'Close editor';
       saveBtn.onclick = async () => {
-        try { await fetch('/api/editor/signal', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ signalPath, filePath }) }); } catch {}
+        try { await fetch('/api/editor/signal', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ signalPath, filePath, host: host || undefined }) }); } catch {}
         targetWinInfo._editorState = null;
         targetWinInfo._editorDoSave = null;
         splitResizer.destroy();

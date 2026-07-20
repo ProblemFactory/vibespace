@@ -1415,10 +1415,23 @@ function restoreSessions() {
       liveConvos = new Set(out.split('\n').map((s) => s.trim()).filter(Boolean));
     } catch {} // grep exits 1 when nothing matched — leaves the set empty
   }
+  // REMOTE sockets: the /proc scan can't see a claude running ON THE HOST, so
+  // claudeAlive was unconditionally false and duplicate sockets of one remote
+  // conversation could retire the wrong one (audit 2.192.0/B-82ea). Substitute
+  // the LOCAL transport liveness (dtach socket has an owner = the ssh/agentd
+  // pipe survived the restart) — the same signal the adoption loop uses below.
+  const remoteSockAlive = new Set();
+  for (const { sockFile, m } of dedupMetas) {
+    if (!m.host) continue;
+    try {
+      const out = execFileSync('fuser', [path.join(SOCKETS_DIR, sockFile)], { encoding: 'utf-8', timeout: 2000, stdio: ['pipe', 'pipe', 'pipe'] });
+      if (out.trim().length > 0) remoteSockAlive.add(sockFile);
+    } catch {}
+  }
   const { retire: retireSockets } = dedupWebuiSockets(dedupMetas.map(({ sockFile, m }) => ({
     sockFile, backend: m.backend || 'claude', host: m.host || 'local',
     claudeSessionId: m.claudeSessionId, createdAt: m.createdAt || 0,
-    claudeAlive: liveConvos.has(m.claudeSessionId),
+    claudeAlive: m.host ? remoteSockAlive.has(sockFile) : liveConvos.has(m.claudeSessionId),
   })));
 
   for (const sockFile of sockets) {
@@ -2008,6 +2021,7 @@ function removeAgentHooks() {
 // ── File System API (extracted to src/routes/files.js) ──
 app.locals.xEnv = X_ENV;
 app.locals.refreshXEnv = refreshXEnv; // paste route retries through this after an X cookie rotation
+app.locals.activeSessions = activeSessions; // paste-image resolves a session's host server-side (B-65ec)
 // Remote fs (Files cross-host) — resolved lazily; `hosts` is created below.
 app.locals.getRemoteFs = () => remoteFs;
 // ── SafeFs: dedicated worker_threads pool for LOCAL user-path fs ops ──
@@ -2057,8 +2071,13 @@ app.post('/api/editor/open', (req, res) => {
     if (!ok) return res.status(401).json({ error: 'unauthorized (session token required)' });
   }
   const { file, signal, sessionId } = req.body;
+  // Remote Ctrl+G (B-2de8): the POST came from the fake `code` helper running
+  // ON THE HOST (over the reverse tunnel) — the tmpfile + signal file live
+  // there. Resolve the session's host server-side and ship it in the
+  // broadcast so the client editor reads/writes/signals the right machine.
+  const editorHost = (sessionId && activeSessions.get(sessionId)?.host) || null;
   // Broadcast to all WebSocket clients — include sessionId so each client opens editor on the right window
-  const msg = JSON.stringify({ type: 'editor-open', filePath: file, signalPath: signal, sessionId: sessionId || null });
+  const msg = JSON.stringify({ type: 'editor-open', filePath: file, signalPath: signal, sessionId: sessionId || null, host: editorHost });
   wss.clients.forEach(client => {
     if (client.readyState === WS_OPEN) {
       try { client.send(msg); } catch {}
@@ -2068,11 +2087,17 @@ app.post('/api/editor/open', (req, res) => {
 });
 
 // Editor: signal completion (called by client when user saves/closes editor)
-app.post('/api/editor/signal', (req, res) => {
-  const { signalPath, filePath, content } = req.body;
+app.post('/api/editor/signal', async (req, res) => {
+  const { signalPath, filePath, content, host } = req.body;
   try {
-    if (content !== undefined) fs.writeFileSync(filePath, content);
-    fs.writeFileSync(signalPath, 'done');
+    if (host && remoteFs) {
+      // remote Ctrl+G: the CLI polls the signal file ON ITS machine
+      if (content !== undefined) await remoteFs.write(String(host), filePath, Buffer.from(content));
+      await remoteFs.write(String(host), signalPath, Buffer.from('done'));
+    } else {
+      if (content !== undefined) fs.writeFileSync(filePath, content);
+      fs.writeFileSync(signalPath, 'done');
+    }
     // Broadcast editor-close to all clients so they remove the split pane
     const msg = JSON.stringify({ type: 'editor-close', filePath, signalPath });
     wss.clients.forEach(client => {

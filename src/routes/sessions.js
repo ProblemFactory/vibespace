@@ -60,7 +60,11 @@ function setup(ctx) {
     // Remote session (?host=): refresh the local transcript cache first —
     // findSessionJsonlPath scans it, so everything below works unchanged.
     if (req.query.host && hosts) {
-      try { await hosts.fetchSessionJsonl(req.query.host, backendSessionId || claudeSessionId); }
+      try {
+        const rid = backendSessionId || claudeSessionId;
+        if ((backend || 'claude') === 'codex') await hosts.fetchCodexJsonl(req.query.host, rid);
+        else await hosts.fetchSessionJsonl(req.query.host, rid);
+      }
       catch (e) { console.error('remote jsonl fetch failed:', e.message); }
     }
     const resolvedSessionId = backendSessionId || claudeSessionId;

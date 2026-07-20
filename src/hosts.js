@@ -713,12 +713,20 @@ class HostManager {
     return this._fetchRemoteByFind(id, `-maxdepth 6 -name ${JSON.stringify('agent-' + agentId + '.jsonl')} ${sidPath}`,
       path.join(id, 'agents', 'agent-' + agentId + '.jsonl'), { maxBytes });
   }
+  // Remote CODEX rollout (B-10ed): view-history/resume-load of a codex thread
+  // that ran on the host. Cached under remote-jsonl/<host>/codex/ — the codex
+  // finder (findCodexSessionJsonlPath) scans that cache like claude's.
+  async fetchCodexJsonl(id, threadId, { maxBytes = 64 * 1024 * 1024 } = {}) {
+    if (!/^[\w-]+$/.test(threadId)) throw new Error('bad thread id');
+    return this._fetchRemoteByFind(id, `-maxdepth 5 -type f -name ${JSON.stringify('rollout-*' + threadId + '.jsonl')}`,
+      path.join(id, 'codex', threadId + '.jsonl'), { maxBytes, root: '"$HOME"/.codex/sessions' });
+  }
   // Shared fetch-and-cache core (generalized from fetchSessionJsonl 2.191.0 —
   // findExpr = the find(1) predicate under "$HOME"/.claude/projects; cacheRel
   // = path under data/remote-jsonl/). All the 2.187.0/2.188.1 integrity
   // invariants live HERE: count-gated reads, never stamp meta for bytes not
   // received, cache-valid requires the FILE to hold meta.size bytes.
-  async _fetchRemoteByFind(id, findExpr, cacheRel, { maxBytes = 64 * 1024 * 1024 } = {}) {
+  async _fetchRemoteByFind(id, findExpr, cacheRel, { maxBytes = 64 * 1024 * 1024, root = '"$HOME"/.claude/projects' } = {}) {
     const h = this.get(id);
     const cachePath = path.join(this.dataDir, 'remote-jsonl', cacheRel);
     const dir = path.dirname(cachePath);
@@ -733,7 +741,7 @@ class HostManager {
       try {
         const dm = await this.device(id);
         // locate via the discovery snapshot (cached-ish) or a targeted find
-        const find = await dm.runCmd('sh', ['-c', `find "$HOME"/.claude/projects ${findExpr} 2>/dev/null | head -1`]);
+        const find = await dm.runCmd('sh', ['-c', `find ${root} ${findExpr} 2>/dev/null | head -1`]);
         const remotePath = find.stdout.trim();
         if (!remotePath) return fs.existsSync(cachePath) ? cachePath : null;
         const st = await dm.fsStat(remotePath);
@@ -774,7 +782,7 @@ class HostManager {
         return cachePath;
       } catch (e2) { /* legacy fallback below */ }
     }
-    const probe = `f=$(find "$HOME"/.claude/projects ${findExpr} 2>/dev/null | head -1); [ -n "$f" ] && { stat -c '%s %Y' "$f" 2>/dev/null || stat -f '%z %m' "$f"; } && echo "$f"`;
+    const probe = `f=$(find ${root} ${findExpr} 2>/dev/null | head -1); [ -n "$f" ] && { stat -c '%s %Y' "$f" 2>/dev/null || stat -f '%z %m' "$f"; } && echo "$f"`;
     const out = (await this._ssh(h, probe, { timeoutMs: 15000 })).toString().trim();
     if (!out) return fs.existsSync(cachePath) ? cachePath : null; // gone remotely — keep stale cache if any
     const [sizeMtime, remotePath] = [out.split('\n')[0], out.split('\n')[1]];
@@ -952,6 +960,22 @@ class HostManager {
         # uniq collapses runs (records from one session are consecutive).
         printf 'T %s\\t' "$f"; tail -c 65536 -- "$f" 2>/dev/null | grep -o '"sessionId":"[^"]*"' | cut -d'"' -f4 | uniq | tail -n 8 | tr '\\n' ','; echo
       done
+      # C = codex rollouts (~/.codex/sessions) so codex terminal sessions run
+      # remotely reappear as resumable STOPPED cards (B-10ed — they used to
+      # vanish from the sidebar the moment they ended). HC = head cwd.
+      if [ -d "$HOME/.codex/sessions" ]; then
+        CDX=$({ if [ -n "$GNUFIND" ]; then
+          find "$HOME"/.codex/sessions -type f -name 'rollout-*.jsonl' -printf 'C %T@ %s %p\\n' 2>/dev/null
+        else
+          find "$HOME"/.codex/sessions -type f -name 'rollout-*.jsonl' 2>/dev/null | while read -r f; do
+            m=$(stat -f '%m %z' "$f" 2>/dev/null); [ -n "$m" ] && echo "C $m $f"
+          done
+        fi; } | sort -rn -k2 | head -100)
+        [ -n "$CDX" ] && printf '%s\\n' "$CDX"
+        [ -n "$CDX" ] && printf '%s\\n' "$CDX" | head -30 | while read -r c m s f; do
+          printf 'HC %s\\t' "$f"; head -c 32000 "$f" | grep -o '"cwd":"[^"]*"' | head -n 1; echo
+        done
+      fi
     `.trim();
     let out;
     try {
@@ -974,6 +998,10 @@ class HostManager {
             for (const u of j.userLines || []) lines.push(`N ${fp}\t${u}`);
             if (j.tailIds) lines.push(`T ${fp}\t${j.tailIds.join(',')},`);
           }
+          for (const r of snap.codexRollouts || []) {
+            lines.push(`C ${(r.mtimeMs / 1000).toFixed(4)} ${r.size} ${r.path}`);
+            if (r.headCwd) lines.push(`HC ${r.path}\t"cwd":"${r.headCwd}"`);
+          }
           out = lines.join('\n');
         } catch (e2) { out = null; /* legacy fallback below */ }
       }
@@ -992,6 +1020,8 @@ class HostManager {
     const keeperBySession = new Map(); // claudeSessionId → {sid} (live keeper sessions)
     const jsonls = [];
     const heads = new Map(); // jsonl path -> first record (cwd source)
+    const codexRollouts = []; // B-10ed: codex rollout files on the host
+    const codexCwd = new Map(); // rollout path -> cwd
     const tailIds = new Map(); // jsonl path -> [sessionIds in tail, last = current writer]
     for (const line of out.split('\n')) {
       if (line.startsWith('K ')) {
@@ -1011,6 +1041,14 @@ class HostManager {
       else if (line.startsWith('J ')) {
         const m = line.match(/^J ([\d.]+) (\d+) (.+)$/);
         if (m) jsonls.push({ mtime: parseFloat(m[1]) * 1000, size: +m[2], path: m[3] });
+      } else if (line.startsWith('C ')) {
+        // codex rollout (B-10ed): "C <mtime> <size> <path>"
+        const m = line.match(/^C ([\d.]+) (\d+) (.+)$/);
+        if (m) codexRollouts.push({ mtime: parseFloat(m[1]) * 1000, size: +m[2], path: m[3] });
+      } else if (line.startsWith('HC ')) {
+        const t = line.indexOf('\t');
+        const m = t > 3 && line.slice(t + 1).match(/^"cwd":"([^"]*)"/);
+        if (m) codexCwd.set(line.slice(3, t), m[1]);
       } else if (line.startsWith('T ')) {
         const t = line.indexOf('\t');
         if (t > 2) {
@@ -1092,6 +1130,16 @@ class HostManager {
       if (runningIds.has(sid)) continue; // already listed via a lock
       const head = heads.get(j.path);
       sessions.push({ sessionId: sid, cwd: head?.cwd || null, name: head?.name || null, projDir: path.basename(path.dirname(j.path)), status: 'remote-stopped', host: h.id, hostName: h.name, mtime: j.mtime });
+    }
+    // Codex rollouts → resumable STOPPED cards (B-10ed). threadId = the uuid
+    // tail of the rollout filename (same rule as codex-session-store). No
+    // running-state detection (codex has no lock files) — a live webui codex
+    // session dedups client-side by session id like every remote card.
+    const TID_RE = /rollout-.*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/;
+    for (const r of codexRollouts) {
+      const m = String(r.path).match(TID_RE);
+      if (!m) continue;
+      sessions.push({ sessionId: m[1], backend: 'codex', cwd: codexCwd.get(r.path) || null, name: null, status: 'remote-stopped', host: h.id, hostName: h.name, mtime: r.mtime });
     }
     this._discoveryCache.set(id, { at: Date.now(), sessions });
     this._persistDiscovery(id, sessions);

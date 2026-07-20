@@ -382,15 +382,29 @@ router.post('/api/upload', upload.array('files'), async (req, res) => {
 });
 
 // Paste image from clipboard → save to temp file + set X clipboard via xclip
-router.post('/api/paste-image', (req, res) => {
+router.post('/api/paste-image', async (req, res) => {
   try {
-    const { dataUrl } = req.body; // "data:image/png;base64,..."
+    const { dataUrl, sessionId } = req.body; // "data:image/png;base64,..."
     if (!dataUrl || !dataUrl.startsWith('data:image/')) return res.status(400).json({ error: 'Not an image' });
     const match = dataUrl.match(/^data:image\/(\w+);base64,(.+)$/);
     if (!match) return res.status(400).json({ error: 'Invalid data URL' });
     const ext = match[1] === 'jpeg' ? 'jpg' : match[1];
     const mimeType = `image/${match[1]}`;
     const buf = Buffer.from(match[2], 'base64');
+    // REMOTE terminal session (B-65ec): the CLI reads the clipboard ON ITS OWN
+    // machine — the local xclip dance below can never reach it. Instead land
+    // the image as a file on the host and hand the client the remote path to
+    // TYPE into the PTY (the drag-drop model). Server-side host resolution:
+    // the session object is authoritative (client openSpec can lag).
+    const sess = sessionId && req.app.locals.activeSessions?.get?.(String(sessionId));
+    if (sess?.host) {
+      const rfsInst = req.app.locals.getRemoteFs?.();
+      if (!rfsInst) return res.status(500).json({ error: 'remote fs unavailable' });
+      const remotePath = `~/.vibespace/paste/paste-${Date.now()}.${ext}`;
+      await rfsInst.mkdir(sess.host, '~/.vibespace/paste');
+      await rfsInst.write(sess.host, remotePath, buf);
+      return res.json({ ready: true, remotePath });
+    }
     const tmpPath = path.join(os.tmpdir(), `claude-paste-${Date.now()}.${ext}`);
     fs.writeFileSync(tmpPath, buf);
     // Set system clipboard with image — macOS uses osascript, Linux uses xclip
