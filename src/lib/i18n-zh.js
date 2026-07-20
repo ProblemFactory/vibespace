@@ -823,6 +823,7 @@ export default {
   "All windows": "所有窗口",
   "Title-bar \"Switch window\" scope": "标题栏\"切换窗口\"范围",
   "Which windows the title-bar right-click menu's \"Switch window\" submenu lists: only windows overlapping this one (classic), every window on the current desktop, or all windows across desktops (entries name their desktop; picking one switches to it).": "标题栏右键菜单的\"切换窗口\"子菜单列出哪些窗口：仅与当前窗口重叠的（经典行为）、当前桌面的所有窗口、或跨桌面的全部窗口（条目标注所在桌面，选中即切换过去）。",
+  "Read": "读取",
   "· logged in on {host}": "· 已在 {host} 登录",
   "not logged in on {host}": "未在 {host} 登录",
   "This account holds its own login ON {host} (minted there, never leaves it) — sessions on {host} picking it use that login.": "这个账号在 {host} 上有自己的独立登录（在那台机器上生成、永不离开）——{host} 上的会话选它即使用该登录。",

@@ -822,6 +822,7 @@ export default {
   "All windows": "すべてのウィンドウ",
   "Title-bar \"Switch window\" scope": "タイトルバー「ウィンドウ切替」の範囲",
   "Which windows the title-bar right-click menu's \"Switch window\" submenu lists: only windows overlapping this one (classic), every window on the current desktop, or all windows across desktops (entries name their desktop; picking one switches to it).": "タイトルバー右クリックメニューの「ウィンドウ切替」サブメニューに表示するウィンドウ：このウィンドウと重なるもののみ（従来動作）、現在のデスクトップの全ウィンドウ、または全デスクトップ横断（項目にデスクトップ名を表示、選ぶと切り替え）。",
+  "Read": "読み取り",
   "· logged in on {host}": "・{host} でログイン済み",
   "not logged in on {host}": "{host} で未ログイン",
   "This account holds its own login ON {host} (minted there, never leaves it) — sessions on {host} picking it use that login.": "このアカウントは {host} 上に独自のログインを保持しています（そこで生成され、外に出ません）——{host} 上のセッションでこれを選ぶとそのログインを使用します。",
