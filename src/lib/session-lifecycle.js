@@ -219,6 +219,25 @@ export function installSessionLifecycle(App, ctx = {}) {
       term.dispose(); this.sessions.delete(winInfo.id); this._checkWelcome();
     };
     winInfo._notifyChanged = () => this.updateTaskbar();
+    // Exited-overlay Resume (2.206.0): agent terminals resume by conversation
+    // id (kept fresh in the openSpec by syncSessionIdentity); plain shells
+    // have nothing to resume — no callback, the overlay shows message-only.
+    if (backend !== 'shell') {
+      term.onSessionExited = () => {
+        const spec = winInfo._openSpec || {};
+        const backendSessionId = spec.backendSessionId;
+        const cwd = spec.cwd || winInfo.cwd || '';
+        if (!backendSessionId) { showToast(t('Session id not known — resume it from the sidebar'), { type: 'error' }); return; }
+        const name = this.sidebar?.getCustomName?.({ backend, backendSessionId }) || spec.name || winInfo.name || t('Session');
+        const winId = winInfo.id;
+        const winBounds = this._snapshotWinBounds(this.wm.windows.get(winId));
+        this.wm?.closeWindow?.(winId);
+        this.resumeSession(backendSessionId, cwd, name, {
+          mode: 'terminal', backend, backendSessionId,
+          hostId: spec.host || spec.hostId || undefined, winBounds,
+        });
+      };
+    }
   },
 
   killSession(webuiId) {

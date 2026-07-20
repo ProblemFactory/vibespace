@@ -1333,6 +1333,10 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
     session._isStreaming = false;
     // Detect auth failure from buffer content (claude exits immediately with "Not logged in")
     const exitReason = /Not logged in|Please run \/login|OAuth token revoked/.test(session.buffer || '') ? 'not_logged_in' : undefined;
+    // Lifecycle line for the ops log (2.206.0) — tonight's black-window
+    // forensics found NOTHING in opslog about session deaths; this is the
+    // minimum breadcrumb an incident needs.
+    console.log(`[session] exited ${id} "${session.name || ''}" mode=${session.mode} backend=${session.backend || 'claude'}${exitReason ? ' reason=' + exitReason : ''}`);
     broadcastToSession(session, id, { type: 'exited', sessionId: id, reason: exitReason });
     activeSessions.delete(id);
     if (cleanupOnExit && session.sockName) deleteSessionMeta(session.sockName);

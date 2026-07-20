@@ -1020,6 +1020,7 @@ done`;
 
           activeSessions.set(id, session);
           attachedSessions.add(id);
+          console.log(`[session] created ${id} "${session.name || ''}" mode=${sessionMode} backend=${backend}${data.hostId ? ' host=' + data.hostId : ''}${session._accountId ? ' account=' + session._accountId : ''}${data.resumeId ? ' resume=' + data.resumeId : ''}`);
           // Remote session: push its groups' context folders to the host now
           // (the 60s timer + prompt-time trigger keep them fresh afterwards);
           // bust the host's discovery cache so the sidebar's remote zone sees
@@ -1662,6 +1663,7 @@ done`;
           { const ks = activeSessions.get(data.sessionId); if (ks && ks._bridgePort) { try { dialBridge?.close(data.sessionId); } catch { } if (ks._dialDeviceId && ks._dialReversePort) { hosts.device(ks.host).then((dm) => dm.reverseUnforward(ks._dialReversePort)).catch(() => {}); } } }
           const session = activeSessions.get(data.sessionId);
           if (session) {
+            console.log(`[session] killed ${data.sessionId} "${session.name || ''}" mode=${session.mode} backend=${session.backend || 'claude'}`);
             // Cancel any pending delayed-SIGINT from a recent interrupt — after
             // kill, the childPid may be reused by an unrelated process
             if (session._interruptTimer) { clearTimeout(session._interruptTimer); session._interruptTimer = null; }

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.206.0 — 2026-07-20
+- **A terminal session whose process exits no longer leaves a dead BLACK window** (real report, forensically reconstructed: a TUI claude hit "You've reached your Fable 5 limit", exited, and cleared its alternate screen on the way out — the window was pure black with one invisible dim line, the session vanished from ACTIVE, and the only path forward was noticing the stopped entry in the sidebar; no VibeSpace data was lost — the resume worked perfectly). Terminal windows now show a prominent **end-of-session overlay** ("Session ended — the process exited") with a one-click **Resume this session** (openSpec identity, geometry kept; plain shells get the message only) — parity with chat's resume bar. Applies to live exits AND the reconnect-found-dead path.
+- **Session lifecycle reaches the ops log** — `[session] created/exited/killed` lines with name/mode/backend/host/account/resume: tonight's forensics twice found ZERO trace of a session death in opslog; incidents need at least this breadcrumb.
+
 ## 2.205.0 — 2026-07-20
 - **Same-account auto-recognition** (the "这个不能自动识别吗" ask): a login whose identity email matches an EXISTING subscription record is the SAME account — records now merge automatically instead of duplicating. Two triggers: the local add-flow's finalize (fresh creds fold into the existing record, which keeps the newest login; toast says "recognized as existing account — merged"), and every host identity probe (a host-side per-account dir whose email matches a different record renames the dir to the survivor and folds the records — so an existing duplicate like the reported ProblemFactory pair SELF-HEALS the next time the machine's roster is opened). Learned dir emails also backfill records that never declared one (enabling the =host-login link). Survivor = the older record; union of host logins; merge is best-effort per dir (a failure keeps both records rather than losing anything).
 
