@@ -47,6 +47,11 @@ class ChatView {
       this._compact = v;
       container.classList.toggle('chat-compact', v);
       if (this._renderers) this._renderers._compact = v;
+      // compact vs bubble is a per-message DOM STRUCTURE decided at render
+      // time (wrapMsg) — flipping the class alone left already-rendered
+      // cards in the old structure under the new mode's CSS (real report:
+      // broken Update card after toggling). Rebuild what's on screen.
+      this._rerenderVisible();
     });
 
     // Apply font size from global settings (scale message list relative to base 14px)
@@ -107,6 +112,10 @@ class ChatView {
     });
     this._runsObserver.observe(this._messageList, { childList: true });
     this._runExpanded = new WeakSet(); // first member of runs the user opened
+    // Live re-fold on toggle — the observer only fires on list mutations, so
+    // a settings change used to take effect on the NEXT message only.
+    onSetting('chat.collapseRuns', () => this._updateRuns());
+    onSetting('chat.collapseKinds', () => this._updateRuns());
     // Search open/close changes no list children — watch the bar's class so
     // runs expand while searching (reveal must reach hidden members) and
     // re-collapse after.
@@ -2041,6 +2050,38 @@ class ChatView {
   _traceExpect() {}
   _installScrollTracer() {}
 
+  // Re-render every rendered message in place — for mode toggles that change
+  // the per-message DOM STRUCTURE (compact mode builds a different wrapper in
+  // wrapMsg at render time). Gap-loaded (.chat-gap-msg) elements aren't in
+  // _elements and keep the old structure until reloaded — accepted (rare
+  // mid-history toggle). Run open/closed memory transfers across the swap.
+  _rerenderVisible() {
+    if (!this._elements || this._disposed) return;
+    for (const [id, oldEl] of [...this._elements]) {
+      const msg = oldEl._rawMsg;
+      if (!msg || !oldEl.isConnected) continue;
+      let newEl = null;
+      try {
+        switch (msg.role) {
+          case 'user': newEl = this._renderers.renderUserMsg(msg); break;
+          case 'tool': newEl = this._renderers.renderToolMsg(msg); break;
+          case 'assistant': newEl = this._renderers.renderAssistantMsg(msg); break;
+          default: { const r = this._renderers.renderSystemMsg(msg); newEl = r?.el || null; break; }
+        }
+      } catch {}
+      if (!newEl) continue;
+      newEl.dataset.msgId = id;
+      if (msg.ts) newEl.dataset.ts = msg.ts;
+      if (oldEl.dataset.line) newEl.dataset.line = oldEl.dataset.line;
+      if (this._runExpanded?.has(oldEl)) this._runExpanded.add(newEl);
+      oldEl.replaceWith(newEl);
+      this._elements.set(id, newEl);
+      this._renderers.addWrapToggles(newEl);
+      this._renderers.addOpenInEditorBtn(newEl);
+    }
+    this._updateRuns();
+  }
+
   _updateRuns() {
     const list = this._messageList;
     if (!list || this._disposed) return;
@@ -2066,11 +2107,29 @@ class ChatView {
       list.querySelectorAll(':scope > .chat-run-header').forEach((h) => h.remove());
       list.querySelectorAll(':scope > .chat-run-collapsed').forEach((el) => el.classList.remove('chat-run-collapsed'));
       if (!enabled || searchOpen) return;
-      // thinking and Bash count as ONE collapsible kind — the TUI folds the
-      // interleaved think→run→think noise as a single group (user directive;
-      // same-kind-only grouping never reached its threshold in real turns).
+      // ENABLED kinds count as ONE collapsible group — the TUI folds the
+      // interleaved think→read→edit→run noise as a single group (user
+      // directive; same-kind-only grouping never reached its threshold in
+      // real turns). Which kinds participate is configurable since 2.213.0
+      // (chat.collapseKinds: thinking/bash/read/write).
       const hideEmptyThink = this.app?.settings?.get('chat.hideEmptyThinking') !== false;
       const hooksHidden = document.body.classList.contains('hide-hook-cards');
+      const kindsArr = this.app?.settings?.get('chat.collapseKinds');
+      const kinds = new Set(Array.isArray(kindsArr) ? kindsArr : ['thinking', 'bash', 'read']);
+      // per-member classification (also used by flush() for the summary)
+      const memberKind = (el) => {
+        const m = el._rawMsg;
+        if (el.classList.contains('chat-msg-tool-result')) {
+          const tn = m?.content?.[0]?.toolName;
+          if (tn === 'Bash') return 'bash';
+          if (tn === 'Read') return 'read';
+          if (tn === 'Write' || tn === 'Edit' || tn === 'Patch') return 'write';
+          return null;
+        }
+        if (m?.role === 'assistant' && Array.isArray(m.content) && m.content.length
+            && m.content.every((b) => b.type === 'thinking')) return 'thinking';
+        return null;
+      };
       const kindOf = (el) => {
         if (!el.classList?.contains('chat-msg') || el.classList.contains('chat-gap-msg')) return null;
         // display:none'd cards are invisible glue — 'skip' (never break a run)
@@ -2083,15 +2142,18 @@ class ChatView {
         // and the turn stalls unnoticed (real report). Returning null also
         // BREAKS the run so the surrounding fold can't swallow it.
         if (m.permission && !m.permission.resolved) return null;
-        if (el.classList.contains('chat-msg-tool-result')) {
-          const b = m.content?.[0];
-          // pending/running Bash collapses too (user directive — the bottom
-          // streaming indicator already shows live activity)
-          return b?.toolName === 'Bash' ? 'noise' : null;
-        }
-        if (m.role === 'assistant' && Array.isArray(m.content) && m.content.length
-            && m.content.every((b) => b.type === 'thinking')) return 'noise';
-        return null;
+        // pending/running cards collapse too (user directive — the bottom
+        // streaming indicator already shows live activity)
+        const mk = memberKind(el);
+        return mk && kinds.has(mk) ? 'noise' : null;
+      };
+      // Collapsed-summary file name: basename, with agent-memory files
+      // distinguished as memory/<name> (user ask: 区分项目文件和memory).
+      const fileLabelOf = (el) => {
+        const fp = el._rawMsg?.content?.[0]?.input?.file_path || '';
+        if (!fp) return null;
+        const base = fp.split('/').pop();
+        return /\/\.claude\/(?:projects\/[^/]+\/)?memory\//.test(fp) ? 'memory/' + base : base;
       };
       const kids = [...list.children];
       let run = [];
@@ -2099,23 +2161,52 @@ class ChatView {
       const flush = () => {
         // the newest message stays visible — live activity must not vanish
         const members = run; // the newest message collapses too (user directive)
-        // A run containing ANY Bash collapses immediately — even a single one
-        // (user directive: "看到 bash 直接开始折叠, 无论多少条"). Pure-thinking
-        // runs still need ≥2 so a lone thought stays inline.
-        const hasBash = members.some((el) => el.classList.contains('chat-msg-tool-result'));
-        if (members.length >= (hasBash ? 1 : 2)) {
+        // A run containing ANY tool card collapses immediately — even a single
+        // one (user directive: "看到 bash 直接开始折叠, 无论多少条"; a lone tool
+        // card still shrinks several lines → one). Pure-thinking runs need ≥2
+        // so a lone thought stays inline.
+        const hasTool = members.some((el) => el.classList.contains('chat-msg-tool-result'));
+        if (members.length >= (hasTool ? 1 : 2)) {
           const header = document.createElement('div');
           header.className = 'chat-run-header';
-          const nBash = members.filter((el) => el.classList.contains('chat-msg-tool-result')).length;
-          const nThink = members.length - nBash;
-          let label = nThink === 0 ? t('{n} Bash commands', { n: nBash })
-            : nBash === 0 ? t('{n} thinking steps', { n: nThink })
-            : t('{t} thinking · {b} Bash', { t: nThink, b: nBash });
+          // per-kind counts (only non-zero kinds render)
+          const byKind = { thinking: 0, bash: 0, read: 0, write: 0 };
+          for (const el of members) { const k = memberKind(el); if (k) byKind[k]++; }
+          const parts = [];
+          if (byKind.thinking) parts.push(t('{n} thinking', { n: byKind.thinking }));
+          if (byKind.bash) parts.push(t('{n} Bash', { n: byKind.bash }));
+          if (byKind.read) parts.push(t('{n} reads', { n: byKind.read }));
+          if (byKind.write) parts.push(t('{n} writes', { n: byKind.write }));
+          let label = parts.join(' · ');
+          // touched files (user ask: don't lose the paths): writes first with
+          // a ✎ mark, then reads; deduped display names, capped at 4 + "+N".
+          // memory/<name> marks agent-memory files vs project files.
+          const files = [];
+          const seenF = new Set();
+          for (const wantWrite of [true, false]) {
+            for (const el of members) {
+              const k = memberKind(el);
+              if ((k === 'write') !== wantWrite || (k !== 'write' && k !== 'read')) continue;
+              const fl = fileLabelOf(el);
+              if (!fl || seenF.has(fl)) continue;
+              seenF.add(fl);
+              files.push(k === 'write' ? '✎ ' + fl : fl);
+            }
+          }
+          if (files.length) {
+            const shown = files.slice(0, 4);
+            label += ' — ' + shown.join(', ') + (files.length > 4 ? `, +${files.length - 4}` : '');
+          }
+          // failed members surface as a count (an error must not vanish into a
+          // silent fold — grep-exit-1 class errors are common and folding them
+          // is fine, but the header says they exist)
+          const nErr = members.filter((el) => el._rawMsg?.toolStatus === 'error').length;
+          if (nErr) label += ` · ${nErr} ✗`;
           // live state on the fold: a running member shows through the header
           if (members.some((el) => el._rawMsg?.status === 'pending' || el._rawMsg?.status === 'streaming')) {
             label += ' · ' + t('running…');
           }
-          header.innerHTML = `<span class="chat-run-arrow">▸</span><span>${label}</span>`;
+          header.innerHTML = `<span class="chat-run-arrow">▸</span><span>${escHtml(label)}</span>`;
           // Rebuilds happen on every list mutation — remember runs the user
           // opened so a new message doesn't re-collapse what they're reading.
           // Keyed by ANY member, not just the first: scroll-up pagination

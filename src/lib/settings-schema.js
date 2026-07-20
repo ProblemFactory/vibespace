@@ -285,8 +285,20 @@ const SETTINGS_SCHEMA = {
   },
   'chat.collapseRuns': {
     type: 'boolean', default: true,
-    label: t('Collapse runs of thinking/Bash cards'),
-    description: t('Consecutive thinking blocks (two or more) and Bash commands (any run containing one) fold behind a "N × …" line, like the Claude Code TUI — click to expand. Searching expands everything.'),
+    label: t('Collapse runs of working cards'),
+    description: t('Consecutive working cards (kinds picked below) fold behind a one-line summary, like the Claude Code TUI — click to expand. The summary shows per-kind counts, the touched file names (✎ marks writes, memory/… marks agent-memory files) and a ✗ failure count. Searching expands everything.'),
+    category: t('Chat'), liveApply: true,
+  },
+  'chat.collapseKinds': {
+    type: 'multiSelect', default: ['thinking', 'bash', 'read'],
+    options: [
+      { value: 'thinking', label: t('Thinking blocks') },
+      { value: 'bash', label: t('Bash commands') },
+      { value: 'read', label: t('File reads') },
+      { value: 'write', label: t('File writes (Write/Edit/Patch)') },
+    ],
+    label: t('Card kinds that collapse'),
+    description: t('Which card kinds fold into the summary line. Enabled kinds collapse TOGETHER as one interleaved group (think → read → edit → run is the real work pattern; per-kind groups rarely get long enough to fold). A run of only thinking needs two or more; any tool card folds immediately. Cards waiting for your approval never fold. Writes are off by default — diffs are usually worth seeing.'),
     category: t('Chat'), liveApply: true,
   },
   'chat.reducedMotionSpin': {
