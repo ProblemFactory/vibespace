@@ -9,10 +9,14 @@ import { ChatInput } from './chat-input.js';
 import { ChatStatusBar } from './chat-status-bar.js';
 import { UI_ICONS } from './icons.js';
 import { t } from './i18n.js';
+import { agentMemoryPathRes } from './agent-meta.js';
 
-// Agent-memory file paths (~/.claude/projects/<proj>/memory/ or ~/.claude/memory/)
-// — their reads/writes are the 'memory' collapse kind and label as memory/<name>.
-const MEMORY_PATH_RE = /\/\.claude\/(?:projects\/[^/]+\/)?memory\//;
+// Agent-memory path patterns, PER BACKEND from BACKEND_META (agent-meta.js —
+// claude only today; codex has no memory feature; a new backend adds one
+// memoryPathRe entry there). Unioned: the PATH identifies memory content
+// regardless of which session's file op touches it.
+const MEMORY_PATH_RES = agentMemoryPathRes();
+const isMemoryPath = (fp) => MEMORY_PATH_RES.some((re) => re.test(fp));
 
 /**
  * ChatView — renders a chat interface for stream-json mode sessions.
@@ -2129,7 +2133,7 @@ class ChatView {
           if (tn === 'Read' || tn === 'Write' || tn === 'Edit' || tn === 'Patch') {
             // agent-memory file ops are their OWN kind (2.213.1, user ask:
             // each is a distinct user concern) — housekeeping vs project work
-            if (MEMORY_PATH_RE.test(m?.content?.[0]?.input?.file_path || '')) return 'memory';
+            if (isMemoryPath(m?.content?.[0]?.input?.file_path || '')) return 'memory';
             return tn === 'Read' ? 'read' : 'write';
           }
           return null;
@@ -2161,7 +2165,7 @@ class ChatView {
         const fp = el._rawMsg?.content?.[0]?.input?.file_path || '';
         if (!fp) return null;
         const base = fp.split('/').pop();
-        return MEMORY_PATH_RE.test(fp) ? 'memory/' + base : base;
+        return isMemoryPath(fp) ? 'memory/' + base : base;
       };
       const kids = [...list.children];
       let run = [];
