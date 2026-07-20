@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.213.1 — 2026-07-20
+- **Generic tool-card headers localize** (user report: TaskCreate/TaskUpdate read as unlocalized chrome): ~20 harness built-in tools get curated display names (创建任务/更新待办/网页搜索/…) in the card header AND the typing indicator's "running …" label; the raw tool name stays as the card tooltip. MCP/unknown tools keep their identifier; Bash/Agent/Workflow stay as-is.
+- **Agent-memory file operations are their own collapse kind** (user ask: reads, writes and memory files are each a distinct concern): a new "memory" entry in Card-kinds-that-collapse covers reads AND writes under the agent's memory directory — housekeeping, folded by default (project-file writes stay visible by default), counted separately in the fold summary and still listed as memory/<name>.
+
 ## 2.213.0 — 2026-07-20
 - **Run-collapse is now kind-configurable** (user request): new Chat setting "Card kinds that collapse" (`chat.collapseKinds`) — thinking / Bash / file reads / file writes each toggle individually (default: thinking+bash+read; writes stay visible — diffs are usually worth seeing). Enabled kinds still fold TOGETHER as one interleaved group (think → read → edit → run is the real work pattern).
 - **The fold header keeps the information** (user ask): per-kind counts ("3 段思考 · 2 条 Bash · 4 次读取"), the touched FILE NAMES (✎ marks writes and lists them first; files under the agent-memory directory show as `memory/<name>` to distinguish them from project files; deduped, capped at 4 + "+N"), a `N ✗` failure count so errors never vanish silently into a fold, and the existing running… indicator. Toggling the collapse settings now re-folds open chats immediately (the observer only fired on new messages before).
