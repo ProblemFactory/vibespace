@@ -324,6 +324,12 @@ class TerminalSession {
       } else if (msg.type === 'exited') {
         this.terminal.write('\r\n\x1b[90m[Process exited]\x1b[0m\r\n');
         winInfo.exited = true; if (winInfo._notifyChanged) winInfo._notifyChanged();
+        // A TUI that exits from its ALTERNATE screen clears it on the way
+        // out — the window is then PURE BLACK with one dim line (real
+        // report: claude hit a usage-limit error, exited, and the user saw
+        // a dead black window with no way forward). Prominent overlay with
+        // the way out, parity with chat's resume bar.
+        this._showExitedOverlay();
       } else if (msg.type === 'error' && !winInfo.exited) {
         // A reconnect re-attach answered "unknown session": the session died
         // WITH the server (pod recreation / hard restart killed dtach) — the
@@ -332,6 +338,7 @@ class TerminalSession {
         // to the same honest exited state as a live exit.
         this.terminal.write('\r\n\x1b[90m[Session ended while disconnected — resume it from the sidebar]\x1b[0m\r\n');
         winInfo.exited = true; if (winInfo._notifyChanged) winInfo._notifyChanged();
+        this._showExitedOverlay();
       } else if (msg.type === 'effective-size') {
         // Multi-device: PTY is sized to min of all clients — unless one client
         // took over via size-override, in which case the PTY is ITS size.
@@ -922,6 +929,40 @@ class TerminalSession {
     if (this.winInfo._notifyChanged) this.winInfo._notifyChanged(); // update taskbar
   }
 
+  /** Prominent end-of-session overlay (2.206.0): a TUI exiting from its
+   *  alternate screen leaves the window PURE BLACK — the dim "[Process
+   *  exited]" line was invisible in practice, and unlike chat there was no
+   *  resume affordance (real report: claude hit a usage-limit error and the
+   *  user was left with a dead black window). Resume wiring comes from
+   *  session-lifecycle via onSessionExited (identity lives in the window's
+   *  openSpec); without it (ephemeral shells) only the message shows. */
+  _showExitedOverlay() {
+    if (this._exitOverlayEl || !this.winInfo?.content) return;
+    const ov = document.createElement('div');
+    ov.className = 'term-exit-overlay';
+    const box = document.createElement('div');
+    box.className = 'term-exit-box';
+    const msg = document.createElement('div');
+    msg.className = 'term-exit-msg';
+    msg.textContent = t('Session ended — the process exited.');
+    box.appendChild(msg);
+    if (typeof this.onSessionExited === 'function') {
+      const btn = document.createElement('button');
+      btn.className = 'term-cap-btn';
+      btn.textContent = t('Resume this session');
+      btn.onclick = () => this.onSessionExited('resume');
+      box.appendChild(btn);
+    }
+    const dismiss = document.createElement('button');
+    dismiss.className = 'term-cap-btn term-exit-dismiss';
+    dismiss.textContent = t('Dismiss');
+    dismiss.onclick = () => { ov.remove(); this._exitOverlayEl = null; };
+    box.appendChild(dismiss);
+    ov.appendChild(box);
+    this.winInfo.content.appendChild(ov);
+    this._exitOverlayEl = ov;
+  }
+
   focus() { this.terminal.focus(); this._setBell(false); this._setWaiting(false); }
   dispose() {
     if (this._fitTimer) { clearTimeout(this._fitTimer); this._fitTimer = null; }
@@ -932,6 +973,7 @@ class TerminalSession {
     if (this._webgl) { try { this._webgl.dispose(); } catch {} this._webgl = null; }
     if (this._capEls) { for (const el of this._capEls) el.remove(); this._capEls = null; }
     if (this._blockEl) { this._blockEl.remove(); this._blockEl = null; }
+    if (this._exitOverlayEl) { this._exitOverlayEl.remove(); this._exitOverlayEl = null; }
     this._ro.disconnect(); this.terminal.dispose(); this.ws.off(this.sessionId);
     if (this._pasteTarget) this._pasteTarget.remove();
   }
