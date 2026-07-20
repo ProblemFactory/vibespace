@@ -784,7 +784,7 @@ export default {
   "not installed": "未安装",
   "not logged in": "未登录",
   "notification": "通知",
-  "· master copy": "· 主副本",
+  "· master held by VibeSpace": "· 主副本存于 VibeSpace",
   "VibeSpace holds the MASTER copy of this key; sessions get derived working copies on their machines (swept on removal). ⋯ → “Show key…” reveals the value.": "VibeSpace 持有这把 key 的主副本；会话运行时向所在机器下发派生的工作副本（移除时一并清理）。⋯ → “查看 key…” 可查看完整值。",
   "Show key…": "查看 key…",
   "API key — {name}": "API key——{name}",

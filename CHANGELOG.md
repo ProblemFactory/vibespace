@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.202.1 — 2026-07-20
+- The API-key "master copy" tag reads **"master held by VibeSpace"** — the bare tag rendered in EVERY machine view (the roster is one shared list), which read as one master per machine ("俩主副本是吧"). The reworded tag states the view-independent fact.
+
 ## 2.202.0 — 2026-07-20
 Account roster polish (user's 4-point list):
 - Provenance + note tags move to their OWN second line under the identity (`.acct-key-extra`, flex-basis wrap) — inline they squeezed the tail into an ellipsis mush.

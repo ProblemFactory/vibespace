@@ -1031,7 +1031,7 @@ export function installManageAgents(App, ctx = {}) {
       let ident = isSub
         ? (a.loggedIn ? escHtml((aEmail || '') + (a.subscriptionType ? (aEmail ? ' · ' : '') + a.subscriptionType : '')) || t('logged in')
                       : `<span class="ob-warn">${t('not logged in')}</span>`)
-        : `API …${escHtml(a.tail || '')} <span class="acct-master-hint" title="${t('VibeSpace holds the MASTER copy of this key; sessions get derived working copies on their machines (swept on removal). ⋯ → “Show key…” reveals the value.')}">${t('· master copy')}</span>`;
+        : `API …${escHtml(a.tail || '')} <span class="acct-master-hint" title="${t('VibeSpace holds the MASTER copy of this key; sessions get derived working copies on their machines (swept on removal). ⋯ → “Show key…” reveals the value.')}">${t('· master held by VibeSpace')}</span>`;
       // Some login flows leave the creds dir without an identity file — the
       // email is then unknowable from disk, which breaks same-account detection
       // vs the machine login (merged usage). Let the user declare/fix it.
