@@ -1,6 +1,7 @@
 import { attachPopoverClose, escHtml } from './utils.js';
 import { track } from './telemetry-client.js';
 import { t } from './i18n.js';
+import { showWindowContextMenu } from './taskbar.js';
 import { TYPE_ICONS, installTabGroupMixin } from './tab-group.js';
 import { createAgentKindIcon, createBackendIcon, createModeBackendIcon, getAgentKindMeta } from './agent-meta.js';
 
@@ -110,11 +111,15 @@ class WindowManager {
     controls.querySelector('.win-close').onclick = (e) => { e.stopPropagation(); this.closeWindow(winInfo.id); };
     el.addEventListener('mousedown', () => this.focusWindow(winInfo.id));
     titleBar.addEventListener('dblclick', (e) => { if (!e.target.closest('.window-controls')) this.toggleMaximize(winInfo.id); });
-    // Right-click on title bar: show overlapping windows switcher
+    // Right-click on title bar (2.212.0): full window menu — the old direct
+    // overlap-switcher popup now lives inside it as the "Switch window"
+    // submenu (scope configurable via window.titlebarSwitchScope). The □
+    // overlap BUTTON keeps the classic popup.
     titleBar.addEventListener('contextmenu', (e) => {
       if (e.target.closest('.window-controls')) return;
       e.preventDefault();
-      this._showOverlapSwitcher(winInfo, e.clientX, e.clientY);
+      if (this._app) showWindowContextMenu(this._app, winInfo.id, e.clientX, e.clientY, { switchSubmenu: true });
+      else this._showOverlapSwitcher(winInfo, e.clientX, e.clientY);
     });
     if (openSpec) winInfo._openSpec = openSpec;
     track('event', 'window-open:' + type);

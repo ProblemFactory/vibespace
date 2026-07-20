@@ -1926,44 +1926,51 @@ class App {
   goToWindow(serverSessionId) {
     for (const [winId, term] of this.sessions) {
       if (term.sessionId === serverSessionId) {
-        const win = this.wm.windows.get(winId);
-        if (!win) break;
-
-        // Resolve tab group: find host and switch to target tab
-        let targetWin = win, targetId = winId;
-        if (win._tabChain && win._tabChain.tabs[0] !== winId) {
-          const hostId = win._tabChain.tabs[0];
-          const host = this.wm.windows.get(hostId);
-          if (host) {
-            targetWin = host; targetId = hostId;
-            const tabIdx = win._tabChain.tabs.indexOf(winId);
-            if (tabIdx >= 0) this.wm.switchTab(win._tabChain, tabIdx);
-          }
-        }
-
-        const dm = this.desktopManager;
-        const doFlash = () => {
-          if (targetWin.isMinimized) this.wm.restore(targetId);
-          this.wm.focusWindow(targetId);
-          targetWin.element.classList.add('window-find-flash');
-          setTimeout(() => targetWin.element.classList.remove('window-find-flash'), 3000);
-        };
-        if (this.stage?.isActive) {
-          // On the stage, "go to" means MATERIALIZE as the hero — focusWindow
-          // is the stage's interception point. Switching desktops out from
-          // under the stage desynced the view (real report: desktop switched
-          // while the preview stayed on the stage).
-          doFlash();
-        } else if (dm && targetWin._desktopId && targetWin._desktopId !== dm.activeDesktopId) {
-          dm.switchTo(targetWin._desktopId).then(doFlash);
-        } else {
-          doFlash();
-        }
-        const session = this.sessions.get(winId);
-        if (session) session.focus?.();
+        this.goToWinId(winId);
         break;
       }
     }
+  }
+
+  // Window-id based go-to (2.212.0): the title-bar/taskbar "Switch window"
+  // submenu targets ANY window type, not just sessions. Same semantics as
+  // goToWindow: tab-chain resolve, stage-aware, cross-desktop switch, flash.
+  goToWinId(winId) {
+    const win = this.wm.windows.get(winId);
+    if (!win) return;
+
+    // Resolve tab group: find host and switch to target tab
+    let targetWin = win, targetId = winId;
+    if (win._tabChain && win._tabChain.tabs[0] !== winId) {
+      const hostId = win._tabChain.tabs[0];
+      const host = this.wm.windows.get(hostId);
+      if (host) {
+        targetWin = host; targetId = hostId;
+        const tabIdx = win._tabChain.tabs.indexOf(winId);
+        if (tabIdx >= 0) this.wm.switchTab(win._tabChain, tabIdx);
+      }
+    }
+
+    const dm = this.desktopManager;
+    const doFlash = () => {
+      if (targetWin.isMinimized) this.wm.restore(targetId);
+      this.wm.focusWindow(targetId);
+      targetWin.element.classList.add('window-find-flash');
+      setTimeout(() => targetWin.element.classList.remove('window-find-flash'), 3000);
+    };
+    if (this.stage?.isActive) {
+      // On the stage, "go to" means MATERIALIZE as the hero — focusWindow
+      // is the stage's interception point. Switching desktops out from
+      // under the stage desynced the view (real report: desktop switched
+      // while the preview stayed on the stage).
+      doFlash();
+    } else if (dm && targetWin._desktopId && targetWin._desktopId !== dm.activeDesktopId) {
+      dm.switchTo(targetWin._desktopId).then(doFlash);
+    } else {
+      doFlash();
+    }
+    const session = this.sessions.get(winId);
+    if (session) session.focus?.();
   }
 
   // Flash a window's title bar + taskbar item to help user find it

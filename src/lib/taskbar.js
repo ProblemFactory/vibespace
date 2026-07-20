@@ -1,4 +1,57 @@
 import { createPopover, showContextMenu } from './utils.js';
+import { t } from './i18n.js';
+
+// Resolve the sidebar SESSION object behind a session window (chat/terminal)
+// — identity kept fresh in _openSpec by syncSessionIdentity. Non-session
+// windows (files/editor/browser) return null: Rename/Task-Groups are
+// session-level concepts.
+function sessionForWin(app, win) {
+  if (!win || (win.type !== 'chat' && win.type !== 'terminal')) return null;
+  const spec = win._openSpec || {};
+  const all = app.sidebar?._allSessions || [];
+  return all.find((s) =>
+    (spec.backendSessionId && s.sessionId === spec.backendSessionId)
+    || (spec.serverId && s.webuiId === spec.serverId)) || null;
+}
+
+// "Switch window" submenu items (2.212.0, title-bar right-click). Scope from
+// window.titlebarSwitchScope: 'overlap' (windows intersecting this one — the
+// pre-2.212 behavior of the whole right-click) | 'desktop' (all windows on
+// the active desktop) | 'all' (every window, cross-desktop entries labeled
+// with their desktop name). Click routes through app.goToWinId (tab-chain +
+// stage + desktop aware).
+function switchWindowItems(app, selfId) {
+  const scope = app.settings?.get('window.titlebarSwitchScope') || 'overlap';
+  const wm = app.wm;
+  const self = wm.windows.get(selfId);
+  if (!self) return [];
+  const dm = app.desktopManager;
+  const activeDesk = dm?.activeDesktopId;
+  const deskName = (id) => dm?.desktops?.find((d) => d.id === id)?.name || '';
+  const selfRect = self.element.getBoundingClientRect();
+  const items = [];
+  for (const [wid, w] of wm.windows) {
+    if (wid === selfId || w._isStagePlaceholder) continue;
+    // tab-group GUESTS have no geometry of their own (content reparented into
+    // the host element) — skip them in the geometric scope; the wider scopes
+    // list them as direct jump-to-tab entries (goToWinId resolves host+tab).
+    const isGuest = w._tabChain && w._tabChain.tabs[0] !== wid;
+    if (scope === 'overlap') {
+      if (isGuest || w._hiddenByDesktop || w._hiddenByStage || w.isMinimized) continue;
+      if (!wm._rectsOverlap(selfRect, w.element.getBoundingClientRect())) continue;
+    } else if (scope === 'desktop') {
+      if (w._hiddenByStage) continue;
+      if (activeDesk && w._desktopId && w._desktopId !== activeDesk) continue;
+    }
+    const otherDesk = scope === 'all' && w._desktopId && w._desktopId !== activeDesk && w._desktopId !== '__stage__';
+    items.push({
+      label: (w.title || w.type) + (otherDesk ? `  — ${deskName(w._desktopId)}` : '') + (w.isMinimized ? ' ' + t('(minimized)') : ''),
+      action: () => app.goToWinId(wid),
+    });
+  }
+  if (!items.length) items.push({ label: t('(no windows)'), disabled: true });
+  return items;
+}
 
 /**
  * Rebuild the taskbar items from the current window state.
@@ -119,17 +172,45 @@ function _rebuildTaskbarItems(app, container, entries) {
 // window-count chip moved into the toolbar must not push the menu off-screen.
 // opts.onAction(kind) fires after any action ('move'|'minimize'|'desktop'|
 // 'close') so a hosting popover can refresh itself instead of going stale.
-export function showWindowContextMenu(app, id, x, y, { closeLabel = '\u2715 Close', onAction } = {}) {
+export function showWindowContextMenu(app, id, x, y, { closeLabel = null, onAction, switchSubmenu = false } = {}) {
   const win = app.wm.windows.get(id);
   if (!win) return;
+  closeLabel = closeLabel || '\u2715 ' + t('Close');
   const act = (kind, fn) => () => { fn(); onAction?.(kind); };
-  const menuItems = [
-    { label: '\u2725 Move', action: act('move', () => app.wm.startMoveMode(id)) },
-    { label: win.isMinimized ? '\u25A1 Restore' : '\u2013 Minimize', action: act('minimize', () => win.isMinimized ? app.wm.restore(id) : app.wm.minimize(id)) },
-  ];
+  const menuItems = [];
+  // Title-bar variant (2.212.0): the whole right-click used to BE the overlap
+  // switcher \u2014 now it's a submenu whose scope is user-configurable.
+  if (switchSubmenu) {
+    menuItems.push({ label: t('Switch window'), children: switchWindowItems(app, id) });
+    menuItems.push({ separator: true });
+  }
+  menuItems.push(
+    { label: '\u2725 ' + t('Move'), action: act('move', () => app.wm.startMoveMode(id)) },
+    { label: win.isMinimized ? '\u25A1 ' + t('Restore') : '\u2013 ' + t('Minimize'), action: act('minimize', () => win.isMinimized ? app.wm.restore(id) : app.wm.minimize(id)) },
+  );
+  // Session windows: rename + Task Group binding straight from the window
+  // chrome (2.212.0, user request) \u2014 same semantics as the session card menu.
+  const sess = sessionForWin(app, win);
+  if (sess) {
+    const sb = app.sidebar;
+    menuItems.push({ label: t('Rename\u2026'), action: act('rename', () => sb?.renameSession?.(sess, sess.name)) });
+    const groups = (sb?._tasks || []).filter((tg) => !tg.archived);
+    if (groups.length) {
+      const explicitIds = new Set((sb._getSessionTasks?.(sess) || []).map((tg) => tg.id));
+      const folderIds = new Set((sb._getSessionTaskGroups?.(sess) || []).map((tg) => tg.id));
+      menuItems.push({
+        label: t('Task Groups'),
+        children: groups.map((tg) => ({
+          label: (explicitIds.has(tg.id) ? '\u2713 ' : folderIds.has(tg.id) ? '\u25C7 ' : ' ') + tg.title + (!explicitIds.has(tg.id) && folderIds.has(tg.id) ? t(' (folder)') : ''),
+          disabled: !explicitIds.has(tg.id) && folderIds.has(tg.id),
+          action: act('groups', () => { explicitIds.has(tg.id) ? sb._taskUnbind(tg.id, sess) : sb._taskBind(tg.id, sess); }),
+        })),
+      });
+    }
+  }
   const deskItems = (app.desktopManager?.getDesktopMenuItems(id) || [])
     .map(d => ({ ...d, action: act('desktop', d.action) }));
-  if (deskItems.length) menuItems.push({ label: '\u27A4 Move to Desktop', children: deskItems });
+  if (deskItems.length) menuItems.push({ label: '\u27A4 ' + t('Move to Desktop'), children: deskItems });
   menuItems.push({ label: closeLabel, action: act('close', () => app.wm.closeWindow(id)), style: 'color:var(--red, #e55)' });
   const menu = showContextMenu(x, y, menuItems, 'taskbar-context-menu');
   if (y > window.innerHeight / 2) {
@@ -227,7 +308,7 @@ function _buildGroupItem(app, container, item, hostWin, starPrefix, group) {
   item.addEventListener('click', () => showTabGroupList(app, item, group.chain));
   item.addEventListener('contextmenu', (e) => {
     e.preventDefault();
-    showWindowContextMenu(app, hostId, e.clientX, e.clientY, { closeLabel: '\u2715 Close group' });
+    showWindowContextMenu(app, hostId, e.clientX, e.clientY, { closeLabel: '\u2715 ' + t('Close group') });
   });
   container.appendChild(item);
 }
