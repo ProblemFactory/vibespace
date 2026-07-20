@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.207.0 — 2026-07-20
+**Debuggability telemetry batch** (user ask, scoped to exactly what blinded tonight's three investigations; all names/enums only — never content — flowing into ⚙ Diagnostics + fleet forwarding):
+- `session-created/exited/killed` events (mode/backend/remote/resume; exited carries the CHILD's exit code — both wrappers now keep their final meta WITH `childExitCode` instead of unlinking it, and the server reads it at teardown into the lifecycle log + event).
+- **Crash-loop detector**: ≥3 creates of the SAME conversation within 10 minutes fires `session-crash-loop` + an opslog warn — the natural incident (4 restarts in 3.5 min) would have flagged in real time.
+- CLI error classes: `cli-usage-limit` (a "You've reached your … limit" turn) and `cli-model-fallback` (from→to) — frequency data for capacity-night triage.
+- `perm-mode-refused` (the CLI refused a mid-session mode switch) and `host-probe-failed` (ssh/dial) — the silent failure modes behind two of this week's "looks like a data bug" reports.
+
 ## 2.206.2 — 2026-07-20
 - Hotfix: the 2.206.1 tombstone referenced a nonexistent DATA_DIR constant inside its try/catch — it would have silently never written (the exact silent-failure class it exists to catch). Path corrected + logic unit-verified.
 

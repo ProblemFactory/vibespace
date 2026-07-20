@@ -320,12 +320,19 @@ class HostManager {
    *  status probes were ssh-only, so a selected dial device showed everything
    *  as not-installed/unreachable while the same probes worked over ssh). */
   async _hostShell(h, script, { timeoutMs = 15000 } = {}) {
-    if (h.transport === 'dial') {
-      const dm = await this.device(h.id);
-      const r = await dm.runCmd('sh', ['-c', script], { timeoutMs });
-      return String(r.stdout || '');
+    try {
+      if (h.transport === 'dial') {
+        const dm = await this.device(h.id);
+        const r = await dm.runCmd('sh', ['-c', script], { timeoutMs });
+        return String(r.stdout || '');
+      }
+      return String(await this._ssh(h, script, { timeoutMs }));
+    } catch (e) {
+      // Probe-failure telemetry (2.207.0): silent host-probe failures made
+      // identity/roster bugs look like data bugs. Name + transport only.
+      global.__vsEvent?.('host-probe-failed', h.transport === 'dial' ? 'dial' : 'ssh');
+      throw e;
     }
-    return String(await this._ssh(h, script, { timeoutMs }));
   }
 
   /** Anthropic login state ON THE HOST (read-only probe, one round trip):
