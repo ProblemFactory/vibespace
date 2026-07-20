@@ -52,6 +52,11 @@ export function installSessionLifecycle(App, ctx = {}) {
       tuiRenderer: (backend === 'claude' && sessionMode === 'terminal' ? this.settings.get('claude.tuiRenderer') : '') || undefined,
       agentKind: agentKind || undefined, agentRole: agentRole || undefined, agentNickname: agentNickname || undefined,
       sourceKind: sourceKind || undefined, parentThreadId: parentThreadId || undefined,
+      // initialCommand reaches the SERVER too (2.196.0): the shell adapter
+      // arms DISABLE_UPDATE_PROMPT for auto-typed shells — without this field
+      // the guard was dead code and oh-my-zsh's [Y/n] ate the first typed
+      // char on remote helper terminals ("claude /login" → "laude").
+      initialCommand: initialCommand || undefined,
       resume: !!resumeId, resumeId: resumeId||undefined, fork: fork||undefined, cols:120, rows:30, reqId,
       taskId: taskId || undefined, // spawns VIBESPACE_TASK_ID into the agent env
       accountId: accountId || undefined, // billing identity: undefined=server default, 'subscription', or acct-… key id

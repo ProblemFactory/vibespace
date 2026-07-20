@@ -195,6 +195,12 @@ function registerWsHandler(wss, ctx) {
             initialPrompt: data.initialPrompt || '',
             mode: sessionMode,
             tuiRenderer: data.tuiRenderer || '',
+            // Shell helper terminals auto-type this — the adapter arms the
+            // DISABLE_UPDATE_PROMPT guard (oh-my-zsh's rc-time [Y/n] eats the
+            // first typed char: "claude /login" → "laude"). 2.196.0: the field
+            // never reached the server before, so the guard was dead code and
+            // the mangling hit REMOTE shells (env rides the exec-env prefix).
+            initialCommand: data.initialCommand || undefined,
           });
           // For codex resume: inherit forkedFrom chain from old session's JSONL
           if (backend === 'codex' && data.resumeId && sessionSpec.env) {

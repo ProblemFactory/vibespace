@@ -273,7 +273,14 @@ export function installManageAgents(App, ctx = {}) {
         if (e.target.closest('.acct-host-login')) {
           // Runs ON the selected host — lands in ITS ~/.codex, not VibeSpace.
           // --device-auth: a plain `codex login` would open localhost:1455 on
-          // the host, unreachable from the user's browser.
+          // the host, unreachable from the user's browser. Confirmed first —
+          // this REPLACES the machine's login (same semantics as claude).
+          const okGo = await showConfirmDialog({
+            title: t('Switch {host}’s own login?', { host: hostLabel }),
+            message: t('This opens codex login ON {host} and REPLACES that machine’s current ChatGPT login. VibeSpace’s named accounts are untouched — to add a switchable account instead, use “+ Add ChatGPT account…”.', { host: hostLabel }),
+            confirmText: t('Open login terminal'),
+          });
+          if (!okGo) return;
           this._watchHostLogin(selectedHost, hostLabel);
           run('codex login --device-auth');
         } else if (e.target.closest('.acct-def')) {
@@ -1066,9 +1073,28 @@ export function installManageAgents(App, ctx = {}) {
       if (id === '__global__') {
         if (e.target.closest('.acct-host-login')) {
           // Runs ON the selected host (run() targets it) — lands in the
-          // host's own ~/.claude, NOT in VibeSpace's store. The watcher
-          // polls the host's login state (read-only ssh probe) and brings
-          // the Agents surface back on THIS machine once the login lands.
+          // host's own ~/.claude, NOT in VibeSpace's store. That REPLACES
+          // the machine's current login, which read too much like "add
+          // account" (real report: user expected an add, got the machine
+          // login swapped) — confirm with the semantics spelled out, and
+          // save a not-yet-imported Console key on the host into VibeSpace
+          // FIRST so the swap can't orphan it. The watcher then polls the
+          // host's login state (read-only ssh probe) and brings the Agents
+          // surface back on THIS machine once the login lands.
+          const hasKey = racct?.cliKey?.present && !importedTails.has(racct.cliKey.tail);
+          const okGo = await showConfirmDialog({
+            title: t('Switch {host}’s own login?', { host: hostLabel }),
+            message: t('This opens claude /login ON {host} and REPLACES that machine’s current CLI login. VibeSpace’s named accounts are untouched — to add a switchable account instead, use “+ Add account…”.', { host: hostLabel })
+              + (hasKey ? ' ' + t('The Console API key currently on it (…{tail}) will be imported into VibeSpace first so it isn’t lost.', { tail: racct.cliKey.tail }) : ''),
+            confirmText: t('Open login terminal'),
+          });
+          if (!okGo) return;
+          if (hasKey) {
+            try {
+              const r = await fetchJson('/api/accounts/import-cli-host', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hostId: selectedHost }) });
+              if (r?.account) showToast(t('Imported: {name}', { name: r.account.name }));
+            } catch { /* best-effort — the dialog already told the user */ }
+          }
           this._watchHostLogin(selectedHost, hostLabel);
           run('claude /login');
         } else if (e.target.closest('.acct-host-refresh')) {
