@@ -783,7 +783,7 @@ export default {
   "not installed": "未インストール",
   "not logged in": "未ログイン",
   "notification": "通知",
-  "· master copy": "・マスターコピー",
+  "· master held by VibeSpace": "・マスターは VibeSpace が保持",
   "VibeSpace holds the MASTER copy of this key; sessions get derived working copies on their machines (swept on removal). ⋯ → “Show key…” reveals the value.": "VibeSpace がこのキーのマスターコピーを保持します。セッション実行時に各マシンへ派生の作業コピーが配置されます（削除時に掃除）。⋯ →「キーを表示…」で値を確認できます。",
   "Show key…": "キーを表示…",
   "API key — {name}": "API キー——{name}",
