@@ -109,7 +109,7 @@ class AccountManager {
       accounts: this._state.accounts.map((a) => {
         const type = this._acctType(a);
         const backend = this._acctBackend(a);
-        const base = { id: a.id, name: a.name, type, backend, source: a.source, createdAt: a.createdAt };
+        const base = { id: a.id, name: a.name, type, backend, source: a.source, originHost: a.originHost || null, note: a.note || null, createdAt: a.createdAt };
         if (backend === 'codex') {
           const info = this.readCodexSubAuth(a.id);
           return { ...base, loggedIn: info.loggedIn, email: info.email || a.email || null, emailDeclared: !info.email && !!a.email, subscriptionType: info.plan, authMode: info.authMode };
@@ -333,7 +333,20 @@ class AccountManager {
     return { imported, skipped };
   }
 
-  add({ name, key, source = 'manual' } = {}) {
+  /** Free-text provenance/annotation shown as a dim tag in the roster —
+   *  answers "where did this key come from?" (real report: a key imported
+   *  from a host read as live-shared from it; the note + originHost make the
+   *  independent-copy semantics visible). */
+  setNote(id, note) {
+    const a = this._state.accounts.find((x) => x.id === id);
+    if (!a) throw new Error('unknown account');
+    const v = String(note || '').trim().slice(0, 120);
+    if (v) a.note = v; else delete a.note;
+    this._save();
+    return this.list().accounts.find((x) => x.id === id) || null;
+  }
+
+  add({ name, key, source = 'manual', originHost = null } = {}) {
     key = String(key || '').trim();
     if (!/^sk-ant-/.test(key)) throw new Error('not an Anthropic API key (must start with sk-ant-)');
     const tail = key.slice(-8);
@@ -349,6 +362,9 @@ class AccountManager {
       keyEnc: this._enc(key),
       tail,
       source,
+      // provenance: the machine this key was imported FROM (display only —
+      // the record is an independent copy in this store, not live-linked)
+      ...(originHost ? { originHost: String(originHost).slice(0, 60) } : {}),
       createdAt: Date.now(),
     };
     this._state.accounts.push(a);

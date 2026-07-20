@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.201.0 — 2026-07-20
+- **Account provenance is visible** (real ask: a key imported from a host read as "shared from AIDev" with no marker). Host key imports now stamp `originHost`, rendered as a dim **"from \<host\>"** tag whose tooltip states the real semantics: an independent COPY held in VibeSpace, not live-linked to the machine it came from, usable anywhere. Every account also gets a free-text **note** (⋯ → "Set note…", ≤120 chars) rendered as a small tag — e.g. "from AIDev backup" on a rescued key. Management stays enabled everywhere deliberately: the record is a store-owned copy, and locking it to a machine would re-introduce the confusion the tag resolves.
+
 ## 2.200.0 — 2026-07-20
 - **"Add subscription" with a machine selected now logs in ON that machine** (the actual root of today's "my subscription got moved to the local machine" confusion, caught from the user's terminal-title screenshot: with AIDev selected, "+ Add account… → Add subscription" quietly opened the login terminal LOCALLY with the LOCAL store path — the account the user believed they were logging in "on AIDev" landed in the local store, tagged this-machine-only). The menu item now reads **"Add subscription (log in on \<host\>)…"** and runs the login on the host into the account's per-host creds dir (the 2.199.0 mechanism — token minted on the host, never leaves it; the account record still lives in VibeSpace as the machine-independent identity). The login watcher picks up the landing and the account immediately shows "logged in on \<host\>". No-host-selected keeps the classic local flow.
 

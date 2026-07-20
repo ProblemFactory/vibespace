@@ -1040,13 +1040,20 @@ export function installManageAgents(App, ctx = {}) {
         : hostSub
         ? ` <span class="acct-linked-hint" title="${t('This account holds its own login ON {host} (minted there, never leaves it) — sessions on {host} picking it use that login.', { host: escHtml(hostLabel) })}">${t('· logged in on {host}', { host: escHtml(hostLabel) })}</span>`
         : blocked ? ` <span class="acct-blocked-hint" title="${t('Runs on this machine only. For {host}: use “Log in on {host} as this account…” in the ⋯ menu (a per-account login held on the host), or enable Settings → “Ship subscription logins to remote hosts.”', { host: escHtml(hostLabel) })}">${t('· this machine only')}</span>` : '';
+      // Provenance + user note tags (2.201.0, real report: a key imported
+      // from a host read as live-shared FROM it — say where it came from and
+      // that it's an independent copy)
+      const provTag = a.originHost
+        ? ` <span class="acct-linked-hint" title="${t('Imported from {host}’s Console login — an independent copy held in VibeSpace (not linked to {host}); usable on any machine.', { host: escHtml(a.originHost) })}">${t('· from {host}', { host: escHtml(a.originHost) })}</span>` : '';
+      const noteTag = a.note
+        ? ` <span class="acct-blocked-hint" title="${escHtml(a.note)}">· ${escHtml(String(a.note).slice(0, 24))}${a.note.length > 24 ? '…' : ''}</span>` : '';
       const iconTitle = isSub ? t('Subscription (Pro/Max) — runs on this machine (or a host you log into)') : t('API key — stored in VibeSpace, runs on any machine');
       // Redesign (2.178.0): rows carry ONLY the star + a ⋯ menu — Test/Rename/
       // email/Remove live in the menu (four inline buttons crushed every row,
       // modal AND panel; real screenshot report). Star stays direct: most-used.
       return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}" data-sub="${isSub ? '1' : ''}"${blocked ? ' data-blocked="1"' : ''}>
         <span class="acct-type-icon" title="${iconTitle}">${isSub ? CROWN : KEY}</span>
-        <span class="acct-key-main"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span></span>
+        <span class="acct-key-main"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}${provTag}${noteTag}</span></span>
         <span class="acct-usage-cell">${isSub && a.loggedIn ? usageHtml(this._accountUsage?.[a.id]) : ''}</span>
         <span class="acct-key-actions">
           <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
@@ -1207,6 +1214,17 @@ export function installManageAgents(App, ctx = {}) {
         try { await fetchJson(`/api/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }); } catch {}
         refresh();
       };
+      const doNote = async () => {
+        const note = await showInputDialog({
+          title: t('Account note'),
+          label: t('Shown as a small tag on the account row (e.g. “from AIDev backup”). Empty clears it.'),
+          value: a?.note || '', confirmText: t('Save'),
+        });
+        if (note != null) {
+          try { await fetchJson(`/api/accounts/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note: note.trim() }) }); } catch {}
+          refresh();
+        }
+      };
       if (e.target.closest('.acct-def')) {
         const isDef = accts.defaultAccountId === id;
         // Default is GLOBAL — starring a "this machine only" subscription
@@ -1240,6 +1258,7 @@ export function installManageAgents(App, ctx = {}) {
           } });
         }
         if (isSub && a.loggedIn && (!a.email || a.emailDeclared)) items.push({ label: a.email ? t('edit email') : t('set email…'), action: doEmail });
+        items.push({ label: a?.note ? t('Edit note…') : t('Set note…'), action: doNote });
         items.push({ separator: true }, { label: t('Remove account'), action: doDelete });
         showContextMenu(r.left, r.bottom + 4, items);
       }
