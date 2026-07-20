@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.212.1 — 2026-07-20
+- Chat tool cards: the **Write** and **Read** card verbs were raw English next to Edit's translated 更新 (real report — a Write card and an Edit card of the same file rendered "Write" / "更新" side by side). Both now localize, incl. the pending (running) file-op cards.
+
 ## 2.212.0 — 2026-07-20
 - **Title-bar right-click is now a full window menu**: the old direct overlap-switcher popup became its "Switch window" SUBMENU, with a new setting (Window → Title-bar "Switch window" scope) choosing what it lists — windows overlapping this one (classic, default), every window on the current desktop, or ALL windows across desktops (entries name their desktop; picking one switches there — tab-chain/stage/desktop aware via the new goToWinId). Session windows additionally get **Rename…** and a **Task Groups** bind/unbind submenu (same semantics as the session-card menu, incl. folder-derived entries shown disabled), plus the usual Move/Minimize/Move-to-Desktop/Close. The □ title-bar button keeps the classic overlap popup.
 - **Taskbar window menus gained Rename… + Task Groups too** (taskbar items, grouped items, window-list rows — the shared menu).

@@ -290,7 +290,11 @@ class ChatRenderers {
       const isFileOp = ['Edit', 'Write', 'Read'].includes(block.toolName);
       const isPending = msg.status === 'pending';
       if (isPending && isFileOp) {
-        const label = `${UI_ICONS.hourglass} ${escHtml(block.toolName)} ${this.clickablePath(fp)}`;
+        // localized VERB, matching the completed cards (Edit completes as
+        // t('Update'), Write as t('Write') — a raw English toolName next to
+        // them read as unlocalized; real report)
+        const verb = block.toolName === 'Edit' ? t('Update') : block.toolName === 'Write' ? t('Write') : t('Read');
+        const label = `${UI_ICONS.hourglass} ${escHtml(verb)} ${this.clickablePath(fp)}`;
         html = `<div class="chat-tool-pending"><span class="chat-tool-label">${label}</span><span class="chat-spinner"></span></div>`;
       } else {
         const desc = isAgent && block.input?.description ? `${icon} Agent: ${escHtml(block.input.description)}${agentModelChip(block.input?.model)}` : `${icon} ${escHtml(block.toolName)}`;
@@ -349,12 +353,12 @@ class ChatRenderers {
       const byteCount = new Blob([content]).size;
       const sizeStr = byteCount > 1024 ? (byteCount / 1024).toFixed(1) + ' KB' : byteCount + ' B';
       const codeBlock = this.renderCodeBlock(content, fp);
-      return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.memo} Write ${this.clickablePath(fp)}</span><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${t('{n} lines, {size}', { n: lineCount, size: sizeStr })}</summary>${codeBlock}</details></div>`;
+      return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.memo} ${t('Write')} ${this.clickablePath(fp)}</span><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${t('{n} lines, {size}', { n: lineCount, size: sizeStr })}</summary>${codeBlock}</details></div>`;
     }
     if (block.toolName === 'Read') {
       const lineCount = resultText.split('\n').length;
       const codeBlock = this.renderCodeBlock(resultText, fp);
-      return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.book} Read ${this.clickablePath(fp)}</span><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${t('{n} lines', { n: lineCount })}</summary>${codeBlock}</details></div>`;
+      return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.book} ${t('Read')} ${this.clickablePath(fp)}</span><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${t('{n} lines', { n: lineCount })}</summary>${codeBlock}</details></div>`;
     }
     if (block.toolName === 'Agent') {
       const desc = block.input?.description || '';
