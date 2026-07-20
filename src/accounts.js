@@ -333,6 +333,19 @@ class AccountManager {
     return { imported, skipped };
   }
 
+  /** Decrypted key VALUE for the reveal dialog (API-key accounts only).
+   *  Same trust model as the mounts config endpoint (2.108.8, user
+   *  directive): single-user instance, cookie-authed — blank secrets that
+   *  can never be re-read are worse than showing them on request (real
+   *  incident: a removed key was unrecoverable; the Console never re-shows
+   *  values). */
+  revealKey(id) {
+    const a = this._state.accounts.find((x) => x.id === id);
+    if (!a) throw new Error('unknown account');
+    if (!a.keyEnc) throw new Error('not an API-key account');
+    return this._dec(a.keyEnc);
+  }
+
   /** Free-text provenance/annotation shown as a dim tag in the roster —
    *  answers "where did this key come from?" (real report: a key imported
    *  from a host read as live-shared from it; the note + originHost make the

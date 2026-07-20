@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.202.0 — 2026-07-20
+Account roster polish (user's 4-point list):
+- Provenance + note tags move to their OWN second line under the identity (`.acct-key-extra`, flex-basis wrap) — inline they squeezed the tail into an ellipsis mush.
+- API-key rows carry a dim **"master copy"** tag (tooltip: VibeSpace holds the master; sessions get derived working copies on their machines, swept on removal) — makes the copy model visible where it matters.
+- **"Show key…"** in the ⋯ menu reveals the decrypted key value (GET /api/accounts/:id/key, cookie-authed — the mounts-config trust model) with a one-click Copy: the store is the master copy and the Anthropic Console can never re-show a key, so users need a sanctioned way to save it elsewhere.
+- (The 2.201.2 removal-confirm translation applies on a page refresh — the screenshot in the report predated the fixed bundle.)
+
 ## 2.201.2 — 2026-07-20
 - The API-key removal confirm is translated (the 2.201.1 string missed the dictionaries — straight-vs-curly quote mismatch between the code key and the dict key, the §16 class) and its wording no longer contradicts the account model: it now says the roster deletes the **master** copy held by VibeSpace AND sweeps the per-session **working copies** placed on hosts — "one copy" and "copies on machines" were both true at different layers, which read as a contradiction.
 

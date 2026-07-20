@@ -2566,6 +2566,12 @@ app.post('/api/accounts/default', (req, res) => {
   try { accounts.setDefault(req.body?.id || null, req.body?.backend || 'claude'); res.json({ success: true }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
+app.get('/api/accounts/:id/key', (req, res) => {
+  // reveal the decrypted key on request (cookie-authed; mounts-config trust
+  // model) — the store is the MASTER copy and the Console can't re-show it
+  try { res.json({ key: accounts.revealKey(req.params.id) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
 app.patch('/api/accounts/:id', (req, res) => {
   try {
     let account = null;
