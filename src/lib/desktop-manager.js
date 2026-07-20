@@ -58,9 +58,11 @@ export class DesktopManager {
       this._desktops = meta;
       this._activeId = meta[0].id;
 
-      // Cache all desktop states
+      // Cache all desktop states — except a poisoned '__stage__' record
+      // (pre-2.209.0 raw switchTo while staged persisted the stage's window
+      // set under that key; caching it would lazy-replay slot-bounds copies)
       for (const [id, dState] of Object.entries(desktopsData)) {
-        if (dState.autoSave) this._savedStates.set(id, dState.autoSave);
+        if (id !== '__stage__' && dState.autoSave) this._savedStates.set(id, dState.autoSave);
       }
 
       // Restore the active (first) desktop
@@ -184,6 +186,19 @@ export class DesktopManager {
   }
 
   async switchTo(desktopId) {
+    // Stage state-machine guard (2.209.0): while staged, EVERY switch must
+    // route through stage.leave() — a raw switchTo would captureState the
+    // stage's window set under the '__stage__' key (poisoning
+    // desktops['__stage__'] in layouts.json, lazily replayed later as real
+    // windows at slot bounds) and leave stage._active desynced from
+    // _activeId. Reachable while staged via the + add-desktop button,
+    // command-mode d/D, moveSessionWindow, and _onRemoteDesktopUpdated.
+    // Conversely '__stage__' is never a switchTo target — route to enter().
+    if (desktopId === '__stage__') {
+      if (this.app.stage && this.app.stage.enabled && !this.app.stage.isActive) this.app.stage.enter();
+      return;
+    }
+    if (this.app.stage?.isActive) return this.app.stage.leave(desktopId);
     if (desktopId === this._activeId) { this._pendingSwitch = null; return; }
     // Rapid switching: a switch requested mid-flight is QUEUED (latest wins),
     // not dropped — dropping left the user's actual position out of sync with
@@ -351,11 +366,15 @@ export class DesktopManager {
       const newIds = new Set(msg.desktops.map(d => d.id));
       this._desktops = msg.desktops;
 
-      // Reassign windows from deleted desktops to the first remaining desktop
+      // Reassign windows from deleted desktops to the first remaining desktop.
+      // STAGE-owned windows are EXEMPT ('__stage__' is never in the meta, so
+      // every remote desktop create/rename/delete used to retag the whole
+      // stage — placeholder included — onto a normal desktop, turning parked
+      // slot-geometry ex-heroes into desktop windows at slot bounds).
       const fallbackId = this._desktops[0]?.id;
       if (fallbackId) {
         for (const [, win] of this.app.wm.windows) {
-          if (win._desktopId && !newIds.has(win._desktopId)) {
+          if (win._desktopId && win._desktopId !== '__stage__' && !newIds.has(win._desktopId)) {
             win._desktopId = fallbackId;
             if (fallbackId === this._activeId && win._hiddenByDesktop) {
               this._showWin(win);
@@ -364,8 +383,11 @@ export class DesktopManager {
         }
       }
 
-      // If our active desktop was deleted, switch to first
-      if (!newIds.has(this._activeId) && this._desktops.length > 0) {
+      // If our active desktop was deleted, switch to first. While staged,
+      // _activeId is '__stage__' (never in the meta) — the old check
+      // force-yanked a staged client off the stage on ANY remote desktop
+      // meta change.
+      if (!newIds.has(this._activeId) && this._activeId !== '__stage__' && this._desktops.length > 0) {
         this.switchTo(this._desktops[0].id);
       }
       this._renderSwitcher();
@@ -381,6 +403,7 @@ export class DesktopManager {
 
   /** Broadcast a specific desktop's state (used during switch) */
   _broadcastDesktopState(desktopId, state) {
+    if (desktopId === '__stage__') return; // stage state never enters desktop records
     this.app.ws.send({ type: 'layout-sync', state, desktopId });
   }
 

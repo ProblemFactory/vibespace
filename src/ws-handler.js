@@ -1845,6 +1845,13 @@ done`;
           // operation on one client got reverted and replayed several times).
           const layoutData = readLayouts();
           const desktopId = data.desktopId;
+          // The Stage is NOT a desktop — its state lives in the 'stage'
+          // SyncStore. A '__stage__' record here is the pre-2.209.0 poisoning
+          // (raw switchTo while staged captured the stage's window set into
+          // desktop records → lazy-replayed as slot-bounds window copies).
+          // Refuse new writes and scrub any persisted residue.
+          if (desktopId === '__stage__') break;
+          if (layoutData.desktops?.__stage__) delete layoutData.desktops.__stage__;
           if (desktopId) {
             // Per-desktop save
             if (!layoutData.desktops) layoutData.desktops = {};

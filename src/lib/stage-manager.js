@@ -262,10 +262,19 @@ export class StageManager {
       if (g) this.app.wm.setGrid(g.rows, g.cols); else this.app.wm.setGrid(null);
       this.healStray();
       this._ensurePlaceholder();
-      // Re-show this tab's live hero workspace if one was active before a
-      // temporary leave (windows tagged _hiddenByStage).
+      // Re-show ONLY this tab's LIVE hero workspace (the remembered hero +
+      // aux bound to it). The old blanket every-_hiddenByStage re-show also
+      // resurrected every slot-PARKED ex-hero (stage-created sessions hidden
+      // at slot geometry by _deactivateHero accumulate for the whole staged
+      // lifetime) — N sessions stacked in the slot on each desktop round
+      // trip (walter's 超级重叠). Parked windows stay hidden; clicking their
+      // session re-materializes them normally.
       for (const [, win] of this.app.wm.windows) {
-        if (win._hiddenByStage) this._showWin(win);
+        if (!win._hiddenByStage) continue;
+        const owner = this._boundAux.get(win.id);
+        if (win.id === this._heroWinId || (owner !== undefined && (owner === this._heroKey || owner === '__pending__'))) {
+          this._showWin(win);
+        }
       }
       // Re-borrow the live hero: leave() handed it back to its home desktop
       // (home geometry, desktop-owned hidden flag) — take it onto the slot
@@ -297,7 +306,11 @@ export class StageManager {
     this._recordActiveWorkspace();
     this._sweepTransient();
     const dm = this.app.desktopManager;
-    const target = targetDesktopId || this._prevDesktopId || dm.desktops[0]?.id;
+    // Target must be a LIVE desktop — _prevDesktopId can have been deleted
+    // remotely while we were staged (leaving to a dead id strands _activeId).
+    const validIds = new Set(dm.desktops.map((d) => d.id));
+    let target = targetDesktopId || this._prevDesktopId || dm.desktops[0]?.id;
+    if (!validIds.has(target)) target = dm.desktops[0]?.id;
     this._active = false;
     // Hand the hero back to the desktop system at its HOME geometry (view
     // model: the slot geometry is stage-only — real report: a hero returned
@@ -467,6 +480,18 @@ export class StageManager {
     return true;
   }
 
+  /** Bounds ≈ the shared slot (tolerance covers layout-sync quantization). */
+  _nearSlot(b) {
+    const slot = this.slotBounds();
+    return !!b && !!slot && ['left', 'top', 'width', 'height'].every((k) => Math.abs((b[k] ?? 0) - (slot[k] ?? 0)) < 0.005);
+  }
+
+  /** Synthesized cascade home for a window with no real home geometry. */
+  _cascadeHome() {
+    const k = (this._homeSeq = ((this._homeSeq || 0) + 1) % 6);
+    return { left: 0.06 + 0.04 * k, top: 0.08 + 0.04 * k, width: 0.55, height: 0.65 };
+  }
+
   /** Serialized (walter lesson #1): latest queued target wins. */
   materialize(win) {
     if (this._switchInFlight) { this._queued = win.id; return; }
@@ -485,6 +510,11 @@ export class StageManager {
   }
 
   async _materializeInner(win) {
+    // A materialize queued just before a leave() must not fire on the normal
+    // desktop (it would deactivate the freshly handed-back hero and show the
+    // target at slot bounds off-stage, corrupting _heroWinId for the next
+    // round trip).
+    if (!this._active) return;
     const wm = this.app.wm;
     // 1. Record + deactivate the previous hero workspace.
     if (this._heroWinId && this._heroWinId !== win.id) {
@@ -556,7 +586,20 @@ export class StageManager {
    *  fullscreen styles override the slot bounds), then apply the shared slot.
    *  Fresh snapshot on every borrow so home edits made off-stage are kept. */
   _borrowHero(win) {
-    if (!win._stageHomeBounds && win.gridBounds) win._stageHomeBounds = { ...win.gridBounds };
+    // The home snapshot MUST exist before the slot is applied. A window born
+    // while staged has NO gridBounds at borrow time (createWindow writes only
+    // the pixel cascade; its creation-tail focus materializes synchronously)
+    // — the old `&& win.gridBounds` guard skipped the snapshot, hand-back
+    // then kept the SLOT as the window's only geometry, and the NEXT borrow
+    // snapshotted the slot AS home (permanent degeneration; the pile-at-slot
+    // + slot-leaks-into-desktop-records class). Capture from current pixels
+    // first (stage flags not yet set, so _captureGridBounds has no slot side
+    // effect); slot-degenerated bounds (pre-fix residue) get a cascade home.
+    if (!win._stageHomeBounds) {
+      if (!win.gridBounds) { try { this.app.wm._captureGridBounds(win); } catch {} }
+      if (win.gridBounds && !this._nearSlot(win.gridBounds)) win._stageHomeBounds = { ...win.gridBounds };
+      else win._stageHomeBounds = this._cascadeHome();
+    }
     if (win.isMaximized) { win._stageHomeMax = true; try { this.app.wm.toggleMaximize(win.id); } catch {} }
     win._onStage = true;
     win._isStageHero = true;
@@ -573,6 +616,9 @@ export class StageManager {
    *  bounds, never the slot. */
   _handBackHero(hero) {
     if (hero._stageHomeBounds) { hero.gridBounds = { ...hero._stageHomeBounds }; delete hero._stageHomeBounds; }
+    // Belt: NEVER leave a hand-back at slot geometry (pre-fix borrows had no
+    // snapshot, so field state can still carry slot-degenerated bounds).
+    else if (this._nearSlot(hero.gridBounds)) hero.gridBounds = this._cascadeHome();
     hero._isStageHero = false;
     hero._onStage = false;
     if (hero.gridBounds && !hero.isMaximized) this.app.wm._applyGridBounds(hero);
