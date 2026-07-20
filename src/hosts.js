@@ -341,12 +341,18 @@ class HostManager {
    *  can never go stale relative to the token itself). */
   async accountsStatus(id) {
     const h = this.get(id);
+    // JSON field greps tolerate ": " — the CLI writes ~/.claude.json with
+    // INDENTED JSON on most machines, and the old no-space patterns were
+    // blind there (real incident: a Console key + email sat in the config
+    // for months while accountsStatus reported cliKey absent / email null —
+    // "Import its key" never appeared and the key was later orphaned by an
+    // OAuth login switch).
     const out = await this._hostShell(h,
       `S=$(grep -c accessToken "$HOME/.claude/.credentials.json" 2>/dev/null); echo "SUB:$S"; `
-      + `K=$(grep -o "primaryApiKey\\":\\"sk-ant-[^\\"]*" "$HOME/.claude.json" 2>/dev/null | head -1); echo "KEY:$K"; `
+      + `K=$(grep -o "primaryApiKey\\": *\\"sk-ant-[^\\"]*" "$HOME/.claude.json" 2>/dev/null | head -1); echo "KEY:$K"; `
       + `grep -q "\\"apiKeyHelper\\"" "$HOME/.claude/settings.json" 2>/dev/null && echo "HELPER:yes" || echo "HELPER:no"; `
-      + `E=$(grep -o "emailAddress\\":\\"[^\\"]*" "$HOME/.claude.json" 2>/dev/null | head -1); echo "EMAIL:$E"; `
-      + `J=$(grep -o "id_token\\":\\"[^\\"]*" "$HOME/.codex/auth.json" 2>/dev/null | head -1 | cut -d. -f2); echo "CXJWT:$J"; `
+      + `E=$(grep -o "emailAddress\\": *\\"[^\\"]*" "$HOME/.claude.json" 2>/dev/null | head -1); echo "EMAIL:$E"; `
+      + `J=$(grep -o "id_token\\": *\\"[^\\"]*" "$HOME/.codex/auth.json" 2>/dev/null | head -1 | cut -d. -f2); echo "CXJWT:$J"; `
       // Credential-file mtimes (GNU stat else BSD) — the freshness anchor for
       // the 2.114.1 identity class: a cached roles-derived orgEmail OLDER than
       // the creds file describes the PREVIOUS login and must not be preferred
@@ -354,9 +360,9 @@ class HostManager {
       + `M=$(stat -c %Y "$HOME/.claude/.credentials.json" 2>/dev/null || stat -f %m "$HOME/.claude/.credentials.json" 2>/dev/null); echo "CMT:$M"; `
       + `MX=$(stat -c %Y "$HOME/.codex/auth.json" 2>/dev/null || stat -f %m "$HOME/.codex/auth.json" 2>/dev/null); echo "XMT:$MX"`);
     const sub = /SUB:(\d+)/.exec(out);
-    const key = /KEY:primaryApiKey":"(sk-ant-[^\s"]+)/.exec(out);
+    const key = /KEY:primaryApiKey": *"(sk-ant-[^\s"]+)/.exec(out);
     const helper = /HELPER:yes/.test(out);
-    const email = /EMAIL:emailAddress":"([^"\s]+)/.exec(out);
+    const email = /EMAIL:emailAddress": *"([^"\s]+)/.exec(out);
     const cxSeg = /CXJWT:([A-Za-z0-9_-]{8,})/.exec(out);
     const cmt = /CMT:(\d+)/.exec(out);
     const xmt = /XMT:(\d+)/.exec(out);
@@ -382,10 +388,11 @@ class HostManager {
    *  central store — travels over the ssh/device channel, never argv). */
   async cliPrimaryKey(id) {
     const h = this.get(id);
+    // ": *" tolerance — indented-JSON configs (see accountsStatus note)
     const out = await this._hostShell(h,
-      `grep -o "primaryApiKey\\":\\"sk-ant-[^\\"]*" "$HOME/.claude.json" 2>/dev/null | head -1; grep -o "organizationName\\":\\"[^\\"]*" "$HOME/.claude.json" 2>/dev/null | head -1`);
-    const key = /primaryApiKey":"(sk-ant-[^\s"]+)/.exec(out);
-    const org = /organizationName":"([^"]+)/.exec(out);
+      `grep -o "primaryApiKey\\": *\\"sk-ant-[^\\"]*" "$HOME/.claude.json" 2>/dev/null | head -1; grep -o "organizationName\\": *\\"[^\\"]*" "$HOME/.claude.json" 2>/dev/null | head -1`);
+    const key = /primaryApiKey": *"(sk-ant-[^\s"]+)/.exec(out);
+    const org = /organizationName": *"([^"]+)/.exec(out);
     return { key: key ? key[1] : null, org: org ? org[1] : null };
   }
 
