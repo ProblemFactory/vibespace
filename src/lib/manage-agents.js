@@ -1030,7 +1030,11 @@ export function installManageAgents(App, ctx = {}) {
       const aEmail = this._accountUsage?.[a.id]?.orgEmail || a.email;
       let ident = isSub
         ? (a.loggedIn ? escHtml((aEmail || '') + (a.subscriptionType ? (aEmail ? ' · ' : '') + a.subscriptionType : '')) || t('logged in')
-                      : `<span class="ob-warn">${t('not logged in')}</span>`)
+          // Host-held login + empty LOCAL dir: "not logged in" (which is
+          // about the local dir) next to "logged in on {host}" read as a
+          // contradiction (real report) — the host tag carries the state.
+          : hostSub ? escHtml(aEmail || '')
+          : `<span class="ob-warn">${t('not logged in')}</span>`)
         : `API …${escHtml(a.tail || '')} <span class="acct-master-hint" title="${t('VibeSpace holds the MASTER copy of this key; sessions get derived working copies on their machines (swept on removal). ⋯ → “Show key…” reveals the value.')}">${t('· master held by VibeSpace')}</span>`;
       // Some login flows leave the creds dir without an identity file — the
       // email is then unknowable from disk, which breaks same-account detection
@@ -1051,7 +1055,7 @@ export function installManageAgents(App, ctx = {}) {
       // Redesign (2.178.0): rows carry ONLY the star + a ⋯ menu — Test/Rename/
       // email/Remove live in the menu (four inline buttons crushed every row,
       // modal AND panel; real screenshot report). Star stays direct: most-used.
-      return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}" data-sub="${isSub ? '1' : ''}"${blocked ? ' data-blocked="1"' : ''}>
+      return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}" data-sub="${isSub ? '1' : ''}"${blocked ? ' data-blocked="1"' : ''}${hostSub ? ' data-hostsub="1"' : ''}>
         <span class="acct-type-icon" title="${iconTitle}">${isSub ? CROWN : KEY}</span>
         <span class="acct-key-main"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span>${(provTag || noteTag) ? `<span class="acct-key-extra">${provTag}${noteTag}</span>` : ''}</span>
         <span class="acct-usage-cell">${isSub && a.loggedIn ? usageHtml(this._accountUsage?.[a.id]) : ''}</span>
@@ -1176,7 +1180,9 @@ export function installManageAgents(App, ctx = {}) {
       const doTest = () => {
         // A not-logged-in subscription can't spawn — the server would
         // reject the create and leave a blank window. Guard it here.
-        if (isSub && !a.loggedIn) {
+        // EXCEPT host-held logins (2.203.0): the LOCAL dir is empty by
+        // design; the spawn resolves against the host-side dir.
+        if (isSub && !a.loggedIn && !keyRow.dataset.hostsub) {
           showToast(t('This subscription isn’t signed in yet — use “Add subscription…” to finish the login first.'), { type: 'error' });
           return;
         }

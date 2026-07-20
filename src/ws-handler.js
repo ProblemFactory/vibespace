@@ -226,8 +226,31 @@ function registerWsHandler(wss, ctx) {
           if ((backend === 'claude' || backend === 'codex') && accounts) {
             try { spawnAccount = accounts.resolveForSpawn(data.accountId, backend); }
             catch (e) {
-              ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'Account error: ' + e.message }));
-              return;
+              // Host-held subscription (2.199.0): an account whose login lives
+              // ONLY on a host has an EMPTY local dir — resolveForSpawn throws
+              // "not logged in" before the hostSubs mapping below ever runs
+              // (real report: picking the account for a session on that very
+              // host failed). Probe the host before failing the create; the
+              // spawn then points at the host-side dir, nothing ships.
+              let rescued = null;
+              if (data.hostId && hosts && backend === 'claude'
+                  && typeof data.accountId === 'string' && /^sub-[\w-]{1,40}$/.test(data.accountId)
+                  && /not logged in/.test(String(e.message))) {
+                try {
+                  const rs = await hosts.accountsStatus(data.hostId);
+                  if ((rs?.hostSubs || []).includes(data.accountId)) {
+                    rescued = {
+                      id: data.accountId, kind: 'subscription', _hostSubReady: true,
+                      remoteCreds: { dirName: 'subs/' + data.accountId, envVar: 'CLAUDE_SECURESTORAGE_CONFIG_DIR' },
+                    };
+                  }
+                } catch { /* probe failed — fall through to the original error */ }
+              }
+              if (!rescued) {
+                ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'Account error: ' + e.message }));
+                return;
+              }
+              spawnAccount = rescued;
             }
             // REMOTE + the account came from the DEFAULT (nothing specified) +
             // it could only reach the host by shipping subscription creds →
