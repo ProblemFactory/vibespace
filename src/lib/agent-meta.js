@@ -11,9 +11,8 @@ export const BACKEND_META = {
     brandColor: '#D97757',
     // The CLI's auto-memory dirs (~/.claude/projects/<proj>/memory/ and
     // ~/.claude/memory/) — file ops here classify as the 'memory' collapse
-    // kind and label memory/<name> in fold summaries. Codex (0.142.x) has no
-    // memory feature, hence no entry; a NEW backend with a memory dir adds
-    // ONE memoryPathRe here and everything downstream picks it up
+    // kind and label memory/<name> in fold summaries. A NEW backend with a
+    // memory dir adds ONE memoryPathRe and everything downstream picks it up
     // (agentMemoryPathRes unions across backends deliberately: the PATH
     // identifies memory content regardless of which session touches it).
     memoryPathRe: /\/\.claude\/(?:projects\/[^/]+\/)?memory\//,
@@ -39,6 +38,14 @@ export const BACKEND_META = {
     iconSrc: '/brand/codex.svg',
     iconClass: 'backend-icon-codex',
     brandColor: '#000000',
+    // Codex Memories (0.144.0, config-gated `[memories]` in config.toml,
+    // developers.openai.com/codex/memories): background jobs distill rollouts
+    // (memories_1.sqlite stage1 → global consolidation) into FILES under
+    // $CODEX_HOME/memories/ — MEMORY.md, memory_summary.md, raw_memories.md,
+    // rollout_summaries/ (paths verified in the 0.144.0 binary). Sessions can
+    // also touch them via dedicated tools or plain file ops — either way the
+    // path marks the content as memory.
+    memoryPathRe: /\/\.codex\/memories\//,
   },
 };
 
