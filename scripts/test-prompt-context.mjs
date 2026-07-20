@@ -62,7 +62,7 @@ tasks.update(g1.id, { objective: 'obj one, refined' });
 const c3 = call();
 check('change → diff only (no full re-inject)', c3.includes('<vibespace-task-update>') && !c3.includes('<vibespace-task-context>'), c3.slice(0, 300));
 check('diff carries the actual deltas', c3.includes('Objective UPDATED to:') && c3.includes('obj one, refined') && c3.includes('made progress here'), c3);
-check('diff omits the tools teaching (already known)', !c3.includes('Reporting back — three CLIs'), c3);
+check('diff omits the tools teaching (already known)', !c3.includes('Reporting back —'), c3);
 const c4 = call();
 check('after diff → quiet again', !c4.includes('task-update') && !c4.includes('task-context'), c4);
 

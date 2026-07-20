@@ -296,6 +296,30 @@ const SETTINGS_SCHEMA = {
     description: t('Everything the AGENT can see or use from VibeSpace. ON (default): sessions get the VibeSpace hooks (Task Group context, per-turn reminders, stop nudge) and the vibespace-status/ask/task tools on their PATH. OFF: the model gets a pristine claude/codex — the hook registration is removed from ~/.claude/settings.json and ~/.codex/hooks.json immediately (restored on re-enable, unless you had removed the hook manually in Manage Agents), new sessions spawn with no VibeSpace env or tools, and already-running sessions stop receiving injected context, nudges and task reads. Model-INVISIBLE plumbing keeps working either way: passive usage capture (statusline), billing/account env, the Ctrl+G editor, session persistence and remote transport. Every option below only applies while this is ON.'),
     category: t('Integration'), liveApply: true,
   },
+  'agents.contextInjection': {
+    type: 'boolean', default: true,
+    label: t('Inject Task Group context'),
+    description: t('Deliver each session\'s Task Group context (objective, shared-context folder index, activity log, update diffs) into the agent via hooks. OFF: agents get no group payloads at all — the reporting tools below still work if enabled. The per-group "Inject context" checkbox in the group\'s detail window is the finer-grained version of this.'),
+    category: t('Integration'), liveApply: true,
+  },
+  'agents.toolStatus': {
+    type: 'boolean', default: true,
+    label: t('Agent tool: vibespace-status (board state)'),
+    description: t('Lets agents self-report working/blocked/needs-input/… onto the session board. OFF: the tool is no longer taught in injected context or reminders, its endpoint refuses with skip-and-continue guidance, and the stop-time bookkeeping nudge (which is keyed on status staleness) never fires. Synthesized states (idle detection) keep working.'),
+    category: t('Integration'), liveApply: true,
+  },
+  'agents.toolAsk': {
+    type: 'boolean', default: true,
+    label: t('Agent tool: vibespace-ask (your inbox)'),
+    description: t('Lets agents mirror questions/decisions onto your "For you" inbox. OFF: not taught, endpoint refuses with skip-and-continue guidance — agents ask only in chat.'),
+    category: t('Integration'), liveApply: true,
+  },
+  'agents.toolTask': {
+    type: 'boolean', default: true,
+    label: t('Agent tool: vibespace-task (activity log & backlog)'),
+    description: t('Lets agents log finished work into the group activity log and park items in the group backlog. OFF: not taught, the progress/backlog write endpoints refuse with skip-and-continue guidance; reading group state (vibespace-task show) still works while context injection is on.'),
+    category: t('Integration'), liveApply: true,
+  },
   'agents.stopNudgeStaleMinutes': {
     type: 'number', default: 10, min: 0, max: 240, step: 1,
     label: t('Stop nudge: staleness threshold (minutes)'),

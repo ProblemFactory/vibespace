@@ -15,6 +15,7 @@ function setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionSt
 app.post('/api/agent/user-todo', (req, res) => {
   const hit = agentSession(req, res);
   if (!hit) return;
+  if (!toolOn('Ask')) return toolDisabled(res, 'vibespace-ask');
   const [s, id] = hit;
   const key = sessionStatusKey(s, id);
   if (!key.startsWith('webui:')) userTodos.rekey(`webui:${id}`, key); // migrate early items once the real id exists
@@ -48,6 +49,7 @@ app.post('/api/agent/session-status', (req, res) => {
   let found = null, foundId = null;
   for (const [id, s] of activeSessions) { if (s.agentToken === token) { found = s; foundId = id; break; } }
   if (!found) return res.status(401).json({ error: 'unknown session token' });
+  if (!toolOn('Status')) return toolDisabled(res, 'vibespace-status');
   const key = sessionStatusKey(found, foundId);
   // migrate an early webui:<id> record once the real backend id exists
   if (!key.startsWith('webui:')) sessionStatus.rekey(`webui:${foundId}`, key);
@@ -200,26 +202,43 @@ function withPreamble(sessionObj, parts) {
   return [preambleBlock(text), ...parts];
 }
 
-const SESSION_TOOLS_INTRO = [
-  '<vibespace-session-tools>',
-  'This session is running inside VibeSpace. Report your OWN status so the user can see it on their session board — use the `vibespace-status` command (already on your PATH):',
-  '  vibespace-status <working|needs-input|blocked|review|done> [--urgency low|normal|high|urgent] [--reason "why"]',
-  '  vibespace-status show   (or run it with no arguments) — prints usage + your current status',
-  'Keep it honest and current: `working` while making progress; `blocked` or `needs-input` (with a higher urgency) the moment you are stuck or waiting on the user; `review` when you want them to look; `done` when this piece of work is finished.',
-  'Whenever you ask the user ANYTHING — a question in chat, or ending a turn waiting on their decision/input/review — ALSO file it on their global inbox with `vibespace-ask`. They are often NOT watching this window; the inbox is how they find waiting questions across all sessions:',
-  '  vibespace-ask "question or decision needed" [--detail "context + your recommendation"] [--urgency low|normal|high|urgent]',
-  '  vibespace-ask list  /  vibespace-ask resolve <id|text>',
-  'The MOMENT the user answers (in chat or anywhere), resolve the item YOURSELF with `vibespace-ask resolve` — never leave answered items for them to tick. Not for your own working steps — those belong in your normal todo list.',
-  'The inbox item is a NOTIFICATION MIRROR, not the message itself: everything you file (the question, options, your recommendation) must ALSO appear IN FULL in your chat reply — never say something only in the inbox (the user reads and copies from chat; inbox rows are hard to read at length).',
-  'When your reply references files you created or discuss (audio, images, reports, code, HTML…), write their ABSOLUTE paths — the chat UI turns absolute paths into clickable links that open in the right viewer (audio plays, images preview, HTML renders). Bare filenames or project-relative paths may not resolve.',
-  'If a request needs a DIFFERENT machine\'s network position (a region, an internal/VPN network, a fixed source IP), you can borrow a paired machine\'s network for that ONE command with `vibespace-exit` (default: go direct — only reach for an exit deliberately):',
-  '  vibespace-exit list                     machines the user enabled as exits',
-  '  eval "$(vibespace-exit use <machine>)"; curl https://ifconfig.me   (borrow its egress via SOCKS for proxy-aware TCP tools)',
-  '  vibespace-exit run <machine> -- <cmd>   run the command ON that machine (universal: ICMP/UDP/proxy-unaware tools/its own DNS)',
-  '  (SOCKS can\'t carry ping/UDP and needs a proxy-aware tool — when `use` won\'t work, `run` will. Nothing is available until the user enables a machine as an exit.)',
-  '(If this session is later linked to a VibeSpace task, you will also get `vibespace-task` for task-level progress/plan/status — you have no task right now, so it is not active yet.)',
-  '</vibespace-session-tools>',
-].join('\n');
+// Built per delivery since 2.211.0 — the per-feature Integration toggles are
+// liveApply, and teaching a DISABLED tool (whose endpoint refuses) would
+// train agents into dead ends. All-on output is byte-identical to the old
+// static SESSION_TOOLS_INTRO. Returns '' when nothing session-level is
+// enabled (status+ask both off) — the abs-path/exit advice alone isn't worth
+// a delivery.
+function sessionToolsIntro(T) {
+  if (!T.status && !T.ask) return '';
+  const L = ['<vibespace-session-tools>'];
+  if (T.status) {
+    L.push(
+      'This session is running inside VibeSpace. Report your OWN status so the user can see it on their session board — use the `vibespace-status` command (already on your PATH):',
+      '  vibespace-status <working|needs-input|blocked|review|done> [--urgency low|normal|high|urgent] [--reason "why"]',
+      '  vibespace-status show   (or run it with no arguments) — prints usage + your current status',
+      'Keep it honest and current: `working` while making progress; `blocked` or `needs-input` (with a higher urgency) the moment you are stuck or waiting on the user; `review` when you want them to look; `done` when this piece of work is finished.');
+  } else {
+    L.push('This session is running inside VibeSpace.');
+  }
+  if (T.ask) {
+    L.push(
+      'Whenever you ask the user ANYTHING — a question in chat, or ending a turn waiting on their decision/input/review — ALSO file it on their global inbox with `vibespace-ask`. They are often NOT watching this window; the inbox is how they find waiting questions across all sessions:',
+      '  vibespace-ask "question or decision needed" [--detail "context + your recommendation"] [--urgency low|normal|high|urgent]',
+      '  vibespace-ask list  /  vibespace-ask resolve <id|text>',
+      'The MOMENT the user answers (in chat or anywhere), resolve the item YOURSELF with `vibespace-ask resolve` — never leave answered items for them to tick. Not for your own working steps — those belong in your normal todo list.',
+      'The inbox item is a NOTIFICATION MIRROR, not the message itself: everything you file (the question, options, your recommendation) must ALSO appear IN FULL in your chat reply — never say something only in the inbox (the user reads and copies from chat; inbox rows are hard to read at length).');
+  }
+  L.push(
+    'When your reply references files you created or discuss (audio, images, reports, code, HTML…), write their ABSOLUTE paths — the chat UI turns absolute paths into clickable links that open in the right viewer (audio plays, images preview, HTML renders). Bare filenames or project-relative paths may not resolve.',
+    'If a request needs a DIFFERENT machine\'s network position (a region, an internal/VPN network, a fixed source IP), you can borrow a paired machine\'s network for that ONE command with `vibespace-exit` (default: go direct — only reach for an exit deliberately):',
+    '  vibespace-exit list                     machines the user enabled as exits',
+    '  eval "$(vibespace-exit use <machine>)"; curl https://ifconfig.me   (borrow its egress via SOCKS for proxy-aware TCP tools)',
+    '  vibespace-exit run <machine> -- <cmd>   run the command ON that machine (universal: ICMP/UDP/proxy-unaware tools/its own DNS)',
+    '  (SOCKS can\'t carry ping/UDP and needs a proxy-aware tool — when `use` won\'t work, `run` will. Nothing is available until the user enables a machine as an exit.)');
+  if (T.task) L.push('(If this session is later linked to a VibeSpace task, you will also get `vibespace-task` for task-level progress/plan/status — you have no task right now, so it is not active yet.)');
+  L.push('</vibespace-session-tools>');
+  return L.join('\n');
+}
 
 // SessionStart hook payload (context injection): rendered task state + context
 // folder file index + the rules. Fires + injects for Claude (terminal + chat).
@@ -236,11 +255,14 @@ app.get('/api/agent/task-context', (req, res) => {
     const [s, id] = hit;
     const key = sessionStatusKey(s, id);
     const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId });
-    const injectGroups = groups.filter((g) => g.injectContext !== false); // P6: per-group context toggle
+    // agents.contextInjection off (2.211.0) ⇒ no group content is injected at
+    // all (falls through to the baseline tools intro) — the per-group
+    // injectContext toggle stays the finer-grained instrument.
+    const injectGroups = ctxInjectionOn() ? groups.filter((g) => g.injectContext !== false) : []; // P6: per-group context toggle
     let context = '';
     if (injectGroups.length) {
       // Remote sessions read the auto-synced copy — translate file paths
-      context = tasks.renderMultiContext(injectGroups.map((g) => g.id), { ctxBaseFor: remoteCtxBaseFor(s), sessionKey: key });
+      context = tasks.renderMultiContext(injectGroups.map((g) => g.id), { ctxBaseFor: remoteCtxBaseFor(s), sessionKey: key, tools: enabledTools() });
       // Only Claude injects the SessionStart output; codex runs the command but
       // ignores it, so don't mark groups "seen" for codex (that would starve its
       // UserPromptSubmit delivery).
@@ -263,8 +285,8 @@ app.get('/api/agent/task-context', (req, res) => {
       // tool can't self-report.
       // In no group: still teach the agent to report its status (baseline), once.
       // codex ignores SessionStart output, so it gets this via prompt-context.
-      context = SESSION_TOOLS_INTRO;
-      s._toolsIntroSeen = true;
+      context = sessionToolsIntro(enabledTools());
+      if (context) s._toolsIntroSeen = true;
     }
     // Designated Group MANAGER: teach the admin verbs ONCE — whichever route
     // delivers first wins (s._mgrIntroSeen shared with prompt-context).
@@ -308,8 +330,10 @@ app.get('/api/agent/prompt-context', (req, res) => {
     const [s, id] = hit;
     const key = sessionStatusKey(s, id);
     const parts = [];
+    const toolFlags = enabledTools();
     const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId });
-    const injectGroups = groups.filter((g) => g.injectContext !== false); // P6: per-group context toggle
+    // agents.contextInjection off ⇒ no group payloads/diffs (see task-context)
+    const injectGroups = ctxInjectionOn() ? groups.filter((g) => g.injectContext !== false) : []; // P6: per-group context toggle
     if (injectGroups.length) {
       s._groupSeenAt = s._groupSeenAt || {};
       s._ctxSig = s._ctxSig || {};
@@ -379,7 +403,7 @@ app.get('/api/agent/prompt-context', (req, res) => {
           : tasks.renderContextDiffMulti(changedDiffs.map((x) => ({ id: x.g.id, changes: x.changes })));
       const fullBlocks = [];
       for (const g of updatedFulls) {
-        const ctx = tasks.renderContext(g.id, { multi, ctxBase: ctxBaseFor ? ctxBaseFor(g.id) : null, sessionKey: key });
+        const ctx = tasks.renderContext(g.id, { multi, ctxBase: ctxBaseFor ? ctxBaseFor(g.id) : null, sessionKey: key, tools: toolFlags });
         if (ctx) fullBlocks.push(`The Task Group below was UPDATED since you last saw it — this is the current state (supersedes any earlier copy).\n\n${ctx}`);
       }
       let newFullGroups = [];
@@ -394,8 +418,8 @@ app.get('/api/agent/prompt-context', (req, res) => {
         // count-free multi phrasing instead.
         const allNew = firstGroups.length === injectGroups.length;
         const fulls = (firstGroups.length > 1 && allNew)
-          ? [tasks.renderMultiContext(firstGroups.map((g) => g.id), { ctxBaseFor, sessionKey: key })].filter(Boolean)
-          : firstGroups.map((g) => tasks.renderContext(g.id, { multi, ctxBase: ctxBaseFor ? ctxBaseFor(g.id) : null, sessionKey: key })).filter(Boolean);
+          ? [tasks.renderMultiContext(firstGroups.map((g) => g.id), { ctxBaseFor, sessionKey: key, tools: toolFlags })].filter(Boolean)
+          : firstGroups.map((g) => tasks.renderContext(g.id, { multi, ctxBase: ctxBaseFor ? ctxBaseFor(g.id) : null, sessionKey: key, tools: toolFlags })).filter(Boolean);
         if (fulls.length) {
           fullBlocks.push(...fulls);
           newFullGroups = firstGroups;
@@ -425,8 +449,8 @@ app.get('/api/agent/prompt-context', (req, res) => {
       // No injectable group → baseline tools intro once (see task-context note).
       // In no group: deliver the baseline tools intro on the FIRST prompt (covers
       // codex — its app-server runs the hook but ignores SessionStart output).
-      parts.push(SESSION_TOOLS_INTRO);
-      s._toolsIntroSeen = true;
+      const intro = sessionToolsIntro(toolFlags);
+      if (intro) { parts.push(intro); s._toolsIntroSeen = true; }
     }
     // Designated Group MANAGER: teach the admin verbs once (this route is
     // codex's ONLY delivery path; claude usually gets it via task-context).
@@ -464,8 +488,13 @@ app.get('/api/agent/prompt-context', (req, res) => {
     if (!outParts.length) {
       const multi = injectGroups.length > 1;
       const mgrClause = isManagerSession(key) ? ' · you are a Group MANAGER: `vibespace-task group-list` + group-create/-update/-bind organize ALL groups (any verb takes --group <id>)' : '';
-      const std = perTurnReminderEnabled()
-        ? `Tools on PATH: vibespace-status <state> — keep your board state honest · vibespace-ask "q" — MIRROR every chat question onto their inbox (the FULL content still goes in your chat reply — the inbox is only the notification), and resolve <id|text> the moment they answer · vibespace-task ${multi ? '--group <id> ' : ''}progress "summary" — log finished work${mgrClause}. Run any with no args for usage.`
+      // Per-feature toggles: the reminder lists only ENABLED tools (2.211.0).
+      const segs = [];
+      if (toolFlags.status) segs.push('vibespace-status <state> — keep your board state honest');
+      if (toolFlags.ask) segs.push('vibespace-ask "q" — MIRROR every chat question onto their inbox (the FULL content still goes in your chat reply — the inbox is only the notification), and resolve <id|text> the moment they answer');
+      if (toolFlags.task) segs.push(`vibespace-task ${multi ? '--group <id> ' : ''}progress "summary" — log finished work`);
+      const std = perTurnReminderEnabled() && segs.length
+        ? `Tools on PATH: ${segs.join(' · ')}${mgrClause}. Run any with no args for usage.`
         : '';
       // User extra rides at the TOP of the reminder block (per-hook custom,
       // 2.88.0); it delivers even with the standard reminder toggled off.
@@ -502,6 +531,10 @@ app.get('/api/agent/stop-check', (req, res) => {
   if (!hit) return;
   try {
     if (!integrationOnMaster() || !stopNudgeEnabled()) return res.json({ block: false });
+    // The arbiter is keyed on STATUS staleness — with vibespace-status
+    // disabled (2.211.0) there is nothing to keep fresh, so never nudge.
+    const T = enabledTools();
+    if (!T.status) return res.json({ block: false });
     const [s, id] = hit;
     const now = Date.now();
     // Both thresholds user-configurable (2.89.0) — clamped to sane bounds so a
@@ -521,9 +554,13 @@ app.get('/api/agent/stop-check', (req, res) => {
     s._lastStopNudge = now;
     // Per-hook custom text (2.88.0): user extra rides at the top of the nudge.
     const extra = customExtra('agents.stopNudgeExtra', 500);
+    // Steps list only ENABLED tools (2.211.0) — status is guaranteed on here.
+    const steps = ['set your CURRENT state — vibespace-status <working|needs-input|blocked|review|done> --reason "one line" (done if this piece of work is finished; needs-input/review if you are waiting on the user)'];
+    if (T.ask) steps.push('if you asked the user anything this turn or are waiting on them, MIRROR it — vibespace-ask "question" (the full content must already be in your chat reply; the inbox only notifies) — and vibespace-ask resolve anything they already answered');
+    if (T.task) steps.push('if you completed meaningful work, log it — vibespace-task progress "summary"');
     res.json({
       block: true,
-      reason: (extra ? extra + '\n' : '') + 'VibeSpace bookkeeping before you stop (your board state is stale): (1) set your CURRENT state — vibespace-status <working|needs-input|blocked|review|done> --reason "one line" (done if this piece of work is finished; needs-input/review if you are waiting on the user); (2) if you asked the user anything this turn or are waiting on them, MIRROR it — vibespace-ask "question" (the full content must already be in your chat reply; the inbox only notifies) — and vibespace-ask resolve anything they already answered; (3) if you completed meaningful work, log it — vibespace-task progress "summary". Then stop again.',
+      reason: (extra ? extra + '\n' : '') + 'VibeSpace bookkeeping before you stop (your board state is stale): ' + steps.map((t, i) => `(${i + 1}) ${t}`).join('; ') + '. Then stop again.',
     });
   } catch { res.json({ block: false }); }
 });
@@ -544,6 +581,21 @@ function integrationOnMaster() {
 }
 function stopNudgeEnabled() {
   try { return serverSetting('agents.stopBookkeepingNudge') !== false; } catch { return true; }
+}
+// Per-feature Integration toggles (2.211.0, user request: e.g. keep shared-
+// context injection but withhold ask/progress). All default ON; consulted
+// only while the master switch is ON. OFF ⇒ the feature is neither TAUGHT
+// (intro/context/reminders omit it) nor SERVED (its write endpoints refuse
+// with skip-and-continue guidance).
+function toolOn(name) { // 'Status' | 'Ask' | 'Task'
+  try { return serverSetting('agents.tool' + name) !== false; } catch { return true; }
+}
+function enabledTools() { return { status: toolOn('Status'), ask: toolOn('Ask'), task: toolOn('Task') }; }
+function ctxInjectionOn() {
+  try { return serverSetting('agents.contextInjection') !== false; } catch { return true; }
+}
+function toolDisabled(res, cmd) {
+  res.status(403).json({ error: `${cmd} is disabled in this VibeSpace's settings (Integration section) — skip this reporting step and continue with your work; do not retry.` });
 }
 function perTurnReminderEnabled() {
   try { return serverSetting('agents.perTurnToolReminder') !== false; } catch { return true; }
@@ -574,6 +626,7 @@ app.get('/api/agent/task', (req, res) => {
 app.post('/api/agent/task-progress', (req, res) => {
   const hit = agentSession(req, res);
   if (!hit) return;
+  if (!toolOn('Task')) return toolDisabled(res, 'vibespace-task progress');
   const gid = resolveAgentGroup(hit, req, res);
   if (!gid) return;
   try {
@@ -600,6 +653,7 @@ app.post('/api/agent/task-plan', (req, res) => {
 app.post('/api/agent/task-backlog', (req, res) => {
   const hit = agentSession(req, res);
   if (!hit) return;
+  if (!toolOn('Task')) return toolDisabled(res, 'vibespace-task backlog');
   const gid = resolveAgentGroup(hit, req, res);
   if (!gid) return;
   try {
