@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.194.0 — 2026-07-20
+- **A PDF Read no longer bursts N bare "notification" cards into the chat** (real report: a 10-page Read → 10 empty "通知" rows). Root cause reproduced against a live claude 2.1.x stream: the CLI ships the extracted pages into model context as image-only user records — LIVE as one `isSynthetic:true` event PER PAGE (each classified as a notification and, having no text, rendered as the bare fallback label), in the JSONL as one `isMeta:true` record with N image blocks (which the history rebuild rendered as a giant "You" bubble — also wrong). The normalizer now coalesces consecutive CLI-injected page records into ONE `imageAttachment` message (create + edit ops, no turnIndex bump — it's not a conversation turn, so no minimap marker either) and both live and rebuilt paths render a single compact collapsible **"Attached pages (N)"** card: pages show as 300px thumbs on expand (scroll-capped body), click-to-zoom via the standard image overlay. Real user image pastes (typed / unflagged) are untouched. Regression test: `scripts/test-page-attachments.mjs` (13 asserts: live burst coalesce, edit-op re-render gate, history single-record, paste immunity, run boundary).
+
 ## 2.193.0 — 2026-07-19
 The four remote gaps parked by the 2.192.0 audit, now built (user: 全部解决):
 - **Image paste into a REMOTE terminal works** (was a silent no-op — the server set ITS OWN X clipboard, which the remote CLI can never read). /api/paste-image now resolves the session's host server-side: the image lands on the host at `~/.vibespace/paste/paste-<ts>.<ext>` via RemoteFs and the client types the shell-escaped remote path into the PTY (the drag-drop model) instead of sending Ctrl+V.

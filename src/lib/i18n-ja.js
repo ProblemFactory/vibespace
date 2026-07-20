@@ -783,6 +783,7 @@ export default {
   "not installed": "未インストール",
   "not logged in": "未ログイン",
   "notification": "通知",
+  "Attached pages ({n})": "添付ページ画像（{n}）",
   "off by default; encrypted with a passphrase. The file lets anyone who has it (and the passphrase) log in / use your agent accounts. Treat it like a key.": "既定でオフ；パスフレーズで暗号化されます。このファイルを持つ人（とパスフレーズ）は誰でもログインしたり、あなたのエージェントアカウントを使用できます。キーと同様に扱ってください。",
   "optional": "任意",
   "or browse files first": "または先にファイルを参照",

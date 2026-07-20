@@ -450,6 +450,11 @@
 }
 .chat-img:hover { opacity: 0.9; }
 
+/* CLI-attached page images (PDF Read) — one collapsed card; pages render on
+   expand (300px thumbs, click-to-zoom via the standard chat-img overlay) and
+   the body scrolls so a 10-page expand never floods the transcript */
+.chat-attach-pages-body { display: flex; flex-direction: column; gap: 4px; padding: 4px 0 2px; max-height: 480px; overflow: auto; }
+
 /* Attachment preview area */
 .chat-attach-area { display: flex; gap: 6px; padding: 6px 0; flex-wrap: wrap; width: 100%; }
 .chat-attach-area.hidden { display: none; }
