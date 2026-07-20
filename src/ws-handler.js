@@ -253,12 +253,20 @@ function registerWsHandler(wss, ctx) {
               try { allowShip = !!serverSetting('accounts.shipSubscriptionToRemote'); } catch {}
               if (!allowShip) {
                 try {
+                  const rs = await hosts.accountsStatus(data.hostId);
+                  // (a) The account IS the host's own login (same email) →
+                  // run on the host's login directly.
                   const meta = (accounts.list().accounts || []).find((x) => x.id === spawnAccount.id);
                   const acctEmail = String(meta?.email || (String(meta?.name || '').includes('@') ? meta.name : '')).trim().toLowerCase();
-                  if (acctEmail) {
-                    const rs = await hosts.accountsStatus(data.hostId);
-                    const hostEmail = String((backend === 'codex' ? rs?.codex?.email : rs?.subscription?.email) || '').trim().toLowerCase();
-                    if (hostEmail && hostEmail === acctEmail) spawnAccount = null; // = the host's own login (same account)
+                  const hostEmail = String((backend === 'codex' ? rs?.codex?.email : rs?.subscription?.email) || '').trim().toLowerCase();
+                  if (acctEmail && hostEmail && hostEmail === acctEmail) {
+                    spawnAccount = null; // = the host's own login (same account)
+                  } else if (backend === 'claude' && (rs?.hostSubs || []).includes(spawnAccount.id)) {
+                    // (b) The host holds a LIVE per-account creds dir
+                    // (~/.vibespace/subs/<id>, minted by an on-host login —
+                    // 2.199.0): point the spawn at it, ship nothing. The
+                    // token was born on that machine and never leaves it.
+                    spawnAccount._hostSubReady = true;
                   }
                 } catch { /* probe failed — keep the explicit-account path (errors later with guidance) */ }
               }
@@ -508,6 +516,13 @@ function registerWsHandler(wss, ctx) {
           // worse than failing the create.
           const remoteAccountEnv = (h) => {
             if (!spawnAccount) return '';
+            // Host-side subscription login (2.199.0): the host already holds
+            // this account's creds dir — minted ON the host, never shipped.
+            // Point the CLI at it and skip the ship gate entirely (nothing
+            // crosses machines; the §ban-safety concern doesn't apply).
+            if (spawnAccount._hostSubReady && spawnAccount.remoteCreds) {
+              return `${spawnAccount.remoteCreds.envVar}="$HOME/.vibespace/${spawnAccount.remoteCreds.dirName}" `;
+            }
             // API key: ship the single value to a 0600 file, reference via a
             // shell prefix assignment (the VALUE never enters any argv). API
             // keys are the SANCTIONED programmatic path — always shippable.

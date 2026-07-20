@@ -112,7 +112,7 @@ export function installManageAgents(App, ctx = {}) {
     if (!hostId) return;
     if (this._hostLoginWatch) { clearInterval(this._hostLoginWatch); this._hostLoginWatch = null; }
     const sig = (r) => (r && !r.error)
-      ? [r.credsMtime || 0, r.codexAuthMtime || 0, r.subscription?.loggedIn ? 1 : 0, r.subscription?.email || '', r.codex?.email || ''].join('|')
+      ? [r.credsMtime || 0, r.codexAuthMtime || 0, r.subscription?.loggedIn ? 1 : 0, r.subscription?.email || '', r.codex?.email || '', (r.hostSubs || []).join('+')].join('|')
       : null;
     // Baseline = the FIRST SUCCESSFUL poll (t≈6s), never a pre-click fetch:
     // (a) a transient probe failure at t0 must not make the first good poll
@@ -131,10 +131,13 @@ export function installManageAgents(App, ctx = {}) {
       if (baseSig === null) { baseSig = s; return; }
       if (s === baseSig) return;
       clearInterval(this._hostLoginWatch); this._hostLoginWatch = null;
-      // Stamp for the roster's identity-freshness note: cached org identity
-      // older than this moment belongs to the PREVIOUS login (local clocks
-      // only — remote mtimes rotate on normal token refresh and skew).
-      (this._hostLoginSeenAt ||= {})[hostId] = Date.now();
+      // Stamp for the roster's identity-freshness note — ONLY when the
+      // MACHINE login itself changed (a per-account host login landing is
+      // the last sig field; it must not arm the CLI-login row's amber
+      // "login changed" note). Local clocks only — remote mtimes rotate on
+      // normal token refresh and skew.
+      const machinePart = (x) => x.split('|').slice(0, 5).join('|');
+      if (machinePart(s) !== machinePart(baseSig)) (this._hostLoginSeenAt ||= {})[hostId] = Date.now();
       // Respect a machine the user explicitly switched to while waiting —
       // yanking the surface back would re-instance the jumps-machines bug.
       if (this._agentsHostPref && this._agentsHostPref !== hostId) {
@@ -999,11 +1002,16 @@ export function installManageAgents(App, ctx = {}) {
     const hostOwnEmail = selectedHost
       ? String(racct?.subscription?.email || this._hostOwnUsage?.[selectedHost]?.orgEmail || '').trim().toLowerCase() : '';
     const acctEmailOf = (a) => String(this._accountUsage?.[a.id]?.orgEmail || a.email || (String(a.name || '').includes('@') ? a.name : '')).trim().toLowerCase();
+    // Host-side per-account logins (2.199.0): ids with a live creds dir on
+    // the selected host (~/.vibespace/subs/<id>) — usable there directly.
+    const hostSubIds = selectedHost ? (racct?.hostSubs || []) : [];
+    this._hostSubsKnown = { ...(this._hostSubsKnown || {}), ...(selectedHost ? { [selectedHost]: hostSubIds } : {}) };
     const keyLines = claudeAccts.map(a => {
       const isDef = accts.defaultAccountId === a.id;
       const isSub = a.type === 'subscription';
       const linked = isSub && subBlocked && !!hostOwnEmail && acctEmailOf(a) === hostOwnEmail;
-      const blocked = isSub && subBlocked && !linked; // subscription on a remote host, opt-in off
+      const hostSub = isSub && subBlocked && !linked && hostSubIds.includes(a.id);
+      const blocked = isSub && subBlocked && !linked && !hostSub; // subscription on a remote host, opt-in off
       // token-derived orgEmail (per-account ⟳ roles bake) beats the creds
       // dir's config email — same staleness class as the global row (2.188.0)
       const aEmail = this._accountUsage?.[a.id]?.orgEmail || a.email;
@@ -1016,7 +1024,9 @@ export function installManageAgents(App, ctx = {}) {
       // vs the machine login (merged usage). Let the user declare/fix it.
       const hint = linked
         ? ` <span class="acct-linked-hint" title="${t('Same account as {host}’s current CLI login — sessions on {host} picking it run on the host’s own login directly (nothing is shipped).', { host: escHtml(hostLabel) })}">${t('· = {host}’s own login', { host: escHtml(hostLabel) })}</span>`
-        : blocked ? ` <span class="acct-blocked-hint" title="${t('Runs on this machine only. For {host}, log in on the host — or enable Settings → “Ship subscription logins to remote hosts.”', { host: escHtml(hostLabel) })}">${t('· this machine only')}</span>` : '';
+        : hostSub
+        ? ` <span class="acct-linked-hint" title="${t('This account holds its own login ON {host} (minted there, never leaves it) — sessions on {host} picking it use that login.', { host: escHtml(hostLabel) })}">${t('· logged in on {host}', { host: escHtml(hostLabel) })}</span>`
+        : blocked ? ` <span class="acct-blocked-hint" title="${t('Runs on this machine only. For {host}: use “Log in on {host} as this account…” in the ⋯ menu (a per-account login held on the host), or enable Settings → “Ship subscription logins to remote hosts.”', { host: escHtml(hostLabel) })}">${t('· this machine only')}</span>` : '';
       const iconTitle = isSub ? t('Subscription (Pro/Max) — runs on this machine (or a host you log into)') : t('API key — stored in VibeSpace, runs on any machine');
       // Redesign (2.178.0): rows carry ONLY the star + a ⋯ menu — Test/Rename/
       // email/Remove live in the menu (four inline buttons crushed every row,
@@ -1198,6 +1208,20 @@ export function installManageAgents(App, ctx = {}) {
           { label: t('Test'), action: doTest },
           { label: t('Rename account'), action: doRename },
         ];
+        // Per-account login held ON the host (2.199.0): mint this account's
+        // own creds dir on the selected machine via an on-host interactive
+        // login (~/.vibespace/subs/<id> — the token is born there and never
+        // leaves; §ban-safety-clean, unlike shipping). Coexists with the
+        // machine's global login. Once it lands, sessions on that host can
+        // pick this account directly.
+        if (isSub && selectedHost && keyRow.dataset.blocked) {
+          items.splice(1, 0, { label: t('Log in on {host} as this account…', { host: hostLabel }), action: () => {
+            const dir = `$HOME/.vibespace/subs/${id}`; // id shape sub-<hex>, metachar-free
+            this._watchHostLogin(selectedHost, hostLabel);
+            run(`mkdir -p "${dir}" && CLAUDE_CONFIG_DIR="${dir}" CLAUDE_SECURESTORAGE_CONFIG_DIR="${dir}" claude /login`);
+            showToast(t('Sign in as “{name}” in the terminal — this login lives ON {host} only; the machine’s own login is untouched.', { name: a?.name, host: hostLabel }), { duration: 7000 });
+          } });
+        }
         if (isSub && a.loggedIn && (!a.email || a.emailDeclared)) items.push({ label: a.email ? t('edit email') : t('set email…'), action: doEmail });
         items.push({ separator: true }, { label: t('Remove account'), action: doDelete });
         showContextMenu(r.left, r.bottom + 4, items);
