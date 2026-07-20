@@ -1210,7 +1210,16 @@ export function installManageAgents(App, ctx = {}) {
         }
       };
       const doDelete = async () => {
-        if (!(await showConfirmDialog({ title: t('Remove account'), message: t('Remove "{name}" from VibeSpace? Sessions already running keep working; the key itself stays valid.', { name: a?.name }) }))) return;
+        // API keys: the store holds the ONLY copy VibeSpace has, the roster
+        // is shared by every machine view, and Anthropic's Console never
+        // re-shows a key's full value — deleting is effectively final (real
+        // incident: a rescued key removed "from the local view" was gone
+        // from AIDev's view too, and recoverable only from a rotating CLI
+        // backup). Say all of that before acting.
+        const msg = isSub
+          ? t('Remove "{name}" from VibeSpace? Sessions already running keep working; the key itself stays valid.', { name: a?.name })
+          : t('Remove "{name}"? This deletes VibeSpace’s stored copy of the key — the roster is one shared list (it disappears from every machine’s view), and the Anthropic Console cannot re-show an existing key’s value. Make sure it’s saved elsewhere, or keep the account. Running sessions keep working.', { name: a?.name });
+        if (!(await showConfirmDialog({ title: t('Remove account'), message: msg }))) return;
         try { await fetchJson(`/api/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }); } catch {}
         refresh();
       };
