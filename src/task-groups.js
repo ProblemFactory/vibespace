@@ -323,17 +323,25 @@ class TaskGroupManager {
   // The shared tools teaching, one emission per payload. gid = the --group
   // prefix agents must use ('' single-group; '--group <id> ' generic in the
   // shared multi-group section).
-  _toolsSectionParts(gid, multi) {
+  _toolsSectionParts(gid, multi, tools = null) {
     // DISCOVERY layer (2.111.22) with COPY-READY samples (2.111.25, user
     // directive): every line shows the COMPLETE correct invocation — waiting
     // states carry both --reason and --detail (enforced server-side), ask
     // carries --detail — so the first call an agent copies is already valid.
     // Syntax edge cases still live in each CLI's own no-args output.
+    // Per-feature toggles (2.211.0): a disabled tool is OMITTED — teaching a
+    // command whose endpoint refuses would train agents into dead ends.
+    const T = tools || { status: true, ask: true, task: true };
+    const n = [T.task, T.status, T.ask].filter(Boolean).length;
+    if (!n) return [];
     const g = gid || '';
-    return ['', '### Reporting back — three CLIs on your PATH (run any with no args for full usage)', '',
+    const out = ['', `### Reporting back — ${n > 1 ? n + ' CLIs' : 'one CLI'} on your PATH (run ${n > 1 ? 'any' : 'it'} with no args for full usage)`, '',
       multi
-        ? `You belong to MORE THAN ONE Task Group; pass \`--group <id>\` to \`vibespace-task\` (each block below names its id). \`vibespace-status\`/\`vibespace-ask\` always mean THIS session.`
-        : `They're bound to THIS session — you never pass a group id.`,
+        ? (T.task
+          ? `You belong to MORE THAN ONE Task Group; pass \`--group <id>\` to \`vibespace-task\` (each block below names its id).${(T.status || T.ask) ? ` \`${[T.status && 'vibespace-status', T.ask && 'vibespace-ask'].filter(Boolean).join('`/`')}\` always mean${T.status && T.ask ? '' : 's'} THIS session.` : ''}`
+          : `These are bound to THIS session.`)
+        : `They're bound to THIS session — you never pass a group id.`];
+    if (T.task) out.push(
       '',
       'After each meaningful piece of work, log it for the group:',
       `\`\`\``,
@@ -345,21 +353,25 @@ class TaskGroupManager {
       `\`\`\``,
       `vibespace-task ${g}backlog-add "one-line item" --detail "context for whoever picks it up later"`,
       `\`\`\``,
-      `(parking auto-CLAIMS the item for you — claimed items are re-surfaced to you and their changes notify you. \`vibespace-task ${g}backlog\` lists; \`backlog <id>\` shows one in full; \`backlog-claim/-unclaim <id>\` take/hand back ownership — if the user hands you a backlog id, view it and claim it; \`backlog-done <id>\` once decided or finished)`,
+      `(parking auto-CLAIMS the item for you — claimed items are re-surfaced to you and their changes notify you. \`vibespace-task ${g}backlog\` lists; \`backlog <id>\` shows one in full; \`backlog-claim/-unclaim <id>\` take/hand back ownership — if the user hands you a backlog id, view it and claim it; \`backlog-done <id>\` once decided or finished)`);
+    if (T.status) out.push(
       '',
       "Your session's live state on the board — set it the MOMENT it changes. Waiting states REQUIRE both flags:",
       `\`\`\``,
       `vibespace-status blocked --reason "what you're waiting on" --detail "context: options, what you tried, your recommendation" --urgency high`,
       `\`\`\``,
-      '(states: working | needs-input | blocked | review | done — `done` when this piece of work is finished)',
+      '(states: working | needs-input | blocked | review | done — `done` when this piece of work is finished)');
+    if (T.ask) out.push(
       '',
       'Whenever you ask the user anything or end a turn waiting on them — file it AND write the full question (options + recommendation) in your CHAT REPLY; the inbox only notifies, never the sole copy:',
       `\`\`\``,
       `vibespace-ask "the question" --detail "options + your recommendation" --urgency high`,
       `\`\`\``,
-      'Resolve it YOURSELF the moment they answer (chat counts): `vibespace-ask resolve <id>`',
+      'Resolve it YOURSELF the moment they answer (chat counts): `vibespace-ask resolve <id>`');
+    out.push(
       '',
-      'In chat replies use ABSOLUTE file paths (e.g. /home/user/out/final.wav) — the UI makes them clickable; bare/relative names may not resolve.'];
+      'In chat replies use ABSOLUTE file paths (e.g. /home/user/out/final.wav) — the UI makes them clickable; bare/relative names may not resolve.');
+    return out;
   }
 
   // Backlog note for INJECTION (user directive 2.122.0/2.123.0): never dump
@@ -367,7 +379,8 @@ class TaskGroupManager {
   // THIS session CLAIMED (the session that parks one auto-claims it), so the
   // responsible agent re-surfaces them; otherwise just one line saying how to
   // query/claim. Returns lines.
-  _backlogNoteLines(t, { gid = '', sessionKey = null } = {}) {
+  _backlogNoteLines(t, { gid = '', sessionKey = null, tools = null } = {}) {
+    if (tools && tools.task === false) return []; // backlog commands ride vibespace-task
     const open = (t.backlog || []).filter((b) => b.status === 'open');
     if (!open.length) return [];
     const mine = sessionKey ? open.filter((b) => (b.claimedBy || []).includes(sessionKey)) : [];
@@ -387,7 +400,7 @@ class TaskGroupManager {
     return out;
   }
 
-  renderContext(id, { multi = false, ctxBase = null, logBudget = 8000, skipTools = false, sessionKey = null } = {}) {
+  renderContext(id, { multi = false, ctxBase = null, logBudget = 8000, skipTools = false, sessionKey = null, tools = null } = {}) {
     const t = this.get(id);
     const parts = [
       `<vibespace-task-context>`,
@@ -396,7 +409,7 @@ class TaskGroupManager {
       '',
       // cap=0: meta/objective only — the log is appended LAST below.
       this.renderTaskMd(t, 0).replace(/\n---\n[\s\S]*$/, '').trim(),
-      ...this._backlogNoteLines(t, { gid: multi ? `--group ${t.id} ` : '', sessionKey }),
+      ...this._backlogNoteLines(t, { gid: multi ? `--group ${t.id} ` : '', sessionKey, tools }),
     ];
     // ── How to report back — self-documenting + scoped + enum-disambiguated ──
     // In multi-group payloads the tools section is emitted ONCE by
@@ -404,7 +417,7 @@ class TaskGroupManager {
     // a 2-group payload to 9.8KB / 3-group to 15.7KB, past the hook persist
     // threshold (agents then see only a ~2KB head preview and never learn the
     // tools — the same fleet-wide failure 2.68.0 fixed for the single-group case).
-    if (!skipTools) parts.push(...this._toolsSectionParts(multi ? `--group ${t.id} ` : '', multi));
+    if (!skipTools) parts.push(...this._toolsSectionParts(multi ? `--group ${t.id} ` : '', multi, tools));
     if (t.contextDir) {
       const base = ctxBase || t.contextDir;
       parts.push('', `## Shared context folder (the group's shared memory)`, '',
@@ -710,11 +723,11 @@ class TaskGroupManager {
   // to the baseline tools intro). 1 → the normal single-group context. N → each
   // group's context, prefaced so the agent knows it spans multiple 岗位 and must
   // use `--group <id>` to act on a specific one.
-  renderMultiContext(groupIds, { ctxBaseFor = null, sessionKey = null } = {}) {
+  renderMultiContext(groupIds, { ctxBaseFor = null, sessionKey = null, tools = null } = {}) {
     const ids = (groupIds || []).filter((id) => this._state.tasks[id] && !this._state.tasks[id].archived);
     if (!ids.length) return '';
     const baseOf = (id) => (ctxBaseFor ? ctxBaseFor(id) : null);
-    if (ids.length === 1) return this.renderContext(ids[0], { ctxBase: baseOf(ids[0]), sessionKey });
+    if (ids.length === 1) return this.renderContext(ids[0], { ctxBase: baseOf(ids[0]), sessionKey, tools });
     // LAYERED, not per-group blocks (user directive): tools → ALL identities →
     // ALL shared folders → ALL activity logs. Truncation then degrades by
     // LAYER — the first group's bulk can no longer erase the very EXISTENCE of
@@ -723,17 +736,17 @@ class TaskGroupManager {
     const titles = ids.map((id) => `"${ts[id].title}" (${id})`).join(', ');
     const head = [
       `<vibespace-task-context>`,
-      `This session belongs to ${ids.length} VibeSpace Task Groups (岗位): ${titles}. Their shared state follows in LAYERS (all groups' identities → shared folders → recent activity); use \`vibespace-task --group <id> …\` to act on a specific group.`,
+      `This session belongs to ${ids.length} VibeSpace Task Groups (岗位): ${titles}. Their shared state follows in LAYERS (all groups' identities → shared folders → recent activity)${(!tools || tools.task !== false) ? '; use \`vibespace-task --group <id> …\` to act on a specific group' : ''}.`,
       this._persistRescueLine(),
     ];
-    head.push(...this._toolsSectionParts('--group <id> ', true));
+    head.push(...this._toolsSectionParts('--group <id> ', true, tools));
     head.push('', '## Your Task Groups');
     for (const id of ids) {
       // renderTaskMd's H1/H2 demoted one level so groups nest under the layer heading
       const md = this.renderTaskMd(ts[id], 0).replace(/\n---\n[\s\S]*$/, '').trim().replace(/^(#{1,2}) /gm, '#$1 ');
       head.push('', md);
       // per-group backlog note (own-parked summary or a one-line pointer)
-      const bl = this._backlogNoteLines(ts[id], { gid: `--group ${id} `, sessionKey })
+      const bl = this._backlogNoteLines(ts[id], { gid: `--group ${id} `, sessionKey, tools })
         .map((l) => l.replace(/^### /, '#### '));
       head.push(...bl);
     }

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.211.0 — 2026-07-20
+**Per-feature Integration toggles** (user request: inject shared context but withhold ask/progress). Four new settings under Integration, all default ON, applying only while the master switch is ON:
+- `agents.contextInjection` — Task Group context payloads/diffs into agents (the per-group "Inject context" checkbox remains the finer grain). OFF falls back to the baseline tools intro.
+- `agents.toolStatus` / `agents.toolAsk` / `agents.toolTask` — each agent tool individually. A disabled tool is neither TAUGHT (the injected tools section, baseline intro, per-turn reminder and stop-nudge steps all rebuild from the enabled set — teaching a command whose endpoint refuses would train agents into dead ends) nor SERVED (its write endpoints refuse with "disabled in settings — skip this step and continue; do not retry"). Turning off vibespace-status also silences the stop-time bookkeeping nudge (it is keyed on status staleness); reading group state (`vibespace-task show`) stays available while context injection is on.
+- New route smoke: `scripts/test-tool-toggles.mjs` (21 asserts); existing prompt-context/context-diff/group-admin suites re-run green.
+
 ## 2.210.0 — 2026-07-20
 - **`vibespace-task progress` success output now reminds the agent to say it in chat** (the vibespace-ask 2.111.21 pattern): real agents logged a deliverable (a URL, a path, a result) into the activity log and ended the turn without putting it in the reply — the log is agent-facing and invisible in the user's chat flow. The reminder states that anything the USER needs must also appear in the chat reply.
 - **Stop nudge can now fire on EVERY stop**: `agents.stopNudgeStaleMinutes` / `stopNudgeCooldownMinutes` accept an explicit 0 (0 stale = board always considered stale; 0 cooldown = no per-session rate limit). With 0/0 the bookkeeping nudge fires after every turn — still capped at ONE mini-turn per user turn by the existing loop guards (claude stop_hook_active, codex nudgeTurnActive). Defaults unchanged (10/30).
