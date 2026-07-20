@@ -516,10 +516,18 @@ export function installSessionLifecycle(App, ctx = {}) {
     const rHostName = live?.hostName || rHostId;
     const rTransport = rHostId ? (this.sidebar?._hostsData?.hosts?.find(h => h.id === rHostId)?.transport || 'ssh') : null;
     const shipSubs = !!this.settings.get('accounts.shipSubscriptionToRemote');
+    // Same-account link: a named subscription whose email matches the host's
+    // own login identity (⟳-baked orgEmail cache) IS that login — pickable;
+    // the server maps the spawn onto the host's own login (2.198.0, zero
+    // creds ship). Cache empty → stays blocked with the pick-CLI-login hint.
+    const hostOwnEmail = rHostId ? String(this._hostOwnUsage?.[rHostId]?.orgEmail || '').trim().toLowerCase() : '';
+    const acctEmailOf = (a) => String(a.email || (String(a.name || '').includes('@') ? a.name : '')).trim().toLowerCase();
+    const hostLinked = (a) => !isCodex && !!hostOwnEmail && acctEmailOf(a) === hostOwnEmail;
     const subBlock = (a) => {
       if (!rHostId) return null;
       const isSub = isCodex || (a.type || 'api') === 'subscription';
       if (!isSub) return null; // API keys always ship
+      if (hostLinked(a)) return null; // = the host's own login — usable directly
       if (rTransport === 'dial') return t('Subscription logins can’t ship to a paired device — log in on the device, or use an API-key account');
       if (!shipSubs) return t('This stored login can’t ship to {host}. If you’ve logged this account in ON {host}, pick “CLI login @ {host}” above — that uses the host’s own login. (Or enable Settings → “Ship subscription logins to remote hosts”.)', { host: rHostName });
       return null;
@@ -545,7 +553,9 @@ export function installSessionLifecycle(App, ctx = {}) {
     }
     for (const a of accts) {
       const cur = currentId === a.id;
-      const suffix = (!isCodex && (a.type || 'api') !== 'subscription') ? ' · API' : '';
+      const linked = rHostId && hostLinked(a) && (isCodex || (a.type || 'api') === 'subscription');
+      const suffix = (!isCodex && (a.type || 'api') !== 'subscription') ? ' · API'
+        : linked ? ' ' + t('· uses {host}’s own login', { host: rHostName }) : '';
       const block = subBlock(a);
       if (block && !cur) { items.push({ label: a.name + suffix, disabled: true, title: block }); continue; }
       items.push({ label: (cur ? '✓ ' : '') + a.name + suffix, action: () => { if (!cur) doSwitch(a.id, a.name); } });

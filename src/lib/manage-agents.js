@@ -234,13 +234,20 @@ export function installManageAgents(App, ctx = {}) {
     // remote host unless the opt-in is set — same as Claude subscriptions.
     const allowSubRemote = !!this.settings?.get?.('accounts.shipSubscriptionToRemote');
     const subBlocked = !!selectedHost && !allowSubRemote;
+    // Same-account link vs the host's own codex login (see the Anthropic
+    // roster note) — a linked account is usable on the host via its own login
+    const cxHostEmail = selectedHost ? String(racct?.codex?.email || '').trim().toLowerCase() : '';
+    const cxEmailOf = (a) => String(a.email || (String(a.name || '').includes('@') ? a.name : '')).trim().toLowerCase();
     const keyLines = codexAccts.map(a => {
       const isDef = accts.defaultCodexAccountId === a.id;
-      const blocked = subBlocked;
+      const linked = subBlocked && !!cxHostEmail && cxEmailOf(a) === cxHostEmail;
+      const blocked = subBlocked && !linked;
       let ident = a.loggedIn
         ? escHtml((a.email || '') + (a.subscriptionType ? (a.email ? ' · ' : '') + a.subscriptionType : '')) || t('logged in')
         : `<span class="ob-warn">${t('not logged in')}</span>`;
-      const hint = blocked ? ` <span class="acct-blocked-hint" title="${t('Runs on this machine only. For {host}, log in on the host — or enable Settings → “Ship subscription logins to remote hosts.”', { host: escHtml(hostLabel) })}">${t('· this machine only')}</span>` : '';
+      const hint = linked
+        ? ` <span class="acct-linked-hint" title="${t('Same account as {host}’s current CLI login — sessions on {host} picking it run on the host’s own login directly (nothing is shipped).', { host: escHtml(hostLabel) })}">${t('· = {host}’s own login', { host: escHtml(hostLabel) })}</span>`
+        : blocked ? ` <span class="acct-blocked-hint" title="${t('Runs on this machine only. For {host}, log in on the host — or enable Settings → “Ship subscription logins to remote hosts.”', { host: escHtml(hostLabel) })}">${t('· this machine only')}</span>` : '';
       // Redesign (2.178.0): star + ⋯ menu, same as the Anthropic roster
       return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}"${blocked ? ' data-blocked="1"' : ''}>
         <span class="acct-type-icon" title="${t('ChatGPT account — runs on this machine (or a host you log into)')}">${CROWN}</span>
@@ -983,10 +990,20 @@ export function installManageAgents(App, ctx = {}) {
       <span class="acct-key-actions">
         <button class="acct-icon acct-def ${gDef ? 'on' : ''}" title="${gDef ? t('Default for new sessions — pick another to change') : t('Set as default for new sessions')}">${gDef ? STAR_F : STAR_O}</button>${gExtraActions}
       </span></div>`;
+    // The selected host's own login identity (live probe, ⟳-cache fallback) —
+    // a named subscription with the SAME email IS that login: it must not
+    // read "this machine only" (real report: user logged the very account in
+    // ON the machine and the roster still called it unusable). Picking a
+    // linked account for a session on that host runs on the host's own login
+    // (server maps it since 2.198.0 — zero creds ship).
+    const hostOwnEmail = selectedHost
+      ? String(racct?.subscription?.email || this._hostOwnUsage?.[selectedHost]?.orgEmail || '').trim().toLowerCase() : '';
+    const acctEmailOf = (a) => String(this._accountUsage?.[a.id]?.orgEmail || a.email || (String(a.name || '').includes('@') ? a.name : '')).trim().toLowerCase();
     const keyLines = claudeAccts.map(a => {
       const isDef = accts.defaultAccountId === a.id;
       const isSub = a.type === 'subscription';
-      const blocked = isSub && subBlocked; // subscription on a remote host, opt-in off
+      const linked = isSub && subBlocked && !!hostOwnEmail && acctEmailOf(a) === hostOwnEmail;
+      const blocked = isSub && subBlocked && !linked; // subscription on a remote host, opt-in off
       // token-derived orgEmail (per-account ⟳ roles bake) beats the creds
       // dir's config email — same staleness class as the global row (2.188.0)
       const aEmail = this._accountUsage?.[a.id]?.orgEmail || a.email;
@@ -997,7 +1014,9 @@ export function installManageAgents(App, ctx = {}) {
       // Some login flows leave the creds dir without an identity file — the
       // email is then unknowable from disk, which breaks same-account detection
       // vs the machine login (merged usage). Let the user declare/fix it.
-      const hint = blocked ? ` <span class="acct-blocked-hint" title="${t('Runs on this machine only. For {host}, log in on the host — or enable Settings → “Ship subscription logins to remote hosts.”', { host: escHtml(hostLabel) })}">${t('· this machine only')}</span>` : '';
+      const hint = linked
+        ? ` <span class="acct-linked-hint" title="${t('Same account as {host}’s current CLI login — sessions on {host} picking it run on the host’s own login directly (nothing is shipped).', { host: escHtml(hostLabel) })}">${t('· = {host}’s own login', { host: escHtml(hostLabel) })}</span>`
+        : blocked ? ` <span class="acct-blocked-hint" title="${t('Runs on this machine only. For {host}, log in on the host — or enable Settings → “Ship subscription logins to remote hosts.”', { host: escHtml(hostLabel) })}">${t('· this machine only')}</span>` : '';
       const iconTitle = isSub ? t('Subscription (Pro/Max) — runs on this machine (or a host you log into)') : t('API key — stored in VibeSpace, runs on any machine');
       // Redesign (2.178.0): rows carry ONLY the star + a ⋯ menu — Test/Rename/
       // email/Remove live in the menu (four inline buttons crushed every row,
