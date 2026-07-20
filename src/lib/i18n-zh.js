@@ -784,6 +784,7 @@ export default {
   "not installed": "未安装",
   "not logged in": "未登录",
   "notification": "通知",
+  "Remove “{name}”? This deletes VibeSpace’s stored copy of the key — the roster is one shared list (it disappears from every machine’s view), and the Anthropic Console cannot re-show an existing key’s value. Make sure it’s saved elsewhere, or keep the account. Running sessions keep working.": "移除“{name}”？这会删除 VibeSpace 保存的密钥副本——账号列表是全局共享的一份（所有机器视图里都会消失），且 Anthropic Console 网页无法重新查看已有 key 的完整值。请确认已在别处保存，否则请保留该账号。运行中的会话不受影响。",
   "· from {host}": "· 来自 {host}",
   "Imported from {host}’s Console login — an independent copy held in VibeSpace (not linked to {host}); usable on any machine.": "从 {host} 的 Console 登录导入——是保存在 VibeSpace 里的独立副本（与 {host} 无实时关联），可在任何机器上使用。",
   "Account note": "账号备注",

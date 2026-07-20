@@ -783,6 +783,7 @@ export default {
   "not installed": "未インストール",
   "not logged in": "未ログイン",
   "notification": "通知",
+  "Remove “{name}”? This deletes VibeSpace’s stored copy of the key — the roster is one shared list (it disappears from every machine’s view), and the Anthropic Console cannot re-show an existing key’s value. Make sure it’s saved elsewhere, or keep the account. Running sessions keep working.": "「{name}」を削除しますか？VibeSpace が保存しているキーのコピーが削除されます——アカウント一覧は全マシン共有の 1 つのリストであり（すべてのマシンの表示から消えます）、Anthropic Console では既存キーの値を再表示できません。他の場所に保存済みか確認するか、アカウントを残してください。実行中のセッションには影響しません。",
   "· from {host}": "・{host} から",
   "Imported from {host}’s Console login — an independent copy held in VibeSpace (not linked to {host}); usable on any machine.": "{host} の Console ログインからインポート——VibeSpace に保存された独立したコピーです（{host} とは連動しません）。どのマシンでも使用できます。",
   "Account note": "アカウントメモ",

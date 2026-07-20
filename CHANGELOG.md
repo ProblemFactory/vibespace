@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.201.1 — 2026-07-20
+- **Removing an API-key account warns with the real stakes** (real incident, minutes after 2.201.0: the rescued Console key was removed "from the local view" — but the roster is ONE shared list, so it vanished from every machine's view, and Anthropic's Console never re-shows an existing key's value; recovery relied on a rotating CLI config backup that was hours from expiring). The confirm now states: the stored copy is deleted everywhere, the Console cannot re-show it, save it elsewhere first. Subscription removals keep the milder wording (their creds dirs are re-creatable by logging in again).
+
 ## 2.201.0 — 2026-07-20
 - **Account provenance is visible** (real ask: a key imported from a host read as "shared from AIDev" with no marker). Host key imports now stamp `originHost`, rendered as a dim **"from \<host\>"** tag whose tooltip states the real semantics: an independent COPY held in VibeSpace, not live-linked to the machine it came from, usable anywhere. Every account also gets a free-text **note** (⋯ → "Set note…", ≤120 chars) rendered as a small tag — e.g. "from AIDev backup" on a rescued key. Management stays enabled everywhere deliberately: the record is a store-owned copy, and locking it to a machine would re-introduce the confusion the tag resolves.
 
