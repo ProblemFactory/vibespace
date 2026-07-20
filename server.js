@@ -1344,7 +1344,27 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
     // lives (restore reads them) — on real teardown they're dead weight that
     // used to accumulate forever (129 files / 28MB observed for 8 live
     // sessions; known-backlog item, fixed 2.81.0).
+    // FORENSIC TOMBSTONE (2.206.1): keep the buffer TAIL for a week — a
+    // crash's stack trace/stderr lives ONLY in the buffer, and deleting it
+    // on exit blinded three "why did this session die" investigations in one
+    // night (a claude that crash-looped 4× left zero process-level evidence).
     if (cleanupOnExit) {
+      try {
+        const bufPath = path.join(BUFFERS_DIR, id + '.buf');
+        const st = fs.statSync(bufPath);
+        const fd = fs.openSync(bufPath, 'r');
+        const take = Math.min(st.size, 65536);
+        const tail = Buffer.alloc(take);
+        fs.readSync(fd, tail, 0, take, st.size - take);
+        fs.closeSync(fd);
+        const tombDir = path.join(DATA_DIR, 'exit-tombs');
+        fs.mkdirSync(tombDir, { recursive: true });
+        fs.writeFileSync(path.join(tombDir, `${id}.tail`), tail);
+        // opportunistic sweep: tombs older than 7 days
+        for (const f of fs.readdirSync(tombDir)) {
+          try { const s = fs.statSync(path.join(tombDir, f)); if (Date.now() - s.mtimeMs > 7 * 86400e3) fs.unlinkSync(path.join(tombDir, f)); } catch {}
+        }
+      } catch { /* no buffer / read failed — nothing to keep */ }
       try { fs.unlinkSync(path.join(BUFFERS_DIR, id + '.buf')); } catch {}
       try { fs.unlinkSync(path.join(BUFFERS_DIR, id + '.json')); } catch {}
     }
