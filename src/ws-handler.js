@@ -13,6 +13,14 @@ const { execFile } = require('child_process');
 
 // Crash-loop detector state (2.207.0): conversation id → recent create times
 const crashLoopRef = {};
+// Unresumable-conversation circuit breaker (2.207.1): conversation ids whose
+// resume died with the CLI's "No conversation found with session ID" — the
+// transcript does not exist on the target machine (a session killed before
+// its first message ever flushes has NO transcript, forever). Server.js
+// stamps entries at teardown; the create case refuses further resumes for
+// 10 minutes with a CLEAR error instead of feeding a bootloop (real
+// incident: 5 auto-recreations in 2 minutes, each dying in ~2s).
+const noConvoRef = { map: new Map() };
 
 function getSessionKey(session = {}) {
   const backend = session.backend || 'claude'; // fallback needed: called with API data too
@@ -161,6 +169,23 @@ function registerWsHandler(wss, ctx) {
                 existingId: existing[0], existingName: existing[1].name || '',
                 existingCwd: existing[1].cwd || '', existingMode: existing[1].mode || 'chat',
                 message: 'This conversation is already running in a live session — opening that instead of starting a second copy.',
+              }));
+              break;
+            }
+          }
+          // Unresumable-conversation circuit breaker (2.207.1, real bootloop:
+          // a remote session killed 9s after creation never flushed a
+          // transcript — every resume died in ~2s with the CLI's "No
+          // conversation found", and an automated recreation fed the loop 5×
+          // in 2 minutes). Refuse further resumes for 10 minutes with the
+          // honest explanation instead of another guaranteed death.
+          if (data.resume && data.resumeId) {
+            const hit = noConvoRef.map.get(data.resumeId);
+            if (hit && Date.now() - hit < 600000) {
+              global.__vsEvent?.('resume-refused-no-transcript');
+              ws.send(JSON.stringify({
+                type: 'error', reqId: data.reqId,
+                message: 'This conversation has no saved transcript on its machine (it likely ended before the first message was written) — there is nothing to resume. Close this window/card; start a new session instead.',
               }));
               break;
             }
@@ -1025,6 +1050,11 @@ done`;
           attachedSessions.add(id);
           console.log(`[session] created ${id} "${session.name || ''}" mode=${sessionMode} backend=${backend}${data.hostId ? ' host=' + data.hostId : ''}${session._accountId ? ' account=' + session._accountId : ''}${data.resumeId ? ' resume=' + data.resumeId : ''}`);
           global.__vsEvent?.('session-created', `${sessionMode}/${backend}${data.hostId ? '/remote' : ''}${data.resumeId ? '/resume' : ''}`);
+          // Unresumable-conversation circuit breaker (2.207.1): a resume that
+          // recently died with "No conversation found" has NO transcript on
+          // its machine — every retry is a guaranteed ~2s death. Note this is
+          // checked at CREATE below via noConvoRef (the refusal must run
+          // BEFORE the spawn; see the guard further up).
           // Crash-loop detector (2.207.0, the natural incident: one
           // conversation restarted 4× in 3.5 minutes with zero signal): ≥3
           // creates of the SAME conversation within 10 minutes is a loop —
@@ -1903,4 +1933,4 @@ done`;
   });
 }
 
-module.exports = { registerWsHandler };
+module.exports = { registerWsHandler, noConvoRef };

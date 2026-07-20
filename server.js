@@ -1347,6 +1347,17 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
     session._isStreaming = false;
     // Detect auth failure from buffer content (claude exits immediately with "Not logged in")
     const exitReason = /Not logged in|Please run \/login|OAuth token revoked/.test(session.buffer || '') ? 'not_logged_in' : undefined;
+    // Unresumable-conversation stamp (2.207.1): the CLI's canned error means
+    // the transcript does not exist on this session's machine — arm the
+    // create-side circuit breaker so retries get an explanation, not a loop.
+    if (/No conversation found with session ID/.test(session.buffer || '')) {
+      const cid = session.claudeSessionId || session.backendSessionId;
+      if (cid) {
+        noConvoRef.map.set(cid, Date.now());
+        if (noConvoRef.map.size > 100) noConvoRef.map.delete(noConvoRef.map.keys().next().value);
+        console.warn(`[session] unresumable conversation ${cid} — transcript missing on its machine; resumes blocked 10min`);
+      }
+    }
     // Child exit code from the wrapper's final meta (2.207.0 — wrappers keep
     // it instead of unlinking; a crash-looping claude previously left zero
     // process-level evidence).
@@ -3507,7 +3518,7 @@ app.get('/api/session-options', (req, res) => {
 });
 
 // ── WebSocket Terminal Handler (extracted to src/ws-handler.js) ──
-const { registerWsHandler } = require('./src/ws-handler');
+const { registerWsHandler, noConvoRef } = require('./src/ws-handler');
 registerWsHandler(wss, {
   agentdRemote: { ensureAgentdOnHost, agentdHostToken, agentdDir: AGENTD_DIR, attachBundle: path.join(__dirname, 'data', 'bin', 'vibespace-agentd-attach.js') },
   dialBridge,
