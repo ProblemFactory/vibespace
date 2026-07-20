@@ -18,9 +18,9 @@ export function installManageAgents(App, ctx = {}) {
   // open a login terminal scoped to that dir (does NOT disturb the CLI's global
   // login), and watch for the OAuth login to land. Held per-account, switchable
   // per session. (Local Claude only in P1.)
-  async _addSubscription() {
+  async _addSubscription(hostId, hostLabel) {
     const name = await showInputDialog({
-      title: t('Add subscription'),
+      title: hostId ? t('Add subscription — log in on {host}', { host: hostLabel }) : t('Add subscription'),
       label: t('Name this subscription (e.g. Work Max, Personal Max)'),
       placeholder: t('e.g. Work Max'),
       confirmText: t('Continue'),
@@ -34,6 +34,19 @@ export function installManageAgents(App, ctx = {}) {
       });
     } catch { showToast(t('Could not start — server unreachable'), { type: 'error' }); return; }
     if (!created?.loginCmd) { showToast(created?.error || t('Could not start'), { type: 'error' }); return; }
+    // With a MACHINE selected the login runs ON that machine, into the
+    // account's per-host creds dir (2.199.0/2.200.0 — real trap: the dialog
+    // said AIDev, the login terminal quietly opened LOCALLY, and the user's
+    // account landed in the local store "moved to this machine"). The token
+    // is minted on the host and never leaves it; the account record still
+    // lives in VibeSpace (machine-independent identity).
+    if (hostId) {
+      const dir = `$HOME/.vibespace/subs/${created.id}`; // id shape sub-<hex>, metachar-free
+      this._watchHostLogin(hostId, hostLabel);
+      this.openShellTerminal(undefined, { hostId, initialCommand: `mkdir -p "${dir}" && CLAUDE_CONFIG_DIR="${dir}" CLAUDE_SECURESTORAGE_CONFIG_DIR="${dir}" claude auth login --claudeai` });
+      showToast(t('A terminal opened ON {host} — sign in there. The login lives on {host} only; sessions on it can then pick this account.', { host: hostLabel }), { duration: 7000 });
+      return;
+    }
     // Open a login terminal with the env-scoped command. The sign-in writes THIS
     // account's creds into its own dir — your current/global login is untouched.
     this.openShellTerminal(undefined, { initialCommand: created.loginCmd });
@@ -1080,10 +1093,14 @@ export function installManageAgents(App, ctx = {}) {
         });
         items.push({ separator: true });
       }
-      // These add to VibeSpace's store (machine-independent) — available with
-      // a remote host selected too; the login terminal runs locally.
+      // These add to VibeSpace's store (machine-independent). With a MACHINE
+      // selected, the subscription login runs ON that machine (per-host creds
+      // dir) — the old always-local terminal was a trap: the dialog said the
+      // host, the login quietly landed in the local store (real report).
       items.push(
-        { label: t('Add subscription…'), action: () => { done(); this._addSubscription(); } },
+        selectedHost
+          ? { label: t('Add subscription (log in on {host})…', { host: hostLabel }), action: () => { done(); this._addSubscription(selectedHost, hostLabel); } }
+          : { label: t('Add subscription…'), action: () => { done(); this._addSubscription(); } },
         { label: t('Add Console account…'), action: () => { done(); this._addConsoleAccount(); } },
         { label: t('Add API key…'), action: addApiKey },
       );
