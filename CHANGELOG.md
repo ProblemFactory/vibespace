@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.212.0 — 2026-07-20
+- **Title-bar right-click is now a full window menu**: the old direct overlap-switcher popup became its "Switch window" SUBMENU, with a new setting (Window → Title-bar "Switch window" scope) choosing what it lists — windows overlapping this one (classic, default), every window on the current desktop, or ALL windows across desktops (entries name their desktop; picking one switches there — tab-chain/stage/desktop aware via the new goToWinId). Session windows additionally get **Rename…** and a **Task Groups** bind/unbind submenu (same semantics as the session-card menu, incl. folder-derived entries shown disabled), plus the usual Move/Minimize/Move-to-Desktop/Close. The □ title-bar button keeps the classic overlap popup.
+- **Taskbar window menus gained Rename… + Task Groups too** (taskbar items, grouped items, window-list rows — the shared menu).
+- Fix: context-menu SUBMENU entries now honor `disabled` — a disabled submenu item used to fire its action anyway (the card menu's folder-derived Task-Group entries were never actually disabled).
+- **i18n hygiene** (user ask — the accumulating build warnings): deduped 8 duplicate dictionary keys, two of which were REAL translation overrides shipping for weeks ("Vendor" 服务商→供应商, "Machine" 远程主机→机器 — in a JS object the later key silently wins everywhere); new `scripts/i18n-check.mjs` runs first in `npm run build` and HARD-FAILS on duplicate keys (zh/ja parity + lost-placeholder checks as warnings), so the warning pile can never re-accumulate. Menu strings fully translated (zh/ja).
+- New CDP smoke: `scripts/test-window-menu.mjs` (13 asserts through the real menu paths).
+
 ## 2.211.0 — 2026-07-20
 **Per-feature Integration toggles** (user request: inject shared context but withhold ask/progress). Four new settings under Integration, all default ON, applying only while the master switch is ON:
 - `agents.contextInjection` — Task Group context payloads/diffs into agents (the per-group "Inject context" checkbox remains the finer grain). OFF falls back to the baseline tools intro.

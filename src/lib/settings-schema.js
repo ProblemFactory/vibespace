@@ -177,6 +177,17 @@ const SETTINGS_SCHEMA = {
     description: t('What happens when closing a session window: detach and keep it running (default — the session stays in the sidebar for re-attach), or terminate it. Automation helper terminals always terminate.'),
     category: t('Window'), liveApply: true,
   },
+  'window.titlebarSwitchScope': {
+    type: 'enum', default: 'overlap',
+    options: [
+      { value: 'overlap', label: t('Overlapping this window') },
+      { value: 'desktop', label: t('Current desktop windows') },
+      { value: 'all', label: t('All windows') },
+    ],
+    label: t('Title-bar "Switch window" scope'),
+    description: t('Which windows the title-bar right-click menu\'s "Switch window" submenu lists: only windows overlapping this one (classic), every window on the current desktop, or all windows across desktops (entries name their desktop; picking one switches to it).'),
+    category: t('Window'), liveApply: true,
+  },
   'window.activeHighlightIntensity': {
     type: 'enum', default: 'normal',
     options: [

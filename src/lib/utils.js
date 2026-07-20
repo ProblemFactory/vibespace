@@ -373,10 +373,14 @@ export function showContextMenu(x, y, items, className = 'context-menu') {
       sub.style.cssText = 'position:absolute;left:100%;top:-4px;display:none;z-index:99999';
       for (const child of item.children) {
         const ce = document.createElement('div');
-        ce.className = className + '-item';
+        ce.className = className + '-item' + (child.disabled ? ' disabled' : '');
         ce.textContent = child.label;
         if (child.style) ce.style.cssText = child.style;
-        ce.onclick = (e) => { e.stopPropagation(); pop.remove(); child.action(); };
+        if (child.title) ce.title = child.title;
+        // disabled children must not fire (this was silently ignored — a
+        // "disabled" submenu entry still ran its action on click)
+        if (child.disabled) { ce.style.opacity = '0.4'; ce.style.cursor = 'default'; }
+        else ce.onclick = (e) => { e.stopPropagation(); pop.remove(); child.action?.(); };
         sub.appendChild(ce);
       }
       el.appendChild(sub);
