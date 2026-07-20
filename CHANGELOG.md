@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.213.3 — 2026-07-20
+- **Codex memory paths recognized** — correcting 2.213.2's "codex has no memory feature" (wrong: a truncated directory listing). Codex 0.144.0 DOES have Memories (config-gated `[memories]`, developers.openai.com/codex/memories): background jobs distill rollouts into files under `~/.codex/memories/` (MEMORY.md, memory_summary.md, raw_memories.md, rollout_summaries/ — paths verified in the binary). File ops there now classify as the 'memory' collapse kind via `BACKEND_META.codex.memoryPathRe`.
+
 ## 2.213.2 — 2026-07-20
 - Memory-path detection generalized: the agent-memory pattern moved from a chat-view constant into per-backend metadata (`BACKEND_META.<backend>.memoryPathRe` in agent-meta.js, unioned at use). Claude matches its auto-memory dirs (~/.claude/projects/<proj>/memory/ and ~/.claude/memory/); Codex 0.142.x has no memory feature so no entry; a future backend with a memory dir is ONE metadata line.
 
