@@ -241,6 +241,28 @@ function registerWsHandler(wss, ctx) {
               try { allowShip = !!serverSetting('accounts.shipSubscriptionToRemote'); } catch {}
               if (!allowShip) spawnAccount = null; // = the host's own login
             }
+            // EXPLICITLY-chosen subscription on a remote host without the
+            // ship opt-in: when the account IS the machine's own login (same
+            // email — the identity probe is reliable since 2.197.0), run on
+            // the host's login directly instead of failing (real report: "I
+            // logged this exact account in ON the machine, yet picking it
+            // says this-machine-only"). Zero creds ship — §ban-safety
+            // unchanged; a non-matching account still errors with guidance.
+            if (spawnAccount?.remoteCreds && data.hostId && data.accountId && hosts) {
+              let allowShip = false;
+              try { allowShip = !!serverSetting('accounts.shipSubscriptionToRemote'); } catch {}
+              if (!allowShip) {
+                try {
+                  const meta = (accounts.list().accounts || []).find((x) => x.id === spawnAccount.id);
+                  const acctEmail = String(meta?.email || (String(meta?.name || '').includes('@') ? meta.name : '')).trim().toLowerCase();
+                  if (acctEmail) {
+                    const rs = await hosts.accountsStatus(data.hostId);
+                    const hostEmail = String((backend === 'codex' ? rs?.codex?.email : rs?.subscription?.email) || '').trim().toLowerCase();
+                    if (hostEmail && hostEmail === acctEmail) spawnAccount = null; // = the host's own login (same account)
+                  }
+                } catch { /* probe failed — keep the explicit-account path (errors later with guidance) */ }
+              }
+            }
           }
 
           const session = {
