@@ -1071,6 +1071,19 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
               }
             }
 
+            // CLI error-class telemetry (2.207.0, names/enums only — no
+            // content): usage-limit sightings and silent model fallbacks are
+            // exactly what tonight's incidents needed frequency data for.
+            if (msg.type === 'assistant' && Array.isArray(msg.message?.content)) {
+              for (const b of msg.message.content) {
+                if (b?.type === 'text' && typeof b.text === 'string' && /^You've reached your .{0,40} limit/.test(b.text)) {
+                  global.__vsEvent?.('cli-usage-limit');
+                } else if (b?.type === 'fallback') {
+                  global.__vsEvent?.('cli-model-fallback', `${b.from?.model || '?'}->${b.to?.model || '?'}`);
+                }
+              }
+            }
+
             // Permission-mode TRUTH (2.195.0): 2.1.215 emits a fresh init on
             // EVERY user message carrying the CURRENT effective mode — adopt
             // it so attach/chatStatus/resume never serve the spawn-time value
@@ -1098,6 +1111,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
                 session._permissionMode = pend.mode;
                 if (session.sockName) writeSessionMeta(session.sockName, { ...(readSessionMeta(session.sockName) || {}), permissionMode: pend.mode });
               }
+              if (!ok) global.__vsEvent?.('perm-mode-refused', pend.mode);
               broadcastToSession(session, id, {
                 type: 'permission-mode-ack', sessionId: id, ok, mode: pend.mode,
                 error: ok ? null : String(msg.response?.error || 'permission mode change refused'),
@@ -1333,10 +1347,16 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
     session._isStreaming = false;
     // Detect auth failure from buffer content (claude exits immediately with "Not logged in")
     const exitReason = /Not logged in|Please run \/login|OAuth token revoked/.test(session.buffer || '') ? 'not_logged_in' : undefined;
+    // Child exit code from the wrapper's final meta (2.207.0 — wrappers keep
+    // it instead of unlinking; a crash-looping claude previously left zero
+    // process-level evidence).
+    let childCode = null;
+    try { childCode = JSON.parse(fs.readFileSync(path.join(BUFFERS_DIR, id + '.json'), 'utf-8')).childExitCode ?? null; } catch {}
     // Lifecycle line for the ops log (2.206.0) — tonight's black-window
     // forensics found NOTHING in opslog about session deaths; this is the
     // minimum breadcrumb an incident needs.
-    console.log(`[session] exited ${id} "${session.name || ''}" mode=${session.mode} backend=${session.backend || 'claude'}${exitReason ? ' reason=' + exitReason : ''}`);
+    console.log(`[session] exited ${id} "${session.name || ''}" mode=${session.mode} backend=${session.backend || 'claude'}${childCode != null ? ' code=' + childCode : ''}${exitReason ? ' reason=' + exitReason : ''}`);
+    global.__vsEvent?.('session-exited', `${session.mode}/${session.backend || 'claude'}${childCode != null ? '/code=' + childCode : ''}${exitReason ? '/' + exitReason : ''}`);
     broadcastToSession(session, id, { type: 'exited', sessionId: id, reason: exitReason });
     activeSessions.delete(id);
     if (cleanupOnExit && session.sockName) deleteSessionMeta(session.sockName);
@@ -2414,6 +2434,11 @@ process.on('unhandledRejection', (e) => { try { telemetry.record({ kind: 'server
 
 // Zero-coupling metric hook for deep modules (session-store slow-parse etc.)
 global.__vsMetric = (name, value) => { try { telemetry.record({ kind: 'metric', name, value }); } catch {} };
+// Server-side EVENT hook (2.207.0): the debugging-pain batch — session
+// lifecycle anomalies, CLI error classes, probe failures — flows into the
+// same Diagnostics report/fleet forwarding as client events. NAMES + short
+// enum-ish details only, never content (telemetry charter).
+global.__vsEvent = (name, detail) => { try { telemetry.record({ kind: 'event', name, detail }); } catch {} };
 
 // ── Threadpool canary (2.108.6) ──
 // The wedge class that took the instance down twice today (hung fuse IO) fills

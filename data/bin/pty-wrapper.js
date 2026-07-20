@@ -125,7 +125,14 @@ function onChildExit({ exitCode }) {
     return;
   }
   if (writeTimer) { clearTimeout(writeTimer); persistBuffer(); }
-  try { fs.unlinkSync(metaFile); } catch {}
+  // Post-mortem breadcrumb (2.207.0): keep the final meta WITH the child's
+  // exit code — the server reads it at teardown (lifecycle log/telemetry)
+  // and unlinks it itself. Unlinking here left crash exits evidence-free.
+  try {
+    const m = JSON.parse(fs.readFileSync(metaFile, 'utf8'));
+    m.childExitCode = exitCode ?? null;
+    fs.writeFileSync(metaFile, JSON.stringify(m));
+  } catch {}
   process.exit(exitCode);
 }
 

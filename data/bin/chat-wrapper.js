@@ -328,8 +328,12 @@ function finalize(exitCode) {
     if (t.status === 'running') t.status = 'unknown';
   }
   if (metaTimer) clearTimeout(metaTimer);
+  // Post-mortem breadcrumb (2.207.0): keep the FINAL meta (with the child's
+  // exit code) instead of unlinking — the server reads it at teardown for
+  // the lifecycle log/telemetry, then unlinks it itself. A crash-looping
+  // claude previously left zero process-level evidence.
+  meta.childExitCode = exitCode ?? null;
   persistMeta();
-  try { fs.unlinkSync(metaFile); } catch {}
   process.exit(exitCode ?? 0);
 }
 

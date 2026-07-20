@@ -11,6 +11,9 @@ const { cwdToProjectDir } = require('./session-store');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
 
+// Crash-loop detector state (2.207.0): conversation id → recent create times
+const crashLoopRef = {};
+
 function getSessionKey(session = {}) {
   const backend = session.backend || 'claude'; // fallback needed: called with API data too
   const backendSessionId = session.backendSessionId || session.sessionId || session.claudeSessionId || null;
@@ -1021,6 +1024,22 @@ done`;
           activeSessions.set(id, session);
           attachedSessions.add(id);
           console.log(`[session] created ${id} "${session.name || ''}" mode=${sessionMode} backend=${backend}${data.hostId ? ' host=' + data.hostId : ''}${session._accountId ? ' account=' + session._accountId : ''}${data.resumeId ? ' resume=' + data.resumeId : ''}`);
+          global.__vsEvent?.('session-created', `${sessionMode}/${backend}${data.hostId ? '/remote' : ''}${data.resumeId ? '/resume' : ''}`);
+          // Crash-loop detector (2.207.0, the natural incident: one
+          // conversation restarted 4× in 3.5 minutes with zero signal): ≥3
+          // creates of the SAME conversation within 10 minutes is a loop —
+          // flag it loudly so Diagnostics/opslog show it in real time.
+          if (data.resumeId) {
+            const rl = (crashLoopRef.map ||= new Map());
+            const arr = (rl.get(data.resumeId) || []).filter((t) => Date.now() - t < 600000);
+            arr.push(Date.now());
+            rl.set(data.resumeId, arr);
+            if (rl.size > 200) rl.delete(rl.keys().next().value);
+            if (arr.length >= 3) {
+              console.warn(`[session] crash-loop suspected: conversation ${data.resumeId} created ${arr.length}× in 10min`);
+              global.__vsEvent?.('session-crash-loop', `${arr.length}x`);
+            }
+          }
           // Remote session: push its groups' context folders to the host now
           // (the 60s timer + prompt-time trigger keep them fresh afterwards);
           // bust the host's discovery cache so the sidebar's remote zone sees
@@ -1664,6 +1683,7 @@ done`;
           const session = activeSessions.get(data.sessionId);
           if (session) {
             console.log(`[session] killed ${data.sessionId} "${session.name || ''}" mode=${session.mode} backend=${session.backend || 'claude'}`);
+            global.__vsEvent?.('session-killed', `${session.mode}/${session.backend || 'claude'}`);
             // Cancel any pending delayed-SIGINT from a recent interrupt — after
             // kill, the childPid may be reused by an unrelated process
             if (session._interruptTimer) { clearTimeout(session._interruptTimer); session._interruptTimer = null; }
