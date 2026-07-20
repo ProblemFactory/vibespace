@@ -358,7 +358,13 @@ class HostManager {
       // the creds file describes the PREVIOUS login and must not be preferred
       // (real report: on-host /login switch kept showing the old account 2h).
       + `M=$(stat -c %Y "$HOME/.claude/.credentials.json" 2>/dev/null || stat -f %m "$HOME/.claude/.credentials.json" 2>/dev/null); echo "CMT:$M"; `
-      + `MX=$(stat -c %Y "$HOME/.codex/auth.json" 2>/dev/null || stat -f %m "$HOME/.codex/auth.json" 2>/dev/null); echo "XMT:$MX"`);
+      + `MX=$(stat -c %Y "$HOME/.codex/auth.json" 2>/dev/null || stat -f %m "$HOME/.codex/auth.json" 2>/dev/null); echo "XMT:$MX"; `
+      // Per-account subscription logins held ON the host (2.199.0): isolated
+      // creds dirs under ~/.vibespace/subs/<acctId> minted by an on-host
+      // login (or a past opt-in ship) — a session picking that account runs
+      // on the host-side dir, nothing ships. find -exec (no shell globs —
+      // zsh nomatch aborts glob-carrying lines in _hostShell scripts).
+      + `HS=$(find "$HOME/.vibespace/subs" -maxdepth 2 -name ".credentials.json" -exec grep -l accessToken {} + 2>/dev/null | tr "\\n" " "); echo "HSUBS:$HS"`);
     const sub = /SUB:(\d+)/.exec(out);
     const key = /KEY:primaryApiKey": *"(sk-ant-[^\s"]+)/.exec(out);
     const helper = /HELPER:yes/.test(out);
@@ -374,6 +380,10 @@ class HostManager {
         codexPlan = payload['https://api.openai.com/auth']?.chatgpt_plan_type || null;
       } catch { }
     }
+    const hsubs = /HSUBS:([^\n]*)/.exec(out);
+    const hostSubs = hsubs
+      ? [...hsubs[1].matchAll(/subs\/([\w-]+)\/\.credentials\.json/g)].map((m) => m[1])
+      : [];
     return {
       subscription: { loggedIn: !!(sub && parseInt(sub[1]) > 0), email: email ? email[1] : null },
       cliKey: key ? { present: true, tail: key[1].slice(-8) } : { present: false },
@@ -381,6 +391,7 @@ class HostManager {
       codex: { email: codexEmail, plan: codexPlan },
       credsMtime: cmt ? parseInt(cmt[1]) : null,      // seconds — claude .credentials.json
       codexAuthMtime: xmt ? parseInt(xmt[1]) : null,  // seconds — codex auth.json
+      hostSubs, // acct ids with a live host-side creds dir (~/.vibespace/subs/<id>)
     };
   }
 
