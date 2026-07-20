@@ -1,6 +1,6 @@
 // Manage-Agents dialog + Anthropic/ChatGPT account rosters (mixin split from app.js, 2.82.0 audit seam). Methods run with the App instance as `this`.
 import { t } from './i18n.js';
-import { createModalShell, escHtml, fetchJson, showConfirmDialog, showContextMenu, showInputDialog, showToast } from './utils.js';
+import { copyText, createModalShell, escHtml, fetchJson, showConfirmDialog, showContextMenu, showInputDialog, showToast } from './utils.js';
 
 export function installManageAgents(App, ctx = {}) {
   Object.assign(App.prototype, {
@@ -1031,7 +1031,7 @@ export function installManageAgents(App, ctx = {}) {
       let ident = isSub
         ? (a.loggedIn ? escHtml((aEmail || '') + (a.subscriptionType ? (aEmail ? ' · ' : '') + a.subscriptionType : '')) || t('logged in')
                       : `<span class="ob-warn">${t('not logged in')}</span>`)
-        : `API …${escHtml(a.tail || '')}`;
+        : `API …${escHtml(a.tail || '')} <span class="acct-master-hint" title="${t('VibeSpace holds the MASTER copy of this key; sessions get derived working copies on their machines (swept on removal). ⋯ → “Show key…” reveals the value.')}">${t('· master copy')}</span>`;
       // Some login flows leave the creds dir without an identity file — the
       // email is then unknowable from disk, which breaks same-account detection
       // vs the machine login (merged usage). Let the user declare/fix it.
@@ -1053,7 +1053,7 @@ export function installManageAgents(App, ctx = {}) {
       // modal AND panel; real screenshot report). Star stays direct: most-used.
       return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}" data-sub="${isSub ? '1' : ''}"${blocked ? ' data-blocked="1"' : ''}>
         <span class="acct-type-icon" title="${iconTitle}">${isSub ? CROWN : KEY}</span>
-        <span class="acct-key-main"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}${provTag}${noteTag}</span></span>
+        <span class="acct-key-main"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span>${(provTag || noteTag) ? `<span class="acct-key-extra">${provTag}${noteTag}</span>` : ''}</span>
         <span class="acct-usage-cell">${isSub && a.loggedIn ? usageHtml(this._accountUsage?.[a.id]) : ''}</span>
         <span class="acct-key-actions">
           <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
@@ -1268,6 +1268,21 @@ export function installManageAgents(App, ctx = {}) {
         }
         if (isSub && a.loggedIn && (!a.email || a.emailDeclared)) items.push({ label: a.email ? t('edit email') : t('set email…'), action: doEmail });
         items.push({ label: a?.note ? t('Edit note…') : t('Set note…'), action: doNote });
+        // Reveal the key value (API keys only) — the store holds the MASTER
+        // copy and the Console can never re-show it; users need a way to
+        // save it elsewhere (real incident: removed key ≈ lost key).
+        if (!isSub) items.push({ label: t('Show key…'), action: async () => {
+          try {
+            const r2 = await fetchJson(`/api/accounts/${encodeURIComponent(id)}/key`);
+            if (!r2?.key) { showToast(r2?.error || t('Could not read the key'), { type: 'error' }); return; }
+            const act = await showInputDialog({
+              title: t('API key — {name}', { name: a?.name }),
+              label: t('The full key value (the MASTER copy held by VibeSpace). Save it in a password manager — the Anthropic Console cannot re-show it.'),
+              value: r2.key, confirmText: t('Copy'),
+            });
+            if (act != null) { copyText(r2.key); showToast(t('Copied')); }
+          } catch { showToast(t('Could not read the key'), { type: 'error' }); }
+        } });
         items.push({ separator: true }, { label: t('Remove account'), action: doDelete });
         showContextMenu(r.left, r.bottom + 4, items);
       }

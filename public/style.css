@@ -389,6 +389,10 @@ html, body {
 .acct-usage-donut > span { position: relative; z-index: 1; font-size: 7px; font-weight: 600; color: var(--text-secondary); letter-spacing: -0.2px; }
 .acct-usage-age { opacity: 0.6; font-style: italic; min-width: 4.5ch; text-align: right; flex: none; font-variant-numeric: tabular-nums; }
 .acct-linked-hint { color: var(--accent); opacity: 0.85; }
+/* provenance/note line under the account identity (2.202.0 — inline tags
+   squeezed the tail into an ellipsis mush; flex-basis:100% wraps the flex row) */
+.acct-key-extra { flex-basis: 100%; font-size: 10px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct-master-hint { color: var(--text-dim); font-size: 9px; white-space: nowrap; }
 /* When a usage readout is present the actions no longer push right (usage takes
    the auto margin) — give the actions their own small gap. */
 /* Manage Agents dialog: wider than the 440px default — its rows carry real
