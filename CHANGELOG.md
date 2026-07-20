@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.213.0 — 2026-07-20
+- **Run-collapse is now kind-configurable** (user request): new Chat setting "Card kinds that collapse" (`chat.collapseKinds`) — thinking / Bash / file reads / file writes each toggle individually (default: thinking+bash+read; writes stay visible — diffs are usually worth seeing). Enabled kinds still fold TOGETHER as one interleaved group (think → read → edit → run is the real work pattern).
+- **The fold header keeps the information** (user ask): per-kind counts ("3 段思考 · 2 条 Bash · 4 次读取"), the touched FILE NAMES (✎ marks writes and lists them first; files under the agent-memory directory show as `memory/<name>` to distinguish them from project files; deduped, capped at 4 + "+N"), a `N ✗` failure count so errors never vanish silently into a fold, and the existing running… indicator. Toggling the collapse settings now re-folds open chats immediately (the observer only fired on new messages before).
+- Fix: **the Stop-hook feedback card now obeys "Show hook cards in chat"** — the setting's description always promised stop reminders were covered, but the card never carried the hook class, so the toggle silently didn't apply (real report). Goal-check cards stay visible (goal progress is signal).
+- Fix: **toggling compact mode re-renders open chats** — compact vs bubble is a per-message DOM structure decided at render time, so flipping the class alone corrupted already-rendered cards (real report: broken Update card after the switch).
+
 ## 2.212.1 — 2026-07-20
 - Chat tool cards: the **Write** and **Read** card verbs were raw English next to Edit's translated 更新 (real report — a Write card and an Edit card of the same file rendered "Write" / "更新" side by side). Both now localize, incl. the pending (running) file-op cards.
 

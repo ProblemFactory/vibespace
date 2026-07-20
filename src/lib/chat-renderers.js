@@ -226,6 +226,11 @@ class ChatRenderers {
     } else if (/^Stop hook feedback:/.test(rawText.trim())) {
       // Generic (non-goal) Stop hook block reason — e.g. the VibeSpace
       // bookkeeping nudge. Full text behind the expander, never cut off.
+      // It IS a hook card (the chat.showHookCards description promises
+      // "stop reminders" are covered) — the class was missing, so the
+      // toggle never hid it (real report). Goal-check cards stay visible
+      // (goal progress is signal, not hook noise).
+      el.classList.add('chat-msg-hook');
       label = t('Stop hook feedback');
       detail = rawText.trim().replace(/^Stop hook feedback:\s*/, '');
     } else {
