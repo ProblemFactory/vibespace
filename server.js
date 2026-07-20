@@ -2557,7 +2557,7 @@ app.post('/api/accounts/import-cli-host', async (req, res) => {
     const { key, org } = await hosts.cliPrimaryKey(req.body?.hostId);
     if (!key) return res.status(400).json({ error: 'no primaryApiKey on that host — log in to a Console account there first' });
     const hostName = (() => { try { return hosts.get(req.body?.hostId)?.name; } catch { return null; } })();
-    res.json({ success: true, account: accounts.add({ name: (org || 'Console') + ' (API' + (hostName ? ', ' + hostName : '') + ')', key, source: 'cli-import' }) });
+    res.json({ success: true, account: accounts.add({ name: (org || 'Console') + ' (API' + (hostName ? ', ' + hostName : '') + ')', key, source: 'cli-import', originHost: hostName }) });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.post('/api/accounts/default', (req, res) => {
@@ -2571,6 +2571,7 @@ app.patch('/api/accounts/:id', (req, res) => {
     let account = null;
     if (req.body?.name !== undefined) account = accounts.rename(req.params.id, req.body.name);
     if (req.body?.email !== undefined) account = accounts.setEmail(req.params.id, req.body.email);
+    if (req.body?.note !== undefined) account = accounts.setNote(req.params.id, req.body.note);
     res.json({ success: true, account });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
