@@ -344,8 +344,12 @@ function registerWsHandler(wss, ctx) {
             //       VIBESPACE_API reverse tunnel. A hook a PREVIOUS spawn
             //       registered on the host stays inert (it guards on env we
             //       no longer pass) — Manage Agents → host → Remove strips it.
+            // + the fake `code` editor helper (remote Ctrl+G, B-2de8) — moved
+            // OUT of the PATH dir after extract: its basename must be `code`
+            // (claude's GUI-editor check) but shadowing a real vscode `code`
+            // on the host's PATH would hang any `code …` shell command.
             const names = integrationOn
-              ? require('./hosts').HostManager.AGENT_TOOLS
+              ? [...require('./hosts').HostManager.AGENT_TOOLS, 'code']
               : (sessionMode === 'chat' ? ['vibespace-remote-keeper'] : []);
             const toolDir = path.dirname(EDITOR_CMD);
             const present = names.filter((n) => { try { return fs.statSync(path.join(toolDir, n)).isFile(); } catch { return false; } });
@@ -361,11 +365,13 @@ function registerWsHandler(wss, ctx) {
                   }
                   const tar = execFileSync('tar', ['-c', '-C', toolDir, ...present, ...tokArgs], { timeout: 15000, maxBuffer: 8 * 1024 * 1024 });
                   const h2 = hosts.get(data.hostId);
-                  execFileSync('ssh', [...hosts.sshArgs(h2, { multiplex: true }), '--', 'umask 077; mkdir -p "$HOME/.vibespace/bin"; tar -x -C "$HOME/.vibespace/bin"; chmod +x "$HOME/.vibespace/bin"/vibespace-* 2>/dev/null || true'],
+                  execFileSync('ssh', [...hosts.sshArgs(h2, { multiplex: true }), '--', 'umask 077; mkdir -p "$HOME/.vibespace/bin" "$HOME/.vibespace/editor"; tar -x -C "$HOME/.vibespace/bin"; chmod +x "$HOME/.vibespace/bin"/vibespace-* 2>/dev/null; [ -f "$HOME/.vibespace/bin/code" ] && { mv -f "$HOME/.vibespace/bin/code" "$HOME/.vibespace/editor/code"; chmod +x "$HOME/.vibespace/editor/code"; } || true'],
                     { input: tar, timeout: 20000 });
                   if (integrationOn) {
                     prelude += `export PATH="$HOME/.vibespace/bin:$PATH"; node "$HOME/.vibespace/bin/vibespace-hook-register.mjs" 2>/dev/null || true; `;
-                    tokenAssign = `VIBESPACE_SESSION_TOKEN="$(cat "$HOME/.vibespace/bin/${tokName}")" `;
+                    // EDITOR needs $HOME expansion → shell prefix assignment
+                    // (envPairs are shq'd); PORT/SESSION_ID are static values.
+                    tokenAssign = `VIBESPACE_SESSION_TOKEN="$(cat "$HOME/.vibespace/bin/${tokName}")" EDITOR="$HOME/.vibespace/editor/code" `;
                   }
                 } finally { try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {} }
               } catch (e) {
@@ -379,8 +385,14 @@ function registerWsHandler(wss, ctx) {
             // port) is negligible; a collision only degrades the loser's tools
             // (ssh -R bind warns, session still runs), never breaks the session.
             // VIBESPACE_API is not a secret; the token rides tokenAssign only.
+            // CLAUDE_WEBUI_PORT = the reverse-tunnel port: the remote `code`
+            // helper POSTs /api/editor/open through it (remote Ctrl+G, B-2de8).
             const rport = session._remotePort = 20000 + Math.floor(Math.random() * 40000);
-            return { prelude, envPairs: [`VIBESPACE_API=http://127.0.0.1:${rport}`], tokenAssign, reverse: `${rport}:127.0.0.1:${PORT}` };
+            return {
+              prelude,
+              envPairs: [`VIBESPACE_API=http://127.0.0.1:${rport}`, `CLAUDE_WEBUI_PORT=${rport}`, `CLAUDE_WEBUI_SESSION_ID=${id}`],
+              tokenAssign, reverse: `${rport}:127.0.0.1:${PORT}`,
+            };
           };
           // B.3: the same agent prelude for a DIAL device, over the device
           // link (no ssh). Tools + the 0600 token ride fsWrite; VIBESPACE_API
@@ -409,11 +421,16 @@ function registerWsHandler(wss, ctx) {
               for (const n of names) {
                 try { const buf = fs.readFileSync(path.join(toolDir, n)); await dm.fsWrite(`${bin}/${n}`, buf); } catch { }
               }
+              // fake `code` editor helper (remote Ctrl+G, B-2de8) — OUTSIDE the
+              // PATH dir so it can't shadow a real vscode `code` on the device
+              try {
+                await dm.fsWrite(`${home}/.vibespace/editor/code`, fs.readFileSync(EDITOR_CMD));
+              } catch { }
               await dm.fsWrite(`${bin}/${tokName}`, Buffer.from(session.agentToken));
               // chmod: tools executable, token 0600, then register the hook in
               // the device's OWN claude/codex configs (its local CLI fires it)
               await dm.runCmd('sh', ['-c',
-                `chmod +x "${bin}"/vibespace-* 2>/dev/null; chmod 600 "${bin}/${tokName}"; `
+                `chmod +x "${bin}"/vibespace-* "${home}/.vibespace/editor/code" 2>/dev/null; chmod 600 "${bin}/${tokName}"; `
                 + `node "${bin}/vibespace-hook-register.mjs" 2>/dev/null || true`], { timeoutMs: 12000 }).catch(() => {});
               // VIBESPACE_API back-tunnel: a loopback port ON THE DEVICE whose
               // accepts ride the dial link back into our own server port.
@@ -441,7 +458,14 @@ function registerWsHandler(wss, ctx) {
             }
             if (!integrationOn) return { envPairs: [], tokenAssign: acctAssign };
             return {
-              envPairs: [`VIBESPACE_API=http://127.0.0.1:${rf.port}`],
+              // home is concrete here, so EDITOR can ride envPairs (shq-safe);
+              // CLAUDE_WEBUI_PORT = the device back-tunnel (remote Ctrl+G)
+              envPairs: [
+                `VIBESPACE_API=http://127.0.0.1:${rf.port}`,
+                `CLAUDE_WEBUI_PORT=${rf.port}`,
+                `CLAUDE_WEBUI_SESSION_ID=${sid}`,
+                `EDITOR=${home}/.vibespace/editor/code`,
+              ],
               tokenAssign: acctAssign + `VIBESPACE_SESSION_TOKEN="$(cat "${bin}/${tokName}")" `,
             };
           };
@@ -1442,7 +1466,11 @@ done`;
               // the first history load, so pre-resume history renders and the
               // pagination/search machinery has a real file to work on.
               if (session.host && hosts && !session._historyLoaded && (session.claudeSessionId || session.backendSessionId)) {
-                try { await hosts.fetchSessionJsonl(session.host, session.claudeSessionId || session.backendSessionId); }
+                try {
+                  const rid = session.claudeSessionId || session.backendSessionId;
+                  if ((session.backend || 'claude') === 'codex') await hosts.fetchCodexJsonl(session.host, rid);
+                  else await hosts.fetchSessionJsonl(session.host, rid);
+                }
                 catch (e) { console.error('remote jsonl fetch failed:', e.message); }
               }
               const sm = createSessionMessages(session, data.sessionId);
@@ -1509,7 +1537,10 @@ done`;
             // cache first (findSessionJsonlPath scans it) — history then
             // loads through the normal path. Stale cache beats no history.
             if (data.host && hosts) {
-              try { await hosts.fetchSessionJsonl(data.host, backendSessionId); }
+              try {
+                if ((data.backend || 'claude') === 'codex') await hosts.fetchCodexJsonl(data.host, backendSessionId);
+                else await hosts.fetchSessionJsonl(data.host, backendSessionId);
+              }
               catch (e) { console.error('remote jsonl fetch failed:', e.message); }
             }
             const sm = createSessionMessages({

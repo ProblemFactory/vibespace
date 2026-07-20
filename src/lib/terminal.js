@@ -484,6 +484,10 @@ class TerminalSession {
 
   // Upload an image blob to the server (sets the X clipboard) then send Ctrl+V
   // so the CLI reads it — shared by desktop Ctrl+V paste and the mobile 📋 flow.
+  // REMOTE sessions (B-65ec): the CLI reads the clipboard on ITS machine, so
+  // the server instead lands the image as a file ON THE HOST and returns its
+  // remote path — we type the shell-escaped path into the PTY (drag-drop model)
+  // so the agent can Read it.
   _uploadImageBlob(blob) {
     return new Promise((resolve) => {
       const reader = new FileReader();
@@ -491,10 +495,15 @@ class TerminalSession {
         try {
           const res = await fetch('/api/paste-image', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ dataUrl: reader.result }),
+            body: JSON.stringify({ dataUrl: reader.result, sessionId: this.sessionId }),
           });
           const data = await res.json();
-          if (data.ready) this.ws.send({ type: 'input', sessionId: this.sessionId, data: '\x16' });
+          if (data.remotePath) {
+            const escaped = data.remotePath.replace(/([ '"\\$`!&(){}|;<>?*#])/g, '\\$1');
+            this.ws.send({ type: 'input', sessionId: this.sessionId, data: escaped + ' ' });
+          } else if (data.ready) {
+            this.ws.send({ type: 'input', sessionId: this.sessionId, data: '\x16' });
+          }
         } catch {}
         resolve();
       };

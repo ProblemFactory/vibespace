@@ -255,7 +255,7 @@ class App {
     // Listen for editor open/close requests (from editor-helper.sh via server HTTP→WebSocket)
     this.ws.onGlobal((msg) => {
       if (msg.type === 'editor-open' && msg.filePath && msg.signalPath) {
-        this._openExternalEditor(msg.filePath, msg.signalPath, msg.sessionId);
+        this._openExternalEditor(msg.filePath, msg.signalPath, msg.sessionId, msg.host);
       } else if (msg.type === 'editor-close' && msg.signalPath) {
         this._closeExternalEditor(msg.signalPath);
       }
@@ -1846,7 +1846,7 @@ class App {
   }
 
   // Delegate to extracted external-editor.js module
-  _openExternalEditor(filePath, signalPath, sessionId) { openExternalEditor(this, filePath, signalPath, sessionId); }
+  _openExternalEditor(filePath, signalPath, sessionId, host) { openExternalEditor(this, filePath, signalPath, sessionId, host); }
   _closeExternalEditor(signalPath) { closeExternalEditor(this, signalPath); }
 
   _hideWelcome() { document.getElementById('welcome').classList.add('hidden'); }

@@ -259,7 +259,7 @@ export function installSidebarWorkbench(Sidebar) {
       return {
         sessionId: s.sessionId,
         backendSessionId: s.sessionId,
-        backend: 'claude',
+        backend: s.backend || 'claude', // codex rollouts ride discovery too (B-10ed)
         name: s.name || folder || s.projDir || s.sessionId.slice(0, 8),
         cwd: s.cwd || '',
         host: s.host,

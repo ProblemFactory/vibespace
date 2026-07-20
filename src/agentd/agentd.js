@@ -818,7 +818,36 @@ function serveConnection(sock) {
               } finally { fs.closeSync(fd); }
             } catch { }
           }
-          mux.control({ op: 'discovery-result', id: msg.id, locks, jsonls: top });
+          // codex rollouts (B-10ed): stopped codex sessions on the device
+          // must reappear as resumable cards like claude's
+          const codexRollouts = [];
+          try {
+            const croot = path.join(home, '.codex', 'sessions');
+            const walk = (d, depth) => {
+              if (depth > 4) return;
+              let ents = []; try { ents = fs.readdirSync(d); } catch { return; }
+              for (const f of ents) {
+                const fp = path.join(d, f);
+                let st; try { st = fs.statSync(fp); } catch { continue; }
+                if (st.isDirectory()) walk(fp, depth + 1);
+                else if (/^rollout-.*\.jsonl$/.test(f)) codexRollouts.push({ path: fp, size: st.size, mtimeMs: st.mtimeMs });
+              }
+            };
+            walk(croot, 0);
+            codexRollouts.sort((a, b) => b.mtimeMs - a.mtimeMs);
+            codexRollouts.length = Math.min(codexRollouts.length, 100);
+            for (const r of codexRollouts.slice(0, 30)) {
+              try {
+                const fd = fs.openSync(r.path, 'r');
+                try {
+                  const b = Buffer.alloc(Math.min(32000, r.size));
+                  fs.readSync(fd, b, 0, b.length, 0);
+                  r.headCwd = (b.toString('utf-8').match(/"cwd":"((?:[^"\\]|\\.)*)"/) || [])[1] || null;
+                } finally { fs.closeSync(fd); }
+              } catch { }
+            }
+          } catch { }
+          mux.control({ op: 'discovery-result', id: msg.id, locks, jsonls: top, codexRollouts });
         } catch (e) { mux.control({ op: 'discovery-result', id: msg.id, error: e.message }); }
         return;
       }

@@ -86,6 +86,17 @@ function findCodexSessionJsonlPath(threadId) {
   for (const fp of _walkJsonlFiles(CODEX_SESSIONS_DIR)) {
     if (fp.endsWith(`${threadId}.jsonl`)) return fp;
   }
+  // Remote-cache scan (B-10ed, mirrors session-store's claude cache scan):
+  // hosts.fetchCodexJsonl pulls a host's rollout into
+  // data/remote-jsonl/<hostId>/codex/<threadId>.jsonl — finding it here makes
+  // every codex history consumer remote-capable for free.
+  try {
+    const base = path.join(__dirname, '..', '..', 'data', 'remote-jsonl');
+    for (const hostDir of fs.readdirSync(base)) {
+      const p = path.join(base, hostDir, 'codex', `${threadId}.jsonl`);
+      if (fs.existsSync(p)) return p;
+    }
+  } catch { }
   return null;
 }
 
