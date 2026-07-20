@@ -9,8 +9,18 @@ import DOMPurify from 'dompurify';
 import { escHtml, copyText, showContextMenu } from './utils.js';
 import { renderCodeBlock, rehighlightCodeBlock, stripAnsi, getHljsLanguages } from './highlight.js';
 import { UI_ICONS } from './icons.js';
+import { agentMemoryPathRes } from './agent-meta.js';
 import { createBackendIconHtml, getBackendMeta } from './agent-meta.js';
 import { t } from './i18n.js';
+
+// Agent-memory files get their own card treatment (user ask: a memory write
+// is a different concern than a project write — render "记忆更新 <name>"
+// instead of a Write card with a long dotfile path). Full path stays on the
+// link's data-path (copy/Ctrl+click unchanged).
+const MEMORY_RES = agentMemoryPathRes();
+function memoryBase(fp) {
+  return fp && MEMORY_RES.some((re) => re.test(fp)) ? fp.split('/').pop() : null;
+}
 
 // Curated localized display names for harness built-in tools (fallback: raw
 // name — MCP/unknown tools keep their identifier). See ChatRenderers.toolDisplayName.
@@ -325,8 +335,11 @@ class ChatRenderers {
         // localized VERB, matching the completed cards (Edit completes as
         // t('Update'), Write as t('Write') — a raw English toolName next to
         // them read as unlocalized; real report)
-        const verb = block.toolName === 'Edit' ? t('Update') : block.toolName === 'Write' ? t('Write') : t('Read');
-        const label = `${UI_ICONS.hourglass} ${escHtml(verb)} ${this.clickablePath(fp)}`;
+        const mb = memoryBase(fp);
+        const verb = mb
+          ? (block.toolName === 'Read' ? t('Memory read') : t('Memory update'))
+          : block.toolName === 'Edit' ? t('Update') : block.toolName === 'Write' ? t('Write') : t('Read');
+        const label = `${UI_ICONS.hourglass} ${escHtml(verb)} ${this.clickablePath(fp, mb)}`;
         html = `<div class="chat-tool-pending"><span class="chat-tool-label">${label}</span><span class="chat-spinner"></span></div>`;
       } else {
         const desc = isAgent && block.input?.description ? `${icon} Agent: ${escHtml(block.input.description)}${agentModelChip(block.input?.model)}` : `${icon} ${escHtml(toolDisplayName(block.toolName))}`;
@@ -385,12 +398,14 @@ class ChatRenderers {
       const byteCount = new Blob([content]).size;
       const sizeStr = byteCount > 1024 ? (byteCount / 1024).toFixed(1) + ' KB' : byteCount + ' B';
       const codeBlock = this.renderCodeBlock(content, fp);
-      return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.memo} ${t('Write')} ${this.clickablePath(fp)}</span><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${t('{n} lines, {size}', { n: lineCount, size: sizeStr })}</summary>${codeBlock}</details></div>`;
+      const mbW = memoryBase(fp);
+      return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.memo} ${mbW ? t('Memory update') : t('Write')} ${this.clickablePath(fp, mbW)}</span><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${t('{n} lines, {size}', { n: lineCount, size: sizeStr })}</summary>${codeBlock}</details></div>`;
     }
     if (block.toolName === 'Read') {
       const lineCount = resultText.split('\n').length;
       const codeBlock = this.renderCodeBlock(resultText, fp);
-      return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.book} ${t('Read')} ${this.clickablePath(fp)}</span><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${t('{n} lines', { n: lineCount })}</summary>${codeBlock}</details></div>`;
+      const mbR = memoryBase(fp);
+      return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.book} ${mbR ? t('Memory read') : t('Read')} ${this.clickablePath(fp, mbR)}</span><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${t('{n} lines', { n: lineCount })}</summary>${codeBlock}</details></div>`;
     }
     if (block.toolName === 'Agent') {
       const desc = block.input?.description || '';
@@ -718,7 +733,8 @@ class ChatRenderers {
       body += `<div class="${cls}"><span class="chat-diff-prefix">${prefix}</span><span class="chat-diff-text">${escHtml(line.text)}</span></div>`;
     }
 
-    return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.memo} ${t('Update')} ${this.clickablePath(filePath)}</span><details class="chat-diff"><summary class="chat-diff-summary">${summary}</summary><div class="chat-diff-body">${body}</div></details></div>`;
+    const mbE = memoryBase(filePath);
+    return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.memo} ${mbE ? t('Memory update') : t('Update')} ${this.clickablePath(filePath, mbE)}</span><details class="chat-diff"><summary class="chat-diff-summary">${summary}</summary><div class="chat-diff-body">${body}</div></details></div>`;
   }
 
   renderPatchDiff(block) {
@@ -744,16 +760,19 @@ class ChatRenderers {
           : [];
       const addCount = diffLines.filter((line) => line.type === 'add').length;
       const delCount = diffLines.filter((line) => line.type === 'del').length;
-      const action = change.changeType === 'add'
-        ? t('Write')
-        : change.changeType === 'delete'
-          ? t('Delete')
-          : change.changeType === 'move'
-            ? t('Move')
-            : t('Update');
+      const mbP = memoryBase(filePath);
+      const action = (mbP && (change.changeType === 'add' || change.changeType === 'update'))
+        ? t('Memory update')
+        : change.changeType === 'add'
+          ? t('Write')
+          : change.changeType === 'delete'
+            ? t('Delete')
+            : change.changeType === 'move'
+              ? t('Move')
+              : t('Update');
       const pathLabel = change.movePath && fromPath
         ? `${this.clickablePath(fromPath)} \u2192 ${this.clickablePath(change.movePath)}`
-        : this.clickablePath(filePath);
+        : this.clickablePath(filePath, mbP);
       const summary = change.changeType === 'move' && !addCount && !delCount
         ? `\u2713 ${t('Moved to {path}', { path: escHtml(change.movePath || filePath) })}`
         : change.changeType === 'delete' && !addCount && !delCount
@@ -813,8 +832,8 @@ class ChatRenderers {
   // ── Linkification helpers ──
 
   /** Make a file path clickable (click=copy, ctrl+click=open) */
-  clickablePath(fp) {
-    return `<span class="chat-link chat-link-path" data-path="${escHtml(fp)}" title="${t('Click to copy, Ctrl+Click to open')}">${escHtml(fp)}</span>`;
+  clickablePath(fp, label = null) {
+    return `<span class="chat-link chat-link-path" data-path="${escHtml(fp)}" title="${t('Click to copy, Ctrl+Click to open')}">${escHtml(label || fp)}</span>`;
   }
 
   /** Strip trailing punctuation from matched paths/URLs */
