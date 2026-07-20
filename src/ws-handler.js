@@ -629,6 +629,14 @@ function registerWsHandler(wss, ctx) {
             execFileSync('ssh', [...hosts.sshArgs(h), '--', script], { input: tar, timeout: 20000 });
             return `${rc.envVar}="${rdir}" `;
           };
+          // Host-held subscription on a DIAL device (2.208.0): the device
+          // already holds this account's creds dir (~/.vibespace/subs/<id>,
+          // minted by an on-device login — 2.199.0) — a shell prefix
+          // assignment points the CLI at it. NOTHING ships, so the §ban-safety
+          // dial guards below must not reject it (they used to, with a
+          // misleading "shipping not implemented" error). Empty otherwise.
+          const dialAcctAssign = (spawnAccount?._hostSubReady && spawnAccount.remoteCreds)
+            ? `${spawnAccount.remoteCreds.envVar}="$HOME/.vibespace/${spawnAccount.remoteCreds.dirName}" ` : '';
           if (data.hostId && hosts && sessionMode === 'terminal') {
             let h;
             try { h = hosts.get(data.hostId); }
@@ -643,11 +651,12 @@ function registerWsHandler(wss, ctx) {
             if (h.transport === 'dial') {
               if (!dialBridge || !agentdRemote) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, sessionId: id, message: 'dial sessions not wired on this server' })); return; }
               // Account billing on a device: API keys ship (below); a
-              // SUBSCRIPTION account can't be honored on a device (OAuth ship
-              // is off by default, §ban-safety) — fail LOUD, don't silently
-              // bill the device's own login (mirror the chat-dial guard;
-              // review: this branch used to ignore an explicit subscription).
-              if (spawnAccount && !spawnAccount.secret) {
+              // host-HELD subscription uses the device's own creds dir (no
+              // ship — dialAcctAssign); any OTHER subscription can't be
+              // honored on a device (OAuth ship is off by default,
+              // §ban-safety) — fail LOUD, don't silently bill the device's
+              // own login (mirror the chat-dial guard).
+              if (spawnAccount && !spawnAccount.secret && !dialAcctAssign) {
                 let allowSub = false; try { allowSub = !!serverSetting('accounts.shipSubscriptionToRemote'); } catch {}
                 ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, sessionId: id, message: allowSub
                   ? 'subscription creds shipping to dial devices is not implemented — use an API-key account, or log in on the device'
@@ -675,7 +684,7 @@ function registerWsHandler(wss, ctx) {
                 });
                 // tools PATH only while integrated — leftover tools from an
                 // earlier ON spawn must not be name-resolvable in a pristine one
-                const shellCmd = `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:${integrationOn ? '$HOME/.vibespace/bin:' : ''}$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ${shellResolve}${da.tokenAssign}exec env `
+                const shellCmd = `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:${integrationOn ? '$HOME/.vibespace/bin:' : ''}$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ${shellResolve}${da.tokenAssign}${dialAcctAssign}exec env `
                   + [...da.envPairs.map(shq), ...spawnEnvPairs.map(shq)].join(' ')
                   + ' ' + [rcmd0, ...(backend === 'shell' ? ['-l'] : spawnArgs.map(shq))].join(' ');
                 const cfg = {
@@ -763,8 +772,9 @@ function registerWsHandler(wss, ctx) {
               // A selected SUBSCRIPTION account can't be honored on a device
               // (OAuth shipping is off by default — §ban-safety) — fail loudly
               // rather than silently billing the device's own login (the ssh
-              // path fails the same way). API keys are shippable (below).
-              if (spawnAccount && !spawnAccount.secret) {
+              // path fails the same way). API keys are shippable (below);
+              // host-HELD logins use the device's own creds dir (dialAcctAssign).
+              if (spawnAccount && !spawnAccount.secret && !dialAcctAssign) {
                 let allowSub = false; try { allowSub = !!serverSetting('accounts.shipSubscriptionToRemote'); } catch {}
                 ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: allowSub
                   ? 'subscription creds shipping to dial devices is not implemented — use an API-key account, or log in on the device'
@@ -781,7 +791,7 @@ function registerWsHandler(wss, ctx) {
                   console.warn('[dial] agent setup degraded:', e.message); return { envPairs: [], tokenAssign: '' };
                 });
                 // tools PATH only while integrated (see the pty branch note)
-                const shellCmd = `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:${integrationOn ? '$HOME/.vibespace/bin:' : ''}$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ${da.tokenAssign}exec env `
+                const shellCmd = `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:${integrationOn ? '$HOME/.vibespace/bin:' : ''}$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ${da.tokenAssign}${dialAcctAssign}exec env `
                   + [...da.envPairs.map(shq), ...spawnEnvPairs.map(shq)].join(' ')
                   + ' ' + [rcmd, ...rargs.map(shq)].join(' ');
                 const cfg = {
