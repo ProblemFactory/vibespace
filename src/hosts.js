@@ -364,7 +364,11 @@ class HostManager {
       // login (or a past opt-in ship) — a session picking that account runs
       // on the host-side dir, nothing ships. find -exec (no shell globs —
       // zsh nomatch aborts glob-carrying lines in _hostShell scripts).
-      + `HS=$(find "$HOME/.vibespace/subs" -maxdepth 2 -name ".credentials.json" -exec grep -l accessToken {} + 2>/dev/null | tr "\\n" " "); echo "HSUBS:$HS"`);
+      + `HS=$(find "$HOME/.vibespace/subs" -maxdepth 2 -name ".credentials.json" -exec grep -l accessToken {} + 2>/dev/null | tr "\\n" " "); echo "HSUBS:$HS"; `
+      // per-dir identity email — the anchor for same-account auto-merge
+      // (2.205.0): a host login whose email matches an EXISTING record means
+      // duplicate records of one real account
+      + `find "$HOME/.vibespace/subs" -maxdepth 2 -name ".claude.json" -exec grep -H -o "emailAddress\\": *\\"[^\\"]*" {} + 2>/dev/null | sed "s/^/HSE:/"`);
     const sub = /SUB:(\d+)/.exec(out);
     const key = /KEY:primaryApiKey": *"(sk-ant-[^\s"]+)/.exec(out);
     const helper = /HELPER:yes/.test(out);
@@ -384,6 +388,10 @@ class HostManager {
     const hostSubs = hsubs
       ? [...hsubs[1].matchAll(/subs\/([\w-]+)\/\.credentials\.json/g)].map((m) => m[1])
       : [];
+    const hostSubEmails = {};
+    for (const m of out.matchAll(/HSE:.*subs\/([\w-]+)\/\.claude\.json:emailAddress": *"([^"\s]+)/g)) {
+      hostSubEmails[m[1]] = m[2];
+    }
     return {
       subscription: { loggedIn: !!(sub && parseInt(sub[1]) > 0), email: email ? email[1] : null },
       cliKey: key ? { present: true, tail: key[1].slice(-8) } : { present: false },
@@ -392,7 +400,18 @@ class HostManager {
       credsMtime: cmt ? parseInt(cmt[1]) : null,      // seconds — claude .credentials.json
       codexAuthMtime: xmt ? parseInt(xmt[1]) : null,  // seconds — codex auth.json
       hostSubs, // acct ids with a live host-side creds dir (~/.vibespace/subs/<id>)
+      hostSubEmails, // { acctId: identity email of its host-side dir } — merge anchor
     };
+  }
+
+  /** Rename a per-account creds dir on the host (same-account record merge —
+   *  2.205.0). Refuses to clobber an existing target dir. */
+  async renameHostSubDir(id, fromAcct, toAcct) {
+    if (!/^sub-[\w-]{1,40}$/.test(fromAcct) || !/^sub-[\w-]{1,40}$/.test(toAcct)) throw new Error('bad account id');
+    const h = this.get(id);
+    const out = await this._hostShell(h,
+      `if [ -e "$HOME/.vibespace/subs/${toAcct}" ]; then echo EXISTS; elif [ -d "$HOME/.vibespace/subs/${fromAcct}" ]; then mv "$HOME/.vibespace/subs/${fromAcct}" "$HOME/.vibespace/subs/${toAcct}" && echo MOVED; else echo ABSENT; fi`);
+    return /MOVED/.test(out);
   }
 
   /** Full remote primaryApiKey + org name (for one-click import into the

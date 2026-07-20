@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.205.0 — 2026-07-20
+- **Same-account auto-recognition** (the "这个不能自动识别吗" ask): a login whose identity email matches an EXISTING subscription record is the SAME account — records now merge automatically instead of duplicating. Two triggers: the local add-flow's finalize (fresh creds fold into the existing record, which keeps the newest login; toast says "recognized as existing account — merged"), and every host identity probe (a host-side per-account dir whose email matches a different record renames the dir to the survivor and folds the records — so an existing duplicate like the reported ProblemFactory pair SELF-HEALS the next time the machine's roster is opened). Learned dir emails also backfill records that never declared one (enabling the =host-login link). Survivor = the older record; union of host logins; merge is best-effort per dir (a failure keeps both records rather than losing anything).
+
 ## 2.204.0 — 2026-07-20
 Closing the per-host login loop (user's A/B comparison: the ⋯ "Log in on \<host\> as this account…" path displayed perfectly, the "+ Add account" host path duplicated an existing account and read "not logged in" on the local view):
 - **The add menu (machine selected) offers EXISTING subscriptions first** — "Log in on \<host\> as \<name\>…" per account not already on that machine (never mints a duplicate record), then "New subscription — log in on \<host\>…" for genuinely new accounts.

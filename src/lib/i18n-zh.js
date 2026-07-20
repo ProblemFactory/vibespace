@@ -784,6 +784,7 @@ export default {
   "not installed": "未安装",
   "not logged in": "未登录",
   "notification": "通知",
+  "✓ Recognized as existing account “{name}” — merged (freshest login kept)": "✓ 识别为已有账号“{name}”——已合并（保留最新登录）",
   "Log in on {host} as “{name}”…": "以“{name}”在 {host} 上登录…",
   "New subscription — log in on {host}…": "新订阅——在 {host} 上登录…",
   "· master held by VibeSpace": "· 主副本存于 VibeSpace",
