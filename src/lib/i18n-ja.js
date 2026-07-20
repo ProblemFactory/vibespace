@@ -783,6 +783,7 @@ export default {
   "not installed": "未インストール",
   "not logged in": "未ログイン",
   "notification": "通知",
+  "✓ Recognized as existing account “{name}” — merged (freshest login kept)": "✓ 既存アカウント「{name}」と認識——統合しました（最新のログインを保持）",
   "Log in on {host} as “{name}”…": "「{name}」として {host} でログイン…",
   "New subscription — log in on {host}…": "新しいサブスクリプション——{host} でログイン…",
   "· master held by VibeSpace": "・マスターは VibeSpace が保持",

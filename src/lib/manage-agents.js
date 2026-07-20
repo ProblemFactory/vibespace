@@ -59,7 +59,8 @@ export function installManageAgents(App, ctx = {}) {
         const r = await fetchJson(`/api/accounts/subscription/${encodeURIComponent(created.id)}/finalize`, { method: 'POST' });
         if (r?.loggedIn) {
           clearInterval(iv);
-          showToast(t('✓ Added {name}', { name: r.name || t('subscription') }));
+          if (r.merged) showToast(t('✓ Recognized as existing account “{name}” — merged (freshest login kept)', { name: r.account?.name || '' }), { duration: 7000 });
+          else showToast(t('✓ Added {name}', { name: r.name || t('subscription') }));
         }
       } catch { /* keep polling */ }
     }, 3000);

@@ -333,6 +333,49 @@ class AccountManager {
     return { imported, skipped };
   }
 
+  /** Identity email of a claude subscription record: the dir's own identity
+   *  wins, then the declared email, then an email-shaped name. */
+  identityEmailOf(a) {
+    let dirEmail = null;
+    try { if (this._acctType(a) === 'subscription' && (a.backend || 'claude') === 'claude') dirEmail = this.readSubCreds(a.id).email; } catch { }
+    const v = dirEmail || a.email || (String(a.name || '').includes('@') ? a.name : '');
+    return String(v || '').trim().toLowerCase();
+  }
+
+  /** Merge duplicate records of the SAME real account (same identity email —
+   *  2.205.0, real report: a host add-flow login minted a second record of an
+   *  account the user already had; "can't it auto-recognize?"). `fromId` (the
+   *  newer dup) folds into `intoId` (the survivor): fresh local creds win
+   *  when asked, hostLogins union, metadata kept on the survivor, the dup
+   *  record spliced WITHOUT the delete-path host cleanup (its host dirs are
+   *  renamed to the survivor by the caller first). */
+  mergeSubscription(fromId, intoId, { preferFromCreds = false } = {}) {
+    const from = this._state.accounts.find((x) => x.id === fromId);
+    const into = this._state.accounts.find((x) => x.id === intoId);
+    if (!from || !into || fromId === intoId) throw new Error('bad merge pair');
+    // local creds: bring the dup's dir over when it's fresher/the only login
+    try {
+      const fromDir = this.subDir(fromId), intoDir = this.subDir(intoId);
+      const intoLogged = this.readSubCreds(intoId).loggedIn;
+      if (fs.existsSync(path.join(fromDir, '.credentials.json')) && (preferFromCreds || !intoLogged)) {
+        fs.mkdirSync(intoDir, { recursive: true, mode: 0o700 });
+        for (const f of ['.credentials.json', '.claude.json']) {
+          const src = path.join(fromDir, f);
+          if (fs.existsSync(src)) fs.copyFileSync(src, path.join(intoDir, f));
+        }
+      }
+      fs.rmSync(fromDir, { recursive: true, force: true });
+    } catch { /* best-effort file consolidation */ }
+    if (from.hostLogins) into.hostLogins = { ...(from.hostLogins), ...(into.hostLogins || {}) };
+    if (!into.email && from.email) into.email = from.email;
+    if (!into.note && from.note) into.note = from.note;
+    if (this._state.defaultAccountId === fromId) this._state.defaultAccountId = intoId;
+    this._state.accounts = this._state.accounts.filter((x) => x.id !== fromId);
+    this._save();
+    this._notify();
+    return this.list().accounts.find((x) => x.id === intoId) || null;
+  }
+
   /** Write-through from a host identity probe (2.204.0): remember which
    *  machines hold a per-account login dir for each account, so EVERY view
    *  (incl. the local one, which probes no host) can say "logged in on X"

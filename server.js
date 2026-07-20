@@ -2549,6 +2549,35 @@ app.post('/api/accounts/import-cli', (req, res) => {
 app.get('/api/hosts/:id/accounts-status', async (req, res) => {
   try {
     const r = await hosts.accountsStatus(req.params.id);
+    // Same-account auto-recognition on the HOST side (2.205.0): a host dir
+    // whose identity email matches a DIFFERENT existing subscription means
+    // duplicate records of one real account — rename the host dir to the
+    // survivor and fold the records (the local finalize path does the same
+    // for local logins). Learned dir emails also backfill records that
+    // never declared one (enables the =host-login link).
+    if (accounts && r.hostSubEmails) {
+      for (const [dirId, email] of Object.entries(r.hostSubEmails)) {
+        try {
+          const em = String(email).trim().toLowerCase();
+          const all = accounts.list().accounts || [];
+          const rec = all.find((x) => x.id === dirId);
+          if (!rec) continue;
+          if (!rec.email) { try { accounts.setEmail(dirId, email); } catch { } }
+          const dup = all.find((x) => x.id !== dirId && (x.backend || 'claude') === 'claude' && x.type === 'subscription'
+            && String(x.email || (String(x.name || '').includes('@') ? x.name : '')).trim().toLowerCase() === em);
+          if (dup) {
+            // survivor = the OLDER record; rename the newer's host dir first
+            const survivor = (dup.createdAt || 0) <= (rec.createdAt || 0) ? dup : rec;
+            const gone = survivor === dup ? rec : dup;
+            if ((r.hostSubs || []).includes(gone.id) && await hosts.renameHostSubDir(req.params.id, gone.id, survivor.id)) {
+              const i = r.hostSubs.indexOf(gone.id);
+              if (i >= 0) r.hostSubs.splice(i, 1, survivor.id);
+            }
+            accounts.mergeSubscription(gone.id, survivor.id, { preferFromCreds: false });
+          }
+        } catch { /* best-effort per-dir; a failed merge keeps both records */ }
+      }
+    }
     // remember which accounts hold a login ON this host — every view (incl.
     // local, which probes no host) can then show "logged in on X" (2.204.0)
     try { accounts?.noteHostLogins?.(req.params.id, r.hostSubs || []); } catch { }
@@ -2634,7 +2663,24 @@ app.post('/api/accounts/subscription', (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.post('/api/accounts/subscription/:id/finalize', (req, res) => {
-  try { res.json({ success: true, ...accounts.finalizeSubscription(req.params.id) }); }
+  try {
+    const fin = accounts.finalizeSubscription(req.params.id);
+    // Same-account auto-recognition (2.205.0, real ask "这个不能自动识别吗"):
+    // a fresh login whose identity email matches an EXISTING subscription is
+    // the SAME account — fold the new record into the existing one (fresh
+    // creds win) instead of keeping a duplicate.
+    if (fin?.loggedIn && fin?.email && accounts) {
+      const em = String(fin.email).trim().toLowerCase();
+      const dup = (accounts.list().accounts || []).find((x) =>
+        x.id !== req.params.id && (x.backend || 'claude') === 'claude' && x.type === 'subscription'
+        && String(x.email || (String(x.name || '').includes('@') ? x.name : '')).trim().toLowerCase() === em);
+      if (dup) {
+        const merged = accounts.mergeSubscription(req.params.id, dup.id, { preferFromCreds: true });
+        return res.json({ success: true, ...fin, merged: true, account: merged });
+      }
+    }
+    res.json({ success: true, ...fin });
+  }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 // Add a Console account safely: the /login runs in an isolated dir so it can't
