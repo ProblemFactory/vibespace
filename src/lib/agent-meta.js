@@ -9,6 +9,14 @@ export const BACKEND_META = {
     iconSrc: '/brand/claude.svg',
     iconClass: 'backend-icon-claude',
     brandColor: '#D97757',
+    // The CLI's auto-memory dirs (~/.claude/projects/<proj>/memory/ and
+    // ~/.claude/memory/) — file ops here classify as the 'memory' collapse
+    // kind and label memory/<name> in fold summaries. Codex (0.142.x) has no
+    // memory feature, hence no entry; a NEW backend with a memory dir adds
+    // ONE memoryPathRe here and everything downstream picks it up
+    // (agentMemoryPathRes unions across backends deliberately: the PATH
+    // identifies memory content regardless of which session touches it).
+    memoryPathRe: /\/\.claude\/(?:projects\/[^/]+\/)?memory\//,
   },
   shell: {
     id: 'shell',
@@ -33,6 +41,11 @@ export const BACKEND_META = {
     brandColor: '#000000',
   },
 };
+
+/** Every backend's agent-memory path pattern (see BACKEND_META.claude). */
+export function agentMemoryPathRes() {
+  return Object.values(BACKEND_META).map((m) => m.memoryPathRe).filter(Boolean);
+}
 
 export function getBackendMeta(backend) {
   return BACKEND_META[backend] || {

@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.213.2 — 2026-07-20
+- Memory-path detection generalized: the agent-memory pattern moved from a chat-view constant into per-backend metadata (`BACKEND_META.<backend>.memoryPathRe` in agent-meta.js, unioned at use). Claude matches its auto-memory dirs (~/.claude/projects/<proj>/memory/ and ~/.claude/memory/); Codex 0.142.x has no memory feature so no entry; a future backend with a memory dir is ONE metadata line.
+
 ## 2.213.1 — 2026-07-20
 - **Generic tool-card headers localize** (user report: TaskCreate/TaskUpdate read as unlocalized chrome): ~20 harness built-in tools get curated display names (创建任务/更新待办/网页搜索/…) in the card header AND the typing indicator's "running …" label; the raw tool name stays as the card tooltip. MCP/unknown tools keep their identifier; Bash/Agent/Workflow stay as-is.
 - **Agent-memory file operations are their own collapse kind** (user ask: reads, writes and memory files are each a distinct concern): a new "memory" entry in Card-kinds-that-collapse covers reads AND writes under the agent's memory directory — housekeeping, folded by default (project-file writes stay visible by default), counted separately in the fold summary and still listed as memory/<name>.
