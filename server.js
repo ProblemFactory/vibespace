@@ -1357,7 +1357,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
         const tail = Buffer.alloc(take);
         fs.readSync(fd, tail, 0, take, st.size - take);
         fs.closeSync(fd);
-        const tombDir = path.join(DATA_DIR, 'exit-tombs');
+        const tombDir = path.join(__dirname, 'data', 'exit-tombs');
         fs.mkdirSync(tombDir, { recursive: true });
         fs.writeFileSync(path.join(tombDir, `${id}.tail`), tail);
         // opportunistic sweep: tombs older than 7 days

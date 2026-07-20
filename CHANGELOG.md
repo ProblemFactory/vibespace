@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.206.2 — 2026-07-20
+- Hotfix: the 2.206.1 tombstone referenced a nonexistent DATA_DIR constant inside its try/catch — it would have silently never written (the exact silent-failure class it exists to catch). Path corrected + logic unit-verified.
+
 ## 2.206.1 — 2026-07-20
 - **Exit tombstones**: on real session teardown the buffer's last 64KB is kept for 7 days in `data/exit-tombs/<id>.tail` before the buffer is unlinked — a crash's stack trace/stderr lives ONLY in the buffer, and deleting it on exit blinded three "why did this session die" investigations in one night (forensics upgraded the black-window incident to a claude that CRASH-LOOPED 4× in 3.5 minutes — config-backup + MCP-log startup timestamps prove the restarts; OOM ruled out via cgroup counters — with zero process-level evidence left). Correction to the 2.206.0 note: the usage-limit error was the last turn's visible symptom, NOT the exit cause; the exit overlay + lifecycle logs + tombstones together make the next occurrence diagnosable.
 
