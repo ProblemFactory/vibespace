@@ -857,6 +857,8 @@ export default {
   "{n} memory": "記憶操作 {n} 件",
   "Agent memory files (reads AND writes)": "エージェント記憶ファイル（読み書き）",
   "Which card kinds fold into the summary line. Enabled kinds collapse TOGETHER as one interleaved group (think → read → edit → run is the real work pattern; per-kind groups rarely get long enough to fold). Memory = operations on the agent's own memory directory — housekeeping, folded by default and listed as memory/<name> in the summary; project-file writes are off by default — diffs are usually worth seeing. A run of only thinking needs two or more; any tool card folds immediately. Cards waiting for your approval never fold.": "どの種類のカードをサマリー行に折りたたむか。有効な種類は 1 つの交互グループとしてまとめて折りたたまれます（考える→読む→編集→実行が実際の作業パターン；種類別グループは折りたたみに足る長さになりにくい）。記憶 = エージェント自身の記憶ディレクトリへの操作——内務であり、デフォルトで折りたたまれ、サマリーには memory/<名> と表示；プロジェクトファイルの書き込みはデフォルトでオフ——diff は見る価値があることが多いため。思考のみの連続は 2 件以上必要；ツールカードは即折りたたみ。承認待ちのカードは決して折りたたまれません。",
+  "Memory update": "記憶更新",
+  "Memory read": "記憶読み取り",
   "· logged in on {host}": "・{host} でログイン済み",
   "not logged in on {host}": "{host} で未ログイン",
   "This account holds its own login ON {host} (minted there, never leaves it) — sessions on {host} picking it use that login.": "このアカウントは {host} 上に独自のログインを保持しています（そこで生成され、外に出ません）——{host} 上のセッションでこれを選ぶとそのログインを使用します。",

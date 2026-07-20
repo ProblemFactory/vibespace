@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.214.0 — 2026-07-20
+- **Memory file operations get their own card face** (user ask): a Write/Edit/Read recognized as an agent-memory file (via the per-backend memoryPathRe) renders as **记忆更新 / 记忆读取 <name>** — verb swapped, path display shortened to the file name (the full path stays behind the link: click still copies, Ctrl+click still opens). Applies to completed cards, pending (running) cards, Edit diffs, and Patch per-file changes.
+
 ## 2.213.3 — 2026-07-20
 - **Codex memory paths recognized** — correcting 2.213.2's "codex has no memory feature" (wrong: a truncated directory listing). Codex 0.144.0 DOES have Memories (config-gated `[memories]`, developers.openai.com/codex/memories): background jobs distill rollouts into files under `~/.codex/memories/` (MEMORY.md, memory_summary.md, raw_memories.md, rollout_summaries/ — paths verified in the binary). File ops there now classify as the 'memory' collapse kind via `BACKEND_META.codex.memoryPathRe`.
 
