@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.204.0 — 2026-07-20
+Closing the per-host login loop (user's A/B comparison: the ⋯ "Log in on \<host\> as this account…" path displayed perfectly, the "+ Add account" host path duplicated an existing account and read "not logged in" on the local view):
+- **The add menu (machine selected) offers EXISTING subscriptions first** — "Log in on \<host\> as \<name\>…" per account not already on that machine (never mints a duplicate record), then "New subscription — log in on \<host\>…" for genuinely new accounts.
+- **Host logins are remembered on the account record** (`hostLogins`, written through from every host identity probe, cleared when a probe stops listing the account) — so the LOCAL view (which probes no host) now shows "logged in on \<host\>" instead of a bare "not logged in" for host-only accounts.
+
 ## 2.203.0 — 2026-07-20
 - **Host-held subscription logins actually spawn now** (the 2.199.0 flow's missing last mile, caught live: the roster proudly said "logged in on AIDev" while picking the account for an AIDev session failed with "subscription not logged in" — `resolveForSpawn` throws on the EMPTY local dir before the hostSubs mapping ever ran). The create handler now catches that specific failure for remote spawns, probes the host, and on a hostSubs match builds the spawn against the host-side dir directly. UI follow-ups: a host-held account no longer shows the contradictory local "not logged in" next to "logged in on \<host\>" (the host tag carries the state), and Test works for host-held accounts (the local-loggedIn guard exempts them).
 

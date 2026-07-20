@@ -1028,12 +1028,20 @@ export function installManageAgents(App, ctx = {}) {
       // token-derived orgEmail (per-account ⟳ roles bake) beats the creds
       // dir's config email — same staleness class as the global row (2.188.0)
       const aEmail = this._accountUsage?.[a.id]?.orgEmail || a.email;
+      // Machines known to hold this account's own login dir (write-through
+      // from host probes — 2.204.0): lets EVERY view say "logged in on X"
+      // instead of a bare local "not logged in" for host-only accounts.
+      const hlNames = Object.keys(a.hostLogins || {})
+        .map((hid) => this.sidebar?._hostsData?.hosts?.find((h) => h.id === hid)?.name || hid);
+      const hlTag = hlNames.length
+        ? ` <span class="acct-linked-hint">${t('· logged in on {host}', { host: escHtml(hlNames.join(', ')) })}</span>` : '';
       let ident = isSub
         ? (a.loggedIn ? escHtml((aEmail || '') + (a.subscriptionType ? (aEmail ? ' · ' : '') + a.subscriptionType : '')) || t('logged in')
           // Host-held login + empty LOCAL dir: "not logged in" (which is
           // about the local dir) next to "logged in on {host}" read as a
           // contradiction (real report) — the host tag carries the state.
           : hostSub ? escHtml(aEmail || '')
+          : hlNames.length ? `${escHtml(aEmail || '')}${aEmail ? ' ' : ''}${hlTag}`
           : `<span class="ob-warn">${t('not logged in')}</span>`)
         : `API …${escHtml(a.tail || '')} <span class="acct-master-hint" title="${t('VibeSpace holds the MASTER copy of this key; sessions get derived working copies on their machines (swept on removal). ⋯ → “Show key…” reveals the value.')}">${t('· master held by VibeSpace')}</span>`;
       // Some login flows leave the creds dir without an identity file — the
@@ -1108,10 +1116,28 @@ export function installManageAgents(App, ctx = {}) {
       // selected, the subscription login runs ON that machine (per-host creds
       // dir) — the old always-local terminal was a trap: the dialog said the
       // host, the login quietly landed in the local store (real report).
+      if (selectedHost) {
+        // With a machine selected, "add" usually means "get an account ONTO
+        // this machine" — offer the EXISTING subscriptions first (per-host
+        // login into their own dir; picking one never mints a duplicate
+        // record — real report: the always-new flow duplicated an account
+        // the user already had), then the genuinely-new option.
+        for (const sa of claudeAccts.filter((x) => x.type === 'subscription')) {
+          if (hostSubIds.includes(sa.id)) continue; // already on this host
+          if (hostOwnEmail && acctEmailOf(sa) === hostOwnEmail) continue; // IS the host's own login
+          items.push({ label: t('Log in on {host} as “{name}”…', { host: hostLabel, name: sa.name }), action: () => {
+            done();
+            const dir = `$HOME/.vibespace/subs/${sa.id}`; // id shape sub-<hex>, metachar-free
+            this._watchHostLogin(selectedHost, hostLabel);
+            this.openShellTerminal(undefined, { hostId: selectedHost, initialCommand: `mkdir -p "${dir}" && CLAUDE_CONFIG_DIR="${dir}" CLAUDE_SECURESTORAGE_CONFIG_DIR="${dir}" claude auth login --claudeai` });
+            showToast(t('Sign in as “{name}” in the terminal — this login lives ON {host} only; the machine’s own login is untouched.', { name: sa.name, host: hostLabel }), { duration: 7000 });
+          } });
+        }
+        items.push({ label: t('New subscription — log in on {host}…', { host: hostLabel }), action: () => { done(); this._addSubscription(selectedHost, hostLabel); } });
+      } else {
+        items.push({ label: t('Add subscription…'), action: () => { done(); this._addSubscription(); } });
+      }
       items.push(
-        selectedHost
-          ? { label: t('Add subscription (log in on {host})…', { host: hostLabel }), action: () => { done(); this._addSubscription(selectedHost, hostLabel); } }
-          : { label: t('Add subscription…'), action: () => { done(); this._addSubscription(); } },
         { label: t('Add Console account…'), action: () => { done(); this._addConsoleAccount(); } },
         { label: t('Add API key…'), action: addApiKey },
       );

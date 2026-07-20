@@ -109,7 +109,7 @@ class AccountManager {
       accounts: this._state.accounts.map((a) => {
         const type = this._acctType(a);
         const backend = this._acctBackend(a);
-        const base = { id: a.id, name: a.name, type, backend, source: a.source, originHost: a.originHost || null, note: a.note || null, createdAt: a.createdAt };
+        const base = { id: a.id, name: a.name, type, backend, source: a.source, originHost: a.originHost || null, note: a.note || null, hostLogins: a.hostLogins || null, createdAt: a.createdAt };
         if (backend === 'codex') {
           const info = this.readCodexSubAuth(a.id);
           return { ...base, loggedIn: info.loggedIn, email: info.email || a.email || null, emailDeclared: !info.email && !!a.email, subscriptionType: info.plan, authMode: info.authMode };
@@ -331,6 +331,28 @@ class AccountManager {
     }
     if (imported) { this._save(); this._notify(); }
     return { imported, skipped };
+  }
+
+  /** Write-through from a host identity probe (2.204.0): remember which
+   *  machines hold a per-account login dir for each account, so EVERY view
+   *  (incl. the local one, which probes no host) can say "logged in on X"
+   *  instead of a bare "not logged in" (real report: an account whose only
+   *  login lived on AIDev read as dead on the local view). Cleared for a
+   *  host when its probe stops listing the account. */
+  noteHostLogins(hostId, ids) {
+    if (!hostId) return;
+    const set = new Set(ids || []);
+    let changed = false;
+    for (const a of this._state.accounts) {
+      const has = !!a.hostLogins?.[hostId];
+      if (set.has(a.id) && !has) { (a.hostLogins ||= {})[hostId] = Date.now(); changed = true; }
+      else if (!set.has(a.id) && has) {
+        delete a.hostLogins[hostId];
+        if (!Object.keys(a.hostLogins).length) delete a.hostLogins;
+        changed = true;
+      }
+    }
+    if (changed) { this._save(); this._notify(); }
   }
 
   /** Decrypted key VALUE for the reveal dialog (API-key accounts only).

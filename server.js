@@ -2547,7 +2547,13 @@ app.post('/api/accounts/import-cli', (req, res) => {
 // Anthropic login state ON a remote host (subscription OAuth? console key?) —
 // powers the Manage Agents accounts section when a host is selected.
 app.get('/api/hosts/:id/accounts-status', async (req, res) => {
-  try { res.json(await hosts.accountsStatus(req.params.id)); }
+  try {
+    const r = await hosts.accountsStatus(req.params.id);
+    // remember which accounts hold a login ON this host — every view (incl.
+    // local, which probes no host) can then show "logged in on X" (2.204.0)
+    try { accounts?.noteHostLogins?.(req.params.id, r.hostSubs || []); } catch { }
+    res.json(r);
+  }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 // Import the console-login key minted on a REMOTE host into the central store
