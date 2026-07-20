@@ -297,15 +297,15 @@ const SETTINGS_SCHEMA = {
     category: t('Integration'), liveApply: true,
   },
   'agents.stopNudgeStaleMinutes': {
-    type: 'number', default: 10, min: 1, max: 240, step: 1,
+    type: 'number', default: 10, min: 0, max: 240, step: 1,
     label: t('Stop nudge: staleness threshold (minutes)'),
-    description: t('The nudge only fires when the session has not updated its board status for this long. Lower = agents are reminded more eagerly; higher = quieter.'),
+    description: t('The nudge only fires when the session has not updated its board status for this long. Lower = agents are reminded more eagerly; higher = quieter. 0 = always considered stale (with cooldown 0 too, the nudge fires on EVERY stop — one bookkeeping mini-turn per turn).'),
     category: t('Integration'), liveApply: true,
   },
   'agents.stopNudgeCooldownMinutes': {
-    type: 'number', default: 30, min: 2, max: 720, step: 1,
+    type: 'number', default: 30, min: 0, max: 720, step: 1,
     label: t('Stop nudge: cooldown per session (minutes)'),
-    description: t('After nudging a session once, wait at least this long before nudging it again — the ceiling on how often an agent pays the bookkeeping mini-turn.'),
+    description: t('After nudging a session once, wait at least this long before nudging it again — the ceiling on how often an agent pays the bookkeeping mini-turn. 0 = no cooldown.'),
     category: t('Integration'), liveApply: true,
   },
   'agents.stopBookkeepingNudge': {
