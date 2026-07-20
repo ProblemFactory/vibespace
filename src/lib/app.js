@@ -1608,24 +1608,52 @@ class App {
       const defName = defId ? (list.find(a => a.id === defId)?.name || t('API key')) : globalLabel;
       const prev = acctSel.value;
       acctSel.innerHTML = '';
+      const hostId = document.getElementById('input-host')?.value || '';
+      const hostRec = hostId ? (this._nsHosts || this.sidebar?._hostsData?.hosts || []).find(h => h.id === hostId) : null;
+      const hostName = hostRec?.name || hostId;
+      const cliLoginLabel = be === 'codex'
+        ? (onHost ? t('ChatGPT login (on the host)') : t('ChatGPT login'))
+        : (onHost ? t('CLI login') + ' @ ' + hostName + ' (Pro/Max)' : t('Subscription (Pro/Max login)'));
       const opts = [
         ['', t('Default ({name})', { name: defName })],
-        ['subscription', be === 'codex' ? (onHost ? t('ChatGPT login (on the host)') : t('ChatGPT login')) : t('Subscription (Pro/Max login)')], // the CLI's global login
+        ['subscription', cliLoginLabel], // the CLI's global login (on the host for remote sessions)
       ];
-      // Subscription accounts on a REMOTE host require the opt-in toggle (their
-      // creds ship to the host, exposing the token from that host's IP — a ban
-      // risk; default OFF). API keys always ship. Local: always available.
+      // Subscription accounts for a REMOTE host — SAME semantics as the billing
+      // switcher (2.198.0/2.199.0; natural's bootloop started here: the dialog
+      // hid every named subscription for remote, forcing create-then-switch on
+      // an empty session): email-LINKED to the host's own login or HELD on the
+      // host (per-host login dir) = usable with zero creds shipped; otherwise
+      // shipping needs the opt-in toggle (ban risk, default OFF; never dial).
+      // API keys always ship. Local: needs a local login.
       const allowSubRemote = !!this.settings?.get?.('accounts.shipSubscriptionToRemote');
+      const hostOwnEmail = onHost && be !== 'codex'
+        ? String(this._hostOwnUsage?.[hostId]?.orgEmail || this._hostUsage?.[hostId]?.orgEmail || '').trim().toLowerCase() : '';
+      const emailOf = (a) => String(this._accountUsage?.[a.id]?.orgEmail || a.email || (String(a.name || '').includes('@') ? a.name : '')).trim().toLowerCase();
+      const hostHeld = (a) => !!a.hostLogins?.[hostId] || (this._hostSubsKnown?.[hostId] || []).includes(a.id);
       for (const a of list) {
-        if (a.type === 'subscription') { if (a.loggedIn && (!onHost || allowSubRemote)) opts.push([a.id, t('{name} (subscription)', { name: a.name })]); }
-        else opts.push([a.id, t('{name} — API key …{tail}', { name: a.name, tail: a.tail })]);
+        if (a.type === 'subscription') {
+          if (be === 'codex' || !onHost) {
+            if (a.loggedIn && (!onHost || allowSubRemote)) opts.push([a.id, t('{name} (subscription)', { name: a.name })]);
+            continue;
+          }
+          const linked = !!hostOwnEmail && emailOf(a) === hostOwnEmail;
+          const held = !linked && hostHeld(a);
+          if (linked) opts.push([a.id, a.name + ' ' + t('· uses {host}’s own login', { host: hostName })]);
+          else if (held) opts.push([a.id, a.name + ' ' + t('· logged in on {host}', { host: hostName })]);
+          else if (a.loggedIn && allowSubRemote && hostRec?.transport !== 'dial') opts.push([a.id, t('{name} (subscription)', { name: a.name })]);
+          // Not usable there — show WHY instead of silently omitting (the
+          // omission is what taught users the create-then-switch workaround)
+          else opts.push([a.id, a.name + ' — ' + t('not logged in on {host}', { host: hostName }), true]);
+        } else opts.push([a.id, t('{name} — API key …{tail}', { name: a.name, tail: a.tail })]);
       }
-      for (const [v, label] of opts) {
+      for (const [v, label, disabled] of opts) {
         const o = document.createElement('option');
         o.value = v; o.textContent = label;
+        if (disabled) o.disabled = true;
         acctSel.appendChild(o);
       }
-      acctSel.value = [...acctSel.options].some(o => o.value === prev) ? prev : '';
+      const keep = [...acctSel.options].find(o => o.value === prev && !o.disabled);
+      acctSel.value = keep ? prev : '';
     };
     this._updateAcctRow = updateAcctRow; // freshest closure wins
     updateAcctRow();
@@ -1640,6 +1668,7 @@ class App {
     const hostSel = document.getElementById('input-host');
     if (hostSel) {
       fetchJson('/api/hosts').then(d => {
+        this._nsHosts = d?.hosts || []; // account row reads name/transport from here
         hostSel.innerHTML = `<option value="">${t('Local')}</option>`;
         for (const h of d?.hosts || []) {
           const o = document.createElement('option');

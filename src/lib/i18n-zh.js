@@ -806,6 +806,7 @@ export default {
   "Add subscription — log in on {host}": "添加订阅——在 {host} 上登录",
   "A terminal opened ON {host} — sign in there. The login lives on {host} only; sessions on it can then pick this account.": "已在 {host} 上打开终端——请在那里完成登录。该登录只保存在 {host} 上；之后 {host} 上的会话即可选择这个账号。",
   "· logged in on {host}": "· 已在 {host} 登录",
+  "not logged in on {host}": "未在 {host} 登录",
   "This account holds its own login ON {host} (minted there, never leaves it) — sessions on {host} picking it use that login.": "这个账号在 {host} 上有自己的独立登录（在那台机器上生成、永不离开）——{host} 上的会话选它即使用该登录。",
   "Log in on {host} as this account…": "以此账号在 {host} 上登录…",
   "Sign in as “{name}” in the terminal — this login lives ON {host} only; the machine’s own login is untouched.": "请在终端里用“{name}”登录——该登录只保存在 {host} 上；机器自身的登录不受影响。",

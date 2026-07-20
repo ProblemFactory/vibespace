@@ -805,6 +805,7 @@ export default {
   "Add subscription — log in on {host}": "サブスクリプションを追加——{host} でログイン",
   "A terminal opened ON {host} — sign in there. The login lives on {host} only; sessions on it can then pick this account.": "{host} 上でターミナルを開きました——そこでサインインしてください。このログインは {host} 上にのみ保存され、以後 {host} 上のセッションでこのアカウントを選べます。",
   "· logged in on {host}": "・{host} でログイン済み",
+  "not logged in on {host}": "{host} で未ログイン",
   "This account holds its own login ON {host} (minted there, never leaves it) — sessions on {host} picking it use that login.": "このアカウントは {host} 上に独自のログインを保持しています（そこで生成され、外に出ません）——{host} 上のセッションでこれを選ぶとそのログインを使用します。",
   "Log in on {host} as this account…": "このアカウントとして {host} でログイン…",
   "Sign in as “{name}” in the terminal — this login lives ON {host} only; the machine’s own login is untouched.": "ターミナルで「{name}」としてサインインしてください——このログインは {host} 上にのみ保存され、マシン自身のログインには影響しません。",
