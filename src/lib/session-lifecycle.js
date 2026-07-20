@@ -516,7 +516,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       const isSub = isCodex || (a.type || 'api') === 'subscription';
       if (!isSub) return null; // API keys always ship
       if (rTransport === 'dial') return t('Subscription logins can’t ship to a paired device — log in on the device, or use an API-key account');
-      if (!shipSubs) return t('Blocked for remote hosts — log in on the host, or enable Settings → “Ship subscription logins to remote hosts”');
+      if (!shipSubs) return t('This stored login can’t ship to {host}. If you’ve logged this account in ON {host}, pick “CLI login @ {host}” above — that uses the host’s own login. (Or enable Settings → “Ship subscription logins to remote hosts”.)', { host: rHostName });
       return null;
     };
     const items = [];

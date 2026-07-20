@@ -1100,7 +1100,22 @@ done`;
           const session = activeSessions.get(data.sessionId);
           if (session?.pty && session.mode === 'chat' && data.mode) {
             const adapter = adapterRegistry.get(session.backend);
-            if (adapter) session.pty.write(adapter.formatSetPermissionMode(data.mode) + '\n');
+            // Claude answers with a real success/error control_response
+            // (2.1.215 refuses bypassPermissions unless launched
+            // bypass-capable) — track the request id so the stdout parser
+            // can adopt the mode on success / tell the client on refusal.
+            // The old fire-and-forget left session._permissionMode stale AND
+            // swallowed the refusal (the badge then flipped back on the next
+            // per-message init and read as "switching is broken").
+            const tracked = adapter?.buildTrackedSetPermissionMode?.(data.mode);
+            if (tracked) {
+              const pend = (session._pendingModeReqs ||= new Map());
+              pend.set(tracked.requestId, { mode: data.mode, ts: Date.now() });
+              for (const [rid, p] of pend) if (Date.now() - p.ts > 120000) pend.delete(rid);
+              session.pty.write(tracked.line + '\n');
+            } else if (adapter) {
+              session.pty.write(adapter.formatSetPermissionMode(data.mode) + '\n');
+            }
           }
           break;
         }

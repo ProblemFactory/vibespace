@@ -1071,6 +1071,39 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
               }
             }
 
+            // Permission-mode TRUTH (2.195.0): 2.1.215 emits a fresh init on
+            // EVERY user message carrying the CURRENT effective mode — adopt
+            // it so attach/chatStatus/resume never serve the spawn-time value
+            // (the old stale _permissionMode is what made a successful
+            // mid-session switch look reverted after a restart/reattach).
+            if (msg.type === 'system' && msg.subtype === 'init' && typeof msg.permissionMode === 'string' && msg.permissionMode
+                && session._permissionMode !== msg.permissionMode) {
+              session._permissionMode = msg.permissionMode;
+              if (session.sockName) writeSessionMeta(session.sockName, { ...(readSessionMeta(session.sockName) || {}), permissionMode: msg.permissionMode });
+            }
+
+            // set_permission_mode verdict (2.195.0): the CLI REFUSES a
+            // mid-session switch to bypassPermissions unless the session was
+            // launched bypass-capable — a clean error control_response we
+            // used to swallow (the optimistic badge then flipped back on the
+            // next init and the user read the whole feature as broken).
+            // Success → adopt + persist; either way tell the session's
+            // clients so the UI can confirm, revert, or offer the
+            // restart-with-mode path.
+            if (msg.type === 'control_response' && session._pendingModeReqs?.has(msg.response?.request_id)) {
+              const pend = session._pendingModeReqs.get(msg.response.request_id);
+              session._pendingModeReqs.delete(msg.response.request_id);
+              const ok = msg.response?.subtype === 'success';
+              if (ok) {
+                session._permissionMode = pend.mode;
+                if (session.sockName) writeSessionMeta(session.sockName, { ...(readSessionMeta(session.sockName) || {}), permissionMode: pend.mode });
+              }
+              broadcastToSession(session, id, {
+                type: 'permission-mode-ack', sessionId: id, ok, mode: pend.mode,
+                error: ok ? null : String(msg.response?.error || 'permission mode change refused'),
+              });
+            }
+
             // TodoWrite / TaskCreate / TaskUpdate → the session's live TODO
             // summary (board pill). TaskCreate's id arrives in the RESULT.
             if (msg.type === 'assistant' && Array.isArray(msg.message?.content)) {

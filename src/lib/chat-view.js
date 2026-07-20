@@ -1,4 +1,4 @@
-import { copyText, escHtml, showToast, collectDroppedFiles } from './utils.js';
+import { copyText, escHtml, showToast, showConfirmDialog, collectDroppedFiles } from './utils.js';
 import { installChatSeek } from './chat-view-seek.js';
 import { metric, track } from './telemetry-client.js';
 import { stripAnsi } from './highlight.js';
@@ -395,6 +395,8 @@ class ChatView {
       } else if (msg.type === 'remote-state' && msg.sessionId === sessionId) {
         // remote transport: ssh pipe reconnecting to the host-side keeper
         this._statusBar?.setRemoteState(msg);
+      } else if (msg.type === 'permission-mode-ack' && msg.sessionId === sessionId) {
+        this._onPermissionModeAck(msg);
       } else if (msg.type === 'subagent-message' && msg.sessionId === sessionId) {
         this._onSubagentMessage(msg.parentToolUseId, msg.message);
       } else if (msg.type === 'exited' && msg.sessionId === sessionId) {
@@ -1311,6 +1313,70 @@ class ChatView {
   }
 
   // Handle meta ops (usage, cost, turn_complete)
+  /**
+   * Verdict of a mid-session set_permission_mode (2.195.0). Success → keep the
+   * badge + persist as the session's per-session permission (resume respawns
+   * with it — the old switch was durable NOWHERE, so any restart clamped back).
+   * Refusal (the CLI rejects bypassPermissions unless the session was LAUNCHED
+   * bypass-capable — verified on 2.1.215) → revert the optimistic badge and
+   * offer the working path: restart this conversation with the mode as a
+   * launch flag (history preserved via --resume).
+   */
+  async _onPermissionModeAck({ ok, mode, error }) {
+    // The ack is BROADCAST to every attached client — only the INITIATOR
+    // (the client with an optimistic pick in flight: _permModePrev set) may
+    // pop dialogs; other tabs just sync the badge on success and ignore
+    // refusals (their badge never changed). Review-confirmed: unconditional
+    // handling made BOTH tabs offer the restart → double kill+resume flap.
+    // The successful mode is deliberately NOT persisted as the per-session
+    // launch override: the CLI moves modes on its own (plan → acceptEdits on
+    // ExitPlanMode approval) and a frozen 'plan' override would relaunch
+    // every resume into plan mode (review finding). Server meta tracks the
+    // live mode via the per-message init harvest; only the explicit
+    // restart-with-bypass persists (its whole point is the launch flag).
+    const initiated = this._statusBar && this._statusBar._permModePrev !== undefined;
+    if (ok) {
+      this._statusBar?.setPermMode(mode);
+      return;
+    }
+    if (!initiated) return;
+    this._statusBar?.revertPermMode();
+    if (mode === 'bypassPermissions') {
+      const go = await showConfirmDialog({
+        title: t('Restart in bypassPermissions?'),
+        message: t('The CLI refuses switching a running session to bypassPermissions (it must be launched with that mode). Restart this conversation with bypassPermissions? The history is kept — it resumes where you left off.'),
+        confirmText: t('Restart session'),
+      });
+      if (go) this._restartWithPermission('bypassPermissions');
+      else showToast(error || t('Permission mode unchanged'), { type: 'error', duration: 5000 });
+    } else {
+      showToast(error || t('Permission mode change refused by the CLI'), { type: 'error', duration: 6000 });
+    }
+  }
+
+  /** Kill + resume with the mode persisted as the per-session permission
+   *  override (the billing-switcher dance: geometry survives, transcript
+   *  flushes before --resume). */
+  _restartWithPermission(mode) {
+    const ids = this._getSessionIds();
+    const backendSessionId = ids.backendSessionId || this.winInfo?._openSpec?.backendSessionId;
+    const cwd = ids.cwd || this.winInfo?._openSpec?.cwd || '';
+    if (!backendSessionId || !cwd) { showToast(t('Session id not known yet — try again after the first reply'), { type: 'error' }); return; }
+    this._persistSessionConfig({ permission: mode });
+    const backend = ids.backend || 'claude';
+    const name = this.app.sidebar?.getCustomName?.({ backend, backendSessionId }) || this.winInfo?.name || t('Session');
+    const winId = this.winInfo?.id;
+    const winBounds = winId ? this.app._snapshotWinBounds?.(this.app.wm.windows.get(winId)) : undefined;
+    this.ws.send({ type: 'kill', sessionId: this.sessionId, backendSessionId });
+    setTimeout(() => {
+      if (winId) this.app.wm?.closeWindow?.(winId);
+      this.app.resumeSession(backendSessionId, cwd, name, {
+        mode: 'chat', backend, backendSessionId,
+        hostId: ids.host || undefined, winBounds, permission: mode,
+      });
+    }, 900); // let the CLI flush its transcript before --resume
+  }
+
   _persistSessionConfig(patch) {
     try {
       const sb = this.app?.sidebar;

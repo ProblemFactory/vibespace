@@ -103,6 +103,52 @@ export function installManageAgents(App, ctx = {}) {
     }, 3000);
   },
 
+  // Watch a "Log in on <host>…" flow land (2.195.0, real report: after an
+  // on-host login the dialog showed another machine + the old identity).
+  // Polls the host's live login state — a read-only ssh probe, NO API calls
+  // (§ban-safety) — until the credential files CHANGE vs the pre-login
+  // snapshot, then brings the Agents surface back on the SAME machine.
+  _watchHostLogin(hostId, hostLabel) {
+    if (!hostId) return;
+    if (this._hostLoginWatch) { clearInterval(this._hostLoginWatch); this._hostLoginWatch = null; }
+    const sig = (r) => (r && !r.error)
+      ? [r.credsMtime || 0, r.codexAuthMtime || 0, r.subscription?.loggedIn ? 1 : 0, r.subscription?.email || '', r.codex?.email || ''].join('|')
+      : null;
+    // Baseline = the FIRST SUCCESSFUL poll (t≈6s), never a pre-click fetch:
+    // (a) a transient probe failure at t0 must not make the first good poll
+    // of the UNCHANGED login read as "updated" (review-confirmed); (b) the
+    // login terminal's claude may refresh its own token at startup, bumping
+    // credsMtime seconds in — baselining after that absorbs it, while a real
+    // OAuth login takes ≥15-30s and still lands after the baseline.
+    let baseSig = null;
+    let tries = 0;
+    this._hostLoginWatch = setInterval(async () => {
+      if (++tries > 50) { clearInterval(this._hostLoginWatch); this._hostLoginWatch = null; return; }
+      let cur = null;
+      try { cur = await fetchJson(`/api/hosts/${encodeURIComponent(hostId)}/accounts-status`); } catch { return; }
+      const s = sig(cur);
+      if (s === null) return;
+      if (baseSig === null) { baseSig = s; return; }
+      if (s === baseSig) return;
+      clearInterval(this._hostLoginWatch); this._hostLoginWatch = null;
+      // Stamp for the roster's identity-freshness note: cached org identity
+      // older than this moment belongs to the PREVIOUS login (local clocks
+      // only — remote mtimes rotate on normal token refresh and skew).
+      (this._hostLoginSeenAt ||= {})[hostId] = Date.now();
+      // Respect a machine the user explicitly switched to while waiting —
+      // yanking the surface back would re-instance the jumps-machines bug.
+      if (this._agentsHostPref && this._agentsHostPref !== hostId) {
+        showToast(t('✓ Login on {host} updated', { host: hostLabel }), { duration: 5000 });
+        return;
+      }
+      showToast(t('✓ Login on {host} updated — reopening Agents there', { host: hostLabel }), { duration: 5000 });
+      this._agentsHostPref = hostId;
+      // Refresh the open Agents surface in place (forcing it onto the login's
+      // machine), else reopen it (the wizard pattern).
+      if (!this._agentsRefreshHook?.(hostId)) this._showAgentsDialog();
+    }, 6000);
+  },
+
   // ── Codex/OpenAI accounts roster (rendered UNDER Codex in Manage Agents).
   // Same unified model as the Anthropic roster: the peer "CLI login" row is
   // the SELECTED machine's own codex login; the named ChatGPT accounts below
@@ -228,6 +274,7 @@ export function installManageAgents(App, ctx = {}) {
           // Runs ON the selected host — lands in ITS ~/.codex, not VibeSpace.
           // --device-auth: a plain `codex login` would open localhost:1455 on
           // the host, unreachable from the user's browser.
+          this._watchHostLogin(selectedHost, hostLabel);
           run('codex login --device-auth');
         } else if (e.target.closest('.acct-def')) {
           try { await fetchJson('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: null, backend: 'codex' }) }); } catch {}
@@ -250,7 +297,7 @@ export function installManageAgents(App, ctx = {}) {
       const doTest = () => {
         if (!a?.loggedIn) { showToast(t('This account isn’t signed in yet — use “Add ChatGPT account…” to finish the login first.'), { type: 'error' }); return; }
         if (keyRow.dataset.blocked) {
-          showToast(t('“{name}” runs on this machine only. For {host}, use “Log in on host…” on the CLI-login row, or turn on Settings → “Ship subscription logins to remote hosts.”', { name: a?.name, host: escHtml(hostLabel) }), { type: 'error', duration: 6000 });
+          showToast(t('“{name}” runs on this machine only. For {host}, use “Log in on host…” on the CLI-login row, or turn on Settings → “Ship subscription logins to remote hosts.”', { name: a?.name, host: escHtml(hostLabel) }) + ' ' + t('Already logged in as this account ON {host}? Then pick “CLI login @ {host}” when switching the session’s billing — that uses the host’s own login.', { host: escHtml(hostLabel) }), { type: 'error', duration: 8000 });
           return;
         }
         done();
@@ -275,7 +322,7 @@ export function installManageAgents(App, ctx = {}) {
         // Default is GLOBAL — starring a "this machine only" row while a host
         // is selected read as "I switched the remote's account" (2.188.0)
         if (keyRow.dataset.blocked && !isDef) {
-          showToast(t('The default is global, and “{name}” can’t run on {host} — new sessions there keep using its own login.', { name: a?.name, host: escHtml(hostLabel) }), { type: 'error', duration: 6000 });
+          showToast(t('The default is global, and “{name}” can’t run on {host} — new sessions there keep using its own login.', { name: a?.name, host: escHtml(hostLabel) }) + ' ' + t('Already logged in as this account ON {host}? Then pick “CLI login @ {host}” when switching the session’s billing — that uses the host’s own login.', { host: escHtml(hostLabel) }), { type: 'error', duration: 8000 });
           return;
         }
         try { await fetchJson('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: isDef ? null : id, backend: 'codex' }) }); } catch {}
@@ -423,7 +470,12 @@ export function installManageAgents(App, ctx = {}) {
     ];
     // Host selector: agent lifecycle can target a remote machine too. Login/
     // update then run in a shell ON that host (ssh -t).
-    let selectedHost = ''; // '' = local
+    // The selection is an APP-LEVEL pref (2.195.0, real report): the dialog is
+    // re-invoked with a fresh closure by rail-panel rebuilds and every
+    // close/reopen — a closure-local '' reset the machine to local mid-flow
+    // (login on Novita-H200 → dialog back on another machine). Validated
+    // against the roster each refresh; falls back to local if the host is gone.
+    let selectedHost = this._agentsHostPref || ''; // '' = local
     const run = (cmd) => {
       done();
       if (selectedHost) this.openShellTerminal(undefined, { hostId: selectedHost, initialCommand: cmd });
@@ -436,6 +488,8 @@ export function installManageAgents(App, ctx = {}) {
     // handlers acting on the wrong host). Each refresh takes a generation
     // ticket; stale runs stop at every await/append point.
     let refreshGen = 0;
+    // Exposed so the host-login watcher can refresh THIS surface in place
+    // (returns false once the body left the document — panel rebuilt/closed).
     const refresh = async () => {
       const myGen = ++refreshGen;
       const stale = () => myGen !== refreshGen;
@@ -456,11 +510,16 @@ export function installManageAgents(App, ctx = {}) {
           const o = document.createElement('option'); o.value = h.id; o.textContent = h.transport === 'dial' ? `${h.name} (${t('device')})` : `${h.name} (${h.user}@${h.host})`;
           hostSel.appendChild(o);
         }
+        // Restored pref no longer in the roster (host removed) → local. Only
+        // when the roster actually LOADED — on a fetch failure keep the pick.
+        if (selectedHost && hd?.hosts && !hd.hosts.some(h => h.id === selectedHost)) {
+          selectedHost = ''; this._agentsHostPref = '';
+        }
         hostTransport = (hd?.hosts || []).find(h => h.id === selectedHost)?.transport || null;
       } catch {}
       if (stale()) return;
       hostSel.value = selectedHost;
-      hostSel.onchange = () => { selectedHost = hostSel.value; refresh(); };
+      hostSel.onchange = () => { this._agentsHostPref = selectedHost = hostSel.value; refresh(); };
       hostRow.append(hostLabel, hostSel);
       body.appendChild(hostRow);
       // Accounts render UNDER their CLI: Anthropic accounts below Claude Code,
@@ -779,6 +838,17 @@ export function installManageAgents(App, ctx = {}) {
       foot.append(note, recheck);
       body.appendChild(foot);
     };
+    // Latest surface wins; the watcher checks isConnected so a stale hook
+    // (panel rebuilt / modal closed) reports false and triggers a reopen.
+    // An explicit hostId forces the closure's machine selection — refresh()
+    // renders the CLOSURE var, so pref alone would leave the surface on
+    // whatever the dropdown last showed (review-confirmed).
+    this._agentsRefreshHook = (hostId) => {
+      if (!body.isConnected) return false;
+      if (hostId !== undefined && hostId !== selectedHost) selectedHost = hostId;
+      refresh();
+      return true;
+    };
     refresh();
   },
 
@@ -844,9 +914,24 @@ export function installManageAgents(App, ctx = {}) {
       // the host's config reports one.
       // identity preference: roles-derived orgEmail baked by the host quota ⟳
       // (live, tied to the actual token) beats the host's config-file email
-      // (goes stale after a /login switch — the 2.114.1 mixup class)
-      const hEmailV = this._hostOwnUsage?.[selectedHost]?.orgEmail || racct?.subscription?.email;
+      // (goes stale after a /login switch — the 2.114.1 mixup class) — BUT
+      // only while the cache POSTDATES the last login the watcher saw land
+      // on this host (2.195.0, real report): after an on-host /login switch
+      // the cached orgEmail is a snapshot of the OLD token and kept winning
+      // for hours. Anchor = the LOCAL _hostLoginSeenAt stamp, deliberately
+      // NOT the creds-file mtime — the CLI rotates .credentials.json on its
+      // own token refresh and remote clocks skew, so an mtime comparison
+      // re-armed the warning forever on any active host (review-confirmed).
+      // Trade: a login done OUTSIDE VibeSpace isn't detected — the ⟳ on the
+      // row is the manual confirm for that case.
+      const hu = this._hostOwnUsage?.[selectedHost];
+      const loginAt = this._hostLoginSeenAt?.[selectedHost] || 0;
+      const cacheFresh = hu?.orgEmail && (hu.fetchedAt || 0) > loginAt;
+      const hEmailV = (cacheFresh ? hu.orgEmail : null) || racct?.subscription?.email;
       const hEmail = hEmailV ? escHtml(hEmailV) + ' · ' : '';
+      const identStale = !!(hu?.orgEmail && loginAt && (hu.fetchedAt || 0) <= loginAt);
+      const staleNote = identStale
+        ? ` <span class="ob-warn" title="${escHtml(t('The login on this machine changed after the last identity/quota refresh — the cached account info may belong to the previous login. Press ⟳ to confirm.'))}">⚠ ${t('login changed — ⟳ to confirm')}</span>` : '';
       // NOT a preference ladder for the helper (2.191.0): the CLI prefers a
       // configured apiKeyHelper OVER OAuth, so when both exist the row must
       // show the helper as the effective billing, not hide it behind
@@ -855,14 +940,15 @@ export function installManageAgents(App, ctx = {}) {
         ? ` <span class="ob-warn" title="${escHtml(t('The CLI prefers a configured apiKeyHelper over the OAuth login — sessions on this machine bill via the helper key. Remove apiKeyHelper from ~/.claude/settings.json to bill the subscription.'))}">⚠ ${t('apiKeyHelper overrides this login')}</span>` : '';
       gIdent = racct && !racct.error
         ? (racct.subscription?.loggedIn
-            ? `${hEmail}<span class="ob-ok">${t('logged in')}</span>${helperNote}`
+            ? `${hEmail}<span class="ob-ok">${t('logged in')}</span>${helperNote}${staleNote}`
             : racct.cliKey?.present
             ? `<span class="ob-ok">${t('logged in')}</span> <span class="ob-ver">${t('API key')} …${escHtml(racct.cliKey.tail || '')}</span>`
             : racct.keyHelper
             ? `<span class="ob-ok">${t('logged in')}</span> <span class="ob-ver">apiKeyHelper</span>`
             : `<span class="ob-warn">${t('not logged in')}</span>`)
         : `<span class="ob-warn">${t('unreachable')}</span>`;
-      gExtraActions = `<button class="agent-btn acct-host-login" title="${t('Opens a terminal ON {host} — this login lands on that machine, not in VibeSpace', { host: escHtml(hostLabel) })}">${t('Log in on {host}…', { host: escHtml(hostLabel) })}</button>`
+      gExtraActions = `<button class="agent-btn acct-host-refresh" title="${t('Confirm identity + quota of {host}’s own login (one on-demand read of its token — never scheduled)', { host: escHtml(hostLabel) })}">⟳</button>`
+        + `<button class="agent-btn acct-host-login" title="${t('Opens a terminal ON {host} — this login lands on that machine, not in VibeSpace', { host: escHtml(hostLabel) })}">${t('Log in on {host}…', { host: escHtml(hostLabel) })}</button>`
         + (racct?.cliKey?.present && !importedTails.has(racct.cliKey.tail)
             ? `<button class="agent-btn acct-host-import" title="${t('Copy the Console key found on {host} (…{tail}) into VibeSpace so any machine can use it', { host: escHtml(hostLabel), tail: escHtml(racct.cliKey.tail) })}">${t('Import its key')}</button>` : '');
     } else {
@@ -980,8 +1066,20 @@ export function installManageAgents(App, ctx = {}) {
       if (id === '__global__') {
         if (e.target.closest('.acct-host-login')) {
           // Runs ON the selected host (run() targets it) — lands in the
-          // host's own ~/.claude, NOT in VibeSpace's store.
+          // host's own ~/.claude, NOT in VibeSpace's store. The watcher
+          // polls the host's login state (read-only ssh probe) and brings
+          // the Agents surface back on THIS machine once the login lands.
+          this._watchHostLogin(selectedHost, hostLabel);
           run('claude /login');
+        } else if (e.target.closest('.acct-host-refresh')) {
+          const btn = e.target.closest('.acct-host-refresh');
+          btn.disabled = true; btn.textContent = '…';
+          try {
+            const r = await fetchJson('/api/usage/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host: selectedHost }) });
+            if (r?.error) showToast(r.error, { type: 'error', duration: 6000 });
+            else if (r?.throttled) showToast(t('Refreshed less than a minute ago — try again shortly'), { type: 'error' });
+          } catch { showToast(t('Refresh failed'), { type: 'error' }); }
+          refresh();
         } else if (e.target.closest('.acct-host-import')) {
           try {
             const r = await fetchJson('/api/accounts/import-cli-host', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hostId: selectedHost }) });
@@ -1006,7 +1104,7 @@ export function installManageAgents(App, ctx = {}) {
         // §ban-safety: a subscription can't run on a remote host by default.
         // Explain instead of firing a create the server will reject.
         if (keyRow.dataset.blocked) {
-          showToast(t('“{name}” runs on this machine only. For {host}, use “Log in on host…” on the CLI-login row, or turn on Settings → “Ship subscription logins to remote hosts.”', { name: a?.name, host: escHtml(hostLabel) }), { type: 'error', duration: 6000 });
+          showToast(t('“{name}” runs on this machine only. For {host}, use “Log in on host…” on the CLI-login row, or turn on Settings → “Ship subscription logins to remote hosts.”', { name: a?.name, host: escHtml(hostLabel) }) + ' ' + t('Already logged in as this account ON {host}? Then pick “CLI login @ {host}” when switching the session’s billing — that uses the host’s own login.', { host: escHtml(hostLabel) }), { type: 'error', duration: 8000 });
           return;
         }
         done();
@@ -1043,7 +1141,7 @@ export function installManageAgents(App, ctx = {}) {
         // while a host is selected read as "I switched the remote's account"
         // when it actually set a default that host can never use (2.188.0)
         if (keyRow.dataset.blocked && !isDef) {
-          showToast(t('The default is global, and “{name}” can’t run on {host} — new sessions there keep using its own login.', { name: a?.name, host: escHtml(hostLabel) }), { type: 'error', duration: 6000 });
+          showToast(t('The default is global, and “{name}” can’t run on {host} — new sessions there keep using its own login.', { name: a?.name, host: escHtml(hostLabel) }) + ' ' + t('Already logged in as this account ON {host}? Then pick “CLI login @ {host}” when switching the session’s billing — that uses the host’s own login.', { host: escHtml(hostLabel) }), { type: 'error', duration: 8000 });
           return;
         }
         try { await fetchJson('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: isDef ? null : id }) }); } catch {}

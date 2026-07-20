@@ -872,6 +872,15 @@ class Sidebar {
       }
     }
 
+    // Rail panel tabs dispatch BEFORE the innerHTML wipe (2.195.0, real
+    // report): _renderRailPanel's renders-once guard checks for the live
+    // panel element — wiping first defeated it on EVERY digest change (a
+    // session appearing/exiting, user-state broadcasts…), so the Agents
+    // panel rebuilt with a fresh closure and its Machine selection reset to
+    // local mid-use (natural: "login on host → dialog jumps machines"). The
+    // panel wipes listEl itself when it genuinely rebuilds (tab change).
+    if (this._activeTab === 'ports' || this._activeTab === 'agents' || this._activeTab === 'plugins') { this._renderRailPanel?.(); return; }
+
     this.listEl.innerHTML = '';
 
     // Remote tab renders machines + storage — it doesn't depend on the session
@@ -879,7 +888,6 @@ class Sidebar {
     // early-return: with ZERO sessions (fresh managed instance) that return
     // fired first and the Remote tab showed the Folders empty state instead
     // of the mounts panel (real report: "remote 功能直接坏了").
-    if (this._activeTab === 'ports' || this._activeTab === 'agents' || this._activeTab === 'plugins') { this._renderRailPanel?.(); return; }
     if (this._activeTab === 'mounts') { this._renderMounts(); return; }
 
     // "New Session" card at the top — NOT on the Tasks tab (it has its own

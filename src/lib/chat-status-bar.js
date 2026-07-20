@@ -221,7 +221,20 @@ export class ChatStatusBar {
 
   setPermMode(mode) {
     this._statusPermMode = mode;
+    // any authoritative set (ack, init sideEffect, attach) resolves the
+    // in-flight optimistic pick — a stale prev otherwise corrupted a later
+    // revert (review-confirmed multi-pick/multi-client scenarios)
+    this._permModePrev = undefined;
     this.render();
+  }
+
+  /** Undo the optimistic dropdown pick after a refused set_permission_mode. */
+  revertPermMode() {
+    if (this._permModePrev !== undefined) {
+      this._statusPermMode = this._permModePrev;
+      this._permModePrev = undefined;
+      this.render();
+    }
   }
 
   setGoal(goal, elapsedMs) {
@@ -754,6 +767,14 @@ export class ChatStatusBar {
       item.onclick = (ev) => {
         ev.stopPropagation();
         dropdown.remove();
+        // Optimistic badge; the pre-switch value is kept so the server's
+        // permission-mode-ack can revert cleanly when the CLI refuses
+        // (bypassPermissions on a non-bypass-capable launch — 2.195.0).
+        // Only the FIRST of rapid re-picks captures prev — a second pick
+        // before the ack must not make "revert" restore the refused mode
+        // (review-confirmed). prev!==undefined ⇔ a pick is in flight; it also
+        // marks THIS client as the initiator for the broadcast ack.
+        if (this._permModePrev === undefined) this._permModePrev = this._statusPermMode;
         this._ws.send({ type: 'set-permission-mode', sessionId: this._sessionId, mode });
         this._statusPermMode = mode;
         this.render();

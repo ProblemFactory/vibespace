@@ -154,6 +154,14 @@ export function installSidebarRail(Sidebar) {
       this.app.ws.onGlobal((msg) => {
         if (!this._railEl) return;
         if (msg.type === 'port-forwards-updated' || msg.type === 'hosts-updated') this._railRefreshBadges();
+        // The renders-once panel guard (2.195.0) means the Ports panel's
+        // machine roster no longer heals via incidental digest rebuilds — a
+        // pair/unpair while it's open must rebuild it explicitly (its live
+        // subscriptions cover forwards/scans, not the roster itself).
+        if (msg.type === 'hosts-updated' && this._activeTab === 'ports') {
+          this.listEl.querySelector('.rail-panel-ports')?.remove();
+          this._renderRailPanel();
+        }
       });
       this._railRefreshBadges();
       // diagnostics: one cheap cached probe per page load, not a poll
