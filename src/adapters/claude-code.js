@@ -132,6 +132,16 @@ class ClaudeCodeAdapter extends BackendAdapter {
     return JSON.stringify(ClaudeCodeAdapter.buildSetPermissionMode(mode));
   }
 
+  // Tracked variant (2.195.0): the CLI ANSWERS set_permission_mode with a real
+  // success/error control_response (verified on 2.1.215 — bypassPermissions is
+  // REFUSED unless the session was launched bypass-capable). The caller records
+  // the request_id so the stdout parser can surface the verdict instead of the
+  // old fire-and-forget silence.
+  buildTrackedSetPermissionMode(mode) {
+    const req = ClaudeCodeAdapter.buildSetPermissionMode(mode);
+    return { line: JSON.stringify(req), requestId: req.request_id };
+  }
+
   // ── Static helpers (kept for backward compat) ──
 
   static buildPermissionResponse(requestId, approved, toolInput, permissionUpdates) {

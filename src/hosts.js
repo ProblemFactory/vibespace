@@ -346,12 +346,20 @@ class HostManager {
       + `K=$(grep -o "primaryApiKey\\":\\"sk-ant-[^\\"]*" "$HOME/.claude.json" 2>/dev/null | head -1); echo "KEY:$K"; `
       + `grep -q "\\"apiKeyHelper\\"" "$HOME/.claude/settings.json" 2>/dev/null && echo "HELPER:yes" || echo "HELPER:no"; `
       + `E=$(grep -o "emailAddress\\":\\"[^\\"]*" "$HOME/.claude.json" 2>/dev/null | head -1); echo "EMAIL:$E"; `
-      + `J=$(grep -o "id_token\\":\\"[^\\"]*" "$HOME/.codex/auth.json" 2>/dev/null | head -1 | cut -d. -f2); echo "CXJWT:$J"`);
+      + `J=$(grep -o "id_token\\":\\"[^\\"]*" "$HOME/.codex/auth.json" 2>/dev/null | head -1 | cut -d. -f2); echo "CXJWT:$J"; `
+      // Credential-file mtimes (GNU stat else BSD) — the freshness anchor for
+      // the 2.114.1 identity class: a cached roles-derived orgEmail OLDER than
+      // the creds file describes the PREVIOUS login and must not be preferred
+      // (real report: on-host /login switch kept showing the old account 2h).
+      + `M=$(stat -c %Y "$HOME/.claude/.credentials.json" 2>/dev/null || stat -f %m "$HOME/.claude/.credentials.json" 2>/dev/null); echo "CMT:$M"; `
+      + `MX=$(stat -c %Y "$HOME/.codex/auth.json" 2>/dev/null || stat -f %m "$HOME/.codex/auth.json" 2>/dev/null); echo "XMT:$MX"`);
     const sub = /SUB:(\d+)/.exec(out);
     const key = /KEY:primaryApiKey":"(sk-ant-[^\s"]+)/.exec(out);
     const helper = /HELPER:yes/.test(out);
     const email = /EMAIL:emailAddress":"([^"\s]+)/.exec(out);
     const cxSeg = /CXJWT:([A-Za-z0-9_-]{8,})/.exec(out);
+    const cmt = /CMT:(\d+)/.exec(out);
+    const xmt = /XMT:(\d+)/.exec(out);
     let codexEmail = null, codexPlan = null;
     if (cxSeg) {
       try {
@@ -365,6 +373,8 @@ class HostManager {
       cliKey: key ? { present: true, tail: key[1].slice(-8) } : { present: false },
       keyHelper: helper,
       codex: { email: codexEmail, plan: codexPlan },
+      credsMtime: cmt ? parseInt(cmt[1]) : null,      // seconds — claude .credentials.json
+      codexAuthMtime: xmt ? parseInt(xmt[1]) : null,  // seconds — codex auth.json
     };
   }
 
