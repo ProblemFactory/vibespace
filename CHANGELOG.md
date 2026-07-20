@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.201.2 — 2026-07-20
+- The API-key removal confirm is translated (the 2.201.1 string missed the dictionaries — straight-vs-curly quote mismatch between the code key and the dict key, the §16 class) and its wording no longer contradicts the account model: it now says the roster deletes the **master** copy held by VibeSpace AND sweeps the per-session **working copies** placed on hosts — "one copy" and "copies on machines" were both true at different layers, which read as a contradiction.
+
 ## 2.201.1 — 2026-07-20
 - **Removing an API-key account warns with the real stakes** (real incident, minutes after 2.201.0: the rescued Console key was removed "from the local view" — but the roster is ONE shared list, so it vanished from every machine's view, and Anthropic's Console never re-shows an existing key's value; recovery relied on a rotating CLI config backup that was hours from expiring). The confirm now states: the stored copy is deleted everywhere, the Console cannot re-show it, save it elsewhere first. Subscription removals keep the milder wording (their creds dirs are re-creatable by logging in again).
 
