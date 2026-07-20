@@ -12,6 +12,23 @@ import { UI_ICONS } from './icons.js';
 import { createBackendIconHtml, getBackendMeta } from './agent-meta.js';
 import { t } from './i18n.js';
 
+// Curated localized display names for harness built-in tools (fallback: raw
+// name — MCP/unknown tools keep their identifier). See ChatRenderers.toolDisplayName.
+export function toolDisplayName(name) {
+  const M = {
+    TaskCreate: t('Create task'), TaskUpdate: t('Update task'), TaskList: t('List tasks'),
+    TaskGet: t('View task'), TaskStop: t('Stop task'), TaskOutput: t('Task output'),
+    TodoWrite: t('Update todos'), WebSearch: t('Web search'), WebFetch: t('Fetch page'),
+    Glob: t('Find files'), Grep: t('Search text'), LS: t('List directory'),
+    NotebookEdit: t('Edit notebook'), AskUserQuestion: t('Ask user'),
+    EnterPlanMode: t('Enter plan mode'), ExitPlanMode: t('Exit plan mode'),
+    KillShell: t('Kill shell'), BashOutput: t('Shell output'),
+    SendMessage: t('Send message'), Skill: t('Skill'),
+  };
+  return M[name] || name;
+}
+
+
 // Shell-command tools get a terminal icon instead of the generic wrench
 // (covers Claude Bash/BashOutput/KillShell and Codex exec_command/write_stdin
 // which normalize to Bash/Terminal).
@@ -129,6 +146,16 @@ class ChatRenderers {
   }
 
   // ── Message renderers ──
+
+  /**
+   * Localized display name for a tool-card header. Curated map for the
+   * harness's built-in tools (user report: TaskCreate/TaskUpdate headers
+   * read as unlocalized chrome); unknown/MCP tools fall back to the raw
+   * name. Bash/Agent/Workflow stay as-is (proper-noun-like, with dedicated
+   * surfaces). The raw name rides the card's title tooltip when it differs.
+   */
+  toolDisplayName(name) { return toolDisplayName(name); }
+
 
   /**
    * Shared compact/bubble wrapper for user, assistant, and tool messages.
@@ -302,7 +329,7 @@ class ChatRenderers {
         const label = `${UI_ICONS.hourglass} ${escHtml(verb)} ${this.clickablePath(fp)}`;
         html = `<div class="chat-tool-pending"><span class="chat-tool-label">${label}</span><span class="chat-spinner"></span></div>`;
       } else {
-        const desc = isAgent && block.input?.description ? `${icon} Agent: ${escHtml(block.input.description)}${agentModelChip(block.input?.model)}` : `${icon} ${escHtml(block.toolName)}`;
+        const desc = isAgent && block.input?.description ? `${icon} Agent: ${escHtml(block.input.description)}${agentModelChip(block.input?.model)}` : `${icon} ${escHtml(toolDisplayName(block.toolName))}`;
         const inputStr = stripAnsi(typeof block.input === 'string' ? block.input : JSON.stringify(block.input, null, 2));
         const statusHtml = isPending
           ? `<div class="chat-tool-output-pending"><span class="chat-spinner"></span> ${t('running...')}</div>`
@@ -343,7 +370,7 @@ class ChatRenderers {
     const inputStr = stripAnsi(typeof block.input === 'string' ? block.input : JSON.stringify(block.input, null, 2));
 
     if (block.status === 'error') {
-      return `<div class="chat-tool-use"><span class="chat-tool-label">${toolCardIcon(block.toolName)} ${escHtml(block.toolName)} ${this.clickablePath(fp)}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff" open><summary class="chat-diff-summary chat-tool-error-label">\u2717 ${t('Error')}</summary><pre class="chat-tool-error-text">${this.linkifyText(resultText)}</pre></details></div>`;
+      return `<div class="chat-tool-use"><span class="chat-tool-label" title="${escHtml(block.toolName)}">${toolCardIcon(block.toolName)} ${escHtml(toolDisplayName(block.toolName))} ${this.clickablePath(fp)}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff" open><summary class="chat-diff-summary chat-tool-error-label">\u2717 ${t('Error')}</summary><pre class="chat-tool-error-text">${this.linkifyText(resultText)}</pre></details></div>`;
     }
     if (block.toolName === 'Patch') {
       const patchHtml = this.renderPatchDiff(block);
@@ -397,7 +424,7 @@ class ChatRenderers {
     }
     // Generic tool
     const firstLine = resultText.split('\n')[0].substring(0, 120) || t('(empty)');
-    return `<div class="chat-tool-use"><span class="chat-tool-label">${toolCardIcon(block.toolName)} ${escHtml(block.toolName)}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLine)}</summary><pre>${this.linkifyText(resultText)}</pre></details></div>`;
+    return `<div class="chat-tool-use"><span class="chat-tool-label" title="${escHtml(block.toolName)}">${toolCardIcon(block.toolName)} ${escHtml(toolDisplayName(block.toolName))}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLine)}</summary><pre>${this.linkifyText(resultText)}</pre></details></div>`;
   }
 
   /**

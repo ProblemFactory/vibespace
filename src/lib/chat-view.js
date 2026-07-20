@@ -4,11 +4,15 @@ import { metric, track } from './telemetry-client.js';
 import { stripAnsi } from './highlight.js';
 import { ChatMinimap } from './chat-minimap.js';
 import { ChatSearch } from './chat-search.js';
-import { ChatRenderers } from './chat-renderers.js';
+import { ChatRenderers, toolDisplayName } from './chat-renderers.js';
 import { ChatInput } from './chat-input.js';
 import { ChatStatusBar } from './chat-status-bar.js';
 import { UI_ICONS } from './icons.js';
 import { t } from './i18n.js';
+
+// Agent-memory file paths (~/.claude/projects/<proj>/memory/ or ~/.claude/memory/)
+// — their reads/writes are the 'memory' collapse kind and label as memory/<name>.
+const MEMORY_PATH_RE = /\/\.claude\/(?:projects\/[^/]+\/)?memory\//;
 
 /**
  * ChatView — renders a chat interface for stream-json mode sessions.
@@ -1500,7 +1504,7 @@ class ChatView {
       const c = msg.message?.content || msg.content;
       if (Array.isArray(c)) {
         const last = c[c.length - 1];
-        if (last?.type === 'tool_use' || last?.type === 'tool_call') activity = t('running {tool}', { tool: last.name || last.toolName || t('tool') });
+        if (last?.type === 'tool_use' || last?.type === 'tool_call') activity = t('running {tool}', { tool: toolDisplayName(last.name || last.toolName) || t('tool') });
         else if (last?.type === 'thinking') activity = t('thinking');
         else if (last?.type === 'text') activity = t('responding');
       }
@@ -2115,15 +2119,19 @@ class ChatView {
       const hideEmptyThink = this.app?.settings?.get('chat.hideEmptyThinking') !== false;
       const hooksHidden = document.body.classList.contains('hide-hook-cards');
       const kindsArr = this.app?.settings?.get('chat.collapseKinds');
-      const kinds = new Set(Array.isArray(kindsArr) ? kindsArr : ['thinking', 'bash', 'read']);
+      const kinds = new Set(Array.isArray(kindsArr) ? kindsArr : ['thinking', 'bash', 'read', 'memory']);
       // per-member classification (also used by flush() for the summary)
       const memberKind = (el) => {
         const m = el._rawMsg;
         if (el.classList.contains('chat-msg-tool-result')) {
           const tn = m?.content?.[0]?.toolName;
           if (tn === 'Bash') return 'bash';
-          if (tn === 'Read') return 'read';
-          if (tn === 'Write' || tn === 'Edit' || tn === 'Patch') return 'write';
+          if (tn === 'Read' || tn === 'Write' || tn === 'Edit' || tn === 'Patch') {
+            // agent-memory file ops are their OWN kind (2.213.1, user ask:
+            // each is a distinct user concern) — housekeeping vs project work
+            if (MEMORY_PATH_RE.test(m?.content?.[0]?.input?.file_path || '')) return 'memory';
+            return tn === 'Read' ? 'read' : 'write';
+          }
           return null;
         }
         if (m?.role === 'assistant' && Array.isArray(m.content) && m.content.length
@@ -2153,7 +2161,7 @@ class ChatView {
         const fp = el._rawMsg?.content?.[0]?.input?.file_path || '';
         if (!fp) return null;
         const base = fp.split('/').pop();
-        return /\/\.claude\/(?:projects\/[^/]+\/)?memory\//.test(fp) ? 'memory/' + base : base;
+        return MEMORY_PATH_RE.test(fp) ? 'memory/' + base : base;
       };
       const kids = [...list.children];
       let run = [];
@@ -2170,13 +2178,14 @@ class ChatView {
           const header = document.createElement('div');
           header.className = 'chat-run-header';
           // per-kind counts (only non-zero kinds render)
-          const byKind = { thinking: 0, bash: 0, read: 0, write: 0 };
+          const byKind = { thinking: 0, bash: 0, read: 0, write: 0, memory: 0 };
           for (const el of members) { const k = memberKind(el); if (k) byKind[k]++; }
           const parts = [];
           if (byKind.thinking) parts.push(t('{n} thinking', { n: byKind.thinking }));
           if (byKind.bash) parts.push(t('{n} Bash', { n: byKind.bash }));
           if (byKind.read) parts.push(t('{n} reads', { n: byKind.read }));
           if (byKind.write) parts.push(t('{n} writes', { n: byKind.write }));
+          if (byKind.memory) parts.push(t('{n} memory', { n: byKind.memory }));
           let label = parts.join(' · ');
           // touched files (user ask: don't lose the paths): writes first with
           // a ✎ mark, then reads; deduped display names, capped at 4 + "+N".
@@ -2186,11 +2195,14 @@ class ChatView {
           for (const wantWrite of [true, false]) {
             for (const el of members) {
               const k = memberKind(el);
-              if ((k === 'write') !== wantWrite || (k !== 'write' && k !== 'read')) continue;
+              if (k !== 'read' && k !== 'write' && k !== 'memory') continue;
+              const tn = el._rawMsg?.content?.[0]?.toolName;
+              const isW = tn === 'Write' || tn === 'Edit' || tn === 'Patch';
+              if (isW !== wantWrite) continue;
               const fl = fileLabelOf(el);
               if (!fl || seenF.has(fl)) continue;
               seenF.add(fl);
-              files.push(k === 'write' ? '✎ ' + fl : fl);
+              files.push(isW ? '✎ ' + fl : fl);
             }
           }
           if (files.length) {
