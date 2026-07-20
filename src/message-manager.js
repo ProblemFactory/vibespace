@@ -449,7 +449,6 @@ class MessageManager {
       const hasText = textBlocks.some(b => (b.type === 'text' && b.text?.trim()) || b.type === 'image');
       if (!hasText && toolResults.length > 0) return;
 
-      this.turnIndex++;
       const normalizedContent = textBlocks.map(b => {
         if (b.type === 'text') return { type: 'text', text: b.text || '' };
         if (b.type === 'image') return { type: 'image', mediaType: b.source?.media_type || 'image/png', data: b.source?.data || '' };
@@ -457,6 +456,32 @@ class MessageManager {
       }).filter(Boolean);
 
       if (normalizedContent.length === 0) return;
+      // CLI-injected page images (Read on a PDF): the CLI ships the extracted
+      // pages as image-only user records — LIVE as one isSynthetic record PER
+      // PAGE, in the JSONL as one isMeta record with N image blocks. They are
+      // model context, not the user speaking: unflagged, the live burst
+      // rendered one bare "notification" stub per page (real report: a
+      // 10-page Read → 10 empty cards) and the history rebuild a giant "You"
+      // bubble. Coalesce consecutive page events into ONE imageAttachment
+      // message (no turnIndex bump — not a conversation turn) so both paths
+      // converge on a single compact card.
+      const isPageImages = !raw.promptSource && !raw._fromWebui && (raw.isSynthetic || raw.isMeta)
+        && normalizedContent.every(b => b.type === 'image');
+      if (isPageImages) {
+        const last = this.messages[this.messages.length - 1];
+        if (last && last.imageAttachment) {
+          last.content = last.content.concat(normalizedContent);
+          if (emit) this._emit({ op: 'edit', id: last.id, fields: { content: last.content, status: 'complete' } });
+          return;
+        }
+        const att = this._create({ role: 'user', status: 'complete', content: normalizedContent, turnIndex: this.turnIndex });
+        att.imageAttachment = true;
+        att.synthetic = true;
+        if (emit) this._emit({ op: 'create', message: att });
+        return;
+      }
+
+      this.turnIndex++;
       // Use original msgId if present (for dedup with client-side local preview)
       const msg = this._create({ role: 'user', status: 'complete', content: normalizedContent, turnIndex: this.turnIndex });
       // Provenance for the notification classifier: promptSource = the CLI's

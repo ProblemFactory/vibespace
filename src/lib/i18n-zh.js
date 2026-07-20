@@ -784,6 +784,7 @@ export default {
   "not installed": "未安装",
   "not logged in": "未登录",
   "notification": "通知",
+  "Attached pages ({n})": "文档页面图（{n}）",
   "off by default; encrypted with a passphrase. The file lets anyone who has it (and the passphrase) log in / use your agent accounts. Treat it like a key.": "默认关闭；用口令加密。拥有该文件（及口令）的任何人都可登录 / 使用你的 agent 账号。请像对待密钥一样对待它。",
   "optional": "可选",
   "or browse files first": "或先浏览文件",

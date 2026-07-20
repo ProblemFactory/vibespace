@@ -148,6 +148,20 @@ class ChatRenderers {
     const content = msg.content;
     if (!content?.length) return null;
 
+    // CLI-injected page images (a Read on a PDF ships the extracted pages
+    // into model context as image-only synthetic user records — the
+    // normalizer coalesces the per-page burst into one flagged message).
+    // One compact collapsible card; the pages render on expand.
+    if (msg.imageAttachment) {
+      const imgs = content.filter(b => b.type === 'image');
+      const el = document.createElement('div');
+      el.className = 'chat-msg chat-msg-system chat-system-notification chat-attach-pages';
+      el._rawMsg = msg;
+      const inner = imgs.map(b => `<img class="chat-img" src="data:${escHtml(b.mediaType || 'image/png')};base64,${escHtml(b.data)}" alt="page" loading="lazy">`).join('');
+      el.innerHTML = `<details class="chat-hook-details"><summary class="chat-hook-summary">${UI_ICONS.memo} ${escHtml(t('Attached pages ({n})', { n: imgs.length }))}</summary><div class="chat-attach-pages-body">${inner}</div></details>`;
+      return el;
+    }
+
     // Detect system notifications: command tags, meta directives, reminders
     const rawText = content.map(b => b.text || '').join('');
     // Provenance beats text-shape: a HUMAN-submitted prompt (msg.typed, from

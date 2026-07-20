@@ -1172,8 +1172,9 @@ class ChatView {
     if (!this._loadingHistory) {
       this._total++;
       this._windowEnd = this._total;
-      // Update minimap with new user turns
-      if (msg.role === 'user') {
+      // Update minimap with new user turns (CLI-injected page-image
+      // attachments share the previous turnIndex — not a turn, no marker)
+      if (msg.role === 'user' && !msg.imageAttachment) {
         const preview = (msg.content || []).map(b => b.text || '').join('').trim();
         const turn = { turnIndex: msg.turnIndex, startIdx: this._total - 1, ts: msg.ts, role: 'user' };
         if (preview) {
