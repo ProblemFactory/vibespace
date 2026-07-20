@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.210.0 — 2026-07-20
+- **`vibespace-task progress` success output now reminds the agent to say it in chat** (the vibespace-ask 2.111.21 pattern): real agents logged a deliverable (a URL, a path, a result) into the activity log and ended the turn without putting it in the reply — the log is agent-facing and invisible in the user's chat flow. The reminder states that anything the USER needs must also appear in the chat reply.
+- **Stop nudge can now fire on EVERY stop**: `agents.stopNudgeStaleMinutes` / `stopNudgeCooldownMinutes` accept an explicit 0 (0 stale = board always considered stale; 0 cooldown = no per-session rate limit). With 0/0 the bookkeeping nudge fires after every turn — still capped at ONE mini-turn per user turn by the existing loop guards (claude stop_hook_active, codex nudgeTurnActive). Defaults unchanged (10/30).
+
 ## 2.209.0 — 2026-07-20
 **Stage pile-at-slot rootfix** (walter's 超级重叠: Stage → normal desktop → Stage stacked every stage-born session at the hero slot, one more per round trip; reproduced 16/16 in a new CDP smoke before fixing, then all green):
 - **enter() re-shows only the live workspace** (the remembered hero + aux bound to it). The old blanket re-show of every `_hiddenByStage` window resurrected every slot-parked ex-hero — sessions materialized while staged get parked hidden AT SLOT GEOMETRY by `_deactivateHero` and accumulate for the whole staged lifetime.

@@ -125,6 +125,11 @@ async function main() {
     if (!arg) { console.error('vibespace-task: progress needs a summary, e.g. vibespace-task progress "fixed the parser" --detail "root cause was ..."'); process.exit(1); }
     await call('POST', '/api/agent/task-progress', { note: arg, ...(detail ? { detail } : {}) });
     console.log('progress recorded' + (detail ? ' (with detail)' : ''));
+    // Same class as vibespace-ask's mirror reminder (2.111.21): real agents
+    // logged a deliverable (URL, path, result) here and ended the turn with a
+    // reply that never contained it — the activity log is invisible to the
+    // user in the chat flow.
+    console.log('REMINDER: the activity log is for OTHER AGENTS — anything the USER needs from this work (URLs, file paths, results, conclusions) must ALSO appear in your CHAT REPLY. Do not end the turn with this log as the only copy.');
   } else if (cmd === 'backlog') {
     if (arg) {
       // show ONE item in full (any status) — the "user handed me an id" path
