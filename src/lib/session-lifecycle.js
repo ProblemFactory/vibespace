@@ -93,6 +93,27 @@ export function installSessionLifecycle(App, ctx = {}) {
         }
         const text = msg.message || t('Session create failed');
         showToast(text, { type: 'error' });
+        // Failed RESUME rescue (2.219.0, real window-loss class): resumeSession
+        // CLOSES the old read-only window before creating, so a failed create
+        // used to leave only a spec-less "Create failed" shell — which
+        // EVAPORATES on the next refresh (captureState skips windows without
+        // an openSpec-recreatable identity), silently losing the window from
+        // the layout (lengyue lost "Mega Fish 训练" this way). Flip the shell
+        // into the view-only pipeline with a REAL viewSession openSpec so the
+        // window shows history + Resume and persists/syncs like any other.
+        if (sessionMode === 'chat' && resumeId && !/^sess-\d/.test(resumeId) && backend === 'claude') {
+          winInfo._openSpec = {
+            action: 'viewSession', sessionId: resumeId, backend,
+            backendSessionId: resumeId, sessionKey: `${backend}:${resumeId}`,
+            hostId: hostId || undefined, cwd: cwd || '', name: sessionName || '',
+          };
+          this.wm.setTitle(winInfo.id, `${sessionName || resumeId.slice(0, 8)} — ${cwd || ''}`);
+          this._viewIntoWindow(winInfo, { backend, backendSessionId: resumeId, cwd, name: sessionName, hostId });
+          this.sessions.get(winInfo.id)?._renderers?.appendSystem(text);
+          this.layoutManager?.scheduleAutoSave?.();
+          try { track('event', 'create-failed-rescued'); } catch { }
+          return;
+        }
         const err = document.createElement('div');
         err.className = 'empty-hint';
         err.style.cssText = 'padding:24px;white-space:pre-wrap;user-select:text';

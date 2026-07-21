@@ -407,6 +407,9 @@ function registerWsHandler(wss, ctx) {
             // the stdout parser to adopt it (so the fork becomes its own session
             // instead of shadowing the parent). One-shot, cleared on adoption.
             _forkRequested: backend === 'claude' && !!data.fork,
+            // resume spawn marker (2.219.0): lets the parser adopt claude's
+            // IMPLICIT fork (locked-conversation resume mints a new id)
+            _resumeSpawn: backend === 'claude' && !!(data.resume && data.resumeId),
             sockName, socketPath, buffer: '',
           };
           if (codexThreadBaseline) session._codexThreadBaseline = codexThreadBaseline;
@@ -1134,6 +1137,12 @@ done`;
             keeperSid: session.keeperSid || null,
             dialDeviceId: session._dialDeviceId || null,
             bridgePort: session._bridgePort || null,
+            // transport mechanism + fork intent survive restarts (2.219.0
+            // audit: a restored agentd session's terminate took the keeper
+            // branch = silent no-op, remote claude ran on; a restored fork's
+            // new id could never be adopted)
+            agentdSession: !!session._agentdSession,
+            forkRequested: !!session._forkRequested,
             backend: session.backend,
             backendSessionId: session.backendSessionId,
             claudeSessionId: session.claudeSessionId,
@@ -1457,7 +1466,11 @@ done`;
               // replace (both backends natively replace an active goal:
               // Claude /goal swaps the Stop-hook condition; Codex
               // thread/goal/set updates/replaces, steering a running turn)
-              if (session._goal && session._goal !== goalText) session._prevGoal = session._goal;
+              if (session._goal && session._goal !== goalText) {
+                session._prevGoal = session._goal;
+                // /goal resume survives restarts (2.219.0): stash in session meta
+                try { if (session.sockName) writeSessionMeta(session.sockName, { ...readSessionMeta(session.sockName), prevGoal: session._prevGoal }); } catch {}
+              }
               if (session.pty) session.pty.write(JSON.stringify({ type: 'set-goal', goal: goalText }) + '\n');
               session._goal = goalText;
               session._goalStatus = goalText ? 'active' : null;
@@ -1828,9 +1841,15 @@ done`;
                     setTimeout(() => { try { hosts.invalidateDiscovery(session.host); } catch {} }, 2000);
                   }
                 } else if (session.mode === 'chat') {
-                  execFile('ssh', [...hosts.sshArgs(h), '--', `${session._agentdSession
-                    ? `M="$HOME/.vibespace/agentd/state/sessions/${data.sessionId}.json"; P=$(grep -o '"childPid":[0-9]*' "$M" 2>/dev/null | cut -d: -f2); [ -n "$P" ] && kill $P 2>/dev/null; sleep 2; [ -n "$P" ] && kill -9 $P 2>/dev/null`
-                    : `node "$HOME/.vibespace/bin/vibespace-remote-keeper" stop ${session.keeperSid || data.sessionId}`} 2>/dev/null || true; rm -f "$HOME/.vibespace/bin/.tok-${data.sessionId}"`],
+                  // Mechanism-agnostic teardown (2.219.0): _agentdSession used
+                  // to pick ONE branch, but the flag wasn't restored across
+                  // restarts — a restored agentd session's keeper-stop was a
+                  // silent no-op and the remote claude ran on (double-writer
+                  // class). Both shapes no-op harmlessly when inapplicable.
+                  execFile('ssh', [...hosts.sshArgs(h), '--',
+                    `M="$HOME/.vibespace/agentd/state/sessions/${data.sessionId}.json"; P=$(grep -o '"childPid":[0-9]*' "$M" 2>/dev/null | cut -d: -f2); [ -n "$P" ] && kill $P 2>/dev/null; `
+                    + `node "$HOME/.vibespace/bin/vibespace-remote-keeper" stop ${session.keeperSid || data.sessionId} 2>/dev/null; `
+                    + `sleep 2; [ -n "$P" ] && kill -9 $P 2>/dev/null; true; rm -f "$HOME/.vibespace/bin/.tok-${data.sessionId}"`],
                     { timeout: 15000 }, () => { try { hosts.invalidateDiscovery(session.host); } catch {} });
                 } else {
                   setTimeout(() => { try { hosts.invalidateDiscovery(session.host); } catch {} }, 2000);
