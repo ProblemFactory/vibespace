@@ -610,9 +610,26 @@ class StateSync {
   _applySnapshot(storeName, data, version) {
     const s = this.stores[storeName];
     if (!s) return;
-    const oldKeys = new Set(Object.keys(s.data));
+    const oldData = s.data;
+    const oldKeys = new Set(Object.keys(oldData));
+    // Server ROLLBACK defense: a snapshot whose version is BELOW what this
+    // client already applied means the store was reset/rolled back (crash-class
+    // restart lost the debounced save). Local data is the newer truth on a
+    // single-user instance — adopt the server's version base, then re-push
+    // every differing key so both sides converge forward instead of silently
+    // diverging (e.g. a draft typed in the ~2s before an OOM kill).
+    const rolledBack = (version || 0) < s.version;
     s.data = data || {};
     s.version = version || 0;
+    if (rolledBack) {
+      for (const key of new Set([...oldKeys, ...Object.keys(s.data)])) {
+        const localVal = oldData[key] ?? '';
+        const serverVal = s.data[key] ?? '';
+        // set() mutates s.data + sends state-set, so the notify loop below
+        // already sees the restored values.
+        if (JSON.stringify(localVal) !== JSON.stringify(serverVal)) this.set(storeName, key, localVal);
+      }
+    }
     // Notify for all changed keys
     for (const key of new Set([...oldKeys, ...Object.keys(s.data)])) {
       const newVal = s.data[key] || '';

@@ -46,7 +46,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     const reqId = `req-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     const _createT0 = performance.now();
 
-    this.ws.send({
+    const createMsg = {
       type:'create', backend, hostId: hostId||undefined, keeperSid: keeperSid||undefined, mode: sessionMode, cwd: cwd||undefined, sessionName: name||undefined, model: sessionModel||undefined,
       permissionMode: sessionPermission||undefined, effort: sessionEffort||undefined, extraArgs: sessionExtraArgs||undefined,
       tuiRenderer: (backend === 'claude' && sessionMode === 'terminal' ? this.settings.get('claude.tuiRenderer') : '') || undefined,
@@ -60,25 +60,22 @@ export function installSessionLifecycle(App, ctx = {}) {
       resume: !!resumeId, resumeId: resumeId||undefined, fork: fork||undefined, cols:120, rows:30, reqId,
       taskId: taskId || undefined, // spawns VIBESPACE_TASK_ID into the agent env
       accountId: accountId || undefined, // billing identity: undefined=server default, 'subscription', or acct-… key id
-    });
+    };
 
-    // Reply watchdog (fleet-incident retrospective): a create swallowed by a
-    // zombie ws left a blank window with ZERO trace anywhere. Surface + record.
-    const createWd = setTimeout(() => {
-      try { track('event', 'ws-reply-timeout:create', backend + ':' + sessionMode); } catch { }
-      showToast(t('Creating the session is taking unusually long — check the connection or reload the tab'), { type: 'error' });
-    }, 15000);
-
-    const handler = (msg) => {
-      // Window closed before the server answered — clean up the handler so it
-      // doesn't hold winInfo forever (and can't bind a session to a dead window)
-      if (!this.wm.windows.has(winInfo.id)) { clearTimeout(createWd); this.ws.offGlobal(handler); return; }
+    // Request/reply via ws.request (2026-07-03 review structural fix):
+    // self-cleanup on window close + the reply watchdog (a create swallowed by
+    // a zombie ws left a blank window with ZERO trace anywhere) + reconnect
+    // re-send. Re-send is gated to CLAUDE RESUMES only: if the create DID
+    // reach the old server, its dtach session survives the restart and the
+    // re-sent resume trips the resume-already-live guard (2.179.0), which the
+    // error branch turns into an attach — no double-writer. Fresh creates and
+    // forks mint NEW ids with no such guard, so re-sending them risks a
+    // silent double-spawn; codex resumes fork a thread per resume (same risk).
+    this.ws.request(createMsg, (msg) => {
       // Server refused the create (e.g. remote subscription-shipping policy):
       // surface it — without this the window stayed BLANK forever with no
       // feedback and no openSpec (found reproducing the remote-blank report).
       if (msg.type === 'error' && msg.reqId === reqId) {
-        clearTimeout(createWd);
-        this.ws.offGlobal(handler);
         // Resume guard (2.179.0): the conversation is ALREADY live — attach
         // that session instead of leaving a dead "create failed" window (a
         // second --resume would double-write the same claude id).
@@ -89,7 +86,7 @@ export function installSessionLifecycle(App, ctx = {}) {
             mode: msg.existingMode || sessionMode, backend,
             backendSessionId: resumeId || undefined, hostId: hostId || undefined,
           });
-          return;
+          return true;
         }
         const text = msg.message || t('Session create failed');
         showToast(text, { type: 'error' });
@@ -112,7 +109,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           this.sessions.get(winInfo.id)?._renderers?.appendSystem(text);
           this.layoutManager?.scheduleAutoSave?.();
           try { track('event', 'create-failed-rescued'); } catch { }
-          return;
+          return true;
         }
         const err = document.createElement('div');
         err.className = 'empty-hint';
@@ -127,10 +124,9 @@ export function installSessionLifecycle(App, ctx = {}) {
         winInfo.content.appendChild(err);
         const label = sessionName || (resumeId ? resumeId.slice(0, 8) : '');
         this.wm.setTitle(winInfo.id, label ? `${t('Create failed')} — ${label}` : t('Create failed'));
-        return;
+        return true;
       }
       if (msg.type === 'created' && msg.reqId === reqId) {
-        clearTimeout(createWd);
         metric('session-create-roundtrip-ms', performance.now() - _createT0);
         // Set openSpec now that we have the server session ID (for cross-client sync)
         winInfo._openSpec = {
@@ -230,10 +226,18 @@ export function installSessionLifecycle(App, ctx = {}) {
           term.focus();
         }
         this.wm.setTitle(winInfo.id, `${sessionName} — ${msg.cwd||cwd||'~'}`);
-        this.ws.offGlobal(handler);
+        return true;
       }
-    };
-    this.ws.onGlobal(handler);
+      return false;
+    }, {
+      isAlive: () => this.wm.windows.has(winInfo.id),
+      timeoutMs: 15000,
+      onTimeout: () => {
+        try { track('event', 'ws-reply-timeout:create', backend + ':' + sessionMode); } catch { }
+        showToast(t('Creating the session is taking unusually long — check the connection or reload the tab'), { type: 'error' });
+      },
+      resend: backend === 'claude' && !!resumeId && !fork,
+    });
   },
 
   _wireTerminalWindow(winInfo, term, sessionId, { killOnClose = true, ephemeral = false, backend = 'claude' } = {}) {
@@ -338,23 +342,17 @@ export function installSessionLifecycle(App, ctx = {}) {
       titleMeta: this._buildTitleMeta(openSpec),
     });
 
-    this.ws.send({ type: 'attach', sessionId: serverId });
-
-    // Reply watchdog (fleet-incident retrospective): a lost attach — zombie
-    // ws, stale tab, dropped reply — used to leave the window silently blank
-    // forever with zero telemetry. Surface it + record it.
-    const wd = setTimeout(() => {
-      try { track('event', 'ws-reply-timeout:attach', serverId); } catch { }
-      showToast(t('Attaching "{name}" is taking unusually long — check the connection or reload the tab', { name: name || serverId }), { type: 'error' });
-    }, 12000);
-
-    const handler = (msg) => {
-      // Window closed before the server answered (esp. slow huge-JSONL attaches):
-      // drop the handler so it can't build a ChatView into a dead winInfo and
-      // leave a phantom sessions entry that makes the session un-reopenable.
-      if (!this.wm.windows.has(winInfo.id)) { clearTimeout(wd); this.ws.offGlobal(handler); return; }
+    // Request/reply via ws.request: self-cleanup on window close (esp. slow
+    // huge-JSONL attaches — a leaked handler could build a ChatView into a
+    // dead winInfo and leave a phantom sessions entry), the reply watchdog
+    // (a lost attach used to leave the window silently blank forever with
+    // zero telemetry), and reconnect re-send: attach is idempotent — the
+    // restarted server either re-adopted the dtach session (attached) or
+    // answers error → the view-only rescue below; without the re-send a
+    // window awaiting its FIRST 'attached' had no session object, so
+    // app.js's reconnect loop never covered it (blank-shell class).
+    this.ws.request({ type: 'attach', sessionId: serverId }, (msg) => {
       if ((msg.type === 'error') && msg.sessionId === serverId) {
-        clearTimeout(wd); this.ws.offGlobal(handler);
         // Dead session (stale serverId from a saved layout — server restart
         // after an OOM kill / pod recreation loses every dtach session): no
         // ChatView exists yet at this point, so ChatView's own error path
@@ -366,10 +364,9 @@ export function installSessionLifecycle(App, ctx = {}) {
           this._viewIntoWindow(winInfo, { backend, backendSessionId: bsid, cwd, name, hostId: openSpec.hostId });
           try { track('event', 'chat-attach-rescued'); } catch { }
         }
-        return;
+        return true;
       }
       if (msg.type === 'attached' && msg.sessionId === serverId) {
-        clearTimeout(wd);
         if (msg.mode === 'chat' || isChat) {
           const chatView = new ChatView(winInfo, this.ws, serverId, this);
           this.sessions.set(winInfo.id, chatView);
@@ -400,10 +397,18 @@ export function installSessionLifecycle(App, ctx = {}) {
           this._wireTerminalWindow(winInfo, term, serverId, { backend });
           term.focus();
         }
-        this.ws.offGlobal(handler);
+        return true;
       }
-    };
-    this.ws.onGlobal(handler);
+      return false;
+    }, {
+      isAlive: () => this.wm.windows.has(winInfo.id),
+      timeoutMs: 12000,
+      onTimeout: () => {
+        try { track('event', 'ws-reply-timeout:attach', serverId); } catch { }
+        showToast(t('Attaching "{name}" is taking unusually long — check the connection or reload the tab', { name: name || serverId }), { type: 'error' });
+      },
+      resend: true,
+    });
     return winInfo;
   },
 
@@ -425,10 +430,12 @@ export function installSessionLifecycle(App, ctx = {}) {
     const winInfo = this.wm.createWindow({ title: `[tmux] ${name}`, type: 'terminal', openSpec: { action: 'attachTmuxSession', tmuxTarget, name, cwd } });
     const reqId = `req-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
-    this.ws.send({ type: 'tmux-attach', tmuxTarget, name, cwd, cols: 120, rows: 30, reqId });
-
-    const handler = (msg) => {
-      if (!this.wm.windows.has(winInfo.id)) { this.ws.offGlobal(handler); return; }
+    // ws.request: self-cleanup on window close + a reply watchdog (this path
+    // had NO watchdog at all — a lost tmux-attach failed with zero feedback).
+    // NOT re-sent on reconnect: tmux-attach mints a new server-side view pty
+    // per request, so a re-send after a zombie-ws reconnect (where the first
+    // request DID land) would leak a clientless duplicate view.
+    this.ws.request({ type: 'tmux-attach', tmuxTarget, name, cwd, cols: 120, rows: 30, reqId }, (msg) => {
       if (msg.type === 'created' && msg.isTmuxView && msg.reqId === reqId) {
         const term = new TerminalSession(winInfo, this.ws, msg.sessionId, this.themeManager, null, {}, this.settings);
         term._tmuxTarget = tmuxTarget;
@@ -436,10 +443,17 @@ export function installSessionLifecycle(App, ctx = {}) {
         // Closing window only detaches the tmux view — does NOT kill the session
         this._wireTerminalWindow(winInfo, term, msg.sessionId, { killOnClose: false });
         term.focus();
-        this.ws.offGlobal(handler);
+        return true;
       }
-    };
-    this.ws.onGlobal(handler);
+      return false;
+    }, {
+      isAlive: () => this.wm.windows.has(winInfo.id),
+      timeoutMs: 12000,
+      onTimeout: () => {
+        try { track('event', 'ws-reply-timeout:tmux-attach', tmuxTarget); } catch { }
+        showToast(t('Attaching "{name}" is taking unusually long — check the connection or reload the tab', { name: name || tmuxTarget }), { type: 'error' });
+      },
+    });
   },
 
   resumeSession(sessionId, cwd, sessionName, { mode, model, effort, permission, accountId, syncId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, hostId, keeperSid, winBounds } = {}) {

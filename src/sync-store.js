@@ -88,6 +88,12 @@ class SyncStore {
   getSnapshot() { return { version: this.version, data: { ...this.data } }; }
 
   getOpsSince(sinceVersion) {
+    // Client claims a FUTURE version ⇒ this store was rolled back (SIGKILL/OOM
+    // lost the 2s-debounced save; only SIGINT/SIGTERM flush). The old empty-ops
+    // answer left that client silently believing it was in sync while holding
+    // data the server lost — hand it the full snapshot instead; the client's
+    // rollback branch (StateSync._applySnapshot) re-pushes its newer keys.
+    if (sinceVersion > this.version) return { full: this.data, version: this.version };
     if (sinceVersion >= this.version) return { ops: [], version: this.version };
     const idx = this.ops.findIndex(o => o.version > sinceVersion);
     if (idx >= 0 && this.ops[idx].version === sinceVersion + 1) {

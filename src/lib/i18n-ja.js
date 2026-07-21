@@ -393,6 +393,7 @@ export default {
   "Details…": "詳細…",
   "Disconnected from server": "サーバーから切断されました",
   "Disconnected — reconnecting… your draft is kept": "切断されました——再接続中… 下書きは保持されます",
+  "Connection lost — your message may not have been sent; the text was restored to the input": "接続が切断されました——メッセージが送信されていない可能性があります。テキストを入力欄に復元しました",
   "Dock to top": "上部に固定",
   "Double-click to rename": "ダブルクリックで名前変更",
   "Drop to upload to the working directory": "ドロップで作業ディレクトリにアップロード",

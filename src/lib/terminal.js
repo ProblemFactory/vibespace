@@ -339,6 +339,28 @@ class TerminalSession {
         this.terminal.write('\r\n\x1b[90m[Session ended while disconnected — resume it from the sidebar]\x1b[0m\r\n');
         winInfo.exited = true; if (winInfo._notifyChanged) winInfo._notifyChanged();
         this._showExitedOverlay();
+      } else if (msg.type === 'attached' && !winInfo.exited) {
+        // Reconnect re-attach reply (app.js onStateChange loop): the server
+        // sends the FULL session buffer, which used to be discarded here —
+        // PTY output produced while this client was disconnected (incl. a
+        // whole server-restart window, during which the wrapper kept writing
+        // the .buf file) silently never reached xterm; normal-buffer shells
+        // kept a permanent gap in scrollback with no marker. Repaint from the
+        // buffer like the initial attach does — reset first, since the buffer
+        // is the whole (rotated) history, not a delta.
+        if (typeof msg.buffer === 'string' && msg.buffer) {
+          this.terminal.reset();
+          this._pendingOutput = ''; // anything queued pre-outage is inside the buffer
+          this._pinned = true;
+          this._suppressWaiting = true;
+          // _replaying: drop xterm's auto-answers to query sequences stored in
+          // the buffer (answered live long ago — re-answers echo as junk).
+          this._replaying = true;
+          this.terminal.write(msg.buffer, () => {
+            this._suppressWaiting = false; this._replaying = false;
+            this.terminal.scrollToBottom(); this.fit();
+          });
+        }
       } else if (msg.type === 'effective-size') {
         // Multi-device: PTY is sized to min of all clients — unless one client
         // took over via size-override, in which case the PTY is ITS size.
