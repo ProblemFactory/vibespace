@@ -510,8 +510,14 @@ class TerminalSession {
             this.ws.send({ type: 'input', sessionId: this.sessionId, data: escaped + ' ' });
           } else if (data.ready) {
             this.ws.send({ type: 'input', sessionId: this.sessionId, data: '\x16' });
+          } else if (data.error) {
+            showToast(t('Paste failed: {msg}', { msg: data.error }), { type: 'error' });
           }
-        } catch {}
+        } catch {
+          // Mid-restart request window: fail LOUDLY — Ctrl+V silently doing
+          // nothing was unreadable (restart audit #29); instantly retryable.
+          showToast(t('Paste failed — server unreachable'), { type: 'error' });
+        }
         resolve();
       };
       reader.onerror = () => resolve();
