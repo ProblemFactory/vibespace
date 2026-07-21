@@ -1561,6 +1561,7 @@ export default {
   "Three or more consecutive thinking blocks (or Bash commands) fold behind a \"N × …\" line, like the Claude Code TUI — click to expand. The newest message always stays visible, and searching expands everything.": "三条及以上连续的思考块(或 Bash 命令)折叠为一行\"N × …\",类似 Claude Code TUI——点击展开。最新消息始终可见,搜索时全部展开。",
   "Keep the spinner rotating under reduced motion": "减弱动态效果时保持加载指示器旋转",
   "With \"reduce motion\" enabled in your OS, the working spinner normally swaps its rotation for a gentle opacity pulse. Turn this on to keep the rotation instead (the pulse can read as blinking).": "系统开启\"减弱动态效果\"时,工作指示器默认从旋转退化为透明度脉冲。开启此项保持旋转(脉冲可能看起来像闪烁)。",
+  "Conversation": "对话",
   "Create failed": "创建失败",
   "Connecting…": "连接中…",
   "Starting desktop…": "正在启动桌面…",
