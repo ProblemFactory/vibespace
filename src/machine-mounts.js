@@ -258,13 +258,39 @@ class MachineMounts {
   }
 
   async _mountPushInner(hostId, { folder, mode = 'ro', mountpoint, publicUrlFallback } = {}) {
-    const { base, tunnelPort } = await this._davBase(hostId, { publicUrlFallback });
-    console.log(`[machine-mounts] push: dav base ready (${tunnelPort ? 'tunnel:' + tunnelPort : 'public'})`);
     // expand ~ BEFORE resolving — a literal '~' resolved against cwd made the
     // token mint fail with a bare 'root does not exist' (real report)
     const expanded = String(folder || os.homedir()).replace(/^~(?=$|\/)/, os.homedir());
     const abs = path.resolve(expanded);
-    if (!fs.existsSync(abs)) throw new Error(`folder does not exist on this instance: ${abs}`);
+    // LOOP GUARD (2.215.1, walter's real attempt): pushing a folder that IS a
+    // pull-mount mirror routes every IO through the device chain TWICE
+    // (machine → tunnel → /dav → instance FUSE → tunnel → machine) — rclone's
+    // daemon never comes up ("Daemon timed out"). Refuse with the real story.
+    const pull = this._state.mounts.find((m) => m.dir === 'pull' && m.mountpoint && (abs === m.mountpoint || abs.startsWith(m.mountpoint + '/')));
+    if (pull) {
+      const mName = (() => { try { return this.hosts.get(pull.hostId)?.name || pull.hostId; } catch { return pull.hostId; } })();
+      throw new Error(pull.hostId === hostId
+        ? `this folder is the live mirror of ${mName}'s own ${pull.remotePath} — it already lives on that machine; open it there directly instead of mounting it back`
+        : `this folder is the live mirror of ${mName}'s ${pull.remotePath} — sharing a mounted mirror loops through two mount chains; share a real folder on this instance instead`);
+    }
+    // Existence/health probe via a CHILD process — NEVER node fs on a
+    // possibly-FUSE-backed path (2.108.3 class; real incident: the old
+    // fs.existsSync here BLOCKED THE EVENT LOOP on a wedged storage mount —
+    // the whole server froze and the proxy answered 502 with zero logs).
+    const shqL = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+    const probe = await new Promise((resolve) => {
+      execFile('sh', ['-c', `[ -e ${shqL(abs)} ] || exit 3; ls ${shqL(abs)} >/dev/null 2>&1 || exit 4`], { timeout: 6000 }, (err) => {
+        if (!err) return resolve('ok');
+        if (err.killed || err.signal) return resolve('hung');
+        resolve(err.code === 3 ? 'missing' : err.code === 4 ? 'unreadable' : 'hung');
+      });
+    });
+    if (probe === 'missing') throw new Error(`folder does not exist on this instance: ${abs}`);
+    if (probe !== 'ok') throw new Error(probe === 'hung'
+      ? `folder is not responding (its backing mount/storage may be stalled): ${abs} — reconnect that storage first, or share a plain local folder`
+      : `folder is not readable: ${abs}`);
+    const { base, tunnelPort } = await this._davBase(hostId, { publicUrlFallback });
+    console.log(`[machine-mounts] push: dav base ready (${tunnelPort ? 'tunnel:' + tunnelPort : 'public'})`);
     const share = this.mountTokens.mint({ name: 'host:' + hostId, kind: 'reverse-mount', owner: hostId, root: abs, mode: mode === 'rw' ? 'rw' : 'ro' });
     const shareToken = share.raw, shareTokenId = share.rec.id;
     try {

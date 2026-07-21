@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.215.1 — 2026-07-21
+**walter's push-mount saga root-caused** (the new 2.214.1 error surfacing did its job — the retry showed rclone's real "Daemon timed out"):
+- **Loop guard**: he was pushing `vibespace-machines/<Machine>-Downloads` — the PULL-mount mirror of that same Mac's Downloads — back onto the Mac. Every IO would cross the device link twice, so rclone's daemon can never come up. mountPush now refuses folders under any pull-mount mirror with the real story ("it already lives on that machine — open it there directly").
+- **The original 502 explained and fixed**: mountPush's folder check was `fs.existsSync` — on a FUSE-backed folder with a stalled backend (his first attempt: a storage-mount path) that SYNC call blocks node's event loop, freezing the whole server → proxy 502 with zero logs (the 2.108.3 never-node-fs-on-mountpoints class). The check now runs in a child process with a 6s guard and distinguishes missing / unreadable / "backing storage stalled — reconnect it first".
+
 ## 2.215.0 — 2026-07-21
 - **File copy/move gets live progress** (user report: a big — especially cross-machine — paste had zero feedback): pasting now runs as a polled server op with a progress row in the file explorer (same machinery as uploads/extraction: inline row + button ring + percentage + transferred bytes + cancel). Cross-machine relays count bytes directly on the stream; local and same-host copies poll the destination size; totals pre-computed via du (BSD fallback included). The row only appears if the operation outlives 400ms — small pastes look exactly like before. Conflict handling (confirm-once overwrite) unchanged. Verified live: 300MB local + 120MB cross-machine to a real ssh host with accurate byte progress.
 
