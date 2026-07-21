@@ -319,7 +319,14 @@ export function installExplorerOps(FileExplorer) {
       const poll = setInterval(async () => {
         let st = null;
         try { const rr = await fetch('/api/file/transfer-status?id=' + encodeURIComponent(opId)); st = rr.ok ? await rr.json() : null; } catch {}
-        if (!st) { clearInterval(poll); finish(false, null); return; }
+        if (!st) {
+          clearInterval(poll);
+          // Status lost = server restart mid-op: the spawned child can OUTLIVE
+          // the server (KillMode=process) and finish AFTER this 'Failed' — say
+          // so instead of claiming a clean failure (restart audit #28).
+          showToast(t('Transfer status lost (server restarted) — it may still have completed'), { type: 'error' });
+          finish(false, null); return;
+        }
         if (st.status === 'running') {
           const pct = st.total ? Math.min(99, Math.round(st.done / st.total * 100)) : 0;
           upload.pct = pct;
@@ -357,7 +364,10 @@ export function installExplorerOps(FileExplorer) {
       r = await post(true);
     }
     const d = await r?.json().catch(() => ({}));
-    if (!r?.ok) showToast(t('Compress failed: {msg}', { msg: d?.error || t('unknown error') }), { type: 'error' });
+    // r === null = network-level failure (server restart mid-compress): the
+    // zip/tar child can outlive the server and complete anyway (#28)
+    if (!r) showToast(t('Compress failed: server unreachable — it may still have completed'), { type: 'error' });
+    else if (!r.ok) showToast(t('Compress failed: {msg}', { msg: d?.error || t('unknown error') }), { type: 'error' });
     else showToast(t('Created {name} ({size})', { name: out.trim(), size: formatSize(d.size || 0) }));
     this.refresh();
   },
@@ -406,7 +416,11 @@ export function installExplorerOps(FileExplorer) {
         ref.pctLabel.textContent = ok ? '100%' : t('Failed');
       }
       if (ok) showToast(t('Extracted to {name}', { name: (st?.dest || dest).split('/').pop() }));
-      else if (st?.status !== 'cancelled') showToast(t('Extract failed: {msg}', { msg: st?.error || t('unknown error') }), { type: 'error' });
+      // st === null = status lost to a server restart — the unzip/tar child
+      // may have died mid-file (the server-side journal forces a repairing
+      // overwrite on the next extract into this dest) or completed (#28)
+      else if (!st) showToast(t('Extract status lost (server restarted) — it may still have completed'), { type: 'error' });
+      else if (st.status !== 'cancelled') showToast(t('Extract failed: {msg}', { msg: st.error || t('unknown error') }), { type: 'error' });
       setTimeout(() => { this._activeUploads.delete(key); this._updateUploadRing(); this.refresh(); }, ok ? 1200 : 4000);
     };
     const poll = setInterval(async () => {

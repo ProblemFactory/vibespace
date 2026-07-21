@@ -179,8 +179,23 @@ const OPS = {
     return { result: { success: true } };
   },
 
+  // Staged copy (restart audit #22): cpSync used to write the FINAL name
+  // directly, so a crash mid-tree left a truncated dest that looked complete.
+  // Copy into a `.vs-partial` sibling and rename on success — a crash leaves
+  // only the clearly-marked partial. Suffix mirrors PARTIAL_SUFFIX in
+  // src/routes/files.js (the du progress poll watches both names). The
+  // overwrite path keeps direct cpSync merge semantics — dest already exists
+  // there, and the full force re-copy IS the heal for an earlier interrupted
+  // attempt (each file rewritten whole).
   copy({ src, dest, overwrite }) {
-    fs.cpSync(src, dest, { recursive: true, force: !!overwrite, errorOnExist: !overwrite });
+    if (overwrite) { fs.cpSync(src, dest, { recursive: true, force: true }); return { result: { success: true } }; }
+    if (fs.existsSync(dest)) { const e = new Error(`EEXIST: dest exists: ${dest}`); e.code = 'EEXIST'; throw e; }
+    const part = dest + '.vs-partial';
+    try {
+      fs.rmSync(part, { recursive: true, force: true });
+      fs.cpSync(src, part, { recursive: true });
+      fs.renameSync(part, dest);
+    } catch (e) { try { fs.rmSync(part, { recursive: true, force: true }); } catch {} throw e; }
     return { result: { success: true } };
   },
 
@@ -189,7 +204,15 @@ const OPS = {
     try { fs.renameSync(src, dest); }
     catch (e) {
       if (e.code !== 'EXDEV') throw e;
-      fs.cpSync(src, dest, { recursive: true });
+      // EXDEV fallback = copy+rm; stage through `.vs-partial` like copy() so a
+      // crash mid-copy never leaves a truncated dest at the final name (#22).
+      // Source is only removed after the rename landed.
+      const part = dest + '.vs-partial';
+      try {
+        fs.rmSync(part, { recursive: true, force: true });
+        fs.cpSync(src, part, { recursive: true });
+        fs.renameSync(part, dest);
+      } catch (e2) { try { fs.rmSync(part, { recursive: true, force: true }); } catch {} throw e2; }
       fs.rmSync(src, { recursive: true, force: true });
     }
     return { result: { success: true } };
