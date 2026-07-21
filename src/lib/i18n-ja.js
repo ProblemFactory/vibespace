@@ -1561,6 +1561,7 @@ export default {
   "Three or more consecutive thinking blocks (or Bash commands) fold behind a \"N × …\" line, like the Claude Code TUI — click to expand. The newest message always stays visible, and searching expands everything.": "3 件以上連続する思考ブロック(または Bash コマンド)は「N × …」の 1 行に折りたたまれます(Claude Code TUI と同様)。クリックで展開。最新メッセージは常に表示され、検索時はすべて展開されます。",
   "Keep the spinner rotating under reduced motion": "視差効果を減らす設定でもスピナーの回転を維持",
   "With \"reduce motion\" enabled in your OS, the working spinner normally swaps its rotation for a gentle opacity pulse. Turn this on to keep the rotation instead (the pulse can read as blinking).": "OS で「視差効果を減らす」を有効にすると、スピナーは回転から不透明度のパルスに切り替わります。これを有効にすると回転を維持します(パルスは点滅に見えることがあります)。",
+  "Conversation": "会話",
   "Create failed": "作成失敗",
   "Connecting…": "接続中…",
   "Starting desktop…": "デスクトップを起動中…",

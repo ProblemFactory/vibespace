@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.217.1
+
+- **"Create failed" windows identify their session** (real report: a resume refused by the 2.207.1 no-transcript circuit breaker left an anonymous error shell — the user couldn't tell which conversation it was for). The failure fires before the window gets an openSpec, so the error path now stamps the attempted session name (or conversation-id prefix) into the title and prints the full conversation id + cwd in the body.
+
 ## 2.217.0
 
 **Dead-session windows rescue into saved history (the 12-blank-windows class).** After the server loses its sessions (OOM kill, pod recreation), every saved-layout chat window replayed a stale serverId, the attach errored **before any ChatView existed**, and the one-time handler silently dropped — leaving bare blank window shells (real fleet report). Now:

@@ -96,9 +96,16 @@ export function installSessionLifecycle(App, ctx = {}) {
         const err = document.createElement('div');
         err.className = 'empty-hint';
         err.style.cssText = 'padding:24px;white-space:pre-wrap;user-select:text';
-        err.textContent = text;
+        // Identify WHICH session the failed create/resume was for — the
+        // failure fires before the window ever gets an openSpec, so without
+        // this the error shell was anonymous (real report: user couldn't
+        // tell which conversation a "Create failed" window belonged to).
+        err.textContent = text
+          + (resumeId ? `\n\n${t('Conversation')}: ${resumeId}` : '')
+          + (cwd ? `\n${cwd}` : '');
         winInfo.content.appendChild(err);
-        this.wm.setTitle(winInfo.id, t('Create failed'));
+        const label = sessionName || (resumeId ? resumeId.slice(0, 8) : '');
+        this.wm.setTitle(winInfo.id, label ? `${t('Create failed')} — ${label}` : t('Create failed'));
         return;
       }
       if (msg.type === 'created' && msg.reqId === reqId) {
