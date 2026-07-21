@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.220.0
+
+Backlog-clearing batch 1 (B-8194 / B-b4a2 / B-1525 second half):
+
+- **Stage shared-hero null-key race fixed (B-8194)**: a hero staged before its backend id landed never published the shared-hero record (and nothing re-published later) — other clients' walk-over followed a stale hero. `stage.onIdentitySync()` (called from every identity merge) adopts the key once it exists, re-owns `__pending__` aux bindings, and publishes.
+- **Home-rename auto-migration (B-b4a2)**: booting under a NEW `$HOME` (the 3.5.0 personalized-username fleet image) with leftover `-home-<olduser>-*` projdirs now auto-renames them to the new cwd encoding (merge-never-overwrite) and prefix-rewrites recorded paths in mounts/layouts/session-metas/task-groups (with `.pre-home-migrate` backups + a one-shot marker). Every future fleet roll self-heals instead of needing per-user surgery.
+- **Boot auto re-adopt of orphaned keeper sessions (B-1525 second half)**: the `.orphan` metas preserved by 2.219.0 are now CONSUMED at boot — for each one whose remote claude is still alive under its keeper, the local transport half respawns attached to the same keeper sid. Attach ≠ create keeps it minimal and safe: no new claude (so billing/tools shipping are irrelevant), the original vsst_ token is reused so the remote agent's tools keep authenticating, and the tools back-tunnel is revived on the SAME port (read from the orphan claude's /proc environ). Capped 8/boot, host-down orphans are left for a later boot.
+- Create-time session meta now records the tools back-tunnel port (`remotePort`) for future re-adopts.
+
 ## 2.219.1
 
 - **Session cards tell the transport truth** (real confusion: Dallas sessions showed plain LIVE while the machine was unreachable). A remote session whose local wrapper is alive but whose HOST can't be reached now carries an amber dashed "host unreachable" chip (tooltip explains: reconnect retries automatically, sent messages queue and deliver when the machine returns). `remoteState` rides the active-sessions broadcast, updates live on every transport transition, and is restored from wrapper meta across server restarts.
