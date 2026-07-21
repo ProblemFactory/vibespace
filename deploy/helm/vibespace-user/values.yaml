@@ -128,7 +128,7 @@ cephMint:
 # Optional Prometheus metrics exporter on a SEPARATE (non-ingress) port,
 # scraped in-cluster via the standard prometheus.io/* pod annotations.
 metrics:
-  enabled: false
+  enabled: true
   port: 3457
 
 # Optional persistent ops log: server logs written to a shared (typically
