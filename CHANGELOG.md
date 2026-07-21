@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.215.2 — 2026-07-21
+- **MCP tool cards de-uglified** (user report: `mcp__chrome-devtools__navigate_page` as a card header): MCP ids split into the SHORT tool name (underscores → spaces) plus a small server pill ("navigate page \[CHROME-DEVTOOLS\]") — applied to pending/completed/error card headers and the typing indicator ("running navigate page · chrome-devtools"). The raw identifier stays in the card tooltip.
+
 ## 2.215.1 — 2026-07-21
 **walter's push-mount saga root-caused** (the new 2.214.1 error surfacing did its job — the retry showed rclone's real "Daemon timed out"):
 - **Loop guard**: he was pushing `vibespace-machines/<Machine>-Downloads` — the PULL-mount mirror of that same Mac's Downloads — back onto the Mac. Every IO would cross the device link twice, so rclone's daemon can never come up. mountPush now refuses folders under any pull-mount mirror with the real story ("it already lives on that machine — open it there directly").
