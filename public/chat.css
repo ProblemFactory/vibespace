@@ -189,6 +189,14 @@
   border: 1px solid var(--border); border-left: 3px solid var(--accent); font-size: 12px;
 }
 .chat-tool-label { font-weight: 600; font-size: 12px; display: block; margin-bottom: 4px; }
+/* MCP server chip next to the short tool name (mcp__server__tool split) */
+.chat-tool-chip {
+  display: inline-block; vertical-align: 1px; margin-left: 4px; padding: 0 6px;
+  font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
+  color: var(--text-secondary); background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  border-radius: 999px; line-height: 15px;
+}
 .chat-tool-use details summary {
   cursor: pointer; font-size: 11px; color: var(--text-dim); padding: 2px 0;
 }
