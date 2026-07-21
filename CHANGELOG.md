@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.218.0
+
+Restart-robustness batch 1 (real fleet incident — host-less resumes of remote conversations):
+
+- **Resume host inference**: a host-less claude resume whose transcript is NOT local but lives in the `data/remote-jsonl` cache under exactly one registered host now resumes ON that host automatically (pre-hostId-era window specs and rescued view-only windows used to spawn a doomed LOCAL `claude --resume` — four consecutive "No conversation found" deaths in the wild while the host was reachable).
+- **Live-keeper double-writer guard**: before such an inferred remote resume spawns anything, `hosts.findKeeperFor` probes the host's `~/.vibespace/run` metas — if a keeper still holds a LIVE claude child for the conversation, the create ATTACHES to it (`keeperSid`) instead of starting a second writer on the same JSONL.
+- **Unreachable-host memo (60s)**: with a session's host machine down, every view-only attach ate a full ~15s ssh timeout before the stale-cache fallback — a desktop of three such windows read as "blank/gone". After one timeout the transcript fetch serves the cache instantly for 60s; any successful probe clears the memo.
+
 ## 2.217.1
 
 - **"Create failed" windows identify their session** (real report: a resume refused by the 2.207.1 no-transcript circuit breaker left an anonymous error shell — the user couldn't tell which conversation it was for). The failure fires before the window gets an openSpec, so the error path now stamps the attempted session name (or conversation-id prefix) into the title and prints the full conversation id + cwd in the body.

@@ -756,6 +756,25 @@ class HostManager {
     return this._fetchRemoteByFind(id, `-maxdepth 2 -name ${JSON.stringify(sessionId + '.jsonl')}`,
       path.join(id, sessionId + '.jsonl'), { maxBytes });
   }
+  // Does the host still run a LIVE keeper child for this claude conversation?
+  // Returns the keeper sid to ATTACH to (ws create keeperSid path — never a
+  // second writer), or null. One read-only ssh probe: scan ~/.vibespace/run
+  // metas mentioning the conversation id, keep only those whose childPid (the
+  // claude process) is alive. 2.218.0 — resume host inference's double-writer
+  // guard; ssh hosts only (dial pipe sessions are a different store).
+  async findKeeperFor(id, conversationId) {
+    if (!/^[\w-]+$/.test(conversationId)) return null;
+    const h = this.get(id);
+    if (!h || h.transport === 'dial') return null;
+    const script = `for f in "$HOME"/.vibespace/run/*.json; do [ -e "$f" ] || break; `
+      + `grep -l ${JSON.stringify(conversationId)} "$f" >/dev/null 2>&1 || continue; `
+      + `cpid=$(sed -n 's/.*"childPid":\\([0-9]*\\).*/\\1/p' "$f" | head -1); `
+      + `[ -n "$cpid" ] && kill -0 "$cpid" 2>/dev/null && basename "$f" .json; done | tail -1`;
+    try {
+      const out = (await this._ssh(h, script, { timeoutMs: 8000 })).toString().trim().split('\n').pop().trim();
+      return /^[\w][\w-]*$/.test(out) ? out : null;
+    } catch { return null; }
+  }
   // Remote SUBAGENT transcript (2.191.0, remote workflow viewer's View Log):
   // agent-<id>.jsonl lives under <projDir>/<sid>/subagents/ (plain agents) or
   // <sid>/subagents/workflows/wf_*/ (dynamic-workflow agents) — same
@@ -783,6 +802,12 @@ class HostManager {
   async _fetchRemoteByFind(id, findExpr, cacheRel, { maxBytes = 64 * 1024 * 1024, root = '"$HOME"/.claude/projects' } = {}) {
     const h = this.get(id);
     const cachePath = path.join(this.dataDir, 'remote-jsonl', cacheRel);
+    // Known-unreachable host memo (2.218.0, real report): with the host DOWN,
+    // every window's view-only attach ate a full ssh connect timeout (~15s)
+    // before the stale-cache fallback kicked in — a desktop of 3 such windows
+    // read as "blank/gone". After one timeout, serve the cache instantly for
+    // 60s instead of re-probing per request.
+    if (Date.now() < (this._hostDownUntil?.get(id) || 0) && fs.existsSync(cachePath)) return cachePath;
     const dir = path.dirname(cachePath);
     const metaPath = cachePath + '.meta';
     let meta = null;
@@ -838,10 +863,15 @@ class HostManager {
     }
     const probe = `f=$(find ${root} ${findExpr} 2>/dev/null | head -1); [ -n "$f" ] && { stat -c '%s %Y' "$f" 2>/dev/null || stat -f '%z %m' "$f"; } && echo "$f"`;
     let out;
-    try { out = (await this._ssh(h, probe, { timeoutMs: 15000 })).toString().trim(); }
+    try {
+      out = (await this._ssh(h, probe, { timeoutMs: 15000 })).toString().trim();
+      this._hostDownUntil?.delete(id); // reachable again — drop the memo
+    }
     catch (e) {
-      // Host unreachable (machine down, network partition) — a stale cached
-      // transcript beats no history; only throw when there's nothing to serve.
+      // Host unreachable (machine down, network partition) — remember for 60s
+      // (see the memo check at entry) and serve the stale cached transcript;
+      // only throw when there's nothing to serve.
+      (this._hostDownUntil ||= new Map()).set(id, Date.now() + 60000);
       if (fs.existsSync(cachePath)) return cachePath;
       throw e;
     }
