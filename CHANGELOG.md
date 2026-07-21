@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.216.0 — 2026-07-21
+**OOM-kill prevention** (lengyue's instance hit its 32Gi pod limit — the kernel killed the whole pod, taking EVERY dtach session, with zero warning):
+- **System rail panel** (new gauge icon): container memory bar (cgroup-aware used/limit/%), workspace disk bar, load average, and the top processes by memory — refreshes every 5s while open. The rail icon carries a % badge from 80% (amber) and turns red at 92%.
+- **Proactive memory alerts**: the server polls the container limit every 45s and broadcasts a warning toast at ≥80% (error-styled at ≥92%) naming the top consumer — cooldown 30min per level, instant on escalation; also logged to opslog + a memory-pressure telemetry event. Kill the culprit BEFORE the kernel kills everything (orphaned dev servers already have a Kill button in Ports).
+- Run-collapse polish: while pinned to the live tail, only the LAST run keeps an opened state — an accidentally/deliberately expanded run used to inherit the open flag as it grew and stay expanded forever. Reading history (unpinned) never auto-collapses.
+
 ## 2.215.3 — 2026-07-21
 - **MCP tool calls join run-collapse** (user ask): a sixth kind in Card-kinds-that-collapse — any `mcp__*` tool card folds with the rest of the working noise (default ON; the browser-automation navigate/click/fill bursts were the reported pattern). The fold summary counts them ("8 次 MCP") and names the server when a run is single-server ("8 MCP (chrome-devtools)"). Approval-waiting MCP cards still never fold; failures still surface as the ✗ count.
 

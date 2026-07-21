@@ -2170,6 +2170,7 @@ class ChatView {
         return isMemoryPath(fp) ? 'memory/' + base : base;
       };
       const kids = [...list.children];
+      const built = []; // runs constructed this pass (for pinned auto-refold)
       let run = [];
       let runKind = null;
       const flush = () => {
@@ -2249,6 +2250,7 @@ class ChatView {
           list.insertBefore(header, members[0]);
           if (wasOpen) { header.classList.add('open'); for (const el of members) this._runExpanded.add(el); }
           else for (const el of members) el.classList.add('chat-run-collapsed');
+          built.push({ header, members });
         }
         run = []; runKind = null;
       };
@@ -2260,6 +2262,18 @@ class ChatView {
         if (k) { run = [el]; runKind = k; }
       }
       flush();
+      // While PINNED (following live output) only the LAST run keeps an
+      // opened state: a run expanded to watch one command's output used to
+      // inherit the open flag as it grew and stayed expanded FOREVER (user
+      // report: 一部分没折叠). Moving on re-folds it; reading history
+      // (unpinned) never auto-collapses anything.
+      if (this._pinned && built.length > 1) {
+        for (const r of built.slice(0, -1)) {
+          if (!r.header.classList.contains('open')) continue;
+          r.header.classList.remove('open');
+          for (const el of r.members) { this._runExpanded.delete(el); el.classList.add('chat-run-collapsed'); }
+        }
+      }
     } finally {
       this._runsMutating = false;
       if (anchorEl && anchorEl.isConnected) {
