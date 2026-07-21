@@ -243,8 +243,12 @@ export function installExplorerOps(FileExplorer) {
     const srcHost = clip.host || '', destHost = this._host || '';
     const sameHost = srcHost === destHost;
     let overwriteAll = null, done = 0, failed = 0;
+    // progress:1 → the server answers with an opId immediately and the copy
+    // runs as a polled op (2.215.0 — a big/cross-machine paste used to hold
+    // the request with ZERO feedback). The progress row only renders if the
+    // op outlives 400ms, so small pastes look exactly like before.
     const post = (src, dest, overwrite) => {
-      const body = sameHost ? this._hb({ src, dest, overwrite }) : { src, dest, overwrite, srcHost, destHost };
+      const body = sameHost ? this._hb({ src, dest, overwrite, progress: 1 }) : { src, dest, overwrite, srcHost, destHost, progress: 1 };
       return fetch(api, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).catch(() => null);
     };
     for (const src of clip.paths) {
@@ -254,19 +258,81 @@ export function installExplorerOps(FileExplorer) {
         if (clip.op === 'cut') continue;          // move onto itself: no-op
         dest = this._uniqueName(base);            // copy into same dir: duplicate
       }
-      let r = await post(src, dest, false);
-      if (r && r.status === 409) {
+      const label = clip.op === 'cut' ? t('Moving {name}…', { name: base }) : t('Copying {name}…', { name: base });
+      const attempt = async (overwrite) => {
+        const r = await post(src, dest, overwrite);
+        const d = await r?.json().catch(() => ({}));
+        if (r && r.status === 409) return { ok: false, error: 'exists' };
+        if (!r?.ok) return { ok: false, error: d?.error || t('unknown error') };
+        if (d?.opId) return await this._trackTransferOp(d.opId, label, dest);
+        return { ok: true };
+      };
+      let out = await attempt(false);
+      if (!out.ok && out.error === 'exists') {
         if (overwriteAll === null) {
           overwriteAll = await showConfirmDialog({ title: t('Overwrite?'), message: t('"{name}" already exists here. Overwrite existing item(s)?', { name: base }), confirmText: t('Overwrite'), danger: true });
         }
         if (!overwriteAll) { failed++; continue; }
-        r = await post(src, dest, true);
+        out = await attempt(true);
       }
-      if (r?.ok) done++; else failed++;
+      if (out.ok) done++; else failed++;
     }
     if (clip.op === 'cut' && done) this.app._fileClipboard = null;
     showToast(failed ? t('Pasted {done}, failed {failed}', { done, failed }) : t('Pasted {n} items', { n: done }), failed ? { type: 'error' } : {});
     this.refresh();
+  },
+
+  // Poll a copy/move transfer op and surface it as a persistent inline
+  // progress row (same machinery as uploads/extraction). The row appears
+  // only after 400ms — quick ops never flash chrome. Resolves
+  // {ok, error, cancelled} so _paste keeps its sequential confirm flow.
+  _trackTransferOp(opId, label, dest) {
+    return new Promise((resolve) => {
+      const upload = {
+        xhr: { abort: () => fetch('/api/file/transfer-status?id=' + encodeURIComponent(opId), { method: 'DELETE' }).catch(() => {}) },
+        files: [], destDir: dest, displayNames: [label], isFolder: false,
+        pct: 0, status: 'uploading', domRefs: new Map(),
+      };
+      const key = 'transfer-' + opId;
+      let shown = false;
+      const showT = setTimeout(() => {
+        shown = true;
+        this._activeUploads.set(key, upload);
+        this._updateUploadRing();
+        this._renderItems();
+      }, 400);
+      const finish = (ok, st) => {
+        clearTimeout(showT);
+        const cancelled = st?.status === 'cancelled';
+        if (shown) {
+          upload.status = ok ? 'done' : 'error';
+          upload.pct = 100;
+          for (const ref of upload.domRefs.values()) {
+            ref.row.classList.add(ok ? 'file-upload-done' : 'file-upload-error');
+            ref.fill.style.width = '100%';
+            ref.pctLabel.textContent = ok ? '100%' : (cancelled ? t('Cancelled') : t('Failed'));
+          }
+          setTimeout(() => { this._activeUploads.delete(key); this._updateUploadRing(); this.refresh(); }, ok ? 1200 : 3000);
+        }
+        resolve({ ok, error: st?.error || null, cancelled });
+      };
+      const poll = setInterval(async () => {
+        let st = null;
+        try { const rr = await fetch('/api/file/transfer-status?id=' + encodeURIComponent(opId)); st = rr.ok ? await rr.json() : null; } catch {}
+        if (!st) { clearInterval(poll); finish(false, null); return; }
+        if (st.status === 'running') {
+          const pct = st.total ? Math.min(99, Math.round(st.done / st.total * 100)) : 0;
+          upload.pct = pct;
+          for (const ref of upload.domRefs.values()) {
+            ref.fill.style.width = pct + '%';
+            ref.pctLabel.textContent = st.total ? pct + '% · ' + formatSize(st.done) : formatSize(st.done);
+          }
+          return;
+        }
+        clearInterval(poll);
+        finish(st.status === 'done', st);
+      }, 500);
+    });
   },
 
     async _duplicate(name) {

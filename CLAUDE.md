@@ -689,7 +689,7 @@ One design language, DENSITY-PRESERVING (pro tool — compact stays compact). A 
 - `GET /api/archive/list?path=` — archive contents (unzip -l / tar -tvf parse; 20k entry cap)
 - `POST /api/archive/extract` — extract archive to dest (never overwrites unless overwrite:true — unzip -n / tar -k)
 - `POST /api/archive/extract-entry` — extract ONE entry to a temp file (spawn streaming, 200MB cap) → client opens via normal viewer pipeline
-- `POST /api/file/copy` / `POST /api/file/move` — recursive copy/move to FULL dest path (fs.cpSync; move falls back to copy+rm across devices; 409 on conflict unless overwrite)
+- `POST /api/file/copy` / `POST /api/file/move` — recursive copy/move to FULL dest path (fs.cpSync; move falls back to copy+rm across devices; 409 on conflict unless overwrite). `progress:1` (2.215.0) → returns `{opId}` immediately and runs as a polled op: `GET /api/file/transfer-status?id=` {done,total(bytes),status,error,dest}, `DELETE` cancels (best-effort; local worker copies can't abort mid-flight). Cross-host relays count bytes INLINE on the tar/cat stream (du -sb pre-computes total, BSD -sk×1024 fallback); local/same-host branches poll du on dest. In op mode the 409-exists check surfaces as op error 'exists' — the client maps it back onto the confirm-overwrite flow. Paste always requests progress; the client row renders only if the op outlives 400ms (small pastes look unchanged)
 - `GET /api/download-zip?path=` — stream folder as zip download (spawn `zip -r - `, no temp file)
 - `GET /api/file/stat?path=&du=1` — extended properties (mode/uid/entryCount; optional bounded du -sb)
 - `GET /api/dir-complete?path=` — directory autocomplete (500ms timeout, supports `~`)
@@ -918,7 +918,7 @@ Server → Client: `created`, `output`, `msg` (normalized: op=create/edit/meta),
 ### File Management
 - File explorer with upload/download/drag-drop, title shows current path
 - Multi-select (Ctrl/Cmd+click toggle, Shift+click range, Ctrl+A) with bulk Compress/Copy/Cut/Delete; Delete key works on selection
-- Copy/Cut/Paste file clipboard (`app._fileClipboard`, works across explorer windows; cut items dimmed via `.cut-pending`; same-dir paste auto-renames "(copy)"; conflicts confirm-once overwrite); Duplicate
+- Copy/Cut/Paste file clipboard (`app._fileClipboard`, works across explorer windows; cut items dimmed via `.cut-pending`; same-dir paste auto-renames "(copy)"; conflicts confirm-once overwrite); Duplicate. Big/cross-machine pastes show a live progress row (upload machinery: ring + % + bytes + cancel) via the transfer-op mechanism (2.215.0)
 - Archives: Compress to Archive (zip/tar.gz/tar/tar.xz, multi-select), archive viewer (double-click .zip/.tar.* → entry list + filter + Extract All; entry click extracts to temp + opens via normal pipeline), Extract Here / Extract to Folder (skip-existing semantics), folder Download as Zip (streamed)
 - Background right-click menu (Paste/New File/New Folder/Select All/Refresh/Copy Path/Properties); Properties dialog (du recursive size, permissions); icon view has the same context menu as list view
 - View menu (single dropdown): view mode (list/icon), options (hidden files, mixed sort, bookmarks panel, preview panel), group by (none/type/modified/size), column visibility

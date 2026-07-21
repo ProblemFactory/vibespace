@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.215.0 — 2026-07-21
+- **File copy/move gets live progress** (user report: a big — especially cross-machine — paste had zero feedback): pasting now runs as a polled server op with a progress row in the file explorer (same machinery as uploads/extraction: inline row + button ring + percentage + transferred bytes + cancel). Cross-machine relays count bytes directly on the stream; local and same-host copies poll the destination size; totals pre-computed via du (BSD fallback included). The row only appears if the operation outlives 400ms — small pastes look exactly like before. Conflict handling (confirm-once overwrite) unchanged. Verified live: 300MB local + 120MB cross-machine to a real ssh host with accurate byte progress.
+
 ## 2.214.1 — 2026-07-21
 - **Machine-mount operations are observable and bounded** (walter's "HTTP 502" push-mount report — forensics found ZERO server-side trace of the attempt: mountPush/mountPull logged nothing and had no overall deadline, so any unforeseen stall in the device-link chain hung the HTTP handler forever and the proxy answered 502). Both now log the request, key milestones and the outcome with timing, emit machine-mount-push/pull-failed telemetry events, and race a 150s hard deadline — a stalled chain returns a real, actionable error ("device link may be stalled — wake the machine and retry") instead of a proxy 502.
 
