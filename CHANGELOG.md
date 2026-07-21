@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.214.1 — 2026-07-21
+- **Machine-mount operations are observable and bounded** (walter's "HTTP 502" push-mount report — forensics found ZERO server-side trace of the attempt: mountPush/mountPull logged nothing and had no overall deadline, so any unforeseen stall in the device-link chain hung the HTTP handler forever and the proxy answered 502). Both now log the request, key milestones and the outcome with timing, emit machine-mount-push/pull-failed telemetry events, and race a 150s hard deadline — a stalled chain returns a real, actionable error ("device link may be stalled — wake the machine and retry") instead of a proxy 502.
+
 ## 2.214.0 — 2026-07-20
 - **Memory file operations get their own card face** (user ask): a Write/Edit/Read recognized as an agent-memory file (via the per-backend memoryPathRe) renders as **记忆更新 / 记忆读取 <name>** — verb swapped, path display shortened to the file name (the full path stays behind the link: click still copies, Ctrl+click still opens). Applies to completed cards, pending (running) cards, Edit diffs, and Patch per-file changes.
 
