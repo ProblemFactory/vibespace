@@ -435,11 +435,17 @@ class ChatView {
         if (msg.normEpoch) this._normEpoch = msg.normEpoch;
         if (msg.remoteState) this._statusBar?.setRemoteState(msg.remoteState);
       } else if (msg.type === 'error' && msg.sessionId === sessionId) {
-        // Attach failed (e.g. stale serverId replayed from a saved layout) —
-        // surface it instead of waiting forever on a blank window
+        // Attach failed (e.g. stale serverId replayed from a saved layout).
+        // If NOTHING is rendered yet and the identity is known, rescue into
+        // the view-only pipeline (saved history + Resume bar) — after an OOM
+        // kill / pod recreation every window replays a dead serverId, and
+        // read-only-ing the empty pane opened 12 BLANK windows at once (real
+        // fleet report). Only when even that can't work, show the bare error.
         this._hideTyping();
-        this._renderers.appendSystem(msg.message || t('Session not found.'));
-        this._setReadOnly();
+        if (!this._tryViewOnlyRescue()) {
+          this._renderers.appendSystem(msg.message || t('Session not found.'));
+          this._setReadOnly();
+        }
         try { track('event', 'chat-attach-failed', this._telemDetail(msg.message)); } catch {}
       }
     };
@@ -1799,6 +1805,7 @@ class ChatView {
       if (this._readOnly || this._disconnected) return; // resolved / still offline (next reconnect retries)
       if ((this._lastAttachedAt || 0) >= reattachAt) return;
       this._hideTyping();
+      if (this._tryViewOnlyRescue()) return;
       this._renderers.appendSystem(t('The session no longer exists on the server (likely a restart) — resume to continue.'));
       this._setReadOnly();
     }, 20000);
@@ -1909,6 +1916,53 @@ class ChatView {
     this._readOnly = true;
     if (this._chatInput) this._chatInput.setReadOnly();
     this._showResumeBar();
+  }
+
+  // Attach failed for a window that never rendered anything — flip it into
+  // the view-only pipeline IN PLACE: the same server path viewSession uses
+  // (JSONL history from the local transcript or the remote-jsonl cache — the
+  // cache scan is host-less-tolerant and stale-cache-beats-no-history, so it
+  // works even with the session's host machine down), then the Resume bar.
+  // Without this, every layout replay after the server lost its sessions
+  // (OOM kill, pod recreation) opened BLANK read-only windows.
+  _tryViewOnlyRescue() {
+    if (this._rescueTried || this._readOnly) return false;
+    if (this.sessionId.startsWith('view-') || this.sessionId.startsWith('sub-')) return false;
+    if (this._total > 0 || this._elements.size > 0) return false;
+    const ids = this._getSessionIds() || {};
+    const bsid = ids.backendSessionId;
+    // needs the REAL backend id — a webui `sess-N` placeholder has no transcript
+    if (!bsid || /^sess-\d/.test(bsid)) return false;
+    this._rescueTried = true;
+    const backend = ids.backend || 'claude';
+    const viewId = backend === 'claude' ? `view-${bsid}` : `view-${backend}-${bsid}`;
+    const handler = (msg) => {
+      if (this._disposed) { this.ws.offGlobal(handler); return; }
+      if (msg.sessionId !== viewId) return;
+      if (msg.type === 'error') {
+        this.ws.offGlobal(handler);
+        this._renderers.appendSystem(msg.message || t('Session not found.'));
+        this._setReadOnly();
+        return;
+      }
+      if (msg.type !== 'attached') return;
+      this.ws.offGlobal(handler);
+      // History ops (pagination, search, resume) resolve identity through
+      // _getSessionIds/openSpec — nothing addresses the dead server id anymore.
+      this.sessionId = viewId;
+      if (msg.messages?.length) this.loadHistory(msg.messages, msg.totalCount, false, { chatStatus: msg.chatStatus });
+      else this._renderers.appendSystem(t("No messages in this session's transcript yet."));
+      this._renderers.appendSystem(t('The session is no longer running — showing saved history.'));
+      this._setReadOnly();
+    };
+    this.ws.onGlobal(handler);
+    this.ws.send({
+      type: 'attach', sessionId: viewId, viewOnly: true, backend,
+      backendSessionId: bsid, claudeSessionId: backend === 'claude' ? bsid : undefined,
+      host: ids.host || undefined, cwd: ids.cwd || '', name: this.winInfo?.title || '',
+    });
+    try { track('event', 'chat-attach-rescued'); } catch {}
+    return true;
   }
 
   // Insert a Resume bar in place of the input area for stopped/view-only/terminated

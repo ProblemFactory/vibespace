@@ -837,7 +837,14 @@ class HostManager {
       } catch (e2) { /* legacy fallback below */ }
     }
     const probe = `f=$(find ${root} ${findExpr} 2>/dev/null | head -1); [ -n "$f" ] && { stat -c '%s %Y' "$f" 2>/dev/null || stat -f '%z %m' "$f"; } && echo "$f"`;
-    const out = (await this._ssh(h, probe, { timeoutMs: 15000 })).toString().trim();
+    let out;
+    try { out = (await this._ssh(h, probe, { timeoutMs: 15000 })).toString().trim(); }
+    catch (e) {
+      // Host unreachable (machine down, network partition) — a stale cached
+      // transcript beats no history; only throw when there's nothing to serve.
+      if (fs.existsSync(cachePath)) return cachePath;
+      throw e;
+    }
     if (!out) return fs.existsSync(cachePath) ? cachePath : null; // gone remotely — keep stale cache if any
     const [sizeMtime, remotePath] = [out.split('\n')[0], out.split('\n')[1]];
     const [size, mtime] = sizeMtime.split(' ').map(Number);

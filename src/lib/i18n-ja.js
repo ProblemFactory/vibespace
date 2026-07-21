@@ -2160,6 +2160,7 @@ export default {
   "blocked on this host": "このホストでは使用不可",
   "The default is global, and “{name}” can’t run on {host} — new sessions there keep using its own login.": "デフォルトはグローバル設定ですが、“{name}” は {host} では動作しません——そのマシン上の新規セッションは引き続き自身のログインを使います。",
   "managed automatically — each session spawn refreshes the tools": "自動管理——セッション作成のたびにツールが更新されます",
+  "The session is no longer running — showing saved history.": "セッションは既に終了しています — 保存された履歴を表示しています。",
   "The session no longer exists on the server (likely a restart) — resume to continue.": "このセッションはサーバー上に存在しません（再起動の可能性）——Resume で続行してください。",
   "Remote host (its own login)": "リモートホスト（ホスト自身のログイン）",
   "Maintenance: a support agent is connected to this instance for troubleshooting": "メンテナンス：サポート担当/エージェントがこのインスタンスに接続してトラブルシューティング中です",

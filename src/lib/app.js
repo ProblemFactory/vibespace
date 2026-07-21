@@ -2126,7 +2126,12 @@ class App {
           backend: match.backend || win._openSpec.backend || 'claude',
           backendSessionId: realBsid || win._openSpec.backendSessionId || null,
           sessionKey: realBsid ? (match.sessionKey || getSessionKey(match)) : (win._openSpec.sessionKey || ''),
-          hostId: match.hostId ?? win._openSpec.hostId ?? null,
+          // Live session entries carry the host under `host` (not `hostId`) —
+          // reading only match.hostId meant a remote session's spec NEVER got
+          // its host backfilled, so after the session died the replay/view
+          // fetch went host-less and opened blank (real fleet report: 5
+          // pre-hostId-era windows on lengyue's layout, dead after an OOM).
+          hostId: match.host ?? match.hostId ?? win._openSpec.hostId ?? null,
           name: match.name || win._openSpec.name || '',
           agentKind: match.agentKind || 'primary',
           agentRole: match.agentRole || '',
