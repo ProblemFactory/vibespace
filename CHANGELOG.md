@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.219.1
+
+- **Session cards tell the transport truth** (real confusion: Dallas sessions showed plain LIVE while the machine was unreachable). A remote session whose local wrapper is alive but whose HOST can't be reached now carries an amber dashed "host unreachable" chip (tooltip explains: reconnect retries automatically, sent messages queue and deliver when the machine returns). `remoteState` rides the active-sessions broadcast, updates live on every transport transition, and is restored from wrapper meta across server restarts.
+
 ## 2.219.0
 
 Restart-robustness batch 2 — first slice of the 54-finding restart-survival audit (9-agent workflow, adversarially verified) + two live fleet incidents:

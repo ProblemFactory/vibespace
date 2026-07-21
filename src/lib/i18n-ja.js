@@ -34,6 +34,8 @@ export default {
   "Auto (system)": "自動（システムに従う）",
   "New Agent Session": "新規エージェントセッション",
   "Backend": "バックエンド",
+  "host unreachable": "ホスト到達不能",
+  "The machine this session runs on is unreachable — the connection retries automatically; messages you send are queued and delivered when it returns.": "このセッションが動作するマシンに現在到達できません — 接続は自動的に再試行されます。送信したメッセージはキューに入り、復帰後に配信されます。",
   "Host": "リモートホスト",
   "Task": "タスクグループ",
   "Mode": "モード",
