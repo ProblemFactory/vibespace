@@ -407,6 +407,29 @@ export class ChatInput {
     // reconnect.
     this._disconnected = disconnected;
     this._element.classList.toggle('chat-input-disconnected', disconnected);
+    if (disconnected && this._pendingSend) {
+      // The socket died with a send still unconfirmed — the message may never
+      // have reached the server. Restore the text (draft was never cleared)
+      // so the user can re-send after checking the conversation; without this
+      // the prompt vanished with zero trace.
+      const { text } = this._pendingSend;
+      this._pendingSend = null;
+      if (text && !this._textarea.value.trim()) {
+        this._textarea.value = text;
+        this._textarea.dispatchEvent(new Event('input', { bubbles: true })); // resize + draft save
+      }
+      this.hideTyping();
+      showToast(t('Connection lost — your message may not have been sent; the text was restored to the input'), { type: 'error' });
+    }
+  }
+
+  // Called by ChatView when server traffic for this session arrives: the send
+  // that preceded it demonstrably reached the server, so the deferred draft
+  // clear can finalize.
+  confirmDelivery() {
+    if (!this._pendingSend) return;
+    this._pendingSend = null;
+    clearDraft('chat', this._sessionId);
   }
 
   focus() {
@@ -463,7 +486,20 @@ export class ChatInput {
     this._textarea.value = '';
     this._textarea.style.height = '';
     this._textarea.style.minHeight = '';
-    clearDraft('chat', this._sessionId);
+    // DEFERRED draft clear (restart audit): ws.send has no ack — a message
+    // written into a half-open socket (server died, onclose not yet fired,
+    // up to the 30s-heartbeat window for remote clients) vanishes silently,
+    // and the immediately-cleared draft made the loss total: the server echo
+    // IS the render, so nothing ever marked it. Keep the draft until inbound
+    // traffic proves the send got through (confirmDelivery — TCP ordering:
+    // anything the server answers on this socket arrived AFTER our send); if
+    // the connection drops first, setDisconnected restores the text.
+    // A pending 300ms autosave would read the now-empty textarea and wipe the
+    // kept draft — cancel it and pin the draft to exactly what was sent (the
+    // debounced autosave can lag behind fast typing).
+    clearTimeout(this._draftTimer);
+    if (text) saveDraft('chat', this._sessionId, text);
+    this._pendingSend = { text };
     if (this._expanded) {
       this._expanded = false;
       this._textarea.classList.remove('chat-input-expanded');
