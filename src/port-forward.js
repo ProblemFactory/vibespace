@@ -65,7 +65,13 @@ class PortForwardManager {
     // fast offline), ssh machines only while a device link already exists.
     this._seenPorts = new Map(); // hostId → Set(port)
     this._protoCache = new Map(); // `${hostId}:${port}` → { proto, ts }
-    this._watch = setInterval(() => this._watchSweep().catch(() => {}), 30000);
+    // Heal state: forwards whose boot _start()/frpPublish() failed (machine
+    // not linked yet, frpc admin not up) retry on a timer — ssh machines have
+    // NO dial-in event, so onMachineLinked alone can never heal them (the
+    // machine-mounts pull-retry lesson, review finding).
+    this._published = new Set(); // rec.id with a LIVE relay proxy from THIS process
+    this._healRetryAt = new Map(); // rec.id → next attempt ts (5-min backoff)
+    this._watch = setInterval(() => { this._healSweep().catch(() => {}); this._watchSweep().catch(() => {}); }, 30000);
     if (this._watch.unref) this._watch.unref();
   }
 
@@ -454,6 +460,8 @@ class PortForwardManager {
       try { l.server.close(); } catch {}
       this._live.delete(id);
     }
+    this._published.delete(id);
+    this._healRetryAt.delete(id);
     this._state.forwards = this._state.forwards.filter((r) => r.id !== id);
     this._persist();
     this._emit();
@@ -473,6 +481,7 @@ class PortForwardManager {
     const r = await this.plugins.frpPublish(id, localPort, { preferPort: rec.publicPort || 0, preferSub: rec.publicSub || '', proto: rec.protoOverride || '' });
     rec.publicUrl = r.url; rec.publicName = r.name; rec.publicPort = r.remotePort; rec.publicSub = r.subdomain || null; rec.publicProto = r.proto || null;
     if (!rec.protoOverride && r.proto) rec.proto = r.proto; // publish probe refreshes detection
+    this._published.add(rec.id);
     this._persist(); this._emit();
     return { publicUrl: r.url };
   }
@@ -482,30 +491,99 @@ class PortForwardManager {
     if (!rec) return;
     try { if (this.plugins) await this.plugins.frpUnpublish(rec.publicName || id); } catch { }
     rec.publicUrl = null; rec.publicName = null; rec.publicPort = null;
+    this._published.delete(id);
     this._persist(); this._emit();
   }
 
+  /** Re-establish a restored forward's public URL at its CURRENT localPort,
+   *  reusing the persisted subdomain/port (preferSub/preferPort — regenerating
+   *  them on restart silently broke previously shared public URLs, review
+   *  finding). On failure the stale relay proxy is torn down: the persistent
+   *  frpc proxy toml still names the PRE-restart ephemeral localPort, so
+   *  boot-replayed frpc would serve the shared URL against a freed loopback
+   *  port (silent connection-refused for everyone holding the link).
+   *  Returns false on a failed publish so callers keep their retry backoff. */
+  async _republish(rec) {
+    if (!rec.publicUrl || !this.plugins) return true;
+    const localPort = this._live.get(rec.id)?.rec?.localPort;
+    if (!localPort) return false; // not active — nothing to bind the proxy to
+    try {
+      const r = await this.plugins.frpPublish(rec.id, localPort, { preferPort: rec.publicPort || 0, preferSub: rec.publicSub || '', proto: rec.protoOverride || rec.publicProto || '' });
+      rec.publicUrl = r.url; rec.publicName = r.name; rec.publicPort = r.remotePort; rec.publicSub = r.subdomain || null; rec.publicProto = r.proto || null;
+      this._published.add(rec.id);
+      return true;
+    } catch (e) {
+      this.log('re-publish ' + rec.id + ': ' + e.message);
+      this._published.delete(rec.id);
+      try { await this.plugins.frpUnpublish(rec.publicName || rec.id); } catch { }
+      rec.error = 'public URL down — retrying republish';
+      return false;
+    }
+  }
+
   /** Re-establish persisted forwards (boot / machine relink). Best-effort;
-   *  an offline machine's forward stays recorded and retries on next link. */
+   *  a failed forward stays recorded and retries via _healSweep AND on the
+   *  next machine link (dial machines routinely re-dial AFTER our +5s boot
+   *  restore — the single-attempt restore was a review finding). */
   async restore() {
     for (const rec of this._state.forwards) {
       if (this._live.has(rec.id)) continue;
-      // re-publish REUSES the persisted subdomain/port (preferSub/preferPort) —
-      // regenerating them on every server restart silently broke previously
-      // shared public URLs (review finding)
-      try { await this._start(rec); this._probeForward(rec); if (rec.publicUrl && this.plugins) { try { const r = await this.plugins.frpPublish(rec.id, this._live.get(rec.id).rec.localPort, { preferPort: rec.publicPort || 0, preferSub: rec.publicSub || '', proto: rec.protoOverride || rec.publicProto || '' }); rec.publicUrl = r.url; rec.publicName = r.name; rec.publicPort = r.remotePort; rec.publicSub = r.subdomain || null; rec.publicProto = r.proto || null; } catch (e) { this.log('re-publish ' + rec.id + ': ' + e.message); } } } catch (e) { rec.error = e.message; }
+      try {
+        await this._start(rec);
+        rec.error = null;
+        this._probeForward(rec);
+        await this._republish(rec);
+      } catch (e) {
+        rec.error = e.message;
+        // _start failed but the pre-restart relay proxy toml persists on the
+        // instance — take it down NOW or frpc serves the shared URL against
+        // a freed loopback port until the heal/relink re-publishes
+        if (rec.publicUrl && this.plugins) { this.plugins.frpUnpublish(rec.publicName || rec.id).catch(() => {}); }
+      }
     }
     this._persist();
     this._emit();
   }
 
-  /** A machine (re)linked — bring up any of its recorded forwards. */
+  /** A machine (re)linked — bring up any of its recorded forwards (incl. the
+   *  public URL: a dial-in after a failed boot restore used to restart the
+   *  forward at a NEW localPort while the relay proxy kept the stale one). */
   async onMachineLinked(hostId) {
     for (const rec of this._state.forwards) {
       if (rec.hostId !== hostId || this._live.has(rec.id)) continue;
-      try { await this._start(rec); rec.error = null; this._probeForward(rec); } catch (e) { rec.error = e.message; }
+      try {
+        await this._start(rec);
+        rec.error = null;
+        this._probeForward(rec);
+        await this._republish(rec);
+        this._healRetryAt.delete(rec.id);
+      } catch (e) { rec.error = e.message; }
     }
+    this._persist();
     this._emit();
+  }
+
+  /** Retry pass for forwards that are recorded but not live (or live with a
+   *  down public URL) — the boot attempt is otherwise the ONLY one for ssh
+   *  machines. 5-min per-record backoff (mirrors machine-mounts' pull retry);
+   *  a machine-link event still heals immediately via onMachineLinked. */
+  async _healSweep() {
+    let changed = false;
+    for (const rec of this._state.forwards) {
+      const needStart = !this._live.has(rec.id);
+      const needPublish = !!(rec.publicUrl && this.plugins && !this._published.has(rec.id));
+      if (!needStart && !needPublish) continue;
+      const at = this._healRetryAt.get(rec.id) || 0;
+      if (Date.now() < at) continue;
+      this._healRetryAt.set(rec.id, Date.now() + 5 * 60000);
+      try {
+        if (needStart) { await this._start(rec); rec.error = null; this._probeForward(rec); }
+        const pubOk = await this._republish(rec);
+        if (pubOk) { this._healRetryAt.delete(rec.id); rec.error = null; }
+        changed = true;
+      } catch (e) { if (rec.error !== e.message) { rec.error = e.message; changed = true; } }
+    }
+    if (changed) { this._persist(); this._emit(); }
   }
 
   /** A machine was unpaired/removed — drop its forwards. */
@@ -517,6 +595,8 @@ class PortForwardManager {
       if (rec.publicUrl && this.plugins) { this.plugins.frpUnpublish(rec.publicName || rec.id).catch(() => {}); }
       const l = this._live.get(rec.id);
       if (l) { for (const s of l.sockets) { try { s.destroy(); } catch {} } try { l.server.close(); } catch {} this._live.delete(rec.id); }
+      this._published.delete(rec.id);
+      this._healRetryAt.delete(rec.id);
     }
     this._state.forwards = this._state.forwards.filter((r) => r.hostId !== hostId);
     this._persist();
