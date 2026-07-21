@@ -2257,6 +2257,21 @@ const tasks = new TaskGroupManager({
     wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
   },
 });
+// System info + memory-pressure watch (2.216.0, lengyue's 32Gi OOM kill —
+// the pod-level kill takes every dtach session; warn BEFORE the kernel acts)
+const sysinfo = require('./src/sysinfo');
+app.get('/api/sysinfo', async (req, res) => {
+  try { res.json(await sysinfo.read(path.join(__dirname, 'data'))); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+sysinfo.startWatch({
+  dataDir: path.join(__dirname, 'data'),
+  broadcast: (msg) => {
+    const json = JSON.stringify(msg);
+    wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
+  },
+});
+
 app.get('/api/tasks', (req, res) => res.json({ tasks: tasks.list() }));
 app.post('/api/tasks', (req, res) => {
   try { res.json({ success: true, task: tasks.create(req.body || {}) }); }

@@ -230,6 +230,17 @@ class App {
       if (msg.type === 'accounts-updated' && Array.isArray(msg.accounts)) {
         this._accounts = { ...(this._accounts || {}), accounts: msg.accounts, defaultAccountId: msg.defaultAccountId || null, defaultCodexAccountId: msg.defaultCodexAccountId || null };
       }
+      if (msg.type === 'sysinfo-alert') {
+        // Memory pressure (2.216.0, lengyue's OOM kill): warn BEFORE the
+        // kernel kills the pod (which takes every dtach session with it).
+        this.sidebar?._railSysBadge?.(msg.pct);
+        const top = (msg.procs || [])[0];
+        const topStr = top ? ` ${t('Top consumer:')} ${Math.round(top.rss / 1048576)}MB ${(top.cmd || '').slice(0, 48)}` : '';
+        showToast(
+          t('Memory at {pct}% of the container limit — an OOM kill would end EVERY session.', { pct: msg.pct }) + topStr,
+          { type: msg.level >= 2 ? 'error' : undefined },
+        );
+      }
     });
 
     // Anthropic accounts (subscription ↔ API key, per-session billing identity)

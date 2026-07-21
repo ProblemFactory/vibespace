@@ -30,6 +30,7 @@ const RAIL_ICONS = {
   plugins: R('<path d="M9 3v4M15 3v4M7 7h10v5a5 5 0 0 1-10 0zM12 17v4"/>'),
   diagnostics: R('<path d="M3 12h4l2-7 4 14 2-7h6"/>'),
   settings: R('<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1L7 17M17 7l2.1-2.1"/>'),
+  system: R('<path d="M12 12l3.5-3.5"/><path d="M5 19a9 9 0 1 1 14 0"/>'),
 };
 
 // 13px action icons for the ports rows (emoji glyphs clash with the mono
@@ -44,13 +45,13 @@ const PORT_ICONS = {
   copy: A('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>'),
 };
 
-const PANEL_TABS = ['ports', 'agents', 'plugins'];
+const PANEL_TABS = ['ports', 'agents', 'plugins', 'system'];
 
 // Sidebar header title per rail item (the tab bar is hidden, so the header is
 // the only label saying which panel is showing).
 const RAIL_TITLES = {
   folders: 'Sessions', tasks: 'Task Groups', mounts: 'Remote',
-  ports: 'Ports', agents: 'Agents', plugins: 'Plugins',
+  ports: 'Ports', agents: 'Agents', plugins: 'Plugins', system: 'System',
 };
 
 export function installSidebarRail(Sidebar) {
@@ -97,6 +98,7 @@ export function installSidebarRail(Sidebar) {
         item('ports', tr('Ports'), () => this._railGo('ports')),
         item('agents', tr('Agents'), () => this._railGo('agents')),
         item('plugins', tr('Plugins'), () => this._railGo('plugins')),
+        item('system', tr('System'), () => this._railGo('system')),
       );
       const spacer = document.createElement('div');
       spacer.className = 'rail-spacer';
@@ -169,6 +171,9 @@ export function installSidebarRail(Sidebar) {
         const n = (r?.errors || []).reduce((a, g) => a + (g.count || 0), 0);
         if (n) this._railSetBadge('diagnostics', n > 99 ? '99+' : n);
       }).catch(() => {});
+      // system: one probe at load; live updates ride the sysinfo-alert
+      // broadcast (app.js toasts it and calls _railSysBadge)
+      fetchJson('/api/sysinfo').then((r) => this._railSysBadge(r?.mem?.pct)).catch(() => {});
     },
 
     async _railRefreshBadges() {
@@ -232,7 +237,55 @@ export function installSidebarRail(Sidebar) {
       }
       else if (this._activeTab === 'agents') this.app._showAgentsDialog?.({ container: c });
       else if (this._activeTab === 'ports') this._renderPortsPanel(c);
+      else if (this._activeTab === 'system') this._renderSystemPanel(c);
       this._railSync();
+    },
+
+    /** Memory badge on the System rail icon: shown at ≥80% (amber via CSS
+     *  class), red ≥92%. Called from the load probe + sysinfo-alert pushes. */
+    _railSysBadge(pct) {
+      if (!this._railEl) return;
+      const b = this._railEl.querySelector('.rail-item[data-rail="system"]');
+      if (!b) return;
+      this._railSetBadge('system', pct >= 80 ? pct + '%' : '');
+      b.classList.toggle('rail-danger', pct >= 92);
+      b.classList.toggle('rail-warn', pct >= 80 && pct < 92);
+    },
+
+    // ── System panel: container memory / disk / load / top processes ──
+    async _renderSystemPanel(c) {
+      c.innerHTML = `<div class="empty-hint">${escHtml(tr('Loading…'))}</div>`;
+      const fmt = (b) => b >= 1073741824 ? (b / 1073741824).toFixed(1) + ' GB' : Math.round(b / 1048576) + ' MB';
+      const bar = (pct, label) => {
+        const color = pct >= 92 ? 'var(--red, #e55)' : pct >= 80 ? 'var(--yellow, #e5c07b)' : 'var(--green, #3fb950)';
+        return `<div class="sys-bar" title="${escHtml(label)}"><div class="sys-bar-fill" style="width:${Math.min(100, pct)}%;background:${color}"></div><span class="sys-bar-label">${escHtml(label)}</span></div>`;
+      };
+      const render = async () => {
+        if (!c.isConnected) return;
+        let d = null;
+        try { d = await fetchJson('/api/sysinfo'); } catch { }
+        if (!d || !c.isConnected) return;
+        this._railSysBadge(d.mem?.pct || 0);
+        const parts = [];
+        parts.push(`<div class="usage-section-title">${escHtml(tr('Memory'))}</div>`);
+        parts.push(bar(d.mem.pct, `${fmt(d.mem.used)} / ${fmt(d.mem.limit)} · ${d.mem.pct}%`));
+        if (d.mem.pct >= 80) parts.push(`<div class="usage-warn">${escHtml(tr('Close to the container limit — the kernel may OOM-kill the whole instance (all sessions die). Stop the top consumers below.'))}</div>`);
+        if (d.disk) {
+          parts.push(`<div class="usage-section-title">${escHtml(tr('Disk (workspace)'))}</div>`);
+          parts.push(bar(d.disk.pct, `${fmt(d.disk.used)} / ${fmt(d.disk.total)} · ${d.disk.pct}%`));
+        }
+        parts.push(`<div class="usage-section-title">${escHtml(tr('Load'))}</div>`);
+        parts.push(`<div class="sys-load">${d.load.join(' · ')} <span class="sys-load-cpus">/ ${d.cpus} CPU</span></div>`);
+        parts.push(`<div class="usage-section-title">${escHtml(tr('Top processes (by memory)'))}</div>`);
+        for (const p of d.procs || []) {
+          parts.push(`<div class="sys-proc" title="${escHtml(p.cmd)}"><span class="sys-proc-rss">${fmt(p.rss)}</span><span class="sys-proc-cmd">${escHtml(p.cmd.slice(0, 70))}</span></div>`);
+        }
+        parts.push(`<div class="empty-hint empty-hint-inline">${escHtml(tr('Orphaned dev servers show in Ports with a Kill button'))}</div>`);
+        c.innerHTML = parts.join('');
+      };
+      await render();
+      const t = setInterval(() => { if (!c.isConnected) { clearInterval(t); return; } render(); }, 5000);
+      this._panelDispose = () => clearInterval(t);
     },
 
     // ── Ports panel (the vscode PORTS analogue) ──

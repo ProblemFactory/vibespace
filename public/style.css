@@ -3005,6 +3005,17 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .ports-pub { font-size: 10px; }
 
 .rail-badge { position: absolute; top: 2px; right: 2px; min-width: 13px; height: 13px; padding: 0 3px; border-radius: 999px; background: var(--accent); color: var(--accent-fg); font-size: 9px; font-weight: 700; line-height: 13px; text-align: center; pointer-events: none; }
+.rail-item.rail-warn .rail-badge { background: var(--yellow, #e5c07b); color: #1a1a1a; }
+.rail-item.rail-danger .rail-badge { background: var(--red, #e55); color: #fff; }
+/* System rail panel (2.216.0): memory/disk bars + top processes */
+.sys-bar { position: relative; height: 16px; border-radius: var(--radius-sm); background: var(--bg-input); border: 1px solid var(--border); overflow: hidden; margin: 4px 0 8px; }
+.sys-bar-fill { position: absolute; left: 0; top: 0; bottom: 0; opacity: .45; transition: width .4s; }
+.sys-bar-label { position: relative; display: block; font-size: 10px; line-height: 14px; text-align: center; color: var(--text); }
+.sys-load { font-size: 11px; color: var(--text-secondary); margin: 2px 0 8px; }
+.sys-load-cpus { color: var(--text-dim); }
+.sys-proc { display: flex; gap: 6px; align-items: baseline; font-size: 10px; padding: 2px 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent); min-width: 0; }
+.sys-proc-rss { flex: 0 0 52px; text-align: right; color: var(--text-secondary); font-weight: 600; }
+.sys-proc-cmd { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); font-family: monospace; }
 .rail-item[data-rail="tasks"] .rail-badge, .rail-item[data-rail="mounts"] .rail-badge { background: var(--yellow, #e5c07b); color: #1a1a1a; }
 .rail-item[data-rail="diagnostics"] .rail-badge { background: var(--red, #e55); color: #fff; }
 body.sidebar-right #sidebar-rail { order: 2; border-right: none; border-left: 1px solid var(--border); }
