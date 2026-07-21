@@ -402,6 +402,10 @@ class ChatView {
     // Listen for normalized message ops from server
     this._handler = (msg) => {
       if (msg.type === 'msg' && msg.sessionId === sessionId) {
+        // Any live op for this session proves the socket that carried the last
+        // send was alive server-side — finalize the deferred draft clear
+        // (chat-input dead-ws-window loss defense).
+        this._chatInput?.confirmDelivery?.();
         this._onOp(msg);
       } else if (msg.type === 'streaming-label' && msg.sessionId === sessionId) {
         if (msg.label) this._showTyping(msg.label);

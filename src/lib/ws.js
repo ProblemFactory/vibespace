@@ -45,6 +45,54 @@ class WsManager {
   }
   get connected() { return this._connected; }
   send(d) { const m = JSON.stringify(d); this.ws?.readyState === 1 ? this.ws.send(m) : this.pending.push(m); }
+  // One-time request/reply: sends `msg`, watches the global stream until
+  // matchFn(m) returns truthy (reply consumed), then unhooks itself. Retires
+  // the hand-rolled one-time-handler pattern (2026-07-03 review structural
+  // recommendation) with its three recurring failure modes:
+  // - isAlive() false (window closed before the reply) → self-cleanup, so the
+  //   handler can't bind a session into a dead winInfo or leak forever.
+  // - timeoutMs/onTimeout: watchdog fires ONCE but the handler stays armed —
+  //   a late reply must still bind (matches the old watchdog semantics).
+  // - resend: true → re-send the original msg on every ws reconnect while
+  //   unanswered. A request written to a socket that died before answering
+  //   dead-ended forever (the server restarted between request and reply and
+  //   never saw it — blank-shell class); pending-flush in send() only covers
+  //   messages queued while ALREADY disconnected. Callers opt in per the
+  //   idempotency of their request.
+  // Returns a cancel() for callers that need early teardown.
+  request(msg, matchFn, { isAlive, timeoutMs, onTimeout, resend = false } = {}) {
+    let done = false, timer = null;
+    const cleanup = () => {
+      if (done) return;
+      done = true;
+      if (timer) clearTimeout(timer);
+      this.offGlobal(handler);
+      this.offStateChange(stateH);
+    };
+    const handler = (m) => {
+      if (done) return;
+      if (isAlive && !isAlive()) { cleanup(); return; }
+      // matchFn errors must not tear down the request — a throwing branch
+      // mid-build would otherwise leave the window permanently half-bound.
+      let matched = false;
+      try { matched = !!matchFn(m); } catch (err) { console.error('[ws] request match error', err); }
+      if (matched) cleanup();
+    };
+    const stateH = (connected) => {
+      if (!connected || done || !resend) return;
+      if (isAlive && !isAlive()) { cleanup(); return; }
+      // Request made while disconnected → the original still sits in the
+      // pending queue and onopen's flush (which runs AFTER state notify) will
+      // deliver it — a resend here would double-send (double-spawn class).
+      if (this.pending.includes(JSON.stringify(msg))) return;
+      this.send(msg);
+    };
+    this.onGlobal(handler);
+    this.onStateChange(stateH);
+    if (timeoutMs) timer = setTimeout(() => { if (!done) onTimeout?.(); }, timeoutMs);
+    this.send(msg);
+    return cleanup;
+  }
   on(sid, h) { if (!this.handlers.has(sid)) this.handlers.set(sid, []); this.handlers.get(sid).push(h); }
   off(sid) { this.handlers.delete(sid); }
   onGlobal(h) { this.globalHandlers.push(h); }
