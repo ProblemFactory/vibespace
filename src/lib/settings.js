@@ -34,6 +34,25 @@ class SettingsManager {
     }
   }
 
+  /** Reconnect refetch (2.219.0): broadcast-only sync misses changes made
+   * while this tab was offline. Skips while a local save is in flight (the
+   * 2.177.0 stale-echo class — a refetch mid-debounce would revert it). */
+  async refetch() {
+    if (this._saveTimer) return;
+    try {
+      const res = await fetch('/api/settings');
+      if (!res.ok) return;
+      const fresh = await res.json();
+      for (const [path, val] of Object.entries(fresh)) {
+        if (JSON.stringify(this._values[path]) !== JSON.stringify(val)) {
+          const old = this._values[path];
+          this._values[path] = val;
+          this._notify(path, val, old);
+        }
+      }
+    } catch { }
+  }
+
   _loadFromLocalStorage() {
     try {
       const stored = localStorage.getItem('webui-settings');

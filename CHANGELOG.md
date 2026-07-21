@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.219.0
+
+Restart-robustness batch 2 — first slice of the 54-finding restart-survival audit (9-agent workflow, adversarially verified) + two live fleet incidents:
+
+- **CRITICAL — dial sessions now survive server restarts**: the dial-bridge restore loop read session meta under a cw-stripped filename that NEVER matched, so no bridge was ever re-listened — every paired-device session died on any restart (wrapper reconnecting forever against a dead port). Fixed the key + the bridge is registered under the recorded webui id so terminate can find it.
+- **Implicit-fork adoption** (lengyue's "对话在 compact recap 里有、窗口里不展示"): resuming a conversation still LOCKED by another live claude makes the CLI silently fork to a new session id; the 2.156.1 hijack guard vetoed the change, so VibeSpace kept tracking the old id while claude wrote the new file — live stream showed the turns, every rebuilt history lost them. An id change on the first id-bearing line of a RESUME spawn is now adopted (mid-stream changes stay vetoed).
+- **Failed-resume window rescue**: resume closes the old read-only window before creating; a failed create left a spec-less "Create failed" shell that evaporated on refresh — silently losing the window from the layout (how "Mega Fish 训练" vanished). The shell now flips into view-only history + Resume with a real viewSession openSpec.
+- **Transport flags survive restarts**: `agentdSession` + `forkRequested` persisted in session meta and restored; the ssh chat terminate script is now mechanism-agnostic (tries both the agentd state-file kill and the keeper stop — a restored agentd session's terminate used to no-op silently, leaving the remote claude running).
+- **B-1525 first half**: dead-socket cleanup preserves REMOTE sessions' metas as tagged orphan files instead of deleting the only local record of their keeper/dial identity.
+- Atomic `writeSessionMeta` (tmp+rename — the most-written store was the only non-atomic one); crash-path (`uncaughtException`) now runs the same flush belt as clean shutdown; telemetry flush added to shutdown.
+- Restart continuity smalls: agent todo list + `/goal resume` state restored from metas; reconnect refetches maintenance state + settings (broadcast-only stores went stale across an outage); reattach safety timer 5s→30s (huge-transcript attaches lost their catch-up); unknown-prior-epoch reattach does a full view reload (silent message drops); read-only windows skip reattach.
+
 ## 2.218.0
 
 Restart-robustness batch 1 (real fleet incident — host-less resumes of remote conversations):

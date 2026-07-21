@@ -301,6 +301,11 @@ class App {
       if (!connected) return;
       this._checkBundleFreshness(); // stale-bundle tab after a server update → one-shot reload
       if (!this._vncAvailable) this._probeVncAvailability(); // may have failed during a restart-window page load
+      // Broadcast-only stores go stale across an outage — refetch once per
+      // reconnect (2.219.0 audit: maintenance banner + settings missed
+      // changes made while this tab was disconnected)
+      fetchJson('/api/maintenance').then((m) => { if (m) this._renderMaintenance?.(m); }).catch(() => {});
+      try { this.settings?.refetch?.(); } catch {}
       for (const [winId, session] of this.sessions) {
         if (session instanceof TerminalSession && session.sessionId) {
           this.ws.send({ type: 'attach', sessionId: session.sessionId });
@@ -498,6 +503,7 @@ class App {
       clearTimeout(this._maintTimer);
       if (m.until) this._maintTimer = setTimeout(() => render({ active: false }), Math.max(1000, m.until - Date.now()));
     };
+    this._renderMaintenance = render; // reconnect refetch re-renders through this
     fetchJson('/api/maintenance').then((m) => { if (m) render(m); }).catch(() => {});
     this.ws.onGlobal((msg) => { if (msg.type === 'maintenance-updated') render(msg.maintenance); });
   }

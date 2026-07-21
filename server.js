@@ -1025,8 +1025,22 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
             // meta kept null forever and attach's transcript prefetch died on
             // it. Hijack-safety is preserved: with NO tracked id there is
             // nothing to hijack, and a CHANGED id still requires _forkRequested.
+            // IMPLICIT FORK adoption (2.219.0, lengyue real incident): a
+            // `claude --resume <id>` whose conversation is LOCKED by another
+            // live claude (an orphaned keeper child) silently forks to a NEW
+            // session id — no fork flag from us, claude's own double-writer
+            // protection. The 2.156.1 hijack guard vetoed that change, so
+            // VibeSpace kept tracking the OLD id while claude wrote the new
+            // file: the live stream showed the turns, every restart-rebuilt
+            // history lost them ("compact recap 里有, 窗口里不展示"). An id
+            // change on the FIRST id-bearing line of a RESUME spawn is claude
+            // telling us the real id — adopt it (mid-stream changes without
+            // the fork flag stay vetoed).
+            const implicitFork = session._resumeSpawn && !session._sawFirstId
+              && session.backendSessionId && msg.session_id !== session.backendSessionId;
+            if (typeof msg.session_id === 'string' && msg.session_id) session._sawFirstId = true;
             if (typeof msg.session_id === 'string' && msg.session_id
-                && (!session.backendSessionId || (session._forkRequested && session.backendSessionId !== msg.session_id))) {
+                && (!session.backendSessionId || ((session._forkRequested || implicitFork) && session.backendSessionId !== msg.session_id))) {
               if (session.backendSessionId) {
                 const prev = session.forkedFrom || [];
                 if (!prev.includes(session.backendSessionId)) prev.push(session.backendSessionId);
@@ -1417,7 +1431,13 @@ const _metaTombstones = new Map(); // sockName → deletedAt
 function writeSessionMeta(sockName, meta) {
   if (_metaTombstones.has(sockName)) return;
   ensureDir(META_DIR);
-  fs.writeFileSync(path.join(META_DIR, sockName + '.json'), JSON.stringify(meta));
+  // tmp+rename (2.219.0): the most frequently written core store was the only
+  // non-atomic one — an OOM kill mid-write left truncated JSON that poisoned
+  // the next restore.
+  const fp = path.join(META_DIR, sockName + '.json');
+  const tmp = fp + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(meta));
+  fs.renameSync(tmp, fp);
   try { recordUsageAttribution(meta); } catch {} // usage-ledger account-by-time
 }
 function deleteSessionMeta(sockName) {
@@ -1475,9 +1495,14 @@ function restoreSessions() {
   // host-mounts tunnel re-own pattern). Must happen before wrappers retry.
   for (const sockFile of sockets) {
     try {
-      const m = readSessionMeta(sockFile.replace(/^cw-/, '').replace(/\.sock$/, '')) || {};
+      // Metas are keyed by the FULL sockName (cw-N-TS) — the old cw-stripped
+      // read NEVER matched, so no dial bridge was ever restored and every
+      // dial session died on any server restart (2.219.0 audit CRITICAL;
+      // wrapper reconnected forever against the dead port). Bridge keyed by
+      // the recorded webui id so kill's dialBridge.close(sessionId) finds it.
+      const m = readSessionMeta(sockFile) || {};
       if (m.dialDeviceId && m.bridgePort) {
-        dialBridge.ensure({ sid: sockFile.replace(/^cw-/, ''), deviceId: m.dialDeviceId, port: m.bridgePort })
+        dialBridge.ensure({ sid: m.webuiSessionId || sockFile, deviceId: m.dialDeviceId, port: m.bridgePort })
           .catch((e) => console.warn('[dial-bridge] restore failed:', e.message));
       }
     } catch { }
@@ -1542,6 +1567,23 @@ function restoreSessions() {
     if (!socketAlive) {
       console.log(`  ✗ Dead socket: ${sockFile} — cleaning up`);
       try { fs.unlinkSync(socketPath); } catch {}
+      // B-1525 (2.219.0): a REMOTE session's meta holds the ONLY local record
+      // of its keeper sid / dial device — the remote half (keeper daemon,
+      // device pipe session) survives a pod-level death, and deleting the
+      // meta here orphaned it forever (lengyue's h200 keeper claudes needed
+      // manual surgery). Keep those metas tagged orphanedAt for re-adopt
+      // (resume host-inference + findKeeperFor consume them); local-only
+      // sessions keep the old cleanup.
+      try {
+        const dm = readSessionMeta(sockFile) || {};
+        if ((dm.host || dm.dialDeviceId) && !dm.orphanedAt) {
+          writeSessionMeta(sockFile.replace(/\.orphan$/, ''), { ...dm, orphanedAt: Date.now() });
+          const op = path.join(META_DIR, sockFile + '.json');
+          fs.renameSync(op, op + '.orphan');
+          console.log(`    ↳ remote session meta preserved as orphan (${dm.keeperSid || dm.dialDeviceId || dm.host})`);
+          continue;
+        }
+      } catch { }
       deleteSessionMeta(sockFile);
       continue;
     }
@@ -1578,6 +1620,13 @@ function restoreSessions() {
       if (wrapperMeta.mode === 'chat') sessionMode = 'chat';
       if (wrapperMeta.streaming != null) wrapperStreaming = !!wrapperMeta.streaming;
       if (wrapperMeta.goal) { wrapperGoal = wrapperMeta.goal; wrapperGoalStatus = wrapperMeta.goalStatus || null; wrapperGoalElapsed = wrapperMeta.goalElapsed || 0; wrapperGoalTokens = wrapperMeta.goalTokensUsed || 0; }
+      // Agent's live todo list survives the restart (2.219.0 audit — the
+      // card's progress pill/Steps went blank until the next TodoWrite)
+      if (Array.isArray(wrapperMeta.todos) && wrapperMeta.todos.length) {
+        const done = wrapperMeta.todos.filter((t) => t?.status === 'completed').length;
+        const cur = wrapperMeta.todos.find((t) => t?.status === 'in_progress');
+        var wrapperTodos = { done, total: wrapperMeta.todos.length, current: cur ? String(cur.content || cur.activeForm || cur.step || '').slice(0, 140) : null };
+      }
       // B-0845: a REMOTE chat session restored WITHOUT the wrapper's remote
       // field predates the keeper (2.124.0) — claude hangs bare off the ssh
       // pipe and one network wobble kills the conversation. Surface it.
@@ -1594,6 +1643,12 @@ function restoreSessions() {
       host: meta.host || null,
       _bareRemote: bareRemote,
       keeperSid: meta.keeperSid || null,
+      _agentdSession: !!meta.agentdSession, // transport mechanism (2.219.0 — kill branch correctness)
+      _todos: (typeof wrapperTodos !== 'undefined' && wrapperTodos) || null,
+      _prevGoal: meta.prevGoal || null, // /goal resume works across restarts
+      _forkRequested: !!meta.forkRequested, // pending fork-id adoption survives restart
+      _dialDeviceId: meta.dialDeviceId || null,
+      _bridgePort: meta.bridgePort || null,
       hostName: meta.hostName || null,
       name: meta.name || sockFile,
       createdAt: meta.createdAt || Date.now(),
@@ -2414,7 +2469,16 @@ const telemetry = new Telemetry({
 });
 // Server-side fatals land in the same ledger (journald has them too, but the
 // diagnostics report should show one unified picture).
-process.on('uncaughtException', (e) => { try { telemetry.record({ kind: 'server-error', name: e.message || 'uncaughtException', stack: e.stack }); telemetry.flush(); } catch {} console.error(e); process.exit(1); });
+process.on('uncaughtException', (e) => {
+  try { telemetry.record({ kind: 'server-error', name: e.message || 'uncaughtException', stack: e.stack }); telemetry.flush(); } catch {}
+  // Same flush belt as the clean shutdown (2.219.0 audit) — a crash used to
+  // drop up to 2s of debounced writes (layouts, session-status, user-todos).
+  try { for (const store of Object.values(syncStores)) { try { store.flush(); } catch {} } } catch {}
+  try { flushLayouts(); } catch {}
+  try { sessionStatus.flush(); } catch {}
+  try { userTodos.flush(); } catch {}
+  console.error(e); process.exit(1);
+});
 process.on('unhandledRejection', (e) => { try { telemetry.record({ kind: 'server-error', name: (e && e.message) || 'unhandledRejection', stack: e && e.stack }); } catch {} console.error('unhandledRejection:', e); });
 
 // Server performance metrics — RSS/heap, event-loop lag, live session count.
@@ -3998,6 +4062,7 @@ function shutdown() {
   try { flushLayouts(); } catch {}
   try { sessionStatus.flush(); } catch {} // debounced session-status writes
   try { userTodos.flush(); } catch {} // debounced user-todo writes
+  try { telemetry.flush(); } catch {} // buffered telemetry records (2.219.0)
   process.exit(0);
 }
 process.on('SIGINT', () => {

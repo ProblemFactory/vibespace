@@ -1782,6 +1782,9 @@ class ChatView {
 
   // Re-attach to session after reconnect: re-register with server + sync missed messages
   _reattach(keepDisabled = false) {
+    // Read-only windows (view-history, terminated, rescued) have nothing to
+    // re-attach — a bare attach of a view-/dead id just errors (2.219.0 audit)
+    if (this._readOnly) return;
     // Keep input disabled until server confirms re-attach — prevents
     // sending messages before the WS is registered in session.clients
     if (keepDisabled && this._chatInput) this._chatInput.setDisconnected(true);
@@ -1820,7 +1823,10 @@ class ChatView {
       // we've already rendered — incremental catch-up would silently DROP new
       // messages (false dedup in _renderedMsgIds) and corrupt indices. The
       // only safe move is a full view reload from the attach payload.
-      const epochChanged = msg.normEpoch && epochBefore && msg.normEpoch !== epochBefore;
+      // UNKNOWN prior epoch (createSession-born window that never saw an
+      // 'attached') counts as changed — incremental catch-up against a
+      // possibly-rebuilt normalizer silently drops messages (2.219.0 audit)
+      const epochChanged = msg.normEpoch && msg.normEpoch !== epochBefore;
       if (msg.normEpoch) this._normEpoch = msg.normEpoch;
       if (epochChanged) { this._fullViewReset(msg); return; }
       // Sync streaming label from server
@@ -1829,11 +1835,13 @@ class ChatView {
       this._reattachCatchUp();
     };
     this.ws.onGlobal(handler);
-    // Safety: re-enable after 5s even if attached never arrives
+    // Safety: re-enable after 30s even if attached never arrives (was 5s —
+    // a huge-transcript attach takes longer and the early removal killed the
+    // catch-up while leaving the input live on a stale view; 2.219.0 audit)
     setTimeout(() => {
       this.ws.offGlobal(handler);
       if (this._chatInput) this._chatInput.setDisconnected(false);
-    }, 5000);
+    }, 30000);
   }
 
   // Same-epoch reconnect: fetch just the messages we missed while offline
