@@ -860,6 +860,8 @@ export default {
   "Which card kinds fold into the summary line. Enabled kinds collapse TOGETHER as one interleaved group (think → read → edit → run is the real work pattern; per-kind groups rarely get long enough to fold). Memory = operations on the agent's own memory directory — housekeeping, folded by default and listed as memory/<name> in the summary; project-file writes are off by default — diffs are usually worth seeing. A run of only thinking needs two or more; any tool card folds immediately. Cards waiting for your approval never fold.": "哪些卡片类型折叠进摘要行。启用的类型作为一个交错组一起折叠（思考→读→改→跑是真实工作模式；按类型分组很少能凑够长度）。记忆 = 对 agent 自身记忆目录的操作——属内务，默认折叠，摘要中显示为 memory/<名>；项目文件写入默认不折叠——diff 通常值得看。纯思考段需要两条以上；任何工具卡立即折叠。等待你批准的卡片永不折叠。",
   "Memory update": "记忆更新",
   "Memory read": "记忆读取",
+  "Copying {name}…": "正在复制 {name}…",
+  "Moving {name}…": "正在移动 {name}…",
   "· logged in on {host}": "· 已在 {host} 登录",
   "not logged in on {host}": "未在 {host} 登录",
   "This account holds its own login ON {host} (minted there, never leaves it) — sessions on {host} picking it use that login.": "这个账号在 {host} 上有自己的独立登录（在那台机器上生成、永不离开）——{host} 上的会话选它即使用该登录。",

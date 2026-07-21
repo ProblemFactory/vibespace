@@ -753,6 +753,75 @@ router.post('/api/archive/extract', async (req, res) => {
   });
 });
 
+// ── Copy/move progress ops (2.215.0, user ask: a big — especially
+// CROSS-MACHINE — copy held the HTTP request with ZERO feedback). Same
+// pattern as archive extraction: POST with progress:true returns an opId
+// immediately, GET /api/file/transfer-status polls {done,total(bytes),
+// status,error,dest}, DELETE cancels (best-effort — a local worker copy
+// can't be aborted mid-flight; the op is marked cancelled and the UI moves
+// on). Cross-host relays count bytes INLINE on the stream; local/same-host
+// branches poll `du` on the destination. ──
+const transferOps = new Map(); // opId → {done,total,status,error,dest,cancel}
+router.get('/api/file/transfer-status', (req, res) => {
+  const op = transferOps.get(String(req.query.id || ''));
+  if (!op) return res.status(404).json({ error: 'unknown op' });
+  res.json({ done: op.done, total: op.total, status: op.status, error: op.error, dest: op.dest });
+});
+router.delete('/api/file/transfer-status', (req, res) => {
+  const op = transferOps.get(String(req.query.id || ''));
+  if (!op) return res.status(404).json({ error: 'unknown op' });
+  op.status = 'cancelled';
+  try { op.cancel?.(); } catch {}
+  res.json({ success: true });
+});
+// du-based byte totals/progress. Portable: GNU `du -sb`, BSD falls back to
+// -sk × 1024 (macOS hosts have no -b).
+const DU_SH = (p) => { const q = `'${String(p).replace(/'/g, `'\\''`)}'`; return `du -sb ${q} 2>/dev/null | cut -f1 | grep . || du -sk ${q} 2>/dev/null | awk '{print $1*1024}'`; };
+function localDuBytes(p) {
+  return new Promise((resolve) => {
+    try {
+      const st = fs.statSync(p);
+      if (!st.isDirectory()) return resolve(st.size);
+    } catch { return resolve(0); }
+    execFile('sh', ['-c', DU_SH(p)], { timeout: 30000 }, (e, out) => resolve(parseInt(out, 10) || 0));
+  });
+}
+function remoteDuBytes(inst, host, p) {
+  return inst._run(host, DU_SH(p)).then((r) => parseInt(r.stdout ?? r, 10) || 0).catch(() => 0);
+}
+// Poll dest size into op.done while a branch we can't instrument runs.
+function attachDuPoll(op, duFn) {
+  const t = setInterval(async () => { const b = await duFn(); if (b > op.done) op.done = b; }, 1200);
+  t.unref?.();
+  return () => clearInterval(t);
+}
+// Run a route body detached from the HTTP response: the sink records the
+// outcome on the op; the client learns it from the poll.
+function opSink(op, opId) {
+  const done = (o) => {
+    if (op.status === 'cancelled') return;
+    if (o && o.error) { op.status = 'error'; op.error = o.error; op.dest = o.dest || op.dest; }
+    else { op.status = 'done'; op.dest = o?.dest || op.dest; if (op.total) op.done = op.total; }
+    setTimeout(() => transferOps.delete(opId), 5 * 60 * 1000);
+  };
+  return { json: done, status: () => ({ json: done }) };
+}
+// progress:true entry — answer with the opId immediately, run the normal
+// route body detached with an opSink. The synchronous-409 overwrite check
+// still runs INSIDE the body; in op mode it surfaces as error:'exists',
+// which the client maps back onto its confirm-overwrite flow.
+function startTransferOp(req, res, body) {
+  const opId = 'tf-' + require('crypto').randomBytes(6).toString('hex');
+  const op = { done: 0, total: 0, status: 'running', error: null, dest: req.body?.dest || null, cancel: null };
+  transferOps.set(opId, op);
+  req._transferOp = op;
+  res.json({ success: true, opId });
+  Promise.resolve(body(req, opSink(op, opId))).catch((e) => {
+    if (op.status === 'running') { op.status = 'error'; op.error = e.message; }
+    setTimeout(() => transferOps.delete(opId), 5 * 60 * 1000);
+  });
+}
+
 // Cross-host transfer relay: stream src (local or remote) → dest (local or
 // remote) through the server. Smart selection: same host uses remote cp/mv
 // (handled below); different hosts (or host↔local) stream here.
@@ -760,6 +829,9 @@ async function crossHostTransfer(req, res, { move }) {
   const { src, dest, srcHost, destHost, overwrite } = req.body || {};
   if (!src || !dest) return res.status(400).json({ error: 'src and dest required' });
   const inst = req.app.locals.getRemoteFs?.();
+  const op = req._transferOp || null;
+  if (op) (srcHost ? remoteDuBytes(inst, srcHost, src) : localDuBytes(safePath(src))).then((b) => { if (b) op.total = b; });
+  const count = (stream) => { if (op && stream) stream.on('data', (d) => { op.done += d.length; }); };
   const isDir = async (host, p) => host ? (await inst.info(host, p)).isDirectory : fs.statSync(safePath(p)).isDirectory();
   let dir;
   try { dir = await isDir(srcHost, src); } catch (e) { return res.status(400).json({ error: 'source not found: ' + e.message }); }
@@ -794,6 +866,8 @@ async function crossHostTransfer(req, res, { move }) {
         destChild = spawn('tar', ['-xf', '-', '-C', dParent]);
         if (path.basename(dp) !== base) localRename = { from: path.join(dParent, base), to: dp };
       }
+      count(srcChild.stdout);
+      if (op) op.cancel = () => { try { srcChild.kill('SIGTERM'); } catch {} try { destChild.kill('SIGTERM'); } catch {} };
       srcChild.stdout.pipe(destChild.stdin);
       let srcErr = '', dstErr = '';
       srcChild.stderr?.on('data', d => { srcErr += d; });
@@ -811,6 +885,8 @@ async function crossHostTransfer(req, res, { move }) {
   let reader;
   if (srcHost) reader = inst._spawn(srcHost, `cat '${String(src).replace(/'/g, `'\\''`)}'`).stdout;
   else reader = fs.createReadStream(safePath(src));
+  count(reader);
+  if (op) op.cancel = () => { try { reader.destroy(new Error('cancelled')); } catch {} };
   try {
     if (destHost) {
       const h = inst._host(destHost);
@@ -829,27 +905,44 @@ async function crossHostTransfer(req, res, { move }) {
 }
 
 // Copy file/dir (recursive). dest is the FULL target path.
-router.post('/api/file/copy', async (req, res) => {
+async function doCopy(req, res) {
   const { srcHost, destHost } = req.body || {};
+  const op = req._transferOp || null;
   // cross-host (or host↔local) → relay stream through the server
   if ((srcHost || destHost) && srcHost !== destHost) return crossHostTransfer(req, res, { move: false });
   const R = rfs(req) || (srcHost ? { fs: req.app.locals.getRemoteFs(), host: srcHost } : null);
-  if (R) { try { return res.json(await R.fs.copy(R.host, remotePath(req.body.src), remotePath(req.body.dest))); } catch (e) { return res.status(400).json({ error: e.message }); } }
+  if (R) {
+    let stop = null;
+    if (op) {
+      remoteDuBytes(R.fs, R.host, req.body.src).then((b) => { if (b) op.total = b; });
+      stop = attachDuPoll(op, () => remoteDuBytes(R.fs, R.host, req.body.dest));
+    }
+    try { return res.json(await R.fs.copy(R.host, remotePath(req.body.src), remotePath(req.body.dest))); }
+    catch (e) { return res.status(400).json({ error: e.message }); }
+    finally { stop?.(); }
+  }
   const { src, dest, overwrite } = req.body || {};
   if (!src || !dest) return res.status(400).json({ error: 'src and dest required' });
   const s = safePath(src), d = safePath(dest);
   if (s === d) return res.status(400).json({ error: 'source and destination are the same' });
   if (d.startsWith(s + '/')) return res.status(400).json({ error: 'cannot copy a folder into itself' });
+  let stop = null;
   try {
     if (!overwrite && (await sfs(req).call('exists', { path: d })).exists) return res.status(409).json({ error: 'exists', dest: d });
+    if (op) { localDuBytes(s).then((b) => { if (b) op.total = b; }); stop = attachDuPoll(op, () => localDuBytes(d)); }
     await sfs(req).call('copy', { src: s, dest: d, overwrite: !!overwrite });
     res.json({ success: true, dest: d });
-  } catch (e) { res.status(e.status || 400).json({ error: e.message }); }
+  } catch (e) { res.status(e.status || 400).json({ error: e.message }); } finally { stop?.(); }
+}
+router.post('/api/file/copy', async (req, res) => {
+  if (req.body?.progress) return startTransferOp(req, res, doCopy);
+  return doCopy(req, res);
 });
 
 // Move file/dir. dest is the FULL target path. Falls back to copy+rm across devices.
-router.post('/api/file/move', async (req, res) => {
+async function doMove(req, res) {
   const { srcHost, destHost } = req.body || {};
+  const op = req._transferOp || null;
   if ((srcHost || destHost) && srcHost !== destHost) return crossHostTransfer(req, res, { move: true });
   const R = srcHost ? { fs: req.app.locals.getRemoteFs(), host: srcHost } : null;
   if (R) { try { return res.json(await R.fs.move(R.host, remotePath(req.body.src), remotePath(req.body.dest))); } catch (e) { return res.status(400).json({ error: e.message }); } }
@@ -858,12 +951,20 @@ router.post('/api/file/move', async (req, res) => {
   const s = safePath(src), d = safePath(dest);
   if (s === d) return res.json({ success: true, dest: d }); // no-op
   if (d.startsWith(s + '/')) return res.status(400).json({ error: 'cannot move a folder into itself' });
+  let stop = null;
   try {
     if (!overwrite && (await sfs(req).call('exists', { path: d })).exists) return res.status(409).json({ error: 'exists', dest: d });
+    // same-device rename is instant — the poll only matters on the EXDEV
+    // copy+rm fallback, where dest grows measurably
+    if (op) { localDuBytes(s).then((b) => { if (b) op.total = b; }); stop = attachDuPoll(op, () => localDuBytes(d)); }
     // worker `move` handles the overwrite-rm + rename/EXDEV-fallback atomically
     await sfs(req).call('move', { src: s, dest: d, overwrite: !!overwrite });
     res.json({ success: true, dest: d });
-  } catch (e) { res.status(e.status || 400).json({ error: e.message }); }
+  } catch (e) { res.status(e.status || 400).json({ error: e.message }); } finally { stop?.(); }
+}
+router.post('/api/file/move', async (req, res) => {
+  if (req.body?.progress) return startTransferOp(req, res, doMove);
+  return doMove(req, res);
 });
 
 // Stream a folder (or file) as a zip download — no temp archive on disk
