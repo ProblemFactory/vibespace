@@ -10,6 +10,7 @@ import { ChatStatusBar } from './chat-status-bar.js';
 import { UI_ICONS } from './icons.js';
 import { t } from './i18n.js';
 import { agentMemoryPathRes } from './agent-meta.js';
+import { mcpParts } from './chat-renderers.js';
 
 // Agent-memory path patterns, PER BACKEND from BACKEND_META (agent-meta.js —
 // claude only today; codex has no memory feature; a new backend adds one
@@ -2123,13 +2124,14 @@ class ChatView {
       const hideEmptyThink = this.app?.settings?.get('chat.hideEmptyThinking') !== false;
       const hooksHidden = document.body.classList.contains('hide-hook-cards');
       const kindsArr = this.app?.settings?.get('chat.collapseKinds');
-      const kinds = new Set(Array.isArray(kindsArr) ? kindsArr : ['thinking', 'bash', 'read', 'memory']);
+      const kinds = new Set(Array.isArray(kindsArr) ? kindsArr : ['thinking', 'bash', 'read', 'memory', 'mcp']);
       // per-member classification (also used by flush() for the summary)
       const memberKind = (el) => {
         const m = el._rawMsg;
         if (el.classList.contains('chat-msg-tool-result')) {
           const tn = m?.content?.[0]?.toolName;
           if (tn === 'Bash') return 'bash';
+          if (mcpParts(tn)) return 'mcp'; // any MCP server's tool (2.215.3)
           if (tn === 'Read' || tn === 'Write' || tn === 'Edit' || tn === 'Patch') {
             // agent-memory file ops are their OWN kind (2.213.1, user ask:
             // each is a distinct user concern) — housekeeping vs project work
@@ -2182,14 +2184,21 @@ class ChatView {
           const header = document.createElement('div');
           header.className = 'chat-run-header';
           // per-kind counts (only non-zero kinds render)
-          const byKind = { thinking: 0, bash: 0, read: 0, write: 0, memory: 0 };
-          for (const el of members) { const k = memberKind(el); if (k) byKind[k]++; }
+          const byKind = { thinking: 0, bash: 0, read: 0, write: 0, memory: 0, mcp: 0 };
+          const mcpServers = new Set();
+          for (const el of members) {
+            const k = memberKind(el);
+            if (k) byKind[k]++;
+            if (k === 'mcp') { const mp = mcpParts(el._rawMsg?.content?.[0]?.toolName); if (mp) mcpServers.add(mp.server); }
+          }
           const parts = [];
           if (byKind.thinking) parts.push(t('{n} thinking', { n: byKind.thinking }));
           if (byKind.bash) parts.push(t('{n} Bash', { n: byKind.bash }));
           if (byKind.read) parts.push(t('{n} reads', { n: byKind.read }));
           if (byKind.write) parts.push(t('{n} writes', { n: byKind.write }));
           if (byKind.memory) parts.push(t('{n} memory', { n: byKind.memory }));
+          // single-server runs name the server — "8 MCP (chrome-devtools)"
+          if (byKind.mcp) parts.push(t('{n} MCP', { n: byKind.mcp }) + (mcpServers.size === 1 ? ` (${[...mcpServers][0]})` : ''));
           let label = parts.join(' · ');
           // touched files (user ask: don't lose the paths): writes first with
           // a ✎ mark, then reads; deduped display names, capped at 4 + "+N".

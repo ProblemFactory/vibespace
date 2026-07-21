@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.215.3 — 2026-07-21
+- **MCP tool calls join run-collapse** (user ask): a sixth kind in Card-kinds-that-collapse — any `mcp__*` tool card folds with the rest of the working noise (default ON; the browser-automation navigate/click/fill bursts were the reported pattern). The fold summary counts them ("8 次 MCP") and names the server when a run is single-server ("8 MCP (chrome-devtools)"). Approval-waiting MCP cards still never fold; failures still surface as the ✗ count.
+
 ## 2.215.2 — 2026-07-21
 - **MCP tool cards de-uglified** (user report: `mcp__chrome-devtools__navigate_page` as a card header): MCP ids split into the SHORT tool name (underscores → spaces) plus a small server pill ("navigate page \[CHROME-DEVTOOLS\]") — applied to pending/completed/error card headers and the typing indicator ("running navigate page · chrome-devtools"). The raw identifier stays in the card tooltip.
 

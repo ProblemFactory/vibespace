@@ -861,6 +861,8 @@ export default {
   "Memory read": "記憶読み取り",
   "Copying {name}…": "{name} をコピー中…",
   "Moving {name}…": "{name} を移動中…",
+  "MCP tool calls (any server)": "MCP ツール呼び出し（全サーバー）",
+  "{n} MCP": "MCP {n} 件",
   "· logged in on {host}": "・{host} でログイン済み",
   "not logged in on {host}": "{host} で未ログイン",
   "This account holds its own login ON {host} (minted there, never leaves it) — sessions on {host} picking it use that login.": "このアカウントは {host} 上に独自のログインを保持しています（そこで生成され、外に出ません）——{host} 上のセッションでこれを選ぶとそのログインを使用します。",
