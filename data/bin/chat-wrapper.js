@@ -359,6 +359,16 @@ try {
       try { process.stdout.write(JSON.stringify({ type: '_stdin_ack', timestamp: Date.now() }) + '\n'); } catch {}
       try {
         const parsed = JSON.parse(line);
+        // Permission answers (control_response) exist ONLY on this stdin path —
+        // the buffer file tees child STDOUT, so without recording them here a
+        // server restart rebuilds history as request-without-answer and an
+        // APPROVED still-running tool resurrects its Allow/Deny overlay on
+        // every attach until the tool_result lands. Append to the buffer so
+        // restart-rebuilt history keeps the resolution.
+        if (parsed.type === 'control_response') {
+          buffer += line + '\n';
+          schedulePersist();
+        }
         // Handle goal commands from WebUI
         if (parsed.type === 'set-goal') {
           // Forward to the CLI's NATIVE /goal (dispatched as a command in

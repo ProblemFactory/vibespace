@@ -42,6 +42,10 @@ export function openExternalEditor(app, filePath, signalPath, sessionId, host) {
     for (const [, win] of app.wm.windows) { if (win.type === 'terminal') { targetWinInfo = win; break; } }
   }
 
+  // Re-delivered editor-open (the server re-broadcasts a pending edit on
+  // attach so it survives restarts/reloads) — the pane is already open here
+  if (targetWinInfo && targetWinInfo._editorState?.signalPath === signalPath) return;
+
   if (!targetWinInfo) {
     // No terminal window — open standalone editor
     app._hideWelcome();

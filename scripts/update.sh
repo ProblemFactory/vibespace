@@ -12,6 +12,15 @@ cd "$(dirname "$0")/.."
 # every update (real regression report). Trust this repo regardless of who runs
 # the update — single-user container, and the exec is already privileged.
 git config --global --add safe.directory "$(pwd)" 2>/dev/null || true
+# Single-flight guard: the update restarts the server, whose fresh in-memory
+# pid map can't see this still-running script — a second POST /api/self-update
+# (another tab / re-click) would interleave a concurrent git pull/npm install.
+# flock is Linux-only (macOS lacks flock(1)) — skip the guard there.
+mkdir -p data
+if command -v flock >/dev/null 2>&1; then
+  exec 9>data/.update.lock
+  flock -n 9 || { echo "Another update is already running — aborting this one."; exit 1; }
+fi
 echo "== VibeSpace update: $(git rev-parse --short HEAD) @ $(git rev-parse --abbrev-ref HEAD)"
 # Derived/generated tracked files dirty the working tree and block the ff-only
 # pull. package-lock.json: an in-container npm (different version) rewrites it.

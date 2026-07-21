@@ -984,6 +984,10 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
           session.subagentWatchers.delete(toolUseId);
         }
       };
+      // restoreSessions re-arms watchers for agents that span a restart via
+      // this handle (the wrapper meta's task map carries their ids); the
+      // 10-min inactivity sweep bounds any stale entry it re-creates
+      session._startSubagentWatcher = startSubagentWatcher;
 
       ptyProcess.onData((output) => {
         if (session._reattachAttempts) session._reattachAttempts = 0;
@@ -1618,6 +1622,7 @@ function restoreSessions() {
     let wrapperGoal = null, wrapperGoalStatus = null, wrapperGoalElapsed = 0, wrapperGoalTokens = 0;
     let bareRemote = false;
     let restoredRemote = null;
+    let wrapperAgentTasks = null;
     try {
       const wrapperMeta = JSON.parse(fs.readFileSync(path.join(BUFFERS_DIR, id + '.json'), 'utf-8'));
       if (wrapperMeta.mode === 'chat') sessionMode = 'chat';
@@ -1629,6 +1634,17 @@ function restoreSessions() {
         const done = wrapperMeta.todos.filter((t) => t?.status === 'completed').length;
         const cur = wrapperMeta.todos.find((t) => t?.status === 'in_progress');
         var wrapperTodos = { done, total: wrapperMeta.todos.length, current: cur ? String(cur.content || cur.activeForm || cur.step || '').slice(0, 140) : null };
+      }
+      // Agents still RUNNING per the wrapper's task map (chat-wrapper keeps
+      // them until task_notification) need their JSONL watchers re-armed —
+      // startSubagentWatcher's only other call site is the live task_started
+      // parse, so an agent spanning the restart went monitoring-dark (frozen
+      // tool card, empty live View Log) until it completed.
+      if (sessionMode === 'chat' && wrapperMeta.tasks) {
+        const running = Object.entries(wrapperMeta.tasks)
+          .filter(([, t]) => t && t.type === 'agent' && t.status === 'running' && t.id)
+          .map(([tuid, t]) => ({ tuid, agentId: t.id }));
+        if (running.length) wrapperAgentTasks = running;
       }
       // B-0845: a REMOTE chat session restored WITHOUT the wrapper's remote
       // field predates the keeper (2.124.0) — claude hangs bare off the ssh
@@ -1652,6 +1668,8 @@ function restoreSessions() {
       _agentdSession: !!meta.agentdSession, // transport mechanism (2.219.0 — kill branch correctness)
       _remoteState: restoredRemote,
       _todos: (typeof wrapperTodos !== 'undefined' && wrapperTodos) || null,
+      _restoreAgentTasks: wrapperAgentTasks, // re-armed post-attach (setupSessionPty defines the watcher)
+      _pendingEditor: meta.pendingEditor || null, // Ctrl+G edit in flight — re-broadcast on attach
       _prevGoal: meta.prevGoal || null, // /goal resume works across restarts
       _forkRequested: !!meta.forkRequested, // pending fork-id adoption survives restart
       _dialDeviceId: meta.dialDeviceId || null,
@@ -1734,6 +1752,79 @@ function restoreSessions() {
     }
     if (!pending) { /* nothing to backfill */ }
   }, 3000);
+
+  // Re-arm live subagent monitoring for agents that span the restart: the
+  // wrapper meta's task map (captured into _restoreAgentTasks above) still
+  // lists them as running, but startSubagentWatcher's only live call site is
+  // the task_started stream parse. The handle lands on the session when
+  // setupSessionPty runs — async for agentd-restored sessions, hence the
+  // delayed pass + one late retry.
+  const rearmSubagentWatchers = (retry) => {
+    for (const [, s] of activeSessions) {
+      const tasks = s._restoreAgentTasks;
+      if (!tasks || !tasks.length) continue;
+      if (typeof s._startSubagentWatcher !== 'function') { if (!retry) s._restoreAgentTasks = null; continue; }
+      s._restoreAgentTasks = null;
+      for (const t of tasks) { try { s._startSubagentWatcher(t.tuid, t.agentId); } catch {} }
+    }
+  };
+  setTimeout(() => rearmSubagentWatchers(true), 5000);
+  setTimeout(() => rearmSubagentWatchers(false), 20000);
+
+  // Re-arm the backend-id capture for restored sessions still missing their id
+  // (server restarted inside the create-time ~2-17s/60s capture window — those
+  // retry chains died with the old process). Claude CHAT self-heals via the
+  // stream parser's first-capture on the next line; claude TERMINAL and codex
+  // have NO other backfill and stayed id-less for life (sessionKey '' → no
+  // status/config/star binding, no transcript link). LOCAL sessions only —
+  // scanning the local lock dir for a remote session false-matches (2.156.2).
+  // Idempotent: same claimed-id + cwd + startedAt guards as the create chains.
+  const recaptureIds = (attempts) => {
+    let changed = false, missing = false;
+    const claimed = new Set();
+    for (const [, s] of activeSessions) { if (s.backend === 'claude' && s.claudeSessionId) claimed.add(s.claudeSessionId); }
+    for (const [id, s] of activeSessions) {
+      if (s.host) continue;
+      if (s.backend === 'claude' && !s.claudeSessionId) {
+        try {
+          const { SESSIONS_DIR } = require('./src/session-store');
+          for (const f of fs.readdirSync(SESSIONS_DIR).filter((n) => n.endsWith('.json'))) {
+            const lockData = JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR, f), 'utf-8'));
+            if (claimed.has(lockData.sessionId)) continue;
+            if (lockData.cwd === s.cwd && lockData.startedAt > s.createdAt - 5000) {
+              s.claudeSessionId = lockData.sessionId;
+              s.backendSessionId = lockData.sessionId;
+              claimed.add(lockData.sessionId);
+              if (s.sockName) { try { writeSessionMeta(s.sockName, { ...(readSessionMeta(s.sockName) || {}), backendSessionId: s.backendSessionId, claudeSessionId: s.claudeSessionId }); } catch {} }
+              changed = true;
+              break;
+            }
+          }
+        } catch {}
+        if (!s.claudeSessionId) missing = true;
+      } else if (s.backend === 'codex' && !s.backendSessionId) {
+        try {
+          const matched = pickCodexThreadCandidate({ activeSessions, webuiSessionId: id, cwd: s.cwd, createdAt: s.createdAt, baselineThreadIds: null, pathLib: path });
+          // no create-time baseline here — refuse clearly-stale threads (the
+          // same startedAt window the claude lock guard uses)
+          if (matched && (Number(matched.startedAt) || 0) > (s.createdAt || 0) - 5000) {
+            s.backendSessionId = matched.backendSessionId || matched.sessionId || null;
+            s.claudeSessionId = null;
+            if (matched.name) s.name = matched.name;
+            if (matched.cwd) s.cwd = matched.cwd;
+            if (s.backendSessionId && s.sockName) {
+              try { writeSessionMeta(s.sockName, { ...(readSessionMeta(s.sockName) || {}), name: s.name, cwd: s.cwd, backendSessionId: s.backendSessionId, claudeSessionId: null }); } catch {}
+              changed = true;
+            }
+          }
+        } catch {}
+        if (!s.backendSessionId) missing = true;
+      }
+    }
+    if (changed) broadcastActiveSessions();
+    if (missing && attempts > 1) setTimeout(() => recaptureIds(attempts - 1), 2000);
+  };
+  setTimeout(() => recaptureIds(5), 4000);
 
   // Warn about surviving sessions whose CLI is still running in child-session
   // mode (spawned while the server env carried CLAUDE_CODE_CHILD_SESSION —
@@ -2226,6 +2317,17 @@ app.post('/api/editor/open', (req, res) => {
   // there. Resolve the session's host server-side and ship it in the
   // broadcast so the client editor reads/writes/signals the right machine.
   const editorHost = (sessionId && activeSessions.get(sessionId)?.host) || null;
+  // Persist the pending edit on the session + its meta: the helper script
+  // waits FOREVER on the signal file while claude shows "Save and close
+  // editor to continue…" — a server restart + page reload (or pod recreation
+  // for remote sessions, whose helper+claude survive on the host) otherwise
+  // loses the only record of it and the session silently hangs mid-turn.
+  // Cleared by /api/editor/signal; re-broadcast on terminal attach.
+  if (sessionId && activeSessions.has(sessionId)) {
+    const s = activeSessions.get(sessionId);
+    s._pendingEditor = { filePath: file, signalPath: signal, host: editorHost, at: Date.now() };
+    try { if (s.sockName) writeSessionMeta(s.sockName, { ...(readSessionMeta(s.sockName) || {}), pendingEditor: s._pendingEditor }); } catch {}
+  }
   // Broadcast to all WebSocket clients — include sessionId so each client opens editor on the right window
   const msg = JSON.stringify({ type: 'editor-open', filePath: file, signalPath: signal, sessionId: sessionId || null, host: editorHost });
   wss.clients.forEach(client => {
@@ -2247,6 +2349,14 @@ app.post('/api/editor/signal', async (req, res) => {
     } else {
       if (content !== undefined) fs.writeFileSync(filePath, content);
       fs.writeFileSync(signalPath, 'done');
+    }
+    // The edit is settled — drop the persisted pending-editor record so a
+    // later restart/attach doesn't re-open a dead pane
+    for (const [, s] of activeSessions) {
+      if (s._pendingEditor?.signalPath === signalPath) {
+        s._pendingEditor = null;
+        try { if (s.sockName) writeSessionMeta(s.sockName, { ...(readSessionMeta(s.sockName) || {}), pendingEditor: null }); } catch {}
+      }
     }
     // Broadcast editor-close to all clients so they remove the split pane
     const msg = JSON.stringify({ type: 'editor-close', filePath, signalPath });
@@ -3604,7 +3714,7 @@ app.get('/api/session-options', (req, res) => {
 });
 
 // ── WebSocket Terminal Handler (extracted to src/ws-handler.js) ──
-const { registerWsHandler, noConvoRef } = require('./src/ws-handler');
+const { registerWsHandler, noConvoRef, pickCodexThreadCandidate } = require('./src/ws-handler');
 registerWsHandler(wss, {
   agentdRemote: { ensureAgentdOnHost, agentdHostToken, agentdDir: AGENTD_DIR, attachBundle: path.join(__dirname, 'data', 'bin', 'vibespace-agentd-attach.js') },
   dialBridge,
@@ -3840,6 +3950,23 @@ app.post('/api/self-update', (req, res) => {
   try {
     if (!fs.existsSync(path.join(__dirname, 'scripts', 'update.sh'))) return res.status(400).json({ error: 'update script not found' });
     if (_selfUpdate) { try { process.kill(_selfUpdate.pid, 0); return res.json({ success: true, already: true }); } catch { _selfUpdate = null; } }
+    // The pid map dies with the server (the update's own restart!) while the
+    // DETACHED script keeps running — unlinking its live log here sent the
+    // first run's remaining output to an unlinked inode and spawned a second
+    // concurrent update.sh. A recent log without the exit sentinel = a run
+    // still in flight; hand the dialog the existing log instead. (update.sh
+    // also flocks data/.update.lock as the hard guard.)
+    try {
+      const st = fs.statSync(_updateLogPath);
+      if (Date.now() - st.mtimeMs < 10 * 60 * 1000) {
+        const fd = fs.openSync(_updateLogPath, 'r');
+        const len = Math.min(st.size, 4000);
+        const buf = Buffer.alloc(len);
+        fs.readSync(fd, buf, 0, len, st.size - len);
+        fs.closeSync(fd);
+        if (!buf.toString('utf8').includes('__UPDATE_EXIT:')) return res.json({ success: true, already: true });
+      }
+    } catch {}
     try { fs.unlinkSync(_updateLogPath); } catch {}
     const fd = fs.openSync(_updateLogPath, 'a');
     const child = spawn('bash', ['-c', 'bash scripts/update.sh; echo "__UPDATE_EXIT:$?"'], {
