@@ -222,6 +222,19 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       stateChip.onclick = (e) => { e.stopPropagation(); state._showSessionStatusPopover?.(stateChip, s); };
     }
   }
+  // Transport truth chip (2.219.1, real confusion): a remote session whose
+  // LOCAL wrapper is alive but whose host machine is unreachable showed a
+  // plain LIVE card — it looked conversable while every input just queued.
+  // The amber dashed chip says what's actually happening; input still queues
+  // and flushes when the host returns (the wrapper's reconnect semantics).
+  if (s.remoteState && (s.status === 'live' || s.status === 'tmux')) {
+    const rchip = document.createElement('span');
+    rchip.className = 'sess-state-chip sess-state-derived sess-remote-chip';
+    rchip.style.setProperty('--chip-color', 'var(--yellow, #e5c07b)');
+    rchip.innerHTML = `<span class="chip-icon">⟳</span><span class="chip-text">${escHtml(tr('host unreachable'))}</span>`;
+    rchip.dataset.tip = tr('The machine this session runs on is unreachable — the connection retries automatically; messages you send are queued and delivered when it returns.');
+    stateChip.after(rchip);
+  }
   // Custom config marker: shown when this session has persisted model/effort/permission overrides
   const cfgBadge = row.querySelector('.badge-config');
   const updateCfgBadge = () => {

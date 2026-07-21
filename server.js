@@ -1003,8 +1003,10 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
             // (the REMOTE session is fine). Surfaced as a status-bar chip; the
             // attach payload carries the current value for refreshes.
             if (msg.type === '_remote_state') {
-              session._remoteState = { state: msg.state, attempts: msg.attempts || 0, at: Date.now() };
-              broadcastToSession(session, id, { type: 'remote-state', sessionId: id, ...session._remoteState });
+              const rs = { state: msg.state, attempts: msg.attempts || 0, at: Date.now() };
+              session._remoteState = msg.state === 'connected' ? null : rs;
+              broadcastToSession(session, id, { type: 'remote-state', sessionId: id, ...rs });
+              broadcastActiveSessions(); // card chip follows the transport state (2.219.1)
               continue;
             }
 
@@ -1615,6 +1617,7 @@ function restoreSessions() {
     let wrapperStreaming = false;
     let wrapperGoal = null, wrapperGoalStatus = null, wrapperGoalElapsed = 0, wrapperGoalTokens = 0;
     let bareRemote = false;
+    let restoredRemote = null;
     try {
       const wrapperMeta = JSON.parse(fs.readFileSync(path.join(BUFFERS_DIR, id + '.json'), 'utf-8'));
       if (wrapperMeta.mode === 'chat') sessionMode = 'chat';
@@ -1631,6 +1634,9 @@ function restoreSessions() {
       // field predates the keeper (2.124.0) — claude hangs bare off the ssh
       // pipe and one network wobble kills the conversation. Surface it.
       if (meta.host && sessionMode === 'chat' && !wrapperMeta.remote) bareRemote = true;
+      if (wrapperMeta.remote && wrapperMeta.remote.state && wrapperMeta.remote.state !== 'connected') {
+        restoredRemote = { state: wrapperMeta.remote.state, attempts: wrapperMeta.remote.attempts || 0, at: wrapperMeta.remote.at || Date.now() };
+      }
     } catch {}
 
     let savedBuffer = '';
@@ -1644,6 +1650,7 @@ function restoreSessions() {
       _bareRemote: bareRemote,
       keeperSid: meta.keeperSid || null,
       _agentdSession: !!meta.agentdSession, // transport mechanism (2.219.0 — kill branch correctness)
+      _remoteState: restoredRemote,
       _todos: (typeof wrapperTodos !== 'undefined' && wrapperTodos) || null,
       _prevGoal: meta.prevGoal || null, // /goal resume works across restarts
       _forkRequested: !!meta.forkRequested, // pending fork-id adoption survives restart
@@ -3680,6 +3687,10 @@ function activeSessionsPayload() {
       cwd: s.cwd,
       host: s.host || null,
       hostName: s.hostName || null,
+      // transport truth for the card (2.219.1): a remote session whose local
+      // wrapper is alive but whose HOST is unreachable used to show a plain
+      // LIVE card — user read it as "conversable" while every input queued
+      remoteState: (s._remoteState && s._remoteState.state !== 'connected') ? s._remoteState.state : null,
       createdAt: s.createdAt,
       backend: s.backend || 'claude',
       backendSessionId: s.backendSessionId || s.claudeSessionId || null,

@@ -34,6 +34,8 @@ export default {
   "Auto (system)": "自动（跟随系统）",
   "New Agent Session": "新建 Agent 会话",
   "Backend": "后端",
+  "host unreachable": "主机不可达",
+  "The machine this session runs on is unreachable — the connection retries automatically; messages you send are queued and delivered when it returns.": "这个会话所在的机器当前不可达 — 连接会自动重试；你发送的消息会排队，机器恢复后送达。",
   "Host": "远程主机",
   "Task": "任务组",
   "Mode": "模式",
