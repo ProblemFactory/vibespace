@@ -425,8 +425,58 @@ const pipeSessions = {
       try { process.kill(m.childPid, 'SIGTERM'); } catch { }
       setTimeout(() => { try { if (this._childAlive(m)) process.kill(m.childPid, 'SIGKILL'); } catch { } }, 2500);
     }
+    // File GC once the child is really gone (the exit waiter/adopt watcher has
+    // written the sentinel by then; a kill comes from a server TERMINATE, whose
+    // local pipeline dies too — nothing drains these files afterwards). A
+    // still-alive child leaves the files for the age sweep (never race a
+    // survivor — invariant #1).
+    const t = setTimeout(() => { try { const cur = this._meta(sid); if (cur && !this._childAlive(cur)) this._gcFiles(sid); } catch { } }, 15000);
+    if (t.unref) t.unref();
+  },
+  _gcFiles(sid) {
+    const P2 = this._paths(sid);
+    for (const f of [P2.out, P2.err, P2.fifo, P2.meta]) { try { fs.unlinkSync(f); } catch { } }
+    const w = this._adoptWatch.get(sid);
+    if (w) { clearInterval(w); this._adoptWatch.delete(sid); }
+  },
+  // Keeper-parity age sweep (audit #50 — the registry had NO GC of any kind:
+  // .out buffers are a full transcript copy, kill() left all four files, and
+  // nothing ever reclaimed pod-recreation orphans). Mirrors the keeper's 7d
+  // semantics: only sessions whose child is DEAD and untouched >7d are swept —
+  // a live child is NEVER touched (invariant #1), however abandoned it looks.
+  sweep() {
+    const cutoff = Date.now() - 7 * 86400000;
+    let names;
+    try { names = fs.readdirSync(SESS_DIR); } catch { return; }
+    const known = new Set();
+    for (const fn of names) {
+      if (!fn.endsWith('.json')) continue;
+      const sid = fn.slice(0, -5);
+      known.add(sid);
+      const m = this._meta(sid);
+      if (!m || this._childAlive(m)) continue;
+      let mt = 0;
+      try { mt = fs.statSync(path.join(SESS_DIR, fn)).mtimeMs; } catch { }
+      // newest signal wins: a recently-ended session stays drainable/attachable
+      if (Math.max(m.exitedAt || 0, m.startedAt || 0, mt) > cutoff) continue;
+      this._gcFiles(sid);
+      log('swept dead pipe session ' + sid + ' (>7d)');
+    }
+    // stray .out/.err/.in whose meta is already gone (interrupted spawns)
+    for (const fn of names) {
+      const s = fn.match(/^(.+)\.(out|err|in)$/);
+      if (!s || known.has(s[1])) continue;
+      try {
+        const st = fs.statSync(path.join(SESS_DIR, fn));
+        if (st.mtimeMs > cutoff) continue;
+        fs.unlinkSync(path.join(SESS_DIR, fn));
+      } catch { }
+    }
   },
 };
+const _pipeSweep = setInterval(() => { try { pipeSessions.sweep(); } catch { } }, 3600000);
+if (_pipeSweep.unref) _pipeSweep.unref();
+setTimeout(() => { try { pipeSessions.sweep(); } catch { } }, 30000); // boot pass, off the startup hot path
 
 // ── M5+: REVERSE TCP FORWARD registry ("互挂云盘" tunnel — the NAT-traversal
 // primitive). The server registers a listener; we bind 127.0.0.1:<port> on
