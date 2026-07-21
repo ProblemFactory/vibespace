@@ -2152,6 +2152,7 @@ class App {
         this.wm.setTitle(winId, cwd ? `${displayName} — ${cwd}` : displayName);
       }
     }
+      try { this.stage?.onIdentitySync?.(); } catch { }
   }
 
   _notifySidebarFocus() {

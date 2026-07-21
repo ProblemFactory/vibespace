@@ -408,6 +408,80 @@ const sessionCounterRef = { value: 0 };
 const SOCKETS_DIR = path.join(__dirname, 'data', 'sockets');
 const META_DIR = path.join(__dirname, 'data', 'session-meta');
 const BUFFERS_DIR = path.join(__dirname, 'data', 'session-buffers');
+
+// ── HOME-RENAME MIGRATION (B-b4a2, one-shot at boot) ────────────────────────
+// The 3.5.0 fleet image personalizes the container user, so $HOME moves (e.g.
+// /home/vibe → /home/lengyue) while the PVC keeps everything recorded under
+// the OLD path: ~/.claude/projects dirs encode the old cwd (claude's resume
+// lookup goes by CURRENT-cwd encoding → every resume died "No conversation
+// found"), and mounts/layouts/session metas hold dead /home/vibe/... paths.
+// This repeats for EVERY user on EVERY such roll (lengyue needed manual
+// surgery) — migrate automatically: rename projdirs to the new encoding and
+// prefix-rewrite recorded paths. One-shot per (oldUser→newUser) marker.
+function migrateHomeRename() {
+  try {
+    const home = os.homedir();
+    const user = path.basename(home);
+    const projectsDir = path.join(home, '.claude', 'projects');
+    let dirs = [];
+    try { dirs = fs.readdirSync(projectsDir); } catch { return; }
+    // Detect the old username from leftover projdirs: -home-<old>-… where
+    // <old> ≠ current user and /home/<old> no longer exists.
+    const oldUsers = new Set();
+    for (const d of dirs) {
+      const m = /^-home-([a-z][a-z0-9]*)-/.exec(d);
+      if (m && m[1] !== user && !fs.existsSync(`/home/${m[1]}`)) oldUsers.add(m[1]);
+    }
+    for (const old of oldUsers) {
+      const marker = path.join(__dirname, 'data', `.home-migrated-${old}-to-${user}`);
+      if (fs.existsSync(marker)) continue;
+      console.log(`[migrate] home rename detected: /home/${old} → ${home} — migrating projdirs + recorded paths`);
+      let moved = 0;
+      for (const d of fs.readdirSync(projectsDir)) {
+        if (!d.startsWith(`-home-${old}-`)) continue;
+        const nd = `-home-${user}-` + d.slice(`-home-${old}-`.length);
+        const src = path.join(projectsDir, d), dst = path.join(projectsDir, nd);
+        try {
+          if (!fs.existsSync(dst)) { fs.renameSync(src, dst); moved++; }
+          else { // merge, never overwrite (both sides may hold transcripts)
+            for (const f of fs.readdirSync(src)) {
+              if (!fs.existsSync(path.join(dst, f))) fs.renameSync(path.join(src, f), path.join(dst, f));
+            }
+            try { fs.rmdirSync(src); } catch { }
+            moved++;
+          }
+        } catch (e) { console.warn(`[migrate] projdir ${d}: ${e.message}`); }
+      }
+      // Prefix-rewrite every recorded string path in the small JSON stores.
+      const rewrite = (v) => (typeof v === 'string' && v.includes(`/home/${old}/`))
+        ? v.split(`/home/${old}/`).join(`/home/${user}/`)
+        : (typeof v === 'string' && v === `/home/${old}`) ? `/home/${user}` : v;
+      const walk = (x) => {
+        if (Array.isArray(x)) return x.map(walk);
+        if (x && typeof x === 'object') { for (const k of Object.keys(x)) x[k] = walk(x[k]); return x; }
+        return rewrite(x);
+      };
+      const stores = [path.join(__dirname, 'data', 'mounts.json'), path.join(__dirname, 'data', 'layouts.json'),
+        path.join(__dirname, 'data', 'task-groups.json'), path.join(__dirname, 'data', 'machine-mounts.json')];
+      try { for (const f of fs.readdirSync(META_DIR)) stores.push(path.join(META_DIR, f)); } catch { }
+      let rewrote = 0;
+      for (const f of stores) {
+        try {
+          if (!fs.existsSync(f)) continue;
+          const raw = fs.readFileSync(f, 'utf-8');
+          if (!raw.includes(`/home/${old}`)) continue;
+          const fixed = JSON.stringify(walk(JSON.parse(raw)));
+          fs.writeFileSync(f + '.pre-home-migrate', raw); // one-shot backup beside it
+          const tmp = f + '.tmp'; fs.writeFileSync(tmp, fixed); fs.renameSync(tmp, f);
+          rewrote++;
+        } catch (e) { console.warn(`[migrate] ${path.basename(f)}: ${e.message}`); }
+      }
+      fs.writeFileSync(marker, JSON.stringify({ at: Date.now(), moved, rewrote }));
+      console.log(`[migrate] home rename done: ${moved} projdirs, ${rewrote} stores rewritten (backups *.pre-home-migrate)`);
+    }
+  } catch (e) { console.warn('[migrate] home-rename check failed:', e.message); }
+}
+migrateHomeRename();
 const USAGE_CACHE_FILE = path.join(__dirname, 'data', 'usage-cache.json');
 // Per-account PASSIVE usage capture (written by data/bin/vibespace-usage, the
 // statusLine hook). Key '__global__' = the machine's own login; 'sub-…' = a
@@ -1756,6 +1830,104 @@ function restoreSessions() {
       }
     }, 3000); // after refreshWebuiPids has populated _childPid
   }
+}
+
+// ── B-1525 second half: boot AUTO RE-ADOPT of orphaned remote keeper sessions ──
+// Pod-level death kills every local dtach; the dead-socket cleanup preserves
+// REMOTE sessions' metas as .orphan files. For each orphan whose keeper child
+// (the remote claude) is STILL ALIVE on its ssh host, respawn the local
+// transport half attached to the SAME keeper sid — the session comes back
+// LIVE by itself (the lengyue manual-surgery class, automated).
+// Attach ≠ create, which keeps this spawn MINIMAL and safe:
+//  - keeper `run <sid> <offset>` on a LIVE sid only ATTACHES (never spawns a
+//    claude) → billing env and tools shipping are irrelevant here;
+//  - session.agentToken REUSES the original vsst_ value, so the remote
+//    claude's baked env token maps straight onto the re-adopted session;
+//  - the remote claude's baked VIBESPACE_API port is read from its
+//    /proc/<pid>/environ and the new `ssh -R` binds the SAME port, so the
+//    agent tools' back-tunnel heals completely.
+async function readoptOrphanKeeperSessions() {
+  let files = [];
+  try { files = fs.readdirSync(META_DIR).filter((f) => f.endsWith('.json.orphan')); } catch { return; }
+  if (!files.length) return;
+  const { execFile } = require('child_process');
+  const sshOut = (h, script) => new Promise((resolve) => {
+    execFile('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', script],
+      { timeout: 15000, maxBuffer: 256 * 1024 }, (err, out) => resolve(err ? null : String(out || '')));
+  });
+  let adopted = 0;
+  for (const f of files) {
+    if (adopted >= 8) break; // per-boot cap — a huge orphan pile shouldn't storm hosts
+    let meta = null;
+    try { meta = JSON.parse(fs.readFileSync(path.join(META_DIR, f), 'utf-8')); } catch { continue; }
+    if (!meta?.host || !meta.keeperSid || meta.mode !== 'chat' || (meta.backend || 'claude') !== 'claude') continue;
+    const h = hosts.get?.(meta.host);
+    if (!h || h.transport === 'dial') continue; // dial pipe re-adopt is a separate path
+    // A live session already tracking this conversation wins — never double up
+    let dup = false;
+    for (const [, s] of activeSessions) {
+      if (meta.claudeSessionId && (s.claudeSessionId === meta.claudeSessionId || s.backendSessionId === meta.claudeSessionId)) { dup = true; break; }
+    }
+    if (dup) continue;
+    // Liveness probe: keeper meta → childPid alive → baked VIBESPACE_API port
+    const probe = `K="$HOME/.vibespace/run/${meta.keeperSid}.json"; [ -e "$K" ] || exit 3; `
+      + `P=$(sed -n 's/.*"childPid":\\([0-9]*\\).*/\\1/p' "$K" | head -1); `
+      + `[ -n "$P" ] && kill -0 "$P" 2>/dev/null || exit 4; echo "PID=$P"; `
+      + `tr '\\0' '\\n' < /proc/$P/environ 2>/dev/null | grep '^VIBESPACE_API=' | head -1`;
+    const out = await sshOut(h, probe);
+    if (!out || !out.includes('PID=')) continue; // host down or claude gone — leave the orphan for a later boot
+    const rport = Number((/VIBESPACE_API=http:\/\/127\.0\.0\.1:(\d+)/.exec(out) || [])[1]) || null;
+
+    const id = 'sess-' + (++sessionCounterRef.value) + '-' + Date.now();
+    const sockName = 'cw-' + sessionCounterRef.value + '-' + Date.now();
+    const socketPath = path.join(SOCKETS_DIR, sockName);
+    const bufFile = path.join(BUFFERS_DIR, id + '.buf');
+    const metaFileW = path.join(BUFFERS_DIR, id + '.json');
+    const inner = `export PATH="$HOME/.vibespace/bin:$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; `
+      + `exec node "$HOME/.vibespace/bin/vibespace-remote-keeper" run ${meta.keeperSid} __VS_OFFSET__`;
+    const sshArgs = [...hosts.sshArgs(h, rport ? { reverse: `${rport}:127.0.0.1:${PORT}` } : {}), '-T', '--', inner];
+    let ptyProc;
+    try {
+      ptyProc = pty.spawn(DTACH_CMD, ['-c', socketPath, '-E', '-r', 'none',
+        NODE_CMD, CHAT_WRAPPER, bufFile, metaFileW,
+        ENV_CMD, `CLAUDE_WEBUI_PORT=${PORT}`, `CLAUDE_WEBUI_SESSION_ID=${id}`,
+        `TERM=xterm-256color`, 'ssh', ...sshArgs,
+      ], {
+        name: 'xterm-256color', cols: 190, rows: 45, cwd: os.homedir(),
+        env: { ...process.env, TERM: 'xterm-256color', VIBESPACE_REMOTE_SID: id },
+      });
+    } catch (e) { console.warn(`[readopt] spawn failed for ${meta.keeperSid}: ${e.message}`); continue; }
+    const session = {
+      mode: 'chat', pty: null, clients: new Map(),
+      cwd: meta.cwd || os.homedir(),
+      host: meta.host, hostName: meta.hostName || null,
+      keeperSid: meta.keeperSid,
+      name: meta.name || 'Session',
+      createdAt: meta.createdAt || Date.now(),
+      backend: 'claude',
+      backendSessionId: meta.claudeSessionId || meta.backendSessionId || null,
+      claudeSessionId: meta.claudeSessionId || null,
+      agentToken: meta.agentToken || null,
+      _accountId: meta.accountId || null,
+      _authAtSpawn: meta.authAtSpawn || null,
+      _permissionMode: meta.permissionMode || null,
+      _effort: meta.effort || null,
+      _initialGroupId: meta.taskId || null,
+      _remotePort: rport,
+      sockName, socketPath, buffer: '',
+    };
+    session._normalizer = createMessageManager('claude', id);
+    session._normEpoch = Date.now();
+    session._normalizer.onOp((op) => broadcastToSession(session, id, { type: 'msg', sessionId: id, ...op }));
+    activeSessions.set(id, session);
+    setupSessionPty(session, id, ptyProc);
+    writeSessionMeta(sockName, { ...meta, orphanedAt: undefined, readoptedAt: Date.now(), webuiSessionId: id, mode: 'chat' });
+    try { fs.unlinkSync(path.join(META_DIR, f)); } catch { }
+    adopted++;
+    console.log(`[readopt] re-adopted orphan keeper session ${meta.keeperSid} (${(meta.claudeSessionId || '').slice(0, 8)}) on ${h.name || meta.host} → ${id}${rport ? ` (tools tunnel :${rport} revived)` : ''}`);
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  if (adopted) { refreshWebuiPids(); broadcastActiveSessions(); }
 }
 
 // ── Create editor helper script ──
@@ -4034,6 +4206,12 @@ server.listen(PORT, HOST, () => {
 
   // Restore existing dtach sessions from before restart
   restoreSessions();
+  // B-1525 second half: consume the .orphan metas the dead-socket cleanup
+  // preserved — remote keeper sessions whose claude is STILL ALIVE on its
+  // host come back LIVE by themselves (no manual surgery). Runs even on a
+  // zero-socket boot (the pod-recreation case restoreSessions early-returns
+  // on); delayed off the boot critical path; probes are read-only ssh.
+  setTimeout(() => { readoptOrphanKeeperSessions().catch((e) => console.warn('[readopt] failed:', e.message)); }, 8000);
 
   // Orphan sweep — AGE-BASED (2.89.1). The activeSessions-keyed sweep was a
   // real data-loss race: a live dtach session the restore didn't re-adopt

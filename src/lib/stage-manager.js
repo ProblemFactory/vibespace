@@ -889,6 +889,26 @@ export class StageManager {
     }
   }
 
+  /** B-8194 (H4 null-key race): a hero staged before its backend id landed
+   *  published NOTHING (_publishHero early-returns on null _heroKey) and
+   *  nothing re-published when the id arrived — other clients' walk-over
+   *  followed a stale hero record. app.syncSessionIdentity calls this on
+   *  every merge; once the id exists we adopt the real key, re-own aux bound
+   *  under '__pending__', and publish. No-op guard keeps the per-poll cost nil. */
+  onIdentitySync() {
+    if (!this._active || !this.enabled || this._heroKey || !this._heroWinId) return;
+    const win = this.app.wm.windows.get(this._heroWinId);
+    if (!win) return;
+    const key = this._sessionKeyFor(win);
+    if (!key) return;
+    this._heroKey = key;
+    for (const [winId, owner] of [...this._boundAux]) {
+      if (owner === '__pending__') this._boundAux.set(winId, key);
+    }
+    this._publishHero(win);
+    this._scheduleRecord?.();
+  }
+
   _sessionKeyFor(win) {
     const spec = win._openSpec;
     if (spec?.backendSessionId) return `${spec.backend || 'claude'}:${spec.backendSessionId}`;

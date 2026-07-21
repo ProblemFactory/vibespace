@@ -1143,6 +1143,7 @@ done`;
             // new id could never be adopted)
             agentdSession: !!session._agentdSession,
             forkRequested: !!session._forkRequested,
+            remotePort: session._remotePort || null, // tools back-tunnel port (boot re-adopt revives it)
             backend: session.backend,
             backendSessionId: session.backendSessionId,
             claudeSessionId: session.claudeSessionId,
