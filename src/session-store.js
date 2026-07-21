@@ -627,7 +627,17 @@ class SessionMessages {
     // overlay on every attach (real report: an answered AskUserQuestion
     // questionnaire resurrected after each server restart). Same class as
     // the chatStatus 200→2000 scan-depth bug.
+    // Answered request_ids: the chat-wrapper appends control_response stdin
+    // lines to its buffer (2.220.0), so an APPROVED permission whose tool is
+    // STILL RUNNING at restart (no tool_result yet) resolves here instead of
+    // resurrecting the Allow/Deny overlay on every attach.
+    const answered = new Set();
     for (const m of this._all) {
+      if (m.type === 'control_response') {
+        const rid = m.response?.request_id;
+        if (rid) answered.add(rid);
+        continue;
+      }
       if (m.type !== 'user') continue;
       const c = m.message?.content;
       if (!Array.isArray(c)) continue;
@@ -635,7 +645,9 @@ class SessionMessages {
     }
     const result = {};
     for (const [id, cr] of Object.entries(this._pendingPerms)) {
-      if (!resolved.has(id)) result[id] = cr;
+      if (resolved.has(id)) continue;
+      if (cr.request_id && answered.has(cr.request_id)) continue;
+      result[id] = cr;
     }
     return result;
   }
