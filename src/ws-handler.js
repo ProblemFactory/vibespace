@@ -1720,6 +1720,25 @@ done`;
                 goal: session._goal || null, goalElapsed: session._goalElapsed || 0, goalStatus: session._goalStatus || null }));
             } else {
               ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, buffer: session.buffer || '' }));
+              // A Ctrl+G edit still in flight (helper script blocking on its
+              // signal file, claude on "Save and close editor to continue…")
+              // exists only as a one-shot broadcast — re-deliver it so a page
+              // reload / server restart doesn't leave the session silently
+              // hung with no visible editor pane. Local sessions verify the
+              // tmpfile still exists (gone = the edit settled or was aborted
+              // via Escape → drop the record); remote is best-effort.
+              const pe = session._pendingEditor;
+              if (pe) {
+                let live = true;
+                if (!pe.host) { try { live = fs.existsSync(pe.filePath); } catch { live = false; } }
+                if (Date.now() - (pe.at || 0) > 24 * 3600 * 1000) live = false;
+                if (live) {
+                  ws.send(JSON.stringify({ type: 'editor-open', filePath: pe.filePath, signalPath: pe.signalPath, sessionId: data.sessionId, host: pe.host || null }));
+                } else {
+                  session._pendingEditor = null;
+                  try { if (session.sockName) writeSessionMeta(session.sockName, { ...(readSessionMeta(session.sockName) || {}), pendingEditor: null }); } catch {}
+                }
+              }
             }
           } else if (data.viewOnly && (data.backendSessionId || data.claudeSessionId)) {
             // View-only: load JSONL history without an active session
@@ -2006,4 +2025,6 @@ done`;
   });
 }
 
-module.exports = { registerWsHandler, noConvoRef };
+// pickCodexThreadCandidate also serves restoreSessions' id recapture (a
+// restart inside the create-time capture window killed the retry chain)
+module.exports = { registerWsHandler, noConvoRef, pickCodexThreadCandidate };

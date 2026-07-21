@@ -2048,8 +2048,27 @@ class MountManager {
     hidrive: { label: 'HiDrive' },
   };
 
+  // A server restart mid-auth orphans the non-detached `rclone authorize`
+  // child (idle until the OAuth callback → no SIGPIPE) still holding the fixed
+  // loopback port 53682 — every later auth then fails to bind and dies with
+  // "did not produce an auth URL" until someone kills it by hand. Sweep
+  // leftovers by exact /proc cmdline match (the _killMountDaemon pattern)
+  // before each spawn; our own live child is nulled by cancelDriveAuth first.
+  _killOrphanAuthorize() {
+    try {
+      for (const pid of fs.readdirSync('/proc').filter(d => /^\d+$/.test(d))) {
+        let argv;
+        try { argv = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf-8').split('\0'); } catch { continue; }
+        if (argv.includes('authorize') && /rclone/.test(argv[0] || '')) {
+          try { process.kill(+pid, 'SIGKILL'); } catch {}
+        }
+      }
+    } catch {} // non-Linux: no /proc — the orphan clears with the machine
+  }
+
   startDriveAuth({ backend = 'drive', clientId, clientSecret, clientPreset } = {}) {
     this.cancelDriveAuth();
+    this._killOrphanAuthorize();
     this._driveAuthPreset = clientPreset || null;
     // `rclone authorize "<backend>" [<id> <secret>]`. For drive, no explicit
     // client falls back to the instance-preset client (VIBESPACE_GDRIVE_*);
