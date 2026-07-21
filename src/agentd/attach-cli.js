@@ -94,7 +94,18 @@ if (cfg.pty) {
         mux.control({ op: 'open-session', chan: CHAN, cmd: cfg.pty.cmd, args: cfg.pty.args, cwd: cfg.pty.cwd, env: cfg.pty.env, cols: s.cols, rows: s.rows });
         return;
       }
-      if (msg.op === 'session-open') { opened = true; log(`pty session open pid=${msg.pid}`); return; }
+      if (msg.op === 'session-open') {
+        opened = true; log(`pty session open pid=${msg.pid}`);
+        // HONEST RECONNECT MARKER (audit #12): the device pty is LIVE — the
+        // dropped link KILLED the previous CLI (daemon onDead), and this
+        // respawned attach (pty-wrapper REMOTE_RETRY sets the env) just opened
+        // a brand-new one under the old window title. Say so — the transcript
+        // survives on the device, so the old conversation stays resumable.
+        if (process.env.VIBESPACE_REMOTE_ATTEMPT) {
+          try { process.stdout.write('\r\n\x1b[33m[vibespace] reconnected — the previous CLI on the device ended with the dropped link; this is a NEW session (resume the old conversation from the sidebar).\x1b[0m\r\n'); } catch { }
+        }
+        return;
+      }
       // A device-session END (clean OR crash) means the terminal is OVER —
       // exit 0 so pty-wrapper FINALIZES instead of respawning. pty-wrapper's
       // REMOTE_RETRY respawns on ANY nonzero exit, which turned a claude that
