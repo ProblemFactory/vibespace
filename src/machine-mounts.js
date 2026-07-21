@@ -230,8 +230,36 @@ class MachineMounts {
   }
 
   /** Mount THIS VibeSpace's <folder> on the machine as <mountpoint>. */
-  async mountPush(hostId, { folder, mode = 'ro', mountpoint, publicUrlFallback } = {}) {
+  // Overall deadline for a mount operation (2.214.1, walter's HTTP 502): the
+  // chain crosses the device link many times — an await that stalls in an
+  // unforeseen way (half-open dial stream, wedged daemon) used to hang the
+  // HTTP handler FOREVER, so the proxy answered 502 and the server logged
+  // NOTHING (the forensic blindness that motivated this). Race a hard cap so
+  // the dialog always gets a real, actionable error.
+  _withDeadline(p, ms, label) {
+    return Promise.race([p, new Promise((_, rej) => {
+      const t = setTimeout(() => rej(new Error(`${label} timed out after ${Math.round(ms / 1000)}s — the device link may be stalled (machine asleep/offline?); wake the machine and retry`)), ms);
+      t.unref?.();
+    })]);
+  }
+
+  async mountPush(hostId, opts = {}) {
+    console.log(`[machine-mounts] push mount request → ${hostId} folder=${opts.folder || '~'} mode=${opts.mode || 'ro'}`);
+    const t0 = Date.now();
+    try {
+      const r = await this._withDeadline(this._mountPushInner(hostId, opts), 150000, 'push mount');
+      console.log(`[machine-mounts] push mount OK in ${Date.now() - t0}ms → ${r.mountpoint} (${r.method}, ${r.via})`);
+      return r;
+    } catch (e) {
+      console.warn(`[machine-mounts] push mount FAILED after ${Date.now() - t0}ms: ${e.message}`);
+      global.__vsEvent?.('machine-mount-push-failed', { detail: String(e.message).slice(0, 160) });
+      throw e;
+    }
+  }
+
+  async _mountPushInner(hostId, { folder, mode = 'ro', mountpoint, publicUrlFallback } = {}) {
     const { base, tunnelPort } = await this._davBase(hostId, { publicUrlFallback });
+    console.log(`[machine-mounts] push: dav base ready (${tunnelPort ? 'tunnel:' + tunnelPort : 'public'})`);
     // expand ~ BEFORE resolving — a literal '~' resolved against cwd made the
     // token mint fail with a bare 'root does not exist' (real report)
     const expanded = String(folder || os.homedir()).replace(/^~(?=$|\/)/, os.homedir());
@@ -332,7 +360,21 @@ class MachineMounts {
 
   // ═══ PULL direction (the machine's folder → this workspace) ═══
 
-  async mountPull(hostId, { remotePath, mountpoint } = {}) {
+  async mountPull(hostId, opts = {}) {
+    console.log(`[machine-mounts] pull mount request → ${hostId} path=${opts.remotePath || '~'}`);
+    const t0 = Date.now();
+    try {
+      const r = await this._withDeadline(this._mountPullInner(hostId, opts), 150000, 'pull mount');
+      console.log(`[machine-mounts] pull mount OK in ${Date.now() - t0}ms → ${r.mountpoint}`);
+      return r;
+    } catch (e) {
+      console.warn(`[machine-mounts] pull mount FAILED after ${Date.now() - t0}ms: ${e.message}`);
+      global.__vsEvent?.('machine-mount-pull-failed', { detail: String(e.message).slice(0, 160) });
+      throw e;
+    }
+  }
+
+  async _mountPullInner(hostId, { remotePath, mountpoint } = {}) {
     const h = this.hosts.get(hostId); // throws for unknown machine
     // '~' paths are what the dialog's own autocomplete suggests — expand them
     // against the MACHINE's home (review finding: suggest-then-reject)
