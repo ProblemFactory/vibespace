@@ -786,6 +786,53 @@ function registerWsHandler(wss, ctx) {
             try { h = hosts.get(data.hostId); }
             catch { ws.send(JSON.stringify({ type: 'error', message: 'Unknown host: ' + data.hostId })); return; }
             const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+            // ── B-4058 writer sweep script, SHARED by the ssh AND dial resume
+            // paths (audit #11/#47 — it was ssh-only, so a device-side orphan
+            // claude raced every dial resume as a second JSONL writer). The ONE
+            // invariant before a resume: no other process may still be writing
+            // this conversation's transcript. Legs: fd scan (kills ANY claude
+            // holding <RID>.jsonl open — /proc on Linux, lsof on macOS/BSD),
+            // lock-file scan, agentd PIPE-SESSION metas (both the ssh-agentd
+            // root and per-instance device@/agentd@ roots — their setsid claude
+            // survives pod recreation), keeper run-file bookkeeping (harmless
+            // no-op on devices without the keeper).
+            const writerSweepScript = (rid) => `RID=${shq(rid)}
+# writer sweep, portable: /proc fd scan on Linux; lsof on macOS/BSD ssh hosts
+# (no /proc there — the old script silently swept NOTHING, audit 2.192.0).
+# cmdline checks use POSIX \`ps -o args=\` (same idiom as killRemotePid).
+if [ -d /proc/1 ] || [ -d /proc/self ]; then
+  for pdir in /proc/[0-9]*; do
+    [ -e "$pdir" ] || continue
+    ls -l "$pdir/fd" 2>/dev/null | grep -q "/$RID.jsonl" || continue
+    pid=$(basename "$pdir")
+    case "$(ps -p "$pid" -o args= 2>/dev/null)" in *claude*) kill -TERM "$pid" 2>/dev/null;; esac
+  done
+elif command -v lsof >/dev/null 2>&1; then
+  J=$(find "$HOME/.claude/projects" -maxdepth 2 -name "$RID.jsonl" 2>/dev/null | head -1)
+  if [ -n "$J" ]; then
+    for pid in $(lsof -t -- "$J" 2>/dev/null); do
+      case "$(ps -p "$pid" -o args= 2>/dev/null)" in *claude*) kill -TERM "$pid" 2>/dev/null;; esac
+    done
+  fi
+fi
+find "$HOME/.claude/sessions" -maxdepth 1 -name '*.json' 2>/dev/null | while read -r f; do
+  pid=$(basename "$f" .json)
+  grep -q "\\"sessionId\\":\\"$RID\\"" "$f" 2>/dev/null || continue
+  kill -0 "$pid" 2>/dev/null || continue
+  case "$(ps -p "$pid" -o args= 2>/dev/null)" in *claude*) kill -TERM "$pid" 2>/dev/null;; esac
+done
+for kf in "$HOME"/.vibespace/*/state/sessions/*.json; do
+  [ -e "$kf" ] || continue
+  grep -q "$RID" "$kf" 2>/dev/null || continue
+  grep -q '"exited"' "$kf" 2>/dev/null && continue
+  cpid=$(sed -n 's/.*"childPid":\\([0-9]*\\).*/\\1/p' "$kf" | head -1)
+  [ -n "$cpid" ] && kill -TERM "$cpid" 2>/dev/null
+done
+find "$HOME/.vibespace/run" -maxdepth 1 -name '*.json' 2>/dev/null | while read -r kf; do
+  grep -q "$RID" "$kf" 2>/dev/null || continue
+  grep -q '"exited"' "$kf" 2>/dev/null && continue
+  node "$HOME/.vibespace/bin/vibespace-remote-keeper" stop "$(basename "$kf" .json)" >/dev/null 2>&1 || true
+done`;
             const rcmd = spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd;
             const rargs = [...spawnArgs];
             if (backend !== 'codex') {
@@ -821,12 +868,42 @@ function registerWsHandler(wss, ctx) {
                   : 'the selected account is a subscription login — shipping it to a device is disabled (§ban-safety). Use an API-key account, or log in on the device itself.' }));
                 return;
               }
+              // pipe-ATTACH (B-4058 dial edition, audit #11/#47): the card
+              // carried a live device pipe sid — reattach to the SURVIVING
+              // device-side claude from byte 0 (full replay rebuilds the view)
+              // instead of spawning a second writer onto the same JSONL. No
+              // spawn spec in the cfg ⇒ attach-pipe-session (never spawns).
+              let dialKeeperSid = data.keeperSid && /^[\w-]+$/.test(data.keeperSid) ? data.keeperSid : null;
+              // Dial discovery carries no pipe sids, so a plain sidebar resume
+              // never arrives with keeperSid — probe the device's pipe-session
+              // store directly and ADOPT a surviving claude over respawning.
+              if (!dialKeeperSid && data.resume && data.resumeId && /^[\w-]+$/.test(data.resumeId)) {
+                try {
+                  const k = await hosts.findKeeperFor(h.id, data.resumeId);
+                  if (k) { dialKeeperSid = k; console.log(`[dial] live pipe session ${k} holds ${data.resumeId.slice(0, 8)} — attaching instead of spawning a second writer`); }
+                } catch { }
+              }
+              // Pre-resume writer sweep over the DEVICE LINK — the ssh-only
+              // cleanScript never ran for dial, so a pod-recreation-orphaned
+              // pipe-session claude (setsid-detached, survives everything the
+              // daemon does) raced every later resume as a second JSONL writer.
+              // Never runs for pipe-ATTACH (we adopt, not respawn).
+              if (data.resume && data.resumeId && !dialKeeperSid && /^[\w-]+$/.test(data.resumeId)) {
+                try {
+                  const dm = await hosts.device(h.id);
+                  await dm.runCmd('sh', ['-c', writerSweepScript(data.resumeId)], { timeoutMs: 20000 });
+                  hosts.invalidateDiscovery(h.id);
+                } catch (e) { console.warn('[dial] pre-resume cleanup failed (continuing):', e.message); }
+              }
               try {
                 const bridgePort = await dialBridge.ensure({ sid: id, deviceId: h.deviceId });
                 // Tool/token/tunnel setup degrades to bare env on error (session
                 // still runs); the API-key ship inside is NOT degradable — a
                 // write failure throws out of the try and fails the create.
-                const da = await deviceAgentSetup(h, id).catch((e) => {
+                // Skipped entirely on pipe-ATTACH: the surviving claude keeps
+                // its original env, and a fresh reverseForward here would leak
+                // an unused device port per attach.
+                const da = dialKeeperSid ? { envPairs: [], tokenAssign: '' } : await deviceAgentSetup(h, id).catch((e) => {
                   if (spawnAccount?.secret) throw e; // wrong billing must fail, not silently degrade
                   console.warn('[dial] agent setup degraded:', e.message); return { envPairs: [], tokenAssign: '' };
                 });
@@ -837,12 +914,12 @@ function registerWsHandler(wss, ctx) {
                 const cfg = {
                   tcp: { port: bridgePort },
                   hostToken: agentdRemote.agentdHostToken('dial-' + h.deviceId),
-                  sid: id,
+                  sid: dialKeeperSid || id,
                   version: require('../package.json').version,
                   // cwd runs ON THE DEVICE — send the resolved device cwd, not
                   // this server's homedir (a path absent on the device). The
                   // daemon also falls back to HOME if it still doesn't exist.
-                  spawn: { cmd: 'sh', args: ['-lc', shellCmd], cwd },
+                  ...(dialKeeperSid ? {} : { spawn: { cmd: 'sh', args: ['-lc', shellCmd], cwd } }),
                 };
                 ensureDir(agentdRemote.agentdDir);
                 const cfgFile = path.join(agentdRemote.agentdDir, 'session-' + id + '.json');
@@ -857,6 +934,9 @@ function registerWsHandler(wss, ctx) {
                 session._dialDeviceId = h.deviceId;
                 session._bridgePort = bridgePort;
                 session._agentdCfgFile = cfgFile;
+                // the pipe sid the kill path must target (attach-adopted
+                // sessions keep the SURVIVING sid, not the fresh webui id)
+                session.keeperSid = dialKeeperSid || id;
               } catch (e) {
                 ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: `dial session failed: ${e.message} (is the device online?)` })); return;
               }
@@ -887,47 +967,15 @@ function registerWsHandler(wss, ctx) {
                 // that must be true before a resume is that NO other process is
                 // still writing this conversation's transcript — else we get
                 // multiple concurrent writers on one JSONL ("resume did
-                // nothing / session ends"; real incident with agentd.remote
-                // Sessions, whose setsid-detached claude survives a local pod
+                // nothing / session ends"; real incident with agentd remote
+                // sessions, whose setsid-detached claude survives a local pod
                 // rebuild that the sidebar-driven cold resume then races). The
                 // fd scan kills ANY claude holding <RID>.jsonl open regardless
                 // of how it was spawned (bare / keeper / agentd pipe-session) —
                 // it subsumes the id-lock grep (a --resumed claude's lock
                 // carries a NEW session id, so grepping the lock for RID missed
-                // it) and the agentd case the keeper-only stop below never
-                // reached. The keeper stop still runs to clean the keeper's own
-                // run-file bookkeeping.
-                const cleanScript = `RID=${shq(data.resumeId)}
-# writer sweep, portable: /proc fd scan on Linux; lsof on macOS/BSD ssh hosts
-# (no /proc there — the old script silently swept NOTHING, audit 2.192.0).
-# cmdline checks use POSIX \`ps -o args=\` (same idiom as killRemotePid).
-if [ -d /proc/1 ] || [ -d /proc/self ]; then
-  for pdir in /proc/[0-9]*; do
-    [ -e "$pdir" ] || continue
-    ls -l "$pdir/fd" 2>/dev/null | grep -q "/$RID.jsonl" || continue
-    pid=$(basename "$pdir")
-    case "$(ps -p "$pid" -o args= 2>/dev/null)" in *claude*) kill -TERM "$pid" 2>/dev/null;; esac
-  done
-elif command -v lsof >/dev/null 2>&1; then
-  J=$(find "$HOME/.claude/projects" -maxdepth 2 -name "$RID.jsonl" 2>/dev/null | head -1)
-  if [ -n "$J" ]; then
-    for pid in $(lsof -t -- "$J" 2>/dev/null); do
-      case "$(ps -p "$pid" -o args= 2>/dev/null)" in *claude*) kill -TERM "$pid" 2>/dev/null;; esac
-    done
-  fi
-fi
-find "$HOME/.claude/sessions" -maxdepth 1 -name '*.json' 2>/dev/null | while read -r f; do
-  pid=$(basename "$f" .json)
-  grep -q "\"sessionId\":\"$RID\"" "$f" 2>/dev/null || continue
-  kill -0 "$pid" 2>/dev/null || continue
-  case "$(ps -p "$pid" -o args= 2>/dev/null)" in *claude*) kill -TERM "$pid" 2>/dev/null;; esac
-done
-find "$HOME/.vibespace/run" -maxdepth 1 -name '*.json' 2>/dev/null | while read -r kf; do
-  grep -q "$RID" "$kf" 2>/dev/null || continue
-  grep -q '"exited"' "$kf" 2>/dev/null && continue
-  node "$HOME/.vibespace/bin/vibespace-remote-keeper" stop "$(basename "$kf" .json)" >/dev/null 2>&1 || true
-done`;
-                execFileSync('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', cleanScript], { timeout: 20000, stdio: 'ignore' });
+                // it). The pipe-meta + keeper legs clean their own bookkeeping.
+                execFileSync('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', writerSweepScript(data.resumeId)], { timeout: 20000, stdio: 'ignore' });
                 hosts.invalidateDiscovery(h.id);
               } catch (e) { console.warn('[remote] pre-resume cleanup failed (continuing):', e.message); }
             }
@@ -1137,6 +1185,10 @@ done`;
             keeperSid: session.keeperSid || null,
             dialDeviceId: session._dialDeviceId || null,
             bridgePort: session._bridgePort || null,
+            // the device-side VIBESPACE_API back-tunnel port (audit #49): the
+            // dial-in handler re-owns it on every re-link — without the record
+            // a server restart / re-dial silently killed the agent tools' API
+            dialReversePort: session._dialReversePort || null,
             // transport mechanism + fork intent survive restarts (2.219.0
             // audit: a restored agentd session's terminate took the keeper
             // branch = silent no-op, remote claude ran on; a restored fork's
@@ -1817,6 +1869,15 @@ done`;
             // Clean up wrapper buffer files
             try { fs.unlinkSync(path.join(BUFFERS_DIR, data.sessionId + '.json')); } catch {}
             try { fs.unlinkSync(path.join(BUFFERS_DIR, data.sessionId + '.buf')); } catch {}
+            // Per-session agentd attach cfg (0600 — vsht_ host token + full
+            // spawn command) accumulated forever (audit #16/#53). The path is
+            // derivable, so a restart-restored session (in-memory field lost)
+            // still gets its cfg removed.
+            {
+              const cfgF = session._agentdCfgFile
+                || (agentdRemote && path.join(agentdRemote.agentdDir, 'session-' + data.sessionId + '.json'));
+              if (cfgF) { try { fs.unlinkSync(cfgF); } catch {} }
+            }
             // Tell every attached client the session ended (windows flip to the
             // read-only view). This must happen HERE, deterministically: we
             // delete the session from activeSessions right below, and the pty's
@@ -1851,7 +1912,8 @@ done`;
                   // (double JSONL writers, the B-4058 class). Kill the daemon
                   // pipe session + drop the agent token over the device link.
                   if (session.mode === 'chat') {
-                    const sidSafe = String(data.sessionId).replace(/[^\w-]/g, '');
+                    // the pipe sid ≠ webui id for attach-adopted sessions
+                    const sidSafe = String(session.keeperSid || data.sessionId).replace(/[^\w-]/g, '');
                     hosts.device(session.host).then(async (dm) => {
                       try { await dm.killPipeSession(sidSafe); } catch {}
                       try { await dm.runCmd('sh', ['-c', `rm -f "$HOME/.vibespace/bin/.tok-${sidSafe}"`], { timeoutMs: 10000 }); } catch {}

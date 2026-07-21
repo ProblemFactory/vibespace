@@ -1748,6 +1748,7 @@ function restoreSessions() {
       _forkRequested: !!meta.forkRequested, // pending fork-id adoption survives restart
       _dialDeviceId: meta.dialDeviceId || null,
       _bridgePort: meta.bridgePort || null,
+      _dialReversePort: meta.dialReversePort || null, // VIBESPACE_API back-tunnel, re-owned at the next dial-in (audit #49)
       hostName: meta.hostName || null,
       name: meta.name || sockFile,
       createdAt: meta.createdAt || Date.now(),
@@ -4095,6 +4096,24 @@ server.on('upgrade', (req, socket, head) => {
       // heal recorded pull mounts + re-own push tunnel ports + flip the UI dot
       try { machineMounts.onMachineLinked(hosts.findByDeviceId(deviceId)?.id); } catch { }
       try { portForwards.onMachineLinked(hosts.findByDeviceId(deviceId)?.id); } catch { }
+      // Re-own each live dial session's VIBESPACE_API back-tunnel (audit #49):
+      // the per-session reverse listener existed only in the DEAD link's
+      // DeviceManager — mounts/port-forwards heal from persisted records on
+      // dial-in, sessions had none, so vibespace-status/task/ask + remote
+      // Ctrl+G went connection-refused forever after any re-dial or server
+      // restart while the session kept chatting fine (nothing surfaced it).
+      // The daemon's reverseListen `existing` branch re-owns a still-bound
+      // port; a reaped one (>10min offline) rebinds at the same number.
+      (async () => {
+        const netR = require('net');
+        for (const [, s] of activeSessions) {
+          if (s._dialDeviceId !== deviceId || !s._dialReversePort) continue;
+          try {
+            const dm = await deviceForDial(deviceId);
+            await dm.reverseForward({ port: s._dialReversePort, connectLocal: () => netR.connect(PORT, '127.0.0.1') });
+          } catch (e) { console.warn(`[device] session back-tunnel re-own failed (${s._dialReversePort}):`, e.message); }
+        }
+      })().catch(() => { });
       try { bcastAll({ type: 'hosts-updated' }); } catch { }
       ws.on('close', () => {
         if (agentdDials.get(deviceId) === stream) agentdDials.delete(deviceId);
@@ -4362,7 +4381,23 @@ server.listen(PORT, HOST, () => {
         } catch {}
       }
     } catch {}
-    if (swept) console.log(`  Swept ${swept} orphaned session-buffer files (>7d untouched)`);
+    // data/agentd/session-*.json attach configs (0600, vsht_ host token +
+    // full spawn command) — the kill-path unlink needs the live session, so
+    // pod recreation leaked one per dial/agentd session forever (audit
+    // #16/#53). Same age rule: written once at create, so 7d + not-active is
+    // race-free (active sessions are protected by the id check alone).
+    try {
+      for (const fn of fs.readdirSync(AGENTD_DIR)) {
+        const m = fn.match(/^session-(.+)\.json$/);
+        if (!m || activeSessions.has(m[1])) continue;
+        try {
+          const st = fs.statSync(path.join(AGENTD_DIR, fn));
+          if (st.mtimeMs > cutoff) continue;
+          fs.unlinkSync(path.join(AGENTD_DIR, fn)); swept++;
+        } catch {}
+      }
+    } catch {}
+    if (swept) console.log(`  Swept ${swept} orphaned session-buffer/attach-cfg files (>7d untouched)`);
   }, 30000);
 
   console.log(`  Ready.\n`);

@@ -758,16 +758,31 @@ class HostManager {
   }
   // Does the host still run a LIVE keeper child for this claude conversation?
   // Returns the keeper sid to ATTACH to (ws create keeperSid path — never a
-  // second writer), or null. One read-only ssh probe: scan ~/.vibespace/run
-  // metas mentioning the conversation id, keep only those whose childPid (the
-  // claude process) is alive. 2.218.0 — resume host inference's double-writer
-  // guard; ssh hosts only (dial pipe sessions are a different store).
+  // second writer), or null. One read-only probe: scan the persistence-layer
+  // session metas mentioning the conversation id, keep only those whose
+  // childPid (the claude process) is alive. 2.218.0 — resume host inference's
+  // double-writer guard. ssh hosts scan the keeper's ~/.vibespace/run; DIAL
+  // devices scan the daemon's pipe-session store (~/.vibespace/*/state/
+  // sessions — the sid feeds attach-pipe-session, audit #11/#47).
   async findKeeperFor(id, conversationId) {
     if (!/^[\w-]+$/.test(conversationId)) return null;
     const h = this.get(id);
-    if (!h || h.transport === 'dial') return null;
+    if (!h) return null;
+    const cid = JSON.stringify(conversationId);
+    if (h.transport === 'dial') {
+      const script = `for f in "$HOME"/.vibespace/*/state/sessions/*.json; do [ -e "$f" ] || continue; `
+        + `grep -l ${cid} "$f" >/dev/null 2>&1 || continue; `
+        + `grep -q '"exited"' "$f" 2>/dev/null && continue; `
+        + `cpid=$(sed -n 's/.*"childPid":\\([0-9]*\\).*/\\1/p' "$f" | head -1); `
+        + `[ -n "$cpid" ] && kill -0 "$cpid" 2>/dev/null && basename "$f" .json; done | tail -1`;
+      try {
+        const dm = await this.device(id);
+        const out = String((await dm.runCmd('sh', ['-c', script], { timeoutMs: 8000 }))?.stdout || '').trim().split('\n').pop().trim();
+        return /^[\w][\w-]*$/.test(out) ? out : null;
+      } catch { return null; }
+    }
     const script = `for f in "$HOME"/.vibespace/run/*.json; do [ -e "$f" ] || break; `
-      + `grep -l ${JSON.stringify(conversationId)} "$f" >/dev/null 2>&1 || continue; `
+      + `grep -l ${cid} "$f" >/dev/null 2>&1 || continue; `
       + `cpid=$(sed -n 's/.*"childPid":\\([0-9]*\\).*/\\1/p' "$f" | head -1); `
       + `[ -n "$cpid" ] && kill -0 "$cpid" 2>/dev/null && basename "$f" .json; done | tail -1`;
     try {
