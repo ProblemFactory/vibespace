@@ -127,11 +127,14 @@ class UsageHistory {
     let p = this._loadJson(this.pricingFile, null);
     if (!p) {
       p = { version: 2, tiers: DEFAULT_PRICING, accounts: {} };
-      try { fs.writeFileSync(this.pricingFile, JSON.stringify(p, null, 2)); } catch {}
+      // atomic like every other pricing write — a crash mid-write tears the
+      // file and the next boot's _loadJson fallback silently recreates
+      // defaults over user-edited rates
+      try { this._writeAtomic(this.pricingFile, JSON.stringify(p, null, 2)); } catch {}
     } else if (!p.tiers) {
       // migrate the old FLAT {opus:{...},...} file to v2 in place
       p = { version: 2, tiers: p, accounts: {} };
-      try { fs.writeFileSync(this.pricingFile, JSON.stringify(p, null, 2)); } catch {}
+      try { this._writeAtomic(this.pricingFile, JSON.stringify(p, null, 2)); } catch {}
     }
     if (!p.accounts) p.accounts = {};
     if (!p.tiers) p.tiers = DEFAULT_PRICING;
