@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.217.0
+
+**Dead-session windows rescue into saved history (the 12-blank-windows class).** After the server loses its sessions (OOM kill, pod recreation), every saved-layout chat window replayed a stale serverId, the attach errored **before any ChatView existed**, and the one-time handler silently dropped — leaving bare blank window shells (real fleet report). Now:
+
+- `attachSession`'s error path flips the window into the view-only pipeline in place (`_viewIntoWindow`, shared with `viewSession`): saved history renders + Resume bar. Works host-less — the server's transcript finder scans the `data/remote-jsonl` cache, so a remote session's history shows even with its host machine **down**.
+- ChatView-side `_tryViewOnlyRescue` covers the reconnect-time variants (server restarted while the tab was open; 20s no-reply fallback).
+- `syncSessionIdentity` now backfills `openSpec.hostId` from the live entry's `host` field (it read the nonexistent `hostId` key — a remote session's spec NEVER got its host recorded, so post-mortem fetches went host-less).
+- `hosts.fetchSessionJsonl`: unreachable host + cached transcript → serve the stale cache instead of throwing (stale history beats none).
+- Smoke: `scripts/test-attach-rescue.mjs` (worktree+CDP, 8 asserts — local-transcript rescue, host-less cached-remote rescue, no-transcript degradation).
+
 ## 2.216.0 — 2026-07-21
 **OOM-kill prevention** (lengyue's instance hit its 32Gi pod limit — the kernel killed the whole pod, taking EVERY dtach session, with zero warning):
 - **System rail panel** (new gauge icon): container memory bar (cgroup-aware used/limit/%), workspace disk bar, load average, and the top processes by memory — refreshes every 5s while open. The rail icon carries a % badge from 80% (amber) and turns red at 92%.

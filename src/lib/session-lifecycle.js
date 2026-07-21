@@ -325,7 +325,21 @@ export function installSessionLifecycle(App, ctx = {}) {
       // drop the handler so it can't build a ChatView into a dead winInfo and
       // leave a phantom sessions entry that makes the session un-reopenable.
       if (!this.wm.windows.has(winInfo.id)) { clearTimeout(wd); this.ws.offGlobal(handler); return; }
-      if ((msg.type === 'error') && msg.sessionId === serverId) { clearTimeout(wd); this.ws.offGlobal(handler); return; }
+      if ((msg.type === 'error') && msg.sessionId === serverId) {
+        clearTimeout(wd); this.ws.offGlobal(handler);
+        // Dead session (stale serverId from a saved layout — server restart
+        // after an OOM kill / pod recreation loses every dtach session): no
+        // ChatView exists yet at this point, so ChatView's own error path
+        // can't fire — dropping the handler left a BARE BLANK window shell
+        // (real fleet report: 12 at once). Flip the window into the
+        // view-only pipeline in place: saved history + Resume bar.
+        const bsid = openSpec.backendSessionId;
+        if (isChat && bsid && !/^sess-\d/.test(bsid)) {
+          this._viewIntoWindow(winInfo, { backend, backendSessionId: bsid, cwd, name, hostId: openSpec.hostId });
+          try { track('event', 'chat-attach-rescued'); } catch { }
+        }
+        return;
+      }
       if (msg.type === 'attached' && msg.sessionId === serverId) {
         clearTimeout(wd);
         if (msg.mode === 'chat' || isChat) {
@@ -708,6 +722,19 @@ export function installSessionLifecycle(App, ctx = {}) {
       openSpec,
       titleMeta: this._buildTitleMeta(openSpec),
     });
+    this._viewIntoWindow(winInfo, { backend, backendSessionId: resolvedSessionId, cwd, name: sessionName, hostId });
+    return winInfo;
+  },
+
+  // Drive the view-only pipeline into an EXISTING window: build a read-only
+  // ChatView, request the viewOnly attach (server loads the JSONL — local
+  // transcript or the host-less remote-jsonl cache scan; stale cache beats no
+  // history, so it works with the session's host machine down), render on
+  // 'attached'. Shared by viewSession and attachSession's dead-session rescue
+  // (the blank-window class: a stale serverId replayed after the server lost
+  // its sessions used to leave a bare shell with no ChatView at all).
+  _viewIntoWindow(winInfo, { backend = 'claude', backendSessionId, cwd, name, hostId } = {}) {
+    const viewId = backend === 'claude' ? `view-${backendSessionId}` : `view-${backend}-${backendSessionId}`;
     const chatView = new ChatView(winInfo, this.ws, viewId, this, { readOnly: true });
     this.sessions.set(winInfo.id, chatView);
 
@@ -717,19 +744,23 @@ export function installSessionLifecycle(App, ctx = {}) {
       sessionId: viewId,
       viewOnly: true,
       backend,
-      backendSessionId: resolvedSessionId,
-      claudeSessionId: backend === 'claude' ? resolvedSessionId : undefined,
+      backendSessionId,
+      claudeSessionId: backend === 'claude' ? backendSessionId : undefined,
       host: hostId || undefined, // remote session: server pulls the transcript over ssh first
       cwd,
-      name: sessionName,
+      name,
     });
 
     const handler = (msg) => {
-      // Window closed (or the server replied error) before 'attached' — drop the
-      // handler so a stale fire can't call loadHistory on a disposed ChatView
-      // (which throws mid-dispatch and swallows every later handler's message).
+      // Window closed before 'attached' — drop the handler so a stale fire
+      // can't call loadHistory on a disposed ChatView (which throws
+      // mid-dispatch and swallows every later handler's message).
       if (!this.wm.windows.has(winInfo.id)) { this.ws.offGlobal(handler); return; }
-      if (msg.type === 'error' && msg.sessionId === viewId) { this.ws.offGlobal(handler); return; }
+      if (msg.type === 'error' && msg.sessionId === viewId) {
+        this.ws.offGlobal(handler);
+        chatView._renderers.appendSystem(msg.message || t('Session not found.'));
+        return;
+      }
       if (msg.type === 'attached' && msg.sessionId === viewId) {
         this.ws.offGlobal(handler);
         if (msg.messages?.length) {
@@ -745,7 +776,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     this.ws.onGlobal(handler);
     winInfo.onClose = () => { this.ws.offGlobal(handler); chatView.dispose(); this.sessions.delete(winInfo.id); this._checkWelcome(); };
     winInfo._notifyChanged = () => this.updateTaskbar();
-    return winInfo;
+    return chatView;
   },
 
   // Replay a serialized openSpec to recreate a window (for cross-client sync)
@@ -786,7 +817,7 @@ export function installSessionLifecycle(App, ctx = {}) {
             // server be authoritative; a genuinely dead session's attach
             // errors into the read-only path anyway.
             this.viewSession(bsid, cwd, this.sidebar?.getCustomName(spec.sessionKey || bsid) || name, {
-              syncId, backend, backendSessionId: bsid, hostId: spec.hostId,
+              syncId, backend, backendSessionId: bsid, hostId: spec.hostId || spec.host || undefined,
               agentKind: spec.agentKind, agentRole: spec.agentRole,
               agentNickname: spec.agentNickname, sourceKind: spec.sourceKind,
               parentThreadId: spec.parentThreadId,
@@ -800,7 +831,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           syncId,
           backend,
           backendSessionId: bsid,
-          hostId: spec.hostId,
+          hostId: spec.hostId || spec.host || undefined,
           agentKind: spec.agentKind,
           agentRole: spec.agentRole,
           agentNickname: spec.agentNickname,
@@ -847,7 +878,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         break;
       case 'viewSession':
         this.viewSession(spec.sessionId, spec.cwd, spec.name, {
-          hostId: spec.hostId,
+          hostId: spec.hostId || spec.host || undefined,
           syncId,
           backend: spec.backend || 'claude',
           backendSessionId: spec.backendSessionId || spec.sessionId,
@@ -884,7 +915,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           backendSessionId: spec.backendSessionId || spec.claudeSessionId,
           claudeSessionId: spec.claudeSessionId,
           cwd: spec.cwd,
-          hostId: spec.hostId, // remote workflow agent → transcript on the host (2.191.0)
+          hostId: spec.hostId || spec.host || undefined, // remote workflow agent → transcript on the host (2.191.0)
         });
         const handler = (msg) => {
           if (!this.wm.windows.has(winInfo.id)) { this.ws.offGlobal(handler); return; }
