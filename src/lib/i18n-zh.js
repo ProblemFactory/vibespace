@@ -862,6 +862,8 @@ export default {
   "Memory read": "记忆读取",
   "Copying {name}…": "正在复制 {name}…",
   "Moving {name}…": "正在移动 {name}…",
+  "MCP tool calls (any server)": "MCP 工具调用（所有服务器）",
+  "{n} MCP": "{n} 次 MCP",
   "· logged in on {host}": "· 已在 {host} 登录",
   "not logged in on {host}": "未在 {host} 登录",
   "This account holds its own login ON {host} (minted there, never leaves it) — sessions on {host} picking it use that login.": "这个账号在 {host} 上有自己的独立登录（在那台机器上生成、永不离开）——{host} 上的会话选它即使用该登录。",
