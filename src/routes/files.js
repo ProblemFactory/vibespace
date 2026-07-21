@@ -381,6 +381,30 @@ router.post('/api/upload', upload.array('files'), async (req, res) => {
   }
 });
 
+// Paste temp hygiene (restart audit #29): claude-paste-* files in tmpdir and
+// remote ~/.vibespace/paste/ were never cleaned by anything — /tmp only clears
+// on reboot/pod recreation and the remote dir grew forever. Sweep files older
+// than 24h, fire-and-forget, at most once per hour per target.
+const _pasteSweepAt = new Map(); // '__local__' | hostId → last sweep ts
+function sweepPasteTemps(rfsInst, host) {
+  const key = host || '__local__';
+  const now = Date.now();
+  if (now - (_pasteSweepAt.get(key) || 0) < 60 * 60 * 1000) return;
+  _pasteSweepAt.set(key, now);
+  if (host && rfsInst) {
+    rfsInst._run(host, `find ~/.vibespace/paste -type f -mmin +1440 -delete 2>/dev/null || true`).catch(() => {});
+    return;
+  }
+  // async only — os.tmpdir() is local disk, but never risk a pool stall
+  fs.promises.readdir(os.tmpdir()).then(async (names) => {
+    for (const n of names) {
+      if (!n.startsWith('claude-paste-')) continue;
+      const p = path.join(os.tmpdir(), n);
+      try { const st = await fs.promises.stat(p); if (now - st.mtimeMs > 24 * 3600 * 1000) await fs.promises.unlink(p); } catch {}
+    }
+  }).catch(() => {});
+}
+
 // Paste image from clipboard → save to temp file + set X clipboard via xclip
 router.post('/api/paste-image', async (req, res) => {
   try {
@@ -403,10 +427,12 @@ router.post('/api/paste-image', async (req, res) => {
       const remotePath = `~/.vibespace/paste/paste-${Date.now()}.${ext}`;
       await rfsInst.mkdir(sess.host, '~/.vibespace/paste');
       await rfsInst.write(sess.host, remotePath, buf);
+      sweepPasteTemps(rfsInst, sess.host);
       return res.json({ ready: true, remotePath });
     }
     const tmpPath = path.join(os.tmpdir(), `claude-paste-${Date.now()}.${ext}`);
     fs.writeFileSync(tmpPath, buf);
+    sweepPasteTemps();
     // Set system clipboard with image — macOS uses osascript, Linux uses xclip
     const isMac = process.platform === 'darwin';
     try {
@@ -676,6 +702,35 @@ router.post('/api/archive/extract-entry', (req, res) => {
 // from a streamed listing pass), polled via GET /api/archive/extract-status.
 // A big archive used to hold the HTTP request for minutes with zero feedback.
 const extractOps = new Map(); // opId → {done,total,status,error,dest,child}
+// ── Interrupted-extraction journal (restart audit #23): a server death mid-
+// extraction truncates the file being inflated at that instant, and the
+// natural retry posts overwrite:false → unzip -n / tar -xk SKIP the truncated
+// (existing) file and report success — silent corruption surviving the visible
+// recovery. Persist archive+dest across restarts: a re-extract into a
+// journaled dest escalates to overwrite so the fresh pass rewrites (repairs)
+// every file from the archive; the entry clears only on clean completion. ──
+const EXTRACT_JOURNAL = path.join(__dirname, '..', '..', 'data', 'extract-journal.json');
+function readExtractJournal() {
+  try { return JSON.parse(fs.readFileSync(EXTRACT_JOURNAL, 'utf-8')) || {}; } catch { return {}; }
+}
+function writeExtractJournal(j) {
+  // atomic tmp+rename (persistence invariant)
+  try { const tmp = EXTRACT_JOURNAL + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(j)); fs.renameSync(tmp, EXTRACT_JOURNAL); } catch {}
+}
+function markExtractStart(fp, destDir) {
+  const j = readExtractJournal();
+  j[fp + '\n' + destDir] = Date.now();
+  const keys = Object.keys(j);
+  if (keys.length > 200) for (const k of keys.sort((a, b) => j[a] - j[b]).slice(0, keys.length - 200)) delete j[k];
+  writeExtractJournal(j);
+}
+function clearExtractMark(fp, destDir) {
+  const j = readExtractJournal();
+  if ((fp + '\n' + destDir) in j) { delete j[fp + '\n' + destDir]; writeExtractJournal(j); }
+}
+function hadInterruptedExtract(fp, destDir) {
+  return (fp + '\n' + destDir) in readExtractJournal();
+}
 router.get('/api/archive/extract-status', (req, res) => {
   const op = extractOps.get(String(req.query.id || ''));
   if (!op) return res.status(404).json({ error: 'unknown op' });
@@ -699,6 +754,11 @@ router.post('/api/archive/extract', async (req, res) => {
   const type = archiveType(fp);
   if (!type) return res.status(400).json({ error: 'unsupported archive type' });
   try { await sfs(req).call('mkdir', { path: destDir }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+  // #23: a prior extraction of this archive into this dest was interrupted —
+  // its truncated files EXIST, so skip-existing would silently keep them.
+  // Escalate to overwrite: the fresh pass only rewrites the archive's own
+  // entries, repairing any truncated survivors.
+  const effOverwrite = !!overwrite || hadInterruptedExtract(fp, destDir);
   if (req.body.progress) {
     const opId = 'ex-' + require('crypto').randomBytes(6).toString('hex');
     const op = { done: 0, total: 0, status: 'listing', error: null, dest: destDir, child: null };
@@ -711,9 +771,10 @@ router.post('/api/archive/extract', async (req, res) => {
     const startExtract = () => {
       if (op.status === 'cancelled') return;
       op.status = 'running';
+      markExtractStart(fp, destDir); // #23: journal BEFORE spawning; cleared only on clean completion
       const args = type === 'zip'
-        ? [overwrite ? '-o' : '-n', fp, '-d', destDir]          // verbose by default: one " inflating:" line per entry
-        : [overwrite ? '-xvf' : '-xvkf', fp, '-C', destDir];    // -v: one line per entry
+        ? [effOverwrite ? '-o' : '-n', fp, '-d', destDir]          // verbose by default: one " inflating:" line per entry
+        : [effOverwrite ? '-xvf' : '-xvkf', fp, '-C', destDir];    // -v: one line per entry
       const child = spawn(type === 'zip' ? 'unzip' : 'tar', args);
       op.child = child;
       const bump = lineCounter((n) => { op.done = op.total ? Math.min(op.done + n, op.total) : op.done + n; });
@@ -725,8 +786,8 @@ router.post('/api/archive/extract', async (req, res) => {
         if (op.status === 'cancelled') { setTimeout(() => extractOps.delete(opId), 60000); return; }
         // tar -k exits non-zero on already-existing files (skip semantics);
         // unzip exit 1 = warnings only — both are success for our purposes.
-        const ok = code === 0 || (type === 'zip' && code === 1) || (type !== 'zip' && !overwrite && /(already |: File )exists/i.test(errTail));
-        if (ok) { op.status = 'done'; if (op.total) op.done = op.total; }
+        const ok = code === 0 || (type === 'zip' && code === 1) || (type !== 'zip' && !effOverwrite && /(already |: File )exists/i.test(errTail));
+        if (ok) { op.status = 'done'; if (op.total) op.done = op.total; clearExtractMark(fp, destDir); }
         else { op.status = 'error'; op.error = (errTail.split('\n').filter(Boolean)[0] || `exit ${code}`); }
         setTimeout(() => extractOps.delete(opId), 5 * 60 * 1000);
       });
@@ -742,13 +803,15 @@ router.post('/api/archive/extract', async (req, res) => {
     return;
   }
   let cmd, args;
-  if (type === 'zip') { cmd = 'unzip'; args = [overwrite ? '-o' : '-n', '-q', fp, '-d', destDir]; }
-  else { cmd = 'tar'; args = [overwrite ? '-xf' : '-xkf', fp, '-C', destDir]; }
+  if (type === 'zip') { cmd = 'unzip'; args = [effOverwrite ? '-o' : '-n', '-q', fp, '-d', destDir]; }
+  else { cmd = 'tar'; args = [effOverwrite ? '-xf' : '-xkf', fp, '-C', destDir]; }
+  markExtractStart(fp, destDir); // #23
   execFile(cmd, args, { timeout: 10 * 60 * 1000, maxBuffer: 8 * 1024 * 1024 }, (err, _o, stderr) => {
     // tar -k exits non-zero when files already existed — treat as success (skip-existing semantics)
-    if (err && !(cmd === 'tar' && !overwrite && /(already |: File )exists/i.test(stderr || ''))) {
+    if (err && !(cmd === 'tar' && !effOverwrite && /(already |: File )exists/i.test(stderr || ''))) {
       return res.status(400).json({ error: (stderr || err.message).split('\n')[0] });
     }
+    clearExtractMark(fp, destDir);
     res.json({ success: true, dest: destDir });
   });
 });
@@ -762,6 +825,12 @@ router.post('/api/archive/extract', async (req, res) => {
 // on). Cross-host relays count bytes INLINE on the stream; local/same-host
 // branches poll `du` on the destination. ──
 const transferOps = new Map(); // opId → {done,total,status,error,dest,cancel}
+// Staged-write suffix (restart audit #22) — keep in sync with copy/move in
+// src/safe-fs-worker.js: dest is written as `<dest>.vs-partial` and renamed
+// into place on success, so an interrupted transfer leaves only a clearly
+// marked partial (never a truncated file at the final name). The du progress
+// poll must watch both names.
+const PARTIAL_SUFFIX = '.vs-partial';
 router.get('/api/file/transfer-status', (req, res) => {
   const op = transferOps.get(String(req.query.id || ''));
   if (!op) return res.status(404).json({ error: 'unknown op' });
@@ -853,18 +922,40 @@ async function crossHostTransfer(req, res, { move }) {
     let srcChild;
     if (srcHost) srcChild = inst._spawn(srcHost, `cd ${shq(srcParent)} && tar -cf - ${shq(base)}`);
     else { const sp = safePath(src); srcChild = spawn('tar', ['-cf', '-', path.basename(sp)], { cwd: path.dirname(sp) }); }
+    let stageLocal = null;
     try {
       let destChild, localRename = null;
       if (destHost) {
         const h = inst._host(destHost);
-        // extract lands as <base>; rename remotely if the target name differs
-        const post = destBase === base ? '' : ` && mv ${shq(destParent + '/' + base)} ${shq(destPath)}`;
-        destChild = spawn('ssh', [...inst.hosts.sshArgs(h), '--', `mkdir -p ${shq(destParent)} && tar -xf - -C ${shq(destParent)}${post}`]);
+        if (overwrite) {
+          // merge-overwrite into the existing tree — also the heal path for an
+          // earlier interrupted attempt (each file rewritten whole).
+          // extract lands as <base>; rename remotely if the target name differs
+          const post = destBase === base ? '' : ` && mv ${shq(destParent + '/' + base)} ${shq(destPath)}`;
+          destChild = spawn('ssh', [...inst.hosts.sshArgs(h), '--', `mkdir -p ${shq(destParent)} && tar -xf - -C ${shq(destParent)}${post}`]);
+        } else {
+          // Staged extract (#22): untar into a marked temp sibling and mv into
+          // place only when tar exits clean — a truncated stream (server death
+          // mid-copy) makes tar fail, and the guard removes the partial instead
+          // of leaving a half tree at the final name. The 409 pre-check above
+          // guarantees destPath is free, so the mv never collides.
+          const stage = destParent + '/' + PARTIAL_SUFFIX + '-' + Date.now().toString(36);
+          destChild = spawn('ssh', [...inst.hosts.sshArgs(h), '--',
+            `mkdir -p ${shq(stage)} && { tar -xf - -C ${shq(stage)} && mv ${shq(stage + '/' + base)} ${shq(destPath)} && rm -rf ${shq(stage)}; } || { rm -rf ${shq(stage)}; exit 1; }`]);
+        }
       } else {
         const dp = safePath(destPath), dParent = path.dirname(dp);
         fs.mkdirSync(dParent, { recursive: true });
-        destChild = spawn('tar', ['-xf', '-', '-C', dParent]);
-        if (path.basename(dp) !== base) localRename = { from: path.join(dParent, base), to: dp };
+        if (overwrite) {
+          destChild = spawn('tar', ['-xf', '-', '-C', dParent]);
+          if (path.basename(dp) !== base) localRename = { from: path.join(dParent, base), to: dp };
+        } else {
+          // Staged extract (#22), local flavor: an interrupted stream leaves
+          // only the marked `.vs-partial-*` dir, never a half tree at dp.
+          stageLocal = fs.mkdtempSync(path.join(dParent, PARTIAL_SUFFIX + '-'));
+          destChild = spawn('tar', ['-xf', '-', '-C', stageLocal]);
+          localRename = { from: path.join(stageLocal, base), to: dp };
+        }
       }
       count(srcChild.stdout);
       if (op) op.cancel = () => { try { srcChild.kill('SIGTERM'); } catch {} try { destChild.kill('SIGTERM'); } catch {} };
@@ -877,10 +968,24 @@ async function crossHostTransfer(req, res, { move }) {
         new Promise((resolve, reject) => destChild.on('close', c => c === 0 ? resolve() : reject(new Error('extract failed: ' + (dstErr.trim().slice(0, 200) || c))))),
       ]);
       if (localRename) fs.renameSync(localRename.from, localRename.to);
+      if (stageLocal) { try { fs.rmSync(stageLocal, { recursive: true, force: true }); } catch {} }
       if (move) { if (srcHost) await inst.remove(srcHost, src); else fs.rmSync(safePath(src), { recursive: true, force: true }); }
       return res.json({ success: true, dest: destPath });
-    } catch (e) { return res.status(400).json({ error: e.message }); }
+    } catch (e) {
+      if (stageLocal) { try { fs.rmSync(stageLocal, { recursive: true, force: true }); } catch {} }
+      return res.status(400).json({ error: e.message });
+    }
   }
+  // Source byte count for the staged-write size guard below (#22): `cat` ends
+  // CLEANLY on a dead pipe's EOF (server death mid-copy), so byte-count
+  // equality is the only truncation signal either side has.
+  let srcSize = null;
+  try {
+    srcSize = srcHost
+      ? parseInt(String(await inst._run(srcHost, `wc -c < ${shq(src)}`)), 10)
+      : fs.statSync(safePath(src)).size;
+    if (!Number.isFinite(srcSize)) srcSize = null;
+  } catch { srcSize = null; }
   // reader stream
   let reader;
   if (srcHost) reader = inst._spawn(srcHost, `cat '${String(src).replace(/'/g, `'\\''`)}'`).stdout;
@@ -891,13 +996,29 @@ async function crossHostTransfer(req, res, { move }) {
     if (destHost) {
       const h = inst._host(destHost);
       const { spawn } = require('child_process');
-      const w = spawn('ssh', [...inst.hosts.sshArgs(h), '--', `mkdir -p "$(dirname '${String(destPath).replace(/'/g, `'\\''`)}')" && cat > '${String(destPath).replace(/'/g, `'\\''`)}'`]);
+      // Staged write (#22): land bytes at the .vs-partial name and only mv to
+      // the final name when the byte count matches the source — `cat` exits 0
+      // on the EOF a dying server produces, which used to leave a truncated
+      // file that looked complete at the real destination.
+      const part = destPath + PARTIAL_SUFFIX;
+      const sizeGuard = srcSize != null ? ` && [ "$(wc -c < ${shq(part)})" -eq ${srcSize} ]` : '';
+      const w = spawn('ssh', [...inst.hosts.sshArgs(h), '--',
+        `mkdir -p "$(dirname ${shq(destPath)})" && { cat > ${shq(part)}${sizeGuard} && mv -f ${shq(part)} ${shq(destPath)}; } || { rm -f ${shq(part)}; exit 1; }`]);
       reader.pipe(w.stdin);
       await new Promise((resolve, reject) => { w.on('close', c => c === 0 ? resolve() : reject(new Error('remote write failed'))); reader.on('error', reject); });
     } else {
       const dPath = safePath(destPath);
       fs.mkdirSync(path.dirname(dPath), { recursive: true });
-      await new Promise((resolve, reject) => { const w = fs.createWriteStream(dPath); reader.pipe(w); w.on('finish', resolve); w.on('error', reject); reader.on('error', reject); });
+      // Staged write (#22): stream into .vs-partial, rename only after a clean
+      // 'finish' AND a source-size match (a remote `cat` reader that dies
+      // mid-stream still 'end's cleanly) — an interrupted transfer leaves the
+      // marked partial, never a truncated file at the final name.
+      const part = dPath + PARTIAL_SUFFIX;
+      try {
+        await new Promise((resolve, reject) => { const w = fs.createWriteStream(part); reader.pipe(w); w.on('finish', resolve); w.on('error', reject); reader.on('error', reject); });
+        if (srcSize != null && fs.statSync(part).size !== srcSize) throw new Error('transfer truncated (source changed or connection dropped)');
+        fs.renameSync(part, dPath);
+      } catch (e) { try { fs.rmSync(part, { force: true }); } catch {} throw e; }
     }
     if (move) { if (srcHost) await inst.remove(srcHost, src); else fs.rmSync(safePath(src), { force: true }); }
     res.json({ success: true, dest: destPath });
@@ -929,7 +1050,7 @@ async function doCopy(req, res) {
   let stop = null;
   try {
     if (!overwrite && (await sfs(req).call('exists', { path: d })).exists) return res.status(409).json({ error: 'exists', dest: d });
-    if (op) { localDuBytes(s).then((b) => { if (b) op.total = b; }); stop = attachDuPoll(op, () => localDuBytes(d)); }
+    if (op) { localDuBytes(s).then((b) => { if (b) op.total = b; }); stop = attachDuPoll(op, async () => Math.max(await localDuBytes(d), await localDuBytes(d + PARTIAL_SUFFIX))); }
     await sfs(req).call('copy', { src: s, dest: d, overwrite: !!overwrite });
     res.json({ success: true, dest: d });
   } catch (e) { res.status(e.status || 400).json({ error: e.message }); } finally { stop?.(); }
@@ -956,7 +1077,7 @@ async function doMove(req, res) {
     if (!overwrite && (await sfs(req).call('exists', { path: d })).exists) return res.status(409).json({ error: 'exists', dest: d });
     // same-device rename is instant — the poll only matters on the EXDEV
     // copy+rm fallback, where dest grows measurably
-    if (op) { localDuBytes(s).then((b) => { if (b) op.total = b; }); stop = attachDuPoll(op, () => localDuBytes(d)); }
+    if (op) { localDuBytes(s).then((b) => { if (b) op.total = b; }); stop = attachDuPoll(op, async () => Math.max(await localDuBytes(d), await localDuBytes(d + PARTIAL_SUFFIX))); }
     // worker `move` handles the overwrite-rm + rename/EXDEV-fallback atomically
     await sfs(req).call('move', { src: s, dest: d, overwrite: !!overwrite });
     res.json({ success: true, dest: d });
