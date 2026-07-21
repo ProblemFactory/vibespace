@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.221.0
+
+**Restart-survival audit: remaining findings implemented (B-e45a — 25 items across 5 parallel worktree clusters, all self-tested + merged + full smoke battery green).**
+
+- **agentd/dial**: dial chat create honors `keeperSid` (adopts a surviving device-side claude instead of spawning a second writer) + probes the device pipe-session store on host-less resumes; the B-4058 pre-resume writer sweep is extracted into one shared script used by BOTH ssh and dial branches (with a new pipe-session-meta kill leg); per-session `VIBESPACE_API` back-tunnels re-own on every dial-in (persisted `dialReversePort`); `data/agentd/session-*.json` attach configs are unlinked at kill + age-swept at boot; the device daemon gains a keeper-parity pipe-session GC (7d, never touches a live child) and dial TERMINAL reconnects print an honest "this is a NEW session" marker instead of silently impersonating a continuation.
+- **port-forward / machine-mounts**: published public URLs re-publish beyond boot's single attempt (heal sweep + onMachineLinked + stale-proxy unpublish on failure); push-mount reverse tunnels are verified end-to-end in the health sweep and re-owned with backoff.
+- **in-flight integrity**: copy/move dest writes are staged (`.vs-partial` + rename) so a restart never leaves a truncated file at its final name; interrupted extractions journal to `data/extract-journal.json` and surface on retry; transfer polls that lose their op to a restart say so honestly; paste-image failures toast instead of dying silently.
+- **client resilience**: new `WsManager.request()` request/reply helper (self-cleanup, watchdog, gated reconnect re-send) retires the one-time-handler leak class — create/attach/tmux-attach migrated; terminal reconnects repaint from the attach reply's buffer; SyncStore defends against server version rollback (full snapshot instead of a poisoned diff); a chat message sent into a dead ws keeps its draft + toasts.
+- **server misc**: backend-id capture chains re-arm for restored sessions; subagent JSONL watchers restart after restore; pending Ctrl+G editor requests survive restarts; orphaned `rclone authorize` children are pre-flight-killed; `update.sh` is flock-guarded; pricing.json writes are atomic; permission answers are appended to the wrapper buffer so restart-rebuilt history keeps resolutions.
+
 ## 2.220.0
 
 Backlog-clearing batch 1 (B-8194 / B-b4a2 / B-1525 second half):
