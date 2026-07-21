@@ -394,6 +394,7 @@ export default {
   "Details…": "详情…",
   "Disconnected from server": "已与服务器断开",
   "Disconnected — reconnecting… your draft is kept": "已断开——正在重连…你的草稿已保留",
+  "Connection lost — your message may not have been sent; the text was restored to the input": "连接中断——消息可能未送达；内容已恢复到输入框",
   "Dock to top": "停靠到顶部",
   "Double-click to rename": "双击重命名",
   "Drop to upload to the working directory": "拖放以上传到工作目录",
