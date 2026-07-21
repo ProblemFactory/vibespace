@@ -114,6 +114,11 @@ function onChildExit({ exitCode }) {
   log(`Child exited with code ${exitCode}`);
   if (REMOTE_RETRY && exitCode !== 0 && retries < 120) {
     retries++;
+    // Mark the respawned child as a RECONNECT: a dial-terminal's device pty is
+    // LIVE (killed with the link — not the dtach reattach shape), so the
+    // respawn opens a brand-new CLI; attach-cli reads this to print an honest
+    // new-session marker instead of silently impersonating a continuation.
+    process.env.VIBESPACE_REMOTE_ATTEMPT = String(retries);
     const delay = [1000, 2000, 5000, 10000, 30000][Math.min(4, retries - 1)];
     try { process.stdout.write(`\r\n\x1b[33m[vibespace] connection lost — reconnecting in ${Math.round(delay / 1000)}s (attempt ${retries})…\x1b[0m\r\n`); } catch {}
     setTimeout(() => {
