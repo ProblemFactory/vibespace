@@ -190,6 +190,43 @@ function registerWsHandler(wss, ctx) {
               break;
             }
           }
+          // Resume HOST INFERENCE (2.218.0, real incident): pre-hostId-era
+          // window specs resumed REMOTE conversations host-less — a local
+          // `claude --resume` of an h200 transcript died "No conversation
+          // found" four times in a row while the conversation's home host was
+          // reachable the whole time. If a host-less claude resume has no
+          // LOCAL transcript but the remote-jsonl cache holds the
+          // conversation under exactly ONE registered host, resume it ON that
+          // host — and when the host still runs a live keeper child for the
+          // conversation, ATTACH (keeperSid) instead of spawning a second
+          // writer onto the same JSONL.
+          if (data.resume && data.resumeId && !data.hostId && (data.backend || 'claude') === 'claude'
+              && hosts && /^[\w-]+$/.test(data.resumeId)) {
+            try {
+              const projectsDir = path.join(os.homedir(), '.claude', 'projects');
+              let local = false;
+              try { local = fs.readdirSync(projectsDir).some((d) => fs.existsSync(path.join(projectsDir, d, data.resumeId + '.jsonl'))); } catch { }
+              if (!local) {
+                const cacheRoot = path.join(__dirname, '..', 'data', 'remote-jsonl');
+                const owners = [];
+                try {
+                  for (const hd of fs.readdirSync(cacheRoot)) {
+                    if (hosts.get(hd) && fs.existsSync(path.join(cacheRoot, hd, data.resumeId + '.jsonl'))) owners.push(hd);
+                  }
+                } catch { }
+                if (owners.length === 1) {
+                  data.hostId = owners[0];
+                  console.log(`[session] resume host inferred: ${data.resumeId.slice(0, 8)} → ${owners[0]} (host-less resume of a cached remote conversation)`);
+                  if (!data.keeperSid) {
+                    try {
+                      const k = await hosts.findKeeperFor(owners[0], data.resumeId);
+                      if (k) { data.keeperSid = k; console.log(`[session] live keeper ${k} holds ${data.resumeId.slice(0, 8)} — attaching instead of spawning a second writer`); }
+                    } catch { }
+                  }
+                }
+              }
+            } catch { }
+          }
           const id = 'sess-' + (++sessionCounterRef.value) + '-' + Date.now();
           // cwd default: a REMOTE/DIAL session with no explicit cwd must land
           // in the DEVICE's home, NOT this server's (B-0d70: the pod's
