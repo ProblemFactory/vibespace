@@ -62,6 +62,14 @@ class MachineMounts {
     if (normed) this._save();
     this._live = new Map(); // pull rec.id → { teardown, mountpoint }
     this._mounting = new Set(); // pull rec.id (single-flight)
+    // Push tunnel ownership: rec.id whose reverse-forward listener was
+    // established by THIS process. The boot re-own (restore→onMachineLinked)
+    // is otherwise the ONLY attempt — ssh machines never dial in, the daemon
+    // reaps a disowned listener after ~10min, and the machine-side rclone
+    // STAYS in its mount table while pointing at the dead 127.0.0.1 port
+    // (so the mount-table probe below can't see it) — review finding.
+    this._pushTunnelOwned = new Set();
+    this._pushRetryAt = new Map(); // push rec.id → next re-own attempt ts
     // Pull health sweep: a live pull whose LISTING hangs (its machine-side
     // serve-folder died with a daemon re-exec while the record still thinks
     // it's live — real Mac report) is torn down + remounted. Child-process ls
@@ -355,6 +363,7 @@ class MachineMounts {
       }
     }
     const rec = { id, dir: 'push', hostId, folder: abs, mountpoint: mp, mode, os: osKind, method, tokenId: shareTokenId, tunnelPort, mountedAt: Date.now() };
+    if (tunnelPort) this._pushTunnelOwned.add(id);
     this._state.mounts.push(rec);
     this._save(); this._notify();
     return { id, mountpoint: mp, os: osKind, method, via: tunnelPort ? 'tunnel' : 'public' };
@@ -482,6 +491,9 @@ class MachineMounts {
       if (live) { try { await live.teardown(); } catch { } this._live.delete(id); }
     } else {
       await this._unmountPush(rec);
+      this._pushTunnelOwned.delete(id);
+      this._pushRetryAt.delete(id);
+      this._pushDown?.delete(id);
     }
     this._state.mounts.splice(i, 1);
     this._save(); this._notify();
@@ -511,7 +523,14 @@ class MachineMounts {
         const net = require('net');
         this.hosts.device(hostId)
           .then((dm) => dm.reverseForward({ port: rec.tunnelPort, connectLocal: () => net.connect(lp, '127.0.0.1') }))
-          .catch((e) => this.log(`push tunnel re-own failed (:${rec.tunnelPort}): ${e.message}`));
+          .then(() => { this._pushTunnelOwned.add(rec.id); this._pushRetryAt.delete(rec.id); })
+          .catch((e) => {
+            // clear ownership + backoff so the health sweep retries promptly —
+            // a single failed re-own must not strand the tunnel (review finding)
+            this._pushTunnelOwned.delete(rec.id);
+            this._pushRetryAt.delete(rec.id);
+            this.log(`push tunnel re-own failed (:${rec.tunnelPort}): ${e.message}`);
+          });
       }
     }
   }
@@ -590,6 +609,37 @@ class MachineMounts {
       const was = this._pushDown.has(rec.id);
       if (!mounted && !was) { this._pushDown.add(rec.id); this.log(`push mount ${rec.mountpoint} is GONE on the machine (umounted there?)`); this._notify(); }
       else if (mounted && was) { this._pushDown.delete(rec.id); this._notify(); }
+      // Tunnel liveness (review finding): the mount-table probe above is
+      // structurally blind to a dead reverse-forward — the machine-side
+      // rclone stays mounted while every IO fails against the unbound
+      // 127.0.0.1:tunnelPort. Verify end-to-end from the machine (a request
+      // through the tunnel reaches our /dav only when a server owns the
+      // listener; a disowned/reaped one refuses or resets) and re-own with
+      // the same 5-min backoff the pull branch uses — ssh machines have no
+      // dial-in event, so the boot attempt was otherwise the only one.
+      if (rec.tunnelPort) {
+        if (this._pushTunnelOwned.has(rec.id)) {
+          try {
+            // no curl on the machine ⇒ exit 0 (no verdict) — never churn re-owns
+            const r = await dm.runCmd('sh', ['-c', `command -v curl >/dev/null 2>&1 || exit 0; curl -s -o /dev/null --max-time 5 http://127.0.0.1:${Number(rec.tunnelPort)}/`], { timeoutMs: 10000 });
+            if (r.code !== 0) { this._pushTunnelOwned.delete(rec.id); this.log(`push tunnel :${rec.tunnelPort} dead on ${rec.hostId} — will re-own`); }
+          } catch { }
+        }
+        const lp = this.localPort();
+        if (!this._pushTunnelOwned.has(rec.id) && lp) {
+          const at = this._pushRetryAt.get(rec.id) || 0;
+          if (Date.now() >= at) {
+            this._pushRetryAt.set(rec.id, Date.now() + 5 * 60000);
+            const net = require('net');
+            try {
+              await dm.reverseForward({ port: rec.tunnelPort, connectLocal: () => net.connect(lp, '127.0.0.1') });
+              this._pushTunnelOwned.add(rec.id);
+              this._pushRetryAt.delete(rec.id);
+              this.log(`push tunnel re-owned (:${rec.tunnelPort}) on ${rec.hostId}`);
+            } catch (e) { this.log(`push tunnel re-own failed (:${rec.tunnelPort}): ${e.message}`); }
+          }
+        }
+      }
     }
     for (const [id, h] of [...this._live]) {
       const rec = this._state.mounts.find((m) => m.id === id);
