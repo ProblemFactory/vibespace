@@ -176,6 +176,12 @@ class Sidebar {
         this._activeTab = val;
         this._updateTabs();
         this._render();
+        // Rail chrome must follow (real report: content landed on the default
+        // tab while the rail highlight + header title stayed on the
+        // localStorage-restored pre-refresh panel — the rail restores first,
+        // this async one-shot then switched content only)
+        this._railSync?.();
+        this._railApplyTitle?.();
       }
     };
     this.app.settings?.on('sidebar.defaultTab', _applyDefaultTab);
