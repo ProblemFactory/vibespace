@@ -78,7 +78,7 @@ try {
 
   // default ON: rail present, classic tab bar hidden
   check('rail renders by default', await evalJs(`!!document.getElementById('sidebar-rail')`));
-  check('rail has 8 items', await evalJs(`document.querySelectorAll('#sidebar-rail .rail-item').length === 8`));
+  check('rail has 9 items', await evalJs(`document.querySelectorAll('#sidebar-rail .rail-item').length === 9`)); // 2.216.0 added the system icon
   check('classic tab bar hidden', await evalJs(`getComputedStyle(document.querySelector('.sidebar-tabs')).display === 'none'`));
   check('sidebar content wrapped', await evalJs(`!!document.querySelector('#sidebar .sidebar-main')`));
 

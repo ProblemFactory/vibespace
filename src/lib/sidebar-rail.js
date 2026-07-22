@@ -252,6 +252,64 @@ export function installSidebarRail(Sidebar) {
       b.classList.toggle('rail-warn', pct >= 80 && pct < 92);
     },
 
+    /** 14-day daily-cost bars for the System panel — hand-drawn canvas (no
+     *  Chart.js lifecycle in the rail), ledger data from /api/usage-stats.
+     *  Fetched once per panel render (the ledger scan is server-throttled;
+     *  the 5s sysinfo interval must NOT hammer it — render() skips the chart
+     *  when one is already drawn). */
+    async _renderRailUsageChart(c) {
+      const canvas = c.querySelector('.sys-usage-chart');
+      if (!canvas || canvas.dataset.drawn) return;
+      canvas.dataset.drawn = '1';
+      const to = Date.now(), from = to - 14 * 864e5;
+      let d = null;
+      try { d = await fetchJson(`/api/usage-stats?from=${from}&to=${to}`); } catch { }
+      const rows = d?.groups?.day || [];
+      const stats = c.querySelector('.sys-usage-stats');
+      if (!d || d.error || !rows.length) {
+        if (stats) stats.textContent = tr('No usage recorded in the last 14 days.');
+        canvas.remove();
+        return;
+      }
+      // gap-fill the 14-day scale so quiet days render as gaps, not a squeezed axis
+      const byKey = new Map(rows.map((r) => [r.key, r]));
+      const days = [];
+      for (let i = 13; i >= 0; i--) {
+        const dt = new Date(to - i * 864e5);
+        const key = dt.toISOString().slice(0, 10);
+        days.push({ key, cost: byKey.get(key)?.cost || 0, tokens: byKey.get(key)?.totalTokens || 0 });
+      }
+      const dpr = window.devicePixelRatio || 1;
+      const wCss = canvas.clientWidth || canvas.parentElement.clientWidth || 220;
+      canvas.width = wCss * dpr; canvas.height = 72 * dpr;
+      const ctx = canvas.getContext('2d'); ctx.scale(dpr, dpr);
+      const cs = getComputedStyle(document.documentElement);
+      const accent = (cs.getPropertyValue('--accent') || '#5b8def').trim() || '#5b8def';
+      const dim = (cs.getPropertyValue('--text-dim') || '#888').trim() || '#888';
+      const max = Math.max(0.01, ...days.map((x) => x.cost));
+      const bw = wCss / days.length;
+      ctx.font = '9px sans-serif'; ctx.fillStyle = dim;
+      for (let i = 0; i < days.length; i++) {
+        const h = Math.max(days[i].cost > 0 ? 2 : 0, 58 * days[i].cost / max);
+        ctx.fillStyle = accent;
+        ctx.globalAlpha = 0.85;
+        ctx.fillRect(i * bw + 1.5, 60 - h, Math.max(2, bw - 3), h);
+      }
+      ctx.globalAlpha = 1; ctx.fillStyle = dim;
+      ctx.fillText(days[0].key.slice(5), 0, 70);
+      const lastLbl = days[days.length - 1].key.slice(5);
+      ctx.fillText(lastLbl, wCss - ctx.measureText(lastLbl).width, 70);
+      const peak = '$' + max.toFixed(2);
+      ctx.fillText(peak, wCss - ctx.measureText(peak).width, 8);
+      canvas.title = tr('Estimated API-equivalent cost per day (subscriptions are plan-covered) — open Usage for the full breakdown');
+      if (stats) {
+        const totCost = days.reduce((a, b) => a + b.cost, 0);
+        const totTok = days.reduce((a, b) => a + b.tokens, 0);
+        const fmtT = (n) => n >= 1e9 ? (n / 1e9).toFixed(1) + 'B' : n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(0) + 'k' : String(n);
+        stats.innerHTML = `<span class="sys-usage-stat">${escHtml(tr('est. cost'))} <b>$${totCost.toFixed(2)}</b></span> · <span class="sys-usage-stat">${escHtml(tr('tokens'))} <b>${fmtT(totTok)}</b></span>`;
+      }
+    },
+
     // ── System panel: container memory / disk / load / top processes ──
     async _renderSystemPanel(c) {
       c.innerHTML = `<div class="empty-hint">${escHtml(tr('Loading…'))}</div>`;
@@ -281,7 +339,13 @@ export function installSidebarRail(Sidebar) {
           parts.push(`<div class="sys-proc" title="${escHtml(p.cmd)}"><span class="sys-proc-rss">${fmt(p.rss)}</span><span class="sys-proc-cmd">${escHtml(p.cmd.slice(0, 70))}</span></div>`);
         }
         parts.push(`<div class="empty-hint empty-hint-inline">${escHtml(tr('Orphaned dev servers show in Ports with a Kill button'))}</div>`);
+        // Usage history (user request): a compact 14-day daily-cost chart from
+        // the permanent ledger, with a click-through to the full Usage window.
+        parts.push(`<div class="usage-section-title">${escHtml(tr('Usage (14 days)'))} <span class="sys-usage-open" style="float:right;cursor:pointer;color:var(--accent);text-transform:none;letter-spacing:0">${escHtml(tr('Open Usage…'))}</span></div>`);
+        parts.push(`<canvas class="sys-usage-chart" height="72"></canvas><div class="sys-usage-stats tiny"></div>`);
         c.innerHTML = parts.join('');
+        c.querySelector('.sys-usage-open')?.addEventListener('click', () => this.app.openUsage?.());
+        this._renderRailUsageChart(c).catch(() => { });
       };
       await render();
       const t = setInterval(() => { if (!c.isConnected) { clearInterval(t); return; } render(); }, 5000);
