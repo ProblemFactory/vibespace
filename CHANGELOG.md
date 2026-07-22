@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.222.0
+
+- **Usage history in the System rail panel** (user request): a compact 14-day daily-cost bar chart from the permanent ledger (gap-filled scale, peak label, est. cost + token totals underneath) with an "Open Usage…" click-through to the full window. Hand-drawn canvas — no chart-library lifecycle in the rail; fetched once per panel render so the 5s sysinfo refresh never hammers the ledger scan.
+- Rail smoke updated for the 2.216.0 system icon (the "8 items" assert had gone stale).
+
 ## 2.221.0
 
 **Restart-survival audit: remaining findings implemented (B-e45a — 25 items across 5 parallel worktree clusters, all self-tested + merged + full smoke battery green).**
