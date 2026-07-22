@@ -2609,6 +2609,13 @@ app.get('/api/sysinfo', async (req, res) => {
   try { res.json(await sysinfo.read(path.join(__dirname, 'data'))); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Resource HISTORY for the System rail charts (2.223.0): self-sampled CPU/
+// memory rings — 24h at the 45s watch cadence, 7d at 15min. range=1h|24h|7d.
+app.get('/api/sysinfo/history', (req, res) => {
+  const ranges = { '1h': 3600e3, '24h': 24 * 3600e3, '7d': 7 * 24 * 3600e3 };
+  const ms = ranges[String(req.query.range || '24h')] || ranges['24h'];
+  res.json({ points: sysinfo.history(ms), rangeMs: ms, cpus: require('os').cpus().length });
+});
 sysinfo.startWatch({
   dataDir: path.join(__dirname, 'data'),
   broadcast: (msg) => {
@@ -4414,6 +4421,7 @@ function shutdown() {
   try { sessionStatus.flush(); } catch {} // debounced session-status writes
   try { userTodos.flush(); } catch {} // debounced user-todo writes
   try { telemetry.flush(); } catch {} // buffered telemetry records (2.219.0)
+  try { sysinfo.persistHistory(); } catch {} // resource-history ring (2.223.0)
   process.exit(0);
 }
 process.on('SIGINT', () => {

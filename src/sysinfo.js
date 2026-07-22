@@ -72,14 +72,94 @@ async function read(dataDir) {
   };
 }
 
+// ── Resource HISTORY (2.223.0, user request: the admin panel's CPU/memory
+// charts, self-contained in the instance): every watch tick samples container
+// CPU (cgroup usage delta → cores) + memory into two rings — 24h at the 45s
+// cadence and 7d at 15min — persisted to data/sysinfo-history.json (atomic,
+// debounced) so charts survive restarts. No Prometheus dependency: works on
+// bare Docker/self-hosted the same as in the fleet.
+let _cpuPrev = null; // { usec, at }
+function cpuUsageUsec() {
+  try { // cgroup v2
+    const m = /usage_usec (\d+)/.exec(fs.readFileSync('/sys/fs/cgroup/cpu.stat', 'utf8'));
+    if (m) return Number(m[1]);
+  } catch { }
+  try { // cgroup v1 (ns)
+    return Number(fs.readFileSync('/sys/fs/cgroup/cpuacct/cpuacct.usage', 'utf8')) / 1000;
+  } catch { }
+  try { // host fallback: aggregate cpu times (ms → usec)
+    const cpus = os.cpus();
+    let busy = 0;
+    for (const c of cpus) busy += c.times.user + c.times.nice + c.times.sys + c.times.irq;
+    return busy * 1000;
+  } catch { return null; }
+}
+function sampleCpuCores() {
+  const usec = cpuUsageUsec();
+  const at = Date.now();
+  if (usec == null) return null;
+  const prev = _cpuPrev; _cpuPrev = { usec, at };
+  if (!prev || usec < prev.usec || at <= prev.at) return null;
+  return Math.round(((usec - prev.usec) / ((at - prev.at) * 1000)) * 100) / 100;
+}
+const _hist = { fine: [], coarse: [], loadedFrom: null }; // fine: 45s×24h, coarse: 15min×7d
+const FINE_MAX = Math.ceil(24 * 3600 / 45), COARSE_MAX = Math.ceil(7 * 24 * 4);
+let _histDirty = false, _histFile = null, _lastCoarseAt = 0;
+function loadHistory(dataDir) {
+  _histFile = path.join(dataDir, 'sysinfo-history.json');
+  try {
+    const d = JSON.parse(fs.readFileSync(_histFile, 'utf8'));
+    if (Array.isArray(d.fine)) _hist.fine = d.fine.slice(-FINE_MAX);
+    if (Array.isArray(d.coarse)) _hist.coarse = d.coarse.slice(-COARSE_MAX);
+  } catch { }
+}
+function persistHistory() {
+  if (!_histFile || !_histDirty) return;
+  _histDirty = false;
+  try {
+    const tmp = _histFile + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify({ fine: _hist.fine, coarse: _hist.coarse }));
+    fs.renameSync(tmp, _histFile);
+  } catch { }
+}
+function recordSample(mem, cores) {
+  const pt = { t: Date.now(), m: mem.used, l: mem.limit, c: cores };
+  _hist.fine.push(pt);
+  if (_hist.fine.length > FINE_MAX) _hist.fine.splice(0, _hist.fine.length - FINE_MAX);
+  if (pt.t - _lastCoarseAt >= 15 * 60 * 1000) { // 15-min ring: max-mem + avg-cpu over the window
+    const winFrom = pt.t - 15 * 60 * 1000;
+    const win = _hist.fine.filter((x) => x.t >= winFrom);
+    const cs = win.map((x) => x.c).filter((v) => v != null);
+    _hist.coarse.push({
+      t: pt.t, l: pt.l,
+      m: Math.max(...win.map((x) => x.m), 0),
+      c: cs.length ? Math.round(cs.reduce((a, b) => a + b, 0) / cs.length * 100) / 100 : null,
+    });
+    if (_hist.coarse.length > COARSE_MAX) _hist.coarse.splice(0, _hist.coarse.length - COARSE_MAX);
+    _lastCoarseAt = pt.t;
+  }
+  _histDirty = true;
+}
+function history(rangeMs) {
+  const from = Date.now() - rangeMs;
+  // fine ring covers ≤24h; longer ranges serve the coarse ring
+  const src = rangeMs <= 24 * 3600 * 1000 ? _hist.fine : _hist.coarse;
+  return src.filter((p) => p.t >= from);
+}
+
 // Memory-pressure watch: amber ≥80%, red ≥92% of the container limit.
 // Re-alerts on ESCALATION immediately, otherwise once per 30min per level;
 // fully clears below 75% so a later climb alerts again.
 function startWatch({ broadcast, dataDir, intervalMs = 45000 } = {}) {
   let lastLevel = 0, lastAlertAt = 0;
+  if (dataDir) loadHistory(dataDir);
+  sampleCpuCores(); // prime the delta baseline
+  const persistT = setInterval(persistHistory, 5 * 60 * 1000);
+  persistT.unref?.();
   const t = setInterval(async () => {
     try {
       const mem = memInfo();
+      recordSample(mem, sampleCpuCores());
       const pct = mem.limit ? (mem.used / mem.limit) * 100 : 0;
       global.__vsMetric?.('srv-container-mem-pct', Math.round(pct));
       const level = pct >= 92 ? 2 : pct >= 80 ? 1 : 0;
@@ -94,7 +174,7 @@ function startWatch({ broadcast, dataDir, intervalMs = 45000 } = {}) {
     } catch { }
   }, intervalMs);
   t.unref?.();
-  return () => clearInterval(t);
+  return () => { clearInterval(t); clearInterval(persistT); persistHistory(); };
 }
 
-module.exports = { read, startWatch, memInfo };
+module.exports = { read, startWatch, memInfo, history, persistHistory };
