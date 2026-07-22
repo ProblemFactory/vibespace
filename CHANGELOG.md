@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.223.0
+
+- **System rail panel: CPU/memory HISTORY charts** (what the 2.222.0 request actually meant — the admin panel's resource charts, in-instance; the token-usage chart it mistakenly added is removed). The instance self-samples container CPU (cgroup usage delta → cores; v2/v1/host fallbacks) + memory on the existing 45s watch into two rings — 24h fine + 7d at 15min — persisted to `data/sysinfo-history.json` (atomic, flushed on shutdown) so charts survive restarts. Panel shows Memory (scaled to the container limit) and CPU (cores) area charts with 1h/24h/7d range chips and current-value readouts. `GET /api/sysinfo/history?range=`. No Prometheus dependency — works identically on self-hosted/Docker.
+
 ## 2.222.0
 
 - **Usage history in the System rail panel** (user request): a compact 14-day daily-cost bar chart from the permanent ledger (gap-filled scale, peak label, est. cost + token totals underneath) with an "Open Usage…" click-through to the full window. Hand-drawn canvas — no chart-library lifecycle in the rail; fetched once per panel render so the 5s sysinfo refresh never hammers the ledger scan.
