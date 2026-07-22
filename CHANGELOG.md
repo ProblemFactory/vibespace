@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.223.1
+
+- **System history charts are interactive now**: switched to Chart.js (same hover/tooltip model as the Usage window) and split the panel into two lifecycles — the live zone (bars/load/processes) keeps its 5s refresh while the history zone rebuilds only on range change + a slow 60s tick, so the chart is never replaced under your cursor. Chart instances are destroyed before every rebuild and on panel dispose.
+- **Top-process rows expand on click** (real complaint: long command paths were unreadable at any sidebar width): click toggles the full wrapped command; expansion state is keyed by pid so the 5s refresh keeps it open; server-side command capture widened 160→400 chars.
+
 ## 2.223.0
 
 - **System rail panel: CPU/memory HISTORY charts** (what the 2.222.0 request actually meant — the admin panel's resource charts, in-instance; the token-usage chart it mistakenly added is removed). The instance self-samples container CPU (cgroup usage delta → cores; v2/v1/host fallbacks) + memory on the existing 45s watch into two rings — 24h fine + 7d at 15min — persisted to `data/sysinfo-history.json` (atomic, flushed on shutdown) so charts survive restarts. Panel shows Memory (scaled to the container limit) and CPU (cores) area charts with 1h/24h/7d range chips and current-value readouts. `GET /api/sysinfo/history?range=`. No Prometheus dependency — works identically on self-hosted/Docker.

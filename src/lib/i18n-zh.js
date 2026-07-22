@@ -447,6 +447,7 @@ export default {
   "Goal set: {condition}": "已设定目标：{condition}",
   "Goal: {text}": "目标：{text}",
   "Groups": "组",
+  "Click to expand the full command": "点击展开完整命令",
   "History": "历史",
   "Hook removed": "钩子已移除",
   "ID": "ID",
