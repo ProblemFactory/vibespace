@@ -306,6 +306,10 @@ class App {
       // changes made while this tab was disconnected)
       fetchJson('/api/maintenance').then((m) => { if (m) this._renderMaintenance?.(m); }).catch(() => {});
       try { this.settings?.refetch?.(); } catch {}
+      // user-state too (2.223.4 — the walter names/stars/archives blackout):
+      // a boot-time fetch that failed during a restart window left the tab
+      // permanently stateless; reconnect re-applies the authoritative copy.
+      try { this.sidebar?._fetchUserState?.(); } catch {}
       for (const [winId, session] of this.sessions) {
         if (session instanceof TerminalSession && session.sessionId) {
           this.ws.send({ type: 'attach', sessionId: session.sessionId });
