@@ -15,18 +15,31 @@ export function installSidebarState(SidebarClass) {
   // ── Server State Sync ──
 
   proto._fetchUserState = async function() {
-    try {
-      const res = await fetch('/api/user-state');
-      if (res.ok) {
+    // Retry on failure (2.223.4, walter incident): this used to be a
+    // ONE-SHOT fetch — a tab loading during a server-restart window came up
+    // with names/stars/archives ALL unapplied (renames "gone", archived
+    // sessions resurfacing) and never healed. Worse, _userStateFetched was
+    // set even on failure, so a later star/rename POSTed the EMPTY full doc
+    // back over the server's real state (silent fleet-wide clobber bomb).
+    // Now: retries with backoff, the fetched flag is set only after a
+    // SUCCESSFUL apply (writes stay blocked until then), and the app's
+    // reconnect path calls this again (idempotent).
+    for (const wait of [0, 2000, 5000, 15000]) {
+      if (wait) await new Promise((r) => setTimeout(r, wait));
+      try {
+        const res = await fetch('/api/user-state');
+        if (!res.ok) continue;
         const state = await res.json();
         this._applyServerState(state);
         this._render();
         this.app.updateTaskbar();
-      }
-    } catch {}
-    // Only after the authoritative server state has been applied may
-    // migration-triggered pushes write back (see _migrateUserStateKeys).
-    this._userStateFetched = true;
+        // Only after the authoritative server state has been applied may
+        // migration-triggered pushes write back (see _migrateUserStateKeys).
+        this._userStateFetched = true;
+        return;
+      } catch {}
+    }
+    console.warn('[user-state] initial fetch failed after retries — stars/names read-only until reconnect');
   };
 
   proto._writeUserStateToLocalStorage = function(state) {

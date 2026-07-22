@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.223.4
+
+- **User-state (stars / renames / archives) can no longer black out a tab** (real report: after a mobile round-trip, every rename showed as the first-message name and archived sessions "mysteriously" resurfaced — the server data was intact the whole time). The boot-time `/api/user-state` fetch was ONE-SHOT: failing during a server-restart window left the tab permanently stateless, and `_userStateFetched` was set even on failure, so a later star/rename POSTed the empty full document back over the server's real state (a silent clobber bomb — writes are full-doc). Now the fetch retries with backoff, the flag is set only after a successful apply (writes stay blocked until then), and ws reconnect re-applies the authoritative copy.
+
 ## 2.223.3
 
 - **Manage-Agents helper commands survive broken login-shell PATHs** (fleet-wide incident: helper terminals run `bash -l`/`zsh -l`, `/etc/profile` resets PATH, and a home without `~/.local/bin` in `~/.profile` made the Update button's bare `claude update` die "command not found" — reading as "claude 没了" while the install was healthy). `/api/backend-status` now returns the server-resolved absolute `cmdPath` per CLI and local login/update helper commands are prefixed with it; remote hosts keep the bare name. The fleet image's boot script also idempotently ensures `~/.profile` re-adds `~/.local/bin` (PVC homes predate any skeleton).
