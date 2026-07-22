@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.223.3
+
+- **Manage-Agents helper commands survive broken login-shell PATHs** (fleet-wide incident: helper terminals run `bash -l`/`zsh -l`, `/etc/profile` resets PATH, and a home without `~/.local/bin` in `~/.profile` made the Update button's bare `claude update` die "command not found" — reading as "claude 没了" while the install was healthy). `/api/backend-status` now returns the server-resolved absolute `cmdPath` per CLI and local login/update helper commands are prefixed with it; remote hosts keep the bare name. The fleet image's boot script also idempotently ensures `~/.profile` re-adds `~/.local/bin` (PVC homes predate any skeleton).
+
 ## 2.223.2
 
 - **Rail highlight/title no longer desync from the default tab on refresh** (real report): the rail restores the last-used panel from localStorage first, then the async `sidebar.defaultTab` one-shot switched the CONTENT only — highlight and header title kept the pre-refresh panel. The one-shot now syncs the rail chrome too. Precedence stays: an explicitly configured default tab wins over last-position; without one, last-position persists as before.
