@@ -591,16 +591,26 @@ export function installManageAgents(App, ctx = {}) {
           instBtn.onclick = () => run(b.installCmd);
           actions.appendChild(instBtn);
         }
+        // Helper terminals are LOGIN shells — /etc/profile resets PATH, and a
+        // host missing ~/.local/bin in ~/.profile made a bare `claude update`
+        // die "command not found" (fleet-wide him188 incident). Local commands
+        // that START with the CLI name use the server-resolved absolute path;
+        // remote hosts keep the bare name (their path layout is unknown here).
+        const absCmd = (cmd) => {
+          if (selectedHost || !info.cmdPath) return cmd;
+          const name = b.key === 'claude' ? 'claude' : 'codex';
+          return cmd.startsWith(name + ' ') || cmd === name ? `"${info.cmdPath}"` + cmd.slice(name.length) : cmd;
+        };
         if (info.installed && !info.loggedIn) {
           const loginBtn = document.createElement('button'); loginBtn.className = 'agent-btn primary'; loginBtn.textContent = t('Log in');
           loginBtn.title = selectedHost ? t('Logs in ON the selected remote host (its own login, not VibeSpace)') : '';
-          loginBtn.onclick = () => run(selectedHost && b.remoteLoginCmd ? b.remoteLoginCmd : b.loginCmd);
+          loginBtn.onclick = () => run(selectedHost && b.remoteLoginCmd ? b.remoteLoginCmd : absCmd(b.loginCmd));
           actions.appendChild(loginBtn);
         }
         if (info.installed) {
           const updBtn = document.createElement('button'); updBtn.className = 'agent-btn'; updBtn.textContent = t('Update');
           updBtn.title = b.updateCmd;
-          updBtn.onclick = () => run(b.updateCmd);
+          updBtn.onclick = () => run(absCmd(b.updateCmd));
           actions.appendChild(updBtn);
         }
         if (stale()) return;

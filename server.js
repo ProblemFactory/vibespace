@@ -3843,6 +3843,11 @@ app.get('/api/backend-status', (req, res) => {
     } catch { return { installed: false, version: null }; }
   };
   out.claude = probe(CLAUDE_CMD);
+  // Resolved ABSOLUTE path (2.223.3): helper terminals run LOGIN shells whose
+  // /etc/profile resets PATH — a bare `claude update` typed into one died
+  // "command not found" on hosts without ~/.local/bin in ~/.profile (fleet-wide
+  // him188 incident). The client prefixes helper commands with this instead.
+  out.claude.cmdPath = CLAUDE_CMD && CLAUDE_CMD.startsWith('/') ? CLAUDE_CMD : null;
   out.claude.loggedIn = false;
   try {
     if (process.platform === 'darwin') {
@@ -3869,6 +3874,7 @@ app.get('/api/backend-status', (req, res) => {
   // — the dialog needs to warn when both are present (CW-H200 incident).
   try { if (JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', 'settings.json'), 'utf-8'))?.apiKeyHelper) out.claude.keyHelper = true; } catch {}
   out.codex = probe(CODEX_CMD);
+  out.codex.cmdPath = CODEX_CMD && CODEX_CMD.startsWith('/') ? CODEX_CMD : null;
   out.codex.loggedIn = false;
   try { out.codex.loggedIn = fs.existsSync(path.join(os.homedir(), '.codex', 'auth.json')); } catch {}
   res.json(out);

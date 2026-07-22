@@ -38,6 +38,14 @@ fi
 
 export HOME="/home/$USER_NAME"
 export PATH="/home/$USER_NAME/.local/bin:$PATH"
+# Login shells (helper terminals run `bash -l`/`zsh -l`) reset PATH from
+# /etc/profile — without ~/.profile re-adding ~/.local/bin, `claude`/`codex`
+# vanish from every helper terminal (fleet-wide him188 incident, 2026-07-22).
+# PVC homes predate any image skeleton, so ensure it idempotently at boot.
+if ! grep -qs "local/bin" "/home/$USER_NAME/.profile"; then
+  printf '\n# ~/.local/bin on PATH for login shells (claude/codex CLIs live here)\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "/home/$USER_NAME/.profile"
+  chown "$USER_NAME:$USER_NAME" "/home/$USER_NAME/.profile" || true
+fi
 # The admin's `kubectl exec` update/restart path runs git as ROOT (the
 # container USER is root now) against the uid-1000-owned PVC repo → git
 # "dubious ownership" aborted every admin-triggered update (real regression).
