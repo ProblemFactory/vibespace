@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.223.2
+
+- **Rail highlight/title no longer desync from the default tab on refresh** (real report): the rail restores the last-used panel from localStorage first, then the async `sidebar.defaultTab` one-shot switched the CONTENT only — highlight and header title kept the pre-refresh panel. The one-shot now syncs the rail chrome too. Precedence stays: an explicitly configured default tab wins over last-position; without one, last-position persists as before.
+
 ## 2.223.1
 
 - **System history charts are interactive now**: switched to Chart.js (same hover/tooltip model as the Usage window) and split the panel into two lifecycles — the live zone (bars/load/processes) keeps its 5s refresh while the history zone rebuilds only on range change + a slow 60s tick, so the chart is never replaced under your cursor. Chart instances are destroyed before every rebuild and on panel dispose.
