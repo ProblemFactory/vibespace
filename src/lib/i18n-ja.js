@@ -446,6 +446,7 @@ export default {
   "Goal set: {condition}": "ゴール設定: {condition}",
   "Goal: {text}": "ゴール: {text}",
   "Groups": "グループ",
+  "Click to expand the full command": "クリックでコマンド全体を表示",
   "History": "履歴",
   "Hook removed": "フックを削除しました",
   "ID": "ID",

@@ -3013,12 +3013,14 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .sys-bar-label { position: relative; display: block; font-size: 10px; line-height: 14px; text-align: center; color: var(--text); }
 .sys-load { font-size: 11px; color: var(--text-secondary); margin: 2px 0 8px; }
 .sys-load-cpus { color: var(--text-dim); }
-.sys-hist-chart { width: 100%; display: block; margin: 2px 0 6px; }
+.sys-chart-box { position: relative; height: 64px; margin: 2px 0 6px; }
 .sys-chart-label { font-size: 10px; color: var(--text-secondary); display: flex; justify-content: space-between; margin-top: 4px; }
 .sys-chart-label b { color: var(--text); font-weight: 600; }
 .sys-range { float: right; display: inline-flex; gap: 4px; text-transform: none; letter-spacing: 0; }
 .sys-range-chip { cursor: pointer; padding: 0 5px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-secondary); font-size: 9px; }
 .sys-range-chip.on { border-color: var(--accent); color: var(--accent); }
+.sys-proc { cursor: pointer; }
+.sys-proc.expanded .sys-proc-cmd { white-space: normal; word-break: break-all; overflow: visible; }
 .sys-proc { display: flex; gap: 6px; align-items: baseline; font-size: 10px; padding: 2px 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent); min-width: 0; }
 .sys-proc-rss { flex: 0 0 52px; text-align: right; color: var(--text-secondary); font-weight: 600; }
 .sys-proc-cmd { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); font-family: monospace; }

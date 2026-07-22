@@ -36,7 +36,7 @@ function topProcs(n = 8) {
       const parse = (text) => text.split('\n').slice(1).filter(Boolean).map((ln) => {
         const f = ln.trim().split(/\s+/);
         // USER PID %CPU %MEM VSZ RSS TTY STAT START TIME CMD…
-        return { pid: parseInt(f[1], 10), pcpu: parseFloat(f[2]) || 0, rss: (parseInt(f[5], 10) || 0) * 1024, cmd: f.slice(10).join(' ').slice(0, 160) };
+        return { pid: parseInt(f[1], 10), pcpu: parseFloat(f[2]) || 0, rss: (parseInt(f[5], 10) || 0) * 1024, cmd: f.slice(10).join(' ').slice(0, 400) };
       }).filter((p) => p.pid);
       if (!err) return resolve(parse(out).slice(0, n));
       // BSD ps (no --sort): sort ourselves

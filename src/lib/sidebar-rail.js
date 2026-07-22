@@ -332,22 +332,33 @@ export function installSidebarRail(Sidebar) {
         parts.push(`<div class="sys-load">${d.load.join(' · ')} <span class="sys-load-cpus">/ ${d.cpus} CPU</span></div>`);
         parts.push(`<div class="usage-section-title">${escHtml(tr('Top processes (by memory)'))}</div>`);
         for (const p of d.procs || []) {
-          parts.push(`<div class="sys-proc" title="${escHtml(p.cmd)}"><span class="sys-proc-rss">${fmt(p.rss)}</span><span class="sys-proc-cmd">${escHtml(p.cmd.slice(0, 70))}</span></div>`);
+          const exp = this._railProcExpanded?.has(String(p.pid));
+          parts.push(`<div class="sys-proc${exp ? ' expanded' : ''}" data-pid="${p.pid}" title="${escHtml(tr('Click to expand the full command'))}"><span class="sys-proc-rss">${fmt(p.rss)}</span><span class="sys-proc-cmd">${escHtml(exp ? p.cmd : p.cmd.slice(0, 70))}</span></div>`);
         }
         parts.push(`<div class="empty-hint empty-hint-inline">${escHtml(tr('Orphaned dev servers show in Ports with a Kill button'))}</div>`);
-        // Resource HISTORY (2.223.0, user request — the admin panel's CPU/
-        // memory charts, in-instance): self-sampled rings, range chips 1h/24h/7d.
-        const range = this._railSysRange || '24h';
-        parts.push(`<div class="usage-section-title">${escHtml(tr('History'))} <span class="sys-range">${['1h', '24h', '7d'].map((r) => `<span class="sys-range-chip${r === range ? ' on' : ''}" data-range="${r}">${r}</span>`).join('')}</span></div>`);
-        parts.push(`<div class="sys-chart-label">${escHtml(tr('Memory'))} <b class="sys-chart-cur" data-ch="mem"></b></div><canvas class="sys-hist-chart" data-ch="mem" height="56"></canvas>`);
-        parts.push(`<div class="sys-chart-label">${escHtml(tr('CPU (cores)'))} <b class="sys-chart-cur" data-ch="cpu"></b></div><canvas class="sys-hist-chart" data-ch="cpu" height="56"></canvas>`);
-        c.innerHTML = parts.join('');
-        c.querySelectorAll('.sys-range-chip').forEach((el) => el.addEventListener('click', () => { this._railSysRange = el.dataset.range; render(); }));
-        this._renderRailResourceCharts(c, range).catch(() => { });
+        live.innerHTML = parts.join('');
+        // click a process row to expand its FULL command (the truncated line
+        // was unreadable and no sidebar width could show a long path; state
+        // keyed by pid so the 5s refresh keeps expansions open)
+        live.querySelectorAll('.sys-proc').forEach((row) => row.addEventListener('click', () => {
+          const pid = row.dataset.pid;
+          this._railProcExpanded = this._railProcExpanded || new Set();
+          if (this._railProcExpanded.has(pid)) this._railProcExpanded.delete(pid); else this._railProcExpanded.add(pid);
+          row.classList.toggle('expanded');
+        }));
       };
+      // Two lifecycles: the LIVE zone refreshes every 5s; the HISTORY zone
+      // (Chart.js, hoverable) rebuilds only on range change + a slow 60s tick
+      // — a 5s innerHTML swap under the cursor killed all interactivity.
+      c.innerHTML = '<div class="sys-live"></div><div class="sys-hist"></div>';
+      const live = c.querySelector('.sys-live');
+      const hist = c.querySelector('.sys-hist');
+      const renderHist = () => this._renderRailResourceCharts(hist, this._railSysRange || '24h').catch(() => { });
       await render();
+      renderHist();
       const t = setInterval(() => { if (!c.isConnected) { clearInterval(t); return; } render(); }, 5000);
-      this._panelDispose = () => clearInterval(t);
+      const th = setInterval(() => { if (!c.isConnected) { clearInterval(th); return; } renderHist(); }, 60000);
+      this._panelDispose = () => { clearInterval(t); clearInterval(th); this._destroyRailSysCharts(); };
     },
 
     // ── Ports panel (the vscode PORTS analogue) ──
