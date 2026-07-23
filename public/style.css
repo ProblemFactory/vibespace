@@ -121,18 +121,26 @@ html, body {
   position: relative;
 }
 .session-item-card:hover { background: var(--bg-hover); border-color: var(--border-active); }
-.session-card-row { display: flex; align-items: center; gap: 6px; }
+.session-card-row { display: flex; align-items: center; gap: 5px; }
 .session-card-lines { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.session-card-main { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.session-card-main { display: flex; align-items: center; gap: 5px; min-width: 0; }
 .session-card-sub { display: flex; min-width: 0; }
 /* cwd: left-truncate (elide the front, keep the meaningful tail) like folder-path */
 .session-card-cwd { font-size: 9px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; min-width: 0; }
 .session-card-cwd::before { content: '\200e'; }
 /* Connection-status dot (left of the name): LIVE/TMUX green, EXTERNAL amber, STOPPED dim */
-.session-conn-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--text-dim); }
-.session-conn-dot[data-status="live"], .session-conn-dot[data-status="tmux"] { background: var(--green); }
-.session-conn-dot[data-status="external"] { background: var(--yellow, #e5c07b); }
-.session-conn-dot[data-status="stopped"] { background: var(--text-dim); opacity: 0.45; }
+/* Connection status as a TOP-RIGHT corner dot on the backend icon (2.224.0
+   structural merge — the standalone dot + gap left the row; the mode badge
+   already sits bottom-right, so the icon carries identity+mode+connectivity) */
+.conn-host-icon { position: relative; overflow: visible; }
+.conn-corner-dot {
+  position: absolute; top: -3px; right: -3px; width: 6px; height: 6px;
+  border-radius: 50%; background: var(--text-dim);
+  box-shadow: 0 0 0 1.5px var(--bg-sidebar, var(--bg-root));
+}
+.conn-corner-dot[data-status="live"], .conn-corner-dot[data-status="tmux"] { background: var(--green); }
+.conn-corner-dot[data-status="external"] { background: var(--yellow, #e5c07b); }
+.conn-corner-dot[data-status="stopped"] { background: var(--text-dim); opacity: 0.45; }
 /* Status chip: text by default; collapses to icon-only PER CARD when the tags
    would crowd the name (JS-measured: name truncated → add .tags-icon). */
 .sess-state-chip .chip-icon { display: none; align-items: center; }
@@ -140,6 +148,18 @@ html, body {
 .sess-state-chip .chip-text { display: inline; }
 .session-item-card.tags-icon .sess-state-chip .chip-text { display: none; }
 .session-item-card.tags-icon .sess-state-chip .chip-icon { display: inline-flex; }
+/* Ultra-narrow ladder (2.224.0): the structural savings above cover most
+   widths; below ~190px force icon-mode chips and ellipsize the host badge,
+   below ~160px drop the lowest-value badges so the TITLE keeps priority */
+.session-item-card { container-type: inline-size; }
+@container (max-width: 190px) {
+  .sess-state-chip .chip-text { display: none; }
+  .sess-state-chip .chip-icon { display: inline-flex; }
+  .session-host-badge { max-width: 44px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+@container (max-width: 160px) {
+  .badge-agent-role, .session-host-badge, .badge-config { display: none !important; }
+}
 .session-item-card.tags-icon .sess-state-chip { padding: 1px 4px; }
 /* Session TODO pill — the agent's own TodoWrite/plan progress (活儿 steps) */
 .session-todo-pill {
@@ -229,6 +249,11 @@ html, body {
   background: none; border: none; cursor: pointer; font-size: 11px; color: var(--text-dim);
   padding: 0 2px; line-height: 1; flex-shrink: 0; opacity: 0.4; transition: opacity 0.15s;
 }
+/* Star/archive stack VERTICALLY in a ~14px column (2.224.0 structural —
+   two side-by-side buttons cost ~44px of every card's row) */
+.session-side-controls { display: flex; flex-direction: column; gap: 0; flex-shrink: 0; width: 14px; align-items: center; }
+.session-side-controls .session-inline-btn { padding: 0; }
+.session-side-controls .session-inline-btn svg { width: 10px; height: 10px; vertical-align: 0; }
 .session-item-card:hover .session-inline-btn { opacity: 0.8; }
 .session-inline-btn:hover { opacity: 1 !important; }
 .session-inline-btn.starred { color: var(--yellow); opacity: 1; }

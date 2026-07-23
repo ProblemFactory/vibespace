@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.224.0
+
+**Session cards: structural narrow-width redesign** (user-directed — reduce the chrome's intrinsic cost first, hide only as a last resort):
+
+- **Connection status merges into the backend icon** as a top-right corner dot (green live/tmux, amber external, dim stopped — the mode badge already proved the corner pattern at bottom-right). The standalone dot + gap leave the row; the icon tooltip carries the status label.
+- **Star/archive stack vertically** in a ~14px left column instead of two side-by-side buttons (~44px) — same visibility and manage-mode mark behavior, roughly 37px returned to the title overall.
+- Row gaps tightened 6→5px; ultra-narrow container-query ladder as the final tier (≤190px: icon-mode chips + ellipsized host badge; ≤160px: lowest-value badges drop so the title keeps priority).
+
 ## 2.223.4
 
 - **User-state (stars / renames / archives) can no longer black out a tab** (real report: after a mobile round-trip, every rename showed as the first-message name and archived sessions "mysteriously" resurfaced — the server data was intact the whole time). The boot-time `/api/user-state` fetch was ONE-SHOT: failing during a server-restart window left the tab permanently stateless, and `_userStateFetched` was set even on failure, so a later star/rename POSTed the empty full document back over the server's real state (a silent clobber bomb — writes are full-doc). Now the fetch retries with backoff, the flag is set only after a successful apply (writes stay blocked until then), and ws reconnect re-applies the authoritative copy.
