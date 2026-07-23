@@ -141,6 +141,11 @@ html, body {
 .conn-corner-dot[data-status="live"], .conn-corner-dot[data-status="tmux"] { background: var(--green); }
 .conn-corner-dot[data-status="external"] { background: var(--yellow, #e5c07b); }
 .conn-corner-dot[data-status="stopped"] { background: var(--text-dim); opacity: 0.45; }
+.config-corner-dot {
+  position: absolute; bottom: -3px; left: -3px; width: 6px; height: 6px;
+  border-radius: 50%; background: var(--magenta, #c678dd);
+  box-shadow: 0 0 0 1.5px var(--bg-sidebar, var(--bg-root));
+}
 /* Status chip: text by default; collapses to icon-only PER CARD when the tags
    would crowd the name (JS-measured: name truncated → add .tags-icon). */
 .sess-state-chip .chip-icon { display: none; align-items: center; }
