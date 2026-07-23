@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.225.0
+
+- **Icon legend popover** (user request): hovering a session card's backend icon opens a structured mini panel — instantly, no hover delay — decoding every corner badge for THAT session: backend identity, mode (bottom-right), connection state (top-right, with its color), and the custom-config summary (bottom-left purple dot: model/effort/permission/account). Replaces the icon's native title and the scattered per-dot tooltips.
+- **Stopped sessions render a clean icon** (real report: the dim connection dot on stopped cards read as a rendering glitch — stopped is the default state and needs no marker). The connection corner dot now renders only for live/tmux/external; both icon variants normalized to a fixed 14px inline box so corner offsets land identically.
+
 ## 2.224.1
 
 - **Custom-config indicator joins the icon corners** (user-directed continuation of 2.224.0's corner-badge language): the purple gear pill (~20px of row) becomes a 6px dot at the backend icon's BOTTOM-LEFT — the icon's corners now carry connection (top-right), mode (bottom-right) and custom config (bottom-left); the model/effort/permission/account summary lives in the dot's instant tooltip and stays live-updated on config changes.

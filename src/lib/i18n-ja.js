@@ -447,6 +447,7 @@ export default {
   "Goal: {text}": "ゴール: {text}",
   "Groups": "グループ",
   "Click to expand the full command": "クリックでコマンド全体を表示",
+  "Custom config": "カスタム設定",
   "History": "履歴",
   "Hook removed": "フックを削除しました",
   "ID": "ID",
