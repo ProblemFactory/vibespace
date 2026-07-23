@@ -236,20 +236,28 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
   }
   // Custom config marker: shown when this session has persisted model/effort/permission overrides
   const cfgBadge = row.querySelector('.badge-config');
+  // Custom-config indicator = BOTTOM-LEFT corner dot on the backend icon
+  // (2.224.1, user-directed — the row pill cost ~20px for a pure indicator;
+  // the icon's corners now carry conn (top-right), mode (bottom-right) and
+  // config (bottom-left), details in the dot's tooltip).
   const updateCfgBadge = () => {
     const cfg = state.getSessionConfig?.(s) || {};
     const acctLabel = cfg.account === 'subscription' ? tr('Subscription')
       : cfg.account ? ((app._accounts?.accounts || []).find(a => a.id === cfg.account)?.name || cfg.account) : null;
     const parts = ['model', 'effort', 'permission'].filter(k => cfg[k]).map(k => `${k}: ${cfg[k]}`);
     if (acctLabel) parts.push(`account: ${acctLabel}`);
-    if (!parts.length) { cfgBadge.style.display = 'none'; cfgBadge.textContent = ''; return; }
-    cfgBadge.style.display = '';
-    // Icon-only: the details live in the tooltip (was showing the full model id,
-    // which crowded the row). Hover to see model/effort/permission.
-    cfgBadge.dataset.tip = tr('Custom session config — {parts} (click to change)', { parts: parts.join(' · ') });
-    cfgBadge.innerHTML = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.6 3.6l1.4 1.4M11 11l1.4 1.4M3.6 12.4l1.4-1.4M11 5l1.4-1.4"/></svg>`;
+    cfgBadge.style.display = 'none'; // legacy row pill stays retired
+    let dot = card.querySelector('.config-corner-dot');
+    if (!parts.length) { dot?.remove(); return; }
+    if (!dot) {
+      const iconEl = card.querySelector('.conn-host-icon');
+      if (!iconEl) return;
+      dot = document.createElement('span');
+      dot.className = 'config-corner-dot';
+      iconEl.appendChild(dot);
+    }
+    dot.dataset.tip = tr('Custom session config — {parts} (click to change)', { parts: parts.join(' · ') });
   };
-  updateCfgBadge();
   // Structural narrow-width optimization (2.224.0, user-directed design):
   // the two side-by-side left buttons cost ~44px of EVERY card. They now
   // STACK VERTICALLY in a ~14px column (visible as before — no hover hiding;
@@ -317,6 +325,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     iconEl.appendChild(cd);
     row.insertBefore(iconEl, row.querySelector('.session-card-lines'));
   }
+  updateCfgBadge(); // needs .conn-host-icon in the DOM (config corner dot)
 
   if (showAgentKind) {
     const agentKindIcon = createAgentKindIcon(s.agentKind || 'primary', {

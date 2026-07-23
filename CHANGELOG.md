@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.224.1
+
+- **Custom-config indicator joins the icon corners** (user-directed continuation of 2.224.0's corner-badge language): the purple gear pill (~20px of row) becomes a 6px dot at the backend icon's BOTTOM-LEFT — the icon's corners now carry connection (top-right), mode (bottom-right) and custom config (bottom-left); the model/effort/permission/account summary lives in the dot's instant tooltip and stays live-updated on config changes.
+
 ## 2.224.0
 
 **Session cards: structural narrow-width redesign** (user-directed — reduce the chrome's intrinsic cost first, hide only as a last resort):
