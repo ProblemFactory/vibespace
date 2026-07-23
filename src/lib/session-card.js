@@ -140,7 +140,6 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
   card.innerHTML = `<div class="session-card-row">
     <div class="session-card-lines">
       <div class="session-card-main">
-        <span class="session-conn-dot" data-status="${escHtml(s.status || 'stopped')}" data-tip="${escHtml(connLabel)}"></span>
         <span class="session-card-name">${escHtml(displayName)}</span>
         ${agentRoleShort ? `<span class="session-card-badge badge-agent-role" data-tip="${escHtml(agentRoleLabel)}">${escHtml(agentRoleShort)}</span>` : ''}
         ${(() => {
@@ -251,13 +250,21 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     cfgBadge.innerHTML = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.6 3.6l1.4 1.4M11 11l1.4 1.4M3.6 12.4l1.4-1.4M11 5l1.4-1.4"/></svg>`;
   };
   updateCfgBadge();
-  // Star button (inline, always visible)
+  // Structural narrow-width optimization (2.224.0, user-directed design):
+  // the two side-by-side left buttons cost ~44px of EVERY card. They now
+  // STACK VERTICALLY in a ~14px column (visible as before — no hover hiding;
+  // the card is already two lines tall in cwd mode, and a hair taller
+  // otherwise), and the connection status merges into the backend icon as a
+  // corner dot (see below) — together freeing ~37px for the title.
+  const sideCol = document.createElement('div');
+  sideCol.className = 'session-side-controls';
   const starBtn = document.createElement('button');
   starBtn.className = 'session-inline-btn' + (starred ? ' starred' : '');
   starBtn.innerHTML = starred ? ICON.starOn : ICON.starOff;
   starBtn.title = starred ? tr('Unstar') : tr('Star');
   starBtn.onclick = (e) => { e.stopPropagation(); state.toggleStar(s); };
-  row.insertBefore(starBtn, row.firstChild);
+  sideCol.appendChild(starBtn);
+  row.insertBefore(sideCol, row.firstChild);
   // Archive button (inline, always visible). In manage mode it becomes a
   // MARK toggle — same position, so entering manage mode doesn't reshuffle
   // the controls the user already knows.
@@ -275,7 +282,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     archBtn.title = isArchived ? tr('Unarchive') : tr('Archive');
     archBtn.onclick = (e) => { e.stopPropagation(); state.toggleArchive(s); };
   }
-  row.insertBefore(archBtn, row.children[1]);
+  sideCol.appendChild(archBtn);
   // Manage mode: a terminate-mark button right next to archive (running only)
   if (mark && s.status !== 'stopped') {
     const termMark = document.createElement('button');
@@ -289,18 +296,26 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
   // Composite icon: mode shape (chat/terminal) + backend logo inside
   // For live sessions with known mode: composite icon before name
   // For stopped/external: plain backend icon before name
-  if (s.webuiMode) {
-    const compositeIcon = createModeBackendIcon(s.backend || 'claude', s.webuiMode, {
-      className: 'session-composite-icon',
-      title: `${backendMeta.label} ${s.webuiMode === 'chat' ? tr('Chat') : tr('Terminal')}`,
-    });
-    row.insertBefore(compositeIcon, row.querySelector('.session-card-lines'));
-  } else {
-    const backendIcon = createBackendIcon(s.backend || 'claude', {
-      className: 'session-backend-icon',
-      title: backendMeta.label,
-    });
-    row.insertBefore(backendIcon, row.querySelector('.session-card-lines'));
+  // Connection status rides the ICON as a top-right corner dot (user-directed
+  // merge — the standalone 7px dot + gap leaves the row; the mode badge
+  // already proved the corner-badge pattern at bottom-right). The icon's
+  // tooltip carries the status label the dot used to hold.
+  {
+    const iconEl = s.webuiMode
+      ? createModeBackendIcon(s.backend || 'claude', s.webuiMode, {
+          className: 'session-composite-icon',
+          title: `${backendMeta.label} ${s.webuiMode === 'chat' ? tr('Chat') : tr('Terminal')} · ${connLabel}`,
+        })
+      : createBackendIcon(s.backend || 'claude', {
+          className: 'session-backend-icon',
+          title: `${backendMeta.label} · ${connLabel}`,
+        });
+    iconEl.classList.add('conn-host-icon');
+    const cd = document.createElement('span');
+    cd.className = 'conn-corner-dot';
+    cd.dataset.status = s.status || 'stopped';
+    iconEl.appendChild(cd);
+    row.insertBefore(iconEl, row.querySelector('.session-card-lines'));
   }
 
   if (showAgentKind) {
