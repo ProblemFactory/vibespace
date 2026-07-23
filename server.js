@@ -2372,10 +2372,28 @@ function agentHooksStatus() {
   }
   return out;
 }
+// A THROWAWAY server must never touch the machine's GLOBAL CLI hook
+// registration (real incident 2026-07-21: a rail-smoke WORKTREE server under
+// /tmp booted with the real HOME and rewrote ~/.claude/settings.json's hook
+// command to its /tmp path; after worktree cleanup every Stop/UserPromptSubmit
+// hook errored MODULE_NOT_FOUND for two days — and the CLI snapshots hook
+// config per session, so healing the file doesn't reach already-running
+// sessions). Rule: a server whose own code lives under the OS temp dir skips
+// ALL global hook writes (register AND strip). Escape hatches:
+// VIBESPACE_SKIP_AGENT_HOOKS=1 forces skip anywhere (test harness belt),
+// VIBESPACE_FORCE_AGENT_HOOKS=1 overrides the tmp guard.
+function hookRegistrationSafe() {
+  if (process.env.VIBESPACE_FORCE_AGENT_HOOKS === '1') return true;
+  if (process.env.VIBESPACE_SKIP_AGENT_HOOKS === '1') return false;
+  const here = path.resolve(__dirname) + path.sep;
+  const tmp = path.resolve(os.tmpdir()) + path.sep;
+  return !here.startsWith(tmp) && !here.startsWith('/tmp/');
+}
 // auto=true (startup): respect the opt-out marker. auto=false (explicit Install
 // from the UI): always register + clear the marker.
 function ensureAgentHooks({ auto = false } = {}) {
   const hookCmd = `node ${HOOK_CMD}`;
+  if (!hookRegistrationSafe()) { console.log('Agent-hook registration skipped (throwaway/temp server root)'); return { skipped: true }; }
   if (auto && fs.existsSync(HOOK_OPTOUT_FILE)) return { optedOut: true };
   if (!auto) { try { fs.rmSync(HOOK_OPTOUT_FILE, { force: true }); } catch {} }
   const results = {};
@@ -2404,6 +2422,7 @@ function ensureAgentHooks({ auto = false } = {}) {
 // SETTING-driven state: boot re-checks the setting, so no marker is needed
 // (and writing one would make a later re-enable silently not re-register).
 function stripAgentHookEntries() {
+  if (!hookRegistrationSafe()) return; // temp/worktree server: never edit global CLI configs
   for (const def of Object.values(HOOK_FILES)) {
     try {
       _patchHookFile(def.file(), false, (root) => {

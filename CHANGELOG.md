@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.225.1
+
+- **Throwaway servers can no longer hijack the machine's global agent-hook registration** (real incident, user-noticed as "Stop hooks stopped arriving"): a worktree smoke-test server booted under /tmp with the real HOME, and its startup `ensureAgentHooks` rewrote the hook command in `~/.claude/settings.json` (+ `~/.codex/hooks.json`) to its own `/tmp/vs-rail-smoke/...` path — after worktree cleanup every Stop/UserPromptSubmit/SessionStart hook errored MODULE_NOT_FOUND for two days. Because the claude CLI snapshots hook config per session, healing the file doesn't reach already-running sessions (they need a restart/compaction to re-read). Fixes: (1) `hookRegistrationSafe()` — a server whose code lives under the OS temp dir skips ALL global hook writes (register AND strip; `VIBESPACE_SKIP_AGENT_HOOKS=1` forces skip anywhere, `VIBESPACE_FORCE_AGENT_HOOKS=1` overrides); (2) all four worktree smokes (`test-sidebar-rail` / `test-stage-preview` / `test-stage-overlap` / `test-attach-rescue`) pass the skip env explicitly. Both layers verified live: a /tmp worktree server with no env logs the skip and leaves the global files untouched.
+
 ## 2.225.0
 
 - **Icon legend popover** (user request): hovering a session card's backend icon opens a structured mini panel — instantly, no hover delay — decoding every corner badge for THAT session: backend identity, mode (bottom-right), connection state (top-right, with its color), and the custom-config summary (bottom-left purple dot: model/effort/permission/account). Replaces the icon's native title and the scattered per-dot tooltips.
