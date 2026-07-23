@@ -256,7 +256,8 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       dot.className = 'config-corner-dot';
       iconEl.appendChild(dot);
     }
-    dot.dataset.tip = tr('Custom session config — {parts} (click to change)', { parts: parts.join(' · ') });
+    // details live in the icon's hover legend (no per-dot tooltip — a 6px
+    // hover target inside the icon double-fired with the legend)
   };
   // Structural narrow-width optimization (2.224.0, user-directed design):
   // the two side-by-side left buttons cost ~44px of EVERY card. They now
@@ -319,11 +320,49 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
           title: `${backendMeta.label} · ${connLabel}`,
         });
     iconEl.classList.add('conn-host-icon');
-    const cd = document.createElement('span');
-    cd.className = 'conn-corner-dot';
-    cd.dataset.status = s.status || 'stopped';
-    iconEl.appendChild(cd);
+    if (s.status && s.status !== 'stopped') { // stopped = default state, no dot (a dim smudge on most cards read as a render glitch)
+      const cd = document.createElement('span');
+      cd.className = 'conn-corner-dot';
+      cd.dataset.status = s.status;
+      iconEl.appendChild(cd);
+    }
     row.insertBefore(iconEl, row.querySelector('.session-card-lines'));
+
+    // Icon LEGEND popover (user request): the icon now packs FOUR dimensions
+    // (backend identity + mode + connection + custom config) into 14px —
+    // hovering it opens a structured mini panel decoding THIS session's
+    // corner badges, replacing the native title / scattered dot tooltips.
+    iconEl.removeAttribute('title');
+    let legendTimer = null;
+    const removeLegend = () => { document.querySelector('.icon-legend-pop')?.remove(); };
+    iconEl.addEventListener('mouseenter', () => {
+      clearTimeout(legendTimer);
+      legendTimer = setTimeout(() => {
+        removeLegend();
+        const cfg = state.getSessionConfig?.(s) || {};
+        const cfgParts = ['model', 'effort', 'permission'].filter(k => cfg[k]).map(k => cfg[k]);
+        if (cfg.account) cfgParts.push(cfg.account === 'subscription' ? tr('Subscription') : ((app._accounts?.accounts || []).find(a => a.id === cfg.account)?.name || cfg.account));
+        const dot = (color, dim) => `<span class="ilp-dot" style="background:${color};${dim ? 'opacity:.45' : ''}"></span>`;
+        const connColor = (s.status === 'live' || s.status === 'tmux') ? 'var(--green)' : s.status === 'external' ? 'var(--yellow, #e5c07b)' : 'var(--text-dim)';
+        const rows = [];
+        rows.push(`<div class="ilp-row"><span class="ilp-glyph">${iconEl.querySelector('svg')?.outerHTML || ''}</span><span>${escHtml(backendMeta.label)}</span></div>`);
+        if (s.webuiMode) rows.push(`<div class="ilp-row"><span class="ilp-glyph ilp-corner br"></span><span>${escHtml(tr('Mode'))}: ${escHtml(s.webuiMode === 'chat' ? tr('Chat') : tr('Terminal'))}</span></div>`);
+        rows.push(`<div class="ilp-row"><span class="ilp-glyph ilp-corner tr">${s.status === 'stopped' ? '' : dot(connColor)}</span><span>${escHtml(tr('Connection'))}: ${escHtml(connLabel)}</span></div>`);
+        if (cfgParts.length) rows.push(`<div class="ilp-row"><span class="ilp-glyph ilp-corner bl">${dot('var(--magenta, #c678dd)')}</span><span>${escHtml(tr('Custom config'))}: ${escHtml(cfgParts.join(' · '))}</span></div>`);
+        const pop = document.createElement('div');
+        pop.className = 'icon-legend-pop';
+        pop.innerHTML = rows.join('');
+        document.body.appendChild(pop);
+        const r = iconEl.getBoundingClientRect();
+        const pr = pop.getBoundingClientRect();
+        pop.style.left = Math.max(4, Math.min(r.left, window.innerWidth - pr.width - 4)) + 'px';
+        pop.style.top = (r.bottom + 6 + pr.height > window.innerHeight ? r.top - pr.height - 6 : r.bottom + 6) + 'px';
+        const kill = () => { removeLegend(); document.removeEventListener('pointerdown', kill, true); document.removeEventListener('scroll', kill, true); };
+        document.addEventListener('pointerdown', kill, true);
+        document.addEventListener('scroll', kill, true);
+      }, 0);
+    });
+    iconEl.addEventListener('mouseleave', () => { clearTimeout(legendTimer); removeLegend(); });
   }
   updateCfgBadge(); // needs .conn-host-icon in the DOM (config corner dot)
 

@@ -448,6 +448,7 @@ export default {
   "Goal: {text}": "目标：{text}",
   "Groups": "组",
   "Click to expand the full command": "点击展开完整命令",
+  "Custom config": "自定义配置",
   "History": "历史",
   "Hook removed": "钩子已移除",
   "ID": "ID",
