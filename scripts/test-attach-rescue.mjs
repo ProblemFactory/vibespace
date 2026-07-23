@@ -59,7 +59,7 @@ const cacheDir = path.join(wt, 'data', 'remote-jsonl', 'host-deadbeef');
 fs.mkdirSync(cacheDir, { recursive: true });
 fs.writeFileSync(path.join(cacheDir, `${SID_CACHED}.jsonl`), transcript(SID_CACHED));
 
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, PORT: String(PORT), HOME: fakeHome }, stdio: 'ignore' });
+const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
   '--disable-background-timer-throttling', '--user-data-dir=/tmp/vs-attach-rescue-chrome', 'about:blank'], { stdio: 'ignore' });
 
