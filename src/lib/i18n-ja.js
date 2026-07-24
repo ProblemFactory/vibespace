@@ -2181,4 +2181,6 @@ export default {
   'Account signed in on ANOTHER browser? Copy this link and open it there:': '別のブラウザでログイン中のアカウントを使う場合は、このリンクをコピーしてそちらで開いてください：',
   'Popup blocked — copy the link below and open it in a browser yourself.': 'ポップアップがブロックされました——下のリンクをコピーしてブラウザで開いてください。',
   'If the final page fails to load (address starts with 127.0.0.1 — VibeSpace runs on another machine, or you authorized in a different browser), copy that address and paste it here:': '最後のページが開けない場合（アドレスが 127.0.0.1 で始まる——VibeSpace が別のマシンで動いている、または別のブラウザで承認した場合）、そのアドレスをコピーしてここに貼り付けてください：',
+  'Machine unreachable': 'マシンに到達できません',
+  'History charts cover this instance only (sampling runs here).': '履歴グラフはこのインスタンスのみ対象（サンプリングはここで実行）。',
 };

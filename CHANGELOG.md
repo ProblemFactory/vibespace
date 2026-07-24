@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.226.3
+
+**System panel: history charts rebuilt + machine switcher + rail unbrick** (real report: charts stopped appearing, and once the System panel was open, no other rail panel could be selected):
+
+- **Root cause — 2.223.1 was committed in a partial state**: the repo held a chart *draw* function with no DOM builder (so nothing ever created the canvases → charts silently invisible) and a `_panelDispose` calling a `_destroyRailSysCharts` helper that never existed — leaving the panel threw a TypeError on every rail click, permanently bricking panel switching. The working Chart.js version verified during that arc never fully made it into the commit.
+- **Rebuilt as intended**: interactive Chart.js line charts (hover tooltips, index interaction), 1h/24h/7d range chips, per-chart current-value labels, point decimation (≤400), self-contained `Chart.register` (no dependence on the usage-dashboard module having registered first), and a real `_destroyRailSysCharts`.
+- **Rail unbrick guard**: all three `_panelDispose` call sites now catch — a broken dispose logs + emits a `rail-dispose-failed` telemetry event and the switch still proceeds (this class can never freeze the rail again).
+- **Machine switcher** (user request): the System panel gets a machine dropdown (This machine + every configured ssh/dial machine). Remote = live snapshot (memory/disk/$HOME filesystem/load/top processes) over the shared read-only probe channel, Linux + macOS handled, ~10s refresh; history charts stay local-only with an explaining note (the sampler runs in this server). `GET /api/sysinfo?host=<id>`.
+- Committed regression smoke: `scripts/test-sys-panel.mjs` (worktree + CDP, 8 asserts incl. the switch-away/destroy/re-entry cycle).
+
 ## 2.226.2
 
 - **Cloud-OAuth flows now work when the account lives in ANOTHER browser** (real report: connecting a Google Drive whose Google account is signed in in a different browser was impossible — all four OAuth entry points force-`window.open`ed the consent page in the CURRENT browser and never showed the URL). Every flow (Drive connect, Drive re-auth, Gmail, generic cloud providers) now always renders the auth URL as a copyable row ("Account signed in on ANOTHER browser? Copy this link and open it there") — any browser can complete the consent, then the existing paste-back relay (paste the failed 127.0.0.1 address) finishes it. A blocked popup now says so honestly instead of claiming a page opened, and the paste-back hint covers the different-browser case alongside the different-machine one.
