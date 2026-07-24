@@ -3,7 +3,7 @@ import { ChatView } from './chat-view.js';
 import { track, metric } from './telemetry-client.js';
 import { t } from './i18n.js';
 import { TerminalSession } from './terminal.js';
-import { showConfirmDialog, showContextMenu, showToast } from './utils.js';
+import { showConfirmDialog, showContextMenu, showToast, stripCwdHostLabel } from './utils.js';
 
 export function installSessionLifecycle(App, ctx = {}) {
   Object.assign(App.prototype, {
@@ -20,6 +20,7 @@ export function installSessionLifecycle(App, ctx = {}) {
 
   createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, accountId, ephemeral = false, winBounds }) {
     try { track('event', `session-create:${backend || 'claude'}:${mode || 'default'}`); } catch {}
+    cwd = stripCwdHostLabel(cwd); // merged-record display cwd ("host: /path") must never reach a spawn
     this._hideWelcome();
     const defaults = this._getBackendSessionDefaults(backend);
     const sessionMode = mode || this.settings.get('session.defaultMode') || 'chat';
@@ -312,6 +313,7 @@ export function installSessionLifecycle(App, ctx = {}) {
   },
 
   attachSession(serverId, name, cwd, { mode, syncId, backend = 'claude', backendSessionId, hostId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId } = {}) {
+    cwd = stripCwdHostLabel(cwd); // keep openSpec.cwd a REAL path — it persists into layouts and feeds later resumes
     this._closeSidebarOnMobile();
     // If we already have a window for this session, just focus it
     if (this._focusExistingSession(serverId)) return null;
@@ -738,6 +740,7 @@ export function installSessionLifecycle(App, ctx = {}) {
 
   // Open a stopped session as view-only (load JSONL, no claude --resume)
   viewSession(sessionId, cwd, sessionName, { syncId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, hostId } = {}) {
+    cwd = stripCwdHostLabel(cwd);
     this._closeSidebarOnMobile();
     this._hideWelcome();
     const resolvedSessionId = backendSessionId || sessionId;

@@ -233,6 +233,16 @@ function registerWsHandler(wss, ctx) {
           // /home/xingweil doesn't exist on a Mac → `cd` failed and, on the
           // pipe-session path, a nonexistent spawn cwd crashed the daemon).
           let cwd = data.cwd || '';
+          // Server-side twin of the client's stripCwdHostLabel (utils.js): the
+          // sidebar's folder-grouping display cwd "<host name>: /path" leaked
+          // into persisted openSpecs, and a resume that `cd`'d into the literal
+          // label fell back to $HOME — claude then said "No conversation found"
+          // (real incident, lengyue h200). Strip iff the remainder is a real
+          // absolute/home path; heals old clients + already-persisted layouts.
+          {
+            const m = /^[^/~]+: (?=[/~])/.exec(cwd);
+            if (m) { console.warn(`[session] stripped display host-label from cwd: ${cwd}`); cwd = cwd.slice(m[0].length); }
+          }
           if (!cwd) {
             if (data.hostId && hosts) {
               try { const hh = hosts.get(data.hostId); cwd = (hh && await hosts.homeDir(hh)) || ''; } catch { }

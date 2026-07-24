@@ -9,7 +9,7 @@
 //             main filter searches it; expanding renders capped pages).
 // Starred sessions float to the top of their zone.
 import { t as tr } from './i18n.js'; // sidebar cluster convention
-import { escHtml, showConfirmDialog, showToast } from './utils.js';
+import { escHtml, showConfirmDialog, showToast, stripCwdHostLabel } from './utils.js';
 
 const RECENT_MS = 7 * 86400e3;
 const HISTORY_PAGE = 60;
@@ -517,7 +517,7 @@ export function installSidebarWorkbench(Sidebar) {
         plus.className = 'wb-proj-plus';
         plus.textContent = '+';
         plus.title = 'New session here';
-        plus.onclick = (e) => { e.stopPropagation(); this.app.showNewSessionDialog({ cwd: cwd.includes(': ') ? cwd.split(': ').pop() : cwd }); };
+        plus.onclick = (e) => { e.stopPropagation(); this.app.showNewSessionDialog({ cwd: stripCwdHostLabel(cwd) }); };
         head.appendChild(plus);
         this.listEl.appendChild(head);
         // cap per project — auto-generated session floods (observer swarms)
