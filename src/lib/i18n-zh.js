@@ -2178,4 +2178,5 @@ export default {
   "since {time}": "始于 {time}",
   "{n} updates": "{n} 条进展",
   "Show the full troubleshooting timeline": "展开完整排障时间线",
+  'Mode (on resume)': '模式（恢复时）',
 };

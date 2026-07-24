@@ -310,16 +310,26 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
   // already proved the corner-badge pattern at bottom-right). The icon's
   // tooltip carries the status label the dot used to hold.
   {
-    const iconEl = s.webuiMode
-      ? createModeBackendIcon(s.backend || 'claude', s.webuiMode, {
+    // Mode corner for EVERY card (2.226.1, real report "stopped的角标显示都不全"):
+    // live webui sessions show their RUNNING mode; tmux/external run in a real
+    // terminal so 'terminal' is the honest label; stopped cards show the mode
+    // the Resume button will USE (persisted per-session toggle, else the
+    // session.defaultMode setting) — same sources as the resume split button.
+    // Non-live sources get .mode-implied (badge slightly dimmed).
+    const iconMode = s.webuiMode
+      || ((s.status === 'tmux' || s.status === 'external') ? 'terminal' : null)
+      || (s.status === 'stopped' ? (state.getSessionMode?.(s) || settings?.get('session.defaultMode') || 'terminal') : null);
+    const iconEl = iconMode
+      ? createModeBackendIcon(s.backend || 'claude', iconMode, {
           className: 'session-composite-icon',
-          title: `${backendMeta.label} ${s.webuiMode === 'chat' ? tr('Chat') : tr('Terminal')} · ${connLabel}`,
+          title: `${backendMeta.label} ${iconMode === 'chat' ? tr('Chat') : tr('Terminal')} · ${connLabel}`,
         })
       : createBackendIcon(s.backend || 'claude', {
           className: 'session-backend-icon',
           title: `${backendMeta.label} · ${connLabel}`,
         });
     iconEl.classList.add('conn-host-icon');
+    if (iconMode && !s.webuiMode) iconEl.classList.add('mode-implied');
     if (s.status && s.status !== 'stopped') { // stopped = default state, no dot (a dim smudge on most cards read as a render glitch)
       const cd = document.createElement('span');
       cd.className = 'conn-corner-dot';
@@ -346,7 +356,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
         const connColor = (s.status === 'live' || s.status === 'tmux') ? 'var(--green)' : s.status === 'external' ? 'var(--yellow, #e5c07b)' : 'var(--text-dim)';
         const rows = [];
         rows.push(`<div class="ilp-row"><span class="ilp-glyph">${iconEl.querySelector('svg')?.outerHTML || ''}</span><span>${escHtml(backendMeta.label)}</span></div>`);
-        if (s.webuiMode) rows.push(`<div class="ilp-row"><span class="ilp-glyph ilp-corner br"></span><span>${escHtml(tr('Mode'))}: ${escHtml(s.webuiMode === 'chat' ? tr('Chat') : tr('Terminal'))}</span></div>`);
+        if (iconMode) rows.push(`<div class="ilp-row"><span class="ilp-glyph ilp-corner br"></span><span>${escHtml(s.status === 'stopped' ? tr('Mode (on resume)') : tr('Mode'))}: ${escHtml(iconMode === 'chat' ? tr('Chat') : tr('Terminal'))}</span></div>`);
         rows.push(`<div class="ilp-row"><span class="ilp-glyph ilp-corner tr">${s.status === 'stopped' ? '' : dot(connColor)}</span><span>${escHtml(tr('Connection'))}: ${escHtml(connLabel)}</span></div>`);
         if (cfgParts.length) rows.push(`<div class="ilp-row"><span class="ilp-glyph ilp-corner bl">${dot('var(--magenta, #c678dd)')}</span><span>${escHtml(tr('Custom config'))}: ${escHtml(cfgParts.join(' · '))}</span></div>`);
         const pop = document.createElement('div');
