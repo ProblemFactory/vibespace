@@ -322,6 +322,7 @@ class TerminalSession {
           this.terminal.write(msg.data, () => this.terminal.scrollToBottom());
         }
       } else if (msg.type === 'exited') {
+        if (msg.detail) this.terminal.write('\r\n\x1b[31m' + String(msg.detail).replace(/[\x00-\x1f\x7f]+/g, ' ') + '\x1b[0m');
         this.terminal.write('\r\n\x1b[90m[Process exited]\x1b[0m\r\n');
         winInfo.exited = true; if (winInfo._notifyChanged) winInfo._notifyChanged();
         // A TUI that exits from its ALTERNATE screen clears it on the way

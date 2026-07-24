@@ -1439,12 +1439,25 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
     if (session._normalizer) { session._normalizer.listeners.length = 0; }
     if (session._interruptTimer) { clearTimeout(session._interruptTimer); session._interruptTimer = null; }
     session._isStreaming = false;
-    // Detect auth failure from buffer content (claude exits immediately with "Not logged in")
-    const exitReason = /Not logged in|Please run \/login|OAuth token revoked/.test(session.buffer || '') ? 'not_logged_in' : undefined;
+    // Child exit code from the wrapper's final meta (2.207.0 — wrappers keep
+    // it instead of unlinking; a crash-looping claude previously left zero
+    // process-level evidence).
+    let childCode = null;
+    try { childCode = JSON.parse(fs.readFileSync(path.join(BUFFERS_DIR, id + '.json'), 'utf-8')).childExitCode ?? null; } catch {}
+    // CLI-death classifier (2.226.0, user directive "不要静默失败"): known
+    // canned errors become a machine reason + the matched line, which rides
+    // the `exited` broadcast so the window shows WHY it died (read-only bar /
+    // exited overlay) and lands as a telemetry event the admin collector
+    // groups fleet-wide. TAIL-scan only — the buffer rotates and an old error
+    // hours back must not label a normal exit.
+    const death = classifyCliDeath((session.buffer || '').slice(-4096), childCode);
+    const exitReason = death?.reason;
     // Unresumable-conversation stamp (2.207.1): the CLI's canned error means
     // the transcript does not exist on this session's machine — arm the
     // create-side circuit breaker so retries get an explanation, not a loop.
-    if (/No conversation found with session ID/.test(session.buffer || '')) {
+    // Tested INDEPENDENTLY of the classifier's first-match precedence (review
+    // finding: another pattern winning must not skip arming the breaker).
+    if (exitReason === 'no_conversation' || /No conversation found with session ID/.test((session.buffer || '').slice(-4096))) {
       const cid = session.claudeSessionId || session.backendSessionId;
       if (cid) {
         noConvoRef.map.set(cid, Date.now());
@@ -1452,17 +1465,13 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
         console.warn(`[session] unresumable conversation ${cid} — transcript missing on its machine; resumes blocked 10min`);
       }
     }
-    // Child exit code from the wrapper's final meta (2.207.0 — wrappers keep
-    // it instead of unlinking; a crash-looping claude previously left zero
-    // process-level evidence).
-    let childCode = null;
-    try { childCode = JSON.parse(fs.readFileSync(path.join(BUFFERS_DIR, id + '.json'), 'utf-8')).childExitCode ?? null; } catch {}
+    if (death) global.__vsEvent?.('cli-death', `${session.backend || 'claude'}/${death.reason}`);
     // Lifecycle line for the ops log (2.206.0) — tonight's black-window
     // forensics found NOTHING in opslog about session deaths; this is the
     // minimum breadcrumb an incident needs.
     console.log(`[session] exited ${id} "${session.name || ''}" mode=${session.mode} backend=${session.backend || 'claude'}${childCode != null ? ' code=' + childCode : ''}${exitReason ? ' reason=' + exitReason : ''}`);
     global.__vsEvent?.('session-exited', `${session.mode}/${session.backend || 'claude'}${childCode != null ? '/code=' + childCode : ''}${exitReason ? '/' + exitReason : ''}`);
-    broadcastToSession(session, id, { type: 'exited', sessionId: id, reason: exitReason });
+    broadcastToSession(session, id, { type: 'exited', sessionId: id, reason: exitReason, detail: death?.detail });
     activeSessions.delete(id);
     if (cleanupOnExit && session.sockName) deleteSessionMeta(session.sockName);
     // Buffer + wrapper-meta files are only meaningful while the dtach session
@@ -2351,6 +2360,23 @@ function _patchHookFile(file, createIfMissing, mutate) {
   }
   throw new Error(`${file} kept changing under concurrent writes — gave up`);
 }
+// Known CLI death signatures → { reason, detail } (2.226.0, probe batch).
+// Patterns are the CLIs' OWN canned strings; keep them TIGHT — the buffer
+// tail can contain tool output, and a loose pattern would mislabel normal
+// exits. cli_missing additionally requires the shell's 126/127 exit code
+// (a bare "No such file or directory" also appears in ordinary tool output).
+function classifyCliDeath(tail, code) {
+  if (!tail) return null;
+  const line = (re) => { const m = tail.match(re); return m ? String(m[0]).replace(/[\x00-\x1f\x7f]+/g, ' ').trim().slice(0, 200) : null; };
+  let d;
+  if ((d = line(/(?:Not logged in|Please run \/login|OAuth token revoked)[^\n]*/))) return { reason: 'not_logged_in', detail: d };
+  if ((d = line(/No conversation found with session ID[^\n]*/))) return { reason: 'no_conversation', detail: d };
+  if ((d = line(/error: unknown (?:option|command)[^\n]*/))) return { reason: 'cli_arg_error', detail: d };
+  if ((d = line(/(?:Invalid API key|invalid x-api-key|authentication_error)[^\n]*/i))) return { reason: 'auth_error', detail: d };
+  if ((d = line(/Credit balance is too low[^\n]*/i))) return { reason: 'billing_error', detail: d };
+  if ((code === 127 || code === 126) && (d = line(/[^\n]*(?:command not found|No such file or directory)[^\n]*/))) return { reason: 'cli_missing', detail: d };
+  return null;
+}
 function agentHooksStatus() {
   const hookCmd = `node ${HOOK_CMD}`;
   const out = { hookPath: HOOK_CMD, optedOut: fs.existsSync(HOOK_OPTOUT_FILE) };
@@ -2446,6 +2472,51 @@ function removeAgentHooks() {
   // Durable: record the opt-out so startup won't re-register (finding #3).
   try { fs.writeFileSync(HOOK_OPTOUT_FILE, new Date().toISOString() + '\n'); } catch {}
   stripAgentHookEntries();
+}
+// Generic operator-visible notice channel (2.226.0, user directive "不要静默
+// 失败"): server-side probes report through this instead of dying in the log —
+// every connected client toasts it (+ it lands in toast/notification history)
+// and a telemetry event carries the key to the fleet collector. Key-deduped
+// per boot so a recurring probe can't spam.
+const _sentNotices = new Set();
+function serverNotice(key, text, { level = 1 } = {}) {
+  if (_sentNotices.has(key)) return;
+  console.warn('[notice]', text);
+  global.__vsEvent?.('server-notice', key);
+  let delivered = 0;
+  try {
+    const payload = JSON.stringify({ type: 'server-notice', key, text, level });
+    for (const c of wss.clients) { try { if (c.readyState === WS_OPEN) { c.send(payload); delivered++; } } catch {} }
+  } catch {}
+  // No client connected (e.g. the 60s post-boot probe right after a pod
+  // restart) → don't burn the key; the next probe run re-notices when
+  // someone is actually there to see it (review finding).
+  if (delivered > 0) _sentNotices.add(key);
+}
+// Agent-hook health probe (2.226.0; born from the 2-day silent MODULE_NOT_FOUND
+// outage whose CAUSE 2.225.1 fixed): a registration that goes stale or points
+// at a missing script MID-RUN now self-heals + notifies instead of silently
+// dropping every Stop/SessionStart/UserPromptSubmit delivery. Boot(+60s) +
+// every 6h. NOTE the heal only fixes the FILE — running CLI sessions snapshot
+// hook config and pick it up after restart/compaction; the notice says so.
+function checkAgentHookHealth() {
+  try {
+    if (!hookRegistrationSafe() || !integrationEnabled() || fs.existsSync(HOOK_OPTOUT_FILE)) return;
+    const scriptMissing = !fs.existsSync(HOOK_CMD);
+    if (scriptMissing) { try { createHookHelper(); } catch {} }
+    const st = agentHooksStatus();
+    for (const [key, info] of Object.entries(st)) {
+      if (!info || typeof info !== 'object' || !('installed' in info)) continue; // hookPath/optedOut fields
+      if (!info.fileExists || info.parseError) continue; // that CLI isn't set up here / unreadable
+      if (info.stale || !info.installed || scriptMissing) {
+        global.__vsEvent?.('agent-hook-broken', `${key}${info.stale ? '/stale' : ''}${!info.installed ? '/missing-entry' : ''}${scriptMissing ? '/script-missing' : ''}`);
+        ensureAgentHooks({ auto: true }); // self-heal the registration in place
+        serverNotice(`hook-health-${key}`,
+          `VibeSpace's ${key} agent-hook registration was broken (stale or missing path) and has been repaired — CLI sessions already running pick the fix up only after they restart or compact.`,
+          { level: 2 });
+      }
+    }
+  } catch (e) { console.warn('[hook-health] probe failed:', e.message); }
 }
 // Boot-time hook registration is DEFERRED until settings are readable (after
 // setupPersistence below) — the Integration master switch decides whether we
@@ -2607,6 +2678,10 @@ app.use(persistenceRouter);
 // the Integration master switch is readable) — a toggle flipped just before a
 // restart, or an imported config bundle carrying it, converges here.
 syncHookRegistration();
+// Health probe: catches MID-RUN poisoning (the 2.225.1 incident class) that
+// boot-time registration can't — self-heals + notifies. 60s in, then 6h.
+setTimeout(checkAgentHookHealth, 60000).unref();
+setInterval(checkAgentHookHealth, 6 * 3600 * 1000).unref();
 
 // ── Task Groups (岗位; task system — docs/design-task-system.md + refactor) ──
 // data/task-groups.json is AUTHORITATIVE for everything the board renders (the

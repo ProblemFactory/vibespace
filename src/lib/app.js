@@ -230,6 +230,12 @@ class App {
       if (msg.type === 'accounts-updated' && Array.isArray(msg.accounts)) {
         this._accounts = { ...(this._accounts || {}), accounts: msg.accounts, defaultAccountId: msg.defaultAccountId || null, defaultCodexAccountId: msg.defaultCodexAccountId || null };
       }
+      if (msg.type === 'server-notice' && msg.text) {
+        // Probe-reported condition (2.226.0): server-side silent failures now
+        // surface as toasts (+ notification history) instead of dying in the
+        // server log. Key-deduped server-side, once per boot per issue.
+        showToast(msg.text, { type: msg.level >= 2 ? 'error' : undefined });
+      }
       if (msg.type === 'sysinfo-alert') {
         // Memory pressure (2.216.0, lengyue's OOM kill): warn BEFORE the
         // kernel kills the pod (which takes every dtach session with it).
