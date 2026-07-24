@@ -428,7 +428,9 @@ class ChatView {
           this._setReadOnly();
           this._showLoginBar();
         } else {
-          this._renderers.appendSystem(t('Session ended.'));
+          // Classified death detail (2.226.0): show WHY it died — "Session
+          // ended." alone on a canned CLI error read as a silent failure.
+          this._renderers.appendSystem(msg.detail ? `${t('Session ended.')} — ${msg.detail}` : t('Session ended.'));
           this._setReadOnly();
         }
       } else if (msg.type === 'attached' && msg.sessionId === sessionId) {

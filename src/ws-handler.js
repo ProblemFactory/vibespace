@@ -248,6 +248,45 @@ function registerWsHandler(wss, ctx) {
               try { const hh = hosts.get(data.hostId); cwd = (hh && await hosts.homeDir(hh)) || ''; } catch { }
             }
             if (!cwd) cwd = os.homedir();
+          } else if ((data.backend || 'claude') !== 'shell') {
+            // Spawn-cwd preflight (2.226.0, user directive "不要静默失败"): an
+            // EXPLICIT cwd that doesn't exist used to fall back to $HOME
+            // silently — for claude/codex that broke resumes ("No conversation
+            // found" from the wrong project dir) and misplaced new sessions.
+            // Fail fast with the honest reason. BEST-EFFORT: only a definitive
+            // MISSING refuses; a probe error/timeout proceeds as before.
+            // (Shell terminals keep the home fallback — a terminal in $HOME is
+            // usable; a transcript-coupled session in the wrong dir is not.)
+            let missing = false;
+            try {
+              if (!data.hostId) {
+                // Child-process probe, NEVER node fs (§2.108.3 hung-mount
+                // doctrine: a wedged FUSE path blocks sync fs / eats a
+                // threadpool slot; a stuck child just gets killed by timeout).
+                missing = await new Promise((resolve) => {
+                  execFile('test', ['-d', cwd], { timeout: 4000 }, (err) => resolve(!!err && err.code === 1));
+                });
+              } else if (hosts) {
+                const hh = hosts.get(data.hostId);
+                if (hh) {
+                  const q = cwd.replace(/'/g, `'\\''`);
+                  const out = await Promise.race([
+                    hosts._hostShell(hh, `[ -d '${q}' ] && echo __VS_DIR_OK__ || echo __VS_DIR_MISSING__`, { timeoutMs: 5000 }),
+                    new Promise((r) => setTimeout(() => r(''), 5500)),
+                  ]);
+                  missing = String(out).includes('__VS_DIR_MISSING__');
+                }
+              }
+            } catch { /* probe failure must never block a create */ }
+            if (missing) {
+              global.__vsEvent?.('spawn-cwd-missing', `${data.hostId ? 'host' : 'local'}/${data.resume ? 'resume' : 'new'}`);
+              ws.send(JSON.stringify({
+                type: 'error', reqId: data.reqId,
+                message: `Working directory does not exist${data.hostId ? " on the session's machine" : ''}: ${cwd}` +
+                  (data.resume ? ' — the folder may have been moved or deleted; restore it or start a new session in a valid folder.' : ''),
+              }));
+              break;
+            }
           }
           const sockName = 'cw-' + sessionCounterRef.value + '-' + Date.now();
           const socketPath = path.join(SOCKETS_DIR, sockName);
