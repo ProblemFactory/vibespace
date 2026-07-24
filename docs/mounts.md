@@ -20,6 +20,7 @@ All secrets are AES-256-GCM encrypted at rest in `data/mounts.json`; passwords r
 Click **Connect Google Drive** in the Add-mount dialog. VibeSpace runs the OAuth handshake for you:
 - **Same machine** (VibeSpace and your browser on one computer): a Google sign-in page opens, you approve, and the connection completes on its own.
 - **Remote deployment** (VibeSpace on a server): after you approve, the browser tries to reach `127.0.0.1` and shows a "can't connect" page — that's expected. Copy that page's address from the address bar and paste it into the box that appears; VibeSpace finishes the exchange. The Drive token is filled in automatically either way.
+- **Account in a different browser**: the dialog also shows the authorization link as a copyable row — copy it into whichever browser holds the Google/Microsoft account, approve there, then paste the failed `127.0.0.1` address back the same way. Any browser can complete the consent.
 
 ## One flat list of connections
 
