@@ -6,6 +6,31 @@ import { setupDirAutocomplete } from './autocomplete.js';
 import { protoChip } from './sidebar-rail.js'; // http/https/tcp chip (override menu = this._portProtoMenu, same prototype)
 import { t as tr } from './i18n.js'; // sidebar cluster convention: local `t` is pervasively a task var
 
+
+// OAuth cross-browser affordance (2.226.2, real report: the target Google
+// account lived in ANOTHER browser and the flow force-opened the consent page
+// in THIS one with the URL never shown). Always render the auth URL as a
+// copyable row — ANY browser can complete the consent, and the paste-back
+// relay doesn't care where the 127.0.0.1 redirect failed.
+function oauthLinkRow(url) {
+  const row = document.createElement('div');
+  row.className = 'mounts-oauth-link';
+  const hint = document.createElement('div');
+  hint.className = 'mounts-field-hint';
+  hint.textContent = tr('Account signed in on ANOTHER browser? Copy this link and open it there:');
+  const line = document.createElement('div');
+  line.style.cssText = 'display:flex;gap:4px;align-items:center;margin:2px 0;';
+  const inp = document.createElement('input');
+  inp.readOnly = true; inp.value = url; inp.style.flex = '1'; inp.style.minWidth = '0';
+  inp.onfocus = () => inp.select();
+  const cp = document.createElement('button');
+  cp.type = 'button'; cp.className = 'mounts-btn'; cp.textContent = tr('Copy');
+  cp.onclick = () => copyText(url).then(() => showToast(tr('Copied')));
+  line.append(inp, cp);
+  row.append(hint, line);
+  return row;
+}
+
 // 16x16 stroke icons (project convention — no emoji in chrome)
 const MI = {
   // Directional folder icons (user feedback: one 📁 carried THREE meanings).
@@ -454,11 +479,14 @@ export function installSidebarMounts(Sidebar) {
         try {
           const r = await api('/api/mounts/gdrive-auth/start', { method: 'POST', body: JSON.stringify({ mountId: m.id }) });
           if (r.error) throw new Error(r.error);
-          window.open(r.url, '_blank');
+          const _w = window.open(r.url, '_blank');
+          status.parentElement?.querySelectorAll('.mounts-oauth-link').forEach((e) => e.remove());
+          status.after(oauthLinkRow(r.url));
           status.textContent = tr('A Google sign-in page opened. Approve access, then come back here.');
+          if (!_w) status.textContent = tr('Popup blocked — copy the link below and open it in a browser yourself.');
           if (!pasteBox) {
             pasteBox = document.createElement('div');
-            pasteBox.innerHTML = `<div class="mounts-field-hint">${escHtml(tr("If this VibeSpace runs on ANOTHER machine, the final page won't load (address starts with 127.0.0.1) — copy that address and paste it here:"))}</div>`;
+            pasteBox.innerHTML = `<div class="mounts-field-hint">${escHtml(tr("If the final page fails to load (address starts with 127.0.0.1 — VibeSpace runs on another machine, or you authorized in a different browser), copy that address and paste it here:"))}</div>`;
             const inp = document.createElement('input');
             inp.placeholder = 'http://127.0.0.1:53682/?state=…&code=…';
             inp.onchange = async () => {
@@ -1625,11 +1653,14 @@ export function installSidebarMounts(Sidebar) {
           if (clientIdKey && ctx.inputs[clientIdKey]?.value) { body.clientId = ctx.inputs[clientIdKey].value; body.clientSecret = ctx.inputs[clientSecretKey]?.value || ''; }
           const r = await api('/api/mounts/gdrive-auth/start', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } });
           if (r.error) throw new Error(r.error);
-          window.open(r.url, '_blank');
+          const _w = window.open(r.url, '_blank');
+          status.parentElement?.querySelectorAll('.mounts-oauth-link').forEach((e) => e.remove());
+          status.after(oauthLinkRow(r.url));
           status.textContent = tr('A {provider} sign-in page opened. Approve access, then come back here.', { provider: PROVIDER_LABELS[body.backend] || body.backend });
+          if (!_w) status.textContent = tr('Popup blocked — copy the link below and open it in a browser yourself.');
           if (!pasteBox) {
             pasteBox = document.createElement('div');
-            pasteBox.innerHTML = `<div class="mounts-field-hint">${escHtml(tr("If this VibeSpace runs on ANOTHER machine, the final page won't load (address starts with 127.0.0.1) — copy that address and paste it here:"))}</div>`;
+            pasteBox.innerHTML = `<div class="mounts-field-hint">${escHtml(tr("If the final page fails to load (address starts with 127.0.0.1 — VibeSpace runs on another machine, or you authorized in a different browser), copy that address and paste it here:"))}</div>`;
             const inp = document.createElement('input'); inp.placeholder = 'http://127.0.0.1:53682/?state=…&code=…';
             inp.onchange = async () => { try { status.textContent = tr('Completing…'); const fr = await api('/api/mounts/gdrive-auth/callback', { method: 'POST', body: JSON.stringify({ url: inp.value }), headers: { 'Content-Type': 'application/json' } }); if (fr.error) throw new Error(fr.error); if (fr.token) finish(fr.token); } catch (e) { status.textContent = e.message || tr('Failed'); } };
             pasteBox.appendChild(inp); wrap.appendChild(pasteBox);
@@ -1728,11 +1759,14 @@ export function installSidebarMounts(Sidebar) {
             headers: { 'Content-Type': 'application/json' },
           });
           if (r.error) throw new Error(r.error);
-          window.open(r.url, '_blank');
+          const _w = window.open(r.url, '_blank');
+          status.parentElement?.querySelectorAll('.mounts-oauth-link').forEach((e) => e.remove());
+          status.after(oauthLinkRow(r.url));
           status.textContent = tr('A Google sign-in page opened. Approve access, then come back here.');
+          if (!_w) status.textContent = tr('Popup blocked — copy the link below and open it in a browser yourself.');
           if (!pasteBox) {
             pasteBox = document.createElement('div');
-            pasteBox.innerHTML = `<div class="mounts-field-hint">${escHtml(tr("If this VibeSpace runs on ANOTHER machine, the final page won't load (address starts with 127.0.0.1) — copy that address and paste it here:"))}</div>`;
+            pasteBox.innerHTML = `<div class="mounts-field-hint">${escHtml(tr("If the final page fails to load (address starts with 127.0.0.1 — VibeSpace runs on another machine, or you authorized in a different browser), copy that address and paste it here:"))}</div>`;
             const inp = document.createElement('input');
             inp.placeholder = 'http://127.0.0.1:…/?state=…&code=…';
             inp.onchange = async () => {
@@ -1844,11 +1878,14 @@ export function installSidebarMounts(Sidebar) {
             headers: { 'Content-Type': 'application/json' },
           });
           if (r.error) throw new Error(r.error);
-          window.open(r.url, '_blank');
+          const _w = window.open(r.url, '_blank');
+          status.parentElement?.querySelectorAll('.mounts-oauth-link').forEach((e) => e.remove());
+          status.after(oauthLinkRow(r.url));
           status.textContent = tr('A Google sign-in page opened. Approve access, then come back here.');
+          if (!_w) status.textContent = tr('Popup blocked — copy the link below and open it in a browser yourself.');
           if (!pasteBox) {
             pasteBox = document.createElement('div');
-            pasteBox.innerHTML = `<div class="mounts-field-hint">${escHtml(tr("If this VibeSpace runs on ANOTHER machine, the final page won't load (address starts with 127.0.0.1) — copy that address and paste it here:"))}</div>`;
+            pasteBox.innerHTML = `<div class="mounts-field-hint">${escHtml(tr("If the final page fails to load (address starts with 127.0.0.1 — VibeSpace runs on another machine, or you authorized in a different browser), copy that address and paste it here:"))}</div>`;
             const inp = document.createElement('input');
             inp.placeholder = 'http://127.0.0.1:53682/?state=…&code=…';
             inp.onchange = async () => {

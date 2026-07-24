@@ -1641,7 +1641,6 @@ export default {
   "Folder path (optional)": "フォルダパス(任意)",
   "Google Drive re-authorized": "Google Drive を再認可しました",
   "Google reported the saved sign-in as expired or revoked. Sign in again to mint a fresh token — nothing else about the mount changes.": "保存されたサインインは期限切れまたは取り消されたと Google が報告しました。再サインインして新しいトークンを取得してください — マウントの他の設定は変わりません。",
-  "If this VibeSpace runs on ANOTHER machine, the final page won't load (address starts with 127.0.0.1) — copy that address and paste it here:": "この VibeSpace が別のマシンで動いている場合、最後のページは開けません（アドレスが 127.0.0.1 で始まる）——そのアドレスをコピーしてここに貼り付けてください：",
   "OAuth client id (optional)": "OAuth クライアント ID(任意)",
   "Mount point": "マウントポイント",
   "OAuth client secret": "OAuth クライアントシークレット",
@@ -2179,4 +2178,7 @@ export default {
   "{n} updates": "{n} 件の更新",
   "Show the full troubleshooting timeline": "トラブルシューティングの全タイムラインを表示",
   'Mode (on resume)': 'モード（再開時）',
+  'Account signed in on ANOTHER browser? Copy this link and open it there:': '別のブラウザでログイン中のアカウントを使う場合は、このリンクをコピーしてそちらで開いてください：',
+  'Popup blocked — copy the link below and open it in a browser yourself.': 'ポップアップがブロックされました——下のリンクをコピーしてブラウザで開いてください。',
+  'If the final page fails to load (address starts with 127.0.0.1 — VibeSpace runs on another machine, or you authorized in a different browser), copy that address and paste it here:': '最後のページが開けない場合（アドレスが 127.0.0.1 で始まる——VibeSpace が別のマシンで動いている、または別のブラウザで承認した場合）、そのアドレスをコピーしてここに貼り付けてください：',
 };

@@ -1641,7 +1641,6 @@ export default {
   "Folder path (optional)": "文件夹路径(可选)",
   "Google Drive re-authorized": "Google Drive 已重新授权",
   "Google reported the saved sign-in as expired or revoked. Sign in again to mint a fresh token — nothing else about the mount changes.": "Google 报告已保存的登录已过期或被撤销。重新登录以获取新 token — 挂载的其他设置不变。",
-  "If this VibeSpace runs on ANOTHER machine, the final page won't load (address starts with 127.0.0.1) — copy that address and paste it here:": "如果这个 VibeSpace 运行在另一台机器上，最后一页会打不开（地址以 127.0.0.1 开头）——把那个地址复制粘贴到这里：",
   "OAuth client id (optional)": "OAuth client id(可选)",
   "Mount point": "挂载点",
   "OAuth client secret": "OAuth 客户端密钥",
@@ -2179,4 +2178,7 @@ export default {
   "{n} updates": "{n} 条进展",
   "Show the full troubleshooting timeline": "展开完整排障时间线",
   'Mode (on resume)': '模式（恢复时）',
+  'Account signed in on ANOTHER browser? Copy this link and open it there:': '账号登录在另一个浏览器里？复制此链接到那个浏览器打开：',
+  'Popup blocked — copy the link below and open it in a browser yourself.': '弹窗被拦截——请复制下方链接自行在浏览器中打开。',
+  'If the final page fails to load (address starts with 127.0.0.1 — VibeSpace runs on another machine, or you authorized in a different browser), copy that address and paste it here:': '如果最后一页打不开（地址以 127.0.0.1 开头——VibeSpace 在另一台机器上，或你在别的浏览器里完成了授权），把那个地址复制粘贴到这里：',
 };
