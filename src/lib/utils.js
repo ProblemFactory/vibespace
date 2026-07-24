@@ -283,6 +283,20 @@ export function frontTruncate(str, maxLen = 40) {
 const ESC_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 export function escHtml(s) { return String(s ?? '').replace(/[&<>"']/g, (c) => ESC_MAP[c]); }
 
+// The sidebar merge composes a remote webui session's cwd as the DISPLAY/
+// grouping string "<host name>: /real/path" (sidebar.js _merge — it is a
+// load-bearing folder-grouping/archivedFolders KEY, so the composer stays).
+// That string leaked into openSpecs (persisted in layouts) and from there into
+// operations: a resume `cd`'d into the literal label, fell back to $HOME, and
+// claude said "No conversation found" (real incident, lengyue's h200 session).
+// Strip the label iff the remainder is an absolute/home path; server-side
+// twin in ws-handler heals already-persisted polluted specs.
+export function stripCwdHostLabel(cwd) {
+  if (typeof cwd !== 'string') return cwd;
+  const m = cwd.match(/^[^/~]+: (?=[/~])/);
+  return m ? cwd.slice(m[0].length) : cwd;
+}
+
 export function attachPopoverClose(popover, ...excludeEls) {
   setTimeout(() => {
     const close = (e) => {

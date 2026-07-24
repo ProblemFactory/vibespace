@@ -727,7 +727,12 @@ class Sidebar {
           sessionKey: ws.sessionKey || `${backend}:${backendSessionId}`,
           claudeSessionId: ws.claudeSessionId || null,
           sessionId: backendSessionId,
-          // remote sessions group under a host-prefixed folder in the list
+          // remote sessions group under a host-prefixed folder in the list.
+          // ⚠ this composed "host: /path" string is a DISPLAY/grouping KEY
+          // (archivedFolders + folder groups key on it — do not change) and
+          // MUST NOT reach any spawn: session-lifecycle strips it via
+          // stripCwdHostLabel at createSession/attachSession/viewSession, and
+          // ws-handler strips server-side (already-persisted openSpecs).
           cwd: ws.hostName ? `${ws.hostName}: ${ws.cwd}` : ws.cwd,
           host: ws.host || null,
           hostName: ws.hostName || null,
