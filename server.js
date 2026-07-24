@@ -2699,9 +2699,53 @@ const tasks = new TaskGroupManager({
 // System info + memory-pressure watch (2.216.0, lengyue's 32Gi OOM kill —
 // the pod-level kill takes every dtach session; warn BEFORE the kernel acts)
 const sysinfo = require('./src/sysinfo');
+// Remote machine snapshot for the System panel's machine switcher (2.226.3):
+// one bounded probe over the shared read-only channel (hosts._hostShell —
+// ssh AND dial devices). Raw-host semantics: MemTotal is the limit (no
+// cgroup), disk = the $HOME filesystem; macOS handled (no /proc). History
+// stays LOCAL-only — the sampler runs in this server.
+const REMOTE_SYSINFO_SCRIPT = `
+U=$(uname)
+if [ "$U" = Darwin ]; then
+  T=$(sysctl -n hw.memsize 2>/dev/null)
+  P=$(sysctl -n vm.pagesize 2>/dev/null || echo 4096)
+  W=$(vm_stat 2>/dev/null | awk -v p="$P" '/Pages (active|wired down|occupied by compressor)/ {gsub("\\\\.","",$NF); s+=$NF} END {print s*p}')
+  echo "MEM \${W:-0} \${T:-0}"
+  echo "LOAD $(sysctl -n vm.loadavg 2>/dev/null | tr -d '{}')"
+  echo "CPUS $(sysctl -n hw.ncpu 2>/dev/null)"
+  df -k "$HOME" 2>/dev/null | tail -1 | awk '{print "DISK", $3*1024, ($3+$4)*1024}'
+  ps ax -o rss=,pid=,command= 2>/dev/null | sort -k1,1 -rn | head -8 | sed 's/^ */PROC /'
+else
+  awk '/MemTotal/{t=$2*1024} /MemAvailable/{a=$2*1024} END{print "MEM", t-a, t}' /proc/meminfo
+  echo "LOAD $(cut -d' ' -f1-3 /proc/loadavg)"
+  echo "CPUS $(nproc 2>/dev/null || echo 1)"
+  df -k "$HOME" 2>/dev/null | tail -1 | awk '{print "DISK", $3*1024, ($3+$4)*1024}'
+  ps ax -o rss=,pid=,args= --sort=-rss 2>/dev/null | head -8 | sed 's/^ */PROC /'
+fi`;
+async function remoteSysinfo(hostId) {
+  const h = hosts.get(hostId);
+  if (!h) throw new Error('unknown machine');
+  const out = await hosts._hostShell(h, REMOTE_SYSINFO_SCRIPT, { timeoutMs: 8000 });
+  const r = { host: hostId, procs: [] };
+  for (const line of String(out).split('\n')) {
+    const m = line.match(/^([A-Z]+) (.*)$/);
+    if (!m) continue;
+    const [, k, v] = m;
+    if (k === 'MEM') { const [u, t] = v.trim().split(/\s+/).map(Number); if (t > 0) r.mem = { used: u, limit: t, pct: Math.round(u / t * 100) }; }
+    else if (k === 'DISK') { const [u, t] = v.trim().split(/\s+/).map(Number); if (t > 0) r.disk = { used: u, total: t, pct: Math.round(u / t * 100) }; }
+    else if (k === 'LOAD') { const l = v.trim().split(/\s+/).slice(0, 3).filter(Boolean); if (l.length) r.load = l; }
+    else if (k === 'CPUS') { const n = parseInt(v, 10); if (n > 0) r.cpus = n; }
+    else if (k === 'PROC') { const pm = v.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/); if (pm && r.procs.length < 8) r.procs.push({ rss: Number(pm[1]) * 1024, pid: Number(pm[2]), cmd: pm[3].slice(0, 400) }); }
+  }
+  if (!r.mem && !r.load && !r.procs.length) throw new Error('probe returned nothing usable');
+  return r;
+}
 app.get('/api/sysinfo', async (req, res) => {
-  try { res.json(await sysinfo.read(path.join(__dirname, 'data'))); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  try {
+    const hostId = String(req.query.host || '');
+    if (hostId) return res.json(await remoteSysinfo(hostId));
+    res.json(await sysinfo.read(path.join(__dirname, 'data')));
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Resource HISTORY for the System rail charts (2.223.0): self-sampled CPU/
 // memory rings — 24h at the 45s watch cadence, 7d at 15min. range=1h|24h|7d.

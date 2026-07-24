@@ -3182,3 +3182,8 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
    corner from a NON-live source (resume preference / terminal-by-nature) —
    dim it slightly so live badges keep visual priority. */
 .conn-host-icon.mode-implied .mode-badge { opacity: 0.6; }
+
+/* System panel machine switcher (2.226.3) */
+.sys-host-row { margin-bottom: 6px; }
+.sys-host-sel { width: 100%; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 11px; padding: 3px 6px; }
+.sys-hist-wrap { margin-top: 2px; }

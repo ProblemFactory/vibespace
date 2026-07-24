@@ -8,6 +8,11 @@
 // modal dialogs when off. Mobile keeps its own nav — the rail never renders.
 import { t as tr } from './i18n.js';
 import { copyText, escHtml, showToast, fetchJson, showContextMenu } from './utils.js';
+import { track } from './telemetry-client.js';
+import { Chart, LineController, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Filler } from 'chart.js';
+// Self-contained registration (idempotent) — the rail must not depend on the
+// usage-dashboard module having run its own Chart.register first.
+Chart.register(LineController, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Filler);
 
 // Protocol chip: what a port speaks (http/https/tcp) → how it can be shared.
 // `over` = user override active (shown filled/accented). Clicking opens the
@@ -189,7 +194,8 @@ export function installSidebarRail(Sidebar) {
 
     _removeRail() {
       if (!this._railEl) return;
-      this._panelDispose?.(); this._panelDispose = null;
+      try { this._panelDispose?.(); } catch (e) { try { track('event', 'rail-dispose-failed'); } catch {} console.warn('[rail] panel dispose failed:', e); }
+      this._panelDispose = null;
       this._railEl.remove(); this._railEl = null;
       this.el.classList.remove('rail-on', 'rail-collapsed');
       const title = this.el.querySelector('.sidebar-title');
@@ -207,7 +213,8 @@ export function installSidebarRail(Sidebar) {
         this.toggle(true);
         if (this._activeTab === id) { this._railSync(); return; }
       } else if (this._activeTab === id) { this.toggle(false); return; } // vscode: re-click = collapse
-      this._panelDispose?.(); this._panelDispose = null;
+      try { this._panelDispose?.(); } catch (e) { try { track('event', 'rail-dispose-failed'); } catch {} console.warn('[rail] panel dispose failed:', e); }
+      this._panelDispose = null;
       this._activeTab = id;
       this._updateTabs();
       this._railSync();
@@ -225,7 +232,8 @@ export function installSidebarRail(Sidebar) {
     _renderRailPanel() {
       const cls = 'rail-panel-' + this._activeTab;
       if (this.listEl.querySelector('.' + cls)) return;
-      this._panelDispose?.(); this._panelDispose = null;
+      try { this._panelDispose?.(); } catch (e) { try { track('event', 'rail-dispose-failed'); } catch {} console.warn('[rail] panel dispose failed:', e); }
+      this._panelDispose = null;
       this.listEl.innerHTML = '';
       const c = document.createElement('div');
       c.className = 'rail-panel ' + cls;
@@ -256,57 +264,87 @@ export function installSidebarRail(Sidebar) {
      *  canvas over the self-sampled rings (/api/sysinfo/history). Memory
      *  scales to the container limit; CPU to the observed peak (cpu count as
      *  the reference line when known). */
-    async _renderRailResourceCharts(c, range) {
+    _destroyRailSysCharts() {
+      for (const ch of this._railSysCharts || []) { try { ch.destroy(); } catch {} }
+      this._railSysCharts = [];
+    },
+
+    // History charts (2.226.3 REBUILD — the 2.223.1 commit shipped a partial
+    // state: a draw function with no DOM builder and a dispose calling a
+    // helper that never existed, so charts were invisible and LEAVING the
+    // panel threw + bricked the rail. This is the intended interactive
+    // Chart.js version; local instance only — the sampler runs in this
+    // server, so the machine switcher hides history for remote machines.)
+    async _renderRailResourceCharts(hist, range) {
+      if (!hist.isConnected) return;
+      if (!hist.querySelector('.sys-hist-wrap')) {
+        hist.innerHTML = `
+          <div class="usage-section-title">${escHtml(tr('History'))}<span class="sys-range">${['1h', '24h', '7d'].map((rr) => `<span class="sys-range-chip${rr === range ? ' on' : ''}" data-r="${rr}">${rr}</span>`).join('')}</span></div>
+          <div class="sys-hist-wrap">
+            <div class="sys-chart-label"><span>${escHtml(tr('Memory'))}</span><b class="sys-chart-cur" data-ch="mem"></b></div>
+            <div class="sys-chart-box"><canvas class="sys-hist-chart" data-ch="mem"></canvas></div>
+            <div class="sys-chart-label"><span>CPU</span><b class="sys-chart-cur" data-ch="cpu"></b></div>
+            <div class="sys-chart-box"><canvas class="sys-hist-chart" data-ch="cpu"></canvas></div>
+            <div class="sys-hist-note"></div>
+          </div>`;
+        hist.querySelectorAll('.sys-range-chip').forEach((chip) => chip.addEventListener('click', () => {
+          this._railSysRange = chip.dataset.r;
+          hist.querySelectorAll('.sys-range-chip').forEach((c2) => c2.classList.toggle('on', c2 === chip));
+          this._renderRailResourceCharts(hist, this._railSysRange).catch(() => {});
+        }));
+      }
       let d = null;
-      try { d = await fetchJson(`/api/sysinfo/history?range=${encodeURIComponent(range)}`); } catch { }
+      try { d = await fetchJson(`/api/sysinfo/history?range=${encodeURIComponent(range)}`); } catch {}
+      if (!hist.isConnected) return;
+      const note = hist.querySelector('.sys-hist-note');
       const pts = d?.points || [];
-      if (!c.isConnected) return;
+      this._destroyRailSysCharts();
       if (pts.length < 2) {
-        c.querySelectorAll('.sys-hist-chart').forEach((el) => { el.outerHTML = `<div class="empty-hint empty-hint-inline">${escHtml(tr('Collecting samples — history appears after a few minutes.'))}</div>`; });
+        if (note) note.innerHTML = `<div class="empty-hint empty-hint-inline">${escHtml(tr('Collecting samples — history appears after a few minutes.'))}</div>`;
         return;
       }
+      if (note) note.innerHTML = '';
       const cs = getComputedStyle(document.documentElement);
-      const dim = (cs.getPropertyValue('--text-dim') || '#888').trim() || '#888';
+      const col = (v, fb) => (cs.getPropertyValue(v) || fb).trim() || fb;
+      const tint = (c3) => /^#[0-9a-f]{6}$/i.test(c3) ? c3 + '20' : 'transparent';
       const fmtG = (b) => b >= 1073741824 ? (b / 1073741824).toFixed(1) + 'G' : Math.round(b / 1048576) + 'M';
-      const draw = (ch, series, yMax, color, fmtV) => {
-        const canvas = c.querySelector(`.sys-hist-chart[data-ch="${ch}"]`);
+      // Decimate for tooltip/render perf — the fine ring is ~1900 points at 24h.
+      const step = Math.max(1, Math.ceil(pts.length / 400));
+      const p = pts.filter((_, i) => i % step === 0 || i === pts.length - 1);
+      const labels = p.map((x) => new Date(x.t).toISOString().slice(range === '7d' ? 5 : 11, range === '7d' ? 10 : 16));
+      const lim = Math.max(...pts.map((x) => x.l || 0), 1);
+      const mk = (ch, data, color, yMax, fmtV) => {
+        const canvas = hist.querySelector(`.sys-hist-chart[data-ch="${ch}"]`);
         if (!canvas) return;
-        const dpr = window.devicePixelRatio || 1;
-        const w = canvas.clientWidth || canvas.parentElement.clientWidth || 220, h = 56;
-        canvas.width = w * dpr; canvas.height = h * dpr;
-        const ctx = canvas.getContext('2d'); ctx.scale(dpr, dpr);
-        const t0 = pts[0].t, t1 = pts[pts.length - 1].t || 1;
-        const x = (t) => (t - t0) / Math.max(1, t1 - t0) * w;
-        const y = (v) => h - 10 - Math.max(0, Math.min(1, v / yMax)) * (h - 14);
-        ctx.beginPath();
-        let started = false;
-        for (const p2 of pts) {
-          const v = series(p2);
-          if (v == null) continue;
-          const xx = x(p2.t), yy = y(v);
-          if (!started) { ctx.moveTo(xx, yy); started = true; } else ctx.lineTo(xx, yy);
-        }
-        ctx.strokeStyle = color; ctx.lineWidth = 1.4; ctx.stroke();
-        ctx.lineTo(x(t1), h - 10); ctx.lineTo(x(t0), h - 10); ctx.closePath();
-        ctx.globalAlpha = 0.12; ctx.fillStyle = color; ctx.fill(); ctx.globalAlpha = 1;
-        ctx.font = '9px sans-serif'; ctx.fillStyle = dim;
-        ctx.fillText(fmtV(yMax), 0, 8);
-        const l0 = new Date(t0).toISOString().slice(range === '7d' ? 5 : 11, range === '7d' ? 10 : 16);
-        const l1 = new Date(t1).toISOString().slice(range === '7d' ? 5 : 11, range === '7d' ? 10 : 16);
-        ctx.fillText(l0, 0, h);
-        ctx.fillText(l1, w - ctx.measureText(l1).width, h);
+        const inst = new Chart(canvas, {
+          type: 'line',
+          data: { labels, datasets: [{ data, borderColor: color, backgroundColor: tint(color), fill: true, pointRadius: 0, borderWidth: 1.4, tension: 0.25, xAxisID: 'x', yAxisID: 'y' }] },
+          options: {
+            animation: false, responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c2) => fmtV(c2.parsed.y) } } },
+            scales: {
+              x: { ticks: { maxTicksLimit: 4, color: col('--text-dim', '#888'), font: { size: 9 } }, grid: { display: false } },
+              y: { beginAtZero: true, max: yMax || undefined, ticks: { maxTicksLimit: 3, color: col('--text-dim', '#888'), font: { size: 9 }, callback: (v) => fmtV(v) }, grid: { color: tint(col('--text-dim', '#888')) } },
+            },
+          },
+        });
+        this._railSysCharts = this._railSysCharts || [];
+        this._railSysCharts.push(inst);
       };
-      const lim = Math.max(...pts.map((p2) => p2.l || 0), 1);
-      draw('mem', (p2) => p2.m, lim, (cs.getPropertyValue('--blue') || '#61afef').trim() || '#61afef', fmtG);
-      const peakC = Math.max(...pts.map((p2) => p2.c ?? 0), 0.1);
+      mk('mem', p.map((x) => x.m), col('--blue', '#61afef'), lim, fmtG);
+      const peakC = Math.max(...pts.map((x) => x.c ?? 0), 0.1);
       const cpuMax = d.cpus && d.cpus >= peakC ? Math.min(d.cpus, Math.max(1, Math.ceil(peakC))) : Math.ceil(peakC);
-      draw('cpu', (p2) => p2.c, cpuMax, (cs.getPropertyValue('--red') || '#e06c75').trim() || '#e06c75', (v) => v.toFixed(v < 10 ? 1 : 0));
+      mk('cpu', p.map((x) => x.c), col('--red', '#e06c75'), cpuMax, (v) => (typeof v === 'number' ? v.toFixed(v < 10 ? 2 : 0) : v));
       const last = pts[pts.length - 1];
-      const curMem = c.querySelector('.sys-chart-cur[data-ch="mem"]'); if (curMem) curMem.textContent = fmtG(last.m) + ' / ' + fmtG(lim);
-      const curCpu = c.querySelector('.sys-chart-cur[data-ch="cpu"]'); if (curCpu && last.c != null) curCpu.textContent = last.c.toFixed(2);
+      const curMem = hist.querySelector('.sys-chart-cur[data-ch="mem"]'); if (curMem) curMem.textContent = fmtG(last.m) + ' / ' + fmtG(lim);
+      const curCpu = hist.querySelector('.sys-chart-cur[data-ch="cpu"]'); if (curCpu && last.c != null) curCpu.textContent = last.c.toFixed(2);
     },
 
     // ── System panel: container memory / disk / load / top processes ──
+    // Machine switcher (2.226.3, user request): the same panel can inspect any
+    // configured machine — live snapshot over the shared read-only probe
+    // channel (ssh AND dial); history stays local (the sampler runs here).
     async _renderSystemPanel(c) {
       c.innerHTML = `<div class="empty-hint">${escHtml(tr('Loading…'))}</div>`;
       const fmt = (b) => b >= 1073741824 ? (b / 1073741824).toFixed(1) + ' GB' : Math.round(b / 1048576) + ' MB';
@@ -314,28 +352,41 @@ export function installSidebarRail(Sidebar) {
         const color = pct >= 92 ? 'var(--red, #e55)' : pct >= 80 ? 'var(--yellow, #e5c07b)' : 'var(--green, #3fb950)';
         return `<div class="sys-bar" title="${escHtml(label)}"><div class="sys-bar-fill" style="width:${Math.min(100, pct)}%;background:${color}"></div><span class="sys-bar-label">${escHtml(label)}</span></div>`;
       };
+      let hostsList = [];
+      try { hostsList = (await fetchJson('/api/hosts'))?.hosts || []; } catch {}
+      if (!c.isConnected) return;
+      c.innerHTML = '<div class="sys-host-row"></div><div class="sys-live"></div><div class="sys-hist"></div>';
+      const hostRow = c.querySelector('.sys-host-row');
+      const live = c.querySelector('.sys-live');
+      const hist = c.querySelector('.sys-hist');
       const render = async () => {
         if (!c.isConnected) return;
+        const hostId = this._railSysHost || '';
         let d = null;
-        try { d = await fetchJson('/api/sysinfo'); } catch { }
-        if (!d || !c.isConnected) return;
-        this._railSysBadge(d.mem?.pct || 0);
+        try { d = await fetchJson('/api/sysinfo' + (hostId ? `?host=${encodeURIComponent(hostId)}` : '')); } catch {}
+        if (!c.isConnected || hostId !== (this._railSysHost || '')) return; // stale response after a switch
+        if (!d || d.error) { live.innerHTML = `<div class="empty-hint">${escHtml(d?.error || tr('Machine unreachable'))}</div>`; return; }
+        if (!hostId) this._railSysBadge(d.mem?.pct || 0); // the taskbar badge tracks THIS instance only
         const parts = [];
-        parts.push(`<div class="usage-section-title">${escHtml(tr('Memory'))}</div>`);
-        parts.push(bar(d.mem.pct, `${fmt(d.mem.used)} / ${fmt(d.mem.limit)} · ${d.mem.pct}%`));
-        if (d.mem.pct >= 80) parts.push(`<div class="usage-warn">${escHtml(tr('Close to the container limit — the kernel may OOM-kill the whole instance (all sessions die). Stop the top consumers below.'))}</div>`);
+        if (d.mem) {
+          parts.push(`<div class="usage-section-title">${escHtml(tr('Memory'))}</div>`);
+          parts.push(bar(d.mem.pct, `${fmt(d.mem.used)} / ${fmt(d.mem.limit)} · ${d.mem.pct}%`));
+          if (!hostId && d.mem.pct >= 80) parts.push(`<div class="usage-warn">${escHtml(tr('Close to the container limit — the kernel may OOM-kill the whole instance (all sessions die). Stop the top consumers below.'))}</div>`);
+        }
         if (d.disk) {
           parts.push(`<div class="usage-section-title">${escHtml(tr('Disk (workspace)'))}</div>`);
           parts.push(bar(d.disk.pct, `${fmt(d.disk.used)} / ${fmt(d.disk.total)} · ${d.disk.pct}%`));
         }
-        parts.push(`<div class="usage-section-title">${escHtml(tr('Load'))}</div>`);
-        parts.push(`<div class="sys-load">${d.load.join(' · ')} <span class="sys-load-cpus">/ ${d.cpus} CPU</span></div>`);
+        if (d.load) {
+          parts.push(`<div class="usage-section-title">${escHtml(tr('Load'))}</div>`);
+          parts.push(`<div class="sys-load">${d.load.join(' · ')}${d.cpus ? ` <span class="sys-load-cpus">/ ${d.cpus} CPU</span>` : ''}</div>`);
+        }
         parts.push(`<div class="usage-section-title">${escHtml(tr('Top processes (by memory)'))}</div>`);
         for (const p of d.procs || []) {
           const exp = this._railProcExpanded?.has(String(p.pid));
           parts.push(`<div class="sys-proc${exp ? ' expanded' : ''}" data-pid="${p.pid}" title="${escHtml(tr('Click to expand the full command'))}"><span class="sys-proc-rss">${fmt(p.rss)}</span><span class="sys-proc-cmd">${escHtml(exp ? p.cmd : p.cmd.slice(0, 70))}</span></div>`);
         }
-        parts.push(`<div class="empty-hint empty-hint-inline">${escHtml(tr('Orphaned dev servers show in Ports with a Kill button'))}</div>`);
+        if (!hostId) parts.push(`<div class="empty-hint empty-hint-inline">${escHtml(tr('Orphaned dev servers show in Ports with a Kill button'))}</div>`);
         live.innerHTML = parts.join('');
         // click a process row to expand its FULL command (the truncated line
         // was unreadable and no sidebar width could show a long path; state
@@ -347,17 +398,38 @@ export function installSidebarRail(Sidebar) {
           row.classList.toggle('expanded');
         }));
       };
-      // Two lifecycles: the LIVE zone refreshes every 5s; the HISTORY zone
-      // (Chart.js, hoverable) rebuilds only on range change + a slow 60s tick
-      // — a 5s innerHTML swap under the cursor killed all interactivity.
-      c.innerHTML = '<div class="sys-live"></div><div class="sys-hist"></div>';
-      const live = c.querySelector('.sys-live');
-      const hist = c.querySelector('.sys-hist');
-      const renderHist = () => this._renderRailResourceCharts(hist, this._railSysRange || '24h').catch(() => { });
+      const renderHist = () => this._renderRailResourceCharts(hist, this._railSysRange || '24h').catch(() => {});
+      const syncHist = () => {
+        if (this._railSysHost) {
+          this._destroyRailSysCharts();
+          hist.innerHTML = `<div class="empty-hint empty-hint-inline">${escHtml(tr('History charts cover this instance only (sampling runs here).'))}</div>`;
+        } else { hist.innerHTML = ''; renderHist(); }
+      };
+      if (hostsList.length) {
+        const sel = document.createElement('select');
+        sel.className = 'sys-host-sel';
+        sel.innerHTML = `<option value="">${escHtml(tr('This machine'))}</option>` + hostsList.map((h) => `<option value="${escHtml(h.id)}"${h.id === this._railSysHost ? ' selected' : ''}>${escHtml(h.name || h.host || h.id)}</option>`).join('');
+        sel.onchange = () => {
+          this._railSysHost = sel.value;
+          live.innerHTML = `<div class="empty-hint">${escHtml(tr('Loading…'))}</div>`;
+          syncHist();
+          render();
+        };
+        hostRow.appendChild(sel);
+      } else if (this._railSysHost) this._railSysHost = ''; // hosts removed since last open
+      // Two lifecycles: the LIVE zone refreshes every 5s (remote: ~10s — each
+      // refresh is a real probe round trip); the HISTORY zone rebuilds only on
+      // range change + a slow 60s tick — a 5s innerHTML swap under the cursor
+      // killed all interactivity.
+      let lastRemote = 0;
       await render();
-      renderHist();
-      const t = setInterval(() => { if (!c.isConnected) { clearInterval(t); return; } render(); }, 5000);
-      const th = setInterval(() => { if (!c.isConnected) { clearInterval(th); return; } renderHist(); }, 60000);
+      syncHist();
+      const t = setInterval(() => {
+        if (!c.isConnected) { clearInterval(t); return; }
+        if (this._railSysHost) { if (Date.now() - lastRemote < 9500) return; lastRemote = Date.now(); }
+        render();
+      }, 5000);
+      const th = setInterval(() => { if (!c.isConnected) { clearInterval(th); return; } if (!this._railSysHost) renderHist(); }, 60000);
       this._panelDispose = () => { clearInterval(t); clearInterval(th); this._destroyRailSysCharts(); };
     },
 

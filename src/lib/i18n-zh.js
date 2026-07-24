@@ -2181,4 +2181,6 @@ export default {
   'Account signed in on ANOTHER browser? Copy this link and open it there:': '账号登录在另一个浏览器里？复制此链接到那个浏览器打开：',
   'Popup blocked — copy the link below and open it in a browser yourself.': '弹窗被拦截——请复制下方链接自行在浏览器中打开。',
   'If the final page fails to load (address starts with 127.0.0.1 — VibeSpace runs on another machine, or you authorized in a different browser), copy that address and paste it here:': '如果最后一页打不开（地址以 127.0.0.1 开头——VibeSpace 在另一台机器上，或你在别的浏览器里完成了授权），把那个地址复制粘贴到这里：',
+  'Machine unreachable': '机器不可达',
+  'History charts cover this instance only (sampling runs here).': '历史图表仅覆盖本实例（采样在本机进行）。',
 };
