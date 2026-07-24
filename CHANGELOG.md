@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.226.2
+
+- **Cloud-OAuth flows now work when the account lives in ANOTHER browser** (real report: connecting a Google Drive whose Google account is signed in in a different browser was impossible — all four OAuth entry points force-`window.open`ed the consent page in the CURRENT browser and never showed the URL). Every flow (Drive connect, Drive re-auth, Gmail, generic cloud providers) now always renders the auth URL as a copyable row ("Account signed in on ANOTHER browser? Copy this link and open it there") — any browser can complete the consent, then the existing paste-back relay (paste the failed 127.0.0.1 address) finishes it. A blocked popup now says so honestly instead of claiming a page opened, and the paste-back hint covers the different-browser case alongside the different-machine one.
+
 ## 2.226.1
 
 - **Stopped/tmux/external session cards now carry the full icon corner language** (real report: "stopped session的角标显示都不全" — non-live cards rendered a bare backend glyph with no mode corner). The mode badge (bottom-right) now renders on EVERY card: live sessions show their running mode; tmux/external show terminal (they run in a real terminal); stopped cards show the mode the Resume button will use (the persisted per-session toggle, else `session.defaultMode`) — dimmed (`.mode-implied`, 0.6 opacity) to signal a non-live source, and the icon legend labels it "Mode (on resume)". Config corner dot and the no-dot-when-stopped rule unchanged. CDP-smoked: DOM asserts + screenshot.
