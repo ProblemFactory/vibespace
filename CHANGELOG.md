@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.226.1
+
+- **Stopped/tmux/external session cards now carry the full icon corner language** (real report: "stopped session的角标显示都不全" — non-live cards rendered a bare backend glyph with no mode corner). The mode badge (bottom-right) now renders on EVERY card: live sessions show their running mode; tmux/external show terminal (they run in a real terminal); stopped cards show the mode the Resume button will use (the persisted per-session toggle, else `session.defaultMode`) — dimmed (`.mode-implied`, 0.6 opacity) to signal a non-live source, and the icon legend labels it "Mode (on resume)". Config corner dot and the no-dot-when-stopped rule unchanged. CDP-smoked: DOM asserts + screenshot.
+
 ## 2.226.0
 
 **Silent-failure probe batch** (user directive "不要老是静默失败" — after two back-to-back incidents where the system knew why something failed and told no one):

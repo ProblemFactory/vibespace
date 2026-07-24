@@ -3177,3 +3177,8 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .ports-manual { display: flex; gap: 4px; margin: 4px 0 2px; }
 .ports-manual-input { flex: 1; min-width: 0; font-size: 11px; padding: 3px 6px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-input); color: var(--text); }
 .ports-manual-input:focus { border-color: var(--accent); outline: none; }
+
+/* Implied mode badge (2.226.1): stopped/tmux/external cards carry a mode
+   corner from a NON-live source (resume preference / terminal-by-nature) —
+   dim it slightly so live badges keep visual priority. */
+.conn-host-icon.mode-implied .mode-badge { opacity: 0.6; }

@@ -2178,4 +2178,5 @@ export default {
   "since {time}": "{time} から",
   "{n} updates": "{n} 件の更新",
   "Show the full troubleshooting timeline": "トラブルシューティングの全タイムラインを表示",
+  'Mode (on resume)': 'モード（再開時）',
 };
