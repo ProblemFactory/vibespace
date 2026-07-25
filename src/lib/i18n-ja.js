@@ -2183,4 +2183,7 @@ export default {
   'If the final page fails to load (address starts with 127.0.0.1 — VibeSpace runs on another machine, or you authorized in a different browser), copy that address and paste it here:': '最後のページが開けない場合（アドレスが 127.0.0.1 で始まる——VibeSpace が別のマシンで動いている、または別のブラウザで承認した場合）、そのアドレスをコピーしてここに貼り付けてください：',
   'Machine unreachable': 'マシンに到達できません',
   'History charts cover this instance only (sampling runs here).': '履歴グラフはこのインスタンスのみ対象（サンプリングはここで実行）。',
+  'Working directory is gone': '作業ディレクトリが存在しません',
+  'This folder no longer exists on {machine}. You can recreate it as an EMPTY folder and resume — but every file the agent worked with there is GONE and is not coming back. The agent will be told the folder was recreated empty.': 'このフォルダは{machine}上に存在しません。空のフォルダとして再作成して再開できますが、エージェントが扱っていたファイルはすべて失われており復元されません。エージェントにはフォルダが空で再作成されたことが通知されます。',
+  'Recreate empty folder & resume': '空フォルダを再作成して再開',
 };

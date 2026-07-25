@@ -2183,4 +2183,7 @@ export default {
   'If the final page fails to load (address starts with 127.0.0.1 — VibeSpace runs on another machine, or you authorized in a different browser), copy that address and paste it here:': '如果最后一页打不开（地址以 127.0.0.1 开头——VibeSpace 在另一台机器上，或你在别的浏览器里完成了授权），把那个地址复制粘贴到这里：',
   'Machine unreachable': '机器不可达',
   'History charts cover this instance only (sampling runs here).': '历史图表仅覆盖本实例（采样在本机进行）。',
+  'Working directory is gone': '工作目录已不存在',
+  'This folder no longer exists on {machine}. You can recreate it as an EMPTY folder and resume — but every file the agent worked with there is GONE and is not coming back. The agent will be told the folder was recreated empty.': '该文件夹在{machine}上已不存在。可以将其重建为空文件夹并继续会话——但 agent 在其中处理过的所有文件已经丢失且不会恢复。agent 会被告知文件夹已被重建为空。',
+  'Recreate empty folder & resume': '重建空文件夹并继续',
 };

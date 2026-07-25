@@ -330,6 +330,16 @@ app.get('/api/agent/prompt-context', (req, res) => {
     const [s, id] = hit;
     const key = sessionStatusKey(s, id);
     const parts = [];
+    // Recreated-cwd safety notice (B-7812, user-mandated defense): a resume
+    // whose working directory was DELETED got it recreated EMPTY on explicit
+    // user confirm — the agent must not continue on the false premise that
+    // its files still exist. One-shot; meta keeps the flag until delivered,
+    // so a restart before the first prompt re-arms it (duplicate on that rare
+    // edge is the SAFE direction).
+    if (s._cwdRecreated) {
+      s._cwdRecreated = false;
+      parts.push(`<vibespace-cwd-notice>\nYour working directory (${s.cwd || ''}) did NOT exist when this session was resumed — the user chose to recreate it as an EMPTY directory. Files from earlier in this conversation are GONE from disk. Re-verify every assumption about existing files/state before acting, and tell the user what is missing if it affects the task.\n</vibespace-cwd-notice>`);
+    }
     const toolFlags = enabledTools();
     const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId });
     // agents.contextInjection off ⇒ no group payloads/diffs (see task-context)

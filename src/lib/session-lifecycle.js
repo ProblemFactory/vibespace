@@ -18,7 +18,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     });
   },
 
-  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, accountId, ephemeral = false, winBounds }) {
+  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, accountId, ephemeral = false, winBounds, recreateCwd = false }) {
     try { track('event', `session-create:${backend || 'claude'}:${mode || 'default'}`); } catch {}
     cwd = stripCwdHostLabel(cwd); // merged-record display cwd ("host: /path") must never reach a spawn
     this._hideWelcome();
@@ -61,6 +61,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       resume: !!resumeId, resumeId: resumeId||undefined, fork: fork||undefined, cols:120, rows:30, reqId,
       taskId: taskId || undefined, // spawns VIBESPACE_TASK_ID into the agent env
       accountId: accountId || undefined, // billing identity: undefined=server default, 'subscription', or acct-… key id
+      recreateCwd: recreateCwd || undefined, // B-7812: user danger-confirmed rebuilding a missing cwd
     };
 
     // Request/reply via ws.request (2026-07-03 review structural fix):
@@ -90,7 +91,6 @@ export function installSessionLifecycle(App, ctx = {}) {
           return true;
         }
         const text = msg.message || t('Session create failed');
-        showToast(text, { type: 'error' });
         // Failed RESUME rescue (2.219.0, real window-loss class): resumeSession
         // CLOSES the old read-only window before creating, so a failed create
         // used to leave only a spec-less "Create failed" shell — which
@@ -99,7 +99,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         // the layout (lengyue lost "Mega Fish 训练" this way). Flip the shell
         // into the view-only pipeline with a REAL viewSession openSpec so the
         // window shows history + Resume and persists/syncs like any other.
-        if (sessionMode === 'chat' && resumeId && !/^sess-\d/.test(resumeId) && backend === 'claude') {
+        const rescueViewOnly = () => {
           winInfo._openSpec = {
             action: 'viewSession', sessionId: resumeId, backend,
             backendSessionId: resumeId, sessionKey: `${backend}:${resumeId}`,
@@ -110,6 +110,35 @@ export function installSessionLifecycle(App, ctx = {}) {
           this.sessions.get(winInfo.id)?._renderers?.appendSystem(text);
           this.layoutManager?.scheduleAutoSave?.();
           try { track('event', 'create-failed-rescued'); } catch { }
+        };
+        // Missing-cwd DANGER flow (B-7812, user-approved with the explicit
+        // constraint that this must be a red option): offer to recreate the
+        // dir EMPTY and resume. The confirm spells out that the agent's files
+        // are gone; on confirm the server also arms a one-shot agent notice
+        // (prompt-context) so the session can never silently continue on the
+        // false premise that its files still exist.
+        if (msg.code === 'cwd-missing' && resumeId && !recreateCwd && sessionMode === 'chat') {
+          const missingCwd = msg.cwd || cwd || '';
+          showConfirmDialog({
+            title: t('Working directory is gone'),
+            message: `${missingCwd}\n\n` + t('This folder no longer exists on {machine}. You can recreate it as an EMPTY folder and resume — but every file the agent worked with there is GONE and is not coming back. The agent will be told the folder was recreated empty.', { machine: msg.hostName || t('this machine') }),
+            confirmText: t('Recreate empty folder & resume'),
+            danger: true,
+          }).then((ok) => {
+            if (!ok) { rescueViewOnly(); return; }
+            const bounds = winBounds || this._snapshotWinBounds?.(this.wm.windows.get(winInfo.id));
+            try { this.wm.closeWindow(winInfo.id); } catch { }
+            this.createSession({
+              cwd, name: sessionName, resumeId, mode: sessionMode, model, permission, effort,
+              backend, hostId, keeperSid, accountId, extraArgs, agentKind, agentRole, agentNickname,
+              sourceKind, parentThreadId, winBounds: bounds, recreateCwd: true,
+            });
+          });
+          return true;
+        }
+        showToast(text, { type: 'error' });
+        if (sessionMode === 'chat' && resumeId && !/^sess-\d/.test(resumeId) && backend === 'claude') {
+          rescueViewOnly();
           return true;
         }
         const err = document.createElement('div');

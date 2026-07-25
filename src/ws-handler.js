@@ -233,6 +233,7 @@ function registerWsHandler(wss, ctx) {
           // /home/xingweil doesn't exist on a Mac → `cd` failed and, on the
           // pipe-session path, a nonexistent spawn cwd crashed the daemon).
           let cwd = data.cwd || '';
+          let cwdRecreated = false; // B-7812: set when the missing cwd was rebuilt on user confirm
           // Server-side twin of the client's stripCwdHostLabel (utils.js): the
           // sidebar's folder-grouping display cwd "<host name>: /path" leaked
           // into persisted openSpecs, and a resume that `cd`'d into the literal
@@ -258,6 +259,7 @@ function registerWsHandler(wss, ctx) {
             // (Shell terminals keep the home fallback — a terminal in $HOME is
             // usable; a transcript-coupled session in the wrong dir is not.)
             let missing = false;
+            let hostName = '';
             try {
               if (!data.hostId) {
                 // Child-process probe, NEVER node fs (§2.108.3 hung-mount
@@ -269,6 +271,7 @@ function registerWsHandler(wss, ctx) {
               } else if (hosts) {
                 const hh = hosts.get(data.hostId);
                 if (hh) {
+                  hostName = hh.name || hh.host || '';
                   const q = cwd.replace(/'/g, `'\\''`);
                   const out = await Promise.race([
                     hosts._hostShell(hh, `[ -d '${q}' ] && echo __VS_DIR_OK__ || echo __VS_DIR_MISSING__`, { timeoutMs: 5000 }),
@@ -278,10 +281,43 @@ function registerWsHandler(wss, ctx) {
                 }
               }
             } catch { /* probe failure must never block a create */ }
+            // Recreate-empty-and-resume (B-7812, user-approved DANGER path):
+            // only on the client's EXPLICIT flag (set after a red confirm that
+            // spells out the files are gone). The resumed agent is told the
+            // dir was recreated empty via prompt-context (_cwdRecreated) — the
+            // user's hard requirement against silently continuing on a false
+            // premise.
+            if (missing && data.recreateCwd === true) {
+              let made = false;
+              try {
+                if (!data.hostId) {
+                  made = await new Promise((resolve) => {
+                    execFile('mkdir', ['-p', cwd], { timeout: 8000 }, (err) => resolve(!err));
+                  });
+                } else if (hosts) {
+                  const hh = hosts.get(data.hostId);
+                  const q = cwd.replace(/'/g, `'\\''`);
+                  const out = hh ? await hosts._hostShell(hh, `mkdir -p '${q}' && echo __VS_MKDIR_OK__`, { timeoutMs: 8000 }) : '';
+                  made = String(out).includes('__VS_MKDIR_OK__');
+                }
+              } catch { }
+              if (made) {
+                missing = false;
+                cwdRecreated = true;
+                global.__vsEvent?.('spawn-cwd-recreated', data.hostId ? 'host' : 'local');
+                console.log(`[session] recreated missing cwd (user-confirmed): ${cwd}`);
+              } else {
+                ws.send(JSON.stringify({
+                  type: 'error', reqId: data.reqId, code: 'cwd-mkdir-failed',
+                  message: `Could not recreate the directory${hostName ? ` on ${hostName}` : ''}: ${cwd}`,
+                }));
+                break;
+              }
+            }
             if (missing) {
               global.__vsEvent?.('spawn-cwd-missing', `${data.hostId ? 'host' : 'local'}/${data.resume ? 'resume' : 'new'}`);
               ws.send(JSON.stringify({
-                type: 'error', reqId: data.reqId,
+                type: 'error', reqId: data.reqId, code: 'cwd-missing', cwd, hostName: hostName || undefined,
                 message: `Working directory does not exist${data.hostId ? " on the session's machine" : ''}: ${cwd}` +
                   (data.resume ? ' — the folder may have been moved or deleted; restore it or start a new session in a valid folder.' : ''),
               }));
@@ -1193,6 +1229,7 @@ done`;
           }
           setupSessionPty(session, id, createPty);
 
+          session._cwdRecreated = cwdRecreated; // B-7812: prompt-context tells the agent once
           activeSessions.set(id, session);
           attachedSessions.add(id);
           console.log(`[session] created ${id} "${session.name || ''}" mode=${sessionMode} backend=${backend}${data.hostId ? ' host=' + data.hostId : ''}${session._accountId ? ' account=' + session._accountId : ''}${data.resumeId ? ' resume=' + data.resumeId : ''}`);
@@ -1243,6 +1280,7 @@ done`;
             // branch = silent no-op, remote claude ran on; a restored fork's
             // new id could never be adopted)
             agentdSession: !!session._agentdSession,
+            cwdRecreated: session._cwdRecreated || undefined, // B-7812: agent notice pending
             forkRequested: !!session._forkRequested,
             remotePort: session._remotePort || null, // tools back-tunnel port (boot re-adopt revives it)
             backend: session.backend,
