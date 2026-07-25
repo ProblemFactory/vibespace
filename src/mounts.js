@@ -1024,6 +1024,15 @@ class MountManager {
         throw new Error('A shared link points into this mount — revoke it before renaming (the share path would break).');
       }
     }
+    // Fail-FAST on an unwritable new mountpoint BEFORE touching the live
+    // mount (2.227.2, user report: the failure only surfaced at reconnect,
+    // leaving a half-state stuck between old and new paths). An early throw
+    // keeps the mount up and the record untouched.
+    if (patch.customPath !== undefined) {
+      const cpNew = String(patch.customPath || '').trim();
+      if (cpNew && !path.isAbsolute(cpNew)) throw new Error('Custom path must be absolute');
+      if (cpNew && cpNew !== (m.customPath || '')) await this._ensureMountpointDir(cpNew);
+    }
     if (this.isMounted(m)) await this.unmount(id);
     if (patch.name) m.name = String(patch.name).slice(0, 60);
     if (patch.mode === 'ro' || patch.mode === 'rw') m.mode = patch.mode;
@@ -1159,7 +1168,13 @@ class MountManager {
     }
     this._save();
     this._notify();
-    if (wasMounted) { try { await this.mount(id); } catch {} }
+    // Auto-remount after an edit — a FAILED remount must reach the row (the
+    // swallowed catch here was why an unwritable path change looked like a
+    // successful save; no-silent-failure rule).
+    if (wasMounted) {
+      try { await this.mount(id); }
+      catch (e) { if (!this._errors.get(id)) { this._errors.set(id, String(e.message || e)); this._notify(); } }
+    }
     // Editing a CREDENTIAL (token refresh, endpoint change) must reach every
     // mount point that resolves through it — bounce the mounted children.
     if (this._kindOf(m) === 'credential') {
@@ -1357,7 +1372,8 @@ class MountManager {
       if (m.kind === 'credential') { delete m.kind; this._save(); }
     }
     const mp = this.pathOf(m);
-    fs.mkdirSync(mp, { recursive: true });
+    try { await this._ensureMountpointDir(mp); }
+    catch (e) { this._errors.set(id, String(e.message || e)); this._notify(); throw e; } // mount()'s finally clears _connecting
     fs.mkdirSync(this._logDir, { recursive: true });
     const { env, remote } = this._rcloneFor(m);
     const log = fs.openSync(path.join(this._logDir, `${m.id}.log`), 'w');
@@ -1763,7 +1779,7 @@ class MountManager {
   async _mountCephfs(id) {
     const m = this._get(id);
     const mp = this.pathOf(m);
-    try { fs.mkdirSync(mp, { recursive: true }); } catch {}
+    await this._ensureMountpointDir(mp); // sudo -n fallback covers root-owned parents
     // `sudo mount -t ceph <mons>:<path> <mp> -o name=<user>,secret=<key>,mds_namespace=<fs>`
     // Root-only, so sudo (the container has passwordless sudo). Secret rides in
     // the -o options (argv is world-readable in /proc for the ~1s the mount
@@ -1797,13 +1813,54 @@ class MountManager {
 
   /** Remove a LEFTOVER mountpoint directory — only when it exists, is not a
    *  live mount, and is EMPTY (rmdir refuses non-empty; never recursive).
-   *  User report: unmount / mountpoint change left empty husks behind. */
-  _cleanupEmptyMountpoint(mp) {
-    try {
-      if (!mp || !path.isAbsolute(mp)) return;
-      if (this._state.mounts.some((x) => this.pathOf(x) === mp && this.isMounted(x))) return;
-      fs.rmdirSync(mp); // throws (swallowed) unless empty
-    } catch {}
+   *  RETRY LADDER (2.227.2, user report: husks stayed behind): lazy unmounts
+   *  (`fusermount -uz` / `umount -l`) detach asynchronously — the old
+   *  one-shot rmdir at 1.5s raced the kernel, hit EBUSY, and the swallowed
+   *  error left the husk forever. Child-process rmdir only (§2.108.3: never
+   *  node fs on an ex-mountpoint). */
+  _cleanupEmptyMountpoint(mp, attempt = 0) {
+    if (!mp || !path.isAbsolute(mp)) return;
+    if (this._state.mounts.some((x) => this.pathOf(x) === mp && this.isMounted(x))) return;
+    execFile('rmdir', [mp], { timeout: 5000 }, (err, _o, stderr) => {
+      if (!err) { console.log(`[mounts] removed leftover mountpoint dir ${mp}`); return; }
+      const se = String(stderr || err.message || '');
+      if (/no such file/i.test(se)) return;            // already gone
+      if (/not empty/i.test(se)) return;               // real content — never recursive
+      const delays = [3500, 10000, 30000, 60000];      // EBUSY etc: the unmount is still detaching
+      if (attempt < delays.length) setTimeout(() => this._cleanupEmptyMountpoint(mp, attempt + 1), delays[attempt]).unref();
+      else console.warn(`[mounts] leftover mountpoint dir not removable after retries: ${mp} (${se.trim().slice(0, 80)})`);
+    });
+  }
+
+  /** Create + verify a mountpoint dir — child-process only (§2.108.3), with a
+   *  NON-INTERACTIVE sudo fallback for unwritable parents (user-approved
+   *  auto-escalation 2026-07-25: `sudo -n` never prompts — containers with
+   *  passwordless sudo just work, everything else falls through to the honest
+   *  error). Ownership is normalized to the service user so the unprivileged
+   *  fuse daemon can use the dir. */
+  async _ensureMountpointDir(mp) {
+    const run = (cmd, args) => new Promise((resolve) =>
+      execFile(cmd, args, { timeout: 8000 }, (err, _o, stderr) => resolve({ ok: !err, stderr: String(stderr || (err && err.message) || '') })));
+    const owner = `${typeof process.getuid === 'function' ? process.getuid() : 0}:${typeof process.getgid === 'function' ? process.getgid() : 0}`;
+    let made = await run('mkdir', ['-p', mp]);
+    if (!made.ok && /permission denied|not permitted/i.test(made.stderr)) {
+      const su = await run('sudo', ['-n', 'mkdir', '-p', mp]);
+      if (su.ok) {
+        await run('sudo', ['-n', 'chown', owner, mp]);
+        global.__vsEvent?.('mount-mkdir-sudo');
+        made = { ok: true };
+      }
+    }
+    if (!made.ok) {
+      throw new Error(`No permission to create the mount point ${mp} — pick a writable location, or create it yourself first: sudo mkdir -p '${mp}' && sudo chown ${owner} '${mp}'`);
+    }
+    // Writability check catches a PRE-EXISTING root-owned dir too.
+    let w = await run('test', ['-w', mp]);
+    if (!w.ok) {
+      const su = await run('sudo', ['-n', 'chown', owner, mp]);
+      if (su.ok) { global.__vsEvent?.('mount-mkdir-sudo'); w = await run('test', ['-w', mp]); }
+    }
+    if (!w.ok) throw new Error(`The mount point ${mp} exists but is not writable by VibeSpace — fix ownership: sudo chown ${owner} '${mp}'`);
   }
 
   unmount(id, opts = {}) {

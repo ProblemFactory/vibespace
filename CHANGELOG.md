@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.227.2
+
+**Mount hygiene + mountpoint permissions** (two user reports):
+
+- **Leftover empty mountpoint dirs are now actually removed**: the sweep (unmount / mountpoint change / remove) was a ONE-SHOT `rmdir` 1.5s after a LAZY unmount — the kernel often hadn't detached yet, the EBUSY was swallowed, and the husk stayed forever. Now a child-process rmdir with a retry ladder (1.5s → 3.5s → 10s → 30s → 60s); non-empty dirs are still never touched, and a final failure logs instead of vanishing.
+- **Changing the mount point to an unwritable path no longer half-breaks the mount**: the new path is created and verified writable BEFORE the live mount is touched — an impossible path now fails the edit dialog immediately with the reason, leaving the mount running exactly as it was (previously the failure only surfaced at reconnect, stuck between old and new paths — and the auto-remount after an edit swallowed its own failure, so the save even looked successful).
+- **Auto-escalation for mountpoint creation** (user-approved): when `mkdir` hits a permission error, VibeSpace tries **non-interactive** `sudo -n mkdir -p` + `chown` back to the service user — containers with passwordless sudo (the fleet default; cephfs already relies on it) just work, and everywhere else it falls through to an honest error with the exact manual commands. A pre-existing root-owned dir gets the same chown treatment. `sudo -n` never prompts, so nothing can hang.
+- CephFS mountpoint creation had a silently-swallowed mkdir failure — same helper now, error surfaced.
+
 ## 2.227.1
 
 Standing rule adopted (user directive): **no user action may fail silently — every failure reports to the frontend.**
