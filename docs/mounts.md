@@ -36,6 +36,8 @@ Think of it as rclone syntax: the part before the colon is the connection, the p
 - Bucket names are strict: lowercase letters, digits and hyphens only (`example-prod-data`, not `Example_Prod_Data`). If the token can't access the path you typed, the mount fails immediately with a pointer instead of connecting a dead folder.
 - **Google Drive re-authorization**: if Google reports the saved sign-in as expired/revoked (`invalid_grant`), the row's error line and the edit dialog offer **Re-authorize Google Drive…** — the same guided sign-in used when adding a Drive connection, writing the fresh token back into the existing record.
 
+**Mount point path**: changing a mount's folder is validated **before** anything is touched — VibeSpace creates the new directory first (if the location needs root and passwordless `sudo` is available, it escalates automatically and hands ownership back; otherwise the dialog shows the exact `sudo mkdir`/`chown` commands to run). Only after the new path is ready does the mount move; the old empty folder is swept away automatically (retried past the lazy unmount — a folder with real content is never touched).
+
 **Edit** (✎) exposes every connection field for your own mounts — S3 endpoint/bucket/keys, custom-rclone parameters, WebDAV/SFTP hosts and secrets, Drive token. Every field is **prefilled with its real current value, secrets included** (access/secret keys, OAuth tokens, passwords, bearer tokens, rclone params), so you read and edit them directly; on save only the fields you changed are written (an unchanged secret isn't re-encrypted). For custom-rclone mounts, clearing a parameter's value removes it. **Duplicate** (⧉) derives a new standalone mount from an existing connection.
 
 ## Sharing a folder from your S3 storage
