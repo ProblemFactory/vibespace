@@ -2186,4 +2186,5 @@ export default {
   'Working directory is gone': '工作目录已不存在',
   'This folder no longer exists on {machine}. You can recreate it as an EMPTY folder and resume — but every file the agent worked with there is GONE and is not coming back. The agent will be told the folder was recreated empty.': '该文件夹在{machine}上已不存在。可以将其重建为空文件夹并继续会话——但 agent 在其中处理过的所有文件已经丢失且不会恢复。agent 会被告知文件夹已被重建为空。',
   'Recreate empty folder & resume': '重建空文件夹并继续',
+  'Cannot resume from this window — session identity is incomplete. Use the session card in the sidebar instead.': '无法从此窗口恢复——会话身份信息不完整。请改用侧栏中的会话卡片。',
 };

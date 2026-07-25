@@ -2052,7 +2052,9 @@ class ChatView {
     const backendSessionId = ids.backendSessionId || this.winInfo?.backendSessionId || null;
     const cwd = ids.cwd || this.winInfo?._openSpec?.cwd || this.winInfo?.cwd || '';
     if (!backendSessionId || !cwd) {
-      // Can't resume without these — fall back to focusing sidebar
+      // NEVER a silent no-op (user directive 2026-07-25: every resume failure
+      // must reach the frontend — a dead click reads as a VibeSpace bug).
+      showToast(t('Cannot resume from this window — session identity is incomplete. Use the session card in the sidebar instead.'), { type: 'error' });
       this.app.sidebar?.refresh?.();
       return;
     }

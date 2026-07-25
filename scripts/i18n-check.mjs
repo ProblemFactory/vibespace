@@ -17,7 +17,12 @@ import { fileURLToPath } from 'node:url';
 const lib = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'lib');
 const DICTS = ['i18n-zh.js', 'i18n-ja.js'].map((f) => path.join(lib, f));
 
-const ENTRY_RE = /^  ("(?:[^"\\]|\\.)*"): ("(?:[^"\\]|\\.)*"),?$/;
+// Quote-AGNOSTIC (2.227.1, real miss: python-inserted single-quoted entries
+// were invisible to every check — a mixed-quote duplicate of "this machine"
+// shipped without a peep). Keys/values are DECODED before comparison.
+const STR_LIT = `(?:"(?:[^"\\\\]|\\\\.)*"|'(?:[^'\\\\]|\\\\.)*')`;
+const ENTRY_RE = new RegExp(`^  (${STR_LIT}): (${STR_LIT}),?$`);
+const decode = (lit) => { try { return new Function('return ' + lit)(); } catch { return lit; } };
 let dupFail = 0, warns = 0;
 const keySets = new Map();
 
@@ -28,7 +33,7 @@ for (const file of DICTS) {
   fs.readFileSync(file, 'utf8').split('\n').forEach((ln, i) => {
     const m = ln.match(ENTRY_RE);
     if (!m) return;
-    const [, k, v] = m;
+    const k = decode(m[1]), v = decode(m[2]);
     if (seen.has(k)) {
       dupFail++;
       const prev = seen.get(k);
