@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.227.1
+
+Standing rule adopted (user directive): **no user action may fail silently — every failure reports to the frontend.**
+
+- **Read-only window Resume with incomplete identity now says so** (was a silent no-op that read as "VibeSpace is broken"): a toast explains the identity is incomplete and points at the sidebar card path.
+- **i18n-check is quote-agnostic**: single-quoted dictionary entries were INVISIBLE to every check (dup/parity/params) — a mixed-quote duplicate of "this machine" shipped without a peep. Keys/values are now decoded before comparison; negative-tested (a mixed-quote dup hard-fails the build).
+- CLAUDE.md: documented the create preflight wire contract (`code:'cwd-missing'` / `recreateCwd`), the `server-notice` probe channel, and `exited` reason+detail from classifyCliDeath.
+
 ## 2.227.0
 
 - **Recreate-empty-and-resume for a deleted working directory** (B-7812, user-approved as an explicitly DANGEROUS option — born from lengyue's CRUD-worker session whose ceph folder was cleaned away while the 76MB conversation stayed intact). When a resume hits the 2.226.0 cwd preflight refusal, the window now offers a RED confirm: "Recreate it as an EMPTY folder and resume — every file the agent worked with there is GONE." Decline = the normal view-only rescue. Confirm = the server `mkdir -p`s the directory (local child process / remote probe channel, both hung-mount-safe), resumes, and — the user's hard requirement against silently continuing on a false premise — arms a one-shot `<vibespace-cwd-notice>` delivered to the agent on its next prompt: the directory was recreated EMPTY, files from earlier turns are gone, re-verify premises before acting. The pending notice survives server restarts (session meta). Refusals carry structured `code:'cwd-missing'` + cwd + machine name for the dialog. E2E smoke committed: `scripts/test-cwd-recreate.mjs` (real claude spawn, 10 asserts: refuse → recreate → meta persist → one-shot notice).

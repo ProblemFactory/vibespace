@@ -2186,4 +2186,5 @@ export default {
   'Working directory is gone': '作業ディレクトリが存在しません',
   'This folder no longer exists on {machine}. You can recreate it as an EMPTY folder and resume — but every file the agent worked with there is GONE and is not coming back. The agent will be told the folder was recreated empty.': 'このフォルダは{machine}上に存在しません。空のフォルダとして再作成して再開できますが、エージェントが扱っていたファイルはすべて失われており復元されません。エージェントにはフォルダが空で再作成されたことが通知されます。',
   'Recreate empty folder & resume': '空フォルダを再作成して再開',
+  'Cannot resume from this window — session identity is incomplete. Use the session card in the sidebar instead.': 'このウィンドウからは再開できません——セッション情報が不完全です。サイドバーのセッションカードをご利用ください。',
 };
