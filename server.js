@@ -1749,6 +1749,7 @@ function restoreSessions() {
       _bareRemote: bareRemote,
       keeperSid: meta.keeperSid || null,
       _agentdSession: !!meta.agentdSession, // transport mechanism (2.219.0 — kill branch correctness)
+      _cwdRecreated: !!meta.cwdRecreated, // B-7812: undelivered recreated-cwd agent notice survives restarts
       _remoteState: restoredRemote,
       _todos: (typeof wrapperTodos !== 'undefined' && wrapperTodos) || null,
       _restoreAgentTasks: wrapperAgentTasks, // re-armed post-attach (setupSessionPty defines the watcher)

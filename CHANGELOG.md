@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.227.0
+
+- **Recreate-empty-and-resume for a deleted working directory** (B-7812, user-approved as an explicitly DANGEROUS option — born from lengyue's CRUD-worker session whose ceph folder was cleaned away while the 76MB conversation stayed intact). When a resume hits the 2.226.0 cwd preflight refusal, the window now offers a RED confirm: "Recreate it as an EMPTY folder and resume — every file the agent worked with there is GONE." Decline = the normal view-only rescue. Confirm = the server `mkdir -p`s the directory (local child process / remote probe channel, both hung-mount-safe), resumes, and — the user's hard requirement against silently continuing on a false premise — arms a one-shot `<vibespace-cwd-notice>` delivered to the agent on its next prompt: the directory was recreated EMPTY, files from earlier turns are gone, re-verify premises before acting. The pending notice survives server restarts (session meta). Refusals carry structured `code:'cwd-missing'` + cwd + machine name for the dialog. E2E smoke committed: `scripts/test-cwd-recreate.mjs` (real claude spawn, 10 asserts: refuse → recreate → meta persist → one-shot notice).
+
 ## 2.226.3
 
 **System panel: history charts rebuilt + machine switcher + rail unbrick** (real report: charts stopped appearing, and once the System panel was open, no other rail panel could be selected):
