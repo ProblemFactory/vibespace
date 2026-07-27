@@ -2008,6 +2008,30 @@ class ChatView {
     this._resumeBar = bar;
   }
 
+  // Retry-past-the-breaker bar (2.227.3): the no-transcript breaker is a
+  // GUESS ("the CLI looked and didn't find it"), so the user always gets a
+  // way through instead of a dead end — no-silent-failure rule, applied to
+  // dead-END failures too.
+  _showRetryResumeBar(onRetry) {
+    if (this._resumeBar) this._resumeBar.remove();
+    this._resumeBar = null;
+    const container = this._container;
+    if (!container) return;
+    const bar = document.createElement('div');
+    bar.className = 'chat-resume-bar';
+    const note = document.createElement('div');
+    note.className = 'chat-resume-note';
+    note.textContent = t('Resume was paused after a failed attempt — you can try again.');
+    const btn = document.createElement('button');
+    btn.className = 'chat-resume-btn';
+    btn.innerHTML = `${UI_ICONS.refresh || ''} <span>${t('Try resuming anyway')}</span>`;
+    btn.onclick = () => { btn.disabled = true; try { onRetry?.(); } finally { this.app.wm?.closeWindow?.(this.winInfo?.id); } };
+    bar.append(note, btn);
+    if (this._statusBar?.element && this._statusBar.element.parentNode === container) container.insertBefore(bar, this._statusBar.element);
+    else container.appendChild(bar);
+    this._resumeBar = bar;
+  }
+
   // Show login bar when session exits due to expired/missing OAuth token
   _showLoginBar() {
     if (this._resumeBar) this._resumeBar.remove();
