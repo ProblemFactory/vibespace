@@ -7,7 +7,7 @@ const { MessageManager } = require('./message-manager');
 const { createMessageManager } = require('./normalizers');
 const { listCodexThreads } = require('./codex-session-store');
 const { findCodexSessionJsonlPath, extractCodexThreadMeta } = require('./adapters/codex');
-const { cwdToProjectDir } = require('./session-store');
+const { cwdToProjectDir, findSessionJsonlPath } = require('./session-store');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
 
@@ -179,13 +179,26 @@ function registerWsHandler(wss, ctx) {
           // conversation found", and an automated recreation fed the loop 5×
           // in 2 minutes). Refuse further resumes for 10 minutes with the
           // honest explanation instead of another guaranteed death.
-          if (data.resume && data.resumeId) {
+          if (data.resume && data.resumeId && !data.ignoreNoConvo) {
             const hit = noConvoRef.map.get(data.resumeId);
             if (hit && Date.now() - hit < 600000) {
-              global.__vsEvent?.('resume-refused-no-transcript');
+              // VERIFY BEFORE BLAMING (2.227.3, natural's 46MB "修轮子"): the
+              // CLI's "No conversation found" only proves claude looked in the
+              // WRONG PLACE — a stale display-cwd ("Host: /path", the 2.225.2
+              // bug) made it search the wrong project dir while the transcript
+              // sat intact on the machine. The old text told the user to CLOSE
+              // THE CARD AND START OVER, i.e. discard a live conversation.
+              // Now: if a transcript for this id EXISTS anywhere we can see
+              // (local project dirs OR the remote-jsonl cache), say the truth —
+              // we know it exists, the last attempt looked in the wrong folder
+              // — and let the client offer a retry instead of a dead end.
+              const known = (() => { try { return !!findSessionJsonlPath(data.resumeId, data.cwd || ''); } catch { return false; } })();
+              global.__vsEvent?.('resume-refused-no-transcript', known ? 'transcript-exists' : 'transcript-absent');
               ws.send(JSON.stringify({
-                type: 'error', reqId: data.reqId,
-                message: 'This conversation has no saved transcript on its machine (it likely ended before the first message was written) — there is nothing to resume. Close this window/card; start a new session instead.',
+                type: 'error', reqId: data.reqId, code: 'no-convo-breaker', resumeId: data.resumeId, transcriptKnown: known,
+                message: known
+                  ? 'The last resume attempt failed: the CLI could not find this conversation in the folder it was started from — but a transcript for it DOES exist, so the conversation is NOT lost. Check the session\'s working directory / machine, then try again (further attempts are paused for a few minutes to avoid a crash loop).'
+                  : 'The last resume attempt failed with "no conversation found", and no transcript for it turned up on this machine or in the cache. It may have ended before anything was written — or it lives on a machine this instance can\'t see right now. Further attempts are paused for a few minutes; nothing has been deleted.',
               }));
               break;
             }

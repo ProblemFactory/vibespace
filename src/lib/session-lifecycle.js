@@ -18,7 +18,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     });
   },
 
-  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, accountId, ephemeral = false, winBounds, recreateCwd = false }) {
+  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, accountId, ephemeral = false, winBounds, recreateCwd = false, ignoreNoConvo = false }) {
     try { track('event', `session-create:${backend || 'claude'}:${mode || 'default'}`); } catch {}
     cwd = stripCwdHostLabel(cwd); // merged-record display cwd ("host: /path") must never reach a spawn
     this._hideWelcome();
@@ -62,6 +62,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       taskId: taskId || undefined, // spawns VIBESPACE_TASK_ID into the agent env
       accountId: accountId || undefined, // billing identity: undefined=server default, 'subscription', or acct-… key id
       recreateCwd: recreateCwd || undefined, // B-7812: user danger-confirmed rebuilding a missing cwd
+      ignoreNoConvo: ignoreNoConvo || undefined, // 2.227.3: user chose to retry past the no-transcript breaker
     };
 
     // Request/reply via ws.request (2026-07-03 review structural fix):
@@ -111,6 +112,26 @@ export function installSessionLifecycle(App, ctx = {}) {
           this.layoutManager?.scheduleAutoSave?.();
           try { track('event', 'create-failed-rescued'); } catch { }
         };
+        // No-transcript breaker (2.227.3, natural's 46MB "修轮子"): the CLI's
+        // "no conversation found" only proves it looked in the WRONG PLACE —
+        // the old dead-end told the user to close the card and start over,
+        // i.e. discard a live conversation. Rescue into view-only (history +
+        // Resume) and offer a retry that BYPASSES the breaker.
+        if (msg.code === 'no-convo-breaker' && resumeId) {
+          showToast(text, { type: 'error' });
+          rescueViewOnly();
+          const retry = () => this.createSession({
+            cwd, name: sessionName, resumeId, mode: sessionMode, model, permission, effort,
+            backend, hostId, keeperSid, accountId, extraArgs, agentKind, agentRole, agentNickname,
+            sourceKind, parentThreadId, ignoreNoConvo: true,
+          });
+          const view = this.sessions.get(winInfo.id);
+          view?._renderers?.appendSystem(msg.transcriptKnown
+            ? t('A transcript for this conversation exists — it is not lost. The history below is loaded from it.')
+            : t('No transcript turned up for this conversation. Nothing has been deleted; the history below is whatever could be loaded.'));
+          view?._showRetryResumeBar?.(retry);
+          return true;
+        }
         // Missing-cwd DANGER flow (B-7812, user-approved with the explicit
         // constraint that this must be a red option): offer to recreate the
         // dir EMPTY and resume. The confirm spells out that the agent's files

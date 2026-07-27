@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.227.3
+
+**The unresumable-conversation breaker no longer tells you to throw away a live conversation** (real incident: a 46MB session that was fully intact on its machine showed "there is nothing to resume — close this window/card; start a new session instead"):
+
+- **Verify before blaming.** The CLI's "No conversation found" only proves it looked in the WRONG PLACE — in this incident a stale display-cwd (`Host: /path`, the 2.225.2 bug, from a pre-fix client) sent claude into the wrong project dir while the transcript sat untouched. The refusal now checks whether a transcript for that id exists anywhere we can see (local project dirs / remote-jsonl cache) and says so: "a transcript DOES exist, the conversation is NOT lost — check the working directory/machine and try again". When nothing is found it still never claims deletion ("nothing has been deleted").
+- **Never a dead end.** The refusal rescues the window into view-only history plus a **Try resuming anyway** bar that retries with the breaker bypassed (`ignoreNoConvo`), instead of instructing the user to close the card.
+- Structured reply (`code:'no-convo-breaker'`, `transcriptKnown`) so the client can render the right affordance.
+- Regression smoke: `scripts/test-resume-breaker.mjs` (7 asserts — both wordings, the bypass, and that the destructive advice can never come back).
+
 ## 2.227.2
 
 **Mount hygiene + mountpoint permissions** (two user reports):
