@@ -2196,4 +2196,7 @@ export default {
   'still running · {elapsed}': '実行中 · {elapsed}',
   'still running': '実行中',
   'Skill launches': 'スキル起動',
+  'Missing: {fields} — fill it in below (or set VIBESPACE_FRPS_ADDR/_PORT/_TOKEN).': '不足：{fields} —— 下で入力してください（または VIBESPACE_FRPS_ADDR/_PORT/_TOKEN を設定）。',
+  'relay address': 'リレーアドレス',
+  'relay token': 'リレートークン',
 };
