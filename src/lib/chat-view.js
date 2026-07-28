@@ -114,8 +114,20 @@ class ChatView {
     // itself inserts/removes headers).
     this._runsTimer = null;
     this._runsMutating = false;
-    this._runsObserver = new MutationObserver(() => {
+    this._runsObserver = new MutationObserver((records) => {
       if (this._runsMutating) return;
+      // NO VISIBLE FLASH (2.227.9, user report "会展示一瞬间然后才折叠"): the
+      // 180ms debounce let a foldable card paint at full size first. A
+      // MutationObserver callback runs at the microtask checkpoint — BEFORE
+      // the next paint — so folding synchronously here makes the card appear
+      // already folded. Only for pure TAIL APPENDS (live streaming): bulk
+      // inserts (pagination, jumps, trims) keep the debounce, where the pass
+      // is expensive and a frame of delay is invisible anyway.
+      const list = this._messageList;
+      const tailAppend = list && records.length && records.every((r) =>
+        r.type === 'childList' && r.removedNodes.length === 0 && r.addedNodes.length > 0
+        && r.nextSibling === null);
+      if (tailAppend) { clearTimeout(this._runsTimer); this._runsTimer = null; this._updateRuns(); return; }
       clearTimeout(this._runsTimer);
       this._runsTimer = setTimeout(() => this._updateRuns(), 180);
     });
@@ -2250,6 +2262,10 @@ class ChatView {
         if (el.classList.contains('chat-msg-tool-result')) {
           const tn = m?.content?.[0]?.toolName;
           if (tn === 'Bash') return 'bash';
+          // Skill launches (2.227.9, user report "技能卡片无法参与折叠") — a
+          // "Launching skill: x" card is pure harness noise, same class as a
+          // Bash line; it fell through to null and so BROKE the surrounding run.
+          if (tn === 'Skill') return 'skill';
           if (mcpParts(tn)) return 'mcp'; // any MCP server's tool (2.215.3)
           if (tn === 'Read' || tn === 'Write' || tn === 'Edit' || tn === 'Patch') {
             // agent-memory file ops are their OWN kind (2.213.1, user ask:
