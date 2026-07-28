@@ -1335,7 +1335,25 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
               }
             }
 
-            if (msg.parent_tool_use_id || msg.isSidechain) {
+            // TOOL PROGRESS ≠ SUBAGENT (2.227.7, real report "为什么一个 Bash
+            // 卡片里出现了 messages"): newer CLIs stream
+            // {type:'tool_progress', tool_use_id, tool_name, parent_tool_use_id,
+            // elapsed_time_seconds, heartbeat} for a long-running tool — and it
+            // carries parent_tool_use_id, the SAME field subagent messages use.
+            // The type-blind branch below then buffered them as subagent
+            // messages, spun a sub-normalizer per Bash call, and painted the
+            // agent-style "N messages · View Log" line on a Bash card. Route
+            // them to their own channel (the elapsed seconds are genuinely
+            // useful on a pending card) and never into the subagent path.
+            if (msg.type === 'tool_progress') {
+              broadcastToSession(session, id, {
+                type: 'tool-progress', sessionId: id,
+                parentToolUseId: msg.parent_tool_use_id || null,
+                toolName: msg.tool_name || null,
+                elapsedSeconds: msg.elapsed_time_seconds ?? null,
+                heartbeat: !!msg.heartbeat,
+              });
+            } else if (msg.parent_tool_use_id || msg.isSidechain) {
               const ptuid = msg.parent_tool_use_id;
               if (ptuid) {
                 // Mark uuid as emitted (for dedup with JSONL watcher)

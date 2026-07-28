@@ -2193,4 +2193,6 @@ export default {
   'Try resuming anyway': '仍然尝试恢复',
   "⚠ Safety-classifier fallback: {from} → {to} — this message tripped {from}'s safeguards, so it was retried on {to}. Your model setting is unchanged; later messages go back to {from}.": '⚠ 安全分类器回退：{from} → {to} —— 这条消息触发了 {from} 的安全护栏，于是被换到 {to} 重试。你的模型设置没有变，后续消息会回到 {from}。',
   'Details from the CLI': 'CLI 原文',
+  'still running · {elapsed}': '仍在运行 · {elapsed}',
+  'still running': '仍在运行',
 };

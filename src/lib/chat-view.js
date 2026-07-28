@@ -421,6 +421,8 @@ class ChatView {
         this._onPermissionModeAck(msg);
       } else if (msg.type === 'subagent-message' && msg.sessionId === sessionId) {
         this._onSubagentMessage(msg.parentToolUseId, msg.message);
+      } else if (msg.type === 'tool-progress' && msg.sessionId === sessionId) {
+        this._onToolProgress(msg);
       } else if (msg.type === 'exited' && msg.sessionId === sessionId) {
         this._hideTyping();
         if (msg.reason === 'not_logged_in') {
@@ -1474,6 +1476,29 @@ class ChatView {
 
   _onGoalUpdated(goal, elapsed) {
     this._statusBar.setGoal(goal, elapsed);
+  }
+
+  // Long-running tool heartbeat (2.227.7) — the CLI streams elapsed seconds for
+  // a tool that is still running. Renders as a plain "running · 2m30s" line on
+  // the PENDING card; deliberately NOT the agent status line (no message count,
+  // no View Log — a Bash call has no transcript to view; that mix-up is the bug
+  // this replaced).
+  _onToolProgress({ parentToolUseId, elapsedSeconds }) {
+    if (!parentToolUseId) return;
+    const pending = this._messageList?.querySelector(`[data-tool-id="${parentToolUseId}"]`);
+    if (!pending) return;
+    const card = pending.querySelector('.chat-tool-use') || pending;
+    if (card.querySelector('.chat-agent-live-status')) return; // a real agent owns this card
+    let el = card.querySelector('.chat-tool-progress');
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'chat-tool-progress';
+      const outputPending = card.querySelector('.chat-tool-output-pending');
+      if (outputPending) outputPending.before(el); else card.appendChild(el);
+    }
+    const s = Number(elapsedSeconds);
+    const human = !Number.isFinite(s) ? '' : s < 60 ? `${Math.round(s)}s` : `${Math.floor(s / 60)}m${String(Math.round(s % 60)).padStart(2, '0')}s`;
+    el.textContent = human ? t('still running · {elapsed}', { elapsed: human }) : t('still running');
   }
 
   _onSubagentMessage(parentToolUseId, msg) {

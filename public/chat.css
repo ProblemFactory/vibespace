@@ -859,3 +859,7 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
 .chat-run-header.open .chat-run-arrow { transform: rotate(90deg); }
 .chat-msg.chat-run-collapsed,
 .chat-compact .chat-msg.chat-run-collapsed { display: none; }
+
+/* Long-running tool heartbeat line (2.227.7) — distinct from the agent status
+   line: no count, no View Log (a Bash call has no transcript to open). */
+.chat-tool-progress { font-size: 11px; color: var(--text-dim); padding: 2px 0 0 2px; font-style: italic; }
