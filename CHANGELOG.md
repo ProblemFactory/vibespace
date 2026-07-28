@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.227.10
+
+- **"Relay not configured" now says WHICH field is missing.** A user filled in the frp relay address and port but the token stayed blank; the plugin only said "relay not configured on this instance", so there was nothing to act on and the feature looked broken for days. The status carries `missing: ['token'|'serverAddr']` and the panel says "Missing: relay token — fill it in below". Same rule as every other failure path: name the gap, never make the user guess.
+
 ## 2.227.9
 
 Two run-collapse reports:

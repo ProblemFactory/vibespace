@@ -505,6 +505,10 @@ class PluginManager {
     return {
       installed: !!this._frpBin(),
       configured: this._frpConfigured(),
+      // WHICH field is missing (2.227.10, him188: he filled the address+port,
+      // the token stayed empty, and the UI only said "relay not configured" —
+      // an unactionable dead end. Name the gap; never make the user guess).
+      missing: [!c.serverAddr && 'serverAddr', !c.token && 'token'].filter(Boolean),
       server: this._frpConfigured() ? `${c.serverAddr}:${c.serverPort}` : null,
       publicHost: c.serverAddr || null,
       subDomainHost: c.subDomainHost || null,     // subdomain mode when set

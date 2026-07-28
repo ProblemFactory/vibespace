@@ -2196,4 +2196,7 @@ export default {
   'still running · {elapsed}': '仍在运行 · {elapsed}',
   'still running': '仍在运行',
   'Skill launches': '技能启动',
+  'Missing: {fields} — fill it in below (or set VIBESPACE_FRPS_ADDR/_PORT/_TOKEN).': '缺少：{fields} —— 在下方填写即可（或设置 VIBESPACE_FRPS_ADDR/_PORT/_TOKEN）。',
+  'relay address': '中继地址',
+  'relay token': '中继 token',
 };
