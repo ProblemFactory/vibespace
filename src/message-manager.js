@@ -13,6 +13,14 @@
  * NormalizedMessage format via their own normalizer.
  */
 
+// System subtypes _processSystem actually renders/consumes — anything else
+// trips the unhandled-subtype breadcrumb (2.227.5). Keep in sync when adding
+// a branch; task_* are handled under the tool_use_id path.
+const HANDLED_SYSTEM_SUBTYPES = new Set([
+  'init', 'hook_response', 'stop_hook_summary', 'model_refusal_fallback',
+  'task_started', 'task_progress', 'task_notification',
+]);
+
 class MessageManager {
   // Injected by the server once the settings SyncStore exists (the normalizer
   // can't reach server state directly). null in tests → defaults apply.
@@ -207,6 +215,7 @@ class MessageManager {
   }
 
   _processSystem(raw, emit) {
+    // (see the unhandled-subtype breadcrumb at the tail of this method)
     if (raw.subtype === 'init') {
       const msg = this._create({
         role: 'system', status: 'complete',
@@ -281,6 +290,19 @@ class MessageManager {
         content: [{ type: 'system_info', text, ...(detail ? { hookData: { name: `${count} hooks`, event: 'Stop', outcome: failed.length ? 'partial' : 'success', exitCode: null, output: detail } } : {}) }],
       });
       if (emit) this._emit({ op: 'create', message: msg });
+    }
+
+    // BREADCRUMB for CLI evolution (2.227.5, the model_refusal_fallback
+    // lesson): an unhandled system subtype is DROPPED here — that is how a
+    // new upstream record type becomes an invisible product gap (39 silent
+    // model switches before a user noticed). Name-only telemetry, deduped per
+    // process, so the NEXT new subtype shows up in Diagnostics instead of
+    // waiting for a report. Add the handler, then it stops firing.
+    if (raw.subtype && !HANDLED_SYSTEM_SUBTYPES.has(raw.subtype) && !raw.tool_use_id) {
+      if (!MessageManager._seenUnknownSubtypes.has(raw.subtype)) {
+        MessageManager._seenUnknownSubtypes.add(raw.subtype);
+        try { global.__vsEvent?.('cli-unknown-system-subtype', String(raw.subtype).slice(0, 60)); } catch {}
+      }
     }
 
     // Task lifecycle → edit existing tool message
@@ -742,4 +764,5 @@ class MessageManager {
   }
 }
 
+MessageManager._seenUnknownSubtypes = new Set();
 module.exports = { MessageManager };
