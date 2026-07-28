@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.227.6
+
+- **The new safety-fallback notice showed "? → ?" instead of the model names** (real report, one release after 2.227.4): the SAME record is **snake_case on stdout** (`original_model`, `fallback_model`, `api_refusal_category`) and **camelCase in the JSONL** (`originalModel`, …). The handler was written from the JSONL sample, so every LIVE notice lost its models while history rebuilds looked correct. Both casings are now accepted on every field. Bonus: stdout also carries `api_refusal_explanation` (the actual policy reason, absent from the JSONL) — it now leads the details expander.
+- Test extended with the stdout shape, so a one-transport handler can't ship again.
+
 ## 2.227.5
 
 - **A new upstream CLI record type can no longer become an invisible product gap.** `_processSystem` drops system subtypes it doesn't handle — that is exactly how 39 silent model switches shipped unnoticed until a user asked (2.227.4). Unhandled subtypes now leave a name-only telemetry breadcrumb (`cli-unknown-system-subtype`, deduped per process), so the next CLI addition surfaces in the Diagnostics report instead of waiting for a report. Adding the handler silences it.
