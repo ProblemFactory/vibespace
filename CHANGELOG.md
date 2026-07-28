@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.227.5
+
+- **A new upstream CLI record type can no longer become an invisible product gap.** `_processSystem` drops system subtypes it doesn't handle — that is exactly how 39 silent model switches shipped unnoticed until a user asked (2.227.4). Unhandled subtypes now leave a name-only telemetry breadcrumb (`cli-unknown-system-subtype`, deduped per process), so the next CLI addition surfaces in the Diagnostics report instead of waiting for a report. Adding the handler silences it.
+
 ## 2.227.4
 
 **The model badge changed mid-conversation with nothing in the transcript to explain it** (real report: "聊到一半就显示 opus-4.8，也没看到 fallback 事件"):
