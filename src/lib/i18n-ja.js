@@ -2193,4 +2193,6 @@ export default {
   'Try resuming anyway': 'それでも再開する',
   "⚠ Safety-classifier fallback: {from} → {to} — this message tripped {from}'s safeguards, so it was retried on {to}. Your model setting is unchanged; later messages go back to {from}.": '⚠ セーフティ分類器によるフォールバック：{from} → {to} —— このメッセージが {from} のセーフガードに触れたため、{to} で再試行されました。モデル設定は変更されていません。以降は {from} に戻ります。',
   'Details from the CLI': 'CLI の詳細',
+  'still running · {elapsed}': '実行中 · {elapsed}',
+  'still running': '実行中',
 };

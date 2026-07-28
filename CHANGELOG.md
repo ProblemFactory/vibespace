@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.227.7
+
+- **A Bash card showed "14 messages · View Log"** (real report). Newer CLIs stream `{type:'tool_progress', tool_name, parent_tool_use_id, elapsed_time_seconds, heartbeat}` while a long tool runs — and it carries `parent_tool_use_id`, the SAME field subagent messages use. The server's type-blind `if (msg.parent_tool_use_id || msg.isSidechain)` swallowed them: they were buffered as subagent transcript, spun up a sub-normalizer per Bash call, and the client painted the agent status line (message count + a View Log button opening an empty viewer) onto a plain Bash card. Now routed to their own `tool-progress` broadcast and rendered as what they are — a dim "still running · 2m30s" line on the pending card, which yields to the real agent status line when an actual agent owns that card. (`tool_progress` is stdout-only; it never appears in the JSONL, which is why history never showed this.)
+- Test: `scripts/test-tool-progress.mjs` (dispatch order, else-if exclusivity, and that the progress line can never grow a View Log button).
+
 ## 2.227.6
 
 - **The new safety-fallback notice showed "? → ?" instead of the model names** (real report, one release after 2.227.4): the SAME record is **snake_case on stdout** (`original_model`, `fallback_model`, `api_refusal_category`) and **camelCase in the JSONL** (`originalModel`, …). The handler was written from the JSONL sample, so every LIVE notice lost its models while history rebuilds looked correct. Both casings are now accepted on every field. Bonus: stdout also carries `api_refusal_explanation` (the actual policy reason, absent from the JSONL) — it now leads the details expander.
