@@ -2191,4 +2191,6 @@ export default {
   'No transcript turned up for this conversation. Nothing has been deleted; the history below is whatever could be loaded.': '没有找到这个会话的转录文件。系统没有删除任何东西；下面是能加载到的历史。',
   'Resume was paused after a failed attempt — you can try again.': '上次恢复失败后暂停了重试——你可以再试一次。',
   'Try resuming anyway': '仍然尝试恢复',
+  "⚠ Safety-classifier fallback: {from} → {to} — this message tripped {from}'s safeguards, so it was retried on {to}. Your model setting is unchanged; later messages go back to {from}.": '⚠ 安全分类器回退：{from} → {to} —— 这条消息触发了 {from} 的安全护栏，于是被换到 {to} 重试。你的模型设置没有变，后续消息会回到 {from}。',
+  'Details from the CLI': 'CLI 原文',
 };

@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.227.4
+
+**The model badge changed mid-conversation with nothing in the transcript to explain it** (real report: "聊到一半就显示 opus-4.8，也没看到 fallback 事件"):
+
+- **Safety-classifier fallbacks were invisible.** Newer CLIs retry a flagged message on a different model and record ONLY a `system/model_refusal_fallback` line — no `fallback` content block (verified in a 343MB transcript: 39 such records, and the switches that puzzled the user had the system record and no block). `_processSystem` dropped unknown subtypes silently, so the served-model badge flipped to Opus 4.8/Opus 5 with zero explanation. Now rendered as a system notice naming both models, the refusal category, and — behind an expander — the CLI's own wording, with the reassurance that the model SETTING is unchanged and later messages return to the chosen model.
+- **`noticeKind` was never passed through `_create`** — so the localized renderer branch for the older capacity/overload fallback notice has been dead code since it was written (the notice rendered as raw English). Fixed; both notices now localize.
+- Test: `scripts/test-model-fallback-notice.mjs` (real captured record shape, live + history-rebuild paths, plus the revived legacy branch).
+
 ## 2.227.3
 
 **The unresumable-conversation breaker no longer tells you to throw away a live conversation** (real incident: a 46MB session that was fully intact on its machine showed "there is nothing to resume — close this window/card; start a new session instead"):
