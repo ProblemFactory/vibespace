@@ -249,7 +249,13 @@ class MessageManager {
     // block). Unhandled subtypes fall through _processSystem silently, so the
     // model badge flipped with nothing in the transcript to explain it.
     if (raw.subtype === 'model_refusal_fallback') {
-      const from = raw.originalModel || '?', to = raw.fallbackModel || '?';
+      // KEY-CASING TRAP (2.227.6, real "? → ?" report): the SAME record is
+      // snake_case on stdout (`original_model`) and camelCase in the JSONL
+      // (`originalModel`) — reading only the JSONL shape rendered every LIVE
+      // notice with '?' models while history rebuilds looked fine. Accept
+      // both on every field of any record read from BOTH transports.
+      const from = raw.originalModel || raw.original_model || '?';
+      const to = raw.fallbackModel || raw.fallback_model || '?';
       const msg = this._create({
         role: 'system',
         content: [{
@@ -257,8 +263,11 @@ class MessageManager {
           // English text is the fallback; the client localizes on noticeKind.
           text: `⚠ Safety-classifier fallback: ${from} → ${to} (the model's safeguards flagged this message, so the harness retried it on another model)`,
           fallbackFrom: from, fallbackTo: to,
-          refusalCategory: raw.apiRefusalCategory || null,
-          cliText: typeof raw.content === 'string' ? raw.content.slice(0, 600) : null,
+          refusalCategory: raw.apiRefusalCategory || raw.api_refusal_category || null,
+          // stdout also carries the policy explanation (JSONL doesn't) — it is
+          // the most actionable line for the user, so prefer it.
+          cliText: [raw.api_refusal_explanation || raw.apiRefusalExplanation || '', typeof raw.content === 'string' ? raw.content : '']
+            .filter(Boolean).join('\n\n').slice(0, 900) || null,
         }],
         noticeKind: 'model-refusal-fallback',
       });
