@@ -473,6 +473,24 @@ class ChatRenderers {
     // Model auto-fallback notice: the server bakes an English sentence (it
     // can't know the per-device language), so localize it here from the
     // structured from/to that ride the block.
+    // Safety-classifier fallback (2.227.4) — distinct from the capacity/
+    // overload fallback below: the model's own safeguards flagged the message
+    // and the harness RETRIED it elsewhere. Shows the CLI's own explanation
+    // behind an expander so the badge change is never unexplained again.
+    if (msg.noticeKind === 'model-refusal-fallback' && msg.content?.[0]?.fallbackTo) {
+      const b = msg.content[0];
+      const el = document.createElement('div');
+      el.className = 'chat-msg chat-msg-system chat-system-notification';
+      const head = t('⚠ Safety-classifier fallback: {from} → {to} — this message tripped {from}\'s safeguards, so it was retried on {to}. Your model setting is unchanged; later messages go back to {from}.', { from: b.fallbackFrom || '?', to: b.fallbackTo || '?' });
+      const cat = b.refusalCategory ? ` (${b.refusalCategory})` : '';
+      el.innerHTML = `<span class="chat-system-text">${escHtml(head + cat)}</span>`;
+      if (b.cliText) {
+        const det = document.createElement('details');
+        det.innerHTML = `<summary>${escHtml(t('Details from the CLI'))}</summary><pre class="chat-pre">${escHtml(b.cliText)}</pre>`;
+        el.appendChild(det);
+      }
+      return { el, sideEffect: null };
+    }
     if (msg.noticeKind === 'model-fallback' && msg.content?.[0]?.fallbackTo) {
       const b = msg.content[0];
       const el = document.createElement('div');

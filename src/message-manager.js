@@ -148,6 +148,11 @@ class MessageManager {
       usage: fields.usage || null,
       taskInfo: fields.taskInfo || null,
       meta: fields.meta || null, // per-record metadata (model/usage/requestId) for the message-info popup
+      // noticeKind keys the CLIENT's localized renderer branch (model-fallback,
+      // model-refusal-fallback). It was NEVER passed through here (2.227.4):
+      // every notice fell back to its raw English text and the localized
+      // branches were dead code from the day they were written.
+      noticeKind: fields.noticeKind || null,
     };
     this.messages.push(msg);
     this.messageIndex.set(msg.id, msg);
@@ -224,6 +229,30 @@ class MessageManager {
       // the first buffer hook record (live path swallowed it per-line; the
       // "restart 之后消息都没了" incident).
       this._lastHookCard = { name, ts: this._currentTs, msgId: msg.id, outHead: raw.output ? String(raw.output).slice(0, 200) : null };
+      if (emit) this._emit({ op: 'create', message: msg });
+    }
+
+    // REFUSAL-triggered model fallback (2.227.4, real report "聊到一半变成
+    // opus-4.8 但看不到 fallback 事件"): a NEWER CLI path than the 2.29.1
+    // `fallback` CONTENT BLOCK — when the safety classifier flags a message,
+    // the CLI RETRIES it on another model and records ONLY this system line
+    // (verified: the 00:29 switch had the system record and NO content
+    // block). Unhandled subtypes fall through _processSystem silently, so the
+    // model badge flipped with nothing in the transcript to explain it.
+    if (raw.subtype === 'model_refusal_fallback') {
+      const from = raw.originalModel || '?', to = raw.fallbackModel || '?';
+      const msg = this._create({
+        role: 'system',
+        content: [{
+          type: 'text',
+          // English text is the fallback; the client localizes on noticeKind.
+          text: `⚠ Safety-classifier fallback: ${from} → ${to} (the model's safeguards flagged this message, so the harness retried it on another model)`,
+          fallbackFrom: from, fallbackTo: to,
+          refusalCategory: raw.apiRefusalCategory || null,
+          cliText: typeof raw.content === 'string' ? raw.content.slice(0, 600) : null,
+        }],
+        noticeKind: 'model-refusal-fallback',
+      });
       if (emit) this._emit({ op: 'create', message: msg });
     }
 

@@ -2191,4 +2191,6 @@ export default {
   'No transcript turned up for this conversation. Nothing has been deleted; the history below is whatever could be loaded.': 'この会話のトランスクリプトは見つかりませんでした。何も削除されていません。以下は読み込めた履歴です。',
   'Resume was paused after a failed attempt — you can try again.': '前回の再開失敗後、再試行が一時停止されています——もう一度試せます。',
   'Try resuming anyway': 'それでも再開する',
+  "⚠ Safety-classifier fallback: {from} → {to} — this message tripped {from}'s safeguards, so it was retried on {to}. Your model setting is unchanged; later messages go back to {from}.": '⚠ セーフティ分類器によるフォールバック：{from} → {to} —— このメッセージが {from} のセーフガードに触れたため、{to} で再試行されました。モデル設定は変更されていません。以降は {from} に戻ります。',
+  'Details from the CLI': 'CLI の詳細',
 };
