@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.227.8
+
+- **A new top-level CLI stream record can no longer ride the wrong branch in silence.** `tool_progress` did exactly that for weeks (2.227.7), one release after `model_refusal_fallback` did the same thing inside the normalizer (2.227.4) — twice, a user noticed before we did. The server's stream parser now breadcrumbs any unrecognized top-level `type` (name-only, deduped per process, `cli-unknown-stream-type` + a log line), matching the 2.227.5 guard for system subtypes. Both entry points from the CLI now announce upstream additions instead of absorbing them.
+
 ## 2.227.7
 
 - **A Bash card showed "14 messages · View Log"** (real report). Newer CLIs stream `{type:'tool_progress', tool_name, parent_tool_use_id, elapsed_time_seconds, heartbeat}` while a long tool runs — and it carries `parent_tool_use_id`, the SAME field subagent messages use. The server's type-blind `if (msg.parent_tool_use_id || msg.isSidechain)` swallowed them: they were buffered as subagent transcript, spun up a sub-normalizer per Bash call, and the client painted the agent status line (message count + a View Log button opening an empty viewer) onto a plain Bash card. Now routed to their own `tool-progress` broadcast and rendered as what they are — a dim "still running · 2m30s" line on the pending card, which yields to the real agent status line when an actual agent owns that card. (`tool_progress` is stdout-only; it never appears in the JSONL, which is why history never showed this.)

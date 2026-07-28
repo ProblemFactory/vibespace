@@ -655,6 +655,15 @@ function refreshWebuiPids() {
 
 // ── Broadcast helper (avoids duplicating per-session WebSocket iteration) ──
 const WS_OPEN = 1;
+// Top-level stream-json record types this server KNOWS (2.227.8 breadcrumb).
+// Add a type here when you add its handling — until then it announces itself.
+const CLAUDE_STREAM_TYPES = new Set([
+  'assistant', 'user', 'system', 'result', 'attachment', 'control_request',
+  'control_response', 'tool_progress', 'stream_event', 'summary',
+  '_stdin_ack', '_remote_state', '_remote_exit',
+]);
+const _seenStreamTypes = new Set();
+
 function broadcastToSession(session, id, msg) {
   const json = JSON.stringify(msg);
   for (const client of session.clients.keys()) {
@@ -1075,6 +1084,18 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
           if (!line) continue;
           try {
             const msg = JSON.parse(line);
+            // BREADCRUMB for CLI evolution (2.227.8): the claude stream gained
+            // `tool_progress` and it silently rode the subagent branch for
+            // weeks (2.227.7) — the SECOND time a new upstream record type
+            // became an invisible product gap (the first was
+            // model_refusal_fallback, 2.227.4). Name-only, deduped per
+            // process, so the NEXT new top-level type shows up in Diagnostics
+            // instead of waiting for a user to notice something odd.
+            if (msg.type && !CLAUDE_STREAM_TYPES.has(msg.type) && !_seenStreamTypes.has(msg.type)) {
+              _seenStreamTypes.add(msg.type);
+              global.__vsEvent?.('cli-unknown-stream-type', String(msg.type).slice(0, 60));
+              console.log(`[claude] new stream record type from the CLI: ${msg.type} (unhandled — see Diagnostics)`);
+            }
             if (msg.type === '_stdin_ack') { session._stdinAckReceived = true; continue; }
             // Remote transport state from the chat-wrapper (2.125.0): the ssh
             // pipe died and the wrapper is reconnecting to the host-side keeper
