@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.227.9
+
+Two run-collapse reports:
+
+- **Skill cards now participate in the fold.** A "Launching skill: x" card is harness noise of the same class as a Bash line, but `memberKind` returned null for it — so it never folded AND it BROKE the run around it (the cards either side couldn't fold together). Added as its own kind (`skill`, on by default, toggleable in `chat.collapseKinds`).
+- **No more visible flash before folding.** The fold ran on a 180ms-debounced MutationObserver pass, so a foldable card painted at full size first and collapsed a moment later. A MutationObserver callback runs at the microtask checkpoint — before the next paint — so pure TAIL APPENDS (live streaming) now fold synchronously in that callback and the card appears already folded. Bulk inserts (pagination, jumps, trims) keep the debounce, where the pass is expensive and one frame of delay is invisible.
+- Committed smoke: `scripts/test-run-collapse-fold.mjs`.
+
 ## 2.227.8
 
 - **A new top-level CLI stream record can no longer ride the wrong branch in silence.** `tool_progress` did exactly that for weeks (2.227.7), one release after `model_refusal_fallback` did the same thing inside the normalizer (2.227.4) — twice, a user noticed before we did. The server's stream parser now breadcrumbs any unrecognized top-level `type` (name-only, deduped per process, `cli-unknown-stream-type` + a log line), matching the 2.227.5 guard for system subtypes. Both entry points from the CLI now announce upstream additions instead of absorbing them.

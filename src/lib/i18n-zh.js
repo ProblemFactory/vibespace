@@ -2195,4 +2195,5 @@ export default {
   'Details from the CLI': 'CLI 原文',
   'still running · {elapsed}': '仍在运行 · {elapsed}',
   'still running': '仍在运行',
+  'Skill launches': '技能启动',
 };
