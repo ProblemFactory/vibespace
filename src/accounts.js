@@ -20,9 +20,10 @@ const os = require('os');
 const crypto = require('crypto');
 
 class AccountManager {
-  constructor({ dataDir, onChange }) {
+  constructor({ dataDir, onChange, platform = process.platform }) {
     this._file = path.join(dataDir, 'accounts.json');
     this._keyFile = path.join(dataDir, '.accounts-key');
+    this._platform = platform;
     // Per-SUBSCRIPTION credential dirs. A subscription account is a real dir
     // holding ONLY that account's .credentials.json; the CLI reads it via
     // CLAUDE_SECURESTORAGE_CONFIG_DIR (relocates the SECRET store only —
@@ -47,6 +48,11 @@ class AccountManager {
 
   _acctType(a) { return a.type || 'api'; } // legacy records (no type) = API key
   _acctBackend(a) { return a.backend || 'claude'; } // legacy records = Claude
+  _localOnlyClaudeSub(a) {
+    return this._platform === 'darwin'
+      && this._acctBackend(a) === 'claude'
+      && this._acctType(a) === 'subscription';
+  }
   subDir(id) { return path.join(this._subsDir, id); }
   subCredsPath(id) { return path.join(this.subDir(id), '.credentials.json'); }
   codexSubDir(id) { return path.join(this._codexSubsDir, id); }
@@ -109,7 +115,7 @@ class AccountManager {
       accounts: this._state.accounts.map((a) => {
         const type = this._acctType(a);
         const backend = this._acctBackend(a);
-        const base = { id: a.id, name: a.name, type, backend, source: a.source, originHost: a.originHost || null, note: a.note || null, hostLogins: a.hostLogins || null, createdAt: a.createdAt };
+        const base = { id: a.id, name: a.name, type, backend, source: a.source, originHost: a.originHost || null, note: a.note || null, hostLogins: a.hostLogins || null, createdAt: a.createdAt, localOnly: this._localOnlyClaudeSub(a) };
         if (backend === 'codex') {
           const info = this.readCodexSubAuth(a.id);
           return { ...base, loggedIn: info.loggedIn, email: info.email || a.email || null, emailDeclared: !info.email && !!a.email, subscriptionType: info.plan, authMode: info.authMode };
@@ -127,9 +133,9 @@ class AccountManager {
 
   // ── Subscription accounts (each = its own securestorage creds dir) ──
 
-  // Allocate an empty account + dir. The OAuth login happens externally
-  // (a terminal running `CLAUDE_SECURESTORAGE_CONFIG_DIR=<dir> claude /login`);
-  // the caller watches for the creds file, then calls finalizeSubscription.
+  // Allocate an empty account + dir. The OAuth login happens in an interactive
+  // terminal through vibespace-claude-subscription-login.mjs; the caller
+  // watches for the creds/status file, then calls finalizeSubscription.
   createSubscription({ name } = {}) {
     const id = 'sub-' + crypto.randomBytes(6).toString('hex');
     fs.mkdirSync(this.subDir(id), { recursive: true, mode: 0o700 });
@@ -170,18 +176,33 @@ class AccountManager {
     } catch { return { loggedIn: false }; }
   }
 
+  _subscriptionLoginStatus(id) {
+    try {
+      const status = JSON.parse(fs.readFileSync(path.join(this.subDir(id), '.vibespace-login-status.json'), 'utf-8'));
+      if (status?.state !== 'error' || !/^[a-z0-9-]{1,40}$/.test(status.code || '')) return null;
+      return { state: 'error', code: status.code };
+    } catch { return null; }
+  }
+
   // After the login terminal wrote creds: pull identity, default the name to
   // the email/plan if the user didn't set one. Returns loggedIn.
   finalizeSubscription(id) {
     const a = this.get(id);
     if (!a || this._acctType(a) !== 'subscription') throw new Error('not a subscription account');
     const info = this.readSubCreds(id);
+    const loginStatus = this._subscriptionLoginStatus(id);
     if (info.loggedIn && (!a.name || a.name === 'Subscription')) {
       a.name = (info.email || (info.subscriptionType ? info.subscriptionType[0].toUpperCase() + info.subscriptionType.slice(1) : 'Subscription')).slice(0, 60);
       this._save();
     }
     this._notify();
-    return { id, ...info, name: a.name };
+    const { accessToken: _accessToken, ...publicInfo } = info;
+    return {
+      id, ...publicInfo, name: a.name,
+      localOnly: this._localOnlyClaudeSub(a),
+      loginFailed: !info.loggedIn && loginStatus?.state === 'error',
+      loginErrorCode: !info.loggedIn ? loginStatus?.code || null : null,
+    };
   }
 
   // ── Codex subscription accounts (each = its own CODEX_HOME, auth isolated) ──
@@ -281,7 +302,12 @@ class AccountManager {
       if (a.tail) rec.tail = a.tail;
       if (a.keyEnc) { try { rec.key = this._dec(a.keyEnc); } catch { } }
       if (backend === 'codex') rec.files = readFiles(this.codexSubDir(a.id), CODEX_SUB_FILES);
-      else if (type === 'subscription') rec.files = readFiles(this.subDir(a.id), CLAUDE_SUB_FILES);
+      else if (type === 'subscription') {
+        // macOS secure storage is Keychain-primary. The local fallback is a
+        // same-machine compatibility shadow for launchd and can diverge after
+        // refresh-token rotation, so never treat it as a portable backup.
+        rec.files = readFiles(this.subDir(a.id), this._localOnlyClaudeSub(a) ? ['.claude.json'] : CLAUDE_SUB_FILES);
+      }
       return rec;
     });
     return {
@@ -353,15 +379,40 @@ class AccountManager {
     const from = this._state.accounts.find((x) => x.id === fromId);
     const into = this._state.accounts.find((x) => x.id === intoId);
     if (!from || !into || fromId === intoId) throw new Error('bad merge pair');
+    // Claude's macOS Keychain service is hashed from the config-dir path.
+    // Moving fresh fallback bytes to another id does NOT move that Keychain
+    // item, so the survivor can keep reading its old token and the new item is
+    // orphaned. Keep both records instead of claiming a safe file-only merge.
+    if (this._localOnlyClaudeSub(from) || this._localOnlyClaudeSub(into)) {
+      throw new Error('macOS Keychain-backed subscriptions cannot be merged across config directories');
+    }
     // local creds: bring the dup's dir over when it's fresher/the only login
     try {
       const fromDir = this.subDir(fromId), intoDir = this.subDir(intoId);
       const intoLogged = this.readSubCreds(intoId).loggedIn;
       if (fs.existsSync(path.join(fromDir, '.credentials.json')) && (preferFromCreds || !intoLogged)) {
         fs.mkdirSync(intoDir, { recursive: true, mode: 0o700 });
+        fs.chmodSync(intoDir, 0o700);
         for (const f of ['.credentials.json', '.claude.json']) {
           const src = path.join(fromDir, f);
-          if (fs.existsSync(src)) fs.copyFileSync(src, path.join(intoDir, f));
+          if (fs.existsSync(src)) {
+            const dest = path.join(intoDir, f);
+            const tmp = dest + `.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`;
+            let fd;
+            try {
+              const content = fs.readFileSync(src);
+              fd = fs.openSync(tmp, 'wx', 0o600);
+              fs.writeFileSync(fd, content);
+              fs.fchmodSync(fd, 0o600);
+              if ((fs.fstatSync(fd).mode & 0o777) !== 0o600) throw new Error('private mode not applied');
+              fs.fsyncSync(fd);
+              fs.closeSync(fd); fd = undefined;
+              fs.renameSync(tmp, dest);
+            } finally {
+              if (fd !== undefined) { try { fs.closeSync(fd); } catch { } }
+              try { fs.unlinkSync(tmp); } catch { }
+            }
+          }
         }
       }
       fs.rmSync(fromDir, { recursive: true, force: true });
@@ -539,7 +590,15 @@ class AccountManager {
         // Console /login inside a remote session wipes .credentials.json to {}
         // with a fresh mtime) — a remote primary file MISSING the marker is
         // deleted before extract so the valid local copy always restores it.
-        remoteCreds: { srcDir: this.subDir(id), dirName: 'subs/' + id, envVar: 'CLAUDE_SECURESTORAGE_CONFIG_DIR', files: ['.credentials.json', '.claude.json'], symlinks: {}, ensureTargets: [], probe: { file: '.credentials.json', marker: 'accessToken' } },
+        remoteCreds: {
+          srcDir: this.subDir(id), dirName: 'subs/' + id, envVar: 'CLAUDE_SECURESTORAGE_CONFIG_DIR',
+          files: ['.credentials.json', '.claude.json'], symlinks: {}, ensureTargets: [],
+          probe: { file: '.credentials.json', marker: 'accessToken' },
+          // Keychain + fallback can fork when either copy refreshes (rotating
+          // refresh tokens). It remains usable on this Mac, or on another host
+          // that has its OWN login for the account, but must never be copied.
+          shippable: !this._localOnlyClaudeSub(a),
+        },
       };
     }
     const key = this.getKey(id);

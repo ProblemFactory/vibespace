@@ -157,7 +157,17 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
     const rHost = s.host || null;
     const rTransport = rHost ? (sidebar._hostsData?.hosts?.find(h => h.id === rHost)?.transport || 'ssh') : null;
     const shipSubs = !!app.settings?.get?.('accounts.shipSubscriptionToRemote');
-    const subBlocked = (x) => rHost && (sbe === 'codex' || x.type === 'subscription') && (rTransport === 'dial' || !shipSubs);
+    const hostOwnEmail = rHost
+      ? String(app._hostOwnUsage?.[rHost]?.orgEmail || '').trim().toLowerCase()
+      : '';
+    const acctEmailOf = (x) => String(x.email || (String(x.name || '').includes('@') ? x.name : '')).trim().toLowerCase();
+    const hostLinked = (x) => sbe !== 'codex' && !!hostOwnEmail && acctEmailOf(x) === hostOwnEmail;
+    const hostSubHeld = (x) => sbe !== 'codex' && (app._hostSubsKnown?.[rHost] || []).includes(x.id);
+    const subBlocked = (x) => rHost
+      && (sbe === 'codex' || x.type === 'subscription')
+      && !hostLinked(x)
+      && !hostSubHeld(x)
+      && (rTransport === 'dial' || !shipSubs || x.localOnly);
     for (const [v, label, blocked] of [['', t('Default')], ['subscription', globalLabel], ...accts.map(x => [x.id, x.type === 'subscription' ? `${x.name} (${t('subscription')})` : `${x.name} — API …${x.tail}`, subBlocked(x)])]) {
       const o = document.createElement('option'); o.value = v; o.textContent = blocked ? label + ' · ' + t('blocked on this host') : label;
       if (blocked) { o.disabled = true; o.title = t('Subscription logins don’t ship to this machine — log in there, or use an API-key account'); }
