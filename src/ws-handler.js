@@ -22,6 +22,38 @@ const crashLoopRef = {};
 // incident: 5 auto-recreations in 2 minutes, each dying in ~2s).
 const noConvoRef = { map: new Map() };
 
+// ── Server-runtime env must NEVER reach an agent session (2.227.12) ──
+// A session inherits `process.env` so the CLI sees the user's PATH etc. — but
+// the container's env also carries (a) OPERATIONAL vars that break the agent's
+// own work and (b) the instance's SECRETS.
+//   (a) real report: `NODE_ENV=production` made every `npm install` the agent
+//       ran silently skip devDependencies, and `PORT=3456` (the server's own
+//       listen port, set by the image) was inherited by dev servers the agent
+//       started. npm_* leaks the same way when the server was started via npm.
+//   (b) the helm chart injects VIBESPACE_PASSWORD (the login password!),
+//       S3/CephFS/Drive/frps credentials and the telemetry token — an agent
+//       could read all of them with one `env`.
+// Everything the agent legitimately needs is set EXPLICITLY after this strip
+// (VIBESPACE_API / _SESSION_TOKEN / _TASK_ID / remote-transport hints), so the
+// allowlist only has to cover vars set elsewhere and passed through.
+const AGENT_ENV_KEEP = new Set([
+  'VIBESPACE_API', 'VIBESPACE_SESSION_TOKEN', 'VIBESPACE_TASK_ID',
+  'VIBESPACE_REMOTE_SID', 'VIBESPACE_REMOTE_RETRY', 'VIBESPACE_KEEPER_DIR',
+  'VIBESPACE_INSTANCE_NAME', 'VIBESPACE_DEVICE_ROOT', 'VIBESPACE_AGENTD_ROOT',
+]);
+const AGENT_ENV_DROP = new Set(['PORT', 'HOST', 'NODE_ENV', 'NODE_OPTIONS']);
+function agentEnv(base = process.env) {
+  const out = {};
+  for (const [k, v] of Object.entries(base)) {
+    if (AGENT_ENV_DROP.has(k)) continue;
+    if (k.startsWith('npm_')) continue;                       // nested-npm hazard
+    if (k.startsWith('VIBESPACE_') && !AGENT_ENV_KEEP.has(k)) continue; // secrets + server config
+    out[k] = v;
+  }
+  return out;
+}
+
+
 function getSessionKey(session = {}) {
   const backend = session.backend || 'claude'; // fallback needed: called with API data too
   const backendSessionId = session.backendSessionId || session.sessionId || session.claudeSessionId || null;
@@ -1204,7 +1236,7 @@ done`;
               name: 'xterm-256color', cols: data.cols || 120, rows: data.rows || 30,
               cwd: spawnCwd, env: (() => {
                 const env = {
-                  ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor',
+                  ...agentEnv(), TERM: 'xterm-256color', COLORTERM: 'truecolor',
                   // The WRAPPER (always local, even for remote sessions) needs the
                   // agent API in its OWN env: the codex-chat-wrapper injects task
                   // context via thread/inject_items by calling /api/agent/*. The
@@ -1543,7 +1575,7 @@ done`;
                 if (session.pty) { try { session.pty.kill(); } catch {} }
                 const newPty = pty.spawn(DTACH_CMD, ['-a', session.socketPath, '-E', '-r', 'winch'], {
                   name: 'xterm-256color', cols: 120, rows: 30,
-                  env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' },
+                  env: { ...agentEnv(), TERM: 'xterm-256color', COLORTERM: 'truecolor' },
                 });
                 setupSessionPty(session, data.sessionId, newPty);
                 setTimeout(() => { newPty.write(inputPayload + '\n'); }, 500);
@@ -2155,7 +2187,7 @@ done`;
           const id = 'tmux-' + (++sessionCounterRef.value) + '-' + Date.now();
           const tmuxPty = pty.spawn('tmux', ['attach-session', '-t', tmuxTarget], {
             name: 'xterm-256color', cols: data.cols || 120, rows: data.rows || 30,
-            env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' },
+            env: { ...agentEnv(), TERM: 'xterm-256color', COLORTERM: 'truecolor' },
           });
 
           const session = {
@@ -2190,4 +2222,4 @@ done`;
 
 // pickCodexThreadCandidate also serves restoreSessions' id recapture (a
 // restart inside the create-time capture window killed the retry chain)
-module.exports = { registerWsHandler, noConvoRef, pickCodexThreadCandidate };
+module.exports = { registerWsHandler, noConvoRef, pickCodexThreadCandidate, agentEnv };
