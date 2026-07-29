@@ -522,6 +522,12 @@ const SETTINGS_SCHEMA = {
     description: t('Extra Claude CLI args appended when starting a Claude session.'),
     category: t('Claude'), liveApply: true,
   },
+  'claude.disableModelFallback': {
+    type: 'boolean', default: false,
+    label: t('Disable model fallback'),
+    description: t('When safeguards flag a message, pause the turn instead of automatically switching to another model (the CLI\'s "Switch models when a message is flagged" set to off). Applies to new sessions at start and to running chat sessions from their next turn; sessions started while enabled also cover their subagents. A stopped turn shows a notice — rephrase and resend to continue.'),
+    category: t('Claude'), liveApply: true,
+  },
   'claude.tuiRenderer': {
     type: 'enum', default: '',
     options: [

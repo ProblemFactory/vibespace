@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.228.0
+
+**Disable model fallback (`claude.disableModelFallback`, Settings → Claude, default off)** — user request: "stop instead of silently becoming opus". Built on the CLI's native controls (found by disassembling 2.1.220; no reactive hacks as the primary path):
+
+- `switchModelsOnFlag:false` — the CLI's own settings key ("When safeguards flag a message … when off, your session will pause instead"). Injected at spawn (merged into the single `--settings` flag alongside e.g. ultracode) and pushed to RUNNING chat sessions the moment the toggle flips, via the same `apply_flag_settings` channel the effort switcher uses (effective next turn; re-enable sends the literal `true` — `null` deletes the key with undocumented layer precedence). With it armed, the server-lane `fallbacks` request param is never sent and the client-lane refusal retry degrades to a clean stop.
+- `CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK=1` in the spawn env additionally covers **subagents** (the settings key is main-thread-only) for sessions started while enabled.
+- A stopped turn is never a silent dead-end: the CLI's `model_refusal_no_fallback` record now renders as a localized notice (both stdout/JSONL key casings) with the refusal category + the CLI's explanation behind an expander — "rephrase and resend to continue".
+- Reactive belt for sessions that predate the toggle (their CLI still has fallback armed): a fallback signal on the live stream triggers the standard interrupt + a per-session toast naming the from→to models, once per turn; it also disarms fallback in that CLI for the rest of the session.
+- Corrected internal understanding along the way: `{type:'fallback'}` content blocks are SAFETY-CLASSIFIER reroutes (the API `fallbacks` beta triggers on policy declines only — overloads/rate limits never fall back); genuine capacity fallback is a different record (`system/model_fallback`) and only exists when a `fallbackModel` is configured, which VibeSpace never does.
+- Contract test: `scripts/test-fallback-policy.mjs` (10 asserts: single-flag merge, env, apply_flag_settings shapes, no-fallback notice both casings).
+
 ## 2.227.12
 
 Two reports from one user, one of which turned out to be a credential leak:

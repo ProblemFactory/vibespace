@@ -671,6 +671,34 @@ function broadcastToSession(session, id, msg) {
   }
 }
 
+// ── Stop-on-model-fallback belt (2.228.0, claude.disableModelFallback) ──
+// The PRIMARY mechanism is the CLI's native switchModelsOnFlag=false
+// (spawn --settings + mid-session apply_flag_settings) — with it armed no
+// fallback ever happens and this never fires. The belt covers sessions whose
+// CLI predates the toggle (spawned before it was enabled, or restored from
+// before a server restart): the moment a fallback signal appears on the
+// stream, interrupt the turn (same recipe as the ws 'interrupt' case) and
+// tell the user why. Once per turn (_fallbackStopFired, cleared on result).
+function maybeStopOnFallback(session, id, from, to) {
+  try {
+    if (serverSetting('claude.disableModelFallback') !== true) return;
+    if (session._fallbackStopFired || session.mode !== 'chat' || !session.pty) return;
+    const adapter = adapterRegistry.get(session.backend);
+    if (!adapter?.formatInterrupt) return;
+    session._fallbackStopFired = true;
+    session.pty.write(adapter.formatInterrupt() + '\n');
+    adapter.postInterrupt(session, id);
+    // Belt-and-braces: also disarm fallback in this CLI for the rest of the
+    // session, so the next turn stops at the refusal instead of re-routing.
+    try { if (adapter.formatSetFallbackPolicy) session.pty.write(adapter.formatSetFallbackPolicy(true) + '\n'); } catch {}
+    global.__vsEvent?.('fallback-auto-stop', `${from || '?'}->${to || '?'}`);
+    broadcastToSession(session, id, {
+      type: 'server-notice', key: `fallback-stop:${id}:${Date.now()}`, level: 2,
+      text: `Model fallback detected (${from || '?'} → ${to || '?'}) — turn stopped because "Disable model fallback" is on. Send a new message to continue on your model.`,
+    });
+  } catch (e) { console.warn('[fallback-stop] failed:', e.message); }
+}
+
 // SyncStore imported from ./src/sync-store.js
 
 // ── Effective-size computation (min cols/rows across clients + PTY resize + broadcast) ──
@@ -1195,8 +1223,17 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
                   global.__vsEvent?.('cli-usage-limit');
                 } else if (b?.type === 'fallback') {
                   global.__vsEvent?.('cli-model-fallback', `${b.from?.model || '?'}->${b.to?.model || '?'}`);
+                  maybeStopOnFallback(session, id, b.from?.model, b.to?.model);
                 }
               }
+            }
+            // Reactive belt for the CLIENT-lane reroute (system record). The
+            // native switchModelsOnFlag=false prevents both lanes for sessions
+            // spawned/flipped after the toggle — this belt covers sessions
+            // that predate it (their CLI still has fallback armed).
+            if (msg.type === 'system' && msg.subtype === 'model_refusal_fallback') {
+              maybeStopOnFallback(session, id,
+                msg.originalModel || msg.original_model, msg.fallbackModel || msg.fallback_model);
             }
 
             // Permission-mode TRUTH (2.195.0): 2.1.215 emits a fresh init on
@@ -1262,6 +1299,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
               let newLabel = null;
               if (msg.type === 'result' || (msg.type === 'system' && msg.subtype === 'compact_boundary')) {
                 session._isStreaming = false;
+                session._fallbackStopFired = false; // one auto-stop per turn (claude.disableModelFallback belt)
                 newLabel = '';
               } else if (msg.type === 'user' && !msg.parent_tool_use_id && !msg.isSidechain) {
                 // Local-command echoes (e.g. "<local-command-stdout>Set model
@@ -2712,6 +2750,22 @@ setupPersistence({ dataDir: path.join(__dirname, 'data'), wss, WS_OPEN, getSyncS
     const was = (prev || {})['agents.vibespaceIntegration'] !== false;
     const now = (next || {})['agents.vibespaceIntegration'] !== false;
     if (was !== now) syncHookRegistration();
+    // claude.disableModelFallback flips LIVE sessions too ("动态对对话进行调整"):
+    // apply_flag_settings merges switchModelsOnFlag into the CLI's inline
+    // flag-settings layer, effective from the next turn. Local and remote
+    // chat sessions alike (the control_request rides the same stdin channel
+    // as set_model). Sessions spawned after the flip get it at spawn instead.
+    const fbWas = (prev || {})['claude.disableModelFallback'] === true;
+    const fbNow = (next || {})['claude.disableModelFallback'] === true;
+    if (fbWas !== fbNow) {
+      for (const [sid, sess] of activeSessions) {
+        if (sess.backend !== 'claude' || sess.mode !== 'chat' || !sess.pty) continue;
+        try {
+          const ad = adapterRegistry.get('claude');
+          if (ad?.formatSetFallbackPolicy) sess.pty.write(ad.formatSetFallbackPolicy(fbNow) + '\n');
+        } catch (e) { console.warn(`[fallback-policy] ${sid}: ${e.message}`); }
+      }
+    }
   } });
 app.use(persistenceRouter);
 // ── Agent-hook boot registration (deferred from the hook-machinery block so

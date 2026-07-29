@@ -390,6 +390,10 @@ function registerWsHandler(wss, ctx) {
             initialPrompt: data.initialPrompt || '',
             mode: sessionMode,
             tuiRenderer: data.tuiRenderer || '',
+            // Server-side read (covers every create path uniformly — resume,
+            // layout restore, billing switch); only the claude adapter
+            // consumes it (codex has no model-fallback mechanism).
+            disableModelFallback: (() => { try { return serverSetting('claude.disableModelFallback') === true; } catch { return false; } })(),
             // Shell helper terminals auto-type this — the adapter arms the
             // DISABLE_UPDATE_PROMPT guard (oh-my-zsh's rc-time [Y/n] eats the
             // first typed char: "claude /login" → "laude"). 2.196.0: the field

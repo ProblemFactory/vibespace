@@ -36,7 +36,7 @@ class ClaudeCodeAdapter extends BackendAdapter {
    * This adapter provides the command line arguments and session config.
    */
   buildSessionArgs(options) {
-    const { cwd, model, permissionMode, resumeId, sessionName, effort, extraArgs = [], mode = 'chat', tuiRenderer } = options;
+    const { cwd, model, permissionMode, resumeId, sessionName, effort, extraArgs = [], mode = 'chat', tuiRenderer, disableModelFallback } = options;
     const args = [];
 
     if (resumeId) {
@@ -56,12 +56,31 @@ class ClaudeCodeAdapter extends BackendAdapter {
       args.push('--effort', effort);
     }
     if (extraArgs.length) args.push(...extraArgs);
+    // Disable model fallback (2.228.0, user request "stop instead of becoming
+    // opus"): switchModelsOnFlag=false is the CLI's OWN settings key ("When
+    // off, your session will pause instead") — it stops the server-lane
+    // `fallbacks` request param (no more {type:'fallback'} reroutes) and, in
+    // our dialog-less stream-json shape, the client-lane refusal retry too
+    // (refusals surface as system/model_refusal_no_fallback and the turn
+    // ends). Merged into ONE --settings flag (repeated flags are undefined
+    // behavior; the statusline injection in ws-handler merges the same way).
+    // The env var additionally covers SUBAGENTS, which ignore the settings
+    // key (verified in the 2.1.220 disassembly: x2c requires isMainThread).
+    const env = {};
+    if (disableModelFallback) {
+      let settingsObj = {};
+      const si = args.indexOf('--settings');
+      if (si >= 0 && args[si + 1]) { try { settingsObj = JSON.parse(args[si + 1]) || {}; } catch {} }
+      settingsObj.switchModelsOnFlag = false;
+      const sjson = JSON.stringify(settingsObj);
+      if (si >= 0) args[si + 1] = sjson; else args.push('--settings', sjson);
+      env.CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK = '1';
+    }
 
     // TUI renderer for terminal-mode sessions (CLI ≥2.1.x): "fullscreen" is the
     // flicker-free alternate-screen renderer with virtualized scrollback (same
     // as /tui fullscreen), "classic" forces the main-screen renderer. Unset =
     // whatever preference the CLI has saved. Chat mode has no TUI — skip.
-    const env = {};
     if (mode !== 'chat') {
       if (tuiRenderer === 'fullscreen') env.CLAUDE_CODE_NO_FLICKER = '1';
       else if (tuiRenderer === 'classic') env.CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN = '1';
@@ -198,6 +217,21 @@ class ClaudeCodeAdapter extends BackendAdapter {
   // success-blind and nothing echoes back — the commanded value is all we have
   // to display. (ultracode is gated CLI-side on an xhigh-capable model +
   // dynamic workflows enabled — a no-op otherwise.)
+  // Mid-session fallback-policy flip ("动态对对话进行调整"): rides the SAME
+  // apply_flag_settings channel as effortLevel — the CLI merges schema-valid
+  // keys into its inline flag-settings layer and re-reads them next turn.
+  // Re-enable sends the literal `true`, NEVER null: null DELETES the key from
+  // the inline layer, and whether a spawn-time --settings false would then
+  // resurface depends on undocumented source precedence — an explicit value
+  // wins in any layering.
+  formatSetFallbackPolicy(disabled) {
+    return JSON.stringify({
+      type: 'control_request',
+      request_id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      request: { subtype: 'apply_flag_settings', settings: { switchModelsOnFlag: !disabled } },
+    });
+  }
+
   formatSetEffort(effort) {
     const ultracode = effort === 'ultracode';
     const settings = ultracode
