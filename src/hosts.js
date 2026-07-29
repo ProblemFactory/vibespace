@@ -454,9 +454,9 @@ class HostManager {
     return null;
   }
 
-  _ssh(h, remoteCmd, { timeoutMs = 15000, maxBuffer = 4 * 1024 * 1024, encoding } = {}) {
+  _ssh(h, remoteCmd, { timeoutMs = 15000, maxBuffer = 4 * 1024 * 1024, encoding, fresh = false } = {}) {
     return new Promise((resolve, reject) => {
-      execFile('ssh', [...this.sshArgs(h, { multiplex: true }), '--', remoteCmd], { timeout: timeoutMs, maxBuffer, ...(encoding !== undefined ? { encoding } : {}) }, (err, stdout, stderr) => {
+      execFile('ssh', [...this.sshArgs(h, { multiplex: !fresh }), '--', remoteCmd], { timeout: timeoutMs, maxBuffer, ...(encoding !== undefined ? { encoding } : {}) }, (err, stdout, stderr) => {
         if (err) return reject(new Error((stderr?.toString() || err.message || '').trim().slice(0, 300)));
         resolve(stdout);
       });
@@ -483,7 +483,25 @@ class HostManager {
     }
     const probe = 'export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; echo VS-OK; for c in dtach node claude codex; do command -v $c >/dev/null 2>&1 && printf "%s=yes " $c || printf "%s=no " $c; done; echo; uname -sm';
     const t0 = Date.now();
-    const out = await this._hostShell(h, probe, { timeoutMs: 10000 });
+    // The probe must measure what SESSIONS experience: a FRESH connection.
+    // Multiplexed probes ride the persisted ControlMaster, whose ESTABLISHED
+    // TCP flow survives firewall/route changes (conntrack keeps it; the
+    // keepalives maintain it) — so a host whose address went dark kept
+    // showing READY for hours while every new session pipe timed out (real
+    // lengyue report 2.228.1: sidebar green, session stuck "host
+    // reconnecting"). On fresh-fail we still try the mux once, ONLY to name
+    // the situation precisely.
+    let out;
+    try {
+      out = await this._ssh(h, probe, { timeoutMs: 10000, fresh: true });
+    } catch (freshErr) {
+      let muxAlive = false;
+      try { muxAlive = String(await this._ssh(h, 'echo VS-MUX', { timeoutMs: 6000 })).includes('VS-MUX'); } catch {}
+      if (muxAlive) {
+        throw new Error(`new SSH connections fail (${String(freshErr.message || freshErr).slice(0, 120)}) while an already-established channel still responds — the network path to this host changed (firewall/NAT/address). File transfers over the old channel may still work, but sessions cannot connect until the address is fixed.`);
+      }
+      throw freshErr;
+    }
     if (!out.includes('VS-OK')) throw new Error('unexpected response');
     const tools = {};
     for (const m of out.matchAll(/(\w+)=(yes|no)/g)) tools[m[1]] = m[2] === 'yes';
