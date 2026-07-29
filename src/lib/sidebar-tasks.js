@@ -1,4 +1,5 @@
 import { escHtml, createPopover, showContextMenu, showInputDialog, showConfirmDialog, showToast } from './utils.js';
+import { track } from './telemetry-client.js';
 import { t as tr } from './i18n.js';
 
 /**
@@ -237,11 +238,23 @@ export function installSidebarTasks(SidebarClass) {
         headers: { 'Content-Type': 'application/json' },
         body: body !== undefined ? JSON.stringify(body) : undefined,
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) { showToast(data.error || tr('Task Group operation failed'), { type: 'error' }); return null; }
+      const raw = await res.text().catch(() => '');
+      let data = {}; try { data = raw ? JSON.parse(raw) : {}; } catch { }
+      if (!res.ok) {
+        // NEVER a bare "operation failed" (2.227.12): a body with no `error`
+        // key (an HTML 502 from the ingress, a body-parser 413, a proxy
+        // timeout) used to render a message that told the user — and the
+        // engineer reading the report — NOTHING. Always name the status, and
+        // leave a telemetry breadcrumb so it is diagnosable after the fact.
+        const detail = data.error || (raw && !raw.startsWith('<') ? raw.slice(0, 120) : '');
+        showToast(`${tr('Task Group operation failed')} (HTTP ${res.status}${detail ? ' — ' + detail : ''})`, { type: 'error' });
+        try { track('error', `task-api-${res.status}`, `${method} ${url}`); } catch { }
+        return null;
+      }
       return data;
-    } catch {
-      showToast(tr('Task Group operation failed — server unreachable'), { type: 'error' });
+    } catch (e) {
+      showToast(`${tr('Task Group operation failed — server unreachable')}${e?.message ? ' (' + String(e.message).slice(0, 80) + ')' : ''}`, { type: 'error' });
+      try { track('error', 'task-api-network', `${method} ${url}`); } catch { }
       return null;
     }
   };
