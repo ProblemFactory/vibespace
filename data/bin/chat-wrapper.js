@@ -46,6 +46,7 @@ const REMOTE_SID = process.env.VIBESPACE_REMOTE_SID || '';
 // is present, not only for REMOTE_SID.
 const OFFSET_MODE = !!REMOTE_SID || process.argv.slice(5).some(a => a.includes('__VS_OFFSET__'));
 let remoteOffset = 0;        // bytes of the REMOTE buffer consumed (byte-exact)
+let lastChildError = null;   // last stderr line / spawn error of the transport child (UI tooltip)
 let remoteExited = null;     // set when the keeper's _remote_exit sentinel arrives
 let reconnectAttempts = 0;
 let reconnectTimer = null;
@@ -263,19 +264,26 @@ function startChild() {
     schedulePersist();
   });
 
-  // Child stderr → log (not shown to user, but useful for debugging)
+  // Child stderr → log + kept as the LAST ERROR the UI can show. "host
+  // reconnecting (9)…" with no reason is undiagnosable (real lengyue report:
+  // the actual cause — connect timeout to a changed address — was only
+  // visible by rerunning the ssh by hand); the last stderr line rides
+  // meta.remote.lastError → _remote_state → the status-bar chip tooltip.
   child.stderr.setEncoding('utf8');
   child.stderr.on('data', (chunk) => {
-    log(`[stderr] ${chunk.trim()}`);
+    const t = chunk.trim();
+    if (t) lastChildError = t.split('\n').pop().slice(0, 200);
+    log(`[stderr] ${t}`);
   });
 
   child.on('exit', (exitCode) => {
     childDead = true;
     log(`Child exited with code ${exitCode}`);
+    if (!lastChildError && exitCode) lastChildError = `transport exited with code ${exitCode}`;
     // Remote + the session did NOT end on the host + we weren't told to die:
     // this was a transport (ssh) death — reconnect, never finalize.
     if (OFFSET_MODE && remoteExited === null && !shuttingDown) {
-      meta.remote = { state: 'reconnecting', attempts: reconnectAttempts + 1, at: Date.now() };
+      meta.remote = { state: 'reconnecting', attempts: reconnectAttempts + 1, at: Date.now(), lastError: lastChildError || null };
       meta.streaming = meta.streaming || false; // keep whatever the stream last said
       scheduleMeta();
       scheduleReconnect();
@@ -286,6 +294,7 @@ function startChild() {
 
   child.on('error', (err) => {
     childDead = true;
+    lastChildError = String(err.message || err).slice(0, 200);
     log(`Child error: ${err.message}`);
     if (OFFSET_MODE && remoteExited === null && !shuttingDown) { scheduleReconnect(); return; }
     process.exit(1);
@@ -304,7 +313,7 @@ function scheduleReconnect() {
   reconnectAttempts++;
   const delay = [1000, 2000, 5000, 10000, 30000][Math.min(4, reconnectAttempts - 1)];
   log(`reconnect #${reconnectAttempts} in ${delay}ms (offset=${remoteOffset})`);
-  try { process.stdout.write(JSON.stringify({ type: '_remote_state', state: 'reconnecting', attempts: reconnectAttempts }) + '\n'); } catch {}
+  try { process.stdout.write(JSON.stringify({ type: '_remote_state', state: 'reconnecting', attempts: reconnectAttempts, lastError: lastChildError || null }) + '\n'); } catch {}
   reconnectTimer = setTimeout(startChild, delay);
 }
 

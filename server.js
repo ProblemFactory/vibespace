@@ -1130,7 +1130,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
             // (the REMOTE session is fine). Surfaced as a status-bar chip; the
             // attach payload carries the current value for refreshes.
             if (msg.type === '_remote_state') {
-              const rs = { state: msg.state, attempts: msg.attempts || 0, at: Date.now() };
+              const rs = { state: msg.state, attempts: msg.attempts || 0, at: Date.now(), lastError: msg.lastError || null };
               session._remoteState = msg.state === 'connected' ? null : rs;
               broadcastToSession(session, id, { type: 'remote-state', sessionId: id, ...rs });
               broadcastActiveSessions(); // card chip follows the transport state (2.219.1)

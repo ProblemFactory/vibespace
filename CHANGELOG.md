@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.228.1
+
+lengyue's contradiction — a session stuck on "host reconnecting (9)…" while the machine row showed green READY — diagnosed to the root and both halves fixed:
+
+- **The machine-row probe was lying.** `hosts.test` (and the sidebar autoprobe through it) rode the multiplexed ControlMaster, whose ESTABLISHED TCP flow survives firewall/route changes — verified live: fresh connections to the host timed out for hours while the mux channel from before the change kept answering, so the row stayed READY while every new session pipe failed. The probe now measures what sessions actually experience: a FRESH connection. When fresh fails but the old channel still answers, the row names the exact situation ("new SSH connections fail … while an already-established channel still responds — the network path changed").
+- **"host reconnecting (N)…" now says why.** The chat wrapper records the transport child's last stderr line (e.g. `ssh: connect to host X port 22: Connection timed out`) into `meta.remote.lastError`, forwards it on `_remote_state`, and the status-bar chip tooltip shows it — the difference between "transient blip" and "the host address is dead" is now visible in the UI instead of requiring hand-run ssh. Contract test: `scripts/test-remote-lasterror.mjs`.
+
+The session chip was truthful all along — the "same remote" impression came from two host records pointing at two different machines, one of which had genuinely gone dark for new connections.
+
 ## 2.228.0
 
 **Disable model fallback (`claude.disableModelFallback`, Settings → Claude, default off)** — user request: "stop instead of silently becoming opus". Built on the CLI's native controls (found by disassembling 2.1.220; no reactive hacks as the primary path):

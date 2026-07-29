@@ -2202,4 +2202,5 @@ export default {
   "Disable model fallback": "モデルフォールバックを無効化",
   "When safeguards flag a message, pause the turn instead of automatically switching to another model (the CLI's \"Switch models when a message is flagged\" set to off). Applies to new sessions at start and to running chat sessions from their next turn; sessions started while enabled also cover their subagents. A stopped turn shows a notice — rephrase and resend to continue.": "セーフガードがメッセージをフラグした際、別モデルへ自動で切り替えず、そのターンを一時停止します（CLI の \"Switch models when a message is flagged\" をオフに相当）。新規セッションは起動時から、実行中のチャットセッションは次のターンから適用。有効中に開始したセッションはサブエージェントも対象。停止したターンには通知が表示されます——言い換えて再送すれば続行できます。",
   "⚠ Safeguards stopped this turn: {model} flagged the message and model fallback is disabled, so it was NOT retried on another model. Rephrase and resend to continue on {model}.": "⚠ セーフガードがこのターンを停止しました：{model} がこのメッセージをフラグし、モデルフォールバックは無効のため、別モデルでの再試行は行われませんでした。言い換えて再送すれば {model} で続行できます。",
+  "Last error:": "直近のエラー:",
 };

@@ -316,7 +316,14 @@ export class ChatStatusBar {
       parts.push(`<span class="chat-status-remote" title="${escHtml(t('This session was created before disconnect protection existed — a network drop can kill it. Terminate and Resume the session to rebuild it protected.'))}">⚠ ${escHtml(t('no disconnect protection'))}</span>`);
     } else if (this._remoteState) {
       const n = this._remoteState.attempts || 0;
-      parts.push(`<span class="chat-status-remote" title="${escHtml(t('The connection to the remote host dropped — reconnecting. The session keeps running on the host; nothing is lost.'))}">⟳ ${escHtml(t('host reconnecting'))}${n > 1 ? ` (${n})` : ''}…</span>`);
+      // Name the concrete failure (2.228.1): "reconnecting (9)…" alone is
+      // undiagnosable — the wrapper now forwards the transport child's last
+      // stderr line (e.g. "connect to host X port 22: Connection timed out"),
+      // which tells host-address problems apart from transient drops.
+      const err = this._remoteState.lastError;
+      const tip = t('The connection to the remote host dropped — reconnecting. The session keeps running on the host; nothing is lost.')
+        + (err ? `\n${t('Last error:')} ${err}` : '');
+      parts.push(`<span class="chat-status-remote" title="${escHtml(tip)}">⟳ ${escHtml(t('host reconnecting'))}${n > 1 ? ` (${n})` : ''}…</span>`);
     }
 
     // Billing identity chip — only rendered when fed (app gates it to mobile)
