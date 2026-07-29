@@ -1,4 +1,4 @@
-import { copyText, escHtml, showToast, showConfirmDialog, collectDroppedFiles } from './utils.js';
+import { copyText, escHtml, showToast, showConfirmDialog, collectDroppedFiles, showImageOverlay } from './utils.js';
 import { installChatSeek } from './chat-view-seek.js';
 import { metric, track } from './telemetry-client.js';
 import { stripAnsi } from './highlight.js';
@@ -295,15 +295,7 @@ class ChatView {
 
       this._messageList.addEventListener('click', (e) => {
         if (e.target.tagName === 'IMG' && e.target.classList.contains('chat-img')) {
-          const overlay = document.createElement('div');
-          overlay.className = 'chat-img-overlay';
-          // Build the <img> via property assignment (NOT innerHTML): e.target.src
-          // is the browser-DECODED url, and a hostile data: mediaType can smuggle
-          // a literal `" onerror=` through it — property assignment is unescapable.
-          const zoomImg = document.createElement('img'); zoomImg.src = e.target.src; zoomImg.alt = 'image';
-          overlay.appendChild(zoomImg);
-          overlay.onclick = () => overlay.remove();
-          document.body.appendChild(overlay);
+          showImageOverlay(e.target.src); // property-assignment inside (XSS note in utils)
         }
         if (e.target.classList.contains('chat-agent-view-btn')) {
           e.stopPropagation();
@@ -379,14 +371,7 @@ class ChatView {
     // Image zoom + Agent View Log click handler
     this._messageList.addEventListener('click', (e) => {
       if (e.target.tagName === 'IMG' && e.target.classList.contains('chat-img')) {
-        const overlay = document.createElement('div');
-        overlay.className = 'chat-img-overlay';
-        // Property assignment, not innerHTML — a hostile data: mediaType can
-        // smuggle a literal `" onerror=` through the decoded e.target.src.
-        const zoomImg = document.createElement('img'); zoomImg.src = e.target.src; zoomImg.alt = 'image';
-        overlay.appendChild(zoomImg);
-        overlay.onclick = () => overlay.remove();
-        document.body.appendChild(overlay);
+        showImageOverlay(e.target.src); // property-assignment inside (XSS note in utils)
       }
       // Agent View Log button
       if (e.target.classList.contains('chat-agent-view-btn')) {

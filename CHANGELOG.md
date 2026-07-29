@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.228.2
+
+- **Pending image attachments are now click-to-zoom.** Pasting a screenshot into the chat input shows a ~32px chip preview with no way to verify WHAT you pasted before sending it to the model (user request). Clicking the chip now opens the standard full-screen image overlay (× still removes; zoom-in cursor + tooltip). The overlay builder was deduplicated into `showImageOverlay` (utils.js) — the two inline copies in ChatView (sent-message `chat-img` thumbnails, which were already zoomable) now share it, and it joins the global Escape-close protocol via `data-popover`.
+
 ## 2.228.1
 
 lengyue's contradiction — a session stuck on "host reconnecting (9)…" while the machine row showed green READY — diagnosed to the root and both halves fixed:
