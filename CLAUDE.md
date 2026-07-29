@@ -238,7 +238,7 @@ docs/
 | **Taskbar** | `src/lib/taskbar.js` | Taskbar rendering, window list popup, right-click context menu |
 | **Command mode** | `src/lib/command-mode.js` | Ctrl+\ prefix key, tmux-style window commands |
 | **Embedded browser** | `src/lib/browser-window.js` | iframe + URL bar + proxy toggle |
-| **Shared utilities** | `src/lib/utils.js` | escHtml, createPopover, showContextMenu, fetchJson, copyText, StateSync |
+| **Shared utilities** | `src/lib/utils.js` | escHtml, createPopover, showContextMenu, fetchJson, copyText, showImageOverlay (the ONE image-zoom overlay — chat thumbs + pending chips), StateSync |
 | **i18n / translations** | `src/lib/i18n.js` + `i18n-zh.js`/`i18n-ja.js` + `scripts/i18n-extract.mjs` | t() wrapping rules + dictionary workflow in §16 — read it BEFORE adding UI strings |
 | **CSS / visual styling** | `public/style.css` + `public/chat.css` + `public/viewers.css` | Split by component area |
 | **HTML structure** | `public/index.html` | Sidebar, toolbar, workspace, dialogs |
