@@ -18,6 +18,7 @@
 // a branch; task_* are handled under the tool_use_id path.
 const HANDLED_SYSTEM_SUBTYPES = new Set([
   'init', 'hook_response', 'stop_hook_summary', 'model_refusal_fallback',
+  'model_refusal_no_fallback',
   'task_started', 'task_progress', 'task_notification',
 ]);
 
@@ -270,6 +271,28 @@ class MessageManager {
             .filter(Boolean).join('\n\n').slice(0, 900) || null,
         }],
         noticeKind: 'model-refusal-fallback',
+      });
+      if (emit) this._emit({ op: 'create', message: msg });
+    }
+
+    // With fallback disabled (switchModelsOnFlag=false / the env kill), a
+    // safety-classifier refusal no longer reroutes — the CLI emits this and
+    // the turn DEAD-ENDS. Unrendered it is a silent failure (the turn just
+    // stops with nothing shown), which is the exact class the disable option
+    // exists to avoid. Both key casings (stdout snake / JSONL camel).
+    if (raw.subtype === 'model_refusal_no_fallback') {
+      const model = raw.originalModel || raw.original_model || '?';
+      const msg = this._create({
+        role: 'system',
+        content: [{
+          type: 'text',
+          text: `⚠ Safety-classifier stop: ${model} flagged this message and model fallback is disabled — the turn stopped instead of switching models. Rephrase and resend to continue.`,
+          fallbackFrom: model,
+          refusalCategory: raw.apiRefusalCategory || raw.api_refusal_category || null,
+          cliText: [raw.api_refusal_explanation || raw.apiRefusalExplanation || '', typeof raw.content === 'string' ? raw.content : '']
+            .filter(Boolean).join('\n\n').slice(0, 900) || null,
+        }],
+        noticeKind: 'model-refusal-no-fallback',
       });
       if (emit) this._emit({ op: 'create', message: msg });
     }

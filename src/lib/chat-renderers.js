@@ -491,6 +491,20 @@ class ChatRenderers {
       }
       return { el, sideEffect: null };
     }
+    if (msg.noticeKind === 'model-refusal-no-fallback' && msg.content?.[0]) {
+      const b = msg.content[0];
+      const el = document.createElement('div');
+      el.className = 'chat-msg chat-msg-system chat-system-notification';
+      const head = t('⚠ Safeguards stopped this turn: {model} flagged the message and model fallback is disabled, so it was NOT retried on another model. Rephrase and resend to continue on {model}.', { model: b.fallbackFrom || '?' });
+      const cat = b.refusalCategory ? ` (${b.refusalCategory})` : '';
+      el.innerHTML = `<span class="chat-system-text">${escHtml(head + cat)}</span>`;
+      if (b.cliText) {
+        const det = document.createElement('details');
+        det.innerHTML = `<summary>${escHtml(t('Details from the CLI'))}</summary><pre class="chat-pre">${escHtml(b.cliText)}</pre>`;
+        el.appendChild(det);
+      }
+      return { el, sideEffect: null };
+    }
     if (msg.noticeKind === 'model-fallback' && msg.content?.[0]?.fallbackTo) {
       const b = msg.content[0];
       const el = document.createElement('div');
