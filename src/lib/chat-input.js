@@ -1,4 +1,4 @@
-import { escHtml, saveDraft, loadDraft, clearDraft, getStateSync, showContextMenu, showToast, uploadFilesBatched } from './utils.js';
+import { escHtml, saveDraft, loadDraft, clearDraft, getStateSync, showContextMenu, showToast, uploadFilesBatched, showImageOverlay } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { t } from './i18n.js';
 
@@ -550,6 +550,12 @@ export class ChatInput {
       const item = document.createElement('div');
       item.className = 'chat-attach-item';
       item.innerHTML = `<img src="${a.dataUrl}" alt="${escHtml(a.name)}"><span class="chat-attach-name">${escHtml(a.name)}</span>`;
+      // Click the chip → full-size zoom (2.228.2, user request): a pasted
+      // screenshot's ~28px preview is unverifiable — you want to confirm you
+      // pasted the RIGHT image BEFORE sending it to the model.
+      item.title = t('Click to view full size');
+      item.style.cursor = 'zoom-in';
+      item.onclick = () => showImageOverlay(a.dataUrl);
       const removeBtn = document.createElement('button');
       removeBtn.className = 'chat-attach-remove';
       removeBtn.textContent = '\u2715';

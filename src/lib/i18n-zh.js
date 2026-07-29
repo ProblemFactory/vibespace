@@ -2203,4 +2203,5 @@ export default {
   "When safeguards flag a message, pause the turn instead of automatically switching to another model (the CLI's \"Switch models when a message is flagged\" set to off). Applies to new sessions at start and to running chat sessions from their next turn; sessions started while enabled also cover their subagents. A stopped turn shows a notice — rephrase and resend to continue.": "当安全机制标记某条消息时，暂停本轮而不是自动切换到另一个模型（即关闭 CLI 的 \"Switch models when a message is flagged\"）。新会话启动即生效，运行中的对话会话从下一轮生效；启用后新建的会话连 subagent 一起覆盖。被暂停的轮次会显示提示——换个说法重发即可继续。",
   "⚠ Safeguards stopped this turn: {model} flagged the message and model fallback is disabled, so it was NOT retried on another model. Rephrase and resend to continue on {model}.": "⚠ 安全机制暂停了本轮：{model} 标记了这条消息，且模型 fallback 已禁用，因此没有换用其他模型重试。换个说法重发即可继续使用 {model}。",
   "Last error:": "上次错误:",
+  "Click to view full size": "点击查看大图",
 };

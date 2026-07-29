@@ -533,6 +533,23 @@ export async function fetchJson(url, opts) {
 }
 
 /** Clipboard copy with execCommand fallback for non-HTTPS */
+
+/** Full-screen image zoom overlay (chat thumbnails, pending attachment chips).
+ *  Build the <img> via PROPERTY assignment, NOT innerHTML: the src is often a
+ *  browser-decoded data: url and a hostile mediaType can smuggle a literal
+ *  `" onerror=` past HTML escaping — property assignment is unescapable.
+ *  data-popover joins the global Escape-close protocol (created-and-removed). */
+export function showImageOverlay(src) {
+  const overlay = document.createElement('div');
+  overlay.className = 'chat-img-overlay';
+  overlay.dataset.popover = '1';
+  const img = document.createElement('img');
+  img.src = src; img.alt = 'image';
+  overlay.appendChild(img);
+  overlay.onclick = () => overlay.remove();
+  document.body.appendChild(overlay);
+}
+
 export function copyText(text) {
   if (navigator.clipboard?.writeText) {
     return navigator.clipboard.writeText(text).catch(() => _fallbackCopy(text));
