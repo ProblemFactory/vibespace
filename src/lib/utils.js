@@ -582,8 +582,19 @@ export function autoTaskHue(id) {
  *  slot. Deterministic: sorted by id, pure function of the id set. */
 export function assignDistinctTaskColors(tasks) {
   const MIN = 20;
-  const BANDS = [52, 36, 68];
-  const placed = BANDS.map(() => []);
+  // Planes = lightness band × TEXTURE (2.230.2, user suggestion 斜线/点点;
+  // refined on the follow-up "3px bars can't show fine texture"): the
+  // texture vocabulary is CHART LINE STYLES — solid / dashed / dotted /
+  // diagonal-banded. Their variation runs along the bar's LENGTH, so they
+  // stay legible at 1-3px width (the same reason line charts can encode
+  // series identity in hairline strokes). Hue-independent ⇒ also a
+  // color-blind aid. Solid planes fill first: 18 hues × 3 bands × 4
+  // styles = 216 combinations under the hard pairwise guarantee.
+  const PLANES = [];
+  for (const pattern of [null, 'dash', 'dot', 'diag']) {
+    for (const L of [52, 36, 68]) PLANES.push({ pattern, L });
+  }
+  const placed = PLANES.map(() => []);
   const out = new Map();
   const dist = (a, b) => { const d = Math.abs(a - b) % 360; return Math.min(d, 360 - d); };
   const autos = (tasks || []).filter((t) => t && t.id && !t.color)
@@ -591,18 +602,18 @@ export function assignDistinctTaskColors(tasks) {
   for (const t of autos) {
     const anchor = autoTaskHue(t.id);
     let done = false;
-    for (let b = 0; b < BANDS.length && !done; b++) {
-      if (placed[b].length >= Math.floor(360 / MIN)) continue;
+    for (let p = 0; p < PLANES.length && !done; p++) {
+      if (placed[p].length >= Math.floor(360 / MIN)) continue;
       for (let off = 0; off < 360; off += 2) {
         const h = (anchor + off) % 360;
-        if (placed[b].every((ph) => dist(ph, h) >= MIN)) {
-          placed[b].push(h);
-          out.set(t.id, `hsl(${Math.round(h)}, 62%, ${BANDS[b]}%)`);
+        if (placed[p].every((ph) => dist(ph, h) >= MIN)) {
+          placed[p].push(h);
+          out.set(t.id, { color: `hsl(${Math.round(h)}, 62%, ${PLANES[p].L}%)`, pattern: PLANES[p].pattern });
           done = true; break;
         }
       }
     }
-    if (!done) out.set(t.id, autoTaskColor(t.id)); // >54 groups: best effort
+    if (!done) out.set(t.id, { color: autoTaskColor(t.id), pattern: null }); // >216 groups: best effort
   }
   return out;
 }
