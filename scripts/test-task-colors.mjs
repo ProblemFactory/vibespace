@@ -49,7 +49,14 @@ check('unset → auto', taskGroupColor({ id: 'x' }) === autoTaskColor('x'));
   check('prefix 3: pairwise distinct (bands differ)', minSamePlane(3) === 360);
   check('prefix 12 (4/band): same-plane ≥50° (golden ≈59% of ideal 90°)', minSamePlane(12) >= 50, `min=${minSamePlane(12)}`);
   check('prefix 36 (12/band): same-plane ≥18°', minSamePlane(36) >= 18, `min=${minSamePlane(36)}`);
-  check('slot 36+ opens textures', seqTaskColor(36).pattern === 'dash' && seqTaskColor(0).pattern === null);
+  check('textures engage from slot 3 (v5: all dimensions from the start)',
+    seqTaskColor(0).pattern === null && seqTaskColor(3).pattern === 'dash' && seqTaskColor(6).pattern === 'dot' && seqTaskColor(9).pattern === 'diag');
+  check('first 12 slots occupy 12 DISTINCT planes', (() => {
+    const seen = new Set();
+    for (let k = 0; k < 12; k++) { const s = seqTaskColor(k); seen.add(`${s.pattern}|${s.lightness}`); }
+    return seen.size === 12;
+  })());
+  check('20 groups (the reported case) include textured ones', Array.from({ length: 20 }, (_, k) => seqTaskColor(k)).filter((s) => s.pattern).length >= 10);
   check('sequence is immutable (pure function)', JSON.stringify(seqTaskColor(7)) === JSON.stringify(seqTaskColor(7)));
   // INFINITE extension (2.231.2): no wrap — slot 144 must NOT duplicate slot
   // 0; the sequence densifies gracefully instead of colliding
