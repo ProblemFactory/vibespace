@@ -571,52 +571,10 @@ export function autoTaskHue(id) {
   return (h >>> 0) % 360;
 }
 
-/** GUARANTEED-distinct auto colors for a whole group set (2.230.1, after the
- *  fair objection that hash-only hues still collide as groups multiply).
- *  Contract: any two auto colors either differ in hue by ≥20° or sit in
- *  DIFFERENT lightness bands (52%/36%/68% — visibly distinct even at 3px);
- *  three bands ⇒ up to 54 groups with hard separation, then best-effort.
- *  Placement is anchor-first: a group whose stable anchor hue is free KEEPS
- *  it (colors don't reshuffle when unrelated groups come and go); only
- *  colliders get deterministically nudged clockwise to the nearest free
- *  slot. Deterministic: sorted by id, pure function of the id set. */
-export function assignDistinctTaskColors(tasks) {
-  const MIN = 20;
-  // Planes = lightness band × TEXTURE (2.230.2, user suggestion 斜线/点点;
-  // refined on the follow-up "3px bars can't show fine texture"): the
-  // texture vocabulary is CHART LINE STYLES — solid / dashed / dotted /
-  // diagonal-banded. Their variation runs along the bar's LENGTH, so they
-  // stay legible at 1-3px width (the same reason line charts can encode
-  // series identity in hairline strokes). Hue-independent ⇒ also a
-  // color-blind aid. Solid planes fill first: 18 hues × 3 bands × 4
-  // styles = 216 combinations under the hard pairwise guarantee.
-  const PLANES = [];
-  for (const pattern of [null, 'dash', 'dot', 'diag']) {
-    for (const L of [52, 36, 68]) PLANES.push({ pattern, L });
-  }
-  const placed = PLANES.map(() => []);
-  const out = new Map();
-  const dist = (a, b) => { const d = Math.abs(a - b) % 360; return Math.min(d, 360 - d); };
-  const autos = (tasks || []).filter((t) => t && t.id && !t.color)
-    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
-  for (const t of autos) {
-    const anchor = autoTaskHue(t.id);
-    let done = false;
-    for (let p = 0; p < PLANES.length && !done; p++) {
-      if (placed[p].length >= Math.floor(360 / MIN)) continue;
-      for (let off = 0; off < 360; off += 2) {
-        const h = (anchor + off) % 360;
-        if (placed[p].every((ph) => dist(ph, h) >= MIN)) {
-          placed[p].push(h);
-          out.set(t.id, { color: `hsl(${Math.round(h)}, 62%, ${PLANES[p].L}%)`, pattern: PLANES[p].pattern });
-          done = true; break;
-        }
-      }
-    }
-    if (!done) out.set(t.id, { color: autoTaskColor(t.id), pattern: null }); // >216 groups: best effort
-  }
-  return out;
-}
+// Auto color+texture sequence: shared with the server-side allocator —
+// single source of truth in src/task-color-seq.js (see its header).
+export { seqTaskColor } from '../task-color-seq.js';
+const _seqNote = null;
 
 export function showImageOverlay(src) {
   const overlay = document.createElement('div');

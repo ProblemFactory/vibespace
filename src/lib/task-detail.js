@@ -352,7 +352,7 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
     // scalability answer to "颜色太少"). Shows the group's actual auto color.
     const autoSw = document.createElement('button');
     autoSw.className = 'task-detail-swatch auto' + (!task.color ? ' active' : '');
-    autoSw.style.background = (app.sidebar?.getTaskColor && app.sidebar.getTaskColor({ id: task.id })) || autoTaskColor(task.id);
+    autoSw.style.background = (app.sidebar?.getTaskColor && app.sidebar.getTaskColor({ ...task, color: null })) || autoTaskColor(task.id);
     autoSw.title = t('Auto (distinct per group)');
     autoSw.textContent = 'A';
     autoSw.onclick = () => patch({ color: null });

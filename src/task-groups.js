@@ -34,6 +34,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { pickColorSeq } = require('./task-color-seq');
 
 // Task Groups (岗位) have NO status — they are persistent roles; only an
 // `archived` flag. Task STATUS lives on the session (session-status.js STATES,
@@ -96,6 +97,15 @@ class TaskGroupManager {
     // One-time migration: Task Groups lost their status (岗位 refactor) — a
     // `done` group becomes archived, others just drop the field.
     let migrated = false;
+    // colorSeq backfill (2.231.1): pre-existing groups get their immutable
+    // auto-identity slot in creation order, through the SAME allocator used
+    // at create (occupied slots + manual-color masks accumulate as we go).
+    {
+      const all = Object.values(this._state.tasks);
+      const missing = all.filter((t) => !Number.isInteger(t.colorSeq))
+        .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0) || String(a.id).localeCompare(String(b.id)));
+      for (const t of missing) { t.colorSeq = pickColorSeq(all); migrated = true; }
+    }
     for (const t of Object.values(this._state.tasks)) {
       if ('status' in t) { if (t.archived === undefined) t.archived = (t.status === 'done'); delete t.status; migrated = true; }
       // Backfill (in-memory is enough; persisted on the next change): content
@@ -861,6 +871,11 @@ class TaskGroupManager {
       contextDir: this._sanitizeContextDir(contextDir),
       color: this._sanitizeColor(color),
       pattern: (() => { try { return this._sanitizePattern(pattern); } catch { return null; } })(),
+      // Immutable auto-identity slot (2.231.1): lowest free sequence index,
+      // skipping slots masked by existing manual color/texture picks.
+      // Deletion frees the slot for the next creation; the slot never
+      // changes for the life of the group.
+      colorSeq: pickColorSeq(Object.values(this._state.tasks)),
       injectContext: injectContext !== false, // per-group context-injection toggle (default on)
       createdAt: now,
       updatedAt: now,
