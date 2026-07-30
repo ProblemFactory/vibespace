@@ -582,7 +582,27 @@ class MessageManager {
       // drop the origin field.
       const contentStr = typeof raw.message?.content === 'string' ? raw.message.content : '';
       const isTaskNotif = raw.origin?.kind === 'task-notification' || /^\s*<task-notification>/.test(contentStr);
-      if (isTaskNotif) msg.originKind = 'task-notification';
+      if (isTaskNotif) {
+        msg.originKind = 'task-notification';
+        // CLOSE THE TASK LIFECYCLE (2.233.0, real report "popup 20条无完成
+        // 状态"): in the current harness a background task's COMPLETION
+        // signal is THIS user record — the system/task_notification subtype
+        // that used to remove tasks from the status-bar tracker never
+        // arrives for them, so tasks only accumulated. The wakeup names its
+        // <tool-use-id> and <status>; route them into the same taskInfo
+        // edit the old path used.
+        const tuMatch = contentStr.match(/<tool-use-id>([\s\S]*?)<\/tool-use-id>/);
+        const stMatch = contentStr.match(/<status>([\s\S]*?)<\/status>/);
+        if (tuMatch) {
+          const pendingTask = this.pendingToolCalls.get(tuMatch[1].trim());
+          const taskMsg = pendingTask ? this.messageIndex.get(pendingTask.msgId) : null;
+          if (taskMsg?.taskInfo && taskMsg.taskInfo.status === 'running') {
+            const st = (stMatch ? stMatch[1].trim() : 'completed').toLowerCase();
+            taskMsg.taskInfo.status = st === 'completed' ? 'completed' : (st || 'completed');
+            if (emit) this._emit({ op: 'edit', id: taskMsg.id, fields: { taskInfo: taskMsg.taskInfo } });
+          }
+        }
+      }
       else if (raw.promptSource || raw._fromWebui) msg.typed = true;
       if (raw.isSynthetic) msg.synthetic = true;
       if (emit) this._emit({ op: 'create', message: msg });

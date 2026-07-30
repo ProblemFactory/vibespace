@@ -3234,3 +3234,9 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .task-board-item[data-pattern="dash"] { border-image: repeating-linear-gradient(to bottom, var(--task-color) 0 5px, transparent 5px 9px) 1; }
 .task-board-item[data-pattern="dot"] { border-image: repeating-linear-gradient(to bottom, var(--task-color) 0 2px, transparent 2px 5px) 1; }
 .task-board-item[data-pattern="diag"] { border-image: repeating-linear-gradient(35deg, var(--task-color) 0 4px, color-mix(in srgb, var(--task-color) 30%, transparent) 4px 8px) 1; }
+
+/* Background-task popup: finished tail (2.233.0) */
+.chat-task-done-hdr { padding: 4px 10px 2px; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--text-dim); }
+.chat-task-done { opacity: 0.65; cursor: default; }
+.chat-task-done .tdone-ok { color: var(--green, #3fb950); }
+.chat-task-done .tdone-bad { color: var(--red, #e55); }

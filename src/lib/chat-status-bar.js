@@ -128,6 +128,15 @@ export class ChatStatusBar {
   updateTask(taskInfo, toolCallId, content) {
     if (!this._activeTasks) this._activeTasks = new Map();
     if (taskInfo.status !== 'running') {
+      // keep a short visible history (2.233.0, real report: 20 accumulated
+      // rows with no way to tell what finished) — the popup shows a dim
+      // "recently finished" tail with the outcome; the chip counts RUNNING
+      const prev = this._activeTasks.get(toolCallId);
+      if (prev) {
+        if (!this._doneTasks) this._doneTasks = [];
+        this._doneTasks.unshift({ ...prev, status: taskInfo.status, finishedAt: Date.now() });
+        if (this._doneTasks.length > 12) this._doneTasks.length = 12;
+      }
       this._activeTasks.delete(toolCallId);
     } else {
       const block = content?.[0];
@@ -499,6 +508,22 @@ export class ChatStatusBar {
           }
         };
         dropdown.appendChild(item);
+      }
+      // Recently finished tail (2.233.0): outcome at a glance — the check/
+      // cross prefix is the completion state the popup previously never showed
+      if (this._doneTasks?.length) {
+        const hdr = document.createElement('div');
+        hdr.className = 'chat-status-dim chat-task-done-hdr';
+        hdr.textContent = t('Recently finished');
+        dropdown.appendChild(hdr);
+        for (const dt of this._doneTasks.slice(0, 8)) {
+          const row = document.createElement('div');
+          row.className = 'chat-status-dropdown-item chat-task-detail chat-task-done';
+          const ok = dt.status === 'completed';
+          row.innerHTML = `<div class="chat-task-title">${ok ? '<span class="tdone-ok">✓</span>' : '<span class="tdone-bad">✗</span>'} ${escHtml(dt.description || '')}</div>`;
+          row.title = ok ? t('completed') : escHtml(String(dt.status));
+          dropdown.appendChild(row);
+        }
       }
       return;
     }
