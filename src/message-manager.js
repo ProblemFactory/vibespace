@@ -572,7 +572,18 @@ class MessageManager {
       // stamp it too), isSynthetic = CLI-synthesized records (hook feedback on
       // the live stream). A user who literally types "Stop hook feedback: …"
       // must NOT get their message demoted to a dim notification card.
-      if (raw.promptSource || raw._fromWebui) msg.typed = true;
+      // EXCEPT (2.229.2, real report "看不到后台任务唤醒"): the CLI stamps
+      // promptSource:"sdk" on SYSTEM-GENERATED deliveries too — a background
+      // task completing wakes the agent with a `<task-notification>` user
+      // record whose authoritative marker is top-level origin.kind. typed
+      // made it render as the USER'S OWN words (a "You" bubble of sanitized
+      // XML ≈ invisible), so the wakeup had no trace in the chat. origin
+      // wins over promptSource; the text-shape check covers transports that
+      // drop the origin field.
+      const contentStr = typeof raw.message?.content === 'string' ? raw.message.content : '';
+      const isTaskNotif = raw.origin?.kind === 'task-notification' || /^\s*<task-notification>/.test(contentStr);
+      if (isTaskNotif) msg.originKind = 'task-notification';
+      else if (raw.promptSource || raw._fromWebui) msg.typed = true;
       if (raw.isSynthetic) msg.synthetic = true;
       if (emit) this._emit({ op: 'create', message: msg });
     }
