@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.232.1
+
+- **The auto-style dimension order is now a setting** (`tasks.autoStyleOrder`, Settings → Sidebar — user: both orders have merit, make it a choice). `interleaved` (default): bands and textures cycle from the first groups, maximum visual difference. `solid-first`: the 36-solid-slots-before-textures layout, cleaner for small setups. The setting reaches the SERVER allocator too — manual-pick masking compares slot renderings, so both sides must sequence identically (order mismatch would let auto colors collide with manual picks). Applies live (board re-renders on change); `colorSeq` values are order-independent.
+
 ## 2.232.0
 
 **All four identity dimensions now engage from the very first groups** (user report: "I created 20 groups and saw no texture — is this really done?"). It was implemented but ordered wrong: the sequence filled 36 solid slots (12 hues × 3 bands) before any texture — an aesthetic "keep small setups clean" choice that contradicted the maximize-difference directive. The 12 planes (3 lightness bands × 4 line styles, solid trio first, then dash/dot/diag trios) now cycle every 12 slots: groups 1-3 are the solid band trio, group 4 is dashed, and any two groups within 11 sequence positions of each other differ outright in lightness band or texture; the within-plane golden-angle index still grows without bound (infinite, never-colliding, gracefully densifying — 2.231.2 semantics unchanged). A 97°-step per-plane hue offset keeps consecutive slots apart in hue as well. NOTE: this reorders existing auto colors once (a one-time visual migration; colorSeq values are untouched).

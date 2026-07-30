@@ -2785,6 +2785,7 @@ const { TaskGroupManager } = require('./src/task-groups');
 const tasks = new TaskGroupManager({
   dataDir: path.join(__dirname, 'data'),
   readUserState: () => persistenceRouter.readUserState(),
+  getSetting: (k) => serverSetting(k),
   onChange: (list) => {
     const json = JSON.stringify({ type: 'tasks-updated', tasks: list });
     wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });

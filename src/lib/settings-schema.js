@@ -595,6 +595,16 @@ const SETTINGS_SCHEMA = {
     description: t('Which sidebar tab opens on page load'),
     category: t('Sidebar'), liveApply: false,
   },
+  'tasks.autoStyleOrder': {
+    type: 'enum', default: 'interleaved',
+    options: [
+      { value: 'interleaved', label: t('All dimensions from the start (textures early)') },
+      { value: 'solid-first', label: t('Solid colors first (textures after 36 groups)') },
+    ],
+    label: t('Task Group auto-style order'),
+    description: t('How automatic Task Group styles are sequenced. "All dimensions" cycles lightness bands AND line-style textures from the first groups (maximum visual difference — the 4th group is already dashed); "Solid first" uses 36 solid color slots before any texture (a cleaner look for small setups). Applies live; changing it re-renders existing auto styles.'),
+    category: t('Sidebar'), liveApply: true,
+  },
   'sidebar.defaultBoardView': {
     type: 'enum', default: 'groups',
     options: [

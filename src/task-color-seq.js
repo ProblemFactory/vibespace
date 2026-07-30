@@ -26,7 +26,7 @@ const BANDS = [52, 36, 68];
 const PATTERNS = [null, 'dash', 'dot', 'diag'];
 const SLOTS = 144;
 
-function seqTaskColor(k) {
+function seqTaskColor(k, order) {
   // v5 (2.232.0, user: "20 groups and still no texture — is this really
   // done?"): ALL FOUR dimensions participate from the start. The 12 discrete
   // planes (3 bands × 4 line styles, solid trio first, then dash/dot/diag
@@ -41,6 +41,19 @@ function seqTaskColor(k) {
   // 36 solid slots before any texture — an aesthetic choice that
   // contradicted the maximize-difference directive).
   const kk = Math.max(0, Math.floor(k) || 0);
+  // order = 'interleaved' (default) | 'solid-first' — user setting
+  // tasks.autoStyleOrder (2.232.1: both orders have real use cases; the
+  // setting must reach the SERVER allocator too, since manual-pick masking
+  // compares slot renderings). solid-first = the pre-v5 layout: 36 solid
+  // slots (12 hues × 3 bands) before any texture — cleaner look for small
+  // setups at the cost of engaging fewer dimensions early.
+  if (order === 'solid-first') {
+    const band = (kk % 36) % 3;
+    const pattern = PATTERNS[Math.floor(kk / 36) % 4];
+    const j = Math.floor(kk / 144) * 12 + Math.floor((kk % 36) / 3);
+    const hue = ((j * GOLDEN + band * 41) % 360);
+    return { color: `hsl(${Math.round(hue * 10) / 10}, 62%, ${BANDS[band]}%)`, hue, lightness: BANDS[band], pattern };
+  }
   const planeIdx = kk % 12;
   const band = planeIdx % 3;
   const pattern = PATTERNS[Math.floor(planeIdx / 3)];
@@ -78,13 +91,13 @@ function colorToHl(c) {
 
 /** Slots masked by ONE manual (color, pattern) pick: any slot rendering
  *  close to it (same texture, similar lightness, hue within 24°). */
-function maskedSlotsFor(color, pattern) {
+function maskedSlotsFor(color, pattern, order) {
   const hl = colorToHl(color);
   if (!hl) return [];
   const pat = pattern && pattern !== 'solid' ? pattern : null;
   const out = [];
   for (let k = 0; k < SLOTS; k++) {
-    const s = seqTaskColor(k);
+    const s = seqTaskColor(k, order);
     if (s.pattern === pat && Math.abs(s.lightness - hl.l) < 12 && hueDist(s.hue, hl.h) < 24) out.push(k);
   }
   return out;
@@ -95,7 +108,7 @@ function maskedSlotsFor(color, pattern) {
  *  (tested on the fly, so masking extends over the whole infinite
  *  sequence, not just the first cycle). Always terminates: a manual pick
  *  only masks slots rendering close to it, never a whole plane. */
-function pickColorSeq(tasks) {
+function pickColorSeq(tasks, order) {
   const taken = new Set();
   const manuals = [];
   for (const t of tasks || []) {
@@ -107,7 +120,7 @@ function pickColorSeq(tasks) {
   }
   for (let k = 0; k < 100000; k++) {
     if (taken.has(k)) continue;
-    const s = seqTaskColor(k);
+    const s = seqTaskColor(k, order);
     if (manuals.some((m) => s.pattern === m.pat && Math.abs(s.lightness - m.hl.l) < 12 && hueDist(s.hue, m.hl.h) < 24)) continue;
     return k;
   }

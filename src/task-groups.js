@@ -83,7 +83,7 @@ function sanitizeStrArray(arr, cap = 200) {
 }
 
 class TaskGroupManager {
-  constructor({ dataDir, onChange, readUserState }) {
+  constructor({ dataDir, onChange, readUserState, getSetting }) {
     // Authoritative store for Task Groups (岗位). Renamed from tasks.json in the
     // 岗位/活儿 refactor; _load migrates the old file once. The internal
     // `_state.tasks` map keeps its key (a wire/data structure — renaming it would
@@ -93,6 +93,7 @@ class TaskGroupManager {
     this._onChange = onChange || (() => {});
     this._state = { version: 1, tasks: {} };
     this._lastMd = new Map(); // groupId → last written TASK.md content (skip no-op writes)
+    this._getSetting = getSetting || null; // tasks.autoStyleOrder for the allocator
     const existed = this._load();
     // One-time migration: Task Groups lost their status (岗位 refactor) — a
     // `done` group becomes archived, others just drop the field.
@@ -104,7 +105,7 @@ class TaskGroupManager {
       const all = Object.values(this._state.tasks);
       const missing = all.filter((t) => !Number.isInteger(t.colorSeq))
         .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0) || String(a.id).localeCompare(String(b.id)));
-      for (const t of missing) { t.colorSeq = pickColorSeq(all); migrated = true; }
+      for (const t of missing) { t.colorSeq = pickColorSeq(all, this._styleOrder()); migrated = true; }
     }
     for (const t of Object.values(this._state.tasks)) {
       if ('status' in t) { if (t.archived === undefined) t.archived = (t.status === 'done'); delete t.status; migrated = true; }
@@ -875,7 +876,7 @@ class TaskGroupManager {
       // skipping slots masked by existing manual color/texture picks.
       // Deletion frees the slot for the next creation; the slot never
       // changes for the life of the group.
-      colorSeq: pickColorSeq(Object.values(this._state.tasks)),
+      colorSeq: pickColorSeq(Object.values(this._state.tasks), this._styleOrder()),
       injectContext: injectContext !== false, // per-group context-injection toggle (default on)
       createdAt: now,
       updatedAt: now,
@@ -920,6 +921,13 @@ class TaskGroupManager {
   // Texture line-style (2.231.0): null = auto assignment decides; explicit
   // value = the user's manual pick (incl. 'solid' to force no texture).
   // Visual-only like color — never bumps contentUpdatedAt.
+  /** tasks.autoStyleOrder — read via the injected settings getter so the
+   *  allocator's mask comparisons use the SAME slot renderings the client
+   *  draws (order mismatch would let auto colors collide with manual ones). */
+  _styleOrder() {
+    try { const v = this._getSetting?.('tasks.autoStyleOrder'); return v === 'solid-first' ? 'solid-first' : 'interleaved'; } catch { return 'interleaved'; }
+  }
+
   _sanitizePattern(v) {
     if (v == null || v === '') return null;
     const p = String(v).trim();
