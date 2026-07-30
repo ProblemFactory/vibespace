@@ -169,6 +169,7 @@ Everything VibeSpace adds *into* your agent sessions lives here — and all of i
 | `sidebar.defaultStatusFilter` | multiSelect | live, tmux, external, stopped | Which statuses to show by default (excludes archived) |
 | `sidebar.enableStatusQuickTabs` | boolean | `false` | Show ALL/LIVE/TMUX/EXT/STOP/ARCH quick-filter tabs |
 | `sidebar.defaultTab` | enum | `folders` | Which sidebar tab opens on page load (folders / tasks / mounts) |
+| `tasks.autoStyleOrder` | enum | `interleaved` | Auto Task-Group style sequencing: `interleaved` cycles lightness bands + line-style textures from the first groups (max difference, 4th group already dashed); `solid-first` uses 36 solid slots before any texture (cleaner for small setups). Live; reaches the server allocator so manual-pick masking matches |
 | `sidebar.defaultBoardView` | enum | `groups` | Which Task Groups sub-view opens on load (groups / tasks) |
 
 ### Session Card
