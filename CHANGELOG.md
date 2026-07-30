@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.233.1
+
+- **A finished background agent's card no longer says "responding" forever** (real report). The card's live status line is only ever redrawn by incoming subagent messages, so after the agent's last message it kept whatever activity was in flight. Completion now freezes it: the same `<task-notification>` wakeup that 2.233.0 wired into the task tracker also rewrites the line to "N messages · finished" (dimmed) and latches it, so a trailing buffered message can't resurrect the stale activity. Server side, the wakeup now also stops that agent's JSONL watcher and GCs its buffers immediately instead of waiting for the 10-minute idle sweep.
+
 ## 2.233.0
 
 **The background-task popup now shows completion — and stops accumulating forever** (user report: 20 rows, no way to tell what finished). Root cause: tasks enter the tracker on `system/task_started`, and the removal path listened for `system/task_notification` — but in the current harness a background command's completion signal is the `<task-notification>` WAKEUP user record (the 2.229.2 discovery), which never touched the tracker. Tasks only accumulated. The wakeup names its `<tool-use-id>` and `<status>`; the normalizer now routes them into the same taskInfo lifecycle, so:
