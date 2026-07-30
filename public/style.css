@@ -2729,7 +2729,8 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 /* Task board add/import row (P4) */
 .task-board-addrow { display: flex; gap: 6px; }
 .task-board-addrow .new-session-card { flex: 1; }
-.task-board-import { flex: 0 0 auto !important; padding-left: 12px; padding-right: 12px; }
+.task-board-import { flex: 0 0 auto !important; padding-left: 10px; padding-right: 10px; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); font-size: 14px; /* icons are 1em inline-sized */ }
+.task-board-import:hover { color: var(--accent); }
 /* Tasks-tab Groups|Tasks sub-tabs (same language as the main tabs, one level in) */
 .sidebar-subtabs { display: flex; border-bottom: 1px solid var(--border); }
 .sidebar-subtab {

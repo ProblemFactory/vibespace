@@ -48,6 +48,7 @@ export const UI_ICONS = {
   clipboard: _s('<path d="M5 2h6a1 1 0 011 1v11a1 1 0 01-1 1H4a1 1 0 01-1-1V5"/><path d="M6 1h4v2H6z"/>'),
   refresh:   _s('<path d="M2 8a6 6 0 0111-3M14 8a6 6 0 01-11 3"/><path d="M13 2v3h-3M3 14v-3h3"/>'),
   upload:    _s('<path d="M8 11V1M4 4l4-4 4 4"/><path d="M2 13h12"/>'),
+  import:    _s('<path d="M8 1v9M4 7l4 4 4-4"/><path d="M2 13h12"/>'),
   book:      _s('<path d="M2 2h5a3 3 0 013 3v9a2 2 0 00-2-2H2zM14 2H9a3 3 0 00-3 3v9a2 2 0 012-2h6z"/>'),
   memo:      _s('<path d="M4 1h8a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1z"/><path d="M6 5h4M6 8h4M6 11h2"/>'),
   tasks:     _s('<path d="M4 4l8 0M4 8l8 0M4 12l8 0"/><circle cx="2" cy="4" r="0.8" fill="currentColor" stroke="none"/><circle cx="2" cy="8" r="0.8" fill="currentColor" stroke="none"/><circle cx="2" cy="12" r="0.8" fill="currentColor" stroke="none"/>'),

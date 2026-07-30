@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.232.3
+
+- **The task board's Import button is no longer an empty dashed square** (real report). The card rendered its label through `.session-card-name`, whose `flex:1 / min-width:0 / overflow:hidden` semantics are built for the session-card flex row — inside this shrink-to-fit card the text collapsed to 0 width (verified with a live CDP probe: text present in DOM, rendered at 0px). It is now a proper SVG icon button (new `import` icon in the shared library, instant tooltip retained).
+
 ## 2.232.2
 
 - Switching `tasks.autoStyleOrder` also live-refreshes any OPEN Task Group detail window (the Auto swatch and texture chip previews show the group's current auto style); board/flat-view already re-rendered live. No per-group action is ever needed on a switch — auto styles are a pure function of the stored order-independent `colorSeq` and the setting.

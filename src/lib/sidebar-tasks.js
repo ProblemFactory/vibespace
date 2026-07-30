@@ -1,4 +1,5 @@
 import { escHtml, createPopover, showContextMenu, showInputDialog, showConfirmDialog, showToast, taskGroupColor, seqTaskColor } from './utils.js';
+import { UI_ICONS } from './icons.js';
 import { track } from './telemetry-client.js';
 import { t as tr } from './i18n.js';
 
@@ -762,8 +763,12 @@ export function installSidebarTasks(SidebarClass) {
     // Import a task from a committable repo file (P4)
     const importCard = document.createElement('div');
     importCard.className = 'session-item-card new-session-card task-board-import';
-    importCard.innerHTML = `<div class="session-card-name" style="color:var(--text-secondary)">${tr('Import…')}</div>`;
-    importCard.title = tr('Import a task from a VibeSpace task markdown file');
+    // SVG icon, not text (2.232.3, real report "导入按钮是个空白图标"):
+    // .session-card-name's flex:1/min-width:0/overflow:hidden semantics are
+    // built for the session-card flex row — inside this shrink-to-fit card
+    // the text collapsed to 0 width, leaving an empty dashed square.
+    importCard.innerHTML = UI_ICONS.import;
+    importCard.dataset.tip = tr('Import a task from a VibeSpace task markdown file');
     importCard.onclick = async () => {
       const p = await showInputDialog({ title: tr('Import Task Group'), label: tr('Absolute path to a VibeSpace task .md file'), placeholder: '/path/to/repo/T-xxxxxx.md', confirmText: tr('Import') });
       if (!p || !p.trim()) return;
