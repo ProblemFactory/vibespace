@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.230.1
+
+**Auto group colors upgraded from probabilistic to GUARANTEED distinct** (fair follow-up objection to 2.230.0: hash-only hues are birthday-bounded — with enough groups some pairs land close no matter how good the hash). Rendering now assigns colors set-aware (`assignDistinctTaskColors`): any two auto colors either differ in hue by **≥20°** or sit in **different lightness bands** (52%/36%/68% — visibly distinct even in a 3px bar). Three bands give hard separation up to 54 groups, then best-effort. Placement is anchor-first: a group whose stable hash-anchor hue is free KEEPS it forever, so colors don't reshuffle when unrelated groups come and go — only colliders get deterministically nudged (test-verified: adding a group to a 40-group set changes ≤3 existing colors). The canonical resolver lives on the sidebar (`getTaskColor`, map lazily recomputed on task-list sync); all consumers route through it. Test grew to 12 asserts including the pairwise hard guarantee, determinism, and insertion stability.
+
 ## 2.230.0
 
 **Task Group colors scale to any number of groups** (user request: the fixed 6-swatch palette ran out fast for people with many groups). Three layers:

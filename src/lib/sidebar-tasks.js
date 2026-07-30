@@ -1,4 +1,4 @@
-import { escHtml, createPopover, showContextMenu, showInputDialog, showConfirmDialog, showToast, taskGroupColor } from './utils.js';
+import { escHtml, createPopover, showContextMenu, showInputDialog, showConfirmDialog, showToast, taskGroupColor, assignDistinctTaskColors } from './utils.js';
 import { track } from './telemetry-client.js';
 import { t as tr } from './i18n.js';
 
@@ -69,6 +69,7 @@ export function installSidebarTasks(SidebarClass) {
     this.app.ws.onGlobal((msg) => {
       if (msg.type === 'tasks-updated' && Array.isArray(msg.tasks)) {
         this._tasks = msg.tasks;
+        this._taskColorMap = null; // lazy-recomputed by getTaskColor
         this._tasksLoaded = true;
         if (this._activeTab === 'tasks') this._render();
         this._lastAttnSig = null; // declared attention may have changed
@@ -211,6 +212,7 @@ export function installSidebarTasks(SidebarClass) {
       if (res.ok) {
         const data = await res.json();
         this._tasks = Array.isArray(data.tasks) ? data.tasks : [];
+        this._taskColorMap = null;
         this._tasksLoaded = true;
         if (this._activeTab === 'tasks') this._render();
         this._lastAttnSig = null;
@@ -230,6 +232,19 @@ export function installSidebarTasks(SidebarClass) {
   };
 
   // ── API write-through (broadcast echoes back to all clients incl. us) ──
+
+  /** Canonical group-color resolver (2.230.1): explicit color wins, 'none' =
+   *  neutral, unset = the set-aware GUARANTEED-distinct assignment (see
+   *  utils.assignDistinctTaskColors — ≥20° hue separation per lightness
+   *  band). The map is lazily recomputed whenever the client task list
+   *  syncs. Every group-color consumer goes through here. */
+  proto.getTaskColor = function(t) {
+    if (!t) return null;
+    if (t.color === 'none') return null;
+    if (t.color) return t.color;
+    if (!this._taskColorMap) this._taskColorMap = assignDistinctTaskColors(this._tasks || []);
+    return this._taskColorMap.get(t.id) || taskGroupColor(t);
+  };
 
   proto._taskApi = async function(method, url, body) {
     try {
@@ -599,7 +614,7 @@ export function installSidebarTasks(SidebarClass) {
       for (const g of groups) {
         const bar = document.createElement('span');
         bar.className = 'task-view-colorbar';
-        bar.style.setProperty('--g-color', taskGroupColor(g) || 'var(--text-dim)');
+        bar.style.setProperty('--g-color', this.getTaskColor(g) || 'var(--text-dim)');
         bar.dataset.tip = g.title + (g.objective ? ' — ' + g.objective.slice(0, 100) : '');
         bar.onclick = (e) => { e.stopPropagation(); this.app.openTaskDetail(g.id); };
         // Right-click (long-press on touch) = the group's full action menu —
@@ -644,7 +659,7 @@ export function installSidebarTasks(SidebarClass) {
       showContextMenu(e.clientX, e.clientY, [
         ...groupsAll.map(g => ({
           label: g.title,
-          style: (() => { const c = taskGroupColor(g); return c ? `box-shadow: inset 3px 0 0 ${c}` : ''; })(),
+          style: (() => { const c = this.getTaskColor(g); return c ? `box-shadow: inset 3px 0 0 ${c}` : ''; })(),
           action: () => this.app.showNewSessionDialog({ taskId: g.id, cwd: this._folderPaths(g)[0] }),
         })),
         ...(groupsAll.length ? [{ separator: true }] : []),
@@ -728,7 +743,7 @@ export function installSidebarTasks(SidebarClass) {
       const collapseKey = 'group:' + task.id;
       groupEl._collapseKey = collapseKey; // for highlightSession to expand on jump
       if (this._collapsedFolders.has(collapseKey)) groupEl.classList.add('collapsed');
-      { const c = taskGroupColor(task); if (c) { groupEl.style.setProperty('--task-color', c); groupEl.dataset.colored = '1'; } }
+      { const c = this.getTaskColor(task); if (c) { groupEl.style.setProperty('--task-color', c); groupEl.dataset.colored = '1'; } }
 
       const hasLive = taskSessions.some(s => s.status === 'live' || s.status === 'tmux');
       const linkedFolders = task.folders || [];

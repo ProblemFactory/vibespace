@@ -191,7 +191,7 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
       const txt = document.createElement('span');
       txt.textContent = g.title + (viaFolder ? t(' (folder)') : '');
       {
-        const c = taskGroupColor(g);
+        const c = app.sidebar?.getTaskColor ? app.sidebar.getTaskColor(g) : taskGroupColor(g);
         if (c) { const dot = document.createElement('span'); dot.className = 'tvg-dot'; dot.style.setProperty('--g-color', c); lbl.append(cb, dot, txt); }
         else lbl.append(cb, txt);
       }
