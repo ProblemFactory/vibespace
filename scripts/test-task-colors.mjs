@@ -51,6 +51,34 @@ check('unset → auto', taskGroupColor({ id: 'x' }) === autoTaskColor('x'));
   check('prefix 36 (12/band): same-plane ≥18°', minSamePlane(36) >= 18, `min=${minSamePlane(36)}`);
   check('slot 36+ opens textures', seqTaskColor(36).pattern === 'dash' && seqTaskColor(0).pattern === null);
   check('sequence is immutable (pure function)', JSON.stringify(seqTaskColor(7)) === JSON.stringify(seqTaskColor(7)));
+  // INFINITE extension (2.231.2): no wrap — slot 144 must NOT duplicate slot
+  // 0; the sequence densifies gracefully instead of colliding
+  const s0 = seqTaskColor(0), s144 = seqTaskColor(144);
+  check('slot 144 is a NEW point, not a wrap of slot 0',
+    s0.pattern === s144.pattern && s0.lightness === s144.lightness && dist(s0.hue, s144.hue) > 60,
+    `hueDist=${dist(s0.hue, s144.hue)}`);
+  {
+    const seen = new Set(); let dup = 0;
+    for (let k = 0; k < 1000; k++) { const s = seqTaskColor(k); const key = `${s.pattern}|${s.lightness}|${s.hue.toFixed(2)}`; if (seen.has(key)) dup++; seen.add(key); }
+    check('no exact duplicates in the first 1000 slots', dup === 0, `dups=${dup}`);
+  }
+  {
+    // graceful degradation: min same-plane gap stays ≥ ~half the ideal even
+    // spacing as density doubles (golden-ratio gap bound)
+    const minAt = (N) => {
+      const per = {};
+      for (let k = 0; k < N; k++) { const s = seqTaskColor(k); const key = `${s.pattern}|${s.lightness}`; (per[key] = per[key] || []).push(s.hue); }
+      let mind = 360, maxPer = 0;
+      for (const hs of Object.values(per)) {
+        maxPer = Math.max(maxPer, hs.length);
+        for (let i = 0; i < hs.length; i++) for (let j = i + 1; j < hs.length; j++) mind = Math.min(mind, dist(hs[i], hs[j]));
+      }
+      return { mind, ideal: 360 / maxPer };
+    };
+    const a288 = minAt(288), a576 = minAt(576);
+    check('288 slots: min gap ≥ half of ideal (graceful, not colliding)', a288.mind >= a288.ideal * 0.5, `${a288.mind.toFixed(1)} vs ideal ${a288.ideal.toFixed(1)}`);
+    check('576 slots: still ≥ half of ideal', a576.mind >= a576.ideal * 0.5, `${a576.mind.toFixed(1)} vs ideal ${a576.ideal.toFixed(1)}`);
+  }
   // allocator: sequential, reuses freed slots, skips masked ones
   check('empty set → slot 0', pickColorSeq([]) === 0);
   check('0,1,2 taken → 3', pickColorSeq([{ colorSeq: 0 }, { colorSeq: 1 }, { colorSeq: 2 }]) === 3);

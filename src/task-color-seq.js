@@ -10,8 +10,11 @@
  * phyllotaxis): within a plane the j-th hue is j×137.5077°, whose min
  * pairwise gap over ANY prefix stays ≥ ~61.8% of ideal even spacing
  * (three-gap theorem). Slots cycle lightness bands first (52/36/68%),
- * textures open after 36 solid slots: 12 hues × 3 bands × 4 line styles =
- * 144 immutable slots, wrapping past that (best effort).
+ * textures open after 36 solid slots. The sequence is INFINITE: the 12
+ * discrete planes (3 bands × 4 line styles) cycle, while the within-plane
+ * golden index grows without bound — later points pack into the existing
+ * space ever more densely (min gap ~0.618×360/perPlaneCount) but NEVER
+ * collide exactly (irrational rotation).
  *
  * SHARED between server (allocator in task-groups.js) and client (renderers
  * via src/lib/utils.js re-export) — one source of truth; esbuild handles the
@@ -24,15 +27,23 @@ const PATTERNS = [null, 'dash', 'dot', 'diag'];
 const SLOTS = 144;
 
 function seqTaskColor(k) {
-  const kk = ((Math.floor(k) % SLOTS) + SLOTS) % SLOTS;
-  const pattern = PATTERNS[Math.floor(kk / 36)];
-  const k2 = kk % 36;
-  const band = k2 % 3;
-  const j = Math.floor(k2 / 3);
+  // INFINITE sequence (2.231.2, the user's theory question caught a gap: the
+  // old `% 144` wrap made slot 144 an EXACT duplicate of slot 0). Only the
+  // discrete dimensions cycle (3 bands × 4 line styles = 12 planes); the
+  // within-plane golden-angle index j grows WITHOUT BOUND — an irrational
+  // rotation never lands on the same hue twice, each new point splits an
+  // existing gap in the golden ratio, and the min same-plane gap degrades
+  // gracefully as ~0.618 × 360/perPlaneCount. So the sequence extends
+  // forever, just increasingly dense — never colliding. For k < 144 this
+  // formula equals the old one, so already-assigned slots keep their color.
+  const kk = Math.max(0, Math.floor(k) || 0);
+  const band = (kk % 36) % 3;
+  const pattern = PATTERNS[Math.floor(kk / 36) % 4];
+  const j = Math.floor(kk / 144) * 12 + Math.floor((kk % 36) / 3);
   // band offset decorrelates the three interleaved band sequences so
   // consecutive slots differ in hue as well as lightness
-  const hue = Math.round((j * GOLDEN + band * 41) % 360);
-  return { color: `hsl(${hue}, 62%, ${BANDS[band]}%)`, hue, lightness: BANDS[band], pattern };
+  const hue = ((j * GOLDEN + band * 41) % 360);
+  return { color: `hsl(${Math.round(hue * 10) / 10}, 62%, ${BANDS[band]}%)`, hue, lightness: BANDS[band], pattern };
 }
 
 function hueDist(a, b) { const d = Math.abs(a - b) % 360; return Math.min(d, 360 - d); }
@@ -77,18 +88,27 @@ function maskedSlotsFor(color, pattern) {
 }
 
 /** The allocator: lowest slot that is neither OCCUPIED (a live group's
- *  colorSeq — deletion frees slots naturally) nor MASKED by a manual pick.
- *  All 144 taken → overflow past the wheel (wraps in seqTaskColor). */
+ *  colorSeq — deletion frees slots naturally) nor MASKED by a manual pick
+ *  (tested on the fly, so masking extends over the whole infinite
+ *  sequence, not just the first cycle). Always terminates: a manual pick
+ *  only masks slots rendering close to it, never a whole plane. */
 function pickColorSeq(tasks) {
   const taken = new Set();
+  const manuals = [];
   for (const t of tasks || []) {
-    if (Number.isInteger(t?.colorSeq)) taken.add(((t.colorSeq % SLOTS) + SLOTS) % SLOTS);
-    if (t?.color && t.color !== 'none') for (const k of maskedSlotsFor(t.color, t.pattern)) taken.add(k);
+    if (Number.isInteger(t?.colorSeq)) taken.add(t.colorSeq);
+    if (t?.color && t.color !== 'none') {
+      const hl = colorToHl(t.color);
+      if (hl) manuals.push({ hl, pat: t.pattern && t.pattern !== 'solid' ? t.pattern : null });
+    }
   }
-  for (let k = 0; k < SLOTS; k++) if (!taken.has(k)) return k;
-  let max = -1;
-  for (const t of tasks || []) if (Number.isInteger(t?.colorSeq)) max = Math.max(max, t.colorSeq);
-  return max + 1;
+  for (let k = 0; k < 100000; k++) {
+    if (taken.has(k)) continue;
+    const s = seqTaskColor(k);
+    if (manuals.some((m) => s.pattern === m.pat && Math.abs(s.lightness - m.hl.l) < 12 && hueDist(s.hue, m.hl.h) < 24)) continue;
+    return k;
+  }
+  return 100000; // unreachable in practice
 }
 
 module.exports = { seqTaskColor, pickColorSeq, maskedSlotsFor, colorToHl, hueDist, SLOTS };
