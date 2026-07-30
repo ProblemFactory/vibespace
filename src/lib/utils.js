@@ -554,19 +554,57 @@ export function taskGroupColor(t) {
   return autoTaskColor(t.id || t.title || '');
 }
 export function autoTaskColor(id) {
-  // FNV-1a + murmur-style avalanche: measured 20-21 distinct 12° hue buckets
-  // for 30 ids vs 17 for plain djb2 — stateless hashing is inherently
-  // birthday-bounded, but the finalizer keeps near-collisions rare. Stability
-  // (same id → same color forever) is deliberately chosen over perfect
-  // spacing: an order-indexed golden-angle sequence would reshuffle every
-  // group's color whenever an older group is deleted.
+  return `hsl(${autoTaskHue(id)}, 62%, 52%)`;
+}
+export function autoTaskHue(id) {
+  // FNV-1a + murmur-style avalanche — the STABLE ANCHOR hue for a group id.
+  // Stateless hashing alone is birthday-bounded (near-collisions guaranteed
+  // with enough groups), which is why rendering goes through
+  // assignDistinctTaskColors below; this stays as the anchor + the fallback
+  // when no group list is available.
   const str = String(id);
   let h = 2166136261;
   for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
   h ^= h >>> 16; h = Math.imul(h, 2246822507) >>> 0;
   h ^= h >>> 13; h = Math.imul(h, 3266489909) >>> 0;
   h ^= h >>> 16;
-  return `hsl(${(h >>> 0) % 360}, 62%, 52%)`;
+  return (h >>> 0) % 360;
+}
+
+/** GUARANTEED-distinct auto colors for a whole group set (2.230.1, after the
+ *  fair objection that hash-only hues still collide as groups multiply).
+ *  Contract: any two auto colors either differ in hue by ≥20° or sit in
+ *  DIFFERENT lightness bands (52%/36%/68% — visibly distinct even at 3px);
+ *  three bands ⇒ up to 54 groups with hard separation, then best-effort.
+ *  Placement is anchor-first: a group whose stable anchor hue is free KEEPS
+ *  it (colors don't reshuffle when unrelated groups come and go); only
+ *  colliders get deterministically nudged clockwise to the nearest free
+ *  slot. Deterministic: sorted by id, pure function of the id set. */
+export function assignDistinctTaskColors(tasks) {
+  const MIN = 20;
+  const BANDS = [52, 36, 68];
+  const placed = BANDS.map(() => []);
+  const out = new Map();
+  const dist = (a, b) => { const d = Math.abs(a - b) % 360; return Math.min(d, 360 - d); };
+  const autos = (tasks || []).filter((t) => t && t.id && !t.color)
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  for (const t of autos) {
+    const anchor = autoTaskHue(t.id);
+    let done = false;
+    for (let b = 0; b < BANDS.length && !done; b++) {
+      if (placed[b].length >= Math.floor(360 / MIN)) continue;
+      for (let off = 0; off < 360; off += 2) {
+        const h = (anchor + off) % 360;
+        if (placed[b].every((ph) => dist(ph, h) >= MIN)) {
+          placed[b].push(h);
+          out.set(t.id, `hsl(${Math.round(h)}, 62%, ${BANDS[b]}%)`);
+          done = true; break;
+        }
+      }
+    }
+    if (!done) out.set(t.id, autoTaskColor(t.id)); // >54 groups: best effort
+  }
+  return out;
 }
 
 export function showImageOverlay(src) {

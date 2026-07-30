@@ -12,11 +12,12 @@ const require = createRequire(import.meta.url);
 let failed = 0;
 const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? ' — ' + e : ''}`); } };
 
-// utils is an ES module — read+eval the two pure functions
+// utils is an ES module — read+eval the pure functions
 const src = fs.readFileSync('src/lib/utils.js', 'utf8');
-const fn = src.match(/export function taskGroupColor[\s\S]*?\n\}/)[0] + '\n' + src.match(/export function autoTaskColor[\s\S]*?\n\}/)[0];
-const mod = new Function(fn.replace(/export /g, '') + '; return { taskGroupColor, autoTaskColor };')();
-const { taskGroupColor, autoTaskColor } = mod;
+const fn = ['taskGroupColor', 'autoTaskColor', 'autoTaskHue', 'assignDistinctTaskColors']
+  .map((n) => src.match(new RegExp(`export function ${n}[\\s\\S]*?\\n\\}`))[0]).join('\n');
+const mod = new Function(fn.replace(/export /g, '') + '; return { taskGroupColor, autoTaskColor, autoTaskHue, assignDistinctTaskColors };')();
+const { taskGroupColor, autoTaskColor, assignDistinctTaskColors } = mod;
 
 check('deterministic: same id → same color', autoTaskColor('T-260709-abc') === autoTaskColor('T-260709-abc'));
 const hues = [];
@@ -26,6 +27,31 @@ check('30 groups spread across ≥18 distinct 12° hue buckets', uniq.size >= 18
 check('explicit color wins', taskGroupColor({ id: 'x', color: '#123456' }) === '#123456');
 check("sentinel 'none' → null (neutral)", taskGroupColor({ id: 'x', color: 'none' }) === null);
 check('unset → auto', taskGroupColor({ id: 'x' }) === autoTaskColor('x'));
+
+// ── set-aware GUARANTEED distinctness (2.230.1, the fair objection:
+// hash-only hues still collide as groups multiply) ──
+{
+  const mk = (n) => Array.from({ length: n }, (_, i) => ({ id: `T-26${String(100 + i)}-grp${i}` }));
+  const parse = (c) => { const m = c.match(/hsl\((\d+), 62%, (\d+)%\)/); return { h: +m[1], l: +m[2] }; };
+  const dist = (a, b) => { const d = Math.abs(a - b) % 360; return Math.min(d, 360 - d); };
+  const forty = mk(40);
+  const map = assignDistinctTaskColors(forty);
+  let violations = 0;
+  const cols = forty.map((t) => parse(map.get(t.id)));
+  for (let i = 0; i < cols.length; i++) for (let j = i + 1; j < cols.length; j++) {
+    if (cols[i].l === cols[j].l && dist(cols[i].h, cols[j].h) < 20) violations++;
+  }
+  check('40 groups: every same-band pair ≥20° apart (hard guarantee)', violations === 0, `violations=${violations}`);
+  const map2 = assignDistinctTaskColors(mk(40));
+  check('assignment is deterministic', [...map.entries()].every(([k, v]) => map2.get(k) === v));
+  // stability: adding one group leaves the vast majority untouched
+  const map3 = assignDistinctTaskColors([...forty, { id: 'T-26999-newcomer' }]);
+  const changed = forty.filter((t) => map3.get(t.id) !== map.get(t.id)).length;
+  check('adding a group changes ≤3 existing colors (anchor-first stability)', changed <= 3, `changed=${changed}`);
+  // explicit colors are ignored by the assigner (they keep their own)
+  const mixed = assignDistinctTaskColors([{ id: 'a', color: '#123456' }, { id: 'b' }]);
+  check('explicit-color groups are not assigned', !mixed.has('a') && mixed.has('b'));
+}
 
 // server sanitizer: arbitrary hex + 'none' accepted, css-injection rejected
 const { TaskGroupManager } = require('../src/task-groups.js');
