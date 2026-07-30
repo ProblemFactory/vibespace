@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.233.0
+
+**The background-task popup now shows completion — and stops accumulating forever** (user report: 20 rows, no way to tell what finished). Root cause: tasks enter the tracker on `system/task_started`, and the removal path listened for `system/task_notification` — but in the current harness a background command's completion signal is the `<task-notification>` WAKEUP user record (the 2.229.2 discovery), which never touched the tracker. Tasks only accumulated. The wakeup names its `<tool-use-id>` and `<status>`; the normalizer now routes them into the same taskInfo lifecycle, so:
+
+- the status-bar chip counts RUNNING tasks only;
+- finished tasks move to a dim **Recently finished** tail in the popup (✓/✗ outcome, last 12) instead of vanishing silently or lingering as fake-running rows.
+
+Unit-tested end to end (task_started → wakeup → completed) in `scripts/test-task-wakeup-card.mjs`.
+
 ## 2.232.4
 
 - **The Import button is actually visible now** (2.232.3 shipped the SVG but it still rendered blank — this time verified by PIXELS, not DOM). True root cause, three layers deep: `.session-item-card` is a container-query container (`container-type: inline-size`, from the 2.37.4 responsive-tags work) — inline-size containment makes the card's width INDEPENDENT of its content, so the shrink-to-fit import card collapsed to padding-only width, and the flex layout then squeezed the child (the old text AND the new icon alike) to 0. The forensic tell: the icon's inline `1em` height resolved to 14px (cross axis) while its width resolved to 0px (main axis, flex-shrunk). Fix: the import card opts out of containment (`container-type: normal`) + explicit `min-width` + `flex-shrink: 0` on the icon. Verified with a CDP screenshot of the rendered row this time.

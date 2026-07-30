@@ -37,5 +37,22 @@ check('genuine typed message stays typed', m && m.typed === true && !m.originKin
 m = norm({ type: 'user', message: { role: 'user', content: 'look at this: <task-notification> weird' }, promptSource: 'sdk', uuid: 'w4', timestamp: new Date().toISOString() });
 check('mid-text mention does not classify as wakeup', m && m.typed === true && !m.originKind);
 
+// ── task lifecycle closure (2.233.0): the wakeup COMPLETES its tracked task
+// (in the current harness no system/task_notification ever arrives for
+// background commands — tasks only accumulated in the status-bar popup) ──
+{
+  const mm = new MessageManager('claude', 't2');
+  const ops = [];
+  mm.onOp((op) => ops.push(op));
+  // background Bash: tool_use → task_started → wakeup names the tool-use-id
+  mm.processLive({ type: 'assistant', message: { id: 'm1', role: 'assistant', model: 'claude-fable-5', content: [{ type: 'tool_use', id: 'toolu_bg1', name: 'Bash', input: { command: 'sleep 99', run_in_background: true } }] }, uuid: 'a1', timestamp: new Date().toISOString() });
+  mm.processLive({ type: 'system', subtype: 'task_started', tool_use_id: 'toolu_bg1', task_id: 'bgtask1', task_type: 'local_bash', description: 'watch CI' });
+  const started = ops.filter((o) => o.op === 'edit' && o.fields?.taskInfo).pop();
+  check('task_started marks running', started?.fields.taskInfo.status === 'running');
+  mm.processLive({ type: 'user', message: { role: 'user', content: '<task-notification>\n<task-id>bgtask1</task-id>\n<tool-use-id>toolu_bg1</tool-use-id>\n<status>completed</status>\n<summary>done</summary>\n</task-notification>' }, origin: { kind: 'task-notification' }, promptSource: 'sdk', uuid: 'w9', timestamp: new Date().toISOString() });
+  const done = ops.filter((o) => o.op === 'edit' && o.fields?.taskInfo).pop();
+  check('wakeup completes the tracked task (popup lifecycle closed)', done?.fields.taskInfo.status === 'completed', JSON.stringify(done?.fields));
+}
+
 console.log(failed === 0 ? 'ALL PASS' : `${failed} FAILED`);
 process.exit(failed ? 1 : 0);
