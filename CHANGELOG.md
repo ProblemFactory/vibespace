@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.231.1
+
+**Auto colors redesigned around the user's formalization: a fixed sequence S_k in the hue × lightness × texture identity space, where every prefix S_0..S_i stays far apart and assigned points NEVER move.** The previous set-aware assignment satisfied a ≥20° floor while letting 3 groups sit visibly close (the reported case), and re-spaced existing colors on insertion. Now:
+
+- **The sequence**: golden-angle hues (sunflower phyllotaxis — any prefix keeps ≥~62% of ideal even spacing, three-gap theorem) interleaved across the 3 lightness bands, textures opening after 36 solid slots; 144 immutable slots total. 3 groups = 3 different bands with well-spread hues; a group's color never changes for its lifetime.
+- **The slot** (`colorSeq`) is allocated server-side at creation — lowest free index — and stored on the record. **Deletion frees the slot for the next creation** (S1 deleted → the next group becomes the new S1), keeping the occupied prefix compact so spacing quality tracks the CURRENT group count.
+- **Manual picks mask the sequence**: a hand-chosen color/texture blocks the auto slots that render close to it (hue <24°, similar lightness, same texture), so auto assignments never collide with manual ones.
+- Renderer-side this collapsed to a pure function (`seqTaskColor(colorSeq)`) — the set-aware map machinery is gone; the generator + allocator live in one shared module (`src/task-color-seq.js`) used by both server and client. Existing groups are backfilled in creation order at boot.
+
+Test suite rewritten to the sequence contract (25 asserts: prefix spacing, immutability, slot reuse on deletion, mask-aware allocation, server create/delete integration).
+
 ## 2.231.0
 
 **Texture is now manually selectable per Task Group** (follow-up: 2.230.2 made line-style textures auto-only — the settings dialog still only offered color). The group detail window's Color section gains a **Texture row**: Auto (follow the auto assignment) / Solid / Dashed / Dotted / Diagonal, each chip previewing its line style on the group's current color. A manual pick wins over the auto assignment and works for explicit-color groups too (pick any color AND any texture); `pattern` is a first-class store field (sanitized enum, visual-only — never re-injects agent context). Textures now also render on the task board's left strip via `border-image` (replaces the border color only — the 4px layout is untouched), alongside the flat-view color bars. Note on lightness: the custom color picker always allowed any lightness — pick a darker/lighter shade of the same hue there.

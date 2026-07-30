@@ -1,4 +1,4 @@
-import { escHtml, createPopover, showContextMenu, showInputDialog, showConfirmDialog, showToast, taskGroupColor, assignDistinctTaskColors } from './utils.js';
+import { escHtml, createPopover, showContextMenu, showInputDialog, showConfirmDialog, showToast, taskGroupColor, seqTaskColor } from './utils.js';
 import { track } from './telemetry-client.js';
 import { t as tr } from './i18n.js';
 
@@ -69,7 +69,6 @@ export function installSidebarTasks(SidebarClass) {
     this.app.ws.onGlobal((msg) => {
       if (msg.type === 'tasks-updated' && Array.isArray(msg.tasks)) {
         this._tasks = msg.tasks;
-        this._taskColorMap = null; // lazy-recomputed by getTaskColor
         this._tasksLoaded = true;
         if (this._activeTab === 'tasks') this._render();
         this._lastAttnSig = null; // declared attention may have changed
@@ -212,7 +211,6 @@ export function installSidebarTasks(SidebarClass) {
       if (res.ok) {
         const data = await res.json();
         this._tasks = Array.isArray(data.tasks) ? data.tasks : [];
-        this._taskColorMap = null;
         this._tasksLoaded = true;
         if (this._activeTab === 'tasks') this._render();
         this._lastAttnSig = null;
@@ -242,8 +240,9 @@ export function installSidebarTasks(SidebarClass) {
     if (!t) return null;
     if (t.color === 'none') return null;
     if (t.color) return t.color;
-    if (!this._taskColorMap) this._taskColorMap = assignDistinctTaskColors(this._tasks || []);
-    return this._taskColorMap.get(t.id)?.color || taskGroupColor(t);
+    // pure function of the group's immutable colorSeq (see utils.seqTaskColor)
+    if (t.colorSeq != null) return seqTaskColor(t.colorSeq).color;
+    return taskGroupColor(t); // pre-migration record / remote list without seq
   };
   /** Texture channel of the auto assignment (null | 'stripe' | 'dot' |
    *  'hatch') — hue-independent third dimension; explicit-color groups
@@ -254,8 +253,7 @@ export function installSidebarTasks(SidebarClass) {
     // as chosen — works for BOTH explicit-color and auto-color groups
     if (t.pattern) return t.pattern === 'solid' ? null : t.pattern;
     if (t.color) return null; // explicit color, no manual texture → solid
-    if (!this._taskColorMap) this._taskColorMap = assignDistinctTaskColors(this._tasks || []);
-    return this._taskColorMap.get(t.id)?.pattern || null;
+    return t.colorSeq != null ? seqTaskColor(t.colorSeq).pattern : null;
   };
 
   proto._taskApi = async function(method, url, body) {

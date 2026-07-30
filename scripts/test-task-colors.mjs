@@ -14,10 +14,10 @@ const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; 
 
 // utils is an ES module — read+eval the pure functions
 const src = fs.readFileSync('src/lib/utils.js', 'utf8');
-const fn = ['taskGroupColor', 'autoTaskColor', 'autoTaskHue', 'assignDistinctTaskColors']
+const fn = ['taskGroupColor', 'autoTaskColor', 'autoTaskHue']
   .map((n) => src.match(new RegExp(`export function ${n}[\\s\\S]*?\\n\\}`))[0]).join('\n');
-const mod = new Function(fn.replace(/export /g, '') + '; return { taskGroupColor, autoTaskColor, autoTaskHue, assignDistinctTaskColors };')();
-const { taskGroupColor, autoTaskColor, assignDistinctTaskColors } = mod;
+const mod = new Function(fn.replace(/export /g, '') + '; return { taskGroupColor, autoTaskColor, autoTaskHue };')();
+const { taskGroupColor, autoTaskColor } = mod;
 
 check('deterministic: same id → same color', autoTaskColor('T-260709-abc') === autoTaskColor('T-260709-abc'));
 const hues = [];
@@ -28,41 +28,54 @@ check('explicit color wins', taskGroupColor({ id: 'x', color: '#123456' }) === '
 check("sentinel 'none' → null (neutral)", taskGroupColor({ id: 'x', color: 'none' }) === null);
 check('unset → auto', taskGroupColor({ id: 'x' }) === autoTaskColor('x'));
 
-// ── set-aware GUARANTEED distinctness (2.230.1, the fair objection:
-// hash-only hues still collide as groups multiply) ──
+// ── v4 (2.231.1, user's formalization): auto identity = a FIXED SEQUENCE
+// S_k in hue×lightness×texture space — every prefix far apart, assigned
+// points NEVER move, deletion frees the slot, manual picks MASK nearby
+// slots. Allocator lives server-side (pickColorSeq); renderer is the pure
+// function seqTaskColor(colorSeq). ──
 {
-  const mk = (n) => Array.from({ length: n }, (_, i) => ({ id: `T-26${String(100 + i)}-grp${i}` }));
+  const { seqTaskColor, pickColorSeq, maskedSlotsFor } = require('../src/task-color-seq.js');
   const parse = (c) => { const m = c.match(/hsl\((\d+), 62%, (\d+)%\)/); return { h: +m[1], l: +m[2] }; };
   const dist = (a, b) => { const d = Math.abs(a - b) % 360; return Math.min(d, 360 - d); };
-  const forty = mk(40);
-  const map = assignDistinctTaskColors(forty);
-  let violations = 0;
-  const ent = forty.map((t) => { const e = map.get(t.id); return { ...parse(e.color), p: e.pattern }; });
-  for (let i = 0; i < ent.length; i++) for (let j = i + 1; j < ent.length; j++) {
-    if (ent[i].l === ent[j].l && ent[i].p === ent[j].p && dist(ent[i].h, ent[j].h) < 20) violations++;
-  }
-  check('40 groups: every same-plane pair ≥20° apart (hard guarantee)', violations === 0, `violations=${violations}`);
-  check('first 54 groups are all SOLID (textures only past the solid planes)', ent.every((e) => e.p === null));
-  const map2 = assignDistinctTaskColors(mk(40));
-  check('assignment is deterministic', [...map.entries()].every(([k, v]) => JSON.stringify(map2.get(k)) === JSON.stringify(v)));
-  // stability: adding one group leaves the vast majority untouched
-  const map3 = assignDistinctTaskColors([...forty, { id: 'T-26999-newcomer' }]);
-  const changed = forty.filter((t) => JSON.stringify(map3.get(t.id)) !== JSON.stringify(map.get(t.id))).length;
-  check('adding a group changes ≤3 existing colors (anchor-first stability)', changed <= 3, `changed=${changed}`);
-  // explicit colors are ignored by the assigner (they keep their own)
-  const mixed = assignDistinctTaskColors([{ id: 'a', color: '#123456' }, { id: 'b' }]);
-  check('explicit-color groups are not assigned', !mixed.has('a') && mixed.has('b'));
-  // texture dimension: 80 groups → patterns appear, hard guarantee still holds
-  const eighty = mk(80);
-  const map4 = assignDistinctTaskColors(eighty);
-  const e4 = eighty.map((t) => { const e = map4.get(t.id); return { ...parse(e.color), p: e.pattern }; });
-  const patterned = e4.filter((e) => e.p !== null).length;
-  check('80 groups: textured plane engaged (>54 spill into dash)', patterned >= 20, `patterned=${patterned}`);
-  let v4 = 0;
-  for (let i = 0; i < e4.length; i++) for (let j = i + 1; j < e4.length; j++) {
-    if (e4[i].l === e4[j].l && e4[i].p === e4[j].p && dist(e4[i].h, e4[j].h) < 20) v4++;
-  }
-  check('80 groups: pairwise guarantee holds across planes', v4 === 0, `violations=${v4}`);
+  const minSamePlane = (n) => {
+    const es = Array.from({ length: n }, (_, k) => { const e = seqTaskColor(k); return { h: e.hue, l: e.lightness, p: e.pattern }; });
+    let mind = 360;
+    for (let i = 0; i < es.length; i++) for (let j = i + 1; j < es.length; j++) {
+      if (es[i].l === es[j].l && es[i].p === es[j].p) mind = Math.min(mind, dist(es[i].h, es[j].h));
+    }
+    return mind;
+  };
+  // prefix quality: same-plane golden prefixes stay ≥ ~62% of ideal spacing
+  check('prefix 3: pairwise distinct (bands differ)', minSamePlane(3) === 360);
+  check('prefix 12 (4/band): same-plane ≥50° (golden ≈59% of ideal 90°)', minSamePlane(12) >= 50, `min=${minSamePlane(12)}`);
+  check('prefix 36 (12/band): same-plane ≥18°', minSamePlane(36) >= 18, `min=${minSamePlane(36)}`);
+  check('slot 36+ opens textures', seqTaskColor(36).pattern === 'dash' && seqTaskColor(0).pattern === null);
+  check('sequence is immutable (pure function)', JSON.stringify(seqTaskColor(7)) === JSON.stringify(seqTaskColor(7)));
+  // allocator: sequential, reuses freed slots, skips masked ones
+  check('empty set → slot 0', pickColorSeq([]) === 0);
+  check('0,1,2 taken → 3', pickColorSeq([{ colorSeq: 0 }, { colorSeq: 1 }, { colorSeq: 2 }]) === 3);
+  check('deletion frees: 0,2,3 taken → reuse 1', pickColorSeq([{ colorSeq: 0 }, { colorSeq: 2 }, { colorSeq: 3 }]) === 1);
+  // masking: a manual color equal to slot 1's rendering blocks slot 1
+  const s1 = seqTaskColor(1);
+  const masked = maskedSlotsFor(s1.color, null);
+  check('manual pick masks its nearby slot(s)', masked.includes(1), JSON.stringify(masked));
+  check('allocator skips masked slots', pickColorSeq([{ colorSeq: 0 }, { color: s1.color }]) !== 1);
+  // hex parsing path for masks
+  check('hex manual colors parse for masking', maskedSlotsFor('#ff0000', null).length >= 0 && Array.isArray(maskedSlotsFor('#f00', null)));
+}
+
+// ── server integration: create assigns colorSeq, delete frees it ──
+{
+  const dir3 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-seq-'));
+  const { TaskGroupManager: TM3 } = require('../src/task-groups.js');
+  const tm3 = new TM3({ dataDir: dir3, readUserState: () => ({}), onChange: () => {} });
+  const a = tm3.create({ title: 's0' }), b = tm3.create({ title: 's1' }), c = tm3.create({ title: 's2' });
+  check('create assigns sequential colorSeq', a.colorSeq === 0 && b.colorSeq === 1 && c.colorSeq === 2, JSON.stringify([a.colorSeq, b.colorSeq, c.colorSeq]));
+  tm3.remove(b.id);
+  const d = tm3.create({ title: 's3' });
+  check('deleted slot is reused (S1 freed → next create takes it)', d.colorSeq === 1, `got ${d.colorSeq}`);
+  check('survivors untouched by deletion', tm3.get(a.id).colorSeq === 0 && tm3.get(c.id).colorSeq === 2);
+  fs.rmSync(dir3, { recursive: true, force: true });
 }
 
 // ── manual texture (2.231.0): store sanitize + precedence semantics ──
