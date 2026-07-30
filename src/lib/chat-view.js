@@ -548,8 +548,11 @@ class ChatView {
     // Render minimap from turn data (attach payload or async fetch fallback)
     if (meta?.turnMap?.length) {
       this._chatMinimap.render(meta.turnMap);
-    } else if (this._total > 50) {
-      // Fallback: fetch turn map via API
+    } else if (this._total > 50 && this._canPaginate) {
+      // Fallback: fetch turn map via API. _canPaginate excludes sub- viewers:
+      // _getSessionIds() falls back to the PARENT's identity there (the
+      // openSpec carries it for the disk lookup), so this fetch would render
+      // the PARENT conversation's turn markers into the agent's minimap.
       const { backend, backendSessionId, cwd, host } = this._getSessionIds();
       if (backendSessionId) {
         fetch(`/api/session-messages?backend=${encodeURIComponent(backend)}&backendSessionId=${encodeURIComponent(backendSessionId)}&cwd=${encodeURIComponent(cwd)}&turnmap=1${host ? `&host=${encodeURIComponent(host)}` : ''}`)
@@ -560,7 +563,7 @@ class ChatView {
     // front, so the scrollbar reflects the full timeline without waiting for
     // the user to scroll up to the seam marker. (info probe is free for normal
     // sessions — jsonlGapInfo returns null without building an index.)
-    if (this._total > 50) this._initGapMinimap();
+    if (this._total > 50 && this._canPaginate) this._initGapMinimap();
 
     if (isStreaming) this._showTyping(meta?.streamingLabel || t('thinking...'));
     this._scrollToBottom();
@@ -863,6 +866,13 @@ class ChatView {
   // minimap to full-extent mode so the scrollbar reflects the entire session,
   // not just the loaded head+tail window.
   async _initGapMinimap() {
+    // NEVER for subagent viewers (2.233.2, real report "agent日志前面有好多
+    // 父会话历史"): _getSessionIds() resolves a sub- viewer to its PARENT
+    // session, so the gap probe hits the parent's huge transcript, installs
+    // the seek sentinel, and scrolling up loads PARENT slabs above the
+    // agent's own log — real parent records rendered as if the agent did
+    // them. Same capability class as _canPaginate.
+    if (!this._canPaginate) return;
     if (this._gapMinimapActive || this._gapMinimapLoading) return;
     this._gapMinimapLoading = true;
     try {

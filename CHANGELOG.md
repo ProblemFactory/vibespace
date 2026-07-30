@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.233.2
+
+- **Subagent View Log no longer leaks the PARENT conversation's history above the agent's own log** (real report: scrolling up in an agent viewer showed cards from before the agent existed). `_getSessionIds()` resolves a `sub-*` viewer to its parent session (the openSpec carries the parent's id/cwd for the transcript lookup), and the huge-session machinery keyed only on message count — so when the parent is a huge-JSONL session, the gap probe activated against the PARENT transcript: the viewer got the parent's whole-conversation minimap and the seek sentinel loaded parent slabs above the agent's messages (genuine parent records, rendered as if the agent did them; the position indicator stayed correct because gap messages are excluded from window accounting — which is exactly why it looked so confusing). Gap minimap, seek sentinel, and the turn-map fallback fetch are now gated on `_canPaginate`, the same capability that already excludes sub- viewers from pagination.
+
 ## 2.233.1
 
 - **A finished background agent's card no longer says "responding" forever** (real report). The card's live status line is only ever redrawn by incoming subagent messages, so after the agent's last message it kept whatever activity was in flight. Completion now freezes it: the same `<task-notification>` wakeup that 2.233.0 wired into the task tracker also rewrites the line to "N messages · finished" (dimmed) and latches it, so a trailing buffered message can't resurrect the stale activity. Server side, the wakeup now also stops that agent's JSONL watcher and GCs its buffers immediately instead of waiting for the 10-minute idle sweep.
