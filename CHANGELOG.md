@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.228.3
+
+**Sidebar no longer jumps back to the top when you expand a card after scrolling** (recurring report). Three cooperating defects, found by driving the real render/observer machinery in a committed CDP harness:
+
+- **The scroll-preserve anchored on an element that no longer scrolls.** `_render()` preserved `.sidebar-section`'s scrollTop, but in the current layout the scrolling element is `#all-sessions-list` itself (measured 391/7106 vs the section's 443/443) — every "preserved" value read 0, so the whole mechanism had silently rotted into a no-op. Both the per-render and the poll-digest preserve now capture/restore BOTH candidate scrollers (restoring a non-scroller is a harmless no-op), so the anchor can't rot again when CSS evolves.
+- **Lazy folders collapsed the scrollHeight during rebuild.** A re-render resets every folder to an empty pending div, so even a correct scrollTop restore got CLAMPED toward the top before the IntersectionObserver (async) could materialize anything. Folders now RESERVE their height while pending — the exact height remembered from the previous render (`_lazyHeights`), or a card-count estimate on first render — cleared on materialization.
+- **One bad session record could husk whole folders.** A throwing card build inside the observer callback (real case: a garbage timestamp → `RangeError: Invalid time value` in a date format) aborted the entire batch AFTER the folder's minHeight/content were cleared — leaving empty pending husks. Card builds are now per-card try/caught with a `sidebar-card-render` telemetry breadcrumb; one bad record costs one card, not the sidebar.
+
+Committed smoke: `scripts/test-sidebar-scroll.mjs` (throwaway worktree server + headless-chrome CDP, drives the real `_render`/lazy-folder path with 50 synthetic folders; negative-controlled — pre-fix code fails exactly the two scroll assertions).
+
 ## 2.228.2
 
 - **Pending image attachments are now click-to-zoom.** Pasting a screenshot into the chat input shows a ~32px chip preview with no way to verify WHAT you pasted before sending it to the model (user request). Clicking the chip now opens the standard full-screen image overlay (× still removes; zoom-in cursor + tooltip). The overlay builder was deduplicated into `showImageOverlay` (utils.js) — the two inline copies in ChatView (sent-message `chat-img` thumbnails, which were already zoomable) now share it, and it joins the global Escape-close protocol via `data-popover`.
