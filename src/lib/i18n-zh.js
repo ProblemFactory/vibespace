@@ -2210,4 +2210,8 @@ export default {
   "Woken by background task ({status}): {summary}": "后台任务唤醒（{status}）：{summary}",
   "Auto (distinct per group)": "自动（每组自动区分）",
   "Custom color…": "自定义颜色…",
+  "Solid": "实线",
+  "Dashed": "虚线",
+  "Dotted": "点线",
+  "Diagonal": "斜纹",
 };

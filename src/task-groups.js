@@ -842,7 +842,7 @@ class TaskGroupManager {
     return t;
   }
 
-  create({ title, kind, archived, objective, sessions, folders, contextDir, color, injectContext } = {}) {
+  create({ title, kind, archived, objective, sessions, folders, contextDir, color, pattern, injectContext } = {}) {
     const cleanTitle = String(title || '').trim().slice(0, CAPS.title);
     if (!cleanTitle) throw new Error('title required');
     const id = this._genId(cleanTitle);
@@ -860,6 +860,7 @@ class TaskGroupManager {
       folders: this._sanitizeFolders(folders),
       contextDir: this._sanitizeContextDir(contextDir),
       color: this._sanitizeColor(color),
+      pattern: (() => { try { return this._sanitizePattern(pattern); } catch { return null; } })(),
       injectContext: injectContext !== false, // per-group context-injection toggle (default on)
       createdAt: now,
       updatedAt: now,
@@ -901,6 +902,16 @@ class TaskGroupManager {
     return p;
   }
 
+  // Texture line-style (2.231.0): null = auto assignment decides; explicit
+  // value = the user's manual pick (incl. 'solid' to force no texture).
+  // Visual-only like color — never bumps contentUpdatedAt.
+  _sanitizePattern(v) {
+    if (v == null || v === '') return null;
+    const p = String(v).trim();
+    if (!['solid', 'dash', 'dot', 'diag'].includes(p)) throw new Error('invalid pattern');
+    return p;
+  }
+
   _sanitizeColor(c) {
     if (typeof c !== 'string' || !c.trim()) return null;
     const v = c.trim().slice(0, 40);
@@ -925,6 +936,7 @@ class TaskGroupManager {
     if (patch.folders !== undefined) t.folders = this._sanitizeFolders(patch.folders);
     if (patch.contextDir !== undefined) t.contextDir = this._sanitizeContextDir(patch.contextDir);
     if (patch.color !== undefined) t.color = this._sanitizeColor(patch.color);
+    if (patch.pattern !== undefined) t.pattern = this._sanitizePattern(patch.pattern);
     if (patch.injectContext !== undefined) t.injectContext = !!patch.injectContext;
     // patch.plan is deliberately IGNORED (checklist removed 2.121.0) — an old
     // client bundle may still send it; a stored dormant t.plan stays untouched.

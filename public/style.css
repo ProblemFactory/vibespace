@@ -3205,6 +3205,19 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
    bar's length, so it stays legible at the 3px bar width (fine fills
    don't). Gaps are transparent (panel shows through) for real dash/dot
    contrast; hue-independent, so it doubles as a color-blind aid. */
-.task-view-colorbar[data-pattern="dash"] { background: repeating-linear-gradient(to bottom, var(--g-color, var(--text-dim)) 0 5px, transparent 5px 9px); }
-.task-view-colorbar[data-pattern="dot"] { background: repeating-linear-gradient(to bottom, var(--g-color, var(--text-dim)) 0 2px, transparent 2px 5px); }
-.task-view-colorbar[data-pattern="diag"] { background: repeating-linear-gradient(35deg, var(--g-color, var(--text-dim)) 0 4px, color-mix(in srgb, var(--g-color, var(--text-dim)) 30%, transparent) 4px 8px); }
+.task-view-colorbar[data-pattern="dash"], .task-detail-texture-bar[data-pattern="dash"] { background: repeating-linear-gradient(to bottom, var(--g-color, var(--text-dim)) 0 5px, transparent 5px 9px); }
+.task-view-colorbar[data-pattern="dot"], .task-detail-texture-bar[data-pattern="dot"] { background: repeating-linear-gradient(to bottom, var(--g-color, var(--text-dim)) 0 2px, transparent 2px 5px); }
+.task-view-colorbar[data-pattern="diag"], .task-detail-texture-bar[data-pattern="diag"] { background: repeating-linear-gradient(35deg, var(--g-color, var(--text-dim)) 0 4px, color-mix(in srgb, var(--g-color, var(--text-dim)) 30%, transparent) 4px 8px); }
+/* Texture pick chips (task-detail): each previews its line style on the
+   group's current color; 'A' = follow the auto assignment */
+.task-detail-textures { margin-top: 4px; }
+.task-detail-texture { width: 22px; height: 20px; padding: 3px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; color: var(--text-secondary); font-size: 10px; font-weight: 700; }
+.task-detail-texture.active { border-color: var(--accent); }
+.task-detail-texture-bar { display: block; width: 4px; height: 14px; background: var(--g-color, var(--text-dim)); border-radius: 1px; }
+
+/* Board left strip textures via border-image (2.231.0): replaces the border
+   COLOR only — the 4px border-left layout is untouched (the background-strip
+   approach shifted layout and was rejected). */
+.task-board-item[data-pattern="dash"] { border-image: repeating-linear-gradient(to bottom, var(--task-color) 0 5px, transparent 5px 9px) 1; }
+.task-board-item[data-pattern="dot"] { border-image: repeating-linear-gradient(to bottom, var(--task-color) 0 2px, transparent 2px 5px) 1; }
+.task-board-item[data-pattern="diag"] { border-image: repeating-linear-gradient(35deg, var(--task-color) 0 4px, color-mix(in srgb, var(--task-color) 30%, transparent) 4px 8px) 1; }

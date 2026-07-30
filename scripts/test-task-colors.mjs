@@ -65,6 +65,23 @@ check('unset → auto', taskGroupColor({ id: 'x' }) === autoTaskColor('x'));
   check('80 groups: pairwise guarantee holds across planes', v4 === 0, `violations=${v4}`);
 }
 
+// ── manual texture (2.231.0): store sanitize + precedence semantics ──
+{
+  const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pattern-'));
+  const { TaskGroupManager: TM2 } = require('../src/task-groups.js');
+  const tm2 = new TM2({ dataDir: dir2, readUserState: () => ({}), onChange: () => {} });
+  const g = tm2.create({ title: 'p1', pattern: 'dash' });
+  check("store accepts pattern 'dash'", g.pattern === 'dash');
+  const g2 = tm2.update(g.id, { pattern: 'solid' });
+  check("update to 'solid' sticks", g2.pattern === 'solid');
+  const g3 = tm2.update(g.id, { pattern: null });
+  check('pattern null = back to auto', g3.pattern === null);
+  let bad = false;
+  try { tm2.update(g.id, { pattern: 'zigzag' }); } catch { bad = true; }
+  check('invalid pattern rejected', bad);
+  fs.rmSync(dir2, { recursive: true, force: true });
+}
+
 // server sanitizer: arbitrary hex + 'none' accepted, css-injection rejected
 const { TaskGroupManager } = require('../src/task-groups.js');
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-color-'));

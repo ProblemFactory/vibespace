@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.231.0
+
+**Texture is now manually selectable per Task Group** (follow-up: 2.230.2 made line-style textures auto-only — the settings dialog still only offered color). The group detail window's Color section gains a **Texture row**: Auto (follow the auto assignment) / Solid / Dashed / Dotted / Diagonal, each chip previewing its line style on the group's current color. A manual pick wins over the auto assignment and works for explicit-color groups too (pick any color AND any texture); `pattern` is a first-class store field (sanitized enum, visual-only — never re-injects agent context). Textures now also render on the task board's left strip via `border-image` (replaces the border color only — the 4px layout is untouched), alongside the flat-view color bars. Note on lightness: the custom color picker always allowed any lightness — pick a darker/lighter shade of the same hue there.
+
 ## 2.230.2
 
 **Texture joins the auto-color space as a third dimension** (user suggestion — refined by the follow-up observation that fine fills can't read on a 3px bar): the texture vocabulary is **chart line styles** — solid / dashed / dotted / diagonal-banded — whose variation runs along the bar's LENGTH, so they stay legible at hairline widths (the same reason line charts can encode series identity in 1px strokes). Auto assignment now spans 18 hues × 3 lightness bands × 4 line styles = **216 combinations** under the hard pairwise guarantee (same plane ⇒ ≥20° hue apart; different plane ⇒ lightness or texture visibly differs). Solid planes fill first, so textures only appear past 54 groups; dash/dot gaps are transparent (the panel shows through) for real contrast, and the channel is hue-independent — a color-blind aid wherever it appears. Applied on the flat-view color bars (the one surface with no text label); board rows keep their name as the primary identity. Test grew to 15 asserts incl. the 80-group cross-plane guarantee.
