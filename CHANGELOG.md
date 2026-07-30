@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.229.1
+
+**Chat paging no longer jumps** (user report: scrolling up through history leapt a big chunk; scrolling back down jumped too). Reproduced with a committed CDP harness driving a real view-only ChatView over a synthetic 40MB transcript (gap-seek active, wheel-cadence steps both directions) and attributed with a scrollTop-write interceptor that stacks every programmatic write — the recording showed ±4000px oscillations between adjacent frames. Three cooperating defects:
+
+- **A per-message trim storm during batch loads.** `_extendBottom` appends its 50-message batch through `_onCreateMessage`, whose pinned live-path called `_trimTop()` + `_scrollToBottom()` PER MESSAGE — dozens of remove/compensate cycles per batch. Batch loads now skip the live-path trim (`_loadingHistory` gate); the batch caller trims once at the end.
+- **Relative delta compensation fought the browser's native scroll anchoring.** `_trimTop`'s `scrollTop -= (before − after)` and the browser's own anchoring both corrected for the same removals — double compensation, visible as the captured oscillation. `_trimTop` is now element-anchored with an ABSOLUTE restore (`_withViewportAnchor`), which converges regardless of what the browser did in between; the delta math survives only as the anchorless fallback.
+- **A folded anchor sent callers to the estimate-skewed delta path.** `_withViewportAnchor` reported failure when its anchor element got folded by a run-collapse pass inside the wrapped mutation (much likelier since 2.213.0 widened the collapsible kinds) — callers then fell back to delta math under content-visibility estimate skew. It now restores on the nearest visible sibling (the run header sits exactly where the folded content was — same strategy as `_updateRuns`' own restore).
+
+Committed harness: `scripts/test-chat-paging.mjs` (throwaway worktree server + headless-chrome CDP, 180 scripted wheel steps, per-frame anchor-drift detector + scrollTop-write forensics; negative-controlled — pre-fix code produces 13 jumps, fixed code zero).
+
 ## 2.229.0
 
 **Persistent claude installs are now the default** (the walter rollback incident: he ran `claude update`, used Opus 5 for three days, then a pod rebuild silently reverted the image-baked npm-global CLI to its old version — and the `opus` alias back to Opus 4.8 — with zero notice):
