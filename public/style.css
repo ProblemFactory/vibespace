@@ -3187,3 +3187,7 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .sys-host-row { margin-bottom: 6px; }
 .sys-host-sel { width: 100%; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 11px; padding: 3px 6px; }
 .sys-hist-wrap { margin-top: 2px; }
+
+/* Ephemeral CLI install warning row (Manage Agents, 2.229.0) */
+.ob-cli-ephemeral { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 11px; flex-wrap: wrap; }
+.ob-cli-ephemeral .usage-warn { flex: 1 1 auto; min-width: 0; }

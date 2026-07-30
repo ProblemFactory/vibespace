@@ -613,6 +613,23 @@ export function installManageAgents(App, ctx = {}) {
           updBtn.onclick = () => run(absCmd(b.updateCmd));
           actions.appendChild(updBtn);
         }
+        // Ephemeral-install warning (2.229.0, LOCAL machine only — remote
+        // hosts' layout is theirs): a claude living outside $HOME (image-baked
+        // npm-global) is wiped back to the baked version on every container
+        // rebuild — walter updated, got Opus 5 for 3 days, then a pod rebuild
+        // silently reverted the opus alias to 4.8. Offer the persistent
+        // user-local install right here (native installer → ~/.local, which
+        // wins PATH; picked up by new sessions after the next server restart).
+        if (!selectedHost && b.key === 'claude' && info.installed && info.install && !info.install.userLocal && b.installCmd) {
+          const warnRow = document.createElement('div');
+          warnRow.className = 'ob-cli-ephemeral';
+          warnRow.innerHTML = `<span class="usage-warn">⚠ ${escHtml(t('Installed in a system location ({path}) — in containerized deployments, updates to it are lost when the container is rebuilt.', { path: info.install.binPath }))}</span>`;
+          const persistBtn = document.createElement('button'); persistBtn.className = 'agent-btn'; persistBtn.textContent = t('Install persistent copy');
+          persistBtn.title = b.installCmd + ' — ' + t('installs under your home directory (survives rebuilds; takes over for new sessions after the next server restart)');
+          persistBtn.onclick = () => run(b.installCmd);
+          warnRow.appendChild(persistBtn);
+          left.appendChild(warnRow);
+        }
         if (stale()) return;
         row.append(left, actions);
         body.appendChild(row);

@@ -2204,4 +2204,7 @@ export default {
   "⚠ Safeguards stopped this turn: {model} flagged the message and model fallback is disabled, so it was NOT retried on another model. Rephrase and resend to continue on {model}.": "⚠ セーフガードがこのターンを停止しました：{model} がこのメッセージをフラグし、モデルフォールバックは無効のため、別モデルでの再試行は行われませんでした。言い換えて再送すれば {model} で続行できます。",
   "Last error:": "直近のエラー:",
   "Click to view full size": "クリックで拡大表示",
+  "Installed in a system location ({path}) — in containerized deployments, updates to it are lost when the container is rebuilt.": "システム領域（{path}）にインストールされています——コンテナ環境では、これへの更新はコンテナ再構築時に失われます。",
+  "Install persistent copy": "永続コピーをインストール",
+  "installs under your home directory (survives rebuilds; takes over for new sessions after the next server restart)": "ホームディレクトリ配下にインストールします（再構築後も保持；次回サーバー再起動後の新規セッションから有効）",
 };
