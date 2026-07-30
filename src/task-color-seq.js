@@ -9,12 +9,12 @@
  * The prefix-optimal hue generator is the GOLDEN ANGLE sequence (sunflower
  * phyllotaxis): within a plane the j-th hue is j×137.5077°, whose min
  * pairwise gap over ANY prefix stays ≥ ~61.8% of ideal even spacing
- * (three-gap theorem). Slots cycle lightness bands first (52/36/68%),
- * textures open after 36 solid slots. The sequence is INFINITE: the 12
- * discrete planes (3 bands × 4 line styles) cycle, while the within-plane
- * golden index grows without bound — later points pack into the existing
- * space ever more densely (min gap ~0.618×360/perPlaneCount) but NEVER
- * collide exactly (irrational rotation).
+ * (three-gap theorem). ALL dimensions engage from the start (v5): the 12
+ * discrete planes (3 lightness bands × 4 line styles — solid trio first,
+ * then dash/dot/diag trios) cycle every 12 slots, while the within-plane
+ * golden index grows without bound — the sequence is INFINITE, later
+ * points pack the existing space ever more densely (min gap
+ * ~0.618×360/perPlaneCount) but NEVER collide exactly.
  *
  * SHARED between server (allocator in task-groups.js) and client (renderers
  * via src/lib/utils.js re-export) — one source of truth; esbuild handles the
@@ -27,22 +27,25 @@ const PATTERNS = [null, 'dash', 'dot', 'diag'];
 const SLOTS = 144;
 
 function seqTaskColor(k) {
-  // INFINITE sequence (2.231.2, the user's theory question caught a gap: the
-  // old `% 144` wrap made slot 144 an EXACT duplicate of slot 0). Only the
-  // discrete dimensions cycle (3 bands × 4 line styles = 12 planes); the
-  // within-plane golden-angle index j grows WITHOUT BOUND — an irrational
-  // rotation never lands on the same hue twice, each new point splits an
-  // existing gap in the golden ratio, and the min same-plane gap degrades
-  // gracefully as ~0.618 × 360/perPlaneCount. So the sequence extends
-  // forever, just increasingly dense — never colliding. For k < 144 this
-  // formula equals the old one, so already-assigned slots keep their color.
+  // v5 (2.232.0, user: "20 groups and still no texture — is this really
+  // done?"): ALL FOUR dimensions participate from the start. The 12 discrete
+  // planes (3 bands × 4 line styles, solid trio first, then dash/dot/diag
+  // trios) cycle every 12 slots, so any two groups within 11 of each other
+  // differ in lightness band or texture outright; the within-plane
+  // golden-angle index j = floor(k/12) grows WITHOUT BOUND (infinite
+  // sequence, 2.231.2: irrational rotation never repeats a hue, min gap
+  // degrades gracefully as ~0.618 × 360/perPlaneCount — later points pack
+  // the existing space ever denser, never colliding). A per-plane hue
+  // offset (97° steps) decorrelates consecutive slots in hue as well.
+  // NOTE: this reordered the k<144 renderings once (the old layout filled
+  // 36 solid slots before any texture — an aesthetic choice that
+  // contradicted the maximize-difference directive).
   const kk = Math.max(0, Math.floor(k) || 0);
-  const band = (kk % 36) % 3;
-  const pattern = PATTERNS[Math.floor(kk / 36) % 4];
-  const j = Math.floor(kk / 144) * 12 + Math.floor((kk % 36) / 3);
-  // band offset decorrelates the three interleaved band sequences so
-  // consecutive slots differ in hue as well as lightness
-  const hue = ((j * GOLDEN + band * 41) % 360);
+  const planeIdx = kk % 12;
+  const band = planeIdx % 3;
+  const pattern = PATTERNS[Math.floor(planeIdx / 3)];
+  const j = Math.floor(kk / 12);
+  const hue = ((j * GOLDEN + planeIdx * 97) % 360);
   return { color: `hsl(${Math.round(hue * 10) / 10}, 62%, ${BANDS[band]}%)`, hue, lightness: BANDS[band], pattern };
 }
 

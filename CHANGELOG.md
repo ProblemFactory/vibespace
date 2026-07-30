@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.232.0
+
+**All four identity dimensions now engage from the very first groups** (user report: "I created 20 groups and saw no texture — is this really done?"). It was implemented but ordered wrong: the sequence filled 36 solid slots (12 hues × 3 bands) before any texture — an aesthetic "keep small setups clean" choice that contradicted the maximize-difference directive. The 12 planes (3 lightness bands × 4 line styles, solid trio first, then dash/dot/diag trios) now cycle every 12 slots: groups 1-3 are the solid band trio, group 4 is dashed, and any two groups within 11 sequence positions of each other differ outright in lightness band or texture; the within-plane golden-angle index still grows without bound (infinite, never-colliding, gracefully densifying — 2.231.2 semantics unchanged). A 97°-step per-plane hue offset keeps consecutive slots apart in hue as well. NOTE: this reorders existing auto colors once (a one-time visual migration; colorSeq values are untouched).
+
 ## 2.231.3
 
 - **Creating a Task Group no longer toasts "Task Group not found"** (real report, every create). Classic response-vs-broadcast race: the create flow opened the detail window with the id from the POST response, but the detail window resolves groups from the client mirror — which only updates when the `tasks-updated` WebSocket broadcast lands, and the awaited response beats the broadcast essentially always. The mirror is now upserted synchronously from the API response (create / update / import; delete removes locally) — the later broadcast idempotently overwrites. Same class as the 2.31.0-era `_pendingTaskBinds` note: any UI action chained on a store write must not wait on the echo.
