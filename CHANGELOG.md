@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.231.3
+
+- **Creating a Task Group no longer toasts "Task Group not found"** (real report, every create). Classic response-vs-broadcast race: the create flow opened the detail window with the id from the POST response, but the detail window resolves groups from the client mirror — which only updates when the `tasks-updated` WebSocket broadcast lands, and the awaited response beats the broadcast essentially always. The mirror is now upserted synchronously from the API response (create / update / import; delete removes locally) — the later broadcast idempotently overwrites. Same class as the 2.31.0-era `_pendingTaskBinds` note: any UI action chained on a store write must not wait on the echo.
+
 ## 2.231.2
 
 **The color sequence is now truly infinite** (the user's theory question — "the sequence should extend forever, later points just packing the existing space ever more densely" — caught a gap: the implementation wrapped at 144 slots, making slot 144 an EXACT duplicate of slot 0). The 12 discrete planes (3 lightness bands × 4 line styles) cycle, but the within-plane golden-angle index now grows without bound: an irrational rotation never lands on the same hue twice, each new point splits an existing gap in the golden ratio, and the min same-plane gap degrades gracefully (measured: 20.1° at 144 slots, 7.7° at 288, 4.7° at 576 — consistently ≥~half the ideal even spacing, per the three-gap bound). Slots below 144 render identically to before, so already-assigned colors are unchanged. The allocator's manual-pick masking also became range-free (tested per candidate slot on the fly instead of a precomputed 144-slot window). Tests: 30 asserts incl. no-duplicate-at-1000-slots and the graceful-degradation ratios.

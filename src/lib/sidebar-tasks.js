@@ -284,12 +284,35 @@ export function installSidebarTasks(SidebarClass) {
     }
   };
 
+  /** Upsert one task into the CLIENT MIRROR synchronously from an API
+   *  response (2.231.3, real report "创建任务组后总提示未找到任务组"): the
+   *  mirror otherwise updates only when the tasks-updated BROADCAST lands,
+   *  and the awaited POST response beats the WS message essentially always —
+   *  so create → openTaskDetail(id) looked the fresh id up in a stale mirror
+   *  and toasted "Task Group not found". The later broadcast idempotently
+   *  overwrites this. */
+  proto._upsertTaskLocal = function(task) {
+    if (!task?.id) return;
+    if (!Array.isArray(this._tasks)) this._tasks = [];
+    const i = this._tasks.findIndex((x) => x.id === task.id);
+    if (i >= 0) this._tasks[i] = task; else this._tasks.push(task);
+    this._tasksLoaded = true;
+  };
   proto._taskCreate = async function(fields) {
     const data = await this._taskApi('POST', '/api/tasks', fields);
+    if (data?.task) this._upsertTaskLocal(data.task);
     return data?.task || null;
   };
-  proto._taskUpdate = function(id, patch) { return this._taskApi('PATCH', `/api/tasks/${encodeURIComponent(id)}`, patch); };
-  proto._taskDelete = function(id) { return this._taskApi('DELETE', `/api/tasks/${encodeURIComponent(id)}`); };
+  proto._taskUpdate = async function(id, patch) {
+    const data = await this._taskApi('PATCH', `/api/tasks/${encodeURIComponent(id)}`, patch);
+    if (data?.task) this._upsertTaskLocal(data.task);
+    return data;
+  };
+  proto._taskDelete = async function(id) {
+    const data = await this._taskApi('DELETE', `/api/tasks/${encodeURIComponent(id)}`);
+    if (data?.success && Array.isArray(this._tasks)) this._tasks = this._tasks.filter((t) => t.id !== id);
+    return data;
+  };
   proto._taskBind = function(id, sessionOrKey) {
     const sessionKey = this._getSessionStateKey(sessionOrKey);
     if (!sessionKey) return;
@@ -739,7 +762,7 @@ export function installSidebarTasks(SidebarClass) {
       const p = await showInputDialog({ title: tr('Import Task Group'), label: tr('Absolute path to a VibeSpace task .md file'), placeholder: '/path/to/repo/T-xxxxxx.md', confirmText: tr('Import') });
       if (!p || !p.trim()) return;
       const data = await this._taskApi('POST', '/api/tasks/import', { path: p.trim() });
-      if (data?.task) { showToast(tr('Imported: {title}', { title: data.task.title })); this.app.openTaskDetail(data.task.id); }
+      if (data?.task) { this._upsertTaskLocal(data.task); showToast(tr('Imported: {title}', { title: data.task.title })); this.app.openTaskDetail(data.task.id); }
     };
     addRow.append(addCard, importCard);
     this.listEl.appendChild(addRow);
