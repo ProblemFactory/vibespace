@@ -3191,3 +3191,10 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 /* Ephemeral CLI install warning row (Manage Agents, 2.229.0) */
 .ob-cli-ephemeral { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 11px; flex-wrap: wrap; }
 .ob-cli-ephemeral .usage-warn { flex: 1 1 auto; min-width: 0; }
+
+/* Task-group color: Auto swatch + custom picker (2.230.0) */
+.task-detail-swatch.auto { color: #fff; font-size: 10px; font-weight: 700; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
+.task-detail-swatch.custom { position: relative; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; border-style: dashed; }
+.task-detail-swatch.custom input[type=color] { position: absolute; inset: -4px; opacity: 0; cursor: pointer; }
+.task-detail-swatch.custom::after { content: '+'; color: var(--text-secondary); font-size: 12px; font-weight: 700; pointer-events: none; }
+.task-detail-swatch.custom.active::after { content: ''; }

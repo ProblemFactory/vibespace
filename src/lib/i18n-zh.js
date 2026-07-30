@@ -2208,4 +2208,6 @@ export default {
   "Install persistent copy": "安装持久化副本",
   "installs under your home directory (survives rebuilds; takes over for new sessions after the next server restart)": "安装到你的主目录下（重建后仍在；下次服务重启后新会话自动使用）",
   "Woken by background task ({status}): {summary}": "后台任务唤醒（{status}）：{summary}",
+  "Auto (distinct per group)": "自动（每组自动区分）",
+  "Custom color…": "自定义颜色…",
 };
