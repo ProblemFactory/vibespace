@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.231.2
+
+**The color sequence is now truly infinite** (the user's theory question — "the sequence should extend forever, later points just packing the existing space ever more densely" — caught a gap: the implementation wrapped at 144 slots, making slot 144 an EXACT duplicate of slot 0). The 12 discrete planes (3 lightness bands × 4 line styles) cycle, but the within-plane golden-angle index now grows without bound: an irrational rotation never lands on the same hue twice, each new point splits an existing gap in the golden ratio, and the min same-plane gap degrades gracefully (measured: 20.1° at 144 slots, 7.7° at 288, 4.7° at 576 — consistently ≥~half the ideal even spacing, per the three-gap bound). Slots below 144 render identically to before, so already-assigned colors are unchanged. The allocator's manual-pick masking also became range-free (tested per candidate slot on the fly instead of a precomputed 144-slot window). Tests: 30 asserts incl. no-duplicate-at-1000-slots and the graceful-degradation ratios.
+
 ## 2.231.1
 
 **Auto colors redesigned around the user's formalization: a fixed sequence S_k in the hue × lightness × texture identity space, where every prefix S_0..S_i stays far apart and assigned points NEVER move.** The previous set-aware assignment satisfied a ≥20° floor while letting 3 groups sit visibly close (the reported case), and re-spaced existing colors on insertion. Now:
