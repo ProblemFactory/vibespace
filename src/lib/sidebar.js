@@ -799,10 +799,14 @@ class Sidebar {
     this._renderAgentKindQuickTabs();
     // Preserve scroll position across the auto-refresh re-render so browsing a
     // session lower in the list isn't interrupted by a jump to the top.
-    const sc = this.listEl.closest('.sidebar-section');
-    const savedScroll = sc ? sc.scrollTop : 0;
+    const hosts = [this.listEl, this.listEl?.closest('.sidebar-section')].filter(Boolean);
+    const saved = hosts.map((el) => el.scrollTop);
     this._render();
-    if (sc && savedScroll) { sc.scrollTop = savedScroll; requestAnimationFrame(() => { sc.scrollTop = savedScroll; }); }
+    hosts.forEach((el, i) => {
+      if (!saved[i]) return;
+      el.scrollTop = saved[i];
+      requestAnimationFrame(() => { el.scrollTop = saved[i]; });
+    });
   }
 
   // EVERY render preserves the list scroll (2.106.1, real report: "sidebar 不断
@@ -812,15 +816,32 @@ class Sidebar {
   // only the 5s-poll digest path used to preserve it. A view change (tab /
   // board sub-view / mobile drill-down) resets deliberately — different content.
   _render() {
-    const sc = this.listEl?.closest('.sidebar-section');
+    // The ACTUAL scrolling element moved over time (.sidebar-section
+    // classically; #all-sessions-list itself in the current layout — measured
+    // 391/7106 vs the section's 443/443). Anchoring the preserve on one
+    // element ROTS SILENTLY when CSS evolves (the 2.228.3 recurrence: every
+    // scrollTop read returned 0, so "preserved" scroll was a no-op and any
+    // re-render — e.g. clicking a card's expand arrow — landed at the top).
+    // Preserve BOTH candidates; restoring a non-scroller is a harmless no-op.
+    const hosts = [this.listEl, this.listEl?.closest('.sidebar-section')].filter(Boolean);
     const view = `${this._activeTab}:${this._boardView || ''}:${JSON.stringify(this._mobileDrilldown || null)}`;
-    const keep = sc && this._lastRenderView === view ? sc.scrollTop : 0;
+    const keeps = this._lastRenderView === view ? hosts.map((el) => el.scrollTop) : hosts.map(() => 0);
+    // Remember every lazy folder's CURRENT height so the rebuild can reserve
+    // it (see _observeFolder) — without this the post-rebuild scrollHeight
+    // collapses and the scrollTop restore below clamps to the top.
+    const heights = new Map();
+    this.listEl?.querySelectorAll('.folder-sessions').forEach((d) => {
+      if (d._lazyKey && d.offsetHeight) heights.set(d._lazyKey, d.offsetHeight);
+    });
+    this._lazyHeights = heights;
     this._renderInner();
     this._lastRenderView = view;
-    if (sc && keep) {
-      sc.scrollTop = keep;
-      requestAnimationFrame(() => { if (Math.abs(sc.scrollTop - keep) > 2) sc.scrollTop = keep; });
-    }
+    hosts.forEach((el, i) => {
+      const keep = keeps[i];
+      if (!keep) return;
+      el.scrollTop = keep;
+      requestAnimationFrame(() => { if (Math.abs(el.scrollTop - keep) > 2) el.scrollTop = keep; });
+    });
   }
 
   _renderInner() {

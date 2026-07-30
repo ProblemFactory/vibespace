@@ -5,6 +5,7 @@
  * Installed on Sidebar.prototype via installSidebarRender(Sidebar).
  */
 import { escHtml, createPopover, showContextMenu, copyText, showToast, showInputDialog, showConfirmDialog } from './utils.js';
+import { track } from './telemetry-client.js';
 import { t as tr } from './i18n.js';
 import { createBackendIcon, getBackendMeta, getSessionKey } from './agent-meta.js';
 import { renderSessionCard } from './session-card.js';
@@ -31,7 +32,16 @@ export function installSidebarRender(SidebarClass) {
             if (items) {
               sessionsDiv.innerHTML = '';
               sessionsDiv.style.minHeight = '';
-              for (const s of items) sessionsDiv.appendChild(this._buildSessionCard(s, sessionsDiv._lazyOpts || {}));
+              // Per-card try/catch (2.228.3): a single throwing card build
+              // (real case: a record with a garbage timestamp → RangeError in
+              // a date format) used to abort the WHOLE observer batch — this
+              // folder was left a half-cleared empty husk AND every later
+              // entry in the batch went unprocessed. One bad record must cost
+              // one card, not the sidebar.
+              for (const s of items) {
+                try { sessionsDiv.appendChild(this._buildSessionCard(s, sessionsDiv._lazyOpts || {})); }
+                catch (e) { try { track('error', 'sidebar-card-render', String(e?.message || e).slice(0, 120)); } catch {} }
+              }
               sessionsDiv.dataset.lazy = 'rendered';
             }
           }
@@ -53,6 +63,23 @@ export function installSidebarRender(SidebarClass) {
     sessionsDiv._lazyItems = items;
     sessionsDiv._lazyOpts = opts;
     sessionsDiv.dataset.lazy = 'pending';
+    // RESERVE the folder's height while pending (2.228.3, the "expand a card
+    // → list jumps to top" recurrence): a re-render resets every folder to an
+    // EMPTY pending div, so the list's scrollHeight collapses to a stack of
+    // headers and _render()'s scrollTop restore gets CLAMPED to ~0 before the
+    // IntersectionObserver (async, post-frame) can materialize anything — the
+    // rAF re-assert clamps the same way. Remember each folder's real height
+    // from the previous render (_lazyHeights, captured in _render) and hold
+    // it as minHeight until the observer renders or placeholders the div;
+    // first-ever renders estimate from the card count (exactness only matters
+    // for folders ABOVE the restored viewport, which always have a remembered
+    // height). Materialization clears minHeight (both observer + jump paths).
+    const key = `${items[0]?.sessionId || items[0]?.claudeSessionId || '?'}:${items.length}`;
+    sessionsDiv._lazyKey = key;
+    if (items.length) {
+      const prev = this._lazyHeights?.get(key);
+      sessionsDiv.style.minHeight = Math.round(prev || items.length * 38) + 'px';
+    }
     if (this._folderObserver) this._folderObserver.observe(group);
   };
 
