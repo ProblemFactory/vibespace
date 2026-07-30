@@ -243,7 +243,15 @@ export function installSidebarTasks(SidebarClass) {
     if (t.color === 'none') return null;
     if (t.color) return t.color;
     if (!this._taskColorMap) this._taskColorMap = assignDistinctTaskColors(this._tasks || []);
-    return this._taskColorMap.get(t.id) || taskGroupColor(t);
+    return this._taskColorMap.get(t.id)?.color || taskGroupColor(t);
+  };
+  /** Texture channel of the auto assignment (null | 'stripe' | 'dot' |
+   *  'hatch') — hue-independent third dimension; explicit-color groups
+   *  are always solid. */
+  proto.getTaskPattern = function(t) {
+    if (!t || t.color) return null;
+    if (!this._taskColorMap) this._taskColorMap = assignDistinctTaskColors(this._tasks || []);
+    return this._taskColorMap.get(t.id)?.pattern || null;
   };
 
   proto._taskApi = async function(method, url, body) {
@@ -615,6 +623,8 @@ export function installSidebarTasks(SidebarClass) {
         const bar = document.createElement('span');
         bar.className = 'task-view-colorbar';
         bar.style.setProperty('--g-color', this.getTaskColor(g) || 'var(--text-dim)');
+        const pat = this.getTaskPattern(g);
+        if (pat) bar.dataset.pattern = pat;
         bar.dataset.tip = g.title + (g.objective ? ' — ' + g.objective.slice(0, 100) : '');
         bar.onclick = (e) => { e.stopPropagation(); this.app.openTaskDetail(g.id); };
         // Right-click (long-press on touch) = the group's full action menu —

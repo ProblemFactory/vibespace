@@ -37,20 +37,32 @@ check('unset → auto', taskGroupColor({ id: 'x' }) === autoTaskColor('x'));
   const forty = mk(40);
   const map = assignDistinctTaskColors(forty);
   let violations = 0;
-  const cols = forty.map((t) => parse(map.get(t.id)));
-  for (let i = 0; i < cols.length; i++) for (let j = i + 1; j < cols.length; j++) {
-    if (cols[i].l === cols[j].l && dist(cols[i].h, cols[j].h) < 20) violations++;
+  const ent = forty.map((t) => { const e = map.get(t.id); return { ...parse(e.color), p: e.pattern }; });
+  for (let i = 0; i < ent.length; i++) for (let j = i + 1; j < ent.length; j++) {
+    if (ent[i].l === ent[j].l && ent[i].p === ent[j].p && dist(ent[i].h, ent[j].h) < 20) violations++;
   }
-  check('40 groups: every same-band pair ≥20° apart (hard guarantee)', violations === 0, `violations=${violations}`);
+  check('40 groups: every same-plane pair ≥20° apart (hard guarantee)', violations === 0, `violations=${violations}`);
+  check('first 54 groups are all SOLID (textures only past the solid planes)', ent.every((e) => e.p === null));
   const map2 = assignDistinctTaskColors(mk(40));
-  check('assignment is deterministic', [...map.entries()].every(([k, v]) => map2.get(k) === v));
+  check('assignment is deterministic', [...map.entries()].every(([k, v]) => JSON.stringify(map2.get(k)) === JSON.stringify(v)));
   // stability: adding one group leaves the vast majority untouched
   const map3 = assignDistinctTaskColors([...forty, { id: 'T-26999-newcomer' }]);
-  const changed = forty.filter((t) => map3.get(t.id) !== map.get(t.id)).length;
+  const changed = forty.filter((t) => JSON.stringify(map3.get(t.id)) !== JSON.stringify(map.get(t.id))).length;
   check('adding a group changes ≤3 existing colors (anchor-first stability)', changed <= 3, `changed=${changed}`);
   // explicit colors are ignored by the assigner (they keep their own)
   const mixed = assignDistinctTaskColors([{ id: 'a', color: '#123456' }, { id: 'b' }]);
   check('explicit-color groups are not assigned', !mixed.has('a') && mixed.has('b'));
+  // texture dimension: 80 groups → patterns appear, hard guarantee still holds
+  const eighty = mk(80);
+  const map4 = assignDistinctTaskColors(eighty);
+  const e4 = eighty.map((t) => { const e = map4.get(t.id); return { ...parse(e.color), p: e.pattern }; });
+  const patterned = e4.filter((e) => e.p !== null).length;
+  check('80 groups: textured plane engaged (>54 spill into dash)', patterned >= 20, `patterned=${patterned}`);
+  let v4 = 0;
+  for (let i = 0; i < e4.length; i++) for (let j = i + 1; j < e4.length; j++) {
+    if (e4[i].l === e4[j].l && e4[i].p === e4[j].p && dist(e4[i].h, e4[j].h) < 20) v4++;
+  }
+  check('80 groups: pairwise guarantee holds across planes', v4 === 0, `violations=${v4}`);
 }
 
 // server sanitizer: arbitrary hex + 'none' accepted, css-injection rejected

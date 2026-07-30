@@ -3198,3 +3198,13 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .task-detail-swatch.custom input[type=color] { position: absolute; inset: -4px; opacity: 0; cursor: pointer; }
 .task-detail-swatch.custom::after { content: '+'; color: var(--text-secondary); font-size: 12px; font-weight: 700; pointer-events: none; }
 .task-detail-swatch.custom.active::after { content: ''; }
+
+
+/* Task-group texture channel (2.230.2): chart LINE STYLES as the third
+   identity dimension — dashed/dotted/diagonal variation runs along the
+   bar's length, so it stays legible at the 3px bar width (fine fills
+   don't). Gaps are transparent (panel shows through) for real dash/dot
+   contrast; hue-independent, so it doubles as a color-blind aid. */
+.task-view-colorbar[data-pattern="dash"] { background: repeating-linear-gradient(to bottom, var(--g-color, var(--text-dim)) 0 5px, transparent 5px 9px); }
+.task-view-colorbar[data-pattern="dot"] { background: repeating-linear-gradient(to bottom, var(--g-color, var(--text-dim)) 0 2px, transparent 2px 5px); }
+.task-view-colorbar[data-pattern="diag"] { background: repeating-linear-gradient(35deg, var(--g-color, var(--text-dim)) 0 4px, color-mix(in srgb, var(--g-color, var(--text-dim)) 30%, transparent) 4px 8px); }
