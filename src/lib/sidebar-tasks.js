@@ -241,7 +241,7 @@ export function installSidebarTasks(SidebarClass) {
     if (t.color === 'none') return null;
     if (t.color) return t.color;
     // pure function of the group's immutable colorSeq (see utils.seqTaskColor)
-    if (t.colorSeq != null) return seqTaskColor(t.colorSeq).color;
+    if (t.colorSeq != null) return seqTaskColor(t.colorSeq, this.app?.settings?.get('tasks.autoStyleOrder')).color;
     return taskGroupColor(t); // pre-migration record / remote list without seq
   };
   /** Texture channel of the auto assignment (null | 'stripe' | 'dot' |
@@ -253,7 +253,7 @@ export function installSidebarTasks(SidebarClass) {
     // as chosen — works for BOTH explicit-color and auto-color groups
     if (t.pattern) return t.pattern === 'solid' ? null : t.pattern;
     if (t.color) return null; // explicit color, no manual texture → solid
-    return t.colorSeq != null ? seqTaskColor(t.colorSeq).pattern : null;
+    return t.colorSeq != null ? seqTaskColor(t.colorSeq, this.app?.settings?.get('tasks.autoStyleOrder')).pattern : null;
   };
 
   proto._taskApi = async function(method, url, body) {
@@ -291,6 +291,12 @@ export function installSidebarTasks(SidebarClass) {
    *  so create → openTaskDetail(id) looked the fresh id up in a stale mirror
    *  and toasted "Task Group not found". The later broadcast idempotently
    *  overwrites this. */
+  // render-time-read setting → change listener (2.112.4 rule); wired once at
+  // install via a microtask (app.settings exists after construction)
+  queueMicrotask(() => {
+    try { window.app?.settings?.on?.('tasks.autoStyleOrder', () => { try { window.app.sidebar?._render(); } catch {} }); } catch {}
+  });
+
   proto._upsertTaskLocal = function(task) {
     if (!task?.id) return;
     if (!Array.isArray(this._tasks)) this._tasks = [];

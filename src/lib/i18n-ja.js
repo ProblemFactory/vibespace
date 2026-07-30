@@ -2214,4 +2214,8 @@ export default {
   "Dashed": "破線",
   "Dotted": "点線",
   "Diagonal": "斜線",
+  "All dimensions from the start (textures early)": "最初から全次元を使用（テクスチャが早く登場）",
+  "Solid colors first (textures after 36 groups)": "単色優先（36 グループ以降にテクスチャ）",
+  "Task Group auto-style order": "タスクグループ自動スタイル順序",
+  "How automatic Task Group styles are sequenced. \"All dimensions\" cycles lightness bands AND line-style textures from the first groups (maximum visual difference — the 4th group is already dashed); \"Solid first\" uses 36 solid color slots before any texture (a cleaner look for small setups). Applies live; changing it re-renders existing auto styles.": "自動タスクグループスタイルの順序。「全次元」は最初のグループから明度バンドと線種テクスチャを循環（視覚差最大——4 番目のグループは破線）；「単色優先」はテクスチャ導入前に 36 の単色スロットを使用（小規模ではより落ち着いた見た目）。即時反映；切り替えると既存の自動スタイルが再配置されます。",
 };

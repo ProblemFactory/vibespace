@@ -57,6 +57,12 @@ check('unset → auto', taskGroupColor({ id: 'x' }) === autoTaskColor('x'));
     return seen.size === 12;
   })());
   check('20 groups (the reported case) include textured ones', Array.from({ length: 20 }, (_, k) => seqTaskColor(k)).filter((s) => s.pattern).length >= 10);
+  // the order SETTING (2.232.1): solid-first restores the pre-v5 layout
+  check("order 'solid-first': first 36 slots all solid, textures at 36",
+    Array.from({ length: 36 }, (_, k) => seqTaskColor(k, 'solid-first')).every((s) => s.pattern === null)
+      && seqTaskColor(36, 'solid-first').pattern === 'dash');
+  check("order 'solid-first' allocator masks with matching renderings",
+    pickColorSeq([{ colorSeq: 0 }, { color: seqTaskColor(1, 'solid-first').color }], 'solid-first') !== 1);
   check('sequence is immutable (pure function)', JSON.stringify(seqTaskColor(7)) === JSON.stringify(seqTaskColor(7)));
   // INFINITE extension (2.231.2): no wrap — slot 144 must NOT duplicate slot
   // 0; the sequence densifies gracefully instead of colliding

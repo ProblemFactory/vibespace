@@ -2214,4 +2214,8 @@ export default {
   "Dashed": "虚线",
   "Dotted": "点线",
   "Diagonal": "斜纹",
+  "All dimensions from the start (textures early)": "全维度从头参与（纹理更早出现）",
+  "Solid colors first (textures after 36 groups)": "纯色优先（36 组之后才有纹理）",
+  "Task Group auto-style order": "任务组自动样式顺序",
+  "How automatic Task Group styles are sequenced. \"All dimensions\" cycles lightness bands AND line-style textures from the first groups (maximum visual difference — the 4th group is already dashed); \"Solid first\" uses 36 solid color slots before any texture (a cleaner look for small setups). Applies live; changing it re-renders existing auto styles.": "自动任务组样式的排序方式。\"全维度\"从最初几个组就轮换亮度带和线型纹理（视觉差异最大——第 4 个组即为虚线）；\"纯色优先\"先用完 36 个纯色槽位再引入纹理（小规模下界面更素净）。实时生效；切换会重排现有自动样式。",
 };
