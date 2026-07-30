@@ -1327,6 +1327,15 @@ class ChatView {
     // Task info update — delegate to status bar
     if (fields.taskInfo) {
       this._statusBar.updateTask(fields.taskInfo, msg.toolCallId, msg.content);
+      // TERMINAL state also freezes the AGENT CARD's live status line
+      // (2.233.1, real report "已经回复完了还写着回应中"): the line is only
+      // ever redrawn by _onSubagentMessage, so after the last subagent
+      // message it kept whatever activity was in flight ("responding")
+      // forever. Background agents' completion arrives as the
+      // <task-notification> wakeup (2.233.0), which now lands here.
+      if (fields.taskInfo.status && fields.taskInfo.status !== 'running') {
+        this._freezeAgentStatus(msg.toolCallId, fields.taskInfo.status);
+      }
     }
   }
 
@@ -1510,6 +1519,22 @@ class ChatView {
     el.textContent = human ? t('still running · {elapsed}', { elapsed: human }) : t('still running');
   }
 
+  /** Replace a finished agent card's live activity with its终态 (2.233.1).
+   *  Keeps the message count + View Log, drops the stale "responding". */
+  _freezeAgentStatus(toolCallId, status) {
+    if (!toolCallId || !this._messageList) return;
+    const pending = this._messageList.querySelector(`[data-tool-id="${toolCallId}"]`);
+    const statusEl = pending?.querySelector('.chat-agent-live-status');
+    if (!statusEl) return;
+    if (this._subagentDone) this._subagentDone.add(toolCallId);
+    else this._subagentDone = new Set([toolCallId]);
+    const countEl = statusEl.querySelector('.chat-agent-live-count');
+    const n = this._subagentCounts?.get(toolCallId);
+    const label = status === 'completed' ? t('finished') : String(status);
+    if (countEl) countEl.textContent = `${n ? t('{n} messages', { n }) : ''}${n ? ' \u2022 ' : ''}${label}`;
+    statusEl.classList.add('chat-agent-status-done');
+  }
+
   _onSubagentMessage(parentToolUseId, msg) {
     if (!parentToolUseId) return;
     // Track message count for tool card status
@@ -1533,6 +1558,9 @@ class ChatView {
         else card.appendChild(statusEl);
       }
       const count = this._subagentCounts.get(parentToolUseId);
+      // a card frozen by its completion wakeup stays frozen (a trailing
+      // buffered message must not resurrect "responding")
+      const frozen = this._subagentDone?.has(parentToolUseId);
       // Upgrade the header model chip to the model ACTUALLY serving this agent
       // (subagent assistant messages carry message.model) — the render-time chip
       // only knows the declared tool-input model, which may be absent/an alias.
@@ -1568,7 +1596,9 @@ class ChatView {
       // the live status line only adds one when the card has none (pending).
       const hasHeaderBtn = !!card.querySelector('.chat-tool-label .chat-agent-view-btn');
       const btnHtml = hasHeaderBtn ? '' : ` <button class="chat-agent-view-btn"${threadAttr} data-desc="${escHtml(desc)}">${t('View Log')}</button>`;
-      statusEl.innerHTML = `<span class="chat-agent-live-count">${t('{n} messages', { n: count })}${activity ? ' \u2022 ' + escHtml(activity) : ''}</span>${btnHtml}`;
+      const actPart = frozen ? ' \u2022 ' + escHtml(t('finished')) : (activity ? ' \u2022 ' + escHtml(activity) : '');
+      statusEl.innerHTML = `<span class="chat-agent-live-count">${t('{n} messages', { n: count })}${actPart}</span>${btnHtml}`;
+      if (frozen) statusEl.classList.add('chat-agent-status-done');
     }
   }
 

@@ -2220,4 +2220,5 @@ export default {
   "How automatic Task Group styles are sequenced. \"All dimensions\" cycles lightness bands AND line-style textures from the first groups (maximum visual difference — the 4th group is already dashed); \"Solid first\" uses 36 solid color slots before any texture (a cleaner look for small setups). Applies live; changing it re-renders existing auto styles.": "自动任务组样式的排序方式。\"全维度\"从最初几个组就轮换亮度带和线型纹理（视觉差异最大——第 4 个组即为虚线）；\"纯色优先\"先用完 36 个纯色槽位再引入纹理（小规模下界面更素净）。实时生效；切换会重排现有自动样式。",
   "Recently finished": "最近完成",
   "completed": "已完成",
+  "finished": "已完成",
 };

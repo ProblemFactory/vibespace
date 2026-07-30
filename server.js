@@ -1378,6 +1378,17 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
               stopSubagentWatcher(msg.tool_use_id);
               gcSubagent(msg.tool_use_id);
             }
+            // The CURRENT harness signals a background agent's completion with
+            // the <task-notification> WAKEUP user record instead (2.233.0
+            // discovery) — without this the fs.watch handle + double-buffered
+            // transcript lingered until the 10-min idle sweep.
+            if (msg.type === 'user' && (msg.origin?.kind === 'task-notification' || /^\s*<task-notification>/.test(typeof msg.message?.content === 'string' ? msg.message.content : ''))) {
+              const tu = (typeof msg.message?.content === 'string' ? msg.message.content : '').match(/<tool-use-id>([\s\S]*?)<\/tool-use-id>/);
+              if (tu && session.subagentWatchers?.has(tu[1].trim())) {
+                stopSubagentWatcher(tu[1].trim());
+                gcSubagent(tu[1].trim());
+              }
+            }
             // Inactivity sweep (audit round-3): an agent whose turn was
             // interrupted / whose CLI died NEVER emits task_notification — its
             // fs.watch handle + double-buffered transcript lived for the
