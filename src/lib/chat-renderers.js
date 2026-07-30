@@ -227,10 +227,10 @@ class ChatRenderers {
     // pasted hook text verbatim; a CLI-synthesized record (msg.synthetic)
     // always is. The text regexes remain the fallback for old records that
     // predate these flags.
-    const isNotification = !msg.typed && (msg.synthetic
+    const isNotification = msg.originKind === 'task-notification' || (!msg.typed && (msg.synthetic
       || /^<(command-name|local-command|task-notification|system-reminder|vibespace-task-context|vibespace-reminder)/.test(rawText.trim())
       || /^A session-scoped Stop hook is now active/.test(rawText.trim())
-      || /^Stop hook feedback:/.test(rawText.trim()));
+      || /^Stop hook feedback:/.test(rawText.trim())));
     if (isNotification) {
       return this._renderNotificationMsg(rawText);
     }
@@ -265,7 +265,24 @@ class ChatRenderers {
     const hookMatch = rawText.match(/^A session-scoped Stop hook is now active with condition: "([\s\S]*?)"/);
     const hookFeedback = rawText.match(/^Stop hook feedback:\s*\[[\s\S]*?\]:\s*([\s\S]*)/);
 
+    // Background-task wakeup (2.229.2): the harness re-invokes the agent with
+    // a <task-notification> block when a background task/workflow completes —
+    // previously invisible (see the normalizer's origin.kind note), now a
+    // first-class dim card naming the task + status, full payload expandable.
+    const taskNotif = rawText.match(/<task-notification>[\s\S]*?<\/task-notification>/);
     let labelIcon = ''; // SVG prefix rendered outside escHtml (label text is escaped)
+    if (taskNotif) {
+      const tag = (name) => { const m = rawText.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`)); return m ? m[1].trim() : ''; };
+      const status = tag('status') || 'completed';
+      const summary = tag('summary') || tag('task-id') || t('background task');
+      label = t('⏰ Woken by background task ({status}): {summary}', { status, summary: summary.substring(0, 110) });
+      detail = rawText.trim();
+      const el2 = document.createElement('div');
+      el2.className = 'chat-msg chat-msg-system chat-system-notification chat-task-wakeup';
+      el2._rawMsg = { role: 'system' };
+      el2.innerHTML = `<details><summary><span class="chat-system-text">${escHtml(label)}</span></summary><pre class="chat-pre">${escHtml(detail)}</pre></details>`;
+      return el2;
+    }
     if (cmdMatch) {
       label = `/${cmdMatch[1]}`;
       if (argsMatch) detail = argsMatch[1].trim();
