@@ -2729,8 +2729,20 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 /* Task board add/import row (P4) */
 .task-board-addrow { display: flex; gap: 6px; }
 .task-board-addrow .new-session-card { flex: 1; }
-.task-board-import { flex: 0 0 auto !important; padding-left: 10px; padding-right: 10px; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); font-size: 14px; /* icons are 1em inline-sized */ }
+.task-board-import {
+  flex: 0 0 auto !important; padding-left: 10px; padding-right: 10px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-secondary); font-size: 14px; /* icons are 1em inline-sized */
+  /* ROOT CAUSE of the blank square (2.232.4, pixel-probed): .session-item-card
+     is a container-query container (container-type: inline-size, 2.37.4) —
+     inline-size containment makes the card's width INDEPENDENT of content, so
+     a shrink-to-fit card collapses to padding-only and flex then squeezes the
+     child (text OR svg) to 0 width. Opt this card out + explicit min-width. */
+  container-type: normal;
+  min-width: 34px;
+}
 .task-board-import:hover { color: var(--accent); }
+.task-board-import svg { flex-shrink: 0; }
 /* Tasks-tab Groups|Tasks sub-tabs (same language as the main tabs, one level in) */
 .sidebar-subtabs { display: flex; border-bottom: 1px solid var(--border); }
 .sidebar-subtab {

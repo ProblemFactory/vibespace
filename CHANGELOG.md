@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.232.4
+
+- **The Import button is actually visible now** (2.232.3 shipped the SVG but it still rendered blank — this time verified by PIXELS, not DOM). True root cause, three layers deep: `.session-item-card` is a container-query container (`container-type: inline-size`, from the 2.37.4 responsive-tags work) — inline-size containment makes the card's width INDEPENDENT of its content, so the shrink-to-fit import card collapsed to padding-only width, and the flex layout then squeezed the child (the old text AND the new icon alike) to 0. The forensic tell: the icon's inline `1em` height resolved to 14px (cross axis) while its width resolved to 0px (main axis, flex-shrunk). Fix: the import card opts out of containment (`container-type: normal`) + explicit `min-width` + `flex-shrink: 0` on the icon. Verified with a CDP screenshot of the rendered row this time.
+
 ## 2.232.3
 
 - **The task board's Import button is no longer an empty dashed square** (real report). The card rendered its label through `.session-card-name`, whose `flex:1 / min-width:0 / overflow:hidden` semantics are built for the session-card flex row — inside this shrink-to-fit card the text collapsed to 0 width (verified with a live CDP probe: text present in DOM, rendered at 0px). It is now a proper SVG icon button (new `import` icon in the shared library, instant tooltip retained).
