@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.232.2
+
+- Switching `tasks.autoStyleOrder` also live-refreshes any OPEN Task Group detail window (the Auto swatch and texture chip previews show the group's current auto style); board/flat-view already re-rendered live. No per-group action is ever needed on a switch — auto styles are a pure function of the stored order-independent `colorSeq` and the setting.
+
 ## 2.232.1
 
 - **The auto-style dimension order is now a setting** (`tasks.autoStyleOrder`, Settings → Sidebar — user: both orders have merit, make it a choice). `interleaved` (default): bands and textures cycle from the first groups, maximum visual difference. `solid-first`: the 36-solid-slots-before-textures layout, cleaner for small setups. The setting reaches the SERVER allocator too — manual-pick masking compares slot renderings, so both sides must sequence identically (order mismatch would let auto colors collide with manual picks). Applies live (board re-renders on change); `colorSeq` values are order-independent.

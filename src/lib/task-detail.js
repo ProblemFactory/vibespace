@@ -481,8 +481,13 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
 
   const onTasksMsg = (msg) => { if (msg.type === 'tasks-updated') render(); };
   app.ws.onGlobal(onTasksMsg);
+  // tasks.autoStyleOrder is render-time-read (Auto swatch + texture chip
+  // previews show the group's CURRENT auto style) — re-render on change
+  // (2.112.4 rule), unsubscribe on close.
+  const onOrderChange = () => { try { render(); } catch {} };
+  app.settings?.on?.('tasks.autoStyleOrder', onOrderChange);
   const prevClose = winInfo.onClose;
-  winInfo.onClose = () => { app.ws.offGlobal(onTasksMsg); prevClose?.(); };
+  winInfo.onClose = () => { app.ws.offGlobal(onTasksMsg); app.settings?.off?.('tasks.autoStyleOrder', onOrderChange); prevClose?.(); };
 
   return winInfo;
 }
