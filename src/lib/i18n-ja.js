@@ -2210,4 +2210,8 @@ export default {
   "Woken by background task ({status}): {summary}": "バックグラウンドタスクで再開（{status}）：{summary}",
   "Auto (distinct per group)": "自動（グループごとに自動区別）",
   "Custom color…": "カスタムカラー…",
+  "Solid": "実線",
+  "Dashed": "破線",
+  "Dotted": "点線",
+  "Diagonal": "斜線",
 };

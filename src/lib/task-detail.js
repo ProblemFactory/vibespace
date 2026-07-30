@@ -383,6 +383,35 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
     swatchRow.appendChild(noColor);
     colorSec.appendChild(swatchRow);
 
+    // ── Texture (2.231.0): manual line-style pick — Auto follows the
+    // auto-assignment (or solid for explicit colors); the chips preview the
+    // actual styles on the group's current color ──
+    const texRow = document.createElement('div');
+    texRow.className = 'task-detail-swatches task-detail-textures';
+    const curColor = (app.sidebar?.getTaskColor && app.sidebar.getTaskColor(task)) || 'var(--text-secondary)';
+    const TEXTURES = [
+      { v: null, label: t('Auto') },
+      { v: 'solid', label: t('Solid') },
+      { v: 'dash', label: t('Dashed') },
+      { v: 'dot', label: t('Dotted') },
+      { v: 'diag', label: t('Diagonal') },
+    ];
+    for (const tx of TEXTURES) {
+      const chip = document.createElement('button');
+      const active = (task.pattern || null) === tx.v;
+      chip.className = 'task-detail-texture' + (active ? ' active' : '');
+      chip.title = tx.label;
+      const bar = document.createElement('span');
+      bar.className = 'task-detail-texture-bar';
+      if (tx.v && tx.v !== 'solid') bar.dataset.pattern = tx.v;
+      bar.style.setProperty('--g-color', curColor);
+      if (tx.v === null) { chip.appendChild(document.createTextNode('A')); }
+      else chip.appendChild(bar);
+      chip.onclick = () => patch({ pattern: tx.v });
+      texRow.appendChild(chip);
+    }
+    colorSec.appendChild(texRow);
+
     // ── Export / Import (P4): a task ⇄ a committable markdown file ──
     const repoSec = section(t('Export / Import'), t('a self-contained markdown file (frontmatter + objective + activity) — commit it into a git repo so the task travels with the code, or move it between machines'));
     const repoWrap = document.createElement('div');

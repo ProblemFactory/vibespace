@@ -249,7 +249,11 @@ export function installSidebarTasks(SidebarClass) {
    *  'hatch') — hue-independent third dimension; explicit-color groups
    *  are always solid. */
   proto.getTaskPattern = function(t) {
-    if (!t || t.color) return null;
+    if (!t) return null;
+    // manual pick wins (2.231.0): 'solid' forces no texture, others render
+    // as chosen — works for BOTH explicit-color and auto-color groups
+    if (t.pattern) return t.pattern === 'solid' ? null : t.pattern;
+    if (t.color) return null; // explicit color, no manual texture → solid
     if (!this._taskColorMap) this._taskColorMap = assignDistinctTaskColors(this._tasks || []);
     return this._taskColorMap.get(t.id)?.pattern || null;
   };
@@ -753,7 +757,12 @@ export function installSidebarTasks(SidebarClass) {
       const collapseKey = 'group:' + task.id;
       groupEl._collapseKey = collapseKey; // for highlightSession to expand on jump
       if (this._collapsedFolders.has(collapseKey)) groupEl.classList.add('collapsed');
-      { const c = this.getTaskColor(task); if (c) { groupEl.style.setProperty('--task-color', c); groupEl.dataset.colored = '1'; } }
+      {
+        const c = this.getTaskColor(task);
+        if (c) { groupEl.style.setProperty('--task-color', c); groupEl.dataset.colored = '1'; }
+        const pat = this.getTaskPattern(task);
+        if (c && pat) groupEl.dataset.pattern = pat;
+      }
 
       const hasLive = taskSessions.some(s => s.status === 'live' || s.status === 'tmux');
       const linkedFolders = task.folders || [];
