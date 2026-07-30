@@ -2207,5 +2207,5 @@ export default {
   "Installed in a system location ({path}) — in containerized deployments, updates to it are lost when the container is rebuilt.": "安装在系统位置（{path}）——容器化部署下，对它的更新会在容器重建时丢失。",
   "Install persistent copy": "安装持久化副本",
   "installs under your home directory (survives rebuilds; takes over for new sessions after the next server restart)": "安装到你的主目录下（重建后仍在；下次服务重启后新会话自动使用）",
-  "⏰ Woken by background task ({status}): {summary}": "⏰ 后台任务唤醒（{status}）：{summary}",
+  "Woken by background task ({status}): {summary}": "后台任务唤醒（{status}）：{summary}",
 };

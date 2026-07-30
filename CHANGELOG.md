@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.229.3
+
+- The background-task wakeup card uses the shared SVG clock icon instead of an emoji (project convention: chrome/card icons are SVG, never emoji — `UI_ICONS.clock` added to the icon library for reuse).
+
 ## 2.229.2
 
 **Background-task wakeups are now visible in the chat** (user report: an agent kept getting woken by background tasks — a CI watcher, a workflow — with no trace of the task or the wakeup in the conversation). Root cause from the real transcript: the wakeup is a user record with `<task-notification>` content, but the CLI stamps `promptSource:"sdk"` on it — and the typed heuristic (promptSource ⇒ the user's own words ⇒ never demote to a notification card, the 2.88.0 guarantee) made it render as a "You" bubble of sanitized XML, effectively invisible. The record's authoritative marker — top-level `origin:{kind:"task-notification"}` — now wins over promptSource; wakeups render as a dedicated dim card: **"⏰ Woken by background task (completed): Background command "…" completed (exit code 0)"** with the full payload behind an expander. A leading-tag text-shape check covers transports that drop the origin field; genuinely typed messages (including pasted XML mid-sentence) keep their protection. Unit test: `scripts/test-task-wakeup-card.mjs`.

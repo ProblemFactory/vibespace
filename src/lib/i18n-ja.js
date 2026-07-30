@@ -2207,5 +2207,5 @@ export default {
   "Installed in a system location ({path}) — in containerized deployments, updates to it are lost when the container is rebuilt.": "システム領域（{path}）にインストールされています——コンテナ環境では、これへの更新はコンテナ再構築時に失われます。",
   "Install persistent copy": "永続コピーをインストール",
   "installs under your home directory (survives rebuilds; takes over for new sessions after the next server restart)": "ホームディレクトリ配下にインストールします（再構築後も保持；次回サーバー再起動後の新規セッションから有効）",
-  "⏰ Woken by background task ({status}): {summary}": "⏰ バックグラウンドタスクで再開（{status}）：{summary}",
+  "Woken by background task ({status}): {summary}": "バックグラウンドタスクで再開（{status}）：{summary}",
 };
