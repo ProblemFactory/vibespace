@@ -275,12 +275,12 @@ class ChatRenderers {
       const tag = (name) => { const m = rawText.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`)); return m ? m[1].trim() : ''; };
       const status = tag('status') || 'completed';
       const summary = tag('summary') || tag('task-id') || t('background task');
-      label = t('⏰ Woken by background task ({status}): {summary}', { status, summary: summary.substring(0, 110) });
+      label = t('Woken by background task ({status}): {summary}', { status, summary: summary.substring(0, 110) });
       detail = rawText.trim();
       const el2 = document.createElement('div');
       el2.className = 'chat-msg chat-msg-system chat-system-notification chat-task-wakeup';
       el2._rawMsg = { role: 'system' };
-      el2.innerHTML = `<details><summary><span class="chat-system-text">${escHtml(label)}</span></summary><pre class="chat-pre">${escHtml(detail)}</pre></details>`;
+      el2.innerHTML = `<details><summary><span class="chat-system-text">${UI_ICONS.clock}${escHtml(label)}</span></summary><pre class="chat-pre">${escHtml(detail)}</pre></details>`;
       return el2;
     }
     if (cmdMatch) {
