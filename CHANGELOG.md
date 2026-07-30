@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.229.0
+
+**Persistent claude installs are now the default** (the walter rollback incident: he ran `claude update`, used Opus 5 for three days, then a pod rebuild silently reverted the image-baked npm-global CLI to its old version — and the `opus` alias back to Opus 4.8 — with zero notice):
+
+- `/api/backend-status` classifies each CLI's install layer (`install: {binPath, userLocal}` — resolved binary under `$HOME` = survives container rebuilds and wins PATH).
+- Manage Agents shows an amber warning on a system-location claude ("updates to it are lost when the container is rebuilt") with a one-click **Install persistent copy** (the native installer → `~/.local`; takes over for new sessions after the next server restart).
+- The pod entrypoint now defaults to migrating: when the PVC has no `~/.local/bin/claude`, it fetches the native installer in the background at boot (never blocks; offline boot skips harmlessly — the baked copy still works). Opt out with `VIBESPACE_NO_CLI_MIGRATE=1`.
+
+Context for the class of confusion this ends: model aliases (`opus`, `sonnet`) resolve against the registry EMBEDDED in the binary — 2.1.207 maps `opus` → claude-opus-4-8 (and predates Opus 5 entirely), 2.1.220 maps it → claude-opus-5. A silently-reverted CLI therefore silently changes what your configured model alias means.
+
 ## 2.228.3
 
 **Sidebar no longer jumps back to the top when you expand a card after scrolling** (recurring report). Three cooperating defects, found by driving the real render/observer machinery in a committed CDP harness:

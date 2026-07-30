@@ -4075,11 +4075,24 @@ app.get('/api/backend-status', (req, res) => {
     } catch { return { installed: false, version: null }; }
   };
   out.claude = probe(CLAUDE_CMD);
+  // Install-layer classification (2.229.0, the walter rollback incident): a
+  // CLI OUTSIDE $HOME (npm-global /usr/local, baked into the container image)
+  // lives in the EPHEMERAL layer — `claude update` succeeds, then the next
+  // pod/container rebuild silently reverts it (walter: 3 days of Opus 5, then
+  // a rebuild put the opus alias back on 4.8 with zero notice). userLocal
+  // (under $HOME → the PVC in fleet pods) survives rebuilds and wins PATH.
+  const classifyInstall = (cmdPath) => {
+    if (!cmdPath || !cmdPath.startsWith('/')) return null;
+    let real = cmdPath;
+    try { real = fs.realpathSync(cmdPath); } catch {}
+    return { binPath: real, userLocal: real.startsWith(os.homedir() + path.sep) };
+  };
   // Resolved ABSOLUTE path (2.223.3): helper terminals run LOGIN shells whose
   // /etc/profile resets PATH — a bare `claude update` typed into one died
   // "command not found" on hosts without ~/.local/bin in ~/.profile (fleet-wide
   // him188 incident). The client prefixes helper commands with this instead.
   out.claude.cmdPath = CLAUDE_CMD && CLAUDE_CMD.startsWith('/') ? CLAUDE_CMD : null;
+  out.claude.install = classifyInstall(out.claude.cmdPath);
   out.claude.loggedIn = false;
   try {
     if (process.platform === 'darwin') {
@@ -4107,6 +4120,7 @@ app.get('/api/backend-status', (req, res) => {
   try { if (JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', 'settings.json'), 'utf-8'))?.apiKeyHelper) out.claude.keyHelper = true; } catch {}
   out.codex = probe(CODEX_CMD);
   out.codex.cmdPath = CODEX_CMD && CODEX_CMD.startsWith('/') ? CODEX_CMD : null;
+  out.codex.install = classifyInstall(out.codex.cmdPath);
   out.codex.loggedIn = false;
   try { out.codex.loggedIn = fs.existsSync(path.join(os.homedir(), '.codex', 'auth.json')); } catch {}
   res.json(out);

@@ -2204,4 +2204,7 @@ export default {
   "⚠ Safeguards stopped this turn: {model} flagged the message and model fallback is disabled, so it was NOT retried on another model. Rephrase and resend to continue on {model}.": "⚠ 安全机制暂停了本轮：{model} 标记了这条消息，且模型 fallback 已禁用，因此没有换用其他模型重试。换个说法重发即可继续使用 {model}。",
   "Last error:": "上次错误:",
   "Click to view full size": "点击查看大图",
+  "Installed in a system location ({path}) — in containerized deployments, updates to it are lost when the container is rebuilt.": "安装在系统位置（{path}）——容器化部署下，对它的更新会在容器重建时丢失。",
+  "Install persistent copy": "安装持久化副本",
+  "installs under your home directory (survives rebuilds; takes over for new sessions after the next server restart)": "安装到你的主目录下（重建后仍在；下次服务重启后新会话自动使用）",
 };

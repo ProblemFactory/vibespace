@@ -43,6 +43,25 @@ if [ -f "$HOME/.vibespace-init.sh" ]; then
   bash "$HOME/.vibespace-init.sh" || echo "[entrypoint] init hook failed (continuing)"
 fi
 
+# 2b. Persistent CLI migration (2.229.0, the walter rollback incident): the
+#     image bakes an npm-global claude in the EPHEMERAL layer — a user's
+#     `claude update` is silently reverted by the next pod rebuild (real
+#     incident: 3 days of Opus 5, then a rebuild put the opus alias back on
+#     4.8). Default to a PERSISTENT user-local install: if the PVC has no
+#     ~/.local/bin/claude yet, fetch the native installer in the BACKGROUND
+#     (never blocks boot; offline boot just skips — the baked copy still
+#     works). ~/.local/bin wins PATH, so once present it takes over for new
+#     sessions at the next server (re)start. Opt out: VIBESPACE_NO_CLI_MIGRATE=1.
+if [ -z "${VIBESPACE_NO_CLI_MIGRATE:-}" ] && [ ! -x "$HOME/.local/bin/claude" ]; then
+  (
+    if curl -fsSL --max-time 300 https://claude.ai/install.sh | bash >>"$HOME/.vibespace-cli-migrate.log" 2>&1; then
+      echo "[entrypoint] persistent claude installed: $("$HOME/.local/bin/claude" --version 2>/dev/null | head -1)"
+    else
+      echo "[entrypoint] persistent claude install skipped (offline or installer failed — baked copy still active)"
+    fi
+  ) &
+fi
+
 # 3. Run from the PVC. Build only if the bundle is missing (a fresh git pull that
 #    the user hasn't rebuilt yet); a normal boot finds the baked bundle → no-op.
 cd "$APP"
