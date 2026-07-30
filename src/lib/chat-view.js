@@ -1007,21 +1007,27 @@ class ChatView {
     const scrollHeightBefore = this._messageList.scrollHeight;
     const toRemove = els.length - maxRendered;
     const removedIds = new Set();
-    for (let i = 0; i < toRemove; i++) {
-      const id = els[i].dataset.msgId;
-      if (id) { this._elements.delete(id); this._renderedMsgIds.delete(id); removedIds.add(id); }
-      els[i].remove();
-    }
+    // Element-anchored ABSOLUTE restore (2.229.1, forensics-confirmed): the
+    // old relative `scrollTop -= (before - after)` double-compensated with
+    // the browser's NATIVE scroll anchoring, which reacts to the same
+    // removals with its own adjustment — the two fought in ±4000px
+    // oscillations. An absolute anchor restore converges no matter what the
+    // browser did in between. Delta math survives only as the anchorless
+    // fallback (empty/near-top viewport).
+    const anchored = this._withViewportAnchor(() => {
+      for (let i = 0; i < toRemove; i++) {
+        const id = els[i].dataset.msgId;
+        if (id) { this._elements.delete(id); this._renderedMsgIds.delete(id); removedIds.add(id); }
+        els[i].remove();
+      }
+    });
     if (removedIds.size) this._messages = this._messages.filter(m => !removedIds.has(m.id));
     this._windowStart += toRemove;
-    this._trace('trimTop', { removed: toRemove });
-    // Preserve scroll position after removing from top. NOTE: still the
-    // delta math — trimTop only ever removes REAL-height (long-rendered)
-    // elements from the window top, where estimate-vs-real skew doesn't
-    // apply the way it does for extendTop's fresh inserts; and the caller
-    // (_extendBottom) has no content-visibility churn in flight.
-    this._traceExpect();
-    this._messageList.scrollTop -= (scrollHeightBefore - this._messageList.scrollHeight);
+    this._trace('trimTop', { removed: toRemove, anchored });
+    if (!anchored) {
+      this._traceExpect();
+      this._messageList.scrollTop -= (scrollHeightBefore - this._messageList.scrollHeight);
+    }
   }
 
   // Jump to a specific message index: replace window entirely
@@ -1223,11 +1229,17 @@ class ChatView {
       }
       this._chatMinimap.setViewport(this._windowStart, this._windowEnd, this._total);
     }
-    if (this._pinned) {
+    if (this._pinned && !this._loadingHistory) {
       // Live path trim (audit-confirmed): _trimTop was only ever called from
       // pagination, so a pinned chat streaming for DAYS grew the DOM without
       // bound. While pinned the user is at the bottom — dropping the oldest
       // rendered rows is invisible; scrolling up re-loads them via _extendTop.
+      // NOT during batch loads (2.229.1 forensics): _extendBottom appends 50
+      // messages through this path — the per-message trim+scrollToBottom
+      // fired a storm of remove/compensate cycles per batch and the browser's
+      // native scroll anchoring answered each with its own correction
+      // (captured live: ±4000px oscillation between adjacent frames). Batch
+      // callers trim ONCE at the end.
       this._trimTop();
       this._scrollToBottom();
     }
@@ -2159,9 +2171,23 @@ class ChatView {
       }
     }
     fn();
-    if (el && el.isConnected && el.offsetParent !== null) {
+    if (el && el.isConnected) {
+      let a = el;
+      if (a.offsetParent === null) {
+        // anchor got FOLDED by a run-collapse pass inside fn (much likelier
+        // since 2.213.0 widened the collapsible kinds) — restore on the
+        // nearest visible neighbor: the run header sits exactly where the
+        // folded content was (same strategy as _updateRuns' own restore)
+        let prev = a.previousElementSibling;
+        while (prev && prev.offsetParent === null) prev = prev.previousElementSibling;
+        let next = null;
+        if (!prev) { next = a.nextElementSibling; while (next && next.offsetParent === null) next = next.nextElementSibling; }
+        a = prev || next;
+        if (a) { this._traceExpect?.(); list.scrollTop = a.offsetTop; return true; }
+        return false;
+      }
       this._traceExpect?.();
-      list.scrollTop = el.offsetTop - delta;
+      list.scrollTop = a.offsetTop - delta;
       return true;
     }
     return false;
