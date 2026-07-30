@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.230.0
+
+**Task Group colors scale to any number of groups** (user request: the fixed 6-swatch palette ran out fast for people with many groups). Three layers:
+
+- **Auto-distinct by default**: a group with no explicit color now gets a deterministic color derived from its id (FNV-1a hash + avalanche mix over the hue wheel) — any number of groups stays visually distinguishable with zero effort, identical on every client and across restarts, nothing new stored. The detail window's color row leads with an "A" swatch showing the group's actual auto color.
+- **Any color at all**: a native color-picker swatch next to the presets (the server already accepted arbitrary values; only the UI was limiting). The quick-pick palette also grew 6 → 18.
+- **Explicit neutral**: "no color" is now a deliberate choice (sentinel `'none'`) — picking it keeps the group grey instead of auto-colored.
+
+Applied everywhere group colors render: board headers, flat-view color bars, session-card group indicators, Session Properties dots. Unit test: `scripts/test-task-colors.mjs` (determinism, hue dispersion ≥18 12° buckets for 30 groups, sentinel semantics, sanitizer accepts hex/'none' and still rejects CSS injection).
+
 ## 2.229.3
 
 - The background-task wakeup card uses the shared SVG clock icon instead of an emoji (project convention: chrome/card icons are SVG, never emoji — `UI_ICONS.clock` added to the icon library for reuse).

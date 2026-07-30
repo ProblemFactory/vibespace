@@ -1,4 +1,4 @@
-import { escHtml, createPopover, showContextMenu, showInputDialog, showConfirmDialog, showToast } from './utils.js';
+import { escHtml, createPopover, showContextMenu, showInputDialog, showConfirmDialog, showToast, taskGroupColor } from './utils.js';
 import { track } from './telemetry-client.js';
 import { t as tr } from './i18n.js';
 
@@ -599,7 +599,7 @@ export function installSidebarTasks(SidebarClass) {
       for (const g of groups) {
         const bar = document.createElement('span');
         bar.className = 'task-view-colorbar';
-        bar.style.setProperty('--g-color', g.color || 'var(--text-dim)');
+        bar.style.setProperty('--g-color', taskGroupColor(g) || 'var(--text-dim)');
         bar.dataset.tip = g.title + (g.objective ? ' — ' + g.objective.slice(0, 100) : '');
         bar.onclick = (e) => { e.stopPropagation(); this.app.openTaskDetail(g.id); };
         // Right-click (long-press on touch) = the group's full action menu —
@@ -644,7 +644,7 @@ export function installSidebarTasks(SidebarClass) {
       showContextMenu(e.clientX, e.clientY, [
         ...groupsAll.map(g => ({
           label: g.title,
-          style: g.color ? `box-shadow: inset 3px 0 0 ${g.color}` : '',
+          style: (() => { const c = taskGroupColor(g); return c ? `box-shadow: inset 3px 0 0 ${c}` : ''; })(),
           action: () => this.app.showNewSessionDialog({ taskId: g.id, cwd: this._folderPaths(g)[0] }),
         })),
         ...(groupsAll.length ? [{ separator: true }] : []),
@@ -728,7 +728,7 @@ export function installSidebarTasks(SidebarClass) {
       const collapseKey = 'group:' + task.id;
       groupEl._collapseKey = collapseKey; // for highlightSession to expand on jump
       if (this._collapsedFolders.has(collapseKey)) groupEl.classList.add('collapsed');
-      if (task.color) { groupEl.style.setProperty('--task-color', task.color); groupEl.dataset.colored = '1'; }
+      { const c = taskGroupColor(task); if (c) { groupEl.style.setProperty('--task-color', c); groupEl.dataset.colored = '1'; } }
 
       const hasLive = taskSessions.some(s => s.status === 'live' || s.status === 'tmux');
       const linkedFolders = task.folders || [];

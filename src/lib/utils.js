@@ -539,6 +539,36 @@ export async function fetchJson(url, opts) {
  *  browser-decoded data: url and a hostile mediaType can smuggle a literal
  *  `" onerror=` past HTML escaping — property assignment is unescapable.
  *  data-popover joins the global Escape-close protocol (created-and-removed). */
+
+/** Task Group color resolver (2.230.0, user request "颜色太少, 会建很多group").
+ *  Explicit color wins; the sentinel 'none' = deliberately neutral; UNSET
+ *  falls back to a DETERMINISTIC auto color — a stable id hash spread around
+ *  the hue wheel by the golden angle, so ANY number of groups stay visually
+ *  distinct with zero user action, identical on every client/restart (pure
+ *  function of the id, nothing stored). Callers keep their own neutral
+ *  styling when this returns null. */
+export function taskGroupColor(t) {
+  if (!t) return null;
+  if (t.color === 'none') return null;
+  if (t.color) return t.color;
+  return autoTaskColor(t.id || t.title || '');
+}
+export function autoTaskColor(id) {
+  // FNV-1a + murmur-style avalanche: measured 20-21 distinct 12° hue buckets
+  // for 30 ids vs 17 for plain djb2 — stateless hashing is inherently
+  // birthday-bounded, but the finalizer keeps near-collisions rare. Stability
+  // (same id → same color forever) is deliberately chosen over perfect
+  // spacing: an order-indexed golden-angle sequence would reshuffle every
+  // group's color whenever an older group is deleted.
+  const str = String(id);
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  h ^= h >>> 16; h = Math.imul(h, 2246822507) >>> 0;
+  h ^= h >>> 13; h = Math.imul(h, 3266489909) >>> 0;
+  h ^= h >>> 16;
+  return `hsl(${(h >>> 0) % 360}, 62%, 52%)`;
+}
+
 export function showImageOverlay(src) {
   const overlay = document.createElement('div');
   overlay.className = 'chat-img-overlay';

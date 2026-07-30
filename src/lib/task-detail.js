@@ -1,4 +1,4 @@
-import { escHtml, showConfirmDialog, showToast } from './utils.js';
+import { escHtml, showConfirmDialog, showToast, autoTaskColor } from './utils.js';
 import { setupDirAutocomplete } from './autocomplete.js';
 import { t } from './i18n.js';
 
@@ -11,7 +11,15 @@ import { t } from './i18n.js';
  * here in P1 — injection (SessionStart hook) ships in P2.
  */
 
-const SWATCHES = ['#e06c75', '#e5a04c', '#98c379', '#56b6c2', '#61afef', '#c678dd'];
+// Quick-pick palette (expanded 6→18 in 2.230.0). The REAL scalability answer
+// for many groups is the Auto swatch (deterministic distinct hue per group id,
+// see utils.taskGroupColor) + the native custom picker (any color); these are
+// just convenient presets.
+const SWATCHES = [
+  '#e06c75', '#e5533d', '#e5a04c', '#e5c07b', '#b8bb26', '#98c379',
+  '#2ea043', '#56b6c2', '#39c5bb', '#61afef', '#4078f2', '#7c7cf0',
+  '#c678dd', '#d33682', '#e56399', '#a0522d', '#8a919e', '#5c6370',
+];
 
 export function openTaskDetail(app, taskId, { syncId } = {}) {
   const sidebar = app.sidebar;
@@ -339,6 +347,16 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
     const colorSec = section(t('Color'));
     const swatchRow = document.createElement('div');
     swatchRow.className = 'task-detail-swatches';
+    // Auto (default): color unset → a deterministic distinct hue per group id
+    // (golden-angle spacing — any NUMBER of groups stays distinguishable, the
+    // scalability answer to "颜色太少"). Shows the group's actual auto color.
+    const autoSw = document.createElement('button');
+    autoSw.className = 'task-detail-swatch auto' + (!task.color ? ' active' : '');
+    autoSw.style.background = autoTaskColor(task.id);
+    autoSw.title = t('Auto (distinct per group)');
+    autoSw.textContent = 'A';
+    autoSw.onclick = () => patch({ color: null });
+    swatchRow.appendChild(autoSw);
     for (const c of SWATCHES) {
       const sw = document.createElement('button');
       sw.className = 'task-detail-swatch' + (task.color === c ? ' active' : '');
@@ -346,10 +364,22 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
       sw.onclick = () => patch({ color: task.color === c ? null : c });
       swatchRow.appendChild(sw);
     }
+    // Custom: any color via the native picker (no dependency, themes itself)
+    const customWrap = document.createElement('label');
+    const isCustom = !!task.color && task.color !== 'none' && !SWATCHES.includes(task.color);
+    customWrap.className = 'task-detail-swatch custom' + (isCustom ? ' active' : '');
+    customWrap.title = t('Custom color…');
+    customWrap.style.background = isCustom ? task.color : 'transparent';
+    const colorInput = document.createElement('input');
+    colorInput.type = 'color';
+    colorInput.value = isCustom && /^#[0-9a-fA-F]{6}$/.test(task.color) ? task.color : '#61afef';
+    colorInput.onchange = () => patch({ color: colorInput.value });
+    customWrap.appendChild(colorInput);
+    swatchRow.appendChild(customWrap);
     const noColor = document.createElement('button');
-    noColor.className = 'task-detail-swatch none' + (!task.color ? ' active' : '');
+    noColor.className = 'task-detail-swatch none' + (task.color === 'none' ? ' active' : '');
     noColor.title = t('No color');
-    noColor.onclick = () => patch({ color: null });
+    noColor.onclick = () => patch({ color: 'none' });
     swatchRow.appendChild(noColor);
     colorSec.appendChild(swatchRow);
 

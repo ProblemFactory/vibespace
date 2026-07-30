@@ -2208,4 +2208,6 @@ export default {
   "Install persistent copy": "永続コピーをインストール",
   "installs under your home directory (survives rebuilds; takes over for new sessions after the next server restart)": "ホームディレクトリ配下にインストールします（再構築後も保持；次回サーバー再起動後の新規セッションから有効）",
   "Woken by background task ({status}): {summary}": "バックグラウンドタスクで再開（{status}）：{summary}",
+  "Auto (distinct per group)": "自動（グループごとに自動区別）",
+  "Custom color…": "カスタムカラー…",
 };

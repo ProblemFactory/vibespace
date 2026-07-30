@@ -1,4 +1,4 @@
-import { escHtml, copyText, showConfirmDialog } from './utils.js';
+import { escHtml, copyText, showConfirmDialog, taskGroupColor } from './utils.js';
 import { SESSION_STATE_META, SESSION_URGENCY_META } from './sidebar-tasks.js';
 import { getBackendMeta, getAgentKindMeta, getAgentRoleLabel } from './agent-meta.js';
 import { t } from './i18n.js';
@@ -190,8 +190,11 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
       cb.onchange = () => { cb.checked ? sidebar._taskBind(g.id, s) : sidebar._taskUnbind(g.id, s); };
       const txt = document.createElement('span');
       txt.textContent = g.title + (viaFolder ? t(' (folder)') : '');
-      if (g.color) { const dot = document.createElement('span'); dot.className = 'tvg-dot'; dot.style.setProperty('--g-color', g.color); lbl.append(cb, dot, txt); }
-      else lbl.append(cb, txt);
+      {
+        const c = taskGroupColor(g);
+        if (c) { const dot = document.createElement('span'); dot.className = 'tvg-dot'; dot.style.setProperty('--g-color', c); lbl.append(cb, dot, txt); }
+        else lbl.append(cb, txt);
+      }
       tgSec.appendChild(lbl);
     }
     if (!(sidebar._tasks || []).filter(t => !t.archived).length) tgSec.insertAdjacentHTML('beforeend', `<div class="empty-hint">${escHtml(t('No Task Groups yet'))}</div>`);
