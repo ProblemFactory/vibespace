@@ -438,6 +438,8 @@ class ChatView {
           this._renderers.appendSystem(msg.detail ? `${t('Session ended.')} — ${msg.detail}` : t('Session ended.'));
           this._setReadOnly();
         }
+      } else if (msg.type === 'attach-ack' && msg.sessionId === sessionId) {
+        this._lastAttachAckAt = Date.now(); // proof-of-life: server got our attach and is processing
       } else if (msg.type === 'attached' && msg.sessionId === sessionId) {
         // Track the server normalizer epoch from EVERY attach path (create,
         // attach, reattach) — _reattach compares against it to detect a
@@ -1882,22 +1884,41 @@ class ChatView {
 
     // Re-attach so server adds this WS to session.clients again
     this.ws.send({ type: 'attach', sessionId: this.sessionId });
-    // NO-REPLY fallback: the explicit error path (server replies error with
-    // our sessionId → read-only) covers the common restart case, but a window
-    // whose create was still in flight when the server died can hold an id
-    // the new server never answers for AT ALL — it then looked alive forever
-    // (input box, no responses; real report). If neither 'attached' nor
-    // 'error' lands within 20s of a reconnect re-attach, flip to read-only
-    // with the Resume bar. 20s clears even a huge-transcript attach.
+    // NO-REPLY fallback (REWRITTEN 2.234.1, lengyue's mass false-death
+    // incident): the old one-shot 20s timer declared "session no longer
+    // exists (likely a restart)" on ANY slow reply — but a degraded server
+    // (event-loop spikes, remote transcript pulls, MB-scale attach bursts on
+    // reload) can lawfully take longer while every session is alive, and the
+    // flip turned "slow" into what looked like mass session death across ~8
+    // windows. Now: a RETRY ladder — re-send the attach while the server
+    // hasn't even ACKED it (the 2.234.1 'attach-ack' lands synchronously, so
+    // its absence means the attach may never have arrived); once acked, just
+    // wait (server alive, processing). Flip read-only only after ~2 minutes,
+    // with a message that says the truth: timeout ≠ dead — the old certainty
+    // is reserved for the explicit not-found error path.
     const reattachAt = Date.now();
-    setTimeout(() => {
-      if (this._readOnly || this._disconnected) return; // resolved / still offline (next reconnect retries)
-      if ((this._lastAttachedAt || 0) >= reattachAt) return;
+    this._reattachGen = (this._reattachGen || 0) + 1;
+    const gen = this._reattachGen;
+    let waits = 0;
+    const checkOrRetry = () => {
+      if (gen !== this._reattachGen) return; // superseded by a newer reconnect cycle
+      if (this._readOnly || this._disconnected) return; // resolved / offline (next reconnect restarts the ladder)
+      if ((this._lastAttachedAt || 0) >= reattachAt) return; // attached — done
+      const acked = (this._lastAttachAckAt || 0) >= reattachAt;
+      waits++;
+      if (waits < 5) {
+        if (!acked) this.ws.send({ type: 'attach', sessionId: this.sessionId });
+        setTimeout(checkOrRetry, 25000);
+        return;
+      }
       this._hideTyping();
       if (this._tryViewOnlyRescue()) return;
-      this._renderers.appendSystem(t('The session no longer exists on the server (likely a restart) — resume to continue.'));
+      this._renderers.appendSystem(acked
+        ? t('The server is alive but did not finish re-attaching in time — the session is likely STILL RUNNING. Reload the tab, or Resume (resuming a live session reconnects to it, never starts a duplicate).')
+        : t('The server did not answer the re-attach — it may have restarted. If the session is still running, Resume reconnects to it.'));
       this._setReadOnly();
-    }, 20000);
+    };
+    setTimeout(checkOrRetry, 20000);
 
     // Wait for attached response before re-enabling input
     const handler = (msg) => {
