@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.235.1
+
+- **update.sh survives root-run-update residue** (real fleet incident: an admin-side update executed as root via `kubectl exec` left `data/.update.lock` — and 252 working-tree files — root-owned; the user's next in-app Update died at the lock with a bare "Permission denied"). The lock is now remove-or-explain when unwritable, and an ownership PREFLIGHT detects non-writable repo files up front and prints the actual fix (`sudo chown -R <user>: .`) instead of letting git fail midway with a confusing error.
+
 ## 2.235.0
 
 - **Heavy transcript work moved off the main thread** (the structural follow-up to the 2.234.1 incident: the degradation was single-threaded transcript work — 32MB tail parses on every attach/history load, GB-scale line-index builds, full-file turn scans — saturating the ONE event-loop thread while machine CPU% looked idle). New `src/transcript-worker.js` runs the EXISTING sync implementations inside a persistent worker pool (SafeFs generalized to host other worker scripts; zero logic duplication — the worker simply requires the same modules, whose mtime+size caches now live where the work happens). Worker-backed async variants (`jsonlGapInfoAsync`/`readJsonlLineRangeAsync`/`scanJsonlUserTurnsAsync`/`readJsonlBoundedParsedAsync`) serve the gap/turn-map/slab endpoints, and `warmSessionJsonlAsync` pre-warms the JSONL parse cache before the ws attach rebuild and `/api/session-messages` — the sync machinery then hits a warm cache instead of blocking. Worker down ⇒ automatic sync inline fallback, identical behavior. Measured: main-thread max block 1ms via workers vs 78ms inline on a 39MB fixture (real-world files were 0.6-1s); regression test scripts/test-transcript-worker.mjs (12 asserts incl. a negative control and parity checks). SafeFs also now ref()s a worker while calls are in flight (an idle loop could exit before an unref'd worker replied).
