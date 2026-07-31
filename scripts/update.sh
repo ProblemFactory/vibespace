@@ -17,9 +17,29 @@ git config --global --add safe.directory "$(pwd)" 2>/dev/null || true
 # (another tab / re-click) would interleave a concurrent git pull/npm install.
 # flock is Linux-only (macOS lacks flock(1)) — skip the guard there.
 mkdir -p data
+# Stale lock owned by ANOTHER USER (2.235.1, real fleet incident): an admin
+# update that ran as root via kubectl exec left data/.update.lock (and worse,
+# working-tree files) root-owned — the user-side update then dies here with
+# "Permission denied". Remove-or-explain instead of a bare EACCES.
+if [ -e data/.update.lock ] && [ ! -w data/.update.lock ]; then
+  rm -f data/.update.lock 2>/dev/null || {
+    echo "Update lock data/.update.lock is owned by another user (likely a past root-run admin update)."
+    echo "Fix once with:  sudo chown -R $(id -un): ."
+    exit 1
+  }
+fi
 if command -v flock >/dev/null 2>&1; then
   exec 9>data/.update.lock
   flock -n 9 || { echo "Another update is already running — aborting this one."; exit 1; }
+fi
+# Ownership preflight (same incident, the bigger half): a root-run update
+# leaves SOURCE files root-owned — git pull would fail midway with a confusing
+# error. Detect any non-writable file up front and name the real fix.
+BADF=$(find .git src server.js package.json ! -writable -print -quit 2>/dev/null)
+if [ -n "$BADF" ]; then
+  echo "Repo files are not writable by $(id -un) (e.g. $BADF) — likely left root-owned by a past root-run admin update."
+  echo "Fix once with:  sudo chown -R $(id -un): ."
+  exit 1
 fi
 echo "== VibeSpace update: $(git rev-parse --short HEAD) @ $(git rev-parse --abbrev-ref HEAD)"
 # Derived/generated tracked files dirty the working tree and block the ff-only
