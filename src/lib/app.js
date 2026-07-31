@@ -237,6 +237,16 @@ class App {
         showToast(msg.text, { type: msg.level >= 2 ? 'error' : undefined });
       }
       if (msg.type === 'sysinfo-alert') {
+        // Event-loop degradation (2.235.0): the "everything is slow but CPU
+        // looks fine" state — surface it the moment it happens instead of
+        // being diagnosed from telemetry after the fact.
+        if (msg.kind === 'evloop') {
+          showToast(
+            t('The server is degraded — its main thread is saturated ({lag}ms median lag). Everything will feel slow; sessions are NOT dead.', { lag: msg.lagMs }),
+            { type: msg.level >= 2 ? 'error' : undefined },
+          );
+          return;
+        }
         // Memory pressure (2.216.0, lengyue's OOM kill): warn BEFORE the
         // kernel kills the pod (which takes every dtach session with it).
         this.sidebar?._railSysBadge?.(msg.pct);

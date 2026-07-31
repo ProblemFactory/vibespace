@@ -195,6 +195,55 @@ function getJsonlLineIndex(fp) {
 // Which line indices does the head+tail window cover? Lines [0, headEndLine)
 // are in the head, [tailStartLine, totalLines) in the tail; the gap in between
 // is what lazy loading fetches. Returns null when the file isn't elided.
+// ── Worker-backed async variants (2.235.0) ──
+// The sync scans above are correct but SINGLE-THREADED: on huge transcripts a
+// line-index build runs seconds and a 32MB tail parse ~0.5-1s, and every such
+// call blocks the ONE event loop for the whole server (the lengyue incident's
+// degradation was exactly these, invisible in machine CPU%). The async
+// variants run the SAME functions in a persistent worker (transcript-worker
+// requires this module — zero duplication; the mtime+size caches live worker-
+// side where the work happens). Worker down/timeout ⇒ sync inline fallback,
+// identical behavior without the isolation.
+let _transcriptPool = null;
+function _transcriptPoolGet() {
+  if (_transcriptPool === null) {
+    try {
+      const { SafeFs } = require('../safe-fs');
+      const { runOp } = require('../transcript-worker');
+      _transcriptPool = new SafeFs({
+        workerPath: path.join(__dirname, '..', 'transcript-worker.js'),
+        poolSize: 2,
+        inlineRun: runOp,
+        timeouts: { default: 60000, gapInfo: 120000, lineRange: 60000, userTurns: 120000, boundedParsed: 60000 },
+      });
+    } catch (e) {
+      _transcriptPool = false; // construction failed once — stay inline forever
+      console.error('[transcript-worker] pool unavailable, staying inline:', e.message);
+    }
+  }
+  return _transcriptPool || null;
+}
+async function jsonlGapInfoAsync(fp) {
+  const pool = _transcriptPoolGet();
+  if (pool) { try { return await pool.call('gapInfo', { fp }); } catch {} }
+  return jsonlGapInfo(fp);
+}
+async function readJsonlLineRangeAsync(fp, startLine, endLine) {
+  const pool = _transcriptPoolGet();
+  if (pool) { try { return await pool.call('lineRange', { fp, startLine, endLine }); } catch {} }
+  return readJsonlLineRange(fp, startLine, endLine);
+}
+async function scanJsonlUserTurnsAsync(fp, backend) {
+  const pool = _transcriptPoolGet();
+  if (pool) { try { return await pool.call('userTurns', { fp, backend }); } catch {} }
+  return scanJsonlUserTurns(fp, backend);
+}
+async function readJsonlBoundedParsedAsync(fp, { tailOnly = true, dropSubagent = false } = {}) {
+  const pool = _transcriptPoolGet();
+  if (pool) { try { return await pool.call('boundedParsed', { fp, tailOnly, dropSubagent }); } catch {} }
+  return null; // caller falls back to its own sync parse
+}
+
 function jsonlGapInfo(fp) {
   const stat = fs.statSync(fp);
   if (stat.size <= JSONL_HEAD_BYTES + JSONL_TAIL_BYTES) return null;
@@ -899,6 +948,7 @@ class CodexAdapter extends BackendAdapter {
 }
 
 module.exports = {
+  jsonlGapInfoAsync, readJsonlLineRangeAsync, scanJsonlUserTurnsAsync, readJsonlBoundedParsedAsync,
   CODEX_SESSIONS_DIR,
   CodexAdapter,
   findCodexSessionJsonlPath,

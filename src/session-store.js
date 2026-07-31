@@ -246,6 +246,28 @@ function findSessionJsonlPath(claudeSessionId, cwd) {
 const _jsonlCache = new Map();
 const JSONL_CACHE_MAX = 30;
 
+// Async warm (2.235.0): populate _jsonlCache OFF the main thread via the
+// transcript worker, so the sync parseSessionJsonl below (unchanged, many sync
+// callers) hits a warm cache instead of blocking the loop for the 0.5-1s a
+// 32MB tail parse costs. Await this at the HOT entry points (ws attach
+// history rebuild, /api/session-messages) before the sync machinery runs.
+async function warmSessionJsonlAsync(claudeSessionId, cwd) {
+  try {
+    const fp = findSessionJsonlPath(claudeSessionId, cwd);
+    if (!fp) return false;
+    const stat = fs.statSync(fp);
+    const cached = _jsonlCache.get(claudeSessionId);
+    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) return true; // already warm
+    const { readJsonlBoundedParsedAsync } = require('./adapters/codex');
+    const records = await readJsonlBoundedParsedAsync(fp, { tailOnly: true, dropSubagent: true });
+    if (!records) return false; // worker unavailable — sync path will parse inline
+    _jsonlCache.delete(claudeSessionId);
+    _jsonlCache.set(claudeSessionId, { mtimeMs: stat.mtimeMs, size: stat.size, messages: records });
+    while (_jsonlCache.size > JSONL_CACHE_MAX) _jsonlCache.delete(_jsonlCache.keys().next().value);
+    return true;
+  } catch { return false; }
+}
+
 function parseSessionJsonl(claudeSessionId, cwd) {
   const fp = findSessionJsonlPath(claudeSessionId, cwd);
   if (!fp) return [];
@@ -810,6 +832,7 @@ function dedupWebuiSockets(entries) {
 }
 
 module.exports = {
+  warmSessionJsonlAsync,
   SESSIONS_DIR,
   dedupWebuiSockets,
   isPidAlive,

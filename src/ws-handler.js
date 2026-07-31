@@ -7,7 +7,7 @@ const { MessageManager } = require('./message-manager');
 const { createMessageManager } = require('./normalizers');
 const { listCodexThreads } = require('./codex-session-store');
 const { findCodexSessionJsonlPath, extractCodexThreadMeta } = require('./adapters/codex');
-const { cwdToProjectDir, findSessionJsonlPath } = require('./session-store');
+const { cwdToProjectDir, findSessionJsonlPath, warmSessionJsonlAsync } = require('./session-store');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
 
@@ -1866,6 +1866,14 @@ done`;
               // Can't use total===0: PTY output via processLive may have populated the
               // normalizer with partial buffer data before any client connected.
               if (session._normalizer && !session._historyLoaded) {
+                // 2.235.0: warm the JSONL parse cache in the transcript worker
+                // FIRST — the sync rebuild below then reads a warm cache
+                // instead of blocking the loop ~0.5-1s per big-tail parse
+                // (the lengyue-incident spike class). Codex sessions parse
+                // their own rollouts sync (unwarmed) — smaller files today.
+                if ((session.backend || 'claude') === 'claude') {
+                  try { await warmSessionJsonlAsync(session.claudeSessionId || session.backendSessionId, session.cwd); } catch {}
+                }
                 const opHandlers = [...session._normalizer.listeners]; // carry over ALL subscribers, not just the first
                 session._normalizer = createMessageManager(session.backend || 'claude', data.sessionId);
                 session._normEpoch = Date.now();
