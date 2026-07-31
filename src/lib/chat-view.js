@@ -336,6 +336,12 @@ class ChatView {
       getCwd: () => this._getSessionIds().cwd,
       getHost: () => this._getSessionIds().host || null,
       getUploadDir: () => (this.app?.settings?.get('chat.uploadDir') || '').trim(),
+      // Touch devices: soft keyboards have no Shift+Enter — the enter key is
+      // the ONLY way to type a newline, so it must insert one, not send
+      // (2.234.0, real report). Send = the button. chat.touchEnterSends
+      // restores enter-to-send for those who prefer it.
+      isTouch: () => !!this.app?.isTouch,
+      getTouchEnterSends: () => !!this.app?.settings?.get('chat.touchEnterSends'),
     });
     this._chatInput.popupContainer = container;
     this._setupChatDrop(container);
