@@ -122,8 +122,9 @@ function persistHistory() {
     fs.renameSync(tmp, _histFile);
   } catch { }
 }
+let _lastLoopLag = 0; // most recent 500ms-drift sample, folded into history
 function recordSample(mem, cores) {
-  const pt = { t: Date.now(), m: mem.used, l: mem.limit, c: cores };
+  const pt = { t: Date.now(), m: mem.used, l: mem.limit, c: cores, e: _lastLoopLag };
   _hist.fine.push(pt);
   if (_hist.fine.length > FINE_MAX) _hist.fine.splice(0, _hist.fine.length - FINE_MAX);
   if (pt.t - _lastCoarseAt >= 15 * 60 * 1000) { // 15-min ring: max-mem + avg-cpu over the window
@@ -152,6 +153,34 @@ function history(rangeMs) {
 // fully clears below 75% so a later climb alerts again.
 function startWatch({ broadcast, dataDir, intervalMs = 45000 } = {}) {
   let lastLevel = 0, lastAlertAt = 0;
+  // ── Event-loop lag watch (2.235.0, lengyue "卡了2h但CPU不高" incident): the
+  // ONE metric that caught that degradation was loop lag, and it lived only in
+  // telemetry (visible after the fact). Sample drift every 500ms, keep a
+  // 3-min window, alert on SUSTAINED degradation: median >300ms amber /
+  // >800ms red (median, not max — a single big GC pause must not page anyone).
+  // Same cooldown discipline as the memory watch.
+  const lagWin = [];
+  let lastLag = Date.now(), lagLevel = 0, lagAlertAt = 0;
+  const lagT = setInterval(() => {
+    const now = Date.now();
+    const lag = Math.max(0, now - lastLag - 500);
+    lastLag = now;
+    lagWin.push({ t: now, lag });
+    while (lagWin.length && lagWin[0].t < now - 3 * 60 * 1000) lagWin.shift();
+    _lastLoopLag = lag; // picked up by recordSample into history
+    if (lagWin.length < 60) return; // need a real window before judging
+    const sorted = lagWin.map((x) => x.lag).sort((a, b) => a - b);
+    const med = sorted[Math.floor(sorted.length / 2)];
+    const level = med >= 800 ? 2 : med >= 300 ? 1 : 0;
+    if (level === 0) { if (med < 150) lagLevel = 0; return; }
+    const cooldown = level > lagLevel ? 0 : 30 * 60 * 1000;
+    if (now - lagAlertAt < cooldown) return;
+    lagAlertAt = now; lagLevel = level;
+    console.warn(`[sysinfo] event-loop degradation: median lag ${med}ms over 3min (level ${level}) — the server thread is saturated (big parses / sync work), machine CPU% will NOT show this`);
+    global.__vsEvent?.('evloop-degraded', { detail: `median ${med}ms level${level}` });
+    broadcast?.({ type: 'sysinfo-alert', kind: 'evloop', level, lagMs: med });
+  }, 500);
+  lagT.unref?.();
   if (dataDir) loadHistory(dataDir);
   sampleCpuCores(); // prime the delta baseline
   const persistT = setInterval(persistHistory, 5 * 60 * 1000);
@@ -174,7 +203,7 @@ function startWatch({ broadcast, dataDir, intervalMs = 45000 } = {}) {
     } catch { }
   }, intervalMs);
   t.unref?.();
-  return () => { clearInterval(t); clearInterval(persistT); persistHistory(); };
+  return () => { clearInterval(t); clearInterval(lagT); clearInterval(persistT); persistHistory(); };
 }
 
 module.exports = { read, startWatch, memInfo, history, persistHistory };

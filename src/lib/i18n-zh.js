@@ -2225,4 +2225,5 @@ export default {
   "On phones and tablets the keyboard’s enter key inserts a newline by default (soft keyboards have no Shift+Enter, so this is the only way to type one) and messages are sent with the send button. Turn on to make enter send instead.": "手机/平板上键盘的回车键默认插入换行（软键盘没有 Shift+回车，这是唯一的换行方式），消息用发送按钮发出。开启后回车改为直接发送。",
   "The server is alive but did not finish re-attaching in time — the session is likely STILL RUNNING. Reload the tab, or Resume (resuming a live session reconnects to it, never starts a duplicate).": "服务器在线但未能及时完成重连——会话很可能仍在运行。请刷新页面，或点击 Resume（对仍在运行的会话 Resume 只会重新接入，不会另起一份）。",
   "The server did not answer the re-attach — it may have restarted. If the session is still running, Resume reconnects to it.": "服务器未响应重连——可能经历了重启。如果会话仍在运行，Resume 会重新接入它。",
+  "The server is degraded — its main thread is saturated ({lag}ms median lag). Everything will feel slow; sessions are NOT dead.": "服务器处于劣化状态——主线程饱和（中位延迟 {lag}ms）。一切都会变慢，但会话并没有死。",
 };

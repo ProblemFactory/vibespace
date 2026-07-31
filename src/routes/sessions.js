@@ -19,7 +19,7 @@ const {
 const { createMessageManager } = require('../normalizers');
 const { listCodexThreads } = require('../codex-session-store');
 const { findSessionJsonlPath } = require('../session-store');
-const { findCodexSessionJsonlPath, jsonlGapInfo, readJsonlLineRange, scanJsonlUserTurns, searchJsonlFull, searchJsonlFullStream } = require('../adapters/codex');
+const { findCodexSessionJsonlPath, jsonlGapInfo, jsonlGapInfoAsync, readJsonlLineRange, readJsonlLineRangeAsync, scanJsonlUserTurns, scanJsonlUserTurnsAsync, searchJsonlFull, searchJsonlFullStream } = require('../adapters/codex');
 
 function getSessionKey(session = {}) {
   const backend = session.backend || 'claude';
@@ -69,6 +69,12 @@ function setup(ctx) {
     }
     const resolvedSessionId = backendSessionId || claudeSessionId;
     if (!resolvedSessionId) return res.status(400).json({ error: 'backendSessionId or claudeSessionId required' });
+    // 2.235.0: warm the JSONL parse cache in the transcript worker so the sync
+    // machinery below reads a warm cache instead of blocking the loop on a
+    // big-tail parse (claude transcripts; codex rollouts parse their own path)
+    if (resolvedBackend === 'claude') {
+      try { await require('../session-store').warmSessionJsonlAsync(resolvedSessionId, cwd); } catch {}
+    }
 
     // Use session's existing normalizer if available (cached); else build on-demand
     let session = null;
@@ -164,7 +170,7 @@ function setup(ctx) {
     if (!fp || !fs.existsSync(fp)) return res.json({ gap: null });
 
     let gap;
-    try { gap = jsonlGapInfo(fp); } catch { gap = null; }
+    try { gap = await jsonlGapInfoAsync(fp); } catch { gap = null; }
     if (!gap) return res.json({ gap: null });
 
     if (req.query.info) {
@@ -206,7 +212,7 @@ function setup(ctx) {
     // (markers) + each turn's file line (for seek-jumping into the gap).
     if (req.query.fullturnmap) {
       let turns = [];
-      try { turns = scanJsonlUserTurns(fp, resolvedBackend); } catch { turns = []; }
+      try { turns = await scanJsonlUserTurnsAsync(fp, resolvedBackend); } catch { turns = []; }
       const firstTs = turns.length ? turns[0].ts : 0;
       const lastTs = turns.length ? turns[turns.length - 1].ts : 0;
       return res.json({ fullTurns: turns, firstTs, lastTs, ...gap });
@@ -235,7 +241,7 @@ function setup(ctx) {
     if (fromLine >= toLine) return res.json({ messages: [], fromLine: 0, toLine: 0, tailStartLine: gap.tailStartLine });
 
     let records = [];
-    try { records = readJsonlLineRange(fp, fromLine, toLine); } catch { records = []; }
+    try { records = await readJsonlLineRangeAsync(fp, fromLine, toLine); } catch { records = []; }
     // Match the display path: drop subagent records before normalizing.
     records = records.filter((r) => !isSubagentMessage(r));
     // Normalize the slab in isolation. Tool calls whose result is outside this

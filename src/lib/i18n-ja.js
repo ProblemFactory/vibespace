@@ -2225,4 +2225,5 @@ export default {
   "On phones and tablets the keyboard’s enter key inserts a newline by default (soft keyboards have no Shift+Enter, so this is the only way to type one) and messages are sent with the send button. Turn on to make enter send instead.": "スマホ/タブレットではキーボードの改行キーはデフォルトで改行を挿入し（ソフトキーボードには Shift+Enter がないため唯一の改行手段）、メッセージは送信ボタンで送ります。オンにすると Enter で送信します。",
   "The server is alive but did not finish re-attaching in time — the session is likely STILL RUNNING. Reload the tab, or Resume (resuming a live session reconnects to it, never starts a duplicate).": "サーバーは稼働していますが再接続が時間内に完了しませんでした——セッションはまだ実行中の可能性が高いです。タブを再読み込みするか、Resume してください（実行中のセッションへの Resume は再接続するだけで、複製は作られません）。",
   "The server did not answer the re-attach — it may have restarted. If the session is still running, Resume reconnects to it.": "サーバーが再接続に応答しませんでした——再起動した可能性があります。セッションがまだ実行中なら、Resume で再接続できます。",
+  "The server is degraded — its main thread is saturated ({lag}ms median lag). Everything will feel slow; sessions are NOT dead.": "サーバーが劣化状態です——メインスレッドが飽和しています（中央値遅延 {lag}ms）。全体的に遅くなりますが、セッションは生きています。",
 };

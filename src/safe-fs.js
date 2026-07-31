@@ -45,6 +45,9 @@ const DEFAULT_TIMEOUTS = {
 class SafeFs {
   constructor(opts = {}) {
     this.workerPath = opts.workerPath || path.join(__dirname, 'safe-fs-worker.js');
+    // Inline fallback when the pool is down — defaults to the fs op set; other
+    // worker scripts (transcript-worker) pass their own runOp (2.235.0).
+    this._inlineRun = opts.inlineRun || _runOpInline;
     this.poolSize = Math.max(1, opts.poolSize || 4);
     this.timeouts = { ...DEFAULT_TIMEOUTS, ...(opts.timeouts || {}) };
     this._seq = 1;
@@ -99,6 +102,7 @@ class SafeFs {
     const call = rec.inflight.get(msg.id);
     if (!call) return; // already timed out & rejected + worker being replaced
     rec.inflight.delete(msg.id);
+    if (rec.inflight.size === 0) rec.worker?.unref?.();
     clearTimeout(call.timer);
     if (msg.ok) return call.resolve(msg.result);
     const e = new Error(msg.error?.message || 'fs error');
@@ -151,7 +155,7 @@ class SafeFs {
     if (!rec) {
       // No live worker at all — run inline in the main thread as a last resort
       // (no isolation, but keeps file browsing alive if the pool can't start).
-      try { return Promise.resolve(_runOpInline(op, payload)).then(r => r.result); }
+      try { return Promise.resolve(this._inlineRun(op, payload)).then(r => r.result); }
       catch (e) { return Promise.reject(e); }
     }
     const id = this._seq++;
@@ -161,6 +165,11 @@ class SafeFs {
       rec.inflight.set(id, { resolve, reject, timer, op });
       try {
         rec.worker.postMessage({ id, op, payload });
+        // Hold the event loop open while work is in flight — workers are
+        // unref'd at spawn, and an idle main loop would otherwise let the
+        // process exit before the reply lands (bit the test harness; a
+        // draining server has the same shape).
+        if (rec.inflight.size === 1) rec.worker.ref?.();
       } catch (e) {
         clearTimeout(timer);
         rec.inflight.delete(id);
