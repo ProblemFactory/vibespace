@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.236.0
+
+- **Picking a subscription account now works on machines with apiKeyHelper configured** (real report: on a host whose settings carry `apiKeyHelper`, every billing pick silently stayed API-billed — the 2.191.0 disassembly showed a configured helper unconditionally overrides claude.ai OAuth, and the switcher could only explain, not fix). VERIFIED by a controlled A/B experiment: an inline `--settings '{"apiKeyHelper":""}'` overrides the file-level helper (`apiKeySource` flips from `apiKeyHelper` to `none` = subscription OAuth; `null` remains unusable — the CLI schema drops it). Every EXPLICIT subscription pick (local or remote, create and resume) now merges the neutralizer into the spawn settings — a no-op on machines without a helper; the bare "CLI login" pick deliberately keeps the machine's own behavior (a helper may be admin intent). Switcher and Manage-Agents explainers updated to say picks work instead of "remove it from settings.json". Contract asserts added to scripts/test-fallback-policy.mjs (single merged --settings with ultracode + fallback + neutralizer).
+
 ## 2.235.1
 
 - **update.sh survives root-run-update residue** (real fleet incident: an admin-side update executed as root via `kubectl exec` left `data/.update.lock` — and 252 working-tree files — root-owned; the user's next in-app Update died at the lock with a bare "Permission denied"). The lock is now remove-or-explain when unwritable, and an ownership PREFLIGHT detects non-writable repo files up front and prints the actual fix (`sudo chown -R <user>: .`) instead of letting git fail midway with a confusing error.

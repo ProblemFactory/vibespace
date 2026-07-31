@@ -578,7 +578,7 @@ export function installManageAgents(App, ctx = {}) {
         // fresh OAuth login + a leftover helper = every session bills the
         // helper key while this row said just "logged in") \u2014 warn loudly.
         const helperWarn = (info.keyHelper && lm !== 'key-helper')
-          ? ` <span class="ob-warn" title="${escHtml(t('The CLI prefers a configured apiKeyHelper over the OAuth login \u2014 sessions on this machine bill via the helper key. Remove apiKeyHelper from ~/.claude/settings.json to bill the subscription.'))}">\u26a0 ${t('apiKeyHelper overrides this login')}</span>` : '';
+          ? ` <span class="ob-warn" title="${escHtml(t('The CLI prefers a configured apiKeyHelper over the OAuth login \u2014 sessions using the machine\u2019s own login bill via the helper key. Sessions where you explicitly pick a subscription account bypass the helper automatically (2.236.0); to change the machine-wide default, remove apiKeyHelper from ~/.claude/settings.json.'))}">\u26a0 ${t('apiKeyHelper overrides this login')}</span>` : '';
         left.innerHTML = `<b>${b.label}</b>${ver ? ` <span class="ob-ver">${escHtml(ver)}</span>` : ''} ${
           !info.installed ? `<span class="ob-bad">${t('not installed')}</span>`
           : info.loggedIn ? `<span class="ob-ok">\u2713 ${t('logged in')}</span>${lmLabel ? ` <span class="ob-ver">${escHtml(lmLabel)}</span>` : ''}${helperWarn}`

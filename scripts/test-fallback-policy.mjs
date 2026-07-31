@@ -64,5 +64,15 @@ for (const [label, raw] of [
       && m.content[0].refusalCategory === 'cyber');
 }
 
+// (4) apiKeyHelper neutralization (2.236.0) — merges into the ONE --settings
+spec = adapter.buildSessionArgs({ cwd: '/tmp', mode: 'chat', neutralizeKeyHelper: true });
+si = spec.args.indexOf('--settings');
+check('neutralizer adds --settings apiKeyHelper:""', si >= 0 && JSON.parse(spec.args[si + 1]).apiKeyHelper === '');
+spec = adapter.buildSessionArgs({ cwd: '/tmp', mode: 'chat', effort: 'ultracode', disableModelFallback: true, neutralizeKeyHelper: true });
+check('ONE --settings with all three keys merged', spec.args.filter((a) => a === '--settings').length === 1
+  && (() => { const o = JSON.parse(spec.args[spec.args.indexOf('--settings') + 1]); return o.ultracode === true && o.switchModelsOnFlag === false && o.apiKeyHelper === ''; })());
+spec = adapter.buildSessionArgs({ cwd: '/tmp', mode: 'chat' });
+check('no neutralizer flag ⇒ no settings key', !spec.args.includes('--settings'));
+
 console.log(failed === 0 ? 'ALL PASS' : `${failed} FAILED`);
 process.exit(failed ? 1 : 0);
