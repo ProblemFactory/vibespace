@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.234.1
+
+- **A slow server no longer reads as mass session death** (real fleet incident: an instance degraded for ~2h — event-loop spikes from heavy live sessions + big-transcript re-parses + remote transcript pulls — and every WS reconnect's re-attach missed the old one-shot 20s no-reply timer, flipping ~8 windows to read-only with "The session no longer exists on the server (likely a restart)" while every session, local and remote, was verifiably alive). Two-sided fix: the server now sends a tiny synchronous `attach-ack` the moment an attach arrives (proof-of-life before any slow work — transcript pulls, history rebuilds, payload serialization), and the client's no-reply fallback became a retry ladder: it re-sends the attach while un-acked (the ack's absence means the attach may never have landed), just waits once acked, and only flips read-only after ~2 minutes — with honest messages that distinguish "server alive but slow, session likely still running" from "server may have restarted". The confident "no longer exists" wording is now reserved for the explicit not-found error reply. Contract smoke: scripts/test-attach-ack.mjs.
+
 ## 2.234.0
 
 - **Touch devices: the keyboard's enter key now inserts a newline instead of sending** (real report: "点换行之后就发出了" — soft keyboards have no Shift+Enter, so enter was both the only newline key AND the send key, making multi-line messages impossible on phones). Sending on touch is the ▶ button. New setting `chat.touchEnterSends` (Chat, default off) restores enter-to-send for those who prefer it; desktop behavior is unchanged (Enter sends, Shift+Enter newline). Detection uses the central `app.isTouch` (hover:none + pointer:coarse), so touch-primary tablets get the newline behavior too.

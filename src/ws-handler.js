@@ -1759,6 +1759,14 @@ done`;
         }
 
         case 'attach': {
+          // PROOF-OF-LIFE ACK (2.234.1, lengyue mass "session died" incident):
+          // the full attach reply can lawfully take >20s (degraded event loop,
+          // remote transcript pulls, MB-scale payload bursts on reload) — the
+          // client's no-reply fallback used to conclude "session no longer
+          // exists" and flip every window read-only while all sessions were
+          // alive. This tiny synchronous ack tells the client the server is
+          // alive and processing, so it WAITS instead of declaring death.
+          try { ws.send(JSON.stringify({ type: 'attach-ack', sessionId: data.sessionId })); } catch {}
           // Virtual subagent session: sub-{parentToolUseId} or sub-agent-{agentId}
           if (data.sessionId?.startsWith('sub-')) {
             const subId = data.sessionId;
