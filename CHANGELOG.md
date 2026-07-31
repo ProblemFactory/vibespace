@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.234.0
+
+- **Touch devices: the keyboard's enter key now inserts a newline instead of sending** (real report: "点换行之后就发出了" — soft keyboards have no Shift+Enter, so enter was both the only newline key AND the send key, making multi-line messages impossible on phones). Sending on touch is the ▶ button. New setting `chat.touchEnterSends` (Chat, default off) restores enter-to-send for those who prefer it; desktop behavior is unchanged (Enter sends, Shift+Enter newline). Detection uses the central `app.isTouch` (hover:none + pointer:coarse), so touch-primary tablets get the newline behavior too.
+
 ## 2.233.2
 
 - **Subagent View Log no longer leaks the PARENT conversation's history above the agent's own log** (real report: scrolling up in an agent viewer showed cards from before the agent existed). `_getSessionIds()` resolves a `sub-*` viewer to its parent session (the openSpec carries the parent's id/cwd for the transcript lookup), and the huge-session machinery keyed only on message count — so when the parent is a huge-JSONL session, the gap probe activated against the PARENT transcript: the viewer got the parent's whole-conversation minimap and the seek sentinel loaded parent slabs above the agent's messages (genuine parent records, rendered as if the agent did them; the position indicator stayed correct because gap messages are excluded from window accounting — which is exactly why it looked so confusing). Gap minimap, seek sentinel, and the turn-map fallback fetch are now gated on `_canPaginate`, the same capability that already excludes sub- viewers from pagination.

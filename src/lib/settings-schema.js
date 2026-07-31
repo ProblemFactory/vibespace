@@ -277,6 +277,12 @@ const SETTINGS_SCHEMA = {
     description: t('Hooks like PostToolUse fire on every tool call with nothing to show — by default those render no card at all. Turn off to see every hook event. Applies to newly loaded history (reopen the window for existing views).'),
     category: t('Chat'), liveApply: true,
   },
+  'chat.touchEnterSends': {
+    type: 'boolean', default: false,
+    label: t('Enter sends on touch devices'),
+    description: t('On phones and tablets the keyboard\u2019s enter key inserts a newline by default (soft keyboards have no Shift+Enter, so this is the only way to type one) and messages are sent with the send button. Turn on to make enter send instead.'),
+    category: t('Chat'), liveApply: true,
+  },
   'chat.hideEmptyThinking': {
     type: 'boolean', default: true,
     label: t('Hide empty thinking blocks'),

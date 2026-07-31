@@ -2221,4 +2221,6 @@ export default {
   "Recently finished": "最近完了",
   "completed": "完了",
   "finished": "完了",
+  "Enter sends on touch devices": "タッチデバイスで Enter で送信",
+  "On phones and tablets the keyboard’s enter key inserts a newline by default (soft keyboards have no Shift+Enter, so this is the only way to type one) and messages are sent with the send button. Turn on to make enter send instead.": "スマホ/タブレットではキーボードの改行キーはデフォルトで改行を挿入し（ソフトキーボードには Shift+Enter がないため唯一の改行手段）、メッセージは送信ボタンで送ります。オンにすると Enter で送信します。",
 };

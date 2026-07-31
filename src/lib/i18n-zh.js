@@ -2221,4 +2221,6 @@ export default {
   "Recently finished": "最近完成",
   "completed": "已完成",
   "finished": "已完成",
+  "Enter sends on touch devices": "触屏设备上回车直接发送",
+  "On phones and tablets the keyboard’s enter key inserts a newline by default (soft keyboards have no Shift+Enter, so this is the only way to type one) and messages are sent with the send button. Turn on to make enter send instead.": "手机/平板上键盘的回车键默认插入换行（软键盘没有 Shift+回车，这是唯一的换行方式），消息用发送按钮发出。开启后回车改为直接发送。",
 };

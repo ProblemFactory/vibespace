@@ -16,7 +16,7 @@ export class ChatInput {
    * @param {function} opts.getStateSync - returns StateSync instance
    * @param {function} opts.onInterrupt - called when user clicks Stop
    */
-  constructor(ws, sessionId, { onSend, onInterrupt, getCwd, getHost, getUploadDir }) {
+  constructor(ws, sessionId, { onSend, onInterrupt, getCwd, getHost, getUploadDir, isTouch, getTouchEnterSends }) {
     this._ws = ws;
     this._sessionId = sessionId;
     this._onSend = onSend;
@@ -24,6 +24,8 @@ export class ChatInput {
     this._getCwd = getCwd || (() => null);
     this._getHost = getHost || (() => null);
     this._getUploadDir = getUploadDir || (() => '');
+    this._isTouch = isTouch || (() => false);
+    this._getTouchEnterSends = getTouchEnterSends || (() => false);
 
     // Attachment state
     this._attachments = [];
@@ -151,7 +153,14 @@ export class ChatInput {
       if (this._expanded) {
         if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); this._send(); }
       } else {
-        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this._send(); }
+        if (e.key === 'Enter' && !e.shiftKey) {
+          // Touch soft keyboards have no Shift — their enter key is the only
+          // way to type a newline, so by default it inserts one and sending
+          // is the button (2.234.0, real report "点换行之后就发出了").
+          // chat.touchEnterSends opts back into enter-to-send.
+          if (this._isTouch() && !this._getTouchEnterSends()) return;
+          e.preventDefault(); this._send();
+        }
       }
     });
 
