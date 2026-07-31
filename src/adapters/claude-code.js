@@ -36,7 +36,7 @@ class ClaudeCodeAdapter extends BackendAdapter {
    * This adapter provides the command line arguments and session config.
    */
   buildSessionArgs(options) {
-    const { cwd, model, permissionMode, resumeId, sessionName, effort, extraArgs = [], mode = 'chat', tuiRenderer, disableModelFallback } = options;
+    const { cwd, model, permissionMode, resumeId, sessionName, effort, extraArgs = [], mode = 'chat', tuiRenderer, disableModelFallback, neutralizeKeyHelper } = options;
     const args = [];
 
     if (resumeId) {
@@ -67,15 +67,29 @@ class ClaudeCodeAdapter extends BackendAdapter {
     // The env var additionally covers SUBAGENTS, which ignore the settings
     // key (verified in the 2.1.220 disassembly: x2c requires isMainThread).
     const env = {};
-    if (disableModelFallback) {
+    const mergeSettings = (patch) => {
       let settingsObj = {};
       const si = args.indexOf('--settings');
       if (si >= 0 && args[si + 1]) { try { settingsObj = JSON.parse(args[si + 1]) || {}; } catch {} }
-      settingsObj.switchModelsOnFlag = false;
+      Object.assign(settingsObj, patch);
       const sjson = JSON.stringify(settingsObj);
       if (si >= 0) args[si + 1] = sjson; else args.push('--settings', sjson);
+    };
+    if (disableModelFallback) {
+      mergeSettings({ switchModelsOnFlag: false });
       env.CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK = '1';
     }
+    // Per-session apiKeyHelper neutralization (2.236.0, naturalhg's "can't
+    // switch to my subscription" on a keyHelper machine): a configured
+    // apiKeyHelper in the merged settings UNCONDITIONALLY overrides claude.ai
+    // OAuth (2.191.0 disassembly), so an explicit SUBSCRIPTION pick silently
+    // billed via the helper key. VERIFIED live (2026-07-31 controlled A/B):
+    // an inline --settings apiKeyHelper:"" overrides the file's helper —
+    // apiKeySource flips from 'apiKeyHelper' to 'none' (subscription OAuth)
+    // and the turn succeeds. Harmless no-op on machines without a helper, so
+    // it is applied for EVERY explicit subscription pick. (null is NOT usable
+    // — the CLI's field-level schema .catch DROPS it.)
+    if (neutralizeKeyHelper) mergeSettings({ apiKeyHelper: '' });
 
     // TUI renderer for terminal-mode sessions (CLI ≥2.1.x): "fullscreen" is the
     // flicker-free alternate-screen renderer with virtualized scrollback (same

@@ -680,7 +680,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     });
     if (helperActive) {
       items.push({ label: t('Why API billing? apiKeyHelper is set on the machine'), disabled: true,
-        title: t('The CLI prefers a configured apiKeyHelper over the OAuth login — sessions on this machine bill via the helper key. Remove apiKeyHelper from ~/.claude/settings.json to bill the subscription.') });
+        title: t('The CLI prefers a configured apiKeyHelper over the machine\u2019s own OAuth login. Picking a NAMED subscription account below bypasses the helper for that session (the helper is neutralized at spawn); this CLI-login entry keeps billing via the helper.') });
     }
     for (const a of accts) {
       const cur = currentId === a.id;
