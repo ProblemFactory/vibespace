@@ -1776,10 +1776,26 @@ class MountManager {
   }
 
   // ── CephFS (native kernel mount; deployment-provisioned all-flash storage) ──
+  // mount.ceph HARDCODES a /sbin/modprobe call and treats "command not found"
+  // as FATAL (2.237.2, walter's recurring failure): images without the kmod
+  // package (3.5.0 dropped it) die "sh: 1: /sbin/modprobe: not found" even
+  // though the ceph module is ALREADY LOADED host-side (a container can never
+  // modprobe the shared kernel anyway — on kmod-bearing images the call always
+  // FAILED and mount.ceph ignored the failure; exit-127 is the only variant it
+  // refuses). Ensure a no-op shim so the module state, not the image's package
+  // list, decides the outcome. Idempotent; container-scoped; survives until
+  // the pod is recreated, so it runs before every mount attempt.
+  async _ensureModprobeShim() {
+    return new Promise((resolve) => {
+      execFile('sh', ['-c', 'command -v /sbin/modprobe >/dev/null 2>&1 || sudo -n sh -c \'mkdir -p /sbin && printf "#!/bin/sh\\nexit 0\\n" > /sbin/modprobe && chmod 755 /sbin/modprobe\' 2>/dev/null; true'], { timeout: 10000 }, () => resolve());
+    });
+  }
+
   async _mountCephfs(id) {
     const m = this._get(id);
     const mp = this.pathOf(m);
     await this._ensureMountpointDir(mp); // sudo -n fallback covers root-owned parents
+    await this._ensureModprobeShim(); // 3.5.0-class images lack kmod — see above
     // `sudo mount -t ceph <mons>:<path> <mp> -o name=<user>,secret=<key>,mds_namespace=<fs>`
     // Root-only, so sudo (the container has passwordless sudo). Secret rides in
     // the -o options (argv is world-readable in /proc for the ~1s the mount
