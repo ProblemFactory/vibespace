@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.236.1
+
+- **Resume works again after the personalized-username container migration** (real incident: upgrading a long-lived instance to the 3.5.0 image renamed the container user `vibe`→`<name>`; the boot script's `/home/vibe` symlink covers every recorded absolute path, but claude encodes its per-project transcript dirs from the RESOLVED cwd — 57 pre-migration projects sat under `projects/-home-vibe-*` while every resume looked in `-home-<name>-*` → "No conversation found with session ID"). The server now self-heals at boot: when home isn't `vibe` and `/home/vibe` is a symlink, each `-home-vibe-*` project dir is renamed to the new encoding with the old name left as a symlink, so both claude's resolved-cwd lookups and VibeSpace's recorded-cwd lookups keep working. Idempotent; collisions are skipped with a log.
+
 ## 2.236.0
 
 - **Picking a subscription account now works on machines with apiKeyHelper configured** (real report: on a host whose settings carry `apiKeyHelper`, every billing pick silently stayed API-billed — the 2.191.0 disassembly showed a configured helper unconditionally overrides claude.ai OAuth, and the switcher could only explain, not fix). VERIFIED by a controlled A/B experiment: an inline `--settings '{"apiKeyHelper":""}'` overrides the file-level helper (`apiKeySource` flips from `apiKeyHelper` to `none` = subscription OAuth; `null` remains unusable — the CLI schema drops it). Every EXPLICIT subscription pick (local or remote, create and resume) now merges the neutralizer into the spawn settings — a no-op on machines without a helper; the bare "CLI login" pick deliberately keeps the machine's own behavior (a helper may be admin intent). Switcher and Manage-Agents explainers updated to say picks work instead of "remove it from settings.json". Contract asserts added to scripts/test-fallback-policy.mjs (single merged --settings with ultracode + fallback + neutralizer).
