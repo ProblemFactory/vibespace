@@ -33,11 +33,14 @@ if command -v flock >/dev/null 2>&1; then
   flock -n 9 || { echo "Another update is already running — aborting this one."; exit 1; }
 fi
 # Ownership preflight (same incident, the bigger half): a root-run update
-# leaves SOURCE files root-owned — git pull would fail midway with a confusing
-# error. Detect any non-writable file up front and name the real fix.
-BADF=$(find .git src server.js package.json ! -writable -print -quit 2>/dev/null)
+# leaves SOURCE files owned by another user — git pull would fail midway with
+# a confusing error. Test OWNERSHIP, not writability (2.237.1: the first
+# version used `! -writable`, which false-positived on every normal repo —
+# git makes pack files 444 read-only BY DESIGN, so updates were blocked
+# everywhere the 2.235.1 script had landed; real incident on the dev box).
+BADF=$(find .git src server.js package.json ! -user "$(id -un)" -print -quit 2>/dev/null)
 if [ -n "$BADF" ]; then
-  echo "Repo files are not writable by $(id -un) (e.g. $BADF) — likely left root-owned by a past root-run admin update."
+  echo "Repo files are owned by another user (e.g. $BADF) — likely left behind by a past root-run admin update."
   echo "Fix once with:  sudo chown -R $(id -un): ."
   exit 1
 fi

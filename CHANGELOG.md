@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.237.1
+
+- **Update works again — the 2.235.1 ownership preflight false-positived on every normal repo** (real incident on the first machine to update past it: git makes pack files mode 444 read-only BY DESIGN, so the `! -writable` test flagged `.git/objects/pack/*` and refused the update with the chown advice on perfectly healthy checkouts). The preflight now tests OWNERSHIP (`! -user <current>`), which matches the actual root-run-residue incident class. Instances that already carry the broken 2.235.1–2.237.0 script can't self-heal (the local script blocks before `git pull` — the 2.112.7 class); fix once with a manual `git pull` in the repo, after which the in-app Update works normally.
+
 ## 2.237.0
 
 - **The resume-breaker recovery is now an unmissable dialog** (real report: after the resume cooldown armed, the 2.227.3 "Try resuming anyway" bar sat quietly at the bottom of the rescued window and the user concluded resume was broken). When the breaker fires AND the transcript verifiably exists, the client now pops a confirm dialog — "对话还在——现在重试？" — whose confirm immediately re-runs the resume with the cooldown bypassed (same window geometry); declining falls back to the old rescued view + retry bar. The no-transcript branch keeps the previous toast + bar behavior.
