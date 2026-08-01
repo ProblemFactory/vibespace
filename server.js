@@ -1660,6 +1660,44 @@ function attachToDtach(id, socketPath, session, { repaint = false } = {}) {
 }
 
 // On startup, reconnect to existing dtach sockets
+// ── Personalized-username migration self-heal (2.236.1, walter's real
+// incident): the 3.5.0 image renames the container user vibe→<name> and
+// symlinks /home/vibe → /home/<name>, which covers every recorded ABSOLUTE
+// path — but claude encodes its per-project transcript dirs from the
+// RESOLVED cwd, so pre-migration transcripts live under
+// projects/-home-vibe-* while post-migration resumes look in
+// -home-<name>-* → "No conversation found with session ID". Heal at boot:
+// rename each -home-vibe-* dir to the new encoding and leave the old name
+// as a symlink (VibeSpace's own cwdToProjectDir over recorded /home/vibe
+// cwds keeps working through it). Idempotent; collisions skipped with a log.
+function migrateLegacyHomeProjects() {
+  try {
+    const home = os.homedir();
+    if (path.basename(home) === 'vibe') return;
+    let st; try { st = fs.lstatSync('/home/vibe'); } catch { return; }
+    if (!st.isSymbolicLink()) return;
+    const projectsDir = path.join(home, '.claude', 'projects');
+    const newPrefix = cwdToProjectDir(home); // e.g. -home-walter
+    let names; try { names = fs.readdirSync(projectsDir); } catch { return; }
+    let n = 0;
+    for (const d of names) {
+      if (!d.startsWith('-home-vibe-')) continue;
+      const full = path.join(projectsDir, d);
+      let ds; try { ds = fs.lstatSync(full); } catch { continue; }
+      if (!ds.isDirectory()) continue; // already a symlink from a prior run
+      const target = newPrefix + '-' + d.slice('-home-vibe-'.length);
+      const targetFull = path.join(projectsDir, target);
+      if (fs.existsSync(targetFull)) { console.warn(`[migrate] projects collision, left in place: ${d}`); continue; }
+      try {
+        fs.renameSync(full, targetFull);
+        fs.symlinkSync(target, full);
+        n++;
+      } catch (e) { console.warn(`[migrate] projects rename failed for ${d}: ${e.message}`); }
+    }
+    if (n) console.log(`[migrate] personalized-username: re-encoded ${n} claude project dir(s) -home-vibe-* -> ${newPrefix}-* (old names symlinked)`);
+  } catch (e) { console.warn('[migrate] legacy home projects check failed:', e.message); }
+}
+
 function restoreSessions() {
   ensureDir(SOCKETS_DIR);
   ensureDir(BUFFERS_DIR);
@@ -4622,6 +4660,7 @@ server.listen(PORT, HOST, () => {
   }
 
   // Restore existing dtach sessions from before restart
+  migrateLegacyHomeProjects();
   restoreSessions();
   // B-1525 second half: consume the .orphan metas the dead-socket cleanup
   // preserved — remote keeper sessions whose claude is STILL ALIVE on its
