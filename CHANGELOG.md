@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.237.2
+
+- **CephFS mounts no longer depend on the image shipping `modprobe`** (real recurring failure: `mount.ceph` HARDCODES a `/sbin/modprobe` call and treats "command not found" as fatal — the 3.5.0 container image dropped the `kmod` package, so every cephfs connect died "sh: 1: /sbin/modprobe: not found" even though the ceph kernel module was already loaded host-side; a container can never modprobe the shared kernel anyway, and on kmod-bearing images the call always failed harmlessly — exit-127 was the one variant mount.ceph refuses). `_mountCephfs` now ensures a no-op `/sbin/modprobe` shim (sudo, idempotent, container-scoped) before every attempt, so the host's module state — not the image's package list — decides the outcome; the deploy image also gets `kmod` back for good measure.
+
 ## 2.237.1
 
 - **Update works again — the 2.235.1 ownership preflight false-positived on every normal repo** (real incident on the first machine to update past it: git makes pack files mode 444 read-only BY DESIGN, so the `! -writable` test flagged `.git/objects/pack/*` and refused the update with the chown advice on perfectly healthy checkouts). The preflight now tests OWNERSHIP (`! -user <current>`), which matches the actual root-run-residue incident class. Instances that already carry the broken 2.235.1–2.237.0 script can't self-heal (the local script blocks before `git pull` — the 2.112.7 class); fix once with a manual `git pull` in the repo, after which the in-app Update works normally.
