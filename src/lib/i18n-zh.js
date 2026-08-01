@@ -2228,4 +2228,7 @@ export default {
   "The server is degraded — its main thread is saturated ({lag}ms median lag). Everything will feel slow; sessions are NOT dead.": "服务器处于劣化状态——主线程饱和（中位延迟 {lag}ms）。一切都会变慢，但会话并没有死。",
   "The CLI prefers a configured apiKeyHelper over the machine’s own OAuth login. Picking a NAMED subscription account below bypasses the helper for that session (the helper is neutralized at spawn); this CLI-login entry keeps billing via the helper.": "CLI 优先使用机器上配置的 apiKeyHelper 而非该机器自身的 OAuth 登录。在下方选择一个具名订阅账号即可绕过 helper（启动时按会话中和）；本条\"CLI 登录\"则继续经 helper 按 API 计费。",
   "The CLI prefers a configured apiKeyHelper over the OAuth login — sessions using the machine’s own login bill via the helper key. Sessions where you explicitly pick a subscription account bypass the helper automatically (2.236.0); to change the machine-wide default, remove apiKeyHelper from ~/.claude/settings.json.": "CLI 优先使用配置的 apiKeyHelper 而非 OAuth 登录——使用机器自身登录的会话经 helper key 按 API 计费。显式选择订阅账号的会话会自动绕过 helper（2.236.0）；要改机器级默认，请从 ~/.claude/settings.json 移除 apiKeyHelper。",
+  "Conversation found — retry now?": "对话还在——现在重试？",
+  "The last resume failed because the CLI looked in the wrong folder, but this conversation’s transcript EXISTS — nothing is lost. Retry the resume right now (this skips the retry cooldown)?": "上次恢复失败是因为 CLI 找错了文件夹，但这个对话的转录确实存在——什么都没丢。现在立即重试恢复吗？（将跳过重试冷却）",
+  "Retry resume now": "立即重试恢复",
 };

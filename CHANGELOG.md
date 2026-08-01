@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.237.0
+
+- **The resume-breaker recovery is now an unmissable dialog** (real report: after the resume cooldown armed, the 2.227.3 "Try resuming anyway" bar sat quietly at the bottom of the rescued window and the user concluded resume was broken). When the breaker fires AND the transcript verifiably exists, the client now pops a confirm dialog — "对话还在——现在重试？" — whose confirm immediately re-runs the resume with the cooldown bypassed (same window geometry); declining falls back to the old rescued view + retry bar. The no-transcript branch keeps the previous toast + bar behavior.
+
 ## 2.236.1
 
 - **Resume works again after the personalized-username container migration** (real incident: upgrading a long-lived instance to the 3.5.0 image renamed the container user `vibe`→`<name>`; the boot script's `/home/vibe` symlink covers every recorded absolute path, but claude encodes its per-project transcript dirs from the RESOLVED cwd — 57 pre-migration projects sat under `projects/-home-vibe-*` while every resume looked in `-home-<name>-*` → "No conversation found with session ID"). The server now self-heals at boot: when home isn't `vibe` and `/home/vibe` is a symlink, each `-home-vibe-*` project dir is renamed to the new encoding with the old name left as a symlink, so both claude's resolved-cwd lookups and VibeSpace's recorded-cwd lookups keep working. Idempotent; collisions are skipped with a log.

@@ -118,17 +118,44 @@ export function installSessionLifecycle(App, ctx = {}) {
         // i.e. discard a live conversation. Rescue into view-only (history +
         // Resume) and offer a retry that BYPASSES the breaker.
         if (msg.code === 'no-convo-breaker' && resumeId) {
-          showToast(text, { type: 'error' });
-          rescueViewOnly();
           const retry = () => this.createSession({
             cwd, name: sessionName, resumeId, mode: sessionMode, model, permission, effort,
             backend, hostId, keeperSid, accountId, extraArgs, agentKind, agentRole, agentNickname,
             sourceKind, parentThreadId, ignoreNoConvo: true,
           });
+          // Transcript verified to exist ⇒ the retry will usually just work
+          // once the underlying cause is fixed — surface it as an UNMISSABLE
+          // confirm dialog (2.237.0, real report: the 2.227.3 retry bar sat
+          // quietly at the bottom of the rescued window and the user never
+          // saw it — "还是resume不了"). Decline falls back to the rescued
+          // view + the bar, exactly the old behavior.
+          if (msg.transcriptKnown) {
+            showConfirmDialog({
+              title: t('Conversation found — retry now?'),
+              message: t('The last resume failed because the CLI looked in the wrong folder, but this conversation\u2019s transcript EXISTS — nothing is lost. Retry the resume right now (this skips the retry cooldown)?'),
+              confirmText: t('Retry resume now'),
+            }).then((ok) => {
+              if (ok) {
+                const bounds = winBounds || this._snapshotWinBounds?.(this.wm.windows.get(winInfo.id));
+                try { this.wm.closeWindow(winInfo.id); } catch { }
+                this.createSession({
+                  cwd, name: sessionName, resumeId, mode: sessionMode, model, permission, effort,
+                  backend, hostId, keeperSid, accountId, extraArgs, agentKind, agentRole, agentNickname,
+                  sourceKind, parentThreadId, winBounds: bounds, ignoreNoConvo: true,
+                });
+                return;
+              }
+              rescueViewOnly();
+              const view = this.sessions.get(winInfo.id);
+              view?._renderers?.appendSystem(t('A transcript for this conversation exists — it is not lost. The history below is loaded from it.'));
+              view?._showRetryResumeBar?.(retry);
+            });
+            return true;
+          }
+          showToast(text, { type: 'error' });
+          rescueViewOnly();
           const view = this.sessions.get(winInfo.id);
-          view?._renderers?.appendSystem(msg.transcriptKnown
-            ? t('A transcript for this conversation exists — it is not lost. The history below is loaded from it.')
-            : t('No transcript turned up for this conversation. Nothing has been deleted; the history below is whatever could be loaded.'));
+          view?._renderers?.appendSystem(t('No transcript turned up for this conversation. Nothing has been deleted; the history below is whatever could be loaded.'));
           view?._showRetryResumeBar?.(retry);
           return true;
         }

@@ -2228,4 +2228,7 @@ export default {
   "The server is degraded — its main thread is saturated ({lag}ms median lag). Everything will feel slow; sessions are NOT dead.": "サーバーが劣化状態です——メインスレッドが飽和しています（中央値遅延 {lag}ms）。全体的に遅くなりますが、セッションは生きています。",
   "The CLI prefers a configured apiKeyHelper over the machine’s own OAuth login. Picking a NAMED subscription account below bypasses the helper for that session (the helper is neutralized at spawn); this CLI-login entry keeps billing via the helper.": "CLI はマシンの OAuth ログインより設定済み apiKeyHelper を優先します。下の名前付きサブスクリプションアカウントを選ぶと、そのセッションでは helper がバイパスされます（起動時に無効化）。この「CLI ログイン」項目は引き続き helper 経由の API 課金です。",
   "The CLI prefers a configured apiKeyHelper over the OAuth login — sessions using the machine’s own login bill via the helper key. Sessions where you explicitly pick a subscription account bypass the helper automatically (2.236.0); to change the machine-wide default, remove apiKeyHelper from ~/.claude/settings.json.": "CLI は OAuth ログインより設定済み apiKeyHelper を優先します——マシン自身のログインを使うセッションは helper キーで API 課金されます。サブスクリプションアカウントを明示的に選んだセッションは自動的に helper をバイパスします（2.236.0）。マシン全体のデフォルトを変えるには ~/.claude/settings.json から apiKeyHelper を削除してください。",
+  "Conversation found — retry now?": "会話は残っています——今すぐ再試行しますか？",
+  "The last resume failed because the CLI looked in the wrong folder, but this conversation’s transcript EXISTS — nothing is lost. Retry the resume right now (this skips the retry cooldown)?": "前回の再開は CLI が誤ったフォルダを探したため失敗しましたが、この会話のトランスクリプトは存在します——何も失われていません。今すぐ再開を再試行しますか？（再試行クールダウンをスキップします）",
+  "Retry resume now": "今すぐ再試行",
 };
