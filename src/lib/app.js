@@ -961,7 +961,8 @@ class App {
       item(I.key, t('Manage agents\u2026'), () => this._showAgentsDialog()),
       item(I.puzzle, t('Plugins\u2026'), () => this.openPluginsDialog()),
       item(I.chart, t('Usage\u2026'), () => this.openUsage()),
-      item(I.pulse, t('Diagnostics report\u2026'), () => this._openDiagnostics()));
+      item(I.pulse, t('Diagnostics report\u2026'), () => this._openDiagnostics()),
+      item(I.alert || I.pulse, t('Report a problem\u2026'), () => this.captureIncident?.()));
     menu.append(sep(),
       item(I.exp, t('Backup & migrate\u2026'), () => this._showTransferDialog()),
       item(I.lock, this._authEnabled ? t('Change password\u2026') : t('Set password\u2026'), () => this._showPasswordDialog()));

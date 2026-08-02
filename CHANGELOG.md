@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.238.0
+
+- **"Report a problem" panic button — the scene now survives the timezone gap** (admin request: users hit problems while the admin sleeps, and by investigation time the scene is gone). The client keeps ALWAYS-ON bounded ring buffers of the last few minutes — clicks and coarse key events (special keys only; typed text is NEVER recorded, only a per-burst "typing" marker), WS message types both directions (type/sessionId/diagnostic codes, never payload bodies), and console errors/warnings — plus assembles a full state snapshot on demand (windows with openSpec-lite, session digest, ws state, heap). ⚙ → "Report a problem…" flushes all of it to the server, which adds ITS OWN scene (active-session digest with streaming/remoteState flags, 30-min sysinfo history, an in-memory server console ring, hosts digest) and writes `data/incidents/<inc-id>/bundle.json`; a follow-up snapshot auto-attaches 2 minutes later for it's-happening-right-now cases. The user relays only the short `inc-…` id. Newest 30 bundles kept; the note field is the only free text. Contract smoke: scripts/test-incident.mjs (7 asserts incl. traversal rejection + prune).
+
 ## 2.237.3
 
 - **Manage Agents → Test no longer claims a LINKED subscription "isn't signed in"** (real report: on a host whose own CLI login IS that account's email, Test refused with "This subscription isn't signed in yet"). A linked account needs no local creds dir and no shipped copy — on that host it IS the machine login — which the billing switcher and the New Session dialog already model (2.208.0); the Test guard was the last place still reading an empty LOCAL creds dir as "not signed in". Linked rows are now marked in the DOM, the guard exempts them, and the diagnostic session spawns with the CLI-login sentinel so it runs on the host's own login (nothing ships — §ban-safety unaffected).

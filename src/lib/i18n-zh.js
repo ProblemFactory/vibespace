@@ -2231,4 +2231,13 @@ export default {
   "Conversation found — retry now?": "对话还在——现在重试？",
   "The last resume failed because the CLI looked in the wrong folder, but this conversation’s transcript EXISTS — nothing is lost. Retry the resume right now (this skips the retry cooldown)?": "上次恢复失败是因为 CLI 找错了文件夹，但这个对话的转录确实存在——什么都没丢。现在立即重试恢复吗？（将跳过重试冷却）",
   "Retry resume now": "立即重试恢复",
+  "Report a problem…": "报告问题…",
+  "Report a problem (capture the scene)": "报告问题（抓取现场）",
+  "This saves the last few minutes of UI activity (clicks, window events, errors — never any text you typed or message content) plus a full client+server state snapshot, so the problem can be investigated later even after the scene is gone.": "这会保存最近几分钟的界面活动（点击、窗口事件、报错——绝不包含你输入的文字或消息内容），外加一份完整的前端+服务端状态快照，之后即使现场已经消失也能据此调查问题。",
+  "What went wrong? (optional but helpful)": "出了什么问题？（选填，但很有帮助）",
+  "Capture now": "立即抓取",
+  "Capture failed: {err}": "抓取失败：{err}",
+  "Scene captured. Send this ID to the admin:": "现场已抓取。把这个 ID 发给管理员：",
+  "A follow-up snapshot of the next 2 minutes is attached automatically. Keep working normally.": "接下来 2 分钟的后续快照会自动附加。正常继续使用即可。",
+  "Copy ID": "复制 ID",
 };

@@ -2884,6 +2884,78 @@ async function remoteSysinfo(hostId) {
   if (!r.mem && !r.load && !r.procs.length) throw new Error('probe returned nothing usable');
   return r;
 }
+// ── Incident capture ("panic button", 2.238.0): the client posts its ring
+// buffers + state snapshot; the server adds ITS OWN scene (sessions digest,
+// sysinfo history slice, in-memory console ring, hosts digest) and writes
+// data/incidents/<id>/bundle.json. The user relays only the short id; the
+// admin reads the bundle later — the scene survives the timezone gap.
+const _srvConsoleRing = [];
+for (const _lvl of ['log', 'warn', 'error']) {
+  const _orig = console[_lvl].bind(console);
+  console[_lvl] = (...args) => {
+    try {
+      _srvConsoleRing.push({ t: Date.now(), l: _lvl, m: args.map((a) => (a instanceof Error ? (a.stack || a.message) : typeof a === 'string' ? a : JSON.stringify(a))).join(' ').slice(0, 500) });
+      if (_srvConsoleRing.length > 600) _srvConsoleRing.splice(0, _srvConsoleRing.length - 600);
+    } catch {}
+    _orig(...args);
+  };
+}
+const INCIDENTS_DIR = path.join(__dirname, 'data', 'incidents');
+function _incidentServerState() {
+  const out = { t: Date.now(), version: (() => { try { return require('./package.json').version; } catch { return ''; } })(), uptimeS: Math.round(process.uptime()), rssMB: Math.round(process.memoryUsage().rss / 1048576) };
+  try {
+    out.sessions = [...activeSessions.entries()].map(([id, s]) => ({
+      id, mode: s.mode, backend: s.backend, host: s.host || null,
+      cid: s.claudeSessionId || s.backendSessionId || null, name: (s.name || '').slice(0, 40),
+      streaming: !!s._isStreaming, historyLoaded: !!s._historyLoaded, clients: s.clients?.size ?? 0,
+      remoteState: s._remoteState || null, agentd: !!s.agentdSession,
+    }));
+  } catch (e) { out.sessions = 'failed: ' + e.message; }
+  try { out.sysinfoHistory = sysinfo.history(30 * 60 * 1000); } catch {}
+  try { out.hosts = (hosts?.list?.() || []).map((h) => ({ id: h.id, name: h.name, transport: h.dialTokenHash ? 'dial' : 'ssh' })); } catch {}
+  out.console = _srvConsoleRing.slice(-400);
+  return out;
+}
+app.post('/api/incident', (req, res) => {
+  try {
+    const id = 'inc-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
+    const dir = path.join(INCIDENTS_DIR, id);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'bundle.json'), JSON.stringify({
+      id, at: new Date().toISOString(), note: String(req.body?.note || '').slice(0, 2000),
+      clientVersion: String(req.body?.version || ''), client: { rings: req.body?.rings, snapshot: req.body?.snapshot },
+      server: _incidentServerState(),
+    }, null, 1));
+    // prune: newest 30 kept
+    try {
+      const all = fs.readdirSync(INCIDENTS_DIR).filter((d) => d.startsWith('inc-')).sort();
+      for (const d of all.slice(0, Math.max(0, all.length - 30))) fs.rmSync(path.join(INCIDENTS_DIR, d), { recursive: true, force: true });
+    } catch {}
+    console.log(`[incident] captured ${id}${req.body?.note ? ' — ' + String(req.body.note).slice(0, 80) : ''}`);
+    res.json({ id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/incident/:id/append', (req, res) => {
+  try {
+    const id = String(req.params.id || '');
+    if (!/^inc-[a-z0-9-]+$/.test(id)) return res.status(400).json({ error: 'bad id' });
+    const dir = path.join(INCIDENTS_DIR, id);
+    if (!fs.existsSync(dir)) return res.status(404).json({ error: 'unknown incident' });
+    fs.writeFileSync(path.join(dir, 'followup.json'), JSON.stringify({
+      at: new Date().toISOString(), client: { rings: req.body?.rings, snapshot: req.body?.snapshot }, server: _incidentServerState(),
+    }, null, 1));
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/incidents', (req, res) => {
+  try {
+    const out = [];
+    for (const d of (fs.existsSync(INCIDENTS_DIR) ? fs.readdirSync(INCIDENTS_DIR) : []).sort().reverse().slice(0, 30)) {
+      try { const b = JSON.parse(fs.readFileSync(path.join(INCIDENTS_DIR, d, 'bundle.json'), 'utf8')); out.push({ id: b.id, at: b.at, note: b.note }); } catch {}
+    }
+    res.json({ incidents: out });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.get('/api/sysinfo', async (req, res) => {
   try {
     const hostId = String(req.query.host || '');
