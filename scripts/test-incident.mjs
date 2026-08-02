@@ -39,5 +39,36 @@ const left = fs.readdirSync(path.join(wt, 'data', 'incidents')).filter((d) => d.
 check(`prune keeps ≤30 (${left.length})`, left.length <= 30);
 const list = await (await fetch(`http://127.0.0.1:${PORT}/api/incidents`)).json();
 check('list returns newest incidents with notes', Array.isArray(list.incidents) && list.incidents.length > 0 && 'note' in list.incidents[0]);
+
+// ── FREEZE THE SCENE (2.239.0): the volatile facts a user's own
+// troubleshooting would destroy must be copied out, asynchronously, and the
+// pending marker must clear when the freeze completes.
+const dir = path.join(wt, 'data', 'incidents', r.id);
+// plant a session meta + a fake transcript so the freeze has something to grab
+const metaDir = path.join(wt, 'data', 'session-meta');
+fs.mkdirSync(metaDir, { recursive: true });
+fs.writeFileSync(path.join(metaDir, 'cw-99-test.json'), JSON.stringify({ sessionId: 'sess-99-test', name: 'frozen probe' }));
+const CID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+const cacheDir = path.join(wt, 'data', 'remote-jsonl', 'host-test');
+fs.mkdirSync(cacheDir, { recursive: true });
+fs.writeFileSync(path.join(cacheDir, CID + '.jsonl'), '{"type":"user","uuid":"u1"}\n{"type":"assistant","uuid":"u2"}\n');
+const r2 = await post('/api/incident', { note: 'freeze test', rings: {}, snapshot: { sessions: [{ id: CID, host: 'host-test' }] } });
+const dir2 = path.join(wt, 'data', 'incidents', r2.id);
+check('pending marker written immediately', fs.existsSync(path.join(dir2, 'env.json.pending')) || fs.existsSync(path.join(dir2, 'env.json')));
+for (let i = 0; i < 60 && !fs.existsSync(path.join(dir2, 'env.json')); i++) await sleep(500);
+check('env.json produced by the async freeze', fs.existsSync(path.join(dir2, 'env.json')));
+const env = JSON.parse(fs.readFileSync(path.join(dir2, 'env.json'), 'utf8'));
+check('process table captured (the kill-erases-it evidence)', Array.isArray(env.local.processes) && env.local.processes.length > 0);
+check('session metas frozen as real copies', fs.existsSync(path.join(dir2, 'frozen', 'session-meta', 'cw-99-test.json'))
+  && JSON.parse(fs.readFileSync(path.join(dir2, 'frozen', 'session-meta', 'cw-99-test.json'), 'utf8')).name === 'frozen probe');
+const tr = env.local.transcripts?.[CID];
+check('transcript fingerprinted (sha256 + size) for the referenced conversation', Array.isArray(tr) && tr.length > 0 && /^[0-9a-f]{64}$/.test(tr[0].sha256 || ''), JSON.stringify(tr));
+check('transcript tail frozen to disk', fs.readdirSync(path.join(dir2, 'frozen', 'transcripts')).some((f) => f.startsWith(CID)));
+check('targets include the referenced host', (env.targets?.hostIds || []).includes('host-test'));
+// the meta a later kill would clobber: prove the frozen copy is independent
+fs.writeFileSync(path.join(metaDir, 'cw-99-test.json'), JSON.stringify({ sessionId: null, name: 'CLOBBERED' }));
+check('frozen copy survives the original being clobbered',
+  JSON.parse(fs.readFileSync(path.join(dir2, 'frozen', 'session-meta', 'cw-99-test.json'), 'utf8')).name === 'frozen probe');
+check('pending marker cleared after freeze', !fs.existsSync(path.join(dir2, 'env.json.pending')));
 console.log(failed === 0 ? 'ALL PASS' : `${failed} FAILED`);
 process.exit(failed ? 1 : 0);

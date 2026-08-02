@@ -121,7 +121,7 @@ export function installIncidentRecorder(app) {
     const shell = createModalShell({ title: t('Report a problem (capture the scene)') });
     const body = shell.body;
     body.innerHTML = `
-      <div class="usage-note" style="margin-bottom:8px">${escHtml(t('This saves the last few minutes of UI activity (clicks, window events, errors — never any text you typed or message content) plus a full client+server state snapshot, so the problem can be investigated later even after the scene is gone.'))}</div>
+      <div class="usage-note" style="margin-bottom:8px">${escHtml(t('This freezes the whole scene — the last few minutes of UI activity (clicks, window events, errors; never any text you typed or message content), plus the live environment on this instance AND on every machine your sessions use: process tables, session state, lock files, transcript fingerprints. Capture this BEFORE you try to fix things yourself — afterwards the evidence is gone.'))}</div>
       <textarea class="dialog-input" rows="3" style="width:100%;box-sizing:border-box" placeholder="${escHtml(t('What went wrong? (optional but helpful)'))}"></textarea>`;
     const ta = body.querySelector('textarea');
     const btn = document.createElement('button');
@@ -148,7 +148,7 @@ export function installIncidentRecorder(app) {
         <div style="text-align:center;padding:12px 4px">
           <div class="usage-section-title">${escHtml(t('Scene captured. Send this ID to the admin:'))}</div>
           <div class="mono" style="font-size:20px;font-weight:700;margin:10px 0;user-select:all">${escHtml(r.id)}</div>
-          <div class="usage-note">${escHtml(t('A follow-up snapshot of the next 2 minutes is attached automatically. Keep working normally.'))}</div>
+          <div class="usage-note">${escHtml(t('The full environment is frozen (processes, session state, locks, transcript fingerprints — local and on every machine involved), so you can now troubleshoot freely: resuming, killing or restarting anything will NOT destroy the evidence. A follow-up snapshot of the next 2 minutes attaches automatically.'))}</div>
         </div>`;
       btn.textContent = t('Copy ID');
       btn.disabled = false;

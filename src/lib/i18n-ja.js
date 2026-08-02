@@ -2240,4 +2240,6 @@ export default {
   "Scene captured. Send this ID to the admin:": "現場をキャプチャしました。この ID を管理者に送ってください：",
   "A follow-up snapshot of the next 2 minutes is attached automatically. Keep working normally.": "今後 2 分間のフォローアップスナップショットが自動で添付されます。通常どおりお使いください。",
   "Copy ID": "ID をコピー",
+  "The full environment is frozen (processes, session state, locks, transcript fingerprints — local and on every machine involved), so you can now troubleshoot freely: resuming, killing or restarting anything will NOT destroy the evidence. A follow-up snapshot of the next 2 minutes attaches automatically.": "環境全体を凍結しました（プロセス・セッション状態・ロックファイル・トランスクリプト指紋——このインスタンスと関係する全マシン）。この後は自由に調査して構いません：resume・kill・再起動をしても証拠は失われません。今後 2 分間のスナップショットも自動で添付されます。",
+  "This freezes the whole scene — the last few minutes of UI activity (clicks, window events, errors; never any text you typed or message content), plus the live environment on this instance AND on every machine your sessions use: process tables, session state, lock files, transcript fingerprints. Capture this BEFORE you try to fix things yourself — afterwards the evidence is gone.": "現場全体を凍結します——直近数分の UI アクティビティ（クリック・ウィンドウイベント・エラー。入力テキストやメッセージ内容は含みません）に加え、このインスタンスとセッションが使う全マシンのライブ環境（プロセステーブル・セッション状態・ロックファイル・トランスクリプト指紋）。自分で直す前にキャプチャしてください——その後では証拠が消えます。",
 };
