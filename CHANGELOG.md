@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.237.3
+
+- **Manage Agents → Test no longer claims a LINKED subscription "isn't signed in"** (real report: on a host whose own CLI login IS that account's email, Test refused with "This subscription isn't signed in yet"). A linked account needs no local creds dir and no shipped copy — on that host it IS the machine login — which the billing switcher and the New Session dialog already model (2.208.0); the Test guard was the last place still reading an empty LOCAL creds dir as "not signed in". Linked rows are now marked in the DOM, the guard exempts them, and the diagnostic session spawns with the CLI-login sentinel so it runs on the host's own login (nothing ships — §ban-safety unaffected).
+
 ## 2.237.2
 
 - **CephFS mounts no longer depend on the image shipping `modprobe`** (real recurring failure: `mount.ceph` HARDCODES a `/sbin/modprobe` call and treats "command not found" as fatal — the 3.5.0 container image dropped the `kmod` package, so every cephfs connect died "sh: 1: /sbin/modprobe: not found" even though the ceph kernel module was already loaded host-side; a container can never modprobe the shared kernel anyway, and on kmod-bearing images the call always failed harmlessly — exit-127 was the one variant mount.ceph refuses). `_mountCephfs` now ensures a no-op `/sbin/modprobe` shim (sudo, idempotent, container-scoped) before every attempt, so the host's module state — not the image's package list — decides the outcome; the deploy image also gets `kmod` back for good measure.
