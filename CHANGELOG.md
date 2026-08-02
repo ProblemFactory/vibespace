@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.238.1
+
+- Incident bundles additionally capture the **active resume-breaker table** (which conversation ids are currently blocked from resuming, and for how long) and a **remote-discovery cache digest** (per host: how many sessions discovery last believed exist, with id prefixes) — both were load-bearing in the "conversation disappeared" investigation and neither survives anywhere else.
+
 ## 2.238.0
 
 - **"Report a problem" panic button — the scene now survives the timezone gap** (admin request: users hit problems while the admin sleeps, and by investigation time the scene is gone). The client keeps ALWAYS-ON bounded ring buffers of the last few minutes — clicks and coarse key events (special keys only; typed text is NEVER recorded, only a per-burst "typing" marker), WS message types both directions (type/sessionId/diagnostic codes, never payload bodies), and console errors/warnings — plus assembles a full state snapshot on demand (windows with openSpec-lite, session digest, ws state, heap). ⚙ → "Report a problem…" flushes all of it to the server, which adds ITS OWN scene (active-session digest with streaming/remoteState flags, 30-min sysinfo history, an in-memory server console ring, hosts digest) and writes `data/incidents/<inc-id>/bundle.json`; a follow-up snapshot auto-attaches 2 minutes later for it's-happening-right-now cases. The user relays only the short `inc-…` id. Newest 30 bundles kept; the note field is the only free text. Contract smoke: scripts/test-incident.mjs (7 asserts incl. traversal rejection + prune).
