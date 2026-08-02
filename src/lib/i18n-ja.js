@@ -2231,4 +2231,13 @@ export default {
   "Conversation found — retry now?": "会話は残っています——今すぐ再試行しますか？",
   "The last resume failed because the CLI looked in the wrong folder, but this conversation’s transcript EXISTS — nothing is lost. Retry the resume right now (this skips the retry cooldown)?": "前回の再開は CLI が誤ったフォルダを探したため失敗しましたが、この会話のトランスクリプトは存在します——何も失われていません。今すぐ再開を再試行しますか？（再試行クールダウンをスキップします）",
   "Retry resume now": "今すぐ再試行",
+  "Report a problem…": "問題を報告…",
+  "Report a problem (capture the scene)": "問題を報告（現場をキャプチャ）",
+  "This saves the last few minutes of UI activity (clicks, window events, errors — never any text you typed or message content) plus a full client+server state snapshot, so the problem can be investigated later even after the scene is gone.": "直近数分の UI アクティビティ（クリック・ウィンドウイベント・エラー——入力したテキストやメッセージ内容は一切含みません）とクライアント+サーバーの状態スナップショットを保存します。現場が消えた後でも調査できます。",
+  "What went wrong? (optional but helpful)": "何が起きましたか？（任意・あると助かります）",
+  "Capture now": "今すぐキャプチャ",
+  "Capture failed: {err}": "キャプチャ失敗：{err}",
+  "Scene captured. Send this ID to the admin:": "現場をキャプチャしました。この ID を管理者に送ってください：",
+  "A follow-up snapshot of the next 2 minutes is attached automatically. Keep working normally.": "今後 2 分間のフォローアップスナップショットが自動で添付されます。通常どおりお使いください。",
+  "Copy ID": "ID をコピー",
 };
