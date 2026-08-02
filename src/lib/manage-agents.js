@@ -1091,7 +1091,7 @@ export function installManageAgents(App, ctx = {}) {
       // Redesign (2.178.0): rows carry ONLY the star + a ⋯ menu — Test/Rename/
       // email/Remove live in the menu (four inline buttons crushed every row,
       // modal AND panel; real screenshot report). Star stays direct: most-used.
-      return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}" data-sub="${isSub ? '1' : ''}"${blocked ? ' data-blocked="1"' : ''}${hostSub ? ' data-hostsub="1"' : ''}>
+      return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}" data-sub="${isSub ? '1' : ''}"${blocked ? ' data-blocked="1"' : ''}${hostSub ? ' data-hostsub="1"' : ''}${linked ? ' data-linked="1"' : ''}>
         <span class="acct-type-icon" title="${iconTitle}">${isSub ? CROWN : KEY}</span>
         <span class="acct-key-main"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span>${(provTag || noteTag) ? `<span class="acct-key-extra">${provTag}${noteTag}</span>` : ''}</span>
         <span class="acct-usage-cell">${isSub && a.loggedIn ? usageHtml(this._accountUsage?.[a.id]) : ''}</span>
@@ -1232,11 +1232,18 @@ export function installManageAgents(App, ctx = {}) {
       const a = claudeAccts.find(x => x.id === id);
       const isSub = a?.type === 'subscription';
       const doTest = () => {
+        // LINKED account (2.237.3, natural's report "Test says not signed in"):
+        // this account's email IS the selected host's own login, so on that
+        // host it needs NO local creds and NO shipped dir — the correct spawn
+        // is the CLI-login sentinel. The switcher/New-Session dialog already
+        // model this (2.208.0); the Test guard was the last place still
+        // treating an empty LOCAL creds dir as "not signed in".
+        const linkedHere = isSub && !!keyRow.dataset.linked && !!selectedHost;
         // A not-logged-in subscription can't spawn — the server would
         // reject the create and leave a blank window. Guard it here.
         // EXCEPT host-held logins (2.203.0): the LOCAL dir is empty by
         // design; the spawn resolves against the host-side dir.
-        if (isSub && !a.loggedIn && !keyRow.dataset.hostsub) {
+        if (isSub && !a.loggedIn && !keyRow.dataset.hostsub && !linkedHere) {
           showToast(t('This subscription isn’t signed in yet — use “Add subscription…” to finish the login first.'), { type: 'error' });
           return;
         }
@@ -1248,8 +1255,10 @@ export function installManageAgents(App, ctx = {}) {
         }
         done();
         // Diagnostic session — ephemeral (closing its window terminates it).
-        // With a remote host selected it runs ON that host (creds ship to it).
-        this.createSession({ backend: 'claude', mode: 'terminal', cwd: '', accountId: id, ephemeral: true, hostId: selectedHost || undefined });
+        // With a remote host selected it runs ON that host (creds ship to it);
+        // a LINKED account resolves to the host's own login instead (nothing
+        // ships, §ban-safety unaffected).
+        this.createSession({ backend: 'claude', mode: 'terminal', cwd: '', accountId: linkedHere ? 'subscription' : id, ephemeral: true, hostId: selectedHost || undefined });
       };
       const doEmail = async () => {
         const email = await showInputDialog({
