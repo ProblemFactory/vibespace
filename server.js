@@ -2914,6 +2914,17 @@ function _incidentServerState() {
   try { out.sysinfoHistory = sysinfo.history(30 * 60 * 1000); } catch {}
   try { out.hosts = (hosts?.list?.() || []).map((h) => ({ id: h.id, name: h.name, transport: h.dialTokenHash ? 'dial' : 'ssh' })); } catch {}
   out.console = _srvConsoleRing.slice(-400);
+  // The "conversation disappeared" class (2.238.1): what the RESUME BREAKER
+  // currently blocks and what remote DISCOVERY last believed — both were
+  // load-bearing in the natural incident and neither survives anywhere else.
+  try { out.resumeBreakers = [...noConvoRef.map.entries()].map(([cid, at]) => ({ cid, agoS: Math.round((Date.now() - at) / 1000) })); } catch {}
+  try {
+    const dc = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'remote-sessions-cache.json'), 'utf8'));
+    out.discoveryCache = Object.fromEntries(Object.entries(dc.hosts || dc || {}).map(([hid, v]) => {
+      const list = Array.isArray(v?.sessions) ? v.sessions : Array.isArray(v) ? v : [];
+      return [hid, { count: list.length, ids: list.slice(0, 40).map((x) => String(x.sessionId || x.id || '').slice(0, 8)) }];
+    }));
+  } catch {}
   return out;
 }
 app.post('/api/incident', (req, res) => {
