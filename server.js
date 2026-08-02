@@ -2927,6 +2927,27 @@ function _incidentServerState() {
   } catch {}
   return out;
 }
+// Which conversations + hosts does this incident touch? Everything the
+// FREEZE needs to target: live sessions, the client's visible session list,
+// and any id currently blocked by the resume breaker (the disappeared class).
+function _incidentTargets(clientSnapshot) {
+  const cids = new Set(), hostIds = new Set();
+  try {
+    for (const [, s] of activeSessions) {
+      if (s.claudeSessionId) cids.add(s.claudeSessionId);
+      if (s.backendSessionId) cids.add(s.backendSessionId);
+      if (s.host) hostIds.add(s.host);
+    }
+  } catch {}
+  try {
+    for (const s of (clientSnapshot?.sessions || []).slice(0, 60)) {
+      if (s?.id) cids.add(s.id);
+      if (s?.host) hostIds.add(s.host);
+    }
+  } catch {}
+  try { for (const cid of noConvoRef.map.keys()) cids.add(cid); } catch {}
+  return { cids: [...cids].filter(Boolean), hostIds: [...hostIds].filter(Boolean) };
+}
 app.post('/api/incident', (req, res) => {
   try {
     const id = 'inc-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
@@ -2937,6 +2958,30 @@ app.post('/api/incident', (req, res) => {
       clientVersion: String(req.body?.version || ''), client: { rings: req.body?.rings, snapshot: req.body?.snapshot },
       server: _incidentServerState(),
     }, null, 1));
+    // ── FREEZE THE SCENE (2.239.0) ──────────────────────────────────────
+    // The user WILL now go troubleshoot — ssh in, resume, kill — and destroy
+    // every volatile fact (process tree, locks, metas, transcript state).
+    // Copy it all out first. Runs async so the id comes back instantly; a
+    // `env.json.pending` marker tells a later reader the capture was cut off
+    // (server killed mid-freeze) rather than empty by design.
+    const targets = _incidentTargets(req.body?.snapshot);
+    fs.writeFileSync(path.join(dir, 'env.json.pending'), JSON.stringify({ startedAt: new Date().toISOString(), targets }, null, 1));
+    (async () => {
+      try {
+        const inc = require('./src/incident');
+        const local = await inc.captureLocal(dir, { dataDir: path.join(__dirname, 'data'), cids: targets.cids });
+        fs.writeFileSync(path.join(dir, 'env.json'), JSON.stringify({ targets, local }, null, 1));
+        if (hosts && targets.hostIds.length) {
+          const remote = await inc.captureRemote({ hosts, hostIds: targets.hostIds, cids: targets.cids });
+          fs.writeFileSync(path.join(dir, 'remote.json'), JSON.stringify(remote, null, 1));
+        }
+        fs.rmSync(path.join(dir, 'env.json.pending'), { force: true });
+        console.log(`[incident] ${id}: scene frozen (${targets.cids.length} conversations, ${targets.hostIds.length} hosts)`);
+      } catch (e) {
+        try { fs.writeFileSync(path.join(dir, 'env-error.txt'), String(e.stack || e.message)); } catch {}
+        console.error(`[incident] ${id}: freeze failed:`, e.message);
+      }
+    })();
     // prune: newest 30 kept
     try {
       const all = fs.readdirSync(INCIDENTS_DIR).filter((d) => d.startsWith('inc-')).sort();
