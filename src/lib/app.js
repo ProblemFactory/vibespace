@@ -1678,7 +1678,7 @@ class App {
           const held = !linked && hostHeld(a);
           if (linked) opts.push([a.id, a.name + ' ' + t('· uses {host}’s own login', { host: hostName })]);
           else if (held) opts.push([a.id, a.name + ' ' + t('· logged in on {host}', { host: hostName })]);
-          else if (a.loggedIn && allowSubRemote && hostRec?.transport !== 'dial') opts.push([a.id, t('{name} (subscription)', { name: a.name })]);
+          else if (a.loggedIn && allowSubRemote && !a.localOnly && hostRec?.transport !== 'dial') opts.push([a.id, t('{name} (subscription)', { name: a.name })]);
           // Not usable there — show WHY instead of silently omitting (the
           // omission is what taught users the create-then-switch workaround)
           else opts.push([a.id, a.name + ' — ' + t('not logged in on {host}', { host: hostName }), true]);
