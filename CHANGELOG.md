@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.239.2
+
+- **Billing switcher no longer greys out every subscription on a fresh page** (diagnosed from the panic button's FIRST real field capture, `inc-msfwgfpd-tlhn` — "不给换号": the action ring showed two badge clicks with no menu interaction and zero errors). `hostSubHeld`/`hostLinked` read per-page caches that only a Manage-Agents visit or a usage ⟳ populated — so right after a reload, accounts whose logins are held ON the host (or ARE the host's own login) rendered disabled with the "can't ship" explanation. The switcher now probes the host's account status itself (the same read-only `accounts-status` probe Manage Agents uses, once per host per page, warmed eagerly on open) and REBUILDS the open menu in place when the answer lands, so the rows un-grey in front of the user.
+
 ## 2.239.1
 
 - **The Report-a-problem dialog actually shows its submit button now** (real report: "这个如何提交" — `createModalShell` exposes no `.footer`, so the Capture button's append threw and it silently never rendered; the dialog was note-field-only). The actions row is built explicitly with the standard `.dialog-actions` convention, and the incident smoke now drives the REAL dialog in headless chrome: renders it, types a note, clicks Capture, waits for the `inc-` id, and asserts the bundle carries the typed note (18 asserts total).

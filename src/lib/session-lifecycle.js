@@ -3,7 +3,7 @@ import { ChatView } from './chat-view.js';
 import { track, metric } from './telemetry-client.js';
 import { t } from './i18n.js';
 import { TerminalSession } from './terminal.js';
-import { showConfirmDialog, showContextMenu, showToast, stripCwdHostLabel } from './utils.js';
+import { fetchJson, showConfirmDialog, showContextMenu, showToast, stripCwdHostLabel } from './utils.js';
 
 export function installSessionLifecycle(App, ctx = {}) {
   Object.assign(App.prototype, {
@@ -609,6 +609,34 @@ export function installSessionLifecycle(App, ctx = {}) {
   // the choice (sessionConfigs.account), kill the CLI, resume the SAME
   // conversation on the new account. Also works on already-terminated
   // (read-only) windows, where it just resumes on the picked account.
+  // Warm the per-host account knowledge the billing switcher depends on
+  // (2.239.2, natural's inc-msfwgfpd-tlhn — the panic button's first real
+  // catch): hostSubHeld/hostLinked read `_hostSubsKnown`/host-email caches
+  // that only a Manage-Agents visit or a usage ⟳ populated, so on a FRESH
+  // page every named subscription rendered disabled ("can't ship") even when
+  // its login was held ON the host or WAS the host's own login. Fetch the
+  // same accounts-status probe Manage Agents uses, once per host per page;
+  // when the fetch lands while the billing menu is still open, rebuild it in
+  // place so the rows un-grey in front of the user.
+  _warmHostAccountCache(hostId) {
+    if (!hostId) return;
+    this._hostAcctWarmState = this._hostAcctWarmState || {};
+    if (this._hostAcctWarmState[hostId]) return;
+    this._hostAcctWarmState[hostId] = 'pending';
+    fetchJson(`/api/hosts/${encodeURIComponent(hostId)}/accounts-status`).then((r) => {
+      this._hostAcctWarmState[hostId] = 'done';
+      if (!r || r.error) return;
+      this._hostSubsKnown = { ...(this._hostSubsKnown || {}), [hostId]: r.hostSubs || [] };
+      const email = String(r.subscription?.email || '').trim().toLowerCase();
+      this._hostOwnEmailKnown = { ...(this._hostOwnEmailKnown || {}), [hostId]: email };
+      const bm = this._billingMenu;
+      if (bm && bm.host === hostId && bm.el?.isConnected) {
+        bm.el.remove();
+        this.showBillingSwitcher(...bm.args);
+      }
+    }).catch(() => { this._hostAcctWarmState[hostId] = 'done'; });
+  },
+
   showBillingSwitcher(winId, anchor) {
     // Two call shapes: (windowId, anchorElement) from the title-bar identity
     // badge, or (sessionObject, {x,y}) from the sidebar card context menu —
@@ -674,7 +702,11 @@ export function installSessionLifecycle(App, ctx = {}) {
     // own login identity (⟳-baked orgEmail cache) IS that login — pickable;
     // the server maps the spawn onto the host's own login (2.198.0, zero
     // creds ship). Cache empty → stays blocked with the pick-CLI-login hint.
-    const hostOwnEmail = rHostId ? String(this._hostOwnUsage?.[rHostId]?.orgEmail || '').trim().toLowerCase() : '';
+    const hostOwnEmail = rHostId ? String(this._hostOwnUsage?.[rHostId]?.orgEmail || this._hostOwnEmailKnown?.[rHostId] || '').trim().toLowerCase() : '';
+    // Cold caches ⇒ probe the host now; the menu rebuilds in place when the
+    // answer lands (~1s). Without this, a fresh page disables every named
+    // subscription no matter what the host actually holds.
+    if (rHostId && !(this._hostSubsKnown && rHostId in this._hostSubsKnown)) this._warmHostAccountCache(rHostId);
     const acctEmailOf = (a) => String(a.email || (String(a.name || '').includes('@') ? a.name : '')).trim().toLowerCase();
     const hostLinked = (a) => !isCodex && !!hostOwnEmail && acctEmailOf(a) === hostOwnEmail;
     // Per-account login held ON the host (2.199.0) — cached from the last
@@ -720,12 +752,14 @@ export function installSessionLifecycle(App, ctx = {}) {
       if (block && !cur) { items.push({ label: a.name + suffix, disabled: true, title: block }); continue; }
       items.push({ label: (cur ? '✓ ' : '') + a.name + suffix, action: () => { if (!cur) doSwitch(a.id, a.name); } });
     }
+    let menuEl;
     if (anchor && typeof anchor.getBoundingClientRect === 'function') {
       const r = anchor.getBoundingClientRect();
-      showContextMenu(r.left, r.bottom + 4, items);
+      menuEl = showContextMenu(r.left, r.bottom + 4, items);
     } else {
-      showContextMenu(anchor?.x || 40, anchor?.y || 40, items);
+      menuEl = showContextMenu(anchor?.x || 40, anchor?.y || 40, items);
     }
+    this._billingMenu = { el: menuEl, host: rHostId, args: [winId, anchor] };
   },
 
   // Clicking Fork opens a popup for the first message. The fork only diverges
