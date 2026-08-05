@@ -667,7 +667,21 @@ function registerWsHandler(wss, ctx) {
                   execFileSync('ssh', [...hosts.sshArgs(h2, { multiplex: true }), '--', 'umask 077; mkdir -p "$HOME/.vibespace/bin" "$HOME/.vibespace/editor"; tar -x -C "$HOME/.vibespace/bin"; chmod +x "$HOME/.vibespace/bin"/vibespace-* 2>/dev/null; [ -f "$HOME/.vibespace/bin/code" ] && { mv -f "$HOME/.vibespace/bin/code" "$HOME/.vibespace/editor/code"; chmod +x "$HOME/.vibespace/editor/code"; } || true'],
                     { input: tar, timeout: 20000 });
                   if (integrationOn) {
-                    prelude += `export PATH="$HOME/.vibespace/bin:$PATH"; node "$HOME/.vibespace/bin/vibespace-hook-register.mjs" 2>/dev/null || true; `;
+                    // NODE FINDER (2.244.4, natural's Novita — the chicken-and-egg
+                    // behind "hook still says node: not found"): the spawn shell is
+                    // POSIX sh (dash on Debian), where nvm never loads — a bare
+                    // `node` resolves to NOTHING there, so the register (which
+                    // rewrites hook entries to an absolute interpreter) could never
+                    // run, and every `#!/usr/bin/env node` agent tool was dead too.
+                    // Locate node POSIX-portably (PATH → newest nvm → common
+                    // locations), EXPORT its dir onto PATH (revives tools + any
+                    // old-format hook entries immediately), then run the register
+                    // with the absolute path so entries self-heal to execPath.
+                    prelude += `export PATH="$HOME/.vibespace/bin:$PATH"; `
+                      + `VS_NODE="$(command -v node 2>/dev/null)"; `
+                      + `[ -z "$VS_NODE" ] && VS_NODE="$(ls -1 "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | sort | tail -1)"; `
+                      + `if [ -z "$VS_NODE" ]; then for vs_c in /usr/local/bin/node /usr/bin/node /opt/homebrew/bin/node "$HOME/.local/bin/node"; do [ -x "$vs_c" ] && VS_NODE="$vs_c" && break; done; fi; `
+                      + `[ -n "$VS_NODE" ] && export PATH="$(dirname "$VS_NODE"):$PATH" && "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" 2>/dev/null; `;
                     // EDITOR needs $HOME expansion → shell prefix assignment
                     // (envPairs are shq'd); PORT/SESSION_ID are static values.
                     tokenAssign = `VIBESPACE_SESSION_TOKEN="$(cat "$HOME/.vibespace/bin/${tokName}")" EDITOR="$HOME/.vibespace/editor/code" `;
@@ -730,7 +744,12 @@ function registerWsHandler(wss, ctx) {
               // the device's OWN claude/codex configs (its local CLI fires it)
               await dm.runCmd('sh', ['-c',
                 `chmod +x "${bin}"/vibespace-* "${home}/.vibespace/editor/code" 2>/dev/null; chmod 600 "${bin}/${tokName}"; `
-                + `node "${bin}/vibespace-hook-register.mjs" 2>/dev/null || true`], { timeoutMs: 12000 }).catch(() => {});
+                // same POSIX node finder as the ssh prelude (2.244.4 — a bare
+                // `node` is unresolvable in dash/non-login shells on nvm hosts)
+                + `VS_NODE="$(command -v node 2>/dev/null)"; `
+                + `[ -z "$VS_NODE" ] && VS_NODE="$(ls -1 "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | sort | tail -1)"; `
+                + `if [ -z "$VS_NODE" ]; then for vs_c in /usr/local/bin/node /usr/bin/node /opt/homebrew/bin/node "$HOME/.local/bin/node"; do [ -x "$vs_c" ] && VS_NODE="$vs_c" && break; done; fi; `
+                + `[ -n "$VS_NODE" ] && "$VS_NODE" "${bin}/vibespace-hook-register.mjs" 2>/dev/null || true`], { timeoutMs: 12000 }).catch(() => {});
               // VIBESPACE_API back-tunnel: a loopback port ON THE DEVICE whose
               // accepts ride the dial link back into our own server port.
               const net = require('net');

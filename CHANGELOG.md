@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.244.4
+
+- **The hook fix could never apply itself — the fixer needed node too** (the chicken-and-egg behind "hook still says node: not found"): the remote prelude ran the hook REGISTER with a bare `node`, silently failing on hosts where node is nvm-managed (nvm never loads in the POSIX/dash spawn shell) — so 2.244.2's absolute-interpreter rewrite never executed, and every `#!/usr/bin/env node` agent tool was equally dead there. All four register invocation sites (ssh prelude, dial install, manual Install, Remove) now run a POSIX node finder (PATH → newest nvm install → common locations), EXPORT the found node's dir onto the session PATH (revives the agent tools and any old-format hook entries immediately), and run the register via the absolute path so entries self-heal. Verified live on the affected host: finder located the nvm node, the register ran, and the hook entries now carry the absolute interpreter.
+
 ## 2.244.3
 
 - **"Never finished signing in" no longer slanders accounts that ARE signed in — elsewhere**: an account holding its login on one machine (ClaudeLu on Novita) showed "never finished signing in" in the billing menu of a session on a DIFFERENT machine (CW-H200) — the disable was correct (no login THERE), the message read as a broken account. `evaluateOnHost` now distinguishes `not-on-this-host` (logins exist on other machines — named in the message, with the two ways out) from `never-signed-in` (no login anywhere). Matrix test grows to 17 asserts.
