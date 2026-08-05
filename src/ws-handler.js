@@ -422,6 +422,12 @@ function registerWsHandler(wss, ctx) {
           // remoteAccountEnv — subscription accounts stay local-only). Resolved
           // BEFORE the session object so a bad account aborts the create cleanly.
           let spawnAccount = null;
+          // A LINKED account (same email as the host's own login) spawns via
+          // the host's login (spawnAccount nulled below) but the PICKED
+          // identity must survive onto session._accountId — else the badge
+          // and the billing switcher's ✓ degrade to "CLI login @ host" and a
+          // successful switch reads as failed (2.241.0, natural's report).
+          let linkedAccountId = null;
           if ((backend === 'claude' || backend === 'codex') && accounts) {
             try { spawnAccount = accounts.resolveForSpawn(data.accountId, backend); }
             catch (e) {
@@ -465,7 +471,7 @@ function registerWsHandler(wss, ctx) {
               spawnAccount = rescued;
               // email-linked rescue resolves to the host's own login = the
               // same null the 'subscription' sentinel produces downstream
-              if (spawnAccount && spawnAccount._useHostLogin) spawnAccount = null;
+              if (spawnAccount && spawnAccount._useHostLogin) { linkedAccountId = data.accountId; spawnAccount = null; }
             }
             // REMOTE + the account came from the DEFAULT (nothing specified) +
             // it could only reach the host by shipping subscription creds →
@@ -498,6 +504,7 @@ function registerWsHandler(wss, ctx) {
                   const acctEmail = String(meta?.email || (String(meta?.name || '').includes('@') ? meta.name : '')).trim().toLowerCase();
                   const hostEmail = String((backend === 'codex' ? rs?.codex?.email : rs?.subscription?.email) || '').trim().toLowerCase();
                   if (acctEmail && hostEmail && hostEmail === acctEmail) {
+                    linkedAccountId = spawnAccount.id; // identity survives the host-login mapping
                     spawnAccount = null; // = the host's own login (same account)
                   } else if (backend === 'claude' && (rs?.hostSubs || []).includes(spawnAccount.id)) {
                     // (b) The host holds a LIVE per-account creds dir
@@ -525,8 +532,10 @@ function registerWsHandler(wss, ctx) {
             // bind lands. VALIDATED to the id shape (metachar-free — kept as
             // defense-in-depth even though it's no longer shell-interpolated).
             _initialGroupId: (typeof data.taskId === 'string' && /^T-[\w-]{1,60}$/.test(data.taskId)) ? data.taskId : null,
-            // Billing identity badge (the key itself only lives in the spawn env)
-            _accountId: spawnAccount?.id || null,
+            // Billing identity badge (the key itself only lives in the spawn
+            // env); a linked account spawns via the host's login but IS that
+            // account — keep its identity (2.241.0)
+            _accountId: spawnAccount?.id || linkedAccountId || null,
             // Billing intent at spawn: without an env key the CLI follows its
             // GLOBAL login — record what that was RIGHT NOW so the badge can
             // warn about API-billed sessions even after the user re-logins to

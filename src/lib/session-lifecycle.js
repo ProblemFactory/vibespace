@@ -535,15 +535,20 @@ export function installSessionLifecycle(App, ctx = {}) {
     });
   },
 
-  resumeSession(sessionId, cwd, sessionName, { mode, model, effort, permission, accountId, syncId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, hostId, keeperSid, winBounds } = {}) {
+  resumeSession(sessionId, cwd, sessionName, { mode, model, effort, permission, accountId, syncId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, hostId, keeperSid, winBounds, excludeWebuiId } = {}) {
     this._closeSidebarOnMobile();
     const targetBackendId = backendSessionId || sessionId;
-    // If this session is already open in a LIVE window, focus it
+    // If this session is already open in a LIVE window, focus it.
+    // TWO staleness guards (2.241.0): a read-only view is a DEAD window, not a
+    // live one (its ChatView keeps sessionId after 'exited'), and an
+    // excludeWebuiId caller (billing switch) just killed that id — either can
+    // still match here because _allSessions refreshes on a poll/broadcast that
+    // may be seconds stale, and the silent return ate the whole resume.
     for (const [winId, term] of this.sessions) {
-      if (term.sessionId) {
+      if (term.sessionId && !term._readOnly) {
         const sidebar = this.sidebar;
         const match = (sidebar._allSessions || []).find(s => (s.backendSessionId || s.sessionId) === targetBackendId && (s.backend || 'claude') === backend && s.webuiId);
-        if (match && term.sessionId === match.webuiId) {
+        if (match && term.sessionId === match.webuiId && match.webuiId !== excludeWebuiId) {
           this._focusExistingSession(match.webuiId);
           return;
         }
@@ -689,7 +694,14 @@ export function installSessionLifecycle(App, ctx = {}) {
       const mode = live?.webuiMode || (win ? (win.type === 'terminal' ? 'terminal' : 'chat') : (this.settings.get('session.defaultMode') || 'chat'));
       const hostId = live?.host || undefined;
       const winBounds = win ? this._snapshotWinBounds(this.wm.windows.get(winId)) : undefined;
-      const finish = () => this.resumeSession(backendSessionId, cwd, name, { mode, backend, backendSessionId, accountId: acctVal, hostId, winBounds });
+      // excludeWebuiId: we KILLED this webui id ourselves — resumeSession's
+      // "already open in a live window" shortcut must not trust a stale
+      // _allSessions entry still carrying it (2.241.0, natural's incident ws
+      // ring: kill → exited → the auto-resume create was never sent; on his
+      // loop-blocked instance the active-sessions refresh lagged 10-30s, the
+      // killed session still matched as "live", and the switch silently
+      // ended at _focusExistingSession on the dead window).
+      const finish = () => this.resumeSession(backendSessionId, cwd, name, { mode, backend, backendSessionId, accountId: acctVal, hostId, winBounds, excludeWebuiId: live?.webuiId });
       if (live?.webuiId) {
         // backendSessionId lets the server resolve the session even when the
         // webui id went stale across a restart (2.179.0 — a no-op'd kill here
@@ -778,12 +790,14 @@ export function installSessionLifecycle(App, ctx = {}) {
         : held ? ' ' + t('· logged in on {host}', { host: rHostName }) : '';
       const block = subBlock(a);
       if (block && !cur) { items.push({ label: a.name + suffix, disabled: true, title: block }); continue; }
-      // LINKED pick = the host's own login: spawn with the CLI-login sentinel
-      // (2.240.2, natural's fourth incident — the New Session dialog and the
-      // Manage-Agents Test both map this; the switcher passed the raw id and
-      // the server refused it as 'subscription not logged in' since the
-      // account has no local creds dir — the pick could never work).
-      items.push({ label: (cur ? '✓ ' : '') + a.name + suffix, action: () => { if (!cur) doSwitch(linked ? 'subscription' : a.id, a.name); } });
+      // LINKED pick sends the REAL account id (2.241.0): the server's
+      // email-linked rescue (ws-handler create, 2.240.2) maps it onto the
+      // host's own login — zero creds ship — while session._accountId keeps
+      // the picked identity, so the badge and this menu's ✓ show the account
+      // instead of "CLI login @ host" (natural's sixth incident: a successful
+      // linked switch READ as failed because the identity degraded to the
+      // sentinel). The old client-side sentinel mapping predates the rescue.
+      items.push({ label: (cur ? '✓ ' : '') + a.name + suffix, action: () => { if (!cur) doSwitch(a.id, a.name); } });
     }
     let menuEl;
     if (anchor && typeof anchor.getBoundingClientRect === 'function') {
