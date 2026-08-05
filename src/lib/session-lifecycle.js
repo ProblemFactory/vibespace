@@ -812,6 +812,25 @@ export function installSessionLifecycle(App, ctx = {}) {
     // 'subscription' = accounts.resolveForSpawn's force-the-CLI's-own-login
     // sentinel (a bare '' would fall through to the default account). For a
     // remote session that login lives on the HOST — say so.
+    // Per-row usage PREVIEW (2.245.1, user request): remaining quota + data
+    // age inline in the switcher, same per-row source rule as the Agents
+    // overview (host-login → machine quota, host-held → hostAccounts cache,
+    // else the local passive cache). Text-only — menu rows are plain labels.
+    const pctOf = (x) => (x == null ? null : Math.min(100, Math.round(x.usedPercent ?? ((x.utilization || 0) * 100))));
+    const usageHint = (u) => {
+      if (!u) return '';
+      const f = pctOf(u.fiveHour), s7 = pctOf(u.sevenDay);
+      if (f == null && s7 == null) return '';
+      const age = u.fetchedAt ? Math.round((Date.now() - u.fetchedAt) / 60000) : null;
+      const ageTxt = age != null && age > 5 ? ' · ' + (age < 100 ? t('{n}m', { n: age }) : t('{n}h', { n: Math.round(age / 60) })) : '';
+      return ` — 5h ${f == null ? '?' : f + '%'} · 7d ${s7 == null ? '?' : s7 + '%'}${ageTxt}`;
+    };
+    const usageFor = (a) => {
+      const v = vOf(a);
+      if (rHostId && v?.usable && v.how === 'host-login') return this._hostOwnUsage?.[rHostId];
+      if (rHostId && v?.usable && v.how === 'host-held') return this._hostAccountUsage?.[`${rHostId}:${a.id}`];
+      return this._accountUsage?.[a.id];
+    };
     const cliLabel = rHostId ? t('CLI login') + ' @ ' + rHostName : t('CLI login');
     // apiKeyHelper honesty (2.191.0, CW-H200): when the CLI itself reported
     // apiKeySource=apiKeyHelper, "CLI login" IS the helper's API key — the
@@ -820,7 +839,8 @@ export function installSessionLifecycle(App, ctx = {}) {
     // looks like it should work but "does nothing".
     const helperActive = live?.auth?.source === 'api-other' && live?.auth?.detail === 'apiKeyHelper';
     items.push({
-      label: (currentId === null ? '✓ ' : '') + cliLabel + (helperActive ? ' · apiKeyHelper (API)' : ''),
+      label: (currentId === null ? '✓ ' : '') + cliLabel + (helperActive ? ' · apiKeyHelper (API)' : '')
+        + usageHint(rHostId ? this._hostOwnUsage?.[rHostId] : this._rateLimit),
       action: () => { if (currentId !== null) doSwitch('subscription', cliLabel); },
     });
     if (helperActive) {
@@ -843,7 +863,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       // instead of "CLI login @ host" (natural's sixth incident: a successful
       // linked switch READ as failed because the identity degraded to the
       // sentinel). The old client-side sentinel mapping predates the rescue.
-      items.push({ label: (cur ? '✓ ' : '') + a.name + suffix, action: () => { if (!cur) doSwitch(a.id, a.name); } });
+      items.push({ label: (cur ? '✓ ' : '') + a.name + suffix + usageHint(usageFor(a)), action: () => { if (!cur) doSwitch(a.id, a.name); } });
     }
     let menuEl;
     if (anchor && typeof anchor.getBoundingClientRect === 'function') {
