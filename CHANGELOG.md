@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.245.2
+
+- **Roster donut column aligned again** (real screenshot on the machine overview; diagnosed with pixel measurements, not by eye): the donut cluster is right-anchored against the actions column, so any row whose `.acct-key-actions` differed in width shifted its cluster — the CLI-login row's star-only actions sat 26px narrower than the account rows' [★][⋯], and host rows' inline text buttons (⟳ / Log in on host… / Import its key) shifted theirs by 100px+. Fix: every row now carries the same [★][⋯] pair (host actions moved into the ⋯ menu, the 2.178.0 pattern; a CSS `min-width` evens out star-only rows), and the inline refresh error renders as ONE ellipsized line (full text in the tooltip) instead of exploding the row. Regression guard committed: `test-agents-overview.mjs` fabricates mixed-state rows (fresh + scoped bucket / stale + age / no data / inline error / CLI login) and asserts every visible cluster's right edge equal ±1px at panel widths ~460/340/260 plus equal donut sizes (measured spread: 26.0px before → 0.0px after; the ≤340px pill swap stays intact).
+- **Billing switcher quota preview: scoped buckets + water-level colors**: the per-row usage hint now includes model-scoped weekly buckets (`Fa 41%`, same 2-char labels as the roster donuts) and colors every percentage by the donut scheme (>95 red / >80 amber / green). Mechanism: `showContextMenu` gained an OPT-IN `labelHtml` field (innerHTML rendering; callers MUST escHtml every interpolated string — enforced in the switcher, covered by a hostile-account-name smoke assert); rows without data and disabled rows keep working unchanged.
+
 ## 2.245.1
 
 - **The billing switcher previews each account's quota inline**: every row in the switch-billing menu (title-bar badge / card menu) now appends `— 5h x% · 7d y% · age` from the same per-row source rule as the Agents overview (machine login → host quota cache, host-held → its own held-login cache, otherwise the local passive cache; age shown when the data is older than 5 minutes). Pick with your eyes open instead of switching first and checking quota after.

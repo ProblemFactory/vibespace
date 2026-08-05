@@ -447,7 +447,12 @@ html, body {
 /* Anthropic accounts section (Manage Agents) + setup wizard */
 .acct-section { flex-direction: column; align-items: stretch; }
 .acct-section > .agent-actions { flex-wrap: wrap; justify-content: flex-start; margin-top: 8px; padding-top: 8px; border-top: 1px solid color-mix(in srgb, var(--border) 50%, transparent); }
-.acct-key-actions { display: inline-flex; gap: 4px; justify-content: flex-start; }
+/* min-width = the standard [★][⋯] icon pair (22+4+22) — the usage cell is
+   right-anchored against this column, so a row with FEWER buttons (the local
+   CLI-login row has only ★) otherwise shifts its donut cluster right and
+   breaks the roster-wide column alignment (2.245.2 regression, real pixels:
+   26px). Wide row-specific actions must live in the ⋯ menu, never inline. */
+.acct-key-actions { display: inline-flex; gap: 4px; justify-content: flex-start; min-width: 48px; }
 .acct-key-actions .agent-btn { padding: 1px 7px; font-size: 10px; }
 .acct-step { display: flex; gap: 10px; padding: 10px 4px; border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent); }
 .acct-step:last-child { border-bottom: none; }
@@ -2067,7 +2072,11 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .agents-machine-sec { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .agents-machine-title { margin: 6px 0 0; padding-bottom: 3px; border-bottom: 1px solid var(--border); }
 .agents-machine-title .agents-machine-sub { font-size: 10px; font-weight: 400; letter-spacing: 0; color: var(--text-dim); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.acct-refresh-err { display: block; font-size: 10px; margin-top: 2px; }
+/* Inline per-row refresh failure — ONE ellipsized line on its own wrapped
+   flex line (flex-basis:100%, the .acct-key-extra pattern; a display:block
+   item collapsed to min-content and wrapped one word per line in the rail).
+   Full message stays on the title tooltip. */
+.acct-refresh-err { flex-basis: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; margin-top: 2px; }
 
 /* ── Customize mode (Firefox-style chrome edit mode) ── */
 .cz-overlay {
