@@ -6,6 +6,16 @@
 // clickable, and a failed target renders an INLINE per-row error (never
 // silent); the usage popup lost its Remote-hosts section and gained the
 // "Full overview →" door into the Agents panel.
+// 2.245.2 regression guards (real screenshot: donut clusters at different x
+// per row): with FABRICATED mixed-state rows (fresh w/ scoped bucket / stale
+// w/ age / no data / inline refresh error + the CLI-login row) every visible
+// cluster's RIGHT EDGE must be equal ±1px at panel widths ~460/340/260, donut
+// rendered size equal, and the ≤340px pill swap intact. Plus: the billing
+// switcher renders water-level-colored quota (labelHtml) with scoped buckets,
+// escHtml'd (a hostile account name must not inject).
+// NETWORK SAFETY: every fabricated token is EXPIRED — loggedIn stays true
+// (presence-based) but usageToken/getOAuthToken return null, so Refresh-all
+// fails fast inline WITHOUT ever contacting Anthropic.
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -23,17 +33,23 @@ execSync(`git worktree add --detach ${wt} HEAD`, { stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 execSync('npm run build', { cwd: wt, stdio: 'ignore' });
-fs.rmSync(fakeHome, { recursive: true, force: true }); fs.mkdirSync(fakeHome, { recursive: true });
+fs.rmSync(fakeHome, { recursive: true, force: true });
+fs.mkdirSync(path.join(fakeHome, '.claude'), { recursive: true });
+// Machine login present-but-EXPIRED: CLI-login row renders (with donuts from
+// the seeded cache) while getOAuthToken() stays null (no Anthropic calls).
+const expiredCreds = JSON.stringify({ claudeAiOauth: { accessToken: 'expired-test-token', expiresAt: Date.now() - 1000 } });
+fs.writeFileSync(path.join(fakeHome, '.claude', '.credentials.json'), expiredCreds);
+fs.writeFileSync(path.join(fakeHome, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: 'machine@example.com' } }));
 // Seed the usage caches: a machine-login snapshot (so the popup renders its
 // claude section → the overview link appears) + a host-held account snapshot
 // (exercises the boot loader's host-vs-host-account filename disambiguation).
 const cacheDir = path.join(wt, 'data', 'usage-cache');
 fs.mkdirSync(cacheDir, { recursive: true });
-const snap = { fiveHour: { utilization: 0.42, status: 'allowed', resetsAt: Math.floor(Date.now() / 1000) + 3600 }, sevenDay: { utilization: 0.17, status: 'allowed', resetsAt: Math.floor(Date.now() / 1000) + 86400 }, scopedWeekly: [], overallStatus: 'allowed', fetchedAt: Date.now() };
-fs.writeFileSync(path.join(cacheDir, '__global__.json'), JSON.stringify(snap));
-fs.writeFileSync(path.join(cacheDir, 'host-host-deadbeef-sub-abcdefabcdef.json'), JSON.stringify({ ...snap, name: 'HeldAcct' }));
+const mkSnap = (o = {}) => ({ fiveHour: { utilization: 0.42, status: 'allowed', resetsAt: Math.floor(Date.now() / 1000) + 3600 }, sevenDay: { utilization: 0.87, status: 'allowed', resetsAt: Math.floor(Date.now() / 1000) + 86400 }, scopedWeekly: [], overallStatus: 'allowed', fetchedAt: Date.now(), ...o });
+fs.writeFileSync(path.join(cacheDir, '__global__.json'), JSON.stringify(mkSnap()));
+fs.writeFileSync(path.join(cacheDir, 'host-host-deadbeef-sub-abcdefabcdef.json'), JSON.stringify({ ...mkSnap(), name: 'HeldAcct' }));
 const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--window-size=1280,900', '--user-data-dir=/tmp/vs-agentsov-chrome', 'about:blank'], { stdio: 'ignore' });
+const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--window-size=1280,1000', '--user-data-dir=/tmp/vs-agentsov-chrome', 'about:blank'], { stdio: 'ignore' });
 process.on('exit', () => { try { chrome.kill('SIGKILL'); } catch {}; try { srv.kill('SIGKILL'); } catch {}; try { execSync(`git worktree remove --force ${wt}`, { stdio: 'ignore' }); } catch {}; try { fs.rmSync('/tmp/vs-agentsov-chrome', { recursive: true, force: true }); } catch {}; try { fs.rmSync(fakeHome, { recursive: true, force: true }); } catch {} });
 for (let i = 0; i < 40; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); break; } catch { await sleep(250); } }
 
@@ -51,6 +67,13 @@ check('refresh {host,account}: unknown host rejected', /unknown host/.test(r?.er
 // Dead host record → a second machine section that must render honestly.
 r = await (await fetch(`http://127.0.0.1:${PORT}/api/hosts`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'DeadHost', user: 'nobody', host: '127.0.0.1', port: 1 }) })).json();
 check('dead host record added', !!r?.success);
+// ── fabricate mixed-state subscription accounts (2.245.2 alignment guard) ──
+const mkSub = async (name) => (await (await fetch(`http://127.0.0.1:${PORT}/api/accounts/subscription`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) })).json());
+const A = await mkSub('Fresh Max'), B = await mkSub('Stale Max'), C = await mkSub('NoData Max'), D = await mkSub('Err Max'), E = await mkSub('Ev<il> & "Max"');
+for (const s of [A, B, C, D, E]) fs.writeFileSync(path.join(wt, 'data', 'subs', s.id, '.credentials.json'), expiredCreds);
+fs.writeFileSync(path.join(cacheDir, A.id + '.json'), JSON.stringify(mkSnap({ scopedWeekly: [{ name: 'Fable', utilization: 0.41, resetsAt: 0 }], scopedFetchedAt: Date.now() })));
+fs.writeFileSync(path.join(cacheDir, B.id + '.json'), JSON.stringify(mkSnap({ fetchedAt: Date.now() - 2 * 3600e3 })));
+fs.writeFileSync(path.join(cacheDir, D.id + '.json'), JSON.stringify(mkSnap()));
 
 // ── UI asserts (CDP) ──
 const WebSocket = require('ws');
@@ -87,18 +110,88 @@ check('local section has the CLI-login row', st1.localGlobalRow);
 check('⟳ Refresh-all button present', st1.refreshAll);
 check('host selector is gone', !st1.oldSelector);
 check('host section container present', st1.hostSec);
+// ── donut-column alignment (2.245.2 regression guard, real pixels) ──
+// Inject the inline refresh-error DOM shape into one row (same markup the
+// real fan-out failure path appends), then sweep panel widths.
+await evalJs(`(() => {
+  const rows = [...document.querySelectorAll('.agents-machine-sec[data-host=""] .acct-key-row')];
+  const row = rows.find(r => r.querySelector('.acct-key-name')?.textContent === 'Err Max');
+  if (!row) throw new Error('Err Max row missing');
+  const e = document.createElement('span'); e.className = 'acct-refresh-err usage-warn';
+  e.textContent = '⚠ refresh failed (rate-limited or offline) — kept last-known';
+  row.querySelector('.acct-key-main').appendChild(e);
+  return 1;
+})()`);
+const measureRows = () => evalJs(`(() => {
+  const out = [];
+  for (const row of document.querySelectorAll('.agents-machine-sec[data-host=""] .acct-key-row')) {
+    const vis = (el) => el && getComputedStyle(el).display !== 'none';
+    const cluster = row.querySelector('.acct-usage');
+    const mini = row.querySelector('.acct-usage-mini');
+    const rect = (el) => { const r = el.getBoundingClientRect(); return { r: r.right, w: r.width, h: r.height }; };
+    const donuts = [...row.querySelectorAll('.acct-usage-donut')].filter(vis).map(rect);
+    out.push({
+      name: row.querySelector('.acct-key-name')?.textContent || row.dataset.id,
+      clusterR: vis(cluster) ? rect(cluster).r : null,
+      miniR: vis(mini) ? rect(mini).r : null,
+      donuts,
+    });
+  }
+  return out;
+})()`);
+// sidebar width = rail strip (44px) + panel; 504/384/304 ⇒ panel ≈460/340/260
+for (const [sbw, panel, mode] of [[504, 460, 'donut'], [384, 340, 'pill'], [304, 260, 'pill']]) {
+  await evalJs(`(() => { app.sidebar.el.style.width='${sbw}px'; app.sidebar._applySidebarLayoutWidth?.(); return 1; })()`);
+  await sleep(500);
+  const rows = await measureRows();
+  const key = mode === 'donut' ? 'clusterR' : 'miniR';
+  const edges = rows.map((x) => x[key]).filter((v) => v != null);
+  const spread = edges.length ? Math.max(...edges) - Math.min(...edges) : 999;
+  check(`panel ~${panel}px: ≥4 rows show a ${mode} cluster (got ${edges.length})`, edges.length >= 4);
+  check(`panel ~${panel}px: cluster right edges aligned ±1px (spread ${spread.toFixed(1)}px)`, spread <= 1);
+  if (mode === 'donut') {
+    const sizes = rows.flatMap((x) => x.donuts).flatMap((d) => [d.w, d.h]);
+    const sspread = sizes.length ? Math.max(...sizes) - Math.min(...sizes) : 999;
+    check(`panel ~${panel}px: donut sizes equal across rows (spread ${sspread.toFixed(1)}px)`, sizes.length >= 8 && sspread <= 0.5);
+    check(`panel ~${panel}px: pill hidden in donut mode`, rows.every((x) => x.miniR == null));
+  } else {
+    check(`panel ~${panel}px: donuts hidden in pill mode (swap intact)`, rows.every((x) => x.clusterR == null));
+  }
+}
+await evalJs(`(() => { app.sidebar.el.style.width=''; app.sidebar._applySidebarLayoutWidth?.(); return 1; })()`);
 // Wait out the dead host's probe failures, then check honest state.
 for (let i = 0; i < 20; i++) { if (await evalJs(`!document.querySelector('.agents-machine-sec:not([data-host=""]) .ob-loading')`)) break; await sleep(1000); }
 const st2 = await evalJs(`(() => {
   const sec = document.querySelector('.agents-machine-sec:not([data-host=""])');
-  return { filled: !sec.querySelector('.ob-loading'), globalRow: !!sec.querySelector('.acct-key-row[data-id="__global__"]'), text: sec.textContent.slice(0, 400) };
+  return { filled: !sec.querySelector('.ob-loading'), globalRow: !!sec.querySelector('.acct-key-row[data-id="__global__"]') };
 })()`);
 check('dead host section filled (probe failure did not wedge it)', st2.filled);
 check('dead host section has its CLI-login row', st2.globalRow);
-// Refresh-all: clickable; its one target (the dead host) must FAIL INLINE.
+// Refresh-all: clickable; every target holds an EXPIRED token (or a dead
+// host), so each must FAIL INLINE on its row — and never contact Anthropic.
 await evalJs(`(() => { const b = document.querySelector('.agents-refresh-all'); b.click(); return 1; })()`);
-for (let i = 0; i < 20; i++) { if (await evalJs(`!!document.querySelector('.acct-refresh-err')`)) break; await sleep(1000); }
-check('failed refresh target rendered an inline per-row error', await evalJs(`!!document.querySelector('.agents-machine-sec:not([data-host=""]) .acct-refresh-err')`));
+for (let i = 0; i < 25; i++) { if (await evalJs(`!!document.querySelector('.agents-machine-sec:not([data-host=""]) .acct-refresh-err')`)) break; await sleep(1000); }
+check('failed refresh target rendered an inline per-row error (dead host)', await evalJs(`!!document.querySelector('.agents-machine-sec:not([data-host=""]) .acct-refresh-err')`));
+check('failed LOCAL targets rendered inline errors too', await evalJs(`document.querySelectorAll('.agents-machine-sec[data-host=""] .acct-refresh-err').length >= 2`));
+// ── billing switcher: labelHtml quota preview (2.245.2) ──
+await evalJs(`(() => { app.showBillingSwitcher({ backend: 'claude', backendSessionId: null, name: 'T' }, { x: 300, y: 200 }); return 1; })()`);
+await sleep(400);
+const sw = await evalJs(`(() => {
+  const m = document.querySelector('.context-menu');
+  if (!m) return { menu: false };
+  return {
+    menu: true,
+    coloredPcts: m.querySelectorAll('.context-menu-item span[style*="color"]').length,
+    hasScoped: /Fa \\d+%/.test(m.textContent),
+    evilLiteral: m.textContent.includes('Ev<il> & "Max"'),
+    injected: !!m.querySelector('il, img'),
+  };
+})()`);
+check('billing switcher menu opens', sw.menu);
+check('switcher rows carry water-level-colored percentages', sw.coloredPcts >= 4);
+check('scoped bucket (Fa) appears in the preview', sw.hasScoped);
+check('hostile account name renders as literal text (escHtml)', sw.evilLiteral && !sw.injected);
+await evalJs(`(() => { document.querySelector('.context-menu')?.remove(); return 1; })()`);
 // Usage popup: Remote-hosts section gone, Full-overview door present.
 await evalJs(`(() => { document.getElementById('taskbar-usage').click(); return 1; })()`);
 await sleep(600);
@@ -121,7 +214,7 @@ check('overview door lands on the Agents rail panel', st4.agentsActive);
 const realErrors = jsErrors.filter((e) => !/favicon|net::|Failed to load resource/.test(e));
 check('no JS errors', realErrors.length === 0);
 if (realErrors.length) console.error('   errors:', realErrors.slice(0, 5));
-const shot = await cdp('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: 420, height: 900, scale: 1.5 } });
+const shot = await cdp('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: 460, height: 1000, scale: 1.5 } });
 fs.writeFileSync('/tmp/agents-overview.png', Buffer.from(shot.data, 'base64'));
 console.log(failed === 0 ? 'ALL PASS' : `${failed} FAILED`);
 process.exit(failed ? 1 : 0);

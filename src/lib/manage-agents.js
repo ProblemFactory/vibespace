@@ -307,6 +307,7 @@ export function installManageAgents(App, ctx = {}) {
     const GLOBE = svg('<circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c-2 2-2 10 0 12M8 2c2 2 2 10 0 12"/>');
     const STAR_F = svg('<path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 11.6 4.1 13.6l.8-4.3-3.1-3 4.3-.6z" fill="currentColor"/>');
     const STAR_O = svg('<path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 11.6 4.1 13.6l.8-4.3-3.1-3 4.3-.6z"/>');
+    const DOTS = svg('<circle cx="3" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="13" cy="8" r="1.3" fill="currentColor" stroke="none"/>');
     const row = document.createElement('div'); row.className = 'ob-backend acct-section acct-roster';
     const left = document.createElement('div'); left.style.flex = '1';
     const gDef = !accts.defaultCodexAccountId;
@@ -327,8 +328,11 @@ export function installManageAgents(App, ctx = {}) {
     // email) — say so; their quota buckets are then merged newest-wins.
     const linkedCx = !selectedHost && gLoggedIn && cgl.accountId ? codexAccts.find(a => a.id === cgl.accountId) : null;
     if (linkedCx) gIdent += ` <span class="acct-linked-hint" title="${escHtml(t('The machine login and this VibeSpace account are the same ChatGPT account — usage is shown merged'))}">${t('= “{name}”', { name: escHtml(linkedCx.name) })}</span>`;
+    // Host actions live in a ⋯ menu (2.245.2 — same [★][⋯] actions width on
+    // every row keeps the right-anchored donut column aligned; see the
+    // Anthropic roster's note).
     const gExtraActions = selectedHost
-      ? `<button class="agent-btn acct-host-login" title="${t('Opens a terminal ON {host} — this login lands on that machine, not in VibeSpace', { host: escHtml(hostLabel) })}">${t('Log in on {host}…', { host: escHtml(hostLabel) })}</button>` : '';
+      ? `<button class="acct-icon acct-menu" title="${t('More actions')}">${DOTS}</button>` : '';
     const globalRow = `<div class="acct-key-row${gDef ? ' is-default' : ''}" data-id="__codex_global__">
       <span class="acct-type-icon" title="${selectedHost ? t("This machine's own login — lives on {host}, not in VibeSpace", { host: escHtml(hostLabel) }) : t('The CLI’s own global login on this machine')}">${GLOBE}</span>
       <span class="acct-key-main"><span class="acct-key-name">${gName}</span><span class="acct-key-tail">${gIdent}</span></span>
@@ -368,7 +372,7 @@ export function installManageAgents(App, ctx = {}) {
         <span class="acct-usage-cell">${a.loggedIn ? usageHtml(this._codexAccountUsage?.[a.id]) : ''}</span>
         <span class="acct-key-actions">
           <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
-          <button class="acct-icon acct-menu" title="${t('More actions')}">${svg('<circle cx="3" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="13" cy="8" r="1.3" fill="currentColor" stroke="none"/>')}</button>
+          <button class="acct-icon acct-menu" title="${t('More actions')}">${DOTS}</button>
         </span></div>`;
     }).join('');
     const note = selectedHost
@@ -392,7 +396,7 @@ export function installManageAgents(App, ctx = {}) {
       if (!keyRow) return;
       const id = keyRow.dataset.id;
       if (id === '__codex_global__') {
-        if (e.target.closest('.acct-host-login')) {
+        const doHostLogin = async () => {
           // Runs ON the selected host — lands in ITS ~/.codex, not VibeSpace.
           // --device-auth: a plain `codex login` would open localhost:1455 on
           // the host, unreachable from the user's browser. Confirmed first —
@@ -405,6 +409,12 @@ export function installManageAgents(App, ctx = {}) {
           if (!okGo) return;
           this._watchHostLogin(selectedHost, hostLabel);
           run('codex login --device-auth');
+        };
+        if (e.target.closest('.acct-menu')) {
+          const r = e.target.closest('.acct-menu').getBoundingClientRect();
+          showContextMenu(r.left, r.bottom + 4, [
+            { label: t('Log in on {host}…', { host: hostLabel }), title: t('Opens a terminal ON {host} — this login lands on that machine, not in VibeSpace', { host: hostLabel }), action: doHostLogin },
+          ]);
         } else if (e.target.closest('.acct-def')) {
           try { await fetchJson('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: null, backend: 'codex' }) }); } catch {}
           refresh();
@@ -1099,6 +1109,7 @@ export function installManageAgents(App, ctx = {}) {
     const KEY = svg('<circle cx="5" cy="9" r="2.6"/><path d="M7.4 8.2 14 3M11.5 5.2l1.6 1.6M13 3.7l1.6 1.6"/>', 1.5);
     const STAR_F = svg('<path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 11.6 4.1 13.6l.8-4.3-3.1-3 4.3-.6z" fill="currentColor"/>');
     const STAR_O = svg('<path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 11.6 4.1 13.6l.8-4.3-3.1-3 4.3-.6z"/>');
+    const DOTS = svg('<circle cx="3" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="13" cy="8" r="1.3" fill="currentColor" stroke="none"/>');
     // Compact per-account usage readout — shared with the Codex roster.
     const usageHtml = (u) => this._acctUsageHtml(u);
     // Peer row: the SELECTED MACHINE's own global login. It's the default
@@ -1149,10 +1160,13 @@ export function installManageAgents(App, ctx = {}) {
             ? `<span class="ob-ok">${t('logged in')}</span> <span class="ob-ver">apiKeyHelper</span>`
             : `<span class="ob-warn">${t('not logged in')}</span>`)
         : `<span class="ob-warn">${t('unreachable')}</span>`;
-      gExtraActions = `<button class="agent-btn acct-host-refresh" title="${t('Confirm identity + quota of {host}’s own login (one on-demand read of its token — never scheduled)', { host: escHtml(hostLabel) })}">⟳</button>`
-        + `<button class="agent-btn acct-host-login" title="${t('Opens a terminal ON {host} — this login lands on that machine, not in VibeSpace', { host: escHtml(hostLabel) })}">${t('Log in on {host}…', { host: escHtml(hostLabel) })}</button>`
-        + (racct?.cliKey?.present && !importedTails.has(racct.cliKey.tail)
-            ? `<button class="agent-btn acct-host-import" title="${t('Copy the Console key found on {host} (…{tail}) into VibeSpace so any machine can use it', { host: escHtml(hostLabel), tail: escHtml(racct.cliKey.tail) })}">${t('Import its key')}</button>` : '');
+      // Column alignment (2.245.2, real screenshot regression): the inline
+      // text buttons (⟳ / Log in on host… / Import its key) made this row's
+      // .acct-key-actions a DIFFERENT width than the account rows' [★][⋯],
+      // shifting the right-anchored donut cluster per row (measured 26-150px).
+      // Every row now carries the same [★][⋯] pair — the host actions live
+      // in the ⋯ menu, exactly like the account rows' actions (2.178.0).
+      gExtraActions = `<button class="acct-icon acct-menu" title="${t('More actions')}">${DOTS}</button>`;
     } else {
       gName = t('CLI login');
       // Prefer the token-derived identity (actualEmail, baked by the quota ⟳
@@ -1276,7 +1290,7 @@ export function installManageAgents(App, ctx = {}) {
         })()}</span>
         <span class="acct-key-actions">
           <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
-          <button class="acct-icon acct-menu" title="${t('More actions')}">${svg('<circle cx="3" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="13" cy="8" r="1.3" fill="currentColor" stroke="none"/>')}</button>
+          <button class="acct-icon acct-menu" title="${t('More actions')}">${DOTS}</button>
         </span></div>`;
     }).join('');
     const note = selectedHost
@@ -1361,9 +1375,11 @@ export function installManageAgents(App, ctx = {}) {
       const keyRow = e.target.closest?.('.acct-key-row');
       if (!keyRow) return;
       const id = keyRow.dataset.id;
-      // The peer CLI-login row: default star + (host) login/import actions.
+      // The peer CLI-login row: default star + (host sections) a ⋯ menu —
+      // the host actions moved OFF the row into the menu in 2.245.2 so every
+      // row's actions column is the same [★][⋯] width (donut alignment).
       if (id === '__global__') {
-        if (e.target.closest('.acct-host-login')) {
+        const doHostLogin = async () => {
           // Runs ON the selected host (run() targets it) — lands in the
           // host's own ~/.claude, NOT in VibeSpace's store. That REPLACES
           // the machine's current login, which read too much like "add
@@ -1372,7 +1388,7 @@ export function installManageAgents(App, ctx = {}) {
           // save a not-yet-imported Console key on the host into VibeSpace
           // FIRST so the swap can't orphan it. The watcher then polls the
           // host's login state (read-only ssh probe) and brings the Agents
-          // surface back on THIS machine once the login lands.
+          // surface back once the login lands.
           const hasKey = racct?.cliKey?.present && !importedTails.has(racct.cliKey.tail);
           const okGo = await showConfirmDialog({
             title: t('Switch {host}’s own login?', { host: hostLabel }),
@@ -1389,21 +1405,33 @@ export function installManageAgents(App, ctx = {}) {
           }
           this._watchHostLogin(selectedHost, hostLabel);
           run('claude /login');
-        } else if (e.target.closest('.acct-host-refresh')) {
-          const btn = e.target.closest('.acct-host-refresh');
-          btn.disabled = true; btn.textContent = '…';
+        };
+        const doHostRefresh = async () => {
           try {
             const r = await fetchJson('/api/usage/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host: selectedHost }) });
             if (r?.error) showToast(r.error, { type: 'error', duration: 6000 });
             else if (r?.throttled) showToast(t('Refreshed less than a minute ago — try again shortly'), { type: 'error' });
           } catch { showToast(t('Refresh failed'), { type: 'error' }); }
           refresh();
-        } else if (e.target.closest('.acct-host-import')) {
+        };
+        const doHostImport = async () => {
           try {
             const r = await fetchJson('/api/accounts/import-cli-host', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hostId: selectedHost }) });
             if (r?.account) showToast(t('Imported: {name}', { name: r.account.name })); else showToast(r?.error || t('Import failed'), { type: 'error' });
           } catch { showToast(t('Import failed'), { type: 'error' }); }
           refresh();
+        };
+        if (e.target.closest('.acct-menu')) {
+          const r = e.target.closest('.acct-menu').getBoundingClientRect();
+          const items = [];
+          if ((this.settings.get('accounts.onDemandQuotaRefresh') || 'manual') !== 'off') {
+            items.push({ label: t('Refresh quota'), title: t('Confirm identity + quota of {host}’s own login (one on-demand read of its token — never scheduled)', { host: hostLabel }), action: doHostRefresh });
+          }
+          items.push({ label: t('Log in on {host}…', { host: hostLabel }), title: t('Opens a terminal ON {host} — this login lands on that machine, not in VibeSpace', { host: hostLabel }), action: doHostLogin });
+          if (racct?.cliKey?.present && !importedTails.has(racct.cliKey.tail)) {
+            items.push({ label: t('Import its key'), title: t('Copy the Console key found on {host} (…{tail}) into VibeSpace so any machine can use it', { host: hostLabel, tail: racct.cliKey.tail }), action: doHostImport });
+          }
+          showContextMenu(r.left, r.bottom + 4, items);
         } else if (e.target.closest('.acct-def')) {
           try { await fetchJson('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: null }) }); } catch {}
           refresh();

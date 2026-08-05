@@ -388,7 +388,10 @@ export function showContextMenu(x, y, items, className = 'context-menu') {
       for (const child of item.children) {
         const ce = document.createElement('div');
         ce.className = className + '-item' + (child.disabled ? ' disabled' : '');
-        ce.textContent = child.label;
+        // labelHtml: see the top-level item note below — callers MUST escHtml
+        // every interpolated string.
+        if (child.labelHtml != null) ce.innerHTML = child.labelHtml;
+        else ce.textContent = child.label;
         if (child.style) ce.style.cssText = child.style;
         if (child.title) ce.title = child.title;
         // disabled children must not fire (this was silently ignored — a
@@ -421,7 +424,15 @@ export function showContextMenu(x, y, items, className = 'context-menu') {
         showSub();
       });
     } else {
-      el.textContent = item.label;
+      // OPT-IN rich label (2.245.2): `labelHtml` renders via innerHTML for
+      // rows that need styled fragments (e.g. the billing switcher's
+      // water-level-colored quota percentages). ⚠ SECURITY: the caller MUST
+      // escHtml() EVERY interpolated string (names, emails, hosts, reasons —
+      // anything user/peer-controlled). Only our own code sets labelHtml;
+      // NEVER pass through strings from a remote payload unescaped. Plain
+      // `label` stays textContent (no escaping needed) — prefer it.
+      if (item.labelHtml != null) el.innerHTML = item.labelHtml;
+      else el.textContent = item.label;
       if (item.title) el.title = item.title; // esp. WHY a disabled item is disabled
       if (item.disabled) { el.style.opacity = '0.4'; el.style.cursor = 'default'; }
       else el.onclick = () => { pop.remove(); item.action(); };

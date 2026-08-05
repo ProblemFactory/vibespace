@@ -2259,4 +2259,5 @@ export default {
   'This makes ONE non-billable request to Anthropic’s usage endpoint per signed-in account/machine, each with that identity’s own login token — the same call the CLI makes when you run /usage. It only ever fires when you click (never on a timer) and is throttled to ≥60s per target. This notice is shown once.': 'ログイン済みの各アカウント/マシンごとに、その身元自身のログイントークンで Anthropic の使用量エンドポイントへ課金されないリクエストを1回ずつ送ります — CLI で /usage を実行したときと同じ呼び出しです。クリック時のみ発火し（タイマーでは決して実行されません）、ターゲットごとに60秒以上の間隔が保たれます。この通知は一度だけ表示されます。',
   'Nothing to refresh — no signed-in accounts or machines': '更新対象がありません — ログイン済みのアカウントやマシンがありません',
   'Full overview →': '全体ビュー →',
+  'Refresh quota': 'クォータを更新',
 };

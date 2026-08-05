@@ -3,7 +3,7 @@ import { ChatView } from './chat-view.js';
 import { track, metric } from './telemetry-client.js';
 import { t } from './i18n.js';
 import { TerminalSession } from './terminal.js';
-import { fetchJson, showConfirmDialog, showContextMenu, showToast, stripCwdHostLabel } from './utils.js';
+import { escHtml, fetchJson, showConfirmDialog, showContextMenu, showToast, stripCwdHostLabel } from './utils.js';
 
 export function installSessionLifecycle(App, ctx = {}) {
   Object.assign(App.prototype, {
@@ -812,18 +812,28 @@ export function installSessionLifecycle(App, ctx = {}) {
     // 'subscription' = accounts.resolveForSpawn's force-the-CLI's-own-login
     // sentinel (a bare '' would fall through to the default account). For a
     // remote session that login lives on the HOST — say so.
-    // Per-row usage PREVIEW (2.245.1, user request): remaining quota + data
-    // age inline in the switcher, same per-row source rule as the Agents
-    // overview (host-login → machine quota, host-held → hostAccounts cache,
-    // else the local passive cache). Text-only — menu rows are plain labels.
+    // Per-row usage PREVIEW (2.245.1; scoped buckets + water-level colors
+    // 2.245.2, user request): remaining quota + data age inline in the
+    // switcher, same per-row source rule as the Agents overview (host-login →
+    // machine quota, host-held → hostAccounts cache, else the local passive
+    // cache). Rendered via showContextMenu's OPT-IN labelHtml — every
+    // interpolated string below is escHtml'd (labelHtml contract); the
+    // percentage spans carry the same >95 red / >80 amber / green scheme as
+    // the roster donuts.
     const pctOf = (x) => (x == null ? null : Math.min(100, Math.round(x.usedPercent ?? ((x.utilization || 0) * 100))));
+    const wlColor = (p) => (p > 95 ? 'var(--red,#e55)' : p > 80 ? 'var(--yellow,#e5c07b)' : 'var(--green,#3fb950)');
+    const pctHtml = (p) => (p == null ? '?' : `<span style="color:${wlColor(p)}">${p}%</span>`);
     const usageHint = (u) => {
       if (!u) return '';
       const f = pctOf(u.fiveHour), s7 = pctOf(u.sevenDay);
-      if (f == null && s7 == null) return '';
+      // Scoped buckets (e.g. the Fable weekly cap) — same 2-char short label
+      // as the roster donuts ('Fa 41%').
+      const scoped = (u.scopedWeekly || []).map((sc) => [String(sc.name || '?').slice(0, 2), pctOf(sc)]).filter(([, p]) => p != null);
+      if (f == null && s7 == null && !scoped.length) return '';
       const age = u.fetchedAt ? Math.round((Date.now() - u.fetchedAt) / 60000) : null;
-      const ageTxt = age != null && age > 5 ? ' · ' + (age < 100 ? t('{n}m', { n: age }) : t('{n}h', { n: Math.round(age / 60) })) : '';
-      return ` — 5h ${f == null ? '?' : f + '%'} · 7d ${s7 == null ? '?' : s7 + '%'}${ageTxt}`;
+      const ageTxt = age != null && age > 5 ? ' · ' + escHtml(age < 100 ? t('{n}m', { n: age }) : t('{n}h', { n: Math.round(age / 60) })) : '';
+      const parts = [`5h ${pctHtml(f)}`, `7d ${pctHtml(s7)}`, ...scoped.map(([l, p]) => `${escHtml(l)} ${pctHtml(p)}`)];
+      return ` — ${parts.join(' · ')}${ageTxt}`;
     };
     const usageFor = (a) => {
       const v = vOf(a);
@@ -839,7 +849,9 @@ export function installSessionLifecycle(App, ctx = {}) {
     // looks like it should work but "does nothing".
     const helperActive = live?.auth?.source === 'api-other' && live?.auth?.detail === 'apiKeyHelper';
     items.push({
-      label: (currentId === null ? '✓ ' : '') + cliLabel + (helperActive ? ' · apiKeyHelper (API)' : '')
+      // labelHtml contract: every text part escHtml'd; only the usageHint
+      // spans carry markup (see utils.showContextMenu).
+      labelHtml: escHtml((currentId === null ? '✓ ' : '') + cliLabel + (helperActive ? ' · apiKeyHelper (API)' : ''))
         + usageHint(rHostId ? this._hostOwnUsage?.[rHostId] : this._rateLimit),
       action: () => { if (currentId !== null) doSwitch('subscription', cliLabel); },
     });
@@ -863,7 +875,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       // instead of "CLI login @ host" (natural's sixth incident: a successful
       // linked switch READ as failed because the identity degraded to the
       // sentinel). The old client-side sentinel mapping predates the rescue.
-      items.push({ label: (cur ? '✓ ' : '') + a.name + suffix + usageHint(usageFor(a)), action: () => { if (!cur) doSwitch(a.id, a.name); } });
+      items.push({ labelHtml: escHtml((cur ? '✓ ' : '') + a.name + suffix) + usageHint(usageFor(a)), action: () => { if (!cur) doSwitch(a.id, a.name); } });
     }
     let menuEl;
     if (anchor && typeof anchor.getBoundingClientRect === 'function') {

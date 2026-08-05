@@ -2259,4 +2259,5 @@ export default {
   'This makes ONE non-billable request to Anthropic’s usage endpoint per signed-in account/machine, each with that identity’s own login token — the same call the CLI makes when you run /usage. It only ever fires when you click (never on a timer) and is throttled to ≥60s per target. This notice is shown once.': '这会为每个已登录的账号/机器向 Anthropic 的用量端点各发一次不计费请求，均使用该身份自己的登录 token——与在 CLI 里运行 /usage 的调用相同。只在你点击时发起（绝不定时），每个目标至少间隔 60 秒。本提示只显示一次。',
   'Nothing to refresh — no signed-in accounts or machines': '没有可刷新的对象——无已登录账号或机器',
   'Full overview →': '完整总览 →',
+  'Refresh quota': '刷新配额',
 };
