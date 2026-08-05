@@ -135,6 +135,7 @@ function recordSample(mem, cores) {
       t: pt.t, l: pt.l,
       m: Math.max(...win.map((x) => x.m), 0),
       c: cs.length ? Math.round(cs.reduce((a, b) => a + b, 0) / cs.length * 100) / 100 : null,
+      e: Math.max(...win.map((x) => x.e || 0), 0), // worst loop lag in the window (B-bb68)
     });
     if (_hist.coarse.length > COARSE_MAX) _hist.coarse.splice(0, _hist.coarse.length - COARSE_MAX);
     _lastCoarseAt = pt.t;

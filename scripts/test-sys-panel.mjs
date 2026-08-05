@@ -45,7 +45,7 @@ const st1 = await evalJs(`(() => ({
   chips: document.querySelectorAll('.sys-range-chip').length,
   bars: document.querySelectorAll('.sys-bar').length,
 }))()`);
-check('hist markup built (2 canvases)', st1.canvases === 2);
+check('hist markup built (3 canvases)', st1.canvases === 3); // mem/cpu/loop-lag (2.243.0)
 check('2 Chart instances live', st1.charts === 2);
 check('3 range chips', st1.chips === 3);
 check('live zone rendered (bars>0)', st1.bars > 0);

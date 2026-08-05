@@ -2245,4 +2245,5 @@ export default {
   "“{name}” never finished signing in — complete its login in Manage agents first.": "「{name}」はサインインが完了していません——先に「エージェント管理」でログインを完了してください。",
   "Capturing…": "キャプチャ中…",
   "Capture failed ({err}) — the server may be busy or restarting. Try again in a moment.": "キャプチャに失敗しました（{err}）——サーバーがビジー中か再起動中の可能性があります。少し待って再試行してください。",
+  'Loop lag': 'ループ遅延',
 };
