@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.244.2
+
+- **Case closed on "Test shows the wrong account" — the billing was correct, the CLI's display was not** (verified forensically: the Test spawn refreshed the HELD dir's token two seconds after start — proof it authenticated as the held account — while the machine's own credential store sat untouched): claude reads its `/status` Organization/Email from the non-relocated `~/.claude.json`, so a host-held login shows the MACHINE's identity while the TOKEN (= what's billed) is the held account's. The Test now shows a banner saying exactly that before the user reads /status.
+- **Agent hooks register with an ABSOLUTE node path** (natural's Novita: "SessionStart hook error — /bin/sh: 1: node: not found"): hooks run as claude children via /bin/sh with claude's PATH — hosts with nvm-style node installs (and claude as a native binary) have no `node` there. Both the remote register and the local registration now use the registering process's own `process.execPath`; existing entries self-heal at the next spawn/boot (the register updates a changed command in place).
+
 ## 2.244.1
 
 - **Account rows say "logged in on Novita-H200", not "logged in on host-9835dc80"**: the roster resolved host display names through the sidebar's hosts cache, which is empty until the Remote tab loads — raw host ids leaked into the chips on fresh pages. `/api/accounts` now ships a `hostNames` map (the server always knows them) and the chips read it first.

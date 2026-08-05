@@ -2384,7 +2384,12 @@ import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 const UNINSTALL = process.argv.includes('--uninstall');
-const hookCmd = 'node ' + join(dirname(fileURLToPath(import.meta.url)), 'vibespace-hook.mjs');
+// ABSOLUTE interpreter (2.244.2, natural's Novita: hook error '/bin/sh: 1:
+// node: not found'): hooks run as claude children via /bin/sh with claude's
+// PATH — hosts with nvm-style node installs (and claude as a native binary)
+// have NO node on that PATH. The register itself runs under node, so its own
+// process.execPath is an interpreter that provably exists on this machine.
+const hookCmd = JSON.stringify(process.execPath) + ' ' + join(dirname(fileURLToPath(import.meta.url)), 'vibespace-hook.mjs');
 const files = [
   { f: join(homedir(), '.claude', 'settings.json'), create: false, EVENTS: ['SessionStart', 'UserPromptSubmit', 'Stop'] },
   { f: join(homedir(), '.codex', 'hooks.json'), create: true, EVENTS: ['SessionStart', 'UserPromptSubmit'] },
@@ -2505,7 +2510,7 @@ function classifyCliDeath(tail, code) {
   return null;
 }
 function agentHooksStatus() {
-  const hookCmd = `node ${HOOK_CMD}`;
+  const hookCmd = `${JSON.stringify(process.execPath)} ${HOOK_CMD}`; // absolute interpreter (2.244.2 — see the register template note)
   const out = { hookPath: HOOK_CMD, optedOut: fs.existsSync(HOOK_OPTOUT_FILE) };
   for (const [key, def] of Object.entries(HOOK_FILES)) {
     const file = def.file();
@@ -2545,7 +2550,7 @@ function hookRegistrationSafe() {
 // auto=true (startup): respect the opt-out marker. auto=false (explicit Install
 // from the UI): always register + clear the marker.
 function ensureAgentHooks({ auto = false } = {}) {
-  const hookCmd = `node ${HOOK_CMD}`;
+  const hookCmd = `${JSON.stringify(process.execPath)} ${HOOK_CMD}`; // absolute interpreter (2.244.2 — see the register template note)
   if (!hookRegistrationSafe()) { console.log('Agent-hook registration skipped (throwaway/temp server root)'); return { skipped: true }; }
   if (auto && fs.existsSync(HOOK_OPTOUT_FILE)) return { optedOut: true };
   if (!auto) { try { fs.rmSync(HOOK_OPTOUT_FILE, { force: true }); } catch {} }
