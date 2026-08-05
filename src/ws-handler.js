@@ -449,7 +449,7 @@ function registerWsHandler(wss, ctx) {
                   // mismatches the account is refused loudly instead of
                   // billing whoever's creds sit in it.
                   const rs = await hosts.accountsStatus(data.hostId);
-                  const facts = { ...rs, transport: hosts.get(data.hostId)?.transport === 'dial' ? 'dial' : 'ssh' };
+                  const facts = { ...rs, hostId: data.hostId, transport: hosts.get(data.hostId)?.transport === 'dial' ? 'dial' : 'ssh' };
                   const v = accounts.evaluateOnHost(accounts.get(data.accountId), facts, {});
                   if (v.reason === 'held-identity-mismatch') {
                     ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: `Account error: the login held on the host for this account actually belongs to ${v.dirEmail} — re-run "Log in on host as this account" to fix it` }));
@@ -506,7 +506,7 @@ function registerWsHandler(wss, ctx) {
                   // switch — the 2.114.1 class — and a stale match billed
                   // the machine's ACTUAL new login under the picked badge).
                   const rs = await hosts.accountsStatus(data.hostId);
-                  const facts = { ...rs, transport: hosts.get(data.hostId)?.transport === 'dial' ? 'dial' : 'ssh' };
+                  const facts = { ...rs, hostId: data.hostId, transport: hosts.get(data.hostId)?.transport === 'dial' ? 'dial' : 'ssh' };
                   const v = accounts.evaluateOnHost(accounts.get(spawnAccount.id), facts, {});
                   if (v.reason === 'held-identity-mismatch') {
                     ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: `Account error: the login held on the host for this account actually belongs to ${v.dirEmail} — re-run "Log in on host as this account" to fix it` }));
