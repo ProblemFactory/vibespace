@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.240.0
+
+Three fixes from the second field incident (`inc-msfx2fdt-3rbn`, "无法切号" + a hanging Capture button):
+
+- **The billing switcher no longer offers a subscription that never finished signing in.** The user's real blocker: a freshly added account whose OAuth login was never completed (empty creds dir) was pickable (the ship opt-in bypassed the remote gate), so the switch failed at spawn with "subscription not logged in" — and the doomed pick was already persisted as the conversation's on-resume account, breaking every later resume too. Such accounts now render disabled with the honest reason ("never finished signing in — complete its login in Manage agents first"), on local and remote sessions alike.
+- **Switch-billing waits for the session to actually EXIT before resuming.** The old flow killed the session and blind-fired the resume 900ms later — a REMOTE session's teardown takes seconds (9s in the captured timeline), so the resume ran while the old session still lived and the duplicate-window guard swallowed it silently: the window just died with no restart, twice, before a third attempt happened to land. Now the resume triggers on the session's `exited` event (+400ms transcript-flush grace, 15s fallback so a lost event can't strand the switch).
+- **The Capture button shows progress and failure inline.** The first field click happened mid-server-restart (the user's own in-app update): the request died, the failure toast went unseen, and the dialog looked frozen. The button now reads "Capturing…" while in flight and a failed attempt puts an explanation line inside the dialog.
+
 ## 2.239.2
 
 - **Billing switcher no longer greys out every subscription on a fresh page** (diagnosed from the panic button's FIRST real field capture, `inc-msfwgfpd-tlhn` — "不给换号": the action ring showed two badge clicks with no menu interaction and zero errors). `hostSubHeld`/`hostLinked` read per-page caches that only a Manage-Agents visit or a usage ⟳ populated — so right after a reload, accounts whose logins are held ON the host (or ARE the host's own login) rendered disabled with the "can't ship" explanation. The switcher now probes the host's account status itself (the same read-only `accounts-status` probe Manage Agents uses, once per host per page, warmed eagerly on open) and REBUILDS the open menu in place when the answer lands, so the rows un-grey in front of the user.

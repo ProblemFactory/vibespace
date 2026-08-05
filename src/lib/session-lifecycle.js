@@ -686,7 +686,18 @@ export function installSessionLifecycle(App, ctx = {}) {
         // webui id went stale across a restart (2.179.0 — a no-op'd kill here
         // followed by the resume double-wrote the same claude id)
         this.ws.send({ type: 'kill', sessionId: live.webuiId, backendSessionId });
-        setTimeout(finish, 900); // let the CLI flush its transcript before --resume
+        // Wait for the ACTUAL exited event, not a fixed delay (2.240.0,
+        // natural's incident timeline: a REMOTE session's teardown took ~9s —
+        // the old 900ms fire let resume run while the session still lived,
+        // where the duplicate-window guard swallowed it silently; the window
+        // just died with no restart, twice, before a third attempt landed).
+        let done = false;
+        const go = () => { if (done) return; done = true; this.ws.offGlobal(onExit); finish(); };
+        const onExit = (msg) => {
+          if (msg.type === 'exited' && msg.sessionId === live.webuiId) setTimeout(go, 400); // let the CLI flush its transcript
+        };
+        this.ws.onGlobal(onExit);
+        setTimeout(go, 15000); // fallback: a lost exited must not strand the switch
       } else finish();
     };
     // Remote sessions can't take every account: subscriptions never ship to
@@ -713,9 +724,17 @@ export function installSessionLifecycle(App, ctx = {}) {
     // Manage-Agents visit to that machine; the server re-verifies at spawn.
     const hostSubHeld = (a) => !isCodex && rHostId && (this._hostSubsKnown?.[rHostId] || []).includes(a.id);
     const subBlock = (a) => {
-      if (!rHostId) return null;
       const isSub = isCodex || (a.type || 'api') === 'subscription';
       if (!isSub) return null; // API keys always ship
+      // NEVER-SIGNED-IN sub (2.240.0, natural's inc-msfx2fdt-3rbn): an
+      // account added but whose OAuth login was never completed has no
+      // usable credentials ANYWHERE — offering it fail-lates at spawn with
+      // "subscription not logged in" and poisons the session's on-resume
+      // config. Say the real reason instead of the ship explanation.
+      if (!a.loggedIn && !(rHostId && (hostLinked(a) || hostSubHeld(a)))) {
+        return t('“{name}” never finished signing in — complete its login in Manage agents first.', { name: a.name });
+      }
+      if (!rHostId) return null;
       if (hostLinked(a)) return null; // = the host's own login — usable directly
       if (hostSubHeld(a)) return null; // has its own login held ON the host
       if (rTransport === 'dial') return t('Subscription logins can’t ship to a paired device — log in on the device, or use an API-key account');
