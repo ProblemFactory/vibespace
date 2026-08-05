@@ -70,5 +70,60 @@ fs.writeFileSync(path.join(metaDir, 'cw-99-test.json'), JSON.stringify({ session
 check('frozen copy survives the original being clobbered',
   JSON.parse(fs.readFileSync(path.join(dir2, 'frozen', 'session-meta', 'cw-99-test.json'), 'utf8')).name === 'frozen probe');
 check('pending marker cleared after freeze', !fs.existsSync(path.join(dir2, 'env.json.pending')));
+
+// ── 2.239.1: the dialog must actually render its submit button (the boss's
+// "怎么提交" screenshot — shell.footer was undefined, appendChild threw, no
+// button). Drive the REAL dialog in headless chrome and click through it.
+const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
+if (CHROME) {
+  const { spawn: sp } = await import('node:child_process');
+  const { createRequire } = await import('node:module');
+  const WebSocket = createRequire(import.meta.url)('ws');
+  const chrome = sp(CHROME, ['--headless=new', '--remote-debugging-port=9341', '--no-first-run', '--disable-gpu', '--user-data-dir=/tmp/vs-inc-chrome', 'about:blank'], { stdio: 'ignore' });
+  process.on('exit', () => { try { chrome.kill('SIGKILL'); } catch {}; try { fs.rmSync('/tmp/vs-inc-chrome', { recursive: true, force: true }); } catch {} });
+  let target = null;
+  for (let i = 0; i < 40 && !target; i++) {
+    try { target = (await (await fetch('http://127.0.0.1:9341/json')).json()).find((x) => x.type === 'page'); } catch { await sleep(250); }
+  }
+  const cws = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
+  await new Promise((r) => cws.on('open', r));
+  let seq = 0; const pend = new Map();
+  cws.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); } });
+  const cdp = (method, params = {}) => new Promise((res) => { const id = ++seq; pend.set(id, res); cws.send(JSON.stringify({ id, method, params })); });
+  const evaljs = async (expr) => {
+    const rr = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true });
+    if (rr.result?.exceptionDetails) throw new Error(JSON.stringify(rr.result.exceptionDetails).slice(0, 300));
+    return rr.result?.result?.value;
+  };
+  await cdp('Page.enable');
+  await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+  for (let i = 0; i < 60; i++) { if (await evaljs('!!(window.app && window.app.captureIncident)').catch(() => false)) break; await sleep(400); }
+  const ui = await evaljs(`(async () => {
+    window.app.captureIncident();
+    await new Promise((r) => setTimeout(r, 300));
+    // scope to the NEWEST overlay — a fresh instance also shows the
+    // onboarding dialog, and document-order querySelector grabs that one
+    const ovs = document.querySelectorAll('.dialog-overlay');
+    const ov = ovs[ovs.length - 1];
+    const btn = ov?.querySelector('.dialog-actions .btn-create');
+    const ta = ov?.querySelector('.dialog-body textarea');
+    if (!btn || !ta) return { ok: false, btn: !!btn, ta: !!ta };
+    ta.value = 'ui e2e note';
+    btn.click();
+    for (let i = 0; i < 40; i++) {
+      await new Promise((r) => setTimeout(r, 250));
+      const idEl = ov?.querySelector('.dialog-body .mono');
+      if (idEl && /^inc-/.test(idEl.textContent.trim())) return { ok: true, id: idEl.textContent.trim() };
+    }
+    return { ok: false, stuck: document.querySelector('.dialog-body')?.textContent?.slice(0, 120) };
+  })()`);
+  check('dialog renders the Capture button AND click-through yields an inc- id', ui?.ok === true, JSON.stringify(ui));
+  if (ui?.ok) {
+    const b2 = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'incidents', ui.id, 'bundle.json'), 'utf8'));
+    check('UI-driven capture wrote the note from the textarea', b2.note === 'ui e2e note');
+  }
+  cws.close();
+} else console.log('  (chrome absent — dialog render check skipped)');
+
 console.log(failed === 0 ? 'ALL PASS' : `${failed} FAILED`);
 process.exit(failed ? 1 : 0);

@@ -127,7 +127,14 @@ export function installIncidentRecorder(app) {
     const btn = document.createElement('button');
     btn.className = 'btn-create';
     btn.textContent = t('Capture now');
-    shell.footer.appendChild(btn);
+    // createModalShell has NO .footer (2.239.1, the boss's "怎么提交"
+    // screenshot: the button silently never rendered — shell.footer was
+    // undefined and the appendChild threw). Build the actions row ourselves,
+    // the same .dialog-actions convention every other dialog uses.
+    const actions = document.createElement('div');
+    actions.className = 'dialog-actions';
+    actions.appendChild(btn);
+    body.appendChild(actions);
     btn.onclick = async () => {
       btn.disabled = true;
       const r = await fetchJson('/api/incident', {
