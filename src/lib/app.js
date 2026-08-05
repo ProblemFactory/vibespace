@@ -1805,8 +1805,15 @@ class App {
       const srv = r?.version;
       if (!srv || srv === BUILD_VERSION) return;
       const key = 'vibespace.reloaded-for.' + srv;
-      if (localStorage.getItem(key)) return;
-      localStorage.setItem(key, String(Date.now()));
+      // PER-TAB, not per-origin (2.240.3, natural's "updated but still broken"
+      // marathon): localStorage is shared across every tab of the origin, so
+      // the FIRST tab to reload burned the once-per-version key and every
+      // OTHER stale tab never auto-reloaded — it kept its old bundle and
+      // silently misbehaved against the new server, looking exactly like
+      // "the fix didn't work". sessionStorage is per-tab and survives the
+      // reload within it, preserving the anti-loop property where it matters.
+      if (sessionStorage.getItem(key)) return;
+      sessionStorage.setItem(key, String(Date.now()));
       try { track('event', 'stale-bundle-reload', BUILD_VERSION + ' -> ' + srv); } catch { }
       showToast(t('VibeSpace was updated — reloading this tab…'));
       setTimeout(() => location.reload(), 800);

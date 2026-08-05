@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.240.3
+
+- **Every stale tab now auto-reloads after a server update, not just the first one** (the mechanism behind "updated but still broken": the stale-bundle guard's once-per-version reload key lived in localStorage, which is shared across ALL tabs of the origin — the first tab to reload burned the key and every other open tab silently kept its old bundle against the new server, reproducing already-fixed bugs and eating clicks without a trace). The key moved to sessionStorage: per-tab, survives the reload within the tab, same anti-loop protection where it actually matters.
+
 ## 2.240.2
 
 - **Picking a LINKED account in the billing switcher actually works now** (fourth field incident: the pick "never reached the create path" — the New Session dialog and the Manage-Agents Test button both map an account that IS the host's own machine login onto the CLI-login sentinel, but the switcher passed the raw account id, which the server refused as "subscription not logged in" since a linked account has no local creds dir by design). Two-sided: the switcher maps linked picks to the sentinel like every other surface, and the server's create-rescue gains an EMAIL-LINKED branch — when the picked account's email matches the host's own machine login, the spawn proceeds on the host's own login directly (zero creds ship), so even a stale client that passes the raw id succeeds.
