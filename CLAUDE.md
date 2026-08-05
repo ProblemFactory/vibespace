@@ -639,6 +639,7 @@ Read/Write tool output uses highlight.js for syntax highlighting with line numbe
 ### 15. Frontend Optimization
 - **Minification**: esbuild `--minify` flag (2.5MB → 1.4MB)
 - **Gzip compression**: `compression` middleware on all Express responses (1.4MB → ~420KB over the wire, 83% total reduction)
+- **Stale-tab auto-reload is PER-TAB (2.240.3, do not regress)**: the `_checkBundleFreshness` once-per-version reload key MUST live in sessionStorage — localStorage is origin-shared, so the first tab to reload burned the key and every OTHER open tab silently kept its old bundle against the new server (natural's "updated but still broken" marathon: server logs showed ZERO requests for his clicks — the diagnostic tell for this whole class). Field heuristic: user swears an action does nothing + server logs show no corresponding request ⇒ suspect a stale tab BEFORE suspecting the feature.
 - **Cache-busting**: `index.html` is served by a route (not static) that injects `?v=<mtime>` onto every local `js`/`css` asset URL and sets `Cache-Control: no-cache`, so a changed bundle/CSS always gets a fresh fetch. Browsers serve unversioned `<script>`/`<link>` from memory cache on a soft reload without revalidating — users were stuck on a stale bundle after an update until a hard refresh; versioning the URL fixes that permanently. Other static files keep `maxAge=0` + etag.
 
 ### 16. Full-UI i18n (en/zh/ja, 2.51.0)
