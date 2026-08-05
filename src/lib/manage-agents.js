@@ -1252,8 +1252,12 @@ export function installManageAgents(App, ctx = {}) {
         // A not-logged-in subscription can't spawn — the server would
         // reject the create and leave a blank window. Guard it here.
         // EXCEPT host-held logins (2.203.0): the LOCAL dir is empty by
-        // design; the spawn resolves against the host-side dir.
-        if (isSub && !a.loggedIn && !keyRow.dataset.hostsub && !linkedHere) {
+        // design; the spawn resolves against the host-side dir. And EXCEPT
+        // any remote test at all (2.243.2, natural's "still says not signed
+        // in"): dataset.hostsub/linked come from page caches that start COLD —
+        // with a host selected the server resolves against live host facts
+        // and errors honestly, so the client must not veto on stale data.
+        if (isSub && !a.loggedIn && !selectedHost && !keyRow.dataset.hostsub && !linkedHere) {
           showToast(t('This subscription isn’t signed in yet — use “Add subscription…” to finish the login first.'), { type: 'error' });
           return;
         }

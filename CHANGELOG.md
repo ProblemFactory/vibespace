@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.243.2
+
+- **A rotated machine login can no longer silently bill the wrong account** (natural's screenshot: the Test window's badge said ClaudeLu while `/status` inside showed the machine's new login): the server's email-linked mapping trusts the host's `.claude.json` config email, which goes STALE right after a `/login` switch (the 2.114.1 identity class) — a stale match mapped the spawn onto whatever token the machine actually holds NOW. The host-held creds dir (deterministically the named account) now takes precedence over the email-linked mapping in the explicit-account path, matching the rescue path's existing order.
+- **Remote account Test no longer vetoes on cold page caches** ("still says not signed in"): with a host selected, the client guard let stale hostsub/linked flags block the test — the server resolves against live host facts and errors honestly, so the client now only blocks local tests of never-signed-in accounts.
+
 ## 2.243.1
 
 - **Manage Agents "Test" now tests the account it says it tests** (natural's inc-msghecvm-5ym8: "Test ClaudeLu" showed a DIFFERENT account signed in): the client mapped a linked account onto the CLI-login sentinel, which spawns on the host's CURRENT machine login — and that login had been switched to another account since the client's cache. Test now always sends the real account id; the server resolves it against live host facts (email-linked → host login only when the emails match NOW; host-held dir → that dir), so a rotated machine login can no longer impersonate the account under test. Fifth surface of the client-side-verdict class — the switcher got the same treatment in 2.241.0.
