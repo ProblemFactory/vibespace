@@ -363,8 +363,16 @@ const _onDemandUsageAt = {};
 // usage-cache/host-<id>.json by the on-demand ⟳ (read-only remote token —
 // never refreshed, §ban-safety; no scheduler anywhere near this).
 const _hostUsage = {};
+// Host-HELD account quota snapshots (2.245.0): '<hostId>:<acctId>' → snapshot,
+// persisted as usage-cache/host-<hostId>-<acctId>.json. Account ids are
+// strictly sub-[\w-]+ (validated at write), so the host-account pattern is
+// checked FIRST — the plain host pattern would otherwise swallow these files
+// and pollute _hostUsage with bogus host keys.
+const _hostAcctUsage = {};
 try {
   for (const f of fs.readdirSync(USAGE_CACHE_DIR)) {
+    const ma = /^host-([\w-]+)-(sub-[\w-]+)\.json$/.exec(f);
+    if (ma) { try { _hostAcctUsage[ma[1] + ':' + ma[2]] = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, f), 'utf-8')); } catch {} continue; }
     const m = /^host-([\w-]+)\.json$/.exec(f);
     if (m) { try { _hostUsage[m[1]] = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, f), 'utf-8')); } catch {} }
   }
@@ -401,6 +409,39 @@ app.post('/api/usage/refresh', (req, res) => {
   if (req.body?.host && hosts) {
     const hid = String(req.body.host);
     if (Date.now() < _rateLimitBackoffUntil) return res.json({ throttled: true, reason: 'backoff' });
+    // Host-HELD account variant (2.245.0): {host, account} together — read the
+    // account's OWN creds dir on the host (~/.vibespace/subs/<id>; READ-ONLY,
+    // never refreshed — same §ban-safety class as the machine-login peek
+    // below) and make the same single human-gated call with that token.
+    if (req.body.account) {
+      const aid = String(req.body.account);
+      if (!/^sub-[\w-]{1,40}$/.test(aid)) return res.status(400).json({ error: 'bad account id' });
+      const tkey = 'host:' + hid + ':' + aid;
+      if (Date.now() - (_onDemandUsageAt[tkey] || 0) < 60000) return res.json({ throttled: true });
+      let hMeta2; try { hMeta2 = hosts.get(hid); } catch { return res.status(404).json({ error: 'unknown host' }); }
+      const acctMeta2 = (accounts.list().accounts || []).find((x) => x.id === aid);
+      if (!acctMeta2) return res.status(404).json({ error: 'unknown account' });
+      _onDemandUsageAt[tkey] = Date.now();
+      hosts.readRemoteSubOAuth(hid, aid).then((token) => {
+        if (!token) return res.json({ error: 'no currently-valid login for this account on the host — run a session on it there first' });
+        _fetchOAuthUsage(token, (u) => {
+          if (!u) return res.json({ error: 'refresh failed (rate-limited or offline) — kept last-known' });
+          u.source = 'on-demand';
+          u.scopedFetchedAt = Date.now();
+          _fetchOAuthRoles(token, (org) => {
+            if (org) Object.assign(u, org);
+            _hostAcctUsage[hid + ':' + aid] = { ...u, name: acctMeta2.name, email: acctMeta2.email };
+            try {
+              fs.mkdirSync(USAGE_CACHE_DIR, { recursive: true });
+              const f = path.join(USAGE_CACHE_DIR, 'host-' + hid.replace(/[^\w-]/g, '_') + '-' + aid + '.json');
+              fs.writeFileSync(f + '.tmp', JSON.stringify(_hostAcctUsage[hid + ':' + aid])); fs.renameSync(f + '.tmp', f);
+            } catch {}
+            res.json({ success: true });
+          });
+        });
+      }).catch((e) => res.json({ error: String(e.message || e).slice(0, 160) }));
+      return;
+    }
     if (Date.now() - (_onDemandUsageAt['host:' + hid] || 0) < 60000) return res.json({ throttled: true });
     let hMeta; try { hMeta = hosts.get(hid); } catch { return res.status(404).json({ error: 'unknown host' }); }
     _onDemandUsageAt['host:' + hid] = Date.now();
@@ -689,6 +730,9 @@ app.get('/api/usage', (req, res) => {
         return out;
       } catch { return _hostUsage; }
     })(),
+    // Host-HELD account quota snapshots (2.245.0, on-demand ⟳ only), keyed
+    // '<hostId>:<accountId>' — the Agents machine sections' per-row usage
+    hostAccounts: _hostAcctUsage,
   });
 });
 

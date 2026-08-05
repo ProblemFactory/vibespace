@@ -35,18 +35,10 @@ export function installUsageMeter(App, ctx = {}) {
     });
     // Account switcher chips (popup re-renders every poll → delegate)
     popup.addEventListener('click', (e) => {
-      const hbtn = e.target.closest('.usage-host-refresh');
-      if (hbtn) {
-        e.stopPropagation();
-        hbtn.classList.add('usage-refresh-spin');
-        fetchJson('/api/usage/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host: hbtn.dataset.host }) })
-          .then(async (r) => {
-            if (r?.error) showToast(r.error, { type: 'error' });
-            const data = await fetchJson('/api/usage');
-            if (data) { this._applyUsage(data); this._renderUsage(); }
-          });
-        return;
-      }
+      // "Full overview" → the Agents machine-sectioned account+quota center
+      // (2.245.0 — the popup's Remote-hosts section moved there).
+      const ov = e.target.closest('.usage-overview-link');
+      if (ov) { e.stopPropagation(); popup.classList.add('hidden'); this._showAgentsDialog(); return; }
       const rbtn = e.target.closest('.usage-refresh-btn');
       if (rbtn) { e.stopPropagation(); this._refreshQuotaOnDemand(rbtn); return; }
       const chip = e.target.closest('.usage-acct-chip');
@@ -78,6 +70,8 @@ export function installUsageMeter(App, ctx = {}) {
     this._usageCodexGlobal = data?.codexGlobalLogin || null;
     this._codexAccountUsage = data?.codexAccounts || {}; // per-account codex quota buckets
     this._hostUsage = data?.hosts || {}; // remote hosts' own-login quota (on-demand ⟳ only)
+    this._hostOwnUsage = this._hostUsage; // canonical alias the Agents machine sections read
+    this._hostAccountUsage = data?.hostAccounts || {}; // host-HELD account quota ('<hostId>:<acctId>', 2.245.0)
   },
 
   // Resolve the Claude account the pies/popup currently DISPLAY (same rules as
@@ -391,31 +385,11 @@ export function installUsageMeter(App, ctx = {}) {
       ${cBody}`);
     }
 
-    // ── Remote hosts (2.127.0): each configured host's OWN login quota.
-    // Data arrives ONLY via the per-host ⟳ (read-only remote token, single
-    // human-gated call — §ban-safety: no scheduler anywhere near this).
-    {
-      const hostEntries = Object.entries(this._hostUsage || {});
-      if (hostEntries.length) {
-        const odOffH = (this.settings.get('accounts.onDemandQuotaRefresh') || 'manual') === 'off';
-        const parts = [];
-        for (const [hid, hu] of hostEntries) {
-          const has = hu?.fiveHour || hu?.sevenDay;
-          const p5 = Math.round((hu?.fiveHour?.utilization || 0) * 100);
-          const p7 = Math.round((hu?.sevenDay?.utilization || 0) * 100);
-          const rbtn = odOffH ? '' : `<button class="usage-refresh-btn usage-host-refresh" data-host="${escHtml(hid)}" title="${escHtml(t('Fetch this host’s quota (reads its own login token over ssh — one on-demand request)'))}">⟳</button>`;
-          parts.push(`<div class="usage-session">
-        <div class="usage-session-name">${escHtml(hu?.name || hid)} ${rbtn}${hu?.actualEmail || hu?.orgEmail ? `<span class="usage-stat-label"> ${escHtml(hu.actualEmail || hu.orgEmail)}</span>` : ''}</div>
-        ${has ? `
-        <div class="usage-bar" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${p5}%;background:${usageColor(p5)}"></div></div>
-        <div class="usage-session-stats"><span class="usage-stat">${t('5-hour limit')}: ${t('{pct}% used', { pct: p5 })}</span><span class="usage-stat">${t('Resets')} ${fmtReset(hu.fiveHour?.resetsAt)}</span></div>
-        <div class="usage-bar" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${p7}%;background:${usageColor(p7)}"></div></div>
-        <div class="usage-session-stats"><span class="usage-stat">${t('7-day limit')}: ${t('{pct}% used', { pct: p7 })}</span><span class="usage-stat">${t('Resets')} ${fmtReset(hu.sevenDay?.resetsAt)}</span><span class="usage-stat">${t('Updated {ago}', { ago: agoText(hu.fetchedAt) })}</span></div>`
-        : `<div class="usage-note">${t('No data yet — ⟳ reads the host’s own login quota on demand')}</div>`}
-      </div>`);
-        }
-        sections.push(`${renderSectionTitle('claude', escHtml(t('Remote hosts')))}${parts.join('')}`);
-      }
+    // Remote hosts moved to the Agents machine-sectioned overview (2.245.0) —
+    // the popup stays the quick glance; this row is the door to the full
+    // per-machine account+quota center.
+    if (sections.length) {
+      sections.push(`<div class="usage-overview-row"><button class="usage-btn usage-overview-link">${t('Full overview →')}</button></div>`);
     }
 
     // Change-guard: this runs every 8s poll; unchanged HTML must not churn

@@ -1038,6 +1038,23 @@ class HostManager {
     return null;
   }
 
+  /** READ-ONLY peek at a host-HELD account's login token (2.245.0): the
+   *  isolated creds dir ~/.vibespace/subs/<subId> a per-account on-host login
+   *  minted. Same §ban-safety class as readRemoteOAuth — never refresh, never
+   *  write; expired/absent → null (the account's own sessions on the host
+   *  refresh it). Powers the on-demand quota ⟳ for host-held accounts. */
+  async readRemoteSubOAuth(id, subId) {
+    if (!/^sub-[\w-]{1,40}$/.test(String(subId || ''))) return null;
+    const h = this.get(id);
+    let raw;
+    try { raw = await this._hostShell(h, `cat "$HOME/.vibespace/subs/${subId}/.credentials.json" 2>/dev/null || true`, { timeoutMs: 10000 }); } catch { return null; }
+    try {
+      const o = JSON.parse(raw).claudeAiOauth;
+      if (o?.accessToken && (!o.expiresAt || o.expiresAt > Date.now() + 60000)) return o.accessToken;
+    } catch { }
+    return null;
+  }
+
   // ── Remote session discovery (lock-first, same algorithm as local) ──
 
   async discoverSessions(id, { ttlMs = 15000 } = {}) {

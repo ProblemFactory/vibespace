@@ -1,4 +1,5 @@
 // Manage-Agents dialog + Anthropic/ChatGPT account rosters (mixin split from app.js, 2.82.0 audit seam). Methods run with the App instance as `this`.
+import { UI_ICONS } from './icons.js';
 import { t } from './i18n.js';
 import { copyText, createModalShell, escHtml, fetchJson, showConfirmDialog, showContextMenu, showInputDialog, showToast } from './utils.js';
 
@@ -152,17 +153,11 @@ export function installManageAgents(App, ctx = {}) {
       // normal token refresh and skew.
       const machinePart = (x) => x.split('|').slice(0, 5).join('|');
       if (machinePart(s) !== machinePart(baseSig)) (this._hostLoginSeenAt ||= {})[hostId] = Date.now();
-      // Respect a machine the user explicitly switched to while waiting —
-      // yanking the surface back would re-instance the jumps-machines bug.
-      if (this._agentsHostPref && this._agentsHostPref !== hostId) {
-        showToast(t('✓ Login on {host} updated', { host: hostLabel }), { duration: 5000 });
-        return;
-      }
-      showToast(t('✓ Login on {host} updated — reopening Agents there', { host: hostLabel }), { duration: 5000 });
-      this._agentsHostPref = hostId;
-      // Refresh the open Agents surface in place (forcing it onto the login's
-      // machine), else reopen it (the wizard pattern).
-      if (!this._agentsRefreshHook?.(hostId)) this._showAgentsDialog();
+      showToast(t('✓ Login on {host} updated', { host: hostLabel }), { duration: 5000 });
+      // Refresh the open Agents surface in place, else reopen it (the wizard
+      // pattern). Since 2.245.0 the surface stacks EVERY machine's section, so
+      // there's no machine selection to force — a plain refresh shows it.
+      if (!this._agentsRefreshHook?.()) this._showAgentsDialog();
     }, 6000);
   },
 
@@ -207,14 +202,106 @@ export function installManageAgents(App, ctx = {}) {
     return `<span class="acct-usage">${parts.join('')}<span class="acct-usage-age" title="${age != null ? t('Last refreshed {n} min ago', { n: age }) : ''}">${ageLabel}</span></span>${mini}`;
   },
 
+  // ── ⟳ Refresh all (2.245.0): ONE human click fans out a per-target
+  // on-demand quota refresh across every signed-in identity the machine
+  // overview shows — local subscriptions, each host's machine login, and
+  // host-HELD account logins. §ban-safety: strictly click-initiated (never a
+  // timer), and the Anthropic calls are STAGGERED ~1.5s apart — the usage
+  // endpoint hard-429s on bursts (~5 rapid requests, CLAUDE.md §9), so a
+  // simultaneous volley of N identities from one IP risks tripping the shared
+  // backoff. Rows still update independently as each answer lands; failures
+  // render inline on their row (静默失败零容忍 — never silent).
+  async _refreshAllQuota(btn, bodyEl) {
+    if ((this.settings.get('accounts.onDemandQuotaRefresh') || 'manual') === 'off') {
+      showToast(t('On-demand quota refresh is disabled in Settings'), { type: 'error' });
+      return;
+    }
+    // Same one-time explainer + ack key as the usage popup's ⟳.
+    let acked = false;
+    try { acked = localStorage.getItem('vibespace.quotaRefreshAck') === '1'; } catch {}
+    if (!acked) {
+      const ok = await showConfirmDialog({
+        title: t('Fetch quota from Anthropic?'),
+        message: t('This makes ONE non-billable request to Anthropic’s usage endpoint per signed-in account/machine, each with that identity’s own login token — the same call the CLI makes when you run /usage. It only ever fires when you click (never on a timer) and is throttled to ≥60s per target. This notice is shown once.'),
+        confirmText: t('Fetch'),
+      });
+      if (!ok) return;
+      try { localStorage.setItem('vibespace.quotaRefreshAck', '1'); } catch {}
+    }
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.classList.add('usage-refresh-spin');
+    try {
+      // Wait out the section fills so every host's verdicts (held accounts)
+      // are known before the target list is built.
+      try { await this._agentsFill; } catch {}
+      const targets = []; // rows addressed by (section data-host, row data-id)
+      const accts = this._accounts?.accounts || [];
+      const gl = this._usageGlobal || this._usageGlobalIdent || {};
+      const claudeSubs = accts.filter(a => (a.backend || 'claude') !== 'codex' && a.type === 'subscription');
+      // Local CLI login (unless it IS a named account — that account's own
+      // refresh covers the shared quota via the server-side merge).
+      if ((gl.loggedIn || gl.email) && !gl.accountId) targets.push({ host: '', id: '__global__', body: { account: '__global__' } });
+      for (const a of claudeSubs) if (a.loggedIn) targets.push({ host: '', id: a.id, body: { account: a.id } });
+      for (const h of this._agentsHostsList || []) {
+        targets.push({ host: h.id, id: '__global__', body: { host: h.id } });
+        for (const [aid, v] of Object.entries(this._hostVerdicts?.[h.id] || {})) {
+          if (v?.usable && v.how === 'host-held') targets.push({ host: h.id, id: aid, body: { host: h.id, account: aid } });
+        }
+      }
+      const rowOf = (tg) => bodyEl.querySelector(`.agents-machine-sec[data-host="${tg.host}"] .acct-key-row[data-id="${tg.id}"]`);
+      const one = async (tg) => {
+        let r = null;
+        try {
+          r = await fetchJson('/api/usage/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(tg.body) });
+        } catch {}
+        const row = rowOf(tg);
+        if (!row || !row.isConnected) return; // surface re-rendered mid-flight
+        row.querySelector('.acct-refresh-err')?.remove();
+        const msg = r?.error ? String(r.error)
+          : r?.throttled ? t('Refreshed less than a minute ago — try again shortly')
+          : !r ? t('Refresh failed') : null;
+        if (msg) {
+          const err = document.createElement('span');
+          err.className = 'acct-refresh-err usage-warn';
+          err.textContent = '⚠ ' + msg;
+          err.title = msg;
+          (row.querySelector('.acct-key-main') || row).appendChild(err);
+          return;
+        }
+        // Success → repaint just this row's usage cell from fresh data (a
+        // full refresh() here would wipe the other rows' inline errors).
+        const u0 = await fetchJson('/api/usage');
+        if (u0) this._applyUsage(u0);
+        const cell = row.querySelector('.acct-usage-cell');
+        if (!cell) return;
+        let u = null;
+        if (tg.body.host && tg.body.account) u = this._hostAccountUsage?.[tg.body.host + ':' + tg.body.account];
+        else if (tg.body.host) u = this._hostOwnUsage?.[tg.body.host]?.fiveHour ? this._hostOwnUsage[tg.body.host] : null;
+        else if (tg.body.account === '__global__') u = this._rateLimit;
+        else u = this._accountUsage?.[tg.body.account];
+        if (u) cell.innerHTML = this._acctUsageHtml(u);
+      };
+      if (!targets.length) { showToast(t('Nothing to refresh — no signed-in accounts or machines'), { type: 'error' }); return; }
+      const jobs = targets.map((tg, i) => (async () => {
+        await new Promise((r) => setTimeout(r, i * 1500)); // stagger starts
+        await one(tg);
+      })());
+      await Promise.allSettled(jobs);
+    } finally {
+      btn.disabled = false;
+      btn.classList.remove('usage-refresh-spin');
+    }
+  },
+
   async _renderCodexAccounts(ctx) {
-    const { body, selectedHost, hostSel, done, run, refresh, st } = ctx;
+    const { body, selectedHost, done, run, refresh, st } = ctx;
     let accts;
     try { accts = await this.refreshAccounts(); } catch { return; }
     const codexAccts = (accts.accounts || []).filter(a => a.backend === 'codex');
     // st is already machine-scoped: /api/hosts/<id>/backend-status on a host.
     const gLoggedIn = !!(st?.codex?.loggedIn);
-    const hostLabel = selectedHost ? (hostSel.options[hostSel.selectedIndex]?.textContent?.split(' (')[0] || t('remote host')) : null;
+    const hostLabel = selectedHost ? (ctx.hostLabel || t('remote host')) : null;
     const svg = (d, sw = 1.4) => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
     const CROWN = svg('<path d="M2.5 12.5h11M3 12.5L2 4.5l3.2 2.6L8 3l2.8 4.1L14 4.5l-1 8z"/>');
     const GLOBE = svg('<circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c-2 2-2 10 0 12M8 2c2 2 2 10 0 12"/>');
@@ -233,7 +320,9 @@ export function installManageAgents(App, ctx = {}) {
       ? (selectedHost
           ? `${rcx?.email ? escHtml(rcx.email + (rcx.plan ? ' · ' + rcx.plan : '')) + ' · ' : ''}<span class="ob-ok">${t('logged in')}</span>`
           : (escHtml(cgl.email || '') || t('logged in')))
-      : `<span class="ob-warn">${t('not logged in')}</span>`;
+      : (selectedHost && (!ctx.racct || ctx.racct.error))
+        ? `<span class="ob-warn">${t('unreachable')}</span>`
+        : `<span class="ob-warn">${t('not logged in')}</span>`;
     // The machine's codex login may BE one of the named ChatGPT accounts (same
     // email) — say so; their quota buckets are then merged newest-wins.
     const linkedCx = !selectedHost && gLoggedIn && cgl.accountId ? codexAccts.find(a => a.id === cgl.accountId) : null;
@@ -253,9 +342,16 @@ export function installManageAgents(App, ctx = {}) {
     const subBlocked = !!selectedHost && !allowSubRemote;
     // Same-account link vs the host's own codex login (see the Anthropic
     // roster note) — a linked account is usable on the host via its own login
-    const cxHostEmail = selectedHost ? String(racct?.codex?.email || '').trim().toLowerCase() : '';
+    // (2.245.0: `ctx.racct` — the bare `racct` here was a latent
+    // ReferenceError that silently killed the codex roster on every host
+    // view, swallowed by the caller's try/catch)
+    const cxHostEmail = selectedHost ? String(ctx.racct?.codex?.email || '').trim().toLowerCase() : '';
     const cxEmailOf = (a) => String(a.email || (String(a.name || '').includes('@') ? a.name : '')).trim().toLowerCase();
-    const keyLines = codexAccts.map(a => {
+    // Host sections list VERDICT-usable accounts only (B-f531) — same rule as
+    // the Anthropic roster; the local section stays the full roster.
+    const rosterCx = !selectedHost ? codexAccts
+      : ctx.racct?.verdicts ? codexAccts.filter(a => ctx.racct.verdicts[a.id]?.usable) : [];
+    const keyLines = rosterCx.map(a => {
       const isDef = accts.defaultCodexAccountId === a.id;
       const linked = subBlocked && !!cxHostEmail && cxEmailOf(a) === cxHostEmail;
       const blocked = subBlocked && !linked;
@@ -276,7 +372,9 @@ export function installManageAgents(App, ctx = {}) {
         </span></div>`;
     }).join('');
     const note = selectedHost
-      ? t("The “CLI login” row is {host}'s own login (lives on that machine). Named accounts run on THIS machine only — for {host}, use “Log in on host…”, or enable Settings → “Ship subscription logins to remote hosts.”", { host: escHtml(hostLabel) })
+      ? (ctx.racct?.verdicts
+          ? t('Only accounts usable on {host} are listed — the full roster lives under “This machine”. The “CLI login” row is {host}’s own login.', { host: escHtml(hostLabel) })
+          : t('Machine unreachable — account availability unknown. Accounts are managed under “This machine”.'))
       : t('Each Codex session can pick its ChatGPT login (New Session dialog / card ⚙). Held in isolated logins, switchable per session; threads stay shared.');
     left.innerHTML = `<div class="acct-list">${globalRow}${keyLines}</div>
       <div class="agents-note">${note}</div>`;
@@ -473,8 +571,15 @@ export function installManageAgents(App, ctx = {}) {
   },
 
   _showAgentsDialog({ container } = {}) {
-    // rail mode: render into the sidebar panel instead of a modal (one source)
-    if (!container && !this.isMobile && this.sidebar?._railEl) { this.sidebar.toggle?.(true); this.sidebar._railGo?.('agents'); return; }
+    // rail mode: render into the sidebar panel instead of a modal (one source).
+    // Skip _railGo when the agents panel is ALREADY active — its re-click
+    // semantics COLLAPSE the sidebar (the usage popup's "Full overview" door
+    // would close the very panel it points at).
+    if (!container && !this.isMobile && this.sidebar?._railEl) {
+      this.sidebar.toggle?.(true);
+      if (this.sidebar._activeTab !== 'agents') this.sidebar._railGo?.('agents');
+      return;
+    }
     const shell = container ? { body: container, close: () => {} } : createModalShell({
       id: 'agents-dialog-overlay', title: t('Agents'), dialogClass: 'agents-dialog',
       bodyClass: 'agents-dialog-body', escapeToClose: true,
@@ -499,60 +604,33 @@ export function installManageAgents(App, ctx = {}) {
       // and works everywhere, including this dev box.
       { key: 'codex', label: 'Codex', loginCmd: 'codex login --device-auth', updateCmd: 'npm install -g @openai/codex@latest', installCmd: 'npm install -g @openai/codex@latest' },
     ];
-    // Host selector: agent lifecycle can target a remote machine too. Login/
-    // update then run in a shell ON that host (ssh -t).
-    // The selection is an APP-LEVEL pref (2.195.0, real report): the dialog is
-    // re-invoked with a fresh closure by rail-panel rebuilds and every
-    // close/reopen — a closure-local '' reset the machine to local mid-flow
-    // (login on Novita-H200 → dialog back on another machine). Validated
-    // against the roster each refresh; falls back to local if the host is gone.
-    let selectedHost = this._agentsHostPref || ''; // '' = local
-    const run = (cmd) => {
-      done();
-      if (selectedHost) this.openShellTerminal(undefined, { hostId: selectedHost, initialCommand: cmd });
-      else this.openShellTerminal(undefined, { initialCommand: cmd });
-    };
-    // Reentrancy guard: switching machines mid-render (host probes take
-    // seconds over ssh) starts a NEW refresh whose innerHTML='' wipes the old
-    // one's partial rows — but the OLD run resumes after its next await and
-    // keeps appending sections scoped to the old machine (duplicate rosters,
-    // handlers acting on the wrong host). Each refresh takes a generation
+    // Machine-sectioned overview (2.245.0): no host selector anymore — the
+    // surface stacks "This machine" plus one section per configured host,
+    // each with its full block (CLI status rows, account rosters, integration
+    // row). Host sections list only VERDICT-usable accounts (B-f531 — the
+    // server computes usable/linked/held, never the client) plus the host's
+    // own CLI-login row with its quota.
+    // Reentrancy guard: a refresh mid-fill starts a NEW pass whose
+    // innerHTML='' wipes the old one's partial rows — but the OLD fills
+    // resume after their next await and would keep appending. Generation
     // ticket; stale runs stop at every await/append point.
     let refreshGen = 0;
-    // Exposed so the host-login watcher can refresh THIS surface in place
-    // (returns false once the body left the document — panel rebuilt/closed).
-    const refresh = async () => {
-      const myGen = ++refreshGen;
-      const stale = () => myGen !== refreshGen;
+    // Render ONE machine's full block into its own section container. The
+    // container param is deliberately named `body` so the extensive existing
+    // append logic below (backend rows, rosters, integration) runs unchanged
+    // inside the section — nothing in it needs the OUTER dialog body.
+    const renderMachine = async (body, selectedHost, hostLabel, hostTransport, stale) => {
+      const run = (cmd) => {
+        done();
+        if (selectedHost) this.openShellTerminal(undefined, { hostId: selectedHost, initialCommand: cmd });
+        else this.openShellTerminal(undefined, { initialCommand: cmd });
+      };
+      // Row actions re-render the WHOLE surface (all machines) — the same
+      // full-refresh semantics the single-machine dialog had.
+      const refresh = () => { this._agentsRefreshHook?.(); };
       let st = {};
-      try { st = await fetchJson(selectedHost ? `/api/hosts/${selectedHost}/backend-status` : '/api/backend-status'); } catch {}
-      if (stale()) return;
-      body.innerHTML = '';
-      // Host dropdown row
-      const hostRow = document.createElement('div');
-      hostRow.className = 'agents-host-row';
-      const hostLabel = document.createElement('span'); hostLabel.textContent = t('Machine:');
-      const hostSel = document.createElement('select'); hostSel.className = 'agents-host-select';
-      hostSel.innerHTML = `<option value="">${t('This machine (local)')}</option>`;
-      let hostTransport = null; // 'dial' for a paired device (shapes the install actions)
-      try {
-        const hd = await fetchJson('/api/hosts');
-        for (const h of hd?.hosts || []) {
-          const o = document.createElement('option'); o.value = h.id; o.textContent = h.transport === 'dial' ? `${h.name} (${t('device')})` : `${h.name} (${h.user}@${h.host})`;
-          hostSel.appendChild(o);
-        }
-        // Restored pref no longer in the roster (host removed) → local. Only
-        // when the roster actually LOADED — on a fetch failure keep the pick.
-        if (selectedHost && hd?.hosts && !hd.hosts.some(h => h.id === selectedHost)) {
-          selectedHost = ''; this._agentsHostPref = '';
-        }
-        hostTransport = (hd?.hosts || []).find(h => h.id === selectedHost)?.transport || null;
-      } catch {}
-      if (stale()) return;
-      hostSel.value = selectedHost;
-      hostSel.onchange = () => { this._agentsHostPref = selectedHost = hostSel.value; refresh(); };
-      hostRow.append(hostLabel, hostSel);
-      body.appendChild(hostRow);
+      try { st = (await fetchJson(selectedHost ? `/api/hosts/${selectedHost}/backend-status` : '/api/backend-status')) || {}; } catch {}
+      if (stale() || !body.isConnected) return;
       // Accounts render UNDER their CLI: Anthropic accounts below Claude Code,
       // OpenAI/Codex accounts below Codex. Shared context for the extracted
       // renderers (they capture the same closures the dialog builds).
@@ -560,9 +638,26 @@ export function installManageAgents(App, ctx = {}) {
       // shapes + codex JWT email — 2.188.0).
       let racct = null;
       if (selectedHost) { try { racct = await fetchJson(`/api/hosts/${encodeURIComponent(selectedHost)}/accounts-status`); } catch {} }
-      if (stale()) return;
-      const actx = { body, selectedHost, hostSel, done, run, refresh, st, stale, racct };
+      if (stale() || !body.isConnected) return;
+      body.querySelector('.ob-loading')?.remove();
+      const actx = { body, selectedHost, hostLabel, done, run, refresh, st, stale, racct };
+      // A host whose status probe failed must SAY so — the empty status
+      // object otherwise renders "not installed" + Install buttons for a
+      // machine that is simply unreachable (honest-state rule).
+      const unreachable = !!selectedHost && (!!st?.error || (!st?.claude && !st?.codex));
       for (const b of BACKENDS) {
+        if (unreachable) {
+          const row = document.createElement('div'); row.className = 'ob-backend';
+          const left = document.createElement('div'); left.className = 'ob-backend-id';
+          left.innerHTML = `<b>${b.label}</b> <span class="ob-warn">${t('unreachable')}</span>`;
+          row.append(left);
+          body.appendChild(row);
+          // Rosters still render — the CLI-login row + note carry the state
+          if (b.key === 'claude') { try { await this._renderClaudeAccounts(actx); } catch {} }
+          else if (b.key === 'codex') { try { await this._renderCodexAccounts(actx); } catch {} }
+          if (stale()) return;
+          continue;
+        }
         const info = st[b.key] || {};
         const row = document.createElement('div'); row.className = 'ob-backend';
         const left = document.createElement('div');
@@ -708,7 +803,7 @@ export function installManageAgents(App, ctx = {}) {
         try { rs = await fetchJson(`/api/hosts/${encodeURIComponent(selectedHost)}/agent-tools`); } catch {}
         if (stale()) return;
         if (rs && rs.tools) {
-          const hostName = hostSel.options[hostSel.selectedIndex]?.textContent?.split(' (')[0] || t('remote host');
+          const hostName = hostLabel || t('remote host');
           const row = document.createElement('div'); row.className = 'ob-backend';
           const left = document.createElement('div');
           const names = Object.keys(rs.tools);
@@ -791,6 +886,58 @@ export function installManageAgents(App, ctx = {}) {
           } // end non-dial actions
         }
       }
+    }; // end renderMachine
+
+    // Exposed so the host-login watcher can refresh THIS surface in place
+    // (returns false once the body left the document — panel rebuilt/closed).
+    const refresh = async () => {
+      const myGen = ++refreshGen;
+      const stale = () => myGen !== refreshGen;
+      let hostsList = [];
+      try { const hd = await fetchJson('/api/hosts'); hostsList = hd?.hosts || []; } catch {}
+      if (stale()) return;
+      this._agentsHostsList = hostsList; // the refresh-all fan-out reads this
+      body.innerHTML = '';
+      // Panel header: context line + ONE ⟳ Refresh-all. The fan-out is a
+      // per-target on-demand refresh, HUMAN-CLICK-initiated only (§ban-safety:
+      // never wire this to any timer).
+      const head = document.createElement('div');
+      head.className = 'agents-overview-head';
+      const headNote = document.createElement('span');
+      headNote.className = 'agents-note';
+      headNote.textContent = t('Accounts & quota by machine');
+      const refreshAll = document.createElement('button');
+      refreshAll.className = 'agent-btn agents-refresh-all';
+      refreshAll.innerHTML = `${UI_ICONS.refresh}<span>${t('Refresh all')}</span>`;
+      refreshAll.title = t('Fetch fresh quota for every signed-in account and machine below — one on-demand request per identity, only when you click (never scheduled)');
+      refreshAll.onclick = () => this._refreshAllQuota(refreshAll, body);
+      head.append(headNote, refreshAll);
+      body.appendChild(head);
+      // Machine section containers are created SYNCHRONOUSLY (DOM order fixed:
+      // local first, then each host) and filled in parallel — ssh probes to
+      // different hosts overlap instead of serializing the whole surface.
+      const mkSection = (label, hostId, sub) => {
+        const sec = document.createElement('div');
+        sec.className = 'agents-machine-sec';
+        sec.dataset.host = hostId || '';
+        const hd2 = document.createElement('div');
+        hd2.className = 'usage-section-title agents-machine-title';
+        const sp = document.createElement('span'); sp.textContent = label; hd2.appendChild(sp);
+        if (sub) { const ss = document.createElement('span'); ss.className = 'agents-machine-sub'; ss.textContent = sub; hd2.appendChild(ss); }
+        sec.appendChild(hd2);
+        const ld = document.createElement('div'); ld.className = 'ob-loading'; ld.textContent = t('Checking…');
+        sec.appendChild(ld);
+        body.appendChild(sec);
+        return sec;
+      };
+      const fills = [renderMachine(mkSection(t('This machine'), ''), '', null, null, stale)];
+      for (const h of hostsList) {
+        const sec = mkSection(h.name, h.id, h.transport === 'dial' ? t('device') : `${h.user}@${h.host}`);
+        fills.push(renderMachine(sec, h.id, h.name, h.transport || null, stale));
+      }
+      // Refresh-all awaits this so a click right after open still sees every
+      // host's verdicts (held accounts) before building its target list.
+      this._agentsFill = Promise.allSettled(fills);
       // ── Agent instructions — ADVANCED, collapsed by default (user request:
       // the expanded form dominated the dialog). Lives right under the
       // VibeSpace integration row it belongs with. Layout: one labelled field
@@ -898,12 +1045,9 @@ export function installManageAgents(App, ctx = {}) {
     };
     // Latest surface wins; the watcher checks isConnected so a stale hook
     // (panel rebuilt / modal closed) reports false and triggers a reopen.
-    // An explicit hostId forces the closure's machine selection — refresh()
-    // renders the CLOSURE var, so pref alone would leave the surface on
-    // whatever the dropdown last showed (review-confirmed).
-    this._agentsRefreshHook = (hostId) => {
+    // All machines render at once since 2.245.0 — nothing to select/force.
+    this._agentsRefreshHook = () => {
       if (!body.isConnected) return false;
-      if (hostId !== undefined && hostId !== selectedHost) selectedHost = hostId;
       refresh();
       return true;
     };
@@ -914,7 +1058,7 @@ export function installManageAgents(App, ctx = {}) {
   // Agents). Extracted from _showAgentsDialog so accounts sit beside their
   // CLI. ctx carries the dialog closures the block already used.
   async _renderClaudeAccounts(ctx) {
-    const { body, selectedHost, hostSel, done, run, refresh } = ctx;
+    const { body, selectedHost, done, run, refresh } = ctx;
     const ctxRacct = ctx.racct;
     // ── Anthropic accounts (billing identity) — ONE unified roster whose
     // meaning is machine-scoped ONLY on the first row: the peer "CLI login"
@@ -929,11 +1073,11 @@ export function installManageAgents(App, ctx = {}) {
     if (!acct) return;
     // Prime per-account usage so the rows show current quota on open (the
     // 30s poll also keeps it fresh). Best-effort — rows render regardless.
-    try { const u = await fetchJson('/api/usage'); if (u) { this._accountUsage = u.accounts || {}; this._hostOwnUsage = u.hosts || {}; this._usageGlobalIdent = u.globalLogin || null; if (u.rateLimit) this._rateLimit = u.rateLimit; } } catch {}
-    // Remote host selected → its login state was probed once in refresh()
+    try { const u = await fetchJson('/api/usage'); if (u) { this._accountUsage = u.accounts || {}; this._hostOwnUsage = u.hosts || {}; this._hostAccountUsage = u.hostAccounts || {}; this._usageGlobalIdent = u.globalLogin || null; if (u.rateLimit) this._rateLimit = u.rateLimit; } } catch {}
+    // Host section → its login state was probed once in renderMachine()
     // (shared with the codex roster — 2.188.0).
     const racct = ctxRacct;
-    const hostLabel = selectedHost ? (hostSel.options[hostSel.selectedIndex]?.textContent?.split(' (')[0] || t('remote host')) : null;
+    const hostLabel = selectedHost ? (ctx.hostLabel || t('remote host')) : null;
     const accts = await this.refreshAccounts(); // keep app cache in sync
     const claudeAccts = (accts.accounts || []).filter(x => (x.backend || 'claude') === 'claude');
     // §ban-safety: on a REMOTE host a subscription can't run unless the opt-in
@@ -1060,7 +1204,15 @@ export function installManageAgents(App, ctx = {}) {
       // billing switcher and New Session dialog read (one fact, one store)
       if (racct.verdicts) this._hostVerdicts = { ...(this._hostVerdicts || {}), [selectedHost]: racct.verdicts };
     }
-    const keyLines = claudeAccts.map(a => {
+    // Machine sections (2.245.0): a HOST section lists only accounts the
+    // server says are USABLE there (B-f531 verdicts — never computed
+    // client-side). No verdicts (host unreachable) → no named rows; the
+    // CLI-login row carries the unreachable state and the note says why.
+    // The LOCAL section stays the FULL roster — it is the management home
+    // (rename/remove/finish-login of any account, usable anywhere or not).
+    const rosterAccts = !selectedHost ? claudeAccts
+      : racct?.verdicts ? claudeAccts.filter(a => racct.verdicts[a.id]?.usable) : [];
+    const keyLines = rosterAccts.map(a => {
       const isDef = accts.defaultAccountId === a.id;
       const isSub = a.type === 'subscription';
       // Verdict-driven when the probe answered (B-f531): the SAME
@@ -1110,14 +1262,27 @@ export function installManageAgents(App, ctx = {}) {
       return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}" data-sub="${isSub ? '1' : ''}"${blocked ? ' data-blocked="1"' : ''}${hostSub ? ' data-hostsub="1"' : ''}${linked ? ' data-linked="1"' : ''}>
         <span class="acct-type-icon" title="${iconTitle}">${isSub ? CROWN : KEY}</span>
         <span class="acct-key-main"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span>${(provTag || noteTag) ? `<span class="acct-key-extra">${provTag}${noteTag}</span>` : ''}</span>
-        <span class="acct-usage-cell">${isSub && a.loggedIn ? usageHtml(this._accountUsage?.[a.id]) : ''}</span>
+        <span class="acct-usage-cell">${(() => {
+          // Usage source follows the VERDICT's how (2.245.0): a linked account
+          // runs on the host's own login (its quota IS the host quota); a
+          // host-held one has its own snapshot ('<host>:<id>', ⟳ Refresh all);
+          // ship/local read the local passive cache.
+          if (!isSub) return '';
+          let u = null;
+          if (selectedHost && v?.how === 'host-login') u = this._hostOwnUsage?.[selectedHost]?.fiveHour ? this._hostOwnUsage[selectedHost] : null;
+          else if (selectedHost && v?.how === 'host-held') u = this._hostAccountUsage?.[selectedHost + ':' + a.id] || null;
+          else if (a.loggedIn) u = this._accountUsage?.[a.id];
+          return u ? usageHtml(u) : '';
+        })()}</span>
         <span class="acct-key-actions">
           <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
           <button class="acct-icon acct-menu" title="${t('More actions')}">${svg('<circle cx="3" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="13" cy="8" r="1.3" fill="currentColor" stroke="none"/>')}</button>
         </span></div>`;
     }).join('');
     const note = selectedHost
-      ? t("The “CLI login” row is {host}'s own login (lives on that machine). API-key accounts below ship to {host} per session; subscription accounts run on THIS machine only — for {host}, use “Log in on host…”, or enable Settings → “Ship subscription logins to remote hosts.”", { host: escHtml(hostLabel) })
+      ? (racct?.verdicts
+          ? t('Only accounts usable on {host} are listed — the full roster lives under “This machine”. The “CLI login” row is {host}’s own login.', { host: escHtml(hostLabel) })
+          : t('Machine unreachable — account availability unknown. Accounts are managed under “This machine”.'))
       : t('Each session can pick its account (New Session dialog / card ⚙). Subscriptions bill your Pro/Max plan; API keys bill pay-per-use. The starred account is the default when a session doesn’t pick one.');
     left.innerHTML = `<div class="acct-list">${globalRow}${keyLines}</div>
       <div class="agents-note">${note}</div>`;
