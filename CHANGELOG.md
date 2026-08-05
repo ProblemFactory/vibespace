@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.243.1
+
+- **Manage Agents "Test" now tests the account it says it tests** (natural's inc-msghecvm-5ym8: "Test ClaudeLu" showed a DIFFERENT account signed in): the client mapped a linked account onto the CLI-login sentinel, which spawns on the host's CURRENT machine login — and that login had been switched to another account since the client's cache. Test now always sends the real account id; the server resolves it against live host facts (email-linked → host login only when the emails match NOW; host-held dir → that dir), so a rotated machine login can no longer impersonate the account under test. Fifth surface of the client-side-verdict class — the switcher got the same treatment in 2.241.0.
+
 ## 2.243.0
 
 - **System panel: event-loop lag history chart** (the metric that cracked the instance-freeze case now has a face): a third chart under Memory/CPU plots the sampler's per-500ms loop-lag values; the 7d coarse ring records each 15-min window's worst lag going forward. Rows hide on ranges with no lag data (pre-upgrade coarse samples).
