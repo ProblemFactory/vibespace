@@ -1076,7 +1076,7 @@ export function installManageAgents(App, ctx = {}) {
       // from host probes — 2.204.0): lets EVERY view say "logged in on X"
       // instead of a bare local "not logged in" for host-only accounts.
       const hlNames = Object.keys(a.hostLogins || {})
-        .map((hid) => this.sidebar?._hostsData?.hosts?.find((h) => h.id === hid)?.name || hid);
+        .map((hid) => this._hostNamesKnown?.[hid] || this.sidebar?._hostsData?.hosts?.find((h) => h.id === hid)?.name || hid);
       const hlTag = hlNames.length
         ? ` <span class="acct-linked-hint">${t('· logged in on {host}', { host: escHtml(hlNames.join(', ')) })}</span>` : '';
       let ident = isSub
