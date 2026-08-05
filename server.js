@@ -3448,7 +3448,7 @@ app.get('/api/hosts/:id/accounts-status', async (req, res) => {
     // authority, computed against these LIVE facts — client surfaces render
     // these verbatim and never compute their own from page caches.
     try {
-      const facts = { ...r, transport: hosts.get(req.params.id)?.transport === 'dial' ? 'dial' : 'ssh' };
+      const facts = { ...r, hostId: req.params.id, transport: hosts.get(req.params.id)?.transport === 'dial' ? 'dial' : 'ssh' };
       let allowShip = false;
       try { allowShip = !!serverSetting('accounts.shipSubscriptionToRemote'); } catch { }
       r.verdicts = {};

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.244.3
+
+- **"Never finished signing in" no longer slanders accounts that ARE signed in — elsewhere**: an account holding its login on one machine (ClaudeLu on Novita) showed "never finished signing in" in the billing menu of a session on a DIFFERENT machine (CW-H200) — the disable was correct (no login THERE), the message read as a broken account. `evaluateOnHost` now distinguishes `not-on-this-host` (logins exist on other machines — named in the message, with the two ways out) from `never-signed-in` (no login anywhere). Matrix test grows to 17 asserts.
+
 ## 2.244.2
 
 - **Case closed on "Test shows the wrong account" — the billing was correct, the CLI's display was not** (verified forensically: the Test spawn refreshed the HELD dir's token two seconds after start — proof it authenticated as the held account — while the machine's own credential store sat untouched): claude reads its `/status` Organization/Email from the non-relocated `~/.claude.json`, so a host-held login shows the MACHINE's identity while the TOKEN (= what's billed) is the held account's. The Test now shows a banner saying exactly that before the user reads /status.

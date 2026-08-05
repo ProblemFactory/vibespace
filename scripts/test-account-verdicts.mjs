@@ -57,6 +57,21 @@ check('HELD+LINKED both → held WINS (2.243.2 precedence: dir creds are determi
   return v.usable && v.how === 'host-held' && v.held && v.linked;
 })());
 
+console.log('── not-on-this-host vs never-signed-in ──');
+accounts.noteHostLogins('host-nov', [subOut.id]);
+check('no login HERE but held elsewhere → not-on-this-host (+otherHosts)', (() => {
+  const v = evalV(subOut, F({ hostId: 'host-cw' }));
+  return !v.usable && v.reason === 'not-on-this-host' && (v.otherHosts || []).includes('host-nov');
+})());
+check('local pick of a host-only account → not-on-this-host', (() => {
+  const v = evalV(subOut, null);
+  return !v.usable && v.reason === 'not-on-this-host';
+})());
+check('evaluated ON the holding host itself w/o live dir → NOT listed as its own other-host', (() => {
+  const v = evalV(subOut, F({ hostId: 'host-nov' }));
+  return !v.usable && !(v.otherHosts || []).includes('host-nov');
+})());
+
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
 fs.rmSync(tmp, { recursive: true, force: true });
 process.exit(fail ? 1 : 0);

@@ -556,9 +556,16 @@ class AccountManager {
       return { usable: true, how: hostFacts ? 'ship' : 'local-env', reason: null, linked: false, held: false, heldVerified: false };
     }
     const loggedIn = backend === 'codex' ? !!this.readCodexSubAuth(a.id).loggedIn : !!this.readSubCreds(a.id).loggedIn;
+    // Hosts KNOWN to hold this account's own login (noteHostLogins write-
+    // through) minus the host being evaluated: "signed in SOMEWHERE else" is
+    // a different situation than "never signed in anywhere" — natural's
+    // report: ClaudeLu (held on Novita) showed "never finished signing in"
+    // in a CW-H200 session's menu, reading as a broken account (2.244.3).
+    const otherHosts = Object.keys(a.hostLogins || {}).filter((h) => h !== hostFacts?.hostId);
+    const noLoginReason = () => (otherHosts.length ? 'not-on-this-host' : 'never-signed-in');
     if (!hostFacts) {
       if (loggedIn) return { usable: true, how: 'local-env', reason: null, linked: false, held: false, heldVerified: false };
-      return { usable: false, how: null, reason: 'never-signed-in', linked: false, held: false, heldVerified: false };
+      return { usable: false, how: null, reason: noLoginReason(), otherHosts, linked: false, held: false, heldVerified: false };
     }
     const hostEmail = norm(backend === 'codex' ? hostFacts.codex?.email : hostFacts.subscription?.email);
     const linked = !!acctEmail && !!hostEmail && acctEmail === hostEmail;
@@ -574,7 +581,7 @@ class AccountManager {
     if (loggedIn && allowShip && hostFacts.transport !== 'dial') {
       return { usable: true, how: 'ship', reason: null, linked, held, heldVerified: false };
     }
-    if (!loggedIn) return { usable: false, how: null, reason: 'never-signed-in', linked, held, heldVerified: false };
+    if (!loggedIn) return { usable: false, how: null, reason: noLoginReason(), otherHosts, linked, held, heldVerified: false };
     return { usable: false, how: null, reason: hostFacts.transport === 'dial' ? 'dial-no-ship' : 'ship-disabled', linked, held, heldVerified: false };
   }
 

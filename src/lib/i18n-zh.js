@@ -2249,4 +2249,5 @@ export default {
   'The login held on {host} for “{name}” actually belongs to {email} — re-run “Log in on host as this account”.': '{host} 上为“{name}”持有的登录实际属于 {email} — 请重新执行“以此账号在主机上登录”。',
   'host login belongs to {email}': '主机登录属于 {email}',
   'This test bills “{name}” via its login held on {host}. Note: claude’s /status will show the MACHINE’s identity there — that display doesn’t follow relocated logins; the billed account is “{name}”.': '本测试以“{name}”计费(经其在 {host} 上持有的登录)。注意: claude 的 /status 会显示机器自身的身份——该显示不跟随重定位的登录; 实际计费账号是“{name}”。',
+  '“{name}” isn’t logged in on {host} — it’s logged in on {others}. Use “Log in on host as this account” for {host} (Manage agents), or run the session on {others}.': '“{name}”未在 {host} 上登录——它登录在 {others}。可在 Manage agents 中对 {host} 执行“以此账号在主机上登录”，或把会话跑在 {others} 上。',
 };

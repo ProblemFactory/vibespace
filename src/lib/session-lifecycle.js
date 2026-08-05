@@ -780,6 +780,14 @@ export function installSessionLifecycle(App, ctx = {}) {
       if (v) { // verdict is authoritative — render it verbatim
         if (v.usable) return null;
         if (v.reason === 'held-identity-mismatch') return t('The login held on {host} for “{name}” actually belongs to {email} — re-run “Log in on host as this account”.', { host: rHostName, name: a.name, email: v.dirEmail || '?' });
+        if (v.reason === 'not-on-this-host') {
+          // signed in SOMEWHERE — just not on the machine this session runs on
+          // (2.244.3, natural: ClaudeLu held on Novita read "never finished
+          // signing in" in a CW-H200 session's menu = looked like a broken
+          // account)
+          const others = (v.otherHosts || []).map((h) => this._hostNamesKnown?.[h] || h).join(', ');
+          return t('“{name}” isn’t logged in on {host} — it’s logged in on {others}. Use “Log in on host as this account” for {host} (Manage agents), or run the session on {others}.', { name: a.name, host: rHostName || t('this machine'), others: others || '?' });
+        }
         if (v.reason === 'never-signed-in') return t('“{name}” never finished signing in — complete its login in Manage agents first.', { name: a.name });
         if (v.reason === 'dial-no-ship') return t('Subscription logins can’t ship to a paired device — log in on the device, or use an API-key account');
         return t('This stored login can’t ship to {host}. If you’ve logged this account in ON {host}, pick “CLI login @ {host}” above — that uses the host’s own login. (Or enable Settings → “Ship subscription logins to remote hosts”.)', { host: rHostName });
