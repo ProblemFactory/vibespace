@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.242.0
+
+- **THE instance-wide freeze root cause, caught red-handed and fixed**: a resident V8 sampling watchdog on the affected fleet pod captured the event loop blocked for 5.1 seconds inside the `/api/sessions` discovery sweep — which ran `execFileSync` end-to-end (pgrep per live webui session + `tmux list-panes` + two `ps` calls per lock file, all sequential, each fork 100-300ms under load with pgrep's 2s timeout bounding the worst sweeps at tens of seconds). With the sidebar polling every 5s and the cache at 4.5s, a connected client froze the whole server every few seconds for as long as the browser stayed open — the "everything is slow while I work, fine when I come back later" pattern (observed 8-33s event-loop stalls). The sweep is now fully async with PARALLEL subprocess probes (wall time = slowest single command, loop never blocks) and concurrent polls coalesce into one in-flight sweep. Lock-entry ordering is preserved (claimJsonls' mtime fallback depends on it).
+
 ## 2.241.2
 
 - **The 30s local port watch no longer runs a synchronous /proc sweep on the main thread**: on the slim fleet image (no ss/lsof) `detectLocal` falls back to a /proc/net + per-process fd scan — all `readdirSync`/`readlinkSync`, every 30 seconds, on the event loop. A live CPU profile on the busiest fleet pod (hundreds of processes) showed it as the single largest non-idle main-thread consumer (~0.2-0.5s per pass). Converted to `fs.promises` — same bounded work, now on the threadpool.
