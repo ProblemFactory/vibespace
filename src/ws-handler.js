@@ -498,20 +498,32 @@ function registerWsHandler(wss, ctx) {
               if (!allowShip) {
                 try {
                   const rs = await hosts.accountsStatus(data.hostId);
-                  // (a) The account IS the host's own login (same email) →
-                  // run on the host's login directly.
+                  // ORDER MATTERS (2.243.2, natural's screenshot: Test badge
+                  // said ClaudeLu, /status inside said the OTHER account): the
+                  // host-held dir is checked FIRST — its creds are the named
+                  // account DETERMINISTICALLY. The email-linked mapping trusts
+                  // the host's .claude.json config email, which goes STALE
+                  // after a /login switch (the 2.114.1 identity class) — a
+                  // stale match mapped the spawn onto whatever token the
+                  // machine ACTUALLY holds now, silently billing the wrong
+                  // account while the badge showed the picked one.
                   const meta = (accounts.list().accounts || []).find((x) => x.id === spawnAccount.id);
                   const acctEmail = String(meta?.email || (String(meta?.name || '').includes('@') ? meta.name : '')).trim().toLowerCase();
                   const hostEmail = String((backend === 'codex' ? rs?.codex?.email : rs?.subscription?.email) || '').trim().toLowerCase();
-                  if (acctEmail && hostEmail && hostEmail === acctEmail) {
-                    linkedAccountId = spawnAccount.id; // identity survives the host-login mapping
-                    spawnAccount = null; // = the host's own login (same account)
-                  } else if (backend === 'claude' && (rs?.hostSubs || []).includes(spawnAccount.id)) {
-                    // (b) The host holds a LIVE per-account creds dir
+                  if (backend === 'claude' && (rs?.hostSubs || []).includes(spawnAccount.id)) {
+                    // (a) The host holds a LIVE per-account creds dir
                     // (~/.vibespace/subs/<id>, minted by an on-host login —
                     // 2.199.0): point the spawn at it, ship nothing. The
                     // token was born on that machine and never leaves it.
                     spawnAccount._hostSubReady = true;
+                  } else if (acctEmail && hostEmail && hostEmail === acctEmail) {
+                    // (b) The account IS the host's own login (same email) →
+                    // run on the host's login directly. Residual risk: the
+                    // config email can lie after a fresh /login switch until
+                    // the CLI rewrites it — the held-dir path above is immune,
+                    // which is why it wins.
+                    linkedAccountId = spawnAccount.id; // identity survives the host-login mapping
+                    spawnAccount = null; // = the host's own login (same account)
                   }
                 } catch { /* probe failed — keep the explicit-account path (errors later with guidance) */ }
               }
