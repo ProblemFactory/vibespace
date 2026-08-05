@@ -1863,6 +1863,7 @@ class App {
   refreshAccounts() {
     return fetchJson('/api/accounts').then(d => {
       if (d) this._accounts = { accounts: d.accounts || [], defaultAccountId: d.defaultAccountId || null, defaultCodexAccountId: d.defaultCodexAccountId || null, subscription: d.subscription || {}, cliKey: d.cliKey || {} };
+      if (d?.hostNames) this._hostNamesKnown = d.hostNames; // id→name for chips (2.244.1)
       return this._accounts;
     }).catch(() => this._accounts);
   }

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.244.1
+
+- **Account rows say "logged in on Novita-H200", not "logged in on host-9835dc80"**: the roster resolved host display names through the sidebar's hosts cache, which is empty until the Remote tab loads — raw host ids leaked into the chips on fresh pages. `/api/accounts` now ships a `hostNames` map (the server always knows them) and the chips read it first.
+
 ## 2.244.0
 
 - **One authority for "which account runs where, and how"** (the structural cure after six field incidents in this exact area — every one was a different surface computing its own verdict from its own cache): `accounts.evaluateOnHost()` is now THE single decision function — pure given live host facts, with the incident-derived rules baked in (host-held dir beats email-linked; a held dir whose reported identity mismatches the account is refused loudly; linked works without a local login; dial never ships; API keys always ship). The spawn path (ws-handler create) and every display surface consume the same function: `/api/hosts/:id/accounts-status` and `/api/accounts` now return per-account `verdicts`, and the billing switcher, New Session dialog and Manage-Agents roster render them verbatim (legacy cache-derived checks survive only as fallback while a probe is in flight).

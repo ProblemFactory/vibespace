@@ -3381,6 +3381,10 @@ app.get('/api/accounts', (req, res) => {
     subscription: accounts.subscriptionStatus(),
     cliKey: accounts.cliPrimaryKey(),
   };
+  // Host id → display name map (2.244.1, real screenshot: the roster's
+  // "logged in on host-9a86e4fb" — raw ids leaked whenever the sidebar's
+  // hosts data wasn't loaded yet; the server always knows the names)
+  try { out.hostNames = Object.fromEntries((hosts.list?.() || []).map((h) => [h.id, h.name || h.id])); } catch { }
   // LOCAL verdicts (B-f531): same authority as the per-host ones
   try {
     out.verdicts = {};
