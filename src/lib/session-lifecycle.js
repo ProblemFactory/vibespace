@@ -778,7 +778,12 @@ export function installSessionLifecycle(App, ctx = {}) {
         : held ? ' ' + t('· logged in on {host}', { host: rHostName }) : '';
       const block = subBlock(a);
       if (block && !cur) { items.push({ label: a.name + suffix, disabled: true, title: block }); continue; }
-      items.push({ label: (cur ? '✓ ' : '') + a.name + suffix, action: () => { if (!cur) doSwitch(a.id, a.name); } });
+      // LINKED pick = the host's own login: spawn with the CLI-login sentinel
+      // (2.240.2, natural's fourth incident — the New Session dialog and the
+      // Manage-Agents Test both map this; the switcher passed the raw id and
+      // the server refused it as 'subscription not logged in' since the
+      // account has no local creds dir — the pick could never work).
+      items.push({ label: (cur ? '✓ ' : '') + a.name + suffix, action: () => { if (!cur) doSwitch(linked ? 'subscription' : a.id, a.name); } });
     }
     let menuEl;
     if (anchor && typeof anchor.getBoundingClientRect === 'function') {

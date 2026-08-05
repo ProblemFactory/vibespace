@@ -442,6 +442,19 @@ function registerWsHandler(wss, ctx) {
                       id: data.accountId, kind: 'subscription', _hostSubReady: true,
                       remoteCreds: { dirName: 'subs/' + data.accountId, envVar: 'CLAUDE_SECURESTORAGE_CONFIG_DIR' },
                     };
+                  } else {
+                    // EMAIL-LINKED rescue (2.240.2): the account IS the host's
+                    // own machine login (same email) — spawn on the host's own
+                    // login directly, zero creds ship. Server-side truth beats
+                    // whatever vintage the client's caches were (a stale
+                    // client passed the raw id; refusing it here was the
+                    // 'never reaches the create path' failure in natural's
+                    // fourth incident).
+                    const acctEmail = String(accounts.get?.(data.accountId)?.email || '').trim().toLowerCase();
+                    const hostEmail = String(rs?.subscription?.email || '').trim().toLowerCase();
+                    if (acctEmail && hostEmail && acctEmail === hostEmail) {
+                      rescued = { id: null, kind: null, _useHostLogin: true };
+                    }
                   }
                 } catch { /* probe failed — fall through to the original error */ }
               }
@@ -450,6 +463,9 @@ function registerWsHandler(wss, ctx) {
                 return;
               }
               spawnAccount = rescued;
+              // email-linked rescue resolves to the host's own login = the
+              // same null the 'subscription' sentinel produces downstream
+              if (spawnAccount && spawnAccount._useHostLogin) spawnAccount = null;
             }
             // REMOTE + the account came from the DEFAULT (nothing specified) +
             // it could only reach the host by shipping subscription creds →

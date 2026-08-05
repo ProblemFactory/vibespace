@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.240.2
+
+- **Picking a LINKED account in the billing switcher actually works now** (fourth field incident: the pick "never reached the create path" — the New Session dialog and the Manage-Agents Test button both map an account that IS the host's own machine login onto the CLI-login sentinel, but the switcher passed the raw account id, which the server refused as "subscription not logged in" since a linked account has no local creds dir by design). Two-sided: the switcher maps linked picks to the sentinel like every other surface, and the server's create-rescue gains an EMAIL-LINKED branch — when the picked account's email matches the host's own machine login, the spawn proceeds on the host's own login directly (zero creds ship), so even a stale client that passes the raw id succeeds.
+
 ## 2.240.1
 
 - **Manage Agents and the billing switcher no longer disagree about who a host's login is** (real report with screenshot: the roster showed one account as the host's own login while the switcher's menu credited a different one — the user had /login'd a NEW account directly on the host, changing the machine identity; the roster probes live but the 2.239.2 switcher cache lived for the whole page, and its stale "uses the host's own login" label was a wrong-BILLING hazard). The switcher's warm cache now has a 2-minute TTL (matching the host auto-test cadence, re-probing on menu open and rebuilding the open menu when fresh data lands), and the Manage-Agents roster write-through shares its fresh machine-login identity into the same store — one fact, one store, freshest write wins.
