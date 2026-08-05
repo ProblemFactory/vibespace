@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.243.0
+
+- **System panel: event-loop lag history chart** (the metric that cracked the instance-freeze case now has a face): a third chart under Memory/CPU plots the sampler's per-500ms loop-lag values; the 7d coarse ring records each 15-min window's worst lag going forward. Rows hide on ranges with no lag data (pre-upgrade coarse samples).
+- **Billing switch persists the account pick only after the spawn succeeds** (persist-after-verify): a doomed pick (never-signed-in account, host down, shipping blocked) used to be written as the session's on-resume account BEFORE the restart was attempted — every later manual Resume then re-failed with the poisoned config. The pick now rides the create explicitly and lands in the per-session config only when the server confirms the session spawned.
+
 ## 2.242.0
 
 - **THE instance-wide freeze root cause, caught red-handed and fixed**: a resident V8 sampling watchdog on the affected fleet pod captured the event loop blocked for 5.1 seconds inside the `/api/sessions` discovery sweep — which ran `execFileSync` end-to-end (pgrep per live webui session + `tmux list-panes` + two `ps` calls per lock file, all sequential, each fork 100-300ms under load with pgrep's 2s timeout bounding the worst sweeps at tens of seconds). With the sidebar polling every 5s and the cache at 4.5s, a connected client froze the whole server every few seconds for as long as the browser stayed open — the "everything is slow while I work, fine when I come back later" pattern (observed 8-33s event-loop stalls). The sweep is now fully async with PARALLEL subprocess probes (wall time = slowest single command, loop never blocks) and concurrent polls coalesce into one in-flight sweep. Lock-entry ordering is preserved (claimJsonls' mtime fallback depends on it).

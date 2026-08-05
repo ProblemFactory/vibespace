@@ -18,7 +18,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     });
   },
 
-  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, accountId, ephemeral = false, winBounds, recreateCwd = false, ignoreNoConvo = false }) {
+  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, accountId, ephemeral = false, winBounds, recreateCwd = false, ignoreNoConvo = false, onCreateResult }) {
     try { track('event', `session-create:${backend || 'claude'}:${mode || 'default'}`); } catch {}
     cwd = stripCwdHostLabel(cwd); // merged-record display cwd ("host: /path") must never reach a spawn
     this._hideWelcome();
@@ -79,6 +79,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       // surface it — without this the window stayed BLANK forever with no
       // feedback and no openSpec (found reproducing the remote-blank report).
       if (msg.type === 'error' && msg.reqId === reqId) {
+        try { onCreateResult?.(false, msg); } catch { }
         // Resume guard (2.179.0): the conversation is ALREADY live — attach
         // that session instead of leaving a dead "create failed" window (a
         // second --resume would double-write the same claude id).
@@ -205,6 +206,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         return true;
       }
       if (msg.type === 'created' && msg.reqId === reqId) {
+        try { onCreateResult?.(true, msg); } catch { }
         metric('session-create-roundtrip-ms', performance.now() - _createT0);
         // Set openSpec now that we have the server session ID (for cross-client sync)
         winInfo._openSpec = {
@@ -535,7 +537,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     });
   },
 
-  resumeSession(sessionId, cwd, sessionName, { mode, model, effort, permission, accountId, syncId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, hostId, keeperSid, winBounds, excludeWebuiId } = {}) {
+  resumeSession(sessionId, cwd, sessionName, { mode, model, effort, permission, accountId, syncId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, hostId, keeperSid, winBounds, excludeWebuiId, onCreateResult } = {}) {
     this._closeSidebarOnMobile();
     const targetBackendId = backendSessionId || sessionId;
     // If this session is already open in a LIVE window, focus it.
@@ -595,6 +597,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       parentThreadId,
       taskId: contextTask?.id,
       winBounds,
+      onCreateResult,
     });
   },
 
@@ -688,7 +691,16 @@ export function installSessionLifecycle(App, ctx = {}) {
       });
       if (!ok) return;
       const key = spec.sessionKey || `${backend}:${backendSessionId}`;
-      this.sidebar?.setSessionConfig?.(key, { ...(this.sidebar?.getSessionConfig?.(key) || {}), account: acctVal });
+      // PERSIST-AFTER-VERIFY (B-77f3, 2.243.0): the pick used to be written as
+      // the on-resume account BEFORE the spawn — a doomed pick (not logged in,
+      // can't ship, host down) poisoned the session's config, and every later
+      // manual Resume re-failed with it (natural's 2.240.0 incident chain).
+      // The pick now rides the create explicitly and is persisted only once
+      // the server confirms the session actually spawned with it.
+      const persistOnSuccess = (ok2) => {
+        if (!ok2) return; // create errored — config untouched, old account stands
+        this.sidebar?.setSessionConfig?.(key, { ...(this.sidebar?.getSessionConfig?.(key) || {}), account: acctVal });
+      };
       const name = this.sidebar?.getCustomName?.({ backend, backendSessionId }) || live?.name || spec.name || win?.title || t('Session');
       const cwd = live?.cwd || spec.cwd || '';
       const mode = live?.webuiMode || (win ? (win.type === 'terminal' ? 'terminal' : 'chat') : (this.settings.get('session.defaultMode') || 'chat'));
@@ -701,7 +713,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       // loop-blocked instance the active-sessions refresh lagged 10-30s, the
       // killed session still matched as "live", and the switch silently
       // ended at _focusExistingSession on the dead window).
-      const finish = () => this.resumeSession(backendSessionId, cwd, name, { mode, backend, backendSessionId, accountId: acctVal, hostId, winBounds, excludeWebuiId: live?.webuiId });
+      const finish = () => this.resumeSession(backendSessionId, cwd, name, { mode, backend, backendSessionId, accountId: acctVal, hostId, winBounds, excludeWebuiId: live?.webuiId, onCreateResult: persistOnSuccess });
       if (live?.webuiId) {
         // backendSessionId lets the server resolve the session even when the
         // webui id went stale across a restart (2.179.0 — a no-op'd kill here

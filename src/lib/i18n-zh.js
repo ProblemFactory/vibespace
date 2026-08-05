@@ -2245,4 +2245,5 @@ export default {
   "“{name}” never finished signing in — complete its login in Manage agents first.": "「{name}」从未完成登录——请先在「管理 Agents」里完成它的登录。",
   "Capturing…": "抓取中…",
   "Capture failed ({err}) — the server may be busy or restarting. Try again in a moment.": "抓取失败（{err}）——服务器可能正忙或在重启。稍等片刻再试一次。",
+  'Loop lag': '事件循环延迟',
 };

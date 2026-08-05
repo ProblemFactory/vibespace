@@ -285,6 +285,8 @@ export function installSidebarRail(Sidebar) {
             <div class="sys-chart-box"><canvas class="sys-hist-chart" data-ch="mem"></canvas></div>
             <div class="sys-chart-label"><span>CPU</span><b class="sys-chart-cur" data-ch="cpu"></b></div>
             <div class="sys-chart-box"><canvas class="sys-hist-chart" data-ch="cpu"></canvas></div>
+            <div class="sys-chart-label"><span>${escHtml(tr('Loop lag'))}</span><b class="sys-chart-cur" data-ch="lag"></b></div>
+            <div class="sys-chart-box"><canvas class="sys-hist-chart" data-ch="lag"></canvas></div>
             <div class="sys-hist-note"></div>
           </div>`;
         hist.querySelectorAll('.sys-range-chip').forEach((chip) => chip.addEventListener('click', () => {
@@ -336,9 +338,21 @@ export function installSidebarRail(Sidebar) {
       const peakC = Math.max(...pts.map((x) => x.c ?? 0), 0.1);
       const cpuMax = d.cpus && d.cpus >= peakC ? Math.min(d.cpus, Math.max(1, Math.ceil(peakC))) : Math.ceil(peakC);
       mk('cpu', p.map((x) => x.c), col('--red', '#e06c75'), cpuMax, (v) => (typeof v === 'number' ? v.toFixed(v < 10 ? 2 : 0) : v));
+      // Event-loop lag (B-bb68, the metric that cracked the naturalhg freeze
+      // case): fine points carry `e` per sample; coarse (7d) points carry the
+      // window max since 2.243.0 — older coarse samples lack it, so hide the
+      // row when the range has no lag data at all.
+      const fmtMs = (v) => (typeof v !== 'number' ? v : v >= 1000 ? (v / 1000).toFixed(1) + 's' : Math.round(v) + 'ms');
+      const hasLag = pts.some((x) => x.e != null);
+      const lagRow = hist.querySelector('.sys-chart-cur[data-ch="lag"]')?.parentElement;
+      const lagBox = hist.querySelector('.sys-hist-chart[data-ch="lag"]')?.parentElement;
+      if (lagRow) lagRow.style.display = hasLag ? '' : 'none';
+      if (lagBox) lagBox.style.display = hasLag ? '' : 'none';
+      if (hasLag) mk('lag', p.map((x) => x.e ?? null), col('--yellow', '#e5c07b'), undefined, fmtMs);
       const last = pts[pts.length - 1];
       const curMem = hist.querySelector('.sys-chart-cur[data-ch="mem"]'); if (curMem) curMem.textContent = fmtG(last.m) + ' / ' + fmtG(lim);
       const curCpu = hist.querySelector('.sys-chart-cur[data-ch="cpu"]'); if (curCpu && last.c != null) curCpu.textContent = last.c.toFixed(2);
+      const curLag = hist.querySelector('.sys-chart-cur[data-ch="lag"]'); if (curLag && last.e != null) curLag.textContent = fmtMs(last.e);
     },
 
     // ── System panel: container memory / disk / load / top processes ──
