@@ -1056,13 +1056,19 @@ export function installManageAgents(App, ctx = {}) {
       this._hostOwnEmailKnown = { ...(this._hostOwnEmailKnown || {}), [selectedHost]: hostOwnEmail };
       this._hostAcctWarmAt = { ...(this._hostAcctWarmAt || {}), [selectedHost]: Date.now() };
       this._hostAcctWarmState = { ...(this._hostAcctWarmState || {}), [selectedHost]: 'done' };
+      // Server-computed verdicts (B-f531) — shared into the same store the
+      // billing switcher and New Session dialog read (one fact, one store)
+      if (racct.verdicts) this._hostVerdicts = { ...(this._hostVerdicts || {}), [selectedHost]: racct.verdicts };
     }
     const keyLines = claudeAccts.map(a => {
       const isDef = accts.defaultAccountId === a.id;
       const isSub = a.type === 'subscription';
-      const linked = isSub && subBlocked && !!hostOwnEmail && acctEmailOf(a) === hostOwnEmail;
-      const hostSub = isSub && subBlocked && !linked && hostSubIds.includes(a.id);
-      const blocked = isSub && subBlocked && !linked && !hostSub; // subscription on a remote host, opt-in off
+      // Verdict-driven when the probe answered (B-f531): the SAME
+      // evaluateOnHost the spawn uses; legacy email/dir checks as fallback.
+      const v = (selectedHost && racct?.verdicts) ? racct.verdicts[a.id] || null : null;
+      const linked = v ? (isSub && subBlocked && v.usable && v.how === 'host-login') : (isSub && subBlocked && !!hostOwnEmail && acctEmailOf(a) === hostOwnEmail);
+      const hostSub = v ? (isSub && subBlocked && v.usable && v.how === 'host-held') : (isSub && subBlocked && !linked && hostSubIds.includes(a.id));
+      const blocked = isSub && subBlocked && !linked && !hostSub; // subscription on a remote host, opt-in off (incl. held-identity-mismatch — Test/spawn error explains)
       // token-derived orgEmail (per-account ⟳ roles bake) beats the creds
       // dir's config email — same staleness class as the global row (2.188.0)
       const aEmail = this._accountUsage?.[a.id]?.orgEmail || a.email;

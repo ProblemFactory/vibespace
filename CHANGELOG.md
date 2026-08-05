@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.244.0
+
+- **One authority for "which account runs where, and how"** (the structural cure after six field incidents in this exact area — every one was a different surface computing its own verdict from its own cache): `accounts.evaluateOnHost()` is now THE single decision function — pure given live host facts, with the incident-derived rules baked in (host-held dir beats email-linked; a held dir whose reported identity mismatches the account is refused loudly; linked works without a local login; dial never ships; API keys always ship). The spawn path (ws-handler create) and every display surface consume the same function: `/api/hosts/:id/accounts-status` and `/api/accounts` now return per-account `verdicts`, and the billing switcher, New Session dialog and Manage-Agents roster render them verbatim (legacy cache-derived checks survive only as fallback while a probe is in flight).
+- **The `created` reply carries the POST-FACTO billing truth** (`billing: {accountId, how, name}` — what the spawn actually resolved to): the billing switcher persists the session's on-resume account from THIS, never from the requested intent, so a rescue that lands somewhere else can no longer poison the config or split the badge from reality.
+- **The account matrix now runs in CI, not in users' browsers**: `scripts/test-account-verdicts.mjs` exercises every combination that produced a field incident (14 asserts — linked / held / both / identity-mismatch / never-signed-in / ship gate / dial / api-key).
+
 ## 2.243.2
 
 - **A rotated machine login can no longer silently bill the wrong account** (natural's screenshot: the Test window's badge said ClaudeLu while `/status` inside showed the machine's new login): the server's email-linked mapping trusts the host's `.claude.json` config email, which goes STALE right after a `/login` switch (the 2.114.1 identity class) — a stale match mapped the spawn onto whatever token the machine actually holds NOW. The host-held creds dir (deterministically the named account) now takes precedence over the email-linked mapping in the explicit-account path, matching the rescue path's existing order.

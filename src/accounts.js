@@ -519,6 +519,65 @@ class AccountManager {
   //   { id, name, tail?, kind:'api'|'subscription',
   //     localEnv: {VAR:val},          // set in the LOCAL process spawn env
   //     secret: {var,value} | null }  // shipped over ssh-stdin for REMOTE (api only)
+  /**
+   * evaluateOnHost — THE single authority for "how does account X run on
+   * machine Y" (B-f531, 2.244.0 — after SIX field incidents where four client
+   * surfaces and two server branches each computed their own verdict from
+   * their own caches). PURE given hostFacts: the same function feeds the
+   * display surfaces (accounts-status `verdicts`) and the spawn path
+   * (ws-handler create), so what the UI promises is exactly what the spawn
+   * does.
+   *
+   * @param a          account record (this.get(id))
+   * @param hostFacts  null = LOCAL spawn; else the accountsStatus() result
+   *                   (+ .transport) — LIVE host facts, never a client cache
+   * @param opts       { allowShip } — accounts.shipSubscriptionToRemote
+   * @returns {usable, how, reason, linked, held, heldVerified}
+   *   how:    'local-env'  spawn locally with the account env
+   *           'ship'       creds/key ship to the host (resolveForSpawn path)
+   *           'host-held'  host-side ~/.vibespace/subs/<id> dir (nothing ships)
+   *           'host-login' the host's own CLI login IS this account (email)
+   *   reason (when !usable): 'never-signed-in' | 'ship-disabled' |
+   *           'dial-no-ship' | 'held-identity-mismatch'
+   * PRECEDENCE (2.243.2 lesson): host-held beats email-linked — the dir's
+   * creds are the named account deterministically, while the host's config
+   * email goes stale right after a /login switch (2.114.1 class). And when
+   * the host REPORTS the dir's actual identity (hostSubEmails) and it does
+   * NOT match this account, the dir is poisoned/mislabeled — refuse it
+   * loudly instead of billing whoever's creds sit in it.
+   */
+  evaluateOnHost(a, hostFacts, { allowShip = false } = {}) {
+    const backend = this._acctBackend(a);
+    const isSub = backend === 'codex' || this._acctType(a) === 'subscription';
+    const norm = (v) => String(v || '').trim().toLowerCase();
+    const acctEmail = norm(a.email || (String(a.name || '').includes('@') ? a.name : ''));
+    if (!isSub) {
+      // API keys are the sanctioned programmatic path — always shippable
+      return { usable: true, how: hostFacts ? 'ship' : 'local-env', reason: null, linked: false, held: false, heldVerified: false };
+    }
+    const loggedIn = backend === 'codex' ? !!this.readCodexSubAuth(a.id).loggedIn : !!this.readSubCreds(a.id).loggedIn;
+    if (!hostFacts) {
+      if (loggedIn) return { usable: true, how: 'local-env', reason: null, linked: false, held: false, heldVerified: false };
+      return { usable: false, how: null, reason: 'never-signed-in', linked: false, held: false, heldVerified: false };
+    }
+    const hostEmail = norm(backend === 'codex' ? hostFacts.codex?.email : hostFacts.subscription?.email);
+    const linked = !!acctEmail && !!hostEmail && acctEmail === hostEmail;
+    const held = backend === 'claude' && (hostFacts.hostSubs || []).includes(a.id);
+    if (held) {
+      const dirEmail = norm(hostFacts.hostSubEmails?.[a.id]);
+      if (dirEmail && acctEmail && dirEmail !== acctEmail) {
+        return { usable: false, how: null, reason: 'held-identity-mismatch', linked, held, heldVerified: false, dirEmail };
+      }
+      return { usable: true, how: 'host-held', reason: null, linked, held, heldVerified: !!dirEmail };
+    }
+    if (linked) return { usable: true, how: 'host-login', reason: null, linked, held, heldVerified: false };
+    if (loggedIn && allowShip && hostFacts.transport !== 'dial') {
+      return { usable: true, how: 'ship', reason: null, linked, held, heldVerified: false };
+    }
+    if (!loggedIn) return { usable: false, how: null, reason: 'never-signed-in', linked, held, heldVerified: false };
+    return { usable: false, how: null, reason: hostFacts.transport === 'dial' ? 'dial-no-ship' : 'ship-disabled', linked, held, heldVerified: false };
+  }
+
   resolveForSpawn(requested, backend = 'claude') {
     if (backend === 'codex') return this._resolveCodexSpawn(requested);
     if (requested === 'subscription') return null; // the CLI's own global login

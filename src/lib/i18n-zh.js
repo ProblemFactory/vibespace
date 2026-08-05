@@ -2246,4 +2246,6 @@ export default {
   "Capturing…": "抓取中…",
   "Capture failed ({err}) — the server may be busy or restarting. Try again in a moment.": "抓取失败（{err}）——服务器可能正忙或在重启。稍等片刻再试一次。",
   'Loop lag': '事件循环延迟',
+  'The login held on {host} for “{name}” actually belongs to {email} — re-run “Log in on host as this account”.': '{host} 上为“{name}”持有的登录实际属于 {email} — 请重新执行“以此账号在主机上登录”。',
+  'host login belongs to {email}': '主机登录属于 {email}',
 };
