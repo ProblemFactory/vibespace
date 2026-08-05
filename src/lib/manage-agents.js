@@ -1285,6 +1285,17 @@ export function installManageAgents(App, ctx = {}) {
         // test shows the account it claims to test. §ban-safety unaffected —
         // both server paths ship zero creds.
         this.createSession({ backend: 'claude', mode: 'terminal', cwd: '', accountId: id, ephemeral: true, hostId: selectedHost || undefined });
+        // /status DISPLAY caveat (2.244.2, verified forensically on Novita:
+        // the spawn refreshed the HELD dir's token — billing correct — while
+        // /status Organization/Email showed the MACHINE login): the CLI reads
+        // its identity display from the non-relocated ~/.claude.json, so for
+        // a host-held login the display lies while the TOKEN (= billing) is
+        // the held account's. Say so before the user reads /status and files
+        // a wrong-account report.
+        const vTest = selectedHost ? this._hostVerdicts?.[selectedHost]?.[id] : null;
+        if (vTest?.usable && vTest.how === 'host-held') {
+          showToast(t('This test bills “{name}” via its login held on {host}. Note: claude’s /status will show the MACHINE’s identity there — that display doesn’t follow relocated logins; the billed account is “{name}”.', { name: a?.name, host: escHtml(hostLabel) }), { duration: 14000 });
+        }
       };
       const doEmail = async () => {
         const email = await showInputDialog({

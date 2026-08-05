@@ -2248,4 +2248,5 @@ export default {
   'Loop lag': 'ループ遅延',
   'The login held on {host} for “{name}” actually belongs to {email} — re-run “Log in on host as this account”.': '{host} 上の「{name}」用ログインは実際には {email} のものです — 「このアカウントとしてホストでログイン」をやり直してください。',
   'host login belongs to {email}': 'ホストのログインは {email} のもの',
+  'This test bills “{name}” via its login held on {host}. Note: claude’s /status will show the MACHINE’s identity there — that display doesn’t follow relocated logins; the billed account is “{name}”.': 'このテストは {host} 上に保持されたログイン経由で「{name}」に課金されます。注意: claude の /status はマシン自身のアイデンティティを表示します — 課金アカウントは「{name}」です。',
 };
