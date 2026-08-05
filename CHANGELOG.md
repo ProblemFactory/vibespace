@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.241.0
+
+- **Billing switch no longer strands the session on "terminated"** (natural's incident ws ring, definitive: kill → exited → the auto-resume create was NEVER SENT). Root cause: `resumeSession`'s "already open in a live window" shortcut trusted `_allSessions`, which refreshes on a poll/broadcast that can be seconds stale — on a loop-blocked instance the just-killed session still matched as "live", and the switch silently ended at focusing the DEAD window. Two guards: the switcher passes the webui id it just killed as `excludeWebuiId` (never trust a stale match on it), and a read-only view (the terminated window's own ChatView, which keeps its sessionId) no longer counts as a live window at all.
+- **A LINKED account pick now keeps its identity** ("切换到ClaudeLu后点resume变成标准CLI login"): the switcher passed the CLI-login sentinel for accounts that ARE the host's own machine login, so the persisted on-resume config, the title-bar badge, and the switcher's ✓ all degraded to "CLI login @ host" — a successful switch READ as failed. The switcher now sends the real account id; the server's email-linked rescue (2.240.2) maps it onto the host's own login (zero creds ship, §ban-safety unchanged) while `session._accountId` records the picked account, so the badge and ✓ show the account name.
+
 ## 2.240.3
 
 - **Every stale tab now auto-reloads after a server update, not just the first one** (the mechanism behind "updated but still broken": the stale-bundle guard's once-per-version reload key lived in localStorage, which is shared across ALL tabs of the origin — the first tab to reload burned the key and every other open tab silently kept its old bundle against the new server, reproducing already-fixed bugs and eating clicks without a trace). The key moved to sessionStorage: per-tab, survives the reload within the tab, same anti-loop protection where it actually matters.
