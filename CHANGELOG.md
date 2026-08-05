@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.241.1
+
+- **A dying ssh agentd bridge can no longer crash the whole server** (natural's unexplained exit-code-1, 28s after an update restart: the mux heartbeat PING wrote to the ssh child's stdin right as the child died — stdin pipe errors arrive ASYNC as 'error' events, the wrapper only listened on the child process, and the write wrapper's try/catch only stops sync throws → uncaught `write EPIPE`, server down, every session's attach state lost again). stdin/stdout error events are now swallowed; the 'close' event already drives mux teardown + reconnect.
+
 ## 2.241.0
 
 - **Billing switch no longer strands the session on "terminated"** (natural's incident ws ring, definitive: kill → exited → the auto-resume create was NEVER SENT). Root cause: `resumeSession`'s "already open in a live window" shortcut trusted `_allSessions`, which refreshes on a poll/broadcast that can be seconds stale — on a loop-blocked instance the just-killed session still matched as "live", and the switch silently ended at focusing the DEAD window. Two guards: the switcher passes the webui id it just killed as `excludeWebuiId` (never trust a stale match on it), and a read-only view (the terminated window's own ChatView, which keeps its sessionId) no longer counts as a live window at all.
