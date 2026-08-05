@@ -648,7 +648,10 @@ class HostManager {
       const child = execFile('ssh', [...this.sshArgs(h, { multiplex: true }), '--',
         'umask 077; mkdir -p "$HOME/.vibespace/bin"; tar -x -C "$HOME/.vibespace/bin"; chmod +x "$HOME/.vibespace/bin"/vibespace-* 2>/dev/null || true; '
         + 'export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; '
-        + 'node "$HOME/.vibespace/bin/vibespace-hook-register.mjs" 2>/dev/null || true; echo VS-INSTALLED'],
+        // POSIX node finder (2.244.4): nvm.sh sourcing only works in bash — a
+        // dash login shell leaves `node` unresolvable (natural's Novita)
+        + 'VS_NODE="$(command -v node 2>/dev/null)"; [ -z "$VS_NODE" ] && VS_NODE="$(ls -1 "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | sort | tail -1)"; if [ -z "$VS_NODE" ]; then for vs_c in /usr/local/bin/node /usr/bin/node /opt/homebrew/bin/node "$HOME/.local/bin/node"; do [ -x "$vs_c" ] && VS_NODE="$vs_c" && break; done; fi; '
+        + '[ -n "$VS_NODE" ] && "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" 2>/dev/null; echo VS-INSTALLED'],
         { timeout: 30000 }, (err, stdout, stderr) => {
           if (err) return reject(new Error((stderr?.toString() || err.message || '').trim().slice(0, 300)));
           if (!String(stdout).includes('VS-INSTALLED')) return reject(new Error('unexpected response'));
@@ -736,7 +739,7 @@ class HostManager {
     const h = this.get(id);
     const rms = HostManager.AGENT_TOOLS.map((n) => `"$HOME/.vibespace/bin/${n}"`).join(' ');
     const cmd = 'export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; '
-      + 'if [ -f "$HOME/.vibespace/bin/vibespace-hook-register.mjs" ]; then node "$HOME/.vibespace/bin/vibespace-hook-register.mjs" --uninstall 2>/dev/null || true; fi; '
+      + 'VS_NODE="$(command -v node 2>/dev/null)"; [ -z "$VS_NODE" ] && VS_NODE="$(ls -1 "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | sort | tail -1)"; if [ -z "$VS_NODE" ]; then for vs_c in /usr/local/bin/node /usr/bin/node /opt/homebrew/bin/node "$HOME/.local/bin/node"; do [ -x "$vs_c" ] && VS_NODE="$vs_c" && break; done; fi; if [ -n "$VS_NODE" ] && [ -f "$HOME/.vibespace/bin/vibespace-hook-register.mjs" ]; then "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" --uninstall 2>/dev/null || true; fi; '
       + `rm -f ${rms}; echo VS-REMOVED`;
     const out = String(await this._ssh(h, cmd, { timeoutMs: 15000 }));
     if (!out.includes('VS-REMOVED')) throw new Error('unexpected response');
