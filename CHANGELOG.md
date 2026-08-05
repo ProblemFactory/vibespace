@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.245.1
+
+- **The billing switcher previews each account's quota inline**: every row in the switch-billing menu (title-bar badge / card menu) now appends `— 5h x% · 7d y% · age` from the same per-row source rule as the Agents overview (machine login → host quota cache, host-held → its own held-login cache, otherwise the local passive cache; age shown when the data is older than 5 minutes). Pick with your eyes open instead of switching first and checking quota after.
+
 ## 2.245.0
 
 - **Manage Agents is now the machine-sectioned account+quota center**: the host selector is gone — the surface stacks "This machine" plus one section per configured host (`.usage-section-title` headers, sections fill in parallel so slow ssh probes don't serialize the view). Each host section shows the host's own CLI-login row (identity + quota + per-host ⟳) and ONLY the accounts the server says are usable there (B-f531 `verdicts`, usable=true — the client never computes linked/held; the local section stays the FULL roster, the management home for rename/remove/finish-login). Per-row usage follows the verdict: linked accounts show the host's own quota, host-held ones their own host-side snapshot, ship/local the passive cache. An unreachable host says "unreachable" honestly instead of "not installed" + Install buttons. Also fixed in passing: a latent `racct` ReferenceError silently killed the codex roster on every host view (swallowed by the caller's try/catch).
