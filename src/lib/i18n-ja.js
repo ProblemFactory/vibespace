@@ -2246,4 +2246,6 @@ export default {
   "Capturing…": "キャプチャ中…",
   "Capture failed ({err}) — the server may be busy or restarting. Try again in a moment.": "キャプチャに失敗しました（{err}）——サーバーがビジー中か再起動中の可能性があります。少し待って再試行してください。",
   'Loop lag': 'ループ遅延',
+  'The login held on {host} for “{name}” actually belongs to {email} — re-run “Log in on host as this account”.': '{host} 上の「{name}」用ログインは実際には {email} のものです — 「このアカウントとしてホストでログイン」をやり直してください。',
+  'host login belongs to {email}': 'ホストのログインは {email} のもの',
 };

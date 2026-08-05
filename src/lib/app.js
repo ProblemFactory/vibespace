@@ -1668,16 +1668,23 @@ class App {
         ? String(this._hostOwnUsage?.[hostId]?.orgEmail || this._hostUsage?.[hostId]?.orgEmail || '').trim().toLowerCase() : '';
       const emailOf = (a) => String(this._accountUsage?.[a.id]?.orgEmail || a.email || (String(a.name || '').includes('@') ? a.name : '')).trim().toLowerCase();
       const hostHeld = (a) => !!a.hostLogins?.[hostId] || (this._hostSubsKnown?.[hostId] || []).includes(a.id);
+      // SERVER verdicts (B-f531): warm the probe now; the row rebuilds when
+      // the answer lands (_warmHostAccountCache calls _updateAcctRow). While
+      // present, verdicts override the legacy cache-derived linked/held.
+      if (onHost && hostId) this._warmHostAccountCache?.(hostId);
+      const vOf = (a) => (onHost ? this._hostVerdicts?.[hostId]?.[a.id] : null) || null;
       for (const a of list) {
         if (a.type === 'subscription') {
           if (be === 'codex' || !onHost) {
             if (a.loggedIn && (!onHost || allowSubRemote)) opts.push([a.id, t('{name} (subscription)', { name: a.name })]);
             continue;
           }
-          const linked = !!hostOwnEmail && emailOf(a) === hostOwnEmail;
-          const held = !linked && hostHeld(a);
+          const v = vOf(a);
+          const linked = v ? (v.usable && v.how === 'host-login') : (!!hostOwnEmail && emailOf(a) === hostOwnEmail);
+          const held = v ? (v.usable && v.how === 'host-held') : (!linked && hostHeld(a));
           if (linked) opts.push([a.id, a.name + ' ' + t('· uses {host}’s own login', { host: hostName })]);
           else if (held) opts.push([a.id, a.name + ' ' + t('· logged in on {host}', { host: hostName })]);
+          else if (v && v.reason === 'held-identity-mismatch') opts.push([a.id, a.name + ' — ' + t('host login belongs to {email}', { email: v.dirEmail || '?' }), true]);
           else if (a.loggedIn && allowSubRemote && hostRec?.transport !== 'dial') opts.push([a.id, t('{name} (subscription)', { name: a.name })]);
           // Not usable there — show WHY instead of silently omitting (the
           // omission is what taught users the create-then-switch workaround)

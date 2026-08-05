@@ -646,11 +646,18 @@ export function installSessionLifecycle(App, ctx = {}) {
       this._hostSubsKnown = { ...(this._hostSubsKnown || {}), [hostId]: r.hostSubs || [] };
       const email = String(r.subscription?.email || '').trim().toLowerCase();
       this._hostOwnEmailKnown = { ...(this._hostOwnEmailKnown || {}), [hostId]: email };
+      // Server-computed per-account VERDICTS (B-f531) — surfaces render these
+      // verbatim; the legacy email/subs caches above stay only as fallback
+      // for servers that predate the field.
+      if (r.verdicts) this._hostVerdicts = { ...(this._hostVerdicts || {}), [hostId]: r.verdicts };
       const bm = this._billingMenu;
       if (bm && bm.host === hostId && bm.el?.isConnected) {
         bm.el.remove();
         this.showBillingSwitcher(...bm.args);
       }
+      // New Session dialog open on this host → rebuild its account row with
+      // the fresh verdicts (same rebuild-on-arrival pattern as the menu)
+      try { this._updateAcctRow?.(); } catch { }
     }).catch(() => { this._hostAcctWarmState[hostId] = 'done'; });
   },
 
@@ -697,9 +704,13 @@ export function installSessionLifecycle(App, ctx = {}) {
       // manual Resume re-failed with it (natural's 2.240.0 incident chain).
       // The pick now rides the create explicitly and is persisted only once
       // the server confirms the session actually spawned with it.
-      const persistOnSuccess = (ok2) => {
+      const persistOnSuccess = (ok2, createdMsg) => {
         if (!ok2) return; // create errored — config untouched, old account stands
-        this.sidebar?.setSessionConfig?.(key, { ...(this.sidebar?.getSessionConfig?.(key) || {}), account: acctVal });
+        // Persist the POST-FACTO truth (B-f531): what the server actually
+        // resolved the spawn to (created.billing), not the requested intent.
+        // billing.accountId null = the CLI/host's own login = the sentinel.
+        const resolved = createdMsg?.billing ? (createdMsg.billing.accountId || 'subscription') : acctVal;
+        this.sidebar?.setSessionConfig?.(key, { ...(this.sidebar?.getSessionConfig?.(key) || {}), account: resolved });
       };
       const name = this.sidebar?.getCustomName?.({ backend, backendSessionId }) || live?.name || spec.name || win?.title || t('Session');
       const cwd = live?.cwd || spec.cwd || '';
@@ -752,13 +763,28 @@ export function installSessionLifecycle(App, ctx = {}) {
     // subscription no matter what the host actually holds.
     if (rHostId) this._warmHostAccountCache(rHostId); // TTL-guarded internally; rebuilds the open menu on fresh data
     const acctEmailOf = (a) => String(a.email || (String(a.name || '').includes('@') ? a.name : '')).trim().toLowerCase();
-    const hostLinked = (a) => !isCodex && !!hostOwnEmail && acctEmailOf(a) === hostOwnEmail;
+    // SERVER-COMPUTED verdicts (B-f531, 2.244.0): evaluateOnHost's answer per
+    // account, fetched live by _warmHostAccountCache — the SAME function the
+    // spawn path uses, so what this menu promises is what the spawn does.
+    // Legacy cache-derived checks below survive only as fallback while the
+    // probe is in flight or against a pre-verdict server.
+    const vOf = (a) => (rHostId ? this._hostVerdicts?.[rHostId]?.[a.id] : null) || null;
+    const hostLinked = (a) => { const v = vOf(a); if (v) return v.usable && v.how === 'host-login'; return !isCodex && !!hostOwnEmail && acctEmailOf(a) === hostOwnEmail; };
     // Per-account login held ON the host (2.199.0) — cached from the last
     // Manage-Agents visit to that machine; the server re-verifies at spawn.
-    const hostSubHeld = (a) => !isCodex && rHostId && (this._hostSubsKnown?.[rHostId] || []).includes(a.id);
+    const hostSubHeld = (a) => { const v = vOf(a); if (v) return v.usable && v.how === 'host-held'; return !isCodex && rHostId && (this._hostSubsKnown?.[rHostId] || []).includes(a.id); };
     const subBlock = (a) => {
       const isSub = isCodex || (a.type || 'api') === 'subscription';
       if (!isSub) return null; // API keys always ship
+      const v = vOf(a);
+      if (v) { // verdict is authoritative — render it verbatim
+        if (v.usable) return null;
+        if (v.reason === 'held-identity-mismatch') return t('The login held on {host} for “{name}” actually belongs to {email} — re-run “Log in on host as this account”.', { host: rHostName, name: a.name, email: v.dirEmail || '?' });
+        if (v.reason === 'never-signed-in') return t('“{name}” never finished signing in — complete its login in Manage agents first.', { name: a.name });
+        if (v.reason === 'dial-no-ship') return t('Subscription logins can’t ship to a paired device — log in on the device, or use an API-key account');
+        return t('This stored login can’t ship to {host}. If you’ve logged this account in ON {host}, pick “CLI login @ {host}” above — that uses the host’s own login. (Or enable Settings → “Ship subscription logins to remote hosts”.)', { host: rHostName });
+      }
+      // ── legacy fallback (probe in flight / old server) ──
       // NEVER-SIGNED-IN sub (2.240.0, natural's inc-msfx2fdt-3rbn): an
       // account added but whose OAuth login was never completed has no
       // usable credentials ANYWHERE — offering it fail-lates at spawn with

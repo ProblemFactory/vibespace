@@ -442,25 +442,26 @@ function registerWsHandler(wss, ctx) {
                   && typeof data.accountId === 'string' && /^sub-[\w-]{1,40}$/.test(data.accountId)
                   && /not logged in/.test(String(e.message))) {
                 try {
+                  // SINGLE-AUTHORITY verdict (B-f531, 2.244.0): the same
+                  // evaluateOnHost that feeds every display surface decides
+                  // the rescue — held dir first (deterministic creds), then
+                  // email-linked; and a held dir whose REPORTED identity
+                  // mismatches the account is refused loudly instead of
+                  // billing whoever's creds sit in it.
                   const rs = await hosts.accountsStatus(data.hostId);
-                  if ((rs?.hostSubs || []).includes(data.accountId)) {
+                  const facts = { ...rs, transport: hosts.get(data.hostId)?.transport === 'dial' ? 'dial' : 'ssh' };
+                  const v = accounts.evaluateOnHost(accounts.get(data.accountId), facts, {});
+                  if (v.reason === 'held-identity-mismatch') {
+                    ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: `Account error: the login held on the host for this account actually belongs to ${v.dirEmail} — re-run "Log in on host as this account" to fix it` }));
+                    return;
+                  }
+                  if (v.usable && v.how === 'host-held') {
                     rescued = {
                       id: data.accountId, kind: 'subscription', _hostSubReady: true,
                       remoteCreds: { dirName: 'subs/' + data.accountId, envVar: 'CLAUDE_SECURESTORAGE_CONFIG_DIR' },
                     };
-                  } else {
-                    // EMAIL-LINKED rescue (2.240.2): the account IS the host's
-                    // own machine login (same email) — spawn on the host's own
-                    // login directly, zero creds ship. Server-side truth beats
-                    // whatever vintage the client's caches were (a stale
-                    // client passed the raw id; refusing it here was the
-                    // 'never reaches the create path' failure in natural's
-                    // fourth incident).
-                    const acctEmail = String(accounts.get?.(data.accountId)?.email || '').trim().toLowerCase();
-                    const hostEmail = String(rs?.subscription?.email || '').trim().toLowerCase();
-                    if (acctEmail && hostEmail && acctEmail === hostEmail) {
-                      rescued = { id: null, kind: null, _useHostLogin: true };
-                    }
+                  } else if (v.usable && v.how === 'host-login') {
+                    rescued = { id: null, kind: null, _useHostLogin: true };
                   }
                 } catch { /* probe failed — fall through to the original error */ }
               }
@@ -497,31 +498,23 @@ function registerWsHandler(wss, ctx) {
               try { allowShip = !!serverSetting('accounts.shipSubscriptionToRemote'); } catch {}
               if (!allowShip) {
                 try {
+                  // SINGLE-AUTHORITY verdict (B-f531, 2.244.0) — same
+                  // evaluateOnHost as the display surfaces and the rescue
+                  // path above. Precedence lesson (2.243.2): host-held beats
+                  // email-linked (the dir's creds are deterministic; the
+                  // host's config email goes stale right after a /login
+                  // switch — the 2.114.1 class — and a stale match billed
+                  // the machine's ACTUAL new login under the picked badge).
                   const rs = await hosts.accountsStatus(data.hostId);
-                  // ORDER MATTERS (2.243.2, natural's screenshot: Test badge
-                  // said ClaudeLu, /status inside said the OTHER account): the
-                  // host-held dir is checked FIRST — its creds are the named
-                  // account DETERMINISTICALLY. The email-linked mapping trusts
-                  // the host's .claude.json config email, which goes STALE
-                  // after a /login switch (the 2.114.1 identity class) — a
-                  // stale match mapped the spawn onto whatever token the
-                  // machine ACTUALLY holds now, silently billing the wrong
-                  // account while the badge showed the picked one.
-                  const meta = (accounts.list().accounts || []).find((x) => x.id === spawnAccount.id);
-                  const acctEmail = String(meta?.email || (String(meta?.name || '').includes('@') ? meta.name : '')).trim().toLowerCase();
-                  const hostEmail = String((backend === 'codex' ? rs?.codex?.email : rs?.subscription?.email) || '').trim().toLowerCase();
-                  if (backend === 'claude' && (rs?.hostSubs || []).includes(spawnAccount.id)) {
-                    // (a) The host holds a LIVE per-account creds dir
-                    // (~/.vibespace/subs/<id>, minted by an on-host login —
-                    // 2.199.0): point the spawn at it, ship nothing. The
-                    // token was born on that machine and never leaves it.
+                  const facts = { ...rs, transport: hosts.get(data.hostId)?.transport === 'dial' ? 'dial' : 'ssh' };
+                  const v = accounts.evaluateOnHost(accounts.get(spawnAccount.id), facts, {});
+                  if (v.reason === 'held-identity-mismatch') {
+                    ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: `Account error: the login held on the host for this account actually belongs to ${v.dirEmail} — re-run "Log in on host as this account" to fix it` }));
+                    return;
+                  }
+                  if (v.usable && v.how === 'host-held') {
                     spawnAccount._hostSubReady = true;
-                  } else if (acctEmail && hostEmail && hostEmail === acctEmail) {
-                    // (b) The account IS the host's own login (same email) →
-                    // run on the host's login directly. Residual risk: the
-                    // config email can lie after a fresh /login switch until
-                    // the CLI rewrites it — the held-dir path above is immune,
-                    // which is why it wins.
+                  } else if (v.usable && v.how === 'host-login') {
                     linkedAccountId = spawnAccount.id; // identity survives the host-login mapping
                     spawnAccount = null; // = the host's own login (same account)
                   }
@@ -548,6 +541,14 @@ function registerWsHandler(wss, ctx) {
             // env); a linked account spawns via the host's login but IS that
             // account — keep its identity (2.241.0)
             _accountId: spawnAccount?.id || linkedAccountId || null,
+            // HOW the billing resolved (B-f531): rides the created reply so
+            // the client persists/displays the POST-FACTO truth, never the
+            // pre-facto intent
+            _billingHow: spawnAccount?._hostSubReady ? 'host-held'
+              : (spawnAccount?.remoteCreds && data.hostId) ? 'ship'
+              : spawnAccount ? 'local-env'
+              : linkedAccountId ? 'host-login'
+              : 'cli-login',
             // Billing intent at spawn: without an env key the CLI follows its
             // GLOBAL login — record what that was RIGHT NOW so the badge can
             // warn about API-billed sessions even after the user re-logins to
@@ -1489,7 +1490,17 @@ done`;
           // Read childPid from wrapper metadata after it has time to spawn
           setTimeout(() => refreshWebuiPids(), 3000);
 
-          ws.send(JSON.stringify({ type: 'created', sessionId: id, name: session.name, cwd, mode: sessionMode, reqId: data.reqId || undefined }));
+          ws.send(JSON.stringify({
+            type: 'created', sessionId: id, name: session.name, cwd, mode: sessionMode, reqId: data.reqId || undefined,
+            // POST-FACTO billing truth (B-f531): what the spawn ACTUALLY
+            // resolved to — the client persists/labels from this, never from
+            // the requested intent (the badge-vs-reality split class)
+            billing: {
+              accountId: session._accountId || null,
+              how: session._billingHow || null,
+              name: session._accountId ? (() => { try { return accounts?.get?.(session._accountId)?.name || null; } catch { return null; } })() : null,
+            },
+          }));
           broadcastActiveSessions();
           break;
         }

@@ -3376,11 +3376,19 @@ app.post('/api/usage-stats/pricing', (req, res) => {
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.get('/api/accounts', (req, res) => {
-  res.json({
+  const out = {
     ...accounts.list(),
     subscription: accounts.subscriptionStatus(),
     cliKey: accounts.cliPrimaryKey(),
-  });
+  };
+  // LOCAL verdicts (B-f531): same authority as the per-host ones
+  try {
+    out.verdicts = {};
+    for (const a of (out.accounts || [])) {
+      try { out.verdicts[a.id] = accounts.evaluateOnHost(accounts.get(a.id), null, {}); } catch { }
+    }
+  } catch { }
+  res.json(out);
 });
 app.post('/api/accounts', (req, res) => {
   try { res.json({ success: true, account: accounts.add(req.body || {}) }); }
@@ -3427,6 +3435,18 @@ app.get('/api/hosts/:id/accounts-status', async (req, res) => {
     // remember which accounts hold a login ON this host — every view (incl.
     // local, which probes no host) can then show "logged in on X" (2.204.0)
     try { accounts?.noteHostLogins?.(req.params.id, r.hostSubs || []); } catch { }
+    // Per-account VERDICTS (B-f531, 2.244.0): the single evaluateOnHost
+    // authority, computed against these LIVE facts — client surfaces render
+    // these verbatim and never compute their own from page caches.
+    try {
+      const facts = { ...r, transport: hosts.get(req.params.id)?.transport === 'dial' ? 'dial' : 'ssh' };
+      let allowShip = false;
+      try { allowShip = !!serverSetting('accounts.shipSubscriptionToRemote'); } catch { }
+      r.verdicts = {};
+      for (const a of (accounts.list().accounts || [])) {
+        try { r.verdicts[a.id] = accounts.evaluateOnHost(a, facts, { allowShip }); } catch { }
+      }
+    } catch { }
     res.json(r);
   }
   catch (e) { res.status(400).json({ error: e.message }); }
