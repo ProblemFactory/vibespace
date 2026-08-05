@@ -2250,4 +2250,13 @@ export default {
   'host login belongs to {email}': 'ホストのログインは {email} のもの',
   'This test bills “{name}” via its login held on {host}. Note: claude’s /status will show the MACHINE’s identity there — that display doesn’t follow relocated logins; the billed account is “{name}”.': 'このテストは {host} 上に保持されたログイン経由で「{name}」に課金されます。注意: claude の /status はマシン自身のアイデンティティを表示します — 課金アカウントは「{name}」です。',
   '“{name}” isn’t logged in on {host} — it’s logged in on {others}. Use “Log in on host as this account” for {host} (Manage agents), or run the session on {others}.': '「{name}」は {host} にログインしていません — {others} にログイン済みです。Manage agents で {host} に「このアカウントとしてホストでログイン」を実行するか、セッションを {others} で実行してください。',
+  'Accounts & quota by machine': 'マシン別のアカウントとクォータ',
+  'Refresh all': 'すべて更新',
+  'Fetch fresh quota for every signed-in account and machine below — one on-demand request per identity, only when you click (never scheduled)': '下のログイン済みアカウントとマシンすべての最新クォータを取得します — 各アイデンティティにつきオンデマンドの1リクエスト、クリック時のみ（定期実行はしません）',
+  'Only accounts usable on {host} are listed — the full roster lives under “This machine”. The “CLI login” row is {host}’s own login.': '{host} で使用可能なアカウントのみ表示しています — 全アカウントは「このマシン」セクションにあります。「CLI login」行は {host} 自身のログインです。',
+  'Machine unreachable — account availability unknown. Accounts are managed under “This machine”.': 'マシンに到達できません — アカウントの利用可否は不明です。アカウントの管理は「このマシン」セクションで行えます。',
+  'On-demand quota refresh is disabled in Settings': 'オンデマンドのクォータ更新は設定で無効になっています',
+  'This makes ONE non-billable request to Anthropic’s usage endpoint per signed-in account/machine, each with that identity’s own login token — the same call the CLI makes when you run /usage. It only ever fires when you click (never on a timer) and is throttled to ≥60s per target. This notice is shown once.': 'ログイン済みの各アカウント/マシンごとに、その身元自身のログイントークンで Anthropic の使用量エンドポイントへ課金されないリクエストを1回ずつ送ります — CLI で /usage を実行したときと同じ呼び出しです。クリック時のみ発火し（タイマーでは決して実行されません）、ターゲットごとに60秒以上の間隔が保たれます。この通知は一度だけ表示されます。',
+  'Nothing to refresh — no signed-in accounts or machines': '更新対象がありません — ログイン済みのアカウントやマシンがありません',
+  'Full overview →': '全体ビュー →',
 };

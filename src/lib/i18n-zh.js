@@ -2250,4 +2250,13 @@ export default {
   'host login belongs to {email}': '主机登录属于 {email}',
   'This test bills “{name}” via its login held on {host}. Note: claude’s /status will show the MACHINE’s identity there — that display doesn’t follow relocated logins; the billed account is “{name}”.': '本测试以“{name}”计费(经其在 {host} 上持有的登录)。注意: claude 的 /status 会显示机器自身的身份——该显示不跟随重定位的登录; 实际计费账号是“{name}”。',
   '“{name}” isn’t logged in on {host} — it’s logged in on {others}. Use “Log in on host as this account” for {host} (Manage agents), or run the session on {others}.': '“{name}”未在 {host} 上登录——它登录在 {others}。可在 Manage agents 中对 {host} 执行“以此账号在主机上登录”，或把会话跑在 {others} 上。',
+  'Accounts & quota by machine': '按机器查看账号与配额',
+  'Refresh all': '全部刷新',
+  'Fetch fresh quota for every signed-in account and machine below — one on-demand request per identity, only when you click (never scheduled)': '为下方每个已登录账号和机器拉取最新配额——每个身份一次按需请求，仅在你点击时发起（绝不定时）',
+  'Only accounts usable on {host} are listed — the full roster lives under “This machine”. The “CLI login” row is {host}’s own login.': '这里只列出可在 {host} 上使用的账号——完整账号列表在“本机”一节。“CLI login”一行是 {host} 自己的登录。',
+  'Machine unreachable — account availability unknown. Accounts are managed under “This machine”.': '机器不可达——账号可用性未知。账号管理在“本机”一节。',
+  'On-demand quota refresh is disabled in Settings': '按需配额刷新已在设置中禁用',
+  'This makes ONE non-billable request to Anthropic’s usage endpoint per signed-in account/machine, each with that identity’s own login token — the same call the CLI makes when you run /usage. It only ever fires when you click (never on a timer) and is throttled to ≥60s per target. This notice is shown once.': '这会为每个已登录的账号/机器向 Anthropic 的用量端点各发一次不计费请求，均使用该身份自己的登录 token——与在 CLI 里运行 /usage 的调用相同。只在你点击时发起（绝不定时），每个目标至少间隔 60 秒。本提示只显示一次。',
+  'Nothing to refresh — no signed-in accounts or machines': '没有可刷新的对象——无已登录账号或机器',
+  'Full overview →': '完整总览 →',
 };

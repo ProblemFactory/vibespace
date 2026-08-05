@@ -1138,6 +1138,8 @@ html, body {
 }
 .usage-warn { font-size: 10px; color: var(--yellow, #e5c07b); white-space: normal; line-height: 1.45; margin-top: 6px; }
 .usage-updated { font-size: 10px; color: var(--text-dim); margin: 4px 0 10px; }
+/* Door to the Agents machine-sectioned account+quota overview (2.245.0) */
+.usage-overview-row { display: flex; justify-content: flex-end; margin-top: 8px; }
 .usage-popup.hidden { display: none; }
 /* ── Global user-TODO inbox ("For you") ── */
 .taskbar-user-todos {
@@ -2055,6 +2057,17 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .agent-btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
 .agent-btn.primary:hover { background: var(--accent-hover); color: var(--accent-fg); }
 .agents-note { font-size: 11px; color: var(--text-dim); line-height: 1.5; margin: 4px 0 0; }
+/* Machine-sectioned overview (2.245.0): "This machine" + one section per host */
+.agents-overview-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+.agents-overview-head .agents-note { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agents-refresh-all { display: inline-flex; align-items: center; gap: 5px; flex: none; }
+.agents-refresh-all svg { width: 12px; height: 12px; }
+.agents-refresh-all.usage-refresh-spin svg { animation: usage-refresh-spin 0.8s linear infinite; }
+.agents-refresh-all:disabled { opacity: 0.6; pointer-events: none; }
+.agents-machine-sec { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.agents-machine-title { margin: 6px 0 0; padding-bottom: 3px; border-bottom: 1px solid var(--border); }
+.agents-machine-title .agents-machine-sub { font-size: 10px; font-weight: 400; letter-spacing: 0; color: var(--text-dim); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct-refresh-err { display: block; font-size: 10px; margin-top: 2px; }
 
 /* ── Customize mode (Firefox-style chrome edit mode) ── */
 .cz-overlay {
@@ -2481,8 +2494,8 @@ label.cfg-row {
 .palette-path::before { content: '\200e'; } /* LTR mark — leading '~'/neutrals reorder to the end under rtl otherwise */
 
 /* Manage Agents: host selector row */
-.agents-host-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); padding-bottom: 6px; border-bottom: 1px solid var(--border); }
-.agents-host-select { flex: 1; padding: 5px 8px; font-size: 12px; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+/* (the .agents-host-row machine selector was retired by the 2.245.0
+   machine-sectioned overview — sections replaced the dropdown) */
 .cwd-recent-loading { font-size: 10px; color: var(--text-dim); }
 
 /* Sidebar manage mode: mark-then-apply batch management */
@@ -3121,8 +3134,6 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 
 /* rail agents/plugins panel: everything shrinks inside the narrow panel */
 .rail-panel.agents-dialog-body { overflow-x: hidden; }
-.rail-panel .agents-host-row { flex-wrap: wrap; }
-.rail-panel .agents-host-select { flex: 1 1 120px; min-width: 0; max-width: 100%; }
 .rail-panel .ob-backend { min-width: 0; }
 .rail-panel .ob-backend > div { min-width: 0; }
 
@@ -3145,7 +3156,7 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .acct-roster > * { min-width: 0; max-width: 100%; }
 .acct-roster-head .acct-add { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .acct-list > .acct-key-row { min-width: 0; }
-.rail-panel .agents-host-row + .ob-backend, .rail-panel .ob-backend:first-child { border-top: none; }
+.rail-panel .ob-backend:first-child { border-top: none; }
 .rail-panel .acct-roster-head b { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rail-panel .acct-roster-head .acct-add { padding: 1px 7px; font-size: 10px; }
 .rail-panel .agents-note { font-size: 10px; }
