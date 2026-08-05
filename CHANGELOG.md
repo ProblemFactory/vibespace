@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.241.2
+
+- **The 30s local port watch no longer runs a synchronous /proc sweep on the main thread**: on the slim fleet image (no ss/lsof) `detectLocal` falls back to a /proc/net + per-process fd scan — all `readdirSync`/`readlinkSync`, every 30 seconds, on the event loop. A live CPU profile on the busiest fleet pod (hundreds of processes) showed it as the single largest non-idle main-thread consumer (~0.2-0.5s per pass). Converted to `fs.promises` — same bounded work, now on the threadpool.
+
 ## 2.241.1
 
 - **A dying ssh agentd bridge can no longer crash the whole server** (natural's unexplained exit-code-1, 28s after an update restart: the mux heartbeat PING wrote to the ssh child's stdin right as the child died — stdin pipe errors arrive ASYNC as 'error' events, the wrapper only listened on the child process, and the write wrapper's try/catch only stops sync throws → uncaught `write EPIPE`, server down, every session's attach state lost again). stdin/stdout error events are now swallowed; the 'close' event already drives mux teardown + reconnect.

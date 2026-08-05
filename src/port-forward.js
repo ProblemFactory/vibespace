@@ -271,7 +271,7 @@ class PortForwardManager {
     const found = new Map(); // port → inode
     for (const f of ['/proc/net/tcp', '/proc/net/tcp6']) {
       let txt = '';
-      try { txt = fs.readFileSync(f, 'utf-8'); } catch { continue; }
+      try { txt = await fs.promises.readFile(f, 'utf-8'); } catch { continue; }
       for (const line of txt.split('\n').slice(1)) {
         const cols = line.trim().split(/\s+/);
         if (cols.length < 10 || cols[3] !== '0A') continue;
@@ -279,32 +279,37 @@ class PortForwardManager {
         if (port && !found.has(port)) found.set(port, cols[9]);
       }
     }
-    const byInode = this._resolveInodeProcs(new Set([...found.values()]));
+    const byInode = await this._resolveInodeProcs(new Set([...found.values()]));
     return [...found.entries()]
       .map(([port, inode]) => { const hit = byInode.get(inode); return this._classifyOrphan(this._classify({ port, proc: hit?.comm || '', ...(hit?.pid ? { pid: hit.pid } : {}) })); })
       .filter((p) => p.port > 0 && p.port < 65536)
       .sort((a, b) => a.port - b.port);
   }
 
-  /** socket inode → process name via /proc/<pid>/fd (best-effort, bounded). */
-  _resolveInodeProcs(inodes) {
+  /** socket inode → process name via /proc/<pid>/fd (best-effort, bounded).
+   *  ASYNC (2.241.2): this runs on the 30s local watch — on the slim fleet
+   *  image (no ss/lsof) with a busy pod (naturalhg: 184 dtach + hundreds of
+   *  procs) the sync sweep was the single largest main-thread consumer in a
+   *  live profile (~0.2-0.5s EVERY pass, all readdirSync/readlinkSync). The
+   *  promises variants spread the same bounded work over the threadpool. */
+  async _resolveInodeProcs(inodes) {
     const map = new Map();
     if (!inodes.size) return map;
     let budget = 6000; // total readlinks — keeps a busy host bounded
     let pids = [];
-    try { pids = fs.readdirSync('/proc').filter((d) => /^\d+$/.test(d)); } catch { return map; }
+    try { pids = (await fs.promises.readdir('/proc')).filter((d) => /^\d+$/.test(d)); } catch { return map; }
     for (const pid of pids) {
       if (map.size >= inodes.size || budget <= 0) break;
       let fds = [];
-      try { fds = fs.readdirSync(`/proc/${pid}/fd`); } catch { continue; } // not ours — skip
+      try { fds = await fs.promises.readdir(`/proc/${pid}/fd`); } catch { continue; } // not ours — skip
       for (const fd of fds) {
         if (--budget <= 0) break;
         let ln = '';
-        try { ln = fs.readlinkSync(`/proc/${pid}/fd/${fd}`); } catch { continue; }
+        try { ln = await fs.promises.readlink(`/proc/${pid}/fd/${fd}`); } catch { continue; }
         const m = ln.match(/^socket:\[(\d+)\]$/);
         if (!m || !inodes.has(m[1]) || map.has(m[1])) continue;
         let comm = '';
-        try { comm = fs.readFileSync(`/proc/${pid}/comm`, 'utf-8').trim(); } catch { }
+        try { comm = (await fs.promises.readFile(`/proc/${pid}/comm`, 'utf-8')).trim(); } catch { }
         if (comm) map.set(m[1], { pid: Number(pid), comm });
       }
     }
