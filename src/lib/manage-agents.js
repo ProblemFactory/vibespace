@@ -1047,6 +1047,16 @@ export function installManageAgents(App, ctx = {}) {
     // the selected host (~/.vibespace/subs/<id>) — usable there directly.
     const hostSubIds = selectedHost ? (racct?.hostSubs || []) : [];
     this._hostSubsKnown = { ...(this._hostSubsKnown || {}), ...(selectedHost ? { [selectedHost]: hostSubIds } : {}) };
+    // Share the FRESH machine-login identity with the billing switcher's
+    // cache (2.240.1, natural's "左右状态不一致": the roster probed the truth —
+    // the host's machine login had CHANGED — while the switcher's page-old
+    // warm cache kept the previous identity, labeling the WRONG account
+    // "uses the host's own login". One fact, one store, freshest write wins.)
+    if (selectedHost && racct) {
+      this._hostOwnEmailKnown = { ...(this._hostOwnEmailKnown || {}), [selectedHost]: hostOwnEmail };
+      this._hostAcctWarmAt = { ...(this._hostAcctWarmAt || {}), [selectedHost]: Date.now() };
+      this._hostAcctWarmState = { ...(this._hostAcctWarmState || {}), [selectedHost]: 'done' };
+    }
     const keyLines = claudeAccts.map(a => {
       const isDef = accts.defaultAccountId === a.id;
       const isSub = a.type === 'subscription';

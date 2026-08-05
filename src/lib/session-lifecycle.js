@@ -621,10 +621,19 @@ export function installSessionLifecycle(App, ctx = {}) {
   _warmHostAccountCache(hostId) {
     if (!hostId) return;
     this._hostAcctWarmState = this._hostAcctWarmState || {};
-    if (this._hostAcctWarmState[hostId]) return;
+    this._hostAcctWarmAt = this._hostAcctWarmAt || {};
+    // TTL, not once-per-page (2.240.1, natural's "左右状态不一致": the host's
+    // MACHINE LOGIN can change out from under a page-lifetime cache — he
+    // /login'd a different account on the host and the switcher kept calling
+    // the OLD identity "the host's own login", a wrong-BILLING hazard, while
+    // Manage Agents' fresh probe showed the truth. 2min matches the host
+    // auto-test cadence.)
+    if (this._hostAcctWarmState[hostId] === 'pending') return;
+    if (this._hostAcctWarmState[hostId] === 'done' && Date.now() - (this._hostAcctWarmAt[hostId] || 0) < 120000) return;
     this._hostAcctWarmState[hostId] = 'pending';
     fetchJson(`/api/hosts/${encodeURIComponent(hostId)}/accounts-status`).then((r) => {
       this._hostAcctWarmState[hostId] = 'done';
+      this._hostAcctWarmAt[hostId] = Date.now();
       if (!r || r.error) return;
       this._hostSubsKnown = { ...(this._hostSubsKnown || {}), [hostId]: r.hostSubs || [] };
       const email = String(r.subscription?.email || '').trim().toLowerCase();
@@ -717,7 +726,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     // Cold caches ⇒ probe the host now; the menu rebuilds in place when the
     // answer lands (~1s). Without this, a fresh page disables every named
     // subscription no matter what the host actually holds.
-    if (rHostId && !(this._hostSubsKnown && rHostId in this._hostSubsKnown)) this._warmHostAccountCache(rHostId);
+    if (rHostId) this._warmHostAccountCache(rHostId); // TTL-guarded internally; rebuilds the open menu on fresh data
     const acctEmailOf = (a) => String(a.email || (String(a.name || '').includes('@') ? a.name : '')).trim().toLowerCase();
     const hostLinked = (a) => !isCodex && !!hostOwnEmail && acctEmailOf(a) === hostOwnEmail;
     // Per-account login held ON the host (2.199.0) — cached from the last
