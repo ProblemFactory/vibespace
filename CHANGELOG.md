@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.240.1
+
+- **Manage Agents and the billing switcher no longer disagree about who a host's login is** (real report with screenshot: the roster showed one account as the host's own login while the switcher's menu credited a different one — the user had /login'd a NEW account directly on the host, changing the machine identity; the roster probes live but the 2.239.2 switcher cache lived for the whole page, and its stale "uses the host's own login" label was a wrong-BILLING hazard). The switcher's warm cache now has a 2-minute TTL (matching the host auto-test cadence, re-probing on menu open and rebuilding the open menu when fresh data lands), and the Manage-Agents roster write-through shares its fresh machine-login identity into the same store — one fact, one store, freshest write wins.
+
 ## 2.240.0
 
 Three fixes from the second field incident (`inc-msfx2fdt-3rbn`, "无法切号" + a hanging Capture button):
