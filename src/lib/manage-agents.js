@@ -1265,10 +1265,16 @@ export function installManageAgents(App, ctx = {}) {
         }
         done();
         // Diagnostic session — ephemeral (closing its window terminates it).
-        // With a remote host selected it runs ON that host (creds ship to it);
-        // a LINKED account resolves to the host's own login instead (nothing
-        // ships, §ban-safety unaffected).
-        this.createSession({ backend: 'claude', mode: 'terminal', cwd: '', accountId: linkedHere ? 'subscription' : id, ephemeral: true, hostId: selectedHost || undefined });
+        // With a remote host selected it runs ON that host. ALWAYS the real
+        // account id (2.243.1, natural's inc-msghecvm-5ym8): the old
+        // client-side linked→CLI-login-sentinel mapping spawned on the host's
+        // CURRENT machine login — when that login had rotated to a different
+        // account since the client's cache, "Test ClaudeLu" showed the OTHER
+        // account signed in. The server resolves the id against LIVE host
+        // facts (email-linked → host login; host-held dir → that dir), so the
+        // test shows the account it claims to test. §ban-safety unaffected —
+        // both server paths ship zero creds.
+        this.createSession({ backend: 'claude', mode: 'terminal', cwd: '', accountId: id, ephemeral: true, hostId: selectedHost || undefined });
       };
       const doEmail = async () => {
         const email = await showInputDialog({
