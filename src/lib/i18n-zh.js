@@ -2242,4 +2242,7 @@ export default {
   "Copy ID": "复制 ID",
   "The full environment is frozen (processes, session state, locks, transcript fingerprints — local and on every machine involved), so you can now troubleshoot freely: resuming, killing or restarting anything will NOT destroy the evidence. A follow-up snapshot of the next 2 minutes attaches automatically.": "完整环境已冻结（进程、会话状态、锁文件、转录指纹——本机以及所有相关机器），你现在可以放手排查：resume、kill、重启都不会破坏证据。接下来 2 分钟的后续快照会自动附加。",
   "This freezes the whole scene — the last few minutes of UI activity (clicks, window events, errors; never any text you typed or message content), plus the live environment on this instance AND on every machine your sessions use: process tables, session state, lock files, transcript fingerprints. Capture this BEFORE you try to fix things yourself — afterwards the evidence is gone.": "这会冻结整个现场——最近几分钟的界面活动（点击、窗口事件、报错；绝不包含你输入的文字或消息内容），外加本实例以及你会话所在的每台机器上的实时环境：进程表、会话状态、锁文件、转录指纹。请在你自己动手修之前先抓取——动手之后证据就没了。",
+  "“{name}” never finished signing in — complete its login in Manage agents first.": "「{name}」从未完成登录——请先在「管理 Agents」里完成它的登录。",
+  "Capturing…": "抓取中…",
+  "Capture failed ({err}) — the server may be busy or restarting. Try again in a moment.": "抓取失败（{err}）——服务器可能正忙或在重启。稍等片刻再试一次。",
 };

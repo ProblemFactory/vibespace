@@ -137,13 +137,21 @@ export function installIncidentRecorder(app) {
     body.appendChild(actions);
     btn.onclick = async () => {
       btn.disabled = true;
+      const prevLabel = btn.textContent;
+      btn.textContent = t('Capturing\u2026');
       const r = await fetchJson('/api/incident', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: ta.value.slice(0, 2000), rings, snapshot: snapshot(), version: app._version || '' }),
       });
       if (!r?.id) {
         btn.disabled = false;
-        showToast(t('Capture failed: {err}', { err: r?.error || 'server did not answer' }), { type: 'error' });
+        btn.textContent = prevLabel;
+        // Inline, not only a toast (2.240.0: the first field user clicked
+        // mid-server-restart, the request died, and the toast went unseen —
+        // the dialog just looked frozen)
+        let errLine = body.querySelector('.inc-cap-err');
+        if (!errLine) { errLine = document.createElement('div'); errLine.className = 'usage-warn inc-cap-err'; body.appendChild(errLine); }
+        errLine.textContent = t('Capture failed ({err}) — the server may be busy or restarting. Try again in a moment.', { err: r?.error || 'no answer' });
         return;
       }
       // 2-minute follow-up flush: "it's happening right now" cases get the
