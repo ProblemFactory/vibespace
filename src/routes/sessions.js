@@ -13,6 +13,7 @@ const router = express.Router();
 const {
   SESSIONS_DIR, isPidAlive, cwdToProjectDir, recoverCwdFromProjDir,
   getTmuxPaneMap, findTmuxTarget, isProcessClaude,
+  getTmuxPaneMapAsync, findTmuxTargetAsync, isProcessClaudeAsync, execFileP,
   extractSessionMeta, isSubagentMessage,
   readJsonlTailIds, claimJsonls,
 } = require('../session-store');
@@ -550,64 +551,79 @@ function setup(ctx) {
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
-  // Short response cache: discovery spawns sync subprocesses (pgrep/tmux) and
+  // Short response cache: discovery spawns subprocesses (pgrep/tmux) and
   // scans lock files + project dirs — with several clients polling, each poll
   // paid the full cost. 2s TTL collapses concurrent polls into one scan.
   let _sessionsCache = null;
   let _sessionsCacheAt = 0;
+  let _sweepInFlight = null; // concurrent polls share ONE async sweep (2.242.0)
   const _childPidCache = new Map(); // childPid -> {pids, at} — see pgrep note below
 
-  router.get('/api/sessions', (req, res) => {
-    try {
-      // 4500ms: clients poll at 5s — a 2s TTL guaranteed every poll missed
-      // the cache and ran the full sweep (audit round-2, high)
-      if (_sessionsCache && Date.now() - _sessionsCacheAt < 4500) return res.json(_sessionsCache);
-      const projectsDir = path.join(os.homedir(), '.claude', 'projects');
+  // The sweep body — ASYNC since 2.242.0. It ran execFileSync end-to-end and a
+  // live V8 profile on the busiest fleet pod (22 live sessions, heavy claude
+  // turns) caught ONE sweep blocking the event loop for 5.1s (sequential
+  // pgrep×22 + tmux + per-lock ps×2; each sync fork 100-300ms under load,
+  // pgrep's 2s timeout bounding the worst sweeps at tens of seconds). With the
+  // sidebar polling at 5s this froze the WHOLE instance every few seconds for
+  // as long as a client was connected — the "everything is slow while I work,
+  // fine when I come back later" class. Subprocess calls are now async and
+  // PARALLEL (wall = slowest single command, loop never blocks).
+  const _runSessionsSweep = async () => {
+    const projectsDir = path.join(os.homedir(), '.claude', 'projects');
 
-      // Step 0: Use cached webuiPids (updated on session create/kill/restore)
+    // Step 0: Use cached webuiPids (updated on session create/kill/restore)
 
-      // Step 1: Scan lock files + tmux panes -> build map of RUNNING sessions
-      // Build webuiPid -> claudeSessionId map for precise JSONL matching
-      const webuiPidToSessionId = new Map();
-      for (const [id, s] of activeSessions) {
-        if (s.claudeSessionId) {
-          // Map childPid + its direct children (claude forks from node-pty spawn)
-          if (s._childPid) {
-            webuiPidToSessionId.set(s._childPid, s.claudeSessionId);
-            // pgrep is a BLOCKING fork+exec per live session per sweep — the
-            // wrapper's child pids rarely change, cache them 15s (audit round-2)
-            const hit = _childPidCache.get(s._childPid);
-            let pids = hit && Date.now() - hit.at < 15000 ? hit.pids : null;
-            if (!pids) {
-              pids = [];
-              try {
-                const ch = execFileSync('pgrep', ['-P', String(s._childPid)], { encoding: 'utf-8', timeout: 2000 }).trim();
-                for (const line of ch.split('\n')) { const p = parseInt(line.trim()); if (p) pids.push(p); }
-              } catch {}
-              _childPidCache.set(s._childPid, { pids, at: Date.now() });
-              if (_childPidCache.size > 512) _childPidCache.delete(_childPidCache.keys().next().value);
-            }
-            for (const p of pids) webuiPidToSessionId.set(p, s.claudeSessionId);
-          }
-        }
+    // Step 1: Scan lock files + tmux panes -> build map of RUNNING sessions
+    // Build webuiPid -> claudeSessionId map for precise JSONL matching
+    const webuiPidToSessionId = new Map();
+    const needPgrep = []; // [{childPid, claudeSessionId}] — cache misses
+    for (const [id, s] of activeSessions) {
+      if (s.claudeSessionId && s._childPid) {
+        // Map childPid + its direct children (claude forks from node-pty spawn)
+        webuiPidToSessionId.set(s._childPid, s.claudeSessionId);
+        // the wrapper's child pids rarely change, cache them 15s (audit round-2)
+        const hit = _childPidCache.get(s._childPid);
+        if (hit && Date.now() - hit.at < 15000) {
+          for (const p of hit.pids) webuiPidToSessionId.set(p, s.claudeSessionId);
+        } else needPgrep.push({ childPid: s._childPid, claudeSessionId: s.claudeSessionId });
       }
+    }
+    await Promise.all(needPgrep.map(async ({ childPid, claudeSessionId }) => {
+      const out = await execFileP('pgrep', ['-P', String(childPid)], { timeout: 2000 });
+      const pids = [];
+      for (const line of String(out || '').trim().split('\n')) { const p = parseInt(line.trim()); if (p) pids.push(p); }
+      _childPidCache.set(childPid, { pids, at: Date.now() });
+      if (_childPidCache.size > 512) _childPidCache.delete(_childPidCache.keys().next().value);
+      for (const p of pids) webuiPidToSessionId.set(p, claudeSessionId);
+    }));
 
-      const paneMap = getTmuxPaneMap();
-      const runningByProjDir = new Map(); // projDirName -> [{lock, tmuxTarget, assigned, claudeSessionId}]
-      if (fs.existsSync(SESSIONS_DIR)) {
-        for (const f of fs.readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.json'))) {
-          try {
-            const data = JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR, f), 'utf-8'));
-            if (!isPidAlive(data.pid)) continue;
-            if (!isProcessClaude(data.pid)) continue;
-            const projDirName = cwdToProjectDir(data.cwd);
-            const tmuxTarget = findTmuxTarget(data.pid, paneMap);
-            const claudeSessionId = webuiPidToSessionId.get(data.pid) || null;
-            if (!runningByProjDir.has(projDirName)) runningByProjDir.set(projDirName, []);
-            runningByProjDir.get(projDirName).push({ lock: data, tmuxTarget, assigned: false, claudeSessionId });
-          } catch {}
-        }
+    const paneMap = await getTmuxPaneMapAsync();
+    const runningByProjDir = new Map(); // projDirName -> [{lock, tmuxTarget, assigned, claudeSessionId}]
+    if (fs.existsSync(SESSIONS_DIR)) {
+      const lockDatas = [];
+      for (const f of fs.readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.json'))) {
+        try {
+          const data = JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR, f), 'utf-8'));
+          if (!isPidAlive(data.pid)) continue;
+          lockDatas.push(data);
+        } catch {}
       }
+      // probe in PARALLEL, assemble in ORIGINAL order (claimJsonls' mtime
+      // fallback + the firstRunning cwd pick depend on stable entry order)
+      const probed = await Promise.all(lockDatas.map(async (data) => {
+        try {
+          if (!(await isProcessClaudeAsync(data.pid))) return null;
+          return { data, tmuxTarget: await findTmuxTargetAsync(data.pid, paneMap) };
+        } catch { return null; }
+      }));
+      for (const hit of probed) {
+        if (!hit) continue;
+        const projDirName = cwdToProjectDir(hit.data.cwd);
+        const claudeSessionId = webuiPidToSessionId.get(hit.data.pid) || null;
+        if (!runningByProjDir.has(projDirName)) runningByProjDir.set(projDirName, []);
+        runningByProjDir.get(projDirName).push({ lock: hit.data, tmuxTarget: hit.tmuxTarget, assigned: false, claudeSessionId });
+      }
+    }
 
       // Step 2: Scan JSONL files, match with running locks
       const sessions = [];
@@ -730,7 +746,20 @@ function setup(ctx) {
       sessions.sort((a, b) => b.startedAt - a.startedAt);
       _sessionsCache = { sessions };
       _sessionsCacheAt = Date.now();
-      res.json(_sessionsCache);
+      return _sessionsCache;
+  };
+
+  router.get('/api/sessions', async (req, res) => {
+    try {
+      // 4500ms: clients poll at 5s — a 2s TTL guaranteed every poll missed
+      // the cache and ran the full sweep (audit round-2, high)
+      if (_sessionsCache && Date.now() - _sessionsCacheAt < 4500) return res.json(_sessionsCache);
+      // coalesce: N clients missing the cache together share ONE sweep — the
+      // sync handler serialized them for free; the async one must do it itself
+      if (!_sweepInFlight) {
+        _sweepInFlight = _runSessionsSweep().finally(() => { _sweepInFlight = null; });
+      }
+      res.json(await _sweepInFlight);
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 

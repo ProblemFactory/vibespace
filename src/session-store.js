@@ -6,7 +6,7 @@
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const { execFileSync } = require('child_process');
+const { execFileSync, execFile } = require('child_process');
 const { readJsonlBounded } = require('./adapters/codex');
 
 const SESSIONS_DIR = path.join(os.homedir(), '.claude', 'sessions');
@@ -74,6 +74,44 @@ function isProcessClaude(pid) {
     const cmd = execFileSync('ps', ['-p', String(pid), '-o', 'comm='], { encoding: 'utf-8', timeout: 2000 }).trim();
     return cmd === 'claude' || cmd.includes('claude');
   } catch { return false; }
+}
+
+// ── ASYNC discovery helpers (2.242.0) ──
+// The /api/sessions sweep ran these as execFileSync — a live V8 profile on the
+// busiest fleet pod caught a single sweep blocking the event loop 5.1s (22
+// live sessions × sequential pgrep + tmux + per-lock ps; each sync fork is
+// 100-300ms under load and pgrep's 2s timeout × N bounded the worst sweeps at
+// tens of seconds — the 8-33s "whole instance freezes while I work" class).
+// Same commands, async + parallelizable; sync variants stay for boot paths.
+function execFileP(cmd, args, opts = {}) {
+  return new Promise((resolve) => {
+    try { execFile(cmd, args, { encoding: 'utf-8', ...opts }, (err, stdout) => resolve(err ? null : String(stdout || ''))); }
+    catch { resolve(null); }
+  });
+}
+
+async function getTmuxPaneMapAsync() {
+  const map = new Map();
+  const out = await execFileP('tmux', ['list-panes', '-a', '-F', '#{pane_pid}||#{session_name}:#{window_index}.#{pane_index}'], { timeout: 3000 });
+  for (const line of String(out || '').trim().split('\n')) {
+    const [pid, target] = line.split('||');
+    if (pid && target) map.set(parseInt(pid), target);
+  }
+  return map;
+}
+
+async function findTmuxTargetAsync(pid, paneMap) {
+  if (paneMap.has(pid)) return paneMap.get(pid);
+  const out = await execFileP('ps', ['-p', String(pid), '-o', 'ppid='], { timeout: 2000 });
+  const ppid = parseInt(String(out || '').trim());
+  if (paneMap.has(ppid)) return paneMap.get(ppid);
+  return null;
+}
+
+async function isProcessClaudeAsync(pid) {
+  const out = await execFileP('ps', ['-p', String(pid), '-o', 'comm='], { timeout: 2000 });
+  const cmd = String(out || '').trim();
+  return cmd === 'claude' || cmd.includes('claude');
 }
 
 // ── Lock → JSONL claiming (discovery) ──
@@ -841,6 +879,10 @@ module.exports = {
   getTmuxPaneMap,
   findTmuxTarget,
   isProcessClaude,
+  getTmuxPaneMapAsync,
+  findTmuxTargetAsync,
+  isProcessClaudeAsync,
+  execFileP,
   isSubagentMessage,
   isDisplayMessage,
   readJsonlTailIds,
