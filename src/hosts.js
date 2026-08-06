@@ -1161,8 +1161,21 @@ class HostManager {
       out = null;
       if (this.dataPlaneOn?.() || h.transport === 'dial') {
         try {
-          const dm = await this.device(id);
-          const snap = await dm.discoverySnapshot();
+          // HARD DEADLINE on the device path (2.246.2, naturalhg's flapping
+          // link): device(id) runs the connect retry ladder — up to ~13 ×
+          // (8s handshake + backoff) ≈ 2.7 MINUTES — and a lossy path where
+          // TCP opens but the ssh banner hangs (observed live: ssh blew past
+          // ConnectTimeout=8, which only bounds the TCP connect) rides that
+          // ladder to the end. Discovery is a read-only probe with TWO
+          // fallbacks right below (legacy ssh script, 20s hard kill → stale
+          // cache), so the sidebar sat on "Scanning sessions over ssh…" for
+          // minutes while 85 cached sessions were one throw away. The race
+          // doesn't cancel the background connect (deliberate — a later
+          // success heals the device link for everyone else).
+          const deadline = (p, ms, what) => Promise.race([p,
+            new Promise((_, rj) => setTimeout(() => rj(new Error(`${what} deadline`)), ms).unref())]);
+          const dm = await deadline(this.device(id), 6000, 'device-connect');
+          const snap = await deadline(dm.discoverySnapshot(), 12000, 'device-discovery');
           const home = '~'; // path prefix only cosmetic in J/H/N/T keys — build real-looking paths
           const lines = [];
           for (const l of snap.locks) lines.push('LOCK ' + JSON.stringify(l));
