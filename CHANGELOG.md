@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.246.1
+
+- **The chart can pin a workspace against preemption** (`priorityClassName`, empty by default): on a shared cluster that also runs batch/CI, a VibeSpace pod at the default priority 0 is the FIRST thing the scheduler evicts when capacity gets tight — and an interactive workspace that dies mid-session takes the user's live terminal state with it (two instances lost their containers in one day). Set it to a class that outranks those workloads; a class with `preemptionPolicy: Never` is the right shape — it wins a slot without evicting anybody else.
+
 ## 2.246.0
 
 - **SSH keys WITH a passphrase can finally be imported** (Remote → Add machine → "Paste or upload my own key…"). Two things were broken: the encryption check was a regex for the word `ENCRYPTED` in the first 3 lines, but a modern `openssh-key-v1` key's armor is **byte-identical** whether or not it has a passphrase (the state lives in the decoded body's `ciphername`/`kdfname`) — so effectively every key ssh-keygen has produced since OpenSSH 7.8 sailed through the check, got stored still-encrypted, and then failed at connect time with a bare `Permission denied (publickey)` that never mentions a passphrase at any `-v` level. And there was no way to supply one anyway. Now: a real decoder (`src/ssh-key-format.js`, shared verbatim by server and browser) classifies openssh-v1 / PKCS#8 / classic PEM / ppk / ssh.com, the dialog reveals a passphrase field when the key needs one, and the server unlocks it once at import via `ssh-keygen -p`.
