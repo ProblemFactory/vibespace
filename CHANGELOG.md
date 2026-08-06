@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.246.2
+
+- **Remote discovery no longer hangs for minutes on a flapping link** (naturalhg's "scan不出来东西"): the sidebar's Recent/History scan prefers the device data-plane, and `device(id)` runs its connect retry ladder to the end — up to ~2.7 minutes — before discovery could reach its own fallbacks (legacy ssh script, then the last-known stale cache). On a lossy path where TCP opens but the ssh banner hangs (`ConnectTimeout` only bounds the TCP connect — verified live), the sidebar sat on "Scanning sessions over ssh…" the whole time while 85 cached sessions were one throw away. The device path now gets a hard deadline (6s connect / 12s snapshot) and falls through; the background connect keeps retrying so a later success still heals the link.
+
 ## 2.246.1
 
 - **The chart can pin a workspace against preemption** (`priorityClassName`, empty by default): on a shared cluster that also runs batch/CI, a VibeSpace pod at the default priority 0 is the FIRST thing the scheduler evicts when capacity gets tight — and an interactive workspace that dies mid-session takes the user's live terminal state with it (two instances lost their containers in one day). Set it to a class that outranks those workloads; a class with `preemptionPolicy: Never` is the right shape — it wins a slot without evicting anybody else.
