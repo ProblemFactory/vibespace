@@ -90,9 +90,18 @@ Derived decisions (stated in review, not objected):
    shipping: agent tools + hooks talk to the daemon's 0700 unix socket
    (`VIBESPACE_AGENTD_SOCK`), daemon relays; per-session `vsst_` tokens still scope
    requests but never leave the device.
-9. **Node runtime**: prefer device node ≥18; else installer downloads the pinned official
-   static build into the install dir. node-pty ships as prebuilt binaries (linux-x64/arm64,
-   darwin-arm64/x64) in the daemon bundle; unsupported arch = that device's terminals stay
+9. **Node runtime** — SHIPPED 2.246.0 (dial-out installer, bash + PowerShell): prefer device
+   node ≥18 (override → our private copy → PATH → newest nvm → common paths); else the
+   installer downloads the pinned official static build into the install dir, verified
+   against that release's `SHASUMS256.txt` and smoke-run before it is committed. Everything
+   stays inside the install root (`rm -rf` = full uninstall) and the daemon's `spawnEnv()`
+   puts that node dir on every child's PATH, so the `#!/usr/bin/env node` agent tools resolve
+   on a machine that never had node. Instance-side fallback mirror `/vibespace-node/...` for
+   networks that can't reach nodejs.org; musl/32-bit-Windows refuse honestly with fix
+   instructions. Details: `docs/device-agent.md` § Node runtime. Still open: the **ssh**
+   bootstrap path hardcodes bare `node` in five places (see the backlog item). node-pty
+   ships as prebuilt binaries (linux-x64/arm64, darwin-arm64/x64) installed best-effort by
+   the npm belonging to the same node; unsupported arch = that device's terminals stay
    on the legacy path (the ONE hard-cut exception).
 10. **§ban-safety invariants unchanged**: quota reads read-only + human-gated; no scheduled
     OAuth calls; subscription-to-remote opt-in; nothing secret/bulky in argv ever.

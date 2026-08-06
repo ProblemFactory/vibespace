@@ -203,6 +203,9 @@ class Auth {
       if (p === '/agentd.js' || p === '/agentd-install.sh' || p === '/agentd-install.ps1'
         || p === '/vibespace-device.js' || p === '/vibespace-device-install.sh' || p === '/vibespace-device-install.ps1') return next();
       if (p === '/api/agentd-dial') return next();
+      // Node runtime mirror for the installer (2.246.0): the device fetches it
+      // BEFORE it has any node — let alone a cookie. Read-only, allowlisted.
+      if (p.startsWith('/vibespace-node/')) return next();
       // Telemetry collector ingest: remote VibeSpace instances authenticate
       // with the shared Bearer token — the ROUTE enforces it (404 when the
       // collector is off, 403 on a bad token); no cookie exists on the sender.
