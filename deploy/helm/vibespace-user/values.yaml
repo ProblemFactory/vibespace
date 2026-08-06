@@ -38,6 +38,14 @@ resources:
   requests: { cpu: "1", memory: "4Gi" }
   limits:   { cpu: "8", memory: "32Gi" }
 
+# Scheduling priority. An interactive workspace that gets preempted mid-session
+# loses the user's terminal state, so a shared cluster running batch/CI beside
+# VibeSpace should give these pods a priority class ABOVE those workloads —
+# ideally one with preemptionPolicy: Never (it can outrank others for a slot
+# without evicting anything itself). Empty = the cluster's global default
+# (usually priority 0, the first thing anything else preempts).
+priorityClassName: ""
+
 # Schedule onto whatever nodes you want VibeSpace pods on.
 nodeSelector: {}
 tolerations: []
