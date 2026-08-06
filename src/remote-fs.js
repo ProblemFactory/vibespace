@@ -36,7 +36,7 @@ class RemoteFs {
     let dial = false;
     try { dial = this.hosts.get(id)?.transport === 'dial'; } catch { }
     if (!dial && !this.hosts.dataPlaneOn?.()) return null;
-    try { return await this.hosts.device(id); } catch { return null; }
+    try { return await this.hosts.deviceBounded(id, 5000); } catch { return null; }
   }
   async _devHome(id, dm) {
     if (!this._homes) this._homes = new Map();

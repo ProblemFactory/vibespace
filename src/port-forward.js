@@ -110,7 +110,7 @@ class PortForwardManager {
   /** One fresh duplex stream to <hostId>'s <targetHost||loopback>:<port> over
    *  the device link — the same tcpForward primitive the forwards pipe over. */
   async _remoteSocket(hostId, port, targetHost) {
-    const dm = await this.hosts.device(hostId);
+    const dm = await this.hosts.deviceBounded(hostId);
     const h = await dm.tcpForward(port, targetHost || undefined);
     const { Duplex } = require('stream');
     const d = new Duplex({
@@ -224,7 +224,7 @@ class PortForwardManager {
     let ports;
     if (hostId === LOCAL_ID) ports = await this.detectLocal();
     else {
-      const dm = await this.hosts.device(hostId);
+      const dm = await this.hosts.deviceBounded(hostId);
       // Linux: `ss -tlnH`; macOS/BSD: `lsof`. Try ss first, fall back to lsof.
       // -H (no header) is GNU-ss only, so parse defensively either way.
       let out = '';
@@ -426,11 +426,11 @@ class PortForwardManager {
         up.on('error', (e) => { handle.onClose?.(); reject(e); });
       });
     } else {
-      await this.hosts.device(rec.hostId); // remote: fail loud so the UI can say "device offline"
+      await this.hosts.deviceBounded(rec.hostId, 8000); // remote: fail loud so the UI can say "device offline"
       // resolve the device PER CONNECTION, never capture it: a dial re-dial
       // stop()s the old DeviceManager (review finding, high). Steady-state
       // hosts.device() returns the cached live dm, so this costs nothing.
-      openUpstream = async () => { const dm = await this.hosts.device(rec.hostId); return dm.tcpForward(rec.remotePort, rec.targetHost || undefined); };
+      openUpstream = async () => { const dm = await this.hosts.deviceBounded(rec.hostId, 8000); return dm.tcpForward(rec.remotePort, rec.targetHost || undefined); };
     }
     const sockets = new Set();
     const server = net.createServer({ allowHalfOpen: true }, async (sock) => {

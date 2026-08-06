@@ -353,7 +353,10 @@ class HostManager {
   async _hostShell(h, script, { timeoutMs = 15000 } = {}) {
     try {
       if (h.transport === 'dial') {
-        const dm = await this.device(h.id);
+        // 15s, not the 6s default (review catch): accountsStatus rides this
+        // inside session CREATE (linked/host-held rescue) — a tight bound
+        // failed creates a slow-but-healthy link would have served.
+        const dm = await this.deviceBounded(h.id, 15000);
         const r = await dm.runCmd('sh', ['-c', script], { timeoutMs });
         return String(r.stdout || '');
       }
@@ -475,7 +478,9 @@ class HostManager {
       // the LOCAL home, which doesn't exist on the device → spawn/cd failure).
       let out;
       if (h.transport === 'dial') {
-        const dm = await this.device(h.id);
+        // 15s (review catch): this default feeds the session-create cwd — a
+        // deadline records the POD's local home as the device cwd (B-0d70).
+        const dm = await this.deviceBounded(h.id, 15000);
         out = String((await dm.runCmd('sh', ['-c', 'echo "$HOME"'])).stdout || '').trim().split('\n').pop().trim();
       } else {
         out = String(await this._ssh(h, 'echo "$HOME"')).trim().split('\n').pop().trim();
@@ -502,7 +507,7 @@ class HostManager {
     if (h.transport === 'dial') {
       if (!this.dialOnline?.(h.deviceId)) throw new Error('not dialed in — start the daemon on the device (rerun the install command)');
       const t0 = Date.now();
-      const dm = await this.device(id);
+      const dm = await this.deviceBounded(id, 8000);
       const st = dm.status();
       let tools;
       try {
@@ -550,7 +555,7 @@ class HostManager {
     const cmd = `C=$(ps -p ${p} -o args= 2>/dev/null); case "$C" in *claude*|*codex*) kill -TERM ${p} && echo VS_OK;; "") echo VS_GONE;; *) echo VS_NOTAGENT;; esac`;
     let out = '';
     if (h.transport === 'dial' || this.dataPlaneOn?.()) {
-      try { const dm = await this.device(id); out = String((await dm.runCmd('sh', ['-c', cmd], { timeoutMs: 10000 })).stdout || ''); }
+      try { const dm = await this.deviceBounded(id); out = String((await dm.runCmd('sh', ['-c', cmd], { timeoutMs: 10000 })).stdout || ''); }
       catch (e) { if (h.transport === 'dial') throw new Error('device unreachable: ' + e.message); }
     }
     if (!out) out = String(await this._ssh(h, cmd));
@@ -571,7 +576,7 @@ class HostManager {
     const prefix = slash >= 0 ? raw.slice(slash + 1) : raw;
     if (h.transport === 'dial' || this.dataPlaneOn?.()) {
       try {
-        const dm = await this.device(id);
+        const dm = await this.deviceBounded(id, 4000);
         let base = parent;
         if (base === '' || base === '~') base = String((await dm.runCmd('sh', ['-c', 'echo "$HOME"'], { timeoutMs: 5000 })).stdout || '').trim() || '/';
         else if (base.startsWith('~/')) base = String((await dm.runCmd('sh', ['-c', 'echo "$HOME"'], { timeoutMs: 5000 })).stdout || '').trim() + base.slice(1);
@@ -698,10 +703,47 @@ class HostManager {
    *  connection failures surface so callers fall back to the legacy ssh path.
    *  deps.agentd = { ensureAgentdOnHost, agentdHostToken, bundlePath, version }
    *  injected by server.js after boot. ── */
+  /** device() with a hard connect DEADLINE — for READ-ONLY probes and
+   *  interactive surfaces (B-fa6f, naturalhg's flapping H200 links): the
+   *  connect retry ladder runs up to ~2.7 minutes, and on a lossy path where
+   *  TCP opens but the ssh banner hangs (ConnectTimeout only bounds the TCP
+   *  connect — verified live) every data-plane consumer sat on that ladder
+   *  BEFORE reaching its own ssh fallback / error UI. The race never cancels
+   *  the underlying connect — a later success still heals the cached link
+   *  for everyone. Session-ESTABLISHING paths keep calling device() directly:
+   *  they want the full ladder. */
+  deviceBounded(id, connectMs = 6000) {
+    const p = this.device(id);
+    // Observe the LOSER: after the deadline wins, the underlying connect keeps
+    // running (deliberate — a late success heals the cached link), but a late
+    // ladder-exhausted REJECTION with no remaining handler is an
+    // unhandledRejection, which crashes modern Node. One no-op catch marks it
+    // handled without swallowing the race's own rejection path.
+    p.catch(() => { });
+    return Promise.race([
+      p,
+      new Promise((_, rj) => setTimeout(() => rj(new Error(`device link not responding within ${Math.round(connectMs / 1000)}s — it may be flapping; reconnection keeps retrying in the background, try again shortly`)), connectMs).unref()),
+    ]);
+  }
+
   async device(id) {
     if (!this._devices) this._devices = new Map();
     const cached = this._devices.get(id);
     if (cached?.status().connected) return cached;
+    // IN-FLIGHT DEDUP (review catch): deviceBounded abandons its race loser,
+    // so without this every timed-out probe stacked ANOTHER full connect
+    // ladder (fresh DeviceManager + ensureAgentdOnHost ssh + up to ~13 ssh
+    // spawns) — a 5s-polling sidebar against a flapping host multiplied them.
+    if (!this._deviceInflight) this._deviceInflight = new Map();
+    const inflight = this._deviceInflight.get(id);
+    if (inflight) return inflight;
+    const p = this._deviceConnect(id);
+    this._deviceInflight.set(id, p);
+    p.finally(() => this._deviceInflight.delete(id)).catch(() => { });
+    return p;
+  }
+
+  async _deviceConnect(id) {
     if (!this.agentdDeps) throw new Error('agentd deps not wired');
     const h = this.get(id);
     // dial hosts have no ssh — the daemon is already dialed IN; drive it
@@ -828,6 +870,11 @@ class HostManager {
         + `cpid=$(sed -n 's/.*"childPid":\\([0-9]*\\).*/\\1/p' "$f" | head -1); `
         + `[ -n "$cpid" ] && kill -0 "$cpid" 2>/dev/null && basename "$f" .json; done | tail -1`;
       try {
+        // SESSION-ESTABLISHING (review catch, do not re-bound): this probe
+        // decides ADOPT-a-live-claude vs sweep+respawn — a deadline here reads
+        // as "no live keeper" and the writer sweep then SIGTERMs the healthy
+        // claude the full ladder would have adopted. The resume path wants
+        // the wait.
         const dm = await this.device(id);
         const out = String((await dm.runCmd('sh', ['-c', script], { timeoutMs: 8000 }))?.stdout || '').trim().split('\n').pop().trim();
         return /^[\w][\w-]*$/.test(out) ? out : null;
@@ -885,7 +932,7 @@ class HostManager {
     // whole-file cache's biggest cost). Any failure → legacy ssh path below.
     if (this.dataPlaneOn?.() || h.transport === 'dial') {
       try {
-        const dm = await this.device(id);
+        const dm = await this.deviceBounded(id);
         // locate via the discovery snapshot (cached-ish) or a targeted find
         const find = await dm.runCmd('sh', ['-c', `find ${root} ${findExpr} 2>/dev/null | head -1`]);
         const remotePath = find.stdout.trim();
@@ -1031,7 +1078,7 @@ class HostManager {
     // NDJSON output can be huge). Same cursor semantics; legacy ssh fallback.
     if (this.dataPlaneOn?.() || h.transport === 'dial') {
       try {
-        const dm = await this.device(id);
+        const dm = await this.deviceBounded(id);
         const home = (await dm.runCmd('sh', ['-c', 'echo "$HOME"'])).stdout.trim();
         const scanPath = home + '/.vibespace/bin/vibespace-usage-scan';
         await dm.fsWrite(scanPath, script); // fsWrite mkdirs the parent
@@ -1174,7 +1221,7 @@ class HostManager {
           // success heals the device link for everyone else).
           const deadline = (p, ms, what) => Promise.race([p,
             new Promise((_, rj) => setTimeout(() => rj(new Error(`${what} deadline`)), ms).unref())]);
-          const dm = await deadline(this.device(id), 6000, 'device-connect');
+          const dm = await this.deviceBounded(id);
           const snap = await deadline(dm.discoverySnapshot(), 12000, 'device-discovery');
           const home = '~'; // path prefix only cosmetic in J/H/N/T keys — build real-looking paths
           const lines = [];

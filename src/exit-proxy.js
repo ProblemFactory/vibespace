@@ -80,7 +80,7 @@ class ExitProxyManager {
     if (existing && existing.server.listening) {
       return { machine: h.name || h.id, hostId: h.id, localPort: existing.localPort, url: `socks5h://127.0.0.1:${existing.localPort}` };
     }
-    const dm = await this.hosts.device(h.id); // throws if offline
+    const dm = await this.hosts.deviceBounded(h.id, 8000); // throws if offline
     const { port: socksPort } = await dm.serveSocks();
     const sockets = new Set();
     const server = net.createServer({ allowHalfOpen: true }, async (sock) => {
@@ -91,7 +91,7 @@ class ExitProxyManager {
       try {
         // resolve the device PER CONNECTION (a dial re-dial stop()s the old
         // DeviceManager — port-forward's hard-won lesson)
-        const d = await this.hosts.device(h.id);
+        const d = await this.hosts.deviceBounded(h.id, 8000);
         ch = await d.tcpForward(socksPort);
       } catch { try { sock.destroy(); } catch {} return; }
       if (sock.destroyed) { try { ch.close(); } catch {} return; }
@@ -117,7 +117,7 @@ class ExitProxyManager {
     for (const s of l.sockets) { try { s.destroy(); } catch {} }
     try { l.server.close(); } catch {}
     this._live.delete(hostId);
-    try { const dm = await this.hosts.device(hostId); await dm.unserveSocks(l.deviceSocksPort); } catch {}
+    try { const dm = await this.hosts.deviceBounded(hostId); await dm.unserveSocks(l.deviceSocksPort); } catch {}
     this.broadcast?.({ type: 'exits-updated', exits: this.list() });
   }
 

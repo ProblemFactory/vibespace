@@ -3772,7 +3772,10 @@ app.post('/api/agent/exit/run', async (req, res) => {
   if (!cmd || typeof cmd !== 'string') return res.status(400).json({ error: 'cmd (a shell command string) is required' });
   try {
     const h = exitProxy.resolve(machine); // enforces allowExit + resolves the ref
-    const dm = await hosts.device(h.id);
+    // Bounded connect (B-fa6f review catch): every sibling exit path uses
+    // deviceBounded — an agent's `vibespace-exit run` must error in seconds
+    // on a flapping link, not sit on the ~2.7-min connect ladder.
+    const dm = await hosts.deviceBounded(h.id, 8000);
     const r = await dm.runCmd('sh', ['-lc', cmd], { timeoutMs: 120000 });
     res.json({ machine: h.name || h.id, code: r.code ?? 0, stdout: String(r.stdout || ''), stderr: String(r.stderr || '') });
   } catch (e) { res.status(400).json({ error: e.message }); }

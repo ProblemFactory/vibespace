@@ -47,7 +47,13 @@ const mockDm = {
   },
 };
 let deviceThrows = false;
-const hosts = { async device() { if (deviceThrows) throw new Error('device "x" is offline'); return mockDm; }, list: () => [{ id: 'h1', name: 'mock-mac', transport: 'dial' }] };
+const hosts = {
+  async device() { if (deviceThrows) throw new Error('device "x" is offline'); return mockDm; },
+  // mirror the real HostManager interface (2.247.0): consumers call the
+  // bounded variant for read-only/interactive paths
+  deviceBounded(id, ms) { return this.device(id); },
+  list: () => [{ id: 'h1', name: 'mock-mac', transport: 'dial' }],
+};
 
 const events = [];
 const pf = new PortForwardManager({ hosts, dataDir, broadcast: (m) => events.push(m), log: () => {} });
