@@ -145,7 +145,7 @@ class MachineMounts {
     const dial = (() => { try { return this.hosts.get(hostId).transport === 'dial'; } catch { return false; } })();
     if ((dial || this.hosts.dataPlaneOn?.()) && lp) {
       try {
-        const dm = await this.hosts.device(hostId);
+        const dm = await this.hosts.deviceBounded(hostId, 10000);
         const net = require('net');
         const { port } = await dm.reverseForward({ port: wantPort || 0, connectLocal: () => net.connect(lp, '127.0.0.1') });
         return { base: `http://127.0.0.1:${port}`, tunnelPort: port };
@@ -161,7 +161,7 @@ class MachineMounts {
     const h = this.hosts.get(hostId);
     if (h.transport === 'dial' || this.hosts.dataPlaneOn?.()) {
       try {
-        const dm = await this.hosts.device(hostId);
+        const dm = await this.hosts.deviceBounded(hostId, 10000);
         const r = await dm.runCmd(cmd, args, { stdin: input, timeoutMs: 60000 });
         return { code: r.code, stdout: r.stdout, stderr: r.stderr };
       } catch (e) {
@@ -219,7 +219,7 @@ class MachineMounts {
     const h = this.hosts.get(hostId);
     if (h.transport === 'dial' || this.hosts.dataPlaneOn?.()) {
       try {
-        const dm = await this.hosts.device(hostId);
+        const dm = await this.hosts.deviceBounded(hostId, 10000);
         const chunks = [];
         const r = await dm.runStream('sh', ['-c', script], { onData: (b) => chunks.push(b) });
         out = Buffer.concat(chunks).toString('utf8');
@@ -389,7 +389,7 @@ class MachineMounts {
     } catch { }
     try { this.mountTokens.revoke?.(rec.tokenId); } catch { }
     if (rec.tunnelPort) { // release the device-side listener (best-effort)
-      try { const dm = await this.hosts.device(rec.hostId); await dm.reverseUnforward(rec.tunnelPort); } catch { }
+      try { const dm = await this.hosts.deviceBounded(rec.hostId); await dm.reverseUnforward(rec.tunnelPort); } catch { }
     }
   }
 
@@ -415,7 +415,7 @@ class MachineMounts {
     // against the MACHINE's home (review finding: suggest-then-reject)
     let rp = String(remotePath || '');
     if (rp === '~' || rp.startsWith('~/')) {
-      const dm = await this.hosts.device(hostId);
+      const dm = await this.hosts.deviceBounded(hostId, 8000);
       const home = String((await dm.runCmd('sh', ['-c', 'echo "$HOME"'], { timeoutMs: 8000 })).stdout || '').trim();
       if (!home.startsWith('/')) throw new Error('could not resolve ~ on the machine — use an absolute path');
       rp = home + rp.slice(1);
@@ -445,7 +445,7 @@ class MachineMounts {
     if (this._live.has(rec.id) || this._mounting.has(rec.id)) return;
     this._mounting.add(rec.id);
     try {
-      const device = await this.hosts.device(rec.hostId); // ssh: daemon over --stdio; dial: the dialed-in link
+      const device = await this.hosts.deviceBounded(rec.hostId, 10000); // ssh: daemon over --stdio; dial: the dialed-in link
       // normalize a stored trailing slash so an EXISTING record (minted before
       // the mountPull fix) works without a daemon update (the serve-folder
       // confinement double-slash 403 — walter's real bug)
@@ -521,7 +521,7 @@ class MachineMounts {
         const lp = this.localPort();
         if (!lp) continue;
         const net = require('net');
-        this.hosts.device(hostId)
+        this.hosts.deviceBounded(hostId, 8000)
           .then((dm) => dm.reverseForward({ port: rec.tunnelPort, connectLocal: () => net.connect(lp, '127.0.0.1') }))
           .then(() => { this._pushTunnelOwned.add(rec.id); this._pushRetryAt.delete(rec.id); })
           .catch((e) => {
@@ -596,7 +596,7 @@ class MachineMounts {
     for (const rec of this._state.mounts.filter((m) => m.dir === 'push')) {
       if (!this._online(rec.hostId)) continue;
       let dm = null;
-      try { dm = await this.hosts.device(rec.hostId); } catch { continue; }
+      try { dm = await this.hosts.deviceBounded(rec.hostId); } catch { continue; }
       let mounted = null;
       try {
         // `mount` prints "… on <mountpoint> (type…" (mac) / "… on <mountpoint> type …"

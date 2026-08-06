@@ -1081,7 +1081,7 @@ done`;
               // Never runs for pipe-ATTACH (we adopt, not respawn).
               if (data.resume && data.resumeId && !dialKeeperSid && /^[\w-]+$/.test(data.resumeId)) {
                 try {
-                  const dm = await hosts.device(h.id);
+                  const dm = await hosts.deviceBounded(h.id, 15000);
                   await dm.runCmd('sh', ['-c', writerSweepScript(data.resumeId)], { timeoutMs: 20000 });
                   hosts.invalidateDiscovery(h.id);
                 } catch (e) { console.warn('[dial] pre-resume cleanup failed (continuing):', e.message); }

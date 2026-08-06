@@ -38,6 +38,7 @@ const hosts = {
   list: () => records.map((r) => ({ ...r })),
   get: (id) => { const h = records.find((x) => x.id === id); if (!h) throw new Error('host not found'); return h; },
   async device(id) { const h = records.find((x) => x.id === id); if (h.online === false) throw new Error(`device "${h.name}" is offline`); return mkDevice(); },
+  deviceBounded(id, ms) { return this.device(id); }, // mirrors the real HostManager (2.247.0)
 };
 const ev = [];
 const ex = new ExitProxyManager({ hosts, broadcast: (m) => ev.push(m), log: () => {} });
