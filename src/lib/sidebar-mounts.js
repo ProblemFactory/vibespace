@@ -5,6 +5,7 @@ import { createModalShell, showToast, showConfirmDialog, showContextMenu, copyTe
 import { setupDirAutocomplete } from './autocomplete.js';
 import { protoChip } from './sidebar-rail.js'; // http/https/tcp chip (override menu = this._portProtoMenu, same prototype)
 import { t as tr } from './i18n.js'; // sidebar cluster convention: local `t` is pervasively a task var
+import { classifyPrivateKey } from '../ssh-key-format.js'; // shared with the server (CJS pulled into the bundle, like task-color-seq.js)
 
 
 // OAuth cross-browser affordance (2.226.2, real report: the target Google
@@ -65,9 +66,27 @@ const MI = {
 async function api(url, opts = {}) {
   const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...opts });
   const d = await res.json().catch(() => ({}));
-  if (!res.ok || d.error) throw new Error(d.error || `HTTP ${res.status}`);
+  // carry the server's machine-readable `code` (the key-import flow maps it to
+  // localized text — a bare message string can't be translated)
+  if (!res.ok || d.error) { const e = new Error(d.error || `HTTP ${res.status}`); e.code = d.code; throw e; }
   return d;
 }
+
+// Private-key import errors: the SERVER sends a stable code, the CLIENT renders
+// the localized prose (server strings are for logs / non-browser callers).
+const KEY_ERR = {
+  'key-encrypted': () => tr('This key needs a passphrase.'),
+  'key-bad-passphrase': () => tr('Wrong passphrase — the key could not be unlocked.'),
+  'key-not-a-key': () => tr('This does not look like a private key — check that you copied the whole file, including the BEGIN and END lines.'),
+  'key-ppk': () => tr('PuTTY .ppk keys cannot be used by OpenSSH. Convert it first: puttygen key.ppk -O private-openssh-new -o key.pem'),
+  'key-unsupported': () => tr('This key format is not supported — export it in OpenSSH format.'),
+  'key-no-ssh-keygen': () => tr('ssh-keygen is not available on this server, so a passphrase-protected key cannot be unlocked here. Remove its passphrase on your own machine first: ssh-keygen -p -N "" -f <keyfile>'),
+  'key-unlock-unavailable': () => tr('Could not unlock the key on this server. Remove its passphrase on your own machine first: ssh-keygen -p -N "" -f <keyfile>'),
+};
+// every code that should re-open the key dialog instead of failing the add
+const KEY_ERR_CODES = new Set([...Object.keys(KEY_ERR), 'key-unlock-failed', 'key-too-large']);
+// …and the subset that means "we need a (different) passphrase"
+const NEEDS_PASS = new Set(['key-encrypted', 'key-bad-passphrase']);
 
 export function installSidebarMounts(Sidebar) {
   Object.assign(Sidebar.prototype, {
@@ -1032,6 +1051,124 @@ export function installSidebarMounts(Sidebar) {
       render();
     },
 
+    /**
+     * The "Private key" sub-dialog. Resolves {privateKey, keyPassphrase} or
+     * null if dismissed. Re-openable PREFILLED so a wrong passphrase doesn't
+     * make the user paste the key again.
+     *
+     * Detection here is an AFFORDANCE ONLY — it reveals the passphrase row, it
+     * NEVER blocks submit (the server is authoritative, and a format we
+     * misjudge must not become a wall). The "Key has a passphrase?" toggle is
+     * always reachable for exactly that case.
+     */
+    _askPrivateKey({ text = '', error = '', showPass = false } = {}) {
+      return new Promise((resolve) => {
+        let settled = false;
+        const done = (v) => { if (!settled) { settled = true; resolve(v); } };
+        this._mountsDialog(tr('Private key'), [], tr('Use this key'), async (_, ctx) => {
+          const val = ta.value || '';
+          if (!val.trim()) throw new Error(tr('Paste or upload the key first'));
+          // RAW values — a passphrase may legitimately have leading/trailing
+          // whitespace (verified: ssh-keygen accepts 'p@ss w/ spaces '), so
+          // this deliberately bypasses _mountsDialog's trimming field reader.
+          // ORDER IS LOAD-BEARING: settle BEFORE close(). createModalShell's
+          // close() invokes onClose on EVERY path including this one, so a
+          // close-then-resolve would let the onClose fire done(null) first and
+          // "Use this key" would behave exactly like Cancel (caught by the
+          // headless dialog test — idempotency alone does not save you, the
+          // FIRST settle wins).
+          done({ privateKey: val, keyPassphrase: passIn.value || '' });
+          ctx.close();
+        }, { onClose: () => done(null) });
+
+        const ov = document.getElementById('mounts-dialog-overlay');
+        const body = ov.querySelector('.dialog-body');
+
+        const note = document.createElement('p');
+        note.className = 'agents-note';
+        note.textContent = tr('Stored securely on the server. If the key is passphrase-protected, enter the passphrase below — it unlocks the key once and is never saved.');
+
+        const ta = document.createElement('textarea');
+        ta.id = 'mounts-key-paste';
+        ta.placeholder = '-----BEGIN OPENSSH PRIVATE KEY-----';
+        ta.style.cssText = 'min-height:130px;font-size:10px;font-family:monospace';
+        ta.value = text;
+
+        const up = document.createElement('input');
+        up.type = 'file';
+        up.onchange = () => {
+          const f = up.files[0];
+          if (f) { const r = new FileReader(); r.onload = () => { ta.value = r.result; detect(); }; r.readAsText(f); }
+        };
+
+        // status line for detection verdicts (never a blocker)
+        const status = document.createElement('div');
+        status.className = 'mounts-field-hint';
+
+        const passToggle = document.createElement('button');
+        passToggle.type = 'button';
+        passToggle.className = 'mounts-btn';
+        passToggle.style.marginTop = '6px';
+        passToggle.textContent = tr('Key has a passphrase?');
+        passToggle.onclick = () => { revealPass(true); passIn.focus(); };
+
+        const passWrap = document.createElement('div');
+        // NOTE: display:none, NOT a `hidden` class — this project has no global
+        // `.hidden {display:none}` rule (that exact trap already bit the
+        // minimap label and the chat drop overlay).
+        passWrap.style.display = 'none';
+        const passLabel = document.createElement('label');
+        passLabel.textContent = tr('Passphrase');
+        const passIn = document.createElement('input');
+        passIn.type = 'password';
+        passIn.autocomplete = 'off';
+        const passHint = document.createElement('div');
+        passHint.className = 'mounts-field-hint';
+        passHint.textContent = tr('Used once to unlock the key, then discarded — VibeSpace never stores it.');
+        passWrap.append(passLabel, passIn, passHint);
+
+        const revealPass = (on) => {
+          // once revealed it STAYS revealed — auto-hiding would yank a field
+          // the user is typing into
+          if (on) { passWrap.style.display = ''; passToggle.style.display = 'none'; }
+        };
+
+        const detect = () => {
+          const v = ta.value || '';
+          if (!v.trim()) { status.textContent = ''; status.style.color = ''; status.title = ''; return; }
+          const info = classifyPrivateKey(v);
+          status.title = info.cipher || '';
+          if (info.format === 'ppk') {
+            status.style.color = 'var(--red, #e55)';
+            status.textContent = KEY_ERR['key-ppk']();
+          } else if (info.format === 'ssh2') {
+            status.style.color = 'var(--red, #e55)';
+            status.textContent = KEY_ERR['key-unsupported']();
+          } else if (info.format === 'unknown' || info.malformed) {
+            status.style.color = 'var(--yellow, #e5c07b)';
+            status.textContent = KEY_ERR['key-not-a-key']();
+          } else if (info.encrypted) {
+            status.style.color = '';
+            status.textContent = tr('This key is passphrase-protected — enter its passphrase below.');
+            revealPass(!passIn.value); // don't steal focus from a passphrase already being typed
+          } else {
+            status.style.color = '';
+            status.textContent = '';
+          }
+        };
+        ta.addEventListener('input', detect);
+
+        body.prepend(note, ta, up, status, passToggle, passWrap);
+        if (error) {
+          const errEl = ov.querySelector('.cfg-err');
+          if (errEl) errEl.textContent = error;
+        }
+        if (showPass) revealPass(true);
+        detect();
+        if (showPass) passIn.focus(); else ta.focus();
+      });
+    },
+
     _showAddHostDialog(hd) {
       this._mountsDialog('Add remote machine', [
         { key: 'name', label: 'Name', placeholder: 'gpu-01', hint: 'Any label you like — how this machine shows in your lists.' },
@@ -1043,33 +1180,20 @@ export function installSidebarMounts(Sidebar) {
           ['app', hd.key.exists ? 'VibeSpace’s own key (recommended)' : 'Create a key for VibeSpace (recommended)'],
           ['paste', 'Paste or upload my own key…'],
         ], hint: 'An SSH key lets VibeSpace log in without a password. If unsure, pick the VibeSpace key — we’ll show you a line to add on the other machine.' },
-      ], 'Add machine', async (v, { close }) => {
+      ], 'Add machine', async (v, { close, err }) => {
+       // A sub-dialog (key paste / generated public key) reuses the SAME
+       // overlay id, and createModalShell REMOVES the existing one — so from
+       // here on THIS dialog may be detached and _mountsDialog's inline error
+       // element would render into nothing. Anything thrown past that point is
+       // surfaced as a toast instead of failing silently.
+       try {
         let keyPath = null;
         let privateKey = null;
+        let keyPassphrase = '';
         if (v.keyChoice === 'paste') {
-          privateKey = await new Promise((resolve) => {
-            this._mountsDialog('Private key', [], 'Use this key', async (_, ctx) => {
-              const val = document.getElementById('mounts-key-paste')?.value || '';
-              if (!val.trim()) throw new Error('Paste or upload the key first');
-              ctx.close(); resolve(val);
-            });
-            const ov = document.getElementById('mounts-dialog-overlay');
-            const body = ov.querySelector('.dialog-body');
-            const note = document.createElement('p');
-            note.className = 'agents-note';
-            note.textContent = 'Stored securely on the server. The key must not have a passphrase — VibeSpace logs in automatically.';
-            const ta = document.createElement('textarea');
-            ta.id = 'mounts-key-paste';
-            ta.placeholder = '-----BEGIN OPENSSH PRIVATE KEY-----';
-            ta.style.cssText = 'min-height:130px;font-size:10px;font-family:monospace';
-            const up = document.createElement('input');
-            up.type = 'file';
-            up.onchange = () => {
-              const f = up.files[0];
-              if (f) { const r = new FileReader(); r.onload = () => { ta.value = r.result; }; r.readAsText(f); }
-            };
-            body.prepend(note, ta, up);
-          });
+          const k = await this._askPrivateKey();
+          if (!k) throw new Error(tr('Key import cancelled'));
+          ({ privateKey, keyPassphrase } = k);
         }
         if (v.keyChoice === 'app') {
           let k = hd.key;
@@ -1095,13 +1219,42 @@ export function installSidebarMounts(Sidebar) {
           }
           keyPath = k.path;
         }
-        const r = await api('/api/hosts', { method: 'POST', body: JSON.stringify({ name: v.name, user: v.user, host: v.host, port: v.port, keyPath, privateKey }) });
+        // Key errors RETRY in place: re-open the key sub-dialog prefilled with
+        // what was pasted (+ the localized reason) instead of dead-ending the
+        // whole Add-machine flow. The passphrase is only ever sent with the
+        // attempt that needs it — never stored client-side beyond this loop.
+        let r;
+        for (;;) {
+          try {
+            r = await api('/api/hosts', {
+              method: 'POST',
+              body: JSON.stringify({ name: v.name, user: v.user, host: v.host, port: v.port, keyPath, privateKey, keyPassphrase: keyPassphrase || undefined }),
+            });
+            break;
+          } catch (e) {
+            if (!privateKey || !KEY_ERR_CODES.has(e.code)) throw e;
+            const again = await this._askPrivateKey({
+              text: privateKey,
+              error: (KEY_ERR[e.code] || (() => e.message))(),
+              showPass: NEEDS_PASS.has(e.code),
+            });
+            if (!again) throw new Error(tr('Key import cancelled'));
+            ({ privateKey, keyPassphrase } = again);
+          }
+        }
         close();
+        if (r.key && r.key.fingerprint) {
+          showToast(tr('Imported {type} key {fp}', { type: r.key.type || '', fp: r.key.fingerprint }));
+        }
         // immediate connectivity test so the row shows a real status
         this._hostStatus = this._hostStatus || {};
         try { this._hostStatus[r.id] = await api(`/api/hosts/${r.id}/test`, { method: 'POST' }); showToast('Host reachable'); }
         catch (e) { this._hostStatus[r.id] = { ok: false, error: e.message }; showToast('Added, but unreachable: ' + e.message, { type: 'error' }); }
         this._renderMounts();
+       } catch (e) {
+         if (!err.isConnected) { showToast(e.message || tr('Failed'), { type: 'error' }); return; }
+         throw e; // dialog still on screen — let it render the error inline
+       }
       });
     },
 
@@ -1120,15 +1273,18 @@ export function installSidebarMounts(Sidebar) {
       // install without it can dial in but rejects every server command.
       // Per-OS commands (user request): macOS/Linux share the bash
       // installer; Windows gets the PowerShell one (EXPERIMENTAL).
+      // Every URL in the command must be httpBase, NEVER location.origin: for a
+      // relay-paired device the origin is unreachable from its network, so an
+      // origin-built installer/bundle URL fails before it can even start.
       const CMDS = {
-        mac: `curl -fsSL ${location.origin}/vibespace-device-install.sh | bash -s -- \\\n  --bundle-url ${location.origin}/vibespace-device.js \\\n  --dial '${dialUrl}' \\\n  --dial-token ${r.dialToken} \\\n  --host-token ${r.hostToken}`,
-        linux: `curl -fsSL ${location.origin}/vibespace-device-install.sh | bash -s -- \\\n  --bundle-url ${location.origin}/vibespace-device.js \\\n  --dial '${dialUrl}' \\\n  --dial-token ${r.dialToken} \\\n  --host-token ${r.hostToken}`,
-        win: `& ([scriptblock]::Create((iwr -UseBasicParsing ${location.origin}/vibespace-device-install.ps1).Content)) \`\n  -BundleUrl ${location.origin}/vibespace-device.js \`\n  -Dial '${dialUrl}' \`\n  -DialToken ${r.dialToken} -HostToken ${r.hostToken}`,
+        mac: `curl -fsSL ${httpBase}/vibespace-device-install.sh | bash -s -- \\\n  --bundle-url ${httpBase}/vibespace-device.js \\\n  --dial '${dialUrl}' \\\n  --dial-token ${r.dialToken} \\\n  --host-token ${r.hostToken}`,
+        linux: `curl -fsSL ${httpBase}/vibespace-device-install.sh | bash -s -- \\\n  --bundle-url ${httpBase}/vibespace-device.js \\\n  --dial '${dialUrl}' \\\n  --dial-token ${r.dialToken} \\\n  --host-token ${r.hostToken}`,
+        win: `& ([scriptblock]::Create((iwr -UseBasicParsing ${httpBase}/vibespace-device-install.ps1).Content)) \`\n  -BundleUrl ${httpBase}/vibespace-device.js \`\n  -Dial '${dialUrl}' \`\n  -DialToken ${r.dialToken} -HostToken ${r.hostToken}`,
       };
       const NOTES = {
-        mac: tr('macOS: needs Node 18+ (brew install node). No ssh, no FUSE required.'),
-        linux: tr('Linux: needs Node 18+ and curl.'),
-        win: tr('Windows (EXPERIMENTAL, PowerShell): needs Node 18+ (winget install OpenJS.NodeJS.LTS).'),
+        mac: tr('macOS: nothing to install first — the command brings its own Node if needed. No ssh, no FUSE.'),
+        linux: tr('Linux: needs curl (or wget) — Node is installed automatically if the machine has none.'),
+        win: tr('Windows (EXPERIMENTAL, PowerShell): Node is downloaded automatically if missing.'),
       };
       body.innerHTML = '';
       const done = document.createElement('p');
@@ -1158,7 +1314,7 @@ export function installSidebarMounts(Sidebar) {
       }
       const tail = document.createElement('p');
       tail.className = 'agents-note';
-      tail.textContent = tr('The installer registers the daemon with launchd (macOS) / systemd (Linux): it starts on boot and auto-restarts if it crashes. One machine can pair to several VibeSpace instances — each install keeps its own state, keyed by this instance’s address. Pairing the same name again replaces its token.');
+      tail.textContent = tr('The installer registers the daemon with launchd (macOS) / systemd (Linux): it starts on boot and auto-restarts if it crashes. One machine can pair to several VibeSpace instances — each install keeps its own state, keyed by this instance’s address. Pairing the same name again replaces its token. Everything it installs — including a private Node if the machine had none — lives under ~/.vibespace on the device; removing that folder removes it all.');
       const act2 = document.createElement('div');
       act2.className = 'dialog-actions';
       const copy = document.createElement('button');
@@ -1180,7 +1336,7 @@ export function installSidebarMounts(Sidebar) {
       const { body, close } = createModalShell({ id: 'device-pair-dialog', title: tr('Pair a device'), escapeToClose: true });
       const note = document.createElement('p');
       note.className = 'agents-note';
-      note.textContent = tr('For machines you can’t ssh into (a laptop, a Mac at home): the device dials OUT to this instance over a websocket, so it works behind NAT with nothing to expose. Needs Node 18+ on the device.');
+      note.textContent = tr('For machines you can’t ssh into (a laptop, a Mac at home): the device dials OUT to this instance over a websocket, so it works behind NAT with nothing to expose. Nothing to install first — the installer brings its own Node when the machine has none.');
       const note2 = document.createElement('p');
       note2.className = 'agents-note';
       note2.textContent = tr('Re-running the command on the device REPLACES its pairing with this instance. Pairing the same device with several VibeSpace instances is fine — each instance gets its own daemon on the device.');
@@ -1288,8 +1444,12 @@ export function installSidebarMounts(Sidebar) {
       };
     },
 
-    _mountsDialog(title, fields, submitLabel, onSubmit) {
-      const { body, close } = createModalShell({ id: 'mounts-dialog-overlay', title });
+    // opts.onClose: fires on X / backdrop dismissal — REQUIRED by any caller
+    // that awaits a Promise from this dialog, or cancelling it hangs the
+    // awaiting flow forever. Callers must make their resolve idempotent
+    // (close() runs on the submit path too).
+    _mountsDialog(title, fields, submitLabel, onSubmit, opts = {}) {
+      const { body, close } = createModalShell({ id: 'mounts-dialog-overlay', title, onClose: opts.onClose });
       const inputs = {};
       const rows = []; // {field, label, el} for conditional visibility
       let advBody = null;

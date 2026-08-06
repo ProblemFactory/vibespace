@@ -140,6 +140,26 @@ try {
   await evalJs(`([...document.querySelectorAll('#device-pair-dialog button')].find((b) => b.textContent === 'Windows').click(), true)`);
   const winCmd = await evalJs(`document.querySelector('#device-pair-dialog textarea')?.value || ''`);
   check('Windows chip flips to the PowerShell installer', /vibespace-device-install\.ps1/.test(winCmd) && /-DialToken vsdt_/.test(winCmd) && /-HostToken vsht_/.test(winCmd), winCmd.slice(0, 120));
+  // Notes must not promise prerequisites the installer no longer has (2.246.0)
+  const note = await evalJs(`[...document.querySelectorAll('#device-pair-dialog .agents-note')].map((p) => p.textContent).join(' | ')`);
+  check('per-OS notes no longer demand a preinstalled Node', !/Node 18\+|Node ≥18/.test(note), note.slice(0, 160));
+  // RELAY (double-NAT): EVERY url in the command must come from the relay base,
+  // not location.origin — an origin-built installer/bundle URL is exactly what
+  // the device's network cannot reach (2.246.0 bug).
+  const relayCmds = await evalJs(`(() => {
+    const host = document.createElement('div');
+    app.sidebar._fillPairCommandBody(host, () => {}, { deviceId: 'relay-dev', dialToken: 'vsdt_x', hostToken: 'vsht_y', relayUrl: 'https://relay.example.test/' });
+    const out = {};
+    for (const label of ['macOS', 'Linux', 'Windows']) {
+      [...host.querySelectorAll('button')].find((b) => b.textContent === label).click();
+      out[label] = host.querySelector('textarea').value;
+    }
+    return out; })()`);
+  for (const [os, c] of Object.entries(relayCmds || {})) {
+    check(`relay pairing: every URL uses the relay base (${os})`,
+      !c.includes(String(PORT)) && !/127\.0\.0\.1|localhost/.test(c) && (c.match(/https:\/\/relay\.example\.test/g) || []).length >= 2
+      && /wss:\/\/relay\.example\.test\/api\/device-dial\?device=relay-dev/.test(c), c.slice(0, 200));
+  }
   // ── slice B: the pairing IS a machine (hosts model) ──
   const hostsList = (await (await fetch(`http://127.0.0.1:${PORT}/api/hosts`)).json()).hosts || [];
   const dialHost = hostsList.find((h) => h.transport === 'dial' && h.deviceId === 'smoke-mac');

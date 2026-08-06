@@ -5,3 +5,6 @@ placeholder.*BEGIN OPENSSH PRIVATE KEY
 # ceph fs authorize example placeholder in CLAUDE.md (rand token, not a real ceph client name):
 client\.vibespace-share-
 accessToken: 'expired-test-token'
+-----BEGIN OPENSSH PRIVATE KEY-----
+-----END OPENSSH PRIVATE KEY-----
+BEGIN [A-Z ]*PRIVATE KEY

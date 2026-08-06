@@ -3778,15 +3778,34 @@ app.post('/api/agent/exit/run', async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 setTimeout(() => { try { hosts.sweepJsonlCache(); } catch {} }, 60000); // orphaned/stale remote-transcript cache
+const sshKey = require('./src/ssh-key'); // passphrase-protected private-key import
 const { RemoteFs } = require('./src/remote-fs');
 const remoteFs = new RemoteFs(hosts);
 app.get('/api/hosts', (req, res) => {
   const k = hosts.keyInfo();
   res.json({ hosts: hosts.list(), key: { exists: k.exists, path: k.path, publicKey: k.publicKey } });
 });
-app.post('/api/hosts', (req, res) => {
-  try { const id = hosts.add(req.body || {}); bcastAll({ type: 'hosts-updated' }); res.json({ success: true, id }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+app.post('/api/hosts', async (req, res) => {
+  // A pasted key may be passphrase-protected: unlock it HERE (ssh-keygen -p,
+  // src/ssh-key.js) and hand hosts.add() plaintext — add() must stay sync.
+  // The passphrase is used for that one exec and is never stored, logged, or
+  // put in argv; it exists only in this request body and the child's env.
+  const b = { ...(req.body || {}) };
+  try {
+    let key = null;
+    if (b.privateKey && String(b.privateKey).trim()) {
+      key = await sshKey.prepareImportedKey(b.privateKey, b.keyPassphrase);
+      b.privateKey = key.body;
+    }
+    delete b.keyPassphrase; // consumed here and nowhere else
+    const id = hosts.add(b);
+    bcastAll({ type: 'hosts-updated' });
+    res.json({ success: true, id, key: key && { type: key.type, fingerprint: key.fingerprint, wasEncrypted: key.wasEncrypted } });
+  } catch (e) {
+    // `code` drives the client's localized message (server prose is for logs
+    // and non-browser callers)
+    res.status(400).json({ error: e.message, code: e.code });
+  }
 });
 app.post('/api/hosts/key', async (req, res) => {
   try { res.json({ success: true, key: await hosts.generateKey() }); }
@@ -3998,6 +4017,32 @@ app.get(['/vibespace-device-install.ps1', '/agentd-install.ps1'], (req, res) => 
 app.get(['/vibespace-device-install.sh', '/agentd-install.sh'], (req, res) => {
   try { res.type('text/x-shellscript').send(fs.readFileSync(path.join(__dirname, 'scripts', 'vibespace-agentd-install.sh'), 'utf-8')); }
   catch { res.status(404).end(); }
+});
+// Node runtime MIRROR for the device installer (2.246.0): a machine that can
+// reach THIS instance (or its relay) but not nodejs.org — corporate egress
+// filters, CN networks — still pairs. The installer only falls back here when
+// the direct download fails. NEVER a general proxy: fixed upstream host +
+// strict version/filename allowlist, cached on disk. Both the tarball and the
+// SHASUMS come through here, so for that device the trust anchor becomes this
+// instance — which it already trusts to serve the daemon bundle it runs.
+app.get('/vibespace-node/:version/:file', async (req, res) => {
+  const v = String(req.params.version || ''), f = String(req.params.file || '');
+  if (!/^v\d+\.\d+\.\d+$/.test(v)) return res.status(400).end();
+  if (!/^(SHASUMS256\.txt|node-v\d+\.\d+\.\d+-(linux|darwin)-(x64|arm64|armv7l|ppc64le|s390x)(-musl)?\.tar\.gz|node-v\d+\.\d+\.\d+-win-(x64|arm64)\.zip)$/.test(f))
+    return res.status(400).end();
+  const dir = path.join(__dirname, 'data', 'node-cache', v), dest = path.join(dir, f);
+  try {
+    if (!fs.existsSync(dest)) {
+      fs.mkdirSync(dir, { recursive: true });
+      const r = await fetch(`https://nodejs.org/dist/${v}/${f}`);
+      if (!r.ok) return res.status(502).json({ error: 'upstream ' + r.status });
+      const tmp = `${dest}.tmp`;
+      await require('stream/promises').pipeline(require('stream').Readable.fromWeb(r.body), fs.createWriteStream(tmp));
+      fs.renameSync(tmp, dest);
+    }
+    res.type(f.endsWith('.txt') ? 'text/plain' : 'application/octet-stream');
+    fs.createReadStream(dest).pipe(res);
+  } catch (e) { res.status(502).json({ error: e.message }); }
 });
 
 app.get('/api/plugins', (req, res) => {

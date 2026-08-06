@@ -570,8 +570,11 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
         applied.push('codexCreds');
       }
       if (includeSensitive.includes('hosts') && sens.hosts) {
-        getHosts?.()?.importBundle?.(sens.hosts);
-        applied.push('hosts');
+        // a passphrase-protected key can't be unlocked unattended — importBundle
+        // skips it and says so; `applied` is the user-visible channel (same
+        // shape as 'vsPassword: skipped (SSO configured)'), never a silent drop
+        const r = getHosts?.()?.importBundle?.(sens.hosts);
+        applied.push(r?.warnings?.length ? 'hosts (' + r.warnings.join('; ') + ')' : 'hosts');
       }
       if (includeSensitive.includes('mounts') && sens.mounts) {
         getMounts?.()?.importBundle?.(sens.mounts);

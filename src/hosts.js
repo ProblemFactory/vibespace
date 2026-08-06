@@ -18,6 +18,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
 const { claimJsonls, cwdToProjectDir } = require('./session-store');
+const { classifyPrivateKey } = require('./ssh-key-format');
 
 const SSH_BASE_OPTS = [
   '-o', 'BatchMode=yes',
@@ -174,30 +175,47 @@ class HostManager {
     if (!host) throw new Error('host required');
     if (!user) throw new Error('user required');
     const id = 'host-' + crypto.randomBytes(4).toString('hex');
-    // Pasted/uploaded private key → stored per-host under data/ssh, 0600.
-    // BatchMode ssh can't prompt, so passphrase-protected keys won't work.
-    if (privateKey && String(privateKey).trim()) {
-      const body = String(privateKey).replace(/\r\n/g, '\n').trim() + '\n';
-      if (!/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(body)) throw new Error('Not a valid private key (missing BEGIN PRIVATE KEY header)');
-      if (/ENCRYPTED/.test(body.split('\n').slice(0, 3).join('\n'))) throw new Error('Key is passphrase-protected — ssh runs non-interactively; provide an unencrypted key');
-      fs.mkdirSync(this._sshDir, { recursive: true, mode: 0o700 });
-      const kp = path.join(this._sshDir, `${id}.key`);
-      fs.writeFileSync(kp, body, { mode: 0o600 });
-      keyPath = kp;
-    }
+    const hasKeyText = !!(privateKey && String(privateKey).trim());
     const rec = {
       id,
       name: String(name || host).slice(0, 60),
       user: String(user), host: String(host),
       port: Number(port) || 22,
-      keyPath: keyPath ? String(keyPath) : null,
+      keyPath: null,
       // honest key provenance for the UI (real report: an IMPORTED private key
       // was labeled 'using VibeSpace key'): imported = user pasted/uploaded it;
       // app = the VibeSpace-generated key; default = the system's ssh keys.
-      keySource: (privateKey && String(privateKey).trim()) ? 'imported' : (keyPath ? 'app' : 'default'),
+      keySource: hasKeyText ? 'imported' : (keyPath ? 'app' : 'default'),
       createdAt: Date.now(),
     };
+    // Name collision is checked BEFORE any file write — the old order wrote
+    // data/ssh/<id>.key and THEN threw, orphaning a key file no record ever
+    // referenced again.
     if (this._state.hosts.some(h => h.name === rec.name)) throw new Error('A host with that name exists');
+    // Pasted/uploaded private key → stored per-host under data/ssh, 0600.
+    // add() stays SYNCHRONOUS (setDialToken calls it and immediately does
+    // findByDeviceId on the result), so it cannot run the ssh-keygen unlock —
+    // the /api/hosts route decrypts first via src/ssh-key.js and hands us
+    // plaintext. This is the BELT for any caller that skips the route:
+    // BatchMode ssh can never prompt, so a still-encrypted key is refused
+    // rather than stored as a key that will only fail at connect time with a
+    // bare "Permission denied (publickey)".
+    if (hasKeyText) {
+      const body = String(privateKey).replace(/\r\n/g, '\n').trim() + '\n';
+      const info = classifyPrivateKey(body);
+      if (!info.usable) throw new Error('Not a valid private key (missing BEGIN PRIVATE KEY header)');
+      if (info.encrypted) {
+        const e = new Error('Key is passphrase-protected — supply its passphrase so it can be unlocked at import');
+        e.code = 'key-encrypted';
+        throw e;
+      }
+      fs.mkdirSync(this._sshDir, { recursive: true, mode: 0o700 });
+      const kp = path.join(this._sshDir, `${id}.key`);
+      fs.writeFileSync(kp, body, { mode: 0o600 });
+      rec.keyPath = kp;
+    } else if (keyPath) {
+      rec.keyPath = String(keyPath);
+    }
     this._state.hosts.push(rec);
     this._save();
     return rec.id;
@@ -250,9 +268,14 @@ class HostManager {
     return { hosts: this._state.hosts, keys };
   }
 
-  /** Import a host bundle — records REPLACE, uploaded keys rewritten (0600). */
+  /** Import a host bundle — records REPLACE, uploaded keys rewritten (0600).
+   *  Returns {warnings} — a passphrase-protected key in the bundle is SKIPPED
+   *  (we can't prompt for its passphrase during an unattended import, and
+   *  writing it would produce a host that only fails at connect time); the
+   *  caller surfaces the reason in the import result. */
   importBundle(bundle) {
-    if (!bundle || !Array.isArray(bundle.hosts)) return;
+    const warnings = [];
+    if (!bundle || !Array.isArray(bundle.hosts)) return { warnings };
     fs.mkdirSync(this._sshDir, { recursive: true, mode: 0o700 });
     const hosts = [];
     for (const h of bundle.hosts) {
@@ -266,10 +289,17 @@ class HostManager {
       }
       const keyText = bundle.keys?.[h.id];
       if (keyText && h.keyPath && h.keyPath.startsWith(this._sshDir)) {
-        // rebase the key under THIS instance's ssh dir
-        const kp = path.join(this._sshDir, `${h.id}.key`);
-        fs.writeFileSync(kp, keyText, { mode: 0o600 });
-        rec.keyPath = kp;
+        if (classifyPrivateKey(keyText).encrypted) {
+          // Don't write a key ssh can never use non-interactively.
+          rec.keyPath = null;
+          rec.keySource = 'default';
+          warnings.push(`${rec.name || h.id}: key skipped (passphrase-protected — re-import it in Remote → Add machine)`);
+        } else {
+          // rebase the key under THIS instance's ssh dir
+          const kp = path.join(this._sshDir, `${h.id}.key`);
+          fs.writeFileSync(kp, keyText, { mode: 0o600 });
+          rec.keyPath = kp;
+        }
       } else if (h.keyPath && h.keyPath.startsWith(this._sshDir)) {
         rec.keyPath = null; // key text missing — fall back to ~/.ssh
       }
@@ -277,6 +307,7 @@ class HostManager {
     }
     this._state.hosts = hosts;
     this._save();
+    return { warnings };
   }
 
   /** ssh argv for a host (shared by test/discovery/bootstrap/session spawn).

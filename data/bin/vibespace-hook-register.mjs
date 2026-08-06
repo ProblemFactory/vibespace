@@ -4,7 +4,12 @@ import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 const UNINSTALL = process.argv.includes('--uninstall');
-const hookCmd = 'node ' + join(dirname(fileURLToPath(import.meta.url)), 'vibespace-hook.mjs');
+// ABSOLUTE interpreter (2.244.2, natural's Novita: hook error '/bin/sh: 1:
+// node: not found'): hooks run as claude children via /bin/sh with claude's
+// PATH — hosts with nvm-style node installs (and claude as a native binary)
+// have NO node on that PATH. The register itself runs under node, so its own
+// process.execPath is an interpreter that provably exists on this machine.
+const hookCmd = JSON.stringify(process.execPath) + ' ' + join(dirname(fileURLToPath(import.meta.url)), 'vibespace-hook.mjs');
 const files = [
   { f: join(homedir(), '.claude', 'settings.json'), create: false, EVENTS: ['SessionStart', 'UserPromptSubmit', 'Stop'] },
   { f: join(homedir(), '.codex', 'hooks.json'), create: true, EVENTS: ['SessionStart', 'UserPromptSubmit'] },
