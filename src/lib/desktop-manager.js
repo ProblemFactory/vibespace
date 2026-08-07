@@ -434,7 +434,11 @@ export class DesktopManager {
     // still hidden) cached a BLANK preview and the post-show final render
     // early-returned on an identical digest (real report: preview stayed white
     // after leaving the stage until switching desktops).
-    const digest = JSON.stringify([this._activeId, !!this.app.stage?.enabled, !!this.app.stage?.isActive, this.app.stage?.enabled ? this.app.stage.slotBounds() : 0, this._desktops.map(d => [d.id, d.name]),
+    // _flashingWinId included (2.247.4, walter's report — THIRD strike of the
+    // 2.151.0 class): flashWindow's cross-desktop preview flash sets it and
+    // calls _renderSwitcher, but a mere card click changes nothing else, so
+    // the digest matched and the flash never painted.
+    const digest = JSON.stringify([this._activeId, this._flashingWinId || 0, !!this.app.stage?.enabled, !!this.app.stage?.isActive, this.app.stage?.enabled ? this.app.stage.slotBounds() : 0, this._desktops.map(d => [d.id, d.name]),
       [...this.app.wm.windows.values()].map(w => [w._desktopId, w.isMinimized,
         !!w._hiddenByDesktop, !!w._hiddenByStage, !!w._onStage,
         !!w.element?.classList.contains('window-waiting'),
