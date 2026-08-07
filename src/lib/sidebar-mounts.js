@@ -683,6 +683,14 @@ export function installSidebarMounts(Sidebar) {
         }),
       );
       if (!isDial) actions.append(ibtn(MI.wrench, 'Set up (install the tools needed to run agents)', () => { this._showBootstrapDialog(h); }));
+      // B-6640: graduate an ssh machine to dial-out (installs the daemon as a
+      // persistent service so it dials back over ws — banner-hang/ControlMaster/
+      // per-op-child taxes gone; ssh stays as the rescue channel). h.graduated
+      // + h.dialLive come from hosts.list().
+      if (!isDial) actions.append(ibtn(MI.bolt, h.graduated
+        ? tr('Dial-out: {state} — click to manage (ssh stays as rescue)', { state: h.dialLive ? tr('LIVE') : tr('installed, not dialed in') })
+        : tr('Upgrade "{name}" to dial-out (faster + self-healing over a flaky link; ssh kept as rescue)', { name: h.name }),
+        () => { this._showGraduateDialog(h); }, h.graduated ? (h.dialLive ? 'mounts-icon-accent' : '') : ''));
       if (isDial) actions.append(ibtn(MI.retry, tr('Re-pair (fresh command — keeps the row, no unpair needed)'), async () => {
         const { body, close } = createModalShell({ id: 'device-repair-dialog', title: tr('Re-pair "{name}"', { name: h.name }), bodyClass: 'mounts-dialog-body', escapeToClose: true });
         body.textContent = tr('Rotating the pairing credentials…');
@@ -1382,6 +1390,46 @@ export function installSidebarMounts(Sidebar) {
       };
       go.onclick = pair;
       inp.onkeydown = (e) => { if (e.key === 'Enter') pair(); };
+    },
+
+    // B-6640: upgrade an ssh machine to a dial-out device (or roll it back).
+    async _showGraduateDialog(h) {
+      const { body, close } = createModalShell({ id: 'mounts-dialog-overlay', title: h.graduated ? tr('Dial-out — "{name}"', { name: h.name }) : tr('Upgrade "{name}" to dial-out', { name: h.name }), bodyClass: 'mounts-dialog-body', escapeToClose: true });
+      if (h.graduated) {
+        const st = document.createElement('div'); st.className = 'tiny'; st.style.marginBottom = '10px';
+        st.innerHTML = h.dialLive
+          ? tr('The daemon on this machine is <b>dialing in</b> — data-plane ops (files, discovery, transcripts) ride that ws link instead of ssh. ssh stays as the rescue channel.')
+          : tr('The daemon is installed but <b>not currently dialed in</b> — ops fall back to ssh until it reconnects (it retries from the machine side).');
+        body.appendChild(st);
+        const rm = document.createElement('button'); rm.className = 'btn-create danger'; rm.textContent = tr('Remove dial-out (keep the ssh machine)');
+        rm.onclick = async () => {
+          rm.disabled = true; rm.textContent = tr('Removing…');
+          try { const r = await api(`/api/hosts/${h.id}/graduate-dial`, { method: 'POST', body: JSON.stringify({ remove: true }) });
+            if (r?.error) throw new Error(r.error);
+            showToast(tr('Dial-out removed — "{name}" is a plain ssh machine again', { name: h.name })); close(); this._refresh?.();
+          } catch (e) { rm.disabled = false; rm.textContent = tr('Remove dial-out (keep the ssh machine)'); showToast(e.message, { type: 'error' }); }
+        };
+        body.appendChild(rm);
+        return;
+      }
+      const info = document.createElement('div'); info.className = 'tiny'; info.style.marginBottom = '10px';
+      info.innerHTML = tr('Installs the VibeSpace daemon as a persistent service on the machine so it <b>dials back to this instance over a WebSocket</b>. Every file/discovery/transcript op then uses that link — no ssh banner-hang, ControlMaster staleness, or per-op child processes. <b>ssh is kept</b> as the bootstrap + rescue channel, and you can remove this anytime.');
+      body.appendChild(info);
+      const relayRow = document.createElement('label'); relayRow.className = 'tiny'; relayRow.style.display = 'block'; relayRow.style.margin = '8px 0';
+      relayRow.innerHTML = '<input type="checkbox" id="grad-relay" style="vertical-align:middle"> ' + tr('This instance is behind NAT — publish it through the relay so the machine can dial in (needs the frp plugin)');
+      body.appendChild(relayRow);
+      const err = document.createElement('div'); err.className = 'tiny'; err.style.color = 'var(--red)'; err.style.margin = '6px 0'; body.appendChild(err);
+      const go = document.createElement('button'); go.className = 'btn-create'; go.textContent = tr('Upgrade to dial-out');
+      go.onclick = async () => {
+        err.textContent = ''; go.disabled = true; go.textContent = tr('Installing on the machine…');
+        try {
+          const viaRelay = body.querySelector('#grad-relay')?.checked || false;
+          const r = await api(`/api/hosts/${h.id}/graduate-dial`, { method: 'POST', body: JSON.stringify({ serverUrl: viaRelay ? '' : location.origin, viaRelay }) });
+          if (r?.error) throw new Error(r.error);
+          showToast(r.dialedIn ? tr('"{name}" upgraded — dial link is live', { name: h.name }) : tr('"{name}" installed — waiting for it to dial in', { name: h.name })); close(); this._refresh?.();
+        } catch (e) { go.disabled = false; go.textContent = tr('Upgrade to dial-out'); if (!err.isConnected) showToast(e.message, { type: 'error' }); else err.textContent = e.message; }
+      };
+      body.appendChild(go);
     },
 
     // Bootstrap: dedicated step-progress UI with an expandable live log

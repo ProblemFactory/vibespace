@@ -103,7 +103,9 @@ class HostManager {
     // there is no separate device API anymore (B-f3e8).
     return this._state.hosts.map(h => (h.transport === 'dial'
       ? { ...h, dialTokenHash: undefined, online: !!this.dialOnline?.(h.deviceId) }
-      : { ...h }));
+      // graduated ssh machine (B-6640): expose the upgrade + live-dial state
+      // (hash stays redacted like pure-dial records)
+      : { ...h, dialTokenHash: undefined, ...(h.deviceId ? { graduated: true, dialLive: !!this.dialOnline?.(h.deviceId) } : {}) }));
   }
 
   get(id) {
@@ -114,7 +116,44 @@ class HostManager {
 
   /** The host record a dialed-in device belongs to (deviceId = wire identity). */
   findByDeviceId(deviceId) {
-    return this._state.hosts.find(h => h.transport === 'dial' && h.deviceId === String(deviceId)) || null;
+    // Pure-dial first (existing behavior), else a GRADUATED ssh record
+    // (B-6640: an ssh machine that also dials out carries deviceId +
+    // dialTokenHash on its ssh record — dial-in auth and the dial-in hooks
+    // must resolve it, or the daemon's dial is rejected as unknown).
+    return this._state.hosts.find(h => h.transport === 'dial' && h.deviceId === String(deviceId))
+      || this._state.hosts.find(h => h.deviceId === String(deviceId)) || null;
+  }
+
+  /** B-6640: mark an ssh machine as dial-graduated — assigns its stable
+   *  deviceId (the mint + dial-in key) and records the install root for a
+   *  later deterministic removal. transport STAYS 'ssh'/absent: every ssh
+   *  path keeps working as the bootstrap + rescue channel; only the live
+   *  routing (_deviceConnect) prefers the dialed-in stream. */
+  graduateDial(id, { dialRoot } = {}) {
+    const h = this.get(id);
+    if (h.transport === 'dial') throw new Error('already a dial device');
+    if (!h.deviceId) h.deviceId = ('grad-' + id).replace(/[^\w-]/g, '').slice(0, 32);
+    if (dialRoot) h.dialRoot = String(dialRoot);
+    this._save();
+    return h;
+  }
+
+  ungraduateDial(id) {
+    const h = this.get(id);
+    delete h.deviceId; delete h.dialTokenHash; delete h.dialRoot;
+    this._save();
+    return h;
+  }
+
+  /** Dial-in hook for GRADUATED hosts (wired from the server's dial-in
+   *  branch): the fresh dial stream should win over a cached ssh-transport
+   *  DeviceManager — evict it so the next op rebuilds over the dial link.
+   *  In-flight ops on the old dm finish undisturbed. */
+  onDialIn(deviceId) {
+    const h = this.findByDeviceId(deviceId);
+    if (!h || h.transport === 'dial') return;
+    const cached = this._devices?.get(h.id);
+    if (cached && !cached._dialStream) this._devices.delete(h.id);
   }
 
   /** Pairing credential lives ON the host record (B-f3e8 — dial-tokens.json
@@ -753,6 +792,17 @@ class HostManager {
       const dm = await this.agentdDeps.deviceForDial(h.deviceId);
       this._devices.set(id, dm);
       return dm;
+    }
+    // GRADUATED ssh host with a LIVE dial-in link (B-6640): ride the ws
+    // dial stream — our own handshake/heartbeat/backpressure — instead of an
+    // ssh child (banner hangs, ControlMaster staleness, per-op spawns). Any
+    // failure falls straight through to the ssh path: never worse than today.
+    if (h.deviceId && this.dialOnline?.(h.deviceId) && this.agentdDeps.deviceForDial) {
+      try {
+        const dm = await this.agentdDeps.deviceForDial(h.deviceId);
+        this._devices.set(id, dm);
+        return dm;
+      } catch { /* ssh fallback below */ }
     }
     await this.agentdDeps.ensureAgentdOnHost(id);
     const remoteCmd = `export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; exec node "$HOME/.vibespace/agentd/current/agentd.js" --stdio`;

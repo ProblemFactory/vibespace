@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.248.0
+
+- **An ssh machine can graduate to dial-out** (B-6640): one click installs the VibeSpace daemon as a persistent service on the machine, and from then on it *dials back* to this instance over a WebSocket — our own handshake timeout, heartbeat, reconnect and backpressure — instead of every operation spawning an ssh child. That removes the three structural ssh taxes behind this week's incidents: a banner/kex hang that `ConnectTimeout` doesn't bound (it only covers the TCP connect), a ControlMaster whose established flow survives a route change so health checks read green while every new connection fails, and per-op child processes with their PATH/EPIPE hazards. **ssh is kept, not replaced** — it remains the bootstrap and rescue channel, and every data-plane path still falls back to it the moment the dial link isn't live, so a graduated machine is never worse off than before.
+- NAT-aware by construction: the base URL comes from an explicit `serverUrl`, else `agentd.publicUrl`, else the frp relay (`viaRelay`, the same bridge device pairing uses when both sides are behind NAT). Before anything is installed, the **machine itself** is asked whether it can reach that URL — if it can't, graduation aborts and the machine stays pure-ssh rather than silently ending up with a daemon that can never dial in. Removal tears the service and its root down on the machine and always clears the record locally, so a dead machine can't hold the upgrade hostage.
+- Verified end to end against a real ssh host (`scripts/test-graduate-dial.mjs`, 10 assertions): graduate → daemon dials in → file ops ride the dial link → remove → plain ssh machine again, with ssh working before and after.
+
 ## 2.247.4
 
 - **Card-click flash now actually flashes the desktop preview** (walter's report): `flashWindow`'s cross-desktop branch paints the flash through `_renderSwitcher()`, whose render digest didn't include `_flashingWinId` — a mere click changes nothing else, so the digest matched, the render early-returned, and the preview rect never flashed (the third strike of the 2.151.0 "digest must cover every render input" class). The window sitting on another desktop is exactly the case where the preview flash is the only visible feedback.
