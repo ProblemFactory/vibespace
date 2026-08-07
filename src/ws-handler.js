@@ -265,7 +265,11 @@ function registerWsHandler(wss, ctx) {
                   if (!data.keeperSid) {
                     try {
                       const k = await hosts.findKeeperFor(owners[0], data.resumeId);
-                      if (k) { data.keeperSid = k; console.log(`[session] live keeper ${k} holds ${data.resumeId.slice(0, 8)} — attaching instead of spawning a second writer`); }
+                      // findKeeperFor scans ~/.vibespace/*/state/sessions = AGENTD pipe
+                      // sids — tag them (B-218d): the ssh branch must adopt via the
+                      // attach-cli, NOT the legacy keeper binary (which only knows
+                      // ~/.vibespace/run and can never find these sids).
+                      if (k) { data.keeperSid = k; data.keeperKind = 'agentd'; console.log(`[session] live pipe session ${k} holds ${data.resumeId.slice(0, 8)} — attaching instead of spawning a second writer`); }
                     } catch { }
                   }
                 }
@@ -1188,7 +1192,14 @@ done`;
             // the provisioning-failure fallback + for pre-existing keeper
             // sessions (keeperSid resumes). ──
             let agentdMode = !!agentdRemote;
-            if (agentdMode && !keeperSid) {
+            // B-218d: an AGENTD pipe sid must be adopted through the attach-cli
+            // (no spawn spec ⇒ attach-pipe-session, never spawns — the dial
+            // branch's exact contract). Routing it into the legacy keeper
+            // runTail below silently failed: the keeper binary only reads
+            // ~/.vibespace/run and has never heard of these sids, so the
+            // keeper-attach optimization never worked on modern ssh sessions.
+            const agentdAttach = !!(agentdMode && keeperSid && data.keeperKind === 'agentd');
+            if (agentdMode && (!keeperSid || agentdAttach)) {
               try {
                 await agentdRemote.ensureAgentdOnHost(h.id);
                 // the child claude runs under `sh -lc` on the host so the
@@ -1203,9 +1214,11 @@ done`;
                   sshArgs: hosts.sshArgs(h, { reverse: ra.reverse }),
                   remoteCmd,
                   hostToken: agentdRemote.agentdHostToken(h.id),
-                  sid: id,
+                  sid: agentdAttach ? keeperSid : id,
                   version: require('../package.json').version,
-                  spawn: { cmd: 'sh', args: ['-lc', shellCmd], cwd: os.homedir() },
+                  // adopt (agentdAttach) sends NO spawn spec — the daemon
+                  // attach-pipe-sessions the surviving claude from offset 0
+                  ...(agentdAttach ? {} : { spawn: { cmd: 'sh', args: ['-lc', shellCmd], cwd: os.homedir() } }),
                 };
                 ensureDir(agentdRemote.agentdDir);
                 const cfgFile = path.join(agentdRemote.agentdDir, 'session-' + id + '.json');
@@ -1223,7 +1236,7 @@ done`;
                 agentdMode = false;
               }
             }
-            if (!agentdMode || keeperSid) {
+            if (!agentdMode || (keeperSid && !agentdAttach)) {
               const inner = ra.prelude + `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ` + ra.tokenAssign + acctEnv + `exec env `
                 + [...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq)].join(' ')
                 + runTail;
