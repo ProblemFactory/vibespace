@@ -3941,6 +3941,83 @@ try {
 // runs on the NAT'd device (no ssh needed). Cookie-authed (user action).
 // The pairing IS the machine registration — the dial host record carries the
 // token hash (B-f3e8); re-pairing an existing name rotates its token in place.
+// B-6640: graduate an SSH machine to dial-out — install the device daemon as
+// a persistent service on the host (over ssh, ONE time) so it dials back over
+// ws; from then on every data-plane op prefers the dial link (our own
+// handshake/heartbeat/reconnect — none of ssh's banner-hang/ControlMaster/
+// per-op-child taxes). transport STAYS ssh = the bootstrap + rescue channel.
+// NAT rules (user directive): base = explicit serverUrl > agentd.publicUrl >
+// relay (viaRelay); the host-side REACHABILITY PRECHECK runs before anything
+// is installed — unreachable ⇒ abort, stay pure-ssh. {remove:true} rolls the
+// whole thing back (service + root on the host, dial fields on the record).
+app.post('/api/hosts/:id/graduate-dial', async (req, res) => {
+  try {
+    const h = hosts.get(req.params.id);
+    if (h.transport === 'dial') return res.status(400).json({ error: 'already a dial device' });
+    const sshRun = (script, timeout = 30000, input = null) => new Promise((resolve) => {
+      const { execFile } = require('child_process');
+      execFile('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', script],
+        { timeout, maxBuffer: 4 * 1024 * 1024 }, (err, so, se) => resolve({ ok: !err, out: String(so || ''), err: String(se || err?.message || '') }));
+      });
+    if (req.body?.remove) {
+      // best-effort remote teardown, ALWAYS clear the record (dead host must
+      // not hold the graduation hostage — the machine-mounts unmount lesson)
+      const root = h.dialRoot || '';
+      if (root && /^\$HOME\/[\w@.\/-]+$/.test(root)) {
+        const key = require('path').basename(root).replace(/[^A-Za-z0-9.-]/g, '-').replace(/-+$/, '');
+        await sshRun(`systemctl --user disable --now "vibespace-device-${key}.service" 2>/dev/null; ` +
+          `launchctl bootout "gui/$(id -u)/cc.vibespace.device.${key}" 2>/dev/null; ` +
+          `pkill -f "${root}/" 2>/dev/null; sleep 1; rm -rf "${root}"; echo VS_REMOVED`, 30000);
+      }
+      const devId = h.deviceId;
+      hosts.ungraduateDial(h.id);
+      try { if (devId && agentdDials.has(devId)) { agentdDials.get(devId)?.destroy?.(); agentdDials.delete(devId); } } catch { }
+      bcastAll({ type: 'hosts-updated' });
+      return res.json({ success: true, removed: true });
+    }
+    // ── install ──
+    let base = String(req.body?.serverUrl || '').replace(/\/$/, '') || agentdDeps.publicUrl?.() || null;
+    if (!base && req.body?.viaRelay) {
+      const st = plugins.status('frp');
+      const r = await plugins.frpPublish('vibespace-instance', Number(PORT), { preferSub: st?.selfDialSub || '' });
+      if (r?.url) { base = r.url.replace(/\/$/, ''); try { plugins.setSelfDialSub?.(r.subdomain || ''); } catch { } }
+    }
+    if (!base) return res.status(400).json({ error: 'no reachable base URL: set agentd.publicUrl, pass serverUrl, or use viaRelay (frp plugin)' });
+    // reachability PRECHECK from the HOST (any HTTP status = reachable; 000 = not)
+    const chk = await sshRun(`curl -s -o /dev/null -w '%{http_code}' --max-time 10 ${JSON.stringify(base + '/api/home')} 2>/dev/null || echo 000`, 20000);
+    const code = (chk.out.trim().match(/\d{3}$/) || ['000'])[0];
+    if (code === '000') return res.status(400).json({ error: `the machine cannot reach ${base} — graduation aborted (staying on ssh). If this instance is behind NAT, use viaRelay.` });
+    // mint onto the EXISTING ssh record (deviceId first so setDialToken finds it)
+    // dialRoot must mirror the INSTALLER's derivation byte-for-byte (it does
+    // sed hostname-only + tr -cd 'A-Za-z0-9.-') or the removal path tears
+    // down the wrong directory.
+    const dialHost = (new URL(base).hostname || 'dial').replace(/[^A-Za-z0-9.-]/g, '');
+    const root = `$HOME/.vibespace/device@${dialHost || 'dial'}`;
+    hosts.graduateDial(h.id, { dialRoot: root });
+    const pair = agentdMintDialPair(hosts.get(h.id).deviceId);
+    const dialUrl = `${base.replace(/^http/, 'ws')}/api/device-dial?device=${pair.deviceId}`;
+    // ship + run the installer over ssh stdin (never argv — 2.126.0 rule is
+    // about secrets; tokens ride the arg list INSIDE the remote bash, same
+    // exposure class as the pairing dialog's copy-paste command)
+    const installer = fs.readFileSync(path.join(__dirname, 'scripts', 'vibespace-agentd-install.sh'), 'utf-8');
+    const args = `--bundle-url ${JSON.stringify(base + '/vibespace-device.js')} --dial ${JSON.stringify(dialUrl)} --dial-token ${pair.dialToken} --host-token ${pair.hostToken}`;
+    const inst = await new Promise((resolve) => {
+      const { execFile } = require('child_process');
+      const child = execFile('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', `bash -s -- ${args}`],
+        { timeout: 300000, maxBuffer: 8 * 1024 * 1024 }, (err, so, se) => resolve({ ok: !err, out: String(so || '').slice(-3000), err: String(se || err?.message || '').slice(-1500) }));
+      child.stdin.on('error', () => { });
+      child.stdin.end(installer);
+    });
+    if (!inst.ok) { hosts.ungraduateDial(h.id); bcastAll({ type: 'hosts-updated' }); return res.status(400).json({ error: 'installer failed on the host — rolled back: ' + (inst.err || inst.out).slice(-600) }); }
+    // wait for the dial-in (installer verifies the daemon started; the dial
+    // itself can lag a few seconds)
+    let dialed = false;
+    for (let i = 0; i < 15; i++) { if (hosts.dialOnline?.(pair.deviceId)) { dialed = true; break; } await new Promise(r => setTimeout(r, 2000)); }
+    bcastAll({ type: 'hosts-updated' });
+    res.json({ success: true, dialedIn: dialed, base, deviceId: pair.deviceId, note: dialed ? 'dial link live — data-plane ops now prefer it (ssh stays as rescue)' : 'installed — daemon not dialed in yet; check again shortly or see the machine row' });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 app.post(['/api/device/dial-pair', '/api/agentd/dial-pair'], async (req, res) => {
   try {
     const deviceId = String(req.body?.deviceId || ('dev-' + require('crypto').randomBytes(4).toString('hex'))).replace(/[^\w-]/g, '').slice(0, 32);
@@ -4606,6 +4683,7 @@ server.on('upgrade', (req, socket, head) => {
       // rebuilds over this one (stale-stream blank-session fix)
       try { const old = agentdDialDevices.get(deviceId); if (old && old._dialStream !== stream) { old.stop?.(); agentdDialDevices.delete(deviceId); } } catch { }
       try { hosts.invalidateDevice?.('host-dial-' + String(deviceId).replace(/[^\w-]/g, '')); } catch { }
+      try { hosts.onDialIn?.(deviceId); } catch { } // graduated ssh host: prefer this fresh dial link (B-6640)
       console.log(`[device] device '${deviceId}' dialed in`);
       // heal recorded pull mounts + re-own push tunnel ports + flip the UI dot
       try { machineMounts.onMachineLinked(hosts.findByDeviceId(deviceId)?.id); } catch { }
