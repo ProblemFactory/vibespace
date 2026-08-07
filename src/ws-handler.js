@@ -1156,6 +1156,19 @@ done`;
             // any lock-holding claude for this session id (cmdline-verified)
             // and stop any live keeper session referencing it. Never runs for
             // keeper-ATTACH (data.keeperSid — we adopt, not respawn).
+            // EXPLICIT-host adopt probe (2.247.2, the B-218d completion): the
+            // dial branch probes the device's pipe-session store on every
+            // sidebar resume (its discovery carries no pipe sids) — the ssh
+            // branch never did, so an explicit-host resume ALWAYS swept and
+            // respawned even when a healthy surviving claude was one
+            // attach-pipe-session away (lengyue's 12 orphans). Probe first;
+            // a hit skips the sweep below and adopts via the attach-cli.
+            if (data.resume && data.resumeId && !data.keeperSid && agentdRemote && /^[\w-]+$/.test(data.resumeId)) {
+              try {
+                const k = await hosts.findKeeperFor(h.id, data.resumeId);
+                if (k) { data.keeperSid = k; data.keeperKind = 'agentd'; console.log(`[remote] live pipe session ${k} holds ${data.resumeId.slice(0, 8)} — adopting instead of sweep+respawn`); }
+              } catch { }
+            }
             if (data.resume && data.resumeId && !data.keeperSid && /^[\w-]+$/.test(data.resumeId)) {
               try {
                 // ROOT-CAUSE writer sweep (mechanism-agnostic): the ONE thing

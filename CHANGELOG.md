@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.247.2
+
+- **Explicit-host ssh resumes now adopt a surviving claude too** (the B-218d completion): the dial branch has always probed the device's pipe-session store before resuming; the ssh branch only did so on host-INFERENCE (host-less) resumes — so a plain sidebar resume with the host selected always swept and respawned, killing a healthy surviving claude that one attach-pipe-session away. The ssh branch now runs the same probe first; a hit skips the writer sweep and adopts losslessly.
+
 ## 2.247.1
 
 - **B-218d: adopting a surviving remote claude over ssh finally works.** `findKeeperFor` returns agentd pipe-session sids (it scans `~/.vibespace/*/state/sessions`), but the ssh resume branch fed them to the legacy `vibespace-remote-keeper run` — a binary that only knows `~/.vibespace/run` and could never find them, so the "attach instead of spawning a second writer" optimization (2.218.0) silently never worked for modern ssh sessions; every such resume degraded to sweep+respawn, killing the surviving claude (and its in-flight work) that could have been adopted losslessly. Server-derived sids are now tagged `keeperKind: 'agentd'` and the ssh branch adopts them through the attach-cli with a no-spawn-spec config — the exact attach-pipe-session contract the dial branch has used all along. Legacy keeper sids (client-side discovery) keep the old path; provisioning failure degrades to the previous behavior.
