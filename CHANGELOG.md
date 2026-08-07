@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.247.4
+
+- **Card-click flash now actually flashes the desktop preview** (walter's report): `flashWindow`'s cross-desktop branch paints the flash through `_renderSwitcher()`, whose render digest didn't include `_flashingWinId` — a mere click changes nothing else, so the digest matched, the render early-returned, and the preview rect never flashed (the third strike of the 2.151.0 "digest must cover every render input" class). The window sitting on another desktop is exactly the case where the preview flash is the only visible feedback.
+
 ## 2.247.3
 
 - **The adopt probe now actually finds surviving claudes** (findKeeperFor rewrite): the ssh leg scanned only the legacy `~/.vibespace/run` store — it never saw agentd pipe sessions at all — and both legs matched by grepping the conversation id in the state json, which only works for RESUMED spawns (the `--resume` arg embeds the id); a fresh-spawned claude's conversation id lives only in its own lock file. One unified scan now covers both stores plus the childPid→`~/.claude/sessions/<pid>.json` lock leg, and returns `{sid, kind}` so the consumer routes the adopt into the right attach transport (agentd attach-cli vs legacy keeper) instead of a binary that has never heard of the sid.
