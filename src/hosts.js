@@ -863,30 +863,35 @@ class HostManager {
     const h = this.get(id);
     if (!h) return null;
     const cid = JSON.stringify(conversationId);
-    if (h.transport === 'dial') {
-      const script = `for f in "$HOME"/.vibespace/*/state/sessions/*.json; do [ -e "$f" ] || continue; `
-        + `grep -l ${cid} "$f" >/dev/null 2>&1 || continue; `
-        + `grep -q '"exited"' "$f" 2>/dev/null && continue; `
-        + `cpid=$(sed -n 's/.*"childPid":\\([0-9]*\\).*/\\1/p' "$f" | head -1); `
-        + `[ -n "$cpid" ] && kill -0 "$cpid" 2>/dev/null && basename "$f" .json; done | tail -1`;
-      try {
-        // SESSION-ESTABLISHING (review catch, do not re-bound): this probe
-        // decides ADOPT-a-live-claude vs sweep+respawn — a deadline here reads
-        // as "no live keeper" and the writer sweep then SIGTERMs the healthy
-        // claude the full ladder would have adopted. The resume path wants
-        // the wait.
-        const dm = await this.device(id);
-        const out = String((await dm.runCmd('sh', ['-c', script], { timeoutMs: 8000 }))?.stdout || '').trim().split('\n').pop().trim();
-        return /^[\w][\w-]*$/.test(out) ? out : null;
-      } catch { return null; }
-    }
-    const script = `for f in "$HOME"/.vibespace/run/*.json; do [ -e "$f" ] || break; `
-      + `grep -l ${cid} "$f" >/dev/null 2>&1 || continue; `
-      + `cpid=$(sed -n 's/.*"childPid":\\([0-9]*\\).*/\\1/p' "$f" | head -1); `
-      + `[ -n "$cpid" ] && kill -0 "$cpid" 2>/dev/null && basename "$f" .json; done | tail -1`;
+    // ONE scan over BOTH stores, returning {sid, kind} (2.247.3): the old ssh
+    // leg read only legacy ~/.vibespace/run — it never saw agentd pipe
+    // sessions at all — and matching by grep-in-state-json only found RESUMED
+    // spawns (the --resume arg embeds the cid); a fresh-spawned claude's
+    // conversation id lives ONLY in its own lock ~/.claude/sessions/<pid>.json,
+    // so the second grep leg covers those (lengyue's 12 orphans were all
+    // invisible to the old probe for one reason or the other). kind tells the
+    // consumer WHICH attach transport the sid belongs to — tagging a legacy
+    // keeper sid as agentd (or vice versa) routes the adopt into a binary
+    // that has never heard of it.
+    const script = `scan() { for f in "$1"/*.json; do [ -e "$f" ] || continue
+      grep -q '"exited"' "$f" 2>/dev/null && continue
+      cpid=$(sed -n 's/.*"childPid":\\([0-9]*\\).*/\\1/p' "$f" | head -1)
+      [ -n "$cpid" ] && kill -0 "$cpid" 2>/dev/null || continue
+      if grep -l ${cid} "$f" >/dev/null 2>&1 || grep -l ${cid} "$HOME/.claude/sessions/$cpid.json" >/dev/null 2>&1; then echo "$2|$(basename "$f" .json)"; fi
+    done; }
+    for d in "$HOME"/.vibespace/*/state/sessions; do [ -d "$d" ] && scan "$d" agentd; done
+    scan "$HOME/.vibespace/run" keeper`;
     try {
-      const out = (await this._ssh(h, script, { timeoutMs: 8000 })).toString().trim().split('\n').pop().trim();
-      return /^[\w][\w-]*$/.test(out) ? out : null;
+      // SESSION-ESTABLISHING (review catch, do not re-bound): this probe
+      // decides ADOPT-a-live-claude vs sweep+respawn — a deadline here reads
+      // as "no live keeper" and the writer sweep then SIGTERMs the healthy
+      // claude the full ladder would have adopted. The resume path wants
+      // the wait.
+      const out = String(await this._hostShell(h, script, { timeoutMs: 10000 }) || '');
+      const hits = out.trim().split('\n').map((l) => l.trim()).filter((l) => /^(agentd|keeper)\|[\w][\w-]*$/.test(l))
+        .map((l) => { const [kind, sid] = l.split('|'); return { kind, sid }; });
+      // newest-transport first: an agentd hit wins over a legacy keeper one
+      return hits.find((x) => x.kind === 'agentd') || hits[0] || null;
     } catch { return null; }
   }
   // Remote SUBAGENT transcript (2.191.0, remote workflow viewer's View Log):

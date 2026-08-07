@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.247.3
+
+- **The adopt probe now actually finds surviving claudes** (findKeeperFor rewrite): the ssh leg scanned only the legacy `~/.vibespace/run` store — it never saw agentd pipe sessions at all — and both legs matched by grepping the conversation id in the state json, which only works for RESUMED spawns (the `--resume` arg embeds the id); a fresh-spawned claude's conversation id lives only in its own lock file. One unified scan now covers both stores plus the childPid→`~/.claude/sessions/<pid>.json` lock leg, and returns `{sid, kind}` so the consumer routes the adopt into the right attach transport (agentd attach-cli vs legacy keeper) instead of a binary that has never heard of the sid.
+
 ## 2.247.2
 
 - **Explicit-host ssh resumes now adopt a surviving claude too** (the B-218d completion): the dial branch has always probed the device's pipe-session store before resuming; the ssh branch only did so on host-INFERENCE (host-less) resumes — so a plain sidebar resume with the host selected always swept and respawned, killing a healthy surviving claude that one attach-pipe-session away. The ssh branch now runs the same probe first; a hit skips the writer sweep and adopts losslessly.
