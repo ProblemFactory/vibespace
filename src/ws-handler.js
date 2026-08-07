@@ -269,7 +269,7 @@ function registerWsHandler(wss, ctx) {
                       // sids — tag them (B-218d): the ssh branch must adopt via the
                       // attach-cli, NOT the legacy keeper binary (which only knows
                       // ~/.vibespace/run and can never find these sids).
-                      if (k) { data.keeperSid = k; data.keeperKind = 'agentd'; console.log(`[session] live pipe session ${k} holds ${data.resumeId.slice(0, 8)} — attaching instead of spawning a second writer`); }
+                      if (k) { data.keeperSid = k.sid; data.keeperKind = k.kind; console.log(`[session] live ${k.kind} session ${k.sid} holds ${data.resumeId.slice(0, 8)} — attaching instead of spawning a second writer`); }
                     } catch { }
                   }
                 }
@@ -1075,7 +1075,7 @@ done`;
               if (!dialKeeperSid && data.resume && data.resumeId && /^[\w-]+$/.test(data.resumeId)) {
                 try {
                   const k = await hosts.findKeeperFor(h.id, data.resumeId);
-                  if (k) { dialKeeperSid = k; console.log(`[dial] live pipe session ${k} holds ${data.resumeId.slice(0, 8)} — attaching instead of spawning a second writer`); }
+                  if (k?.sid) { dialKeeperSid = k.sid; console.log(`[dial] live pipe session ${k.sid} holds ${data.resumeId.slice(0, 8)} — attaching instead of spawning a second writer`); }
                 } catch { }
               }
               // Pre-resume writer sweep over the DEVICE LINK — the ssh-only
@@ -1166,7 +1166,7 @@ done`;
             if (data.resume && data.resumeId && !data.keeperSid && agentdRemote && /^[\w-]+$/.test(data.resumeId)) {
               try {
                 const k = await hosts.findKeeperFor(h.id, data.resumeId);
-                if (k) { data.keeperSid = k; data.keeperKind = 'agentd'; console.log(`[remote] live pipe session ${k} holds ${data.resumeId.slice(0, 8)} — adopting instead of sweep+respawn`); }
+                if (k?.sid) { data.keeperSid = k.sid; data.keeperKind = k.kind; console.log(`[remote] live ${k.kind} session ${k.sid} holds ${data.resumeId.slice(0, 8)} — adopting instead of sweep+respawn`); }
               } catch { }
             }
             if (data.resume && data.resumeId && !data.keeperSid && /^[\w-]+$/.test(data.resumeId)) {
