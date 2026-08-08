@@ -4,14 +4,38 @@
 // except inside terminals (.xterm owns its keys).
 import { escHtml } from './utils.js';
 
-function score(q, hay) {
-  hay = hay.toLowerCase();
-  const i = hay.indexOf(q);
-  if (i >= 0) return 100 - i; // substring: earlier = better
-  // subsequence fallback
+function subseq(t, s) {
   let qi = 0;
-  for (let ci = 0; ci < hay.length && qi < q.length; ci++) if (hay[ci] === q[qi]) qi++;
-  return qi === q.length ? 10 : -1;
+  for (let ci = 0; ci < s.length && qi < t.length; ci++) if (s[ci] === t[qi]) qi++;
+  return qi === t.length;
+}
+
+// Match quality for one session. TOKENISED on whitespace with AND semantics —
+// the whole-query-as-one-literal version could never match a CamelCase or
+// hyphenated name (walter: typing "best ever" can never substring-hit
+// "BestEver-ToB-signing"), so every multi-word query fell through to a
+// subsequence over the ENTIRE haystack — cwd + three UUIDs — where the shared
+// path prefix supplies almost any letter sequence. Result: every session tied
+// at the same low score, the +live bonus then sorted all live sessions above
+// every stopped one, and the 12-row cap cut the list before the stopped
+// session he wanted could appear.
+// So: each token must hit something; NAME hits outrank path/id hits; the fuzzy
+// fallback is confined to the NAME (matching fuzzily against a UUID is noise).
+function score(q, label, hay) {
+  label = label.toLowerCase();
+  hay = hay.toLowerCase();
+  const tokens = q.split(/\s+/).filter(Boolean);
+  if (!tokens.length) return 1;
+  let total = 0;
+  for (const t of tokens) {
+    const li = label.indexOf(t);
+    if (li >= 0) { total += 1000 - Math.min(li, 200); continue; } // name hit, earlier = better
+    const hi = hay.indexOf(t);
+    if (hi >= 0) { total += 300; continue; }                      // path / host / id hit
+    if (subseq(t, label)) { total += 100; continue; }             // fuzzy, NAME only
+    return -1;                                                     // token matched nothing → reject
+  }
+  return total / tokens.length;
 }
 
 export function installSessionPalette(app) {
@@ -91,10 +115,14 @@ export function installSessionPalette(app) {
       for (const s of all) {
         const label = app.sidebar.getCustomName(s) || s.name || s.webuiName || (s.cwd || '').split('/').pop() || s.sessionId?.slice(0, 8) || '';
         const hay = `${label} ${s.cwd || ''} ${s.hostName || ''} ${s.backend || ''} ${s.sessionId || ''} ${s.backendSessionId || ''} ${s.claudeSessionId || ''}`;
-        const sc = q ? score(q, hay) : 1;
+        const sc = q ? score(q, label, hay) : 1;
         if (sc < 0) continue;
         const live = s.status === 'live' || s.status === 'tmux' || s.status === 'external';
-        scored.push({ s, label, sc: sc + (live ? 1000 : 0) + (s.startedAt || 0) / 1e13 });
+        // Match quality DOMINATES; live is a tiebreak among equally-good
+        // matches, never a reason to bury a better-named stopped session
+        // (that inversion is what hid walter's session behind 12 live ones).
+        // With no query, live-first ordering is preserved.
+        scored.push({ s, label, sc: sc * 1000 + (live ? 500 : 0) + (s.startedAt || 0) / 1e13 });
       }
       scored.sort((a, b) => b.sc - a.sc);
       items = scored.slice(0, 12);
