@@ -465,11 +465,18 @@ export class DesktopManager {
       slotRect.style.width = (slot.width * 100) + '%';
       slotRect.style.height = (slot.height * 100) + '%';
       pv.appendChild(slotRect);
+      let stageHasWaiting = false;
       if (stage.isActive) {
         for (const [id, win] of this.app.wm.windows) {
           if (stage._isStageVisible(win) && win.gridBounds && !win._isStagePlaceholder) {
             const r = document.createElement('div');
-            r.className = 'desktop-preview-win';
+            // waiting-blink + find-flash reach the Stage preview too (2.250.0,
+            // real report: neither showed here — the desktop loop drew them,
+            // this block didn't)
+            const waiting = win.element?.classList.contains('window-waiting');
+            const flash = this._flashingWinId === id;
+            r.className = 'desktop-preview-win' + (waiting ? ' desktop-preview-win-waiting' : '') + (flash ? ' desktop-preview-find-flash' : '');
+            if (waiting) stageHasWaiting = true;
             r.dataset.winId = id;
             r.style.left = (win.gridBounds.left * 100) + '%';
             r.style.top = (win.gridBounds.top * 100) + '%';
@@ -479,6 +486,7 @@ export class DesktopManager {
           }
         }
       }
+      if (stageHasWaiting) pv.classList.add('desktop-preview-waiting');
       const label = document.createElement('div');
       label.className = 'desktop-preview-label';
       label.textContent = t('Stage');
@@ -582,16 +590,36 @@ export class DesktopManager {
           items.push({ label: 'Delete', action: () => this.deleteDesktop(desk.id), style: 'color:var(--red, #e55)' });
         }
         const menu = showContextMenu(e.clientX, e.clientY, items);
-        menu.style.top = '';
-        menu.style.bottom = (window.innerHeight - e.clientY + 4) + 'px';
+        // Open in the direction there's room (2.250.0, real report: a
+        // top-docked taskbar puts the previews near the viewport TOP, where an
+        // unconditional bottom-anchor grew the menu straight off the top edge).
+        // Anchor bottom (grow up) only when the click is in the lower half.
+        if (e.clientY > window.innerHeight / 2) {
+          menu.style.top = ''; menu.style.bottom = (window.innerHeight - e.clientY + 4) + 'px';
+        } else {
+          menu.style.bottom = ''; menu.style.top = (e.clientY + 4) + 'px';
+        }
       });
 
-      // Drop target: drag taskbar items here (HTML5 drag)
+      // Drag-to-reorder desktops (2.250.0). HTML5 drag on the wrapper; the
+      // preview stays a DROP target for BOTH a window-move (text/window-id) and
+      // a desktop-reorder (text/desktop-id) — resolved by which data is set.
+      wrapper.draggable = true;
+      wrapper.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('text/desktop-id', desk.id);
+        e.dataTransfer.effectAllowed = 'move';
+        wrapper.classList.add('desktop-preview-dragging');
+      });
+      wrapper.addEventListener('dragend', () => wrapper.classList.remove('desktop-preview-dragging'));
+
+      // Drop target: a window (move it here) OR another desktop (reorder)
       preview.addEventListener('dragover', (e) => { e.preventDefault(); preview.classList.add('desktop-preview-drop'); });
       preview.addEventListener('dragleave', () => preview.classList.remove('desktop-preview-drop'));
       preview.addEventListener('drop', (e) => {
         e.preventDefault();
         preview.classList.remove('desktop-preview-drop');
+        const dragDesk = e.dataTransfer.getData('text/desktop-id');
+        if (dragDesk && dragDesk !== desk.id) { this.reorderDesktop(dragDesk, desk.id); return; }
         const winId = e.dataTransfer.getData('text/window-id');
         if (winId) this.moveWindowToDesktop(winId, desk.id);
       });
@@ -614,6 +642,19 @@ export class DesktopManager {
   async _startRename(desk) {
     const name = await showInputDialog({ title: 'Rename Desktop', label: 'Desktop name', value: desk.name, confirmText: 'Rename' });
     if (name && name.trim()) this.renameDesktop(desk.id, name.trim());
+  }
+
+  // Move dragId to sit just BEFORE targetId in the desktop order (2.250.0).
+  reorderDesktop(dragId, targetId) {
+    const from = this._desktops.findIndex(d => d.id === dragId);
+    const to = this._desktops.findIndex(d => d.id === targetId);
+    if (from < 0 || to < 0 || from === to) return;
+    const [moved] = this._desktops.splice(from, 1);
+    // after removing `from`, the target index shifts left if it was after `from`
+    const insertAt = this._desktops.findIndex(d => d.id === targetId);
+    this._desktops.splice(insertAt, 0, moved);
+    this.app.ws.send({ type: 'desktop-reorder', order: this._desktops.map(d => d.id) });
+    this._renderSwitcher();
   }
 
   /** Build "Move to Desktop" submenu items for window context menu */

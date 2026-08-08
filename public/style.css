@@ -1086,6 +1086,7 @@ html, body {
 }
 .desktop-preview.active .desktop-preview-label { color: var(--accent-hover); }
 .desktop-preview-drop { border-color: var(--accent) !important; background: var(--accent-dim) !important; }
+.desktop-preview-dragging { opacity: 0.45; }
 .desktop-preview-win-waiting { animation: blink-fade 0.7s ease-in-out infinite reverse; background: var(--yellow, #e5c07b); }
 .desktop-preview-waiting { border-color: var(--yellow, #e5c07b); }
 .desktop-preview-find-flash { animation: blink-fade 0.3s ease-in-out infinite reverse; background: var(--accent); }
