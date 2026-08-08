@@ -257,6 +257,67 @@ class ClaudeCodeAdapter extends BackendAdapter {
       request: { subtype: 'apply_flag_settings', settings },
     });
   }
+
+  // B-7edc: ask the CLI ITSELF for usage over the control channel (subtype
+  // 'get_usage', verified present in the 2.1.222 control-request dispatch).
+  // Its reply carries the FULL rate_limits object incl. `model_scoped` (the
+  // Fable/opus/sonnet weekly buckets the statusline payload does NOT have) and
+  // `extra_usage`. ToS posture is strictly better than our raw ⟳: the request
+  // is made BY the CLI as a first-party client, we never touch the API with a
+  // subscription token. Still HUMAN-TRIGGERED + throttled — the CLI's own
+  // handler does a real usage fetch (Cbn→Tbn→BRe), which can 429.
+  static buildGetUsage() {
+    return {
+      type: 'control_request',
+      request_id: 'vsu-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      request: { subtype: 'get_usage' },
+    };
+  }
+  formatGetUsage() {
+    return JSON.stringify(ClaudeCodeAdapter.buildGetUsage());
+  }
+
+  // Parse the `get_usage` control-response's rate_limits into our usage-cache
+  // shape (same fields _parseUsage(GET /api/oauth/usage) produces). The
+  // control payload's rate_limits is the CLI's OWN merged object:
+  //   { five_hour, seven_day, seven_day_opus, seven_day_sonnet, extra_usage,
+  //     limits, model_scoped:[{display_name, utilization, resets_at}] }
+  // where each window is { used_percentage|utilization, resets_at }. We map
+  // model_scoped → scopedWeekly (the shape the quota popup already renders).
+  static parseGetUsageResponse(payload) {
+    if (!payload || typeof payload !== 'object') return null;
+    const rl = payload.rate_limits;
+    if (!rl || typeof rl !== 'object') return null;
+    const toWin = (w) => {
+      if (!w) return { utilization: 0, resetsAt: 0, status: 'allowed' };
+      // control payload uses used_percentage (0-100) OR utilization (0-1)
+      const pct = typeof w.used_percentage === 'number' ? w.used_percentage / 100
+        : (typeof w.utilization === 'number' ? w.utilization : 0);
+      const resetsAt = typeof w.resets_at === 'number' ? w.resets_at
+        : (w.resets_at ? Math.floor(Date.parse(w.resets_at) / 1000) || 0 : 0);
+      return { utilization: pct, resetsAt, status: pct >= 1 ? 'limited' : 'allowed' };
+    };
+    const fiveHour = toWin(rl.five_hour);
+    const sevenDay = toWin(rl.seven_day);
+    const scopedWeekly = [];
+    for (const s of (Array.isArray(rl.model_scoped) ? rl.model_scoped : [])) {
+      if (!s?.display_name) continue;
+      const resetsAt = typeof s.resets_at === 'number' ? s.resets_at
+        : (s.resets_at ? Math.floor(Date.parse(s.resets_at) / 1000) || 0 : 0);
+      scopedWeekly.push({
+        name: s.display_name,
+        utilization: typeof s.utilization === 'number' ? (s.utilization > 1 ? s.utilization / 100 : s.utilization) : 0,
+        resetsAt,
+        severity: s.severity || 'normal',
+      });
+    }
+    return {
+      fiveHour, sevenDay, scopedWeekly,
+      overallStatus: (fiveHour.status === 'limited' || sevenDay.status === 'limited') ? 'limited' : 'allowed',
+      fetchedAt: Date.now(), source: 'control',
+      scopedFetchedAt: scopedWeekly.length ? Date.now() : undefined,
+    };
+  }
 }
 
 module.exports = { ClaudeCodeAdapter };
