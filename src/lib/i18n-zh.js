@@ -2298,4 +2298,7 @@ export default {
   "restarting {n} conversation(s)…": "正在重启 {n} 个对话…",
   "Pooled accounts run on this machine only": "池化账号仅在本机可用",
   "This pooled account has no target — pick a subscription in Manage agents": "这个池化账号还没有目标 — 请在管理 Agent 里选择一个订阅",
+  "Auto-switch when nearly exhausted": "余量将尽时自动切换",
+  "Hot switch (no restart)": "热切换（不重启）",
+  "Update failed": "更新失败",
 };
