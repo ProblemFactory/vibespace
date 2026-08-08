@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.249.1
+
+- **Ctrl+K could not find a session by a multi-word name, and silently showed the wrong one** (walter, inc-msjro90z-n6y3: searching "best ever" returned only `BestEver-Vendor-Agreement-Sign`, never the `BestEver-ToB-signing` he wanted). Three faults compounded: the query was matched as ONE literal string, so a space could never substring-hit a CamelCase/hyphenated name; that pushed every multi-word query into a subsequence scan over the WHOLE haystack — name + cwd + three UUIDs — where a shared path prefix supplies almost any letter sequence, so unrelated sessions tied at the same low score; and the `+1000` live bonus then sorted every live session above every stopped one, with only 12 rows kept — so the stopped session he wanted was cut off the list entirely. Now the query is tokenised on whitespace with AND semantics (every token must hit), name matches outrank path/id matches, the fuzzy fallback is confined to the name instead of UUID noise, and live is a tiebreak among equally-good matches rather than a reason to bury a better-named stopped session. Searching by cwd fragment or session id still works. Test: scripts/test-session-palette-search.mjs (11 assertions on his real session data).
+
 ## 2.249.0
 
 - **Merging duplicate subscription accounts can no longer silently re-bill a running session** (B-3f8a, from the claude-swap credential study): `accounts.mergeSubscription` copied the survivor's `.credentials.json` and deleted the merged-away dir with no check for live sessions — and the CLI re-reads that file per HTTP request (verified against 2.1.222), so the copy would flip a running session's billing MID-TURN and the delete would yank credentials out from under the other side's sessions. Both merge call sites now pass the set of account ids with a running session; the merge refuses loudly (kept both records) instead of corrupting billing.
