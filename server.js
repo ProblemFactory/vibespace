@@ -3524,6 +3524,37 @@ app.delete('/api/accounts/:id', (req, res) => {
 // its own securestorage creds dir (CLAUDE_SECURESTORAGE_CONFIG_DIR). Create
 // allocates the dir + returns the login command the client runs in a terminal;
 // finalize reads back the identity once the OAuth login has written creds. ──
+// ── Pooled pseudo-account (B-6217) ────────────────────────────────────────
+// The pool's creds dir is a DIRECTORY SYMLINK at data/subs/<poolId>; switching
+// = re-pointing it (accounts.setPoolTarget). See the accounts.js section header
+// for why a directory symlink is the only shape that keeps ONE credential copy
+// (and therefore one refresh-token holder) while still swapping per-spawn.
+app.post('/api/accounts/pool', (req, res) => {
+  try { res.json({ success: true, ...accounts.createPool({ name: req.body?.name, members: req.body?.members }) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.patch('/api/accounts/pool/:id', (req, res) => {
+  try { accounts.updatePool(req.params.id, { members: req.body?.members, auto: req.body?.auto, hot: req.body?.hot }); res.json({ success: true }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+// Re-point. Returns the live sessions billed to this pool so the CLIENT can
+// restart them (v1 = cold swap; the client owns kill+resume, same machinery as
+// the billing switcher). `hot` pools skip the restart — the running CLI
+// re-reads the credential file on its next request.
+app.post('/api/accounts/pool/:id/target', (req, res) => {
+  try {
+    const id = req.params.id;
+    const before = accounts.poolCurrent(id);
+    const r = accounts.setPoolTarget(id, String(req.body?.accountId || ''));
+    const affected = [];
+    for (const [sid, s] of activeSessions) {
+      if (s._accountId !== id) continue;
+      affected.push({ serverId: sid, backend: s.backend || 'claude', backendSessionId: s.claudeSessionId || s.backendSessionId || null, cwd: s.cwd || null, name: s.name || null, host: s.host || null });
+    }
+    res.json({ success: true, ...r, previous: before, affected });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 app.post('/api/accounts/subscription', (req, res) => {
   try {
     const { id, dir } = accounts.createSubscription(req.body || {});

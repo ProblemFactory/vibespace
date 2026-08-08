@@ -114,6 +114,12 @@ class AccountManager {
           const info = this.readCodexSubAuth(a.id);
           return { ...base, loggedIn: info.loggedIn, email: info.email || a.email || null, emailDeclared: !info.email && !!a.email, subscriptionType: info.plan, authMode: info.authMode };
         }
+        if (type === 'pooled') {
+          const cur = this.poolCurrent(a.id);
+          const info = this.readSubCreds(a.id); // resolves through the symlink
+          const curAcct = cur ? this.get(cur) : null;
+          return { ...base, pooled: true, loggedIn: info.loggedIn, email: info.email || null, subscriptionType: info.subscriptionType, current: cur, currentName: curAcct?.name || null, members: a.members || null, memberOptions: this.poolMembers(a.id), auto: !!a.auto, hot: !!a.hot, supported: this.poolSupported() };
+        }
         if (type === 'subscription') {
           const info = this.readSubCreds(a.id);
           // a.email = manual backfill (setEmail) for dirs whose login never
@@ -495,6 +501,7 @@ class AccountManager {
     if (this._state.defaultCodexAccountId === id) this._state.defaultCodexAccountId = null;
     // Isolated-login accounts own a creds dir — wipe it (best-effort).
     if (this._acctBackend(a) === 'codex') { try { fs.rmSync(this.codexSubDir(id), { recursive: true, force: true }); } catch { } }
+    else if (this._acctType(a) === 'pooled') { try { fs.unlinkSync(this.subDir(id)); } catch { } } // unlink ONLY — the target is a real account's dir
     else if (this._acctType(a) === 'subscription') { try { fs.rmSync(this.subDir(id), { recursive: true, force: true }); } catch { } }
     this._save();
     this._notify();
@@ -597,6 +604,103 @@ class AccountManager {
     return { usable: false, how: null, reason: hostFacts.transport === 'dial' ? 'dial-no-ship' : 'ship-disabled', linked, held, heldVerified: false };
   }
 
+  // ── Pooled pseudo-account (B-6217) ──────────────────────────────────────
+  // A pooled account is NOT a login of its own: its "creds dir" is a DIRECTORY
+  // SYMLINK at data/subs/<poolId> pointing at a REAL subscription's dir, and
+  // switching accounts = atomically re-pointing that symlink.
+  //
+  // Why a DIRECTORY symlink and not copies or a file symlink (proven in
+  // scripts/test-creds-symlink-swap.mjs, 8 asserts):
+  //   · the CLI writes credentials with atomicWrite = tmp+rename, which
+  //     REPLACES a *file* symlink on the first refresh — a *directory* one
+  //     survives, because the rename happens INSIDE the resolved dir;
+  //   · refreshes therefore land in the canonical account dir, so there is
+  //     exactly ONE credential copy and Anthropic's ROTATING refresh token
+  //     never gets rotated out from under a sibling session (the reason
+  //     per-session copies are unsafe);
+  //   · `<dir>/.oauth_refresh.lock` resolves through the symlink to the SAME
+  //     real lock a normal session of that account takes ⇒ a pooled session
+  //     and a normal session of one account are mutually excluded exactly as
+  //     two normal sessions are today. Zero new refresh conflict.
+  //   · QX() (the CLI's config-home resolver) returns the env STRING with no
+  //     realpath and no caching, so the kernel re-resolves per syscall and a
+  //     re-point is visible immediately; the stat'd mtime changes too, which
+  //     is what invalidates the CLI's credential cache.
+  // LINUX ONLY: on macOS credentials go to a keychain whose service name is
+  // sha256(NFC(env string)) — the STRING, not the resolved path — so the pool
+  // path would get its own keychain entry and the sharing silently breaks.
+  poolSupported() { return process.platform !== 'win32' && process.platform !== 'darwin'; }
+
+  // Candidate members: explicit list (filtered to still-valid logins) or, when
+  // the pool declares none, EVERY logged-in Claude subscription (the default
+  // the user asked for). Never includes another pool.
+  poolMembers(id) {
+    const a = this.get(id);
+    const all = this._state.accounts.filter((x) => this._acctBackend(x) === 'claude' && this._acctType(x) === 'subscription');
+    const wanted = Array.isArray(a?.members) && a.members.length ? all.filter((x) => a.members.includes(x.id)) : all;
+    return wanted.filter((x) => this.readSubCreds(x.id).loggedIn).map((x) => ({ id: x.id, name: x.name }));
+  }
+
+  // The real account a pool currently resolves to, read from the symlink
+  // itself (the link IS the state — no second source of truth to drift).
+  poolCurrent(id) {
+    try {
+      const t = fs.readlinkSync(this.subDir(id));
+      const sub = path.basename(t);
+      return this.get(sub) ? sub : null;
+    } catch { return null; }
+  }
+
+  // Atomically re-point the pool at `subId`. symlink-to-temp + rename so a
+  // concurrent spawn either sees the old target or the new one, never a gap.
+  // The target's creds mtime is bumped because the CLI's credential cache is
+  // mtime-gated and two accounts could otherwise share an mtimeMs.
+  setPoolTarget(id, subId) {
+    const a = this.get(id);
+    if (!a || this._acctType(a) !== 'pooled') throw new Error('not a pooled account');
+    const target = this.get(subId);
+    if (!target || this._acctType(target) !== 'subscription' || this._acctBackend(target) !== 'claude') throw new Error('not a Claude subscription: ' + subId);
+    if (!this.readSubCreds(subId).loggedIn) throw new Error('subscription not logged in: ' + target.name);
+    const link = this.subDir(id);
+    // Refuse to clobber a REAL directory — that would be someone's creds.
+    try { const st = fs.lstatSync(link); if (!st.isSymbolicLink()) throw new Error('pool path is a real directory, refusing to replace: ' + link); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+    const tmp = link + '.swap-' + crypto.randomBytes(4).toString('hex');
+    fs.symlinkSync(this.subDir(subId), tmp);
+    fs.renameSync(tmp, link);
+    try { const now = Date.now() / 1000; fs.utimesSync(this.subCredsPath(subId), now, now); } catch { }
+    this._notify();
+    return { id, current: subId, name: target.name };
+  }
+
+  createPool({ name, members } = {}) {
+    if (!this.poolSupported()) throw new Error('pooled accounts need a platform with directory symlinks and no keychain-backed credentials (Linux)');
+    const id = 'pool-' + crypto.randomBytes(6).toString('hex');
+    const a = { id, name: String(name || '').trim().slice(0, 60) || 'Pool', type: 'pooled', backend: 'claude', members: Array.isArray(members) && members.length ? members.slice(0, 40) : null, auto: false, hot: false, createdAt: Date.now() };
+    this._state.accounts.push(a);
+    this._save();
+    const first = this.poolMembers(id)[0];
+    if (!first) { this._state.accounts = this._state.accounts.filter((x) => x.id !== id); this._save(); throw new Error('no logged-in Claude subscription to pool'); }
+    this.setPoolTarget(id, first.id);
+    this._notify();
+    return { id, current: first.id };
+  }
+
+  // members / auto / hot. A member list that drops the CURRENT target re-points
+  // to the first remaining member (a pool must always resolve to something).
+  updatePool(id, { members, auto, hot } = {}) {
+    const a = this.get(id);
+    if (!a || this._acctType(a) !== 'pooled') throw new Error('not a pooled account');
+    if (members !== undefined) a.members = Array.isArray(members) && members.length ? members.slice(0, 40) : null;
+    if (auto !== undefined) a.auto = !!auto;
+    if (hot !== undefined) a.hot = !!hot;
+    this._save();
+    const cur = this.poolCurrent(id);
+    const list = this.poolMembers(id);
+    if (list.length && !list.some((m) => m.id === cur)) this.setPoolTarget(id, list[0].id);
+    this._notify();
+    return this.get(id);
+  }
+
   resolveForSpawn(requested, backend = 'claude') {
     if (backend === 'codex') return this._resolveCodexSpawn(requested);
     if (requested === 'subscription') return null; // the CLI's own global login
@@ -605,6 +709,16 @@ class AccountManager {
     const a = this.get(id);
     if (!a) throw new Error('unknown account: ' + id);
     if (this._acctBackend(a) !== 'claude') throw new Error('not a Claude account: ' + a.name);
+    if (this._acctType(a) === 'pooled') {
+      const cur = this.poolCurrent(id);
+      if (!cur) throw new Error('pooled account has no target: ' + a.name);
+      // readSubCreds resolves THROUGH the symlink, so this is the real login.
+      if (!this.readSubCreds(id).loggedIn) throw new Error('pooled target is not logged in: ' + a.name);
+      // No remoteCreds: shipping would copy the symlink's CONTENTS to a fixed
+      // remote dir, freezing the pool at spawn time and (on a macOS host)
+      // landing in a per-path keychain entry. Pools are local-only for now.
+      return { id: a.id, name: a.name, kind: 'subscription', pooled: true, poolTarget: cur, localEnv: { CLAUDE_SECURESTORAGE_CONFIG_DIR: this.subDir(id) }, secret: null };
+    }
     if (this._acctType(a) === 'subscription') {
       const info = this.readSubCreds(id);
       if (!info.loggedIn) throw new Error('subscription not logged in: ' + a.name);
