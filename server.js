@@ -3304,7 +3304,12 @@ const _lastAttrib = new Map();
 function recordUsageAttribution(meta) {
   const sid = meta && (meta.claudeSessionId || meta.backendSessionId);
   if (!sid) return;
-  const acct = meta.accountId || null;
+  let acct = meta.accountId || null;
+  // A POOLED session bills whatever the pool currently points at — attribute
+  // the ledger to the REAL target at record time (attribution is by-time, so
+  // a later re-point + re-record moves subsequent requests to the new target;
+  // the pool id itself has no pricing/bucket meaning).
+  try { if (acct && accounts.get(acct)?.type === 'pooled') acct = accounts.poolCurrent(acct) || acct; } catch {}
   if (_lastAttrib.get(sid) === (acct || '')) return;
   _lastAttrib.set(sid, acct || '');
   // Cap only — never delete-on-kill: kill→resume of the same sid (terminate/

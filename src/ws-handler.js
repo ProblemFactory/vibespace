@@ -1286,7 +1286,12 @@ done`;
               settingsObj.statusLine = { type: 'command', command: USAGE_STATUSLINE_CMD, padding: 0 };
               const sjson = JSON.stringify(settingsObj);
               if (si >= 0) spawnArgs[si + 1] = sjson; else spawnArgs = [...spawnArgs, '--settings', sjson];
-              const acctKey = spawnAccount?.id || '__global__';
+              // A POOLED spawn attributes usage to the real TARGET account, not
+              // the pool: the statusline cache + quota popup are per-account,
+              // and the target is fixed for this process's lifetime anyway
+              // (a cold swap re-resolves at resume; a hot re-point is a known
+              // attribution seam handled by the ledger's time-based records).
+              const acctKey = spawnAccount?.poolTarget || spawnAccount?.id || '__global__';
               const orig = (userStatuslineCmd && userStatuslineCmd()) || '';
               usageEnvPairs.push(`VIBESPACE_ACCOUNT_KEY=${acctKey}`);
               if (orig) usageEnvPairs.push(`VIBESPACE_ORIG_STATUSLINE=${orig}`);
