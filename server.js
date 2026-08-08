@@ -687,6 +687,50 @@ function broadcastToSession(session, id, msg) {
 // before a server restart): the moment a fallback signal appears on the
 // stream, interrupt the turn (same recipe as the ws 'interrupt' case) and
 // tell the user why. Once per turn (_fallbackStopFired, cleared on result).
+// ── Pooled pseudo-account auto-switch (B-6217 v2) ───────────────────────────
+// Runs at each claude turn end for sessions billed to a pool with auto=on.
+// Decisions read ONLY the passive usage cache (§ban-safety — never an API
+// call); see src/account-pool-auto.js for the semantics. hot=on → just
+// re-point (the running CLI re-reads the credential file on its next request);
+// hot=off → also ask ONE connected client to cold-restart the affected
+// conversations (headless instances degrade to hot behavior until a client
+// appears — the switch itself never waits on a browser).
+const { decidePoolSwitch } = require('./src/account-pool-auto.js');
+const _poolAutoLast = new Map(); // poolId → ts (min 60s between switches)
+function maybePoolAutoSwitch(session) {
+  try {
+    const poolId = session._accountId;
+    if (!poolId) return;
+    const a = accounts.get(poolId);
+    if (!a || a.type !== 'pooled' || !a.auto) return;
+    const now = Date.now();
+    if ((now - (_poolAutoLast.get(poolId) || 0)) < 60000) return;
+    const currentId = accounts.poolCurrent(poolId);
+    if (!currentId) return;
+    const readCache = (id) => { try { return JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, id + '.json'), 'utf-8')); } catch { return null; } };
+    const d = decidePoolSwitch({ currentId, members: accounts.poolMembers(poolId), readCache, nowSec: now / 1000 });
+    if (!d) return;
+    _poolAutoLast.set(poolId, now);
+    accounts.setPoolTarget(poolId, d.to);
+    // Re-attribute every live session on this pool from this moment — the
+    // ledger's by-time attribution resolves pool → current target at record
+    // time, so a fresh record moves subsequent requests to the new account.
+    const affected = [];
+    for (const [sid, s] of activeSessions) {
+      if (s._accountId !== poolId) continue;
+      try { recordUsageAttribution({ claudeSessionId: s.claudeSessionId || s.backendSessionId, accountId: poolId }); } catch {}
+      affected.push({ serverId: sid, backend: s.backend || 'claude', backendSessionId: s.claudeSessionId || s.backendSessionId || null, cwd: s.cwd || null, name: s.name || null, host: s.host || null });
+    }
+    const fromPct = Math.round(d.fromRemaining);
+    serverNotice(`pool-auto-${poolId}-${now}`, `Pool "${a.name}" auto-switched to ${d.toName} (previous account down to ${fromPct}% remaining)${a.hot ? '' : ' — restarting its conversations'}`);
+    console.log(`[pool] auto-switch ${poolId}: ${currentId} → ${d.to} (from ${fromPct}% left, hot=${!!a.hot}, affected=${affected.length})`);
+    if (!a.hot && affected.length) {
+      // ONE client only — every client acting would race duplicate restarts.
+      const payload = JSON.stringify({ type: 'pool-auto-switched', poolId, affected });
+      for (const c of wss.clients) { if (c.readyState === WS_OPEN) { try { c.send(payload); } catch {} break; } }
+    }
+  } catch (e) { console.warn('[pool] auto-switch check failed:', e.message); }
+}
 function maybeStopOnFallback(session, id, from, to) {
   try {
     if (serverSetting('claude.disableModelFallback') !== true) return;
@@ -1362,6 +1406,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
             // After each turn, tail the JSONL for goal_status (native goal sync).
             // Immediate check + one delayed re-check (the Stop hook may write
             // the attachment slightly after the result reaches stdout).
+            if (msg.type === 'result') maybePoolAutoSwitch(session);
             if (msg.type === 'result' && session._goal) {
               checkClaudeGoalStatus(session, id);
               setTimeout(() => { if (activeSessions.has(id)) checkClaudeGoalStatus(session, id); }, 2000);

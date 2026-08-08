@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.252.0
+
+Pooled pseudo-account v2 (B-6217 complete): the `auto` and `hot` switches, per the user's spec.
+
+- **Auto-switch** (⋯ → "Auto-switch when nearly exhausted"): at each claude turn end, if the pool's current target has **under 5% remaining** — taking the MINIMUM across every known bucket (5h, 7d, and each model-scoped weekly like Fable) — the pool re-points to the member with the MOST remaining by the same measure. Decisions read ONLY the passive usage cache (`data/usage-cache/*.json`) — **zero API calls** in this path, §ban-safety intact. A bucket whose reset already passed reads as full (stale readings are normal — the cache updates passively); a member with no data ranks as half-full (wrong guesses self-correct next turn end); an unknown CURRENT target never triggers a switch (no flapping on ignorance). 60s minimum between switches per pool.
+- **Hot switch** (⋯ → "Hot switch (no restart)"): switches — manual or auto — only re-point the symlink; the running CLI re-reads the credential file on its next request (mtime-gated, verified against 2.1.222) and the conversation continues uninterrupted on the new account. The cswap outcome via a first-party mechanism: no request interception, no token copying.
+- Auto + cold: the server re-points, re-records the ledger's by-time attribution for every live session on the pool, and asks exactly ONE connected client to cold-restart the affected conversations (all clients acting would race duplicate resumes). Headless instances degrade to hot behavior until a client appears — the switch itself never waits on a browser.
+- Known seam: a hot re-point leaves a terminal session's statusline attribution env (`VIBESPACE_ACCOUNT_KEY`) on the old target until that session restarts; the ledger is correct either way (attribution re-recorded server-side at switch time).
+- Tests: scripts/test-pool-auto.mjs (14, decision logic incl. reset-passed/unknown/min-across rules) + a live engine smoke (2%-left target auto-switched); pool/verdict suites still green.
+
 ## 2.251.0
 
 Pooled pseudo-account v1 (B-6217, the user's directory-symlink design). A "pooled" account is one switchable billing identity over your logged-in Claude subscriptions: its creds dir at `data/subs/<poolId>` is a DIRECTORY SYMLINK to the current target's dir, and switching = atomically re-pointing it (symlink-to-temp + rename, then `utimes` on the target so the CLI's mtime-gated credential cache invalidates). Why this exact shape (proven in `scripts/test-creds-symlink-swap.mjs`, 8 asserts): the CLI writes credentials via atomicWrite (tmp+rename) which REPLACES a file-level symlink but leaves a directory-level one intact — so refreshes land in the canonical account dir (ONE credential copy ⇒ Anthropic's rotating refresh token keeps exactly one holder), and `.oauth_refresh.lock` resolves through the symlink to the SAME real lock a normal session of that account takes, so pooled and normal sessions of one account are mutually excluded exactly like two normal sessions — zero new refresh conflict.

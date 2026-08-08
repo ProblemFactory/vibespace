@@ -129,14 +129,18 @@ export function installManageAgents(App, ctx = {}) {
   // pool would silently start billing the NEW account without a restart. v1
   // semantics are COLD: the switch restarts every affected conversation (same
   // kill→exited→resume machinery as the billing switcher). Not optional.
-  async _poolSwitchTarget(poolId, subId, poolName) {
+  async _poolSwitchTarget(poolId, subId, poolName, hot) {
     let r;
     try { r = await fetchJson('/api/accounts/pool/' + encodeURIComponent(poolId) + '/target', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountId: subId }) }); }
     catch (e) { showToast(e?.message || t('Switch failed'), { type: 'error' }); return; }
     if (!r?.success) { showToast(r?.error || t('Switch failed'), { type: 'error' }); return; }
     const affected = r.affected || [];
-    showToast(t('“{name}” now uses {target}', { name: poolName, target: r.name }) + (affected.length ? ' — ' + t('restarting {n} conversation(s)…', { n: affected.length }) : ''), { duration: 6000 });
-    for (const sess of affected) this._poolColdRestart(sess, poolId);
+    // hot = re-point only: the running CLI re-reads the credential file on its
+    // next request, so the conversations continue uninterrupted on the new
+    // account. Cold (default) restarts them for clean per-process attribution.
+    const restart = !hot && affected.length;
+    showToast(t('“{name}” now uses {target}', { name: poolName, target: r.name }) + (restart ? ' — ' + t('restarting {n} conversation(s)…', { n: affected.length }) : ''), { duration: 6000 });
+    if (restart) for (const sess of affected) this._poolColdRestart(sess, poolId);
   },
   _poolColdRestart(sess, poolId) {
     if (!sess.backendSessionId) return; // nothing to resume by — leave it be
@@ -1600,8 +1604,16 @@ export function installManageAgents(App, ctx = {}) {
           items.splice(0, 1, { label: t('Switch target'), children: members.length ? members.map((m) => ({
             label: (m.id === a.current ? '\u2713 ' : '') + m.name,
             disabled: m.id === a.current,
-            action: () => this._poolSwitchTarget(id, m.id, a.name),
+            action: () => this._poolSwitchTarget(id, m.id, a.name, a.hot),
           })) : [{ label: t('no logged-in subscriptions'), disabled: true, action: () => {} }] });
+          const patchPool = async (body) => {
+            try { await fetchJson('/api/accounts/pool/' + encodeURIComponent(id), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); }
+            catch (e) { showToast(e?.message || t('Update failed'), { type: 'error' }); }
+          };
+          items.splice(1, 0,
+            { label: (a.auto ? '\u2713 ' : '') + t('Auto-switch when nearly exhausted'), action: () => patchPool({ auto: !a.auto }) },
+            { label: (a.hot ? '\u2713 ' : '') + t('Hot switch (no restart)'), action: () => patchPool({ hot: !a.hot }) },
+          );
         }
         // Per-account login held ON the host (2.199.0): mint this account's
         // own creds dir on the selected machine via an on-host interactive

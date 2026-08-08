@@ -230,6 +230,12 @@ class App {
       if (msg.type === 'accounts-updated' && Array.isArray(msg.accounts)) {
         this._accounts = { ...(this._accounts || {}), accounts: msg.accounts, defaultAccountId: msg.defaultAccountId || null, defaultCodexAccountId: msg.defaultCodexAccountId || null };
       }
+      if (msg.type === 'pool-auto-switched' && Array.isArray(msg.affected)) {
+        // B-6217 v2 auto+COLD: the server re-pointed a pool and picked THIS
+        // client (exactly one) to restart the affected conversations — every
+        // client acting would race duplicate resumes.
+        for (const sess of msg.affected) { try { this._poolColdRestart(sess, msg.poolId); } catch {} }
+      }
       if (msg.type === 'server-notice' && msg.text) {
         // Probe-reported condition (2.226.0): server-side silent failures now
         // surface as toasts (+ notification history) instead of dying in the

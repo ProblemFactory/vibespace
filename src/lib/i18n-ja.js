@@ -2298,4 +2298,7 @@ export default {
   "restarting {n} conversation(s)…": "{n} 件の会話を再起動しています…",
   "Pooled accounts run on this machine only": "プールアカウントはこのマシンでのみ使用できます",
   "This pooled account has no target — pick a subscription in Manage agents": "このプールアカウントにはターゲットがありません — エージェント管理でサブスクリプションを選択してください",
+  "Auto-switch when nearly exhausted": "残量が少なくなったら自動切替",
+  "Hot switch (no restart)": "ホットスイッチ（再起動なし）",
+  "Update failed": "更新に失敗しました",
 };
