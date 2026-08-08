@@ -138,7 +138,7 @@ export function installManageAgents(App, ctx = {}) {
         : `<div class="usage-note">${t('Active — renews in {n} days.', { n: a.oatDaysLeft })}</div>`)
       : '';
     body.innerHTML = `
-      <div class="usage-note">${t('A long-lived token lets this subscription run on remote machines and paired devices WITHOUT shipping its login: the token lasts 1 year, never rotates, and the remote makes no login traffic at all. Limits: quota refresh (⟳) does not work through it, and when it expires sessions fail until you re-mint.')}</div>
+      <div class="usage-note">${t('A long-lived token (Anthropic’s official `claude setup-token`, the same one the Claude Code GitHub Action uses) lets this subscription run on remote machines and paired devices WITHOUT shipping its interactive login: it lasts 1 year and never rotates, so nothing can get out of sync. This is the intended way to run your own subscription on your own remote/CI machines — safer than shipping the login. It still bills YOUR subscription and is tied to it, so treat it like the account itself; Anthropic recommends an API key instead when a credential is shared broadly across many contexts. Limits: quota refresh (⟳) does not work through it, and when it expires sessions fail until you re-mint.')}</div>
       ${status}
       <div class="oat-steps">
         <div>1. ${t('Run the mint command in a terminal, then complete the sign-in it opens in your browser.')}</div>

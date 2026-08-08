@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.253.1
+
+Long-lived-token follow-up — honest framing + real end-to-end verification:
+
+- **Framing corrected (was overstated).** The mint dialog now says the plain truth: a long-lived token is Anthropic's OFFICIAL mechanism (`claude setup-token`, the same one the Claude Code GitHub Action uses) for running YOUR subscription on YOUR remote/CI machines — cross-machine use is by design and safer than shipping the interactive login — but it still bills and is tied to your subscription, and Anthropic recommends an API key when a credential is shared broadly across many contexts. Not "zero-risk anywhere." (Confirmed against code.claude.com/docs/en/github-actions.)
+- **Live end-to-end test on real subscriptions** — scripts/dbg-oat-pool-live.mjs (throwaway server, REAL logged-in Max subscriptions, REAL inference turns; 21 asserts, all green): real claude runs THROUGH the pool symlink; a target switch is picked up by a fresh spawn; a normal session and a pooled session on one account resolve to the SAME real credential dir (the shared `.oauth_refresh.lock` invariant, verified with live `/proc`); an oat-only account completes a real turn via the env token; the ambient `CLAUDE_CODE_OAUTH_TOKEN` is stripped from a normal spawn (`/proc`-verified — no silent re-billing). Safety: it only copies subscriptions whose token has >1.5h of life so a short test can never trigger a refresh that would rotate the real single-use token; it never restarts the production instance and only reads its creds.
+
 ## 2.253.0
 
 **Long-lived tokens (B-211a)** — a Claude subscription can now hold a `claude setup-token` token (1 year, no refresh, inference-only; mechanism verified against the 2.1.225 binary):
