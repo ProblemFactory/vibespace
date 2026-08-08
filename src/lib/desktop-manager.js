@@ -21,6 +21,7 @@ export class DesktopManager {
 
     // Taskbar resize handle (drag top edge to resize)
     this._setupTaskbarResize();
+    this._setupToolbarResize();
 
     // Re-adapt sizes when preview ratio changes
     app.settings?.on('taskbar.desktopPreviewRatio', () => {
@@ -583,6 +584,14 @@ export class DesktopManager {
       // Right-click context menu
       wrapper.addEventListener('contextmenu', (e) => {
         e.preventDefault();
+        // STOP THE BUBBLE (2.250.1, real report): chrome elements are
+        // drag-movable between bars, and the TOOLBAR's background handler
+        // only exempts `button, select, input` — so once the previews were
+        // dragged into the toolbar, its "Customize UI…" menu fired too and,
+        // because showContextMenu removes any existing menu, REPLACED this
+        // one. The element owning the menu must stop the event rather than
+        // rely on each container's exemption list staying in sync.
+        e.stopPropagation();
         const items = [
           { label: 'Rename', action: () => this._startRename(desk) },
         ];
@@ -667,6 +676,60 @@ export class DesktopManager {
         label: d.name,
         action: () => this.moveWindowToDesktop(winId, d.id),
       }));
+  }
+
+  // ── Toolbar resize (2.250.1) ──
+  // The layout is a flex COLUMN (toolbar · workspace flex:1 · taskbar), so the
+  // only thing that has to change is the toolbar's height — the workspace
+  // absorbs the delta automatically and windows re-derive their pixels from
+  // proportional gridBounds via _reflowWindows(). Rather than pin an inline
+  // height on #toolbar, we drive the `--toolbar-height` CSS VAR: #toolbar's
+  // height already reads it, and so does everything derived from it (e.g. the
+  // customize-mode pill offset), so every dependent follows for free — that's
+  // the whole "dynamic layout calc".
+  _setupToolbarResize() {
+    const handle = document.getElementById('toolbar-resize-handle');
+    const toolbar = document.getElementById('toolbar');
+    if (!handle || !toolbar) return;
+    const MIN_H = 28, MAX_H = 96;
+    const root = document.documentElement;
+    const cssDefault = () => parseInt(getComputedStyle(root).getPropertyValue('--toolbar-height')) || 40;
+    const setH = (h) => root.style.setProperty('--toolbar-height', h + 'px');
+
+    const saved = parseInt(localStorage.getItem('toolbarHeight'));
+    if (saved && saved >= MIN_H && saved <= MAX_H) setH(saved);
+
+    handle.title = 'Drag to resize · double-click to reset';
+    handle.addEventListener('dblclick', () => {
+      root.style.removeProperty('--toolbar-height'); // back to the CSS default
+      localStorage.removeItem('toolbarHeight');
+      this.app.wm._reflowWindows?.();
+      this.app.layoutManager.scheduleAutoSave();
+    });
+    handle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      const startY = e.clientY;
+      const startH = toolbar.offsetHeight;
+      handle.classList.add('active');
+      document.body.style.cursor = 'ns-resize';
+      document.body.style.userSelect = 'none';
+      this.app.wm._suppressReflow = true; // ResizeObserver storm during drag
+      const onMove = (ev) => setH(Math.max(MIN_H, Math.min(MAX_H, startH + (ev.clientY - startY))));
+      const onUp = () => {
+        handle.classList.remove('active');
+        document.body.style.cursor = ''; document.body.style.userSelect = '';
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        const h = toolbar.offsetHeight;
+        if (Math.abs(h - cssDefault()) < 2) { root.style.removeProperty('--toolbar-height'); localStorage.removeItem('toolbarHeight'); }
+        else localStorage.setItem('toolbarHeight', h);
+        this.app.wm._suppressReflow = false;
+        this.app.wm._reflowWindows?.();
+        this.app.layoutManager.scheduleAutoSave();
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
   }
 
   // ── Taskbar resize ──

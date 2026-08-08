@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.250.1
+
+- **Right-clicking a desktop preview that was moved into the top bar showed the wrong menu** (user report with screenshot; 2.250.0 fixed a different, real-but-unrelated issue — the menu *direction* — and left this one). Chrome elements are drag-movable between the bars, but the toolbar's background context-menu handler only exempted `button, select, input` while the taskbar's exempted `.desktop-preview` — so once the previews were dragged up into the toolbar, its "Customize UI…" menu fired too and, because `showContextMenu` removes any existing menu, *replaced* the desktop's Rename/Delete. Fixed at both ends: the preview now stops the event (so it works in whichever bar it was dragged into, without depending on each container's exemption list staying in sync), and the toolbar exempts the same element classes the taskbar does.
+- **The top bar can be resized** (user request): drag its bottom edge, double-click to reset; the height persists and syncs to other clients like the taskbar's. It drives the `--toolbar-height` CSS variable rather than an inline height, so every dependent measurement follows for free — the workspace is `flex: 1` and absorbs the delta, and windows re-derive their pixels from proportional bounds. Test: scripts/test-desktop-reorder.mjs (8 CDP assertions incl. the toolbar-menu regression).
+
 ## 2.250.0
 
 - **Resume-all after a restart** (user request — clicking Resume on each of dozens of windows was tedious): when the server or a machine restarts, sessions come back as read-only history windows; on the first load after that, a single popup now offers "Resume all N" and bulk-resumes them (staggered). Only offered when ≥2 sessions were interrupted, only on the boot restore (not on desktop switches or soft reconnects).

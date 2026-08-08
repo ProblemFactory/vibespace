@@ -1106,6 +1106,12 @@ html, body {
   position: relative; z-index: 1; margin-bottom: -3px;
 }
 #taskbar-resize-handle:hover, #taskbar-resize-handle.active { background: var(--accent-dim); }
+#toolbar-resize-handle {
+  height: 3px; cursor: ns-resize; flex-shrink: 0; background: transparent;
+  position: relative; z-index: 1; margin-top: -3px;
+}
+#toolbar-resize-handle:hover, #toolbar-resize-handle.active { background: var(--accent-dim); }
+@media (max-width: 768px) { #toolbar-resize-handle { display: none; } }
 #taskbar {
   height: var(--taskbar-height); background: var(--bg-taskbar);
   border-top: 1px solid var(--border); display: flex; align-items: center;
