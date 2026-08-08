@@ -1,4 +1,4 @@
-import { showContextMenu, showInputDialog } from './utils.js';
+import { cssVarDefault, showContextMenu, showInputDialog } from './utils.js';
 import { t } from './i18n.js';
 
 /**
@@ -693,7 +693,10 @@ export class DesktopManager {
     if (!handle || !toolbar) return;
     const MIN_H = 28, MAX_H = 96;
     const root = document.documentElement;
-    const cssDefault = () => parseInt(getComputedStyle(root).getPropertyValue('--toolbar-height')) || 40;
+    // NEVER read the computed var here — onMove drives that very var, so at
+    // mouseup it equals the dragged height and the reset check always fired
+    // (the snap-back bug). cssVarDefault lifts the override to measure.
+    const cssDefault = () => cssVarDefault('--toolbar-height', 40);
     const setH = (h) => root.style.setProperty('--toolbar-height', h + 'px');
 
     const saved = parseInt(localStorage.getItem('toolbarHeight'));

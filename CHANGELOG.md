@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.252.1
+
+Toolbar resize snapped back to the default (2.250.1 regression, user report) — THREE cooperating legs, all fixed:
+
+- **Mouseup self-comparison**: the drag-end "within 2px of the CSS default ⇒ reset" check read the COMPUTED `--toolbar-height` as the default — but the drag itself sets that very var, so the check compared the dragged height against itself and reset on every release. Same flaw in `_applyToolbarHeight` (restore / layout-sync re-apply of the saved height read as "at default" and cleared it). Both now measure the TRUE stylesheet default via `cssVarDefault()` (utils.js — temporarily lifts the root inline override, reads computed, restores).
+- **Theme sweep wipe**: `ThemeManager.apply()` → `_clearInlineOverrides()` removed EVERY inline `--*` var on :root (built for custom-theme preview leftovers) — killing the height override at boot (right after the localStorage restore applied it) and on every theme switch. Layout vars are now exempt from the theme cleanup sweep.
+- Smoke: scripts/test-toolbar-resize.mjs (worktree + CDP, 10 asserts — real mouse-event drag sticks after mouseup, survives reload and a theme switch, same-value re-apply is a no-op, dblclick/drag-to-default reset semantics intact).
+
 ## 2.252.0
 
 Pooled pseudo-account v2 (B-6217 complete): the `auto` and `hot` switches, per the user's spec.
