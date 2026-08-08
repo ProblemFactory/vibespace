@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.252.2
+
+Toolbar-resize follow-up (adversarial review of 2.252.1 found one residual snap-back route + hardening):
+
+- **Cross-desktop stale re-broadcast**: bar heights are GLOBAL chrome but ride PER-DESKTOP layout-sync states — a client viewing ANOTHER desktop only cached the broadcast without applying it, kept rendering the old height, and its next desktop switch captured + broadcast that stale size back, erasing the resize (and its localStorage) on every client. `_handleRemoteSync` now applies `toolbarHeight`/`taskbarHeight` BEFORE the per-desktop gate (fixes the same aged hole for the taskbar too).
+- `_applyToolbarHeight` clamps to the drag range 28–96 (a corrupt/foreign state can no longer render 500px or persist it) and no-ops on unchanged values (no storage churn/reflow per echo — symmetry with the taskbar twin).
+- `cssVarDefault` preserves a var's `important` priority through its lift-measure-restore round-trip.
+- Smoke grew to 12 asserts (non-active-desktop broadcast applies; absurd height clamps).
+
 ## 2.252.1
 
 Toolbar resize snapped back to the default (2.250.1 regression, user report) — THREE cooperating legs, all fixed:

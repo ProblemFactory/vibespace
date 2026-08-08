@@ -608,9 +608,10 @@ export function showImageOverlay(src) {
 export function cssVarDefault(name, fallback) {
   const root = document.documentElement;
   const cur = root.style.getPropertyValue(name);
+  const pri = cur ? root.style.getPropertyPriority(name) : '';
   if (cur) root.style.removeProperty(name);
   const d = parseInt(getComputedStyle(root).getPropertyValue(name)) || fallback;
-  if (cur) root.style.setProperty(name, cur);
+  if (cur) root.style.setProperty(name, cur, pri); // keep an 'important' flag intact through the round-trip
   return d;
 }
 

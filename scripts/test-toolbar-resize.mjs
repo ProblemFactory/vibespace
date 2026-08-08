@@ -113,6 +113,24 @@ try {
   const hR = await toolbarH();
   check('height survives reload', Math.abs(hR - h1) <= 2);
 
+  // cross-desktop broadcast (2.252.2, adversarial-review catch): a layout-sync
+  // for a NON-active desktop used to be cached without applying — the bars are
+  // GLOBAL chrome, so the height must apply immediately regardless of which
+  // desktop the broadcast belongs to (else this client's next capture
+  // broadcasts its stale size back and erases the resize fleet-wide)
+  await evalJs(`app.layoutManager._handleRemoteSync({ desktopId: 'not-the-active-desktop', state: { toolbarHeight: 90, windows: [] } })`);
+  await sleep(150);
+  check('non-active-desktop broadcast still applies the height', (await toolbarH()) === 90);
+  await evalJs(`app.layoutManager._applyToolbarHeight(${h1})`);
+  await sleep(150);
+
+  // corrupt/foreign state must clamp, not render (defense-in-depth)
+  await evalJs(`app.layoutManager._applyToolbarHeight(500)`);
+  await sleep(150);
+  check('absurd height clamps to the drag range', (await toolbarH()) <= 96);
+  await evalJs(`app.layoutManager._applyToolbarHeight(${h1})`);
+  await sleep(150);
+
   // theme switch must NOT wipe the override (the 2.252.1 third leg:
   // ThemeManager.apply's _clearInlineOverrides swept every inline --* var,
   // killing the height at boot and on every theme change)
@@ -138,5 +156,5 @@ try {
 }
 
 ws.close();
-console.log(failed ? `${failed} FAILED` : 'ALL PASS (10)');
+console.log(failed ? `${failed} FAILED` : 'ALL PASS (12)');
 process.exit(failed ? 1 : 0);
