@@ -404,6 +404,14 @@ app.get('/xterm.css', (req, res) => {
 // dtach is a minimal PTY detach/attach tool — no rendering layer, no mouse interception.
 // Claude processes get raw PTY I/O identical to a native terminal.
 const activeSessions = new Map();
+// B-3f8a: account ids that have a RUNNING session — the merge/creds-rewrite
+// guard consults this so a subscription merge never rewrites/removes a creds
+// dir under a live session (the CLI re-reads creds per request, mid-turn).
+const liveAccountIdSet = () => {
+  const s = new Set();
+  for (const sess of activeSessions.values()) if (sess?._accountId) s.add(sess._accountId);
+  return s;
+};
 const sessionCounterRef = { value: 0 };
 const SOCKETS_DIR = path.join(__dirname, 'data', 'sockets');
 const META_DIR = path.join(__dirname, 'data', 'session-meta');
@@ -3436,7 +3444,8 @@ app.get('/api/hosts/:id/accounts-status', async (req, res) => {
               const i = r.hostSubs.indexOf(gone.id);
               if (i >= 0) r.hostSubs.splice(i, 1, survivor.id);
             }
-            accounts.mergeSubscription(gone.id, survivor.id, { preferFromCreds: false });
+            try { accounts.mergeSubscription(gone.id, survivor.id, { preferFromCreds: false, liveAccountIds: liveAccountIdSet() }); }
+            catch (me) { if (me.code !== 'merge-account-live') throw me; /* live session — leave both records, merge on a later probe */ }
           }
         } catch { /* best-effort per-dir; a failed merge keeps both records */ }
       }
@@ -3550,8 +3559,14 @@ app.post('/api/accounts/subscription/:id/finalize', (req, res) => {
         x.id !== req.params.id && (x.backend || 'claude') === 'claude' && x.type === 'subscription'
         && String(x.email || (String(x.name || '').includes('@') ? x.name : '')).trim().toLowerCase() === em);
       if (dup) {
-        const merged = accounts.mergeSubscription(req.params.id, dup.id, { preferFromCreds: true });
-        return res.json({ success: true, ...fin, merged: true, account: merged });
+        try {
+          const merged = accounts.mergeSubscription(req.params.id, dup.id, { preferFromCreds: true, liveAccountIds: liveAccountIdSet() });
+          return res.json({ success: true, ...fin, merged: true, account: merged });
+        } catch (me) {
+          if (me.code !== 'merge-account-live') throw me;
+          // logged in, but a running session blocks the auto-fold — keep both, tell the user
+          return res.json({ success: true, ...fin, merged: false, mergeBlocked: 'a session using one of these accounts is running — stop it to auto-merge the duplicate' });
+        }
       }
     }
     res.json({ success: true, ...fin });

@@ -132,8 +132,26 @@ function _parseUsage(u) {
       }
     }
   }
+  // extra_usage → spend (B-87fe; guards mirror claude-swap oauth.py:419-441).
+  // used_credits/monthly_limit are cents; monthly_limit=null means unlimited
+  // (skip the limit, keep spend). All-or-nothing on the three core fields so a
+  // partial payload never renders a half-baked spend line.
+  let spend = null;
+  const eu = u.extra_usage;
+  if (eu && eu.is_enabled) {
+    const uc = eu.used_credits, ml = eu.monthly_limit, ut = eu.utilization;
+    if (uc != null && ut != null) {
+      spend = {
+        used: Number(uc) / 100,
+        limit: ml != null ? Number(ml) / 100 : null, // null = unlimited
+        pct: Number(ut),
+        currency: eu.currency || 'USD',
+        resetsAt: eu.resets_at ? Math.floor(Date.parse(eu.resets_at) / 1000) || 0 : 0,
+      };
+    }
+  }
   return {
-    fiveHour, sevenDay, scopedWeekly,
+    fiveHour, sevenDay, scopedWeekly, ...(spend ? { spend } : {}),
     overallStatus: (fiveHour.status === 'limited' || sevenDay.status === 'limited') ? 'limited' : 'allowed',
     fetchedAt: Date.now(),
   };

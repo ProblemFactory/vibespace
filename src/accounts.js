@@ -349,10 +349,22 @@ class AccountManager {
    *  when asked, hostLogins union, metadata kept on the survivor, the dup
    *  record spliced WITHOUT the delete-path host cleanup (its host dirs are
    *  renamed to the survivor by the caller first). */
-  mergeSubscription(fromId, intoId, { preferFromCreds = false } = {}) {
+  mergeSubscription(fromId, intoId, { preferFromCreds = false, liveAccountIds = null } = {}) {
     const from = this._state.accounts.find((x) => x.id === fromId);
     const into = this._state.accounts.find((x) => x.id === intoId);
     if (!from || !into || fromId === intoId) throw new Error('bad merge pair');
+    // B-3f8a: NEVER rewrite creds while a session of EITHER side is running.
+    // The CLI re-reads .credentials.json per HTTP request (verified vs 2.1.222,
+    // SharedContext/devices-and-access.md) — so copying over intoDir/.credentials.json
+    // would silently re-bill the survivor's live sessions MID-TURN, and the
+    // rmSync(fromDir) would yank creds out from under the merged-away side's
+    // live sessions. The caller (server.js, which holds activeSessions) passes
+    // the set of account ids with a running session; refuse loudly if hit.
+    if (liveAccountIds && (liveAccountIds.has?.(fromId) || liveAccountIds.has?.(intoId))) {
+      const e = new Error('cannot merge these accounts while a session using either is running — stop those sessions first');
+      e.code = 'merge-account-live';
+      throw e;
+    }
     // local creds: bring the dup's dir over when it's fresher/the only login
     try {
       const fromDir = this.subDir(fromId), intoDir = this.subDir(intoId);
