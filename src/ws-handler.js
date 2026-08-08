@@ -2292,6 +2292,29 @@ done`;
           break;
         }
 
+        case 'desktop-reorder': {
+          // Reorder desktopMeta to the client-supplied id order (drag-to-reorder,
+          // 2.250.0). Reconcile against the stored set so a stale client can't
+          // drop or invent a desktop: keep only known ids in the given order,
+          // then append any stored ids the client omitted.
+          const layoutData = readLayouts();
+          const cur = layoutData.desktopMeta || [];
+          const byId = new Map(cur.map(d => [d.id, d]));
+          const seen = new Set();
+          const next = [];
+          for (const id of (Array.isArray(data.order) ? data.order : [])) {
+            if (byId.has(id) && !seen.has(id)) { next.push(byId.get(id)); seen.add(id); }
+          }
+          for (const d of cur) if (!seen.has(d.id)) next.push(d);
+          if (next.length === cur.length) {
+            layoutData.desktopMeta = next;
+            writeLayouts(layoutData);
+            const broadcast = JSON.stringify({ type: 'desktop-updated', desktops: layoutData.desktopMeta });
+            wss.clients.forEach(c => { if (c !== ws && c.readyState === WS_OPEN) try { c.send(broadcast); } catch {} });
+          }
+          break;
+        }
+
         case 'tmux-attach': {
           // Attach to a running tmux pane (read-only view of external session)
           const tmuxTarget = data.tmuxTarget;

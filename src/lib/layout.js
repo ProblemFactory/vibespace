@@ -349,6 +349,19 @@ class LayoutManager {
   async restoreState(state) {
     if (!state || !state.windows) return;
 
+    // Resume-all offer (2.250.0): collect the stopped sessions restored as
+    // read-only windows so we can offer ONE bulk-resume popup after boot
+    // instead of making a user with dozens of sessions click Resume N times.
+    // Only meaningful during the initial boot restore — `_bootStoppedSessions`
+    // is armed by loadAutoSave and null afterwards, so desktop-switch replays
+    // don't collect.
+    const collectStopped = (sessionId, cwd, name, opts) => {
+      if (!this._bootStoppedSessions) return;
+      const key = (opts?.backend || 'claude') + ':' + (opts?.backendSessionId || sessionId) + ':' + (opts?.hostId || '');
+      if (this._bootStoppedSessions.some((d) => d.key === key)) return;
+      this._bootStoppedSessions.push({ key, sessionId, cwd, name, opts });
+    };
+
     // Restore theme
     if (state.theme) {
       this.app.themeManager.apply(state.theme);
@@ -441,20 +454,20 @@ class LayoutManager {
             (s.backendSessionId || s.sessionId) === backendSessionId && (s.backend || 'claude') === backend
           );
           if (stoppedMatch) {
-            const viewWin = this.app.viewSession(stoppedMatch.sessionId, stoppedMatch.cwd, customName || stoppedMatch.name || ws.title || 'Session', {
-              backend, backendSessionId, hostId: ws.openSpec?.hostId || undefined,
-            });
+            const rOpts = { backend, backendSessionId, hostId: ws.openSpec?.hostId || undefined };
+            const viewWin = this.app.viewSession(stoppedMatch.sessionId, stoppedMatch.cwd, customName || stoppedMatch.name || ws.title || 'Session', rOpts);
             if (viewWin) applyPosition(viewWin, ws);
+            collectStopped(stoppedMatch.sessionId, stoppedMatch.cwd, customName || stoppedMatch.name || ws.title || 'Session', rOpts);
           } else if (ws.openSpec?.hostId) {
             // REMOTE session: /api/sessions is LOCAL discovery only, so a
             // remote session can never stoppedMatch — restore it view-only
             // from the openSpec identity (viewSession is host-capable and
             // prefetches the transcript); dropping it silently lost the
             // window on every restore (audit 2.192.0)
-            const viewWin = this.app.viewSession(backendSessionId, cwd, customName || ws.title || 'Session', {
-              backend, backendSessionId, hostId: ws.openSpec.hostId,
-            });
+            const rOpts = { backend, backendSessionId, hostId: ws.openSpec.hostId };
+            const viewWin = this.app.viewSession(backendSessionId, cwd, customName || ws.title || 'Session', rOpts);
             if (viewWin) applyPosition(viewWin, ws);
+            collectStopped(backendSessionId, cwd, customName || ws.title || 'Session', rOpts);
           }
         }
       } else if (ws.type === 'chat') {
@@ -481,20 +494,20 @@ class LayoutManager {
             (s.backendSessionId || s.sessionId) === backendSessionId && (s.backend || 'claude') === backend
           );
           if (stoppedMatch) {
-            const viewWin = this.app.viewSession(stoppedMatch.sessionId, stoppedMatch.cwd, customName || stoppedMatch.name || ws.title || 'Session', {
-              backend, backendSessionId, hostId: ws.openSpec?.hostId || undefined,
-            });
+            const rOpts = { backend, backendSessionId, hostId: ws.openSpec?.hostId || undefined };
+            const viewWin = this.app.viewSession(stoppedMatch.sessionId, stoppedMatch.cwd, customName || stoppedMatch.name || ws.title || 'Session', rOpts);
             if (viewWin) applyPosition(viewWin, ws);
+            collectStopped(stoppedMatch.sessionId, stoppedMatch.cwd, customName || stoppedMatch.name || ws.title || 'Session', rOpts);
           } else if (ws.openSpec?.hostId) {
             // REMOTE session: /api/sessions is LOCAL discovery only, so a
             // remote session can never stoppedMatch — restore it view-only
             // from the openSpec identity (viewSession is host-capable and
             // prefetches the transcript); dropping it silently lost the
             // window on every restore (audit 2.192.0)
-            const viewWin = this.app.viewSession(backendSessionId, cwd, customName || ws.title || 'Session', {
-              backend, backendSessionId, hostId: ws.openSpec.hostId,
-            });
+            const rOpts = { backend, backendSessionId, hostId: ws.openSpec.hostId };
+            const viewWin = this.app.viewSession(backendSessionId, cwd, customName || ws.title || 'Session', rOpts);
             if (viewWin) applyPosition(viewWin, ws);
+            collectStopped(backendSessionId, cwd, customName || ws.title || 'Session', rOpts);
           }
         }
       } else if (ws.type === 'files') {
@@ -612,6 +625,7 @@ class LayoutManager {
   // Load auto-saved state on startup
   async loadAutoSave() {
     this._restoring = true;
+    this._bootStoppedSessions = []; // arm the resume-all collector (see restoreState)
     try {
       const res = await fetch('/api/layouts');
       const data = await res.json();
@@ -629,8 +643,31 @@ class LayoutManager {
         }
       }
     } catch {}
+    // Offer a bulk resume for the sessions that came back stopped, then disarm
+    // the collector so later desktop-switch replays don't re-prompt.
+    const stopped = this._bootStoppedSessions || [];
+    this._bootStoppedSessions = null;
+    if (stopped.length >= 2) setTimeout(() => this._offerResumeAll(stopped), 1200);
     // Allow autosave after restore is complete (with extra delay for windows to attach)
     setTimeout(() => { this._restoring = false; }, 5000);
+  }
+
+  // Bulk-resume the sessions that restored stopped (2.250.0). resumeSession
+  // already replaces the matching read-only window, so we just fire them
+  // staggered to avoid a create storm on a fleet server.
+  async _offerResumeAll(stopped) {
+    const { showConfirmDialog } = await import('./utils.js');
+    const ok = await showConfirmDialog({
+      title: 'Resume interrupted sessions?',
+      message: `<b>${stopped.length}</b> sessions were interrupted (the server or a machine restarted) and reopened as read-only history. Resume all of them now?`,
+      confirmText: `Resume all ${stopped.length}`,
+    }).catch(() => false);
+    if (!ok) return;
+    for (let i = 0; i < stopped.length; i++) {
+      const d = stopped[i];
+      try { this.app.resumeSession(d.sessionId, d.cwd, d.name, d.opts); } catch {}
+      if (i < stopped.length - 1) await new Promise((r) => setTimeout(r, 400));
+    }
   }
 
   // Save a named preset
