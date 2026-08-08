@@ -57,6 +57,16 @@ class LayoutManager {
 
   _handleRemoteSync(msg) {
     const dm = this.app.desktopManager;
+    // Bar heights are GLOBAL chrome riding PER-DESKTOP states — apply them
+    // BEFORE the desktop gate (2.252.2, adversarial-review catch): a client
+    // viewing another desktop used to only CACHE the broadcast, so its bars
+    // kept the old size; its next desktop switch then captured that stale
+    // size and broadcast it back, erasing the first client's resize (and its
+    // localStorage) fleet-wide — a residual snap-back route after 2.252.1.
+    if (msg.state) {
+      if (msg.state.taskbarHeight) this._applyTaskbarHeight(msg.state.taskbarHeight);
+      if (msg.state.toolbarHeight) this._applyToolbarHeight(msg.state.toolbarHeight);
+    }
     if (dm && msg.desktopId) {
       // Desktop-aware: only apply if it's for our active desktop
       if (msg.desktopId !== dm.activeDesktopId) {
@@ -1019,12 +1029,20 @@ class LayoutManager {
   // default means RESET (clear the override) rather than pinning the default.
   _applyToolbarHeight(h) {
     const root = document.documentElement;
+    h = Number(h);
+    if (!Number.isFinite(h)) return;
+    h = Math.max(28, Math.min(96, Math.round(h))); // drag-range clamp — a corrupt/foreign state must not render 500px NOR persist it
     // cssVarDefault, NOT getComputedStyle: with a saved override active the
     // computed var IS the override — re-applying the same height then read as
     // "at default" and reset it (restore/layout-sync reverted the user's size).
     const def = cssVarDefault('--toolbar-height', 40);
-    if (Math.abs(h - def) < 2) { root.style.removeProperty('--toolbar-height'); localStorage.removeItem('toolbarHeight'); }
-    else { root.style.setProperty('--toolbar-height', h + 'px'); localStorage.setItem('toolbarHeight', h); }
+    if (Math.abs(h - def) < 2) {
+      if (!root.style.getPropertyValue('--toolbar-height')) return; // already at default — no churn
+      root.style.removeProperty('--toolbar-height'); localStorage.removeItem('toolbarHeight');
+    } else {
+      if (root.style.getPropertyValue('--toolbar-height') === h + 'px') return; // unchanged — skip the reflow + storage write
+      root.style.setProperty('--toolbar-height', h + 'px'); localStorage.setItem('toolbarHeight', h);
+    }
     this.app.wm._reflowWindows?.();
   }
 
