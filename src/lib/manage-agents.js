@@ -123,6 +123,34 @@ export function installManageAgents(App, ctx = {}) {
   // Polls the host's live login state — a read-only ssh probe, NO API calls
   // (§ban-safety) — until the credential files CHANGE vs the pre-login
   // snapshot, then brings the Agents surface back on the SAME machine.
+  // ── Pooled pseudo-account: re-point + cold restart (B-6217 v1) ──────────
+  // Re-pointing moves the symlink IMMEDIATELY, and a running claude re-reads
+  // the credential file mid-session (mtime-gated) — so any conversation on the
+  // pool would silently start billing the NEW account without a restart. v1
+  // semantics are COLD: the switch restarts every affected conversation (same
+  // kill→exited→resume machinery as the billing switcher). Not optional.
+  async _poolSwitchTarget(poolId, subId, poolName) {
+    let r;
+    try { r = await fetchJson('/api/accounts/pool/' + encodeURIComponent(poolId) + '/target', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountId: subId }) }); }
+    catch (e) { showToast(e?.message || t('Switch failed'), { type: 'error' }); return; }
+    if (!r?.success) { showToast(r?.error || t('Switch failed'), { type: 'error' }); return; }
+    const affected = r.affected || [];
+    showToast(t('“{name}” now uses {target}', { name: poolName, target: r.name }) + (affected.length ? ' — ' + t('restarting {n} conversation(s)…', { n: affected.length }) : ''), { duration: 6000 });
+    for (const sess of affected) this._poolColdRestart(sess, poolId);
+  },
+  _poolColdRestart(sess, poolId) {
+    if (!sess.backendSessionId) return; // nothing to resume by — leave it be
+    const live = (this.sidebar?._allSessions || []).find((x) => x.webuiId === sess.serverId);
+    const name = this.sidebar?.getCustomName?.({ backend: sess.backend, backendSessionId: sess.backendSessionId }) || live?.name || sess.name || '';
+    const mode = live?.webuiMode || 'chat';
+    const finish = () => this.resumeSession(sess.backendSessionId, sess.cwd || live?.cwd || '', name, { mode, backend: sess.backend, backendSessionId: sess.backendSessionId, accountId: poolId, hostId: sess.host || undefined, excludeWebuiId: sess.serverId });
+    let done = false;
+    const go = () => { if (done) return; done = true; this.ws.offGlobal(onExit); finish(); };
+    const onExit = (msg) => { if (msg.type === 'exited' && msg.sessionId === sess.serverId) setTimeout(go, 400); }; // let the CLI flush its transcript
+    this.ws.onGlobal(onExit);
+    this.ws.send({ type: 'kill', sessionId: sess.serverId, backendSessionId: sess.backendSessionId });
+    setTimeout(go, 15000); // a lost exited must not strand the restart
+  },
   _watchHostLogin(hostId, hostLabel) {
     if (!hostId) return;
     if (this._hostLoginWatch) { clearInterval(this._hostLoginWatch); this._hostLoginWatch = null; }
@@ -1245,7 +1273,11 @@ export function installManageAgents(App, ctx = {}) {
         .map((hid) => this._hostNamesKnown?.[hid] || this.sidebar?._hostsData?.hosts?.find((h) => h.id === hid)?.name || hid);
       const hlTag = hlNames.length
         ? ` <span class="acct-linked-hint">${t('· logged in on {host}', { host: escHtml(hlNames.join(', ')) })}</span>` : '';
-      let ident = isSub
+      let ident = a.pooled
+        ? (a.supported === false ? `<span class="ob-warn">${t('not supported on this platform')}</span>`
+          : a.current ? escHtml('→ ' + (a.currentName || a.current) + (a.email ? ' · ' + a.email : ''))
+          : `<span class="ob-warn">${t('no target — pick a subscription in ⋯')}</span>`)
+        : isSub
         ? (a.loggedIn ? escHtml((aEmail || '') + (a.subscriptionType ? (aEmail ? ' · ' : '') + a.subscriptionType : '')) || t('logged in')
           // Host-held login + empty LOCAL dir: "not logged in" (which is
           // about the local dir) next to "logged in on {host}" read as a
@@ -1364,6 +1396,18 @@ export function installManageAgents(App, ctx = {}) {
         { label: t('Add Console account…'), action: () => { done(); this._addConsoleAccount(); } },
         { label: t('Add API key…'), action: addApiKey },
       );
+      // Pooled pseudo-account (local only): one switchable identity over the
+      // logged-in subscriptions. Needs at least one to point at.
+      if (!selectedHost && claudeAccts.some((x) => x.type === 'subscription' && x.loggedIn)) {
+        items.push({ separator: true }, { label: t('Add pooled account…'), action: async () => {
+          done();
+          const name = await showInputDialog({ title: t('Pooled account'), label: t('One account entry that internally switches between your logged-in subscriptions. Sessions pick it like any account; you (or later, auto-switching) choose which real subscription it currently uses.'), value: t('Pool'), confirmText: t('Create') });
+          if (name == null) return;
+          try { await fetchJson('/api/accounts/pool', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }); showToast(t('Pooled account created')); }
+          catch (e) { showToast(e?.message || t('Create failed'), { type: 'error' }); }
+          refresh();
+        } });
+      }
       showContextMenu(r.left, r.bottom + 4, items);
     };
     head.append(title, addAcctBtn);
@@ -1551,6 +1595,14 @@ export function installManageAgents(App, ctx = {}) {
           { label: t('Test'), action: doTest },
           { label: t('Rename account'), action: doRename },
         ];
+        if (a?.pooled && !selectedHost) {
+          const members = a.memberOptions || [];
+          items.splice(0, 1, { label: t('Switch target'), children: members.length ? members.map((m) => ({
+            label: (m.id === a.current ? '\u2713 ' : '') + m.name,
+            disabled: m.id === a.current,
+            action: () => this._poolSwitchTarget(id, m.id, a.name),
+          })) : [{ label: t('no logged-in subscriptions'), disabled: true, action: () => {} }] });
+        }
         // Per-account login held ON the host (2.199.0): mint this account's
         // own creds dir on the selected machine via an on-host interactive
         // login (~/.vibespace/subs/<id> — the token is born there and never

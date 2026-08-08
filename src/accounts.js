@@ -567,6 +567,15 @@ class AccountManager {
    */
   evaluateOnHost(a, hostFacts, { allowShip = false } = {}) {
     const backend = this._acctBackend(a);
+    // Pooled pseudo-accounts are LOCAL-ONLY: shipping would freeze the pool at
+    // spawn time (a copy of the symlink's contents) and break the shared-lock
+    // invariant on the host. Never let them fall into the API-key always-ship
+    // branch below.
+    if (this._acctType(a) === 'pooled') {
+      if (hostFacts) return { usable: false, how: null, reason: 'pool-local-only', linked: false, held: false, heldVerified: false };
+      const ok = !!this.poolCurrent(a.id) && !!this.readSubCreds(a.id).loggedIn;
+      return { usable: ok, how: 'local-env', reason: ok ? null : 'pool-no-target', linked: false, held: false, heldVerified: false };
+    }
     const isSub = backend === 'codex' || this._acctType(a) === 'subscription';
     const norm = (v) => String(v || '').trim().toLowerCase();
     const acctEmail = norm(a.email || (String(a.name || '').includes('@') ? a.name : ''));

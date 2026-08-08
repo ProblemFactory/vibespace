@@ -790,6 +790,8 @@ export function installSessionLifecycle(App, ctx = {}) {
         }
         if (v.reason === 'never-signed-in') return t('“{name}” never finished signing in — complete its login in Manage agents first.', { name: a.name });
         if (v.reason === 'dial-no-ship') return t('Subscription logins can’t ship to a paired device — log in on the device, or use an API-key account');
+        if (v.reason === 'pool-local-only') return t('Pooled accounts run on this machine only');
+        if (v.reason === 'pool-no-target') return t('This pooled account has no target — pick a subscription in Manage agents');
         return t('This stored login can’t ship to {host}. If you’ve logged this account in ON {host}, pick “CLI login @ {host}” above — that uses the host’s own login. (Or enable Settings → “Ship subscription logins to remote hosts”.)', { host: rHostName });
       }
       // ── legacy fallback (probe in flight / old server) ──
@@ -798,6 +800,10 @@ export function installSessionLifecycle(App, ctx = {}) {
       // usable credentials ANYWHERE — offering it fail-lates at spawn with
       // "subscription not logged in" and poisons the session's on-resume
       // config. Say the real reason instead of the ship explanation.
+      if (a.pooled) { // pooled = local-only; loggedIn reads through the symlink
+        if (rHostId) return t('Pooled accounts run on this machine only');
+        return a.loggedIn ? null : t('This pooled account has no target — pick a subscription in Manage agents');
+      }
       if (!a.loggedIn && !(rHostId && (hostLinked(a) || hostSubHeld(a)))) {
         return t('“{name}” never finished signing in — complete its login in Manage agents first.', { name: a.name });
       }

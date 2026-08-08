@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.251.0
+
+Pooled pseudo-account v1 (B-6217, the user's directory-symlink design). A "pooled" account is one switchable billing identity over your logged-in Claude subscriptions: its creds dir at `data/subs/<poolId>` is a DIRECTORY SYMLINK to the current target's dir, and switching = atomically re-pointing it (symlink-to-temp + rename, then `utimes` on the target so the CLI's mtime-gated credential cache invalidates). Why this exact shape (proven in `scripts/test-creds-symlink-swap.mjs`, 8 asserts): the CLI writes credentials via atomicWrite (tmp+rename) which REPLACES a file-level symlink but leaves a directory-level one intact — so refreshes land in the canonical account dir (ONE credential copy ⇒ Anthropic's rotating refresh token keeps exactly one holder), and `.oauth_refresh.lock` resolves through the symlink to the SAME real lock a normal session of that account takes, so pooled and normal sessions of one account are mutually excluded exactly like two normal sessions — zero new refresh conflict.
+
+- Manage Agents → + Add account… → "Add pooled account…" (needs ≥1 logged-in subscription); the row shows `→ current target · email`; ⋯ → Switch target lists members.
+- Switching target COLD-RESTARTS every conversation currently billed to the pool (kill → exited → resume, the billing-switcher machinery) — mandatory, because a running claude re-reads the credential file mid-session and would otherwise silently start billing the new account.
+- Members default to ALL logged-in Claude subscriptions; narrowing the member list away from the current target re-points to a remaining member. Deleting a pool unlinks ONLY the symlink (never a real account's dir; `rmSync` on a symlinked dir throws — probed, which is why remove() uses `unlinkSync`).
+- Attribution: the passive-usage statusline key and the ledger's by-time attribution both resolve pool → its real target, so quota donuts and the Usage window bill the actual account, never the pool id.
+- Linux-only (macOS keychains key on the env STRING, not the resolved path — different symlink paths would get separate entries); pools never ship to remote hosts (`pool-local-only` verdict; billing switcher + New Session render the honest reason).
+- Store fields `auto`/`hot` exist but have no UI yet — v2 (auto-switch at turn end when the target drops under 5% remaining across 5h/weekly/scoped, hot re-point without restart) comes next.
+- Tests: scripts/test-account-pool.mjs (16) + test-creds-symlink-swap.mjs (8); test-account-verdicts.mjs still green (17).
+
 ## 2.250.1
 
 - **Right-clicking a desktop preview that was moved into the top bar showed the wrong menu** (user report with screenshot; 2.250.0 fixed a different, real-but-unrelated issue — the menu *direction* — and left this one). Chrome elements are drag-movable between the bars, but the toolbar's background context-menu handler only exempted `button, select, input` while the taskbar's exempted `.desktop-preview` — so once the previews were dragged up into the toolbar, its "Customize UI…" menu fired too and, because `showContextMenu` removes any existing menu, *replaced* the desktop's Rename/Delete. Fixed at both ends: the preview now stops the event (so it works in whichever bar it was dragged into, without depending on each container's exemption list staying in sync), and the toolbar exempts the same element classes the taskbar does.
