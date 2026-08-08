@@ -114,6 +114,40 @@ async function isProcessClaudeAsync(pid) {
   return cmd === 'claude' || cmd.includes('claude');
 }
 
+// /proc/<pid>/stat field 22 (starttime, clock ticks since boot). Verified
+// byte-equal to the claude lock's `procStart` across 6/6 real locks (2.248.x).
+function procStartTicks(pid) {
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf-8');
+    // comm may contain spaces/parens — start after the LAST ')' (skips
+    // "pid (comm) "), so rest[0] = state (field 3); starttime is field 22 →
+    // index 22-3 = 19.
+    const rest = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+    const v = rest[19];
+    return v ? String(v) : null;
+  } catch { return null; }
+}
+
+// B-2104: identity-verify a lock's pid WITHOUT a per-lock `ps` fork — the
+// 2.242.0 event-loop stall was 22 locks × serial `ps`. claude's own lock
+// carries `procStart` (= /proc/<pid>/stat field 22); matching it proves the
+// alive pid is the SAME process the lock was written for (defeats PID reuse),
+// which is exactly what the `ps comm=claude` check established. GOTCHA: only
+// LINUX locks carry `procStart` — macOS writes the string `procStartFt`
+// (`ps -o lstart=`), so an absent numeric procStart is NOT a mismatch; it
+// falls back to the `ps` fork (never a silent always-true guard).
+async function isLockClaude(lock) {
+  const pid = lock?.pid;
+  if (!pid) return false;
+  const want = lock.procStart != null ? String(lock.procStart) : null;
+  if (want) {
+    const have = procStartTicks(pid);
+    if (have != null) return have === want; // pure file read, no fork
+    // /proc unreadable (non-Linux, or raced exit) → fall through to ps
+  }
+  return isProcessClaudeAsync(pid);
+}
+
 // ── Lock → JSONL claiming (discovery) ──
 // "Newest JSONL in the lock's project dir" misattributes files when SEVERAL
 // sessions run in parallel in ONE cwd — mtime order among concurrent writers is
@@ -882,6 +916,7 @@ module.exports = {
   getTmuxPaneMapAsync,
   findTmuxTargetAsync,
   isProcessClaudeAsync,
+  isLockClaude,
   execFileP,
   isSubagentMessage,
   isDisplayMessage,

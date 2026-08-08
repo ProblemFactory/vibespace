@@ -79,6 +79,10 @@ function writeUsage(p) {
     // Org identity (orgUuid/orgName/orgEmail) is captured by the server's
     // on-demand refresh — preserve it the same way as scopedWeekly.
     ...(prev && prev.orgUuid ? { orgUuid: prev.orgUuid, orgName: prev.orgName || '', ...(prev.orgEmail ? { orgEmail: prev.orgEmail } : {}) } : {}),
+    // spend (extra_usage) also comes only from the on-demand refresh — the
+    // statusline never carries it. Preserve, or this write nulls it (2.70.0
+    // Fable-vanishing class; B-87fe).
+    ...(prev && prev.spend ? { spend: prev.spend } : {}),
     overallStatus: (fiveHour.status === 'limited' || sevenDay.status === 'limited') ? 'limited' : 'allowed',
     fetchedAt: Date.now(), source: 'passive',
   };

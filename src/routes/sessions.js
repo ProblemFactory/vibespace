@@ -13,7 +13,7 @@ const router = express.Router();
 const {
   SESSIONS_DIR, isPidAlive, cwdToProjectDir, recoverCwdFromProjDir,
   getTmuxPaneMap, findTmuxTarget, isProcessClaude,
-  getTmuxPaneMapAsync, findTmuxTargetAsync, isProcessClaudeAsync, execFileP,
+  getTmuxPaneMapAsync, findTmuxTargetAsync, isProcessClaudeAsync, isLockClaude, execFileP,
   extractSessionMeta, isSubagentMessage,
   readJsonlTailIds, claimJsonls,
 } = require('../session-store');
@@ -612,7 +612,7 @@ function setup(ctx) {
       // fallback + the firstRunning cwd pick depend on stable entry order)
       const probed = await Promise.all(lockDatas.map(async (data) => {
         try {
-          if (!(await isProcessClaudeAsync(data.pid))) return null;
+          if (!(await isLockClaude(data))) return null; // B-2104: procStart file-read, ps only as fallback
           return { data, tmuxTarget: await findTmuxTargetAsync(data.pid, paneMap) };
         } catch { return null; }
       }));
