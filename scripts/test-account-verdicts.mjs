@@ -72,6 +72,41 @@ check('evaluated ON the holding host itself w/o live dir → NOT listed as its o
   return !v.usable && !(v.otherHosts || []).includes('host-nov');
 })());
 
+console.log('── long-lived token (oat, B-211a) ──');
+// oat on the never-signed-in sub: valid token shape, encrypted at rest
+const OAT = 'sk-ant-oat01-' + 'a'.repeat(60);
+accounts.setOat(subOut.id, OAT);
+check('oat stored encrypted (raw token never on disk)', !fs.readFileSync(path.join(tmp, 'accounts.json'), 'utf-8').includes(OAT));
+check('getOat round-trips', accounts.getOat(subOut.id) === OAT);
+check('list() exposes oat state', (() => { const a = accounts.list().accounts.find((x) => x.id === subOut.id); return a.oat === true && a.oatDaysLeft > 360; })());
+check('bad token shape refused', (() => { try { accounts.setOat(subOut.id, 'sk-ant-api03-nope'); return false; } catch { return true; } })());
+check('oat on an API-key account refused', (() => { try { accounts.setOat(api.id, OAT); return false; } catch { return true; } })());
+
+check('oat-only sub local → usable via oat', (() => { const v = evalV(subOut, null); return v.usable && v.how === 'oat'; })());
+check('oat-only sub on ssh host → usable via oat', (() => { const v = evalV(subOut, F()); return v.usable && v.how === 'oat'; })());
+check('oat sub on DIAL host → usable via oat (no dial-no-ship)', (() => { const v = evalV(subOut, F({ transport: 'dial' })); return v.usable && v.how === 'oat'; })());
+check('host-held still beats oat', (() => { const v = evalV(subOut, F({ hostSubs: [subOut.id], hostSubEmails: { [subOut.id]: 'bob@example.com' } })); return v.usable && v.how === 'host-held'; })());
+check('linked still beats oat', (() => { const v = evalV(subOut, F({ subscription: { email: 'bob@example.com' } })); return v.usable && v.how === 'host-login'; })());
+
+// resolveForSpawn shapes
+check('oat-only local spawn → env token, no dir', (() => { const r = accounts.resolveForSpawn(subOut.id, 'claude'); return r.oatOnly && r.localEnv.CLAUDE_CODE_OAUTH_TOKEN === OAT && !r.localEnv.CLAUDE_SECURESTORAGE_CONFIG_DIR; })());
+check('oat-only spawn carries the secret channel', (() => { const r = accounts.resolveForSpawn(subOut.id, 'claude'); return r.secret?.var === 'CLAUDE_CODE_OAUTH_TOKEN' && r.secret.value === OAT; })());
+accounts.setOat(subIn.id, OAT);
+check('logged-in + oat: local spawn keeps the DIR (hot-swap intact)', (() => { const r = accounts.resolveForSpawn(subIn.id, 'claude'); return !!r.localEnv.CLAUDE_SECURESTORAGE_CONFIG_DIR && !r.localEnv.CLAUDE_CODE_OAUTH_TOKEN; })());
+check('logged-in + oat: remote secret channel present', (() => { const r = accounts.resolveForSpawn(subIn.id, 'claude'); return r.secret?.var === 'CLAUDE_CODE_OAUTH_TOKEN'; })());
+accounts.clearOat(subIn.id);
+check('clearOat restores the plain-subscription shape', (() => { const r = accounts.resolveForSpawn(subIn.id, 'claude'); return r.secret === null; })());
+// expired oat: verdict NOT usable with its own honest reason (review fix —
+// a usable verdict made the switcher kill-then-fail, and a default account
+// silently flipped billing to the host login the day the token expired)
+accounts.setOat(subOut.id, OAT);
+accounts.get(subOut.id).oatMintedAt = Date.now() - 366 * 86400000;
+check('EXPIRED oat verdict → not usable, reason oat-expired (local)', (() => { const v = evalV(subOut, null); return !v.usable && v.reason === 'oat-expired'; })());
+check('EXPIRED oat verdict → oat-expired on a host too', (() => { const v = evalV(subOut, F()); return !v.usable && v.reason === 'oat-expired'; })());
+check('EXPIRED oat-only spawn refuses with re-mint guidance', (() => { try { accounts.resolveForSpawn(subOut.id, 'claude'); return false; } catch (e) { return /re-mint/.test(e.message); } })());
+check('expired oat drops the secret for a logged-in account', (() => { accounts.get(subIn.id).oatEnc = accounts.get(subOut.id).oatEnc; accounts.get(subIn.id).oatMintedAt = Date.now() - 366 * 86400000; const r = accounts.resolveForSpawn(subIn.id, 'claude'); delete accounts.get(subIn.id).oatEnc; return r.secret === null; })());
+check('clearOat removes verdict usability', (() => { accounts.clearOat(subOut.id); const v = evalV(subOut, F()); return !v.usable; })());
+
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
 fs.rmSync(tmp, { recursive: true, force: true });
 process.exit(fail ? 1 : 0);

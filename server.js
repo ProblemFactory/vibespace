@@ -2703,6 +2703,24 @@ function checkAgentHookHealth() {
     }
   } catch (e) { console.warn('[hook-health] probe failed:', e.message); }
 }
+
+// Long-lived-token expiry sweep (B-211a): setup-token tokens live exactly 1
+// year and a 401 has NO self-heal — warn while there's still time to re-mint.
+// Once per boot, notice-deduped per account.
+function checkOatExpiry() {
+  try {
+    for (const a of accounts.list().accounts) {
+      if (!a.oat || typeof a.oatDaysLeft !== 'number') continue;
+      if (a.oatDaysLeft <= 0) {
+        serverNotice(`oat-expired-${a.id}`, `The long-lived token for "${a.name}" has EXPIRED — sessions using it will fail until you re-mint one (Manage agents → the account's ⋯ menu → Long-lived token).`, { level: 2 });
+      } else if (a.oatDaysLeft <= 21) {
+        serverNotice(`oat-expiring-${a.id}`, `The long-lived token for "${a.name}" expires in ${a.oatDaysLeft} days — re-mint it soon (Manage agents → ⋯ → Long-lived token).`, { level: 2 });
+      }
+    }
+  } catch { }
+}
+setTimeout(checkOatExpiry, 20000);
+setInterval(checkOatExpiry, 6 * 3600e3); // stable instances stay up for weeks — a one-shot sweep would sail past the threshold (serverNotice keys dedupe per boot, so re-fires are cheap)
 // Boot-time hook registration is DEFERRED until settings are readable (after
 // setupPersistence below) — the Integration master switch decides whether we
 // register or actively strip. See "Agent-hook boot registration".
@@ -3603,6 +3621,32 @@ app.post('/api/accounts/pool/:id/target', (req, res) => {
     }
     res.json({ success: true, ...r, previous: before, affected });
   } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// ── Long-lived token (oat01, B-211a) ──────────────────────────────────────
+// Minting one (claude setup-token, 1-year, no refresh) is the per-account
+// consent to run this subscription on remote machines — it ships as
+// CLAUDE_CODE_OAUTH_TOKEN over the same 0600-file channel API keys use.
+app.post('/api/accounts/:id/oat', (req, res) => {
+  try { res.json({ success: true, ...accounts.setOat(req.params.id, req.body?.token) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.delete('/api/accounts/:id/oat', (req, res) => {
+  try {
+    accounts.clearOat(req.params.id);
+    // The spawn channel left 0600 working copies (~/.vibespace/<id>.key) on
+    // hosts — sweep them best-effort like account delete does (the still-valid
+    // 1-year token must not outlive its removal where we can reach).
+    const rid = req.params.id;
+    if (/^sub-[a-f0-9]+$/.test(rid) && hosts) {
+      const { execFile } = require('child_process');
+      for (const h of hosts.list() || []) {
+        try { execFile('ssh', [...hosts.sshArgs(h), '--', `rm -f "$HOME/.vibespace/${rid}.key"`], { timeout: 15000 }, () => {}); } catch { }
+      }
+    }
+    res.json({ success: true });
+  }
+  catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 app.post('/api/accounts/subscription', (req, res) => {

@@ -123,6 +123,63 @@ export function installManageAgents(App, ctx = {}) {
   // Polls the host's live login state — a read-only ssh probe, NO API calls
   // (§ban-safety) — until the credential files CHANGE vs the pre-login
   // snapshot, then brings the Agents surface back on the SAME machine.
+  // ── Long-lived token (oat01, B-211a) ────────────────────────────────────
+  // `claude setup-token` mints a 1-year, refresh-free subscription token.
+  // Storing one here is the per-account consent to run it on remote machines
+  // (it ships as CLAUDE_CODE_OAUTH_TOKEN over the same 0600-file channel API
+  // keys use — nothing rotates, no login is shipped). The mint itself is an
+  // interactive OAuth consent: the BROWSER login chooses which account the
+  // token belongs to, so the dialog says that in bold terms.
+  _oatDialog(id, a, refresh) {
+    const { body, close } = createModalShell({ id: 'oat-dialog', title: t('Long-lived token — {name}', { name: a?.name || '' }), minWidth: '460px', escapeToClose: true });
+    const status = a?.oat
+      ? (a.oatDaysLeft <= 0
+        ? `<div class="usage-warn">${t('The stored token has EXPIRED — sessions using it fail until you paste a fresh one.')}</div>`
+        : `<div class="usage-note">${t('Active — renews in {n} days.', { n: a.oatDaysLeft })}</div>`)
+      : '';
+    body.innerHTML = `
+      <div class="usage-note">${t('A long-lived token lets this subscription run on remote machines and paired devices WITHOUT shipping its login: the token lasts 1 year, never rotates, and the remote makes no login traffic at all. Limits: quota refresh (⟳) does not work through it, and when it expires sessions fail until you re-mint.')}</div>
+      ${status}
+      <div class="oat-steps">
+        <div>1. ${t('Run the mint command in a terminal, then complete the sign-in it opens in your browser.')}</div>
+        <div class="usage-warn">${t('The BROWSER account you sign in with decides which account the token bills — sign in as “{name}”.', { name: escHtml(a?.name || '') })}</div>
+        <div>2. ${t('Copy the sk-ant-oat01-… value it prints and paste it below.')}</div>
+      </div>
+      <div class="oat-row"><button class="btn-create" id="oat-run">${t('Open a terminal with `claude setup-token`')}</button></div>
+      <div class="oat-row"><input type="text" id="oat-paste" class="settings-input-text" placeholder="sk-ant-oat01-…" spellcheck="false" autocomplete="off" style="width:100%"></div>
+      <div class="dialog-buttons">
+        ${a?.oat ? `<button class="btn-create danger" id="oat-remove">${t('Remove token')}</button>` : ''}
+        <button class="btn-create" id="oat-save">${t('Save token')}</button>
+      </div>`;
+    body.querySelector('#oat-run').onclick = () => {
+      // LOCAL helper terminal — setup-token only needs a browser for the
+      // consent; local creds do not decide the account. CLOSE the dialog
+      // FIRST: modal overlays sit at z≈99998 while windows live at z≈9000,
+      // so the terminal would open blurred and unclickable behind it
+      // (adversarial-review must-fix).
+      close();
+      this.openShellTerminal(undefined, { initialCommand: 'claude setup-token' });
+      showToast(t('Complete the sign-in in your browser, copy the sk-ant-oat01-… value, then reopen ⋯ → Long-lived token to paste it.'), { duration: 9000 });
+    };
+    body.querySelector('#oat-save').onclick = async () => {
+      const tok = body.querySelector('#oat-paste').value.trim();
+      if (!tok) { showToast(t('Paste the sk-ant-oat01-… token first'), { type: 'error' }); return; }
+      try {
+        const r = await fetchJson(`/api/accounts/${encodeURIComponent(id)}/oat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: tok }) });
+        if (!r?.success) { showToast(r?.error || t('Save failed'), { type: 'error' }); return; }
+        showToast(t('Long-lived token stored — “{name}” is now usable on any machine.', { name: a?.name || '' }));
+        close(); refresh?.();
+      } catch (e) { showToast(e?.message || t('Save failed'), { type: 'error' }); }
+    };
+    const rm = body.querySelector('#oat-remove');
+    if (rm) rm.onclick = async () => {
+      if (!(await showConfirmDialog({ title: t('Remove token'), message: t('Remove the long-lived token from “{name}”? Machines relying on it lose access at their next spawn (running sessions keep working).', { name: a?.name || '' }) }))) return;
+      const r = await fetchJson(`/api/accounts/${encodeURIComponent(id)}/oat`, { method: 'DELETE' });
+      if (!r?.success) { showToast(r?.error || t('Remove failed'), { type: 'error' }); return; }
+      showToast(t('Removed')); close(); refresh?.();
+    };
+  },
+
   // ── Pooled pseudo-account: re-point + cold restart (B-6217 v1) ──────────
   // Re-pointing moves the symlink IMMEDIATELY, and a running claude re-reads
   // the credential file mid-session (mtime-gated) — so any conversation on the
@@ -1266,7 +1323,11 @@ export function installManageAgents(App, ctx = {}) {
       const v = (selectedHost && racct?.verdicts) ? racct.verdicts[a.id] || null : null;
       const linked = v ? (isSub && subBlocked && v.usable && v.how === 'host-login') : (isSub && subBlocked && !!hostOwnEmail && acctEmailOf(a) === hostOwnEmail);
       const hostSub = v ? (isSub && subBlocked && v.usable && v.how === 'host-held') : (isSub && subBlocked && !linked && hostSubIds.includes(a.id));
-      const blocked = isSub && subBlocked && !linked && !hostSub; // subscription on a remote host, opt-in off (incl. held-identity-mismatch — Test/spawn error explains)
+      // Long-lived token (B-211a): usable on any machine via the secret env
+      // channel — ranked below host-held/linked by the server verdict.
+      const oatDead = isSub && !!a.oat && a.oatDaysLeft <= 0;
+      const viaOat = !oatDead && (v ? (isSub && v.usable && v.how === 'oat') : (isSub && !!a.oat && !selectedHost));
+      const blocked = isSub && subBlocked && !linked && !hostSub && !viaOat; // subscription on a remote host, opt-in off (incl. held-identity-mismatch — Test/spawn error explains)
       // token-derived orgEmail (per-account ⟳ roles bake) beats the creds
       // dir's config email — same staleness class as the global row (2.188.0)
       const aEmail = this._accountUsage?.[a.id]?.orgEmail || a.email;
@@ -1288,6 +1349,7 @@ export function installManageAgents(App, ctx = {}) {
           // contradiction (real report) — the host tag carries the state.
           : hostSub ? escHtml(aEmail || '')
           : hlNames.length ? `${escHtml(aEmail || '')}${aEmail ? ' ' : ''}${hlTag}`
+          : a.oat ? `${escHtml(aEmail || '')}${aEmail ? ' ' : ''}<span class="acct-linked-hint">${t('long-lived token only')}</span>`
           : `<span class="ob-warn">${t('not logged in')}</span>`)
         : `API …${escHtml(a.tail || '')} <span class="acct-master-hint" title="${t('VibeSpace holds the MASTER copy of this key; sessions get derived working copies on their machines (swept on removal). ⋯ → “Show key…” reveals the value.')}">${t('· master held by VibeSpace')}</span>`;
       // Some login flows leave the creds dir without an identity file — the
@@ -1297,6 +1359,8 @@ export function installManageAgents(App, ctx = {}) {
         ? ` <span class="acct-linked-hint" title="${t('Same account as {host}’s current CLI login — sessions on {host} picking it run on the host’s own login directly (nothing is shipped).', { host: escHtml(hostLabel) })}">${t('· = {host}’s own login', { host: escHtml(hostLabel) })}</span>`
         : hostSub
         ? ` <span class="acct-linked-hint" title="${t('This account holds its own login ON {host} (minted there, never leaves it) — sessions on {host} picking it use that login.', { host: escHtml(hostLabel) })}">${t('· logged in on {host}', { host: escHtml(hostLabel) })}</span>`
+        : (selectedHost && viaOat)
+        ? ` <span class="acct-linked-hint" title="${t('Runs on {host} through its long-lived token (nothing rotates, no login is shipped).', { host: escHtml(hostLabel) })}">${t('· via long-lived token')}</span>`
         : blocked ? ` <span class="acct-blocked-hint" title="${t('Runs on this machine only. For {host}: use “Log in on {host} as this account…” in the ⋯ menu (a per-account login held on the host), or enable Settings → “Ship subscription logins to remote hosts.”', { host: escHtml(hostLabel) })}">${t('· this machine only')}</span>` : '';
       // Provenance + user note tags (2.201.0, real report: a key imported
       // from a host read as live-shared FROM it — say where it came from and
@@ -1305,13 +1369,22 @@ export function installManageAgents(App, ctx = {}) {
         ? ` <span class="acct-linked-hint" title="${t('Imported from {host}’s Console login — an independent copy held in VibeSpace (not linked to {host}); usable on any machine.', { host: escHtml(a.originHost) })}">${t('· from {host}', { host: escHtml(a.originHost) })}</span>` : '';
       const noteTag = a.note
         ? ` <span class="acct-blocked-hint" title="${escHtml(a.note)}">· ${escHtml(String(a.note).slice(0, 24))}${a.note.length > 24 ? '…' : ''}</span>` : '';
+      // Long-lived token state: quiet while healthy, amber under 30 days,
+      // red once expired (a 401 on an expired oat has no self-heal).
+      const oatTag = (isSub && a.oat && (!selectedHost || oatDead))
+        ? (a.oatDaysLeft <= 0
+          ? ` <span class="acct-blocked-hint" style="color:var(--red,#e55)" title="${t('The long-lived token EXPIRED — sessions using it fail until you re-mint one (⋯ → Long-lived token).')}">${t('· long-lived token expired')}</span>`
+          : a.oatDaysLeft <= 30
+          ? ` <span class="acct-blocked-hint" title="${t('Long-lived token (used for remote machines) expires in {n} days — re-mint it in ⋯ → Long-lived token.', { n: a.oatDaysLeft })}">${t('· long-lived token · {n}d left', { n: a.oatDaysLeft })}</span>`
+          : ` <span class="acct-linked-hint" title="${t('Has a long-lived token: usable on any machine (incl. paired devices) without shipping the login. Renews in {n} days.', { n: a.oatDaysLeft })}">${t('· long-lived token')}</span>`)
+        : '';
       const iconTitle = isSub ? t('Subscription (Pro/Max) — runs on this machine (or a host you log into)') : t('API key — stored in VibeSpace, runs on any machine');
       // Redesign (2.178.0): rows carry ONLY the star + a ⋯ menu — Test/Rename/
       // email/Remove live in the menu (four inline buttons crushed every row,
       // modal AND panel; real screenshot report). Star stays direct: most-used.
       return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}" data-sub="${isSub ? '1' : ''}"${blocked ? ' data-blocked="1"' : ''}${hostSub ? ' data-hostsub="1"' : ''}${linked ? ' data-linked="1"' : ''}>
         <span class="acct-type-icon" title="${iconTitle}">${isSub ? CROWN : KEY}</span>
-        <span class="acct-key-main"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span>${(provTag || noteTag) ? `<span class="acct-key-extra">${provTag}${noteTag}</span>` : ''}</span>
+        <span class="acct-key-main"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span>${(provTag || noteTag || oatTag) ? `<span class="acct-key-extra">${provTag}${noteTag}${oatTag}</span>` : ''}</span>
         <span class="acct-usage-cell">${(() => {
           // Usage source follows the VERDICT's how (2.245.0): a linked account
           // runs on the host's own login (its quota IS the host quota); a
@@ -1321,7 +1394,7 @@ export function installManageAgents(App, ctx = {}) {
           let u = null;
           if (selectedHost && v?.how === 'host-login') u = this._hostOwnUsage?.[selectedHost]?.fiveHour ? this._hostOwnUsage[selectedHost] : null;
           else if (selectedHost && v?.how === 'host-held') u = this._hostAccountUsage?.[selectedHost + ':' + a.id] || null;
-          else if (a.loggedIn) u = this._accountUsage?.[a.id];
+          else if (a.loggedIn || a.oat) u = this._accountUsage?.[a.id];
           return u ? usageHtml(u) : '';
         })()}</span>
         <span class="acct-key-actions">
@@ -1504,7 +1577,7 @@ export function installManageAgents(App, ctx = {}) {
         // in"): dataset.hostsub/linked come from page caches that start COLD —
         // with a host selected the server resolves against live host facts
         // and errors honestly, so the client must not veto on stale data.
-        if (isSub && !a.loggedIn && !selectedHost && !keyRow.dataset.hostsub && !linkedHere) {
+        if (isSub && !a.loggedIn && !a.oat && !selectedHost && !keyRow.dataset.hostsub && !linkedHere) {
           showToast(t('This subscription isn’t signed in yet — use “Add subscription…” to finish the login first.'), { type: 'error' });
           return;
         }
@@ -1629,6 +1702,7 @@ export function installManageAgents(App, ctx = {}) {
             showToast(t('Sign in as “{name}” in the terminal — this login lives ON {host} only; the machine’s own login is untouched.', { name: a?.name, host: hostLabel }), { duration: 7000 });
           } });
         }
+        if (isSub && !a?.pooled) items.push({ label: a?.oat ? (a.oatDaysLeft <= 0 ? t('Long-lived token (expired)…') : t('Long-lived token (active)…')) : t('Long-lived token…'), action: () => this._oatDialog(id, a, refresh) });
         if (isSub && a.loggedIn && (!a.email || a.emailDeclared)) items.push({ label: a.email ? t('edit email') : t('set email…'), action: doEmail });
         items.push({ label: a?.note ? t('Edit note…') : t('Set note…'), action: doNote });
         // Reveal the key value (API keys only) — the store holds the MASTER

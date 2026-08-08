@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.253.0
+
+**Long-lived tokens (B-211a)** — a Claude subscription can now hold a `claude setup-token` token (1 year, no refresh, inference-only; mechanism verified against the 2.1.225 binary):
+
+- **What it buys**: the account becomes usable on ANY machine — ssh hosts AND paired devices — WITHOUT shipping its login. The token rides the same 0600-file + `$(cat …)` secret channel API keys use, as `CLAUDE_CODE_OAUTH_TOKEN`; nothing rotates, so local/remote can never diverge and the remote makes zero login traffic (the creds-dir tar dance is bypassed for oat accounts). An account with NO local login but an oat also spawns locally via the env token (macOS keychain bypassed).
+- **Where it ranks**: host-held login > email-linked > long-lived token > full-login shipping (evaluateOnHost; the verdict flows to every surface). Locally, a dir login stays authoritative (hot-swap/pooling intact) — the oat only takes over where the login can't go.
+- **UI**: Manage agents → account ⋯ → "Long-lived token…" — guided mint dialog (opens a `claude setup-token` terminal; the BROWSER login decides the account, the dialog says so; paste `sk-ant-oat01-…` back). Row tags: `· long-lived token` (amber under 30 days, red when expired); host views say `· via long-lived token`; New Session + billing switcher offer oat accounts with the same labels.
+- **Honesty**: an EXPIRED token refuses at create with re-mint guidance (a long-lived 401 has no self-heal); boot notice at ≤21 days; quota ⟳ can't work through an oat (inference-only scope) — passive usage capture is unaffected.
+- **Safety**: token AES-GCM-encrypted at rest; `CLAUDE_CODE_OAUTH_TOKEN` has TOP precedence in the CLI, so ambient copies are stripped from every spawned session env (`AGENT_ENV_DROP` + the local spawn env strip).
+- **Adversarial-review hardening** (17-finding pass, all confirmed items fixed): mint-terminal now closes the dialog first (it opened unclickable BEHIND the modal overlay); `billing.how` gained an `oat` rung (remote oat spawns mis-stamped as `ship` — reporting the exact action the feature avoids); a host-HELD account that gains an oat keeps host-held precedence at spawn (the oat shortcut used to skip the held-dir probe AND the identity-mismatch refusal); Backup & migrate now carries the token (oat-only accounts imported as dead records) and account-merge keeps it; an EXPIRED token is un-usable in every verdict with its own `oat-expired` reason (before: the switcher offered it → killed the session → create refused → window gone; a DEFAULT account silently flipped billing to the host login the day it expired), while a locally-logged-in account with an expired remote-only oat is no longer hard-blocked locally; host-held dial spawns no longer fail hard on degradable tool-setup errors just because the account also has an oat; the expiry sweep re-runs every 6h (was one-shot); Remove-token surfaces real failures; ⋯ → Test accepts oat-only accounts; Session Properties' on-resume select stops blanket-blocking oat accounts; removing a token also sweeps its 0600 working copies off hosts.
+- Tests: scripts/test-account-verdicts.mjs grew to 37 asserts (oat matrix: local/ssh/dial usability, held/linked precedence, spawn shapes, encryption at rest, expiry refusal + expired-verdict reasons).
+
 ## 2.252.2
 
 Toolbar-resize follow-up (adversarial review of 2.252.1 found one residual snap-back route + hardening):

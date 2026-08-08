@@ -1688,6 +1688,11 @@ class App {
         if (a.type === 'subscription') {
           if (be === 'codex' || !onHost) {
             if (a.loggedIn && (!onHost || allowSubRemote)) opts.push([a.id, t('{name} (subscription)', { name: a.name })]);
+            // Long-lived token (B-211a): usable locally via the env token even
+            // with no local login (expired = disabled with the reason)
+            else if (be !== 'codex' && a.oat) opts.push(a.oatDaysLeft <= 0
+              ? [a.id, a.name + ' — ' + t('long-lived token expired'), true]
+              : [a.id, a.name + ' ' + t('· long-lived token')]);
             continue;
           }
           const v = vOf(a);
@@ -1695,6 +1700,8 @@ class App {
           const held = v ? (v.usable && v.how === 'host-held') : (!linked && hostHeld(a));
           if (linked) opts.push([a.id, a.name + ' ' + t('· uses {host}’s own login', { host: hostName })]);
           else if (held) opts.push([a.id, a.name + ' ' + t('· logged in on {host}', { host: hostName })]);
+          else if ((v ? (v.usable && v.how === 'oat') : !!a.oat) && !(a.oatDaysLeft <= 0)) opts.push([a.id, a.name + ' ' + t('· via long-lived token')]);
+          else if (a.oat && a.oatDaysLeft <= 0) opts.push([a.id, a.name + ' — ' + t('long-lived token expired'), true]);
           else if (v && v.reason === 'held-identity-mismatch') opts.push([a.id, a.name + ' — ' + t('host login belongs to {email}', { email: v.dirEmail || '?' }), true]);
           else if (a.loggedIn && allowSubRemote && hostRec?.transport !== 'dial') opts.push([a.id, t('{name} (subscription)', { name: a.name })]);
           // Not usable there — show WHY instead of silently omitting (the

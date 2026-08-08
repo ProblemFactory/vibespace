@@ -124,7 +124,7 @@ class AccountManager {
           const info = this.readSubCreds(a.id);
           // a.email = manual backfill (setEmail) for dirs whose login never
           // wrote the identity file; the dir's own identity wins when present.
-          return { ...base, loggedIn: info.loggedIn, email: info.email || a.email || null, emailDeclared: !info.email && !!a.email, subscriptionType: info.subscriptionType };
+          return { ...base, loggedIn: info.loggedIn, email: info.email || a.email || null, emailDeclared: !info.email && !!a.email, subscriptionType: info.subscriptionType, ...this._oatMeta(a) };
         }
         return { ...base, tail: a.tail };
       }),
@@ -286,6 +286,10 @@ class AccountManager {
       if (a.email) rec.email = a.email;
       if (a.tail) rec.tail = a.tail;
       if (a.keyEnc) { try { rec.key = this._dec(a.keyEnc); } catch { } }
+      // Long-lived token travels like an API key (decrypted into the
+      // passphrase blob; re-encrypted under the TARGET's key on import) — an
+      // oat-ONLY account would otherwise import as a dead record (B-211a)
+      if (a.oatEnc) { try { rec.oat = this._dec(a.oatEnc); rec.oatMintedAt = a.oatMintedAt || null; } catch { } }
       if (backend === 'codex') rec.files = readFiles(this.codexSubDir(a.id), CODEX_SUB_FILES);
       else if (type === 'subscription') rec.files = readFiles(this.subDir(a.id), CLAUDE_SUB_FILES);
       return rec;
@@ -317,6 +321,7 @@ class AccountManager {
       else if (rec.type === 'subscription') a.type = 'subscription';
       if (rec.key && /^sk-ant-/.test(rec.key)) { a.keyEnc = this._enc(String(rec.key)); a.tail = String(rec.key).slice(-8); }
       else if (rec.tail) a.tail = rec.tail;
+      if (rec.oat && /^sk-ant-oat\d{2}-/.test(String(rec.oat))) { a.oatEnc = this._enc(String(rec.oat)); a.oatMintedAt = Number(rec.oatMintedAt) || Date.now(); }
       if (rec.files && typeof rec.files === 'object' && (isCodex || a.type === 'subscription')) {
         const dir = isCodex ? this.codexSubDir(a.id) : this.subDir(a.id);
         fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -386,6 +391,7 @@ class AccountManager {
     } catch { /* best-effort file consolidation */ }
     if (from.hostLogins) into.hostLogins = { ...(from.hostLogins), ...(into.hostLogins || {}) };
     if (!into.email && from.email) into.email = from.email;
+    if (!into.oatEnc && from.oatEnc) { into.oatEnc = from.oatEnc; into.oatMintedAt = from.oatMintedAt; } // long-lived token survives the fold (B-211a)
     if (!into.note && from.note) into.note = from.note;
     if (this._state.defaultAccountId === fromId) this._state.defaultAccountId = intoId;
     this._state.accounts = this._state.accounts.filter((x) => x.id !== fromId);
@@ -591,8 +597,19 @@ class AccountManager {
     // in a CW-H200 session's menu, reading as a broken account (2.244.3).
     const otherHosts = Object.keys(a.hostLogins || {}).filter((h) => h !== hostFacts?.hostId);
     const noLoginReason = () => (otherHosts.length ? 'not-on-this-host' : 'never-signed-in');
+    // hasOat = a VALID token only — mirrors resolveForSpawn's oatExpired drop
+    // (an expired oat must never rank an account usable: the switcher would
+    // kill-then-fail the create, and a DEFAULT account would silently flip to
+    // the host login the day it expires). Expired gets its own 'oat-expired'
+    // reason below so every surface can say re-mint instead of the §ban-safety
+    // ship explanation.
+    const hasOat = backend === 'claude' && !!a.oatEnc && (a.oatMintedAt || 0) + this.OAT_TTL_MS > Date.now();
+    const oatExpired = backend === 'claude' && !!a.oatEnc && !hasOat;
     if (!hostFacts) {
       if (loggedIn) return { usable: true, how: 'local-env', reason: null, linked: false, held: false, heldVerified: false };
+      // no local login but a long-lived token → spawns via the env token
+      if (hasOat) return { usable: true, how: 'oat', reason: null, linked: false, held: false, heldVerified: false };
+      if (oatExpired) return { usable: false, how: null, reason: 'oat-expired', linked: false, held: false, heldVerified: false };
       return { usable: false, how: null, reason: noLoginReason(), otherHosts, linked: false, held: false, heldVerified: false };
     }
     const hostEmail = norm(backend === 'codex' ? hostFacts.codex?.email : hostFacts.subscription?.email);
@@ -606,11 +623,73 @@ class AccountManager {
       return { usable: true, how: 'host-held', reason: null, linked, held, heldVerified: !!dirEmail };
     }
     if (linked) return { usable: true, how: 'host-login', reason: null, linked, held, heldVerified: false };
+    // Long-lived token: usable on ANY host incl. dial — it rides the secret
+    // env channel (nothing rotates, no token-endpoint traffic from the host).
+    // Ranked below host-held/linked (a full login there has more capability)
+    // and above full-login shipping.
+    if (hasOat) return { usable: true, how: 'oat', reason: null, linked, held, heldVerified: false };
     if (loggedIn && allowShip && hostFacts.transport !== 'dial') {
       return { usable: true, how: 'ship', reason: null, linked, held, heldVerified: false };
     }
+    // Expired oat beats the generic reasons — 're-mint' is the actionable fix
+    if (oatExpired) return { usable: false, how: null, reason: 'oat-expired', linked, held, heldVerified: false };
     if (!loggedIn) return { usable: false, how: null, reason: noLoginReason(), otherHosts, linked, held, heldVerified: false };
     return { usable: false, how: null, reason: hostFacts.transport === 'dial' ? 'dial-no-ship' : 'ship-disabled', linked, held, heldVerified: false };
+  }
+
+  // ── Long-lived OAuth token (oat01, B-211a) ─────────────────────────────
+  // `claude setup-token` mints a 1-year subscription token with NO refresh
+  // token (verified vs 2.1.225: LONG_LIVED_OAUTH_TOKEN_TTL_SECONDS=31536000,
+  // inferenceOnly:true; the client adapts it as {refreshToken:null,
+  // expiresAt:null} and NEVER touches the token endpoint). Stored encrypted
+  // like API keys. What it buys per placement:
+  //   · REMOTE: ships as CLAUDE_CODE_OAUTH_TOKEN via the existing 0600-file +
+  //     $(cat …) secret channel (ssh AND dial) — never rotates, so the local
+  //     and remote copies can never diverge and the host makes ZERO
+  //     token-endpoint calls (§ban-safety's #1 signal gone; the creds-dir
+  //     tar dance isn't used for oat accounts).
+  //   · LOCAL fallback: an account with no local login but an oat spawns via
+  //     the env token (macOS keychain bypassed too).
+  // Scope is inference-only (no user:profile): the on-demand quota ⟳ cannot
+  // work through an oat, and a 401 (revoked/expired) has NO self-heal — the
+  // CLI errors until re-mint. Minting the token is treated as the per-account
+  // consent to run it on remote machines (finer-grained than the global
+  // shipSubscriptionToRemote toggle, which stays for full-login shipping).
+  OAT_TTL_MS = 31536000 * 1000;
+
+  setOat(id, token) {
+    const a = this.get(id);
+    if (!a) throw new Error('unknown account: ' + id);
+    if (this._acctBackend(a) !== 'claude' || this._acctType(a) !== 'subscription') throw new Error('long-lived tokens apply to Claude subscription accounts only');
+    token = String(token || '').trim();
+    // sk-ant-oat01-… today; tolerate future oat revisions, refuse everything
+    // else (an API key or a pasted access token here would mis-bill silently)
+    if (!/^sk-ant-oat\d{2}-[\w-]{20,600}$/.test(token)) throw new Error('that does not look like a long-lived token (expected sk-ant-oat01-…, from `claude setup-token`)');
+    a.oatEnc = this._enc(token);
+    a.oatMintedAt = Date.now();
+    this._save();
+    this._notify();
+    return { id, mintedAt: a.oatMintedAt };
+  }
+
+  clearOat(id) {
+    const a = this.get(id);
+    if (!a) throw new Error('unknown account: ' + id);
+    delete a.oatEnc; delete a.oatMintedAt;
+    this._save();
+    this._notify();
+  }
+
+  getOat(id) {
+    const a = this.get(id);
+    if (!a || !a.oatEnc) return null;
+    try { return this._dec(a.oatEnc); } catch { return null; }
+  }
+
+  _oatMeta(a) {
+    if (!a?.oatEnc) return {};
+    const expiresAt = (a.oatMintedAt || 0) + this.OAT_TTL_MS;
+    return { oat: true, oatMintedAt: a.oatMintedAt || null, oatDaysLeft: Math.floor((expiresAt - Date.now()) / 86400000) };
   }
 
   // ── Pooled pseudo-account (B-6217) ──────────────────────────────────────
@@ -730,10 +809,26 @@ class AccountManager {
     }
     if (this._acctType(a) === 'subscription') {
       const info = this.readSubCreds(id);
+      // Long-lived token (B-211a): rides the API-key secret channel for
+      // remote spawns (both remote paths check .secret BEFORE the creds-dir
+      // ship, so an oat account never tars its rotating login to a host).
+      // Locally the dir login stays authoritative when present (hot-swap +
+      // full capabilities); with NO local login the env token IS the spawn.
+      const oatExpired = a.oatEnc && (a.oatMintedAt || 0) + this.OAT_TTL_MS < Date.now();
+      const oat = oatExpired ? null : this.getOat(id);
+      const oatSecret = oat ? { var: 'CLAUDE_CODE_OAUTH_TOKEN', value: oat } : null;
+      if (!info.loggedIn && oat) {
+        return { id: a.id, name: a.name, kind: 'subscription', oatOnly: true, localEnv: { CLAUDE_CODE_OAUTH_TOKEN: oat }, secret: oatSecret };
+      }
+      // Expired oat: fail the CREATE with the real reason instead of letting
+      // the CLI 401 opaquely mid-session (a long-lived 401 has no self-heal).
+      // loggedIn + expired-oat just drops the secret — the dir login works
+      // locally and the remote paths give their normal actionable errors.
+      if (!info.loggedIn && a.oatEnc && oatExpired) throw new Error(`the long-lived token for ${a.name} has expired — re-mint it in Manage agents (⋯ → Long-lived token)`);
       if (!info.loggedIn) throw new Error('subscription not logged in: ' + a.name);
       return {
-        id: a.id, name: a.name, kind: 'subscription',
-        localEnv: { CLAUDE_SECURESTORAGE_CONFIG_DIR: this.subDir(id) }, secret: null,
+        id: a.id, name: a.name, kind: 'subscription', oatExpired: oatExpired || undefined,
+        localEnv: { CLAUDE_SECURESTORAGE_CONFIG_DIR: this.subDir(id) }, secret: oatSecret,
         // REMOTE: ship the creds dir to the host so the remote CLI reads THIS
         // account's login (securestorage relocated; config stays ~/.claude).
         // probe: newest-wins keeps a POISONED remote file forever (e.g. a
