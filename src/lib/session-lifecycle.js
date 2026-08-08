@@ -778,7 +778,12 @@ export function installSessionLifecycle(App, ctx = {}) {
       if (!isSub) return null; // API keys always ship
       const v = vOf(a);
       if (v) { // verdict is authoritative — render it verbatim
-        if (v.usable) return null;
+        // Belt vs a stale server: an expired oat must not be pickable (the
+        // pick kills the session, then the create refuses — window gone)
+        if (v.usable) return (v.how === 'oat' && a.oatDaysLeft <= 0)
+          ? t('“{name}”’s long-lived token has expired — re-mint it in Manage agents (⋯ → Long-lived token).', { name: a.name })
+          : null;
+        if (v.reason === 'oat-expired') return t('“{name}”’s long-lived token has expired — re-mint it in Manage agents (⋯ → Long-lived token).', { name: a.name });
         if (v.reason === 'held-identity-mismatch') return t('The login held on {host} for “{name}” actually belongs to {email} — re-run “Log in on host as this account”.', { host: rHostName, name: a.name, email: v.dirEmail || '?' });
         if (v.reason === 'not-on-this-host') {
           // signed in SOMEWHERE — just not on the machine this session runs on
@@ -803,6 +808,19 @@ export function installSessionLifecycle(App, ctx = {}) {
       if (a.pooled) { // pooled = local-only; loggedIn reads through the symlink
         if (rHostId) return t('Pooled accounts run on this machine only');
         return a.loggedIn ? null : t('This pooled account has no target — pick a subscription in Manage agents');
+      }
+      // Long-lived token (B-211a): usable anywhere via the secret env channel
+      // — locally there ARE no verdicts (vOf needs a host), and remotely this
+      // covers the probe-in-flight window. Expired is the one honest refusal.
+      if (a.oat) {
+        const expired = typeof a.oatDaysLeft === 'number' && a.oatDaysLeft <= 0;
+        // valid oat = usable anywhere; expired blocks ONLY where the oat is
+        // the actual spawn channel — a LOCALLY logged-in account keeps its
+        // dir login (the server drops the dead secret), so it must fall
+        // through to the normal ladder instead of a false hard-block
+        if (!expired) return null;
+        if (!a.loggedIn) return t('“{name}”’s long-lived token has expired — re-mint it in Manage agents (⋯ → Long-lived token).', { name: a.name });
+        // logged-in + expired oat → the ordinary rules below tell the truth
       }
       if (!a.loggedIn && !(rHostId && (hostLinked(a) || hostSubHeld(a)))) {
         return t('“{name}” never finished signing in — complete its login in Manage agents first.', { name: a.name });

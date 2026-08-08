@@ -157,7 +157,7 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
     const rHost = s.host || null;
     const rTransport = rHost ? (sidebar._hostsData?.hosts?.find(h => h.id === rHost)?.transport || 'ssh') : null;
     const shipSubs = !!app.settings?.get?.('accounts.shipSubscriptionToRemote');
-    const subBlocked = (x) => rHost && (sbe === 'codex' || x.type === 'subscription') && (rTransport === 'dial' || !shipSubs);
+    const subBlocked = (x) => (x.oat && !(x.oatDaysLeft <= 0)) ? false : (rHost && (sbe === 'codex' || x.type === 'subscription') && (rTransport === 'dial' || !shipSubs));
     for (const [v, label, blocked] of [['', t('Default')], ['subscription', globalLabel], ...accts.map(x => [x.id, x.type === 'subscription' ? `${x.name} (${t('subscription')})` : `${x.name} — API …${x.tail}`, subBlocked(x)])]) {
       const o = document.createElement('option'); o.value = v; o.textContent = blocked ? label + ' · ' + t('blocked on this host') : label;
       if (blocked) { o.disabled = true; o.title = t('Subscription logins don’t ship to this machine — log in there, or use an API-key account'); }

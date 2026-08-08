@@ -41,7 +41,12 @@ const AGENT_ENV_KEEP = new Set([
   'VIBESPACE_REMOTE_SID', 'VIBESPACE_REMOTE_RETRY', 'VIBESPACE_KEEPER_DIR',
   'VIBESPACE_INSTANCE_NAME', 'VIBESPACE_DEVICE_ROOT', 'VIBESPACE_AGENTD_ROOT',
 ]);
-const AGENT_ENV_DROP = new Set(['PORT', 'HOST', 'NODE_ENV', 'NODE_OPTIONS']);
+// CLAUDE_CODE_OAUTH_TOKEN has TOP precedence in the CLI's credential getter
+// (verified 2.1.225) — an ambient copy would silently re-bill every spawn and
+// leak a subscription token into agent child envs. Deliberate oat spawns
+// re-add it via spawnAccount.localEnv AFTER the strip.
+const AGENT_ENV_DROP = new Set(['PORT', 'HOST', 'NODE_ENV', 'NODE_OPTIONS',
+  'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR']);
 function agentEnv(base = process.env) {
   const out = {};
   for (const [k, v] of Object.entries(base)) {
@@ -485,10 +490,10 @@ function registerWsHandler(wss, ctx) {
             // resuming a remote session with no account picked errored).
             // An EXPLICITLY chosen subscription still errors with guidance,
             // and an opted-in shipSubscriptionToRemote still ships.
-            if (spawnAccount?.remoteCreds && data.hostId && !data.accountId) {
+            if (spawnAccount?.remoteCreds && !spawnAccount.secret && data.hostId && !data.accountId) {
               let allowShip = false;
               try { allowShip = !!serverSetting('accounts.shipSubscriptionToRemote'); } catch {}
-              if (!allowShip) spawnAccount = null; // = the host's own login
+              if (!allowShip) spawnAccount = null; // = the host's own login (an oat-bearing account keeps its secret channel instead)
             }
             // EXPLICITLY-chosen subscription on a remote host without the
             // ship opt-in: when the account IS the machine's own login (same
@@ -497,10 +502,13 @@ function registerWsHandler(wss, ctx) {
             // logged this exact account in ON the machine, yet picking it
             // says this-machine-only"). Zero creds ship — §ban-safety
             // unchanged; a non-matching account still errors with guidance.
-            if (spawnAccount?.remoteCreds && data.hostId && data.accountId && hosts) {
+            if ((spawnAccount?.remoteCreds || spawnAccount?.oatOnly) && data.hostId && data.accountId && hosts) {
               let allowShip = false;
               try { allowShip = !!serverSetting('accounts.shipSubscriptionToRemote'); } catch {}
-              if (!allowShip) {
+              // oatOnly always probes: a host-HELD login outranks the oat
+              // (full capability, same identity) and the held-identity-
+              // mismatch refusal must not be skippable by adding a token
+              if (!allowShip || spawnAccount.oatOnly) {
                 try {
                   // SINGLE-AUTHORITY verdict (B-f531, 2.244.0) — same
                   // evaluateOnHost as the display surfaces and the rescue
@@ -518,6 +526,9 @@ function registerWsHandler(wss, ctx) {
                   }
                   if (v.usable && v.how === 'host-held') {
                     spawnAccount._hostSubReady = true;
+                    // oatOnly shape carries no remoteCreds — the held-dir
+                    // pointer paths need one (dirName/envVar only, nothing ships)
+                    if (!spawnAccount.remoteCreds) spawnAccount.remoteCreds = { dirName: 'subs/' + spawnAccount.id, envVar: 'CLAUDE_SECURESTORAGE_CONFIG_DIR' };
                   } else if (v.usable && v.how === 'host-login') {
                     linkedAccountId = spawnAccount.id; // identity survives the host-login mapping
                     spawnAccount = null; // = the host's own login (same account)
@@ -549,6 +560,11 @@ function registerWsHandler(wss, ctx) {
             // the client persists/displays the POST-FACTO truth, never the
             // pre-facto intent
             _billingHow: spawnAccount?._hostSubReady ? 'host-held'
+              // oat rung BEFORE remoteCreds: a logged-in+oat account carries
+              // BOTH, but remote spawns use the SECRET channel (env token) —
+              // stamping 'ship' told the client its rotating login was tarred
+              // to the host, the exact action the oat exists to avoid
+              : (spawnAccount?.secret?.var === 'CLAUDE_CODE_OAUTH_TOKEN' && (data.hostId || spawnAccount?.oatOnly)) ? 'oat'
               : (spawnAccount?.remoteCreds && data.hostId) ? 'ship'
               : spawnAccount ? 'local-env'
               : linkedAccountId ? 'host-login'
@@ -771,7 +787,7 @@ function registerWsHandler(wss, ctx) {
             // branch). The value rides fsWrite into a 0600 file; $(cat …) keeps
             // it out of every argv.
             let acctAssign = '';
-            if (spawnAccount && spawnAccount.secret) {
+            if (spawnAccount && spawnAccount.secret && !spawnAccount._hostSubReady) {
               await dm.fsMkdir(`${home}/.vibespace`); // integration-OFF path skipped the bin mkdir
               const kf = `${home}/.vibespace/${spawnAccount.id}.key`;
               await dm.fsWrite(kf, Buffer.from(spawnAccount.secret.value));
@@ -914,7 +930,7 @@ function registerWsHandler(wss, ctx) {
                 // an API key must be placed — a swallowed failure would run the
                 // session on the device's own login = wrong billing (review).
                 const da = await deviceAgentSetup(h, id).catch((e) => {
-                  if (spawnAccount?.secret) throw e;
+                  if (spawnAccount?.secret && !spawnAccount._hostSubReady) throw e; // held billing rides dialAcctAssign — only a real key placement failure is fatal
                   console.warn('[dial] agent setup degraded:', e.message); return { envPairs: [], tokenAssign: '' };
                 });
                 // tools PATH only while integrated — leftover tools from an
@@ -1099,7 +1115,7 @@ done`;
                 // its original env, and a fresh reverseForward here would leak
                 // an unused device port per attach.
                 const da = dialKeeperSid ? { envPairs: [], tokenAssign: '' } : await deviceAgentSetup(h, id).catch((e) => {
-                  if (spawnAccount?.secret) throw e; // wrong billing must fail, not silently degrade
+                  if (spawnAccount?.secret && !spawnAccount._hostSubReady) throw e; // wrong billing must fail, not silently degrade (held rides dialAcctAssign — placement can't fail)
                   console.warn('[dial] agent setup degraded:', e.message); return { envPairs: [], tokenAssign: '' };
                 });
                 // tools PATH only while integrated (see the pty branch note)
@@ -1350,6 +1366,8 @@ done`;
                 // strip any ambient key so the CLI uses its global login.
                 delete env.ANTHROPIC_API_KEY;
                 delete env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
+                delete env.CLAUDE_CODE_OAUTH_TOKEN;                 // top-precedence in the CLI — ambient copy = wrong billing
+                delete env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR;
                 // Claude API key → ANTHROPIC_API_KEY; Claude subscription → its
                 // own CLAUDE_SECURESTORAGE_CONFIG_DIR (relocates ONLY the creds
                 // store, transcripts stay shared); Codex subscription → its own
