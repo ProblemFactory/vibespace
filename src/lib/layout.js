@@ -1,4 +1,5 @@
 import { track } from './telemetry-client.js';
+import { cssVarDefault } from './utils.js';
 
 // Window types that legitimately carry no openSpec (never persisted/synced):
 // chat/terminal restore by session identity + get their openSpec async after
@@ -1018,7 +1019,10 @@ class LayoutManager {
   // default means RESET (clear the override) rather than pinning the default.
   _applyToolbarHeight(h) {
     const root = document.documentElement;
-    const def = parseInt(getComputedStyle(root).getPropertyValue('--toolbar-height')) || 40;
+    // cssVarDefault, NOT getComputedStyle: with a saved override active the
+    // computed var IS the override — re-applying the same height then read as
+    // "at default" and reset it (restore/layout-sync reverted the user's size).
+    const def = cssVarDefault('--toolbar-height', 40);
     if (Math.abs(h - def) < 2) { root.style.removeProperty('--toolbar-height'); localStorage.removeItem('toolbarHeight'); }
     else { root.style.setProperty('--toolbar-height', h + 'px'); localStorage.setItem('toolbarHeight', h); }
     this.app.wm._reflowWindows?.();

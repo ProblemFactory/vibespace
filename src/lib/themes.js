@@ -135,11 +135,19 @@ class ThemeManager {
     if (typeof window !== 'undefined') window.dispatchEvent(new Event('theme-colors-changed'));
   }
 
+  // Wipe custom-theme live-preview leftovers from :root. LAYOUT vars are
+  // EXEMPT: this sweep runs on every theme apply INCLUDING boot, and it used
+  // to remove the user's --toolbar-height resize override (set from
+  // localStorage moments earlier) — the toolbar silently snapped back to the
+  // default on load and on every theme switch (2.252.1, user report). A var
+  // that isn't a theme color has no business in a theme-cleanup sweep.
   _clearInlineOverrides() {
+    const LAYOUT_VARS = new Set(['--toolbar-height']);
     const root = document.documentElement;
     const toRemove = [];
     for (let i = 0; i < root.style.length; i++) {
-      if (root.style[i].startsWith('--')) toRemove.push(root.style[i]);
+      const p = root.style[i];
+      if (p.startsWith('--') && !LAYOUT_VARS.has(p)) toRemove.push(p);
     }
     toRemove.forEach(p => root.style.removeProperty(p));
   }

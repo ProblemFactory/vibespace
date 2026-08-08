@@ -598,6 +598,22 @@ export function showImageOverlay(src) {
   document.body.appendChild(overlay);
 }
 
+// TRUE stylesheet default of a :root CSS variable, ignoring any inline
+// override on documentElement. getComputedStyle alone is WRONG for a var the
+// caller itself drives: once root.style sets it, computed = the override — a
+// "within-2px-of-default ⇒ reset" check then compares the value against
+// ITSELF and resets on every apply (the 2.250.1 toolbar-resize snap-back).
+// Temporarily lifting the override forces one sync style recalc — fine for
+// rare interactions (drag end, layout restore), not for per-frame use.
+export function cssVarDefault(name, fallback) {
+  const root = document.documentElement;
+  const cur = root.style.getPropertyValue(name);
+  if (cur) root.style.removeProperty(name);
+  const d = parseInt(getComputedStyle(root).getPropertyValue(name)) || fallback;
+  if (cur) root.style.setProperty(name, cur);
+  return d;
+}
+
 export function copyText(text) {
   if (navigator.clipboard?.writeText) {
     return navigator.clipboard.writeText(text).catch(() => _fallbackCopy(text));
