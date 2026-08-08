@@ -551,7 +551,12 @@ class App {
     });
     const toolbar = document.getElementById('toolbar');
     toolbar?.addEventListener('contextmenu', (e) => {
-      if (e.target.closest('button, select, input')) return;
+      // Chrome elements are drag-movable BETWEEN the bars (customize mode), so
+      // this bar must exempt the same element classes the taskbar does — a
+      // preview/usage/taskbar-item dragged up here owns its own menu
+      // (2.250.1, real report: right-clicking a desktop preview moved into the
+      // toolbar showed "Customize UI…" instead of Rename/Delete).
+      if (e.target.closest('button, select, input, .taskbar-item, .desktop-preview, .desktop-preview-wrapper, .taskbar-usage')) return;
       e.preventDefault();
       showContextMenu(e.clientX, e.clientY, [
         { label: t('Customize UI…'), action: () => this._customize.enter() },

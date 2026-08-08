@@ -89,6 +89,7 @@ class LayoutManager {
       if (state.taskbarHeight) {
         this._applyTaskbarHeight(state.taskbarHeight);
       }
+      if (state.toolbarHeight) this._applyToolbarHeight(state.toolbarHeight);
       // Windows: update existing, create missing, close removed
       if (state.windows) {
         const remoteIds = new Set();
@@ -342,7 +343,8 @@ class LayoutManager {
     const globalFontFamily = this.app._fontFamily;
     const sidebarOpen = this.app.sidebar.isOpen;
     const taskbarHeight = document.getElementById('taskbar')?.offsetHeight || null;
-    return { windows, grid, theme, globalFontSize, globalFontFamily, sidebarOpen, taskbarHeight };
+    const toolbarHeight = document.getElementById('toolbar')?.offsetHeight || null;
+    return { windows, grid, theme, globalFontSize, globalFontFamily, sidebarOpen, taskbarHeight, toolbarHeight };
   }
 
   // Restore workspace from state (used for autosave restore on startup)
@@ -376,6 +378,7 @@ class LayoutManager {
     if (state.taskbarHeight) {
       this._applyTaskbarHeight(state.taskbarHeight);
     }
+    if (state.toolbarHeight) this._applyToolbarHeight(state.toolbarHeight);
 
     // Restore sidebar
     if (state.sidebarOpen !== undefined) {
@@ -1009,6 +1012,16 @@ class LayoutManager {
       this._savedPresets = data.saved || {};
       this._currentName = data.current || null;
     } catch {}
+  }
+
+  // Toolbar height rides layout-sync like the taskbar's; a value at the CSS
+  // default means RESET (clear the override) rather than pinning the default.
+  _applyToolbarHeight(h) {
+    const root = document.documentElement;
+    const def = parseInt(getComputedStyle(root).getPropertyValue('--toolbar-height')) || 40;
+    if (Math.abs(h - def) < 2) { root.style.removeProperty('--toolbar-height'); localStorage.removeItem('toolbarHeight'); }
+    else { root.style.setProperty('--toolbar-height', h + 'px'); localStorage.setItem('toolbarHeight', h); }
+    this.app.wm._reflowWindows?.();
   }
 
   _applyTaskbarHeight(h) {

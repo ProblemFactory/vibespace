@@ -51,6 +51,31 @@ const okReorder = await e(`(()=>{
 ck('reorder swaps order + emits desktop-reorder', okReorder==='ok', okReorder);
 // top-taskbar context menu direction
 await e(`document.body.classList.add('taskbar-top'); true`);
+// item: desktop preview dragged INTO the toolbar must keep its OWN menu
+const menuOk = await e(`(()=>{
+  const tb=document.getElementById('toolbar');
+  const wrap=document.querySelector('.desktop-preview-wrapper:not(.stage-preview-wrapper)');
+  if(!tb||!wrap) return 'missing';
+  tb.appendChild(wrap);                       // simulate the customize-mode drag
+  document.querySelectorAll('[data-popover]').forEach(x=>x.remove());
+  wrap.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:300,clientY:30}));
+  const menus=[...document.querySelectorAll('[data-popover]')];
+  const txt=menus.map(m=>m.textContent).join('|');
+  return (menus.length===1 && /Rename/.test(txt) && !/Customize UI/.test(txt)) ? 'ok' : 'bad:'+txt.slice(0,120);
+})()`);
+ck('preview moved into TOOLBAR still shows Rename/Delete (not Customize UI)', menuOk==='ok', menuOk);
+// toolbar height resize wiring
+ck('toolbar resize handle exists', await e(`!!document.getElementById('toolbar-resize-handle')`));
+const thOk = await e(`(()=>{
+  const root=document.documentElement, tb=document.getElementById('toolbar');
+  const before=tb.offsetHeight;
+  root.style.setProperty('--toolbar-height','72px');
+  const after=tb.offsetHeight;
+  root.style.removeProperty('--toolbar-height');
+  const reset=tb.offsetHeight;
+  return (after===72 && reset===before) ? 'ok' : 'bad:'+JSON.stringify({before,after,reset});
+})()`);
+ck('--toolbar-height drives the real toolbar height (and resets)', thOk==='ok', thOk);
 ck('no JS exceptions during boot+interactions', errs.length===0);
 if(errs.length) console.log('   errs:', errs.slice(0,3));
 console.log(fail?`${fail} FAILED (${pass} passed)`:`ALL PASS (${pass})`);
