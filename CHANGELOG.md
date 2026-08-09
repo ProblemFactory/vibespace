@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.257.1
+
+- **Add-subscription click did nothing** (inc-mslfbdjv, real report — introduced by the 2.255.0 inc-msl890ua fix): the roster-refresh call added to `_addSubscription` referenced the Agents-dialog's scope-local `refresh` from a standalone method — the ReferenceError killed the flow **before** the login terminal opened, so the click was a silent no-op (the account record was still created server-side, which is why a pending row appeared after reopening). The method now has its own refresh (via the `_agentsRefreshHook`), and the agents-overview smoke drives the REAL flow (method → name dialog → confirm → asserts a terminal window opens + zero JS errors; negative-control-verified: the un-fixed code fails both asserts exactly like the incident).
+
 ## 2.257.0
 
 Lock-badge restyle + model-lock semantics v2 + pool members dialog + UI scale/font size (user batch):
