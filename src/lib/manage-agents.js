@@ -20,6 +20,11 @@ export function installManageAgents(App, ctx = {}) {
   // login), and watch for the OAuth login to land. Held per-account, switchable
   // per session. (Local Claude only in P1.)
   async _addSubscription(hostId, hostLabel) {
+    // NOT the dialog-scope refresh — this is a standalone method (real
+    // incident inc-mslfbdjv: the 2.255.0 fix called the dialog's `refresh()`
+    // here, the ReferenceError killed the flow BEFORE the login terminal
+    // opened, and the click looked like a silent no-op).
+    const refresh = () => { try { this._agentsRefreshHook?.(); } catch { } };
     const name = await showInputDialog({
       title: hostId ? t('Add subscription — log in on {host}', { host: hostLabel }) : t('Add subscription'),
       label: t('Name this subscription (e.g. Work Max, Personal Max)'),

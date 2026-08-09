@@ -211,6 +211,34 @@ const st4 = await evalJs(`(() => ({
 }))()`);
 check('overview door closes the popup', st4.popupHidden);
 check('overview door lands on the Agents rail panel', st4.agentsActive);
+// ── Add-subscription flow opens the login terminal (inc-mslfbdjv regression:
+// a dialog-scope `refresh()` called from the standalone method threw a
+// ReferenceError BEFORE openShellTerminal — the click was a silent no-op).
+// Drive the REAL flow: method → name dialog → confirm → a terminal window.
+const winsBefore = await evalJs(`app.wm.windows.size`);
+await evalJs(`(() => { app._addSubscription(); return 1; })()`);
+await sleep(500);
+const dlgOk = await evalJs(`(() => {
+  const ovs = [...document.querySelectorAll('.dialog-overlay')];
+  const ov = ovs[ovs.length - 1];
+  const inp = ov?.querySelector('input, textarea');
+  if (!inp) return false;
+  inp.value = 'Smoke Sub';
+  inp.dispatchEvent(new Event('input', { bubbles: true }));
+  // the confirm button carries the confirmText ('Continue') — click by text,
+  // never by class (the shell's button classes are not part of this contract)
+  const btn = [...ov.querySelectorAll('button')].find((b) => /continue|确定|OK/i.test(b.textContent || ''));
+  btn?.click();
+  return !!btn;
+})()`);
+check('add-subscription name dialog confirmed', dlgOk);
+await sleep(2500);
+const addRes = await evalJs(`(() => ({
+  wins: app.wm.windows.size,
+  hasTerminal: [...app.wm.windows.values()].some((w) => w.type === 'terminal'),
+}))()`);
+check(`login terminal opened (windows ${winsBefore} → ${addRes.wins})`, addRes.wins > winsBefore && addRes.hasTerminal);
+
 const realErrors = jsErrors.filter((e) => !/favicon|net::|Failed to load resource/.test(e));
 check('no JS errors', realErrors.length === 0);
 if (realErrors.length) console.error('   errors:', realErrors.slice(0, 5));
