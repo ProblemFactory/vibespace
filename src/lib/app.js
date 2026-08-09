@@ -229,6 +229,10 @@ class App {
       }
       if (msg.type === 'accounts-updated' && Array.isArray(msg.accounts)) {
         this._accounts = { ...(this._accounts || {}), accounts: msg.accounts, defaultAccountId: msg.defaultAccountId || null, defaultCodexAccountId: msg.defaultCodexAccountId || null };
+        // Live-re-render an OPEN Manage Agents surface — without this the
+        // roster only updated on the next manual reopen, so adding an account
+        // (esp. one never logged in) left the page unchanged (inc-msl890ua).
+        try { this._agentsRefreshHook?.(); } catch {}
       }
       if (msg.type === 'pool-auto-switched' && Array.isArray(msg.affected)) {
         // B-6217 v2 auto+COLD: the server re-pointed a pool and picked THIS

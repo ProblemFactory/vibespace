@@ -46,8 +46,13 @@ export function installManageAgents(App, ctx = {}) {
       this._watchHostLogin(hostId, hostLabel);
       this.openShellTerminal(undefined, { hostId, initialCommand: `mkdir -p "${dir}" && CLAUDE_CONFIG_DIR="${dir}" CLAUDE_SECURESTORAGE_CONFIG_DIR="${dir}" claude auth login --claudeai` });
       showToast(t('A terminal opened ON {host} — sign in there. The login lives on {host} only; sessions on it can then pick this account.', { host: hostLabel }), { duration: 7000 });
+      refresh();
       return;
     }
+    // Show the new (not-yet-logged-in) account in the roster IMMEDIATELY —
+    // the create already succeeded server-side; without this the page looked
+    // unchanged until a manual reopen (inc-msl890ua, real report).
+    refresh();
     // Open a login terminal with the env-scoped command. The sign-in writes THIS
     // account's creds into its own dir — your current/global login is untouched.
     this.openShellTerminal(undefined, { initialCommand: created.loginCmd });
@@ -178,6 +183,31 @@ export function installManageAgents(App, ctx = {}) {
       if (!r?.success) { showToast(r?.error || t('Remove failed'), { type: 'error' }); return; }
       showToast(t('Removed')); close(); refresh?.();
     };
+  },
+
+  // Add a subscription record and go STRAIGHT to minting its long-lived token
+  // (B-211a #2, user request 'why can oat only be added to an existing
+  // account'): no local login step — the setup-token browser flow decides the
+  // account, usable on any machine once pasted. Creates the record, opens
+  // _oatDialog on it, and deletes the throwaway if the user cancels with no
+  // token AND no login (a dead record otherwise).
+  async _addSubscriptionViaOat() {
+    const name = await showInputDialog({ title: t('Add via long-lived token'), label: t('Name this subscription (e.g. Work Max, Personal Max)'), placeholder: t('e.g. Work Max'), confirmText: t('Continue') });
+    if (name === null) return;
+    let created;
+    try { created = await fetchJson('/api/accounts/subscription', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: (name || '').trim() }) }); }
+    catch { showToast(t('Could not start — server unreachable'), { type: 'error' }); return; }
+    if (!created?.id) { showToast(created?.error || t('Could not start'), { type: 'error' }); return; }
+    const refresh = () => { this._agentsRefreshHook?.(); };
+    refresh();
+    this._oatDialog(created.id, { name: (name || '').trim() || 'Subscription' }, async () => {
+      refresh();
+      try {
+        const list = await fetchJson('/api/accounts');
+        const a = (list?.accounts || []).find((x) => x.id === created.id);
+        if (a && !a.loggedIn && !a.oat) { await fetchJson(`/api/accounts/${encodeURIComponent(created.id)}`, { method: 'DELETE' }); refresh(); }
+      } catch {}
+    });
   },
 
   // ── Pooled pseudo-account: re-point + cold restart (B-6217 v1) ──────────
@@ -1468,6 +1498,11 @@ export function installManageAgents(App, ctx = {}) {
         items.push({ label: t('New subscription — log in on {host}…', { host: hostLabel }), action: () => { done(); this._addSubscription(selectedHost, hostLabel); } });
       } else {
         items.push({ label: t('Add subscription…'), action: () => { done(); this._addSubscription(); } });
+        // Add a subscription straight as a LONG-LIVED TOKEN (B-211a) — no local
+        // login needed, usable on any machine. Mints the account record then
+        // opens the mint dialog directly (real request: 'why can only add oat
+        // to an existing account').
+        items.push({ label: t('Add subscription via long-lived token…'), action: () => { done(); this._addSubscriptionViaOat(); } });
       }
       items.push(
         { label: t('Add Console account…'), action: () => { done(); this._addConsoleAccount(); } },

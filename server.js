@@ -4659,6 +4659,13 @@ function sessionAuth(s) {
   if (be !== 'claude') return null; // shell terminals — nothing billed
   if (s._accountId) {
     const a = accounts.get(s._accountId);
+    // A POOLED pseudo-account (B-6217): show it AS a pool + the real account it
+    // currently bills, so the badge/chip never mislabels it as an API key
+    // (real report: pooled sessions rendered as 'API key').
+    if (a && a.type === 'pooled') {
+      let cur = null; try { const c = accounts.poolCurrent(a.id); cur = c ? (accounts.get(c)?.name || null) : null; } catch {}
+      return withHost({ source: 'pooled', name: a.name, poolTarget: cur });
+    }
     // A named SUBSCRIPTION account bills the subscription (not API) — show its
     // name, no amber key warning.
     if (a && (a.type || 'api') === 'subscription') return withHost({ source: 'subscription', name: a.name });

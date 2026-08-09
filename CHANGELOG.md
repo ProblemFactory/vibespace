@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.255.0
+
+Account display + add-flow fixes (user batch):
+
+- **Pooled account no longer masquerades as an API key** (real report): `sessionAuth` had no pooled branch, so a pooled pseudo-account fell through to the API-key display. It now renders a distinct **pool chip** — title-bar badge + chat status chip — naming the pool AND the real account it currently bills (inline when there's room, always in the tooltip), and the badge re-renders when the pool switches its target.
+- **Add-account now updates the page immediately** (inc-msl890ua): adding a subscription — even one you never finish logging into — left Manage Agents unchanged until a manual reopen. The `accounts-updated` broadcast now live-re-renders an open Agents surface, and the add flow refreshes the roster the moment the (pending) account is created.
+- **Add a subscription straight as a long-lived token** (user request "why can oat only be added to an existing account"): the + Add account menu gains "Add subscription via long-lived token…" — it creates the record and opens the mint dialog directly (no local login step; the setup-token browser flow decides the account), cleaning up the throwaway record if you cancel without pasting a token.
+
 ## 2.254.0
 
 **Toolbar resize reworked into content scaling (walter's `inc-mskxi7zk-mbm6` + the 2-row dead-band report — direction A, user-picked):**

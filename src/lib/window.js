@@ -1035,7 +1035,7 @@ class WindowManager {
   // (the CLI's init record) or change across a resume.
   setAuthBadge(id, auth) {
     const win = this.windows.get(id); if (!win) return;
-    const key = auth ? `${auth.source}:${auth.name || ''}:${auth.hostName || ''}:${auth.guessed ? 1 : 0}` : '';
+    const key = auth ? `${auth.source}:${auth.name || ''}:${auth.poolTarget || ''}:${auth.hostName || ''}:${auth.guessed ? 1 : 0}` : '';
     win._authBadge = auth; // kept for re-apply after tab-bar rebuilds
     // No-op guard, but SELF-HEALING: tab-bar re-renders (switch/merge/detach/
     // drag) rebuild the tab DOM and destroy the badge span — with a pure key
@@ -1068,8 +1068,10 @@ class WindowManager {
       }
       const isApi = auth.source === 'api-key' || auth.source === 'api-console' || auth.source === 'api-other';
       const isUnknown = auth.source === 'unknown';
+      const isPooled = auth.source === 'pooled';
       el.classList.toggle('unknown', isUnknown);
-      el.classList.toggle('sub', !isApi && !isUnknown);
+      el.classList.toggle('pooled', isPooled);
+      el.classList.toggle('sub', !isApi && !isUnknown && !isPooled);
       // A remote session's CLI login is the HOST's, not this machine's — name
       // the machine on the chip and in the tooltip (2.188.0: a remote host-
       // login window was indistinguishable from a local one, and the tooltip's
@@ -1077,7 +1079,15 @@ class WindowManager {
       const hn = auth.hostName;
       const machineTip = hn ? t('"{name}"’s own CLI login', { name: hn }) : t("The machine's own CLI login");
       let tip;
-      if (isApi) {
+      const POOL_SVG = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 5.5c1.5 1 4 1 6 0s4.5-1 6 0M2 8.5c1.5 1 4 1 6 0s4.5-1 6 0M2 11.5c1.5 1 4 1 6 0s4.5-1 6 0"/></svg>';
+      if (isPooled) {
+        // Pooled pseudo-account: a distinct chip (never the API key), naming
+        // the POOL + the real account it currently bills (inline if room, else
+        // the tooltip carries it) — real report: pooled sessions read as API.
+        const tgt = auth.poolTarget ? escHtml(auth.poolTarget) : '';
+        el.innerHTML = POOL_SVG + `<span class="wab-name">${escHtml(auth.name || t('Pool'))}</span>${tgt ? `<span class="wab-pool-tgt"> → ${tgt}</span>` : ''}`;
+        tip = t('Pooled account') + (auth.poolTarget ? ' · ' + t('currently billing {name}', { name: auth.poolTarget }) : ' · ' + t('no target')) + (hn ? ' · ' + t('on "{name}"', { name: hn }) : '');
+      } else if (isApi) {
         el.innerHTML = KEY_SVG + `<span class="wab-name">${escHtml(auth.name || (auth.source === 'api-console' ? 'Console' : 'API'))}</span>`;
         tip = t('API billing (pay per use)') + ` — ${auth.source === 'api-console' ? t('Console login') : (auth.name ? auth.name + (auth.tail ? ' (…' + auth.tail + ')' : '') : (auth.detail || t('API key')))}${hn ? ' · ' + t('on "{name}"', { name: hn }) : ''}${auth.guessed ? ' · ' + t('estimated from the login state at spawn') : ''}`;
       } else if (isUnknown) {
