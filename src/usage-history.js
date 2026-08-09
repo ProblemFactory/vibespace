@@ -263,14 +263,39 @@ class UsageHistory {
         const pdAbs = path.join(this.projectsDir, pd);
         let entries = [];
         try { entries = fs.readdirSync(pdAbs); } catch { continue; }
+        // Per-file scan bodies collected first, run below — top-level session
+        // transcripts PLUS subagent/workflow agent transcripts (2.265.0):
+        // <sid>/subagents/agent-*.jsonl and <sid>/subagents/workflows/wf_*/
+        // agent-*.jsonl. WORKFLOW agents' API usage exists ONLY in those files
+        // (the parent stream carries just the tool_use + async ack) — the
+        // "top-level only" scan under-counted every workflow run (~$205 for
+        // one 15-agent review run, measured; the dead-reckoning calibration
+        // caught it as a 3-4× hot learned 5h rate). Events attribute to the
+        // PARENT session id, so account/pool by-time attribution follows the
+        // parent (workflow agents bill the parent's account). Normal Agent-
+        // tool sidechains also live in the parent jsonl — the read-time
+        // requestId dedup absorbs the overlap.
+        const claudeFiles = []; // {fp, sid}
         for (const fn of entries) {
-          if (!fn.endsWith('.jsonl')) continue; // top-level session transcripts only
-          const fp = path.join(pdAbs, fn);
+          if (fn.endsWith('.jsonl')) { claudeFiles.push({ fp: path.join(pdAbs, fn), sid: fn.replace(/\.jsonl$/, '') }); continue; }
+          if (!/^[0-9a-f-]{36}$/i.test(fn)) continue; // session dirs only
+          const subDir = path.join(pdAbs, fn, 'subagents');
+          let subs = []; try { subs = fs.readdirSync(subDir); } catch { continue; }
+          for (const sf of subs) {
+            if (sf.endsWith('.jsonl')) { claudeFiles.push({ fp: path.join(subDir, sf), sid: fn }); continue; }
+            if (sf !== 'workflows') continue;
+            let wfs = []; try { wfs = fs.readdirSync(path.join(subDir, 'workflows')); } catch { continue; }
+            for (const wf of wfs) {
+              let afs = []; try { afs = fs.readdirSync(path.join(subDir, 'workflows', wf)); } catch { continue; }
+              for (const af of afs) if (af.startsWith('agent-') && af.endsWith('.jsonl')) claudeFiles.push({ fp: path.join(subDir, 'workflows', wf, af), sid: fn });
+            }
+          }
+        }
+        for (const { fp, sid } of claudeFiles) {
           let st; try { st = fs.statSync(fp); } catch { continue; }
           if (!st.isFile()) continue;
           const cur = cursorFor(fp, st.size);
           if (st.size === cur.offset) continue; // unchanged
-          const sid = fn.replace(/\.jsonl$/, '');
           const minfo = meta[sid] || {};
           filesTouched++;
           this._scanFileLines(fp, cur, st.size, (line) => {
