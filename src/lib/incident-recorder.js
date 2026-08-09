@@ -113,6 +113,18 @@ export function installIncidentRecorder(app) {
     } catch (e) { out.sessions = 'failed: ' + e.message; }
     try { out.wsState = app.ws?.connected ? 'connected' : 'disconnected'; } catch {}
     try { out.activeDesktop = app.desktopManager?._activeId; } catch {}
+    // Per-chat-window SCROLL TRACER tails (B-21bc, user request: reports must
+    // carry them automatically — no dump hotkey the user has to remember).
+    // The ring records every scroll-affecting op (coarse scroll moves with
+    // pin state + time-since-user-wheel, paging/trim/fold compensations) —
+    // positions and op tags only, never message content.
+    try {
+      const traces = {};
+      for (const [winId, v] of app.sessions || []) {
+        if (v?._traceRing?.length) traces[winId] = { sid: v.sessionId || null, tail: v._traceRing.slice(-200) };
+      }
+      if (Object.keys(traces).length) out.chatTraces = traces;
+    } catch (e) { out.chatTraces = 'failed: ' + e.message; }
     return out;
   };
 

@@ -146,11 +146,9 @@ class ChatView {
       this._searchBarObserver.observe(this._search._bar, { attributes: true, attributeFilter: ['class'] });
     });
 
-    // Scroll-jump tracer (TEMPORARY diagnostic — user report: paging up still
-    // jumps). Every scroll-affecting path below records into a ring buffer;
-    // an unexplained scrollTop jump (>600px with no recent wheel/touch and no
-    // expected compensation window) ships the buffer to /api/telemetry as
-    // kind:'trace' name:'chat-scroll-jump'. Remove once the jump is fixed.
+    // Always-on scroll tracer ring (v2, B-21bc): every scroll-affecting path
+    // records positions + op tags into a capped in-memory ring; "Report a
+    // problem" ships each chat window's tail automatically. See _trace below.
     this._installScrollTracer();
 
     // Renderers (extracted rendering methods)
@@ -254,6 +252,7 @@ class ChatView {
           this._newMsgCount = 0;
           this._scrollBtn.classList.add('hidden');
         } else if (!atBottom) {
+          if (this._pinned) this._trace('unpin', { st: Math.round(scrollTop), wheelAgo: this._lastUserScrollAt ? Date.now() - this._lastUserScrollAt : -1 });
           this._pinned = false;
           this._scrollBtn.classList.remove('hidden');
         }
@@ -2260,13 +2259,37 @@ class ChatView {
     return false;
   }
 
-  // Scroll-jump tracer removed in 2.111.8 (the 2.111.5 element-anchored paging
-  // fix is user-verified). These stay as no-op stubs so the anchoring code's
-  // `_traceExpect()` marks and the scattered `_trace()` breadcrumbs don't need
-  // to be scrubbed from every call site.
-  _trace() {}
+  // Scroll tracer v2 (2.264.0, B-21bc — user request: 汇报问题时自动带上).
+  // The 2.111.8 removal stubbed these out, which left incident reports BLIND
+  // to viewport-jump bugs (B-21bc arrived with zero scroll evidence and even
+  // the documented Ctrl+Shift+J dump was dead). Now an ALWAYS-ON in-memory
+  // ring: the pre-existing `_trace()` breadcrumbs (extendTop/extendBottom/
+  // trim/jump/runsRestore) re-arm for free, plus a coarse scroll sampler
+  // below. Positions and op tags only — never message content. The incident
+  // reporter ships each chat window's ring tail automatically (snapshot
+  // `chatTraces` in incident-recorder.js). Cost: one compare per scroll event
+  // + tiny objects in a capped ring.
+  _trace(tag, data) {
+    const r = this._traceRing || (this._traceRing = []);
+    r.push(data ? { t: Date.now(), tag, ...data } : { t: Date.now(), tag });
+    if (r.length > 400) r.splice(0, r.length - 250);
+  }
   _traceExpect() {}
-  _installScrollTracer() {}
+  _installScrollTracer() {
+    let last = 0;
+    this._messageList.addEventListener('scroll', () => {
+      const st = this._messageList.scrollTop;
+      if (Math.abs(st - last) < 400) return; // coarse: only real moves, not per-frame noise
+      this._trace('scroll', {
+        from: Math.round(last), to: Math.round(st),
+        pin: this._pinned ? 1 : 0,
+        // key discriminator for B-21bc: a big move with NO recent user
+        // wheel/touch is a programmatic yank
+        wheelAgo: this._lastUserScrollAt ? Date.now() - this._lastUserScrollAt : -1,
+      });
+      last = st;
+    }, { passive: true });
+  }
 
   // Re-render every rendered message in place — for mode toggles that change
   // the per-message DOM STRUCTURE (compact mode builds a different wrapper in

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.264.0
+
+- **"Report a problem" now ships chat scroll traces automatically** (user request, straight out of B-21bc: a viewport-jump report arrived with zero scroll evidence — and the documented Ctrl+Shift+J dump turned out to be a dead stub since 2.111.8). The chat scroll tracer is back as an **always-on in-memory ring** per chat window: the pre-existing paging/trim/jump/fold-restore breadcrumbs re-arm, plus a coarse scroll sampler (moves >400px with pin state and time-since-last-user-wheel — the discriminator between a user scroll and a programmatic yank) and an explicit unpin breadcrumb. Positions and op tags only, never message content. The incident snapshot carries each open chat window's ring tail (`chatTraces`), so the next B-21bc recurrence is self-evidencing — nothing for the user to remember.
+
 ## 2.263.0
 
 Quota dead-reckoning v2 (B-fcff, user go-ahead: "按照这个作为初步的approximation锚点来实现自动统计切换…随着数据增多内部自动优化estimation"):
