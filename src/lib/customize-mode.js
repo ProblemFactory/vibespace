@@ -315,9 +315,17 @@ export class CustomizeMode {
       // All pickable elements live in the top/bottom bars, so center is safe.
       pop.classList.add('cz-parked');
       this._startWidthPick(el, (totalPx, count) => {
-        save({ px: totalPx, pct: null });
+        // The picked widths are VISUAL px (getBoundingClientRect). A spring
+        // living inside the zoomed toolbar (--toolbar-scale, 2.254.0) renders
+        // its style.width MULTIPLIED by the zoom — divide the target zone's
+        // scale back out or the stored width renders scale²-wrong (the
+        // two-rows-center-alignment flagship use broke at any non-1 scale).
+        const inToolbar = !!el.closest('#toolbar, #toolbar-row2');
+        const tbScale = inToolbar ? (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--toolbar-scale')) || 1) : 1;
+        const px = Math.round(totalPx / tbScale);
+        save({ px, pct: null });
         syncUi();
-        matchBtn.textContent = `Done (${count} · ${totalPx}px)`;
+        matchBtn.textContent = `Done (${count} · ${px}px)`;
       }, () => {
         pop.classList.remove('cz-parked');
         matchBtn.textContent = 'Match…';

@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.254.0
+
+**Toolbar resize reworked into content scaling (walter's `inc-mskxi7zk-mbm6` + the 2-row dead-band report — direction A, user-picked):**
+
+- The toolbar no longer has a resizable fixed height. Its height **auto-fits its content rows** (including a populated `#toolbar-row2`), so there is **never a dead empty band** — the old model stretched only row 1, leaving a large gap on 2-row arrangements.
+- The drag handle now drives **content scale** (`--toolbar-scale`, a zoom on `#toolbar` + `#toolbar-row2`, range 0.7–1.25): drag **up = more compact = a visibly larger desktop** (both rows shrink; the workspace absorbs every pixel — measured 565/539/517px workspace across 0.7/1/1.25), drag down = larger chrome. Double-click still resets.
+- Migration: a previously saved fixed height (localStorage or synced layout state) converts to the equivalent scale (`height/40`) automatically; old clients in a mixed-version fleet degrade benignly (they ignore the new field).
+- Multi-client: the scale rides layout-sync pre-desktop-gate (the 2.252.2 invariant), and an explicit **reset now propagates** (a `null` in the state used to be skipped, leaving other clients scaled forever).
+- **Adversarial-review hardening** (before ship): a mixed-version fleet is safe both ways — the new captureState emits a companion legacy `toolbarHeight` (so an old-bundle client tracks + round-trips the size instead of re-echoing its fixed 40 and erasing everyone's scale), and the decode treats a legacy value at the old default (≈40) as no-information, never a reset. A reset (dblclick / drag-to-default) now propagates AND heals at boot: one `_applyToolbarState` decoder is used at every intake — remote sync, remote apply, restore, and a new boot-path heal in loadAutoSave — so a stale localStorage can't resurrect an erased scale on a client that boots later. Spring "Match…" width-pick divides out the toolbar zoom before storing (a matched spring no longer renders scale²-wrong). Handle tooltip is i18n'd; package-lock synced.
+- Verified with screenshots at 0.7/1/1.25 on the reporter's real 2-row arrangement + an 18-assert CDP smoke (drag/persist/reload/theme-switch/cross-desktop/legacy-migrate/legacy-default-no-erase/companion-field/clamp/reset-propagation/**boot-divergence via real server round-trip**/no-dead-band).
+
 ## 2.253.1
 
 Long-lived-token follow-up — honest framing + real end-to-end verification:

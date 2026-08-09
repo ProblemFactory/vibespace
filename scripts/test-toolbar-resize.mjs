@@ -86,75 +86,113 @@ try {
   await evalJs('window.app ? app.ready : Promise.reject(new Error("no app"))');
   await sleep(500);
 
-  const h0 = await toolbarH();
+  // 2.254.0 SCALE MODEL: the toolbar height auto-fits content; the handle
+  // drives --toolbar-scale (zoom on #toolbar + #toolbar-row2). Truth metric =
+  // RENDERED height (getBoundingClientRect) + workspace absorption.
+  const rendered = () => evalJs(`Math.round(document.getElementById('toolbar').getBoundingClientRect().height)`);
+  const workspaceH = () => evalJs(`document.getElementById('workspace').offsetHeight`);
+  const scaleVar = () => evalJs(`document.documentElement.style.getPropertyValue('--toolbar-scale')`);
+
+  const h0 = await rendered(); const ws0 = await workspaceH();
   check('handle exists', await evalJs(`!!document.getElementById('toolbar-resize-handle')`));
 
-  // THE reported bug: drag down 24px → height must STAY after mouseup
-  await dragHandle(24);
-  const h1 = await toolbarH();
-  check(`drag +24px sticks after mouseup (${h0} → ${h1})`, Math.abs(h1 - (h0 + 24)) <= 2 && h1 > h0 + 15);
-  check('override persisted to localStorage', await evalJs(`parseInt(localStorage.getItem('toolbarHeight')) > ${h0 + 15}`));
-  check('CSS var carries the override', await evalJs(`document.documentElement.style.getPropertyValue('--toolbar-height') !== ''`));
+  // drag DOWN → scale up → toolbar renders taller, workspace shrinks
+  await dragHandle(80);
+  const h1 = await rendered(); const ws1 = await workspaceH();
+  check(`drag down scales the toolbar UP and it sticks (${h0} → ${h1})`, h1 > h0 + 5);
+  check('workspace shrank by the toolbar delta', ws0 - ws1 >= (h1 - h0) - 3);
+  check('scale persisted to localStorage', await evalJs(`parseFloat(localStorage.getItem('toolbarScale')) > 1.05`));
+  const s1 = await evalJs(`parseFloat(localStorage.getItem('toolbarScale'))`);
 
-  // second flaw site: re-applying the SAME height with the override active
-  // (restore / layout-sync echo) must be a no-op, not a reset
-  await evalJs(`app.layoutManager._applyToolbarHeight(${h1})`);
+  // same-value re-apply is a no-op (restore/sync path)
+  await evalJs(`app.layoutManager._applyToolbarScale(${s1})`);
   await sleep(100);
-  check('re-applying the same height does not reset (restore/sync path)', (await toolbarH()) === h1);
+  check('re-applying the same scale does not reset', Math.abs((await rendered()) - h1) <= 1);
 
-  // survives a reload. Wait out the layout autosave debounce (2s) first —
-  // reloading INSIDE it replays the stale pre-drag state (default height),
-  // which is the normal loss window every layout property has, not this bug.
-  await sleep(2800);
+  // NO DEAD BAND: the toolbar's rendered height ≈ scale × content height —
+  // an empty gap would make rendered >> content. Compare against row content.
+  const noBand = await evalJs(`(() => {
+    const tb = document.getElementById('toolbar');
+    const inner = Math.max(...[...tb.children].map(c => c.getBoundingClientRect().height), 0);
+    return { outer: tb.getBoundingClientRect().height, inner };
+  })()`);
+  check(`no dead band (outer ${Math.round(noBand.outer)} ≈ content+pad, inner ${Math.round(noBand.inner)})`, noBand.outer - noBand.inner < 30);
+
+  // cross-desktop broadcast applies the scale (2.252.2 invariant, scale edition)
+  await evalJs(`app.layoutManager._handleRemoteSync({ desktopId: 'not-the-active-desktop', state: { toolbarScale: 0.8, windows: [] } })`);
+  await sleep(150);
+  check('non-active-desktop broadcast applies the scale', (await rendered()) < h0);
+  // legacy fixed-height state migrates (toolbarHeight 64 → scale 1.25-capped 1.6)
+  await evalJs(`app.layoutManager._handleRemoteSync({ desktopId: 'not-the-active-desktop', state: { toolbarHeight: 64, windows: [] } })`);
+  await sleep(150);
+  check('legacy toolbarHeight state migrates to a scale', parseFloat(await scaleVar()) > 1.1);
+  // an OLD-bundle client echoes its fixed default (40) on every autosave —
+  // that is NO information, it must NOT erase the fleet's scale (review catch)
+  await evalJs(`app.layoutManager._handleRemoteSync({ desktopId: 'not-the-active-desktop', state: { toolbarHeight: 40, windows: [] } })`);
+  await sleep(150);
+  check('legacy default (40) echo does NOT erase the scale', parseFloat(await scaleVar()) > 1.1);
+  // companion legacy field rides captureState so old bundles can track + round-trip
+  check('captureState emits the companion legacy toolbarHeight', await evalJs(`(() => { const st = app.layoutManager.captureState(); return typeof st.toolbarHeight === 'number' && Math.abs(st.toolbarHeight - Math.round(40 * (st.toolbarScale || 1))) <= 1; })()`));
+  // absurd values clamp
+  await evalJs(`app.layoutManager._applyToolbarScale(500)`);
+  await sleep(100);
+  check('absurd value clamps to the range', parseFloat(await scaleVar()) <= 1.25);
+  // a remote RESET (explicit toolbarScale:null in the state) must propagate —
+  // skipping null left other clients scaled forever after a dblclick reset
+  await evalJs(`app.layoutManager._handleRemoteSync({ desktopId: 'not-the-active-desktop', state: { toolbarScale: null, windows: [] } })`);
+  await sleep(150);
+  check('remote reset (null) propagates', (await scaleVar()) === '');
+  await evalJs(`app.layoutManager._applyToolbarScale(${s1})`);
+  await sleep(2800); // let the autosave land before reload
+
+  // survives a reload (localStorage boot restore)
   await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
   await sleep(1500);
   await evalJs('app.ready');
   await sleep(500);
-  const hR = await toolbarH();
-  check('height survives reload', Math.abs(hR - h1) <= 2);
+  check('scale survives reload', Math.abs((await rendered()) - h1) <= 2);
 
-  // cross-desktop broadcast (2.252.2, adversarial-review catch): a layout-sync
-  // for a NON-active desktop used to be cached without applying — the bars are
-  // GLOBAL chrome, so the height must apply immediately regardless of which
-  // desktop the broadcast belongs to (else this client's next capture
-  // broadcasts its stale size back and erases the resize fleet-wide)
-  await evalJs(`app.layoutManager._handleRemoteSync({ desktopId: 'not-the-active-desktop', state: { toolbarHeight: 90, windows: [] } })`);
-  await sleep(150);
-  check('non-active-desktop broadcast still applies the height', (await toolbarH()) === 90);
-  await evalJs(`app.layoutManager._applyToolbarHeight(${h1})`);
-  await sleep(150);
-
-  // corrupt/foreign state must clamp, not render (defense-in-depth)
-  await evalJs(`app.layoutManager._applyToolbarHeight(500)`);
-  await sleep(150);
-  check('absurd height clamps to the drag range', (await toolbarH()) <= 96);
-  await evalJs(`app.layoutManager._applyToolbarHeight(${h1})`);
-  await sleep(150);
-
-  // theme switch must NOT wipe the override (the 2.252.1 third leg:
-  // ThemeManager.apply's _clearInlineOverrides swept every inline --* var,
-  // killing the height at boot and on every theme change)
+  // theme switch must NOT wipe the override (2.252.1 third leg, scale edition)
   await evalJs(`app.themeManager.apply('nord')`);
   await sleep(200);
-  check('theme switch keeps the resized height', (await toolbarH()) === h1);
+  check('theme switch keeps the scale', Math.abs((await rendered()) - h1) <= 2);
   await evalJs(`app.themeManager.apply('dark')`);
 
-  // the intended reset semantics still work: dblclick → default
+  // dblclick resets to default
   await evalJs(`document.getElementById('toolbar-resize-handle').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
   await sleep(200);
-  check(`dblclick resets to default (${h0})`, (await toolbarH()) === h0);
-  check('reset cleared localStorage', await evalJs(`localStorage.getItem('toolbarHeight') === null`));
+  check(`dblclick resets to default (${h0})`, Math.abs((await rendered()) - h0) <= 1);
+  check('reset cleared localStorage', await evalJs(`localStorage.getItem('toolbarScale') === null`));
 
-  // dragging back to ~default also resets (the within-2px rule, now against
-  // the TRUE stylesheet default)
-  await dragHandle(30);
-  await dragHandle(-30);
-  check('drag back to default clears the override', await evalJs(`localStorage.getItem('toolbarHeight') === null && document.documentElement.style.getPropertyValue('--toolbar-height') === ''`));
+  // drag away then back to ~default clears the override
+  await dragHandle(60);
+  await dragHandle(-60);
+  check('drag back to default clears the override', await evalJs(`localStorage.getItem('toolbarScale') === null && document.documentElement.style.getPropertyValue('--toolbar-scale') === ''`));
+
+  // BOOT DIVERGENCE (review catch): the server state carries the reset
+  // (toolbarScale null after the resets above, persisted by the autosaves);
+  // a client with a STALE localStorage must not resurrect the erased scale
+  // at boot — the loadAutoSave heal applies the explicit-null reset even
+  // when restoreState is skipped (no windows).
+  // The 5s post-load _restoring window suppresses autosaves (deliberate) —
+  // the resets above happened inside it. Wait it out, re-trigger the reset
+  // with a REAL interaction, and give the debounce time to send.
+  await sleep(6000);
+  await evalJs(`document.getElementById('toolbar-resize-handle').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+  await evalJs(`document.dispatchEvent(new Event('pointerdown'))`); // arm _userDirty (capture listener)
+  await evalJs(`app.layoutManager.scheduleAutoSave()`);
+  await sleep(1500); // debounce + send + server write
+  await evalJs(`localStorage.setItem('toolbarScale', '1.2')`);
+  await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+  await sleep(1500);
+  await evalJs('app.ready');
+  await sleep(500);
+  check('stale localStorage does NOT resurrect an erased scale at boot', Math.abs((await rendered()) - h0) <= 1, 'rendered=' + (await rendered()));
 } catch (e) {
   failed++;
   console.error('  ✗ harness error: ' + e.message);
 }
 
 ws.close();
-console.log(failed ? `${failed} FAILED` : 'ALL PASS (12)');
+console.log(failed ? `${failed} FAILED` : 'ALL PASS (18)');
 process.exit(failed ? 1 : 0);

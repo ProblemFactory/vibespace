@@ -65,7 +65,7 @@ class LayoutManager {
     // localStorage) fleet-wide — a residual snap-back route after 2.252.1.
     if (msg.state) {
       if (msg.state.taskbarHeight) this._applyTaskbarHeight(msg.state.taskbarHeight);
-      if (msg.state.toolbarHeight) this._applyToolbarHeight(msg.state.toolbarHeight);
+      this._applyToolbarState(msg.state);
     }
     if (dm && msg.desktopId) {
       // Desktop-aware: only apply if it's for our active desktop
@@ -100,7 +100,7 @@ class LayoutManager {
       if (state.taskbarHeight) {
         this._applyTaskbarHeight(state.taskbarHeight);
       }
-      if (state.toolbarHeight) this._applyToolbarHeight(state.toolbarHeight);
+      this._applyToolbarState(state);
       // Windows: update existing, create missing, close removed
       if (state.windows) {
         const remoteIds = new Set();
@@ -354,8 +354,14 @@ class LayoutManager {
     const globalFontFamily = this.app._fontFamily;
     const sidebarOpen = this.app.sidebar.isOpen;
     const taskbarHeight = document.getElementById('taskbar')?.offsetHeight || null;
-    const toolbarHeight = document.getElementById('toolbar')?.offsetHeight || null;
-    return { windows, grid, theme, globalFontSize, globalFontFamily, sidebarOpen, taskbarHeight, toolbarHeight };
+    const tbScaleRaw = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--toolbar-scale'));
+    const toolbarScale = (tbScaleRaw && Math.abs(tbScaleRaw - 1) > 0.02) ? tbScaleRaw : null;
+    // Companion LEGACY field: pre-2.254.0 bundles read only toolbarHeight —
+    // emitting the equivalent px keeps a mixed-version fleet stable (the old
+    // client applies+re-echoes 48, which migrates back to 1.2 — round-trip;
+    // without it old clients re-echo their fixed 40 forever)
+    const toolbarHeight = Math.round(40 * (toolbarScale || 1));
+    return { windows, grid, theme, globalFontSize, globalFontFamily, sidebarOpen, taskbarHeight, toolbarScale, toolbarHeight };
   }
 
   // Restore workspace from state (used for autosave restore on startup)
@@ -389,7 +395,7 @@ class LayoutManager {
     if (state.taskbarHeight) {
       this._applyTaskbarHeight(state.taskbarHeight);
     }
-    if (state.toolbarHeight) this._applyToolbarHeight(state.toolbarHeight);
+    this._applyToolbarState(state); // incl. explicit-null reset — a stale localStorage must not resurrect an erased scale at boot
 
     // Restore sidebar
     if (state.sidebarOpen !== undefined) {
@@ -646,6 +652,14 @@ class LayoutManager {
       this._savedPresets = data.saved || {};
       this._currentName = data.current || null;
 
+      // Bar-scale boot heal BEFORE the delegate: restoreState only runs when
+      // the active desktop has windows, so an explicit-null reset in the
+      // persisted state must be honored HERE too — else a stale localStorage
+      // (applied by _setupToolbarResize moments ago) resurrects an erased
+      // scale and the first autosave re-broadcasts it fleet-wide.
+      const bootState = this._isMobile() ? (data.autoSaveMobile || data.autoSave)
+        : (data.desktopMeta?.length ? data.desktops?.[data.desktopMeta[0].id]?.autoSave : data.autoSave);
+      this._applyToolbarState(bootState || data.autoSave);
       // Desktop-aware restore: delegate to DesktopManager
       if (this.app.desktopManager) {
         await this.app.desktopManager.loadFromServer(data);
@@ -1027,21 +1041,52 @@ class LayoutManager {
 
   // Toolbar height rides layout-sync like the taskbar's; a value at the CSS
   // default means RESET (clear the override) rather than pinning the default.
-  _applyToolbarHeight(h) {
+  // ONE decoder for a state's toolbar fields (2.254.0 review-hardened) —
+  // every intake (sync, remote apply, restore, boot) must use THIS, never
+  // inline branches:
+  //  · toolbarScale number → apply
+  //  · legacy toolbarHeight → migrate via h/40, BUT a value in the reset
+  //    dead-zone (≈40) is NO INFORMATION, never a reset — an old-bundle
+  //    client echoes its fixed 40 on every autosave (2.240.3 stale tabs are
+  //    a real recurring class) and treating that as a reset erased the whole
+  //    fleet's scale + localStorage (adversarial-review catch)
+  //  · explicit toolbarScale:null (key present) → the sender RESET; propagate
+  _applyToolbarState(state) {
+    if (!state) return;
+    if ('toolbarScale' in state) {
+      // NEW-format state: decode by the new key EXCLUSIVELY — the companion
+      // legacy toolbarHeight (emitted for old readers) must never shadow an
+      // explicit-null reset (branch-ordering bug caught by the boot smoke:
+      // null + companion 40 decoded as "legacy no-info" and the reset died)
+      if (state.toolbarScale != null) this._applyToolbarScale(state.toolbarScale);
+      else this._applyToolbarScale(1); // explicit null = the sender RESET
+    } else if (state.toolbarHeight) {
+      // LEGACY-only state (old bundle): migrate via h/40; the reset dead-zone
+      // (≈40, the old fixed default) is NO information — an old client echoes
+      // it on every autosave and must not erase the fleet's scale
+      const sc = Number(state.toolbarHeight) / 40;
+      if (Number.isFinite(sc) && Math.abs(sc - 1) >= 0.03) this._applyToolbarScale(sc);
+    }
+  }
+
+  // 2.254.0: the toolbar resize is a CONTENT SCALE (--toolbar-scale zoom), not
+  // a fixed height. Accepts a scale, OR migrates a legacy fixed-height value
+  // (from a pre-2.254.0 client / persisted state) via scale ≈ height/40.
+  _applyToolbarScale(s) {
     const root = document.documentElement;
-    h = Number(h);
-    if (!Number.isFinite(h)) return;
-    h = Math.max(28, Math.min(96, Math.round(h))); // drag-range clamp — a corrupt/foreign state must not render 500px NOR persist it
-    // cssVarDefault, NOT getComputedStyle: with a saved override active the
-    // computed var IS the override — re-applying the same height then read as
-    // "at default" and reset it (restore/layout-sync reverted the user's size).
-    const def = cssVarDefault('--toolbar-height', 40);
-    if (Math.abs(h - def) < 2) {
-      if (!root.style.getPropertyValue('--toolbar-height')) return; // already at default — no churn
-      root.style.removeProperty('--toolbar-height'); localStorage.removeItem('toolbarHeight');
+    s = Number(s);
+    if (!Number.isFinite(s)) return;
+    if (s > 4) s = s / 40; // a legacy fixed-height value (px) → scale
+    s = Math.max(0.7, Math.min(1.25, s)); // clamp to the drag range
+    // default is a constant 1 (no theme/CSS override of --toolbar-scale), so a
+    // plain constant is the correct reset reference — no cssVarDefault needed
+    if (Math.abs(s - 1) < 0.03) {
+      if (!root.style.getPropertyValue('--toolbar-scale')) return; // already default — no churn
+      root.style.removeProperty('--toolbar-scale'); localStorage.removeItem('toolbarScale');
     } else {
-      if (root.style.getPropertyValue('--toolbar-height') === h + 'px') return; // unchanged — skip the reflow + storage write
-      root.style.setProperty('--toolbar-height', h + 'px'); localStorage.setItem('toolbarHeight', h);
+      const v = s.toFixed(3);
+      if (root.style.getPropertyValue('--toolbar-scale') === v) return; // unchanged — skip reflow + write
+      root.style.setProperty('--toolbar-scale', v); localStorage.setItem('toolbarScale', v);
     }
     this.app.wm._reflowWindows?.();
   }
