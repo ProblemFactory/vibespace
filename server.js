@@ -708,7 +708,9 @@ function maybePoolAutoSwitch(session) {
     const currentId = accounts.poolCurrent(poolId);
     if (!currentId) return;
     const readCache = (id) => { try { return JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, id + '.json'), 'utf-8')); } catch { return null; } };
-    const d = decidePoolSwitch({ currentId, members: accounts.poolMembers(poolId), readCache, nowSec: now / 1000 });
+    // proactive EDF tier only for HOT pools (re-point is free — no restart);
+    // cold pools switch on exhaustion only (each switch restarts conversations)
+    const d = decidePoolSwitch({ currentId, members: accounts.poolMembers(poolId), readCache, nowSec: now / 1000, proactive: !!a.hot });
     if (!d) return;
     _poolAutoLast.set(poolId, now);
     accounts.setPoolTarget(poolId, d.to);
@@ -721,9 +723,11 @@ function maybePoolAutoSwitch(session) {
       try { recordUsageAttribution({ claudeSessionId: s.claudeSessionId || s.backendSessionId, accountId: poolId }); } catch {}
       affected.push({ serverId: sid, backend: s.backend || 'claude', backendSessionId: s.claudeSessionId || s.backendSessionId || null, cwd: s.cwd || null, name: s.name || null, host: s.host || null });
     }
-    const fromPct = Math.round(d.fromRemaining);
-    serverNotice(`pool-auto-${poolId}-${now}`, `Pool "${a.name}" auto-switched to ${d.toName} (previous account down to ${fromPct}% remaining)${a.hot ? '' : ' — restarting its conversations'}`);
-    console.log(`[pool] auto-switch ${poolId}: ${currentId} → ${d.to} (from ${fromPct}% left, hot=${!!a.hot}, affected=${affected.length})`);
+    const fromPct = d.fromRemaining != null ? Math.round(d.fromRemaining) : null;
+    serverNotice(`pool-auto-${poolId}-${now}`, d.reason === 'edf'
+      ? `Pool "${a.name}" switched to ${d.toName} — draining the member whose weekly quota resets soonest (use-it-or-lose-it)`
+      : `Pool "${a.name}" auto-switched to ${d.toName} (previous account down to ${fromPct}% remaining)${a.hot ? '' : ' — restarting its conversations'}`);
+    console.log(`[pool] auto-switch ${poolId}: ${currentId} → ${d.to} (${d.reason}, from ${fromPct}% left, hot=${!!a.hot}, affected=${affected.length})`);
     if (!a.hot && affected.length) {
       // ONE client only — every client acting would race duplicate restarts.
       const payload = JSON.stringify({ type: 'pool-auto-switched', poolId, affected });
