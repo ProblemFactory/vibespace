@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.258.0
+
+- **Billing-switcher menu redesign** (real report: "太丑/空白很多/布局不稳定"): the per-account usage preview was one flat inline string (`name — 5h 11% · 7d …`) in an auto-width menu, so rows wrapped at arbitrary points and every row had a different shape. Rows are now a **stable two-column layout** — account name left (ellipsized, dim suffix like `· API`), a **nowrap usage cluster right-aligned into one column** (dim `5h/7d/Fa` unit labels + colored tabular-numeral percentages + dim data age) — and the menu pins to a stable width the moment any row carries usage (`:has()`, so the open-time clamp measures the final box). Screenshot-verified against every row shape (long name, scoped bucket + age, missing usage, API row, ✓ current): scripts/dbg-billing-menu-shot.mjs.
+
 ## 2.257.1
 
 - **Add-subscription click did nothing** (inc-mslfbdjv, real report — introduced by the 2.255.0 inc-msl890ua fix): the roster-refresh call added to `_addSubscription` referenced the Agents-dialog's scope-local `refresh` from a standalone method — the ReferenceError killed the flow **before** the login terminal opened, so the click was a silent no-op (the account record was still created server-side, which is why a pending row appeared after reopening). The method now has its own refresh (via the `_agentsRefreshHook`), and the agents-overview smoke drives the REAL flow (method → name dialog → confirm → asserts a terminal window opens + zero JS errors; negative-control-verified: the un-fixed code fails both asserts exactly like the incident).
