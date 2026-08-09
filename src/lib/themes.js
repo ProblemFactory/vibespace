@@ -142,7 +142,7 @@ class ThemeManager {
   // default on load and on every theme switch (2.252.1, user report). A var
   // that isn't a theme color has no business in a theme-cleanup sweep.
   _clearInlineOverrides() {
-    const LAYOUT_VARS = new Set(['--toolbar-height']);
+    const LAYOUT_VARS = new Set(['--toolbar-height', '--toolbar-scale']);
     const root = document.documentElement;
     const toRemove = [];
     for (let i = 0; i < root.style.length; i++) {

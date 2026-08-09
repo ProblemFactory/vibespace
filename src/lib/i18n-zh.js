@@ -2331,4 +2331,6 @@ export default {
   "Long-lived token (expired)…": "长期 token（已过期）…",
   "Removed": "已移除",
   "A long-lived token (Anthropic’s official `claude setup-token`, the same one the Claude Code GitHub Action uses) lets this subscription run on remote machines and paired devices WITHOUT shipping its interactive login: it lasts 1 year and never rotates, so nothing can get out of sync. This is the intended way to run your own subscription on your own remote/CI machines — safer than shipping the login. It still bills YOUR subscription and is tied to it, so treat it like the account itself; Anthropic recommends an API key instead when a credential is shared broadly across many contexts. Limits: quota refresh (⟳) does not work through it, and when it expires sessions fail until you re-mint.": "长期 token（Anthropic 官方的 `claude setup-token`，与 Claude Code GitHub Action 用的是同一个）让这个订阅无需搬运交互式登录即可在远程机器和配对设备上运行：有效期 1 年、永不轮换，不会失步。这是让你自己的订阅跑在自己远程/CI 机器上的正规方式——比搬运登录更安全。它仍然计费到你本人的订阅并与之绑定，请把它当账号本身对待；当凭据要跨多个上下文广泛共享时，Anthropic 建议改用 API key。限制：配额刷新(⟳)无法通过它工作；过期后会话会报错，需重新生成。",
+  "Drag to resize the top bar · double-click to reset": "拖动调整顶栏大小 · 双击重置",
+  "Drag to resize · double-click to reset": "拖动调整大小 · 双击重置",
 };

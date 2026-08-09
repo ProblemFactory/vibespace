@@ -67,15 +67,18 @@ ck('preview moved into TOOLBAR still shows Rename/Delete (not Customize UI)', me
 // toolbar height resize wiring
 ck('toolbar resize handle exists', await e(`!!document.getElementById('toolbar-resize-handle')`));
 const thOk = await e(`(()=>{
+  // 2.254.0: the resize is a content SCALE (zoom), not a fixed height — the
+  // RENDERED height must follow --toolbar-scale and reset cleanly
   const root=document.documentElement, tb=document.getElementById('toolbar');
-  const before=tb.offsetHeight;
-  root.style.setProperty('--toolbar-height','72px');
-  const after=tb.offsetHeight;
-  root.style.removeProperty('--toolbar-height');
-  const reset=tb.offsetHeight;
-  return (after===72 && reset===before) ? 'ok' : 'bad:'+JSON.stringify({before,after,reset});
+  const rh=()=>Math.round(tb.getBoundingClientRect().height);
+  const before=rh();
+  root.style.setProperty('--toolbar-scale','1.2');
+  const after=rh();
+  root.style.removeProperty('--toolbar-scale');
+  const reset=rh();
+  return (after>before+3 && reset===before) ? 'ok' : 'bad:'+JSON.stringify({before,after,reset});
 })()`);
-ck('--toolbar-height drives the real toolbar height (and resets)', thOk==='ok', thOk);
+ck('--toolbar-scale drives the rendered toolbar size (and resets)', thOk==='ok', thOk);
 ck('no JS exceptions during boot+interactions', errs.length===0);
 if(errs.length) console.log('   errs:', errs.slice(0,3));
 console.log(fail?`${fail} FAILED (${pass} passed)`:`ALL PASS (${pass})`);

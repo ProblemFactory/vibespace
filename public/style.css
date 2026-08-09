@@ -775,9 +775,14 @@ html, body {
 
 /* ── Toolbar ── */
 #toolbar {
-  height: var(--toolbar-height); background: var(--bg-toolbar);
+  /* Height AUTO-FITS content (no dead band — the 2.254.0 rootfix of walter's
+     "拉高留大空档"): the toolbar is exactly as tall as its content rows need.
+     The resize handle drives --toolbar-scale (a zoom), so dragging changes
+     content COMPACTNESS (smaller = more desktop), never injects empty space. */
+  zoom: var(--toolbar-scale, 1);
+  background: var(--bg-toolbar);
   border-bottom: 1px solid var(--border); display: flex; align-items: center;
-  padding: 0 8px; gap: 8px; flex-shrink: 0;
+  padding: 6px 8px; gap: 8px; flex-shrink: 0;
 }
 .toolbar-left { display: flex; align-items: center; gap: 6px; min-width: 160px; }
 .toolbar-center { flex: 1; display: flex; justify-content: center; }
@@ -2118,7 +2123,7 @@ body.taskbar-top #taskbar .cz-item:hover::after { top: calc(100% + 8px); bottom:
 }
 .cz-pill-taskbar { top: -48px; left: 50%; transform: translateX(-50%); }
 /* top-docked: the toolbar sits right below the taskbar — drop the pill past it */
-body.taskbar-top .cz-pill-taskbar { top: auto; bottom: calc(-48px - var(--toolbar-height, 40px)); }
+body.taskbar-top .cz-pill-taskbar { top: auto; bottom: -92px; }
 .cz-pill-sidebar { bottom: 14px; left: 50%; transform: translateX(-50%); }
 .cz-seg-wrap { display: inline-flex; align-items: center; gap: 6px; }
 .cz-seg-label { font-size: 11px; color: var(--text-secondary); font-weight: 600; }
@@ -2208,7 +2213,7 @@ body.taskbar-top .cz-panel { bottom: 32px; }
   --taskbar-sub-size: 8px; --usage-pie-size: 16px; --taskbar-item-pad: 2px;
   --desktop-preview-h: 20px; --desktop-preview-w: 30px; --desktop-label-size: 8px;
 }
-#toolbar-row2 { background: var(--bg-toolbar); border-bottom: 1px solid var(--border); }
+#toolbar-row2 { background: var(--bg-toolbar); border-bottom: 1px solid var(--border); zoom: var(--toolbar-scale, 1); }
 #taskbar-row2 { background: var(--bg-taskbar); border-top: 1px solid var(--border); }
 body.taskbar-top #taskbar-row2 { order: -1; border-top: none; border-bottom: 1px solid var(--border); }
 #toolbar-row2:empty, #taskbar-row2:empty { display: none; }

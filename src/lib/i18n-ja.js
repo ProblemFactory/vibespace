@@ -2331,4 +2331,6 @@ export default {
   "Long-lived token (expired)…": "長期トークン（期限切れ）…",
   "Removed": "削除しました",
   "A long-lived token (Anthropic’s official `claude setup-token`, the same one the Claude Code GitHub Action uses) lets this subscription run on remote machines and paired devices WITHOUT shipping its interactive login: it lasts 1 year and never rotates, so nothing can get out of sync. This is the intended way to run your own subscription on your own remote/CI machines — safer than shipping the login. It still bills YOUR subscription and is tied to it, so treat it like the account itself; Anthropic recommends an API key instead when a credential is shared broadly across many contexts. Limits: quota refresh (⟳) does not work through it, and when it expires sessions fail until you re-mint.": "長期トークン（Anthropic 公式の `claude setup-token`。Claude Code GitHub Action と同じもの）を使うと、対話ログインを転送せずにこのサブスクリプションをリモートマシンやペアリング済みデバイスで実行できます。有効期間は 1 年、ローテーションなしなので同期がずれません。自分のサブスクリプションを自分のリモート/CI マシンで動かす正規の方法で、ログイン転送より安全です。ただし請求はあなたのサブスクリプションに紐づくため、アカウント本体と同様に扱ってください。認証情報を多数のコンテキストで広く共有する場合、Anthropic は API キーの使用を推奨します。制限：クォータ更新(⟳)は利用不可、期限切れ後は再発行するまでセッションがエラーになります。",
+  "Drag to resize the top bar · double-click to reset": "ドラッグでトップバーのサイズを調整 · ダブルクリックでリセット",
+  "Drag to resize · double-click to reset": "ドラッグでサイズ調整 · ダブルクリックでリセット",
 };

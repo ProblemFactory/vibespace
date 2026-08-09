@@ -680,52 +680,60 @@ export class DesktopManager {
 
   // ── Toolbar resize (2.250.1) ──
   // The layout is a flex COLUMN (toolbar · workspace flex:1 · taskbar), so the
-  // only thing that has to change is the toolbar's height — the workspace
   // absorbs the delta automatically and windows re-derive their pixels from
-  // proportional gridBounds via _reflowWindows(). Rather than pin an inline
-  // height on #toolbar, we drive the `--toolbar-height` CSS VAR: #toolbar's
-  // height already reads it, and so does everything derived from it (e.g. the
-  // customize-mode pill offset), so every dependent follows for free — that's
-  // the whole "dynamic layout calc".
+  // proportional gridBounds via _reflowWindows(). 2.254.0: the resize is a
+  // CONTENT SCALE (--toolbar-scale zoom on #toolbar + #toolbar-row2), not a
+  // fixed height — the toolbar auto-fits its content so there's never a dead
+  // empty band (walter's report), and dragging changes compactness.
   _setupToolbarResize() {
     const handle = document.getElementById('toolbar-resize-handle');
     const toolbar = document.getElementById('toolbar');
     if (!handle || !toolbar) return;
-    const MIN_H = 28, MAX_H = 96;
+    // 2.254.0 rework (walter's dead-band bug): the toolbar height AUTO-FITS its
+    // content rows now; the drag drives --toolbar-scale (a zoom on #toolbar +
+    // #toolbar-row2), so it changes content COMPACTNESS — smaller = more
+    // desktop, larger = bigger chrome — never a dead empty band. ~230px of drag
+    // spans the whole range so it feels like a size adjustment, not a nudge.
+    const MIN_S = 0.7, MAX_S = 1.25, PXPER = 230; // upper bound modest: large scales overflow the center zone in narrow windows — the feature's value is COMPACT (more desktop)
     const root = document.documentElement;
-    // NEVER read the computed var here — onMove drives that very var, so at
-    // mouseup it equals the dragged height and the reset check always fired
-    // (the snap-back bug). cssVarDefault lifts the override to measure.
-    const cssDefault = () => cssVarDefault('--toolbar-height', 40);
-    const setH = (h) => root.style.setProperty('--toolbar-height', h + 'px');
+    const clampS = (s) => Math.max(MIN_S, Math.min(MAX_S, s));
+    const curScale = () => parseFloat(getComputedStyle(root).getPropertyValue('--toolbar-scale')) || 1;
+    const setS = (s) => root.style.setProperty('--toolbar-scale', clampS(s).toFixed(3));
 
-    const saved = parseInt(localStorage.getItem('toolbarHeight'));
-    if (saved && saved >= MIN_H && saved <= MAX_H) setH(saved);
-
-    handle.title = 'Drag to resize · double-click to reset';
-    handle.addEventListener('dblclick', () => {
-      root.style.removeProperty('--toolbar-height'); // back to the CSS default
+    // MIGRATE the old fixed-height override (pre-2.254.0) to a scale so a user
+    // who had resized doesn't jump back to default: scale ≈ oldHeight / 40.
+    const oldH = parseInt(localStorage.getItem('toolbarHeight'));
+    if (oldH && !localStorage.getItem('toolbarScale')) {
+      localStorage.setItem('toolbarScale', clampS(oldH / 40).toFixed(3));
       localStorage.removeItem('toolbarHeight');
+    }
+    const saved = parseFloat(localStorage.getItem('toolbarScale'));
+    if (saved && saved >= MIN_S && saved <= MAX_S && Math.abs(saved - 1) > 0.02) setS(saved);
+
+    handle.title = t('Drag to resize the top bar · double-click to reset');
+    handle.addEventListener('dblclick', () => {
+      root.style.removeProperty('--toolbar-scale'); // back to the CSS default (1)
+      localStorage.removeItem('toolbarScale');
       this.app.wm._reflowWindows?.();
       this.app.layoutManager.scheduleAutoSave();
     });
     handle.addEventListener('mousedown', (e) => {
       e.preventDefault();
       const startY = e.clientY;
-      const startH = toolbar.offsetHeight;
+      const startS = curScale();
       handle.classList.add('active');
       document.body.style.cursor = 'ns-resize';
       document.body.style.userSelect = 'none';
       this.app.wm._suppressReflow = true; // ResizeObserver storm during drag
-      const onMove = (ev) => setH(Math.max(MIN_H, Math.min(MAX_H, startH + (ev.clientY - startY))));
+      const onMove = (ev) => setS(startS + (ev.clientY - startY) / PXPER); // drag DOWN = bigger
       const onUp = () => {
         handle.classList.remove('active');
         document.body.style.cursor = ''; document.body.style.userSelect = '';
         document.removeEventListener('mousemove', onMove);
         document.removeEventListener('mouseup', onUp);
-        const h = toolbar.offsetHeight;
-        if (Math.abs(h - cssDefault()) < 2) { root.style.removeProperty('--toolbar-height'); localStorage.removeItem('toolbarHeight'); }
-        else localStorage.setItem('toolbarHeight', h);
+        const s = curScale();
+        if (Math.abs(s - 1) < 0.03) { root.style.removeProperty('--toolbar-scale'); localStorage.removeItem('toolbarScale'); }
+        else localStorage.setItem('toolbarScale', s.toFixed(3));
         this.app.wm._suppressReflow = false;
         this.app.wm._reflowWindows?.();
         this.app.layoutManager.scheduleAutoSave();
@@ -762,7 +770,7 @@ export class DesktopManager {
       this.app.wm._reflowWindows?.();
       this.app.layoutManager.scheduleAutoSave();
     });
-    handle.title = 'Drag to resize · double-click to reset';
+    handle.title = t('Drag to resize · double-click to reset');
 
     handle.addEventListener('mousedown', (e) => {
       e.preventDefault();
