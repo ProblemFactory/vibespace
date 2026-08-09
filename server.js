@@ -705,6 +705,35 @@ const _poolAutoLast = new Map(); // poolId → ts (min 60s between switches)
 // pattern that got a real account banned. The passive chat-mode signal is the
 // LIMIT BANNER instead (markLimitBanner below): zero calls.
 const { ClaudeCodeAdapter } = require('./src/adapters/claude-code.js');
+// ── usage ANCHOR recorder (dead-reckoning data foundation, 2.261.0) ─────────
+// Sweeps local usage-cache snapshots for NEW ground-truth readings (any
+// source: statusline / ⟳ / get_usage / limit banner) and appends them, with
+// the ledger cost consumed since the previous anchor, to
+// data/usage-anchors/anchors-<identity>.ndjson. Identity key = orgUuid >
+// email > account id, so a sub's history SURVIVES remove + re-add (user
+// requirement — a re-add mints a fresh sub-<hex> id). Zero API calls.
+const { UsageAnchors, identityKeyFor, costBetween } = require('./src/usage-anchors.js');
+const usageAnchors = new UsageAnchors({ dataDir: path.join(__dirname, 'data') });
+function sweepUsageAnchors() {
+  let files = [];
+  try { files = fs.readdirSync(USAGE_CACHE_DIR).filter((f) => f.endsWith('.json') && !f.startsWith('__models__') && !f.startsWith('host-')); } catch { return; }
+  for (const fn of files) {
+    try {
+      const accountId = fn === '__global__.json' ? null : fn.slice(0, -5);
+      const cache = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, fn), 'utf-8'));
+      if (!cache?.fetchedAt) continue;
+      const acctRec = accountId ? (accounts.list().accounts || []).find((x) => x.id === accountId) : null;
+      if (accountId && acctRec && acctRec.type === 'pooled') continue; // pools have no quota of their own
+      const identityKey = identityKeyFor({ accountId, cache, email: acctRec?.email });
+      const prev = usageAnchors.lastAnchor(identityKey);
+      const costSince = prev ? costBetween(usageHistory, accountId, prev.fetchedAt, cache.fetchedAt) : null;
+      usageAnchors.maybeRecord({ identityKey, accountId, cache, costSince });
+    } catch { }
+  }
+}
+setInterval(() => { try { sweepUsageAnchors(); } catch {} }, 60000);
+setTimeout(() => { try { sweepUsageAnchors(); } catch {} }, 20000);
+
 const _vsuPending = new Map(); // request_id → {resolve, timer}
 function resolveUsageKey(session) {
   let acct = session._accountId || null;
