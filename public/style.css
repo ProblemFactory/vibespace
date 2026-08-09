@@ -3283,6 +3283,21 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 /* Finished agent card status line (2.233.1) */
 .chat-agent-status-done { opacity: 0.7; font-style: normal; }
 
+/* Billing-switcher menu rows (2.258.0 layout-stability redesign): name left
+   (ellipsized, dim suffix), usage cluster right (nowrap, tabular numbers).
+   :has() pins the menu width the moment any row carries usage, so the
+   synchronous clamp in showContextMenu measures the FINAL box. */
+.context-menu:has(.bsw-usage) { min-width: 340px; max-width: 480px; }
+.context-menu-item .bsw-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.context-menu-item .bsw-name .bsw-sub { color: var(--text-dim); font-size: 10px; }
+.context-menu-item .bsw-usage {
+  flex-shrink: 0; margin-left: auto; display: inline-flex; gap: 8px; align-items: baseline;
+  white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+.bsw-usage .bsw-seg { display: inline-flex; gap: 3px; align-items: baseline; }
+.bsw-usage .bsw-k, .bsw-usage .bsw-age { font-size: 9px; color: var(--text-dim); }
+.bsw-usage .bsw-pct { font-size: 11px; font-weight: 600; }
+
 /* Pool members dialog. `.dialog-body label.pool-mem-row`: must out-rank
    `.dialog-body label` (0,1,1) which forces display:block — same class as the
    label.cfg-row precedent. */

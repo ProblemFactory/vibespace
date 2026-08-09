@@ -850,7 +850,13 @@ export function installSessionLifecycle(App, ctx = {}) {
     // the roster donuts.
     const pctOf = (x) => (x == null ? null : Math.min(100, Math.round(x.usedPercent ?? ((x.utilization || 0) * 100))));
     const wlColor = (p) => (p > 95 ? 'var(--red,#e55)' : p > 80 ? 'var(--yellow,#e5c07b)' : 'var(--green,#3fb950)');
-    const pctHtml = (p) => (p == null ? '?' : `<span style="color:${wlColor(p)}">${p}%</span>`);
+    const pctHtml = (p) => (p == null ? '?' : `<span class="bsw-pct" style="color:${wlColor(p)}">${p}%</span>`);
+    // STABLE ROW LAYOUT (2.258.0, real report '布局不稳定/空白很多'): the old
+    // flat `name — 5h 11% · 7d …` string wrapped at arbitrary points in an
+    // auto-width menu. Rows are now two flex parts — `.bsw-name` (flex:1,
+    // ellipsized, suffix dim) + `.bsw-usage` (nowrap fixed cluster, tabular
+    // numbers) — and `.context-menu:has(.bsw-usage)` pins the menu width, so
+    // every row renders on ONE line with the usage column right-aligned.
     const usageHint = (u) => {
       if (!u) return '';
       const f = pctOf(u.fiveHour), s7 = pctOf(u.sevenDay);
@@ -859,10 +865,12 @@ export function installSessionLifecycle(App, ctx = {}) {
       const scoped = (u.scopedWeekly || []).map((sc) => [String(sc.name || '?').slice(0, 2), pctOf(sc)]).filter(([, p]) => p != null);
       if (f == null && s7 == null && !scoped.length) return '';
       const age = u.fetchedAt ? Math.round((Date.now() - u.fetchedAt) / 60000) : null;
-      const ageTxt = age != null && age > 5 ? ' · ' + escHtml(age < 100 ? t('{n}m', { n: age }) : t('{n}h', { n: Math.round(age / 60) })) : '';
-      const parts = [`5h ${pctHtml(f)}`, `7d ${pctHtml(s7)}`, ...scoped.map(([l, p]) => `${escHtml(l)} ${pctHtml(p)}`)];
-      return ` — ${parts.join(' · ')}${ageTxt}`;
+      const ageTxt = age != null && age > 5 ? escHtml(age < 100 ? t('{n}m', { n: age }) : t('{n}h', { n: Math.round(age / 60) })) : '';
+      const seg = (k, p) => `<span class="bsw-seg"><span class="bsw-k">${escHtml(k)}</span>${pctHtml(p)}</span>`;
+      return `<span class="bsw-usage">${seg('5h', f)}${seg('7d', s7)}${scoped.map(([l, p]) => seg(l, p)).join('')}${ageTxt ? `<span class="bsw-age">${ageTxt}</span>` : ''}</span>`;
     };
+    const rowHtml = (nameText, subText, usage) =>
+      `<span class="bsw-name">${escHtml(nameText)}${subText ? `<span class="bsw-sub">${escHtml(subText)}</span>` : ''}</span>` + (usage || '');
     const usageFor = (a) => {
       const v = vOf(a);
       if (rHostId && v?.usable && v.how === 'host-login') return this._hostOwnUsage?.[rHostId];
@@ -877,10 +885,10 @@ export function installSessionLifecycle(App, ctx = {}) {
     // looks like it should work but "does nothing".
     const helperActive = live?.auth?.source === 'api-other' && live?.auth?.detail === 'apiKeyHelper';
     items.push({
-      // labelHtml contract: every text part escHtml'd; only the usageHint
-      // spans carry markup (see utils.showContextMenu).
-      labelHtml: escHtml((currentId === null ? '✓ ' : '') + cliLabel + (helperActive ? ' · apiKeyHelper (API)' : ''))
-        + usageHint(rHostId ? this._hostOwnUsage?.[rHostId] : this._rateLimit),
+      // labelHtml contract: every text part escHtml'd inside rowHtml; only the
+      // usage spans carry markup (see utils.showContextMenu).
+      labelHtml: rowHtml((currentId === null ? '✓ ' : '') + cliLabel, helperActive ? ' · apiKeyHelper (API)' : '',
+        usageHint(rHostId ? this._hostOwnUsage?.[rHostId] : this._rateLimit)),
       action: () => { if (currentId !== null) doSwitch('subscription', cliLabel); },
     });
     if (helperActive) {
@@ -903,7 +911,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       // instead of "CLI login @ host" (natural's sixth incident: a successful
       // linked switch READ as failed because the identity degraded to the
       // sentinel). The old client-side sentinel mapping predates the rescue.
-      items.push({ labelHtml: escHtml((cur ? '✓ ' : '') + a.name + suffix) + usageHint(usageFor(a)), action: () => { if (!cur) doSwitch(a.id, a.name); } });
+      items.push({ labelHtml: rowHtml((cur ? '✓ ' : '') + a.name, suffix, usageHint(usageFor(a))), action: () => { if (!cur) doSwitch(a.id, a.name); } });
     }
     let menuEl;
     if (anchor && typeof anchor.getBoundingClientRect === 'function') {
