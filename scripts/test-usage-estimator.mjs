@@ -264,5 +264,27 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   ck('single-id file: unmarked pairs still learn', est.extractPairs(single).sevenDay.length === 1);
 }
 
+// ── calibration-incident round: cap-censoring + learn-time live cost ─────────
+{
+  // AT-CAP pair (the 01:46 limit-banner poison: 9%→100% over an under-counted
+  // $50 taught full≈$139 vs true $500) — censored, never learns
+  const capped = [
+    mkAnchor(T0, { u5: 0.09 }),
+    mkAnchor(T0 + HR, { u5: 1.0, prevFetchedAt: T0, costSince: cs(50) }),
+  ];
+  capped[0].buckets.fiveHour.resetsAt = capped[1].buckets.fiveHour.resetsAt = Math.floor(T0 / 1000) + 7200;
+  ck('at-cap reading (u=1, banner mark) censors the pair', !est.extractPairs(capped).fiveHour);
+
+  // learn-time LIVE cost recomputation overrides a stale frozen costSince
+  const stale = [
+    mkAnchor(T0, { u7: 0.40 }),
+    mkAnchor(T0 + HR, { u7: 0.45, prevFetchedAt: T0, costSince: cs(20) }), // sweep saw $20; ledger later backfilled to $86.5
+  ];
+  const live = est.extractPairs(stale, { costFn: () => cs(86.5) });
+  ck('live ledger cost overrides the frozen snapshot', live.sevenDay[0].cost === 86.5);
+  const zero = est.extractPairs(stale, { costFn: () => cs(0) });
+  ck('zero live total (retention gap) falls back to the frozen snapshot', zero.sevenDay[0].cost === 20);
+}
+
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

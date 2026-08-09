@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.265.0
+
+The calibration log's first real catch (user report: "最近几次预测都严重高估" — est now 3-4× hot on the 5h bucket; `calib` records pinned it to a $139-implied-full learned rate vs the true ≈$500). Root cause chain, all three links fixed:
+
+- **The usage ledger NEVER mined workflow/subagent transcripts** — the scan read `<proj>/*.jsonl` top-level only, but workflow agents' API usage exists ONLY in `<sid>/subagents/workflows/wf_*/agent-*.jsonl` (~**$205 for one 15-agent review run**, measured). The scan now walks `subagents/` (agent files + workflow dirs; journal files excluded), attributing events to the PARENT session id so account/pool by-time attribution follows the parent; requestId dedup absorbs the parent-sidechain overlap. This also fixes the **Usage window's long-standing under-reporting** of every workflow/ultracode run — historical files backfill on the next scan (per-file cursors start at 0 for newly discovered files).
+- **Rate learning now recomputes pair costs from the LIVE ledger** at learn time (10-min rate-cache TTL) instead of trusting the frozen `costSince` snapshot — the sweep records cost against a scan that lags fast burns, so frozen pairs systematically under-counted cost and taught hot rates. The ledger is append-only and eventually complete: late-landing events (like the newly-mined workflow files) retroactively heal every stale pair. A zero live total with a non-zero snapshot (retention gap) falls back to the snapshot.
+- **At-cap readings are censored from learning**: a bucket clipped at 100% (the limit-banner mark writes exactly 1; a genuinely exhausted ⟳ reads 100 too) says nothing about how much spend got it there — the incident's 9%→100%-over-$50 pair was the direct poison. Gate/display semantics unchanged.
+- Note: the measured Max-20x priors (5h $500 / 7d $1730 / Fable $875) came from the same under-counting ledger and may read slightly LOW once workflow history backfills — the prior is a weak pseudo-observation, so learned rates self-correct; a re-derivation with the complete ledger is worth a look after a few days.
+- Tests: scripts/test-usage-scan-subagents.mjs (7 — workflow/subagent mining, parent attribution, journal exclusion, dedup, incremental cursor) + test-usage-estimator.mjs (54, incl. cap-censoring and live-cost override/fallback).
+
 ## 2.264.0
 
 - **"Report a problem" now ships chat scroll traces automatically** (user request, straight out of B-21bc: a viewport-jump report arrived with zero scroll evidence — and the documented Ctrl+Shift+J dump turned out to be a dead stub since 2.111.8). The chat scroll tracer is back as an **always-on in-memory ring** per chat window: the pre-existing paging/trim/jump/fold-restore breadcrumbs re-arm, plus a coarse scroll sampler (moves >400px with pin state and time-since-last-user-wheel — the discriminator between a user scroll and a programmatic yank) and an explicit unpin breadcrumb. Positions and op tags only, never message content. The incident snapshot carries each open chat window's ring tail (`chatTraces`), so the next B-21bc recurrence is self-evidencing — nothing for the user to remember.

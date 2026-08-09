@@ -60,7 +60,15 @@ function costForKey(key, costSince) {
 // beyond quantization jitter (>0.02) without a reset change is an anomaly
 // (skip); small negatives clamp to 0 with the cost still counted (the spend
 // really happened — dropping it would bias rates high).
-function extractPairs(lines) {
+// opts.costFn(fromMs, toMs) → {total, byFamily}: when provided, each pair's
+// cost is RECOMPUTED from the live ledger instead of the frozen costSince —
+// the sweep records costSince against a ledger scan that LAGS fast burns
+// (worst case: a $205 workflow run whose transcripts weren't even scanned),
+// so frozen pairs systematically under-count cost and teach HOT rates
+// (calib-caught: a 3-4× overestimating 5h rate). The ledger is append-only
+// and eventually complete; recomputing at learn time self-heals every
+// stale-cost pair retroactively.
+function extractPairs(lines, opts = {}) {
   const byFetched = new Map();
   for (const l of lines || []) if (l && l.fetchedAt) byFetched.set(l.fetchedAt, l);
   // v1-era interleaved records (pre-2.263.0 per-cache-file sweep): an identity
@@ -79,10 +87,16 @@ function extractPairs(lines) {
     const base = byFetched.get(l.prevFetchedAt);
     if (!base || !base.buckets || !l.buckets) continue;
     const spanSec = (l.fetchedAt - base.fetchedAt) / 1000;
+    let liveCost = null; // lazily recomputed once per pair when costFn given
     const pairBucket = (key, b0, b1) => {
       if (!b0 || !b1) return;
       const u0 = normU(b0.u), u1 = normU(b1.u);
       if (u0 == null || u1 == null) return;
+      // AT-CAP readings are CENSORED data: a bucket clipped at 100% (the
+      // limit-banner mark writes exactly 1, and a real exhausted ⟳ reads
+      // 100 too) says nothing about how much spend got it there — the
+      // incident's 9%→100%-over-$50 pair taught full≈$139 vs true $500.
+      if (u0 >= 0.995 || u1 >= 0.995) return;
       const r0 = Number(b0.resetsAt) || 0, r1 = Number(b1.resetsAt) || 0;
       if (r0 && r1 && Math.abs(r0 - r1) > 120) return; // window rolled inside the pair
       // resetsAt can be 0/absent (partial cache writes) — the crossing guard
@@ -96,7 +110,11 @@ function extractPairs(lines) {
       let du = u1 - u0;
       if (du < -0.02) return; // anomalous decrease without a reset change
       if (du < 0) du = 0;
-      const cost = costForKey(key, l.costSince);
+      if (opts.costFn && liveCost === null) { try { liveCost = opts.costFn(base.fetchedAt, l.fetchedAt) || null; } catch { liveCost = null; } }
+      // A ZERO live total with a non-zero recorded snapshot means the ledger
+      // no longer covers this window (retention/pruning) — the frozen
+      // snapshot is then the better source, not zero.
+      const cost = costForKey(key, (liveCost && liveCost.total > 0) ? liveCost : l.costSince);
       if (cost == null) return;
       add(key, du, cost);
     };
@@ -114,8 +132,8 @@ function extractPairs(lines) {
 // pseudo-pair {du: PRIOR_WEIGHT_DU, cost: PRIOR_WEIGHT_DU × priorFullUsd}.
 // Without a prior, a bucket needs real signal (≥$1 cost AND ≥0.5% movement)
 // before we dare emit a rate at all.
-function learnRates(lines, { priors = null } = {}) {
-  const pairs = extractPairs(lines);
+function learnRates(lines, { priors = null, costFn = null } = {}) {
+  const pairs = extractPairs(lines, { costFn });
   const keys = new Set([...Object.keys(pairs), ...Object.keys(priors || {})]);
   const out = {};
   for (const key of keys) {
@@ -293,10 +311,16 @@ class UsageEstimator {
     return [...ids];
   }
   ratesFor(identityKey) {
+    // TTL 10min (not only invalidate-on-anchor): the LEDGER keeps backfilling
+    // between anchors (late-scanned workflow transcripts), and learn-time
+    // live-cost recomputation should see it without waiting for a new anchor.
     const c = this._rateCache.get(identityKey);
-    if (c) return c.rates;
+    if (c && Date.now() - c.at < 600000) return c.rates;
     const lines = this.lines(identityKey);
-    const rates = learnRates(lines, { priors: this.priorsFor(identityKey) });
+    // learn-time LIVE cost recomputation (see extractPairs) — the frozen
+    // costSince snapshots under-count fast burns whose ledger events land
+    // after the sweep; the live ledger heals them retroactively.
+    const rates = learnRates(lines, { priors: this.priorsFor(identityKey), costFn: this._costFn(this.accountIdsFor(identityKey)) });
     this._rateCache.set(identityKey, { rates, at: Date.now() });
     this._persistRates(identityKey, rates, lines.length);
     return rates;
