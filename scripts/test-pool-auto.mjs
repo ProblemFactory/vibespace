@@ -71,5 +71,14 @@ ck('proactive OFF (cold pool): same layout stays put', run({ a: acct(0.3, 6 * D)
 ck('proactive + exhausted current still switches (exhaustion tier wins)',
   run({ a: acct(0.97, 6 * D), b: acct(0.4, 12 * H) }, { proactive: true })?.reason === 'exhausted');
 
+// ── est-driven early exhaustion (B-fcff v2): hot pools pass exhaustPct 10 ────
+ck('exhaustPct 10: current at 8% switches (est-based 提前切)',
+  run({ a: acct(0.92, 6 * D), b: acct(0.4, 12 * H) }, { exhaustPct: 10 })?.reason === 'exhausted');
+ck('default threshold: 8% left does NOT switch', run({ a: acct(0.92, 6 * D), b: acct(0.4, 12 * H) }) === null);
+ck('exhaustPct 10: candidate GATE stays at 5 (9%-left member is a legal target)',
+  run({ a: acct(0.95, 12 * H), b: acct(0.91, 12 * H - 30), c: acct(0.5, 6 * D) }, { exhaustPct: 10 })?.to === 'b');
+ck('anti-flap margin: a 2%-better target inside the exhaustion band does NOT flip (no ping-pong)',
+  run({ a: acct(0.97, 12 * H), b: acct(0.95, 12 * H - 30) }) === null);
+
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

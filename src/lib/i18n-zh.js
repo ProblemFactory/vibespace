@@ -2360,4 +2360,8 @@ export default {
   "no target": "无目标",
   "Add subscription via long-lived token…": "通过长期 token 添加订阅…",
   "Add via long-lived token": "通过长期 token 添加",
+  "est {pct}%": "预计 {pct}%",
+  "window reset since last reading": "上次读数后窗口已重置",
+  "Dead-reckoned estimate: last confirmed reading + your local usage since, at learned rates. ⟳ fetches a fresh reading to re-calibrate.": "航位推算估计：最后一次真实读数 + 之后的本地用量按学习速率折算（虚线部分）。点 ⟳ 获取新读数校准。",
+  "Pooled account — one billing identity auto-switching across your subscriptions": "池化账号 — 一个计费身份在你的订阅之间自动切换",
 };

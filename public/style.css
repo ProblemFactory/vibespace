@@ -1150,7 +1150,14 @@ html, body {
   width: var(--usage-pie-size, 14px); height: var(--usage-pie-size, 14px);
   border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 1px var(--border);
 }
-.usage-bar { width: 60px; height: 6px; background: var(--bg-input); border-radius: 999px; overflow: hidden; }
+.usage-bar { width: 60px; height: 6px; background: var(--bg-input); border-radius: 999px; overflow: hidden; position: relative; }
+/* Dead-reckoned estimate layer (B-fcff v2): light diagonal hatch from the
+   confirmed fill to the estimated value, dashed right edge = the estimate. */
+.usage-bar-est { position: absolute; top: 0; bottom: 0; border-right: 2px dashed var(--est-c, var(--text-secondary)); background: repeating-linear-gradient(45deg, var(--est-c, var(--text-secondary)) 0 2px, transparent 2px 5px); opacity: 0.55; }
+.usage-est-stat { border-bottom: 1px dashed var(--text-dim); cursor: help; }
+/* Estimating state on donuts: dashed outer ring (popup pies + Agents rosters) */
+.usage-donut-est, .acct-donut-est { outline: 1px dashed color-mix(in srgb, var(--text-secondary) 70%, transparent); outline-offset: 1.5px; }
+.acct-mini-est { border-bottom: 1px dashed currentColor; }
 .usage-popup {
   position: fixed; bottom: 50px; right: 10px; z-index: 99999;
   background: var(--bg-dialog); border: 1px solid var(--border-active); border-radius: var(--radius);

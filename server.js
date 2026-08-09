@@ -712,22 +712,85 @@ const { ClaudeCodeAdapter } = require('./src/adapters/claude-code.js');
 // data/usage-anchors/anchors-<identity>.ndjson. Identity key = orgUuid >
 // email > account id, so a sub's history SURVIVES remove + re-add (user
 // requirement — a re-add mints a fresh sub-<hex> id). Zero API calls.
-const { UsageAnchors, identityKeyFor, costBetween } = require('./src/usage-anchors.js');
+const { UsageAnchors, identityKeyFor, costBetweenMulti } = require('./src/usage-anchors.js');
+const { UsageEstimator, overlayCache: estOverlayCache, predictCalib } = require('./src/usage-estimator.js');
 const usageAnchors = new UsageAnchors({ dataDir: path.join(__dirname, 'data') });
-function sweepUsageAnchors() {
+// Which caches map to which identity (org-merge aware) — shared by the sweep
+// and the estimator's per-account resolution. Reads roster + cache files only.
+function usageIdentityGroups() {
+  const groups = new Map(); // identityKey → {accountIds:[], cache, accountId}
   let files = [];
-  try { files = fs.readdirSync(USAGE_CACHE_DIR).filter((f) => f.endsWith('.json') && !f.startsWith('__models__') && !f.startsWith('host-')); } catch { return; }
+  try { files = fs.readdirSync(USAGE_CACHE_DIR).filter((f) => f.endsWith('.json') && !f.startsWith('__models__') && !f.startsWith('host-') && f !== 'rates.json'); } catch { return groups; }
+  const roster = accounts.list().accounts || [];
   for (const fn of files) {
     try {
       const accountId = fn === '__global__.json' ? null : fn.slice(0, -5);
       const cache = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, fn), 'utf-8'));
       if (!cache?.fetchedAt) continue;
-      const acctRec = accountId ? (accounts.list().accounts || []).find((x) => x.id === accountId) : null;
-      if (accountId && acctRec && acctRec.type === 'pooled') continue; // pools have no quota of their own
-      const identityKey = identityKeyFor({ accountId, cache, email: acctRec?.email });
+      const acctRec = accountId ? roster.find((x) => x.id === accountId) : null;
+      if (accountId && acctRec && (acctRec.type === 'pooled' || acctRec.backend === 'codex')) continue; // pools have no quota; codex economics are separate
+      const key = identityKeyFor({ accountId, cache, email: acctRec?.email });
+      const g = groups.get(key) || { accountIds: [], cache: null, accountId: null };
+      g.accountIds.push(accountId || '__global__');
+      // freshest cache is the identity's anchor source (the same real login can
+      // surface as BOTH __global__ and a named sub — one quota, two files)
+      if (!g.cache || cache.fetchedAt > g.cache.fetchedAt) { g.cache = cache; g.accountId = accountId; }
+      groups.set(key, g);
+    } catch { }
+  }
+  return groups;
+}
+// Dead-reckoning estimator (B-fcff v2): learned per-identity per-bucket rates
+// over the anchor pairs, seeded with the measured Max-20x priors. Feeds the
+// pool auto-switch an ESTIMATED bucket view and /api/usage an `estimates`
+// field. Zero API calls; ledger + anchor files only.
+const _identGroupsMemo = { at: 0, groups: null };
+function usageIdentityGroupsCached() {
+  if (!_identGroupsMemo.groups || Date.now() - _identGroupsMemo.at > 30000) {
+    _identGroupsMemo.groups = usageIdentityGroups(); _identGroupsMemo.at = Date.now();
+  }
+  return _identGroupsMemo.groups;
+}
+const usageEstimator = new UsageEstimator({
+  anchorsDir: path.join(__dirname, 'data', 'usage-anchors'),
+  usageHistory: () => usageHistory, // declared far below — lazy ref (TDZ)
+  resolveIdentity: (accountId) => {
+    const want = accountId || '__global__';
+    for (const [identityKey, g] of usageIdentityGroupsCached()) {
+      if (g.accountIds.includes(want)) return { identityKey };
+    }
+    return null;
+  },
+});
+app.locals.usageEstimator = usageEstimator;
+function sweepUsageAnchors() {
+  // GROUPED BY IDENTITY (2.263.0): recording per cache-file double-anchored
+  // org-merged logins (__global__ + named sub interleaved in one identity
+  // file, each record's costSince missing the sibling account's spend — real
+  // data bug caught in the ProblemFactory analysis). One identity = one
+  // anchor stream; cost sums across ALL its account ids.
+  for (const [identityKey, g] of usageIdentityGroups()) {
+    try {
       const prev = usageAnchors.lastAnchor(identityKey);
-      const costSince = prev ? costBetween(usageHistory, accountId, prev.fetchedAt, cache.fetchedAt) : null;
-      usageAnchors.maybeRecord({ identityKey, accountId, cache, costSince });
+      const allIds = usageEstimator.accountIdsFor(identityKey, g.accountIds);
+      const costSince = prev ? costBetweenMulti(usageHistory, allIds, prev.fetchedAt, g.cache.fetchedAt) : null;
+      // calibration: what the CURRENT rates would have predicted for this new
+      // reading — recorded into the anchor for offline analysis + Diagnostics
+      let calib = null;
+      if (prev && costSince) {
+        try {
+          const newBuckets = {
+            fiveHour: g.cache.fiveHour ? { u: g.cache.fiveHour.utilization, resetsAt: g.cache.fiveHour.resetsAt } : null,
+            sevenDay: g.cache.sevenDay ? { u: g.cache.sevenDay.utilization, resetsAt: g.cache.sevenDay.resetsAt } : null,
+            scopedWeekly: (g.cache.scopedWeekly || []).map((s) => ({ name: s.name, u: s.utilization, resetsAt: s.resetsAt })),
+          };
+          calib = predictCalib(prev, newBuckets, usageEstimator.ratesFor(identityKey), costSince);
+          if (calib) for (const c of Object.values(calib)) global.__vsMetric?.('usage-est-err-pct', Math.abs(c.err) * 100);
+        } catch { }
+      }
+      if (usageAnchors.maybeRecord({ identityKey, accountId: g.accountId, cache: g.cache, costSince, calib, accountIds: allIds })) {
+        usageEstimator.invalidate(identityKey); // rates re-derive from the grown pair set
+      }
     } catch { }
   }
 }
@@ -818,8 +881,26 @@ function markLimitBanner(session, text) {
 }
 
 function maybePoolAutoSwitch(session) {
+  try { if (session._accountId) maybePoolAutoSwitchForPool(session._accountId); } catch { }
+}
+// TIMER-driven evaluation (2.263.0, real incident): the event triggers (turn
+// `result` records + limit banner) both sit at TURN EDGES — an 8-minute
+// review workflow burned an entire 5h window mid-turn with ZERO evaluation
+// points and the pool only switched after exhaustion had failed 9 agents.
+// Every auto pool now re-evaluates on a 60s timer (per-pool 60s throttle
+// unchanged). §ban-safety: local reads only — the ledger scan mines the CLI's
+// own transcripts (self-throttled), the decision reads cache files; no
+// network anywhere.
+setInterval(() => {
   try {
-    const poolId = session._accountId;
+    const pools = (accounts.list().accounts || []).filter((a) => a.type === 'pooled' && a.auto);
+    if (!pools.length) return;
+    try { usageHistory.scan(); } catch { } // freshen the odometer first (incremental, 15s-throttled)
+    for (const a of pools) { try { maybePoolAutoSwitchForPool(a.id); } catch { } }
+  } catch { }
+}, 60000);
+function maybePoolAutoSwitchForPool(poolId) {
+  try {
     if (!poolId) return;
     const a = accounts.get(poolId);
     if (!a || a.type !== 'pooled' || !a.auto) return;
@@ -827,10 +908,20 @@ function maybePoolAutoSwitch(session) {
     if ((now - (_poolAutoLast.get(poolId) || 0)) < 60000) return;
     const currentId = accounts.poolCurrent(poolId);
     if (!currentId) return;
-    const readCache = (id) => { try { return JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, id + '.json'), 'utf-8')); } catch { return null; } };
+    // ESTIMATED bucket view (B-fcff v2): the raw cache goes stale the moment
+    // its session pauses — overlay dead-reckoned utilizations (anchor + rate ×
+    // ledger cost since) so the decision sees NOW, not the last reading. The
+    // estimator abstains per bucket when it has nothing better; those keep raw.
+    const readCache = (id) => {
+      let raw = null;
+      try { raw = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, id + '.json'), 'utf-8')); } catch { }
+      try { return estOverlayCache(raw, usageEstimator.estimateFor(id, raw, now)); } catch { return raw; }
+    };
     // proactive EDF tier only for HOT pools (re-point is free — no restart);
-    // cold pools switch on exhaustion only (each switch restarts conversations)
-    const d = decidePoolSwitch({ currentId, members: accounts.poolMembers(poolId), readCache, nowSec: now / 1000, proactive: !!a.hot });
+    // cold pools switch on exhaustion only (each switch restarts conversations).
+    // Hot pools also treat est<10% as exhaustion (提前切 — switch BEFORE the
+    // limit interrupts a long-running workflow; cold keeps 5%).
+    const d = decidePoolSwitch({ currentId, members: accounts.poolMembers(poolId), readCache, nowSec: now / 1000, proactive: !!a.hot, exhaustPct: a.hot ? 10 : undefined });
     if (!d) return;
     _poolAutoLast.set(poolId, now);
     accounts.setPoolTarget(poolId, d.to);
@@ -1451,7 +1542,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
             // exactly what tonight's incidents needed frequency data for.
             if (msg.type === 'assistant' && Array.isArray(msg.message?.content)) {
               for (const b of msg.message.content) {
-                if (b?.type === 'text' && typeof b.text === 'string' && /^You've reached your .{0,40} limit/.test(b.text)) {
+                if (b?.type === 'text' && typeof b.text === 'string' && /You've (?:reached|hit) your .{0,40} limit/.test(b.text)) {
                   global.__vsEvent?.('cli-usage-limit');
                   markLimitBanner(session, b.text); // chat-mode passive exhaustion signal (2.260.0)
                 } else if (b?.type === 'fallback') {
@@ -1632,11 +1723,19 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
             // discovery) — without this the fs.watch handle + double-buffered
             // transcript lingered until the 10-min idle sweep.
             if (msg.type === 'user' && (msg.origin?.kind === 'task-notification' || /^\s*<task-notification>/.test(typeof msg.message?.content === 'string' ? msg.message.content : ''))) {
-              const tu = (typeof msg.message?.content === 'string' ? msg.message.content : '').match(/<tool-use-id>([\s\S]*?)<\/tool-use-id>/);
+              const notifText = typeof msg.message?.content === 'string' ? msg.message.content : '';
+              const tu = notifText.match(/<tool-use-id>([\s\S]*?)<\/tool-use-id>/);
               if (tu && session.subagentWatchers?.has(tu[1].trim())) {
                 stopSubagentWatcher(tu[1].trim());
                 gcSubagent(tu[1].trim());
               }
+              // Limit banners CARRIED BY workflow/agent failure text (real
+              // 2026-08-09 incident: 9 workflow agents died on "You've hit
+              // your session limit" — the phrase lives only in the task-
+              // notification blob, never as a main-stream assistant banner,
+              // so the pool switch waited for full exhaustion).
+              const lb = /You've (?:reached|hit) your .{0,40}? ?limit/i.exec(notifText.slice(0, 16384));
+              if (lb) { global.__vsEvent?.('cli-usage-limit'); markLimitBanner(session, lb[0]); }
             }
             // Inactivity sweep (audit round-3): an agent whose turn was
             // interrupted / whose CLI died NEVER emits task_notification — its

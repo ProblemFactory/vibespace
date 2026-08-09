@@ -759,6 +759,28 @@ let _stateSync = null;
 export const UI_SCALE_MIN = 80, UI_SCALE_MAX = 130, UI_FONT_MIN = 85, UI_FONT_MAX = 140;
 let _uiScaleVal = 1;
 export function uiScale() { return _uiScaleVal; } // drag-delta compensation factor (viewport px → layout px = /uiScale())
+
+// Dead-reckoning display pair (B-fcff v2): how a bucket's LAST READING (dark,
+// confirmed) and its ESTIMATED current value (light/dashed) should render
+// together. Within one window est ≥ reading always (est = reading + rate×cost,
+// cost ≥ 0), so est < reading is the clean discriminator for "the window RESET
+// since the reading" — the stale dark value no longer applies to the current
+// window: dark collapses to 0 and the whole arc is estimate (user-specified).
+export function estDisplayPair(readingBucket, estBucket) {
+  const rdRaw = readingBucket ? Number(readingBucket.usedPercent ?? ((readingBucket.utilization || 0) * 100)) : null;
+  const rd = Number.isFinite(rdRaw) ? Math.max(0, Math.min(100, Math.round(rdRaw))) : null;
+  const eRaw = estBucket ? Number(estBucket.utilization) : null;
+  if (!Number.isFinite(eRaw)) return { darkPct: rd ?? 0, estPct: null, rolled: false };
+  const est = Math.max(0, Math.min(100, Math.round(eRaw * 100)));
+  if (rd == null) return { darkPct: 0, estPct: est, rolled: false };
+  // Hysteresis belt (adversarial-review major): a freshly-advanced reading vs
+  // a ≤30s-memoized estimate can briefly read est ≈ rd−1 — that's freshness
+  // skew, NOT a window reset. Only a clearly-lower estimate means the window
+  // rolled; inside the skew band the estimate adds nothing → no light layer.
+  if (est >= rd - 2 && est < rd) return { darkPct: rd, estPct: null, rolled: false };
+  if (est < rd) return { darkPct: 0, estPct: est, rolled: true };
+  return { darkPct: rd, estPct: est, rolled: false };
+}
 export function getUiPref(key, def = 100) {
   const v = parseInt(localStorage.getItem(key), 10);
   return Number.isFinite(v) ? v : def;

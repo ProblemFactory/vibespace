@@ -1,7 +1,7 @@
 // Manage-Agents dialog + Anthropic/ChatGPT account rosters (mixin split from app.js, 2.82.0 audit seam). Methods run with the App instance as `this`.
 import { UI_ICONS } from './icons.js';
 import { t } from './i18n.js';
-import { copyText, createModalShell, escHtml, fetchJson, showConfirmDialog, showContextMenu, showInputDialog, showToast } from './utils.js';
+import { copyText, createModalShell, escHtml, estDisplayPair, fetchJson, showConfirmDialog, showContextMenu, showInputDialog, showToast } from './utils.js';
 
 export function installManageAgents(App, ctx = {}) {
   Object.assign(App.prototype, {
@@ -346,17 +346,30 @@ export function installManageAgents(App, ctx = {}) {
   // Claude = the passive statusline cache; Codex = the per-account rate-limit
   // buckets (both ride /api/usage). Scoped weekly buckets (e.g. Fable) get
   // their own donut when present.
-  _acctUsageHtml(u) {
+  _acctUsageHtml(u, est) {
     if (!u) return '';
     const pct = (x) => Math.min(100, Math.round(x?.usedPercent ?? ((x?.utilization || 0) * 100)));
-    const donut = (label, x, tipName) => {
-      const p = pct(x);
-      const c = p > 95 ? 'var(--red,#e55)' : p > 80 ? 'var(--yellow,#e5c07b)' : 'var(--green,#3fb950)';
-      const deg = Math.round(p * 3.6);
-      return `<span class="acct-usage-donut" title="${escHtml(tipName || label)}: ${p}%" style="background:conic-gradient(${c} ${deg}deg, var(--bg-input) ${deg}deg)"><span>${escHtml(label)}</span></span>`;
+    // With a dead-reckoning estimate (B-fcff v2): DARK arc = confirmed reading,
+    // LIGHT arc = estimated delta since; after a window reset (est < reading —
+    // the clean discriminator) the reading no longer applies, dark collapses to
+    // 0 and the whole arc renders light. Dashed ring marks "estimating".
+    const donut = (label, x, tipName, estBucket) => {
+      const pair = estDisplayPair(x, estBucket);
+      const p = pair.estPct != null ? pair.darkPct : pct(x);
+      const eff = pair.estPct ?? p;
+      const c = eff > 95 ? 'var(--red,#e55)' : eff > 80 ? 'var(--yellow,#e5c07b)' : 'var(--green,#3fb950)';
+      const light = `color-mix(in srgb, ${c} 38%, var(--bg-input))`;
+      const bg = pair.estPct != null && pair.estPct > pair.darkPct
+        ? `conic-gradient(${c} ${Math.round(p * 3.6)}deg, ${light} ${Math.round(p * 3.6)}deg ${Math.round(pair.estPct * 3.6)}deg, var(--bg-input) ${Math.round(pair.estPct * 3.6)}deg)`
+        : `conic-gradient(${c} ${Math.round(p * 3.6)}deg, var(--bg-input) ${Math.round(p * 3.6)}deg)`;
+      const tip = pair.estPct != null
+        ? `${escHtml(tipName || label)}: ${p}% · ${escHtml(t('est {pct}%', { pct: pair.estPct }))}${pair.rolled ? ' · ' + escHtml(t('window reset since last reading')) : ''}`
+        : `${escHtml(tipName || label)}: ${p}%`;
+      return `<span class="acct-usage-donut${pair.estPct != null ? ' acct-donut-est' : ''}" title="${tip}" style="background:${bg}"><span>${escHtml(label)}</span></span>`;
     };
-    const parts = [donut('5h', u.fiveHour), donut('7d', u.sevenDay)];
-    for (const sc of (u.scopedWeekly || [])) parts.push(donut(String(sc.name || '?').slice(0, 2), sc, sc.name));
+    const parts = [donut('5h', u.fiveHour, null, est?.fiveHour), donut('7d', u.sevenDay, null, est?.sevenDay)];
+    const scEst = (name) => (est?.scopedWeekly || []).find((x) => String(x?.name || '').toLowerCase() === String(name || '').toLowerCase()) || null;
+    for (const sc of (u.scopedWeekly || [])) parts.push(donut(String(sc.name || '?').slice(0, 2), sc, sc.name, scEst(sc.name)));
     const age = u.fetchedAt ? Math.round((Date.now() - u.fetchedAt) / 60000) : null;
     // The age span ALWAYS renders (empty when fresh) at a fixed min-width —
     // conditional rendering shifted the right-aligned donut group per row and
@@ -365,14 +378,14 @@ export function installManageAgents(App, ctx = {}) {
     // Narrow-width companion (rail panel, 2.179.1): the donut cluster is
     // ~100px and doesn't shrink — below ~340px a container query swaps it for
     // ONE pill showing the TIGHTEST bucket (full detail in the tooltip).
-    const buckets = [['5h', u.fiveHour], ['7d', u.sevenDay], ...(u.scopedWeekly || []).map((sc) => [String(sc.name || '?').slice(0, 2), sc])]
-      .map(([label, x]) => [label, pct(x)]).filter(([, p]) => Number.isFinite(p));
+    const buckets = [['5h', u.fiveHour, est?.fiveHour], ['7d', u.sevenDay, est?.sevenDay], ...(u.scopedWeekly || []).map((sc) => [String(sc.name || '?').slice(0, 2), sc, scEst(sc.name)])]
+      .map(([label, x, e]) => { const pr = estDisplayPair(x, e); return [label, pr.estPct ?? pct(x), pr.estPct != null]; }).filter(([, p]) => Number.isFinite(p));
     let mini = '';
     if (buckets.length) {
-      const [wl, wp] = buckets.reduce((a, b) => (b[1] > a[1] ? b : a));
+      const [wl, wp, wEst] = buckets.reduce((a, b) => (b[1] > a[1] ? b : a));
       const wc = wp > 95 ? 'var(--red,#e55)' : wp > 80 ? 'var(--yellow,#e5c07b)' : 'var(--green,#3fb950)';
-      const tip = buckets.map(([l, p]) => `${l} ${p}%`).join(' · ');
-      mini = `<span class="acct-usage-mini" style="color:${wc}" title="${escHtml(tip)}">${escHtml(wl)} ${wp}%</span>`;
+      const tip = buckets.map(([l, p, isE]) => `${l} ${isE ? t('est {pct}%', { pct: p }) : p + '%'}`).join(' · ');
+      mini = `<span class="acct-usage-mini${wEst ? ' acct-mini-est' : ''}" style="color:${wc}" title="${escHtml(tip)}">${escHtml(wl)} ${wp}%</span>`;
     }
     return `<span class="acct-usage">${parts.join('')}<span class="acct-usage-age" title="${age != null ? t('Last refreshed {n} min ago', { n: age }) : ''}">${ageLabel}</span></span>${mini}`;
   },
@@ -450,12 +463,12 @@ export function installManageAgents(App, ctx = {}) {
         if (u0) this._applyUsage(u0);
         const cell = row.querySelector('.acct-usage-cell');
         if (!cell) return;
-        let u = null;
+        let u = null, est = null;
         if (tg.body.host && tg.body.account) u = this._hostAccountUsage?.[tg.body.host + ':' + tg.body.account];
         else if (tg.body.host) u = this._hostOwnUsage?.[tg.body.host]?.fiveHour ? this._hostOwnUsage[tg.body.host] : null;
-        else if (tg.body.account === '__global__') u = this._rateLimit;
-        else u = this._accountUsage?.[tg.body.account];
-        if (u) cell.innerHTML = this._acctUsageHtml(u);
+        else if (tg.body.account === '__global__') { u = this._rateLimit; est = this._usageEstimates?.__global__; }
+        else { u = this._accountUsage?.[tg.body.account]; est = this._usageEstimates?.[tg.body.account]; }
+        if (u) cell.innerHTML = this._acctUsageHtml(u, est);
       };
       if (!targets.length) { showToast(t('Nothing to refresh — no signed-in accounts or machines'), { type: 'error' }); return; }
       const jobs = targets.map((tg, i) => (async () => {
@@ -1334,11 +1347,14 @@ export function installManageAgents(App, ctx = {}) {
     const CROWN = svg('<path d="M2.5 12.5h11M3 12.5L2 4.5l3.2 2.6L8 3l2.8 4.1L14 4.5l-1 8z"/>');
     const GLOBE = svg('<circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c-2 2-2 10 0 12M8 2c2 2 2 10 0 12"/>');
     const KEY = svg('<circle cx="5" cy="9" r="2.6"/><path d="M7.4 8.2 14 3M11.5 5.2l1.6 1.6M13 3.7l1.6 1.6"/>', 1.5);
+    // Pooled pseudo-account: overlapping circles (a pool of identities) — a
+    // pool is NOT an API key; the KEY icon misread as one (real report).
+    const POOL = svg('<circle cx="5.4" cy="6.2" r="3"/><circle cx="10.6" cy="6.2" r="3"/><circle cx="8" cy="10.6" r="3"/>', 1.3);
     const STAR_F = svg('<path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 11.6 4.1 13.6l.8-4.3-3.1-3 4.3-.6z" fill="currentColor"/>');
     const STAR_O = svg('<path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 11.6 4.1 13.6l.8-4.3-3.1-3 4.3-.6z"/>');
     const DOTS = svg('<circle cx="3" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="13" cy="8" r="1.3" fill="currentColor" stroke="none"/>');
     // Compact per-account usage readout — shared with the Codex roster.
-    const usageHtml = (u) => this._acctUsageHtml(u);
+    const usageHtml = (u, est) => this._acctUsageHtml(u, est);
     // Peer row: the SELECTED MACHINE's own global login. It's the default
     // whenever no named account is starred (a session with no account uses
     // the login of whatever machine it runs on). Not renamable/removable.
@@ -1414,7 +1430,7 @@ export function installManageAgents(App, ctx = {}) {
     const globalRow = `<div class="acct-key-row${gDef ? ' is-default' : ''}" data-id="__global__">
       <span class="acct-type-icon" title="${selectedHost ? t("This machine's own login — lives on {host}, not in VibeSpace", { host: escHtml(hostLabel) }) : t('The CLI’s own global login on this machine')}">${GLOBE}</span>
       <span class="acct-key-main"><span class="acct-key-name">${gName}</span><span class="acct-key-tail">${gIdent}</span></span>
-      <span class="acct-usage-cell">${!selectedHost && sub.loggedIn ? usageHtml(this._rateLimit)
+      <span class="acct-usage-cell">${!selectedHost && sub.loggedIn ? usageHtml(this._rateLimit, this._usageEstimates?.__global__)
         : (selectedHost && this._hostOwnUsage?.[selectedHost]?.fiveHour ? usageHtml(this._hostOwnUsage[selectedHost]) : '')}</span>
       <span class="acct-key-actions">
         <button class="acct-icon acct-def ${gDef ? 'on' : ''}" title="${gDef ? t('Default for new sessions — pick another to change') : t('Set as default for new sessions')}">${gDef ? STAR_F : STAR_O}</button>${gExtraActions}
@@ -1516,24 +1532,33 @@ export function installManageAgents(App, ctx = {}) {
           ? ` <span class="acct-blocked-hint" title="${t('Long-lived token (used for remote machines) expires in {n} days — re-mint it in ⋯ → Long-lived token.', { n: a.oatDaysLeft })}">${t('· long-lived token · {n}d left', { n: a.oatDaysLeft })}</span>`
           : ` <span class="acct-linked-hint" title="${t('Has a long-lived token: usable on any machine (incl. paired devices) without shipping the login. Renews in {n} days.', { n: a.oatDaysLeft })}">${t('· long-lived token')}</span>`)
         : '';
-      const iconTitle = isSub ? t('Subscription (Pro/Max) — runs on this machine (or a host you log into)') : t('API key — stored in VibeSpace, runs on any machine');
+      const isPool = !!a.pooled;
+      const iconTitle = isPool ? t('Pooled account — one billing identity auto-switching across your subscriptions')
+        : isSub ? t('Subscription (Pro/Max) — runs on this machine (or a host you log into)') : t('API key — stored in VibeSpace, runs on any machine');
       // Redesign (2.178.0): rows carry ONLY the star + a ⋯ menu — Test/Rename/
       // email/Remove live in the menu (four inline buttons crushed every row,
       // modal AND panel; real screenshot report). Star stays direct: most-used.
       return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}" data-sub="${isSub ? '1' : ''}"${blocked ? ' data-blocked="1"' : ''}${hostSub ? ' data-hostsub="1"' : ''}${linked ? ' data-linked="1"' : ''}>
-        <span class="acct-type-icon" title="${iconTitle}">${isSub ? CROWN : KEY}</span>
+        <span class="acct-type-icon" title="${iconTitle}">${isPool ? POOL : isSub ? CROWN : KEY}</span>
         <span class="acct-key-main"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span>${(provTag || noteTag || oatTag) ? `<span class="acct-key-extra">${provTag}${noteTag}${oatTag}</span>` : ''}</span>
         <span class="acct-usage-cell">${(() => {
           // Usage source follows the VERDICT's how (2.245.0): a linked account
           // runs on the host's own login (its quota IS the host quota); a
           // host-held one has its own snapshot ('<host>:<id>', ⟳ Refresh all);
-          // ship/local read the local passive cache.
+          // ship/local read the local passive cache. A POOL row shows its
+          // current TARGET's usage (that's what the pool bills right now),
+          // dead-reckoned like any other row.
+          if (isPool) {
+            const tid = a.current;
+            const u = tid ? this._accountUsage?.[tid] : null;
+            return u ? usageHtml(u, this._usageEstimates?.[tid]) : '';
+          }
           if (!isSub) return '';
-          let u = null;
+          let u = null, estKey = null;
           if (selectedHost && v?.how === 'host-login') u = this._hostOwnUsage?.[selectedHost]?.fiveHour ? this._hostOwnUsage[selectedHost] : null;
           else if (selectedHost && v?.how === 'host-held') u = this._hostAccountUsage?.[selectedHost + ':' + a.id] || null;
-          else if (a.loggedIn || a.oat) u = this._accountUsage?.[a.id];
-          return u ? usageHtml(u) : '';
+          else if (a.loggedIn || a.oat) { u = this._accountUsage?.[a.id]; estKey = a.id; }
+          return u ? usageHtml(u, estKey ? this._usageEstimates?.[estKey] : null) : '';
         })()}</span>
         <span class="acct-key-actions">
           <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
@@ -1851,8 +1876,9 @@ export function installManageAgents(App, ctx = {}) {
         items.push({ label: a?.note ? t('Edit note…') : t('Set note…'), action: doNote });
         // Reveal the key value (API keys only) — the store holds the MASTER
         // copy and the Console can never re-show it; users need a way to
-        // save it elsewhere (real incident: removed key ≈ lost key).
-        if (!isSub) items.push({ label: t('Show key…'), action: async () => {
+        // save it elsewhere (real incident: removed key ≈ lost key). A POOLED
+        // account has no key (it rendered "Show key…" once — real report).
+        if (!isSub && !a?.pooled) items.push({ label: t('Show key…'), action: async () => {
           try {
             const r2 = await fetchJson(`/api/accounts/${encodeURIComponent(id)}/key`);
             if (!r2?.key) { showToast(r2?.error || t('Could not read the key'), { type: 'error' }); return; }

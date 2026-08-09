@@ -40,7 +40,7 @@ class UsageAnchors {
   // the same snapshot every 8s while a terminal runs). costSince = ledger cost
   // between the previous anchor's fetchedAt and this one, split by model
   // family so scoped-bucket (Fable) rates stay derivable offline.
-  maybeRecord({ identityKey, accountId, cache, costSince }) {
+  maybeRecord({ identityKey, accountId, cache, costSince, calib = null, accountIds = null }) {
     if (!cache || !cache.fetchedAt) return false;
     const seen = this._last.get(identityKey) ?? this.lastAnchor(identityKey)?.fetchedAt ?? 0;
     if (cache.fetchedAt <= seen) { this._last.set(identityKey, seen); return false; }
@@ -49,14 +49,27 @@ class UsageAnchors {
       ts: Date.now(), fetchedAt: cache.fetchedAt, source: cache.source || 'unknown',
       accountId: accountId || null, identityKey,
       buckets: {
-        fiveHour: cache.fiveHour ? { u: cache.fiveHour.utilization, resetsAt: cache.fiveHour.resetsAt } : null,
-        sevenDay: cache.sevenDay ? { u: cache.sevenDay.utilization, resetsAt: cache.sevenDay.resetsAt } : null,
-        scopedWeekly: (cache.scopedWeekly || []).map((s) => ({ name: s.name, u: s.utilization, resetsAt: s.resetsAt })),
+        // status 'unknown' = a FABRICATED placeholder (data/bin/vibespace-usage
+        // writes {utilization:0, status:'unknown', resetsAt:0} when a window is
+        // absent from the payload) — anchoring it once and pairing with the
+        // next real reading forged a du=+full pair that inflated the learned
+        // rate ~6× (verifier repro). Record as no-bucket instead.
+        fiveHour: cache.fiveHour && cache.fiveHour.status !== 'unknown' ? { u: cache.fiveHour.utilization, resetsAt: cache.fiveHour.resetsAt } : null,
+        sevenDay: cache.sevenDay && cache.sevenDay.status !== 'unknown' ? { u: cache.sevenDay.utilization, resetsAt: cache.sevenDay.resetsAt } : null,
+        // asOf: scoped readings only refresh via ⟳ (preserve-merged into
+        // fresher caches) — record WHEN the reading was true so estimation
+        // starts its cost window there, not at the anchor write.
+        scopedWeekly: (cache.scopedWeekly || []).map((s) => ({ name: s.name, u: s.utilization, resetsAt: s.resetsAt, asOf: cache.scopedFetchedAt || undefined })),
       },
       prevFetchedAt: prev?.fetchedAt || null,
       elapsedSec: prev ? Math.round((cache.fetchedAt - prev.fetchedAt) / 1000) : null,
       costSince: costSince || null, // {total, byFamily:{fable,opus,sonnet,other}, requests}
     };
+    // Calibration record (2.263.0): predicted-vs-actual per bucket, computed
+    // by the caller from the PREVIOUS anchor + current learned rates. Lives in
+    // the anchor itself so prediction quality is offline-analyzable forever.
+    if (calib) rec.calib = calib;
+    if (Array.isArray(accountIds) && accountIds.length > 1) rec.accountIds = accountIds;
     try {
       fs.mkdirSync(this.dir, { recursive: true });
       fs.appendFileSync(this._file(identityKey), JSON.stringify(rec) + '\n');
@@ -69,11 +82,19 @@ class UsageAnchors {
 // Ledger cost between two times for one account id, split by model family —
 // the "odometer reading" of the dead-reckoning pair.
 function costBetween(usageHistory, accountId, fromMs, toMs) {
+  return costBetweenMulti(usageHistory, [accountId || '__global__'], fromMs, toMs);
+}
+// Multi-id variant (one ledger pass): a single IDENTITY can span several
+// account ids — the org-merge case (__global__ + the named sub are the same
+// login) and remove+re-add (fresh sub-<hex> id, same identity). Cost must sum
+// across all of them or the odometer under-reads.
+function costBetweenMulti(usageHistory, accountIds, fromMs, toMs) {
+  const want = new Set((accountIds || []).map((a) => a || '__global__'));
   const out = { total: 0, byFamily: { fable: 0, opus: 0, sonnet: 0, haiku: 0, other: 0 }, requests: 0 };
   try {
     for (const ev of usageHistory._events(fromMs, toMs)) {
       const acct = ev.acct || '__global__';
-      if (acct !== (accountId || '__global__')) continue;
+      if (!want.has(acct)) continue;
       if (ev.host) continue; // local odometer only; remote rides the harvest separately
       if (ev.ts < fromMs || ev.ts > toMs) continue;
       const c = usageHistory._cost(ev);
@@ -88,4 +109,4 @@ function costBetween(usageHistory, accountId, fromMs, toMs) {
   return out;
 }
 
-module.exports = { UsageAnchors, identityKeyFor, costBetween };
+module.exports = { UsageAnchors, identityKeyFor, costBetween, costBetweenMulti };
