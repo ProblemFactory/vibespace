@@ -52,6 +52,7 @@ export const DIMENSIONS = () => ([
   { key: 'day', label: t('Day'), seq: true },
   { key: 'model', label: t('Model') },
   { key: 'account', label: t('Account') },
+  { key: 'pool', label: t('Pool') },
   { key: 'billing', label: t('Billing type') },
   { key: 'project', label: t('Project') },
   { key: 'mode', label: t('Mode') },

@@ -1954,6 +1954,7 @@ function restoreSessions() {
       // stdout-only) — restore what the session was launched with
       _permissionMode: meta.permissionMode || null,
       _effort: meta.effort || null,
+      _modelLocked: !!meta.modelLocked,
       agentToken: meta.agentToken || null, // vibespace-status auth survives restarts
       _initialGroupId: meta.taskId || null, // group spawned into; belonging is live-derived, this only covers the pre-bind window
       _accountId: meta.accountId || null, // billing identity the session was spawned with (badge only — env lives in the surviving dtach process)
@@ -2193,6 +2194,7 @@ async function readoptOrphanKeeperSessions() {
       _authAtSpawn: meta.authAtSpawn || null,
       _permissionMode: meta.permissionMode || null,
       _effort: meta.effort || null,
+      _modelLocked: !!meta.modelLocked,
       _initialGroupId: meta.taskId || null,
       _remotePort: rport,
       sockName, socketPath, buffer: '',
@@ -2885,6 +2887,11 @@ setupPersistence({ dataDir: path.join(__dirname, 'data'), wss, WS_OPEN, getSyncS
     if (fbWas !== fbNow) {
       for (const [sid, sess] of activeSessions) {
         if (sess.backend !== 'claude' || sess.mode !== 'chat' || !sess.pty) continue;
+        // A per-conversation model LOCK (#6) is a deliberate user choice — the
+        // global toggle must not silently RE-ENABLE fallback on a locked
+        // session (which would also leave the badge disagreeing with the CLI).
+        // Turning the global OFF→ON still hits it (both want fallback off).
+        if (sess._modelLocked && !fbNow) continue;
         try {
           const ad = adapterRegistry.get('claude');
           if (ad?.formatSetFallbackPolicy) sess.pty.write(ad.formatSetFallbackPolicy(fbNow) + '\n');
@@ -3368,17 +3375,25 @@ function recordUsageAttribution(meta) {
   const sid = meta && (meta.claudeSessionId || meta.backendSessionId);
   if (!sid) return;
   let acct = meta.accountId || null;
+  let pool = null;
   // A POOLED session bills whatever the pool currently points at — attribute
   // the ledger to the REAL target at record time (attribution is by-time, so
-  // a later re-point + re-record moves subsequent requests to the new target;
-  // the pool id itself has no pricing/bucket meaning).
-  try { if (acct && accounts.get(acct)?.type === 'pooled') acct = accounts.poolCurrent(acct) || acct; } catch {}
-  if (_lastAttrib.get(sid) === (acct || '')) return;
-  _lastAttrib.set(sid, acct || '');
+  // a later re-point + re-record moves subsequent requests to the new target).
+  // Keep the pool id as a SEPARATE tag (#4): acct stays the real target so
+  // per-account and the global sum are correct with NO double-count, while pool
+  // lets the Usage window show the total that flowed through each pool.
+  // An unresolvable pool target (broken symlink / logged-out member) falls to
+  // GLOBAL, never to the pool id itself — else a `type:'pooled'` pseudo-account
+  // would surface as a spender in the account dimension (review low-confidence
+  // finding). The pool tag is still recorded (pool captured above).
+  try { if (acct && accounts.get(acct)?.type === 'pooled') { pool = acct; acct = accounts.poolCurrent(acct) || null; } } catch {}
+  const attribKey = (acct || '') + '|' + (pool || '');
+  if (_lastAttrib.get(sid) === attribKey) return;
+  _lastAttrib.set(sid, attribKey);
   // Cap only — never delete-on-kill: kill→resume of the same sid (terminate/
   // resume, billing switch) would re-append a duplicate attribution line.
   if (_lastAttrib.size > 4096) _lastAttrib.delete(_lastAttrib.keys().next().value);
-  usageHistory.recordAttribution({ sid, acct, ts: Date.now() });
+  usageHistory.recordAttribution({ sid, acct, pool, ts: Date.now() });
 }
 // Rescan the ledger periodically (incremental — only new JSONL bytes). Also
 // rescanned on demand when the Usage window opens.

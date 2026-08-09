@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.256.0
+
+Per-conversation model lock + pooled usage accounting (user batch #4, #6):
+
+- **Lock a conversation to its model** (user request, and the fix for the "总是变成 opus 4.8" report): the model badge's dropdown gains a **🔒 Lock to this model / 🔓 Unlock** toggle. Locking DISABLES model fallback for that one session — so when a safety-classifier reroute would silently swap the served model (Fable 5 → an older opus is an Anthropic *server-side* decision, not ours), the CLI surfaces the refusal instead of quietly switching. Locked shows a lock glyph + amber-free `LOCKED (fallback off)` on the badge. The lock **persists** across resume and server restart (session config whitelist + `meta.modelLocked`) and re-arms at spawn (`switchModelsOnFlag:false` merged into the one `--settings` flag). Codex sessions ignore it (no fallback mechanism).
+- **Pooled accounts are now accounted for in Usage** (user #4): every request billed *through* a pooled pseudo-account is tagged with the pool id — while still attributed to the pool's REAL target account. So the per-account breakdown and the global total stay exactly correct with **no double-counting**, and a new **"By pool"** breakdown (classic view) + **Pool** dashboard dimension show the total that flowed through each pool. Attribution is by-time (a re-point moves subsequent requests), the pool tag is baked at scan for both Claude and Codex transcripts, and the section is hidden when no pool has been used.
+- **Adversarial-review hardening** (two reviewers, before ship — all findings fixed & re-verified): (1) the **pivot loop** now carries the same sparse-pool skip as the 1-D dim loop — putting `pool` on a dashboard split-series/pivot axis no longer fabricates a phantom `null` series aggregating all non-pooled spend (confirmed: a `day:pool` / `pool:account` pivot excludes the big non-pooled event, through-pool total stays exact). (2) An unresolvable pool target now falls to **global**, never surfaces the pool pseudo-account as a spender in the account dimension. (3) The **model lock survives a server restart after resume** — the create-time session-meta write now persists `modelLocked` (it was written only by the live toggle, so a resumed lock's badge silently reverted on restart). (4) The lock toggle is **hidden for Codex** (no fallback mechanism there — it was a silent no-op that implied protection) and no longer re-issues a redundant `set-model` echo on every lock. (5) The global `claude.disableModelFallback` toggle now **exempts per-session-locked sessions** when it re-enables fallback (a global off→on flip used to silently defeat a deliberate per-conversation lock).
+
 ## 2.255.0
 
 Account display + add-flow fixes (user batch):

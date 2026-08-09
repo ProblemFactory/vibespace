@@ -76,9 +76,14 @@ class UsageHistory {
   // account is then attributed per-request by TIME (the account active when each
   // request happened), not just the latest — so switching accounts mid-session
   // never mixes the billing. session-meta's current accountId is the fallback.
-  recordAttribution({ sid, acct, ts }) {
+  // `pool` (optional) tags the POOLED pseudo-account a request was billed
+  // THROUGH — acct still holds the pool's REAL target at that time (so per-
+  // account and the global sum stay correct with no double-count), pool is an
+  // extra dimension so the Usage window can also show the total that flowed
+  // through each pool.
+  recordAttribution({ sid, acct, pool, ts }) {
     if (!sid) return;
-    try { fs.appendFileSync(this.attribFile, JSON.stringify({ sid, acct: acct || null, ts: ts || Date.now() }) + '\n'); } catch {}
+    try { fs.appendFileSync(this.attribFile, JSON.stringify({ sid, acct: acct || null, pool: pool || null, ts: ts || Date.now() }) + '\n'); } catch {}
     this._attrib = null; // invalidate cache
   }
   _attribMap() {
@@ -89,7 +94,7 @@ class UsageHistory {
       if (!line) continue;
       let e; try { e = JSON.parse(line); } catch { continue; }
       if (!e.sid) continue;
-      (map[e.sid] = map[e.sid] || []).push({ ts: e.ts || 0, acct: e.acct || null });
+      (map[e.sid] = map[e.sid] || []).push({ ts: e.ts || 0, acct: e.acct || null, pool: e.pool || null });
     }
     for (const sid of Object.keys(map)) map[sid].sort((a, b) => a.ts - b.ts);
     this._attrib = map;
@@ -116,6 +121,17 @@ class UsageHistory {
       return ts >= list[0].ts - 10 * 60 * 1000 ? list[0].acct : null;
     }
     return metaAcct || null;
+  }
+  // The POOLED pseudo-account (if any) active for session `sid` at time `ts` —
+  // same by-time walk as _acctAt but returns the pool tag. Baked onto events so
+  // the Usage window can show per-pool totals without a second attribution pass.
+  _poolAt(sid, ts, attrib) {
+    const list = attrib[sid];
+    if (!list || !list.length) return null;
+    let found = false, chosen = null;
+    for (const e of list) { if (e.ts <= ts) { found = true; chosen = e.pool || null; } else break; }
+    if (found) return chosen;
+    return ts >= list[0].ts - 10 * 60 * 1000 ? (list[0].pool || null) : null;
   }
 
   _loadJson(f, fallback) { try { return JSON.parse(fs.readFileSync(f, 'utf-8')); } catch { return fallback; } }
@@ -274,12 +290,14 @@ class UsageHistory {
             // now so subscription vs API never mix (and it survives account
             // deletion). name = a human label frozen at scan time.
             const acct = this._acctAt(sid, ts, attrib, minfo.acct);
+            const pool = this._poolAt(sid, ts, attrib);
             const ainfo = acct ? (this._resolveAccount(acct) || null) : null;
             push({
               rid, ts, sid,
               be: minfo.backend || 'claude',
               model: msg.model || null,
               acct: acct || null,
+              pool: pool || undefined, // billed THROUGH this pool (acct = its real target)
               atype: ainfo ? ainfo.type : (acct ? 'unknown' : 'global'),
               aname: ainfo ? (ainfo.name || null) : null,
               mode: minfo.mode || null,
@@ -342,11 +360,13 @@ class UsageHistory {
           cur.lastRid = rid;
           const cached = last.cached_input_tokens || 0;
           const acct = this._acctAt(sid, ts, attrib, minfo.acct);
+          const pool = this._poolAt(sid, ts, attrib);
           const ainfo = acct ? (this._resolveAccount(acct) || null) : null;
           push({
             rid, ts, sid, be: 'codex',
             model: cur.model || null,
             acct: acct || null,
+            pool: pool || undefined,
             atype: ainfo ? ainfo.type : (acct ? 'unknown' : 'global'),
             aname: ainfo ? (ainfo.name || null) : null,
             mode: minfo.mode || null,
@@ -544,7 +564,7 @@ class UsageHistory {
   // The one flexible query the UI uses. groupBy is an array of dimension keys;
   // returns { totals, series(byDay), groups: { <dim>: [{key,...}] }, accounts }.
   aggregate({ from = null, to = null, backend = null, accounts = null, hostFilter = null, pivots = null } = {}) {
-    const dims = { day: {}, model: {}, account: {}, billing: {}, project: {}, mode: {}, host: {}, hour: {}, weekday: {}, session: {} };
+    const dims = { day: {}, model: {}, account: {}, billing: {}, project: {}, mode: {}, host: {}, hour: {}, weekday: {}, session: {}, pool: {} };
     const dimMeta = {}; // dim → key → {name,type,...} extra labels
     // pivots = [[dimA, dimB], …] — 2-D crosses for the dashboard's split-series
     // panels (e.g. day×account = per-account daily token stacks). Cells carry
@@ -583,14 +603,23 @@ class UsageHistory {
         hour: String(d.getHours()),
         weekday: String(d.getDay()),
         session: ev.sid,
+        pool: ev.pool || null, // only events billed THROUGH a pool have this
       };
       for (const dim of Object.keys(dims)) {
         const k = keyOf[dim];
+        // pool is sparse — a null key would collect every non-pooled event into
+        // one bucket = the whole account, defeating the point. Skip those.
+        if (dim === 'pool' && !k) continue;
         (dims[dim][k] = dims[dim][k] || this._emptyBucket());
         this._add(dims[dim][k], ev);
       }
       for (let i = 0; i < pivotPairs.length; i++) {
         const ka = keyOf[pivotPairs[i][0]], kb = keyOf[pivotPairs[i][1]];
+        // Same sparse-pool guard as the 1-D dim loop: a null pool key on EITHER
+        // axis would collect every non-pooled event into a phantom "null"
+        // series aggregating all non-pool spend (dashboard split-series/pivot
+        // panels put pool on an axis) — review-caught, do not drop.
+        if ((pivotPairs[i][0] === 'pool' && !ka) || (pivotPairs[i][1] === 'pool' && !kb)) continue;
         const row = (pivotAcc[i][ka] = pivotAcc[i][ka] || {});
         this._add(row[kb] = row[kb] || this._emptyBucket(), ev);
       }
@@ -614,6 +643,15 @@ class UsageHistory {
       if (!dimMeta.host[hostKey]) dimMeta.host[hostKey] = { name: ev.aname || hostKey };
       if (!dimMeta.model) dimMeta.model = {};
       if (!dimMeta.model[keyOf.model]) dimMeta.model[keyOf.model] = { be: ev.be || 'claude' };
+      // Pool labels: the pseudo-account's display name (resolves even after the
+      // pool re-points, since the pool id is stable).
+      if (ev.pool) {
+        if (!dimMeta.pool) dimMeta.pool = {};
+        if (!dimMeta.pool[ev.pool]) {
+          const pinfo = this._resolveAccount(ev.pool);
+          dimMeta.pool[ev.pool] = { name: pinfo?.name || ev.pool, be: ev.be || 'claude', deleted: !pinfo };
+        }
+      }
       // Session names from session-meta (VibeSpace-created sessions carry one;
       // foreign sessions fall back to the id in the UI).
       if (!dimMeta.session) dimMeta.session = {};

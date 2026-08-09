@@ -120,6 +120,10 @@ export function openUsageWindow(app, opts = {}) {
       body.appendChild(sectionGrid([
         renderBilling(d),
         renderGroup(t('By account'), d.groups.account, state, { badge: true }),
+        // Pooled pseudo-accounts (#4): the total that flowed THROUGH each pool.
+        // acct already bills to the pool's real target, so this NEVER double-
+        // counts the global sum — it's a separate lens. Hidden when unused.
+        ((d.groups.pool || []).length ? renderGroup(t('By pool'), d.groups.pool, state, { badge: true }) : null),
         renderGroup(t('By model'), d.groups.model, state, { beIcon: true }),
         renderCache(d),
         renderGroup(t('By project'), d.groups.project, state, { path: true }),
@@ -127,7 +131,7 @@ export function openUsageWindow(app, opts = {}) {
         renderHours(d),
         renderWeekdays(d),
         renderGroup(t('Top sessions'), d.groups.session, state, { session: true, limit: 12 }),
-      ]));
+      ].filter(Boolean)));
     } else {
       // Configurable dashboard (2.96.0): panels persist in settings and sync
       // across clients like everything else.
