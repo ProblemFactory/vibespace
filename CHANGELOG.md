@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.261.0
+
+- **Quota dead-reckoning data foundation** (user-designed "惯性导航" step 1): every ground-truth usage reading (statusline / ⟳ / get_usage / limit banner) is now recorded as an **anchor** — together with the local ledger's cost consumed since the previous anchor (split by model family, so Fable-bucket rates stay derivable) — into `data/usage-anchors/anchors-<identity>.ndjson`. This is the complete, raw training set: prediction/rate models can be built and re-built **offline forever** from anchor pairs. Zero API calls (a 60s sweep of local cache snapshots).
+- **Identity key, not the minted account id** (user requirement): anchors key by `orgUuid > lowercased email > account id`, so a subscription's tracking history **survives remove + re-add** (a re-add mints a fresh `sub-<hex>` id; the same login resolves to the same identity). Note: re-adding the *same login without removing* already merges into the existing record — the identity key closes the remove-first hole.
+- v2 (queued): learned per-account/per-bucket exchange rates + estimated-remaining feeding the pool's proactive switch, with the calibration log (predicted vs actual). The empirical study behind the design (a real account's local ledger sees only ~1/7 of its consumption — multi-device — so fixed token→% rates are impossible and per-identity learning is mandatory) is recorded in the shared context.
+
 ## 2.260.0
 
 Chat-mode usage freshness WITHOUT new automation (B-7edc/B-292b closed; auto-firing explicitly rejected):
