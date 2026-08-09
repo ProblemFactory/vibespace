@@ -2835,6 +2835,10 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 /* Subscription/CLI-login identity: neutral chip (only API billing stays amber) */
 .win-auth-badge.sub { color: var(--text-secondary); background: var(--bg-input); border-color: var(--border); }
 .win-auth-badge.sub:hover { border-color: var(--accent); color: var(--accent); }
+.win-auth-badge.pooled { color: var(--accent-hover); background: color-mix(in srgb, var(--accent) 12%, transparent); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+.win-auth-badge.pooled:hover { border-color: var(--accent); color: var(--accent); }
+.win-auth-badge .wab-pool-tgt { opacity: 0.75; max-width: 84px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-status-billing.pooled { color: var(--accent-hover); }
 .win-auth-badge .wab-name { max-width: 88px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tab-item .win-auth-badge { margin-left: 3px; }
 .tab-item .win-auth-badge svg { width: 10px; height: 10px; }

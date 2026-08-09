@@ -339,15 +339,18 @@ export class ChatStatusBar {
     if (this._billing) {
       const a = this._billing;
       const isApi = a.source === 'api-key' || a.source === 'api-console' || a.source === 'api-other';
+      const isPooled = a.source === 'pooled';
       // remote session: its CLI login is the HOST's — name the machine
       const label = a.source === 'unknown' ? '?'
+        : isPooled ? '⣿ ' + (a.name || t('Pool')) + (a.poolTarget ? ' → ' + a.poolTarget : '')
         : (a.name || (isApi ? (a.source === 'api-console' ? 'Console' : 'API')
           : (a.hostName ? t('CLI login') + ' @ ' + a.hostName : t('CLI login'))));
-      const tip = (isApi ? t('API billing (pay per use)') : (a.hostName && !a.name ? t('"{name}"’s own CLI login', { name: a.hostName }) : t('Subscription account')))
+      const tip = (isPooled ? t('Pooled account') + (a.poolTarget ? ' · ' + t('currently billing {name}', { name: a.poolTarget }) : ' · ' + t('no target'))
+          : isApi ? t('API billing (pay per use)') : (a.hostName && !a.name ? t('"{name}"’s own CLI login', { name: a.hostName }) : t('Subscription account')))
         + (a.hostName && (a.name || isApi) ? ' · ' + t('on "{name}"', { name: a.hostName }) : '')
         + (a.guessed ? ' · ' + t('estimated from the login state at spawn') : '')
         + ' · ' + t('Click to switch billing');
-      parts.push(`<span class="chat-status-billing chat-status-clickable${isApi ? ' api' : ''}" title="${escHtml(tip)}">${escHtml(label)}</span>`);
+      parts.push(`<span class="chat-status-billing chat-status-clickable${isApi ? ' api' : ''}${isPooled ? ' pooled' : ''}" title="${escHtml(tip)}">${escHtml(label)}</span>`);
     }
 
     // Permission mode (always show, click to change; Codex sandbox policy in tooltip)
