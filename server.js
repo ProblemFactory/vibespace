@@ -731,6 +731,32 @@ function maybePoolAutoSwitch(session) {
     }
   } catch (e) { console.warn('[pool] auto-switch check failed:', e.message); }
 }
+// Alias-tolerant model compare (server twin of the client's _modelMismatch):
+// 'fable' vs 'claude-fable-5' is NOT a mismatch; [1m] suffixes ignored.
+function modelsMatch(a, b) {
+  if (!a || !b) return true;
+  const core = (m) => String(m).toLowerCase().replace(/^claude-/, '').replace(/\s*\[1m\]$/, '').trim();
+  const x = core(a), y = core(b);
+  return x === y || x.startsWith(y) || y.startsWith(x);
+}
+// Per-conversation MODEL LOCK v2 (#6, semantics per the user's correction):
+// fallback stays ALLOWED (the flagged turn completes on the fallback model),
+// but at each turn end a locked session whose SERVED model drifted away is
+// re-pinned via set_model — so every subsequent turn re-attempts the original
+// model instead of staying degraded forever (switchModelsOnFlag switches the
+// session's model persistently on a safety reroute; this undoes it per turn).
+// The set_model echo ("Set model to …") lands in the chat as the visible trace.
+function maybeRepinLockedModel(session) {
+  try {
+    if (!session._modelLocked || !session._lockedModel || !session.pty || session.mode !== 'chat') return;
+    if (modelsMatch(session._servedModel, session._lockedModel)) return;
+    const adapter = adapterRegistry.get(session.backend);
+    if (!adapter?.formatSetModel) return;
+    session.pty.write(adapter.formatSetModel(session._lockedModel) + '\n');
+    global.__vsEvent?.('model-lock-repin', `${session._servedModel || '?'}->${session._lockedModel}`);
+  } catch (e) { console.warn('[model-lock] repin failed:', e.message); }
+}
+
 function maybeStopOnFallback(session, id, from, to) {
   try {
     if (serverSetting('claude.disableModelFallback') !== true) return;
@@ -1266,6 +1292,23 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
               }
             }
 
+            // Served-model truth for the lock re-pin (assistant records carry
+            // the model that actually answered; '<synthetic>' rows excluded).
+            // MAIN THREAD ONLY (review-caught): subagents/sidechains run their
+            // own models — without the guard a haiku subagent both spuriously
+            // triggered repins AND masked a real main-thread reroute when it
+            // answered last.
+            if (msg.type === 'assistant' && !msg.parent_tool_use_id && !msg.isSidechain
+                && msg.message?.model && !String(msg.message.model).startsWith('<')) {
+              session._servedModel = msg.message.model;
+              // Latch a target-less lock (locked before any model was known —
+              // restored sessions, pre-first-reply locks): first main-thread
+              // served model becomes the target, else repin no-ops forever.
+              if (session._modelLocked && !session._lockedModel) {
+                session._lockedModel = session._servedModel;
+                try { if (session.sockName) writeSessionMeta(session.sockName, { ...(readSessionMeta(session.sockName) || {}), lockedModel: session._lockedModel }); } catch {}
+              }
+            }
             // CLI error-class telemetry (2.207.0, names/enums only — no
             // content): usage-limit sightings and silent model fallbacks are
             // exactly what tonight's incidents needed frequency data for.
@@ -1275,7 +1318,9 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
                   global.__vsEvent?.('cli-usage-limit');
                 } else if (b?.type === 'fallback') {
                   global.__vsEvent?.('cli-model-fallback', `${b.from?.model || '?'}->${b.to?.model || '?'}`);
-                  maybeStopOnFallback(session, id, b.from?.model, b.to?.model);
+                  // main thread only — a SUBAGENT's fallback must not interrupt
+                  // the parent turn (same guard class as the served-model capture)
+                  if (!msg.parent_tool_use_id && !msg.isSidechain) maybeStopOnFallback(session, id, b.from?.model, b.to?.model);
                 }
               }
             }
@@ -1361,6 +1406,18 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
                 const uText = typeof msg.message?.content === 'string'
                   ? msg.message.content
                   : (Array.isArray(msg.message?.content) ? msg.message.content.map(b => b.text || '').join('') : '');
+                // A5 (review): "Set model to X (resolved-full-id)" echo is the
+                // CLI's authoritative resolution — upgrade a BARE-ALIAS lock
+                // target to the full id (alias targets false-match intra-family
+                // reroutes via the startsWith rule, e.g. 'opus' vs 'opus-4-8',
+                // and the repin never fires).
+                if (session._modelLocked && session._lockedModel && !/\d/.test(session._lockedModel)) {
+                  const em = /^<local-command-stdout>Set model to \S+ \(([^)]+)\)/.exec(uText.trim());
+                  if (em && modelsMatch(session._lockedModel, em[1])) {
+                    session._lockedModel = em[1];
+                    try { if (session.sockName) writeSessionMeta(session.sockName, { ...(readSessionMeta(session.sockName) || {}), lockedModel: em[1] }); } catch {}
+                  }
+                }
                 if (!/^<local-command-/.test(uText.trim())) {
                   session._isStreaming = true;
                   newLabel = 'thinking...';
@@ -1407,6 +1464,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
             // Immediate check + one delayed re-check (the Stop hook may write
             // the attachment slightly after the result reaches stdout).
             if (msg.type === 'result') maybePoolAutoSwitch(session);
+            if (msg.type === 'result') maybeRepinLockedModel(session);
             if (msg.type === 'result' && session._goal) {
               checkClaudeGoalStatus(session, id);
               setTimeout(() => { if (activeSessions.has(id)) checkClaudeGoalStatus(session, id); }, 2000);
@@ -1955,6 +2013,7 @@ function restoreSessions() {
       _permissionMode: meta.permissionMode || null,
       _effort: meta.effort || null,
       _modelLocked: !!meta.modelLocked,
+      _lockedModel: meta.lockedModel || null,
       agentToken: meta.agentToken || null, // vibespace-status auth survives restarts
       _initialGroupId: meta.taskId || null, // group spawned into; belonging is live-derived, this only covers the pre-bind window
       _accountId: meta.accountId || null, // billing identity the session was spawned with (badge only — env lives in the surviving dtach process)
@@ -2195,6 +2254,7 @@ async function readoptOrphanKeeperSessions() {
       _permissionMode: meta.permissionMode || null,
       _effort: meta.effort || null,
       _modelLocked: !!meta.modelLocked,
+      _lockedModel: meta.lockedModel || null,
       _initialGroupId: meta.taskId || null,
       _remotePort: rport,
       sockName, socketPath, buffer: '',
@@ -2887,11 +2947,6 @@ setupPersistence({ dataDir: path.join(__dirname, 'data'), wss, WS_OPEN, getSyncS
     if (fbWas !== fbNow) {
       for (const [sid, sess] of activeSessions) {
         if (sess.backend !== 'claude' || sess.mode !== 'chat' || !sess.pty) continue;
-        // A per-conversation model LOCK (#6) is a deliberate user choice — the
-        // global toggle must not silently RE-ENABLE fallback on a locked
-        // session (which would also leave the badge disagreeing with the CLI).
-        // Turning the global OFF→ON still hits it (both want fallback off).
-        if (sess._modelLocked && !fbNow) continue;
         try {
           const ad = adapterRegistry.get('claude');
           if (ad?.formatSetFallbackPolicy) sess.pty.write(ad.formatSetFallbackPolicy(fbNow) + '\n');
@@ -3617,7 +3672,27 @@ app.post('/api/accounts/pool', (req, res) => {
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.patch('/api/accounts/pool/:id', (req, res) => {
-  try { accounts.updatePool(req.params.id, { members: req.body?.members, auto: req.body?.auto, hot: req.body?.hot }); res.json({ success: true }); }
+  try {
+    const id = req.params.id;
+    // Narrowing the member list away from the CURRENT target makes updatePool
+    // re-point IMMEDIATELY (symlink swap) — a running claude re-reads the
+    // credential file mid-session, so this must mirror /target's contract
+    // (review B1): re-record attribution for live pooled sessions + return
+    // `affected` so the dialog can cold-restart them. Silently it mis-billed
+    // the OLD target for everything after the swap.
+    const before = accounts.poolCurrent(id);
+    accounts.updatePool(id, { members: req.body?.members, auto: req.body?.auto, hot: req.body?.hot });
+    const after = accounts.poolCurrent(id);
+    const affected = [];
+    if (before !== after) {
+      for (const [sid, sess] of activeSessions) {
+        if (sess._accountId !== id) continue;
+        try { recordUsageAttribution({ claudeSessionId: sess.claudeSessionId || sess.backendSessionId, accountId: id }); } catch {}
+        affected.push({ serverId: sid, backend: sess.backend || 'claude', backendSessionId: sess.claudeSessionId || sess.backendSessionId || null, cwd: sess.cwd || null, name: sess.name || null, host: sess.host || null });
+      }
+    }
+    res.json({ success: true, retargeted: before !== after ? { from: before, to: after, name: after ? (accounts.get(after)?.name || after) : null } : null, affected });
+  }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 // Re-point. Returns the live sessions billed to this pool so the CLIENT can

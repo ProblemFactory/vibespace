@@ -402,7 +402,7 @@ function registerWsHandler(wss, ctx) {
             // Server-side read (covers every create path uniformly — resume,
             // layout restore, billing switch); only the claude adapter
             // consumes it (codex has no model-fallback mechanism).
-            disableModelFallback: (() => { try { return serverSetting('claude.disableModelFallback') === true || !!data.modelLock; } catch { return !!data.modelLock; } })(), // #6: a locked conversation disables fallback at spawn too (resume carries data.modelLock from sessionConfigs)
+            disableModelFallback: (() => { try { return serverSetting('claude.disableModelFallback') === true; } catch { return false; } })(),
             // Shell helper terminals auto-type this — the adapter arms the
             // DISABLE_UPDATE_PROMPT guard (oh-my-zsh's rc-time [Y/n] eats the
             // first typed char: "claude /login" → "laude"). 2.196.0: the field
@@ -595,7 +595,12 @@ function registerWsHandler(wss, ctx) {
             // Effort is never reported back by claude — remember the commanded
             // value (spawn flag now, set-effort later) for the status bar
             _effort: data.effort || null,
-            _modelLocked: !!data.modelLock,  // #6: per-session model lock (disable fallback)
+            _modelLocked: !!data.modelLock,  // #6 lock v2: re-pin the target model after any fallback (turn-end)
+            // EXPLICIT target only (review-caught): inferring it from data.model
+            // re-targeted the lock to claude.defaultModel on any resume whose
+            // saved config had no model. No target ⇒ the server latches the
+            // first main-thread served model instead.
+            _lockedModel: data.modelLock ? (data.lockModel || data.model || null) : null,
             // Claude --fork-session mints a NEW session id at startup; this arms
             // the stdout parser to adopt it (so the fork becomes its own session
             // instead of shadowing the parent). One-shot, cleared on adoption.
@@ -1450,6 +1455,7 @@ done`;
             permissionMode: session._permissionMode || null,
             effort: session._effort || null,
             modelLocked: session._modelLocked || undefined, // #6: survive server restart (else a resumed lock's badge silently reverts — review-caught)
+            lockedModel: session._lockedModel || undefined,
             agentToken: session.agentToken || null,
             taskId: session._initialGroupId || null, // group spawned into (meta key kept for back-compat)
             accountId: session._accountId || null, // billing identity (badge restore across server restarts)
@@ -1605,16 +1611,21 @@ done`;
             const adapter = adapterRegistry.get(session.backend);
             try {
               if (data.model && adapter?.formatSetModel) session.pty.write(adapter.formatSetModel(data.model) + '\n');
-              // Model LOCK (#6): pin the model + DISABLE fallback for THIS
-              // session — on a safety-refusal the CLI surfaces the refusal
-              // instead of silently rerouting to an older opus (the user's
-              // "总是变成opus 4.8" complaint). Persisted like _effort so a
-              // resume re-applies it (buildSessionArgs reads the session config).
-              if ('lock' in data && adapter?.formatSetFallbackPolicy) {
+              // Model LOCK v2 (#6, user-corrected semantics): fallback stays
+              // ALLOWED — the lock records the TARGET model, and the server
+              // re-pins it via set_model at every turn end where the served
+              // model drifted (maybeRepinLockedModel in server.js). So a
+              // safety-reroute completes the flagged turn on the fallback,
+              // but every subsequent turn re-attempts the original model.
+              if ('lock' in data) {
                 session._modelLocked = !!data.lock;
-                session.pty.write(adapter.formatSetFallbackPolicy(!!data.lock) + '\n');
-                if (session.sockName) { const m = readSessionMeta(session.sockName); writeSessionMeta(session.sockName, { ...m, modelLocked: session._modelLocked }); }
+                session._lockedModel = data.lock ? (data.lockModel || session._servedModel || null) : null;
+                if (session.sockName) { const m = readSessionMeta(session.sockName); writeSessionMeta(session.sockName, { ...m, modelLocked: session._modelLocked, lockedModel: session._lockedModel }); }
                 broadcastActiveSessions();
+              } else if (data.model && session._modelLocked) {
+                // changing the model while locked re-targets the lock
+                session._lockedModel = data.model;
+                if (session.sockName) { const m = readSessionMeta(session.sockName); writeSessionMeta(session.sockName, { ...m, lockedModel: session._lockedModel }); }
               }
             } catch {}
           }
@@ -2047,7 +2058,10 @@ done`;
               const chatStatus = sm.chatStatus() || {};
               if (!chatStatus.permissionMode && session._permissionMode) chatStatus.permissionMode = session._permissionMode;
               if (!chatStatus.effort && session._effort) chatStatus.effort = session._effort;
-              if (session._modelLocked) chatStatus.modelLocked = true;
+              // ALWAYS present (review-caught): omitting the false case left a
+              // reconnecting second client showing LOCKED forever after an unlock
+              chatStatus.modelLocked = !!session._modelLocked;
+              chatStatus.lockedModel = session._lockedModel || null;
               ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, mode: 'chat',
                 messages, totalCount, chatStatus, isStreaming, streamingLabel, taskState: sm.taskState(), turnMap, pendingPermissions: pendingPerms,
                 normEpoch: session._normEpoch || 0,

@@ -18,7 +18,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     });
   },
 
-  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, accountId, modelLock, ephemeral = false, winBounds, recreateCwd = false, ignoreNoConvo = false, onCreateResult }) {
+  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, accountId, modelLock, lockModel, ephemeral = false, winBounds, recreateCwd = false, ignoreNoConvo = false, onCreateResult }) {
     try { track('event', `session-create:${backend || 'claude'}:${mode || 'default'}`); } catch {}
     cwd = stripCwdHostLabel(cwd); // merged-record display cwd ("host: /path") must never reach a spawn
     this._hideWelcome();
@@ -61,7 +61,8 @@ export function installSessionLifecycle(App, ctx = {}) {
       resume: !!resumeId, resumeId: resumeId||undefined, fork: fork||undefined, cols:120, rows:30, reqId,
       taskId: taskId || undefined, // spawns VIBESPACE_TASK_ID into the agent env
       accountId: accountId || undefined, // billing identity: undefined=server default, 'subscription', or acct-… key id
-      modelLock: modelLock || undefined, // #6: pin the target model — spawn disables fallback so a safety reroute never sticks
+      modelLock: modelLock || undefined, // #6 lock v2: the server re-pins the target model after any fallback
+      lockModel: lockModel || undefined, // explicit lock TARGET (review-caught: inferring from the spawn model re-targeted to claude.defaultModel)
       recreateCwd: recreateCwd || undefined, // B-7812: user danger-confirmed rebuilding a missing cwd
       ignoreNoConvo: ignoreNoConvo || undefined, // 2.227.3: user chose to retry past the no-transcript breaker
     };
@@ -586,7 +587,8 @@ export function installSessionLifecycle(App, ctx = {}) {
       permission: permission !== undefined ? permission : savedCfg.permission,
       effort: effort !== undefined ? effort : savedCfg.effort,
       accountId: accountId !== undefined ? accountId : savedCfg.account,
-      modelLock: savedCfg.modelLock,  // #6: a locked conversation stays locked across resume (disables fallback at spawn)
+      modelLock: savedCfg.modelLock,  // #6 lock v2: a locked conversation stays locked across resume (re-pin re-arms)
+      lockModel: savedCfg.lockModel,
       syncId,
       backend,
       keeperSid,

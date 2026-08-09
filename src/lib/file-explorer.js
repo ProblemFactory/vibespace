@@ -1,4 +1,4 @@
-import { formatSize, attachPopoverClose, createPopover, createModalShell, showContextMenu, getStateSync, copyText, escHtml, frontTruncate, uploadFilesBatched, showInputDialog, showConfirmDialog, showToast, collectDroppedFiles } from './utils.js';
+import { formatSize, attachPopoverClose, createPopover, createModalShell, showContextMenu, getStateSync, copyText, escHtml, frontTruncate, uploadFilesBatched, showInputDialog, showConfirmDialog, showToast, collectDroppedFiles, uiScale } from './utils.js';
 import { installExplorerUploads } from './file-explorer-uploads.js';
 import { installExplorerOps } from './file-explorer-ops.js';
 import { setupDirAutocomplete } from './autocomplete.js';
@@ -661,7 +661,7 @@ class FileExplorer {
 
   _startColumnResize(col, headerEl, startEvent) {
     const startX = startEvent.clientX;
-    const startWidth = headerEl.getBoundingClientRect().width;
+    const startWidth = headerEl.offsetWidth; // layout px — gBCR is viewport px and compounded ×zoomⁿ into localStorage (F4)
     let currentWidth = startWidth;
     let rafId = null;
     let moved = false;
@@ -669,7 +669,7 @@ class FileExplorer {
 
     const onMove = (e) => {
       moved = true;
-      const dx = e.clientX - startX;
+      const dx = (e.clientX - startX) / uiScale(); // viewport→layout px
       currentWidth = Math.max(20, startWidth + dx);
       if (rafId) return;
       rafId = requestAnimationFrame(() => {

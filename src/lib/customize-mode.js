@@ -1,3 +1,4 @@
+import { uiScale } from './utils.js';
 // CustomizeMode — Firefox-style "Customize Toolbar" edit mode for the chrome.
 //
 // Instead of hunting through the Settings dialog for abstract toggle names,
@@ -375,9 +376,10 @@ export class CustomizeMode {
 
     // position near the spring (above by default, below if clipped)
     const r = el.getBoundingClientRect();
-    const ph = pop.offsetHeight || 34;
-    pop.style.top = (r.top - ph - 8 > 0 ? r.top - ph - 8 : r.bottom + 8) + 'px';
-    pop.style.left = Math.max(8, Math.min(r.left + r.width / 2 - pop.offsetWidth / 2, innerWidth - pop.offsetWidth - 8)) + 'px';
+    const Zc = uiScale(); // viewport→layout px for fixed body children
+    const ph = (pop.offsetHeight || 34) * Zc;
+    pop.style.top = ((r.top - ph - 8 > 0 ? r.top - ph - 8 : r.bottom + 8) / Zc) + 'px';
+    pop.style.left = (Math.max(8, Math.min(r.left + r.width / 2 - (pop.offsetWidth * Zc) / 2, innerWidth - pop.offsetWidth * Zc - 8)) / Zc) + 'px';
 
     const close = (e) => {
       if (pop.contains(e.target) || el.contains(e.target)) return;
@@ -425,8 +427,8 @@ export class CustomizeMode {
         tip.style.display = el2 ? '' : 'none';
         if (el2) {
           tip.textContent = `+${Math.round(el2.getBoundingClientRect().width)}px — click to add`;
-          tip.style.left = (lastMove.clientX + 14) + 'px';
-          tip.style.top = (lastMove.clientY + 16) + 'px';
+          tip.style.left = (lastMove.clientX / uiScale() + 14) + 'px';
+          tip.style.top = (lastMove.clientY / uiScale() + 16) + 'px';
         }
       });
     };
@@ -501,8 +503,8 @@ export class CustomizeMode {
           el.classList.add('cz-drag-src');
           for (const z of ZONE_IDS) zoneEl(z)?.classList.add('cz-zone-allowed');
         }
-        ghost.style.left = ev.clientX + 'px';
-        ghost.style.top = ev.clientY + 'px';
+        ghost.style.left = (ev.clientX / uiScale()) + 'px';
+        ghost.style.top = (ev.clientY / uiScale()) + 'px';
         // Zone hit-test (ghost is pointer-events:none via CSS)
         const under = document.elementFromPoint(ev.clientX, ev.clientY);
         const zone = under?.closest('[data-zone]');
@@ -663,11 +665,12 @@ export class CustomizeMode {
       // toolbar targets: chip below the bar; taskbar targets: above (flipped
       // when the taskbar is docked top)
       const below = inTaskbar ? taskbarTop : true;
-      chip.style.top = (below ? r.bottom + 6 : r.top - ch - 6) + 'px';
+      chip.style.top = ((below ? r.bottom + 6 : r.top - ch * uiScale() - 6) / uiScale()) + 'px';
       // taskbar-items spans most of the bar — centering its chip would collide
       // with the (centered) taskbar pill, so anchor it at the strip's left end
-      const anchorX = target.key === 'taskbar-items' ? r.left + 8 : r.left + r.width / 2 - chip.offsetWidth / 2;
-      chip.style.left = Math.max(8, Math.min(anchorX, innerWidth - chip.offsetWidth - 8)) + 'px';
+      const chipW = chip.offsetWidth * uiScale();
+      const anchorX = target.key === 'taskbar-items' ? r.left + 8 : r.left + r.width / 2 - chipW / 2;
+      chip.style.left = (Math.max(8, Math.min(anchorX, innerWidth - chipW - 8)) / uiScale()) + 'px';
     }
   }
 

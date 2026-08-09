@@ -1,5 +1,5 @@
 import { createAgentKindIcon } from './agent-meta.js';
-import { escHtml } from './utils.js';
+import { escHtml , uiScale } from './utils.js';
 
 /**
  * Tab grouping — mixin methods for WindowManager.
@@ -119,8 +119,10 @@ const tabGroupMethods = {
         ghost.innerHTML = `<span>${ghostIcon}</span><span>${escHtml(winInfo.title)}</span>`;
         document.body.appendChild(ghost);
       }
-      ghost.style.left = (e.clientX + 12) + 'px';
-      ghost.style.top = (e.clientY + 12) + 'px';
+      // /uiScale(): ghost is a body child — layout px differ from viewport px
+      // under the DPI zoom (see window.js drag note)
+      ghost.style.left = (e.clientX / uiScale() + 12) + 'px';
+      ghost.style.top = (e.clientY / uiScale() + 12) + 'px';
 
       targetWin = this._detectTabMergeTarget(e.clientX, e.clientY, winInfo.id, [ghost]);
       for (const [, w] of this.windows) {
@@ -347,8 +349,8 @@ const tabGroupMethods = {
         // (sidebar/toolbar offset) — same fix as window.js's un-snap re-anchor
         const w = parseInt(win.element.style.width) || 700;
         const wr0 = this.workspace.getBoundingClientRect();
-        win.element.style.left = ((e.clientX - wr0.left) - w / 2) + 'px';
-        win.element.style.top = ((e.clientY - wr0.top) - 15) + 'px';
+        win.element.style.left = ((e.clientX - wr0.left) / uiScale() - w / 2) + 'px';
+        win.element.style.top = ((e.clientY - wr0.top) / uiScale() - 15) + 'px';
         win.element.classList.add('dragging');
         if (this.grid) this.gridOverlay.classList.add('dragging');
       }
@@ -389,16 +391,16 @@ const tabGroupMethods = {
       }
 
       if (mergeGhost) {
-        mergeGhost.style.left = (e.clientX + 12) + 'px';
-        mergeGhost.style.top = (e.clientY + 12) + 'px';
+        mergeGhost.style.left = (e.clientX / uiScale() + 12) + 'px';
+        mergeGhost.style.top = (e.clientY / uiScale() + 12) + 'px';
       } else {
         // Not in merge zone: window follows cursor + snap/grid indicators
         // (cursor converted to workspace space — viewport coords drift by the
         // sidebar width otherwise)
         const w = parseInt(win.element.style.width) || 700;
         const wr1 = this.workspace.getBoundingClientRect();
-        win.element.style.left = ((e.clientX - wr1.left) - w / 2) + 'px';
-        win.element.style.top = ((e.clientY - wr1.top) - 15) + 'px';
+        win.element.style.left = ((e.clientX - wr1.left) / uiScale() - w / 2) + 'px';
+        win.element.style.top = ((e.clientY - wr1.top) / uiScale() - 15) + 'px';
         if (!e.altKey) {
           if (this.grid) this._showGridHighlight(e.clientX, e.clientY);
           else this._showSnap(e.clientX, e.clientY);
@@ -456,8 +458,8 @@ const tabGroupMethods = {
         // (workspace space — see the detach-site note)
         const w = parseInt(win.element.style.width) || 700;
         const wr2 = this.workspace.getBoundingClientRect();
-        win.element.style.left = ((e.clientX - wr2.left) - w / 2) + 'px';
-        win.element.style.top = ((e.clientY - wr2.top) - 15) + 'px';
+        win.element.style.left = ((e.clientX - wr2.left) / uiScale() - w / 2) + 'px';
+        win.element.style.top = ((e.clientY - wr2.top) / uiScale() - 15) + 'px';
       }
       savedBounds = null;
 

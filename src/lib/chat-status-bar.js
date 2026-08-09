@@ -1,4 +1,4 @@
-import { escHtml, showInputDialog } from './utils.js';
+import { escHtml, showInputDialog, uiScale, showToast } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { t } from './i18n.js';
 
@@ -113,6 +113,9 @@ export class ChatStatusBar {
     if (status.permissionModes) this._permissionModes = status.permissionModes;
     if (status.effort) this._statusEffort = status.effort;
     if (status.modelLocked != null) this._modelLocked = !!status.modelLocked;
+    // 'in' not truthy: the server always sends lockedModel (null after an
+    // unlock) — a truthy guard left other clients showing the stale target
+    if ('lockedModel' in status) this._lockedModel = status.lockedModel || null;
     if (status.sandbox) this._statusSandbox = status.sandbox;
     if (status.totalUsage) this._statusTotalUsage = status.totalUsage;
     this.render();
@@ -291,8 +294,11 @@ export class ChatStatusBar {
         : known
           ? t('Model (as last reported by the CLI) — click to change')
           : t('Model not reported by the CLI yet — click to set');
-      const label = locked ? '🔒 ' + escHtml(this._statusModel || '?') : (mismatch ? `\u26a0 ${escHtml(this._servedModel)}` : (known ? escHtml(this._statusModel) : t('model: ?')));
-      parts.push(`<span class="chat-status-model chat-status-clickable${known ? '' : ' chat-status-dim'}${mismatch && !locked ? ' chat-status-model-fallback' : ''}${locked ? ' chat-status-model-locked' : ''}" title="${escHtml(title)}${locked ? ' \u00b7 ' + t('LOCKED (fallback off)') : ''}">${label}</span>`);
+      const lockTip = locked ? ' \u00b7 ' + t('LOCKED — retries {model} after any fallback', { model: this._lockedModel || this._statusModel || '?' }) : '';
+      const label = locked
+        ? UI_ICONS.lock + (mismatch ? `\u26a0 ${escHtml(this._servedModel)}` : escHtml(this._statusModel || '?'))
+        : (mismatch ? `\u26a0 ${escHtml(this._servedModel)}` : (known ? escHtml(this._statusModel) : t('model: ?')));
+      parts.push(`<span class="chat-status-model chat-status-clickable${known ? '' : ' chat-status-dim'}${mismatch ? ' chat-status-model-fallback' : ''}${locked ? ' chat-status-model-locked' : ''}" title="${escHtml(title)}${escHtml(lockTip)}">${label}</span>`);
       const eKnown = !!this._statusEffort;
       const eTitle = eKnown
         ? (this._backend === 'codex'
@@ -463,8 +469,8 @@ export class ChatStatusBar {
       const rect = anchor.getBoundingClientRect();
       const containerRect = container.getBoundingClientRect();
       dropdown.style.position = 'absolute';
-      dropdown.style.bottom = (containerRect.bottom - rect.top + 4) + 'px';
-      dropdown.style.left = (rect.left - containerRect.left) + 'px';
+      dropdown.style.bottom = ((containerRect.bottom - rect.top + 4) / uiScale()) + 'px';
+      dropdown.style.left = ((rect.left - containerRect.left) / uiScale()) + 'px';
       container.appendChild(dropdown);
       const close = (ev) => {
         if (!dropdown.contains(ev.target) && ev.target !== anchor) {
@@ -748,7 +754,11 @@ export class ChatStatusBar {
       const backend = this._backend === 'codex' ? 'codex' : 'claude';
       const pick = (model) => {
         this._ws.send({ type: 'set-model', sessionId: this._sessionId, model });
-        this._onConfigChange?.({ model });
+        // changing the model while LOCKED re-targets the lock (A4 sub-item:
+        // the tooltip kept naming the old target while the server retried the
+        // new one) — the server's retarget branch does the same with data.model
+        if (this._modelLocked) this._lockedModel = model;
+        this._onConfigChange?.({ model, ...(this._modelLocked ? { lockModel: model } : {}) });
         // optimistic; the CLI's own confirmation (set_model echo / codex
         // turn_context) overwrites this with the RESOLVED id
         this._statusModel = model;
@@ -772,24 +782,28 @@ export class ChatStatusBar {
         };
         dropdown.appendChild(custom);
       };
-      // #6 model LOCK toggle: disable fallback for this conversation, so a
-      // safety-reroute SURFACES instead of silently switching to an older opus
-      // (the user's '总是变成opus 4.8'). Claude only — codex has no fallback
-      // mechanism, so the toggle would be a silent no-op that falsely implies
-      // protection (review-caught).
+      // #6 model LOCK v2: record a TARGET model — the server re-pins it at
+      // every turn end where the served model drifted, so a safety-reroute
+      // completes its turn on the fallback but every subsequent turn retries
+      // the original (the user's '总是变成opus 4.8' fix). Claude only — codex
+      // has no fallback mechanism (a toggle would falsely imply protection).
       if (this._backend !== 'codex') {
         const lockItem = document.createElement('div');
         lockItem.className = 'chat-status-dropdown-item' + (this._modelLocked ? ' active' : '');
-        lockItem.textContent = this._modelLocked ? t('\uD83D\uDD13 Unlock model (allow fallback)') : t('\uD83D\uDD12 Lock to this model (no fallback)');
+        lockItem.classList.add('chat-status-dropdown-lock');
+        lockItem.innerHTML = (this._modelLocked ? UI_ICONS.unlock : UI_ICONS.lock) + '<span>' + escHtml(this._modelLocked ? t('Unlock model') : t('Lock to this model (auto-retry after fallback)')) + '</span>';
         lockItem.onclick = (ev) => {
           ev.stopPropagation(); dropdown.remove();
           const nowLock = !this._modelLocked;
+          if (nowLock && !this._statusModel) { showToast(t('Model not reported yet — send a message first, then lock'), { type: 'error' }); return; }
           this._modelLocked = nowLock;
-          // Pure fallback-policy toggle — never re-issue the model (a redundant
-          // set-model echoed a 'Set model to X' record on every lock; the lock
-          // keeps whatever model is current).
-          this._ws.send({ type: 'set-model', sessionId: this._sessionId, lock: nowLock });
-          this._onConfigChange?.({ modelLock: nowLock });
+          this._lockedModel = nowLock ? (this._statusModel || null) : null;
+          // v2: the lock records a TARGET model — the server re-pins it after
+          // any fallback at turn end. No set-model is issued at lock time.
+          this._ws.send({ type: 'set-model', sessionId: this._sessionId, lock: nowLock, lockModel: nowLock ? (this._statusModel || undefined) : undefined });
+          // Persist the target as the session's model config too, so a resume
+          // spawns on it and the lock re-arms with the right target.
+          this._onConfigChange?.({ modelLock: nowLock, lockModel: nowLock ? this._statusModel : undefined, ...(nowLock && this._statusModel ? { model: this._statusModel } : {}) });
           this.render();
         };
         dropdown.appendChild(lockItem);

@@ -414,7 +414,7 @@ export function installSidebarState(SidebarClass) {
     // was added in 2.132.0 (the Session Properties toggle never saved — third
     // strike of the same bug) — keep it in sync with EVERY per-session config
     // writer (gear popover rows + Session Properties toggles).
-    for (const k of ['model', 'effort', 'permission', 'account', 'groupManager', 'modelLock']) {
+    for (const k of ['model', 'effort', 'permission', 'account', 'groupManager', 'modelLock', 'lockModel']) {
       if (config?.[k]) clean[k] = config[k];
     }
     if (Object.keys(clean).length) this._sessionConfigs[stateKey] = clean;

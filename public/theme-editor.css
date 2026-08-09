@@ -1,7 +1,7 @@
 /* ── Theme Editor (floating panel) ── */
 .theme-editor-panel {
   position: fixed; top: 60px; right: 20px;
-  width: 420px; height: 70vh;
+  width: 420px; height: calc(70vh / var(--ui-scale, 1));
   background: var(--bg-dialog); border: 1px solid var(--border);
   border-radius: calc(var(--radius) * 1.5); box-shadow: 0 12px 40px rgba(0,0,0,0.5);
   display: flex; flex-direction: column; overflow: hidden;

@@ -126,7 +126,7 @@ html, body {
 .session-card-main { display: flex; align-items: center; gap: 5px; min-width: 0; }
 .session-card-sub { display: flex; min-width: 0; }
 /* cwd: left-truncate (elide the front, keep the meaningful tail) like folder-path */
-.session-card-cwd { font-size: 9px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; min-width: 0; }
+.session-card-cwd { font-size: calc(9px * var(--ui-font-scale, 1)); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; min-width: 0; }
 .session-card-cwd::before { content: '\200e'; }
 /* Connection-status dot (left of the name): LIVE/TMUX green, EXTERNAL amber, STOPPED dim */
 /* Connection status as a TOP-RIGHT corner dot on the backend icon (2.224.0
@@ -211,7 +211,7 @@ html, body {
 .instant-tooltip { position: fixed; z-index: 100000; pointer-events: none; background: var(--bg-dialog); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px 8px; font-size: 11px; line-height: 1.4; max-width: 300px; box-shadow: 0 2px 10px rgba(0,0,0,0.4); }
 .badge-config { padding: 1px 3px; display: inline-flex; align-items: center; }
 .badge-config svg { width: 10px; height: 10px; }
-.session-card-name { font-size: 11px; font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.session-card-name { font-size: calc(11px * var(--ui-font-scale, 1)); font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
 .backend-icon {
   --backend-icon-color: currentColor;
   width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center;
@@ -442,7 +442,7 @@ html, body {
    the auto margin) — give the actions their own small gap. */
 /* Manage Agents dialog: wider than the 440px default — its rows carry real
    button groups (login/update, accounts) that truncate/wrap at 440px */
-.dialog.agents-dialog { width: 560px; max-width: 92vw; }
+.dialog.agents-dialog { width: 560px; max-width: calc(92vw / var(--ui-scale, 1)); }
 .agents-dialog .agent-btn { white-space: nowrap; }
 /* Anthropic accounts section (Manage Agents) + setup wizard */
 .acct-section { flex-direction: column; align-items: stretch; }
@@ -615,7 +615,7 @@ html, body {
 .folder-group { margin-bottom: 2px; }
 .folder-header {
   display: flex; align-items: center; gap: 4px; padding: 5px 8px; cursor: pointer;
-  font-size: 11px; font-weight: 600; color: var(--text-secondary);
+  font-size: calc(11px * var(--ui-font-scale, 1)); font-weight: 600; color: var(--text-secondary);
   border-radius: var(--radius-sm); transition: background var(--transition);
 }
 .folder-header:hover { background: var(--bg-hover); }
@@ -718,7 +718,10 @@ html, body {
 
 /* ── Main Wrapper ── */
 #main-wrapper {
-  display: flex; flex-direction: column; height: 100vh; height: 100dvh;
+  display: flex; flex-direction: column;
+  /* /--ui-scale: under the body DPI zoom, 100dvh resolves in zoomed px and
+     would overflow (>100%) or undershoot (<100%) the real viewport */
+  height: calc(100vh / var(--ui-scale, 1)); height: calc(100dvh / var(--ui-scale, 1));
   transition: margin-left 0.2s ease;
 }
 /* Maintenance-mode strip (operator-onsite transparency) — first flex child
@@ -747,7 +750,7 @@ html, body {
 }
 #mb-timeline {
   position: absolute; top: 100%; right: 12px; z-index: 9500; min-width: 280px; max-width: 460px;
-  max-height: 45vh; overflow-y: auto; padding: 8px 10px;
+  max-height: calc(45vh / var(--ui-scale, 1)); overflow-y: auto; padding: 8px 10px;
   background: var(--bg-dialog); border: 1px solid var(--border);
   border-radius: var(--radius, 8px); box-shadow: 0 8px 24px rgba(0,0,0,0.35);
   text-align: left; font-size: 11px;
@@ -903,7 +906,7 @@ html, body {
 .window-backend-icon { width: 14px; height: 14px; font-size: 8px; }
 .window-agent-kind-icon { width: 12px; height: 12px; font-size: 8px; }
 .window-title {
-  font-size: 11px; font-weight: 500; color: var(--text-secondary);
+  font-size: calc(11px * var(--ui-font-scale, 1)); font-weight: 500; color: var(--text-secondary);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; margin-right: 8px;
 }
 .window-active .window-title { color: var(--text); }
@@ -1085,7 +1088,7 @@ html, body {
   transition: left 0.05s, top 0.05s;
 }
 .desktop-preview-label {
-  text-align: center; font-size: var(--desktop-label-size, 7px); color: var(--text-dim); line-height: 1;
+  text-align: center; font-size: calc(var(--desktop-label-size, 7px) * var(--ui-font-scale, 1)); color: var(--text-dim); line-height: 1;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   max-width: var(--desktop-preview-w, 48px); pointer-events: none;
 }
@@ -1266,10 +1269,10 @@ html, body {
 }
 .taskbar-text { display: flex; flex-direction: column; min-width: 0; gap: 0; }
 .taskbar-title {
-  font-size: var(--taskbar-title-size, 10px); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: calc(var(--taskbar-title-size, 10px) * var(--ui-font-scale, 1)); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .taskbar-subtitle {
-  font-size: var(--taskbar-sub-size, 9px); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: calc(var(--taskbar-sub-size, 9px) * var(--ui-font-scale, 1)); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 /* Tab-group stacked taskbar item (Windows-style) */
 .taskbar-group { overflow: visible; } /* let the count badge poke out */
@@ -1308,7 +1311,7 @@ html, body {
 #taskbar-status svg { display: block; opacity: 0.75; }
 .taskbar-context-menu { min-width: 100px; }
 /* item base lives in viewers.css (.context-menu-item); keep taskbar items identical */
-.taskbar-context-menu-item { padding: 5px 12px; font-size: 11px; cursor: pointer; color: var(--text-secondary); display: flex; align-items: center; gap: 8px; }
+.taskbar-context-menu-item { padding: 5px 12px; font-size: calc(11px * var(--ui-font-scale, 1)); cursor: pointer; color: var(--text-secondary); display: flex; align-items: center; gap: 8px; }
 .taskbar-context-menu-item:hover { background: var(--bg-hover); color: var(--text); }
 
 /* ── Dialogs ── */
@@ -1321,7 +1324,7 @@ html, body {
 .dialog {
   background: var(--bg-dialog); border: 1px solid var(--border);
   border-radius: calc(var(--radius) * 1.5); box-shadow: 0 16px 48px rgba(0,0,0,0.5);
-  width: 440px; max-height: 80vh; overflow: hidden; display: flex; flex-direction: column;
+  width: 440px; max-height: calc(80vh / var(--ui-scale, 1)); overflow: hidden; display: flex; flex-direction: column;
 }
 .dialog.hidden { display: none; }
 .dialog-header {
@@ -1361,7 +1364,7 @@ html, body {
 .settings-dialog {
   background: var(--bg-dialog); border: 1px solid var(--border);
   border-radius: calc(var(--radius) * 1.5); box-shadow: 0 16px 48px rgba(0,0,0,0.5);
-  width: 720px; max-width: 90vw; height: 75vh; max-height: 80vh;
+  width: 720px; max-width: calc(90vw / var(--ui-scale, 1)); height: calc(75vh / var(--ui-scale, 1)); max-height: calc(80vh / var(--ui-scale, 1));
   display: flex; flex-direction: column; overflow: hidden;
 }
 /* When hosted in a WindowManager window (non-blocking mode) the window chrome
@@ -1731,8 +1734,8 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
 @media (max-width: 768px) {
   /* Sidebar: full-width overlay (z-index must beat window z-index which can be 10000+) */
   .sidebar {
-    width: 100vw !important; max-width: 100vw; z-index: 90000;
-    height: 100vh !important; height: 100dvh !important;
+    width: calc(100vw / var(--ui-scale, 1)) !important; max-width: calc(100vw / var(--ui-scale, 1)); z-index: 90000;
+    height: calc(100vh / var(--ui-scale, 1)) !important; height: calc(100dvh / var(--ui-scale, 1)) !important;
     position: fixed !important; top: 0; left: 0;
   }
   .sidebar .sidebar-section { -webkit-overflow-scrolling: touch; }
@@ -1753,12 +1756,12 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
   .usage-popup {
     left: 8px !important; right: 8px !important; top: 48px !important;
     bottom: auto !important; width: auto !important; max-width: none;
-    max-height: calc(100dvh - 60px); z-index: 90001;
+    max-height: calc(calc(100dvh / var(--ui-scale, 1)) - 60px); z-index: 90001;
   }
   .global-settings-popover {
     left: 8px !important; right: 8px !important; top: 48px !important;
     width: auto !important; max-width: none;
-    max-height: calc(100dvh - 60px); overflow-y: auto; z-index: 90001;
+    max-height: calc(calc(100dvh / var(--ui-scale, 1)) - 60px); overflow-y: auto; z-index: 90001;
   }
 
 
@@ -1820,7 +1823,7 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
   /* Dialogs */
   /* min-width !important: createModalShell's wide variant sets an inline
      min-width (440px) that would out-rank the width clamp and overflow phones */
-  .dialog { width: 95vw !important; min-width: 0 !important; max-width: none; max-height: 85vh; max-height: 85dvh; overflow-y: auto; }
+  .dialog { width: calc(95vw / var(--ui-scale, 1)) !important; min-width: 0 !important; max-width: none; max-height: calc(85vh / var(--ui-scale, 1)); max-height: calc(85dvh / var(--ui-scale, 1)); overflow-y: auto; }
   /* Settings is a window now; the .settings-window rule fills its window. Keep
      the stacked nav layout on narrow screens. */
   .settings-body { flex-direction: column; }
@@ -1838,7 +1841,7 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
   .folder-group { display: none; }
 
   /* Popovers: prevent going off-screen on mobile */
-  .session-config-popover, .upload-popover, .file-view-menu { max-width: 90vw; }
+  .session-config-popover, .upload-popover, .file-view-menu { max-width: calc(90vw / var(--ui-scale, 1)); }
 }
 
 /* Mobile terminal key toolbar (hidden on desktop) */
@@ -1879,7 +1882,7 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
 #global-toasts.gt-anchored { align-items: flex-end; }
 .global-toast {
   display: flex; align-items: flex-start; gap: 8px;
-  max-width: min(560px, 86vw); padding: 9px 10px 9px 12px; border-radius: var(--radius);
+  max-width: min(560px, calc(86vw / var(--ui-scale, 1))); padding: 9px 10px 9px 12px; border-radius: var(--radius);
   background: var(--bg-dialog); color: var(--text);
   border: 1px solid var(--border); border-left: 3px solid var(--accent);
   box-shadow: 0 8px 24px rgba(0,0,0,0.35);
@@ -2047,7 +2050,7 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .gs-menu-item {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 8px; margin: 0 -4px; border-radius: var(--radius-sm);
-  font-size: 12px; color: var(--text); cursor: pointer;
+  font-size: calc(12px * var(--ui-font-scale, 1)); color: var(--text); cursor: pointer;
 }
 .gs-menu-item:hover { background: var(--bg-hover); }
 .gs-menu-item.danger { color: var(--red); }
@@ -2175,7 +2178,7 @@ body.taskbar-top .cz-panel { bottom: 32px; }
 #toolbar #desktop-previews { align-items: center; height: 100%; }
 #toolbar .desktop-preview { width: var(--toolbar-preview-w, 34px); height: var(--toolbar-preview-h, 20px); }
 #toolbar .desktop-preview-add { width: 14px; height: var(--toolbar-preview-h, 20px); font-size: 10px; }
-#toolbar .desktop-preview-label { font-size: var(--toolbar-preview-label, 8px); line-height: 1; }
+#toolbar .desktop-preview-label { font-size: calc(var(--toolbar-preview-label, 8px) * var(--ui-font-scale, 1)); line-height: 1; }
 #toolbar .taskbar-usage { --usage-pie-size: 15px; }
 #toolbar #taskbar-status { font-size: 10px; }
 /* Toolbar-hosted layout presets / buttons dropped into the taskbar just work
@@ -2494,7 +2497,7 @@ label.cfg-row {
 /* ── Ctrl+K session palette ── */
 .palette-overlay { position: fixed; inset: 0; z-index: 99997; background: rgba(0,0,0,0.35); display: flex; justify-content: center; }
 .palette {
-  margin-top: 12vh; width: min(560px, 90vw); height: fit-content;
+  margin-top: calc(12vh / var(--ui-scale, 1)); width: min(560px, calc(90vw / var(--ui-scale, 1))); height: fit-content;
   background: var(--bg-dialog); border: 1px solid var(--border-active); border-radius: var(--radius);
   box-shadow: 0 16px 48px rgba(0,0,0,0.5); overflow: hidden;
 }
@@ -2502,7 +2505,7 @@ label.cfg-row {
   width: 100%; box-sizing: border-box; padding: 12px 14px; font-size: 14px;
   border: none; border-bottom: 1px solid var(--border); background: var(--bg-input); color: var(--text); outline: none;
 }
-.palette-list { max-height: 46vh; overflow-y: auto; padding: 4px; }
+.palette-list { max-height: calc(46vh / var(--ui-scale, 1)); overflow-y: auto; padding: 4px; }
 .palette-item {
   display: flex; align-items: center; gap: 8px; padding: 7px 10px;
   border-radius: var(--radius-sm); cursor: pointer; font-size: 12px;
@@ -2978,7 +2981,7 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .ucl-newtag { margin-left: 8px; font-size: 10px; }
 .ucl-latesttag { color: var(--text-dim); border: 1px solid var(--border); border-radius: 999px; padding: 0 7px; }
 .ucl-sub { font-size: 11px; color: var(--text-secondary); margin-bottom: 6px; }
-.ucl-list { max-height: min(420px, 55vh); overflow-y: auto; display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; min-height: 40px; }
+.ucl-list { max-height: min(420px, calc(55vh / var(--ui-scale, 1))); overflow-y: auto; display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; min-height: 40px; }
 .ucl-list .empty-hint { padding: 12px 0; }
 .ucl-entry { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; }
 .ucl-ver { font-size: 12px; font-weight: 600; color: var(--accent); margin-bottom: 4px; }
@@ -2986,8 +2989,8 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 
 /* Inbox readability (user request): selectable text + dedicated viewer */
 .ut-text, .ut-detail, .ut-hist-msg { user-select: text; cursor: text; }
-.ut-viewer-body { width: min(560px, 92vw); }
-.ut-viewer-md { user-select: text; font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; max-height: min(480px, 60vh); overflow-y: auto; }
+.ut-viewer-body { width: min(560px, calc(92vw / var(--ui-scale, 1))); }
+.ut-viewer-md { user-select: text; font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; max-height: min(480px, calc(60vh / var(--ui-scale, 1))); overflow-y: auto; }
 .ut-viewer-md p { margin: 0 0 8px; }
 .ut-viewer-md code { background: var(--bg-input); padding: 0 4px; border-radius: 3px; font-size: 11px; }
 .ut-viewer-md pre { background: var(--bg-input); padding: 8px; border-radius: var(--radius-sm); overflow-x: auto; }
@@ -2998,7 +3001,7 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
    with overflow:hidden, so a body min-width overflowed and got CLIPPED on the
    right (terminal box + status text ran past the dialog edge — real report).
    Size the dialog like .agents-dialog does; the body just fills it. */
-.dialog.guided-cli-dialog { width: min(760px, 94vw); }
+.dialog.guided-cli-dialog { width: min(760px, calc(94vw / var(--ui-scale, 1))); }
 .guided-cli-body { width: 100%; }
 .guided-cli-status { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
 .guided-cli-status .gc-msg { min-width: 0; } /* let the message wrap instead of overflowing the flex row */
@@ -3009,7 +3012,7 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .selfupd-phase { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 8px; }
 .selfupd-phase .ob-ok { color: var(--green, #3fb950); font-weight: 600; }
 .selfupd-phase .ob-bad { color: var(--red, #e55); font-weight: 600; }
-.selfupd-log { max-height: 280px; min-width: min(640px, 90vw); overflow: auto; font-family: monospace; font-size: 11px; line-height: 1.45; background: var(--bg-root); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; white-space: pre-wrap; word-break: break-all; color: var(--text-secondary); }
+.selfupd-log { max-height: 280px; min-width: min(640px, calc(90vw / var(--ui-scale, 1))); overflow: auto; font-family: monospace; font-size: 11px; line-height: 1.45; background: var(--bg-root); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; white-space: pre-wrap; word-break: break-all; color: var(--text-secondary); }
 
 /* ── Dynamic desktop (Stage) ── */
 .stage-preview { border-style: dashed !important; }
@@ -3280,9 +3283,23 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 /* Finished agent card status line (2.233.1) */
 .chat-agent-status-done { opacity: 0.7; font-style: normal; }
 
+/* Pool members dialog. `.dialog-body label.pool-mem-row`: must out-rank
+   `.dialog-body label` (0,1,1) which forces display:block — same class as the
+   label.cfg-row precedent. */
+.dialog-body label.pool-mem-row, .pool-mem-row { display: flex; flex-direction: row; align-items: flex-start; gap: 8px; padding: 5px 2px; font-size: 12px; color: var(--text); cursor: pointer; }
+.pool-mem-row input { margin-top: 2px; flex-shrink: 0; }
+.pool-mem-all { border-bottom: 1px solid var(--border); margin-bottom: 4px; padding-bottom: 8px; }
+.pool-mem-sub { font-size: 10px; color: var(--text-dim); }
+.pool-mem-list { max-height: 300px; overflow-y: auto; }
+
 /* Long-lived token dialog (B-211a) */
 .oat-steps { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; font-size: 12px; color: var(--text-secondary); }
 .oat-row { margin: 8px 0; }
 
 .chat-status-dropdown-sep { height: 1px; background: var(--border); margin: 3px 0; }
-.chat-status-model.chat-status-model-locked { color: var(--accent-hover); font-weight: 600; }
+/* Locked model badge: keep the base pill colors (accent bg + --bg-root text —
+   the earlier color:var(--accent-hover) override was accent-on-accent washout,
+   real report). The lock is an SVG in currentColor so it matches the text. */
+.chat-status-model.chat-status-model-locked { display: inline-flex; align-items: center; gap: 3px; }
+.chat-status-dropdown-lock { display: flex; align-items: center; gap: 6px; }
+.chat-status-dropdown-lock svg { color: var(--text-secondary); }

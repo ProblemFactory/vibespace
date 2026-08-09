@@ -4,7 +4,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { THEMES } from './themes.js';
-import { attachPopoverClose, showToast } from './utils.js';
+import { attachPopoverClose, showToast, uiScale } from './utils.js';
 import { t } from './i18n.js';
 
 // Web fonts loaded via Google Fonts (always available)
@@ -625,7 +625,7 @@ class TerminalSession {
     pop.style.zIndex = '99999';
     pop.dataset.popover = '1';
     const rect = anchor.getBoundingClientRect();
-    pop.style.top = (rect.bottom + 4) + 'px'; pop.style.right = (window.innerWidth - rect.right) + 'px';
+    pop.style.top = ((rect.bottom + 4) / uiScale()) + 'px'; pop.style.right = ((window.innerWidth - rect.right) / uiScale()) + 'px';
 
     const opt = (v, l) => { const o = document.createElement('option'); o.value = v; o.textContent = l; return o; };
 

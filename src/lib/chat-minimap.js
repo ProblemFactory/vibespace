@@ -3,7 +3,7 @@
  * User message markers (blue), compact markers (red), drag-to-jump with floating label.
  * TOC button (top of the track) opens a filterable outline of all user messages.
  */
-import { createPopover } from './utils.js';
+import { createPopover, uiScale } from './utils.js';
 import { t } from './i18n.js';
 
 export class ChatMinimap {
@@ -297,7 +297,7 @@ export class ChatMinimap {
       this._label.appendChild(tEl);
       if (preview) { const pEl = document.createElement('div'); pEl.className = 'chat-minimap-label-preview'; pEl.textContent = preview; this._label.appendChild(pEl); }
       this._label.classList.remove('hidden');
-      this._label.style.top = (e.clientY - containerRect.top) + 'px';
+      this._label.style.top = ((e.clientY - containerRect.top) / uiScale()) + 'px'; // viewport→layout px
       // Emphasize the hovered turn's marker so the eye can track it
       const marker = this._markerByTurn.get(turn) || null;
       if (this._hoverMarker && this._hoverMarker !== marker) this._hoverMarker.classList.remove('chat-minimap-marker-hover');

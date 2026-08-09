@@ -1,7 +1,7 @@
 import { marked } from 'marked';
 import { HexViewer } from './hex-viewer.js';
 import { CodeEditor } from './code-editor.js';
-import { formatSize, escHtml, showConfirmDialog, showInputDialog, showToast } from './utils.js';
+import { formatSize, escHtml, showConfirmDialog, showInputDialog, showToast, uiScale } from './utils.js';
 import { hasDedicatedViewer, getViewerType, getFileIcon } from './file-types.js';
 import { FILE_ICONS } from './icons.js';
 import { renderAsync as renderDocx } from 'docx-preview';
@@ -482,7 +482,7 @@ class FileViewer {
     sidebarHandle.addEventListener('mousedown', (e) => {
       e.preventDefault();
       const startX = e.clientX, startW = sidebar.offsetWidth;
-      const onMove = (ev) => { sidebar.style.width = Math.max(120, Math.min(400, startW + ev.clientX - startX)) + 'px'; if (viewer._resizeThumbs) viewer._resizeThumbs(); };
+      const onMove = (ev) => { sidebar.style.width = Math.max(120, Math.min(400, startW + (ev.clientX - startX) / uiScale())) + 'px'; if (viewer._resizeThumbs) viewer._resizeThumbs(); };
       const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);

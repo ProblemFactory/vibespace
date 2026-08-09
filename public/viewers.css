@@ -82,7 +82,7 @@
 .file-view-menu {
   background: var(--bg-dialog); border: 1px solid var(--border-active);
   border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,0.4); padding: 4px 0; min-width: 190px;
-  max-height: 80vh; overflow-y: auto;
+  max-height: calc(80vh / var(--ui-scale, 1)); overflow-y: auto;
 }
 .file-view-menu-section {
   padding: 5px 12px 2px; font-size: 9px; font-weight: 700; color: var(--text-dim);
@@ -490,7 +490,7 @@
   padding: 4px 0; z-index: 99999; min-width: 160px;
 }
 .context-menu-item {
-  padding: 5px 12px; font-size: 11px; cursor: pointer; transition: background var(--transition);
+  padding: 5px 12px; font-size: calc(11px * var(--ui-font-scale, 1)); cursor: pointer; transition: background var(--transition);
   display: flex; align-items: center; gap: 8px;
 }
 .context-menu-item:hover { background: var(--bg-hover); }
