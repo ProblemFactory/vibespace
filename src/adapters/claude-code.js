@@ -344,7 +344,12 @@ class ClaudeCodeAdapter extends BackendAdapter {
   // (auto-firing get_usage was REJECTED as an automated quota-check pattern).
   // Returns {kind:'fiveHour'|'sevenDay'|'scoped', name?} or null.
   static parseLimitBanner(text) {
-    const m = /^You've reached your (.{0,40}?) ?limit/i.exec(String(text || ''));
+    // BOTH wordings are live: "You've reached your …" (chat banner) AND
+    // "You've hit your session limit · resets 3am" (subagent/workflow failure
+    // strings — real 2026-08-09 incident: the reach-only regex was blind to
+    // it and the pool switch waited for exhaustion). Non-anchored: the phrase
+    // can sit inside a task-notification/failure blob.
+    const m = /You've (?:reached|hit) your (.{0,40}?) ?limit/i.exec(String(text || ''));
     if (!m) return null;
     const what = m[1] || '';
     if (/5[- ]?hour|session/i.test(what)) return { kind: 'fiveHour' };

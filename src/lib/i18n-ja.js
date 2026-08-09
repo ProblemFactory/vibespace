@@ -2360,4 +2360,8 @@ export default {
   "no target": "ターゲットなし",
   "Add subscription via long-lived token…": "長期トークンでサブスクリプションを追加…",
   "Add via long-lived token": "長期トークンで追加",
+  "est {pct}%": "推定 {pct}%",
+  "window reset since last reading": "前回取得後にウィンドウがリセット",
+  "Dead-reckoned estimate: last confirmed reading + your local usage since, at learned rates. ⟳ fetches a fresh reading to re-calibrate.": "推測航法による推定：最後の実測値にその後のローカル使用量を学習レートで加算（破線部分）。⟳ で実測値を取得して補正します。",
+  "Pooled account — one billing identity auto-switching across your subscriptions": "プールアカウント — 1つの請求アイデンティティがサブスクリプション間を自動切替",
 };

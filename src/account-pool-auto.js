@@ -30,6 +30,10 @@ const UNKNOWN_REMAINING_PCT = 50;
 // Proactive (hot) switches require the candidate's deadline to be sooner by a
 // real margin — absorbs the ±1s scoped-vs-7d rounding and cache skew.
 const PROACTIVE_MARGIN_SEC = 3600;
+// Exhaustion-tier anti-flap: the target must beat the current member's
+// remaining by this much (two members leapfrogging inside the exhaustion band
+// otherwise ping-pong every evaluation tick).
+const MIN_GAIN_PCT = 3;
 
 // Remaining % for one bucket ({utilization: 0..1, resetsAt: unix seconds}).
 // A reset that already PASSED means the window rolled over since the reading
@@ -75,11 +79,14 @@ function weeklyDeadline(cache, nowSec) {
 // readCache(id) → parsed cache entry or null. proactive = hot pools only: also
 // switch toward a strictly-sooner deadline before exhaustion. Returns null
 // (stay) or {to, toName, fromRemaining, toRemaining, reason: 'exhausted'|'edf'}.
-function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = false }) {
+function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = false, exhaustPct = SWITCH_THRESHOLD_PCT }) {
   const curCache = readCache(currentId);
   const cur = accountRemaining(curCache, nowSec);
   const curDeadline = weeklyDeadline(curCache, nowSec);
-  const exhausted = cur.known && cur.remaining < SWITCH_THRESHOLD_PCT;
+  // exhaustPct: hot pools pass 10 with ESTIMATED views (B-fcff v2) — switch
+  // before the limit interrupts a long task; the candidate GATE stays at the
+  // base threshold (a 7%-left member is a legal target for a 9%-left current).
+  const exhausted = cur.known && cur.remaining < exhaustPct;
   // No data on the current target → we cannot judge exhaustion; staying put is
   // safer than flapping on ignorance (the ledger will teach us eventually).
   if (!cur.known && !proactive) return null;
@@ -112,8 +119,12 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   if (!best) return null;
 
   if (exhausted) {
-    // must move somewhere strictly better than the scraps we're on
-    if (best.eff <= cur.remaining) return null;
+    // Must move somewhere better than the scraps we're on — by a REAL margin:
+    // when two members sit in the exhaustion band together, a zero-margin
+    // "strictly better" rule ping-pongs between them every evaluation tick as
+    // their remainders leapfrog (each hot re-point re-records attribution +
+    // toasts — pure noise for a ~1% gain).
+    if (best.eff <= cur.remaining + MIN_GAIN_PCT) return null;
     return { to: best.id, toName: best.name, fromRemaining: cur.remaining, toRemaining: best.remaining, reason: 'exhausted' };
   }
   // Proactive tier (hot pools): jump to a strictly-sooner KNOWN deadline —
@@ -126,4 +137,4 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   return null;
 }
 
-module.exports = { SWITCH_THRESHOLD_PCT, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, bucketRemaining, accountRemaining, weeklyDeadline, decidePoolSwitch };
+module.exports = { SWITCH_THRESHOLD_PCT, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, bucketRemaining, accountRemaining, weeklyDeadline, decidePoolSwitch };

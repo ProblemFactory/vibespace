@@ -747,6 +747,24 @@ app.get('/api/usage', (req, res) => {
   res.json({
     rateLimit: _rateLimitCache, codexRateLimit: codexRl.overall,
     subscriptionSignedOut: _oauthSignedOut, accounts: _accountUsage,
+    // Dead-reckoned CURRENT utilization per account key (B-fcff v2): anchor +
+    // learned-rate × ledger-cost-since. Purely local computation (30s memo);
+    // keys match `accounts` + '__global__'. The popup renders these as a dim
+    // "est now" line so stale readings stop masquerading as current.
+    estimates: (() => {
+      try {
+        const e = app.locals.usageEstimator;
+        if (!e) return {};
+        const out = {}; const now = Date.now();
+        for (const [id, snap] of Object.entries(_accountUsage)) {
+          const est = e.estimateFor(id, snap, now);
+          if (est) out[id] = est;
+        }
+        const g = e.estimateFor(null, _rateLimitCache, now);
+        if (g) out.__global__ = g;
+        return out;
+      } catch { return {}; }
+    })(),
     // Identity of each CLI's machine login (+ the named account it IS, when an
     // email matches) — the usage switchers render one entry, not two.
     globalLogin: _usageGlobalLink,

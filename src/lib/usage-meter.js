@@ -1,7 +1,7 @@
 // Taskbar quota pies + usage popup + on-demand quota refresh (mixin split from app.js, 2.82.0 audit seam).
 import { createBackendIconHtml } from './agent-meta.js';
 import { t, tc } from './i18n.js';
-import { anchorFixedPopup, escHtml, fetchJson, showConfirmDialog, showToast } from './utils.js';
+import { anchorFixedPopup, escHtml, estDisplayPair, fetchJson, showConfirmDialog, showToast } from './utils.js';
 
 export function installUsageMeter(App, ctx = {}) {
   Object.assign(App.prototype, {
@@ -72,6 +72,7 @@ export function installUsageMeter(App, ctx = {}) {
     this._hostUsage = data?.hosts || {}; // remote hosts' own-login quota (on-demand ⟳ only)
     this._hostOwnUsage = this._hostUsage; // canonical alias the Agents machine sections read
     this._hostAccountUsage = data?.hostAccounts || {}; // host-HELD account quota ('<hostId>:<acctId>', 2.245.0)
+    this._usageEstimates = data?.estimates || {}; // dead-reckoned CURRENT utilization per account key (B-fcff v2)
   },
 
   // Resolve the Claude account the pies/popup currently DISPLAY (same rules as
@@ -182,6 +183,14 @@ export function installUsageMeter(App, ctx = {}) {
       claudeUsageLabel = a?.name || sel;
       usageNote = t('Refreshes passively when you run this account in a terminal session');
     }
+    // Dead-reckoned estimate for the DISPLAYED claude selection (mirrors the
+    // rl resolution above; keys = account ids + '__global__'). Rendered as the
+    // LIGHT/dashed layer over the dark confirmed reading (B-fcff v2).
+    const estimates = this._usageEstimates || {};
+    let estSel = null;
+    if (sel === 'auto') estSel = (claudeDefId && this._accountUsage?.[claudeDefId]) ? estimates[claudeDefId] : estimates.__global__;
+    else if (sel === '__global__') estSel = estimates.__global__;
+    else estSel = estimates[sel] || (gl.accountId === sel ? estimates.__global__ : null) || null;
     // Codex mirrors the Claude selection model: per-account quota buckets from
     // /api/usage codexAccounts (key = cxs id / '__global_codex__'), the machine
     // login linked to a named ChatGPT account by email, 'auto' = default account.
@@ -224,23 +233,44 @@ export function installUsageMeter(App, ctx = {}) {
 
     const usageColor = (pct) => (pct > 80 ? 'var(--red)' : pct > 50 ? 'var(--yellow)' : 'var(--green)');
     // Donut with the window label in the hole — 5h vs 7d distinguishable at a
-    // glance instead of two identical pies
-    const renderPie = (label, pct, noData) => {
+    // glance instead of two identical pies. With a dead-reckoning pair the
+    // CONFIRMED reading fills solid and the ESTIMATED delta fills LIGHT (same
+    // hue mixed toward the track); after a window reset the reading no longer
+    // applies, so the whole arc renders light (estDisplayPair's rolled rule).
+    const renderPie = (label, pct, noData, pair) => {
       const clamped = Math.max(0, Math.min(100, Math.round(pct || 0)));
-      const color = usageColor(clamped);
-      const deg = noData ? 0 : Math.round(clamped * 3.6);
-      const tip = noData ? `${label}: ${t('no data yet')}` : `${label}: ${clamped}%`;
-      return `<div class="usage-pie usage-donut" title="${tip}" style="background:conic-gradient(${color} ${deg}deg, var(--bg-input) ${deg}deg)"><span class="usage-donut-label">${label}</span></div>`;
+      const hasEst = !noData && pair?.estPct != null;
+      const dark = hasEst ? pair.darkPct : clamped;
+      const estP = hasEst ? Math.max(pair.estPct, dark) : dark;
+      const color = usageColor(hasEst ? estP : clamped);
+      const darkDeg = noData ? 0 : Math.round(dark * 3.6);
+      const estDeg = noData ? 0 : Math.round(estP * 3.6);
+      const light = `color-mix(in srgb, ${color} 38%, var(--bg-input))`;
+      const bg = hasEst
+        ? `conic-gradient(${color} ${darkDeg}deg, ${light} ${darkDeg}deg ${estDeg}deg, var(--bg-input) ${estDeg}deg)`
+        : `conic-gradient(${color} ${darkDeg}deg, var(--bg-input) ${darkDeg}deg)`;
+      const tip = noData ? `${label}: ${t('no data yet')}`
+        : hasEst ? `${label}: ${dark}% · ${t('est {pct}%', { pct: estP })}${pair.rolled ? ' · ' + t('window reset since last reading') : ''}`
+        : `${label}: ${clamped}%`;
+      return `<div class="usage-pie usage-donut${hasEst ? ' usage-donut-est' : ''}" title="${tip}" style="background:${bg}"><span class="usage-donut-label">${label}</span></div>`;
     };
-    const renderRow = (backend, primaryLabel, primaryPct, secondaryLabel, secondaryPct, noData) => (
+    const renderRow = (backend, primaryLabel, primaryPct, secondaryLabel, secondaryPct, noData, pairs) => (
       `<div class="taskbar-usage-row">
         ${createBackendIconHtml(backend, { className: 'taskbar-usage-backend', title: backend === 'codex' ? 'Codex' : 'Claude' })}
         <div class="taskbar-usage-pair">
-          ${renderPie(primaryLabel, primaryPct, noData)}
-          ${renderPie(secondaryLabel, secondaryPct, noData)}
+          ${renderPie(primaryLabel, primaryPct, noData, pairs?.[0])}
+          ${renderPie(secondaryLabel, secondaryPct, noData, pairs?.[1])}
         </div>
       </div>`
     );
+    // Popup-bar companions: hatched light span from the confirmed fill to the
+    // estimate + a dashed marker at the estimate; a stat chip naming it.
+    const estBar = (pair) => {
+      if (pair?.estPct == null || pair.estPct <= pair.darkPct) return '';
+      return `<div class="usage-bar-est" style="left:${pair.darkPct}%;width:${pair.estPct - pair.darkPct}%;--est-c:${usageColor(pair.estPct)}"></div>`;
+    };
+    const estStat = (pair) => (pair?.estPct == null ? '' :
+      `<span class="usage-stat usage-est-stat" title="${escHtml(t('Dead-reckoned estimate: last confirmed reading + your local usage since, at learned rates. ⟳ fetches a fresh reading to re-calibrate.'))}">${escHtml(t('est {pct}%', { pct: pair.estPct }))}${pair.rolled ? ' · ' + escHtml(t('window reset since last reading')) : ''}</span>`);
     const renderSectionTitle = (backend, label, extra = '') => (
       `<div class="usage-section-title">${createBackendIconHtml(backend, { className: 'usage-section-backend', title: label })}<span>${label}</span>${extra}</div>`
     );
@@ -269,8 +299,10 @@ export function installUsageMeter(App, ctx = {}) {
       const color = usageColor(pct5h);
       const pct7d = Math.round((rl?.sevenDay?.utilization || 0) * 100);
       const color7d = usageColor(pct7d);
-      rows.push(renderRow('claude', '5h', pct5h, '7d', pct7d, noData));
-      if (!noData) chipWorst = Math.max(chipWorst, pct5h, pct7d);
+      const p5 = estDisplayPair(rl?.fiveHour, estSel?.fiveHour);
+      const p7 = estDisplayPair(rl?.sevenDay, estSel?.sevenDay);
+      rows.push(renderRow('claude', '5h', pct5h, '7d', pct7d, noData, [p5, p7]));
+      if (!noData) chipWorst = Math.max(chipWorst, p5.estPct ?? pct5h, p7.estPct ?? pct7d);
       // Account switcher — one chip per viewable identity. When the CLI login
       // is a named account (gl.accountId), NO separate CLI-login chip renders:
       // that account's chip covers both (tooltip says so). ★ marks the default.
@@ -285,7 +317,9 @@ export function installUsageMeter(App, ctx = {}) {
         `<button class="usage-acct-chip${en.key === activeKey ? ' active' : ''}" data-key="${escHtml(en.key)}" title="${escHtml(en.tip || '')}">${escHtml(en.label)}</button>`).join('')}</div>` : '';
       const scopedSections = [];
       for (const sc of rl?.scopedWeekly || []) {
-        const pctSc = Math.round((sc.utilization || 0) * 100);
+        const scEst = (estSel?.scopedWeekly || []).find((x) => String(x?.name || '').toLowerCase() === String(sc.name || '').toLowerCase()) || null;
+        const pSc = estDisplayPair(sc, scEst);
+        const pctSc = pSc.estPct != null ? pSc.darkPct : Math.round((sc.utilization || 0) * 100);
         const colorSc = usageColor(pctSc);
         // Scoped buckets only arrive via on-demand refresh (⟳) — show THEIR
         // age, which can lag the passively-updated 5h/7d above.
@@ -293,9 +327,10 @@ export function installUsageMeter(App, ctx = {}) {
         scopedSections.push(`
       <div class="usage-session">
         <div class="usage-session-name">${t('{name} weekly limit', { name: escHtml(sc.name) })}</div>
-        <div class="usage-bar" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pctSc}%;background:${colorSc}"></div></div>
+        <div class="usage-bar" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pctSc}%;background:${colorSc}"></div>${estBar(pSc)}</div>
         <div class="usage-session-stats">
           <span class="usage-stat">${t('{pct}% used', { pct: pctSc })}</span>
+          ${estStat(pSc)}
           <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(sc.resetsAt)}</span>
           ${scAge}
         </div>
@@ -314,17 +349,19 @@ export function installUsageMeter(App, ctx = {}) {
         ? `<div class="usage-note">${t('No usage captured yet — quota data arrives passively from terminal sessions (chat sessions don’t report it), or use ⟳ to fetch it on demand.')}</div>`
         : `<div class="usage-session">
         <div class="usage-session-name">${t('5-hour limit')}</div>
-        <div class="usage-bar" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pct5h}%;background:${color}"></div></div>
+        <div class="usage-bar" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${p5.estPct != null ? p5.darkPct : pct5h}%;background:${color}"></div>${estBar(p5)}</div>
         <div class="usage-session-stats">
-          <span class="usage-stat">${t('{pct}% used', { pct: pct5h })}</span>
+          <span class="usage-stat">${t('{pct}% used', { pct: p5.estPct != null ? p5.darkPct : pct5h })}</span>
+          ${estStat(p5)}
           <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(rl.fiveHour?.resetsAt)}</span>
         </div>
       </div>
       <div class="usage-session">
         <div class="usage-session-name">${t('7-day limit')}</div>
-        <div class="usage-bar" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pct7d}%;background:${color7d}"></div></div>
+        <div class="usage-bar" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${p7.estPct != null ? p7.darkPct : pct7d}%;background:${color7d}"></div>${estBar(p7)}</div>
         <div class="usage-session-stats">
-          <span class="usage-stat">${t('{pct}% used', { pct: pct7d })}</span>
+          <span class="usage-stat">${t('{pct}% used', { pct: p7.estPct != null ? p7.darkPct : pct7d })}</span>
+          ${estStat(p7)}
           <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(rl.sevenDay?.resetsAt)}</span>
         </div>
       </div>${scopedSections.join('')}

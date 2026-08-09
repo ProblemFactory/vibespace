@@ -27,6 +27,12 @@ ck('buckets serialized (Fable kept)', last.buckets.scopedWeekly[0].name==='Fable
 const fakeUH = { _events: function*(){ yield {acct:'sub-1',ts:1500,model:'claude-fable-5',host:null}; yield {acct:'sub-1',ts:1600,model:'claude-opus-4-8',host:null}; yield {acct:'other',ts:1500,model:'claude-fable-5',host:null}; yield {acct:'sub-1',ts:1500,model:'x',host:'h1'}; }, _cost: ()=>2 };
 const cb = costBetween(fakeUH, 'sub-1', 1000, 2000);
 ck('costBetween: filters account + local-only, splits family', cb.total===4 && cb.byFamily.fable===2 && cb.byFamily.opus===2 && cb.requests===2);
+// fabricated placeholder buckets (status 'unknown', the statusline hook's
+// defensive fallback) must never anchor — a u:0 fabrication paired with the
+// next real reading forged a du=+full pair (~6× rate inflation, verifier repro)
+const cache3 = { fetchedAt: 3000, source:'statusline', fiveHour:{utilization:0,status:'unknown',resetsAt:0}, sevenDay:{utilization:0.6,resetsAt:999}, scopedWeekly:[] };
+ua.maybeRecord({identityKey:'email:a@b.c', accountId:'sub-1', cache:cache3});
+ck('status-unknown bucket records as null (never anchors a fabrication)', ua.lastAnchor('email:a@b.c').buckets.fiveHour===null && ua.lastAnchor('email:a@b.c').buckets.sevenDay.u===0.6);
 fs.rmSync(dir,{recursive:true,force:true});
 console.log(fail?`${fail} FAILED`:`ALL PASS (${pass})`);
 process.exit(fail?1:0);

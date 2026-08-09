@@ -45,6 +45,11 @@ ck('banner: weekly', pb("You've reached your weekly limit.").kind==='sevenDay');
 ck('banner: model-scoped weekly', (()=>{const r=pb("You've reached your Fable weekly limit."); return r.kind==='scoped'&&r.name==='Fable';})());
 ck('banner: unknown wording → fiveHour (shortest self-heal)', pb("You've reached your usage limit for now.").kind==='fiveHour');
 ck('banner: non-banner text → null', pb('Normal assistant reply about limits')===null);
+// the REAL 2026-08-09 incident wording (workflow agent failure strings) — the
+// reach-only anchored regex was blind to it and the pool switched only after
+// exhaustion had failed 9 agents
+ck("banner: 'hit your session limit' (workflow failure wording) → fiveHour", pb("You've hit your session limit · resets 3am (America/Los_Angeles)").kind==='fiveHour');
+ck('banner: phrase mid-blob (task-notification carrier) still matches', pb("[verify:x] failed: You've hit your session limit · resets 3am").kind==='fiveHour');
 
 console.log(fail?`${fail} FAILED`:`ALL PASS (${pass})`);
 process.exit(fail?1:0);
