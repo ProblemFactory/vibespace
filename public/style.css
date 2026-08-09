@@ -3283,3 +3283,6 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 /* Long-lived token dialog (B-211a) */
 .oat-steps { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; font-size: 12px; color: var(--text-secondary); }
 .oat-row { margin: 8px 0; }
+
+.chat-status-dropdown-sep { height: 1px; background: var(--border); margin: 3px 0; }
+.chat-status-model.chat-status-model-locked { color: var(--accent-hover); font-weight: 600; }

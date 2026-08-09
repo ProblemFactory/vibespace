@@ -402,7 +402,7 @@ function registerWsHandler(wss, ctx) {
             // Server-side read (covers every create path uniformly — resume,
             // layout restore, billing switch); only the claude adapter
             // consumes it (codex has no model-fallback mechanism).
-            disableModelFallback: (() => { try { return serverSetting('claude.disableModelFallback') === true; } catch { return false; } })(),
+            disableModelFallback: (() => { try { return serverSetting('claude.disableModelFallback') === true || !!data.modelLock; } catch { return !!data.modelLock; } })(), // #6: a locked conversation disables fallback at spawn too (resume carries data.modelLock from sessionConfigs)
             // Shell helper terminals auto-type this — the adapter arms the
             // DISABLE_UPDATE_PROMPT guard (oh-my-zsh's rc-time [Y/n] eats the
             // first typed char: "claude /login" → "laude"). 2.196.0: the field
@@ -595,6 +595,7 @@ function registerWsHandler(wss, ctx) {
             // Effort is never reported back by claude — remember the commanded
             // value (spawn flag now, set-effort later) for the status bar
             _effort: data.effort || null,
+            _modelLocked: !!data.modelLock,  // #6: per-session model lock (disable fallback)
             // Claude --fork-session mints a NEW session id at startup; this arms
             // the stdout parser to adopt it (so the fork becomes its own session
             // instead of shadowing the parent). One-shot, cleared on adoption.
@@ -1448,6 +1449,7 @@ done`;
             parentThreadId: session.parentThreadId,
             permissionMode: session._permissionMode || null,
             effort: session._effort || null,
+            modelLocked: session._modelLocked || undefined, // #6: survive server restart (else a resumed lock's badge silently reverts — review-caught)
             agentToken: session.agentToken || null,
             taskId: session._initialGroupId || null, // group spawned into (meta key kept for back-compat)
             accountId: session._accountId || null, // billing identity (badge restore across server restarts)
@@ -1599,11 +1601,22 @@ done`;
 
         case 'set-model': {
           const session = activeSessions.get(data.sessionId);
-          if (session?.pty && session.mode === 'chat' && data.model) {
+          if (session?.pty && session.mode === 'chat' && (data.model || 'lock' in data)) {
             const adapter = adapterRegistry.get(session.backend);
-            if (adapter?.formatSetModel) {
-              try { session.pty.write(adapter.formatSetModel(data.model) + '\n'); } catch {}
-            }
+            try {
+              if (data.model && adapter?.formatSetModel) session.pty.write(adapter.formatSetModel(data.model) + '\n');
+              // Model LOCK (#6): pin the model + DISABLE fallback for THIS
+              // session — on a safety-refusal the CLI surfaces the refusal
+              // instead of silently rerouting to an older opus (the user's
+              // "总是变成opus 4.8" complaint). Persisted like _effort so a
+              // resume re-applies it (buildSessionArgs reads the session config).
+              if ('lock' in data && adapter?.formatSetFallbackPolicy) {
+                session._modelLocked = !!data.lock;
+                session.pty.write(adapter.formatSetFallbackPolicy(!!data.lock) + '\n');
+                if (session.sockName) { const m = readSessionMeta(session.sockName); writeSessionMeta(session.sockName, { ...m, modelLocked: session._modelLocked }); }
+                broadcastActiveSessions();
+              }
+            } catch {}
           }
           break;
         }
@@ -2034,6 +2047,7 @@ done`;
               const chatStatus = sm.chatStatus() || {};
               if (!chatStatus.permissionMode && session._permissionMode) chatStatus.permissionMode = session._permissionMode;
               if (!chatStatus.effort && session._effort) chatStatus.effort = session._effort;
+              if (session._modelLocked) chatStatus.modelLocked = true;
               ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, mode: 'chat',
                 messages, totalCount, chatStatus, isStreaming, streamingLabel, taskState: sm.taskState(), turnMap, pendingPermissions: pendingPerms,
                 normEpoch: session._normEpoch || 0,

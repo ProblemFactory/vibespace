@@ -112,6 +112,7 @@ export class ChatStatusBar {
     if (status.permissionMode) this._statusPermMode = status.permissionMode;
     if (status.permissionModes) this._permissionModes = status.permissionModes;
     if (status.effort) this._statusEffort = status.effort;
+    if (status.modelLocked != null) this._modelLocked = !!status.modelLocked;
     if (status.sandbox) this._statusSandbox = status.sandbox;
     if (status.totalUsage) this._statusTotalUsage = status.totalUsage;
     this.render();
@@ -284,13 +285,14 @@ export class ChatStatusBar {
     {
       const known = !!this._statusModel;
       const mismatch = this._modelMismatch();
+      const locked = !!this._modelLocked;
       const title = mismatch
         ? t('Auto-fallback: the harness is serving {served} instead of {model} (capacity/overload). Click to re-pick.', { served: this._servedModel, model: this._statusModel })
         : known
           ? t('Model (as last reported by the CLI) — click to change')
           : t('Model not reported by the CLI yet — click to set');
-      const label = mismatch ? `\u26a0 ${escHtml(this._servedModel)}` : (known ? escHtml(this._statusModel) : t('model: ?'));
-      parts.push(`<span class="chat-status-model chat-status-clickable${known ? '' : ' chat-status-dim'}${mismatch ? ' chat-status-model-fallback' : ''}" title="${escHtml(title)}">${label}</span>`);
+      const label = locked ? '🔒 ' + escHtml(this._statusModel || '?') : (mismatch ? `\u26a0 ${escHtml(this._servedModel)}` : (known ? escHtml(this._statusModel) : t('model: ?')));
+      parts.push(`<span class="chat-status-model chat-status-clickable${known ? '' : ' chat-status-dim'}${mismatch && !locked ? ' chat-status-model-fallback' : ''}${locked ? ' chat-status-model-locked' : ''}" title="${escHtml(title)}${locked ? ' \u00b7 ' + t('LOCKED (fallback off)') : ''}">${label}</span>`);
       const eKnown = !!this._statusEffort;
       const eTitle = eKnown
         ? (this._backend === 'codex'
@@ -770,6 +772,29 @@ export class ChatStatusBar {
         };
         dropdown.appendChild(custom);
       };
+      // #6 model LOCK toggle: disable fallback for this conversation, so a
+      // safety-reroute SURFACES instead of silently switching to an older opus
+      // (the user's '总是变成opus 4.8'). Claude only — codex has no fallback
+      // mechanism, so the toggle would be a silent no-op that falsely implies
+      // protection (review-caught).
+      if (this._backend !== 'codex') {
+        const lockItem = document.createElement('div');
+        lockItem.className = 'chat-status-dropdown-item' + (this._modelLocked ? ' active' : '');
+        lockItem.textContent = this._modelLocked ? t('\uD83D\uDD13 Unlock model (allow fallback)') : t('\uD83D\uDD12 Lock to this model (no fallback)');
+        lockItem.onclick = (ev) => {
+          ev.stopPropagation(); dropdown.remove();
+          const nowLock = !this._modelLocked;
+          this._modelLocked = nowLock;
+          // Pure fallback-policy toggle — never re-issue the model (a redundant
+          // set-model echoed a 'Set model to X' record on every lock; the lock
+          // keeps whatever model is current).
+          this._ws.send({ type: 'set-model', sessionId: this._sessionId, lock: nowLock });
+          this._onConfigChange?.({ modelLock: nowLock });
+          this.render();
+        };
+        dropdown.appendChild(lockItem);
+        const sep = document.createElement('div'); sep.className = 'chat-status-dropdown-sep'; dropdown.appendChild(sep);
+      }
       // Loading row while the model list fetches; on failure fall back to the
       // CLI alias ladder (+ Custom\u2026) instead of silently vanishing.
       const loading = document.createElement('div');
