@@ -1,5 +1,5 @@
 import { THEMES, BUILTIN_THEMES } from './themes.js';
-import { showToast, showConfirmDialog } from './utils.js';
+import { showToast, showConfirmDialog, uiScale } from './utils.js';
 
 // All CSS custom properties that themes define
 const CSS_VAR_DEFS = [
@@ -222,8 +222,8 @@ class ThemeEditor {
   _setupDrag(handle, panel) {
     let startX, startY, startLeft, startTop;
     const onMove = (e) => {
-      panel.style.left = (startLeft + e.clientX - startX) + 'px';
-      panel.style.top = (startTop + e.clientY - startY) + 'px';
+      panel.style.left = (startLeft + (e.clientX - startX) / uiScale()) + 'px';
+      panel.style.top = (startTop + (e.clientY - startY) / uiScale()) + 'px';
     };
     const onUp = () => {
       document.removeEventListener('mousemove', onMove);
@@ -234,11 +234,12 @@ class ThemeEditor {
       e.preventDefault();
       const rect = panel.getBoundingClientRect();
       startX = e.clientX; startY = e.clientY;
-      startLeft = rect.left; startTop = rect.top;
+      // rect is viewport px; the fixed panel's style takes layout px (F5)
+      startLeft = rect.left / uiScale(); startTop = rect.top / uiScale();
       // Switch from right-positioned to left-positioned on first drag
       panel.style.right = 'auto';
-      panel.style.left = rect.left + 'px';
-      panel.style.top = rect.top + 'px';
+      panel.style.left = (rect.left / uiScale()) + 'px';
+      panel.style.top = (rect.top / uiScale()) + 'px';
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
     });
@@ -247,8 +248,8 @@ class ThemeEditor {
   _setupResize(handle, panel) {
     let startX, startY, startW, startH;
     const onMove = (e) => {
-      const w = Math.max(320, startW + e.clientX - startX);
-      const h = Math.max(300, startH + e.clientY - startY);
+      const w = Math.max(320, startW + (e.clientX - startX) / uiScale());
+      const h = Math.max(300, startH + (e.clientY - startY) / uiScale());
       panel.style.width = w + 'px';
       panel.style.height = h + 'px';
     };

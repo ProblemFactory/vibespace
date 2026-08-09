@@ -1,4 +1,4 @@
-import { cssVarDefault, showContextMenu, showInputDialog } from './utils.js';
+import { cssVarDefault, showContextMenu, showInputDialog, uiScale } from './utils.js';
 import { t } from './i18n.js';
 
 /**
@@ -725,7 +725,7 @@ export class DesktopManager {
       document.body.style.cursor = 'ns-resize';
       document.body.style.userSelect = 'none';
       this.app.wm._suppressReflow = true; // ResizeObserver storm during drag
-      const onMove = (ev) => setS(startS + (ev.clientY - startY) / PXPER); // drag DOWN = bigger
+      const onMove = (ev) => setS(startS + (ev.clientY - startY) / uiScale() / PXPER); // drag DOWN = bigger (viewport→layout px under the DPI zoom)
       const onUp = () => {
         handle.classList.remove('active');
         document.body.style.cursor = ''; document.body.style.userSelect = '';
@@ -785,7 +785,7 @@ export class DesktopManager {
       const top = document.body.classList.contains('taskbar-top');
       const onMove = (e) => {
         // bottom taskbar: drag UP grows; top taskbar: drag DOWN grows
-        const delta = top ? (e.clientY - startY) : (startY - e.clientY);
+        const delta = (top ? (e.clientY - startY) : (startY - e.clientY)) / uiScale();
         const h = Math.max(MIN_H, Math.min(MAX_H, startH + delta));
         taskbar.style.height = h + 'px';
         this._adaptTaskbarSize(h);

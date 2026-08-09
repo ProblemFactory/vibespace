@@ -12,7 +12,7 @@ import { CodeEditor } from './code-editor.js';
 import { LayoutManager } from './layout.js';
 import { ChatView } from './chat-view.js';
 import { Resizer } from './resizer.js';
-import { anchorFixedPopup, configureToasts, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog } from './utils.js';
+import { anchorFixedPopup, configureToasts, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, getUiPref, UI_SCALE_MIN, UI_SCALE_MAX, UI_FONT_MIN, UI_FONT_MAX, uiScale } from './utils.js';
 import { t, tc, getLangPref, setLang } from './i18n.js';
 import { installManageAgents } from './manage-agents.js';
 import { installPluginsUI } from './plugins-ui.js';
@@ -129,6 +129,7 @@ const CLIENT_PREF_KEYS = [
   'theme', 'termFontSize', 'termFontFamily', 'taskbarHeight',
   'vibespace.lang', 'vibespace.usageAccount', 'vibespace.usageAccountCodex',
   'vibespace.quotaRefreshAck', 'vs-onboarded',
+  'vibespace.uiScale', 'vibespace.uiFontScale',
 ];
 
 class App {
@@ -822,6 +823,15 @@ class App {
 
   
 
+  _refitAllTerminals() {
+    for (const [, session] of this.sessions) {
+      if (session.overrides && session.terminal) { // TerminalSession (ChatView has no .overrides)
+        try { session.terminal.clearTextureAtlas(); } catch {}
+        try { session.fit(); } catch {}
+      }
+    }
+  }
+
   _setupGlobalSettings() {
     this._fontSize = parseInt(localStorage.getItem('termFontSize')) || 14;
     this._fontFamily = localStorage.getItem('termFontFamily') || getAvailableFonts()[0]?.value || 'monospace';
@@ -830,14 +840,27 @@ class App {
 
     const btn = document.getElementById('btn-global-settings');
     btn.onclick = (e) => { e.stopPropagation(); this._showGlobalSettings(btn); };
+    // UI scale re-apply on viewport resize (review F9): applyUiPrefs only ran
+    // at boot + gs-menu change, so crossing the 768px mobile boundary either
+    // stranded the saved scale (narrow-at-boot) or left the zoom active under
+    // the mobile CSS (wide→narrow, 100vw sidebar × zoom = overflow).
+    let uiRz = null;
+    window.addEventListener('resize', () => {
+      clearTimeout(uiRz);
+      uiRz = setTimeout(() => {
+        const before = uiScale();
+        applyUiPrefs();
+        if (uiScale() !== before) this._refitAllTerminals();
+      }, 250);
+    });
   }
 
   _showGlobalSettings(anchor) {
     const pop = createPopover(anchor, 'global-settings-popover');
     const rect = anchor.getBoundingClientRect();
     pop.style.left = '';
-    pop.style.top = (rect.bottom + 4) + 'px';
-    pop.style.right = (window.innerWidth - rect.right) + 'px';
+    pop.style.top = ((rect.bottom + 4) / uiScale()) + 'px';
+    pop.style.right = ((window.innerWidth - rect.right) / uiScale()) + 'px';
 
     const opt = (v, l) => { const o = document.createElement('option'); o.value = v; o.textContent = l; return o; };
 
@@ -917,6 +940,36 @@ class App {
       }
     };
 
+    // UI scale (DPI) + UI font size — per-DEVICE like the language (a phone
+    // and a 4K desktop viewing the same instance want different scales, so
+    // these live in localStorage, never the synced settings store). Scale =
+    // whole-app CSS zoom (terminals refit + atlas-clear on change; 100% keeps
+    // them sharpest); font size = text-only multiplier on chrome labels
+    // (sidebar/taskbar/desktop-preview names/menus) via --ui-font-scale.
+    const mkPctRow = (labelText, key, min, max, onApply) => {
+      const lab = document.createElement('label'); lab.textContent = labelText;
+      const row = document.createElement('div'); row.className = 'font-size-ctrl';
+      const down = document.createElement('button'); down.textContent = '\u2212';
+      const val = document.createElement('span');
+      const up = document.createElement('button'); up.textContent = '+';
+      const cur = () => getUiPref(key);
+      const render = () => { val.textContent = cur() + '%'; };
+      const set = (v) => {
+        const nv = Math.max(min, Math.min(max, v));
+        if (nv === 100) localStorage.removeItem(key); else localStorage.setItem(key, String(nv));
+        render(); applyUiPrefs(); onApply?.();
+      };
+      down.onclick = () => set(cur() - 5);
+      up.onclick = () => set(cur() + 5);
+      val.style.cursor = 'pointer'; val.title = t('Click to reset to 100%');
+      val.onclick = () => set(100);
+      render();
+      row.append(down, val, up);
+      return [lab, row];
+    };
+    const [scaleLab, scaleRow] = mkPctRow(t('UI scale (DPI)'), 'vibespace.uiScale', UI_SCALE_MIN, UI_SCALE_MAX, () => this._refitAllTerminals());
+    const [fscaleLab, fscaleRow] = mkPctRow(t('UI font size'), 'vibespace.uiFontScale', UI_FONT_MIN, UI_FONT_MAX);
+
     // "All Settings" link
     const allSettingsLink = document.createElement('div');
     allSettingsLink.className = 'settings-all-link';
@@ -926,7 +979,7 @@ class App {
     const themeRow = document.createElement('div');
     themeRow.style.cssText = 'display:flex;align-items:center;gap:4px';
     themeRow.append(themeSel, editBtn);
-    pop.append(themeLabel, themeRow, sizeLabel, sizeRow, fontLabel, fontSel, allSettingsLink);
+    pop.append(themeLabel, themeRow, sizeLabel, sizeRow, fontLabel, fontSel, scaleLab, scaleRow, fscaleLab, fscaleRow, allSettingsLink);
 
     // Account / help section — compact menu rows (matches context-menu look)
     const menu = document.createElement('div');

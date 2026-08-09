@@ -1,4 +1,4 @@
-import { attachPopoverClose, escHtml } from './utils.js';
+import { attachPopoverClose, escHtml, uiScale } from './utils.js';
 import { track } from './telemetry-client.js';
 import { t } from './i18n.js';
 import { showWindowContextMenu } from './taskbar.js';
@@ -138,7 +138,10 @@ class WindowManager {
     }
     // Skip grouped guests — they share host bounds via _syncChainBounds
     if (win._tabChain && win._tabChain.tabs[0] !== win.id) return;
-    const r = this.workspace.getBoundingClientRect();
+    // LAYOUT px, never getBoundingClientRect: offsetLeft is layout px and gBCR
+    // is viewport px — under the DPI zoom the mixed ratio recorded fractions
+    // divided by the zoom, which poisoned layouts.json for every client (F1)
+    const r = { width: this.workspace.offsetWidth, height: this.workspace.offsetHeight };
     const el = win.element;
     // Quantize to 4 decimals: offsetLeft/Width are integer px, so raw
     // fractions carry viewport-dependent rounding noise — two clients would
@@ -160,7 +163,7 @@ class WindowManager {
 
   _applyGridBounds(win) {
     if (!win.gridBounds) return;
-    const r = this.workspace.getBoundingClientRect();
+    const r = { width: this.workspace.offsetWidth, height: this.workspace.offsetHeight }; // layout px (F1)
     const b = win.gridBounds;
     const el = win.element;
     el.style.left = (b.left * r.width) + 'px';
@@ -290,7 +293,7 @@ class WindowManager {
         if (win.isMaximized) {
           const prev = win.prevBounds, prevW = parseInt(prev.width) || 700;
           win.isMaximized = false; element.style.width = prev.width; element.style.height = prev.height;
-          element.style.left = ((e.clientX - wsr.left) - prevW * (e.clientX / this.workspace.offsetWidth)) + 'px'; element.style.top = '0px';
+    element.style.left = ((e.clientX - wsr.left) / uiScale() - prevW * ((e.clientX - wsr.left) / (this.workspace.offsetWidth * uiScale()))) + 'px'; element.style.top = '0px';
           initL = element.offsetLeft; initT = element.offsetTop;
           startX = e.clientX; startY = e.clientY;
         }
@@ -299,8 +302,8 @@ class WindowManager {
           const ps = win._preSnapBounds;
           element.style.width = ps.width; element.style.height = ps.height;
           // Center on cursor (in workspace space)
-          initL = (e.clientX - wsr.left) - (parseInt(ps.width) || 350) / 2;
-          initT = (e.clientY - wsr.top) - 15;
+          initL = (e.clientX - wsr.left) / uiScale() - (parseInt(ps.width) || 350) / 2;
+          initT = (e.clientY - wsr.top) / uiScale() - 15;
           element.style.left = initL + 'px'; element.style.top = initT + 'px';
           startX = e.clientX; startY = e.clientY;
           win._isSnapped = false;
@@ -315,20 +318,25 @@ class WindowManager {
       // by however far the pointer had traveled since mousedown (with rAF
       // coalescing that's the whole first-frame sweep — the reported
       // "snapped window drifts away from the pointer").
-      element.style.left = (initL + (e.clientX - startX)) + 'px';
-      element.style.top = (initT + (e.clientY - startY)) + 'px';
+      // Deltas arrive in VIEWPORT px; style.left/top are LAYOUT px — under the
+      // body DPI zoom (ui scale) they differ by the zoom factor, so an
+      // uncompensated delta made the window outrun (or lag) the cursor.
+      element.style.left = (initL + (e.clientX - startX) / uiScale()) + 'px';
+      element.style.top = (initT + (e.clientY - startY) / uiScale()) + 'px';
 
       // Shake detection runs on the raw cursor path (before any snap decision).
       updateShake(e);
-      if (shakeBadge) { shakeBadge.style.left = (e.clientX + 14) + 'px'; shakeBadge.style.top = (e.clientY - 26) + 'px'; }
+      if (shakeBadge) { shakeBadge.style.left = (e.clientX / uiScale() + 14) + 'px'; shakeBadge.style.top = (e.clientY / uiScale() - 26) + 'px'; }
 
       // Live-update this window's rect in the active desktop preview
       if (!deskPreviewTarget) {
-        const wr = this.workspace.getBoundingClientRect();
+        // offsetLeft is LAYOUT px — ratio against offsetWidth (same space),
+        // never getBoundingClientRect (viewport px, differs under the DPI zoom)
+        const wsW = this.workspace.offsetWidth, wsH = this.workspace.offsetHeight;
         const srcRect = document.querySelector(`.desktop-preview.active .desktop-preview-win[data-win-id="${win.id}"]`);
-        if (srcRect && wr.width > 0 && wr.height > 0) {
-          srcRect.style.left = ((element.offsetLeft / wr.width) * 100) + '%';
-          srcRect.style.top = ((element.offsetTop / wr.height) * 100) + '%';
+        if (srcRect && wsW > 0 && wsH > 0) {
+          srcRect.style.left = ((element.offsetLeft / wsW) * 100) + '%';
+          srcRect.style.top = ((element.offsetTop / wsH) * 100) + '%';
         }
       }
 
@@ -375,16 +383,16 @@ class WindowManager {
           element.style.width = savedBounds.width; element.style.height = savedBounds.height;
           // Re-sync position to cursor (workspace space — see the un-snap note)
           const wr2 = this.workspace.getBoundingClientRect();
-          initL = (e.clientX - wr2.left) - (parseInt(savedBounds.width) || 350) / 2;
-          initT = (e.clientY - wr2.top) - 15;
+          initL = (e.clientX - wr2.left) / uiScale() - (parseInt(savedBounds.width) || 350) / 2;
+          initT = (e.clientY - wr2.top) / uiScale() - 15;
           element.style.left = initL + 'px'; element.style.top = initT + 'px';
           startX = e.clientX; startY = e.clientY;
           savedBounds = null;
         }
       }
       if (mergeGhost) {
-        mergeGhost.style.left = (e.clientX + 12) + 'px';
-        mergeGhost.style.top = (e.clientY + 12) + 'px';
+        mergeGhost.style.left = (e.clientX / uiScale() + 12) + 'px';
+        mergeGhost.style.top = (e.clientY / uiScale() + 12) + 'px';
       }
 
       // Desktop preview: detect hover, collapse window into mini preview inside it
@@ -429,8 +437,8 @@ class WindowManager {
         if (deskSavedBounds) {
           // workspace space, not viewport — see the un-snap note
           const wr3 = this.workspace.getBoundingClientRect();
-          initL = (e.clientX - wr3.left) - (parseInt(deskSavedBounds.width) || 350) / 2;
-          initT = (e.clientY - wr3.top) - 15;
+          initL = (e.clientX - wr3.left) / uiScale() - (parseInt(deskSavedBounds.width) || 350) / 2;
+          initT = (e.clientY - wr3.top) / uiScale() - 15;
           element.style.left = initL + 'px'; element.style.top = initT + 'px';
           element.style.width = deskSavedBounds.width; element.style.height = deskSavedBounds.height;
           startX = e.clientX; startY = e.clientY;
@@ -607,7 +615,7 @@ class WindowManager {
 
   _getGridLines() {
     if (!this.grid) return { x: [], y: [] };
-    const r = this.workspace.getBoundingClientRect();
+    const r = { width: this.workspace.offsetWidth, height: this.workspace.offsetHeight }; // layout px (F1)
     const gap = 4;
     const { rows, cols } = this.grid;
     const cw = (r.width - gap * (cols + 1)) / cols;
@@ -627,7 +635,8 @@ class WindowManager {
         const SNAP_T = 15;
 
         const processMove = (e) => {
-          const dx = e.clientX - sX, dy = e.clientY - sY;
+          // viewport→layout px under the DPI zoom (see the titlebar-drag note)
+          const dx = (e.clientX - sX) / uiScale(), dy = (e.clientY - sY) / uiScale();
           let newL = sL, newT = sT, newW = sW, newH = sH;
 
           if (dir.includes('e')) newW = Math.max(320, sW + dx);
@@ -684,7 +693,7 @@ class WindowManager {
     if (y < T) return 'top'; if (y > r.height - T) return 'bottom'; return null;
   }
   _getSnapZones(g) {
-    const r = this.workspace.getBoundingClientRect();
+    const r = { width: this.workspace.offsetWidth, height: this.workspace.offsetHeight }; // layout px (F1)
     return {
       left:{left:g,top:g,width:r.width/2-g*1.5,height:r.height-g*2}, right:{left:r.width/2+g/2,top:g,width:r.width/2-g*1.5,height:r.height-g*2},
       top:{left:g,top:g,width:r.width-g*2,height:r.height/2-g*1.5}, bottom:{left:g,top:r.height/2+g/2,width:r.width-g*2,height:r.height/2-g*1.5},
@@ -757,7 +766,7 @@ class WindowManager {
   // Snap a window to half the workspace without changing the grid
   snapToHalf(winId, side) {
     const win = this.windows.get(winId); if (!win) return;
-    const r = this.workspace.getBoundingClientRect(), g = 4;
+    const r = { width: this.workspace.offsetWidth, height: this.workspace.offsetHeight }, g = 4; // layout px (F1)
     const el = win.element;
     const zones = {
       left:   { left: g, top: g, width: r.width / 2 - g * 1.5, height: r.height - g * 2 },
@@ -793,7 +802,7 @@ class WindowManager {
     const minR = Math.min(r1, r2), maxR = Math.max(r1, r2);
     const minC = Math.min(c1, c2), maxC = Math.max(c1, c2);
 
-    const r = this.workspace.getBoundingClientRect(), g = 4;
+    const r = { width: this.workspace.offsetWidth, height: this.workspace.offsetHeight }, g = 4; // layout px (F1)
     const cw = (r.width - g * (cols + 1)) / cols;
     const ch = (r.height - g * (rows + 1)) / rows;
 
@@ -809,7 +818,7 @@ class WindowManager {
 
   _positionToCell(win, idx, animate) {
     if (!this.grid) return;
-    const r = this.workspace.getBoundingClientRect(), g = 4;
+    const r = { width: this.workspace.offsetWidth, height: this.workspace.offsetHeight }, g = 4; // layout px (F1)
     const { rows, cols } = this.grid;
     const row = Math.floor(idx / cols), col = idx % cols;
     const cw = (r.width - g * (cols + 1)) / cols, ch = (r.height - g * (rows + 1)) / rows;
@@ -903,12 +912,15 @@ class WindowManager {
       const e = pendingEv; if (!e) return;
       pendingEv = null;
       const w = el.offsetWidth || parseInt(el.style.width) || 350;
-      el.style.left = (e.clientX - w / 2) + 'px';
-      el.style.top = (e.clientY - 15) + 'px';
-      // Live-update desktop preview rect
-      if (wr.width > 0 && wr.height > 0 && srcRect) {
-        srcRect.style.left = ((el.offsetLeft / wr.width) * 100) + '%';
-        srcRect.style.top = ((el.offsetTop / wr.height) * 100) + '%';
+      // workspace-relative (pre-existing 2.100.3-class bug, review-flagged:
+      // absolute clientX dropped the window a sidebar-width right)
+      el.style.left = ((e.clientX - wr.left) / uiScale() - w / 2) + 'px';
+      el.style.top = ((e.clientY - wr.top) / uiScale() - 15) + 'px';
+      // Live-update desktop preview rect (layout-px ratio — see the drag note)
+      const mwW = this.workspace.offsetWidth, mwH = this.workspace.offsetHeight;
+      if (mwW > 0 && mwH > 0 && srcRect) {
+        srcRect.style.left = ((el.offsetLeft / mwW) * 100) + '%';
+        srcRect.style.top = ((el.offsetTop / mwH) * 100) + '%';
       }
     };
     const onMove = (e) => {
@@ -1253,9 +1265,10 @@ class WindowManager {
     document.body.appendChild(pop);
     // Position at cursor, clamp to viewport
     requestAnimationFrame(() => {
-      const pw = pop.offsetWidth, ph = pop.offsetHeight;
-      pop.style.left = Math.min(cx, window.innerWidth - pw - 8) + 'px';
-      pop.style.top = Math.min(cy, window.innerHeight - ph - 8) + 'px';
+      // clamp in VIEWPORT space (offset sizes ×Z), write layout px (F3)
+      const pw = pop.offsetWidth * uiScale(), ph = pop.offsetHeight * uiScale();
+      pop.style.left = (Math.min(cx, window.innerWidth - pw - 8) / uiScale()) + 'px';
+      pop.style.top = (Math.min(cy, window.innerHeight - ph - 8) / uiScale()) + 'px';
     });
 
     attachPopoverClose(pop);

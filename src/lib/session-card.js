@@ -1,4 +1,4 @@
-import { escHtml, copyText, createPopover, showConfirmDialog, showContextMenu } from './utils.js';
+import { escHtml, copyText, createPopover, showConfirmDialog, showContextMenu, uiScale } from './utils.js';
 import { t as tr } from './i18n.js';
 import { SESSION_STATE_META, SESSION_URGENCY_META } from './sidebar-tasks.js';
 import { createBackendIcon, createAgentKindIcon, createModeBackendIcon, getBackendMeta, getAgentKindMeta, getAgentRoleLabel, getAgentRoleShortLabel, getSessionKey } from './agent-meta.js';
@@ -365,8 +365,8 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
         document.body.appendChild(pop);
         const r = iconEl.getBoundingClientRect();
         const pr = pop.getBoundingClientRect();
-        pop.style.left = Math.max(4, Math.min(r.left, window.innerWidth - pr.width - 4)) + 'px';
-        pop.style.top = (r.bottom + 6 + pr.height > window.innerHeight ? r.top - pr.height - 6 : r.bottom + 6) + 'px';
+        pop.style.left = (Math.max(4, Math.min(r.left, window.innerWidth - pr.width - 4)) / uiScale()) + 'px';
+        pop.style.top = ((r.bottom + 6 + pr.height > window.innerHeight ? r.top - pr.height - 6 : r.bottom + 6) / uiScale()) + 'px';
         const kill = () => { removeLegend(); document.removeEventListener('pointerdown', kill, true); document.removeEventListener('scroll', kill, true); };
         document.addEventListener('pointerdown', kill, true);
         document.addEventListener('scroll', kill, true);

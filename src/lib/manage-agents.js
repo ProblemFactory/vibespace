@@ -242,6 +242,57 @@ export function installManageAgents(App, ctx = {}) {
     this.ws.send({ type: 'kill', sessionId: sess.serverId, backendSessionId: sess.backendSessionId });
     setTimeout(go, 15000); // a lost exited must not strand the restart
   },
+  // Pool MEMBERS dialog (user request): choose which subscriptions the pool
+  // switches over. "All" = members:null in the store — a DYNAMIC default that
+  // includes subscriptions added LATER (the user's 全选 semantics), not a
+  // snapshot of today's list. Explicit selection = a narrowed fixed set;
+  // narrowing away the current target re-points server-side (updatePool).
+  async _poolMembersDialog(poolId, a, refresh) {
+    let list;
+    try { list = await fetchJson('/api/accounts'); } catch { showToast(t('Could not load accounts'), { type: 'error' }); return; }
+    const subs = (list?.accounts || []).filter((x) => x.type === 'subscription' && x.backend !== 'codex' && !x.pooled);
+    const { body, close } = createModalShell({ id: 'pool-members-dialog', title: t('Pool members — {name}', { name: a?.name || '' }), minWidth: '420px', escapeToClose: true });
+    const explicit = Array.isArray(a?.members) && a.members.length ? a.members : null;
+    body.innerHTML = `
+      <div class="usage-note">${escHtml(t('The pool switches between these subscriptions. Not-signed-in accounts are skipped until they log in.'))}</div>
+      <label class="pool-mem-row pool-mem-all"><input type="checkbox" id="pool-mem-all" ${explicit ? '' : 'checked'}>
+        <span><b>${escHtml(t('All subscriptions'))}</b><br><span class="pool-mem-sub">${escHtml(t('including accounts you add in the future'))}</span></span></label>
+      <div class="pool-mem-list">${subs.map((x) => `
+        <label class="pool-mem-row"><input type="checkbox" class="pool-mem-cb" data-id="${escHtml(x.id)}" ${explicit ? (explicit.includes(x.id) ? 'checked' : '') : 'checked'} ${explicit ? '' : 'disabled'}>
+          <span>${escHtml(x.name)}${x.email ? ` <span class="pool-mem-sub">${escHtml(x.email)}</span>` : ''}${x.loggedIn ? '' : ` <span class="pool-mem-sub">· ${escHtml(t('not signed in'))}</span>`}</span></label>`).join('')}
+        ${subs.length ? '' : `<div class="empty-hint">${escHtml(t('No subscription accounts yet'))}</div>`}</div>
+      <div class="dialog-buttons"><button class="btn-create" id="pool-mem-save">${escHtml(t('Save'))}</button></div>`;
+    const allCb = body.querySelector('#pool-mem-all');
+    const cbs = [...body.querySelectorAll('.pool-mem-cb')];
+    allCb.onchange = () => { for (const cb of cbs) { cb.disabled = allCb.checked; if (allCb.checked) cb.checked = true; } };
+    body.querySelector('#pool-mem-save').onclick = async () => {
+      // empty explicit selection would silently mean ALL in the store
+      // (updatePool maps [] → null) — refuse instead of surprising
+      const members = allCb.checked ? null : cbs.filter((cb) => cb.checked).map((cb) => cb.dataset.id);
+      if (members && !members.length) { showToast(t('Pick at least one member (or choose All)'), { type: 'error' }); return; }
+      // review B2: a selection with ZERO signed-in members can never take over
+      // — the pool would keep billing the current (now non-member) target
+      // while the row still shows it, with nothing telling the user why
+      if (members && !members.some((mid) => subs.find((x) => x.id === mid)?.loggedIn)) {
+        showToast(t('None of the selected members is signed in — the pool would keep billing its current (non-member) target. Sign one in first.'), { type: 'error', duration: 8000 }); return;
+      }
+      let r;
+      try {
+        r = await fetchJson('/api/accounts/pool/' + encodeURIComponent(poolId), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ members }) });
+        if (r?.error) { showToast(r.error, { type: 'error' }); return; }
+      } catch (e) { showToast(e?.message || t('Update failed'), { type: 'error' }); return; }
+      close(); refresh?.();
+      showToast(members ? t('Pool members updated ({n} selected)', { n: members.length }) : t('Pool set to all subscriptions (incl. future ones)'));
+      // Narrowing away the current target re-points the pool IMMEDIATELY —
+      // same consequences as an explicit target switch (review B1): tell the
+      // user, and cold-restart affected conversations unless the pool is hot.
+      if (r?.retargeted) {
+        showToast(t('“{name}” now uses {target}', { name: a?.name || '', target: r.retargeted.name || '?' }) + ((!a?.hot && r.affected?.length) ? ' — ' + t('restarting {n} conversation(s)…', { n: r.affected.length }) : ''), { duration: 6000 });
+        if (!a?.hot) for (const sess of (r.affected || [])) this._poolColdRestart(sess, poolId);
+      }
+    };
+  },
+
   _watchHostLogin(hostId, hostLabel) {
     if (!hostId) return;
     if (this._hostLoginWatch) { clearInterval(this._hostLoginWatch); this._hostLoginWatch = null; }
@@ -1719,6 +1770,7 @@ export function installManageAgents(App, ctx = {}) {
             catch (e) { showToast(e?.message || t('Update failed'), { type: 'error' }); }
           };
           items.splice(1, 0,
+            { label: t('Members\u2026'), action: () => this._poolMembersDialog(id, a, refresh) },
             { label: (a.auto ? '\u2713 ' : '') + t('Auto-switch when nearly exhausted'), action: () => patchPool({ auto: !a.auto }) },
             { label: (a.hot ? '\u2713 ' : '') + t('Hot switch (no restart)'), action: () => patchPool({ hot: !a.hot }) },
           );

@@ -149,9 +149,10 @@ export function showToast(message, { type = 'info', duration } = {}) {
     stack.classList.add('gt-anchored');
     stack.style.left = 'auto';
     stack.style.transform = 'none';
-    stack.style.right = Math.max(8, window.innerWidth - r.right) + 'px';
-    if (r.top > window.innerHeight / 2) { stack.style.bottom = (window.innerHeight - r.top + 8) + 'px'; stack.style.top = 'auto'; }
-    else { stack.style.top = (r.bottom + 8) + 'px'; stack.style.bottom = 'auto'; }
+    const Z = uiScale(); // viewport→layout px (F2)
+    stack.style.right = (Math.max(8, window.innerWidth - r.right) / Z) + 'px';
+    if (r.top > window.innerHeight / 2) { stack.style.bottom = ((window.innerHeight - r.top + 8) / Z) + 'px'; stack.style.top = 'auto'; }
+    else { stack.style.top = ((r.bottom + 8) / Z) + 'px'; stack.style.bottom = 'auto'; }
   } else {
     stack.classList.remove('gt-anchored');
     stack.style.left = ''; stack.style.right = ''; stack.style.top = ''; stack.style.bottom = ''; stack.style.transform = '';
@@ -330,21 +331,24 @@ export function createPopover(anchor, className, opts = {}) {
   pop.style.zIndex = '99999';
   // Initial placement (off-screen to measure)
   pop.style.visibility = 'hidden';
+  // /uiScale(): fixed body children take LAYOUT px; all inputs are VIEWPORT px
+  const Z = uiScale();
   if (opts.position === 'cursor') {
-    pop.style.left = (opts.x || 0) + 'px';
-    pop.style.top = (opts.y || 0) + 'px';
+    pop.style.left = ((opts.x || 0) / Z) + 'px';
+    pop.style.top = ((opts.y || 0) / Z) + 'px';
   } else {
     const rect = anchor.getBoundingClientRect();
-    pop.style.left = rect.left + 'px';
-    pop.style.top = (rect.bottom + 2) + 'px';
+    pop.style.left = (rect.left / Z) + 'px';
+    pop.style.top = ((rect.bottom + 2) / Z) + 'px';
   }
   (opts.parent || document.body).appendChild(pop);
-  // Clamp to viewport after render so content is measured
+  // Clamp to viewport after render so content is measured. Clamp math runs in
+  // VIEWPORT space (pr + innerWidth agree), only the final write divides.
   requestAnimationFrame(() => {
     const pr = pop.getBoundingClientRect();
     const vw = window.innerWidth, vh = window.innerHeight;
-    if (pr.right > vw) pop.style.left = Math.max(0, vw - pr.width - 4) + 'px';
-    if (pr.bottom > vh) pop.style.top = Math.max(0, vh - pr.height - 4) + 'px';
+    if (pr.right > vw) pop.style.left = (Math.max(0, vw - pr.width - 4) / Z) + 'px';
+    if (pr.bottom > vh) pop.style.top = (Math.max(0, vh - pr.height - 4) / Z) + 'px';
     if (pr.left < 0) pop.style.left = '4px';
     if (pr.top < 0) pop.style.top = '4px';
     pop.style.visibility = '';
@@ -369,8 +373,9 @@ export function showContextMenu(x, y, items, className = 'context-menu') {
   pop.style.position = 'fixed';
   pop.style.zIndex = '99999';
   pop.style.visibility = 'hidden';
-  pop.style.left = x + 'px';
-  pop.style.top = y + 'px';
+  const Z = uiScale(); // viewport→layout px for fixed body children (F2)
+  pop.style.left = (x / Z) + 'px';
+  pop.style.top = (y / Z) + 'px';
   document.body.appendChild(pop);
   attachPopoverClose(pop); // no anchor exclusion — any outside click closes
   for (const item of items) {
@@ -444,12 +449,12 @@ export function showContextMenu(x, y, items, className = 'context-menu') {
   let mr = pop.getBoundingClientRect();
   const vw = window.innerWidth, vh = window.innerHeight;
   if (mr.height > vh - 8) {
-    pop.style.maxHeight = (vh - 8) + 'px';
+    pop.style.maxHeight = ((vh - 8) / Z) + 'px';
     pop.style.overflowY = 'auto';
     mr = pop.getBoundingClientRect();
   }
-  if (mr.right > vw) pop.style.left = Math.max(0, vw - mr.width - 4) + 'px';
-  if (mr.bottom > vh) pop.style.top = Math.max(0, vh - mr.height - 4) + 'px';
+  if (mr.right > vw) pop.style.left = (Math.max(0, vw - mr.width - 4) / Z) + 'px';
+  if (mr.bottom > vh) pop.style.top = (Math.max(0, vh - mr.height - 4) / Z) + 'px';
   if (mr.left < 0) pop.style.left = '4px';
   if (mr.top < 0) pop.style.top = '4px';
   pop.style.visibility = '';
@@ -512,26 +517,27 @@ export function anchorFixedPopup(popup, anchor, { gap = 6 } = {}) {
   if (!popup || !anchor) return;
   const r = anchor.getBoundingClientRect();
   const vw = window.innerWidth, vh = window.innerHeight;
+  const Z = uiScale(); // viewport→layout px for fixed body children (F2)
   const openUp = r.top + r.height / 2 > vh / 2;
   if (openUp) {
-    popup.style.bottom = `${Math.max(8, vh - r.top + gap)}px`;
+    popup.style.bottom = `${Math.max(8, vh - r.top + gap) / Z}px`;
     popup.style.top = 'auto';
-    popup.style.maxHeight = `${Math.max(120, r.top - gap - 16)}px`;
+    popup.style.maxHeight = `${Math.max(120, r.top - gap - 16) / Z}px`;
   } else {
-    popup.style.top = `${Math.min(vh - 40, r.bottom + gap)}px`;
+    popup.style.top = `${Math.min(vh - 40, r.bottom + gap) / Z}px`;
     popup.style.bottom = 'auto';
-    popup.style.maxHeight = `${Math.max(120, vh - r.bottom - gap - 16)}px`;
+    popup.style.maxHeight = `${Math.max(120, vh - r.bottom - gap - 16) / Z}px`;
   }
   if (r.left + r.width / 2 > vw / 2) {
-    popup.style.right = `${Math.max(8, vw - r.right)}px`;
+    popup.style.right = `${Math.max(8, vw - r.right) / Z}px`;
     popup.style.left = 'auto';
   } else {
-    popup.style.left = `${Math.max(8, r.left)}px`;
+    popup.style.left = `${Math.max(8, r.left) / Z}px`;
     popup.style.right = 'auto';
   }
   // width clamp needs the rendered size — nudge back inside if overflowing
   const pr = popup.getBoundingClientRect();
-  if (pr.right > vw - 8) { popup.style.left = `${Math.max(8, vw - 8 - pr.width)}px`; popup.style.right = 'auto'; }
+  if (pr.right > vw - 8) { popup.style.left = `${Math.max(8, vw - 8 - pr.width) / Z}px`; popup.style.right = 'auto'; }
   else if (pr.left < 8) { popup.style.left = '8px'; popup.style.right = 'auto'; }
 }
 
@@ -743,6 +749,33 @@ class StateSync {
 
 let _stateSync = null;
 
+// ── UI scale (DPI) + UI font scale — per-DEVICE prefs like the language ──────
+// uiScale = a CSS zoom on <body> (whole-app "display scaling"); uiFontScale =
+// a text-only multiplier consumed by curated chrome font-size rules via
+// --ui-font-scale. Stored as PERCENT ints in localStorage (never synced —
+// different monitors want different scales). applyUiPrefs() runs before App
+// boots and again on every gs-menu change. Desktop-only for the zoom half
+// (mobile keeps OS scaling + the 100vh!important sidebar override intact).
+export const UI_SCALE_MIN = 80, UI_SCALE_MAX = 130, UI_FONT_MIN = 85, UI_FONT_MAX = 140;
+let _uiScaleVal = 1;
+export function uiScale() { return _uiScaleVal; } // drag-delta compensation factor (viewport px → layout px = /uiScale())
+export function getUiPref(key, def = 100) {
+  const v = parseInt(localStorage.getItem(key), 10);
+  return Number.isFinite(v) ? v : def;
+}
+export function applyUiPrefs() {
+  const mobile = window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
+  const sp = Math.max(UI_SCALE_MIN, Math.min(UI_SCALE_MAX, getUiPref('vibespace.uiScale')));
+  const fp = Math.max(UI_FONT_MIN, Math.min(UI_FONT_MAX, getUiPref('vibespace.uiFontScale')));
+  const s = mobile ? 1 : sp / 100;
+  _uiScaleVal = s;
+  try {
+    document.body.style.zoom = s === 1 ? '' : String(s);
+    document.documentElement.style.setProperty('--ui-scale', String(s));
+    document.documentElement.style.setProperty('--ui-font-scale', String(fp / 100));
+  } catch { }
+}
+
 export function getStateSync() { return _stateSync; }
 
 export async function initStateSync(wsManager) {
@@ -778,11 +811,12 @@ export function clearDraft(type, id) {
     tip.textContent = text;
     tip.style.display = 'block';
     const r = el.getBoundingClientRect();
-    tip.style.left = r.left + 'px';
-    tip.style.top = (r.bottom + 5) + 'px';
+    const Z = uiScale(); // viewport→layout px (F2)
+    tip.style.left = (r.left / Z) + 'px';
+    tip.style.top = ((r.bottom + 5) / Z) + 'px';
     const tr = tip.getBoundingClientRect();
-    if (tr.right > window.innerWidth - 6) tip.style.left = Math.max(6, window.innerWidth - 6 - tr.width) + 'px';
-    if (tr.bottom > window.innerHeight - 6) tip.style.top = (r.top - 5 - tr.height) + 'px';
+    if (tr.right > window.innerWidth - 6) tip.style.left = (Math.max(6, window.innerWidth - 6 - tr.width) / Z) + 'px';
+    if (tr.bottom > window.innerHeight - 6) tip.style.top = ((r.top - 5 - tr.height) / Z) + 'px';
   };
   const hide = () => { if (tip) tip.style.display = 'none'; };
   document.addEventListener('mouseover', (e) => { const el = e.target.closest && e.target.closest('[data-tip]'); if (el) show(el); });

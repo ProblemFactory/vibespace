@@ -1,3 +1,4 @@
+import { uiScale } from './utils.js';
 /**
  * Reusable drag-to-resize handle.
  *
@@ -68,7 +69,8 @@ class Resizer {
 
       const inv = typeof this._invert === 'function' ? this._invert() : !!this._invert;
       const onMove = (e) => {
-        let delta = (dir === 'horizontal' ? e.clientX : e.clientY) - startPos;
+        // viewport→layout px under the DPI zoom (body zoom): sizes are layout px
+        let delta = ((dir === 'horizontal' ? e.clientX : e.clientY) - startPos) / uiScale();
         if (inv) delta = -delta;
         const newSize = Math.max(this.min, Math.min(this.max, startSize + delta));
         currentSize = newSize;
