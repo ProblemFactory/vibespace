@@ -19,5 +19,32 @@ ck('scoped Fable 0.33', out.scopedWeekly.some(w=>w.name==='Claude Fable'&&Math.a
 ck('scoped Opus 0-1 kept', out.scopedWeekly.some(w=>w.name==='Claude Opus'&&Math.abs(w.utilization-0.12)<1e-3));
 ck('source=control', out.source==='control');
 ck('null on garbage', ClaudeCodeAdapter.parseGetUsageResponse(null)===null && ClaudeCodeAdapter.parseGetUsageResponse({})===null);
+// ── REAL live envelope (captured 2026-08-09 on a 2.1.x session): utilization
+// is a 0-100 INTEGER, resets_at ISO, NO model_scoped array — named nullable
+// fields + codename buckets instead. The payload nests at
+// control_response.response.response (double). ──
+const live = { session:{total_cost_usd:0}, subscription_type:'max', rate_limits_available:true, rate_limits:{
+  five_hour:{utilization:34, resets_at:'2026-08-09T09:59:59.753015+00:00', limit_dollars:null},
+  seven_day:{utilization:39, resets_at:'2026-08-11T16:59:59.753043+00:00'},
+  seven_day_oauth_apps:null, seven_day_opus:null,
+  seven_day_sonnet:{utilization:12, resets_at:'2026-08-11T16:59:59.753043+00:00'},
+  nimbus_quill:{utilization:0, resets_at:null},
+  extra_usage:{is_enabled:false} } };
+const lv = ClaudeCodeAdapter.parseGetUsageResponse(live);
+ck('LIVE: 0-100 int utilization normalized (34 → 0.34)', Math.abs(lv.fiveHour.utilization-0.34)<1e-3);
+ck('LIVE: sevenDay 0.39', Math.abs(lv.sevenDay.utilization-0.39)<1e-3);
+ck('LIVE: ISO resets_at → epoch seconds', lv.sevenDay.resetsAt === Math.floor(Date.parse('2026-08-11T16:59:59.753043+00:00')/1000));
+ck('LIVE: named scoped field picked up (seven_day_sonnet → Sonnet)', lv.scopedWeekly.some(w=>/Sonnet/i.test(w.name)&&Math.abs(w.utilization-0.12)<1e-3));
+ck('LIVE: codename bucket without resets_at skipped', !lv.scopedWeekly.some(w=>/nimbus/i.test(w.name)));
+ck('LIVE: null buckets skipped, extra_usage not a scoped entry', !lv.scopedWeekly.some(w=>/extra|oauth/i.test(w.name)));
+
+// ── chat-mode limit banner parser (passive exhaustion signal) ──
+const pb = ClaudeCodeAdapter.parseLimitBanner;
+ck("banner: 5-hour", pb("You've reached your 5-hour limit.").kind==='fiveHour');
+ck('banner: weekly', pb("You've reached your weekly limit.").kind==='sevenDay');
+ck('banner: model-scoped weekly', (()=>{const r=pb("You've reached your Fable weekly limit."); return r.kind==='scoped'&&r.name==='Fable';})());
+ck('banner: unknown wording → fiveHour (shortest self-heal)', pb("You've reached your usage limit for now.").kind==='fiveHour');
+ck('banner: non-banner text → null', pb('Normal assistant reply about limits')===null);
+
 console.log(fail?`${fail} FAILED`:`ALL PASS (${pass})`);
 process.exit(fail?1:0);
