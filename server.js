@@ -697,6 +697,97 @@ function broadcastToSession(session, id, msg) {
 // appears — the switch itself never waits on a browser).
 const { decidePoolSwitch } = require('./src/account-pool-auto.js');
 const _poolAutoLast = new Map(); // poolId → ts (min 60s between switches)
+// ── get_usage control channel + chat-mode limit banner (B-7edc/B-292b) ──────
+// The get_usage control request makes the CLI (first-party client) fetch usage
+// itself — strictly better ToS posture than our bare /api/oauth/usage call.
+// HUMAN-TRIGGERED ONLY (the ⟳ button): auto-firing was REJECTED (2026-08-09,
+// user decision) — a machine-initiated quota check is the automated-access
+// pattern that got a real account banned. The passive chat-mode signal is the
+// LIMIT BANNER instead (markLimitBanner below): zero calls.
+const { ClaudeCodeAdapter } = require('./src/adapters/claude-code.js');
+const _vsuPending = new Map(); // request_id → {resolve, timer}
+function resolveUsageKey(session) {
+  let acct = session._accountId || null;
+  try { if (acct && accounts.get(acct)?.type === 'pooled') acct = accounts.poolCurrent(acct) || acct; } catch {}
+  return acct || '__global__';
+}
+function writeUsageCacheForKey(key, parsed) {
+  try {
+    const f = path.join(USAGE_CACHE_DIR, key.replace(/[^\w.-]/g, '_') + '.json');
+    let prev = {}; try { prev = JSON.parse(fs.readFileSync(f, 'utf-8')) || {}; } catch {}
+    const merged = { ...prev, ...parsed };
+    // preserve-merge like the statusline hook: never clobber known scoped/org
+    // data with an empty answer
+    if ((!parsed.scopedWeekly || !parsed.scopedWeekly.length) && Array.isArray(prev.scopedWeekly) && prev.scopedWeekly.length) {
+      merged.scopedWeekly = prev.scopedWeekly; merged.scopedFetchedAt = prev.scopedFetchedAt;
+    }
+    for (const k of ['orgUuid', 'orgName', 'orgEmail', 'email', 'name']) if (prev[k] !== undefined && merged[k] === undefined) merged[k] = prev[k];
+    fs.mkdirSync(USAGE_CACHE_DIR, { recursive: true });
+    fs.writeFileSync(f + '.tmp', JSON.stringify(merged)); fs.renameSync(f + '.tmp', f);
+    return true;
+  } catch { return false; }
+}
+// Ask a LIVE LOCAL claude chat session's CLI for usage over its control
+// channel. Returns parsed cache shape or null. Caller is the human-gated ⟳.
+function probeUsageViaSession(session, timeoutMs = 8000) {
+  return new Promise((resolve) => {
+    try {
+      if (!session?.pty || session.backend !== 'claude' || session.mode !== 'chat' || session.host) return resolve(null);
+      const req = ClaudeCodeAdapter.buildGetUsage();
+      const timer = setTimeout(() => { _vsuPending.delete(req.request_id); resolve(null); }, timeoutMs);
+      _vsuPending.set(req.request_id, { resolve, timer });
+      session.pty.write(JSON.stringify(req) + '\n');
+    } catch { resolve(null); }
+  });
+}
+// ⟳-route hook: find any live local claude chat session billed to `key`.
+function probeUsageForAccountKey(key) {
+  for (const [, s] of activeSessions) {
+    if (s.backend !== 'claude' || s.mode !== 'chat' || s.host || !s.pty) continue;
+    if (resolveUsageKey(s) !== key) continue;
+    return probeUsageViaSession(s).then((parsed) => {
+      if (parsed) writeUsageCacheForKey(key, parsed);
+      return parsed;
+    });
+  }
+  return Promise.resolve(null);
+}
+// Chat-mode PASSIVE exhaustion signal (zero API calls): the CLI's own
+// "You've reached your … limit" banner marks the bucket dead in the cache and
+// immediately re-evaluates the pool — this is what makes auto-switch work for
+// chat-only accounts (the statusline never runs there).
+function markLimitBanner(session, text) {
+  try {
+    const hit = ClaudeCodeAdapter.parseLimitBanner(text);
+    if (!hit) return;
+    const key = resolveUsageKey(session);
+    const f = path.join(USAGE_CACHE_DIR, key.replace(/[^\w.-]/g, '_') + '.json');
+    let cache = {}; try { cache = JSON.parse(fs.readFileSync(f, 'utf-8')) || {}; } catch {}
+    const nowSec = Math.floor(Date.now() / 1000);
+    const bump = (b, fallbackResetSec) => ({
+      ...(b || {}),
+      utilization: 1, status: 'limited',
+      // keep a known FUTURE reset; else a bounded guess so the marker self-
+      // expires (reset-passed ⇒ full) instead of pinning the account dead
+      resetsAt: (Number(b?.resetsAt) || 0) > nowSec ? b.resetsAt : nowSec + fallbackResetSec,
+    });
+    if (hit.kind === 'fiveHour') cache.fiveHour = bump(cache.fiveHour, 5 * 3600);
+    else if (hit.kind === 'sevenDay') cache.sevenDay = bump(cache.sevenDay, 24 * 3600);
+    else if (hit.kind === 'scoped') {
+      const list = Array.isArray(cache.scopedWeekly) ? cache.scopedWeekly : [];
+      const i = list.findIndex((x) => String(x?.name || '').toLowerCase() === hit.name.toLowerCase());
+      if (i >= 0) list[i] = bump(list[i], 24 * 3600);
+      else list.push({ name: hit.name, ...bump(null, 24 * 3600) });
+      cache.scopedWeekly = list;
+    }
+    cache.fetchedAt = Date.now(); cache.source = 'limit-banner';
+    fs.mkdirSync(USAGE_CACHE_DIR, { recursive: true });
+    fs.writeFileSync(f + '.tmp', JSON.stringify(cache)); fs.renameSync(f + '.tmp', f);
+    global.__vsEvent?.('usage-limit-banner-marked', `${key}:${hit.kind}`);
+    maybePoolAutoSwitch(session); // freshest possible exhaustion signal — act now
+  } catch (e) { console.warn('[usage] banner mark failed:', e.message); }
+}
+
 function maybePoolAutoSwitch(session) {
   try {
     const poolId = session._accountId;
@@ -1296,6 +1387,19 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
               }
             }
 
+            // get_usage control-response (vsu- ids are OURS): payload nests at
+            // response.response (live-verified 2026-08-09); resolve the ⟳
+            // probe's promise + persist. Other control_responses untouched.
+            if (msg.type === 'control_response' && String(msg.response?.request_id || '').startsWith('vsu-')) {
+              const pend = _vsuPending.get(msg.response.request_id);
+              if (pend) {
+                _vsuPending.delete(msg.response.request_id);
+                clearTimeout(pend.timer);
+                let parsed = null;
+                try { parsed = ClaudeCodeAdapter.parseGetUsageResponse(msg.response.response); } catch {}
+                pend.resolve(parsed);
+              }
+            }
             // Served-model truth for the lock re-pin (assistant records carry
             // the model that actually answered; '<synthetic>' rows excluded).
             // MAIN THREAD ONLY (review-caught): subagents/sidechains run their
@@ -1320,6 +1424,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
               for (const b of msg.message.content) {
                 if (b?.type === 'text' && typeof b.text === 'string' && /^You've reached your .{0,40} limit/.test(b.text)) {
                   global.__vsEvent?.('cli-usage-limit');
+                  markLimitBanner(session, b.text); // chat-mode passive exhaustion signal (2.260.0)
                 } else if (b?.type === 'fallback') {
                   global.__vsEvent?.('cli-model-fallback', `${b.from?.model || '?'}->${b.to?.model || '?'}`);
                   // main thread only — a SUBAGENT's fallback must not interrupt
@@ -4699,7 +4804,7 @@ app.use(sessionsRouter);
 // refreshed every ~5 min. See _fetchOAuthUsage below for the why.
 // ── Usage / Rate Limit ── (extracted to src/usage-routes.js in the 2.92.0 split)
 const { setupUsage } = require('./src/usage-routes');
-const usage = setupUsage({ app, accounts, hosts, usageHistory, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR });
+const usage = setupUsage({ app, accounts, hosts, usageHistory, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR, probeUsageForAccountKey });
 // Normalizer-level settings reads (chat.hideEmptyHooks) go through the REAL store
 MessageManager.getSetting = (k) => { try { return serverSetting(k); } catch { return undefined; } };
 const { getOAuthToken, usagePollingEnabled, summarizeCodexRateLimit, summarizeCodexRateLimits } = usage;

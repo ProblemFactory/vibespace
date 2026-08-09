@@ -11,7 +11,7 @@ const path = require('path');
 const os = require('os');
 const { execFileSync } = require('child_process');
 
-function setupUsage({ app, accounts, hosts, usageHistory, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR }) {
+function setupUsage({ app, accounts, hosts, usageHistory, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR, probeUsageForAccountKey }) {
 const https = require('https');
 function readUsageCache() {
   try {
@@ -416,7 +416,7 @@ app.post('/api/usage-stats/harvest-hosts', async (req, res) => {
   } finally { _harvestBusy = false; }
   res.json({ hosts: out });
 });
-app.post('/api/usage/refresh', (req, res) => {
+app.post('/api/usage/refresh', async (req, res) => {
   // User-facing kill switch (accounts.onDemandQuotaRefresh = 'off'): never
   // contact Anthropic, even if a stale client asks.
   let odMode = 'manual';
@@ -486,6 +486,21 @@ app.post('/api/usage/refresh', (req, res) => {
   const key = String(req.body?.account || '__global__');
   if (Date.now() < _rateLimitBackoffUntil) return res.json({ throttled: true, reason: 'backoff' });
   if (Date.now() - (_onDemandUsageAt[key] || 0) < 60000) return res.json({ throttled: true });
+  // CONTROL-CHANNEL preference (B-7edc, 2.260.0): if a live LOCAL claude chat
+  // session is billed to this account, ask ITS CLI via get_usage instead of
+  // touching the API ourselves — the fetch is then made by the first-party
+  // client (same as the user typing /usage there). Still human-gated (this
+  // route IS the ⟳ click) + the same 60s throttle above. Falls through to the
+  // bare read-only call when no session answers.
+  if (probeUsageForAccountKey) {
+    try {
+      const viaSession = await probeUsageForAccountKey(key);
+      if (viaSession) {
+        _onDemandUsageAt[key] = Date.now();
+        return res.json({ success: true, via: 'session' });
+      }
+    } catch { /* fall through to the bare call */ }
+  }
   const isGlobal = key === '__global__';
   let acctMeta = null;
   if (!isGlobal) {

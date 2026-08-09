@@ -290,9 +290,12 @@ class ClaudeCodeAdapter extends BackendAdapter {
     if (!rl || typeof rl !== 'object') return null;
     const toWin = (w) => {
       if (!w) return { utilization: 0, resetsAt: 0, status: 'allowed' };
-      // control payload uses used_percentage (0-100) OR utilization (0-1)
-      const pct = typeof w.used_percentage === 'number' ? w.used_percentage / 100
+      // control payload uses used_percentage (0-100) OR utilization — the LIVE
+      // envelope (verified 2026-08-09 on a real session) carries utilization as
+      // 0-100 integers, so normalize anything >1 down to the 0-1 shape
+      let pct = typeof w.used_percentage === 'number' ? w.used_percentage / 100
         : (typeof w.utilization === 'number' ? w.utilization : 0);
+      if (pct > 1) pct = pct / 100;
       const resetsAt = typeof w.resets_at === 'number' ? w.resets_at
         : (w.resets_at ? Math.floor(Date.parse(w.resets_at) / 1000) || 0 : 0);
       return { utilization: pct, resetsAt, status: pct >= 1 ? 'limited' : 'allowed' };
@@ -311,12 +314,46 @@ class ClaudeCodeAdapter extends BackendAdapter {
         severity: s.severity || 'normal',
       });
     }
+    // LIVE-envelope fallback (verified): no model_scoped array — scoped caps
+    // ride as named nullable top-level fields (seven_day_opus/seven_day_sonnet
+    // + internal codename buckets). Include any object field with a numeric
+    // utilization AND a resets_at (codename buckets without a reset carry no
+    // usable deadline and are skipped); prettify the field name.
+    if (!scopedWeekly.length) {
+      const SKIP = new Set(['five_hour', 'seven_day', 'extra_usage', 'seven_day_oauth_apps']);
+      for (const [k, v] of Object.entries(rl)) {
+        if (SKIP.has(k) || !v || typeof v !== 'object') continue;
+        if (typeof v.utilization !== 'number' && typeof v.used_percentage !== 'number') continue;
+        if (!v.resets_at) continue;
+        const w = toWin(v);
+        const name = k.replace(/^seven_day_/, '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+        scopedWeekly.push({ name, utilization: w.utilization, resetsAt: w.resetsAt, severity: w.utilization >= 1 ? 'exceeded' : 'normal' });
+      }
+    }
     return {
       fiveHour, sevenDay, scopedWeekly,
       overallStatus: (fiveHour.status === 'limited' || sevenDay.status === 'limited') ? 'limited' : 'allowed',
       fetchedAt: Date.now(), source: 'control',
       scopedFetchedAt: scopedWeekly.length ? Date.now() : undefined,
     };
+  }
+
+  // Chat-mode PASSIVE limit signal (2.260.0, ToS-clean by construction): the
+  // CLI prints "You've reached your … limit" INTO the stream when a bucket
+  // hits zero — the freshest possible exhaustion signal, zero API calls
+  // (auto-firing get_usage was REJECTED as an automated quota-check pattern).
+  // Returns {kind:'fiveHour'|'sevenDay'|'scoped', name?} or null.
+  static parseLimitBanner(text) {
+    const m = /^You've reached your (.{0,40}?) ?limit/i.exec(String(text || ''));
+    if (!m) return null;
+    const what = m[1] || '';
+    if (/5[- ]?hour|session/i.test(what)) return { kind: 'fiveHour' };
+    const model = /\b(Fable|Opus|Sonnet|Haiku)\b/i.exec(what);
+    if (model && /week/i.test(what)) return { kind: 'scoped', name: model[1][0].toUpperCase() + model[1].slice(1).toLowerCase() };
+    if (/week|7[- ]?day/i.test(what)) return { kind: 'sevenDay' };
+    // unknown wording → treat as the SHORTEST-recovery bucket (self-heals in
+    // ≤5h via the reset-passed rule; a re-attempt re-banners and re-marks)
+    return { kind: 'fiveHour' };
   }
 }
 
