@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.262.0
+
+- **Agents surface redesigned into three tabs** (user: 按设备平铺缺分级看着累 + 指令环节孤立): **Accounts** (default — the management home: local roster, local CLI logins, integration), **Machines** (one **accordion card per host**, collapsed by default with the ssh/dial probe running **lazily on first expand** — opening the dialog no longer fans probes to every configured machine; open-set remembered per device; a single host auto-expands), **Instructions** (the agent-injection fields get their own tab instead of dangling collapsed at the bottom). Tab choice persists per device. Modal and rail panel share the layout. The smoke suite navigates the real tabs (accordion fill, per-row refresh errors on both tabs) — and caught a silently-broken 2.258.0 assert along the way (the menu redesign moved the `Fa 41%` spacing from text to CSS gap).
+
 ## 2.261.0
 
 - **Quota dead-reckoning data foundation** (user-designed "惯性导航" step 1): every ground-truth usage reading (statusline / ⟳ / get_usage / limit banner) is now recorded as an **anchor** — together with the local ledger's cost consumed since the previous anchor (split by model family, so Fable-bucket rates stay derivable) — into `data/usage-anchors/anchors-<identity>.ndjson`. This is the complete, raw training set: prediction/rate models can be built and re-built **offline forever** from anchor pairs. Zero API calls (a 60s sweep of local cache snapshots).

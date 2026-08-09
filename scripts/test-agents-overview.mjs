@@ -105,11 +105,13 @@ const st1 = await evalJs(`(() => ({
   oldSelector: !!document.querySelector('.agents-host-select'),
   hostSec: !!document.querySelector('.agents-machine-sec:not([data-host=""])'),
 }))()`);
-check('two machine sections render (local + DeadHost)', st1.secs === 2);
+// 2.262.0 tabs: default = Accounts (the LOCAL roster only); hosts moved to
+// the Machines tab's accordion (asserted after the tab switch below).
+check('accounts tab renders exactly the local section', st1.secs === 1 && !st1.hostSec);
 check('local section has the CLI-login row', st1.localGlobalRow);
 check('⟳ Refresh-all button present', st1.refreshAll);
 check('host selector is gone', !st1.oldSelector);
-check('host section container present', st1.hostSec);
+check('tab bar renders', await evalJs(`document.querySelectorAll('.agents-tab').length === 3`));
 // ── donut-column alignment (2.245.2 regression guard, real pixels) ──
 // Inject the inline refresh-error DOM shape into one row (same markup the
 // real fan-out failure path appends), then sweep panel widths.
@@ -159,6 +161,11 @@ for (const [sbw, panel, mode] of [[504, 460, 'donut'], [384, 340, 'pill'], [304,
   }
 }
 await evalJs(`(() => { app.sidebar.el.style.width=''; app.sidebar._applySidebarLayoutWidth?.(); return 1; })()`);
+// 2.262.0 tabs: host sections live under the Machines tab (single host
+// auto-expands its accordion card).
+await evalJs(`(() => { [...document.querySelectorAll('.agents-tab')].find((b) => /Machines|机器/.test(b.textContent))?.click(); return 1; })()`);
+await sleep(800);
+check('machines tab shows the accordion card', await evalJs(`!!document.querySelector('.agents-mach-acc[data-host]')`));
 // Wait out the dead host's probe failures, then check honest state.
 for (let i = 0; i < 20; i++) { if (await evalJs(`!document.querySelector('.agents-machine-sec:not([data-host=""]) .ob-loading')`)) break; await sleep(1000); }
 const st2 = await evalJs(`(() => {
@@ -172,6 +179,12 @@ check('dead host section has its CLI-login row', st2.globalRow);
 await evalJs(`(() => { const b = document.querySelector('.agents-refresh-all'); b.click(); return 1; })()`);
 for (let i = 0; i < 25; i++) { if (await evalJs(`!!document.querySelector('.agents-machine-sec:not([data-host=""]) .acct-refresh-err')`)) break; await sleep(1000); }
 check('failed refresh target rendered an inline per-row error (dead host)', await evalJs(`!!document.querySelector('.agents-machine-sec:not([data-host=""]) .acct-refresh-err')`));
+// LOCAL rows live on the Accounts tab now — switch, re-click (throttled
+// replies also render inline, which is the honest surface here).
+await evalJs(`(() => { [...document.querySelectorAll('.agents-tab')].find((b) => /Accounts|账号/.test(b.textContent))?.click(); return 1; })()`);
+await sleep(1200);
+await evalJs(`(() => { const b = document.querySelector('.agents-refresh-all'); b.click(); return 1; })()`);
+for (let i = 0; i < 25; i++) { if (await evalJs(`document.querySelectorAll('.agents-machine-sec[data-host=""] .acct-refresh-err').length >= 2`)) break; await sleep(1000); }
 check('failed LOCAL targets rendered inline errors too', await evalJs(`document.querySelectorAll('.agents-machine-sec[data-host=""] .acct-refresh-err').length >= 2`));
 // ── billing switcher: labelHtml quota preview (2.245.2) ──
 await evalJs(`(() => { app.showBillingSwitcher({ backend: 'claude', backendSessionId: null, name: 'T' }, { x: 300, y: 200 }); return 1; })()`);
@@ -182,7 +195,7 @@ const sw = await evalJs(`(() => {
   return {
     menu: true,
     coloredPcts: m.querySelectorAll('.context-menu-item span[style*="color"]').length,
-    hasScoped: /Fa \\d+%/.test(m.textContent),
+    hasScoped: /Fa\\s*\\d+%/.test(m.textContent),
     evilLiteral: m.textContent.includes('Ev<il> & "Max"'),
     injected: !!m.querySelector('il, img'),
   };

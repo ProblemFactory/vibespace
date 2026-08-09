@@ -1083,59 +1083,109 @@ export function installManageAgents(App, ctx = {}) {
       if (stale()) return;
       this._agentsHostsList = hostsList; // the refresh-all fan-out reads this
       body.innerHTML = '';
-      // Panel header: context line + ONE ⟳ Refresh-all. The fan-out is a
-      // per-target on-demand refresh, HUMAN-CLICK-initiated only (§ban-safety:
-      // never wire this to any timer).
-      const head = document.createElement('div');
-      head.className = 'agents-overview-head';
-      const headNote = document.createElement('span');
-      headNote.className = 'agents-note';
-      headNote.textContent = t('Accounts & quota by machine');
-      const refreshAll = document.createElement('button');
-      refreshAll.className = 'agent-btn agents-refresh-all';
-      refreshAll.innerHTML = `${UI_ICONS.refresh}<span>${t('Refresh all')}</span>`;
-      refreshAll.title = t('Fetch fresh quota for every signed-in account and machine below — one on-demand request per identity, only when you click (never scheduled)');
-      refreshAll.onclick = () => this._refreshAllQuota(refreshAll, body);
-      head.append(headNote, refreshAll);
-      body.appendChild(head);
-      // Machine section containers are created SYNCHRONOUSLY (DOM order fixed:
-      // local first, then each host) and filled in parallel — ssh probes to
-      // different hosts overlap instead of serializing the whole surface.
-      const mkSection = (label, hostId, sub) => {
+      // ── 2.262.0 REDESIGN (user: 平铺缺分级看着累 + 指令环节孤立): three
+      // tabs — Accounts (management home = the local roster), Machines (one
+      // ACCORDION card per host, lazily probed on first expand), Instructions
+      // (the agent-injection fields, no longer dangling at the bottom). ──
+      const tab = ['accounts', 'machines', 'instructions'].includes(localStorage.getItem('vibespace.agentsTab')) ? localStorage.getItem('vibespace.agentsTab') : 'accounts';
+      const tabs = document.createElement('div');
+      tabs.className = 'agents-tabs';
+      for (const [k, label] of [['accounts', t('Accounts')], ['machines', t('Machines') + (hostsList.length ? ` (${hostsList.length})` : '')], ['instructions', t('Instructions')]]) {
+        const b = document.createElement('button');
+        b.className = 'agents-tab' + (k === tab ? ' active' : '');
+        b.textContent = label;
+        b.onclick = () => { localStorage.setItem('vibespace.agentsTab', k); refresh(); };
+        tabs.appendChild(b);
+      }
+      body.appendChild(tabs);
+      // Header: ONE ⟳ Refresh-all (HUMAN-CLICK-initiated only, §ban-safety:
+      // never wire this to any timer). Not shown on the Instructions tab.
+      if (tab !== 'instructions') {
+        const head = document.createElement('div');
+        head.className = 'agents-overview-head';
+        const headNote = document.createElement('span');
+        headNote.className = 'agents-note';
+        headNote.textContent = tab === 'accounts' ? t('Accounts & quota on this machine') : t('Accounts & quota by machine');
+        const refreshAll = document.createElement('button');
+        refreshAll.className = 'agent-btn agents-refresh-all';
+        refreshAll.innerHTML = `${UI_ICONS.refresh}<span>${t('Refresh all')}</span>`;
+        refreshAll.title = t('Fetch fresh quota for every signed-in account and machine below — one on-demand request per identity, only when you click (never scheduled)');
+        refreshAll.onclick = () => this._refreshAllQuota(refreshAll, body);
+        head.append(headNote, refreshAll);
+        body.appendChild(head);
+      }
+      const mkSection = (label, hostId, sub, parent) => {
         const sec = document.createElement('div');
         sec.className = 'agents-machine-sec';
         sec.dataset.host = hostId || '';
-        const hd2 = document.createElement('div');
-        hd2.className = 'usage-section-title agents-machine-title';
-        const sp = document.createElement('span'); sp.textContent = label; hd2.appendChild(sp);
-        if (sub) { const ss = document.createElement('span'); ss.className = 'agents-machine-sub'; ss.textContent = sub; hd2.appendChild(ss); }
-        sec.appendChild(hd2);
+        if (label) {
+          const hd2 = document.createElement('div');
+          hd2.className = 'usage-section-title agents-machine-title';
+          const sp = document.createElement('span'); sp.textContent = label; hd2.appendChild(sp);
+          if (sub) { const ss = document.createElement('span'); ss.className = 'agents-machine-sub'; ss.textContent = sub; hd2.appendChild(ss); }
+          sec.appendChild(hd2);
+        }
         const ld = document.createElement('div'); ld.className = 'ob-loading'; ld.textContent = t('Checking…');
         sec.appendChild(ld);
-        body.appendChild(sec);
+        (parent || body).appendChild(sec);
         return sec;
       };
-      const fills = [renderMachine(mkSection(t('This machine'), ''), '', null, null, stale)];
-      for (const h of hostsList) {
-        const sec = mkSection(h.name, h.id, h.transport === 'dial' ? t('device') : `${h.user}@${h.host}`);
-        fills.push(renderMachine(sec, h.id, h.name, h.transport || null, stale));
+      const fills = [];
+      if (tab === 'accounts') {
+        // The LOCAL machine is the management home: full roster + local CLI
+        // logins + local integration (renderMachine('') unchanged).
+        fills.push(renderMachine(mkSection('', ''), '', null, null, stale));
+      } else if (tab === 'machines') {
+        if (!hostsList.length) {
+          const eh = document.createElement('div');
+          eh.className = 'empty-hint';
+          eh.textContent = t('No machines yet — add an SSH host or pair a device in the Remote tab.');
+          body.appendChild(eh);
+        }
+        // Accordion: one collapsible card per host; the ssh/dial probe runs
+        // LAZILY on first expand (opening the dialog no longer fans probes to
+        // every configured machine). Open-set remembered per device.
+        let openSet;
+        try { openSet = new Set(JSON.parse(localStorage.getItem('vibespace.agentsMachOpen') || '[]')); } catch { openSet = new Set(); }
+        for (const h of hostsList) {
+          const det = document.createElement('details');
+          det.className = 'agents-mach-acc';
+          det.dataset.host = h.id;
+          if (openSet.has(h.id) || hostsList.length === 1) det.open = true;
+          const sum = document.createElement('summary');
+          sum.className = 'agents-mach-sum';
+          sum.innerHTML = `<span class="agents-mach-name">${escHtml(h.name)}</span><span class="agents-machine-sub">${escHtml(h.transport === 'dial' ? t('device') : `${h.user}@${h.host}`)}</span>`;
+          det.appendChild(sum);
+          const sec = mkSection('', h.id, null, det);
+          const fill = () => {
+            if (det._filled) return;
+            det._filled = true;
+            const p = renderMachine(sec, h.id, h.name, h.transport || null, stale);
+            fills.push(p);
+            this._agentsFill = Promise.allSettled(fills);
+          };
+          det.addEventListener('toggle', () => {
+            try {
+              const cur = new Set(JSON.parse(localStorage.getItem('vibespace.agentsMachOpen') || '[]'));
+              if (det.open) cur.add(h.id); else cur.delete(h.id);
+              localStorage.setItem('vibespace.agentsMachOpen', JSON.stringify([...cur]));
+            } catch { }
+            if (det.open) fill();
+          });
+          body.appendChild(det);
+          if (det.open) fill();
+        }
       }
       // Refresh-all awaits this so a click right after open still sees every
-      // host's verdicts (held accounts) before building its target list.
+      // rendered machine's verdicts before building its target list.
       this._agentsFill = Promise.allSettled(fills);
-      // ── Agent instructions — ADVANCED, collapsed by default (user request:
-      // the expanded form dominated the dialog). Lives right under the
-      // VibeSpace integration row it belongs with. Layout: one labelled field
-      // per injection surface; each nudge condition is a full sentence with
-      // the number input embedded (the two-column flex wrap read broken).
-      {
-        const adv = document.createElement('details');
-        adv.className = 'agents-adv';
-        const sum = document.createElement('summary');
-        const hasAny = ['agents.injectPreamble', 'agents.perTurnExtra', 'agents.stopNudgeExtra']
-          .some((k) => (this.settings.get(k) || '').trim());
-        sum.innerHTML = `<b>${t('Agent instructions')}</b><span class="agents-adv-hint">${hasAny ? escHtml(t('customized')) : escHtml(t('advanced — custom text injected into every agent session'))}</span>`;
-        adv.appendChild(sum);
+      // ── Agent instructions — its OWN tab since 2.262.0 (it used to dangle
+      // collapsed at the bottom of the machine stack). Layout: one labelled
+      // field per injection surface; each nudge condition is a full sentence
+      // with the number input embedded.
+      if (tab === 'instructions') {
+        const adv = document.createElement('div');
+        adv.className = 'agents-adv agents-adv-tab';
         const body2 = document.createElement('div');
         body2.className = 'agents-adv-body';
         const note = document.createElement('div');
@@ -1219,14 +1269,16 @@ export function installManageAgents(App, ctx = {}) {
         body.appendChild(adv);
       }
 
-      const foot = document.createElement('div');
-      foot.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:10px;';
-      const note = document.createElement('p'); note.className = 'agents-note';
-      note.textContent = t('Actions open in a terminal window so you can see exactly what runs.');
-      const recheck = document.createElement('button'); recheck.className = 'agent-btn'; recheck.textContent = t('Re-check');
-      recheck.onclick = refresh;
-      foot.append(note, recheck);
-      body.appendChild(foot);
+      if (tab !== 'instructions') {
+        const foot = document.createElement('div');
+        foot.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:10px;';
+        const note = document.createElement('p'); note.className = 'agents-note';
+        note.textContent = t('Actions open in a terminal window so you can see exactly what runs.');
+        const recheck = document.createElement('button'); recheck.className = 'agent-btn'; recheck.textContent = t('Re-check');
+        recheck.onclick = refresh;
+        foot.append(note, recheck);
+        body.appendChild(foot);
+      }
     };
     // Latest surface wins; the watcher checks isConnected so a stale hook
     // (panel rebuilt / modal closed) reports false and triggers a reopen.
