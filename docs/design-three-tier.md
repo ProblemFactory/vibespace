@@ -141,9 +141,9 @@ hash identically across transports or messages double-render.
 
 | # | Round | Contents | Retires / unlocks |
 |---|---|---|---|
-| R0 | Message ids | content-derived mids, server-only, soak | prerequisite for all device-side parsing |
-| R1 | Machine facts | `probe.*` family; hosts/accounts consume op-first incl. device #0 | probe twin-scripts; wrong-machine CLI facts |
-| R2 | Worker isolation | embedded worker tier; fs-ops through it; loop-lag canary | unlocks file-ops unification and all later heavy ops |
+| R0 ✅ 2.280.0 | Message ids | content-derived mids, server-only, soak | prerequisite for all device-side parsing |
+| R1 ✅ 2.281.0 | Machine facts | `probe.*` family (`src/machine-probes.js`); hosts consume op-first, local calls in-proc | probe twin-scripts demoted to fallback |
+| R2 ✅ 2.282.0 | Worker isolation | embedded worker tier (FS_ACTIONS single object); fs-ops through it with deadline/terminate/respawn; loop-lag canary; hang-isolation proven on a real FIFO wedge | unlocks file-ops unification and all later heavy ops |
 | R3 | Transcript service | extract the parse stack behind one interface (pure refactor) → daemon-hosted ops dark behind a flag → byte-identical parity → remote reads switch. Replacement substrate (mirror + location index) proven BEFORE the raw remote cache demotes to fallback | the slab-sync integrity class; faster remote history |
 | R4 | Usage + events | walker into the daemon; `session.events`; policy consumers subscribe; local double-feeds during cutover (id dedup makes overlap harmless) | remote live-estimate + remote codex coverage gaps; the shipped scanner and its parity test |
 | R5 | Discovery | on-device claims; local discovery harvests device #0 behind a flag once poll latency is proven | the ssh discovery script (to fallback) |
