@@ -107,6 +107,28 @@ check('EXPIRED oat-only spawn refuses with re-mint guidance', (() => { try { acc
 check('expired oat drops the secret for a logged-in account', (() => { accounts.get(subIn.id).oatEnc = accounts.get(subOut.id).oatEnc; accounts.get(subIn.id).oatMintedAt = Date.now() - 366 * 86400000; const r = accounts.resolveForSpawn(subIn.id, 'claude'); delete accounts.get(subIn.id).oatEnc; return r.secret === null; })());
 check('clearOat removes verdict usability', (() => { accounts.clearOat(subOut.id); const v = evalV(subOut, F()); return !v.usable; })());
 
+// ── macOS local-only rung (PR #23, walter): a Darwin-platform manager marks
+// Claude subscriptions Keychain-backed — the SHIP rung is forbidden (the file
+// fallback forks the rotating refresh token), but held/linked stay usable.
+console.log('── macOS local-only (PR #23) ──');
+{
+  const { AccountManager: AM } = await import('../src/accounts.js');
+  const mac = new AM({ dataDir: tmp + '/mac', platform: 'darwin' });
+  const ms = mac.createSubscription({ name: 'MacSub' });
+  fs.writeFileSync(path.join(mac.subDir(ms.id), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'tok', expiresAt: Date.now() + 3600e3 } }));
+  mac.setEmail(ms.id, 'mac@example.com');
+  const mF = (over = {}) => ({ subscription: { email: 'machine@example.com' }, codex: { email: '' }, hostSubs: [], hostSubEmails: {}, transport: 'ssh', ...over });
+  const mv = (facts, opts) => mac.evaluateOnHost(mac.get(ms.id), facts, opts || {});
+  check('darwin sub is localOnly in list()', mac.list().accounts.find((x) => x.id === ms.id)?.localOnly === true);
+  check('darwin sub + allowShip → BLOCKED reason local-only-mac', (() => { const v = mv(mF(), { allowShip: true }); return !v.usable && v.reason === 'local-only-mac'; })());
+  check('darwin sub, ship off → reason local-only-mac (not ship-disabled)', (() => { const v = mv(mF()); return !v.usable && v.reason === 'local-only-mac'; })());
+  check('darwin sub HELD on host stays usable (host-held)', (() => { const v = mv(mF({ hostSubs: [ms.id], hostSubEmails: { [ms.id]: 'mac@example.com' } })); return v.usable && v.how === 'host-held'; })());
+  check('darwin sub LINKED to host login stays usable (host-login)', (() => { const v = mv(mF({ subscription: { email: 'mac@example.com' } })); return v.usable && v.how === 'host-login'; })());
+  check('darwin sub local spawn unaffected', (() => { const v = mv(null); return v.usable && v.how === 'local-env'; })());
+  check('resolveForSpawn marks remoteCreds non-shippable', mac.resolveForSpawn(ms.id, 'claude').remoteCreds?.shippable === false);
+  check('linux manager (this one) marks nothing localOnly', accounts.list().accounts.every((x) => !x.localOnly));
+}
+
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
 fs.rmSync(tmp, { recursive: true, force: true });
 process.exit(fail ? 1 : 0);
