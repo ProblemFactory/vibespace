@@ -1265,6 +1265,7 @@ export default {
   "Billing account": "计费账号",
   "machine login inactive": "机器登录已失效",
   "machine login not set up": "未配置机器登录",
+  "Log in machine-wide (claude /login)…": "机器全局登录（claude /login）…",
   "{n} named account(s) in use": "{n} 个命名账号在用",
   "Accounts & pool…": "账号与池…",
   "Tip: named accounts and account pools work without the machine-wide login — add them via “Accounts & pool…”.": "提示：命名账号和账号池无需机器全局登录即可使用——通过“账号与池…”直接添加。",

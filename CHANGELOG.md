@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.268.4
+
+- **"登录" and "+ 添加账号…" no longer sit side by side as look-alike primaries** (user report): when named/pooled accounts are carrying the sessions, the backend row's machine-wide "Log in" button disappears and the action moves INTO the Add-account menu as a clearly-labeled "Log in machine-wide (claude /login)…" entry. A machine with no named accounts keeps the primary Log in button (it is the main path there).
+
 ## 2.268.3
 
 - "Set up both…" retired from the Anthropic add-account menu (user: 没啥意义了) — the 2.43.0 console+subscription dual-login wizard predates named accounts and pooling; the menu now leads with the actual add paths. The dangling leading separator on non-importable machines is guarded; the wizard method itself stays (onboarding import path).
