@@ -20,6 +20,11 @@ const HANDLED_SYSTEM_SUBTYPES = new Set([
   'init', 'hook_response', 'stop_hook_summary', 'model_refusal_fallback',
   'model_refusal_no_fallback',
   'task_started', 'task_progress', 'task_notification',
+  // api_retry is DELIBERATELY card-less: the server feeds it into the
+  // streaming label ("API retrying (3/10, HTTP 500)…") — one card per retry
+  // attempt would spam the transcript. Listed here so the unknown-subtype
+  // breadcrumb stops firing for it.
+  'api_retry',
 ]);
 
 class MessageManager {
