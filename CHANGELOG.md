@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.268.1
+
+**Third class: cache READS are the nearly-free one** (user report: est 60 vs ⟳ 51, minutes after 2.268.0 went live — the incident window's $34.55 held only $1.29 of cache-write; incremental caching makes conversation windows cache-READ-dominated, and 2.268.0's two-class split had lumped cr into "other"). The 5h regression is now 3-class (`byClass {cw, cr, other}`; du = rate_cw·cw$ + rate_cr·cr$ + rate_fresh·fresh$, 3-var least squares, per-class priors $500/$3000/$200 + per-class sanity bounds):
+
+- Real-data fit via the shipped path, three identities in tight agreement: **cr-full $2660-2782** (cache reads nearly free for the bucket), fresh $179-192, cw $190-261. The refined physical picture: the 5h bucket ≈ input-class token count with ~zero weight on cache reads — cw and fresh burn at the SAME token rate, and cw's slightly higher $-implied full is exactly our 1.25-2× cache-write pricing premium. (2.268.0's "cw burns half" was a two-class artifact of cr hiding inside both groups.)
+- Tonight's 60-vs-51 window re-predicts **+2.5 points vs actual +3** (two-class said +12, blended +12.3).
+- Live ring entries carry `crUsd`; both stream feeders split it out; class pairs need cw AND cr present (older two-class snapshots fall back to blended — the learn-time ledger recompute gives virtually every pair the 3-way split retroactively anyway). Estimator suite 73.
+
 ## 2.268.0
 
 **5h token-class regression (B-536b, user-approved)** — the 5h bucket's last big error source was that ONE blended $-rate swung ±2.5× with the hour's cache-write share. The estimator now learns TWO rates per identity for the 5h bucket via 2-var least squares over class-split pairs (du = rate_cw × cw$ + rate_other × other$), seeded by pure-class prior pseudo-pairs (cw $800 / other $250) that real data quickly dominates:

@@ -28,13 +28,15 @@ const path = require('path');
 const PRIOR_WEIGHT_DU = 0.15;
 // Measured Max-20x full-quota sizes in API-equivalent USD (see header).
 const CLAUDE_MAX_PRIOR_FULL_USD = { fiveHour: 500, sevenDay: 1730, 'scoped:fable': 875 };
-// 5h TOKEN-CLASS priors (B-536b): the 5h bucket weights cache-WRITE tokens
-// far below our $ pricing — hourly-scale evidence put cw-heavy windows at
-// implied full ~$500-800 and fresh/output-heavy at ~$150-300. Two pseudo-
-// pairs (pure-cw / pure-other) seed the 2-var regression; real mixed data
-// dominates quickly (PRIOR_WEIGHT_DU each).
-const PRIOR_5H_CW_FULL_USD = 800;
-const PRIOR_5H_OTHER_FULL_USD = 250;
+// 5h TOKEN-CLASS priors (B-536b; 3-class since 2.268.1): the 5h bucket
+// weights each token class differently from our $ pricing — cache WRITES
+// burn ~half per $, cache READS are nearly FREE (incremental caching makes
+// cr-dominated windows: real-data fit cw ~$443 / cr ~$2556 / fresh ~$185).
+// Three pure-class pseudo-pairs seed the regression; real data dominates
+// quickly (PRIOR_WEIGHT_DU each).
+const PRIOR_5H_CW_FULL_USD = 500;
+const PRIOR_5H_CR_FULL_USD = 3000;
+const PRIOR_5H_FRESH_FULL_USD = 200;
 const WEEK_SEC = 7 * 86400;
 
 function normU(u) {
@@ -87,7 +89,7 @@ function extractPairs(lines, opts = {}) {
   const distinctIds = new Set();
   for (const l of lines || []) if (l && l.fetchedAt) distinctIds.add(l.accountId ?? '__global__');
   const out = {};
-  const add = (key, du, cost, cls = null) => { (out[key] = out[key] || []).push(cls ? { du, cost, cw: cls.cw, ot: cls.ot } : { du, cost }); };
+  const add = (key, du, cost, cls = null) => { (out[key] = out[key] || []).push(cls ? { du, cost, cw: cls.cw, cr: cls.cr, ot: cls.ot } : { du, cost }); };
   // BOUNCE-BACK taint (2.267.0, real poison caught in the Personal Max calib
   // stream): a stale sibling cache file briefly promoted to freshest anchors a
   // WEEK-OLD reading — the u-DECREASE pair into it is already voided by the
@@ -139,8 +141,9 @@ function extractPairs(lines, opts = {}) {
       // recompute always does since B-536b — historical pairs get classes
       // RETROACTIVELY; a frozen pre-B-536b snapshot yields null = the pair
       // still feeds the blended fallback, never the regression)
-      const cls = key === 'fiveHour' && src.byClass && Number.isFinite(Number(src.byClass.cw))
-        ? { cw: Number(src.byClass.cw) || 0, ot: Math.max(0, cost - (Number(src.byClass.cw) || 0)) } : null;
+      const bc = src.byClass;
+      const cls = key === 'fiveHour' && bc && Number.isFinite(Number(bc.cw)) && Number.isFinite(Number(bc.cr))
+        ? { cw: Number(bc.cw) || 0, cr: Number(bc.cr) || 0, ot: Math.max(0, cost - (Number(bc.cw) || 0) - (Number(bc.cr) || 0)) } : null;
       add(key, du, cost, cls);
     };
     pairBucket('fiveHour', base.buckets.fiveHour, l.buckets.fiveHour);
@@ -184,28 +187,38 @@ function learnRates(lines, { priors = null, costFn = null } = {}) {
     // the blended rate above stays as DISPLAY/back-compat + the fallback for
     // degenerate data (all pairs same mix ⇒ near-singular normal equations).
     if (key === 'fiveHour' && prior) {
-      const cls = (pairs[key] || []).filter((p) => Number.isFinite(p.cw));
+      const cls = (pairs[key] || []).filter((p) => Number.isFinite(p.cw) && Number.isFinite(p.cr));
       if (cls.length >= 3) {
         const obs = [
-          ...cls.map((p) => ({ du: p.du, cw: p.cw, ot: p.ot })),
-          { du: PRIOR_WEIGHT_DU, cw: PRIOR_WEIGHT_DU * PRIOR_5H_CW_FULL_USD, ot: 0 },
-          { du: PRIOR_WEIGHT_DU, cw: 0, ot: PRIOR_WEIGHT_DU * PRIOR_5H_OTHER_FULL_USD },
+          ...cls.map((p) => [p.cw, p.cr, p.ot, p.du]),
+          [PRIOR_WEIGHT_DU * PRIOR_5H_CW_FULL_USD, 0, 0, PRIOR_WEIGHT_DU],
+          [0, PRIOR_WEIGHT_DU * PRIOR_5H_CR_FULL_USD, 0, PRIOR_WEIGHT_DU],
+          [0, 0, PRIOR_WEIGHT_DU * PRIOR_5H_FRESH_FULL_USD, PRIOR_WEIGHT_DU],
         ];
-        let scc = 0, soo = 0, sco = 0, scd = 0, sod = 0;
-        for (const o of obs) { scc += o.cw * o.cw; soo += o.ot * o.ot; sco += o.cw * o.ot; scd += o.cw * o.du; sod += o.ot * o.du; }
-        const det = scc * soo - sco * sco;
-        if (det > 1e-6) {
-          const a = (scd * soo - sod * sco) / det;
-          const b = (sod * scc - scd * sco) / det;
-          // positivity + sanity bounds (implied fulls within [40, 20000]$):
-          // a negative/absurd coefficient = ill-conditioned mix — keep blended
+        // 3-var normal equations, Cramer solve
+        const A = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], Bv = [0, 0, 0];
+        for (const [x0, x1, x2, y] of obs) {
+          const x = [x0, x1, x2];
+          for (let i = 0; i < 3; i++) { Bv[i] += x[i] * y; for (let j = 0; j < 3; j++) A[i][j] += x[i] * x[j]; }
+        }
+        const det3 = (m) => m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+        const D = det3(A);
+        if (Number.isFinite(D) && Math.abs(D) > 1e-9) {
+          const rep = (m, col, v) => m.map((row, i) => row.map((x, j) => (j === col ? v[i] : x)));
+          const [a, b, c2] = [0, 1, 2].map((col) => det3(rep(A, col, Bv)) / D);
+          // positivity + per-class sanity bounds — a negative/absurd
+          // coefficient = ill-conditioned mix, keep blended. cr legitimately
+          // fits huge implied fulls (reads are nearly free), wider bound.
           const okA = Number.isFinite(a) && a > 1 / 20000 && a < 1 / 40;
-          const okB = Number.isFinite(b) && b > 1 / 20000 && b < 1 / 40;
-          if (okA && okB) {
+          const okB = Number.isFinite(b) && b > 1 / 100000 && b < 1 / 100;
+          const okC = Number.isFinite(c2) && c2 > 1 / 20000 && c2 < 1 / 40;
+          if (okA && okB && okC) {
             out[key].rateCw = a;
-            out[key].rateOther = b;
+            out[key].rateCr = b;
+            out[key].rateFresh = c2;
             out[key].impliedFullCwUsd = Math.round(10 / a) / 10;
-            out[key].impliedFullOtherUsd = Math.round(10 / b) / 10;
+            out[key].impliedFullCrUsd = Math.round(10 / b) / 10;
+            out[key].impliedFullFreshUsd = Math.round(10 / c2) / 10;
             out[key].nClassPairs = cls.length;
           }
         }
@@ -263,9 +276,10 @@ function estimateBuckets({ anchor, rates, costFn, nowMs }) {
     // regressions).
     let du;
     const bc = cost(fromMs).byClass;
-    if (key === 'fiveHour' && r.rateCw != null && r.rateOther != null && bc && Number.isFinite(Number(bc.cw))) {
-      const cw = Number(bc.cw) || 0;
-      du = r.rateCw * cw + r.rateOther * Math.max(0, c - cw);
+    if (key === 'fiveHour' && r.rateCw != null && r.rateCr != null && r.rateFresh != null
+        && bc && Number.isFinite(Number(bc.cw)) && Number.isFinite(Number(bc.cr))) {
+      const cw = Number(bc.cw) || 0, cr = Number(bc.cr) || 0;
+      du = r.rateCw * cw + r.rateCr * cr + r.rateFresh * Math.max(0, c - cw - cr);
     } else {
       du = r.rate * c;
     }
@@ -370,7 +384,7 @@ class UsageEstimator {
     // own rid set, so nothing double-counts once the scan lands).
     this._liveRing = []; // {rid, acct, fam, usd, ts}
   }
-  noteLive({ rid, accountId, model, usd, cwUsd = 0, ts = Date.now() }) {
+  noteLive({ rid, accountId, model, usd, cwUsd = 0, crUsd = 0, ts = Date.now() }) {
     if (!rid || !Number.isFinite(usd) || usd <= 0) return;
     if (!this._liveRids) this._liveRids = new Map(); // rid → ring entry
     // A streamed message is emitted SEVERAL times with GROWING usage (partial
@@ -379,10 +393,10 @@ class UsageEstimator {
     // the max instead of being dropped (first-wins under-counted the live
     // part). File-tail feeders re-reading ranges stay idempotent either way.
     const prev = this._liveRids.get(rid);
-    if (prev) { if (usd > prev.usd) { prev.usd = usd; prev.cwUsd = Math.max(prev.cwUsd || 0, cwUsd || 0); this._estMemo.clear(); } return; }
+    if (prev) { if (usd > prev.usd) { prev.usd = usd; prev.cwUsd = Math.max(prev.cwUsd || 0, cwUsd || 0); prev.crUsd = Math.max(prev.crUsd || 0, crUsd || 0); this._estMemo.clear(); } return; }
     const m = String(model || '').toLowerCase();
     const fam = m.includes('fable') ? 'fable' : m.includes('opus') ? 'opus' : m.includes('sonnet') ? 'sonnet' : m.includes('haiku') ? 'haiku' : 'other';
-    const entry = { rid, acct: accountId || '__global__', fam, usd, cwUsd: Number(cwUsd) || 0, ts };
+    const entry = { rid, acct: accountId || '__global__', fam, usd, cwUsd: Number(cwUsd) || 0, crUsd: Number(crUsd) || 0, ts };
     this._liveRids.set(rid, entry);
     this._liveRing.push(entry);
     if (this._liveRing.length > 3000) {
@@ -409,15 +423,15 @@ class UsageEstimator {
     // No age-out: ledger-dedup is the ONLY exit — an age cutoff made
     // un-scanned cost vanish from the estimate after N minutes (a dip
     // exactly when the scan lags worst); the ring cap bounds memory instead.
-    const out = { total: 0, byFamily: { fable: 0, opus: 0, sonnet: 0, haiku: 0, other: 0 }, byClass: { cw: 0, other: 0 } };
+    const out = { total: 0, byFamily: { fable: 0, opus: 0, sonnet: 0, haiku: 0, other: 0 }, byClass: { cw: 0, cr: 0, other: 0 } };
     for (const e of this._liveRing) {
       if (e.ts < fromMs || e.ts > nowMs) continue;
       if (!want.has(e.acct)) continue;
       if (known && known.has(e.rid)) continue;
       if (knownMids && knownMids.has(e.rid)) continue;
       out.total += e.usd; out.byFamily[e.fam] += e.usd;
-      const cw = Number(e.cwUsd) || 0;
-      out.byClass.cw += cw; out.byClass.other += Math.max(0, e.usd - cw);
+      const cw = Number(e.cwUsd) || 0, cr = Number(e.crUsd) || 0;
+      out.byClass.cw += cw; out.byClass.cr += cr; out.byClass.other += Math.max(0, e.usd - cw - cr);
     }
     return out.total > 0 ? out : null;
   }
@@ -486,8 +500,10 @@ class UsageEstimator {
         c.total += live.total;
         for (const k of Object.keys(live.byFamily)) c.byFamily[k] = (c.byFamily[k] || 0) + live.byFamily[k];
         if (live.byClass) {
-          c.byClass = c.byClass || { cw: 0, other: 0 };
-          c.byClass.cw += live.byClass.cw; c.byClass.other += live.byClass.other;
+          c.byClass = c.byClass || { cw: 0, cr: 0, other: 0 };
+          c.byClass.cw += live.byClass.cw;
+          c.byClass.cr = (c.byClass.cr || 0) + live.byClass.cr;
+          c.byClass.other += live.byClass.other;
         }
       }
       return c;
