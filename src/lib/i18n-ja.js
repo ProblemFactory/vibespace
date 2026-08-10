@@ -1264,6 +1264,7 @@ export default {
   "Billing account": "課金アカウント",
   "machine login inactive": "マシンログイン失効",
   "machine login not set up": "マシンログイン未設定",
+  "Log in machine-wide (claude /login)…": "マシン全体でログイン（claude /login）…",
   "{n} named account(s) in use": "名前付きアカウント {n} 件使用中",
   "Accounts & pool…": "アカウントとプール…",
   "Tip: named accounts and account pools work without the machine-wide login — add them via “Accounts & pool…”.": "ヒント：名前付きアカウントとアカウント プールはマシン全体のログインなしで使えます——「アカウントとプール…」から直接追加できます。",

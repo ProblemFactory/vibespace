@@ -904,7 +904,12 @@ export function installManageAgents(App, ctx = {}) {
           const name = b.key === 'claude' ? 'claude' : 'codex';
           return cmd.startsWith(name + ' ') || cmd === name ? `"${info.cmdPath}"` + cmd.slice(name.length) : cmd;
         };
-        if (info.installed && !info.loggedIn) {
+        // With named/pooled accounts carrying the sessions, a PRIMARY "Log in"
+        // next to "+ Add account…" was two green look-alikes with no visible
+        // distinction (2.268.4, user report) — the machine-wide login demotes
+        // into the Add-account menu then ("Log in machine-wide…"); a machine
+        // with NO named accounts keeps the button (it IS the primary path).
+        if (info.installed && !info.loggedIn && !(b.key === 'claude' && !selectedHost && info.namedLoggedIn > 0)) {
           const loginBtn = document.createElement('button'); loginBtn.className = 'agent-btn primary'; loginBtn.textContent = t('Log in');
           loginBtn.title = selectedHost ? t('Logs in ON the selected remote host (its own login, not VibeSpace)') : '';
           loginBtn.onclick = () => run(selectedHost && b.remoteLoginCmd ? b.remoteLoginCmd : absCmd(b.loginCmd));
@@ -1318,7 +1323,7 @@ export function installManageAgents(App, ctx = {}) {
   // Agents). Extracted from _showAgentsDialog so accounts sit beside their
   // CLI. ctx carries the dialog closures the block already used.
   async _renderClaudeAccounts(ctx) {
-    const { body, selectedHost, done, run, refresh } = ctx;
+    const { body, selectedHost, done, run, refresh, st } = ctx;
     const ctxRacct = ctx.racct;
     // ── Anthropic accounts (billing identity) — ONE unified roster whose
     // meaning is machine-scoped ONLY on the first row: the peer "CLI login"
@@ -1667,6 +1672,16 @@ export function installManageAgents(App, ctx = {}) {
           catch (e) { showToast(e?.message || t('Create failed'), { type: 'error' }); }
           refresh();
         } });
+      }
+      // Machine-wide login lives HERE when it's down but named accounts run
+      // the show (2.268.4): the backend row hides its "Log in" then — two
+      // primary green buttons (Log in / Add account) read as look-alikes.
+      if (!selectedHost && st?.claude?.installed && !st.claude.loggedIn && (st.claude.namedLoggedIn || 0) > 0) {
+        const cmd = st.claude.cmdPath ? `"${st.claude.cmdPath}"` : 'claude';
+        items.push({ separator: true }, {
+          label: t('Log in machine-wide (claude /login)…'),
+          action: () => { done(); run(cmd); },
+        });
       }
       showContextMenu(r.left, r.bottom + 4, items);
     };
