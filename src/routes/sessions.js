@@ -53,96 +53,25 @@ function withSessionKey(session = {}) {
 /** Setup session routes. Requires ctx object with dependencies. */
 function setup(ctx) {
   const { activeSessions, webuiPids, refreshWebuiPids, createSessionMessages, BUFFERS_DIR, PERMISSION_MODES, execFileSync, hosts } = ctx;
+  // R3 (three-tier): the transcript read composite lives in ONE service —
+  // this interface is the future `transcript.*` device op schema.
+  const { createTranscriptService } = require('../transcript-service');
+  const transcripts = createTranscriptService({ activeSessions, createSessionMessages, hosts });
 
   // Get chat message history for a Claude session (JSONL + optional buffer)
   router.get('/api/session-messages', async (req, res) => {
     const { backend, backendSessionId, claudeSessionId, cwd, offset, limit, search } = req.query;
-    const resolvedBackend = backend || 'claude';
-    // Remote session (?host=): refresh the local transcript cache first —
-    // findSessionJsonlPath scans it, so everything below works unchanged.
-    if (req.query.host && hosts) {
-      try {
-        const rid = backendSessionId || claudeSessionId;
-        if ((backend || 'claude') === 'codex') await hosts.fetchCodexJsonl(req.query.host, rid);
-        else await hosts.fetchSessionJsonl(req.query.host, rid);
-      }
-      catch (e) { console.error('remote jsonl fetch failed:', e.message); }
-    }
     const resolvedSessionId = backendSessionId || claudeSessionId;
     if (!resolvedSessionId) return res.status(400).json({ error: 'backendSessionId or claudeSessionId required' });
-    // 2.235.0: warm the JSONL parse cache in the transcript worker so the sync
-    // machinery below reads a warm cache instead of blocking the loop on a
-    // big-tail parse (claude transcripts; codex rollouts parse their own path)
-    if (resolvedBackend === 'claude') {
-      try { await require('../session-store').warmSessionJsonlAsync(resolvedSessionId, cwd); } catch {}
-    }
-
-    // Use session's existing normalizer if available (cached); else build on-demand
-    let session = null;
-    for (const [, s] of activeSessions) {
-      if (s.backend !== resolvedBackend) continue;
-      if ((s.backendSessionId || s.claudeSessionId) === resolvedSessionId) { session = s; break; }
-    }
-    let mm;
-    // Only trust the live normalizer once the WS attach path has loaded the
-    // full JSONL into it (_historyLoaded). After a server restart, processLive
-    // can populate it with partial buffer data first — serving that here
-    // truncated history/search/turnmap to a handful of buffer messages.
-    if (session?._normalizer && session._normalizer.total > 0 && session._historyLoaded) {
-      mm = session._normalizer;
-    } else {
-      const sm = createSessionMessages(session || {
-        backend: resolvedBackend,
-        backendSessionId: resolvedSessionId,
-        claudeSessionId: resolvedBackend === 'claude' ? resolvedSessionId : null,
-        cwd: cwd || '',
-        buffer: '',
-      });
-      mm = createMessageManager(resolvedBackend, 'api');
-      mm.convertHistory(sm.raw());
-    }
-
-    if (req.query.turnmap) {
-      res.json({ turns: mm.turnMap(), total: mm.total });
-      return;
-    }
-    if (search) {
-      res.json({ matches: mm.search(search), total: mm.total });
-      return;
-    }
-
-    let payload;
-    if (req.query.untilUuid) {
-      // Fork-from-here: return the conversation truncated at the given message
-      // (matches claude --resume-session-at), last 50 of that range for the
-      // initial view; total=upto so scroll-up pagination still loads older.
-      const idx = mm.messages.findIndex(m => m.uuid === req.query.untilUuid);
-      const upto = idx >= 0 ? idx + 1 : mm.total;
-      const start = Math.max(0, upto - 50);
-      payload = { messages: mm.messages.slice(start, upto), total: upto };
-    } else if (offset !== undefined || limit !== undefined) {
-      const o = parseInt(offset) || 0;
-      const l = parseInt(limit) || 50;
-      payload = { messages: mm.slice(o, l), total: mm.total };
-    } else {
-      payload = { messages: mm.tail(50), total: mm.total };
-    }
+    const ref = { backend: backend || 'claude', sessionId: resolvedSessionId, cwd, host: req.query.host };
+    if (req.query.turnmap) return res.json(await transcripts.turnmap(ref));
+    if (search) return res.json(await transcripts.searchIndexed(ref, search));
+    const payload = await transcripts.page(ref, { offset, limit, untilUuid: req.query.untilUuid });
     if (req.query.withStatus) {
-      const sm = createSessionMessages(session || {
-        backend: resolvedBackend,
-        backendSessionId: resolvedSessionId,
-        claudeSessionId: resolvedBackend === 'claude' ? resolvedSessionId : null,
-        cwd: cwd || '',
-        buffer: '',
-      });
-      payload.chatStatus = sm.chatStatus();
-      // Permission mode isn't recoverable from the JSONL — merge the mode the
-      // live session was started with (covers freshly resumed sessions)
-      if (session?._permissionMode && payload.chatStatus && !payload.chatStatus.permissionMode) {
-        payload.chatStatus.permissionMode = session._permissionMode;
-      }
-      payload.taskState = sm.taskState?.() || null;
-      payload.turnMap = mm.turnMap();
+      const st = await transcripts.status(ref);
+      payload.chatStatus = st.chatStatus;
+      payload.taskState = st.taskState;
+      payload.turnMap = (await transcripts.turnmap(ref)).turns;
     }
     res.json(payload);
   });
@@ -159,64 +88,18 @@ function setup(ctx) {
   //   ?...&search=q[&stream=1]  -> full-file matches (streamed NDJSON if stream=1)
   //   ?...&fullturnmap=1        -> every user turn in TIME coordinates for the minimap
 
-  // Remote transcripts: the gap endpoint is hit MANY times per scroll (one per
-  // slab), and each refresh is a remote find+stat round trip — throttle per
-  // (host, session). Slabs read OLD lines, which append-only transcripts never
-  // change, so a few seconds of staleness costs nothing; only the newest turns
-  // (search/minimap) care, and they get a fresh pull on the next window.
-  const gapHostRefreshAt = new Map();
-  const GAP_HOST_REFRESH_MS = 10000;
-
   router.get('/api/session-history-gap', async (req, res) => {
     const { backend, backendSessionId, claudeSessionId, cwd } = req.query;
-    const resolvedBackend = backend || 'claude';
     const resolvedSessionId = backendSessionId || claudeSessionId;
     if (!resolvedSessionId) return res.status(400).json({ error: 'backendSessionId or claudeSessionId required' });
-
-    // ?host= — refresh the local transcript cache first, exactly like
-    // /api/session-messages. Without it this endpoint resolved the LOCAL
-    // transcript path for a REMOTE session, so its scroll-up slabs, Ctrl+F
-    // full-file search and whole-conversation minimap read a cache frozen at
-    // the last attach — or found nothing at all — while the identical local
-    // session worked (the 2.108.1 "EVERY history consumer passes ?host=" rule
-    // this endpoint never followed).
-    let hostFetchError = null;
-    if (req.query.host && hosts) {
-      const key = `${req.query.host}:${resolvedSessionId}`;
-      if (Date.now() - (gapHostRefreshAt.get(key) || 0) > GAP_HOST_REFRESH_MS) {
-        gapHostRefreshAt.set(key, Date.now());
-        // keys come from query params — bound it (same shape as _realCwdCache)
-        if (gapHostRefreshAt.size > 512) gapHostRefreshAt.delete(gapHostRefreshAt.keys().next().value);
-        try {
-          if (resolvedBackend === 'codex') await hosts.fetchCodexJsonl(req.query.host, resolvedSessionId);
-          else await hosts.fetchSessionJsonl(req.query.host, resolvedSessionId);
-        } catch (e) {
-          hostFetchError = e.message;
-          console.error('remote jsonl fetch failed (gap):', e.message);
-        }
-      }
-    }
-
-    const fp = resolvedBackend === 'codex'
-      ? findCodexSessionJsonlPath(resolvedSessionId)
-      : findSessionJsonlPath(resolvedSessionId, cwd || '');
-    // Carry the remote failure to the client: "no transcript" and "the machine
-    // holding it was unreachable" produce the same empty view otherwise, and
-    // the client has to end paging silently to tell them apart.
-    if (!fp || !fs.existsSync(fp)) return res.json({ gap: null, ...(hostFetchError ? { error: hostFetchError } : {}) });
-
-    let gap;
-    try { gap = await jsonlGapInfoAsync(fp); } catch { gap = null; }
+    const ref = { backend: backend || 'claude', sessionId: resolvedSessionId, cwd, host: req.query.host };
+    const { gap, fp, hostFetchError } = await transcripts.gapInfo(ref);
+    // Carry a remote failure to the client: "no transcript" and "the machine
+    // holding it was unreachable" produce the same empty view otherwise.
+    if (!fp) return res.json({ gap: null, ...(hostFetchError ? { error: hostFetchError } : {}) });
     if (!gap) return res.json({ gap: null });
+    if (req.query.info) return res.json({ gap });
 
-    if (req.query.info) {
-      return res.json({ gap });
-    }
-
-    // Full-file search: covers the whole file uniformly in {line, ts} coordinates,
-    // so huge sessions search like small ones. Jumps teleport by absolute line, so
-    // no normalized index is needed. `stream=1` progressively streams matches as
-    // NDJSON (less-style live count); otherwise all matches come back at once.
     if (req.query.search) {
       if (req.query.stream) {
         res.writeHead(200, {
@@ -224,15 +107,12 @@ function setup(ctx) {
           'Cache-Control': 'no-cache, no-transform',
           'X-Accel-Buffering': 'no',
         });
-        res.write(JSON.stringify({ ...gap }) + '\n'); // first line: tailStartLine/totalLines
+        res.write(JSON.stringify({ ...gap }) + '\n');
         const ac = new AbortController();
         req.on('close', () => ac.abort());
         try {
-          const { total, truncated } = await searchJsonlFullStream(
-            fp, resolvedBackend, req.query.search,
-            (m) => { res.write(JSON.stringify(m) + '\n'); },
-            { signal: ac.signal },
-          );
+          const { total, truncated } = await transcripts.searchFullStream(ref, fp, req.query.search,
+            (m) => { res.write(JSON.stringify(m) + '\n'); }, { signal: ac.signal });
           if (!ac.signal.aborted) res.write(JSON.stringify({ done: true, total, truncated }) + '\n');
         } catch {
           if (!ac.signal.aborted) res.write(JSON.stringify({ done: true, total: 0, truncated: false, error: true }) + '\n');
@@ -240,15 +120,13 @@ function setup(ctx) {
         return res.end();
       }
       let result = { matches: [], truncated: false };
-      try { result = searchJsonlFull(fp, resolvedBackend, req.query.search); } catch {}
+      try { result = transcripts.searchFull(ref, fp, req.query.search); } catch {}
       return res.json({ ...result, ...gap });
     }
 
-    // Whole-conversation minimap: full-file user-turn scan in TIME coordinates
-    // (markers) + each turn's file line (for seek-jumping into the gap).
     if (req.query.fullturnmap) {
       let turns = [];
-      try { turns = await scanJsonlUserTurnsAsync(fp, resolvedBackend); } catch { turns = []; }
+      try { turns = await transcripts.fullTurnmap(ref, fp); } catch { turns = []; }
       const firstTs = turns.length ? turns[0].ts : 0;
       const lastTs = turns.length ? turns[turns.length - 1].ts : 0;
       return res.json({ fullTurns: turns, firstTs, lastTs, ...gap });
@@ -258,33 +136,21 @@ function setup(ctx) {
     const endLine = parseInt(req.query.endLine);
     const startLine = parseInt(req.query.startLine);
     let fromLine, toLine;
-    // whole=1: seek anywhere in [0, totalLines) — used for jump/teleport, which
-    // reads by ABSOLUTE file line (immune to the tail sliding on a live session).
-    // Default clamps to [0, tailStartLine): the tail is the registered window, so
-    // continuous scroll-up only loads earlier history and never re-reads the tail.
+    // whole=1: seek anywhere (jump/teleport reads by ABSOLUTE file line);
+    // default clamps to [0, tailStartLine) so scroll-up never re-reads the tail.
     const ceil = req.query.whole ? gap.totalLines : gap.tailStartLine;
     if (Number.isFinite(startLine)) {
-      // Forward read (jump): records [startLine, startLine+count).
       fromLine = Math.max(0, Math.min(startLine, ceil));
       toLine = Math.min(ceil, fromLine + count);
     } else if (Number.isFinite(endLine)) {
-      // Backward read (scroll-up auto-load): records [endLine-count, endLine).
       toLine = Math.min(endLine, ceil);
       fromLine = Math.max(0, toLine - count);
     } else {
       return res.status(400).json({ error: 'endLine or startLine required' });
     }
     if (fromLine >= toLine) return res.json({ messages: [], fromLine: 0, toLine: 0, tailStartLine: gap.tailStartLine });
-
-    let records = [];
-    try { records = await readJsonlLineRangeAsync(fp, fromLine, toLine); } catch { records = []; }
-    // Match the display path: drop subagent records before normalizing.
-    records = records.filter((r) => !isSubagentMessage(r));
-    // Normalize the slab in isolation. Tool calls whose result is outside this
-    // window render as orphans (acceptable for read-only history browsing).
-    const mm = createMessageManager(resolvedBackend, 'gap');
-    mm.convertHistory(records);
-    res.json({ messages: mm.tail(mm.total), fromLine, toLine, tailStartLine: gap.tailStartLine, totalLines: gap.totalLines });
+    const messages = await transcripts.gapSlab(ref, fp, fromLine, toLine);
+    res.json({ messages, fromLine, toLine, tailStartLine: gap.tailStartLine, totalLines: gap.totalLines });
   });
 
   // Subagent messages for a given session + agentId
@@ -810,20 +676,7 @@ function setup(ctx) {
       // Remote session: pull the transcript into the data/remote-jsonl cache
       // first (same pattern as /api/session-messages) — without it the Steps
       // list only worked if a chat attach had already warmed the cache.
-      if (host && hosts && b === 'claude') {
-        try { await hosts.fetchSessionJsonl(String(host), rid); } catch {}
-      }
-      let session = null;
-      for (const [, s] of activeSessions) {
-        if ((s.backend || 'claude') === b && (s.backendSessionId === rid || s.claudeSessionId === rid)) { session = s; break; }
-      }
-      const sm = createSessionMessages(session || {
-        backend: b,
-        backendSessionId: rid,
-        claudeSessionId: b === 'claude' ? rid : null,
-        cwd: cwd || '',
-      });
-      const st = sm.taskState() || {};
+      const st = await transcripts.taskState({ backend: b, sessionId: rid, cwd, host: b === 'claude' ? host : null });
       res.json({ todos: st.todos || [] });
     } catch (e) { res.json({ todos: [] }); }
   });
