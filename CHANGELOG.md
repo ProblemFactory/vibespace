@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.281.0
+
+**R1 of the three-tier plan: machine facts come from the machine** (`probe.*` op family; docs/design-three-tier.md).
+
+"Which CLIs does this machine have, how is it logged in, what credential directories does it hold" existed as THREE divergent implementations — the local backend-status route (node), plus two ssh shell scripts with their own grep ladders (the apiKeyHelper blind spot and the same-dialog status contradictions were both probe-twin bugs). Now `src/machine-probes.js` is the ONE implementation:
+
+- Bundled into the device daemon as `probe-cli` / `probe-creds` ops — a remote machine answers about ITSELF (read-only over files; per the §ban-safety whitelist nothing here can originate a vendor call).
+- The local route calls the same module in-process (device #0, CS amendment #2 — shared implementation, no socket transit).
+- `hosts.backendStatus` / `hosts.accountsStatus` consume op-first with the ssh scripts demoted to fallback (daemon-less hosts and pre-R1 daemons — whose unknown-op silence times the bounded 9s request out — keep working unchanged).
+
+scripts/test-machine-probes.mjs (13 asserts): a fixture home with an expired machine login + console key + apiKeyHelper + a held sub dir + a codex JWT is read IDENTICALLY by the in-process call and by a REAL daemon over the ops — one implementation, two transports, byte-equal facts. Regression: account-verdicts (45), integration-toggle, Manage-Agents CDP suite all green.
+
 ## 2.280.0
 
 **R0 of the three-tier plan (docs/design-three-tier.md): content-derived message ids.**
