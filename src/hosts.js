@@ -1203,6 +1203,25 @@ class HostManager {
     if (this.dataPlaneOn?.() || h.transport === 'dial') {
       try {
         const dm = await this.deviceBounded(id);
+        // R4 `usage.scan`: the walker is BUNDLED in the daemon (≥2.286.0) —
+        // no per-harvest script ship, and the cursor commits over the device
+        // link ONLY after the count-gated transfer fully landed server-side
+        // (two-phase: a link death mid-transfer leaves the cursor put, the
+        // next harvest re-emits, rid dedup absorbs — the script's
+        // flush-then-persist model lost that window's events forever on
+        // relayed paths). Older daemon / op failure → script-ship fallback.
+        try {
+          const r = await dm.usageScan();
+          if (r.cursors && r.cursorFile) {
+            try {
+              await dm.fsWrite(r.cursorFile + '.tmp', JSON.stringify(r.cursors));
+              await dm.fsRename(r.cursorFile + '.tmp', r.cursorFile);
+            } catch (e4) { console.warn('[usage] cursor commit failed (next harvest re-emits):', e4.message); }
+          }
+          return r.ndjson;
+        } catch (e3) {
+          if (!/lacks usage-scan/.test(e3.message || '')) console.warn('[usage] usage-scan op failed, falling back to script ship:', e3.message);
+        }
         const home = (await dm.runCmd('sh', ['-c', 'echo "$HOME"'])).stdout.trim();
         const scanPath = home + '/.vibespace/bin/vibespace-usage-scan';
         await dm.fsWrite(scanPath, script); // fsWrite mkdirs the parent

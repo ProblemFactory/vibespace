@@ -1,0 +1,86 @@
+#!/usr/bin/env node
+// R4 step 1 — the daemon's `usage-scan` op, end to end against a REAL daemon
+// (docs/design-three-tier.md `usage.scan`).
+//
+// WHAT IT PINS: (1) the op's events match the shipped scanner run directly
+// over the same fixture (the walker module is behavior-identical through the
+// bundle + child re-exec + count-gated stream); (2) the daemon NEVER persists
+// the cursor — the two-phase commit is the server's move after the transfer
+// fully landed (the loss-window fix: a link death mid-transfer leaves the
+// cursor put, re-emit + rid-dedup absorb); (3) the committed cursor makes the
+// next op incremental; (4) an append is picked up.
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const REPO = path.resolve(new URL('..', import.meta.url).pathname);
+
+let pass = 0, fail = 0;
+const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
+
+const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-uscan-'));
+process.env.HOME = home; // the daemon child inherits this
+const proj = path.join(home, '.claude', 'projects', '-home-u-work');
+const SID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+let n = 0;
+const rec = () => JSON.stringify({
+  type: 'assistant', requestId: 'req_' + (++n), timestamp: new Date().toISOString(),
+  message: { id: 'msg_' + n, model: 'claude-fable-5', usage: { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 5, cache_creation: { ephemeral_5m_input_tokens: 7 } } },
+}) + '\n';
+const write = (p, body) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, body); };
+write(path.join(proj, SID + '.jsonl'), rec() + rec());
+write(path.join(proj, SID, 'subagents', 'workflows', 'wf_r1', 'agent-a.jsonl'), rec());
+
+// reference: the shipped scanner, its own throwaway cursor
+const refCursor = path.join(home, 'ref-cursor.json');
+const refOut = execFileSync(process.execPath, [path.join(REPO, 'data/bin/vibespace-usage-scan')], {
+  encoding: 'utf8', env: { ...process.env, HOME: home, VIBESPACE_USAGE_CURSOR: refCursor }, timeout: 30000,
+});
+const refLines = refOut.split('\n').filter(Boolean);
+
+// real daemon
+const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-uscan-data-'));
+process.env.VIBESPACE_AGENTD_ROOT = path.join(home, 'agentd-root');
+const { DeviceManager } = require(REPO + '/src/agentd/client.js');
+const dm = new DeviceManager({ dataDir, bundlePath: path.join(REPO, 'data/bin/vibespace-agentd.js'), version: '0.0.0-t', nodeModules: path.join(REPO, 'node_modules'), log: () => { } });
+await dm.connect();
+
+const opCursor = path.join(home, 'op-cursor.json');
+const r1 = await dm.usageScan({ cursorFile: opCursor });
+const opLines = r1.ndjson.split('\n').filter(Boolean);
+ok(opLines.length === 3, `op streamed all 3 events (${opLines.length})`);
+ok(JSON.stringify(opLines) === JSON.stringify(refLines), 'op events BYTE-IDENTICAL to the shipped scanner over the same fixture');
+ok(r1.cursors && Object.keys(r1.cursors).length === 2, 'cursor manifest returned to the caller');
+ok(r1.cursorFile === opCursor, 'manifest names the cursor file');
+ok(!fs.existsSync(opCursor), 'daemon did NOT persist the cursor (two-phase: commit is the server’s move)');
+
+// server-style commit over the device link, then incremental
+await dm.fsWrite(opCursor + '.tmp', JSON.stringify(r1.cursors));
+await dm.fsRename(opCursor + '.tmp', opCursor);
+ok(fs.existsSync(opCursor), 'commit landed via fsWrite+fsRename');
+const r2 = await dm.usageScan({ cursorFile: opCursor });
+ok(r2.ndjson === '', 'committed cursor makes the next op incremental (nothing re-emitted)');
+
+// append → only the new event
+fs.appendFileSync(path.join(proj, SID + '.jsonl'), rec());
+const r3 = await dm.usageScan({ cursorFile: opCursor });
+ok(r3.ndjson.split('\n').filter(Boolean).length === 1, 'append picked up past the committed cursor');
+
+// capability gate: an old daemon (no usage-scan capability in its hello-ack)
+// must throw FAST pre-wire — unknown ops get no reply and would hang the
+// request until its timeout. Simulate by masking the live conn's caps.
+const conn = await dm.connect();
+const realCaps = conn.info.capabilities;
+conn.info.capabilities = [];
+let gateErr = null;
+try { await dm.usageScan(); } catch (e) { gateErr = e; }
+conn.info.capabilities = realCaps;
+ok(gateErr && /lacks usage-scan/.test(gateErr.message), 'pre-op capability gate throws fast for old daemons (unknown ops would hang)');
+
+try { const pid = parseInt(fs.readFileSync(path.join(process.env.VIBESPACE_AGENTD_ROOT, 'state', 'agentd.pid'), 'utf-8')); if (pid) process.kill(pid); } catch { }
+fs.rmSync(home, { recursive: true, force: true });
+fs.rmSync(dataDir, { recursive: true, force: true });
+console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
+process.exit(fail ? 1 : 0);

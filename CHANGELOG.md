@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.286.0
+
+**R4 step 1 (three-tier): the usage-ledger walker moves into the device daemon — with a structurally loss-free cursor** (docs/design-three-tier.md `usage.scan`).
+
+- `src/usage-walker.js` is the walk as a shared module, bundled into the daemon; the `usage-scan` op runs it in a CHILD process (heavy IO never rides the loop holding session pipes) and streams NDJSON events over the count-gated channel. No more per-harvest script ship for daemon hosts — the walker's version rides daemon self-upgrade.
+- **Two-phase cursor commit**: the walker never persists its own cursor. The server writes it back over the device link only after the full transfer landed. The shipped script's flush-then-persist model had a real loss window on relayed (dial) paths — child flushed into the local pipe, cursor advanced, link died, those events were gone forever. Now a mid-transfer death leaves the cursor put; the next harvest re-emits and rid-dedup absorbs.
+- Capability gating done right: the hello-ack's (previously empty) `capabilities` field now lists per-op capabilities (`probe`, `transcript-op`, `usage-scan`); consumers gate on it and throw fast for old daemons — unknown ops get no reply and would hang the request until its timeout. Version-string parsing rejected.
+- `hosts.harvestUsage` prefers the op, falls back to the script-ship path (old daemons), then ssh (daemon-less hosts) — the existing ladder, one rung richer.
+- The shipped single-file scanner stays (a checkout-less ssh host cannot require a module) and the parity net now covers all THREE walkers: `test-usage-walk-parity` (15 asserts) runs local walk + shipped script + module over one fixture demanding identical events/mid fields/cursor behavior; `test-usage-scan-op.mjs` (9 asserts) drives the op against a real daemon — byte-identical events vs the scanner, deferred-cursor proof, commit round trip, incrementality, and the fast capability-gate failure.
+
+
 ## 2.285.0
 
 **R3 step 2 (three-tier): transcript ops served by the device daemon — dark, with byte-identical parity proven** (docs/design-three-tier.md).

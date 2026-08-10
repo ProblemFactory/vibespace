@@ -367,6 +367,7 @@ class DeviceManager {
   fsStat(p) { return this._request({ op: 'fs-op', action: 'stat', path: p }); }
   fsList(p) { return this._request({ op: 'fs-op', action: 'list', path: p }); }
   fsWrite(p, buf) { return this._request({ op: 'fs-op', action: 'write', path: p, data64: Buffer.from(buf).toString('base64') }); }
+  fsRename(p, to) { return this._request({ op: 'fs-op', action: 'rename', path: p, to }); }
   fsMkdir(p) { return this._request({ op: 'fs-op', action: 'mkdir', path: p }); }
   fsRm(p, recursive = false) { return this._request({ op: 'fs-op', action: 'rm', path: p, recursive }); }
   /** read [start, start+len) — resolves a Buffer (the transcript-slab primitive).
@@ -462,7 +463,12 @@ class DeviceManager {
    *  credit-gated tail can't be overtaken and silently dropped (truncated
    *  usage harvests / streamed downloads). Old daemons omit it → resolve at
    *  exit as before. A 15s post-exit stall resolves {truncated:true}. */
-  async runStream(cmd, args = [], { env, cwd, stdin, onData } = {}) {
+  runStream(cmd, args = [], { env, cwd, stdin, onData } = {}) {
+    return this._streamOp({ op: 'run-stream', cmd, args, env, cwd, stdin64: stdin ? Buffer.from(stdin).toString('base64') : undefined }, { onData });
+  }
+  /** ONE streaming-op consumer (run-stream + usage-scan): count-gated settle
+   *  (stream-exit's `sent` vs received), link-death settles, deadline belt. */
+  async _streamOp(req, { onData } = {}) {
     const conn = await this.connect();
     const chan = conn.nextChan++;
     let exitR;
@@ -493,9 +499,34 @@ class DeviceManager {
     const deadline = setTimeout(() => settle({ error: 'run-stream timed out' }), 120000);
     if (deadline.unref) deadline.unref();
     done.finally?.(() => clearTimeout(deadline));
-    const ack = await this._request({ op: 'run-stream', cmd, args, env, cwd, chan, stdin64: stdin ? Buffer.from(stdin).toString('base64') : undefined });
+    const ack = await this._request({ ...req, chan });
     if (ack.error) { conn.sessions.delete(chan); clearTimeout(stall); throw new Error(ack.error); }
     return done;
+  }
+  /** R4 `usage.scan`: run the daemon's BUNDLED ledger walker (no per-harvest
+   *  script ship) — returns {ndjson, cursors, cursorFile}. The device does
+   *  NOT persist the cursor; the caller commits it (fsWrite+fsRename) only
+   *  after this resolves, i.e. after the full transfer landed (two-phase).
+   *  Old daemons never answer unknown ops (they'd hang the request), so gate
+   *  on the hello's daemonVersion and throw fast → caller falls back. */
+  async usageScan({ cursorFile } = {}) {
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('usage-scan')) throw new Error('daemon lacks usage-scan (capabilities gate)');
+    const chunks = [];
+    const r = await this._streamOp({ op: 'usage-scan', cursorFile }, { onData: (buf) => chunks.push(buf) });
+    if (r.error) throw new Error(r.error);
+    if (r.truncated) throw new Error('usage-scan stream truncated');
+    if (r.code !== 0) throw new Error('usage-scan exit ' + r.code);
+    const lines = Buffer.concat(chunks).toString('utf-8').split('\n').filter((l) => l.trim());
+    let cursors = null, cf = null;
+    if (lines.length) {
+      try {
+        const last = JSON.parse(lines[lines.length - 1]);
+        if (last && last.__cursors__) { cursors = last.__cursors__; cf = last.__cursorFile__ || null; lines.pop(); }
+      } catch { }
+    }
+    if (!cursors) throw new Error('usage-scan output missing cursor manifest');
+    return { ndjson: lines.length ? lines.join('\n') + '\n' : '', cursors, cursorFile: cf };
   }
 
   /** loopback TCP forward on the device: returns {write, close, onData, onClose}. */
