@@ -154,13 +154,25 @@ class ThemeManager {
 
   extractThemeValues(themeName, varNames) {
     const result = {};
+    // TWO-LAYER probe (B-b2d6): custom properties INHERIT, and only "dark"
+    // defines every var — a partially-defined theme's missing vars fell
+    // through to the documentElement, which the theme editor's live preview
+    // covers with inline overrides (and an applied custom theme covers via
+    // its stylesheet). Switching Base themes then read back the user's own
+    // just-edited values as the target theme's "defaults", and Save froze
+    // the pollution into the new theme. The outer data-theme="dark" wrapper
+    // intercepts inheritance, so missing vars resolve to real built-in
+    // defaults regardless of ambient live-preview/custom-theme state.
+    const base = document.createElement('div');
+    base.setAttribute('data-theme', 'dark');
+    base.style.cssText = 'position:absolute;left:-9999px;top:-9999px;width:0;height:0;overflow:hidden;pointer-events:none';
     const probe = document.createElement('div');
     probe.setAttribute('data-theme', themeName);
-    probe.style.cssText = 'position:absolute;left:-9999px;top:-9999px;width:0;height:0;overflow:hidden;pointer-events:none';
-    document.body.appendChild(probe);
+    base.appendChild(probe);
+    document.body.appendChild(base);
     const cs = getComputedStyle(probe);
     for (const name of varNames) result[name] = cs.getPropertyValue(name).trim();
-    probe.remove();
+    base.remove();
     return result;
   }
 }
