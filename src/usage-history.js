@@ -319,6 +319,13 @@ class UsageHistory {
             const ainfo = acct ? (this._resolveAccount(acct) || null) : null;
             push({
               rid, ts, sid,
+              // message.id ALONGSIDE the requestId (2.267.3, the est-2×
+              // incident): STDOUT stream records carry NO requestId, so the
+              // live odometer keys its ring on msg.id — without this join
+              // field the ledger's rid set could never exclude a streamed
+              // entry once scanned, and every request counted TWICE while a
+              // conversation was active (user saw est 27% vs actual 9%).
+              mid: (msg.id && msg.id !== rid) ? msg.id : undefined,
               be: minfo.backend || 'claude',
               model: msg.model || null,
               acct: acct || null,
@@ -523,7 +530,7 @@ class UsageHistory {
   // between a shard append and the cursor write). Without this, every Usage
   // window request re-read + re-parsed every shard (~seconds at 100k+ events).
   _loadEvents() {
-    if (!this._evCache) this._evCache = { consumed: new Map(), events: [], rids: new Set() };
+    if (!this._evCache) this._evCache = { consumed: new Map(), events: [], rids: new Set(), mids: new Set() };
     const c = this._evCache;
     let files = [];
     try { files = fs.readdirSync(this.dir).filter(f => /^events-\d{4}-\d{2}\.ndjson$/.test(f)).sort(); } catch {}
@@ -548,6 +555,7 @@ class UsageHistory {
         if (!line) continue;
         let ev; try { ev = JSON.parse(line); } catch { continue; }
         if (ev.rid) { if (c.rids.has(ev.rid)) continue; c.rids.add(ev.rid); }
+        if (ev.mid) c.mids.add(ev.mid); // stream-side id space (live-odometer exclusion join)
         c.events.push(ev);
       }
       c.consumed.set(fn, consumed + lastNl + 1);

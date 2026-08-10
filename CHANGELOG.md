@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.267.3
+
+**The est-2× bug — live-odometer double count, quantitatively confirmed** (user report: est 27% vs ⟳ 9%; arithmetic closes exactly: 2 × $34.73 window cost / $256.5 learned full = 27.1%):
+
+- STDOUT stream records carry **no `requestId`** (measured 0/22 on a live buffer) — the live odometer ring keys entries by `msg.id` (`msg_…`) while ledger events key by `requestId` (`req_…`). The rid-space exclusion (`known.has(rid)`) could therefore **never** fire: once the ledger scan absorbed a request, the ring's copy kept counting on top of it — every streamed request double-counted for as long as a conversation stayed active (the ring deliberately has no age-out). The ledger now bakes `mid` (message.id) alongside `rid` on every claude event, `_loadEvents` maintains a `mids` set, and `_liveDelta` excludes against BOTH id spaces. Rate learning was never affected (it is ledger-only) — this was purely the live display/pool-decision layer.
+- Bonus accuracy: the same `msg.id` is emitted up to 3× on stdout with GROWING usage (streaming partials) — first-wins under-counted the not-yet-scanned part; a re-noted rid now upgrades the ring entry to the max.
+- Historical shard events lack `mid` (fine — the ring is empty after a restart; new events carry it). Estimator suite grows to 66 with the mid-exclusion + growing-partials regressions.
+- Residual gap (13.5% pure-rate prediction vs 9% actual) is the learned 5h rate's multi-device-share bias — it self-corrects as clean per-window pairs accumulate; the display error was dominated by the double count.
+
 ## 2.267.2
 
 Hotfix for a 2.267.0 regression the fake-`code` move dragged in: three OTHER generators (vibespace-status / vibespace-hook.mjs / hook-register) and the statusline path were anchored on `EDITOR_DIR` and silently followed the move into `data/bin/editor/` — scattering agent tools OFF the session PATH, pointing the statusline at a nonexistent file, and rewriting the global hook registration to the editor subdir. All re-anchored on the tools dir (`AGENT_BIN_DIR`); only the fake `code` lives in `editor/`. The stray generated files 2.267.1 accidentally committed are untracked again (`data/bin/editor/` gitignored — tracked generated files are the 2.111.26 self-update-blocking class); stale `editor/` copies stay on disk so sessions that snapshotted the interim hook path keep working until their next restart.
