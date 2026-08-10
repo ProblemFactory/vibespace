@@ -523,7 +523,7 @@ function registerWsHandler(wss, ctx) {
             if (spawnAccount?.remoteCreds && !spawnAccount.secret && data.hostId && !data.accountId) {
               let allowShip = false;
               try { allowShip = !!serverSetting('accounts.shipSubscriptionToRemote'); } catch {}
-              if (!allowShip) spawnAccount = null; // = the host's own login (an oat-bearing account keeps its secret channel instead)
+              if (!allowShip || spawnAccount.remoteCreds.shippable === false) spawnAccount = null; // = the host's own login (an oat-bearing account keeps its secret channel instead; macOS Keychain-backed logins never ship — PR #23)
             }
             // EXPLICITLY-chosen subscription on a remote host without the
             // ship opt-in: when the account IS the machine's own login (same
@@ -537,8 +537,10 @@ function registerWsHandler(wss, ctx) {
               try { allowShip = !!serverSetting('accounts.shipSubscriptionToRemote'); } catch {}
               // oatOnly always probes: a host-HELD login outranks the oat
               // (full capability, same identity) and the held-identity-
-              // mismatch refusal must not be skippable by adding a token
-              if (!allowShip || spawnAccount.oatOnly) {
+              // mismatch refusal must not be skippable by adding a token.
+              // shippable===false (macOS Keychain-backed, PR #23) probes too —
+              // held/linked still work there; only shipping is off the table.
+              if (!allowShip || spawnAccount.oatOnly || spawnAccount.remoteCreds?.shippable === false) {
                 try {
                   // SINGLE-AUTHORITY verdict (B-f531, 2.244.0) — same
                   // evaluateOnHost as the display surfaces and the rescue
@@ -671,6 +673,11 @@ function registerWsHandler(wss, ctx) {
           // VIBESPACE_SESSION_TOKEN (Ctrl+G editor auth; inert without the
           // api var — every consumer guards on both). Read per spawn = live.
           let integrationOn = integrationEnabled ? integrationEnabled() : true;
+          // A remote Add-subscription helper terminal needs this one transport
+          // utility even when agent-visible Integration is OFF. It handles the
+          // host's own Keychain/file login only and exposes nothing to agents.
+          const needsClaudeLoginHelper = backend === 'shell'
+            && String(data.initialCommand || '').includes('/vibespace-claude-subscription-login.mjs');
           // Remote agent enablement (P3): a remote session can't reach the local
           // API at 127.0.0.1:<PORT>, and the vibespace-status/-task tools don't
           // exist on the remote box. So for any remote session we (1) open an
@@ -692,26 +699,36 @@ function registerWsHandler(wss, ctx) {
             //       0600 files, the inner command references the token via a
             //       `VAR="$(cat …)"` shell prefix so the value never enters
             //       any argv), then hook-register + tools PATH in the prelude.
-            // OFF → pristine spawn: ship ONLY the transport keeper, and only
-            //       for CHAT (remote chat persistence rides it, invoked by
-            //       absolute path — terminal uses remote dtach and needs
-            //       nothing); no hook-register, no token, no tools PATH, no
-            //       VIBESPACE_API reverse tunnel. A hook a PREVIOUS spawn
-            //       registered on the host stays inert (it guards on env we
-            //       no longer pass) — Manage Agents → host → Remove strips it.
+            // OFF → pristine agent spawn: ship only model-invisible transport
+            //       utilities as needed — the keeper for CHAT persistence and
+            //       the Claude login helper for an explicit Add-subscription
+            //       shell. No hook-register, token, tools PATH, or VIBESPACE_API
+            //       reverse tunnel. A hook a PREVIOUS spawn registered on the
+            //       host stays inert (it guards on env we no longer pass) —
+            //       Manage Agents → host → Remove strips it.
             // + the fake `code` editor helper (remote Ctrl+G, B-2de8) — moved
             // OUT of the PATH dir after extract: its basename must be `code`
             // (claude's GUI-editor check) but shadowing a real vscode `code`
             // on the host's PATH would hang any `code …` shell command.
             const names = integrationOn
               ? [...require('./hosts').HostManager.AGENT_TOOLS, 'code']
-              : (sessionMode === 'chat' ? ['vibespace-remote-keeper'] : []);
+              : [
+                ...(sessionMode === 'chat' ? ['vibespace-remote-keeper'] : []),
+                // A remote Add-subscription helper terminal needs this one
+                // transport utility even when agent-visible Integration is
+                // OFF (PR #23) — it handles the host's own login only.
+                ...(needsClaudeLoginHelper ? ['vibespace-claude-subscription-login.mjs'] : []),
+              ];
             // tools live in AGENT_BIN_DIR; the fake `code` moved to its own
             // editor/ subdir (B-b87b, local-PATH shadow fix) — tar it from
             // there via a second -C so the remote layout is unchanged
             const toolDir = AGENT_BIN_DIR;
             const dirFor = (n) => (n === 'code' ? path.dirname(EDITOR_CMD) : toolDir);
             const present = names.filter((n) => { try { return fs.statSync(path.join(dirFor(n), n)).isFile(); } catch { return false; } });
+            if (needsClaudeLoginHelper && !present.includes('vibespace-claude-subscription-login.mjs')) {
+              throw new Error('Claude subscription login helper is unavailable on the VibeSpace server');
+            }
+
             if (present.length) {
               try {
                 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-tok-'));
@@ -750,9 +767,10 @@ function registerWsHandler(wss, ctx) {
                   }
                 } finally { try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {} }
               } catch (e) {
-                // tool shipping failed (an unreachable host fails the create
-                // later anyway) — session still runs, agent tools just degrade
+                // Ordinary agent-tool shipping is best-effort; the explicit
+                // login terminal's helper is required and must fail closed.
                 console.error('[remote] tool distribution failed:', e.message);
+                if (needsClaudeLoginHelper) throw e;
               }
             }
             if (!integrationOn) return { prelude, envPairs: [], tokenAssign: '', reverse: null };
@@ -783,19 +801,28 @@ function registerWsHandler(wss, ctx) {
             // daemon IS the persistence layer). Only BILLING (an API-key file)
             // still needs device round trips; with no key either, there is
             // nothing to place at all.
-            if (!integrationOn && !spawnAccount?.secret) return { envPairs: [], tokenAssign: '' };
+            if (!integrationOn && !spawnAccount?.secret && !needsClaudeLoginHelper) return { envPairs: [], tokenAssign: '' };
             const dm = await hosts.device(h.id); // dial → deviceForDial
             const home = String((await dm.runCmd('sh', ['-c', 'printf %s "$HOME"'], { timeoutMs: 8000 }))?.stdout || '').trim() || '/root';
             const bin = `${home}/.vibespace/bin`;
             const tokName = `.tok-${sid}`;
             let rf = null;
-            if (integrationOn) {
+            if (integrationOn || needsClaudeLoginHelper) {
               await dm.fsMkdir(bin);
               const toolDir = AGENT_BIN_DIR;
-              const names = require('./hosts').HostManager.AGENT_TOOLS;
+              const names = integrationOn
+                ? require('./hosts').HostManager.AGENT_TOOLS
+                : ['vibespace-claude-subscription-login.mjs']; // PR #23: the login helper ships alone when Integration is OFF
               for (const n of names) {
-                try { const buf = fs.readFileSync(path.join(toolDir, n)); await dm.fsWrite(`${bin}/${n}`, buf); } catch { }
+                try {
+                  const buf = fs.readFileSync(path.join(toolDir, n));
+                  await dm.fsWrite(`${bin}/${n}`, buf);
+                } catch (e) {
+                  if (needsClaudeLoginHelper && n === 'vibespace-claude-subscription-login.mjs') throw e;
+                }
               }
+            }
+            if (integrationOn) {
               // fake `code` editor helper (remote Ctrl+G, B-2de8) — OUTSIDE the
               // PATH dir so it can't shadow a real vscode `code` on the device
               try {
@@ -875,6 +902,9 @@ function registerWsHandler(wss, ctx) {
               execFileSync('ssh', [...hosts.sshArgs(h), '--', `umask 077; mkdir -p "$HOME/.vibespace"; cat > "${kf}"`],
                 { input: spawnAccount.secret.value, timeout: 15000 });
               return `${spawnAccount.secret.var}="$(cat "${kf}")" `;
+            }
+            if (spawnAccount.remoteCreds?.shippable === false) {
+              throw new Error('this macOS Keychain-backed subscription login cannot be copied to another machine because OAuth refresh tokens rotate. Log in as this account on the host instead, or use an API-key account.');
             }
             // §ban-safety GATE: shipping a SUBSCRIPTION's OAuth creds to a remote
             // host means that subscription token is live from a (likely
@@ -972,7 +1002,7 @@ function registerWsHandler(wss, ctx) {
                 // an API key must be placed — a swallowed failure would run the
                 // session on the device's own login = wrong billing (review).
                 const da = await deviceAgentSetup(h, id).catch((e) => {
-                  if (spawnAccount?.secret && !spawnAccount._hostSubReady) throw e; // held billing rides dialAcctAssign — only a real key placement failure is fatal
+                  if ((spawnAccount?.secret && !spawnAccount._hostSubReady) || needsClaudeLoginHelper) throw e; // held billing rides dialAcctAssign — only a real key placement failure (or the required login helper, PR #23) is fatal
                   console.warn('[dial] agent setup degraded:', e.message); return { envPairs: [], tokenAssign: '' };
                 });
                 // tools PATH only while integrated — leftover tools from an
@@ -1157,7 +1187,7 @@ done`;
                 // its original env, and a fresh reverseForward here would leak
                 // an unused device port per attach.
                 const da = dialKeeperSid ? { envPairs: [], tokenAssign: '' } : await deviceAgentSetup(h, id).catch((e) => {
-                  if (spawnAccount?.secret && !spawnAccount._hostSubReady) throw e; // wrong billing must fail, not silently degrade (held rides dialAcctAssign — placement can't fail)
+                  if ((spawnAccount?.secret && !spawnAccount._hostSubReady) || needsClaudeLoginHelper) throw e; // wrong billing / a required login helper must fail, not silently degrade (held rides dialAcctAssign — placement can't fail)
                   console.warn('[dial] agent setup degraded:', e.message); return { envPairs: [], tokenAssign: '' };
                 });
                 // tools PATH only while integrated (see the pty branch note)

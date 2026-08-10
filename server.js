@@ -20,6 +20,7 @@ const { cwdToProjectDir, SessionMessages, findSessionJsonlPath, dedupWebuiSocket
 const { CodexSessionMessages } = require('./src/codex-session-store');
 const { normalizeCodexSource, CODEX_SESSIONS_DIR } = require('./src/adapters/codex');
 const { createAdapterRegistry } = require('./src/adapters');
+const { buildClaudeSubscriptionLoginCommand } = require('./src/claude-subscription-login');
 const fileRoutes = require('./src/routes/files');
 const { SafeFs } = require('./src/safe-fs');
 const { router: persistenceRouter, setup: setupPersistence } = require('./src/routes/persistence');
@@ -161,6 +162,7 @@ const X_ENV = detectXDisplay();
 function refreshXEnv() { Object.assign(X_ENV, detectXDisplay()); return X_ENV; }
 const CLAUDE_CMD = CLAUDE_CMD_RAW.startsWith('/') ? CLAUDE_CMD_RAW : resolveCmd(CLAUDE_CMD_RAW);
 const CODEX_CMD = CODEX_CMD_RAW.startsWith('/') ? CODEX_CMD_RAW : resolveCmd(CODEX_CMD_RAW);
+const CLAUDE_SUBSCRIPTION_LOGIN_HELPER = path.join(__dirname, 'data', 'bin', 'vibespace-claude-subscription-login.mjs');
 const CODEX_LINUX_SANDBOX_CMD = resolveCmd('codex-linux-sandbox');
 const CODEX_SANDBOX_SUPPORTED = process.platform !== 'linux'
   || (!!CODEX_LINUX_SANDBOX_CMD && CODEX_LINUX_SANDBOX_CMD !== 'codex-linux-sandbox')
@@ -4100,7 +4102,11 @@ app.get('/api/hosts/:id/accounts-status', async (req, res) => {
     // survivor and fold the records (the local finalize path does the same
     // for local logins). Learned dir emails also backfill records that
     // never declared one (enables the =host-login link).
-    if (accounts && r.hostSubEmails) {
+    // On macOS the Keychain service name is hashed from the dir path. Renaming
+    // a host dir cannot migrate that item from this non-interactive server
+    // context, so keep duplicate records rather than silently selecting stale
+    // credentials or orphaning the fresh service.
+    if (accounts && r.hostSubEmails && r.platform && r.platform !== 'darwin') {
       for (const [dirId, email] of Object.entries(r.hostSubEmails)) {
         try {
           const em = String(email).trim().toLowerCase();
@@ -4111,6 +4117,11 @@ app.get('/api/hosts/:id/accounts-status', async (req, res) => {
           const dup = all.find((x) => x.id !== dirId && (x.backend || 'claude') === 'claude' && x.type === 'subscription'
             && String(x.email || (String(x.name || '').includes('@') ? x.name : '')).trim().toLowerCase() === em);
           if (dup) {
+            // A Darwin VibeSpace marks these records local-only even when this
+            // particular copy lives on a Linux host. Be conservative: check
+            // before renaming so mergeSubscription cannot reject after the
+            // host path has already changed.
+            if (rec.localOnly || dup.localOnly) continue;
             // survivor = the OLDER record; rename the newer's host dir first
             const survivor = (dup.createdAt || 0) <= (rec.createdAt || 0) ? dup : rec;
             const gone = survivor === dup ? rec : dup;
@@ -4278,22 +4289,19 @@ app.delete('/api/accounts/:id/oat', (req, res) => {
 app.post('/api/accounts/subscription', (req, res) => {
   try {
     const { id, dir } = accounts.createSubscription(req.body || {});
-    // The client opens a shell terminal with this exact command. Set ONLY
-    // CLAUDE_SECURESTORAGE_CONFIG_DIR → the login's CREDS go to the isolated dir
-    // (that's what bills), while the CONFIG dir stays ~/.claude — so claude does
-    // NOT show its first-run onboarding (an empty CLAUDE_CONFIG_DIR would, which
-    // broke the login flow). `/login` matches the proven console-wizard command.
-    // (Identity in ~/.claude.json is cosmetically overwritten — the global's
-    // TOKENS in ~/.claude/.credentials.json are untouched since they read from
-    // the securestorage dir.)
-    // `claude auth login` (subcommand — NOT the TUI `/login`, which errors from
-    // a shell) prints an OAuth URL to a HOSTED callback + a "Paste code" prompt,
-    // so it works headlessly. --claudeai = the subscription flow. Set BOTH env
-    // vars → dir: creds AND identity (.claude.json oauthAccount) isolate into the
-    // dir, so the GLOBAL ~/.claude.json is NOT clobbered. The dir is pre-seeded
-    // with onboarding-complete flags so no first-run screen appears.
-    const q = JSON.stringify(dir);
-    const loginCmd = `CLAUDE_CONFIG_DIR=${q} CLAUDE_SECURESTORAGE_CONFIG_DIR=${q} claude auth login --claudeai`;
+    // The client opens a shell terminal with this exact command. The helper
+    // runs the official `claude auth login --claudeai` with BOTH config envs
+    // scoped to the pre-seeded account dir, isolating credentials + identity
+    // without touching the global login. On macOS it then copies the new
+    // per-dir Keychain value to Claude's normal fallback file while it is still
+    // in the interactive terminal's Keychain security session; launchd-started
+    // VibeSpace processes cannot reliably read that item later.
+    const loginCmd = buildClaudeSubscriptionLoginCommand({
+      nodeCmd: NODE_CMD,
+      helperPath: CLAUDE_SUBSCRIPTION_LOGIN_HELPER,
+      claudeCmd: CLAUDE_CMD,
+      configDir: dir,
+    });
     res.json({ success: true, id, dir, loginCmd });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -4304,7 +4312,11 @@ app.post('/api/accounts/subscription/:id/finalize', (req, res) => {
     // a fresh login whose identity email matches an EXISTING subscription is
     // the SAME account — fold the new record into the existing one (fresh
     // creds win) instead of keeping a duplicate.
-    if (fin?.loggedIn && fin?.email && accounts) {
+    // A macOS Keychain service is tied to this fresh config-dir path. Folding
+    // its file fallback into an older id would leave Claude preferring the
+    // older id's stale Keychain item, so Darwin logins deliberately keep their
+    // fresh record instead of using the path-changing auto-merge.
+    if (fin?.loggedIn && fin?.email && !fin.localOnly && accounts) {
       const em = String(fin.email).trim().toLowerCase();
       const dup = (accounts.list().accounts || []).find((x) =>
         x.id !== req.params.id && (x.backend || 'claude') === 'claude' && x.type === 'subscription'

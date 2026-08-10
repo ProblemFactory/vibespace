@@ -1772,7 +1772,9 @@ class App {
           else if ((v ? (v.usable && v.how === 'oat') : !!a.oat) && !(a.oatDaysLeft <= 0)) opts.push([a.id, a.name + ' ' + t('· via long-lived token')]);
           else if (a.oat && a.oatDaysLeft <= 0) opts.push([a.id, a.name + ' — ' + t('long-lived token expired'), true]);
           else if (v && v.reason === 'held-identity-mismatch') opts.push([a.id, a.name + ' — ' + t('host login belongs to {email}', { email: v.dirEmail || '?' }), true]);
-          else if (a.loggedIn && allowSubRemote && hostRec?.transport !== 'dial') opts.push([a.id, t('{name} (subscription)', { name: a.name })]);
+          // !a.localOnly: macOS Keychain-backed logins never ship (PR #23) —
+          // the verdict path already blocks via reason 'local-only-mac'
+          else if (a.loggedIn && allowSubRemote && !a.localOnly && hostRec?.transport !== 'dial') opts.push([a.id, t('{name} (subscription)', { name: a.name })]);
           // Not usable there — show WHY instead of silently omitting (the
           // omission is what taught users the create-then-switch workaround)
           else opts.push([a.id, a.name + ' — ' + t('not logged in on {host}', { host: hostName }), true]);

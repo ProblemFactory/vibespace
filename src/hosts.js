@@ -428,7 +428,8 @@ class HostManager {
     // "Import its key" never appeared and the key was later orphaned by an
     // OAuth login switch).
     const out = await this._hostShell(h,
-      `S=$(grep -c accessToken "$HOME/.claude/.credentials.json" 2>/dev/null); echo "SUB:$S"; `
+      `echo "OS:$(uname -s 2>/dev/null)"; `
+      + `S=$(grep -c accessToken "$HOME/.claude/.credentials.json" 2>/dev/null); echo "SUB:$S"; `
       + `K=$(grep -o "primaryApiKey\\": *\\"sk-ant-[^\\"]*" "$HOME/.claude.json" 2>/dev/null | head -1); echo "KEY:$K"; `
       + `grep -q "\\"apiKeyHelper\\"" "$HOME/.claude/settings.json" 2>/dev/null && echo "HELPER:yes" || echo "HELPER:no"; `
       + `E=$(grep -o "emailAddress\\": *\\"[^\\"]*" "$HOME/.claude.json" 2>/dev/null | head -1); echo "EMAIL:$E"; `
@@ -445,10 +446,15 @@ class HostManager {
       // on the host-side dir, nothing ships. find -exec (no shell globs —
       // zsh nomatch aborts glob-carrying lines in _hostShell scripts).
       + `HS=$(find "$HOME/.vibespace/subs" -maxdepth 2 -name ".credentials.json" -exec grep -l accessToken {} + 2>/dev/null | tr "\\n" " "); echo "HSUBS:$HS"; `
+      // Sanitized helper state for a currently-watched on-host login. The
+      // attempt id is random but non-secret; matching it avoids both stale
+      // markers and another concurrent account's completion.
+      + `find "$HOME/.vibespace/subs" -maxdepth 2 -name ".vibespace-login-status.json" -exec grep -H "\\"state\\":" {} + 2>/dev/null | sed "s/^/HSSTAT:/"; `
       // per-dir identity email — the anchor for same-account auto-merge
       // (2.205.0): a host login whose email matches an EXISTING record means
       // duplicate records of one real account
       + `find "$HOME/.vibespace/subs" -maxdepth 2 -name ".claude.json" -exec grep -H -o "emailAddress\\": *\\"[^\\"]*" {} + 2>/dev/null | sed "s/^/HSE:/"`);
+    const hostOs = /^OS:([A-Za-z0-9._-]+)\s*$/m.exec(out);
     const sub = /SUB:(\d+)/.exec(out);
     const key = /KEY:primaryApiKey": *"(sk-ant-[^\s"]+)/.exec(out);
     const helper = /HELPER:yes/.test(out);
@@ -468,11 +474,16 @@ class HostManager {
     const hostSubs = hsubs
       ? [...hsubs[1].matchAll(/subs\/([\w-]+)\/\.credentials\.json/g)].map((m) => m[1])
       : [];
+    const hostSubLoginStatus = {};
+    for (const m of out.matchAll(/HSSTAT:.*subs\/([\w-]+)\/\.vibespace-login-status\.json:[^\n]*"state":"(running|success|error)"[^\n]*"attempt":"([a-zA-Z0-9._-]{8,80})"/g)) {
+      hostSubLoginStatus[m[1]] = { state: m[2], attempt: m[3] };
+    }
     const hostSubEmails = {};
     for (const m of out.matchAll(/HSE:.*subs\/([\w-]+)\/\.claude\.json:emailAddress": *"([^"\s]+)/g)) {
       hostSubEmails[m[1]] = m[2];
     }
     return {
+      platform: hostOs ? hostOs[1].toLowerCase() : null,
       subscription: { loggedIn: !!(sub && parseInt(sub[1]) > 0), email: email ? email[1] : null },
       cliKey: key ? { present: true, tail: key[1].slice(-8) } : { present: false },
       keyHelper: helper,
@@ -480,6 +491,7 @@ class HostManager {
       credsMtime: cmt ? parseInt(cmt[1]) : null,      // seconds — claude .credentials.json
       codexAuthMtime: xmt ? parseInt(xmt[1]) : null,  // seconds — codex auth.json
       hostSubs, // acct ids with a live host-side creds dir (~/.vibespace/subs/<id>)
+      hostSubLoginStatus, // {acctId:{state,attempt}} from sanitized on-host helper markers
       hostSubEmails, // { acctId: identity email of its host-side dir } — merge anchor
     };
   }
@@ -682,7 +694,7 @@ class HostManager {
 
   /** The agent-tool set shipped to remotes (same list the per-spawn
    *  distribution in ws-handler uses — keep in sync). */
-  static AGENT_TOOLS = ['vibespace-status', 'vibespace-task', 'vibespace-ask', 'vibespace-exit', 'vibespace-hook.mjs', 'vibespace-hook-register.mjs', 'vibespace-remote-keeper'];
+  static AGENT_TOOLS = ['vibespace-status', 'vibespace-task', 'vibespace-ask', 'vibespace-exit', 'vibespace-hook.mjs', 'vibespace-hook-register.mjs', 'vibespace-remote-keeper', 'vibespace-claude-subscription-login.mjs'];
 
   /** Integration state ON THE HOST in one ssh round trip: per-tool presence +
    *  sha256 (content compare beats mtime — the local hook/status tools are
