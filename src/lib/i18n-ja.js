@@ -1262,6 +1262,7 @@ export default {
   "Message ID": "メッセージ ID",
   "Transcript line": "トランスクリプト行",
   "Billing account": "課金アカウント",
+  "⚠ The machine’s own CLI login has no valid token (it sat idle until its refresh token expired — named/pooled accounts handle the sessions, so nothing refreshes it). Named accounts are unaffected; run /login in a terminal only if you use the bare CLI login.": "⚠ このマシン自身の CLI ログインに有効なトークンがありません（長期間未使用のまま refresh token が失効——セッションは名前付き/プール アカウントが担うため更新されなくなりました）。名前付きアカウントは影響なし。素の CLI ログインを使う場合のみターミナルで /login を実行してください。",
   "via pool “{name}”": "プール“{name}”経由",
   "not in the ledger yet": "まだ台帳に未記帳",
   "Transfer status lost (server restarted) — it may still have completed": "転送の状態が失われました（サーバー再起動）——完了している可能性があります",

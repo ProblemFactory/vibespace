@@ -65,6 +65,7 @@ export function installUsageMeter(App, ctx = {}) {
     if (data?.codexRateLimit) this._codexRateLimit = data.codexRateLimit;
     else if (this._codexRateLimit === undefined) this._codexRateLimit = null;
     this._subSignedOut = !!data?.subscriptionSignedOut;
+    this._subSignedOutCause = data?.subscriptionSignedOutCause || 'console';
     this._accountUsage = data?.accounts || {}; // per-subscription usage (Manage Agents rows)
     this._usageGlobal = data?.globalLogin || null; // CLI-login identity (+ linked named account)
     this._usageCodexGlobal = data?.codexGlobalLogin || null;
@@ -365,7 +366,9 @@ export function installUsageMeter(App, ctx = {}) {
           <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(rl.sevenDay?.resetsAt)}</span>
         </div>
       </div>${scopedSections.join('')}
-      ${this._subSignedOut && showingGlobal ? `<div class="usage-warn">${t('⚠ Subscription signed out (a Console login replaced it) — pies show its last-known quota. API-billed sessions never appear here.')}</div>` : ''}
+      ${this._subSignedOut && showingGlobal ? `<div class="usage-warn">${this._subSignedOutCause === 'console'
+        ? t('⚠ Subscription signed out (a Console login replaced it) — pies show its last-known quota. API-billed sessions never appear here.')
+        : t('⚠ The machine’s own CLI login has no valid token (it sat idle until its refresh token expired — named/pooled accounts handle the sessions, so nothing refreshes it). Named accounts are unaffected; run /login in a terminal only if you use the bare CLI login.')}</div>` : ''}
       ${gl.identityMismatch && showingGlobal ? `<div class="usage-warn">${t('⚠ The CLI config file says {cfg}, but the login token actually belongs to {actual} — quotas shown are {actual}’s. Run /login in a terminal to refresh the recorded identity.', { cfg: gl.email || '?', actual: gl.actualEmail || '?' })}</div>` : ''}
       <div class="usage-updated">${t('Updated {ago}', { ago: agoText(rl.fetchedAt) })}</div>`;
       const odMode = this.settings.get('accounts.onDemandQuotaRefresh') || 'manual';

@@ -1263,6 +1263,7 @@ export default {
   "Message ID": "消息 ID",
   "Transcript line": "转录行号",
   "Billing account": "计费账号",
+  "⚠ The machine’s own CLI login has no valid token (it sat idle until its refresh token expired — named/pooled accounts handle the sessions, so nothing refreshes it). Named accounts are unaffected; run /login in a terminal only if you use the bare CLI login.": "⚠ 机器自身的 CLI 登录已无有效 token（长期闲置直到 refresh token 过期——会话都由命名/池化账号承担，它不再被刷新）。命名账号不受影响；只有需要使用裸 CLI 登录时才需在终端运行 /login。",
   "via pool “{name}”": "经由池“{name}”",
   "not in the ledger yet": "尚未入账",
   "Transfer status lost (server restarted) — it may still have completed": "传输状态丢失（服务器已重启）——操作可能仍已完成",
