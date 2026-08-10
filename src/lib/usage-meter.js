@@ -284,14 +284,26 @@ export function installUsageMeter(App, ctx = {}) {
       const m = Math.round((Date.now() - ts) / 60000);
       return m < 1 ? t('just now') : t('{m}min ago', { m });
     };
+    // Countdown suffix "· in 1d10h50m" (2.268.6, user request) — rides the ONE
+    // shared reset formatter so every Resets stat gains it with zero new UI.
+    const fmtDur = (sec) => {
+      sec = Math.max(0, Math.round(sec));
+      const dd = Math.floor(sec / 86400), hh = Math.floor((sec % 86400) / 3600), mm = Math.floor((sec % 3600) / 60);
+      return (dd ? `${dd}d` : '') + ((dd || hh) ? `${hh}h` : '') + `${mm}m`;
+    };
     const fmtReset = (ts) => {
       if (!ts) return '?';
       const d = new Date(ts * 1000), now = new Date();
       const time = d.toLocaleTimeString([], {hour:'numeric',minute:'2-digit'});
-      if (d.toDateString() === now.toDateString()) return t('Today {time}', { time });
-      const tmr = new Date(now); tmr.setDate(tmr.getDate() + 1);
-      if (d.toDateString() === tmr.toDateString()) return t('Tomorrow {time}', { time });
-      return d.toLocaleDateString([], {month:'short',day:'numeric'}) + ' ' + time;
+      let when;
+      if (d.toDateString() === now.toDateString()) when = t('Today {time}', { time });
+      else {
+        const tmr = new Date(now); tmr.setDate(tmr.getDate() + 1);
+        when = d.toDateString() === tmr.toDateString() ? t('Tomorrow {time}', { time })
+          : d.toLocaleDateString([], {month:'short',day:'numeric'}) + ' ' + time;
+      }
+      const left = ts - now.getTime() / 1000;
+      return left > 45 ? `${when} · ${t('in {dur}', { dur: fmtDur(left) })}` : when;
     };
 
     if (rl || hasSwitch || glKnown) {
