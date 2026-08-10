@@ -2753,9 +2753,9 @@ createEditorHelper();
 // Spawned sessions get data/bin on PATH + VIBESPACE_API/VIBESPACE_SESSION_TOKEN
 // in env, so an agent can run e.g. `vibespace-status blocked --urgency high
 // --reason "waiting for DB credentials"` from its ordinary shell tool.
-const STATUS_CMD = path.join(EDITOR_DIR, 'vibespace-status');
+const STATUS_CMD = path.join(AGENT_BIN_DIR, 'vibespace-status');
 function createStatusHelper() {
-  ensureDir(EDITOR_DIR);
+  ensureDir(AGENT_BIN_DIR);
   const script = `#!/usr/bin/env node
 // vibespace-status — report THIS session's own state to the VibeSpace board.
 // (For the whole task's status, use vibespace-task status instead.) Run with
@@ -2834,7 +2834,7 @@ createStatusHelper();
 // STATIC tracked file (data/bin/vibespace-usage), not generated — just make sure
 // it's present + executable and the cache dir exists. See §ban-safety: this
 // replaces all background /api/oauth/usage polling with a zero-API-call source.
-const USAGE_STATUSLINE_CMD = path.join(EDITOR_DIR, 'vibespace-usage');
+const USAGE_STATUSLINE_CMD = path.join(AGENT_BIN_DIR, 'vibespace-usage');
 try { ensureDir(USAGE_CACHE_DIR); } catch {}
 try { if (fs.existsSync(USAGE_STATUSLINE_CMD)) fs.chmodSync(USAGE_STATUSLINE_CMD, 0o755); } catch {}
 // The user's OWN statusLine command (from ~/.claude/settings.json), so injected
@@ -2855,9 +2855,9 @@ function userStatuslineCmd() {
 // spawned by VibeSpace with a task have no VIBESPACE_TASK_ID → instant no-op,
 // so global registration never affects other sessions. Output contract copied
 // from the live-verified plugin: top-level {additionalContext} JSON on stdout.
-const HOOK_CMD = path.join(EDITOR_DIR, 'vibespace-hook.mjs');
+const HOOK_CMD = path.join(AGENT_BIN_DIR, 'vibespace-hook.mjs');
 function createHookHelper() {
-  ensureDir(EDITOR_DIR);
+  ensureDir(AGENT_BIN_DIR);
   const script = `#!/usr/bin/env node
 // vibespace-hook — delivers VibeSpace task context through the harness's OWN
 // native hooks (never by rewriting the user's message):
@@ -2982,7 +2982,7 @@ for (const { f, create, EVENTS } of files) {
   } catch { }
 }
 `;
-  fs.writeFileSync(path.join(EDITOR_DIR, 'vibespace-hook-register.mjs'), reg, { mode: 0o755 });
+  fs.writeFileSync(path.join(AGENT_BIN_DIR, 'vibespace-hook-register.mjs'), reg, { mode: 0o755 });
 }
 createHookHelper();
 
