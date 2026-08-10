@@ -1607,7 +1607,10 @@ export function installManageAgents(App, ctx = {}) {
       const r = addAcctBtn.getBoundingClientRect();
       const items = [];
       if (!selectedHost) {
-        items.push({ label: t('Set up both…'), action: () => { done(); this._showAccountsWizard(); } });
+        // 'Set up both…' (the 2.43.0 console+subscription wizard) retired from
+        // the menu in 2.268.3 (user: 没啥意义了) — pooling/named accounts made
+        // the machine-global dual-login dance obsolete. _showAccountsWizard
+        // stays for the onboarding import path only.
         if (importable) items.push({
           label: t('Import CLI key') + ` (…${acct.cliKey.tail || ''})`,
           action: async () => {
@@ -1615,7 +1618,9 @@ export function installManageAgents(App, ctx = {}) {
             refresh();
           },
         });
-        items.push({ separator: true });
+        // separator only when something is actually above it (with the wizard
+        // entry gone, a non-importable local menu otherwise led with a rule)
+        if (items.length) items.push({ separator: true });
       }
       // These add to VibeSpace's store (machine-independent). With a MACHINE
       // selected, the subscription login runs ON that machine (per-host creds
