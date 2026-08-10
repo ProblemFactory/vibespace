@@ -44,7 +44,13 @@ fs.writeFileSync(path.join(home, '.claude', 'settings.json'), '{}');
 // manufacture the dir — reviewed invariant).
 fs.mkdirSync(path.join(home, '.codex'), { recursive: true });
 
-const SRV_ENV = { ...process.env, HOME: home, PORT: String(PORT) };
+// FORCE hook registration: the harness runs the server from a /tmp worktree,
+// where the 2.225.1 temp-server guard refuses every global-hook write — so
+// the five hook assertions below could NEVER pass and this suite has been
+// silently red since that release (found during the 2.271.0 lag/CS audit
+// campaign; a red suite = zero coverage on the registration path). HOME is a
+// throwaway dir here, so forcing only ever touches the fake configs.
+const SRV_ENV = { ...process.env, HOME: home, PORT: String(PORT), VIBESPACE_FORCE_AGENT_HOOKS: '1' };
 let srv = null;
 // A stale listener on our port would silently absorb every assertion (real
 // debugging cost: yesterday's crashed smoke servers still held the port).
