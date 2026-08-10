@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.282.0
+
+**R2 of the three-tier plan: daemon worker isolation** (docs/design-three-tier.md — THE unlock for every later heavy migration).
+
+The device daemon's fs ops ran SYNC on its main loop — the loop that keeps every session pipe on the machine alive. A hung filesystem path (the dead-FUSE-mount class that motivated SafeFs server-side) could wedge the whole daemon. Now:
+
+- **Embedded worker tier**: heavy fs work runs in `worker_threads` spawned from the SAME single-file bundle (`new Worker(__filename)` + role flag — a second shipped artifact through the installer/versioned-dir/re-exec chain would be a fleet-brick vector, the 2.185.2 class). `FS_ACTIONS` is ONE implementation object: the worker servant runs it, and the inline fallback (worker_threads unavailable) runs the SAME object — no twin to drift.
+- **Deadline → terminate → respawn**: a wedged op surfaces as a bounded `fs deadline` error (measured 8 s on a real FIFO wedge) instead of a 30 s transport timeout; the pool kills the stuck worker and respawns it. `read-range` reads in 4 MB worker chunks so a mid-file hang trips the per-chunk deadline; the count-gated byte-channel contract (2.187.0) is unchanged.
+- **Loop-lag canary**: the daemon logs if its own loop ever stalls >300 ms — a regression that puts weight back on the loop becomes visible instead of waiting for a field freeze.
+- **Found & fixed while building it**: the pool's job id leaked into the mux reply via object spread, overwriting the request id — the reply then answered a request nobody made and the op hung forever. The two id spaces HAPPENED to align until unrelated ops skewed them (which is why simple repros passed and the full suite hung). Pinned in the new test.
+
+scripts/test-agentd-workers.mjs (7 asserts, real daemon): correct fs ops after id-space skew, run-cmd + probe ops answered WHILE an op is wedged on a FIFO, other fs ops served mid-hang by the second worker, bounded deadline, pool self-heal. Full agentd battery green (M0/M1/adopt/bigread/m3m4/local-device/probes).
+
 ## 2.281.0
 
 **R1 of the three-tier plan: machine facts come from the machine** (`probe.*` op family; docs/design-three-tier.md).
