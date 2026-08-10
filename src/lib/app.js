@@ -1704,7 +1704,11 @@ class App {
       if (!acctRow || !acctSel) return;
       const be = document.getElementById('input-backend')?.value || 'claude';
       const all = this._accounts?.accounts || [];
-      const list = all.filter(a => (a.backend || 'claude') === be);
+      const list = all.filter(a => (a.backend || 'claude') === be)
+        // TYPE-then-name order, matching the Manage-Agents roster (2.268.5)
+        .sort((a, b) => (((a.pooled || a.type === 'pooled') ? 0 : a.type === 'subscription' ? 1 : 2)
+          - ((b.pooled || b.type === 'pooled') ? 0 : b.type === 'subscription' ? 1 : 2))
+          || String(a.name || '').localeCompare(String(b.name || '')));
       const onHost = !!document.getElementById('input-host')?.value;
       const show = (be === 'claude' || be === 'codex') && list.length > 0;
       acctRow.style.display = show ? '' : 'none';

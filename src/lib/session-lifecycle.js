@@ -684,7 +684,12 @@ export function installSessionLifecycle(App, ctx = {}) {
     if (backend !== 'claude' && backend !== 'codex') return;
     const backendSessionId = live?.backendSessionId || spec.backendSessionId || live?.sessionId || null;
     const isCodex = backend === 'codex';
-    const accts = (this._accounts?.accounts || []).filter(a => ((a.backend || 'claude') === 'codex') === isCodex);
+    const accts = (this._accounts?.accounts || []).filter(a => ((a.backend || 'claude') === 'codex') === isCodex)
+      // same TYPE-then-name order as the Manage-Agents roster (2.268.5) —
+      // divergent ordering between the two surfaces reads as a shuffle
+      .sort((a, b) => (((a.pooled || a.type === 'pooled') ? 0 : a.type === 'subscription' ? 1 : 2)
+        - ((b.pooled || b.type === 'pooled') ? 0 : b.type === 'subscription' ? 1 : 2))
+        || String(a.name || '').localeCompare(String(b.name || '')));
     // A stopped session has no live accountId — its saved on-resume account
     // config is the honest "current" (that's what the next resume bills to).
     const savedAcct = !live?.webuiId

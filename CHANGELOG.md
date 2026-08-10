@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.268.5
+
+- **Account lists sort by TYPE, not add-order** (user request): pools first (the umbrella identities you actually pick), then subscriptions, then API keys, name-sorted within a type — applied consistently to the Manage-Agents roster, the billing switcher, and the New Session account dropdown (divergent ordering between surfaces reads as a shuffle). The codex roster name-sorts for parity (all its entries are logins).
+
 ## 2.268.4
 
 - **"登录" and "+ 添加账号…" no longer sit side by side as look-alike primaries** (user report): when named/pooled accounts are carrying the sessions, the backend row's machine-wide "Log in" button disappears and the action moves INTO the Add-account menu as a clearly-labeled "Log in machine-wide (claude /login)…" entry. A machine with no named accounts keeps the primary Log in button (it is the main path there).
