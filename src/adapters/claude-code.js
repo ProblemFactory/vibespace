@@ -354,7 +354,12 @@ class ClaudeCodeAdapter extends BackendAdapter {
     const what = m[1] || '';
     if (/5[- ]?hour|session/i.test(what)) return { kind: 'fiveHour' };
     const model = /\b(Fable|Opus|Sonnet|Haiku)\b/i.exec(what);
-    if (model && /week/i.test(what)) return { kind: 'scoped', name: model[1][0].toUpperCase() + model[1].slice(1).toLowerCase() };
+    // A model name in the banner ⇒ the model-scoped weekly bucket, with or
+    // without the word "weekly" — the live wording is just "You've reached
+    // your Fable 5 limit" (real 2026-08-09 incident #2: the week-word
+    // requirement mis-marked it as 5h, which self-heals in ≤5h while the
+    // scoped bucket is actually dead for up to a week).
+    if (model) return { kind: 'scoped', name: model[1][0].toUpperCase() + model[1].slice(1).toLowerCase() };
     if (/week|7[- ]?day/i.test(what)) return { kind: 'sevenDay' };
     // unknown wording → treat as the SHORTEST-recovery bucket (self-heals in
     // ≤5h via the reset-passed rule; a re-attempt re-banners and re-marks)

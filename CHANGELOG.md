@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.266.0
+
+Exhaustion #2 post-mortem (same day: a 31-agent review workflow killed the Fable weekly bucket — anchors show 51%→100% in the final ~4 minutes, faster than any polling cadence could see). Three layers, all addressed:
+
+- **Event-driven pool evaluation + live odometer** (user-designed): every usage record streaming through a session's stdout (main thread AND subagent sidechains) is noted into an in-memory ring (`usageEstimator.noteLive`) the moment it arrives — before the transcript flushes, long before the ledger scan — and kicks a 5s-throttled pool re-evaluation (`kickPoolEval`). Estimates add ring entries the ledger hasn't absorbed yet, rid-deduped against the ledger's own request-id set so nothing ever double-counts once the scan lands. The scan-lag blind window for stdout-visible burns is gone; the timer drops to 30s with a 10s per-pool decision gate (anti-flap lives entirely in the MIN_GAIN margin now, not the cadence).
+- **Workflow agents get a file-level "wrapper"** (user question: 拦截workflow agents保证在wrapper下 — they are IN-PROCESS API calls with file-only transcripts, no process to wrap, but tailing is equivalent): the launch ack ("Run ID: wf_…") arms a run-dir tailer (`armWorkflowUsageWatcher` — fs.watch + 5s belt poll, per-file byte offsets, complete-lines-only) that streams every agent's usage records into the live odometer within ~1-2s of being written. rid-dedup makes offset loss harmless; teardown on 30min idle or session death. The last observability corner (this morning's "half the Fable bucket between two ticks") is closed.
+- **Org-merged identities read quota through the identity group**: a machine-login-linked account keeps TWO cache files (`__global__` + the named sub) and ground truth lands in whichever one the refresh targeted — during the incident the ⟳ readings (Fable 34%→51%) went to `__global__.json` while the pool decision read the sub's file frozen hours earlier. `readCache` now takes the freshest file across the identity.
+- **Third live banner wording**: `You've reached your Fable 5 limit` (no "weekly" word) was mis-marked as the 5-hour bucket (self-heals in 5h while the scoped bucket is dead for up to a week). A model name in the banner now always means the scoped bucket.
+- Tests: estimator suite grows to 58 (live-odometer visibility/dedup/account-scoping) + banner suite 21.
+- **docs/architecture-map.md** (new): the product of a 31-agent global review workflow (which doubled as the pool stress test) — 9-subsystem index, 41 imperative ownership rules (OR-1…41), 9 cross-file contracts, and a 22-class "where does my change go" decision table, plus a phased refactor plan. 17 adversarially-confirmed defects from the same run are queued as the next fix batch (critical first: dial chat sessions freeze permanently after any dial-link drop — the bridge discards the transport-death signal).
+
 ## 2.265.0
 
 The calibration log's first real catch (user report: "最近几次预测都严重高估" — est now 3-4× hot on the 5h bucket; `calib` records pinned it to a $139-implied-full learned rate vs the true ≈$500). Root cause chain, all three links fixed:
