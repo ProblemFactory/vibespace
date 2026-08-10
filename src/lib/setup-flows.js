@@ -259,20 +259,37 @@ export function installSetupFlows(App) {
           try { st = await fetchJson('/api/backend-status'); } catch {}
           const card = (key, label, loginCmd, installCmd) => {
             const b = st[key] || {};
+            // Named/pooled accounts count as READY (2.267.4, user request:
+            // onboarding must not force the machine-wide login — accounts
+            // added per-directory or as a pool work without it).
+            const named = key === 'claude' ? (b.namedLoggedIn || 0) : 0;
             const state = !b.installed ? `<span class="ob-bad">${t('not installed')}</span>`
               : b.loggedIn ? `<span class="ob-ok">✓ ${t('ready')}</span>`
+              : named > 0 ? `<span class="ob-ok">✓ ${t('{n} named account(s) in use', { n: named })}</span>`
               : `<span class="ob-warn">${t('installed, not logged in')}</span>`;
             // Not installed → one-click install; installed but logged out →
             // log in. Both just run the command in a visible shell terminal.
             const btn = !b.installed ? `<button class="welcome-btn ob-login" data-key="${key}" data-kind="install" data-label="${escHtml(label)}" data-cmd="${escHtml(installCmd)}" title="${escHtml(installCmd)}">${t('Install')}</button>`
-              : b.loggedIn ? '' : `<button class="welcome-btn ob-login" data-key="${key}" data-kind="login" data-label="${escHtml(label)}" data-cmd="${escHtml(loginCmd)}">${t('Log in')}</button>`;
-            return `<div class="ob-backend"><div><b>${label}</b> ${b.version ? `<span class="ob-ver">${escHtml(b.version)}</span>` : ''}</div><div>${state} ${btn}</div></div>`;
+              : b.loggedIn ? '' : `<button class="welcome-btn${named > 0 ? ' welcome-btn-secondary' : ''} ob-login" data-key="${key}" data-kind="login" data-label="${escHtml(label)}" data-cmd="${escHtml(loginCmd)}">${t('Log in')}</button>`;
+            // Direct door to named accounts / the account pool — no machine
+            // login required (Manage Agents opens above the wizard)
+            const acctBtn = key === 'claude' && b.installed
+              ? ` <button class="welcome-btn welcome-btn-secondary ob-accounts">${t('Accounts & pool…')}</button>` : '';
+            return `<div class="ob-backend"><div><b>${label}</b> ${b.version ? `<span class="ob-ver">${escHtml(b.version)}</span>` : ''}</div><div>${state} ${btn}${acctBtn}</div></div>`;
           };
           const el = content.querySelector('#ob-backends');
           if (!el) return;
           el.innerHTML = card('claude', 'Claude Code', 'claude', 'curl -fsSL https://claude.ai/install.sh | bash')
             + card('codex', 'Codex', 'codex login --device-auth', 'npm install -g @openai/codex@latest')
+            + `<div class="ob-sub" style="margin-top:6px">${t('Tip: named accounts and account pools work without the machine-wide login — add them via “Accounts & pool…”.')}</div>`
             + `<button class="welcome-btn welcome-btn-secondary ob-recheck">${t('Re-check')}</button>`;
+          el.querySelector('.ob-accounts')?.addEventListener('click', () => {
+            // Manage Agents as a MODAL above the wizard (z 99998 > wizard
+            // 9600; forceModal skips the rail-panel redirect, which would
+            // open BEHIND the wizard). Cards refresh on close so a fresh
+            // named account flips this step to ✓ without a manual re-check.
+            try { this._showAgentsDialog?.({ forceModal: true, onClose: () => refresh() }); } catch {}
+          });
           el.querySelectorAll('.ob-login').forEach(btn => {
             // Embedded guided modal (stays ON the wizard; auto-detects
             // completion via /api/backend-status and refreshes the cards) —

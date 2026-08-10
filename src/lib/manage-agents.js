@@ -768,19 +768,21 @@ export function installManageAgents(App, ctx = {}) {
     render();
   },
 
-  _showAgentsDialog({ container } = {}) {
+  _showAgentsDialog({ container, forceModal, onClose } = {}) {
     // rail mode: render into the sidebar panel instead of a modal (one source).
     // Skip _railGo when the agents panel is ALREADY active — its re-click
     // semantics COLLAPSE the sidebar (the usage popup's "Full overview" door
-    // would close the very panel it points at).
-    if (!container && !this.isMobile && this.sidebar?._railEl) {
+    // would close the very panel it points at). forceModal callers (the
+    // onboarding wizard, 2.267.4) need the MODAL regardless — the rail panel
+    // would open BEHIND the wizard overlay.
+    if (!container && !forceModal && !this.isMobile && this.sidebar?._railEl) {
       this.sidebar.toggle?.(true);
       if (this.sidebar._activeTab !== 'agents') this.sidebar._railGo?.('agents');
       return;
     }
     const shell = container ? { body: container, close: () => {} } : createModalShell({
       id: 'agents-dialog-overlay', title: t('Agents'), dialogClass: 'agents-dialog',
-      bodyClass: 'agents-dialog-body', escapeToClose: true,
+      bodyClass: 'agents-dialog-body', escapeToClose: true, onClose,
     });
     // rail panel: carry the SAME body class so one stylesheet (incl. the
     // container queries) serves modal and panel — the panel's narrow-width
@@ -878,9 +880,11 @@ export function installManageAgents(App, ctx = {}) {
           // Machine login dead but NAMED/pooled accounts carry the sessions
           // (the pooling-era normal state, 2.267.1): "not logged in" read as
           // "Claude is broken" \u2014 say what's actually true. Log in stays
-          // offered (it's still how you revive the machine login).
+          // offered (it's still how you revive the machine login). The cause
+          // is only claimed when KNOWN (2.267.4): token-less creds = expired;
+          // no creds at all = never set up \u2014 don't invent idle-expiry.
           : (info.namedLoggedIn > 0)
-            ? `<span class="ob-ver">${t('machine login inactive')}</span> <span class="ob-ok">${t('{n} named account(s) in use', { n: info.namedLoggedIn })}</span>`
+            ? `<span class="ob-ver">${info.machineLoginState === 'expired' ? t('machine login inactive') : t('machine login not set up')}</span> <span class="ob-ok">${t('{n} named account(s) in use', { n: info.namedLoggedIn })}</span>`
           : `<span class="ob-warn">${t('not logged in')}</span>`
         }`;
         const actions = document.createElement('div'); actions.className = 'agent-actions';
