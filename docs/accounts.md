@@ -56,7 +56,18 @@ not sharing one account with other people or pooling access.
 - **Add subscription…** — opens a terminal running the official Claude OAuth
   login, scoped to a fresh isolated dir. Sign in with the account you want to
   add; your other logins are untouched. VibeSpace reads back the email/plan and
-  names the account (rename anytime via the pencil).
+  names the account (rename anytime via the pencil). On macOS, Claude Code
+  normally saves this isolated login in Keychain. After the official login
+  succeeds, VibeSpace copies only its `claudeAiOauth` record into the isolated
+  dir's standard fallback file while the same interactive terminal still has
+  Keychain access. This is a one-time local copy, not a token refresh or API
+  call; the dir is mode `0700` and the file is mode `0600`. Because OAuth
+  refresh tokens rotate and the Keychain/file copies can later diverge, this
+  macOS fallback stays on that machine: it is not included in config exports
+  or shipped to another host. Log in on the target host to use the account
+  there. The Keychain service name also depends on the isolated directory
+  path, so duplicate macOS subscription records are not auto-merged or renamed;
+  doing so could make Claude prefer an older Keychain item.
 - **Add ChatGPT account…** — same idea via `codex login --device-auth` (a URL +
   one-time code, so it works even when your browser is on a different machine
   than the server).
@@ -117,7 +128,10 @@ When a session on a remote host uses a VibeSpace account:
   subscription logins to remote hosts"**; VibeSpace then streams the credential
   dir over ssh-stdin into a private `0700` dir on the host (per-file
   newest-wins, so a token the host refreshed is never overwritten by a stale
-  copy).
+  copy). A macOS Keychain-backed login is never shipped even with this option,
+  because copying its fallback could fork a rotating refresh token. Use **Log
+  in on \<host\> as this account…** instead; VibeSpace runs the same interactive
+  login helper on that host and keeps the result there.
 - Deleting an account best-effort removes its key file / creds dirs from every
   registered host.
 
@@ -159,6 +173,11 @@ truth; this document is guidance, not legal advice.
   and `data/codex-subs/`. All of these are gitignored — never commit `data/`.
 - Credentials ride the process-env channel (or ssh-stdin for remote), never
   command-line arguments.
-- VibeSpace reads OAuth credentials strictly read-only; token refresh is left
-  entirely to the CLIs (refresh tokens rotate — an external refresher would
-  break the login).
+- Outside an explicit **Add subscription…** login, VibeSpace treats OAuth
+  credentials strictly read-only; token refresh is left entirely to the CLIs
+  (refresh tokens rotate — an external refresher would break the login). The
+  macOS login helper only snapshots the Keychain result after that interactive
+  login succeeds, and never calls Anthropic or refreshes a token itself.
+- Config export keeps a macOS subscription's account metadata, but deliberately
+  omits its Keychain-derived OAuth fallback. Re-authenticate that account after
+  importing on another machine.

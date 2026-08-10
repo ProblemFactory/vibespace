@@ -3,6 +3,19 @@ import { UI_ICONS } from './icons.js';
 import { t } from './i18n.js';
 import { copyText, createModalShell, escHtml, estDisplayPair, fetchJson, showConfirmDialog, showContextMenu, showInputDialog, showToast } from './utils.js';
 
+function remoteClaudeSubscriptionLoginCommand(id) {
+  if (!/^sub-[a-f0-9]+$/.test(id)) throw new Error('invalid subscription id');
+  const dir = `$HOME/.vibespace/subs/${id}`;
+  const attempt = `vslogin-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  // The server ships this single transport helper even when agent Integration
+  // is off. It runs the official login and, on a Mac host, captures Keychain
+  // credentials before the interactive terminal/security session ends.
+  return {
+    attempt,
+    command: `mkdir -p "${dir}" && node "$HOME/.vibespace/bin/vibespace-claude-subscription-login.mjs" --config-dir "${dir}" --claude claude --attempt "${attempt}"`,
+  };
+}
+
 export function installManageAgents(App, ctx = {}) {
   Object.assign(App.prototype, {
   // ── Manage Agents dialog: install/login status + login/update actions ──
@@ -47,9 +60,9 @@ export function installManageAgents(App, ctx = {}) {
     // is minted on the host and never leaves it; the account record still
     // lives in VibeSpace (machine-independent identity).
     if (hostId) {
-      const dir = `$HOME/.vibespace/subs/${created.id}`; // id shape sub-<hex>, metachar-free
-      this._watchHostLogin(hostId, hostLabel);
-      this.openShellTerminal(undefined, { hostId, initialCommand: `mkdir -p "${dir}" && CLAUDE_CONFIG_DIR="${dir}" CLAUDE_SECURESTORAGE_CONFIG_DIR="${dir}" claude auth login --claudeai` });
+      const login = remoteClaudeSubscriptionLoginCommand(created.id);
+      this._watchHostLogin(hostId, hostLabel, created.id, login.attempt);
+      this.openShellTerminal(undefined, { hostId, initialCommand: login.command });
       showToast(t('A terminal opened ON {host} — sign in there. The login lives on {host} only; sessions on it can then pick this account.', { host: hostLabel }), { duration: 7000 });
       refresh();
       return;
@@ -72,6 +85,9 @@ export function installManageAgents(App, ctx = {}) {
           clearInterval(iv);
           if (r.merged) showToast(t('✓ Recognized as existing account “{name}” — merged (freshest login kept)', { name: r.account?.name || '' }), { duration: 7000 });
           else showToast(t('✓ Added {name}', { name: r.name || t('subscription') }));
+        } else if (r?.loginFailed) {
+          clearInterval(iv);
+          showToast(t('Subscription login could not be saved. Check the login terminal for details, then try again.'), { type: 'error', duration: 8000 });
         }
       } catch { /* keep polling */ }
     }, 3000);
@@ -298,7 +314,7 @@ export function installManageAgents(App, ctx = {}) {
     };
   },
 
-  _watchHostLogin(hostId, hostLabel) {
+  _watchHostLogin(hostId, hostLabel, accountId = null, loginAttempt = null) {
     if (!hostId) return;
     if (this._hostLoginWatch) { clearInterval(this._hostLoginWatch); this._hostLoginWatch = null; }
     const sig = (r) => (r && !r.error)
@@ -312,27 +328,44 @@ export function installManageAgents(App, ctx = {}) {
     // OAuth login takes ≥15-30s and still lands after the baseline.
     let baseSig = null;
     let tries = 0;
+    const complete = (machineLoginChanged) => {
+      clearInterval(this._hostLoginWatch); this._hostLoginWatch = null;
+      if (machineLoginChanged) (this._hostLoginSeenAt ||= {})[hostId] = Date.now();
+      showToast(t('✓ Login on {host} updated', { host: hostLabel }), { duration: 5000 });
+      // Refresh the open Agents surface in place, else reopen it (the wizard
+      // pattern). Since 2.245.0 the surface stacks EVERY machine's section, so
+      // there's no machine selection to force — a plain refresh shows it.
+      if (!this._agentsRefreshHook?.()) this._showAgentsDialog();
+    };
     this._hostLoginWatch = setInterval(async () => {
       if (++tries > 50) { clearInterval(this._hostLoginWatch); this._hostLoginWatch = null; return; }
       let cur = null;
       try { cur = await fetchJson(`/api/hosts/${encodeURIComponent(hostId)}/accounts-status`); } catch { return; }
+      if (accountId && loginAttempt) {
+        const loginStatus = cur?.hostSubLoginStatus?.[accountId];
+        // A named-account helper owns its exact completion signal (PR #23).
+        // Never let another account/global refresh satisfy this watcher, and
+        // do not lose a fast login that completed before the first poll.
+        if (!loginStatus || loginStatus.attempt !== loginAttempt || loginStatus.state === 'running') return;
+        if (loginStatus.state === 'error') {
+          clearInterval(this._hostLoginWatch); this._hostLoginWatch = null;
+          showToast(t('Subscription login could not be saved. Check the login terminal for details, then try again.'), { type: 'error', duration: 8000 });
+          return;
+        }
+        if (loginStatus.state === 'success') complete(false);
+        return;
+      }
       const s = sig(cur);
       if (s === null) return;
       if (baseSig === null) { baseSig = s; return; }
       if (s === baseSig) return;
-      clearInterval(this._hostLoginWatch); this._hostLoginWatch = null;
       // Stamp for the roster's identity-freshness note — ONLY when the
       // MACHINE login itself changed (a per-account host login landing is
       // the last sig field; it must not arm the CLI-login row's amber
       // "login changed" note). Local clocks only — remote mtimes rotate on
       // normal token refresh and skew.
       const machinePart = (x) => x.split('|').slice(0, 5).join('|');
-      if (machinePart(s) !== machinePart(baseSig)) (this._hostLoginSeenAt ||= {})[hostId] = Date.now();
-      showToast(t('✓ Login on {host} updated', { host: hostLabel }), { duration: 5000 });
-      // Refresh the open Agents surface in place, else reopen it (the wizard
-      // pattern). Since 2.245.0 the surface stacks EVERY machine's section, so
-      // there's no machine selection to force — a plain refresh shows it.
-      if (!this._agentsRefreshHook?.()) this._showAgentsDialog();
+      complete(machinePart(s) !== machinePart(baseSig));
     }, 6000);
   },
 
@@ -1581,7 +1614,9 @@ export function installManageAgents(App, ctx = {}) {
         ? ` <span class="acct-linked-hint" title="${t('This account holds its own login ON {host} (minted there, never leaves it) — sessions on {host} picking it use that login.', { host: escHtml(hostLabel) })}">${t('· logged in on {host}', { host: escHtml(hostLabel) })}</span>`
         : (selectedHost && viaOat)
         ? ` <span class="acct-linked-hint" title="${t('Runs on {host} through its long-lived token (nothing rotates, no login is shipped).', { host: escHtml(hostLabel) })}">${t('· via long-lived token')}</span>`
-        : blocked ? ` <span class="acct-blocked-hint" title="${t('Runs on this machine only. For {host}: use “Log in on {host} as this account…” in the ⋯ menu (a per-account login held on the host), or enable Settings → “Ship subscription logins to remote hosts.”', { host: escHtml(hostLabel) })}">${t('· this machine only')}</span>` : '';
+        : blocked ? ` <span class="acct-blocked-hint" title="${a.localOnly
+          ? t('This macOS Keychain-backed login stays on this machine. Log in as this account on {host} instead; copying it can invalidate rotating OAuth credentials.', { host: escHtml(hostLabel) })
+          : t('Runs on this machine only. For {host}: use “Log in on {host} as this account…” in the ⋯ menu (a per-account login held on the host), or enable Settings → “Ship subscription logins to remote hosts.”', { host: escHtml(hostLabel) })}">${t('· this machine only')}</span>` : '';
       // Provenance + user note tags (2.201.0, real report: a key imported
       // from a host read as live-shared FROM it — say where it came from and
       // that it's an independent copy)
@@ -1693,9 +1728,9 @@ export function installManageAgents(App, ctx = {}) {
           if (hostOwnEmail && acctEmailOf(sa) === hostOwnEmail) continue; // IS the host's own login
           items.push({ label: t('Log in on {host} as “{name}”…', { host: hostLabel, name: sa.name }), action: () => {
             done();
-            const dir = `$HOME/.vibespace/subs/${sa.id}`; // id shape sub-<hex>, metachar-free
-            this._watchHostLogin(selectedHost, hostLabel);
-            this.openShellTerminal(undefined, { hostId: selectedHost, initialCommand: `mkdir -p "${dir}" && CLAUDE_CONFIG_DIR="${dir}" CLAUDE_SECURESTORAGE_CONFIG_DIR="${dir}" claude auth login --claudeai` });
+            const login = remoteClaudeSubscriptionLoginCommand(sa.id);
+            this._watchHostLogin(selectedHost, hostLabel, sa.id, login.attempt);
+            this.openShellTerminal(undefined, { hostId: selectedHost, initialCommand: login.command });
             showToast(t('Sign in as “{name}” in the terminal — this login lives ON {host} only; the machine’s own login is untouched.', { name: sa.name, host: hostLabel }), { duration: 7000 });
           } });
         }
@@ -1833,7 +1868,10 @@ export function installManageAgents(App, ctx = {}) {
         // §ban-safety: a subscription can't run on a remote host by default.
         // Explain instead of firing a create the server will reject.
         if (keyRow.dataset.blocked) {
-          showToast(t('“{name}” runs on this machine only. For {host}, use “Log in on host…” on the CLI-login row, or turn on Settings → “Ship subscription logins to remote hosts.”', { name: a?.name, host: escHtml(hostLabel) }) + ' ' + t('Already logged in as this account ON {host}? Then pick “CLI login @ {host}” when switching the session’s billing — that uses the host’s own login.', { host: escHtml(hostLabel) }), { type: 'error', duration: 8000 });
+          showToast((a?.localOnly
+            ? t('This macOS Keychain-backed login stays on this machine. Log in as this account on {host} instead; copying it can invalidate rotating OAuth credentials.', { host: escHtml(hostLabel) })
+            : t('“{name}” runs on this machine only. For {host}, use “Log in on host…” on the CLI-login row, or turn on Settings → “Ship subscription logins to remote hosts.”', { name: a?.name, host: escHtml(hostLabel) }))
+            + ' ' + t('Already logged in as this account ON {host}? Then pick “CLI login @ {host}” when switching the session’s billing — that uses the host’s own login.', { host: escHtml(hostLabel) }), { type: 'error', duration: 8000 });
           return;
         }
         done();
@@ -1946,9 +1984,9 @@ export function installManageAgents(App, ctx = {}) {
         // pick this account directly.
         if (isSub && selectedHost && keyRow.dataset.blocked) {
           items.splice(1, 0, { label: t('Log in on {host} as this account…', { host: hostLabel }), action: () => {
-            const dir = `$HOME/.vibespace/subs/${id}`; // id shape sub-<hex>, metachar-free
-            this._watchHostLogin(selectedHost, hostLabel);
-            run(`mkdir -p "${dir}" && CLAUDE_CONFIG_DIR="${dir}" CLAUDE_SECURESTORAGE_CONFIG_DIR="${dir}" claude /login`);
+            const login = remoteClaudeSubscriptionLoginCommand(id);
+            this._watchHostLogin(selectedHost, hostLabel, id, login.attempt);
+            run(login.command);
             showToast(t('Sign in as “{name}” in the terminal — this login lives ON {host} only; the machine’s own login is untouched.', { name: a?.name, host: hostLabel }), { duration: 7000 });
           } });
         }

@@ -837,6 +837,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       if (!rHostId) return null;
       if (hostLinked(a)) return null; // = the host's own login — usable directly
       if (hostSubHeld(a)) return null; // has its own login held ON the host
+      if (a.localOnly) return t('This macOS Keychain-backed login stays on this machine. Log in as this account on {host} instead; copying it can invalidate rotating OAuth credentials.', { host: rHostName });
       if (rTransport === 'dial') return t('Subscription logins can’t ship to a paired device — log in on the device, or use an API-key account');
       if (!shipSubs) return t('This stored login can’t ship to {host}. If you’ve logged this account in ON {host}, pick “CLI login @ {host}” above — that uses the host’s own login. (Or enable Settings → “Ship subscription logins to remote hosts”.)', { host: rHostName });
       return null;
