@@ -16,6 +16,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
+const { REMOTE_PRELUDE, nodeFinder } = require('./remote-shell.js');
 const { execFile } = require('child_process');
 const { claimJsonls, cwdToProjectDir } = require('./session-store');
 const { classifyPrivateKey } = require('./ssh-key-format');
@@ -568,7 +569,7 @@ class HostManager {
       } catch { tools = null; } // Windows daemon: no sh — identity still proves the link
       return { ok: true, latencyMs: Date.now() - t0, dial: true, tools, info: st.info || null };
     }
-    const probe = 'export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; echo VS-OK; for c in dtach node claude codex; do command -v $c >/dev/null 2>&1 && printf "%s=yes " $c || printf "%s=no " $c; done; echo; uname -sm';
+    const probe = REMOTE_PRELUDE + 'echo VS-OK; for c in dtach node claude codex; do command -v $c >/dev/null 2>&1 && printf "%s=yes " $c || printf "%s=no " $c; done; echo; uname -sm';
     const t0 = Date.now();
     // The probe must measure what SESSIONS experience: a FRESH connection.
     // Multiplexed probes ride the persisted ControlMaster, whose ESTABLISHED
@@ -652,7 +653,7 @@ class HostManager {
   /** Backend status on a host (mirrors local /api/backend-status shape). */
   async backendStatus(id) {
     const h = this.get(id);
-    const probe = 'export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; '
+    const probe = REMOTE_PRELUDE
       + 'for c in claude codex; do '
       + 'if command -v $c >/dev/null 2>&1; then v=$($c --version 2>/dev/null | head -1); echo "$c|yes|$v"; else echo "$c|no|"; fi; done; '
       // login state: OAuth token OR console-managed key OR an apiKeyHelper —
@@ -703,7 +704,7 @@ class HostManager {
    *  files. Read-only probe. */
   async agentToolsStatus(id) {
     const h = this.get(id);
-    const probe = 'export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; '
+    const probe = REMOTE_PRELUDE
       + `for f in ${HostManager.AGENT_TOOLS.join(' ')}; do `
       + 'p="$HOME/.vibespace/bin/$f"; if [ -f "$p" ]; then s=$( (sha256sum "$p" 2>/dev/null || shasum -a 256 "$p" 2>/dev/null) | cut -d" " -f1 ); echo "T|$f|$s"; else echo "T|$f|"; fi; done; '
       + 'command -v node >/dev/null 2>&1 && echo "NODE|yes" || echo "NODE|no"; '
@@ -734,10 +735,10 @@ class HostManager {
     return new Promise((resolve, reject) => {
       const child = execFile('ssh', [...this.sshArgs(h, { multiplex: true }), '--',
         'umask 077; mkdir -p "$HOME/.vibespace/bin"; tar -x -C "$HOME/.vibespace/bin"; chmod +x "$HOME/.vibespace/bin"/vibespace-* 2>/dev/null || true; '
-        + 'export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; '
+        + REMOTE_PRELUDE
         // POSIX node finder (2.244.4): nvm.sh sourcing only works in bash — a
         // dash login shell leaves `node` unresolvable (natural's Novita)
-        + 'VS_NODE="$(command -v node 2>/dev/null)"; [ -z "$VS_NODE" ] && VS_NODE="$(ls -1 "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | sort | tail -1)"; if [ -z "$VS_NODE" ]; then for vs_c in /usr/local/bin/node /usr/bin/node /opt/homebrew/bin/node "$HOME/.local/bin/node"; do [ -x "$vs_c" ] && VS_NODE="$vs_c" && break; done; fi; '
+        + nodeFinder()
         + '[ -n "$VS_NODE" ] && "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" 2>/dev/null; echo VS-INSTALLED'],
         { timeout: 30000 }, (err, stdout, stderr) => {
           if (err) return reject(new Error((stderr?.toString() || err.message || '').trim().slice(0, 300)));
@@ -817,7 +818,7 @@ class HostManager {
       } catch { /* ssh fallback below */ }
     }
     await this.agentdDeps.ensureAgentdOnHost(id);
-    const remoteCmd = `export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; exec node "$HOME/.vibespace/agentd/current/agentd.js" --stdio`;
+    const remoteCmd = REMOTE_PRELUDE + `exec node "$HOME/.vibespace/agentd/current/agentd.js" --stdio`;
     const { DeviceManager } = require('./agentd/client.js');
     const dm = new DeviceManager({
       dataDir: this.dataDir,
@@ -873,8 +874,8 @@ class HostManager {
   async uninstallAgentTools(id) {
     const h = this.get(id);
     const rms = HostManager.AGENT_TOOLS.map((n) => `"$HOME/.vibespace/bin/${n}"`).join(' ');
-    const cmd = 'export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; '
-      + 'VS_NODE="$(command -v node 2>/dev/null)"; [ -z "$VS_NODE" ] && VS_NODE="$(ls -1 "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | sort | tail -1)"; if [ -z "$VS_NODE" ]; then for vs_c in /usr/local/bin/node /usr/bin/node /opt/homebrew/bin/node "$HOME/.local/bin/node"; do [ -x "$vs_c" ] && VS_NODE="$vs_c" && break; done; fi; if [ -n "$VS_NODE" ] && [ -f "$HOME/.vibespace/bin/vibespace-hook-register.mjs" ]; then "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" --uninstall 2>/dev/null || true; fi; '
+    const cmd = REMOTE_PRELUDE
+      + nodeFinder() + 'if [ -n "$VS_NODE" ] && [ -f "$HOME/.vibespace/bin/vibespace-hook-register.mjs" ]; then "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" --uninstall 2>/dev/null || true; fi; '
       + `rm -f ${rms}; echo VS-REMOVED`;
     const out = String(await this._ssh(h, cmd, { timeoutMs: 15000 }));
     if (!out.includes('VS-REMOVED')) throw new Error('unexpected response');
@@ -1174,7 +1175,7 @@ class HostManager {
     }
     return new Promise((resolve, reject) => {
       const child = execFile('ssh', [...this.sshArgs(h, { multiplex: true }), '--',
-        'umask 077; mkdir -p "$HOME/.vibespace/bin"; cat > "$HOME/.vibespace/bin/vibespace-usage-scan"; export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; node "$HOME/.vibespace/bin/vibespace-usage-scan"'],
+        'umask 077; mkdir -p "$HOME/.vibespace/bin"; cat > "$HOME/.vibespace/bin/vibespace-usage-scan"; ' + REMOTE_PRELUDE + 'node "$HOME/.vibespace/bin/vibespace-usage-scan"'],
         { timeout: 180000, maxBuffer: 128 * 1024 * 1024 }, (err, stdout, stderr) => {
           if (err) { this._usageHarvestAt.set(id, 0); return reject(new Error((stderr || err.message || '').toString().slice(0, 200))); }
           resolve(stdout.toString());
