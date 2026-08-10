@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.268.6
+
+- Quota popup "Resets" stats gain a live countdown suffix — `Tomorrow 3:00 · in 1d10h50m` (user request). Rides the one shared `fmtReset` formatter, so every reset line (5h / 7d / scoped weeklies / codex) gets it with zero new UI elements; suppressed inside the final 45s.
+
 ## 2.268.5
 
 - **Account lists sort by TYPE, not add-order** (user request): pools first (the umbrella identities you actually pick), then subscriptions, then API keys, name-sorted within a type — applied consistently to the Manage-Agents roster, the billing switcher, and the New Session account dropdown (divergent ordering between surfaces reads as a shuffle). The codex roster name-sorts for parity (all its entries are logins).
