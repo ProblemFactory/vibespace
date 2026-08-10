@@ -221,9 +221,12 @@ const CLAUDE_MODEL_ALIASES = [
 // LOCAL TERMINAL session here (real report: the list held Opus 4.8 —
 // once seen — but never Opus 5), and the /v1/models fetch is §ban-safety
 // opt-in. A new tier ships → add it here (same convention as the aliases).
+// No context-size claims on these labels: a full id can serve the long
+// context (a claude-opus-5 session was observed at 222k/1M under an old
+// "(200k)" label) — the status bar derives the real window from usage.
 const CLAUDE_KNOWN_MODELS = [
-  { id: 'claude-fable-5', label: 'Fable 5 (200k)' },
-  { id: 'claude-opus-5', label: 'Opus 5 (200k)' },
+  { id: 'claude-fable-5', label: 'Fable 5' },
+  { id: 'claude-opus-5', label: 'Opus 5' },
   { id: 'claude-sonnet-5', label: 'Sonnet 5' },
   { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' },
 ];
@@ -4000,7 +4003,11 @@ app.get('/api/usage-stats', (req, res) => {
 // attribution (aname frozen at scan time; pool = billed THROUGH it).
 app.get('/api/usage-stats/rid-info', (req, res) => {
   try {
-    const ev = usageHistory.eventForRid(String(req.query.rid || ''));
+    let ev = req.query.rid ? usageHistory.eventForRid(String(req.query.rid)) : null;
+    // live stdout records carry NO requestId — message.id is the join field
+    // both transports share (the 2.267.3 rule), so the popup can attribute
+    // EVERY reply, not just history-rebuilt ones.
+    if (!ev && req.query.mid) ev = usageHistory.eventForMid(String(req.query.mid));
     if (!ev) return res.json({ found: false });
     let poolName = null;
     try { poolName = ev.pool ? (accounts.get(ev.pool)?.name || null) : null; } catch { }

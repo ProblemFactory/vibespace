@@ -60,6 +60,11 @@ function handleLine(line, cur) {
   const cc = u.cache_creation || {};
   out.push(JSON.stringify({
     rid,
+    // message.id join field (2.267.3 rule — live stdout records lack
+    // requestId, so per-message billing lookups join on mid): keep field
+    // parity with the local walker or the popup can't attribute remote
+    // replies (parity-guarded twin — see test-usage-walk-parity).
+    mid: (msg.id && msg.id !== rid) ? msg.id : undefined,
     ts: Date.parse(r.timestamp) || Date.now(),
     sid: cur.sid,
     model: msg.model || null,

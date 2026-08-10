@@ -438,6 +438,7 @@ class UsageHistory {
       if (!e || !e.rid || !e.ts) continue;
       const ev = {
         rid: `h:${hostId}:${e.rid}`,
+        mid: e.mid || undefined, // message.id join field — see eventForMid
         ts: Number(e.ts) || Date.now(),
         sid: e.sid || null,
         be: 'claude',
@@ -583,6 +584,24 @@ class UsageHistory {
     for (let i = evs.length - 1; i >= 0; i--) {
       const r = evs[i].rid;
       if (typeof r === 'string' && r.startsWith('h:') && r.endsWith(suf)) return evs[i];
+    }
+    return null;
+  }
+
+  /** Join by message.id — the id BOTH transports carry (the 2.267.3 rule).
+   *  Live stdout records have NO requestId, so the popup's per-message
+   *  billing lookup joins here: ev.mid (baked since 2.267.3), or ev.rid
+   *  when the walker fell back to msg.id (records without requestId), or a
+   *  host-namespaced rid ending in the mid. */
+  eventForMid(mid) {
+    if (!mid) return null;
+    try { this.scan(); } catch { }
+    const evs = this._loadEvents();
+    const suf = ':' + mid;
+    for (let i = evs.length - 1; i >= 0; i--) {
+      const ev = evs[i];
+      if (ev.mid === mid || ev.rid === mid) return ev;
+      if (typeof ev.rid === 'string' && ev.rid.startsWith('h:') && ev.rid.endsWith(suf)) return ev;
     }
     return null;
   }
