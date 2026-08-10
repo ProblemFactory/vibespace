@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.283.0
+
+**R3 step 1 of the three-tier plan: the transcript read composite becomes ONE service** (`src/transcript-service.js` — pure refactor, zero behavior change; docs/design-three-tier.md).
+
+Reading a conversation was a composite copy-pasted per endpoint: refresh the remote cache (`?host=`) → warm the parse worker → prefer the live session's normalizer (only once `_historyLoaded`) else rebuild from the merged JSONL+buffer → answer page/turnmap/search/status/taskState — three copies of the normalizer dance and two of the host-refresh throttle lived in routes/sessions.js alone. Now `/api/session-messages`, the whole `/api/session-history-gap` seek family (info/slab/full-search/full-turnmap, incl. the NDJSON streaming search), and `/api/session-todos` all flow through `createTranscriptService` — whose method shapes ARE the future `transcript.*` device op schema: when the daemon hosts the same service next to the bytes, the orchestrator keeps calling these exact shapes, locally in-process (device #0) and remotely over the mux.
+
+Verified over the real thing: the chat-paging forensics suite (scroll compensation, teleport, gap slabs) and the attach-rescue suite (view-only, dead-transcript degradation) both green through the rerouted endpoints, plus transcript-worker and the boot smokes.
+
 ## 2.282.0
 
 **R2 of the three-tier plan: daemon worker isolation** (docs/design-three-tier.md — THE unlock for every later heavy migration).
