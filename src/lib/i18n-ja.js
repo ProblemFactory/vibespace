@@ -729,6 +729,8 @@ export default {
   "Today {time}": "今日 {time}",
   "Toggle word wrap": "折り返しを切替",
   "Tomorrow {time}": "明日 {time}",
+  "dialed in": "ダイヤルイン中",
+  "not dialed in": "未接続",
   "in {dur}": "あと {dur}",
   "resets in {dur}": "リセットまで {dur}",
   "Type a message...": "メッセージを入力…",

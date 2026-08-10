@@ -3312,6 +3312,11 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .agents-mach-acc[open] > .agents-mach-sum::before { transform: rotate(90deg); }
 .agents-mach-sum::-webkit-details-marker { display: none; }
 .agents-mach-name { font-weight: 600; }
+/* Collapsed-header health (2.268.9): dial-truth conn dot + worst-bucket
+   quota pill — visible without expanding (the probe stays lazy). */
+.agents-mach-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green, #3fb950); flex: none; }
+.agents-mach-dot.off { background: var(--red, #e55); }
+.agents-mach-quota { margin-left: auto; flex: none; font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 999px; background: color-mix(in srgb, currentColor 14%, transparent); white-space: nowrap; }
 .agents-mach-acc > .agents-machine-sec { padding: 0 10px 8px; }
 .agents-adv-tab > .agents-adv-body { display: block; padding: 4px 0; }
 

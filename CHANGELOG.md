@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.268.9
+
+- **Theme editor no longer freezes your live edits into other themes' "defaults"** (B-b2d6, adversarial-review finding): CSS custom properties inherit, and only "dark" defines every var — a partially-defined theme's missing vars fell through to the documentElement, which the live preview covers with inline overrides (and an applied custom theme covers via its stylesheet), so switching Base themes read back your own just-edited values and Save froze the pollution into the new theme. `extractThemeValues` now probes inside a `data-theme="dark"` wrapper that intercepts inheritance — missing vars resolve to real built-in defaults regardless of ambient state (mechanism verified in headless Chrome: polluted rgb(66,66,66) → real default with the wrapper).
+- Agents Machines tab: collapsed accordion headers show health at a glance (inbox follow-up) — a connection dot from the dial registry's live truth (dial/graduated machines only; plain ssh has no probe-free signal and never guesses) + the machine login's worst quota bucket as a colored pill from the cached usage snapshot. The expand-time probe stays lazy; zero Anthropic calls.
+
 ## 2.268.8
 
 - **Native OneDrive mounts actually work** (user report — first local add failed): rclone's onedrive backend refuses to create the fs without `drive_id`+`drive_type` in config (its interactive `rclone config` resolves them via Microsoft Graph; our guided flow never did, so every FRESH native add died with the cryptic "if you are upgrading from older versions of rclone" error — imported rclone.conf records only worked because the conf carried both). Now: `_resolveOneDriveDrive` (Graph `/me/drive`, region-aware endpoint) runs as a mount-time backstop whenever `driveId` is missing (honest row error on failure — an expired token says "token expired", which also surfaces the re-auth button) and after every re-auth token write-back; an explicit Drive ID is never overridden. Test: scripts/test-onedrive-resolve.mjs (8 asserts, mocked Graph).

@@ -1198,6 +1198,17 @@ export function installManageAgents(App, ctx = {}) {
         // every configured machine). Open-set remembered per device.
         let openSet;
         try { openSet = new Set(JSON.parse(localStorage.getItem('vibespace.agentsMachOpen') || '[]')); } catch { openSet = new Set(); }
+        // Collapsed-header health at a glance (2.268.9, inbox follow-up) —
+        // WITHOUT expanding (the ssh/dial probe stays lazy): a conn dot from
+        // the dial registry's live truth (dial `online` / graduated ssh
+        // `dialLive`; plain ssh has no probe-free signal → no dot, never
+        // guess) + the machine login's worst quota bucket from the cached
+        // /api/usage snapshot (local read, zero Anthropic calls).
+        try {
+          const u = await fetchJson('/api/usage');
+          if (u && !stale()) { this._accountUsage = u.accounts || this._accountUsage; this._hostOwnUsage = u.hosts || this._hostOwnUsage; this._hostAccountUsage = u.hostAccounts || this._hostAccountUsage; }
+        } catch {}
+        const pctOf = (x) => Math.min(100, Math.round(x?.usedPercent ?? ((x?.utilization || 0) * 100)));
         for (const h of hostsList) {
           const det = document.createElement('details');
           det.className = 'agents-mach-acc';
@@ -1205,7 +1216,18 @@ export function installManageAgents(App, ctx = {}) {
           if (openSet.has(h.id) || hostsList.length === 1) det.open = true;
           const sum = document.createElement('summary');
           sum.className = 'agents-mach-sum';
-          sum.innerHTML = `<span class="agents-mach-name">${escHtml(h.name)}</span><span class="agents-machine-sub">${escHtml(h.transport === 'dial' ? t('device') : `${h.user}@${h.host}`)}</span>`;
+          const live = h.transport === 'dial' ? !!h.online : (h.graduated ? !!h.dialLive : null);
+          const dot = live == null ? '' : `<span class="agents-mach-dot${live ? '' : ' off'}" data-tip="${escHtml(live ? t('dialed in') : t('not dialed in'))}"></span>`;
+          let pill = '';
+          const hu = this._hostOwnUsage?.[h.id];
+          const bs = hu ? [['5h', hu.fiveHour], ['7d', hu.sevenDay], ...(hu.scopedWeekly || []).map((sc) => [String(sc.name || '?').slice(0, 2), sc])].filter(([, x]) => x && Number.isFinite(pctOf(x))) : [];
+          if (bs.length) {
+            const [wl, wx] = bs.reduce((a, b) => (pctOf(b[1]) > pctOf(a[1]) ? b : a));
+            const wp = pctOf(wx);
+            const c = wp > 95 ? 'var(--red,#e55)' : wp > 80 ? 'var(--yellow,#e5c07b)' : 'var(--green,#3fb950)';
+            pill = `<span class="agents-mach-quota" style="color:${c}" title="${escHtml(bs.map(([l, x]) => `${l} ${pctOf(x)}%`).join(' · '))}">${escHtml(wl)} ${wp}%</span>`;
+          }
+          sum.innerHTML = `${dot}<span class="agents-mach-name">${escHtml(h.name)}</span><span class="agents-machine-sub">${escHtml(h.transport === 'dial' ? t('device') : `${h.user}@${h.host}`)}</span>${pill}`;
           det.appendChild(sum);
           const sec = mkSection('', h.id, null, det);
           const fill = () => {

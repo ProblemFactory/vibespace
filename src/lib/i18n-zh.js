@@ -730,6 +730,8 @@ export default {
   "Today {time}": "今天 {time}",
   "Toggle word wrap": "切换自动换行",
   "Tomorrow {time}": "明天 {time}",
+  "dialed in": "已拨入",
+  "not dialed in": "未拨入",
   "in {dur}": "还有 {dur}",
   "resets in {dur}": "重置还有 {dur}",
   "Type a message...": "输入消息…",
