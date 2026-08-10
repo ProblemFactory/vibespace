@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.284.0
+
+Field-test feedback batch (ten findings from the owner's first R0–R3 verification pass):
+
+- **Message-metadata billing row is honest in all three cases** (was: remote replies stuck on "not in the ledger yet" forever; records without a request id showed NOTHING). ① Remote sessions: the ledger's host harvest namespaces request ids (`h:<host>:…`) — the lookup now suffix-matches them and says "{host}'s machine login (remote ledger)"; ② not-yet-harvested remote replies say so ("harvested every ~15 min") together with the session's billing identity; ③ records with no request id fall back to the session-level billing identity instead of omitting the row.
+- **Opus 5 in the model dropdown**: the passive statusline discovery only ever learns models that served a LOCAL TERMINAL here (the cache held Opus 4.8 but never Opus 5). A known-GA baseline (Fable 5 / Opus 5 / Sonnet 5 / Haiku 4.5 full ids) now always rides the list, and every session's SERVED model (chat + remote too) feeds the discovery cache.
+- **Account switcher wording**: "logged in on X" vs "uses X's own login" was indistinguishable — now "own login held on {host}" (its own credential dir lives there) vs "is {host}'s machine login (same account)".
+- **Customize UI**: the workspace overlay actually dims now (the old `var(--bg)` 55% mix was invisible on dark themes — theme-agnostic black wash); the Taskbar position/visibility pill is BODY-FIXED and measured off the live bar rect, so docking the taskbar to the top no longer hides the pill under the toolbar rows; right-clicking the extra rows (top or bottom) opens the proper bar menu instead of the browser's native one.
+- **Extra-row sizing**: `#taskbar-row2` joins the pinned-defaults block — the same element no longer renders at different sizes in the top vs bottom extra row (the bottom row was following the taskbar's drag-resize).
+- **UI scale ranges widened**: DPI 60–200% (was 80–130), font 75–175% (was 85–140).
+
 ## 2.283.0
 
 **R3 step 1 of the three-tier plan: the transcript read composite becomes ONE service** (`src/transcript-service.js` — pure refactor, zero behavior change; docs/design-three-tier.md).

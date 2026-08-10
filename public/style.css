@@ -2111,7 +2111,10 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 /* ── Customize mode (Firefox-style chrome edit mode) ── */
 .cz-overlay {
   position: fixed; inset: 0; z-index: 9400;
-  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  /* theme-AGNOSTIC darkening (real report: the old var(--bg) 55% mix was
+     invisible on dark themes — "dim the workspace" must actually read as
+     dimmed everywhere, marking the area as not-editable) */
+  background: rgba(0, 0, 0, 0.45);
 }
 /* chrome bars rise above the overlay while editing */
 body.customize-mode #toolbar, body.customize-mode #taskbar { position: relative; z-index: 9500; }
@@ -2139,9 +2142,8 @@ body.taskbar-top #taskbar .cz-item:hover::after { top: calc(100% + 8px); bottom:
   background: var(--bg-dialog); border: 1px solid var(--border-active); border-radius: 999px;
   padding: 5px 12px; box-shadow: 0 6px 20px rgba(0,0,0,0.35); z-index: 9600; white-space: nowrap;
 }
-.cz-pill-taskbar { top: -48px; left: 50%; transform: translateX(-50%); }
-/* top-docked: the toolbar sits right below the taskbar — drop the pill past it */
-body.taskbar-top .cz-pill-taskbar { top: auto; bottom: -92px; }
+/* .cz-pill-taskbar is BODY-FIXED and positioned by measurement in
+   customize-mode.js (_positionTaskbarPill) — CSS offsets here would fight it */
 .cz-pill-sidebar { bottom: 14px; left: 50%; transform: translateX(-50%); }
 .cz-seg-wrap { display: inline-flex; align-items: center; gap: 6px; }
 .cz-seg-label { font-size: 11px; color: var(--text-secondary); font-weight: 600; }
@@ -2226,7 +2228,12 @@ body.taskbar-top .cz-panel { bottom: 32px; }
    the adaptive size vars land on :root for cross-bar hosting — pin them to
    defaults inside the toolbar + its extra row so only taskbar-hosted elements
    scale with the taskbar. */
-#toolbar, #toolbar-row2 {
+/* …and the taskbar's OWN extra row is pinned too (real report: the same
+   element sized differently in the top vs bottom extra row — #taskbar-row2
+   was missing here, so it followed the taskbar's drag-derived sizes while
+   the toolbar row stayed pinned). Extra rows are NEUTRAL zones; taskbar
+   resize scales only elements hosted in the taskbar itself. */
+#toolbar, #toolbar-row2, #taskbar-row2 {
   --taskbar-icon-size: 14px; --taskbar-icon-scale: 1; --taskbar-title-size: 10px;
   --taskbar-sub-size: 8px; --usage-pie-size: 16px; --taskbar-item-pad: 2px;
   --desktop-preview-h: 20px; --desktop-preview-w: 30px; --desktop-label-size: 8px;

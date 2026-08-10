@@ -819,7 +819,7 @@ let _stateSync = null;
 // different monitors want different scales). applyUiPrefs() runs before App
 // boots and again on every gs-menu change. Desktop-only for the zoom half
 // (mobile keeps OS scaling + the 100vh!important sidebar override intact).
-export const UI_SCALE_MIN = 80, UI_SCALE_MAX = 130, UI_FONT_MIN = 85, UI_FONT_MAX = 140;
+export const UI_SCALE_MIN = 60, UI_SCALE_MAX = 200, UI_FONT_MIN = 75, UI_FONT_MAX = 175; // widened per user request (was 80-130 / 85-140)
 let _uiScaleVal = 1;
 export function uiScale() { return _uiScaleVal; } // drag-delta compensation factor (viewport px → layout px = /uiScale())
 

@@ -1058,8 +1058,8 @@ export function installSessionLifecycle(App, ctx = {}) {
       const linked = rHostId && hostLinked(a) && (isCodex || (a.type || 'api') === 'subscription');
       const held = !linked && rHostId && hostSubHeld(a) && (a.type || 'api') === 'subscription';
       const suffix = (!isCodex && (a.type || 'api') !== 'subscription') ? ' · API'
-        : linked ? ' ' + t('· uses {host}’s own login', { host: rHostName })
-        : held ? ' ' + t('· logged in on {host}', { host: rHostName }) : '';
+        : linked ? ' ' + t('· is {host}’s machine login (same account)', { host: rHostName })
+        : held ? ' ' + t('· own login held on {host}', { host: rHostName }) : '';
       let block = subBlock(a);
       // A reason derived from the LEGACY fallback (no verdict for this host
       // yet) is a guess — say so in the tooltip rather than let a cold cache

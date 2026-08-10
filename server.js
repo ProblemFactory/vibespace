@@ -216,8 +216,37 @@ const CLAUDE_MODEL_ALIASES = [
   { id: 'sonnet[1m]', label: 'sonnet[1m] (latest, 1M context)' },
   { id: 'haiku', label: 'haiku (latest)' },
 ];
+// Known GA full model ids — the BASELINE the dropdown always carries.
+// The passive statusline discovery only learns models that have SERVED a
+// LOCAL TERMINAL session here (real report: the list held Opus 4.8 —
+// once seen — but never Opus 5), and the /v1/models fetch is §ban-safety
+// opt-in. A new tier ships → add it here (same convention as the aliases).
+const CLAUDE_KNOWN_MODELS = [
+  { id: 'claude-fable-5', label: 'Fable 5 (200k)' },
+  { id: 'claude-opus-5', label: 'Opus 5 (200k)' },
+  { id: 'claude-sonnet-5', label: 'Sonnet 5' },
+  { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' },
+];
+// Served-model passive discovery: EVERY session's assistant records name the
+// model that actually served — feed the same __models__.json the statusline
+// hook writes, so chat/remote sessions teach the dropdown too (both writers
+// preserve-merge; ingestPassiveModels picks it up within ~30s).
+const _modelsSeenRam = new Set();
+function noteModelSeen(id) {
+  if (!id || typeof id !== 'string' || id === '<synthetic>' || _modelsSeenRam.has(id)) return;
+  _modelsSeenRam.add(id);
+  try {
+    const fp = path.join(USAGE_CACHE_DIR, '__models__.json');
+    let list = [];
+    try { list = JSON.parse(fs.readFileSync(fp, 'utf-8')) || []; } catch { }
+    if (!list.some((m) => m && m.id === id)) {
+      list.push({ id, label: id.replace(/^claude-/, '').replace(/-(\d{8})$/, '').replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) });
+      fs.writeFileSync(fp, JSON.stringify(list));
+    }
+  } catch { }
+}
 const AVAILABLE_MODELS = {
-  claude: [...CLAUDE_MODEL_ALIASES],
+  claude: [...CLAUDE_MODEL_ALIASES, ...CLAUDE_KNOWN_MODELS],
   codex: [{ id: '', label: 'Default' }],
 };
 function refreshAvailableModels() {
@@ -247,7 +276,8 @@ function refreshAvailableModels() {
               const ctx = m.max_input_tokens >= 1000000 ? '1M' : m.max_input_tokens >= 200000 ? '200k' : Math.round(m.max_input_tokens / 1000) + 'k';
               return { id: m.id, label: `${m.display_name || m.id} (${ctx})` };
             });
-            AVAILABLE_MODELS.claude = [...CLAUDE_MODEL_ALIASES, ...models];
+            const known = CLAUDE_KNOWN_MODELS.filter((k) => !models.some((m) => m.id === k.id));
+            AVAILABLE_MODELS.claude = [...CLAUDE_MODEL_ALIASES, ...known, ...models];
           } else if (res.statusCode !== 200) {
             console.warn(`[models] /v1/models failed: HTTP ${res.statusCode}`);
           }
@@ -1683,6 +1713,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
             if (msg.type === 'assistant' && !msg.parent_tool_use_id && !msg.isSidechain
                 && msg.message?.model && !String(msg.message.model).startsWith('<')) {
               session._servedModel = msg.message.model;
+              try { noteModelSeen(session._servedModel); } catch { }
               // Latch a target-less lock (locked before any model was known —
               // restored sessions, pre-first-reply locks): first main-thread
               // served model becomes the target, else repin no-ops forever.

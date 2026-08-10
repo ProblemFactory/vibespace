@@ -600,8 +600,29 @@ export class CustomizeMode {
         { value: 'show', label: 'Show' }, { value: 'autohide', label: 'Auto-hide' }, { value: 'hidden', label: 'Hidden' },
       ]),
     );
-    taskbar.appendChild(pill);
-    this._cleanup.push(() => pill.remove());
+    // BODY-FIXED like the align chips (real report: switching the taskbar to
+    // Top made this pill vanish — as a taskbar child with negative offsets it
+    // landed under the toolbar rows, and any extra row changed the needed
+    // clearance). Measured off the live taskbar rect instead, immune to bar
+    // layout; repositioned by _refresh + resize like the chips.
+    pill.style.position = 'fixed';
+    document.body.appendChild(pill);
+    this._taskbarPill = pill;
+    this._positionTaskbarPill();
+    this._cleanup.push(() => { pill.remove(); this._taskbarPill = null; });
+  }
+
+  _positionTaskbarPill() {
+    const pill = this._taskbarPill;
+    const taskbar = document.getElementById('taskbar');
+    if (!pill || !taskbar) return;
+    const r = taskbar.getBoundingClientRect();
+    const taskbarTop = document.body.classList.contains('taskbar-top');
+    const ph = (pill.offsetHeight || 36) * uiScale();
+    const top = taskbarTop ? r.bottom + 8 : r.top - ph - 8;
+    pill.style.top = (Math.max(8, top) / uiScale()) + 'px';
+    const pw = pill.offsetWidth * uiScale();
+    pill.style.left = (Math.max(8, r.left + r.width / 2 - pw / 2) / uiScale()) + 'px';
   }
 
   _buildSidebarPill() {
@@ -647,7 +668,7 @@ export class CustomizeMode {
       this._alignChips.push({ target: t, chip });
       this._cleanup.push(() => chip.remove());
     }
-    const onResize = () => this._positionAlignChips();
+    const onResize = () => { this._positionAlignChips(); this._positionTaskbarPill(); };
     window.addEventListener('resize', onResize);
     this._cleanup.push(() => { window.removeEventListener('resize', onResize); this._alignChips = []; });
   }
@@ -705,6 +726,7 @@ export class CustomizeMode {
   }
 
   _refresh() {
+    this._positionTaskbarPill();
     if (!this.active) return;
     const s = this.app.settings;
     for (const meta of CHROME_ELEMENTS) {
