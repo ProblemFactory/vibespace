@@ -3357,3 +3357,13 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chat-status-model.chat-status-model-locked { display: inline-flex; align-items: center; gap: 3px; }
 .chat-status-dropdown-lock { display: flex; align-items: center; gap: 6px; }
 .chat-status-dropdown-lock svg { color: var(--text-secondary); }
+
+/* Host-scoped transition-state chips (2.272.1 campaign primitive): the ONE
+   visual language for checking / stale / unreachable across every surface
+   that talks to a machine — sidebar zones, account rosters, mounts, ports. */
+.host-state-chip { font-size: 9px; font-weight: 600; padding: 1px 6px; border-radius: 999px; white-space: nowrap; flex: none; }
+.host-state-pending { color: var(--text-dim); background: color-mix(in srgb, var(--text-dim) 14%, transparent); animation: host-chip-pulse 1.4s ease-in-out infinite; }
+.host-state-stale { color: var(--yellow, #e5c07b); background: color-mix(in srgb, var(--yellow, #e5c07b) 14%, transparent); }
+.host-state-error { color: var(--red, #e55); background: color-mix(in srgb, var(--red, #e55) 14%, transparent); }
+.host-state-ok { color: var(--green, #3fb950); background: color-mix(in srgb, var(--green, #3fb950) 14%, transparent); }
+@keyframes host-chip-pulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
