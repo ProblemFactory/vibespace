@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.276.1
+
+- Usage popup ⟳: the spin animation was applied to the BUTTON element, so its border box visibly tumbled with the icon (real report). The glyph now spins inside a static box (`.uref-glyph`); the Agents-panel refresh-all was already svg-scoped and untouched.
+
 ## 2.276.0
 
 **CS separation, for real: `hostId` becomes a parameter instead of a branch.** (docs/design-cs-unification.md — the anchor, with a per-area migration table and a counted divergence surface.)
