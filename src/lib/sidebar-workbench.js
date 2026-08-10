@@ -9,7 +9,7 @@
 //             main filter searches it; expanding renders capped pages).
 // Starred sessions float to the top of their zone.
 import { t as tr } from './i18n.js'; // sidebar cluster convention
-import { agoText, escHtml, hostStateChip, showConfirmDialog, showToast, stripCwdHostLabel } from './utils.js';
+import { agoText, escHtml, hostStateChip, showConfirmDialog, showToast, stripCwdHostLabel, sessionMatchesFilter } from './utils.js';
 
 const RECENT_MS = 7 * 86400e3;
 const HISTORY_PAGE = 60;
@@ -239,14 +239,7 @@ export function installSidebarWorkbench(Sidebar) {
     // agent fields, so e.g. "codex" listed every local codex session and NOT
     // ONE remote codex rollout — the same query silently meant different
     // things per machine.
-    _wbMatchRemote(s, f) {
-      if (!f) return true;
-      return (s.cwd || s.projDir || '').toLowerCase().includes(f)
-        || (s.name || '').toLowerCase().includes(f)
-        || (s.sessionId || '').toLowerCase().includes(f)
-        || (s.backend || 'claude').toLowerCase().includes(f)
-        || (s.hostName || '').toLowerCase().includes(f);
-    },
+    _wbMatchRemote(s, f) { return sessionMatchesFilter(s, f); },
 
     // Cross-host remote search: when the sidebar filter is active, surface
     // matching sessions from EVERY loaded remote host (skipping skipHost, which

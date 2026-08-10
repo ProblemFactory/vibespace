@@ -1,5 +1,5 @@
 import { Resizer } from './resizer.js';
-import { agoText, escHtml, createPopover, hostStateChip, showContextMenu } from './utils.js';
+import { agoText, escHtml, createPopover, hostStateChip, sessionMatchesFilter, showContextMenu } from './utils.js';
 import { t as tr } from './i18n.js';
 import { createAgentKindIcon, createBackendIcon, getAgentKindMeta, getBackendMeta, getSessionKey } from './agent-meta.js';
 import { installSidebarState } from './sidebar-state.js';
@@ -885,18 +885,7 @@ class Sidebar {
     let sessions = this._allSessions;
 
     // Text filter
-    if (f) sessions = sessions.filter(s =>
-      (s.cwd || '').toLowerCase().includes(f)
-      || (s.sessionId || '').toLowerCase().includes(f)
-      || (s.sessionKey || '').toLowerCase().includes(f)
-      || (s.name || '').toLowerCase().includes(f)
-      || (s.webuiName || '').toLowerCase().includes(f)
-      || (s.backend || '').toLowerCase().includes(f)
-      || (s.sourceKind || '').toLowerCase().includes(f)
-      || (s.agentKind || '').toLowerCase().includes(f)
-      || (s.agentRole || '').toLowerCase().includes(f)
-      || (s.agentNickname || '').toLowerCase().includes(f)
-    );
+    if (f) sessions = sessions.filter(s => sessionMatchesFilter(s, f)); // ONE matcher, shared with the remote zones
 
     // Backend / agent filter
     if (this._backendFilter.size > 0) {
