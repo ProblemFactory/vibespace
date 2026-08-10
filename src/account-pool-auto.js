@@ -115,24 +115,38 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     if (b.deadline != null) return 1;
     return b.eff - a.eff;
   });
-  const best = ranked[0];
-  if (!best) return null;
+  if (!ranked.length) return null;
 
+  // A VOLUNTARY move (soft-exhaustion at the raised hot threshold, or an EDF
+  // proactive jump) must land on a target that will not itself trip the
+  // exhaustion rule — otherwise the two tiers oscillate (real incident:
+  // Personal <10% → exhaustion → Fish; Fish current → Personal's deadline is
+  // sooner → proactive back onto the <10% account → exhaustion again, every
+  // tick, each hot re-point cold-starting BOTH sides' prompt caches). The bar
+  // applies to CANDIDATE SELECTION, not just ranked[0] — the EDF-first member
+  // may be below it while a later one qualifies.
+  const settleBar = exhaustPct + MIN_GAIN_PCT;
+  const bestSettle = ranked.find((r) => r.eff >= settleBar) || null;
   if (exhausted) {
-    // Must move somewhere better than the scraps we're on — by a REAL margin:
-    // when two members sit in the exhaustion band together, a zero-margin
-    // "strictly better" rule ping-pongs between them every evaluation tick as
-    // their remainders leapfrog (each hot re-point re-records attribution +
-    // toasts — pure noise for a ~1% gain).
-    if (best.eff <= cur.remaining + MIN_GAIN_PCT) return null;
-    return { to: best.id, toName: best.name, fromRemaining: cur.remaining, toRemaining: best.remaining, reason: 'exhausted' };
+    if (cur.remaining < SWITCH_THRESHOLD_PCT) {
+      // genuinely unusable — any meaningfully-better member beats staying,
+      // even one below the settle bar (scraps > nothing)
+      const best = ranked[0];
+      if (best.eff <= cur.remaining + MIN_GAIN_PCT) return null;
+      return { to: best.id, toName: best.name, fromRemaining: cur.remaining, toRemaining: best.remaining, reason: 'exhausted' };
+    }
+    // soft-exhausted (only the RAISED hot threshold tripped): still usable,
+    // so only move somewhere that can actually SETTLE
+    if (!bestSettle) return null;
+    return { to: bestSettle.id, toName: bestSettle.name, fromRemaining: cur.remaining, toRemaining: bestSettle.remaining, reason: 'exhausted' };
   }
   // Proactive tier (hot pools): jump to a strictly-sooner KNOWN deadline —
   // drain the soonest-expiring quota while the current target's keeps. Never
-  // jump onto unknown data proactively, and never without a real margin.
-  if (proactive && best.deadline != null && curDeadline != null && best.known
-      && curDeadline - best.deadline > PROACTIVE_MARGIN_SEC) {
-    return { to: best.id, toName: best.name, fromRemaining: cur.known ? cur.remaining : null, toRemaining: best.remaining, reason: 'edf' };
+  // jump onto unknown data, never without a real deadline margin, and never
+  // onto a member below the settle bar (the oscillation guard above).
+  if (proactive && bestSettle && bestSettle.deadline != null && curDeadline != null && bestSettle.known
+      && curDeadline - bestSettle.deadline > PROACTIVE_MARGIN_SEC) {
+    return { to: bestSettle.id, toName: bestSettle.name, fromRemaining: cur.known ? cur.remaining : null, toRemaining: bestSettle.remaining, reason: 'edf' };
   }
   return null;
 }

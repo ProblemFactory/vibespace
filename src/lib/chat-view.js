@@ -1,4 +1,4 @@
-import { copyText, escHtml, showToast, showConfirmDialog, collectDroppedFiles, showImageOverlay } from './utils.js';
+import { copyText, escHtml, showToast, showConfirmDialog, collectDroppedFiles, showImageOverlay, fetchJson } from './utils.js';
 import { installChatSeek } from './chat-view-seek.js';
 import { metric, track } from './telemetry-client.js';
 import { stripAnsi } from './highlight.js';
@@ -658,6 +658,26 @@ class ChatView {
     });
     const close = (e) => { if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener('mousedown', close, true); } };
     document.addEventListener('mousedown', close, true);
+    // Billing-account row (2.266.1, user request): resolved async from the
+    // ledger by requestId — with the pool switching accounts mid-conversation,
+    // "which account served THIS message" is per-message truth only the
+    // ledger's baked attribution can answer.
+    if (meta.requestId) {
+      fetchJson('/api/usage-stats/rid-info?rid=' + encodeURIComponent(meta.requestId)).then((r) => {
+        if (!pop.isConnected) return;
+        let val;
+        if (r?.found) {
+          val = r.aname || (r.atype === 'global' || !r.acct ? t('CLI login') : r.acct);
+          if (r.poolName) val += ` · ${t('via pool “{name}”', { name: r.poolName })}`;
+        } else {
+          val = t('not in the ledger yet');
+        }
+        const row = document.createElement('div');
+        row.className = 'msg-meta-row';
+        row.innerHTML = `<span class="msg-meta-label">${escHtml(t('Billing account'))}</span><span class="msg-meta-val">${escHtml(val)}</span>`;
+        pop.querySelector('.msg-meta-copy')?.before(row);
+      }).catch(() => { });
+    }
   }
 
   _getSessionIds() {
