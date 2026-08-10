@@ -1,7 +1,7 @@
 /**
  * MessageManager — converts raw Claude stream-json messages into normalized messages.
  *
- * Each NormalizedMessage has a stable ID ({sessionId}:{seq}), a role, status, and content blocks.
+ * Each NormalizedMessage has a stable CONTENT-DERIVED ID (see _nextId), a role, status, and content blocks.
  * Tool calls and their results are merged into single messages server-side.
  * Streaming text is modeled as repeated edits to the same message.
  *
@@ -29,7 +29,9 @@ class MessageManager {
 
   constructor(sessionId) {
     this.sessionId = sessionId;
-    this.seq = 0;
+    this.seq = 0; // rebuild belt only — ids no longer derive from it (R0, three-tier design)
+    this._rkCounts = new Map(); // record-key → messages minted from it (id suffix discriminator)
+    this._currentRk = null;
     this.messages = [];
     this.messageIndex = new Map();      // id → NormalizedMessage
     this.pendingToolCalls = new Map();   // toolUseId → { msgId, block }
@@ -37,7 +39,36 @@ class MessageManager {
     this.listeners = [];
   }
 
-  _nextId() { return `${this.sessionId}:${this.seq++}`; }
+  // R0 (docs/design-three-tier.md): ids derive from CONTENT, not a
+  // per-instance counter. A parser rebuild (server restart today; routine
+  // daemon self-upgrade once parsing moves device-side) must reproduce the
+  // SAME ids, and a device-parsed history must join a server-parsed live
+  // stream by id. Key preference: message.id (stable across the stdout and
+  // JSONL copies of one API message — the 2.74.0 dedup lesson) > record uuid
+  // (unique per JSONL record; the stdout placeholder uuid is excluded) >
+  // record-content hash. One record can mint several messages (thinking /
+  // text / tool_use blocks); a per-key counter suffixes the 2nd+ — block
+  // order is the API's content order on BOTH transports, so the suffix is
+  // transport-stable. Tool messages don't come through here at all: they key
+  // on their globally-unique toolCallId.
+  _nextId() {
+    const rk = this._currentRk || ('s' + this.seq); // s-fallback: creates outside record context
+    this.seq++;
+    const n = this._rkCounts.get(rk) || 0;
+    this._rkCounts.set(rk, n + 1);
+    return `${this.sessionId}:${rk}${n ? '.' + n : ''}`;
+  }
+
+  static recordKey(raw) {
+    const mid = raw?.message?.id;
+    if (mid && mid !== '<synthetic>') return 'm:' + mid;
+    const u = raw?.uuid;
+    if (u && !/-0{11,}1?$/.test(u)) return 'u:' + u; // stdout placeholder …-000000000001 excluded
+    let h = 0x811c9dc5; // FNV-1a over the record's own serialization —
+    const str = JSON.stringify(raw ?? null); // deterministic for identical bytes (buffer replay)
+    for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = (h * 0x01000193) >>> 0; }
+    return 'h:' + h.toString(36) + ':' + str.length;
+  }
 
   onOp(fn) { this.listeners.push(fn); }
   offOp(fn) { const i = this.listeners.indexOf(fn); if (i >= 0) this.listeners.splice(i, 1); }
@@ -203,6 +234,7 @@ class MessageManager {
     this._currentTs = raw.timestamp ? new Date(raw.timestamp).getTime() : Date.now();
     this._currentLine = Number.isFinite(raw.__line) ? raw.__line : null; // source file line (gap loads only)
     this._currentUuid = raw.uuid || null; // JSONL record uuid — needed for fork-from-here (--resume-session-at)
+    this._currentRk = MessageManager.recordKey(raw);
     switch (raw.type) {
       case 'system': return this._processSystem(raw, emit);
       case 'user': return this._processUser(raw, emit);
@@ -679,7 +711,17 @@ class MessageManager {
             this._emitHarnessTodos(emit);
           }
         }
-        const msgId = this._nextId();
+        // Tool ids key on the globally-unique toolCallId: the SAME tool_use
+        // replayed from any transport (stdout buffer, JSONL rebuild, a
+        // device-parsed history) lands on the SAME id — duplicates become
+        // no-ops instead of double cards (R0 join guarantee).
+        const msgId = `${this.sessionId}:t:${block.id}`;
+        if (this.messageIndex.has(msgId)) {
+          // already minted (replay overlap) — refresh the pending mapping so
+          // a later tool_result still resolves it, and never re-create.
+          if (!this.pendingToolCalls.has(block.id)) this.pendingToolCalls.set(block.id, { msgId, block });
+          continue;
+        }
         const msg = {
           id: msgId, role: 'tool', status: 'pending',
           content: [{ type: 'tool_call', toolCallId: block.id, toolName: block.name, input: block.input }],

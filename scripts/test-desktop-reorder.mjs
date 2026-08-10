@@ -5,7 +5,7 @@ import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs'; import path from 'node:path'; import http from 'node:http';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
-const repo = '/home/<user>/workspace/AIWorkspace/vibespace';
+const repo = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 const CHROME = ['/usr/bin/google-chrome','/usr/bin/google-chrome-stable','/usr/bin/chromium'].find(p=>fs.existsSync(p));
 if(!CHROME){ console.log('SKIP: no chrome'); process.exit(0); }
 const wt = '/tmp/vs-desk-wt';
