@@ -785,7 +785,7 @@ function sweepUsageAnchors() {
             sevenDay: g.cache.sevenDay ? { u: g.cache.sevenDay.utilization, resetsAt: g.cache.sevenDay.resetsAt } : null,
             scopedWeekly: (g.cache.scopedWeekly || []).map((s) => ({ name: s.name, u: s.utilization, resetsAt: s.resetsAt })),
           };
-          calib = predictCalib(prev, newBuckets, usageEstimator.ratesFor(identityKey), costSince);
+          calib = predictCalib(prev, newBuckets, usageEstimator.ratesFor(identityKey), costSince, (g.cache.fetchedAt - prev.fetchedAt) / 1000);
           if (calib) for (const c of Object.values(calib)) global.__vsMetric?.('usage-est-err-pct', Math.abs(c.err) * 100);
         } catch { }
       }
@@ -872,8 +872,6 @@ function markLimitBanner(session, text) {
     const hit = ClaudeCodeAdapter.parseLimitBanner(text);
     if (!hit) return;
     const key = resolveUsageKey(session);
-    const f = path.join(USAGE_CACHE_DIR, key.replace(/[^\w.-]/g, '_') + '.json');
-    let cache = {}; try { cache = JSON.parse(fs.readFileSync(f, 'utf-8')) || {}; } catch {}
     const nowSec = Math.floor(Date.now() / 1000);
     const bump = (b, fallbackResetSec) => ({
       ...(b || {}),
@@ -882,18 +880,47 @@ function markLimitBanner(session, text) {
       // expires (reset-passed ⇒ full) instead of pinning the account dead
       resetsAt: (Number(b?.resetsAt) || 0) > nowSec ? b.resetsAt : nowSec + fallbackResetSec,
     });
-    if (hit.kind === 'fiveHour') cache.fiveHour = bump(cache.fiveHour, 5 * 3600);
-    else if (hit.kind === 'sevenDay') cache.sevenDay = bump(cache.sevenDay, 24 * 3600);
-    else if (hit.kind === 'scoped') {
-      const list = Array.isArray(cache.scopedWeekly) ? cache.scopedWeekly : [];
-      const i = list.findIndex((x) => String(x?.name || '').toLowerCase() === hit.name.toLowerCase());
-      if (i >= 0) list[i] = bump(list[i], 24 * 3600);
-      else list.push({ name: hit.name, ...bump(null, 24 * 3600) });
-      cache.scopedWeekly = list;
+    const applyHit = (cache) => {
+      if (hit.kind === 'fiveHour') cache.fiveHour = bump(cache.fiveHour, 5 * 3600);
+      else if (hit.kind === 'sevenDay') cache.sevenDay = bump(cache.sevenDay, 24 * 3600);
+      else if (hit.kind === 'scoped') {
+        const list = Array.isArray(cache.scopedWeekly) ? cache.scopedWeekly : [];
+        const i = list.findIndex((x) => String(x?.name || '').toLowerCase() === hit.name.toLowerCase());
+        if (i >= 0) list[i] = bump(list[i], 24 * 3600);
+        else list.push({ name: hit.name, ...bump(null, 24 * 3600) });
+        cache.scopedWeekly = list;
+      }
+      return cache;
+    };
+    const fileFor = (id) => path.join(USAGE_CACHE_DIR, String(id).replace(/[^\w.-]/g, '_') + '.json');
+    // IDENTITY-GROUP write (2.267.0, anchor-poison root cause): an org-merged
+    // login keeps several cache files, and stamping fetchedAt=now onto ONE of
+    // them used to PROMOTE that file — week-stale sibling buckets and all —
+    // to "freshest" for the anchor sweep (real incident: banner on the idle
+    // __global__ file flapped the identity's anchors 51→19→51 and the bounce
+    // pair taught a poison rate). Base the promoted write on the identity's
+    // FRESHEST file, and mark the same bucket dead in every sibling WITHOUT
+    // touching its fetchedAt (a stale file must never gain freshness here).
+    const ids = usageIdentityAccountIds(key);
+    let base = null, baseAt = -1;
+    for (const id of ids) {
+      try { const c = JSON.parse(fs.readFileSync(fileFor(id), 'utf-8')) || {}; if ((Number(c.fetchedAt) || 0) > baseAt) { baseAt = Number(c.fetchedAt) || 0; base = c; } } catch {}
     }
+    const cache = applyHit(base ? { ...base } : {});
     cache.fetchedAt = Date.now(); cache.source = 'limit-banner';
     fs.mkdirSync(USAGE_CACHE_DIR, { recursive: true });
+    const f = fileFor(key);
     fs.writeFileSync(f + '.tmp', JSON.stringify(cache)); fs.renameSync(f + '.tmp', f);
+    for (const id of ids) {
+      if (id === key) continue;
+      try {
+        const f2 = fileFor(id);
+        let c2; try { c2 = JSON.parse(fs.readFileSync(f2, 'utf-8')) || null; } catch { c2 = null; }
+        if (!c2) continue; // never CREATE a sibling file here
+        applyHit(c2); // fetchedAt deliberately untouched
+        fs.writeFileSync(f2 + '.tmp', JSON.stringify(c2)); fs.renameSync(f2 + '.tmp', f2);
+      } catch {}
+    }
     global.__vsEvent?.('usage-limit-banner-marked', `${key}:${hit.kind}`);
     maybePoolAutoSwitch(session); // freshest possible exhaustion signal — act now
   } catch (e) { console.warn('[usage] banner mark failed:', e.message); }
@@ -1592,7 +1619,14 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
             // the fork flag stay vetoed).
             const implicitFork = session._resumeSpawn && !session._sawFirstId
               && session.backendSessionId && msg.session_id !== session.backendSessionId;
-            if (typeof msg.session_id === 'string' && msg.session_id) session._sawFirstId = true;
+            if (typeof msg.session_id === 'string' && msg.session_id && !session._sawFirstId) {
+              session._sawFirstId = true;
+              // persist the disarm for resumes — a restart between first-id and
+              // a later id-bearing line must not re-arm implicit-fork adoption
+              if (session._resumeSpawn && session.sockName) {
+                try { writeSessionMeta(session.sockName, { ...(readSessionMeta(session.sockName) || {}), sawFirstId: true }); } catch {}
+              }
+            }
             if (typeof msg.session_id === 'string' && msg.session_id
                 && (!session.backendSessionId || ((session._forkRequested || implicitFork) && session.backendSessionId !== msg.session_id))) {
               if (session.backendSessionId) {
@@ -2390,6 +2424,8 @@ function restoreSessions() {
       _pendingEditor: meta.pendingEditor || null, // Ctrl+G edit in flight — re-broadcast on attach
       _prevGoal: meta.prevGoal || null, // /goal resume works across restarts
       _forkRequested: !!meta.forkRequested, // pending fork-id adoption survives restart
+      _resumeSpawn: !!meta.resumeSpawn, // implicit-fork adoption stays armed across restarts (B-b87b)
+      _sawFirstId: !!meta.sawFirstId,
       _dialDeviceId: meta.dialDeviceId || null,
       _bridgePort: meta.bridgePort || null,
       _dialReversePort: meta.dialReversePort || null, // VIBESPACE_API back-tunnel, re-owned at the next dial-in (audit #49)
@@ -2677,7 +2713,14 @@ async function readoptOrphanKeeperSessions() {
 // ["code","cursor","windsurf","codium"] — if it is, it does NOT clear the screen.
 // So we create a fake "code" wrapper script and set EDITOR to its path.
 // This tricks Claude Code into treating our editor as a GUI editor.
-const EDITOR_DIR = path.join(__dirname, 'data', 'bin');
+// The tools dir (agent CLIs, PATH-prepended into sessions) and the editor
+// helper are SEPARATE dirs since B-b87b: the fake `code` on the session PATH
+// shadowed a real VS Code `code` binary for every local shell/claude/codex
+// terminal (a `code file.txt` hung forever waiting for the Ctrl+G signal).
+// EDITOR= stays the absolute path, so Ctrl+G is unaffected; only PATH
+// resolution loses the fake. (Remote already ships it to ~/.vibespace/editor.)
+const AGENT_BIN_DIR = path.join(__dirname, 'data', 'bin');
+const EDITOR_DIR = path.join(AGENT_BIN_DIR, 'editor');
 const EDITOR_CMD = path.join(EDITOR_DIR, 'code'); // named "code" to match GUI editor check
 
 function createEditorHelper() {
@@ -2700,6 +2743,9 @@ while [ ! -f "\$SIGNAL" ]; do sleep 0.2; done
 rm -f "\$SIGNAL"
 `;
   fs.writeFileSync(EDITOR_CMD, script, { mode: 0o755 });
+  // pre-B-b87b installs left the fake at data/bin/code — still on the session
+  // PATH; remove it or the shadow survives the move
+  try { fs.unlinkSync(path.join(AGENT_BIN_DIR, 'code')); } catch {}
 }
 createEditorHelper();
 
@@ -3622,6 +3668,18 @@ async function syncRemoteGroupCtx(h, g) {
     const home = await hosts.homeDir(h);
     if (!home) return;
     const rdir = `${home}/.vibespace/ctx/${g.id}`;
+    if (h.transport === 'dial') {
+      // DIAL ctx sync (B-b87b): this function was ssh-only (sshArgs THROWS
+      // for dial) while remoteCtxBaseFor translated ctx paths for EVERY
+      // remote session — dial agents were taught file paths that never
+      // existed. Per-file newer-wins over the device link, content-hashed so
+      // an echo can never ping-pong (fsWrite can't preserve mtimes; equal
+      // sha ⇒ skip both directions). Same semantics as the rsync pair
+      // otherwise: never deletes, .vibespace/ excluded, bounded (≤400 files,
+      // ≤2MB each).
+      await syncDialGroupCtx(h, g, rdir);
+      return;
+    }
     await hosts._ssh(h, `mkdir -p "${rdir}"`);
     const e = hosts.sshCmd(h);
     const local = g.contextDir.replace(/\/+$/, '') + '/';
@@ -3635,6 +3693,71 @@ async function syncRemoteGroupCtx(h, g) {
     await rsync([...opts, remote, local]); // pull newer remote artifacts back
   } catch (e) { console.warn('[ctx-sync]', h.name, g.id, e.message); }
   finally { _ctxSyncBusy.delete(key); }
+}
+// Dial half of the ctx sync (see the branch above). One inventory probe
+// (mtime+sha per file, GNU-else-BSD stat, sha256sum-else-shasum), then
+// per-file fsWrite pushes / fsReadRange pulls only where content differs and
+// the other side is strictly newer.
+async function syncDialGroupCtx(h, g, rdir) {
+  const shqS = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+  const dm = await hosts.deviceBounded(h.id, 15000);
+  if (!dm) throw new Error('device offline');
+  const CAP = 2 * 1024 * 1024, MAXF = 400;
+  const local = g.contextDir.replace(/\/+$/, '');
+  const inv = await dm.runCmd('sh', ['-c',
+    `mkdir -p ${shqS(rdir)}; cd ${shqS(rdir)} && find . -type f ! -path './.vibespace/*' 2>/dev/null | while IFS= read -r f; do ` +
+    `printf '%s\\t%s\\t%s\\n' "$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo 0)" ` +
+    `"$( (sha256sum "$f" 2>/dev/null || shasum -a 256 "$f" 2>/dev/null) | cut -d' ' -f1)" "$f"; done`], { timeoutMs: 25000 });
+  const remote = new Map(); // rel → {mt, sha}
+  for (const line of String(inv?.stdout || '').split('\n')) {
+    const parts = line.split('\t');
+    if (parts.length < 3) continue;
+    const rel = parts.slice(2).join('\t').replace(/^\.\//, '');
+    if (rel) remote.set(rel, { mt: parseInt(parts[0]) || 0, sha: parts[1] || '' });
+  }
+  const localFiles = [];
+  const walk = (dir, rel) => {
+    let ents = []; try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of ents) {
+      if (e.name === '.vibespace') continue;
+      const p = path.join(dir, e.name), r = rel ? rel + '/' + e.name : e.name;
+      if (e.isDirectory()) walk(p, r);
+      else if (e.isFile() && localFiles.length < MAXF) {
+        try {
+          const st = fs.statSync(p);
+          if (st.size <= CAP) localFiles.push({ p, r, mt: Math.floor(st.mtimeMs / 1000), size: st.size });
+        } catch { }
+      }
+    }
+  };
+  walk(local, '');
+  const crypto = require('crypto');
+  const shaOf = (p) => { try { return crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex'); } catch { return null; } };
+  const mkdirs = new Set();
+  const localByRel = new Map(localFiles.map((f) => [f.r, f]));
+  for (const f of localFiles) {
+    const rm = remote.get(f.r);
+    f.sha = shaOf(f.p);
+    if (!f.sha) continue;
+    if (rm && rm.sha === f.sha) continue; // identical — nothing to move either way
+    if (rm && rm.mt > f.mt + 1) continue; // remote strictly newer — the pull pass owns it
+    const dir = path.posix.dirname(`${rdir}/${f.r}`);
+    if (dir !== rdir && !mkdirs.has(dir)) { try { await dm.fsMkdir(dir); } catch { } mkdirs.add(dir); }
+    try { await dm.fsWrite(`${rdir}/${f.r}`, fs.readFileSync(f.p)); } catch { }
+  }
+  for (const [rel, rm] of remote) {
+    const lf = localByRel.get(rel);
+    if (lf && lf.sha && lf.sha === rm.sha) continue;
+    if (lf && lf.mt >= rm.mt - 1) continue; // local same-age-or-newer — push pass owned it
+    const lp = path.resolve(local, rel);
+    if (lp !== local && !lp.startsWith(local + path.sep)) continue; // traversal guard on remote-supplied rel
+    try {
+      const r = await dm.fsReadRange(`${rdir}/${rel}`, 0, CAP + 1);
+      if (!r?.data || r.data.length > CAP) continue;
+      fs.mkdirSync(path.dirname(lp), { recursive: true });
+      fs.writeFileSync(lp, r.data);
+    } catch { }
+  }
 }
 // Groups a session belongs to that have a syncable context folder.
 function ctxGroupsOf(session, id) {
@@ -4519,7 +4642,7 @@ app.get('/api/hosts/:id/backend-status', async (req, res) => {
 app.get('/api/hosts/:id/agent-tools', async (req, res) => {
   try {
     const st = await hosts.agentToolsStatus(req.params.id);
-    const toolDir = path.dirname(EDITOR_CMD);
+    const toolDir = AGENT_BIN_DIR;
     const crypto = require('crypto');
     for (const [n, t] of Object.entries(st.tools)) {
       let local = null;
@@ -4534,7 +4657,7 @@ app.post('/api/hosts/:id/agent-tools/install', async (req, res) => {
   // Same master-switch guard as the local /api/agent-hooks/install — the
   // remote twin must not silently contradict a pristine-CLI state either.
   if (!integrationEnabled()) return res.status(400).json({ error: 'VibeSpace integration is disabled (Settings → Integration → master switch). Enable it first.' });
-  try { res.json({ success: true, ...(await hosts.installAgentTools(req.params.id, path.dirname(EDITOR_CMD))) }); }
+  try { res.json({ success: true, ...(await hosts.installAgentTools(req.params.id, AGENT_BIN_DIR)) }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.post('/api/hosts/:id/agent-tools/uninstall', async (req, res) => {
@@ -5126,7 +5249,7 @@ registerWsHandler(wss, {
   readLayouts, writeLayouts, getSyncStore, serverSetting, integrationEnabled,
   sessionCounterRef, createSessionMessages,
   SOCKETS_DIR, BUFFERS_DIR, PTY_WRAPPER, CHAT_WRAPPER,
-  NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, PORT, X_ENV,
+  NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV,
   adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
   accounts, scheduleCtxSync, activeSessionsPayload,
   USAGE_STATUSLINE_CMD, userStatuslineCmd,

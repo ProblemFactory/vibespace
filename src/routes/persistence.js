@@ -355,6 +355,22 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     res.json({ success: true });
   });
 
+  // Merge-only write (B-b87b clobber belt): user-state is full-doc
+  // last-write-wins with 10+ unguarded mutation sites — a tab acting on a
+  // STALE mirror (open all day, missed broadcasts) used to clobber every key
+  // it never touched (stars, renames, configs from other tabs). The client
+  // now sends only the top-level keys its mutation CHANGED; unchanged keys
+  // can no longer travel, so a stale tab's damage is bounded to the key it
+  // actually edited (same-key races stay last-write-wins, the documented
+  // residual until a rev protocol lands).
+  router.patch('/api/user-state', (req, res) => {
+    const data = req.body;
+    if (!data || typeof data !== 'object') return res.status(400).json({ error: 'Expected object' });
+    const cur = readUserState();
+    writeUserState({ ...cur, ...data });
+    res.json({ success: true });
+  });
+
   // ── Settings ──
   const SETTINGS_FILE = path.join(dataDir, 'settings.json');
   let _settingsCache = null;

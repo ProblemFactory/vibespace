@@ -81,6 +81,16 @@ function extractPairs(lines, opts = {}) {
   for (const l of lines || []) if (l && l.fetchedAt) distinctIds.add(l.accountId ?? '__global__');
   const out = {};
   const add = (key, du, cost) => { (out[key] = out[key] || []).push({ du, cost }); };
+  // BOUNCE-BACK taint (2.267.0, real poison caught in the Personal Max calib
+  // stream): a stale sibling cache file briefly promoted to freshest anchors a
+  // WEEK-OLD reading — the u-DECREASE pair into it is already voided by the
+  // anomaly guard below, but the RECOVERY pair out of it (stale→fresh, e.g.
+  // fable 19%→51% over $1.68) read as a huge du for near-zero cost and taught
+  // a ~30%-hot rate (= the user-visible systematic overestimate). An anomalous
+  // reading poisons BOTH its incoming and outgoing pair: record the anomalous
+  // anchor's fetchedAt per bucket and skip any pair BASED on it. Lines append
+  // chronologically, so the decrease pair is always seen before the bounce.
+  const tainted = {}; // key → Set<fetchedAt of the anomalous anchor>
   for (const l of lines || []) {
     if (!l || !l.prevFetchedAt || !l.costSince) continue;
     if (distinctIds.size > 1 && !Array.isArray(l.accountIds)) continue; // legacy under-counted pair
@@ -90,6 +100,7 @@ function extractPairs(lines, opts = {}) {
     let liveCost = null; // lazily recomputed once per pair when costFn given
     const pairBucket = (key, b0, b1) => {
       if (!b0 || !b1) return;
+      if (tainted[key]?.has(base.fetchedAt)) return; // recovery from an anomalous base
       const u0 = normU(b0.u), u1 = normU(b1.u);
       if (u0 == null || u1 == null) return;
       // AT-CAP readings are CENSORED data: a bucket clipped at 100% (the
@@ -108,7 +119,7 @@ function extractPairs(lines, opts = {}) {
       // with real cost would bias the rate low).
       if (key.startsWith('scoped:') && b0.asOf && b1.asOf && b0.asOf === b1.asOf) return;
       let du = u1 - u0;
-      if (du < -0.02) return; // anomalous decrease without a reset change
+      if (du < -0.02) { (tainted[key] = tainted[key] || new Set()).add(l.fetchedAt); return; } // anomalous decrease without a reset change — and the NEXT pair off this anchor is the bounce-back
       if (du < 0) du = 0;
       if (opts.costFn && liveCost === null) { try { liveCost = opts.costFn(base.fetchedAt, l.fetchedAt) || null; } catch { liveCost = null; } }
       // A ZERO live total with a non-zero recorded snapshot means the ledger
@@ -240,7 +251,7 @@ function overlayCache(rawCache, est) {
 // actual logged into the anchor record itself, offline-analyzable forever).
 // Reset-crossed buckets are skipped (prediction across a roll is a different
 // model — don't pollute the calibration record with it).
-function predictCalib(prevAnchor, newBuckets, rates, costSince) {
+function predictCalib(prevAnchor, newBuckets, rates, costSince, spanSec = 0) {
   if (!prevAnchor?.buckets || !newBuckets || !rates || !costSince) return null;
   const out = {};
   const one = (key, b0, b1) => {
@@ -248,8 +259,18 @@ function predictCalib(prevAnchor, newBuckets, rates, costSince) {
     if (!r || !b0 || !b1) return;
     const u0 = normU(b0.u), act = normU(b1.u);
     if (u0 == null || act == null) return;
+    // Honesty guards (2.267.0 — the calib stream carried p100/a0 rows across
+    // 5h rolls and p5/a100 banner marks, drowning the real error signal it
+    // exists to expose): mirror extractPairs — at-cap readings carry no
+    // prediction information; a one-sided/absent resetsAt disarms the
+    // roll-crossing guard (skip those pairs outright — calib prefers
+    // precision over coverage); a span exceeding the window length has
+    // definitionally crossed a reset.
+    if (u0 >= 0.995 || act >= 0.995) return;
     const r0 = Number(b0.resetsAt) || 0, r1 = Number(b1.resetsAt) || 0;
-    if (r0 && r1 && Math.abs(r0 - r1) > 120) return;
+    if (!r0 || !r1) return;
+    if (Math.abs(r0 - r1) > 120) return;
+    if (spanSec && spanSec > (key === 'fiveHour' ? 5 * 3600 : WEEK_SEC)) return;
     const c = costForKey(key, costSince);
     if (c == null) return;
     const pred = Math.min(1.2, u0 + r.rate * c);

@@ -3,7 +3,7 @@ import { ChatView } from './chat-view.js';
 import { track, metric } from './telemetry-client.js';
 import { t } from './i18n.js';
 import { TerminalSession } from './terminal.js';
-import { escHtml, fetchJson, showConfirmDialog, showContextMenu, showToast, stripCwdHostLabel } from './utils.js';
+import { escHtml, estDisplayPair, fetchJson, showConfirmDialog, showContextMenu, showToast, stripCwdHostLabel } from './utils.js';
 
 export function installSessionLifecycle(App, ctx = {}) {
   Object.assign(App.prototype, {
@@ -857,17 +857,32 @@ export function installSessionLifecycle(App, ctx = {}) {
     // ellipsized, suffix dim) + `.bsw-usage` (nowrap fixed cluster, tabular
     // numbers) — and `.context-menu:has(.bsw-usage)` pins the menu width, so
     // every row renders on ONE line with the usage column right-aligned.
-    const usageHint = (u) => {
-      if (!u) return '';
-      const f = pctOf(u.fiveHour), s7 = pctOf(u.sevenDay);
+    const usageHint = (u, est) => {
+      if (!u && !est) return '';
+      u = u || {};
+      // Dead-reckoned CURRENT view (B-b87b: this menu showed the raw cached
+      // reading while every other surface — popup/taskbar/roster — shows the
+      // estimate; a stale reading here contradicted them and mis-informed the
+      // exact decision this menu exists for). estDisplayPair = the shared
+      // roll-aware discriminator; an estimated value renders dash-underlined.
+      const eff = (raw, e) => {
+        const pair = estDisplayPair(raw, e);
+        if (pair.estPct != null) return { p: pair.estPct, est: true };
+        const p = pctOf(raw);
+        return p == null ? null : { p, est: false };
+      };
+      const f = eff(u.fiveHour, est?.fiveHour), s7 = eff(u.sevenDay, est?.sevenDay);
       // Scoped buckets (e.g. the Fable weekly cap) — same 2-char short label
       // as the roster donuts ('Fa 41%').
-      const scoped = (u.scopedWeekly || []).map((sc) => [String(sc.name || '?').slice(0, 2), pctOf(sc)]).filter(([, p]) => p != null);
+      const scoped = (u.scopedWeekly || []).map((sc) => {
+        const e = (est?.scopedWeekly || []).find((x) => String(x?.name || '').toLowerCase() === String(sc?.name || '').toLowerCase());
+        return [String(sc.name || '?').slice(0, 2), eff(sc, e)];
+      }).filter(([, v]) => v != null);
       if (f == null && s7 == null && !scoped.length) return '';
       const age = u.fetchedAt ? Math.round((Date.now() - u.fetchedAt) / 60000) : null;
       const ageTxt = age != null && age > 5 ? escHtml(age < 100 ? t('{n}m', { n: age }) : t('{n}h', { n: Math.round(age / 60) })) : '';
-      const seg = (k, p) => `<span class="bsw-seg"><span class="bsw-k">${escHtml(k)}</span>${pctHtml(p)}</span>`;
-      return `<span class="bsw-usage">${seg('5h', f)}${seg('7d', s7)}${scoped.map(([l, p]) => seg(l, p)).join('')}${ageTxt ? `<span class="bsw-age">${ageTxt}</span>` : ''}</span>`;
+      const seg = (k, v) => (v == null ? '' : `<span class="bsw-seg${v.est ? ' bsw-est' : ''}"><span class="bsw-k">${escHtml(k)}</span>${pctHtml(v.p)}</span>`);
+      return `<span class="bsw-usage">${seg('5h', f)}${seg('7d', s7)}${scoped.map(([l, v]) => seg(l, v)).join('')}${ageTxt ? `<span class="bsw-age">${ageTxt}</span>` : ''}</span>`;
     };
     const rowHtml = (nameText, subText, usage) =>
       `<span class="bsw-name">${escHtml(nameText)}${subText ? `<span class="bsw-sub">${escHtml(subText)}</span>` : ''}</span>` + (usage || '');
@@ -888,7 +903,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       // labelHtml contract: every text part escHtml'd inside rowHtml; only the
       // usage spans carry markup (see utils.showContextMenu).
       labelHtml: rowHtml((currentId === null ? '✓ ' : '') + cliLabel, helperActive ? ' · apiKeyHelper (API)' : '',
-        usageHint(rHostId ? this._hostOwnUsage?.[rHostId] : this._rateLimit)),
+        usageHint(rHostId ? this._hostOwnUsage?.[rHostId] : this._rateLimit, rHostId ? null : this._usageEstimates?.__global__)),
       action: () => { if (currentId !== null) doSwitch('subscription', cliLabel); },
     });
     if (helperActive) {
@@ -911,7 +926,11 @@ export function installSessionLifecycle(App, ctx = {}) {
       // instead of "CLI login @ host" (natural's sixth incident: a successful
       // linked switch READ as failed because the identity degraded to the
       // sentinel). The old client-side sentinel mapping predates the rescue.
-      items.push({ labelHtml: rowHtml((cur ? '✓ ' : '') + a.name, suffix, usageHint(usageFor(a))), action: () => { if (!cur) doSwitch(a.id, a.name); } });
+      // estimates key on the LOCAL passive-cache identity — host-login /
+      // host-held rows read a host-side cache no local estimator covers
+      const estA = rHostId ? null
+        : (this._usageEstimates?.[a.id] || (this._usageGlobal?.accountId === a.id ? this._usageEstimates?.__global__ : null));
+      items.push({ labelHtml: rowHtml((cur ? '✓ ' : '') + a.name, suffix, usageHint(usageFor(a), estA)), action: () => { if (!cur) doSwitch(a.id, a.name); } });
     }
     let menuEl;
     if (anchor && typeof anchor.getBoundingClientRect === 'function') {

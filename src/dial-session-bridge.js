@@ -109,7 +109,15 @@ class DialSessionBridge {
             });
             const ready = await handle.ready;
             handle.onData = (buf) => { try { mux.data(chan, buf); } catch { } };
-            handle.onExit = () => { /* the _remote_exit sentinel rides the byte stream */ };
+            // A real CHILD exit arrives as the _remote_exit sentinel in the
+            // byte stream — reaching onExit here means the DEVICE LINK died
+            // (DeviceManager's mux.onDead fires s.onExit(-1) on every open
+            // handle). Discarding it froze dial chat permanently after any
+            // link drop (B-b87b CRITICAL): the attach client kept a healthy
+            // loopback socket to a corpse, input written into the void. Tear
+            // the loopback DOWN so the attach client dies and chat-wrapper's
+            // backoff respawns it against a re-dialed device.
+            handle.onExit = () => { try { mux.destroy?.(); } catch { } try { sock.destroy(); } catch { } };
             mux.control({ op: 'pipe-session-open', chan, pid: ready.pid, existing: !!ready.existing, exited: ready.exited });
           } catch (e) {
             mux.control({ op: 'session-error', chan, error: e.message });

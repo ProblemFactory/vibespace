@@ -175,6 +175,15 @@ class SettingsManager {
   }
 
   async _save() {
+    // B-b87b CRITICAL: this never nulled _saveTimer, so after the FIRST local
+    // settings change the echo-revert guard (applyRemote/refetch check
+    // `this._saveTimer`) stayed armed FOREVER — the tab silently stopped
+    // receiving every other client's settings changes until reload. Release
+    // the guard when the save completes, but only if no NEWER save was
+    // scheduled while the POST was in flight (that save's own finally
+    // releases; the guard must cover the whole in-flight window — the
+    // 2.177.0 stale-echo class).
+    const myTimer = this._saveTimer;
     const data = this.toJSON();
     // Always write to localStorage as backup
     try { localStorage.setItem('webui-settings', JSON.stringify(data)); } catch {}
@@ -185,7 +194,9 @@ class SettingsManager {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       });
-    } catch {}
+    } catch {} finally {
+      if (this._saveTimer === myTimer) this._saveTimer = null;
+    }
   }
 }
 
