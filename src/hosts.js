@@ -19,6 +19,7 @@ const crypto = require('crypto');
 const { REMOTE_PRELUDE, nodeFinder } = require('./remote-shell.js');
 const { execFile } = require('child_process');
 const { claimJsonls, cwdToProjectDir } = require('./session-store');
+const { nameFromUserLine } = require('./discovery-facts');
 const { classifyPrivateKey } = require('./ssh-key-format');
 
 const SSH_BASE_OPTS = [
@@ -1412,16 +1413,11 @@ class HostManager {
           // content is either a plain string ("content":"...") or an array of
           // blocks ("content":[{"type":"text","text":"..."}]) — support both.
           // The line may be truncated at 1500 bytes.
-          const seg = line.slice(t + 1);
-          const m = seg.match(/"content":"((?:[^"\\]|\\.)*)"/) || seg.match(/"text":"((?:[^"\\]|\\.)*)"/);
-          if (m) {
-            let name = null;
-            try { name = JSON.parse('"' + m[1] + '"'); } catch { name = m[1]; }
-            name = (name || '').replace(/\s+/g, ' ').trim();
-            // first REAL message wins (multiple N lines per file now) — skip
-            // synthetic <…>-tag context/reminders and slash-command echoes.
-            if (name && !name.startsWith('<') && !name.startsWith('/') && !heads.get(fp)?.name) heads.set(fp, { ...(heads.get(fp) || {}), name: name.slice(0, 80) });
-          }
+          // ONE naming rule (discovery-facts, 2.278.0) — this parser used to
+          // whitespace-collapse the whole message while local took the first
+          // line: the same session named differently local vs remote.
+          const name = nameFromUserLine(line.slice(t + 1));
+          if (name && !heads.get(fp)?.name) heads.set(fp, { ...(heads.get(fp) || {}), name });
         }
       }
     }

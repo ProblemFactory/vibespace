@@ -10,6 +10,7 @@
 'use strict';
 
 const fs = require('fs');
+const { extractTailIds, pidLooksClaude } = require('./../discovery-facts.js');
 const os = require('os');
 const path = require('path');
 const net = require('net');
@@ -821,6 +822,10 @@ function serveConnection(sock) {
               const pid = Number(f.slice(0, -5));
               let alive = false; try { process.kill(pid, 0); alive = true; } catch { }
               if (!alive) continue;
+              // PID-reuse guard (discovery-facts, 2.278.0): liveness alone let
+              // a recycled pid surface a phantom "running" session — the hole
+              // the LOCAL sweep closed years ago and this snapshot never had.
+              if (!pidLooksClaude(pid)) continue;
               try { locks.push({ pid, ...JSON.parse(fs.readFileSync(path.join(home, '.claude', 'sessions', f), 'utf-8')) }); } catch { }
             }
           } catch { }
@@ -862,9 +867,7 @@ function serveConnection(sock) {
                 const tailStart = Math.max(0, j.size - 65536);
                 const tailB = Buffer.alloc(j.size - tailStart);
                 fs.readSync(fd, tailB, 0, tailB.length, tailStart);
-                const ids = [...tailB.toString('utf-8').matchAll(/"sessionId":"([^"]+)"/g)].map((m) => m[1]);
-                const uniq = []; for (const idv of ids) { if (uniq[uniq.length - 1] !== idv) uniq.push(idv); }
-                j.tailIds = uniq.slice(-8);
+                j.tailIds = extractTailIds(tailB.toString('utf-8')); // ONE rule (discovery-facts)
               } finally { fs.closeSync(fd); }
             } catch { }
           }

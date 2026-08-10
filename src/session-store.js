@@ -7,6 +7,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { execFileSync, execFile } = require('child_process');
+const { extractTailIds, nameFromUserRecord } = require('./discovery-facts');
 const { readJsonlBounded } = require('./adapters/codex');
 
 const SESSIONS_DIR = path.join(os.homedir(), '.claude', 'sessions');
@@ -174,11 +175,10 @@ function readJsonlTailIds(fp, bytes = 65536) {
       const nl = text.indexOf('\n');
       if (nl >= 0) text = text.slice(nl + 1);
     }
-    const ids = [];
-    const re = /"sessionId":"([\w-]+)"/g;
-    let m;
-    while ((m = re.exec(text))) ids.push(m[1]);
-    return ids;
+    // ONE tail-id rule (discovery-facts, 2.278.0): uniq-collapsed runs,
+    // last 8 — the semantics the ssh script and daemon snapshot always had;
+    // the full-list local variant gave claimJsonls a different mention window.
+    return extractTailIds(text);
   } catch { return null; } finally {
     if (fd !== null) { try { fs.closeSync(fd); } catch {} }
   }
@@ -416,17 +416,12 @@ function extractSessionMeta(filePath) {
             const d = JSON.parse(line);
             if (!cwd && d.cwd) cwd = d.cwd;
             if (d.type === 'user' && !name) {
-              const msg = d.message;
-              if (msg?.content) {
-                const content = Array.isArray(msg.content)
-                  ? (msg.content.find(c => c.type === 'text')?.text || '')
-                  : String(msg.content);
-                const cand = content.split('\n')[0].substring(0, 80).trim();
-                // skip synthetic first turns — an injected <vibespace-task-context>/
-                // <system-reminder> or a slash-command echo isn't the session's name;
-                // keep scanning for the first REAL user message (matches remote).
-                if (cand && !cand.startsWith('<') && !cand.startsWith('/')) name = cand;
-              }
+              // ONE naming rule for every machine (discovery-facts, 2.278.0):
+              // first non-empty line of the first REAL user message — the
+              // remote parser used to whitespace-collapse the WHOLE message,
+              // so one session could carry two names depending on where it ran.
+              const cand = nameFromUserRecord(d);
+              if (cand) name = cand;
             }
           } catch {}
         }
