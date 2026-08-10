@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// dedupWebuiSockets — restore-time conversation dedup (2.185.3, real xingweil
+// dedupWebuiSockets — restore-time conversation dedup (2.185.3, real owner
 // "重复session" report). A plain `claude --resume` REUSES the conversation id,
 // so a resume of a session whose claude had already died mints a SECOND dtach
-// session for the SAME claudeSessionId → two sidebar cards (walter's local
+// session for the SAME claudeSessionId → two sidebar cards (userW's local
 // double-writer class). restoreSessions keeps ONE socket per conversation.
 // Run: node scripts/test-dedup-sockets.mjs
 import { createRequire } from 'node:module';

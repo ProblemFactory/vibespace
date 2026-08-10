@@ -2,7 +2,7 @@
 
 > **⚠ SUPERSEDED IN PART by the 2.39.0 concept refactor — read `docs/design-task-refactor.md` first.** This doc describes the ORIGINAL P1–P4 model (a "Task" with a status). In 2.39.0 the code's "Task" was recognized as the user's **Task Group (岗位)** and a session as the real "Task": status moved to the SESSION (+`done`), Task Groups lost status (archive only), belonging became live many-to-many, and `TaskManager`/`tasks.json` → `TaskGroupManager`/`task-groups.json`. Where this doc says "task status active/paused/blocked/done", "single context task", or `session._taskId`, the refactor changed it. Wire names (JSON fields, API paths, `tasks-updated`, CLI commands) were kept for compatibility.
 
-Status: **P1–P4 SHIPPED** (2.30.0→2.34.0, all 2026-07-05). Injection is **HOOK-ONLY** — VibeSpace never rewrites the user's message (an earlier first-message approach was removed as unstable, per user directive). `vibespace-hook.mjs` is registered for BOTH `SessionStart` (task context) and `UserPromptSubmit` (first-prompt context fallback + status-override notices) on both harnesses; hook output is ONLY the nested `hookSpecificOutput` shape (Codex's schema is `additionalProperties:false`). VERIFIED backend reality: **Claude fires + injects hooks** (terminal + chat, local + remote); **Codex app-server runs hook commands but does NOT inject their output** (codex-cli 0.142.5) → codex chat auto-context awaits Codex app-server hook-injection. P3 remote (ssh reverse tunnel + tool/hook distribution to `~/.vibespace/bin` + remote registration) and P4 (repo export/import) shipped 2.34.0. Design agreed 2026-07-05; supersedes the shelved walter `feat/task-centric` approach (see below).
+Status: **P1–P4 SHIPPED** (2.30.0→2.34.0, all 2026-07-05). Injection is **HOOK-ONLY** — VibeSpace never rewrites the user's message (an earlier first-message approach was removed as unstable, per user directive). `vibespace-hook.mjs` is registered for BOTH `SessionStart` (task context) and `UserPromptSubmit` (first-prompt context fallback + status-override notices) on both harnesses; hook output is ONLY the nested `hookSpecificOutput` shape (Codex's schema is `additionalProperties:false`). VERIFIED backend reality: **Claude fires + injects hooks** (terminal + chat, local + remote); **Codex app-server runs hook commands but does NOT inject their output** (codex-cli 0.142.5) → codex chat auto-context awaits Codex app-server hook-injection. P3 remote (ssh reverse tunnel + tool/hook distribution to `~/.vibespace/bin` + remote registration) and P4 (repo export/import) shipped 2.34.0. Design agreed 2026-07-05; supersedes the shelved userW `feat/task-centric` approach (see below).
 
 ## 1. Vision & the hard boundary
 
@@ -12,7 +12,7 @@ A **task** is a durable, cross-session unit of work that sits *above* individual
 
 Litmus test for any task-system feature: *does it DECIDE/INFLUENCE what the agent does/thinks/when it runs, or does it MANAGE/PRESENT/ORGANIZE work the user or harness drives?* The former is an intrusion. Where a feature genuinely needs to put context in front of the agent, it does so **through the harness's own mechanisms** (a SessionStart hook, an MCP tool) that the user opts into — never through the stream wrapper.
 
-Why walter's version was shelved: it drove context injection through the webUI wrapper (putting words in the agent's mouth) and depended on a private external "claude-ops" system (external markdown + a cron sentinel). This design keeps the good ideas (task-as-unit, attention surfacing) but routes every agent-facing action through native harness extension points, and keeps VibeSpace self-contained.
+Why userW's version was shelved: it drove context injection through the webUI wrapper (putting words in the agent's mouth) and depended on a private external "claude-ops" system (external markdown + a cron sentinel). This design keeps the good ideas (task-as-unit, attention surfacing) but routes every agent-facing action through native harness extension points, and keeps VibeSpace self-contained.
 
 ## 2. What we're solving (user-confirmed pain points)
 
@@ -154,7 +154,7 @@ Task detail view: structured fields (title, status, tags, plan items, folders, c
 
 ## 6. Repo task files (optional, bidirectional, agent-driven)
 
-For teams who want tasks to live in the repo (walter's instinct, done right and optional):
+For teams who want tasks to live in the repo (userW's instinct, done right and optional):
 - **Export**: a task → `tasks/T-*.md` with YAML frontmatter (id/title/status) + the objective body. VibeSpace writes it, or the agent does via `task_update` + file tools.
 - **Import / link**: point a VibeSpace task at an existing repo task file; VibeSpace reads it for display and (optionally) watches it for changes.
 - No hard dependency: with no repo file, tasks live purely in `data/tasks.json`. The repo file is a projection/sync target, never required.

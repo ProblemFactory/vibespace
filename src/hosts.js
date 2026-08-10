@@ -577,7 +577,7 @@ class HostManager {
     // TCP flow survives firewall/route changes (conntrack keeps it; the
     // keepalives maintain it) — so a host whose address went dark kept
     // showing READY for hours while every new session pipe timed out (real
-    // lengyue report 2.228.1: sidebar green, session stuck "host
+    // userL report 2.228.1: sidebar green, session stuck "host
     // reconnecting"). On fresh-fail we still try the mux once, ONLY to name
     // the situation precisely.
     let out;
@@ -738,7 +738,7 @@ class HostManager {
         'umask 077; mkdir -p "$HOME/.vibespace/bin"; tar -x -C "$HOME/.vibespace/bin"; chmod +x "$HOME/.vibespace/bin"/vibespace-* 2>/dev/null || true; '
         + REMOTE_PRELUDE
         // POSIX node finder (2.244.4): nvm.sh sourcing only works in bash — a
-        // dash login shell leaves `node` unresolvable (natural's Novita)
+        // dash login shell leaves `node` unresolvable (userN's Novita)
         + nodeFinder()
         + '[ -n "$VS_NODE" ] && "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" 2>/dev/null; echo VS-INSTALLED'],
         { timeout: 30000 }, (err, stdout, stderr) => {
@@ -757,7 +757,7 @@ class HostManager {
    *  deps.agentd = { ensureAgentdOnHost, agentdHostToken, bundlePath, version }
    *  injected by server.js after boot. ── */
   /** device() with a hard connect DEADLINE — for READ-ONLY probes and
-   *  interactive surfaces (B-fa6f, naturalhg's flapping H200 links): the
+   *  interactive surfaces (B-fa6f, userN's flapping H200 links): the
    *  connect retry ladder runs up to ~2.7 minutes, and on a lossy path where
    *  TCP opens but the ssh banner hangs (ConnectTimeout only bounds the TCP
    *  connect — verified live) every data-plane consumer sat on that ladder
@@ -951,7 +951,7 @@ class HostManager {
     // sessions at all — and matching by grep-in-state-json only found RESUMED
     // spawns (the --resume arg embeds the cid); a fresh-spawned claude's
     // conversation id lives ONLY in its own lock ~/.claude/sessions/<pid>.json,
-    // so the second grep leg covers those (lengyue's 12 orphans were all
+    // so the second grep leg covers those (userL's 12 orphans were all
     // invisible to the old probe for one reason or the other). kind tells the
     // consumer WHICH attach transport the sid belongs to — tagging a legacy
     // keeper sid as agentd (or vice versa) routes the adopt into a binary
@@ -1319,7 +1319,7 @@ class HostManager {
       out = null;
       if (this.dataPlaneOn?.() || h.transport === 'dial') {
         try {
-          // HARD DEADLINE on the device path (2.246.2, naturalhg's flapping
+          // HARD DEADLINE on the device path (2.246.2, userN's flapping
           // link): device(id) runs the connect retry ladder — up to ~13 ×
           // (8s handshake + backoff) ≈ 2.7 MINUTES — and a lossy path where
           // TCP opens but the ssh banner hangs (observed live: ssh blew past

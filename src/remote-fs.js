@@ -179,7 +179,7 @@ class RemoteFs {
   async info(id, filePath) {
     // dial device fast path (B-0d70): /api/file/info?host=<dial> was ssh-only
     // → always 400 'has no ssh' → the New Session preflight (_ensureCwdExists)
-    // reported EVERY existing device dir as nonexistent (the '/Users/xingweil
+    // reported EVERY existing device dir as nonexistent (the '/Users/<user>
     // 不存在' report). fsStat gives size/mtime/isDir; a small read-range sniffs
     // binary (NUL byte in the head).
     const dm = await this._dev(id);

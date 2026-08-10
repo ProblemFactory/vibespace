@@ -865,8 +865,8 @@ class SessionMessages {
   }
 }
 
-// Dedup surviving webui dtach sockets by conversation (walter's local
-// double-writer class, real xingweil report). A plain `claude --resume`
+// Dedup surviving webui dtach sockets by conversation (userW's local
+// double-writer class, real owner report). A plain `claude --resume`
 // REUSES the conversation id, so resuming a session whose claude had already
 // died (the live-guard sees no live session to block) mints a SECOND dtach
 // session for the SAME claudeSessionId. Two surviving sockets → two sidebar

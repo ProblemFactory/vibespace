@@ -289,7 +289,7 @@ export function escHtml(s) { return String(s ?? '').replace(/[&<>"']/g, (c) => E
 // load-bearing folder-grouping/archivedFolders KEY, so the composer stays).
 // That string leaked into openSpecs (persisted in layouts) and from there into
 // operations: a resume `cd`'d into the literal label, fell back to $HOME, and
-// claude said "No conversation found" (real incident, lengyue's h200 session).
+// claude said "No conversation found" (real incident, userL's h200 session).
 // Strip the label iff the remainder is an absolute/home path; server-side
 // twin in ws-handler heals already-persisted polluted specs.
 export function stripCwdHostLabel(cwd) {

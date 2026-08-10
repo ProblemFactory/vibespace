@@ -1792,7 +1792,7 @@ class MountManager {
 
   // ── CephFS (native kernel mount; deployment-provisioned all-flash storage) ──
   // mount.ceph HARDCODES a /sbin/modprobe call and treats "command not found"
-  // as FATAL (2.237.2, walter's recurring failure): images without the kmod
+  // as FATAL (2.237.2, userW's recurring failure): images without the kmod
   // package (3.5.0 dropped it) die "sh: 1: /sbin/modprobe: not found" even
   // though the ceph module is ALREADY LOADED host-side (a container can never
   // modprobe the shared kernel anyway — on kmod-bearing images the call always

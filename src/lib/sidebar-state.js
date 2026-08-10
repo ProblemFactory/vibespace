@@ -15,7 +15,7 @@ export function installSidebarState(SidebarClass) {
   // ── Server State Sync ──
 
   proto._fetchUserState = async function() {
-    // Retry on failure (2.223.4, walter incident): this used to be a
+    // Retry on failure (2.223.4, userW incident): this used to be a
     // ONE-SHOT fetch — a tab loading during a server-restart window came up
     // with names/stars/archives ALL unapplied (renames "gone", archived
     // sessions resurfacing) and never healed. Worse, _userStateFetched was

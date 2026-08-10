@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// attach-ack proof-of-life contract (2.234.1, lengyue mass false-death
+// attach-ack proof-of-life contract (2.234.1, userL mass false-death
 // incident): EVERY ws attach — real, sub-, or nonexistent id — must get a
 // synchronous attach-ack BEFORE the (possibly slow) attached/error reply, so
 // the client can tell "server alive and processing" from "server gone" and

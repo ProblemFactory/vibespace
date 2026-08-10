@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // LIVE test for the frp plugin (B-0b60 public exposure) against the REAL frps
-// relay. Needs the relay env: reads ~/workspace/39AI/vibespace-deploy/frp/
-// frps-secrets.env (private) if VIBESPACE_FRPS_* aren't already set. Installs
+// relay. Needs the relay env: set VIBESPACE_FRPS_* directly, or point
+// VIBESPACE_FRP_SECRETS at a private frps-secrets.env file. Installs
 // frpc into ~/.vibespace/plugins/frp, publishes a local echo server, and
 // verifies the public URL round-trips. Skips (exit 0) if no relay config.
 import fs from 'node:fs';
@@ -13,7 +13,8 @@ const require = createRequire(import.meta.url);
 
 // pull relay config from the private secrets file if not in env
 if (!process.env.VIBESPACE_FRPS_ADDR) {
-  const sec = path.join(os.homedir(), 'workspace/39AI/vibespace-deploy/frp/frps-secrets.env');
+  // Never a hardcoded private path in the public repo — the runner supplies it.
+  const sec = process.env.VIBESPACE_FRP_SECRETS || path.join(os.homedir(), '.config/vibespace/frps-secrets.env');
   try {
     const suffix = { FRPS_SERVER: 'ADDR', FRPS_BIND_PORT: 'PORT', FRPS_TOKEN: 'TOKEN' };
     for (const line of fs.readFileSync(sec, 'utf-8').split('\n')) {

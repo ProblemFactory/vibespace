@@ -109,7 +109,7 @@ try {
   fs.writeFileSync(path.join(share, 'hello.txt'), 'FROM-THE-DEVICE');
   const mres = await (await fetch(`http://127.0.0.1:${PORT}/api/machine-mounts/host-dial-smoke-mac`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    // TRAILING SLASH on purpose (walter regression): the serve-folder confines
+    // TRAILING SLASH on purpose (userW regression): the serve-folder confines
     // subpaths with `root + path.sep`, so a trailing-slash root double-slashed
     // the prefix → every FILE 403'd ("couldn't list files: 403"). The
     // hello.txt read below is the guard — it 403s without the normalization fix.
@@ -174,7 +174,7 @@ try {
   }
   // RE-PAIR (no unpair): minting for the existing deviceId rotates in place —
   // record kept, and the CONNECTED device gets the new dial.json pushed over
-  // the live link (2.170.x; the walter-incident UX)
+  // the live link (2.170.x; the userW-incident UX)
   {
     const rp = await (await fetch(`http://127.0.0.1:${PORT}/api/device/dial-pair`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },

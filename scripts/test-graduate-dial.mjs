@@ -6,7 +6,7 @@
 // Run: T_HOST=<ip> T_USER=<user> T_KEY=<keyfile> [T_PORT=22] node scripts/test-graduate-dial.mjs
 import { spawn, execFileSync } from 'node:child_process';
 import http from 'node:http'; import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
-const REPO='/home/xingweil/workspace/AIWorkspace/vibespace';
+const REPO='/home/<user>/workspace/AIWorkspace/vibespace';
 const HOST=process.env.T_HOST, USER=process.env.T_USER, KEY=process.env.T_KEY, PORT_SSH=process.env.T_PORT||'22';
 if(!HOST){ console.log('SKIP: no T_HOST'); process.exit(0); }
 // THROWAWAY git worktree (server.js honours no data-dir env — the worktree's

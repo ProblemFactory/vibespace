@@ -1,10 +1,10 @@
 # Design: Dynamic Desktop (动态桌面 / Stage view)
 
 Status: APPROVED design, pending implementation. Decisions settled with the user 2026-07-12
-(chat session 9f4cd444); reference implementation studied: walter's fork
+(chat session 9f4cd444); reference implementation studied: userW's fork
 `PHIIISH1988/claude-code-webui` branch `feat/task-centric` (`src/lib/task-manager.js`) —
 DIFFERENT model (task-driven, fixed 2×N grid + pinned Files window), so we implement the
-user's session-driven spec fresh and port walter's defensive mechanisms (§6).
+user's session-driven spec fresh and port userW's defensive mechanisms (§6).
 
 ## 1. Concept
 
@@ -127,7 +127,7 @@ LRU keep-alive of the last **N workspaces** (setting `desktop.stageKeepAlive`, d
 - Within LRU: windows hidden via the established `visibility:hidden` pattern (scroll/terminal/
   WS state preserved) — instant switch-back.
 - Beyond LRU: bound windows are serialized to their bind records and CLOSED. Session hero
-  windows follow walter's hard-won rule (§6.4): **never close a session window that shows any
+  windows follow userW's hard-won rule (§6.4): **never close a session window that shows any
   in-flight signal** — streaming flag, active background tasks, active /goal, pending
   permission, non-empty draft — re-checked AT CLOSE TIME, never from cached state. A busy
   hero stays hidden regardless of LRU. Windows that ALSO live on a normal desktop are never
@@ -148,14 +148,14 @@ LRU keep-alive of the last **N workspaces** (setting `desktop.stageKeepAlive`, d
   creation path). Deep per-type state (wrap toggles etc.) rides the hidden tier; replay-tier
   fidelity can grow per-type as needed.
 
-## 6. Ported defensive mechanisms (walter's field lessons — do not skip)
+## 6. Ported defensive mechanisms (userW's field lessons — do not skip)
 
 1. **Serialize hero switches** (lock-and-queue, latest-wins): rapid A→B clicks running two
    async switch pipelines concurrently corrupted shared state ("white screen, toolbar gone").
    One in-flight switch; queued taskId/sessionKey holds ONLY the latest.
 2. **Spawn/replay dedup** (`_spawningKeys` + refresh/spawn split): a chat window exists long
    before `openSpec.backendSessionId` is filled, so a reconcile pass re-running spawn creates
-   duplicates (walter: 9 clones of one chat). Track in-flight spawn keys with a 15s hard
+   duplicates (userW: 9 clones of one chat). Track in-flight spawn keys with a 15s hard
    timeout; reconcile passes must never spawn.
 3. **`_inProgrammaticSwitch` guard**: desktop-switch hooks must distinguish user switches from
    programmatic ones or they feed back into the switch pipeline.
@@ -163,7 +163,7 @@ LRU keep-alive of the last **N workspaces** (setting `desktop.stageKeepAlive`, d
    time (see §5). The original 30s default killed the previous session on every hop and
    swallowed messages sent into dead sessions.
 5. Membership flags are SEPARATE booleans (`_hiddenByStage` vs `_hiddenByDesktop` analog to
-   walter's `_hiddenByTask`) — never overload `win._desktopId` with a second meaning.
+   userW's `_hiddenByTask`) — never overload `win._desktopId` with a second meaning.
 
 ## 7. Persistence & sync
 
@@ -211,7 +211,7 @@ with their own workspace of helper windows."
   materialize/leave; aux close → unbind + re-record; dm.moveWindowToDesktop → `stage.unbind`.
 - [x] **Phase D (committed)**: LRU eviction `_enforceLru` — v1 CONSERVATIVE: only hidden AUX
   windows beyond keep-alive N are closed (records replay them); session windows are NEVER
-  closed by the stage (strictly avoids walter's killed-session class). Ctrl+Alt+Left enters
+  closed by the stage (strictly avoids userW's killed-session class). Ctrl+Alt+Left enters
   from the leftmost desktop / Right leaves (command-mode.js). Placeholder window controls
   hidden via CSS. Hero-at-bottom z placement + extras capture/restore (addenda §5b).
   SMOKE-VERIFIED via CDP-driven headless Chrome on an isolated worktree instance (12/12):

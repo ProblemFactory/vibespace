@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
-const repo = '/home/xingweil/workspace/AIWorkspace/vibespace';
+const repo = '/home/<user>/workspace/AIWorkspace/vibespace';
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
 const PORT = 3993, CDP_PORT = 9343;
 const wt = '/tmp/vs-pooldlg-smoke';

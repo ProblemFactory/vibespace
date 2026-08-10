@@ -1,288 +1,180 @@
-# 三层架构设计：前端 / 编排层 / 设备层（详细说明版）
+# Three-tier architecture: frontend / orchestrator / device layer
 
-**状态**：设计文档，等 owner 拍板后分轮实施。
-**产生过程**：2026-08-10，9 个 agent 的编排产出——6 个逐行读完全部服务端代码（server.js 5740 行、ws-handler 2579 行、转录解析、设备层、账号+用量、文件+发现）做职责清单，3 个从不同立场独立出方案（激进派/渐进派/数据面优先），三个方案的结论罕见地一致。本文档是综合。
-**姊妹文档**：docs/design-cs-unification.md（模块级的 CS 统一台账，本文档是它的全局化）。
-**术语表在文末**——遇到不认识的词直接跳附录。
+**Status**: APPROVED (2026-08-10) — rounds R0–R6 in progress. This is the formal design record;
+requirement discussions happen outside this repository.
+**Companion**: docs/design-cs-unification.md (the module-level migration ledger this generalizes).
 
----
+## Summary
 
-## 0. 这份文档回答什么问题
+VibeSpace separates into three tiers:
 
-Owner 的原始问题：
+- **F — frontend**: the browser bundle. Talks to one server WS/HTTP endpoint. Unchanged.
+- **O — orchestrator** (`vibespace-server`): registries (accounts catalog, machines, task groups,
+  layouts, settings), policy (billing selection, pool switch decisions, resume breakers), the
+  permanent usage ledger + pricing + estimator, secrets-at-rest, the browser protocol, static
+  serving, and a normalized transcript **mirror** + conversation-location **index** (so history
+  stays readable when an owning machine is unreachable).
+- **D — device layer** (`vibespace-device`): ONE codebase running on EVERY machine — including
+  the server's own machine as **device #0** — owning all per-machine facts and execution:
+  session lifecycle and persistence, transcript parsing, credential/login state, file
+  management, usage fact collection. Transports (unix socket / ssh-stdio / ws dial; more can be
+  added) live UNDER the device API: every transport carries the same ops.
 
-> 是不是要在架构层面进行一些重构？如何分离前端、服务端、设备端。我理解要么服务端和设备端是
-> 同一套代码，要么服务端只负责对设备端暴露的数据的编排，所有 session 管理、聊天记录解析、
-> 登录状态管理、文件管理 API 等功能都应该在设备端，然后本地和远端设备共用同一套代码
-> （底层传输可以支持 ssh、ws、socks 等）。
+The motivating defect class: per-machine logic living in the orchestrator forces twin
+implementations (a local one and a remote one), and whoever fixes one never exercises the other.
+Documented instances include a remote usage scanner that lagged its local twin for six weeks, a
+resume-safety sweep that existed remotely but not locally, a session-naming rule that had
+silently diverged between local and remote, per-CLI capability facts served from the wrong
+machine, and an entire transfer-integrity bug class that exists only because multi-MB transcripts
+cross the wire to be parsed centrally.
 
-**一句话答案**：方向完全正确，而且"要么 A 要么 B"其实不必二选一——A（同一套代码）和 B（服务端只编排）分别描述了两个不同层面的事，两者都对、可以同时成立。后面详细解释。
+## Design principles
 
----
+1. **Fat OWNERSHIP, thin daemon PROCESS.** The daemon keeps every live session pipe on its
+   machine alive; nothing it does may ever endanger that. All heavy work (fs, discovery walks,
+   JSONL parsing, usage scans) runs in daemon-side **worker threads** with deadline → terminate →
+   respawn, behind the lean mux/pipe supervisor. The worker entry is **embedded in the single
+   bundle** (`new Worker(__filename)` + role flag) — a second shipped artifact through the
+   installer/versioned-dir/re-exec chain is a fleet-brick vector (the 2.185.2 class).
+2. **"Local = device #0" means shared implementation, not mandatory socket transit.** One module
+   behind `xFor(hostId)`: local callers invoke it in-process (no serialization tax on hot paths),
+   remote callers over the mux. The remaining branch selects a transport for ONE implementation —
+   exactly what the CS rule permits.
+3. **Authority moves down; code stays shared.** The server keeps the shared parser as a library
+   to read its mirror (dead-host read-only rescue and resume host-inference must survive machine
+   loss). The daemon bundle is esbuild-built from `src/`, so daemon and server genuinely share
+   modules; daemon self-upgrade ships device-layer code fleet-wide automatically.
 
-## 1. 现状：今天的架构长什么样
+## Device op families
 
-今天系统里有三种进程：
+All ops are capability-gated per-op via the hello handshake; consumers keep a per-op fallback
+ladder (device op → legacy ssh script → honest named error). Legacy ssh scripts remain forever as
+the bootstrap/rescue channel and for daemon-less ssh hosts.
 
-### 1.1 浏览器前端（bundle.js）
-
-xterm.js 终端、聊天视图、窗口管理器、侧栏。它只跟 server 说话（一条 WebSocket + 一批 HTTP API）。**这一层不需要动**，本文档后面基本不再提它。
-
-### 1.2 Server（node server.js，就是那个 5740 行的进程）
-
-今天它是"什么都干"的进程。逐类列出它现在承担的职责：
-
-| 职责 | 今天在哪里 | 备注 |
-|---|---|---|
-| 浏览器协议（WS + HTTP）、静态文件、登录 | server | 这本来就该它干 |
-| **spawn 会话**（拼 claude 命令行、账号注入、dtach） | server | 本地一套代码，ssh 一套，dial 一套 |
-| **解析 claude 的实时输出**（stream-json stdout） | server | ~700 行，所有会话——包括远程会话的字节流也是先搬运回 server 再解析 |
-| **解析聊天转录**（~/.claude 里的 JSONL 文件） | server | 本地直接读文件；**远程要先把整个文件同步回来**（见 1.4 的事故） |
-| **会话发现**（哪些 claude 在跑、哪些停了） | server | 本地一套（直接扫文件+进程），ssh 一套（shell 脚本），dial 一套（daemon 快照）——**三份实现** |
-| **登录状态探测**（哪个机器登了哪个账号） | server | 本地直接读文件，远程跑 ssh 探针脚本——**两份实现** |
-| **文件管理 API**（浏览、读写、上传下载） | server | 本地走 SafeFs worker 池，远程走 RemoteFs——两份实现 |
-| **用量账本**（挖转录算 token 花费） | server | 本地一套走查代码；远程是一个单独发货的单文件脚本——**曾经落后本地版本六个星期** |
-| 账号注册表、计费策略、pool 自动切换 | server | 跨机器的"政策"，本来就该它干 |
-| 布局、任务组、设置等 UI 状态 | server | 本来就该它干 |
-
-### 1.3 设备 daemon（vibespace-agentd，装在每台配对机器上）
-
-今天它是个"瘦"角色：保持会话进程活着（pty/pipe 会话）、执行文件操作、出发现快照、开隧道。**它不理解任何内容**——比如它把 claude 的输出原样搬给 server，由 server 解析。
-
-关键事实：**本机也有一个 daemon（叫 device #0），和远程机器上装的是同一个二进制、同一套协议。** 这是 2.276.0 刚打通的：`hosts.device(null)` 现在能拿到本机 daemon 的句柄了。在那之前，虽然二进制一样，server 的代码却"够不着"它，所以每个功能都被迫写两遍（本地一版、远程一版）。
-
-### 1.4 现状的病：同一件事存在两三份实现
-
-这不是审美问题，是**事故的直接来源**。规律是：**修某一边 bug 的人，永远不会顺手测另一边的孪生兄弟**。五个真实案例：
-
-1. **用量扫描器落后六周**。本地在 2.265.0 学会了挖 workflow agent 的转录（每次 workflow 跑掉约 $205 但账本上看不见），而发到远程机器的那份扫描脚本是独立实现，没人记得同步——远程机器整整六周少报了所有 workflow 花费。
-2. **writer sweep 本地根本没有**。resume 一个会话前要确保没有别的进程还在写同一份转录（两个写者=转录损坏）。这个保护当年因为事故报在远程，所以只加给了 ssh 和 dial——**本地从来没有**，而本地风险一模一样。没人"决定"不给本地，只是修远程的人不碰本地。
-3. **同一个会话两个名字**。会话名取自第一条真实用户消息。本地实现取"第一行"，远程实现把"整条消息的空白折叠后"当名字——同一个会话在两台机器上显示不同的名字，直到上周才发现这已经分家了。
-4. **把本机 claude 的能力表发给远程会话**。`/api/session-options`（权限模式、effort 档位列表）来自解析**本机** `claude --help`——远程机器装的 claude 版本可能不同，选项就是错的。因为"问那台机器"没有现成通道，就顺手用了本机的。
-5. **45MB 转录传输截断成 256KB**（2.187.0 事故）。远程转录必须整个文件搬回 server 才能解析，搬运机制里一个控制信号超车 bug 把一个 45MB 的会话缓存成了 256KB 的头部并永久标记"完整"——用户看到的是聊天记录永远停在很久以前。**这一整类 bug 之所以存在，就是因为"把字节搬到解析器"而不是"把解析器放到字节旁边"。**
-
-上周的 CS 统一战役（2.276.0–2.279.1）已经把 9 组这样的"双胞胎实现"清到了 0 组无理由双胞胎——但那是模块级的缝补。你现在问的是**终局**：架构上怎么让这类问题不再产生。
-
----
-
-## 2. 你提的两个方向，分别展开讲
-
-### 方向 A："服务端和设备端是同一套代码"
-
-字面上有两种理解：
-
-- **强理解**：server 进程本身就是跑 device 二进制，加一层编排。——不可取。server 有大量 device 不需要的东西（浏览器协议、注册表、账本），揉在一起daemon就不"瘦"了，而 daemon 必须瘦（见 4.3 的铁律）。
-- **合理理解（采纳）**："同一套代码"发生在**模块层**。设备 daemon 是 esbuild 把 `src/` 打包出来的产物——**它本来就能引用 server 用的同一批源码模块**。上周的 discovery-facts.js 已经证明了这条路：一个模块同时被 server 和 daemon bundle 使用，一处修改两边生效。而且 daemon 有自升级机制——**设备侧代码改一次，全 fleet 自动收到**，不需要每台机器手动装。这是 fat-device 模型最强的现实论据。
-
-### 方向 B："服务端只负责编排设备暴露的数据"
-
-这描述的是**权限/职责**层面的终态：server 不再自己走 `~/.claude` 目录、不再自己 spawn CLI、不再以解析转录为主业——它对每台机器（包括本机）说"给我你的会话列表""帮我打开一个会话""给我这个会话的第 1200-1400 条消息"，然后**组合** N 台机器的回答，加上只有它知道的全局信息（哪个账号计费、窗口布局、任务组），喂给浏览器。
-
-### 结论：A 和 B 各管一层，同时成立
-
-- **代码层**：设备层是一套代码，跑在每台机器上（含本机），server 也复用同一批模块（作为库）。
-- **权限层**：server 是纯编排者，所有"每台机器自己的事实"都从设备层拿。
-
-这正是三个独立设计方案共同的结论。
-
----
-
-## 3. 目标架构（详细版）
-
-```
-┌───────────────── F: 浏览器前端 ─────────────────┐
-│  bundle.js — 只跟 server 的一条 WS/HTTP 说话，不变  │
-└──────────────────────┬─────────────────────────┘
-┌──────────────────────┴─────────────────────────┐
-│            O: vibespace-server（编排层）            │
-│  留下的东西（详见 3.1）：                            │
-│  · 注册表：账号/机器/任务组/布局/设置                  │
-│  · 策略：计费选择、pool 自动切换、resume 熔断          │
-│  · 永久账本 + 定价 + 配额推算                        │
-│  · 密文（API key、oat token 的密文永不出 server）     │
-│  · 浏览器协议 + 前端静态文件                          │
-│  · 规范化镜像 + 会话位置索引（机器挂了还能看历史）        │
-└──┬──────────────┬──────────────┬────────────────┘
-   │ 进程内调用      │ ssh 传输      │ ws 拨入传输     ← 传输只是通道，上面的 API 一模一样
-┌──┴─────┐   ┌────┴────┐   ┌────┴────┐
-│ D #0   │   │ D (ssh) │   │ D (dial)│    D: vibespace-device（设备层，一套代码）
-│ 本机    │   │ 远程机器  │   │ 远程设备  │
-└────────┘   └─────────┘   └─────────┘
-```
-
-### 3.1 编排层（server）终态留什么、为什么
-
-| 留下 | 为什么必须留在 server |
+| Family | Contents |
 |---|---|
-| 账号**目录** + 选择策略 + pool **决策**引擎（注意：不是账号本身——见 3.1.1 的精确切分，owner 修正） | "这个会话用哪个账号计费"是**跨机器**的决策：pool 要看所有账号的配额水位；机器只知道自己有什么登录，不知道该用哪个。但凭据**材料**和登录**生命周期**属于设备 |
-| 密文存储 | API key / oat token 的密文和解密钥匙只在 server；发给设备走的还是现有的 0600 文件 + `$(cat)` 通道，值永不进命令行参数 |
-| 永久用量账本 + 定价 | 要跨机器汇总才有意义；设备只上报原始事件 |
-| 浏览器协议 + UI 状态 | 布局/桌面/任务组/收藏本来就是"这个工作台"的状态，不属于任何一台机器 |
-| **规范化镜像 + 会话位置索引** | 关键防线：**机器不可达时**，用户还能只读查看那台机器上的历史会话（今天靠 remote-jsonl 缓存实现，2.217.0 冷月事故的修复）。终态里 server 持续保存一份"已解析消息"的镜像；镜像的读取要用解析器——所以 **server 保留解析器作为库**。注意区别：**权限**（谁负责解析）下沉到设备，**代码**（解析器模块）依然共享 |
+| `probe.*` | per-machine CLI facts (version, permission modes, effort levels, install layer), credential/login state (read-only), sysinfo, workflow state, pipe liveness (the daemon answers about its OWN registry), validated pid kill |
+| `discovery.v2` | session claims computed on-device in a worker (lock matching, naming, tmux facts, codex metas, realCwd); the orchestrator passes its webui-pid map in and does only cross-machine merging |
+| `usage.scan` | the shared ledger walker bundled into the daemon; NDJSON usage events over count-gated byte channels; device-side byte cursors; attribution applied at ingest — one ingest pipeline for local and remote |
+| `transcript.*` | attach / gap / turnmap / streaming search / task state, parsed in daemon workers **where the bytes live**; the wire carries parsed results (KB), not raw multi-MB files |
+| `session.events` | typed push stream: id adoption, usage records (carrying both request-id and message-id), limit banners, permission-mode acks, streaming labels, served-model changes, todos, tool progress, subagent lifecycle |
+| `session.open/kill` | abstract session spec (backend, mode, cwd, resume/fork, account descriptor); the device resolves binaries, composes persistence, sanitizes env, injects the statusline; `place-secret` is the one 0600-file + `$(cat)` secret channel on every transport |
 
-### 3.1.1 账号管理的精确切分（owner 修正，2026-08-10）
+## Account management split
 
-Owner 指出初稿"账号注册表留 server"切得太粗：**默认情况下（不开启订阅凭据传输）每台机器的账号本来就是自己内部独立的**——机器登录在机器上、host-held 凭据目录在机器上、刷新由那台机器上的 CLI 自己完成、macOS 的 keychain 甚至物理上不可搬运。server 对账号的持续参与应该收缩为**统计和初始分发**。采纳，精确切分如下：
+Credential **material** and login **lifecycle** belong to the device tier: each machine's CLI
+login, held credential directories, token refresh (done by the CLI on that machine, under its
+own locks), and platform keychains already live wholly on their machines. The server-machine's
+credential directories (`data/subs/`) are properly understood as **device #0's account store** —
+the server machine is not special.
 
-| 归属 | 内容 | 说明 |
-|---|---|---|
-| **D（设备）** | 凭据**材料**与登录**生命周期** | 机器登录（~/.claude）、host-held 目录（~/.vibespace/subs）、token 刷新（CLI 自己做，锁在机器上）、pool 符号链接的**机械动作**、keychain。**一个此前被掩盖的事实：server 机器上的 `data/subs/` 本质上就是 device #0 的账号仓**——终态它由每台机器都在跑的同一套设备侧账号代码管理，server 机器不特殊 |
-| **D（设备）** | 身份/配额**事实** | "我登录了谁"（probe.creds，只读）、statusline 被动配额捕获**在会话所在的机器上落盘并上报**——顺带修掉审计里的一条真缺口：今天远程会话的 statusline 写在远程机器上然后**丢失**，server 永远看不到 |
-| **O（server）** | **目录**（catalog） | 有哪些已知身份、显示名、默认账号、每个身份在哪些机器上可用——由设备上报的事实 + 用户录入合成；这是 UI 状态，不含凭据材料 |
-| **O（server）** | **初始分发** | 用户交给 VibeSpace 保管的东西（录入的 API key、mint 的 oat token）加密存放在 server 金库，需要时通过 place-secret（0600 文件 + `$(cat)`）**分发**到目标机器；订阅目录的一次性 ship（且默认关闭不变）。分发完成后 server 不再碰材料 |
-| **O（server）** | **选择策略 + 统计** | 开会话时用哪个账号（evaluateOnHost 裁决）、pool 何时切换到谁（EDF 决策引擎，喝设备上报的配额事实）、用量账本汇总、按请求归账。**参与的形态是"只发决策和描述符，不碰材料"**——pool 切换的决定是 O 做的，执行（重指符号链接）是持有那些目录的设备做的 |
+The orchestrator keeps:
 
-**Pool 的具体切分（owner 追问：放 server 会不会统计延迟导致切换来不及）**——决策在 server、执行在设备、外加设备侧应急反射：
+- the **catalog** (known identities, display names, per-machine availability — UI state, no
+  credential material),
+- **initial distribution** (user-entered API keys and minted long-lived tokens are encrypted at
+  rest in the server vault and placed onto machines via `place-secret`; one-time subscription
+  shipping stays opt-in and off by default),
+- **selection policy and statistics** (which account a session bills to; pool switch decisions;
+  ledger aggregation, per-request attribution).
 
-- **为什么决策必须在 server**：切换要比较**全体成员账号**的配额水位和周重置期限（EDF 排序），而一个成员的最新读数可能来自**另一台机器**（同一账号在别处跑会话时，那台机器的 statusline 才有最新值）；估算模型（学习出的消耗速率）也吃跨机器账本。单台设备天然没有这些。
-- **延迟的真相**：历史上两次"切换差点来不及"（Fable 4 分钟内 51%→100%、workflow 期间估算差 35 个点）的根因都是**信号源缺失**（workflow 转录没人挖、事件源 armed 但从未生效），不是决策放在哪里的传输延迟——那两个 bug 修完后，事件驱动路径从用量记录产生到 pool 重估是 1-6 秒。终态下远程设备把用量事件推给 server 只多加 ~0.1-0.3 秒（拨号广域网），相对 5 秒节流阈值可忽略。**且 proactive 切换的设计本来就是让时机不敏感**：hot pool 在估算余量 <10%（约还剩 $20+ 头寸）时就提前切，离墙还有几分钟——真等到撞墙前一秒才决策，那次撞墙的请求本来也救不回来（限流打断的是已发出的请求，换凭据只对下一个请求生效）。
-- **唯一真实的失败模式是链路断**，不是统计慢：拨号设备断链的瞬间恰好当前目标耗尽，server 的切换命令到不了。对策是**密封命令式应急反射**：server 每次重估后把该 pool 的成员排序快照（谁可用、备选顺序，几百字节）推给持有 pool 的设备；设备侧仅在"本地看到硬限额横幅 **且** 联系不上编排层"时，按快照就地执行备选切换，事后向 server 补报事件（账本按时间归账自动对齐）。正常情况下设备**从不**自作主张——避免两个大脑打架（震荡防护、驻留时间这些政策依然只有 server 执行）。
+The orchestrator's ongoing involvement is "decisions and descriptors only, never material".
 
-**用量信息的跨设备聚合（owner 追问确认）**：分两半，成熟度不同——
+### Pool management
 
-- **配额读数（百分比）：是，identity 键已经在干这件事**。一个账号的利用率是 Anthropic 侧的全局状态，哪台机器读到都是同一个真相。从 2.261.0 起主键就是 identity（**orgUuid > 小写 email > 账号 id**，orgUuid 来自人工⟳时顺带取回的组织身份），2.263.0 修过的正是"同一身份两份缓存文件各自记锚点、互相看不见对方花费"的分裂 bug——现在同一真实账号无论读数来自机器登录文件、命名订阅目录还是 host-held 目录，都合并进一条锚点流。
-- **设备掉线时的预测偏差（owner 追问）**：覆盖变完整是把双刃剑——今天学习出的速率**自带**对不可见消耗的补偿（本地只看到 1/7 → 速率学成 ≈7 倍）；终态覆盖趋近完整后速率回落到 ≈1 倍，此时**一台正在烧量的设备掉线 = 成本流突然缺一块 → 低估余量 → 晚切换**（危险方向）。四个配套机制，全部是对既有机制的推广而非新发明：
-  1. **按来源记水位 + 区分掉线与闲置**：估算器按 identity 记录每台贡献成本的设备的最后事件水位；设备链路状态 server 本来就知道——链路断且该设备近期在烧 → 不确定度按它自己的近期烧率增长；链路好但没事件 → 真闲置，零偏差。
-  2. **不确定度进决策**：pool 的耗尽判断在存在"掉线的活跃设备"时用**悲观边**（估算减不确定度）——宁可早切，绝不晚切。与既有"绝对头寸决定阈值"哲学一致。
-  3. **重连即自愈，且按时间序回填**：设备侧字节游标保证事件不丢，重连后从游标续传（rid 去重吸收）；**回填必须按源机器的 asOf 时间序插入，绝不当"最新"处理**——2.267.0① 的教训（陈旧读数被当最新锚点→速率学出 30% 的毒）在跨设备场景会以"掉线设备回来倒灌旧读数"的形式复发，同一个防线（配对时间窗校验+污染跳过）直接推广。好消息：2.265.0 的"学习时从活账本重算配对成本"机制天然吸收迟到的成本事件。
-  4. **跨掉线窗口的配对不进学习**：一对锚点之间若存在该 identity 的设备掉线缺口，该配对照 2.267.0 的污染规则跳过——否则缺失的成本又把速率教歪（六周欠账教出通胀速率的同类）。
-  另外锚点本身有跨机器冗余：账号的利用率是全局真相，掉线设备的读数丢了，**其他机器**对同一账号的任何读数照样重锚整条 identity 流——偏差窗口的上界是"到下一次任何来源的地面真值"，不是"到那台设备回来"。
-- **账本（逐请求美元成本）：今天是弱的一半，终态补齐**。远程机器的账本事件今天按**机器**归桶（atype='host'），不按账号身份——因为远程扫描器不知道每条请求是谁计费的。这正是实测"某账号的本地账本只看到它总消耗的约 1/7（多设备）"的来源，也是估算器必须**学习**速率而不是直接算的原因。终态下设备侧上报的用量事件**自带账号归属**（spawn 时的账号描述符在设备手里），identity 继续做 join 键——VibeSpace 管辖内的机器成本覆盖趋近完整，学习机制降级为兜底（覆盖手机 App 等管辖外消耗）。
+Decision = orchestrator; execution = device; plus a **sealed-orders emergency reflex**:
 
-一句话："**材料和事实归设备，目录、分发、决策和统计归 server**"。这个切分还有一个附带收益：pool 的机械动作变成设备 op 之后，"在某台远程机器的多个 host-held 登录之间池化"在结构上变得可能（今天 pool 是 local-only，正因为它是 device #0 仓库的符号链接把戏）——不承诺、但路是通的。
+- The switch decision needs cross-machine member quota states, weekly reset deadlines, and the
+  learned consumption model — only the orchestrator has these.
+- The mechanical act (re-pointing the credential symlink) happens on the machine holding the
+  directories.
+- After every evaluation the orchestrator pushes the pool's ranked member snapshot (a few hundred
+  bytes) to the holding device. The device executes a local fallback switch ONLY when it both
+  observes a hard limit banner locally AND cannot reach the orchestrator, reporting the event on
+  reconnect (time-based ledger attribution reconciles). Policy remains single-brained: outside
+  that double condition the device never acts on its own.
 
-**一个需要拍板的真张力——配额⟳（主动刷新）从哪台机器发起**：今天 host-held 账号的⟳是 server 通过 ssh 把 token 读回来、**从 server 的 IP** 调 Anthropic。按本切分，更自然（且对封号安全**更有利**）的做法是让**持有登录的那台机器自己**发起这次人工触发的只读查询——token 从它平时跑会话的同一个 IP 使用，消除"token 在陌生 IP 出现"的信号。代价是 §ban-safety 结构法要从"设备协议里零 Anthropic 调用"精化为"**唯一**允许的是人工触发、限流的配额只读 op（creds.quota），其余一律没有"——grep 守卫改为盯这条白名单。我的建议：采纳设备侧发起（更符合本切分也更安全），法律按白名单形式固化。
+Latency analysis: historical near-misses in pool switching were caused by missing **signal
+sources**, never by decision placement; the event-driven path runs in 1–6 s and remote transport
+adds ≤0.3 s. Proactive switching (act while meaningful headroom remains) makes decision timing
+non-critical by design.
 
-### 3.2 设备层（daemon）终态长什么样：内部三层
+### Quota refresh origin
 
-这是三个设计方案都独立强调的第一修正：**"fat device" 指职责肥，不指 daemon 进程肥**。daemon 进程内部分三层：
+The human-gated on-demand quota refresh is issued **by the machine that holds the login**
+(decision 2026-08-10): the token is then used from the same IP its CLI sessions use, removing a
+token-appears-from-a-foreign-IP signal. The safety law is therefore a **whitelist**: the ONLY
+device op that may reach the vendor API is the human-gated, throttled read-only quota query;
+credential probes never refresh tokens; nothing else on the device protocol may originate a
+vendor call. A guard test enforces the whitelist structurally.
 
-```
-vibespace-device 进程
-├── CORE（主循环，永远瘦，纪律不变）
-│     mux 协议服务、传输(unix socket/ssh/ws)、
-│     会话进程登记簿、认证、自升级
-│     ——铁律：这一层绝不跑任何重活
-├── WORKERS（新增的 worker 线程层，重活全在这）
-│     文件操作池 / 转录解析服务 / 发现扫描 /
-│     用量走查 / 登录态探测
-│     ——每个操作有超时；超时→杀线程→重启线程
-│     ——一个卡死的 FUSE 挂载点或一次 1 秒的大解析，
-│       永远不可能卡住上面 CORE 的会话管道
-└── SESSION CHILDREN（子进程，现状保留）
-      pty-wrapper / chat-wrapper 继续作为独立子进程
-      ——久经考验；解析代码崩溃在结构上碰不到 claude 进程
-```
+### Cross-device usage aggregation
 
-**为什么必须这样分**：daemon 手里握着这台机器**所有活着的会话管道**。今天 server 崩了没关系——dtach 里的 claude 都活着，server 重启再接回来。如果把重活直接塞进 daemon 主循环，一次卡死（比如访问一个断网的网络挂载点）就冻住全机器所有会话——这比今天 server 卡死严重得多。所以重活必须隔离在可杀可重启的 worker 线程里。**这个 worker 层同时是文件操作统一的解锁条件**（CS 台账里 file-ops 例外的成立理由就是"daemon 没有隔离"，建成后例外自动解除）。
+- **Quota readings** are global per-account facts and already merge across sources keyed by
+  identity (org uuid > lowercased email > account id).
+- **The ledger** is per-machine-bucketed today (a remote machine cannot attribute requests to
+  accounts); in the target state device-reported usage events carry account attribution from the
+  spawn descriptor, so per-account cost coverage approaches completeness and the learned-rate
+  mechanism demotes to covering out-of-management consumption.
+- **Device-offline bias**: complete coverage creates a new fragility — the learned rate falls to
+  ≈1× (it no longer compensates for invisible spend), so an ACTIVE device going offline means
+  missing cost and an UNDERestimate (the dangerous direction: late switches). Mechanisms, all
+  generalizations of existing guards: per-source watermarks with offline-vs-idle distinction
+  (link state is known); uncertainty-widened estimates with pessimistic-edge pool decisions
+  while an active source is dark; reconnect backfill inserted in source-timestamp order and
+  never treated as freshest (the stale-reading poisoning class); anchor pairs spanning an
+  offline gap excluded from rate learning. Anchors are cross-machine redundant: any machine's
+  reading of the same account re-anchors the identity stream, so the bias window ends at the
+  next ground truth from ANY source, not at the device's return.
 
-**Worker 怎么发货**：worker 入口**内嵌在同一个 bundle 文件里**（`new Worker(__filename)` + 角色标志），不发第二个文件。原因：daemon 的安装器/版本目录/自升级重启是一条精密链条，多一个要发的文件就多一个把全 fleet 设备搞挂的向量（2.185.2 事故就是升级重启丢了一个参数导致设备全部掉线）。
+## Prerequisite: content-derived message ids (R0)
 
-### 3.3 设备层对外提供什么（op 清单，人话版）
+Message ids are currently per-normalizer counters, so every parser rebuild renumbers and forces a
+full client view reset. Daemon self-upgrade restarts are routine, so device-side parsing is
+impossible until ids derive from content: `mid = sessionId + ':' + (uuid || message.id ||
+hash(record))`. Then a device-parsed history and a server-parsed live stream merge by
+construction (dedup by id across producers) — the transition needs no flag day. Independent
+value: server restarts stop renumbering. Pinned risk: placeholder uuids and pre-uuid records must
+hash identically across transports or messages double-render.
 
-设备层的 API 分六族。**每个 op 都带版本能力协商**（旧 daemon 不支持的 op，server 自动退回 ssh 脚本老路——老路永久保留作为兜底，这也是没装 daemon 的纯 ssh 机器继续可用的原因）：
+## Rounds
 
-1. **probe.***（问机器事实）："你装的 claude 什么版本、支持哪些权限模式？""你登录了哪些账号？"（只读，绝不刷新 token）"你的系统负载？"——**修掉案例 4**（能力表来自正确的机器）、消灭登录探测双胞胎。
-2. **discovery.v2**（会话发现）："你机器上哪些会话在跑、哪些停了、各叫什么名字？" 判定逻辑（锁匹配、命名、tmux 识别）在设备侧 worker 里用共享模块算好，server 只做跨机器合并。——三份发现实现收成一份。
-3. **usage.scan**（用量走查）：设备自己挖自己的转录，产出标准化用量事件流。本地和远程走**同一条摄入管道**。——案例 1 的六周落后在结构上不可能再发生（没有第二份实现了）。
-4. **transcript.***（转录服务，**最大的一项**）："给我这个会话的最后 50 条消息（已解析成标准格式）""往前翻 200 条""全文搜索这个词"。解析发生在**字节所在的机器**，网线上传输的是解析结果（KB 级），不再是 45MB 的原始文件。——案例 5 那整类搬运完整性 bug 直接消失；顺带获得：远程会话的实时用量表（今天只有本地有）、远程 codex 用量（今天完全看不见）。
-5. **session.events**（事件订阅）：设备把"会话 id 变了""产生了一条用量记录""撞到限额横幅""权限模式切换成功"这些**类型化事件**推给 server，server 里的策略（pool 切换、模型锁重钉）订阅消费。——取代今天"把原始 stdout 字节搬回来在 server 里用 700 行代码边解析边处理"的模式。
-6. **session.open / kill**（会话生命周期）：server 说"在你机器上开一个 claude 会话，backend/模式/目录/账号描述符是这些"，设备自己解析二进制路径、组装持久化（dtach/pipe）、注入 statusline、清洗环境变量。——本地/ssh/dial 三套 spawn 代码收成一套。
-
-### 3.4 一个例子把数据流走一遍：打开远程会话的聊天记录
-
-**今天**：
-1. server 通过 ssh 把那台机器上的 45MB JSONL 文件增量同步到本地 `data/remote-jsonl/` 缓存（搬字节，慢、有 2.187.0 那类截断风险）
-2. server 在自己进程里解析这 45MB，切出最后 50 条消息
-3. 发给浏览器
-4. 用户往上翻页 → 每次都要确认缓存新鲜度，可能再触发同步
-
-**终态**：
-1. server 对那台机器的 daemon 说：`transcript.attach(会话id)`
-2. daemon 的 worker **就地**解析（文件就在它脚下，读文件是本地速度），返回最后 50 条**已解析**的消息（几十 KB）
-3. server 加上全局信息（计费徽章、任务组）转发浏览器
-4. 翻页 = `transcript.gap(1200-1400)`，还是只传结果
-5. 同时 server 把流过的消息**顺手存进镜像**——那台机器将来失联了，历史照样能看
-
-**本地会话呢？** 走**同一个模块**，但注意第二修正：**"本地=device #0"指共享实现，不强制走 socket**。本地调用是进程内直接调（`transcriptFor(hostId)`：hostId 为空→进程内，远程→走协议），因为本地文件就在 server 脚下，强制绕道 daemon socket 是拿延迟换洁癖，没有正确性收益。判据（CS 规则）依然满足：剩下的分支只是**选传输**，实现只有一份。
-
----
-
-## 4. 为什么不能一步到位：先决条件 R0
-
-**今天消息 id 是这么来的**：每条聊天消息的 id = `会话id:递增计数器`，计数器活在解析器实例的内存里。解析器一重建（server 重启），计数从头来，全部 id 变了——所以现在有一套 `_normEpoch` 机制：id 空间变了就让浏览器**整个聊天窗口推倒重来**。今天 server 重启不频繁，还能忍。
-
-**问题**：转录解析搬进 daemon 后，daemon 的**自升级重启是家常便饭**（每次发版全 fleet 自动重启）。如果 id 还是计数器，每次发版=全 fleet 每个打开的聊天窗口白屏重建一次。不可接受。
-
-**解法 R0**：id 改成**从内容派生**——`会话id:该消息在转录里的uuid`（uuid 没有就用 message.id，再没有就哈希该行内容）。同一条消息无论谁解析、解析几次、在哪台机器解析，id 都一样。这带来一个迁移期的超能力：**设备解析的历史 + server 解析的实时流可以直接按 id 合并去重**——过渡期两边共存不需要"某天一刀切"。而且它单独发就有价值：server 重启不再重编号。
-
-所以 R0 必须最先、单独发版、观察一段时间，然后才谈得上任何设备侧解析。
-
----
-
-## 5. 实施路线：七轮，每轮独立发版、随时可停
-
-| 轮 | 名字 | 做什么（人话） | 发完用户能感知什么 |
+| # | Round | Contents | Retires / unlocks |
 |---|---|---|---|
-| **R0** | 消息 id | id 从计数器改成内容派生。纯 server 改动 | server 重启后聊天窗口不再整体闪断重建 |
-| **R1** | 机器事实 | probe.* op 族上线；登录态/CLI 能力/系统信息都"问那台机器" | 远程会话的权限模式/effort 列表终于是对的；Manage Agents 探测更快更准 |
-| **R2** | worker 隔离 | daemon 内建 worker 层，现有文件 op 先搬进去 | 无感知（纯地基）；副产品：一台机器上卡死的网络挂载不再可能拖垮该机会话 |
-| **R3** | 转录服务 | 解析搬到字节旁边（详见 3.4）。**先建替代品再拆旧的**：镜像+位置索引先活过一个完整版本周期，旧的 remote-jsonl 缓存才降级为兜底 | 远程会话打开/翻页/搜索明显变快；"聊天记录停在很久以前"这类 bug 绝迹 |
-| **R4** | 用量+事件流 | 用量走查进 daemon；session.events 上线；pool 切换改喝事件流 | 远程会话也有实时配额推算（今天只有本地有）；远程 codex 用量首次可见 |
-| **R5** | 发现下沉 | 会话发现的判定全部设备侧算好 | 侧栏远程列表更准（tmux 识别远程也有了）；三份发现实现只剩一份 |
-| **R6** | 会话所有权 | 本地 spawn 也走 device #0 的 session.open。**adoption-based**：存量 dtach/keeper 会话永远可以继续 attach，绝不强制迁移 | 无感知；结构上三套 spawn 只剩一套 |
-| 之后 | "session brain" | 实时 stdout 解析也下沉设备侧（那 700 行的最终归宿）。**单独的战役**，以上全部是它的前置 | — |
+| R0 | Message ids | content-derived mids, server-only, soak | prerequisite for all device-side parsing |
+| R1 | Machine facts | `probe.*` family; hosts/accounts consume op-first incl. device #0 | probe twin-scripts; wrong-machine CLI facts |
+| R2 | Worker isolation | embedded worker tier; fs-ops through it; loop-lag canary | unlocks file-ops unification and all later heavy ops |
+| R3 | Transcript service | extract the parse stack behind one interface (pure refactor) → daemon-hosted ops dark behind a flag → byte-identical parity → remote reads switch. Replacement substrate (mirror + location index) proven BEFORE the raw remote cache demotes to fallback | the slab-sync integrity class; faster remote history |
+| R4 | Usage + events | walker into the daemon; `session.events`; policy consumers subscribe; local double-feeds during cutover (id dedup makes overlap harmless) | remote live-estimate + remote codex coverage gaps; the shipped scanner and its parity test |
+| R5 | Discovery | on-device claims; local discovery harvests device #0 behind a flag once poll latency is proven | the ssh discovery script (to fallback) |
+| R6 | Session ownership | local creates via device #0 `session.open`; adoption-based — existing sessions stay attachable forever, nothing force-migrated | the local-dtach special path |
+| — | Session brain | device-side live stdout parsing + buffer ownership + spawn resolution | a separate campaign; the above is its prerequisite |
 
-顺序的逻辑：R0 是硬前提；R1 便宜、立刻有用、零风险，适合当第一脚；R2 是所有重活下沉的地基；R3 是最大收益（性能+bug 类消灭）；R4-R6 依次收尾。**每轮之间可以停下来干别的**——这不是一个必须连续执行的大工程。
+## Risk register
 
----
+- **SPOF inversion**: today a server crash leaves sessions alive; a daemon crash takes a
+  machine's session pipes. Mitigations are structural: heavy work only in killable workers;
+  OOM-priority inversion in fleet containers (the kernel should prefer killing the restartable
+  server); hard worker heap bounds; staged rollout + versioned-dir rollback + upgrade drain.
+- **Version skew**: per-op capability gating with per-op fallback (never per-host); a lagging
+  daemon loses features loudly, never silently.
+- **Retirement-order law**: a legacy path dies only after its replacement has survived a full
+  release exercising the rescue paths, and a forced-fallback smoke keeps the fallback exercised
+  (fallbacks drift too).
+- **Vendor-call surface**: the whitelist above, enforced by a guard test.
+- **WAN paging latency**: slab loads move from local-fs seek to a WAN round trip on dialed
+  devices; prefetch + immutable-slab caching absorb it; first-open latency improves massively
+  (parsed KBs instead of raw MBs).
 
-## 6. 风险与对策（展开讲）
+## Enabled later
 
-**风险 1：daemon 变成新的单点故障。**
-今天：server 崩→dtach 里的会话都活着→server 重启接回，用户损失≈0。
-明天：daemon 崩→这台机器所有会话管道断（claude 进程本身 setsid 独立、还活着，但接不回来就等于黑屏）。
-对策（全部是结构性的，不靠"小心"）：重活只进可杀可重启的 worker 线程；fleet 容器里把 OOM 优先级**反转**（内存不够时内核先杀可以无损重启的 server，不是握着会话的 daemon）；worker 内存硬上限；发版走灰度+一键回滚（daemon 的版本目录天然支持）+升级前先排空进行中的操作。
+Multiple servers orchestrating one device (the daemon is already multi-server); peer-to-peer
+instance pairing as "a server is another client of the device protocol"; per-machine capability
+honesty everywhere.
 
-**风险 2：升级半径反转。**
-今天最坏情况=一次坏的 server 发版，重启就好、会话无伤。明天一个坏的 daemon bundle 推到全 fleet=握着会话的那层挂了。对策：见风险 1 的灰度/回滚，加上**每个 op 单独能力协商**——新 server 遇到旧 daemon，逐 op 退回 ssh 老路，绝不整机失能，更绝不静默失能。
+## Repository hygiene rule (2026-08-10)
 
-**风险 3：拆旧路拆早了。**
-remote-jsonl 缓存今天顺带承担着两个救命功能：机器挂了还能只读看历史（2.217.0）、resume 时推断会话在哪台机器（2.218.0）。这两个功能的失败方式是**静默的**（resume 报"找不到会话"、死机器显示空白，没有任何报错指向根因）。对策定成**法律**：任何旧路，必须在替代品（镜像+索引）**活过一个完整版本周期并且专门测过救援路径**之后才能降级；且永久保留一个"强制走兜底"的冒烟测试——因为**我们自己的兜底也会烂**（六周落后教训对兜底同样适用）。
-
-**风险 4：§ban-safety 面扩大。**
-登录态探测代码将跑在 N 台设备上而不是一台受审计的 server 上。将来某个"好心"的 PR 在设备侧加个定时刷新配额——那正是封号触发器。对策：**协议层面**做白名单——设备 op 里唯一允许触达 Anthropic 的是人工触发、限流的配额只读查询（creds.quota，见 3.1.1 的张力讨论），probe-creds 永远只读文件、绝不刷新 token，其余任何设备 op 不得发起 Anthropic 调用；用 grep 类守卫测试固化白名单，不靠 review 时想起来。
-
-**风险 5：广域网翻页变慢。**
-滚动翻页从本地 15ms 文件 seek 变成 拨号设备上 100-300ms 往返。对策：预取下一片、已到手的片段永久缓存（历史不可变）；这换来的是**首次打开**从"同步 45MB"变成"传 50 条消息"，净收益为正。
-
----
-
-## 7. 需要你拍板的问题
-
-1. **方向**：批准这个终态（fat-device + 三修正）吗？
-2. **节奏**：批准 R0-R6 的顺序吗？我的建议是先发 R0+R1（都小、独立有价值、几乎零行为风险），R2 起每轮开工前跟你确认一次。
-3. **配额⟳的发起方**（3.1.1 的张力）：human-gated 的主动配额查询改由持有登录的机器自己发起（我的建议，IP 一致性更安全），还是维持 server 发起？
-4. **可以现在明确说"不"的部分**：如果你对某一轮有保留（比如 R6 会话所有权），前面的轮次不依赖它的批准。
-
----
-
-## 附录：术语表
-
-- **daemon / vibespace-agentd / vibespace-device**：装在每台配对机器上的常驻小进程，负责保持会话活着、执行文件操作、开隧道。`data/bin/vibespace-agentd.js`，esbuild 从 `src/agentd/` 打包。
-- **device #0**：跑在 server 同一台机器上的那个 daemon。和远程机器上装的是同一个二进制。"#0"表示"本机也是一台设备，不搞特殊"。
-- **mux**：daemon 和 server 之间的通信协议（一条连接上复用多个通道，带流控）。`src/agentd/mux.js`。
-- **传输（transport）**：mux 底下的物理通道——本机=unix socket，远程=ssh 管道或 WebSocket 拨入。你提的 socks 等以后就是再加一种传输，上层完全不用改。
-- **dial / 拨入设备**：没有公网 IP 的机器（比如家里的 Mac）主动 WebSocket 连到 server 的配对方式。
-- **keeper**：dial/agentd 之前的旧一代远程会话保活机制（2.124.0），逐步被 daemon 的 pipe-session 取代，存量永久兼容。
-- **JSONL / 转录（transcript）**：claude CLI 把每场对话写在 `~/.claude/projects/**/*.jsonl`，一行一条记录。聊天历史、用量数据都从这里挖。
-- **normalizer / 解析器 / MessageManager**：把 claude 的原始记录流转换成前端渲染用的标准消息格式的那套代码。
-- **slab-sync / remote-jsonl 缓存**：今天查看远程会话历史的机制——把远程转录文件增量搬回 server 的 `data/remote-jsonl/` 再解析。终态被转录服务取代。
-- **twin-set / 双胞胎实现**：同一个语义在代码里存在两份（本地一份远程一份）。本项目事故史的头号根源。
-- **SafeFs**：server 里的文件操作 worker 池（2.109.0），存在的意义是卡死的网络挂载点不能拖垮主进程。终态这个思想搬进 daemon 的 worker 层。
-- **statusline / 被动用量捕获**：§ban-safety 的核心机制——不主动调 Anthropic 接口，而是让 claude 自己的状态栏钩子把配额数字写到本地缓存。
-- **§ban-safety**：封号安全红线（来自一次真实的 Max 订阅封号复盘）：绝不定时/自动用订阅 token 调 Anthropic 接口。
-- **pool / 池化账号**：多个订阅账号合成一个可自动切换的计费身份（2.251.0+）。
-- **normalized mirror / 规范化镜像**：终态里 server 保存的"已解析消息"副本，用途=源机器失联时还能看历史。
-- **op / 能力协商（caps）**：设备 API 的一个操作；新旧版本 daemon 共存时，server 按 op 探测支持度，不支持就走 ssh 老路。
-- **adoption-based 迁移**：新机制只管新会话，存量会话按旧机制继续服务到自然结束，绝不强制转换——本项目所有存储迁移的惯例。
+Formal, neutral design records belong in this public repository. Requirement/communication
+notes, personal identifiers (local usernames, home paths, machine names), and
+organization-specific details do not — they live in private notes outside git. The push guard's
+external denylist enforces this for future commits.

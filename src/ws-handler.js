@@ -222,7 +222,7 @@ function registerWsHandler(wss, ctx) {
             ws.send(JSON.stringify({ type: 'error', message: `Unknown backend "${backend}".` }));
             break;
           }
-          // Resume guard (2.179.0, walter's duplicate-session incident): a
+          // Resume guard (2.179.0, userW's duplicate-session incident): a
           // plain claude --resume REUSES the conversation id — spawning it
           // while the original session is still LIVE puts TWO claude
           // processes on ONE JSONL (transcript double-writer class) and
@@ -256,7 +256,7 @@ function registerWsHandler(wss, ctx) {
           if (data.resume && data.resumeId && !data.ignoreNoConvo) {
             const hit = noConvoRef.map.get(data.resumeId);
             if (hit && Date.now() - hit < 600000) {
-              // VERIFY BEFORE BLAMING (2.227.3, natural's 46MB "修轮子"): the
+              // VERIFY BEFORE BLAMING (2.227.3, userN's 46MB "修轮子"): the
               // CLI's "No conversation found" only proves claude looked in the
               // WRONG PLACE — a stale display-cwd ("Host: /path", the 2.225.2
               // bug) made it search the wrong project dir while the transcript
@@ -328,7 +328,7 @@ function registerWsHandler(wss, ctx) {
           const id = 'sess-' + (++sessionCounterRef.value) + '-' + Date.now();
           // cwd default: a REMOTE/DIAL session with no explicit cwd must land
           // in the DEVICE's home, NOT this server's (B-0d70: the pod's
-          // /home/xingweil doesn't exist on a Mac → `cd` failed and, on the
+          // /home/<user> doesn't exist on a Mac → `cd` failed and, on the
           // pipe-session path, a nonexistent spawn cwd crashed the daemon).
           let cwd = data.cwd || '';
           let cwdRecreated = false; // B-7812: set when the missing cwd was rebuilt on user confirm
@@ -336,7 +336,7 @@ function registerWsHandler(wss, ctx) {
           // sidebar's folder-grouping display cwd "<host name>: /path" leaked
           // into persisted openSpecs, and a resume that `cd`'d into the literal
           // label fell back to $HOME — claude then said "No conversation found"
-          // (real incident, lengyue h200). Strip iff the remainder is a real
+          // (real incident, userL h200). Strip iff the remainder is a real
           // absolute/home path; heals old clients + already-persisted layouts.
           {
             const m = /^[^/~]+: (?=[/~])/.exec(cwd);
@@ -479,7 +479,7 @@ function registerWsHandler(wss, ctx) {
           // the host's login (spawnAccount nulled below) but the PICKED
           // identity must survive onto session._accountId — else the badge
           // and the billing switcher's ✓ degrade to "CLI login @ host" and a
-          // successful switch reads as failed (2.241.0, natural's report).
+          // successful switch reads as failed (2.241.0, userN's report).
           let linkedAccountId = null;
           // ADOPT vs explicit billing pick (B-b87b): an adopted session keeps
           // the SURVIVING child's original billing — the requested account
@@ -783,7 +783,7 @@ function registerWsHandler(wss, ctx) {
                   await execFileAsync('ssh', [...hosts.sshArgs(h2, { multiplex: true }), '--', 'umask 077; mkdir -p "$HOME/.vibespace/bin" "$HOME/.vibespace/editor"; tar -x -C "$HOME/.vibespace/bin"; chmod +x "$HOME/.vibespace/bin"/vibespace-* 2>/dev/null; [ -f "$HOME/.vibespace/bin/code" ] && { mv -f "$HOME/.vibespace/bin/code" "$HOME/.vibespace/editor/code"; chmod +x "$HOME/.vibespace/editor/code"; } || true'],
                     { input: tar, timeout: 20000 });
                   if (integrationOn) {
-                    // NODE FINDER (2.244.4, natural's Novita — the chicken-and-egg
+                    // NODE FINDER (2.244.4, userN's Novita — the chicken-and-egg
                     // behind "hook still says node: not found"): the spawn shell is
                     // POSIX sh (dash on Debian), where nvm never loads — a bare
                     // `node` resolves to NOTHING there, so the register (which
@@ -1262,7 +1262,7 @@ function registerWsHandler(wss, ctx) {
             // sidebar resume (its discovery carries no pipe sids) — the ssh
             // branch never did, so an explicit-host resume ALWAYS swept and
             // respawned even when a healthy surviving claude was one
-            // attach-pipe-session away (lengyue's 12 orphans). Probe first;
+            // attach-pipe-session away (userL's 12 orphans). Probe first;
             // a hit skips the sweep below and adopts via the attach-cli.
             if (data.resume && data.resumeId && !data.keeperSid && !data.accountId && agentdRemote && /^[\w-]+$/.test(data.resumeId)) {
               try {
@@ -1521,7 +1521,7 @@ function registerWsHandler(wss, ctx) {
           // its machine — every retry is a guaranteed ~2s death. Note this is
           // checked at CREATE below via noConvoRef (the refusal must run
           // BEFORE the spawn; see the guard further up).
-          // Crash-loop detector (2.207.0, the natural incident: one
+          // Crash-loop detector (2.207.0, the userN incident: one
           // conversation restarted 4× in 3.5 minutes with zero signal): ≥3
           // creates of the SAME conversation within 10 minutes is a loop —
           // flag it loudly so Diagnostics/opslog show it in real time.
@@ -2030,7 +2030,7 @@ function registerWsHandler(wss, ctx) {
         }
 
         case 'attach': {
-          // PROOF-OF-LIFE ACK (2.234.1, lengyue mass "session died" incident):
+          // PROOF-OF-LIFE ACK (2.234.1, userL mass "session died" incident):
           // the full attach reply can lawfully take >20s (degraded event loop,
           // remote transcript pulls, MB-scale payload bursts on reload) — the
           // client's no-reply fallback used to conclude "session no longer
@@ -2150,7 +2150,7 @@ function registerWsHandler(wss, ctx) {
                 // 2.235.0: warm the JSONL parse cache in the transcript worker
                 // FIRST — the sync rebuild below then reads a warm cache
                 // instead of blocking the loop ~0.5-1s per big-tail parse
-                // (the lengyue-incident spike class). Codex sessions parse
+                // (the userL-incident spike class). Codex sessions parse
                 // their own rollouts sync (unwarmed) — smaller files today.
                 if ((session.backend || 'claude') === 'claude') {
                   try { await warmSessionJsonlAsync(session.claudeSessionId || session.backendSessionId, session.cwd); } catch {}
@@ -2274,7 +2274,7 @@ function registerWsHandler(wss, ctx) {
           // Stale-serverId robustness (2.179.0): after a server restart the
           // client can hold an OLD webui id — a kill that silently no-ops
           // leaves the session alive, and the follow-up resume (billing
-          // switch) then double-writes the same claude id (walter's duplicate
+          // switch) then double-writes the same claude id (userW's duplicate
           // incident). Fall back to resolving by the conversation id.
           if (!activeSessions.has(data.sessionId) && data.backendSessionId) {
             for (const [eid, es] of activeSessions) {

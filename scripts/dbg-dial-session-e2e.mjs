@@ -94,7 +94,7 @@ try {
   check('/api/home?host=<dial> returns the DEVICE home (not local)', homeInfo.home === DEVHOME, JSON.stringify(homeInfo));
 
   // ── /api/file/info?host=<dial> for an EXISTING device dir (was the
-  //    '/Users/xingweil 不存在' 400) ──
+  //    '/Users/<user> 不存在' 400) ──
   const info = await J(`/api/file/info?host=${hostId}&path=${encodeURIComponent(DEVHOME)}`);
   check('/api/file/info?host=<dial> sees an existing device dir', info.isDirectory === true && !info.error, JSON.stringify(info));
   const infoMissing = await J(`/api/file/info?host=${hostId}&path=${encodeURIComponent('/no/such/device/path')}`);
@@ -103,7 +103,7 @@ try {
   // ── THE blank-chat repro: create a CHAT session with a cwd that does NOT
   //    exist on the device (pre-fix: daemon crashed on spawn → blank forever).
   //    We send an explicit bad cwd to prove the daemon survives + falls back. ──
-  const badCwd = '/home/xingweil/does-not-exist-on-device';
+  const badCwd = '/home/<user>/does-not-exist-on-device';
   const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
   await new Promise((r, j) => { ws.on('open', r); ws.on('error', j); });
   const msgs = [];

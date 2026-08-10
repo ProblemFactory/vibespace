@@ -435,7 +435,7 @@ export class DesktopManager {
     // still hidden) cached a BLANK preview and the post-show final render
     // early-returned on an identical digest (real report: preview stayed white
     // after leaving the stage until switching desktops).
-    // _flashingWinId included (2.247.4, walter's report — THIRD strike of the
+    // _flashingWinId included (2.247.4, userW's report — THIRD strike of the
     // 2.151.0 class): flashWindow's cross-desktop preview flash sets it and
     // calls _renderSwitcher, but a mere card click changes nothing else, so
     // the digest matched and the flash never painted.
@@ -684,12 +684,12 @@ export class DesktopManager {
   // proportional gridBounds via _reflowWindows(). 2.254.0: the resize is a
   // CONTENT SCALE (--toolbar-scale zoom on #toolbar + #toolbar-row2), not a
   // fixed height — the toolbar auto-fits its content so there's never a dead
-  // empty band (walter's report), and dragging changes compactness.
+  // empty band (userW's report), and dragging changes compactness.
   _setupToolbarResize() {
     const handle = document.getElementById('toolbar-resize-handle');
     const toolbar = document.getElementById('toolbar');
     if (!handle || !toolbar) return;
-    // 2.254.0 rework (walter's dead-band bug): the toolbar height AUTO-FITS its
+    // 2.254.0 rework (userW's dead-band bug): the toolbar height AUTO-FITS its
     // content rows now; the drag drives --toolbar-scale (a zoom on #toolbar +
     // #toolbar-row2), so it changes content COMPACTNESS — smaller = more
     // desktop, larger = bigger chrome — never a dead empty band. ~230px of drag

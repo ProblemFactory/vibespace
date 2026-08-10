@@ -17,7 +17,7 @@
  *
  * NOTE the POSIX constraint: the spawn shell is often dash (Debian's /bin/sh),
  * where `nvm.sh` sourcing silently does nothing. That is why nodeFinder()
- * exists as well (2.244.4, natural's Novita chicken-and-egg): it locates node
+ * exists as well (2.244.4, userN's Novita chicken-and-egg): it locates node
  * without any shell-specific machinery and exports its dir onto PATH.
  */
 

@@ -2,7 +2,7 @@
 // M2 REAL-SSH e2e: install agentd on an actual host over ssh, then reach its
 // STANDING daemon over a genuine `ssh host -- node agentd.js --stdio` bridge,
 // run a persistent pipe session, DROP the ssh bridge, and reattach by offset.
-// This is the real-machine proof of the M2 architecture (the AIDev test box).
+// This is the real-machine proof of the M2 architecture (the the devbox test box).
 // Usage: node scripts/test-agentd-real-ssh.mjs <hostId>
 //   (hostId from data/hosts.json; needs key auth + node on the host)
 import { createRequire } from 'node:module';

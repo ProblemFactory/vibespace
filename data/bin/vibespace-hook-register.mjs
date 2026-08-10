@@ -4,7 +4,7 @@ import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 const UNINSTALL = process.argv.includes('--uninstall');
-// ABSOLUTE interpreter (2.244.2, natural's Novita: hook error '/bin/sh: 1:
+// ABSOLUTE interpreter (2.244.2, userN's Novita: hook error '/bin/sh: 1:
 // node: not found'): hooks run as claude children via /bin/sh with claude's
 // PATH — hosts with nvm-style node installs (and claude as a native binary)
 // have NO node on that PATH. The register itself runs under node, so its own

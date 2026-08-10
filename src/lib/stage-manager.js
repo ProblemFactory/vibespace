@@ -7,7 +7,7 @@
 // choke point every switch-to-session path funnels through, including
 // createWindow's trailing focus).
 //
-// Ported field lessons from walter's feat/task-centric (task-manager.js):
+// Ported field lessons from userW's feat/task-centric (task-manager.js):
 //  - hero switches are SERIALIZED (lock + latest-wins queue) — two concurrent
 //    async switch pipelines corrupt shared state ("white screen").
 //  - reconcile/replay passes never spawn; spawn keys are tracked with a hard
@@ -39,9 +39,9 @@ export class StageManager {
     this._heroKey = null;          // backend:backendSessionId of the hero
     this._placeholderId = null;    // winId of the placeholder pseudo-window
     this._prevDesktopId = null;    // desktop to return to on leave
-    this._switchInFlight = false;  // walter lesson #1: serialize switches
+    this._switchInFlight = false;  // userW lesson #1: serialize switches
     this._queued = undefined;      // latest queued materialize target
-    this._replayingKeys = new Map(); // walter lesson #2: spawn/replay dedup (key → timeout)
+    this._replayingKeys = new Map(); // userW lesson #2: spawn/replay dedup (key → timeout)
     this._boundAux = new Map();    // winId → heroKey (live bindings this tab)
   }
 
@@ -267,7 +267,7 @@ export class StageManager {
       // resurrected every slot-PARKED ex-hero (stage-created sessions hidden
       // at slot geometry by _deactivateHero accumulate for the whole staged
       // lifetime) — N sessions stacked in the slot on each desktop round
-      // trip (walter's 超级重叠). Parked windows stay hidden; clicking their
+      // trip (userW's 超级重叠). Parked windows stay hidden; clicking their
       // session re-materializes them normally.
       for (const [, win] of this.app.wm.windows) {
         if (!win._hiddenByStage) continue;
@@ -492,7 +492,7 @@ export class StageManager {
     return { left: 0.06 + 0.04 * k, top: 0.08 + 0.04 * k, width: 0.55, height: 0.65 };
   }
 
-  /** Serialized (walter lesson #1): latest queued target wins. */
+  /** Serialized (userW lesson #1): latest queued target wins. */
   materialize(win) {
     if (this._switchInFlight) { this._queued = win.id; return; }
     this._switchInFlight = true;
@@ -553,7 +553,7 @@ export class StageManager {
   /** LRU keep-alive (design §5, v1 CONSERVATIVE): beyond the newest N
    *  workspaces, hidden AUX windows are closed (their records replay them on
    *  the next visit). Session windows are NEVER closed by the stage — strictly
-   *  safer than walter's idle-close incident class (killed sessions, messages
+   *  safer than userW's idle-close incident class (killed sessions, messages
    *  swallowed); hiding a chat/terminal is cheap. */
   _enforceLru() {
     const keep = Math.max(0, Number(this.app.settings?.get('desktop.stageKeepAlive') ?? 3));
@@ -805,7 +805,7 @@ export class StageManager {
   }
 
   /** Restore a hero's recorded workspace: show live hidden members, replay
-   *  missing ones (walter lesson #2: dedup by key, reconcile never spawns). */
+   *  missing ones (userW lesson #2: dedup by key, reconcile never spawns). */
   async _restoreWorkspace(key) {
     if (!key) return;
     const wm = this.app.wm;

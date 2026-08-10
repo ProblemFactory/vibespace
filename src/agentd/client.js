@@ -145,7 +145,7 @@ class DeviceManager {
       // stdin/stdout errors arrive ASYNC as 'error' events on the pipe socket
       // itself — the write wrapper's try/catch only stops sync throws, so a
       // dying ssh child (heartbeat PING → write EPIPE on its stdin) was an
-      // UNCAUGHT exception that took the whole server down (2.241.1, natural's
+      // UNCAUGHT exception that took the whole server down (2.241.1, userN's
       // 10:34 exit-code-1: crashed 28s after boot during the reattach storm).
       // Swallow here; the 'close' event drives mux teardown + reconnect.
       child.stdin.on('error', () => {});

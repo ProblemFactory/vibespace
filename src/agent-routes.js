@@ -746,7 +746,7 @@ app.post('/api/agent/task-backlog', (req, res) => {
 });
 
 // ── Task Group ADMIN for designated MANAGER sessions (2.132.0, issue #21 —
-// walter's majordomo/Jarvis flow: group create/update/bind is a routine
+// userW's majordomo/Jarvis flow: group create/update/bind is a routine
 // agent-driven operation there). DOUBLE-GATED, both off by default:
 //   1. setting agents.allowGroupManagement (user opt-in, Settings)
 //   2. THIS session designated "Group manager" by the user (Session

@@ -10,7 +10,7 @@
  *   · transcript IDENTITY: size + mtime + sha256 (a manual `--resume` of a
  *     live id double-writes or forks; the hash proves divergence afterwards)
  *   · remote process table (the "is it actually still running" question that
- *     took a whole investigation to answer for natural's session)
+ *     took a whole investigation to answer for userN's session)
  * Everything here is READ-ONLY and bounded: child processes with timeouts (a
  * hung mount must never wedge a capture — §2.108.3), size-capped file copies,
  * per-host probe caps, and every step individually try/caught so a dead host

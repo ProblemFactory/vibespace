@@ -456,7 +456,7 @@ class AccountManager {
    *  machines hold a per-account login dir for each account, so EVERY view
    *  (incl. the local one, which probes no host) can say "logged in on X"
    *  instead of a bare "not logged in" (real report: an account whose only
-   *  login lived on AIDev read as dead on the local view). Cleared for a
+   *  login lived on the devbox read as dead on the local view). Cleared for a
    *  host when its probe stops listing the account. */
   noteHostLogins(hostId, ids) {
     if (!hostId) return;
@@ -644,7 +644,7 @@ class AccountManager {
     const loggedIn = backend === 'codex' ? !!this.readCodexSubAuth(a.id).loggedIn : !!this.readSubCreds(a.id).loggedIn;
     // Hosts KNOWN to hold this account's own login (noteHostLogins write-
     // through) minus the host being evaluated: "signed in SOMEWHERE else" is
-    // a different situation than "never signed in anywhere" — natural's
+    // a different situation than "never signed in anywhere" — userN's
     // report: ClaudeLu (held on Novita) showed "never finished signing in"
     // in a CW-H200 session's menu, reading as a broken account (2.244.3).
     const otherHosts = Object.keys(a.hostLogins || {}).filter((h) => h !== hostFacts?.hostId);

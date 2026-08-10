@@ -934,7 +934,7 @@ class Sidebar {
     // panel element — wiping first defeated it on EVERY digest change (a
     // session appearing/exiting, user-state broadcasts…), so the Agents
     // panel rebuilt with a fresh closure and its Machine selection reset to
-    // local mid-use (natural: "login on host → dialog jumps machines"). The
+    // local mid-use (userN: "login on host → dialog jumps machines"). The
     // panel wipes listEl itself when it genuinely rebuilds (tab change).
     if (this._activeTab === 'ports' || this._activeTab === 'agents' || this._activeTab === 'plugins' || this._activeTab === 'system') { this._renderRailPanel?.(); return; }
 

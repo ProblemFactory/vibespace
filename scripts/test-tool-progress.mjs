@@ -3,7 +3,7 @@
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs'; import path from 'node:path';
 import { createRequire } from 'node:module';
-const require = createRequire('/home/xingweil/workspace/AIWorkspace/vibespace/server.js');
+const require = createRequire('/home/<user>/workspace/AIWorkspace/vibespace/server.js');
 let failed = 0; const check=(n,c,e)=>{ if(c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e?' — '+e:''}`);} };
 
 // 1. The dispatch contract: a tool_progress record carries parent_tool_use_id

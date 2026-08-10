@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Attach-error view-only rescue smoke (2.217.0 — lengyue's 12 blank windows):
+// Attach-error view-only rescue smoke (2.217.0 — userL's 12 blank windows):
 //  BUG: after the server loses its sessions (OOM kill, pod recreation), every
 //  saved layout window replays a STALE serverId → attach errors → ChatView
 //  set itself read-only on an EMPTY pane (blank window + Resume bar, no
@@ -8,7 +8,7 @@
 //  remote-jsonl cache scan (works with the session's host machine down).
 // Asserts: (A) local-transcript rescue renders history + Resume bar;
 //          (B) host-less spec whose transcript exists ONLY in the
-//              remote-jsonl cache rescues too (the lengyue h200 case);
+//              remote-jsonl cache rescues too (the userL h200 case);
 //          (C) unknown session (no transcript anywhere) degrades to the
 //              plain error + read-only, no rescue loop.
 // Runs a THROWAWAY server in a git worktree + headless chrome over raw CDP.
