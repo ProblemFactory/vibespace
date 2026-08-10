@@ -194,6 +194,12 @@ export function installSidebarState(SidebarClass) {
     if (state.sessionConfigs) this._sessionConfigs = { ...state.sessionConfigs };
     if (state.sessionGroups) this._sessionGroups = { ...state.sessionGroups };
     if (state.groupFolders) this._groupFolders = { ...state.groupFolders };
+    // snapshot what the SERVER said — _pushUserState diffs against it so a
+    // stale tab can only ever send the keys it actually changed (B-b87b)
+    this._serverStateJson = {};
+    for (const k of ['starredSessions', 'archivedSessions', 'archivedFolders', 'customNames', 'sessionModes', 'sessionConfigs', 'sessionGroups', 'groupFolders']) {
+      if (state[k] !== undefined) this._serverStateJson[k] = JSON.stringify(state[k]);
+    }
     this._writeUserStateToLocalStorage({
       starredSessions: [...this._starredIds], archivedSessions: [...this._archivedIds],
       archivedFolders: [...(this._archivedFolders || [])],
@@ -210,7 +216,24 @@ export function installSidebarState(SidebarClass) {
       sessionGroups: this._sessionGroups, groupFolders: this._groupFolders,
     };
     this._writeUserStateToLocalStorage(state);
+    // CLOBBER BELT (B-b87b): the full-doc POST let a tab acting on a STALE
+    // mirror (open all day, missed broadcasts) silently revert every key it
+    // never touched — stars/renames/configs made in other tabs vanished. Diff
+    // against the last server-applied snapshot and PATCH only the changed
+    // top-level keys; unchanged keys can't travel, so stale damage is bounded
+    // to the key actually edited. No snapshot yet (pre-first-fetch legacy
+    // path) → full POST as before.
     try {
+      const snap = this._serverStateJson;
+      if (snap) {
+        const delta = {};
+        for (const [k, v] of Object.entries(state)) {
+          if (snap[k] !== JSON.stringify(v)) delta[k] = v;
+        }
+        if (!Object.keys(delta).length) return;
+        await fetch('/api/user-state', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(delta) });
+        return;
+      }
       await fetch('/api/user-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(state) });
     } catch {}
   };

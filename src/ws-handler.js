@@ -10,6 +10,13 @@ const { findCodexSessionJsonlPath, extractCodexThreadMeta } = require('./adapter
 const { cwdToProjectDir, findSessionJsonlPath, warmSessionJsonlAsync } = require('./session-store');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
+// Remote twin of the LOCAL ambient-oat strip (B-211a AGENT_ENV_DROP): a host
+// profile exporting CLAUDE_CODE_OAUTH_TOKEN silently re-bills EVERY remote
+// spawn (top precedence in the CLI's credential getter) — the local spawn env
+// deletes it, but `sh -lc` re-sources the host's profiles. Runs after profile
+// sourcing, before the command-prefix assignments (a deliberate oat spawn's
+// own `CLAUDE_CODE_OAUTH_TOKEN="$(cat …)"` prefix survives an earlier unset).
+const AMBIENT_OAT_UNSET = 'unset CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR 2>/dev/null; ';
 
 // Crash-loop detector state (2.207.0): conversation id → recent create times
 const crashLoopRef = {};
@@ -124,7 +131,7 @@ function registerWsHandler(wss, ctx) {
     readLayouts, writeLayouts, getSyncStore, serverSetting, integrationEnabled, agentdRemote, dialBridge,
     sessionCounterRef, createSessionMessages,
     SOCKETS_DIR, BUFFERS_DIR, PTY_WRAPPER, CHAT_WRAPPER,
-    NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, PORT, X_ENV,
+    NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV,
     adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
     accounts, scheduleCtxSync, activeSessionsPayload,
     USAGE_STATUSLINE_CMD, userStatuslineCmd,
@@ -437,6 +444,17 @@ function registerWsHandler(wss, ctx) {
           // and the billing switcher's ✓ degrade to "CLI login @ host" and a
           // successful switch reads as failed (2.241.0, natural's report).
           let linkedAccountId = null;
+          // ADOPT vs explicit billing pick (B-b87b): an adopted session keeps
+          // the SURVIVING child's original billing — the requested account
+          // would be stamped on the badge but never take effect (billing lie,
+          // exactly what the switcher exists to change). With an explicit
+          // pick, skip adoption entirely: fall through to the writer sweep +
+          // respawn so the pick is real. Adoption probes below carry the same
+          // !data.accountId gate.
+          if (data.accountId && data.keeperSid) {
+            console.log(`[session] explicit account pick ${String(data.accountId).slice(0, 12)} — skipping keeper adopt of ${data.keeperSid} (respawn applies the pick)`);
+            delete data.keeperSid; delete data.keeperKind;
+          }
           if ((backend === 'claude' || backend === 'codex') && accounts) {
             try { spawnAccount = accounts.resolveForSpawn(data.accountId, backend); }
             catch (e) {
@@ -490,6 +508,18 @@ function registerWsHandler(wss, ctx) {
             // resuming a remote session with no account picked errored).
             // An EXPLICITLY chosen subscription still errors with guidance,
             // and an opted-in shipSubscriptionToRemote still ships.
+            if (spawnAccount?.pooled && data.hostId) {
+              // Pools are LOCAL-ONLY (the symlink dir lives on this machine;
+              // its path in a remote spawn env is meaningless — the session
+              // would silently bill the host's own login while badged as the
+              // pool, B-b87b). Default-picked pool → fall back to the host's
+              // login honestly; explicitly picked → refuse with guidance.
+              if (data.accountId) {
+                ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'Account error: pooled accounts are local-only (the pool switches a credentials directory on THIS machine) — pick a real account for remote sessions, or the host’s own CLI login' }));
+                return;
+              }
+              spawnAccount = null; // = the host's own login
+            }
             if (spawnAccount?.remoteCreds && !spawnAccount.secret && data.hostId && !data.accountId) {
               let allowShip = false;
               try { allowShip = !!serverSetting('accounts.shipSubscriptionToRemote'); } catch {}
@@ -676,8 +706,12 @@ function registerWsHandler(wss, ctx) {
             const names = integrationOn
               ? [...require('./hosts').HostManager.AGENT_TOOLS, 'code']
               : (sessionMode === 'chat' ? ['vibespace-remote-keeper'] : []);
-            const toolDir = path.dirname(EDITOR_CMD);
-            const present = names.filter((n) => { try { return fs.statSync(path.join(toolDir, n)).isFile(); } catch { return false; } });
+            // tools live in AGENT_BIN_DIR; the fake `code` moved to its own
+            // editor/ subdir (B-b87b, local-PATH shadow fix) — tar it from
+            // there via a second -C so the remote layout is unchanged
+            const toolDir = AGENT_BIN_DIR;
+            const dirFor = (n) => (n === 'code' ? path.dirname(EDITOR_CMD) : toolDir);
+            const present = names.filter((n) => { try { return fs.statSync(path.join(dirFor(n), n)).isFile(); } catch { return false; } });
             if (present.length) {
               try {
                 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-tok-'));
@@ -688,7 +722,9 @@ function registerWsHandler(wss, ctx) {
                     fs.writeFileSync(path.join(tmpDir, tokName), session.agentToken, { mode: 0o600 });
                     tokArgs.push('-C', tmpDir, tokName);
                   }
-                  const tar = execFileSync('tar', ['-c', '-C', toolDir, ...present, ...tokArgs], { timeout: 15000, maxBuffer: 8 * 1024 * 1024 });
+                  const tarArgs = ['-c', '-C', toolDir, ...present.filter((n) => n !== 'code')];
+                  if (present.includes('code')) tarArgs.push('-C', path.dirname(EDITOR_CMD), 'code');
+                  const tar = execFileSync('tar', [...tarArgs, ...tokArgs], { timeout: 15000, maxBuffer: 8 * 1024 * 1024 });
                   const h2 = hosts.get(data.hostId);
                   execFileSync('ssh', [...hosts.sshArgs(h2, { multiplex: true }), '--', 'umask 077; mkdir -p "$HOME/.vibespace/bin" "$HOME/.vibespace/editor"; tar -x -C "$HOME/.vibespace/bin"; chmod +x "$HOME/.vibespace/bin"/vibespace-* 2>/dev/null; [ -f "$HOME/.vibespace/bin/code" ] && { mv -f "$HOME/.vibespace/bin/code" "$HOME/.vibespace/editor/code"; chmod +x "$HOME/.vibespace/editor/code"; } || true'],
                     { input: tar, timeout: 20000 });
@@ -755,7 +791,7 @@ function registerWsHandler(wss, ctx) {
             let rf = null;
             if (integrationOn) {
               await dm.fsMkdir(bin);
-              const toolDir = path.dirname(EDITOR_CMD);
+              const toolDir = AGENT_BIN_DIR;
               const names = require('./hosts').HostManager.AGENT_TOOLS;
               for (const n of names) {
                 try { const buf = fs.readFileSync(path.join(toolDir, n)); await dm.fsWrite(`${bin}/${n}`, buf); } catch { }
@@ -941,7 +977,7 @@ function registerWsHandler(wss, ctx) {
                 });
                 // tools PATH only while integrated — leftover tools from an
                 // earlier ON spawn must not be name-resolvable in a pristine one
-                const shellCmd = `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:${integrationOn ? '$HOME/.vibespace/bin:' : ''}$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ${shellResolve}${da.tokenAssign}${dialAcctAssign}exec env `
+                const shellCmd = `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:${integrationOn ? '$HOME/.vibespace/bin:' : ''}$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ${shellResolve}${AMBIENT_OAT_UNSET}${da.tokenAssign}${dialAcctAssign}exec env `
                   + [...da.envPairs.map(shq), ...spawnEnvPairs.map(shq)].join(' ')
                   + ' ' + [rcmd0, ...(backend === 'shell' ? ['-l'] : spawnArgs.map(shq))].join(' ');
                 const cfg = {
@@ -978,7 +1014,7 @@ function registerWsHandler(wss, ctx) {
             // acctEnv rides as a SHELL PREFIX ASSIGNMENT before exec — the shell
             // setenvs it internally, so the VALUE never appears in any argv
             // (an `env KEY=$(cat …)` argument would expand into env's argv).
-            const inner = ra.prelude + `cd ${shq(cwd)} 2>/dev/null; ` + ra.tokenAssign + acctEnv + `exec env TERM=xterm-256color COLORTERM=truecolor `
+            const inner = ra.prelude + `cd ${shq(cwd)} 2>/dev/null; ` + AMBIENT_OAT_UNSET + ra.tokenAssign + acctEnv + `exec env TERM=xterm-256color COLORTERM=truecolor `
               + [...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq), rcmd, ...spawnArgs.map(shq)].join(' ');
             spawnCmd = 'ssh';
             spawnArgs = [...hosts.sshArgs(h, { tty: true, reverse: ra.reverse }), '--', `dtach -A /tmp/vs-${id} -r winch sh -lc ${shq(inner)}`];
@@ -1094,7 +1130,7 @@ done`;
               // Dial discovery carries no pipe sids, so a plain sidebar resume
               // never arrives with keeperSid — probe the device's pipe-session
               // store directly and ADOPT a surviving claude over respawning.
-              if (!dialKeeperSid && data.resume && data.resumeId && /^[\w-]+$/.test(data.resumeId)) {
+              if (!dialKeeperSid && data.resume && data.resumeId && !data.accountId && /^[\w-]+$/.test(data.resumeId)) {
                 try {
                   const k = await hosts.findKeeperFor(h.id, data.resumeId);
                   if (k?.sid) { dialKeeperSid = k.sid; console.log(`[dial] live pipe session ${k.sid} holds ${data.resumeId.slice(0, 8)} — attaching instead of spawning a second writer`); }
@@ -1125,7 +1161,7 @@ done`;
                   console.warn('[dial] agent setup degraded:', e.message); return { envPairs: [], tokenAssign: '' };
                 });
                 // tools PATH only while integrated (see the pty branch note)
-                const shellCmd = `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:${integrationOn ? '$HOME/.vibespace/bin:' : ''}$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ${da.tokenAssign}${dialAcctAssign}exec env `
+                const shellCmd = `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:${integrationOn ? '$HOME/.vibespace/bin:' : ''}$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ${AMBIENT_OAT_UNSET}${da.tokenAssign}${dialAcctAssign}exec env `
                   + [...da.envPairs.map(shq), ...spawnEnvPairs.map(shq)].join(' ')
                   + ' ' + [rcmd, ...rargs.map(shq)].join(' ');
                 const cfg = {
@@ -1185,7 +1221,7 @@ done`;
             // respawned even when a healthy surviving claude was one
             // attach-pipe-session away (lengyue's 12 orphans). Probe first;
             // a hit skips the sweep below and adopts via the attach-cli.
-            if (data.resume && data.resumeId && !data.keeperSid && agentdRemote && /^[\w-]+$/.test(data.resumeId)) {
+            if (data.resume && data.resumeId && !data.keeperSid && !data.accountId && agentdRemote && /^[\w-]+$/.test(data.resumeId)) {
               try {
                 const k = await hosts.findKeeperFor(h.id, data.resumeId);
                 if (k?.sid) { data.keeperSid = k.sid; data.keeperKind = k.kind; console.log(`[remote] live ${k.kind} session ${k.sid} holds ${data.resumeId.slice(0, 8)} — adopting instead of sweep+respawn`); }
@@ -1240,7 +1276,7 @@ done`;
                 // the child claude runs under `sh -lc` on the host so the
                 // existing shell-expanded prefixes (token file reads, $HOME
                 // account paths) keep their exact semantics
-                const shellCmd = ra.prelude + `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ` + ra.tokenAssign + acctEnv + `exec env `
+                const shellCmd = ra.prelude + `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ` + AMBIENT_OAT_UNSET + ra.tokenAssign + acctEnv + `exec env `
                   + [...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq)].join(' ')
                   + ' ' + [rcmd, ...rargs.map(shq)].join(' ');
                 const remoteCmd = `export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; exec node "$HOME/.vibespace/agentd/current/agentd.js" --stdio`;
@@ -1272,7 +1308,7 @@ done`;
               }
             }
             if (!agentdMode || (keeperSid && !agentdAttach)) {
-              const inner = ra.prelude + `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ` + ra.tokenAssign + acctEnv + `exec env `
+              const inner = ra.prelude + `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ` + AMBIENT_OAT_UNSET + ra.tokenAssign + acctEnv + `exec env `
                 + [...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq)].join(' ')
                 + runTail;
               spawnCmd = 'ssh';
@@ -1337,7 +1373,10 @@ done`;
               // tools, codex wrapper) guards on api AND token so token-alone is
               // inert. The CLI itself never reads either var.
               ...(integrationOn ? [`VIBESPACE_API=http://127.0.0.1:${PORT}`] : []),
-              `PATH=${integrationOn ? path.dirname(EDITOR_CMD) + ':' : ''}${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
+              // AGENT_BIN_DIR (vibespace-* tools), NOT dirname(EDITOR_CMD):
+              // the fake `code` lives in editor/ precisely so PATH never
+              // resolves it (B-b87b — it shadowed real VS Code locally)
+              `PATH=${integrationOn ? AGENT_BIN_DIR + ':' : ''}${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`,
               `VIBESPACE_SESSION_TOKEN=${session.agentToken}`,
               // Probed working X display (see server.js detectXDisplay) — the CLI
               // reads the clipboard itself on Ctrl+V, so it needs BOTH vars
@@ -1443,6 +1482,12 @@ done`;
             agentdSession: !!session._agentdSession,
             cwdRecreated: session._cwdRecreated || undefined, // B-7812: agent notice pending
             forkRequested: !!session._forkRequested,
+            // implicit-fork adoption (2.218.0) is armed by _resumeSpawn and
+            // disarmed by _sawFirstId — neither survived a restart, so a
+            // restored resume whose claude implicitly forked could never be
+            // adopted (B-b87b; the exact 2.219.0 fork-divergence class)
+            resumeSpawn: !!session._resumeSpawn,
+            sawFirstId: !!session._sawFirstId,
             remotePort: session._remotePort || null, // tools back-tunnel port (boot re-adopt revives it)
             backend: session.backend,
             backendSessionId: session.backendSessionId,
@@ -2224,9 +2269,16 @@ done`;
                   // restarts — a restored agentd session's keeper-stop was a
                   // silent no-op and the remote claude ran on (double-writer
                   // class). Both shapes no-op harmlessly when inapplicable.
+                  // agentd-ADOPTED sessions run under the pipe sid = keeperSid,
+                  // NOT the webui id — the state-file leg used to read
+                  // sessions/<webui-id>.json (never exists for adopted) and the
+                  // remote claude survived every Terminate (B-b87b; mirrors the
+                  // dial branch's sidSafe above). The keeper leg is a harmless
+                  // no-op for agentd sids, kept for legacy keeper sessions.
+                  const sshSidSafe = String(session.keeperSid || data.sessionId).replace(/[^\w-]/g, '');
                   execFile('ssh', [...hosts.sshArgs(h), '--',
-                    `M="$HOME/.vibespace/agentd/state/sessions/${data.sessionId}.json"; P=$(grep -o '"childPid":[0-9]*' "$M" 2>/dev/null | cut -d: -f2); [ -n "$P" ] && kill $P 2>/dev/null; `
-                    + `node "$HOME/.vibespace/bin/vibespace-remote-keeper" stop ${session.keeperSid || data.sessionId} 2>/dev/null; `
+                    `M="$HOME/.vibespace/agentd/state/sessions/${sshSidSafe}.json"; P=$(grep -o '"childPid":[0-9]*' "$M" 2>/dev/null | cut -d: -f2); [ -n "$P" ] && kill $P 2>/dev/null; `
+                    + `node "$HOME/.vibespace/bin/vibespace-remote-keeper" stop ${sshSidSafe} 2>/dev/null; `
                     + `sleep 2; [ -n "$P" ] && kill -9 $P 2>/dev/null; true; rm -f "$HOME/.vibespace/bin/.tok-${data.sessionId}"`],
                     { timeout: 15000 }, () => { try { hosts.invalidateDiscovery(session.host); } catch {} });
                 } else {

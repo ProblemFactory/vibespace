@@ -60,6 +60,42 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   ck('pair: base matched by prevFetchedAt (interleaved stranger ignored)', approx(p4.sevenDay[0].du, 0.01));
 }
 
+// ── bounce-back taint (2.267.0, the Personal Max flap poison) ────────────────
+// A stale sibling cache file briefly promoted to freshest anchors a week-old
+// reading: the DECREASE pair into it is voided (anomaly), and the RECOVERY
+// pair out of it (huge du, near-zero cost) must be excluded too — it taught a
+// ~30%-hot fable rate in the field. The taint stops after one step.
+{
+  const b0 = mkAnchor(T0, { u7: 0.51, uf: 0.51 });
+  const b1 = mkAnchor(T0 + HR, { u7: 0.19, uf: 0.19, prevFetchedAt: T0, costSince: cs(1.7) });          // stale reading — anomaly
+  const b2 = mkAnchor(T0 + 2 * HR, { u7: 0.51, uf: 0.51, prevFetchedAt: T0 + HR, costSince: cs(1.7) }); // bounce-back
+  const b3 = mkAnchor(T0 + 3 * HR, { u7: 0.53, uf: 0.53, prevFetchedAt: T0 + 2 * HR, costSince: cs(20) }); // clean again
+  const tp = est.extractPairs([b0, b1, b2, b3]);
+  ck('taint: decrease pair voided AND its bounce-back excluded — only the clean pair survives',
+    tp.sevenDay?.length === 1 && approx(tp.sevenDay[0].du, 0.02) && tp.sevenDay[0].cost === 20);
+  ck('taint: scoped bucket tainted independently, same outcome', tp['scoped:fable']?.length === 1 && approx(tp['scoped:fable'][0].du, 0.02));
+  // without the taint the bounce pair would have added du 0.32 for $1.7
+  const rt = est.learnRates([b0, b1, b2, b3], { priors: { sevenDay: 1730 } });
+  ck('taint: learned 7d rate ignores the flap (implied full stays near prior)', rt.sevenDay.impliedFullUsd > 1000);
+}
+
+// ── predictCalib honesty guards (2.267.0) ────────────────────────────────────
+{
+  const rates = { fiveHour: { rate: 0.002 }, sevenDay: { rate: 0.00058 } };
+  const prev = mkAnchor(T0, { u5: 0.98, u7: 0.5 });
+  prev.buckets.fiveHour.u = 1.0; // banner-marked at cap
+  const nb = mkAnchor(T0 + HR, { u5: 0, u7: 0.51 }).buckets;
+  const c1 = est.predictCalib(prev, nb, rates, cs(5));
+  ck('calib: at-cap base (banner mark) skipped — no p100/a0 rows', !c1?.fiveHour && !!c1?.sevenDay);
+  const prev2 = mkAnchor(T0, { u5: 0.4, u7: 0.5 });
+  const nb2 = mkAnchor(T0 + HR, { u5: 0.5, u7: 0.6 }).buckets;
+  nb2.fiveHour.resetsAt = 0; // defensive resetsAt-less reading
+  const c2 = est.predictCalib(prev2, nb2, rates, cs(5));
+  ck('calib: missing resetsAt on either side skips the bucket', !c2?.fiveHour && !!c2?.sevenDay);
+  const c3 = est.predictCalib(prev2, mkAnchor(T0 + 6 * HR, { u5: 0.5, u7: 0.6, r5: Math.floor(T0 / 1000) + 7200 }).buckets, rates, cs(5), 6 * 3600);
+  ck('calib: span beyond the 5h window skips fiveHour, keeps sevenDay', !c3?.fiveHour && !!c3?.sevenDay);
+}
+
 // ── learnRates: prior blend → observation dominance ──────────────────────────
 {
   const priors = { fiveHour: 500, sevenDay: 1730, 'scoped:fable': 875 };

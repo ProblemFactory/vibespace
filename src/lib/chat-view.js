@@ -1920,9 +1920,9 @@ class ChatView {
     const gen = this._reattachGen;
     let waits = 0;
     const checkOrRetry = () => {
-      if (gen !== this._reattachGen) return; // superseded by a newer reconnect cycle
-      if (this._readOnly || this._disconnected) return; // resolved / offline (next reconnect restarts the ladder)
-      if ((this._lastAttachedAt || 0) >= reattachAt) return; // attached — done
+      if (gen !== this._reattachGen) { this.ws.offGlobal(handler); return; } // superseded by a newer reconnect cycle (which armed its own handler)
+      if (this._readOnly || this._disconnected) { this.ws.offGlobal(handler); return; } // resolved / offline (next reconnect restarts the ladder)
+      if ((this._lastAttachedAt || 0) >= reattachAt) return; // attached — done (the handler self-removed when it ran)
       const acked = (this._lastAttachAckAt || 0) >= reattachAt;
       waits++;
       if (waits < 5) {
@@ -1930,6 +1930,7 @@ class ChatView {
         setTimeout(checkOrRetry, 25000);
         return;
       }
+      this.ws.offGlobal(handler);
       this._hideTyping();
       if (this._tryViewOnlyRescue()) return;
       this._renderers.appendSystem(acked
@@ -1943,6 +1944,7 @@ class ChatView {
     const handler = (msg) => {
       if (msg.type !== 'attached' || msg.sessionId !== this.sessionId) return;
       this.ws.offGlobal(handler);
+      if (gen !== this._reattachGen) return; // a newer reconnect cycle owns the view now
       if (this._chatInput) this._chatInput.setDisconnected(false);
       // Server normalizer was REBUILT (server restart): message IDs are a
       // plain per-normalizer counter, so the new numbering collides with what
@@ -1961,11 +1963,13 @@ class ChatView {
       this._reattachCatchUp();
     };
     this.ws.onGlobal(handler);
-    // Safety: re-enable after 30s even if attached never arrives (was 5s —
-    // a huge-transcript attach takes longer and the early removal killed the
-    // catch-up while leaving the input live on a stale view; 2.219.0 audit)
+    // Safety: re-enable INPUT after 30s even if attached never arrives. The
+    // handler itself must stay armed for the whole retry-ladder window — an
+    // 'attached' landing between 30s and the ~2min deadline used to be
+    // half-processed (the ladder saw _lastAttachedAt and stood down, but the
+    // catch-up / epoch full-reset never ran → silently stale view; B-b87b).
+    // The ladder's terminal paths remove the handler instead.
     setTimeout(() => {
-      this.ws.offGlobal(handler);
       if (this._chatInput) this._chatInput.setDisconnected(false);
     }, 30000);
   }

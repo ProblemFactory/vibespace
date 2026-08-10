@@ -12,6 +12,37 @@
 
 const { spawn, execFile } = require('child_process');
 const path = require('path');
+const fs = require('fs');
+
+// ONE archive-listing parser for local AND remote (B-b87b: RemoteFs used to
+// return bare-string entries while /api/archive/list returned
+// {name,size,isDirectory} objects — the viewer read e.name and crashed on
+// every remote archive). files.js requires this too so the shapes can't
+// drift again.
+const ARCHIVE_LIST_MAX = 20000;
+function parseArchiveListing(kind, out) {
+  const entries = [];
+  for (const line of String(out || '').split('\n')) {
+    let name, size, isDirectory;
+    if (kind === 'zip') {
+      // "     1234  2026-07-03 12:00   dir/file.txt" (unzip -l -qq; totals row won't match)
+      const m = line.match(/^\s*(\d+)\s+[\d-]+\s+[\d:]+\s+(.+)$/);
+      if (!m) continue;
+      name = m[2]; size = parseInt(m[1]); isDirectory = name.endsWith('/');
+    } else {
+      // "drwxr-xr-x user/grp 0 2026-07-03 12:00 dir/" (GNU tar -tvf)
+      const m = line.match(/^([\-dlrwxsStT]{10})\s+\S+\s+(\d+)\s+\S+\s+\S+\s+(.+)$/);
+      if (!m) continue;
+      name = m[3];
+      const arrow = name.indexOf(' -> '); // symlink target
+      if (arrow > 0) name = name.substring(0, arrow);
+      size = parseInt(m[2]); isDirectory = m[1][0] === 'd';
+    }
+    entries.push({ name, size, isDirectory });
+    if (entries.length > ARCHIVE_LIST_MAX) break;
+  }
+  return { type: kind, entries: entries.slice(0, ARCHIVE_LIST_MAX), total: entries.length, truncated: entries.length > ARCHIVE_LIST_MAX };
+}
 
 const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 // shq for PATHS: a quoted `~` never expands ('~/Downloads/x' landed in a
@@ -323,9 +354,62 @@ class RemoteFs {
   // Archives
   async archiveList(id, archivePath) {
     const ap = shq(archivePath);
-    const cmd = `case ${ap} in *.zip) unzip -l ${ap} 2>/dev/null | awk 'NR>3{if($4)print $4}' | head -20000;; *) tar -tf ${ap} 2>/dev/null | head -20000;; esac`;
-    const out = (await this._run(id, cmd, { timeoutMs: 30000 })).toString();
-    return { entries: out.split('\n').filter(Boolean).filter(e => e !== '----') };
+    const kind = /\.zip$/i.test(archivePath) ? 'zip' : 'tar';
+    const cmd = kind === 'zip'
+      ? `unzip -l -qq ${ap} 2>/dev/null | head -20050`
+      : `tar -tvf ${ap} 2>/dev/null | head -20050`;
+    const out = (await this._run(id, cmd, { timeoutMs: 30000, maxBuffer: 32 * 1024 * 1024 })).toString();
+    const parsed = parseArchiveListing(kind, out);
+    if (parsed.entries.length || kind === 'zip' || !out.trim()) return parsed;
+    // BSD tar (macOS hosts) lists a different -tvf column layout the GNU
+    // regex can't read — degrade to plain names rather than an empty viewer
+    const names = (await this._run(id, `tar -tf ${ap} 2>/dev/null | head -20000`, { timeoutMs: 30000, maxBuffer: 32 * 1024 * 1024 })).toString();
+    const entries = names.split('\n').filter(Boolean).map((n) => ({ name: n, size: 0, isDirectory: n.endsWith('/') }));
+    return { type: kind, entries, total: entries.length, truncated: false };
+  }
+  // Stream a remote shell command's stdout into a LOCAL file, binary-safe on
+  // both transports, size-capped. Core for archive entry extraction and the
+  // local-parser previews (xlsx/docx/csv) that have no remote library.
+  async _streamCmdToFile(id, cmd, outPath, cap, { timeoutMs = 120000, what = 'file' } = {}) {
+    const h = this._host(id);
+    const ws = fs.createWriteStream(outPath);
+    let written = 0;
+    if (h?.transport === 'dial') {
+      const dm = await this._dev(id);
+      if (!dm) { try { ws.destroy(); } catch { } throw new Error(`device "${h.name}" is offline`); }
+      let over = false;
+      const r = await dm.runStream('sh', ['-c', cmd], { onData: (b) => { written += b.length; if (written > cap) { over = true; return; } try { ws.write(b); } catch { } } });
+      await new Promise((done) => ws.end(done));
+      if (over) throw Object.assign(new Error(`${what} too large (>${Math.round(cap / 1048576)}MB)`), { status: 413 });
+      if (r.code !== 0 && written === 0) throw new Error(`${what} read failed (exit ${r.code})`);
+      return { size: written };
+    }
+    const child = this._spawn(id, `${cmd} | head -c ${cap + 1}`);
+    child.stdout.on('data', (b) => { written += b.length; });
+    child.stdout.pipe(ws);
+    child.stderr.on('data', () => { });
+    const timer = setTimeout(() => { try { child.kill(); } catch { } }, timeoutMs);
+    const code = await new Promise((resolve) => child.on('close', resolve));
+    clearTimeout(timer);
+    await new Promise((done) => (ws.writableFinished ? done() : ws.on('finish', done)));
+    if (written > cap) throw Object.assign(new Error(`${what} too large (>${Math.round(cap / 1048576)}MB)`), { status: 413 });
+    if (code !== 0 && written === 0) throw new Error(`${what} read failed (exit ${code})`);
+    return { size: written };
+  }
+  // Pull one remote file to a local path (bounded).
+  fetchToLocal(id, filePath, outPath, cap = 20 * 1024 * 1024) {
+    return this._streamCmdToFile(id, `cat ${shq(filePath)}`, outPath, cap, { what: 'file' });
+  }
+  // Extract ONE entry off the host into a LOCAL file (the archive viewer's
+  // entry-click path — it opens the temp file through the normal viewer
+  // pipeline, which is local by definition).
+  archiveExtractEntry(id, archivePath, entry, outPath) {
+    const ap = shq(archivePath);
+    // unzip treats [ ] * ? as globs — escape for a literal member name
+    const zipLit = shq(entry.replace(/([\[\]*?])/g, '\\$1'));
+    const en = shq(entry);
+    const cmd = `case ${ap} in *.zip) unzip -p ${ap} ${zipLit};; *) tar -xOf ${ap} ${en};; esac`;
+    return this._streamCmdToFile(id, cmd, outPath, 200 * 1024 * 1024, { what: 'entry' });
   }
   async archiveExtract(id, archivePath, destDir) {
     const ap = shq(archivePath), dd = shq(destDir);
@@ -345,4 +429,4 @@ class RemoteFs {
   dirComplete(id, input) { return this.hosts.dirComplete(id, input); }
 }
 
-module.exports = { RemoteFs };
+module.exports = { RemoteFs, parseArchiveListing };

@@ -3322,6 +3322,8 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
   white-space: nowrap; font-variant-numeric: tabular-nums;
 }
 .bsw-usage .bsw-seg { display: inline-flex; gap: 3px; align-items: baseline; }
+/* dead-reckoned (estimated) value — same dashed language as the est donuts */
+.bsw-usage .bsw-seg.bsw-est .bsw-pct { text-decoration: underline dashed 1px; text-underline-offset: 2px; }
 .bsw-usage .bsw-k, .bsw-usage .bsw-age { font-size: 9px; color: var(--text-dim); }
 .bsw-usage .bsw-pct { font-size: 11px; font-weight: 600; }
 

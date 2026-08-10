@@ -1,4 +1,4 @@
-import { escHtml, createPopover, showContextMenu, showInputDialog, showConfirmDialog, showToast, taskGroupColor, seqTaskColor } from './utils.js';
+import { escHtml, createPopover, showContextMenu, showInputDialog, showConfirmDialog, showToast, taskGroupColor, seqTaskColor, stripCwdHostLabel } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { track } from './telemetry-client.js';
 import { t as tr } from './i18n.js';
@@ -362,7 +362,12 @@ export function installSidebarTasks(SidebarClass) {
   // symlink-resolved realCwd (stamped by discovery). Board, Task View and the
   // expanded card must all agree, so they all call this.
   proto._sessionFolderMatch = function(s, folderRecs) {
-    const cwds = [s.cwd, s.realCwd].filter(Boolean);
+    // Remote webui sessions carry the merged DISPLAY cwd "<host>: /path"
+    // (the sidebar's grouping key) — strip the label before comparing or
+    // every remote session fails folder-match while the server's
+    // groupsForSession (which sees the raw cwd) says it belongs (B-b87b:
+    // board membership and injected context disagreed for remote sessions).
+    const cwds = [stripCwdHostLabel(s.cwd), s.realCwd].filter(Boolean);
     for (const f of folderRecs) {
       for (const c of cwds) {
         if (c === f.path || (f.recursive && c.startsWith(f.path + '/'))) return true;

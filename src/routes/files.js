@@ -42,6 +42,7 @@ const remotePath = (p) => String(p || '~');
 // (no isolation, but file browsing keeps working). Timeouts surface as
 // err.status===503 → the routes map that to a "storage not responding" reply.
 const { runOp: _runOpInline } = require('../safe-fs-worker');
+const { parseArchiveListing } = require('../remote-fs');
 function sfs(req) {
   return req.app.locals.safeFs || {
     call: async (op, payload) => (await _runOpInline(op, payload)).result,
@@ -239,8 +240,38 @@ router.get('/api/download', async (req, res) => {
 });
 
 // Preview Excel files
+// Remote spreadsheet/doc/CSV previews (B-b87b): the parsers (xlsx/mammoth/
+// csvRange) are LOCAL-only — pull the remote file into a size+TTL-validated
+// local temp and run the SAME local parse. The cache matters for the CSV
+// pager, which re-requests row ranges on every scroll.
+const _remoteTmpCache = new Map(); // `${host}|${path}` → {tmp, size, at}
+async function remoteToLocalTmp(R, p, capBytes) {
+  const info = await R.fs.info(R.host, p);
+  if ((info.size || 0) > capBytes) {
+    const e = new Error(`file too large to preview (${((info.size || 0) / 1048576).toFixed(1)} MB > ${Math.round(capBytes / 1048576)} MB)`);
+    e.status = 413; throw e;
+  }
+  const key = `${R.host}|${p}`;
+  const hit = _remoteTmpCache.get(key);
+  if (hit && hit.size === info.size && Date.now() - hit.at < 60000 && fs.existsSync(hit.tmp)) return hit.tmp;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'webui-remote-'));
+  const tmp = path.join(dir, path.basename(p) || 'file');
+  await R.fs.fetchToLocal(R.host, p, tmp, capBytes);
+  if (hit) { try { fs.rmSync(path.dirname(hit.tmp), { recursive: true }); } catch {} }
+  _remoteTmpCache.set(key, { tmp, size: info.size, at: Date.now() });
+  if (_remoteTmpCache.size > 8) {
+    const [k0, v0] = _remoteTmpCache.entries().next().value;
+    try { fs.rmSync(path.dirname(v0.tmp), { recursive: true }); } catch {}
+    _remoteTmpCache.delete(k0);
+  }
+  return tmp;
+}
+
 router.get('/api/file/excel', async (req, res) => {
-  const filePath = safePath(req.query.path);
+  const R = rfs(req);
+  let filePath;
+  try { filePath = R ? await remoteToLocalTmp(R, remotePath(req.query.path), 20 * 1024 * 1024) : safePath(req.query.path); }
+  catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   try {
     // Size guard (like /api/file/content's 10MB cap): XLSX.readFile parses the
     // whole workbook synchronously — a huge file blocks the entire server. The
@@ -262,8 +293,11 @@ router.get('/api/file/excel', async (req, res) => {
 });
 
 // Preview Word files
-router.get('/api/file/docx', (req, res) => {
-  const filePath = safePath(req.query.path);
+router.get('/api/file/docx', async (req, res) => {
+  const R = rfs(req);
+  let filePath;
+  try { filePath = R ? await remoteToLocalTmp(R, remotePath(req.query.path), 20 * 1024 * 1024) : safePath(req.query.path); }
+  catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   try {
     const mammoth = require('mammoth');
     mammoth.convertToHtml({ path: filePath }).then(result => {
@@ -507,7 +541,10 @@ function splitCsvLine(line, sep) {
 // mount-backed CSV never touches the main thread. Handles arbitrarily large
 // files by chunked reads inside the worker.
 router.get('/api/file/csv', async (req, res) => {
-  const filePath = safePath(req.query.path);
+  const R = rfs(req);
+  let filePath;
+  try { filePath = R ? await remoteToLocalTmp(R, remotePath(req.query.path), 64 * 1024 * 1024) : safePath(req.query.path); }
+  catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   const offset = parseInt(req.query.offset) || 0;
   const limit = parseInt(req.query.limit) || 100;
   const sep = req.query.sep || ',';
@@ -626,37 +663,19 @@ router.get('/api/archive/list', async (req, res) => {
   if (!type) return res.status(400).json({ error: 'unsupported archive type' });
   try { if (!(await sfs(req).call('exists', { path: fp })).exists) return res.status(404).json({ error: 'not found' }); }
   catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
-  const MAX = 20000;
   const opts = { timeout: 60000, maxBuffer: 64 * 1024 * 1024 };
+  // ONE parser for local and remote listings (src/remote-fs.js
+  // parseArchiveListing) — the shapes drifted once and crashed the remote
+  // archive viewer (B-b87b); sharing the implementation retires the class.
   if (type === 'zip') {
     execFile('unzip', ['-l', '-qq', fp], opts, (err, out) => {
       if (err) return res.status(400).json({ error: 'failed to read zip: ' + (err.message || '').split('\n')[0] });
-      const entries = [];
-      for (const line of out.split('\n')) {
-        // "     1234  2026-07-03 12:00   dir/file.txt" (skip the trailing totals row)
-        const m = line.match(/^\s*(\d+)\s+[\d-]+\s+[\d:]+\s+(.+)$/);
-        if (!m) continue;
-        const name = m[2];
-        entries.push({ name, size: parseInt(m[1]), isDirectory: name.endsWith('/') });
-        if (entries.length > MAX) break;
-      }
-      res.json({ type, entries: entries.slice(0, MAX), total: entries.length, truncated: entries.length > MAX });
+      res.json({ ...parseArchiveListing('zip', out), type });
     });
   } else {
     execFile('tar', ['-tvf', fp], opts, (err, out) => {
       if (err) return res.status(400).json({ error: 'failed to read tar: ' + (err.message || '').split('\n')[0] });
-      const entries = [];
-      for (const line of out.split('\n')) {
-        // "drwxr-xr-x user/grp 0 2026-07-03 12:00 dir/"
-        const m = line.match(/^([\-dlrwxsStT]{10})\s+\S+\s+(\d+)\s+\S+\s+\S+\s+(.+)$/);
-        if (!m) continue;
-        let name = m[3];
-        const arrow = name.indexOf(' -> '); // symlink target
-        if (arrow > 0) name = name.substring(0, arrow);
-        entries.push({ name, size: parseInt(m[2]), isDirectory: m[1][0] === 'd' });
-        if (entries.length > MAX) break;
-      }
-      res.json({ type, entries: entries.slice(0, MAX), total: entries.length, truncated: entries.length > MAX });
+      res.json({ ...parseArchiveListing('tar', out), type });
     });
   }
 });
@@ -666,10 +685,20 @@ router.get('/api/archive/list', async (req, res) => {
 router.post('/api/archive/extract-entry', (req, res) => {
   const { path: ap, entry } = req.body || {};
   if (!ap || !entry) return res.status(400).json({ error: 'path and entry required' });
+  if (entry.endsWith('/')) return res.status(400).json({ error: 'cannot open a directory entry' });
+  // Remote archives (B-b87b): extract the entry OFF the host into a local
+  // temp file — the viewer pipeline that opens it is local by definition.
+  const R = rfs(req);
+  if (R) {
+    const rTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'webui-archive-'));
+    const rOut = path.join(rTmp, path.basename(entry) || 'entry');
+    return R.fs.archiveExtractEntry(R.host, remotePath(ap), entry, rOut)
+      .then((r) => res.json({ path: rOut, size: r.size }))
+      .catch((e) => { try { fs.rmSync(rTmp, { recursive: true }); } catch {} res.status(e.status || 400).json({ error: e.message }); });
+  }
   const fp = safePath(ap);
   const type = archiveType(fp);
   if (!type) return res.status(400).json({ error: 'unsupported archive type' });
-  if (entry.endsWith('/')) return res.status(400).json({ error: 'cannot open a directory entry' });
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'webui-archive-'));
   const outPath = path.join(tmpDir, path.basename(entry) || 'entry');
   const outStream = fs.createWriteStream(outPath);

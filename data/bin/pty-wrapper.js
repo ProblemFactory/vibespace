@@ -48,11 +48,15 @@ try { fs.writeFileSync(metaFile, JSON.stringify(meta)); } catch (e) { log(`meta 
 // the same ssh command with backoff (the remote dtach -A reattaches) until a
 // CLEAN exit (code 0 = the user actually ended the remote session).
 const REMOTE_RETRY = !!process.env.VIBESPACE_REMOTE_RETRY;
-let retries = 0;
+let retries = 0;       // delay-ladder index — reset only when a child LIVED (see onChildExit)
+let totalAttempts = 0; // monotonic cap: ssh's own stderr ("Connection refused") arrives as pty DATA,
+                       // and resetting the ladder on any bytes made a dead host retry every 1s forever (B-b87b)
+let spawnedAt = 0;
 
 // Spawn child with PTY
 let child;
 function spawnChild() {
+  spawnedAt = Date.now();
   child = pty.spawn(cmd, args, {
     name: process.env.TERM || 'xterm-256color',
     cols: process.stdout.columns || 120,
@@ -86,7 +90,9 @@ function persistBuffer() {
 
 // Child output → stdout (dtach PTY) + buffer file
 function onChildData(data) {
-  retries = 0; // real output = the link works — reset the backoff ladder
+  // NOTE: deliberately no ladder reset here — the child is ssh, whose own
+  // stderr diagnostics are pty data; the reset lives in onChildExit, gated on
+  // the child having LIVED (uptime), which bytes can't fake.
   try { process.stdout.write(data); } catch {}
   buffer = (buffer + data).slice(-MAX_BUFFER);
   if (!writeTimer) writeTimer = setTimeout(persistBuffer, 2000);
@@ -112,8 +118,11 @@ process.on('SIGWINCH', () => {
 // ended (user exited the shell/CLI remotely).
 function onChildExit({ exitCode }) {
   log(`Child exited with code ${exitCode}`);
-  if (REMOTE_RETRY && exitCode !== 0 && retries < 120) {
-    retries++;
+  if (REMOTE_RETRY && exitCode !== 0 && totalAttempts < 120) {
+    // a child that survived a while = the link genuinely worked — restart the
+    // DELAY ladder (but never the monotonic attempt cap)
+    if (Date.now() - spawnedAt > 30000) retries = 0;
+    retries++; totalAttempts++;
     // Mark the respawned child as a RECONNECT: a dial-terminal's device pty is
     // LIVE (killed with the link — not the dtach reattach shape), so the
     // respawn opens a brand-new CLI; attach-cli reads this to print an honest
