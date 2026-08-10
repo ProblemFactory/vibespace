@@ -883,6 +883,95 @@ function markLimitBanner(session, text) {
 function maybePoolAutoSwitch(session) {
   try { if (session._accountId) maybePoolAutoSwitchForPool(session._accountId); } catch { }
 }
+// EVENT-DRIVEN pool evaluation (user-designed after exhaustion #2, 2026-08-09):
+// every streamed usage record kicks a (5s-throttled) re-evaluation instead of
+// waiting for the timer — combined with the estimator's live odometer, burst
+// burns are seen the moment the CLI streams them, not when the ledger scan
+// catches up. Zero network; decision reads memory + local files only.
+let _poolEvalKickAt = 0;
+function kickPoolEval() {
+  const now = Date.now();
+  if (now - _poolEvalKickAt < 5000) return;
+  _poolEvalKickAt = now;
+  setImmediate(() => {
+    try {
+      for (const a of accounts.list().accounts || []) {
+        if (a.type === 'pooled' && a.auto) { try { maybePoolAutoSwitchForPool(a.id); } catch { } }
+      }
+    } catch { }
+  });
+}
+// WORKFLOW usage tailer (2.266.0, user question "不能拦截workflow agents吗"):
+// workflow agents are IN-PROCESS API calls writing FILE-ONLY transcripts —
+// there is no process to wrap — but tailing the run dir is the same thing at
+// the file level: every agent-*.jsonl growth streams its usage records into
+// the live odometer within ~1-2s (vs the 30s timer+scan). Armed when the
+// launch ack ("Run ID: wf_…") crosses the session's stdout; belt-polled 5s
+// (fs.watch can coalesce/miss); torn down after 30min without growth or when
+// the session dies. rid-dedup in noteLive makes offset loss/re-reads harmless.
+const _wfWatchers = new Map(); // runId → state
+function armWorkflowUsageWatcher(session, sessionId, runId) {
+  try {
+    if (_wfWatchers.has(runId) || _wfWatchers.size >= 6) return;
+    if (session.host) return; // remote runs have no local files; timer+harvest cover them
+    const sid = session.claudeSessionId || session.backendSessionId;
+    if (!sid || !session.cwd) return;
+    const { cwdToProjectDir } = require('./src/session-store.js');
+    const dir = path.join(os.homedir(), '.claude', 'projects', cwdToProjectDir(session.cwd), sid, 'subagents', 'workflows', runId);
+    if (!fs.existsSync(dir)) return;
+    const st = { dir, offsets: new Map(), lastGrowth: Date.now(), watcher: null, poll: null, debounce: null, draining: false };
+    const teardown = () => {
+      try { st.watcher?.close(); } catch { }
+      clearInterval(st.poll); clearTimeout(st.debounce);
+      _wfWatchers.delete(runId);
+    };
+    const drain = () => {
+      if (st.draining) return; st.draining = true;
+      try {
+        let noted = 0;
+        for (const fn of fs.readdirSync(st.dir)) {
+          if (!fn.startsWith('agent-') || !fn.endsWith('.jsonl')) continue;
+          const fp = path.join(st.dir, fn);
+          let size; try { size = fs.statSync(fp).size; } catch { continue; }
+          let off = st.offsets.get(fn) || 0;
+          if (size <= off) continue;
+          st.lastGrowth = Date.now();
+          const fd = fs.openSync(fp, 'r');
+          try {
+            const buf = Buffer.alloc(Math.min(size - off, 8 * 1024 * 1024));
+            const n = fs.readSync(fd, buf, 0, buf.length, off);
+            const chunk = buf.slice(0, n);
+            const lastNl = chunk.lastIndexOf(10);
+            if (lastNl < 0) continue; // no complete line yet
+            st.offsets.set(fn, off + lastNl + 1);
+            for (const line of chunk.slice(0, lastNl).toString('utf-8').split('\n')) {
+              if (line.indexOf('"usage"') < 0) continue;
+              let r; try { r = JSON.parse(line); } catch { continue; }
+              if (r.type !== 'assistant') continue;
+              const u = r.message?.usage; if (!u) continue;
+              const rid = r.requestId || r.message?.id; if (!rid) continue;
+              const cc = u.cache_creation || {};
+              const acctKey = resolveUsageKey(session);
+              const usd = usageHistory._cost({ acct: acctKey === '__global__' ? null : acctKey, model: r.message?.model, i: u.input_tokens || 0, o: u.output_tokens || 0, cw5: cc.ephemeral_5m_input_tokens || 0, cw1: cc.ephemeral_1h_input_tokens || 0, cr: u.cache_read_input_tokens || 0 });
+              usageEstimator.noteLive({ rid, accountId: acctKey, model: r.message?.model, usd });
+              noted++;
+            }
+          } finally { try { fs.closeSync(fd); } catch { } }
+        }
+        if (noted) kickPoolEval();
+      } catch { }
+      st.draining = false;
+    };
+    try { st.watcher = fs.watch(st.dir, { persistent: false }, () => { if (!st.debounce) st.debounce = setTimeout(() => { st.debounce = null; drain(); }, 800); }); } catch { }
+    st.poll = setInterval(() => {
+      if (Date.now() - st.lastGrowth > 30 * 60000 || !activeSessions.has(sessionId)) { teardown(); return; }
+      drain();
+    }, 5000);
+    _wfWatchers.set(runId, st);
+    drain();
+    global.__vsEvent?.('wf-usage-tailer-armed');
+  } catch { }
+}
 // TIMER-driven evaluation (2.263.0, real incident): the event triggers (turn
 // `result` records + limit banner) both sit at TURN EDGES — an 8-minute
 // review workflow burned an entire 5h window mid-turn with ZERO evaluation
@@ -898,14 +987,19 @@ setInterval(() => {
     try { usageHistory.scan(); } catch { } // freshen the odometer first (incremental, 15s-throttled)
     for (const a of pools) { try { maybePoolAutoSwitchForPool(a.id); } catch { } }
   } catch { }
-}, 60000);
+  // 30s (was 60s): the 2026-08-09 #2 exhaustion burned HALF the Fable bucket
+  // between two ticks (12 concurrent maxed-context agents ≈ $100+/min) — a
+  // tighter cadence can't fully close that gap (ledger visibility lags the
+  // burn) but halves the blind window; anti-flap now lives in MIN_GAIN_PCT +
+  // the proactive margin, not the cadence.
+}, 30000);
 function maybePoolAutoSwitchForPool(poolId) {
   try {
     if (!poolId) return;
     const a = accounts.get(poolId);
     if (!a || a.type !== 'pooled' || !a.auto) return;
     const now = Date.now();
-    if ((now - (_poolAutoLast.get(poolId) || 0)) < 60000) return;
+    if ((now - (_poolAutoLast.get(poolId) || 0)) < 10000) return; // event-driven kicks need a tight gate; anti-flap = MIN_GAIN, not cadence
     const currentId = accounts.poolCurrent(poolId);
     if (!currentId) return;
     // ESTIMATED bucket view (B-fcff v2): the raw cache goes stale the moment
@@ -915,6 +1009,16 @@ function maybePoolAutoSwitchForPool(poolId) {
     const readCache = (id) => {
       let raw = null;
       try { raw = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, id + '.json'), 'utf-8')); } catch { }
+      // ORG-MERGED identities keep TWO cache files (__global__ + the named
+      // sub) and ground truth lands in whichever one the refresh targeted —
+      // during the 2026-08-09 #2 exhaustion the ⟳ readings (Fable 34%→51%)
+      // went to __global__.json while this decision read the sub's file
+      // frozen at 01:23. Read through the IDENTITY GROUP: freshest file wins.
+      try {
+        for (const [, g] of usageIdentityGroupsCached()) {
+          if (g.accountIds.includes(id) && g.cache && (g.cache.fetchedAt || 0) > (raw?.fetchedAt || 0)) { raw = g.cache; break; }
+        }
+      } catch { }
       try { return estOverlayCache(raw, usageEstimator.estimateFor(id, raw, now)); } catch { return raw; }
     };
     // proactive EDF tier only for HOT pools (re-point is free — no restart);
@@ -1540,6 +1644,21 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
             // CLI error-class telemetry (2.207.0, names/enums only — no
             // content): usage-limit sightings and silent model fallbacks are
             // exactly what tonight's incidents needed frequency data for.
+            // LIVE odometer feed (event-driven estimation): note every usage-
+            // carrying record — main thread AND subagent sidechains — the
+            // moment it streams (before the transcript flush, long before the
+            // ledger scan), then kick a throttled pool re-evaluation. This is
+            // what makes burst burns visible between scan ticks (exhaustion #2:
+            // half the Fable bucket evaporated inside one polling interval).
+            if (msg.type === 'assistant' && msg.message?.usage && (msg.requestId || msg.message?.id)) {
+              try {
+                const u = msg.message.usage; const cc = u.cache_creation || {};
+                const acctKey = resolveUsageKey(session);
+                const usd = usageHistory._cost({ acct: acctKey === '__global__' ? null : acctKey, model: msg.message.model, i: u.input_tokens || 0, o: u.output_tokens || 0, cw5: cc.ephemeral_5m_input_tokens || 0, cw1: cc.ephemeral_1h_input_tokens || 0, cr: u.cache_read_input_tokens || 0 });
+                usageEstimator.noteLive({ rid: msg.requestId || msg.message.id, accountId: acctKey, model: msg.message.model, usd });
+                kickPoolEval();
+              } catch { }
+            }
             if (msg.type === 'assistant' && Array.isArray(msg.message?.content)) {
               for (const b of msg.message.content) {
                 if (b?.type === 'text' && typeof b.text === 'string' && /You've (?:reached|hit) your .{0,40} limit/.test(b.text)) {
@@ -1722,6 +1841,19 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
             // the <task-notification> WAKEUP user record instead (2.233.0
             // discovery) — without this the fs.watch handle + double-buffered
             // transcript lingered until the 10-min idle sweep.
+            // Workflow launch ack → arm the usage tailer (file-level "wrapper"
+            // for in-process workflow agents — see armWorkflowUsageWatcher).
+            if (msg.type === 'user' && Array.isArray(msg.message?.content)) {
+              try {
+                for (const b of msg.message.content) {
+                  if (b?.type !== 'tool_result') continue;
+                  const txt = typeof b.content === 'string' ? b.content
+                    : Array.isArray(b.content) ? b.content.map((x) => x?.text || '').join('\n') : '';
+                  const wm = /Run ID: (wf_[\w-]+)/.exec(txt);
+                  if (wm) armWorkflowUsageWatcher(session, id, wm[1]);
+                }
+              } catch { }
+            }
             if (msg.type === 'user' && (msg.origin?.kind === 'task-notification' || /^\s*<task-notification>/.test(typeof msg.message?.content === 'string' ? msg.message.content : ''))) {
               const notifText = typeof msg.message?.content === 'string' ? msg.message.content : '';
               const tu = notifText.match(/<tool-use-id>([\s\S]*?)<\/tool-use-id>/);

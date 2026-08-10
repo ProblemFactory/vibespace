@@ -281,6 +281,49 @@ class UsageEstimator {
     this._lineCache = new Map();  // identityKey → {mtimeMs, size, lines}
     this._rateCache = new Map();  // identityKey → {rates, at}
     this._estMemo = new Map();    // accountId|'__global__' → {at, est}
+    // LIVE odometer ring (event-driven estimation, user-designed 2026-08-09
+    // after exhaustion #2): every usage record seen on a session's stdout is
+    // noted HERE the moment it streams — before the transcript flushes and
+    // long before the ledger scan absorbs it. estimateFor adds ring entries
+    // the ledger hasn't caught up to yet (rid-deduped against the ledger's
+    // own rid set, so nothing double-counts once the scan lands).
+    this._liveRing = []; // {rid, acct, fam, usd, ts}
+  }
+  noteLive({ rid, accountId, model, usd, ts = Date.now() }) {
+    if (!rid || !Number.isFinite(usd) || usd <= 0) return;
+    // Ring-level rid dedup: file-tail feeders (workflow watchers) may re-read
+    // ranges after a lost offset — the same rid must not stack in the ring.
+    if (!this._liveRids) this._liveRids = new Set();
+    if (this._liveRids.has(rid)) return;
+    this._liveRids.add(rid);
+    const m = String(model || '').toLowerCase();
+    const fam = m.includes('fable') ? 'fable' : m.includes('opus') ? 'opus' : m.includes('sonnet') ? 'sonnet' : m.includes('haiku') ? 'haiku' : 'other';
+    this._liveRing.push({ rid, acct: accountId || '__global__', fam, usd, ts });
+    if (this._liveRing.length > 3000) {
+      this._liveRing.splice(0, this._liveRing.length - 2000);
+      this._liveRids = new Set(this._liveRing.map((e) => e.rid));
+    }
+    // freshest signal there is — estimates must not serve a pre-burn memo
+    this._estMemo.clear();
+  }
+  // Un-ledgered live cost for a set of account ids within [fromMs, nowMs] —
+  // entries whose rid the ledger ALREADY holds are skipped (scan caught up).
+  _liveDelta(accountIds, fromMs, nowMs) {
+    if (!this._liveRing.length) return null;
+    const uh = typeof this._usageHistory === 'function' ? this._usageHistory() : this._usageHistory;
+    const known = uh?._evCache?.rids || null;
+    const want = new Set(accountIds);
+    // No age-out: rid-dedup vs the ledger is the ONLY exit — an age cutoff
+    // made un-scanned cost vanish from the estimate after N minutes (a dip
+    // exactly when the scan lags worst); the ring cap bounds memory instead.
+    const out = { total: 0, byFamily: { fable: 0, opus: 0, sonnet: 0, haiku: 0, other: 0 } };
+    for (const e of this._liveRing) {
+      if (e.ts < fromMs || e.ts > nowMs) continue;
+      if (!want.has(e.acct)) continue;
+      if (known && known.has(e.rid)) continue;
+      out.total += e.usd; out.byFamily[e.fam] += e.usd;
+    }
+    return out.total > 0 ? out : null;
   }
   _file(key) { return path.join(this.dir, 'anchors-' + String(key).replace(/[^\w.@-]/g, '_').slice(0, 80) + '.ndjson'); }
   lines(identityKey) {
@@ -338,7 +381,17 @@ class UsageEstimator {
   _costFn(accountIds) {
     const { costBetweenMulti } = require('./usage-anchors.js');
     const uh = typeof this._usageHistory === 'function' ? this._usageHistory() : this._usageHistory;
-    return (fromMs, toMs) => costBetweenMulti(uh, accountIds, fromMs, toMs);
+    return (fromMs, toMs) => {
+      const c = costBetweenMulti(uh, accountIds, fromMs, toMs);
+      // + streamed-but-not-yet-ledgered records (the live odometer): closes
+      // the transcript-flush + scan-lag blind window during fast burns.
+      const live = this._liveDelta(accountIds, fromMs, toMs);
+      if (live) {
+        c.total += live.total;
+        for (const k of Object.keys(live.byFamily)) c.byFamily[k] = (c.byFamily[k] || 0) + live.byFamily[k];
+      }
+      return c;
+    };
   }
   // Estimated bucket view for one account NOW (memo 30s). rawCache is only a
   // freshness reference: when the cache reading is NEWER than the last anchor

@@ -286,5 +286,37 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   ck('zero live total (retention gap) falls back to the frozen snapshot', zero.sevenDay[0].cost === 20);
 }
 
+// ── live odometer (event-driven estimation, exhaustion-#2 round) ─────────────
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-est3-'));
+  const key = 'org:live';
+  const lines = [ { ...mkAnchor(T0, { u7: 0.40 }), identityKey: key, accountId: 'sub-x' } ];
+  fs.writeFileSync(path.join(dir, 'anchors-org_live.ndjson'), lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+  const ledgerRids = new Set();
+  const fakeHistory = { *_events() {}, _cost: () => 0, _evCache: { rids: ledgerRids } };
+  const ue = new est.UsageEstimator({
+    anchorsDir: dir, usageHistory: fakeHistory,
+    resolveIdentity: (id) => (id === 'sub-x' ? { identityKey: key } : null),
+    priorsFor: () => ({ sevenDay: 1730 }),
+  });
+  const e0 = ue.estimateFor('sub-x', null, T0 + HR);
+  ck('live: no ring → estimate = anchor', approx(e0.sevenDay.utilization, 0.40, 0.001));
+  // a streamed burst lands in the ring BEFORE any ledger scan sees it
+  ue.noteLive({ rid: 'req_live1', accountId: 'sub-x', model: 'claude-fable-5', usd: 173, ts: T0 + 30 * 60000 });
+  const e1 = ue.estimateFor('sub-x', null, T0 + HR);
+  ck('live: streamed $173 visible immediately (memo busted by noteLive)', approx(e1.sevenDay.utilization, 0.40 + 173 / 1730, 0.001));
+  // the ledger scan catches up → the rid dedups out of the live delta
+  ledgerRids.add('req_live1');
+  ue._estMemo.clear();
+  const e2 = ue.estimateFor('sub-x', null, T0 + HR);
+  ck('live: ledger-absorbed rid no longer double-counts', approx(e2.sevenDay.utilization, 0.40, 0.001));
+  ck('live: wrong-account entries ignored', (() => {
+    ue.noteLive({ rid: 'req_other', accountId: 'sub-zzz', model: 'claude-fable-5', usd: 500, ts: T0 + 30 * 60000 });
+    const e3 = ue.estimateFor('sub-x', null, T0 + HR);
+    return approx(e3.sevenDay.utilization, 0.40, 0.001);
+  })());
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

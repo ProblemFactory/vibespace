@@ -50,6 +50,8 @@ ck('banner: non-banner text → null', pb('Normal assistant reply about limits')
 // exhaustion had failed 9 agents
 ck("banner: 'hit your session limit' (workflow failure wording) → fiveHour", pb("You've hit your session limit · resets 3am (America/Los_Angeles)").kind==='fiveHour');
 ck('banner: phrase mid-blob (task-notification carrier) still matches', pb("[verify:x] failed: You've hit your session limit · resets 3am").kind==='fiveHour');
+// incident #2 wording (same day): model-scoped WITHOUT the word "weekly"
+ck("banner: 'Fable 5 limit' (no week word) → scoped Fable", (()=>{const r=pb("You've reached your Fable 5 limit. Run /usage-credits to continue or switch models with /model."); return r.kind==='scoped'&&r.name==='Fable';})());
 
 console.log(fail?`${fail} FAILED`:`ALL PASS (${pass})`);
 process.exit(fail?1:0);
