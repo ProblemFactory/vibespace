@@ -2553,4 +2553,9 @@ export default {
   "{what} applied": "{what} を適用しました",
   "{what} applied, {n} skipped": "{what} を適用しました、{n} 件をスキップ",
   "“{name}” isn’t available for this session — the account reset to Default": "「{name}」はこのセッションでは利用できません——アカウントは既定に戻りました",
+  "· is {host}’s machine login (same account)": "· {host} のマシンログインそのもの（同一アカウント）",
+  "· own login held on {host}": "· {host} に独自ログインあり",
+  "{host}’s machine login (remote ledger)": "{host} のマシンログイン（リモート台帳はマシン単位）",
+  "remote — harvested into the ledger every ~15 min": "リモート——台帳へは約15分ごとに取り込み",
+  "session-level (no request id on this record)": "セッション単位（このレコードにリクエストIDなし）",
 };

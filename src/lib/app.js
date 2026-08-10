@@ -594,6 +594,22 @@ class App {
         { label: t('All settings\u2026'), action: () => this._settingsUI?.open() },
       ]);
     });
+    // Extra rows (#toolbar-row2 / #taskbar-row2) are ZONES like the bars —
+    // without their own handler a right-click there fell through to the
+    // browser's native menu (real report). Same menu as their parent bar;
+    // same movable-element exemptions.
+    for (const [rowId, barId] of [['toolbar-row2', 'toolbar'], ['taskbar-row2', 'taskbar']]) {
+      const row = document.getElementById(rowId);
+      const bar = document.getElementById(barId);
+      if (!row || !bar) continue;
+      row.addEventListener('contextmenu', (e) => {
+        if (e.target.closest('button, select, input, .taskbar-item, .desktop-preview, .desktop-preview-wrapper, .taskbar-usage')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        // re-dispatch onto the parent bar's handler for an identical menu
+        bar.dispatchEvent(new MouseEvent('contextmenu', { clientX: e.clientX, clientY: e.clientY, bubbles: false, cancelable: true }));
+      });
+    }
   }
 
   _setupWelcome() {
@@ -1806,8 +1822,8 @@ class App {
           const v = vOf(a);
           const linked = v ? (v.usable && v.how === 'host-login') : (!!hostOwnEmail && emailOf(a) === hostOwnEmail);
           const held = v ? (v.usable && v.how === 'host-held') : (!linked && hostHeld(a));
-          if (linked) opts.push([a.id, a.name + ' ' + t('· uses {host}’s own login', { host: hostName })]);
-          else if (held) opts.push([a.id, a.name + ' ' + t('· logged in on {host}', { host: hostName })]);
+          if (linked) opts.push([a.id, a.name + ' ' + t('· is {host}’s machine login (same account)', { host: hostName })]);
+          else if (held) opts.push([a.id, a.name + ' ' + t('· own login held on {host}', { host: hostName })]);
           else if ((v ? (v.usable && v.how === 'oat') : !!a.oat) && !(a.oatDaysLeft <= 0)) opts.push([a.id, a.name + ' ' + t('· via long-lived token')]);
           else if (a.oat && a.oatDaysLeft <= 0) opts.push([a.id, a.name + ' — ' + t('long-lived token expired'), true]);
           else if (v && v.reason === 'held-identity-mismatch') opts.push([a.id, a.name + ' — ' + t('host login belongs to {email}', { email: v.dirEmail || '?' }), true]);

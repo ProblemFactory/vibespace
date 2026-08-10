@@ -575,6 +575,15 @@ class UsageHistory {
     try { this.scan(); } catch { } // throttled incremental — freshens just-streamed messages
     const evs = this._loadEvents();
     for (let i = evs.length - 1; i >= 0; i--) if (evs[i].rid === rid) return evs[i];
+    // REMOTE sessions (real report: every reply on a remote conversation
+    // showed "not in the ledger yet"): the host harvest namespaces its rids
+    // `h:<hostId>:<rid>`, so an exact match on the plain request id can never
+    // find them. Suffix-match the namespaced form before giving up.
+    const suf = ':' + rid;
+    for (let i = evs.length - 1; i >= 0; i--) {
+      const r = evs[i].rid;
+      if (typeof r === 'string' && r.startsWith('h:') && r.endsWith(suf)) return evs[i];
+    }
     return null;
   }
 

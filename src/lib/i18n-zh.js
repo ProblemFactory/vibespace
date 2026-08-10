@@ -2553,4 +2553,9 @@ export default {
   "{what} applied": "已应用：{what}",
   "{what} applied, {n} skipped": "已应用：{what}，跳过 {n} 个",
   "“{name}” isn’t available for this session — the account reset to Default": "“{name}”对此会话不可用——账号已重置为默认",
+  "· is {host}’s machine login (same account)": "· 即 {host} 的机器登录（同一账号）",
+  "· own login held on {host}": "· 在 {host} 上有独立登录",
+  "{host}’s machine login (remote ledger)": "{host} 的机器登录（远程账本按机器归账）",
+  "remote — harvested into the ledger every ~15 min": "远程会话——账本约每 15 分钟收割一次",
+  "session-level (no request id on this record)": "会话级（该记录无请求 ID，无法逐请求归账）",
 };

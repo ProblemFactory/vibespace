@@ -666,21 +666,52 @@ class ChatView {
     // ledger by requestId — with the pool switching accounts mid-conversation,
     // "which account served THIS message" is per-message truth only the
     // ledger's baked attribution can answer.
+    const addBillingRow = (val) => {
+      if (!pop.isConnected) return;
+      const row = document.createElement('div');
+      row.className = 'msg-meta-row';
+      row.innerHTML = `<span class="msg-meta-label">${escHtml(t('Billing account'))}</span><span class="msg-meta-val">${escHtml(val)}</span>`;
+      pop.querySelector('.msg-meta-copy')?.before(row);
+    };
+    // Session-level billing identity — the fallback truth when per-request
+    // attribution can't answer (no request id on the record, or the remote
+    // harvest hasn't landed yet). Real report: rows with no requestId showed
+    // NOTHING at all, which read as a bug rather than a data gap.
+    const sessionBilling = () => {
+      const ids = this._getSessionIds?.() || {};
+      const live = (this.app.sidebar?._allSessions || []).find((s) =>
+        s.webuiId && (s.backendSessionId === ids.backendSessionId || s.claudeSessionId === ids.backendSessionId));
+      const a = live?.auth;
+      if (!a) return null;
+      return a.accountName || (a.kind === 'subscription' || a.kind === 'cli-global' ? t('CLI login') : null);
+    };
+    const isRemote = !!(this.winInfo?._openSpec?.hostId);
     if (meta.requestId) {
       fetchJson('/api/usage-stats/rid-info?rid=' + encodeURIComponent(meta.requestId)).then((r) => {
-        if (!pop.isConnected) return;
         let val;
         if (r?.found) {
-          val = r.aname || (r.atype === 'global' || !r.acct ? t('CLI login') : r.acct);
-          if (r.poolName) val += ` · ${t('via pool “{name}”', { name: r.poolName })}`;
+          if (r.atype === 'host') {
+            // remote sessions bill through THAT machine's own login — the
+            // ledger buckets them per machine, not per named account.
+            val = t('{host}’s machine login (remote ledger)', { host: r.aname || r.acct || t('remote host') });
+          } else {
+            val = r.aname || (r.atype === 'global' || !r.acct ? t('CLI login') : r.acct);
+            if (r.poolName) val += ` · ${t('via pool “{name}”', { name: r.poolName })}`;
+          }
+        } else if (isRemote) {
+          const sb = sessionBilling();
+          val = (sb ? sb + ' · ' : '') + t('remote — harvested into the ledger every ~15 min');
         } else {
           val = t('not in the ledger yet');
         }
-        const row = document.createElement('div');
-        row.className = 'msg-meta-row';
-        row.innerHTML = `<span class="msg-meta-label">${escHtml(t('Billing account'))}</span><span class="msg-meta-val">${escHtml(val)}</span>`;
-        pop.querySelector('.msg-meta-copy')?.before(row);
+        addBillingRow(val);
       }).catch(() => { });
+    } else {
+      // No request id on this record (some transports/records don't carry
+      // one) — per-request attribution is impossible; show the session-level
+      // billing identity instead of silently omitting the row.
+      const sb = sessionBilling();
+      addBillingRow((sb || t('unknown')) + ' · ' + t('session-level (no request id on this record)'));
     }
   }
 
