@@ -532,6 +532,7 @@ const USAGE_CACHE_FILE = path.join(__dirname, 'data', 'usage-cache.json');
 // background /api/oauth/usage calls with subscription tokens (that off-CLI
 // automated pattern is what gets Max/Pro accounts banned; see §ban-safety).
 const USAGE_CACHE_DIR = path.join(__dirname, 'data', 'usage-cache');
+const USAGE_SCANNER_PATH = path.join(__dirname, 'data', 'bin', 'vibespace-usage-scan');
 const PTY_WRAPPER = path.join(__dirname, 'data', 'bin', 'pty-wrapper.js');
 
 // ── CS refactor M1 (opt-in, default OFF): route LOCAL terminal sessions
@@ -1907,6 +1908,19 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
             // Immediate check + one delayed re-check (the Stop hook may write
             // the attachment slightly after the result reaches stdout).
             if (msg.type === 'result') maybePoolAutoSwitch(session);
+            // Event-driven remote ledger harvest (owner question "为什么15分钟
+            // 不实时"): a remote session's turn just ENDED — its usage now
+            // exists in the remote transcript, so harvest promptly (60s/host
+            // floor) instead of waiting out the idle 15-min cadence. The pool
+            // control loop never depended on this (it eats the relayed stdout
+            // live via noteLive); this closes the LEDGER/billing-popup lag.
+            if (msg.type === 'result' && session.host) {
+              try {
+                hosts?.harvestUsage(session.host, { minIntervalMs: 60 * 1000, scannerPath: USAGE_SCANNER_PATH })
+                  .then((txt) => { if (txt) usageHistory.ingestRemoteEvents(session.host, hosts.get(session.host)?.name, txt); })
+                  .catch(() => { });
+              } catch { }
+            }
             if (msg.type === 'result') maybeRepinLockedModel(session);
             if (msg.type === 'result' && session._goal) {
               checkClaudeGoalStatus(session, id);

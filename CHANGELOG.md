@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.284.3
+
+**Remote ledger harvest goes event-driven** (owner question: "为什么是15分钟？统计不应该实时吗？").
+
+Clarified semantics first: the POOL's control loop never waited 15 minutes — remote CHAT sessions relay their stdout through the server's parse, so every usage record feeds the live estimator (`noteLive` + pool re-evaluation) within seconds, same as local. The 15-minute cadence only governed the PERMANENT ledger (Usage window, per-request $ history, the billing popup's join) for remote machines. Now a remote session's turn END triggers a prompt harvest (60s/host floor; the idle 15-min background cadence remains) — the ledger and the message billing popup lag ~a minute instead of up to 15. Fully real-time per-account remote accounting stays an R4 deliverable (device-side usage events with account attribution).
+
+Also updates the message-popup hint implicitly: remote replies should now resolve in the ledger shortly after their turn completes.
+
 ## 2.284.2
 
 **"Everything is stuck on thinking" decoded: the API was erroring and the CLI was silently retrying** (real fleet incident, diagnosed from the incident bundle + session buffers: bursts of `api_retry` records — HTTP 500 server_error plus connection-level failures — with the CLI backing off up to 10 attempts, minutes of apparent freeze; sessions recovered between bursts).
