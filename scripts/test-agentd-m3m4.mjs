@@ -89,12 +89,24 @@ console.log('— M3.2 transcript slab: byte-exact range reads across a multibyte
 
 console.log('— M3.3 discovery: raw-facts snapshot + dirty push —');
 {
-  // fixture: one live lock (our own pid), one dead lock, one jsonl
-  fs.writeFileSync(path.join(fakeHome, '.claude', 'sessions', process.pid + '.json'), JSON.stringify({ pid: process.pid, sessionId: 'live-1', cwd: '/tmp/proj' }));
+  // fixture: one live CLAUDE-LOOKING lock (a symlinked-claude sleep — the
+  // 2.278.0 PID-reuse guard verifies the process actually looks like claude,
+  // so a bare test pid no longer passes), one live NON-claude lock (this
+  // process — must be filtered as PID reuse), one dead lock, one jsonl.
+  // NOT a symlink to sleep: /bin/sleep can be a multi-call binary (uutils/
+  // busybox) that dispatches on argv0 and dies when invoked as 'claude'.
+  // A script named 'claude' gets comm='claude' (script basename) portably.
+  const claudeLn = path.join(fakeHome, 'claude');
+  fs.writeFileSync(claudeLn, '#!/bin/sh\nsleep 300\n', { mode: 0o755 });
+  const fakeClaude = (await import('node:child_process')).spawn(claudeLn, [], { stdio: 'ignore' });
+  await new Promise((r) => setTimeout(r, 200));
+  fs.writeFileSync(path.join(fakeHome, '.claude', 'sessions', fakeClaude.pid + '.json'), JSON.stringify({ pid: fakeClaude.pid, sessionId: 'live-1', cwd: '/tmp/proj' }));
+  fs.writeFileSync(path.join(fakeHome, '.claude', 'sessions', process.pid + '.json'), JSON.stringify({ pid: process.pid, sessionId: 'pid-reused-1', cwd: '/tmp/proj' }));
   fs.writeFileSync(path.join(fakeHome, '.claude', 'sessions', '999999.json'), JSON.stringify({ pid: 999999, sessionId: 'dead-1', cwd: '/tmp/proj' }));
   fs.writeFileSync(path.join(fakeHome, '.claude', 'projects', '-tmp-proj', 'aaaa.jsonl'), '{"type":"user"}\n');
   const snap = await dm.discoverySnapshot();
-  check('live lock reported, dead lock filtered', snap.locks.length === 1 && snap.locks[0].sessionId === 'live-1', JSON.stringify(snap.locks));
+  check('live claude lock reported; dead AND pid-reused locks filtered', snap.locks.length === 1 && snap.locks[0].sessionId === 'live-1', JSON.stringify(snap.locks));
+  try { fakeClaude.kill(); } catch { }
   check('jsonl inventory with size/mtime', snap.jsonls.length === 1 && snap.jsonls[0].file === 'aaaa.jsonl' && snap.jsonls[0].size > 0, JSON.stringify(snap.jsonls));
   let dirty = false;
   await dm.watchDiscovery(() => { dirty = true; });

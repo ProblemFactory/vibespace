@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.278.0
+
+**CS separation, third migration: discovery INTERPRETATION is single-sourced** (`src/discovery-facts.js`; table updated in docs/design-cs-unification.md).
+
+The three fact collectors (local rich sweep / device-daemon snapshot / ssh script fallback) legitimately differ in transport — but the interpretation of the same bytes had quietly forked three ways:
+
+- **Naming had ALREADY drifted**: local named a session from the FIRST LINE of the first real user message; the remote parser whitespace-collapsed the WHOLE message — the same session carried different names depending on which machine it ran on. One rule now (first non-empty line, 80 cap, skip injected `<tag>` context and slash-command echoes), used by session-store, the hosts N-line parser, and (as raw lines) the daemon. The truncated-line fallback also learned to read a string cut before its closing quote — the old regex required one and silently named nothing.
+- **Tail-ids had three implementations** (session-store full list / daemon inline uniq+last-8 / ssh `grep|uniq|tail -8`) feeding ONE consumer (claimJsonls) with different mention windows. One `extractTailIds` now; session-store delegates, keeping its null-on-unreadable contract (the no-tail-evidence class).
+- **The daemon snapshot gains the PID-reuse guard** it never had: it verified lock-pid LIVENESS only, so a recycled pid on a device surfaced a phantom "running" session — the exact hole the local sweep closed years ago, in the mirror direction of the writer-sweep gap (this time REMOTE lacked what local had). `pidLooksClaude` = /proc on Linux (zero fork), `ps` elsewhere.
+
+The structural point: the agentd bundle is built by esbuild from src/, so — unlike the ssh one-file scanner — it CAN share modules; `discovery-facts.js` is deliberately tiny to ride in it. Tests: scripts/test-discovery-facts.mjs (18 asserts incl. the drift cases) + the m3m4 acceptance suite (its live-lock fixture now spawns a claude-looking process AND asserts a pid-reused lock is filtered; fun fixture trap: `/bin/sleep` can be a uutils multi-call binary that dispatches on argv0 and dies when invoked as `claude`).
+
 ## 2.277.0
 
 **CS separation, second migration: ctx-folder sync is ONE implementation** (`src/ctx-sync.js`; table row flipped to UNIFIED in docs/design-cs-unification.md).
