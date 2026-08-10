@@ -418,6 +418,40 @@ class DeviceManager {
    *  fall back to the legacy ssh scripts. */
   probeCli() { return this._request({ op: 'probe-cli', timeoutMs: 9000 }); }
   probeCreds() { return this._request({ op: 'probe-creds', timeoutMs: 9000 }); }
+  /** R3 transcript.* — run one transcript-service method ON the device and
+   *  return the parsed JSON result. The result streams on a byte channel with
+   *  the read-range count-gating contract (never resolve on the done marker:
+   *  control overtakes data, 2.187.0). DARK: no production consumer yet — the
+   *  parity suite is the only caller until the switchover round. */
+  async transcriptOp(method, ref, params = {}) {
+    const conn = await this.connect();
+    const chan = conn.nextChan++;
+    const chunks = [];
+    let received = 0, sending = null, sentDone = null, doneSeen = false, stall = null;
+    let resolveP, rejectP;
+    const donePromise = new Promise((res, rej) => { resolveP = res; rejectP = rej; });
+    donePromise.catch(() => {});
+    const cleanup = () => { clearTimeout(stall); conn.sessions.delete(chan); };
+    const bumpStall = () => { clearTimeout(stall); stall = setTimeout(() => { cleanup(); rejectP(new Error('transcript-op stalled')); }, 30000); };
+    const maybeFinish = () => {
+      if (!doneSeen) return;
+      const t = sentDone != null ? (sending != null ? Math.min(sentDone, sending) : sentDone) : sending;
+      if (t != null && received >= t) { cleanup(); resolveP(); }
+    };
+    conn.sessions.set(chan, {
+      onData: (b) => { chunks.push(b); received += b.length; bumpStall(); maybeFinish(); },
+      onDone: (m) => { doneSeen = true; if (typeof m?.sent === 'number') sentDone = m.sent; maybeFinish(); },
+    });
+    bumpStall();
+    // parse can legitimately take a while on a huge transcript — generous ack timeout
+    const ack = await this._request({ op: 'transcript-op', method, ref, params, chan, timeoutMs: 60000 });
+    if (ack?.error) { cleanup(); throw new Error(ack.error); }
+    if (typeof ack?.sending === 'number') sending = ack.sending;
+    else { cleanup(); throw new Error('daemon lacks transcript-op counts'); }
+    maybeFinish();
+    await donePromise;
+    return JSON.parse(Buffer.concat(chunks).toString('utf-8'));
+  }
   runCmd(cmd, args = [], { stdin, env, timeoutMs } = {}) {
     return this._request({ op: 'run-cmd', cmd, args, env, timeoutMs, stdin64: stdin ? Buffer.from(stdin).toString('base64') : undefined });
   }

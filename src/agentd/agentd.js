@@ -75,6 +75,26 @@ const FS_ACTIONS = {
 const fs = require('fs');
 const { extractTailIds, pidLooksClaude } = require('./../discovery-facts.js');
 const machineProbes = require('./../machine-probes.js');
+// R3: the SHARED transcript service, constructed lazily on first use — the
+// parse stack (session-store/normalizers/adapters) is heavy and most daemons
+// never serve transcript ops until the switchover. No live-session overlay
+// here: the daemon serves TRANSCRIPT truth; the server merges its own stdout
+// buffer overlay (the 2.74.0 merge) until the session brain moves.
+let _transcriptSvc = null;
+function getTranscriptService() {
+  if (_transcriptSvc) return _transcriptSvc;
+  const { createTranscriptService } = require('./../transcript-service.js');
+  const { SessionMessages } = require('./../session-store.js');
+  const { CodexSessionMessages } = require('./../codex-session-store.js');
+  _transcriptSvc = createTranscriptService({
+    activeSessions: new Map(),
+    createSessionMessages: (sess) => (sess?.backend === 'codex'
+      ? new CodexSessionMessages(sess, undefined, {})
+      : new SessionMessages(sess, undefined, {})),
+    hosts: null, // the daemon IS the machine — nothing remoter to refresh
+  });
+  return _transcriptSvc;
+}
 const os = require('os');
 const path = require('path');
 const net = require('net');
@@ -1066,6 +1086,52 @@ function serveConnection(sock) {
       // ── R1 (three-tier): machine fact probes — the SHARED node
       // implementation (src/machine-probes.js, bundled) answers about THIS
       // machine. Read-only over files; §ban-safety: no vendor calls here. ──
+      // ── R3 step 2 (three-tier): transcript.* served WHERE THE BYTES LIVE.
+      // DARK for now — no production consumer; the parity suite proves the
+      // daemon-served results byte-equal the server's in-process service
+      // before anything switches over. Results are JSON streamed on a byte
+      // channel with the SAME count-gating as read-range (2.187.0: control
+      // overtakes data — never resolve on the done marker alone). ──
+      if (msg.op === 'transcript-op') {
+        (async () => {
+          const rid = msg.id;
+          try {
+            const svc = getTranscriptService();
+            const m = String(msg.method || '');
+            const ref = { backend: msg.ref?.backend, sessionId: msg.ref?.sessionId, cwd: msg.ref?.cwd };
+            let result;
+            if (m === 'page') result = await svc.page(ref, msg.params || {});
+            else if (m === 'turnmap') result = await svc.turnmap(ref);
+            else if (m === 'searchIndexed') result = await svc.searchIndexed(ref, String(msg.params?.q || ''));
+            else if (m === 'status') result = await svc.status(ref);
+            else if (m === 'taskState') result = await svc.taskState(ref);
+            else if (m === 'gapInfo') { const g = await svc.gapInfo(ref); result = { gap: g.gap, hasFile: !!g.fp }; }
+            else if (m === 'gapSlab') {
+              const g = await svc.gapInfo(ref);
+              if (!g.fp) result = { messages: [] };
+              else result = { messages: await svc.gapSlab(ref, g.fp, Number(msg.params?.fromLine) || 0, Number(msg.params?.toLine) || 0) };
+            }
+            else if (m === 'fullTurnmap') {
+              const g = await svc.gapInfo(ref);
+              result = { turns: g.fp ? await svc.fullTurnmap(ref, g.fp) : [], ...(g.gap || {}) };
+            }
+            else throw new Error('unknown transcript method: ' + m);
+            const buf = Buffer.from(JSON.stringify(result), 'utf-8');
+            mux.control({ op: 'fs-result', id: rid, size: buf.length, sending: buf.length });
+            let sent = 0;
+            const CHUNK = 65536;
+            for (let o2 = 0; o2 < buf.length; o2 += CHUNK) {
+              const piece = buf.subarray(o2, Math.min(o2 + CHUNK, buf.length));
+              const ok = mux.data(msg.chan, piece);
+              sent += piece.length;
+              if (!ok) await waitWritable(msg.chan);
+              else await new Promise((r2) => setImmediate(r2));
+            }
+            mux.control({ op: 'fs-done', id: rid, chan: msg.chan, sent });
+          } catch (e) { mux.control({ op: 'fs-result', id: msg.id, error: e.message }); }
+        })();
+        return;
+      }
       if (msg.op === 'probe-cli') {
         machineProbes.cliFacts({}).then(
           (facts) => mux.control({ op: 'probe-result', id: msg.id, facts }),
