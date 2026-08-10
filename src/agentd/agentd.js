@@ -8,7 +8,70 @@
 // primitives; #1/#7: nothing this process does may ever kill a session).
 // Built as a ZERO-DEPENDENCY single-file bundle (npm run build:agentd).
 'use strict';
-
+// ── R2 worker tier (docs/design-three-tier.md): heavy fs work runs in
+// worker_threads INSIDE this same single-file bundle — `new Worker(__filename,
+// {workerData:{role:'agentd-worker'}})`. A second shipped artifact through the
+// installer/versioned-dir/re-exec chain is a fleet-brick vector (the 2.185.2
+// class), so the worker entry is EMBEDDED and branches FIRST, before any
+// daemon side effect (singleton lock, socket bind). A hung FUSE path can now
+// starve only a worker — which the pool terminates and respawns — never the
+// loop holding every session pipe (invariant #1). FS_ACTIONS below is the ONE
+// implementation: the worker servant runs it, and the daemon's inline
+// fallback (worker_threads unavailable / pool dead) runs the SAME object —
+// no twin to drift.
+const FS_ACTIONS = {
+  'read-range': (m) => {
+    const f = require('fs');
+    const fd = f.openSync(m.path, 'r');
+    try {
+      const size = f.fstatSync(fd).size;
+      const start = Math.max(0, Number(m.start) || 0);
+      const len = Math.max(0, Math.min(Number(m.len) || 0, size - start));
+      const buf = Buffer.alloc(len);
+      if (len) f.readSync(fd, buf, 0, len, start);
+      return { size, data: buf };
+    } finally { f.closeSync(fd); }
+  },
+  write: (m) => {
+    const f = require('fs'), pt = require('path');
+    f.mkdirSync(pt.dirname(m.path), { recursive: true });
+    f.writeFileSync(m.path, Buffer.from(String(m.data64 || ''), 'base64'));
+    return { ok: true };
+  },
+  stat: (m) => {
+    const st = require('fs').statSync(m.path);
+    return { ok: true, stat: { size: st.size, mtimeMs: st.mtimeMs, isDir: st.isDirectory(), mode: st.mode } };
+  },
+  list: (m) => {
+    const f = require('fs'), pt = require('path');
+    const entries = f.readdirSync(m.path, { withFileTypes: true }).slice(0, 5000).map((e) => {
+      let st = null; try { st = f.statSync(pt.join(m.path, e.name)); } catch { }
+      return { name: e.name, isDir: e.isDirectory(), size: st?.size ?? 0, mtimeMs: st?.mtimeMs ?? 0 };
+    });
+    return { entries };
+  },
+  mkdir: (m) => { require('fs').mkdirSync(m.path, { recursive: true }); return { ok: true }; },
+  rename: (m) => { require('fs').renameSync(m.path, String(m.to)); return { ok: true }; },
+  rm: (m) => { require('fs').rmSync(m.path, { recursive: !!m.recursive, force: true }); return { ok: true }; },
+  ping: () => ({ ok: true }),
+};
+{
+  let wt = null; try { wt = require('worker_threads'); } catch { }
+  if (wt && !wt.isMainThread && wt.workerData && wt.workerData.role === 'agentd-worker') {
+    wt.parentPort.on('message', (m) => {
+      try {
+        const fn = FS_ACTIONS[m.action];
+        if (!fn) throw new Error('unknown worker action ' + m.action);
+        const r = fn(m);
+        if (r && Buffer.isBuffer(r.data)) {
+          const ab = r.data.buffer.slice(r.data.byteOffset, r.data.byteOffset + r.data.length);
+          wt.parentPort.postMessage({ id: m.id, ...r, data: ab }, [ab]);
+        } else wt.parentPort.postMessage({ id: m.id, ...r });
+      } catch (e) { try { wt.parentPort.postMessage({ id: m.id, error: e.message, code: e.code }); } catch { } }
+    });
+    return; // the worker never falls through to daemon code
+  }
+}
 const fs = require('fs');
 const { extractTailIds, pidLooksClaude } = require('./../discovery-facts.js');
 const machineProbes = require('./../machine-probes.js');
@@ -44,6 +107,100 @@ function spawnEnv(extra) {
   merged.PATH = parts.join(':');
   return merged;
 }
+// ── R2 worker pool: deadline → terminate → respawn. runFs() prefers a
+// worker; if worker_threads is unavailable or the pool broke, it degrades to
+// the SAME FS_ACTIONS inline (one implementation, honest fallback). ──
+const workerPool = (() => {
+  let wt = null; try { wt = require('worker_threads'); } catch { }
+  if (!wt || !wt.isMainThread) return null;
+  const idle = [], queue = [];
+  let live = 0;
+  const SIZE = 2;
+  function spawnWorker() {
+    if (live >= SIZE) return;
+    let w;
+    try { w = new wt.Worker(__filename, { workerData: { role: 'agentd-worker' } }); } catch { return; }
+    live++;
+    w.unref();
+    w._jobs = new Map();
+    w.on('message', (m) => {
+      const j = w._jobs.get(m.id);
+      if (j) { w._jobs.delete(m.id); clearTimeout(j.t); j.resolve(m); pump(w); }
+    });
+    const die = () => {
+      live--;
+      for (const j of w._jobs.values()) { clearTimeout(j.t); j.reject(new Error('worker died')); }
+      w._jobs.clear();
+      const i = idle.indexOf(w); if (i >= 0) idle.splice(i, 1);
+      setTimeout(spawnWorker, 500).unref?.();
+    };
+    w.on('error', die); w.on('exit', die);
+    idle.push(w);
+    pump(w);
+  }
+  function pump(w) {
+    if (w._jobs.size) return; // one in-flight per worker — deadline stays attributable
+    const job = queue.shift();
+    if (!job) { if (!idle.includes(w)) idle.push(w); return; }
+    const i = idle.indexOf(w); if (i >= 0) idle.splice(i, 1);
+    w._jobs.set(job.id, job);
+    job.t = setTimeout(() => {
+      // deadline: the op is STUCK (hung mount class). Kill the whole worker —
+      // a thread wedged in a sync fs call can't be cancelled any other way.
+      w._jobs.delete(job.id);
+      job.reject(new Error('fs deadline (' + job.msg.action + ')'));
+      try { w.terminate(); } catch { }
+    }, job.timeoutMs);
+    try { w.postMessage(job.msg); } catch (e) { clearTimeout(job.t); w._jobs.delete(job.id); job.reject(e); }
+  }
+  let nextJob = 1;
+  spawnWorker(); spawnWorker();
+  return {
+    run(action, params, timeoutMs = 10000) {
+      return new Promise((resolve, reject) => {
+        const job = { id: nextJob++, msg: { id: 0, action, ...params }, timeoutMs, resolve, reject };
+        job.msg.id = job.id;
+        queue.push(job);
+        const w = idle[0];
+        if (w) pump(w); else if (live === 0) { queue.pop(); reject(new Error('no workers')); }
+      });
+    },
+    alive: () => live > 0,
+  };
+})();
+async function runFs(action, params, timeoutMs) {
+  if (workerPool && workerPool.alive()) {
+    try {
+      const r = await workerPool.run(action, params, timeoutMs);
+      if (r.error) { const e = new Error(r.error); e.code = r.code; throw e; }
+      if (r.data instanceof ArrayBuffer) r.data = Buffer.from(r.data);
+      // the pool JOB id must never leak into callers — the fs-op handler
+      // spreads this result into its mux reply, and a stray `id` OVERWRITES
+      // the request id (the reply then answers a request nobody made — the
+      // client's pending map drops it and the op hangs forever; found live:
+      // the two id spaces merely happened to align until tcp ops skewed them)
+      delete r.id;
+      return r;
+    } catch (e) {
+      if (!/worker died|no workers/.test(e.message)) throw e; // real errors + deadlines surface
+    }
+  }
+  return FS_ACTIONS[action]({ action, ...params }); // honest inline fallback
+}
+// loop-lag canary: if the DAEMON loop ever stalls, sessions are at risk —
+// log it so a regression that puts weight back on the loop is visible.
+let loopLagMax = 0;
+{
+  let last = Date.now();
+  const iv = setInterval(() => {
+    const now = Date.now(), lag = now - last - 500;
+    if (lag > loopLagMax) loopLagMax = lag;
+    if (lag > 300) { try { log('loop-lag ' + lag + 'ms — daemon loop stalled; heavy work belongs in workers'); } catch { } }
+    last = now;
+  }, 500);
+  iv.unref();
+}
+
 const STATE = path.join(ROOT, 'state');
 // Windows has no unix sockets for node's net.listen — use a named pipe keyed
 // by the root path so several per-instance daemons coexist (EXPERIMENTAL).
@@ -752,61 +909,41 @@ function serveConnection(sock) {
           try {
             const p = String(msg.path || '');
             if (!path.isAbsolute(p)) throw new Error('absolute path required');
-            switch (msg.action) {
-              case 'stat': {
-                const st = fs.statSync(p);
-                mux.control({ op: 'fs-result', id: rid, stat: { size: st.size, mtimeMs: st.mtimeMs, isDir: st.isDirectory(), mode: st.mode } });
-                break;
+            // R2: every fs action executes in a WORKER with a deadline —
+            // a hung mount kills a worker, never the session-pipe loop.
+            if (msg.action === 'read-range') {
+              // chunked worker reads (4MB): a hang mid-file trips the
+              // per-chunk deadline instead of wedging one giant read; the
+              // COUNT-GATED channel contract (fs-done carries `sent`; window
+              // pressure pauses, control overtakes data — 2.187.0) unchanged.
+              const first = await runFs('read-range', { path: p, start: Math.max(0, Number(msg.start) || 0), len: 0 }, 8000);
+              const size = first.size;
+              const start0 = Math.max(0, Number(msg.start) || 0);
+              const want = Math.max(0, Math.min(Number(msg.len) || 0, size - start0));
+              mux.control({ op: 'fs-result', id: rid, size, sending: want });
+              let pos = start0, sent = 0;
+              const WCHUNK = 4 * 1024 * 1024, CHUNK = 65536;
+              while (pos < start0 + want) {
+                const n = Math.min(WCHUNK, start0 + want - pos);
+                const r = await runFs('read-range', { path: p, start: pos, len: n }, 15000);
+                const buf = r.data || Buffer.alloc(0);
+                if (!buf.length) break;
+                for (let o = 0; o < buf.length; o += CHUNK) {
+                  const piece = buf.subarray(o, Math.min(o + CHUNK, buf.length));
+                  const ok = mux.data(msg.chan, piece);
+                  sent += piece.length;
+                  if (!ok) await waitWritable(msg.chan);
+                  else await new Promise((r2) => setImmediate(r2)); // credit frames must interleave
+                }
+                pos += buf.length;
+                if (buf.length < n) break; // EOF shrank under us
               }
-              case 'list': {
-                const entries = fs.readdirSync(p, { withFileTypes: true }).slice(0, 5000).map((e) => {
-                  let st = null; try { st = fs.statSync(path.join(p, e.name)); } catch { }
-                  return { name: e.name, isDir: e.isDirectory(), size: st?.size ?? 0, mtimeMs: st?.mtimeMs ?? 0 };
-                });
-                mux.control({ op: 'fs-result', id: rid, entries });
-                break;
-              }
-              case 'read-range': {
-                // stream [start, start+len) on the given byte channel — the
-                // transcript-slab primitive (server keeps its line-index math).
-                // fs-done carries `sent` (the count the client gates on — the
-                // control channel is credit-exempt so fs-done OVERTAKES queued
-                // data; resolving on it alone truncated big reads to the 256KB
-                // window), and window pressure pauses the loop instead of
-                // queueing a whole 45MB transcript in daemon memory.
-                const fd = fs.openSync(p, 'r');
-                try {
-                  const size = fs.fstatSync(fd).size;
-                  const start = Math.max(0, Number(msg.start) || 0);
-                  const want = Math.max(0, Math.min(Number(msg.len) || 0, size - start));
-                  mux.control({ op: 'fs-result', id: rid, size, sending: want });
-                  let pos = start, sent = 0;
-                  const CHUNK = 65536;
-                  while (pos < start + want) {
-                    const n = Math.min(CHUNK, start + want - pos);
-                    const b = Buffer.alloc(n);
-                    const got = fs.readSync(fd, b, 0, n, pos);
-                    if (got <= 0) break;
-                    const ok = mux.data(msg.chan, b.subarray(0, got));
-                    pos += got; sent += got;
-                    if (!ok) await waitWritable(msg.chan);
-                    else await new Promise((r) => setImmediate(r)); // yield: credit frames must interleave
-                  }
-                  mux.control({ op: 'fs-done', id: rid, chan: msg.chan, sent });
-                } finally { fs.closeSync(fd); }
-                break;
-              }
-              case 'write': {
-                fs.mkdirSync(path.dirname(p), { recursive: true });
-                fs.writeFileSync(p, Buffer.from(String(msg.data64 || ''), 'base64'));
-                mux.control({ op: 'fs-result', id: rid, ok: true });
-                break;
-              }
-              case 'mkdir': fs.mkdirSync(p, { recursive: true }); mux.control({ op: 'fs-result', id: rid, ok: true }); break;
-              case 'rename': fs.renameSync(p, String(msg.to)); mux.control({ op: 'fs-result', id: rid, ok: true }); break;
-              case 'rm': fs.rmSync(p, { recursive: !!msg.recursive, force: true }); mux.control({ op: 'fs-result', id: rid, ok: true }); break;
-              default: throw new Error('unknown fs action: ' + msg.action);
-            }
+              mux.control({ op: 'fs-done', id: rid, chan: msg.chan, sent });
+            } else if (FS_ACTIONS[msg.action]) {
+              const r = await runFs(msg.action, { path: p, to: msg.to, recursive: msg.recursive, data64: msg.data64 }, 12000);
+              const { data, ...rest } = r;
+              mux.control({ op: 'fs-result', id: rid, ...rest });
+            } else throw new Error('unknown fs action: ' + msg.action);
           } catch (e) { mux.control({ op: 'fs-result', id: msg.id, error: e.message }); }
         })();
         return;
