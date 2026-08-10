@@ -50,4 +50,28 @@ function buildRemoteShellPrelude({ toolsOnPath = false, withNodeFinder = false }
   return s;
 }
 
-module.exports = { REMOTE_PRELUDE, nodeFinder, buildRemoteShellPrelude };
+/** Ambient long-lived-token strip (B-211a 2.267.0 ⑦): an inherited
+ *  CLAUDE_CODE_OAUTH_TOKEN in a host profile has TOP credential precedence
+ *  and silently re-bills every remote session. It had to be HAND-ADDED to
+ *  all five command builders once — the drift generator buildRemoteExec
+ *  exists to kill. Deliberate oat spawns re-add theirs via tokenAssign. */
+const AMBIENT_OAT_UNSET = 'unset CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR 2>/dev/null; ';
+
+/**
+ * THE remote spawn command line (CS separation, 2.279.0). Five builders in
+ * ws-handler assembled `cd + prelude + unset + tokens + exec env …` by hand
+ * with drifting copies (two of them included REMOTE_PRELUDE twice; a new
+ * security prefix meant editing five sites). One composition now; every
+ * difference is a NAMED parameter:
+ *  - pre:        transport prelude (ra.prelude / REMOTE_PRELUDE + tools PATH)
+ *  - resolve:    extra resolution snippet (dial pty's shellResolve)
+ *  - tokenAssign/acctEnv: secret-by-$(cat) assignments — NEVER values in argv
+ *  - parts:      PRE-QUOTED env pairs + argv tokens (caller owns quoting)
+ *  - tail:       verbatim suffix instead of argv (the keeper runTail)
+ */
+function buildRemoteExec({ cwd, shq, pre = '', resolve = '', tokenAssign = '', acctEnv = '', parts = [], tail = '' }) {
+  return `cd ${shq(cwd)} 2>/dev/null; ` + pre + resolve + AMBIENT_OAT_UNSET + tokenAssign + acctEnv
+    + 'exec env ' + parts.join(' ') + tail;
+}
+
+module.exports = { REMOTE_PRELUDE, nodeFinder, buildRemoteShellPrelude, buildRemoteExec, AMBIENT_OAT_UNSET };

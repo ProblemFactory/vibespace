@@ -16,7 +16,8 @@ const { execFile } = require('child_process');
 // deletes it, but `sh -lc` re-sources the host's profiles. Runs after profile
 // sourcing, before the command-prefix assignments (a deliberate oat spawn's
 // own `CLAUDE_CODE_OAUTH_TOKEN="$(cat …)"` prefix survives an earlier unset).
-const AMBIENT_OAT_UNSET = 'unset CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR 2>/dev/null; ';
+// AMBIENT_OAT_UNSET moved into buildRemoteExec (src/remote-shell.js, 2.279.0) —
+// every spawn line gets it structurally instead of by five hand-edits.
 
 // Crash-loop detector state (2.207.0): conversation id → recent create times
 const crashLoopRef = {};
@@ -130,7 +131,7 @@ function pickCodexThreadCandidate({ activeSessions, webuiSessionId, cwd, created
 // lag/CS audit: four ssh round trips ran SYNC on the loop, so one wedged host
 // froze the whole server for up to 20s per spawn). stdin errors are swallowed
 // on the STREAM (2.241.1 rule: pipe errors arrive as stream 'error' events).
-const { REMOTE_PRELUDE, nodeFinder } = require('./remote-shell.js');
+const { REMOTE_PRELUDE, nodeFinder, buildRemoteExec } = require('./remote-shell.js');
 const { sweepWriters } = require('./writer-sweep.js');
 
 function execFileAsync(cmd, args, { input, timeout = 20000, maxBuffer = 8 * 1024 * 1024, encoding = 'buffer' } = {}) {
@@ -1040,9 +1041,12 @@ function registerWsHandler(wss, ctx) {
                 });
                 // tools PATH only while integrated — leftover tools from an
                 // earlier ON spawn must not be name-resolvable in a pristine one
-                const shellCmd = `cd ${shq(cwd)} 2>/dev/null; ` + REMOTE_PRELUDE + (integrationOn ? 'export PATH="$HOME/.vibespace/bin:$PATH"; ' : '') + `${shellResolve}${AMBIENT_OAT_UNSET}${da.tokenAssign}${dialAcctAssign}exec env `
-                  + [...da.envPairs.map(shq), ...spawnEnvPairs.map(shq)].join(' ')
-                  + ' ' + [rcmd0, ...(backend === 'shell' ? ['-l'] : spawnArgs.map(shq))].join(' ');
+                const shellCmd = buildRemoteExec({
+                  cwd, shq,
+                  pre: REMOTE_PRELUDE + (integrationOn ? 'export PATH="$HOME/.vibespace/bin:$PATH"; ' : ''),
+                  resolve: shellResolve, tokenAssign: da.tokenAssign, acctEnv: dialAcctAssign,
+                  parts: [...da.envPairs.map(shq), ...spawnEnvPairs.map(shq), rcmd0, ...(backend === 'shell' ? ['-l'] : spawnArgs.map(shq))],
+                });
                 const cfg = {
                   tcp: { port: bridgePort },
                   hostToken: agentdRemote.agentdHostToken('dial-' + h.deviceId),
@@ -1077,8 +1081,10 @@ function registerWsHandler(wss, ctx) {
             // acctEnv rides as a SHELL PREFIX ASSIGNMENT before exec — the shell
             // setenvs it internally, so the VALUE never appears in any argv
             // (an `env KEY=$(cat …)` argument would expand into env's argv).
-            const inner = ra.prelude + `cd ${shq(cwd)} 2>/dev/null; ` + AMBIENT_OAT_UNSET + ra.tokenAssign + acctEnv + `exec env TERM=xterm-256color COLORTERM=truecolor `
-              + [...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq), rcmd, ...spawnArgs.map(shq)].join(' ');
+            const inner = buildRemoteExec({
+              cwd, shq, pre: ra.prelude, tokenAssign: ra.tokenAssign, acctEnv,
+              parts: ['TERM=xterm-256color', 'COLORTERM=truecolor', ...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq), rcmd, ...spawnArgs.map(shq)],
+            });
             spawnCmd = 'ssh';
             spawnArgs = [...hosts.sshArgs(h, { tty: true, reverse: ra.reverse }), '--', `dtach -A /tmp/vs-${id} -r winch sh -lc ${shq(inner)}`];
             spawnEnvPairs = [];
@@ -1195,9 +1201,12 @@ function registerWsHandler(wss, ctx) {
                   console.warn('[dial] agent setup degraded:', e.message); return { envPairs: [], tokenAssign: '' };
                 });
                 // tools PATH only while integrated (see the pty branch note)
-                const shellCmd = `cd ${shq(cwd)} 2>/dev/null; ` + REMOTE_PRELUDE + (integrationOn ? 'export PATH="$HOME/.vibespace/bin:$PATH"; ' : '') + `${AMBIENT_OAT_UNSET}${da.tokenAssign}${dialAcctAssign}exec env `
-                  + [...da.envPairs.map(shq), ...spawnEnvPairs.map(shq)].join(' ')
-                  + ' ' + [rcmd, ...rargs.map(shq)].join(' ');
+                const shellCmd = buildRemoteExec({
+                  cwd, shq,
+                  pre: REMOTE_PRELUDE + (integrationOn ? 'export PATH="$HOME/.vibespace/bin:$PATH"; ' : ''),
+                  tokenAssign: da.tokenAssign, acctEnv: dialAcctAssign,
+                  parts: [...da.envPairs.map(shq), ...spawnEnvPairs.map(shq), rcmd, ...rargs.map(shq)],
+                });
                 const cfg = {
                   tcp: { port: bridgePort },
                   hostToken: agentdRemote.agentdHostToken('dial-' + h.deviceId),
@@ -1325,9 +1334,10 @@ function registerWsHandler(wss, ctx) {
                 // the child claude runs under `sh -lc` on the host so the
                 // existing shell-expanded prefixes (token file reads, $HOME
                 // account paths) keep their exact semantics
-                const shellCmd = ra.prelude + `cd ${shq(cwd)} 2>/dev/null; ` + REMOTE_PRELUDE + AMBIENT_OAT_UNSET + ra.tokenAssign + acctEnv + `exec env `
-                  + [...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq)].join(' ')
-                  + ' ' + [rcmd, ...rargs.map(shq)].join(' ');
+                const shellCmd = buildRemoteExec({
+                  cwd, shq, pre: ra.prelude, tokenAssign: ra.tokenAssign, acctEnv,
+                  parts: [...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq), rcmd, ...rargs.map(shq)],
+                });
                 const remoteCmd = REMOTE_PRELUDE + 'exec node "$HOME/.vibespace/agentd/current/agentd.js" --stdio';
                 const cfg = {
                   sshBin: 'ssh',
@@ -1357,9 +1367,11 @@ function registerWsHandler(wss, ctx) {
               }
             }
             if (!agentdMode || (keeperSid && !agentdAttach)) {
-              const inner = ra.prelude + `cd ${shq(cwd)} 2>/dev/null; ` + REMOTE_PRELUDE + AMBIENT_OAT_UNSET + ra.tokenAssign + acctEnv + `exec env `
-                + [...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq)].join(' ')
-                + runTail;
+              const inner = buildRemoteExec({
+                cwd, shq, pre: ra.prelude, tokenAssign: ra.tokenAssign, acctEnv,
+                parts: [...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq)],
+                tail: runTail,
+              });
               spawnCmd = 'ssh';
               spawnArgs = [...hosts.sshArgs(h, { reverse: ra.reverse }), '-T', '--', inner];
               spawnEnvPairs = [];

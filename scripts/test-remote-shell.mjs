@@ -31,5 +31,29 @@ for (const f of ['src/hosts.js', 'src/ws-handler.js']) {
   ok(!src.includes(LIT_PRE), `${f} has no inlined prelude copy (must import REMOTE_PRELUDE)`);
   ok(!src.includes(LIT_NF), `${f} has no inlined node finder (must import nodeFinder)`);
 }
+// ── buildRemoteExec (2.279.0): the five spawn builders collapsed to one ──
+{
+  const { buildRemoteExec, AMBIENT_OAT_UNSET } = require('../src/remote-shell.js');
+  const shq = (x) => `'${String(x).replace(/'/g, `'"'"'`)}'`;
+  const line = buildRemoteExec({
+    cwd: '/home/u/my dir', shq, pre: 'PRE; ', resolve: 'RES; ',
+    tokenAssign: 'T="$(cat /x)" ', acctEnv: 'A="$(cat /y)" ',
+    parts: ['K=v', shq('claude'), shq('--resume')],
+  });
+  ok(line.startsWith("cd '/home/u/my dir' 2>/dev/null; PRE; RES; "), 'composition order: cd → pre → resolve');
+  ok(line.includes(AMBIENT_OAT_UNSET), 'ambient oat strip present STRUCTURALLY (was five hand-edits in 2.267.0)');
+  ok(line.indexOf(AMBIENT_OAT_UNSET) < line.indexOf('T="$(cat /x)"'), 'strip runs BEFORE the deliberate token assign (never unsets it)');
+  ok(line.endsWith(`exec env K=v 'claude' '--resume'`), 'exec env carries pre-quoted parts verbatim');
+  const hostile = buildRemoteExec({ cwd: `/tmp/$(rm -rf ~)'x`, shq, parts: ['a'] });
+  ok(!hostile.includes('$(rm') || hostile.includes(`'/tmp/$(rm`), 'hostile cwd stays inside quotes');
+  const tailLine = buildRemoteExec({ cwd: '/w', shq, parts: ['K=v'], tail: ' node keeper run sid 0 --' });
+  ok(tailLine.endsWith('exec env K=v node keeper run sid 0 --'), 'tail form (keeper runTail) appends verbatim');
+  // drift guard: ws-handler must never hand-assemble a spawn line again
+  const ws = fs.readFileSync(new URL('../src/ws-handler.js', import.meta.url), 'utf-8');
+  const handRolled = (ws.match(/exec env `/g) || []).length + (ws.match(/`exec env/g) || []).length;
+  ok(handRolled === 0, `no hand-assembled 'exec env' spawn lines left in ws-handler (found ${handRolled})`);
+  ok((ws.match(/buildRemoteExec\(\{/g) || []).length === 5, 'all five builders route through buildRemoteExec');
+}
+
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
