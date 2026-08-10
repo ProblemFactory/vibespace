@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.266.2
+
+- **"Subscription signed out (a Console login replaced it)" was the wrong story** (user question: 为啥提示订阅已登出 — forensics: `~/.claude/.credentials.json` held empty tokens with NO `primaryApiKey` anywhere, i.e. no Console login ever happened). The real mechanism, new to the pooling era: with named/pooled accounts handling every session, nothing ever runs on the bare machine login, so its refresh token ages out (this machine's expired 06:46 today) and the CLI's next failed refresh clears the stored tokens — same signed-out file shape, completely different cause. The detection now derives a cause (`primaryApiKey` present ⇒ console; absent ⇒ idle-expiry, computed once per creds-file change) and the popup shows an honest message for the expiry case: named accounts are unaffected (the linked named account's own token pair is alive and refreshed by the pool), `/login` only needed if you use the bare CLI login. The warning still renders under the linked named account's chip (`showingGlobal` includes the identity link) — that stays, since the machine-login fact belongs to that identity.
+
 ## 2.266.1
 
 Three pool-operations fixes from live use (all three user-reported the same evening):

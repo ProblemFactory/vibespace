@@ -38,7 +38,8 @@ let _codexRateLimitCacheAt = 0;
 
 let _oauthCreds = null; // { accessToken, refreshToken, expiresAt }
 let _oauthMtime = 0;
-let _oauthSignedOut = false; // credentials file present but emptied (user /login'd to console) — last-known data is real but frozen
+let _oauthSignedOut = false; // credentials file present but emptied — see the cause split below
+let _oauthSignedOutCause = 'expired'; // 'console' (replaced by a Console /login) | 'expired' (idle machine login aged out)
 
 function _readOAuthCreds() {
   try {
@@ -50,10 +51,20 @@ function _readOAuthCreds() {
       const raw = JSON.parse(fs.readFileSync(credsPath, 'utf-8'));
       const o = raw?.claudeAiOauth;
       if (o?.accessToken) { _oauthCreds = o; _oauthMtime = stat.mtimeMs; _oauthSignedOut = false; return _oauthCreds; }
-      // File parses but holds no token → the user logged OUT of the subscription
-      // (e.g. switched to a console login, which wipes it to {}). We keep serving
-      // the last-known in-memory creds while their access token stays valid, but
-      // flag it so the UI can say the pies are from a signed-out subscription.
+      // File parses but holds no token. TWO distinct causes (2.266.2 — the
+      // blanket "a Console login replaced it" wording was wrong for the real
+      // 2026-08-09 case): (a) a Console /login wiped it (primaryApiKey lands in
+      // ~/.claude.json); (b) the machine login sat IDLE until its refresh token
+      // expired — with named/pooled accounts handling every session nothing
+      // refreshes ~/.claude — and the CLI's failed refresh cleared the stored
+      // tokens (empty access+refresh, metadata kept). Cause derived once per
+      // creds-file change (never per poll — ~/.claude.json can be large).
+      if (!_oauthSignedOut || stat.mtimeMs !== _oauthMtime) {
+        try {
+          const cfg = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude.json'), 'utf-8'));
+          _oauthSignedOutCause = cfg?.primaryApiKey ? 'console' : 'expired';
+        } catch { _oauthSignedOutCause = 'expired'; }
+      }
       _oauthMtime = stat.mtimeMs;
       _oauthSignedOut = true;
     }
@@ -761,7 +772,7 @@ app.get('/api/usage', (req, res) => {
   }
   res.json({
     rateLimit: _rateLimitCache, codexRateLimit: codexRl.overall,
-    subscriptionSignedOut: _oauthSignedOut, accounts: _accountUsage,
+    subscriptionSignedOut: _oauthSignedOut, subscriptionSignedOutCause: _oauthSignedOutCause, accounts: _accountUsage,
     // Dead-reckoned CURRENT utilization per account key (B-fcff v2): anchor +
     // learned-rate × ledger-cost-since. Purely local computation (30s memo);
     // keys match `accounts` + '__global__'. The popup renders these as a dim
