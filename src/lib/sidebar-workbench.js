@@ -9,7 +9,7 @@
 //             main filter searches it; expanding renders capped pages).
 // Starred sessions float to the top of their zone.
 import { t as tr } from './i18n.js'; // sidebar cluster convention
-import { escHtml, showConfirmDialog, showToast, stripCwdHostLabel } from './utils.js';
+import { agoText, escHtml, hostStateChip, showConfirmDialog, showToast, stripCwdHostLabel } from './utils.js';
 
 const RECENT_MS = 7 * 86400e3;
 const HISTORY_PAGE = 60;
@@ -61,25 +61,96 @@ export function installSidebarWorkbench(Sidebar) {
           localStorage.setItem('wbRecentHost', v);
           this._render();
         }));
-        if (recentHost) {
-          const rf = document.createElement('button');
-          rf.className = 'wb-recent-refresh';
-          rf.title = 'Re-scan sessions on this host';
-          rf.innerHTML = '<svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M13 2v3h-3"/></svg>';
-          rf.onclick = (e) => { e.stopPropagation(); this._loadRemoteHost(recentHost, { fresh: true }); };
-          h.appendChild(rf);
-        }
+        if (recentHost) h.appendChild(this._buildRescanBtn(recentHost, st));
+        const chip = this._wbHostHeadChip(st);
+        if (chip) h.appendChild(chip);
       }
       return h;
     },
 
+    // ⟳ re-scan, shared by the Recent and History zone heads. IN-FLIGHT STATE
+    // IS MANDATORY (campaign finding): with a cached list already on screen a
+    // re-scan re-rendered the OLD list unchanged — no spinner, no disable — so
+    // on a slow host (12s device deadline + 20s ssh) nothing appeared to
+    // happen for tens of seconds and users re-clicked.
+    _buildRescanBtn(hostId, st) {
+      const rf = document.createElement('button');
+      rf.className = 'wb-recent-refresh';
+      const busy = !!st?.loading;
+      rf.title = busy ? tr('Scanning this host…') : tr('Re-scan sessions on this host');
+      rf.disabled = busy;
+      rf.style.opacity = busy ? '0.45' : '';
+      rf.innerHTML = '<svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M13 2v3h-3"/></svg>';
+      rf.onclick = (e) => { e.stopPropagation(); this._loadRemoteHost(hostId, { fresh: true }); };
+      return rf;
+    },
+
+    // Compact head chip: the zone count alone can't distinguish "scanning" /
+    // "serving cache because the host is dead" / "fresh" — a dead host's
+    // hours-old scan rendered exactly like a healthy one.
+    _wbHostHeadChip(st) {
+      if (!st) return null;
+      if (st.loading) return hostStateChip('pending', { text: tr('scanning…'), title: tr('Scanning sessions over ssh…') });
+      if (st.error) return hostStateChip('error', { text: tr('unreachable'), title: st.error });
+      const at = this._wbSnapshotAt(st);
+      if (at && Date.now() - at > 120000) return hostStateChip('stale', { age: at, title: tr('One-shot scan — click ⟳ to re-scan this host.') });
+      return null;
+    },
+
+    // Age of the rendered snapshot: our own fetch time, else the server's
+    // last-known marker (hosts.discoverSessions serves {stale, staleAt} when
+    // the machine is unreachable).
+    _wbSnapshotAt(st) {
+      if (!st) return 0;
+      const marked = (st.sessions || []).find(s => s.staleAt)?.staleAt || 0;
+      return marked || st.fetchedAt || 0;
+    },
+
+    // Full-width state row above a remote zone's content. Silence here was the
+    // lie: an unreachable host's cached list rendered as live discovery.
+    _wbHostStateRow(st, hostLabel) {
+      if (!st) return;
+      const cached = (st.sessions || []).length;
+      let text = '', chip = null;
+      const at = this._wbSnapshotAt(st);
+      if (st.error && cached) {
+        text = tr('Showing cached results — {host} is unreachable.', { host: hostLabel });
+        chip = hostStateChip('error', { text: at ? tr('as of {ago}', { ago: agoText(at) }) : tr('unreachable'), title: st.error });
+      } else if (st.loading && cached) {
+        text = tr('Re-scanning {host}…', { host: hostLabel });
+        chip = hostStateChip('pending', { text: tr('scanning…') });
+      } else if (cached && (st.sessions || []).some(s => s.stale)) {
+        text = tr('Last known scan — {host} was unreachable.', { host: hostLabel });
+        chip = hostStateChip('stale', { age: at, title: tr('Session states may have changed since this scan.') });
+      } else if (at && Date.now() - at > 120000) {
+        text = tr('Remote sessions are scanned once, not polled.');
+        chip = hostStateChip('stale', { age: at, title: tr('Click ⟳ to re-scan this host.') });
+      } else return;
+      const row = document.createElement('div');
+      row.className = 'wb-empty wb-host-state-row';
+      const label = document.createElement('span');
+      label.textContent = text + ' ';
+      row.append(label, chip);
+      this.listEl.appendChild(row);
+    },
+
     _ensureHostsData() {
-      if (this._hostsData || this._hostsDataLoading) return;
+      // RETRYABLE (campaign finding): the old version set _hostsDataLoading and
+      // never reset it on failure, and stored a non-ok `{error}` body (truthy)
+      // as the cache — so ONE boot fetch landing in a server-restart window
+      // killed the Recent/History host switchers AND cross-host search for the
+      // whole page lifetime, silently and with no retry.
+      if (this._hostsDataLoading) return;
+      if (Array.isArray(this._hostsData?.hosts)) return;
+      if (this._hostsDataFailAt && Date.now() - this._hostsDataFailAt < 5000) return; // backoff: every render calls this
       this._hostsDataLoading = true;
       fetch('/api/hosts').then(r => r.json()).then(d => {
+        if (!Array.isArray(d?.hosts)) throw new Error(d?.error || 'bad /api/hosts response');
         this._hostsData = d;
-        if (d?.hosts?.length) this._render(); // switcher appears once hosts are known
-      }).catch(() => {});
+        this._hostsDataFailAt = 0;
+        if (d.hosts.length) this._render(); // switcher appears once hosts are known
+      }).catch(() => { this._hostsDataFailAt = Date.now(); })
+        .finally(() => { this._hostsDataLoading = false; });
     },
 
     // Per-host discovery cache — Recent and History can point at DIFFERENT
@@ -88,19 +159,33 @@ export function installSidebarWorkbench(Sidebar) {
       const map = this._wbRemoteHosts = this._wbRemoteHosts || new Map();
       const cur = map.get(hostId);
       if (!fresh && cur && (cur.loading || cur.sessions)) return;
-      map.set(hostId, { loading: true, sessions: cur?.sessions || null, error: null });
-      if (fresh) this._render(); // show the scanning row immediately
+      // BACKOFF after a failed scan (campaign finding): the catch branch used
+      // to store sessions:null, which the guard above reads as "never loaded",
+      // so a failing fetch (server restarting, a proxy 502 whose HTML breaks
+      // r.json()) re-fired from EVERY render in a tight loop — and each retry
+      // wiped the error, leaving a permanent "Scanning sessions over ssh…" row
+      // as the only visible state.
+      if (!fresh && cur?.lastFailAt && Date.now() - cur.lastFailAt < 10000) return;
+      map.set(hostId, { loading: true, sessions: cur?.sessions || null, error: cur?.error || null, fetchedAt: cur?.fetchedAt || 0, lastFailAt: cur?.lastFailAt || 0 });
+      if (fresh) this._render(); // in-flight state (⟳ disabled + "scanning…" chip) must show immediately
       // re-render for the selected zones OR whenever a search is active (so
       // cross-host search matches appear as each host's scan lands)
       const relevant = () => this._wbRecentHost === hostId || this._wbHistoryHost === hostId || !!(document.getElementById('session-filter')?.value || '').trim();
       fetch(`/api/hosts/${hostId}/sessions${fresh ? '?fresh=1' : ''}`)
-        .then(r => r.json())
+        .then(async (r) => {
+          const d = await r.json().catch(() => null);
+          if (!r.ok || !d || d.error) throw new Error(d?.error || `${r.status} ${r.statusText || 'discovery failed'}`);
+          return d;
+        })
         .then(d => {
-          map.set(hostId, { loading: false, sessions: d.sessions || [], error: d.error || null });
+          map.set(hostId, { loading: false, sessions: d.sessions || [], error: null, fetchedAt: Date.now(), lastFailAt: 0 });
           if (relevant()) this._render();
         })
         .catch(e => {
-          map.set(hostId, { loading: false, sessions: null, error: e.message });
+          // KEEP the last good list — an unreachable host must degrade to a
+          // labelled "cached results" zone, never to an empty one.
+          const prev = map.get(hostId);
+          map.set(hostId, { loading: false, sessions: prev?.sessions || null, error: e.message, fetchedAt: prev?.fetchedAt || 0, lastFailAt: Date.now() });
           if (relevant()) this._render();
         });
     },
@@ -146,8 +231,21 @@ export function installSidebarWorkbench(Sidebar) {
       let list = liveIds.size ? sessions.filter(s => !liveIds.has(s.sessionId)) : sessions;
       const f = (document.getElementById('session-filter')?.value || '').toLowerCase().trim();
       if (!f) return list;
-      return list.filter(s => (s.cwd || s.projDir || '').toLowerCase().includes(f)
-        || (s.name || '').toLowerCase().includes(f) || (s.sessionId || '').toLowerCase().includes(f));
+      return list.filter(s => this._wbMatchRemote(s, f));
+    },
+
+    // ONE matcher for discovered remote sessions, shared with the cross-host
+    // search below. The LOCAL filter (_renderInner) also matches backend /
+    // agent fields, so e.g. "codex" listed every local codex session and NOT
+    // ONE remote codex rollout — the same query silently meant different
+    // things per machine.
+    _wbMatchRemote(s, f) {
+      if (!f) return true;
+      return (s.cwd || s.projDir || '').toLowerCase().includes(f)
+        || (s.name || '').toLowerCase().includes(f)
+        || (s.sessionId || '').toLowerCase().includes(f)
+        || (s.backend || 'claude').toLowerCase().includes(f)
+        || (s.hostName || '').toLowerCase().includes(f);
     },
 
     // Cross-host remote search: when the sidebar filter is active, surface
@@ -159,17 +257,37 @@ export function installSidebarWorkbench(Sidebar) {
       const liveIds = new Set();
       for (const x of this._allSessions || []) if (x.status === 'live') { const id = x.backendSessionId || x.claudeSessionId; if (id) liveIds.add(id); }
       let headDone = false;
+      const ensureHead = () => {
+        if (headDone) return;
+        const hd = document.createElement('div'); hd.className = 'wb-zone-head';
+        hd.innerHTML = `<span class="wb-zone-title">${escHtml(tr('Remote matches'))}</span>`;
+        this.listEl.appendChild(hd); headDone = true;
+      };
+      // A scan takes up to ~32s per slow host and used to render NOTHING while
+      // in flight (and nothing at all for a host whose scan failed — its error
+      // only ever showed when that host was selected in a zone switcher), so
+      // the user concluded "no remote matches" from a still-running search.
+      const stateRow = (state, text, chipText, title) => {
+        ensureHead();
+        const row = document.createElement('div');
+        row.className = 'wb-empty wb-host-state-row';
+        const label = document.createElement('span');
+        label.textContent = text + ' ';
+        row.append(label, hostStateChip(state, { text: chipText, title }));
+        this.listEl.appendChild(row);
+      };
       for (const h of hosts) {
         if (h.id === skipHost) continue;
         const st = this._remoteHostState(h.id);
-        if (!st || !st.sessions) continue;
-        const matches = st.sessions.filter(s => !liveIds.has(s.sessionId) && (
-          (s.cwd || s.projDir || '').toLowerCase().includes(f)
-          || (s.name || '').toLowerCase().includes(f)
-          || (s.sessionId || '').toLowerCase().includes(f)));
+        const hname = st?.sessions?.[0]?.hostName || h.name || h.id;
+        if (!st || (st.loading && !st.sessions)) { stateRow('pending', tr('Searching {host}…', { host: hname }), tr('scanning…')); continue; }
+        if (st.error && !st.sessions?.length) { stateRow('error', tr('Search on {host} failed.', { host: hname }), tr('unreachable'), st.error); continue; }
+        if (!st.sessions) continue;
+        const matches = st.sessions.filter(s => !liveIds.has(s.sessionId) && this._wbMatchRemote(s, f));
+        if (st.error) stateRow('error', tr('Showing cached results — {host} is unreachable.', { host: hname }), tr('unreachable'), st.error);
         if (!matches.length) continue;
-        if (!headDone) { const hd = document.createElement('div'); hd.className = 'wb-zone-head'; hd.innerHTML = `<span class="wb-zone-title">${escHtml(tr('Remote matches'))}</span>`; this.listEl.appendChild(hd); headDone = true; }
-        const hlabel = st.sessions[0]?.hostName || h.name || h.id;
+        ensureHead();
+        const hlabel = hname;
         const color = `hsl(${projectHue('host:' + h.id)} 55% 52%)`;
         for (const s of matches.slice(0, 20)) {
           const card = this._buildRemoteCard(s);
@@ -189,8 +307,12 @@ export function installSidebarWorkbench(Sidebar) {
       const st = this._remoteHostState(hostId);
       const empty = (t) => this._wbEmptyRow(t);
       const hostLabelFallback = this._hostsData?.hosts?.find(x => x.id === hostId)?.name || hostId;
-      if (!st || (st.loading && !st.sessions)) { empty('Scanning sessions over ssh…'); return; }
-      if (st.error) { empty('Discovery failed: ' + st.error); return; }
+      if (!st || (st.loading && !st.sessions)) { empty(tr('Scanning sessions over ssh…')); return; }
+      // A failed re-scan with a cached list must SHOW the cached list under an
+      // honest banner — bailing to a bare error row threw away sessions the
+      // user could still resume.
+      if (st.error && !st.sessions?.length) { empty(tr('Discovery failed: {err}', { err: st.error })); return; }
+      this._wbHostStateRow(st, hostLabelFallback);
       const all = this._wbFilterRemote(st.sessions || []);
       const cutoff = Date.now() - RECENT_MS;
       // SEARCHING = search EVERYTHING on this host (2.124.0 parity fix): the
@@ -273,6 +395,13 @@ export function installSidebarWorkbench(Sidebar) {
         // remote card can reach killRemotePid (without it the card's confirm
         // dialog ended in a silent no-op — real report, 2.191.0)
         pid: s.pid || undefined,
+        // LAST-KNOWN marker (campaign finding): hosts.discoverSessions serves a
+        // previous scan tagged {stale, staleAt} when the machine is
+        // unreachable. The whitelist dropped both fields, so an hours-old
+        // snapshot — including 'external' cards implying live processes that
+        // may have exited long ago — rendered exactly like fresh discovery.
+        stale: s.stale || undefined,
+        staleAt: s.staleAt || undefined,
         startedAt: s.mtime,
       };
     },
@@ -335,26 +464,51 @@ export function installSidebarWorkbench(Sidebar) {
         const k = this._getSessionStateKey(s) || s.sessionId;
         if (marks.has(k) && !byKey.has(k)) byKey.set(k, s);
       }
+      // Remote DISCOVERED cards carry the same mark buttons but live in the
+      // per-host discovery cache, NOT _allSessions — their marks fell into the
+      // `if (!s) continue` hole below while the closing toast still claimed
+      // success, so "terminate" on a remote external claude was a silent
+      // no-op and the process kept running.
+      for (const st of (this._wbRemoteHosts?.values() || [])) {
+        for (const rs of st?.sessions || []) {
+          const cs = this._remoteToCardSession(rs);
+          const k = this._getSessionStateKey(cs) || cs.sessionId;
+          if (marks.has(k) && !byKey.has(k)) byKey.set(k, cs);
+        }
+      }
       const termList = [], archList = [];
+      let skipped = 0;
       for (const [k, m] of marks) {
         const s = byKey.get(k);
-        if (!s) continue;
-        if (m.terminate) termList.push(s);
+        if (!s) { skipped++; continue; } // card gone from every list (refreshed away)
+        if (m.terminate) {
+          // no webuiId AND no pid = nothing to kill; counting it as applied
+          // was the same lie as dropping the mark entirely
+          if (s.webuiId || s.pid) termList.push(s); else skipped++;
+        }
         if (m.archive) archList.push(s);
       }
       const parts = [];
-      if (termList.length) parts.push(`terminate ${termList.length}`);
-      if (archList.length) parts.push(`archive ${archList.length}`);
+      if (termList.length) parts.push(tr('terminate {n}', { n: termList.length }));
+      if (archList.length) parts.push(tr('archive {n}', { n: archList.length }));
+      if (!parts.length) {
+        showToast(tr('Nothing to apply — {n} marked session(s) could no longer be found', { n: skipped }), { type: 'error' });
+        return;
+      }
       const ok = await showConfirmDialog({
-        title: 'Apply batch actions',
-        message: `About to ${parts.join(' and ')} session${marks.size === 1 ? '' : 's'}. Terminating kills the running agent process.`,
-        confirmText: 'Apply', danger: true,
+        title: tr('Apply batch actions'),
+        message: tr('About to {what}. Terminating kills the running agent process.', { what: parts.join(' + ') })
+          + (skipped ? ' ' + tr('{n} marked session(s) will be skipped — they are no longer in the list.', { n: skipped }) : ''),
+        confirmText: tr('Apply'), danger: true,
       });
       if (!ok) return;
       // terminate first (kills), then archive the rest
       for (const s of termList) {
+        // s.host is MANDATORY for a remote pid — the host-less local route
+        // 400s silently (the exact bug fixed on the card's own Terminate in
+        // 2.191.0); killPid surfaces its own failure toast either way.
         if (s.webuiId) this.app.killSession(s.webuiId);
-        else if (s.pid) this.app.killPid(s.pid);
+        else if (s.pid) this.app.killPid(s.pid, s.host);
       }
       // archive as a batch — toggle the set directly, single state push + render
       for (const s of archList) {
@@ -373,7 +527,9 @@ export function installSidebarWorkbench(Sidebar) {
       }
       if (archList.length) { this._pushUserState(); this.app.updateTaskbar(); }
       this._manageMarks = new Map();
-      showToast(parts.join(', ') + ' applied');
+      showToast(skipped
+        ? tr('{what} applied, {n} skipped', { what: parts.join(', '), n: skipped })
+        : tr('{what} applied', { what: parts.join(', ') }), skipped ? { type: 'error' } : undefined);
       this._render();
     },
 
@@ -578,20 +734,18 @@ export function installSidebarWorkbench(Sidebar) {
           this._render();
         }));
         if (histHost) {
-          const rf = document.createElement('button');
-          rf.className = 'wb-recent-refresh';
-          rf.title = 'Re-scan sessions on this host';
-          rf.innerHTML = '<svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M13 2v3h-3"/></svg>';
-          rf.onclick = (e) => { e.stopPropagation(); this._loadRemoteHost(histHost, { fresh: true }); };
-          hHead.appendChild(rf);
+          hHead.appendChild(this._buildRescanBtn(histHost, histState));
+          const chip = this._wbHostHeadChip(histState);
+          if (chip) hHead.appendChild(chip);
         }
       }
       this.listEl.appendChild(hHead);
       if (open) {
+        if (histHost) this._wbHostStateRow(histState, histLabel); // cached / unreachable / one-shot age
         if (histLoading) {
-          this._wbEmptyRow('Scanning sessions over ssh…');
-        } else if (histHost && histState?.error) {
-          this._wbEmptyRow('Discovery failed: ' + histState.error);
+          this._wbEmptyRow(tr('Scanning sessions over ssh…'));
+        } else if (histHost && histState?.error && !histState.sessions?.length) {
+          this._wbEmptyRow(tr('Discovery failed: {err}', { err: histState.error }));
         } else if (!histList.length) {
           this._wbEmptyRow(histHost ? `No sessions older than 7 days on ${histLabel}` : 'No older sessions');
         }

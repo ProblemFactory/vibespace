@@ -379,6 +379,7 @@ export class ChatInput {
 
   showTyping(label = t('thinking...')) {
     if (!this._streamStatus) return;
+    this._pendingLine = false; // a real turn owns the line now (see _clearPending)
     this._streamStatus.innerHTML = `<span class="chat-spinner"></span> ${escHtml(label)}<button class="chat-interrupt-btn" title="${escHtml(t('Interrupt'))}">\u25A0 ${escHtml(t('Stop'))}</button>`;
     this._streamStatus.querySelector('.chat-interrupt-btn').onclick = () => this._onInterrupt();
     this._streamStatus.classList.remove('hidden');
@@ -430,6 +431,20 @@ export class ChatInput {
       this.hideTyping();
       showToast(t('Connection lost — your message may not have been sent; the text was restored to the input'), { type: 'error' });
     }
+    if (disconnected && this._pendingGoal) {
+      // Same class as the unconfirmed send above — don't make the user wait out
+      // the 10s timer when the socket is already known dead.
+      clearTimeout(this._goalTimer);
+      this._goalTimer = null;
+      const { text } = this._pendingGoal;
+      this._pendingGoal = null;
+      this._clearPending();
+      if (text && !this._textarea.value.trim()) {
+        this._textarea.value = text;
+        this._textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      showToast(t('Connection lost before the goal was set — your command was restored to the input'), { type: 'error' });
+    }
   }
 
   // Called by ChatView when server traffic for this session arrives: the send
@@ -441,11 +456,63 @@ export class ChatInput {
     clearDraft('chat', this._sessionId);
   }
 
+  // /goal has no ack of its own — the server's goal-updated broadcast IS the
+  // confirmation (it answers status/resume/set/clear alike). Until it lands we
+  // keep the typed command as a draft and show a pending line; 10s of silence
+  // means the session never processed it (dead wrapper / stale session id).
+  _markGoalPending(text) {
+    clearTimeout(this._goalTimer);
+    saveDraft('chat', this._sessionId, text);
+    this._pendingGoal = { text };
+    this._showPending(t('Setting goal…'));
+    this._goalTimer = setTimeout(() => {
+      const pending = this._pendingGoal;
+      this._pendingGoal = null;
+      this._goalTimer = null;
+      this._clearPending();
+      if (!pending) return;
+      if (!this._textarea.value.trim()) {
+        this._textarea.value = pending.text;
+        this._textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      showToast(t('Goal not confirmed — the session may be unresponsive. Your command was restored to the input.'), { type: 'error' });
+    }, 10000);
+  }
+
+  confirmGoal() {
+    if (!this._pendingGoal) return;
+    clearTimeout(this._goalTimer);
+    this._goalTimer = null;
+    this._pendingGoal = null;
+    this._clearPending();
+    clearDraft('chat', this._sessionId);
+  }
+
+  // Transient "still working on it" line in the stream-status slot. Deliberately
+  // WITHOUT the interrupt button showTyping renders — there is no turn to stop.
+  _showPending(label) {
+    if (!this._streamStatus) return;
+    this._pendingLine = true;
+    this._streamStatus.innerHTML = `<span class="chat-spinner"></span> ${escHtml(label)}`;
+    this._streamStatus.classList.remove('hidden');
+  }
+
+  _clearPending() {
+    // Only clear OUR line: a real turn may have started streaming meanwhile
+    // (a /goal set immediately provokes one) and must keep its indicator.
+    if (!this._streamStatus || !this._pendingLine) return;
+    this._pendingLine = false;
+    if (this._streamStatus.querySelector('.chat-interrupt-btn')) return;
+    this._streamStatus.classList.add('hidden');
+    this._streamStatus.innerHTML = '';
+  }
+
   focus() {
     if (this._textarea) this._textarea.focus();
   }
 
   dispose() {
+    if (this._goalTimer) { clearTimeout(this._goalTimer); this._goalTimer = null; }
     if (this._draftSyncHandler) {
       const sync = getStateSync();
       if (sync) sync.off('drafts', 'chat:' + this._sessionId, this._draftSyncHandler);
@@ -478,7 +545,13 @@ export class ChatInput {
       }
       this._textarea.value = '';
       this._textarea.style.height = '';
-      clearDraft('chat', this._sessionId);
+      // Fire-and-forget before: ws.send has no ack, and the server silently
+      // does NOTHING when the session isn't a live chat session (dead wrapper,
+      // stale webui id) — the typed goal vanished with no pending state, no
+      // error and no way to notice. The draft is kept until the goal-updated
+      // broadcast (confirmGoal) proves it landed; a 10s silence restores the
+      // text and says so. Same shape as the _pendingSend defense below.
+      this._markGoalPending(text);
       return;
     }
 

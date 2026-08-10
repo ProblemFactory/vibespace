@@ -159,16 +159,51 @@ function setup(ctx) {
   //   ?...&search=q[&stream=1]  -> full-file matches (streamed NDJSON if stream=1)
   //   ?...&fullturnmap=1        -> every user turn in TIME coordinates for the minimap
 
+  // Remote transcripts: the gap endpoint is hit MANY times per scroll (one per
+  // slab), and each refresh is a remote find+stat round trip — throttle per
+  // (host, session). Slabs read OLD lines, which append-only transcripts never
+  // change, so a few seconds of staleness costs nothing; only the newest turns
+  // (search/minimap) care, and they get a fresh pull on the next window.
+  const gapHostRefreshAt = new Map();
+  const GAP_HOST_REFRESH_MS = 10000;
+
   router.get('/api/session-history-gap', async (req, res) => {
     const { backend, backendSessionId, claudeSessionId, cwd } = req.query;
     const resolvedBackend = backend || 'claude';
     const resolvedSessionId = backendSessionId || claudeSessionId;
     if (!resolvedSessionId) return res.status(400).json({ error: 'backendSessionId or claudeSessionId required' });
 
+    // ?host= — refresh the local transcript cache first, exactly like
+    // /api/session-messages. Without it this endpoint resolved the LOCAL
+    // transcript path for a REMOTE session, so its scroll-up slabs, Ctrl+F
+    // full-file search and whole-conversation minimap read a cache frozen at
+    // the last attach — or found nothing at all — while the identical local
+    // session worked (the 2.108.1 "EVERY history consumer passes ?host=" rule
+    // this endpoint never followed).
+    let hostFetchError = null;
+    if (req.query.host && hosts) {
+      const key = `${req.query.host}:${resolvedSessionId}`;
+      if (Date.now() - (gapHostRefreshAt.get(key) || 0) > GAP_HOST_REFRESH_MS) {
+        gapHostRefreshAt.set(key, Date.now());
+        // keys come from query params — bound it (same shape as _realCwdCache)
+        if (gapHostRefreshAt.size > 512) gapHostRefreshAt.delete(gapHostRefreshAt.keys().next().value);
+        try {
+          if (resolvedBackend === 'codex') await hosts.fetchCodexJsonl(req.query.host, resolvedSessionId);
+          else await hosts.fetchSessionJsonl(req.query.host, resolvedSessionId);
+        } catch (e) {
+          hostFetchError = e.message;
+          console.error('remote jsonl fetch failed (gap):', e.message);
+        }
+      }
+    }
+
     const fp = resolvedBackend === 'codex'
       ? findCodexSessionJsonlPath(resolvedSessionId)
       : findSessionJsonlPath(resolvedSessionId, cwd || '');
-    if (!fp || !fs.existsSync(fp)) return res.json({ gap: null });
+    // Carry the remote failure to the client: "no transcript" and "the machine
+    // holding it was unreachable" produce the same empty view otherwise, and
+    // the client has to end paging silently to tell them apart.
+    if (!fp || !fs.existsSync(fp)) return res.json({ gap: null, ...(hostFetchError ? { error: hostFetchError } : {}) });
 
     let gap;
     try { gap = await jsonlGapInfoAsync(fp); } catch { gap = null; }

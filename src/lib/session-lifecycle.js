@@ -3,7 +3,7 @@ import { ChatView } from './chat-view.js';
 import { track, metric } from './telemetry-client.js';
 import { t } from './i18n.js';
 import { TerminalSession } from './terminal.js';
-import { escHtml, estDisplayPair, fetchJson, showConfirmDialog, showContextMenu, showToast, stripCwdHostLabel } from './utils.js';
+import { api, escHtml, estDisplayPair, fetchJson, hostStateChip, showConfirmDialog, showContextMenu, showToast, stripCwdHostLabel } from './utils.js';
 
 export function installSessionLifecycle(App, ctx = {}) {
   Object.assign(App.prototype, {
@@ -46,6 +46,14 @@ export function installSessionLifecycle(App, ctx = {}) {
     // to whichever session the server happens to answer first.
     const reqId = `req-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     const _createT0 = performance.now();
+    // A remote create lawfully spends 5-60s BEFORE 'created' (home-dir probe,
+    // cwd preflight, tool tar, writer sweep, daemon provisioning) — the window
+    // used to be blank for all of it, so the only signal was a timeout toast
+    // blaming the connection.
+    const createHostName = this._hostLabel(hostId);
+    const pending = this._windowPending(winInfo, createHostName
+      ? t('Starting the session on {host}… (installing tools / checking the conversation)', { host: createHostName })
+      : (resumeId ? t('Resuming the conversation…') : t('Starting the session…')));
 
     const createMsg = {
       type:'create', backend, hostId: hostId||undefined, keeperSid: keeperSid||undefined, mode: sessionMode, cwd: cwd||undefined, sessionName: name||undefined, model: sessionModel||undefined,
@@ -81,6 +89,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       // surface it — without this the window stayed BLANK forever with no
       // feedback and no openSpec (found reproducing the remote-blank report).
       if (msg.type === 'error' && msg.reqId === reqId) {
+        pending.remove();
         try { onCreateResult?.(false, msg); } catch { }
         // Resume guard (2.179.0): the conversation is ALREADY live — attach
         // that session instead of leaving a dead "create failed" window (a
@@ -208,6 +217,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         return true;
       }
       if (msg.type === 'created' && msg.reqId === reqId) {
+        pending.remove();
         try { onCreateResult?.(true, msg); } catch { }
         // Non-fatal server warning (2.271.0 T1-2): the pre-resume writer sweep
         // couldn't verify no other process was writing this conversation on a
@@ -321,7 +331,12 @@ export function installSessionLifecycle(App, ctx = {}) {
       timeoutMs: 15000,
       onTimeout: () => {
         try { track('event', 'ws-reply-timeout:create', backend + ':' + sessionMode); } catch { }
-        showToast(t('Creating the session is taking unusually long — check the connection or reload the tab'), { type: 'error' });
+        // A slow REMOTE create is not a broken connection — the old wording
+        // invited a reload, which abandons the create (fresh creates are not
+        // re-sent on reconnect, so the window comes back spec-less).
+        showToast(createHostName
+          ? t('Still starting the session on {host} — this can take a minute on a slow machine. Leave the window open.', { host: createHostName })
+          : t('Creating the session is taking unusually long — it may still be in progress; reloading the tab abandons it'), { type: 'error' });
       },
       resend: backend === 'claude' && !!resumeId && !fork,
     });
@@ -398,6 +413,20 @@ export function installSessionLifecycle(App, ctx = {}) {
     if (window.innerWidth <= 768 && this.sidebar.isOpen) this.sidebar.toggle(false);
   },
 
+  // Transition-state note for a window whose contents only exist once a ws
+  // reply lands. A remote attach/create legitimately runs 15-120s (transcript
+  // pull over ssh, keeper probe, tool shipping, cwd preflight) and the window
+  // was BLANK for all of it — indistinguishable from a broken one, which is
+  // what taught users to reload the tab and abandon the create.
+  _windowPending(winInfo, text) {
+    const el = document.createElement('div');
+    el.className = 'empty-hint';
+    el.style.cssText = 'padding:24px;white-space:pre-wrap';
+    el.textContent = text;
+    winInfo.content.appendChild(el);
+    return { set: (s) => { el.textContent = s; }, remove: () => el.remove() };
+  },
+
   attachSession(serverId, name, cwd, { mode, syncId, backend = 'claude', backendSessionId, hostId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId } = {}) {
     cwd = stripCwdHostLabel(cwd); // keep openSpec.cwd a REAL path — it persists into layouts and feeds later resumes
     this._closeSidebarOnMobile();
@@ -430,6 +459,12 @@ export function installSessionLifecycle(App, ctx = {}) {
       titleMeta: this._buildTitleMeta(openSpec),
     });
 
+    const hostName = this._hostLabel(openSpec.hostId);
+    const pending = this._windowPending(winInfo, hostName
+      ? t('Connecting to {host}…', { host: hostName })
+      : t('Opening session…'));
+    let acked = false;
+
     // Request/reply via ws.request: self-cleanup on window close (esp. slow
     // huge-JSONL attaches — a leaked handler could build a ChatView into a
     // dead winInfo and leave a phantom sessions entry), the reply watchdog
@@ -440,7 +475,21 @@ export function installSessionLifecycle(App, ctx = {}) {
     // window awaiting its FIRST 'attached' had no session object, so
     // app.js's reconnect loop never covered it (blank-shell class).
     this.ws.request({ type: 'attach', sessionId: serverId }, (msg) => {
+      // PROOF OF LIFE (2.234.1's ack, consumed here too): the server answers
+      // this synchronously at the top of every attach, so a long wait after it
+      // is the transcript pull / history rebuild working — not a dead
+      // connection. Name what it is waiting on and disarm the alarmist toast.
+      if (msg.type === 'attach-ack' && msg.sessionId === serverId) {
+        acked = true;
+        pending.set(isChat
+          ? (hostName
+            ? t('Loading history from {host}… (large conversations can take a while)', { host: hostName })
+            : t('Loading history…'))
+          : t('Restoring the terminal…'));
+        return false; // not the reply — keep waiting
+      }
       if ((msg.type === 'error') && msg.sessionId === serverId) {
+        pending.remove();
         // Dead session (stale serverId from a saved layout — server restart
         // after an OOM kill / pod recreation loses every dtach session): no
         // ChatView exists yet at this point, so ChatView's own error path
@@ -451,10 +500,17 @@ export function installSessionLifecycle(App, ctx = {}) {
         if (isChat && bsid && !/^sess-\d/.test(bsid)) {
           this._viewIntoWindow(winInfo, { backend, backendSessionId: bsid, cwd, name, hostId: openSpec.hostId });
           try { track('event', 'chat-attach-rescued'); } catch { }
+        } else {
+          // Not rescuable (terminal window / synthetic id): removing the
+          // placeholder without this leaves the same anonymous blank shell the
+          // rescue exists to prevent — state the failure in the window.
+          this._windowPending(winInfo, (msg.message || t('Session not found.'))
+            + '\n\n' + t('Resume it from the sidebar.'));
         }
         return true;
       }
       if (msg.type === 'attached' && msg.sessionId === serverId) {
+        pending.remove();
         if (msg.mode === 'chat' || isChat) {
           const chatView = new ChatView(winInfo, this.ws, serverId, this);
           this.sessions.set(winInfo.id, chatView);
@@ -493,7 +549,14 @@ export function installSessionLifecycle(App, ctx = {}) {
       timeoutMs: 12000,
       onTimeout: () => {
         try { track('event', 'ws-reply-timeout:attach', serverId); } catch { }
-        showToast(t('Attaching "{name}" is taking unusually long — check the connection or reload the tab', { name: name || serverId }), { type: 'error' });
+        // ACKED ⇒ the server IS alive and working (the 2.234.1 lesson: "check
+        // the connection or reload the tab" on a legitimately slow remote pull
+        // is the misdiagnosis that made users reload and lose windows).
+        if (acked) {
+          showToast(t('"{name}" is still loading — {host} may be slow. Leave the window open.', { name: name || serverId, host: hostName || t('the machine') }));
+          return;
+        }
+        showToast(t('Attaching "{name}" is taking unusually long — it may still be working; check the connection before reloading', { name: name || serverId }), { type: 'error' });
       },
       resend: true,
     });
@@ -645,20 +708,20 @@ export function installSessionLifecycle(App, ctx = {}) {
     // the OLD identity "the host's own login", a wrong-BILLING hazard, while
     // Manage Agents' fresh probe showed the truth. 2min matches the host
     // auto-test cadence.)
+    this._hostAcctWarmErrAt = this._hostAcctWarmErrAt || {};
     if (this._hostAcctWarmState[hostId] === 'pending') return;
     if (this._hostAcctWarmState[hostId] === 'done' && Date.now() - (this._hostAcctWarmAt[hostId] || 0) < 120000) return;
+    // A FAILED probe retries in 15s, not 2min (2.272.x lag/silent-failure
+    // campaign): the old code stamped a failure as `done` + a FRESH warmAt, so
+    // for two whole minutes nothing retried and every consumer kept rendering
+    // its legacy fallback as DEFINITIVE ("never finished signing in", "can't
+    // ship to {host}") off an answer it never received — a usable host-held
+    // login read as broken, with a confident WRONG reason.
+    if (this._hostAcctWarmState[hostId] === 'error' && Date.now() - (this._hostAcctWarmErrAt[hostId] || 0) < 15000) return;
     this._hostAcctWarmState[hostId] = 'pending';
-    fetchJson(`/api/hosts/${encodeURIComponent(hostId)}/accounts-status`).then((r) => {
-      this._hostAcctWarmState[hostId] = 'done';
-      this._hostAcctWarmAt[hostId] = Date.now();
-      if (!r || r.error) return;
-      this._hostSubsKnown = { ...(this._hostSubsKnown || {}), [hostId]: r.hostSubs || [] };
-      const email = String(r.subscription?.email || '').trim().toLowerCase();
-      this._hostOwnEmailKnown = { ...(this._hostOwnEmailKnown || {}), [hostId]: email };
-      // Server-computed per-account VERDICTS (B-f531) — surfaces render these
-      // verbatim; the legacy email/subs caches above stay only as fallback
-      // for servers that predate the field.
-      if (r.verdicts) this._hostVerdicts = { ...(this._hostVerdicts || {}), [hostId]: r.verdicts };
+    // Rebuild whichever host-scoped surface is open — on SUCCESS the rows
+    // un-grey, on FAILURE they gain the honest "couldn't reach {host}" state.
+    const rebuild = () => {
       const bm = this._billingMenu;
       if (bm && bm.host === hostId && bm.el?.isConnected) {
         bm.el.remove();
@@ -667,7 +730,36 @@ export function installSessionLifecycle(App, ctx = {}) {
       // New Session dialog open on this host → rebuild its account row with
       // the fresh verdicts (same rebuild-on-arrival pattern as the menu)
       try { this._updateAcctRow?.(); } catch { }
-    }).catch(() => { this._hostAcctWarmState[hostId] = 'done'; });
+    };
+    api(`/api/hosts/${encodeURIComponent(hostId)}/accounts-status`).then((r) => {
+      this._hostAcctWarmState[hostId] = 'done';
+      this._hostAcctWarmAt[hostId] = Date.now();
+      if (this._hostAcctWarmErr) delete this._hostAcctWarmErr[hostId];
+      if (!r) return;
+      this._hostSubsKnown = { ...(this._hostSubsKnown || {}), [hostId]: r.hostSubs || [] };
+      const email = String(r.subscription?.email || '').trim().toLowerCase();
+      this._hostOwnEmailKnown = { ...(this._hostOwnEmailKnown || {}), [hostId]: email };
+      // Server-computed per-account VERDICTS (B-f531) — surfaces render these
+      // verbatim; the legacy email/subs caches above stay only as fallback
+      // for servers that predate the field.
+      if (r.verdicts) this._hostVerdicts = { ...(this._hostVerdicts || {}), [hostId]: r.verdicts };
+      rebuild();
+    }).catch((e) => {
+      // warmAt is the freshness of the DATA, never of the attempt — leave the
+      // last good stamp alone so a previously-warmed host keeps its verdicts.
+      this._hostAcctWarmState[hostId] = 'error';
+      this._hostAcctWarmErrAt[hostId] = Date.now();
+      this._hostAcctWarmErr = { ...(this._hostAcctWarmErr || {}), [hostId]: e?.message || t('unreachable') };
+      rebuild();
+    });
+  },
+
+  // Display name for a machine id (host-scoped transition states name the
+  // machine — "checking…" alone doesn't say WHICH one is slow).
+  _hostLabel(hostId) {
+    if (!hostId) return '';
+    const hs = this.sidebar?._hostsData?.hosts || this._nsHosts || [];
+    return hs.find((h) => h.id === hostId)?.name || hostId;
   },
 
   showBillingSwitcher(winId, anchor) {
@@ -776,6 +868,17 @@ export function installSessionLifecycle(App, ctx = {}) {
     // answer lands (~1s). Without this, a fresh page disables every named
     // subscription no matter what the host actually holds.
     if (rHostId) this._warmHostAccountCache(rHostId); // TTL-guarded internally; rebuilds the open menu on fresh data
+    // Is what this menu is about to claim actually KNOWN? With no verdicts for
+    // the host the rows below are legacy guesses — the menu used to render
+    // them as definitive disabled rows with no way to tell "genuinely can't
+    // run there" from "the probe hasn't answered yet" (and the user picks a
+    // worse account off that). Name the state instead.
+    // ⚠ gated on the WARM STATE too: a pre-verdict server answers fine but
+    // never sends `verdicts`, and a bare "no verdicts" test would pin those
+    // instances on "checking…" forever.
+    const acctWarm = rHostId ? this._hostAcctWarmState?.[rHostId] : null;
+    const verdictsCold = !!rHostId && !this._hostVerdicts?.[rHostId] && (acctWarm === 'pending' || acctWarm === 'error');
+    const probeErr = verdictsCold && acctWarm === 'error' ? (this._hostAcctWarmErr?.[rHostId] || t('unreachable')) : null;
     const acctEmailOf = (a) => String(a.email || (String(a.name || '').includes('@') ? a.name : '')).trim().toLowerCase();
     // SERVER-COMPUTED verdicts (B-f531, 2.244.0): evaluateOnHost's answer per
     // account, fetched live by _warmHostAccountCache — the SAME function the
@@ -849,6 +952,14 @@ export function installSessionLifecycle(App, ctx = {}) {
       return null;
     };
     const items = [];
+    // Transition state FIRST — before any row whose reason it qualifies.
+    if (verdictsCold) {
+      const chip = probeErr
+        ? hostStateChip('error', { text: t('couldn’t reach {host} — account availability unknown', { host: rHostName }), title: probeErr })
+        : hostStateChip('pending', { text: t('checking accounts on {host}…', { host: rHostName }) });
+      items.push({ labelHtml: chip.outerHTML, disabled: true,
+        title: probeErr ? t('The reasons below are guesses from cached data until the machine answers. Retrying shortly.') : t('Availability below is unconfirmed until the machine answers.') });
+    }
     // 'subscription' = accounts.resolveForSpawn's force-the-CLI's-own-login
     // sentinel (a bare '' would fall through to the default account). For a
     // remote session that login lives on the HOST — say so.
@@ -940,7 +1051,11 @@ export function installSessionLifecycle(App, ctx = {}) {
       const suffix = (!isCodex && (a.type || 'api') !== 'subscription') ? ' · API'
         : linked ? ' ' + t('· uses {host}’s own login', { host: rHostName })
         : held ? ' ' + t('· logged in on {host}', { host: rHostName }) : '';
-      const block = subBlock(a);
+      let block = subBlock(a);
+      // A reason derived from the LEGACY fallback (no verdict for this host
+      // yet) is a guess — say so in the tooltip rather than let a cold cache
+      // speak with the server's authority.
+      if (block && verdictsCold) block += ' ' + t('(unconfirmed — {host} hasn’t answered the availability check yet)', { host: rHostName });
       if (block && !cur) { items.push({ label: a.name + suffix, disabled: true, title: block }); continue; }
       // LINKED pick sends the REAL account id (2.241.0): the server's
       // email-linked rescue (ws-handler create, 2.240.2) maps it onto the
@@ -1096,9 +1211,20 @@ export function installSessionLifecycle(App, ctx = {}) {
     const viewId = backend === 'claude' ? `view-${backendSessionId}` : `view-${backend}-${backendSessionId}`;
     const chatView = new ChatView(winInfo, this.ws, viewId, this, { readOnly: true });
     this.sessions.set(winInfo.id, chatView);
+    const hostName = this._hostLabel(hostId);
+    // For a REMOTE session the server first pulls the transcript over ssh
+    // (seconds, up to the 15s ssh budget) — the pane used to be BLANK for all
+    // of it, and read-only windows are skipped by the reconnect re-attach
+    // ladder, so a lost reply left it blank FOREVER with no error and no
+    // retry: indistinguishable from an empty conversation.
+    const loadingEl = chatView._renderers.appendSystem(hostName
+      ? t('Loading history from {host}…', { host: hostName })
+      : t('Loading history…'));
 
-    // Request view-only attach — server loads JSONL without spawning claude
-    this.ws.send({
+    // ws.request (not a bare send + onGlobal): the view-only attach is
+    // idempotent, so it can be RE-SENT after a reconnect — a server restart
+    // between request and reply is exactly the documented blank-shell class.
+    this.ws.request({
       type: 'attach',
       sessionId: viewId,
       viewOnly: true,
@@ -1108,20 +1234,14 @@ export function installSessionLifecycle(App, ctx = {}) {
       host: hostId || undefined, // remote session: server pulls the transcript over ssh first
       cwd,
       name,
-    });
-
-    const handler = (msg) => {
-      // Window closed before 'attached' — drop the handler so a stale fire
-      // can't call loadHistory on a disposed ChatView (which throws
-      // mid-dispatch and swallows every later handler's message).
-      if (!this.wm.windows.has(winInfo.id)) { this.ws.offGlobal(handler); return; }
+    }, (msg) => {
       if (msg.type === 'error' && msg.sessionId === viewId) {
-        this.ws.offGlobal(handler);
+        loadingEl?.remove();
         chatView._renderers.appendSystem(msg.message || t('Session not found.'));
-        return;
+        return true;
       }
       if (msg.type === 'attached' && msg.sessionId === viewId) {
-        this.ws.offGlobal(handler);
+        loadingEl?.remove();
         if (msg.messages?.length) {
           chatView.loadHistory(msg.messages, msg.totalCount, false, { chatStatus: msg.chatStatus });
         } else {
@@ -1130,10 +1250,27 @@ export function installSessionLifecycle(App, ctx = {}) {
           // pane (blank windows read as bugs; real user report).
           chatView._renderers.appendSystem(t("No messages in this session's transcript yet."));
         }
+        return true;
       }
-    };
-    this.ws.onGlobal(handler);
-    winInfo.onClose = () => { this.ws.offGlobal(handler); chatView.dispose(); this.sessions.delete(winInfo.id); this._checkWelcome(); };
+      return false;
+    }, {
+      // Window closed before 'attached' — the request self-cleans so a stale
+      // fire can't call loadHistory on a disposed ChatView (which throws
+      // mid-dispatch and swallows every later handler's message).
+      isAlive: () => this.wm.windows.has(winInfo.id),
+      timeoutMs: 20000,
+      onTimeout: () => {
+        try { track('event', 'ws-reply-timeout:view', viewId); } catch { }
+        // Rewrite the inner .chat-system node, never the wrapper's textContent
+        // (that would flatten appendSystem's structure).
+        const inner = loadingEl?.isConnected ? loadingEl.querySelector('.chat-system') : null;
+        if (inner) inner.textContent = hostName
+          ? t('Still loading — {host} may be slow to hand over the transcript.', { host: hostName })
+          : t('Still loading the transcript…');
+      },
+      resend: true,
+    });
+    winInfo.onClose = () => { chatView.dispose(); this.sessions.delete(winInfo.id); this._checkWelcome(); };
     winInfo._notifyChanged = () => this.updateTaskbar();
     return chatView;
   },

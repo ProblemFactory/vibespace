@@ -382,14 +382,15 @@ export function installExplorerOps(FileExplorer) {
       dest = this.currentPath + '/' + d.trim();
     }
     // overwrite:false = skip files that already exist (never destructive).
-    // Local extraction runs as a server-side op with a PERSISTENT progress row
-    // (reuses the upload rows + button ring — a big archive used to look
-    // frozen for minutes); remote hosts keep the plain synchronous call.
-    const wantProgress = !this._host;
-    const r = await fetch('/api/archive/extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this._hb({ path: src, dest, overwrite: false, progress: wantProgress ? 1 : 0 })) }).catch(() => null);
+    // Extraction runs as a server-side op with a PERSISTENT progress row
+    // (reuses the upload rows + button ring — a big archive used to look frozen
+    // for minutes). REMOTE hosts used to be excluded from this and fell back to
+    // the plain 5-minute synchronous call with zero feedback — the exact
+    // pre-2.111.18 bug, surviving remote-only.
+    const r = await fetch('/api/archive/extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this._hb({ path: src, dest, overwrite: false, progress: 1 })) }).catch(() => null);
     const dd = await r?.json().catch(() => ({}));
     if (!r?.ok) { showToast(t('Extract failed: {msg}', { msg: dd?.error || t('unknown error') }), { type: 'error' }); return; }
-    if (wantProgress && dd.opId) { this._trackExtractOp(dd.opId, name, dest); return; }
+    if (dd.opId) { this._trackExtractOp(dd.opId, name, dest); return; }
     showToast(here ? t('Extracted here') : t('Extracted to {name}', { name: dest.split('/').pop() }));
     this.refresh();
   },
@@ -432,7 +433,9 @@ export function installExplorerOps(FileExplorer) {
         upload.pct = pct;
         for (const ref of upload.domRefs.values()) {
           ref.fill.style.width = pct + '%';
-          ref.pctLabel.textContent = st.total ? pct + '%' : t('{n} files', { n: st.done });
+          // remote extraction reports no per-entry count (one ssh command, no
+          // stream to tally) — "0 files" forever read as stuck, say Working…
+          ref.pctLabel.textContent = st.total ? pct + '%' : (st.done ? t('{n} files', { n: st.done }) : t('Working…'));
         }
         return;
       }
@@ -491,7 +494,10 @@ export function installExplorerOps(FileExplorer) {
       if (d.isDirectory) {
         fetch(`/api/file/stat?path=${encodeURIComponent(fp)}&du=1${this._hp()}`).then(r => r.json()).then((d2) => {
           if (!overlay.isConnected) return; // dialog closed meanwhile
-          cells.Size.textContent = d2?.duSize != null ? t('{size} (recursive)', { size: formatSize(d2.duSize) }) : t('unknown');
+          // `du` = the REMOTE branch's field name for the same number (shape
+          // drift: the remote du ran, shipped, and was dropped as 'unknown')
+          const du = d2?.duSize ?? d2?.du;
+          cells.Size.textContent = du != null ? t('{size} (recursive)', { size: formatSize(du) }) : t('unknown');
         }).catch(() => { if (overlay.isConnected) cells.Size.textContent = t('unknown'); });
       }
     }).catch(() => { cells.Type.textContent = t('Could not read properties'); });

@@ -34,6 +34,7 @@ class FileExplorer {
     this._renderLimit = 100; // initial batch size for large folders
     this._bookmarks = [];
     this._selectedPath = null;
+    this._navSeq = 0; // monotonic navigation id — stale (superseded) replies are dropped
 
     // Load settings
     const saved = _loadSettings();
@@ -257,13 +258,24 @@ class FileExplorer {
   // ── Bookmarks ──
   async _loadBookmarks() {
     try {
-      const r = await fetch('/api/bookmarks'); this._bookmarks = await r.json();
-    } catch { this._bookmarks = []; }
+      const r = await fetch('/api/bookmarks');
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      this._bookmarks = await r.json();
+    } catch { /* keep whatever we already show — a failed reload must not blank the panel */ }
     this._renderBookmarks();
   }
 
   async _saveBookmarks() {
-    try { await fetch('/api/bookmarks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this._bookmarks) }); } catch {}
+    // Every caller re-renders the local array as if the change already stuck —
+    // a swallowed POST failure (server lag/restart) let the edit quietly revert
+    // on the next load or bookmarks-updated broadcast with nothing said.
+    try {
+      const r = await fetch('/api/bookmarks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this._bookmarks) });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    } catch (e) {
+      showToast(t('Bookmark change not saved: {msg}', { msg: e.message }), { type: 'error' });
+      this._loadBookmarks(); // reconcile the optimistic list with server truth
+    }
   }
 
   _renderBookmarks() {
@@ -583,7 +595,11 @@ class FileExplorer {
     const sameHost = srcHost === destHost;
     const label = sameHost ? '' : ` (${srcHost || t('local')} -> ${destHost || t('local')})`;
     try {
-      const body = { src: srcPath, dest: destPath };
+      // progress:1 like _paste (2.215.0): a cross-host folder drag runs the
+      // tar relay for the whole transfer inside ONE request — without an op to
+      // poll the drop showed NOTHING until the terminal toast and users
+      // re-dragged, stacking concurrent relays.
+      const body = { src: srcPath, dest: destPath, progress: 1 };
       if (srcHost) body.srcHost = srcHost;
       if (destHost) body.destHost = destHost;
       if (sameHost && destHost) body.host = destHost; // same remote host -> remote cp
@@ -592,19 +608,56 @@ class FileExplorer {
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok || d.error) { showToast(t('Copy failed: {msg}', { msg: d.error || r.status }), { type: 'error' }); return; }
+      if (d.opId) {
+        const out = await this._trackTransferOp(d.opId, t('Copying {name}…', { name: base }), destPath);
+        if (out.cancelled) return;
+        if (!out.ok) {
+          const why = out.error === 'exists' ? t('"{name}" already exists here', { name: base }) : (out.error || t('unknown error'));
+          showToast(t('Copy failed: {msg}', { msg: why }), { type: 'error' });
+          return;
+        }
+      }
       showToast(t('Copied {name}', { name: base + label }));
       this.refresh();
     } catch (e) { showToast(t('Copy failed: {msg}', { msg: e.message }), { type: 'error' }); }
   }
 
+  // A listing can legitimately take seconds (?host= = a per-op ssh round trip,
+  // the device-connect ladder, a slow mount). Two failures came out of having
+  // NO pending state: the pane kept rendering the PREVIOUS directory so the
+  // click read as dead (users re-clicked), and two in-flight navigations raced
+  // — the SLOWER (older) reply overwrote the newer directory. Grace timer keeps
+  // fast local navigation flicker-free.
+  _navPending(dirPath, seq) {
+    let el = null;
+    const timer = setTimeout(() => {
+      el = document.createElement('div');
+      el.className = 'empty-hint';
+      el.textContent = t('Loading {path}…', { path: dirPath });
+      this.listEl.prepend(el);
+      this.listEl.style.opacity = '0.55';
+    }, 300);
+    return () => {
+      clearTimeout(timer);
+      el?.remove();
+      // only the CURRENT navigation may clear the dim — a superseded one
+      // finishing late would otherwise undim while the newer load is still out
+      if (seq === this._navSeq) this.listEl.style.opacity = '';
+    };
+  }
+
   async navigate(dirPath) {
+    const seq = ++this._navSeq;
+    const donePending = this._navPending(dirPath, seq);
     try {
       this._renderLimit = 100; // reset batch on navigation
       const res = await fetch(`/api/files?path=${encodeURIComponent(dirPath)}${this._hp()}`);
       const data = await res.json();
+      if (seq !== this._navSeq) return; // a newer navigation superseded this one
       if (data.error) {
         // If path is a file (not a directory), open it in a viewer
         const infoRes = await fetch(`/api/file/info?path=${encodeURIComponent(dirPath)}${this._hp()}`);
+        if (seq !== this._navSeq) return;
         if (infoRes.ok) {
           const info = await infoRes.json();
           if (!info.isDirectory) { this.app.openFile(dirPath, dirPath.split('/').pop(), { host: this._host || undefined }); return; }
@@ -618,7 +671,10 @@ class FileExplorer {
       const hostName = this._host ? (this._hostSelect.selectedOptions[0]?.textContent || this._host) : '';
       this.app.wm.setTitle(this.winInfo.id, (hostName ? hostName + ': ' : '') + frontTruncate(data.path));
       this._renderItems();
-    } catch (err) { this.listEl.innerHTML = `<div class="empty-hint" style="color:var(--red)">${escHtml(err.message)}</div>`; }
+    } catch (err) {
+      if (seq !== this._navSeq) return; // superseded — its error is not this view's truth
+      this.listEl.innerHTML = `<div class="empty-hint" style="color:var(--red)">${escHtml(err.message)}</div>`;
+    } finally { donePending(); }
   }
 
   _renderSortHeader() {

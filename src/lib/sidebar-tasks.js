@@ -207,18 +207,31 @@ export function installSidebarTasks(SidebarClass) {
   };
 
   proto._fetchTasks = async function() {
+    // A failed boot fetch used to be swallowed AND leave _tasksLoaded false
+    // forever: the Tasks board then rendered as "no groups" (indistinguishable
+    // from an empty store) with no retry — the group board silently vanished
+    // for the tab's lifetime if the page loaded during a restart window
+    // (2.272.1 campaign). Now: surface once, keep the last good list, and let
+    // the reconnect refetch (app.js) recover.
     try {
       const res = await fetch('/api/tasks');
-      if (res.ok) {
-        const data = await res.json();
-        this._tasks = Array.isArray(data.tasks) ? data.tasks : [];
-        this._tasksLoaded = true;
-        if (this._activeTab === 'tasks') this._render();
-        this._lastAttnSig = null;
-        this.refreshTaskAttention();
-        this.app.onTasksUpdated?.(this._tasks);
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText || 'request failed'}`);
+      const data = await res.json();
+      if (data?.error) throw new Error(String(data.error));
+      this._tasks = Array.isArray(data.tasks) ? data.tasks : [];
+      this._tasksLoaded = true;
+      this._tasksLoadErr = null;
+      if (this._activeTab === 'tasks') this._render();
+      this._lastAttnSig = null;
+      this.refreshTaskAttention();
+      this.app.onTasksUpdated?.(this._tasks);
+    } catch (e) {
+      this._tasksLoadErr = String(e?.message || e);
+      if (!this._tasksLoadWarned) {
+        this._tasksLoadWarned = true; // once per page — the reconnect retry is silent
+        try { showToast(tr('Couldn’t load Task Groups — retrying on reconnect'), { type: 'error' }); } catch { }
       }
-    } catch { }
+    }
   };
 
   proto._taskById = function(id) { return (this._tasks || []).find(t => t.id === id) || null; };

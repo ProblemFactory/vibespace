@@ -2051,7 +2051,7 @@ done`;
               const cwd = parentSession?.cwd || data.cwd || '';
               const projectsDir = path.join(os.homedir(), '.claude', 'projects');
               const projDir = cwdToProjectDir(cwd);
-              let rawMsgs = [], meta = {};
+              let rawMsgs = [], meta = {}, subFetchErr = null;
               const subDirs = [path.join(projectsDir, projDir, claudeId, 'subagents')];
               try { for (const dir of fs.readdirSync(projectsDir)) { const fp = path.join(projectsDir, dir, claudeId, 'subagents'); if (!subDirs.includes(fp)) subDirs.push(fp); } } catch {}
               // Direct subagent files first, then workflow-nested ones
@@ -2066,7 +2066,13 @@ done`;
                 try {
                   const p = await hosts.fetchAgentJsonl(String(subHost), agentId, { claudeSessionId: claudeId });
                   if (p) fileCandidates.push(p);
-                } catch (e) { console.error('remote agent jsonl fetch failed:', e.message); }
+                } catch (e) {
+                  // Remote pull failed (host lag/down): the viewer used to fall
+                  // through and render an EMPTY log, indistinguishable from "the
+                  // agent said nothing" (2.272.1). Say what happened instead.
+                  console.error('remote agent jsonl fetch failed:', e.message);
+                  subFetchErr = e.message;
+                }
               }
               for (const subDir of subDirs) {
                 fileCandidates.push(path.join(subDir, `agent-${agentId}.jsonl`));
@@ -2085,7 +2091,11 @@ done`;
               }
               const subMM = new MessageManager(subId);
               subMM.convertHistory(rawMsgs);
-              ws.send(JSON.stringify({ type: 'attached', sessionId: subId, mode: 'chat', messages: subMM.messages, totalCount: subMM.total, meta }));
+              // An empty log after a FAILED remote pull is a lie — tell the
+              // client so the viewer can show "couldn't load from <host>"
+              // with a retry instead of a blank read-only window.
+              ws.send(JSON.stringify({ type: 'attached', sessionId: subId, mode: 'chat', messages: subMM.messages, totalCount: subMM.total, meta,
+                ...(rawMsgs.length === 0 && subFetchErr ? { loadError: `Couldn’t load this agent’s log from the machine: ${subFetchErr}` } : {}) }));
             } else {
               // Live agent: sub-{parentToolUseId} — find parent session and return buffered messages
               const toolUseId = subId.slice('sub-'.length);

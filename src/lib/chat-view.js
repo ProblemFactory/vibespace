@@ -413,6 +413,10 @@ class ChatView {
         if (msg.label) this._showTyping(msg.label);
         else this._hideTyping();
       } else if (msg.type === 'goal-updated' && msg.sessionId === sessionId) {
+        // The server ALWAYS answers a set-goal with this broadcast (status /
+        // resume / set / clear alike), so it is the one honest confirmation
+        // that the /goal the user typed actually landed.
+        this._chatInput?.confirmGoal?.();
         this._onGoalUpdated(msg.goal, msg.goalElapsed);
         if (msg.goalStatus) this._statusBar.setGoalStatus(msg.goalStatus);
         if (msg.statusMsg) this._renderers.appendSystem(msg.statusMsg);
@@ -760,15 +764,80 @@ class ChatView {
     if (host) query.set('host', host); // remote transcript: refresh local cache server-side
     if (withStatus) query.set('withStatus', '1');
     const res = await fetch(`/api/session-messages?${query.toString()}`);
+    // An HTTP failure (500 on an unreadable transcript, a remote fetch that
+    // blew up, a proxy error page) used to fall straight into res.json(): when
+    // the body happened to parse, `messages` was absent → [] → the caller read
+    // it as "no more history" and pagination silently died. Throw instead so
+    // the scroll paths can surface a retry row (静默失败零容忍).
+    if (!res.ok) throw new Error(t('Server error {code}', { code: res.status }));
     const data = await res.json();
     if (typeof data.total === 'number') this._total = data.total;
     return data;
+  }
+
+  // ── History-load transition + failure surface ──
+  // Pagination and gap-seek slabs used to be completely silent: a slow fetch
+  // (a remote session's page can wait on a 15s server-side transcript refresh)
+  // looked like a dead scroll, and a FAILED one looked like "the conversation
+  // begins here". The pill lives on the .chat-view container, NOT in the
+  // message list — an in-flow row would be picked up by _withViewportAnchor /
+  // _trimTop / the ':scope > .chat-msg' insert reference and would shift the
+  // very scroll position those paths exist to preserve.
+  _showHistoryStatus(text, { spinner = false, retry = null, kind = 'info', autoHideMs = 0 } = {}) {
+    if (this._disposed || !this._container) return;
+    let el = this._historyStatus;
+    if (!el || !el.isConnected) {
+      el = document.createElement('div');
+      el.className = 'chat-history-status';
+      el.style.cssText = 'position:absolute;top:6px;left:50%;transform:translateX(-50%);z-index:20;max-width:80%;';
+      this._container.appendChild(el);
+      this._historyStatus = el;
+    }
+    clearTimeout(this._historyStatusTimer);
+    el.dataset.kind = kind;
+    el.innerHTML = '';
+    const pill = document.createElement('div');
+    pill.className = 'chat-system';
+    pill.style.cssText = 'display:flex;align-items:center;gap:6px;';
+    if (spinner) {
+      const sp = document.createElement('span');
+      sp.className = 'chat-spinner';
+      pill.appendChild(sp);
+    }
+    pill.appendChild(document.createTextNode(text));
+    if (retry) {
+      const link = document.createElement('span');
+      link.textContent = t('Retry');
+      link.style.cssText = 'cursor:pointer;text-decoration:underline;';
+      link.onclick = () => { this._hideHistoryStatus(); retry(); };
+      pill.appendChild(link);
+    }
+    el.appendChild(pill);
+    if (autoHideMs) this._historyStatusTimer = setTimeout(() => this._hideHistoryStatus(), autoHideMs);
+  }
+
+  _hideHistoryStatus() {
+    clearTimeout(this._historyStatusTimer);
+    this._historyStatusTimer = null;
+    if (this._historyStatus) { this._historyStatus.remove(); this._historyStatus = null; }
+  }
+
+  // Deferred spinner: a local page loads in single-digit ms, and flashing a
+  // pill on every scroll-up tick would be its own noise. Returns the ender —
+  // it only clears a LOADING pill, never an error the fetch just raised.
+  _beginHistoryLoad(text) {
+    const timer = setTimeout(() => this._showHistoryStatus(text, { spinner: true, kind: 'loading' }), 350);
+    return () => {
+      clearTimeout(timer);
+      if (this._historyStatus?.dataset.kind === 'loading') this._hideHistoryStatus();
+    };
   }
 
   // Extend the window upward (scroll up)
   async _extendTop(count = 50) {
     if (this._loading || this._windowStart <= 0) return;
     this._loading = true;
+    const endLoad = this._beginHistoryLoad(t('Loading earlier messages…'));
     try {
       const newStart = Math.max(0, this._windowStart - count);
       const fetchCount = this._windowStart - newStart;
@@ -811,7 +880,16 @@ class ChatView {
       }
       this._trace('extendTop:done', { ws: newStart, n: msgs.length, anchored, st: Math.round(this._messageList.scrollTop), sh: this._messageList.scrollHeight });
       if (this._search?.hasHighlight) this._search.applyHighlightLayer();
+    } catch (e) {
+      // Unhandled before: the scroll handler calls this un-awaited, so a
+      // rejection just vanished into the console and scroll-up "did nothing".
+      this._showHistoryStatus(t('Couldn\'t load earlier messages'), {
+        kind: 'error',
+        retry: () => this._extendTop(count),
+      });
+      try { track('event', 'chat-extend-top-failed', String(e?.message || e).slice(0, 120)); } catch {}
     } finally {
+      endLoad();
       setTimeout(() => { this._loading = false; }, 300);
     }
   }
@@ -888,6 +966,36 @@ class ChatView {
   // virtual-scroll window (_messages/_elements/_windowStart). Static + read-only.
   
 
+  // Shared query base for /api/session-history-gap (slabs, info, fullturnmap,
+  // full-file search). `host` is load-bearing and was MISSING from every gap
+  // caller: without it the server resolves the LOCAL transcript path, so a
+  // remote huge session's scroll-up slabs / minimap / Ctrl+F read a cache
+  // frozen at the last attach — or nothing at all — while the identical local
+  // session worked (violates the 2.108.1 "EVERY history consumer passes
+  // ?host=" rule that /api/session-messages already follows).
+  _gapQueryBase() {
+    const { backend, backendSessionId, cwd, host } = this._getSessionIds();
+    if (!backendSessionId) return null;
+    const q = new URLSearchParams({ backend: backend || 'claude', backendSessionId, cwd: cwd || '' });
+    if (host) q.set('host', host);
+    return q.toString();
+  }
+
+  // Gap fetch with an explicit ok/fail verdict. `.then(r=>r.json()).catch(()=>null)`
+  // collapsed "server said there is no more history" and "the request failed"
+  // into the same null — and the seek path read that null as completion and
+  // PERMANENTLY removed the scroll sentinel (one blip = the conversation
+  // appears to begin at the failure point).
+  async _gapFetch(url) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return { ok: true, data: await res.json() };
+    } catch (e) {
+      return { ok: false, error: e?.message || String(e) };
+    }
+  }
+
   // ── Whole-conversation minimap for gapped (huge) sessions ──
   // Fetch the full-file user-turn map (TIME coordinates) and switch the
   // minimap to full-extent mode so the scrollbar reflects the entire session,
@@ -903,10 +1011,13 @@ class ChatView {
     if (this._gapMinimapActive || this._gapMinimapLoading) return;
     this._gapMinimapLoading = true;
     try {
-      const { backend, backendSessionId, cwd } = this._getSessionIds();
-      if (!backendSessionId) return;
-      const base = `backend=${encodeURIComponent(backend || 'claude')}&backendSessionId=${encodeURIComponent(backendSessionId)}&cwd=${encodeURIComponent(cwd || '')}`;
-      const data = await fetch(`/api/session-history-gap?${base}&fullturnmap=1`).then(r => r.json()).catch(() => null);
+      const base = this._gapQueryBase();
+      if (!base) return;
+      const r = await this._gapFetch(`/api/session-history-gap?${base}&fullturnmap=1`);
+      // A FAILED probe must not latch: _gapMinimapActive stays false, so the
+      // next caller re-probes instead of leaving a huge session without its
+      // whole-conversation minimap + seek sentinel forever.
+      const data = r.ok ? r.data : null;
       if (this._disposed || !data?.fullTurns?.length) return;
       this._gapMinimapActive = true;
       this._gapBounds = { tailStartLine: data.tailStartLine, totalLines: data.totalLines };
@@ -994,6 +1105,7 @@ class ChatView {
   async _extendBottom(count = 50) {
     if (this._loading || this._windowEnd >= this._total) return;
     this._loading = true;
+    const endLoad = this._beginHistoryLoad(t('Loading messages…'));
     try {
       const end = Math.min(this._total, this._windowEnd + count);
       // finally resets _loading even if the fetch rejects — else pagination locks.
@@ -1012,7 +1124,15 @@ class ChatView {
       this._trace('extendBottom', { we: end, n: msgs.length, st: Math.round(this._messageList.scrollTop) });
       // Newly rendered messages need the search highlight re-applied
       if (this._search?.hasHighlight) this._search.applyHighlightLayer();
+    } catch (e) {
+      // Same silent class as _extendTop: the scroll handler never awaits this.
+      this._showHistoryStatus(t('Couldn\'t load more messages'), {
+        kind: 'error',
+        retry: () => this._extendBottom(count),
+      });
+      try { track('event', 'chat-extend-bottom-failed', String(e?.message || e).slice(0, 120)); } catch {}
     } finally {
+      endLoad();
       setTimeout(() => { this._loading = false; }, 300);
     }
   }
@@ -1074,7 +1194,17 @@ class ChatView {
     const windowSize = 50;
     const start = Math.max(0, targetIdx - 20);
     const end = Math.min(this._total, start + windowSize);
-    const msgs = await this._fetchMessages(start, end - start);
+    // Fetch BEFORE clearing the DOM, and abort the jump on failure — a throw
+    // past this point would leave the view wiped with nothing rendered.
+    let msgs;
+    const endLoad = this._beginHistoryLoad(t('Loading messages…'));
+    try { msgs = await this._fetchMessages(start, end - start); }
+    catch (e) {
+      this._showHistoryStatus(t('Couldn\'t load that part of the conversation'), {
+        kind: 'error', retry: () => this.jumpToIndex(targetIdx),
+      });
+      return;
+    } finally { endLoad(); }
 
     // Clear and rebuild DOM
     this._messageList.querySelectorAll('.chat-msg, .chat-msg-system').forEach(el => el.remove());
@@ -1107,7 +1237,17 @@ class ChatView {
   async jumpToBottom() {
     const windowSize = 50;
     const start = Math.max(0, this._total - windowSize);
-    const msgs = await this._fetchMessages(start, this._total - start);
+    // Same as jumpToIndex: never wipe the rendered view for a fetch that failed
+    // (the "return to latest" button would just blank the window).
+    let msgs;
+    const endLoad = this._beginHistoryLoad(t('Loading messages…'));
+    try { msgs = await this._fetchMessages(start, this._total - start); }
+    catch (e) {
+      this._showHistoryStatus(t('Couldn\'t load the latest messages'), {
+        kind: 'error', retry: () => this.jumpToBottom(),
+      });
+      return;
+    } finally { endLoad(); }
 
     this._messageList.querySelectorAll('.chat-msg, .chat-msg-system').forEach(el => el.remove());
     this._resetGapAfterJump();
@@ -1719,22 +1859,50 @@ class ChatView {
       hostId: host || undefined,
     });
 
+    // No reply at all (host wedged mid-fetch, ws message dropped): say the
+    // viewer is still waiting rather than sitting blank forever.
+    const attachWatchdog = setTimeout(() => {
+      if (!this.app.wm.windows.has(winInfo.id) || view._disposed) return;
+      if (view._messages?.length) return;
+      view._renderers.appendSystem(t('Still loading this agent\'s transcript — the machine holding it may be slow or unreachable.'));
+    }, 20000);
+
     // One-time handler for attach response — MUST self-guard (documented
     // invariant: closing the window mid-attach otherwise leaks the handler
     // and leaves a phantom viewer entry; same fix as app.js attachSession)
     const handler = (msg) => {
       if (!this.app.wm.windows.has(winInfo.id)) { this.ws.offGlobal(handler); return; }
-      if (msg.type === 'error' && msg.sessionId === virtualId) { this.ws.offGlobal(handler); return; }
+      if (msg.type === 'error' && msg.sessionId === virtualId) {
+        this.ws.offGlobal(handler);
+        // Was pure cleanup: the read-only window stayed permanently BLANK.
+        // Remote workflow agents (transcript pulled over ssh) hit this whenever
+        // the host is slow/unreachable — the user learned nothing. Mirror
+        // _viewIntoWindow and render the reason.
+        clearTimeout(attachWatchdog);
+        view._renderers.appendSystem(msg.message || t('Agent transcript could not be loaded.'));
+        return;
+      }
       if (msg.type === 'attached' && msg.sessionId === virtualId) {
         this.ws.offGlobal(handler);
+        clearTimeout(attachWatchdog);
         if (msg.messages?.length) {
           view.loadHistory(msg.messages, msg.totalCount, msg.isStreaming);
+        } else {
+          // An empty 'attached' is the server's "found nothing" — a live agent
+          // whose buffer is gone, or a remote fetch that failed and degraded to
+          // an empty reply. Say so instead of rendering an empty window. The
+          // server now distinguishes the two: msg.loadError carries the real
+          // machine-side failure (2.272.1) instead of implying an empty log.
+          view._renderers.appendSystem(msg.loadError || t('No transcript found for this agent.'));
         }
       }
     };
     this.ws.onGlobal(handler);
 
-    winInfo.onClose = () => { this._subagentViewers.delete(virtualId); view.dispose(); this.app._checkWelcome(); };
+    winInfo.onClose = () => {
+      clearTimeout(attachWatchdog);
+      this._subagentViewers.delete(virtualId); view.dispose(); this.app._checkWelcome();
+    };
   }
 
   _startReview({ target, delivery }) {
@@ -2002,7 +2170,15 @@ class ChatView {
       }
       if (this._search?.hasHighlight) this._search.applyHighlightLayer();
       if (this._pinned) this._scrollToBottom();
-    }).catch(() => {});
+    }).catch(() => {
+      // Was a bare swallow: the catch-up is exactly the fetch that fills in
+      // what happened while the socket was down, so eating its failure leaves
+      // a view that looks complete but silently isn't.
+      if (this._disposed) return;
+      this._showHistoryStatus(t('Couldn\'t load messages received while offline'), {
+        kind: 'error', retry: () => this._reattachCatchUp(),
+      });
+    });
   }
 
   // Server-restart reload: rebuild the whole view from the fresh attach
@@ -2579,6 +2755,7 @@ class ChatView {
     if (this._search) this._search.dispose();
     if (this._gapObserver) { this._gapObserver.disconnect(); this._gapObserver = null; }
     if (this._dropHideTimer) { clearTimeout(this._dropHideTimer); this._dropHideTimer = null; }
+    if (this._historyStatusTimer) { clearTimeout(this._historyStatusTimer); this._historyStatusTimer = null; }
   }
 }
 

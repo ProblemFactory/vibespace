@@ -1,7 +1,7 @@
 // Sidebar "Mounts" tab — rclone S3 mounts + share minting (collaboration P1).
 // Third tab next to Folders | Groups: my-storage card (env-provisioned),
 // mount list with live status, share-a-folder minting, import-a-link.
-import { createModalShell, showToast, showConfirmDialog, showContextMenu, copyText, escHtml } from './utils.js';
+import { createModalShell, showToast, showConfirmDialog, showContextMenu, copyText, escHtml, hostStateChip } from './utils.js';
 import { setupDirAutocomplete } from './autocomplete.js';
 import { protoChip } from './sidebar-rail.js'; // http/https/tcp chip (override menu = this._portProtoMenu, same prototype)
 import { t as tr } from './i18n.js'; // sidebar cluster convention: local `t` is pervasively a task var
@@ -332,11 +332,16 @@ export function installSidebarMounts(Sidebar) {
       top.innerHTML = `
         ${isCred
           ? `<span class="mounts-cred-key" title="${escHtml(tr('Credential only — this token can’t open the storage root; add submounts (specific buckets/paths) under it.'))}">${MI.key}</span>`
-          : `<span class="mounts-dot mounts-dot-${dot}" title="${m.mounted ? 'Mounted' : escHtml(m.error || 'Not mounted')}"></span>`}
+          : `<span class="mounts-dot mounts-dot-${dot}" title="${m.mounted ? 'Mounted' : escHtml(m.connecting ? tr('Connecting…') : (m.error || 'Not mounted'))}"></span>`}
         ${m.parentId ? '<span class="mounts-child-arrow">↳</span>' : ''}
         <b class="mounts-name" title="${escHtml(m.name)}">${escHtml(m.name)}</b>
         ${m.mode === 'ro' ? '<span class="mounts-badge">RO</span>' : ''}
         ${expired ? '<span class="mounts-badge mounts-badge-red">EXPIRED</span>' : ''}`;
+      // A connect legitimately takes 10-25s (server-side _connecting window).
+      // Without this chip the row said "Not mounted" the whole time on every
+      // client, and the initiating client's row-dimming was wiped by any
+      // mounts-updated broadcast that re-rendered the panel mid-connect.
+      if (m.connecting && !m.mounted) top.appendChild(hostStateChip('pending', { text: tr('Connecting…'), title: tr('Opening the connection — this can take a few seconds') }));
       const actions = document.createElement('span');
       actions.className = 'mounts-row-actions';
       const ibtn = (svg, title, fn, cls = '') => {
@@ -362,7 +367,10 @@ export function installSidebarMounts(Sidebar) {
         // Power icon (⏻) in the same icon-button family — the old glyph read
         // as a "download" button and a text chip among icons read worse
         // (user feedback, twice). The ROW itself is also click-to-connect.
-        actions.append(ibtn(MI.plug, tr('Connect'), async () => {
+        actions.append(ibtn(MI.plug, m.connecting ? tr('Connecting…') : tr('Connect'), async () => {
+          // a connect is already in flight — a second POST is refused server-
+          // side (success:false) and would report a bogus connect FAILURE
+          if (m.connecting) { showToast(tr('Already connecting…')); return; }
           const r = await api(`/api/mounts/${m.id}/mount`, { method: 'POST' });
           if (!r.success) throw new Error('Couldn’t connect — hover the status dot for details');
         }, 'mounts-icon-accent'));
@@ -434,6 +442,7 @@ export function installSidebarMounts(Sidebar) {
         row.onclick = async (e) => {
           if (e.target.closest('button, a, input, details, .mounts-row-actions')) return;
           if (m.mounted) { this.app.openFileExplorer(m.path); return; }
+          if (m.connecting) { showToast(tr('Already connecting…')); return; } // see the Connect button
           row.style.opacity = '0.6';
           try {
             const r = await api(`/api/mounts/${m.id}/mount`, { method: 'POST' });
@@ -599,16 +608,25 @@ export function installSidebarMounts(Sidebar) {
         if (st && now - (st.at || 0) < 120000) continue;
         if (this._hostTesting?.has(h.id)) continue;
         (this._hostTesting = this._hostTesting || new Set()).add(h.id);
+        // The row was painted BEFORE the probe started — repaint it now so the
+        // probe window (up to 10s on a fresh-ssh probe) reads as "checking"
+        // instead of the grey never-tested dot, which looked like a dead machine.
+        this._swapHostRow(h, hlist);
         api(`/api/hosts/${h.id}/test`, { method: 'POST' })
           .then((r) => { this._hostStatus[h.id] = { ...r, at: Date.now() }; })
           .catch((e) => { this._hostStatus[h.id] = { error: e.message, at: Date.now() }; })
           .finally(() => {
             this._hostTesting.delete(h.id);
-            if (!hlist.isConnected) return; // panel re-rendered meanwhile
-            const old = [...hlist.children].find(el => el._hostId === h.id);
-            if (old) hlist.replaceChild(this._buildHostRow(h), old);
+            this._swapHostRow(h, hlist);
           });
       }
+    },
+
+    // Rebuild ONE machine row in place (no full re-render → no flicker).
+    _swapHostRow(h, hlist) {
+      if (!hlist.isConnected) return; // panel re-rendered meanwhile
+      const old = [...hlist.children].find(el => el._hostId === h.id);
+      if (old) hlist.replaceChild(this._buildHostRow(h), old);
     },
 
     // This machine as machine #0 (B-f3e8 ⑤): the local device is the same
@@ -654,10 +672,11 @@ export function installSidebarMounts(Sidebar) {
       row.className = 'mounts-row';
       row._hostId = h.id; // in-place replacement key (_autoTestHosts)
       const st = this._hostStatus?.[h.id]; // {ok, latencyMs, tools} | {error} | undefined
+      const testing = !isDial && this._hostTesting?.has(h.id);
       const dot = isDial ? (h.online ? 'ok' : 'off') : (st ? (st.ok ? 'ok' : 'err') : 'off');
       const dotTip = isDial
         ? (h.online ? tr('Dialed in — reachable now') : tr('Offline — the device’s daemon is not dialed in (start it with the install command)'))
-        : (st ? (st.ok ? `${st.latencyMs}ms` : (st.error || 'unreachable')) : 'Not tested yet');
+        : (testing ? tr('Checking the connection…') : (st ? (st.ok ? `${st.latencyMs}ms` : (st.error || 'unreachable')) : 'Not tested yet'));
       const nameTip = isDial ? tr('Dial-out device — it connects TO this instance over a websocket (no ssh)') : `${h.user}@${h.host}:${h.port}`;
       const badge = isDial
         ? `<span class="mounts-badge${h.online ? '' : ' mounts-badge-red'}" title="${escHtml(tr('Dial-out device — it connects TO this instance over a websocket (no ssh)'))}">${h.online ? escHtml(tr('DEVICE')) : escHtml(tr('OFFLINE'))}</span>`
@@ -668,6 +687,10 @@ export function installSidebarMounts(Sidebar) {
         <span class="mounts-dot mounts-dot-${dot}" title="${escHtml(dotTip)}"></span>
         <b class="mounts-name" title="${escHtml(nameTip)}">${escHtml(h.name)}</b>
         ${badge}`;
+      // The auto-probe can take up to 10s (fresh ssh) — during it the grey dot
+      // was indistinguishable from "never tested / dead machine". Say checking.
+      if (testing) top.appendChild(hostStateChip('pending', { text: tr('testing…'), title: tr('Checking the connection…') }));
+      else if (!isDial && st && !st.ok) top.appendChild(hostStateChip('error', { text: tr('unreachable'), title: st.error || '' }));
       const actions = document.createElement('span');
       actions.className = 'mounts-row-actions';
       const ibtn = (svg, title, fn, cls = '') => {
@@ -920,7 +943,7 @@ export function installSidebarMounts(Sidebar) {
             sshHost: h.host, sshUser: h.user, sshPort: h.port || 22,
             keyPath: h.keyPath || undefined, sshPath: v.remotePath,
           }) });
-          await fetch(`/api/mounts/${r.id}/mount`, { method: 'POST' });
+          if (!await this._connectNewMount(r.id, close)) return;
           close(); showToast(tr('Storage connected')); this._renderMounts();
           return;
         }
@@ -1508,6 +1531,28 @@ export function installSidebarMounts(Sidebar) {
       };
     },
 
+    // The connect step of "add a storage / import a share": the record was
+    // already created, only the fuse mount can still fail — and it is exactly
+    // the failure-prone half (unreachable/denied/slow backend). It used to be
+    // a BARE fetch with the response unchecked, so a failed connect toasted
+    // "Storage connected" and the truth only showed if the user later noticed
+    // the row's error state. Returns false when the caller must NOT claim
+    // success. The dialog is CLOSED on failure rather than re-thrown into it:
+    // the record exists, so a retried submit would add a duplicate — the row
+    // (+ this toast) carries the reason.
+    async _connectNewMount(id, close) {
+      try {
+        const r = await api(`/api/mounts/${id}/mount`, { method: 'POST' });
+        if (!r.success) throw new Error(tr('the connection did not come up — hover the row’s status dot for details'));
+        return true;
+      } catch (e) {
+        close();
+        showToast(tr('Storage added, but connecting failed: {msg}', { msg: e.message || tr('unknown error') }), { type: 'error' });
+        this._renderMounts();
+        return false;
+      }
+    },
+
     // opts.onClose: fires on X / backdrop dismissal — REQUIRED by any caller
     // that awaits a Promise from this dialog, or cancelling it hangs the
     // awaiting flow forever. Callers must make their resolve idempotent
@@ -1685,7 +1730,7 @@ export function installSidebarMounts(Sidebar) {
       ], tr('Import & connect'), async (v, { close }) => {
         if (!v.link) throw new Error(tr('Paste the share link'));
         const r = await api('/api/mounts/import', { method: 'POST', body: JSON.stringify({ link: v.link, name: v.name || undefined }), headers: { 'Content-Type': 'application/json' } });
-        await fetch(`/api/mounts/${r.id}/mount`, { method: 'POST' });
+        if (!await this._connectNewMount(r.id, close)) return;
         close(); showToast(tr('Share imported')); this._renderMounts();
       });
     },
@@ -1824,7 +1869,7 @@ export function installSidebarMounts(Sidebar) {
         }
         delete v.cloudBackend; delete v.cloudToken; delete v.cloudPath; delete v.cloudClientId; delete v.cloudClientSecret;
         const r = await api('/api/mounts', { method: 'POST', body: JSON.stringify(v), headers: { 'Content-Type': 'application/json' } });
-        await fetch(`/api/mounts/${r.id}/mount`, { method: 'POST' });
+        if (!await this._connectNewMount(r.id, close)) return;
         close(); showToast(tr('Storage connected')); this._renderMounts();
       });
       const ctx = this._lastMountsDialog;

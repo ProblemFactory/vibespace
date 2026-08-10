@@ -58,11 +58,22 @@ export function installChatSeek(ChatView) {
       const _t0 = performance.now();
     this._gapDownLoading = true;
     try {
-      const { backend, backendSessionId, cwd } = this._getSessionIds();
-      if (!backendSessionId) return;
-      const base = `backend=${encodeURIComponent(backend || 'claude')}&backendSessionId=${encodeURIComponent(backendSessionId)}&cwd=${encodeURIComponent(cwd || '')}`;
-      const data = await fetch(`/api/session-history-gap?${base}&startLine=${this._gapCursorDown}&count=2000&whole=1`).then(r => r.json()).catch(() => null);
+      const base = this._gapQueryBase();
+      if (!base) return;
+      const r = await this._gapFetch(`/api/session-history-gap?${base}&startLine=${this._gapCursorDown}&count=2000&whole=1`);
       if (this._disposed || !this._teleported) return;
+      if (!r.ok) {
+        // A FAILED fetch is not "reached the end of the file": leave the
+        // down-cursor where it is, back off, and say so — reading the failure
+        // as end-of-file silently froze downward browsing at the blip.
+        this._gapDownIdleUntil = Date.now() + 5000;
+        this._showHistoryStatus(t('Couldn\'t load newer messages'), {
+          kind: 'error', autoHideMs: 6000,
+          retry: () => { this._gapDownIdleUntil = 0; this._loadLaterGap(); },
+        });
+        return;
+      }
+      const data = r.data;
       const msgs = data?.messages || [];
       if (Number.isFinite(data?.totalLines) && this._gapBounds) this._gapBounds.totalLines = data.totalLines;
       if (!msgs.length) { this._gapDownIdleUntil = Date.now() + 3000; return; } // reached file end (for now)
@@ -115,7 +126,11 @@ export function installChatSeek(ChatView) {
     _maybeSeekEarlier() {
     if (!this._gapMinimapActive) return;
     const s = this._seekSentinel;
-    if (s && s.isConnected && !s._gapLoading && (s._gapCursor == null || s._gapCursor > 0)) {
+    // _gapRetryAt: a failed slab keeps the sentinel (so history stays
+    // reachable) — without a backoff the scroll handler would re-fire the same
+    // doomed request every frame while the user sits at the top.
+    if (s && s.isConnected && !s._gapLoading && Date.now() >= (s._gapRetryAt || 0)
+        && (s._gapCursor == null || s._gapCursor > 0)) {
       this._loadEarlierGap(s, null);
     }
   },
@@ -129,7 +144,7 @@ export function installChatSeek(ChatView) {
     this._setStableHeights(false);
     if (!this._gapMinimapActive) return;
     const s = this._installSeekSentinel();   // re-create if a prior seek removed it
-    if (s) { s._gapCursor = null; s._gapAnchor = null; s._gapLoading = false; }
+    if (s) { s._gapCursor = null; s._gapAnchor = null; s._gapLoading = false; s._gapRetryAt = 0; }
   },
 
     async _loadEarlierGap(markerEl, btn) {
@@ -142,15 +157,31 @@ export function installChatSeek(ChatView) {
     markerEl._gapLoading = true;
     const origLabel = btn ? btn.textContent : '';
     if (btn) { btn.disabled = true; btn.textContent = t('Loading…'); }
+    const endLoad = this._beginHistoryLoad(t('Loading earlier messages…'));
+    // Retry backoff for the sentinel's scroll-driven auto-load: without it a
+    // persistent failure (host down, transcript unreadable) would re-fire on
+    // every scroll frame.
+    const failed = (retryable = true) => {
+      if (retryable) markerEl._gapRetryAt = Date.now() + 5000;
+      this._showHistoryStatus(t('Couldn\'t load earlier messages'), {
+        kind: 'error',
+        retry: () => { markerEl._gapRetryAt = 0; this._loadEarlierGap(markerEl, btn); },
+      });
+    };
     try {
-      const { backend, backendSessionId, cwd } = this._getSessionIds();
-      if (!backendSessionId) return;
-      const base = `backend=${encodeURIComponent(backend || 'claude')}&backendSessionId=${encodeURIComponent(backendSessionId)}&cwd=${encodeURIComponent(cwd || '')}`;
+      const base = this._gapQueryBase();
+      if (!base) return;
       // First fire: discover the boundary; cursor starts at the tail edge.
       if (markerEl._gapCursor == null) {
         const b = this._gapBounds;
-        const tailStartLine = b?.tailStartLine
-          ?? (await fetch(`/api/session-history-gap?${base}&info=1`).then(r => r.json()).catch(() => null))?.gap?.tailStartLine;
+        let tailStartLine = b?.tailStartLine;
+        if (!Number.isFinite(tailStartLine)) {
+          const info = await this._gapFetch(`/api/session-history-gap?${base}&info=1`);
+          // Failure here used to look identical to "this session has no gap":
+          // the button was REMOVED and earlier history became unreachable.
+          if (!info.ok) { failed(); return; }
+          tailStartLine = info.data?.gap?.tailStartLine;
+        }
         if (!Number.isFinite(tailStartLine)) { if (btn) btn.remove(); return; }
         markerEl._gapCursor = tailStartLine;
         // Insert new (older) slabs before this. NEVER anchor on a run-fold
@@ -166,7 +197,16 @@ export function installChatSeek(ChatView) {
       // Teleport mode reads across the whole file (whole=1); tail mode stops at
       // tailStartLine (the registered tail lives below).
       const whole = this._teleported ? '&whole=1' : '';
-      const data = await fetch(`/api/session-history-gap?${base}&endLine=${markerEl._gapCursor}&count=2000${whole}`).then(r => r.json()).catch(() => null);
+      const r = await this._gapFetch(`/api/session-history-gap?${base}&endLine=${markerEl._gapCursor}&count=2000${whole}`);
+      // THE incident this whole function was hardened for: `.catch(()=>null)`
+      // made a transient failure (server restart mid-scroll, remote slab
+      // timing out) indistinguishable from a real reply, the cursor fell to 0
+      // and _finishSeek REMOVED the sentinel — earlier history became
+      // permanently unreachable for the window's lifetime and the conversation
+      // appeared to begin at the blip, with no error at all. A failure now
+      // leaves the cursor untouched and never reaches _finishSeek.
+      if (!r.ok) { failed(); return; }
+      const data = r.data;
       const msgs = data?.messages || [];
       this._trace?.('gapUp', { n: msgs.length, cursor: markerEl._gapCursor });
       const scrollHeightBefore = this._messageList.scrollHeight;
@@ -189,7 +229,18 @@ export function installChatSeek(ChatView) {
       });
       // Next (older) slab inserts above the one we just added
       if (firstInserted) markerEl._gapAnchor = firstInserted;
-      markerEl._gapCursor = (data && Number.isFinite(data.fromLine)) ? data.fromLine : 0;
+      if (Number.isFinite(data?.fromLine)) {
+        markerEl._gapCursor = data.fromLine;
+        markerEl._gapRetryAt = 0;
+      } else {
+        // 200 OK but no fromLine = `{gap:null}` — the server could not resolve
+        // the transcript at all (remote cache still empty / file gone). That is
+        // NOT "we reached line 0", so keep the cursor and let the user retry
+        // instead of ending paging (the ?host= fix makes the remote case
+        // resolvable, this is the belt).
+        failed();
+        return;
+      }
       metric('gap-slab-load-ms', performance.now() - _t0);
       if (!anchoredOk) {
         // fallback: old delta math (no usable anchor)
@@ -198,7 +249,12 @@ export function installChatSeek(ChatView) {
       }
       if (this._teleported) this._trimGapDom('bottom');
       if (markerEl._gapCursor <= 0) this._finishSeek(markerEl, btn);
+    } catch (e) {
+      // Anything thrown between the fetch and the insert (a renderer blowing up
+      // on one record) used to leave the sentinel silently stuck.
+      failed();
     } finally {
+      endLoad();
       markerEl._gapLoading = false;
       if (btn && btn.isConnected) { btn.disabled = false; btn.textContent = origLabel; }
     }
@@ -309,15 +365,26 @@ export function installChatSeek(ChatView) {
   },
 
     async _seekTeleport(line) {
-    const { backend, backendSessionId, cwd } = this._getSessionIds();
-    if (!backendSessionId) return null;
-    const base = `backend=${encodeURIComponent(backend || 'claude')}&backendSessionId=${encodeURIComponent(backendSessionId)}&cwd=${encodeURIComponent(cwd || '')}`;
+    const base = this._gapQueryBase();
+    if (!base) return null;
     // Small slab (~600 lines) centered on the target: fewer messages render far
     // faster and — critically — settle their real heights almost instantly, so
     // the scroll lands in one shot. Scrolling up seek-loads more on demand.
     const start = Math.max(0, line - 300);
-    const data = await fetch(`/api/session-history-gap?${base}&startLine=${start}&count=600&whole=1`).then(r => r.json()).catch(() => null);
+    const endLoad = this._beginHistoryLoad(t('Jumping to that point in the conversation…'));
+    const r = await this._gapFetch(`/api/session-history-gap?${base}&startLine=${start}&count=600&whole=1`);
+    endLoad();
     if (this._disposed) return null;
+    if (!r.ok) {
+      // A minimap click / search jump that silently did nothing (the whole
+      // teleport is the one jump primitive, so this is the entire "go there"
+      // gesture) — say it failed instead of leaving the user clicking.
+      this._showHistoryStatus(t('Couldn\'t jump there — the conversation history could not be read'), {
+        kind: 'error', autoHideMs: 8000, retry: () => this._seekTeleport(line),
+      });
+      return null;
+    }
+    const data = r.data;
     const msgs = data?.messages || [];
     if (!msgs.length) return null;
     // Replace the entire rendered view with this slab; keep + reset the sentinel.
@@ -340,6 +407,7 @@ export function installChatSeek(ChatView) {
     const marker = this._installSeekSentinel();
     marker._gapCursor = Number.isFinite(data.fromLine) ? data.fromLine : start;
     marker._gapLoading = false;
+    marker._gapRetryAt = 0;
     let firstInserted = null;
     for (const msg of msgs) {
       const el = this._renderGapMsg(msg);

@@ -53,6 +53,8 @@ export function openUsageWindow(app, opts = {}) {
 
   const state = {
     range: '30d', backend: '', account: '', metric: 'cost', data: null, loading: false, view: 'dash',
+    loadError: null,   // a FAILED load must never render as "no usage recorded"
+    harvestErrors: [], // per-machine ledger-harvest failures — stale remote data must SAY it's stale
     customFrom: isoDay(Date.now() - 7 * DAY), customTo: isoDay(Date.now()),
     acctOptions: null, // account rows from the last UNFILTERED load — the chip set must not shrink while filtered
     device: '',        // DEVICE filter: '' all · 'local' · a host id (2.128.0)
@@ -82,8 +84,17 @@ export function openUsageWindow(app, opts = {}) {
     if (state.device) qs.set('host', state.device);
     const pivots = panelPivots(currentPanels());
     if (pivots.length) qs.set('pivot', pivots.join(','));
-    try { state.data = await fetchJson('/api/usage-stats?' + qs.toString()); }
-    catch { state.data = null; showToast(t('Could not load usage'), { type: 'error' }); }
+    // fetchJson CANNOT throw (null on network failure, {error} bodies handed
+    // back as data) — the old try/catch was dead code and a failed load fell
+    // through to the "No usage recorded yet" empty state, i.e. a factual lie
+    // that steered the user away from retrying. Keep the distinction.
+    state.loadError = null;
+    const got = await fetchJson('/api/usage-stats?' + qs.toString());
+    if (!got || got.error) {
+      state.data = null;
+      state.loadError = got?.error || t('the server did not answer');
+      showToast(t('Could not load usage: {msg}', { msg: state.loadError }), { type: 'error' });
+    } else state.data = got;
     if (!state.account && state.data?.groups?.account) {
       // Union, not replace: switching to a narrower range must not drop chips
       // for accounts that simply have no data there. Host buckets are DEVICES,
@@ -104,10 +115,34 @@ export function openUsageWindow(app, opts = {}) {
     destroyCharts(root); // Chart.js instances must not outlive their canvases
     root.innerHTML = '';
     root.appendChild(renderControls(app, state, load, render));
+    // Remote ledger harvest failures: without this line a machine that has not
+    // reported for days looks exactly like one that is up to date.
+    if (state.harvestErrors?.length && state.view !== 'pricing') {
+      const warn = document.createElement('div');
+      warn.className = 'usage-warn';
+      const nameOf = (id) => (state.deviceOptions || []).find(r => r.key === id)?.name || id;
+      warn.textContent = state.harvestErrors
+        .map(h => t('{host}: ledger harvest failing ({msg}) — its usage below is last-known, not current', { host: nameOf(h.id), msg: h.error }))
+        .join(' · ');
+      root.appendChild(warn);
+    }
     const body = document.createElement('div'); body.className = 'usage-body';
     root.appendChild(body);
     if (state.view === 'pricing') { body.appendChild(renderPricingEditor(state, render, load)); return; }
     if (state.loading && !state.data) { body.innerHTML = `<div class="usage-empty">${t('Loading…')}</div>`; return; }
+    // A FAILED load is not an empty ledger — say so and offer the retry
+    if (state.loadError && !state.data) {
+      const box = document.createElement('div');
+      box.className = 'usage-empty';
+      box.textContent = t('Could not load usage: {msg}', { msg: state.loadError });
+      const again = document.createElement('button');
+      again.className = 'usage-btn'; again.textContent = t('Retry');
+      again.style.marginLeft = '8px';
+      again.onclick = load;
+      box.appendChild(again);
+      body.appendChild(box);
+      return;
+    }
     const d = state.data;
     if (!d || !d.totals || !d.totals.requests) {
       body.innerHTML = `<div class="usage-empty">${t('No usage recorded yet for this range. Run some sessions, then re-open this window.')}</div>`;
@@ -158,8 +193,15 @@ export function openUsageWindow(app, opts = {}) {
   // window open (server-throttled 15min/host); reload once if it added events
   // so the host buckets/chips appear without a manual refresh.
   fetchJson('/api/usage-stats/harvest-hosts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then((r) => {
+    // Per-host {error} entries used to be discarded: a machine whose harvest
+    // had been failing for days still showed its OLD events under the Device
+    // filter with nothing marking them stale — the user read them as current.
+    state.harvestErrors = Object.entries(r?.hosts || {})
+      .filter(([, x]) => x?.error)
+      .map(([id, x]) => ({ id, error: x.error }));
     const added = Object.values(r?.hosts || {}).reduce((s, x) => s + (x?.added || 0), 0);
     if (added) load();
+    else if (state.harvestErrors.length) render();
   }).catch(() => {});
   return winInfo;
 }
@@ -362,12 +404,19 @@ function renderPricingEditor(state, rerender, reload) {
     const patch = {};
     if (Object.keys(edited.tiers).length) patch.tiers = edited.tiers;
     if (Object.keys(edited.accounts).length) patch.accounts = edited.accounts;
-    try {
-      await fetchJson('/api/usage-stats/pricing', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
-      showToast(t('Prices saved'));
-      state.view = 'dash';
-      reload(); // re-fetch so costs reflect the new prices
-    } catch { showToast(t('Save failed'), { type: 'error' }); save.disabled = false; }
+    // fetchJson never throws — the old catch could not fire, so a failed save
+    // toasted "Prices saved", left the editor, and DISCARDED the edit buffer:
+    // false success plus silent loss of the user's typing. Check the result
+    // and stay in the editor (the inputs still hold the edits) on failure.
+    const r = await fetchJson('/api/usage-stats/pricing', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
+    if (!r || r.error) {
+      showToast(t('Prices not saved: {msg}', { msg: r?.error || t('the server did not answer') }), { type: 'error' });
+      save.disabled = false;
+      return;
+    }
+    showToast(t('Prices saved'));
+    state.view = 'dash';
+    reload(); // re-fetch so costs reflect the new prices
   };
   const cancel = document.createElement('button'); cancel.className = 'usage-btn'; cancel.textContent = t('Cancel');
   cancel.onclick = () => { state.view = 'dash'; rerender(); };

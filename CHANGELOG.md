@@ -1,5 +1,29 @@
 # Changelog
 
+## 2.273.0
+
+Phases 2+3 of the lag/silent-failure campaign — the client stops lying under lag, and the classes get retired by shared primitives instead of point fixes (docs/design-lag-cs-audit.md).
+
+**Shared primitives (build once, retire the class)**
+- `api(url, opts)` in utils.js — the THROWING sibling of `fetchJson`. fetchJson never throws (returns null on network failure, hands `{error}` bodies back as ordinary data), so every `try { await fetchJson(…) } catch` in the codebase was dead code and every unchecked result silently claimed success — the single largest finding class (49 of 89). User-action paths now go through api() + one catch + a toast/inline error.
+- `hostStateChip(state, {text, age, title})` + `agoText(ts)` — ONE visual language for the three transition states every host-scoped surface needed and most lacked: `checking…` (pulsing) / `as of 12m ago` / `unreachable`.
+
+**Stops lying under lag**
+- **The session list no longer wipes itself**: one 500 from the discovery sweep (a project dir deleted mid-readdir, any throw under NFS lag) parsed as `{error}` → `data.sessions || []` → the ENTIRE list vanished for ≥5s and flip-flopped back on the next good poll. The poll now keeps the last good snapshot, and after 3 consecutive failures (~15s) shows a "session list may be out of date · as of X" row that clears on recovery.
+- **Batch terminate can no longer claim a kill it never attempted**: manage-mode marks on REMOTE discovered cards were dropped (`if (!s) continue`) while the toast still said "applied" — the remote claude kept running. Marks now resolve against the remote discovery lists too, `killPid` gets its host (the 2.191.0 host-less-kill bug's twin), and unresolvable marks are counted as "N skipped" in the confirm dialog and the result toast.
+- **An unreachable machine's cache is labelled as cache**: hosts.discoverSessions already stale-marked last-known results; the client dropped the flags, so an hours-old scan rendered exactly like fresh discovery (including amber "external" cards for processes that may have exited long ago). `stale`/`staleAt` now reach the cards as a "last known · Xm ago" chip plus a zone-header row.
+- Remote discovery retry loop (whose only visible state was a permanent "Scanning sessions over ssh…") got a 10s backoff that keeps the cached list; `_ensureHostsData` resets its loading flag in a finally and no longer caches an `{error}` object forever (one failed boot fetch used to kill the host switchers for the tab's lifetime).
+
+**Transition states on the slow paths**
+- Window creation/attach carry placeholders ("Starting the session on {host}…" → "Loading history from {host}…"), and the attach timeout wording now splits on whether the server's attach-ack arrived: acked ⇒ "still loading, {host} may be slow"; un-acked ⇒ "it may still be working" (never the old reload-invite).
+- Billing switcher / New Session / Session Properties show "checking accounts on {host}…" or "couldn't reach {host} — availability unknown" instead of silently greying accounts; a failed `_warmHostAccountCache` records an error state with a 15s retry TTL instead of stamping a fresh success. Session Properties now reads the server's verdicts (B-f531) like every other surface.
+- Explorer navigation got a nav-sequence guard (a slow `?host=` listing can no longer be overwritten by a superseded one) + a loading row after a 300ms grace; drag-copy tracks progress like paste.
+
+**More remote-only bugs killed**
+- `/api/session-history-gap` accepts `&host=` and all FIVE client callers pass it — gap slabs, minimap, and the streaming search were reading the LOCAL projects dir for remote conversations (silently empty results).
+- A failed remote View Log fetch now says why instead of rendering "no transcript found"; a failed Task Group boot fetch surfaces once instead of leaving the board permanently empty with no retry.
+- 227 missing zh/ja translations added (2546/2546 keys).
+
 ## 2.272.0
 
 Phase 1 (server-side correctness under lag) of the campaign completed — docs/design-lag-cs-audit.md.
