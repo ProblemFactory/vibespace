@@ -957,7 +957,7 @@ function kickPoolEval() {
 // launch ack ("Run ID: wf_…") crosses the session's stdout; belt-polled 5s
 // (fs.watch can coalesce/miss); torn down after 30min without growth or when
 // the session dies. rid-dedup in noteLive makes offset loss/re-reads harmless.
-const _wfWatchers = new Map(); // runId → state
+const _wfWatchers = new Map(); // runId → tailer handle
 function armWorkflowUsageWatcher(session, sessionId, runId) {
   try {
     if (_wfWatchers.has(runId) || _wfWatchers.size >= 6) return;
@@ -966,60 +966,44 @@ function armWorkflowUsageWatcher(session, sessionId, runId) {
     if (!sid || !session.cwd) return;
     const { cwdToProjectDir } = require('./src/session-store.js');
     const dir = path.join(os.homedir(), '.claude', 'projects', cwdToProjectDir(session.cwd), sid, 'subagents', 'workflows', runId);
-    if (!fs.existsSync(dir)) return;
-    const st = { dir, offsets: new Map(), lastGrowth: Date.now(), watcher: null, poll: null, debounce: null, draining: false };
-    const teardown = () => {
-      try { st.watcher?.close(); } catch { }
-      clearInterval(st.poll); clearTimeout(st.debounce);
-      _wfWatchers.delete(runId);
-    };
-    const drain = () => {
-      if (st.draining) return; st.draining = true;
-      try {
-        let noted = 0;
-        for (const fn of fs.readdirSync(st.dir)) {
-          if (!fn.startsWith('agent-') || !fn.endsWith('.jsonl')) continue;
-          const fp = path.join(st.dir, fn);
-          let size; try { size = fs.statSync(fp).size; } catch { continue; }
-          let off = st.offsets.get(fn) || 0;
-          if (size <= off) continue;
-          st.lastGrowth = Date.now();
-          const fd = fs.openSync(fp, 'r');
-          try {
-            const buf = Buffer.alloc(Math.min(size - off, 8 * 1024 * 1024));
-            const n = fs.readSync(fd, buf, 0, buf.length, off);
-            const chunk = buf.slice(0, n);
-            const lastNl = chunk.lastIndexOf(10);
-            if (lastNl < 0) continue; // no complete line yet
-            st.offsets.set(fn, off + lastNl + 1);
-            for (const line of chunk.slice(0, lastNl).toString('utf-8').split('\n')) {
-              if (line.indexOf('"usage"') < 0) continue;
-              let r; try { r = JSON.parse(line); } catch { continue; }
-              if (r.type !== 'assistant') continue;
-              const u = r.message?.usage; if (!u) continue;
-              const rid = r.requestId || r.message?.id; if (!rid) continue;
-              const cc = u.cache_creation || {};
-              const acctKey = resolveUsageKey(session);
-              const usd = usageHistory._cost({ acct: acctKey === '__global__' ? null : acctKey, model: r.message?.model, i: u.input_tokens || 0, o: u.output_tokens || 0, cw5: cc.ephemeral_5m_input_tokens || 0, cw1: cc.ephemeral_1h_input_tokens || 0, cr: u.cache_read_input_tokens || 0 });
-              const cwUsd = usageHistory._cost({ acct: acctKey === '__global__' ? null : acctKey, model: r.message?.model, i: 0, o: 0, cw5: cc.ephemeral_5m_input_tokens || 0, cw1: cc.ephemeral_1h_input_tokens || 0, cr: 0 });
-              const crUsd = usageHistory._cost({ acct: acctKey === '__global__' ? null : acctKey, model: r.message?.model, i: 0, o: 0, cw5: 0, cw1: 0, cr: u.cache_read_input_tokens || 0 });
-              usageEstimator.noteLive({ rid, accountId: acctKey, model: r.message?.model, usd, cwUsd, crUsd });
-              noted++;
-            }
-          } finally { try { fs.closeSync(fd); } catch { } }
+    // The tailer RETRIES until the dir exists — the ack beats the harness's
+    // mkdir by ~17ms, so the old one-shot existsSync never armed (2.270.0,
+    // see src/workflow-usage-tailer.js for the forensics).
+    const { createWorkflowTailer } = require('./src/workflow-usage-tailer.js');
+    const tailer = createWorkflowTailer({
+      dir,
+      isAlive: () => activeSessions.has(sessionId),
+      onRecord: (r) => {
+        const u = r.message?.usage;
+        const rid = r.requestId || r.message?.id; if (!rid) return;
+        const cc = u.cache_creation || {};
+        const acctKey = resolveUsageKey(session);
+        const acct = acctKey === '__global__' ? null : acctKey;
+        const model = r.message?.model;
+        const cost = (o) => usageHistory._cost({ acct, model, i: 0, o: 0, cw5: 0, cw1: 0, cr: 0, ...o });
+        const usd = cost({ i: u.input_tokens || 0, o: u.output_tokens || 0, cw5: cc.ephemeral_5m_input_tokens || 0, cw1: cc.ephemeral_1h_input_tokens || 0, cr: u.cache_read_input_tokens || 0 });
+        const cwUsd = cost({ cw5: cc.ephemeral_5m_input_tokens || 0, cw1: cc.ephemeral_1h_input_tokens || 0 });
+        const crUsd = cost({ cr: u.cache_read_input_tokens || 0 });
+        usageEstimator.noteLive({ rid, accountId: acctKey, model, usd, cwUsd, crUsd });
+      },
+      onDrain: (n) => {
+        // Observability: this feature died silently for four releases because
+        // nothing ever reported it running. Both signals are cheap + local.
+        global.__vsMetric?.('wf-usage-noted', n);
+        if (!_wfWatchers.get(runId)?._announced) {
+          const h = _wfWatchers.get(runId); if (h) h._announced = true;
+          global.__vsEvent?.('wf-usage-tailer-armed', runId);
         }
-        if (noted) kickPoolEval();
-      } catch { }
-      st.draining = false;
-    };
-    try { st.watcher = fs.watch(st.dir, { persistent: false }, () => { if (!st.debounce) st.debounce = setTimeout(() => { st.debounce = null; drain(); }, 800); }); } catch { }
-    st.poll = setInterval(() => {
-      if (Date.now() - st.lastGrowth > 30 * 60000 || !activeSessions.has(sessionId)) { teardown(); return; }
-      drain();
-    }, 5000);
-    _wfWatchers.set(runId, st);
-    drain();
-    global.__vsEvent?.('wf-usage-tailer-armed');
+        kickPoolEval();
+      },
+    });
+    _wfWatchers.set(runId, tailer);
+    // Reap the handle when the tailer gives up (dead session / idle / no dir).
+    const reap = setInterval(() => {
+      if (_wfWatchers.get(runId) !== tailer) { clearInterval(reap); return; }
+      if (tailer._state.stopped) { _wfWatchers.delete(runId); clearInterval(reap); }
+    }, 30000);
+    if (reap.unref) reap.unref();
   } catch { }
 }
 // TIMER-driven evaluation (2.263.0, real incident): the event triggers (turn
