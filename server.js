@@ -3649,7 +3649,9 @@ app.post('/api/tasks/import', (req, res) => {
 // to the remote copy (remoteCtxBase). Triggers: session spawn + a 60s timer
 // while any live remote session belongs to the group. Remote writes sync back
 // → the local signature changes → every member re-injects next turn. ──
+const { syncGroupCtx, FILE_CAP: CTX_FILE_CAP, MAX_FILES: MAX_CTX_FILES } = require('./src/ctx-sync');
 const _ctxSyncBusy = new Set(); // `${hostId}:${groupId}` in-flight guard
+const _ctxSkipNoticed = new Set(); // one honest notice per host:group:file per boot
 async function syncRemoteGroupCtx(h, g) {
   const key = `${h.id}:${g.id}`;
   if (_ctxSyncBusy.has(key)) return;
@@ -3658,96 +3660,26 @@ async function syncRemoteGroupCtx(h, g) {
     const home = await hosts.homeDir(h);
     if (!home) return;
     const rdir = `${home}/.vibespace/ctx/${g.id}`;
-    if (h.transport === 'dial') {
-      // DIAL ctx sync (B-b87b): this function was ssh-only (sshArgs THROWS
-      // for dial) while remoteCtxBaseFor translated ctx paths for EVERY
-      // remote session — dial agents were taught file paths that never
-      // existed. Per-file newer-wins over the device link, content-hashed so
-      // an echo can never ping-pong (fsWrite can't preserve mtimes; equal
-      // sha ⇒ skip both directions). Same semantics as the rsync pair
-      // otherwise: never deletes, .vibespace/ excluded, bounded (≤400 files,
-      // ≤2MB each).
-      await syncDialGroupCtx(h, g, rdir);
-      return;
-    }
-    await hosts._ssh(h, `mkdir -p "${rdir}"`);
-    const e = hosts.sshCmd(h);
-    const local = g.contextDir.replace(/\/+$/, '') + '/';
-    const remote = `${hosts.dest(h)}:${rdir}/`;
-    const opts = ['-az', '--update', '--exclude', '.vibespace', '--timeout', '25', '-e', e];
-    const rsync = (args) => new Promise((resolve, reject) => {
-      const { execFile } = require('child_process');
-      execFile('rsync', args, { timeout: 60000 }, (err, so, se) => err ? reject(new Error(String(se || err.message).slice(0, 200))) : resolve());
+    // ONE implementation for every transport (src/ctx-sync.js, 2.277.0):
+    // hashed newer-wins sync over the device link; ssh degrades to its legacy
+    // rsync pair when the link is down. The old split (ssh=rsync uncapped,
+    // dial=hashed with a SILENT 2MB/400-file cap) meant a 3MB context file
+    // reached every ssh host and never reached a dial device, invisibly.
+    await syncGroupCtx({
+      hosts, host: h, group: g, remoteDir: rdir,
+      onSkip: (rel, why, size) => {
+        const k = `${key}:${rel}:${why}`;
+        if (_ctxSkipNoticed.has(k)) return;
+        _ctxSkipNoticed.add(k);
+        const msg = why === 'count'
+          ? `Context folder for "${g.title || g.id}" has more than ${MAX_CTX_FILES} files — the rest won't sync to ${h.name}.`
+          : `Context file ${rel} (${Math.round((size || 0) / 1024 / 1024)}MB) exceeds the ${Math.round(CTX_FILE_CAP / 1024 / 1024)}MB sync cap and won't reach ${h.name}.`;
+        console.warn('[ctx-sync]', msg);
+        try { serverNotice(`ctx-skip:${k}`, msg, { level: 2 }); } catch { }
+      },
     });
-    await rsync([...opts, local, remote]); // push newer local files
-    await rsync([...opts, remote, local]); // pull newer remote artifacts back
   } catch (e) { console.warn('[ctx-sync]', h.name, g.id, e.message); }
   finally { _ctxSyncBusy.delete(key); }
-}
-// Dial half of the ctx sync (see the branch above). One inventory probe
-// (mtime+sha per file, GNU-else-BSD stat, sha256sum-else-shasum), then
-// per-file fsWrite pushes / fsReadRange pulls only where content differs and
-// the other side is strictly newer.
-async function syncDialGroupCtx(h, g, rdir) {
-  const shqS = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
-  const dm = await hosts.deviceBounded(h.id, 15000);
-  if (!dm) throw new Error('device offline');
-  const CAP = 2 * 1024 * 1024, MAXF = 400;
-  const local = g.contextDir.replace(/\/+$/, '');
-  const inv = await dm.runCmd('sh', ['-c',
-    `mkdir -p ${shqS(rdir)}; cd ${shqS(rdir)} && find . -type f ! -path './.vibespace/*' 2>/dev/null | while IFS= read -r f; do ` +
-    `printf '%s\\t%s\\t%s\\n' "$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo 0)" ` +
-    `"$( (sha256sum "$f" 2>/dev/null || shasum -a 256 "$f" 2>/dev/null) | cut -d' ' -f1)" "$f"; done`], { timeoutMs: 25000 });
-  const remote = new Map(); // rel → {mt, sha}
-  for (const line of String(inv?.stdout || '').split('\n')) {
-    const parts = line.split('\t');
-    if (parts.length < 3) continue;
-    const rel = parts.slice(2).join('\t').replace(/^\.\//, '');
-    if (rel) remote.set(rel, { mt: parseInt(parts[0]) || 0, sha: parts[1] || '' });
-  }
-  const localFiles = [];
-  const walk = (dir, rel) => {
-    let ents = []; try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-    for (const e of ents) {
-      if (e.name === '.vibespace') continue;
-      const p = path.join(dir, e.name), r = rel ? rel + '/' + e.name : e.name;
-      if (e.isDirectory()) walk(p, r);
-      else if (e.isFile() && localFiles.length < MAXF) {
-        try {
-          const st = fs.statSync(p);
-          if (st.size <= CAP) localFiles.push({ p, r, mt: Math.floor(st.mtimeMs / 1000), size: st.size });
-        } catch { }
-      }
-    }
-  };
-  walk(local, '');
-  const crypto = require('crypto');
-  const shaOf = (p) => { try { return crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex'); } catch { return null; } };
-  const mkdirs = new Set();
-  const localByRel = new Map(localFiles.map((f) => [f.r, f]));
-  for (const f of localFiles) {
-    const rm = remote.get(f.r);
-    f.sha = shaOf(f.p);
-    if (!f.sha) continue;
-    if (rm && rm.sha === f.sha) continue; // identical — nothing to move either way
-    if (rm && rm.mt > f.mt + 1) continue; // remote strictly newer — the pull pass owns it
-    const dir = path.posix.dirname(`${rdir}/${f.r}`);
-    if (dir !== rdir && !mkdirs.has(dir)) { try { await dm.fsMkdir(dir); } catch { } mkdirs.add(dir); }
-    try { await dm.fsWrite(`${rdir}/${f.r}`, fs.readFileSync(f.p)); } catch { }
-  }
-  for (const [rel, rm] of remote) {
-    const lf = localByRel.get(rel);
-    if (lf && lf.sha && lf.sha === rm.sha) continue;
-    if (lf && lf.mt >= rm.mt - 1) continue; // local same-age-or-newer — push pass owned it
-    const lp = path.resolve(local, rel);
-    if (lp !== local && !lp.startsWith(local + path.sep)) continue; // traversal guard on remote-supplied rel
-    try {
-      const r = await dm.fsReadRange(`${rdir}/${rel}`, 0, CAP + 1);
-      if (!r?.data || r.data.length > CAP) continue;
-      fs.mkdirSync(path.dirname(lp), { recursive: true });
-      fs.writeFileSync(lp, r.data);
-    } catch { }
-  }
 }
 // Groups a session belongs to that have a syncable context folder.
 function ctxGroupsOf(session, id) {

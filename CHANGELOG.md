@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.277.0
+
+**CS separation, second migration: ctx-folder sync is ONE implementation** (`src/ctx-sync.js`; table row flipped to UNIFIED in docs/design-cs-unification.md).
+
+The old split was the exact bug class the campaign exists for: ssh ran a bidirectional rsync pair with NO caps while dial ran a per-file hashed sync with a SILENT ≤400-files/≤2MB cap — so a 3MB context file reached every ssh host and never reached a dial device, with nothing anywhere saying so. Now:
+
+- The hashed newer-wins sync (sha-equal ⇒ untouched, so echo can never ping-pong; traversal-guarded pulls; `.vibespace/` excluded) runs over the device link on EVERY transport. ssh degrades to its legacy rsync pair only when the device link is down (the writer-sweep pattern); dial surfaces the device error — it has no second channel.
+- Caps raised to 1000 files / 16MB per file, and **a capped skip is REPORTED** — one deduped server notice per file ("Context file X (NMB) exceeds the 16MB sync cap and won't reach <host>"). A bounded sync may refuse a file; it may never lose one silently.
+- scripts/test-ctx-sync.mjs (13 asserts): newer-wins both directions, no-ping-pong, traversal guard, the 3MB audit file now syncing, skip reporting, and the per-transport fallback policy.
+
+Also 2.276.1 (earlier today): the usage ⟳ button spun its whole border box — the glyph spins now.
+
 ## 2.276.1
 
 - Usage popup ⟳: the spin animation was applied to the BUTTON element, so its border box visibly tumbled with the icon (real report). The glyph now spins inside a static box (`.uref-glyph`); the Agents-panel refresh-all was already svg-scoped and untouched.
