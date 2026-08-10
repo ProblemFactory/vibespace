@@ -388,7 +388,7 @@ export function installUsageMeter(App, ctx = {}) {
       ${gl.identityMismatch && showingGlobal ? `<div class="usage-warn">${t('⚠ The CLI config file says {cfg}, but the login token actually belongs to {actual} — quotas shown are {actual}’s. Run /login in a terminal to refresh the recorded identity.', { cfg: gl.email || '?', actual: gl.actualEmail || '?' })}</div>` : ''}
       <div class="usage-updated">${t('Updated {ago}', { ago: agoText(rl.fetchedAt) })}</div>`;
       const odMode = this.settings.get('accounts.onDemandQuotaRefresh') || 'manual';
-      const refreshBtn = odMode === 'off' ? '' : `<button class="usage-refresh-btn" title="${escHtml(t('Refresh from Anthropic now (also fetches model-scoped limits like Fable) — user-initiated, min 60s apart'))}">⟳</button>`;
+      const refreshBtn = odMode === 'off' ? '' : `<button class="usage-refresh-btn" title="${escHtml(t('Refresh from Anthropic now (also fetches model-scoped limits like Fable) — user-initiated, min 60s apart'))}"><span class="uref-glyph">⟳</span></button>`;
       sections.push(`${renderSectionTitle('claude', escHtml(claudeUsageLabel), refreshBtn)}${switcher}
       ${usageNote ? `<div class="usage-note">${usageNote}</div>` : ''}
       ${body}`);

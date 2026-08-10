@@ -395,7 +395,10 @@ html, body {
   color: var(--text-secondary); font-size: 12px; cursor: pointer; transition: var(--transition);
 }
 .usage-refresh-btn:hover { border-color: var(--accent); color: var(--accent); }
-.usage-refresh-btn.usage-refresh-spin { animation: usage-refresh-spin 0.8s linear infinite; pointer-events: none; }
+.usage-refresh-btn.usage-refresh-spin { pointer-events: none; }
+/* Spin the GLYPH only — animating the button itself rotates its border box
+   (real report 2026-08-10: the square visibly tumbling with the icon). */
+.usage-refresh-btn.usage-refresh-spin .uref-glyph { display: inline-block; animation: usage-refresh-spin 0.8s linear infinite; }
 @keyframes usage-refresh-spin { to { transform: rotate(360deg); } }
 .usage-note { font-size: 10px; color: var(--text-dim); margin: 4px 0; line-height: 1.45; white-space: normal; }
 .usage-bar-row { display: grid; grid-template-columns: minmax(90px, 40%) 1fr auto; align-items: center; gap: 8px; padding: 2.5px 0; }
