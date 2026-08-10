@@ -1429,7 +1429,12 @@ function registerWsHandler(wss, ctx) {
           if (data.resume && data.resumeId && !data.hostId && !data.keeperSid
               && (data.backend || 'claude') === 'claude' && /^[\w-]+$/.test(data.resumeId) && hosts) {
             try {
-              const r = await sweepWriters(hosts, null, data.resumeId, { shq, connectMs: 8000 });
+              // shq is defined in the remote branches' scope, not here — the
+              // undefined ref was swallowed by this catch and the local sweep
+              // NEVER ran (caught in a fleet console ring: "sweep skipped:
+              // shq is not defined"). Inline the same quoting.
+              const shqL = (v) => `'${String(v).replace(/'/g, `'\''`)}'`;
+              const r = await sweepWriters(hosts, null, data.resumeId, { shq: shqL, connectMs: 8000 });
               if (r.swept.length) session._resumeSwept = { host: 'this machine', pids: r.swept };
             } catch (e) {
               // Local device daemon down ⇒ legacy behaviour (no sweep), which

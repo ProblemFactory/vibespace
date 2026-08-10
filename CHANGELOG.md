@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.284.2
+
+**"Everything is stuck on thinking" decoded: the API was erroring and the CLI was silently retrying** (real fleet incident, diagnosed from the incident bundle + session buffers: bursts of `api_retry` records — HTTP 500 server_error plus connection-level failures — with the CLI backing off up to 10 attempts, minutes of apparent freeze; sessions recovered between bursts).
+
+- The `api_retry` system record was an UNHANDLED subtype — dropped silently, so the spinner gave zero indication (the 2.227.5 invisible-record class, caught again). The spinner text now says what's happening: **"API retrying (3/10, HTTP 500)…"**. Deliberately card-less — one transcript card per retry attempt would be spam; the label carries it.
+- **Local pre-resume writer sweep actually runs now**: it referenced `shq` out of scope, the ReferenceError was swallowed by its own degrade-gracefully catch, and the sweep silently never ran (spotted in the same incident's console ring: "sweep skipped: shq is not defined"). The degrade path did its job — nothing broke — but the protection was a no-op since 2.276.0.
+
 ## 2.284.1
 
 **Per-message billing attributes EVERY reply now — message.id is the join field** (owner follow-up: "为什么没有请求ID就不能跟踪账单了？message id不够吗？").

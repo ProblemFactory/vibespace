@@ -1864,6 +1864,15 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
                   else if (last?.type === 'text') newLabel = 'responding';
                   else if (last?.type === 'tool_use') newLabel = `running ${last.name || 'tool'}`;
                 }
+              } else if (msg.type === 'system' && msg.subtype === 'api_retry') {
+                // Anthropic API erroring + CLI auto-retrying (up to 10× with
+                // backoff — minutes of apparent freeze). Silently dropped, the
+                // user sees a bare spinner and files "everything is stuck"
+                // (real fleet incident: API 500 burst read as a product hang).
+                // Say what's actually happening in the spinner text.
+                const attempt = msg.attempt || '?', max = msg.max_retries || 10;
+                const why = msg.error_status ? `HTTP ${msg.error_status}` : (msg.error && msg.error !== 'unknown' ? msg.error : 'connection error');
+                newLabel = `API retrying (${attempt}/${max}, ${why})…`;
               }
               if (newLabel !== null && session._streamingLabel !== newLabel) {
                 session._streamingLabel = newLabel;
