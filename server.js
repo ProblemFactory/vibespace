@@ -3650,6 +3650,7 @@ app.post('/api/tasks/import', (req, res) => {
 // while any live remote session belongs to the group. Remote writes sync back
 // → the local signature changes → every member re-injects next turn. ──
 const { syncGroupCtx, FILE_CAP: CTX_FILE_CAP, MAX_FILES: MAX_CTX_FILES } = require('./src/ctx-sync');
+const machineProbes = require('./src/machine-probes');
 const _ctxSyncBusy = new Set(); // `${hostId}:${groupId}` in-flight guard
 const _ctxSkipNoticed = new Set(); // one honest notice per host:group:file per boot
 async function syncRemoteGroupCtx(h, g) {
@@ -5092,79 +5093,23 @@ const { router: sessionsRouter, setup: setupSessions } = require('./src/routes/s
 setupSessions({ activeSessions, webuiPids, refreshWebuiPids, createSessionMessages, BUFFERS_DIR, PERMISSION_MODES, execFileSync, hosts, accounts, sessionAuth });
 // Backend readiness for onboarding: is each CLI installed + logged in?
 // Login detection is best-effort file existence — never spawns the CLIs.
-app.get('/api/backend-status', (req, res) => {
-  const out = {};
-  const probe = (cmd) => {
-    try {
-      const v = execFileSync(cmd, ['--version'], { encoding: 'utf-8', timeout: 5000 }).trim();
-      return { installed: true, version: v.split('\n')[0] };
-    } catch { return { installed: false, version: null }; }
-  };
-  out.claude = probe(CLAUDE_CMD);
-  // Install-layer classification (2.229.0, the userW rollback incident): a
-  // CLI OUTSIDE $HOME (npm-global /usr/local, baked into the container image)
-  // lives in the EPHEMERAL layer — `claude update` succeeds, then the next
-  // pod/container rebuild silently reverts it (userW: 3 days of Opus 5, then
-  // a rebuild put the opus alias back on 4.8 with zero notice). userLocal
-  // (under $HOME → the PVC in fleet pods) survives rebuilds and wins PATH.
-  const classifyInstall = (cmdPath) => {
-    if (!cmdPath || !cmdPath.startsWith('/')) return null;
-    let real = cmdPath;
-    try { real = fs.realpathSync(cmdPath); } catch {}
-    return { binPath: real, userLocal: real.startsWith(os.homedir() + path.sep) };
-  };
-  // Resolved ABSOLUTE path (2.223.3): helper terminals run LOGIN shells whose
-  // /etc/profile resets PATH — a bare `claude update` typed into one died
-  // "command not found" on hosts without ~/.local/bin in ~/.profile (fleet-wide
-  // him188 incident). The client prefixes helper commands with this instead.
-  out.claude.cmdPath = CLAUDE_CMD && CLAUDE_CMD.startsWith('/') ? CLAUDE_CMD : null;
-  out.claude.install = classifyInstall(out.claude.cmdPath);
-  out.claude.loggedIn = false;
-  try {
-    if (process.platform === 'darwin') {
-      execFileSync('security', ['find-generic-password', '-s', 'Claude Code-credentials'], { timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'] });
-      out.claude.loggedIn = true; out.claude.loginMethod = 'keychain';
-    } else {
-      const creds = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', '.credentials.json'), 'utf-8'));
-      out.claude.loggedIn = !!(creds?.claudeAiOauth?.accessToken || creds?.accessToken);
-      if (out.claude.loggedIn) out.claude.loginMethod = 'oauth';
-      // WHY the machine login is out (2.267.4, user challenge "一定是闲置失效
-      // 吗"): a token-LESS claudeAiOauth object = a login that existed and
-      // expired/was cleared; NO creds/key at all = never set up. The header
-      // must not claim idle-expiry for a machine that never logged in.
-      else if (creds?.claudeAiOauth) out.claude.machineLoginState = 'expired';
-    }
-  } catch {}
+app.get('/api/backend-status', async (req, res) => {
+  // R1 (three-tier): the machine facts come from the SHARED probe module —
+  // the same implementation the device daemon serves as `probe-cli` for
+  // remote machines. This route is device #0's in-process call (CS amendment
+  // #2: shared implementation, no socket transit). Orchestrator-only
+  // composition (env-key overlay, named-account counts) layers on after.
+  let out;
+  try { out = await machineProbes.cliFacts({ claudeCmd: CLAUDE_CMD, codexCmd: CODEX_CMD }); } catch { out = { claude: {}, codex: {} }; }
   if (!out.claude.loggedIn && process.env.ANTHROPIC_API_KEY) { out.claude.loggedIn = true; out.claude.loginMethod = 'env-key'; }
-  // A console /login (managed primaryApiKey) and an apiKeyHelper both
-  // authenticate claude with NO OAuth creds file — recognize them (real
-  // report: an apiKeyHelper machine ran claude fine, showed "not logged in").
-  if (!out.claude.loggedIn) {
-    try { if (JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude.json'), 'utf-8'))?.primaryApiKey) { out.claude.loggedIn = true; out.claude.loginMethod = 'console-key'; } } catch {}
-  }
-  if (!out.claude.loggedIn) {
-    try { if (JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', 'settings.json'), 'utf-8'))?.apiKeyHelper) { out.claude.loggedIn = true; out.claude.loginMethod = 'key-helper'; } } catch {}
-  }
-  // apiKeyHelper as an INDEPENDENT flag (2.191.0): the CLI's precedence puts
-  // a configured helper ABOVE OAuth, so "loggedIn (oauth)" alone can mislead
-  // — the dialog needs to warn when both are present (CW-H200 incident).
-  try { if (JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', 'settings.json'), 'utf-8'))?.apiKeyHelper) out.claude.keyHelper = true; } catch {}
-  // Named-account nuance (2.267.1, user report): under full pooling the
-  // MACHINE login legitimately idles to token-less — a bare "not logged in"
-  // on the backend header reads as "Claude is broken" while every session
-  // runs fine on named/pooled accounts. Count usable named identities
-  // (logged-in subs + pools with a logged-in target + stored API keys) so
-  // the client can say what's actually true.
+  // Named-account nuance (2.267.1): under full pooling the MACHINE login
+  // legitimately idles to token-less — count usable named identities so the
+  // client can say what's actually true instead of "not logged in".
   try {
     const l = accounts.list();
     out.claude.namedLoggedIn = (l.accounts || []).filter((a) =>
       (a.backend || 'claude') === 'claude' && (a.loggedIn || (!a.pooled && a.type !== 'subscription' && a.tail))).length;
   } catch {}
-  out.codex = probe(CODEX_CMD);
-  out.codex.cmdPath = CODEX_CMD && CODEX_CMD.startsWith('/') ? CODEX_CMD : null;
-  out.codex.install = classifyInstall(out.codex.cmdPath);
-  out.codex.loggedIn = false;
-  try { out.codex.loggedIn = fs.existsSync(path.join(os.homedir(), '.codex', 'auth.json')); } catch {}
   res.json(out);
 });
 

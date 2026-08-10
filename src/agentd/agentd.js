@@ -11,6 +11,7 @@
 
 const fs = require('fs');
 const { extractTailIds, pidLooksClaude } = require('./../discovery-facts.js');
+const machineProbes = require('./../machine-probes.js');
 const os = require('os');
 const path = require('path');
 const net = require('net');
@@ -925,6 +926,21 @@ function serveConnection(sock) {
       }
       // ── M4: bounded one-shot command (clipboard/xclip class; NOT a shell —
       // argv only, hard timeout, output capped) ──
+      // ── R1 (three-tier): machine fact probes — the SHARED node
+      // implementation (src/machine-probes.js, bundled) answers about THIS
+      // machine. Read-only over files; §ban-safety: no vendor calls here. ──
+      if (msg.op === 'probe-cli') {
+        machineProbes.cliFacts({}).then(
+          (facts) => mux.control({ op: 'probe-result', id: msg.id, facts }),
+          (e) => mux.control({ op: 'probe-result', id: msg.id, error: e.message }));
+        return;
+      }
+      if (msg.op === 'probe-creds') {
+        machineProbes.credsFacts().then(
+          (facts) => mux.control({ op: 'probe-result', id: msg.id, facts }),
+          (e) => mux.control({ op: 'probe-result', id: msg.id, error: e.message }));
+        return;
+      }
       if (msg.op === 'run-cmd') {
         try {
           const { execFile } = require('child_process');

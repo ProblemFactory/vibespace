@@ -201,7 +201,7 @@ class DeviceManager {
             mux.onWritable = (chan) => { sessions.get(chan)?.onWritable?.(); };
             const prevControl = mux.onControl;
             mux.onControl = (m) => {
-              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'cmd-result' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
+              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
                 const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m); }
                 if (m.op === 'tcp-open' && !m.error) return; // channel stays live
                 return;
@@ -413,6 +413,11 @@ class DeviceManager {
   discoverySnapshot() { return this._request({ op: 'discovery-snapshot' }); }
   async watchDiscovery(onDirty) { this._onDiscoveryDirty = onDirty; return this._request({ op: 'discovery-watch' }); }
   // ── M4 ──
+  /** R1 machine facts (shared src/machine-probes.js runs daemon-side).
+   *  Old daemons don't know these ops — callers bound with a timeout and
+   *  fall back to the legacy ssh scripts. */
+  probeCli() { return this._request({ op: 'probe-cli', timeoutMs: 9000 }); }
+  probeCreds() { return this._request({ op: 'probe-creds', timeoutMs: 9000 }); }
   runCmd(cmd, args = [], { stdin, env, timeoutMs } = {}) {
     return this._request({ op: 'run-cmd', cmd, args, env, timeoutMs, stdin64: stdin ? Buffer.from(stdin).toString('base64') : undefined });
   }

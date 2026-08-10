@@ -423,6 +423,15 @@ class HostManager {
    *  can never go stale relative to the token itself). */
   async accountsStatus(id) {
     const h = this.get(id);
+    // R1 (three-tier): op-first — the SHARED machine-probes implementation
+    // answers from the machine itself (probe-creds). The ssh script below
+    // stays as the fallback for daemon-less hosts and pre-R1 daemons (whose
+    // unknown-op silence times the bounded request out).
+    try {
+      const dm = await this.deviceBounded(id, 6000);
+      const r = await dm.probeCreds();
+      if (r?.facts && r.facts.subscription) return r.facts;
+    } catch { }
     // JSON field greps tolerate ": " — the CLI writes ~/.claude.json with
     // INDENTED JSON on most machines, and the old no-space patterns were
     // blind there (real incident: a Console key + email sat in the config
@@ -654,6 +663,20 @@ class HostManager {
   /** Backend status on a host (mirrors local /api/backend-status shape). */
   async backendStatus(id) {
     const h = this.get(id);
+    // R1: op-first (shared machine-probes via probe-cli); ssh script fallback.
+    try {
+      const dm = await this.deviceBounded(id, 6000);
+      const r = await dm.probeCli();
+      const f = r?.facts;
+      if (f?.claude) {
+        return {
+          claude: { installed: !!f.claude.installed, ...(f.claude.version ? { version: f.claude.version } : {}),
+            loggedIn: !!f.claude.loggedIn, ...(f.claude.loginMethod ? { loginMethod: f.claude.loginMethod } : {}),
+            ...(f.claude.keyHelper ? { keyHelper: true } : {}) },
+          codex: { installed: !!f.codex.installed, ...(f.codex.version ? { version: f.codex.version } : {}), loggedIn: !!f.codex.loggedIn },
+        };
+      }
+    } catch { }
     const probe = REMOTE_PRELUDE
       + 'for c in claude codex; do '
       + 'if command -v $c >/dev/null 2>&1; then v=$($c --version 2>/dev/null | head -1); echo "$c|yes|$v"; else echo "$c|no|"; fi; done; '
