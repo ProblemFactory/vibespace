@@ -5196,6 +5196,11 @@ app.get('/api/backend-status', (req, res) => {
       const creds = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', '.credentials.json'), 'utf-8'));
       out.claude.loggedIn = !!(creds?.claudeAiOauth?.accessToken || creds?.accessToken);
       if (out.claude.loggedIn) out.claude.loginMethod = 'oauth';
+      // WHY the machine login is out (2.267.4, user challenge "一定是闲置失效
+      // 吗"): a token-LESS claudeAiOauth object = a login that existed and
+      // expired/was cleared; NO creds/key at all = never set up. The header
+      // must not claim idle-expiry for a machine that never logged in.
+      else if (creds?.claudeAiOauth) out.claude.machineLoginState = 'expired';
     }
   } catch {}
   if (!out.claude.loggedIn && process.env.ANTHROPIC_API_KEY) { out.claude.loggedIn = true; out.claude.loginMethod = 'env-key'; }

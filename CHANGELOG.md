@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.267.4
+
+- **"机器登录闲置失效" no longer over-claims the cause** (user challenge: 一定是闲置吗？): `/api/backend-status` distinguishes a token-less-but-present credentials file (`machineLoginState: 'expired'` — expiry OR logout, worded "已失效") from a machine that NEVER logged in (worded "未配置机器登录"). The header only claims what the evidence shows.
+- **Onboarding no longer funnels everyone through the machine-wide login**: the Claude card gains an "Accounts & pool…" button opening Manage Agents as a modal ABOVE the wizard (`forceModal` skips the rail-panel redirect, which would have opened behind it; cards refresh on close), named/pooled accounts count as ✓ ready for the step (`{n} named account(s) in use`), the machine-login button demotes to secondary when named accounts exist, and a tip line says pools/named accounts work without the global login.
+
 ## 2.267.3
 
 **The est-2× bug — live-odometer double count, quantitatively confirmed** (user report: est 27% vs ⟳ 9%; arithmetic closes exactly: 2 × $34.73 window cost / $256.5 learned full = 27.1%):
