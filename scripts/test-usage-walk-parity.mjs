@@ -71,6 +71,14 @@ const onlyRemote = [...remoteRids].filter((r) => !localRids.has(r));
 ok(onlyLocal.length === 0, 'nothing counted locally is missed remotely' + (onlyLocal.length ? ` (missed: ${onlyLocal})` : ''));
 ok(onlyRemote.length === 0, 'nothing counted remotely is missed locally' + (onlyRemote.length ? ` (extra: ${onlyRemote})` : ''));
 
+// mid field parity (the 2.267.3 join rule): live stdout records lack a
+// requestId, so per-message billing lookups join on message.id — BOTH walkers
+// must carry it or remote replies can never attribute in the popup.
+const remoteEvs = stdout.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+ok(remoteEvs.every((e) => e.mid && e.mid.startsWith('msg_')), 'remote walker emits the mid join field on every event');
+const localEvsAll = (localEvents?.events || localEvents || []);
+ok(localEvsAll.every((e) => e.mid && String(e.mid).startsWith('msg_')), 'local walker bakes mid on every event');
+
 // Cursor semantics: a second run must emit NOTHING new (both sides are
 // incremental; a re-emitting scanner would double-count on every harvest).
 const stdout2 = execFileSync(process.execPath, [path.join(REPO, 'data/bin/vibespace-usage-scan')], {

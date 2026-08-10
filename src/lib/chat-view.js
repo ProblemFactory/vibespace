@@ -686,8 +686,15 @@ class ChatView {
       return a.accountName || (a.kind === 'subscription' || a.kind === 'cli-global' ? t('CLI login') : null);
     };
     const isRemote = !!(this.winInfo?._openSpec?.hostId);
-    if (meta.requestId) {
-      fetchJson('/api/usage-stats/rid-info?rid=' + encodeURIComponent(meta.requestId)).then((r) => {
+    if (meta.requestId || meta.msgId) {
+      // live stdout records carry NO requestId (CLI behavior) — message.id is
+      // the join field both transports share, so EVERY reply attributes, not
+      // just history-rebuilt ones (real report: mid-conversation replies
+      // "couldn't be tracked"; the ledger had them all along).
+      const q = new URLSearchParams();
+      if (meta.requestId) q.set('rid', meta.requestId);
+      if (meta.msgId) q.set('mid', meta.msgId);
+      fetchJson('/api/usage-stats/rid-info?' + q.toString()).then((r) => {
         let val;
         if (r?.found) {
           if (r.atype === 'host') {
@@ -707,9 +714,8 @@ class ChatView {
         addBillingRow(val);
       }).catch(() => { });
     } else {
-      // No request id on this record (some transports/records don't carry
-      // one) — per-request attribution is impossible; show the session-level
-      // billing identity instead of silently omitting the row.
+      // record carries NEITHER id (rare: synthetic/system records) — the only
+      // honest answer left is the session-level billing identity.
       const sb = sessionBilling();
       addBillingRow((sb || t('unknown')) + ' · ' + t('session-level (no request id on this record)'));
     }

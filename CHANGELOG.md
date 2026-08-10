@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.284.1
+
+**Per-message billing attributes EVERY reply now — message.id is the join field** (owner follow-up: "为什么没有请求ID就不能跟踪账单了？message id不够吗？").
+
+The facts, corrected: **no billing data was ever lost.** The ledger mines transcripts, where every request has its id and cost. What failed was only the popup's JOIN: live stdout records carry NO `requestId` (CLI behavior — only the transcript copy has it), so replies rendered live couldn't look themselves up, while history-rebuilt ones could (that's why the FIRST message in a freshly-attached conversation attributed and the following live ones didn't). `message.id` is exactly the join field both transports share — the same 2.267.3 rule that fixed the est-2× double count:
+
+- `eventForMid(mid)` joins by the ledger's baked `mid`, by `rid` where the walker fell back to msg.id, and by host-namespaced rids; `/api/usage-stats/rid-info` accepts `mid`; the popup queries with BOTH ids.
+- The remote scanner now emits `mid` (field parity with the local walker — the parity suite asserts it on every event, so this can't silently drift), and the remote ingest preserves it.
+- Model dropdown baseline labels drop their context-size claims (a `claude-opus-5` session was observed serving 222k/1M under an "(200k)" label — the status bar derives the real window from usage; labels must not assert specs they don't know).
+
+Unit-verified all three join paths (mid field / rid-fallback / host-namespaced) against a real ingest.
+
 ## 2.284.0
 
 Field-test feedback batch (ten findings from the owner's first R0–R3 verification pass):
