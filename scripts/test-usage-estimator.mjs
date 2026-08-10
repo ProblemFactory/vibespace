@@ -322,6 +322,43 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   ck('zero live total (retention gap) falls back to the frozen snapshot', zero.sevenDay[0].cost === 20);
 }
 
+// ── 5h token-class regression (B-536b) ───────────────────────────────────────
+{
+  const R5 = Math.floor(T0 / 1000) + 4 * 3600; // one shared 5h window
+  const csC = (total, cw) => ({ total, byFamily: { fable: total, opus: 0, sonnet: 0, haiku: 0, other: 0 }, byClass: { cw, other: total - cw }, requests: 1 });
+  // chain of anchors: cw-heavy windows burn at $800/full, fresh-heavy at $250
+  const mk5 = (at, u5, prev, costSince) => ({ ...mkAnchor(at, { u5, r5: R5 }), prevFetchedAt: prev, costSince });
+  const chain = [
+    mk5(T0, 0.10, null, null),
+    mk5(T0 + 10 * 60000, 0.15, T0, csC(40, 40)),               // pure cw: du 0.05 = 40/800
+    mk5(T0 + 20 * 60000, 0.23, T0 + 10 * 60000, csC(20, 0)),   // pure other: du 0.08 = 20/250
+    mk5(T0 + 30 * 60000, 0.28, T0 + 20 * 60000, csC(40, 40)),  // pure cw again
+    mk5(T0 + 40 * 60000, 0.36, T0 + 30 * 60000, csC(20, 0)),   // pure other again
+  ];
+  const r = est.learnRates(chain, { priors: { fiveHour: 500 } });
+  ck('class regression: recovers cw full ≈ $800', r.fiveHour.impliedFullCwUsd > 700 && r.fiveHour.impliedFullCwUsd < 900);
+  ck('class regression: recovers other full ≈ $250', r.fiveHour.impliedFullOtherUsd > 220 && r.fiveHour.impliedFullOtherUsd < 280);
+  ck('class regression: blended rate still present (display/fallback)', Number.isFinite(r.fiveHour.rate));
+  // class-aware prediction beats blended on a cw-heavy window
+  const anchor = { fetchedAt: T0, buckets: { fiveHour: { u: 0.10, resetsAt: R5 }, sevenDay: null, scopedWeekly: [] } };
+  const eC = est.estimateBuckets({ anchor, rates: { fiveHour: r.fiveHour }, costFn: () => csC(80, 80), nowMs: T0 + HR });
+  ck('class-aware estimate: $80 pure-cw window → +10 points (80/800), not blended', approx(eC.fiveHour.utilization, 0.10 + 80 / r.fiveHour.impliedFullCwUsd, 0.01));
+  // no byClass in the cost source → blended fallback
+  const eB = est.estimateBuckets({ anchor, rates: { fiveHour: r.fiveHour }, costFn: () => cs(80, 80), nowMs: T0 + HR });
+  ck('no class split in cost source → blended fallback', approx(eB.fiveHour.utilization, 0.10 + 80 * r.fiveHour.rate, 0.005));
+  // absurd data (massive cw spend against ~zero du ⇒ implied cw full beyond
+  // the $20k sanity bound) must NOT emit class rates — blended only
+  const bad = [
+    mk5(T0, 0.10, null, null),
+    mk5(T0 + 10 * 60000, 0.101, T0, csC(900, 900)),
+    mk5(T0 + 20 * 60000, 0.102, T0 + 10 * 60000, csC(900, 900)),
+    mk5(T0 + 30 * 60000, 0.103, T0 + 20 * 60000, csC(900, 900)),
+  ];
+  const rb = est.learnRates(bad, { priors: { fiveHour: 500 } });
+  ck('absurd implied cw full (> sanity bound) → class rates withheld, blended kept',
+    rb.fiveHour && rb.fiveHour.rateCw == null && Number.isFinite(rb.fiveHour.rate));
+}
+
 // ── live odometer (event-driven estimation, exhaustion-#2 round) ─────────────
 {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-est3-'));

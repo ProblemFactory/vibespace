@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.268.0
+
+**5h token-class regression (B-536b, user-approved)** — the 5h bucket's last big error source was that ONE blended $-rate swung ±2.5× with the hour's cache-write share. The estimator now learns TWO rates per identity for the 5h bucket via 2-var least squares over class-split pairs (du = rate_cw × cw$ + rate_other × other$), seeded by pure-class prior pseudo-pairs (cw $800 / other $250) that real data quickly dominates:
+
+- `costBetweenMulti` splits every window's cost into `byClass {cw, other}` (cache-write component priced alone vs everything else) — and because rate learning RECOMPUTES pair costs from the live ledger, **every historical pair gets its class split retroactively**, no data collection wait.
+- Real-data validation across three independent identities agrees quantitatively: cw-full $370-531 vs other-full $180-275 — a cache-write dollar burns the 5h bucket roughly HALF as fast as a fresh/output dollar. Tonight's 53-vs-48 window re-predicted with class rates lands at +4.5 points vs the actual +3 (blended said +9.2).
+- Estimation is class-aware end-to-end: the live odometer ring carries `cwUsd` per entry, `_liveDelta` and the ledger cost merge byClass, `estimateBuckets` predicts per component when the source carries the split (blended stays as display value + fallback for degenerate regressions/pre-split snapshots). Sanity bounds (implied fulls within $40-20k, positive coefficients) withhold class rates on absurd fits. 7d/scoped stay blended by design (long windows average the mix out; their calib error is already 0-3 points).
+- Estimator suite grows to 72 (recovery of both class fulls from synthetic mixes, class-aware vs blended prediction, no-split fallback, sanity-bound withholding).
+
 ## 2.267.4
 
 - **"机器登录闲置失效" no longer over-claims the cause** (user challenge: 一定是闲置吗？): `/api/backend-status` distinguishes a token-less-but-present credentials file (`machineLoginState: 'expired'` — expiry OR logout, worded "已失效") from a machine that NEVER logged in (worded "未配置机器登录"). The header only claims what the evidence shows.
