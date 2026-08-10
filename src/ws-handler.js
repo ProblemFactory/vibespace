@@ -158,6 +158,16 @@ function registerWsHandler(wss, ctx) {
   // reconnect, which a server restart always forces).
   const layoutSyncSeqRef = { value: 0 };
 
+  // Shared by the dial + ssh terminate legs: a kill we could not confirm on
+  // the machine must reach the USER (静默失败零容忍), not just the log.
+  const notifyKillUnconfirmed = (hostName) => {
+    try {
+      ctx.serverNotice?.(`kill-unconfirmed:${hostName}`,
+        `Couldn’t confirm the session was stopped on ${hostName} — it may still be running there. Check the machine’s sessions in the sidebar.`,
+        { level: 'warn' });
+    } catch { }
+  };
+
   // Heartbeat: without ping/pong a half-open WS (network blip, sleep/wake,
   // the OOM-induced unresponsiveness from heavy local jobs) is NOT detected
   // by the server — the dead ws lingers in every session.clients map for the
@@ -297,6 +307,13 @@ function registerWsHandler(wss, ctx) {
                       // sids — tag them (B-218d): the ssh branch must adopt via the
                       // attach-cli, NOT the legacy keeper binary (which only knows
                       // ~/.vibespace/run and can never find these sids).
+                      // k.error = the probe FAILED (host lag) — refuse rather than
+                      // sweep+respawn onto a possibly-live claude (2.271.0 T1-1).
+                      if (k?.error) {
+                        ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, code: 'keeper-probe-failed',
+                          message: `${owners[0]} isn’t responding — couldn’t verify whether this conversation is still running there. Retry in a moment.` }));
+                        return;
+                      }
                       if (k) { data.keeperSid = k.sid; data.keeperKind = k.kind; console.log(`[session] live ${k.kind} session ${k.sid} holds ${data.resumeId.slice(0, 8)} — attaching instead of spawning a second writer`); }
                     } catch { }
                   }
@@ -1179,6 +1196,11 @@ done`;
               if (!dialKeeperSid && data.resume && data.resumeId && !data.accountId && /^[\w-]+$/.test(data.resumeId)) {
                 try {
                   const k = await hosts.findKeeperFor(h.id, data.resumeId);
+                  if (k?.error) {
+                    ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, code: 'keeper-probe-failed',
+                      message: `${h.name} isn’t responding — couldn’t verify whether this conversation is still running there. Retry in a moment.` }));
+                    return;
+                  }
                   if (k?.sid) { dialKeeperSid = k.sid; console.log(`[dial] live pipe session ${k.sid} holds ${data.resumeId.slice(0, 8)} — attaching instead of spawning a second writer`); }
                 } catch { }
               }
@@ -1192,7 +1214,10 @@ done`;
                   const dm = await hosts.deviceBounded(h.id, 15000);
                   await dm.runCmd('sh', ['-c', writerSweepScript(data.resumeId)], { timeoutMs: 20000 });
                   hosts.invalidateDiscovery(h.id);
-                } catch (e) { console.warn('[dial] pre-resume cleanup failed (continuing):', e.message); }
+                } catch (e) {
+                  console.warn('[dial] pre-resume cleanup failed (continuing):', e.message);
+                  session._resumeWarning = `Couldn’t verify no other process is writing this conversation on ${h.name} — if it was still running there, the transcript may double-write. Watch for duplicated messages.`;
+                }
               }
               try {
                 const bridgePort = await dialBridge.ensure({ sid: id, deviceId: h.deviceId });
@@ -1270,6 +1295,11 @@ done`;
             if (data.resume && data.resumeId && !data.keeperSid && !data.accountId && agentdRemote && /^[\w-]+$/.test(data.resumeId)) {
               try {
                 const k = await hosts.findKeeperFor(h.id, data.resumeId);
+                if (k?.error) {
+                  ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, code: 'keeper-probe-failed',
+                    message: `${h.name} isn’t responding — couldn’t verify whether this conversation is still running there. Retry in a moment.` }));
+                  return;
+                }
                 if (k?.sid) { data.keeperSid = k.sid; data.keeperKind = k.kind; console.log(`[remote] live ${k.kind} session ${k.sid} holds ${data.resumeId.slice(0, 8)} — adopting instead of sweep+respawn`); }
               } catch { }
             }
@@ -1289,7 +1319,16 @@ done`;
                 // it). The pipe-meta + keeper legs clean their own bookkeeping.
                 await execFileAsync('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', writerSweepScript(data.resumeId)], { timeout: 20000 });
                 hosts.invalidateDiscovery(h.id);
-              } catch (e) { console.warn('[remote] pre-resume cleanup failed (continuing):', e.message); }
+              } catch (e) {
+                // The sweep exists to guarantee no other writer holds this
+                // transcript; it fails exactly under the host lag that makes
+                // a second writer likely (2.271.0 T1-2). Proceed (the user
+                // asked to resume) but SURFACE it — the created reply carries
+                // a warning so the window can show it, not a silent double-
+                // write risk.
+                console.warn('[remote] pre-resume cleanup failed (continuing):', e.message);
+                session._resumeWarning = `Couldn’t verify no other process is writing this conversation on ${h.name} — if it was still running there, the transcript may double-write. Watch for duplicated messages.`;
+              }
             }
             // keeper-ATTACH (B-4058): the card carried a live keeper sid —
             // reattach to the surviving remote claude from byte 0 (full
@@ -1667,6 +1706,7 @@ done`;
               how: session._billingHow || null,
               name: session._accountId ? (() => { try { return accounts?.get?.(session._accountId)?.name || null; } catch { return null; } })() : null,
             },
+            warning: session._resumeWarning || undefined, // 2.271.0 T1-2: sweep-skipped-under-lag double-write risk
           }));
           broadcastActiveSessions();
           break;
@@ -2217,6 +2257,9 @@ done`;
           break;
         }
 
+        // Terminate could not be CONFIRMED on the machine — the local
+        // pipeline is gone either way, but the remote claude may live on, so
+        // never let the UI imply a clean kill (2.271.0 T1-3).
         case 'kill': {
           // Stale-serverId robustness (2.179.0): after a server restart the
           // client can hold an OLD webui id — a kill that silently no-ops
@@ -2303,11 +2346,19 @@ done`;
                   if (session.mode === 'chat') {
                     // the pipe sid ≠ webui id for attach-adopted sessions
                     const sidSafe = String(session.keeperSid || data.sessionId).replace(/[^\w-]/g, '');
-                    hosts.device(session.host).then(async (dm) => {
-                      try { await dm.killPipeSession(sidSafe); } catch {}
+                    // BOUNDED + CONFIRMED (2.271.0 T1-3): an unbounded
+                    // device() could hang the teardown forever, and BOTH legs
+                    // were swallowed — an unconfirmed kill left the device-side
+                    // claude alive while the UI said "terminated" (the
+                    // double-writer precursor). Tell the user when we could not
+                    // confirm; the sidebar re-discovery then shows the truth.
+                    hosts.deviceBounded(session.host, 8000).then(async (dm) => {
+                      let killed = false;
+                      try { await dm.killPipeSession(sidSafe); killed = true; } catch (e) { console.warn('[dial] kill-pipe-session failed:', e.message); }
                       try { await dm.runCmd('sh', ['-c', `rm -f "$HOME/.vibespace/bin/.tok-${sidSafe}"`], { timeoutMs: 10000 }); } catch {}
                       try { hosts.invalidateDiscovery(session.host); } catch {}
-                    }).catch(() => {});
+                      if (!killed) notifyKillUnconfirmed(h.name);
+                    }).catch((e) => { console.warn('[dial] terminate teardown unreachable:', e.message); notifyKillUnconfirmed(h.name); });
                   } else {
                     setTimeout(() => { try { hosts.invalidateDiscovery(session.host); } catch {} }, 2000);
                   }
@@ -2328,7 +2379,13 @@ done`;
                     `M="$HOME/.vibespace/agentd/state/sessions/${sshSidSafe}.json"; P=$(grep -o '"childPid":[0-9]*' "$M" 2>/dev/null | cut -d: -f2); [ -n "$P" ] && kill $P 2>/dev/null; `
                     + `node "$HOME/.vibespace/bin/vibespace-remote-keeper" stop ${sshSidSafe} 2>/dev/null; `
                     + `sleep 2; [ -n "$P" ] && kill -9 $P 2>/dev/null; true; rm -f "$HOME/.vibespace/bin/.tok-${data.sessionId}"`],
-                    { timeout: 15000 }, () => { try { hosts.invalidateDiscovery(session.host); } catch {} });
+                    { timeout: 15000 }, (err) => {
+                      try { hosts.invalidateDiscovery(session.host); } catch {}
+                      // ssh leg failed (host lag/down) — the remote claude may
+                      // still be running; say so instead of silently claiming
+                      // the terminate worked (2.271.0 T1-3).
+                      if (err) { console.warn('[remote] terminate teardown failed:', err.message); notifyKillUnconfirmed(h.name); }
+                    });
                 } else {
                   setTimeout(() => { try { hosts.invalidateDiscovery(session.host); } catch {} }, 2000);
                 }

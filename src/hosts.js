@@ -944,17 +944,25 @@ class HostManager {
     for d in "$HOME"/.vibespace/*/state/sessions; do [ -d "$d" ] && scan "$d" agentd; done
     scan "$HOME/.vibespace/run" keeper`;
     try {
-      // SESSION-ESTABLISHING (review catch, do not re-bound): this probe
-      // decides ADOPT-a-live-claude vs sweep+respawn — a deadline here reads
-      // as "no live keeper" and the writer sweep then SIGTERMs the healthy
-      // claude the full ladder would have adopted. The resume path wants
-      // the wait.
-      const out = String(await this._hostShell(h, script, { timeoutMs: 10000 }) || '');
+      // SESSION-ESTABLISHING (review catch, do not re-bound BELOW 15s): this
+      // probe decides ADOPT-a-live-claude vs sweep+respawn — a deadline here
+      // reads as "no live keeper" and the writer sweep then SIGTERMs the
+      // healthy claude the full ladder would have adopted. 15s per the
+      // documented invariant (the ssh leg was 10s, below the bar the dial
+      // leg already honored — 2.271.0 audit T1-1/T1-7).
+      const out = String(await this._hostShell(h, script, { timeoutMs: 15000 }) || '');
       const hits = out.trim().split('\n').map((l) => l.trim()).filter((l) => /^(agentd|keeper)\|[\w][\w-]*$/.test(l))
         .map((l) => { const [kind, sid] = l.split('|'); return { kind, sid }; });
       // newest-transport first: an agentd hit wins over a legacy keeper one
       return hits.find((x) => x.kind === 'agentd') || hits[0] || null;
-    } catch { return null; }
+    } catch (e) {
+      // CRITICAL DISTINCTION (2.271.0, the sweep-kills-healthy-claude class):
+      // a FAILED probe (timeout/host lag) must NOT read as "no keeper" — the
+      // caller would sweep+respawn and SIGTERM the surviving claude it should
+      // have adopted, corrupting the transcript with a second writer. Return a
+      // distinct sentinel so every consumer can refuse-and-retry instead.
+      return { error: true, reason: String(e?.message || e) };
+    }
   }
   // Remote SUBAGENT transcript (2.191.0, remote workflow viewer's View Log):
   // agent-<id>.jsonl lives under <projDir>/<sid>/subagents/ (plain agents) or
@@ -1154,7 +1162,15 @@ class HostManager {
         if (error) throw new Error(error);
         if (code !== 0) throw new Error('scanner exit ' + code);
         return Buffer.concat(chunks).toString('utf-8');
-      } catch (e2) { /* legacy ssh fallback below */ }
+      } catch (e2) {
+        // DIAL has no ssh fallback (sshArgs throws 'is a dial-out device'),
+        // and the ssh path would MISDIAGNOSE the device-link failure as a
+        // transport-absent one (2.271.0 T3-6). Rethrow the real error and
+        // reset the throttle so the next kick retries instead of a silent
+        // 15-min block on a misleading message.
+        if (h.transport === 'dial') { this._usageHarvestAt.set(id, 0); throw e2; }
+        /* ssh host: fall through to the legacy ssh path below */
+      }
     }
     return new Promise((resolve, reject) => {
       const child = execFile('ssh', [...this.sshArgs(h, { multiplex: true }), '--',
@@ -1175,7 +1191,12 @@ class HostManager {
     let raw;
     // _hostShell: dial devices peek via the device link (2.188.0 — the ⟳ in
     // the quota popup threw for paired devices; the peek was ssh-only)
-    try { raw = await this._hostShell(h, 'cat "$HOME/.claude/.credentials.json" 2>/dev/null || true', { timeoutMs: 10000 }); } catch { return null; }
+    // UNREACHABLE ≠ TOKEN-ABSENT (2.271.0 T2-12): both used to return null, so
+    // the ⟳ route told the user "no valid login on the host — log in there"
+    // when the host was merely down. Throw a tagged error instead; the route
+    // renders "host unreachable" and skips stamping its throttle.
+    try { raw = await this._hostShell(h, 'cat "$HOME/.claude/.credentials.json" 2>/dev/null || true', { timeoutMs: 10000 }); }
+    catch (e) { const err = new Error('host unreachable: ' + (e?.message || e)); err.code = 'host-unreachable'; throw err; }
     try {
       const o = JSON.parse(raw).claudeAiOauth;
       if (o?.accessToken && (!o.expiresAt || o.expiresAt > Date.now() + 60000)) return o.accessToken;
@@ -1192,7 +1213,9 @@ class HostManager {
     if (!/^sub-[\w-]{1,40}$/.test(String(subId || ''))) return null;
     const h = this.get(id);
     let raw;
-    try { raw = await this._hostShell(h, `cat "$HOME/.vibespace/subs/${subId}/.credentials.json" 2>/dev/null || true`, { timeoutMs: 10000 }); } catch { return null; }
+    // same unreachable-vs-absent split as readRemoteOAuth (2.271.0 T2-12)
+    try { raw = await this._hostShell(h, `cat "$HOME/.vibespace/subs/${subId}/.credentials.json" 2>/dev/null || true`, { timeoutMs: 10000 }); }
+    catch (e) { const err = new Error('host unreachable: ' + (e?.message || e)); err.code = 'host-unreachable'; throw err; }
     try {
       const o = JSON.parse(raw).claudeAiOauth;
       if (o?.accessToken && (!o.expiresAt || o.expiresAt > Date.now() + 60000)) return o.accessToken;

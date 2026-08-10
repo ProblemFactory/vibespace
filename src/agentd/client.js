@@ -290,13 +290,19 @@ class DeviceManager {
     const conn = await this.connect();
     const chan = conn.nextChan++;
     const handle = { chan, onData: null, onExit: null };
-    let resolveReady, rejectReady;
-    handle.ready = new Promise((res, rej) => { resolveReady = res; rejectReady = rej; });
+    let resolveReady, rejectReady, readySettled = false;
+    handle.ready = new Promise((res, rej) => {
+      resolveReady = (v) => { readySettled = true; res(v); };
+      rejectReady = (e) => { readySettled = true; rej(e); };
+    });
     conn.sessions.set(chan, {
       onOpen: (m) => { handle.pid = m.pid; resolveReady({ pid: m.pid }); },
       onError: (e) => rejectReady(new Error(e)),
       onData: (buf) => handle.onData?.(buf),
-      onExit: (code) => handle.onExit?.(code),
+      // Pre-ready link death (2.271.0 T1-6): reject `ready` so a terminal-on-
+      // dial open that races a link drop fails visibly instead of hanging.
+      onExit: (code) => { if (!readySettled) rejectReady(new Error('device link lost before session opened')); else handle.onExit?.(code); },
+      onClose: () => { if (!readySettled) rejectReady(new Error('device link lost before session opened')); },
     });
     handle.write = (str) => conn.mux.data(chan, Buffer.from(str, 'utf-8'));
     handle.resize = (c, r) => conn.mux.control({ op: 'resize-session', chan, cols: c, rows: r });
@@ -315,13 +321,22 @@ class DeviceManager {
     const conn = await this.connect();
     const chan = conn.nextChan++;
     const handle = { chan, sid, onData: null, onExit: null };
-    let resolveReady, rejectReady;
-    handle.ready = new Promise((res, rej) => { resolveReady = res; rejectReady = rej; });
+    let resolveReady, rejectReady, readySettled = false;
+    handle.ready = new Promise((res, rej) => {
+      resolveReady = (v) => { readySettled = true; res(v); };
+      rejectReady = (e) => { readySettled = true; rej(e); };
+    });
     conn.sessions.set(chan, {
       onOpen: (m) => { handle.pid = m.pid; resolveReady({ pid: m.pid, existing: !!m.existing, exited: m.exited }); },
       onError: (e) => rejectReady(new Error(e)),
       onData: (buf) => handle.onData?.(buf),
-      onExit: (code) => handle.onExit?.(code),
+      // Pre-ready link death (2.271.0 T1-6, the pre-ready twin of the B-b87b
+      // CRITICAL): mux.onDead fires onExit(-1)/onClose before the daemon's
+      // open reply — if `ready` is still pending the bridge would `await` it
+      // FOREVER and the dial chat/terminal window stayed blank with no error.
+      // Reject ready when the link dies unsettled; else pass the real exit on.
+      onExit: (code) => { if (!readySettled) rejectReady(new Error('device link lost before session opened')); else handle.onExit?.(code); },
+      onClose: () => { if (!readySettled) rejectReady(new Error('device link lost before session opened')); },
     });
     handle.write = (str) => conn.mux.data(chan, Buffer.from(str, 'utf-8'));
     handle.kill = () => conn.mux.control({ op: 'kill-pipe-session', sid });
@@ -427,7 +442,18 @@ class DeviceManager {
     conn.sessions.set(chan, {
       onData: (b) => { received += b.length; onData?.(b); check(); },
       onExitMsg: (m) => { exitMsg = m; check(); },
+      // Link death mid-stream (2.271.0 T1-5): mux.onDead fires onClose/onExit —
+      // WITHOUT these the `done` promise NEVER settled, so a single device flap
+      // during a usage harvest hung hosts.harvestUsage forever and pinned
+      // _harvestBusy true for every host until a server restart.
+      onClose: () => settle({ error: 'device link lost' }),
+      onExit: () => settle({ error: 'device link lost' }),
     });
+    // Overall deadline belt: even absent a clean onClose/onExit (a wedged
+    // half-open link that never errors), never leave the caller hanging.
+    const deadline = setTimeout(() => settle({ error: 'run-stream timed out' }), 120000);
+    if (deadline.unref) deadline.unref();
+    done.finally?.(() => clearTimeout(deadline));
     const ack = await this._request({ op: 'run-stream', cmd, args, env, cwd, chan, stdin64: stdin ? Buffer.from(stdin).toString('base64') : undefined });
     if (ack.error) { conn.sessions.delete(chan); clearTimeout(stall); throw new Error(ack.error); }
     return done;

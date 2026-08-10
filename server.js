@@ -5267,7 +5267,7 @@ registerWsHandler(wss, {
   SOCKETS_DIR, BUFFERS_DIR, PTY_WRAPPER, CHAT_WRAPPER,
   NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV,
   adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
-  accounts, scheduleCtxSync, activeSessionsPayload,
+  accounts, scheduleCtxSync, activeSessionsPayload, serverNotice,
   USAGE_STATUSLINE_CMD, userStatuslineCmd,
 });
 

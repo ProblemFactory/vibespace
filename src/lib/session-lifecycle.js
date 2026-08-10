@@ -209,6 +209,11 @@ export function installSessionLifecycle(App, ctx = {}) {
       }
       if (msg.type === 'created' && msg.reqId === reqId) {
         try { onCreateResult?.(true, msg); } catch { }
+        // Non-fatal server warning (2.271.0 T1-2): the pre-resume writer sweep
+        // couldn't verify no other process was writing this conversation on a
+        // laggy host — the resume proceeded, but the user must know a double-
+        // write is possible so they don't mistake duplicated messages for a bug.
+        if (msg.warning) { try { showToast(msg.warning, { type: 'error', duration: 9000 }); } catch { } }
         metric('session-create-roundtrip-ms', performance.now() - _createT0);
         // Set openSpec now that we have the server session ID (for cross-client sync)
         winInfo._openSpec = {
