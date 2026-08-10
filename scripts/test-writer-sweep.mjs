@@ -90,5 +90,25 @@ if (fs.existsSync('/proc/self')) {
   fs.rmSync(dir, { recursive: true, force: true });
 } else { console.log('  · /proc absent — skipping the live fd-scan leg'); }
 
+// ── 7. FORK EXCLUSION drift guard (2.284.4, real incident on the dev
+// machine): forking a LIVE conversation ran the sweep against the parent's
+// own rid and SIGTERMed the parent's claude mid-turn. A fork only READS the
+// parent transcript and writes a NEW id's JSONL — no double-writer exists —
+// so EVERY sweepWriters call site in the create handler must sit under a
+// `!data.fork` gate. This guard fails anyone adding a new site without it.
+{
+  const src = fs.readFileSync(new URL('../src/ws-handler.js', import.meta.url), 'utf8');
+  const lines = src.split('\n');
+  let sites = 0, gated = 0;
+  lines.forEach((l, i) => {
+    if (!/await sweepWriters\(/.test(l)) return;
+    sites++;
+    const window = lines.slice(Math.max(0, i - 15), i).join('\n');
+    if (/!data\.fork/.test(window)) gated++;
+  });
+  ok(sites >= 3, `found the expected sweep call sites in ws-handler (${sites})`);
+  ok(gated === sites, `EVERY sweep call site is gated on !data.fork (${gated}/${sites}) — forking a live session must never kill the parent`);
+}
+
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
