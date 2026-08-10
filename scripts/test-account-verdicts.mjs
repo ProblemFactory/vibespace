@@ -107,7 +107,7 @@ check('EXPIRED oat-only spawn refuses with re-mint guidance', (() => { try { acc
 check('expired oat drops the secret for a logged-in account', (() => { accounts.get(subIn.id).oatEnc = accounts.get(subOut.id).oatEnc; accounts.get(subIn.id).oatMintedAt = Date.now() - 366 * 86400000; const r = accounts.resolveForSpawn(subIn.id, 'claude'); delete accounts.get(subIn.id).oatEnc; return r.secret === null; })());
 check('clearOat removes verdict usability', (() => { accounts.clearOat(subOut.id); const v = evalV(subOut, F()); return !v.usable; })());
 
-// ── macOS local-only rung (PR #23, walter): a Darwin-platform manager marks
+// ── macOS local-only rung (PR #23): a Darwin-platform manager marks
 // Claude subscriptions Keychain-backed — the SHIP rung is forbidden (the file
 // fallback forks the rotating refresh token), but held/linked stay usable.
 console.log('── macOS local-only (PR #23) ──');
