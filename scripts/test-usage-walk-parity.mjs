@@ -97,6 +97,29 @@ const after = uh._loadEvents ? uh._loadEvents() : null;
 const afterRids = new Set((after?.events || after || []).map((e) => e.rid).filter(Boolean));
 ok(afterRids.size === 5, 'local walk picks up the same append');
 
+// ── THIRD walker (R4, 2.286.0): src/usage-walker.js — the MODULE the device
+// daemon bundles and runs as its `usage-scan` op. Same fixture, same events
+// as the shipped scanner, byte for byte — plus the module's deliberate
+// difference: it NEVER persists the cursor (the caller two-phase-commits). ──
+{
+  const { runUsageWalk } = require(path.join(REPO, 'src/usage-walker.js'));
+  const modCursor = path.join(dataDir, 'module-cursor.json');
+  const r1 = runUsageWalk({ home, cursorFile: modCursor });
+  const modRids = new Set(r1.events.map((l) => { try { return JSON.parse(l).rid; } catch { return null; } }).filter(Boolean));
+  ok(modRids.size === 5, `walker MODULE counts everything the scanner does (${modRids.size}/5)`);
+  ok([...afterRids].every((r) => modRids.has(r)), 'module coverage identical to the local walk');
+  ok(r1.events.every((l) => { const e = JSON.parse(l); return e.mid && e.mid.startsWith('msg_'); }), 'module emits the mid join field on every event');
+  ok(!fs.existsSync(modCursor), 'module NEVER persists the cursor itself (two-phase commit is the caller)');
+  // caller-committed cursor → next walk emits nothing (incremental holds)
+  fs.writeFileSync(modCursor, JSON.stringify(r1.cursors));
+  const r2 = runUsageWalk({ home, cursorFile: modCursor });
+  ok(r2.events.length === 0, 'committed cursor makes the module incremental (re-run emits nothing)');
+  // an append after commit is picked up
+  fs.appendFileSync(path.join(proj, SID + '.jsonl'), rec());
+  const r3 = runUsageWalk({ home, cursorFile: modCursor });
+  ok(r3.events.length === 1, 'module picks up an append past the committed cursor');
+}
+
 fs.rmSync(home, { recursive: true, force: true });
 fs.rmSync(dataDir, { recursive: true, force: true });
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);

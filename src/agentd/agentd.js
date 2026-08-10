@@ -72,6 +72,25 @@ const FS_ACTIONS = {
     return; // the worker never falls through to daemon code
   }
 }
+// ── R4 usage-scan child (docs/design-three-tier.md `usage.scan`): the ledger
+// walk runs in a CHILD of the daemon — heavy IO must never ride the loop
+// holding session pipes (the R2 rule; a child rather than a worker_thread
+// because run-stream's deadline/kill machinery already fits processes).
+// Emits NDJSON events then ONE final cursor-manifest line and NEVER persists
+// the cursor itself: the server commits it over the device link only after
+// the count-gated transfer fully landed (two-phase — closes the loss window
+// the shipped script's flush-then-persist model had on relayed paths). ──
+if (process.argv.includes('--usage-scan-child')) {
+  try {
+    const { runUsageWalk } = require('./../usage-walker.js');
+    const cfArg = process.argv[process.argv.indexOf('--usage-scan-child') + 1];
+    const r = runUsageWalk(cfArg && !cfArg.startsWith('-') ? { cursorFile: cfArg } : {});
+    process.stdout.on('error', () => process.exit(1));
+    const lines = r.events.concat(JSON.stringify({ __cursors__: r.cursors, __cursorFile__: r.cursorFile }));
+    process.stdout.write(lines.join('\n') + '\n', () => process.exit(0));
+  } catch (e) { console.error(e.message); process.exit(1); }
+  return;
+}
 const fs = require('fs');
 const { extractTailIds, pidLooksClaude } = require('./../discovery-facts.js');
 const machineProbes = require('./../machine-probes.js');
@@ -889,7 +908,10 @@ function serveConnection(sock) {
         mux.control({
           op: 'hello-ack', protoVersion: PROTO_VERSION, daemonVersion: VERSION,
           platform: process.platform, arch: process.arch, nodeVersion: process.version,
-          capabilities: [],
+          // per-op capability gating (three-tier design): consumers check the
+          // capability, NEVER parse daemonVersion — unknown ops on an old
+          // daemon get no reply and hang the request until its timeout
+          capabilities: ['probe', 'transcript-op', 'usage-scan'],
         });
         return;
       }
@@ -1159,10 +1181,13 @@ function serveConnection(sock) {
       }
       // ── M3: streaming exec (usage-scan class: NDJSON output too big for
       // run-cmd's buffer). argv-only; stdout rides the byte channel. ──
-      if (msg.op === 'run-stream') {
+      // ONE streaming-child implementation for run-stream AND usage-scan —
+      // the count-gated stdout relay + close-not-exit + pause/resume pacing
+      // must never fork into twins (the CS rule).
+      const startStreamChild = (msg, cmd, args) => {
         try {
           const { spawn: sp } = require('child_process');
-          const child = sp(String(msg.cmd), (msg.args || []).map(String), {
+          const child = sp(String(cmd), (args || []).map(String), {
             env: spawnEnv(msg.env), cwd: msg.cwd || process.env.HOME,
           });
           const chanS = msg.chan;
@@ -1190,6 +1215,15 @@ function serveConnection(sock) {
           if (msg.stdin64) { try { child.stdin.end(Buffer.from(msg.stdin64, 'base64')); } catch { } } else { try { child.stdin.end(); } catch { } }
           mux.control({ op: 'stream-start', id: msg.id, chan: chanS, pid: child.pid });
         } catch (e) { mux.control({ op: 'stream-start', id: msg.id, chan: msg.chan, error: e.message }); }
+      };
+      if (msg.op === 'run-stream') { startStreamChild(msg, msg.cmd, msg.args); return; }
+      // R4: the bundled ledger walker as an op — re-exec THIS bundle in child
+      // mode (single-artifact rule: no second shipped file; the walker version
+      // rides daemon self-upgrade instead of a per-harvest script ship).
+      if (msg.op === 'usage-scan') {
+        const args = [__filename, '--usage-scan-child'];
+        if (msg.cursorFile) args.push(String(msg.cursorFile));
+        startStreamChild(msg, process.execPath, args);
         return;
       }
       // ── M4: TCP forward (the VNC-bridge shape): byte channel ↔ a LOCAL
