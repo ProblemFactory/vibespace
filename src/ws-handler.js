@@ -124,6 +124,22 @@ function pickCodexThreadCandidate({ activeSessions, webuiSessionId, cwd, created
   return candidates[0]?.entry || null;
 }
 
+// Async exec that KEEPS execFileSync's throw-on-failure contract (the remote
+// spawn path's catch blocks depend on it) while never blocking the event loop
+// — the 2.242.0 instance-freeze lesson applied to the create ladder (P1 of the
+// lag/CS audit: four ssh round trips ran SYNC on the loop, so one wedged host
+// froze the whole server for up to 20s per spawn). stdin errors are swallowed
+// on the STREAM (2.241.1 rule: pipe errors arrive as stream 'error' events).
+function execFileAsync(cmd, args, { input, timeout = 20000, maxBuffer = 8 * 1024 * 1024, encoding = 'buffer' } = {}) {
+  return new Promise((resolve, reject) => {
+    const cp = require('child_process').execFile(cmd, args, { timeout, maxBuffer, encoding },
+      (err, stdout) => (err ? reject(err) : resolve(stdout)));
+    cp.stdin?.on('error', () => { });
+    cp.stdout?.on('error', () => { });
+    if (input != null) { try { cp.stdin.end(input); } catch { } } else { try { cp.stdin.end(); } catch { } }
+  });
+}
+
 function registerWsHandler(wss, ctx) {
   const {
     activeSessions, WS_OPEN, broadcastActiveSessions, broadcastToSession, resizeSessionToMin,
@@ -685,7 +701,7 @@ function registerWsHandler(wss, ctx) {
           // write the two tools into ~/.vibespace/bin on the remote + prepend
           // PATH. Returns pieces spliced into the ssh inner command. Node's
           // base64 is unwrapped (no newlines) so the blob is a single safe word.
-          const remoteAgentSetup = () => {
+          const remoteAgentSetup = async () => {
             // Base PATH/nvm exports — the terminal branch relies on the prelude
             // alone to find node/claude on the host (chat branches re-export
             // inside their inner command), so this part is UNCONDITIONAL even
@@ -741,9 +757,9 @@ function registerWsHandler(wss, ctx) {
                   }
                   const tarArgs = ['-c', '-C', toolDir, ...present.filter((n) => n !== 'code')];
                   if (present.includes('code')) tarArgs.push('-C', path.dirname(EDITOR_CMD), 'code');
-                  const tar = execFileSync('tar', [...tarArgs, ...tokArgs], { timeout: 15000, maxBuffer: 8 * 1024 * 1024 });
+                  const tar = await execFileAsync('tar', [...tarArgs, ...tokArgs], { timeout: 15000 });
                   const h2 = hosts.get(data.hostId);
-                  execFileSync('ssh', [...hosts.sshArgs(h2, { multiplex: true }), '--', 'umask 077; mkdir -p "$HOME/.vibespace/bin" "$HOME/.vibespace/editor"; tar -x -C "$HOME/.vibespace/bin"; chmod +x "$HOME/.vibespace/bin"/vibespace-* 2>/dev/null; [ -f "$HOME/.vibespace/bin/code" ] && { mv -f "$HOME/.vibespace/bin/code" "$HOME/.vibespace/editor/code"; chmod +x "$HOME/.vibespace/editor/code"; } || true'],
+                  await execFileAsync('ssh', [...hosts.sshArgs(h2, { multiplex: true }), '--', 'umask 077; mkdir -p "$HOME/.vibespace/bin" "$HOME/.vibespace/editor"; tar -x -C "$HOME/.vibespace/bin"; chmod +x "$HOME/.vibespace/bin"/vibespace-* 2>/dev/null; [ -f "$HOME/.vibespace/bin/code" ] && { mv -f "$HOME/.vibespace/bin/code" "$HOME/.vibespace/editor/code"; chmod +x "$HOME/.vibespace/editor/code"; } || true'],
                     { input: tar, timeout: 20000 });
                   if (integrationOn) {
                     // NODE FINDER (2.244.4, natural's Novita — the chicken-and-egg
@@ -885,7 +901,7 @@ function registerWsHandler(wss, ctx) {
           // assignment to splice into the inner command, or '' when no account.
           // Throws on write failure — silently billing the wrong account is
           // worse than failing the create.
-          const remoteAccountEnv = (h) => {
+          const remoteAccountEnv = async (h) => {
             if (!spawnAccount) return '';
             // Host-side subscription login (2.199.0): the host already holds
             // this account's creds dir — minted ON the host, never shipped.
@@ -899,7 +915,7 @@ function registerWsHandler(wss, ctx) {
             // keys are the SANCTIONED programmatic path — always shippable.
             if (spawnAccount.secret) {
               const kf = `$HOME/.vibespace/${spawnAccount.id}.key`; // id shape acct-/sub-<hex>, metachar-free
-              execFileSync('ssh', [...hosts.sshArgs(h), '--', `umask 077; mkdir -p "$HOME/.vibespace"; cat > "${kf}"`],
+              await execFileAsync('ssh', [...hosts.sshArgs(h), '--', `umask 077; mkdir -p "$HOME/.vibespace"; cat > "${kf}"`],
                 { input: spawnAccount.secret.value, timeout: 15000 });
               return `${spawnAccount.secret.var}="$(cat "${kf}")" `;
             }
@@ -933,7 +949,7 @@ function registerWsHandler(wss, ctx) {
             if (!rc) throw new Error('this account cannot run on a remote host');
             const files = (rc.files || []).filter(f => { try { return fs.statSync(path.join(rc.srcDir, f)).isFile(); } catch { return false; } });
             if (!files.length) throw new Error('account creds unreadable');
-            const tar = execFileSync('tar', ['-c', '-C', rc.srcDir, ...files], { timeout: 15000, maxBuffer: 8 * 1024 * 1024 });
+            const tar = await execFileAsync('tar', ['-c', '-C', rc.srcDir, ...files], { timeout: 15000 });
             const rdir = `$HOME/.vibespace/${rc.dirName}`; // dirName = subs/<id> | codex-subs/<id>, metachar-free
             const links = Object.entries(rc.symlinks || {}).map(([n, tgt]) => `ln -sfn ${tgt} "${rdir}/${n}"`);
             // Poison-heal: a remote primary creds file that LOST its validity
@@ -949,7 +965,7 @@ function registerWsHandler(wss, ctx) {
             // consumed the ssh stdin stream, a fallback would extract nothing
             // and silently spawn with missing creds. Non-GNU hosts fail LOUD.
             const script = [`umask 077`, `mkdir -p "${rdir}"`, ...heal, `tar -x --keep-newer-files -C "${rdir}"`, ...(rc.ensureTargets || []), ...links].join('; ');
-            execFileSync('ssh', [...hosts.sshArgs(h), '--', script], { input: tar, timeout: 20000 });
+            await execFileAsync('ssh', [...hosts.sshArgs(h), '--', script], { input: tar, timeout: 20000 });
             return `${rc.envVar}="${rdir}" `;
           };
           // Host-held subscription on a DIAL device (2.208.0): the device
@@ -1037,9 +1053,9 @@ function registerWsHandler(wss, ctx) {
             } else {
             // locally-resolved binary paths mean nothing on the remote
             const rcmd = spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd;
-            const ra = remoteAgentSetup();
+            const ra = await remoteAgentSetup();
             let acctEnv = '';
-            try { acctEnv = remoteAccountEnv(h); }
+            try { acctEnv = await remoteAccountEnv(h); }
             catch (e) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'Failed to place the account key on ' + h.name + ': ' + e.message })); return; }
             // acctEnv rides as a SHELL PREFIX ASSIGNMENT before exec — the shell
             // setenvs it internally, so the VALUE never appears in any argv
@@ -1224,9 +1240,9 @@ done`;
                 ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: `dial session failed: ${e.message} (is the device online?)` })); return;
               }
             } else {
-            const ra = remoteAgentSetup();
+            const ra = await remoteAgentSetup();
             let acctEnv = '';
-            try { acctEnv = remoteAccountEnv(h); }
+            try { acctEnv = await remoteAccountEnv(h); }
             catch (e) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: 'Failed to place the account key on ' + h.name + ': ' + e.message })); return; }
             // acctEnv = shell prefix assignment (see the terminal branch note)
             // 2.124.0: claude no longer hangs directly off the ssh pipe — it
@@ -1271,7 +1287,7 @@ done`;
                 // it subsumes the id-lock grep (a --resumed claude's lock
                 // carries a NEW session id, so grepping the lock for RID missed
                 // it). The pipe-meta + keeper legs clean their own bookkeeping.
-                execFileSync('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', writerSweepScript(data.resumeId)], { timeout: 20000, stdio: 'ignore' });
+                await execFileAsync('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', writerSweepScript(data.resumeId)], { timeout: 20000 });
                 hosts.invalidateDiscovery(h.id);
               } catch (e) { console.warn('[remote] pre-resume cleanup failed (continuing):', e.message); }
             }
@@ -2225,7 +2241,9 @@ done`;
             if (session.socketPath) {
               try {
                 // Find dtach process by socket path and kill it
-                const out = execFileSync('pgrep', ['-f', session.socketPath], { encoding: 'utf-8', timeout: 2000 }).trim();
+                // async (P1 sweep): pgrep under a loaded box is fast but the
+                // rule is loop-blocking-free handlers, no exceptions.
+                const out = String(await execFileAsync('pgrep', ['-f', session.socketPath], { encoding: 'utf-8', timeout: 2000 }) || '').trim();
                 for (const line of out.split('\n')) {
                   const dpid = parseInt(line.trim());
                   if (dpid && dpid !== session.pty?.pid) {

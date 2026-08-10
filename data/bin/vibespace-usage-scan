@@ -79,14 +79,34 @@ for (const pd of projDirs) {
   const pdAbs = path.join(PROJECTS, pd);
   let entries = [];
   try { entries = fs.readdirSync(pdAbs); } catch { continue; }
+  // Top-level session transcripts PLUS subagent/workflow agent transcripts —
+  // the same walk the LOCAL ledger got in 2.265.0, ported here in 2.271.0
+  // (P1 of the lag/CS audit): workflow agents' API usage exists ONLY in
+  // <sid>/subagents/workflows/wf_*/agent-*.jsonl, so a remote machine running
+  // workflows under-reported its spend by exactly that amount — the remote
+  // twin of the local under-count. Events attribute to the PARENT session id.
+  const files = []; // {fp, sid}
   for (const fn of entries) {
-    if (!fn.endsWith('.jsonl')) continue; // top-level session transcripts only
-    const fp = path.join(pdAbs, fn);
+    if (fn.endsWith('.jsonl')) { files.push({ fp: path.join(pdAbs, fn), sid: fn.replace(/\.jsonl$/, '') }); continue; }
+    if (!/^[0-9a-f-]{36}$/i.test(fn)) continue; // session dirs only
+    const subDir = path.join(pdAbs, fn, 'subagents');
+    let subs = []; try { subs = fs.readdirSync(subDir); } catch { continue; }
+    for (const sf of subs) {
+      if (sf.endsWith('.jsonl')) { files.push({ fp: path.join(subDir, sf), sid: fn }); continue; }
+      if (sf !== 'workflows') continue;
+      let wfs = []; try { wfs = fs.readdirSync(path.join(subDir, 'workflows')); } catch { continue; }
+      for (const wf of wfs) {
+        let afs = []; try { afs = fs.readdirSync(path.join(subDir, 'workflows', wf)); } catch { continue; }
+        for (const af of afs) if (af.startsWith('agent-') && af.endsWith('.jsonl')) files.push({ fp: path.join(subDir, 'workflows', wf, af), sid: fn });
+      }
+    }
+  }
+  for (const { fp, sid } of files) {
     let st; try { st = fs.statSync(fp); } catch { continue; }
     if (!st.isFile()) continue;
     const cur = cursors[fp] || { offset: 0, lastRid: null };
     if (st.size < cur.offset) { cur.offset = 0; cur.lastRid = null; } // rotated/truncated
-    cur.sid = fn.replace(/\.jsonl$/, '');
+    cur.sid = sid;
     if (st.size === cur.offset) { cursors[fp] = cur; continue; }
     scanFile(fp, cur, st.size);
     delete cur.sid;
