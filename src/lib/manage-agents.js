@@ -56,7 +56,7 @@ export function installManageAgents(App, ctx = {}) {
     if (!created?.loginCmd) { showToast(created?.error || t('Could not start'), { type: 'error' }); return; }
     // With a MACHINE selected the login runs ON that machine, into the
     // account's per-host creds dir (2.199.0/2.200.0 — real trap: the dialog
-    // said AIDev, the login terminal quietly opened LOCALLY, and the user's
+    // said the devbox, the login terminal quietly opened LOCALLY, and the user's
     // account landed in the local store "moved to this machine"). The token
     // is minted on the host and never leaves it; the account record still
     // lives in VibeSpace (machine-independent identity).
@@ -1058,7 +1058,7 @@ export function installManageAgents(App, ctx = {}) {
         // Ephemeral-install warning (2.229.0, LOCAL machine only — remote
         // hosts' layout is theirs): a claude living outside $HOME (image-baked
         // npm-global) is wiped back to the baked version on every container
-        // rebuild — walter updated, got Opus 5 for 3 days, then a pod rebuild
+        // rebuild — userW updated, got Opus 5 for 3 days, then a pod rebuild
         // silently reverted the opus alias to 4.8. Offer the persistent
         // user-local install right here (native installer → ~/.local, which
         // wins PATH; picked up by new sessions after the next server restart).
@@ -1524,8 +1524,8 @@ export function installManageAgents(App, ctx = {}) {
     // that host's login, with a clearly-labeled "Log in on <host>…" action).
     // Every NAMED account below is stored by VibeSpace (machine-independent)
     // and ships to whichever machine a session spawns on. This split is what
-    // answers "if I pick AIDev, where does a login land?" — the peer row's
-    // login lands ON AIDev; the Add… buttons always land in VibeSpace.
+    // answers "if I pick the devbox, where does a login land?" — the peer row's
+    // login lands ON the devbox; the Add… buttons always land in VibeSpace.
     let acct = null;
     try { acct = await fetchJson('/api/accounts'); } catch {}
     if (!acct) return;
@@ -1663,7 +1663,7 @@ export function installManageAgents(App, ctx = {}) {
     const hostSubIds = selectedHost ? (racct?.hostSubs || []) : [];
     this._hostSubsKnown = { ...(this._hostSubsKnown || {}), ...(selectedHost ? { [selectedHost]: hostSubIds } : {}) };
     // Share the FRESH machine-login identity with the billing switcher's
-    // cache (2.240.1, natural's "左右状态不一致": the roster probed the truth —
+    // cache (2.240.1, userN's "左右状态不一致": the roster probed the truth —
     // the host's machine login had CHANGED — while the switcher's page-old
     // warm cache kept the previous identity, labeling the WRONG account
     // "uses the host's own login". One fact, one store, freshest write wins.)
@@ -1962,7 +1962,7 @@ export function installManageAgents(App, ctx = {}) {
       const a = claudeAccts.find(x => x.id === id);
       const isSub = a?.type === 'subscription';
       const doTest = () => {
-        // LINKED account (2.237.3, natural's report "Test says not signed in"):
+        // LINKED account (2.237.3, userN's report "Test says not signed in"):
         // this account's email IS the selected host's own login, so on that
         // host it needs NO local creds and NO shipped dir — the correct spawn
         // is the CLI-login sentinel. The switcher/New-Session dialog already
@@ -1973,7 +1973,7 @@ export function installManageAgents(App, ctx = {}) {
         // reject the create and leave a blank window. Guard it here.
         // EXCEPT host-held logins (2.203.0): the LOCAL dir is empty by
         // design; the spawn resolves against the host-side dir. And EXCEPT
-        // any remote test at all (2.243.2, natural's "still says not signed
+        // any remote test at all (2.243.2, userN's "still says not signed
         // in"): dataset.hostsub/linked come from page caches that start COLD —
         // with a host selected the server resolves against live host facts
         // and errors honestly, so the client must not veto on stale data.
@@ -1993,7 +1993,7 @@ export function installManageAgents(App, ctx = {}) {
         done();
         // Diagnostic session — ephemeral (closing its window terminates it).
         // With a remote host selected it runs ON that host. ALWAYS the real
-        // account id (2.243.1, natural's inc-msghecvm-5ym8): the old
+        // account id (2.243.1, userN's inc-msghecvm-5ym8): the old
         // client-side linked→CLI-login-sentinel mapping spawned on the host's
         // CURRENT machine login — when that login had rotated to a different
         // account since the client's cache, "Test ClaudeLu" showed the OTHER
@@ -2043,7 +2043,7 @@ export function installManageAgents(App, ctx = {}) {
         // is shared by every machine view, and Anthropic's Console never
         // re-shows a key's full value — deleting is effectively final (real
         // incident: a rescued key removed "from the local view" was gone
-        // from AIDev's view too, and recoverable only from a rotating CLI
+        // from the devbox's view too, and recoverable only from a rotating CLI
         // backup). Say all of that before acting.
         const msg = isSub
           ? t('Remove "{name}" from VibeSpace? Sessions already running keep working; the key itself stays valid.', { name: a?.name })
@@ -2056,7 +2056,7 @@ export function installManageAgents(App, ctx = {}) {
       const doNote = async () => {
         const note = await showInputDialog({
           title: t('Account note'),
-          label: t('Shown as a small tag on the account row (e.g. “from AIDev backup”). Empty clears it.'),
+          label: t('Shown as a small tag on the account row (e.g. “from laptop backup”). Empty clears it.'),
           value: a?.note || '', confirmText: t('Save'),
         });
         if (note != null) {

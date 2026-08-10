@@ -2071,7 +2071,7 @@ class ChatView {
 
     // Re-attach so server adds this WS to session.clients again
     this.ws.send({ type: 'attach', sessionId: this.sessionId });
-    // NO-REPLY fallback (REWRITTEN 2.234.1, lengyue's mass false-death
+    // NO-REPLY fallback (REWRITTEN 2.234.1, userL's mass false-death
     // incident): the old one-shot 20s timer declared "session no longer
     // exists (likely a restart)" on ANY slow reply — but a degraded server
     // (event-loop spikes, remote transcript pulls, MB-scale attach bursts on

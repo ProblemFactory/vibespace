@@ -12,7 +12,7 @@ function subseq(t, s) {
 
 // Match quality for one session. TOKENISED on whitespace with AND semantics —
 // the whole-query-as-one-literal version could never match a CamelCase or
-// hyphenated name (walter: typing "best ever" can never substring-hit
+// hyphenated name (userW: typing "best ever" can never substring-hit
 // "BestEver-ToB-signing"), so every multi-word query fell through to a
 // subsequence over the ENTIRE haystack — cwd + three UUIDs — where the shared
 // path prefix supplies almost any letter sequence. Result: every session tied
@@ -120,7 +120,7 @@ export function installSessionPalette(app) {
         const live = s.status === 'live' || s.status === 'tmux' || s.status === 'external';
         // Match quality DOMINATES; live is a tiebreak among equally-good
         // matches, never a reason to bury a better-named stopped session
-        // (that inversion is what hid walter's session behind 12 live ones).
+        // (that inversion is what hid userW's session behind 12 live ones).
         // With no query, live-first ordering is preserved.
         scored.push({ s, label, sc: sc * 1000 + (live ? 500 : 0) + (s.startedAt || 0) / 1e13 });
       }

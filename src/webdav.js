@@ -213,7 +213,7 @@ function registerWebdav(app, { tokens }) {
         case 'OPTIONS': {
           // DAV class 2 (locking) is REQUIRED for macOS Finder to mount
           // read-write — with class 1 only, Finder silently mounts the volume
-          // READ-ONLY no matter what the token allows (real report: walter's
+          // READ-ONLY no matter what the token allows (real report: userW's
           // Mac couldn't write into an rw share). Locks below are advisory
           // fakes (single-writer semantics don't matter for this bridge —
           // same approach as nginx dav_ext / many minimal servers).

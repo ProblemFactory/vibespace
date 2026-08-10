@@ -238,7 +238,7 @@ class MachineMounts {
   }
 
   /** Mount THIS VibeSpace's <folder> on the machine as <mountpoint>. */
-  // Overall deadline for a mount operation (2.214.1, walter's HTTP 502): the
+  // Overall deadline for a mount operation (2.214.1, userW's HTTP 502): the
   // chain crosses the device link many times — an await that stalls in an
   // unforeseen way (half-open dial stream, wedged daemon) used to hang the
   // HTTP handler FOREVER, so the proxy answered 502 and the server logged
@@ -270,7 +270,7 @@ class MachineMounts {
     // token mint fail with a bare 'root does not exist' (real report)
     const expanded = String(folder || os.homedir()).replace(/^~(?=$|\/)/, os.homedir());
     const abs = path.resolve(expanded);
-    // LOOP GUARD (2.215.1, walter's real attempt): pushing a folder that IS a
+    // LOOP GUARD (2.215.1, userW's real attempt): pushing a folder that IS a
     // pull-mount mirror routes every IO through the device chain TWICE
     // (machine → tunnel → /dav → instance FUSE → tunnel → machine) — rclone's
     // daemon never comes up ("Daemon timed out"). Refuse with the real story.
@@ -422,7 +422,7 @@ class MachineMounts {
       remotePath = rp;
     }
     if (!remotePath || !String(remotePath).startsWith('/')) throw new Error('remotePath must be absolute (a folder ON the machine)');
-    // Strip a trailing slash (real walter bug): the daemon's serve-folder
+    // Strip a trailing slash (real userW bug): the daemon's serve-folder
     // confines requests with `root + path.sep`, so a root ending in '/' makes
     // the prefix a DOUBLE slash that no real subpath matches → every file 403s
     // ("couldn't list files: 403"). mountPush avoids this via path.resolve;
@@ -448,7 +448,7 @@ class MachineMounts {
       const device = await this.hosts.deviceBounded(rec.hostId, 10000); // ssh: daemon over --stdio; dial: the dialed-in link
       // normalize a stored trailing slash so an EXISTING record (minted before
       // the mountPull fix) works without a daemon update (the serve-folder
-      // confinement double-slash 403 — walter's real bug)
+      // confinement double-slash 403 — userW's real bug)
       const remotePath = String(rec.remotePath || '').replace(/\/+$/, '') || '/';
       const h = await deviceFolderMount({
         device, remotePath, mountpoint: rec.mountpoint,

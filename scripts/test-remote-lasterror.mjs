@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// meta.remote.lastError contract (2.228.1, the lengyue "host reconnecting (9)
+// meta.remote.lastError contract (2.228.1, the userL "host reconnecting (9)
 // with no reason" report): when the remote transport child dies, the wrapper
 // must record the child's last stderr line (or exit code) in meta.remote and
 // on the _remote_state stdout line, so the status-bar chip tooltip can name

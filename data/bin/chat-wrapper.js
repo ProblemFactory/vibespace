@@ -42,7 +42,7 @@ const REMOTE_SID = process.env.VIBESPACE_REMOTE_SID || '';
 // bytes + __VS_OFFSET__ + _remote_exit sentinel), but its sessions don't
 // always carry VIBESPACE_REMOTE_SID. A LITERAL __VS_OFFSET__ reaching the
 // attach child is ALWAYS a bug (offset=NaN → zero data relayed → blank chat,
-// real xingweil report). Enable the offset machinery whenever the placeholder
+// real owner report). Enable the offset machinery whenever the placeholder
 // is present, not only for REMOTE_SID.
 const OFFSET_MODE = !!REMOTE_SID || process.argv.slice(5).some(a => a.includes('__VS_OFFSET__'));
 let remoteOffset = 0;        // bytes of the REMOTE buffer consumed (byte-exact)
@@ -265,7 +265,7 @@ function startChild() {
   });
 
   // Child stderr → log + kept as the LAST ERROR the UI can show. "host
-  // reconnecting (9)…" with no reason is undiagnosable (real lengyue report:
+  // reconnecting (9)…" with no reason is undiagnosable (real userL report:
   // the actual cause — connect timeout to a changed address — was only
   // visible by rerunning the ssh by hand); the last stderr line rides
   // meta.remote.lastError → _remote_state → the status-bar chip tooltip.

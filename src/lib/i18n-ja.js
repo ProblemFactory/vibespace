@@ -829,7 +829,7 @@ export default {
   "· from {host}": "・{host} から",
   "Imported from {host}’s Console login — an independent copy held in VibeSpace (not linked to {host}); usable on any machine.": "{host} の Console ログインからインポート——VibeSpace に保存された独立したコピーです（{host} とは連動しません）。どのマシンでも使用できます。",
   "Account note": "アカウントメモ",
-  "Shown as a small tag on the account row (e.g. “from AIDev backup”). Empty clears it.": "アカウント行に小さなタグとして表示されます（例：「AIDev バックアップから」）。空にするとクリアされます。",
+  "Shown as a small tag on the account row (e.g. “from laptop backup”). Empty clears it.": "アカウント行に小さなタグとして表示されます（例：「the devbox バックアップから」）。空にするとクリアされます。",
   "Set note…": "メモを設定…",
   "Edit note…": "メモを編集…",
   "Add subscription — log in on {host}": "サブスクリプションを追加——{host} でログイン",

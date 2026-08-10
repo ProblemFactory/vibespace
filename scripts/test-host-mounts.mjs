@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // REVERSE MOUNT e2e (2.147.0, "互挂云盘" direction B): a real remote host
-// (AIDev) mounts THIS VibeSpace's storage over the WebDAV bridge, OS-aware.
+// (the devbox) mounts THIS VibeSpace's storage over the WebDAV bridge, OS-aware.
 // Stands up a throwaway /dav server on a tailnet-reachable address, mints a
 // scoped token, drives MachineMounts.mountPush against the real host over ssh,
 // then verifies (independent ssh) that this instance's files APPEAR in the

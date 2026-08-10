@@ -1,4 +1,4 @@
-import { MessageManager } from '/home/xingweil/workspace/AIWorkspace/vibespace/src/message-manager.js';
+import { MessageManager } from '/home/<user>/workspace/AIWorkspace/vibespace/src/message-manager.js';
 let failed = 0; const check=(n,c,e)=>{ if(c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e?' — '+e:''}`);} };
 // REAL record shape captured from the transcript
 const rec = { type:'system', subtype:'model_refusal_fallback', direction:'retry',

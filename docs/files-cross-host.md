@@ -4,7 +4,7 @@ The file explorer can browse and edit files on any registered [remote host](moun
 
 ## Switching host
 
-Each file-explorer window has a **host dropdown** next to the path bar (Local + every ssh host you've added). Switching re-browses that host's filesystem from its home directory; the window title carries the host name (e.g. `AIDev: /home/you`). Path autocomplete and recent-dir suggestions follow the selected host.
+Each file-explorer window has a **host dropdown** next to the path bar (Local + every ssh host you've added). Switching re-browses that host's filesystem from its home directory; the window title carries the host name (e.g. `the devbox: /home/you`). Path autocomplete and recent-dir suggestions follow the selected host.
 
 Every operation works remotely with full parity: list, open/edit text, view images/PDF/binary (hex), create/rename/delete, upload, download, compress/extract archives, properties. Each runs one ssh command on the host (no daemon installed there), reusing the host's key.
 
@@ -29,4 +29,4 @@ Bookmarks remember which host they belong to. Bookmark a folder while browsing a
 
 The toolbar **Terminal** button shows a host picker when remote hosts are registered (Local + each host) — pick one to open a shell on that machine. With no hosts registered it opens a local shell directly, same as before. In a file explorer browsing a remote host, right-click → **Open Terminal Here** opens the shell on that host in that directory.
 
-Explorer windows also restore their host across refreshes and layout sync — an `AIDev: /tmp` window comes back as `AIDev: /tmp`, not a local window at `/tmp`.
+Explorer windows also restore their host across refreshes and layout sync — an `the devbox: /tmp` window comes back as `the devbox: /tmp`, not a local window at `/tmp`.

@@ -421,11 +421,11 @@ const BUFFERS_DIR = path.join(__dirname, 'data', 'session-buffers');
 
 // ── HOME-RENAME MIGRATION (B-b4a2, one-shot at boot) ────────────────────────
 // The 3.5.0 fleet image personalizes the container user, so $HOME moves (e.g.
-// /home/vibe → /home/lengyue) while the PVC keeps everything recorded under
+// /home/vibe → /home/userL) while the PVC keeps everything recorded under
 // the OLD path: ~/.claude/projects dirs encode the old cwd (claude's resume
 // lookup goes by CURRENT-cwd encoding → every resume died "No conversation
 // found"), and mounts/layouts/session metas hold dead /home/vibe/... paths.
-// This repeats for EVERY user on EVERY such roll (lengyue needed manual
+// This repeats for EVERY user on EVERY such roll (userL needed manual
 // surgery) — migrate automatically: rename projdirs to the new encoding and
 // prefix-rewrite recorded paths. One-shot per (oldUser→newUser) marker.
 function migrateHomeRename() {
@@ -575,7 +575,7 @@ async function deviceForDial(deviceId, _retried = false) {
   // A STOPPED dm must be treated exactly like a stale stream: stop() is
   // terminal (_connectLoop throws 'stopped' forever), so reusing one wedges
   // EVERY op against an otherwise-healthy device until the stream changes
-  // (real walter outage: hours of "offline"/'stopped' while the Mac was
+  // (real userW outage: hours of "offline"/'stopped' while the Mac was
   // dialed-in and fine — a re-dial/unpair race stopped the cached dm).
   if (dm && (dm._stopped || (dm._dialStream && dm._dialStream !== curStream))) {
     try { dm.stop?.(); } catch { }
@@ -603,7 +603,7 @@ async function deviceForDial(deviceId, _retried = false) {
     if (agentdDialDevices.get(deviceId) === dm) agentdDialDevices.delete(deviceId);
     // a dm stopped MID-CONNECT by a concurrent re-dial cleanup surfaces one
     // transient 'stopped' — while the stream is live, rebuild once instead of
-    // failing the caller's FIRST op after a re-dial (seen live on the walter
+    // failing the caller's FIRST op after a re-dial (seen live on the userW
     // verification: test probe errored once, next op self-healed)
     if (!_retried && String(e && e.message) === 'stopped' && agentdDials.get(deviceId)) {
       return deviceForDial(deviceId, true);
@@ -1586,7 +1586,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
             // from a plain resume. One-shot _forkRequested guard (set only when
             // data.fork) so a normal resume, whose id the parser also sees on
             // every line, can never be hijacked.
-            // FIRST-capture is UNCONDITIONAL (2.156.1, lengyue real incident):
+            // FIRST-capture is UNCONDITIONAL (2.156.1, userL real incident):
             // a session created with claudeSessionId=null could NEVER adopt its
             // id here — the fork guard vetoed the only parser-side capture.
             // Local sessions were silently rescued by lock-first discovery
@@ -1594,7 +1594,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
             // meta kept null forever and attach's transcript prefetch died on
             // it. Hijack-safety is preserved: with NO tracked id there is
             // nothing to hijack, and a CHANGED id still requires _forkRequested.
-            // IMPLICIT FORK adoption (2.219.0, lengyue real incident): a
+            // IMPLICIT FORK adoption (2.219.0, userL real incident): a
             // `claude --resume <id>` whose conversation is LOCKED by another
             // live claude (an orphaned keeper child) silently forks to a NEW
             // session id — no fork flag from us, claude's own double-writer
@@ -2192,7 +2192,7 @@ function attachToDtach(id, socketPath, session, { repaint = false } = {}) {
 }
 
 // On startup, reconnect to existing dtach sockets
-// ── Personalized-username migration self-heal (2.236.1, walter's real
+// ── Personalized-username migration self-heal (2.236.1, userW's real
 // incident): the 3.5.0 image renames the container user vibe→<name> and
 // symlinks /home/vibe → /home/<name>, which covers every recorded ABSOLUTE
 // path — but claude encodes its per-project transcript dirs from the
@@ -2209,7 +2209,7 @@ function migrateLegacyHomeProjects() {
     let st; try { st = fs.lstatSync('/home/vibe'); } catch { return; }
     if (!st.isSymbolicLink()) return;
     const projectsDir = path.join(home, '.claude', 'projects');
-    const newPrefix = cwdToProjectDir(home); // e.g. -home-walter
+    const newPrefix = cwdToProjectDir(home); // e.g. -home-userW
     let names; try { names = fs.readdirSync(projectsDir); } catch { return; }
     let n = 0;
     for (const d of names) {
@@ -2257,7 +2257,7 @@ function restoreSessions() {
   // Dedup by conversation BEFORE adoption: a plain `claude --resume` reuses the
   // conversation id, so a resume of a session whose claude had already died
   // minted a SECOND dtach session for the SAME claudeSessionId → two sidebar
-  // cards (real xingweil report; walter's local double-writer class). Keep one
+  // cards (real owner report; userW's local double-writer class). Keep one
   // socket per conversation (alive-claude > dead, then newest), retire the rest.
   const dedupMetas = [];
   for (const sockFile of sockets) {
@@ -2317,7 +2317,7 @@ function restoreSessions() {
       // B-1525 (2.219.0): a REMOTE session's meta holds the ONLY local record
       // of its keeper sid / dial device — the remote half (keeper daemon,
       // device pipe session) survives a pod-level death, and deleting the
-      // meta here orphaned it forever (lengyue's h200 keeper claudes needed
+      // meta here orphaned it forever (userL's h200 keeper claudes needed
       // manual surgery). Keep those metas tagged orphanedAt for re-adopt
       // (resume host-inference + findKeeperFor consume them); local-only
       // sessions keep the old cleanup.
@@ -2601,7 +2601,7 @@ function restoreSessions() {
 // REMOTE sessions' metas as .orphan files. For each orphan whose keeper child
 // (the remote claude) is STILL ALIVE on its ssh host, respawn the local
 // transport half attached to the SAME keeper sid — the session comes back
-// LIVE by itself (the lengyue manual-surgery class, automated).
+// LIVE by itself (the userL manual-surgery class, automated).
 // Attach ≠ create, which keeps this spawn MINIMAL and safe:
 //  - keeper `run <sid> <offset>` on a LIVE sid only ATTACHES (never spawns a
 //    claude) → billing env and tools shipping are irrelevant here;
@@ -2932,7 +2932,7 @@ import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 const UNINSTALL = process.argv.includes('--uninstall');
-// ABSOLUTE interpreter (2.244.2, natural's Novita: hook error '/bin/sh: 1:
+// ABSOLUTE interpreter (2.244.2, userN's Novita: hook error '/bin/sh: 1:
 // node: not found'): hooks run as claude children via /bin/sh with claude's
 // PATH — hosts with nvm-style node installs (and claude as a native binary)
 // have NO node on that PATH. The register itself runs under node, so its own
@@ -3411,7 +3411,7 @@ const tasks = new TaskGroupManager({
     wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
   },
 });
-// System info + memory-pressure watch (2.216.0, lengyue's 32Gi OOM kill —
+// System info + memory-pressure watch (2.216.0, userL's 32Gi OOM kill —
 // the pod-level kill takes every dtach session; warn BEFORE the kernel acts)
 const sysinfo = require('./src/sysinfo');
 // Remote machine snapshot for the System panel's machine switcher (2.226.3):
@@ -3487,7 +3487,7 @@ function _incidentServerState() {
   out.console = _srvConsoleRing.slice(-400);
   // The "conversation disappeared" class (2.238.1): what the RESUME BREAKER
   // currently blocks and what remote DISCOVERY last believed — both were
-  // load-bearing in the natural incident and neither survives anywhere else.
+  // load-bearing in the userN incident and neither survives anywhere else.
   try { out.resumeBreakers = [...noConvoRef.map.entries()].map(([cid, at]) => ({ cid, agoS: Math.round((Date.now() - at) / 1000) })); } catch {}
   try {
     const dc = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'remote-sessions-cache.json'), 'utf8'));
@@ -4621,7 +4621,7 @@ setTimeout(() => { try { plugins.bootReplay(); } catch (e) { console.warn('[plug
 // CS data-plane deps for hosts.device(id) (2.146.0) — wired SYNCHRONOUSLY.
 // (Was a setTimeout(1000); a device dialing in during that window ran mount
 // heal / hosts.device() before deps existed → "agentd deps not wired" and a
-// failed heal — real xingweil log. The referenced functions are hoisted
+// failed heal — real owner log. The referenced functions are hoisted
 // declarations and `hosts` already exists here, so no defer is needed.)
 try {
   hosts.agentdDeps = {
@@ -4717,7 +4717,7 @@ app.post(['/api/device/dial-pair', '/api/agentd/dial-pair'], async (req, res) =>
     const deviceId = String(req.body?.deviceId || ('dev-' + require('crypto').randomBytes(4).toString('hex'))).replace(/[^\w-]/g, '').slice(0, 32);
     // minting for an EXISTING deviceId is a RE-PAIR: setDialToken rotates the
     // hash on the existing record (mounts/forwards/history kept, host token
-    // file untouched) — no unpair needed (walter lesson: unpair-first deleted
+    // file untouched) — no unpair needed (userW lesson: unpair-first deleted
     // the record and orphaned the still-running device daemon)
     const existed = !!hosts.findByDeviceId(deviceId);
     const pair = agentdMintDialPair(deviceId);
@@ -5101,10 +5101,10 @@ app.get('/api/backend-status', (req, res) => {
     } catch { return { installed: false, version: null }; }
   };
   out.claude = probe(CLAUDE_CMD);
-  // Install-layer classification (2.229.0, the walter rollback incident): a
+  // Install-layer classification (2.229.0, the userW rollback incident): a
   // CLI OUTSIDE $HOME (npm-global /usr/local, baked into the container image)
   // lives in the EPHEMERAL layer — `claude update` succeeds, then the next
-  // pod/container rebuild silently reverts it (walter: 3 days of Opus 5, then
+  // pod/container rebuild silently reverts it (userW: 3 days of Opus 5, then
   // a rebuild put the opus alias back on 4.8 with zero notice). userLocal
   // (under $HOME → the PVC in fleet pods) survives rebuilds and wins PATH.
   const classifyInstall = (cmdPath) => {

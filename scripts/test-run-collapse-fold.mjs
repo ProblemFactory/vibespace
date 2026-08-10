@@ -3,7 +3,7 @@
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs'; import path from 'node:path';
 import { createRequire } from 'node:module';
-const require = createRequire('/home/xingweil/workspace/AIWorkspace/vibespace/server.js');
+const require = createRequire('/home/<user>/workspace/AIWorkspace/vibespace/server.js');
 const repo = process.cwd();
 const CHROME = ['/usr/bin/google-chrome','/usr/bin/google-chrome-stable','/usr/bin/chromium'].find(p=>fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome'); process.exit(0); }

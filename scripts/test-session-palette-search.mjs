@@ -1,4 +1,4 @@
-// Palette search: walter's real regression (inc-msjro90z-n6y3) + guards.
+// Palette search: userW's real regression (inc-msjro90z-n6y3) + guards.
 // "cmd+K 搜 best ever 搜不到 best ever toB signing 的 session，只能搜到 vendor session"
 import fs from 'node:fs';
 const src = fs.readFileSync(new URL('../src/lib/session-palette.js', import.meta.url), 'utf-8');
@@ -9,8 +9,8 @@ const { score } = eval(`(()=>{ ${body}; return { score }; })()`);
 let pass=0, fail=0;
 const ck=(n,c)=>{ if(c){pass++;console.log('  ✓ '+n)} else {fail++;console.log('  ✗ '+n)} };
 
-// walter's REAL rows: label (custom name), cwd, id, status
-const PRE='/home/walter/vibespace-mounts/WalterXSpace/Jarvis/work/';
+// userW's REAL rows: label (custom name), cwd, id, status
+const PRE='/home/userW/vibespace-mounts/UserWXSpace/Jarvis/work/';
 const rows=[
   { label:'BestEver-ToB-signing', cwd:PRE+'T-260716-bestever-msa-signing', id:'c652065d-3eb9-4923-ada0-9b7b935379b3', live:false },
   { label:'BestEver-Vendor-Agreement-Sign', cwd:PRE+'T-260722-bestever-vendor-agreement-signing', id:'660496fe-4665-4d1a-b447-76cfe07c2663', live:true },

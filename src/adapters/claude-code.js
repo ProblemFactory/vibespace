@@ -79,7 +79,7 @@ class ClaudeCodeAdapter extends BackendAdapter {
       mergeSettings({ switchModelsOnFlag: false });
       env.CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK = '1';
     }
-    // Per-session apiKeyHelper neutralization (2.236.0, naturalhg's "can't
+    // Per-session apiKeyHelper neutralization (2.236.0, userN's "can't
     // switch to my subscription" on a keyHelper machine): a configured
     // apiKeyHelper in the merged settings UNCONDITIONALLY overrides claude.ai
     // OAuth (2.191.0 disassembly), so an explicit SUBSCRIPTION pick silently

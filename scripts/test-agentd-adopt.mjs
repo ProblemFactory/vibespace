@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Pipe-session ADOPTION across a daemon restart (the 2026-07-17 lengyue
+// Pipe-session ADOPTION across a daemon restart (the 2026-07-17 userL
 // outage): a remote chat child is spawned as `sh -lc '… exec … <cli>'`, so
 // after the execs its /proc cmdline no longer contains the recorded argv0
 // ('sh'). The old _childAlive cmdline check therefore misjudged every LIVE

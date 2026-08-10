@@ -338,7 +338,7 @@ export function installSidebarRail(Sidebar) {
       const peakC = Math.max(...pts.map((x) => x.c ?? 0), 0.1);
       const cpuMax = d.cpus && d.cpus >= peakC ? Math.min(d.cpus, Math.max(1, Math.ceil(peakC))) : Math.ceil(peakC);
       mk('cpu', p.map((x) => x.c), col('--red', '#e06c75'), cpuMax, (v) => (typeof v === 'number' ? v.toFixed(v < 10 ? 2 : 0) : v));
-      // Event-loop lag (B-bb68, the metric that cracked the naturalhg freeze
+      // Event-loop lag (B-bb68, the metric that cracked the userN freeze
       // case): fine points carry `e` per sample; coarse (7d) points carry the
       // window max since 2.243.0 — older coarse samples lack it, so hide the
       // row when the range has no lag data at all.

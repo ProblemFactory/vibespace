@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Transcript worker contract + main-thread-block regression (2.235.0, the
-// lengyue degradation follow-up). Generates a >34MB JSONL (forces the bounded
+// userL degradation follow-up). Generates a >34MB JSONL (forces the bounded
 // tail path + line index), then drives the worker-backed async variants while
 // a 25ms-cadence probe measures the MAIN thread's max scheduling delay. The
 // point of the feature is that heavy transcript work stops blocking the loop —

@@ -1,6 +1,6 @@
 /**
  * transcript-worker.js — heavy JSONL transcript work OFF the main thread
- * (2.235.0, the lengyue "slow server read as mass session death" follow-up:
+ * (2.235.0, the userL "slow server read as mass session death" follow-up:
  * the event-loop spikes that degraded the whole instance were single-threaded
  * transcript work — 32MB tail parses on every attach/history load, GB-scale
  * line-index builds, full-file turn scans. CPU was never the bottleneck; the

@@ -109,7 +109,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         // used to leave only a spec-less "Create failed" shell — which
         // EVAPORATES on the next refresh (captureState skips windows without
         // an openSpec-recreatable identity), silently losing the window from
-        // the layout (lengyue lost "Mega Fish 训练" this way). Flip the shell
+        // the layout (userL lost "Mega Fish 训练" this way). Flip the shell
         // into the view-only pipeline with a REAL viewSession openSpec so the
         // window shows history + Resume and persists/syncs like any other.
         const rescueViewOnly = () => {
@@ -124,7 +124,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           this.layoutManager?.scheduleAutoSave?.();
           try { track('event', 'create-failed-rescued'); } catch { }
         };
-        // No-transcript breaker (2.227.3, natural's 46MB "修轮子"): the CLI's
+        // No-transcript breaker (2.227.3, userN's 46MB "修轮子"): the CLI's
         // "no conversation found" only proves it looked in the WRONG PLACE —
         // the old dead-end told the user to close the card and start over,
         // i.e. discard a live conversation. Rescue into view-only (history +
@@ -699,7 +699,7 @@ export function installSessionLifecycle(App, ctx = {}) {
   // conversation on the new account. Also works on already-terminated
   // (read-only) windows, where it just resumes on the picked account.
   // Warm the per-host account knowledge the billing switcher depends on
-  // (2.239.2, natural's inc-msfwgfpd-tlhn — the panic button's first real
+  // (2.239.2, userN's inc-msfwgfpd-tlhn — the panic button's first real
   // catch): hostSubHeld/hostLinked read `_hostSubsKnown`/host-email caches
   // that only a Manage-Agents visit or a usage ⟳ populated, so on a FRESH
   // page every named subscription rendered disabled ("can't ship") even when
@@ -711,7 +711,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     if (!hostId) return;
     this._hostAcctWarmState = this._hostAcctWarmState || {};
     this._hostAcctWarmAt = this._hostAcctWarmAt || {};
-    // TTL, not once-per-page (2.240.1, natural's "左右状态不一致": the host's
+    // TTL, not once-per-page (2.240.1, userN's "左右状态不一致": the host's
     // MACHINE LOGIN can change out from under a page-lifetime cache — he
     // /login'd a different account on the host and the switcher kept calling
     // the OLD identity "the host's own login", a wrong-BILLING hazard, while
@@ -816,7 +816,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       // PERSIST-AFTER-VERIFY (B-77f3, 2.243.0): the pick used to be written as
       // the on-resume account BEFORE the spawn — a doomed pick (not logged in,
       // can't ship, host down) poisoned the session's config, and every later
-      // manual Resume re-failed with it (natural's 2.240.0 incident chain).
+      // manual Resume re-failed with it (userN's 2.240.0 incident chain).
       // The pick now rides the create explicitly and is persisted only once
       // the server confirms the session actually spawned with it.
       const persistOnSuccess = (ok2, createdMsg) => {
@@ -834,7 +834,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       const winBounds = win ? this._snapshotWinBounds(this.wm.windows.get(winId)) : undefined;
       // excludeWebuiId: we KILLED this webui id ourselves — resumeSession's
       // "already open in a live window" shortcut must not trust a stale
-      // _allSessions entry still carrying it (2.241.0, natural's incident ws
+      // _allSessions entry still carrying it (2.241.0, userN's incident ws
       // ring: kill → exited → the auto-resume create was never sent; on his
       // loop-blocked instance the active-sessions refresh lagged 10-30s, the
       // killed session still matched as "live", and the switch silently
@@ -846,7 +846,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         // followed by the resume double-wrote the same claude id)
         this.ws.send({ type: 'kill', sessionId: live.webuiId, backendSessionId });
         // Wait for the ACTUAL exited event, not a fixed delay (2.240.0,
-        // natural's incident timeline: a REMOTE session's teardown took ~9s —
+        // userN's incident timeline: a REMOTE session's teardown took ~9s —
         // the old 900ms fire let resume run while the session still lived,
         // where the duplicate-window guard swallowed it silently; the window
         // just died with no restart, twice, before a third attempt landed).
@@ -913,7 +913,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         if (v.reason === 'held-identity-mismatch') return t('The login held on {host} for “{name}” actually belongs to {email} — re-run “Log in on host as this account”.', { host: rHostName, name: a.name, email: v.dirEmail || '?' });
         if (v.reason === 'not-on-this-host') {
           // signed in SOMEWHERE — just not on the machine this session runs on
-          // (2.244.3, natural: ClaudeLu held on Novita read "never finished
+          // (2.244.3, userN: ClaudeLu held on Novita read "never finished
           // signing in" in a CW-H200 session's menu = looked like a broken
           // account)
           const others = (v.otherHosts || []).map((h) => this._hostNamesKnown?.[h] || h).join(', ');
@@ -927,7 +927,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         return t('This stored login can’t ship to {host}. If you’ve logged this account in ON {host}, pick “CLI login @ {host}” above — that uses the host’s own login. (Or enable Settings → “Ship subscription logins to remote hosts”.)', { host: rHostName });
       }
       // ── legacy fallback (probe in flight / old server) ──
-      // NEVER-SIGNED-IN sub (2.240.0, natural's inc-msfx2fdt-3rbn): an
+      // NEVER-SIGNED-IN sub (2.240.0, userN's inc-msfx2fdt-3rbn): an
       // account added but whose OAuth login was never completed has no
       // usable credentials ANYWHERE — offering it fail-lates at spawn with
       // "subscription not logged in" and poisons the session's on-resume
@@ -1070,7 +1070,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       // email-linked rescue (ws-handler create, 2.240.2) maps it onto the
       // host's own login — zero creds ship — while session._accountId keeps
       // the picked identity, so the badge and this menu's ✓ show the account
-      // instead of "CLI login @ host" (natural's sixth incident: a successful
+      // instead of "CLI login @ host" (userN's sixth incident: a successful
       // linked switch READ as failed because the identity degraded to the
       // sentinel). The old client-side sentinel mapping predates the rescue.
       // estimates key on the LOCAL passive-cache identity — host-login /

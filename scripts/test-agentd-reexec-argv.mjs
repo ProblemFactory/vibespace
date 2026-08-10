@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // Self-upgrade re-exec must PRESERVE the original argv (2.185.2, real
-// xingweil↔Mac dial outage). The dial transport reads `--dial <url>
+// owner↔Mac dial outage). The dial transport reads `--dial <url>
 // --dial-token <t>` from process.argv; the upgrade re-exec used to spawn the
 // new bundle with NO args → a DIAL device came back in default LISTEN mode: it
 // stopped dialing the instance AND held the singleton so launchd couldn't
-// relaunch the real --dial daemon (walter-class wedge, usually masked by the
+// relaunch the real --dial daemon (userW-class wedge, usually masked by the
 // launchd relaunch winning the race — lost under rapid upgrade churn).
 //
 // A live /proc-cmdline check is unreliable here: the daemon sets

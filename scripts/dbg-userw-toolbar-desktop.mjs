@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Repro walter inc-mskxi7zk-mbm6: "top bar resize 是为了能让desktop变大，现在无法变大"
+// Repro userW inc-mskxi7zk-mbm6: "top bar resize 是为了能让desktop变大，现在无法变大"
 // — he has taskbar-top, dragged the toolbar handle to shrink it, desktop didn't
 // grow. Measures whether #workspace (and a window inside it) actually grows when
 // the toolbar shrinks, WITH taskbar-top. Throwaway server + headless chrome.
@@ -12,7 +12,7 @@ const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome'); process.exit(0); }
-const PORT = 3995, CDP_PORT = 9345, wt = '/tmp/vs-walter-tb';
+const PORT = 3995, CDP_PORT = 9345, wt = '/tmp/vs-userW-tb';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
@@ -20,8 +20,8 @@ for (const f of ['src', 'public', 'server.js']) execSync(`rm -rf ${wt}/${f} && c
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 execSync('npm run build', { cwd: wt, stdio: 'ignore' });
 const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
-const chrome = spawn(CHROME, [`--headless=new`, `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--window-size=2560,1352', '--user-data-dir=/tmp/vs-walter-tb-chrome', 'about:blank'], { stdio: 'ignore' });
-process.on('exit', () => { try { chrome.kill('SIGKILL'); } catch {} try { srv.kill('SIGKILL'); } catch {} try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {} try { fs.rmSync('/tmp/vs-walter-tb-chrome', { recursive: true, force: true }); } catch {} });
+const chrome = spawn(CHROME, [`--headless=new`, `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--window-size=2560,1352', '--user-data-dir=/tmp/vs-userW-tb-chrome', 'about:blank'], { stdio: 'ignore' });
+process.on('exit', () => { try { chrome.kill('SIGKILL'); } catch {} try { srv.kill('SIGKILL'); } catch {} try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {} try { fs.rmSync('/tmp/vs-userW-tb-chrome', { recursive: true, force: true }); } catch {} });
 for (let i = 0; i < 40; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); break; } catch { await sleep(250); } }
 const WebSocket = require('ws');
 let target = null;
@@ -40,7 +40,7 @@ await sleep(1500);
 await evalJs('window.app ? app.ready : Promise.reject(new Error("no app"))');
 await sleep(600);
 
-// walter's setup: taskbar docked TOP + open two windows
+// userW's setup: taskbar docked TOP + open two windows
 await evalJs(`app.settings.set('taskbar.position','top')`);
 await sleep(300);
 await evalJs(`(async()=>{ app.openFileExplorer && app.openFileExplorer(); app.openBrowser && app.openBrowser('about:blank'); })()`);
@@ -72,7 +72,7 @@ console.log('AFTER shrink:', JSON.stringify(after));
 
 let fail = 0;
 const ck = (n, c, e) => { if (c) console.log('  ✓ ' + n); else { fail++; console.log('  ✗ ' + n + (e ? '  — ' + e : '')); } };
-ck('taskbar-top active (walter setup)', after.taskbarTop);
+ck('taskbar-top active (userW setup)', after.taskbarTop);
 ck('toolbar actually shrank', after.toolbarH < before.toolbarH - 5, `${before.toolbarH}→${after.toolbarH}`);
 const dTool = before.toolbarH - after.toolbarH, dWs = after.workspaceH - before.workspaceH;
 ck(`workspace GREW by ~the toolbar delta (Δtoolbar=${dTool}, Δworkspace=${dWs})`, dWs >= dTool - 3 && dWs > 5);
@@ -82,7 +82,7 @@ ck(`workspace GREW by ~the toolbar delta (Δtoolbar=${dTool}, Δworkspace=${dWs}
 const grewWin = before.winHeights.some((h, i) => (after.winHeights[i] || 0) > h + 3);
 console.log('  · freeform windows grew:', grewWin, `(${JSON.stringify(before.winHeights)}→${JSON.stringify(after.winHeights)}; fresh unmoved windows keep px size by design)`);
 
-// how much desktop can walter actually gain? (min toolbar vs default + taskbar-top chrome)
+// how much desktop can userW actually gain? (min toolbar vs default + taskbar-top chrome)
 const minGain = await evalJs(`(() => {
   const root=document.documentElement; const ws=document.getElementById('workspace');
   root.style.setProperty('--toolbar-scale','0.7'); void document.body.offsetHeight;
@@ -92,7 +92,7 @@ const minGain = await evalJs(`(() => {
 })()`);
 console.log('workspace height range across toolbar scale 0.7..1.25:', JSON.stringify(minGain), '→ desktop gain from compacting =', minGain.range, 'px');
 
-// ── the case walter most likely has: a MAXIMIZED window IS "the desktop" ──
+// ── the case userW most likely has: a MAXIMIZED window IS "the desktop" ──
 console.log('\n── maximized-window case ──');
 await evalJs(`document.documentElement.style.removeProperty('--toolbar-scale')`); // reset
 await sleep(200);

@@ -288,7 +288,7 @@ class PortForwardManager {
 
   /** socket inode → process name via /proc/<pid>/fd (best-effort, bounded).
    *  ASYNC (2.241.2): this runs on the 30s local watch — on the slim fleet
-   *  image (no ss/lsof) with a busy pod (naturalhg: 184 dtach + hundreds of
+   *  image (no ss/lsof) with a busy pod (userN: 184 dtach + hundreds of
    *  procs) the sync sweep was the single largest main-thread consumer in a
    *  live profile (~0.2-0.5s EVERY pass, all readdirSync/readlinkSync). The
    *  promises variants spread the same bounded work over the threadpool. */

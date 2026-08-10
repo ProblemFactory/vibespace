@@ -24,7 +24,7 @@ explicitly:
 
 | | Where it lives | Shown as |
 |---|---|---|
-| **The machine's own CLI login** | On that machine (`~/.claude` / `~/.codex`) | The first row — "CLI login" (local) or "CLI login on AIDev" (remote host selected) |
+| **The machine's own CLI login** | On that machine (`~/.claude` / `~/.codex`) | The first row — "CLI login" (local) or "CLI login on the devbox" (remote host selected) |
 | **VibeSpace accounts** | In VibeSpace's own store (`data/`) | Every named row below it |
 
 - Picking a **remote host** in the Machine dropdown changes only the first row —

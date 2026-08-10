@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Stage pile-at-slot regression smoke (walter's 超级重叠, 2.209.0):
+// Stage pile-at-slot regression smoke (userW's 超级重叠, 2.209.0):
 //  BUG: Stage → normal desktop → Stage round trip revealed EVERY slot-parked
 //  ex-hero at identical slot geometry. Chain: a window born while staged has
 //  no gridBounds at borrow time → _borrowHero skipped the home snapshot →

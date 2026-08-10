@@ -325,7 +325,7 @@ export function installSidebarWorkbench(Sidebar) {
       }
       const hostLabel = st.sessions[0]?.hostName || hostId;
       for (const [cwd, list] of byProj) {
-        // color key includes the host so AIDev:/tmp never shares a color with local /tmp
+        // color key includes the host so the devbox:/tmp never shares a color with local /tmp
         const color = `hsl(${projectHue(hostLabel + ': ' + cwd)} 55% 52%)`;
         const head = document.createElement('div');
         head.className = 'wb-proj-head';

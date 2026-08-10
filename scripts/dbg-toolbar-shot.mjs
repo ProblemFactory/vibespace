@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Capture how the top bars actually LOOK when resized (walter/xingwei report:
+// Capture how the top bars actually LOOK when resized (userW/xingwei report:
 // resizing produces a big empty gap). Screenshots default / tall toolbar /
 // taskbar-top tall taskbar → /tmp/tbshot-*.png for visual inspection.
 import { execSync, spawn } from 'node:child_process';
@@ -61,7 +61,7 @@ const heights = await evalJs(`(()=>{
   return out;
 })()`);
 console.log('WORKSPACE height by scale (truth metric):', JSON.stringify(heights));
-// taskbar-top + tall taskbar (the walter setup)
+// taskbar-top + tall taskbar (the userW setup)
 await evalJs(`app.settings.set('taskbar.position','top')`); await sleep(300);
 await evalJs(`(()=>{const tb=document.getElementById('taskbar');tb.style.height='110px';app.desktopManager&&app.desktopManager._adaptTaskbarSize&&app.desktopManager._adaptTaskbarSize(110);})()`);
 await sleep(400); await shot('04-taskbartop-tall');

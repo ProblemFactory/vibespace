@@ -142,7 +142,7 @@ console.log('— wrong dial token is refused at the upgrade gate —');
   check('bad dial token rejected before any protocol runs', refused === true, String(refused));
 }
 
-console.log('— re-pair identity rotation: daemon adopts rewritten dial.json + token LIVE (walter case) —');
+console.log('— re-pair identity rotation: daemon adopts rewritten dial.json + token LIVE (userW case) —');
 {
   const DIAL_TOKEN2 = 'vsdt_' + crypto.randomBytes(8).toString('hex');
   const HOST_TOKEN2 = 'vsht_rot' + crypto.randomBytes(6).toString('hex');

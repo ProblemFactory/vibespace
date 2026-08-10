@@ -750,7 +750,7 @@ class TerminalSession {
     // Re-entry (font switch / list-upgrade): drop the previous watchers first.
     if (this._fontPollTimer) { clearInterval(this._fontPollTimer); this._fontPollTimer = null; }
     this._fontLoadingDoneCleanup?.();
-    // EVENT-DRIVEN BACKSTOP (2.111.12, Walter's onboarding report): on a slow
+    // EVENT-DRIVEN BACKSTOP (2.111.12, userW's onboarding report): on a slow
     // route to Google Fonts (cold cache + cross-border first visit) the CSS
     // lands AFTER the 20s poll cap below — registration is then never noticed
     // and the terminal stays wide-spaced FOREVER (fallback-measured cells,

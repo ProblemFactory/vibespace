@@ -1,7 +1,7 @@
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs'; import path from 'node:path';
 import { createRequire } from 'node:module';
-const require = createRequire('/home/xingweil/workspace/AIWorkspace/vibespace/server.js');
+const require = createRequire('/home/<user>/workspace/AIWorkspace/vibespace/server.js');
 const repo = process.cwd(); const PORT = 3994;
 const wt = '/tmp/vs-brk-smoke', fakeHome = '/tmp/vs-brk-home';
 const CWD = '/tmp/vs-brk-work'; const SID = '88880000-1111-2222-3333-444455556666';

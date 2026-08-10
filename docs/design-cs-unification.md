@@ -1,8 +1,8 @@
 # CS unification — local must run the SAME code as remote
 
-**Owner's framing (2026-08-10):** *"CS 分离的意义就是 local 和远端尽可能完全共用除了前端之外的代码"* — and the honest assessment of the campaign up to 2.275.0: parity tests and shared string modules are **scaffolding, not the cure**. They keep two implementations from drifting; they do not remove the second implementation.
+**Principle (decided 2026-08-10):** local and remote share ALL non-frontend code. The honest assessment of the campaign up to 2.275.0: parity tests and shared string modules are **scaffolding, not the cure** — they keep two implementations from drifting; they do not remove the second implementation.
 
-This document is the anchor for actually removing it. The GENERALIZED end-state architecture (frontend / orchestrator / device layer, fat-device with worker isolation) is designed in docs/design-three-tier.md — this doc remains the per-module migration ledger.
+This document is the anchor for actually removing it. The generalized end-state architecture (frontend / orchestrator / device layer, fat-device with worker isolation) is docs/design-three-tier.md — this doc remains the per-module migration ledger.
 
 ## The rule
 

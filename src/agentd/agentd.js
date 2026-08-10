@@ -22,7 +22,7 @@ const VERSION = process.env.VIBESPACE_AGENTD_VERSION || require('./version.js').
 // systemd units on user devices reference it)
 const ROOT = process.env.VIBESPACE_DEVICE_ROOT || process.env.VIBESPACE_AGENTD_ROOT || path.join(os.homedir(), '.vibespace', 'agentd');
 
-// SPAWN ENV (real xingweil report: Mac dial chat blank — the daemon runs on
+// SPAWN ENV (real owner report: Mac dial chat blank — the daemon runs on
 // node fine but its subprocess `sh -c` couldn't find node/claude). launchd
 // (macOS) / systemd (Linux) start the daemon with a MINIMAL PATH, so every
 // child spawn inherited a PATH without the node/CLI dirs — claude never ran.
@@ -125,7 +125,7 @@ const { reExecArgv } = require('./reexec');
 // does NOT — a pipe child spawned as `sh -lc '… exec env … claude …'` rewrites
 // its cmdline twice, so matching cmdline against the recorded argv0 misjudges
 // every LIVE claude as a recycled pid once a daemon upgrade re-exec forces
-// re-adoption (real lengyue outage: every server update synthesized a crash
+// re-adoption (real userL outage: every server update synthesized a crash
 // sentinel for the running remote chat sessions and orphaned their claudes).
 // Linux: /proc/<pid>/stat field 22 (ticks since boot, unique per boot);
 // macOS/BSD: `ps -o lstart=` (second granularity — plenty for pid reuse).
@@ -238,12 +238,12 @@ function beginUpgrade(mux, { version, size }) {
         log(`upgrade to ${version} landed — re-exec`);
         // re-exec from the new dir; the singleton lock is released on exit and
         // NOTHING outside our install dir is touched (invariant #1/#7).
-        // PRESERVE THE ORIGINAL ARGV (2.185.2, real xingweil↔Mac outage): the
+        // PRESERVE THE ORIGINAL ARGV (2.185.2, real owner↔Mac outage): the
         // dial transport reads `--dial <url> --dial-token <t>` from process.argv
         // (see Transport B below); dropping them here re-exec'd a DIAL device
         // into default LISTEN mode → it stopped dialing the instance AND held
         // the singleton so launchd couldn't relaunch the real --dial daemon
-        // (walter-class wedge, masked most of the time by the launchd relaunch
+        // (userW-class wedge, masked most of the time by the launchd relaunch
         // winning the race — lost under rapid upgrade churn).
         setTimeout(() => {
           const { spawn } = require('child_process');
@@ -343,10 +343,10 @@ const pipeSessions = {
     const outFd = fs.openSync(P2.out, 'a');
     const errFd = fs.openSync(P2.err, 'a');
     const inFd = fs.openSync(P2.fifo, 'r+');
-    // CWD FALLBACK (B-0d70, real xingweil report — the #1 dial-chat-blank
+    // CWD FALLBACK (B-0d70, real owner report — the #1 dial-chat-blank
     // cause): the server ships a cwd defaulted to ITS OWN os.homedir()
-    // (/home/xingweil on the pod), which does not exist on the device (Mac =
-    // /Users/xingweil). child_process.spawn with a nonexistent cwd emits an
+    // (/home/<user> on the pod), which does not exist on the device (Mac =
+    // /Users/<user>). child_process.spawn with a nonexistent cwd emits an
     // ASYNC 'error' event, and with no listener that used to CRASH THE WHOLE
     // DAEMON → every session went blank. Resolve to a real dir here and never
     // let a bad cmd/cwd take the daemon down.
@@ -558,7 +558,7 @@ function _davEntry(href, name, st) {
 function serveFolder(mux, msg) {
   // strip a trailing slash — the confinement below uses `root + path.sep`, so a
   // root ending in '/' becomes a DOUBLE-slash prefix that no real subpath
-  // matches → every file 403s (real walter Mac→VibeSpace pull bug)
+  // matches → every file 403s (real userW Mac→VibeSpace pull bug)
   const root = (String(msg.path || '').replace(/\/+$/, '')) || '/';
   try { if (!path.isAbsolute(root) || !fs.statSync(root).isDirectory()) throw new Error('not a directory'); }
   catch (e) { mux.control({ op: 'serve-folder-result', id: msg.id, error: e.message }); return; }
@@ -1136,7 +1136,7 @@ const DIAL_FILE = path.join(STATE, 'dial.json');
     // re-read the dial config EVERY attempt: a re-pair (identity rotation)
     // rewrites dial.json on disk while this daemon keeps running — the old
     // in-memory identity was rejected forever and the singleton blocked a
-    // replacement daemon (real walter incident: 'already running' + REJECTED
+    // replacement daemon (real userW incident: 'already running' + REJECTED
     // loop + launchd respawn spam). Parse failure keeps the last good cfg.
     const fresh = readCfg();
     if (fresh?.url) {

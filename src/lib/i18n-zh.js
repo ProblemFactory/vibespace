@@ -830,7 +830,7 @@ export default {
   "· from {host}": "· 来自 {host}",
   "Imported from {host}’s Console login — an independent copy held in VibeSpace (not linked to {host}); usable on any machine.": "从 {host} 的 Console 登录导入——是保存在 VibeSpace 里的独立副本（与 {host} 无实时关联），可在任何机器上使用。",
   "Account note": "账号备注",
-  "Shown as a small tag on the account row (e.g. “from AIDev backup”). Empty clears it.": "以小标签显示在账号行上（例如“从 AIDev 备份恢复”）。留空则清除。",
+  "Shown as a small tag on the account row (e.g. “from laptop backup”). Empty clears it.": "以小标签显示在账号行上（例如“从 the devbox 备份恢复”）。留空则清除。",
   "Set note…": "设置备注…",
   "Edit note…": "编辑备注…",
   "Add subscription — log in on {host}": "添加订阅——在 {host} 上登录",

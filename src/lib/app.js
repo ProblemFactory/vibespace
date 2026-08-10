@@ -258,7 +258,7 @@ class App {
           );
           return;
         }
-        // Memory pressure (2.216.0, lengyue's OOM kill): warn BEFORE the
+        // Memory pressure (2.216.0, userL's OOM kill): warn BEFORE the
         // kernel kills the pod (which takes every dtach session with it).
         this.sidebar?._railSysBadge?.(msg.pct);
         const top = (msg.procs || [])[0];
@@ -333,7 +333,7 @@ class App {
       // changes made while this tab was disconnected)
       fetchJson('/api/maintenance').then((m) => { if (m) this._renderMaintenance?.(m); }).catch(() => {});
       try { this.settings?.refetch?.(); } catch {}
-      // user-state too (2.223.4 — the walter names/stars/archives blackout):
+      // user-state too (2.223.4 — the userW names/stars/archives blackout):
       // a boot-time fetch that failed during a restart window left the tab
       // permanently stateless; reconnect re-applies the authoritative copy.
       try { this.sidebar?._fetchUserState?.(); } catch {}
@@ -368,7 +368,7 @@ class App {
     // Probed at startup AND re-probed on every ws reconnect: a page that
     // loads during a server restart window gets a failed probe, and a
     // once-only check would hide the Desktop feature for the whole page
-    // session (real report — walter onboarded mid-update, "desktop功能直接
+    // session (real report — userW onboarded mid-update, "desktop功能直接
     // 被禁用"; F5 was the only cure).
     this._probeVncAvailability();
 
@@ -1653,7 +1653,7 @@ class App {
       recentEl.innerHTML = `<span class="cwd-recent-loading">${t('loading host paths…')}</span>`;
       // Show the DEVICE/remote home as the empty-cwd hint (B-0d70: the
       // placeholder used to stay the LOCAL home, so a paired Mac showed
-      // /home/xingweil which doesn't exist there). Reset to a NEUTRAL hint
+      // /home/<user> which doesn't exist there). Reset to a NEUTRAL hint
       // BEFORE the async fetch so an offline/paired device whose /api/home
       // 400s never leaves the stale local home showing (review).
       const cwdInput = document.getElementById('input-cwd');
@@ -1755,7 +1755,7 @@ class App {
         ['subscription', cliLoginLabel], // the CLI's global login (on the host for remote sessions)
       ];
       // Subscription accounts for a REMOTE host — SAME semantics as the billing
-      // switcher (2.198.0/2.199.0; natural's bootloop started here: the dialog
+      // switcher (2.198.0/2.199.0; userN's bootloop started here: the dialog
       // hid every named subscription for remote, forcing create-then-switch on
       // an empty session): email-LINKED to the host's own login or HELD on the
       // host (per-host login dir) = usable with zero creds shipped; otherwise
@@ -1960,7 +1960,7 @@ class App {
       const srv = r?.version;
       if (!srv || srv === BUILD_VERSION) return;
       const key = 'vibespace.reloaded-for.' + srv;
-      // PER-TAB, not per-origin (2.240.3, natural's "updated but still broken"
+      // PER-TAB, not per-origin (2.240.3, userN's "updated but still broken"
       // marathon): localStorage is shared across every tab of the origin, so
       // the FIRST tab to reload burned the once-per-version key and every
       // OTHER stale tab never auto-reloaded — it kept its old bundle and
@@ -1986,7 +1986,7 @@ class App {
     }).catch(() => {
       // Page loaded during a server-restart window: retry with backoff so the
       // Desktop entry self-heals without needing an F5 or a ws transition
-      // (walter hit the vanish repeatedly during an update storm).
+      // (userW hit the vanish repeatedly during an update storm).
       if (attempt < 5) setTimeout(() => this._probeVncAvailability(attempt + 1), [3000, 8000, 20000, 45000, 90000][attempt]);
     });
   }
@@ -2320,7 +2320,7 @@ class App {
           // reading only match.hostId meant a remote session's spec NEVER got
           // its host backfilled, so after the session died the replay/view
           // fetch went host-less and opened blank (real fleet report: 5
-          // pre-hostId-era windows on lengyue's layout, dead after an OOM).
+          // pre-hostId-era windows on userL's layout, dead after an OOM).
           hostId: match.host ?? match.hostId ?? win._openSpec.hostId ?? null,
           name: match.name || win._openSpec.name || '',
           agentKind: match.agentKind || 'primary',

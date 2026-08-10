@@ -1,4 +1,4 @@
-// System info + memory-pressure watch (2.216.0 — lengyue's instance was
+// System info + memory-pressure watch (2.216.0 — userL's instance was
 // OOMKilled at its 32Gi pod limit after a week of process accumulation; the
 // pod-level kill takes EVERY dtach session with it, and nothing warned).
 // read() = container-aware snapshot for the System rail panel; startWatch()
@@ -154,7 +154,7 @@ function history(rangeMs) {
 // fully clears below 75% so a later climb alerts again.
 function startWatch({ broadcast, dataDir, intervalMs = 45000 } = {}) {
   let lastLevel = 0, lastAlertAt = 0;
-  // ── Event-loop lag watch (2.235.0, lengyue "卡了2h但CPU不高" incident): the
+  // ── Event-loop lag watch (2.235.0, userL "卡了2h但CPU不高" incident): the
   // ONE metric that caught that degradation was loop lag, and it lived only in
   // telemetry (visible after the fact). Sample drift every 500ms, keep a
   // 3-min window, alert on SUSTAINED degradation: median >300ms amber /

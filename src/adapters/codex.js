@@ -198,7 +198,7 @@ function getJsonlLineIndex(fp) {
 // ── Worker-backed async variants (2.235.0) ──
 // The sync scans above are correct but SINGLE-THREADED: on huge transcripts a
 // line-index build runs seconds and a 32MB tail parse ~0.5-1s, and every such
-// call blocks the ONE event loop for the whole server (the lengyue incident's
+// call blocks the ONE event loop for the whole server (the userL incident's
 // degradation was exactly these, invisible in machine CPU%). The async
 // variants run the SAME functions in a persistent worker (transcript-worker
 // requires this module — zero duplication; the mtime+size caches live worker-
