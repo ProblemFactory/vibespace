@@ -804,6 +804,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         }
         if (v.reason === 'never-signed-in') return t('“{name}” never finished signing in — complete its login in Manage agents first.', { name: a.name });
         if (v.reason === 'dial-no-ship') return t('Subscription logins can’t ship to a paired device — log in on the device, or use an API-key account');
+        if (v.reason === 'local-only-mac') return t('This macOS Keychain-backed login stays on this machine. Log in as this account on {host} instead; copying it can invalidate rotating OAuth credentials.', { host: rHostName });
         if (v.reason === 'pool-local-only') return t('Pooled accounts run on this machine only');
         if (v.reason === 'pool-no-target') return t('This pooled account has no target — pick a subscription in Manage agents');
         return t('This stored login can’t ship to {host}. If you’ve logged this account in ON {host}, pick “CLI login @ {host}” above — that uses the host’s own login. (Or enable Settings → “Ship subscription logins to remote hosts”.)', { host: rHostName });

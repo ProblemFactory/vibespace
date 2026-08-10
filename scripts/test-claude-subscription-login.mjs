@@ -287,8 +287,11 @@ try {
   assert.match(manageAgentsSource, /loginStatus\.state === 'success'\) complete\(false\)/);
   const wsSource = fs.readFileSync(path.join(process.cwd(), 'src/ws-handler.js'), 'utf8');
   assert.match(wsSource, /needsClaudeLoginHelper && !present\.includes\('vibespace-claude-subscription-login\.mjs'\)/);
+  // Adapted from the PR's literal pattern: current master keeps the B-211a
+  // nuance (held billing rides dialAcctAssign — _hostSubReady exempts it from
+  // the fatal-secret rule), so the merged guard is a compound condition.
   assert.equal(
-    (wsSource.match(/spawnAccount\?\.secret \|\| needsClaudeLoginHelper/g) || []).length,
+    (wsSource.match(/\(spawnAccount\?\.secret && !spawnAccount\._hostSubReady\) \|\| needsClaudeLoginHelper/g) || []).length,
     2,
     'dial helper placement failures must not degrade to a helper-less terminal',
   );
