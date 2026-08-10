@@ -2,7 +2,7 @@ import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-const require = createRequire('/home/<user>/workspace/AIWorkspace/vibespace/server.js');
+const require = createRequire(new URL('../server.js', import.meta.url));
 const repo = process.cwd();
 const PORT = 3998;
 const wt = '/tmp/vs-cwdre-smoke', fakeHome = '/tmp/vs-cwdre-home';

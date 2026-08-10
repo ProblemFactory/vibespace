@@ -90,7 +90,9 @@ function mergeToolInput(existingInput, extraInput) {
 class CodexMessageManager {
   constructor(sessionId) {
     this.sessionId = sessionId;
-    this.seq = 0;
+    this.seq = 0; // rebuild belt only (R0 — ids are content-derived)
+    this._rkCounts = new Map();
+    this._currentRk = null;
     this.messages = [];
     this.messageIndex = new Map();
     this.userMessageIds = new Map();
@@ -114,7 +116,29 @@ class CodexMessageManager {
     };
   }
 
-  _nextId() { return `${this.sessionId}:${this.seq++}`; }
+  // R0 (docs/design-three-tier.md): content-derived ids — same contract as
+  // the claude normalizer (_nextId there). The record key is a hash of the
+  // record's MERGE FINGERPRINT shape (volatile item_id/itemId/id stripped —
+  // exactly the fields whose presence differs between the wrapper buffer copy
+  // and the rollout JSONL copy of one item), so a rebuild reproduces the same
+  // ids and cross-transport twins collide instead of double-rendering.
+  _nextId() {
+    const rk = this._currentRk || ('s' + this.seq);
+    this.seq++;
+    const n = this._rkCounts.get(rk) || 0;
+    this._rkCounts.set(rk, n + 1);
+    return `${this.sessionId}:${rk}${n ? '.' + n : ''}`;
+  }
+
+  static recordKey(record) {
+    const payload = record?.payload || record || {};
+    const { item_id, itemId, id, internal_chat_message_metadata_passthrough, ...stable } = payload;
+    let str;
+    try { str = (record?.type || '') + ':' + JSON.stringify(stable); } catch { str = String(record?.type || ''); }
+    let h = 0x811c9dc5;
+    for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = (h * 0x01000193) >>> 0; }
+    return 'h:' + h.toString(36) + ':' + str.length;
+  }
 
   onOp(fn) { this.listeners.push(fn); }
   offOp(fn) { const i = this.listeners.indexOf(fn); if (i >= 0) this.listeners.splice(i, 1); }
@@ -226,6 +250,7 @@ class CodexMessageManager {
   }
 
   _processRecord(record, emit) {
+    this._currentRk = CodexMessageManager.recordKey(record);
     if (!record || typeof record !== 'object') return;
     this._currentTs = toTs(record.timestamp);
     this._currentLine = Number.isFinite(record.__line) ? record.__line : null; // source file line (gap loads only)

@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.280.0
+
+**R0 of the three-tier plan (docs/design-three-tier.md): content-derived message ids.**
+
+Message ids were `${sessionId}:${counter}` — a per-parser-instance counter, so every rebuild renumbered everything (the reason server restarts force a full chat-view reset, and a blocker for ever parsing transcripts device-side, where self-upgrade restarts are routine). Ids now derive from CONTENT:
+
+- **Tool messages key on their globally-unique toolCallId** (`S:t:toolu_…`) — the same tool_use replayed from any transport (stdout buffer, JSONL rebuild, a future device-parsed history) lands on the SAME id, so replay overlap collapses to one card instead of duplicating.
+- Other messages key on `message.id` (stable across the stdout and JSONL copies of one API message) > record uuid (stdout placeholder uuids excluded) > a record-content hash, with a per-key counter for records that mint several messages (block order is the API's content order on both transports, so the suffix is transport-stable).
+- Codex ids hash the record's merge-fingerprint shape (volatile `item_id`/`id` stripped — exactly the fields that differ between the wrapper buffer copy and the rollout copy of one item), so cross-transport twins derive identical ids.
+- `_normEpoch` full-view reset stays as the belt; it just stops being load-bearing for ordinary rebuilds.
+
+scripts/test-message-ids.mjs (13 asserts) pins the contract: rebuild stability, the stdout↔JSONL id JOIN (the property that lets a device-parsed history merge a server-parsed live stream with no flag day), replay-overlap collapse, keyless-record determinism, streaming re-emit editing in place. Real-browser belts green (attach-rescue, chat-paging) plus the normalizer/regression battery.
+
+Also: eleven test scripts hardcoded the absolute repo path (surfaced by the 2.279.2 hygiene sweep breaking them) — all derive from `import.meta.url` now.
+
 ## 2.279.2
 
 **Repository hygiene sweep** (owner directive: no personal information or communication content in the public repo).
