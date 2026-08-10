@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.284.4
+
+**Forking a LIVE conversation killed the parent session mid-turn** (real incident on the dev machine, minutes after 2.284.2 rolled out): the pre-resume writer sweep — which SIGTERMs any claude still writing the target conversation's transcript before a resume — ran for FORK creates too. A fork resumes the PARENT's conversation id to branch it, so the sweep found the live parent's claude as a "writer" and terminated it; the parent window died mid-turn while the fork came up fine.
+
+Why now: the sweep's three call sites (local / ssh / dial) never excluded `fork`, but the LOCAL sweep had been silently dead since 2.276.0 (the `shq` scope bug) — 2.284.2 fixed that, making the local sweep actually run for the first time, and this latent hole went live with it. The remote sites carried the same hole for longer (forking a live remote session would have killed it the same way).
+
+The fix is categorical: a fork only READS the parent transcript and writes a NEW conversation id's JSONL — there is never a second writer on any file — so all three sweep gates now skip on `fork`. The resume-already-live guard (2.179.0) already exempted forks for exactly this reason; the sweeps were written under the assumption that guard had filtered live sessions out, which is false precisely for forks. A drift guard in scripts/test-writer-sweep.mjs fails any future sweep call site not gated on `!data.fork`.
+
 ## 2.284.3
 
 **Remote ledger harvest goes event-driven** (owner question: "为什么是15分钟？统计不应该实时吗？").

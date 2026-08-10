@@ -1177,8 +1177,15 @@ function registerWsHandler(wss, ctx) {
               // cleanScript never ran for dial, so a pod-recreation-orphaned
               // pipe-session claude (setsid-detached, survives everything the
               // daemon does) raced every later resume as a second JSONL writer.
-              // Never runs for pipe-ATTACH (we adopt, not respawn).
-              if (data.resume && data.resumeId && !dialKeeperSid && /^[\w-]+$/.test(data.resumeId)) {
+              // Never runs for pipe-ATTACH (we adopt, not respawn) and
+              // NEVER for a FORK (2.284.4, real incident: forking a LIVE
+              // conversation SIGTERMed the parent's claude mid-turn — a fork
+              // only READS the parent transcript and writes a NEW id's JSONL,
+              // so a live parent writer is legitimate, not a corruption risk;
+              // the resume-already-live guard exempts forks for the same
+              // reason, which voids the "can only reach external writers"
+              // assumption these sweeps were written under).
+              if (data.resume && data.resumeId && !data.fork && !dialKeeperSid && /^[\w-]+$/.test(data.resumeId)) {
                 try {
                   const r = await sweepWriters(hosts, h.id, data.resumeId, { shq, execFileAsync });
                   if (r.swept.length) session._resumeSwept = { host: h.name, pids: r.swept };
@@ -1275,7 +1282,9 @@ function registerWsHandler(wss, ctx) {
                 if (k?.sid) { data.keeperSid = k.sid; data.keeperKind = k.kind; console.log(`[remote] live ${k.kind} session ${k.sid} holds ${data.resumeId.slice(0, 8)} — adopting instead of sweep+respawn`); }
               } catch { }
             }
-            if (data.resume && data.resumeId && !data.keeperSid && /^[\w-]+$/.test(data.resumeId)) {
+            // !data.fork: a fork's resume target is the LIVE parent's own
+            // conversation — sweeping it kills the parent (2.284.4).
+            if (data.resume && data.resumeId && !data.fork && !data.keeperSid && /^[\w-]+$/.test(data.resumeId)) {
               try {
                 // ROOT-CAUSE writer sweep (mechanism-agnostic): the ONE thing
                 // that must be true before a resume is that NO other process is
@@ -1425,8 +1434,13 @@ function registerWsHandler(wss, ctx) {
           // and the local twin is the one nobody exercises. Now hostId is a
           // parameter: the identical script runs over device #0.
           // The live-session case is already refused earlier (2.179.0
-          // resume-already-live), so this can only reach EXTERNAL writers.
-          if (data.resume && data.resumeId && !data.hostId && !data.keeperSid
+          // resume-already-live) — EXCEPT forks, which that guard exempts by
+          // design (branching a live conversation is legitimate). A fork must
+          // therefore skip the sweep too: its resume target is the live
+          // parent's own conversation, and sweeping it SIGTERMs the parent
+          // mid-turn (2.284.4, real incident on this very machine — the fork
+          // writes a NEW id's JSONL, so there is no double-writer to prevent).
+          if (data.resume && data.resumeId && !data.fork && !data.hostId && !data.keeperSid
               && (data.backend || 'claude') === 'claude' && /^[\w-]+$/.test(data.resumeId) && hosts) {
             try {
               // shq is defined in the remote branches' scope, not here — the
