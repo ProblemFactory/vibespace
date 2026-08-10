@@ -130,6 +130,8 @@ function pickCodexThreadCandidate({ activeSessions, webuiSessionId, cwd, created
 // lag/CS audit: four ssh round trips ran SYNC on the loop, so one wedged host
 // froze the whole server for up to 20s per spawn). stdin errors are swallowed
 // on the STREAM (2.241.1 rule: pipe errors arrive as stream 'error' events).
+const { REMOTE_PRELUDE, nodeFinder } = require('./remote-shell.js');
+
 function execFileAsync(cmd, args, { input, timeout = 20000, maxBuffer = 8 * 1024 * 1024, encoding = 'buffer' } = {}) {
   return new Promise((resolve, reject) => {
     const cp = require('child_process').execFile(cmd, args, { timeout, maxBuffer, encoding },
@@ -723,7 +725,7 @@ function registerWsHandler(wss, ctx) {
             // alone to find node/claude on the host (chat branches re-export
             // inside their inner command), so this part is UNCONDITIONAL even
             // when tool shipping fails below.
-            let prelude = `export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; `;
+            let prelude = REMOTE_PRELUDE; // ONE definition (src/remote-shell.js) — copies drifted between builders
             let tokenAssign = '';
             // ONE ship list, parameterized by the Integration master switch:
             // ON  → all agent tools + hook + keeper + the per-session vsst_
@@ -789,11 +791,10 @@ function registerWsHandler(wss, ctx) {
                     // locations), EXPORT its dir onto PATH (revives tools + any
                     // old-format hook entries immediately), then run the register
                     // with the absolute path so entries self-heal to execPath.
-                    prelude += `export PATH="$HOME/.vibespace/bin:$PATH"; `
-                      + `VS_NODE="$(command -v node 2>/dev/null)"; `
-                      + `[ -z "$VS_NODE" ] && VS_NODE="$(ls -1 "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | sort | tail -1)"; `
-                      + `if [ -z "$VS_NODE" ]; then for vs_c in /usr/local/bin/node /usr/bin/node /opt/homebrew/bin/node "$HOME/.local/bin/node"; do [ -x "$vs_c" ] && VS_NODE="$vs_c" && break; done; fi; `
-                      + `[ -n "$VS_NODE" ] && export PATH="$(dirname "$VS_NODE"):$PATH" && "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" 2>/dev/null; `;
+                    // tools on PATH + the POSIX node finder (ONE definition in
+                    // src/remote-shell.js), then self-heal the hook entries.
+                    prelude += 'export PATH="$HOME/.vibespace/bin:$PATH"; ' + nodeFinder()
+                      + `[ -n "$VS_NODE" ] && "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" 2>/dev/null; `;
                     // EDITOR needs $HOME expansion → shell prefix assignment
                     // (envPairs are shq'd); PORT/SESSION_ID are static values.
                     tokenAssign = `VIBESPACE_SESSION_TOKEN="$(cat "$HOME/.vibespace/bin/${tokName}")" EDITOR="$HOME/.vibespace/editor/code" `;
@@ -868,9 +869,7 @@ function registerWsHandler(wss, ctx) {
                 `chmod +x "${bin}"/vibespace-* "${home}/.vibespace/editor/code" 2>/dev/null; chmod 600 "${bin}/${tokName}"; `
                 // same POSIX node finder as the ssh prelude (2.244.4 — a bare
                 // `node` is unresolvable in dash/non-login shells on nvm hosts)
-                + `VS_NODE="$(command -v node 2>/dev/null)"; `
-                + `[ -z "$VS_NODE" ] && VS_NODE="$(ls -1 "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | sort | tail -1)"; `
-                + `if [ -z "$VS_NODE" ]; then for vs_c in /usr/local/bin/node /usr/bin/node /opt/homebrew/bin/node "$HOME/.local/bin/node"; do [ -x "$vs_c" ] && VS_NODE="$vs_c" && break; done; fi; `
+                + nodeFinder()
                 + `[ -n "$VS_NODE" ] && "$VS_NODE" "${bin}/vibespace-hook-register.mjs" 2>/dev/null || true`], { timeoutMs: 12000 }).catch(() => {});
               // VIBESPACE_API back-tunnel: a loopback port ON THE DEVICE whose
               // accepts ride the dial link back into our own server port.
@@ -1040,7 +1039,7 @@ function registerWsHandler(wss, ctx) {
                 });
                 // tools PATH only while integrated — leftover tools from an
                 // earlier ON spawn must not be name-resolvable in a pristine one
-                const shellCmd = `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:${integrationOn ? '$HOME/.vibespace/bin:' : ''}$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ${shellResolve}${AMBIENT_OAT_UNSET}${da.tokenAssign}${dialAcctAssign}exec env `
+                const shellCmd = `cd ${shq(cwd)} 2>/dev/null; ` + REMOTE_PRELUDE + (integrationOn ? 'export PATH="$HOME/.vibespace/bin:$PATH"; ' : '') + `${shellResolve}${AMBIENT_OAT_UNSET}${da.tokenAssign}${dialAcctAssign}exec env `
                   + [...da.envPairs.map(shq), ...spawnEnvPairs.map(shq)].join(' ')
                   + ' ' + [rcmd0, ...(backend === 'shell' ? ['-l'] : spawnArgs.map(shq))].join(' ');
                 const cfg = {
@@ -1232,7 +1231,7 @@ done`;
                   console.warn('[dial] agent setup degraded:', e.message); return { envPairs: [], tokenAssign: '' };
                 });
                 // tools PATH only while integrated (see the pty branch note)
-                const shellCmd = `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:${integrationOn ? '$HOME/.vibespace/bin:' : ''}$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ${AMBIENT_OAT_UNSET}${da.tokenAssign}${dialAcctAssign}exec env `
+                const shellCmd = `cd ${shq(cwd)} 2>/dev/null; ` + REMOTE_PRELUDE + (integrationOn ? 'export PATH="$HOME/.vibespace/bin:$PATH"; ' : '') + `${AMBIENT_OAT_UNSET}${da.tokenAssign}${dialAcctAssign}exec env `
                   + [...da.envPairs.map(shq), ...spawnEnvPairs.map(shq)].join(' ')
                   + ' ' + [rcmd, ...rargs.map(shq)].join(' ');
                 const cfg = {
@@ -1361,10 +1360,10 @@ done`;
                 // the child claude runs under `sh -lc` on the host so the
                 // existing shell-expanded prefixes (token file reads, $HOME
                 // account paths) keep their exact semantics
-                const shellCmd = ra.prelude + `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ` + AMBIENT_OAT_UNSET + ra.tokenAssign + acctEnv + `exec env `
+                const shellCmd = ra.prelude + `cd ${shq(cwd)} 2>/dev/null; ` + REMOTE_PRELUDE + AMBIENT_OAT_UNSET + ra.tokenAssign + acctEnv + `exec env `
                   + [...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq)].join(' ')
                   + ' ' + [rcmd, ...rargs.map(shq)].join(' ');
-                const remoteCmd = `export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; exec node "$HOME/.vibespace/agentd/current/agentd.js" --stdio`;
+                const remoteCmd = REMOTE_PRELUDE + 'exec node "$HOME/.vibespace/agentd/current/agentd.js" --stdio';
                 const cfg = {
                   sshBin: 'ssh',
                   sshArgs: hosts.sshArgs(h, { reverse: ra.reverse }),
@@ -1393,7 +1392,7 @@ done`;
               }
             }
             if (!agentdMode || (keeperSid && !agentdAttach)) {
-              const inner = ra.prelude + `cd ${shq(cwd)} 2>/dev/null; export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ` + AMBIENT_OAT_UNSET + ra.tokenAssign + acctEnv + `exec env `
+              const inner = ra.prelude + `cd ${shq(cwd)} 2>/dev/null; ` + REMOTE_PRELUDE + AMBIENT_OAT_UNSET + ra.tokenAssign + acctEnv + `exec env `
                 + [...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq)].join(' ')
                 + runTail;
               spawnCmd = 'ssh';

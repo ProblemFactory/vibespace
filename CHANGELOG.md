@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.274.0
+
+Phase 4 (CS unification) of the campaign — start removing the DIVERGENCE that makes remote-only bugs possible, not just fixing their symptoms.
+
+- **The remote shell prelude has ONE definition** (`src/remote-shell.js`). Every remote command — ssh terminal / ssh chat / dial terminal / dial chat spawns, capability probes, agentd stdio bootstrap, agent-tool install/uninstall, the usage-scan harvest — needs the same two fixups first (`~/.local/bin` on PATH; nvm sourced, since a non-login `ssh host cmd` shell loads neither). That string was copy-pasted into **11 sites across two files and the copies had drifted** — the audit found spawn builders running a stale variant, which is precisely how a bug becomes "remote only". Same for the POSIX node finder (2.244.4): 4 copies → one `nodeFinder()`, and two of the old copies were the WEAKER variant that located node but never exported its dir onto PATH (so `#!/usr/bin/env node` agent tools stayed dead on dash hosts).
+- New `scripts/test-remote-shell.mjs` (12 asserts) is a DRIFT GUARD, not just a unit test: it fails the moment any file re-inlines the prelude or the finder instead of importing them.
+
 ## 2.273.0
 
 Phases 2+3 of the lag/silent-failure campaign — the client stops lying under lag, and the classes get retired by shared primitives instead of point fixes (docs/design-lag-cs-audit.md).
