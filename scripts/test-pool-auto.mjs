@@ -75,10 +75,27 @@ ck('proactive + exhausted current still switches (exhaustion tier wins)',
 ck('exhaustPct 10: current at 8% switches (est-based 提前切)',
   run({ a: acct(0.92, 6 * D), b: acct(0.4, 12 * H) }, { exhaustPct: 10 })?.reason === 'exhausted');
 ck('default threshold: 8% left does NOT switch', run({ a: acct(0.92, 6 * D), b: acct(0.4, 12 * H) }) === null);
-ck('exhaustPct 10: candidate GATE stays at 5 (9%-left member is a legal target)',
-  run({ a: acct(0.95, 12 * H), b: acct(0.91, 12 * H - 30), c: acct(0.5, 6 * D) }, { exhaustPct: 10 })?.to === 'b');
+// Settle-bar semantics (2.266.1, real oscillation: Personal<10% ⇄ Fish every
+// tick — exhaustion one way, EDF-soonest the other, both sides' prompt caches
+// cold-started each time): a VOLUNTARY move (soft-exhaustion / proactive)
+// only lands on a target above exhaustPct+MIN_GAIN; hard-dead (<5%) keeps
+// taking scraps.
+const runAB = (caches, opts = {}) => decidePoolSwitch({ currentId: 'a', members: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }], readCache: (id) => caches[id] ?? null, nowSec: NOW, ...opts });
+ck('soft-exhausted (hot 10%): a 9%-left member is NOT a target (would soft-exhaust immediately)…',
+  runAB({ a: acct(0.95, 12 * H), b: acct(0.91, 12 * H - 30) }, { exhaustPct: 10 }) === null);
+ck('…but a settle-bar-clearing member IS, even ranked behind the 9% one by EDF',
+  run({ a: acct(0.95, 12 * H), b: acct(0.91, 12 * H - 30), c: acct(0.5, 6 * D) }, { exhaustPct: 10 })?.to === 'c');
+ck('hard-dead (<5%) still takes scraps (9% beats nothing)',
+  runAB({ a: acct(0.97, 12 * H), b: acct(0.91, 12 * H - 30) }, { exhaustPct: 10 })?.to === 'b');
 ck('anti-flap margin: a 2%-better target inside the exhaustion band does NOT flip (no ping-pong)',
   run({ a: acct(0.97, 12 * H), b: acct(0.95, 12 * H - 30) }) === null);
+// THE oscillation regression: after exhaustion moved a→b, the proactive tier
+// must NOT jump back onto the <settle-bar account just because its weekly
+// deadline is sooner.
+ck('oscillation: proactive never returns onto a below-settle-bar sooner-deadline member',
+  decidePoolSwitch({ currentId: 'b', members, readCache: (id) => ({ b: acct(0.4, 6 * D), a: acct(0.92, 12 * H) })[id] ?? null, nowSec: NOW, proactive: true, exhaustPct: 10 }) === null);
+ck('oscillation control: a HEALTHY sooner-deadline member still gets the proactive jump',
+  decidePoolSwitch({ currentId: 'b', members, readCache: (id) => ({ b: acct(0.4, 6 * D), a: acct(0.5, 12 * H) })[id] ?? null, nowSec: NOW, proactive: true, exhaustPct: 10 })?.to === 'a');
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

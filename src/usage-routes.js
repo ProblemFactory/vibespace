@@ -525,6 +525,21 @@ app.post('/api/usage/refresh', async (req, res) => {
       }
     } catch { }
   }
+  // IDENTITY-GROUP fallback (2.266.1, real report): the email-link above needs
+  // the account RECORD's email, which login flows can leave empty — but the
+  // identity groups (orgUuid > email from the usage caches) already know which
+  // keys are the same real account. Any currently-valid token in the group is
+  // authoritative for the shared quota; the pool keeps the DIR token fresh
+  // while '__global__' idles, so this is the rung that actually fires there.
+  if (!token) {
+    try {
+      for (const id of app.locals.usageIdentityAccountIds?.(key) || []) {
+        if (id === key) continue;
+        token = id === '__global__' ? getOAuthToken() : accounts.usageToken(id);
+        if (token) break;
+      }
+    } catch { }
+  }
   if (!token) return res.json({ error: 'no currently-valid token for this account (nor its linked machine login) — run a session on it (the CLI refreshes its own login), then retry' });
   _onDemandUsageAt[key] = Date.now();
   _fetchOAuthUsage(token, (u) => {

@@ -559,6 +559,17 @@ class UsageHistory {
   // open doesn't pay the full-ledger parse).
   warm() { try { this._loadEvents(); } catch {} }
 
+  // Which ledger event carries this requestId — the per-message meta popup's
+  // "which account handled this?" (2.266.1, user request). Backwards search:
+  // the asked-about message is almost always recent.
+  eventForRid(rid) {
+    if (!rid) return null;
+    try { this.scan(); } catch { } // throttled incremental — freshens just-streamed messages
+    const evs = this._loadEvents();
+    for (let i = evs.length - 1; i >= 0; i--) if (evs[i].rid === rid) return evs[i];
+    return null;
+  }
+
   // Yield UNIQUE events in [from,to] (epoch ms) from the in-memory cache.
   * _events(from, to) {
     for (const ev of this._loadEvents()) {

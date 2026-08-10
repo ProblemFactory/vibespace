@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.266.1
+
+Three pool-operations fixes from live use (all three user-reported the same evening):
+
+- **⟳ quota refresh resolves tokens through the IDENTITY GROUP** ("现在刷新Personal Max的时候还在提示这个" — correct logic: if the pool can bill a conversation to the account, ⟳ must be able to read its quota). The refresh route's token lookup now walks every account id in the target's identity group (org-merged accounts span `__global__` + the named sub — the named dir's token stays fresh while the machine login idles into expiry, and vice versa), and `probeUsageForAccountKey` matches any live session whose usage key is in the group (pool sessions resolve to the real target, so a pooled conversation can answer `get_usage` for the account it's actually billing). The result is always written to the REQUESTED key's cache. "No valid token" now only appears when the whole identity truly has none.
+- **Pool oscillation killed — settle bar + dwell belt** ("一直在Fish Max和Personal Max之间切换…疯狂触发out of cache"): the hot tier's raised exhaustion threshold (est<10%) and the EDF proactive rule pointed in opposite directions once an account sat just under 10% with the sooner weekly deadline — soft-exhaustion moved off it, proactive jumped straight back, every tick, cold-starting BOTH sides' prompt caches. Now every VOLUNTARY move (soft-exhaustion or proactive EDF) must land on a member above the settle bar (`exhaustPct + MIN_GAIN`, i.e. it won't itself trip the exhaustion rule) — applied at candidate SELECTION, so a below-bar EDF-first member is skipped for a later qualifying one; hard-dead (<5%) still takes scraps. Engine belt: after any actual switch a pool holds 180s before the next voluntary move (hard-death exempt). Pool suite grows to 34 with the oscillation regression pair.
+- **Message metadata popup shows the billing account** (right-click a message's left strip): a new async row resolves the record's requestId against the usage ledger (`GET /api/usage-stats/rid-info`) — account name, `· via pool "X"` when the request flowed through a pooled identity, honest "not in the ledger yet" before the scan absorbs it. With auto-switching moving billing mid-conversation, per-message attribution is now user-visible.
+
 ## 2.266.0
 
 Exhaustion #2 post-mortem (same day: a 31-agent review workflow killed the Fable weekly bucket — anchors show 51%→100% in the final ~4 minutes, faster than any polling cadence could see). Three layers, all addressed:

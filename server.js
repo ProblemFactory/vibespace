@@ -695,8 +695,9 @@ function broadcastToSession(session, id, msg) {
 // hot=off → also ask ONE connected client to cold-restart the affected
 // conversations (headless instances degrade to hot behavior until a client
 // appears — the switch itself never waits on a browser).
-const { decidePoolSwitch } = require('./src/account-pool-auto.js');
-const _poolAutoLast = new Map(); // poolId → ts (min 60s between switches)
+const { decidePoolSwitch, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('./src/account-pool-auto.js');
+const _poolAutoLast = new Map(); // poolId → ts of last DECISION (eval gate)
+const _poolSwitchAt = new Map(); // poolId → ts of last actual SWITCH (dwell belt)
 // ── get_usage control channel + chat-mode limit banner (B-7edc/B-292b) ──────
 // The get_usage control request makes the CLI (first-party client) fetch usage
 // itself — strictly better ToS posture than our bare /api/oauth/usage call.
@@ -832,11 +833,28 @@ function probeUsageViaSession(session, timeoutMs = 8000) {
     } catch { resolve(null); }
   });
 }
-// ⟳-route hook: find any live local claude chat session billed to `key`.
+// Every account key in `key`'s IDENTITY group (org-merged logins span
+// '__global__' + named subs — one real account, several keys). Falls back to
+// just [key] when the identity is unknown.
+function usageIdentityAccountIds(key) {
+  try {
+    for (const [, g] of usageIdentityGroupsCached()) {
+      if (g.accountIds.includes(key)) return g.accountIds;
+    }
+  } catch { }
+  return [key];
+}
+// ⟳-route hook: find any live local claude chat session billed to `key` — or
+// to ANY key in its identity group (2.266.1, real report: ⟳ on the pool's
+// ACTIVE target said "no valid token" while the asking session itself was
+// billing that very account — the popup had remapped the linked account to
+// '__global__', which no session matches when pool sessions bill the DIR key;
+// the shared quota makes any same-identity session's answer authoritative).
 function probeUsageForAccountKey(key) {
+  const ids = new Set(usageIdentityAccountIds(key));
   for (const [, s] of activeSessions) {
     if (s.backend !== 'claude' || s.mode !== 'chat' || s.host || !s.pty) continue;
-    if (resolveUsageKey(s) !== key) continue;
+    if (!ids.has(resolveUsageKey(s))) continue;
     return probeUsageViaSession(s).then((parsed) => {
       if (parsed) writeUsageCacheForKey(key, parsed);
       return parsed;
@@ -844,6 +862,7 @@ function probeUsageForAccountKey(key) {
   }
   return Promise.resolve(null);
 }
+app.locals.usageIdentityAccountIds = usageIdentityAccountIds;
 // Chat-mode PASSIVE exhaustion signal (zero API calls): the CLI's own
 // "You've reached your … limit" banner marks the bucket dead in the cache and
 // immediately re-evaluates the pool — this is what makes auto-switch work for
@@ -1027,6 +1046,15 @@ function maybePoolAutoSwitchForPool(poolId) {
     // limit interrupts a long-running workflow; cold keeps 5%).
     const d = decidePoolSwitch({ currentId, members: accounts.poolMembers(poolId), readCache, nowSec: now / 1000, proactive: !!a.hot, exhaustPct: a.hot ? 10 : undefined });
     if (!d) return;
+    // DWELL belt (2.266.1, real oscillation report): every switch cold-starts
+    // the running sessions' prompt caches on BOTH accounts — expensive. After
+    // any switch, further switches wait 3min unless the current target is
+    // HARD-dead (<5%, genuinely unusable — escaping immediately is cheaper
+    // than idling on a dead account). The settle-bar in decidePoolSwitch is
+    // the primary anti-oscillation; this is the belt.
+    const lastSwitch = _poolSwitchAt.get(poolId) || 0;
+    if (now - lastSwitch < 180000 && !(d.fromRemaining != null && d.fromRemaining < POOL_HARD_PCT)) return;
+    _poolSwitchAt.set(poolId, now);
     _poolAutoLast.set(poolId, now);
     accounts.setPoolTarget(poolId, d.to);
     // Re-attribute every live session on this pool from this moment — the
@@ -3888,6 +3916,18 @@ app.get('/api/usage-stats', (req, res) => {
     // host = the DEVICE filter ('local' | a host id) — top-level over the view
     const hostFilter = req.query.host ? String(req.query.host) : null;
     res.json(usageHistory.aggregate({ from, to, backend, accounts, hostFilter, pivots }));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Per-message account attribution for the msg-meta popup (2.266.1, user
+// request): which account served this requestId, per the ledger's baked
+// attribution (aname frozen at scan time; pool = billed THROUGH it).
+app.get('/api/usage-stats/rid-info', (req, res) => {
+  try {
+    const ev = usageHistory.eventForRid(String(req.query.rid || ''));
+    if (!ev) return res.json({ found: false });
+    let poolName = null;
+    try { poolName = ev.pool ? (accounts.get(ev.pool)?.name || null) : null; } catch { }
+    res.json({ found: true, acct: ev.acct || null, aname: ev.aname || null, atype: ev.atype || 'global', pool: ev.pool || null, poolName, host: ev.host || null });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/usage-stats/pricing', (req, res) => res.json({ pricing: usageHistory.pricingTable() }));
