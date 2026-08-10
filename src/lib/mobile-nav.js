@@ -130,6 +130,9 @@ export class MobileNav {
       billChip = document.createElement('span');
       billChip.className = 'mobile-win-billing' + (isApi ? ' api' : '');
       billChip.textContent = auth.source === 'unknown' ? '?'
+        // pooled parity with the desktop badge: name the pool AND its current
+        // real target (2.267.1, mobile pooling support)
+        : auth.source === 'pooled' ? (auth.name || t('pool')) + (auth.poolTarget ? ` → ${auth.poolTarget}` : '')
         : (auth.name || (isApi ? (auth.source === 'api-console' ? 'Console' : 'API') : t('CLI login')));
       billChip.title = t('Click to switch billing');
       billChip.onclick = (e) => {

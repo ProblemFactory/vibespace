@@ -321,6 +321,10 @@ export function installUsageMeter(App, ctx = {}) {
         const scEst = (estSel?.scopedWeekly || []).find((x) => String(x?.name || '').toLowerCase() === String(sc.name || '').toLowerCase()) || null;
         const pSc = estDisplayPair(sc, scEst);
         const pctSc = pSc.estPct != null ? pSc.darkPct : Math.round((sc.utilization || 0) * 100);
+        // the mobile chip claims "worst across all shown buckets" — the
+        // scoped weeklies (the bucket that actually exhausts first under
+        // Fable-heavy load) were missing from it (2.267.1, mobile parity)
+        chipWorst = Math.max(chipWorst, pSc.estPct ?? pctSc);
         const colorSc = usageColor(pctSc);
         // Scoped buckets only arrive via on-demand refresh (⟳) — show THEIR
         // age, which can lag the passively-updated 5h/7d above.

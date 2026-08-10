@@ -1,0 +1,13 @@
+#!/bin/bash
+# WebUI editor disguised as "code" so Claude Code treats it as GUI (no screen clear).
+# Parse args: skip flags, last arg is the file
+FILE="${@: -1}"
+SIGNAL="/tmp/claude-webui-edit-signal-$$"
+PORT="${CLAUDE_WEBUI_PORT:-3456}"
+SESS="${CLAUDE_WEBUI_SESSION_ID}"
+curl -sf -X POST "http://localhost:${PORT}/api/editor/open" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${VIBESPACE_SESSION_TOKEN}" \
+  -d "{\"file\":\"$FILE\",\"signal\":\"$SIGNAL\",\"sessionId\":\"$SESS\"}" >/dev/null 2>&1 &
+while [ ! -f "$SIGNAL" ]; do sleep 0.2; done
+rm -f "$SIGNAL"
