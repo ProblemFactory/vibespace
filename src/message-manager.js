@@ -730,7 +730,13 @@ class MessageManager {
         const msg = {
           id: msgId, role: 'tool', status: 'pending',
           content: [{ type: 'tool_call', toolCallId: block.id, toolName: block.name, input: block.input }],
-          ts: Date.now(), turnIndex: this.turnIndex,
+          // _currentTs first (the assistant record's own timestamp): this
+          // hand-rolled path bypassed _create's ts ladder and stamped every
+          // rebuild-rendered tool card with the REBUILD time, not the tool
+          // call time (caught by the R3 transcript parity suite — two parses
+          // of one file disagreed on ts; live records without timestamps
+          // still fall back to arrival time exactly as before).
+          ts: this._currentTs || Date.now(), turnIndex: this.turnIndex,
           toolCallId: block.id, toolName: block.name, toolStatus: null,
           permission: null, usage: null, taskInfo: null, meta: recMeta,
         };

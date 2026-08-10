@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.285.0
+
+**R3 step 2 (three-tier): transcript ops served by the device daemon — dark, with byte-identical parity proven** (docs/design-three-tier.md).
+
+The daemon now hosts the SAME transcript service the server extracted in 2.283.0 (`src/transcript-service.js` bundles into `vibespace-agentd.js` along with the full parse stack): a `transcript-op` op runs page / turnmap / searchIndexed / status / taskState / gapInfo / gapSlab / fullTurnmap next to the bytes and streams the parsed JSON result over a count-gated byte channel (the read-range contract — never resolve on the done marker, 2.187.0). Client side: `DeviceManager.transcriptOp(method, ref, params)`. The ops are DARK — no production consumer; remote reads keep flowing through the server-hosted service until the parity substrate has soaked (retirement-order law).
+
+`scripts/test-transcript-parity.mjs` (19 asserts) proves the switchover will be a transport swap, not a behavior change: the same fixtures queried in-process and through a REAL daemon return byte-identical JSON — including a >½MB multi-window payload (count-gating actually exercised), a ~36MB transcript's real seek family (line-index gap, mid-file slab, streaming turn scan), the codex parser, multibyte content across chunk boundaries, and honest shapes for unknown methods / missing transcripts. This is what R0's content-derived message ids bought: two independent parser processes now mint identical ids for identical records.
+
+The suite caught a real defect on its first run: the normalizer's hand-rolled tool-message path stamped `ts: Date.now()` instead of the record's own timestamp — every rebuild-rendered tool card (restart, view-only, resume) carried the REBUILD time, so the message-meta popup showed the wrong time for all historical tool calls. Fixed to the `_currentTs` ladder; live records without timestamps keep arrival-time behavior.
+
+
 ## 2.284.4
 
 **Forking a LIVE conversation killed the parent session mid-turn** (real incident on the dev machine, minutes after 2.284.2 rolled out): the pre-resume writer sweep — which SIGTERMs any claude still writing the target conversation's transcript before a resume — ran for FORK creates too. A fork resumes the PARENT's conversation id to branch it, so the sweep found the live parent's claude as a "writer" and terminated it; the parent window died mid-turn while the fork came up fine.
