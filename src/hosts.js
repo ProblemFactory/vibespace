@@ -1186,11 +1186,16 @@ class HostManager {
    *  keeps its own byte cursors (~/.vibespace/usage-cursor.json), so after the
    *  first full pass each harvest returns only NEW events. Throttled 15min per
    *  host unless forced. Returns the raw NDJSON text ('' when throttled). */
-  async harvestUsage(id, { force = false, scannerPath } = {}) {
+  async harvestUsage(id, { force = false, scannerPath, minIntervalMs } = {}) {
     const h = this.get(id);
     if (!this._usageHarvestAt) this._usageHarvestAt = new Map();
     const last = this._usageHarvestAt.get(id) || 0;
-    if (!force && Date.now() - last < 15 * 60 * 1000) return '';
+    // minIntervalMs: the event-driven cadence (a remote session's turn just
+    // ended → harvest soon so the ledger + billing popup lag ~a minute, not
+    // 15). The 15-min default remains the idle/背景 cadence. Still one ssh/
+    // device round trip per call — never sub-minute.
+    const gate = Math.max(60 * 1000, minIntervalMs ?? 15 * 60 * 1000);
+    if (!force && Date.now() - last < gate) return '';
     this._usageHarvestAt.set(id, Date.now());
     const script = fs.readFileSync(scannerPath, 'utf-8');
     // CS data-plane: ship+run the scanner through the daemon (streaming exec —
