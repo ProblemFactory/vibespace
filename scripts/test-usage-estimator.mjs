@@ -322,27 +322,34 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   ck('zero live total (retention gap) falls back to the frozen snapshot', zero.sevenDay[0].cost === 20);
 }
 
-// ── 5h token-class regression (B-536b) ───────────────────────────────────────
+// ── 5h token-class regression (B-536b; 3-class cw/cr/fresh) ──────────────────
 {
   const R5 = Math.floor(T0 / 1000) + 4 * 3600; // one shared 5h window
-  const csC = (total, cw) => ({ total, byFamily: { fable: total, opus: 0, sonnet: 0, haiku: 0, other: 0 }, byClass: { cw, other: total - cw }, requests: 1 });
-  // chain of anchors: cw-heavy windows burn at $800/full, fresh-heavy at $250
+  const csC = (cw, cr, fresh) => ({ total: cw + cr + fresh, byFamily: { fable: cw + cr + fresh, opus: 0, sonnet: 0, haiku: 0, other: 0 }, byClass: { cw, cr, other: fresh }, requests: 1 });
+  // chain of anchors: cw burns at $800/full, cr at $3200, fresh at $250
   const mk5 = (at, u5, prev, costSince) => ({ ...mkAnchor(at, { u5, r5: R5 }), prevFetchedAt: prev, costSince });
   const chain = [
     mk5(T0, 0.10, null, null),
-    mk5(T0 + 10 * 60000, 0.15, T0, csC(40, 40)),               // pure cw: du 0.05 = 40/800
-    mk5(T0 + 20 * 60000, 0.23, T0 + 10 * 60000, csC(20, 0)),   // pure other: du 0.08 = 20/250
-    mk5(T0 + 30 * 60000, 0.28, T0 + 20 * 60000, csC(40, 40)),  // pure cw again
-    mk5(T0 + 40 * 60000, 0.36, T0 + 30 * 60000, csC(20, 0)),   // pure other again
+    mk5(T0 + 8 * 60000, 0.15, T0, csC(40, 0, 0)),                 // pure cw: du 0.05 = 40/800
+    mk5(T0 + 16 * 60000, 0.23, T0 + 8 * 60000, csC(0, 0, 20)),    // pure fresh: du 0.08 = 20/250
+    mk5(T0 + 24 * 60000, 0.24, T0 + 16 * 60000, csC(0, 32, 0)),   // pure cr: du 0.01 = 32/3200
+    mk5(T0 + 32 * 60000, 0.29, T0 + 24 * 60000, csC(40, 0, 0)),
+    mk5(T0 + 40 * 60000, 0.37, T0 + 32 * 60000, csC(0, 0, 20)),
+    mk5(T0 + 48 * 60000, 0.38, T0 + 40 * 60000, csC(0, 32, 0)),
   ];
   const r = est.learnRates(chain, { priors: { fiveHour: 500 } });
-  ck('class regression: recovers cw full ≈ $800', r.fiveHour.impliedFullCwUsd > 700 && r.fiveHour.impliedFullCwUsd < 900);
-  ck('class regression: recovers other full ≈ $250', r.fiveHour.impliedFullOtherUsd > 220 && r.fiveHour.impliedFullOtherUsd < 280);
+  // two cw pairs vs the $500 prior pseudo-pair: honest Bayesian shrinkage —
+  // the fit lands BETWEEN prior and the $800 data truth, nearer truth as
+  // pairs accumulate
+  ck('class regression: cw full between prior ($500) and data truth ($800), pulled toward data', r.fiveHour.impliedFullCwUsd > 540 && r.fiveHour.impliedFullCwUsd < 800);
+  ck('class regression: recovers cr full ≈ $3200 (reads nearly free)', r.fiveHour.impliedFullCrUsd > 2600 && r.fiveHour.impliedFullCrUsd < 3800);
+  ck('class regression: recovers fresh full ≈ $250', r.fiveHour.impliedFullFreshUsd > 215 && r.fiveHour.impliedFullFreshUsd < 290);
   ck('class regression: blended rate still present (display/fallback)', Number.isFinite(r.fiveHour.rate));
-  // class-aware prediction beats blended on a cw-heavy window
+  // class-aware prediction: a cr-dominated window must NOT be priced blended
   const anchor = { fetchedAt: T0, buckets: { fiveHour: { u: 0.10, resetsAt: R5 }, sevenDay: null, scopedWeekly: [] } };
-  const eC = est.estimateBuckets({ anchor, rates: { fiveHour: r.fiveHour }, costFn: () => csC(80, 80), nowMs: T0 + HR });
-  ck('class-aware estimate: $80 pure-cw window → +10 points (80/800), not blended', approx(eC.fiveHour.utilization, 0.10 + 80 / r.fiveHour.impliedFullCwUsd, 0.01));
+  const eC = est.estimateBuckets({ anchor, rates: { fiveHour: r.fiveHour }, costFn: () => csC(1, 32, 1), nowMs: T0 + HR });
+  const expC = 0.10 + 1 / r.fiveHour.impliedFullCwUsd + 32 / r.fiveHour.impliedFullCrUsd + 1 / r.fiveHour.impliedFullFreshUsd;
+  ck('class-aware estimate: cr-dominated window priced per component', approx(eC.fiveHour.utilization, expC, 0.01));
   // no byClass in the cost source → blended fallback
   const eB = est.estimateBuckets({ anchor, rates: { fiveHour: r.fiveHour }, costFn: () => cs(80, 80), nowMs: T0 + HR });
   ck('no class split in cost source → blended fallback', approx(eB.fiveHour.utilization, 0.10 + 80 * r.fiveHour.rate, 0.005));
@@ -350,9 +357,9 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   // the $20k sanity bound) must NOT emit class rates — blended only
   const bad = [
     mk5(T0, 0.10, null, null),
-    mk5(T0 + 10 * 60000, 0.101, T0, csC(900, 900)),
-    mk5(T0 + 20 * 60000, 0.102, T0 + 10 * 60000, csC(900, 900)),
-    mk5(T0 + 30 * 60000, 0.103, T0 + 20 * 60000, csC(900, 900)),
+    mk5(T0 + 10 * 60000, 0.101, T0, csC(900, 0, 0)),
+    mk5(T0 + 20 * 60000, 0.102, T0 + 10 * 60000, csC(900, 0, 0)),
+    mk5(T0 + 30 * 60000, 0.103, T0 + 20 * 60000, csC(900, 0, 0)),
   ];
   const rb = est.learnRates(bad, { priors: { fiveHour: 500 } });
   ck('absurd implied cw full (> sanity bound) → class rates withheld, blended kept',

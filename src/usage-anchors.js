@@ -90,7 +90,7 @@ function costBetween(usageHistory, accountId, fromMs, toMs) {
 // across all of them or the odometer under-reads.
 function costBetweenMulti(usageHistory, accountIds, fromMs, toMs) {
   const want = new Set((accountIds || []).map((a) => a || '__global__'));
-  const out = { total: 0, byFamily: { fable: 0, opus: 0, sonnet: 0, haiku: 0, other: 0 }, byClass: { cw: 0, other: 0 }, requests: 0 };
+  const out = { total: 0, byFamily: { fable: 0, opus: 0, sonnet: 0, haiku: 0, other: 0 }, byClass: { cw: 0, cr: 0, other: 0 }, requests: 0 };
   try {
     for (const ev of usageHistory._events(fromMs, toMs)) {
       const acct = ev.acct || '__global__';
@@ -102,13 +102,14 @@ function costBetweenMulti(usageHistory, accountIds, fromMs, toMs) {
       const m = String(ev.model || '').toLowerCase();
       const fam = m.includes('fable') ? 'fable' : m.includes('opus') ? 'opus' : m.includes('sonnet') ? 'sonnet' : m.includes('haiku') ? 'haiku' : 'other';
       out.byFamily[fam] += c;
-      // TOKEN-CLASS split (B-536b): the 5h bucket's internal weighting of
-      // cache-WRITE tokens differs sharply from our $ pricing (hourly-scale
-      // evidence: adjacent windows implied full $307 vs $790 by cw share) —
-      // the 5h regression learns separate rates per class. cw = the cache-
-      // write component priced alone; other = everything else.
+      // TOKEN-CLASS split (B-536b; 3-class since 2.268.1): the 5h bucket's
+      // internal weighting differs per token class from our $ pricing —
+      // cache WRITES burn ~half per $, cache READS are nearly free (real-data
+      // fit: cw-full ~$443, cr-full ~$2556, fresh ~$185). cw and cr priced
+      // alone; other = fresh input + output.
       const cw = usageHistory._cost({ ...ev, i: 0, o: 0, cr: 0 });
-      out.byClass.cw += cw; out.byClass.other += (c - cw);
+      const cr = usageHistory._cost({ ...ev, i: 0, o: 0, cw5: 0, cw1: 0 });
+      out.byClass.cw += cw; out.byClass.cr += cr; out.byClass.other += Math.max(0, c - cw - cr);
     }
   } catch { }
   out.total = Math.round(out.total * 10000) / 10000;
