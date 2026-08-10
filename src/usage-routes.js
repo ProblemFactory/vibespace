@@ -408,11 +408,17 @@ try {
 } catch {}
 // Ledger harvest from remote hosts (ssh, incremental via remote-side cursors).
 // One at a time per server; throttling lives in hosts.harvestUsage (15min).
-let _harvestBusy = false;
+// TIMESTAMPED LEASE, not a boolean (2.271.0 T1-5): a hung device stream used
+// to leave _harvestBusy true forever, so every later harvest answered
+// {busy:true} until a server restart — remote usage collection silently died
+// fleet-wide after ONE link flap. The lease expires; the underlying op is
+// bounded too (runStream now settles on link death).
+let _harvestLease = 0;
+const HARVEST_LEASE_MS = 5 * 60 * 1000;
 app.post('/api/usage-stats/harvest-hosts', async (req, res) => {
   if (!hosts || !usageHistory) return res.json({ hosts: {} });
-  if (_harvestBusy) return res.json({ busy: true });
-  _harvestBusy = true;
+  if (Date.now() - _harvestLease < HARVEST_LEASE_MS) return res.json({ busy: true });
+  _harvestLease = Date.now();
   const out = {};
   try {
     const scannerPath = path.join(path.dirname(USAGE_CACHE_DIR), 'bin', 'vibespace-usage-scan');
@@ -424,7 +430,7 @@ app.post('/api/usage-stats/harvest-hosts', async (req, res) => {
         out[id] = text ? usageHistory.ingestRemoteEvents(id, h.name, text) : { added: 0, throttled: !text };
       } catch (e) { out[id] = { error: String(e.message || e).slice(0, 160) }; }
     }
-  } finally { _harvestBusy = false; }
+  } finally { _harvestLease = 0; }
   res.json({ hosts: out });
 });
 app.post('/api/usage/refresh', async (req, res) => {
@@ -450,8 +456,11 @@ app.post('/api/usage/refresh', async (req, res) => {
       let hMeta2; try { hMeta2 = hosts.get(hid); } catch { return res.status(404).json({ error: 'unknown host' }); }
       const acctMeta2 = (accounts.list().accounts || []).find((x) => x.id === aid);
       if (!acctMeta2) return res.status(404).json({ error: 'unknown account' });
-      _onDemandUsageAt[tkey] = Date.now();
+      // Throttle is stamped only AFTER a probe actually reached the host
+      // (2.271.0 T2-12) — stamping first meant an immediate retry after an
+      // unreachable-host failure answered {throttled:true} for 60s.
       hosts.readRemoteSubOAuth(hid, aid).then((token) => {
+        _onDemandUsageAt[tkey] = Date.now();
         if (!token) return res.json({ error: 'no currently-valid login for this account on the host — run a session on it there first' });
         _fetchOAuthUsage(token, (u) => {
           if (!u) return res.json({ error: 'refresh failed (rate-limited or offline) — kept last-known' });
@@ -468,13 +477,15 @@ app.post('/api/usage/refresh', async (req, res) => {
             res.json({ success: true });
           });
         });
-      }).catch((e) => res.json({ error: String(e.message || e).slice(0, 160) }));
+      }).catch((e) => res.json({ error: e?.code === 'host-unreachable'
+        ? `${hMeta2?.name || hid} isn’t responding — couldn’t check its login. Retry when it’s back.`
+        : String(e.message || e).slice(0, 160) }));
       return;
     }
     if (Date.now() - (_onDemandUsageAt['host:' + hid] || 0) < 60000) return res.json({ throttled: true });
     let hMeta; try { hMeta = hosts.get(hid); } catch { return res.status(404).json({ error: 'unknown host' }); }
-    _onDemandUsageAt['host:' + hid] = Date.now();
     hosts.readRemoteOAuth(hid).then((token) => {
+      _onDemandUsageAt['host:' + hid] = Date.now(); // stamp only after the probe reached the host
       if (!token) return res.json({ error: 'no currently-valid login token on the host — log in / run claude there first' });
       _fetchOAuthUsage(token, (u) => {
         if (!u) return res.json({ error: 'refresh failed (rate-limited or offline) — kept last-known' });
@@ -491,7 +502,9 @@ app.post('/api/usage/refresh', async (req, res) => {
           res.json({ success: true });
         });
       });
-    }).catch((e) => res.json({ error: String(e.message || e).slice(0, 160) }));
+    }).catch((e) => res.json({ error: e?.code === 'host-unreachable'
+      ? `${hMeta?.name || hid} isn’t responding — couldn’t check its login. Retry when it’s back.`
+      : String(e.message || e).slice(0, 160) }));
     return;
   }
   const key = String(req.body?.account || '__global__');

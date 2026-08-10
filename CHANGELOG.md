@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.272.0
+
+Phase 1 (server-side correctness under lag) of the campaign completed — docs/design-lag-cs-audit.md.
+
+- **A slow host no longer gets your running conversation KILLED.** `findKeeperFor` — the probe that decides "adopt the live claude" vs "sweep + respawn" — swallowed EVERY failure into `null`, which callers read as "no live keeper": on host lag the resume path went straight to the writer sweep and SIGTERMed the perfectly healthy remote claude it should have adopted. It now returns a distinct `{error:true}` sentinel (and its ssh leg honours the documented ≥15s session-establishing bar instead of 10s); all three consumers refuse with a retryable "couldn't verify whether this conversation is still running there" error instead of sweeping. This is the mechanism behind the historical session-disappeared reports.
+- **A skipped writer sweep is no longer silent**: when the pre-resume sweep fails (exactly under the lag that makes a second writer likely), the resume still proceeds but the `created` reply carries a warning the client toasts — "couldn't verify no other process is writing this conversation … the transcript may double-write".
+- **Terminate on a machine reports the truth**: the dial leg is bounded (`deviceBounded` 8s, was an unbounded `device()`) and BOTH legs check their outcome — an unconfirmed kill emits a serverNotice ("may still be running there") instead of the UI implying a clean stop while the remote claude lives on.
+- **One device flap no longer kills remote usage collection until a restart**: `runStream` registered no onClose/onExit, so a mid-stream link death left its `done` promise pending FOREVER — `harvestUsage` hung and `_harvestBusy` stayed true for every host. runStream now settles on link death (plus a 120s deadline) and the busy flag became a 5-minute timestamped lease.
+- **Dial chat/terminal can no longer hang blank forever**: `openSession`/`openPipeSession`'s `ready` promise only settled on an explicit daemon reply, so a link death BETWEEN the open request and that reply left the bridge awaiting it eternally (the pre-ready twin of the B-b87b critical). Both now reject `ready` on link death.
+- **"No login token on the host" no longer means "the host is down"**: `readRemoteOAuth`/`readRemoteSubOAuth` returned null for both, so the quota ⟳ gave the wrong diagnosis and the wrong remedy; they now throw a tagged `host-unreachable` the route renders honestly, and the 60s throttle is stamped only AFTER a probe actually reached the machine.
+- Dial usage harvest rethrows the real device error instead of falling into an ssh branch that throws "is a dial-out device", and resets its 15-min throttle on failure so the next kick retries.
+
 ## 2.271.0
 
 Phase 1 of the lag/silent-failure/CS-separation campaign (docs/design-lag-cs-audit.md — 89 audited findings, 5 phases).
