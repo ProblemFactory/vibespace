@@ -403,7 +403,7 @@ class AccountManager {
       throw e;
     }
     // Claude's macOS Keychain service is hashed from the config-dir path
-    // (PR #23, walter). Moving fresh fallback bytes to another id does NOT
+    // (PR #23). Moving fresh fallback bytes to another id does NOT
     // move that Keychain item, so the survivor can keep reading its old token
     // and the new item is orphaned. Keep both records instead of claiming a
     // safe file-only merge.
@@ -681,7 +681,7 @@ class AccountManager {
     // and above full-login shipping.
     if (hasOat) return { usable: true, how: 'oat', reason: null, linked, held, heldVerified: false };
     if (loggedIn && allowShip && hostFacts.transport !== 'dial') {
-      // macOS Keychain-backed logins never ship (PR #23, walter): the file
+      // macOS Keychain-backed logins never ship (PR #23): the file
       // fallback is a same-machine shadow that forks the rotating refresh
       // token the moment either copy refreshes. Log in ON the host instead
       // (held/linked/oat rungs above stay fully usable for these accounts).
