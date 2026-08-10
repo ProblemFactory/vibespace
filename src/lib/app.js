@@ -1742,6 +1742,14 @@ class App {
       if (onHost && hostId) this._warmHostAccountCache?.(hostId);
       const vOf = (a) => (onHost ? this._hostVerdicts?.[hostId]?.[a.id] : null) || null;
       for (const a of list) {
+        // Pooled pseudo-account: neither an API key (the old else-branch
+        // labeled it "— API key …undefined") nor a plain subscription.
+        // Local-only by design (directory-symlink mechanics).
+        if (a.pooled || a.type === 'pooled') {
+          if (onHost) opts.push([a.id, a.name + ' — ' + t('pool (this machine only)'), true]);
+          else opts.push([a.id, a.name + (a.currentName ? ` → ${a.currentName}` : ' · ' + t('pool'))]);
+          continue;
+        }
         if (a.type === 'subscription') {
           if (be === 'codex' || !onHost) {
             if (a.loggedIn && (!onHost || allowSubRemote)) opts.push([a.id, t('{name} (subscription)', { name: a.name })]);

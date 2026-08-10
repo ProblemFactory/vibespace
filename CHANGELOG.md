@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.267.1
+
+Pool-display + mobile parity batch (three user reports, same evening):
+
+- **"Claude Code — not logged in" no longer cries wolf**: under full pooling the machine login legitimately idles to token-less, but the Manage-Agents backend header read as "Claude is broken" while 6 named/pooled identities were carrying every session. `/api/backend-status` now counts usable named identities (`namedLoggedIn`); the header says "machine login inactive · N named account(s) in use" (Log in stays offered — it's still how you revive the machine login). A genuinely account-less machine keeps the honest warning.
+- **The pool is no longer labeled "· API"**: the billing switcher's pool row now reads `名字 → 当前目标` with the TARGET's usage preview (dead-reckoned est included); on a remote session it's disabled with the local-only reason instead of failing at spawn. The New Session dialog had the same class of bug worse — a pool fell into the API-key else-branch and rendered "— API key …undefined"; it now shows `→ target` locally and "pool (this machine only)" disabled on hosts.
+- **Mobile parity**: the phone's worst-of quota chip now includes the model-scoped weekly buckets (the bucket that actually exhausts first under Fable-heavy load was missing from "worst"), estimate-aware like the rest; the mobile window-switcher's billing chip names the pool AND its current target (desktop badge parity). The billing switcher, usage popup est bars, and Manage-Agents pool rows were already shared code and inherit the fixes above.
+
 ## 2.267.0
 
 Two halves: the estimator calibration pass (user report: 最近几次刷新预测倾向于高估) and the B-b87b defect batch — all 16 adversarially-confirmed findings from the 31-agent global review, fixed.

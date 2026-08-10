@@ -875,6 +875,12 @@ export function installManageAgents(App, ctx = {}) {
         left.innerHTML = `<b>${b.label}</b>${ver ? ` <span class="ob-ver">${escHtml(ver)}</span>` : ''} ${
           !info.installed ? `<span class="ob-bad">${t('not installed')}</span>`
           : info.loggedIn ? `<span class="ob-ok">\u2713 ${t('logged in')}</span>${lmLabel ? ` <span class="ob-ver">${escHtml(lmLabel)}</span>` : ''}${helperWarn}`
+          // Machine login dead but NAMED/pooled accounts carry the sessions
+          // (the pooling-era normal state, 2.267.1): "not logged in" read as
+          // "Claude is broken" \u2014 say what's actually true. Log in stays
+          // offered (it's still how you revive the machine login).
+          : (info.namedLoggedIn > 0)
+            ? `<span class="ob-ver">${t('machine login inactive')}</span> <span class="ob-ok">${t('{n} named account(s) in use', { n: info.namedLoggedIn })}</span>`
           : `<span class="ob-warn">${t('not logged in')}</span>`
         }`;
         const actions = document.createElement('div'); actions.className = 'agent-actions';

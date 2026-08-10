@@ -5212,6 +5212,17 @@ app.get('/api/backend-status', (req, res) => {
   // a configured helper ABOVE OAuth, so "loggedIn (oauth)" alone can mislead
   // — the dialog needs to warn when both are present (CW-H200 incident).
   try { if (JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', 'settings.json'), 'utf-8'))?.apiKeyHelper) out.claude.keyHelper = true; } catch {}
+  // Named-account nuance (2.267.1, user report): under full pooling the
+  // MACHINE login legitimately idles to token-less — a bare "not logged in"
+  // on the backend header reads as "Claude is broken" while every session
+  // runs fine on named/pooled accounts. Count usable named identities
+  // (logged-in subs + pools with a logged-in target + stored API keys) so
+  // the client can say what's actually true.
+  try {
+    const l = accounts.list();
+    out.claude.namedLoggedIn = (l.accounts || []).filter((a) =>
+      (a.backend || 'claude') === 'claude' && (a.loggedIn || (!a.pooled && a.type !== 'subscription' && a.tail))).length;
+  } catch {}
   out.codex = probe(CODEX_CMD);
   out.codex.cmdPath = CODEX_CMD && CODEX_CMD.startsWith('/') ? CODEX_CMD : null;
   out.codex.install = classifyInstall(out.codex.cmdPath);

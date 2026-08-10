@@ -912,6 +912,17 @@ export function installSessionLifecycle(App, ctx = {}) {
     }
     for (const a of accts) {
       const cur = currentId === a.id;
+      // Pooled pseudo-accounts are neither API keys nor plain subscriptions
+      // (user report: the switcher tagged the pool '· API'): the row names
+      // the CURRENT TARGET, and remote sessions can't use a pool at all
+      // (local symlink mechanics — the server refuses the spawn too).
+      if (a.pooled) {
+        const sfx = a.currentName ? ` → ${a.currentName}` : ' ' + t('· pool');
+        if (rHostId) { items.push({ label: a.name + sfx, disabled: true, title: t('Pooled accounts are local-only (the pool switches a credentials directory on THIS machine)') }); continue; }
+        const estP = a.current ? (this._usageEstimates?.[a.current] || (this._usageGlobal?.accountId === a.current ? this._usageEstimates?.__global__ : null)) : null;
+        items.push({ labelHtml: rowHtml((cur ? '✓ ' : '') + a.name, sfx, usageHint(a.current ? this._accountUsage?.[a.current] : null, estP)), action: () => { if (!cur) doSwitch(a.id, a.name); } });
+        continue;
+      }
       const linked = rHostId && hostLinked(a) && (isCodex || (a.type || 'api') === 'subscription');
       const held = !linked && rHostId && hostSubHeld(a) && (a.type || 'api') === 'subscription';
       const suffix = (!isCodex && (a.type || 'api') !== 'subscription') ? ' · API'
