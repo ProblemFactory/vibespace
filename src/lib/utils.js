@@ -549,6 +549,54 @@ export async function fetchJson(url, opts) {
   } catch { return null; }
 }
 
+/** THROWING sibling of fetchJson (2.272.1, campaign shared primitive #1).
+ *  fetchJson never throws — it returns null on a network/parse failure and
+ *  hands back `{error}` bodies as ordinary data — so `try { await fetchJson }
+ *  catch` is DEAD CODE and every call site that forgets to check the result
+ *  silently claims success on failure (the single largest class in the
+ *  lag/silent-failure audit: 49 findings). Use api() on any USER-ACTION path:
+ *  it throws a real Error for both failure shapes, so one try/catch around a
+ *  dialog handler is enough, and the message is user-showable.
+ *  Reads that legitimately tolerate absence keep fetchJson. */
+export async function api(url, opts) {
+  let res;
+  try { res = await fetch(url, opts); }
+  catch { throw new Error('Server unreachable — check your connection and retry'); }
+  let body = null;
+  try { body = await res.json(); } catch { body = null; }
+  if (!res.ok) throw new Error(body?.error || `${res.status} ${res.statusText || 'request failed'}`);
+  if (body && typeof body === 'object' && body.error) throw new Error(String(body.error));
+  return body;
+}
+
+/** Host-scoped transition-state chip (2.272.1, campaign shared primitive #3).
+ *  ONE visual language for the three states every host-scoped surface needs
+ *  and most of them lacked: checking / stale / unreachable. Returns an
+ *  HTMLElement (callers append it); `age` is a ms timestamp of the data.
+ *  state: 'pending' | 'stale' | 'error' | 'ok'. */
+export function hostStateChip(state, { text = '', age = 0, title = '' } = {}) {
+  const el = document.createElement('span');
+  el.className = 'host-state-chip host-state-' + state;
+  let label = text;
+  if (!label) {
+    if (state === 'pending') label = 'checking…';
+    else if (state === 'stale') label = age ? `as of ${agoText(age)}` : 'cached';
+    else if (state === 'error') label = 'unreachable';
+  }
+  el.textContent = label;
+  if (title) el.title = title;
+  return el;
+}
+
+/** "3m ago" / "2h ago" for staleness labels (shared by the chip + callers). */
+export function agoText(ts) {
+  const m = Math.max(0, Math.round((Date.now() - ts) / 60000));
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  return h < 48 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
+}
+
 /** Clipboard copy with execCommand fallback for non-HTTPS */
 
 /** Full-screen image zoom overlay (chat thumbnails, pending attachment chips).
