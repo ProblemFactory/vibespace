@@ -486,7 +486,8 @@ export function installManageAgents(App, ctx = {}) {
     const { body, selectedHost, done, run, refresh, st } = ctx;
     let accts;
     try { accts = await this.refreshAccounts(); } catch { return; }
-    const codexAccts = (accts.accounts || []).filter(a => a.backend === 'codex');
+    const codexAccts = (accts.accounts || []).filter(a => a.backend === 'codex')
+      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''))); // type-order parity with the claude roster (all codex entries are logins)
     // st is already machine-scoped: /api/hosts/<id>/backend-status on a host.
     const gLoggedIn = !!(st?.codex?.loggedIn);
     const hostLabel = selectedHost ? (ctx.hostLabel || t('remote host')) : null;
@@ -1344,7 +1345,13 @@ export function installManageAgents(App, ctx = {}) {
     const racct = ctxRacct;
     const hostLabel = selectedHost ? (ctx.hostLabel || t('remote host')) : null;
     const accts = await this.refreshAccounts(); // keep app cache in sync
-    const claudeAccts = (accts.accounts || []).filter(x => (x.backend || 'claude') === 'claude');
+    // Roster order = TYPE, not insertion (2.268.5, user request): pools first
+    // (the umbrella identities you actually pick), then subscriptions, then
+    // API keys; name-sorted within a type so the list stays predictable as
+    // accounts come and go.
+    const typeRank = (x) => (x.pooled || x.type === 'pooled') ? 0 : (x.type === 'subscription' ? 1 : 2);
+    const claudeAccts = (accts.accounts || []).filter(x => (x.backend || 'claude') === 'claude')
+      .sort((a, b2) => typeRank(a) - typeRank(b2) || String(a.name || '').localeCompare(String(b2.name || '')));
     // §ban-safety: on a REMOTE host a subscription can't run unless the opt-in
     // is set (its creds would ship to the host's — likely datacenter — IP). Its
     // rows render disabled with guidance; API keys are unaffected.
