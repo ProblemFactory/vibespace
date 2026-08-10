@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.267.2
+
+Hotfix for a 2.267.0 regression the fake-`code` move dragged in: three OTHER generators (vibespace-status / vibespace-hook.mjs / hook-register) and the statusline path were anchored on `EDITOR_DIR` and silently followed the move into `data/bin/editor/` — scattering agent tools OFF the session PATH, pointing the statusline at a nonexistent file, and rewriting the global hook registration to the editor subdir. All re-anchored on the tools dir (`AGENT_BIN_DIR`); only the fake `code` lives in `editor/`. The stray generated files 2.267.1 accidentally committed are untracked again (`data/bin/editor/` gitignored — tracked generated files are the 2.111.26 self-update-blocking class); stale `editor/` copies stay on disk so sessions that snapshotted the interim hook path keep working until their next restart.
+
 ## 2.267.1
 
 Pool-display + mobile parity batch (three user reports, same evening):
