@@ -312,17 +312,22 @@ class UsageEstimator {
   }
   noteLive({ rid, accountId, model, usd, ts = Date.now() }) {
     if (!rid || !Number.isFinite(usd) || usd <= 0) return;
-    // Ring-level rid dedup: file-tail feeders (workflow watchers) may re-read
-    // ranges after a lost offset — the same rid must not stack in the ring.
-    if (!this._liveRids) this._liveRids = new Set();
-    if (this._liveRids.has(rid)) return;
-    this._liveRids.add(rid);
+    if (!this._liveRids) this._liveRids = new Map(); // rid → ring entry
+    // A streamed message is emitted SEVERAL times with GROWING usage (partial
+    // → final; measured up to 3 emissions per msg.id) — the LAST emission is
+    // the complete request, so a re-note of a known rid updates the entry to
+    // the max instead of being dropped (first-wins under-counted the live
+    // part). File-tail feeders re-reading ranges stay idempotent either way.
+    const prev = this._liveRids.get(rid);
+    if (prev) { if (usd > prev.usd) { prev.usd = usd; this._estMemo.clear(); } return; }
     const m = String(model || '').toLowerCase();
     const fam = m.includes('fable') ? 'fable' : m.includes('opus') ? 'opus' : m.includes('sonnet') ? 'sonnet' : m.includes('haiku') ? 'haiku' : 'other';
-    this._liveRing.push({ rid, acct: accountId || '__global__', fam, usd, ts });
+    const entry = { rid, acct: accountId || '__global__', fam, usd, ts };
+    this._liveRids.set(rid, entry);
+    this._liveRing.push(entry);
     if (this._liveRing.length > 3000) {
       this._liveRing.splice(0, this._liveRing.length - 2000);
-      this._liveRids = new Set(this._liveRing.map((e) => e.rid));
+      this._liveRids = new Map(this._liveRing.map((e) => [e.rid, e]));
     }
     // freshest signal there is — estimates must not serve a pre-burn memo
     this._estMemo.clear();
@@ -333,15 +338,23 @@ class UsageEstimator {
     if (!this._liveRing.length) return null;
     const uh = typeof this._usageHistory === 'function' ? this._usageHistory() : this._usageHistory;
     const known = uh?._evCache?.rids || null;
+    // THE 2.267.3 est-2× root cause: STDOUT stream records carry NO requestId,
+    // so ring entries are keyed by msg.id ('msg_…') while ledger events are
+    // keyed by requestId ('req_…') — `known.has(rid)` could NEVER exclude a
+    // scanned entry, and every request counted TWICE while a conversation was
+    // active (user saw est 27% vs ⟳ 9%). The ledger now bakes `mid`
+    // (message.id) alongside rid; exclusion checks BOTH id spaces.
+    const knownMids = uh?._evCache?.mids || null;
     const want = new Set(accountIds);
-    // No age-out: rid-dedup vs the ledger is the ONLY exit — an age cutoff
-    // made un-scanned cost vanish from the estimate after N minutes (a dip
+    // No age-out: ledger-dedup is the ONLY exit — an age cutoff made
+    // un-scanned cost vanish from the estimate after N minutes (a dip
     // exactly when the scan lags worst); the ring cap bounds memory instead.
     const out = { total: 0, byFamily: { fable: 0, opus: 0, sonnet: 0, haiku: 0, other: 0 } };
     for (const e of this._liveRing) {
       if (e.ts < fromMs || e.ts > nowMs) continue;
       if (!want.has(e.acct)) continue;
       if (known && known.has(e.rid)) continue;
+      if (knownMids && knownMids.has(e.rid)) continue;
       out.total += e.usd; out.byFamily[e.fam] += e.usd;
     }
     return out.total > 0 ? out : null;

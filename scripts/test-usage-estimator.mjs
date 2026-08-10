@@ -329,7 +329,8 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   const lines = [ { ...mkAnchor(T0, { u7: 0.40 }), identityKey: key, accountId: 'sub-x' } ];
   fs.writeFileSync(path.join(dir, 'anchors-org_live.ndjson'), lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
   const ledgerRids = new Set();
-  const fakeHistory = { *_events() {}, _cost: () => 0, _evCache: { rids: ledgerRids } };
+  const ledgerMids = new Set();
+  const fakeHistory = { *_events() {}, _cost: () => 0, _evCache: { rids: ledgerRids, mids: ledgerMids } };
   const ue = new est.UsageEstimator({
     anchorsDir: dir, usageHistory: fakeHistory,
     resolveIdentity: (id) => (id === 'sub-x' ? { identityKey: key } : null),
@@ -350,6 +351,29 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
     ue.noteLive({ rid: 'req_other', accountId: 'sub-zzz', model: 'claude-fable-5', usd: 500, ts: T0 + 30 * 60000 });
     const e3 = ue.estimateFor('sub-x', null, T0 + HR);
     return approx(e3.sevenDay.utilization, 0.40, 0.001);
+  })());
+  // THE est-2× regression (2.267.3, user saw est 27% vs ⟳ 9%): stdout records
+  // have NO requestId — the ring keys on msg.id while ledger events key on
+  // requestId, so rid-space exclusion never fired. The ledger's `mid` join
+  // field must exclude a scanned stream entry.
+  ck('live: msg.id-keyed entry excluded once the ledger bakes its mid', (() => {
+    ue.noteLive({ rid: 'msg_stream1', accountId: 'sub-x', model: 'claude-fable-5', usd: 100, ts: T0 + 30 * 60000 });
+    ue._estMemo.clear();
+    const before = ue.estimateFor('sub-x', null, T0 + HR);
+    ledgerMids.add('msg_stream1'); // the scan absorbed the JSONL twin (rid=req_…, mid=msg_stream1)
+    ue._estMemo.clear();
+    const after = ue.estimateFor('sub-x', null, T0 + HR);
+    return approx(before.sevenDay.utilization, 0.40 + 100 / 1730, 0.001) && approx(after.sevenDay.utilization, 0.40, 0.001);
+  })());
+  // Streaming partials: the same msg.id is emitted up to 3× with GROWING
+  // usage — a re-note updates the entry to the max (first-wins under-counted)
+  ck('live: re-noted rid upgrades to the final (max) usage', (() => {
+    ue.noteLive({ rid: 'msg_grow', accountId: 'sub-x', model: 'claude-fable-5', usd: 3, ts: T0 + 30 * 60000 });
+    ue.noteLive({ rid: 'msg_grow', accountId: 'sub-x', model: 'claude-fable-5', usd: 17.3, ts: T0 + 31 * 60000 });
+    ue.noteLive({ rid: 'msg_grow', accountId: 'sub-x', model: 'claude-fable-5', usd: 5, ts: T0 + 32 * 60000 }); // out-of-order smaller re-emission never downgrades
+    ue._estMemo.clear();
+    const e4 = ue.estimateFor('sub-x', null, T0 + HR);
+    return approx(e4.sevenDay.utilization, 0.40 + 17.3 / 1730, 0.001);
   })());
   fs.rmSync(dir, { recursive: true, force: true });
 }
