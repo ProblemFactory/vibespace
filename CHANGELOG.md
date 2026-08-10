@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.275.0
+
+Phase 4 continued — the remaining hand-synced twins get ONE implementation or a parity guard.
+
+- **The local and remote usage walkers are now proven identical by test.** The remote ledger scanner is a shipped single file (a host has no VibeSpace checkout, so it cannot `require` a shared module), which is exactly why it silently lagged its local twin twice: the 2.265.0 subagents/workflows fix took six weeks to reach it, and the 2.271.0 port was another hand-copy. `scripts/test-usage-walk-parity.mjs` runs BOTH walkers over one fixture tree (top-level + plain subagent + two workflow agents + a journal decoy) and demands identical rid coverage, incremental cursor behaviour, and identical pickup of an append. Negative-controlled: reverting the scanner to its pre-2.271.0 top-level-only walk fails 3 asserts.
+- **One session text-filter predicate** (`sessionMatchesFilter` in utils.js) for local AND remote-discovered sessions. There were two hand-synced copies and the remote one lacked the backend/agent fields, so typing "codex" listed every local codex session and not one remote codex rollout — the same query silently meant different things per machine.
+- Remote File Properties resolves folder size again (the remote `/api/file/stat` branch emitted `du` while the only consumer read `duSize`), and the remote relative-path `locate` fallback returns an explicit `unsupported:'remote'` marker instead of an empty result that reads as "file not found".
+
 ## 2.274.0
 
 Phase 4 (CS unification) of the campaign — start removing the DIVERGENCE that makes remote-only bugs possible, not just fixing their symptoms.

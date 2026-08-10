@@ -549,6 +549,21 @@ export async function fetchJson(url, opts) {
   } catch { return null; }
 }
 
+/** ONE text-filter predicate for sessions — local AND remote-discovered
+ *  (2.275.0, CS unification). There were two hand-synced copies: the local one
+ *  matched backend/agent fields, the remote one did not, so the SAME query
+ *  silently meant different things per machine (typing "codex" listed every
+ *  local codex session and not one remote codex rollout). Discovered records
+ *  simply lack some fields — the `||` chain skips them, which is exactly the
+ *  behaviour a single implementation should have. */
+export function sessionMatchesFilter(s, f) {
+  if (!f) return true;
+  const fields = [s.cwd || s.projDir, s.sessionId, s.sessionKey, s.name, s.webuiName,
+    s.backend, s.sourceKind, s.agentKind, s.agentRole, s.agentNickname, s.hostName];
+  for (const v of fields) if (v && String(v).toLowerCase().includes(f)) return true;
+  return false;
+}
+
 /** THROWING sibling of fetchJson (2.272.1, campaign shared primitive #1).
  *  fetchJson never throws — it returns null on a network/parse failure and
  *  hands back `{error}` bodies as ordinary data — so `try { await fetchJson }
