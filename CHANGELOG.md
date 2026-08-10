@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.268.7
+
+- **Agents roster rows show the reset countdown** (user clarification: this surface, not the usage popup): the age cell becomes a two-line micro-column — data age on top (unchanged), and below it the reset countdown of the row's most-constrained bucket (est-aware pick, colored by that bucket's pressure — "when does the tight bucket free up"). Per-donut tooltips and the narrow-width pill tooltip carry per-bucket "resets in …" too. Fixed min-width keeps the donut-column alignment invariant; buckets whose reset already passed are skipped (effectively fresh). Applies to local, host, and pool rows alike (all render via `_acctUsageHtml`).
+
 ## 2.268.6
 
 - Quota popup "Resets" stats gain a live countdown suffix — `Tomorrow 3:00 · in 1d10h50m` (user request). Rides the one shared `fmtReset` formatter, so every reset line (5h / 7d / scoped weeklies / codex) gets it with zero new UI elements; suppressed inside the final 45s.

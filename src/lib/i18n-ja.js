@@ -730,6 +730,7 @@ export default {
   "Toggle word wrap": "折り返しを切替",
   "Tomorrow {time}": "明日 {time}",
   "in {dur}": "あと {dur}",
+  "resets in {dur}": "リセットまで {dur}",
   "Type a message...": "メッセージを入力…",
   "Ultracode (xhigh + workflows)": "Ultracode（xhigh + ワークフロー）",
   "Unarchive": "アーカイブ解除",

@@ -349,6 +349,15 @@ export function installManageAgents(App, ctx = {}) {
   _acctUsageHtml(u, est) {
     if (!u) return '';
     const pct = (x) => Math.min(100, Math.round(x?.usedPercent ?? ((x?.utilization || 0) * 100)));
+    // Reset countdown (2.268.7, user request — THIS surface, not the popup).
+    // resetsAt is unix SECONDS in the usage cache; tolerate ms just in case.
+    const resetMs = (x) => { const r = x?.resetsAt; if (!Number.isFinite(r) || r <= 0) return null; return r > 1e12 ? r : r * 1000; };
+    const fmtEta = (ms) => {
+      const sec = Math.max(0, Math.round((ms - Date.now()) / 1000));
+      const dd = Math.floor(sec / 86400), hh = Math.floor((sec % 86400) / 3600), mm = Math.floor((sec % 3600) / 60);
+      return dd ? `${dd}d${hh}h` : hh ? `${hh}h${mm}m` : `${mm}m`;
+    };
+    const etaTip = (x) => { const ms = resetMs(x); return ms && ms > Date.now() + 45000 ? ' · ' + t('resets in {dur}', { dur: fmtEta(ms) }) : ''; };
     // With a dead-reckoning estimate (B-fcff v2): DARK arc = confirmed reading,
     // LIGHT arc = estimated delta since; after a window reset (est < reading —
     // the clean discriminator) the reading no longer applies, dark collapses to
@@ -362,9 +371,9 @@ export function installManageAgents(App, ctx = {}) {
       const bg = pair.estPct != null && pair.estPct > pair.darkPct
         ? `conic-gradient(${c} ${Math.round(p * 3.6)}deg, ${light} ${Math.round(p * 3.6)}deg ${Math.round(pair.estPct * 3.6)}deg, var(--bg-input) ${Math.round(pair.estPct * 3.6)}deg)`
         : `conic-gradient(${c} ${Math.round(p * 3.6)}deg, var(--bg-input) ${Math.round(p * 3.6)}deg)`;
-      const tip = pair.estPct != null
+      const tip = (pair.estPct != null
         ? `${escHtml(tipName || label)}: ${p}% · ${escHtml(t('est {pct}%', { pct: pair.estPct }))}${pair.rolled ? ' · ' + escHtml(t('window reset since last reading')) : ''}`
-        : `${escHtml(tipName || label)}: ${p}%`;
+        : `${escHtml(tipName || label)}: ${p}%`) + escHtml(etaTip(x));
       return `<span class="acct-usage-donut${pair.estPct != null ? ' acct-donut-est' : ''}" title="${tip}" style="background:${bg}"><span>${escHtml(label)}</span></span>`;
     };
     const parts = [donut('5h', u.fiveHour, null, est?.fiveHour), donut('7d', u.sevenDay, null, est?.sevenDay)];
@@ -379,15 +388,28 @@ export function installManageAgents(App, ctx = {}) {
     // ~100px and doesn't shrink — below ~340px a container query swaps it for
     // ONE pill showing the TIGHTEST bucket (full detail in the tooltip).
     const buckets = [['5h', u.fiveHour, est?.fiveHour], ['7d', u.sevenDay, est?.sevenDay], ...(u.scopedWeekly || []).map((sc) => [String(sc.name || '?').slice(0, 2), sc, scEst(sc.name)])]
-      .map(([label, x, e]) => { const pr = estDisplayPair(x, e); return [label, pr.estPct ?? pct(x), pr.estPct != null]; }).filter(([, p]) => Number.isFinite(p));
+      .map(([label, x, e]) => { const pr = estDisplayPair(x, e); return [label, pr.estPct ?? pct(x), pr.estPct != null, resetMs(x)]; }).filter(([, p]) => Number.isFinite(p));
+    // Second line of the age cell: reset countdown for the row's most-
+    // constrained bucket (est-aware, same pick as the narrow-width pill),
+    // colored by that bucket's pressure — "when does the tight bucket free
+    // up". Buckets whose reset already passed are effectively fresh; skip.
+    let eta = '', etaTitle = '';
+    const etaCands = buckets.filter(([, , , r]) => r && r > Date.now() + 45000);
+    if (etaCands.length) {
+      const [el2, ep, , er] = etaCands.reduce((a, b) => (b[1] > a[1] ? b : a));
+      const ec = ep > 95 ? 'var(--red,#e55)' : ep > 80 ? 'var(--yellow,#e5c07b)' : 'var(--green,#3fb950)';
+      eta = `<span class="acct-reset-eta" style="color:${ec}">${escHtml(fmtEta(er))}</span>`;
+      etaTitle = `${el2} ${t('resets in {dur}', { dur: fmtEta(er) })}`;
+    }
     let mini = '';
     if (buckets.length) {
       const [wl, wp, wEst] = buckets.reduce((a, b) => (b[1] > a[1] ? b : a));
       const wc = wp > 95 ? 'var(--red,#e55)' : wp > 80 ? 'var(--yellow,#e5c07b)' : 'var(--green,#3fb950)';
-      const tip = buckets.map(([l, p, isE]) => `${l} ${isE ? t('est {pct}%', { pct: p }) : p + '%'}`).join(' · ');
+      const tip = [buckets.map(([l, p, isE]) => `${l} ${isE ? t('est {pct}%', { pct: p }) : p + '%'}`).join(' · '), etaTitle].filter(Boolean).join(' · ');
       mini = `<span class="acct-usage-mini${wEst ? ' acct-mini-est' : ''}" style="color:${wc}" title="${escHtml(tip)}">${escHtml(wl)} ${wp}%</span>`;
     }
-    return `<span class="acct-usage">${parts.join('')}<span class="acct-usage-age" title="${age != null ? t('Last refreshed {n} min ago', { n: age }) : ''}">${ageLabel}</span></span>${mini}`;
+    const ageTitle = [age != null ? t('Last refreshed {n} min ago', { n: age }) : '', etaTitle].filter(Boolean).join(' · ');
+    return `<span class="acct-usage">${parts.join('')}<span class="acct-usage-age" title="${escHtml(ageTitle)}"><span>${ageLabel}</span>${eta}</span></span>${mini}`;
   },
 
   // ── ⟳ Refresh all (2.245.0): ONE human click fans out a per-target
