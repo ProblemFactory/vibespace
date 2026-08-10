@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.276.0
+
+**CS separation, for real: `hostId` becomes a parameter instead of a branch.** (docs/design-cs-unification.md — the anchor, with a per-area migration table and a counted divergence surface.)
+
+The owner's assessment of the campaign so far was correct: parity tests and shared string modules keep two implementations from drifting, but they do not remove the second implementation. The reason nobody *could* remove it: the local daemon has been a full DeviceManager since 2.158.0 — same binary, same mux, same op surface, transport is the only difference — but it lived in a server.js variable that `hosts.device(id)` could never return, because that method began with a host-record lookup. So every feature was written twice by construction.
+
+- `hosts.setLocalDevice()` + `hosts.device(falsy) → device #0` (deviceBounded inherits it). A consumer can now be written ONCE: `const dm = await hosts.deviceBounded(hostId, 8000)` — null means this machine.
+- **First real migration: the pre-resume writer sweep** (`src/writer-sweep.js`). It existed three times — ssh, dial, and **not at all for local**. That gap was never a decision: a claude running in an external terminal holds a transcript exactly the way a remote one does, but the incident that motivated the sweep happened remotely, and *the local twin is the one nobody exercises when fixing a remote bug*. Local now runs the byte-identical script over device #0.
+- **A sweep is destructive by design, so it now reports itself**: every kill leg echoes the pid it terminated, and the client toasts "stopped N other process(es) that were writing this conversation" — a terminal that suddenly died elsewhere is explained instead of mysterious.
+- scripts/test-writer-sweep.mjs (11 asserts) drives the SAME function against a fake local and a fake remote machine and requires a byte-identical script — a test that is only meaningful because there is now one implementation to drive. It also proves dial never falls back to ssh (it has none), ssh keeps its per-op fallback, local throws rather than pretending, and a non-claude holder of the transcript is never killed.
+
+Remaining divergence is now *counted and tabled* (ws-handler 33 branches · hosts 26 · server 29 · files 18 · sessions 7 · remote-fs 7) with each area marked UNIFIED / TRANSPORT-ONLY / DIVERGENT, so the next migrations are mechanical rather than rediscovered.
+
 ## 2.275.0
 
 Phase 4 continued — the remaining hand-synced twins get ONE implementation or a parity guard.
