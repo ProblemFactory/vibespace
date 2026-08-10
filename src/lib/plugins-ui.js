@@ -20,7 +20,16 @@ export function installPluginsUI(App) {
 
     const render = async () => {
       const r = await fetchJson('/api/plugins');
-      if (!r?.plugins) { body.innerHTML = `<div class="empty-hint">${escHtml(t('Failed to load'))}</div>`; return; }
+      if (!r?.plugins) {
+        // dead end otherwise: the panel stays on this line until the user
+        // navigates away and back (fetchJson can't throw, so nothing retries)
+        body.innerHTML = `<div class="empty-hint">${escHtml(r?.error || t('Could not load plugins — the server did not answer.'))}</div>`;
+        const again = document.createElement('button');
+        again.className = 'mounts-btn'; again.textContent = t('Retry');
+        again.onclick = () => { body.innerHTML = `<div class="empty-hint">${escHtml(t('Loading…'))}</div>`; render(); };
+        body.appendChild(again);
+        return;
+      }
       body.innerHTML = '';
       for (const p of r.plugins) {
         const card = document.createElement('div');
@@ -73,8 +82,13 @@ export function installPluginsUI(App) {
           actions.appendChild(b);
           return b;
         };
+        // fetchJson resolves NULL on a network failure / non-JSON error page —
+        // an `x?.error` check alone passed that through as SUCCESS, so clicking
+        // Install against an unreachable server toasted "Installed" with
+        // nothing installed (Start/Stop/boot-toggle silently no-op'd the same
+        // way, and the re-render just showed the unchanged state).
         const api = (pathTail, opts) => fetchJson(`/api/plugins/${p.id}/${pathTail}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, ...opts })
-          .then((x) => { if (x?.error) throw new Error(x.error); return x; });
+          .then((x) => { if (!x) throw new Error(t('Server unreachable — nothing was changed')); if (x.error) throw new Error(x.error); return x; });
 
         // frp: no login/mode/flags. The relay config fields (below) always
         // show so the user can enter/override the relay; install/start appear
@@ -121,7 +135,10 @@ export function installPluginsUI(App) {
           lbl.className = 'plugin-boot';
           const cb = document.createElement('input');
           cb.type = 'checkbox'; cb.checked = !!p.enabled;
-          cb.onchange = () => api('enabled', { body: JSON.stringify({ enabled: cb.checked }) }).catch((e) => showToast(e.message, { type: 'error' }));
+          // a failed save must not leave the box showing a setting the server
+          // never took — put it back where it was and say why
+          cb.onchange = () => api('enabled', { body: JSON.stringify({ enabled: cb.checked }) })
+            .catch((e) => { cb.checked = !!p.enabled; showToast(e.message, { type: 'error' }); });
           lbl.append(cb, document.createTextNode(' ' + t('Start automatically with the server')));
           actions.appendChild(lbl);
 

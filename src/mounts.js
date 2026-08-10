@@ -597,6 +597,11 @@ class MountManager {
         canCephShare: this.canCephShare(m),
         path: this.pathOf(m), desired: m.desired, expiresAt: m.expiresAt || null,
         mounted: this.isMounted(m), error: this._errors.get(m.id) || null,
+        // A connect legitimately spends 10-25s in mount()'s window (mountpoint
+        // wait + IO probe + auth probes). Without this flag EVERY client showed
+        // a plain grey "Not mounted" dot the whole time, and the initiating
+        // client's local row-dimming was wiped by any mounts-updated broadcast.
+        connecting: this._connecting?.has(m.id) || false,
         createdAt: m.createdAt,
       };
     });
@@ -1330,8 +1335,9 @@ class MountManager {
     this._connecting = this._connecting || new Set();
     if (this._connecting.has(id)) return false;
     this._connecting.add(id);
+    this._notify(); // every client shows "Connecting…" for the whole window
     try { return await this._mountInner(id); }
-    finally { this._connecting.delete(id); }
+    finally { this._connecting.delete(id); this._notify(); }
   }
 
   async _mountInner(id) {

@@ -1,4 +1,4 @@
-import { escHtml, copyText, createPopover, showConfirmDialog, showContextMenu, uiScale } from './utils.js';
+import { agoText, escHtml, copyText, createPopover, showConfirmDialog, showContextMenu, uiScale } from './utils.js';
 import { t as tr } from './i18n.js';
 import { SESSION_STATE_META, SESSION_URGENCY_META } from './sidebar-tasks.js';
 import { createBackendIcon, createAgentKindIcon, createModeBackendIcon, getBackendMeta, getAgentKindMeta, getAgentRoleLabel, getAgentRoleShortLabel, getSessionKey } from './agent-meta.js';
@@ -233,6 +233,19 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     rchip.innerHTML = `<span class="chip-icon">⟳</span><span class="chip-text">${escHtml(tr('host unreachable'))}</span>`;
     rchip.dataset.tip = tr('The machine this session runs on is unreachable — the connection retries automatically; messages you send are queued and delivered when it returns.');
     stateChip.after(rchip);
+  }
+  // LAST-KNOWN discovery chip: the server serves a previous scan tagged
+  // {stale, staleAt} when the machine is unreachable, and the sidebar rendered
+  // it identically to fresh discovery — an hours-old 'external' card implies a
+  // live remote process that may have exited long ago.
+  if (s.stale) {
+    const schip = document.createElement('span');
+    schip.className = 'sess-state-chip sess-state-derived sess-stale-chip';
+    schip.style.setProperty('--chip-color', 'var(--yellow, #e5c07b)');
+    const label = s.staleAt ? tr('last known · {ago}', { ago: agoText(s.staleAt) }) : tr('last known');
+    schip.innerHTML = `<span class="chip-icon">⚠</span><span class="chip-text">${escHtml(label)}</span>`;
+    schip.dataset.tip = tr('This machine was unreachable — showing the last successful scan, so this session may have changed or ended since.');
+    stateChip?.after(schip);
   }
   // Custom config marker: shown when this session has persisted model/effort/permission overrides
   const cfgBadge = row.querySelector('.badge-config');

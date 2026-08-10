@@ -1,5 +1,5 @@
 import { Resizer } from './resizer.js';
-import { escHtml, createPopover, showContextMenu } from './utils.js';
+import { agoText, escHtml, createPopover, hostStateChip, showContextMenu } from './utils.js';
 import { t as tr } from './i18n.js';
 import { createAgentKindIcon, createBackendIcon, getAgentKindMeta, getBackendMeta, getSessionKey } from './agent-meta.js';
 import { installSidebarState } from './sidebar-state.js';
@@ -9,6 +9,11 @@ import { installSidebarMounts } from './sidebar-mounts.js';
 import { installSidebarRail } from './sidebar-rail.js';
 import { installSidebarWorkbench } from './sidebar-workbench.js';
 import { installSidebarTasks } from './sidebar-tasks.js';
+
+// Consecutive failed /api/sessions polls before the sidebar admits the list is
+// frozen. 3 × 5s ≈ 15s — long enough that one blip stays invisible, short
+// enough that a real outage never renders a silently stale list.
+const SESSION_POLL_STALE_AFTER = 3;
 
 class Sidebar {
   constructor(app) {
@@ -666,10 +671,41 @@ class Sidebar {
       document.addEventListener('visibilitychange', this._visListener);
     }
     if (!document.hidden) {
+      // Fetch and render are SEPARATE try/catches: a throw out of the render
+      // would skip the reschedule below (poll chain dead for the page's
+      // lifetime) and, folded into one catch, would also be miscounted as a
+      // server failure and freeze-mark a list that actually arrived fine.
+      let sessions = null, pollErr = '';
       try {
-        const res = await fetch('/api/sessions'); const data = await res.json();
-        this._systemSessions = data.sessions || [];
-        this._mergeAndRender();
+        const res = await fetch('/api/sessions');
+        const data = await res.json().catch(() => null);
+        // NEVER replace the list with [] on a failure (campaign finding): a
+        // transient 500 from the discovery sweep (a project dir deleted
+        // mid-readdir, any throw under NFS lag) parses as {error} → the old
+        // `data.sessions || []` wiped the ENTIRE discovered list from the
+        // sidebar for ≥5s and flip-flopped back on the next good poll
+        // (empty↔full flicker under sustained lag). Keep the last good
+        // snapshot and MARK it stale instead.
+        if (!res.ok || !data || data.error || !Array.isArray(data.sessions)) {
+          pollErr = data?.error || `${res.status} ${res.statusText || 'session list unavailable'}`;
+        } else sessions = data.sessions;
+      } catch (e) { pollErr = e?.message || 'server unreachable'; }
+      try {
+        if (sessions) {
+          const wasStale = (this._pollFails || 0) >= SESSION_POLL_STALE_AFTER;
+          this._systemSessions = sessions;
+          this._lastPollOkAt = Date.now();
+          this._pollFails = 0; this._pollError = '';
+          this._mergeAndRender();
+          if (wasStale) this._render(); // drop the staleness row now that data is fresh
+        } else {
+          this._pollFails = (this._pollFails || 0) + 1;
+          this._pollError = pollErr;
+          // Announce once at the threshold (a single blip stays invisible),
+          // then periodically so the "as of" age keeps ticking.
+          if (this._pollFails === SESSION_POLL_STALE_AFTER
+            || (this._pollFails > SESSION_POLL_STALE_AFTER && this._pollFails % 12 === 0)) this._render();
+        }
       } catch {}
     }
     clearTimeout(this._pollTimer);
@@ -921,6 +957,21 @@ class Sidebar {
     // fired first and the Remote tab showed the Folders empty state instead
     // of the mounts panel (real report: "remote 功能直接坏了").
     if (this._activeTab === 'mounts') { this._renderMounts(); return; }
+
+    // Frozen-list disclosure: _poll KEEPS the last good snapshot when the
+    // discovery sweep fails, so without this row the sidebar would render an
+    // out-of-date list that looks exactly like a live one (静默失败零容忍).
+    if ((this._pollFails || 0) >= SESSION_POLL_STALE_AFTER) {
+      const row = document.createElement('div');
+      row.className = 'empty-hint sidebar-poll-stale';
+      const label = document.createElement('span');
+      label.textContent = tr('Session list may be out of date — the server is not responding.') + ' ';
+      row.append(label, hostStateChip('error', {
+        text: this._lastPollOkAt ? tr('as of {ago}', { ago: agoText(this._lastPollOkAt) }) : tr('unreachable'),
+        title: this._pollError || '',
+      }));
+      this.listEl.appendChild(row);
+    }
 
     // "New Session" card at the top — NOT on the Tasks tab (it has its own
     // "+ New Task Group" card; a bare New Session there is meaningless).

@@ -80,7 +80,10 @@ router.get('/api/home', async (req, res) => {
 // capped, dep/VCS dirs pruned, 3s kill, first 16 hits — a user-initiated click,
 // never a background scan. Local machine only (remote sessions return empty).
 router.get('/api/file/locate', (req, res) => {
-  if (req.query.host) return res.json({ hits: [] });
+  // Remote sessions have no bounded-find channel here — say UNSUPPORTED
+  // instead of a bare empty result, which read as "the file doesn't exist"
+  // and made the feature look broken rather than absent on remote hosts.
+  if (req.query.host) return res.json({ hits: [], unsupported: 'remote' });
   const name = String(req.query.name || '').trim();
   const root = path.resolve(String(req.query.root || os.homedir()));
   const type = req.query.type === 'd' ? 'd' : 'f';
@@ -116,7 +119,23 @@ router.get('/api/fonts', (req, res) => {
 // Directory autocomplete — returns dirs matching partial path, with 500ms timeout
 router.get('/api/dir-complete', async (req, res) => {
   const R = rfs(req);
-  if (R) { try { return res.json({ suggestions: await R.fs.dirComplete(R.host, req.query.path || '') }); } catch { return res.json({ suggestions: [] }); } }
+  if (R) {
+    // A down/lagging machine was indistinguishable from "no matching folders":
+    // every failure mapped to an empty list (so did the layers below), and the
+    // remote leg could dangle ~6s where the local branch has a 500ms budget.
+    // Bound it and NAME the failure so the caller can say so instead of
+    // silently showing no completions.
+    const guard = setTimeout(() => { if (!res.headersSent) res.json({ suggestions: [], error: 'machine did not answer in time' }); }, 2000);
+    try {
+      const suggestions = await R.fs.dirComplete(R.host, req.query.path || '');
+      clearTimeout(guard);
+      if (!res.headersSent) res.json({ suggestions });
+    } catch (e) {
+      clearTimeout(guard);
+      if (!res.headersSent) res.json({ suggestions: [], error: String(e.message || e).slice(0, 120) });
+    }
+    return;
+  }
   const input = req.query.path || '';
   const timeout = setTimeout(() => { if (!res.headersSent) res.json({ suggestions: [] }); }, 500);
 
@@ -777,7 +796,25 @@ router.post('/api/archive/extract', async (req, res) => {
   const { path: ap, dest, overwrite } = req.body || {};
   if (!ap || !dest) return res.status(400).json({ error: 'path and dest required' });
   const R = rfs(req);
-  if (R) { try { return res.json(await R.fs.archiveExtract(R.host, remotePath(ap), remotePath(dest))); } catch (e) { return res.status(400).json({ error: e.message }); } }
+  if (R) {
+    // Remote extraction runs as the SAME polled op as local: the synchronous
+    // call held the request for up to 5 minutes (RemoteFs timeoutMs) with zero
+    // client feedback — the pre-2.111.18 "frozen for minutes" bug, remote-only.
+    // No per-entry count is available (one ssh command, nothing to tally), so
+    // the op stays indeterminate: total 0, status running → done/error.
+    if (req.body.progress) {
+      const opId = 'ex-' + require('crypto').randomBytes(6).toString('hex');
+      const op = { done: 0, total: 0, status: 'running', error: null, dest: String(dest), child: null };
+      extractOps.set(opId, op);
+      res.json({ success: true, opId });
+      R.fs.archiveExtract(R.host, remotePath(ap), remotePath(dest))
+        .then(() => { if (op.status !== 'cancelled') op.status = 'done'; })
+        .catch((e) => { if (op.status !== 'cancelled') { op.status = 'error'; op.error = String(e.message || e).split('\n')[0]; } })
+        .finally(() => setTimeout(() => extractOps.delete(opId), 5 * 60 * 1000));
+      return;
+    }
+    try { return res.json(await R.fs.archiveExtract(R.host, remotePath(ap), remotePath(dest))); } catch (e) { return res.status(400).json({ error: e.message }); }
+  }
   const fp = safePath(ap);
   const destDir = safePath(dest);
   const type = archiveType(fp);
@@ -1140,7 +1177,11 @@ router.get('/api/file/stat', async (req, res) => {
   if (R) {
     try {
       const s = await R.fs.stat(R.host, remotePath(req.query.path), !!req.query.du);
-      return res.json({ path: s.path, isDirectory: s.kind === 'directory', size: s.size, modified: s.modified, created: 0, mode: s.mode, uid: s.uid, gid: s.gid, du: s.du });
+      // duSize = the field the Properties dialog actually reads; emitting only
+      // `du` here meant every REMOTE folder showed "unknown" after a du that
+      // had run, shipped, and was dropped (B-b87b shape-drift class). `du` is
+      // kept for any older client.
+      return res.json({ path: s.path, isDirectory: s.kind === 'directory', size: s.size, modified: s.modified, created: 0, mode: s.mode, uid: s.uid, gid: s.gid, du: s.du, duSize: s.du });
     } catch (e) { return res.status(400).json({ error: e.message }); }
   }
   const fp = safePath(req.query.path || '');

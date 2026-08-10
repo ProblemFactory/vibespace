@@ -1,7 +1,8 @@
 // Manage-Agents dialog + Anthropic/ChatGPT account rosters (mixin split from app.js, 2.82.0 audit seam). Methods run with the App instance as `this`.
 import { UI_ICONS } from './icons.js';
 import { t } from './i18n.js';
-import { copyText, createModalShell, escHtml, estDisplayPair, fetchJson, showConfirmDialog, showContextMenu, showInputDialog, showToast } from './utils.js';
+import { agoText, api, copyText, createModalShell, escHtml, estDisplayPair, fetchJson, showConfirmDialog, showContextMenu, showInputDialog, showToast } from './utils.js';
+import { track } from './telemetry-client.js';
 
 function remoteClaudeSubscriptionLoginCommand(id) {
   if (!/^sub-[a-f0-9]+$/.test(id)) throw new Error('invalid subscription id');
@@ -78,7 +79,17 @@ export function installManageAgents(App, ctx = {}) {
     // Poll finalize until the creds file appears (or give up after ~5 min).
     let tries = 0;
     const iv = setInterval(async () => {
-      if (++tries > 100) { clearInterval(iv); return; }
+      // GIVING UP MUST BE SAID (静默失能零容忍): the user was promised
+      // "VibeSpace captures it automatically", so a login finished after
+      // minute 5 (slow browser flow, MFA) left the account silently stuck at
+      // "not logged in" with nothing hinting a manual re-check was needed.
+      if (++tries > 100) {
+        clearInterval(iv);
+        const last = await fetchJson(`/api/accounts/subscription/${encodeURIComponent(created.id)}/finalize`, { method: 'POST' }); // one last chance
+        if (last?.loggedIn) { showToast(t('✓ Added {name}', { name: last.name || t('subscription') })); return; }
+        showToast(t('Stopped watching for the login after 5 min. If you completed it, press Re-check in Manage agents to finish capturing it.'), { type: 'error', duration: 10000 });
+        return;
+      }
       try {
         const r = await fetchJson(`/api/accounts/subscription/${encodeURIComponent(created.id)}/finalize`, { method: 'POST' });
         if (r?.loggedIn) {
@@ -105,7 +116,13 @@ export function installManageAgents(App, ctx = {}) {
     showToast(t('A terminal opened — pick “Anthropic Console account” and sign in. Your subscription login stays intact.'), { duration: 6000 });
     let tries = 0;
     const iv = setInterval(async () => {
-      if (++tries > 100) { clearInterval(iv); return; }
+      if (++tries > 100) { // one final capture attempt, then SAY we stopped
+        clearInterval(iv);
+        const last = await fetchJson(`/api/accounts/console-login/${encodeURIComponent(r.id)}/capture`, { method: 'POST' });
+        if (last?.captured) { showToast(t('✓ Added {name}', { name: last.account?.name || t('Console account') })); return; }
+        showToast(t('Stopped watching for the login after 5 min. If you completed it, press Re-check in Manage agents to finish capturing it.'), { type: 'error', duration: 10000 });
+        return;
+      }
       try {
         const c = await fetchJson(`/api/accounts/console-login/${encodeURIComponent(r.id)}/capture`, { method: 'POST' });
         if (c?.captured) { clearInterval(iv); showToast(t('✓ Added {name}', { name: c.account?.name || t('Console account') })); }
@@ -136,7 +153,13 @@ export function installManageAgents(App, ctx = {}) {
     showToast(t('A terminal opened — sign in with the ChatGPT account you want to add. Your other logins are untouched; VibeSpace captures it automatically.'), { duration: 6000 });
     let tries = 0;
     const iv = setInterval(async () => {
-      if (++tries > 100) { clearInterval(iv); return; }
+      if (++tries > 100) { // one final finalize attempt, then SAY we stopped
+        clearInterval(iv);
+        const last = await fetchJson(`/api/accounts/codex-subscription/${encodeURIComponent(created.id)}/finalize`, { method: 'POST' });
+        if (last?.loggedIn) { showToast(t('✓ Added {name}', { name: last.name || t('account') })); return; }
+        showToast(t('Stopped watching for the login after 5 min. If you completed it, press Re-check in Manage agents to finish capturing it.'), { type: 'error', duration: 10000 });
+        return;
+      }
       try {
         const r = await fetchJson(`/api/accounts/codex-subscription/${encodeURIComponent(created.id)}/finalize`, { method: 'POST' });
         if (r?.loggedIn) { clearInterval(iv); showToast(t('✓ Added {name}', { name: r.name || t('account') })); }
@@ -338,7 +361,15 @@ export function installManageAgents(App, ctx = {}) {
       if (!this._agentsRefreshHook?.()) this._showAgentsDialog();
     };
     this._hostLoginWatch = setInterval(async () => {
-      if (++tries > 50) { clearInterval(this._hostLoginWatch); this._hostLoginWatch = null; return; }
+      // Silent give-up is the failure mode here (the user was told VibeSpace
+      // notices the login by itself): an on-host sign-in that lands after
+      // ~5 min never refreshed the surface and nothing said the watch ended.
+      if (++tries > 50) {
+        clearInterval(this._hostLoginWatch); this._hostLoginWatch = null;
+        showToast(t('Stopped watching {host} for the login after 5 min. If you finished signing in there, press Re-check to pick it up.', { host: hostLabel }), { type: 'error', duration: 10000 });
+        this._agentsRefreshHook?.(); // one last repaint in case it did land
+        return;
+      }
       let cur = null;
       try { cur = await fetchJson(`/api/hosts/${encodeURIComponent(hostId)}/accounts-status`); } catch { return; }
       if (accountId && loginAttempt) {
@@ -493,17 +524,33 @@ export function installManageAgents(App, ctx = {}) {
         }
       }
       const rowOf = (tg) => bodyEl.querySelector(`.agents-machine-sec[data-host="${tg.host}"] .acct-key-row[data-id="${tg.id}"]`);
+      // Failures for targets with NO rendered row (Accounts tab has no machine
+      // sections at all; a COLLAPSED accordion's section holds no rows) used to
+      // be dropped entirely — the Anthropic call was made, the click "worked",
+      // and the user saw zero evidence anything failed.
+      const unreported = [];
+      const labelOf = (tg) => {
+        const hostName = tg.host ? ((this._agentsHostsList || []).find(h => h.id === tg.host)?.name || tg.host) : t('this machine');
+        if (tg.id === '__global__') return hostName;
+        const an = (this._accounts?.accounts || []).find(a => a.id === tg.id)?.name || tg.id;
+        return tg.host ? `${an} @ ${hostName}` : an;
+      };
       const one = async (tg) => {
         let r = null;
         try {
           r = await fetchJson('/api/usage/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(tg.body) });
         } catch {}
-        const row = rowOf(tg);
-        if (!row || !row.isConnected) return; // surface re-rendered mid-flight
-        row.querySelector('.acct-refresh-err')?.remove();
-        const msg = r?.error ? String(r.error)
+        const msgOf = () => (r?.error ? String(r.error)
           : r?.throttled ? t('Refreshed less than a minute ago — try again shortly')
-          : !r ? t('Refresh failed') : null;
+          : !r ? t('Refresh failed') : null);
+        const row = rowOf(tg);
+        if (!row || !row.isConnected) { // no row to write on — collect for the summary
+          const m = msgOf();
+          if (m) unreported.push(`${labelOf(tg)}: ${m}`);
+          return;
+        }
+        row.querySelector('.acct-refresh-err')?.remove();
+        const msg = msgOf();
         if (msg) {
           const err = document.createElement('span');
           err.className = 'acct-refresh-err usage-warn';
@@ -531,6 +578,9 @@ export function installManageAgents(App, ctx = {}) {
         await one(tg);
       })());
       await Promise.allSettled(jobs);
+      if (unreported.length) {
+        showToast(t('Quota refresh failed for {n} target(s): {details}', { n: unreported.length, details: unreported.slice(0, 4).join(' · ') + (unreported.length > 4 ? ' …' : '') }), { type: 'error', duration: 10000 });
+      }
     } finally {
       btn.disabled = false;
       btn.classList.remove('usage-refresh-spin');
@@ -660,7 +710,10 @@ export function installManageAgents(App, ctx = {}) {
             { label: t('Log in on {host}…', { host: hostLabel }), title: t('Opens a terminal ON {host} — this login lands on that machine, not in VibeSpace', { host: hostLabel }), action: doHostLogin },
           ]);
         } else if (e.target.closest('.acct-def')) {
-          try { await fetchJson('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: null, backend: 'codex' }) }); } catch {}
+          // fetchJson never throws → the old catch was dead code and a failed
+          // write repainted the OLD state as if it had succeeded.
+          try { await api('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: null, backend: 'codex' }) }); }
+          catch (err) { showToast(t('Could not change the default account — {reason}', { reason: err?.message || t('server unreachable') }), { type: 'error' }); }
           refresh();
         }
         return;
@@ -673,7 +726,8 @@ export function installManageAgents(App, ctx = {}) {
           value: a?.email || '', placeholder: 'you@example.com', confirmText: t('Save'),
         });
         if (email != null) {
-          try { await fetchJson(`/api/accounts/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: email.trim() }) }); } catch {}
+          try { await api(`/api/accounts/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: email.trim() }) }); }
+          catch (err) { showToast(t('Could not save the email — {reason}', { reason: err?.message || t('server unreachable') }), { type: 'error' }); }
           refresh();
         }
       };
@@ -691,13 +745,15 @@ export function installManageAgents(App, ctx = {}) {
       const doRename = async () => {
         const name = await showInputDialog({ title: t('Rename account'), label: t('Account name'), value: a?.name || '', confirmText: t('Save') });
         if (name && name.trim() && name.trim() !== a?.name) {
-          try { await fetchJson(`/api/accounts/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) }); } catch {}
+          try { await api(`/api/accounts/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) }); }
+          catch (err) { showToast(t('Rename failed — {reason}', { reason: err?.message || t('server unreachable') }), { type: 'error' }); }
           refresh();
         }
       };
       const doDelete = async () => {
         if (!(await showConfirmDialog({ title: t('Remove account'), message: t('Remove "{name}" from VibeSpace? Sessions already running keep working.', { name: a?.name }) }))) return;
-        try { await fetchJson(`/api/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }); } catch {}
+        try { await api(`/api/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }); showToast(t('Removed “{name}”', { name: a?.name || '' })); }
+        catch (err) { showToast(t('Could not remove the account — {reason}', { reason: err?.message || t('server unreachable') }), { type: 'error' }); }
         refresh();
       };
       if (e.target.closest('.acct-def')) {
@@ -708,7 +764,8 @@ export function installManageAgents(App, ctx = {}) {
           showToast(t('The default is global, and “{name}” can’t run on {host} — new sessions there keep using its own login.', { name: a?.name, host: escHtml(hostLabel) }) + ' ' + t('Already logged in as this account ON {host}? Then pick “CLI login @ {host}” when switching the session’s billing — that uses the host’s own login.', { host: escHtml(hostLabel) }), { type: 'error', duration: 8000 });
           return;
         }
-        try { await fetchJson('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: isDef ? null : id, backend: 'codex' }) }); } catch {}
+        try { await api('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: isDef ? null : id, backend: 'codex' }) }); }
+        catch (err) { showToast(t('Could not change the default account — {reason}', { reason: err?.message || t('server unreachable') }), { type: 'error' }); }
         refresh();
       } else if (e.target.closest('.acct-menu')) {
         const r = e.target.closest('.acct-menu').getBoundingClientRect();
@@ -737,7 +794,11 @@ export function installManageAgents(App, ctx = {}) {
     const watch = (cond, act) => {
       let tries = 0;
       this._acctWatch = setInterval(async () => {
-        if (++tries > 100) { clearInterval(this._acctWatch); this._acctWatch = null; return; }
+        if (++tries > 100) { // say it — the wizard promised automatic detection
+          clearInterval(this._acctWatch); this._acctWatch = null;
+          showToast(t('Stopped watching for the login after 5 min. If you completed it, reopen the setup to continue.'), { type: 'error', duration: 10000 });
+          return;
+        }
         let d = null;
         try { d = await fetchJson('/api/accounts'); } catch { return; }
         if (d && cond(d)) {
@@ -807,7 +868,8 @@ export function installManageAgents(App, ctx = {}) {
         e.preventDefault();
         const key = await showInputDialog({ title: t('Add API key'), label: t('Anthropic API key (from console.anthropic.com)'), placeholder: 'sk-ant-…', confirmText: t('Save') });
         if (key && key.trim()) {
-          try { await fetchJson('/api/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: key.trim() }) }); } catch {}
+          try { await api('/api/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: key.trim() }) }); }
+          catch (err) { showToast(t('Could not save the API key — {reason}', { reason: err?.message || t('server unreachable') }), { type: 'error' }); }
         }
         render();
       });
@@ -897,6 +959,23 @@ export function installManageAgents(App, ctx = {}) {
       if (stale() || !body.isConnected) return;
       body.querySelector('.ob-loading')?.remove();
       const actx = { body, selectedHost, hostLabel, done, run, refresh, st, stale, racct };
+      // A THROWN roster render used to vanish the whole accounts list from the
+      // section with no trace — that empty catch already hid a real
+      // ReferenceError (`racct`) that killed the codex roster on every host
+      // view for releases, and it read as "this machine just has no accounts".
+      const renderRoster = async (which) => {
+        try {
+          if (which === 'claude') await this._renderClaudeAccounts(actx);
+          else await this._renderCodexAccounts(actx);
+        } catch (err) {
+          try { track('error', 'agents-roster-render-failed', `${which}: ${err?.message || err}`, err?.stack); } catch { }
+          if (stale() || !body.isConnected) return;
+          const warn = document.createElement('div');
+          warn.className = 'ob-backend';
+          warn.innerHTML = `<div class="usage-warn">${escHtml(t('The {backend} accounts list failed to render — {reason}', { backend: which === 'claude' ? 'Claude' : 'Codex', reason: String(err?.message || err) }))}</div>`;
+          body.appendChild(warn);
+        }
+      };
       // A host whose status probe failed must SAY so — the empty status
       // object otherwise renders "not installed" + Install buttons for a
       // machine that is simply unreachable (honest-state rule).
@@ -909,8 +988,7 @@ export function installManageAgents(App, ctx = {}) {
           row.append(left);
           body.appendChild(row);
           // Rosters still render — the CLI-login row + note carry the state
-          if (b.key === 'claude') { try { await this._renderClaudeAccounts(actx); } catch {} }
-          else if (b.key === 'codex') { try { await this._renderCodexAccounts(actx); } catch {} }
+          await renderRoster(b.key);
           if (stale()) return;
           continue;
         }
@@ -998,8 +1076,7 @@ export function installManageAgents(App, ctx = {}) {
         row.append(left, actions);
         body.appendChild(row);
         // Account roster for THIS backend, right under its status row.
-        if (b.key === 'claude') { try { await this._renderClaudeAccounts(actx); } catch {} }
-        else if (b.key === 'codex') { try { await this._renderCodexAccounts(actx); } catch {} }
+        await renderRoster(b.key);
         if (stale()) return;
       }
       // ── VibeSpace integration (task context hook) — local machine only.
@@ -1007,9 +1084,24 @@ export function installManageAgents(App, ctx = {}) {
       // repairable for non-engineers (auto-install can fail silently if e.g.
       // the CLI's settings file doesn't exist yet).
       if (!selectedHost) {
-        let hs = null;
-        try { hs = await fetchJson('/api/agent-hooks'); } catch {}
-        if (stale()) return;
+        // These probes run AFTER the section's '.ob-loading' was removed, so
+        // while in flight the section looked complete with the row simply
+        // ABSENT — and on failure the row never appeared at all, making a
+        // failed probe indistinguishable from "integration not applicable".
+        const probeStub = document.createElement('div');
+        probeStub.className = 'ob-backend';
+        probeStub.innerHTML = `<div><b>${t('VibeSpace integration')}</b> <span class="ob-ver">${t('checking…')}</span></div>`;
+        body.appendChild(probeStub);
+        let hs = null, hsErr = null;
+        try { hs = await api('/api/agent-hooks'); } catch (err) { hsErr = err?.message || t('probe failed'); }
+        if (stale()) { probeStub.remove(); return; }
+        probeStub.remove();
+        if (!hs) {
+          const warn = document.createElement('div');
+          warn.className = 'ob-backend';
+          warn.innerHTML = `<div><b>${t('VibeSpace integration')}</b></div><div class="usage-warn">${escHtml(t('Could not read the hook status — {reason}', { reason: hsErr || t('server unreachable') }))}</div>`;
+          body.appendChild(warn);
+        }
         if (hs) {
           const row = document.createElement('div'); row.className = 'ob-backend';
           const left = document.createElement('div');
@@ -1068,9 +1160,25 @@ export function installManageAgents(App, ctx = {}) {
         // startled finding them). This row makes that footprint VISIBLE:
         // per-tool freshness vs the local copies, remote hook registration,
         // keeper session files — with explicit Install/refresh + Remove.
-        let rs = null;
-        try { rs = await fetchJson(`/api/hosts/${encodeURIComponent(selectedHost)}/agent-tools`); } catch {}
-        if (stale()) return;
+        // ssh/dial round trip — same rule as the local probe: name the wait,
+        // and never let a failed probe read as "integration not applicable"
+        // (a user checking why remote context injection is broken saw nothing).
+        const hostNameStub = hostLabel || t('remote host');
+        const probeStub = document.createElement('div');
+        probeStub.className = 'ob-backend';
+        probeStub.innerHTML = `<div><b>${t('VibeSpace integration on {host}', { host: escHtml(hostNameStub) })}</b> <span class="ob-ver">${t('checking…')}</span></div>`;
+        body.appendChild(probeStub);
+        let rs = null, rsErr = null;
+        try { rs = await api(`/api/hosts/${encodeURIComponent(selectedHost)}/agent-tools`); } catch (err) { rsErr = err?.message || t('probe failed'); }
+        if (stale()) { probeStub.remove(); return; }
+        probeStub.remove();
+        if (!rs?.tools) {
+          const warn = document.createElement('div');
+          warn.className = 'ob-backend';
+          warn.innerHTML = `<div><b>${t('VibeSpace integration on {host}', { host: escHtml(hostNameStub) })}</b></div>`
+            + `<div class="usage-warn">${escHtml(t('Could not check the integration on {host} — {reason}', { host: hostNameStub, reason: rsErr || t('unreachable') }))}</div>`;
+          body.appendChild(warn);
+        }
         if (rs && rs.tools) {
           const hostName = hostLabel || t('remote host');
           const row = document.createElement('div'); row.className = 'ob-backend';
@@ -1258,7 +1366,14 @@ export function installManageAgents(App, ctx = {}) {
             const [wl, wx] = bs.reduce((a, b) => (pctOf(b[1]) > pctOf(a[1]) ? b : a));
             const wp = pctOf(wx);
             const c = wp > 95 ? 'var(--red,#e55)' : wp > 80 ? 'var(--yellow,#e5c07b)' : 'var(--green,#3fb950)';
-            pill = `<span class="agents-mach-quota" style="color:${c}" title="${escHtml(bs.map(([l, x]) => `${l} ${pctOf(x)}%`).join(' · '))}">${escHtml(wl)} ${wp}%</span>`;
+            // AGE MARKER (the row-level donuts have one; this pill didn't):
+            // this is the persisted usage-cache snapshot, potentially DAYS
+            // old, so a dead host showed a healthy-looking green "5h 12%" that
+            // read as current.
+            const ageMs = hu.fetchedAt ? Date.now() - hu.fetchedAt : 0;
+            const ageTxt = ageMs > 5 * 60000 ? ' · ' + agoText(hu.fetchedAt) : '';
+            const tip = bs.map(([l, x]) => `${l} ${pctOf(x)}%`).join(' · ') + (hu.fetchedAt ? ' · ' + t('as of {when}', { when: agoText(hu.fetchedAt) }) : '');
+            pill = `<span class="agents-mach-quota" style="color:${c}" title="${escHtml(tip)}">${escHtml(wl)} ${wp}%${escHtml(ageTxt)}</span>`;
           }
           sum.innerHTML = `${dot}<span class="agents-mach-name">${escHtml(h.name)}</span><span class="agents-machine-sub">${escHtml(h.transport === 'dial' ? t('device') : `${h.user}@${h.host}`)}</span>${pill}`;
           det.appendChild(sum);
@@ -1838,7 +1953,8 @@ export function installManageAgents(App, ctx = {}) {
           }
           showContextMenu(r.left, r.bottom + 4, items);
         } else if (e.target.closest('.acct-def')) {
-          try { await fetchJson('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: null }) }); } catch {}
+          try { await api('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: null }) }); }
+          catch (err) { showToast(t('Could not change the default account — {reason}', { reason: err?.message || t('server unreachable') }), { type: 'error' }); }
           refresh();
         }
         return;
@@ -1905,14 +2021,20 @@ export function installManageAgents(App, ctx = {}) {
           value: a?.email || '', placeholder: 'you@example.com', confirmText: t('Save'),
         });
         if (email != null) {
-          try { await fetchJson(`/api/accounts/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: email.trim() }) }); } catch {}
+          // api(), not fetchJson: fetchJson NEVER throws (null on failure,
+          // {error} bodies handed back as data), so the old try/catch was dead
+          // code and a rejected write silently no-op'd — refresh() repainted
+          // the OLD value and the user never learned why it didn't take.
+          try { await api(`/api/accounts/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: email.trim() }) }); }
+          catch (err) { showToast(t('Could not save the email — {reason}', { reason: err?.message || t('server unreachable') }), { type: 'error' }); }
           refresh();
         }
       };
       const doRename = async () => {
         const name = await showInputDialog({ title: t('Rename account'), label: t('Account name'), value: a?.name || '', confirmText: t('Save') });
         if (name && name.trim() && name.trim() !== a?.name) {
-          try { await fetchJson(`/api/accounts/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) }); } catch {}
+          try { await api(`/api/accounts/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) }); }
+          catch (err) { showToast(t('Rename failed — {reason}', { reason: err?.message || t('server unreachable') }), { type: 'error' }); }
           refresh();
         }
       };
@@ -1927,7 +2049,8 @@ export function installManageAgents(App, ctx = {}) {
           ? t('Remove "{name}" from VibeSpace? Sessions already running keep working; the key itself stays valid.', { name: a?.name })
           : t('Remove "{name}"? The roster is one shared list — this deletes the MASTER key copy held by VibeSpace (it disappears from every machine’s view) and sweeps the per-session working copies it placed on hosts. The Anthropic Console cannot re-show an existing key’s value, so make sure it’s saved elsewhere first. Running sessions keep working.', { name: a?.name });
         if (!(await showConfirmDialog({ title: t('Remove account'), message: msg }))) return;
-        try { await fetchJson(`/api/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }); } catch {}
+        try { await api(`/api/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }); showToast(t('Removed “{name}”', { name: a?.name || '' })); }
+        catch (err) { showToast(t('Could not remove the account — {reason}', { reason: err?.message || t('server unreachable') }), { type: 'error' }); }
         refresh();
       };
       const doNote = async () => {
@@ -1937,7 +2060,8 @@ export function installManageAgents(App, ctx = {}) {
           value: a?.note || '', confirmText: t('Save'),
         });
         if (note != null) {
-          try { await fetchJson(`/api/accounts/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note: note.trim() }) }); } catch {}
+          try { await api(`/api/accounts/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note: note.trim() }) }); }
+          catch (err) { showToast(t('Could not save the note — {reason}', { reason: err?.message || t('server unreachable') }), { type: 'error' }); }
           refresh();
         }
       };
@@ -1950,7 +2074,8 @@ export function installManageAgents(App, ctx = {}) {
           showToast(t('The default is global, and “{name}” can’t run on {host} — new sessions there keep using its own login.', { name: a?.name, host: escHtml(hostLabel) }) + ' ' + t('Already logged in as this account ON {host}? Then pick “CLI login @ {host}” when switching the session’s billing — that uses the host’s own login.', { host: escHtml(hostLabel) }), { type: 'error', duration: 8000 });
           return;
         }
-        try { await fetchJson('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: isDef ? null : id }) }); } catch {}
+        try { await api('/api/accounts/default', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: isDef ? null : id }) }); }
+        catch (err) { showToast(t('Could not change the default account — {reason}', { reason: err?.message || t('server unreachable') }), { type: 'error' }); }
         refresh();
       } else if (e.target.closest('.acct-menu')) {
         // Redesign (2.178.0): Test/Rename/email/Remove live behind ⋯
@@ -1967,7 +2092,7 @@ export function installManageAgents(App, ctx = {}) {
             action: () => this._poolSwitchTarget(id, m.id, a.name, a.hot),
           })) : [{ label: t('no logged-in subscriptions'), disabled: true, action: () => {} }] });
           const patchPool = async (body) => {
-            try { await fetchJson('/api/accounts/pool/' + encodeURIComponent(id), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); }
+            try { await api('/api/accounts/pool/' + encodeURIComponent(id), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); }
             catch (e) { showToast(e?.message || t('Update failed'), { type: 'error' }); }
           };
           items.splice(1, 0,

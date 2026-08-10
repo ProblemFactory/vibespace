@@ -137,7 +137,7 @@ class ChatSearch {
     // request against the loaded window.
     if (this._getGapActive() && this._jumpToFileMatch) {
       this._fullFileMode = true;
-      await this._streamFullFileSearch(backend, backendSessionId, cwd, q, token, stale);
+      await this._streamFullFileSearch(backend, backendSessionId, cwd, q, token, stale, host);
       return;
     }
 
@@ -157,7 +157,7 @@ class ChatSearch {
 
   // Read the NDJSON match stream: jump to the first hit immediately, then keep
   // updating the live count until the server signals `done`.
-  async _streamFullFileSearch(backend, backendSessionId, cwd, q, token, stale) {
+  async _streamFullFileSearch(backend, backendSessionId, cwd, q, token, stale, host) {
     const _t0 = performance.now();
     this._searchAbort?.abort();
     const ac = (this._searchAbort = new AbortController());
@@ -167,7 +167,12 @@ class ChatSearch {
     this._updateSearchStatus();
     let jumped = false;
     try {
-      const url = `/api/session-history-gap?backend=${encodeURIComponent(backend || 'claude')}&backendSessionId=${encodeURIComponent(backendSessionId)}&cwd=${encodeURIComponent(cwd)}&search=${encodeURIComponent(q)}&stream=1`;
+      // &host= is MANDATORY for a remote session (2.272.1): without it the
+      // server searched the LOCAL projects dir — on a remote conversation the
+      // streaming search silently returned nothing (the last of the five
+      // gap-endpoint callers to be threaded; the other four were fixed in the
+      // same release).
+      const url = `/api/session-history-gap?backend=${encodeURIComponent(backend || 'claude')}&backendSessionId=${encodeURIComponent(backendSessionId)}&cwd=${encodeURIComponent(cwd)}&search=${encodeURIComponent(q)}&stream=1${host ? `&host=${encodeURIComponent(host)}` : ''}`;
       const res = await fetch(url, { signal: ac.signal });
       const reader = res.body.getReader();
       const dec = new TextDecoder();

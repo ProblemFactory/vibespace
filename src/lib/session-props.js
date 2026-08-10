@@ -110,7 +110,10 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
     histList.innerHTML = `<div class="empty-hint" style="padding:2px 0">${escHtml(t('Loading history…'))}</div>`;
     stSec.appendChild(histList);
     const keys = [refKey, s.webuiId ? 'webui:' + s.webuiId : null].filter(Boolean).join(',');
-    fetch(`/api/session-status/history?sessionKey=${encodeURIComponent(keys)}`).then(r => r.json()).then(d => {
+    fetch(`/api/session-status/history?sessionKey=${encodeURIComponent(keys)}`).then(r => {
+      if (!r.ok) throw new Error(`${r.status} ${r.statusText || 'request failed'}`);
+      return r.json();
+    }).then(d => {
       if (!histList.isConnected) return;
       const hist = (d?.history || []).slice(-20).reverse();
       histList.innerHTML = hist.length ? '' : `<div class="empty-hint" style="padding:2px 0">${escHtml(t('No status changes recorded yet'))}</div>`;
@@ -128,7 +131,13 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
           + `<span class="session-history-by">${h.setBy === 'user' ? escHtml(t('you')) : escHtml(t('agent'))}</span>`;
         histList.appendChild(li);
       }
-    }).catch(() => {});
+    }).catch((e) => {
+      // A permanent "Loading history…" is indistinguishable from an op still
+      // in progress — terminate the section honestly and let the broadcast-
+      // driven re-render be the retry.
+      if (!histList.isConnected) return;
+      histList.innerHTML = `<div class="usage-warn" style="padding:2px 0">${escHtml(t('Couldn’t load the status history — {reason}', { reason: e?.message || t('server unreachable') }))}</div>`;
+    });
 
     // ── Billing ──
     const bilSec = section(t('Billing'));
@@ -157,24 +166,61 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
     const rHost = s.host || null;
     const rTransport = rHost ? (sidebar._hostsData?.hosts?.find(h => h.id === rHost)?.transport || 'ssh') : null;
     const shipSubs = !!app.settings?.get?.('accounts.shipSubscriptionToRemote');
+    // SERVER-COMPUTED verdicts are the ONE authority (B-f531): this surface
+    // used to recompute linked/held here from page caches that start COLD and
+    // that NOTHING on this window ever warmed — so on a fresh page a remote
+    // session's Properties disabled every host-held/linked subscription as
+    // "blocked on this host" and only un-greyed if some OTHER surface happened
+    // to probe (the 2.239.2 cold-page lie, and it missed every verdict-only
+    // reason: held-identity-mismatch, oat rungs, not-on-this-host).
+    if (rHost) app._warmHostAccountCache?.(rHost); // TTL-guarded; the broadcast-driven re-render picks up the answer
+    const vOf = (x) => (rHost ? app._hostVerdicts?.[rHost]?.[x.id] : null) || null;
+    const warmState = rHost ? app._hostAcctWarmState?.[rHost] : null;
+    // gated on the warm state: a pre-verdict server sends no `verdicts` at
+    // all, and a bare absence test would claim "checking…" forever there
+    const verdictsCold = !!rHost && !app._hostVerdicts?.[rHost] && (warmState === 'pending' || warmState === 'error');
     // linked/held accounts run on the host's own/held login — never blocked
     // (PR #23 brought session-props up to the switcher's semantics); a valid
     // long-lived token keeps its own exemption (B-211a); macOS Keychain-
     // backed logins (localOnly) can never ship regardless of the opt-in.
     const hostOwnEmail = rHost
-      ? String(app._hostOwnUsage?.[rHost]?.orgEmail || '').trim().toLowerCase()
+      ? String(app._hostOwnUsage?.[rHost]?.orgEmail || app._hostOwnEmailKnown?.[rHost] || '').trim().toLowerCase()
       : '';
     const acctEmailOf = (x) => String(x.email || (String(x.name || '').includes('@') ? x.name : '')).trim().toLowerCase();
-    const hostLinked = (x) => sbe !== 'codex' && !!hostOwnEmail && acctEmailOf(x) === hostOwnEmail;
-    const hostSubHeld = (x) => sbe !== 'codex' && (app._hostSubsKnown?.[rHost] || []).includes(x.id);
-    const subBlocked = (x) => (x.oat && !(x.oatDaysLeft <= 0)) ? false : (rHost
-      && (sbe === 'codex' || x.type === 'subscription')
-      && !hostLinked(x)
-      && !hostSubHeld(x)
-      && (rTransport === 'dial' || !shipSubs || x.localOnly));
-    for (const [v, label, blocked] of [['', t('Default')], ['subscription', globalLabel], ...accts.map(x => [x.id, x.type === 'subscription' ? `${x.name} (${t('subscription')})` : `${x.name} — API …${x.tail}`, subBlocked(x)])]) {
-      const o = document.createElement('option'); o.value = v; o.textContent = blocked ? label + ' · ' + t('blocked on this host') : label;
-      if (blocked) { o.disabled = true; o.title = t('Subscription logins don’t ship to this machine — log in there, or use an API-key account'); }
+    const hostLinked = (x) => { const v = vOf(x); if (v) return v.usable && v.how === 'host-login'; return sbe !== 'codex' && !!hostOwnEmail && acctEmailOf(x) === hostOwnEmail; };
+    const hostSubHeld = (x) => { const v = vOf(x); if (v) return v.usable && v.how === 'host-held'; return sbe !== 'codex' && (app._hostSubsKnown?.[rHost] || []).includes(x.id); };
+    const subBlocked = (x) => {
+      const v = vOf(x);
+      if (v) return !v.usable; // verdict is authoritative — the same call the spawn makes
+      return (x.oat && !(x.oatDaysLeft <= 0)) ? false : (rHost
+        && (sbe === 'codex' || x.type === 'subscription')
+        && !hostLinked(x)
+        && !hostSubHeld(x)
+        && (rTransport === 'dial' || !shipSubs || x.localOnly));
+    };
+    // Suffix + tooltip for a blocked row: verbatim from the verdict when we
+    // have one, honest about being a GUESS while the probe is out.
+    const blockedNote = (x) => {
+      const v = vOf(x);
+      if (v?.reason === 'held-identity-mismatch') return [t('host login belongs to {email}', { email: v.dirEmail || '?' }), t('The login held on this machine for this account belongs to someone else — re-run “Log in on host as this account”.')];
+      if (v?.reason === 'not-on-this-host') return [t('not logged in on this machine'), t('This account is signed in elsewhere — log it in on this machine, or run the session where it is signed in.')];
+      if (v?.reason === 'never-signed-in') return [t('never finished signing in'), t('Complete this account’s login in Manage agents first.')];
+      if (v?.reason === 'oat-expired') return [t('long-lived token expired'), t('Re-mint it in Manage agents (⋯ → Long-lived token).')];
+      if (v?.reason === 'pool-local-only') return [t('this machine only'), t('Pooled accounts run on the local machine only.')];
+      if (verdictsCold) {
+        return warmState === 'error'
+          ? [t('availability unknown'), t('Couldn’t reach this session’s machine to check which accounts it can use — this row is a guess from cached data.')]
+          : [t('checking…'), t('Still checking which accounts this session’s machine can use — this row is a guess until it answers.')];
+      }
+      return [t('blocked on this host'), t('Subscription logins don’t ship to this machine — log in there, or use an API-key account')];
+    };
+    for (const [v, label, blocked, acctRec] of [['', t('Default')], ['subscription', globalLabel], ...accts.map(x => [x.id, x.type === 'subscription' ? `${x.name} (${t('subscription')})` : `${x.name} — API …${x.tail}`, subBlocked(x), x])]) {
+      const o = document.createElement('option'); o.value = v;
+      if (blocked) {
+        const [why, tip] = blockedNote(acctRec || {});
+        o.textContent = label + ' · ' + why;
+        o.disabled = true; o.title = tip;
+      } else o.textContent = label;
       acctSel.appendChild(o);
     }
     acctSel.value = [...acctSel.options].some(o => o.value === (savedCfg.account || '')) ? (savedCfg.account || '') : '';
@@ -244,7 +290,10 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
     stepSec.appendChild(stepList);
     const rid = s.backendSessionId || s.sessionId;
     fetch(`/api/session-todos?backend=${encodeURIComponent(s.backend || 'claude')}&backendSessionId=${encodeURIComponent(rid)}&cwd=${encodeURIComponent(s.cwd || '')}${s.host ? `&host=${encodeURIComponent(s.host)}` : ''}`)
-      .then(r => r.json()).then(d => {
+      .then(r => {
+        if (!r.ok) throw new Error(`${r.status} ${r.statusText || 'request failed'}`);
+        return r.json();
+      }).then(d => {
         if (!stepList.isConnected) return;
         const todos = (d?.todos || []).filter(t => (t.content || t.step || '').trim());
         stepList.innerHTML = todos.length ? '' : `<div class="empty-hint" style="padding:2px 0">${escHtml(t("The agent hasn't kept a todo list"))}</div>`;
@@ -272,7 +321,14 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
           stepList.appendChild(toggle);
         }
         for (const t of done.slice(-2)) stepList.appendChild(mkStep(t));
-      }).catch(() => {});
+      }).catch((e) => {
+        // Remote sessions read the steps out of an ssh-fetched transcript — a
+        // slow/dead host used to leave this section on 'Loading…' forever.
+        if (!stepList.isConnected) return;
+        stepList.innerHTML = `<div class="usage-warn" style="padding:2px 0">${escHtml(s.host
+          ? t('Couldn’t load the steps from {host} — {reason}', { host: sidebar._hostsData?.hosts?.find(h => h.id === s.host)?.name || s.host, reason: e?.message || t('unreachable') })
+          : t('Couldn’t load the steps — {reason}', { reason: e?.message || t('server unreachable') }))}</div>`;
+      });
   };
 
   render();

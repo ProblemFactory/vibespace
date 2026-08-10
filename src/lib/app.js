@@ -12,7 +12,7 @@ import { CodeEditor } from './code-editor.js';
 import { LayoutManager } from './layout.js';
 import { ChatView } from './chat-view.js';
 import { Resizer } from './resizer.js';
-import { anchorFixedPopup, configureToasts, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, getUiPref, UI_SCALE_MIN, UI_SCALE_MAX, UI_FONT_MIN, UI_FONT_MAX, uiScale } from './utils.js';
+import { anchorFixedPopup, api, configureToasts, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, getUiPref, UI_SCALE_MIN, UI_SCALE_MAX, UI_FONT_MIN, UI_FONT_MAX, uiScale } from './utils.js';
 import { t, tc, getLangPref, setLang } from './i18n.js';
 import { installManageAgents } from './manage-agents.js';
 import { installPluginsUI } from './plugins-ui.js';
@@ -337,6 +337,21 @@ class App {
       // a boot-time fetch that failed during a restart window left the tab
       // permanently stateless; reconnect re-applies the authoritative copy.
       try { this.sidebar?._fetchUserState?.(); } catch {}
+      // Task Groups + session statuses are ALSO broadcast-only mirrors: an
+      // agent's vibespace-status/vibespace-task writes and another client's
+      // group edits during the outage never arrive, so the board and the
+      // status chips render stale state as current until a full reload (and a
+      // boot fetch lost to a restart window leaves _tasksLoaded false, which
+      // pins task-detail windows on "Loading task…" forever).
+      try { this.sidebar?._fetchTasks?.(); } catch {}
+      fetchJson('/api/session-status').then((d) => {
+        const sb = this.sidebar;
+        if (!d?.statuses || !sb) return;
+        sb._sessionStatuses = d.statuses;
+        sb._render?.();
+        sb._lastAttnSig = null; // declared attention may have changed while we were away
+        sb.refreshTaskAttention?.();
+      }).catch(() => {});
       for (const [winId, session] of this.sessions) {
         if (session instanceof TerminalSession && session.sessionId) {
           this.ws.send({ type: 'attach', sessionId: session.sessionId });
@@ -1274,20 +1289,31 @@ class App {
     // Check if it's a built-in preset — don't save those
     const builtins = [[1,1],[1,2],[2,1],[2,2],[1,3]];
     if (builtins.some(([r,c]) => r === rows && c === cols)) return;
-    // Save to server
-    const data = await fetchJson('/api/custom-grids', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rows, cols }),
-    });
-    if (data) { this._customGrids = data.customGrids || []; this._renderCustomGridButtons(); }
+    // Save to server. A dropped failure silently never created the button and
+    // the "saved" preset was gone on the next load.
+    try {
+      const data = await api('/api/custom-grids', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows, cols }),
+      });
+      this._customGrids = data?.customGrids || [];
+      this._renderCustomGridButtons();
+    } catch (e) {
+      showToast(t('Could not save the grid preset — {reason}', { reason: e?.message || t('server unreachable') }), { type: 'error' });
+    }
   }
 
   async _removeCustomGrid(rows, cols) {
-    const data = await fetchJson('/api/custom-grids', {
-      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rows, cols }),
-    });
-    if (data) { this._customGrids = data.customGrids || []; this._renderCustomGridButtons(); }
+    try {
+      const data = await api('/api/custom-grids', {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows, cols }),
+      });
+      this._customGrids = data?.customGrids || [];
+      this._renderCustomGridButtons();
+    } catch (e) {
+      showToast(t('Could not remove the grid preset — {reason}', { reason: e?.message || t('server unreachable') }), { type: 'error' });
+    }
   }
 
   // Command mode extracted to CommandMode class (src/lib/command-mode.js)
@@ -1745,6 +1771,19 @@ class App {
       // present, verdicts override the legacy cache-derived linked/held.
       if (onHost && hostId) this._warmHostAccountCache?.(hostId);
       const vOf = (a) => (onHost ? this._hostVerdicts?.[hostId]?.[a.id] : null) || null;
+      // Without verdicts every "not logged in on {host}" below is a confident
+      // claim derived from NO data — it read as definitive for the ~15s probe
+      // window (and for 2 min after a failed probe, pre-fix), so users picked
+      // a worse account off it. Say which state we're actually in.
+      // (gated on the warm state as well — a pre-verdict server answers fine
+      // but sends no `verdicts`, and a bare absence test would pin it on
+      // "checking…" forever)
+      const acctWarm = onHost ? this._hostAcctWarmState?.[hostId] : null;
+      const verdictsCold = onHost && !this._hostVerdicts?.[hostId] && (acctWarm === 'pending' || acctWarm === 'error');
+      const unknownLabel = acctWarm === 'error'
+        ? t('availability on {host} unknown — machine unreachable', { host: hostName })
+        : t('checking {host}…', { host: hostName });
+      const uncertainIds = new Set(); // disabled only because the probe hasn't answered
       for (const a of list) {
         // Pooled pseudo-account: neither an API key (the old else-branch
         // labeled it "— API key …undefined") nor a plain subscription.
@@ -1776,8 +1815,12 @@ class App {
           // the verdict path already blocks via reason 'local-only-mac'
           else if (a.loggedIn && allowSubRemote && !a.localOnly && hostRec?.transport !== 'dial') opts.push([a.id, t('{name} (subscription)', { name: a.name })]);
           // Not usable there — show WHY instead of silently omitting (the
-          // omission is what taught users the create-then-switch workaround)
-          else opts.push([a.id, a.name + ' — ' + t('not logged in on {host}', { host: hostName }), true]);
+          // omission is what taught users the create-then-switch workaround).
+          // Uncertain ⇒ say uncertain, never "not logged in".
+          else {
+            if (verdictsCold) uncertainIds.add(a.id);
+            opts.push([a.id, a.name + ' — ' + (verdictsCold ? unknownLabel : t('not logged in on {host}', { host: hostName })), true]);
+          }
         } else opts.push([a.id, t('{name} — API key …{tail}', { name: a.name, tail: a.tail })]);
       }
       for (const [v, label, disabled] of opts) {
@@ -1787,7 +1830,23 @@ class App {
         acctSel.appendChild(o);
       }
       const keep = [...acctSel.options].find(o => o.value === prev && !o.disabled);
-      acctSel.value = keep ? prev : '';
+      // An UNCONFIRMED disable must not silently drop the user's pick: the row
+      // is rebuilt when late verdicts land, so resetting here would leave the
+      // dialog on Default while the (now enabled) account looks unselected —
+      // i.e. the session gets created on a different account than the user
+      // chose, silently. Hold the pick until the machine actually answers.
+      const prevOpt = prev ? [...acctSel.options].find(o => o.value === prev) : null;
+      if (keep || (prev && uncertainIds.has(prev))) acctSel.value = prev;
+      else {
+        acctSel.value = '';
+        // Reset for a CONFIRMED reason — say it (only when the option is still
+        // listed but disabled; a backend switch drops it entirely and needs no
+        // alarm).
+        if (prevOpt?.disabled) {
+          const lost = all.find(a => a.id === prev);
+          showToast(t('“{name}” isn’t available for this session — the account reset to Default', { name: lost?.name || prev }), { type: 'error' });
+        }
+      }
     };
     this._updateAcctRow = updateAcctRow; // freshest closure wins
     updateAcctRow();
