@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.279.1
+
+**CS separation round closed out.** scripts/test-local-device.mjs live-proves the 2.276.0 keystone against a REAL daemon (throwaway root, real unix socket): `hosts.device(null)` / `device('local')` / `deviceBounded(null)` all resolve device #0, runCmd/fsWrite/fsReadRange/discovery-snapshot execute for real, and a missing local daemon THROWS instead of pretending. The design doc's metric is refined to what actually matters: branch count stays flat by design (branches *select* transports); **parallel implementations** fell from 9 twin-sets to 0 unjustified (7 unified modules + 2 documented exceptions, each with a drift/parity guard). File ops formally recorded as a justified exception: SafeFs's FUSE-hang isolation is load-bearing and the daemon carries live session pipes — revisit only with daemon-side worker isolation.
+
 ## 2.279.0
 
 **CS separation, fourth migration: the five remote spawn command builders are ONE composition** (`buildRemoteExec` in src/remote-shell.js).
