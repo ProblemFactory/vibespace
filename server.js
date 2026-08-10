@@ -5720,9 +5720,15 @@ server.listen(PORT, HOST, () => {
         nodeModules: path.join(__dirname, 'node_modules'),
         log: console.log,
       });
+      // device #0 becomes reachable through hosts.device(null) — that is what
+      // lets a consumer be written ONCE and run on ANY machine including this
+      // one (CS separation, 2.276.0). Wired BEFORE connect so a consumer that
+      // races startup gets the handle and awaits its connect like any other.
+      try { hosts.setLocalDevice(deviceMgr); } catch { }
       deviceMgr.connect().then(() => console.log('  device-daemon: device session routing ENABLED')).catch((e) => {
         console.warn('  device-daemon: could not reach the daemon — local pty fallback:', e.message);
         deviceMgr = null; // fall back cleanly
+        try { hosts.setLocalDevice(null); } catch { } // consumers fall back to their legacy local path
       });
     } catch (e) { console.warn('  device-daemon: init failed — local pty fallback:', e.message); deviceMgr = null; }
   }

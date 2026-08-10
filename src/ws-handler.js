@@ -131,6 +131,7 @@ function pickCodexThreadCandidate({ activeSessions, webuiSessionId, cwd, created
 // froze the whole server for up to 20s per spawn). stdin errors are swallowed
 // on the STREAM (2.241.1 rule: pipe errors arrive as stream 'error' events).
 const { REMOTE_PRELUDE, nodeFinder } = require('./remote-shell.js');
+const { sweepWriters } = require('./writer-sweep.js');
 
 function execFileAsync(cmd, args, { input, timeout = 20000, maxBuffer = 8 * 1024 * 1024, encoding = 'buffer' } = {}) {
   return new Promise((resolve, reject) => {
@@ -1111,43 +1112,6 @@ function registerWsHandler(wss, ctx) {
             // root and per-instance device@/agentd@ roots — their setsid claude
             // survives pod recreation), keeper run-file bookkeeping (harmless
             // no-op on devices without the keeper).
-            const writerSweepScript = (rid) => `RID=${shq(rid)}
-# writer sweep, portable: /proc fd scan on Linux; lsof on macOS/BSD ssh hosts
-# (no /proc there — the old script silently swept NOTHING, audit 2.192.0).
-# cmdline checks use POSIX \`ps -o args=\` (same idiom as killRemotePid).
-if [ -d /proc/1 ] || [ -d /proc/self ]; then
-  for pdir in /proc/[0-9]*; do
-    [ -e "$pdir" ] || continue
-    ls -l "$pdir/fd" 2>/dev/null | grep -q "/$RID.jsonl" || continue
-    pid=$(basename "$pdir")
-    case "$(ps -p "$pid" -o args= 2>/dev/null)" in *claude*) kill -TERM "$pid" 2>/dev/null;; esac
-  done
-elif command -v lsof >/dev/null 2>&1; then
-  J=$(find "$HOME/.claude/projects" -maxdepth 2 -name "$RID.jsonl" 2>/dev/null | head -1)
-  if [ -n "$J" ]; then
-    for pid in $(lsof -t -- "$J" 2>/dev/null); do
-      case "$(ps -p "$pid" -o args= 2>/dev/null)" in *claude*) kill -TERM "$pid" 2>/dev/null;; esac
-    done
-  fi
-fi
-find "$HOME/.claude/sessions" -maxdepth 1 -name '*.json' 2>/dev/null | while read -r f; do
-  pid=$(basename "$f" .json)
-  grep -q "\\"sessionId\\":\\"$RID\\"" "$f" 2>/dev/null || continue
-  kill -0 "$pid" 2>/dev/null || continue
-  case "$(ps -p "$pid" -o args= 2>/dev/null)" in *claude*) kill -TERM "$pid" 2>/dev/null;; esac
-done
-for kf in "$HOME"/.vibespace/*/state/sessions/*.json; do
-  [ -e "$kf" ] || continue
-  grep -q "$RID" "$kf" 2>/dev/null || continue
-  grep -q '"exited"' "$kf" 2>/dev/null && continue
-  cpid=$(sed -n 's/.*"childPid":\\([0-9]*\\).*/\\1/p' "$kf" | head -1)
-  [ -n "$cpid" ] && kill -TERM "$cpid" 2>/dev/null
-done
-find "$HOME/.vibespace/run" -maxdepth 1 -name '*.json' 2>/dev/null | while read -r kf; do
-  grep -q "$RID" "$kf" 2>/dev/null || continue
-  grep -q '"exited"' "$kf" 2>/dev/null && continue
-  node "$HOME/.vibespace/bin/vibespace-remote-keeper" stop "$(basename "$kf" .json)" >/dev/null 2>&1 || true
-done`;
             const rcmd = spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd;
             const rargs = [...spawnArgs];
             if (backend !== 'codex') {
@@ -1210,8 +1174,8 @@ done`;
               // Never runs for pipe-ATTACH (we adopt, not respawn).
               if (data.resume && data.resumeId && !dialKeeperSid && /^[\w-]+$/.test(data.resumeId)) {
                 try {
-                  const dm = await hosts.deviceBounded(h.id, 15000);
-                  await dm.runCmd('sh', ['-c', writerSweepScript(data.resumeId)], { timeoutMs: 20000 });
+                  const r = await sweepWriters(hosts, h.id, data.resumeId, { shq, execFileAsync });
+                  if (r.swept.length) session._resumeSwept = { host: h.name, pids: r.swept };
                   hosts.invalidateDiscovery(h.id);
                 } catch (e) {
                   console.warn('[dial] pre-resume cleanup failed (continuing):', e.message);
@@ -1316,7 +1280,8 @@ done`;
                 // it subsumes the id-lock grep (a --resumed claude's lock
                 // carries a NEW session id, so grepping the lock for RID missed
                 // it). The pipe-meta + keeper legs clean their own bookkeeping.
-                await execFileAsync('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', writerSweepScript(data.resumeId)], { timeout: 20000 });
+                const r = await sweepWriters(hosts, h.id, data.resumeId, { shq, execFileAsync });
+                if (r.swept.length) session._resumeSwept = { host: h.name, pids: r.swept };
                 hosts.invalidateDiscovery(h.id);
               } catch (e) {
                 // The sweep exists to guarantee no other writer holds this
@@ -1438,6 +1403,27 @@ done`;
               usageEnvPairs.push(`VIBESPACE_ACCOUNT_KEY=${acctKey}`);
               if (orig) usageEnvPairs.push(`VIBESPACE_ORIG_STATUSLINE=${orig}`);
             } catch {}
+          }
+          // ── LOCAL pre-resume writer sweep (CS separation, 2.276.0) ──
+          // The SAME invariant the remote paths have enforced since B-4058:
+          // no other process may still be writing this conversation. Local
+          // never had it — not because local is safe (a claude running in an
+          // external terminal holds the transcript exactly the same way) but
+          // because the incident that motivated the sweep happened remotely,
+          // and the local twin is the one nobody exercises. Now hostId is a
+          // parameter: the identical script runs over device #0.
+          // The live-session case is already refused earlier (2.179.0
+          // resume-already-live), so this can only reach EXTERNAL writers.
+          if (data.resume && data.resumeId && !data.hostId && !data.keeperSid
+              && (data.backend || 'claude') === 'claude' && /^[\w-]+$/.test(data.resumeId) && hosts) {
+            try {
+              const r = await sweepWriters(hosts, null, data.resumeId, { shq, connectMs: 8000 });
+              if (r.swept.length) session._resumeSwept = { host: 'this machine', pids: r.swept };
+            } catch (e) {
+              // Local device daemon down ⇒ legacy behaviour (no sweep), which
+              // is what every release before this one did — warn, never block.
+              console.warn('[session] local pre-resume sweep skipped:', e.message);
+            }
           }
           let createPty;
           try {
@@ -1706,6 +1692,9 @@ done`;
               name: session._accountId ? (() => { try { return accounts?.get?.(session._accountId)?.name || null; } catch { return null; } })() : null,
             },
             warning: session._resumeWarning || undefined, // 2.271.0 T1-2: sweep-skipped-under-lag double-write risk
+            // A sweep is DESTRUCTIVE by design (it SIGTERMs another claude that
+            // held this transcript). Never do that silently — 2.276.0.
+            swept: session._resumeSwept || undefined,
           }));
           broadcastActiveSessions();
           break;

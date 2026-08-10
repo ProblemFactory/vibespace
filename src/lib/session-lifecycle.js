@@ -224,6 +224,15 @@ export function installSessionLifecycle(App, ctx = {}) {
         // laggy host — the resume proceeded, but the user must know a double-
         // write is possible so they don't mistake duplicated messages for a bug.
         if (msg.warning) { try { showToast(msg.warning, { type: 'error', duration: 9000 }); } catch { } }
+        // The pre-resume sweep STOPPED another process that was writing this
+        // conversation (2.276.0). That is destructive by design — say it, so a
+        // terminal that just died elsewhere is explained rather than mysterious.
+        if (msg.swept?.pids?.length) {
+          try {
+            showToast(t('Stopped {n} other process(es) that were still writing this conversation on {host} — resuming cleanly.',
+              { n: msg.swept.pids.length, host: msg.swept.host || t('this machine') }), { duration: 8000 });
+          } catch { }
+        }
         metric('session-create-roundtrip-ms', performance.now() - _createT0);
         // Set openSpec now that we have the server session ID (for cross-client sync)
         winInfo._openSpec = {

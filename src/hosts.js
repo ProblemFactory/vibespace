@@ -778,7 +778,26 @@ class HostManager {
     ]);
   }
 
+  /** THE machine handle — remote host OR this machine (device #0).
+   *
+   *  CS SEPARATION (2.276.0): `hostId` must be a PARAMETER, not a branch. The
+   *  local daemon has been a full DeviceManager since 2.158.0 (same binary,
+   *  same mux, same op surface — the transport is the ONLY difference), but it
+   *  lived in a server.js variable that `device()` could not return because
+   *  this method started with `this.get(id)`. So every consumer wrote
+   *  `if (host) { …dm path… } else { …local path… }` — two implementations per
+   *  feature, and the local twin is the one nobody exercises when they fix a
+   *  remote bug (and vice versa: the remote twin is the one that silently
+   *  lags). Passing a falsy id now yields device #0, so a consumer can be
+   *  written ONCE and run on any machine including this one. */
+  setLocalDevice(dm) { this._localDevice = dm; }
+  isLocal(id) { return !id || id === 'local'; }
+
   async device(id) {
+    if (this.isLocal(id)) {
+      if (!this._localDevice) throw new Error('local device daemon is not available');
+      return this._localDevice;
+    }
     if (!this._devices) this._devices = new Map();
     const cached = this._devices.get(id);
     if (cached?.status().connected) return cached;
