@@ -1341,6 +1341,15 @@ class MountManager {
     if (m.type === 'gmail') return this._mountGmail(id);
     // CephFS = native kernel mount (not rclone) — its own path.
     if (m.type === 'cephfs') return this._mountCephfs(id);
+    // OneDrive backstop: rclone refuses to create the fs without a resolved
+    // drive_id/drive_type — resolve via Graph before spawning (an honest
+    // error instead of rclone's cryptic "upgrading from older versions" one;
+    // on success the ids persist on the record). Error recorded on the row
+    // like the mountpoint branch — the route reply alone never reaches it.
+    if (m.type === 'onedrive' && !m.driveId) {
+      try { await this._resolveOneDriveDrive(m); this._save(); }
+      catch (e) { this._errors.set(id, String(e.message || e)); this._notify(); throw e; }
+    }
     // Self-mount guard for EXISTING records too (imported before the add()
     // guard existed): our own bridge token = the URL points back at this
     // instance — refuse instead of fuse-mounting a self-referential loop.
@@ -2223,6 +2232,27 @@ class MountManager {
   }
 
   /** Write a freshly minted token back into a Drive-backed record + remount. */
+  // rclone's onedrive backend REFUSES to create the fs without drive_id +
+  // drive_type in config (the cryptic "if you are upgrading from older
+  // versions of rclone" error) — its interactive `rclone config` resolves
+  // them via Microsoft Graph, so our guided flow must do the same (2.268.8,
+  // real local report: every FRESH native OneDrive add failed at first
+  // connect; imported rclone.conf records only worked because the conf
+  // already carried both).
+  static GRAPH_BASE = { global: 'https://graph.microsoft.com', us: 'https://graph.microsoft.us', de: 'https://graph.microsoft.de', cn: 'https://microsoftgraph.chinacloudapi.cn' };
+  async _resolveOneDriveDrive(m) {
+    let tok;
+    try { tok = JSON.parse(this._dec(m.tokenEnc)); } catch { throw new Error('OneDrive token unreadable — re-run the sign-in'); }
+    const base = MountManager.GRAPH_BASE[m.region || 'global'] || MountManager.GRAPH_BASE.global;
+    const r = await fetch(base + '/v1.0/me/drive', { headers: { Authorization: `Bearer ${tok.access_token || ''}` }, signal: AbortSignal.timeout(15000) });
+    if (r.status === 401) throw new Error('OneDrive token expired before the drive could be resolved — sign in again ("Re-authorize OneDrive…" in the edit dialog)');
+    if (!r.ok) throw new Error(`OneDrive drive lookup failed (HTTP ${r.status})`);
+    const d = await r.json().catch(() => null);
+    if (!d?.id) throw new Error('OneDrive drive lookup returned no drive id');
+    m.driveId = String(d.id);
+    m.driveType = d.driveType || m.driveType || 'personal';
+  }
+
   async applyDriveToken(id, token) {
     const rec = this._get(id);
     // token may target a child's parent credential — write where the token lives
@@ -2230,13 +2260,20 @@ class MountManager {
     let tok = String(token).trim();
     const jm = tok.match(/\{[\s\S]*\}/); if (jm) tok = jm[0];
     JSON.parse(tok); // validate
-    if (holder.type === 'drive') holder.tokenEnc = this._enc(tok);
+    // OneDrive + generic cloud backends re-auth through the same dialog —
+    // rejecting them here left the edit-dialog button dead for those types.
+    if (holder.type === 'drive' || holder.type === 'onedrive' || holder.type === 'cloud') holder.tokenEnc = this._enc(tok);
     else if (holder.type === 'rclone' && holder.rcloneType === 'drive') {
       holder.paramsEnc = holder.paramsEnc || {};
       holder.paramsEnc.token = this._enc(tok);
-    } else throw new Error('Not a Google Drive connection');
+    } else throw new Error('Not an OAuth cloud connection');
     this._save();
     this._notify();
+    // Fresh token in hand — resolve the OneDrive drive now (best-effort;
+    // the mount-time backstop retries and reports honestly if this fails).
+    if (holder.type === 'onedrive' && !holder.driveId) {
+      try { await this._resolveOneDriveDrive(holder); this._save(); } catch {}
+    }
     const bounce = async (m) => {
       if (this.isMounted(m) || m.desired === 'mounted') {
         try { await this.unmount(m.id); await this.mount(m.id); } catch {}

@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.268.8
+
+- **Native OneDrive mounts actually work** (user report — first local add failed): rclone's onedrive backend refuses to create the fs without `drive_id`+`drive_type` in config (its interactive `rclone config` resolves them via Microsoft Graph; our guided flow never did, so every FRESH native add died with the cryptic "if you are upgrading from older versions of rclone" error — imported rclone.conf records only worked because the conf carried both). Now: `_resolveOneDriveDrive` (Graph `/me/drive`, region-aware endpoint) runs as a mount-time backstop whenever `driveId` is missing (honest row error on failure — an expired token says "token expired", which also surfaces the re-auth button) and after every re-auth token write-back; an explicit Drive ID is never overridden. Test: scripts/test-onedrive-resolve.mjs (8 asserts, mocked Graph).
+- **Re-auth surfaces stop saying "Google Drive" for non-Google mounts** (same report — the OneDrive edit dialog offered "重新授权 Google Drive…"): the two re-auth buttons + the re-auth dialog (hint / sign-in button / sign-in-page status / success toast) are provider-aware via `_oauthProviderNames` (product vs sign-in-provider names: OneDrive/Microsoft, Dropbox, … — brands untranslated). Also fixed: the server's `applyDriveToken` REJECTED onedrive/cloud records outright ("Not a Google Drive connection") — the edit-dialog re-auth button was dead server-side for every non-Google OAuth type; it now writes the token for all of them.
+
 ## 2.268.7
 
 - **Agents roster rows show the reset countdown** (user clarification: this surface, not the usage popup): the age cell becomes a two-line micro-column — data age on top (unchanged), and below it the reset countdown of the row's most-constrained bucket (est-aware pick, colored by that bucket's pressure — "when does the tight bucket free up"). Per-donut tooltips and the narrow-width pill tooltip carry per-bucket "resets in …" too. Fixed min-width keeps the donut-column alignment invariant; buckets whose reset already passed are skipped (effectively fresh). Applies to local, host, and pool rows alike (all render via `_acctUsageHtml`).

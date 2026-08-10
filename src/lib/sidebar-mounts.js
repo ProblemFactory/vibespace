@@ -455,7 +455,7 @@ export function installSidebarMounts(Sidebar) {
         if (this._isDriveBacked(m) && /invalid_grant|token expired|couldn.t fetch token/i.test(m.error)) {
           const fix = document.createElement('button');
           fix.className = 'mounts-btn mounts-btn-primary mounts-reauth-btn';
-          fix.textContent = tr('Re-authorize Google Drive…');
+          fix.textContent = tr('Re-authorize {provider}…', { provider: this._oauthProviderNames(m).product });
           fix.onclick = (e) => { e.stopPropagation(); this._showDriveReauthDialog(m); };
           err.appendChild(fix);
         }
@@ -466,18 +466,34 @@ export function installSidebarMounts(Sidebar) {
 
     _isDriveBacked(m) { return m.type === 'drive' || m.type === 'onedrive' || m.type === 'cloud' || (m.type === 'rclone' && m.rcloneType === 'drive'); },
 
+    // Product + sign-in-provider names for the re-auth surfaces — the flow is
+    // shared across every OAuth-backed type, so the wording must follow the
+    // record's actual provider (a OneDrive mount offered "Re-authorize Google
+    // Drive…" was a real report). Brand names stay untranslated.
+    _oauthProviderNames(m) {
+      const ty = m?.type;
+      if (ty === 'onedrive') return { product: 'OneDrive', signin: 'Microsoft' };
+      if (ty === 'cloud') {
+        const label = { dropbox: 'Dropbox', box: 'Box', pcloud: 'pCloud', yandex: 'Yandex Disk', premiumizeme: 'Premiumize.me', sharefile: 'ShareFile', hidrive: 'HiDrive', jottacloud: 'Jottacloud' }[m.backend]
+          || (m.source || '').split(':')[0] || 'Cloud';
+        return { product: label, signin: label };
+      }
+      return { product: 'Google Drive', signin: 'Google' };
+    },
+
     // Re-authorize an EXISTING Drive mount/credential whose token died. Same
     // guided flow as adding one (server runs `rclone authorize drive` with the
     // mount's own OAuth client), but the minted token writes back into the
     // record (+ its children) instead of a form field.
     _showDriveReauthDialog(m) {
+      const prov = this._oauthProviderNames(m);
       const { body, close } = createModalShell({ id: 'mount-reauth-dialog', title: tr('Re-authorize "{name}"', { name: m.name }), bodyClass: 'mounts-dialog-body', escapeToClose: true });
       const hint = document.createElement('div');
       hint.className = 'mounts-field-hint';
-      hint.textContent = tr('Google reported the saved sign-in as expired or revoked. Sign in again to mint a fresh token — nothing else about the mount changes.');
+      hint.textContent = tr('{provider} reported the saved sign-in as expired or revoked. Sign in again to mint a fresh token — nothing else about the mount changes.', { provider: prov.signin });
       const btn = document.createElement('button');
       btn.className = 'mounts-btn mounts-btn-primary';
-      btn.textContent = tr('Sign in with Google');
+      btn.textContent = tr('Sign in with {provider}', { provider: prov.signin });
       const status = document.createElement('div');
       status.className = 'mounts-field-hint';
       body.append(hint, btn, status);
@@ -488,7 +504,7 @@ export function installSidebarMounts(Sidebar) {
         status.textContent = tr('Saving token & reconnecting…');
         try {
           await api(`/api/mounts/${m.id}/drive-token`, { method: 'POST', body: JSON.stringify({ token }) });
-          showToast(tr('Google Drive re-authorized'));
+          showToast(tr('{provider} re-authorized', { provider: prov.product }));
           close(); this._renderMounts();
         } catch (e) { status.textContent = e.message || 'Failed'; btn.disabled = false; }
       };
@@ -501,7 +517,7 @@ export function installSidebarMounts(Sidebar) {
           const _w = window.open(r.url, '_blank');
           status.parentElement?.querySelectorAll('.mounts-oauth-link').forEach((e) => e.remove());
           status.after(oauthLinkRow(r.url));
-          status.textContent = tr('A Google sign-in page opened. Approve access, then come back here.');
+          status.textContent = tr('A {provider} sign-in page opened. Approve access, then come back here.', { provider: prov.signin });
           if (!_w) status.textContent = tr('Popup blocked — copy the link below and open it in a browser yourself.');
           if (!pasteBox) {
             pasteBox = document.createElement('div');
@@ -2333,7 +2349,7 @@ export function installSidebarMounts(Sidebar) {
         const rb = document.createElement('button');
         rb.type = 'button';
         rb.className = 'mounts-btn';
-        rb.textContent = tr('Re-authorize Google Drive…');
+        rb.textContent = tr('Re-authorize {provider}…', { provider: this._oauthProviderNames(cfg).product });
         rb.onclick = () => { close(); this._showDriveReauthDialog(m); };
         form.querySelector('.dialog-actions').prepend(rb);
       }
