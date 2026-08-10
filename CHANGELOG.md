@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.279.0
+
+**CS separation, fourth migration: the five remote spawn command builders are ONE composition** (`buildRemoteExec` in src/remote-shell.js).
+
+Every remote session spawn (ssh terminal / ssh chat via keeper / ssh via agentd pipe / dial pty / dial pipe) hand-assembled the same shell line — `cd → prelude → unset ambient tokens → secret-by-$(cat) assigns → exec env …` — as five drifting copies: two of them included REMOTE_PRELUDE twice, and the B-211a ambient-oat strip (an inherited CLAUDE_CODE_OAUTH_TOKEN silently re-bills every remote session) had to be hand-added to all five in 2.267.0. Now every difference is a NAMED parameter (pre/resolve/tokenAssign/acctEnv/parts/tail), the ambient strip is structural and provably ordered BEFORE the deliberate token assign, and the drift guard in scripts/test-remote-shell.mjs (20 asserts now) fails the build of anyone who hand-assembles an `exec env` spawn line in ws-handler again.
+
+Regression belts all green: integration-toggle, tool-toggles, account-verdicts (45), fallback-policy, m3m4 acceptance.
+
 ## 2.278.0
 
 **CS separation, third migration: discovery INTERPRETATION is single-sourced** (`src/discovery-facts.js`; table updated in docs/design-cs-unification.md).
