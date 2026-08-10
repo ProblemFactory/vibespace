@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.268.2
+
+**Per-bucket-kind pool thresholds** (user-designed: what matters is ABSOLUTE headroom, not relative — 1% of a 7d window ≈ $17 vs 1% of a 5h window ≈ $2-5). The single exhaustion threshold split by bucket kind: **5h hot 10% / hard 5%** (unchanged), **weekly (7d + Fable) hot 5% / hard 3%** — a weekly bucket at 88% still holds ~$200+ and is a perfectly healthy target. Exhaustion = ANY bucket under its kind's threshold; candidate gate + settle bar are per-kind too (settle = every bucket ≥ kind's hot threshold + 3). Immediate effect on tonight's roster: Personal Max (Fable 82-88%, sooner weekly deadline) becomes a legitimate EDF target again instead of idling behind Fish — its ~$150 of expiring Fable gets drained before the 8/14 reset. Pool suite rewritten to the per-kind semantics (38, incl. "the Personal case" and the per-kind oscillation pair).
+
 ## 2.268.1
 
 **Third class: cache READS are the nearly-free one** (user report: est 60 vs ⟳ 51, minutes after 2.268.0 went live — the incident window's $34.55 held only $1.29 of cache-write; incremental caching makes conversation windows cache-READ-dominated, and 2.268.0's two-class split had lumped cr into "other"). The 5h regression is now 3-class (`byClass {cw, cr, other}`; du = rate_cw·cw$ + rate_cr·cr$ + rate_fresh·fresh$, 3-var least squares, per-class priors $500/$3000/$200 + per-class sanity bounds):

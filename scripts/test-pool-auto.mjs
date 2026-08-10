@@ -34,6 +34,8 @@ ck('deadline: all resets passed → null (new window unknowable)', weeklyDeadlin
 ck('deadline: no data → null', weeklyDeadline(null, NOW) === null);
 
 // ── exhaustion-triggered switch picks by EDF, not by most-remaining ──────────
+// (per-KIND thresholds since 2.268.2: weekly hard=3/hot=5, 5h hard=5/hot=10 —
+// absolute headroom reasoning, user-designed)
 const members = [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }, { id: 'c', name: 'C' }];
 const run = (caches, opts = {}) => decidePoolSwitch({ currentId: 'a', members, readCache: (id) => caches[id] ?? null, nowSec: NOW, ...opts });
 
@@ -43,21 +45,21 @@ ck('current unknown → stay (never flap on ignorance)', run({ b: acct(0, 12 * H
 // (its quota is about to expire; C's is storable) — the v2 most-remaining rule
 // picked C and let B's 40% evaporate.
 ck('exhausted → EDF picks the SOONEST weekly deadline, not the most-remaining',
-  run({ a: acct(0.97, 12 * H), b: acct(0.6, 12 * H), c: acct(0.1, 6 * D) })?.to === 'b');
-ck('…reason tagged exhausted', run({ a: acct(0.97, 12 * H), b: acct(0.6, 12 * H), c: acct(0.1, 6 * D) })?.reason === 'exhausted');
+  run({ a: acct(0.98, 12 * H), b: acct(0.6, 12 * H), c: acct(0.1, 6 * D) })?.to === 'b');
+ck('…reason tagged exhausted', run({ a: acct(0.98, 12 * H), b: acct(0.6, 12 * H), c: acct(0.1, 6 * D) })?.reason === 'exhausted');
 ck('same deadline (±60s) → more remaining wins (fewer switches; equal expiry)',
-  run({ a: acct(0.97, 12 * H), b: acct(0.6, 12 * H), c: acct(0.2, 12 * H + 30) })?.to === 'c');
-ck('gated member (min<5%, e.g. 5h exhausted) is skipped even with the soonest deadline',
-  run({ a: acct(0.97, 6 * D), b: acct(0.5, 12 * H, { u5: 0.99 }), c: acct(0.5, 3 * D) })?.to === 'c');
+  run({ a: acct(0.98, 12 * H), b: acct(0.6, 12 * H), c: acct(0.2, 12 * H + 30) })?.to === 'c');
+ck('gated member (5h below its hard floor) is skipped even with the soonest deadline',
+  run({ a: acct(0.98, 6 * D), b: acct(0.5, 12 * H, { u5: 0.99 }), c: acct(0.5, 3 * D) })?.to === 'c');
 ck('known-deadline member outranks unknown-data member',
-  run({ a: acct(0.97, 12 * H), b: null, c: acct(0.5, 6 * D) })?.to === 'c');
-ck('all candidates unknown → effective 50 still beats 3% scraps',
-  run({ a: acct(0.97, 12 * H), b: null, c: null })?.to === 'b');
+  run({ a: acct(0.98, 12 * H), b: null, c: acct(0.5, 6 * D) })?.to === 'c');
+ck('all candidates unknown → effective 50 still beats 2% scraps',
+  run({ a: acct(0.98, 12 * H), b: null, c: null })?.to === 'b');
 ck('fresh-after-reset member (no deadline info) ranks after a real deadline',
-  run({ a: acct(0.97, 12 * H), b: { fiveHour: { utilization: 0.2, resetsAt: past }, sevenDay: { utilization: 0.9, resetsAt: past } }, c: acct(0.5, 6 * D) })?.to === 'c');
-ck('every member equally exhausted → stay (nowhere better)',
-  run({ a: acct(0.97, 12 * H), b: acct(0.98, 12 * H), c: acct(0.99, 3 * D) }) === null);
-ck('verdict carries fromRemaining', Math.round(run({ a: acct(0.97, 12 * H), b: acct(0, 12 * H) })?.fromRemaining) === 3);
+  run({ a: acct(0.98, 12 * H), b: { fiveHour: { utilization: 0.2, resetsAt: past }, sevenDay: { utilization: 0.9, resetsAt: past } }, c: acct(0.5, 6 * D) })?.to === 'c');
+ck('every member equally hard-dead → stay (all gated, nowhere better)',
+  run({ a: acct(0.98, 12 * H), b: acct(0.99, 12 * H), c: acct(0.995, 3 * D) }) === null);
+ck('verdict carries fromRemaining', Math.round(run({ a: acct(0.98, 12 * H), b: acct(0, 12 * H) })?.fromRemaining) === 2);
 
 // ── proactive tier (hot pools): drain the soonest-expiring quota FIRST ───────
 ck('proactive: current healthy but B resets sooner → switch (reason edf)',
@@ -68,34 +70,37 @@ ck('proactive: never jump onto UNKNOWN data', run({ a: acct(0.3, 6 * D), b: null
 ck('proactive: current deadline unknown → conservative stay',
   run({ a: { sevenDay: { utilization: 0.3, resetsAt: past }, fiveHour: { utilization: 0, resetsAt: fut } }, b: acct(0.4, 12 * H) }, { proactive: true }) === null);
 ck('proactive OFF (cold pool): same layout stays put', run({ a: acct(0.3, 6 * D), b: acct(0.4, 12 * H) }) === null);
-ck('proactive + exhausted current still switches (exhaustion tier wins)',
+ck('proactive + soft-exhausted current still switches (exhaustion tier wins)',
   run({ a: acct(0.97, 6 * D), b: acct(0.4, 12 * H) }, { proactive: true })?.reason === 'exhausted');
 
-// ── est-driven early exhaustion (B-fcff v2): hot pools pass exhaustPct 10 ────
-ck('exhaustPct 10: current at 8% switches (est-based 提前切)',
-  run({ a: acct(0.92, 6 * D), b: acct(0.4, 12 * H) }, { exhaustPct: 10 })?.reason === 'exhausted');
-ck('default threshold: 8% left does NOT switch', run({ a: acct(0.92, 6 * D), b: acct(0.4, 12 * H) }) === null);
-// Settle-bar semantics (2.266.1, real oscillation: Personal<10% ⇄ Fish every
-// tick — exhaustion one way, EDF-soonest the other, both sides' prompt caches
-// cold-started each time): a VOLUNTARY move (soft-exhaustion / proactive)
-// only lands on a target above exhaustPct+MIN_GAIN; hard-dead (<5%) keeps
-// taking scraps.
+// ── per-KIND thresholds (2.268.2, user-designed) ─────────────────────────────
+ck('hot: 5h at 8% left soft-exhausts (5h hot threshold 10%)',
+  run({ a: acct(0.5, 6 * D, { u5: 0.92 }), b: acct(0.4, 12 * H) }, { hot: true })?.reason === 'exhausted');
+ck('hot: weekly at 12% left is HEALTHY (weekly hot threshold 5% — the Personal case)',
+  run({ a: acct(0.88, 12 * H), b: acct(0.5, 6 * D) }, { hot: true }) === null);
+ck('hot: weekly at 4% left soft-exhausts',
+  run({ a: acct(0.96, 6 * D), b: acct(0.4, 12 * H) }, { hot: true })?.reason === 'exhausted');
+ck('cold: weekly at 8% left stays (hard floor 3%)', run({ a: acct(0.92, 6 * D), b: acct(0.4, 12 * H) }) === null);
+ck('cold: weekly at 2% left switches (below hard floor)', run({ a: acct(0.98, 6 * D), b: acct(0.4, 12 * H) })?.reason === 'exhausted');
+// THE user-requested EDF return: a weekly-88% member with the SOONER deadline
+// is a legitimate proactive target now (12% weekly ≈ $200+ of headroom)
+ck('proactive EDF returns onto a sooner-deadline member at weekly 88% (clears the per-kind bar)',
+  decidePoolSwitch({ currentId: 'b', members, readCache: (id) => ({ b: acct(0.54, 6 * D), a: acct(0.88, 12 * H) })[id] ?? null, nowSec: NOW, proactive: true, hot: true })?.to === 'a');
+
+// ── settle bar (per-kind since 2.268.2) + oscillation regression ─────────────
 const runAB = (caches, opts = {}) => decidePoolSwitch({ currentId: 'a', members: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }], readCache: (id) => caches[id] ?? null, nowSec: NOW, ...opts });
-ck('soft-exhausted (hot 10%): a 9%-left member is NOT a target (would soft-exhaust immediately)…',
-  runAB({ a: acct(0.95, 12 * H), b: acct(0.91, 12 * H - 30) }, { exhaustPct: 10 }) === null);
-ck('…but a settle-bar-clearing member IS, even ranked behind the 9% one by EDF',
-  run({ a: acct(0.95, 12 * H), b: acct(0.91, 12 * H - 30), c: acct(0.5, 6 * D) }, { exhaustPct: 10 })?.to === 'c');
-ck('hard-dead (<5%) still takes scraps (9% beats nothing)',
-  runAB({ a: acct(0.97, 12 * H), b: acct(0.91, 12 * H - 30) }, { exhaustPct: 10 })?.to === 'b');
-ck('anti-flap margin: a 2%-better target inside the exhaustion band does NOT flip (no ping-pong)',
-  run({ a: acct(0.97, 12 * H), b: acct(0.95, 12 * H - 30) }) === null);
-// THE oscillation regression: after exhaustion moved a→b, the proactive tier
-// must NOT jump back onto the <settle-bar account just because its weekly
-// deadline is sooner.
-ck('oscillation: proactive never returns onto a below-settle-bar sooner-deadline member',
-  decidePoolSwitch({ currentId: 'b', members, readCache: (id) => ({ b: acct(0.4, 6 * D), a: acct(0.92, 12 * H) })[id] ?? null, nowSec: NOW, proactive: true, exhaustPct: 10 }) === null);
+ck('soft-exhausted (hot): a 5h-11% member is NOT a settle target (5h bar 13)…',
+  runAB({ a: acct(0.5, 12 * H, { u5: 0.92 }), b: acct(0.4, 12 * H - 30, { u5: 0.89 }) }, { hot: true }) === null);
+ck('…but a settle-bar-clearing member IS, even ranked behind the near-bar one by EDF',
+  run({ a: acct(0.5, 12 * H, { u5: 0.92 }), b: acct(0.4, 12 * H - 30, { u5: 0.89 }), c: acct(0.5, 6 * D) }, { hot: true })?.to === 'c');
+ck('hard-dead (<5h floor) still takes scraps (an 11%-5h member beats nothing)',
+  runAB({ a: acct(0.5, 12 * H, { u5: 0.98 }), b: acct(0.4, 12 * H - 30, { u5: 0.89 }) }, { hot: true })?.to === 'b');
+ck('anti-flap margin: a 2.5%-better target inside the dead band does NOT flip',
+  run({ a: acct(0.98, 12 * H), b: acct(0.955, 12 * H - 30) }) === null);
+ck('oscillation: proactive never returns onto a below-settle-bar sooner-deadline member (weekly 6% < bar 8)',
+  decidePoolSwitch({ currentId: 'b', members, readCache: (id) => ({ b: acct(0.4, 6 * D), a: acct(0.94, 12 * H) })[id] ?? null, nowSec: NOW, proactive: true, hot: true }) === null);
 ck('oscillation control: a HEALTHY sooner-deadline member still gets the proactive jump',
-  decidePoolSwitch({ currentId: 'b', members, readCache: (id) => ({ b: acct(0.4, 6 * D), a: acct(0.5, 12 * H) })[id] ?? null, nowSec: NOW, proactive: true, exhaustPct: 10 })?.to === 'a');
+  decidePoolSwitch({ currentId: 'b', members, readCache: (id) => ({ b: acct(0.4, 6 * D), a: acct(0.5, 12 * H) })[id] ?? null, nowSec: NOW, proactive: true, hot: true })?.to === 'a');
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

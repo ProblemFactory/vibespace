@@ -1073,7 +1073,7 @@ function maybePoolAutoSwitchForPool(poolId) {
     // cold pools switch on exhaustion only (each switch restarts conversations).
     // Hot pools also treat est<10% as exhaustion (提前切 — switch BEFORE the
     // limit interrupts a long-running workflow; cold keeps 5%).
-    const d = decidePoolSwitch({ currentId, members: accounts.poolMembers(poolId), readCache, nowSec: now / 1000, proactive: !!a.hot, exhaustPct: a.hot ? 10 : undefined });
+    const d = decidePoolSwitch({ currentId, members: accounts.poolMembers(poolId), readCache, nowSec: now / 1000, proactive: !!a.hot, hot: !!a.hot });
     if (!d) return;
     // DWELL belt (2.266.1, real oscillation report): every switch cold-starts
     // the running sessions' prompt caches on BOTH accounts — expensive. After

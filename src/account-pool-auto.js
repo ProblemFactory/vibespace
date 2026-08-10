@@ -22,6 +22,15 @@
 // exhaustion-only because each switch restarts conversations).
 
 const SWITCH_THRESHOLD_PCT = 5;
+// PER-BUCKET-KIND thresholds (2.268.2, user-designed: what matters is
+// ABSOLUTE headroom, not relative — 1% of a 7d window ≈ $17 vs 1% of a 5h
+// window ≈ $2-5, so 5% weekly ≈ $87 of buffer while 10% of 5h can be one
+// long turn). hot = soft-exhaustion trigger for HOT pools (free re-points);
+// hard = genuinely-unusable / candidate gate / cold pools' only trigger.
+const THRESH = {
+  fiveHour: { hot: 10, hard: 5 },
+  weekly: { hot: 5, hard: 3 }, // 7d + scoped (Fable) — big windows, more slack
+};
 // A member with NO usable usage data ranks as if half-full: better than a
 // known-exhausted target, worse than a known-good one. Members without a
 // known deadline (unknown data / reset just passed) rank AFTER every member
@@ -75,18 +84,36 @@ function weeklyDeadline(cache, nowSec) {
   return cands.length ? Math.min(...cands) : null;
 }
 
+// Per-bucket remainings tagged by KIND (fiveHour vs weekly) — the threshold
+// unit of the 2.268.2 layered scheme.
+function bucketRems(cache, nowSec) {
+  if (!cache || typeof cache !== 'object') return [];
+  const out = [];
+  const push = (kind, b) => { const r = bucketRemaining(b, nowSec); if (r != null) out.push({ kind, remaining: r }); };
+  push('fiveHour', cache.fiveHour);
+  push('weekly', cache.sevenDay);
+  for (const b of Array.isArray(cache.scopedWeekly) ? cache.scopedWeekly : []) push('weekly', b);
+  return out;
+}
+
 // Decide a switch for a pool. members = [{id, name}] (already login-filtered),
-// readCache(id) → parsed cache entry or null. proactive = hot pools only: also
-// switch toward a strictly-sooner deadline before exhaustion. Returns null
-// (stay) or {to, toName, fromRemaining, toRemaining, reason: 'exhausted'|'edf'}.
-function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = false, exhaustPct = SWITCH_THRESHOLD_PCT }) {
+// readCache(id) → parsed cache entry or null. proactive/hot = hot pools:
+// re-points are free, so they soft-exhaust at the RAISED per-kind thresholds
+// and jump proactively toward sooner deadlines; cold pools only move at the
+// hard thresholds (each switch restarts conversations). Returns null (stay)
+// or {to, toName, fromRemaining, toRemaining, reason: 'exhausted'|'edf'}.
+function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = false, hot = proactive }) {
   const curCache = readCache(currentId);
-  const cur = accountRemaining(curCache, nowSec);
+  const cur = accountRemaining(curCache, nowSec); // min% — display/scraps comparison
   const curDeadline = weeklyDeadline(curCache, nowSec);
-  // exhaustPct: hot pools pass 10 with ESTIMATED views (B-fcff v2) — switch
-  // before the limit interrupts a long task; the candidate GATE stays at the
-  // base threshold (a 7%-left member is a legal target for a 9%-left current).
-  const exhausted = cur.known && cur.remaining < exhaustPct;
+  const curBr = bucketRems(curCache, nowSec);
+  const soft = (b) => b.remaining < (hot ? THRESH[b.kind].hot : THRESH[b.kind].hard);
+  const dead = (b) => b.remaining < THRESH[b.kind].hard;
+  // Per-KIND thresholds (user-designed): what matters is ABSOLUTE headroom —
+  // a weekly bucket at 88% still holds ~$200, a 5h bucket at 90% one long
+  // turn. exhausted = ANY bucket under its kind's (hot-raised) threshold.
+  const exhausted = cur.known && curBr.some(soft);
+  const hardDead = cur.known && curBr.some(dead);
   // No data on the current target → we cannot judge exhaustion; staying put is
   // safer than flapping on ignorance (the ledger will teach us eventually).
   if (!cur.known && !proactive) return null;
@@ -102,9 +129,14 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     if (m.id === currentId) continue;
     const c = readCache(m.id);
     const r = accountRemaining(c, nowSec);
+    const br = bucketRems(c, nowSec);
     const eff = r.known ? r.remaining : UNKNOWN_REMAINING_PCT;
-    if (r.known && r.remaining < SWITCH_THRESHOLD_PCT) continue; // gated: can't serve right now
-    ranked.push({ id: m.id, name: m.name, eff, known: r.known, remaining: r.known ? r.remaining : null, deadline: weeklyDeadline(c, nowSec) });
+    if (r.known && br.some(dead)) continue; // gated: some bucket below its hard floor — can't serve
+    // settleOk: every bucket clears its kind's HOT threshold + margin — a
+    // voluntary move must land somewhere that won't itself soft-exhaust
+    // (the 2.266.1 oscillation guard, now per-kind)
+    const settleOk = r.known && br.length > 0 && br.every((b) => b.remaining >= THRESH[b.kind].hot + MIN_GAIN_PCT);
+    ranked.push({ id: m.id, name: m.name, eff, known: r.known, settleOk, remaining: r.known ? r.remaining : null, deadline: weeklyDeadline(c, nowSec) });
   }
   ranked.sort((a, b) => {
     if (a.deadline != null && b.deadline != null) {
@@ -117,25 +149,16 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   });
   if (!ranked.length) return null;
 
-  // A VOLUNTARY move (soft-exhaustion at the raised hot threshold, or an EDF
-  // proactive jump) must land on a target that will not itself trip the
-  // exhaustion rule — otherwise the two tiers oscillate (real incident:
-  // Personal <10% → exhaustion → Fish; Fish current → Personal's deadline is
-  // sooner → proactive back onto the <10% account → exhaustion again, every
-  // tick, each hot re-point cold-starting BOTH sides' prompt caches). The bar
-  // applies to CANDIDATE SELECTION, not just ranked[0] — the EDF-first member
-  // may be below it while a later one qualifies.
-  const settleBar = exhaustPct + MIN_GAIN_PCT;
-  const bestSettle = ranked.find((r) => r.eff >= settleBar) || null;
+  const bestSettle = ranked.find((r) => r.settleOk) || null;
   if (exhausted) {
-    if (cur.remaining < SWITCH_THRESHOLD_PCT) {
+    if (hardDead) {
       // genuinely unusable — any meaningfully-better member beats staying,
       // even one below the settle bar (scraps > nothing)
       const best = ranked[0];
       if (best.eff <= cur.remaining + MIN_GAIN_PCT) return null;
       return { to: best.id, toName: best.name, fromRemaining: cur.remaining, toRemaining: best.remaining, reason: 'exhausted' };
     }
-    // soft-exhausted (only the RAISED hot threshold tripped): still usable,
+    // soft-exhausted (only a hot-raised threshold tripped): still usable,
     // so only move somewhere that can actually SETTLE
     if (!bestSettle) return null;
     return { to: bestSettle.id, toName: bestSettle.name, fromRemaining: cur.remaining, toRemaining: bestSettle.remaining, reason: 'exhausted' };
@@ -151,4 +174,4 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   return null;
 }
 
-module.exports = { SWITCH_THRESHOLD_PCT, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, bucketRemaining, accountRemaining, weeklyDeadline, decidePoolSwitch };
+module.exports = { SWITCH_THRESHOLD_PCT, THRESH, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, decidePoolSwitch };
