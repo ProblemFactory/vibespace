@@ -149,7 +149,7 @@ function registerWsHandler(wss, ctx) {
     activeSessions, WS_OPEN, broadcastActiveSessions, broadcastToSession, resizeSessionToMin,
     setupSessionPty, refreshWebuiPids, deleteSessionMeta, writeSessionMeta, readSessionMeta,
     readLayouts, writeLayouts, getSyncStore, serverSetting, integrationEnabled, agentdRemote, dialBridge,
-    sessionCounterRef, createSessionMessages, poolChooser,
+    sessionCounterRef, createSessionMessages, poolChooser, sbNoteServerOp,
     SOCKETS_DIR, BUFFERS_DIR, PTY_WRAPPER, CHAT_WRAPPER,
     NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV,
     adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
@@ -723,6 +723,7 @@ function registerWsHandler(wss, ctx) {
             session._normalizer = createMessageManager(backend, id);
             session._normEpoch = Date.now();
             session._normalizer.onOp((op) => {
+              try { if (session.host && session.keeperSid) sbNoteServerOp?.(session.host, session.keeperSid, op); } catch { } // session-brain step-2 dark tap
               broadcastToSession(session, id, { type: 'msg', sessionId: id, ...op });
             });
           }

@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.316.0
+
+### Added
+- **Session-brain step 2 (design §session-brain): device-side normalizer double-feed, DARK.** The daemon now runs the SAME bundled normalizer over each of its pipe sessions' stdout (line-aligned incremental tail, start-at-NOW — history replay stays the transcript service's job) and pushes typed ops to the subscribed server (`session-events`, capability-gated). The server keeps its own parse and only COMPARES: content-derived mids (R0) are matched suffix-wise (each normalizer prefixes its own session id — device uses its sid, the server the webui id), with `sb-parity-hit`/`sb-parity-miss` metrics and a throttled divergence log. **Nothing consumes the device stream yet** — step 3 (consumers switch) stays gated until live parity holds at zero misses. Parity is already proven at the harness level: scripts/test-session-brain-dark.mjs (real daemon, 4 asserts) shows byte-identical create mids across the two parses of the same stream.
+
 ## 2.315.0
 
 ### Added
