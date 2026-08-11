@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.300.0
+
+**Three-tier closure, batch 4: the sealed-orders emergency reflex (design §Pool management) + session-brain step 1.**
+
+- **Sealed orders**: after every pool evaluation (and at boot) the orchestrator pushes the pool's EDF-ranked member snapshot to the holding device (device #0 — pools are local-only). The device executes a LOCAL fallback switch ONLY under the double condition — it observes a hard limit banner in a live session's stdout AND has no orchestrator connection; outside that, policy stays single-brained (verified: with a server connected the reflex never fires). The banner detector is the SAME `parseLimitBanner` the server uses (the adapter is bundled — one implementation, no drift), the symlink re-point is the SAME `account-material` primitive `setPoolTarget` uses, and executions are logged + reported on the next orders push (pushing the report at hello RACED the client's control-routing installation — observed live, moved into the reply). This closes the one failure window pool auto-switching had left: limits hit while the server is down/restarting no longer strand every session on a dead account.
+- **EDF ranking shared**: `rankPoolMembers` extracted with the comparator `decidePoolSwitch` uses — the device's fallback order IS the orchestrator's order.
+- **Session-brain step 1 (`bufferOwner`)**: every session record now names its buffer's owner explicitly ('server' today); the attach path will route by this field when R6's `session.open` starts producing device-owned sessions — records stop being assumptions.
+- Real-daemon e2e `scripts/test-sealed-orders.mjs` (7): single-brain hold, double-condition execution, ranked-fallback re-point, reconnect report + ack-clears-log.
+
+
 ## 2.299.0
 
 **Three-tier closure, batch 3 — R4 COMPLETE: the `usage-events` push stream. The remote ledger goes from pull-with-a-60s-floor to seconds-fresh, with local and remote running the same machinery.**

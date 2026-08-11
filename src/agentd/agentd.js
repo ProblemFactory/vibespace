@@ -94,6 +94,8 @@ if (process.argv.includes('--usage-scan-child')) {
 const fs = require('fs');
 const { extractTailIds, pidLooksClaude, interpretDiscoveryLines, synthesizeDiscoveryLines } = require('./../discovery-facts.js');
 const machineProbes = require('./../machine-probes.js');
+const { ClaudeCodeAdapter: { parseLimitBanner } } = require('./../adapters/claude-code.js');
+const { repointPoolSymlink } = require('./../account-material.js');
 // R3: the SHARED transcript service, constructed lazily on first use — the
 // parse stack (session-store/normalizers/adapters) is heavy and most daemons
 // never serve transcript ops until the switchover. No live-session overlay
@@ -561,6 +563,74 @@ function beginUpgrade(mux, { version, size }) {
 
 // ── M2 pipe-session registry (keeper semantics inside the daemon) ──
 const SESS_DIR = path.join(STATE, 'sessions');
+
+// ── SEALED ORDERS (design §Pool management, 2.300.0): the orchestrator
+// pushes each pool's ranked member snapshot; this device executes a LOCAL
+// fallback switch ONLY when it BOTH observes a hard limit banner in a live
+// session's stdout AND has no orchestrator connection — outside that double
+// condition the device never acts on its own (policy stays single-brained).
+// Executed events are reported on reconnect; time-based ledger attribution
+// reconciles the billing. ──
+const ORDERS_FILE = path.join(STATE, 'pool-orders.json');
+const ORDERS_LOG = path.join(STATE, 'pool-orders-log.ndjson');
+let authedServers = 0; // live orchestrator connections
+const sealedOrders = {
+  orders: null, // {poolId, linkPath, ranked:[{id,dir,creds}], currentId}
+  _timer: null,
+  _tails: new Map(), // sid → byte offset in its .out (only NEW output scanned)
+  _lastActAt: 0,
+  load() { try { this.orders = JSON.parse(fs.readFileSync(ORDERS_FILE, 'utf-8')); } catch { this.orders = null; } this._arm(); },
+  set(orders) {
+    this.orders = orders || null;
+    try {
+      if (orders) { fs.writeFileSync(ORDERS_FILE + '.tmp', JSON.stringify(orders)); fs.renameSync(ORDERS_FILE + '.tmp', ORDERS_FILE); }
+      else fs.rmSync(ORDERS_FILE, { force: true });
+    } catch { }
+    this._arm();
+  },
+  _arm() {
+    if (this.orders && !this._timer) { this._timer = setInterval(() => this._scan(), 1500); if (this._timer.unref) this._timer.unref(); }
+    if (!this.orders && this._timer) { clearInterval(this._timer); this._timer = null; this._tails.clear(); }
+  },
+  _scan() {
+    try {
+      if (!this.orders || authedServers > 0) return; // orchestrator reachable ⇒ it decides
+      if (Date.now() - this._lastActAt < 120000) return; // reflex cooldown
+      let metas = []; try { metas = fs.readdirSync(SESS_DIR).filter((f) => f.endsWith('.json')); } catch { return; }
+      for (const mf of metas) {
+        const sid = mf.replace(/\.json$/, '');
+        let meta; try { meta = JSON.parse(fs.readFileSync(path.join(SESS_DIR, mf), 'utf-8')); } catch { continue; }
+        if (meta.exited != null) { this._tails.delete(sid); continue; }
+        const outFp = path.join(SESS_DIR, sid + '.out');
+        let st2; try { st2 = fs.statSync(outFp); } catch { continue; }
+        let pos = this._tails.has(sid) ? this._tails.get(sid) : st2.size; // start at NOW — only new output
+        if (st2.size <= pos) { this._tails.set(sid, Math.min(pos, st2.size)); continue; }
+        const want = Math.min(st2.size - pos, 512 * 1024);
+        const buf = Buffer.alloc(want);
+        let fd; try { fd = fs.openSync(outFp, 'r'); fs.readSync(fd, buf, 0, want, pos); } catch { continue; } finally { try { fs.closeSync(fd); } catch { } }
+        this._tails.set(sid, pos + want);
+        const banner = parseLimitBanner(buf.toString('utf8'));
+        if (banner) { this._execute(sid, banner); return; }
+      }
+    } catch (e) { log('sealed-orders scan failed: ' + e.message); }
+  },
+  _execute(sid, banner) {
+    try {
+      const o2 = this.orders;
+      let currentDir = null; try { currentDir = fs.readlinkSync(o2.linkPath); } catch { }
+      const next = (o2.ranked || []).find((m) => m.dir && m.dir !== currentDir);
+      if (!next) { log('sealed-orders: banner seen but no usable fallback member'); return; }
+      repointPoolSymlink(o2.linkPath, next.dir, next.creds || null);
+      this._lastActAt = Date.now();
+      const ev = { ts: Date.now(), poolId: o2.poolId, sid, banner: banner.kind, from: currentDir, to: next.id };
+      try { fs.appendFileSync(ORDERS_LOG, JSON.stringify(ev) + '\n'); } catch { }
+      log(`sealed-orders EXECUTED: pool ${o2.poolId} → ${next.id} (banner ${banner.kind} in ${sid}, no orchestrator)`);
+    } catch (e) { log('sealed-orders execute failed: ' + e.message); }
+  },
+  pendingReport() { try { return fs.readFileSync(ORDERS_LOG, 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } },
+  clearReport() { try { fs.rmSync(ORDERS_LOG, { force: true }); } catch { } },
+};
+sealedOrders.load();
 const pipeSessions = {
   _tails: new Map(), // mux → Map(chan → {sid, pos, timer, fd})
   _paths(sid) {
@@ -1006,13 +1076,15 @@ function serveConnection(sock) {
         const want = tokenSha();
         if (!want || sha !== want) { mux.control({ op: 'auth-fail' }); log('auth-fail from a connection'); sock.end(); return; }
         authed = true;
+        authedServers++;
+        this._countedServer = true;
         mux.control({
           op: 'hello-ack', protoVersion: PROTO_VERSION, daemonVersion: VERSION,
           platform: process.platform, arch: process.arch, nodeVersion: process.version,
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events'],
+          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders'],
         });
         return;
       }
@@ -1313,6 +1385,19 @@ function serveConnection(sock) {
         })();
         return;
       }
+      if (msg.op === 'pool-orders') {
+        try {
+          sealedOrders.set(msg.orders || null);
+          // executions from a server-down window ride the reply — pushing at
+          // hello RACED the client's control-routing installation (observed)
+          mux.control({ op: 'pool-orders-ok', id: msg.id, events: sealedOrders.pendingReport() });
+        } catch (e) { mux.control({ op: 'pool-orders-ok', id: msg.id, error: e.message }); }
+        return;
+      }
+      if (msg.op === 'pool-orders-log-ack') {
+        sealedOrders.clearReport();
+        return;
+      }
       if (msg.op === 'place-secret') {
         // THE one sanctioned secret channel on this transport (design
         // §Account split / place-secret): value arrives base64 on chan 0,
@@ -1572,6 +1657,7 @@ function serveConnection(sock) {
       if (w) { writableWaiters.delete(chan); for (const f of w) { try { f(); } catch { } } }
     },
     onDead() {
+      if (this._countedServer) { authedServers = Math.max(0, authedServers - 1); this._countedServer = false; }
       // connection gone: dtach-attach ptys are DETACH points — killing the
       // attach does NOT kill the dtach session (invariant #1: session survives
       // server/daemon death). So we DETACH (kill the attach proc) but the
