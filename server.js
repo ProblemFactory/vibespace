@@ -839,7 +839,18 @@ function darkTaintedAccounts() {
 }
 const DARK_PESSIMISM_PCT = 8; // dock: ~1 long turn of 5h headroom / real weekly $
 
+// Disarm a pool's device-side reflex (pool deleted / auto turned off) —
+// without this the daemon kept executing a stale snapshot forever, and could
+// even recreate a deleted pool's symlink during a server-down window.
+async function clearSealedOrders(poolId) {
+  try {
+    _sealedOrdersSent.delete(poolId);
+    const dm = await hosts.device(null);
+    await dm.poolOrders({ clearPool: poolId });
+  } catch { }
+}
 const _sealedOrdersSent = new Map(); // poolId → last pushed JSON (skip no-ops)
+let _poolOrdersWarned = false; // warn once per boot, never per tick
 async function pushSealedOrders(poolId) {
   const a = accounts.get(poolId);
   if (!a || a.type !== 'pooled') return;
@@ -853,6 +864,8 @@ async function pushSealedOrders(poolId) {
   const j = JSON.stringify(orders);
   if (_sealedOrdersSent.get(poolId) === j) return;
   const dm = await hosts.device(null); // device #0 — pools are local-only
+  // (the memo below is per-pool AND the daemon now stores per-pool slots, so a
+  // second pool's push can no longer evict the first — review finding)
   await dm.poolOrders(orders, (events) => {
     // fallback switches executed while this server was down: surface + let
     // the by-time ledger attribution reconcile billing (it already keys on
@@ -905,7 +918,15 @@ function sweepUsageAnchors() {
 // device-side fallback snapshot AND collects executions from its own down
 // window (the report rides the pool-orders reply)
 setTimeout(() => {
-  try { for (const a of (accounts.list().accounts || [])) if (accounts.get(a.id)?.type === 'pooled') pushSealedOrders(a.id).catch(() => { }); } catch { }
+  // Only AUTO pools (review finding): the runtime refresh is gated on a.auto,
+  // so arming a manual pool at boot let the device switch a pool the user
+  // explicitly set to manual — with a snapshot frozen at boot forever.
+  try {
+    for (const a of (accounts.list().accounts || [])) {
+      const full = accounts.get(a.id);
+      if (full?.type === 'pooled' && full.auto) pushSealedOrders(a.id).catch(() => { });
+    }
+  } catch { }
 }, 15000);
 setInterval(() => { try { sweepUsageAnchors(); } catch {} }, 60000);
 setTimeout(() => { try { sweepUsageAnchors(); } catch {} }, 20000);
@@ -1202,7 +1223,10 @@ function maybePoolAutoSwitchForPool(poolId) {
     // the pool's ranked member snapshot. It executes a LOCAL fallback switch
     // ONLY when it both sees a hard limit banner AND cannot reach this
     // server; executions are reported on reconnect and re-attributed below.
-    try { pushSealedOrders(poolId); } catch { }
+    // OBSERVE the rejection: hosts.device(null) throws while the local daemon
+    // is down/upgrading, and an unobserved rejection is a process-level
+    // unhandledRejection on every eval tick (the deviceBounded ② rule)
+    pushSealedOrders(poolId).catch((e) => { if (!_poolOrdersWarned) { _poolOrdersWarned = true; console.warn('[pool] sealed-orders push unavailable:', e.message); } });
     const d = decidePoolSwitch({ currentId, members: accounts.poolMembers(poolId), readCache, nowSec: now / 1000, proactive: !!a.hot, hot: !!a.hot, pessimism: darkTaintedAccounts() });
     if (!d) return;
     // DWELL belt (2.266.1, real oscillation report): every switch cold-starts
@@ -4340,7 +4364,11 @@ app.patch('/api/accounts/:id', (req, res) => {
 });
 app.delete('/api/accounts/:id', (req, res) => {
   try {
+    const _wasPool = accounts.get(req.params.id)?.type === 'pooled';
     accounts.remove(req.params.id); // throws for unknown ids → only real (shape-safe) ids continue
+    // DISARM the device reflex for a deleted pool — a stale snapshot could
+    // otherwise recreate the deleted pool's symlink in a server-down window
+    if (_wasPool) clearSealedOrders(req.params.id);
     // Best-effort: clear whatever this account left on each host — a 0600 key
     // file (API), a securestorage creds dir (Claude sub), or a CODEX_HOME copy
     // (Codex sub). Fire-and-forget; unreachable hosts are fine (the leftovers
@@ -4382,6 +4410,9 @@ app.patch('/api/accounts/pool/:id', (req, res) => {
     // the OLD target for everything after the swap.
     const before = accounts.poolCurrent(id);
     accounts.updatePool(id, { members: req.body?.members, auto: req.body?.auto, hot: req.body?.hot });
+    // auto turned OFF ⇒ disarm the device reflex too, or the daemon keeps
+    // switching a pool the user just set to manual (review finding)
+    if (req.body?.auto === false) clearSealedOrders(id);
     const after = accounts.poolCurrent(id);
     const affected = [];
     if (before !== after) {

@@ -53,5 +53,40 @@ ck('banner: phrase mid-blob (task-notification carrier) still matches', pb("[ver
 // incident #2 wording (same day): model-scoped WITHOUT the word "weekly"
 ck("banner: 'Fable 5 limit' (no week word) → scoped Fable", (()=>{const r=pb("You've reached your Fable 5 limit. Run /usage-credits to continue or switch models with /model."); return r.kind==='scoped'&&r.name==='Fable';})());
 
+
+// ── OPUS-INVISIBLE regression (inc-msof8i22, 2.305.0) ──────────────────────
+// The named scoped fields were read ONLY when model_scoped was empty, so an
+// account with a Fable array entry AND a seven_day_opus field reported just
+// Fable — the Opus cap was invisible to the pool's exhaustion test, which is
+// why a pool stayed on an account whose Opus was spent.
+{
+  const r = ClaudeCodeAdapter.parseGetUsageResponse({
+    rate_limits: {
+      five_hour: { utilization: 12, resets_at: 1786440000 },
+      seven_day: { utilization: 55, resets_at: 1786900000 },
+      model_scoped: [{ display_name: 'Fable', utilization: 96, resets_at: 1786900000 }],
+      seven_day_opus: { utilization: 100, resets_at: 1786900000 },
+      seven_day_sonnet: { utilization: 20, resets_at: 1786900000 },
+    },
+  });
+  const names = (r.scopedWeekly || []).map((x) => x.name).sort();
+  ck('array AND named scoped buckets are MERGED (Fable + Opus + Sonnet)',
+    names.join(',') === 'Fable,Opus,Sonnet', names.join(','));
+  const opus = r.scopedWeekly.find((x) => x.name === 'Opus');
+  ck('the exhausted Opus bucket survives with utilization 1', opus && opus.utilization === 1);
+  ck('a named bucket never overrides the array entry of the same model',
+    r.scopedWeekly.filter((x) => x.name === 'Fable').length === 1);
+}
+{
+  // array-only payloads keep working; named-only payloads keep working
+  const arrOnly = ClaudeCodeAdapter.parseGetUsageResponse({ rate_limits: { model_scoped: [{ display_name: 'Fable', utilization: 10, resets_at: 1 }] } });
+  ck('array-only payload unchanged', arrOnly.scopedWeekly.length === 1 && arrOnly.scopedWeekly[0].name === 'Fable');
+  const namedOnly = ClaudeCodeAdapter.parseGetUsageResponse({ rate_limits: { seven_day_opus: { utilization: 40, resets_at: 1786900000 } } });
+  ck('named-only payload unchanged', namedOnly.scopedWeekly.length === 1 && namedOnly.scopedWeekly[0].name === 'Opus');
+  // codename buckets without a reset are still skipped (no usable deadline)
+  const noReset = ClaudeCodeAdapter.parseGetUsageResponse({ rate_limits: { seven_day_zebra: { utilization: 50 } } });
+  ck('a scoped field with no reset is still skipped', noReset.scopedWeekly.length === 0);
+}
+
 console.log(fail?`${fail} FAILED`:`ALL PASS (${pass})`);
 process.exit(fail?1:0);

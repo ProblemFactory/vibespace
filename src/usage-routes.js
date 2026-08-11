@@ -131,6 +131,7 @@ function _parseUsage(u) {
   const fiveHour = toWin(u.five_hour);
   const sevenDay = toWin(u.seven_day);
   const scopedWeekly = [];
+  const haveScoped = new Set();
   if (Array.isArray(u.limits)) {
     for (const lim of u.limits) {
       if (lim?.kind === 'weekly_scoped' && lim.scope?.model?.display_name) {
@@ -140,8 +141,32 @@ function _parseUsage(u) {
           resetsAt: lim.resets_at ? Math.floor(Date.parse(lim.resets_at) / 1000) || 0 : 0,
           severity: lim.severity || 'normal',
         });
+        haveScoped.add(String(lim.scope.model.display_name).toLowerCase());
       }
     }
+  }
+  // NAMED scoped buckets too (2.305.0, inc-msof8i22): the REST payload can
+  // carry a model-scoped weekly as a top-level `seven_day_opus`-style field
+  // instead of (or in addition to) a `limits[]` entry. Reading only limits[]
+  // made the OPUS cap invisible to the pool's exhaustion test — it stayed on
+  // an account whose Opus was spent while a member still had headroom. Any
+  // object field with a utilization/percent AND a reset counts; array entries
+  // win on name collision.
+  for (const [k, v] of Object.entries(u)) {
+    if (!/^seven_day_./.test(k) || k === 'seven_day_oauth_apps') continue;
+    if (!v || typeof v !== 'object') continue;
+    const pctRaw = typeof v.utilization === 'number' ? v.utilization
+      : (typeof v.percent === 'number' ? v.percent : null);
+    if (pctRaw == null || !v.resets_at) continue;
+    const name = k.replace(/^seven_day_/, '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    if (haveScoped.has(name.toLowerCase())) continue;
+    haveScoped.add(name.toLowerCase());
+    const util = pctRaw > 1 ? pctRaw / 100 : pctRaw;
+    scopedWeekly.push({
+      name, utilization: util,
+      resetsAt: v.resets_at ? Math.floor(Date.parse(v.resets_at) / 1000) || Number(v.resets_at) || 0 : 0,
+      severity: util >= 1 ? 'exceeded' : (v.severity || 'normal'),
+    });
   }
   // extra_usage → spend (B-87fe; guards mirror claude-swap oauth.py:419-441).
   // used_credits/monthly_limit are cents; monthly_limit=null means unlimited

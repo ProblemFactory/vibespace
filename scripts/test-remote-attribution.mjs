@@ -50,6 +50,17 @@ const l2 = uh2._loadEvents();
 const again = (l2?.events || l2 || []).find((e) => e.mid === 'msg_1');
 ok(again?.acct === ACCT, 'a fresh load keeps the resolved account (no re-bucketing to global)');
 
+// A walker rid that FELL BACK to msg.id must still land a `mid`, or the live
+// odometer can never retire that request (adversarial review; permanent 2×).
+{
+  uh2.ingestRemoteEvents('h9', 'Box9', JSON.stringify({ rid: 'msg_01ABC', ts: Date.now(), sid: 'sX', i: 1, o: 1 }) + '\n');
+  const ev = uh2._events(0, Date.now() + 60000).find((e) => String(e.rid).endsWith('msg_01ABC'));
+  ok(!!ev && ev.mid === 'msg_01ABC', 'msg.id-fallback rid backfills mid (live-ring dedup can retire it)');
+}
+
 fs.rmSync(dataDir, { recursive: true, force: true }); fs.rmSync(home, { recursive: true, force: true });
+
+
+
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail?1:0);

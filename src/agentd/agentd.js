@@ -575,26 +575,46 @@ const ORDERS_FILE = path.join(STATE, 'pool-orders.json');
 const ORDERS_LOG = path.join(STATE, 'pool-orders-log.ndjson');
 let authedServers = 0; // live orchestrator connections
 const sealedOrders = {
-  orders: null, // {poolId, linkPath, ranked:[{id,dir,creds}], currentId}
+  pools: new Map(), // poolId → {poolId, linkPath, ranked:[{id,dir,creds}], currentId}
   _timer: null,
   _tails: new Map(), // sid → byte offset in its .out (only NEW output scanned)
   _lastActAt: 0,
-  load() { try { this.orders = JSON.parse(fs.readFileSync(ORDERS_FILE, 'utf-8')); } catch { this.orders = null; } this._arm(); },
-  set(orders) {
-    this.orders = orders || null;
+  load() {
     try {
-      if (orders) { fs.writeFileSync(ORDERS_FILE + '.tmp', JSON.stringify(orders)); fs.renameSync(ORDERS_FILE + '.tmp', ORDERS_FILE); }
-      else fs.rmSync(ORDERS_FILE, { force: true });
+      const raw = JSON.parse(fs.readFileSync(ORDERS_FILE, 'utf-8'));
+      // MULTI-POOL (adversarial review): one slot meant the last pushed pool
+      // owned the device and every other pool was silently unarmed — worse, a
+      // banner from pool A executed pool B's orders. Keyed by poolId now; the
+      // legacy single-object file migrates on read.
+      if (raw && raw.poolId) this.pools.set(raw.poolId, raw);
+      else for (const [k, v] of Object.entries(raw || {})) if (v && v.poolId) this.pools.set(k, v);
     } catch { }
     this._arm();
   },
+  _persist() {
+    try {
+      if (this.pools.size) {
+        fs.writeFileSync(ORDERS_FILE + '.tmp', JSON.stringify(Object.fromEntries(this.pools)));
+        fs.renameSync(ORDERS_FILE + '.tmp', ORDERS_FILE);
+      } else fs.rmSync(ORDERS_FILE, { force: true });
+    } catch { }
+  },
+  set(orders) {
+    // orders.poolId identifies WHICH pool; a null/clear for a pool removes
+    // only that pool's slot (the disarm path the API always documented)
+    if (orders && orders.poolId) this.pools.set(orders.poolId, orders);
+    else if (orders && orders.clearPool) this.pools.delete(orders.clearPool);
+    else if (!orders) this.pools.clear();
+    this._persist();
+    this._arm();
+  },
   _arm() {
-    if (this.orders && !this._timer) { this._timer = setInterval(() => this._scan(), 1500); if (this._timer.unref) this._timer.unref(); }
-    if (!this.orders && this._timer) { clearInterval(this._timer); this._timer = null; this._tails.clear(); }
+    if (this.pools.size && !this._timer) { this._timer = setInterval(() => this._scan(), 1500); if (this._timer.unref) this._timer.unref(); }
+    if (!this.pools.size && this._timer) { clearInterval(this._timer); this._timer = null; this._tails.clear(); }
   },
   _scan() {
     try {
-      if (!this.orders || authedServers > 0) return; // orchestrator reachable ⇒ it decides
+      if (!this.pools.size || authedServers > 0) return; // orchestrator reachable ⇒ it decides
       if (Date.now() - this._lastActAt < 120000) return; // reflex cooldown
       let metas = []; try { metas = fs.readdirSync(SESS_DIR).filter((f) => f.endsWith('.json')); } catch { return; }
       for (const mf of metas) {
@@ -616,7 +636,13 @@ const sealedOrders = {
   },
   _execute(sid, banner) {
     try {
-      const o2 = this.orders;
+      // Which pool does this session bill to? The daemon cannot know, so the
+      // ONLY safe move with several pools armed is to act on the pool whose
+      // link currently points at a member that is plausibly the biller —
+      // when exactly one pool is armed that is unambiguous; with several,
+      // refuse rather than switch the wrong pool (the review's finding).
+      if (this.pools.size !== 1) { log(`sealed-orders: ${this.pools.size} pools armed — refusing to guess which one the banner belongs to`); return; }
+      const o2 = this.pools.values().next().value;
       let currentDir = null; try { currentDir = fs.readlinkSync(o2.linkPath); } catch { }
       const next = (o2.ranked || []).find((m) => m.dir && m.dir !== currentDir);
       if (!next) { log('sealed-orders: banner seen but no usable fallback member'); return; }
