@@ -554,6 +554,30 @@ app.post('/api/usage/refresh', async (req, res) => {
     const deviceLegG = async () => {
       const dm = await hosts.device(hid);
       const r = await dm.quotaRefresh({ humanGated: true });
+      // B-0f13 read path: the reply carries the host's PASSIVE statusline
+      // cache (files the remote vibespace-usage hook wrote — zero vendor
+      // calls). Merge fetchedAt-GUARDED into the server-side per-host cache:
+      // only a strictly-newer reading may overwrite (the anti-poison rule —
+      // a stale file must never displace a fresher one). Remote '__global__'
+      // = the host's own login → the host-<id> bucket; sub-* keys → the
+      // host-held account files the boot loader already recognizes.
+      if (r?.passive) {
+        try {
+          fs.mkdirSync(USAGE_CACHE_DIR, { recursive: true });
+          for (const [k, j] of Object.entries(r.passive)) {
+            if (!j?.fetchedAt) continue;
+            const fname = k === '__global__'
+              ? 'host-' + hid.replace(/[^\w-]/g, '_') + '.json'
+              : /^sub-[\w-]{1,40}$/.test(k) ? `host-${hid.replace(/[^\w-]/g, '_')}-${k}.json` : null;
+            if (!fname) continue;
+            const f = path.join(USAGE_CACHE_DIR, fname);
+            let prev = null; try { prev = JSON.parse(fs.readFileSync(f, 'utf-8')); } catch { }
+            if (prev?.fetchedAt && prev.fetchedAt >= j.fetchedAt) continue;
+            const merged = { ...(prev || {}), ...j, source: 'remote-statusline' };
+            fs.writeFileSync(f + '.tmp', JSON.stringify(merged)); fs.renameSync(f + '.tmp', f);
+          }
+        } catch { }
+      }
       const u = _consumeDeviceQuota(r);
       if (!u) throw new Error('device refresh returned no usable reading');
       return u;

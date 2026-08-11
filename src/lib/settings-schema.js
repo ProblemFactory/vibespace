@@ -392,6 +392,11 @@ const SETTINGS_SCHEMA = {
     label: t('Local sessions via device daemon (R6)'),
     description: t('New local chat sessions run as device-daemon pipe sessions instead of dtach — the session-brain final form (survives server restarts via the daemon). Existing sessions are never migrated; any daemon failure falls back to dtach at spawn. Leave off until the device-assisted consumer path has soaked.'),
   },
+  'agentd.localDiscovery': {
+    type: 'boolean', default: false, category: 'Integration',
+    label: t('Local session discovery via device daemon'),
+    description: t('The 5s session-list sweep reads its filesystem facts (lock files, transcript listing, tail ids) from the device daemon\'s snapshot — computed in a daemon child process, so a slow or network-mounted home directory can never stall the server. Local enrichment (window mapping, tmux) is unaffected. Falls back to the local scan on any failure.'),
+  },
   'agents.injectPreamble': {
     type: 'text', default: '',
     label: t('Custom agent instructions (injected)'),

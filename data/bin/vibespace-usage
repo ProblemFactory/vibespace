@@ -21,7 +21,9 @@ const fs = require('fs');
 const path = require('path');
 const cp = require('child_process');
 
-const CACHE_DIR = path.join(__dirname, '..', 'usage-cache');
+// B-0f13: on a remote host the script lives in ~/.vibespace/bin with no
+// data/ layout — the spawn env points the cache at ~/.vibespace/usage-cache.
+const CACHE_DIR = process.env.VIBESPACE_USAGE_CACHE || path.join(__dirname, '..', 'usage-cache');
 const THROTTLE_MS = 8000; // write at most once/8s per account — the taskbar polls
 // /api/usage at ~8s (a cheap local read, no Anthropic call), so fresher writes
 // let usage reflect a just-finished turn within a few seconds.

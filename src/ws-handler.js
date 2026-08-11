@@ -741,6 +741,32 @@ function registerWsHandler(wss, ctx) {
           let spawnCmd = sessionSpec.cmd || CLAUDE_CMD;
           let spawnArgs = sessionSpec.args || [];
           let spawnEnvPairs = Object.entries(sessionSpec.env || {}).map(([k, v]) => `${k}=${v == null ? '' : String(v)}`);
+          // B-0f13: REMOTE claude terminal sessions get the SAME passive
+          // statusline capture local ones have had since 2.60.0 — the script
+          // ships with the agent tools (per-spawn tar), the cache lands in
+          // ~/.vibespace/usage-cache on the host (VIBESPACE_USAGE_CACHE — the
+          // host has no data/ layout), and the quota-refresh read path merges
+          // it back (fetchedAt-guarded, zero vendor calls). The --settings
+          // JSON rides the normal rargs quoting (each remote arg is shq'd),
+          // which is the whole quoting hazard handled in one place. Local
+          // sessions keep their existing injection below, untouched.
+          if (backend === 'claude' && sessionMode === 'terminal' && data.hostId) {
+            try {
+              let settingsObj = {};
+              const si = spawnArgs.indexOf('--settings');
+              if (si >= 0 && spawnArgs[si + 1]) { try { settingsObj = JSON.parse(spawnArgs[si + 1]) || {}; } catch {} }
+              settingsObj.statusLine = { type: 'command', command: '"$HOME"/.vibespace/bin/vibespace-usage', padding: 0 };
+              const sjson = JSON.stringify(settingsObj);
+              if (si >= 0) spawnArgs[si + 1] = sjson; else spawnArgs = [...spawnArgs, '--settings', sjson];
+              const acctKey = spawnAccount?.poolTarget || spawnAccount?.id || '__global__';
+              spawnEnvPairs.push(`VIBESPACE_ACCOUNT_KEY=${acctKey}`);
+              // NO cache-dir env: env pairs are shq-quoted (a $HOME inside
+              // single quotes never expands), and none is needed — the script
+              // defaults to __dirname/../usage-cache, which at its shipped
+              // location ~/.vibespace/bin resolves to ~/.vibespace/usage-cache
+              // exactly. The env override exists for tests only.
+            } catch { }
+          }
           let spawnCwd = cwd;
           // Integration master switch (agents.vibespaceIntegration, 2.190.0):
           // OFF ⇒ this spawn carries nothing AGENT-VISIBLE — no VIBESPACE_API,
