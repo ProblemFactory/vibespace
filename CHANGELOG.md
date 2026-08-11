@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.286.1
+
+**Index-mode minimap jumps land wrong on tool-heavy sessions** (incident-diagnosed from an owner report — the auto-shipped scroll tracer told the whole story: `jumpToIndex` landed, then the 180ms-debounced run-collapse pass folded the freshly rendered window and content-visibility height resolution yanked the view to scrollTop 0, firing a spurious `extendBottom` on the collapsed heights — the reader ends up ~20 messages BEFORE the one they clicked).
+
+Root cause: the teleport (huge-file) path received the full content-visibility landing machinery in 2.111.x, but INDEX mode (files below the seek threshold — including most remote sessions) kept a single-rAF `scrollIntoView`. Heights keep resolving for ~1s after a window rebuild, so one shot always drifts. Fix: `jumpToIndex` now folds runs SYNCHRONOUSLY before measuring (the fold can no longer move the target post-landing) and lands via the same `_scrollElStable` the teleport path uses (12-frame convergence + timed re-centers through 750ms + the programmatic-scroll guard). This also fixes index-mode search jump landings (same primitive).
+
+New CDP smoke `scripts/test-minimap-jump.mjs`: a real view-only ChatView over a tool-heavy index-mode transcript, three consecutive jumps, asserting the clicked message is on-screen ~centered after ALL settle timers — with the three targets proven distinct.
+
+
 ## 2.286.0
 
 **R4 step 1 (three-tier): the usage-ledger walker moves into the device daemon — with a structurally loss-free cursor** (docs/design-three-tier.md `usage.scan`).
