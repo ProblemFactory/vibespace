@@ -442,7 +442,16 @@ function registerWsHandler(wss, ctx) {
               break;
             }
           }
-          const sockName = 'cw-' + seq + '-' + Date.now(); // SAME seq as the id — never a re-read (see above)
+          // ROOT FIX (2.304.0): the socket name is DERIVED FROM THE ID, not
+          // minted independently. A session had TWO identities built from two
+          // separate expressions (`sess-<seq>-<now>` and `cw-<seq>-<now>`);
+          // any divergence between them — a re-read counter, a millisecond
+          // drift, a future edit to one and not the other — silently maps two
+          // sessions onto one session-meta file. Deriving makes them ONE
+          // identity: the meta filename is now a pure function of the session
+          // id, so a collision requires duplicate session ids, which the
+          // counter+timestamp already excludes.
+          const sockName = 'cw-' + id.slice('sess-'.length);
           const socketPath = path.join(SOCKETS_DIR, sockName);
           const sessionMode = data.mode === 'chat' ? 'chat' : 'terminal';
           // Shell-style tokenization: quoted segments stay one argument
