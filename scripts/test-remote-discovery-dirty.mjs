@@ -53,5 +53,27 @@ const srv = readFileSync(new URL('../server.js', import.meta.url), 'utf-8');
 ok(/onDiscoveryDirty[\s\S]{0,900}discoverSessions[\s\S]{0,300}remote-sessions/.test(srv), 'server computes once and pushes the RESULT');
 ok(/onDiscoveryDirty[\s\S]{0,700}wss\.clients\.size/.test(srv), 'no computation when nobody is connected');
 
+// ── SWR cold start (2.320.0, inc-msp2srj2): a cold discoverSessions with a
+// persisted last-known list returns it INSTANTLY (stale-marked) and kicks the
+// background refresh through the same dirty→push channel; an explicit ⟳
+// (ttlMs 0) still blocks for the real scan.
+{
+  const h2 = new HostManager({ dataDir: '/tmp/vs-disc-swr-' + process.pid });
+  h2._state.hosts.push({ id: 'hX', name: 'X' });
+  h2._persistedDisc['hX'] = { at: Date.now() - 3600e3, sessions: [{ sessionId: 'aaa', status: 'remote-running' }] };
+  let kicked = null; h2.onDiscoveryDirty = (id) => { kicked = id; };
+  const t0 = Date.now();
+  const r = await h2.discoverSessions('hX', {});
+  ok(Date.now() - t0 < 200 && r.length === 1 && r[0].stale === true, 'cold call serves the persisted list instantly, stale-marked');
+  ok(kicked === 'hX', 'and kicks the background refresh through the dirty channel');
+  // ttlMs 0 must NOT serve stale (the ⟳ contract) — it runs the real ladder,
+  // which for a fake host fails into the stale-cache rung of the ladder
+  // itself (a different, labelled path) or throws; either way NOT the 1ms
+  // instant return (we assert it does not return the instant-stale shape
+  // by checking the SWR branch is gated on ttlMs > 0 in source).
+  const src2 = readFileSync(new URL('../src/hosts.js', import.meta.url), 'utf-8');
+  ok(/ttlMs > 0 && !hit && this\._persistedDisc/.test(src2), 'SWR branch is gated on ttlMs > 0 (explicit ⟳ still scans)');
+}
+
 console.log(fail ? `\n${fail} FAILED` : '\nALL PASS');
 process.exit(fail ? 1 : 0);
