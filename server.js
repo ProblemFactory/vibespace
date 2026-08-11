@@ -4648,6 +4648,17 @@ hosts.onUsageEvents = (hostId, text) => {
 };
 {
   const dirtyTimers = new Map();
+  // Remote discovery went stale (create / terminate / external kill / device
+  // push) — every connected client's cached host list must re-fetch. Trailing-
+  // debounced per host so a burst of invalidations is one broadcast.
+  const discDirtyTimers = new Map();
+  hosts.onDiscoveryDirty = (hostId) => {
+    if (!hostId || discDirtyTimers.has(hostId)) return;
+    discDirtyTimers.set(hostId, setTimeout(() => {
+      discDirtyTimers.delete(hostId);
+      try { bcastAll({ type: 'remote-discovery-dirty', hostId }); } catch { }
+    }, 400));
+  };
   hosts.onDeviceDirty = (hostId) => {
     if (dirtyTimers.has(hostId)) return; // trailing-debounce per host
     dirtyTimers.set(hostId, setTimeout(() => {
