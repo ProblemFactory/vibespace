@@ -861,7 +861,12 @@ async function pushSealedOrders(poolId) {
     readCache: (id) => { try { return JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, id + '.json'), 'utf-8')); } catch { return null; } },
     nowSec: Date.now() / 1000,
   }).map((m) => ({ id: m.id, dir: accounts.subDir(m.id), creds: accounts.subCredsPath(m.id) }));
-  const orders = { poolId, linkPath: accounts.subDir(poolId), ranked, currentId: accounts.poolCurrent(poolId) || null };
+  const orders = { poolId, linkPath: accounts.subDir(poolId), ranked, currentId: accounts.poolCurrent(poolId) || null,
+    // Plan C: per-session links are additional MATCH+ACT targets — the daemon
+    // re-points exactly the link the banner session spawned against. Old
+    // daemons ignore this field and keep matching only the default link:
+    // reduced coverage on skew, never a wrong re-point.
+    linkPaths: (() => { try { return accounts.sessionPoolLinks(poolId).map((l) => l.path); } catch { return []; } })() };
   const j = JSON.stringify(orders);
   if (_sealedOrdersSent.get(poolId) === j) return;
   const dm = await hosts.device(null); // device #0 — pools are local-only
@@ -932,10 +937,61 @@ setTimeout(() => {
 setInterval(() => { try { sweepUsageAnchors(); } catch {} }, 60000);
 setTimeout(() => { try { sweepUsageAnchors(); } catch {} }, 20000);
 
+// ── Plan C (B-a612, 2.315.0): per-session pool placement ────────────────────
+// One pool, many links: each session bills the member its OWN symlink points
+// at. The chooser and the per-session switch pass both read quota through the
+// SAME estimator-overlaid readCache the pool engine uses, PROJECTED to the
+// session's model family (src/model-family.js): scoped caps of models this
+// session is not running stop vetoing its placement; 5h/7d always count
+// (nested buckets); an unknown family means NO projection — today's
+// conservative semantics, never a relaxation on ignorance.
+const { familyOfModel, projectCacheForFamily } = require('./src/model-family.js');
+function poolReadCache(poolId) {
+  // the engine's readCache, extracted for reuse (identity-group freshest file
+  // + estimator overlay); kept here so chooser/switch/engine cannot drift
+  const now = Date.now();
+  return (id) => {
+    let raw = null;
+    try { raw = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, id + '.json'), 'utf-8')); } catch { }
+    try {
+      for (const [, g] of usageIdentityGroupsCached()) {
+        if (g.accountIds.includes(id) && g.cache && (g.cache.fetchedAt || 0) > (raw?.fetchedAt || 0)) { raw = g.cache; break; }
+      }
+    } catch { }
+    try { return estOverlayCache(raw, usageEstimator.estimateFor(id, raw, now)); } catch { return raw; }
+  };
+}
+function poolChooserForModel(poolId, { model } = {}) {
+  try {
+    const a = accounts.get(poolId);
+    if (!a || a.type !== 'pooled') return null;
+    const fam = familyOfModel(model);
+    const cur = accounts.poolCurrent(poolId);
+    if (!fam) return cur; // no identity → the pool's default target
+    const base = poolReadCache(poolId);
+    const readCache = (id) => projectCacheForFamily(base(id), fam);
+    // decidePoolSwitch FROM the default target under the projected view: if
+    // the default serves this family, stay (fewest distinct billing dirs);
+    // if it doesn't, the switch verdict IS the placement.
+    const { decidePoolSwitch } = require('./src/account-pool-auto.js');
+    const d = decidePoolSwitch({ currentId: cur, members: accounts.poolMembers(poolId), readCache, nowSec: Date.now() / 1000, hot: true });
+    return (d && d.to) || cur;
+  } catch (e) { console.warn('[pool] chooser failed (falling back to default target):', e.message); return null; }
+}
+// The session's model identity, per the user's spec: the LAST assistant
+// message's served model vs the last set-model pick — newest wins — else the
+// spawn model. Any unknown → null (no projection).
+function sessionModelFor(s) {
+  const served = s._servedModel ? { m: s._servedModel, at: s._servedModelAt || 0 } : null;
+  const picked = s._pickedModel ? { m: s._pickedModel, at: s._pickedModelAt || 0 } : null;
+  const newest = served && picked ? (picked.at >= served.at ? picked : served) : (picked || served);
+  return (newest && newest.m) || s._spawnModel || null;
+}
+
 const _vsuPending = new Map(); // request_id → {resolve, timer}
 function resolveUsageKey(session) {
   let acct = session._accountId || null;
-  try { if (acct && accounts.get(acct)?.type === 'pooled') acct = accounts.poolCurrent(acct) || acct; } catch {}
+  try { if (acct && accounts.get(acct)?.type === 'pooled') acct = accounts.poolCurrentFor(acct, session._webuiId || null) || acct; } catch {}
   return acct || '__global__';
 }
 function writeUsageCacheForKey(key, parsed) {
@@ -1228,7 +1284,38 @@ function maybePoolAutoSwitchForPool(poolId) {
     // is down/upgrading, and an unobserved rejection is a process-level
     // unhandledRejection on every eval tick (the deviceBounded ② rule)
     pushSealedOrders(poolId).catch((e) => { if (!_poolOrdersWarned) { _poolOrdersWarned = true; console.warn('[pool] sealed-orders push unavailable:', e.message); } });
-    const d = decidePoolSwitch({ currentId, members: accounts.poolMembers(poolId), readCache, nowSec: now / 1000, proactive: !!a.hot, hot: !!a.hot, pessimism: darkTaintedAccounts(), explain: true });
+    // ── Per-SESSION pass (plan C): sessions with their OWN link decide on a
+    // FAMILY-PROJECTED view and re-point only their link — an opus session's
+    // spent cap never evicts a fable session, and vice versa. Sessions whose
+    // family is unknown project nothing (full view = legacy semantics).
+    const members = accounts.poolMembers(poolId);
+    for (const [sid, s2] of activeSessions) {
+      if (s2._accountId !== poolId || s2.host) continue;
+      let curFor = null;
+      try { curFor = accounts.poolCurrentFor(poolId, sid); } catch { }
+      const hasOwnLink = (() => { try { fs.lstatSync(accounts.sessionPoolLinkPath(poolId, sid)); return true; } catch { return false; } })();
+      if (!hasOwnLink || !curFor) continue;
+      const fam = familyOfModel(sessionModelFor(s2));
+      const projected = (id) => projectCacheForFamily(readCache(id), fam);
+      const ds = decidePoolSwitch({ currentId: curFor, members, readCache: projected, nowSec: now / 1000, proactive: !!a.hot, hot: !!a.hot, pessimism: darkTaintedAccounts() });
+      if (!ds || !ds.to) continue;
+      const dwellKey = poolId + ':' + sid;
+      const lastS = _poolSwitchAt.get(dwellKey) || 0;
+      if (now - lastS < 180000 && !(ds.fromRemaining != null && ds.fromRemaining < POOL_HARD_PCT)) continue;
+      _poolSwitchAt.set(dwellKey, now);
+      try {
+        accounts.ensureSessionPoolLink(poolId, sid, ds.to);
+        try { recordUsageAttribution({ claudeSessionId: s2.claudeSessionId || s2.backendSessionId, accountId: poolId }); } catch { }
+        const toName = accounts.get(ds.to)?.name || ds.to;
+        serverNotice(`pool-sess-${sid}-${now}`, `Pool "${a.name}": conversation "${s2.name || sid}" moved to ${toName}${fam ? ` (its ${fam} quota${ds.fromRemaining != null ? ` was at ${Math.round(ds.fromRemaining)}%` : ''})` : ''}${a.hot ? '' : ' — restarting it'}`);
+        console.log(`[pool] per-session switch ${poolId}/${sid}: ${curFor} → ${ds.to} (fam=${fam || '?'}, from ${ds.fromRemaining}%)`);
+        if (!a.hot) {
+          const payload = JSON.stringify({ type: 'pool-auto-switched', poolId, affected: [{ serverId: sid, backend: s2.backend || 'claude', backendSessionId: s2.claudeSessionId || s2.backendSessionId || null, cwd: s2.cwd || null, name: s2.name || null, host: s2.host || null }] });
+          for (const c of wss.clients) { if (c.readyState === WS_OPEN) { try { c.send(payload); } catch {} break; } }
+        }
+      } catch (e) { console.warn('[pool] per-session re-point failed:', e.message); }
+    }
+    const d = decidePoolSwitch({ currentId, members, readCache, nowSec: now / 1000, proactive: !!a.hot, hot: !!a.hot, pessimism: darkTaintedAccounts(), explain: true });
     if (!d) return;
     if (!d.to) {
       // A pool sitting on a DEAD account with nowhere to go used to be
@@ -1277,6 +1364,9 @@ function maybePoolAutoSwitchForPool(poolId) {
     const affected = [];
     for (const [sid, s] of activeSessions) {
       if (s._accountId !== poolId) continue;
+      // plan C: a session with its own link didn't move with the default —
+      // restarting it for the pool-level switch would be the old collateral
+      try { fs.lstatSync(accounts.sessionPoolLinkPath(poolId, sid)); continue; } catch { }
       try { recordUsageAttribution({ claudeSessionId: s.claudeSessionId || s.backendSessionId, accountId: poolId }); } catch {}
       affected.push({ serverId: sid, backend: s.backend || 'claude', backendSessionId: s.claudeSessionId || s.backendSessionId || null, cwd: s.cwd || null, name: s.name || null, host: s.host || null });
     }
@@ -1881,7 +1971,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
             // answered last.
             if (msg.type === 'assistant' && !msg.parent_tool_use_id && !msg.isSidechain
                 && msg.message?.model && !String(msg.message.model).startsWith('<')) {
-              session._servedModel = msg.message.model;
+              session._servedModel = msg.message.model; session._servedModelAt = Date.now();
               try { noteModelSeen(session._servedModel); } catch { }
               // Latch a target-less lock (locked before any model was known —
               // restored sessions, pre-first-reply locks): first main-thread
@@ -2723,6 +2813,8 @@ function restoreSessions() {
       });
     }
     activeSessions.set(id, session);
+    session._webuiId = id; // per-session pool link key (plan C) — the id the session is registered under
+    session._spawnModel = meta.spawnModel || null; session._pickedModel = meta.pickedModel || null; session._pickedModelAt = meta.pickedModelAt || 0; // plan C model ladder survives restarts
     attachToDtach(id, socketPath, session);
 
     console.log(`  ✓ Reconnected: ${session.name} (${session.cwd})`);
@@ -2951,6 +3043,8 @@ async function readoptOrphanKeeperSessions() {
     session._normEpoch = Date.now();
     session._normalizer.onOp((op) => broadcastToSession(session, id, { type: 'msg', sessionId: id, ...op }));
     activeSessions.set(id, session);
+    session._webuiId = id; // per-session pool link key (plan C) — the id the session is registered under
+    session._spawnModel = meta.spawnModel || null; session._pickedModel = meta.pickedModel || null; session._pickedModelAt = meta.pickedModelAt || 0; // plan C model ladder survives restarts
     setupSessionPty(session, id, ptyProc);
     writeSessionMeta(sockName, { ...meta, orphanedAt: undefined, readoptedAt: Date.now(), webuiSessionId: id, mode: 'chat' });
     try { fs.unlinkSync(path.join(META_DIR, f)); } catch { }
@@ -4183,7 +4277,17 @@ function recordUsageAttribution(meta) {
   // GLOBAL, never to the pool id itself — else a `type:'pooled'` pseudo-account
   // would surface as a spender in the account dimension (review low-confidence
   // finding). The pool tag is still recorded (pool captured above).
-  try { if (acct && accounts.get(acct)?.type === 'pooled') { pool = acct; acct = accounts.poolCurrent(acct) || null; } } catch {}
+  try {
+    if (acct && accounts.get(acct)?.type === 'pooled') {
+      pool = acct;
+      // Plan C: a session with its OWN link bills that link's target — the
+      // live session is looked up by conversation id (the attribution key we
+      // were handed) so the per-session choice lands in the ledger.
+      let sessKey = null;
+      try { for (const [wid, s2] of activeSessions) if ((s2.claudeSessionId || s2.backendSessionId) === sid && s2._accountId === acct) { sessKey = wid; break; } } catch { }
+      acct = accounts.poolCurrentFor(acct, sessKey) || null;
+    }
+  } catch {}
   const attribKey = (acct || '') + '|' + (pool || '');
   if (_lastAttrib.get(sid) === attribKey) return;
   _lastAttrib.set(sid, attribKey);
@@ -5565,6 +5669,7 @@ app.get('/api/session-options', (req, res) => {
 // ── WebSocket Terminal Handler (extracted to src/ws-handler.js) ──
 const { registerWsHandler, noConvoRef, pickCodexThreadCandidate } = require('./src/ws-handler');
 registerWsHandler(wss, {
+  poolChooser: poolChooserForModel,
   agentdRemote: { ensureAgentdOnHost, agentdHostToken, agentdDir: AGENTD_DIR, attachBundle: path.join(__dirname, 'data', 'bin', 'vibespace-agentd-attach.js') },
   dialBridge,
   activeSessions, WS_OPEN, broadcastActiveSessions, broadcastToSession, resizeSessionToMin,
@@ -5608,7 +5713,7 @@ function sessionAuth(s) {
     // currently bills, so the badge/chip never mislabels it as an API key
     // (real report: pooled sessions rendered as 'API key').
     if (a && a.type === 'pooled') {
-      let cur = null; try { const c = accounts.poolCurrent(a.id); cur = c ? (accounts.get(c)?.name || null) : null; } catch {}
+      let cur = null; try { const c = accounts.poolCurrentFor(a.id, s._webuiId || null); cur = c ? (accounts.get(c)?.name || null) : null; } catch {} // plan C: THIS session's link target, not the pool default
       return withHost({ source: 'pooled', name: a.name, poolTarget: cur });
     }
     // A named SUBSCRIPTION account bills the subscription (not API) — show its
@@ -6043,6 +6148,9 @@ server.listen(PORT, HOST, () => {
   // Restore existing dtach sessions from before restart
   migrateLegacyHomeProjects();
   restoreSessions();
+  // Plan C boot reconciliation: a per-session pool link whose session did not
+  // survive the restart is a billing pointer nobody can see or move — unlink.
+  try { const n = accounts.sweepSessionPoolLinks(new Set(activeSessions.keys())); if (n) console.log(`[pool] swept ${n} orphaned per-session link(s)`); } catch { }
   // B-1525 second half: consume the .orphan metas the dead-socket cleanup
   // preserved — remote keeper sessions whose claude is STILL ALIVE on its
   // host come back LIVE by themselves (no manual surgery). Runs even on a
