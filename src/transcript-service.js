@@ -29,6 +29,9 @@ const {
   scanJsonlUserTurnsAsync, searchJsonlFull, searchJsonlFullStream,
 } = require('./adapters/codex');
 
+const DEVICE_HANDLE = '\u0000device:'; // opaque to the route; never a real path
+const isDeviceHandle = (fp) => typeof fp === 'string' && fp.startsWith(DEVICE_HANDLE);
+
 function createTranscriptService({ activeSessions, createSessionMessages, hosts }) {
   // ── R3 SWITCHOVER (2.292.0): remote reads are served BY THE MACHINE THAT
   // HOLDS THE BYTES (the daemon's `transcript-op`, dark since 2.285.0 with a
@@ -206,17 +209,22 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
       : findSessionJsonlPath(r.sessionId, r.cwd);
   }
 
-  /** Huge-file seek family. gapInfo → {gap, fp, hostFetchError}.
-   *  DELIBERATELY NOT device-switched (2.292.0): this family speaks in FILE
-   *  LINE NUMBERS, and the streaming full-file search (searchFullStream) has
-   *  no device op — it must read a real local file. Serving gapInfo/slabs
-   *  from the device while search read a local cache copy would put line
-   *  offsets on TWO sources of truth: any divergence teleports the reader to
-   *  the wrong place. One source wins; the cache pull that already happens
-   *  for search serves all three. (Switch the whole family together, with a
-   *  search op, or not at all.) */
+  /** Huge-file seek family — switched to the device AS ONE UNIT (2.293.0,
+   *  once the daemon gained a searchFull op). This family speaks in FILE LINE
+   *  NUMBERS: serving gapInfo/slabs from the device while search read a local
+   *  cache copy would put line offsets on TWO sources of truth and teleport
+   *  the reader to the wrong place. So gapInfo returns an opaque HANDLE
+   *  instead of a bare path — `device:<host>` when the device serves, else
+   *  the local file path — and every follow-up (slab / search / turnmap)
+   *  honours it. The route treats the handle as opaque (it only checks
+   *  truthiness and passes it back), so the whole family switches atomically
+   *  or not at all. Streaming search over the device degrades to ONE batch
+   *  (no streaming op yet): matches still arrive as NDJSON, just together. */
   async function gapInfo(ref) {
     const r = norm(ref);
+    const viaDev = await tryDevice(r, 'gapInfo', {});
+    if (viaDev && viaDev.hasFile) return { gap: viaDev.gap, fp: DEVICE_HANDLE + r.host, hostFetchError: null };
+    if (viaDev && viaDev.hasFile === false) return { gap: null, fp: null, hostFetchError: null };
     const hostFetchError = await refreshRemote(r, { throttled: true });
     const fp = filePath(ref);
     if (!fp || !fs.existsSync(fp)) return { gap: null, fp: null, hostFetchError };
@@ -228,6 +236,12 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
   /** Normalize one raw line-range slab (subagent records dropped to match the
    *  display path; orphan tool calls acceptable for read-only browsing). */
   async function gapSlab(ref, fp, fromLine, toLine) {
+    if (isDeviceHandle(fp)) {
+      const r0 = norm(ref);
+      const viaDev = await tryDevice(r0, 'gapSlab', { fromLine, toLine });
+      if (viaDev) return viaDev.messages || [];
+      return []; // handle said device; a mid-family fallback would mix line spaces
+    }
     let records = [];
     try { records = await readJsonlLineRangeAsync(fp, fromLine, toLine); } catch { }
     records = records.filter((rec) => !isSubagentMessage(rec));
@@ -237,9 +251,29 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     return mm.tail(mm.total);
   }
 
-  function searchFull(ref, fp, q) { return searchJsonlFull(fp, norm(ref).backend, q); }
-  function searchFullStream(ref, fp, q, onMatch, opts) { return searchJsonlFullStream(fp, norm(ref).backend, q, onMatch, opts); }
-  function fullTurnmap(ref, fp) { return scanJsonlUserTurnsAsync(fp, norm(ref).backend); }
+  async function searchFull(ref, fp, q) {
+    if (isDeviceHandle(fp)) return (await tryDevice(norm(ref), 'searchFull', { q })) || { matches: [], truncated: false };
+    return searchJsonlFull(fp, norm(ref).backend, q);
+  }
+  /** Device mode has no streaming op yet: run the device's one-shot search and
+   *  replay its matches through onMatch, so the NDJSON contract is unchanged
+   *  (results arrive together instead of trickling — honest degradation, and
+   *  the wire carries matches, not the whole transcript). */
+  async function searchFullStream(ref, fp, q, onMatch, opts) {
+    if (isDeviceHandle(fp)) {
+      const res = (await tryDevice(norm(ref), 'searchFull', { q })) || { matches: [], truncated: false };
+      for (const m of (res.matches || [])) { if (opts?.signal?.aborted) break; onMatch(m); }
+      return { total: (res.matches || []).length, truncated: !!res.truncated };
+    }
+    return searchJsonlFullStream(fp, norm(ref).backend, q, onMatch, opts);
+  }
+  async function fullTurnmap(ref, fp) {
+    if (isDeviceHandle(fp)) {
+      const viaDev = await tryDevice(norm(ref), 'fullTurnmap', {});
+      return viaDev?.turns || [];
+    }
+    return scanJsonlUserTurnsAsync(fp, norm(ref).backend);
+  }
 
   return { view, page, turnmap, searchIndexed, status, taskState, filePath, gapInfo, gapSlab, searchFull, searchFullStream, fullTurnmap, refreshRemote };
 }

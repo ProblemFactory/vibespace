@@ -1205,6 +1205,10 @@ function serveConnection(sock) {
               if (!g.fp) result = { messages: [] };
               else result = { messages: await svc.gapSlab(ref, g.fp, Number(msg.params?.fromLine) || 0, Number(msg.params?.toLine) || 0) };
             }
+            else if (m === 'searchFull') {
+              const g = await svc.gapInfo(ref);
+              result = g.fp ? svc.searchFull(ref, g.fp, String(msg.params?.q || '')) : { matches: [], truncated: false };
+            }
             else if (m === 'fullTurnmap') {
               const g = await svc.gapInfo(ref);
               result = { turns: g.fp ? await svc.fullTurnmap(ref, g.fp) : [], ...(g.gap || {}) };
