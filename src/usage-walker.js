@@ -33,11 +33,19 @@ function defaultCursorFile() {
 
 /** Walk ~/.claude/projects incrementally. Returns
  *  {events: [ndjson-line…], cursors, cursorFile} — cursor NOT persisted. */
-function runUsageWalk({ home = os.homedir(), cursorFile = defaultCursorFile() } = {}) {
-  const PROJECTS = path.join(home, '.claude', 'projects');
-  let cursors = {};
-  try { cursors = JSON.parse(fs.readFileSync(cursorFile, 'utf-8')) || {}; } catch { }
+function runUsageWalk({ home = os.homedir(), cursorFile = defaultCursorFile(),
+  // 2.297.0 (the twin-killer): the LOCAL ledger walk consumes this module
+  // in-process — explicit dir overrides + an injected cursor store + an
+  // onEvent hook (parsed objects instead of NDJSON strings) are what let
+  // UsageHistory.scan() delete its own copy of this walk. Defaults keep the
+  // daemon/scan-op call shape byte-identical.
+  projectsDir = null, codexSessionsDir = null, cursors: injectedCursors = null, onEvent = null } = {}) {
+  const PROJECTS = projectsDir || path.join(home, '.claude', 'projects');
+  let cursors = injectedCursors;
+  if (!cursors) { try { cursors = JSON.parse(fs.readFileSync(cursorFile, 'utf-8')) || {}; } catch { cursors = {}; } }
   const out = [];
+  let filesTouched = 0;
+  const emit = onEvent ? ((ev) => onEvent(ev)) : ((ev) => out.push(JSON.stringify(ev)));
 
   function handleLine(line, cur) {
     if (line.indexOf('"usage"') < 0) return;
@@ -50,7 +58,7 @@ function runUsageWalk({ home = os.homedir(), cursorFile = defaultCursorFile() } 
     if (rid === cur.lastRid) return; // contiguous duplicate of the same request
     cur.lastRid = rid;
     const cc = u.cache_creation || {};
-    out.push(JSON.stringify({
+    emit({
       rid,
       // message.id join field (2.267.3 rule): live stdout records lack
       // requestId, so per-message billing lookups join on mid
@@ -65,7 +73,7 @@ function runUsageWalk({ home = os.homedir(), cursorFile = defaultCursorFile() } 
       cr: u.cache_read_input_tokens || 0,
       o: u.output_tokens || 0,
       tier: u.service_tier || null,
-    }));
+    });
   }
 
   function scanFileWith(fp, cur, size, onLine) {
@@ -130,6 +138,7 @@ function runUsageWalk({ home = os.homedir(), cursorFile = defaultCursorFile() } 
       // NOTE: the unchanged-file path keeps cur.sid in the cursor entry —
       // matching the shipped scanner exactly (parity over cursor bytes too)
       if (st.size === cur.offset) { cursors[fp] = cur; continue; }
+      filesTouched++;
       scanFileWith(fp, cur, st.size, (line) => handleLine(line, cur));
       delete cur.sid;
       cursors[fp] = cur;
@@ -144,7 +153,7 @@ function runUsageWalk({ home = os.homedir(), cursorFile = defaultCursorFile() } 
   // model/cwd come from the preceding turn_context and PERSIST IN THE CURSOR
   // (an incremental scan may start mid-file). input INCLUDES cached → fresh =
   // difference; rollouts report no cache-write counts (cw 0).
-  const codexDir = path.join(process.env.CODEX_HOME || path.join(home, '.codex'), 'sessions');
+  const codexDir = codexSessionsDir || path.join(process.env.CODEX_HOME || path.join(home, '.codex'), 'sessions');
   let rollouts = [];
   try { rollouts = fs.readdirSync(codexDir, { recursive: true }); } catch { }
   for (const rel of rollouts) {
@@ -157,6 +166,7 @@ function runUsageWalk({ home = os.homedir(), cursorFile = defaultCursorFile() } 
     if (st.size < cur.offset) { cur.offset = 0; cur.lastRid = null; }
     if (st.size === cur.offset) { cursors[fp] = cur; continue; }
     const sid = m[1].toLowerCase();
+    filesTouched++;
     scanFileWith(fp, cur, st.size, (line) => {
       if (line.indexOf('"turn_context"') >= 0) {
         let r; try { r = JSON.parse(line); } catch { return; }
@@ -178,7 +188,7 @@ function runUsageWalk({ home = os.homedir(), cursorFile = defaultCursorFile() } 
       if (rid === cur.lastRid) return;
       cur.lastRid = rid;
       const cached = last.cached_input_tokens || 0;
-      out.push(JSON.stringify({
+      emit({
         rid, be: 'codex', ts, sid,
         model: cur.model || null,
         cwd: cur.cwd || null,
@@ -187,12 +197,12 @@ function runUsageWalk({ home = os.homedir(), cursorFile = defaultCursorFile() } 
         cr: cached,
         o: last.output_tokens || 0,
         tier: null,
-      }));
+      });
     });
     cursors[fp] = cur;
   }
 
-  return { events: out, cursors, cursorFile };
+  return { events: out, cursors, cursorFile, filesTouched };
 }
 
 module.exports = { runUsageWalk, defaultCursorFile };

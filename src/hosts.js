@@ -39,6 +39,7 @@ const SSH_BASE_OPTS = [
 
 class HostManager {
   constructor({ dataDir }) {
+    this.convIndex = new (require('./conversation-index.js').ConversationIndex)({ dataDir });
     this.dataDir = dataDir;
     this._file = path.join(dataDir, 'hosts.json');
     this._sshDir = path.join(dataDir, 'ssh');
@@ -970,8 +971,13 @@ class HostManager {
   // when fresh; stat+cat when stale). Session ids are UUIDs — no collisions.
   async fetchSessionJsonl(id, sessionId, { maxBytes = 64 * 1024 * 1024 } = {}) {
     if (!/^[\w-]+$/.test(sessionId)) throw new Error('bad session id');
-    return this._fetchRemoteByFind(id, `-maxdepth 2 -name ${JSON.stringify(sessionId + '.jsonl')}`,
+    const r = await this._fetchRemoteByFind(id, `-maxdepth 2 -name ${JSON.stringify(sessionId + '.jsonl')}`,
       path.join(id, sessionId + '.jsonl'), { maxBytes });
+    // conversation-location index (R3 tail): a successful fetch is proof this
+    // host owns the conversation — recorded so host-inference / dead-host
+    // rescue can locate it without scanning the raw cache
+    try { this.convIndex.note(sessionId, id, { src: 'fetch' }); } catch { }
+    return r;
   }
   // Does the host still run a LIVE keeper child for this claude conversation?
   // Returns the keeper sid to ATTACH to (ws create keeperSid path — never a
@@ -1310,6 +1316,33 @@ class HostManager {
 
   // ── Remote session discovery (lock-first, same algorithm as local) ──
 
+  /** Cheap link-state classifier for the offline-bias defense:
+   *  'online'  — dial link live, or a cached device connection reports connected
+   *  'offline' — dial host with NO live link, or a fresh unreachable memo
+   *  'unknown' — pure-ssh host with no cached facts (reachability is probed at
+   *              use; absence of evidence is not evidence of absence).
+   *  Deliberately never probes — this runs inside estimator/pool decisions. */
+  linkState(id) {
+    const h = this.get(id);
+    if (!h) return 'unknown';
+    try {
+      if (h.transport === 'dial' || h.deviceId) {
+        if (this.dialOnline?.(h.deviceId || id)) return 'online';
+        if (h.transport === 'dial') return 'offline'; // dial-only: no link = unreachable
+      }
+      if ((this._hostDownUntil?.get(id) || 0) > Date.now()) return 'offline';
+      const dm = this._devices?.get(id);
+      if (dm?.status?.().connected) return 'online';
+    } catch { }
+    return 'unknown';
+  }
+
+  /** The single owning host of a conversation per the location index, or
+   *  null (unknown/ambiguous). Claims from since-removed hosts are ignored. */
+  conversationOwner(sessionId) {
+    try { return this.convIndex.ownerHost(sessionId, (hid) => !!this.get(hid)); } catch { return null; }
+  }
+
   async discoverSessions(id, { ttlMs = 15000 } = {}) {
     const h = this.get(id);
     const hit = this._discoveryCache.get(id);
@@ -1416,6 +1449,7 @@ class HostManager {
           }
           if (claimed) {
             this._discoveryCache.set(id, { at: Date.now(), sessions: claimed });
+            try { this.convIndex.noteDiscovery(id, claimed); } catch { }
             this._persistDiscovery(id, claimed);
             return claimed;
           }
@@ -1436,6 +1470,7 @@ class HostManager {
     }
     const sessions = interpretDiscoveryLines(out, { hostId: h.id, hostName: h.name, claimJsonls });
     this._discoveryCache.set(id, { at: Date.now(), sessions });
+    try { this.convIndex.noteDiscovery(id, sessions); } catch { }
     this._persistDiscovery(id, sessions);
     return sessions;
   }

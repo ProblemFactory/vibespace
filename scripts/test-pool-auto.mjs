@@ -102,5 +102,36 @@ ck('oscillation: proactive never returns onto a below-settle-bar sooner-deadline
 ck('oscillation control: a HEALTHY sooner-deadline member still gets the proactive jump',
   decidePoolSwitch({ currentId: 'b', members, readCache: (id) => ({ b: acct(0.4, 6 * D), a: acct(0.5, 12 * H) })[id] ?? null, nowSec: NOW, proactive: true, hot: true })?.to === 'a');
 
+
+// ── OFFLINE-BIAS pessimism docking (2.297.0, design §Cross-device) ──
+{
+  // current target healthy at 12% remaining on its 5h — but its spend partly
+  // flows through a DARK machine, so an 8-point dock puts it below the hot
+  // threshold and a hot pool moves; without the dock it stays.
+  const caches = {
+    A: { fetchedAt: 1000, fiveHour: { utilization: 0.88, resetsAt: NOW + 3600 }, sevenDay: { utilization: 0.2, resetsAt: NOW + 86400 } },
+    B: { fetchedAt: 1000, fiveHour: { utilization: 0.10, resetsAt: NOW + 3600 }, sevenDay: { utilization: 0.1, resetsAt: NOW + 86400 } },
+  };
+  const readCache = (id) => caches[id];
+  const members = [{ id: 'A', name: 'A' }, { id: 'B', name: 'B' }];
+  const stay = decidePoolSwitch({ currentId: 'A', members, readCache, nowSec: NOW, proactive: true, hot: true });
+  ck('no dark taint: 12% remaining clears the hot threshold — stays', stay === null);
+  const move = decidePoolSwitch({ currentId: 'A', members, readCache, nowSec: NOW, proactive: true, hot: true, pessimism: { A: 8 } });
+  ck('dark-tainted current target is docked below the hot threshold — moves', move?.to === 'B');
+  // a dark-tainted CANDIDATE is docked too — switching ONTO invisible burn is
+  // as dangerous as staying on it (settle bar applies to the docked value)
+  // A soft-exhausted (8 remaining < hot 10, above hard 5); B has 18 — clears
+  // the settle bar (13) undocked, fails it docked. The dock must flip the
+  // decision from move to stay.
+  const cachesTight = {
+    A: { fetchedAt: 1000, fiveHour: { utilization: 0.92, resetsAt: NOW + 3600 }, sevenDay: { utilization: 0.2, resetsAt: NOW + 86400 } },
+    B: { fetchedAt: 1000, fiveHour: { utilization: 0.82, resetsAt: NOW + 3600 }, sevenDay: { utilization: 0.1, resetsAt: NOW + 86400 } },
+  };
+  const rc2 = (id) => cachesTight[id];
+  ck('control: without the dock the soft-exhausted pool moves to B', decidePoolSwitch({ currentId: 'A', members, readCache: rc2, nowSec: NOW, proactive: true, hot: true })?.to === 'B');
+  const noSettle = decidePoolSwitch({ currentId: 'A', members, readCache: rc2, nowSec: NOW, proactive: true, hot: true, pessimism: { B: 8 } });
+  ck('dark-tainted candidate fails the settle bar after docking — pool stays', noSettle === null);
+}
+
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

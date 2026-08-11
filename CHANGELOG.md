@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.297.0
+
+**Three-tier closure, batch 1 of the owner's "finish ALL of it" directive: the two highest-risk design obligations that had never been scheduled, plus two of the registered equivalence exceptions.**
+
+- **Vendor-call whitelist guard test** (`scripts/test-vendor-whitelist.mjs`, 19 asserts) — the design's §ban-safety law is now enforced STRUCTURALLY, not by discipline: exactly two files may construct an Anthropic request (with pinned construction counts and their opt-in/throttle/backoff gate markers asserted), the device daemon and its built bundles must carry ZERO vendor endpoints, and the shipped usage tools must import no network primitive. A new vendor call anywhere fails the suite until deliberately allowlisted with its gates. The full-repo inventory behind it found `refreshRateLimit` exported with zero callers.
+- **Device-offline bias defenses** (design §Cross-device aggregation, previously zero-implemented — the dangerous-direction bias: with per-account remote attribution landing, the learned rate → 1×, so an ACTIVE machine going dark means missing cost and an UNDERestimate = late pool switches):
+  - per-source watermarks (newest ledger event per machine, free on the incremental shard walk) + `hosts.linkState()` (never probes) → **active-dark detection**: recent events + link down;
+  - pool decisions dock a dark-tainted account's effective remaining by 8 points on BOTH sides — the current target trips exhaustion earlier AND switching ONTO invisible burn fails the settle bar (test: control moves, docked stays);
+  - anchors record `dark:[hosts]` and rate learning VOIDS pairs touching a dark interval (Δu real, cost missing ⇒ falsely hot rate — now excluded, not averaged in).
+  - The audit also caught **two live bugs**: resolved remote spend was excluded from the per-account odometer entirely (`if (ev.host) continue` predates 2.294.0 attribution — an account's spend on another machine simply never counted), and a HOST-LOGIN remote session's live stream credited the LOCAL machine login's odometer, so the estimate rose during a remote burn then visibly dropped back when the harvest landed. Both fixed.
+- **The local ledger walk IS the shared walker now** (`usage-history.scan()` consumes `src/usage-walker.js` in-process with its cursor store injected; enrichment stays orchestrator-side) — the three-copies-of-one-walk exception shrinks to two, and the remaining shipped scanner is the documented checkout-less fallback, still parity-pinned.
+- **Conversation-location index** (R3 tail): `data/conversation-index.json` records which machine owns each conversation from BOTH discovery listings and transcript fetches — the resume host-inference can now locate a conversation the raw cache has never seen (previously only ever-fetched transcripts could infer their host); two live claims stay honestly ambiguous, a week-fresher claim is decisive, claims from removed hosts are ignored.
+
+
 ## 2.296.0
 
 **Incident reports gain the two things the layout-collapse investigation lacked: a trail of what MOVED windows, and a way to put them back** (owner request after the pool-collapse incident: "record more information so future bugs like this are solvable").

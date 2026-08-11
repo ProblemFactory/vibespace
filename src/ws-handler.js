@@ -301,6 +301,14 @@ function registerWsHandler(wss, ctx) {
                     if (hosts.get(hd) && fs.existsSync(path.join(cacheRoot, hd, data.resumeId + '.jsonl'))) owners.push(hd);
                   }
                 } catch { }
+                // conversation-location INDEX first (R3 tail, 2.297.0): the
+                // cache scan only knows conversations whose transcript was
+                // already pulled once — the index also knows DISCOVERY-listed
+                // ones. When both sources answer they must AGREE (disagreement
+                // = ambiguous ⇒ refuse to infer, exactly like owners.length>1).
+                const idxOwner = hosts.conversationOwner?.(data.resumeId) || null;
+                if (idxOwner && !owners.length) owners.push(idxOwner);
+                else if (idxOwner && owners.length === 1 && owners[0] !== idxOwner) owners.push(idxOwner); // force ambiguity
                 if (owners.length === 1) {
                   data.hostId = owners[0];
                   console.log(`[session] resume host inferred: ${data.resumeId.slice(0, 8)} → ${owners[0]} (host-less resume of a cached remote conversation)`);

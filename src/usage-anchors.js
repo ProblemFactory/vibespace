@@ -40,7 +40,7 @@ class UsageAnchors {
   // the same snapshot every 8s while a terminal runs). costSince = ledger cost
   // between the previous anchor's fetchedAt and this one, split by model
   // family so scoped-bucket (Fable) rates stay derivable offline.
-  maybeRecord({ identityKey, accountId, cache, costSince, calib = null, accountIds = null }) {
+  maybeRecord({ identityKey, accountId, cache, costSince, calib = null, accountIds = null, dark = null }) {
     if (!cache || !cache.fetchedAt) return false;
     const seen = this._last.get(identityKey) ?? this.lastAnchor(identityKey)?.fetchedAt ?? 0;
     if (cache.fetchedAt <= seen) { this._last.set(identityKey, seen); return false; }
@@ -48,6 +48,11 @@ class UsageAnchors {
     const rec = {
       ts: Date.now(), fetchedAt: cache.fetchedAt, source: cache.source || 'unknown',
       accountId: accountId || null, identityKey,
+      // OFFLINE-BIAS honesty (2.297.0): hosts that were ACTIVE-DARK while this
+      // reading's interval accrued — Δu is real but their cost is missing, so
+      // learning must void pairs touching this record (extractPairs). Kept in
+      // the raw record forever like everything else (models re-derive offline).
+      ...(Array.isArray(dark) && dark.length ? { dark } : {}),
       buckets: {
         // status 'unknown' = a FABRICATED placeholder (data/bin/vibespace-usage
         // writes {utilization:0, status:'unknown', resetsAt:0} when a window is
@@ -95,7 +100,15 @@ function costBetweenMulti(usageHistory, accountIds, fromMs, toMs) {
     for (const ev of usageHistory._events(fromMs, toMs)) {
       const acct = ev.acct || '__global__';
       if (!want.has(acct)) continue;
-      if (ev.host) continue; // local odometer only; remote rides the harvest separately
+      // Remote events RESOLVED to a real account (2.294.0 attribution) COUNT:
+      // quota is a per-account global fact, and excluding another machine's
+      // spend from the odometer is precisely the 1/7-coverage bias this
+      // stack self-learns around — worse, after 2.294.0 the estimate ROSE
+      // during a remote burn (live ring) then DROPPED when the harvest landed
+      // (mid-excluded from the ring, host-excluded here: the spend visibly
+      // un-counted itself). Only UNRESOLVED host-bucket events stay out —
+      // 'that machine's own login' is not an estimable identity.
+      if (ev.host && ev.atype === 'host') continue;
       if (ev.ts < fromMs || ev.ts > toMs) continue;
       const c = usageHistory._cost(ev);
       out.total += c; out.requests++;

@@ -800,6 +800,45 @@ const usageEstimator = new UsageEstimator({
   },
 });
 app.locals.usageEstimator = usageEstimator;
+// ── OFFLINE-BIAS defense (2.297.0, design §Cross-device aggregation) ──
+// A source is ACTIVE-DARK when the ledger holds RECENT events from it but its
+// link is down: its spend keeps accruing invisibly, which biases estimates in
+// the DANGEROUS direction (under → late pool switches). 30s memo — this runs
+// inside pool decisions and the anchor sweep.
+let _darkMemo = { at: 0, list: [] };
+function darkSources() {
+  if (Date.now() - _darkMemo.at < 30000) return _darkMemo.list;
+  const list = [];
+  try {
+    const wm = usageHistory.sourceWatermarks();
+    const now = Date.now();
+    for (const [src, ts] of Object.entries(wm)) {
+      if (src === 'local') continue;
+      if (now - ts > 48 * 3600 * 1000) continue; // idle for 2 days — not dangerous
+      if (hosts.linkState(src) === 'offline') list.push({ host: src, lastEventTs: ts });
+    }
+  } catch { }
+  _darkMemo = { at: Date.now(), list };
+  return list;
+}
+// Which accounts a dark source taints: those with ledger events from that
+// host in the last 7 days (per-account precision so an all-local pool never
+// pays the pessimism tax for an unrelated machine's outage).
+function darkTaintedAccounts() {
+  const dark = darkSources();
+  if (!dark.length) return {};
+  const taint = {};
+  try {
+    const since = Date.now() - 7 * 24 * 3600 * 1000;
+    const darkSet = new Set(dark.map((d) => d.host));
+    for (const ev of usageHistory._events(since, Date.now())) {
+      if (ev.host && darkSet.has(ev.host) && ev.acct && ev.atype !== 'host') taint[ev.acct] = DARK_PESSIMISM_PCT;
+    }
+  } catch { }
+  return taint;
+}
+const DARK_PESSIMISM_PCT = 8; // dock: ~1 long turn of 5h headroom / real weekly $
+
 function sweepUsageAnchors() {
   // GROUPED BY IDENTITY (2.263.0): recording per cache-file double-anchored
   // org-merged logins (__global__ + named sub interleaved in one identity
@@ -825,7 +864,11 @@ function sweepUsageAnchors() {
           if (calib) for (const c of Object.values(calib)) global.__vsMetric?.('usage-est-err-pct', Math.abs(c.err) * 100);
         } catch { }
       }
-      if (usageAnchors.maybeRecord({ identityKey, accountId: g.accountId, cache: g.cache, costSince, calib, accountIds: allIds })) {
+      // pairs recorded while ANY tainted source was dark must not teach rates
+      // (Δu real, cost missing ⇒ a falsely HOT rate) — mark the record so
+      // extractPairs voids pairs touching it (both sides of the gap).
+      const darkHosts = (() => { try { const t = darkTaintedAccounts(); return allIds.some((a) => t[a]) ? darkSources().map((d) => d.host) : []; } catch { return []; } })();
+      if (usageAnchors.maybeRecord({ identityKey, accountId: g.accountId, cache: g.cache, costSince, calib, accountIds: allIds, dark: darkHosts })) {
         usageEstimator.invalidate(identityKey); // rates re-derive from the grown pair set
       }
     } catch { }
@@ -1121,7 +1164,7 @@ function maybePoolAutoSwitchForPool(poolId) {
     // cold pools switch on exhaustion only (each switch restarts conversations).
     // Hot pools also treat est<10% as exhaustion (提前切 — switch BEFORE the
     // limit interrupts a long-running workflow; cold keeps 5%).
-    const d = decidePoolSwitch({ currentId, members: accounts.poolMembers(poolId), readCache, nowSec: now / 1000, proactive: !!a.hot, hot: !!a.hot });
+    const d = decidePoolSwitch({ currentId, members: accounts.poolMembers(poolId), readCache, nowSec: now / 1000, proactive: !!a.hot, hot: !!a.hot, pessimism: darkTaintedAccounts() });
     if (!d) return;
     // DWELL belt (2.266.1, real oscillation report): every switch cold-starts
     // the running sessions' prompt caches on BOTH accounts — expensive. After
@@ -1763,7 +1806,16 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
             // ledger scan), then kick a throttled pool re-evaluation. This is
             // what makes burst burns visible between scan ticks (exhaustion #2:
             // half the Fable bucket evaporated inside one polling interval).
-            if (msg.type === 'assistant' && msg.message?.usage && (msg.requestId || msg.message?.id)) {
+            // Bug B (2.297.0, offline-bias audit): a HOST-LOGIN remote session
+            // has no local billing identity — resolveUsageKey fell through to
+            // '__global__', crediting the LOCAL machine login's live odometer
+            // with another machine's spend (then the harvest landed the real
+            // event and the estimate visibly dropped back — spend that
+            // un-counts itself). Host-login sessions skip the ring; the
+            // harvest is their one ledger path. Account-billed remote
+            // sessions keep riding it (their identity is real and global).
+            if (msg.type === 'assistant' && msg.message?.usage && (msg.requestId || msg.message?.id)
+                && !(session.host && !session._accountId)) {
               try {
                 const u = msg.message.usage; const cc = u.cache_creation || {};
                 const acctKey = resolveUsageKey(session);

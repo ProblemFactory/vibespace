@@ -102,11 +102,20 @@ function bucketRems(cache, nowSec) {
 // and jump proactively toward sooner deadlines; cold pools only move at the
 // hard thresholds (each switch restarts conversations). Returns null (stay)
 // or {to, toName, fromRemaining, toRemaining, reason: 'exhausted'|'edf'}.
-function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = false, hot = proactive }) {
+// pessimism = {accountId: pct} — OFFLINE-BIAS defense (2.297.0, design
+// §Cross-device): an account whose spend partly flows through a machine that
+// is ACTIVE but DARK (recent ledger events + link down) is systematically
+// UNDER-estimated (its invisible burn keeps accruing), so its effective
+// remaining is docked by pct on BOTH sides of a decision — the current
+// target trips exhaustion earlier AND a dark-tainted candidate looks worse
+// (switching ONTO invisible burn is as dangerous as staying on it).
+function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = false, hot = proactive, pessimism = {} }) {
+  const dock = (id, brs) => brs.map((b) => ({ ...b, remaining: Math.max(0, b.remaining - (pessimism[id] || 0)) }));
+  const dockRem = (id, r) => (r.known ? { ...r, remaining: Math.max(0, r.remaining - (pessimism[id] || 0)) } : r);
   const curCache = readCache(currentId);
-  const cur = accountRemaining(curCache, nowSec); // min% — display/scraps comparison
+  const cur = dockRem(currentId, accountRemaining(curCache, nowSec)); // min% — display/scraps comparison
   const curDeadline = weeklyDeadline(curCache, nowSec);
-  const curBr = bucketRems(curCache, nowSec);
+  const curBr = dock(currentId, bucketRems(curCache, nowSec));
   const soft = (b) => b.remaining < (hot ? THRESH[b.kind].hot : THRESH[b.kind].hard);
   const dead = (b) => b.remaining < THRESH[b.kind].hard;
   // Per-KIND thresholds (user-designed): what matters is ABSOLUTE headroom —
@@ -128,8 +137,8 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   for (const m of members) {
     if (m.id === currentId) continue;
     const c = readCache(m.id);
-    const r = accountRemaining(c, nowSec);
-    const br = bucketRems(c, nowSec);
+    const r = dockRem(m.id, accountRemaining(c, nowSec));
+    const br = dock(m.id, bucketRems(c, nowSec));
     const eff = r.known ? r.remaining : UNKNOWN_REMAINING_PCT;
     if (r.known && br.some(dead)) continue; // gated: some bucket below its hard floor — can't serve
     // settleOk: every bucket clears its kind's HOT threshold + margin — a
