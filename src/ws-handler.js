@@ -872,7 +872,8 @@ function registerWsHandler(wss, ctx) {
               try {
                 await dm.fsWrite(`${home}/.vibespace/editor/code`, fs.readFileSync(EDITOR_CMD));
               } catch { }
-              await dm.fsWrite(`${bin}/${tokName}`, Buffer.from(session.agentToken));
+              try { await dm.placeSecret(`${bin}/${tokName}`, Buffer.from(session.agentToken)); }
+              catch { await dm.fsWrite(`${bin}/${tokName}`, Buffer.from(session.agentToken)); }
               // chmod: tools executable, token 0600, then register the hook in
               // the device's OWN claude/codex configs (its local CLI fires it)
               await dm.runCmd('sh', ['-c',
@@ -901,8 +902,14 @@ function registerWsHandler(wss, ctx) {
             if (spawnAccount && spawnAccount.secret && !spawnAccount._hostSubReady) {
               await dm.fsMkdir(`${home}/.vibespace`); // integration-OFF path skipped the bin mkdir
               const kf = `${home}/.vibespace/${spawnAccount.id}.key`;
-              await dm.fsWrite(kf, Buffer.from(spawnAccount.secret.value));
-              await dm.runCmd('sh', ['-c', `chmod 600 "${kf}"`], { timeoutMs: 6000 }).catch(() => {});
+              // place-secret op (2.298.0): atomic 0600 at open — the old
+              // fsWrite-then-chmod pair left a mode-race window with the key
+              // world-readable. Old daemons keep the legacy pair.
+              try { await dm.placeSecret(kf, Buffer.from(spawnAccount.secret.value)); }
+              catch {
+                await dm.fsWrite(kf, Buffer.from(spawnAccount.secret.value));
+                await dm.runCmd('sh', ['-c', `chmod 600 "${kf}"`], { timeoutMs: 6000 }).catch(() => {});
+              }
               acctAssign = `${spawnAccount.secret.var}="$(cat "${kf}")" `;
             }
             if (!integrationOn) return { envPairs: [], tokenAssign: acctAssign };

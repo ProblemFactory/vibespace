@@ -1012,7 +1012,7 @@ function serveConnection(sock) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims'],
+          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh'],
         });
         return;
       }
@@ -1231,6 +1231,81 @@ function serveConnection(sock) {
             }
             mux.control({ op: 'fs-done', id: rid, chan: msg.chan, sent });
           } catch (e) { mux.control({ op: 'fs-result', id: msg.id, error: e.message }); }
+        })();
+        return;
+      }
+      if (msg.op === 'place-secret') {
+        // THE one sanctioned secret channel on this transport (design
+        // §Account split / place-secret): value arrives base64 on chan 0,
+        // lands ATOMICALLY as a 0600 file — the old fsWrite-then-chmod pair
+        // left a mode-race window where the key sat world-readable. Path must
+        // be absolute and inside $HOME (a secret never lands outside the
+        // user's own tree).
+        try {
+          const dest = String(msg.path || '');
+          const home = process.env.HOME || require('os').homedir();
+          const norm = path.resolve(dest);
+          if (!norm.startsWith(home + path.sep)) throw new Error('secret path must be inside $HOME');
+          fs.mkdirSync(path.dirname(norm), { recursive: true, mode: 0o700 });
+          const buf = Buffer.from(String(msg.data || ''), 'base64');
+          const tmp = norm + '.tmp-' + process.pid;
+          const fd = fs.openSync(tmp, 'w', 0o600); // mode at open — never a chmod window
+          try { fs.writeSync(fd, buf); } finally { fs.closeSync(fd); }
+          fs.renameSync(tmp, norm);
+          mux.control({ op: 'secret-result', id: msg.id, ok: true, path: norm });
+        } catch (e) { mux.control({ op: 'secret-result', id: msg.id, error: e.message }); }
+        return;
+      }
+      if (msg.op === 'quota-refresh') {
+        // THE ONE device op allowed to reach the vendor API (design §Quota
+        // refresh origin, decision 2026-08-10): the human-gated read-only
+        // quota query runs ON the machine that holds the login, so the token
+        // is used from the same IP its CLI sessions use — the
+        // token-appears-from-a-foreign-IP signal the server-side fetch
+        // carried is gone. GATES (mirrored in scripts/test-vendor-whitelist):
+        // ① humanGated must be EXPLICITLY true (the server only sets it from
+        //   the click-gated route — a scheduler can never reach this op);
+        // ② daemon-side 60s throttle per credential source (belt on top of
+        //   the server's own throttle);
+        // ③ READ-ONLY token peek — never refreshes, never writes; expired ⇒
+        //   honest 'no valid token' (the CLI refreshes it on its own turn).
+        (async () => {
+          try {
+            if (msg.humanGated !== true) throw new Error('quota-refresh requires humanGated');
+            const os2 = require('os');
+            const home = process.env.HOME || os2.homedir();
+            const credsPath = msg.subDir
+              ? path.join(home, '.vibespace', 'subs', String(msg.subDir).replace(/[^\w.-]/g, ''), '.credentials.json')
+              : path.join(home, '.claude', '.credentials.json');
+            this._quotaAt = this._quotaAt || new Map();
+            const at = this._quotaAt.get(credsPath) || 0;
+            if (Date.now() - at < 60000) throw new Error('throttled (60s)');
+            let creds; try { creds = JSON.parse(fs.readFileSync(credsPath, 'utf-8')); } catch { throw new Error('no credentials on this machine'); }
+            const oauth = creds?.claudeAiOauth;
+            const token = oauth?.accessToken;
+            if (!token || (oauth.expiresAt && oauth.expiresAt < Date.now() + 60000)) throw new Error('no valid token (expired tokens are never refreshed here)');
+            // stamp only when a vendor call is actually about to happen (the
+            // 2.271.0 lesson: a failed precondition must not burn the slot)
+            this._quotaAt.set(credsPath, Date.now());
+            const get = (p2) => new Promise((resolve, reject) => {
+              const req = require('https').request({
+                host: 'api.anthropic.com', path: p2, method: 'GET',
+                headers: { Authorization: 'Bearer ' + token, 'anthropic-beta': 'oauth-2025-04-20' },
+                timeout: 15000,
+              }, (res) => {
+                let body = '';
+                res.on('data', (c) => { if (body.length < 262144) body += c; });
+                res.on('end', () => resolve({ status: res.statusCode, body }));
+              });
+              req.on('timeout', () => { req.destroy(new Error('vendor timeout')); });
+              req.on('error', reject);
+              req.end();
+            });
+            const usage = await get('/api/oauth/usage');
+            let roles = null;
+            if (usage.status === 200) { try { roles = await get('/api/oauth/claude_cli/roles'); } catch { } }
+            mux.control({ op: 'quota-result', id: msg.id, usage, roles });
+          } catch (e) { mux.control({ op: 'quota-result', id: msg.id, error: e.message }); }
         })();
         return;
       }

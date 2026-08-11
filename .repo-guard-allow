@@ -8,3 +8,4 @@ accessToken: 'expired-test-token'
 -----BEGIN OPENSSH PRIVATE KEY-----
 -----END OPENSSH PRIVATE KEY-----
 BEGIN [A-Z ]*PRIVATE KEY
+sk-ant-oat-EXPIRED

@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.298.0
+
+**Three-tier closure, batch 2: the account-management §-obligations (design §Account split / §Quota refresh origin), all previously unimplemented.**
+
+- **`place-secret` device op** — THE sanctioned secret channel: a credential lands as a 0600 file with the mode set AT OPEN, atomically (tmp+rename), confined to $HOME. The old dial path was `fsWrite` **then** `chmod 600` — a mode-race window with the key world-readable on a multi-user device. Both the API-key file and the per-session agent token now ride it; old daemons keep the legacy pair as fallback.
+- **`quota-refresh` device op** — the human-gated on-demand quota fetch now executes **on the machine that holds the login** (decision 2026-08-10): the token is used from the same IP its CLI sessions use, and the server never sees it — the token-appears-from-a-foreign-IP signal the server-side fetch carried is gone. Gates: `humanGated` must be explicitly true (no scheduler can reach it), daemon-side 60s throttle **stamped only when a vendor call is actually about to happen** (a failed precondition must not burn the slot — the 2.271.0 lesson), read-only token peek that never refreshes. Both host-refresh branches prefer the op and fall back to the legacy token-peek for old daemons. `scripts/test-vendor-whitelist.mjs` now pins agentd's vendor surface to exactly this one op with its gate markers (23 asserts).
+- **`src/account-material.js`** — the data/subs formalization: credential-MATERIAL mechanics (the pool symlink re-point) extracted into one device-tier module the server consumes in-process as device #0; the daemon-side sealed-orders reflex will execute the same implementation.
+- Real-daemon test `scripts/test-device-secret-quota.mjs` (12 asserts): 0600-at-creation, $HOME confinement + traversal refusal, humanGated refusal, missing/expired-creds honesty — every gate that PREVENTS a vendor call is exercised live; the call itself never is (§ban-safety: no test may contact Anthropic).
+
+
 ## 2.297.0
 
 **Three-tier closure, batch 1 of the owner's "finish ALL of it" directive: the two highest-risk design obligations that had never been scheduled, plus two of the registered equivalence exceptions.**

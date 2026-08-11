@@ -84,19 +84,35 @@ for (const [rel, a] of Object.entries(ALLOW)) {
   for (const g of a.gates) ok(text.includes(g), `${rel} keeps gate marker '${g}' (§ban-safety gate deleted?)`);
 }
 
-// ── 3: the device daemon may NEVER hold a vendor endpoint ──
-for (const rel of ['src/agentd/agentd.js', 'src/agentd/client.js', 'src/agentd/ws-min.js', 'src/agentd/mux.js']) {
-  const text = fs.readFileSync(path.join(REPO, rel), 'utf-8');
-  ok(!VENDOR.test(text), `${rel}: zero vendor endpoints (no device op may originate a vendor call)`);
+// ── 3: the device protocol's vendor surface is EXACTLY the quota-refresh op ──
+// (design §Quota refresh origin: "the ONLY device op that may reach the
+// vendor API is the human-gated, throttled read-only quota query"). agentd.js
+// holds that one op WITH its gates; every other daemon file stays at zero.
+{
+  const text = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf-8');
+  const hits = (text.match(/api\.anthropic\.com/g) || []).length;
+  ok(hits === 1, `src/agentd/agentd.js: exactly ONE vendor host literal (the quota-refresh op; found ${hits})`);
+  for (const g of ["humanGated !== true", '_quotaAt', 'never refreshes']) {
+    ok(text.includes(g), `agentd quota-refresh keeps gate marker '${g}'`);
+  }
+  ok(!/oauth\/token|platform\.claude\.com/.test(text), 'agentd never touches the token-refresh endpoint (read-only peek only)');
 }
-// the BUILT bundle too (it embeds shared src/ modules — a vendor call leaking
-// in through a require graph edge is exactly what this catches)
-for (const b of ['data/bin/vibespace-agentd.js', 'data/bin/vibespace-agentd-attach.js']) {
+for (const rel of ['src/agentd/client.js', 'src/agentd/ws-min.js', 'src/agentd/mux.js']) {
+  const text = fs.readFileSync(path.join(REPO, rel), 'utf-8');
+  ok(!VENDOR.test(text), `${rel}: zero vendor endpoints`);
+}
+// bundle: carries the same single op (minified) — gate property names survive
+for (const b of ['data/bin/vibespace-agentd.js']) {
   try {
     const text = fs.readFileSync(path.join(REPO, b), 'utf-8');
-    ok(!/api\.anthropic\.com|platform\.claude\.com|oauth\/usage/.test(text), `${b}: built bundle carries zero vendor endpoints`);
-  } catch { ok(true, `${b} not built here (gitignored artifact) — source files asserted above`); }
+    ok((text.match(/api\.anthropic\.com/g) || []).length <= 2 && text.includes('humanGated'),
+      `${b}: bundle vendor surface = the gated quota-refresh op only`);
+  } catch { ok(true, `${b} not built here — source asserted above`); }
 }
+try {
+  const att = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-agentd-attach.js'), 'utf-8');
+  ok(!/api\.anthropic\.com|oauth\/usage/.test(att), 'attach-cli bundle carries zero vendor endpoints');
+} catch { ok(true, 'attach bundle not built here'); }
 
 // ── 4: shipped usage tools are passive by construction ──
 // vibespace-usage legitimately requires child_process — it PASSES THROUGH the

@@ -201,7 +201,7 @@ class DeviceManager {
             mux.onWritable = (chan) => { sessions.get(chan)?.onWritable?.(); };
             const prevControl = mux.onControl;
             mux.onControl = (m) => {
-              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
+              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
                 const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m); }
                 if (m.op === 'tcp-open' && !m.error) return; // channel stays live
                 return;
@@ -521,6 +521,26 @@ class DeviceManager {
    *  after this resolves, i.e. after the full transfer landed (two-phase).
    *  Old daemons never answer unknown ops (they'd hang the request), so gate
    *  on the hello's daemonVersion and throw fast → caller falls back. */
+  /** Place a secret file (0600, atomic) on the device — THE sanctioned secret
+   *  channel; capability-gated so old daemons fall back to fsWrite+chmod. */
+  async placeSecret(remotePath, buf) {
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('place-secret')) throw new Error('daemon lacks place-secret (capabilities gate)');
+    const r = await this._request({ op: 'place-secret', path: remotePath, data: Buffer.from(buf).toString('base64'), timeoutMs: 15000 });
+    if (r.error) throw new Error(r.error);
+    return r.path;
+  }
+
+  /** Human-gated quota refresh executed ON the device (its own token, its own
+   *  IP — design §Quota refresh origin). Never called from any scheduler. */
+  async quotaRefresh({ subDir = null, humanGated = false } = {}) {
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('quota-refresh')) throw new Error('daemon lacks quota-refresh (capabilities gate)');
+    const r = await this._request({ op: 'quota-refresh', subDir, humanGated, timeoutMs: 40000 });
+    if (r.error) throw new Error(r.error);
+    return { usage: r.usage, roles: r.roles };
+  }
+
   async usageScan({ cursorFile } = {}) {
     const conn = await this.connect();
     if (!conn.info?.capabilities?.includes?.('usage-scan')) throw new Error('daemon lacks usage-scan (capabilities gate)');
