@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.315.0
+
+### Added
+- **Per-session pool links (B-a612 plan C, user-decided): concurrent conversations on different models can bill to DIFFERENT pool members.** Each local pooled session now gets its own directory symlink (`data/pool-links/<poolId>/<sessionId>` → the chosen member's dir); the pool's default link at `data/subs/<poolId>` remains the state for display and for sessions without a model identity. The credential invariants hold at both granularities (N links over M accounts still leave exactly M credential files, and every link to an account resolves to that account's one refresh lock — pinned in the test).
+  - **Placement**: at spawn the chooser ranks members through the SAME estimator-overlaid cache the pool engine reads, PROJECTED to the session's model family (`src/model-family.js` — the vocabulary's first shared home): scoped caps of models the session is not running stop vetoing its placement; 5h/7d always count (nested buckets); an unknown family means no projection, never a relaxation on ignorance.
+  - **Model identity** (user's spec): newest of the last assistant message's served model and the last set-model pick, else the spawn model — all three persisted in session meta so restarts keep the ladder.
+  - **Per-session auto-switch**: the engine decides per session on the projected view and re-points only that session's link — an opus conversation's spent cap no longer evicts a fable conversation, and vice versa. Cold pools restart only the moved session; per-session dwell keys prevent flap.
+  - **Attribution is per-session**: the ledger resolves a pooled request to the SESSION's link target, so per-account $ stays exact when two sessions bill different members. The billing badge shows this session's real target.
+  - **Lifecycle**: link created at spawn, dropped at terminate, reconciled at boot (orphan links are unlinked).
+  - **Sealed orders carry the per-session link paths**: the daemon matches a limit banner to the SPECIFIC link that session spawned against (longest match) and re-points only it. Old daemons ignore the new field — reduced coverage on skew, never a wrong re-point.
+- Tests: scripts/test-account-pool.mjs grew to 31 (link primitives, one-real-dir invariant, independent re-points, sweep, removal safety, family projection).
+
 ## 2.314.0
 
 ### Changed

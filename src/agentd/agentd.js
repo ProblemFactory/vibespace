@@ -639,15 +639,22 @@ const sealedOrders = {
         // the daemon must refuse rather than guess when it cannot tell.
         const o0 = this.pools.values().next().value;
         const spawn = JSON.stringify(meta.cmd || '');
-        if (!o0 || !o0.linkPath || spawn.indexOf(o0.linkPath) < 0) {
-          log(`sealed-orders: limit banner in ${sid} but its spawn does not reference the pool credential dir — ignoring (not this pool's session)`);
+        // Plan C: a session may bill through its OWN link (linkPaths) — match
+        // the SPECIFIC path its spawn references and act on that one. The
+        // LONGEST match wins: every per-session link contains the pool dir
+        // name as a substring of its parent, but the reverse can never hold,
+        // so default-link sessions still resolve to the default.
+        const cands = [o0?.linkPath, ...((o0?.linkPaths) || [])].filter(Boolean);
+        const matched = cands.filter((lp) => spawn.indexOf(lp) >= 0).sort((x, y) => y.length - x.length)[0] || null;
+        if (!o0 || !matched) {
+          log(`sealed-orders: limit banner in ${sid} but its spawn does not reference any pool credential link — ignoring (not this pool's session)`);
           continue;
         }
-        this._execute(sid, banner); return;
+        this._execute(sid, banner, matched); return;
       }
     } catch (e) { log('sealed-orders scan failed: ' + e.message); }
   },
-  _execute(sid, banner) {
+  _execute(sid, banner, matchedLink = null) {
     try {
       // Which pool does this session bill to? The daemon cannot know, so the
       // ONLY safe move with several pools armed is to act on the pool whose
@@ -656,12 +663,13 @@ const sealedOrders = {
       // refuse rather than switch the wrong pool (the review's finding).
       if (this.pools.size !== 1) { log(`sealed-orders: ${this.pools.size} pools armed — refusing to guess which one the banner belongs to`); return; }
       const o2 = this.pools.values().next().value;
-      let currentDir = null; try { currentDir = fs.readlinkSync(o2.linkPath); } catch { }
+      const actLink = matchedLink || o2.linkPath; // plan C: act on the LINK THE BANNER SESSION USES
+      let currentDir = null; try { currentDir = fs.readlinkSync(actLink); } catch { }
       const next = (o2.ranked || []).find((m) => m.dir && m.dir !== currentDir);
       if (!next) { log('sealed-orders: banner seen but no usable fallback member'); return; }
-      repointPoolSymlink(o2.linkPath, next.dir, next.creds || null);
+      repointPoolSymlink(actLink, next.dir, next.creds || null);
       this._lastActAt = Date.now();
-      const ev = { ts: Date.now(), poolId: o2.poolId, sid, banner: banner.kind, from: currentDir, to: next.id };
+      const ev = { ts: Date.now(), poolId: o2.poolId, sid, banner: banner.kind, from: currentDir, to: next.id, link: actLink };
       try { fs.appendFileSync(ORDERS_LOG, JSON.stringify(ev) + '\n'); } catch { }
       log(`sealed-orders EXECUTED: pool ${o2.poolId} → ${next.id} (banner ${banner.kind} in ${sid}, no orchestrator)`);
     } catch (e) { log('sealed-orders execute failed: ' + e.message); }

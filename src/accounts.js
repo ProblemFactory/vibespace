@@ -21,6 +21,7 @@ const crypto = require('crypto');
 
 class AccountManager {
   constructor({ dataDir, onChange, platform = process.platform }) {
+    this.dataDir = dataDir;
     this._file = path.join(dataDir, 'accounts.json');
     this._keyFile = path.join(dataDir, '.accounts-key');
     this._platform = platform;
@@ -559,7 +560,7 @@ class AccountManager {
     if (this._state.defaultCodexAccountId === id) this._state.defaultCodexAccountId = null;
     // Isolated-login accounts own a creds dir — wipe it (best-effort).
     if (this._acctBackend(a) === 'codex') { try { fs.rmSync(this.codexSubDir(id), { recursive: true, force: true }); } catch { } }
-    else if (this._acctType(a) === 'pooled') { try { fs.unlinkSync(this.subDir(id)); } catch { } } // unlink ONLY — the target is a real account's dir
+    else if (this._acctType(a) === 'pooled') { try { fs.unlinkSync(this.subDir(id)); } catch { } try { fs.rmSync(this.poolLinksDir(id), { recursive: true, force: true }); } catch { } } // unlink ONLY — the target is a real account's dir; the links dir holds only symlinks (rm never follows)
     else if (this._acctType(a) === 'subscription') { try { fs.rmSync(this.subDir(id), { recursive: true, force: true }); } catch { } }
     this._save();
     this._notify();
@@ -798,6 +799,62 @@ class AccountManager {
     } catch { return null; }
   }
 
+  // ── Per-SESSION pool links (B-a612 plan C, 2.315.0) ─────────────────────
+  // The pool's default link at data/subs/<poolId> stays THE state for display
+  // and for sessions with no model identity. A session that declares a model
+  // gets its OWN directory symlink at data/pool-links/<poolId>/<sessKey> —
+  // same primitive, same lock/credential invariants (N links over M accounts
+  // still leave exactly M credential files; every link to account X resolves
+  // to X's one refresh lock), so a fable conversation and an opus conversation
+  // can bill to DIFFERENT members simultaneously. The link is created at
+  // spawn, re-pointed per session by the auto-switch, dropped at kill, and
+  // reconciled at boot (a link whose session is gone is unlinked).
+  poolLinksDir(poolId) { return path.join(this.dataDir, 'pool-links', String(poolId).replace(/[^\w-]/g, '')); }
+  sessionPoolLinkPath(poolId, sessKey) { return path.join(this.poolLinksDir(poolId), String(sessKey).replace(/[^\w.-]/g, '')); }
+  ensureSessionPoolLink(poolId, sessKey, memberId) {
+    const target = this.get(memberId);
+    if (!target || this._acctType(target) !== 'subscription') throw new Error('not a subscription: ' + memberId);
+    if (!this.readSubCreds(memberId).loggedIn) throw new Error('pool member not logged in: ' + target.name);
+    const link = this.sessionPoolLinkPath(poolId, sessKey);
+    fs.mkdirSync(path.dirname(link), { recursive: true });
+    require('./account-material.js').repointPoolSymlink(link, this.subDir(memberId), this.subCredsPath(memberId));
+    return link;
+  }
+  /** The real account THIS session bills to: its own link's target, else the
+   *  pool default. The link IS the state at both granularities. */
+  poolCurrentFor(poolId, sessKey) {
+    if (sessKey) {
+      try {
+        const sub = path.basename(fs.readlinkSync(this.sessionPoolLinkPath(poolId, sessKey)));
+        if (this.get(sub)) return sub;
+      } catch { }
+    }
+    return this.poolCurrent(poolId);
+  }
+  dropSessionPoolLink(poolId, sessKey) { try { fs.unlinkSync(this.sessionPoolLinkPath(poolId, sessKey)); } catch { } }
+  /** Boot reconciliation: unlink per-session links whose session no longer
+   *  exists — a leaked link is a billing pointer nobody can see or move. */
+  sweepSessionPoolLinks(liveKeys) {
+    const root = path.join(this.dataDir, 'pool-links');
+    let dropped = 0;
+    try {
+      for (const poolId of fs.readdirSync(root)) {
+        const dir = path.join(root, poolId);
+        let entries = []; try { entries = fs.readdirSync(dir); } catch { continue; }
+        for (const k of entries) if (!liveKeys.has(k)) { try { fs.unlinkSync(path.join(dir, k)); dropped++; } catch { } }
+        try { if (!fs.readdirSync(dir).length) fs.rmdirSync(dir); } catch { }
+      }
+    } catch { }
+    return dropped;
+  }
+  /** Every live link path of a pool (sealed orders carry these so the daemon
+   *  can match a banner to the RIGHT link; old daemons ignore the field and
+   *  keep matching only the default link — reduced coverage, never a wrong
+   *  re-point). */
+  sessionPoolLinks(poolId) {
+    try { return fs.readdirSync(this.poolLinksDir(poolId)).map((k) => ({ sessKey: k, path: this.sessionPoolLinkPath(poolId, k) })); } catch { return []; }
+  }
+
   // Atomically re-point the pool at `subId`. symlink-to-temp + rename so a
   // concurrent spawn either sees the old target or the new one, never a gap.
   // The target's creds mtime is bumped because the CLI's credential cache is
@@ -845,7 +902,7 @@ class AccountManager {
     return this.get(id);
   }
 
-  resolveForSpawn(requested, backend = 'claude') {
+  resolveForSpawn(requested, backend = 'claude', opts = {}) {
     if (backend === 'codex') return this._resolveCodexSpawn(requested);
     if (requested === 'subscription') return null; // the CLI's own global login
     const id = requested || this._state.defaultAccountId;
@@ -861,6 +918,18 @@ class AccountManager {
       // No remoteCreds: shipping would copy the symlink's CONTENTS to a fixed
       // remote dir, freezing the pool at spawn time and (on a macOS host)
       // landing in a per-path keychain entry. Pools are local-only for now.
+      // Per-session link (plan C): a session with an identity gets its own
+      // symlink so concurrent conversations on different models can bill to
+      // different members. The CHOICE is the caller's (chooseMember reads the
+      // usage caches, which this store deliberately doesn't); default = the
+      // pool's current target, i.e. exactly the legacy behaviour.
+      if (opts.sessionKey) {
+        let member = null;
+        try { member = opts.chooseMember?.(); } catch { }
+        member = member || cur;
+        const link = this.ensureSessionPoolLink(id, opts.sessionKey, member);
+        return { id: a.id, name: a.name, kind: 'subscription', pooled: true, poolTarget: member, sessionLink: true, localEnv: { CLAUDE_SECURESTORAGE_CONFIG_DIR: link }, secret: null };
+      }
       return { id: a.id, name: a.name, kind: 'subscription', pooled: true, poolTarget: cur, localEnv: { CLAUDE_SECURESTORAGE_CONFIG_DIR: this.subDir(id) }, secret: null };
     }
     if (this._acctType(a) === 'subscription') {

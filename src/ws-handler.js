@@ -149,7 +149,7 @@ function registerWsHandler(wss, ctx) {
     activeSessions, WS_OPEN, broadcastActiveSessions, broadcastToSession, resizeSessionToMin,
     setupSessionPty, refreshWebuiPids, deleteSessionMeta, writeSessionMeta, readSessionMeta,
     readLayouts, writeLayouts, getSyncStore, serverSetting, integrationEnabled, agentdRemote, dialBridge,
-    sessionCounterRef, createSessionMessages,
+    sessionCounterRef, createSessionMessages, poolChooser,
     SOCKETS_DIR, BUFFERS_DIR, PTY_WRAPPER, CHAT_WRAPPER,
     NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV,
     adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
@@ -522,7 +522,17 @@ function registerWsHandler(wss, ctx) {
             delete data.keeperSid; delete data.keeperKind;
           }
           if ((backend === 'claude' || backend === 'codex') && accounts) {
-            try { spawnAccount = accounts.resolveForSpawn(data.accountId, backend); }
+            try {
+              // Plan C (2.315.0): a LOCAL pooled session gets its own link,
+              // chosen by the session's declared model (deps.poolChooser reads
+              // the usage caches with the estimator overlay — the store never
+              // does). Remote pools stay refused upstream; non-pool accounts
+              // ignore the opts entirely.
+              spawnAccount = accounts.resolveForSpawn(data.accountId, backend, data.hostId ? {} : {
+                sessionKey: id,
+                chooseMember: () => poolChooser?.(data.accountId || accounts?._state?.defaultAccountId, { model: data.model || null }),
+              });
+            }
             catch (e) {
               // Host-held subscription (2.199.0): an account whose login lives
               // ONLY on a host has an EMPTY local dir — resolveForSpawn throws
@@ -1568,6 +1578,8 @@ function registerWsHandler(wss, ctx) {
 
           session._cwdRecreated = cwdRecreated; // B-7812: prompt-context tells the agent once
           activeSessions.set(id, session);
+          session._webuiId = id;
+          session._spawnModel = data.model || null; // model ladder's floor (plan C) // per-session pool link key (plan C) — the id the session is registered under
           attachedSessions.add(id);
           console.log(`[session] created ${id} "${session.name || ''}" mode=${sessionMode} backend=${backend}${data.hostId ? ' host=' + data.hostId : ''}${session._accountId ? ' account=' + session._accountId : ''}${data.resumeId ? ' resume=' + data.resumeId : ''}`);
           global.__vsEvent?.('session-created', `${sessionMode}/${backend}${data.hostId ? '/remote' : ''}${data.resumeId ? '/resume' : ''}`);
@@ -1603,6 +1615,7 @@ function registerWsHandler(wss, ctx) {
           writeSessionMeta(sockName, {
             name: session.name,
             cwd,
+            spawnModel: data.model || null, // plan C model ladder's floor — survives restarts
             host: session.host || null,
             hostName: session.hostName || null,
             keeperSid: session.keeperSid || null,
@@ -1800,6 +1813,7 @@ function registerWsHandler(wss, ctx) {
         }
 
         case 'set-model': {
+          { const s2 = activeSessions.get(data.sessionId); if (s2) { s2._pickedModel = data.model || null; s2._pickedModelAt = Date.now(); try { writeSessionMeta(s2.sockName, { ...readSessionMeta(s2.sockName), pickedModel: s2._pickedModel, pickedModelAt: s2._pickedModelAt }); } catch { } } }
           const session = activeSessions.get(data.sessionId);
           if (session?.pty && session.mode === 'chat' && (data.model || 'lock' in data)) {
             const adapter = adapterRegistry.get(session.backend);
@@ -2466,6 +2480,7 @@ function registerWsHandler(wss, ctx) {
             }
             // 'exited' silently broke terminate-from-sidebar.
             broadcastToSession(session, data.sessionId, { type: 'exited', sessionId: data.sessionId, reason: 'terminated' });
+            try { if (session._accountId && accounts?.get?.(session._accountId)?.type === 'pooled') accounts.dropSessionPoolLink(session._accountId, data.sessionId); } catch { }
             activeSessions.delete(data.sessionId);
             refreshWebuiPids();
             broadcastActiveSessions();
@@ -2614,6 +2629,7 @@ function registerWsHandler(wss, ctx) {
             backend: 'claude', buffer: '',
           };
           activeSessions.set(id, session);
+          session._webuiId = id; // per-session pool link key (plan C) — the id the session is registered under
           attachedSessions.add(id);
 
           setupSessionPty(session, id, tmuxPty, { cleanupOnExit: false });
